@@ -1,0 +1,11 @@
+{
+	"id": "clever-search",
+	"name": "Clever Search",
+	"version": "0.0.1",
+	"minAppVersion": "0.15.0",
+	"description": "fuzzy full text search",
+	"author": "visitor3rr",
+	"authorUrl": "https://obsidian.md",
+	"fundingUrl": "https://obsidian.md/pricing",
+	"isDesktopOnly": true
+}
