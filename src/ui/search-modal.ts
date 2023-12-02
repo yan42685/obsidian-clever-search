@@ -12,7 +12,7 @@ export class SearchModal extends Modal {
 		this.tempNode = new Component({
 			target: this.modalEl,
 			props: {
-				queryText: "haha"
+				queryText: ""
 			}
 		});
 	}
