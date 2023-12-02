@@ -5,10 +5,10 @@ import {
 	Notice,
 	Plugin,
 	PluginSettingTab,
-	Setting
+	Setting,
 } from "obsidian";
-import { PluginStates } from "./plugin-states";
-import { SearchService } from "./search-service";
+import "reflect-metadata";
+import { container, singleton } from "tsyringe";
 import { SearchModal } from "./ui/search-modal";
 
 // Remember to rename these classes and interfaces!
@@ -23,14 +23,13 @@ const DEFAULT_SETTINGS: CleverSearchSettings = {
 
 export default class CleverSearch extends Plugin {
 	settings: CleverSearchSettings = new CleverSearchSettings();
-	searchService?: SearchService; // 执行各种任务的对象
 
 	async onload() {
 		await this.loadSettings();
 		this.exampleCode();
-		const pluginStates = new PluginStates(this);
-		this.searchService = new SearchService(pluginStates);
 		this.registerSearchUI();
+		// register ${this} as a dependency
+		container.register("CleverSearch", { useValue: this });
 	}
 
 	registerSearchUI() {
@@ -42,18 +41,7 @@ export default class CleverSearch extends Plugin {
 				new SearchModal(this.app).open();
 			},
 		});
-
 	}
-
-
-
-
-
-
-
-
-
-
 
 	exampleCode() {
 		// This creates an icon in the left ribbon.
@@ -105,8 +93,7 @@ export default class CleverSearch extends Plugin {
 		);
 	}
 
-	onunload() {
-	}
+	onunload() {}
 
 	async loadSettings() {
 		this.settings = Object.assign(
@@ -120,7 +107,6 @@ export default class CleverSearch extends Plugin {
 		await this.saveData(this.settings);
 	}
 }
-
 
 class SampleSettingTab extends PluginSettingTab {
 	plugin: CleverSearch;
@@ -149,7 +135,6 @@ class SampleSettingTab extends PluginSettingTab {
 			);
 	}
 }
-
 
 class SampleModal extends Modal {
 	constructor(app: App) {

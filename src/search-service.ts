@@ -2,18 +2,18 @@ import { Client } from "@elastic/elasticsearch";
 import type { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
 import * as chokidar from "chokidar";
 import { debounce } from "throttle-debounce";
+import { inject, singleton } from "tsyringe";
 import { fsUtils, pathUtils } from "./my-lib";
-import type { PluginStates } from "./plugin-states";
+import { PluginManager } from "./plugin-manager";
 
+@singleton()
 export class SearchService {
-	pluginStates: PluginStates;
 	client: Client;
 	targetIndex: string;
 	// watch the create, update and delete operations and reIndex corresponding files
 	watchers: chokidar.FSWatcher[];
 
-	constructor(pluginStates: PluginStates) {
-		this.pluginStates = pluginStates;
+	constructor(@inject(PluginManager) pluginStates: PluginManager) {
 		// connect to local Elasticsearch server
 		this.client = new Client({ node: "http://localhost:9200" });
 		this.targetIndex = pluginStates.getIndexName();
@@ -39,35 +39,33 @@ export class SearchService {
 				.on("change", (path) => indexFileDebounced(path));
 			this.watchers.push(watcher);
 		});
-		
-
-		// 搜索功能
-		const search = async (query: string): Promise<any> => {
-			try {
-				const result: any = await this.client.search({
-					index: this.targetIndex,
-					query: {
-						match: {
-							content: query,
-						},
-					},
-				});
-				return result;
-			} catch (error) {
-				console.error(`Error during search:`, error);
-				return [];
-			}
-		};
 
 
 		// 使用示例
-		search("hello").then((result) => {
+		this.search("hello").then((result) => {
 			console.log("raw result: ", result);
 			console.log(
 				"search result:",
 				result.hits.hits as SearchHitsMetadata[]
 			);
 		});
+	}
+	async search(query: string): Promise<any> {
+		console.log("perform a search");
+		try {
+			const result: any = await this.client.search({
+				index: this.targetIndex,
+				query: {
+					match: {
+						content: query,
+					},
+				},
+			});
+			return result;
+		} catch (error) {
+			console.error(`Error during search:`, error);
+			return [];
+		}
 	}
 
 	indexFile(path: string): void {
@@ -92,10 +90,11 @@ export class SearchService {
 
 	// TODO: finish it
 	reIndexAll() {
-
 		this.client.indices
 			.delete({ index: this.targetIndex })
 			.then((res) => console.log(`index [${this.targetIndex}] deleted`))
-			.catch((e) => console.error(`delete index [${this.targetIndex}] failed!`));
+			.catch((e) =>
+				console.error(`delete index [${this.targetIndex}] failed!`)
+			);
 	}
 }
