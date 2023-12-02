@@ -1,20 +1,20 @@
 import {
 	App,
 	Editor,
-	MarkdownView,
 	Modal,
 	Notice,
 	Plugin,
 	PluginSettingTab,
-	Setting,
+	Setting
 } from "obsidian";
 import { PluginStates } from "./plugin-states";
 import { SearchService } from "./search-service";
+import { SearchModal } from "./ui/search-modal";
 
 // Remember to rename these classes and interfaces!
 
-interface CleverSearchSettings {
-	mySetting: string;
+class CleverSearchSettings {
+	mySetting: string = "hello";
 }
 
 const DEFAULT_SETTINGS: CleverSearchSettings = {
@@ -22,8 +22,8 @@ const DEFAULT_SETTINGS: CleverSearchSettings = {
 };
 
 export default class CleverSearch extends Plugin {
-	settings: CleverSearchSettings;
-	searchService: SearchService; // 执行各种任务的对象
+	settings: CleverSearchSettings = new CleverSearchSettings();
+	searchService?: SearchService; // 执行各种任务的对象
 
 	async onload() {
 		await this.loadSettings();
@@ -39,7 +39,7 @@ export default class CleverSearch extends Plugin {
 			id: "clever-search-from-vault",
 			name: "Clever Search from Vault",
 			callback: () => {
-				
+				new SearchModal(this.app);
 			},
 		});
 
@@ -84,7 +84,7 @@ export default class CleverSearch extends Plugin {
 		this.addCommand({
 			id: "sample-editor-command",
 			name: "Sample editor command",
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor) => {
 				console.log(editor.getSelection());
 				editor.replaceSelection("Sample Editor Command");
 			},
@@ -141,7 +141,7 @@ class SampleSettingTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder("Enter your secret")
-					.setValue(this.plugin.settings.mySetting)
+					.setValue(this.plugin.settings?.mySetting as any)
 					.onChange(async (value) => {
 						this.plugin.settings.mySetting = value;
 						await this.plugin.saveSettings();
