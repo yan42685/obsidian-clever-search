@@ -6,6 +6,7 @@ import { inject, singleton } from "tsyringe";
 import { fsUtils, pathUtils } from "./my-lib";
 import { PluginManager } from "./plugin-manager";
 
+// register <SearchService, singleton> to the container
 @singleton()
 export class SearchService {
 	client: Client;
@@ -13,6 +14,7 @@ export class SearchService {
 	// watch the create, update and delete operations and reIndex corresponding files
 	watchers: chokidar.FSWatcher[];
 
+	// @inject(key) get a dependency from the container
 	constructor(@inject(PluginManager) pluginStates: PluginManager) {
 		// connect to local Elasticsearch server
 		this.client = new Client({ node: "http://localhost:9200" });

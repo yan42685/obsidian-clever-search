@@ -8,7 +8,7 @@ import {
 	Setting,
 } from "obsidian";
 import "reflect-metadata";
-import { container, singleton } from "tsyringe";
+import { container } from "tsyringe";
 import { SearchModal } from "./ui/search-modal";
 
 // Remember to rename these classes and interfaces!
@@ -28,7 +28,9 @@ export default class CleverSearch extends Plugin {
 		await this.loadSettings();
 		this.exampleCode();
 		this.registerSearchUI();
-		// register ${this} as a dependency
+		// 由于plugin不能让框架自己new，而是要注册this依赖，所以这里需要在CleverSearch手动注册this对象
+		// register <"cleverSearch", this> to the container
+		// cant't use CleverSearch as a key here to void cycle dependencies
 		container.register("CleverSearch", { useValue: this });
 	}
 
