@@ -1,29 +1,29 @@
 import { App, Modal } from "obsidian";
-import Component from "../../Component.svelte";
+import Component from "./Component.svelte";
 
 export class SearchModal extends Modal {
+	tempNode: any;
 	constructor(app: App) {
 		super(app);
-		console.log(1111);
-		
-		new Component({
+		// remove predefined child node
+		this.modalEl.replaceChildren();
+		this.modalEl.addClass("cs-modal");
+
+		this.tempNode = new Component({
 			target: this.modalEl,
 			props: {
 				queryText: "haha"
 			}
-
-
-		})
+		});
 	}
 
 	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText("Woah!");
+		this.contentEl.empty();
+		// this.contentEl.setText("Woah!");
 	}
 
 	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
+		this.tempNode.$destroy();
 	}
 }
 

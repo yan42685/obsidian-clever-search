@@ -14,7 +14,7 @@ import { SearchModal } from "./ui/search-modal";
 // Remember to rename these classes and interfaces!
 
 class CleverSearchSettings {
-	mySetting: string = "hello";
+	mySetting = "hello";
 }
 
 const DEFAULT_SETTINGS: CleverSearchSettings = {
@@ -39,7 +39,7 @@ export default class CleverSearch extends Plugin {
 			id: "clever-search-from-vault",
 			name: "Clever Search from Vault",
 			callback: () => {
-				new SearchModal(this.app);
+				new SearchModal(this.app).open();
 			},
 		});
 

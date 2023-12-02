@@ -1,16 +1,6 @@
 # NOTE
 Time limiting, currently this repo won't accept issues and PRs.
 
-- compile notice:
-  After `npm install`, there will still be some warnings. To remove them , you need to set some options in `node_modules/@tsconfig/svelte/tsconfig.json`
-  ```json
-   "compilerOptions": {
-    // ...
-    "strict": false,
-    "moduleResolution": "node",
-    // ...
-    }
-  ```
 
 # Obsidian Sample Plugin
 

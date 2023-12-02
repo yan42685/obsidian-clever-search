@@ -1,9 +1,9 @@
 import { Client } from "@elastic/elasticsearch";
-import { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
+import type { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
 import * as chokidar from "chokidar";
 import { debounce } from "throttle-debounce";
 import { fsUtils, pathUtils } from "./my-lib";
-import { PluginStates } from "./plugin-states";
+import type { PluginStates } from "./plugin-states";
 
 export class SearchService {
 	pluginStates: PluginStates;
