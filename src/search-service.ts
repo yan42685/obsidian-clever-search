@@ -1,28 +1,29 @@
 import { Client } from "@elastic/elasticsearch";
 import { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
 import * as chokidar from "chokidar";
-import * as fs from "fs";
-import * as pathUtils from "path";
-import { throttle } from "throttle-debounce";
+import { debounce } from "throttle-debounce";
+import { fsUtils, pathUtils } from "./my-lib";
 import { PluginStates } from "./plugin-states";
 
 export class SearchService {
-	client: Client;
 	pluginStates: PluginStates;
+	client: Client;
+	targetIndex: string;
 	// watch the create, update and delete operations and reIndex corresponding files
 	watchers: chokidar.FSWatcher[];
 
 	constructor(pluginStates: PluginStates) {
+		this.pluginStates = pluginStates;
 		// connect to local Elasticsearch server
 		this.client = new Client({ node: "http://localhost:9200" });
-		this.pluginStates = pluginStates;
+		this.targetIndex = pluginStates.getIndexName();
 		this.watchers = [];
 		console.log("Clever Search start...");
 		console.log(this.client);
 		console.log("watchedPaths: " + pluginStates.getWatchedPaths());
 
-		const indexFileThrottled: (path: string) => void = throttle(
-			1000,
+		const indexFileDebounced: (path: string) => void = debounce(
+			3000,
 			this.indexFile.bind(this)
 		);
 
@@ -34,16 +35,17 @@ export class SearchService {
 				.watch(path, {
 					persistent: true,
 				})
-				.on("add", (path) => indexFileThrottled(path))
-				.on("change", (path) => indexFileThrottled(path));
+				.on("add", (path) => indexFileDebounced(path))
+				.on("change", (path) => indexFileDebounced(path));
 			this.watchers.push(watcher);
 		});
+		
 
 		// 搜索功能
 		const search = async (query: string): Promise<any> => {
 			try {
 				const result: any = await this.client.search({
-					index: "markdown_files",
+					index: this.targetIndex,
 					query: {
 						match: {
 							content: query,
@@ -57,36 +59,43 @@ export class SearchService {
 			}
 		};
 
+
 		// 使用示例
-		search("ignore").then((result) => {
+		search("hello").then((result) => {
 			console.log("raw result: ", result);
 			console.log(
 				"search result:",
 				result.hits.hits as SearchHitsMetadata[]
 			);
 		});
-		this.client.indices
-			.delete({ index: "markdown_files" })
-			.then((res) => console.log("index [markdown_files}] deleted"))
-			.catch((e) => console.log("delete index failed!"));
 	}
 
-	indexFile(filePath: string): void {
-		const content: string = fs.readFileSync(filePath, "utf8");
+	indexFile(path: string): void {
+		const content: string = fsUtils.readFileSync(path, "utf8");
 		this.client
 			.index({
-				index: "markdown_files",
-				id: pathUtils.basename(filePath),
+				index: this.targetIndex,
+				id: path,
 				document: {
-					path: filePath,
+					path: path,
+					title: pathUtils.basename(path),
 					content: content,
 				},
 			})
 			.then(() => {
-				console.log(`Indexed file: ${filePath}`);
+				console.log(`Indexed file: ${path}`);
 			})
 			.catch((e) => {
-				console.error(`Error indexing file ${filePath}:`, e);
+				console.error(`Error indexing file ${path}:`, e);
 			});
+	}
+
+	// TODO: finish it
+	reIndexAll() {
+
+		this.client.indices
+			.delete({ index: this.targetIndex })
+			.then((res) => console.log(`index [${this.targetIndex}] deleted`))
+			.catch((e) => console.error(`delete index [${this.targetIndex}] failed!`));
 	}
 }

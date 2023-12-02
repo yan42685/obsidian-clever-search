@@ -30,8 +30,30 @@ export default class CleverSearch extends Plugin {
 		this.exampleCode();
 		const pluginStates = new PluginStates(this);
 		this.searchService = new SearchService(pluginStates);
-		
+		this.registerSearchUI();
 	}
+
+	registerSearchUI() {
+		// This adds a complex command that can check whether the current state of the app allows execution of the command
+		this.addCommand({
+			id: "clever-search-from-vault",
+			name: "Clever Search from Vault",
+			callback: () => {
+				
+			},
+		});
+
+	}
+
+
+
+
+
+
+
+
+
+
 
 	exampleCode() {
 		// This creates an icon in the left ribbon.
@@ -67,26 +89,6 @@ export default class CleverSearch extends Plugin {
 				editor.replaceSelection("Sample Editor Command");
 			},
 		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: "open-sample-modal-complex",
-			name: "Open sample modal (complex)",
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			},
-		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new SampleSettingTab(this.app, this));
@@ -119,21 +121,6 @@ export default class CleverSearch extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText("Woah!");
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
-}
 
 class SampleSettingTab extends PluginSettingTab {
 	plugin: CleverSearch;
@@ -160,5 +147,22 @@ class SampleSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+	}
+}
+
+
+class SampleModal extends Modal {
+	constructor(app: App) {
+		super(app);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.setText("Woah!");
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
 	}
 }
