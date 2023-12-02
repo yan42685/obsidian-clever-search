@@ -2,7 +2,8 @@ import { Client } from "@elastic/elasticsearch";
 import { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
 import * as chokidar from "chokidar";
 import * as fs from "fs";
-import * as path from "path";
+import * as pathUtils from "path";
+import { throttle } from "throttle-debounce";
 import { PluginStates } from "./plugin-states";
 
 export class SearchService {
@@ -20,17 +21,21 @@ export class SearchService {
 		console.log(this.client);
 		console.log("watchedPaths: " + pluginStates.getWatchedPaths());
 
+		const indexFileThrottled: (path: string) => void = throttle(
+			1000,
+			this.indexFile.bind(this)
+		);
+
 		// TODO: 处理重复子目录
 		// 监视目录
-		pluginStates.getWatchedPaths().forEach((dirPath) => {
+		pluginStates.getWatchedPaths().forEach((path) => {
 			// chokidar.watch() will return a new instance every time when called
 			const watcher = chokidar
-				.watch(dirPath + "*.md", {
+				.watch(path, {
 					persistent: true,
-					ignored: ["./obsidian/**"],
 				})
-				.on("add", (filePath: string) => this.indexFile(filePath))
-				.on("change", (filePath: string) => this.indexFile(filePath));
+				.on("add", (path) => indexFileThrottled(path))
+				.on("change", (path) => indexFileThrottled(path));
 			this.watchers.push(watcher);
 		});
 
@@ -53,26 +58,35 @@ export class SearchService {
 		};
 
 		// 使用示例
-		search("software").then((result) => {
+		search("ignore").then((result) => {
 			console.log("raw result: ", result);
-			console.log("search result:", result.hits.hits as SearchHitsMetadata[]);
+			console.log(
+				"search result:",
+				result.hits.hits as SearchHitsMetadata[]
+			);
 		});
+		this.client.indices
+			.delete({ index: "markdown_files" })
+			.then((res) => console.log("index [markdown_files}] deleted"))
+			.catch((e) => console.log("delete index failed!"));
 	}
 
-	async indexFile(filePath: string): Promise<void> {
-		try {
-			const content: string = fs.readFileSync(filePath, "utf8");
-			await this.client.index({
+	indexFile(filePath: string): void {
+		const content: string = fs.readFileSync(filePath, "utf8");
+		this.client
+			.index({
 				index: "markdown_files",
-				id: path.basename(filePath),
+				id: pathUtils.basename(filePath),
 				document: {
 					path: filePath,
 					content: content,
 				},
+			})
+			.then(() => {
+				console.log(`Indexed file: ${filePath}`);
+			})
+			.catch((e) => {
+				console.error(`Error indexing file ${filePath}:`, e);
 			});
-			console.log(`Indexed file: ${filePath}`);
-		} catch (error) {
-			console.error(`Error indexing file ${filePath}:`, error);
-		}
 	}
 }

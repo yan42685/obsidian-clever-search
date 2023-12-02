@@ -12,8 +12,17 @@ export class PluginStates {
 		this.fs = plugin.app.vault.adapter as FileSystemAdapter;
 		this.vaultPath = this.fs.getBasePath().replace(/\\/g, "/") + "/";
 		// TODO: configurable
-		this.watchedPaths = [this.vaultPath];
+		const whitelistPaths = [""];
+		const blackListPaths = [".obsidian/"];
+
+		this.watchedPaths = [];
 	}
 
-	getWatchedPaths() { return this.watchedPaths; }
+	getWatchedPaths() {
+		return this.watchedPaths;
+	}
+	// 存放索引的表
+	getIndexName() {
+		return "obsidian_vault_" + this.plugin.app.vault.getName();
+	}
 }
