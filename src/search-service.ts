@@ -26,7 +26,7 @@ export class SearchService {
 
 		const indexFileDebounced: (path: string) => void = debounce(
 			3000,
-			this.indexFile.bind(this)
+			this.indexFile.bind(this),
 		);
 
 		// TODO: 处理重复子目录
@@ -42,13 +42,12 @@ export class SearchService {
 			this.watchers.push(watcher);
 		});
 
-
 		// 使用示例
 		this.search("hello").then((result) => {
 			console.log("raw result: ", result);
 			console.log(
 				"search result:",
-				result.hits.hits as SearchHitsMetadata[]
+				result.hits.hits as SearchHitsMetadata[],
 			);
 		});
 	}
@@ -57,9 +56,21 @@ export class SearchService {
 		try {
 			const result: any = await this.client.search({
 				index: this.targetIndex,
-				query: {
-					match: {
-						content: query,
+				body: {
+					query: {
+						multi_match: {
+							// Use the multi_match query for semantic search
+							query: query,
+							fields: ["content", "title^2"], // Boost the title field
+							fuzziness: "AUTO", // Enable fuzzy matching
+							operator: "and", // Use 'and' operator to ensure all words must be present
+						},
+					},
+					highlight: {
+						// Highlighting settings
+						fields: {
+							content: {}, // Highlight matches in the content field
+						},
 					},
 				},
 			});
@@ -96,7 +107,7 @@ export class SearchService {
 			.delete({ index: this.targetIndex })
 			.then((res) => console.log(`index [${this.targetIndex}] deleted`))
 			.catch((e) =>
-				console.error(`delete index [${this.targetIndex}] failed!`)
+				console.error(`delete index [${this.targetIndex}] failed!`),
 			);
 	}
 }
