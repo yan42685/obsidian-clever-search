@@ -1,10 +1,12 @@
 import { Client } from "@elastic/elasticsearch";
 import type { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
 import * as chokidar from "chokidar";
+// one two three   speed ↓ accuracy ↑
+import nlp from "compromise/two";
 import { debounce } from "throttle-debounce";
 import { inject, singleton } from "tsyringe";
 import { PluginManager } from "./plugin-manager";
-import { fsUtils, pathUtils } from "./utils/my-lib";
+import { FileExtension, fsUtils, getAllFiles, pathUtils } from "./utils/my-lib";
 
 // register <SearchService, singleton> to the container
 @singleton()
@@ -35,13 +37,14 @@ export class SearchService {
 		// TODO: 处理重复子目录
 		// 监视目录
 		this.watchedPaths.forEach((path) => {
+			const realPath = pathUtils.join(path, "**/*.md");
 			// chokidar.watch() will return a new instance every time when called
 			const watcher = chokidar
-				.watch(path, {
+				.watch(realPath, {
 					persistent: true,
 				})
-				.on("add", (path) => indexFileDebounced(path))
-				.on("change", (path) => indexFileDebounced(path));
+				.on("add", (newPath) => indexFileDebounced(newPath))
+				.on("change", (newPath) => indexFileDebounced(newPath));
 			this.watchers.push(watcher);
 		});
 
@@ -86,7 +89,8 @@ export class SearchService {
 		}
 	}
 
-	indexFile(filepath: string): void {
+	// add or update an document
+	private indexFile(filepath: string): void {
 		const content: string = fsUtils.readFileSync(filepath, "utf8");
 		this.client
 			.index({
@@ -106,102 +110,106 @@ export class SearchService {
 			});
 	}
 
+	// create an index in the elasticsearch to store documents
 	private async createIndex(indexName: any) {
-		console.log("hhhhhhhh");
-		console.log("hhhhhhhh");
-		console.log("hhhhhhhh");
-		console.log("hhhhhhhh");
-
-		this.client.indices
-			.create({
-				index: indexName,
-				body: {
-					mappings: {
-						properties: {
-							path: { type: "keyword" },
-							title: { type: "text" },
-							sentences: {
-								type: "nested", // 嵌套类型
-								properties: {
-									content: { type: "text" },
-									start_line: { type: "integer" },
-								},
+		this.client.indices.create({
+			index: indexName,
+			body: {
+				mappings: {
+					properties: {
+						path: { type: "keyword" },
+						title: { type: "text" },
+						sentences: {
+							type: "nested", // 嵌套类型
+							properties: {
+								content: { type: "text" },
+								start_line: { type: "integer" },
 							},
 						},
 					},
 				},
-			})
-			.then(() => console.log("hhhhhhhh"))
-			.catch(() => console.error("nnnnnnnnn"));
+			},
+		});
 	}
 
 	async reIndexAll() {
-		// delete current index
-		try {
+		// If the index exists, delete it
+		if (
+			await this.client.indices.exists({
+				index: this.targetIndex,
+			})
+		) {
 			await this.client.indices.delete({ index: this.targetIndex });
 			console.log(`Index [${this.targetIndex}] deleted`);
-		} catch (error) {
-			console.error(
-				`Failed to delete index [${this.targetIndex}]:`,
-				error,
+		} else {
+			console.log(
+				`Index [${this.targetIndex}] does not exist, no need to delete.`,
 			);
 		}
-		console.log("hhhhhhhh");
-		console.log("hhhhhhhh");
+
 		await this.createIndex(this.targetIndex);
-		console.log("hhhhhhhh");
-		console.log("hhhhhhhh");
-
-		const documents = [
-			{
-				path: "test1",
-				title: "Document 1",
-				sentences: [
-					{ content: "Sentence 1 of document 1", start_line: 1 },
-					{ content: "Sentence 2 of document 1", start_line: 2 },
-				],
-			},
-			{
-				path: "test2",
-				title: "Document 2",
-				sentences: [
-					{ content: "Sentence 1 of document 2", start_line: 1 },
-					{ content: "Sentence 2 of document 2", start_line: 2 },
-				],
-			},
-		];
-
-		const operations = documents.flatMap(doc => [
-				{ index: { _index: this.targetIndex } }, // Include the _id field if you want to specify a unique identifier
-				doc
-			]);
 
 		const targetPaths = this.watchedPaths;
 		const targetIndex = this.targetIndex;
-		try {
-			// BUG: 别用client.helper.bulk，有BUG ！！！
-			const bulkResult = await this.client.bulk({
-				refresh: true,
-				operations: operations
+		const allIndexedDocuments = []; // 用于测试
+		// try {
+		// 	// BUG: 别用client.helper.bulk，有BUG ！！！
+		// 	const bulkResult = await this.client.bulk({
+		// 		refresh: true,
+		// 		operations: operations,
+		// 	});
+
+		// 	console.log(`Reindexing completed:`, bulkResult);
+		// } catch (error) {
+		// 	console.error(`Error during reindexing:`, error);
+		// }
+		const filePaths = await getAllFiles(targetPaths, [FileExtension.MD]);
+		let bulkOperations: any[] = [];
+		let currentBulkSize = 0;
+
+		for (const filePath of filePaths) {
+			const content = fsUtils.readFileSync(filePath, "utf8");
+			const sentences = nlp(content)
+				.split()
+				.map((sentence: any) => ({
+					content: sentence.text(),
+					start_line: 1,
+				}));
+
+			const doc = {
+				path: filePath,
+				title: pathUtils.basename(filePath),
+				sentences: sentences,
+			};
+
+			currentBulkSize += Buffer.byteLength(JSON.stringify(doc));
+			bulkOperations.push({
+				index: { _index: targetIndex },
+				doc,
 			});
 
-			console.log(`Reindexing completed:`, bulkResult);
-			console.log(`Reindexing completed:`, bulkResult);
-			console.log(`Reindexing completed:`, bulkResult);
-			console.log(`Reindexing completed:`, bulkResult);
-		} catch (error) {
-			console.error(`Error during reindexing:`, error);
+			allIndexedDocuments.push(doc);
+			// Execute bulk upload when the bulk size exceeds the threshold
+			if (currentBulkSize >= BULK_SIZE_THRESHOLD) {
+				await this.client.bulk({ refresh: true, body: bulkOperations });
+				bulkOperations = [];
+				currentBulkSize = 0;
+			}
 		}
+
+		// Upload any remaining documents
+		if (bulkOperations.length > 0) {
+			await this.client.bulk({ refresh: true, body: bulkOperations });
+		}
+		console.log("reIndex finished...");
+		console.log(`Total indexed documents: ${allIndexedDocuments.length}`);
+		// 获取前30个文档的内容
+		const sampleDocs = allIndexedDocuments.slice(0, 30);
+		console.log(sampleDocs);
 	}
 }
 
-const MAX_BULK_SIZE = 5 * 1024 * 1024; // 5MB
-
-
-
-
-
-
+const BULK_SIZE_THRESHOLD = 5 * 1024 * 1024; // 5MB
 
 // 下面是正确的client.bulk API使用方式, 不要用  client.helper.bulk
 
@@ -292,4 +300,3 @@ const MAX_BULK_SIZE = 5 * 1024 * 1024; // 5MB
 // }
 
 // run().catch(console.log);
-

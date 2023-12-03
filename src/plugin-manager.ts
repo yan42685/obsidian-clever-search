@@ -30,7 +30,7 @@ export class PluginManager {
 			(relativePath) =>
 				pathUtils
 					.join(this.vaultPath, relativePath)
-					.replace(/\\/g, "/") + "**/*.md"
+					.replace(/\\/g, "/")
 		);
 	}
 }
