@@ -1,7 +1,7 @@
 import { App, Modal } from "obsidian";
 import { eventBus } from "src/utils/event-bus";
 import { EventEnum } from "src/utils/event-enum";
-import { getModKey } from "src/utils/my-lib";
+import { currModifier } from "src/utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 
 export class SearchModal extends Modal {
@@ -36,8 +36,8 @@ export class SearchModal extends Modal {
 
 	private registerHotkeys() {
 		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
-		const modKey = getModKey();
-		console.log("modKey+"+modKey);
+		const modKey = currModifier;
+		console.log("current modifier: " + modKey);
 
 		this.scope.register([modKey], "J", emitEvent(EventEnum.NEXT_ITEM));
 		this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));

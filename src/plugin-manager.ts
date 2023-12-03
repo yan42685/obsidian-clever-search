@@ -7,25 +7,18 @@ import { pathUtils } from "./utils/my-lib";
 export class PluginManager {
 	private readonly plugin: CleverSearch;
 	private readonly fs: FileSystemAdapter;
-	private readonly vaultPath: string;
-	private watchedPaths: string[] = [];
+	public readonly vaultPath: string;
+	// 存放索引的表
+	public readonly indexName: string;
+	public watchedPaths: string[] = [];
 
 	
 	constructor(@inject("CleverSearch") plugin: CleverSearch) {
 		this.plugin = plugin;
 		this.fs = plugin.app.vault.adapter as FileSystemAdapter;
 		this.vaultPath = this.fs.getBasePath().replace(/\\/g, "/") + "/";
+		this.indexName = "obsidian_vault_" + this.plugin.app.vault.getName().toLowerCase();
 		this.updateWatchedPaths();
-	}
-
-	getWatchedPaths() {
-		return this.watchedPaths;
-	}
-	// 存放索引的表
-	getIndexName() {
-		return (
-			"obsidian_vault_" + this.plugin.app.vault.getName().toLowerCase()
-		);
 	}
 
 	updateWatchedPaths() {

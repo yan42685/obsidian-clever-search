@@ -33,6 +33,7 @@
 		"chokidar": "^3.5.3",
 		"compromise": "^14.10.1",
 		"reflect-metadata": "^0.1.13",
+		"split2": "^4.2.0",
 		"throttle-debounce": "^5.0.0",
 		"tsyringe": "^4.8.0"
 	}
