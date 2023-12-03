@@ -3,8 +3,8 @@ import type { SearchHitsMetadata } from "@elastic/elasticsearch/lib/api/types";
 import * as chokidar from "chokidar";
 import { debounce } from "throttle-debounce";
 import { inject, singleton } from "tsyringe";
-import { fsUtils, pathUtils } from "./my-lib";
 import { PluginManager } from "./plugin-manager";
+import { fsUtils, pathUtils } from "./utils/my-lib";
 
 // register <SearchService, singleton> to the container
 @singleton()

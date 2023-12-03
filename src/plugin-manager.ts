@@ -1,7 +1,7 @@
 import type { FileSystemAdapter } from "obsidian";
 import { inject, singleton } from "tsyringe";
 import CleverSearch from "./main";
-import { pathUtils } from "./my-lib";
+import { pathUtils } from "./utils/my-lib";
 
 @singleton()
 export class PluginManager {

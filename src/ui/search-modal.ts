@@ -1,29 +1,57 @@
 import { App, Modal } from "obsidian";
-import Component from "./Component.svelte";
+import { eventBus } from "src/utils/event-bus";
+import { EventEnum } from "src/utils/event-enum";
+import { getModKey } from "src/utils/my-lib";
+import MountedModal from "./MountedModal.svelte";
 
 export class SearchModal extends Modal {
-	tempNode: any;
+	mountedElement: any;
 	constructor(app: App) {
 		super(app);
 		// remove predefined child node
 		this.modalEl.replaceChildren();
 		this.modalEl.addClass("cs-modal");
 
-		this.tempNode = new Component({
+		// BUG: In fact, the onMount method won't be called
+		//      Use custom init() method instead
+		this.mountedElement = new MountedModal({
 			target: this.modalEl,
 			props: {
-				queryText: ""
-			}
+				queryText: "",
+			},
 		});
+
+		this.registerHotkeys();
 	}
 
 	onOpen() {
-		this.contentEl.empty();
+		// this.contentEl.empty();
 		// this.contentEl.setText("Woah!");
 	}
 
 	onClose() {
-		this.tempNode.$destroy();
+		this.mountedElement.$destroy();
+		console.log("mounted element has been destroyed.");
+	}
+
+	private registerHotkeys() {
+		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
+		const modKey = getModKey();
+		console.log("modKey+"+modKey);
+
+		this.scope.register([modKey], "J", emitEvent(EventEnum.NEXT_ITEM));
+		this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));
+		this.scope.register([], "ArrowDown", emitEvent(EventEnum.NEXT_ITEM));
+
+		this.scope.register([modKey], "K", emitEvent(EventEnum.PREV_ITEM));
+		this.scope.register([], "ArrowUp", emitEvent(EventEnum.PREV_ITEM));
 	}
 }
 
+function emitEvent(eventEnum: EventEnum) {
+	return (e: Event) => {
+		e.preventDefault();
+		eventBus.emit(eventEnum);
+		console.log("emit...");
+	};
+}
