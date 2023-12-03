@@ -11,7 +11,7 @@ export class EventBus {
 
 	// 监听事件
 	on(event: EventEnum, callback: EventCallback): void {
-        console.log("registered");
+        // console.log("registered");
 		if (!this.listeners.has(event)) {
 			this.listeners.set(event, []);
 		}
@@ -20,7 +20,7 @@ export class EventBus {
 
 	// 移除监听器
 	off(event: EventEnum, callback: EventCallback): void {
-        console.log("unregistered");
+        // console.log("unregistered");
 		const callbacks = this.listeners.get(event);
 		if (callbacks) {
 			const index = callbacks.indexOf(callback);

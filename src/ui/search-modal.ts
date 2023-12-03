@@ -37,7 +37,7 @@ export class SearchModal extends Modal {
 	private registerHotkeys() {
 		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
 		const modKey = currModifier;
-		console.log("current modifier: " + modKey);
+		// console.log("current modifier: " + modKey);
 
 		this.scope.register([modKey], "J", emitEvent(EventEnum.NEXT_ITEM));
 		this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));

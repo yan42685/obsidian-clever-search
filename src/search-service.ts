@@ -56,7 +56,9 @@ export class SearchService {
 				result.hits.hits as SearchHitsMetadata[],
 			);
 		});
-
+		// this.fuzzySearch("boundaries");
+		// this.fuzzySearch("cohensive");
+		this.fuzzySearch("jus aciend");
 		this.reIndexAll();
 	}
 
@@ -111,18 +113,67 @@ export class SearchService {
 	}
 
 	// create an index in the elasticsearch to store documents
-	private async createIndex(indexName: any) {
-		this.client.indices.create({
+	// private async createIndex(indexName: any) {
+	// 	this.client.indices.create({
+	// 		index: indexName,
+	// 		body: {
+	// 			mappings: {
+	// 				properties: {
+	// 					path: { type: "keyword" },
+	// 					title: { type: "text" },
+	// 					sentences: {
+	// 						type: "nested", // 嵌套类型
+	// 						properties: {
+	// 							content: { type: "text" },
+	// 							start_line: { type: "integer" },
+	// 						},
+	// 					},
+	// 				},
+	// 			},
+	// 		},
+	// 	});
+	private async createIndex(indexName: string) {
+		await this.client.indices.create({
 			index: indexName,
 			body: {
+				settings: {
+					analysis: {
+						tokenizer: {
+							ngram_tokenizer: {
+								type: "ngram",
+								min_gram: 2,
+								max_gram: 3,
+								token_chars: ["letter", "digit"], // Include letters and digits in ngrams
+							},
+						},
+						filter: {
+							lowercase_filter: {
+								type: "lowercase", // Ensure lowercase filter is defined
+							},
+						},
+						analyzer: {
+							ngram_lowercase_analyzer: {
+								type: "custom",
+								tokenizer: "ngram_tokenizer",
+								filter: ["lowercase_filter"], // Use the lowercase filter
+							},
+						},
+					},
+				},
 				mappings: {
 					properties: {
 						path: { type: "keyword" },
-						title: { type: "text" },
+						title: {
+							type: "text",
+							analyzer: "ngram_lowercase_analyzer", // Use the custom analyzer for title
+						},
 						sentences: {
-							type: "nested", // 嵌套类型
+							type: "nested",
 							properties: {
-								content: { type: "text" },
+								content: {
+									type: "text",
+									analyzer: "ngram_lowercase_analyzer", // Use the custom analyzer for content within sentences
+								},
 								start_line: { type: "integer" },
 							},
 						},
@@ -131,6 +182,7 @@ export class SearchService {
 			},
 		});
 	}
+	// }
 
 	async reIndexAll() {
 		// If the index exists, delete it
@@ -206,6 +258,94 @@ export class SearchService {
 		// 获取前30个文档的内容
 		const sampleDocs = allIndexedDocuments.slice(0, 30);
 		console.log(sampleDocs);
+	}
+
+	async fuzzySearch(searchText: string) {
+		console.log("--------------------------------");
+		console.log("fuzzy");
+
+		// 定义查询的配置
+		// const searchConfig = {
+		// 	index: this.targetIndex,
+		// 	body: {
+		// 		query: {
+		// 			bool: {
+		// 				should: [
+		// 					{
+		// 						fuzzy: {
+		// 							title: {
+		// 								value: searchText,
+		// 								fuzziness: 2,
+		// 							},
+		// 						},
+		// 					},
+		// 					{
+		// 						wildcard: {
+		// 							title: `*${searchText}*`,
+		// 						},
+		// 					},
+		// 					{
+		// 						match_phrase: {
+		// 							"sentences.content": {
+		// 								query: searchText,
+		// 								slop: 100,
+		// 							},
+		// 						},
+		// 					},
+		// 				],
+		// 				minimum_should_match: 1,
+		// 			},
+		// 		},
+		// 		highlight: {
+		// 			fields: {
+		// 				title: {},
+		// 				"sentences.content": {},
+		// 			},
+		// 		},
+		// 	},
+		// };
+
+		const searchConfig = {
+			index: this.targetIndex,
+			body: {
+				query: {
+					multi_match: {
+						query: searchText,
+						fields: ["content", "title"], // 搜索content和title字段
+						fuzziness: "AUTO", // 启用模糊匹配
+						operator: "or", // 使用'or'操作符，任一关键词匹配即可
+						type: "best_fields", // 使用最佳字段类型，适合更模糊的匹配
+						tie_breaker: 0.3, // 在相关性接近时，优先考虑最佳匹配字段
+					},
+				},
+				highlight: {
+					fields: {
+						content: {}, // 只高亮显示content字段
+					},
+				},
+			},
+		};
+
+		try {
+			const response = await this.client.search(searchConfig);
+			console.log("###Search results:", response.hits.hits);
+
+			// 输出结果到控制台
+			response.hits.hits.forEach((hit) => {
+				// console.log(`Document path: ${hit._source.path}`);
+				// console.log(`Title: ${hit._source.title}`);
+				if (hit.highlight && hit.highlight["sentences.content"]) {
+					console.log(
+						`Matched sentences: ${hit.highlight[
+							"sentences.content"
+						].join(", ")}`,
+					);
+				}
+				// console.log("--------------------------------");
+			});
+		} catch (error) {
+			console.error("Error during fuzzy search:", error);
+		}
 	}
 }
 
