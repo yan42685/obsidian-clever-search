@@ -1,27 +1,27 @@
 const isDevEnvironment = process.env.NODE_ENV === "development";
 
 class Logger {
-    async info(message: string) {
+    info(...args: any[]) {
         if (isDevEnvironment) {
-            console.info(`[info] %c${message}`, 'color: blue;');
+            console.info('%c[info]', 'color: blue;', ...args);
         }
     }
 
-    async debug(message: string) {
+    debug(...args: any[]) {
         if (isDevEnvironment) {
-            console.debug(`[debug] %c${message}`, 'color: green;');
+            console.debug('%c[debug]', 'color: green;', ...args);
         }
     }
 
-    async warn(message: string) {
+    warn(...args: any[]) {
         if (isDevEnvironment) {
-            console.warn(`[warn] %c${message}`, 'color: orange;');
+            console.warn('%c[warn]', 'color: orange;', ...args);
         }
     }
 
-    async error(message: string) {
+    error(...args: any[]) {
         if (isDevEnvironment) {
-            console.error(`[error] %c${message}`, 'color: red;');
+            console.error('%c[error]', 'color: red;', ...args);
         }
     }
 }

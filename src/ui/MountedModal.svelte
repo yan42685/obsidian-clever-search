@@ -7,6 +7,9 @@
 
 	const searchService: SearchService = container.resolve(SearchService);
 
+	// 这是一个异步方法
+	searchService.testProcedure();
+
 	export let queryText: string;
 	let searchResults: any[] = [];
 	let selectedFileIndex = 0;

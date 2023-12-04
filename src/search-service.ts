@@ -6,7 +6,14 @@ import nlp from "compromise/two";
 import { debounce } from "throttle-debounce";
 import { inject, singleton } from "tsyringe";
 import { PluginManager } from "./plugin-manager";
-import { FileExtension, fsUtils, getAllFiles, pathUtils } from "./utils/my-lib";
+import { logger } from "./utils/logger";
+import {
+	FileExtension,
+	fsUtils,
+	getAllFiles,
+	monitorExecution,
+	pathUtils
+} from "./utils/my-lib";
 
 // register <SearchService, singleton> to the container
 @singleton()
@@ -15,7 +22,7 @@ export class SearchService {
 	watchedPaths: string[];
 	targetIndex: string;
 	// watch the create, update and delete operations and reIndex corresponding files
-	watchers: chokidar.FSWatcher[];
+	watchers: chokidar.FSWatcher[] = [];
 
 	// @inject(key) get a dependency from the container
 	constructor(@inject(PluginManager) pluginManager: PluginManager) {
@@ -23,47 +30,52 @@ export class SearchService {
 		this.client = new Client({ node: "http://localhost:9200" });
 		this.watchedPaths = pluginManager.watchedPaths;
 		this.targetIndex = pluginManager.indexName;
+	}
 
-		this.watchers = [];
+	async testProcedure() {
 		console.log("Clever Search start...");
 		console.log(this.client);
 		console.log("watchedPaths: " + this.watchedPaths);
 
-		const indexFileDebounced: (path: string) => void = debounce(
-			3000,
-			this.indexFile.bind(this),
-		);
-
-		// TODO: 处理重复子目录
-		// 监视目录
-		this.watchedPaths.forEach((path) => {
-			const realPath = pathUtils.join(path, "**/*.md");
-			// chokidar.watch() will return a new instance every time when called
-			const watcher = chokidar
-				.watch(realPath, {
-					persistent: true,
-				})
-				.on("add", (newPath) => indexFileDebounced(newPath))
-				.on("change", (newPath) => indexFileDebounced(newPath));
-			this.watchers.push(watcher);
-		});
+		this.startFileWatchers();
+		// this.deleteIndex(this.targetIndex);
+		await monitorExecution(this.reIndexAll.bind(this));
 
 		// 使用示例
-		this.search("hello").then((result) => {
-			console.log("raw result: ", result);
-			console.log(
-				"search result:",
-				result.hits.hits as SearchHitsMetadata[],
-			);
-		});
+		await this.search("hello");
 		// this.fuzzySearch("boundaries");
 		// this.fuzzySearch("cohensive");
-		this.fuzzySearch("jus aciend");
-		this.reIndexAll();
+		await this.fuzzySearch("hello");
+		await this.testSearch("when");
+	}
+
+	async testSearch(queryString: string) {
+		try {
+			const { hits } = await this.client.search({
+				index: this.targetIndex,
+				body: {
+					query: {
+						nested: {
+							path: "sentences", // 嵌套对象的路径
+							query: {
+								match: {
+									"sentences.content": queryString,
+								},
+							},
+							score_mode: "avg", // 如何计算分数
+						},
+					},
+				},
+				size: 10, // 返回最多 10 个结果
+			});
+
+			logger.debug("[testSearch] results:", hits);
+		} catch (error) {
+			logger.error("Error during [testSearch]:", error);
+		}
 	}
 
 	async search(query: string): Promise<any> {
-		console.log("perform a search");
 		try {
 			const result: any = await this.client.search({
 				index: this.targetIndex,
@@ -84,15 +96,20 @@ export class SearchService {
 					},
 				},
 			});
+			logger.debug("[search] raw result: ", result);
+			logger.debug(
+				"[search] search result:",
+				result.hits.hits as SearchHitsMetadata[],
+			);
 			return result;
 		} catch (error) {
-			console.error(`Error during search:`, error);
+			logger.error(`Error during [search]:`, error);
 			return [];
 		}
 	}
 
 	// add or update an document
-	private indexFile(filepath: string): void {
+	private async indexFile(filepath: string) {
 		const content: string = fsUtils.readFileSync(filepath, "utf8");
 		this.client
 			.index({
@@ -132,6 +149,33 @@ export class SearchService {
 	// 			},
 	// 		},
 	// 	});
+
+	private async startFileWatchers() {
+		const indexFileDebounced: (path: string) => void = debounce(
+			3000,
+			this.indexFile.bind(this),
+		);
+		this.watchers = [];
+
+		// TODO: 处理重复子目录
+		// 监视目录
+		this.watchedPaths.forEach((path) => {
+			const realPath = pathUtils.join(path, "**/*.md");
+			// chokidar.watch() will return a new instance every time when called
+			const watcher = chokidar
+				.watch(realPath, {
+					persistent: true,
+				})
+				.on("add", (newPath) => indexFileDebounced(newPath))
+				.on("change", (newPath) => indexFileDebounced(newPath));
+			this.watchers.push(watcher);
+		});
+	}
+	private async stopFileWatchers() {
+		// 关闭所有watchers
+		this.watchers.forEach((watcher) => watcher.close());
+	}
+
 	private async createIndex(indexName: string) {
 		await this.client.indices.create({
 			index: indexName,
@@ -182,23 +226,25 @@ export class SearchService {
 			},
 		});
 	}
-	// }
-
-	async reIndexAll() {
-		// If the index exists, delete it
+	async deleteIndex(targetIndex: string) {
 		if (
 			await this.client.indices.exists({
-				index: this.targetIndex,
+				index: targetIndex,
 			})
 		) {
-			await this.client.indices.delete({ index: this.targetIndex });
-			console.log(`Index [${this.targetIndex}] deleted`);
+			await this.client.indices.delete({ index: targetIndex });
+			logger.debug(`Index [${targetIndex}] deleted`);
 		} else {
-			console.log(
-				`Index [${this.targetIndex}] does not exist, no need to delete.`,
+			logger.debug(
+				`Index [${targetIndex}] does not exist, no need to delete.`,
 			);
 		}
+	}
 
+	async reIndexAll() {
+		this.stopFileWatchers();
+		// If the index exists, delete it
+		await this.deleteIndex(this.targetIndex);
 		await this.createIndex(this.targetIndex);
 
 		const targetPaths = this.watchedPaths;
@@ -216,6 +262,8 @@ export class SearchService {
 		// 	console.error(`Error during reindexing:`, error);
 		// }
 		const filePaths = await getAllFiles(targetPaths, [FileExtension.MD]);
+		// TODO: 用更小的数据集测试、更简单的结构测试，这里并没有成功创建对应类型的doc, 建议直接用本页最下面的代码测
+		// const filePaths = await getAllFiles(targetPaths, [FileExtension.ALL]);
 		let bulkOperations: any[] = [];
 		let currentBulkSize = 0;
 
@@ -235,10 +283,12 @@ export class SearchService {
 			};
 
 			currentBulkSize += Buffer.byteLength(JSON.stringify(doc));
-			bulkOperations.push({
-				index: { _index: targetIndex },
+			bulkOperations.push(
+				{
+					index: { _index: targetIndex },
+				},
 				doc,
-			});
+			);
 
 			allIndexedDocuments.push(doc);
 			// Execute bulk upload when the bulk size exceeds the threshold
@@ -251,19 +301,20 @@ export class SearchService {
 
 		// Upload any remaining documents
 		if (bulkOperations.length > 0) {
-			await this.client.bulk({ refresh: true, body: bulkOperations });
+			await this.client.bulk({
+				refresh: true,
+				operations: bulkOperations,
+			});
 		}
 		console.log("reIndex finished...");
 		console.log(`Total indexed documents: ${allIndexedDocuments.length}`);
 		// 获取前30个文档的内容
 		const sampleDocs = allIndexedDocuments.slice(0, 30);
 		console.log(sampleDocs);
+		// this.startFileMonitoring();
 	}
 
 	async fuzzySearch(searchText: string) {
-		console.log("--------------------------------");
-		console.log("fuzzy");
-
 		// 定义查询的配置
 		// const searchConfig = {
 		// 	index: this.targetIndex,
@@ -328,14 +379,14 @@ export class SearchService {
 
 		try {
 			const response = await this.client.search(searchConfig);
-			console.log("###Search results:", response.hits.hits);
+			logger.debug("[fuzzySearch] results:", response.hits.hits);
 
 			// 输出结果到控制台
 			response.hits.hits.forEach((hit) => {
 				// console.log(`Document path: ${hit._source.path}`);
 				// console.log(`Title: ${hit._source.title}`);
 				if (hit.highlight && hit.highlight["sentences.content"]) {
-					console.log(
+					logger.debug(
 						`Matched sentences: ${hit.highlight[
 							"sentences.content"
 						].join(", ")}`,
@@ -344,7 +395,7 @@ export class SearchService {
 				// console.log("--------------------------------");
 			});
 		} catch (error) {
-			console.error("Error during fuzzy search:", error);
+			logger.error("Error during [fuzzySearch]:", error);
 		}
 	}
 }

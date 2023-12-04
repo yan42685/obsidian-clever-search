@@ -68,7 +68,20 @@ export async function getAllFiles(
 export enum FileExtension {
 	MD = ".md",
 	TXT = ".txt",
+	// 尽量不要开启
+	ALL = "",
 }
 
 // default dirs blacklist
 const IGNORED_DIRECTORIES = [".obsidian", ".git", ".vscode"];
+
+// TODO: 定义函数类型
+export async function monitorExecution(callback: any) {
+
+	const startTime = Date.now(); // 记录开始时间
+	await callback(); // 执行传入的回调函数
+	const endTime = Date.now(); // 记录结束时间
+
+	const duration = endTime - startTime; // 计算运行时间
+	console.log(`${callback.name} 运行时间: ${duration} 毫秒`);
+}

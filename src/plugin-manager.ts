@@ -25,8 +25,8 @@ export class PluginManager {
 		// TODO: configurable
 		const whitelistPaths = ["abc"];
 		const blackListPaths = [".obsidian/"];
-		const paths = ["abc/"];
-		this.watchedPaths = paths.map(
+		const relativePaths = ["abc/"];
+		this.watchedPaths = relativePaths.map(
 			(relativePath) =>
 				pathUtils
 					.join(this.vaultPath, relativePath)
