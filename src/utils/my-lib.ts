@@ -1,5 +1,6 @@
 import * as fsLib from "fs";
 import * as pathLib from "path";
+import { logger } from "./logger";
 
 // for autocompletion
 export const fsUtils = fsLib;
@@ -76,12 +77,29 @@ export enum FileExtension {
 const IGNORED_DIRECTORIES = [".obsidian", ".git", ".vscode"];
 
 // TODO: 定义函数类型
-export async function monitorExecution(callback: any) {
+export async function monitorExecution(fn: (...args: any[]) => Promise<void>) {
+	const startTime = Date.now();
+	await fn();
+	const endTime = Date.now();
 
-	const startTime = Date.now(); // 记录开始时间
-	await callback(); // 执行传入的回调函数
-	const endTime = Date.now(); // 记录结束时间
+	const duration = formatMillis(endTime - startTime);
+	logger.debug(`[${fn.name.replace(/^bound /, "")}] running time: ${duration}`);
+}
 
-	const duration = endTime - startTime; // 计算运行时间
-	console.log(`${callback.name} 运行时间: ${duration} 毫秒`);
+/**
+ * get a better view of milliseconds
+ */
+export function formatMillis(millis: number) {
+	if (millis < 1000) {
+		return `${millis} ms`;
+	} else if (millis < 60000) {
+		const seconds = Math.floor(millis / 1000);
+		const milliseconds = millis % 1000;
+		return `${seconds} s ${milliseconds} ms`;
+	} else {
+		const minutes = Math.floor(millis / 60000);
+		const seconds = Math.floor((millis % 60000) / 1000);
+		const milliseconds = millis % 1000;
+		return `${minutes} min ${seconds} s ${milliseconds} ms`;
+	}
 }
