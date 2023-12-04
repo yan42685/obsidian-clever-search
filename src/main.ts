@@ -10,6 +10,7 @@ import {
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { SearchModal } from "./ui/search-modal";
+import { logger } from "./utils/logger";
 
 // Remember to rename these classes and interfaces!
 
@@ -25,6 +26,10 @@ export default class CleverSearch extends Plugin {
 	settings: CleverSearchSettings = new CleverSearchSettings();
 
 	async onload() {
+		logger.info("test")
+		logger.debug("test")
+		logger.warn("test")
+		logger.error("test")
 		await this.loadSettings();
 		this.exampleCode();
 		this.registerSearchUI();
