@@ -24,12 +24,13 @@ const DEFAULT_SETTINGS: CleverSearchSettings = {
 
 export default class CleverSearch extends Plugin {
 	settings: CleverSearchSettings = new CleverSearchSettings();
+	blurEnabled = false;
 
 	async onload() {
-		logger.info("test")
-		logger.debug("test")
-		logger.warn("test")
-		logger.error("test")
+		logger.info("test");
+		logger.debug("test");
+		logger.warn("test");
+		logger.error("test");
 		await this.loadSettings();
 		this.exampleCode();
 		this.registerSearchUI();
@@ -37,6 +38,21 @@ export default class CleverSearch extends Plugin {
 		// register <"cleverSearch", this> to the container
 		// cant't use CleverSearch as a key here to void cycle dependencies
 		container.register("CleverSearch", { useValue: this });
+
+		this.addCommand({
+			id: "cs-toggle-blur",
+			name: "Toggle Blur",
+			callback: () => this.toggleBlur(),
+		});
+	}
+
+	toggleBlur() {
+		this.blurEnabled = !this.blurEnabled;
+		if (this.blurEnabled) {
+			document.body.classList.add("my-custom-blur");
+		} else {
+			document.body.classList.remove("my-custom-blur");
+		}
 	}
 
 	registerSearchUI() {
@@ -58,7 +74,7 @@ export default class CleverSearch extends Plugin {
 			(evt: MouseEvent) => {
 				// Called when the user clicks the icon.
 				new Notice("This is a notice!");
-			}
+			},
 		);
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass("my-plugin-ribbon-class");
@@ -96,17 +112,19 @@ export default class CleverSearch extends Plugin {
 
 		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
 		this.registerInterval(
-			window.setInterval(() => console.log("setInterval"), 5 * 60 * 1000)
+			window.setInterval(() => console.log("setInterval"), 5 * 60 * 1000),
 		);
 	}
 
-	onunload() {}
+	onunload() {
+		document.body.classList.remove('my-custom-blur');
+	}
 
 	async loadSettings() {
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
-			await this.loadData()
+			await this.loadData(),
 		);
 	}
 
@@ -138,7 +156,7 @@ class SampleSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.mySetting = value;
 						await this.plugin.saveSettings();
-					})
+					}),
 			);
 	}
 }

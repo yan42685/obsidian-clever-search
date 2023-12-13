@@ -11,3 +11,22 @@ If your plugin does not need CSS, delete this file.
     width: 50%;
     height: 60%;
 }
+
+/* dynamic blur all elements except active line */
+.my-custom-blur .workspace-ribbon.side-dock-ribbon:not(:hover),
+.my-custom-blur .workspace-split.mod-horizontal:not(:hover),
+.my-custom-blur .workspace-tab-header-container:not(:hover),
+.my-custom-blur .view-header:not(:hover),
+.my-custom-blur .inline-title:not(:hover),
+.my-custom-blur .embedded-backlinks:not(:hover),
+.my-custom-blur .status-bar:not(:hover) {
+    filter: blur(5px);
+}
+
+.my-custom-blur .cm-line:not(:hover) {
+    filter: blur(5px) !important;
+}
+.my-custom-blur .cm-line.cm-active {
+    filter: none !important;
+}
+
