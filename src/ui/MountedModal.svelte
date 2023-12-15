@@ -158,6 +158,7 @@
 		padding: 0; /* 移除默认的内边距 */
 		width: 100%; /* 如果需要，设置一个宽度 */
 		max-width: 300px; /* 限制最大宽度，根据需要调整 */
+		/* overflow: scroll; */
 	}
 
 	/* 调整按钮样式以响应居中布局 */
@@ -165,6 +166,7 @@
 		display: flex;
 		justify-content: center;
 		align-items: center;
+		overflow: hidden;
 		padding: 10px;
 		width: 100%; /* 按钮宽度与ul一致 */
 		text-align: center; /* 文本居中 */
@@ -174,7 +176,7 @@
 		color: #ddd;
 		margin-bottom: 5px;
 		cursor: pointer;
-		transition: background-color 0.2s;
+		transition: background-color 0.01s;
 	}
 
 	.cs-results-leftpane button:hover,

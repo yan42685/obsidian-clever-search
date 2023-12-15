@@ -1,7 +1,7 @@
 import { AsyncFzf } from "fzf";
-import { App, Component, MarkdownRenderer } from "obsidian";
+import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { InFileItem,  Line, MatchedLine, ResultType, SearchResult } from "./entities/search-types";
+import { InFileItem, Line, MatchedLine, ResultType, SearchResult } from "./entities/search-types";
 import { MathUtil } from "./utils/math-util";
 
 @singleton()
@@ -13,6 +13,8 @@ export class SearchHelper {
         if (!queryText) {
             return new SearchResult(ResultType.IN_FILE, "", []);
         }
+		// remove spaces
+		queryText = queryText.replace(/\s/g, "");
 		// HighlightChars function
 		const HighlightChars = (str: string, indexes: Set<number>) => {
 			const chars = str.split("");
