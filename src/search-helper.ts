@@ -2,11 +2,12 @@ import { AsyncFzf } from "fzf";
 import { App, Component, MarkdownRenderer, Notice } from "obsidian";
 import { container, singleton } from "tsyringe";
 import { Line, MatchedLine } from "./entities/search-types";
-import { minInSet } from "./utils/math-utils";
+import { MathUtil } from "./utils/math-util";
 
 @singleton()
 export class SearchHelper {
 	app: App = container.resolve(App);
+	component: Component = new Component();
 
 	async search() {
 		// HighlightChars function
@@ -19,12 +20,9 @@ export class SearchHelper {
 				.join("");
 		};
 
-		// Get list of MatchedLine objects
-		const list = await this.getDataSource();
+		const dataSource = await this.getDataSource();
 
-		// FZF search
-
-		const fzf = new AsyncFzf(list, { selector: (item) => item.text });
+		const fzf = new AsyncFzf(dataSource.lines, { selector: (item) => item.text });
 		const entries = await fzf.find("li");
 		const searchResult: MatchedLine[] = [];
 
@@ -36,40 +34,49 @@ export class SearchHelper {
 				entry.positions,
 			);
 			const row = entry.item.row;
-			const col = minInSet(entry.positions);
+			const col = MathUtil.minInSet(entry.positions);
 			searchResult.push(new MatchedLine(highlightedText, row, col));
 			resultsMarkdown += `Line ${row}, Start ${col}: ${highlightedText}\n`;
 		});
 
-		// Create a new notice to display the results
-		const notice = new Notice("", 20 * 1000); // Duration set to 0 for persistent notice
+		console.log(searchResult);
 
+		// Create a new notice to display the results
+		const notice = new Notice("", 20 * 1000);
+
+        // TODO: 使用modal的component
 		// Render the Markdown string into the notice
 		MarkdownRenderer.render(
 			this.app,
 			resultsMarkdown,
 			notice.noticeEl,
-			"",
-			new Component(),
+			dataSource.path,
+			this.component,
 		);
-
-		console.log(searchResult);
 	}
 
 	/**
 	 * get lines from current note
 	 */
-	async getDataSource(): Promise<Line[]> {
+	async getDataSource(): Promise<DataSource> {
 		// Ensure the active leaf is a markdown note
 		const activeFile = this.app.workspace.getActiveFile();
 		if (!activeFile) {
-			return [];
+			return { lines: [], path: "" };
 		}
 
 		// Read the content and split into lines
 		const lines = (await this.app.vault.read(activeFile)).split("\n");
 
 		// Map each line to a MatchedLine object
-		return lines.map((line, index) => new Line(line, index));
+		return {
+			lines: lines.map((line, index) => new Line(line, index)),
+			path: activeFile.path,
+		};
 	}
 }
+
+type DataSource = {
+	lines: Line[];
+	path: string;
+};

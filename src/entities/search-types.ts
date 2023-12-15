@@ -11,7 +11,7 @@ export class Line {
 		this.row = row;
 	}
 }
-export class MatchedLine extends Line{
+export class MatchedLine extends Line {
 	col: number;
 	constructor(text: string, row: number, col: number) {
 		super(text, row);
@@ -24,7 +24,12 @@ export class SearchResult {
 	matchedLine?: MatchedLine;
 	context: string;
 
-	constructor(type: ResultType, title = "", matchedLine = undefined, context = "") {
+	constructor(
+		type: ResultType,
+		title = "",
+		matchedLine = undefined,
+		context = "",
+	) {
 		this.type = type;
 		this.title = title;
 		this.matchedLine = matchedLine;
