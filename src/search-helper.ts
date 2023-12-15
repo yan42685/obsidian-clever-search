@@ -1,7 +1,7 @@
 import { AsyncFzf } from "fzf";
 import { App, Component, MarkdownRenderer, Notice } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { Line, MatchedLine } from "./entities/search-types";
+import { InFileItem, InFileResult, Line, MatchedLine } from "./entities/search-types";
 import { MathUtil } from "./utils/math-util";
 
 @singleton()
@@ -9,22 +9,24 @@ export class SearchHelper {
 	app: App = container.resolve(App);
 	component: Component = new Component();
 
-	async search() {
+	async search(): Promise<InFileResult> {
 		// HighlightChars function
-		const HighlightChars = (str: string, indices: Set<number>) => {
+		const HighlightChars = (str: string, indexes: Set<number>) => {
 			const chars = str.split("");
 			return chars
 				.map((char, i) => {
-					return indices.has(i) ? `<mark>${char}</mark>` : char;
+					return indexes.has(i) ? `<mark>${char}</mark>` : char;
 				})
 				.join("");
 		};
 
 		const dataSource = await this.getDataSource();
 
-		const fzf = new AsyncFzf(dataSource.lines, { selector: (item) => item.text });
+		const fzf = new AsyncFzf(dataSource.lines, {
+			selector: (item) => item.text,
+		});
 		const entries = await fzf.find("li");
-		const searchResult: MatchedLine[] = [];
+		const searchResult: InFileResult = new InFileResult(dataSource.path, []);
 
 		// Prepare the highlighted search results as a Markdown string
 		let resultsMarkdown = "";
@@ -35,16 +37,19 @@ export class SearchHelper {
 			);
 			const row = entry.item.row;
 			const col = MathUtil.minInSet(entry.positions);
-			searchResult.push(new MatchedLine(highlightedText, row, col));
+			searchResult.items.push(
+				new InFileItem(
+					new MatchedLine(highlightedText, row, col),
+					this.getContext(row),
+				)
+			);
 			resultsMarkdown += `Line ${row}, Start ${col}: ${highlightedText}\n`;
 		});
-
-		console.log(searchResult);
 
 		// Create a new notice to display the results
 		const notice = new Notice("", 20 * 1000);
 
-        // TODO: 使用modal的component
+		// TODO: 使用modal的component
 		// Render the Markdown string into the notice
 		MarkdownRenderer.render(
 			this.app,
@@ -53,12 +58,13 @@ export class SearchHelper {
 			dataSource.path,
 			this.component,
 		);
+		return searchResult;
 	}
 
 	/**
-	 * get lines from current note
+	 * get data from current note
 	 */
-	async getDataSource(): Promise<DataSource> {
+	private async getDataSource(): Promise<DataSource> {
 		// Ensure the active leaf is a markdown note
 		const activeFile = this.app.workspace.getActiveFile();
 		if (!activeFile) {
@@ -73,6 +79,10 @@ export class SearchHelper {
 			lines: lines.map((line, index) => new Line(line, index)),
 			path: activeFile.path,
 		};
+	}
+
+	private getContext(lineNumber: number): string {
+		return "";
 	}
 }
 

@@ -1,8 +1,3 @@
-export enum ResultType {
-	IN_FILE,
-	IN_VAULT,
-	SEMANTIC,
-}
 export class Line {
 	text: string;
 	row: number;
@@ -18,24 +13,22 @@ export class MatchedLine extends Line {
 		this.col = col;
 	}
 }
-export class SearchResult {
-	type: ResultType;
-	title: string;
-	matchedLine?: MatchedLine;
-	context: string;
+export class InFileResult {
+	path: string;
+	items: InFileItem[];
 
-	constructor(
-		type: ResultType,
-		title = "",
-		matchedLine = undefined,
-		context = "",
-	) {
-		this.type = type;
-		this.title = title;
-		this.matchedLine = matchedLine;
-		this.context = context;
+	constructor(title: string, items: InFileItem[]) {
+		this.path = title;
+		this.items = items;
 	}
 }
 
-// 示例
-// const a = new SearchResult(ResultType.IN_FILE, "test title", undefined, "the context");
+export class InFileItem {
+	line: MatchedLine;
+	context: string;
+
+	constructor(line: MatchedLine, context: string) {
+		this.line = line;
+		this.context = context;
+	}
+}
