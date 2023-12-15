@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { InFileResult, type SearchResult } from "src/entities/search-types";
+	import type { App } from "obsidian";
+	import {
+		InFileItem,
+		ResultType,
+		SearchResult,
+	} from "src/entities/search-types";
 	import { SearchHelper } from "src/search-helper";
 	import { eventBus } from "src/utils/event-bus";
 	import { EventEnum } from "src/utils/event-enum";
-	import { onDestroy } from "svelte";
+	import { onDestroy, tick } from "svelte";
 	import { container } from "tsyringe";
 
 	// const searchService: SearchService = container.resolve(SearchService);
@@ -12,21 +17,25 @@
 
 	const searchHelper: SearchHelper = container.resolve(SearchHelper);
 
-
+	export let app: App;
 	export let queryText: string;
-	let searchResult: SearchResult = { path: "", count: 0 };
+	const DEFAULT_RESULT = new SearchResult(ResultType.IN_FILE, "", []);
+	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = 0;
 	let currContext = "";
+	let itemElements: HTMLElement[] = [];
 
 	// Updates focused content and selected file index
 	function updateItem(index: number): void {
-		if (searchResult instanceof InFileResult) {
-			if (index >= 0 && index < searchResult.count) {
-				currContext = searchResult.items[index].context;
+		const items = searchResult.items;
+		if (index >= 0 && index < items.length) {
+			if (searchResult.type === ResultType.IN_FILE) {
+				const item = items[index] as InFileItem;
+				currContext = item.context;
 				currItemIndex = index;
+			} else {
+				throw Error("unsupported result type: " + typeof searchResult);
 			}
-		} else {
-			throw Error("unsupported result type: " + typeof searchResult);
 		}
 	}
 
@@ -34,6 +43,22 @@
 	async function handleInput() {
 		searchResult = await searchHelper.search(queryText);
 		updateItem(0);
+		// wait until all dynamic elements are mounted and rendered
+		await tick();
+		if (searchResult.type === ResultType.IN_FILE) {
+			searchResult.items.forEach((x) => {
+				// const item = x as InFileItem;
+				// if (item.element) {
+				// 	MarkdownRenderer.render(
+				// 		app,
+				// 		item.line.text,
+				// 		item.element,
+				// 		searchResult.currPath,
+				// 		new Component(),
+				// 	);
+				// }
+			});
+		}
 	}
 
 	// Handle result click
@@ -43,7 +68,7 @@
 
 	// Select the next search result
 	function selectNextResult() {
-		updateItem(Math.min(currItemIndex + 1, searchResult.count - 1));
+		updateItem(Math.min(currItemIndex + 1, searchResult.items.length - 1));
 	}
 
 	// Select the previous search result
@@ -66,6 +91,7 @@
 </script>
 
 <div class="cs-searchbar">
+	<!-- svelte-ignore a11y-autofocus -->
 	<input
 		bind:value={queryText}
 		on:input={handleInput}
@@ -76,16 +102,17 @@
 <div class="cs-search-results">
 	<div class="cs-results-leftpane">
 		<ul>
-			{#if searchResult instanceof InFileResult}
-				{#each searchResult.items as result, index}
-					<button
-						class:selected={index === currItemIndex}
-						on:click={() => handleResultClick(index)}
-					>
-						{result.line.text}
-					</button>
-				{/each}
-			{/if}
+			{#each searchResult.items as item, index}
+				<button
+					class:selected={index === currItemIndex}
+					bind:this={item.element}
+					on:click={() => handleResultClick(index)}
+				>
+					{#if item instanceof InFileItem}
+						{@html item.line.text}
+					{/if}
+				</button>
+			{/each}
 		</ul>
 	</div>
 	<div class="cs-result-rightpane">
@@ -135,7 +162,9 @@
 
 	/* 调整按钮样式以响应居中布局 */
 	.cs-results-leftpane button {
-		display: block;
+		display: flex;
+		justify-content: center;
+		align-items: center;
 		padding: 10px;
 		width: 100%; /* 按钮宽度与ul一致 */
 		text-align: center; /* 文本居中 */

@@ -1,7 +1,7 @@
 import { AsyncFzf } from "fzf";
-import { App, Component } from "obsidian";
+import { App, Component, MarkdownRenderer } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { InFileItem, InFileResult, Line, MatchedLine } from "./entities/search-types";
+import { InFileItem,  Line, MatchedLine, ResultType, SearchResult } from "./entities/search-types";
 import { MathUtil } from "./utils/math-util";
 
 @singleton()
@@ -9,9 +9,9 @@ export class SearchHelper {
 	app: App = container.resolve(App);
 	component: Component = new Component();
 
-	async search(queryText: string): Promise<InFileResult> {
+	async search(queryText: string): Promise<SearchResult> {
         if (!queryText) {
-            return new InFileResult("", []);
+            return new SearchResult(ResultType.IN_FILE, "", []);
         }
 		// HighlightChars function
 		const HighlightChars = (str: string, indexes: Set<number>) => {
@@ -30,7 +30,7 @@ export class SearchHelper {
 		});
 		// const entries = await fzf.find("li");
 		const entries = await fzf.find(queryText);
-		const searchResult: InFileResult = new InFileResult(dataSource.path, []);
+		const searchResult: SearchResult = new SearchResult(ResultType.IN_FILE, dataSource.path, []);
 
 		// Prepare the highlighted search results as a Markdown string
 		let resultsMarkdown = "";

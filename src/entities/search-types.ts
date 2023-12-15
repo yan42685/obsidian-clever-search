@@ -1,3 +1,8 @@
+import { Component } from "obsidian";
+
+export enum ResultType{
+	IN_FILE, IN_VAULT, SEMANTIC
+}
 export class Line {
 	text: string;
 	row: number;
@@ -15,27 +20,25 @@ export class MatchedLine extends Line {
 }
 
 export class SearchResult {
-	path: string;
-	count: number;
-	constructor(path: string, count: number) {
-		this.path = path;
-		this.count = count;
-	}
-}
-export class InFileResult extends SearchResult {
-	items: InFileItem[];
-
-	constructor(path: string, items: InFileItem[]) {
-		super(path, items.length);
+	type: ResultType;
+	currPath: string;
+	items: Item[];
+	constructor(type: ResultType, currPath: string, items: Item[]) {
+		this.type = type;
+		this.currPath = currPath;
 		this.items = items;
 	}
 }
 
-export class InFileItem {
+export class Item {
+	element?: HTMLElement;
+}
+export class InFileItem extends Item {
 	line: MatchedLine;
 	context: string;
 
 	constructor(line: MatchedLine, context: string) {
+		super();
 		this.line = line;
 		this.context = context;
 	}

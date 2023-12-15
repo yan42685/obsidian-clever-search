@@ -17,6 +17,7 @@ export class SearchModal extends Modal {
 		this.mountedElement = new MountedModal({
 			target: this.modalEl,
 			props: {
+				app: app,
 				queryText: "",
 			},
 		});
