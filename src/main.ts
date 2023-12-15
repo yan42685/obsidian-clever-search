@@ -9,7 +9,6 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
-import { SearchHelper } from "./search-helper";
 import { SearchModal } from "./ui/search-modal";
 
 // Remember to rename these classes and interfaces!
@@ -39,9 +38,6 @@ export default class CleverSearch extends Plugin {
 		// cant't use CleverSearch as a key here to void cycle dependencies
 		container.register("CleverSearch", { useValue: this });
 		container.register(App, { useValue: this.app });
-
-		const searchHelper = container.resolve(SearchHelper);
-		searchHelper.search();
 
 		this.addCommand({
 			id: "cs-toggle-blur",

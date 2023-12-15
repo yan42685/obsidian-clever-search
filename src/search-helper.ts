@@ -1,5 +1,5 @@
 import { AsyncFzf } from "fzf";
-import { App, Component, MarkdownRenderer, Notice } from "obsidian";
+import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
 import { InFileItem, InFileResult, Line, MatchedLine } from "./entities/search-types";
 import { MathUtil } from "./utils/math-util";
@@ -9,7 +9,10 @@ export class SearchHelper {
 	app: App = container.resolve(App);
 	component: Component = new Component();
 
-	async search(): Promise<InFileResult> {
+	async search(queryText: string): Promise<InFileResult> {
+        if (!queryText) {
+            return new InFileResult("", []);
+        }
 		// HighlightChars function
 		const HighlightChars = (str: string, indexes: Set<number>) => {
 			const chars = str.split("");
@@ -25,7 +28,8 @@ export class SearchHelper {
 		const fzf = new AsyncFzf(dataSource.lines, {
 			selector: (item) => item.text,
 		});
-		const entries = await fzf.find("li");
+		// const entries = await fzf.find("li");
+		const entries = await fzf.find(queryText);
 		const searchResult: InFileResult = new InFileResult(dataSource.path, []);
 
 		// Prepare the highlighted search results as a Markdown string
@@ -46,18 +50,19 @@ export class SearchHelper {
 			resultsMarkdown += `Line ${row}, Start ${col}: ${highlightedText}\n`;
 		});
 
-		// Create a new notice to display the results
-		const notice = new Notice("", 20 * 1000);
+		// // Create a new notice to display the results
+		// const notice = new Notice("", 20 * 1000);
 
-		// TODO: 使用modal的component
-		// Render the Markdown string into the notice
-		MarkdownRenderer.render(
-			this.app,
-			resultsMarkdown,
-			notice.noticeEl,
-			dataSource.path,
-			this.component,
-		);
+		// // TODO: 使用modal的component
+		// // Render the Markdown string into the notice
+		// MarkdownRenderer.render(
+		// 	this.app,
+		// 	resultsMarkdown,
+		// 	notice.noticeEl,
+		// 	dataSource.path,
+		// 	this.component,
+		// );
+
 		return searchResult;
 	}
 

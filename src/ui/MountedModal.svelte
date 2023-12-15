@@ -1,62 +1,57 @@
 <script lang="ts">
+	import { InFileResult, type SearchResult } from "src/entities/search-types";
+	import { SearchHelper } from "src/search-helper";
 	import { eventBus } from "src/utils/event-bus";
 	import { EventEnum } from "src/utils/event-enum";
 	import { onDestroy } from "svelte";
 	import { container } from "tsyringe";
-	import { SearchService } from "../search-service";
 
-	const searchService: SearchService = container.resolve(SearchService);
-
+	// const searchService: SearchService = container.resolve(SearchService);
 	// 这是一个异步方法
-	searchService.testProcedure();
+	// searchService.testProcedure();
+
+	const searchHelper: SearchHelper = container.resolve(SearchHelper);
+
 
 	export let queryText: string;
-	let searchResults: any[] = [];
-	let selectedFileIndex = 0;
-	let focusedFileContent = "";
+	let searchResult: SearchResult = { path: "", count: 0 };
+	let currItemIndex = 0;
+	let currContext = "";
 
 	// Updates focused content and selected file index
-	function updateFocusedContent(index: number): void {
-		if (index >= 0 && index < searchResults.length) {
-			focusedFileContent = searchResults[index].content;
-			selectedFileIndex = index;
+	function updateItem(index: number): void {
+		if (searchResult instanceof InFileResult) {
+			if (index >= 0 && index < searchResult.count) {
+				currContext = searchResult.items[index].context;
+				currItemIndex = index;
+			}
+		} else {
+			throw Error("unsupported result type: " + typeof searchResult);
 		}
 	}
 
 	// Handle input changes
 	async function handleInput() {
-		const result = await searchService.search(queryText);
-		if (result && result.hits && result.hits.hits) {
-			searchResults = result.hits.hits.map((hit: any) => ({
-				fileName: hit._source.title,
-				content: hit._source.content,
-			}));
-			if (searchResults.length > 0) {
-				updateFocusedContent(0);
-			}
-		} else {
-			searchResults = [];
-			focusedFileContent = "";
-		}
+		searchResult = await searchHelper.search(queryText);
+		updateItem(0);
 	}
 
 	// Handle result click
 	function handleResultClick(index: number): void {
-		updateFocusedContent(index);
+		updateItem(index);
 	}
 
 	// Select the next search result
 	function selectNextResult() {
-		updateFocusedContent(
-			Math.min(selectedFileIndex + 1, searchResults.length - 1),
-		);
+		updateItem(Math.min(currItemIndex + 1, searchResult.count - 1));
 	}
 
 	// Select the previous search result
 	function selectPreviousResult() {
-		updateFocusedContent(Math.max(selectedFileIndex - 1, 0));
+		updateItem(Math.max(currItemIndex - 1, 0));
 	}
 
+	// ===================================================
 	// onMount() 方法不会被触发，换一个自定义方法在初始化时调用
 	function init() {
 		eventBus.on(EventEnum.NEXT_ITEM, selectNextResult);
@@ -81,19 +76,21 @@
 <div class="cs-search-results">
 	<div class="cs-results-leftpane">
 		<ul>
-			{#each searchResults as result, index}
-				<button
-					class:selected={index === selectedFileIndex}
-					on:click={() => handleResultClick(index)}
-				>
-					{result.fileName}
-				</button>
-			{/each}
+			{#if searchResult instanceof InFileResult}
+				{#each searchResult.items as result, index}
+					<button
+						class:selected={index === currItemIndex}
+						on:click={() => handleResultClick(index)}
+					>
+						{result.line.text}
+					</button>
+				{/each}
+			{/if}
 		</ul>
 	</div>
 	<div class="cs-result-rightpane">
-		{#if focusedFileContent}
-			<p>{focusedFileContent}</p>
+		{#if currContext}
+			<p>{currContext}</p>
 		{/if}
 	</div>
 </div>
@@ -120,10 +117,10 @@
 	.cs-results-leftpane {
 		display: flex;
 		flex-direction: column; /* Stack children vertically */
-    /* Center children vertically */
+		/* Center children vertically */
 		/* justify-content: center;  */
-    /* Center children horizontally */
-		align-items: center; 
+		/* Center children horizontally */
+		align-items: center;
 		flex: 1;
 		margin-right: 10px;
 	}

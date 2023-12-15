@@ -13,12 +13,20 @@ export class MatchedLine extends Line {
 		this.col = col;
 	}
 }
-export class InFileResult {
+
+export class SearchResult {
 	path: string;
+	count: number;
+	constructor(path: string, count: number) {
+		this.path = path;
+		this.count = count;
+	}
+}
+export class InFileResult extends SearchResult {
 	items: InFileItem[];
 
-	constructor(title: string, items: InFileItem[]) {
-		this.path = title;
+	constructor(path: string, items: InFileItem[]) {
+		super(path, items.length);
 		this.items = items;
 	}
 }
