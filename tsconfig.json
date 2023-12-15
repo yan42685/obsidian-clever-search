@@ -1,26 +1,19 @@
 {
-  "extends": "@tsconfig/svelte/tsconfig.json",
-  "compilerOptions": {
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "types": ["svelte", "node"],
-    "baseUrl": ".",
-    "module": "ESNext",
-    "target": "ES6",
-    "allowJs": true,
-    "noImplicitAny": true,
-    "moduleResolution": "node",
-    "importHelpers": true,
-    "isolatedModules": true,
-	"strictNullChecks": true,
-    "lib": [
-      "DOM",
-      "ES5",
-      "ES6",
-      "ES7"
-    ]
-  },
-  "include": [
-    "**/*.ts"
-, "src/search.service.ts"  ]
+	"extends": "@tsconfig/svelte/tsconfig.json",
+	"compilerOptions": {
+		"experimentalDecorators": true,
+		"emitDecoratorMetadata": true,
+		"types": ["svelte", "node"],
+		"baseUrl": ".",
+		"module": "ESNext",
+		"target": "ES6",
+		"allowJs": true,
+		"noImplicitAny": true,
+		"moduleResolution": "node",
+		"importHelpers": true,
+		"isolatedModules": true,
+		"strictNullChecks": true,
+		"lib": ["DOM", "ES5", "ES6", "ES7"]
+	},
+	"include": ["**/*.ts", "src/search.service.ts"]
 }

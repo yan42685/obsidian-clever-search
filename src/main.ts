@@ -9,8 +9,8 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
+import { SearchHelper } from "./search-helper";
 import { SearchModal } from "./ui/search-modal";
-import { logger } from "./utils/logger";
 
 // Remember to rename these classes and interfaces!
 
@@ -27,10 +27,10 @@ export default class CleverSearch extends Plugin {
 	blurEnabled = false;
 
 	async onload() {
-		logger.info("test");
-		logger.debug("test");
-		logger.warn("test");
-		logger.error("test");
+		// logger.info("test");
+		// logger.debug("test");
+		// logger.warn("test");
+		// logger.error("test");
 		await this.loadSettings();
 		this.exampleCode();
 		this.registerSearchUI();
@@ -38,6 +38,10 @@ export default class CleverSearch extends Plugin {
 		// register <"cleverSearch", this> to the container
 		// cant't use CleverSearch as a key here to void cycle dependencies
 		container.register("CleverSearch", { useValue: this });
+		container.register(App, { useValue: this.app });
+
+		const searchHelper = container.resolve(SearchHelper);
+		searchHelper.search();
 
 		this.addCommand({
 			id: "cs-toggle-blur",
@@ -117,7 +121,7 @@ export default class CleverSearch extends Plugin {
 	}
 
 	onunload() {
-		document.body.classList.remove('my-custom-blur');
+		document.body.classList.remove("my-custom-blur");
 	}
 
 	async loadSettings() {

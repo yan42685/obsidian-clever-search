@@ -7,9 +7,9 @@ If your plugin does not need CSS, delete this file.
 
 */
 .cs-modal {
-    /* remove unused room */
-    width: 50%;
-    height: 60%;
+	/* remove unused room */
+	width: 50%;
+	height: 60%;
 }
 
 /* dynamic blur all elements except active line */
@@ -20,13 +20,14 @@ If your plugin does not need CSS, delete this file.
 .my-custom-blur .inline-title:not(:hover),
 .my-custom-blur .embedded-backlinks:not(:hover),
 .my-custom-blur .status-bar:not(:hover) {
-    filter: blur(5px);
+	filter: blur(5px);
 }
 
-.my-custom-blur .cm-line:not(:hover) {
-    filter: blur(5px) !important;
+.my-custom-blur .cm-line:not(:hover),
+.my-custom-blur .callout:not(:hover),
+.my-custom-blur img:not(:hover) {
+	filter: blur(5px) !important;
 }
 .my-custom-blur .cm-line.cm-active {
-    filter: none !important;
+	filter: none !important;
 }
-
