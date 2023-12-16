@@ -1,7 +1,13 @@
 import { AsyncFzf } from "fzf";
 import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { InFileItem, Line, MatchedLine, SearchResult, SearchType } from "./entities/search-types";
+import {
+	InFileItem,
+	Line,
+	MatchedLine,
+	SearchResult,
+	SearchType,
+} from "./entities/search-types";
 import { MathUtil } from "./utils/math-util";
 
 @singleton()
@@ -10,17 +16,19 @@ export class SearchHelper {
 	component: Component = new Component();
 
 	async search(queryText: string): Promise<SearchResult> {
-        if (!queryText) {
-            return new SearchResult(SearchType.IN_FILE, "", []);
-        }
+		if (!queryText) {
+			return new SearchResult(SearchType.IN_FILE, "", []);
+		}
+
 		// remove spaces
 		queryText = queryText.replace(/\s/g, "");
+
 		// HighlightChars function
-		const HighlightChars = (str: string, indexes: Set<number>) => {
+		const HighlightChars = (str: string, indexes: number[]) => {
 			const chars = str.split("");
 			return chars
 				.map((char, i) => {
-					return indexes.has(i) ? `<mark>${char}</mark>` : char;
+					return indexes.includes(i) ? `<mark>${char}</mark>` : char;
 				})
 				.join("");
 		};
@@ -30,40 +38,40 @@ export class SearchHelper {
 		const fzf = new AsyncFzf(dataSource.lines, {
 			selector: (item) => item.text,
 		});
-		// const entries = await fzf.find("li");
+
 		const entries = await fzf.find(queryText);
-		const searchResult: SearchResult = new SearchResult(SearchType.IN_FILE, dataSource.path, []);
+		const searchResult: SearchResult = new SearchResult(
+			SearchType.IN_FILE,
+			dataSource.path,
+			[],
+		);
 
 		// Prepare the highlighted search results as a Markdown string
-		let resultsMarkdown = "";
 		entries.forEach((entry) => {
-			const highlightedText = HighlightChars(
-				entry.item.text,
-				entry.positions,
-			);
 			const row = entry.item.row;
-			const col = MathUtil.minInSet(entry.positions);
+			const firstMatchedCol = MathUtil.minInSet(entry.positions);
+			const originLine = entry.item.text;
+
+			// only show part of the line that contains the highlighted chars
+			const start = Math.max(firstMatchedCol - 10, 0);
+			const end = Math.min(start + 50, originLine.length);
+			const substring = originLine.substring(start, end);
+
+			const newPositions = Array.from(entry.positions)
+				.filter((position) => position >= start && position < end)
+				.map((position) => position - start);
+
+			const highlightedText = HighlightChars(
+				substring,
+				newPositions,
+			);
 			searchResult.items.push(
 				new InFileItem(
-					new MatchedLine(highlightedText, row, col),
+					new MatchedLine(highlightedText, row, firstMatchedCol),
 					this.getContext(row),
-				)
+				),
 			);
-			resultsMarkdown += `Line ${row}, Start ${col}: ${highlightedText}\n`;
 		});
-
-		// // Create a new notice to display the results
-		// const notice = new Notice("", 20 * 1000);
-
-		// // TODO: 使用modal的component
-		// // Render the Markdown string into the notice
-		// MarkdownRenderer.render(
-		// 	this.app,
-		// 	resultsMarkdown,
-		// 	notice.noticeEl,
-		// 	dataSource.path,
-		// 	this.component,
-		// );
 
 		return searchResult;
 	}

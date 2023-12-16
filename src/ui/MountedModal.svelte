@@ -186,7 +186,7 @@
 	/* 调整按钮样式以响应居中布局 */
 	.cs-results-leftpane button {
 		display: flex;
-		justify-content: center;
+		justify-content: left;
 		align-items: center;
 		overflow: hidden;
 		padding: 10px;
