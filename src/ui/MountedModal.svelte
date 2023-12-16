@@ -142,7 +142,7 @@
 	</div>
 	<div class="cs-result-rightpane">
 		{#if currContext}
-			<p>{currContext}</p>
+			<p>{@html currContext}</p>
 		{/if}
 	</div>
 </div>

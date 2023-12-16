@@ -1,4 +1,4 @@
-import { AsyncFzf } from "fzf";
+import { AsyncFzf, type FzfResultItem } from "fzf";
 import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
 import {
@@ -14,72 +14,62 @@ import { MathUtil } from "./utils/math-util";
 export class SearchHelper {
 	app: App = container.resolve(App);
 	component: Component = new Component();
+	dataSource: DataSource = { lines: [], path: "" };
 
 	async search(queryText: string): Promise<SearchResult> {
 		if (!queryText) {
 			return new SearchResult(SearchType.IN_FILE, "", []);
 		}
 
-		// remove spaces
-		queryText = queryText.replace(/\s/g, "");
+		await this.updateDataSource();
 
-		// HighlightChars function
-		const HighlightChars = (str: string, indexes: number[]) => {
-			const chars = str.split("");
-			return chars
-				.map((char, i) => {
-					return indexes.includes(i) ? `<mark>${char}</mark>` : char;
-				})
-				.join("");
-		};
-
-		const dataSource = await this.getDataSource();
-
-		const fzf = new AsyncFzf(dataSource.lines, {
-			selector: (item) => item.text,
-		});
-
-		const entries = await fzf.find(queryText);
 		const searchResult: SearchResult = new SearchResult(
 			SearchType.IN_FILE,
-			dataSource.path,
+			this.dataSource.path,
 			[],
 		);
+		queryText = queryText.replace(/\s/g, "");
 
-		// Prepare the highlighted search results as a Markdown string
-		entries.forEach((entry) => {
-			const row = entry.item.row;
-			const firstMatchedCol = MathUtil.minInSet(entry.positions);
-			const originLine = entry.item.text;
+		await Promise.all(
+			(await this.fzfMatch(queryText, this.dataSource.lines)).map(
+				async (entry) => {
+					const row = entry.item.row;
+					const firstMatchedCol = MathUtil.minInSet(entry.positions);
+					const originLine = entry.item.text;
 
-			// only show part of the line that contains the highlighted chars
-			const start = Math.max(firstMatchedCol - 10, 0);
-			const end = Math.min(start + 50, originLine.length);
-			const substring = originLine.substring(start, end);
+					// only show part of the line that contains the highlighted chars
+					const start = Math.max(firstMatchedCol - 10, 0);
+					const end = Math.min(start + 50, originLine.length);
+					const substring = originLine.substring(start, end);
 
-			const newPositions = Array.from(entry.positions)
-				.filter((position) => position >= start && position < end)
-				.map((position) => position - start);
+					const newPositions = Array.from(entry.positions)
+						.filter(
+							(position) => position >= start && position < end,
+						)
+						.map((position) => position - start);
 
-			const highlightedText = HighlightChars(
-				substring,
-				newPositions,
-			);
-			searchResult.items.push(
-				new InFileItem(
-					new MatchedLine(highlightedText, row, firstMatchedCol),
-					this.getContext(row),
-				),
-			);
-		});
+					const highlightedText = this.highlightChars(
+						substring,
+						newPositions,
+					);
+					searchResult.items.push(
+						new InFileItem(
+							new MatchedLine(
+								highlightedText,
+								row,
+								firstMatchedCol,
+							),
+							await this.getContext(row, queryText),
+						),
+					);
+				},
+			),
+		);
 
 		return searchResult;
 	}
 
-	/**
-	 * get data from current note
-	 */
-	private async getDataSource(): Promise<DataSource> {
+	private async updateDataSource() {
 		// Ensure the active leaf is a markdown note
 		const activeFile = this.app.workspace.getActiveFile();
 		if (!activeFile) {
@@ -90,14 +80,53 @@ export class SearchHelper {
 		const lines = (await this.app.vault.read(activeFile)).split("\n");
 
 		// Map each line to a MatchedLine object
-		return {
+		this.dataSource = {
 			lines: lines.map((line, index) => new Line(line, index)),
 			path: activeFile.path,
 		};
 	}
 
-	private getContext(lineNumber: number): string {
-		return "";
+	private async getContext(lineNumber: number, queryText: string): Promise<string> {
+		const start = Math.max(lineNumber - 10, 0);
+		const end = Math.min(lineNumber + 10, this.dataSource.lines.length - 1);
+		const contextLines = this.dataSource.lines.slice(start, end + 1);
+
+		const highlightedContext = await Promise.all(
+			contextLines.map(async (line) => {
+				const entries = await this.fzfMatch(queryText, [line]);
+				if (entries.length > 0) {
+					const entry = entries[0];
+					// 高亮所有匹配字符，不调整position
+					return this.highlightChars(
+						line.text,
+						Array.from(entry.positions),
+					);
+				} else {
+					return line.text;
+				}
+			}),
+		);
+
+		return highlightedContext.join("\n");
+	}
+
+	private highlightChars(str: string, indexes: number[]): string {
+		return str
+			.split("")
+			.map((char, i) => {
+				return indexes.includes(i) ? `<mark>${char}</mark>` : char;
+			})
+			.join("");
+	}
+
+	private async fzfMatch(
+		queryText: string,
+		lines: Line[],
+	): Promise<FzfResultItem<Line>[]> {
+		const fzf = new AsyncFzf(lines, {
+			selector: (item) => item.text,
+		});
+		return await fzf.find(queryText);
 	}
 }
 
