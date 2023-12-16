@@ -1,7 +1,7 @@
 import { AsyncFzf } from "fzf";
 import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { InFileItem, Line, MatchedLine, ResultType, SearchResult } from "./entities/search-types";
+import { InFileItem, Line, MatchedLine, SearchResult, SearchType } from "./entities/search-types";
 import { MathUtil } from "./utils/math-util";
 
 @singleton()
@@ -11,7 +11,7 @@ export class SearchHelper {
 
 	async search(queryText: string): Promise<SearchResult> {
         if (!queryText) {
-            return new SearchResult(ResultType.IN_FILE, "", []);
+            return new SearchResult(SearchType.IN_FILE, "", []);
         }
 		// remove spaces
 		queryText = queryText.replace(/\s/g, "");
@@ -32,7 +32,7 @@ export class SearchHelper {
 		});
 		// const entries = await fzf.find("li");
 		const entries = await fzf.find(queryText);
-		const searchResult: SearchResult = new SearchResult(ResultType.IN_FILE, dataSource.path, []);
+		const searchResult: SearchResult = new SearchResult(SearchType.IN_FILE, dataSource.path, []);
 
 		// Prepare the highlighted search results as a Markdown string
 		let resultsMarkdown = "";

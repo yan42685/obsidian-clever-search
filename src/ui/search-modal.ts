@@ -18,6 +18,8 @@ export class SearchModal extends Modal {
 			target: this.modalEl,
 			props: {
 				app: app,
+				modal: this,
+				// queryText: this.queryText,
 				queryText: "",
 			},
 		});
@@ -46,6 +48,7 @@ export class SearchModal extends Modal {
 
 		this.scope.register([modKey], "K", emitEvent(EventEnum.PREV_ITEM));
 		this.scope.register([], "ArrowUp", emitEvent(EventEnum.PREV_ITEM));
+		this.scope.register([], "Enter", emitEvent(EventEnum.CONFIRM_ITEM));
 	}
 }
 

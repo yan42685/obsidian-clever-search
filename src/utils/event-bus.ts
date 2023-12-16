@@ -1,6 +1,6 @@
 import type { EventEnum } from "./event-enum";
 
-type EventCallback = (...args: any[]) => void;
+export type EventCallback = (...args: any[]) => void;
 
 export class EventBus {
 	private listeners: Map<EventEnum, EventCallback[]>;

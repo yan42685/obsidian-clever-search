@@ -1,15 +1,16 @@
 <script lang="ts">
-	import type { App } from "obsidian";
+	import { MarkdownView, type App } from "obsidian";
 	import {
 		InFileItem,
-		ResultType,
 		SearchResult,
+		SearchType,
 	} from "src/entities/search-types";
 	import { SearchHelper } from "src/search-helper";
-	import { eventBus } from "src/utils/event-bus";
+	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { EventEnum } from "src/utils/event-enum";
 	import { onDestroy, tick } from "svelte";
 	import { container } from "tsyringe";
+	import type { SearchModal } from "./search-modal";
 
 	// const searchService: SearchService = container.resolve(SearchService);
 	// 这是一个异步方法
@@ -18,8 +19,9 @@
 	const searchHelper: SearchHelper = container.resolve(SearchHelper);
 
 	export let app: App;
+	export let modal: SearchModal;
 	export let queryText: string;
-	const DEFAULT_RESULT = new SearchResult(ResultType.IN_FILE, "", []);
+	const DEFAULT_RESULT = new SearchResult(SearchType.NONE, "", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = 0;
 	let currContext = "";
@@ -29,7 +31,7 @@
 	function updateItem(index: number): void {
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
-			if (searchResult.type === ResultType.IN_FILE) {
+			if (searchResult.type === SearchType.IN_FILE) {
 				const item = items[index] as InFileItem;
 				currContext = item.context;
 				currItemIndex = index;
@@ -45,7 +47,7 @@
 		updateItem(0);
 		// wait until all dynamic elements are mounted and rendered
 		await tick();
-		if (searchResult.type === ResultType.IN_FILE) {
+		if (searchResult.type === SearchType.IN_FILE) {
 			searchResult.items.forEach((x) => {
 				// const item = x as InFileItem;
 				// if (item.element) {
@@ -67,27 +69,50 @@
 	}
 
 	// Select the next search result
-	function selectNextResult() {
+	function handleNextItem() {
 		updateItem(Math.min(currItemIndex + 1, searchResult.items.length - 1));
 	}
 
 	// Select the previous search result
-	function selectPreviousResult() {
+	function handlePrevItem() {
 		updateItem(Math.max(currItemIndex - 1, 0));
 	}
 
-	// ===================================================
-	// onMount() 方法不会被触发，换一个自定义方法在初始化时调用
-	function init() {
-		eventBus.on(EventEnum.NEXT_ITEM, selectNextResult);
-		eventBus.on(EventEnum.PREV_ITEM, selectPreviousResult);
-	}
-	init();
+	function handleConfirmItem() {
+		modal.close();
 
-	onDestroy(() => {
-		eventBus.off(EventEnum.NEXT_ITEM, selectNextResult);
-		eventBus.off(EventEnum.PREV_ITEM, selectPreviousResult);
-	});
+		if (searchResult.type === SearchType.IN_FILE) {
+			const selectedItem = searchResult.items[
+				currItemIndex
+			] as InFileItem;
+			if (selectedItem) {
+				// 将焦点移至编辑器的特定行和列
+				const view = app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) {
+					const row = selectedItem.line.row;
+					const col = selectedItem.line.col;
+					view.editor.setCursor(row, col);
+					view.editor.scrollIntoView({
+						from: { line: row - 10, ch: 0 },
+						to: { line: row + 10, ch: 0 },
+					});
+				}
+			}
+		} else {
+			throw Error("unsupported search type");
+		}
+	}
+
+	// ===================================================
+	// NOTE: onMount() 方法不会被触发
+	function listenEvent(event: EventEnum, callback: EventCallback) {
+		eventBus.on(event, callback);
+		onDestroy(() => eventBus.off(event, callback));
+	}
+
+	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
+	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
+	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirmItem);
 </script>
 
 <div class="cs-searchbar">
@@ -144,9 +169,6 @@
 	.cs-results-leftpane {
 		display: flex;
 		flex-direction: column; /* Stack children vertically */
-		/* Center children vertically */
-		/* justify-content: center;  */
-		/* Center children horizontally */
 		align-items: center;
 		flex: 1;
 		margin-right: 10px;
