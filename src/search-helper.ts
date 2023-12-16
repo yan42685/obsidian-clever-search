@@ -31,11 +31,14 @@ export class SearchHelper {
 		queryText = queryText.replace(/\s/g, "");
 
 		await Promise.all(
-			(await this.fzfMatch(queryText, this.dataSource.lines)).map(
-				async (entry) => {
+			this.dataSource.lines.map(async (line) => {
+				const entries = await this.fzfMatch(queryText, [line]);
+				if (entries.length > 0) {
+					const entry = entries[0];
+
 					const row = entry.item.row;
 					const firstMatchedCol = MathUtil.minInSet(entry.positions);
-					const originLine = entry.item.text;
+					const originLine = line.text;
 
 					// only show part of the line that contains the highlighted chars
 					const start = Math.max(firstMatchedCol - 10, 0);
@@ -48,9 +51,14 @@ export class SearchHelper {
 						)
 						.map((position) => position - start);
 
+					// const highlightedText = this.highlightChars(
+					// 	substring,
+					// 	newPositions,
+					// );
+					// TODO: 使用部分位置，并且不错过空格
 					const highlightedText = this.highlightChars(
-						substring,
-						newPositions,
+						originLine,
+						Array.from(entry.positions),
 					);
 					searchResult.items.push(
 						new InFileItem(
@@ -62,8 +70,8 @@ export class SearchHelper {
 							await this.getContext(row, queryText),
 						),
 					);
-				},
-			),
+				}
+			}),
 		);
 
 		return searchResult;
@@ -86,7 +94,10 @@ export class SearchHelper {
 		};
 	}
 
-	private async getContext(lineNumber: number, queryText: string): Promise<string> {
+	private async getContext(
+		lineNumber: number,
+		queryText: string,
+	): Promise<string> {
 		const start = Math.max(lineNumber - 10, 0);
 		const end = Math.min(lineNumber + 10, this.dataSource.lines.length - 1);
 		const contextLines = this.dataSource.lines.slice(start, end + 1);
