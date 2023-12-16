@@ -13,6 +13,7 @@ If your plugin does not need CSS, delete this file.
 }
 
 /* dynamic blur all elements except active line */
+.my-custom-blur .titlebar-button-container:not(:hover),
 .my-custom-blur .workspace-ribbon.side-dock-ribbon:not(:hover),
 .my-custom-blur .workspace-split.mod-horizontal:not(:hover),
 .my-custom-blur .workspace-tab-header-container:not(:hover),

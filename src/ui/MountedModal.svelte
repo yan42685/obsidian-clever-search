@@ -25,7 +25,6 @@
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = 0;
 	let currContext = "";
-	let itemElements: HTMLElement[] = [];
 
 	// Updates focused content and selected file index
 	function updateItem(index: number): void {
@@ -38,6 +37,8 @@
 			} else {
 				throw Error("unsupported result type: " + typeof searchResult);
 			}
+		} else {
+			currContext = "";
 		}
 	}
 
@@ -149,19 +150,25 @@
 
 <style>
 	.cs-searchbar {
-		background: #333;
+		background: rgba(0, 0, 0, 0);
 		padding: 10px;
+		margin-left: 1em;
 		border-radius: 5px;
 		color: white;
 	}
 	.cs-searchbar input {
 		width: 100%;
 		padding: 8px 12px;
-		border: 2px solid #555;
+		border: none;
 		border-radius: 4px;
 		color: #ddd;
 		background: #222;
+		/* Refined gradient box-shadow with a more subtle effect */
+		box-shadow:
+			0 2px 4px rgba(0, 0, 0, 0.18),
+			0 2px 3px rgba(0, 0, 0, 0.26);
 	}
+
 	.cs-search-results {
 		display: flex;
 		margin-top: 10px;
@@ -170,11 +177,10 @@
 		display: flex;
 		flex-direction: column; /* Stack children vertically */
 		align-items: center;
-		flex: 1;
+		flex: 0 0 40%;
 		margin-right: 10px;
 	}
 
-	/* 如果你希望ul标签也居中，可能需要添加以下样式 */
 	.cs-results-leftpane ul {
 		list-style: none; /* 移除默认的列表样式 */
 		padding: 0; /* 移除默认的内边距 */
@@ -207,9 +213,9 @@
 	}
 
 	.cs-result-rightpane {
-		flex: 3;
+		flex: 0 0 60%;
 		background: #222;
-		padding: 15px;
+		padding: 10px;
 		border-radius: 4px;
 		color: #ddd;
 	}
