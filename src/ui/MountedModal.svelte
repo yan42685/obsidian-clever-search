@@ -159,6 +159,8 @@
 	.search-container {
 		display: flex;
 		margin-top: 10px;
+		/* 保证空格和换行符在渲染html时不被压缩掉 */
+		white-space: pre-wrap;
 	}
 
 	.left-pane {
@@ -197,29 +199,17 @@
 		margin-top: 1em;
 	}
 
-	.result-items ul {
-		list-style: none; /* 移除默认的列表样式 */
-		padding: 0 0.5em 0 0;
-		margin: 0.2em 0 0 0;
-		width: 90%;
-		height: 45vw;
-		overflow: auto;
-		justify-content: left;
-	}
-
 	.result-items button {
 		display: flex;
 		align-items: center;
 		justify-content: left;
-		overflow: hidden;
 		padding: 0.65em;
 		margin-bottom: 0.5em;
 		/* width: 100%; */
 		width: 23vw;
 		height: fit-content;
-		max-height: 5em;
+		/* max-height: 5.5em; */
 		text-align: left;
-		text-wrap: wrap;
 		background: #222;
 		border: none;
 		border-radius: 4px;
@@ -232,6 +222,26 @@
 		background-color: #555;
 	}
 
+	.result-items ul {
+		list-style: none; /* 移除默认的列表样式 */
+		padding: 0 0.5em 0 0;
+		margin: 0.2em 0 0 0;
+		width: 90%;
+		height: 45vw;
+		overflow: auto;
+		justify-content: left;
+	}
+
+	/* wrap the matched line up to 3 lines and show ... if it still overflows */
+	.result-items ul span {
+		text-wrap: wrap;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
 	.right-pane {
 		width: 60%;
 		height: 50em;
@@ -240,7 +250,6 @@
 	.right-pane .context-container {
 		background: #222;
 		overflow-y: auto;
-		overflow-x: hidden;
 		height: 47vw;
 		width: 100%;
 	}
@@ -248,12 +257,11 @@
 	.right-pane p {
 		padding: 18px;
 		margin: 0;
-		white-space: pre-wrap;
+		overflow-wrap: break-word;
 	}
 
 	.right-pane .context-container :global(span.target-line) {
 		display: inline-block;
 		background-color: #468eeb33;
-		width: 100%;
 	}
 </style>
