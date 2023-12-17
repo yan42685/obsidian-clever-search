@@ -22,57 +22,41 @@ export class SearchHelper {
 		}
 
 		await this.updateDataSource();
+		queryText = queryText.replace(/\s/g, "");
 
-		const searchResult: SearchResult = new SearchResult(
+		const searchResult = new SearchResult(
 			SearchType.IN_FILE,
 			this.dataSource.path,
 			[],
 		);
-		queryText = queryText.replace(/\s/g, "");
 
-		await Promise.all(
-			this.dataSource.lines.map(async (line) => {
-				const entries = await this.fzfMatch(queryText, [line]);
-				if (entries.length > 0) {
-					const entry = entries[0];
+		const entries = await this.fzfMatch(queryText, this.dataSource.lines);
+		for (const entry of entries) {
+			const row = entry.item.row;
+			const firstMatchedCol = MathUtil.minInSet(entry.positions);
+			const originLine = this.dataSource.lines[row].text;
 
-					const row = entry.item.row;
-					const firstMatchedCol = MathUtil.minInSet(entry.positions);
-					const originLine = line.text;
+			// only show part of the line that contains the highlighted chars
+			const start = Math.max(firstMatchedCol - 10, 0);
+			const end = Math.min(start + 50, originLine.length);
+			const substring = originLine.substring(start, end);
 
-					// only show part of the line that contains the highlighted chars
-					// const start = Math.max(firstMatchedCol - 10, 0);
-					// const end = Math.min(start + 50, originLine.length);
-					// const substring = originLine.substring(start, end);
+			const newPositions = Array.from(entry.positions)
+				.filter((position) => position >= start && position < end)
+				.map((position) => position - start);
 
-					// const newPositions = Array.from(entry.positions)
-					// 	.filter(
-					// 		(position) => position >= start && position < end,
-					// 	)
-					// 	.map((position) => position - start);
+			const highlightedText = this.highlightChars(
+				substring,
+				newPositions,
+			);
 
-					// const highlightedText = this.highlightChars(
-					// 	substring,
-					// 	newPositions,
-					// );
-					// TODO: 使用部分位置，并且不错过空格
-					const highlightedText = this.highlightChars(
-						originLine,
-						Array.from(entry.positions),
-					);
-					searchResult.items.push(
-						new InFileItem(
-							new MatchedLine(
-								highlightedText,
-								row,
-								firstMatchedCol,
-							),
-							await this.getContext(row, queryText),
-						),
-					);
-				}
-			}),
-		);
+			searchResult.items.push(
+				new InFileItem(
+					new MatchedLine(highlightedText, row, firstMatchedCol),
+					await this.getContext(row, queryText),
+				),
+			);
+		}
 
 		return searchResult;
 	}
@@ -103,17 +87,25 @@ export class SearchHelper {
 		const contextLines = this.dataSource.lines.slice(start, end + 1);
 
 		const highlightedContext = await Promise.all(
-			contextLines.map(async (line) => {
+			contextLines.map(async (line, index) => {
+				// here, it should match line by line to ensure the order of lines remains unchanged, 
+				// unlike the logic in search method
 				const entries = await this.fzfMatch(queryText, [line]);
+				const isTargetLine = lineNumber === start + index;
 				if (entries.length > 0) {
 					const entry = entries[0];
-					// 高亮所有匹配字符，不调整position
-					return this.highlightChars(
+					const highlighted = this.highlightChars(
 						line.text,
 						Array.from(entry.positions),
 					);
+					// Wrap matched line with a div and specified classes
+					return isTargetLine
+						? `<div class="cm-active cm-line">${highlighted}</div>`
+						: highlighted;
 				} else {
-					return line.text;
+					return isTargetLine
+						? `<div class="cm-active cm-line">${line.text}</div>`
+						: line.text;
 				}
 			}),
 		);
