@@ -23,8 +23,10 @@
 	export let queryText: string;
 	const DEFAULT_RESULT = new SearchResult(SearchType.NONE, "", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
-	let currItemIndex = 0;
+	let currItemIndex = -1;
 	let currContext = "";
+
+	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
 	// Updates focused content and selected file index
 	function updateItem(index: number): void {
@@ -39,6 +41,7 @@
 			}
 		} else {
 			currContext = "";
+			currItemIndex = -1;
 		}
 	}
 
@@ -112,7 +115,6 @@
 		} else {
 			throw Error("unsupported search type");
 		}
-		
 	}
 
 	// ===================================================
@@ -129,14 +131,9 @@
 
 <div class="search-container">
 	<div class="left-pane">
-		<div class="search-bar">
+		<div class="search-bar" data-match-count={matchCountText}>
 			<!-- svelte-ignore a11y-autofocus -->
-			<input
-				bind:value={queryText}
-				on:input={handleInput}
-				placeholder="Start your search..."
-				autofocus
-			/>
+			<input bind:value={queryText} on:input={handleInput} autofocus />
 		</div>
 		<div class="result-items">
 			<ul>
@@ -173,6 +170,13 @@
 		white-space: pre-wrap;
 	}
 
+	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
+	 * 想要插件内部全局生效，就写在源码最外面的style.css里 */
+	:global(.search-container mark) {
+		background-color: rgba(219, 204, 149, 0.9);
+		color: #111;
+	}
+
 	.left-pane {
 		display: flex;
 		flex-direction: column;
@@ -189,7 +193,18 @@
 		width: 90%;
 		height: 30px;
 	}
+	/* 似乎不能在input上面放伪元素 */
+	.search-bar::after {
+		content: attr(data-match-count);
+		position: absolute;
+		right: 0.6em;
+		top: 1.4em;
+		font-size: 0.8em;
+		transform: translateY(-50%);
+		color: grey;
+	}
 	.search-bar input {
+		position: relative;
 		width: 100%;
 		padding: 8px 12px;
 		border: none;
@@ -238,7 +253,8 @@
 		margin: 0.2em 0 0 0;
 		width: 90%;
 		height: 45vw;
-		overflow: auto;
+		overflow-y: auto;
+		overflow-x: hidden;
 		justify-content: left;
 	}
 

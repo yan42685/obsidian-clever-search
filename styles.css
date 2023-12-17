@@ -12,7 +12,10 @@ If your plugin does not need CSS, delete this file.
 	height: 80%;
 	overflow: hidden;
 }
-
+/* mark {
+    background-color: lightblue;
+    color: black;
+} */
 /* dynamic blur all elements except active line */
 .my-custom-blur .titlebar-button-container:not(:hover),
 .my-custom-blur .workspace-ribbon.side-dock-ribbon:not(:hover),
