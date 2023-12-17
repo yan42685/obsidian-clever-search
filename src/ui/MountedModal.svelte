@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { MarkdownView, type App } from "obsidian";
+	import { MarkdownView, type App, type EditorPosition } from "obsidian";
 	import {
 		InFileItem,
 		SearchResult,
@@ -91,13 +91,18 @@
 				// 将焦点移至编辑器的特定行和列
 				const view = app.workspace.getActiveViewOfType(MarkdownView);
 				if (view) {
-					const row = selectedItem.line.row;
-					const col = selectedItem.line.col;
-					view.editor.setCursor(row, col);
-					view.editor.scrollIntoView({
-						from: { line: row - 10, ch: 0 },
-						to: { line: row + 20, ch: 0 },
-					});
+					const cursorPos: EditorPosition = {
+						line: selectedItem.line.row,
+						ch: selectedItem.line.col,
+					};
+					view.editor.setCursor(cursorPos);
+					view.editor.scrollIntoView(
+						{
+							from: cursorPos,
+							to: cursorPos,
+						},
+						true,
+					);
 				}
 			}
 		} else {
