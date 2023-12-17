@@ -82,6 +82,10 @@
 
 	function handleConfirmItem() {
 		modal.close();
+		// BUG: 最新的obsidian.d.ts没有app.commands了
+		const deprecatedApp = app as any;
+		// 对应的command name是Focus on last note
+		deprecatedApp.commands.executeCommandById("editor:focus");
 
 		if (searchResult.type === SearchType.IN_FILE) {
 			const selectedItem = searchResult.items[
@@ -108,6 +112,7 @@
 		} else {
 			throw Error("unsupported search type");
 		}
+		
 	}
 
 	// ===================================================

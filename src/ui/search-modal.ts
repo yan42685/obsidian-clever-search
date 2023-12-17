@@ -33,6 +33,7 @@ export class SearchModal extends Modal {
 	}
 
 	onClose() {
+		this.modalEl.removeEventListener("contextmenu", handleRightClick);
 		this.mountedElement.$destroy();
 		console.log("mounted element has been destroyed.");
 	}
@@ -49,6 +50,8 @@ export class SearchModal extends Modal {
 		this.scope.register([modKey], "K", emitEvent(EventEnum.PREV_ITEM));
 		this.scope.register([], "ArrowUp", emitEvent(EventEnum.PREV_ITEM));
 		this.scope.register([], "Enter", emitEvent(EventEnum.CONFIRM_ITEM));
+		// right click === "contextmenu" event
+		this.modalEl.addEventListener("contextmenu", handleRightClick);
 	}
 }
 
@@ -58,4 +61,11 @@ function emitEvent(eventEnum: EventEnum) {
 		eventBus.emit(eventEnum);
 		console.log("emit...");
 	};
+}
+
+function handleRightClick(event: MouseEvent) {
+	// 防止默认的上下文菜单出现
+	event.preventDefault();
+	eventBus.emit(EventEnum.CONFIRM_ITEM);
+	console.log("Right-click on button, confirm item event emitted.");
 }
