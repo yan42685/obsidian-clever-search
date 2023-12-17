@@ -50,7 +50,8 @@
 		await tick();
 		if (searchResult.type === SearchType.IN_FILE) {
 			searchResult.items.forEach((x) => {
-				// const item = x as InFileItem;
+				const item = x as InFileItem;
+				// console.log(item.line.text);
 				// if (item.element) {
 				// 	MarkdownRenderer.render(
 				// 		app,

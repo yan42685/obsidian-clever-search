@@ -41,15 +41,15 @@ export class SearchHelper {
 					const originLine = line.text;
 
 					// only show part of the line that contains the highlighted chars
-					const start = Math.max(firstMatchedCol - 10, 0);
-					const end = Math.min(start + 50, originLine.length);
-					const substring = originLine.substring(start, end);
+					// const start = Math.max(firstMatchedCol - 10, 0);
+					// const end = Math.min(start + 50, originLine.length);
+					// const substring = originLine.substring(start, end);
 
-					const newPositions = Array.from(entry.positions)
-						.filter(
-							(position) => position >= start && position < end,
-						)
-						.map((position) => position - start);
+					// const newPositions = Array.from(entry.positions)
+					// 	.filter(
+					// 		(position) => position >= start && position < end,
+					// 	)
+					// 	.map((position) => position - start);
 
 					// const highlightedText = this.highlightChars(
 					// 	substring,
@@ -125,6 +125,10 @@ export class SearchHelper {
 		return str
 			.split("")
 			.map((char, i) => {
+				// avoid spaces being ignored when rendering html
+				if (char === " ") {
+					return "&nbsp;";
+				}
 				return indexes.includes(i) ? `<mark>${char}</mark>` : char;
 			})
 			.join("");
