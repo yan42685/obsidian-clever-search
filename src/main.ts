@@ -1,6 +1,8 @@
 import {
 	App,
 	Editor,
+	HoverPopover,
+	MarkdownView,
 	Modal,
 	Notice,
 	Plugin,
@@ -44,6 +46,12 @@ export default class CleverSearch extends Plugin {
 			name: "Toggle Blur",
 			callback: () => this.toggleBlur(),
 		});
+
+		this.addCommand({
+			id: "open-my-modal",
+			name: "Open My Modal",
+			callback: () => this.openMyModal(),
+		});
 	}
 
 	toggleBlur() {
@@ -52,6 +60,27 @@ export default class CleverSearch extends Plugin {
 			document.body.classList.add("my-custom-blur");
 		} else {
 			document.body.classList.remove("my-custom-blur");
+		}
+	}
+	openMyModal() {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView) {
+			let contentHTML = "";
+			// 直接用innerHTML获取不到这个元素本身的标签，需要用临时div来包装一下
+			const element = activeView.contentEl.querySelector(
+				".markdown-source-view",
+			);
+			if (element) {
+				const tempDiv = document.createElement("div");
+				// cloneNode(true) 以克隆元素及其所有子元素
+				tempDiv.appendChild(element.cloneNode(true)); 
+				contentHTML = tempDiv.innerHTML; 
+			}
+			// const modal = new MyCustomModal(this.app, activeView.contentEl.innerHTML);
+			const modal = new RenderHTMLModal(this.app, contentHTML);
+			modal.open();
+		} else {
+			throw Error("no active MarkdownView");
 		}
 	}
 
@@ -169,6 +198,32 @@ class SampleModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.setText("Woah!");
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
+class RenderHTMLModal extends Modal {
+	contentHTML: string;
+
+	constructor(app: App, contentHTML: string) {
+		super(app);
+		this.contentHTML = contentHTML;
+	}
+
+	onOpen() {
+		MarkdownView
+		HoverPopover
+
+		console.log(this.contentHTML);
+		this.containerEl.style.backgroundColor="black";
+		this.containerEl.innerHTML = this.contentHTML;
+
+		// 或者如果您想将Markdown转换为HTML：
+		// contentEl.innerHTML = yourMarkdownToHTMLFunction(this.content);
 	}
 
 	onClose() {

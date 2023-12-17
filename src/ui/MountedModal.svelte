@@ -215,12 +215,15 @@
 	.cs-result-rightpane {
 		flex: 0 0 60%;
 		background: #222;
-		padding: 10px;
+		width: fit-content;
+		height: fit-content;
 		border-radius: 4px;
 		color: #ddd;
 	}
 
-	p {
+	.cs-result-rightpane p {
+		padding: 18px;
+		margin: 0;
 		white-space: pre-wrap;
 	}
 </style>
