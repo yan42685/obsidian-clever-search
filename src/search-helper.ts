@@ -53,7 +53,11 @@ export class SearchHelper {
 			searchResult.items.push(
 				new InFileItem(
 					new MatchedLine(highlightedText, row, firstMatchedCol),
-					await this.getHighlightedContext(row, queryText),
+					await this.getHighlightedContext(
+						row,
+						firstMatchedCol,
+						queryText,
+					),
 				),
 			);
 		}
@@ -78,19 +82,50 @@ export class SearchHelper {
 		};
 	}
 
+	/**
+	 * Get the HTML of context lines surrounding a matched line in a document.
+	 *
+	 * @param matchedRow - The row number of the matched line.
+	 * @param firstMatchedCol - The column number of the first matched character in the matched line.
+	 * @param queryText - The query text used for matching.
+	 * @returns A string representing the highlighted context HTML.
+	 */
 	private async getHighlightedContext(
-		lineNumber: number,
+		matchedRow: number,
+		firstMatchedCol: number,
 		queryText: string,
 	): Promise<string> {
-		const start = Math.max(lineNumber - 10, 0);
-		const end = Math.min(start + 20, this.dataSource.lines.length - 1);
+		const EXTEND_CHARS_THRESHOLD = 220;
+		let preCharsCount = firstMatchedCol;
+		let postCharsCount = 0;
+		let start = matchedRow;
+		let end = matchedRow;
+
+		// Extend the context upwards until we reach the required number of characters or the start of the document.
+		while (start > 0 && preCharsCount < EXTEND_CHARS_THRESHOLD) {
+			start--;
+			const lineLength = this.dataSource.lines[start].text.length;
+			preCharsCount += lineLength;
+		}
+
+		// Extend the context downwards until we reach the required number of characters or the end of the document.
+		while (
+			end < this.dataSource.lines.length - 1 &&
+			postCharsCount < EXTEND_CHARS_THRESHOLD
+		) {
+			end++;
+			const lineLength = this.dataSource.lines[end].text.length;
+			postCharsCount += lineLength;
+		}
+
+		// Now we have the new start and end, get the context lines.
 		const contextLines = this.dataSource.lines.slice(start, end + 1);
 
 		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
 
 		const highlightedContext = await Promise.all(
 			contextLines.map(async (line, index) => {
-				const isTargetLine = lineNumber === start + index;
+				const isTargetLine = matchedRow === start + index;
 
 				if (isTargetLine) {
 					// 对目标行使用 fzfMatch
