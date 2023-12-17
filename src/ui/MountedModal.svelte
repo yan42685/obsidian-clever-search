@@ -229,7 +229,6 @@
 		width: 60%;
 		height: fit-content;
 		border-radius: 4px;
-		color: #ddd;
 	}
 
 	.right-pane p {

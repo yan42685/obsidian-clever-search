@@ -37,7 +37,7 @@ export class SearchHelper {
 			const originLine = this.dataSource.lines[row].text;
 
 			// only show part of the line that contains the highlighted chars
-			const start = Math.max(firstMatchedCol - 10, 0);
+			const start = Math.max(firstMatchedCol - 30, 0);
 			const end = Math.min(start + 50, originLine.length);
 			const substring = originLine.substring(start, end);
 
@@ -83,7 +83,7 @@ export class SearchHelper {
 		queryText: string,
 	): Promise<string> {
 		const start = Math.max(lineNumber - 10, 0);
-		const end = Math.min(lineNumber + 10, this.dataSource.lines.length - 1);
+		const end = Math.min(start + 20, this.dataSource.lines.length - 1);
 		const contextLines = this.dataSource.lines.slice(start, end + 1);
 
 		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
