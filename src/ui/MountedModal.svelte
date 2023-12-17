@@ -96,7 +96,7 @@
 					view.editor.setCursor(row, col);
 					view.editor.scrollIntoView({
 						from: { line: row - 10, ch: 0 },
-						to: { line: row + 10, ch: 0 },
+						to: { line: row + 20, ch: 0 },
 					});
 				}
 			}
@@ -136,9 +136,11 @@
 						bind:this={item.element}
 						on:click={() => handleResultClick(index)}
 					>
-						{#if item instanceof InFileItem}
-							{@html item.line.text}
-						{/if}
+						<span>
+							{#if item instanceof InFileItem}
+								{@html item.line.text}
+							{/if}
+						</span>
 					</button>
 				{/each}
 			</ul>
@@ -166,18 +168,20 @@
 		width: 40%;
 	}
 	.search-bar {
+		position: sticky; /* 固定位置 */
+		top: 0; /* 顶部对齐 */
+		left: 0; /* 左侧对齐 */
 		background: rgba(0, 0, 0, 0);
 		padding-bottom: 15px;
 		border-radius: 5px;
-		color: white;
 		width: 90%;
+		height: 30px;
 	}
 	.search-bar input {
 		width: 100%;
 		padding: 8px 12px;
 		border: none;
 		border-radius: 4px;
-		color: #ddd;
 		background: #222;
 		/* Refined gradient box-shadow with a more subtle effect */
 		box-shadow:
@@ -190,22 +194,28 @@
 		flex-direction: column;
 		align-items: center;
 		width: 100%;
+		margin-top: 1em;
 	}
 
 	.result-items ul {
 		list-style: none; /* 移除默认的列表样式 */
-		padding: 0;
+		padding: 0 0.5em 0 0;
 		margin: 0.2em 0 0 0;
 		width: 90%;
+		height: 45vw;
+		overflow: auto;
+		justify-content: left;
 	}
 
 	.result-items button {
-		display: block;
+		display: flex;
+		align-items: center;
+		justify-content: left;
 		overflow: hidden;
 		padding: 0.65em;
 		margin-bottom: 0.5em;
-		/* margin-bottom: 5px; */
-		width: 100%;
+		/* width: 100%; */
+		width: 23vw;
 		height: fit-content;
 		max-height: 5em;
 		text-align: left;
@@ -213,7 +223,6 @@
 		background: #222;
 		border: none;
 		border-radius: 4px;
-		color: #ddd;
 		cursor: pointer;
 		transition: background-color 0.01s;
 	}
@@ -225,10 +234,15 @@
 
 	.right-pane {
 		width: 60%;
-		background: #222;
-		width: 60%;
-		height: fit-content;
+		height: 50em;
 		border-radius: 4px;
+	}
+	.right-pane .context-container {
+		background: #222;
+		overflow-y: auto;
+		overflow-x: hidden;
+		height: 47vw;
+		width: 100%;
 	}
 
 	.right-pane p {

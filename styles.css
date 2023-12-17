@@ -10,6 +10,7 @@ If your plugin does not need CSS, delete this file.
 	/* remove unused room */
 	width: 70%;
 	height: 80%;
+	overflow: hidden;
 }
 
 /* dynamic blur all elements except active line */
