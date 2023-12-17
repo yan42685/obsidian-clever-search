@@ -118,60 +118,60 @@
 </script>
 
 <div class="search-container">
-    <div class="left-pane">
-        <div class="search-bar">
-            <!-- svelte-ignore a11y-autofocus -->
-            <input
-                bind:value={queryText}
-                on:input={handleInput}
-                placeholder="Start your search..."
-                autofocus
-            />
-        </div>
-        <div class="result-items">
-            <ul>
-                {#each searchResult.items as item, index}
-                    <button
-                        class:selected={index === currItemIndex}
-                        bind:this={item.element}
-                        on:click={() => handleResultClick(index)}
-                    >
-                        {#if item instanceof InFileItem}
-                            {@html item.line.text}
-                        {/if}
-                    </button>
-                {/each}
-            </ul>
-        </div>
-    </div>
-    <div class="right-pane">
-        {#if currContext}
-            <div class="context-container">
-                <p>{@html currContext}</p>
-            </div>
-        {/if}
-    </div>
+	<div class="left-pane">
+		<div class="search-bar">
+			<!-- svelte-ignore a11y-autofocus -->
+			<input
+				bind:value={queryText}
+				on:input={handleInput}
+				placeholder="Start your search..."
+				autofocus
+			/>
+		</div>
+		<div class="result-items">
+			<ul>
+				{#each searchResult.items as item, index}
+					<button
+						class:selected={index === currItemIndex}
+						bind:this={item.element}
+						on:click={() => handleResultClick(index)}
+					>
+						{#if item instanceof InFileItem}
+							{@html item.line.text}
+						{/if}
+					</button>
+				{/each}
+			</ul>
+		</div>
+	</div>
+	<div class="right-pane">
+		{#if currContext}
+			<div class="context-container">
+				<p>{@html currContext}</p>
+			</div>
+		{/if}
+	</div>
 </div>
 
 <style>
-    .search-container {
-        display: flex;
-        margin-top: 10px;
-    }
+	.search-container {
+		display: flex;
+		margin-top: 10px;
+	}
 
-    .left-pane {
+	.left-pane {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		width: 40%;
-    }
-    .search-bar {
-        background: rgba(0, 0, 0, 0);
-        padding-bottom: 15px;
-        border-radius: 5px;
-        color: white;
+	}
+	.search-bar {
+		background: rgba(0, 0, 0, 0);
+		padding-bottom: 15px;
+		border-radius: 5px;
+		color: white;
 		width: 90%;
-    }
+	}
 	.search-bar input {
 		width: 100%;
 		padding: 8px 12px;
@@ -185,12 +185,12 @@
 			0 2px 3px rgba(0, 0, 0, 0.26);
 	}
 
-    .result-items {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 100%;
-    }
+	.result-items {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 100%;
+	}
 
 	.result-items ul {
 		list-style: none; /* 移除默认的列表样式 */
@@ -236,5 +236,11 @@
 		padding: 18px;
 		margin: 0;
 		white-space: pre-wrap;
+	}
+
+	.right-pane .context-container :global(span.target-line) {
+		display: inline-block;
+		background-color: #468eeb33;
+		width: 100%;
 	}
 </style>

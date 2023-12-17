@@ -53,7 +53,7 @@ export class SearchHelper {
 			searchResult.items.push(
 				new InFileItem(
 					new MatchedLine(highlightedText, row, firstMatchedCol),
-					await this.getContext(row, queryText),
+					await this.getHighlightedContext(row, queryText),
 				),
 			);
 		}
@@ -78,7 +78,7 @@ export class SearchHelper {
 		};
 	}
 
-	private async getContext(
+	private async getHighlightedContext(
 		lineNumber: number,
 		queryText: string,
 	): Promise<string> {
@@ -86,26 +86,29 @@ export class SearchHelper {
 		const end = Math.min(lineNumber + 10, this.dataSource.lines.length - 1);
 		const contextLines = this.dataSource.lines.slice(start, end + 1);
 
+		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
+
 		const highlightedContext = await Promise.all(
 			contextLines.map(async (line, index) => {
-				// here, it should match line by line to ensure the order of lines remains unchanged, 
-				// unlike the logic in search method
-				const entries = await this.fzfMatch(queryText, [line]);
 				const isTargetLine = lineNumber === start + index;
-				if (entries.length > 0) {
-					const entry = entries[0];
-					const highlighted = this.highlightChars(
-						line.text,
-						Array.from(entry.positions),
-					);
-					// Wrap matched line with a div and specified classes
-					return isTargetLine
-						? `<div class="cm-active cm-line">${highlighted}</div>`
-						: highlighted;
+
+				if (isTargetLine) {
+					// 对目标行使用 fzfMatch
+					const entries = await this.fzfMatch(queryText, [line]);
+					if (entries.length > 0) {
+						const entry = entries[0];
+						return `<span class="target-line">${this.highlightChars(
+							line.text,
+							Array.from(entry.positions),
+						)}</span>`;
+					}
+					return `<span class="target-line">${line.text}</div>`;
 				} else {
-					return isTargetLine
-						? `<div class="cm-active cm-line">${line.text}</div>`
-						: line.text;
+					// 对其他行进行严格匹配，并只高亮匹配的字符
+					const regex = new RegExp(processedQueryText, "gi");
+					return line.text
+						.replace(regex, (match) => `<mark>${match}</mark>`)
+						.replace(/ /g, "&nbsp;");
 				}
 			}),
 		);
