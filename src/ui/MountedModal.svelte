@@ -117,47 +117,62 @@
 	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirmItem);
 </script>
 
-<div class="cs-searchbar">
-	<!-- svelte-ignore a11y-autofocus -->
-	<input
-		bind:value={queryText}
-		on:input={handleInput}
-		placeholder="Start your search..."
-		autofocus
-	/>
-</div>
-<div class="cs-search-results">
-	<div class="cs-results-leftpane">
-		<ul>
-			{#each searchResult.items as item, index}
-				<button
-					class:selected={index === currItemIndex}
-					bind:this={item.element}
-					on:click={() => handleResultClick(index)}
-				>
-					{#if item instanceof InFileItem}
-						{@html item.line.text}
-					{/if}
-				</button>
-			{/each}
-		</ul>
-	</div>
-	<div class="cs-result-rightpane">
-		{#if currContext}
-			<p>{@html currContext}</p>
-		{/if}
-	</div>
+<div class="search-container">
+    <div class="left-pane">
+        <div class="search-bar">
+            <!-- svelte-ignore a11y-autofocus -->
+            <input
+                bind:value={queryText}
+                on:input={handleInput}
+                placeholder="Start your search..."
+                autofocus
+            />
+        </div>
+        <div class="result-items">
+            <ul>
+                {#each searchResult.items as item, index}
+                    <button
+                        class:selected={index === currItemIndex}
+                        bind:this={item.element}
+                        on:click={() => handleResultClick(index)}
+                    >
+                        {#if item instanceof InFileItem}
+                            {@html item.line.text}
+                        {/if}
+                    </button>
+                {/each}
+            </ul>
+        </div>
+    </div>
+    <div class="right-pane">
+        {#if currContext}
+            <div class="context-container">
+                <p>{@html currContext}</p>
+            </div>
+        {/if}
+    </div>
 </div>
 
 <style>
-	.cs-searchbar {
-		background: rgba(0, 0, 0, 0);
-		padding: 10px;
-		margin-left: 1em;
-		border-radius: 5px;
-		color: white;
-	}
-	.cs-searchbar input {
+    .search-container {
+        display: flex;
+        margin-top: 10px;
+    }
+
+    .left-pane {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 40%;
+    }
+    .search-bar {
+        background: rgba(0, 0, 0, 0);
+        padding-bottom: 15px;
+        border-radius: 5px;
+        color: white;
+		width: 90%;
+    }
+	.search-bar input {
 		width: 100%;
 		padding: 8px 12px;
 		border: none;
@@ -170,59 +185,54 @@
 			0 2px 3px rgba(0, 0, 0, 0.26);
 	}
 
-	.cs-search-results {
-		display: flex;
-		margin-top: 10px;
-	}
-	.cs-results-leftpane {
-		display: flex;
-		flex-direction: column; /* Stack children vertically */
-		align-items: center;
-		flex: 0 0 40%;
-		margin-right: 10px;
-	}
+    .result-items {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+    }
 
-	.cs-results-leftpane ul {
+	.result-items ul {
 		list-style: none; /* 移除默认的列表样式 */
-		padding: 0; /* 移除默认的内边距 */
-		width: 100%; /* 如果需要，设置一个宽度 */
-		max-width: 300px; /* 限制最大宽度，根据需要调整 */
-		/* overflow: scroll; */
+		padding: 0;
+		margin: 0.2em 0 0 0;
+		width: 90%;
 	}
 
-	/* 调整按钮样式以响应居中布局 */
-	.cs-results-leftpane button {
-		display: flex;
-		justify-content: left;
-		align-items: center;
+	.result-items button {
+		display: block;
 		overflow: hidden;
-		padding: 10px;
-		width: 100%; /* 按钮宽度与ul一致 */
-		text-align: center; /* 文本居中 */
+		padding: 0.65em;
+		margin-bottom: 0.5em;
+		/* margin-bottom: 5px; */
+		width: 100%;
+		height: fit-content;
+		max-height: 5em;
+		text-align: left;
+		text-wrap: wrap;
 		background: #222;
 		border: none;
 		border-radius: 4px;
 		color: #ddd;
-		margin-bottom: 5px;
 		cursor: pointer;
 		transition: background-color 0.01s;
 	}
 
-	.cs-results-leftpane button:hover,
-	.cs-results-leftpane button.selected {
+	.result-items button:hover,
+	.result-items button.selected {
 		background-color: #555;
 	}
 
-	.cs-result-rightpane {
-		flex: 0 0 60%;
+	.right-pane {
+		width: 60%;
 		background: #222;
-		width: fit-content;
+		width: 60%;
 		height: fit-content;
 		border-radius: 4px;
 		color: #ddd;
 	}
 
-	.cs-result-rightpane p {
+	.right-pane p {
 		padding: 18px;
 		margin: 0;
 		white-space: pre-wrap;
