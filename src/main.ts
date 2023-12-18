@@ -42,9 +42,9 @@ export default class CleverSearch extends Plugin {
 		container.register(App, { useValue: this.app });
 
 		this.addCommand({
-			id: "cs-toggle-blur",
-			name: "Toggle Blur",
-			callback: () => this.toggleBlur(),
+			id: "cs-toggle-privacy-mode",
+			name: "Toggle Privacy Mode",
+			callback: () => this.togglePrivacyMode(),
 		});
 
 		this.addCommand({
@@ -54,7 +54,7 @@ export default class CleverSearch extends Plugin {
 		});
 	}
 
-	toggleBlur() {
+	togglePrivacyMode() {
 		this.blurEnabled = !this.blurEnabled;
 		if (this.blurEnabled) {
 			document.body.classList.add("my-custom-blur");
@@ -87,8 +87,8 @@ export default class CleverSearch extends Plugin {
 	registerSearchUI() {
 		// This adds a complex command that can check whether the current state of the app allows execution of the command
 		this.addCommand({
-			id: "clever-search-from-vault",
-			name: "Clever Search from Vault",
+			id: "clever-search-in-file",
+			name: "Search in File",
 			callback: () => {
 				new SearchModal(this.app).open();
 			},

@@ -13,15 +13,21 @@
 
 ## Features
 
+### Major
+
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
-- [x] Toggle private mode
+- [x] Toggle privacy mode
 - [ ] Search from selection
 - [ ] Remember last query text
 - [ ] AutoCompletion
 - [ ] Persistent search history
 - [ ] Fuzzy search in the vault
 - [ ] Semantic search in the vault
+
+### Subtle Tweaks for Better UX
+
+- [x] keep focusing input bar even if clicking an item
 
 ## Supported Commands
 
@@ -31,5 +37,5 @@
 | modal    | Next Item           | `Ctrl-J` or `ArrowDown`  |
 | modal    | Previous Item       | `Ctrl-K` or `ArrorUp`    |
 | modal    | Confirm Item        | `Enter` or `Right Click` |
-| obsidian | In File Search      | undefined                |
-| obsidian | Toggle Private Mode | undefined                |
+| obsidian | Search In File      | undefined                |
+| obsidian | Toggle Privacy Mode | undefined                |

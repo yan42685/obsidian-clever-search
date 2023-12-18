@@ -25,6 +25,7 @@
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = -1;
 	let currContext = "";
+	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
@@ -133,7 +134,13 @@
 	<div class="left-pane">
 		<div class="search-bar" data-match-count={matchCountText}>
 			<!-- svelte-ignore a11y-autofocus -->
-			<input bind:value={queryText} on:input={handleInput} autofocus />
+			<input
+				bind:value={queryText}
+				bind:this={inputEl}
+				on:input={handleInput}
+				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
+				autofocus
+			/>
 		</div>
 		<div class="result-items">
 			<ul>
@@ -224,6 +231,7 @@
 		flex-direction: column;
 		align-items: center;
 		width: 100%;
+		height: 40vw;
 		margin-top: 1em;
 	}
 
@@ -255,7 +263,7 @@
 		padding: 0 0.5em 0 0;
 		margin: 0.2em 0 0 0;
 		width: 90%;
-		height: 45vw;
+		height: 36vw;
 		overflow-y: auto;
 		overflow-x: hidden;
 		justify-content: left;
@@ -278,7 +286,7 @@
 	.right-pane .context-container {
 		background: #222;
 		overflow-y: auto;
-		height: 47vw;
+		height: 39.1vw;
 		width: 100%;
 	}
 
