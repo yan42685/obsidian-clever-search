@@ -52,4 +52,7 @@
 
 If this plugin has been useful to you, I'd be sincerely thankful for your support.
 
-[![1](https://github.com/yan42685/obsidian-clever-search/assets/41834091/33363621-b65a-4254-aef1-b567dcd63fa4)](https://www.buymeacoffee.com/AlexClifton)
+[![image](https://github.com/yan42685/obsidian-clever-search/assets/41834091/a3baeea7-817f-46b6-803f-555bc73bfee6)](https://www.buymeacoffee.com/AlexClifton)
+
+
+
