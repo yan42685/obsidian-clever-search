@@ -1,5 +1,7 @@
 # Obsidian Clever Search
 
+[English Doc](README.md)
+
 ## 演示
 
 ### 实时搜索和预览
