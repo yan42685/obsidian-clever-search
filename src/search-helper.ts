@@ -95,30 +95,48 @@ export class SearchHelper {
 		firstMatchedCol: number,
 		queryText: string,
 	): Promise<string> {
-		const EXTEND_CHARS_THRESHOLD = 220;
+		const MAX_PRE_CAHRS_COUNT = 220;
 		let preCharsCount = firstMatchedCol;
 		let postCharsCount = 0;
 		let start = matchedRow;
 		let end = matchedRow;
 
-		// Extend the context upwards until we reach the required number of characters or the start of the document.
-		while (start > 0 && preCharsCount < EXTEND_CHARS_THRESHOLD) {
+		// extend the context upwards until we reach the required number of characters or the start of the document.
+		while (start > 0 && preCharsCount < MAX_PRE_CAHRS_COUNT) {
 			start--;
-			const lineLength = this.dataSource.lines[start].text.length;
-			preCharsCount += lineLength;
+			preCharsCount += this.dataSource.lines[start].text.length;
 		}
 
-		// Extend the context downwards until we reach the required number of characters or the end of the document.
+		if (preCharsCount > MAX_PRE_CAHRS_COUNT) {
+			if (start < matchedRow) {
+				start++; // remove the last added line if it's not the matched line
+			} else if (start === matchedRow) {
+				// truncate the line from firstMatchedCol backward
+				const line = this.dataSource.lines[start];
+				const startIdx = Math.max(
+					firstMatchedCol - MAX_PRE_CAHRS_COUNT,
+					0,
+				);
+				const truncatedLine =
+					line.text.substring(startIdx, firstMatchedCol) +
+					line.text.substring(firstMatchedCol);
+				this.dataSource.lines[start] = new Line(
+					truncatedLine,
+					line.row,
+				);
+
+				// update preCharsCount and postCharsCount
+				// preCharsCount = firstMatchedCol - startIdx;
+				postCharsCount = line.text.length - firstMatchedCol;
+			}
+		}
 		while (
 			end < this.dataSource.lines.length - 1 &&
-			postCharsCount < EXTEND_CHARS_THRESHOLD
+			postCharsCount < 2 * MAX_PRE_CAHRS_COUNT
 		) {
 			end++;
-			const lineLength = this.dataSource.lines[end].text.length;
-			postCharsCount += lineLength;
+			postCharsCount += this.dataSource.lines[end].text.length;
 		}
-
-		// Now we have the new start and end, get the context lines.
 		const contextLines = this.dataSource.lines.slice(start, end + 1);
 
 		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
@@ -141,9 +159,11 @@ export class SearchHelper {
 				} else {
 					// 对其他行进行严格匹配，并只高亮匹配的字符
 					const regex = new RegExp(processedQueryText, "gi");
-					return line.text
-						.replace(regex, (match) => `<mark>${match}</mark>`)
-						// .replace(/ /g, "&nbsp;");
+					return line.text.replace(
+						regex,
+						(match) => `<mark>${match}</mark>`,
+					);
+					// .replace(/ /g, "&nbsp;");
 				}
 			}),
 		);

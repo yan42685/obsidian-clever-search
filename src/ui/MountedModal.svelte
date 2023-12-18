@@ -270,7 +270,6 @@
 
 	.right-pane {
 		width: 60%;
-		height: 50em;
 		border-radius: 4px;
 	}
 	.right-pane .context-container {
