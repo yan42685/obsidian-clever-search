@@ -5,7 +5,6 @@
 	"minAppVersion": "0.15.0",
 	"description": "fuzzy full text search",
 	"author": "visitor3rr",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+    "fundingUrl": "https://buymeacoffee.com",
 	"isDesktopOnly": true
 }

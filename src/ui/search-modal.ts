@@ -44,7 +44,7 @@ export class SearchModal extends Modal {
 		// console.log("current modifier: " + modKey);
 
 		this.scope.register([modKey], "J", emitEvent(EventEnum.NEXT_ITEM));
-		this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));
+		// this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));
 		this.scope.register([], "ArrowDown", emitEvent(EventEnum.NEXT_ITEM));
 
 		this.scope.register([modKey], "K", emitEvent(EventEnum.PREV_ITEM));

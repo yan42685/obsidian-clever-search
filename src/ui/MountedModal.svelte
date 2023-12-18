@@ -141,7 +141,10 @@
 					<button
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
-						on:click={() => handleResultClick(index)}
+						on:click={(event) => {
+							event.preventDefault();
+							handleResultClick(index);
+						}}
 					>
 						<span>
 							{#if item instanceof InFileItem}

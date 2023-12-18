@@ -132,7 +132,7 @@ export class SearchHelper {
 		}
 		while (
 			end < this.dataSource.lines.length - 1 &&
-			postCharsCount < 2 * MAX_PRE_CAHRS_COUNT
+			postCharsCount < 3 * MAX_PRE_CAHRS_COUNT
 		) {
 			end++;
 			postCharsCount += this.dataSource.lines[end].text.length;
