@@ -37,11 +37,11 @@
 
 ## Supported Commands
 
-| scope    | name                | hotkey                   |
+| Scope    | Name                | Hotkey                   |
 | -------- | ------------------- | ------------------------ |
-| item     | View Item Context   | `Left Click`             |
-| modal    | Next Item           | `Ctrl-J` or `ArrowDown`  |
-| modal    | Previous Item       | `Ctrl-K` or `ArrorUp`    |
-| modal    | Confirm Item        | `Enter` or `Right Click` |
-| obsidian | Search In File      | undefined                |
-| obsidian | Toggle Privacy Mode | undefined                |
+| Item     | View Item Context   | `Left Click`             |
+| Modal    | Next Item           | `Ctrl-J` or `ArrowDown`  |
+| Modal    | Previous Item       | `Ctrl-K` or `ArrorUp`    |
+| Modal    | Confirm Item        | `Enter` or `Right Click` |
+| Obsidian | Search In File      | undefined                |
+| Obsidian | Toggle Privacy Mode | undefined                |
