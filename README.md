@@ -1,5 +1,7 @@
 # Obsidian Clever Search
 
+[中文文档](README-ZH.md) | [English Doc](README.md)
+
 ## Demo
 
 ### Realtime Search and Preview
