@@ -45,3 +45,12 @@
 | Modal    | Confirm Item        | `Enter` or `Right Click` |
 | Obsidian | Search In File      | undefined                |
 | Obsidian | Toggle Privacy Mode | undefined                |
+
+## Your support is valuable
+
+If this plugin has been useful to you, I'd be sincerely thankful for your support. It's a huge encouragement for me to continue developing.
+
+⭐ Star the Repo: This is a straightforward way to support open-source work.
+❤️ Make a Donation: Feel free to contribute to my efforts through a donation. Every bit helps to enhance and grow this project.
+
+<a href="https://www.buymeacoffee.com/gbraad" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
