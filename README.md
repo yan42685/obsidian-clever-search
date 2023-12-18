@@ -1,6 +1,12 @@
 # Obsidian Clever Search
 
 ## Demo
+### Realtime Search and Preview
+![demo-search-in-file](https://github.com/yan42685/obsidian-clever-search/assets/41834091/4d43077d-6d25-4a8e-b325-99f9cf6d7a9e)
+
+### Privacy Mode
+![demo-privacy-mode](https://github.com/yan42685/obsidian-clever-search/assets/41834091/b2c7f412-c82f-44ae-9197-45a77632bd7a)
+
 
 ## Installation
 
