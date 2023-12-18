@@ -8,15 +8,6 @@
 ![demo-privacy-mode](https://github.com/yan42685/obsidian-clever-search/assets/41834091/b2c7f412-c82f-44ae-9197-45a77632bd7a)
 
 
-## Installation
-
-- Install through [BRAT](https://github.com/TfTHacker/obsidian42-brat)
-- (Manual) installation:
-    1. Download the latest `main.js` and `manifest.json` from the [latest release](https://github.com/yan42685/obsidian-clever-search/releases)
-    2. Create a folder with any name in `.obsidian/plugins` at your vault location.
-    3. Move `main.js` and `manifest.json` into the folder you created
-    4. click `reload plugins` at `Settings - Community plugins - installed plugins` and enable `Clever Search`
-
 ## Features
 
 ### Major
@@ -35,7 +26,7 @@
 
 - [x] keep focusing input bar even if clicking an item
 
-## Supported Commands
+## Available Commands
 
 | Scope    | Name                | Hotkey                   |
 | -------- | ------------------- | ------------------------ |
@@ -45,3 +36,18 @@
 | Modal    | Confirm Item        | `Enter` or `Right Click` |
 | Obsidian | Search In File      | undefined                |
 | Obsidian | Toggle Privacy Mode | undefined                |
+
+## Installation
+
+- Install through [BRAT](https://github.com/TfTHacker/obsidian42-brat)
+- (Manual) installation:
+    1. Download the latest `main.js` and `manifest.json` from the [latest release](https://github.com/yan42685/obsidian-clever-search/releases)
+    2. Create a folder with any name in `.obsidian/plugins` at your vault location.
+    3. Move `main.js` and `manifest.json` into the folder you created
+    4. click `reload plugins` at `Settings - Community plugins - installed plugins` and enable `Clever Search`
+
+## Support
+
+If this plugin has been useful to you, I'd be sincerely thankful for your support.
+
+<script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="AlexClifton" data-color="#5F7FFF" data-emoji=""  data-font="Lato" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00" ></script>
