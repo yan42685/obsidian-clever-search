@@ -51,6 +51,7 @@
 | 模态框   | 确认项             | `Enter` 或 `右键点击`    |
 | Obsidian | 在文件中搜索         | 未定义                    |
 | Obsidian | 切换隐私模式         | 未定义                    |
+| Obsidian | 在文件中搜索，并使用Omnisearch的上次搜索文本 | 未定义 |
 
 ## 安装
 
