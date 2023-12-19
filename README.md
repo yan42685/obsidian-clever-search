@@ -52,7 +52,7 @@
 
 ## Support
 
-If this plugin has been useful to you, I'd be sincerely thankful for your support.
+If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
 
 [![image](https://github.com/yan42685/obsidian-clever-search/assets/41834091/a3baeea7-817f-46b6-803f-555bc73bfee6)](https://www.buymeacoffee.com/AlexClifton)
 
