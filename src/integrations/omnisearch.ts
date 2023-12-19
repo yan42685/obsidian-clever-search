@@ -18,6 +18,7 @@ export class OmnisearchIntegration {
 			// console.log(dbName);
 			const db: any = new Dexie(dbName);
 
+			// the schema must be the same as what Omnisearch defined
 			db.version(OmnisearchIntegration.DB_VERSION).stores({
 				searchHistory: "++id",
 				minisearch: "date",
@@ -41,7 +42,7 @@ export class OmnisearchIntegration {
 		return lastQuery;
 	}
 
-	private checkOmnisearchStatus() {
+	private checkOmnisearchStatus(): boolean {
 		const omnisearch = this.app.plugins.plugins.omnisearch;
 		let isAvailable = true;
 		if (!omnisearch) {

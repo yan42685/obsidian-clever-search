@@ -19,8 +19,6 @@
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
-- [ ] Search from selection
-- [ ] Remember last query text
 - [ ] AutoCompletion
 - [ ] Persistent search history
 - [ ] Fuzzy search in the vault
@@ -29,6 +27,8 @@
 ### Subtle Tweaks for Better UX
 
 - [x] keep focusing input bar even if clicking an item
+- [x] Search from selection
+- [ ] Remember last query text
 
 ### Integrate with other plugins
 

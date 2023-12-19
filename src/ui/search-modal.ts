@@ -8,6 +8,10 @@ export class SearchModal extends Modal {
 	mountedElement: any;
 	constructor(app: App, query?: string) {
 		super(app);
+		// get text selected by user
+		const selectedText = window.getSelection()?.toString() || "";
+		const effectiveQuery = query || selectedText;
+
 		// remove predefined child node
 		this.modalEl.replaceChildren();
 		this.modalEl.addClass("cs-modal");
@@ -19,8 +23,7 @@ export class SearchModal extends Modal {
 			props: {
 				app: app,
 				modal: this,
-				// queryText: this.queryText,
-				queryText: query || "",
+				queryText: effectiveQuery || "",
 			},
 		});
 
