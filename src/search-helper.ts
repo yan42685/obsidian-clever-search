@@ -101,8 +101,9 @@ export class SearchHelper {
 		let start = matchedRow;
 		let end = matchedRow;
 
-		// extend the context upwards until we reach the required number of characters or the start of the document.
-		while (start > 0 && preCharsCount < MAX_PRE_CAHRS_COUNT) {
+		// extend the context upwards until the start of the document or 7 lines 
+		// or reaching the required number of characters 
+		while (start > 0 && matchedRow - start <= 7 && preCharsCount < MAX_PRE_CAHRS_COUNT) {
 			start--;
 			preCharsCount += this.dataSource.lines[start].text.length;
 		}
