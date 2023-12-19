@@ -19,6 +19,7 @@
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
+- [x] Support `Style Settings` plugin
 - [ ] Search from selection
 - [ ] Remember last query text
 - [ ] AutoCompletion
