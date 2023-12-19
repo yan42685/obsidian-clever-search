@@ -96,7 +96,7 @@
 				currItemIndex
 			] as InFileItem;
 			if (selectedItem) {
-				// 将焦点移至编辑器的特定行和列
+				// move the cursor and view to a specific line and column in the editor.
 				const view = app.workspace.getActiveViewOfType(MarkdownView);
 				if (view) {
 					const cursorPos: EditorPosition = {
@@ -143,6 +143,7 @@
 			/>
 		</div>
 		<div class="result-items">
+			<!-- ul 用来保证button位置不受外层div是否出现滚轮而影响 -->
 			<ul>
 				{#each searchResult.items as item, index}
 					<button
@@ -227,11 +228,22 @@
 		flex-direction: column;
 		align-items: center;
 		width: 100%;
-		height: 40vw;
+		height: 67.3vh;
 		margin-top: 1em;
 	}
 
-	.result-items button {
+	.result-items ul {
+		list-style: none; /* 移除默认的列表样式 */
+		padding: 0 0.5em 0 0;
+		margin: 0.2em 0 0 0;
+		width: 90%;
+		/* height: 36vw; */
+		overflow-y: auto;
+		overflow-x: hidden;
+		justify-content: left;
+	}
+
+	.result-items ul button {
 		display: flex;
 		align-items: center;
 		justify-content: left;
@@ -249,24 +261,13 @@
 		transition: background-color 0.01s;
 	}
 
-	.result-items button:hover,
-	.result-items button.selected {
+	.result-items ul button:hover,
+	.result-items ul button.selected {
 		background-color: var(--cs-item-selected-color, #555);
 	}
 
-	.result-items ul {
-		list-style: none; /* 移除默认的列表样式 */
-		padding: 0 0.5em 0 0;
-		margin: 0.2em 0 0 0;
-		width: 90%;
-		height: 36vw;
-		overflow-y: auto;
-		overflow-x: hidden;
-		justify-content: left;
-	}
-
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
-	.result-items ul span {
+	.result-items ul button span {
 		text-wrap: wrap;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
@@ -276,25 +277,25 @@
 	}
 
 	.right-pane {
+		background-color: var(--cs-pane-bgc, #20202066);
+		border-radius: 6px;
+		height: 72.8vh;
 		width: 60%;
-		border-radius: 4px;
 	}
 	.right-pane .context-container {
-		background-color: var(--cs-pane-bgc, #20202066);
+		margin: 0.7em 0.5em 0.7em 0.7em;
+		height: 70vh;
+		overflow-wrap: break-word;
 		overflow-y: auto;
-		height: 39.1vw;
-		width: 100%;
 	}
 
-	.right-pane p {
-		padding: 18px;
+	.right-pane .context-container p {
 		margin: 0;
-		overflow-wrap: break-word;
 	}
 
 	.right-pane .context-container :global(span.target-line) {
 		display: inline-block;
 		width: 100%;
-		background-color: #468eeb33;
+		background-color: var(--cs-hint-char-color, #468eeb33);
 	}
 </style>
