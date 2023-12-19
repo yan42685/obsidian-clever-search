@@ -183,8 +183,8 @@
 	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
 	 * 想要插件内部全局生效，就写在源码最外面的style.css里 */
 	:global(.search-container mark) {
-		background-color: rgba(219, 204, 149, 0.9);
-		color: #111;
+		background-color: var(--cs-highlight-bgc, rgba(219, 204, 149, 0.9));
+		color: var(--cs-highlight-char-color, #111);
 	}
 
 	.left-pane {
@@ -195,11 +195,9 @@
 	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
-		top: 0; /* 顶部对齐 */
-		left: 0; /* 左侧对齐 */
-		background: rgba(0, 0, 0, 0);
+		top: 0;
+		left: 0;
 		padding-bottom: 15px;
-		border-radius: 5px;
 		width: 90%;
 		height: 30px;
 	}
@@ -214,13 +212,11 @@
 		color: grey;
 	}
 	.search-bar input {
-		position: relative;
 		width: 100%;
 		padding: 8px 12px;
 		border: none;
-		border-radius: 4px;
-		background: #222;
-		/* Refined gradient box-shadow with a more subtle effect */
+		border-radius: 10px;
+		background-color: var(--cs-search-bar-bgc, #20202066);
 		box-shadow:
 			0 2px 4px rgba(0, 0, 0, 0.18),
 			0 2px 3px rgba(0, 0, 0, 0.26);
@@ -246,7 +242,7 @@
 		height: fit-content;
 		/* max-height: 5.5em; */
 		text-align: left;
-		background: #222;
+		background-color: var(--cs-pane-bgc, #20202066);
 		border: none;
 		border-radius: 4px;
 		cursor: pointer;
@@ -255,7 +251,7 @@
 
 	.result-items button:hover,
 	.result-items button.selected {
-		background-color: #555;
+		background-color: var(--cs-item-selected-color, #555);
 	}
 
 	.result-items ul {
@@ -284,7 +280,7 @@
 		border-radius: 4px;
 	}
 	.right-pane .context-container {
-		background: #222;
+		background-color: var(--cs-pane-bgc, #20202066);
 		overflow-y: auto;
 		height: 39.1vw;
 		width: 100%;
@@ -298,6 +294,7 @@
 
 	.right-pane .context-container :global(span.target-line) {
 		display: inline-block;
+		width: 100%;
 		background-color: #468eeb33;
 	}
 </style>

@@ -33,7 +33,7 @@ export default class CleverSearch extends Plugin {
 		// logger.warn("test");
 		// logger.error("test");
 		await this.loadSettings();
-		this.exampleCode();
+		// this.exampleCode();
 		this.registerSearchUI();
 		// 由于plugin不能让框架自己new，而是要注册this依赖，所以这里需要在CleverSearch手动注册this对象
 		// register <"cleverSearch", this> to the container
@@ -48,9 +48,9 @@ export default class CleverSearch extends Plugin {
 		});
 
 		this.addCommand({
-			id: "open-my-modal",
-			name: "Open My Modal",
-			callback: () => this.openMyModal(),
+			id: "open-test-modal",
+			name: "Open Test Modal",
+			callback: () => this.openTestModal(),
 		});
 	}
 
@@ -62,7 +62,7 @@ export default class CleverSearch extends Plugin {
 			document.body.classList.remove("my-custom-blur");
 		}
 	}
-	openMyModal() {
+	openTestModal() {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (activeView) {
 			let contentHTML = "";

@@ -1,9 +1,54 @@
-/*
-
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
+/* @settings
+name: Clever Search
+id: clever-search-styles
+settings:
+	- 
+		id: cs-color-settings
+		title: Color Settings
+		title.zh: 颜色设置
+		type: heading
+		level: 2
+		collapsed: false
+	- 
+		id: cs-search-bar-bgc
+		title: Search Bar Background Color
+		title.zh: 搜索框背景色
+		type: variable-color
+        opacity: true
+        format: hex
+        default: '#'
+	- 
+		id: cs-pane-bgc
+		title: Pane Background Color
+		title.zh: 窗格背景色
+        type: variable-color
+        opacity: true
+        format: hex
+		default: '#'
+	- 
+		id: cs-item-selected-color
+		title: Item Selected Color
+		title.zh: 选中匹配项的颜色
+		type: variable-color
+        opacity: true
+        format: hex
+        default: '#'
+	- 
+		id: cs-highlight-bgc
+		title: Highlight Background Color
+		title.zh: 高亮背景颜色
+        type: variable-color
+        opacity: true
+        format: hex
+        default: '#'
+	- 
+		id: cs-highlight-char-color
+		title: Highlight Character Color
+		title.zh: 高亮字符颜色
+		type: variable-color
+        opacity: true
+        format: hex
+        default: '#'
 
 */
 .cs-modal {
