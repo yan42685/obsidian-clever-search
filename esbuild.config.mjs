@@ -1,6 +1,7 @@
 import builtins from "builtin-modules";
 import esbuild from "esbuild";
 import esbuildSvelte from "esbuild-svelte";
+import fs from "fs";
 import process from "process";
 import sveltePreprocess from "svelte-preprocess";
 
@@ -12,11 +13,55 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = process.argv[2] === "production";
 
-const context = await esbuild.context({
+function debounce(delay, func) {
+	let timeoutId;
+
+	return (...args) => {
+		clearTimeout(timeoutId);
+		timeoutId = setTimeout(() => func(...args), delay);
+	};
+}
+
+// 这里会多次使用esbuild进行编译，防止多次同时复制
+let hasCopied = true;
+function copyFile(src, dest) {
+	hasCopied = !hasCopied;
+	if (hasCopied) {
+		// 跳过偶数次复制
+		return;
+	}
+	fs.copyFile(src, dest, (err) => {
+		const formattedTime = new Date().toLocaleTimeString("en-US", {
+			hour12: false,
+			hour: "2-digit",
+			minute: "2-digit",
+			second: "2-digit",
+		});
+		if (err) {
+			console.error(`Error copying ${src}:`, err, `  - ${formattedTime}`);
+		} else {
+			console.log(`Copied ${src} to ${dest}`, `  - ${formattedTime}`);
+		}
+	});
+}
+
+const copyFileDebounced = debounce(1000, copyFile);
+
+const filesToWatch = ["./styles.css", "./manifest.json"];
+// 监听特定文件的变化
+filesToWatch.forEach((file) => {
+	fs.watch(file, (eventType, filename) => {
+		if (eventType === "change") {
+			copyFileDebounced(file, `./dist/${filename}`);
+		}
+	});
+});
+
+const esbuildConfig = (outdir) => ({
 	banner: {
 		js: banner,
 	},
-	entryPoints: ["src/main.ts"],
+	entryPoints: {"main": "src/main.ts", "search-worker": "src/web-worker/search-worker-server.ts"},
 	bundle: true,
 	external: [
 		"obsidian",
@@ -40,7 +85,7 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
+	outdir: outdir,
 	define: {
 		// need nested quotation mark
 		"process.env.NODE_ENV": prod ? '"production"' : '"development"',
@@ -54,9 +99,17 @@ const context = await esbuild.context({
 	],
 });
 
+// for hot-reload plugin
+const devContext =await esbuild.context(esbuildConfig("./"));
+// for release
+const releaseContext = await esbuild.context(esbuildConfig("dist"));
+fs.copyFile("./manifest.json", "./dist/manifest.json", () => {});
+fs.copyFile("./styles.css", "./dist/styles.css", () => {});
+
 if (prod) {
-	await context.rebuild();
+	await releaseContext.rebuild();
 	process.exit(0);
 } else {
-	await context.watch();
+	await devContext.watch();
+	await releaseContext.rebuild();
 }
