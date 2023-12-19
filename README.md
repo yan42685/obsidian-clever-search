@@ -1,5 +1,7 @@
 # Obsidian Clever Search
 
+[中文文档](README-ZH.md) | [English Doc](README.md)
+
 ## Demo
 
 ### Realtime Search and Preview
@@ -43,9 +45,9 @@
 
 - Install through [BRAT](https://github.com/TfTHacker/obsidian42-brat)
 - (Manual) installation:
-    1. Download the latest `main.js` and `manifest.json` from the [latest release](https://github.com/yan42685/obsidian-clever-search/releases)
-    2. Create a folder with any name in `.obsidian/plugins` at your vault location.
-    3. Move `main.js` and `manifest.json` into the folder you created
+    1. Download the latest `main.js`, `style.css` and `manifest.json` from the [latest release](https://github.com/yan42685/obsidian-clever-search/releases)
+    2. Create a folder with any name in `.obsidian/plugins` at your vault location
+    3. Move above files into the folder you created
     4. click `reload plugins` at `Settings - Community plugins - installed plugins` and enable `Clever Search`
 
 ## Support
