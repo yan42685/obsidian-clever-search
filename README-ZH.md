@@ -19,7 +19,6 @@
 - [x] 在当前笔记中模糊搜索
 - [x] 实时高亮和精确跳转到目标位置
 - [x] 切换隐私模式（仅编辑模式）
-- [x] 支持 `Style Settings` 插件
 - [ ] 从选择中搜索
 - [ ] 记住上次查询文本
 - [ ] 补全提示
@@ -30,6 +29,17 @@
 ### 细微调整以提升用户体验
 
 - [x] 即使点击一个匹配项也保持输入栏的焦点
+
+### 集成其他插件
+
+- [x] `Style Settings`
+- [x] `Omnisearch`
+    <details><summary>详情</summary>
+        新命令：<br>"Search in file with last Omnisearch query Omnisearch"<br><br>
+        使用场景：<br>
+            当你通过 Omnisearch 确认一个全库搜索并且认为当前文件中可能还有更多未被 Omnisearch 列出的匹配文本时，触发这个命令将打开一个文件内搜索模态框，并且用 Omnisearch 的最后一次查询填充搜索栏。<br><br>
+        注意：<br>这只是为更好的全库搜索提供一个临时解决方案，我将在未来实现功能更完善的全库搜索, 并且不依赖于Omnisearch
+    </details>
 
 ## 可用命令
 

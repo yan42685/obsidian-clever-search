@@ -19,7 +19,6 @@
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
-- [x] Support `Style Settings` plugin
 - [ ] Search from selection
 - [ ] Remember last query text
 - [ ] AutoCompletion
@@ -30,6 +29,18 @@
 ### Subtle Tweaks for Better UX
 
 - [x] keep focusing input bar even if clicking an item
+
+### Integrate with other plugins
+
+- [x] `Style Settings`
+- [x] `Omnisearch`
+    <details><summary>Details</summary>
+        New command:<br>"Search in file with last Omnisearch query"<br><br>
+        Use case:<br>
+        When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
+        Note: <br>this is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search with no dependency for Omnisearch in the future.
+    </details>
+
 
 ## Available Commands
 
