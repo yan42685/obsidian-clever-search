@@ -44,7 +44,7 @@
 
 ## 安装
 
-- 通过 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 安装
+- 通过 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 安装，并且开启`自动更新`选项获取本插件最新的功能
 - 手动安装：
     1. 从[最新发布版](https://github.com/yan42685/obsidian-clever-search/releases)下载最新的 `main.js`, `style.css`和 `manifest.json`
     2. 在你的资料库位置的 `.obsidian/plugins` 中创建一个任意名称的文件夹

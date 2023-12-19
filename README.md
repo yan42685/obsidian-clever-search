@@ -44,7 +44,7 @@
 
 ## Installation
 
-- Install through [BRAT](https://github.com/TfTHacker/obsidian42-brat)
+- Install through [BRAT](https://github.com/TfTHacker/obsidian42-brat) and turn on `Auto-update plugins at startup` option to automatically install the latest version when available.
 - (Manual) installation:
     1. Download the latest `main.js`, `style.css` and `manifest.json` from the [latest release](https://github.com/yan42685/obsidian-clever-search/releases)
     2. Create a folder with any name in `.obsidian/plugins` at your vault location
