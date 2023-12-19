@@ -11,6 +11,7 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
+import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { SearchModal } from "./ui/search-modal";
 
 // Remember to rename these classes and interfaces!
@@ -25,7 +26,8 @@ const DEFAULT_SETTINGS: CleverSearchSettings = {
 
 export default class CleverSearch extends Plugin {
 	settings: CleverSearchSettings = new CleverSearchSettings();
-	blurEnabled = false;
+	privacyModeEnabled = false;
+	omnisearchIntegration?: OmnisearchIntegration;
 
 	async onload() {
 		// logger.info("test");
@@ -34,29 +36,20 @@ export default class CleverSearch extends Plugin {
 		// logger.error("test");
 		await this.loadSettings();
 		// this.exampleCode();
-		this.registerSearchUI();
+		this.registerCommands();
 		// 由于plugin不能让框架自己new，而是要注册this依赖，所以这里需要在CleverSearch手动注册this对象
 		// register <"cleverSearch", this> to the container
 		// cant't use CleverSearch as a key here to void cycle dependencies
 		container.register("CleverSearch", { useValue: this });
 		container.register(App, { useValue: this.app });
 
-		this.addCommand({
-			id: "cs-toggle-privacy-mode",
-			name: "Toggle Privacy Mode",
-			callback: () => this.togglePrivacyMode(),
-		});
-
-		this.addCommand({
-			id: "open-test-modal",
-			name: "Open Test Modal",
-			callback: () => this.openTestModal(),
-		});
+		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
+		this.omnisearchIntegration.init();
 	}
 
 	togglePrivacyMode() {
-		this.blurEnabled = !this.blurEnabled;
-		if (this.blurEnabled) {
+		this.privacyModeEnabled = !this.privacyModeEnabled;
+		if (this.privacyModeEnabled) {
 			document.body.classList.add("my-custom-blur");
 		} else {
 			document.body.classList.remove("my-custom-blur");
@@ -73,8 +66,8 @@ export default class CleverSearch extends Plugin {
 			if (element) {
 				const tempDiv = document.createElement("div");
 				// cloneNode(true) 以克隆元素及其所有子元素
-				tempDiv.appendChild(element.cloneNode(true)); 
-				contentHTML = tempDiv.innerHTML; 
+				tempDiv.appendChild(element.cloneNode(true));
+				contentHTML = tempDiv.innerHTML;
 			}
 			// const modal = new MyCustomModal(this.app, activeView.contentEl.innerHTML);
 			const modal = new RenderHTMLModal(this.app, contentHTML);
@@ -84,13 +77,34 @@ export default class CleverSearch extends Plugin {
 		}
 	}
 
-	registerSearchUI() {
+	registerCommands() {
 		// This adds a complex command that can check whether the current state of the app allows execution of the command
 		this.addCommand({
 			id: "clever-search-in-file",
-			name: "Search in File",
-			callback: () => {
-				new SearchModal(this.app).open();
+			name: "Search in file",
+			callback: () => new SearchModal(this.app).open(),
+		});
+
+		this.addCommand({
+			id: "cs-toggle-privacy-mode",
+			name: "Toggle privacy mode",
+			callback: () => this.togglePrivacyMode(),
+		});
+
+		this.addCommand({
+			id: "cs-open-test-modal",
+			name: "Open test modal",
+			callback: () => this.openTestModal(),
+		});
+
+		this.addCommand({
+			id: "cs-in-file-search-with-omnisearch-query",
+			name: "Search in file with last Omnisearch query",
+			callback: async () => {
+				new SearchModal(
+					this.app,
+					await this.omnisearchIntegration?.getLastQuery(),
+				).open();
 			},
 		});
 	}
@@ -215,11 +229,11 @@ class RenderHTMLModal extends Modal {
 	}
 
 	onOpen() {
-		MarkdownView
-		HoverPopover
+		MarkdownView;
+		HoverPopover;
 
 		console.log(this.contentHTML);
-		this.containerEl.style.backgroundColor="black";
+		this.containerEl.style.backgroundColor = "black";
 		this.containerEl.innerHTML = this.contentHTML;
 
 		// 或者如果您想将Markdown转换为HTML：

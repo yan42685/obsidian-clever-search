@@ -104,3 +104,24 @@ export function formatMillis(millis: number) {
 		return `${minutes} min ${seconds} s ${milliseconds} ms`;
 	}
 }
+
+// Invalid Function
+// export function simulateEnterKeyPressOnOmniSearchModal() {
+//     const omniSearchModal = document.querySelector('omnisearch-result');
+// 	console.log(omniSearchModal);
+//     if (!omniSearchModal) {
+// 		new Notice("OmniSearch 模态框未找到");
+//         return;
+//     }
+
+//     // 创建一个模拟 Enter 键的键盘事件
+//     const enterKeyEvent = new KeyboardEvent('keydown', {
+//         key: 'Enter',
+//         code: 'Enter',
+//         keyCode: 13, // Enter 键的 keyCode 是 13
+//         bubbles: true, // 确保事件可以冒泡
+//     });
+
+// 	// NOTE: all hotkeys are disabled if a modal is open, so the following code is invalid
+//     omniSearchModal.dispatchEvent(enterKeyEvent);
+// }

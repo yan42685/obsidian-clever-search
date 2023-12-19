@@ -128,6 +128,7 @@
 	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
 	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
 	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirmItem);
+	handleInput();
 </script>
 
 <div class="search-container">

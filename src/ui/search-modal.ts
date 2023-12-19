@@ -6,7 +6,7 @@ import MountedModal from "./MountedModal.svelte";
 
 export class SearchModal extends Modal {
 	mountedElement: any;
-	constructor(app: App) {
+	constructor(app: App, query?: string) {
 		super(app);
 		// remove predefined child node
 		this.modalEl.replaceChildren();
@@ -20,7 +20,7 @@ export class SearchModal extends Modal {
 				app: app,
 				modal: this,
 				// queryText: this.queryText,
-				queryText: "",
+				queryText: query || "",
 			},
 		});
 
