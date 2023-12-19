@@ -57,8 +57,8 @@
 
 - 通过 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 安装，并且开启`自动更新`选项获取本插件最新的功能
 - 手动安装：
-    1. 从[最新发布版](https://github.com/yan42685/obsidian-clever-search/releases)下载最新的 `main.js`, `style.css`和 `manifest.json`
-    2. 在你的资料库位置的 `.obsidian/plugins` 中创建一个任意名称的文件夹
+    1. 从[最新发布版](https://github.com/yan42685/obsidian-clever-search/releases)下载最新的 `main.js`, `cs-search-worker.js`, `style.css`和 `manifest.json`
+    2. 在你的资料库位置的 `.obsidian/plugins` 中创建一个名为`clever-search`的文件夹
     3. 将上述文件移动到你创建的文件夹中
     4. 在 `设置 - 社区插件 - 已安装的插件` 中点击 `重新加载插件` 并启用 `Clever Search`
 
