@@ -7,12 +7,13 @@ import {
 	Notice,
 	Plugin,
 	PluginSettingTab,
-	Setting,
+	Setting
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { SearchModal } from "./ui/search-modal";
+import { SearchClient } from "./web-worker/worker-client";
 
 // Remember to rename these classes and interfaces!
 
@@ -28,6 +29,7 @@ export default class CleverSearch extends Plugin {
 	settings: CleverSearchSettings = new CleverSearchSettings();
 	privacyModeEnabled = false;
 	omnisearchIntegration?: OmnisearchIntegration;
+	searchClient?: SearchClient;
 
 	async onload() {
 		// logger.info("test");
@@ -45,6 +47,7 @@ export default class CleverSearch extends Plugin {
 
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
 		this.omnisearchIntegration.init();
+		this.searchClient = container.resolve(SearchClient);
 	}
 
 	togglePrivacyMode() {

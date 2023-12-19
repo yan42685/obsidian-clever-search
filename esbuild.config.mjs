@@ -61,7 +61,7 @@ const esbuildConfig = (outdir) => ({
 	banner: {
 		js: banner,
 	},
-	entryPoints: {"main": "src/main.ts", "search-worker": "src/web-worker/search-worker-server.ts"},
+	entryPoints: {"main": "src/main.ts", "cs-search-worker": "src/web-worker/search-worker-server.ts"},
 	bundle: true,
 	external: [
 		"obsidian",

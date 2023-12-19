@@ -1,10 +1,41 @@
-const worker = new Worker("./main.js");
+import { App, FileSystemAdapter } from "obsidian";
+import { container, singleton } from "tsyringe";
 
-// 发送数据到 Worker
-const dataToShare = "hello";
-worker.postMessage(dataToShare);
+@singleton()
+export class SearchClient {
+	worker?: Worker;
+	constructor() {
+		const app: App = container.resolve(App);
+		const obsidianFs = app.vault.adapter as FileSystemAdapter;
+		// const workerJsPath = obsidianFs.getFullPath("./cs-search-worker.js");
+        // console.log(workerJsPath);
 
-// 接收来自 Worker 的消息
-worker.addEventListener('message', (event) => {
-    console.log('Received from worker:', event.data);
-});
+		this.initWorker();
+	}
+
+	async initWorker() {
+		try {
+			const app: App = container.resolve(App);
+			const obsidianFs = app.vault.adapter as FileSystemAdapter;
+
+			// 'await' the Promise to get the actual ArrayBuffer.
+			const workerScript = await obsidianFs.readBinary(".obsidian/plugins/clever-search/cs-search-worker.js");
+
+            // 不直接new Worker是为了绕过同源限制
+			const blob = new Blob([workerScript], { type: "text/javascript" });
+			const workerUrl = URL.createObjectURL(blob);
+			this.worker = new Worker(workerUrl);
+
+			// Send data to Worker
+			const dataToShare = "hello";
+			this.worker.postMessage(dataToShare);
+
+			// Receive messages from Worker
+			this.worker.addEventListener("message", (event: any) => {
+				console.log("Received from worker:", event.data);
+			});
+		} catch (error) {
+			console.error("Error initializing worker:", error);
+		}
+	}
+}
