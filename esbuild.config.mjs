@@ -1,7 +1,8 @@
 import builtins from "builtin-modules";
 import esbuild from "esbuild";
 import esbuildSvelte from "esbuild-svelte";
-import fs from "fs";
+import fsUtil from "fs";
+import pathUtil from "path";
 import process from "process";
 import sveltePreprocess from "svelte-preprocess";
 
@@ -23,14 +24,15 @@ function debounce(delay, func) {
 }
 
 // 这里会多次使用esbuild进行编译，防止多次同时复制
-let hasCopied = true;
+let hasCopied = false;
 function copyFile(src, dest) {
-	hasCopied = !hasCopied;
 	if (hasCopied) {
+		hasCopied = false;
 		// 跳过偶数次复制
 		return;
 	}
-	fs.copyFile(src, dest, (err) => {
+	hasCopied = true;
+	fsUtil.copyFile(src, dest, (err) => {
 		const formattedTime = new Date().toLocaleTimeString("en-US", {
 			hour12: false,
 			hour: "2-digit",
@@ -47,10 +49,10 @@ function copyFile(src, dest) {
 
 const copyFileDebounced = debounce(1000, copyFile);
 
-const filesToWatch = ["./styles.css", "./manifest.json"];
+const filesToCopy = ["./styles.css", "./manifest.json"];
 // 监听特定文件的变化
-filesToWatch.forEach((file) => {
-	fs.watch(file, (eventType, filename) => {
+filesToCopy.forEach((file) => {
+	fsUtil.watch(file, (eventType, filename) => {
 		if (eventType === "change") {
 			copyFileDebounced(file, `./dist/${filename}`);
 		}
@@ -61,7 +63,10 @@ const esbuildConfig = (outdir) => ({
 	banner: {
 		js: banner,
 	},
-	entryPoints: {"main": "src/main.ts", "cs-search-worker": "src/web-worker/search-worker-server.ts"},
+	entryPoints: {
+		main: "src/main.ts",
+		"cs-search-worker": "src/web-worker/search-worker-server.ts",
+	},
 	bundle: true,
 	external: [
 		"obsidian",
@@ -100,11 +105,15 @@ const esbuildConfig = (outdir) => ({
 });
 
 // for hot-reload plugin
-const devContext =await esbuild.context(esbuildConfig("./"));
+const devContext = await esbuild.context(esbuildConfig("./"));
 // for release
 const releaseContext = await esbuild.context(esbuildConfig("dist"));
-fs.copyFile("./manifest.json", "./dist/manifest.json", () => {});
-fs.copyFile("./styles.css", "./dist/styles.css", () => {});
+filesToCopy.forEach((file) => {
+	const destination = `./dist/${pathUtil.basename(file)}`;
+	copyFile(file, destination);
+	// 避免被这个变量影响，导致偶数文件无法复制
+	hasCopied = false; 
+});
 
 if (prod) {
 	await releaseContext.rebuild();
