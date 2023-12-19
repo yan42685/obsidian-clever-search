@@ -18,6 +18,14 @@ settings:
         format: hex
         default: '#'
 	- 
+		id: cs-hint-char-color
+		title: Hint Character Color
+		title.zh: 提示字符颜色
+		type: variable-color
+        opacity: true
+        format: hex
+        default: '#'
+	- 
 		id: cs-pane-bgc
 		title: Pane Background Color
 		title.zh: 窗格背景色

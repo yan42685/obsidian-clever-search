@@ -209,7 +209,7 @@
 		top: 1.4em;
 		font-size: 0.8em;
 		transform: translateY(-50%);
-		color: grey;
+		color: var(--cs-hint-char-color, grey);
 	}
 	.search-bar input {
 		width: 100%;
