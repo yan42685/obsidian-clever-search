@@ -83,6 +83,8 @@ const esbuildConfig = (outdir) => ({
 		"@lezer/highlight",
 		"@lezer/lr",
 		...builtins,
+		// 不打包测试文件夹
+		"tests/*",
 	],
 	format: "cjs",
 	platform: "node",
@@ -112,7 +114,7 @@ filesToCopy.forEach((file) => {
 	const destination = `./dist/${pathUtil.basename(file)}`;
 	copyFile(file, destination);
 	// 避免被这个变量影响，导致偶数文件无法复制
-	hasCopied = false; 
+	hasCopied = false;
 });
 
 if (prod) {
