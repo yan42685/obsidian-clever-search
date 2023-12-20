@@ -5,15 +5,15 @@ import * as chokidar from "chokidar";
 import nlp from "compromise/two";
 import { debounce } from "throttle-debounce";
 import { inject, singleton } from "tsyringe";
-import { PluginManager } from "./plugin-manager";
-import { logger } from "./utils/logger";
+import { PluginManager } from "../plugin-manager";
+import { logger } from "../utils/logger";
 import {
 	FileExtension,
 	fsUtils,
 	getAllFiles,
 	monitorExecution,
 	pathUtils
-} from "./utils/my-lib";
+} from "../utils/my-lib";
 
 // register <SearchService, singleton> to the container
 @singleton()

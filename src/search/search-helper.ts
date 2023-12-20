@@ -1,23 +1,23 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { getCurrLanguage } from "./entities/language-enum";
+import { getCurrLanguage } from "../entities/language-enum";
 import {
 	InFileItem,
 	Line,
 	MatchedLine,
 	SearchResult,
 	SearchType,
-} from "./entities/search-types";
-import { MathUtil } from "./utils/math-util";
+} from "../entities/search-types";
+import { MathUtil } from "../utils/math-util";
 
 @singleton()
 export class SearchHelper {
 	app: App = container.resolve(App);
 	component: Component = new Component();
-	dataSource: DataSource = { lines: [], path: "" };
+	inFileDataSource: InFileDataSource = { lines: [], path: "" };
 
-	async search(queryText: string): Promise<SearchResult> {
+	async searchInFile(queryText: string): Promise<SearchResult> {
 		if (!queryText) {
 			return new SearchResult(SearchType.IN_FILE, "", []);
 		}
@@ -27,15 +27,15 @@ export class SearchHelper {
 
 		const searchResult = new SearchResult(
 			SearchType.IN_FILE,
-			this.dataSource.path,
+			this.inFileDataSource.path,
 			[],
 		);
 
-		const entries = await this.fzfMatch(queryText, this.dataSource.lines);
+		const entries = await this.fzfMatch(queryText, this.inFileDataSource.lines);
 		for (const entry of entries) {
 			const row = entry.item.row;
 			const firstMatchedCol = MathUtil.minInSet(entry.positions);
-			const originLine = this.dataSource.lines[row].text;
+			const originLine = this.inFileDataSource.lines[row].text;
 
 			// only show part of the line that contains the highlighted chars
 			const start = Math.max(firstMatchedCol - 30, 0);
@@ -46,7 +46,7 @@ export class SearchHelper {
 				.filter((position) => position >= start && position < end)
 				.map((position) => position - start);
 
-			const highlightedText = this.highlightChars(
+			const highlightedText = this.highlightCharsByPositions(
 				substring,
 				newPositions,
 			);
@@ -66,6 +66,10 @@ export class SearchHelper {
 		return searchResult;
 	}
 
+	async searchInVault() {
+
+	}
+
 	private async updateDataSource() {
 		// Ensure the active leaf is a markdown note
 		const activeFile = this.app.workspace.getActiveFile();
@@ -77,7 +81,7 @@ export class SearchHelper {
 		const lines = (await this.app.vault.read(activeFile)).split("\n");
 
 		// Map each line to a MatchedLine object
-		this.dataSource = {
+		this.inFileDataSource = {
 			lines: lines.map((line, index) => new Line(line, index)),
 			path: activeFile.path,
 		};
@@ -97,6 +101,7 @@ export class SearchHelper {
 		queryText: string,
 	): Promise<string> {
 		const currLang = getCurrLanguage();
+		// TODO: modify this by currLanguage
 		const MAX_PRE_CAHRS_COUNT = 220;
 		let preCharsCount = firstMatchedCol;
 		let postCharsCount = 0;
@@ -107,7 +112,7 @@ export class SearchHelper {
 		// or reaching the required number of characters 
 		while (start > 0 && matchedRow - start <= 7 && preCharsCount < MAX_PRE_CAHRS_COUNT) {
 			start--;
-			preCharsCount += this.dataSource.lines[start].text.length;
+			preCharsCount += this.inFileDataSource.lines[start].text.length;
 		}
 
 		if (preCharsCount > MAX_PRE_CAHRS_COUNT) {
@@ -115,7 +120,7 @@ export class SearchHelper {
 				start++; // remove the last added line if it's not the matched line
 			} else if (start === matchedRow) {
 				// truncate the line from firstMatchedCol backward
-				const line = this.dataSource.lines[start];
+				const line = this.inFileDataSource.lines[start];
 				const startIdx = Math.max(
 					firstMatchedCol - MAX_PRE_CAHRS_COUNT,
 					0,
@@ -123,7 +128,7 @@ export class SearchHelper {
 				const truncatedLine =
 					line.text.substring(startIdx, firstMatchedCol) +
 					line.text.substring(firstMatchedCol);
-				this.dataSource.lines[start] = new Line(
+				this.inFileDataSource.lines[start] = new Line(
 					truncatedLine,
 					line.row,
 				);
@@ -134,13 +139,13 @@ export class SearchHelper {
 			}
 		}
 		while (
-			end < this.dataSource.lines.length - 1 &&
+			end < this.inFileDataSource.lines.length - 1 &&
 			postCharsCount < 3 * MAX_PRE_CAHRS_COUNT
 		) {
 			end++;
-			postCharsCount += this.dataSource.lines[end].text.length;
+			postCharsCount += this.inFileDataSource.lines[end].text.length;
 		}
-		const contextLines = this.dataSource.lines.slice(start, end + 1);
+		const contextLines = this.inFileDataSource.lines.slice(start, end + 1);
 
 		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
 
@@ -153,7 +158,7 @@ export class SearchHelper {
 					const entries = await this.fzfMatch(queryText, [line]);
 					if (entries.length > 0) {
 						const entry = entries[0];
-						return `<span class="target-line">${this.highlightChars(
+						return `<span class="target-line">${this.highlightCharsByPositions(
 							line.text,
 							Array.from(entry.positions),
 						)}</span>`;
@@ -174,7 +179,7 @@ export class SearchHelper {
 		return highlightedContext.join("\n");
 	}
 
-	private highlightChars(str: string, indexes: number[]): string {
+	private highlightCharsByPositions(str: string, indexes: number[]): string {
 		return str
 			.split("")
 			.map((char, i) => {
@@ -198,7 +203,7 @@ export class SearchHelper {
 	}
 }
 
-type DataSource = {
+type InFileDataSource = {
 	lines: Line[];
 	path: string;
 };

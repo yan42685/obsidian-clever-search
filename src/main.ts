@@ -14,7 +14,7 @@ import { container } from "tsyringe";
 import { getCurrLanguage } from "./entities/language-enum";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { SearchModal } from "./ui/search-modal";
-import { SearchClient } from "./web-worker/worker-client";
+import { SearchClient } from "./web-worker/search-worker-client";
 
 // Remember to rename these classes and interfaces!
 

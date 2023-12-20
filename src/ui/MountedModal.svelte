@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { MarkdownView, type App, type EditorPosition } from "obsidian";
+	import { EventEnum } from "src/entities/event-enum";
 	import {
 		InFileItem,
 		SearchResult,
 		SearchType,
 	} from "src/entities/search-types";
-	import { SearchHelper } from "src/search-helper";
+	import { SearchHelper } from "src/search/search-helper";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
-	import { EventEnum } from "src/utils/event-enum";
 	import { onDestroy, tick } from "svelte";
 	import { container } from "tsyringe";
 	import type { SearchModal } from "./search-modal";
@@ -48,7 +48,7 @@
 
 	// Handle input changes
 	async function handleInput() {
-		searchResult = await searchHelper.search(queryText);
+		searchResult = await searchHelper.searchInFile(queryText);
 		updateItem(0);
 		// wait until all dynamic elements are mounted and rendered
 		await tick();

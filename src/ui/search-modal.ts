@@ -1,6 +1,6 @@
 import { App, Modal } from "obsidian";
+import { EventEnum } from "src/entities/event-enum";
 import { eventBus } from "src/utils/event-bus";
-import { EventEnum } from "src/utils/event-enum";
 import { currModifier } from "src/utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 
