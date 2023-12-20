@@ -24,3 +24,4 @@ data.json
 # Custom
 dist/
 cs-search-worker.js
+coverage/

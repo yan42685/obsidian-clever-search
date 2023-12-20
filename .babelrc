@@ -1,0 +1,15 @@
+{
+  "presets": [
+    [
+      "@babel/preset-env",
+      {
+        "targets": {
+          "node": "current"
+        },
+        // 输出成ESM而不是CommonJS, 同时需要在jest.config.js设置 extensionsToTreatAsEsm: ['.ts']
+        "modules": false
+      }
+    ],
+    "@babel/preset-typescript",
+  ]
+}
