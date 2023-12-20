@@ -49,7 +49,7 @@ export class SearchHelper {
 				.filter((position) => position >= start && position < end)
 				.map((position) => position - start);
 
-			const highlightedText = this.highlightCharsByPositions(
+			const highlightedText = this.highlightLineByCharPositions(
 				substring,
 				newPositions,
 			);
@@ -150,8 +150,7 @@ export class SearchHelper {
 			end++;
 			postCharsCount += this.inFileDataSource.lines[end].text.length;
 		}
-		let contextLines = this.inFileDataSource.lines.slice(start, end + 1);
-		contextLines = this.removeLeadingBlankLines(contextLines, 3);
+		const contextLines = this.inFileDataSource.lines.slice(start, end + 1);
 
 		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
 
@@ -164,7 +163,7 @@ export class SearchHelper {
 					const entries = await this.fzfMatch(queryText, [line]);
 					if (entries.length > 0) {
 						const entry = entries[0];
-						return `<span class="target-line">${this.highlightCharsByPositions(
+						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
 							Array.from(entry.positions),
 						)}</span>`;
@@ -185,26 +184,7 @@ export class SearchHelper {
 		return highlightedContext.join("\n");
 	}
 
-	/**
-	 * removes up to `maxRemoveCount` leading blank lines from the array of lines
-	 * A blank line is defined as a line consisting only of whitespace characters
-	 * all subsequent lines are kept, including blank lines.
-	 */
-	private removeLeadingBlankLines(lines: Line[], maxRemoveCount: number): Line[] {
-		// count how many leading blank lines should be removed
-		let removeCount = 0;
-		for (const line of lines) {
-			if (line.text.match(/^\s*$/) && removeCount < maxRemoveCount) {
-				removeCount++;
-			} else {
-				break;
-			}
-		}
-
-		return lines.slice(removeCount);
-	}
-
-	private highlightCharsByPositions(str: string, positions: number[]): string {
+	private highlightLineByCharPositions(str: string, positions: number[]): string {
 		return str
 			.split("")
 			.map((char, i) => {
