@@ -11,6 +11,7 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
+import { getCurrLanguage } from "./entities/language-enum";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { SearchModal } from "./ui/search-modal";
 import { SearchClient } from "./web-worker/worker-client";
@@ -48,6 +49,7 @@ export default class CleverSearch extends Plugin {
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
 		this.omnisearchIntegration.init();
 		this.searchClient = container.resolve(SearchClient);
+		console.log(getCurrLanguage());
 	}
 
 	togglePrivacyMode() {

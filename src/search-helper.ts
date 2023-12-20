@@ -1,6 +1,7 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
+import { getCurrLanguage } from "./entities/language-enum";
 import {
 	InFileItem,
 	Line,
@@ -95,6 +96,7 @@ export class SearchHelper {
 		firstMatchedCol: number,
 		queryText: string,
 	): Promise<string> {
+		const currLang = getCurrLanguage();
 		const MAX_PRE_CAHRS_COUNT = 220;
 		let preCharsCount = firstMatchedCol;
 		let postCharsCount = 0;
