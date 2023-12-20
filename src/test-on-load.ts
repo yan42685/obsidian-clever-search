@@ -1,4 +1,4 @@
-import { printLanguageProportions, recognizeMainLanguage } from "./utils/nlp";
+import { detectLanguage, printLanguageProportions } from "./utils/nlp";
 
 // 定义测试字符串数组
 const testArrays = [
@@ -20,7 +20,7 @@ const testArrays = [
 ];
 export function testOnLoad() {
 	testArrays.forEach((array) => {
-		const result = recognizeMainLanguage(array);
+		const result = detectLanguage(array);
 		printLanguageProportions(result);
 	});
 }
