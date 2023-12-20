@@ -1,5 +1,5 @@
 import { franc } from "franc-min";
-import { LanguageEnum } from "../entities/language-enum";
+import { LanguageEnum } from "src/entities/language-enum";
 
 export type LanguageProportionsResult = {
 	mainLanguage: LanguageEnum;

@@ -77,7 +77,8 @@ module.exports = {
   //   }
   // }
   moduleDirectories: [
-    "node_modules", "src"
+    // see https://stackoverflow.com/questions/50171412/absolute-paths-baseurl-gives-error-cannot-find-module
+    "node_modules", "<rootDir>"
   ],
 
   // An array of file extensions your modules use
