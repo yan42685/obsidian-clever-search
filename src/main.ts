@@ -15,6 +15,7 @@ import { getCurrLanguage } from "./entities/language-enum";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { SearchModal } from "./ui/search-modal";
 import { SearchClient } from "./web-worker/search-worker-client";
+import { testOnLoad } from "./test-on-load";
 
 // Remember to rename these classes and interfaces!
 
@@ -49,7 +50,7 @@ export default class CleverSearch extends Plugin {
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
 		this.omnisearchIntegration.init();
 		this.searchClient = container.resolve(SearchClient);
-		console.log(getCurrLanguage());
+		testOnLoad();
 	}
 
 	togglePrivacyMode() {

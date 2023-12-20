@@ -33,6 +33,7 @@
 		"chokidar": "^3.5.3",
 		"compromise": "^14.10.1",
 		"dexie": "^3.2.4",
+		"franc-min": "^6.1.0",
 		"fzf": "^0.5.2",
 		"reflect-metadata": "^0.1.13",
 		"split2": "^4.2.0",

@@ -1,8 +1,7 @@
 export enum LanguageEnum {
-    // null = "English",
-    // en = "English",
+    other = "Other Language",
+    en = "English",
     zh = "简体中文",
-    other = "Other",
     // "zh-TW" = "繁體中文",
     // ru = "Pусский",
     // ko = "한국어",

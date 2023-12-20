@@ -9,22 +9,29 @@ export interface TruncateLimitConfig {
 }
 
 export class TruncateLimit {
-	private static readonly limitsByLanguage: Record<LanguageEnum, TruncateLimitConfig> =
-		{
-			[LanguageEnum.other]: {
-				maxPreCharsForItem: 100,
-				maxPreCharsForPreview: 200,
-				maxPreLines: 10,
-			},
-			[LanguageEnum.zh]: {
-				maxPreCharsForItem: 100,
-				maxPreCharsForPreview: 200,
-				maxPreLines: 10,
-			},
-		};
-    public readonly instance: TruncateLimitConfig;
+	private static readonly limitsByLanguage: Record<
+		LanguageEnum,
+		TruncateLimitConfig
+	> = {
+		[LanguageEnum.other]: {
+			maxPreCharsForItem: 80,
+			maxPreCharsForPreview: 200,
+			maxPreLines: 10,
+		},
+		[LanguageEnum.en]: {
+			maxPreCharsForItem: 80,
+			maxPreCharsForPreview: 200,
+			maxPreLines: 10,
+		},
+		[LanguageEnum.zh]: {
+			maxPreCharsForItem: 30,
+			maxPreCharsForPreview: 120,
+			maxPreLines: 10,
+		},
+	};
+	public readonly config: TruncateLimitConfig;
 
 	constructor() {
-        this.instance = TruncateLimit.limitsByLanguage[getCurrLanguage()];
-    }
+		this.config = TruncateLimit.limitsByLanguage[getCurrLanguage()];
+	}
 }
