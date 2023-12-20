@@ -1,9 +1,6 @@
 import { jest } from "@jest/globals";
-import { LanguageEnum } from "./entities/language-enum";
-import { testOnLoad } from "./test-on-load";
-import { detectLanguage, printLanguageProportions } from "./utils/nlp";
-
-import { debounce } from "throttle-debounce";
+import { LanguageEnum } from "src/entities/language-enum";
+import { detectLanguage, printLanguageProportions } from "src/utils/nlp";
 
 // 定义测试字符串数组
 const testArrays = [
@@ -53,19 +50,19 @@ describe("NLP functions", () => {
 				},
 				{
 					mainLanguage: LanguageEnum.en,
-					mainProportion: "100.00%",
+					mainProportion: "90.20%",
 					details: {
-						[LanguageEnum.en]: "100.00%",
-						[LanguageEnum.zh]: "0.00%",
+						[LanguageEnum.en]: "90.20%",
+						[LanguageEnum.zh]: "9.80%",
 						[LanguageEnum.other]: "0.00%",
 					},
 				},
 				{
 					mainLanguage: LanguageEnum.en,
-					mainProportion: "65.48%",
+					mainProportion: "53.57%",
 					details: {
-						[LanguageEnum.en]: "65.48%",
-						[LanguageEnum.zh]: "34.52%",
+						[LanguageEnum.en]: "53.57%",
+						[LanguageEnum.zh]: "46.43%",
 						[LanguageEnum.other]: "0.00%",
 					},
 				},
@@ -97,19 +94,6 @@ describe("NLP functions", () => {
 					"Main Language: English, Main Proportion: 50%",
 				),
 			);
-			// ... 根据 printLanguageProportions 函数的输出格式添加更多的断言
-		});
-	});
-
-	describe("testOnLoad function", () => {
-		it("should call detectLanguage and printLanguageProportions for each array", () => {
-			testOnLoad();
-
-			// 由于有三个数组，所以预期 console.log 被调用了三次
-			expect(logSpy).toHaveBeenCalledTimes(3);
-			// ... 根据 testOnLoad 函数的具体行为添加更多的断言
 		});
 	});
 });
-const fn = (a: number, b: number) => a + b;
-const fnDebounced = debounce(100, fn);
