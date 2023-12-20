@@ -31,7 +31,10 @@ export class SearchHelper {
 			[],
 		);
 
-		const entries = await this.fzfMatch(queryText, this.inFileDataSource.lines);
+		const entries = await this.fzfMatch(
+			queryText,
+			this.inFileDataSource.lines,
+		);
 		for (const entry of entries) {
 			const row = entry.item.row;
 			const firstMatchedCol = MathUtil.minInSet(entry.positions);
@@ -66,9 +69,7 @@ export class SearchHelper {
 		return searchResult;
 	}
 
-	async searchInVault() {
-
-	}
+	async searchInVault() {}
 
 	private async updateDataSource() {
 		// Ensure the active leaf is a markdown note
@@ -108,9 +109,13 @@ export class SearchHelper {
 		let start = matchedRow;
 		let end = matchedRow;
 
-		// extend the context upwards until the start of the document or 7 lines 
-		// or reaching the required number of characters 
-		while (start > 0 && matchedRow - start <= 7 && preCharsCount < MAX_PRE_CAHRS_COUNT) {
+		// extend the context upwards until the start of the document or 7 lines
+		// or reaching the required number of characters
+		while (
+			start > 0 &&
+			matchedRow - start <= 7 &&
+			preCharsCount < MAX_PRE_CAHRS_COUNT
+		) {
 			start--;
 			preCharsCount += this.inFileDataSource.lines[start].text.length;
 		}
@@ -145,7 +150,8 @@ export class SearchHelper {
 			end++;
 			postCharsCount += this.inFileDataSource.lines[end].text.length;
 		}
-		const contextLines = this.inFileDataSource.lines.slice(start, end + 1);
+		let contextLines = this.inFileDataSource.lines.slice(start, end + 1);
+		contextLines = this.removeLeadingBlankLines(contextLines, 3);
 
 		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
 
@@ -179,7 +185,26 @@ export class SearchHelper {
 		return highlightedContext.join("\n");
 	}
 
-	private highlightCharsByPositions(str: string, indexes: number[]): string {
+	/**
+	 * removes up to `maxRemoveCount` leading blank lines from the array of lines
+	 * A blank line is defined as a line consisting only of whitespace characters
+	 * all subsequent lines are kept, including blank lines.
+	 */
+	private removeLeadingBlankLines(lines: Line[], maxRemoveCount: number): Line[] {
+		// count how many leading blank lines should be removed
+		let removeCount = 0;
+		for (const line of lines) {
+			if (line.text.match(/^\s*$/) && removeCount < maxRemoveCount) {
+				removeCount++;
+			} else {
+				break;
+			}
+		}
+
+		return lines.slice(removeCount);
+	}
+
+	private highlightCharsByPositions(str: string, positions: number[]): string {
 		return str
 			.split("")
 			.map((char, i) => {
@@ -187,7 +212,7 @@ export class SearchHelper {
 				// if (char === " ") {
 				// 	return "&nbsp;";
 				// }
-				return indexes.includes(i) ? `<mark>${char}</mark>` : char;
+				return positions.includes(i) ? `<mark>${char}</mark>` : char;
 			})
 			.join("");
 	}
