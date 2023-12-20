@@ -1,4 +1,5 @@
 import { LanguageEnum, getCurrLanguage } from "src/entities/language-enum";
+import { textAnalyzer } from "src/utils/nlp";
 
 export class Highlighter {}
 
@@ -29,9 +30,10 @@ export class TruncateLimit {
 			maxPreLines: 10,
 		},
 	};
-	public readonly config: TruncateLimitConfig;
 
-	constructor() {
-		this.config = TruncateLimit.limitsByLanguage[getCurrLanguage()];
-	}
+	// public static getConfig(strArray: string[]): TruncateLimitConfig {
+	// 	const languageResult = textAnalyzer.detectLanguage(strArray);
+
+
+	// }
 }

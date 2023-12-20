@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import { LanguageEnum } from "src/entities/language-enum";
-import { detectLanguage, printLanguageProportions } from "src/utils/nlp";
+import { textAnalyzer } from "src/utils/nlp";
 
 // 定义测试字符串数组
 const testArrays = [
@@ -69,7 +69,7 @@ describe("NLP functions", () => {
 			];
 
 			testArrays.forEach((array, index) => {
-				const result = detectLanguage(array);
+				const result = textAnalyzer.detectLanguage(array);
 				expect(result).toEqual(expectedResults[index]);
 			});
 		});
@@ -86,7 +86,7 @@ describe("NLP functions", () => {
 					[LanguageEnum.other]: "0%",
 				},
 			};
-			printLanguageProportions(result);
+			textAnalyzer.printLanguageProportion(result);
 
 			// 验证 console.log 是否被调用
 			expect(logSpy).toHaveBeenCalledWith(
