@@ -22,6 +22,9 @@ data.json
 .DS_Store
 
 # Custom
-dist/
 cs-search-worker.js
 coverage/
+.editorconfig
+main.js
+styles.css
+

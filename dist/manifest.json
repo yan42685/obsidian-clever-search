@@ -1,0 +1,10 @@
+{
+	"id": "clever-search",
+	"name": "Clever Search",
+	"version": "0.0.3",
+	"minAppVersion": "0.15.0",
+	"description": "fuzzy full text search",
+	"author": "Alex Clifton",
+    "fundingUrl": "https://www.buymeacoffee.com/alexclifton",
+	"isDesktopOnly": true
+}

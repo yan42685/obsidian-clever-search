@@ -6,8 +6,7 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"version": "node version-bump.mjs && git add manifest.json versions.json"
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
 	},
 	"keywords": [],
 	"author": "",
@@ -43,6 +42,7 @@
 		"dexie": "^3.2.4",
 		"franc-min": "^6.1.0",
 		"fzf": "^0.5.2",
+		"minisearch": "^6.3.0",
 		"reflect-metadata": "^0.1.13",
 		"split2": "^4.2.0",
 		"throttle-debounce": "^5.0.0",
