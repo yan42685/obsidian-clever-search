@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-sample-plugin",
+	"name": "clever-search",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"description": "Fuzzy search and semantic search for obsidian",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -9,8 +9,8 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
 	},
 	"keywords": [],
-	"author": "",
-	"license": "MIT",
+	"author": "Alex Clifton",
+	"license": "GPL-3",
 	"devDependencies": {
 		"@babel/core": "^7.23.6",
 		"@babel/preset-env": "^7.23.6",
