@@ -4,6 +4,7 @@
 	"description": "Fuzzy search and semantic search for obsidian",
 	"main": "main.js",
 	"scripts": {
+		"preinstall": "npx only-allow pnpm", 
 		"dev": "node esbuild.config.mjs",
 		"test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"

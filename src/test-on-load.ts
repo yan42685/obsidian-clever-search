@@ -19,6 +19,8 @@ export function testOnLoad() {
 
 
 
+
+
 			
 			// const dir = container.resolve(PluginManager).vaultPath + "abc";
 			// const allFiles = await getAllFiles([dir], [FileExtension.ALL]);
@@ -27,5 +29,6 @@ export function testOnLoad() {
 			// logger.debug(`count: ${allFiles.length}`);
 			// logger.debug(allFiles);
 		});
-	}, 3000);
+	}, 1300);
+
 }
