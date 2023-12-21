@@ -50,4 +50,6 @@ class Logger {
 	}
 }
 
+export type LogLevel = "None" | "Debug" | "Info" | "Warn" | "Error";
+
 export const logger = new Logger();

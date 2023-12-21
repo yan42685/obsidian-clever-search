@@ -54,6 +54,7 @@ export async function testRequest() {
 		}
 	}
     // test(gptapiOption);
-    test(openaiOption);
+
+    // test(openaiOption);
 
 }

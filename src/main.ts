@@ -15,17 +15,20 @@ import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./obsidian/plugin-manager";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
-import { SearchClient } from "./web-worker/search-worker-client";
 import { THIS_PLUGIN } from "./utils/constants";
+import type { LogLevel } from "./utils/logger";
+import { SearchClient } from "./web-worker/search-worker-client";
 
 // Remember to rename these classes and interfaces!
 
 class CleverSearchSettings {
 	mySetting = "hello";
+	logLevel: LogLevel = "Debug";
 }
 
 const DEFAULT_SETTINGS: CleverSearchSettings = {
 	mySetting: "default",
+	logLevel: "Debug"
 };
 
 export default class CleverSearch extends Plugin {
@@ -37,7 +40,7 @@ export default class CleverSearch extends Plugin {
 	async onload() {
 		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
 		container.register(THIS_PLUGIN, { useValue: this });
-		// initialize this singleton
+		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
 		container.resolve(PluginManager);
 
 		// logger.info("test");

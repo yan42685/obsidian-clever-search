@@ -90,3 +90,19 @@ settings:
 .my-custom-blur .cm-line.cm-active {
 	filter: none !important;
 }
+
+/* ========== For Setting Tab =======*/
+/* 定义设置组标题的样式 */
+.cs-setting-group-dev-title {
+    position: relative;
+    cursor: pointer;
+	margin-bottom: 15px;
+}
+
+/* 定义伪元素的样式 */
+.cs-setting-group-dev-title::before {
+    content: var(--cs-dev-collapse-icon);
+    position: absolute;
+    left: -20px;
+    top: 0;
+}
