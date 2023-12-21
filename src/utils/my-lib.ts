@@ -18,8 +18,9 @@ export const currModifier = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
  */
 export async function getAllFiles(
 	dirs: string[],
-	extensions: string[],
+	extensions: FileExtension[] = [FileExtension.MD],
 ): Promise<string[]> {
+	const extensionsStr: string[] = extensions.map((ext) => ext.toString());
 	const results: string[] = [];
 	const visitedDirs = new Set<string>();
 
@@ -48,7 +49,7 @@ export async function getAllFiles(
 				await traverse(resolvedPath);
 			} else {
 				if (
-					extensions.includes(
+					extensionsStr.includes(
 						pathLib.extname(resolvedPath).toLowerCase(),
 					)
 				) {
