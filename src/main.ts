@@ -11,11 +11,12 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
-import { getCurrLanguage } from "./entities/language-enum";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
+import { PluginManager } from "./obsidian/plugin-manager";
+import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
 import { SearchClient } from "./web-worker/search-worker-client";
-import { testOnLoad } from "./test-on-load";
+import { THIS_PLUGIN } from "./utils/constants";
 
 // Remember to rename these classes and interfaces!
 
@@ -34,6 +35,11 @@ export default class CleverSearch extends Plugin {
 	searchClient?: SearchClient;
 
 	async onload() {
+		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
+		container.register(THIS_PLUGIN, { useValue: this });
+		// initialize this singleton
+		container.resolve(PluginManager);
+
 		// logger.info("test");
 		// logger.debug("test");
 		// logger.warn("test");
@@ -44,7 +50,6 @@ export default class CleverSearch extends Plugin {
 		// 由于plugin不能让框架自己new，而是要注册this依赖，所以这里需要在CleverSearch手动注册this对象
 		// register <"cleverSearch", this> to the container
 		// cant't use CleverSearch as a key here to void cycle dependencies
-		container.register("CleverSearch", { useValue: this });
 		container.register(App, { useValue: this.app });
 
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);

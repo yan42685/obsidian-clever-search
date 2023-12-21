@@ -5,7 +5,7 @@ import * as chokidar from "chokidar";
 import nlp from "compromise/two";
 import { debounce } from "throttle-debounce";
 import { inject, singleton } from "tsyringe";
-import { PluginManager } from "../plugin-manager";
+import { PluginManager } from "../obsidian/plugin-manager";
 import { logger } from "../utils/logger";
 import {
 	FileExtension,
