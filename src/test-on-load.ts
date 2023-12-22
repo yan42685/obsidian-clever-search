@@ -1,10 +1,16 @@
 import { container } from "tsyringe";
+import { PluginSettings } from "./services/obsidian/settings";
 import { LexicalEngine } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
+import { HttpClient } from "./utils/web/http-client";
 
 export async function testOnLoad() {
-	// testRequest();
+	const settings = container.resolve(PluginSettings);
+	// ====== API Request =====
+	// const httpClient = container.resolve(HttpClient);	
+	// httpClient.testRequest();
 
+	// ====== vault files =====
 	// setTimeout(() => {
 	// 	monitorExecution(async () => {
 	// 		const plugin: CleverSearch = container.resolve(THIS_PLUGIN);
@@ -15,9 +21,7 @@ export async function testOnLoad() {
 	// }, 1300);
 
 
-	await testLexicalSearch();
-
-
+	// await testLexicalSearch();
 }
 
 async function testLexicalSearch() {

@@ -131,14 +131,14 @@ class GeneralTab extends PluginSettingTab {
 	}
 }
 
-export class CleverSearchSettings {
+export class PluginSettings {
 	mySetting = "default";
 	logLevel: LogLevel = "debug";
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
 }
 
-export const DEFAULT_SETTINGS: CleverSearchSettings = {
+export const DEFAULT_SETTINGS: PluginSettings = {
 	mySetting: "default",
 	logLevel: isDevEnvironment ? "debug" : "none",
 	apiProvider1: {

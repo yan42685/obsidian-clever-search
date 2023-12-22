@@ -11,7 +11,7 @@ import "reflect-metadata";
 import { container } from "tsyringe";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
-import { CleverSearchSettings, DEFAULT_SETTINGS } from "./services/obsidian/settings";
+import { DEFAULT_SETTINGS, PluginSettings } from "./services/obsidian/settings";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
 import { THIS_PLUGIN } from "./utils/constants";
@@ -21,7 +21,7 @@ import { SearchClient } from "./web-worker/search-worker-client";
 
 
 export default class CleverSearch extends Plugin {
-	settings: CleverSearchSettings = new CleverSearchSettings();
+	settings: PluginSettings = new PluginSettings();
 	privacyModeEnabled = false;
 	omnisearchIntegration?: OmnisearchIntegration;
 	searchClient?: SearchClient;
@@ -30,10 +30,14 @@ export default class CleverSearch extends Plugin {
 		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
+		await this.loadSettings();  // must run before the following line
+		container.register(PluginSettings, {useValue: this.settings})
+
+
+
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
 		container.resolve(PluginManager);
 
-		await this.loadSettings();
 		// this.exampleCode();
 		this.registerCommands();
 
@@ -166,9 +170,11 @@ export default class CleverSearch extends Plugin {
 			await this.loadData(),
 		);
 		logger.setLevel(this.settings.logLevel);
+		// logger.debug(this.settings.apiProvider1.domain);
 	}
 
 	async saveSettings() {
+		// logger.debug(`saved settings: ${this.settings.apiProvider1.domain}`);
 		await this.saveData(this.settings);
 	}
 }
