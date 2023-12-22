@@ -1,7 +1,17 @@
+import type { SearchResult as MiniResult } from "minisearch";
+export type MiniSearchResult = MiniResult;
+
 export type IndexedDocument = {
 	path: string;
-	
+	basename: string;
+	aliases: string;
+	content: string;
 };
+
+export type DocumentRef = {
+	path: string;
+	mtime: number;
+}
 
 export type InFileDataSource = {
 	lines: Line[];

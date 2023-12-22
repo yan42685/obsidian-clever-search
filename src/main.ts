@@ -58,7 +58,7 @@ export default class CleverSearch extends Plugin {
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
 		this.omnisearchIntegration.init();
 		this.searchClient = container.resolve(SearchClient);
-		testOnLoad();
+		await testOnLoad();
 	}
 
 	togglePrivacyMode() {

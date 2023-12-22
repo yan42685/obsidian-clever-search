@@ -1,16 +1,22 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
+import type { Options } from "minisearch";
+import MiniSearch from "minisearch";
 import { App, Component } from "obsidian";
+import { logger } from "src/utils/logger";
 import { container, singleton } from "tsyringe";
 import { getCurrLanguage } from "../../globals/language-enum";
 import {
-    InFileItem,
-    Line,
-    MatchedLine,
-    SearchResult,
-    SearchType,
-    type InFileDataSource,
+	InFileItem,
+	Line,
+	MatchedLine,
+	SearchResult,
+	SearchType,
+	type InFileDataSource,
+	type MiniSearchResult,
 } from "../../globals/search-types";
 import { MathUtil } from "../../utils/math-util";
+import { Database } from "../database/database";
+import { DataProvider } from "./data-provider";
 
 @singleton()
 export class SearchHelper {
@@ -185,7 +191,10 @@ export class SearchHelper {
 		return highlightedContext.join("\n");
 	}
 
-	private highlightLineByCharPositions(str: string, positions: number[]): string {
+	private highlightLineByCharPositions(
+		str: string,
+		positions: number[],
+	): string {
 		return str
 			.split("")
 			.map((char, i) => {
@@ -209,7 +218,38 @@ export class SearchHelper {
 	}
 }
 
+export class LexicalEngine {
+	private static readonly OPTIONS: Options = {
+		idField: "path",
+		fields: ["basename", "aliases", "content"],
+	};
+	private readonly dataProvider = container.resolve(DataProvider);
+	private readonly database = container.resolve(Database);
+	private miniSearch: MiniSearch;
 
-export class InVaultSearcher {
+	async init() {
+		const prevData = await this.database.getMiniSearchData();
+		if (prevData) {
+			this.miniSearch = MiniSearch.loadJS(
+				prevData,
+				LexicalEngine.OPTIONS,
+			);
+		} else {
+			this.miniSearch = new MiniSearch(LexicalEngine.OPTIONS);
+			await this.reIndexAll();
+		}
+	}
+	async search(query: string): Promise<MiniSearchResult[]> {
+		return this.miniSearch.search(query, {
+			fields: ["basename", "content"],
+		});
+	}
 
+	async reIndexAll() {
+		const allIndexedDocs = this.dataProvider.getIndexedDocuments();
+		await this.miniSearch.removeAll();
+		// TODO: add chunks rather than all
+		await this.miniSearch.addAllAsync(allIndexedDocs);
+		logger.debug(this.miniSearch);
+	}
 }
