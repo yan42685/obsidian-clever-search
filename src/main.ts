@@ -11,24 +11,14 @@ import "reflect-metadata";
 import { container } from "tsyringe";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
+import { CleverSearchSettings, DEFAULT_SETTINGS } from "./services/obsidian/settings";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
 import { THIS_PLUGIN } from "./utils/constants";
-import { logger, type LogLevel } from "./utils/logger";
+import { logger } from "./utils/logger";
 import { isDevEnvironment } from "./utils/my-lib";
 import { SearchClient } from "./web-worker/search-worker-client";
 
-// Remember to rename these classes and interfaces!
-
-class CleverSearchSettings {
-	mySetting = "default";
-	logLevel: LogLevel = "debug";
-}
-
-const DEFAULT_SETTINGS: CleverSearchSettings = {
-	mySetting: "default",
-	logLevel: isDevEnvironment ? "debug" : "none"
-};
 
 export default class CleverSearch extends Plugin {
 	settings: CleverSearchSettings = new CleverSearchSettings();

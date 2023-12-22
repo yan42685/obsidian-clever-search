@@ -3,7 +3,7 @@ import type CleverSearch from "src/main";
 import { THIS_PLUGIN } from "src/utils/constants";
 import { container, singleton } from "tsyringe";
 import { pathUtils } from "../../utils/my-lib";
-import { ConfigManager } from "./config";
+import { SettingManager } from "./settings";
 
 @singleton()
 export class PluginManager {
@@ -26,7 +26,7 @@ export class PluginManager {
 
 
 	private loadComponents() {
-		container.resolve(ConfigManager);
+		container.resolve(SettingManager);
 	}
 
 	updateWatchedPaths() {

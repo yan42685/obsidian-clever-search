@@ -2,10 +2,15 @@ import { PluginSettingTab, Setting } from "obsidian";
 import type CleverSearch from "src/main";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/utils/constants";
 import { logger, type LogLevel } from "src/utils/logger";
-import { container, singleton } from "tsyringe";
+import { isDevEnvironment } from "src/utils/my-lib";
+import { container } from "tsyringe";
 
-@singleton()
-export class ConfigManager {
+export type ApiProvider = {
+	domain: string;
+	key: string;
+};
+
+export class SettingManager {
 	plugin: CleverSearch = container.resolve(THIS_PLUGIN);
 	constructor() {
 		this.plugin.addSettingTab(new GeneralTab(this.plugin));
@@ -40,7 +45,7 @@ class GeneralTab extends PluginSettingTab {
 		});
 
 		// devSettingContent.style.display = "none";
-		const initialCollapsed = false;
+		const initialCollapsed = isDevEnvironment ? false : true;
 		devSettingTitle.style.setProperty(
 			"--cs-dev-collapse-icon",
 			initialCollapsed ? ICON_COLLAPSE : ICON_EXPAND,
@@ -58,15 +63,48 @@ class GeneralTab extends PluginSettingTab {
 
 		new Setting(devSettingContent)
 			.setName("API provider1")
-			.setDesc("description")
-			.addText((text) => text.setPlaceholder("api.openai.com"))
-			.addText((text) => text.setPlaceholder("API key"));
+			.setDesc("domain and key")
+			.addText((text) =>
+				text
+					.setPlaceholder("api.openai.com")
+					.setValue(this.plugin.settings.apiProvider1.domain)
+					.onChange((domain) => {
+						this.plugin.settings.apiProvider1.domain = domain;
+						this.plugin.saveSettings();
+					}),
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("API key")
+
+					.setValue(this.plugin.settings.apiProvider1.key)
+					.onChange((key) => {
+						this.plugin.settings.apiProvider1.key = key;
+						this.plugin.saveSettings();
+					}),
+			);
 
 		new Setting(devSettingContent)
 			.setName("API provider2")
 			.setDesc("description")
-			.addText((text) => text.setPlaceholder("api.openai.com"))
-			.addText((text) => text.setPlaceholder("API key"));
+			.addText((text) =>
+				text
+					.setPlaceholder("api.openai.com")
+					.setValue(this.plugin.settings.apiProvider2.domain)
+					.onChange((domain) => {
+						this.plugin.settings.apiProvider2.domain = domain;
+						this.plugin.saveSettings();
+					}),
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("API key")
+					.setValue(this.plugin.settings.apiProvider2.key)
+					.onChange((key) => {
+						this.plugin.settings.apiProvider2.key = key;
+						this.plugin.saveSettings();
+					}),
+			);
 
 		new Setting(devSettingContent)
 			.setName("Log level")
@@ -89,7 +127,26 @@ class GeneralTab extends PluginSettingTab {
 						this.plugin.settings.logLevel = level;
 						await this.plugin.saveSettings();
 					}),
-
 			);
 	}
 }
+
+export class CleverSearchSettings {
+	mySetting = "default";
+	logLevel: LogLevel = "debug";
+	apiProvider1: ApiProvider;
+	apiProvider2: ApiProvider;
+}
+
+export const DEFAULT_SETTINGS: CleverSearchSettings = {
+	mySetting: "default",
+	logLevel: isDevEnvironment ? "debug" : "none",
+	apiProvider1: {
+		domain: "",
+		key: "",
+	},
+	apiProvider2: {
+		domain: "",
+		key: "",
+	},
+};
