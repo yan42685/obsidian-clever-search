@@ -1,10 +1,10 @@
 import { container } from "tsyringe";
 import { LexicalEngine } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
-import { testRequest } from "./utils/web/http-client";
 
 export async function testOnLoad() {
-	testRequest();
+	// testRequest();
+
 	// setTimeout(() => {
 	// 	monitorExecution(async () => {
 	// 		const plugin: CleverSearch = container.resolve(THIS_PLUGIN);
@@ -13,14 +13,16 @@ export async function testOnLoad() {
 	// 		logger.debug(vault.configDir); // .obsidian
 	// 	});
 	// }, 1300);
+
+	await testLexicalSearch();
+
+}
+
+async function testLexicalSearch() {
 	const lexicalEngine = container.resolve(LexicalEngine);
 	await lexicalEngine.init();
-	const results = await lexicalEngine.search("document content of");
-	// logger.debug("minisearch searching...");
-
-	logger.debug(results);
-
-
-
-	// console.log(logger.getLevel())
+	const resultsOr = await lexicalEngine.searchOr("document content of");
+	const resultsAnd = await lexicalEngine.searchAnd("document content of");
+	logger.debug(resultsOr);
+	logger.debug(resultsAnd);
 }

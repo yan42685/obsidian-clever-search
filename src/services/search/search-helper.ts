@@ -239,9 +239,21 @@ export class LexicalEngine {
 			await this.reIndexAll();
 		}
 	}
-	async search(query: string): Promise<MiniSearchResult[]> {
+
+	async searchAnd(query: string) {
+		return this.search(query, "and");
+	}
+
+	async searchOr(query: string) {
+		return this.search(query, "or");
+	}
+	private async search(
+		query: string,
+		combineWith: "and" | "or",
+	): Promise<MiniSearchResult[]> {
 		return this.miniSearch.search(query, {
 			fields: ["basename", "content"],
+			combineWith: combineWith,
 		});
 	}
 

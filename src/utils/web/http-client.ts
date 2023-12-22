@@ -53,8 +53,8 @@ export async function testRequest() {
 			logger.error(err);
 		}
 	}
-    // test(gptapiOption);
+    test(gptapiOption);
 
-    // test(openaiOption);
+    test(openaiOption);
 
 }
