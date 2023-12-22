@@ -10,7 +10,9 @@ export class SearchClient {
 		// const workerJsPath = obsidianFs.getFullPath("./cs-search-worker.js");
         // console.log(workerJsPath);
 
-		this.initWorker();
+
+
+		// this.initWorker();
 	}
 
 	async initWorker() {

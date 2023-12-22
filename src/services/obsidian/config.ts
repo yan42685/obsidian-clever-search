@@ -1,7 +1,7 @@
 import { PluginSettingTab, Setting } from "obsidian";
 import type CleverSearch from "src/main";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/utils/constants";
-import type { LogLevel } from "src/utils/logger";
+import { logger, type LogLevel } from "src/utils/logger";
 import { container, singleton } from "tsyringe";
 
 @singleton()
@@ -75,16 +75,17 @@ class GeneralTab extends PluginSettingTab {
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOptions({
-						none: "None",
-						debug: "Debug",
-						info: "Info",
-						warn: "Warn",
-						error: "Error",
+						debug: "debug",
+						info: "info",
+						warn: "warn",
+						error: "error",
+						none: "none",
 					})
 					// 不能用大写的字符串作为key...
 					.setValue(this.plugin.settings.logLevel.toLowerCase())
 					.onChange(async (value) => {
 						const level = value as LogLevel;
+						logger.setLevel(level);
 						this.plugin.settings.logLevel = level;
 						await this.plugin.saveSettings();
 					}),

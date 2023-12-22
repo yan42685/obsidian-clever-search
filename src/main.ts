@@ -5,31 +5,29 @@ import {
 	MarkdownView,
 	Modal,
 	Notice,
-	Plugin,
-	PluginSettingTab,
-	Setting
+	Plugin
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
-import { HeadingModifyHint } from "./services/obsidian/heading-modify-hint";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
 import { THIS_PLUGIN } from "./utils/constants";
-import type { LogLevel } from "./utils/logger";
+import { logger, type LogLevel } from "./utils/logger";
+import { isDevEnvironment } from "./utils/my-lib";
 import { SearchClient } from "./web-worker/search-worker-client";
 
 // Remember to rename these classes and interfaces!
 
 class CleverSearchSettings {
-	mySetting = "hello";
-	logLevel: LogLevel = "Debug";
+	mySetting = "default";
+	logLevel: LogLevel = "debug";
 }
 
 const DEFAULT_SETTINGS: CleverSearchSettings = {
 	mySetting: "default",
-	logLevel: "Debug"
+	logLevel: isDevEnvironment ? "debug" : "none"
 };
 
 export default class CleverSearch extends Plugin {
@@ -41,31 +39,21 @@ export default class CleverSearch extends Plugin {
 	async onload() {
 		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
 		container.register(THIS_PLUGIN, { useValue: this });
+		container.register(App, { useValue: this.app });
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
 		container.resolve(PluginManager);
 
-
-		// logger.info("test");
-		// logger.debug("test");
-		// logger.warn("test");
-		// logger.error("test");
 		await this.loadSettings();
 		// this.exampleCode();
 		this.registerCommands();
-		// 由于plugin不能让框架自己new，而是要注册this依赖，所以这里需要在CleverSearch手动注册this对象
-		// register <"cleverSearch", this> to the container
-		// cant't use CleverSearch as a key here to void cycle dependencies
-		container.register(App, { useValue: this.app });
 
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
 		this.omnisearchIntegration.init();
 		this.searchClient = container.resolve(SearchClient);
-		await testOnLoad();
 
-		const hinter = container.resolve(HeadingModifyHint);
-		// const hinter = new HeadingModifyHint(this);
-		hinter.init(); // need to unregister when unloading
-
+		if (isDevEnvironment) {
+			await testOnLoad();
+		}
 	}
 
 	togglePrivacyMode() {
@@ -165,9 +153,6 @@ export default class CleverSearch extends Plugin {
 			},
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
 		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
 		// Using this function will automatically remove the event listener when this plugin is disabled.
 		this.registerDomEvent(document, "click", (evt: MouseEvent) => {
@@ -182,7 +167,6 @@ export default class CleverSearch extends Plugin {
 
 	onunload() {
 		document.body.classList.remove("my-custom-blur");
-
 	}
 
 	async loadSettings() {
@@ -191,6 +175,7 @@ export default class CleverSearch extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData(),
 		);
+		logger.setLevel(this.settings.logLevel);
 	}
 
 	async saveSettings() {
@@ -198,33 +183,7 @@ export default class CleverSearch extends Plugin {
 	}
 }
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: CleverSearch;
 
-	constructor(app: App, plugin: CleverSearch) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const { containerEl } = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName("Setting #1")
-			.setDesc("It's a secret")
-			.addText((text) =>
-				text
-					.setPlaceholder("Enter your secret")
-					.setValue(this.plugin.settings?.mySetting as any)
-					.onChange(async (value) => {
-						this.plugin.settings.mySetting = value;
-						await this.plugin.saveSettings();
-					}),
-			);
-	}
-}
 
 class SampleModal extends Modal {
 	constructor(app: App) {

@@ -6,6 +6,8 @@ import { logger } from "./logger";
 export const fsUtils = fsLib;
 export const pathUtils = pathLib;
 
+export const isDevEnvironment = process.env.NODE_ENV === "development";
+
 // "Ctrl" for Windows/Linux;    "Mod" for MacOS
 export const currModifier = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
 	? "Mod"
@@ -107,3 +109,4 @@ export function formatMillis(millis: number) {
 		return `${minutes} min ${seconds} s ${milliseconds} ms`;
 	}
 }
+

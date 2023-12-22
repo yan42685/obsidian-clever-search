@@ -1,16 +1,22 @@
-const isDevEnvironment = process.env.NODE_ENV === "development";
-
 class Logger {
-	getCallerName() {
-		// get stack info and match
-		const match = (new Error().stack?.split("\n")[3] || "").match(
-			/at (\S+)/,
-		);
-		return match ? `<${match[1]}> ` : "";
+	private logLevel: LogLevel = "debug";
+	private levelWeights: { [level in LogLevel]: number } = {
+		debug: 1,
+		info: 2,
+		warn: 3,
+		error: 4,
+		none: 5,
+	};
+
+	getLevel(): LogLevel {
+		return this.logLevel;
+	}
+	setLevel(level: LogLevel) {
+		this.logLevel = level;
 	}
 
 	info(...args: any[]) {
-		if (isDevEnvironment) {
+		if (this.shouldLog("info")) {
 			console.info(
 				`%c[info] ${this.getCallerName()}`,
 				"color: blue;",
@@ -20,7 +26,7 @@ class Logger {
 	}
 
 	debug(...args: any[]) {
-		if (isDevEnvironment) {
+		if (this.shouldLog("debug")) {
 			console.debug(
 				`%c[debug] ${this.getCallerName()}`,
 				"color: green;",
@@ -30,7 +36,7 @@ class Logger {
 	}
 
 	warn(...args: any[]) {
-		if (isDevEnvironment) {
+		if (this.shouldLog("warn")) {
 			console.warn(
 				`%c[warn] ${this.getCallerName()}`,
 				"color: orange;",
@@ -40,7 +46,7 @@ class Logger {
 	}
 
 	error(...args: any[]) {
-		if (isDevEnvironment) {
+		if (this.shouldLog("error")) {
 			console.error(
 				`%c[error] ${this.getCallerName()}`,
 				"color: red;",
@@ -48,8 +54,19 @@ class Logger {
 			);
 		}
 	}
+	private getCallerName() {
+		// get stack info and match
+		const match = (new Error().stack?.split("\n")[3] || "").match(
+			/at (\S+)/,
+		);
+		return match ? `<${match[1]}> ` : "";
+	}
+	private shouldLog(level: LogLevel): boolean {
+		return this.levelWeights[level] >= this.levelWeights[this.logLevel];
+	}
 }
 
-export type LogLevel = "None" | "Debug" | "Info" | "Warn" | "Error";
+// 不适合用大写字母，因为作为属性时，似乎只能用小写字母
+export type LogLevel = "debug" | "info" | "warn" | "error" | "none";
 
 export const logger = new Logger();
