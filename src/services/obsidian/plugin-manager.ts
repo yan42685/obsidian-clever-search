@@ -2,7 +2,7 @@ import type { FileSystemAdapter } from "obsidian";
 import type CleverSearch from "src/main";
 import { THIS_PLUGIN } from "src/utils/constants";
 import { container, singleton } from "tsyringe";
-import { pathUtils } from "../utils/my-lib";
+import { pathUtils } from "../../utils/my-lib";
 import { ConfigManager } from "./config";
 
 @singleton()

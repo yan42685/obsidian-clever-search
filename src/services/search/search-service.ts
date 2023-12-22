@@ -5,7 +5,6 @@ import * as chokidar from "chokidar";
 import nlp from "compromise/two";
 import { debounce } from "throttle-debounce";
 import { inject, singleton } from "tsyringe";
-import { PluginManager } from "../../obsidian/plugin-manager";
 import { logger } from "../../utils/logger";
 import {
     FileExtension,
@@ -14,6 +13,7 @@ import {
     monitorExecution,
     pathUtils
 } from "../../utils/my-lib";
+import { PluginManager } from "../obsidian/plugin-manager";
 
 // register <SearchService, singleton> to the container
 @singleton()

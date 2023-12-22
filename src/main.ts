@@ -12,7 +12,8 @@ import {
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
-import { PluginManager } from "./obsidian/plugin-manager";
+import { HeadingModifyHint } from "./services/obsidian/heading-modify-hint";
+import { PluginManager } from "./services/obsidian/plugin-manager";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
 import { THIS_PLUGIN } from "./utils/constants";
@@ -43,6 +44,7 @@ export default class CleverSearch extends Plugin {
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
 		container.resolve(PluginManager);
 
+
 		// logger.info("test");
 		// logger.debug("test");
 		// logger.warn("test");
@@ -59,6 +61,11 @@ export default class CleverSearch extends Plugin {
 		this.omnisearchIntegration.init();
 		this.searchClient = container.resolve(SearchClient);
 		await testOnLoad();
+
+		const hinter = container.resolve(HeadingModifyHint);
+		// const hinter = new HeadingModifyHint(this);
+		hinter.init(); // need to unregister when unloading
+
 	}
 
 	togglePrivacyMode() {
@@ -175,6 +182,7 @@ export default class CleverSearch extends Plugin {
 
 	onunload() {
 		document.body.classList.remove("my-custom-blur");
+
 	}
 
 	async loadSettings() {
