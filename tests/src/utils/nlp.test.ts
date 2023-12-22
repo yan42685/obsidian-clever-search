@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { LanguageEnum } from "src/entities/language-enum";
+import { LanguageEnum } from "src/globals/language-enum";
 import { textAnalyzer } from "src/utils/nlp";
 
 // 定义测试字符串数组

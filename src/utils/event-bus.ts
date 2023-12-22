@@ -1,4 +1,4 @@
-import type { EventEnum } from "../entities/event-enum";
+import type { EventEnum } from "../globals/event-enum";
 
 export type EventCallback = (...args: any[]) => void;
 

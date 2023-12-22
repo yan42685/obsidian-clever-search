@@ -1,15 +1,16 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { App, Component } from "obsidian";
 import { container, singleton } from "tsyringe";
-import { getCurrLanguage } from "../entities/language-enum";
+import { getCurrLanguage } from "../../globals/language-enum";
 import {
-	InFileItem,
-	Line,
-	MatchedLine,
-	SearchResult,
-	SearchType,
-} from "../entities/search-types";
-import { MathUtil } from "../utils/math-util";
+    InFileItem,
+    Line,
+    MatchedLine,
+    SearchResult,
+    SearchType,
+    type InFileDataSource,
+} from "../../globals/search-types";
+import { MathUtil } from "../../utils/math-util";
 
 @singleton()
 export class SearchHelper {
@@ -208,7 +209,7 @@ export class SearchHelper {
 	}
 }
 
-type InFileDataSource = {
-	lines: Line[];
-	path: string;
-};
+
+export class InVaultSearcher {
+
+}

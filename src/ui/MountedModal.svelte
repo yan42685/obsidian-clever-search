@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { MarkdownView, type App, type EditorPosition } from "obsidian";
-	import { EventEnum } from "src/entities/event-enum";
+	import { EventEnum } from "src/globals/event-enum";
 	import {
 		InFileItem,
 		SearchResult,
 		SearchType,
-	} from "src/entities/search-types";
-	import { SearchHelper } from "src/search/search-helper";
+	} from "src/globals/search-types";
+	import { SearchHelper } from "src/services/search/search-helper";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { onDestroy, tick } from "svelte";
 	import { container } from "tsyringe";

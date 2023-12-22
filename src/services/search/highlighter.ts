@@ -1,5 +1,4 @@
-import { LanguageEnum, getCurrLanguage } from "src/entities/language-enum";
-import { textAnalyzer } from "src/utils/nlp";
+import { LanguageEnum } from "src/globals/language-enum";
 
 export class Highlighter {}
 

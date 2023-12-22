@@ -1,6 +1,18 @@
+export type IndexedDocument = {
+	path: string;
+	
+};
 
-export enum SearchType{
-	NONE, IN_FILE, IN_VAULT, SEMANTIC
+export type InFileDataSource = {
+	lines: Line[];
+	path: string;
+};
+
+export enum SearchType {
+	NONE,
+	IN_FILE,
+	VAULT_LEXICAL,
+	VAULT_SEMANTIC,
 }
 export class Line {
 	text: string;
