@@ -12,10 +12,6 @@
 	import { container } from "tsyringe";
 	import type { SearchModal } from "./search-modal";
 
-	// const searchService: SearchService = container.resolve(SearchService);
-	// 这是一个异步方法
-	// searchService.testProcedure();
-
 	const searchHelper: SearchHelper = container.resolve(SearchHelper);
 
 	export let app: App;
