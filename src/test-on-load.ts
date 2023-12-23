@@ -2,13 +2,12 @@ import { container } from "tsyringe";
 import { PluginSettings } from "./services/obsidian/settings";
 import { LexicalEngine } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
-import { HttpClient } from "./utils/web/http-client";
 
 export async function testOnLoad() {
 	const settings = container.resolve(PluginSettings);
 	// ====== API Request =====
-	const httpClient = container.resolve(HttpClient);
-	httpClient.testRequest();
+	// const httpClient = container.resolve(HttpClient);
+	// httpClient.testRequest();
 
 	// ====== vault files =====
 	// setTimeout(() => {
@@ -19,6 +18,7 @@ export async function testOnLoad() {
 	// 		logger.debug(vault.configDir); // .obsidian
 	// 	});
 	// }, 1300);
+
 
 
 

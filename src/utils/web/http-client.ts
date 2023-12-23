@@ -48,7 +48,6 @@ export class HttpClient {
 
 	}
 
-	// Obsidian.reque
 	async testRequest() {
 		this.request(this.gptapiOption);
 

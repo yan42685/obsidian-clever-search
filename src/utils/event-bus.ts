@@ -39,15 +39,3 @@ export class EventBus {
 }
 
 export const eventBus = new EventBus();
-
-// 使用
-// 注册事件监听
-// eventBus.on(EventEnum.CTRL_J, (data: any) => {
-// 	console.log("MyEvent triggered", data);
-// });
-
-// 触发事件
-// eventBus.emit(EventEnum.CTRL_J, { some: "data" });
-
-// 移除事件监听（需要具体的回调函数引用）
-// eventBus.off(EventEnum.MyEvent, specificListenerFunction);
