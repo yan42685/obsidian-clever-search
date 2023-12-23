@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import { LanguageEnum } from "src/globals/language-enum";
-import { textAnalyzer } from "src/utils/nlp";
+import { TextAnalyzer } from "src/utils/nlp";
 
 // 定义测试字符串数组
 const testArrays = [
@@ -69,7 +69,7 @@ describe("NLP functions", () => {
 			];
 
 			testArrays.forEach((array, index) => {
-				const result = textAnalyzer.detectLanguage(array);
+				const result = TextAnalyzer.detectLanguage(array);
 				expect(result).toEqual(expectedResults[index]);
 			});
 		});
@@ -86,7 +86,7 @@ describe("NLP functions", () => {
 					[LanguageEnum.other]: "0%",
 				},
 			};
-			textAnalyzer.printLanguageProportion(result);
+			TextAnalyzer.printLanguageProportion(result);
 
 			// 验证 console.log 是否被调用
 			expect(logSpy).toHaveBeenCalledWith(
@@ -96,4 +96,15 @@ describe("NLP functions", () => {
 			);
 		});
 	});
+});
+
+it("should detect the correct main language and proportion for a single string", () => {
+    const testString = "This is an English text string.";
+    const result = TextAnalyzer.detectLanguage(testString);
+    
+    expect(result.mainLanguage).toEqual(LanguageEnum.en);
+    expect(result.mainProportion).toBe("100.00%");
+    expect(result.details[LanguageEnum.en]).toBe("100.00%");
+    expect(result.details[LanguageEnum.zh]).toBe("0.00%");
+    expect(result.details[LanguageEnum.other]).toBe("0.00%");
 });

@@ -17,6 +17,7 @@ import {
 import { MathUtil } from "../../utils/math-util";
 import { Database } from "../database/database";
 import { DataProvider } from "./data-provider";
+import { TextAnalyzer } from "src/utils/nlp";
 
 @singleton()
 export class SearchHelper {
@@ -239,6 +240,13 @@ export class LexicalEngine {
 			await this.reIndexAll();
 		}
 	}
+	async reIndexAll() {
+		const allIndexedDocs = this.dataProvider.getIndexedDocuments();
+		await this.miniSearch.removeAll();
+		// TODO: add chunks rather than all
+		await this.miniSearch.addAllAsync(allIndexedDocs);
+		logger.debug(this.miniSearch);
+	}
 
 	// all tokens are matched and can be scattered
 	async searchAnd(query: string) {
@@ -266,11 +274,7 @@ export class LexicalEngine {
 		});
 	}
 
-	async reIndexAll() {
-		const allIndexedDocs = this.dataProvider.getIndexedDocuments();
-		await this.miniSearch.removeAll();
-		// TODO: add chunks rather than all
-		await this.miniSearch.addAllAsync(allIndexedDocs);
-		logger.debug(this.miniSearch);
+	private async calculateFuzziness(query: string) {
+		TextAnalyzer.detectLanguage([query])
 	}
 }
