@@ -4,7 +4,7 @@ import { MyNotice } from "src/services/obsidian/transformed-api";
 import { throttle } from "throttle-debounce";
 import { container } from "tsyringe";
 import { logger } from "../logger";
-import { my } from "../my-lib";
+import { MyLib } from "../my-lib";
 
 export class HttpClient {
 	private settings = container.resolve(PluginSettings);
@@ -41,10 +41,10 @@ export class HttpClient {
 		}),
 	};
 	private getDomain1() {
-		return my.extractDomainFromUrl(this.settings.apiProvider1.domain);
+		return MyLib.extractDomainFromHttpsUrl(this.settings.apiProvider1.domain);
 	}
 	private getDomain2() {
-		return my.extractDomainFromUrl(this.settings.apiProvider2.domain);
+		return MyLib.extractDomainFromHttpsUrl(this.settings.apiProvider2.domain);
 
 	}
 
@@ -60,7 +60,7 @@ export class HttpClient {
 			logger.debug(res.json);
 		} catch (err) {
 			if (err.message.includes("401")) {
-				const info = `Invalid key for ${my.extractDomainFromUrl(
+				const info = `Invalid key for ${MyLib.extractDomainFromHttpsUrl(
 					options.url,
 				)}`;
 				logger.error(info);

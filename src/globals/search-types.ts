@@ -1,4 +1,5 @@
 import type { SearchResult as MiniResult } from "minisearch";
+import { MyLib } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
 export type IndexedDocument = {
@@ -11,7 +12,7 @@ export type IndexedDocument = {
 export type DocumentRef = {
 	path: string;
 	mtime: number;
-}
+};
 
 export type InFileDataSource = {
 	lines: Line[];
@@ -21,6 +22,7 @@ export type InFileDataSource = {
 export enum SearchType {
 	NONE,
 	IN_FILE,
+	VAULT,
 	VAULT_LEXICAL,
 	VAULT_SEMANTIC,
 }
@@ -62,5 +64,24 @@ export class InFileItem extends Item {
 		super();
 		this.line = line;
 		this.context = context;
+	}
+}
+
+export class InVaultItem extends Item {
+	type: SearchType;
+	path: string;
+	inFileItems?: InFileItem[];
+	get basename() {
+		return MyLib.getBasename(this.path);
+	}
+	get extension() {
+		return MyLib.getExtension(this.path);
+	}
+
+	constructor(type: SearchType, path: string, inFileItems?: InFileItem[]) {
+		super();
+		this.type = type;
+		this.path = path;
+		this.inFileItems = inFileItems;
 	}
 }

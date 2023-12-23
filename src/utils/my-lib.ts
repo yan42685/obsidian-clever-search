@@ -110,23 +110,32 @@ export function formatMillis(millis: number) {
 	}
 }
 
-class MyLib {
-    extractDomainFromUrl(url: string): string {
-        if (url.startsWith("http://")) {
-            logger.error("Only support https, current url starts with http");
-            return "";
-        }
+export class MyLib {
+	static extractDomainFromHttpsUrl(url: string): string {
+		if (url.startsWith("http://")) {
+			logger.error("Only support https, current url starts with http");
+			return "";
+		}
 
-        const domainRegex = /^(https?:\/\/)?([\w.-]+)(?:\/|$)/;
-        const match = url.match(domainRegex);
-        if (match && match[2]) {
-            return match[2];
-        } else {
-            return "";
-        }
-    }
+		const domainRegex = /^(https?:\/\/)?([\w.-]+)(?:\/|$)/;
+		const match = url.match(domainRegex);
+		if (match && match[2]) {
+			return match[2];
+		} else {
+			return "";
+		}
+	}
+	static getBasename(path: string) {
+		// 提取文件名（包含扩展名）
+		const filename = path.split("/").pop() || "";
+		// 返回去掉扩展名的基本名称
+		return filename.split(".").slice(0, -1).join(".") || filename;
+	}
+
+	static getExtension(path: string) {
+		// 提取文件扩展名
+		const parts = path.split(".");
+		return parts.length > 1 ? parts.pop() || "" : "";
+	}
 }
 
-
-
-export const my = new MyLib();
