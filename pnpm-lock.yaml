@@ -32,6 +32,9 @@ dependencies:
   split2:
     specifier: ^4.2.0
     version: 4.2.0
+  stemmer:
+    specifier: ^2.0.1
+    version: 2.0.1
   throttle-debounce:
     specifier: ^5.0.0
     version: 5.0.0
@@ -4580,6 +4583,11 @@ packages:
     dependencies:
       escape-string-regexp: 2.0.0
     dev: true
+
+  /stemmer@2.0.1:
+    resolution: {integrity: sha512-bkWvSX2JR4nSZFfs113kd4C6X13bBBrg4fBKv2pVdzpdQI2LA5pZcWzTFNdkYsiUNl13E4EzymSRjZ0D55jBYg==}
+    hasBin: true
+    dev: false
 
   /string-length@4.0.2:
     resolution: {integrity: sha512-+l6rNN5fYHNhZZy41RXsYptCjA2Igmq4EG7kZAYFQI1E1VTXarr6ZPXBg6eq7Y6eK4FEhY6AJlyuFIb/v/S0VQ==}

@@ -275,6 +275,7 @@ export class LexicalEngine {
 	}
 
 	private async calculateFuzziness(query: string) {
-		TextAnalyzer.detectLanguage([query])
+		const lang = TextAnalyzer.detectLanguage(query);
+		
 	}
 }

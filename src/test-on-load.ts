@@ -1,3 +1,4 @@
+import { stemmer } from "stemmer";
 import { container } from "tsyringe";
 import { PluginSettings } from "./services/obsidian/settings";
 import { LexicalEngine } from "./services/search/search-helper";
@@ -19,12 +20,12 @@ export async function testOnLoad() {
 	// 	});
 	// }, 1300);
 
+	// testStemmer();
 
 
 
 
-
-	await testLexicalSearch();
+	// await testLexicalSearch();
 }
 
 async function testLexicalSearch() {
@@ -35,4 +36,11 @@ async function testLexicalSearch() {
 	const resultsAnd = await lexicalEngine.searchAnd(query);
 	logger.debug(resultsOr);
 	logger.debug(resultsAnd);
+}
+
+function testStemmer() {
+	const words = ["gifs;d", "gifs", "哈哈", "很多只猫", "analyzers"];
+	for (const word of words) {
+		logger.debug(stemmer(word));
+	}
 }

@@ -49,6 +49,7 @@
 		"minisearch": "^6.3.0",
 		"reflect-metadata": "^0.1.13",
 		"split2": "^4.2.0",
+		"stemmer": "^2.0.1",
 		"throttle-debounce": "^5.0.0",
 		"tsyringe": "^4.8.0"
 	}
