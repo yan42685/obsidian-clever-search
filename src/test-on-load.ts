@@ -21,6 +21,9 @@ export async function testOnLoad() {
 	// }, 1300);
 
 
+
+
+
 	await testLexicalSearch();
 }
 

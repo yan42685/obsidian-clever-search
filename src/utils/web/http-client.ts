@@ -60,9 +60,11 @@ export class HttpClient {
 				logger.error(info);
 				this.noticeThrottled(info);
 			} else {
-				logger.warn("Maybe the domain is wrong");
+				const info =
+					"Failed to connect to the API provider, maybe the domain is wrong or the api provider is not available now or there is something wrong with your Internet connection";
+				logger.error(info);
+				this.noticeThrottled(info);
 			}
-
 			logger.error(err);
 		}
 	}
