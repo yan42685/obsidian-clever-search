@@ -240,6 +240,7 @@ export class LexicalEngine {
 		}
 	}
 
+	// all tokens are matched and can be scattered
 	async searchAnd(query: string) {
 		return this.search(query, "and");
 	}
@@ -247,6 +248,14 @@ export class LexicalEngine {
 	async searchOr(query: string) {
 		return this.search(query, "or");
 	}
+
+	/**
+	 * Performs a search using the provided query and combination mode.
+	 *
+	 * @param {"and"|"or"} combineWith - The combination mode:
+	 * - "and": Requires any single token to appear in the fields.
+	 * - "or": Requires all tokens to appear across the fields.
+	 */
 	private async search(
 		query: string,
 		combineWith: "and" | "or",

@@ -7,8 +7,8 @@ import { HttpClient } from "./utils/web/http-client";
 export async function testOnLoad() {
 	const settings = container.resolve(PluginSettings);
 	// ====== API Request =====
-	// const httpClient = container.resolve(HttpClient);	
-	// httpClient.testRequest();
+	const httpClient = container.resolve(HttpClient);
+	httpClient.testRequest();
 
 	// ====== vault files =====
 	// setTimeout(() => {
@@ -21,14 +21,15 @@ export async function testOnLoad() {
 	// }, 1300);
 
 
-	// await testLexicalSearch();
+	await testLexicalSearch();
 }
 
 async function testLexicalSearch() {
 	const lexicalEngine = container.resolve(LexicalEngine);
 	await lexicalEngine.init();
-	const resultsOr = await lexicalEngine.searchOr("document content of");
-	const resultsAnd = await lexicalEngine.searchAnd("document content of");
+	const query = "camera community";
+	const resultsOr = await lexicalEngine.searchOr(query);
+	const resultsAnd = await lexicalEngine.searchAnd(query);
 	logger.debug(resultsOr);
 	logger.debug(resultsAnd);
 }

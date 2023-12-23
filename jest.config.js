@@ -67,15 +67,6 @@ module.exports = {
 
   // An array of directory names to be searched recursively up from the requiring module's location
   // 为了路径简写，可以让jest看懂 "utils" => "../../src/utils
-  // 还得在 tsconfig.json 里指定 baseUrl 和 paths 路径, 让tsc看懂
-  // {
-  //   "compilerOptions": {
-  //     "baseUrl": "./",
-  //     "paths": {
-  //       "utils/*": ["src/utils/*"]
-  //     }
-  //   }
-  // }
   moduleDirectories: [
     // see https://stackoverflow.com/questions/50171412/absolute-paths-baseurl-gives-error-cannot-find-module
     "node_modules", "<rootDir>"
@@ -151,8 +142,8 @@ module.exports = {
   // snapshotSerializers: [],
 
   // The test environment that will be used for testing
-  // testEnvironment: 'jsdom',
-  testEnvironment: 'node',
+  testEnvironment: 'jsdom',
+  // testEnvironment: 'node',
 
   // Options that will be passed to the testEnvironment
   // testEnvironmentOptions: {},

@@ -110,3 +110,23 @@ export function formatMillis(millis: number) {
 	}
 }
 
+class MyLib {
+    getDomainFromUrl(url: string): string {
+        if (url.startsWith("http://")) {
+            logger.error("Only support https, current url starts with http");
+            return "";
+        }
+
+        const domainRegex = /^(https?:\/\/)?([\w.-]+)(?:\/|$)/;
+        const match = url.match(domainRegex);
+        if (match && match[2]) {
+            return match[2];
+        } else {
+            return "";
+        }
+    }
+}
+
+
+
+export const my = new MyLib();
