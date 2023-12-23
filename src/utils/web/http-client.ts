@@ -15,7 +15,7 @@ export class HttpClient {
 
 	private gptapiOption: any = {
 		method: "POST",
-		url: `https://${this.settings.apiProvider1.domain}/v1/embeddings`,
+		url: `https://${this.getDomain1()}/v1/embeddings`,
 		headers: {
 			Authorization: `Bearer ${this.settings.apiProvider1.key}`,
 			"Content-Type": "application/json",
@@ -28,7 +28,7 @@ export class HttpClient {
 	};
 
 	private openaiOption: any = {
-		url: `https://${this.settings.apiProvider2.domain}/v1/embeddings`,
+		url: `https://${this.getDomain2()}/v1/embeddings`,
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${this.settings.apiProvider2.key}`,
@@ -40,6 +40,13 @@ export class HttpClient {
 			model: "text-embedding-ada-002",
 		}),
 	};
+	private getDomain1() {
+		return my.extractDomainFromUrl(this.settings.apiProvider1.domain);
+	}
+	private getDomain2() {
+		return my.extractDomainFromUrl(this.settings.apiProvider2.domain);
+
+	}
 
 	// Obsidian.reque
 	async testRequest() {
@@ -54,14 +61,14 @@ export class HttpClient {
 			logger.debug(res.json);
 		} catch (err) {
 			if (err.message.includes("401")) {
-				const info = `Invalid key for ${my.getDomainFromUrl(
+				const info = `Invalid key for ${my.extractDomainFromUrl(
 					options.url,
 				)}`;
 				logger.error(info);
 				this.noticeThrottled(info);
 			} else {
 				const info =
-					"Failed to connect to the API provider, maybe the domain is wrong or the api provider is not available now or there is something wrong with your Internet connection";
+					`Failed to connect to [${this.settings.apiProvider1.domain}], maybe the domain is wrong or the api provider is not available now or there is something wrong with your Internet connection`;
 				logger.error(info);
 				this.noticeThrottled(info);
 			}
@@ -69,3 +76,4 @@ export class HttpClient {
 		}
 	}
 }
+

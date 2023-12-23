@@ -1,9 +1,8 @@
 import { Notice } from "obsidian";
-import { throttle } from "throttle-debounce";
 
 
 export class MyNotice extends Notice {
-	constructor(text: string, duration?: number) {
+	constructor(text: string, duration = 0) {
 		super(text + "\n(clever-search)", duration);
 	}
 }

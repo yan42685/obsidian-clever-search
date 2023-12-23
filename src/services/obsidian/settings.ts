@@ -73,6 +73,7 @@ class GeneralTab extends PluginSettingTab {
 						this.plugin.saveSettings();
 					}),
 			)
+
 			.addText((text) =>
 				text
 					.setPlaceholder("API key")

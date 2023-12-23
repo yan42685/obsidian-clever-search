@@ -111,7 +111,7 @@ export function formatMillis(millis: number) {
 }
 
 class MyLib {
-    getDomainFromUrl(url: string): string {
+    extractDomainFromUrl(url: string): string {
         if (url.startsWith("http://")) {
             logger.error("Only support https, current url starts with http");
             return "";

@@ -7,26 +7,26 @@ describe("MyLib getDomainFromUrl", () => {
 	logger.error = jest.fn();
 
 	it("should return the domain from an https URL", () => {
-		expect(my.getDomainFromUrl("https://www.example.com/path")).toBe(
+		expect(my.extractDomainFromUrl("https://www.example.com/path")).toBe(
 			"www.example.com",
 		);
 	});
 
 	it("should return an empty string and log an error for http URL", () => {
-		expect(my.getDomainFromUrl("http://www.example.com/path")).toBe("");
+		expect(my.extractDomainFromUrl("http://www.example.com/path")).toBe("");
 		expect(logger.error).toHaveBeenCalledWith(
 			"Only support https, current url starts with http",
 		);
 	});
 
 	it("should return the domain from a URL without a protocol", () => {
-		expect(my.getDomainFromUrl("www.example.com/path")).toBe(
+		expect(my.extractDomainFromUrl("www.example.com/path")).toBe(
 			"www.example.com",
 		);
 	});
 
 	it("should return the domain from a URL with trailing slash", () => {
-		expect(my.getDomainFromUrl("https://www.example.com/")).toBe(
+		expect(my.extractDomainFromUrl("https://www.example.com/")).toBe(
 			"www.example.com",
 		);
 	});
