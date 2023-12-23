@@ -5,7 +5,7 @@ import {
 	MarkdownView,
 	Modal,
 	Notice,
-	Plugin
+	Plugin,
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
@@ -19,7 +19,6 @@ import { logger } from "./utils/logger";
 import { isDevEnvironment } from "./utils/my-lib";
 import { SearchClient } from "./web-worker/search-worker-client";
 
-
 export default class CleverSearch extends Plugin {
 	settings: PluginSettings = new PluginSettings();
 	privacyModeEnabled = false;
@@ -30,10 +29,8 @@ export default class CleverSearch extends Plugin {
 		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
-		await this.loadSettings();  // must run before the following line
-		container.register(PluginSettings, {useValue: this.settings})
-
-
+		await this.loadSettings(); // must run before the following line
+		container.register(PluginSettings, { useValue: this.settings });
 
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
 		container.resolve(PluginManager);
@@ -46,6 +43,12 @@ export default class CleverSearch extends Plugin {
 		this.searchClient = container.resolve(SearchClient);
 
 		if (isDevEnvironment) {
+			this.addCommand({
+				id: "clever-search-triggerTest",
+				name: "clever-search-triggerTest",
+				// hotkeys: [{modifiers: [currModifier], key: "5"}],
+				callback: async () => await testOnLoad(),
+			});
 			await testOnLoad();
 		}
 	}
@@ -178,8 +181,6 @@ export default class CleverSearch extends Plugin {
 		await this.saveData(this.settings);
 	}
 }
-
-
 
 class SampleModal extends Modal {
 	constructor(app: App) {

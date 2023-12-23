@@ -167,7 +167,7 @@
 	</div>
 	<div class="right-pane">
 		{#if currContext}
-			<div class="context-container">
+			<div class="preview-container">
 				<p>{@html currContext}</p>
 			</div>
 		{/if}
@@ -283,18 +283,18 @@
 		height: 72.8vh;
 		width: 60%;
 	}
-	.right-pane .context-container {
+	.right-pane .preview-container {
 		margin: 0.7em 0.5em 0.7em 0.7em;
 		height: 70vh;
 		overflow-wrap: break-word;
 		overflow-y: auto;
 	}
 
-	.right-pane .context-container p {
+	.right-pane .preview-container p {
 		margin: 0;
 	}
 
-	.right-pane .context-container :global(span.target-line) {
+	.right-pane .preview-container :global(span.target-line) {
 		display: inline-block;
 		width: 100%;
 		background-color: var(--cs-hint-char-color, #468eeb33);
