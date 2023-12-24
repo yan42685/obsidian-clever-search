@@ -75,7 +75,7 @@ const esbuildConfig = (outdir) => ({
 		"cs-search-worker": "src/web-worker/search-worker-server.ts",
 	},
 	bundle: true,
-	minify: true,
+	minify: prod ? true : false,
 	external: [
 		"obsidian",
 		"electron",
