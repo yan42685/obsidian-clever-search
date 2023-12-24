@@ -25,10 +25,5 @@ data.json
 coverage/
 dist/
 
-styles.css
-!assets/styles.css
-manifest.json
-!assets/manifest.json
-
 .editorconfig
 cs-search-worker.js
