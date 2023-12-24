@@ -22,10 +22,7 @@ export async function testOnLoad() {
 	// testStemmer();
 	// testTsyringe();
 
-
-
-
-	// await testLexicalSearch();
+	await testLexicalSearch();
 }
 
 function testStemmer() {

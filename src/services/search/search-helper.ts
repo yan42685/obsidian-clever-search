@@ -11,19 +11,27 @@ import {
 	MatchedLine,
 	SearchResult,
 	SearchType,
+	type DocumentWeight,
 	type InFileDataSource,
 	type MiniSearchResult,
 } from "../../globals/search-types";
 import { MathUtil } from "../../utils/math-util";
 import { Database } from "../database/database";
+import { PluginSettings, type SearchSettings } from "../obsidian/settings";
 import { DataProvider } from "./data-provider";
-import { TextAnalyzer } from "src/utils/nlp";
+import { Query } from "./query";
 
 @singleton()
 export class SearchHelper {
 	app: App = container.resolve(App);
 	component: Component = new Component();
 	inFileDataSource: InFileDataSource = { lines: [], path: "" };
+	lexicalEngine: LexicalEngine = container.resolve(LexicalEngine);
+	async searchInVault(queryText: string): Promise<SearchResult> {
+		const result = new SearchResult(SearchType.IN_VAULT, "", []);
+		this.lexicalEngine.searchAnd(queryText);
+		return result;
+	}
 
 	async searchInFile(queryText: string): Promise<SearchResult> {
 		if (!queryText) {
@@ -76,8 +84,6 @@ export class SearchHelper {
 
 		return searchResult;
 	}
-
-	async searchInVault() {}
 
 	private async updateDataSource() {
 		// Ensure the active leaf is a markdown note
@@ -227,6 +233,7 @@ export class LexicalEngine {
 	private readonly dataProvider = container.resolve(DataProvider);
 	private readonly database = container.resolve(Database);
 	private miniSearch: MiniSearch;
+	private settings: SearchSettings = container.resolve(PluginSettings).search;
 
 	async init() {
 		const prevData = await this.database.getMiniSearchData();
@@ -260,22 +267,28 @@ export class LexicalEngine {
 	/**
 	 * Performs a search using the provided query and combination mode.
 	 *
-	 * @param {"and"|"or"} combineWith - The combination mode:
+	 * @param {"and"|"or"} combinationMode - The combination mode:
 	 * - "and": Requires any single token to appear in the fields.
 	 * - "or": Requires all tokens to appear across the fields.
 	 */
 	private async search(
-		query: string,
-		combineWith: "and" | "or",
+		queryText: string,
+		combinationMode: "and" | "or",
 	): Promise<MiniSearchResult[]> {
-		return this.miniSearch.search(query, {
-			fields: ["basename", "content"],
-			combineWith: combineWith,
+		const query = new Query(queryText);
+		return this.miniSearch.search(query.text, {
+			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is 
+			// at the last index of the query terms
+			prefix: (term) => term.length >= this.settings.minTermLengthForPrefixSearch,
+			// TODO: fuzziness based on language
+			fuzzy: (term) => (term.length <= 3 ? 0 : this.settings.fuzzyProportion),
+			// if `fields` are omitted, all fields will be search with weight 1
+			boost: {
+				"path": this.settings.weightPath,
+				"basename": this.settings.weightPath,
+				"aliases": this.settings.weightPath,
+			} as DocumentWeight,
+			combineWith: combinationMode,
 		});
-	}
-
-	private async calculateFuzziness(query: string) {
-		const lang = TextAnalyzer.detectLanguage(query);
-		
 	}
 }

@@ -5,11 +5,6 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { isDevEnvironment } from "src/utils/my-lib";
 import { container } from "tsyringe";
 
-export type ApiProvider = {
-	domain: string;
-	key: string;
-};
-
 export class SettingManager {
 	plugin: CleverSearch = container.resolve(THIS_PLUGIN);
 	constructor() {
@@ -137,6 +132,7 @@ export class PluginSettings {
 	logLevel: LogLevel = "debug";
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
+	search: SearchSettings;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -150,4 +146,30 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 		domain: "",
 		key: "",
 	},
+	search: {
+		fuzzyProportion: 0.2,
+		minTermLengthForPrefixSearch: 1,
+		weightPath: 3,
+		weightH1: 1.6,
+		weightH2: 1.4,
+		weightH3: 1.25,
+		weightH4: 1.1,
+		weightTagText: 1.1,
+	},
+};
+
+export type ApiProvider = {
+	domain: string;
+	key: string;
+};
+
+export type SearchSettings = {
+	fuzzyProportion: 0.1 | 0.2;
+	minTermLengthForPrefixSearch: 1 | 2 | 3;
+	weightPath: number;
+	weightH1: number;
+	weightH2: number;
+	weightH3: number;
+	weightH4: number;
+	weightTagText: number;
 };

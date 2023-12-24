@@ -9,9 +9,14 @@ export type IndexedDocument = {
 	content: string;
 };
 
+export type DocumentWeight = {
+    [K in keyof IndexedDocument]?: number;
+};
+
 export type DocumentRef = {
 	path: string;
-	mtime: number;
+	lexicalMtime: number;
+	embeddingMtime: number;
 };
 
 export type InFileDataSource = {
@@ -50,7 +55,7 @@ export class SearchResult {
 export enum SearchType {
 	NONE,
 	IN_FILE,
-	VAULT,
+	IN_VAULT,
 }
 
 export enum ItemType {
