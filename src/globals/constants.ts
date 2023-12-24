@@ -4,3 +4,16 @@
 export const THIS_PLUGIN = "CleverSearch";
 export const ICON_COLLAPSE = '"▶"';
 export const ICON_EXPAND = '"▼"';
+
+export const DEFAULT_BLACKLIST_EXTENSION = [
+	".zip",
+	".rar",
+	".7z",
+	".tar",
+	".gz",
+	".bz2",
+	".xz",
+	".lz",
+	".lzma",
+	".tgz",
+];

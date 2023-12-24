@@ -10,12 +10,12 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
+import { THIS_PLUGIN } from "./globals/constants";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { DEFAULT_SETTING, PluginSetting } from "./services/obsidian/setting";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
-import { THIS_PLUGIN } from "./utils/constants";
 import { logger } from "./utils/logger";
 import { isDevEnvironment } from "./utils/my-lib";
 import { SearchClient } from "./web-worker/search-worker-client";
@@ -30,7 +30,7 @@ export default class CleverSearch extends Plugin {
 		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
-		container.register(Vault, {useValue: this.app.vault});
+		container.register(Vault, { useValue: this.app.vault });
 		await this.loadSettings(); // must run before the following line
 		container.register(PluginSetting, { useValue: this.settings });
 
@@ -51,7 +51,12 @@ export default class CleverSearch extends Plugin {
 				// hotkeys: [{modifiers: [currModifier], key: "5"}],
 				callback: async () => await testOnLoad(),
 			});
-			// await testOnLoad();
+
+			this.addCommand({
+				id: "cs-open-test-modal",
+				name: "Open test modal",
+				callback: () => this.openTestModal(),
+			});
 		}
 	}
 
@@ -97,12 +102,6 @@ export default class CleverSearch extends Plugin {
 			id: "cs-toggle-privacy-mode",
 			name: "Toggle privacy mode",
 			callback: () => this.togglePrivacyMode(),
-		});
-
-		this.addCommand({
-			id: "cs-open-test-modal",
-			name: "Open test modal",
-			callback: () => this.openTestModal(),
 		});
 
 		this.addCommand({

@@ -1,6 +1,6 @@
 import { PluginSettingTab, Setting } from "obsidian";
+import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
-import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/utils/constants";
 import { logger, type LogLevel } from "src/utils/logger";
 import { isDevEnvironment } from "src/utils/my-lib";
 import { container } from "tsyringe";
