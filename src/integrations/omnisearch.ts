@@ -1,5 +1,6 @@
 import Dexie from "dexie";
 import { App, Notice } from "obsidian";
+import { PrivateApi } from "src/services/obsidian/private-api";
 import { container, singleton } from "tsyringe";
 
 @singleton()
@@ -9,12 +10,12 @@ export class OmnisearchIntegration {
 	// https://github.com/scambier/obsidian-omnisearch/blob/master/src/database.ts
 	private static readonly DB_VERSION = 8;
 	private app: any = container.resolve(App);
+	private privateApi = container.resolve(PrivateApi)
 	private db: any;
 
 	async init() {
 		if (this.app.plugins.plugins.omnisearch) {
-			// BUG: 最新的api移除了this.app.appId的定义，以后可能会废除这个属性
-			const dbName = "omnisearch/cache/" + this.app.appId;
+			const dbName = "omnisearch/cache/" + this.privateApi.getAppId();
 			// console.log(dbName);
 			const db: any = new Dexie(dbName);
 

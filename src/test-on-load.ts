@@ -1,6 +1,6 @@
 import { container } from "tsyringe";
 import { PluginSettings } from "./services/obsidian/settings";
-import { LexicalEngine } from "./services/search/search-helper";
+import { LexicalEngine, SearchHelper } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
 
 export async function testOnLoad() {
@@ -20,11 +20,23 @@ export async function testOnLoad() {
 	// }, 1300);
 
 	// testStemmer();
+	// testTsyringe();
 
 
 
 
 	// await testLexicalSearch();
+}
+
+function testStemmer() {
+	const words = ["gifs;d", "gifs", "哈哈", "很多只猫", "analyzers"];
+}
+
+function testTsyringe() {
+	const obj1 = container.resolve(SearchHelper);
+	const obj2 = container.resolve(SearchHelper);
+	// in tsyringe, the default scope for class is singleton, so it should output "true"
+	logger.info(`test equal: ${obj1 === obj2}`);
 }
 
 async function testLexicalSearch() {
@@ -35,10 +47,4 @@ async function testLexicalSearch() {
 	const resultsAnd = await lexicalEngine.searchAnd(query);
 	logger.debug(resultsOr);
 	logger.debug(resultsAnd);
-}
-
-function testStemmer() {
-	const words = ["gifs;d", "gifs", "哈哈", "很多只猫", "analyzers"];
-	for (const word of words) {
-	}
 }

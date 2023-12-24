@@ -19,13 +19,6 @@ export type InFileDataSource = {
 	path: string;
 };
 
-export enum SearchType {
-	NONE,
-	IN_FILE,
-	VAULT,
-	VAULT_LEXICAL,
-	VAULT_SEMANTIC,
-}
 export class Line {
 	text: string;
 	row: number;
@@ -53,9 +46,22 @@ export class SearchResult {
 	}
 }
 
-export class Item {
+
+export enum SearchType {
+	NONE,
+	IN_FILE,
+	VAULT,
+}
+
+export enum ItemType {
+	LEXICAL,
+	SEMANTIC,
+}
+
+export abstract class Item {
 	element?: HTMLElement;
 }
+
 export class InFileItem extends Item {
 	line: MatchedLine;
 	context: string;
@@ -68,7 +74,7 @@ export class InFileItem extends Item {
 }
 
 export class InVaultItem extends Item {
-	type: SearchType;
+	type: ItemType;
 	path: string;
 	inFileItems?: InFileItem[];
 	get basename() {
@@ -78,7 +84,7 @@ export class InVaultItem extends Item {
 		return MyLib.getExtension(this.path);
 	}
 
-	constructor(type: SearchType, path: string, inFileItems?: InFileItem[]) {
+	constructor(type: ItemType, path: string, inFileItems?: InFileItem[]) {
 		super();
 		this.type = type;
 		this.path = path;
