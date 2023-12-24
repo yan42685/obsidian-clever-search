@@ -1,16 +1,18 @@
 # Obsidian Clever Search
 
+> Enjoy swift access to your notes with minimal key presses
+
 [中文文档](README-ZH.md) | [English Doc](README.md)
 
 ## Demo
 
 ### Realtime Search and Preview
 
-![demo-search-in-file](https://github.com/yan42685/obsidian-clever-search/assets/41834091/4d43077d-6d25-4a8e-b325-99f9cf6d7a9e)
+![demo-search-in-file](assets/images/demo-search-in-file.gif)
 
 ### Privacy Mode
 
-![demo-privacy-mode](https://github.com/yan42685/obsidian-clever-search/assets/41834091/b2c7f412-c82f-44ae-9197-45a77632bd7a)
+![demo-privacy-mode](assets/images/demo-privacy-mode.gif)
 
 ## Features
 
@@ -67,7 +69,4 @@
 
 If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
 
-[![image](https://github.com/yan42685/obsidian-clever-search/assets/41834091/a3baeea7-817f-46b6-803f-555bc73bfee6)](https://www.buymeacoffee.com/AlexClifton)
-
-
-
+[![image](assets/images/buymeacoffee.png)](https://www.buymeacoffee.com/AlexClifton)

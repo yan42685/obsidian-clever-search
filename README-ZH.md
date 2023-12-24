@@ -1,16 +1,18 @@
 # Obsidian Clever Search
 
+> 少按几键，速寻心间所记
+
 [English Doc](README.md)
 
 ## 演示
 
 ### 实时搜索和预览
 
-![demo-search-in-file](https://github.com/yan42685/obsidian-clever-search/assets/41834091/4d43077d-6d25-4a8e-b325-99f9cf6d7a9e)
+![demo-search-in-file](assets/images/demo-search-in-file.gif)
 
 ### 隐私模式
 
-![demo-privacy-mode](https://github.com/yan42685/obsidian-clever-search/assets/41834091/b2c7f412-c82f-44ae-9197-45a77632bd7a)
+![demo-privacy-mode](assets/images/demo-privacy-mode.gif)
 
 ## 功能
 
