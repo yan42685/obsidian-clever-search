@@ -127,15 +127,16 @@ class GeneralTab extends PluginSettingTab {
 	}
 }
 
-export class PluginSettings {
+export class PluginSetting {
 	mySetting = "default";
 	logLevel: LogLevel = "debug";
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
-	search: SearchSettings;
+	excludeExtensions: string[];
+	search: SearchSetting;
 }
 
-export const DEFAULT_SETTINGS: PluginSettings = {
+export const DEFAULT_SETTING: PluginSetting = {
 	mySetting: "default",
 	logLevel: isDevEnvironment ? "debug" : "none",
 	apiProvider1: {
@@ -146,6 +147,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 		domain: "",
 		key: "",
 	},
+	excludeExtensions: [],
 	search: {
 		fuzzyProportion: 0.2,
 		minTermLengthForPrefixSearch: 1,
@@ -163,7 +165,7 @@ export type ApiProvider = {
 	key: string;
 };
 
-export type SearchSettings = {
+export type SearchSetting = {
 	fuzzyProportion: 0.1 | 0.2;
 	minTermLengthForPrefixSearch: 1 | 2 | 3;
 	weightPath: number;

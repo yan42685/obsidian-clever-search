@@ -83,5 +83,21 @@ export class MyLib {
 		const parts = path.split(".");
 		return parts.length > 1 ? parts.pop() || "" : "";
 	}
+
+
+}
+
+export function monitorExecutionTime(target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+    const originalMethod = descriptor.value;
+
+    descriptor.value = async function(...args: any[]) {
+        const start = performance.now();
+        const result = await originalMethod.apply(this, args);
+        const end = performance.now();
+        logger.debug(`Execution time for ${propertyKey}: ${end - start} ms`);
+        return result;
+    };
+
+    return descriptor;
 }
 

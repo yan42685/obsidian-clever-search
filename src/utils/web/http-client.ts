@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { PluginSettings } from "src/services/obsidian/settings";
+import { PluginSettings } from "src/services/obsidian/setting";
 import { MyNotice } from "src/services/obsidian/transformed-api";
 import { throttle } from "throttle-debounce";
 import { container } from "tsyringe";

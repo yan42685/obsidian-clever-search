@@ -17,7 +17,7 @@ import {
 } from "../../globals/search-types";
 import { MathUtil } from "../../utils/math-util";
 import { Database } from "../database/database";
-import { PluginSettings, type SearchSettings } from "../obsidian/settings";
+import { PluginSetting, type SearchSetting } from "../obsidian/setting";
 import { DataProvider } from "./data-provider";
 import { Query } from "./query";
 
@@ -233,7 +233,7 @@ export class LexicalEngine {
 	private readonly dataProvider = container.resolve(DataProvider);
 	private readonly database = container.resolve(Database);
 	private miniSearch: MiniSearch;
-	private settings: SearchSettings = container.resolve(PluginSettings).search;
+	private settings: SearchSetting = container.resolve(PluginSetting).search;
 
 	async init() {
 		const prevData = await this.database.getMiniSearchData();
@@ -248,7 +248,8 @@ export class LexicalEngine {
 		}
 	}
 	async reIndexAll() {
-		const allIndexedDocs = this.dataProvider.getIndexedDocuments();
+		const allIndexedDocs =
+			await this.dataProvider.generateAllIndexedDocuments();
 		await this.miniSearch.removeAll();
 		// TODO: add chunks rather than all
 		await this.miniSearch.addAllAsync(allIndexedDocs);
@@ -277,16 +278,18 @@ export class LexicalEngine {
 	): Promise<MiniSearchResult[]> {
 		const query = new Query(queryText);
 		return this.miniSearch.search(query.text, {
-			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is 
+			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
-			prefix: (term) => term.length >= this.settings.minTermLengthForPrefixSearch,
+			prefix: (term) =>
+				term.length >= this.settings.minTermLengthForPrefixSearch,
 			// TODO: fuzziness based on language
-			fuzzy: (term) => (term.length <= 3 ? 0 : this.settings.fuzzyProportion),
+			fuzzy: (term) =>
+				term.length <= 3 ? 0 : this.settings.fuzzyProportion,
 			// if `fields` are omitted, all fields will be search with weight 1
 			boost: {
-				"path": this.settings.weightPath,
-				"basename": this.settings.weightPath,
-				"aliases": this.settings.weightPath,
+				path: this.settings.weightPath,
+				basename: this.settings.weightPath,
+				aliases: this.settings.weightPath,
 			} as DocumentWeight,
 			combineWith: combinationMode,
 		});

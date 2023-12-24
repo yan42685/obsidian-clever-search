@@ -3,7 +3,7 @@ import type CleverSearch from "src/main";
 import { THIS_PLUGIN } from "src/utils/constants";
 import { container, singleton } from "tsyringe";
 import { pathUtils } from "../../utils/my-lib";
-import { SettingManager } from "./settings";
+import { SettingManager } from "./setting";
 
 @singleton()
 export class PluginManager {
