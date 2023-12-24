@@ -51,7 +51,7 @@ export default class CleverSearch extends Plugin {
 				// hotkeys: [{modifiers: [currModifier], key: "5"}],
 				callback: async () => await testOnLoad(),
 			});
-			await testOnLoad();
+			// await testOnLoad();
 		}
 	}
 

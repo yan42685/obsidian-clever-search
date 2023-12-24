@@ -3,6 +3,7 @@ import type { Options } from "minisearch";
 import MiniSearch from "minisearch";
 import { App, Component } from "obsidian";
 import { logger } from "src/utils/logger";
+import { monitorDecorator } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import { getCurrLanguage } from "../../globals/language-enum";
 import {
@@ -235,6 +236,7 @@ export class LexicalEngine {
 	private miniSearch: MiniSearch;
 	private settings: SearchSetting = container.resolve(PluginSetting).search;
 
+	@monitorDecorator
 	async init() {
 		const prevData = await this.database.getMiniSearchData();
 		if (prevData) {

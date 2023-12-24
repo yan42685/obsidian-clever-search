@@ -1,6 +1,7 @@
 import { App, TFile, Vault, parseFrontMatterAliases } from "obsidian";
 import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
+import { MyLib } from "src/utils/my-lib";
 import { container } from "tsyringe";
 import { PluginSetting } from "../obsidian/setting";
 import { Tokenizer } from "./tokenizer";
@@ -97,11 +98,13 @@ export class DataProvider {
 	private readonly app = container.resolve(App);
 
 	async generateAllIndexedDocuments(): Promise<IndexedDocument[]> {
-		const files = await new FileRetriever().getFilesToBeIndexed();
-		logger.debug(`${files.length} files need to be indexed.`);
-
+		const filesToIndex = await new FileRetriever().getFilesToBeIndexed();
+		// MyLib.countFileByExtensions(filesToIndex);
+		logger.debug(`${filesToIndex.length} files need to be indexed.`);
+		// TODO: remove this line
+		// files = files.slice(0, 100);
 		return Promise.all(
-			files.map(async (file) => {
+			filesToIndex.map(async (file) => {
 				const metadata = this.app.metadataCache.getFileCache(file);
 				return {
 					path: file.path,
@@ -118,32 +121,46 @@ export class DataProvider {
 
 class FileRetriever {
 	private readonly vault: Vault = container.resolve(Vault);
-	// @monitorExecutionTime
+	// @monitorDecorator
 	async getFilesToBeIndexed(): Promise<TFile[]> {
 		// TODO: compare mtime and then filter
-		// return this.vault.getFiles().filter((file) => this.isFileIndexable(file));
 		// get all files cached by obsidian
 		const files = this.vault.getFiles();
-
-		const extensionCount = new Map<string, number>();
-
-		files.forEach((file) => {
-			const ext = file.extension || "no_extension";
-			extensionCount.set(ext, (extensionCount.get(ext) || 0) + 1);
-		});
-
-		// Log the count of each file extension
-		extensionCount.forEach((count, ext) => {
-			logger.debug(`Extension '${ext}' has ${count} files to index.`);
-		});
-
+		logger.warn(`files count: ${files.length}`);
+		MyLib.countFileByExtensions(files);
 		return files.filter(this.isFileIndexable);
-
 	}
 
 	private isFileIndexable(file: TFile): boolean {
 		// logger.debug(`${file.path} -- ${file.extension}`);
+
+		// return this.isExtensionValid(file);
+		
+		return false;
+	}
+	private isExtensionValid(file: TFile): boolean {
 		const setting = container.resolve(PluginSetting);
-		return !setting.excludeExtensions.includes(file.extension);
+
+		const userExtensionsProcessed = setting.excludeExtensions.map((ext) =>
+			ext.includes(".") ? ext.substring(ext.lastIndexOf(".")) : ext,
+		);
+		const extensionBlackSet = new Set([
+			...DEFAULT_BLACKLIST_EXTENSION,
+			...userExtensionsProcessed,
+		]);
+		return !extensionBlackSet.has(file.extension);
 	}
 }
+
+const DEFAULT_BLACKLIST_EXTENSION = [
+	".zip",
+	".rar",
+	".7z",
+	".tar",
+	".gz",
+	".bz2",
+	".xz",
+	".lz",
+	".lzma",
+	".tgz",
+];
