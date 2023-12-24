@@ -5,3 +5,6 @@ self.addEventListener('message', (event) => {
     // 处理数据并发送回主线程
     self.postMessage('Processed data');
 });
+// 用来避免tsc报错
+export { };
+
