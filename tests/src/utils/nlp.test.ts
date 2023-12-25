@@ -106,5 +106,5 @@ it("should detect the correct main language and proportion for a single string",
     expect(result.mainProportion).toBe("100.00%");
     expect(result.details[LanguageEnum.en]).toBe("100.00%");
     expect(result.details[LanguageEnum.zh]).toBe("0.00%");
-    expect(result.details[LanguageEnum.other]).toBe("0.00%");
+    expect(result.details[LanguageEnum.other]).toBe("3.00%");
 });

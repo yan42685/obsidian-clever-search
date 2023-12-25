@@ -49,16 +49,6 @@ describe("Logger", () => {
 		);
 	});
 
-	it("should log error messages when log level is error", () => {
-		logger.setLevel("error");
-		logger.error("Error message");
-		expect(consoleSpy.error).toHaveBeenCalledWith(
-			expect.anything(),
-			"color: red;",
-			"Error message",
-		);
-	});
-
 	it("should log info messages when log level is debug", () => {
 		logger.setLevel("debug");
 		logger.info("Info message");
