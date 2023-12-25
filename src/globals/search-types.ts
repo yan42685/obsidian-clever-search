@@ -93,6 +93,9 @@ export class InVaultItem extends Item {
 	get extension() {
 		return MyLib.getExtension(this.path);
 	}
+	get folderPath() {
+		return MyLib.getFolderPath(this.path);
+	}
 
 	constructor(type: ItemType, path: string, inFileItems?: InFileItem[]) {
 		super();

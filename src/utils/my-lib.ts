@@ -23,9 +23,6 @@ export enum FileExtension {
 	ALL = "",
 }
 
-// default dirs blacklist
-const IGNORED_DIRECTORIES = [".obsidian", ".git", ".vscode"];
-
 export class MyLib {
 	static extractDomainFromHttpsUrl(url: string): string {
 		if (url.startsWith("http://")) {
@@ -41,22 +38,27 @@ export class MyLib {
 			return "";
 		}
 	}
-	static getBasename(path: string) {
-		// 提取文件名（包含扩展名）
-		const filename = path.split("/").pop() || "";
-		// 返回去掉扩展名的基本名称
-		return filename.split(".").slice(0, -1).join(".") || filename;
+	static getBasename(filePath: string): string {
+		return pathUtils.basename(filePath, pathUtils.extname(filePath));
 	}
 
-	static getExtension(path: string) {
-		// 提取文件扩展名
-		const parts = path.split(".");
-		return parts.length > 1 ? parts.pop() || "" : "";
+	static getExtension(filePath: string): string {
+		return pathUtils.extname(filePath).slice(1);
+	}
+
+	static getFolderPath(filePath: string): string {
+		const dirPath = pathUtils.dirname(filePath);
+		if (dirPath === "." || dirPath === pathUtils.sep || dirPath === "/") {
+			return "./";
+		}
+		return (
+			dirPath.replace(new RegExp("\\" + pathUtils.sep, "g"), "/") + "/"
+		);
 	}
 
 	static countFileByExtensions(files: TFile[]): Record<string, number> {
 		const extensionCountMap = new Map<string, number>();
-		const commonExtensions=  ["no_extension", "md", "txt"]
+		const commonExtensions = ["no_extension", "md", "txt"];
 		const uncommonExtensionPathMap = new Map<string, string[]>();
 		files.forEach((file) => {
 			const ext = file.extension || "no_extension";
@@ -68,7 +70,9 @@ export class MyLib {
 			}
 		});
 		const countResult = Object.fromEntries(extensionCountMap);
-		const uncommonPathsResult = Object.fromEntries(uncommonExtensionPathMap);
+		const uncommonPathsResult = Object.fromEntries(
+			uncommonExtensionPathMap,
+		);
 		logger.debug(countResult);
 		logger.debug(uncommonPathsResult);
 		return countResult;
@@ -143,7 +147,6 @@ export function formatMillis(millis: number): string {
 		return `${minutes} min ${seconds} s ${milliseconds} ms`;
 	}
 }
-
 
 export function getInstance<T>(token: InjectionToken<T>): T {
 	return container.resolve(token);

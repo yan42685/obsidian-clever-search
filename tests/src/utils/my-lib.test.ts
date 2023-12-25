@@ -1,18 +1,23 @@
-import { MyLib } from "src/utils/my-lib";
+import { logger } from "src/utils/logger";
+import { MyLib, formatMillis, monitorExecution } from "src/utils/my-lib";
 
 describe("MyLib", () => {
 	let originalConsoleError: any;
+	let mockLoggerDebug: jest.SpyInstance;
 
 	beforeAll(() => {
-		// 保存原始的 console.error
 		originalConsoleError = console.error;
-		// Mock console.error
 		console.error = jest.fn();
+
+		// Mock logger.debug
+		mockLoggerDebug = jest
+			.spyOn(logger, "debug")
+			.mockImplementation(() => {});
 	});
 
 	afterAll(() => {
-		// 恢复原始的 console.error
 		console.error = originalConsoleError;
+		mockLoggerDebug.mockRestore();
 	});
 
 	describe("extractDomainFromUrl", () => {
@@ -70,6 +75,43 @@ describe("MyLib", () => {
 		it("should handle hidden files with extension", () => {
 			const path = "/folder/.hiddenfile.txt";
 			expect(MyLib.getExtension(path)).toBe("txt");
+		});
+	});
+
+	describe("getFolderPath", () => {
+		it("should return the folder path of a file", () => {
+			expect(MyLib.getFolderPath("path/to/file.txt")).toBe("path/to/");
+		});
+
+		it('should return "./" for files in the root directory', () => {
+			expect(MyLib.getFolderPath("/file.txt")).toBe("./");
+		});
+
+		it("should handle an empty path", () => {
+			expect(MyLib.getFolderPath("")).toBe("./");
+		});
+
+		it("should handle Windows-style paths", () => {
+			expect(MyLib.getFolderPath("C:\\path\\to\\file.txt")).toBe(
+				"C:/path/to/",
+			);
+		});
+	});
+
+	describe("formatMillis", () => {
+		it("formats milliseconds correctly", () => {
+			expect(formatMillis(500)).toBe("500 ms");
+			expect(formatMillis(1000)).toBe("1 s 0 ms");
+			expect(formatMillis(65000)).toBe("1 min 5 s 0 ms");
+		});
+	});
+	describe("monitorExecution", () => {
+		it("monitors and logs execution time of a function", async () => {
+			const mockFn = jest.fn().mockResolvedValue("test");
+			await monitorExecution(mockFn);
+
+			expect(mockFn).toHaveBeenCalled();
+			expect(mockLoggerDebug).toHaveBeenCalled();
 		});
 	});
 });

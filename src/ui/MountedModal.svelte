@@ -3,6 +3,7 @@
 	import { EventEnum } from "src/globals/event-enum";
 	import {
 		InFileItem,
+		InVaultItem,
 		SearchResult,
 		SearchType,
 	} from "src/globals/search-types";
@@ -151,11 +152,13 @@
 							handleResultClick(index);
 						}}
 					>
-						<span>
-							{#if item instanceof InFileItem}
-								{@html item.line.text}
-							{/if}
-						</span>
+						{#if item instanceof InFileItem}
+							<span class="line-item">{@html item.line.text}</span>
+						{:else if item instanceof InVaultItem}
+							<span class="file-basename">{item.basename}</span>
+							<span class="file-extension">{item.extension}</span>
+							<span class="file-folder-path">{item.folderPath}</span>
+						{/if}
 					</button>
 				{/each}
 			</ul>
@@ -264,7 +267,7 @@
 	}
 
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
-	.result-items ul button span {
+	.result-items ul button span.line-item {
 		text-wrap: wrap;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
@@ -273,6 +276,16 @@
 		text-overflow: ellipsis;
 	}
 
+	.result-items ul button span.file-basename {
+
+	}
+
+	.result-items ul button span.file-extension {
+
+	}
+	.result-items ul button span.file-folder-path {
+
+	}
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 6px;
