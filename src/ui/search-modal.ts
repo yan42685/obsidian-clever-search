@@ -1,12 +1,13 @@
 import { App, Modal } from "obsidian";
 import { EventEnum } from "src/globals/event-enum";
+import type { SearchType } from "src/globals/search-types";
 import { eventBus } from "src/utils/event-bus";
 import { currModifier } from "src/utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 
 export class SearchModal extends Modal {
 	mountedElement: any;
-	constructor(app: App, query?: string) {
+	constructor(app: App, searchType: SearchType, query?: string) {
 		super(app);
 		// get text selected by user
 		const selectedText = window.getSelection()?.toString() || "";
@@ -23,6 +24,7 @@ export class SearchModal extends Modal {
 			props: {
 				app: app,
 				modal: this,
+				searchType: searchType,
 				queryText: effectiveQuery || "",
 			},
 		});

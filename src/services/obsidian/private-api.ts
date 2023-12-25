@@ -14,4 +14,8 @@ export class PrivateApi {
         // BUG: 最新的api移除了this.app.appId的定义，以后可能会废除这个属性
         return (this.app as any).appId;
     }
+
+    executeCommandById(commandId: string) {
+        (this.app as any).commands.executeCommandById(commandId);
+    }
 }

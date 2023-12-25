@@ -11,6 +11,7 @@ import {
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { THIS_PLUGIN } from "./globals/constants";
+import { SearchType } from "./globals/search-types";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { DEFAULT_SETTING, PluginSetting } from "./services/obsidian/setting";
@@ -57,6 +58,13 @@ export default class CleverSearch extends Plugin {
 				name: "Open test modal",
 				callback: () => this.openTestModal(),
 			});
+			this.addCommand({
+				id: "clever-search-in-vault",
+				name: "Search in Vault",
+
+				callback: () =>
+					new SearchModal(this.app, SearchType.IN_VAULT).open(),
+			});
 		}
 	}
 
@@ -95,7 +103,8 @@ export default class CleverSearch extends Plugin {
 		this.addCommand({
 			id: "clever-search-in-file",
 			name: "Search in file",
-			callback: () => new SearchModal(this.app).open(),
+			callback: () =>
+				new SearchModal(this.app, SearchType.IN_FILE).open(),
 		});
 
 		this.addCommand({
@@ -110,6 +119,7 @@ export default class CleverSearch extends Plugin {
 			callback: async () => {
 				new SearchModal(
 					this.app,
+					SearchType.IN_FILE,
 					await this.omnisearchIntegration?.getLastQuery(),
 				).open();
 			},

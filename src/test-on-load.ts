@@ -52,7 +52,8 @@ function testUnsupportedExtensions() {
 async function testLexicalSearch() {
 	const lexicalEngine = container.resolve(LexicalEngine);
 	await lexicalEngine.init();
-	const query = "camera communiy";
+	// const query = "camera communiy";
+	const query = "whoknowthisfolder/whereisit";
 	const resultsOr = await lexicalEngine.searchOr(query);
 	const resultsAnd = await lexicalEngine.searchAnd(query);
 

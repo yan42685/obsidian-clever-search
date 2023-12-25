@@ -5,6 +5,7 @@ export type MiniSearchResult = MiniResult;
 export type IndexedDocument = {
 	path: string;
 	basename: string;
+	folder?: string;
 	aliases?: string;
 	content?: string;
 };
@@ -46,7 +47,7 @@ export type MatchedFile  = {
 }
 
 export class SearchResult {
-	type: SearchType;
+	type?: SearchType;  // TODO: remove this filed if it's not required
 	currPath: string;
 	items: Item[];
 	constructor(type: SearchType, currPath: string, items: Item[]) {

@@ -5,10 +5,12 @@
 		InFileItem,
 		InVaultItem,
 		SearchResult,
-		SearchType
+		SearchType,
 	} from "src/globals/search-types";
+	import { PrivateApi } from "src/services/obsidian/private-api";
 	import { SearchHelper } from "src/services/search/search-helper";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
+	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { container } from "tsyringe";
 	import type { SearchModal } from "./search-modal";
@@ -17,12 +19,14 @@
 
 	export let app: App;
 	export let modal: SearchModal;
+	export let searchType: SearchType;
 	export let queryText: string;
 	const DEFAULT_RESULT = new SearchResult(SearchType.NONE, "", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = -1;
-	let currContext = "";  // for in-file search
-	let currSubItems: string[] = []; // for in-vault search
+	let currContext = ""; // for previewing in-file search
+	let currSubItemIndex = -1;
+	let currSubItems: string[] = []; // for previewing in-vault search
 	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
@@ -31,7 +35,7 @@
 	function updateItem(index: number): void {
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
-			if (searchResult.type === SearchType.IN_FILE) {
+			if (searchType === SearchType.IN_FILE) {
 				const item = items[index] as InFileItem;
 				currContext = item.context;
 				currItemIndex = index;
@@ -46,11 +50,11 @@
 
 	// Handle input changes
 	async function handleInput() {
-		searchResult = await searchHelper.searchInFile(queryText);
-		updateItem(0);
-		// wait until all dynamic elements are mounted and rendered
-		await tick();
-		if (searchResult.type === SearchType.IN_FILE) {
+		if (searchType === SearchType.IN_FILE) {
+			searchResult = await searchHelper.searchInFile(queryText);
+			updateItem(0);
+			// wait until all dynamic elements are mounted and rendered
+			await tick();
 			searchResult.items.forEach((x) => {
 				const item = x as InFileItem;
 				// console.log(item.line.text);
@@ -64,6 +68,9 @@
 				// 	);
 				// }
 			});
+		} else if (searchType === SearchType.IN_VAULT) {
+			searchResult = await searchHelper.searchInVault(queryText);
+
 		}
 	}
 
@@ -84,12 +91,10 @@
 
 	function handleConfirm() {
 		modal.close();
-		// BUG: 最新的obsidian.d.ts没有app.commands了
-		const deprecatedApp = app as any;
 		// 对应的command name是Focus on last note
-		deprecatedApp.commands.executeCommandById("editor:focus");
+		getInstance(PrivateApi).executeCommandById("editor:focus");
 
-		if (searchResult.type === SearchType.IN_FILE) {
+		if (searchType === SearchType.IN_FILE) {
 			const selectedItem = searchResult.items[
 				currItemIndex
 			] as InFileItem;
@@ -171,14 +176,14 @@
 	<div class="right-pane">
 		{#if currContext}
 			<div class="preview-container">
-				{#if searchResult.type === SearchType.IN_FILE}
+				{#if searchType === SearchType.IN_FILE}
 					<p>{@html currContext}</p>
-				{:else if searchResult.type === SearchType.IN_VAULT}
+				{:else if searchType === SearchType.IN_VAULT}
 					<ul>
 						{#each currSubItems as subItem, index}
-							<span>
+							<button>
 								{@html subItem}
-							</span>
+							</button>
 						{/each}
 					</ul>
 				{/if}
