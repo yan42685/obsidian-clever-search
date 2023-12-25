@@ -52,11 +52,8 @@ class FileRetriever {
 		const files = this.vault.getFiles();
 		logger.info(`files count: ${files.length}`);
 		MyLib.countFileByExtensions(files);
-		// 当直接传递this.isFileIndexable给filter时，isFileIndexable方法就脱离了其原始对象FileRetriever的上下文
-		// 需要显式绑定, 显式绑定有两种方法，
-		// 1. this.isFileIndexable.bind(this)
-		// 2. (file) => this.isFileIndexable(file)   因为箭头函数不会创建this上下文
-		return files.filter(this.isFileIndexable.bind(this));
+		// 不应该像Java那样传递方法引用，而是需要用箭头函数避免this的指向发生改变
+		return files.filter((file) => this.isFileIndexable(file));
 	}
 
 	private isFileIndexable(file: TFile): boolean {

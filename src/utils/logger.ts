@@ -29,7 +29,7 @@ class Logger {
 		if (this.shouldLog("debug")) {
 			console.debug(
 				`%c[debug] ${this.getCallerName()}`,
-				"color: green;",
+				"color: #5f6368;",
 				...args,
 			);
 		}

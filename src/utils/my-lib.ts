@@ -55,13 +55,22 @@ export class MyLib {
 
 	static countFileByExtensions(files: TFile[]): Record<string, number> {
 		const extensionCountMap = new Map<string, number>();
+		const commonExtensions=  ["no_extension", "md", "txt"]
+		const uncommonExtensionPathMap = new Map<string, string[]>();
 		files.forEach((file) => {
 			const ext = file.extension || "no_extension";
 			extensionCountMap.set(ext, (extensionCountMap.get(ext) || 0) + 1);
+			if (!commonExtensions.includes(ext)) {
+				const paths = uncommonExtensionPathMap.get(ext) || [];
+				paths.push(file.path);
+				uncommonExtensionPathMap.set(ext, paths);
+			}
 		});
-		const result = Object.fromEntries(extensionCountMap);
-		logger.info(result);
-		return result;
+		const countResult = Object.fromEntries(extensionCountMap);
+		const uncommonPathsResult = Object.fromEntries(uncommonExtensionPathMap);
+		logger.debug(countResult);
+		logger.debug(uncommonPathsResult);
+		return countResult;
 	}
 }
 
@@ -78,7 +87,6 @@ export async function monitorExecution(
 		`[${fn.name.replace(/^bound /, "")}] running time: ${duration}`,
 	);
 }
-
 
 /**
  * A decorator for asynchronously measuring and logging the execution time of a class method.
@@ -103,13 +111,13 @@ export function monitorDecorator(
 	const originalMethod = descriptor.value;
 
 	descriptor.value = async function (...args: any[]) {
-		const start = performance.now();
+		const start = Date.now();
 		const result = await originalMethod.apply(this, args);
-		const end = performance.now();
+		const end = Date.now();
 		logger.debug(
-			`Execution time for [${propertyKey}]: ${formatMillis(
-				end - start,
-			)}`,
+			`Execution time for <${
+				target.constructor.name
+			}-${propertyKey}>: ${formatMillis(end - start)}`,
 		);
 		return result;
 	};
@@ -120,7 +128,7 @@ export function monitorDecorator(
 /**
  * get a better view of milliseconds
  */
-export function formatMillis(millis: number) {
+export function formatMillis(millis: number): string {
 	if (millis < 1000) {
 		return `${millis} ms`;
 	} else if (millis < 60000) {
@@ -131,6 +139,6 @@ export function formatMillis(millis: number) {
 		const minutes = Math.floor(millis / 60000);
 		const seconds = Math.floor((millis % 60000) / 1000);
 		const milliseconds = millis % 1000;
-		return `${minutes} min ${seconds} s ${milliseconds.toFixed(2)} ms`;
+		return `${minutes} min ${seconds} s ${milliseconds} ms`;
 	}
 }
