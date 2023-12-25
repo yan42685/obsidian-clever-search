@@ -5,7 +5,7 @@
 		InFileItem,
 		InVaultItem,
 		SearchResult,
-		SearchType,
+		SearchType
 	} from "src/globals/search-types";
 	import { SearchHelper } from "src/services/search/search-helper";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -21,7 +21,8 @@
 	const DEFAULT_RESULT = new SearchResult(SearchType.NONE, "", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = -1;
-	let currContext = "";
+	let currContext = "";  // for in-file search
+	let currSubItems: string[] = []; // for in-vault search
 	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
@@ -67,7 +68,7 @@
 	}
 
 	// Handle result click
-	function handleResultClick(index: number): void {
+	function handleItemClick(index: number): void {
 		updateItem(index);
 	}
 
@@ -81,7 +82,7 @@
 		updateItem(Math.max(currItemIndex - 1, 0));
 	}
 
-	function handleConfirmItem() {
+	function handleConfirm() {
 		modal.close();
 		// BUG: 最新的obsidian.d.ts没有app.commands了
 		const deprecatedApp = app as any;
@@ -124,7 +125,7 @@
 
 	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
 	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
-	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirmItem);
+	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
 	handleInput();
 </script>
 
@@ -149,15 +150,18 @@
 						bind:this={item.element}
 						on:click={(event) => {
 							event.preventDefault();
-							handleResultClick(index);
+							handleItemClick(index);
 						}}
 					>
 						{#if item instanceof InFileItem}
-							<span class="line-item">{@html item.line.text}</span>
+							<span class="line-item">{@html item.line.text}</span
+							>
 						{:else if item instanceof InVaultItem}
 							<span class="file-basename">{item.basename}</span>
 							<span class="file-extension">{item.extension}</span>
-							<span class="file-folder-path">{item.folderPath}</span>
+							<span class="file-folder-path"
+								>{item.folderPath}</span
+							>
 						{/if}
 					</button>
 				{/each}
@@ -167,7 +171,17 @@
 	<div class="right-pane">
 		{#if currContext}
 			<div class="preview-container">
-				<p>{@html currContext}</p>
+				{#if searchResult.type === SearchType.IN_FILE}
+					<p>{@html currContext}</p>
+				{:else if searchResult.type === SearchType.IN_VAULT}
+					<ul>
+						{#each currSubItems as subItem, index}
+							<span>
+								{@html subItem}
+							</span>
+						{/each}
+					</ul>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -277,14 +291,11 @@
 	}
 
 	.result-items ul button span.file-basename {
-
 	}
 
 	.result-items ul button span.file-extension {
-
 	}
 	.result-items ul button span.file-folder-path {
-
 	}
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
