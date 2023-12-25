@@ -1,6 +1,20 @@
 import { MyLib } from "src/utils/my-lib";
 
 describe("MyLib", () => {
+	let originalConsoleError: any;
+
+	beforeAll(() => {
+		// 保存原始的 console.error
+		originalConsoleError = console.error;
+		// Mock console.error
+		console.error = jest.fn();
+	});
+
+	afterAll(() => {
+		// 恢复原始的 console.error
+		console.error = originalConsoleError;
+	});
+
 	describe("extractDomainFromUrl", () => {
 		it("should extract the domain from a valid HTTPS URL", () => {
 			const url = "https://www.example.com/page";

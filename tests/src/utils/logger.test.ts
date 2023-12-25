@@ -1,4 +1,3 @@
-import { jest } from "@jest/globals";
 import { logger } from "src/utils/logger";
 
 describe("Logger", () => {
@@ -46,6 +45,16 @@ describe("Logger", () => {
 			expect.anything(),
 			"color: orange;",
 			"Warning message",
+		);
+	});
+
+	it("should log error messages when log level is error", () => {
+		logger.setLevel("error");
+		logger.error("Error message");
+		expect(consoleSpy.error).toHaveBeenCalledWith(
+			expect.anything(),
+			"color: red;",
+			"Error message",
 		);
 	});
 
