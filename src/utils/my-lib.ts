@@ -84,7 +84,7 @@ export async function monitorExecution(
 
 	const duration = formatMillis(endTime - startTime);
 	logger.debug(
-		`[${fn.name.replace(/^bound /, "")}] running time: ${duration}`,
+		`<${fn.name.replace(/^bound /, "")}> Execution time: ${duration}`,
 	);
 }
 
@@ -115,9 +115,9 @@ export function monitorDecorator(
 		const result = await originalMethod.apply(this, args);
 		const end = Date.now();
 		logger.debug(
-			`Execution time for <${
+			`<${
 				target.constructor.name
-			}-${propertyKey}>: ${formatMillis(end - start)}`,
+			}-${propertyKey}> Execution time: ${formatMillis(end - start)}`,
 		);
 		return result;
 	};

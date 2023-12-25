@@ -63,9 +63,9 @@ export default class CleverSearch extends Plugin {
 	togglePrivacyMode() {
 		this.privacyModeEnabled = !this.privacyModeEnabled;
 		if (this.privacyModeEnabled) {
-			document.body.classList.add("my-custom-blur");
+			document.body.classList.add("cs-privacy-blur");
 		} else {
-			document.body.classList.remove("my-custom-blur");
+			document.body.classList.remove("cs-privacy-blur");
 		}
 	}
 	openTestModal() {
@@ -164,7 +164,7 @@ export default class CleverSearch extends Plugin {
 	}
 
 	onunload() {
-		document.body.classList.remove("my-custom-blur");
+		document.body.classList.remove("cs-privacy-blur");
 	}
 
 	async loadSettings() {

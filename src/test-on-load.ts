@@ -49,13 +49,14 @@ async function testLexicalSearch() {
 	const query = "camera community";
 	const resultsOr = await lexicalEngine.searchOr(query);
 	const resultsAnd = await lexicalEngine.searchAnd(query);
+
 	// logger.debug(resultsOr);
 	// logger.debug(resultsAnd);
 	const vault = getApp().vault;
 	const tFile = vault.getAbstractFileByPath(resultsOr[0]?.id);
 	if (tFile instanceof TFile) {
-		const content = await vault.cachedRead(tFile);
-		logger.info(content);
+		// const content = await vault.cachedRead(tFile);
+		logger.info(`find first one: ${tFile.path}`);
 	} else {
 		logger.info(`not a TFile: ${tFile}`);
 	}
