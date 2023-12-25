@@ -24,7 +24,7 @@ describe("Logger", () => {
 		logger.debug("Debug message");
 		expect(consoleSpy.debug).toHaveBeenCalledWith(
 			expect.anything(),
-			"color: green;",
+			"color: #5f6368;",
 			"Debug message",
 		);
 	});
