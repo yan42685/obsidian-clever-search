@@ -18,13 +18,10 @@ export class DataProvider {
 		return Promise.all(
 			filesToIndex.map(async (file) => {
 				if (fileRetriever.isContentReadable(file)) {
-					const metadata = this.app.metadataCache.getFileCache(file);
 					return {
 						path: file.path,
 						basename: file.basename,
-						aliases: (
-							parseFrontMatterAliases(metadata?.frontmatter) || []
-						).join(""),
+						aliases: this.parseAliases(file),
 						content: await fileRetriever.readContent(file),
 					};
 				} else {
@@ -36,11 +33,18 @@ export class DataProvider {
 			}),
 		);
 	}
+
+	private parseAliases(file: TFile) {
+		const metadata = this.app.metadataCache.getFileCache(file);
+		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join("");
+	}
 }
 
 export class FileRetriever {
-	private static readonly plainTextExtensions = new Set(["md", ""]);
-	private static readonly readableExtensions = new Set([...FileRetriever.plainTextExtensions]);
+	private static readonly plainTextExtensions = new Set(["md", "txt", ""]);
+	private static readonly readableExtensions = new Set([
+		...FileRetriever.plainTextExtensions,
+	]);
 	private readonly vault: Vault = container.resolve(Vault);
 	private readonly setting: PluginSetting = container.resolve(PluginSetting);
 	private readonly extensionBlacklist;
@@ -72,7 +76,9 @@ export class FileRetriever {
 		if (FileRetriever.plainTextExtensions.has(file.extension)) {
 			return this.vault.cachedRead(file);
 		} else {
-			throw Error(`unsupported file extension to read, filename: ${file.name}`);
+			throw Error(
+				`unsupported file extension to read, filename: ${file.name}`,
+			);
 		}
 	}
 

@@ -52,14 +52,14 @@ function testUnsupportedExtensions() {
 async function testLexicalSearch() {
 	const lexicalEngine = container.resolve(LexicalEngine);
 	await lexicalEngine.init();
-	const query = "camera community";
+	const query = "camera communiy";
 	const resultsOr = await lexicalEngine.searchOr(query);
 	const resultsAnd = await lexicalEngine.searchAnd(query);
 
-	// logger.debug(resultsOr);
+	logger.debug(resultsOr);
 	// logger.debug(resultsAnd);
 	const vault = getApp().vault;
-	const tFile = vault.getAbstractFileByPath(resultsOr[0]?.id);
+	const tFile = vault.getAbstractFileByPath(resultsOr[0]?.path);
 	if (tFile) {
 		if (tFile instanceof TFile) {
 			// const content = await vault.cachedRead(tFile);

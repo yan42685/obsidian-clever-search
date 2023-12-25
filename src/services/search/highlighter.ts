@@ -1,6 +1,11 @@
 import { LanguageEnum } from "src/globals/language-enum";
+import type { InFileItem, MatchedFile } from "src/globals/search-types";
 
-export class Highlighter {}
+export class Highlighter {
+	parse(matchedFiles: MatchedFile[]): InFileItem[] {
+		return [];
+	}
+}
 
 export interface TruncateLimitConfig {
 	maxPreCharsForItem: number;

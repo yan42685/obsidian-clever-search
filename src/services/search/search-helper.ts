@@ -14,7 +14,7 @@ import {
 	SearchType,
 	type DocumentWeight,
 	type InFileDataSource,
-	type MiniSearchResult,
+	type MatchedFile,
 } from "../../globals/search-types";
 import { MathUtil } from "../../utils/math-util";
 import { Database } from "../database/database";
@@ -30,7 +30,7 @@ export class SearchHelper {
 	lexicalEngine: LexicalEngine = container.resolve(LexicalEngine);
 	async searchInVault(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult(SearchType.IN_VAULT, "", []);
-		this.lexicalEngine.searchAnd(queryText);
+		const matchedFiles = await this.lexicalEngine.searchAnd(queryText);
 		return result;
 	}
 
@@ -39,7 +39,7 @@ export class SearchHelper {
 			return new SearchResult(SearchType.IN_FILE, "", []);
 		}
 
-		await this.updateDataSource();
+		await this.updateInFileDataSource();
 		queryText = queryText.replace(/\s/g, "");
 
 		const searchResult = new SearchResult(
@@ -86,7 +86,7 @@ export class SearchHelper {
 		return searchResult;
 	}
 
-	private async updateDataSource() {
+	private async updateInFileDataSource() {
 		// Ensure the active leaf is a markdown note
 		const activeFile = this.app.workspace.getActiveFile();
 		if (!activeFile) {
@@ -277,9 +277,9 @@ export class LexicalEngine {
 	private async search(
 		queryText: string,
 		combinationMode: "and" | "or",
-	): Promise<MiniSearchResult[]> {
+	): Promise<MatchedFile[]> {
 		const query = new Query(queryText);
-		return this.miniSearch.search(query.text, {
+		const minisearchResult = this.miniSearch.search(query.text, {
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
 			prefix: (term) =>
@@ -294,6 +294,12 @@ export class LexicalEngine {
 				aliases: this.settings.weightPath,
 			} as DocumentWeight,
 			combineWith: combinationMode,
+		});
+		return minisearchResult.map((item) => {
+			return {
+				path: item.id,
+				matchedTerms: item.terms,
+			};
 		});
 	}
 }

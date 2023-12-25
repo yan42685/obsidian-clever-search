@@ -40,6 +40,11 @@ export class MatchedLine extends Line {
 	}
 }
 
+export type MatchedFile  = {
+	path: string,
+	matchedTerms: string[]
+}
+
 export class SearchResult {
 	type: SearchType;
 	currPath: string;
