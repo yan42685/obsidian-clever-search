@@ -28,7 +28,6 @@ export async function testOnLoad() {
 	monitorExecution(testLexicalSearch);
 	// monitorExecution(async () => await testLexicalSearch());
 	// testLexicalSearch();
-
 }
 function getApp() {
 	return container.resolve(App);
@@ -46,7 +45,7 @@ function testTsyringe() {
 }
 
 function testUnsupportedExtensions() {
-	const vault  = getApp().vault as any;
+	const vault = getApp().vault as any;
 	logger.info(vault.getConfig("showUnsupportedFiles"));
 }
 
@@ -61,10 +60,14 @@ async function testLexicalSearch() {
 	// logger.debug(resultsAnd);
 	const vault = getApp().vault;
 	const tFile = vault.getAbstractFileByPath(resultsOr[0]?.id);
-	if (tFile instanceof TFile) {
-		// const content = await vault.cachedRead(tFile);
-		logger.info(`find first one: ${tFile.path}`);
+	if (tFile) {
+		if (tFile instanceof TFile) {
+			// const content = await vault.cachedRead(tFile);
+			logger.info(`find first one: ${tFile.path}`);
+		} else {
+			logger.info(`it's a folder: ${tFile}`);
+		}
 	} else {
-		logger.info(`not a TFile: ${tFile}`);
+		logger.info(`no document is found`)
 	}
 }

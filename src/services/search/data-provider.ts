@@ -15,13 +15,9 @@ export class DataProvider {
 	async generateAllIndexedDocuments(): Promise<IndexedDocument[]> {
 		const fileRetriever = getInstance(FileRetriever);
 		const filesToIndex = await fileRetriever.allFilesToBeIndexed();
-		// MyLib.countFileByExtensions(filesToIndex);
-		logger.debug(`${filesToIndex.length} files need to be indexed.`);
-		// TODO: remove this line
-		// files = files.slice(0, 100);
 		return Promise.all(
 			filesToIndex.map(async (file) => {
-				if (fileRetriever.isContentIndexable(file)) {
+				if (fileRetriever.isContentReadable(file)) {
 					const metadata = this.app.metadataCache.getFileCache(file);
 					return {
 						path: file.path,
@@ -29,7 +25,7 @@ export class DataProvider {
 						aliases: (
 							parseFrontMatterAliases(metadata?.frontmatter) || []
 						).join(""),
-						content: await this.vault.cachedRead(file),
+						content: await fileRetriever.readContent(file),
 					};
 				} else {
 					return {
@@ -43,9 +39,10 @@ export class DataProvider {
 }
 
 export class FileRetriever {
+	private static readonly plainTextExtensions = new Set(["md", ""]);
+	private static readonly readableExtensions = new Set([...FileRetriever.plainTextExtensions]);
 	private readonly vault: Vault = container.resolve(Vault);
 	private readonly setting: PluginSetting = container.resolve(PluginSetting);
-	private static readonly CONTENT_INDEXABLE_EXTENSIONS = new Set(["md"]);
 	private readonly extensionBlacklist;
 	constructor() {
 		this.extensionBlacklist = new Set([
@@ -56,23 +53,31 @@ export class FileRetriever {
 
 	// @monitorDecorator
 	async allFilesToBeIndexed(): Promise<TFile[]> {
-		// get all files cached by obsidian
+		// get all fileRefs cached by obsidian
 		const files = this.vault.getFiles();
 		logger.info(`all files: ${files.length}`);
 		MyLib.countFileByExtensions(files);
 
 		// TODO: compare mtime and then filter
-		const result = files.filter((file) => this.isExtensionSupported(file));
+		const result = files.filter((file) => this.shouldIndex(file));
 		logger.info(`files to be indexed: ${files.length}`);
 		MyLib.countFileByExtensions(result);
+
 		return result;
 	}
-
-	// if isContentIndexable(file) === true, then isPathIndexable(file) will always return true
-	isContentIndexable(file: TFile): boolean {
-		return FileRetriever.CONTENT_INDEXABLE_EXTENSIONS.has(file.extension);
+	isContentReadable(file: TFile): boolean {
+		return FileRetriever.readableExtensions.has(file.extension);
 	}
-	isExtensionSupported(file: TFile): boolean {
-		return !this.extensionBlacklist.has(file.extension);
+	async readContent(file: TFile): Promise<string> {
+		if (FileRetriever.plainTextExtensions.has(file.extension)) {
+			return this.vault.cachedRead(file);
+		} else {
+			throw Error(`unsupported file extension to read, filename: ${file.name}`);
+		}
+	}
+
+	private shouldIndex(file: TFile): boolean {
+		// TODO: filter by extensions and paths
+		return true;
 	}
 }
