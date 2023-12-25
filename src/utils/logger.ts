@@ -15,30 +15,29 @@ class Logger {
 		this.logLevel = level;
 	}
 
-	info(...args: any[]) {
-		if (this.shouldLog("info")) {
-			console.info(
-				`%c[info] ${this.getCallerName()}`,
-				"color: blue;",
-				...args,
-			);
-		}
-	}
-
 	debug(...args: any[]) {
 		if (this.shouldLog("debug")) {
 			console.debug(
-				`%c[debug] ${this.getCallerName()}`,
+				`%c[debug] ${this.getCallerName()}\n`,
 				"color: #5f6368;",
 				...args,
 			);
 		}
 	}
 
+	info(...args: any[]) {
+		if (this.shouldLog("info")) {
+			console.info(
+				`%c[info] ${this.getCallerName()}\n`,
+				"color: blue;",
+				...args,
+			);
+		}
+	}
 	warn(...args: any[]) {
 		if (this.shouldLog("warn")) {
 			console.warn(
-				`%c[warn] ${this.getCallerName()}`,
+				`%c[warn] ${this.getCallerName()}\n`,
 				"color: orange;",
 				...args,
 			);
@@ -48,7 +47,7 @@ class Logger {
 	error(...args: any[]) {
 		if (this.shouldLog("error")) {
 			console.error(
-				`%c[error] ${this.getCallerName()}`,
+				`%c[error] ${this.getCallerName()}\n`,
 				"color: red;",
 				...args,
 			);

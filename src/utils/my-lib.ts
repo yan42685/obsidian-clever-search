@@ -1,6 +1,7 @@
 import * as fsLib from "fs";
 import type { TFile } from "obsidian";
 import * as pathLib from "path";
+import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";
 
 // for autocompletion
@@ -141,4 +142,9 @@ export function formatMillis(millis: number): string {
 		const milliseconds = millis % 1000;
 		return `${minutes} min ${seconds} s ${milliseconds} ms`;
 	}
+}
+
+
+export function getInstance<T>(token: InjectionToken<T>): T {
+	return container.resolve(token);
 }

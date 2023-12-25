@@ -1,4 +1,6 @@
-import { Notice } from "obsidian";
+import { App, Notice, Plugin, Vault } from "obsidian";
+import { THIS_PLUGIN } from "src/globals/constants";
+import { container } from "tsyringe";
 
 
 export class MyNotice extends Notice {

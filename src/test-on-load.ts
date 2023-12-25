@@ -23,10 +23,12 @@ export async function testOnLoad() {
 
 	// testStemmer();
 	// testTsyringe();
+	// testUnsupportedExtensions();
 
 	monitorExecution(testLexicalSearch);
 	// monitorExecution(async () => await testLexicalSearch());
 	// testLexicalSearch();
+
 }
 function getApp() {
 	return container.resolve(App);
@@ -41,6 +43,11 @@ function testTsyringe() {
 	const obj2 = container.resolve(SearchHelper);
 	// in tsyringe, the default scope for class is singleton, so it should output "true"
 	logger.info(`test equal: ${obj1 === obj2}`);
+}
+
+function testUnsupportedExtensions() {
+	const vault  = getApp().vault as any;
+	logger.info(vault.getConfig("showUnsupportedFiles"));
 }
 
 async function testLexicalSearch() {

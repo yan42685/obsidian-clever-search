@@ -5,8 +5,8 @@ export type MiniSearchResult = MiniResult;
 export type IndexedDocument = {
 	path: string;
 	basename: string;
-	aliases: string;
-	content: string;
+	aliases?: string;
+	content?: string;
 };
 
 export type DocumentWeight = {
