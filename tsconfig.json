@@ -3,7 +3,7 @@
 	"compilerOptions": {
 		// suppress error due to the extends for svelte/tsconfig.json
 		// won't work on typescript 5.5 or above
-		"ignoreDeprecations": "5.0",  
+		// "ignoreDeprecations": "5.0",  
 		"experimentalDecorators": true,
 		"emitDecoratorMetadata": true,
 		"types": ["svelte", "node", "jest"],

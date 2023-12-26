@@ -70,7 +70,6 @@
 			});
 		} else if (searchType === SearchType.IN_VAULT) {
 			searchResult = await searchHelper.searchInVault(queryText);
-
 		}
 	}
 
