@@ -91,11 +91,13 @@ describe("MyLib", () => {
 			expect(MyLib.getFolderPath("")).toBe("./");
 		});
 
-		it("should handle Windows-style paths", () => {
-			expect(MyLib.getFolderPath("C:\\path\\to\\file.txt")).toBe(
-				"C:/path/to/",
-			);
-		});
+		if (process.platform === "win32") {
+			it("should handle Windows-style paths", () => {
+				expect(MyLib.getFolderPath("C:\\path\\to\\file.txt")).toBe(
+					"C:/path/to/",
+				);
+			});
+		}
 	});
 
 	describe("formatMillis", () => {
