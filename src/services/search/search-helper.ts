@@ -96,6 +96,7 @@ export class SearchHelper {
 		return searchResult;
 	}
 
+	@monitorDecorator
 	private async updateInFileDataSource() {
 		// Ensure the active leaf is a markdown note
 		const activeFile = this.app.workspace.getActiveFile();
@@ -104,7 +105,8 @@ export class SearchHelper {
 		}
 
 		// Read the content and split into lines
-		const lines = (await this.app.vault.read(activeFile)).split("\n");
+		// const lines = (await this.app.vault.read(activeFile)).split("\n");
+		const lines = (await this.app.vault.cachedRead(activeFile)).split("\n");
 
 		// Map each line to a MatchedLine object
 		this.inFileDataSource = {

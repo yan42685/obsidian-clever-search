@@ -17,13 +17,13 @@ export class DataProvider {
 		const filesToIndex = await fileRetriever.allFilesToBeIndexed();
 		return Promise.all(
 			filesToIndex.map(async (file) => {
-				if (fileRetriever.isContentReadable(file)) {
+				if (fileRetriever.isContentIndexable(file)) {
 					return {
 						path: file.path,
 						basename: file.basename,
 						folder: MyLib.getFolderPath(file.path),
 						aliases: this.parseAliases(file),
-						content: await fileRetriever.readContent(file),
+						content: await fileRetriever.readPlainText(file),
 					};
 				} else {
 					return {
@@ -44,7 +44,7 @@ export class DataProvider {
 
 export class FileRetriever {
 	private static readonly plainTextExtensions = new Set(["md", "txt", ""]);
-	private static readonly readableExtensions = new Set([
+	private static readonly contentIndexableExtensions = new Set([
 		...FileRetriever.plainTextExtensions,
 	]);
 	private readonly vault: Vault = container.resolve(Vault);
@@ -71,10 +71,10 @@ export class FileRetriever {
 
 		return result;
 	}
-	isContentReadable(file: TFile): boolean {
-		return FileRetriever.readableExtensions.has(file.extension);
+	isContentIndexable(file: TFile): boolean {
+		return FileRetriever.contentIndexableExtensions.has(file.extension);
 	}
-	async readContent(file: TFile): Promise<string> {
+	async readPlainText(file: TFile): Promise<string> {
 		if (FileRetriever.plainTextExtensions.has(file.extension)) {
 			return this.vault.cachedRead(file);
 		} else {
@@ -85,7 +85,7 @@ export class FileRetriever {
 	}
 	async readContentByPath(path: string): Promise<string> {
 		const file = this.vault.getAbstractFileByPath(path) as TFile
-		return this.readContent(file);
+		return this.readPlainText(file);
 	}
 
 	private shouldIndex(file: TFile): boolean {

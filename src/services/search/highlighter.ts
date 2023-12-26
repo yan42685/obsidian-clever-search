@@ -4,6 +4,7 @@ import {
 	ItemType,
 	type MatchedFile,
 } from "src/globals/search-types";
+import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { FileRetriever } from "./data-provider";
 
@@ -15,7 +16,7 @@ export class Highlighter {
 	): Promise<InVaultItem[]> {
 		// TODO: do real highlight
 		const result = await Promise.all(
-			matchedFiles.map(async (f) => {
+			matchedFiles.slice(0, 50).map(async (f) => {
 				const path = f.path;
 				const content =
 					await this.fileRetriever.readContentByPath(path);
@@ -29,7 +30,7 @@ export class Highlighter {
 				]);
 			}),
 		);
-		// logger.info(result);
+		logger.warn("current only highlight top 50 files");
 		return result;
 	}
 }
