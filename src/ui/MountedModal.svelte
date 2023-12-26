@@ -2,12 +2,14 @@
 	import { MarkdownView, type App, type EditorPosition } from "obsidian";
 	import { EventEnum } from "src/globals/event-enum";
 	import {
+		FileType,
 		InFileItem,
 		InVaultItem,
 		SearchResult,
 		SearchType,
 	} from "src/globals/search-types";
 	import { PrivateApi } from "src/services/obsidian/private-api";
+	import { FileRetriever } from "src/services/search/data-provider";
 	import { SearchHelper } from "src/services/search/search-helper";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { getInstance } from "src/utils/my-lib";
@@ -16,6 +18,7 @@
 	import type { SearchModal } from "./search-modal";
 
 	const searchHelper: SearchHelper = container.resolve(SearchHelper);
+	const fileRetriever = getInstance(FileRetriever);
 
 	export let app: App;
 	export let modal: SearchModal;
@@ -25,8 +28,10 @@
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = -1;
 	let currContext = ""; // for previewing in-file search
+
+	let currFileItem: InVaultItem | null = null; // for previewing in-vault search
+	let currSubItems: string[] = [];
 	let currSubItemIndex = -1;
-	let currSubItems: string[] = []; // for previewing in-vault search
 	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
@@ -40,13 +45,14 @@
 				const item = items[index] as InFileItem;
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
-				const item = items[index] as InVaultItem;
-				currSubItems = item.subItems;
+				currFileItem = items[index] as InVaultItem;
+				currSubItems = currFileItem.subItems;
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
 		} else {
 			currContext = "";
+			currFileItem = null;
 			currSubItems = [];
 			currItemIndex = -1;
 		}
@@ -191,13 +197,17 @@
 					<p>{@html currContext}</p>
 				{/if}
 			{:else if searchType === SearchType.IN_VAULT}
-				<ul>
-					{#each currSubItems as subItem, index}
-						<p>
-							{@html subItem}
-						</p>
-					{/each}
-				</ul>
+				{#if currFileItem && FileType.PLAIN_TEXT === fileRetriever.getFileType(currFileItem.path)}
+					<ul>
+						{#each currSubItems as subItem, index}
+							<p>
+								{@html subItem}
+							</p>
+						{/each}
+					</ul>
+				{:else}
+					<span> no result or to be impl</span>
+				{/if}
 			{/if}
 		</div>
 	</div>
@@ -326,9 +336,10 @@
 		overflow-wrap: break-word;
 		overflow-y: auto;
 	}
-
-	.right-pane .preview-container p {
+	.right-pane .preview-container p,
+	.right-pane .preview-container ul {
 		margin: 0;
+		padding: 0;
 	}
 
 	.right-pane .preview-container :global(span.target-line) {
