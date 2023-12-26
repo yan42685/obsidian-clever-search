@@ -1,9 +1,36 @@
 import { LanguageEnum } from "src/globals/language-enum";
-import type { InFileItem, MatchedFile } from "src/globals/search-types";
+import {
+	InVaultItem,
+	ItemType,
+	type MatchedFile,
+} from "src/globals/search-types";
+import { getInstance } from "src/utils/my-lib";
+import { FileRetriever } from "./data-provider";
 
 export class Highlighter {
-	parse(matchedFiles: MatchedFile[]): InFileItem[] {
-		return [];
+	fileRetriever: FileRetriever = getInstance(FileRetriever);
+	// TODO: highlight by page, rather than reading all files
+	async parseInVaultItem(
+		matchedFiles: MatchedFile[],
+	): Promise<InVaultItem[]> {
+		// TODO: do real highlight
+		const result = await Promise.all(
+			matchedFiles.map(async (f) => {
+				const path = f.path;
+				const content =
+					await this.fileRetriever.readContentByPath(path);
+				const lines = content.split("\n"); // 正则表达式匹配 \n 或 \r\n
+				const firstTenLines = lines.slice(0, 10).join("\n");
+				// It is necessary to use a constructor with 'new', rather than using an object literal. 
+				// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance 
+				// (to correctly display data in Svelte components).
+				return new InVaultItem(ItemType.LEXICAL, f.path, [
+					firstTenLines,
+				]);
+			}),
+		);
+		// logger.info(result);
+		return result;
 	}
 }
 
@@ -37,7 +64,6 @@ export class TruncateLimit {
 
 	// public static getConfig(strArray: string[]): TruncateLimitConfig {
 	// 	const languageResult = textAnalyzer.detectLanguage(strArray);
-
 
 	// }
 }

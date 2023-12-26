@@ -18,7 +18,7 @@ import { DEFAULT_SETTING, PluginSetting } from "./services/obsidian/setting";
 import { testOnLoad } from "./test-on-load";
 import { SearchModal } from "./ui/search-modal";
 import { logger } from "./utils/logger";
-import { isDevEnvironment } from "./utils/my-lib";
+import { getInstance, isDevEnvironment } from "./utils/my-lib";
 import { SearchClient } from "./web-worker/search-worker-client";
 
 export default class CleverSearch extends Plugin {
@@ -36,7 +36,7 @@ export default class CleverSearch extends Plugin {
 		container.register(PluginSetting, { useValue: this.settings });
 
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
-		container.resolve(PluginManager);
+		await getInstance(PluginManager).initAsync();
 
 		// this.exampleCode();
 		this.registerCommands();

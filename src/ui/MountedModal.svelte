@@ -21,7 +21,7 @@
 	export let modal: SearchModal;
 	export let searchType: SearchType;
 	export let queryText: string;
-	const DEFAULT_RESULT = new SearchResult(SearchType.NONE, "", []);
+	const DEFAULT_RESULT = new SearchResult("", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
 	let currItemIndex = -1;
 	let currContext = ""; // for previewing in-file search
@@ -35,15 +35,19 @@
 	function updateItem(index: number): void {
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
+			currItemIndex = index;
 			if (searchType === SearchType.IN_FILE) {
 				const item = items[index] as InFileItem;
 				currContext = item.context;
-				currItemIndex = index;
+			} else if (searchType === SearchType.IN_VAULT) {
+				const item = items[index] as InVaultItem;
+				currSubItems = item.subItems;
 			} else {
-				throw Error("unsupported result type: " + typeof searchResult);
+				throw Error(`unsupported search type: ${searchType}`);
 			}
 		} else {
 			currContext = "";
+			currSubItems = [];
 			currItemIndex = -1;
 		}
 	}
@@ -52,9 +56,6 @@
 	async function handleInput() {
 		if (searchType === SearchType.IN_FILE) {
 			searchResult = await searchHelper.searchInFile(queryText);
-			updateItem(0);
-			// wait until all dynamic elements are mounted and rendered
-			await tick();
 			searchResult.items.forEach((x) => {
 				const item = x as InFileItem;
 				// console.log(item.line.text);
@@ -70,7 +71,12 @@
 			});
 		} else if (searchType === SearchType.IN_VAULT) {
 			searchResult = await searchHelper.searchInVault(queryText);
+			// logger.info(searchResult);
+			// logger.info(typeof searchResult.items[0] || "nothing");
 		}
+		updateItem(0);
+		// wait until all dynamic elements are mounted and rendered
+		await tick();
 	}
 
 	// Handle result click
@@ -161,11 +167,17 @@
 							<span class="line-item">{@html item.line.text}</span
 							>
 						{:else if item instanceof InVaultItem}
-							<span class="file-basename">{item.basename}</span>
-							<span class="file-extension">{item.extension}</span>
-							<span class="file-folder-path"
-								>{item.folderPath}</span
-							>
+							<div class="file-item">
+								<span class="file-basename"
+									>{item.basename}</span
+								>
+								<span class="file-extension"
+									>{item.extension}</span
+								>
+								<span class="file-folder-path"
+									>{item.folderPath}</span
+								>
+							</div>
 						{/if}
 					</button>
 				{/each}
@@ -173,21 +185,21 @@
 		</div>
 	</div>
 	<div class="right-pane">
-		{#if currContext}
-			<div class="preview-container">
-				{#if searchType === SearchType.IN_FILE}
+		<div class="preview-container">
+			{#if searchType === SearchType.IN_FILE}
+				{#if currContext}
 					<p>{@html currContext}</p>
-				{:else if searchType === SearchType.IN_VAULT}
-					<ul>
-						{#each currSubItems as subItem, index}
-							<button>
-								{@html subItem}
-							</button>
-						{/each}
-					</ul>
 				{/if}
-			</div>
-		{/if}
+			{:else if searchType === SearchType.IN_VAULT}
+				<ul>
+					{#each currSubItems as subItem, index}
+						<p>
+							{@html subItem}
+						</p>
+					{/each}
+				</ul>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -300,6 +312,7 @@
 	.result-items ul button span.file-extension {
 	}
 	.result-items ul button span.file-folder-path {
+		display: block;
 	}
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);

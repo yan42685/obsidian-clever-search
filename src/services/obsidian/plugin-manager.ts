@@ -2,7 +2,8 @@ import type { FileSystemAdapter } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { container, singleton } from "tsyringe";
-import { pathUtils } from "../../utils/my-lib";
+import { getInstance, pathUtils } from "../../utils/my-lib";
+import { LexicalEngine } from "../search/search-helper";
 import { SettingManager } from "./setting";
 
 @singleton()
@@ -21,12 +22,12 @@ export class PluginManager {
 		this.vaultPath = this.fs.getBasePath().replace(/\\/g, "/") + "/";
 		this.indexName = "obsidian_vault_" + this.plugin.app.vault.getName().toLowerCase();
 		this.updateWatchedPaths();
-		this.loadComponents();
 	}
 
 
-	private loadComponents() {
+	async initAsync() {
 		container.resolve(SettingManager);
+		await getInstance(LexicalEngine).initAsync();
 	}
 
 	updateWatchedPaths() {

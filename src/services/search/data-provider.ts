@@ -21,6 +21,7 @@ export class DataProvider {
 					return {
 						path: file.path,
 						basename: file.basename,
+						folder: MyLib.getFolderPath(file.path),
 						aliases: this.parseAliases(file),
 						content: await fileRetriever.readContent(file),
 					};
@@ -28,6 +29,7 @@ export class DataProvider {
 					return {
 						path: file.path,
 						basename: file.basename,
+						folder: MyLib.getFolderPath(file.path),
 					};
 				}
 			}),
@@ -77,9 +79,13 @@ export class FileRetriever {
 			return this.vault.cachedRead(file);
 		} else {
 			throw Error(
-				`unsupported file extension to read, filename: ${file.name}`,
+				`unsupported file extension to read, path: ${file.path}`,
 			);
 		}
+	}
+	async readContentByPath(path: string): Promise<string> {
+		const file = this.vault.getAbstractFileByPath(path) as TFile
+		return this.readContent(file);
 	}
 
 	private shouldIndex(file: TFile): boolean {

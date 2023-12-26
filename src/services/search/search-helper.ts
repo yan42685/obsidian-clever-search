@@ -3,15 +3,15 @@ import type { Options } from "minisearch";
 import MiniSearch from "minisearch";
 import { App, Component } from "obsidian";
 import { logger } from "src/utils/logger";
-import { monitorDecorator } from "src/utils/my-lib";
+import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import { getCurrLanguage } from "../../globals/language-enum";
 import {
 	InFileItem,
+	InVaultItem,
 	Line,
 	MatchedLine,
 	SearchResult,
-	SearchType,
 	type DocumentWeight,
 	type InFileDataSource,
 	type MatchedFile,
@@ -20,6 +20,7 @@ import { MathUtil } from "../../utils/math-util";
 import { Database } from "../database/database";
 import { PluginSetting, type SearchSetting } from "../obsidian/setting";
 import { DataProvider } from "./data-provider";
+import { Highlighter } from "./highlighter";
 import { Query } from "./query";
 
 @singleton()
@@ -28,25 +29,34 @@ export class SearchHelper {
 	component: Component = new Component();
 	inFileDataSource: InFileDataSource = { lines: [], path: "" };
 	lexicalEngine: LexicalEngine = container.resolve(LexicalEngine);
+	highlighter: Highlighter = getInstance(Highlighter);
 	async searchInVault(queryText: string): Promise<SearchResult> {
-		const result = new SearchResult(SearchType.IN_VAULT, "", []);
-		const matchedFiles = await this.lexicalEngine.searchAnd(queryText);
-		return result;
+		const result = new SearchResult("to be impl", []);
+		if (queryText.length === 0) {
+			return result;
+		}
+		const lexicalMatches = await this.lexicalEngine.searchAnd(queryText);
+		const lexicalResult = [] as InVaultItem[];
+		if (lexicalMatches.length !== 0) {
+			return {
+				currPath: "to be impl",
+				items: await this.highlighter.parseInVaultItem(lexicalMatches),
+			};
+		} else {
+			// TODO: do semantic search
+			return result;
+		}
 	}
 
 	async searchInFile(queryText: string): Promise<SearchResult> {
 		if (!queryText) {
-			return new SearchResult(SearchType.IN_FILE, "", []);
+			return new SearchResult("", []);
 		}
 
 		await this.updateInFileDataSource();
 		queryText = queryText.replace(/\s/g, "");
 
-		const searchResult = new SearchResult(
-			SearchType.IN_FILE,
-			this.inFileDataSource.path,
-			[],
-		);
+		const searchResult = new SearchResult(this.inFileDataSource.path, []);
 
 		const entries = await this.fzfMatch(
 			queryText,
@@ -226,6 +236,9 @@ export class SearchHelper {
 	}
 }
 
+// If @singleton() is not used,
+// then the lifecycle of the instance obtained through tsyringe container is transient.
+@singleton()
 export class LexicalEngine {
 	private static readonly OPTIONS: Options = {
 		idField: "path",
@@ -235,9 +248,11 @@ export class LexicalEngine {
 	private readonly database = container.resolve(Database);
 	private miniSearch: MiniSearch;
 	private settings: SearchSetting = container.resolve(PluginSetting).search;
+	private _isReady = false;
 
 	@monitorDecorator
-	async init() {
+	async initAsync() {
+		logger.debug("init lexical engine...");
 		const prevData = await this.database.getMiniSearchData();
 		if (prevData) {
 			this.miniSearch = MiniSearch.loadJS(
@@ -248,14 +263,22 @@ export class LexicalEngine {
 			this.miniSearch = new MiniSearch(LexicalEngine.OPTIONS);
 			await this.reIndexAll();
 		}
+		this._isReady = true;
 	}
+
+	get isReady() {
+		return this._isReady;
+	}
+
 	async reIndexAll() {
+		this._isReady = false;
 		const allIndexedDocs =
 			await this.dataProvider.generateAllIndexedDocuments();
 		await this.miniSearch.removeAll();
 		// TODO: add chunks rather than all
 		await this.miniSearch.addAllAsync(allIndexedDocs);
 		logger.debug(this.miniSearch);
+		this._isReady = true;
 	}
 
 	// all tokens are matched and can be scattered
@@ -274,10 +297,13 @@ export class LexicalEngine {
 	 * - "and": Requires any single token to appear in the fields.
 	 * - "or": Requires all tokens to appear across the fields.
 	 */
+	@monitorDecorator
 	private async search(
 		queryText: string,
 		combinationMode: "and" | "or",
 	): Promise<MatchedFile[]> {
+		// TODO: if queryText.length === 0, return empty, 
+		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
 		const minisearchResult = this.miniSearch.search(query.text, {
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is

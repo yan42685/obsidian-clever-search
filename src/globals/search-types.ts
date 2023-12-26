@@ -5,7 +5,7 @@ export type MiniSearchResult = MiniResult;
 export type IndexedDocument = {
 	path: string;
 	basename: string;
-	folder?: string;
+	folder: string;
 	aliases?: string;
 	content?: string;
 };
@@ -47,11 +47,9 @@ export type MatchedFile  = {
 }
 
 export class SearchResult {
-	type?: SearchType;  // TODO: remove this filed if it's not required
 	currPath: string;
 	items: Item[];
-	constructor(type: SearchType, currPath: string, items: Item[]) {
-		this.type = type;
+	constructor(currPath: string, items: Item[]) {
 		this.currPath = currPath;
 		this.items = items;
 	}
@@ -87,7 +85,7 @@ export class InFileItem extends Item {
 export class InVaultItem extends Item {
 	type: ItemType;
 	path: string;
-	inFileItems?: InFileItem[];
+	subItems: string[]
 	get basename() {
 		return MyLib.getBasename(this.path);
 	}
@@ -98,10 +96,10 @@ export class InVaultItem extends Item {
 		return MyLib.getFolderPath(this.path);
 	}
 
-	constructor(type: ItemType, path: string, inFileItems?: InFileItem[]) {
+	constructor(type: ItemType, path: string, subItems: string[]) {
 		super();
 		this.type = type;
 		this.path = path;
-		this.inFileItems = inFileItems;
+		this.subItems = subItems;
 	}
 }
