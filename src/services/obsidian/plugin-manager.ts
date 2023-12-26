@@ -3,7 +3,7 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { container, singleton } from "tsyringe";
 import { getInstance, pathUtils } from "../../utils/my-lib";
-import { LexicalEngine } from "../search/search-helper";
+import { LexicalEngine } from "../search/search-engine";
 import { SettingManager } from "./setting";
 
 @singleton()

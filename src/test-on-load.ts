@@ -1,7 +1,8 @@
 import { App, TFile } from "obsidian";
 import { container } from "tsyringe";
 import { PluginSetting } from "./services/obsidian/setting";
-import { LexicalEngine, SearchHelper } from "./services/search/search-helper";
+import { LexicalEngine } from "./services/search/search-engine";
+import { SearchHelper } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
 import { monitorExecution } from "./utils/my-lib";
 
