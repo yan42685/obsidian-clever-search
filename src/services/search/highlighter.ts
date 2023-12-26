@@ -1,5 +1,6 @@
 import { LanguageEnum } from "src/globals/language-enum";
 import {
+	FileType,
 	InVaultItem,
 	ItemType,
 	type MatchedFile,
@@ -18,16 +19,23 @@ export class Highlighter {
 		const result = await Promise.all(
 			matchedFiles.slice(0, 50).map(async (f) => {
 				const path = f.path;
-				const content =
-					await this.fileRetriever.readContentByPath(path);
-				const lines = content.split("\n"); // 正则表达式匹配 \n 或 \r\n
-				const firstTenLines = lines.slice(0, 10).join("\n");
-				// It is necessary to use a constructor with 'new', rather than using an object literal. 
-				// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance 
-				// (to correctly display data in Svelte components).
-				return new InVaultItem(ItemType.LEXICAL, f.path, [
-					firstTenLines,
-				]);
+				if (
+					this.fileRetriever.getFileType(path) ===
+					FileType.PLAIN_TEXT
+				) {
+					const content =
+						await this.fileRetriever.readPlainText(path);
+					const lines = content.split("\n"); // 正则表达式匹配 \n 或 \r\n
+					const firstTenLines = lines.slice(0, 10).join("\n");
+					// It is necessary to use a constructor with 'new', rather than using an object literal.
+					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
+					// (to correctly display data in Svelte components).
+					return new InVaultItem(ItemType.LEXICAL, f.path, [
+						firstTenLines,
+					]);
+				} else {
+					return new InVaultItem(ItemType.LEXICAL, f.path, ["not supported file type"])
+				}
 			}),
 		);
 		logger.warn("current only highlight top 50 files");

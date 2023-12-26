@@ -36,7 +36,9 @@ export default class CleverSearch extends Plugin {
 		container.register(PluginSetting, { useValue: this.settings });
 
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
-		await getInstance(PluginManager).initAsync();
+		this.app.workspace.onLayoutReady(async () => {
+			await getInstance(PluginManager).initAsync();
+		});
 
 		// this.exampleCode();
 		this.registerCommands();

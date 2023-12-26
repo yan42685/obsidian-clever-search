@@ -1,9 +1,9 @@
 import { App, TFile, Vault, parseFrontMatterAliases } from "obsidian";
 import { DEFAULT_BLACKLIST_EXTENSION } from "src/globals/constants";
-import type { IndexedDocument } from "src/globals/search-types";
+import { FileType, type IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
-import { container } from "tsyringe";
+import { container, singleton } from "tsyringe";
 import { PluginSetting } from "../obsidian/setting";
 import { Tokenizer } from "./tokenizer";
 
@@ -18,13 +18,20 @@ export class DataProvider {
 		return Promise.all(
 			filesToIndex.map(async (file) => {
 				if (fileRetriever.isContentIndexable(file)) {
-					return {
-						path: file.path,
-						basename: file.basename,
-						folder: MyLib.getFolderPath(file.path),
-						aliases: this.parseAliases(file),
-						content: await fileRetriever.readPlainText(file),
-					};
+					if (
+						fileRetriever.getFileType(file.path) ===
+						FileType.PLAIN_TEXT
+					) {
+						return {
+							path: file.path,
+							basename: file.basename,
+							folder: MyLib.getFolderPath(file.path),
+							aliases: this.parseAliases(file),
+							content: await fileRetriever.readPlainText(file),
+						};
+					} else {
+						throw new Error("to be impl");
+					}
 				} else {
 					return {
 						path: file.path,
@@ -42,11 +49,21 @@ export class DataProvider {
 	}
 }
 
+@singleton()
 export class FileRetriever {
-	private static readonly plainTextExtensions = new Set(["md", "txt", ""]);
-	private static readonly contentIndexableExtensions = new Set([
-		...FileRetriever.plainTextExtensions,
+	private static readonly contentIndexableFileTypes = new Set([
+		FileType.PLAIN_TEXT,
+		FileType.IMAGE,
 	]);
+	private static readonly fileTypeMap: Map<string, FileType> = new Map();
+	static {
+		FileRetriever.fileTypeMap.set("", FileType.PLAIN_TEXT);
+		FileRetriever.fileTypeMap.set("md", FileType.PLAIN_TEXT);
+		FileRetriever.fileTypeMap.set("markdown", FileType.PLAIN_TEXT);
+		FileRetriever.fileTypeMap.set("txt", FileType.PLAIN_TEXT);
+		FileRetriever.fileTypeMap.set("jpg", FileType.IMAGE);
+		FileRetriever.fileTypeMap.set("png", FileType.IMAGE);
+	}
 	private readonly vault: Vault = container.resolve(Vault);
 	private readonly setting: PluginSetting = container.resolve(PluginSetting);
 	private readonly extensionBlacklist;
@@ -72,20 +89,36 @@ export class FileRetriever {
 		return result;
 	}
 	isContentIndexable(file: TFile): boolean {
-		return FileRetriever.contentIndexableExtensions.has(file.extension);
+		return FileRetriever.contentIndexableFileTypes.has(
+			this.getFileType(file.path),
+		);
 	}
-	async readPlainText(file: TFile): Promise<string> {
-		if (FileRetriever.plainTextExtensions.has(file.extension)) {
+
+	getFileType(path: string): FileType {
+		const result = FileRetriever.fileTypeMap.get(MyLib.getExtension(path));
+		// NOTE: shouldn't use `result ? FileType.UNSUPPORTED : result;` 
+		// because result might be 0 rather than undefined
+		return result === undefined ? FileType.UNSUPPORTED : result;
+	}
+
+	/**
+	 * Reads the content of a plain text file.
+	 * @param fileOrPath The file object or path string of the file to read.
+	 * @returns The content of the file as a string.
+	 * @throws Error if the file extension is not supported.
+	 */
+	async readPlainText(fileOrPath: TFile | string): Promise<string> {
+		const file =
+			typeof fileOrPath === "string"
+				? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
+				: fileOrPath;
+		if (this.getFileType(file.path) === FileType.PLAIN_TEXT) {
 			return this.vault.cachedRead(file);
 		} else {
 			throw Error(
-				`unsupported file extension to read, path: ${file.path}`,
+				`unsupported file extension as plain text to read, path: ${file.path}`,
 			);
 		}
-	}
-	async readContentByPath(path: string): Promise<string> {
-		const file = this.vault.getAbstractFileByPath(path) as TFile
-		return this.readPlainText(file);
 	}
 
 	private shouldIndex(file: TFile): boolean {

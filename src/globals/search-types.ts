@@ -103,3 +103,7 @@ export class InVaultItem extends Item {
 		this.subItems = subItems;
 	}
 }
+
+export enum FileType {
+	PLAIN_TEXT, IMAGE, UNSUPPORTED
+}
