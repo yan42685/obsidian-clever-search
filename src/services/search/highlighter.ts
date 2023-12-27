@@ -110,10 +110,10 @@ class LineHighlighter implements LineHighlighter {
 			(line, index) => new Line(line, index),
 		);
 
-		queryText = queryText.replace(/\s/g, "");
+		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 		const lineItems: LineItem[] = [];
 
-		const entries = await this.fzfMatch(queryText, lines);
+		const entries = await this.fzfMatch(queryTextNoSpaces, lines);
 		for (const entry of entries) {
 			const row = entry.item.row;
 			const firstMatchedCol = MathUtil.minInSet(entry.positions);
@@ -210,8 +210,6 @@ class LineHighlighter implements LineHighlighter {
 		}
 		const contextLines = lines.slice(start, end + 1);
 
-		const processedQueryText = queryText.replace(/\s/g, "").toLowerCase();
-
 		const highlightedContext = await Promise.all(
 			contextLines.map(async (line, index) => {
 				const isTargetLine = matchedRow === start + index;
@@ -230,7 +228,7 @@ class LineHighlighter implements LineHighlighter {
 					return `<span class="target-line">${line.text}</div>`;
 				} else {
 					// Perform strict matching on other lines
-					const regex = new RegExp(processedQueryText, "gi");
+					const regex = new RegExp(queryText, "gi");
 					return line.text.replace(
 						regex,
 						(match) => `<mark>${match}</mark>`,
