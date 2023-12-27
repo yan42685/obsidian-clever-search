@@ -2,8 +2,8 @@ import type { Options } from "minisearch";
 import MiniSearch from "minisearch";
 import type { DocumentWeight, MatchedFile } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
-import { monitorDecorator } from "src/utils/my-lib";
-import { container, singleton } from "tsyringe";
+import { getInstance, monitorDecorator } from "src/utils/my-lib";
+import { singleton } from "tsyringe";
 import { Database } from "../database/database";
 import { PluginSetting, type SearchSetting } from "../obsidian/setting";
 import { DataProvider } from "./data-provider";
@@ -17,10 +17,10 @@ export class LexicalEngine {
 		idField: "path",
 		fields: ["basename", "aliases", "content"],
 	};
-	private readonly dataProvider = container.resolve(DataProvider);
-	private readonly database = container.resolve(Database);
+	private readonly dataProvider = getInstance(DataProvider);
+	private readonly database = getInstance(Database);
 	private miniSearch: MiniSearch;
-	private settings: SearchSetting = container.resolve(PluginSetting).search;
+	private settings: SearchSetting = getInstance(PluginSetting).search;
 	private _isReady = false;
 
 	@monitorDecorator

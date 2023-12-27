@@ -2,12 +2,12 @@ import { PluginSettingTab, Setting } from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
-import { isDevEnvironment } from "src/utils/my-lib";
-import { container, singleton } from "tsyringe";
+import { getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { singleton } from "tsyringe";
 
 @singleton()
 export class SettingManager {
-	plugin: CleverSearch = container.resolve(THIS_PLUGIN);
+	plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	constructor() {
 		this.plugin.addSettingTab(new GeneralTab(this.plugin));
 	}

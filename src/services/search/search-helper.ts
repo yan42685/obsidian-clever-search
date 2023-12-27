@@ -1,7 +1,7 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { App, Component } from "obsidian";
-import { getInstance, monitorDecorator } from "src/utils/my-lib";
-import { container, singleton } from "tsyringe";
+import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
+import { singleton } from "tsyringe";
 import { getCurrLanguage } from "../../globals/language-enum";
 import {
 	EngineType,
@@ -18,13 +18,13 @@ import { LexicalEngine } from "./search-engine";
 
 @singleton()
 export class SearchHelper {
-	app: App = container.resolve(App);
+	app: App = getInstance(App);
 	component: Component = new Component();
 	inFileDataSource: InFileDataSource = { lines: [], path: "" };
-	lexicalEngine: LexicalEngine = container.resolve(LexicalEngine);
+	lexicalEngine: LexicalEngine = getInstance(LexicalEngine);
 	highlighter: Highlighter = getInstance(Highlighter);
 	async searchInVault(queryText: string): Promise<SearchResult> {
-		const result = new SearchResult("to be impl", []);
+		const result = new SearchResult("no result", []);
 		if (queryText.length === 0) {
 			return result;
 		}
@@ -32,7 +32,7 @@ export class SearchHelper {
 		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
 			return {
-				currPath: "to be impl",
+				currPath: TO_BE_IMPL,
 				items: await this.highlighter.parseFileItems(lexicalMatches, EngineType.LEXICAL),
 			};
 		} else {

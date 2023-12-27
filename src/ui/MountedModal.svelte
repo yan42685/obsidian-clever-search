@@ -13,10 +13,9 @@
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
-	import { container } from "tsyringe";
 	import type { SearchModal } from "./search-modal";
 
-	const searchHelper: SearchHelper = container.resolve(SearchHelper);
+	const searchHelper: SearchHelper = getInstance(SearchHelper);
 
 	export let app: App;
 	export let modal: SearchModal;

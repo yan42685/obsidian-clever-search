@@ -2,16 +2,16 @@ import { App, TFile, Vault, parseFrontMatterAliases } from "obsidian";
 import { DEFAULT_BLACKLIST_EXTENSION } from "src/globals/constants";
 import { FileType, type IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
-import { MyLib, getInstance } from "src/utils/my-lib";
-import { container, singleton } from "tsyringe";
+import { MyLib, TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+import { singleton } from "tsyringe";
 import { PluginSetting } from "../obsidian/setting";
 import { Tokenizer } from "./tokenizer";
 
 @singleton()
 export class DataProvider {
-	private readonly tokenizer = container.resolve(Tokenizer);
-	private readonly vault = container.resolve(Vault);
-	private readonly app = container.resolve(App);
+	private readonly tokenizer = getInstance(Tokenizer);
+	private readonly vault = getInstance(Vault);
+	private readonly app = getInstance(App);
 
 	async generateAllIndexedDocuments(): Promise<IndexedDocument[]> {
 		const fileRetriever = getInstance(FileRetriever);
@@ -31,7 +31,7 @@ export class DataProvider {
 							content: await fileRetriever.readPlainText(file),
 						};
 					} else {
-						throw new Error("to be impl");
+						throw new Error(TO_BE_IMPL);
 					}
 				} else {
 					return {
@@ -65,8 +65,8 @@ export class FileRetriever {
 		FileRetriever.fileTypeMap.set("jpg", FileType.IMAGE);
 		FileRetriever.fileTypeMap.set("png", FileType.IMAGE);
 	}
-	private readonly vault: Vault = container.resolve(Vault);
-	private readonly setting: PluginSetting = container.resolve(PluginSetting);
+	private readonly vault: Vault = getInstance(Vault);
+	private readonly setting: PluginSetting = getInstance(PluginSetting);
 	private readonly extensionBlacklist;
 	constructor() {
 		this.extensionBlacklist = new Set([

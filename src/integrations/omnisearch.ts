@@ -1,7 +1,8 @@
 import Dexie from "dexie";
 import { App, Notice } from "obsidian";
 import { PrivateApi } from "src/services/obsidian/private-api";
-import { container, singleton } from "tsyringe";
+import { getInstance } from "src/utils/my-lib";
+import { singleton } from "tsyringe";
 
 @singleton()
 export class OmnisearchIntegration {
@@ -9,8 +10,8 @@ export class OmnisearchIntegration {
 	// see: public static readonly dbVersion = ? at
 	// https://github.com/scambier/obsidian-omnisearch/blob/master/src/database.ts
 	private static readonly DB_VERSION = 8;
-	private app: any = container.resolve(App);
-	private privateApi = container.resolve(PrivateApi)
+	private app: any = getInstance(App);
+	private privateApi = getInstance(PrivateApi)
 	private db: any;
 
 	async init() {

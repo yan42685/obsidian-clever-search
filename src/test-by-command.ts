@@ -1,21 +1,20 @@
 import { App, TFile } from "obsidian";
-import { container } from "tsyringe";
 import { PluginSetting } from "./services/obsidian/setting";
 import { LexicalEngine } from "./services/search/search-engine";
 import { SearchHelper } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
-import { monitorExecution } from "./utils/my-lib";
+import { getInstance, monitorExecution } from "./utils/my-lib";
 
 export async function testByCommand() {
-	const settings = container.resolve(PluginSetting);
+	const settings = getInstance(PluginSetting);
 	// ====== API Request =====
-	// const httpClient = container.resolve(HttpClient);
+	// const httpClient = getInstance(HttpClient);
 	// httpClient.testRequest();
 
 	// ====== vault files =====
 	// setTimeout(() => {
 	// 	monitorExecution(async () => {
-	// 		const plugin: CleverSearch = container.resolve(THIS_PLUGIN);
+	// 		const plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	// 		const vault = plugin.app.vault;
 	// 		logger.debug(vault.getRoot().path); // /
 	// 		logger.debug(vault.configDir); // .obsidian
@@ -31,7 +30,7 @@ export async function testByCommand() {
 	// testLexicalSearch();
 }
 function getApp() {
-	return container.resolve(App);
+	return getInstance(App);
 }
 
 function testStemmer() {
@@ -39,8 +38,8 @@ function testStemmer() {
 }
 
 function testTsyringe() {
-	const obj1 = container.resolve(SearchHelper);
-	const obj2 = container.resolve(SearchHelper);
+	const obj1 = getInstance(SearchHelper);
+	const obj2 = getInstance(SearchHelper);
 	// in tsyringe, the default scope for class is singleton, so it should output "true"
 	logger.info(`test equal: ${obj1 === obj2}`);
 }
@@ -51,7 +50,7 @@ function testUnsupportedExtensions() {
 }
 
 async function testLexicalSearch() {
-	const lexicalEngine = container.resolve(LexicalEngine);
+	const lexicalEngine = getInstance(LexicalEngine);
 	// await lexicalEngine.initAsync();
 	// const query = "camera communiy";
 	const query = "whoknowthisfolder/whereisit";

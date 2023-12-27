@@ -1,11 +1,12 @@
 import { App, FileSystemAdapter } from "obsidian";
-import { container, singleton } from "tsyringe";
+import { getInstance } from "src/utils/my-lib";
+import { singleton } from "tsyringe";
 
 @singleton()
 export class SearchClient {
 	worker?: Worker;
 	constructor() {
-		const app: App = container.resolve(App);
+		const app: App = getInstance(App);
 		const obsidianFs = app.vault.adapter as FileSystemAdapter;
 		// const workerJsPath = obsidianFs.getFullPath("./cs-search-worker.js");
         // console.log(workerJsPath);
@@ -17,7 +18,7 @@ export class SearchClient {
 
 	async initWorker() {
 		try {
-			const app: App = container.resolve(App);
+			const app: App = getInstance(App);
 			const obsidianFs = app.vault.adapter as FileSystemAdapter;
 
 			// 'await' the Promise to get the actual ArrayBuffer.
