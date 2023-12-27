@@ -16,14 +16,6 @@ export const currModifier = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
 	? "Mod"
 	: "Ctrl";
 
-// allowed extensions
-export enum FileExtension {
-	MD = ".md",
-	TXT = ".txt",
-	// 尽量不要开启
-	ALL = "",
-}
-
 export class MyLib {
 	static extractDomainFromHttpsUrl(url: string): string {
 		if (url.startsWith("http://")) {

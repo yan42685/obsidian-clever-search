@@ -1,11 +1,11 @@
 import { App, TFile } from "obsidian";
 import { PluginSetting } from "./services/obsidian/setting";
 import { LexicalEngine } from "./services/search/search-engine";
-import { SearchHelper } from "./services/search/search-helper";
+import { SearchService } from "./services/search/search-service";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 
-export async function testByCommand() {
+export async function devTest() {
 	const settings = getInstance(PluginSetting);
 	// ====== API Request =====
 	// const httpClient = getInstance(HttpClient);
@@ -38,8 +38,8 @@ function testStemmer() {
 }
 
 function testTsyringe() {
-	const obj1 = getInstance(SearchHelper);
-	const obj2 = getInstance(SearchHelper);
+	const obj1 = getInstance(SearchService);
+	const obj2 = getInstance(SearchService);
 	// in tsyringe, the default scope for class is singleton, so it should output "true"
 	logger.info(`test equal: ${obj1 === obj2}`);
 }

@@ -15,7 +15,7 @@ export class DataProvider {
 
 	async generateAllIndexedDocuments(): Promise<IndexedDocument[]> {
 		const fileRetriever = getInstance(FileRetriever);
-		const filesToIndex = await fileRetriever.allFilesToBeIndexed();
+		const filesToIndex = fileRetriever.allFilesToBeIndexed();
 		return Promise.all(
 			filesToIndex.map(async (file) => {
 				if (fileRetriever.isContentIndexable(file)) {
@@ -76,7 +76,7 @@ export class FileRetriever {
 	}
 
 	// @monitorDecorator
-	async allFilesToBeIndexed(): Promise<TFile[]> {
+	allFilesToBeIndexed(): TFile[] {
 		// get all fileRefs cached by obsidian
 		const files = this.vault.getFiles();
 		logger.info(`all files: ${files.length}`);
@@ -97,7 +97,7 @@ export class FileRetriever {
 
 	getFileType(path: string): FileType {
 		const result = FileRetriever.fileTypeMap.get(MyLib.getExtension(path));
-		// NOTE: shouldn't use `result ? FileType.UNSUPPORTED : result;` 
+		// NOTE: shouldn't use `result ? FileType.UNSUPPORTED : result;`
 		// because result might be 0 rather than undefined
 		return result === undefined ? FileType.UNSUPPORTED : result;
 	}

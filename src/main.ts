@@ -10,12 +10,12 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
+import { devTest } from "./dev-test";
 import { THIS_PLUGIN } from "./globals/constants";
 import { SearchType } from "./globals/search-types";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { DEFAULT_SETTING, PluginSetting } from "./services/obsidian/setting";
-import { testByCommand } from "./test-by-command";
 import { SearchModal } from "./ui/search-modal";
 import { logger } from "./utils/logger";
 import { getInstance, isDevEnvironment } from "./utils/my-lib";
@@ -52,7 +52,7 @@ export default class CleverSearch extends Plugin {
 				id: "clever-search-triggerTest",
 				name: "clever-search-triggerTest",
 				// hotkeys: [{modifiers: [currModifier], key: "5"}],
-				callback: async () => await testByCommand(),
+				callback: async () => await devTest(),
 			});
 
 			this.addCommand({

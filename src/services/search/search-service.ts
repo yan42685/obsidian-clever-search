@@ -17,7 +17,7 @@ import { Highlighter } from "./highlighter";
 import { LexicalEngine } from "./search-engine";
 
 @singleton()
-export class SearchHelper {
+export class SearchService {
 	app: App = getInstance(App);
 	component: Component = new Component();
 	inFileDataSource: InFileDataSource = { lines: [], path: "" };

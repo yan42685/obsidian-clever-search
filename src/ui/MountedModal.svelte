@@ -9,13 +9,13 @@
 		SearchType,
 	} from "src/globals/search-types";
 	import { PrivateApi } from "src/services/obsidian/private-api";
-	import { SearchHelper } from "src/services/search/search-helper";
+	import { SearchService } from "src/services/search/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
 
-	const searchHelper: SearchHelper = getInstance(SearchHelper);
+	const searchService: SearchService = getInstance(SearchService);
 
 	export let app: App;
 	export let modal: SearchModal;
@@ -58,7 +58,7 @@
 	// Handle input changes
 	async function handleInput() {
 		if (searchType === SearchType.IN_FILE) {
-			searchResult = await searchHelper.searchInFile(queryText);
+			searchResult = await searchService.searchInFile(queryText);
 			searchResult.items.forEach((x) => {
 				const item = x as LineItem;
 				// console.log(item.line.text);
@@ -73,7 +73,7 @@
 				// }
 			});
 		} else if (searchType === SearchType.IN_VAULT) {
-			searchResult = await searchHelper.searchInVault(queryText);
+			searchResult = await searchService.searchInVault(queryText);
 			// logger.info(searchResult);
 			// logger.info(typeof searchResult.items[0] || "nothing");
 		}
