@@ -8,7 +8,6 @@ import {
 	LineItem,
 	MatchedLine,
 	type MatchedFile,
-	type TruncatedLine,
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { MathUtil } from "src/utils/math-util";
@@ -233,15 +232,84 @@ class LineHighlighter implements LineHighlighter {
 		return await fzf.find(queryText);
 	}
 
-	private getTruncatedContextLines(
+	private getTruncatedContext(
 		lines: Line[],
 		matchedRow: number,
 		firstMatchedCol: number,
-		truncateType: TruncateType
-	): TruncatedLine[] {
-		return [];
+		truncateType: TruncateType,
+	): TruncatedContext {
+		if (lines.length === 0) {
+			return { lines: [], firstLineOffset: 0 };
+		}
+		const limit = TruncateLimit.forType(truncateType);
+		const resultLines: Line[] = [];
+		let startRow = matchedRow;
+		let endRow = matchedRow + 1;
+		let firstLineStartCol = 0;
+		let firstLineEndCol = 0;
+		const lastLineEndCol = 0;
+		let preCharsCount = firstMatchedCol;
+		let postCharsCount = 0;
+		// add matchRow and extend above
+		while (
+			startRow > 0 &&
+			matchedRow - startRow <= limit.maxPreLines &&
+			preCharsCount < limit.maxPreChars
+		) {
+			resultLines.unshift(lines[startRow]);
+			preCharsCount += lines[startRow].text.length;
+			--startRow;
+		}
+		if (matchedRow - startRow > limit.maxPreLines) {
+			resultLines.shift();
+			preCharsCount -= lines[startRow - 1].text.length;
+			++startRow;
+		}
+		// need to truncate the first row
+		if (preCharsCount > limit.maxPreChars) {
+			const lineText = lines[startRow].text;
+			firstLineStartCol = preCharsCount - limit.maxPreChars;
+			firstLineEndCol = Math.min(
+				firstMatchedCol + limit.maxPostChars,
+				lineText.length - 1,
+			);
+			postCharsCount = firstLineEndCol - firstMatchedCol;
+			const subStr = lines[startRow].text.substring(
+				firstLineStartCol,
+				firstLineEndCol + 1,
+			);
+			resultLines.unshift({ text: subStr, row: startRow });
+		}
+		// extend below but don't add matchedRow
+		while (
+			endRow < lines.length &&
+			endRow - matchedRow <= limit.maxPostLines &&
+			postCharsCount < limit.maxPostChars
+		) {
+			resultLines.push(lines[endRow]);
+			postCharsCount += lines[endRow].text.length;
+			++endRow;
+		}
+		if (endRow - matchedRow > limit.maxPostLines) {
+			resultLines.pop();
+			postCharsCount -= lines[endRow + 1].text.length;
+			--endRow;
+		}
+		if (postCharsCount > limit.maxPostChars) {
+			const overflowCount = postCharsCount - limit.maxPostChars;
+			const lastLineEndCol =
+				lines[endRow].text.length - overflowCount - 1;
+			const subString = lines[endRow].text.substring(
+				0,
+				lastLineEndCol + 1,
+			);
+			resultLines.push({ text: subString, row: endRow });
+		}
+
+		return { lines: resultLines, firstLineOffset: firstLineStartCol };
 	}
 }
+type TruncatedContext = { lines: Line[]; firstLineOffset: number };
 
 type TruncateType = "line" | "paragraph" | "subItem";
 
@@ -280,20 +348,23 @@ class TruncateLimit {
 	};
 
 	// Truncate options set by language
-	private static readonly limitsByLanguage: Record<LanguageEnum, AllTruncateOption> = {
+	private static readonly limitsByLanguage: Record<
+		LanguageEnum,
+		AllTruncateOption
+	> = {
 		[LanguageEnum.other]: TruncateLimit.default,
 		[LanguageEnum.en]: TruncateLimit.default,
 		[LanguageEnum.zh]: {
 			line: { ...this.default.line, maxPreChars: 30 },
-			paragraph:{ ...this.default.paragraph, maxPreChars: 220},
-			subItem: {...this.default.subItem, maxPostChars: 120},
+			paragraph: { ...this.default.paragraph, maxPreChars: 220 },
+			subItem: { ...this.default.subItem, maxPostChars: 120 },
 		},
 	};
 
-    /**
-     * Retrieve the truncate options for a given type in the current language.
-     */
-    static forType(type: TruncateType): TruncateOption {
-        return this.limitsByLanguage[getCurrLanguage()][type];
-    }
+	/**
+	 * Retrieve the truncate options for a given type in the current language.
+	 */
+	static forType(type: TruncateType): TruncateOption {
+		return this.limitsByLanguage[getCurrLanguage()][type];
+	}
 }

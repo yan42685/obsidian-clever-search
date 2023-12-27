@@ -35,7 +35,6 @@ export class Line {
 	}
 }
 
-export type TruncatedLine = Line & {removedPreChars: number};
 
 export class MatchedLine extends Line {
 	col: number;
