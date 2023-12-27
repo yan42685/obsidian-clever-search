@@ -4,9 +4,9 @@ import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import { getCurrLanguage } from "../../globals/language-enum";
 import {
-	InFileItem,
-	InVaultItem,
+	FileItem,
 	Line,
+	LineItem,
 	MatchedLine,
 	SearchResult,
 	type InFileDataSource
@@ -28,7 +28,7 @@ export class SearchHelper {
 			return result;
 		}
 		const lexicalMatches = await this.lexicalEngine.searchAnd(queryText);
-		const lexicalResult = [] as InVaultItem[];
+		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
 			return {
 				currPath: "to be impl",
@@ -74,7 +74,7 @@ export class SearchHelper {
 			);
 
 			searchResult.items.push(
-				new InFileItem(
+				new LineItem(
 					new MatchedLine(highlightedText, row, firstMatchedCol),
 					await this.getHighlightedContext(
 						row,

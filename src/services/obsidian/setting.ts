@@ -3,8 +3,9 @@ import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { isDevEnvironment } from "src/utils/my-lib";
-import { container } from "tsyringe";
+import { container, singleton } from "tsyringe";
 
+@singleton()
 export class SettingManager {
 	plugin: CleverSearch = container.resolve(THIS_PLUGIN);
 	constructor() {

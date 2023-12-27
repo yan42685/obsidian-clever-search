@@ -1,9 +1,10 @@
 import { App, type TFile } from "obsidian";
-import { container } from "tsyringe";
+import { container, singleton } from "tsyringe";
 
 /*
  * APIs in this file are not declared in the official obsidian.d.ts but are available in js
  */
+@singleton()
 export class PrivateApi {
     app: App = container.resolve(App);
     getFileBacklinks(file: TFile) {

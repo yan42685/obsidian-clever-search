@@ -7,6 +7,7 @@ import { container, singleton } from "tsyringe";
 import { PluginSetting } from "../obsidian/setting";
 import { Tokenizer } from "./tokenizer";
 
+@singleton()
 export class DataProvider {
 	private readonly tokenizer = container.resolve(Tokenizer);
 	private readonly vault = container.resolve(Vault);

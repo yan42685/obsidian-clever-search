@@ -2,14 +2,13 @@
 	import { MarkdownView, type App, type EditorPosition } from "obsidian";
 	import { EventEnum } from "src/globals/event-enum";
 	import {
+		FileItem,
 		FileType,
-		InFileItem,
-		InVaultItem,
+		LineItem,
 		SearchResult,
 		SearchType,
 	} from "src/globals/search-types";
 	import { PrivateApi } from "src/services/obsidian/private-api";
-	import { FileRetriever } from "src/services/search/data-provider";
 	import { SearchHelper } from "src/services/search/search-helper";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { getInstance } from "src/utils/my-lib";
@@ -18,7 +17,6 @@
 	import type { SearchModal } from "./search-modal";
 
 	const searchHelper: SearchHelper = container.resolve(SearchHelper);
-	const fileRetriever = getInstance(FileRetriever);
 
 	export let app: App;
 	export let modal: SearchModal;
@@ -29,7 +27,7 @@
 	let currItemIndex = -1;
 	let currContext = ""; // for previewing in-file search
 
-	let currFileItem: InVaultItem | null = null; // for previewing in-vault search
+	let currFileItem: FileItem | null = null; // for previewing in-vault search
 	let currSubItems: string[] = [];
 	let currSubItemIndex = -1;
 	let inputEl: HTMLElement;
@@ -42,10 +40,10 @@
 		if (index >= 0 && index < items.length) {
 			currItemIndex = index;
 			if (searchType === SearchType.IN_FILE) {
-				const item = items[index] as InFileItem;
+				const item = items[index] as LineItem;
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
-				currFileItem = items[index] as InVaultItem;
+				currFileItem = items[index] as FileItem;
 				currSubItems = currFileItem.subItems;
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
@@ -63,7 +61,7 @@
 		if (searchType === SearchType.IN_FILE) {
 			searchResult = await searchHelper.searchInFile(queryText);
 			searchResult.items.forEach((x) => {
-				const item = x as InFileItem;
+				const item = x as LineItem;
 				// console.log(item.line.text);
 				// if (item.element) {
 				// 	MarkdownRenderer.render(
@@ -108,7 +106,7 @@
 		if (searchType === SearchType.IN_FILE) {
 			const selectedItem = searchResult.items[
 				currItemIndex
-			] as InFileItem;
+			] as LineItem;
 			if (selectedItem) {
 				// move the cursor and view to a specific line and column in the editor.
 				const view = app.workspace.getActiveViewOfType(MarkdownView);
@@ -169,10 +167,10 @@
 							handleItemClick(index);
 						}}
 					>
-						{#if item instanceof InFileItem}
+						{#if item instanceof LineItem}
 							<span class="line-item">{@html item.line.text}</span
 							>
-						{:else if item instanceof InVaultItem}
+						{:else if item instanceof FileItem}
 							<div class="file-item">
 								<span class="file-basename"
 									>{item.basename}</span
@@ -197,7 +195,7 @@
 					<p>{@html currContext}</p>
 				{/if}
 			{:else if searchType === SearchType.IN_VAULT}
-				{#if currFileItem && FileType.PLAIN_TEXT === fileRetriever.getFileType(currFileItem.path)}
+				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
 					<ul>
 						{#each currSubItems as subItem, index}
 							<p>

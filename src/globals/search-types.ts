@@ -1,5 +1,6 @@
 import type { SearchResult as MiniResult } from "minisearch";
-import { MyLib } from "src/utils/my-lib";
+import { FileRetriever } from "src/services/search/data-provider";
+import { MyLib, getInstance } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
 export type IndexedDocument = {
@@ -71,7 +72,7 @@ export abstract class Item {
 	element?: HTMLElement;
 }
 
-export class InFileItem extends Item {
+export class LineItem extends Item {
 	line: MatchedLine;
 	context: string;
 
@@ -82,10 +83,13 @@ export class InFileItem extends Item {
 	}
 }
 
-export class InVaultItem extends Item {
-	type: ItemType;
+export class FileItem extends Item {
+	itemType: ItemType;
 	path: string;
-	subItems: string[]
+	subItems: string[];
+	get fileType(): FileType {
+		return getInstance(FileRetriever).getFileType(this.path);
+	}
 	get basename() {
 		return MyLib.getBasename(this.path);
 	}
@@ -96,9 +100,9 @@ export class InVaultItem extends Item {
 		return MyLib.getFolderPath(this.path);
 	}
 
-	constructor(type: ItemType, path: string, subItems: string[]) {
+	constructor(itemType: ItemType, path: string, subItems: string[]) {
 		super();
-		this.type = type;
+		this.itemType = itemType;
 		this.path = path;
 		this.subItems = subItems;
 	}

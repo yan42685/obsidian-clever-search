@@ -6,7 +6,7 @@ import { SearchHelper } from "./services/search/search-helper";
 import { logger } from "./utils/logger";
 import { monitorExecution } from "./utils/my-lib";
 
-export async function testOnLoad() {
+export async function testByCommand() {
 	const settings = container.resolve(PluginSetting);
 	// ====== API Request =====
 	// const httpClient = container.resolve(HttpClient);
