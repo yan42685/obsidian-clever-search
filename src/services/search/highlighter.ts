@@ -3,6 +3,7 @@ import {
 	EngineType,
 	FileItem,
 	FileType,
+	LineItem,
 	type MatchedFile,
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
@@ -42,6 +43,10 @@ export class Highlighter {
 		);
 		logger.warn("current only highlight top 50 files");
 		return result;
+	}
+
+	async parseLineItems(plainTextFilePath: string): Promise<LineItem[]> {
+		return []
 	}
 }
 
