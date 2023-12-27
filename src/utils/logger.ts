@@ -1,11 +1,12 @@
 class Logger {
 	private logLevel: LogLevel = "debug";
 	private levelWeights: { [level in LogLevel]: number } = {
-		debug: 1,
-		info: 2,
-		warn: 3,
-		error: 4,
-		none: 5,
+		trace: 1,
+		debug: 2,
+		info: 3,
+		warn: 4,
+		error: 5,
+		none: 6,
 	};
 
 	getLevel(): LogLevel {
@@ -13,6 +14,17 @@ class Logger {
 	}
 	setLevel(level: LogLevel) {
 		this.logLevel = level;
+	}
+	trace(...args: any[]) {
+		if (this.shouldLog("trace")) {
+			console.groupCollapsed(
+				`%c[trace] ${this.getCallerName()}\n`,
+				"color: grey;",
+				...args,
+			);
+			console.trace();
+			console.groupEnd();
+		}
 	}
 
 	debug(...args: any[]) {
@@ -66,6 +78,6 @@ class Logger {
 }
 
 // 不适合用大写字母，因为作为属性时，似乎只能用小写字母
-export type LogLevel = "debug" | "info" | "warn" | "error" | "none";
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "none";
 
 export const logger = new Logger();

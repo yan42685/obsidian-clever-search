@@ -6,6 +6,7 @@ describe("Logger", () => {
 
 	beforeEach(() => {
 		consoleSpy = {
+			trace: jest.spyOn(console, "trace").mockImplementation(() => {}),
 			debug: jest.spyOn(console, "debug").mockImplementation(() => {}),
 			info: jest.spyOn(console, "info").mockImplementation(() => {}),
 			warn: jest.spyOn(console, "warn").mockImplementation(() => {}),
@@ -16,6 +17,15 @@ describe("Logger", () => {
 	afterEach(() => {
 		jest.restoreAllMocks();
 		console = originalConsole;
+	});
+	it("should log trace messages when log level is trace", () => {
+		logger.setLevel("trace");
+		logger.trace("Trace message");
+		expect(consoleSpy.trace).toHaveBeenCalledWith(
+			expect.anything(),
+			"color: grey;",
+			"Trace message",
+		);
 	});
 
 	it("should log debug messages when log level is debug", () => {
@@ -66,6 +76,12 @@ describe("Logger", () => {
 			"color: blue;",
 			"Info message",
 		);
+	});
+
+	it("should not log trace messages when log level is debug or higher", () => {
+		logger.setLevel("debug");
+		logger.trace("Trace message");
+		expect(consoleSpy.trace).not.toHaveBeenCalled();
 	});
 
 	it("should not log debug messages when log level is info", () => {

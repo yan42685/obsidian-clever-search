@@ -110,12 +110,13 @@ class GeneralTab extends PluginSettingTab {
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOptions({
+						trace: "trace",
 						debug: "debug",
 						info: "info",
 						warn: "warn",
 						error: "error",
 						none: "none",
-					})
+					} as LogLevelOptions)
 					// 不能用大写的字符串作为key...
 					.setValue(this.plugin.settings.logLevel.toLowerCase())
 					.onChange(async (value) => {
@@ -175,4 +176,8 @@ export type SearchSetting = {
 	weightH3: number;
 	weightH4: number;
 	weightTagText: number;
+};
+
+type LogLevelOptions = {
+    [K in LogLevel]: K;
 };
