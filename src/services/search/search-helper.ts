@@ -4,6 +4,7 @@ import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import { getCurrLanguage } from "../../globals/language-enum";
 import {
+	EngineType,
 	FileItem,
 	Line,
 	LineItem,
@@ -32,7 +33,7 @@ export class SearchHelper {
 		if (lexicalMatches.length !== 0) {
 			return {
 				currPath: "to be impl",
-				items: await this.highlighter.parseInVaultItem(lexicalMatches),
+				items: await this.highlighter.parseFileItems(lexicalMatches, EngineType.LEXICAL),
 			};
 		} else {
 			// TODO: do semantic search

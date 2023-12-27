@@ -63,7 +63,7 @@ export enum SearchType {
 	IN_VAULT,
 }
 
-export enum ItemType {
+export enum EngineType {
 	LEXICAL,
 	SEMANTIC,
 }
@@ -84,7 +84,7 @@ export class LineItem extends Item {
 }
 
 export class FileItem extends Item {
-	itemType: ItemType;
+	engineType: EngineType;
 	path: string;
 	subItems: string[];
 	get fileType(): FileType {
@@ -100,9 +100,9 @@ export class FileItem extends Item {
 		return MyLib.getFolderPath(this.path);
 	}
 
-	constructor(itemType: ItemType, path: string, subItems: string[]) {
+	constructor(engineType: EngineType, path: string, subItems: string[]) {
 		super();
-		this.itemType = itemType;
+		this.engineType = engineType;
 		this.path = path;
 		this.subItems = subItems;
 	}

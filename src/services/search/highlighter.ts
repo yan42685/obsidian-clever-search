@@ -1,8 +1,8 @@
 import { LanguageEnum } from "src/globals/language-enum";
 import {
+	EngineType,
 	FileItem,
 	FileType,
-	ItemType,
 	type MatchedFile,
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
@@ -14,8 +14,8 @@ import { FileRetriever } from "./data-provider";
 export class Highlighter {
 	fileRetriever: FileRetriever = getInstance(FileRetriever);
 	// TODO: highlight by page, rather than reading all files
-	async parseInVaultItem(
-		matchedFiles: MatchedFile[],
+	async parseFileItems(
+		matchedFiles: MatchedFile[], engineType: EngineType
 	): Promise<FileItem[]> {
 		// TODO: do real highlight
 		const result = await Promise.all(
@@ -32,11 +32,11 @@ export class Highlighter {
 					// It is necessary to use a constructor with 'new', rather than using an object literal.
 					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
 					// (to correctly display data in Svelte components).
-					return new FileItem(ItemType.LEXICAL, f.path, [
+					return new FileItem(engineType, f.path, [
 						firstTenLines,
 					]);
 				} else {
-					return new FileItem(ItemType.LEXICAL, f.path, ["not supported file type"])
+					return new FileItem(engineType, f.path, ["not supported file type"])
 				}
 			}),
 		);
