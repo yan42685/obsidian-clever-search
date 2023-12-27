@@ -18,8 +18,7 @@ import { FileRetriever } from "./data-provider";
 @singleton()
 export class Highlighter {
 	private readonly fileRetriever: FileRetriever = getInstance(FileRetriever);
-	private readonly fzfLineHighlighter = getInstance(FzfLineHighlighter);
-	private readonly miniSearchHighlighter= getInstance(MiniSearchLineHighlighter);
+	private readonly lineHighlighter = getInstance(LineHighlighter);
 
 	// TODO: highlight by page, rather than reading all files
 	async parseFileItems(
@@ -58,9 +57,9 @@ export class Highlighter {
 		style: "minisearch" | "fzf",
 	): Promise<LineItem[]> {
 		if (style === "fzf") {
-			return this.fzfLineHighlighter.parseLineItems(path, queryText);
+			return this.lineHighlighter.parseLineItems(path, queryText);
 		} else if (style === "minisearch") {
-			return this.miniSearchHighlighter.parseLineItems(path, queryText);
+			throw new Error(TO_BE_IMPL);
 		} else {
 			throw new Error(TO_BE_IMPL);
 		}
@@ -101,12 +100,9 @@ export class TruncateLimit {
 	// }
 }
 
-interface LineHighlighter {
-	parseLineItems(path: string, queryText: string): Promise<LineItem[]>
-}
 
 @singleton()
-class FzfLineHighlighter implements LineHighlighter {
+class LineHighlighter implements LineHighlighter {
 	private readonly fileRetriever = getInstance(FileRetriever);
 
 	async parseLineItems(path: string, queryText: string): Promise<LineItem[]> {
@@ -221,10 +217,11 @@ class FzfLineHighlighter implements LineHighlighter {
 				const isTargetLine = matchedRow === start + index;
 
 				if (isTargetLine) {
-					// 对目标行使用 fzfMatch
+					// apply fzfMatch to the targetLine
 					const entries = await this.fzfMatch(queryText, [line]);
 					if (entries.length > 0) {
-						const entry = entries[0];
+						// There will be at most one entry
+						const entry = entries[0]; 
 						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
 							Array.from(entry.positions),
@@ -232,7 +229,7 @@ class FzfLineHighlighter implements LineHighlighter {
 					}
 					return `<span class="target-line">${line.text}</div>`;
 				} else {
-					// 对其他行进行严格匹配，并只高亮匹配的字符
+					// Perform strict matching on other lines
 					const regex = new RegExp(processedQueryText, "gi");
 					return line.text.replace(
 						regex,
@@ -270,12 +267,5 @@ class FzfLineHighlighter implements LineHighlighter {
 			selector: (item) => item.text,
 		});
 		return await fzf.find(queryText);
-	}
-}
-
-@singleton()
-class MiniSearchLineHighlighter implements LineHighlighter {
-	async parseLineItems(path: string, queryText: string): Promise<LineItem[]> {
-		return [];
 	}
 }
