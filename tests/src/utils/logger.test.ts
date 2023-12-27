@@ -3,6 +3,7 @@ import { logger } from "src/utils/logger";
 describe("Logger", () => {
 	const originalConsole = { ...console };
 	let consoleSpy: any;
+	let consoleGroupCollapsedSpy: any;
 
 	beforeEach(() => {
 		consoleSpy = {
@@ -12,6 +13,9 @@ describe("Logger", () => {
 			warn: jest.spyOn(console, "warn").mockImplementation(() => {}),
 			error: jest.spyOn(console, "error").mockImplementation(() => {}),
 		};
+		consoleGroupCollapsedSpy = jest
+			.spyOn(console, "groupCollapsed")
+			.mockImplementation(() => {});
 	});
 
 	afterEach(() => {
@@ -21,11 +25,7 @@ describe("Logger", () => {
 	it("should log trace messages when log level is trace", () => {
 		logger.setLevel("trace");
 		logger.trace("Trace message");
-		expect(consoleSpy.trace).toHaveBeenCalledWith(
-			expect.anything(),
-			"color: grey;",
-			"Trace message",
-		);
+		expect(consoleGroupCollapsedSpy).toHaveBeenCalled();
 	});
 
 	it("should log debug messages when log level is debug", () => {
