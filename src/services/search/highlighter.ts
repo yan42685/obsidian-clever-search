@@ -7,7 +7,8 @@ import {
 	Line,
 	LineItem,
 	MatchedLine,
-	type MatchedFile
+	type MatchedFile,
+	type TruncatedLine,
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { MathUtil } from "src/utils/math-util";
@@ -65,41 +66,6 @@ export class Highlighter {
 		}
 	}
 }
-
-export interface TruncateLimitConfig {
-	maxPreCharsForItem: number;
-	maxPreCharsForPreview: number;
-	maxPreLines: number;
-}
-
-export class TruncateLimit {
-	private static readonly limitsByLanguage: Record<
-		LanguageEnum,
-		TruncateLimitConfig
-	> = {
-		[LanguageEnum.other]: {
-			maxPreCharsForItem: 80,
-			maxPreCharsForPreview: 200,
-			maxPreLines: 10,
-		},
-		[LanguageEnum.en]: {
-			maxPreCharsForItem: 80,
-			maxPreCharsForPreview: 200,
-			maxPreLines: 10,
-		},
-		[LanguageEnum.zh]: {
-			maxPreCharsForItem: 30,
-			maxPreCharsForPreview: 120,
-			maxPreLines: 10,
-		},
-	};
-
-	// public static getConfig(strArray: string[]): TruncateLimitConfig {
-	// 	const languageResult = textAnalyzer.detectLanguage(strArray);
-
-	// }
-}
-
 
 @singleton()
 class LineHighlighter implements LineHighlighter {
@@ -219,7 +185,7 @@ class LineHighlighter implements LineHighlighter {
 					const entries = await this.fzfMatch(queryText, [line]);
 					if (entries.length > 0) {
 						// There will be at most one entry
-						const entry = entries[0]; 
+						const entry = entries[0];
 						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
 							Array.from(entry.positions),
@@ -266,4 +232,68 @@ class LineHighlighter implements LineHighlighter {
 		});
 		return await fzf.find(queryText);
 	}
+
+	private getTruncatedContextLines(
+		lines: Line[],
+		matchedRow: number,
+		firstMatchedCol: number,
+		truncateType: TruncateType
+	): TruncatedLine[] {
+		return [];
+	}
+}
+
+type TruncateType = "line" | "paragraph" | "subItem";
+
+type TruncateOption = {
+	maxPreLines: number;
+	maxPostLines: number;
+	maxPreChars: number;
+	maxPostChars: number;
+};
+
+type AllTruncateOption = {
+	[key in TruncateType]: TruncateOption;
+};
+
+class TruncateLimit {
+	// Default truncate options for all types and languages
+	private static readonly default: AllTruncateOption = {
+		line: {
+			maxPreLines: 0,
+			maxPostLines: 0,
+			maxPreChars: 30,
+			maxPostChars: 230,
+		},
+		paragraph: {
+			maxPreLines: 4,
+			maxPostLines: 7,
+			maxPreChars: 220,
+			maxPostChars: 600,
+		},
+		subItem: {
+			maxPreLines: 1,
+			maxPostLines: 1,
+			maxPreChars: 120,
+			maxPostChars: 230,
+		},
+	};
+
+	// Truncate options set by language
+	private static readonly limitsByLanguage: Record<LanguageEnum, AllTruncateOption> = {
+		[LanguageEnum.other]: TruncateLimit.default,
+		[LanguageEnum.en]: TruncateLimit.default,
+		[LanguageEnum.zh]: {
+			line: { ...this.default.line, maxPreChars: 30 },
+			paragraph:{ ...this.default.paragraph, maxPreChars: 220},
+			subItem: {...this.default.subItem, maxPostChars: 120},
+		},
+	};
+
+    /**
+     * Retrieve the truncate options for a given type in the current language.
+     */
+    static forType(type: TruncateType): TruncateOption {
+        return this.limitsByLanguage[getCurrLanguage()][type];
+    }
 }

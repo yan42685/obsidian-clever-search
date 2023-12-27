@@ -34,6 +34,9 @@ export class Line {
 		this.row = row;
 	}
 }
+
+export type TruncatedLine = Line & {removedPreChars: number};
+
 export class MatchedLine extends Line {
 	col: number;
 	constructor(text: string, row: number, col: number) {
