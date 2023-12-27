@@ -122,6 +122,10 @@ export class FileRetriever {
 		}
 	}
 
+	async readPlainTextLines(fileOrPath: TFile | string): Promise<string[]> {
+		return (await this.readPlainText(fileOrPath)).split("\n");
+	}
+
 	private shouldIndex(file: TFile): boolean {
 		// TODO: filter by extensions and paths
 		return true;
