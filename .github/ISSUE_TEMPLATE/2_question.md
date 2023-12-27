@@ -1,10 +1,9 @@
 ---
 name: Question
 about: Any question about this plugin
-title: "[Question]"
+title: "[Question] "
 labels: ''
 assignees: ''
 
 ---
-
 
