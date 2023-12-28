@@ -1,9 +1,9 @@
 import { App, TFile, Vault, parseFrontMatterAliases } from "obsidian";
-import { FileType, type IndexedDocument } from "src/globals/search-types";
+import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { FileUtil } from "../../utils/file-util";
+import { FileType, FileUtil } from "../../utils/file-util";
 import { Tokenizer } from "./tokenizer";
 
 @singleton()

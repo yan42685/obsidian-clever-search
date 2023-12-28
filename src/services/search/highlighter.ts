@@ -31,7 +31,7 @@ export class Highlighter {
 }
 
 @singleton()
-class LineHighlighter implements LineHighlighter {
+export class LineHighlighter {
 	private readonly fileRetriever = getInstance(FileUtil);
 
 	async parseLineItems(lines: Line[], queryText: string): Promise<LineItem[]> {
@@ -266,7 +266,9 @@ class LineHighlighter implements LineHighlighter {
 			);
 			resultLines.push({ text: subString, row: endRow });
 		}
-
+		
+		// for test: 
+		// resultLines.push({"row": 2, "text": "abce"});
 		return { lines: resultLines, firstLineOffset: firstLineStartCol };
 	}
 }

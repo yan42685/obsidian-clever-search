@@ -5,12 +5,11 @@ import { singleton } from "tsyringe";
 import {
 	EngineType,
 	FileItem,
-	FileType,
+	Line,
 	SearchResult,
 	type MatchedFile,
-	Line,
 } from "../../globals/search-types";
-import { FileUtil } from "../../utils/file-util";
+import { FileType, FileUtil } from "../../utils/file-util";
 import { DataProvider } from "./data-provider";
 import { Highlighter } from "./highlighter";
 import { LexicalEngine } from "./search-engine";

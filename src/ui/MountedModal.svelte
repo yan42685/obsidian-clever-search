@@ -3,7 +3,6 @@
 	import { EventEnum } from "src/globals/event-enum";
 	import {
 		FileItem,
-		FileType,
 		LineItem,
 		SearchResult,
 		SearchType,
@@ -11,6 +10,7 @@
 	import { PrivateApi } from "src/services/obsidian/private-api";
 	import { SearchService } from "src/services/search/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
+	import { FileType } from "src/utils/file-util";
 	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";

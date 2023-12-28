@@ -1,13 +1,16 @@
 import * as fsLib from "fs";
 import type { TFile } from "obsidian";
 import * as pathLib from "path";
-import { FileType } from "src/globals/search-types";
 import { singleton } from "tsyringe";
 import { logger } from "./logger";
 
 // for autocompletion
 export const fsUtils = fsLib;
 export const pathUtils = pathLib;
+
+export enum FileType {
+	PLAIN_TEXT, IMAGE, UNSUPPORTED
+}
 
 @singleton()
 export class FileUtil {

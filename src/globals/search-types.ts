@@ -1,5 +1,5 @@
 import type { SearchResult as MiniResult } from "minisearch";
-import { FileUtil } from "src/utils/file-util";
+import { FileType, FileUtil } from "src/utils/file-util";
 export type MiniSearchResult = MiniResult;
 
 export type IndexedDocument = {
@@ -107,8 +107,4 @@ export class FileItem extends Item {
 		this.path = path;
 		this.subItems = subItems;
 	}
-}
-
-export enum FileType {
-	PLAIN_TEXT, IMAGE, UNSUPPORTED
 }
