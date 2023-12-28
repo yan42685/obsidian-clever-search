@@ -1,5 +1,4 @@
 import * as fsLib from "fs";
-import type { TFile } from "obsidian";
 import * as pathLib from "path";
 import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";
@@ -30,45 +29,6 @@ export class MyLib {
 		} else {
 			return "";
 		}
-	}
-	static getBasename(filePath: string): string {
-		return pathUtils.basename(filePath, pathUtils.extname(filePath));
-	}
-
-	static getExtension(filePath: string): string {
-		return pathUtils.extname(filePath).slice(1);
-	}
-
-	static getFolderPath(filePath: string): string {
-		const dirPath = pathUtils.dirname(filePath);
-		if (dirPath === "." || dirPath === pathUtils.sep || dirPath === "/") {
-			return "./";
-		}
-		return (
-			dirPath.replace(new RegExp("\\" + pathUtils.sep, "g"), "/") + "/"
-		);
-	}
-
-	static countFileByExtensions(files: TFile[]): Record<string, number> {
-		const extensionCountMap = new Map<string, number>();
-		const commonExtensions = ["no_extension", "md", "txt"];
-		const uncommonExtensionPathMap = new Map<string, string[]>();
-		files.forEach((file) => {
-			const ext = file.extension || "no_extension";
-			extensionCountMap.set(ext, (extensionCountMap.get(ext) || 0) + 1);
-			if (!commonExtensions.includes(ext)) {
-				const paths = uncommonExtensionPathMap.get(ext) || [];
-				paths.push(file.path);
-				uncommonExtensionPathMap.set(ext, paths);
-			}
-		});
-		const countResult = Object.fromEntries(extensionCountMap);
-		const uncommonPathsResult = Object.fromEntries(
-			uncommonExtensionPathMap,
-		);
-		logger.debug(countResult);
-		logger.debug(uncommonPathsResult);
-		return countResult;
 	}
 }
 

@@ -1,10 +1,13 @@
-import { TFile, Vault } from "obsidian";
-import { DEFAULT_BLACKLIST_EXTENSION } from "src/globals/constants";
+import * as fsLib from "fs";
+import type { TFile } from "obsidian";
+import * as pathLib from "path";
 import { FileType } from "src/globals/search-types";
-import { MyLib, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { PluginSetting } from "../services/obsidian/setting";
+import { logger } from "./logger";
 
+// for autocompletion
+export const fsUtils = fsLib;
+export const pathUtils = pathLib;
 
 @singleton()
 export class FileUtil {
@@ -17,21 +20,61 @@ export class FileUtil {
 		FileUtil.fileTypeMap.set("jpg", FileType.IMAGE);
 		FileUtil.fileTypeMap.set("png", FileType.IMAGE);
 	}
-	private readonly setting: PluginSetting = getInstance(PluginSetting);
-	private readonly extensionBlacklist;
-	constructor() {
-		this.extensionBlacklist = new Set([
-			...DEFAULT_BLACKLIST_EXTENSION.map(MyLib.getExtension),
-			...this.setting.excludeExtensions.map(MyLib.getExtension),
-		]);
-	}
+	// private readonly setting: PluginSetting = getInstance(PluginSetting);
+	// private readonly extensionBlacklist;
+	// constructor() {
+	// 	this.extensionBlacklist = new Set([
+	// 		...DEFAULT_BLACKLIST_EXTENSION.map(FileUtil.getExtension),
+	// 		...this.setting.excludeExtensions.map(FileUtil.getExtension),
+	// 	]);
+	// }
 
 
 	static getFileType(path: string): FileType {
-		const result = FileUtil.fileTypeMap.get(MyLib.getExtension(path));
+		const result = FileUtil.fileTypeMap.get(FileUtil.getExtension(path));
 		// NOTE: shouldn't use `result ? FileType.UNSUPPORTED : result;`
 		// because result might be 0 rather than undefined
 		return result === undefined ? FileType.UNSUPPORTED : result;
 	}
 
+
+	static getBasename(filePath: string): string {
+		return pathUtils.basename(filePath, pathUtils.extname(filePath));
+	}
+
+	static getExtension(filePath: string): string {
+		return pathUtils.extname(filePath).slice(1);
+	}
+
+	static getFolderPath(filePath: string): string {
+		const dirPath = pathUtils.dirname(filePath);
+		if (dirPath === "." || dirPath === pathUtils.sep || dirPath === "/") {
+			return "./";
+		}
+		return (
+			dirPath.replace(new RegExp("\\" + pathUtils.sep, "g"), "/") + "/"
+		);
+	}
+
+	static countFileByExtensions(files: TFile[]): Record<string, number> {
+		const extensionCountMap = new Map<string, number>();
+		const commonExtensions = ["no_extension", "md", "txt"];
+		const uncommonExtensionPathMap = new Map<string, string[]>();
+		files.forEach((file) => {
+			const ext = file.extension || "no_extension";
+			extensionCountMap.set(ext, (extensionCountMap.get(ext) || 0) + 1);
+			if (!commonExtensions.includes(ext)) {
+				const paths = uncommonExtensionPathMap.get(ext) || [];
+				paths.push(file.path);
+				uncommonExtensionPathMap.set(ext, paths);
+			}
+		});
+		const countResult = Object.fromEntries(extensionCountMap);
+		const uncommonPathsResult = Object.fromEntries(
+			uncommonExtensionPathMap,
+		);
+		logger.debug(countResult);
+		logger.debug(uncommonPathsResult);
+		return countResult;
+	}
 }

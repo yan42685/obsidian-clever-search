@@ -1,6 +1,5 @@
 import type { SearchResult as MiniResult } from "minisearch";
 import { FileUtil } from "src/utils/file-util";
-import { MyLib } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
 export type IndexedDocument = {
@@ -93,13 +92,13 @@ export class FileItem extends Item {
 		return FileUtil.getFileType(this.path);
 	}
 	get basename() {
-		return MyLib.getBasename(this.path);
+		return FileUtil.getBasename(this.path);
 	}
 	get extension() {
-		return MyLib.getExtension(this.path);
+		return FileUtil.getExtension(this.path);
 	}
 	get folderPath() {
-		return MyLib.getFolderPath(this.path);
+		return FileUtil.getFolderPath(this.path);
 	}
 
 	constructor(engineType: EngineType, path: string, subItems: string[]) {

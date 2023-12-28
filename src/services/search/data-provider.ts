@@ -1,7 +1,7 @@
 import { App, TFile, Vault, parseFrontMatterAliases } from "obsidian";
 import { FileType, type IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
-import { MyLib, TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
 import { Tokenizer } from "./tokenizer";
@@ -30,7 +30,7 @@ export class DataProvider {
 						return {
 							path: file.path,
 							basename: file.basename,
-							folder: MyLib.getFolderPath(file.path),
+							folder: FileUtil.getFolderPath(file.path),
 							aliases: this.parseAliases(file),
 							content: await this.readPlainText(file),
 						};
@@ -41,7 +41,7 @@ export class DataProvider {
 					return {
 						path: file.path,
 						basename: file.basename,
-						folder: MyLib.getFolderPath(file.path),
+						folder: FileUtil.getFolderPath(file.path),
 					};
 				}
 			}),
@@ -59,12 +59,12 @@ export class DataProvider {
 		// get all fileRefs cached by obsidian
 		const files = this.vault.getFiles();
 		logger.info(`all files: ${files.length}`);
-		MyLib.countFileByExtensions(files);
+		FileUtil.countFileByExtensions(files);
 
 		// TODO: compare mtime and then filter
 		const result = files.filter((file) => this.shouldIndex(file));
 		logger.info(`files to be indexed: ${files.length}`);
-		MyLib.countFileByExtensions(result);
+		FileUtil.countFileByExtensions(result);
 
 		return result;
 	}
