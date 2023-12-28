@@ -28,18 +28,18 @@ export class Database {
 		}
 	}
 
-	async setPluginSetting(setting: PluginSetting) {
-		this.db
-			.transaction("rw", this.db.pluginSetting, () => {
+	async setPluginSetting(setting: PluginSetting): Promise<boolean> {
+		try {
+			await this.db.transaction("rw", this.db.pluginSetting, () => {
 				this.db.pluginSetting.clear();
 				this.db.pluginSetting.add({ data: setting });
-			})
-			.then(() => {
-				logger.trace("settings have been saved to database");
-			})
-			.catch((e) => {
-				logger.trace(`settings failed to be saved: ${e}`);
 			});
+			logger.trace("settings have been saved to database");
+			return true;
+		} catch (e) {
+			logger.trace(`settings failed to be saved: ${e}`);
+			return false;
+		}
 	}
 
 	// copied from https://github.com/scambier/obsidian-omnisearch/blob/master/src/database.ts#L36

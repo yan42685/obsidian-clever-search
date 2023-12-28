@@ -8,7 +8,7 @@ export const fsUtils = fsLib;
 export const pathUtils = pathLib;
 
 export const isDevEnvironment = process.env.NODE_ENV === "development";
-export const TO_BE_IMPL = "This branch hasn't been implemented"
+export const TO_BE_IMPL = "This branch hasn't been implemented";
 
 // "Ctrl" for Windows/Linux;    "Mod" for MacOS
 export const currModifier = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)

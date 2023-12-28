@@ -1,19 +1,17 @@
 import type { LogLevel } from "src/utils/logger";
 import { isDevEnvironment } from "src/utils/my-lib";
-import { singleton } from "tsyringe";
 
 
-@singleton()
 export class PluginSetting {
-	mySetting = "default";
-	logLevel: LogLevel = "debug";
+	mySetting: string;
+	logLevel: LogLevel;
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
 	excludeExtensions: string[];
 	search: SearchSetting;
 }
 
-export const DEFAULT_SETTING: PluginSetting = {
+export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	mySetting: "default",
 	logLevel: isDevEnvironment ? "debug" : "none",
 	apiProvider1: {

@@ -1,24 +1,48 @@
 import { PluginSettingTab, Setting } from "obsidian";
-import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
-import type { LogLevelOptions } from "src/globals/plugin-setting";
+import {
+	ICON_COLLAPSE,
+	ICON_EXPAND,
+	THIS_PLUGIN
+} from "src/globals/constants";
+import { DEFAULT_PLUGIN_SETTING, PluginSetting, type LogLevelOptions } from "src/globals/plugin-setting";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
-import { singleton } from "tsyringe";
+import { container, inject, singleton } from "tsyringe";
 
 @singleton()
 export class SettingManager {
-	plugin: CleverSearch = getInstance(THIS_PLUGIN);
-	constructor() {
-		this.plugin.addSettingTab(new GeneralTab(this.plugin));
+	private  plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	private  setting: PluginSetting;
+
+	async initAsync() {
+		await this.loadSettings()  // must run this line before registering PluginSetting
+		container.register(PluginSetting, { useValue: this.setting });
+		this.plugin.addSettingTab(getInstance(GeneralTab));
 	}
+
+	async loadSettings() {
+		this.setting = Object.assign(
+			{},
+			DEFAULT_PLUGIN_SETTING,
+			await this.plugin.loadData(),
+		);
+		logger.setLevel(this.setting.logLevel);
+	}
+
+	async saveSettings() {
+		await this.plugin.saveData(this.setting);
+	}
+
 }
 
+@singleton()
 class GeneralTab extends PluginSettingTab {
-	plugin: CleverSearch;
-	constructor(plugin: CleverSearch) {
+	private readonly settingManager = getInstance(SettingManager);
+	private readonly setting = getInstance(PluginSetting);
+
+	constructor(@inject(THIS_PLUGIN) plugin: CleverSearch) {
 		super(plugin.app, plugin);
-		this.plugin = plugin;
 	}
 
 	display(): void {
@@ -64,10 +88,10 @@ class GeneralTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder("api.openai.com")
-					.setValue(this.plugin.settings.apiProvider1.domain)
+					.setValue(this.setting.apiProvider1.domain)
 					.onChange((domain) => {
-						this.plugin.settings.apiProvider1.domain = domain;
-						this.plugin.saveSettings();
+						this.setting.apiProvider1.domain = domain;
+						this.settingManager.saveSettings();
 					}),
 			)
 
@@ -75,10 +99,10 @@ class GeneralTab extends PluginSettingTab {
 				text
 					.setPlaceholder("API key")
 
-					.setValue(this.plugin.settings.apiProvider1.key)
+					.setValue(this.setting.apiProvider1.key)
 					.onChange((key) => {
-						this.plugin.settings.apiProvider1.key = key;
-						this.plugin.saveSettings();
+						this.setting.apiProvider1.key = key;
+						this.settingManager.saveSettings();
 					}),
 			);
 
@@ -88,19 +112,19 @@ class GeneralTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder("api.openai.com")
-					.setValue(this.plugin.settings.apiProvider2.domain)
+					.setValue(this.setting.apiProvider2.domain)
 					.onChange((domain) => {
-						this.plugin.settings.apiProvider2.domain = domain;
-						this.plugin.saveSettings();
+						this.setting.apiProvider2.domain = domain;
+						this.settingManager.saveSettings();
 					}),
 			)
 			.addText((text) =>
 				text
 					.setPlaceholder("API key")
-					.setValue(this.plugin.settings.apiProvider2.key)
+					.setValue(this.setting.apiProvider2.key)
 					.onChange((key) => {
-						this.plugin.settings.apiProvider2.key = key;
-						this.plugin.saveSettings();
+						this.setting.apiProvider2.key = key;
+						this.settingManager.saveSettings();
 					}),
 			);
 
@@ -119,12 +143,12 @@ class GeneralTab extends PluginSettingTab {
 						none: "none",
 					} as LogLevelOptions)
 					// 不能用大写的字符串作为key...
-					.setValue(this.plugin.settings.logLevel.toLowerCase())
+					.setValue(this.setting.logLevel.toLowerCase())
 					.onChange(async (value) => {
 						const level = value as LogLevel;
 						logger.setLevel(level);
-						this.plugin.settings.logLevel = level;
-						await this.plugin.saveSettings();
+						this.setting.logLevel = level;
+						await this.settingManager.saveSettings();
 					}),
 			);
 	}

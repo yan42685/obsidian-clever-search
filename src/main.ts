@@ -12,17 +12,14 @@ import "reflect-metadata";
 import { container } from "tsyringe";
 import { devTest } from "./dev-test";
 import { THIS_PLUGIN } from "./globals/constants";
-import { DEFAULT_SETTING, PluginSetting } from "./globals/plugin-setting";
 import { SearchType } from "./globals/search-types";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { SearchModal } from "./ui/search-modal";
-import { logger } from "./utils/logger";
 import { getInstance, isDevEnvironment } from "./utils/my-lib";
 import { SearchClient } from "./web-worker/search-worker-client";
 
 export default class CleverSearch extends Plugin {
-	settings: PluginSetting;
 	privacyModeEnabled = false;
 	omnisearchIntegration?: OmnisearchIntegration;
 	searchClient?: SearchClient;
@@ -32,8 +29,6 @@ export default class CleverSearch extends Plugin {
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
 		container.register(Vault, { useValue: this.app.vault });
-		await this.loadSettings(); // must run before the following line
-		container.register(PluginSetting, { useValue: this.settings });
 
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
 		this.app.workspace.onLayoutReady(async () => {
@@ -179,20 +174,7 @@ export default class CleverSearch extends Plugin {
 		document.body.classList.remove("cs-privacy-blur");
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTING,
-			await this.loadData(),
-		);
-		logger.setLevel(this.settings.logLevel);
-		// logger.debug(this.settings.apiProvider1.domain);
-	}
 
-	async saveSettings() {
-		// logger.debug(`saved settings: ${this.settings.apiProvider1.domain}`);
-		await this.saveData(this.settings);
-	}
 }
 
 class SampleModal extends Modal {
