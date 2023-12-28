@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { PluginSetting } from "src/services/obsidian/setting";
+import { PluginSetting } from "src/globals/plugin-setting";
 import { MyNotice } from "src/services/obsidian/transformed-api";
 import { throttle } from "throttle-debounce";
 import { logger } from "../logger";

@@ -4,8 +4,8 @@ import type { DocumentWeight, MatchedFile } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import { PluginSetting, type SearchSetting } from "../../globals/plugin-setting";
 import { Database } from "../database/database";
-import { PluginSetting, type SearchSetting } from "../obsidian/setting";
 import { DataProvider } from "./data-provider";
 import { Query } from "./query";
 
