@@ -10,9 +10,12 @@ export type IndexedDocument = {
 	content?: string;
 };
 
+export type DocumentFields = Array<keyof IndexedDocument>;
+
 export type DocumentWeight = {
     [K in keyof IndexedDocument]?: number;
 };
+
 
 export type DocumentRef = {
 	path: string;

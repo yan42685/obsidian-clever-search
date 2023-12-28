@@ -1,6 +1,6 @@
 import type { Options } from "minisearch";
 import MiniSearch from "minisearch";
-import type { DocumentWeight, MatchedFile } from "src/globals/search-types";
+import type { DocumentFields, DocumentWeight, MatchedFile } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -13,9 +13,9 @@ import { Query } from "./query";
 // then the lifecycle of the instance obtained through tsyringe container is transient.
 @singleton()
 export class LexicalEngine {
-	private static readonly OPTIONS: Options = {
+	private static readonly inVaultOption: Options = {
 		idField: "path",
-		fields: ["basename", "aliases", "content"],
+		fields: ["basename", "aliases", "content"] as DocumentFields,
 	};
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly database = getInstance(Database);
@@ -25,15 +25,15 @@ export class LexicalEngine {
 
 	@monitorDecorator
 	async initAsync() {
-		logger.debug("init lexical engine...");
+		logger.trace("init lexical engine...");
 		const prevData = await this.database.getMiniSearchData();
 		if (prevData) {
 			this.miniSearch = MiniSearch.loadJS(
 				prevData,
-				LexicalEngine.OPTIONS,
+				LexicalEngine.inVaultOption,
 			);
 		} else {
-			this.miniSearch = new MiniSearch(LexicalEngine.OPTIONS);
+			this.miniSearch = new MiniSearch(LexicalEngine.inVaultOption);
 			await this.reIndexAll();
 		}
 		this._isReady = true;

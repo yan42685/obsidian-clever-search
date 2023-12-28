@@ -25,7 +25,7 @@ export default class CleverSearch extends Plugin {
 	searchClient?: SearchClient;
 
 	async onload() {
-		// 不能注册为CleverSearch这个类，可能是因为export default class， 而不是使用export class
+		// can't register `this` as CleverSearch, because it is `export default` rather than `export`
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
 		container.register(Vault, { useValue: this.app.vault });
