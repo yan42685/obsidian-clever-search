@@ -1,63 +1,27 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { LanguageEnum, getCurrLanguage } from "src/globals/language-enum";
 import {
-	EngineType,
-	FileItem,
-	FileType,
 	Line,
 	LineItem,
 	MatchedLine,
-	type MatchedFile,
 } from "src/globals/search-types";
-import { logger } from "src/utils/logger";
 import { MathUtil } from "src/utils/math-util";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { FileRetriever } from "./data-provider";
+import { FileUtil } from "../../utils/file-util";
 
 @singleton()
 export class Highlighter {
-	private readonly fileRetriever: FileRetriever = getInstance(FileRetriever);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 
-	// TODO: highlight by page, rather than reading all files
-	async parseFileItems(
-		matchedFiles: MatchedFile[],
-		engineType: EngineType,
-	): Promise<FileItem[]> {
-		// TODO: do real highlight
-		const result = await Promise.all(
-			matchedFiles.slice(0, 50).map(async (f) => {
-				const path = f.path;
-				if (
-					this.fileRetriever.getFileType(path) === FileType.PLAIN_TEXT
-				) {
-					const content =
-						await this.fileRetriever.readPlainText(path);
-					const lines = content.split("\n"); // 正则表达式匹配 \n 或 \r\n
-					const firstTenLines = lines.slice(0, 10).join("\n");
-					// It is necessary to use a constructor with 'new', rather than using an object literal.
-					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
-					// (to correctly display data in Svelte components).
-					return new FileItem(engineType, f.path, [firstTenLines]);
-				} else {
-					return new FileItem(engineType, f.path, [
-						"not supported file type",
-					]);
-				}
-			}),
-		);
-		logger.warn("current only highlight top 50 files");
-		return result;
-	}
 
 	async parseLineItems(
-		path: string,
+		lines: Line[],
 		queryText: string,
 		style: "minisearch" | "fzf",
 	): Promise<LineItem[]> {
 		if (style === "fzf") {
-			return this.lineHighlighter.parseLineItems(path, queryText);
+			return this.lineHighlighter.parseLineItems(lines, queryText);
 		} else if (style === "minisearch") {
 			throw new Error(TO_BE_IMPL);
 		} else {
@@ -68,12 +32,9 @@ export class Highlighter {
 
 @singleton()
 class LineHighlighter implements LineHighlighter {
-	private readonly fileRetriever = getInstance(FileRetriever);
+	private readonly fileRetriever = getInstance(FileUtil);
 
-	async parseLineItems(path: string, queryText: string): Promise<LineItem[]> {
-		const lines = (await this.fileRetriever.readPlainTextLines(path)).map(
-			(line, index) => new Line(line, index),
-		);
+	async parseLineItems(lines: Line[], queryText: string): Promise<LineItem[]> {
 
 		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 		const lineItems: LineItem[] = [];

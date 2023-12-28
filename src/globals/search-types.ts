@@ -1,6 +1,6 @@
 import type { SearchResult as MiniResult } from "minisearch";
-import { FileRetriever } from "src/services/search/data-provider";
-import { MyLib, getInstance } from "src/utils/my-lib";
+import { FileUtil } from "src/utils/file-util";
+import { MyLib } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
 export type IndexedDocument = {
@@ -90,7 +90,7 @@ export class FileItem extends Item {
 	path: string;
 	subItems: string[];
 	get fileType(): FileType {
-		return getInstance(FileRetriever).getFileType(this.path);
+		return FileUtil.getFileType(this.path);
 	}
 	get basename() {
 		return MyLib.getBasename(this.path);
