@@ -28,6 +28,7 @@ export async function devTest() {
 	monitorExecution(testLexicalSearch);
 	// monitorExecution(async () => await testLexicalSearch());
 	// testLexicalSearch();
+	logger.trace("test")
 }
 function getApp() {
 	return getInstance(App);

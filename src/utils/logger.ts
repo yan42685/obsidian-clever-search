@@ -8,6 +8,8 @@ class Logger {
 		error: 5,
 		none: 6,
 	};
+	// private verboseTrace = true;
+	private verboseTrace = false;
 
 	getLevel(): LogLevel {
 		return this.logLevel;
@@ -17,23 +19,41 @@ class Logger {
 	}
 	trace(...args: any[]) {
 		if (this.shouldLog("trace")) {
-			console.groupCollapsed(
-				`%c[trace] ${this.getCallerName()}\n`,
-				"color: grey;",
-				...args,
-			);
-			console.trace();
-			console.groupEnd();
+			if (this.verboseTrace) {
+				console.groupCollapsed(
+					`%c[trace] ${this.getCallerName()}\n`,
+					"color: #5f6368;font-weight: 400;",
+					...args,
+				);
+				console.trace();
+				console.groupEnd();
+			} else {
+				console.log(
+					`%c[trace] ${this.getCallerName()}\n`,
+					"color: #5f6368;",
+					...args,
+				);
+			}
 		}
 	}
 
 	debug(...args: any[]) {
 		if (this.shouldLog("debug")) {
-			console.debug(
-				`%c[debug] ${this.getCallerName()}\n`,
-				"color: #5f6368;",
-				...args,
-			);
+			if (this.verboseTrace) {
+				console.groupCollapsed(
+					`%c[debug] ${this.getCallerName()}\n`,
+					"color: #597e52;font-weight: 400;",
+					...args,
+				);
+				console.trace();
+				console.groupEnd();
+			} else {
+				console.debug(
+					`%c[debug] ${this.getCallerName()}\n`,
+					"color: #597e52;",
+					...args,
+				);
+			}
 		}
 	}
 
