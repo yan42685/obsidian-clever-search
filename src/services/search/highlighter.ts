@@ -1,10 +1,6 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { LanguageEnum, getCurrLanguage } from "src/globals/language-enum";
-import {
-	Line,
-	LineItem,
-	MatchedLine,
-} from "src/globals/search-types";
+import { Line, LineItem, MatchedLine } from "src/globals/search-types";
 import { MathUtil } from "src/utils/math-util";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -13,7 +9,6 @@ import { FileUtil } from "../../utils/file-util";
 @singleton()
 export class Highlighter {
 	private readonly lineHighlighter = getInstance(LineHighlighter);
-
 
 	async parseLineItems(
 		lines: Line[],
@@ -34,8 +29,10 @@ export class Highlighter {
 export class LineHighlighter {
 	private readonly fileRetriever = getInstance(FileUtil);
 
-	async parseLineItems(lines: Line[], queryText: string): Promise<LineItem[]> {
-
+	async parseLineItems(
+		lines: Line[],
+		queryText: string,
+	): Promise<LineItem[]> {
 		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 		const lineItems: LineItem[] = [];
 
@@ -208,28 +205,27 @@ export class LineHighlighter {
 		let endRow = matchedRow + 1;
 		let firstLineStartCol = 0;
 		let firstLineEndCol = 0;
-		const lastLineEndCol = 0;
-		let preCharsCount = firstMatchedCol;
+		// const lastLineEndCol = 0;
+		let preCharsCount = 0;
 		let postCharsCount = 0;
 		// add matchRow and extend above
 		while (
 			startRow > 0 &&
-			matchedRow - startRow <= limit.maxPreLines &&
-			preCharsCount < limit.maxPreChars
+			matchedRow - startRow < limit.maxPreLines &&
+			preCharsCount + lines[startRow].text.length < limit.maxPreChars
 		) {
 			resultLines.unshift(lines[startRow]);
 			preCharsCount += lines[startRow].text.length;
 			--startRow;
 		}
-		if (matchedRow - startRow > limit.maxPreLines) {
-			resultLines.shift();
-			preCharsCount -= lines[startRow - 1].text.length;
-			++startRow;
-		}
-		// need to truncate the first row
-		if (preCharsCount > limit.maxPreChars) {
+		if (preCharsCount + lines[startRow].text.length <= limit.maxPreChars) {
+			resultLines.unshift(lines[startRow]);
+			postCharsCount += lines[startRow].text.length - 1 - firstMatchedCol;
+		} else {
+			// need to truncate the first row
 			const lineText = lines[startRow].text;
-			firstLineStartCol = preCharsCount - limit.maxPreChars;
+			firstLineStartCol =
+				preCharsCount + lineText.length - limit.maxPreChars;
 			firstLineEndCol = Math.min(
 				firstMatchedCol + limit.maxPostChars,
 				lineText.length - 1,
@@ -241,53 +237,59 @@ export class LineHighlighter {
 			);
 			resultLines.unshift({ text: subStr, row: startRow });
 		}
+
 		// extend below but don't add matchedRow
 		while (
-			endRow < lines.length &&
-			endRow - matchedRow <= limit.maxPostLines &&
-			postCharsCount < limit.maxPostChars
+			endRow < lines.length - 1 &&
+			endRow - matchedRow < limit.maxPostLines &&
+			postCharsCount + lines[endRow].text.length < limit.maxPostChars
 		) {
 			resultLines.push(lines[endRow]);
 			postCharsCount += lines[endRow].text.length;
 			++endRow;
 		}
-		if (endRow - matchedRow > limit.maxPostLines) {
-			resultLines.pop();
-			postCharsCount -= lines[endRow + 1].text.length;
-			--endRow;
+		if (
+			endRow <= lines.length - 1 &&
+			endRow - matchedRow <= limit.maxPostLines
+		) {
+			if (
+				postCharsCount + lines[endRow].text.length <=
+				limit.maxPostChars
+			) {
+				resultLines.push(lines[endRow]);
+			} else {
+				const lineText = lines[endRow].text;
+				const lastLineEndCol =
+					lineText.length -
+					(postCharsCount + lineText.length - limit.maxPostChars) -
+					1;
+				const subString = lines[endRow].text.substring(
+					0,
+					lastLineEndCol + 1,
+				);
+				resultLines.push({ text: subString, row: endRow });
+			}
 		}
-		if (postCharsCount > limit.maxPostChars) {
-			const overflowCount = postCharsCount - limit.maxPostChars;
-			const lastLineEndCol =
-				lines[endRow].text.length - overflowCount - 1;
-			const subString = lines[endRow].text.substring(
-				0,
-				lastLineEndCol + 1,
-			);
-			resultLines.push({ text: subString, row: endRow });
-		}
-		
-		// for test: 
-		// resultLines.push({"row": 2, "text": "abce"});
+
 		return { lines: resultLines, firstLineOffset: firstLineStartCol };
 	}
 }
-type TruncatedContext = { lines: Line[]; firstLineOffset: number };
+export type TruncatedContext = { lines: Line[]; firstLineOffset: number };
 
-type TruncateType = "line" | "paragraph" | "subItem";
+export type TruncateType = "line" | "paragraph" | "subItem";
 
-type TruncateOption = {
+export type TruncateOption = {
 	maxPreLines: number;
 	maxPostLines: number;
 	maxPreChars: number;
 	maxPostChars: number;
 };
 
-type AllTruncateOption = {
+export type AllTruncateOption = {
 	[key in TruncateType]: TruncateOption;
 };
 
-class TruncateLimit {
+export class TruncateLimit {
 	// Default truncate options for all types and languages
 	private static readonly default: AllTruncateOption = {
 		line: {
