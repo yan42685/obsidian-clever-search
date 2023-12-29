@@ -1,10 +1,21 @@
-import type { Options } from "minisearch";
+import type { AsPlainObject, Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
-import type { DocumentFields, DocumentWeight, MatchedFile } from "src/globals/search-types";
+import type {
+	DocumentFields,
+	DocumentWeight,
+	IndexedDocument,
+	Line,
+	LineFields,
+	MatchedFile,
+	MatchedLine,
+} from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { PluginSetting, type SearchSetting } from "../../globals/plugin-setting";
+import {
+	PluginSetting,
+	type SearchSetting,
+} from "../../globals/plugin-setting";
 import { Database } from "../database/database";
 import { DataProvider } from "./data-provider";
 import { Query } from "./query";
@@ -19,22 +30,22 @@ export class LexicalEngine {
 	};
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly database = getInstance(Database);
-	private miniSearch: MiniSearch;
+	private filesIndex: MiniSearch;
 	private settings: SearchSetting = getInstance(PluginSetting).search;
 	private _isReady = false;
 
 	@monitorDecorator
-	async initAsync() {
+	async initAsync(previousData?: AsPlainObject) {
 		logger.trace("init lexical engine...");
 		const prevData = await this.database.getMiniSearchData();
 		if (prevData) {
-			this.miniSearch = MiniSearch.loadJS(
+			this.filesIndex = MiniSearch.loadJS(
 				prevData,
 				LexicalEngine.inVaultOption,
 			);
 		} else {
-			this.miniSearch = new MiniSearch(LexicalEngine.inVaultOption);
-			await this.reIndexAll();
+			this.filesIndex = new MiniSearch(LexicalEngine.inVaultOption);
+			await this.reIndexAllFiles();
 		}
 		this._isReady = true;
 	}
@@ -43,14 +54,14 @@ export class LexicalEngine {
 		return this._isReady;
 	}
 
-	async reIndexAll() {
+	async reIndexAllFiles(newIndexedDocuments?: IndexedDocument[]) {
 		this._isReady = false;
 		const allIndexedDocs =
 			await this.dataProvider.generateAllIndexedDocuments();
-		await this.miniSearch.removeAll();
+		await this.filesIndex.removeAll();
 		// TODO: add chunks rather than all
-		await this.miniSearch.addAllAsync(allIndexedDocs);
-		logger.debug(this.miniSearch);
+		await this.filesIndex.addAllAsync(allIndexedDocs);
+		logger.debug(this.filesIndex);
 		this._isReady = true;
 	}
 
@@ -69,7 +80,7 @@ export class LexicalEngine {
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
-		const minisearchResult = this.miniSearch.search(query.text, {
+		const minisearchResult = this.filesIndex.search(query.text, {
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
 			prefix: (term) =>
@@ -91,5 +102,50 @@ export class LexicalEngine {
 				matchedTerms: item.terms,
 			};
 		});
+	}
+
+	searchLines(lines: Line[], queryText: string): MatchedLine[] {
+		return [];
+	}
+}
+
+@singleton()
+class LexicalOptions {
+	private readonly setting: SearchSetting = getInstance(PluginSetting).search;
+	getFileIndexOption(): Options {
+		return {
+			idField: "path",
+			fields: ["basename", "aliases", "content"] as DocumentFields,
+		};
+	}
+
+	getFileSearchOption(combinationMode: "and" | "or"): SearchOptions {
+		return {
+			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
+			// at the last index of the query terms
+			prefix: (term) =>
+				term.length >= this.setting.minTermLengthForPrefixSearch,
+			// TODO: fuzziness based on language
+			fuzzy: (term) =>
+				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
+			// if `fields` are omitted, all fields will be search with weight 1
+			boost: {
+				path: this.setting.weightPath,
+				basename: this.setting.weightPath,
+				aliases: this.setting.weightPath,
+			} as DocumentWeight,
+			combineWith: combinationMode,
+		};
+	}
+
+	getLineIndexOption(): Options {
+		return {
+			fields: ["text", "row"] as LineFields,
+			storeFields: ["text", "row"] as LineFields,
+		};
+	}
+
+	getLineSearchOption(): SearchOptions {
+		return {}
 	}
 }

@@ -55,8 +55,8 @@ async function testLexicalSearch() {
 	// await lexicalEngine.initAsync();
 	// const query = "camera communiy";
 	const query = "whoknowthisfolder/whereisit";
-	const resultsOr = await lexicalEngine.searchOr(query);
-	const resultsAnd = await lexicalEngine.searchAnd(query);
+	const resultsOr = await lexicalEngine.searchFiles(query, "or");
+	const resultsAnd = await lexicalEngine.searchFiles(query, "and");
 
 	logger.debug(resultsOr);
 	// logger.debug(resultsAnd);

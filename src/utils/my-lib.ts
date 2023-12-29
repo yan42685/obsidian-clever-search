@@ -1,5 +1,4 @@
 import * as fsLib from "fs";
-import { Notice } from "obsidian";
 import * as pathLib from "path";
 import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";
@@ -110,7 +109,7 @@ export function getInstance<T>(token: InjectionToken<T>): T {
 			"CleverSearch for developer:\nThere might be wrong usages for tsyringe:\n1. Inject an instance for static field\n2. Cycle dependencies without delay\n3. Unknown error";
 		logger.warn(msg);
 		logger.error(e);
-		new Notice(msg, 0);
+		alert(msg);
 		return -1 as any;
 	}
 }

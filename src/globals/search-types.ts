@@ -36,7 +36,11 @@ export class Line {
 	}
 }
 
-export type HighlightedLine = Line & { col: number }; // col: the first highlighted col
+export type LineFields = Array<keyof Line>;
+
+// text: highlighted text 
+// col: the first highlighted col text
+export type HighlightedLine = Line & { col: number }; 
 
 export type MatchedLine = Line & { positions: number[] }; // positions: columns of matched chars 
 
