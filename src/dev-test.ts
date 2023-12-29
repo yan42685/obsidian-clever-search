@@ -1,7 +1,7 @@
 import { App, TFile } from "obsidian";
 import { PluginSetting } from "./globals/plugin-setting";
+import { SearchService } from "./services/obsidian/search-service";
 import { LexicalEngine } from "./services/search/search-engine";
-import { SearchService } from "./services/search/search-service";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 

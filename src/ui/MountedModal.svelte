@@ -9,7 +9,7 @@
 		SearchType,
 	} from "src/globals/search-types";
 	import { PrivateApi } from "src/services/obsidian/private-api";
-	import { SearchService } from "src/services/search/search-service";
+	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
 	import { getInstance } from "src/utils/my-lib";

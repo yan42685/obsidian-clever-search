@@ -16,53 +16,41 @@ import {
 	PluginSetting,
 	type SearchSetting,
 } from "../../globals/plugin-setting";
-import { Database } from "../database/database";
-import { DataProvider } from "./data-provider";
 import { Query } from "./query";
 
 // If @singleton() is not used,
 // then the lifecycle of the instance obtained through tsyringe container is transient.
 @singleton()
 export class LexicalEngine {
-	private static readonly inVaultOption: Options = {
-		idField: "path",
-		fields: ["basename", "aliases", "content"] as DocumentFields,
-	};
-	private readonly dataProvider = getInstance(DataProvider);
-	private readonly database = getInstance(Database);
-	private filesIndex: MiniSearch;
-	private settings: SearchSetting = getInstance(PluginSetting).search;
+	private option = getInstance(LexicalOptions);
+	private minisearch: MiniSearch = new MiniSearch(
+		this.option.fileIndexOption,
+	);
 	private _isReady = false;
 
 	@monitorDecorator
-	async initAsync(previousData?: AsPlainObject) {
-		logger.trace("init lexical engine...");
-		const prevData = await this.database.getMiniSearchData();
-		if (prevData) {
-			this.filesIndex = MiniSearch.loadJS(
-				prevData,
-				LexicalEngine.inVaultOption,
-			);
+	async reIndexAll(data: IndexedDocument[] | AsPlainObject) {
+		this._isReady = false;
+		await this.minisearch.removeAll();
+
+		if (Array.isArray(data)) {
+			logger.trace("Indexing all documents...");
+			// Process data with type: IndexedDocument[], need lots of time to create reversed indexes
+			await this.minisearch.addAllAsync(data, {chunkSize: this.option.documentChunkSize});
 		} else {
-			this.filesIndex = new MiniSearch(LexicalEngine.inVaultOption);
-			await this.reIndexAllFiles();
+			logger.trace("Loading indexed data...");
+			// Process data with type: AsPlainObject, faster
+			this.minisearch = MiniSearch.loadJS(
+				data,
+				this.option.fileIndexOption
+			);
 		}
 		this._isReady = true;
+		logger.trace(this.minisearch);
 	}
 
 	get isReady() {
 		return this._isReady;
-	}
-
-	async reIndexAllFiles(newIndexedDocuments?: IndexedDocument[]) {
-		this._isReady = false;
-		const allIndexedDocs =
-			await this.dataProvider.generateAllIndexedDocuments();
-		await this.filesIndex.removeAll();
-		// TODO: add chunks rather than all
-		await this.filesIndex.addAllAsync(allIndexedDocs);
-		logger.debug(this.filesIndex);
-		this._isReady = true;
 	}
 
 	/**
@@ -80,22 +68,10 @@ export class LexicalEngine {
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
-		const minisearchResult = this.filesIndex.search(query.text, {
-			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
-			// at the last index of the query terms
-			prefix: (term) =>
-				term.length >= this.settings.minTermLengthForPrefixSearch,
-			// TODO: fuzziness based on language
-			fuzzy: (term) =>
-				term.length <= 3 ? 0 : this.settings.fuzzyProportion,
-			// if `fields` are omitted, all fields will be search with weight 1
-			boost: {
-				path: this.settings.weightPath,
-				basename: this.settings.weightPath,
-				aliases: this.settings.weightPath,
-			} as DocumentWeight,
-			combineWith: combinationMode,
-		});
+		const minisearchResult = this.minisearch.search(
+			query.text,
+			this.option.getFileSearchOption(combinationMode),
+		);
 		return minisearchResult.map((item) => {
 			return {
 				path: item.id,
@@ -104,7 +80,16 @@ export class LexicalEngine {
 		});
 	}
 
-	searchLines(lines: Line[], queryText: string): MatchedLine[] {
+	async searchLines(
+		lines: Line[],
+		queryText: string,
+	): Promise<MatchedLine[]> {
+		const tmpIndex = new MiniSearch(this.option.lineIndexOption);
+		await tmpIndex.addAllAsync(lines, {
+			chunkSize: this.option.lineChunkSize,
+		});
+		const minisearchResult = tmpIndex.search(queryText, this.option.getLineSearchOption())
+
 		return [];
 	}
 }
@@ -112,12 +97,17 @@ export class LexicalEngine {
 @singleton()
 class LexicalOptions {
 	private readonly setting: SearchSetting = getInstance(PluginSetting).search;
-	getFileIndexOption(): Options {
-		return {
-			idField: "path",
-			fields: ["basename", "aliases", "content"] as DocumentFields,
-		};
-	}
+
+	readonly documentChunkSize: 200;
+	readonly lineChunkSize: 500;
+	readonly fileIndexOption: Options = {
+		idField: "path",
+		fields: ["basename", "aliases", "content"] as DocumentFields,
+	};
+	readonly lineIndexOption: Options = {
+		fields: ["text", "row"] as LineFields,
+		storeFields: ["text", "row"] as LineFields,
+	};
 
 	getFileSearchOption(combinationMode: "and" | "or"): SearchOptions {
 		return {
@@ -138,14 +128,11 @@ class LexicalOptions {
 		};
 	}
 
-	getLineIndexOption(): Options {
-		return {
-			fields: ["text", "row"] as LineFields,
-			storeFields: ["text", "row"] as LineFields,
-		};
-	}
-
 	getLineSearchOption(): SearchOptions {
-		return {}
+		return {
+			fuzzy: (term) =>
+				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
+			combineWith: "or",
+		};
 	}
 }

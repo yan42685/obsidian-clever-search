@@ -1,6 +1,6 @@
 import { App, Component } from "obsidian";
 import { logger } from "src/utils/logger";
-import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import {
 	EngineType,
@@ -11,24 +11,47 @@ import {
 	type MatchedFile,
 } from "../../globals/search-types";
 import { FileType, FileUtil } from "../../utils/file-util";
+import { Highlighter } from "../search/highlighter";
+import { LexicalEngine } from "../search/search-engine";
 import { DataProvider } from "./data-provider";
-import { Highlighter } from "./highlighter";
-import { LexicalEngine } from "./search-engine";
+import { Database } from "../database/database";
 
 @singleton()
 export class SearchService {
 	app: App = getInstance(App);
 	component: Component = new Component();
+	database: Database = getInstance(Database);
+	dataProvider: DataProvider = getInstance(DataProvider);
 	lexicalEngine: LexicalEngine = getInstance(LexicalEngine);
 	highlighter: Highlighter = getInstance(Highlighter);
-	dataProvider: DataProvider = getInstance(DataProvider);
+
+	@monitorDecorator
+	async initAsync() {
+		logger.trace("Init lexical engine...");
+		const prevData = await this.database.getMiniSearchData();
+		if (prevData) {
+			logger.trace("Previous minisearch data is found.");
+			this.lexicalEngine.reIndexAll(prevData);
+		} else {
+			logger.trace(
+				"Previous minisearch data doesn't exists, reading files via obsidian...",
+			);
+			const documents =
+				await this.dataProvider.generateAllIndexedDocuments();
+			await this.lexicalEngine.reIndexAll(documents);
+		}
+		logger.trace("Lexical engine is ready");
+	}
 
 	async searchInVault(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("no result", []);
 		if (queryText.length === 0) {
 			return result;
 		}
-		const lexicalMatches = await this.lexicalEngine.searchFiles(queryText, "and");
+		const lexicalMatches = await this.lexicalEngine.searchFiles(
+			queryText,
+			"and",
+		);
 		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
 			return {
