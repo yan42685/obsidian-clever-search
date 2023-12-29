@@ -1,7 +1,11 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import { LanguageEnum, getCurrLanguage } from "src/globals/language-enum";
-import { Line, LineItem, MatchedLine } from "src/globals/search-types";
-import { MathUtil } from "src/utils/math-util";
+import {
+	Line,
+	LineItem,
+	type HighlightedLine,
+	type MatchedLine,
+} from "src/globals/search-types";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
@@ -38,8 +42,9 @@ export class LineHighlighter {
 
 		const entries = await this.fzfMatch(queryTextNoSpaces, lines);
 		for (const entry of entries) {
-			const row = entry.item.row;
-			const firstMatchedCol = MathUtil.minInSet(entry.positions);
+			const row = entry.row;
+			// const firstMatchedCol = MathUtil.minInSet(entry.positions);
+			const firstMatchedCol = entry.positions[0]; // have been sorted
 			const originLine = lines[row].text;
 
 			// only show part of the line that contains the highlighted chars
@@ -56,15 +61,21 @@ export class LineHighlighter {
 				newPositions,
 			);
 
+			const paragraphContext = await this.getHighlightedContext(
+				lines,
+				row,
+				firstMatchedCol,
+				queryText,
+			);
+
 			lineItems.push(
 				new LineItem(
-					new MatchedLine(highlightedText, row, firstMatchedCol),
-					await this.getHighlightedContext(
-						lines,
-						row,
-						firstMatchedCol,
-						queryText,
-					),
+					{
+						text: highlightedText,
+						row: row,
+						col: firstMatchedCol,
+					} as HighlightedLine,
+					paragraphContext,
 				),
 			);
 		}
@@ -145,7 +156,8 @@ export class LineHighlighter {
 						const entry = entries[0];
 						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
-							Array.from(entry.positions),
+							// Array.from(entry.positions),
+							entry.positions,
 						)}</span>`;
 					}
 					return `<span class="target-line">${line.text}</div>`;
@@ -183,11 +195,17 @@ export class LineHighlighter {
 	private async fzfMatch(
 		queryText: string,
 		lines: Line[],
-	): Promise<FzfResultItem<Line>[]> {
+	): Promise<MatchedLine[]> {
 		const fzf = new AsyncFzf(lines, {
 			selector: (item) => item.text,
 		});
-		return await fzf.find(queryText);
+		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
+			return {
+				text: entry.item.text,
+				row: entry.item.row,
+				positions: [...entry.positions].sort(),
+			} as MatchedLine;
+		});
 	}
 
 	private getTruncatedContext(

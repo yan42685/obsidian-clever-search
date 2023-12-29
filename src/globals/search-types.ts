@@ -13,9 +13,8 @@ export type IndexedDocument = {
 export type DocumentFields = Array<keyof IndexedDocument>;
 
 export type DocumentWeight = {
-    [K in keyof IndexedDocument]?: number;
+	[K in keyof IndexedDocument]?: number;
 };
-
 
 export type DocumentRef = {
 	path: string;
@@ -37,19 +36,14 @@ export class Line {
 	}
 }
 
+export type HighlightedLine = Line & { col: number }; // col: the first highlighted col
 
-export class MatchedLine extends Line {
-	col: number;
-	constructor(text: string, row: number, col: number) {
-		super(text, row);
-		this.col = col;
-	}
-}
+export type MatchedLine = Line & { positions: number[] }; // positions: columns of matched chars 
 
-export type MatchedFile  = {
-	path: string,
-	matchedTerms: string[]
-}
+export type MatchedFile = {
+	path: string;
+	matchedTerms: string[];
+};
 
 export class SearchResult {
 	currPath: string;
@@ -59,7 +53,6 @@ export class SearchResult {
 		this.items = items;
 	}
 }
-
 
 export enum SearchType {
 	NONE,
@@ -77,10 +70,10 @@ export abstract class Item {
 }
 
 export class LineItem extends Item {
-	line: MatchedLine;
+	line: HighlightedLine;
 	context: string;
 
-	constructor(line: MatchedLine, context: string) {
+	constructor(line: HighlightedLine, context: string) {
 		super();
 		this.line = line;
 		this.context = context;
@@ -92,7 +85,7 @@ export class FileItem extends Item {
 	path: string;
 	subItems: FileSubItem[]; // for plaintext filetype
 	// TODO: impl this
-	previewContent: any;  // for non-plaintext filetype
+	previewContent: any; // for non-plaintext filetype
 	get fileType(): FileType {
 		return FileUtil.getFileType(this.path);
 	}
@@ -106,7 +99,12 @@ export class FileItem extends Item {
 		return FileUtil.getFolderPath(this.path);
 	}
 
-	constructor(engineType: EngineType, path: string, subItems: FileSubItem[], previewContent: any) {
+	constructor(
+		engineType: EngineType,
+		path: string,
+		subItems: FileSubItem[],
+		previewContent: any,
+	) {
 		super();
 		this.engineType = engineType;
 		this.path = path;
@@ -117,7 +115,7 @@ export class FileItem extends Item {
 
 export class FileSubItem extends Item {
 	text: string;
-	originRow: number;  // for precisely jumping to the original file location
+	originRow: number; // for precisely jumping to the original file location
 	originCol: number;
 	constructor(text: string, originRow: number, originCol: number) {
 		super();
