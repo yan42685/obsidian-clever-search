@@ -76,8 +76,6 @@
 			});
 		} else if (searchType === SearchType.IN_VAULT) {
 			searchResult = await searchService.searchInVault(queryText);
-			// logger.info(searchResult);
-			// logger.info(typeof searchResult.items[0] || "nothing");
 		}
 		updateItem(0);
 		// wait until all dynamic elements are mounted and rendered

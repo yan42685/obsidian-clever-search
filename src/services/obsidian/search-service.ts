@@ -1,5 +1,6 @@
 import { App, Component } from "obsidian";
 import { logger } from "src/utils/logger";
+import { MathUtil } from "src/utils/math-util";
 import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import {
@@ -11,10 +12,10 @@ import {
 	type MatchedFile,
 } from "../../globals/search-types";
 import { FileType, FileUtil } from "../../utils/file-util";
-import { Highlighter } from "../search/highlighter";
+import { Database } from "../database/database";
+import { Highlighter, LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/search-engine";
 import { DataProvider } from "./data-provider";
-import { Database } from "../database/database";
 
 @singleton()
 export class SearchService {
@@ -24,6 +25,7 @@ export class SearchService {
 	dataProvider: DataProvider = getInstance(DataProvider);
 	lexicalEngine: LexicalEngine = getInstance(LexicalEngine);
 	highlighter: Highlighter = getInstance(Highlighter);
+	lineHighlighter = getInstance(LineHighlighter);
 
 	@monitorDecorator
 	async initAsync() {
@@ -57,6 +59,7 @@ export class SearchService {
 			return {
 				currPath: TO_BE_IMPL,
 				items: await this.parseFileItems(
+					queryText,
 					lexicalMatches,
 					EngineType.LEXICAL,
 				),
@@ -97,25 +100,53 @@ export class SearchService {
 	}
 
 	// TODO: highlight by page, rather than reading all files
+	@monitorDecorator
 	async parseFileItems(
+		queryText: string,
 		matchedFiles: MatchedFile[],
 		engineType: EngineType,
 	): Promise<FileItem[]> {
+		logger.warn("current only highlight top 50 files");
 		// TODO: do real highlight
 		const result = await Promise.all(
 			matchedFiles.slice(0, 50).map(async (f) => {
 				const path = f.path;
 				if (FileUtil.getFileType(path) === FileType.PLAIN_TEXT) {
 					const content = await this.dataProvider.readPlainText(path);
-					const lines = content.split("\n"); // 正则表达式匹配 \n 或 \r\n
+					const lines = content
+						.split("\n")
+						.map((text, index) => new Line(text, index)); // 正则表达式匹配 \n 或 \r\n
 					const firstTenLines = lines.slice(0, 10).join("\n");
+
+					const matchedLines = await this.lexicalEngine.searchLines(
+						lines,
+						queryText,
+					);
+					const fileSubItems = matchedLines.map((matchedLine) => {
+
+						const matchedLineTruncatedContext =
+							this.lineHighlighter.getTruncatedContext(
+								lines,
+								matchedLine.row,
+								MathUtil.minInSet(matchedLine.positions),
+								"subItem",
+							);
+						return {
+							// text: matchedLineTruncatedContext.lines.map(line=>line.text).join("\n"),
+							text: matchedLine.text,
+							originRow: matchedLine.row,
+							originCol: MathUtil.minInSet(matchedLine.positions),
+						} as FileSubItem;
+					});
+
 					// It is necessary to use a constructor with 'new', rather than using an object literal.
 					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
 					// (to correctly display data in Svelte components).
 					return new FileItem(
 						engineType,
 						f.path,
-						[new FileSubItem(firstTenLines, 0, 0)],
+						// [new FileSubItem(firstTenLines, 0, 0)],
+						fileSubItems,
 						null,
 					);
 				} else {
@@ -128,7 +159,6 @@ export class SearchService {
 				}
 			}),
 		);
-		logger.warn("current only highlight top 50 files");
 		return result;
 	}
 }

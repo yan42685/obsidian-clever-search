@@ -42,7 +42,7 @@ export type LineFields = Array<keyof Line>;
 // col: the first highlighted col text
 export type HighlightedLine = Line & { col: number }; 
 
-export type MatchedLine = Line & { positions: number[] }; // positions: columns of matched chars 
+export type MatchedLine = Line & { positions: Set<number> }; // positions: columns of matched chars 
 
 export type MatchedFile = {
 	path: string;

@@ -6,6 +6,7 @@ import {
 	type HighlightedLine,
 	type MatchedLine,
 } from "src/globals/search-types";
+import { MathUtil } from "src/utils/math-util";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
@@ -43,8 +44,7 @@ export class LineHighlighter {
 		const entries = await this.fzfMatch(queryTextNoSpaces, lines);
 		for (const entry of entries) {
 			const row = entry.row;
-			// const firstMatchedCol = MathUtil.minInSet(entry.positions);
-			const firstMatchedCol = entry.positions[0]; // have been sorted
+			const firstMatchedCol = MathUtil.minInSet(entry.positions);
 			const originLine = lines[row].text;
 
 			// only show part of the line that contains the highlighted chars
@@ -156,8 +156,7 @@ export class LineHighlighter {
 						const entry = entries[0];
 						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
-							// Array.from(entry.positions),
-							entry.positions,
+							Array.from(entry.positions),
 						)}</span>`;
 					}
 					return `<span class="target-line">${line.text}</div>`;
@@ -176,6 +175,7 @@ export class LineHighlighter {
 		return highlightedContext.join("\n");
 	}
 
+	// TODO: highlight set positions
 	private highlightLineByCharPositions(
 		str: string,
 		positions: number[],
@@ -203,12 +203,13 @@ export class LineHighlighter {
 			return {
 				text: entry.item.text,
 				row: entry.item.row,
-				positions: [...entry.positions].sort(),
+				positions: entry.positions,
 			} as MatchedLine;
 		});
 	}
 
-	private getTruncatedContext(
+	// private getTruncatedContext(
+	getTruncatedContext(
 		lines: Line[],
 		matchedRow: number,
 		firstMatchedCol: number,

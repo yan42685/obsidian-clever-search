@@ -36,13 +36,15 @@ export class LexicalEngine {
 		if (Array.isArray(data)) {
 			logger.trace("Indexing all documents...");
 			// Process data with type: IndexedDocument[], need lots of time to create reversed indexes
-			await this.minisearch.addAllAsync(data, {chunkSize: this.option.documentChunkSize});
+			await this.minisearch.addAllAsync(data, {
+				chunkSize: this.option.documentChunkSize,
+			});
 		} else {
 			logger.trace("Loading indexed data...");
 			// Process data with type: AsPlainObject, faster
 			this.minisearch = MiniSearch.loadJS(
 				data,
-				this.option.fileIndexOption
+				this.option.fileIndexOption,
 			);
 		}
 		this._isReady = true;
@@ -88,9 +90,36 @@ export class LexicalEngine {
 		await tmpIndex.addAllAsync(lines, {
 			chunkSize: this.option.lineChunkSize,
 		});
-		const minisearchResult = tmpIndex.search(queryText, this.option.getLineSearchOption())
+		const minisearchResult = tmpIndex.search(
+			queryText,
+			this.option.getLineSearchOption(),
+		);
+		
+		return minisearchResult.map((item)=> {
+			return {
+				"text": item.text,
+				"row": item.id,
+				positions: this.findAllTermPositions(item.text, item.terms)
+			} as MatchedLine
+		})
+	}
 
-		return [];
+	// TODO: refactor with KMP algorithm if necessary
+	findAllTermPositions(line: string, terms: string[]): Set<number> {
+		const positions = new Set<number>;
+
+		terms.forEach((term) => {
+			let index = line.indexOf(term);
+
+			while (index !== -1) {
+				for (let i = 0; i < term.length; i++) {
+					positions.add(index + i);
+				}
+				index = line.indexOf(term, index + 1);
+			}
+		});
+
+		return positions;
 	}
 }
 
@@ -105,8 +134,9 @@ class LexicalOptions {
 		fields: ["basename", "aliases", "content"] as DocumentFields,
 	};
 	readonly lineIndexOption: Options = {
-		fields: ["text", "row"] as LineFields,
-		storeFields: ["text", "row"] as LineFields,
+		idField: "row",
+		fields: ["text"] as LineFields,
+		storeFields: ["text"] as LineFields,
 	};
 
 	getFileSearchOption(combinationMode: "and" | "or"): SearchOptions {
@@ -133,6 +163,7 @@ class LexicalOptions {
 			fuzzy: (term) =>
 				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
 			combineWith: "or",
+			// combineWith: "and",
 		};
 	}
 }
