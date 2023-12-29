@@ -209,6 +209,7 @@ export class LineHighlighter {
 	}
 
 	// private getTruncatedContext(
+	// TODO: handle edge cases such as empty line
 	getTruncatedContext(
 		lines: Line[],
 		matchedRow: number,
@@ -216,84 +217,213 @@ export class LineHighlighter {
 		truncateType: TruncateType,
 	): TruncatedContext {
 		if (lines.length === 0) {
-			return { lines: [], firstLineOffset: 0 };
+			return { lines: [], firstLineStartCol: 0 };
 		}
 		const limit = TruncateLimit.forType(truncateType);
-		const resultLines: Line[] = [];
-		let startRow = matchedRow;
-		let endRow = matchedRow + 1;
+		let resultLines: Line[];
 		let firstLineStartCol = 0;
-		let firstLineEndCol = 0;
-		// const lastLineEndCol = 0;
-		let preCharsCount = 0;
 		let postCharsCount = 0;
-		// add matchRow and extend above
-		while (
-			startRow > 0 &&
-			matchedRow - startRow < limit.maxPreLines &&
-			preCharsCount + lines[startRow].text.length < limit.maxPreChars
-		) {
-			resultLines.unshift(lines[startRow]);
-			preCharsCount += lines[startRow].text.length;
-			--startRow;
-		}
-		if (preCharsCount + lines[startRow].text.length <= limit.maxPreChars) {
-			resultLines.unshift(lines[startRow]);
-			postCharsCount += lines[startRow].text.length - 1 - firstMatchedCol;
-		} else {
-			// need to truncate the first row
-			const lineText = lines[startRow].text;
-			firstLineStartCol =
-				preCharsCount + lineText.length - limit.maxPreChars;
-			firstLineEndCol = Math.min(
-				firstMatchedCol + limit.maxPostChars,
-				lineText.length - 1,
-			);
-			postCharsCount = firstLineEndCol - firstMatchedCol;
-			const subStr = lines[startRow].text.substring(
-				firstLineStartCol,
-				firstLineEndCol + 1,
-			);
-			resultLines.unshift({ text: subStr, row: startRow });
-		}
 
-		// extend below but don't add matchedRow
-		while (
-			endRow < lines.length - 1 &&
-			endRow - matchedRow < limit.maxPostLines &&
-			postCharsCount + lines[endRow].text.length < limit.maxPostChars
-		) {
-			resultLines.push(lines[endRow]);
-			postCharsCount += lines[endRow].text.length;
-			++endRow;
-		}
-		if (
-			endRow <= lines.length - 1 &&
-			endRow - matchedRow <= limit.maxPostLines
-		) {
-			if (
-				postCharsCount + lines[endRow].text.length <=
-				limit.maxPostChars
-			) {
-				resultLines.push(lines[endRow]);
+		// for the matchedRow
+		const matchedLineText = lines[matchedRow].text;
+		// don't have to truncate the start of the matched row
+		if (firstMatchedCol < limit.maxPreChars) {
+			const contextAbove = this.extendContextAbove(
+				lines,
+				matchedRow - 1,
+				limit.maxPreChars - firstMatchedCol,
+				limit.maxPreLines,
+			);
+			resultLines = contextAbove.lines;
+			firstLineStartCol = contextAbove.firstLineStartCol;
+			const endCol = Math.min(
+				matchedLineText.length - 1,
+				firstMatchedCol + limit.maxPostChars,
+			);
+			const needTruncateEnd = endCol <= matchedLineText.length - 1;
+			// need to truncate the end of the matched row
+			if (needTruncateEnd) {
+				const subStr = matchedLineText.substring(0, endCol + 1);
+				resultLines.push({ text: subStr, row: matchedRow });
 			} else {
-				const lineText = lines[endRow].text;
-				const lastLineEndCol =
-					lineText.length -
-					(postCharsCount + lineText.length - limit.maxPostChars) -
-					1;
-				const subString = lines[endRow].text.substring(
-					0,
-					lastLineEndCol + 1,
+				resultLines.push(lines[matchedRow]);
+				postCharsCount += endCol - firstMatchedCol;
+				resultLines.concat(
+					this.extendContextBelow(
+						lines,
+						matchedRow + 1,
+						limit.maxPostChars - postCharsCount,
+						limit.maxPostLines,
+					),
 				);
-				resultLines.push({ text: subString, row: endRow });
+			}
+		} else {
+			// need to truncate the start of the matched row
+			const startCol = firstMatchedCol - limit.maxPreChars;
+			firstLineStartCol = startCol;
+			const endCol = Math.min(
+				matchedLineText.length - 1,
+				firstMatchedCol + limit.maxPostChars,
+			);
+			const isEndTruncated = endCol <= matchedLineText.length - 1;
+			if (isEndTruncated) {
+				const subStr = matchedLineText.substring(startCol, endCol + 1);
+				resultLines = [{ text: subStr, row: matchedRow }];
+			} else {
+				resultLines = [lines[matchedRow]];
+				postCharsCount += endCol - firstMatchedCol;
+				resultLines.concat(
+					this.extendContextBelow(
+						lines,
+						matchedRow + 1,
+						limit.maxPostChars - postCharsCount,
+						limit.maxPostLines,
+					),
+				);
 			}
 		}
 
-		return { lines: resultLines, firstLineOffset: firstLineStartCol };
+		return {
+			lines: resultLines,
+			firstLineStartCol: firstLineStartCol,
+		};
+
+		// while (
+		// 	startRow > 0 &&
+		// 	matchedRow - startRow < limit.maxPreLines &&
+		// 	preCharsCount + lines[startRow].text.length < limit.maxPreChars
+		// ) {
+		// 	resultLines.unshift(lines[startRow]);
+		// 	preCharsCount += lines[startRow].text.length;
+		// 	--startRow;
+		// }
+		// if (preCharsCount + lines[startRow].text.length <= limit.maxPreChars) {
+		// 	resultLines.unshift(lines[startRow]);
+		// 	postCharsCount += lines[startRow].text.length - 1 - firstMatchedCol;
+		// } else {
+		// 	// need to truncate the first row
+		// 	const lineText = lines[startRow].text;
+		// 	firstLineStartCol =
+		// 		preCharsCount + lineText.length - limit.maxPreChars;
+		// 	firstLineEndCol = Math.min(
+		// 		firstMatchedCol + limit.maxPostChars,
+		// 		lineText.length - 1,
+		// 	);
+		// 	postCharsCount = firstLineEndCol - firstMatchedCol;
+		// 	const subStr = lines[startRow].text.substring(
+		// 		firstLineStartCol,
+		// 		firstLineEndCol + 1,
+		// 	);
+		// 	resultLines.unshift({ text: subStr, row: startRow });
+		// }
+
+		// // extend below but don't add matchedRow
+		// while (
+		// 	endRow < lines.length - 1 &&
+		// 	endRow - matchedRow < limit.maxPostLines &&
+		// 	postCharsCount + lines[endRow].text.length < limit.maxPostChars
+		// ) {
+		// 	resultLines.push(lines[endRow]);
+		// 	postCharsCount += lines[endRow].text.length;
+		// 	++endRow;
+		// }
+		// if (
+		// 	endRow <= lines.length - 1 &&
+		// 	endRow - matchedRow <= limit.maxPostLines
+		// ) {
+		// 	if (
+		// 		postCharsCount + lines[endRow].text.length <=
+		// 		limit.maxPostChars
+		// 	) {
+		// 		resultLines.push(lines[endRow]);
+		// 	} else {
+		// 		const lineText = lines[endRow].text;
+		// 		const lastLineEndCol =
+		// 			lineText.length -
+		// 			(postCharsCount + lineText.length - limit.maxPostChars) -
+		// 			1;
+		// 		const subString = lines[endRow].text.substring(
+		// 			0,
+		// 			lastLineEndCol + 1,
+		// 		);
+		// 		resultLines.push({ text: subString, row: endRow });
+		// 	}
+		// }
+
+		// return { lines: resultLines, firstLineOffset: firstLineStartCol };
+	}
+
+	/**
+	 * @param lines all lines
+	 */
+	private extendContextAbove(
+		lines: Line[],
+		startRow: number,
+		maxPreChars: number,
+		maxLines: number,
+	): TruncatedContext {
+		let firstLineStartCol = 0;
+		let currRow = startRow;
+		let preCharsCount = 0;
+		const resultLines: Line[] = [];
+		while (currRow >= 0 && startRow - currRow < maxLines) {
+			const currLineText = lines[currRow].text;
+			if (preCharsCount + currLineText.length < maxPreChars) {
+				resultLines.unshift(lines[currRow]);
+				preCharsCount += currLineText.length;
+				--currRow;
+			} else if (preCharsCount + currLineText.length == maxPreChars) {
+				resultLines.unshift(lines[currRow]);
+				break;
+			} else {
+				// need to truncate the top line
+				const startCol =
+					preCharsCount + currLineText.length - maxPreChars;
+				firstLineStartCol = startCol;
+				const subStr = lines[currRow].text.substring(startCol);
+				resultLines.unshift({ text: subStr, row: currRow });
+				break;
+			}
+		}
+		return {
+			lines: resultLines,
+			firstLineStartCol: firstLineStartCol,
+		} as TruncatedContext;
+	}
+
+	private extendContextBelow(
+		lines: Line[],
+		startRow: number,
+		maxPostChars: number,
+		maxLines: number,
+	): Line[] {
+		let currRow = startRow;
+		let postCharsCount = 0;
+		const resultLines: Line[] = [];
+		while (currRow <= lines.length - 1 && currRow - startRow < maxLines) {
+			const currLineText = lines[currRow].text;
+			if (postCharsCount + currLineText.length < maxPostChars) {
+				resultLines.push(lines[currRow]);
+				postCharsCount += currLineText.length;
+				++currRow;
+			} else if (postCharsCount + currLineText.length == maxPostChars) {
+				resultLines.push(lines[currRow]);
+				break;
+			} else {
+				// need to truncate the last line
+				const endCol =
+					currLineText.length -
+					(postCharsCount + currLineText.length - maxPostChars) -
+					1;
+				const subStr = lines[currRow].text.substring(0, endCol + 1);
+				resultLines.push({ text: subStr, row: currRow });
+				break;
+			}
+		}
+		return resultLines;
 	}
 }
-export type TruncatedContext = { lines: Line[]; firstLineOffset: number };
+export type TruncatedContext = { lines: Line[]; firstLineStartCol: number };
 
 export type TruncateType = "line" | "paragraph" | "subItem";
 
