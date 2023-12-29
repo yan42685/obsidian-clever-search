@@ -7,7 +7,7 @@ import type {
 	Line,
 	LineFields,
 	MatchedFile,
-	MatchedLine
+	MatchedLine,
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
@@ -101,7 +101,7 @@ export class LexicalEngine {
 		);
 
 		return minisearchResult.map((item) => {
-			const lineText = lines[item.id].text
+			const lineText = lines[item.id].text;
 			return {
 				text: lineText,
 				row: item.id,
@@ -110,20 +110,20 @@ export class LexicalEngine {
 		});
 	}
 
-	// TODO: refactor with KMP algorithm if necessary
+	/**
+	 * find all chars positions for terms in a given line
+	 */
 	findAllTermPositions(line: string, terms: string[]): Set<number> {
+		const regex = new RegExp(terms.join("|"), "gi");
 		const positions = new Set<number>();
 
-		terms.forEach((term) => {
-			let index = line.indexOf(term);
+		let match: RegExpExecArray | null;
 
-			while (index !== -1) {
-				for (let i = 0; i < term.length; i++) {
-					positions.add(index + i);
-				}
-				index = line.indexOf(term, index + 1);
+		while ((match = regex.exec(line)) !== null) {
+			for (let i = 0; i < match[0].length; i++) {
+				positions.add(match.index + i);
 			}
-		});
+		}
 
 		return positions;
 		// return new Set([1]);  // test if this function consumes too much time
