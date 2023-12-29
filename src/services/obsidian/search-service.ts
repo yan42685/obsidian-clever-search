@@ -45,6 +45,7 @@ export class SearchService {
 		logger.trace("Lexical engine is ready");
 	}
 
+	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("no result", []);
 		if (queryText.length === 0) {
@@ -106,10 +107,12 @@ export class SearchService {
 		matchedFiles: MatchedFile[],
 		engineType: EngineType,
 	): Promise<FileItem[]> {
-		logger.warn("current only highlight top 50 files");
+		// TODO: limit to one and search on demand
+		const limit = 10;
+		logger.warn(`current only highlight top ${limit} files`);
 		// TODO: do real highlight
 		const result = await Promise.all(
-			matchedFiles.slice(0, 50).map(async (f) => {
+			matchedFiles.slice(0, limit).map(async (f) => {
 				const path = f.path;
 				if (FileUtil.getFileType(path) === FileType.PLAIN_TEXT) {
 					const content = await this.dataProvider.readPlainText(path);
@@ -122,6 +125,7 @@ export class SearchService {
 						lines,
 						queryText,
 					);
+					// logger.info(matchedLines);
 					const fileSubItems = matchedLines.map((matchedLine) => {
 
 						const matchedLineTruncatedContext =

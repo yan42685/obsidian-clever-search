@@ -7,7 +7,7 @@ import type {
 	Line,
 	LineFields,
 	MatchedFile,
-	MatchedLine,
+	MatchedLine
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
@@ -23,32 +23,32 @@ import { Query } from "./query";
 @singleton()
 export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
-	private minisearch: MiniSearch = new MiniSearch(
-		this.option.fileIndexOption,
-	);
+	private filesIndex = new MiniSearch(this.option.fileIndexOption);
+	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private _isReady = false;
 
 	@monitorDecorator
 	async reIndexAll(data: IndexedDocument[] | AsPlainObject) {
 		this._isReady = false;
-		await this.minisearch.removeAll();
+		this.filesIndex.removeAll();
+		// this.linesIndex.removeAll();
 
 		if (Array.isArray(data)) {
 			logger.trace("Indexing all documents...");
 			// Process data with type: IndexedDocument[], need lots of time to create reversed indexes
-			await this.minisearch.addAllAsync(data, {
+			await this.filesIndex.addAllAsync(data, {
 				chunkSize: this.option.documentChunkSize,
 			});
 		} else {
 			logger.trace("Loading indexed data...");
 			// Process data with type: AsPlainObject, faster
-			this.minisearch = MiniSearch.loadJS(
+			this.filesIndex = MiniSearch.loadJS(
 				data,
 				this.option.fileIndexOption,
 			);
 		}
 		this._isReady = true;
-		logger.trace(this.minisearch);
+		logger.trace(this.filesIndex);
 	}
 
 	get isReady() {
@@ -70,7 +70,7 @@ export class LexicalEngine {
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
-		const minisearchResult = this.minisearch.search(
+		const minisearchResult = this.filesIndex.search(
 			query.text,
 			this.option.getFileSearchOption(combinationMode),
 		);
@@ -86,27 +86,33 @@ export class LexicalEngine {
 		lines: Line[],
 		queryText: string,
 	): Promise<MatchedLine[]> {
-		const tmpIndex = new MiniSearch(this.option.lineIndexOption);
-		await tmpIndex.addAllAsync(lines, {
-			chunkSize: this.option.lineChunkSize,
-		});
-		const minisearchResult = tmpIndex.search(
+		this.linesIndex.removeAll();
+		// logger.info(lines);
+
+		// NOTE: can't use `addAllAsync` here, there might be some bugs in minisearch
+		this.linesIndex.addAll(lines);
+		// await this.linesIndex.addAllAsync(lines, {
+		// 	chunkSize: this.option.lineChunkSize,
+		// });
+
+		const minisearchResult = this.linesIndex.search(
 			queryText,
 			this.option.getLineSearchOption(),
 		);
-		
-		return minisearchResult.map((item)=> {
+
+		return minisearchResult.map((item) => {
+			const lineText = lines[item.id].text
 			return {
-				"text": item.text,
-				"row": item.id,
-				positions: this.findAllTermPositions(item.text, item.terms)
-			} as MatchedLine
-		})
+				text: lineText,
+				row: item.id,
+				positions: this.findAllTermPositions(lineText, item.terms),
+			} as MatchedLine;
+		});
 	}
 
 	// TODO: refactor with KMP algorithm if necessary
 	findAllTermPositions(line: string, terms: string[]): Set<number> {
-		const positions = new Set<number>;
+		const positions = new Set<number>();
 
 		terms.forEach((term) => {
 			let index = line.indexOf(term);
@@ -120,6 +126,7 @@ export class LexicalEngine {
 		});
 
 		return positions;
+		// return new Set([1]);  // test if this function consumes too much time
 	}
 }
 
@@ -136,7 +143,7 @@ class LexicalOptions {
 	readonly lineIndexOption: Options = {
 		idField: "row",
 		fields: ["text"] as LineFields,
-		storeFields: ["text"] as LineFields,
+		// storeFields: ["text"] as LineFields,
 	};
 
 	getFileSearchOption(combinationMode: "and" | "or"): SearchOptions {
@@ -160,6 +167,8 @@ class LexicalOptions {
 
 	getLineSearchOption(): SearchOptions {
 		return {
+			prefix: (term) =>
+				term.length >= this.setting.minTermLengthForPrefixSearch,
 			fuzzy: (term) =>
 				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
 			combineWith: "or",
