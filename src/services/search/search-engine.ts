@@ -54,15 +54,6 @@ export class LexicalEngine {
 		this._isReady = true;
 	}
 
-	// all tokens are matched and can be scattered
-	async searchAnd(query: string) {
-		return this.search(query, "and");
-	}
-
-	async searchOr(query: string) {
-		return this.search(query, "or");
-	}
-
 	/**
 	 * Performs a search using the provided query and combination mode.
 	 *
@@ -71,7 +62,7 @@ export class LexicalEngine {
 	 * - "or": Requires all tokens to appear across the fields.
 	 */
 	@monitorDecorator
-	private async search(
+	async searchFiles(
 		queryText: string,
 		combinationMode: "and" | "or",
 	): Promise<MatchedFile[]> {

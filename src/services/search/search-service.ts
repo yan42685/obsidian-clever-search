@@ -22,12 +22,13 @@ export class SearchService {
 	lexicalEngine: LexicalEngine = getInstance(LexicalEngine);
 	highlighter: Highlighter = getInstance(Highlighter);
 	dataProvider: DataProvider = getInstance(DataProvider);
+
 	async searchInVault(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("no result", []);
 		if (queryText.length === 0) {
 			return result;
 		}
-		const lexicalMatches = await this.lexicalEngine.searchAnd(queryText);
+		const lexicalMatches = await this.lexicalEngine.searchFiles(queryText, "and");
 		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
 			return {
