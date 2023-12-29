@@ -5,6 +5,7 @@ import { singleton } from "tsyringe";
 import {
 	EngineType,
 	FileItem,
+	FileSubItem,
 	Line,
 	SearchResult,
 	type MatchedFile,
@@ -71,7 +72,6 @@ export class SearchService {
 		} as SearchResult;
 	}
 
-
 	// TODO: highlight by page, rather than reading all files
 	async parseFileItems(
 		matchedFiles: MatchedFile[],
@@ -81,21 +81,26 @@ export class SearchService {
 		const result = await Promise.all(
 			matchedFiles.slice(0, 50).map(async (f) => {
 				const path = f.path;
-				if (
-					FileUtil.getFileType(path) === FileType.PLAIN_TEXT
-				) {
-					const content =
-						await this.dataProvider.readPlainText(path);
+				if (FileUtil.getFileType(path) === FileType.PLAIN_TEXT) {
+					const content = await this.dataProvider.readPlainText(path);
 					const lines = content.split("\n"); // 正则表达式匹配 \n 或 \r\n
 					const firstTenLines = lines.slice(0, 10).join("\n");
 					// It is necessary to use a constructor with 'new', rather than using an object literal.
 					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
 					// (to correctly display data in Svelte components).
-					return new FileItem(engineType, f.path, [firstTenLines]);
+					return new FileItem(
+						engineType,
+						f.path,
+						[new FileSubItem(firstTenLines, 0, 0)],
+						null,
+					);
 				} else {
-					return new FileItem(engineType, f.path, [
-						"not supported file type",
-					]);
+					return new FileItem(
+						engineType,
+						f.path,
+						[],
+						"not supported filetype",
+					);
 				}
 			}),
 		);

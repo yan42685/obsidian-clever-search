@@ -90,7 +90,9 @@ export class LineItem extends Item {
 export class FileItem extends Item {
 	engineType: EngineType;
 	path: string;
-	subItems: string[];
+	subItems: FileSubItem[]; // for plaintext filetype
+	// TODO: impl this
+	previewContent: any;  // for non-plaintext filetype
 	get fileType(): FileType {
 		return FileUtil.getFileType(this.path);
 	}
@@ -104,10 +106,23 @@ export class FileItem extends Item {
 		return FileUtil.getFolderPath(this.path);
 	}
 
-	constructor(engineType: EngineType, path: string, subItems: string[]) {
+	constructor(engineType: EngineType, path: string, subItems: FileSubItem[], previewContent: any) {
 		super();
 		this.engineType = engineType;
 		this.path = path;
 		this.subItems = subItems;
+		this.previewContent = previewContent;
+	}
+}
+
+export class FileSubItem extends Item {
+	text: string;
+	originRow: number;  // for precisely jumping to the original file location
+	originCol: number;
+	constructor(text: string, originRow: number, originCol: number) {
+		super();
+		this.text = text;
+		this.originRow = originRow;
+		this.originCol = originCol;
 	}
 }

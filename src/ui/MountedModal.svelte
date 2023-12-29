@@ -3,6 +3,7 @@
 	import { EventEnum } from "src/globals/event-enum";
 	import {
 		FileItem,
+		FileSubItem,
 		LineItem,
 		SearchResult,
 		SearchType,
@@ -27,7 +28,8 @@
 	let currContext = ""; // for previewing in-file search
 
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
-	let currSubItems: string[] = [];
+	let currFileSubItems: FileSubItem[] = [];  // for plaintext filetype
+	let currFilePreviewContent: any = undefined;  // for non-plaintext filetype
 	let currSubItemIndex = -1;
 	let inputEl: HTMLElement;
 
@@ -43,14 +45,14 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
-				currSubItems = currFileItem.subItems;
+				currFileSubItems = currFileItem.subItems;
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
 		} else {
 			currContext = "";
 			currFileItem = null;
-			currSubItems = [];
+			currFileSubItems = [];
 			currItemIndex = -1;
 		}
 	}
@@ -196,9 +198,9 @@
 			{:else if searchType === SearchType.IN_VAULT}
 				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
 					<ul>
-						{#each currSubItems as subItem, index}
+						{#each currFileSubItems as subItem, index}
 							<p>
-								{@html subItem}
+								{@html subItem.text}
 							</p>
 						{/each}
 					</ul>
