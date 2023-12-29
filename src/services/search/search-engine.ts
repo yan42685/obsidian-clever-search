@@ -111,18 +111,27 @@ export class LexicalEngine {
 	}
 
 	/**
-	 * find all chars positions for terms in a given line
+	 * find all chars positions of terms in a given line
 	 */
 	findAllTermPositions(line: string, terms: string[]): Set<number> {
 		const regex = new RegExp(terms.join("|"), "gi");
 		const positions = new Set<number>();
 
 		let match: RegExpExecArray | null;
+		let lastIndex = -1;
 
 		while ((match = regex.exec(line)) !== null) {
+			// skip and move to the next character if a match is an empty string or at the same position
+			if (match.index === lastIndex || match[0].length === 0) {
+				regex.lastIndex++;
+				continue;
+			}
+
 			for (let i = 0; i < match[0].length; i++) {
 				positions.add(match.index + i);
 			}
+
+			lastIndex = match.index;
 		}
 
 		return positions;

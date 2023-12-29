@@ -119,7 +119,6 @@ export class SearchService {
 					const lines = content
 						.split("\n")
 						.map((text, index) => new Line(text, index)); // 正则表达式匹配 \n 或 \r\n
-					const firstTenLines = lines.slice(0, 10).join("\n");
 
 					const matchedLines = await this.lexicalEngine.searchLines(
 						lines,
@@ -133,11 +132,12 @@ export class SearchService {
 								lines,
 								matchedLine.row,
 								MathUtil.minInSet(matchedLine.positions),
-								"subItem",
+								"paragraph",
 							);
+						// logger.info(matchedLine.positions);
 						return {
-							// text: matchedLineTruncatedContext.lines.map(line=>line.text).join("\n"),
-							text: matchedLine.text,
+							text: matchedLineTruncatedContext.lines.map(line=>line.text).join("\n"),
+							// text: matchedLine.text,
 							originRow: matchedLine.row,
 							originCol: MathUtil.minInSet(matchedLine.positions),
 						} as FileSubItem;
