@@ -125,7 +125,7 @@ export class SearchService {
 						queryText,
 					);
 					// logger.info(matchedLines.map((line)=>line.text));
-					// logger.info(matchedLines);
+					logger.debug(`matched lines count: ${matchedLines.length}`);
 					const fileSubItems = matchedLines.map((matchedLine) => {
 
 						const matchedLineTruncatedContext =
@@ -133,6 +133,7 @@ export class SearchService {
 								lines,
 								matchedLine.row,
 								MathUtil.minInSet(matchedLine.positions),
+								// "line",
 								"subItem",
 							);
 						logger.debug(`matchedcontext lines length: ${matchedLineTruncatedContext.lines.length}`);
