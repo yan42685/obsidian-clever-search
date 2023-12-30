@@ -1,6 +1,5 @@
 import * as fsLib from "fs";
 import type { TFile } from "obsidian";
-import os from "os";
 import * as pathLib from "path";
 import { singleton } from "tsyringe";
 import { logger } from "./logger";
@@ -20,7 +19,8 @@ export enum FileType {
 export class FileUtil {
 	// static SPLIT_EOL = /\r?\n|\r/;   // cross-platform end of line, used for strings.split()
 	static readonly SPLIT_EOL = "\n"; // stay consistent with the logic that Obsidian uses to handle lines
-	static readonly JOIN_EOL = os.EOL; // cross-platform end of line, used for string.join()
+	// static readonly JOIN_EOL = os.EOL; // cross-platform end of line, used for string.join()
+	static readonly JOIN_EOL = "\n"; 
 	private static readonly fileTypeMap: Map<string, FileType> = new Map();
 	static {
 		if (isDevEnvironment) {
