@@ -6,6 +6,7 @@ import {
 	type HighlightedLine,
 	type MatchedLine,
 } from "src/globals/search-types";
+import { logger } from "src/utils/logger";
 import { MathUtil } from "src/utils/math-util";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -41,10 +42,10 @@ export class LineHighlighter {
 		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 		const lineItems: LineItem[] = [];
 
-		const entries = await this.fzfMatch(queryTextNoSpaces, lines);
-		for (const entry of entries) {
-			const row = entry.row;
-			const firstMatchedCol = MathUtil.minInSet(entry.positions);
+		const matchedLines = await this.fzfMatch(queryTextNoSpaces, lines);
+		for (const matchedLine of matchedLines) {
+			const row = matchedLine.row;
+			const firstMatchedCol = MathUtil.minInSet(matchedLine.positions);
 			const originLine = lines[row].text;
 
 			// only show part of the line that contains the highlighted chars
@@ -52,14 +53,17 @@ export class LineHighlighter {
 			const end = Math.min(start + 200, originLine.length);
 			const substring = originLine.substring(start, end);
 
-			const adjustedPositions = this.adjustPositionsByOffset(entry.positions, -start);
+			const adjustedPositions = this.adjustPositionsByOffset(
+				matchedLine.positions,
+				-start,
+			);
 
 			const highlightedText = this.highlightLineByCharPositions(
 				substring,
 				adjustedPositions,
 			);
 
-			const paragraphContext = await this.getHighlightedContext(
+			const paragraphContext = await this.getLineHighlightedContext(
 				lines,
 				row,
 				firstMatchedCol,
@@ -88,76 +92,47 @@ export class LineHighlighter {
 	 * @param queryText - The query text used for matching.
 	 * @returns A string representing the highlighted context HTML.
 	 */
-	private async getHighlightedContext(
+	private async getLineHighlightedContext(
 		lines: Line[],
 		matchedRow: number,
 		firstMatchedCol: number,
 		queryText: string,
 	): Promise<string> {
 		const currLang = getCurrLanguage();
-		// TODO: modify this by currLanguage
-		const MAX_PRE_CAHRS_COUNT = 220;
-		let preCharsCount = firstMatchedCol;
-		let postCharsCount = 0;
-		let start = matchedRow;
-		let end = matchedRow;
-
-		// extend the context upwards until the start of the document or 7 lines
-		// or reaching the required number of characters
-		while (
-			start > 0 &&
-			matchedRow - start <= 7 &&
-			preCharsCount < MAX_PRE_CAHRS_COUNT
-		) {
-			start--;
-			preCharsCount += lines[start].text.length;
-		}
-
-		if (preCharsCount > MAX_PRE_CAHRS_COUNT) {
-			if (start < matchedRow) {
-				start++; // remove the last added line if it's not the matched line
-			} else if (start === matchedRow) {
-				// truncate the line from firstMatchedCol backward
-				const line = lines[start];
-				const startIdx = Math.max(
-					firstMatchedCol - MAX_PRE_CAHRS_COUNT,
-					0,
-				);
-				const truncatedLine =
-					line.text.substring(startIdx, firstMatchedCol) +
-					line.text.substring(firstMatchedCol);
-				lines[start] = new Line(truncatedLine, line.row);
-
-				// update preCharsCount and postCharsCount
-				// preCharsCount = firstMatchedCol - startIdx;
-				postCharsCount = line.text.length - firstMatchedCol;
-			}
-		}
-		while (
-			end < lines.length - 1 &&
-			postCharsCount < 3 * MAX_PRE_CAHRS_COUNT
-		) {
-			end++;
-			postCharsCount += lines[end].text.length;
-		}
-		const contextLines = lines.slice(start, end + 1);
+		const context = this.getTruncatedContext(
+			lines,
+			matchedRow,
+			firstMatchedCol,
+			"paragraph",
+		);
+		const contextLines = context.lines;
 
 		const highlightedContext = await Promise.all(
 			contextLines.map(async (line, index) => {
-				const isTargetLine = matchedRow === start + index;
-
-				if (isTargetLine) {
+				if (line.row === matchedRow) {
 					// apply fzfMatch to the targetLine
-					const entries = await this.fzfMatch(queryText, [line]);
-					if (entries.length > 0) {
-						// There will be at most one entry
-						const entry = entries[0];
+					const matchedLines = await this.fzfMatch(queryText, [line]);
+					try {
+						// There should be only one matchedLine
+						const matchedLine = matchedLines[0];
+						let positions = matchedLine.positions;
+						if (index === 0) {
+							// the first line has been truncated
+							positions = this.adjustPositionsByOffset(
+								positions,
+								context.firstLineStartCol,
+							);
+						}
 						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
-							entry.positions
+							positions,
 						)}</span>`;
+					} catch (e) {
+						logger.warn(
+							"There might be inconsistency with previous search step, which lead to a missed match to target line",
+						);
+						logger.error(e);
 					}
-					return `<span class="target-line">${line.text}</div>`;
 				} else {
 					// Perform strict matching on other lines
 					const regex = new RegExp(queryText, "gi");
