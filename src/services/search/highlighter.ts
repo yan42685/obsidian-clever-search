@@ -232,6 +232,7 @@ export class LineHighlighter {
 				matchedRow - 1,
 				limit.maxPreChars - firstMatchedCol,
 				limit.maxPreLines,
+				limit.boundaryLineMinChars
 			);
 			resultLines = contextAbove.lines;
 			firstLineStartCol = contextAbove.firstLineStartCol;
@@ -274,6 +275,7 @@ export class LineHighlighter {
 				matchedRow + 1,
 				limit.maxPostChars - postCharsCount,
 				limit.maxPostLines,
+				limit.boundaryLineMinChars
 			),
 		);
 
@@ -291,6 +293,7 @@ export class LineHighlighter {
 		startRow: number,
 		maxPreChars: number,
 		maxLines: number,
+		boundaryLineMinChars: number
 	): TruncatedContext {
 		let firstLineStartCol = 0;
 		let currRow = startRow;
@@ -319,6 +322,9 @@ export class LineHighlighter {
 				break;
 			}
 		}
+		if (resultLines.length > 0 && resultLines[0].text.length < boundaryLineMinChars) {
+			resultLines.shift();
+		}
 		return {
 			lines: resultLines,
 			firstLineStartCol: firstLineStartCol,
@@ -330,6 +336,7 @@ export class LineHighlighter {
 		startRow: number,
 		maxPostChars: number,
 		maxLines: number,
+		boundaryLineMinChars: number
 	): Line[] {
 		// logger.trace(`extendContextBelow`);
 		// logger.trace(`startRow: ${startRow}`);
@@ -361,6 +368,9 @@ export class LineHighlighter {
 			}
 		}
 		// logger.debug(`extend below counts: ${resultLines.length}`);
+		if (resultLines.length > 0 && resultLines[0].text.length < boundaryLineMinChars) {
+			resultLines.pop();
+		}
 		return resultLines;
 	}
 }
@@ -372,7 +382,12 @@ export type TruncateOption = {
 	maxPreLines: number;
 	maxPostLines: number;
 	maxPreChars: number;
-	maxPostChars: number;
+	maxPostChars: number;  // include the EOL
+	/**
+	 * if (currLine !== matchedLine && isFirstOrLastLine(currLine) && currLine.text.length < boundaryLineMinChars)
+	 * currLine won't be added to the context
+	 */
+	boundaryLineMinChars: number;  
 };
 
 export type AllTruncateOption = {
@@ -387,18 +402,21 @@ export class TruncateLimit {
 			maxPostLines: 0,
 			maxPreChars: 30,
 			maxPostChars: 230,
+			boundaryLineMinChars: 4,
 		},
 		paragraph: {
 			maxPreLines: 4,
 			maxPostLines: 7,
 			maxPreChars: 220,
 			maxPostChars: 600,
+			boundaryLineMinChars: 4
 		},
 		subItem: {
 			maxPreLines: 1,
 			maxPostLines: 1,
-			maxPreChars: 50,
-			maxPostChars: 120,
+			maxPreChars: 30,
+			maxPostChars: 40,
+			boundaryLineMinChars: 4
 		},
 	};
 
@@ -420,6 +438,7 @@ export class TruncateLimit {
 	 * Retrieve the truncate options for a given type in the current language.
 	 */
 	static forType(type: TruncateType): TruncateOption {
-		return this.limitsByLanguage[getCurrLanguage()][type];
+		// return this.limitsByLanguage[getCurrLanguage()][type];
+		return this.limitsByLanguage[LanguageEnum.en][type];
 	}
 }
