@@ -195,7 +195,7 @@
 				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
 					<ul>
 						{#each currFileSubItems as subItem, index}
-							<p>
+							<p class="file-sub-item">
 								{@html subItem.text}
 							</p>
 						{/each}
@@ -335,6 +335,22 @@
 	.right-pane .preview-container ul {
 		margin: 0;
 		padding: 0;
+	}
+	.right-pane .preview-container ul .file-sub-item {
+		display: flex;
+		align-items: center;
+		justify-content: left;
+		padding: 0.65em;
+		margin-bottom: 0.5em;
+		/* width: 100%; */
+		/* width: 23vw; */
+		height: fit-content;
+		/* max-height: 5.5em; */
+		text-align: left;
+		background-color: var(--cs-pane-bgc, #20202066);
+		border: 1px solid grey; /* 更宽的边框并指定颜色为白色 */
+		border-radius: 4px;
+		transition: background-color 0.01s;
 	}
 
 	.right-pane .preview-container :global(span.target-line) {
