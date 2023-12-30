@@ -19,7 +19,7 @@ export enum FileType {
 @singleton()
 export class FileUtil {
 	// static SPLIT_EOL = /\r?\n|\r/;   // cross-platform end of line, used for strings.split()
-	static readonly SPLIT_EOL = "\r"; // stay consistent with the logic that Obsidian uses to handle lines
+	static readonly SPLIT_EOL = "\n"; // stay consistent with the logic that Obsidian uses to handle lines
 	static readonly JOIN_EOL = os.EOL; // cross-platform end of line, used for string.join()
 	private static readonly fileTypeMap: Map<string, FileType> = new Map();
 	static {

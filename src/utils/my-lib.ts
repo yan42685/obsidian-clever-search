@@ -72,7 +72,7 @@ export function monitorDecorator(
 		const start = Date.now();
 		const result = await originalMethod.apply(this, args);
 		const end = Date.now();
-		logger.debug(
+		logger.trace(
 			`<${
 				target.constructor.name
 			}-${propertyKey}> Execution time: ${formatMillis(end - start)}`,

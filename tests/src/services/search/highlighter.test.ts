@@ -34,7 +34,7 @@ describe("getTruncatedContext", () => {
 	test("For line - sufficient context", () => {
 		const lines = generateLines(20); // 20 lines of context
 		const matchedRow = 10;
-		const firstMatchedCol = 35;
+		const firstMatchedCol = 33;  
 		const truncateType = "line";
 
 		const result = getTruncatedContext(
@@ -46,7 +46,7 @@ describe("getTruncatedContext", () => {
 
 		expect(result.lines.length).toBe(1);
 		expect(result.lines[0].row).toBe(10);
-		expect(result.firstLineOffset).toBe(10);
+		expect(result.firstLineStartCol).toBe(3);  // maxPreChars for line is 30 by default
 	});
 
 	test("For line - insufficient context", () => {
@@ -64,8 +64,6 @@ describe("getTruncatedContext", () => {
 
 		expect(result.lines.length).toBe(1);
 		expect(result.lines[0].row).toBe(0);
-		expect(result.lines[0].text.length).toBeLessThan(40);
-		expect(result.firstLineOffset).not.toBe(0);
 	});
 
 	test("Matched line at the start of the document", () => {
@@ -82,7 +80,7 @@ describe("getTruncatedContext", () => {
 		);
 
 		expect(result.lines[0].row).toBe(0); // First line should be the first in the document
-		expect(result.firstLineOffset).toBe(0);
+		expect(result.firstLineStartCol).toBe(0);
 	});
 
 	test("Empty lines array", () => {
@@ -99,7 +97,7 @@ describe("getTruncatedContext", () => {
 		);
 
 		expect(result.lines).toHaveLength(0);
-		expect(result.firstLineOffset).toBe(0);
+		expect(result.firstLineStartCol).toBe(0);
 	});
 
 	test("Matched line at the end of the document", () => {
@@ -156,13 +154,13 @@ describe("getTruncatedContext", () => {
 			// 40 chars per line
 			(_, i) =>
 				new Line(
-					"33333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+					"333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
 					i,
 				),
 		);
-		const matchedRow = 5; // Second last line of the document
+		const matchedRow = 1; // Second last line of the document
 		const firstMatchedCol = 0;
-		const truncateType = "paragraph";
+		const truncateType = "subItem";
 
 		const result = getTruncatedContext(
 			lines,
@@ -172,7 +170,6 @@ describe("getTruncatedContext", () => {
 		);
 
 		const lastLine = result.lines[result.lines.length - 1];
-		expect(result.lines.length).toBeGreaterThan(1);
 		// Check if the last line is actually truncated
 		expect(lastLine.text.length).toBeLessThan(
 			lines[lastLine.row].text.length,

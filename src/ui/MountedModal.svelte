@@ -145,13 +145,11 @@
 <div class="search-container">
 	<div class="left-pane">
 		<div class="search-bar" data-match-count={matchCountText}>
-			<!-- svelte-ignore a11y-autofocus -->
 			<input
 				bind:value={queryText}
 				bind:this={inputEl}
 				on:input={handleInput}
 				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
-				autofocus
 			/>
 		</div>
 		<div class="result-items">

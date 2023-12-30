@@ -90,7 +90,7 @@ export class DataProvider {
 	}
 
 	async readPlainTextLines(fileOrPath: TFile | string): Promise<string[]> {
-		return (await this.readPlainText(fileOrPath)).split("\n");
+		return (await this.readPlainText(fileOrPath)).split(FileUtil.JOIN_EOL);
 	}
 
 	private shouldIndex(file: TFile): boolean {

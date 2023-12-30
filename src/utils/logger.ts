@@ -42,7 +42,7 @@ class Logger {
 			if (this.verboseTrace) {
 				console.groupCollapsed(
 					`%c[debug] ${this.getCallerName()}\n`,
-					"color: #597e52;font-weight: 400;",
+					"color: #379237;font-weight: 400;",
 					...args,
 				);
 				console.trace();
@@ -50,7 +50,8 @@ class Logger {
 			} else {
 				console.debug(
 					`%c[debug] ${this.getCallerName()}\n`,
-					"color: #597e52;",
+					// "color: #96C291;",
+					"color: #379237",
 					...args,
 				);
 			}

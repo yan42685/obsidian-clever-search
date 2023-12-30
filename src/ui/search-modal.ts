@@ -2,6 +2,7 @@ import { App, Modal } from "obsidian";
 import { EventEnum } from "src/globals/event-enum";
 import type { SearchType } from "src/globals/search-types";
 import { eventBus } from "src/utils/event-bus";
+import { logger } from "src/utils/logger";
 import { currModifier } from "src/utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 
@@ -40,7 +41,7 @@ export class SearchModal extends Modal {
 	onClose() {
 		this.modalEl.removeEventListener("contextmenu", handleRightClick);
 		this.mountedElement.$destroy();
-		console.log("mounted element has been destroyed.");
+		logger.trace("mounted element has been destroyed.");
 	}
 
 	private registerHotkeys() {
