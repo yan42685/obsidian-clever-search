@@ -71,6 +71,7 @@ export class SearchService {
 		}
 	}
 
+	@monitorDecorator
 	async searchInFile(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("", []);
 		const fileRetriever = getInstance(FileUtil);

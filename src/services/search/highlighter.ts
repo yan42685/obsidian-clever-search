@@ -52,13 +52,11 @@ export class LineHighlighter {
 			const end = Math.min(start + 200, originLine.length);
 			const substring = originLine.substring(start, end);
 
-			const newPositions = Array.from(entry.positions)
-				.filter((position) => position >= start && position < end)
-				.map((position) => position - start);
+			const adjustedPositions = this.adjustPositionsByOffset(entry.positions, -start);
 
 			const highlightedText = this.highlightLineByCharPositions(
 				substring,
-				newPositions,
+				adjustedPositions,
 			);
 
 			const paragraphContext = await this.getHighlightedContext(
@@ -156,7 +154,7 @@ export class LineHighlighter {
 						const entry = entries[0];
 						return `<span class="target-line">${this.highlightLineByCharPositions(
 							line.text,
-							Array.from(entry.positions),
+							entry.positions
 						)}</span>`;
 					}
 					return `<span class="target-line">${line.text}</div>`;
@@ -178,7 +176,7 @@ export class LineHighlighter {
 	// TODO: highlight set positions
 	private highlightLineByCharPositions(
 		str: string,
-		positions: number[],
+		positions: Set<number>,
 	): string {
 		return str
 			.split("")
@@ -187,7 +185,7 @@ export class LineHighlighter {
 				// if (char === " ") {
 				// 	return "&nbsp;";
 				// }
-				return positions.includes(i) ? `<mark>${char}</mark>` : char;
+				return positions.has(i) ? `<mark>${char}</mark>` : char;
 			})
 			.join("");
 	}
@@ -206,6 +204,21 @@ export class LineHighlighter {
 				positions: entry.positions,
 			} as MatchedLine;
 		});
+	}
+
+	private adjustPositionsByOffset(
+		positions: Set<number>,
+		offset: number,
+	): Set<number> {
+		const adjustedPositions = new Set<number>();
+
+		positions.forEach((position) => {
+			if (position >= offset) {
+				adjustedPositions.add(position + offset);
+			}
+		});
+
+		return adjustedPositions;
 	}
 
 	// private getTruncatedContext(
@@ -232,7 +245,7 @@ export class LineHighlighter {
 				matchedRow - 1,
 				limit.maxPreChars - firstMatchedCol,
 				limit.maxPreLines,
-				limit.boundaryLineMinChars
+				limit.boundaryLineMinChars,
 			);
 			resultLines = contextAbove.lines;
 			firstLineStartCol = contextAbove.firstLineStartCol;
@@ -275,7 +288,7 @@ export class LineHighlighter {
 				matchedRow + 1,
 				limit.maxPostChars - postCharsCount,
 				limit.maxPostLines,
-				limit.boundaryLineMinChars
+				limit.boundaryLineMinChars,
 			),
 		);
 
@@ -293,7 +306,7 @@ export class LineHighlighter {
 		startRow: number,
 		maxPreChars: number,
 		maxLines: number,
-		boundaryLineMinChars: number
+		boundaryLineMinChars: number,
 	): TruncatedContext {
 		let firstLineStartCol = 0;
 		let currRow = startRow;
@@ -322,7 +335,10 @@ export class LineHighlighter {
 				break;
 			}
 		}
-		if (resultLines.length > 0 && resultLines[0].text.length < boundaryLineMinChars) {
+		if (
+			resultLines.length > 0 &&
+			resultLines[0].text.length < boundaryLineMinChars
+		) {
 			resultLines.shift();
 		}
 		return {
@@ -336,7 +352,7 @@ export class LineHighlighter {
 		startRow: number,
 		maxPostChars: number,
 		maxLines: number,
-		boundaryLineMinChars: number
+		boundaryLineMinChars: number,
 	): Line[] {
 		// logger.trace(`extendContextBelow`);
 		// logger.trace(`startRow: ${startRow}`);
@@ -368,7 +384,10 @@ export class LineHighlighter {
 			}
 		}
 		// logger.debug(`extend below counts: ${resultLines.length}`);
-		if (resultLines.length > 0 && resultLines[0].text.length < boundaryLineMinChars) {
+		if (
+			resultLines.length > 0 &&
+			resultLines[0].text.length < boundaryLineMinChars
+		) {
 			resultLines.pop();
 		}
 		return resultLines;
@@ -382,12 +401,12 @@ export type TruncateOption = {
 	maxPreLines: number;
 	maxPostLines: number;
 	maxPreChars: number;
-	maxPostChars: number;  // include the EOL
+	maxPostChars: number; // include the EOL
 	/**
 	 * if (currLine !== matchedLine && isFirstOrLastLine(currLine) && currLine.text.length < boundaryLineMinChars)
 	 * currLine won't be added to the context
 	 */
-	boundaryLineMinChars: number;  
+	boundaryLineMinChars: number;
 };
 
 export type AllTruncateOption = {
@@ -409,14 +428,14 @@ export class TruncateLimit {
 			maxPostLines: 7,
 			maxPreChars: 220,
 			maxPostChars: 600,
-			boundaryLineMinChars: 4
+			boundaryLineMinChars: 4,
 		},
 		subItem: {
 			maxPreLines: 1,
 			maxPostLines: 1,
 			maxPreChars: 30,
 			maxPostChars: 40,
-			boundaryLineMinChars: 4
+			boundaryLineMinChars: 4,
 		},
 	};
 
