@@ -208,6 +208,7 @@ export class LineHighlighter {
 		});
 	}
 
+
 	// private getTruncatedContext(
 	// TODO: handle edge cases such as empty line
 	getTruncatedContext(

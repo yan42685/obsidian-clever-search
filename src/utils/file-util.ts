@@ -3,6 +3,7 @@ import type { TFile } from "obsidian";
 import * as pathLib from "path";
 import { singleton } from "tsyringe";
 import { logger } from "./logger";
+import { isDevEnvironment } from "./my-lib";
 
 // for autocompletion
 export const fsUtils = fsLib;
@@ -16,7 +17,9 @@ export enum FileType {
 export class FileUtil {
 	private static readonly fileTypeMap: Map<string, FileType> = new Map();
 	static {
-		FileUtil.fileTypeMap.set("", FileType.PLAIN_TEXT);
+		if (isDevEnvironment) { // no extension files are only used for development
+			FileUtil.fileTypeMap.set("", FileType.PLAIN_TEXT);
+		}
 		FileUtil.fileTypeMap.set("md", FileType.PLAIN_TEXT);
 		FileUtil.fileTypeMap.set("markdown", FileType.PLAIN_TEXT);
 		FileUtil.fileTypeMap.set("txt", FileType.PLAIN_TEXT);
@@ -76,8 +79,8 @@ export class FileUtil {
 		const uncommonPathsResult = Object.fromEntries(
 			uncommonExtensionPathMap,
 		);
-		logger.debug(countResult);
-		logger.debug(uncommonPathsResult);
+		logger.trace(countResult);
+		logger.trace(uncommonPathsResult);
 		return countResult;
 	}
 }
