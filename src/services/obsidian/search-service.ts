@@ -108,7 +108,7 @@ export class SearchService {
 		engineType: EngineType,
 	): Promise<FileItem[]> {
 		// TODO: limit to one and search on demand
-		const limit = 10;
+		const limit = 1;
 		logger.warn(`current only highlight top ${limit} files`);
 		// TODO: do real highlight
 		const result = await Promise.all(
@@ -117,13 +117,14 @@ export class SearchService {
 				if (FileUtil.getFileType(path) === FileType.PLAIN_TEXT) {
 					const content = await this.dataProvider.readPlainText(path);
 					const lines = content
-						.split("\n")
+						.split(FileUtil.SPLIT_EOL)
 						.map((text, index) => new Line(text, index)); // 正则表达式匹配 \n 或 \r\n
-
+					logger.debug(`target file lines count: ${lines.length}`);
 					const matchedLines = await this.lexicalEngine.searchLines(
 						lines,
 						queryText,
 					);
+					// logger.info(matchedLines.map((line)=>line.text));
 					// logger.info(matchedLines);
 					const fileSubItems = matchedLines.map((matchedLine) => {
 
@@ -132,11 +133,11 @@ export class SearchService {
 								lines,
 								matchedLine.row,
 								MathUtil.minInSet(matchedLine.positions),
-								"paragraph",
+								"subItem",
 							);
-						// logger.info(matchedLine.positions);
+						logger.debug(`matchedcontext lines length: ${matchedLineTruncatedContext.lines.length}`);
 						return {
-							text: matchedLineTruncatedContext.lines.map(line=>line.text).join("\n"),
+							text: matchedLineTruncatedContext.lines.map(line=>line.text).join(FileUtil.JOIN_EOL),
 							// text: matchedLine.text,
 							originRow: matchedLine.row,
 							originCol: MathUtil.minInSet(matchedLine.positions),

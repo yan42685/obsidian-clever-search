@@ -1,5 +1,6 @@
 import { FileUtil } from "src/utils/file-util";
 
+
 describe("file-util test", () => {
 	describe("getBasename", () => {
 		it("should get the basename of a simple filepath", () => {
@@ -9,7 +10,9 @@ describe("file-util test", () => {
 
 		it("should handle filenames with multiple dots", () => {
 			const path = "/folder/my.file.name.with.dots.tar.gz";
-			expect(FileUtil.getBasename(path)).toBe("my.file.name.with.dots.tar");
+			expect(FileUtil.getBasename(path)).toBe(
+				"my.file.name.with.dots.tar",
+			);
 		});
 
 		it("should handle filenames without extension", () => {
