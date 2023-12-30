@@ -8,6 +8,7 @@ import {
 	FileItem,
 	FileSubItem,
 	Line,
+	LineItem,
 	SearchResult,
 	type MatchedFile,
 } from "../../globals/search-types";
@@ -128,7 +129,6 @@ export class SearchService {
 					// logger.info(matchedLines.map((line)=>line.text));
 					logger.debug(`matched lines count: ${matchedLines.length}`);
 					const fileSubItems = matchedLines.map((matchedLine) => {
-
 						const matchedLineTruncatedContext =
 							this.lineHighlighter.getTruncatedContext(
 								lines,
@@ -137,9 +137,13 @@ export class SearchService {
 								// "line",
 								"subItem",
 							);
-						logger.debug(`matchedcontext lines length: ${matchedLineTruncatedContext.lines.length}`);
+						logger.debug(
+							`matchedcontext lines length: ${matchedLineTruncatedContext.lines.length}`,
+						);
 						return {
-							text: matchedLineTruncatedContext.lines.map(line=>line.text).join(FileUtil.JOIN_EOL),
+							text: matchedLineTruncatedContext.lines
+								.map((line) => line.text)
+								.join(FileUtil.JOIN_EOL),
 							// text: matchedLine.text,
 							originRow: matchedLine.row,
 							originCol: MathUtil.minInSet(matchedLine.positions),
@@ -167,5 +171,48 @@ export class SearchService {
 			}),
 		);
 		return result;
+	}
+
+	@monitorDecorator
+	async parseLineItems(queryText: string): Promise<SearchResult> {
+		const result = new SearchResult("", []);
+		const activeFile = this.app.workspace.getActiveFile();
+		if (
+			!queryText ||
+			!activeFile ||
+			FileUtil.getFileType(activeFile.path) !== FileType.PLAIN_TEXT
+		) {
+			return result;
+		}
+
+		const lines = (
+			await this.dataProvider.readPlainTextLines(activeFile.path)
+		).map((line, index) => new Line(line, index));
+		const queryTextNoSpaces = queryText.replace(/\s/g, "");
+
+		const matchedLines = await this.lexicalEngine.fzfMatch(
+			queryTextNoSpaces,
+			lines,
+		);
+		const lineItems = matchedLines.map((matchedLine) => {
+			const highlightedLine = this.lineHighlighter.parse(
+				lines,
+				matchedLine,
+				[queryTextNoSpaces],
+				"line",
+			);
+			// logger.debug(highlightedLine);
+			const paragraphContext = this.lineHighlighter.parse(
+				lines,
+				matchedLine,
+				[queryTextNoSpaces],
+				"paragraph",
+			);
+			return new LineItem(highlightedLine, paragraphContext.text);
+		});
+		return {
+			currPath: activeFile.path,
+			items: lineItems,
+		} as SearchResult;
 	}
 }

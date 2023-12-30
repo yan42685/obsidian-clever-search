@@ -3,7 +3,7 @@ import { LanguageEnum, getCurrLanguage } from "src/globals/language-enum";
 import {
 	Line,
 	LineItem,
-	type HighlightedLine,
+	type HighlightedContext,
 	type MatchedLine,
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
@@ -33,7 +33,54 @@ export class Highlighter {
 
 @singleton()
 export class LineHighlighter {
-	private readonly fileRetriever = getInstance(FileUtil);
+	parseAll(
+		allLines: Line[],
+		matchedLines: MatchedLine[],
+		terms: string[],
+		truncateType: TruncateType,
+	): HighlightedContext[] {
+		return matchedLines.map((matchedLine) => {
+			const firstMatchedCol = MathUtil.minInSet(matchedLine.positions);
+			const matchedRow = matchedLine.row;
+			const context = this.getTruncatedContext(
+				allLines,
+				matchedRow,
+				firstMatchedCol,
+				truncateType,
+			);
+			let positions = matchedLine.positions;
+			if (matchedLine.row === context.lines[0].row) {
+				// the first row in the context is truncated, need to adjust positions
+				positions = this.adjustPositionsByStartCol(
+					positions,
+					context.firstLineStartCol,
+				);
+			}
+			const highlightedLineText = this.highlightLineByCharPositions(
+				matchedLine.text,
+				matchedLine.positions,
+			);
+			const highlightedText = context.lines
+				.map((line) =>
+					line.row === matchedRow ? highlightedLineText : line.text,
+				)
+				.join(FileUtil.JOIN_EOL);
+			return {
+				row: matchedLine.row,
+				col: firstMatchedCol,
+				text: highlightedText,
+			} as HighlightedContext;
+		});
+	}
+
+	parse(
+		allLines: Line[],
+		matchedLine: MatchedLine,
+		terms: string[],
+		truncateType: TruncateType,
+	): HighlightedContext {
+		return this.parseAll(allLines, [matchedLine], terms, truncateType)[0];
+	}
 
 	async parseLineItems(
 		lines: Line[],
@@ -53,9 +100,9 @@ export class LineHighlighter {
 			const end = Math.min(start + 200, originLine.length);
 			const substring = originLine.substring(start, end);
 
-			const adjustedPositions = this.adjustPositionsByOffset(
+			const adjustedPositions = this.adjustPositionsByStartCol(
 				matchedLine.positions,
-				-start,
+				start,
 			);
 
 			const highlightedText = this.highlightLineByCharPositions(
@@ -76,7 +123,7 @@ export class LineHighlighter {
 						text: highlightedText,
 						row: row,
 						col: firstMatchedCol,
-					} as HighlightedLine,
+					} as HighlightedContext,
 					paragraphContext,
 				),
 			);
@@ -118,7 +165,7 @@ export class LineHighlighter {
 						let positions = matchedLine.positions;
 						if (index === 0) {
 							// the first line has been truncated
-							positions = this.adjustPositionsByOffset(
+							positions = this.adjustPositionsByStartCol(
 								positions,
 								context.firstLineStartCol,
 							);
@@ -135,11 +182,7 @@ export class LineHighlighter {
 					}
 				} else {
 					// Perform strict matching on other lines
-					const regex = new RegExp(queryText, "gi");
-					return line.text.replace(
-						regex,
-						(match) => `<mark>${match}</mark>`,
-					);
+					return this.strictHighlightIgnoreCase(line.text, queryText);
 					// .replace(/ /g, "&nbsp;");
 				}
 			}),
@@ -148,7 +191,6 @@ export class LineHighlighter {
 		return highlightedContext.join(FileUtil.JOIN_EOL);
 	}
 
-	// TODO: highlight set positions
 	private highlightLineByCharPositions(
 		str: string,
 		positions: Set<number>,
@@ -163,6 +205,11 @@ export class LineHighlighter {
 				return positions.has(i) ? `<mark>${char}</mark>` : char;
 			})
 			.join("");
+	}
+
+	strictHighlightIgnoreCase(source: string, term: string): string {
+		const regex = new RegExp(term, "gi");
+		return source.replace(regex, (match) => `<mark>${match}</mark>`);
 	}
 
 	private async fzfMatch(
@@ -181,15 +228,15 @@ export class LineHighlighter {
 		});
 	}
 
-	private adjustPositionsByOffset(
+	private adjustPositionsByStartCol(
 		positions: Set<number>,
-		offset: number,
+		firstStartCol: number,
 	): Set<number> {
 		const adjustedPositions = new Set<number>();
 
 		positions.forEach((position) => {
-			if (position >= offset) {
-				adjustedPositions.add(position + offset);
+			if (position >= firstStartCol) {
+				adjustedPositions.add(position - firstStartCol);
 			}
 		});
 

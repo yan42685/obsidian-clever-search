@@ -40,7 +40,7 @@ export type LineFields = Array<keyof Line>;
 
 // text: highlighted text 
 // col: the first highlighted col text
-export type HighlightedLine = Line & { col: number }; 
+export type HighlightedContext = Line & { col: number }; 
 
 export type MatchedLine = Line & { positions: Set<number> }; // positions: columns of matched chars 
 
@@ -74,10 +74,10 @@ export abstract class Item {
 }
 
 export class LineItem extends Item {
-	line: HighlightedLine;
+	line: HighlightedContext;
 	context: string;
 
-	constructor(line: HighlightedLine, context: string) {
+	constructor(line: HighlightedContext, context: string) {
 		super();
 		this.line = line;
 		this.context = context;

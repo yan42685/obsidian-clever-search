@@ -1,3 +1,4 @@
+import { AsyncFzf, type FzfResultItem } from "fzf";
 import type { AsPlainObject, Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
 import type {
@@ -109,6 +110,23 @@ export class LexicalEngine {
 			} as MatchedLine;
 		});
 	}
+
+	async fzfMatch(
+		queryText: string,
+		lines: Line[],
+	): Promise<MatchedLine[]> {
+		const fzf = new AsyncFzf(lines, {
+			selector: (item) => item.text,
+		});
+		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
+			return {
+				text: entry.item.text,
+				row: entry.item.row,
+				positions: entry.positions,
+			} as MatchedLine;
+		});
+	}
+
 
 	/**
 	 * find all chars positions of terms in a given line

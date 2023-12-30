@@ -12,6 +12,7 @@
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
+	import { logger } from "src/utils/logger";
 	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
@@ -60,7 +61,9 @@
 	// Handle input changes
 	async function handleInput() {
 		if (searchType === SearchType.IN_FILE) {
-			searchResult = await searchService.searchInFile(queryText);
+			// searchResult = await searchService.searchInFile(queryText);
+			searchResult = await searchService.parseLineItems(queryText);
+			logger.info(searchResult)
 			searchResult.items.forEach((x) => {
 				const item = x as LineItem;
 				// console.log(item.line.text);
