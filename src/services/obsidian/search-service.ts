@@ -14,7 +14,7 @@ import {
 } from "../../globals/search-types";
 import { FileType, FileUtil } from "../../utils/file-util";
 import { Database } from "../database/database";
-import { Highlighter, LineHighlighter } from "../search/highlighter";
+import { LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/search-engine";
 import { DataProvider } from "./data-provider";
 
@@ -25,7 +25,6 @@ export class SearchService {
 	database: Database = getInstance(Database);
 	dataProvider: DataProvider = getInstance(DataProvider);
 	lexicalEngine: LexicalEngine = getInstance(LexicalEngine);
-	highlighter: Highlighter = getInstance(Highlighter);
 	lineHighlighter = getInstance(LineHighlighter);
 
 	@monitorDecorator
@@ -73,6 +72,9 @@ export class SearchService {
 	}
 
 	@monitorDecorator
+	/**
+	 * @deprecated since 0.1.x, use SearchService.searchInVault instead
+	 */
 	async searchInFile(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("", []);
 		const fileRetriever = getInstance(FileUtil);
@@ -90,10 +92,9 @@ export class SearchService {
 		const lines = (await this.dataProvider.readPlainTextLines(path)).map(
 			(line, index) => new Line(line, index),
 		);
-		const lineItems = await this.highlighter.parseLineItems(
+		const lineItems = await this.lineHighlighter.parseLineItems(
 			lines,
 			queryText,
-			"fzf",
 		);
 
 		return {
