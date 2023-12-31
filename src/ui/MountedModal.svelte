@@ -338,22 +338,15 @@
 	/* TODO: highlight current subitem */
 	.right-pane .preview-container ul button.file-sub-item {
 		text-wrap: wrap;
-		display: -webkit-box;
-		-webkit-line-clamp: 3;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
+		display: block;
 		text-overflow: ellipsis;
-		align-items: center;
 		justify-content: left;
-		/* padding: 0.65em; */
 		margin-bottom: 1em;
 		height: fit-content;
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;
-		box-sizing: content-box;
-		/* box-sizing: border-box; */
-		transition: background-color 0.01s;
+		font-size: medium;
 	}
 
 	.right-pane .preview-container :global(span.matched-line) {

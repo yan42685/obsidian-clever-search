@@ -52,7 +52,8 @@ export class LineHighlighter {
 			);
 			const highlightedText = context.lines
 				.map((line) =>
-					line.row === matchedRow ? highlightedLineText : this.highlightContextLine(line.text, queryText) ,
+					// line.row === matchedRow ? highlightedLineText : this.highlightContextLine(line.text, queryText) ,
+					line.row === matchedRow ? highlightedLineText : line.text
 				)
 				.join(FileUtil.JOIN_EOL);
 			return {
@@ -446,10 +447,10 @@ export class TruncateLimit {
 			boundaryLineMinChars: 4,
 		},
 		subItem: {
-			maxPreLines: 1,
-			maxPostLines: 1,
-			maxPreChars: 30,
-			maxPostChars: 40,
+			maxPreLines: 3,
+			maxPostLines: 3,
+			maxPreChars: 60,
+			maxPostChars: 80,
 			boundaryLineMinChars: 4,
 		},
 	};

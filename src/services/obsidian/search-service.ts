@@ -172,7 +172,7 @@ export class SearchService {
 					);
 					logger.debug(`matched lines count: ${matchedLines.length}`);
 					const fileSubItems = this.lineHighlighter
-						.parseAll(lines, matchedLines, queryText, "paragraph")
+						.parseAll(lines, matchedLines, queryText, "subItem")
 						.map((itemContext) => {
 							return {
 								text: itemContext.text,
