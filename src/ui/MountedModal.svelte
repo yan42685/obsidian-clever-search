@@ -28,8 +28,8 @@
 	let currContext = ""; // for previewing in-file search
 
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
-	let currFileSubItems: FileSubItem[] = [];  // for plaintext filetype
-	let currFilePreviewContent: any = undefined;  // for non-plaintext filetype
+	let currFileSubItems: FileSubItem[] = []; // for plaintext filetype
+	let currFilePreviewContent: any = undefined; // for non-plaintext filetype
 	let currSubItemIndex = -1;
 	let inputEl: HTMLElement;
 
@@ -104,9 +104,7 @@
 		getInstance(PrivateApi).executeCommandById("editor:focus");
 
 		if (searchType === SearchType.IN_FILE) {
-			const selectedItem = searchResult.items[
-				currItemIndex
-			] as LineItem;
+			const selectedItem = searchResult.items[currItemIndex] as LineItem;
 			if (selectedItem) {
 				// move the cursor and view to a specific line and column in the editor.
 				const view = app.workspace.getActiveViewOfType(MarkdownView);
@@ -196,9 +194,9 @@
 				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
 					<ul>
 						{#each currFileSubItems as subItem, index}
-							<p class="file-sub-item">
+							<button class="file-sub-item">
 								{@html subItem.text}
-							</p>
+							</button>
 						{/each}
 					</ul>
 				{:else}
@@ -337,22 +335,25 @@
 		margin: 0;
 		padding: 0;
 	}
-	.right-pane .preview-container ul .file-sub-item {
+	/* TODO: highlight current subitem */
+	.right-pane .preview-container ul button.file-sub-item {
+		text-wrap: wrap;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		align-items: center;
 		justify-content: left;
-		padding: 0.65em;
-		margin-bottom: 0.5em;
+		/* padding: 0.65em; */
+		margin-bottom: 1em;
 		height: fit-content;
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
-		border: 1px solid grey; /* 更宽的边框并指定颜色为白色 */
 		border-radius: 4px;
+		box-sizing: content-box;
+		/* box-sizing: border-box; */
 		transition: background-color 0.01s;
-	}
-	.right-pane .preview-container ul p {
-		/* height: fit-content;
-		margin: 0;
-		padding: 0; */
 	}
 
 	.right-pane .preview-container :global(span.matched-line) {
