@@ -6,7 +6,7 @@
 		FileSubItem,
 		LineItem,
 		SearchResult,
-		SearchType,
+		SearchType
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -101,17 +101,15 @@
 	}
 
 	function handleNextSubItem() {
-
 		currSubItemIndex = viewHelper.updateSubItemIndex(
 			currSubItemIndex,
 			currFileSubItems.length - 1,
 			"next",
 		);
-		logger.info(`currSubItemIndex; ${currSubItemIndex}`)
+		logger.info(`currSubItemIndex; ${currSubItemIndex}`);
 	}
 
 	function handlePrevSubItem() {
-
 		currSubItemIndex = viewHelper.updateSubItemIndex(
 			currSubItemIndex,
 			currFileSubItems.length - 1,
@@ -119,19 +117,14 @@
 		);
 	}
 
-	function handleConfirm() {
-		modal.close();
-		if (searchType === SearchType.IN_FILE) {
-			const selectedItem = searchResult.items[currItemIndex] as LineItem;
-			if (selectedItem) {
-				viewHelper.jumpInFile(
-					selectedItem.line.row,
-					selectedItem.line.col,
-				);
-			}
-		} else {
-			throw Error("unsupported search type");
-		}
+	async function handleConfirm() {
+		const selectedItem = searchResult.items[currItemIndex];
+		await viewHelper.handleConfirmAsync(
+			modal,
+			searchType,
+			selectedItem,
+			currSubItemIndex,
+		);
 	}
 
 	// ===================================================
