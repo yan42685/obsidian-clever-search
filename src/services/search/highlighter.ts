@@ -12,15 +12,18 @@ import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
 import { LexicalEngine } from "./search-engine";
 
-
 @singleton()
 export class LineHighlighter {
 	private readonly lexicalEngine = getInstance(LexicalEngine);
 
+	// @monitorDecorator
+	/**
+	 * @param queryText used for highlight context except matchedLine
+	 */
 	parseAll(
 		allLines: Line[],
 		matchedLines: MatchedLine[],
-		terms: string[],
+		queryText: string,
 		truncateType: TruncateType,
 	): HighlightedContext[] {
 		return matchedLines.map((matchedLine) => {
@@ -36,19 +39,20 @@ export class LineHighlighter {
 			let matchedLinePositions = matchedLine.positions;
 			if (matchedLine.row === context.lines[0].row) {
 				matchedLineText = context.lines[0].text;
-				// the first row in the context is truncated, need to adjust positions
+				// if the matched line locates at the first row in the context, 
+				// it's been truncated and we need to adjust positions
 				matchedLinePositions = this.adjustPositionsByStartCol(
 					matchedLinePositions,
 					context.firstLineStartCol,
 				);
 			}
-			const highlightedLineText = this.highlightLineByCharPositions(
+			const highlightedLineText = this.highlightMatchedLine(
 				matchedLineText,
 				matchedLinePositions,
 			);
 			const highlightedText = context.lines
 				.map((line) =>
-					line.row === matchedRow ? highlightedLineText : line.text,
+					line.row === matchedRow ? highlightedLineText : this.highlightContextLine(line.text, queryText) ,
 				)
 				.join(FileUtil.JOIN_EOL);
 			return {
@@ -59,18 +63,16 @@ export class LineHighlighter {
 		});
 	}
 
+	/**
+	 * @param queryText used for highlight context except matchedLine
+	 */
 	parse(
 		allLines: Line[],
 		matchedLine: MatchedLine,
-		terms: string[],
+		queryText: string,
 		truncateType: TruncateType,
 	): HighlightedContext {
-		return this.parseAll(allLines, [matchedLine], terms, truncateType)[0];
-	}
-
-	strictHighlightIgnoreCase(source: string, term: string): string {
-		const regex = new RegExp(term, "gi");
-		return source.replace(regex, (match) => `<mark>${match}</mark>`);
+		return this.parseAll(allLines, [matchedLine], queryText, truncateType)[0];
 	}
 
 	/**
@@ -83,7 +85,10 @@ export class LineHighlighter {
 		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 		const lineItems: LineItem[] = [];
 
-		const matchedLines = await this.lexicalEngine.fzfMatch(queryTextNoSpaces, lines);
+		const matchedLines = await this.lexicalEngine.fzfMatch(
+			queryTextNoSpaces,
+			lines,
+		);
 		for (const matchedLine of matchedLines) {
 			const row = matchedLine.row;
 			const firstMatchedCol = MathUtil.minInSet(matchedLine.positions);
@@ -125,12 +130,23 @@ export class LineHighlighter {
 		return lineItems;
 	}
 
+	private highlightMatchedLine(lineText: string, positions: Set<number>) {
+		return `<span class="matched-line">${this.highlightLineByCharPositions(
+			lineText,
+			positions,
+		)}</span>`;
+	}
+
+	private highlightContextLine(lineText: string, queryText: string): string {
+		const regex = new RegExp(queryText, "gi");
+		return lineText.replace(regex, (match) => `<mark>${match}</mark>`);
+	}
 
 	private highlightLineByCharPositions(
-		str: string,
+		lineText: string,
 		positions: Set<number>,
 	): string {
-		return str
+		return lineText
 			.split("")
 			.map((char, i) => {
 				// avoid spaces being ignored when rendering html
@@ -141,7 +157,6 @@ export class LineHighlighter {
 			})
 			.join("");
 	}
-
 
 	private adjustPositionsByStartCol(
 		positions: Set<number>,
@@ -333,7 +348,6 @@ export class LineHighlighter {
 		return resultLines;
 	}
 
-
 	/**
 	 * Get the HTML of context lines surrounding a matched line in a document.
 	
@@ -362,7 +376,10 @@ export class LineHighlighter {
 			contextLines.map(async (line, index) => {
 				if (line.row === matchedRow) {
 					// apply fzfMatch to the targetLine
-					const matchedLines = await this.lexicalEngine.fzfMatch(queryText, [line]);
+					const matchedLines = await this.lexicalEngine.fzfMatch(
+						queryText,
+						[line],
+					);
 					try {
 						// There should be only one matchedLine
 						const matchedLine = matchedLines[0];
@@ -374,10 +391,7 @@ export class LineHighlighter {
 								context.firstLineStartCol,
 							);
 						}
-						return `<span class="target-line">${this.highlightLineByCharPositions(
-							line.text,
-							positions,
-						)}</span>`;
+						return this.highlightMatchedLine(line.text, positions);
 					} catch (e) {
 						logger.warn(
 							"There might be inconsistency with previous search step, which lead to a missed match to target line",
@@ -386,7 +400,7 @@ export class LineHighlighter {
 					}
 				} else {
 					// Perform strict matching on other lines
-					return this.strictHighlightIgnoreCase(line.text, queryText);
+					return this.highlightContextLine(line.text, queryText);
 					// .replace(/ /g, "&nbsp;");
 				}
 			}),
@@ -394,7 +408,6 @@ export class LineHighlighter {
 
 		return highlightedContext.join(FileUtil.JOIN_EOL);
 	}
-
 }
 export type TruncatedContext = { lines: Line[]; firstLineStartCol: number };
 

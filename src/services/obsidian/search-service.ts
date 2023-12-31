@@ -195,14 +195,14 @@ export class SearchService {
 			const highlightedLine = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				[queryTextNoSpaces],
+				queryTextNoSpaces,
 				"line",
 			);
 			// logger.debug(highlightedLine);
 			const paragraphContext = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				[queryTextNoSpaces],
+				queryTextNoSpaces,
 				"paragraph",
 			);
 			return new LineItem(highlightedLine, paragraphContext.text);

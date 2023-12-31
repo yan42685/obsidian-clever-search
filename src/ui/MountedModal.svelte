@@ -354,7 +354,7 @@
 		transition: background-color 0.01s;
 	}
 
-	.right-pane .preview-container :global(span.target-line) {
+	.right-pane .preview-container :global(span.matched-line) {
 		display: inline-block;
 		width: 100%;
 		background-color: var(--cs-hint-char-color, #468eeb33);
