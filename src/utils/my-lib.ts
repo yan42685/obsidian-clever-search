@@ -30,6 +30,15 @@ export class MyLib {
 			return "";
 		}
 	}
+	/**
+	 * Appends elements from addition to host.
+	 */
+	static append<T>(host: T[], addition: T[]): T[] {
+		for (const element of addition) {
+			host.push(element);
+		}
+		return host;
+	}
 }
 
 export async function monitorExecution(

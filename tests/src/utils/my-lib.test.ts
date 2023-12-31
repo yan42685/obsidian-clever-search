@@ -20,6 +20,37 @@ describe("MyLib", () => {
 		mockLoggerDebug.mockRestore();
 	});
 
+	describe("append", () => {
+		it("appends elements from one array to another", () => {
+			const host = [1, 2, 3];
+			const addition = [4, 5, 6];
+
+			const result = MyLib.append(host, addition);
+
+			expect(result).toEqual([1, 2, 3, 4, 5, 6]);
+			// make sure the host has been changed
+			expect(host).toEqual([1, 2, 3, 4, 5, 6]);
+		});
+
+		it("handles empty arrays correctly", () => {
+			const host: number[] = [];
+			const addition = [1, 2, 3];
+
+			const result = MyLib.append(host, addition);
+
+			expect(result).toEqual([1, 2, 3]);
+		});
+
+		it("returns the original array if nothing to append", () => {
+			const host = [1, 2, 3];
+			const addition: number[] = [];
+
+			const result = MyLib.append(host, addition);
+
+			expect(result).toEqual([1, 2, 3]);
+		});
+	});
+
 	describe("extractDomainFromUrl", () => {
 		it("should extract the domain from a valid HTTPS URL", () => {
 			const url = "https://www.example.com/page";
@@ -33,7 +64,6 @@ describe("MyLib", () => {
 			expect(MyLib.extractDomainFromHttpsUrl(url)).toBe("");
 		});
 	});
-
 
 	describe("formatMillis", () => {
 		it("formats milliseconds correctly", () => {

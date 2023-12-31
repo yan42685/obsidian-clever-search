@@ -8,7 +8,7 @@ import {
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { MathUtil } from "src/utils/math-util";
-import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+import { MyLib, TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
 
@@ -51,7 +51,7 @@ export class LineHighlighter {
 			let matchedLineText = matchedLine.text;
 			let matchedLinePositions = matchedLine.positions;
 			if (matchedLine.row === context.lines[0].row) {
-				matchedLineText =context.lines[0].text
+				matchedLineText = context.lines[0].text;
 				// the first row in the context is truncated, need to adjust positions
 				matchedLinePositions = this.adjustPositionsByStartCol(
 					matchedLinePositions,
@@ -60,7 +60,7 @@ export class LineHighlighter {
 			}
 			const highlightedLineText = this.highlightLineByCharPositions(
 				matchedLineText,
-				matchedLinePositions
+				matchedLinePositions,
 			);
 			const highlightedText = context.lines
 				.map((line) =>
@@ -308,7 +308,8 @@ export class LineHighlighter {
 			postCharsCount += endCol - firstMatchedCol;
 		}
 		// logger.debug(`resultLines counts: ${resultLines.length}`)
-		resultLines = resultLines.concat(
+		MyLib.append(
+			resultLines,
 			this.extendContextBelow(
 				lines,
 				matchedRow + 1,
