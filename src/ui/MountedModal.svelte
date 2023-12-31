@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
 		FileItem,
@@ -23,13 +24,13 @@
 	export let queryText: string;
 	const DEFAULT_RESULT = new SearchResult("", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
-	let currItemIndex = -1;
+	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
 
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
 	let currFileSubItems: FileSubItem[] = []; // for plaintext filetype
 	let currFilePreviewContent: any = undefined; // for non-plaintext filetype
-	let currSubItemIndex = -1;
+	let currSubItemIndex = NULL_NUMBER
 	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
@@ -52,7 +53,7 @@
 			currContext = "";
 			currFileItem = null;
 			currFileSubItems = [];
-			currItemIndex = -1;
+			currItemIndex = NULL_NUMBER
 		}
 	}
 
@@ -99,7 +100,6 @@
 
 	function handleConfirm() {
 		modal.close();
-
 		if (searchType === SearchType.IN_FILE) {
 			const selectedItem = searchResult.items[currItemIndex] as LineItem;
 			if (selectedItem) {

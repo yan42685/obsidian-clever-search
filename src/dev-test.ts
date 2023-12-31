@@ -30,6 +30,7 @@ export async function devTest() {
 	// testLexicalSearch();
 	logger.trace("test");
 }
+
 function getApp() {
 	return getInstance(App);
 }
