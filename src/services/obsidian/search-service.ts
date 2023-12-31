@@ -72,10 +72,53 @@ export class SearchService {
 	}
 
 	@monitorDecorator
+	async searchInFile(queryText: string): Promise<SearchResult> {
+		const result = new SearchResult("", []);
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!queryText || !activeFile) {
+			return result;
+		}
+		if (FileUtil.getFileType(activeFile.path) !== FileType.PLAIN_TEXT) {
+			logger.trace("Current file isn't PLAINT_TEXT");
+			return result;
+		}
+
+		const lines = (
+			await this.dataProvider.readPlainTextLines(activeFile.path)
+		).map((line, index) => new Line(line, index));
+		const queryTextNoSpaces = queryText.replace(/\s/g, "");
+
+		const matchedLines = await this.lexicalEngine.fzfMatch(
+			queryTextNoSpaces,
+			lines,
+		);
+		const lineItems = matchedLines.map((matchedLine) => {
+			const highlightedLine = this.lineHighlighter.parse(
+				lines,
+				matchedLine,
+				queryTextNoSpaces,
+				"line",
+			);
+			// logger.debug(highlightedLine);
+			const paragraphContext = this.lineHighlighter.parse(
+				lines,
+				matchedLine,
+				queryTextNoSpaces,
+				"paragraph",
+			);
+			return new LineItem(highlightedLine, paragraphContext.text);
+		});
+		return {
+			currPath: activeFile.path,
+			items: lineItems,
+		} as SearchResult;
+	}
+
+	@monitorDecorator
 	/**
 	 * @deprecated since 0.1.x, use SearchService.searchInVault instead
 	 */
-	async searchInFile(queryText: string): Promise<SearchResult> {
+	async deprecatedSearchInFile(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("", []);
 		const fileRetriever = getInstance(FileUtil);
 		const activeFile = this.app.workspace.getActiveFile();
@@ -105,7 +148,7 @@ export class SearchService {
 
 	// TODO: highlight by page, rather than reading all files
 	@monitorDecorator
-	async parseFileItems(
+	private async parseFileItems(
 		queryText: string,
 		matchedFiles: MatchedFile[],
 		engineType: EngineType,
@@ -168,48 +211,5 @@ export class SearchService {
 			}),
 		);
 		return result;
-	}
-
-	@monitorDecorator
-	async parseLineItems(queryText: string): Promise<SearchResult> {
-		const result = new SearchResult("", []);
-		const activeFile = this.app.workspace.getActiveFile();
-		if (
-			!queryText ||
-			!activeFile ||
-			FileUtil.getFileType(activeFile.path) !== FileType.PLAIN_TEXT
-		) {
-			return result;
-		}
-
-		const lines = (
-			await this.dataProvider.readPlainTextLines(activeFile.path)
-		).map((line, index) => new Line(line, index));
-		const queryTextNoSpaces = queryText.replace(/\s/g, "");
-
-		const matchedLines = await this.lexicalEngine.fzfMatch(
-			queryTextNoSpaces,
-			lines,
-		);
-		const lineItems = matchedLines.map((matchedLine) => {
-			const highlightedLine = this.lineHighlighter.parse(
-				lines,
-				matchedLine,
-				queryTextNoSpaces,
-				"line",
-			);
-			// logger.debug(highlightedLine);
-			const paragraphContext = this.lineHighlighter.parse(
-				lines,
-				matchedLine,
-				queryTextNoSpaces,
-				"paragraph",
-			);
-			return new LineItem(highlightedLine, paragraphContext.text);
-		});
-		return {
-			currPath: activeFile.path,
-			items: lineItems,
-		} as SearchResult;
 	}
 }

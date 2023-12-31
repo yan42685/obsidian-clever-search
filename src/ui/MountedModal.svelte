@@ -60,8 +60,8 @@
 	// Handle input changes
 	async function handleInput() {
 		if (searchType === SearchType.IN_FILE) {
-			// searchResult = await searchService.searchInFile(queryText);
-			searchResult = await searchService.parseLineItems(queryText);
+			// searchResult = await searchService.deprecatedSearchInFile(queryText);
+			searchResult = await searchService.searchInFile(queryText);
 			searchResult.items.forEach((x) => {
 				const item = x as LineItem;
 				// console.log(item.line.text);
