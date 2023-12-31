@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { MarkdownView, type App, type EditorPosition } from "obsidian";
 	import { EventEnum } from "src/globals/enums";
 	import {
 		FileItem,
@@ -8,17 +7,17 @@
 		SearchResult,
 		SearchType,
 	} from "src/globals/search-types";
-	import { PrivateApi } from "src/services/obsidian/private-api";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
 	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
+	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
+	const viewHelper = getInstance(ViewHelper);
 
-	export let app: App;
 	export let modal: SearchModal;
 	export let searchType: SearchType;
 	export let queryText: string;
@@ -100,28 +99,11 @@
 
 	function handleConfirm() {
 		modal.close();
-		// 对应的command name是Focus on last note
-		getInstance(PrivateApi).executeCommandById("editor:focus");
 
 		if (searchType === SearchType.IN_FILE) {
 			const selectedItem = searchResult.items[currItemIndex] as LineItem;
 			if (selectedItem) {
-				// move the cursor and view to a specific line and column in the editor.
-				const view = app.workspace.getActiveViewOfType(MarkdownView);
-				if (view) {
-					const cursorPos: EditorPosition = {
-						line: selectedItem.line.row,
-						ch: selectedItem.line.col,
-					};
-					view.editor.setCursor(cursorPos);
-					view.editor.scrollIntoView(
-						{
-							from: cursorPos,
-							to: cursorPos,
-						},
-						true,
-					);
-				}
+				viewHelper.jumpInFile(selectedItem.line.row, selectedItem.line.col);
 			}
 		} else {
 			throw Error("unsupported search type");

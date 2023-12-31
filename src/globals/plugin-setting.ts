@@ -4,6 +4,7 @@ import { isDevEnvironment } from "src/utils/my-lib";
 
 export class PluginSetting {
 	mySetting: string;
+	openInNewPane: boolean;
 	logLevel: LogLevel;
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
@@ -13,6 +14,7 @@ export class PluginSetting {
 
 export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	mySetting: "default",
+	openInNewPane: true,
 	logLevel: isDevEnvironment ? "debug" : "none",
 	apiProvider1: {
 		domain: "",

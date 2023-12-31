@@ -23,7 +23,6 @@ export class SearchModal extends Modal {
 		this.mountedElement = new MountedModal({
 			target: this.modalEl,
 			props: {
-				app: app,
 				modal: this,
 				searchType: searchType,
 				queryText: effectiveQuery || "",
