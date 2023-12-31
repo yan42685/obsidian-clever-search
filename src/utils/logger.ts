@@ -1,3 +1,5 @@
+import { devOption } from "src/globals/dev-option";
+
 class Logger {
 	private logLevel: LogLevel = "debug";
 	private levelWeights: { [level in LogLevel]: number } = {
@@ -8,8 +10,6 @@ class Logger {
 		error: 5,
 		none: 6,
 	};
-	// private verboseTrace = true;
-	private verboseTrace = false;
 
 	getLevel(): LogLevel {
 		return this.logLevel;
@@ -21,7 +21,7 @@ class Logger {
 
 	trace(...args: any[]) {
 		if (this.shouldLog("trace")) {
-			if (this.verboseTrace) {
+			if (devOption.traceLog) {
 				console.groupCollapsed(
 					`%c[trace] ${this.getCallerName()}\n`,
 					"color: #5f6368;font-weight: 400;",
@@ -41,7 +41,7 @@ class Logger {
 
 	debug(...args: any[]) {
 		if (this.shouldLog("debug")) {
-			if (this.verboseTrace) {
+			if (devOption.traceLog) {
 				console.groupCollapsed(
 					`%c[debug] ${this.getCallerName()}\n`,
 					"color: #379237;font-weight: 400;",

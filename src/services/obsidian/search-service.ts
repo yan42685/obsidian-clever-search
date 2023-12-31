@@ -117,7 +117,7 @@ export class SearchService {
 
 	@monitorDecorator
 	/**
-	 * @deprecated since 0.1.x, use SearchService.searchInVault instead
+	 * @deprecated since 0.1.x, use SearchService.searchInFile instead
 	 */
 	async deprecatedSearchInFile(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("", []);

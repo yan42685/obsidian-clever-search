@@ -76,7 +76,7 @@ export class LineHighlighter {
 	}
 
 	/**
-	 * @deprecated since 0.1.x, use SearchService.searchInVault instead
+	 * @deprecated since 0.1.x, use SearchService.searchInFile instead
 	 */
 	async parseLineItems(
 		lines: Line[],
