@@ -97,14 +97,14 @@ export class SearchService {
 			const highlightedLine = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				queryTextNoSpaces,
+				queryText,  // it won't be used when truncateType === "line"
 				"line",
 			);
 			// logger.debug(highlightedLine);
 			const paragraphContext = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				queryTextNoSpaces,
+				queryText,
 				"paragraph",
 			);
 			return new LineItem(highlightedLine, paragraphContext.text);
