@@ -3,12 +3,7 @@ import { App, MarkdownView, type EditorPosition } from "obsidian";
 import { NULL_NUMBER } from "src/globals/constants";
 import { ObsidianCommandEnum } from "src/globals/enums";
 import { PluginSetting } from "src/globals/plugin-setting";
-import {
-	FileItem,
-	Item,
-	LineItem,
-	SearchType
-} from "src/globals/search-types";
+import { FileItem, Item, LineItem, SearchType } from "src/globals/search-types";
 import { PrivateApi } from "src/services/obsidian/private-api";
 import { FileType } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
@@ -70,35 +65,34 @@ export class ViewHelper {
 		this.privateApi.executeCommandById(
 			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
 		);
-		this.scrollInView(row, col);
+		this.scrollIntoViewForExistingView(row, col);
 	}
 
 	private async jumpInVaultAsync(path: string, row: number, col: number) {
-		await this.setViewAsync(path);
-		this.scrollInView(row, col);
-	}
-
-	private async setViewAsync(path: string) {
 		let alreadyOpen = false;
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (
-				leaf.view instanceof MarkdownView &&
+				// leaf.view instanceof MarkdownView &&
 				leaf.getViewState().state?.file === path
 			) {
 				this.app.workspace.setActiveLeaf(leaf, { focus: true });
 				alreadyOpen = true;
 			}
 		});
-		if (!alreadyOpen) {
+		if (alreadyOpen) {
+			this.scrollIntoViewForExistingView(row, col);
+		} else {
 			await this.app.workspace.openLinkText(
 				path,
 				"",
+				// this.setting.openInNewPane,
 				this.setting.openInNewPane,
 			);
+			this.scrollIntoViewForNewTab(row, col);
 		}
 	}
 
-	private scrollInView(row: number, col: number) {
+	private scrollIntoViewForExistingView(row: number, col: number) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const cursorPos: EditorPosition = {
 			line: row,
@@ -115,6 +109,23 @@ export class ViewHelper {
 			);
 		} else {
 			logger.info("No view to jump");
+		}
+	}
+
+	/**
+	 * This function is essential to distinguish from `scrollIntoViewForExistingView`.
+	 * Although it does not center the view as precisely as the previous function,
+	 * it is necessary because `scrollIntoViewForExistingView` has bugs when applied to new tabs,
+	 * which is an inherent issue with Obsidian's API.
+	 */
+	private scrollIntoViewForNewTab(row: number, col: number) {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view) {
+			view.editor.setCursor({ line: row, ch: col });
+			view.editor.scrollIntoView({
+				from: { line: row - 10, ch: 0 },
+				to: { line: row + 10, ch: 0 },
+			});
 		}
 	}
 }

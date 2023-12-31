@@ -12,7 +12,7 @@
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
 	import { logger } from "src/utils/logger";
-	import { getInstance } from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
@@ -79,6 +79,8 @@
 			});
 		} else if (searchType === SearchType.IN_VAULT) {
 			searchResult = await searchService.searchInVault(queryText);
+		} else {
+			throw Error(TO_BE_IMPL);
 		}
 		updateItem(0);
 		// wait until all dynamic elements are mounted and rendered
