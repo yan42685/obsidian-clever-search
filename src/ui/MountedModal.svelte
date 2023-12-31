@@ -11,6 +11,7 @@
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
+	import { logger } from "src/utils/logger";
 	import { getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
@@ -30,7 +31,7 @@
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
 	let currFileSubItems: FileSubItem[] = []; // for plaintext filetype
 	let currFilePreviewContent: any = undefined; // for non-plaintext filetype
-	let currSubItemIndex = NULL_NUMBER
+	let currSubItemIndex = NULL_NUMBER;
 	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
@@ -46,6 +47,7 @@
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
 				currFileSubItems = currFileItem.subItems;
+				currSubItemIndex = index;
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
@@ -53,7 +55,7 @@
 			currContext = "";
 			currFileItem = null;
 			currFileSubItems = [];
-			currItemIndex = NULL_NUMBER
+			currItemIndex = NULL_NUMBER;
 		}
 	}
 
@@ -98,12 +100,34 @@
 		updateItem(Math.max(currItemIndex - 1, 0));
 	}
 
+	function handleNextSubItem() {
+
+		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currSubItemIndex,
+			currFileSubItems.length - 1,
+			"next",
+		);
+		logger.info(`currSubItemIndex; ${currSubItemIndex}`)
+	}
+
+	function handlePrevSubItem() {
+
+		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currSubItemIndex,
+			currFileSubItems.length - 1,
+			"prev",
+		);
+	}
+
 	function handleConfirm() {
 		modal.close();
 		if (searchType === SearchType.IN_FILE) {
 			const selectedItem = searchResult.items[currItemIndex] as LineItem;
 			if (selectedItem) {
-				viewHelper.jumpInFile(selectedItem.line.row, selectedItem.line.col);
+				viewHelper.jumpInFile(
+					selectedItem.line.row,
+					selectedItem.line.col,
+				);
 			}
 		} else {
 			throw Error("unsupported search type");
@@ -119,6 +143,8 @@
 
 	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
 	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
+	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
+	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
 	handleInput();
 </script>
@@ -176,7 +202,10 @@
 				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
 					<ul>
 						{#each currFileSubItems as subItem, index}
-							<button class="file-sub-item">
+							<button
+								class:selected={index === currSubItemIndex}
+								class="file-sub-item"
+							>
 								{@html subItem.text}
 							</button>
 						{/each}
@@ -329,6 +358,15 @@
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;
 		font-size: medium;
+	}
+
+	.right-pane .preview-container ul button.file-sub-item.selected {
+		background-color: var(
+			--cs-item-selected-color,
+			#555
+		); /* 选中时的背景色 */
+		color: white; /* 选中时的文字颜色 */
+		border-radius: 4px; /* 圆角 */
 	}
 
 	.right-pane .preview-container :global(span.matched-line) {

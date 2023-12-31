@@ -2,7 +2,9 @@ export enum EventEnum {
 	TEST_EVENT_A,
 	TEST_EVENT_B,
 	NEXT_ITEM,
+	NEXT_SUB_ITEM,
 	PREV_ITEM,
+	PREV_SUB_ITEM,
 	CONFIRM_ITEM,
 }
 

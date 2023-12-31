@@ -16,33 +16,51 @@ export class ViewHelper {
 	private readonly setting = getInstance(PluginSetting);
 
 	jumpInFile(row: number, col: number) {
-		this.privateApi.executeCommandById(ObsidianCommandEnum.FOCUS_ON_LAST_NOTE);
+		this.privateApi.executeCommandById(
+			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+		);
 		this.scrollInView(row, col);
 	}
 
 	async jumpInVaultAsync(file: LocatableFile) {
 		if (file.type === FileType.PLAIN_TEXT) {
-            await this.setViewAsync(file.path);
+			await this.setViewAsync(file.path);
 			this.scrollInView(file.row, file.col);
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
 	}
 
+	updateSubItemIndex(
+		currentIndex: number,
+		maxIndex: number,
+		direction: "next" | "prev",
+	): number {
+		if (direction === "next") {
+			return currentIndex < maxIndex ? currentIndex + 1 : currentIndex;
+		} else {
+			return currentIndex > 0 ? currentIndex - 1 : currentIndex;
+		}
+	}
+
 	private async setViewAsync(path: string) {
-        let alreadyOpen = false;
+		let alreadyOpen = false;
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (
 				leaf.view instanceof MarkdownView &&
 				leaf.getViewState().state?.file === path
 			) {
 				this.app.workspace.setActiveLeaf(leaf, { focus: true });
-                alreadyOpen = true;
+				alreadyOpen = true;
 			}
 		});
-        if(!alreadyOpen) {
-			await this.app.workspace.openLinkText(path, "", this.setting.openInNewPane);
-        }
+		if (!alreadyOpen) {
+			await this.app.workspace.openLinkText(
+				path,
+				"",
+				this.setting.openInNewPane,
+			);
+		}
 	}
 
 	private scrollInView(row: number, col: number) {

@@ -1,4 +1,4 @@
-import { App, Modal } from "obsidian";
+import { App, Modal, type Modifier } from "obsidian";
 import { EventEnum } from "src/globals/enums";
 import type { SearchType } from "src/globals/search-types";
 import { eventBus } from "src/utils/event-bus";
@@ -48,15 +48,28 @@ export class SearchModal extends Modal {
 		const modKey = currModifier;
 		// console.log("current modifier: " + modKey);
 
-		this.scope.register([modKey], "J", emitEvent(EventEnum.NEXT_ITEM));
-		// this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));
-		this.scope.register([], "ArrowDown", emitEvent(EventEnum.NEXT_ITEM));
+		// 使用registerHotKey代替直接调用scope.register
+		this.newHotKey([modKey], "J", EventEnum.NEXT_ITEM);
+		this.newHotKey([], "ArrowDown", EventEnum.NEXT_ITEM);
 
-		this.scope.register([modKey], "K", emitEvent(EventEnum.PREV_ITEM));
-		this.scope.register([], "ArrowUp", emitEvent(EventEnum.PREV_ITEM));
-		this.scope.register([], "Enter", emitEvent(EventEnum.CONFIRM_ITEM));
+		this.newHotKey([modKey], "K", EventEnum.PREV_ITEM);
+		this.newHotKey([], "ArrowUp", EventEnum.PREV_ITEM);
+
+		this.newHotKey([modKey], "N", EventEnum.NEXT_SUB_ITEM);
+		this.newHotKey([modKey], "P", EventEnum.PREV_SUB_ITEM);
+
+		this.newHotKey([], "Enter", EventEnum.CONFIRM_ITEM);
 		// right click === "contextmenu" event
 		this.modalEl.addEventListener("contextmenu", handleRightClick);
+
+	}
+
+	private newHotKey(
+		modifiers: Modifier[],
+		key: string,
+		eventEnum: EventEnum,
+	) {
+		this.scope.register(modifiers, key, emitEvent(eventEnum));
 	}
 }
 
