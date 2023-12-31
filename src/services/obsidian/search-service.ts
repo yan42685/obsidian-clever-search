@@ -1,6 +1,5 @@
 import { App, Component } from "obsidian";
 import { logger } from "src/utils/logger";
-import { MathUtil } from "src/utils/math-util";
 import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import {
@@ -97,7 +96,7 @@ export class SearchService {
 			const highlightedLine = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				queryText,  // it won't be used when truncateType === "line"
+				queryText, // it won't be used when truncateType === "line"
 				"line",
 			);
 			// logger.debug(highlightedLine);
@@ -172,24 +171,15 @@ export class SearchService {
 						queryText,
 					);
 					logger.debug(`matched lines count: ${matchedLines.length}`);
-					const fileSubItems = matchedLines.map((matchedLine) => {
-						const matchedLineTruncatedContext =
-							this.lineHighlighter.getTruncatedContext(
-								lines,
-								matchedLine.row,
-								MathUtil.minInSet(matchedLine.positions),
-								"line",
-								// "subItem",
-							);
-						return {
-							text: matchedLineTruncatedContext.lines
-								.map((line) => line.text)
-								.join(FileUtil.JOIN_EOL),
-							// text: matchedLine.text,
-							originRow: matchedLine.row,
-							originCol: MathUtil.minInSet(matchedLine.positions),
-						} as FileSubItem;
-					});
+					const fileSubItems = this.lineHighlighter
+						.parseAll(lines, matchedLines, queryText, "paragraph")
+						.map((itemContext) => {
+							return {
+								text: itemContext.text,
+								originRow: itemContext.row,
+								originCol: itemContext.col,
+							} as FileSubItem;
+						});
 
 					// It is necessary to use a constructor with 'new', rather than using an object literal.
 					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance

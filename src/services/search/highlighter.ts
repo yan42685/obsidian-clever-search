@@ -173,8 +173,7 @@ export class LineHighlighter {
 		return adjustedPositions;
 	}
 
-	// private getTruncatedContext(
-	getTruncatedContext(
+	private getTruncatedContext(
 		lines: Line[],
 		matchedRow: number,
 		firstMatchedCol: number,
