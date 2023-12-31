@@ -1,5 +1,6 @@
 import * as fsLib from "fs";
 import * as pathLib from "path";
+import { LanguageEnum } from "src/globals/enums";
 import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";
 
@@ -38,6 +39,19 @@ export class MyLib {
 			host.push(element);
 		}
 		return host;
+	}
+
+	/**
+	 * Get current runtime language
+	 */
+	static getCurrLanguage(): LanguageEnum {
+		// getItem("language") will return `null` if currLanguage === "en"
+		const langKey = window.localStorage.getItem("language") || "en";
+		if (langKey in LanguageEnum) {
+			return LanguageEnum[langKey as keyof typeof LanguageEnum];
+		} else {
+			return LanguageEnum.other;
+		}
 	}
 }
 
