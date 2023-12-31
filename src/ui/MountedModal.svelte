@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { MarkdownView, type App, type EditorPosition } from "obsidian";
-	import { EventEnum } from "src/globals/event-enum";
+	import { EventEnum } from "src/globals/enums";
 	import {
 		FileItem,
 		FileSubItem,

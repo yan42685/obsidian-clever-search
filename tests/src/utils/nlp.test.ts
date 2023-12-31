@@ -1,4 +1,4 @@
-import { LanguageEnum } from "src/globals/language-enum";
+import { LanguageEnum } from "src/globals/enums";
 import { TextAnalyzer } from "src/utils/nlp";
 
 // 定义测试字符串数组

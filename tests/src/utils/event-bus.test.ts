@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { EventEnum } from "src/globals/event-enum";
+import { EventEnum } from "src/globals/enums";
 import { EventBus } from "src/utils/event-bus";
 
 

@@ -1,3 +1,11 @@
+export enum EventEnum {
+	TEST_EVENT_A,
+	TEST_EVENT_B,
+	NEXT_ITEM,
+	PREV_ITEM,
+	CONFIRM_ITEM,
+}
+
 export enum LanguageEnum {
     other = "Other Language",
     en = "English",
@@ -24,14 +32,4 @@ export enum LanguageEnum {
     // hi = "हिन्दी (आंशिक)",
     // nl = "Nederlands (gedeeltelijk)",
     // ar = "العربية (جزئي)"
-}
-
-export function getCurrLanguage(): LanguageEnum {
-    // getItem("language") will return `null` if currLanguage === "en"
-    const langKey = window.localStorage.getItem("language") || "en";
-    if (langKey in LanguageEnum) {
-        return LanguageEnum[langKey as keyof typeof LanguageEnum];
-    } else {
-        return LanguageEnum.other;
-    }
 }

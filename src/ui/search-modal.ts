@@ -1,5 +1,5 @@
 import { App, Modal } from "obsidian";
-import { EventEnum } from "src/globals/event-enum";
+import { EventEnum } from "src/globals/enums";
 import type { SearchType } from "src/globals/search-types";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";

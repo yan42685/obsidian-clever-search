@@ -1,4 +1,3 @@
-import { LanguageEnum, getCurrLanguage } from "src/globals/language-enum";
 import {
 	Line,
 	LineItem,
@@ -8,9 +7,11 @@ import {
 import { logger } from "src/utils/logger";
 import { MathUtil } from "src/utils/math-util";
 import { MyLib, getInstance } from "src/utils/my-lib";
+import { TextAnalyzer } from "src/utils/nlp";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
 import { LexicalEngine } from "./search-engine";
+import { LanguageEnum } from "src/globals/enums";
 
 @singleton()
 export class LineHighlighter {
@@ -363,7 +364,7 @@ export class LineHighlighter {
 		firstMatchedCol: number,
 		queryText: string,
 	): Promise<string> {
-		const currLang = getCurrLanguage();
+		const currLang = TextAnalyzer.getCurrLanguage();
 		const context = this.getTruncatedContext(
 			lines,
 			matchedRow,

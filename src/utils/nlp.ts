@@ -1,5 +1,5 @@
 import { franc } from "franc-min";
-import { LanguageEnum } from "src/globals/language-enum";
+import { LanguageEnum } from "src/globals/enums";
 
 export type LanguageProportionsResult = {
 	mainLanguage: LanguageEnum;
@@ -71,5 +71,15 @@ export class TextAnalyzer {
 			console.log(`${language}: ${proportion}`);
 		}
 		console.log("");
+	}
+
+	static getCurrLanguage(): LanguageEnum {
+		// getItem("language") will return `null` if currLanguage === "en"
+		const langKey = window.localStorage.getItem("language") || "en";
+		if (langKey in LanguageEnum) {
+			return LanguageEnum[langKey as keyof typeof LanguageEnum];
+		} else {
+			return LanguageEnum.other;
+		}
 	}
 }

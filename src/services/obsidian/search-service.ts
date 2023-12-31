@@ -66,6 +66,7 @@ export class SearchService {
 				),
 			};
 		} else {
+			logger.trace("lexical matched files count is 0");
 			// TODO: do semantic search
 			return result;
 		}

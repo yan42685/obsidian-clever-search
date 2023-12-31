@@ -1,7 +1,4 @@
-import { App, Notice, Plugin, Vault } from "obsidian";
-import { THIS_PLUGIN } from "src/globals/constants";
-import { container } from "tsyringe";
-
+import { Notice } from "obsidian";
 
 export class MyNotice extends Notice {
 	constructor(text: string, duration = 0) {
@@ -9,7 +6,6 @@ export class MyNotice extends Notice {
 	}
 }
 
-class MyObsidianApi {
-}
+class MyObsidianApi {}
 
 export const myObApi = new MyObsidianApi();
