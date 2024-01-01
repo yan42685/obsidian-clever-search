@@ -25,6 +25,14 @@ settings:
         opacity: true
         format: hex
         default: '#'
+	-
+		id: cs-secondary-font-color
+		title: Secondary Font Color (for folder)
+		title.zh: 次要文字颜色 (文件夹)
+		type: variable-color
+		opacity: true
+		format: hex
+		default: '#'
 	- 
 		id: cs-pane-bgc
 		title: Pane Background Color

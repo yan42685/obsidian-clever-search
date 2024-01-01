@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { MarkdownView, type App, type EditorPosition } from "obsidian";
+	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
 		FileItem,
@@ -8,35 +8,35 @@
 		SearchResult,
 		SearchType,
 	} from "src/globals/search-types";
-	import { PrivateApi } from "src/services/obsidian/private-api";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
-	import { getInstance } from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
+	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
+	const viewHelper = getInstance(ViewHelper);
 
-	export let app: App;
 	export let modal: SearchModal;
 	export let searchType: SearchType;
 	export let queryText: string;
 	const DEFAULT_RESULT = new SearchResult("", []);
 	let searchResult: SearchResult = DEFAULT_RESULT;
-	let currItemIndex = -1;
+	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
 
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
 	let currFileSubItems: FileSubItem[] = []; // for plaintext filetype
 	let currFilePreviewContent: any = undefined; // for non-plaintext filetype
-	let currSubItemIndex = -1;
+	let currSubItemIndex = NULL_NUMBER;
 	let inputEl: HTMLElement;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
 	// Updates focused content and selected file index
-	function updateItem(index: number): void {
+	async function updateItemAsync(index: number): Promise<void> {
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
 			currItemIndex = index;
@@ -45,20 +45,31 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
+				currFileItem.subItems = await searchService.getFileSubItems(
+					currFileItem.path,
+					queryText,
+				);
 				currFileSubItems = currFileItem.subItems;
+				currSubItemIndex = 0;
+				viewHelper.scrollTo(
+					"start",
+					currFileSubItems[currSubItemIndex],
+				);
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
+			viewHelper.scrollTo("center", items[index]);
 		} else {
 			currContext = "";
 			currFileItem = null;
 			currFileSubItems = [];
-			currItemIndex = -1;
+			currItemIndex = NULL_NUMBER;
 		}
 	}
+	scrollTo;
 
 	// Handle input changes
-	async function handleInput() {
+	async function handleInputAsync() {
 		if (searchType === SearchType.IN_FILE) {
 			// searchResult = await searchService.deprecatedSearchInFile(queryText);
 			searchResult = await searchService.searchInFile(queryText);
@@ -77,55 +88,55 @@
 			});
 		} else if (searchType === SearchType.IN_VAULT) {
 			searchResult = await searchService.searchInVault(queryText);
+		} else {
+			throw Error(TO_BE_IMPL);
 		}
-		updateItem(0);
+		await updateItemAsync(0);
 		// wait until all dynamic elements are mounted and rendered
 		await tick();
 	}
 
 	// Handle result click
-	function handleItemClick(index: number): void {
-		updateItem(index);
+	async function handleItemClick(index: number) {
+		await updateItemAsync(index);
 	}
 
 	// Select the next search result
-	function handleNextItem() {
-		updateItem(Math.min(currItemIndex + 1, searchResult.items.length - 1));
+	async function handleNextItem() {
+		await updateItemAsync(
+			Math.min(currItemIndex + 1, searchResult.items.length - 1),
+		);
 	}
 
 	// Select the previous search result
-	function handlePrevItem() {
-		updateItem(Math.max(currItemIndex - 1, 0));
+	async function handlePrevItem() {
+		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 	}
 
-	function handleConfirm() {
-		modal.close();
-		// 对应的command name是Focus on last note
-		getInstance(PrivateApi).executeCommandById("editor:focus");
+	function handleNextSubItem() {
+		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currFileSubItems,
+			currSubItemIndex,
+			"next",
+		);
+	}
 
-		if (searchType === SearchType.IN_FILE) {
-			const selectedItem = searchResult.items[currItemIndex] as LineItem;
-			if (selectedItem) {
-				// move the cursor and view to a specific line and column in the editor.
-				const view = app.workspace.getActiveViewOfType(MarkdownView);
-				if (view) {
-					const cursorPos: EditorPosition = {
-						line: selectedItem.line.row,
-						ch: selectedItem.line.col,
-					};
-					view.editor.setCursor(cursorPos);
-					view.editor.scrollIntoView(
-						{
-							from: cursorPos,
-							to: cursorPos,
-						},
-						true,
-					);
-				}
-			}
-		} else {
-			throw Error("unsupported search type");
-		}
+	function handlePrevSubItem() {
+		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currFileSubItems,
+			currSubItemIndex,
+			"prev",
+		);
+	}
+
+	async function handleConfirm() {
+		const selectedItem = searchResult.items[currItemIndex];
+		await viewHelper.handleConfirmAsync(
+			modal,
+			searchType,
+			selectedItem,
+			currSubItemIndex,
+		);
 	}
 
 	// ===================================================
@@ -137,8 +148,10 @@
 
 	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
 	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
+	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
+	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
-	handleInput();
+	handleInputAsync();
 </script>
 
 <div class="search-container">
@@ -147,7 +160,7 @@
 			<input
 				bind:value={queryText}
 				bind:this={inputEl}
-				on:input={handleInput}
+				on:input={handleInputAsync}
 				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
 			/>
 		</div>
@@ -167,17 +180,16 @@
 							<span class="line-item">{@html item.line.text}</span
 							>
 						{:else if item instanceof FileItem}
-							<div class="file-item">
-								<span class="file-basename"
-									>{item.basename}</span
-								>
-								<span class="file-extension"
-									>{item.extension}</span
+							<span class="file-item">
+								<span class="filename"
+									>{@html item.basename +
+										HTML_4_SPACES +
+										item.extension}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
 								>
-							</div>
+							</span>
 						{/if}
 					</button>
 				{/each}
@@ -194,7 +206,11 @@
 				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
 					<ul>
 						{#each currFileSubItems as subItem, index}
-							<button class="file-sub-item">
+							<button
+								bind:this={subItem.element}
+								class:selected={index === currSubItemIndex}
+								class="file-sub-item"
+							>
 								{@html subItem.text}
 							</button>
 						{/each}
@@ -211,8 +227,8 @@
 	.search-container {
 		display: flex;
 		margin-top: 10px;
-		/* 保证空格和换行符在渲染html时不被压缩掉 */
-		white-space: pre-wrap;
+		white-space: pre-wrap; /* 保证空格和换行符在渲染html时不被压缩掉 */
+		overflow-wrap: break-word; /* long text won't be hidden if overflow: hidden is set */
 	}
 
 	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
@@ -297,11 +313,12 @@
 
 	.result-items ul button:hover,
 	.result-items ul button.selected {
-		background-color: var(--cs-item-selected-color, #555);
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
-	.result-items ul button span.line-item {
+	.result-items ul button .line-item,
+	.result-items ul button .file-item {
 		text-wrap: wrap;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
@@ -310,12 +327,17 @@
 		text-overflow: ellipsis;
 	}
 
-	.result-items ul button span.file-basename {
+	.result-items ul button .file-item {
+		-webkit-line-clamp: 6; /* overwrite the previous rule */
 	}
 
-	.result-items ul button span.file-extension {
+	.result-items ul button .file-item span.filename {
+		margin-top: -0.2em;
+		display: block;
 	}
-	.result-items ul button span.file-folder-path {
+
+	.result-items ul button .file-item span.file-folder-path {
+		color: var(--cs-secondary-font-color, #a29c9c);
 		display: block;
 	}
 	.right-pane {
@@ -327,7 +349,6 @@
 	.right-pane .preview-container {
 		margin: 0.7em 0.5em 0.7em 0.7em;
 		height: 70vh;
-		overflow-wrap: break-word;
 		overflow-y: auto;
 	}
 	.right-pane .preview-container p,
@@ -338,27 +359,28 @@
 	/* TODO: highlight current subitem */
 	.right-pane .preview-container ul button.file-sub-item {
 		text-wrap: wrap;
-		display: -webkit-box;
-		-webkit-line-clamp: 3;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
+		display: block;
 		text-overflow: ellipsis;
-		align-items: center;
 		justify-content: left;
-		/* padding: 0.65em; */
 		margin-bottom: 1em;
 		height: fit-content;
+		width: 100%;
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;
-		box-sizing: content-box;
-		/* box-sizing: border-box; */
-		transition: background-color 0.01s;
+		font-size: medium;
+	}
+
+	.right-pane .preview-container ul button.file-sub-item.selected {
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
 	.right-pane .preview-container :global(span.matched-line) {
 		display: inline-block;
 		width: 100%;
+	}
+
+	.right-pane .preview-container :global(span.matched-line.highlight-bg) {
 		background-color: var(--cs-hint-char-color, #468eeb33);
 	}
 </style>

@@ -38,11 +38,11 @@ export class Line {
 
 export type LineFields = Array<keyof Line>;
 
-// text: highlighted text 
+// text: highlighted text
 // col: the first highlighted col text
-export type HighlightedContext = Line & { col: number }; 
+export type HighlightedContext = Line & { col: number };
 
-export type MatchedLine = Line & { positions: Set<number> }; // positions: columns of matched chars 
+export type MatchedLine = Line & { positions: Set<number> }; // positions: columns of matched chars
 
 export type MatchedFile = {
 	path: string;
@@ -128,3 +128,13 @@ export class FileSubItem extends Item {
 		this.originCol = originCol;
 	}
 }
+
+export type Location = {
+	row: number;
+	col: number;
+};
+
+export type LocatableFile = Location & {
+	type: FileType;
+	path: string;
+};

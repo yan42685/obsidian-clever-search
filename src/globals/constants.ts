@@ -4,6 +4,8 @@
 export const THIS_PLUGIN = "CleverSearch";
 export const ICON_COLLAPSE = '"▶"';
 export const ICON_EXPAND = '"▼"';
+export const NULL_NUMBER = -1;
+export const HTML_4_SPACES = "&nbsp;&nbsp;&nbsp;&nbsp;";
 
 export const DEFAULT_BLACKLIST_EXTENSION = [
 	".zip",
