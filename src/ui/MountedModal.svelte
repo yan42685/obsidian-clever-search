@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { NULL_NUMBER } from "src/globals/constants";
+	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
 		FileItem,
@@ -170,17 +170,17 @@
 							<span class="line-item">{@html item.line.text}</span
 							>
 						{:else if item instanceof FileItem}
-							<div class="file-item">
+							<span class="file-item">
 								<span class="file-basename"
-									>{item.basename}</span
+									>{item.basename} {@html HTML_4_SPACES}</span
 								>
-								<span class="file-extension"
-									>{item.extension}</span
+								<span class="file-extension">
+									{item.extension}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
 								>
-							</div>
+							</span>
 						{/if}
 					</button>
 				{/each}
@@ -317,6 +317,7 @@
 	}
 
 	.result-items ul button span.file-basename {
+		/* width: 100%; */
 	}
 
 	.result-items ul button span.file-extension {
@@ -349,6 +350,7 @@
 		justify-content: left;
 		margin-bottom: 1em;
 		height: fit-content;
+		width: 100%;
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;
