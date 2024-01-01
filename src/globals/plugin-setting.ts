@@ -4,17 +4,16 @@ import { isDevEnvironment } from "src/utils/my-lib";
 
 export class PluginSetting {
 	mySetting: string;
-	openInNewPane: boolean;
 	logLevel: LogLevel;
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
 	excludeExtensions: string[];
 	search: SearchSetting;
+	ui: UISetting;
 }
 
 export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	mySetting: "default",
-	openInNewPane: true,
 	logLevel: isDevEnvironment ? "debug" : "none",
 	apiProvider1: {
 		domain: "",
@@ -35,6 +34,14 @@ export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 		weightH4: 1.1,
 		weightTagText: 1.1,
 	},
+	ui: {
+		openInNewPane: true,
+		showedExtension: "except md"
+	}
+};
+
+export type LogLevelOptions = {
+    [K in LogLevel]: K;
 };
 
 export type ApiProvider = {
@@ -53,6 +60,8 @@ export type SearchSetting = {
 	weightTagText: number;
 };
 
-export type LogLevelOptions = {
-    [K in LogLevel]: K;
-};
+
+export type UISetting = {
+	openInNewPane: boolean,
+	showedExtension: "none" | "except md" | "all",
+}

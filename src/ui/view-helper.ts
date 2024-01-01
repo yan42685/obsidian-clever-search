@@ -82,7 +82,7 @@ export class ViewHelper {
 			await this.app.workspace.openLinkText(
 				path,
 				"",
-				this.setting.openInNewPane,
+				this.setting.ui.openInNewPane,
 			);
 			this.scrollIntoViewForNewTab(row, col);
 		}
