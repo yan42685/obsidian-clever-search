@@ -6,7 +6,7 @@
 		FileSubItem,
 		LineItem,
 		SearchResult,
-		SearchType
+		SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -303,7 +303,7 @@
 
 	.result-items ul button:hover,
 	.result-items ul button.selected {
-		background-color: var(--cs-item-selected-color, #555);
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
@@ -356,17 +356,15 @@
 	}
 
 	.right-pane .preview-container ul button.file-sub-item.selected {
-		background-color: var(
-			--cs-item-selected-color,
-			#555
-		); /* 选中时的背景色 */
-		color: white; /* 选中时的文字颜色 */
-		border-radius: 4px; /* 圆角 */
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
 	.right-pane .preview-container :global(span.matched-line) {
 		display: inline-block;
 		width: 100%;
+	}
+
+	.right-pane .preview-container :global(span.matched-line.highlight-bg) {
 		background-color: var(--cs-hint-char-color, #468eeb33);
 	}
 </style>

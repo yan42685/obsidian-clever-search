@@ -23,8 +23,8 @@ export class LineHighlighter {
 	parseAll(
 		allLines: Line[],
 		matchedLines: MatchedLine[],
-		queryText: string,
 		truncateType: TruncateType,
+		hlMatchedLineBackground: boolean,
 	): HighlightedContext[] {
 		return matchedLines.map((matchedLine) => {
 			const firstMatchedCol = MathUtil.minInSet(matchedLine.positions);
@@ -39,7 +39,7 @@ export class LineHighlighter {
 			let matchedLinePositions = matchedLine.positions;
 			if (matchedLine.row === context.lines[0].row) {
 				matchedLineText = context.lines[0].text;
-				// if the matched line locates at the first row in the context, 
+				// if the matched line locates at the first row in the context,
 				// it's been truncated and we need to adjust positions
 				matchedLinePositions = this.adjustPositionsByStartCol(
 					matchedLinePositions,
@@ -49,11 +49,12 @@ export class LineHighlighter {
 			const highlightedLineText = this.highlightMatchedLine(
 				matchedLineText,
 				matchedLinePositions,
+				hlMatchedLineBackground,
 			);
 			const highlightedText = context.lines
 				.map((line) =>
 					// line.row === matchedRow ? highlightedLineText : this.highlightContextLine(line.text, queryText) ,
-					line.row === matchedRow ? highlightedLineText : line.text
+					line.row === matchedRow ? highlightedLineText : line.text,
 				)
 				.join(FileUtil.JOIN_EOL);
 			return {
@@ -70,10 +71,15 @@ export class LineHighlighter {
 	parse(
 		allLines: Line[],
 		matchedLine: MatchedLine,
-		queryText: string,
 		truncateType: TruncateType,
+		hlMatchedLineBackground: boolean,
 	): HighlightedContext {
-		return this.parseAll(allLines, [matchedLine], queryText, truncateType)[0];
+		return this.parseAll(
+			allLines,
+			[matchedLine],
+			truncateType,
+			hlMatchedLineBackground,
+		)[0];
 	}
 
 	/**
@@ -131,11 +137,21 @@ export class LineHighlighter {
 		return lineItems;
 	}
 
-	private highlightMatchedLine(lineText: string, positions: Set<number>) {
-		return `<span class="matched-line">${this.highlightLineByCharPositions(
-			lineText,
-			positions,
-		)}</span>`;
+	private highlightMatchedLine(
+		lineText: string,
+		positions: Set<number>,
+		hlMatchedLineBackground: boolean,
+	) {
+		/*eslint no-mixed-spaces-and-tabs: ["error", "smart-tabs"]*/
+		return hlMatchedLineBackground
+			? `<span class="matched-line highlight-bg">${this.highlightLineByCharPositions(
+					lineText,
+					positions,
+			  )}</span>`
+			: `<span class="matched-line">${this.highlightLineByCharPositions(
+					lineText,
+					positions,
+			  )}</span>`;
 	}
 
 	private highlightContextLine(lineText: string, queryText: string): string {
@@ -391,7 +407,11 @@ export class LineHighlighter {
 								context.firstLineStartCol,
 							);
 						}
-						return this.highlightMatchedLine(line.text, positions);
+						return this.highlightMatchedLine(
+							line.text,
+							positions,
+							true,
+						);
 					} catch (e) {
 						logger.warn(
 							"There might be inconsistency with previous search step, which lead to a missed match to target line",

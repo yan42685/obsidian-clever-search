@@ -96,15 +96,15 @@ export class SearchService {
 			const highlightedLine = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				queryText, // it won't be used when truncateType === "line"
 				"line",
+				false,
 			);
 			// logger.debug(highlightedLine);
 			const paragraphContext = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				queryText,
 				"paragraph",
+				true,
 			);
 			return new LineItem(highlightedLine, paragraphContext.text);
 		});
@@ -172,7 +172,7 @@ export class SearchService {
 					);
 					logger.debug(`matched lines count: ${matchedLines.length}`);
 					const fileSubItems = this.lineHighlighter
-						.parseAll(lines, matchedLines, queryText, "subItem")
+						.parseAll(lines, matchedLines, "subItem", false)
 						.map((itemContext) => {
 							return {
 								text: itemContext.text,
