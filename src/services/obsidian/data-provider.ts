@@ -70,6 +70,7 @@ export class DataProvider {
 	}
 
 
+	// @monitorDecorator
 	/**
 	 * Reads the content of a plain text file.
 	 * @param fileOrPath The file object or path string of the file to read.

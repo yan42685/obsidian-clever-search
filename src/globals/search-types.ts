@@ -119,13 +119,13 @@ export class FileItem extends Item {
 
 export class FileSubItem extends Item {
 	text: string;
-	originRow: number; // for precisely jumping to the original file location
-	originCol: number;
+	row: number; // for precisely jumping to the original file location
+	col: number;
 	constructor(text: string, originRow: number, originCol: number) {
 		super();
 		this.text = text;
-		this.originRow = originRow;
-		this.originCol = originCol;
+		this.row = originRow;
+		this.col = originCol;
 	}
 }
 
