@@ -325,7 +325,7 @@
 	}
 
 	.result-items ul button .file-item span.file-folder-path {
-		color: grey;
+		color: var(--cs-secondary-font-color, #a29c9c);
 		display: block;
 	}
 	.right-pane {
