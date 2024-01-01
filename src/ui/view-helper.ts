@@ -62,9 +62,6 @@ export class ViewHelper {
 	}
 
 	private jumpInFile(row: number, col: number) {
-		this.privateApi.executeCommandById(
-			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
-		);
 		this.scrollIntoViewForExistingView(row, col);
 	}
 
@@ -85,7 +82,6 @@ export class ViewHelper {
 			await this.app.workspace.openLinkText(
 				path,
 				"",
-				// this.setting.openInNewPane,
 				this.setting.openInNewPane,
 			);
 			this.scrollIntoViewForNewTab(row, col);
@@ -93,6 +89,9 @@ export class ViewHelper {
 	}
 
 	private scrollIntoViewForExistingView(row: number, col: number) {
+		this.privateApi.executeCommandById(
+			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+		);
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const cursorPos: EditorPosition = {
 			line: row,
@@ -107,6 +106,8 @@ export class ViewHelper {
 				},
 				true,
 			);
+			// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
+			// 	view.editor.focus();
 		} else {
 			logger.info("No view to jump");
 		}
