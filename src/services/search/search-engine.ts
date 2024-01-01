@@ -58,6 +58,7 @@ export class LexicalEngine {
 
 	/**
 	 * Performs a search using the provided query and combination mode.
+	 * NOTE: minisearch.search() is async in fact
 	 *
 	 * @param {"and"|"or"} combinationMode - The combination mode:
 	 * - "and": Requires any single token to appear in the fields.
@@ -83,9 +84,11 @@ export class LexicalEngine {
 		});
 	}
 
+	@monitorDecorator
 	async searchLines(
 		lines: Line[],
 		queryText: string,
+		maxParsedLines: number,
 	): Promise<MatchedLine[]> {
 		this.linesIndex.removeAll();
 		// logger.info(lines);
@@ -101,7 +104,9 @@ export class LexicalEngine {
 			this.option.getLineSearchOption(),
 		);
 
-		return minisearchResult.map((item) => {
+		logger.debug(`matched lines count: ${minisearchResult.length}`);
+		logger.debug(`only parse top ${maxParsedLines} matched lines per file`);
+		return minisearchResult.slice(0, maxParsedLines).map((item) => {
 			const lineText = lines[item.id].text;
 			return {
 				text: lineText,

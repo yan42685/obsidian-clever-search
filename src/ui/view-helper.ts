@@ -57,8 +57,8 @@ export class ViewHelper {
 					if (filetype === FileType.PLAIN_TEXT) {
 						await this.jumpInVaultAsync(
 							fileItem.path,
-							subItem.originRow,
-							subItem.originCol,
+							subItem.row,
+							subItem.col,
 						);
 					} else {
 						throw Error("unsupported filetype to jump");
@@ -81,8 +81,6 @@ export class ViewHelper {
 				block: direction, // vertical
 				// inline: "center"    // horizontal
 			});
-		} else {
-			logger.trace("No element is bound to item");
 		}
 	}
 

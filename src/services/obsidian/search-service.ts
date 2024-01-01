@@ -100,16 +100,16 @@ export class SearchService {
 		const matchedLines = await this.lexicalEngine.searchLines(
 			lines,
 			queryText,
+			30
 		);
-		logger.debug(`matched lines count: ${matchedLines.length}`);
 
 		const fileSubItems = this.lineHighlighter
 			.parseAll(lines, matchedLines, "subItem", false)
 			.map((itemContext) => {
 				return {
 					text: itemContext.text,
-					originRow: itemContext.row,
-					originCol: itemContext.col,
+					row: itemContext.row,
+					col: itemContext.col,
 				} as FileSubItem;
 			});
 
