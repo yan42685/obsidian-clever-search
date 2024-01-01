@@ -3,7 +3,13 @@ import { App, MarkdownView, type EditorPosition } from "obsidian";
 import { NULL_NUMBER } from "src/globals/constants";
 import { ObsidianCommandEnum } from "src/globals/enums";
 import { PluginSetting } from "src/globals/plugin-setting";
-import { FileItem, Item, LineItem, SearchType } from "src/globals/search-types";
+import {
+	FileItem,
+	FileSubItem,
+	Item,
+	LineItem,
+	SearchType,
+} from "src/globals/search-types";
 import { PrivateApi } from "src/services/obsidian/private-api";
 import { FileType } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
@@ -18,10 +24,13 @@ export class ViewHelper {
 	private readonly setting = getInstance(PluginSetting);
 
 	updateSubItemIndex(
+		subItems: FileSubItem[],
 		currentIndex: number,
-		maxIndex: number,
 		direction: "next" | "prev",
 	): number {
+		const subItem = subItems[currentIndex];
+		const maxIndex = subItems.length - 1;
+		this.scrollTo("center", subItem);
 		if (direction === "next") {
 			return currentIndex < maxIndex ? currentIndex + 1 : currentIndex;
 		} else {
@@ -61,6 +70,22 @@ export class ViewHelper {
 		}
 	}
 
+	// for scroll bar
+	scrollTo(direction: ScrollLogicalPosition, item: Item) {
+		if (item.element) {
+			item.element.scrollIntoView({
+				behavior: "smooth",
+				// behavior: "auto",
+				// behavior: "instant",
+				//@ts-ignore  the type definition mistakenly spell `block` as `lock`, so there will be a warning
+				block: direction, // vertical
+				// inline: "center"    // horizontal
+			});
+		} else {
+			logger.trace("No element is bound to item");
+		}
+	}
+
 	private jumpInFile(row: number, col: number) {
 		this.scrollIntoViewForExistingView(row, col);
 	}
@@ -92,7 +117,7 @@ export class ViewHelper {
 		// WARN: this command inside this function will cause a warning in the console:
 		// [Violation] Forced reflow while executing JavaScript took 55ms
 		// if executing it in the `jumpInFile` before calling this function, this warning won't appear,
-		// but if removing the command in this function, we can't focus the editor when switching to an existing view 
+		// but if removing the command in this function, we can't focus the editor when switching to an existing view
 		this.privateApi.executeCommandById(
 			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
 		);

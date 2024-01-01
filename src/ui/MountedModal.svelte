@@ -11,7 +11,6 @@
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
-	import { logger } from "src/utils/logger";
 	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import type { SearchModal } from "./search-modal";
@@ -52,9 +51,14 @@
 				);
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex = 0;
+				viewHelper.scrollTo(
+					"start",
+					currFileSubItems[currSubItemIndex],
+				);
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
+			viewHelper.scrollTo("center", items[index]);
 		} else {
 			currContext = "";
 			currFileItem = null;
@@ -62,6 +66,7 @@
 			currItemIndex = NULL_NUMBER;
 		}
 	}
+	scrollTo;
 
 	// Handle input changes
 	async function handleInputAsync() {
@@ -110,17 +115,16 @@
 
 	function handleNextSubItem() {
 		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currFileSubItems,
 			currSubItemIndex,
-			currFileSubItems.length - 1,
 			"next",
 		);
-		logger.info(`currSubItemIndex; ${currSubItemIndex}`);
 	}
 
 	function handlePrevSubItem() {
 		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currFileSubItems,
 			currSubItemIndex,
-			currFileSubItems.length - 1,
 			"prev",
 		);
 	}
@@ -203,6 +207,7 @@
 					<ul>
 						{#each currFileSubItems as subItem, index}
 							<button
+								bind:this={subItem.element}
 								class:selected={index === currSubItemIndex}
 								class="file-sub-item"
 							>
