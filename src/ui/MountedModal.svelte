@@ -51,7 +51,7 @@
 					queryText,
 				);
 				currFileSubItems = currFileItem.subItems;
-				currSubItemIndex = index;
+				currSubItemIndex = 0;
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
