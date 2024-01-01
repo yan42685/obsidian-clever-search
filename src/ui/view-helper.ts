@@ -89,6 +89,10 @@ export class ViewHelper {
 	}
 
 	private scrollIntoViewForExistingView(row: number, col: number) {
+		// WARN: this command inside this function will cause a warning in the console:
+		// [Violation] Forced reflow while executing JavaScript took 55ms
+		// if executing it in the `jumpInFile` before calling this function, this warning won't appear,
+		// but if removing the command in this function, we can't focus the editor when switching to an existing view 
 		this.privateApi.executeCommandById(
 			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
 		);
