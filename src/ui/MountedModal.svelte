@@ -37,7 +37,7 @@
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
 	// Updates focused content and selected file index
-	function updateItem(index: number): void {
+	async function updateItemAsync(index: number): Promise<void> {
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
 			currItemIndex = index;
@@ -46,6 +46,10 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
+				currFileItem.subItems = await searchService.getFileSubItems(
+					currFileItem.path,
+					queryText,
+				);
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex = index;
 			} else {
@@ -60,7 +64,7 @@
 	}
 
 	// Handle input changes
-	async function handleInput() {
+	async function handleInputAsync() {
 		if (searchType === SearchType.IN_FILE) {
 			// searchResult = await searchService.deprecatedSearchInFile(queryText);
 			searchResult = await searchService.searchInFile(queryText);
@@ -82,24 +86,26 @@
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
-		updateItem(0);
+		await updateItemAsync(0);
 		// wait until all dynamic elements are mounted and rendered
 		await tick();
 	}
 
 	// Handle result click
-	function handleItemClick(index: number): void {
-		updateItem(index);
+	async function handleItemClick(index: number) {
+		await updateItemAsync(index);
 	}
 
 	// Select the next search result
-	function handleNextItem() {
-		updateItem(Math.min(currItemIndex + 1, searchResult.items.length - 1));
+	async function handleNextItem() {
+		await updateItemAsync(
+			Math.min(currItemIndex + 1, searchResult.items.length - 1),
+		);
 	}
 
 	// Select the previous search result
-	function handlePrevItem() {
-		updateItem(Math.max(currItemIndex - 1, 0));
+	async function handlePrevItem() {
+		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 	}
 
 	function handleNextSubItem() {
@@ -141,7 +147,7 @@
 	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
-	handleInput();
+	handleInputAsync();
 </script>
 
 <div class="search-container">
@@ -150,7 +156,7 @@
 			<input
 				bind:value={queryText}
 				bind:this={inputEl}
-				on:input={handleInput}
+				on:input={handleInputAsync}
 				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
 			/>
 		</div>
@@ -172,7 +178,9 @@
 						{:else if item instanceof FileItem}
 							<span class="file-item">
 								<span class="filename"
-									>{@html item.basename + HTML_4_SPACES + item.extension}</span
+									>{@html item.basename +
+										HTML_4_SPACES +
+										item.extension}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
@@ -214,8 +222,8 @@
 	.search-container {
 		display: flex;
 		margin-top: 10px;
-		white-space: pre-wrap;  /* 保证空格和换行符在渲染html时不被压缩掉 */
-		overflow-wrap: break-word;  /* long text won't be hidden if overflow: hidden is set */
+		white-space: pre-wrap; /* 保证空格和换行符在渲染html时不被压缩掉 */
+		overflow-wrap: break-word; /* long text won't be hidden if overflow: hidden is set */
 	}
 
 	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
@@ -305,8 +313,7 @@
 
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
 	.result-items ul button .line-item,
-	.result-items ul button .file-item 
-	{
+	.result-items ul button .file-item {
 		text-wrap: wrap;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
@@ -316,7 +323,7 @@
 	}
 
 	.result-items ul button .file-item {
-		-webkit-line-clamp: 6;  /* overwrite the previous rule */
+		-webkit-line-clamp: 6; /* overwrite the previous rule */
 	}
 
 	.result-items ul button .file-item span.filename {

@@ -9,7 +9,6 @@ import {
 	Line,
 	LineItem,
 	SearchResult,
-	type MatchedFile,
 } from "../../globals/search-types";
 import { FileType, FileUtil } from "../../utils/file-util";
 import { Database } from "../database/database";
@@ -58,17 +57,63 @@ export class SearchService {
 		if (lexicalMatches.length !== 0) {
 			return {
 				currPath: TO_BE_IMPL,
-				items: await this.parseFileItems(
-					queryText,
-					lexicalMatches,
-					EngineType.LEXICAL,
-				),
+				items: lexicalMatches.map((matchedFile) => {
+					// It is necessary to use a constructor with 'new', rather than using an object literal.
+					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
+					// (to correctly display data in Svelte components).
+					return new FileItem(
+						EngineType.LEXICAL,
+						matchedFile.path,
+						[],  // should be populated on demand
+						"nothing",
+					);
+				}),
 			};
 		} else {
 			logger.trace("lexical matched files count is 0");
 			// TODO: do semantic search
 			return result;
 		}
+	}
+
+	/**
+	 * it should be called on demand for better performance
+	 */
+	@monitorDecorator
+	async getFileSubItems(
+		path: string,
+		queryText: string,
+	): Promise<FileSubItem[]> {
+		if (FileUtil.getFileType(path) !== FileType.PLAIN_TEXT) {
+			logger.warn(
+				`file type for path "${path}" is not supported for sub-items.`,
+			);
+			return [];
+		}
+
+		const content = await this.dataProvider.readPlainText(path);
+		const lines = content
+			.split(FileUtil.SPLIT_EOL)
+			.map((text, index) => new Line(text, index));
+		logger.debug("target file lines count: ", lines.length);
+
+		const matchedLines = await this.lexicalEngine.searchLines(
+			lines,
+			queryText,
+		);
+		logger.debug(`matched lines count: ${matchedLines.length}`);
+
+		const fileSubItems = this.lineHighlighter
+			.parseAll(lines, matchedLines, "subItem", false)
+			.map((itemContext) => {
+				return {
+					text: itemContext.text,
+					originRow: itemContext.row,
+					originCol: itemContext.col,
+				} as FileSubItem;
+			});
+
+		return fileSubItems;
 	}
 
 	@monitorDecorator
@@ -120,7 +165,6 @@ export class SearchService {
 	 */
 	async deprecatedSearchInFile(queryText: string): Promise<SearchResult> {
 		const result = new SearchResult("", []);
-		const fileRetriever = getInstance(FileUtil);
 		const activeFile = this.app.workspace.getActiveFile();
 		if (
 			!queryText ||
@@ -144,63 +188,5 @@ export class SearchService {
 			currPath: path,
 			items: lineItems,
 		} as SearchResult;
-	}
-
-	// TODO: highlight by page, rather than reading all files
-	@monitorDecorator
-	private async parseFileItems(
-		queryText: string,
-		matchedFiles: MatchedFile[],
-		engineType: EngineType,
-	): Promise<FileItem[]> {
-		// TODO: limit to one and search on demand
-		const limit = 1;
-		logger.warn("current only highlight top " + limit + "files");
-		// TODO: do real highlight
-		const result = await Promise.all(
-			matchedFiles.slice(0, limit).map(async (f) => {
-				const path = f.path;
-				if (FileUtil.getFileType(path) === FileType.PLAIN_TEXT) {
-					const content = await this.dataProvider.readPlainText(path);
-					const lines = content
-						.split(FileUtil.SPLIT_EOL)
-						.map((text, index) => new Line(text, index));
-					logger.debug("target file lines count: ", lines.length);
-					const matchedLines = await this.lexicalEngine.searchLines(
-						lines,
-						queryText,
-					);
-					logger.debug(`matched lines count: ${matchedLines.length}`);
-					const fileSubItems = this.lineHighlighter
-						.parseAll(lines, matchedLines, "subItem", false)
-						.map((itemContext) => {
-							return {
-								text: itemContext.text,
-								originRow: itemContext.row,
-								originCol: itemContext.col,
-							} as FileSubItem;
-						});
-
-					// It is necessary to use a constructor with 'new', rather than using an object literal.
-					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
-					// (to correctly display data in Svelte components).
-					return new FileItem(
-						engineType,
-						f.path,
-						// [new FileSubItem(firstTenLines, 0, 0)],
-						fileSubItems,
-						null,
-					);
-				} else {
-					return new FileItem(
-						engineType,
-						f.path,
-						[],
-						"not supported filetype",
-					);
-				}
-			}),
-		);
-		return result;
 	}
 }
