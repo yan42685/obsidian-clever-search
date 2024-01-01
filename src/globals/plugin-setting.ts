@@ -26,7 +26,7 @@ export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	excludeExtensions: [],
 	search: {
 		fuzzyProportion: 0.2,
-		minTermLengthForPrefixSearch: 1,
+		minTermLengthForPrefixSearch: 2,
 		weightPath: 3,
 		weightH1: 1.6,
 		weightH2: 1.4,
@@ -51,7 +51,7 @@ export type ApiProvider = {
 
 export type SearchSetting = {
 	fuzzyProportion: 0.1 | 0.2;
-	minTermLengthForPrefixSearch: 1 | 2 | 3;
+	minTermLengthForPrefixSearch: 1 | 2 | 3 | 4;
 	weightPath: number;
 	weightH1: number;
 	weightH2: number;

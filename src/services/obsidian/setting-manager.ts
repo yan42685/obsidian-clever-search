@@ -48,23 +48,33 @@ class GeneralTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 
-		// 清空设置面板的内容
 		containerEl.empty();
 
-		// 创建设置组
+		new Setting(containerEl)
+			.setName("Min word Length to Trigger Prefix Search")
+			// For Chinese users, a setting of 1 or 2 is typically sufficient, because there are many different chars
+			.setDesc("Affect the responding speed for the first several characters")
+			.addSlider(text => text
+				.setLimits(1, 4, 1)
+				.setValue(this.setting.search.minTermLengthForPrefixSearch)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.setting.search.minTermLengthForPrefixSearch = value as 1 | 2 | 3 | 4;
+					await this.settingManager.saveSettings();
+				}),
+			);
+
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
 
-		// 创建设置组标题
 		const devSettingTitle = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-title",
 			text: "For Development",
 		});
 
-		// 创建设置组内容，初始状态为折叠
+		// collapse by default
 		const devSettingContent = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-content",
 		});
-
 		// devSettingContent.style.display = "none";
 		const initialCollapsed = isDevEnvironment ? false : true;
 		devSettingTitle.style.setProperty(
