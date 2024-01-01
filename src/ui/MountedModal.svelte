@@ -171,11 +171,8 @@
 							>
 						{:else if item instanceof FileItem}
 							<span class="file-item">
-								<span class="file-basename"
-									>{item.basename} {@html HTML_4_SPACES}</span
-								>
-								<span class="file-extension">
-									{item.extension}</span
+								<span class="filename"
+									>{@html item.basename + HTML_4_SPACES + item.extension}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
@@ -217,8 +214,8 @@
 	.search-container {
 		display: flex;
 		margin-top: 10px;
-		/* 保证空格和换行符在渲染html时不被压缩掉 */
-		white-space: pre-wrap;
+		white-space: pre-wrap;  /* 保证空格和换行符在渲染html时不被压缩掉 */
+		overflow-wrap: break-word;  /* long text won't be hidden if overflow: hidden is set */
 	}
 
 	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
@@ -307,7 +304,9 @@
 	}
 
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
-	.result-items ul button span.line-item {
+	.result-items ul button .line-item,
+	.result-items ul button .file-item 
+	{
 		text-wrap: wrap;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
@@ -316,13 +315,17 @@
 		text-overflow: ellipsis;
 	}
 
-	.result-items ul button span.file-basename {
-		/* width: 100%; */
+	.result-items ul button .file-item {
+		-webkit-line-clamp: 6;  /* overwrite the previous rule */
 	}
 
-	.result-items ul button span.file-extension {
+	.result-items ul button .file-item span.filename {
+		margin-top: -0.2em;
+		display: block;
 	}
-	.result-items ul button span.file-folder-path {
+
+	.result-items ul button .file-item span.file-folder-path {
+		color: grey;
 		display: block;
 	}
 	.right-pane {
@@ -334,7 +337,6 @@
 	.right-pane .preview-container {
 		margin: 0.7em 0.5em 0.7em 0.7em;
 		height: 70vh;
-		overflow-wrap: break-word;
 		overflow-y: auto;
 	}
 	.right-pane .preview-container p,
