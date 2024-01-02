@@ -133,6 +133,7 @@ export class LexicalEngine {
 	}
 
 
+	// TODO: only highlight terms.length >= 2 or auto-adjust by text language
 	/**
 	 * find all chars positions of terms in a given line
 	 */

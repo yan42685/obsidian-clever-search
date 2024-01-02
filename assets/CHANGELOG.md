@@ -11,3 +11,4 @@
 - Use debounced search and cached result to decrease the latency of input
 - Better in-file search performance
 - Better preview experience: blank lines located in boundary won't appear anymore
+- Adjust the modal styles
