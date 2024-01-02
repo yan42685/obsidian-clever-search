@@ -53,6 +53,10 @@ export class MyLib {
 			return LanguageEnum.other;
 		}
 	}
+
+	static sleep(ms: number) {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
 }
 
 export async function monitorExecution(

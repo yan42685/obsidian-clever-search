@@ -30,7 +30,7 @@ export class ViewHelper {
 	): number {
 		const subItem = subItems[currentIndex];
 		const maxIndex = subItems.length - 1;
-		this.scrollTo("center", subItem);
+		this.scrollTo("center", subItem, "smooth");
 		if (direction === "next") {
 			return currentIndex < maxIndex ? currentIndex + 1 : currentIndex;
 		} else {
@@ -71,10 +71,10 @@ export class ViewHelper {
 	}
 
 	// for scroll bar
-	scrollTo(direction: ScrollLogicalPosition, item: Item) {
+	scrollTo(direction: ScrollLogicalPosition, item: Item, behavior: ScrollBehavior) {
 		if (item.element) {
 			item.element.scrollIntoView({
-				behavior: "smooth",
+				behavior: behavior,
 				// behavior: "auto",
 				// behavior: "instant",
 				//@ts-ignore  the type definition mistakenly spell `block` as `lock`, so there will be a warning
