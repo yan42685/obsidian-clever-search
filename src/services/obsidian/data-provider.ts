@@ -11,6 +11,7 @@ export class DataProvider {
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly vault = getInstance(Vault);
 	private readonly app = getInstance(App);
+	private readonly supportedExtensions = new Set(["md"]);
 
 	private static readonly contentIndexableFileTypes = new Set([
 		FileType.PLAIN_TEXT,
@@ -18,14 +19,12 @@ export class DataProvider {
 	]);
 
 	async generateAllIndexedDocuments(): Promise<IndexedDocument[]> {
-		const fileRetriever = getInstance(FileUtil);
 		const filesToIndex = this.allFilesToBeIndexed();
 		return Promise.all(
 			filesToIndex.map(async (file) => {
 				if (this.isContentIndexable(file)) {
 					if (
-						FileUtil.getFileType(file.path) ===
-						FileType.PLAIN_TEXT
+						FileUtil.getFileType(file.path) === FileType.PLAIN_TEXT
 					) {
 						return {
 							path: file.path,
@@ -53,7 +52,6 @@ export class DataProvider {
 		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join("");
 	}
 
-
 	// @monitorDecorator
 	allFilesToBeIndexed(): TFile[] {
 		// get all fileRefs cached by obsidian
@@ -62,13 +60,17 @@ export class DataProvider {
 		FileUtil.countFileByExtensions(files);
 
 		// TODO: compare mtime and then filter
-		const result = files.filter((file) => this.shouldIndex(file));
-		logger.info(`files to be indexed: ${files.length}`);
-		FileUtil.countFileByExtensions(result);
+		const filesToIndex = files.filter((file) => this.shouldIndex(file));
+		logger.info(`files to be indexed: ${filesToIndex.length}`);
+		FileUtil.countFileByExtensions(filesToIndex);
 
-		return result;
+		return filesToIndex;
 	}
 
+	shouldIndex(file: TFile): boolean {
+		// TODO: filter by extensions and paths
+		return this.supportedExtensions.has(FileUtil.getExtension(file.path));
+	}
 
 	// @monitorDecorator
 	/**
@@ -78,14 +80,15 @@ export class DataProvider {
 	 * @throws Error if the file extension is not supported.
 	 */
 	async readPlainText(fileOrPath: TFile | string): Promise<string> {
-		const file = typeof fileOrPath === "string"
-			? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
-			: fileOrPath;
+		const file =
+			typeof fileOrPath === "string"
+				? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
+				: fileOrPath;
 		if (FileUtil.getFileType(file.path) === FileType.PLAIN_TEXT) {
 			return this.vault.cachedRead(file);
 		} else {
 			throw Error(
-				`unsupported file extension as plain text to read, path: ${file.path}`
+				`unsupported file extension as plain text to read, path: ${file.path}`,
 			);
 		}
 	}
@@ -94,16 +97,9 @@ export class DataProvider {
 		return (await this.readPlainText(fileOrPath)).split(FileUtil.SPLIT_EOL);
 	}
 
-	private shouldIndex(file: TFile): boolean {
-		// TODO: filter by extensions and paths
-		return true;
-	}
-
 	private isContentIndexable(file: TFile): boolean {
 		return DataProvider.contentIndexableFileTypes.has(
-			FileUtil.getFileType(file.path)
+			FileUtil.getFileType(file.path),
 		);
 	}
 }
-
-

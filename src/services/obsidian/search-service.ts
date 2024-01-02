@@ -1,4 +1,6 @@
-import { App, Component } from "obsidian";
+import { App } from "obsidian";
+import { THIS_PLUGIN } from "src/globals/constants";
+import type CleverSearch from "src/main";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -18,29 +20,16 @@ import { DataProvider } from "./data-provider";
 
 @singleton()
 export class SearchService {
-	app: App = getInstance(App);
-	component: Component = new Component();
-	database: Database = getInstance(Database);
-	dataProvider: DataProvider = getInstance(DataProvider);
-	lexicalEngine: LexicalEngine = getInstance(LexicalEngine);
-	lineHighlighter = getInstance(LineHighlighter);
+	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	private readonly app = getInstance(App);
+	private readonly database = getInstance(Database);
+	private readonly dataProvider = getInstance(DataProvider);
+	private readonly lexicalEngine = getInstance(LexicalEngine);
+	private readonly lineHighlighter = getInstance(LineHighlighter);
 
 	@monitorDecorator
 	async initAsync() {
-		logger.trace("Init lexical engine...");
-		const prevData = await this.database.getMiniSearchData();
-		if (prevData) {
-			logger.trace("Previous minisearch data is found.");
-			this.lexicalEngine.reIndexAll(prevData);
-		} else {
-			logger.trace(
-				"Previous minisearch data doesn't exists, reading files via obsidian...",
-			);
-			const documents =
-				await this.dataProvider.generateAllIndexedDocuments();
-			await this.lexicalEngine.reIndexAll(documents);
-		}
-		logger.trace("Lexical engine is ready");
+		await this.initSearchEngines();
 	}
 
 	@monitorDecorator
@@ -188,5 +177,26 @@ export class SearchService {
 			currPath: path,
 			items: lineItems,
 		} as SearchResult;
+	}
+
+	private async initSearchEngines() {
+		logger.trace("Init lexical engine...");
+		const prevData = await this.database.getMiniSearchData();
+		if (prevData) {
+			logger.trace("Previous minisearch data is found.");
+			this.lexicalEngine.reIndexAll(prevData);
+		} else {
+			logger.trace(
+				"Previous minisearch data doesn't exists, reading files via obsidian...",
+			);
+			const documents =
+				await this.dataProvider.generateAllIndexedDocuments();
+			await this.lexicalEngine.reIndexAll(documents);
+		}
+		logger.trace("Lexical engine is ready");
+	}
+
+	private async startTrackingFiles() {
+
 	}
 }

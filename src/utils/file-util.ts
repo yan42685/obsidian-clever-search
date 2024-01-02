@@ -20,7 +20,7 @@ export class FileUtil {
 	// static SPLIT_EOL = /\r?\n|\r/;   // cross-platform end of line, used for strings.split()
 	static readonly SPLIT_EOL = "\n"; // stay consistent with the logic that Obsidian uses to handle lines
 	// static readonly JOIN_EOL = os.EOL; // cross-platform end of line, used for string.join()
-	static readonly JOIN_EOL = "\n"; 
+	static readonly JOIN_EOL = "\n";
 	private static readonly fileTypeMap: Map<string, FileType> = new Map();
 	static {
 		if (isDevEnvironment) {
@@ -28,7 +28,6 @@ export class FileUtil {
 			FileUtil.fileTypeMap.set("", FileType.PLAIN_TEXT);
 		}
 		FileUtil.fileTypeMap.set("md", FileType.PLAIN_TEXT);
-		FileUtil.fileTypeMap.set("markdown", FileType.PLAIN_TEXT);
 		FileUtil.fileTypeMap.set("txt", FileType.PLAIN_TEXT);
 		FileUtil.fileTypeMap.set("jpg", FileType.IMAGE);
 		FileUtil.fileTypeMap.set("png", FileType.IMAGE);
@@ -69,23 +68,12 @@ export class FileUtil {
 
 	static countFileByExtensions(files: TFile[]): Record<string, number> {
 		const extensionCountMap = new Map<string, number>();
-		const commonExtensions = ["no_extension", "md", "txt"];
-		const uncommonExtensionPathMap = new Map<string, string[]>();
 		files.forEach((file) => {
 			const ext = file.extension || "no_extension";
 			extensionCountMap.set(ext, (extensionCountMap.get(ext) || 0) + 1);
-			if (!commonExtensions.includes(ext)) {
-				const paths = uncommonExtensionPathMap.get(ext) || [];
-				paths.push(file.path);
-				uncommonExtensionPathMap.set(ext, paths);
-			}
 		});
 		const countResult = Object.fromEntries(extensionCountMap);
-		const uncommonPathsResult = Object.fromEntries(
-			uncommonExtensionPathMap,
-		);
 		logger.trace(countResult);
-		logger.trace(uncommonPathsResult);
 		return countResult;
 	}
 }
