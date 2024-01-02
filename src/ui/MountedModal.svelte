@@ -295,7 +295,6 @@
 	}
 
 	.result-items ul {
-		list-style: none; /* 移除默认的列表样式 */
 		padding: 0 0.5em 0 0;
 		margin: 0.2em 0 0 0;
 		width: 90%;
@@ -312,15 +311,13 @@
 		padding: 0.65em;
 		margin-bottom: 0.5em;
 		/* width: 100%; */
-		width: 23vw;
+		width: 24.35vw;
 		height: fit-content;
 		/* max-height: 5.5em; */
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
-		border: none;
 		border-radius: 4px;
 		cursor: pointer;
-		transition: background-color 0.01s;
 	}
 
 	.result-items ul button:hover,
@@ -376,7 +373,7 @@
 		justify-content: left;
 		margin-bottom: 1em;
 		height: fit-content;
-		width: 100%;
+		width: 40.2vw;
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;

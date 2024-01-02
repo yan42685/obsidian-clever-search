@@ -68,9 +68,9 @@ settings:
 
 */
 .cs-modal {
-	/* remove unused room */
-	width: 70%;
+	width: 73.5%;
 	height: 80%;
+	/* remove unused room */
 	overflow: hidden;
 }
 /* mark {
