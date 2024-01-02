@@ -1,4 +1,4 @@
-import { App, TAbstractFile, TFile, Vault, parseFrontMatterAliases } from "obsidian";
+import { App, TAbstractFile, TFile, TFolder, Vault, parseFrontMatterAliases } from "obsidian";
 import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
@@ -18,10 +18,9 @@ export class DataProvider {
 		FileType.IMAGE,
 	]);
 
-	async generateAllIndexedDocuments(): Promise<IndexedDocument[]> {
-		const filesToIndex = this.allFilesToBeIndexed();
+	async generateAllIndexedDocuments(files: TFile[]): Promise<IndexedDocument[]> {
 		return Promise.all(
-			filesToIndex.map(async (file) => {
+			files.map(async (file) => {
 				if (this.isContentIndexable(file)) {
 					if (
 						FileUtil.getFileType(file.path) === FileType.PLAIN_TEXT
@@ -47,11 +46,6 @@ export class DataProvider {
 		);
 	}
 
-	private parseAliases(file: TFile) {
-		const metadata = this.app.metadataCache.getFileCache(file);
-		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join("");
-	}
-
 	// @monitorDecorator
 	allFilesToBeIndexed(): TFile[] {
 		// get all fileRefs cached by obsidian
@@ -67,12 +61,18 @@ export class DataProvider {
 		return filesToIndex;
 	}
 
-	shouldIndex(fileOrFolder: TAbstractFile): boolean {
-		if (!(fileOrFolder instanceof TFile)) {
+	shouldIndex(fileOrPath: TFile | TAbstractFile | string): boolean {
+		if (fileOrPath instanceof TFolder) {
 			return false;
 		}
+		let path: string;
+		if (typeof fileOrPath === "string") {
+			path = fileOrPath;
+		} else {
+			path = fileOrPath.path;
+		}
 		// TODO: filter by extensions and paths
-		return this.supportedExtensions.has(FileUtil.getExtension(fileOrFolder.path));
+		return this.supportedExtensions.has(FileUtil.getExtension(path));
 	}
 
 	// @monitorDecorator
@@ -98,6 +98,11 @@ export class DataProvider {
 
 	async readPlainTextLines(fileOrPath: TFile | string): Promise<string[]> {
 		return (await this.readPlainText(fileOrPath)).split(FileUtil.SPLIT_EOL);
+	}
+
+	private parseAliases(file: TFile) {
+		const metadata = this.app.metadataCache.getFileCache(file);
+		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join("");
 	}
 
 	private isContentIndexable(file: TFile): boolean {

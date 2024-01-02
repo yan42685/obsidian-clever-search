@@ -3,6 +3,7 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
+import { debounce } from "throttle-debounce";
 import { singleton } from "tsyringe";
 import {
 	EngineType,
@@ -189,8 +190,11 @@ export class SearchService {
 			logger.trace(
 				"Previous minisearch data doesn't exists, reading files via obsidian...",
 			);
+			const filesToIndex = this.dataProvider.allFilesToBeIndexed();
 			const documents =
-				await this.dataProvider.generateAllIndexedDocuments();
+				await this.dataProvider.generateAllIndexedDocuments(
+					filesToIndex,
+				);
 			await this.lexicalEngine.reIndexAll(documents);
 		}
 		logger.trace("Lexical engine is ready");
@@ -203,60 +207,15 @@ export class FileWatcher {
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
 	private readonly app = getInstance(App);
-	private readonly TIME_OUT = 1000;
-	private async onCreate(file: TAbstractFile) {
-		if (file instanceof TFile) {
-			logger.debug(`created: ${file.path}`);
-		}
-	}
-	private async onDelete(file: TAbstractFile) {
-		if (file instanceof TFile) {
-			logger.debug(`deleted: ${file.path}`);
-		}
-	}
-	private async onRename(file: TAbstractFile, oldPath: string) {
-		if (file instanceof TFile) {
-			logger.debug(`renamed: ${oldPath} => ${file.path}`);
-		}
-	}
-	private async onModify(file: TAbstractFile) {
-		if (file instanceof TFile) {
-			logger.debug(`modified: ${file.path}`);
-		}
-	}
+	private readonly DEBOUNCE_INTERVAL = 2000;
 
 	start() {
-		// // Create
-		// this.app.vault.on("create", async (file) => {
-		// 	if ( this.dataProvider.shouldIndex(file)) {
-		// 		const indexedDocument =
-		// 			await this.dataProvider.generateIndexedDocument(file);
-		// 		this.lexicalEngine.addDocument(indexedDocument);
-		// 	}
-		// });
-
-		// // Delete
-		// this.app.vault.on("delete", (file) => {
-		// 	if (this.dataProvider.shouldIndex(file)) {
-		// 		this.lexicalEngine.removeDocument(file.path);
-		// 	}
-		// });
-
-		// Modify  // it will be triggered twice by obsidian
+		this.stop(); // in case THIS_PLUGIN.onunload isn't called correctly, sometimes it happens
 		this.app.vault.on("create", this.onCreate);
 		this.app.vault.on("delete", this.onDelete);
 		this.app.vault.on("rename", this.onRename);
 		this.app.vault.on("modify", this.onModify);
 		logger.debug("FileWatcher started");
-		// // Rename
-		// this.app.vault.on("rename", async (file, oldPath) => {
-		// 	if (this.dataProvider.shouldIndex(file)) {
-		// 		this.lexicalEngine.removeDocument(oldPath);
-		// 		const indexedDocument =
-		// 			await this.dataProvider.generateIndexedDocument(file);
-		// 		this.lexicalEngine.addDocument(indexedDocument);
-		// 	}
-		// });
 	}
 
 	stop() {
@@ -264,6 +223,51 @@ export class FileWatcher {
 		this.app.vault.off("delete", this.onDelete);
 		this.app.vault.off("rename", this.onRename);
 		this.app.vault.off("modify", this.onModify);
-		logger.debug("FileWatcher stopped");
 	}
+
+	// should define callbacks as arrow functions rather than methods,
+	// otherwise `this` will be changed when used as callbacks
+	private readonly onCreate = (file: TAbstractFile) => {
+		logger.debug(`created: ${file.path}`);
+		this.addDocument(file);
+	};
+	private readonly onDelete = (file: TAbstractFile) => {
+		logger.debug(`deleted: ${file.path}`);
+		this.deleteDocument(file.path);
+	};
+	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
+		logger.debug(`renamed: ${oldPath} => ${file.path}`);
+		this.updateDocumentDebounced(file, oldPath);
+	};
+	private readonly onModify = (file: TAbstractFile) => {
+		logger.debug(`modified: ${file.path}`);
+		this.updateDocumentDebounced(file, file.path);
+	};
+
+	private readonly addDocument = async (file: TAbstractFile) => {
+		if (this.dataProvider.shouldIndex(file)) {
+			const document = (
+				await this.dataProvider.generateAllIndexedDocuments([
+					file as TFile,
+				])
+			)[0];
+			this.lexicalEngine.addAllDocuments([document]);
+		}
+	};
+
+	private readonly deleteDocument = (path: string) => {
+		if (this.dataProvider.shouldIndex(path)) {
+			this.lexicalEngine.deleteAllDocuments([path]);
+		}
+	};
+
+	private readonly updateDocumentDebounced = debounce(
+		this.DEBOUNCE_INTERVAL,
+		async (file: TAbstractFile, oldPath: string) => {
+			if (this.dataProvider.shouldIndex(file)) {
+				this.deleteDocument(oldPath);
+				await this.addDocument(file);
+			}
+		},
+	);
 }

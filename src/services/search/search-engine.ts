@@ -37,9 +37,7 @@ export class LexicalEngine {
 		if (Array.isArray(data)) {
 			logger.trace("Indexing all documents...");
 			// Process data with type: IndexedDocument[], need lots of time to create reversed indexes
-			await this.filesIndex.addAllAsync(data, {
-				chunkSize: this.option.documentChunkSize,
-			});
+			await this.addAllDocuments(data);
 		} else {
 			logger.trace("Loading indexed data...");
 			// Process data with type: AsPlainObject, faster
@@ -116,10 +114,7 @@ export class LexicalEngine {
 		});
 	}
 
-	async fzfMatch(
-		queryText: string,
-		lines: Line[],
-	): Promise<MatchedLine[]> {
+	async fzfMatch(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
 		const fzf = new AsyncFzf(lines, {
 			selector: (item) => item.text,
 		});
@@ -132,13 +127,21 @@ export class LexicalEngine {
 		});
 	}
 
-	addAllDocuments() {
-
+	async addAllDocuments(documents: IndexedDocument[]) {
+		const docsToAdd = documents.filter(
+			(doc) => !this.filesIndex.has(doc.path),
+		);
+		await this.filesIndex.addAllAsync(docsToAdd, {
+			chunkSize: this.option.documentChunkSize,
+		});
+		logger.debug(`added ${docsToAdd.length}`);
 	}
-	removeAllDocuments() {
 
+	deleteAllDocuments(paths: string[]) {
+		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
+		this.filesIndex.discardAll(docsToDiscard);
+		logger.debug(`deleted ${docsToDiscard.length}`);
 	}
-
 
 	// TODO: only highlight terms.length >= 2 or auto-adjust by text language
 	/**
