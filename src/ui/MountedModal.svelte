@@ -13,7 +13,7 @@
 	import { FileType } from "src/utils/file-util";
 	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
-	import { throttle } from "throttle-debounce";
+	import { debounce } from "throttle-debounce";
 	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
 
@@ -23,8 +23,8 @@
 	export let modal: SearchModal;
 	export let searchType: SearchType;
 	export let queryText: string;
-	const DEFAULT_RESULT = new SearchResult("", []);
-	let searchResult: SearchResult = DEFAULT_RESULT;
+	const cachedResult = new Map<string, SearchResult>();   // remove the unnecessary latency when backspacing
+	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
 
@@ -48,13 +48,14 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
+				// this result also can be cached if necessary in the future
 				currFileItem.subItems = await searchService.getFileSubItems(
 					currFileItem.path,
 					queryText,
 				);
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex = 0;
-				await tick();  // wait until subItems are rendered by svelte
+				await tick(); // wait until subItems are rendered by svelte
 				viewHelper.scrollTo(
 					"start",
 					currFileSubItems[currSubItemIndex],
@@ -74,30 +75,36 @@
 	}
 
 	// Handle input changes
-	const handleInputThrottled = throttle(200, () => handleInputAsync());
+	const handleInputDebounced = debounce(100, () => handleInputAsync());
 
 	async function handleInputAsync() {
+		if (cachedResult.has(queryText)) {
+			searchResult = cachedResult.get(queryText) as SearchResult;
+			await updateItemAsync(0);
+			return;
+		}
 		if (searchType === SearchType.IN_FILE) {
 			// searchResult = await searchService.deprecatedSearchInFile(queryText);
 			searchResult = await searchService.searchInFile(queryText);
-			searchResult.items.forEach((x) => {
-				const item = x as LineItem;
-				// console.log(item.line.text);
-				// if (item.element) {
-				// 	MarkdownRenderer.render(
-				// 		app,
-				// 		item.line.text,
-				// 		item.element,
-				// 		searchResult.currPath,
-				// 		new Component(),
-				// 	);
-				// }
-			});
+			// searchResult.items.forEach((x) => {
+			// 	const item = x as LineItem;
+			// 	console.log(item.line.text);
+			// 	if (item.element) {
+			// 		MarkdownRenderer.render(
+			// 			app,
+			// 			item.line.text,
+			// 			item.element,
+			// 			searchResult.currPath,
+			// 			new Component(),
+			// 		);
+			// 	}
+			// });
 		} else if (searchType === SearchType.IN_VAULT) {
 			searchResult = await searchService.searchInVault(queryText);
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
+		cachedResult.set(queryText, searchResult);
 		await updateItemAsync(0);
 	}
 
@@ -165,7 +172,7 @@
 			<input
 				bind:value={queryText}
 				bind:this={inputEl}
-				on:input={handleInputThrottled}
+				on:input={handleInputDebounced}
 				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
 			/>
 		</div>

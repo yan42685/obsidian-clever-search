@@ -71,8 +71,8 @@ export class ViewHelper {
 	}
 
 	// for scroll bar
-	scrollTo(direction: ScrollLogicalPosition, item: Item, behavior: ScrollBehavior) {
-		if (item.element) {
+	scrollTo(direction: ScrollLogicalPosition, item: Item | undefined, behavior: ScrollBehavior) {
+		if (item && item.element) {
 			item.element.scrollIntoView({
 				behavior: behavior,
 				// behavior: "auto",
