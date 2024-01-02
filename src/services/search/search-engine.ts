@@ -132,6 +132,13 @@ export class LexicalEngine {
 		});
 	}
 
+	addAllDocuments() {
+
+	}
+	removeAllDocuments() {
+
+	}
+
 
 	// TODO: only highlight terms.length >= 2 or auto-adjust by text language
 	/**

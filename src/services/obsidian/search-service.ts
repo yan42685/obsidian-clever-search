@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, TAbstractFile, TFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { logger } from "src/utils/logger";
@@ -29,7 +29,7 @@ export class SearchService {
 
 	@monitorDecorator
 	async initAsync() {
-		await this.initSearchEngines();
+		await this.initLexicalEngines();
 	}
 
 	@monitorDecorator
@@ -53,7 +53,7 @@ export class SearchService {
 					return new FileItem(
 						EngineType.LEXICAL,
 						matchedFile.path,
-						[],  // should be populated on demand
+						[], // should be populated on demand
 						"nothing",
 					);
 				}),
@@ -89,7 +89,7 @@ export class SearchService {
 		const matchedLines = await this.lexicalEngine.searchLines(
 			lines,
 			queryText,
-			30
+			30,
 		);
 
 		const fileSubItems = this.lineHighlighter
@@ -179,7 +179,7 @@ export class SearchService {
 		} as SearchResult;
 	}
 
-	private async initSearchEngines() {
+	private async initLexicalEngines() {
 		logger.trace("Init lexical engine...");
 		const prevData = await this.database.getMiniSearchData();
 		if (prevData) {
@@ -195,8 +195,75 @@ export class SearchService {
 		}
 		logger.trace("Lexical engine is ready");
 	}
+}
 
-	private async startTrackingFiles() {
+@singleton()
+export class FileWatcher {
+	private readonly database = getInstance(Database);
+	private readonly dataProvider = getInstance(DataProvider);
+	private readonly lexicalEngine = getInstance(LexicalEngine);
+	private readonly app = getInstance(App);
+	private readonly TIME_OUT = 1000;
+	private async onCreate(file: TAbstractFile) {
+		if (file instanceof TFile) {
+			logger.debug(`created: ${file.path}`);
+		}
+	}
+	private async onDelete(file: TAbstractFile) {
+		if (file instanceof TFile) {
+			logger.debug(`deleted: ${file.path}`);
+		}
+	}
+	private async onRename(file: TAbstractFile, oldPath: string) {
+		if (file instanceof TFile) {
+			logger.debug(`renamed: ${oldPath} => ${file.path}`);
+		}
+	}
+	private async onModify(file: TAbstractFile) {
+		if (file instanceof TFile) {
+			logger.debug(`modified: ${file.path}`);
+		}
+	}
 
+	start() {
+		// // Create
+		// this.app.vault.on("create", async (file) => {
+		// 	if ( this.dataProvider.shouldIndex(file)) {
+		// 		const indexedDocument =
+		// 			await this.dataProvider.generateIndexedDocument(file);
+		// 		this.lexicalEngine.addDocument(indexedDocument);
+		// 	}
+		// });
+
+		// // Delete
+		// this.app.vault.on("delete", (file) => {
+		// 	if (this.dataProvider.shouldIndex(file)) {
+		// 		this.lexicalEngine.removeDocument(file.path);
+		// 	}
+		// });
+
+		// Modify  // it will be triggered twice by obsidian
+		this.app.vault.on("create", this.onCreate);
+		this.app.vault.on("delete", this.onDelete);
+		this.app.vault.on("rename", this.onRename);
+		this.app.vault.on("modify", this.onModify);
+		logger.debug("FileWatcher started");
+		// // Rename
+		// this.app.vault.on("rename", async (file, oldPath) => {
+		// 	if (this.dataProvider.shouldIndex(file)) {
+		// 		this.lexicalEngine.removeDocument(oldPath);
+		// 		const indexedDocument =
+		// 			await this.dataProvider.generateIndexedDocument(file);
+		// 		this.lexicalEngine.addDocument(indexedDocument);
+		// 	}
+		// });
+	}
+
+	stop() {
+		this.app.vault.off("create", this.onCreate);
+		this.app.vault.off("delete", this.onDelete);
+		this.app.vault.off("rename", this.onRename);
+		this.app.vault.off("modify", this.onModify);
+		logger.debug("FileWatcher stopped");
 	}
 }
