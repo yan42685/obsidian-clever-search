@@ -172,6 +172,7 @@ export default class CleverSearch extends Plugin {
 
 	onunload() {
 		document.body.classList.remove("cs-privacy-blur");
+		getInstance(PluginManager).onunload();
 	}
 
 

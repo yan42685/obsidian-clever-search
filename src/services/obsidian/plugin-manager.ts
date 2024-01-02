@@ -1,8 +1,7 @@
 import { singleton } from "tsyringe";
 import { getInstance } from "../../utils/my-lib";
-import { LexicalEngine } from "../search/search-engine";
+import { FileWatcher, SearchService } from "./search-service";
 import { SettingManager } from "./setting-manager";
-import { SearchService } from "./search-service";
 
 @singleton()
 export class PluginManager {
@@ -10,6 +9,11 @@ export class PluginManager {
 	async initAsync() {
 		await getInstance(SettingManager).initAsync();
 		await getInstance(SearchService).initAsync();
+		getInstance(FileWatcher).start();
 	}
 
+	// should be called in CleverSearch.onunload()
+	onunload() {
+		getInstance(FileWatcher).stop();
+	}
 }

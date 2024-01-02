@@ -1,4 +1,4 @@
-import { App, TFile, Vault, parseFrontMatterAliases } from "obsidian";
+import { App, TAbstractFile, TFile, Vault, parseFrontMatterAliases } from "obsidian";
 import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
@@ -67,9 +67,12 @@ export class DataProvider {
 		return filesToIndex;
 	}
 
-	shouldIndex(file: TFile): boolean {
+	shouldIndex(fileOrFolder: TAbstractFile): boolean {
+		if (!(fileOrFolder instanceof TFile)) {
+			return false;
+		}
 		// TODO: filter by extensions and paths
-		return this.supportedExtensions.has(FileUtil.getExtension(file.path));
+		return this.supportedExtensions.has(FileUtil.getExtension(fileOrFolder.path));
 	}
 
 	// @monitorDecorator
