@@ -13,6 +13,7 @@
 	import { FileType } from "src/utils/file-util";
 	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
+	import { throttle } from "throttle-debounce";
 	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
 
@@ -37,6 +38,8 @@
 
 	// Updates focused content and selected file index
 	async function updateItemAsync(index: number): Promise<void> {
+		// wait until all dynamic elements are mounted and rendered
+		await tick();
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
 			currItemIndex = index;
@@ -51,14 +54,17 @@
 				);
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex = 0;
+				await tick();  // wait until subItems are rendered by svelte
 				viewHelper.scrollTo(
 					"start",
 					currFileSubItems[currSubItemIndex],
+					"instant",
 				);
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
-			viewHelper.scrollTo("center", items[index]);
+			await tick();
+			viewHelper.scrollTo("center", items[index], "smooth");
 		} else {
 			currContext = "";
 			currFileItem = null;
@@ -66,9 +72,10 @@
 			currItemIndex = NULL_NUMBER;
 		}
 	}
-	scrollTo;
 
 	// Handle input changes
+	const handleInputThrottled = throttle(200, () => handleInputAsync());
+
 	async function handleInputAsync() {
 		if (searchType === SearchType.IN_FILE) {
 			// searchResult = await searchService.deprecatedSearchInFile(queryText);
@@ -92,8 +99,6 @@
 			throw Error(TO_BE_IMPL);
 		}
 		await updateItemAsync(0);
-		// wait until all dynamic elements are mounted and rendered
-		await tick();
 	}
 
 	// Handle result click
@@ -160,7 +165,7 @@
 			<input
 				bind:value={queryText}
 				bind:this={inputEl}
-				on:input={handleInputAsync}
+				on:input={handleInputThrottled}
 				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
 			/>
 		</div>
