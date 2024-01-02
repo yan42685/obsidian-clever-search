@@ -30,7 +30,7 @@ export class ViewHelper {
 	): number {
 		const subItem = subItems[currentIndex];
 		const maxIndex = subItems.length - 1;
-		this.scrollTo("center", subItem, "smooth");
+		this.scrollTo("center", subItem, "auto");
 		if (direction === "next") {
 			return currentIndex < maxIndex ? currentIndex + 1 : currentIndex;
 		} else {
