@@ -238,7 +238,6 @@
 <style>
 	.search-container {
 		display: flex;
-		margin-top: 10px;
 		white-space: pre-wrap; /* 保证空格和换行符在渲染html时不被压缩掉 */
 		overflow-wrap: break-word; /* long text won't be hidden if overflow: hidden is set */
 	}
@@ -253,15 +252,14 @@
 	.left-pane {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
+		align-items: left;
 		width: 40%;
 	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
-		top: 0;
+		top: -0.2em;
 		left: 0;
-		padding-bottom: 15px;
-		width: 90%;
+		width: 97%;
 		height: 30px;
 	}
 	/* 似乎不能在input上面放伪元素 */
@@ -288,30 +286,24 @@
 	.result-items {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		width: 100%;
-		height: 67.3vh;
-		margin-top: 1em;
+		height: 70vh;
+		margin-top: 0.15em;
 	}
 
 	.result-items ul {
 		padding: 0 0.5em 0 0;
-		margin: 0.2em 0 0 0;
-		width: 90%;
-		/* height: 36vw; */
-		overflow-y: auto;
+		margin-bottom: 0;
+		width: 97%;
 		overflow-x: hidden;
-		justify-content: left;
 	}
 
 	.result-items ul button {
-		display: flex;
 		align-items: center;
 		justify-content: left;
 		padding: 0.65em;
-		margin-bottom: 0.5em;
+		margin: 0.5em 0 0 0.15em;
 		/* width: 100%; */
-		width: 24.35vw;
+		width: 25.35vw;
 		height: fit-content;
 		/* max-height: 5.5em; */
 		text-align: left;
@@ -352,20 +344,24 @@
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 6px;
-		height: 72.8vh;
+		height: 73.97vh;
 		width: 60%;
 	}
 	.right-pane .preview-container {
-		margin: 0.7em 0.5em 0.7em 0.7em;
-		height: 70vh;
+		margin: 0.7em 0 0 0.7em;
+		height: 72.5vh;
 		overflow-y: auto;
 	}
 	.right-pane .preview-container p,
 	.right-pane .preview-container ul {
 		margin: 0;
 		padding: 0;
+		overflow-x: hidden;
 	}
-	/* TODO: highlight current subitem */
+	.right-pane .preview-container p {
+		width: 39.7vw;
+	}
+
 	.right-pane .preview-container ul button.file-sub-item {
 		text-wrap: wrap;
 		display: block;
@@ -373,7 +369,7 @@
 		justify-content: left;
 		margin-bottom: 1em;
 		height: fit-content;
-		width: 40.2vw;
+		width: 39.2vw;
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;

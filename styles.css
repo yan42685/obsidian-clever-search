@@ -68,8 +68,9 @@ settings:
 
 */
 .cs-modal {
-	width: 73.5%;
+	width: 71.5%;
 	height: 80%;
+	padding: 1.5em 1em 1.5em 1.5em;
 	/* remove unused room */
 	overflow: hidden;
 }
