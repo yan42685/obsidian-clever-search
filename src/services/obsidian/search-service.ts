@@ -1,9 +1,8 @@
-import { App, TAbstractFile, TFile } from "obsidian";
+import { App, TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
-import { debounce } from "throttle-debounce";
 import { singleton } from "tsyringe";
 import {
 	EngineType,
@@ -17,7 +16,8 @@ import { FileType, FileUtil } from "../../utils/file-util";
 import { Database } from "../database/database";
 import { LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/search-engine";
-import { DataProvider } from "./data-provider";
+import { DataManager, DocAddOperation, DocDeleteOperation } from "./user-data/data-manager";
+import { DataProvider } from "./user-data/data-provider";
 
 @singleton()
 export class SearchService {
@@ -203,11 +203,8 @@ export class SearchService {
 
 @singleton()
 export class FileWatcher {
-	private readonly database = getInstance(Database);
-	private readonly dataProvider = getInstance(DataProvider);
-	private readonly lexicalEngine = getInstance(LexicalEngine);
+	private readonly dataManager = getInstance(DataManager);
 	private readonly app = getInstance(App);
-	private readonly DEBOUNCE_INTERVAL = 2000;
 
 	start() {
 		this.stop(); // in case THIS_PLUGIN.onunload isn't called correctly, sometimes it happens
@@ -229,46 +226,21 @@ export class FileWatcher {
 	// otherwise `this` will be changed when used as callbacks
 	private readonly onCreate = (file: TAbstractFile) => {
 		logger.debug(`created: ${file.path}`);
-		this.addDocument(file);
+		this.dataManager.receiveDocOperation(new DocAddOperation(file));
 	};
 	private readonly onDelete = (file: TAbstractFile) => {
 		logger.debug(`deleted: ${file.path}`);
-		this.deleteDocument(file.path);
+		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
 	};
 	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
 		logger.debug(`renamed: ${oldPath} => ${file.path}`);
-		this.updateDocumentDebounced(file, oldPath);
+		this.dataManager.receiveDocOperation(new DocDeleteOperation(oldPath));
+		this.dataManager.receiveDocOperation(new DocAddOperation(file));
 	};
 	private readonly onModify = (file: TAbstractFile) => {
 		logger.debug(`modified: ${file.path}`);
-		this.updateDocumentDebounced(file, file.path);
+		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
+		this.dataManager.receiveDocOperation(new DocAddOperation(file));
 	};
 
-	private readonly addDocument = async (file: TAbstractFile) => {
-		if (this.dataProvider.shouldIndex(file)) {
-			const document = (
-				await this.dataProvider.generateAllIndexedDocuments([
-					file as TFile,
-				])
-			)[0];
-			this.lexicalEngine.addAllDocuments([document]);
-		}
-	};
-
-	private readonly deleteDocument = (path: string) => {
-		if (this.dataProvider.shouldIndex(path)) {
-			this.lexicalEngine.deleteAllDocuments([path]);
-		}
-	};
-
-	// TODO: do not use debounce because when a filename changed, all back links will be changed
-	private readonly updateDocumentDebounced = debounce(
-		this.DEBOUNCE_INTERVAL,
-		async (file: TAbstractFile, oldPath: string) => {
-			if (this.dataProvider.shouldIndex(file)) {
-				this.deleteDocument(oldPath);
-				await this.addDocument(file);
-			}
-		},
-	);
 }

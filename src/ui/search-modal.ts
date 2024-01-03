@@ -10,6 +10,8 @@ export class SearchModal extends Modal {
 	mountedElement: any;
 	constructor(app: App, searchType: SearchType, query?: string) {
 		super(app);
+		eventBus.emit(EventEnum.MODAL_OPEN);
+
 		// get text selected by user
 		const selectedText = window.getSelection()?.toString() || "";
 		const effectiveQuery = query || selectedText;

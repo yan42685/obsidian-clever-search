@@ -6,6 +6,8 @@ export enum EventEnum {
 	PREV_ITEM,
 	PREV_SUB_ITEM,
 	CONFIRM_ITEM,
+
+	MODAL_OPEN,
 }
 
 export enum LanguageEnum {

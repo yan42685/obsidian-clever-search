@@ -3,8 +3,8 @@ import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { FileType, FileUtil } from "../../utils/file-util";
-import { Tokenizer } from "../search/tokenizer";
+import { FileType, FileUtil } from "../../../utils/file-util";
+import { Tokenizer } from "../../search/tokenizer";
 
 @singleton()
 export class DataProvider {
