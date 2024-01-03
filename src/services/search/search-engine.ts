@@ -37,7 +37,7 @@ export class LexicalEngine {
 		if (Array.isArray(data)) {
 			logger.trace("Indexing all documents...");
 			// Process data with type: IndexedDocument[], need lots of time to create reversed indexes
-			await this.addAllDocuments(data);
+			await this.addDocuments(data);
 		} else {
 			logger.trace("Loading indexed data...");
 			// Process data with type: AsPlainObject, faster
@@ -127,7 +127,7 @@ export class LexicalEngine {
 		});
 	}
 
-	async addAllDocuments(documents: IndexedDocument[]) {
+	async addDocuments(documents: IndexedDocument[]) {
 		const docsToAdd = documents.filter(
 			(doc) => !this.filesIndex.has(doc.path),
 		);
@@ -137,7 +137,7 @@ export class LexicalEngine {
 		logger.debug(`added ${docsToAdd.length}`);
 	}
 
-	deleteAllDocuments(paths: string[]) {
+	deleteDocuments(paths: string[]) {
 		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
 		this.filesIndex.discardAll(docsToDiscard);
 		logger.debug(`deleted ${docsToDiscard.length}`);
@@ -177,7 +177,7 @@ export class LexicalEngine {
 class LexicalOptions {
 	private readonly setting: SearchSetting = getInstance(PluginSetting).search;
 
-	readonly documentChunkSize: 200;
+	readonly documentChunkSize: 150;
 	readonly lineChunkSize: 500;
 	readonly fileIndexOption: Options = {
 		idField: "path",

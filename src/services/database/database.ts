@@ -3,7 +3,7 @@ import type { AsPlainObject } from "minisearch";
 import type { PluginSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
-import { getInstance } from "src/utils/my-lib";
+import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
 
@@ -12,28 +12,28 @@ export class Database {
 	readonly db = getInstance(DexieWrapper);
 
 	async setMiniSearchData(data: AsPlainObject) {
-		this.db.transaction("rw",this.db.minisearch, async () => {
+		this.db.transaction("rw", this.db.minisearch, async () => {
 			await this.db.minisearch.clear();
-			await this.db.minisearch.add({data: data});
+			await this.db.minisearch.add({ data: data });
 			logger.trace("minisearch data saved");
-		})
+		});
 	}
 
+	@monitorDecorator
 	async getMiniSearchData(): Promise<AsPlainObject | null> {
-		return (await this.db.minisearch.toArray())[0].data || null;
+		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
+	async setDocumentRefs(refs: DocumentRef[]) {
+		this.db.transaction("rw", this.db.documentRefs, async () => {
+			await this.db.documentRefs.clear();
+			await this.db.documentRefs.bulkAdd(refs);
+		});
+	}
+
+	@monitorDecorator
 	async getDocumentRefs(): Promise<DocumentRef[] | null> {
-		return [];
-	}
-
-	async getPluginSetting(): Promise<PluginSetting | null> {
-		try {
-			return (await this.db.pluginSetting.toArray())[0].data;
-		} catch (e) {
-			logger.trace(`database didn't find pluginSetting: ${e}`);
-			return null;
-		}
+		return (await this.db.documentRefs.toArray()) || null;
 	}
 
 	async setPluginSetting(setting: PluginSetting): Promise<boolean> {
@@ -76,7 +76,7 @@ class DexieWrapper extends Dexie {
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: PluginSetting }, number>;
 	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
-	documentRefs!: Dexie.Table<{ id?: number; data: DocumentRef[] }, number>;
+	documentRefs!: Dexie.Table<DocumentRef, number>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {
 		super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
@@ -84,7 +84,7 @@ class DexieWrapper extends Dexie {
 		this.version(DexieWrapper._dbVersion).stores({
 			pluginSetting: "++id",
 			minisearch: "++id",
-			documentRefs: "path",
+			documentRefs: "++id",
 		});
 	}
 	get dbVersion() {
