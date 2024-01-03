@@ -10,11 +10,10 @@ export class PluginManager {
 	async initAsync() {
 		await getInstance(SettingManager).initAsync();
 		await getInstance(DataManager).initAsync();
-		getInstance(FileWatcher).start();
 	}
 
 	// should be called in CleverSearch.onunload()
 	onunload() {
-		getInstance(FileWatcher).stop();
+		getInstance(DataManager).onunload();
 	}
 }

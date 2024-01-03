@@ -13,6 +13,7 @@ import {
 } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataProvider } from "./data-provider";
+import { FileWatcher } from "./file-watcher";
 
 @singleton()
 export class DataManager {
@@ -49,11 +50,16 @@ export class DataManager {
 		);
 
 		await this.updateIndexDataByMtime();
+		getInstance(FileWatcher).start();
 
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
 			this.lexicalEngine.filesIndex.toJSON(),
 		);
+	}
+
+	onunload() {
+		getInstance(FileWatcher).stop();
 	}
 
 	receiveDocOperation(operation: DocOperation) {
