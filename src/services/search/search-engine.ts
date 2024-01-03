@@ -24,7 +24,7 @@ import { Query } from "./query";
 @singleton()
 export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
-	private filesIndex = new MiniSearch(this.option.fileIndexOption);
+	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private _isReady = false;
 

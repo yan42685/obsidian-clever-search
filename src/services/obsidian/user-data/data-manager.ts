@@ -83,6 +83,8 @@ export class DataManager {
 			await this.lexicalEngine.reIndexAll(documents);
 		}
 		logger.trace("Lexical engine is ready");
+        // serialize lexical engine
+        await this.database.setMiniSearchData(this.lexicalEngine.filesIndex.toJSON());
 	}
 }
 

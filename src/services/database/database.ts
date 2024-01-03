@@ -9,10 +9,18 @@ import { PrivateApi } from "../obsidian/private-api";
 
 @singleton()
 export class Database {
-	private readonly db = getInstance(DexieWrapper);
+	readonly db = getInstance(DexieWrapper);
+
+	async setMiniSearchData(data: AsPlainObject) {
+		this.db.transaction("rw",this.db.minisearch, async () => {
+			await this.db.minisearch.clear();
+			await this.db.minisearch.add({data: data});
+			logger.trace("minisearch data saved");
+		})
+	}
 
 	async getMiniSearchData(): Promise<AsPlainObject | null> {
-		return null;
+		return (await this.db.minisearch.toArray())[0].data || null;
 	}
 
 	async getDocumentRefs(): Promise<DocumentRef[] | null> {
