@@ -1,14 +1,17 @@
 import type { TAbstractFile, TFile } from "obsidian";
 import { EventEnum } from "src/globals/enums";
+import { Database } from "src/services/database/database";
 import { LexicalEngine } from "src/services/search/search-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
-import { SHOULD_NOT_HAPPEN, getInstance } from "src/utils/my-lib";
+import { logger } from "src/utils/logger";
+import { SHOULD_NOT_HAPPEN, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataProvider } from "./data-provider";
 
 @singleton()
 export class DataManager {
+    private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
 	private lexicalEngine = getInstance(LexicalEngine);
 
@@ -31,7 +34,9 @@ export class DataManager {
 		3,
 	);
 
+    @monitorDecorator
 	async initAsync() {
+        await this.initLexicalEngines();
 		// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
 		eventBus.on(EventEnum.MODAL_OPEN, () =>
 			this.docOperationsBuffer.flush(),
@@ -42,7 +47,7 @@ export class DataManager {
 		this.docOperationsBuffer.add(operation);
 	}
 
-	async addDocument(file: TAbstractFile) {
+	private async addDocument(file: TAbstractFile) {
 		if (this.dataProvider.shouldIndex(file)) {
 			const document = (
 				await this.dataProvider.generateAllIndexedDocuments([
@@ -53,18 +58,31 @@ export class DataManager {
 		}
 	}
 
-	async deleteDocument(path: string) {
+	private async deleteDocument(path: string) {
 		if (this.dataProvider.shouldIndex(path)) {
 			this.lexicalEngine.deleteAllDocuments([path]);
 		}
 	}
 
-	// TODO: do not use debounce because when a filename changed, all back links will be changed
-	async updateDocument(file: TAbstractFile, oldPath: string) {
-		if (this.dataProvider.shouldIndex(file)) {
-			await this.deleteDocument(oldPath);
-			await this.addDocument(file);
+
+	private async initLexicalEngines() {
+		logger.trace("Init lexical engine...");
+		const prevData = await this.database.getMiniSearchData();
+		if (prevData) {
+			logger.trace("Previous minisearch data is found.");
+			this.lexicalEngine.reIndexAll(prevData);
+		} else {
+			logger.trace(
+				"Previous minisearch data doesn't exists, reading files via obsidian...",
+			);
+			const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+			const documents =
+				await this.dataProvider.generateAllIndexedDocuments(
+					filesToIndex,
+				);
+			await this.lexicalEngine.reIndexAll(documents);
 		}
+		logger.trace("Lexical engine is ready");
 	}
 }
 

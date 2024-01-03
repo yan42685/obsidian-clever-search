@@ -1,6 +1,4 @@
-import { App, TAbstractFile } from "obsidian";
-import { THIS_PLUGIN } from "src/globals/constants";
-import type CleverSearch from "src/main";
+import { App } from "obsidian";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -13,25 +11,16 @@ import {
 	SearchResult,
 } from "../../globals/search-types";
 import { FileType, FileUtil } from "../../utils/file-util";
-import { Database } from "../database/database";
 import { LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/search-engine";
-import { DataManager, DocAddOperation, DocDeleteOperation } from "./user-data/data-manager";
 import { DataProvider } from "./user-data/data-provider";
 
 @singleton()
 export class SearchService {
-	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly app = getInstance(App);
-	private readonly database = getInstance(Database);
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
-
-	@monitorDecorator
-	async initAsync() {
-		await this.initLexicalEngines();
-	}
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
@@ -179,68 +168,5 @@ export class SearchService {
 			items: lineItems,
 		} as SearchResult;
 	}
-
-	private async initLexicalEngines() {
-		logger.trace("Init lexical engine...");
-		const prevData = await this.database.getMiniSearchData();
-		if (prevData) {
-			logger.trace("Previous minisearch data is found.");
-			this.lexicalEngine.reIndexAll(prevData);
-		} else {
-			logger.trace(
-				"Previous minisearch data doesn't exists, reading files via obsidian...",
-			);
-			const filesToIndex = this.dataProvider.allFilesToBeIndexed();
-			const documents =
-				await this.dataProvider.generateAllIndexedDocuments(
-					filesToIndex,
-				);
-			await this.lexicalEngine.reIndexAll(documents);
-		}
-		logger.trace("Lexical engine is ready");
-	}
-}
-
-@singleton()
-export class FileWatcher {
-	private readonly dataManager = getInstance(DataManager);
-	private readonly app = getInstance(App);
-
-	start() {
-		this.stop(); // in case THIS_PLUGIN.onunload isn't called correctly, sometimes it happens
-		this.app.vault.on("create", this.onCreate);
-		this.app.vault.on("delete", this.onDelete);
-		this.app.vault.on("rename", this.onRename);
-		this.app.vault.on("modify", this.onModify);
-		logger.debug("FileWatcher started");
-	}
-
-	stop() {
-		this.app.vault.off("create", this.onCreate);
-		this.app.vault.off("delete", this.onDelete);
-		this.app.vault.off("rename", this.onRename);
-		this.app.vault.off("modify", this.onModify);
-	}
-
-	// should define callbacks as arrow functions rather than methods,
-	// otherwise `this` will be changed when used as callbacks
-	private readonly onCreate = (file: TAbstractFile) => {
-		logger.debug(`created: ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocAddOperation(file));
-	};
-	private readonly onDelete = (file: TAbstractFile) => {
-		logger.debug(`deleted: ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
-	};
-	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
-		logger.debug(`renamed: ${oldPath} => ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocDeleteOperation(oldPath));
-		this.dataManager.receiveDocOperation(new DocAddOperation(file));
-	};
-	private readonly onModify = (file: TAbstractFile) => {
-		logger.debug(`modified: ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
-		this.dataManager.receiveDocOperation(new DocAddOperation(file));
-	};
 
 }
