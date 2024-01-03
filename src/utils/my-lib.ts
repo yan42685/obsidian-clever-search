@@ -96,16 +96,26 @@ export function monitorDecorator(
 ) {
 	const originalMethod = descriptor.value;
 
-	descriptor.value = async function (...args: any[]) {
+	descriptor.value = function (...args: any[]) {
 		const start = Date.now();
-		const result = await originalMethod.apply(this, args);
-		const end = Date.now();
-		logger.trace(
-			`<${
-				target.constructor.name
-			}-${propertyKey}> Execution time: ${formatMillis(end - start)}`,
-		);
-		return result;
+		const result = originalMethod.apply(this, args);
+		const logExecutionTime = () => {
+			const end = Date.now();
+			logger.trace(
+				`<${
+					target.constructor.name
+				}-${propertyKey}> Execution time: ${formatMillis(end - start)}`,
+			);
+		};
+		if (result instanceof Promise) {
+			return result.then((res) => {
+				logExecutionTime();
+				return res;
+			});
+		} else {
+			logExecutionTime();
+			return result;
+		}
 	};
 
 	return descriptor;
