@@ -1,4 +1,6 @@
+import type { AsPlainObject } from "minisearch";
 import type { TAbstractFile, TFile } from "obsidian";
+import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import type { DocumentRef } from "src/globals/search-types";
 import { Database } from "src/services/database/database";
@@ -81,7 +83,13 @@ export class DataManager {
 
 	private async initLexicalEngines() {
 		logger.trace("Init lexical engine...");
-		const prevData = await this.database.getMiniSearchData();
+		let prevData: AsPlainObject | null;
+		if (!devOption.loadIndexFromDatabase) {
+			prevData = null;
+			logger.info("devOption: don't load index from database");
+		} else {
+			prevData = await this.database.getMiniSearchData(); 
+		}
 		if (prevData) {
 			logger.trace("Previous minisearch data is found.");
 			await this.lexicalEngine.reIndexAll(prevData);
