@@ -5,8 +5,8 @@ import {
 	type HighlightedContext,
 	type MatchedLine,
 } from "src/globals/search-types";
+import { Collections } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
-import { MathUtil } from "src/utils/math-util";
 import { MyLib, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
@@ -27,7 +27,7 @@ export class LineHighlighter {
 		hlMatchedLineBackground: boolean,
 	): HighlightedContext[] {
 		return matchedLines.map((matchedLine) => {
-			const firstMatchedCol = MathUtil.minInSet(matchedLine.positions);
+			const firstMatchedCol = Collections.minInSet(matchedLine.positions);
 			const matchedRow = matchedLine.row;
 			const context = this.getTruncatedContext(
 				allLines,
@@ -98,7 +98,7 @@ export class LineHighlighter {
 		);
 		for (const matchedLine of matchedLines) {
 			const row = matchedLine.row;
-			const firstMatchedCol = MathUtil.minInSet(matchedLine.positions);
+			const firstMatchedCol = Collections.minInSet(matchedLine.positions);
 			const originLine = lines[row].text;
 
 			// only show part of the line that contains the highlighted chars

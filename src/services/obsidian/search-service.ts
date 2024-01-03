@@ -261,6 +261,7 @@ export class FileWatcher {
 		}
 	};
 
+	// TODO: do not use debounce because when a filename changed, all back links will be changed
 	private readonly updateDocumentDebounced = debounce(
 		this.DEBOUNCE_INTERVAL,
 		async (file: TAbstractFile, oldPath: string) => {
