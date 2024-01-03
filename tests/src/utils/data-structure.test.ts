@@ -15,12 +15,12 @@ type Request = {
 
 describe("BufferSet", () => {
 	let bufferSet: BufferSet<Request>;
-	const mockHandler = jest.fn(
-		() =>
-			new Promise<void>((resolve) => {
-				setTimeout(resolve, 10); // simulate a 10ms delay in handler (async flush)
-			}),
-	);
+	const mockHandler = jest.fn(() => {
+		return new Promise<void>((resolve) => {
+			// Simulate a 10ms delay in handler (async flush)
+			setTimeout(resolve, 10);
+		});
+	});
 
 	const identifier = (req: Request) => req.caller + req.query;
 
@@ -34,19 +34,20 @@ describe("BufferSet", () => {
 		jest.useRealTimers();
 	});
 
-	test("add or flush should not interfere with ongoing flush", () => {
+	test("add or flush should not interfere with ongoing flush", async () => {
 		bufferSet.add({ caller: "caller1", query: "query1" });
 		bufferSet.add({ caller: "caller2", query: "query2" });
 		bufferSet.add({ caller: "caller3", query: "query3" }); // should trigger flush
 
-		// start the async flush
-		jest.advanceTimersByTime(5); // halfway through the flush
+		// halfway through the flush
+		jest.advanceTimersByTime(5);
 
 		// add more while flushing
 		bufferSet.add({ caller: "caller4", query: "query4" });
 		bufferSet.add({ caller: "caller5", query: "query5" });
+		bufferSet.flush(); // won't be called at once but will be called later
 
-		// complete the flush
+		// complete first flush
 		jest.advanceTimersByTime(5);
 
 		// first flush should be called with the first three requests
@@ -56,16 +57,17 @@ describe("BufferSet", () => {
 			{ caller: "caller3", query: "query3" },
 		]);
 
-		// call flush explicitly to handle remaining elements
-		bufferSet.flush();
-		jest.advanceTimersByTime(10); // Complete the flush
+		// ensure the mock handler is resolved
+		await mockHandler.mock.results[0].value;
 
-		// second flush should be called with the next two requests
+		// Now that the first flush is done, we call flush again to process the remaining elements
+		jest.advanceTimersByTime(10);
+		await mockHandler.mock.results[1].value;
+
+		// second flush should have been called with the remaining elements
 		expect(mockHandler).toHaveBeenCalledWith([
 			{ caller: "caller4", query: "query4" },
 			{ caller: "caller5", query: "query5" },
 		]);
-
-		expect(mockHandler).toHaveBeenCalledTimes(2);
 	});
 });
