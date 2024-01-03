@@ -62,14 +62,14 @@ export class DataManager {
 
 	private async addDocuments(files: TAbstractFile[]) {
 		const documents = await this.dataProvider.generateAllIndexedDocuments(
-			files.filter((f) => this.dataProvider.shouldIndex(f)) as TFile[],
+			files.filter((f) => this.dataProvider.isIndexable(f)) as TFile[],
 		);
 		await this.lexicalEngine.addDocuments(documents);
 	}
 
 	private async deleteDocuments(paths: string[]) {
 		this.lexicalEngine.deleteDocuments(
-			paths.filter((p) => this.dataProvider.shouldIndex(p)),
+			paths.filter((p) => this.dataProvider.isIndexable(p)),
 		);
 	}
 

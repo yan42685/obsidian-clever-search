@@ -53,15 +53,14 @@ export class DataProvider {
 		logger.info(`all files: ${files.length}`);
 		FileUtil.countFileByExtensions(files);
 
-		// TODO: compare mtime and then filter
-		const filesToIndex = files.filter((file) => this.shouldIndex(file));
-		logger.info(`files to be indexed: ${filesToIndex.length}`);
+		const filesToIndex = files.filter((file) => this.isIndexable(file));
+		logger.info(`indexable files: ${filesToIndex.length}`);
 		FileUtil.countFileByExtensions(filesToIndex);
 
 		return filesToIndex;
 	}
 
-	shouldIndex(fileOrPath: TFile | TAbstractFile | string): boolean {
+	isIndexable(fileOrPath: TFile | TAbstractFile | string): boolean {
 		if (fileOrPath instanceof TFolder) {
 			return false;
 		}

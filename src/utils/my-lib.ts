@@ -75,7 +75,7 @@ export async function monitorExecution(
 }
 
 /**
- * A decorator for asynchronously measuring and logging the execution time of a class method.
+ * A decorator for measuring and logging the execution time of a class method.
  * @param target - The target class.
  * @param propertyKey - The method name.
  * @param descriptor - The method descriptor.

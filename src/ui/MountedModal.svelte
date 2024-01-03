@@ -152,7 +152,7 @@
 	}
 
 	// ===================================================
-	// NOTE: onMount() 方法不会被触发
+	// NOTE: onMount() won't be triggered and I wonder why
 	function listenEvent(event: EventEnum, callback: EventCallback) {
 		eventBus.on(event, callback);
 		onDestroy(() => eventBus.off(event, callback));
