@@ -4,8 +4,11 @@ import { getInstance } from "src/utils/my-lib";
 import { AssetsManager, jiebaTargetUrl } from "src/utils/web/assets-manager";
 import { singleton } from "tsyringe";
 
+/**
+ * better segmentation for Chinese, Japanese and Korean
+ */
 @singleton()
-export class ChinesePatch {
+export class CjkPatch {
 	private isReady = false;
 	async initAsync() {
 		const jiebaBinary =
@@ -16,7 +19,7 @@ export class ChinesePatch {
 
 	cutForSearch(text: string, hmm: boolean): string[] {
 		if (!this.isReady) {
-			logger.error("结巴分词没有初始化");
+			logger.error("jieba segmenter isn't ready");
 			return [text];
 		}
 		return cut_for_search(text, hmm);

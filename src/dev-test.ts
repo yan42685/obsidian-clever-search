@@ -1,7 +1,7 @@
 import { App, TFile } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
 import { PluginSetting } from "./globals/plugin-setting";
-import { ChinesePatch } from "./integrations/languages/Chinese";
+import { CjkPatch } from "./integrations/languages/cjk-patch";
 import { SearchService } from "./services/obsidian/search-service";
 import { LexicalEngine } from "./services/search/search-engine";
 import { logger } from "./utils/logger";
@@ -107,11 +107,12 @@ async function testLexicalSearch() {
 async function testTokenizer() {
 	// getInstance(SearchClient).testTickToken()
 	getInstance(AssetsManager).startDownload();
-	const cutter = getInstance(ChinesePatch);
+	const cutter = getInstance(CjkPatch);
 	await cutter.initAsync()
 	// const text= "今天天气气候不错啊";
 	// const text= "陈志敏今天似乎好像没有来学校学习啊";
-	const text= "In this digital age, 在这个数字时代, let's embrace the wisdom of the past while pushing the boundaries of the future. 让我们在推动未来的同时，拥抱过去的智慧。 past whileaaaaaaa";
+	// const text= "In this digital age, 在这个数字时代, let's embrace the wisdom of the past while pushing the boundaries of the future. 让我们在推动未来的同时，拥抱过去的智慧。 past whileaaaaaaa";
+	const text= "smart-Connection用起来还不错";
 	logger.info(cutter.cutForSearch(text, false));
 	logger.info(cutter.cutForSearch(text, true));
 }
