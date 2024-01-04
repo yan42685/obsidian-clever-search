@@ -6,6 +6,7 @@ import { LexicalEngine } from "./services/search/search-engine";
 import { logger } from "./utils/logger";
 import { getInstance } from "./utils/my-lib";
 import { SearchClient } from "./web-workers/client";
+import { AssetsDownloader } from "./utils/web/assets-downloader";
 
 export async function devTest() {
 	const settings = getInstance(PluginSetting);
@@ -38,6 +39,7 @@ export async function devTest() {
 
 	// testTikToken();
 	getInstance(SearchClient).testTickToken()
+	getInstance(AssetsDownloader).start();
 }
 
 function getApp() {

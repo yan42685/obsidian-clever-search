@@ -1,12 +1,6 @@
-import * as fsLib from "fs";
-import * as pathLib from "path";
 import { LanguageEnum } from "src/globals/enums";
 import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";
-
-// for autocompletion
-export const fsUtils = fsLib;
-export const pathUtils = pathLib;
 
 export const isDevEnvironment = process.env.NODE_ENV === "development";
 export const TO_BE_IMPL = "This branch hasn't been implemented";

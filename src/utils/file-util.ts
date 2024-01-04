@@ -6,8 +6,8 @@ import { logger } from "./logger";
 import { isDevEnvironment } from "./my-lib";
 
 // for autocompletion
-export const fsUtils = fsLib;
-export const pathUtils = pathLib;
+export const fsUtil = fsLib;
+export const pathUtil = pathLib;
 
 export enum FileType {
 	PLAIN_TEXT,
@@ -49,20 +49,20 @@ export class FileUtil {
 	}
 
 	static getBasename(filePath: string): string {
-		return pathUtils.basename(filePath, pathUtils.extname(filePath));
+		return pathUtil.basename(filePath, pathUtil.extname(filePath));
 	}
 
 	static getExtension(filePath: string): string {
-		return pathUtils.extname(filePath).slice(1);
+		return pathUtil.extname(filePath).slice(1);
 	}
 
 	static getFolderPath(filePath: string): string {
-		const dirPath = pathUtils.dirname(filePath);
-		if (dirPath === "." || dirPath === pathUtils.sep || dirPath === "/") {
+		const dirPath = pathUtil.dirname(filePath);
+		if (dirPath === "." || dirPath === pathUtil.sep || dirPath === "/") {
 			return "./";
 		}
 		return (
-			dirPath.replace(new RegExp("\\" + pathUtils.sep, "g"), "/") + "/"
+			dirPath.replace(new RegExp("\\" + pathUtil.sep, "g"), "/") + "/"
 		);
 	}
 
