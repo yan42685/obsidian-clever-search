@@ -180,7 +180,7 @@ class LexicalOptions {
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly tokenize = (text: string) => this.tokenizer.tokenize(text);
 
-	readonly documentChunkSize: 150;
+	readonly documentChunkSize: 50;
 	readonly lineChunkSize: 500;
 	readonly fileIndexOption: Options = {
 		tokenize: this.tokenize,
@@ -188,6 +188,7 @@ class LexicalOptions {
 		fields: ["basename", "aliases", "content"] as DocumentFields,
 	};
 	readonly lineIndexOption: Options = {
+		tokenize: this.tokenize,
 		idField: "row",
 		fields: ["text"] as LineFields,
 		// storeFields: ["text"] as LineFields,

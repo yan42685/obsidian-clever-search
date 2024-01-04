@@ -4,6 +4,7 @@ import { PluginSetting } from "./globals/plugin-setting";
 import { CjkPatch } from "./integrations/languages/cjk-patch";
 import { SearchService } from "./services/obsidian/search-service";
 import { LexicalEngine } from "./services/search/search-engine";
+import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance } from "./utils/my-lib";
 import { AssetsManager } from "./utils/web/assets-manager";
@@ -36,11 +37,8 @@ export async function devTest() {
 	// const vault = getInstance(Vault);
 	// logger.info(`${vault.configDir}`);
 
-
 	// testTikToken();
 	testTokenizer();
-
-						logger.info(`enablecjk: ${getInstance(PluginSetting).enableCjkPatch}`)
 }
 
 function getApp() {
@@ -110,12 +108,16 @@ async function testTokenizer() {
 	// getInstance(SearchClient).testTickToken()
 	getInstance(AssetsManager).startDownload();
 	const cutter = getInstance(CjkPatch);
-	await cutter.initAsync()
+	const tokenizer = getInstance(Tokenizer);
+	await cutter.initAsync();
 	// const text= "今天天气气候不错啊";
 	// const text= "陈志敏今天似乎好像没有来学校学习啊";
 	// const text= "In this digital age, 在这个数字时代, let's embrace the wisdom of the past while pushing the boundaries of the future. 让我们在推动未来的同时，拥抱过去的智慧。 past whileaaaaaaa";
 	// const text= "smart-Connection用起来还不错";
-	const text= "快乐源【泉哈哈昂哈aaanice不错不错好,非常好不+kj错";
+	// const text = "快乐源【泉哈哈昂哈aaanice不错不错好,非常好不+kj错";
+	const text = "camelCase嗟尔远道之人胡为乎来哉";
 	logger.info(cutter.cutForSearch(text, false));
 	logger.info(cutter.cutForSearch(text, true));
+
+	logger.info(tokenizer.tokenize(text));
 }
