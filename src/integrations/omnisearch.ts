@@ -14,7 +14,7 @@ export class OmnisearchIntegration {
 	private privateApi = getInstance(PrivateApi)
 	private db: any;
 
-	async init() {
+	async initAsync() {
 		if (this.app.plugins.plugins.omnisearch) {
 			const dbName = "omnisearch/cache/" + this.privateApi.getAppId();
 			// console.log(dbName);

@@ -14,13 +14,12 @@ import { devTest } from "./dev-test";
 import { THIS_PLUGIN } from "./globals/constants";
 import { SearchType } from "./globals/search-types";
 import { OmnisearchIntegration } from "./integrations/omnisearch";
+import { AuxiliaryService } from "./services/auxiliary/auxiliary-service";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { SearchModal } from "./ui/search-modal";
 import { getInstance, isDevEnvironment } from "./utils/my-lib";
 
 export default class CleverSearch extends Plugin {
-	privacyModeEnabled = false;
-	omnisearchIntegration?: OmnisearchIntegration;
 
 	async onload() {
 		// can't register `this` as CleverSearch, because it is `export default` rather than `export`
@@ -35,9 +34,6 @@ export default class CleverSearch extends Plugin {
 
 		// this.exampleCode();
 		this.registerCommands();
-
-		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
-		this.omnisearchIntegration.init();
 
 		if (isDevEnvironment) {
 			this.addCommand({
@@ -62,14 +58,11 @@ export default class CleverSearch extends Plugin {
 		}
 	}
 
-	togglePrivacyMode() {
-		this.privacyModeEnabled = !this.privacyModeEnabled;
-		if (this.privacyModeEnabled) {
-			document.body.classList.add("cs-privacy-blur");
-		} else {
-			document.body.classList.remove("cs-privacy-blur");
-		}
+	onunload() {
+		document.body.classList.remove("cs-privacy-blur");
+		getInstance(PluginManager).onunload();
 	}
+
 	openTestModal() {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (activeView) {
@@ -104,7 +97,7 @@ export default class CleverSearch extends Plugin {
 		this.addCommand({
 			id: "cs-toggle-privacy-mode",
 			name: "Toggle privacy mode",
-			callback: () => this.togglePrivacyMode(),
+			callback: () => getInstance(AuxiliaryService).togglePrivacyMode()
 		});
 
 		this.addCommand({
@@ -114,7 +107,7 @@ export default class CleverSearch extends Plugin {
 				new SearchModal(
 					this.app,
 					SearchType.IN_FILE,
-					await this.omnisearchIntegration?.getLastQuery(),
+					await getInstance(OmnisearchIntegration).getLastQuery(),
 				).open();
 			},
 		});
@@ -166,13 +159,6 @@ export default class CleverSearch extends Plugin {
 			window.setInterval(() => console.log("setInterval"), 5 * 60 * 1000),
 		);
 	}
-
-	onunload() {
-		document.body.classList.remove("cs-privacy-blur");
-		getInstance(PluginManager).onunload();
-	}
-
-
 }
 
 class SampleModal extends Modal {

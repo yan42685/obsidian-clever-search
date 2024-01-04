@@ -1,3 +1,4 @@
+import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
 import { getInstance } from "../../utils/my-lib";
@@ -8,9 +9,10 @@ import { DataManager } from "./user-data/data-manager";
 export class PluginManager {
 	// private readonly obFileUtil = getInstance(Vault).adapter as FileSystemAdapter;
 	async initAsync() {
+		await getInstance(SearchClient).createChildThreads();
 		await getInstance(SettingManager).initAsync();
 		await getInstance(DataManager).initAsync();
-		await getInstance(SearchClient).createChildThreads();
+		await getInstance(OmnisearchIntegration).initAsync();
 	}
 
 	// should be called in CleverSearch.onunload()
