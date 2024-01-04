@@ -10,6 +10,7 @@ import { singleton } from "tsyringe";
 @singleton()
 export class CjkPatch {
 	private isReady = false;
+	private reportedError = false;
 	async initAsync() {
 		const jiebaBinary =
 			getInstance(AssetsManager).loadLibrary(jiebaTargetUrl);
@@ -18,8 +19,9 @@ export class CjkPatch {
 	}
 
 	cutForSearch(text: string, hmm: boolean): string[] {
-		if (!this.isReady) {
+		if (!this.isReady && !this.reportedError) {
 			logger.error("jieba segmenter isn't ready");
+			this.reportedError = true;
 			return [text];
 		}
 		return cut_for_search(text, hmm);

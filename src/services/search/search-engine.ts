@@ -18,6 +18,7 @@ import {
 	type SearchSetting,
 } from "../../globals/plugin-setting";
 import { Query } from "./query";
+import { Tokenizer } from "./tokenizer";
 
 // If @singleton() is not used,
 // then the lifecycle of the instance obtained through tsyringe container is transient.
@@ -176,10 +177,13 @@ export class LexicalEngine {
 @singleton()
 class LexicalOptions {
 	private readonly setting: SearchSetting = getInstance(PluginSetting).search;
+	private readonly tokenizer = getInstance(Tokenizer);
+	private readonly tokenize = (text: string) => this.tokenizer.tokenize(text);
 
 	readonly documentChunkSize: 150;
 	readonly lineChunkSize: 500;
 	readonly fileIndexOption: Options = {
+		tokenize: this.tokenize,
 		idField: "path",
 		fields: ["basename", "aliases", "content"] as DocumentFields,
 	};

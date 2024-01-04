@@ -1,4 +1,4 @@
 export const devOption = {
     traceLog: false,
-    loadIndexFromDatabase: true,
+    loadIndexFromDatabase: false,
 }

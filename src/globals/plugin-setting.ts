@@ -5,6 +5,7 @@ import { isDevEnvironment } from "src/utils/my-lib";
 export class PluginSetting {
 	mySetting: string;
 	logLevel: LogLevel;
+	enableCjkPatch: boolean;
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
 	excludeExtensions: string[];
@@ -15,6 +16,7 @@ export class PluginSetting {
 export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	mySetting: "default",
 	logLevel: isDevEnvironment ? "debug" : "none",
+	enableCjkPatch: false,
 	apiProvider1: {
 		domain: "",
 		key: "",

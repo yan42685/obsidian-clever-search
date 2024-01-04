@@ -1,10 +1,10 @@
 import { PluginSettingTab, Setting } from "obsidian";
+import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
-	ICON_COLLAPSE,
-	ICON_EXPAND,
-	THIS_PLUGIN
-} from "src/globals/constants";
-import { DEFAULT_PLUGIN_SETTING, PluginSetting, type LogLevelOptions } from "src/globals/plugin-setting";
+	DEFAULT_PLUGIN_SETTING,
+	PluginSetting,
+	type LogLevelOptions,
+} from "src/globals/plugin-setting";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
@@ -12,11 +12,11 @@ import { container, inject, singleton } from "tsyringe";
 
 @singleton()
 export class SettingManager {
-	private  plugin: CleverSearch = getInstance(THIS_PLUGIN);
-	private  setting: PluginSetting;
+	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	private setting: PluginSetting;
 
 	async initAsync() {
-		await this.loadSettings()  // must run this line before registering PluginSetting
+		await this.loadSettings(); // must run this line before registering PluginSetting
 		container.register(PluginSetting, { useValue: this.setting });
 		this.plugin.addSettingTab(getInstance(GeneralTab));
 	}
@@ -33,7 +33,6 @@ export class SettingManager {
 	async saveSettings() {
 		await this.plugin.saveData(this.setting);
 	}
-
 }
 
 @singleton()
@@ -50,18 +49,31 @@ class GeneralTab extends PluginSettingTab {
 
 		containerEl.empty();
 
+		// new Setting(containerEl)
+		// 	.setName("Min word Length to Trigger Prefix Search")
+		// 	// For Chinese users, a setting of 1 or 2 is typically sufficient, because there are many different chars
+		// 	.setDesc("Affect the responding speed for the first several characters")
+		// 	.addSlider(text => text
+		// 		.setLimits(1, 4, 1)
+		// 		.setValue(this.setting.search.minTermLengthForPrefixSearch)
+		// 		.setDynamicTooltip()
+		// 		.onChange(async (value) => {
+		// 			this.setting.search.minTermLengthForPrefixSearch = value as 1 | 2 | 3 | 4;
+		// 			await this.settingManager.saveSettings();
+		// 		}),
+		// 	);
+
 		new Setting(containerEl)
-			.setName("Min word Length to Trigger Prefix Search")
-			// For Chinese users, a setting of 1 or 2 is typically sufficient, because there are many different chars
-			.setDesc("Affect the responding speed for the first several characters")
-			.addSlider(text => text
-				.setLimits(1, 4, 1)
-				.setValue(this.setting.search.minTermLengthForPrefixSearch)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.setting.search.minTermLengthForPrefixSearch = value as 1 | 2 | 3 | 4;
-					await this.settingManager.saveSettings();
-				}),
+			.setName("Enable CJK Patch")
+			.setDesc("better search result for Chinese, Japanese and Korean")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.enableCjkPatch)
+					.onChange(async (value) => {
+						this.setting.enableCjkPatch = value;
+						logger.info(`enablecjk: ${getInstance(PluginSetting).enableCjkPatch}`)
+						await this.settingManager.saveSettings();
+					}),
 			);
 
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
