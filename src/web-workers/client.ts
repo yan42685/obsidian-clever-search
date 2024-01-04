@@ -8,14 +8,20 @@ export class SearchClient {
 	worker?: Worker;
 
 	async createChildThreads() {
-		logger.debug("init child threads...")
+		logger.debug("init child threads...");
 		try {
 			const obsidianFs = getInstance(DataProvider).obsidianFs;
 			// 'await' the Promise to get the actual ArrayBuffer.
-			const workerScript = await obsidianFs.readBinary(".obsidian/plugins/clever-search/cs-search-worker.js");
-			logger.debug(`worker script size: ${(workerScript.byteLength/1000).toFixed(2)} KB`);
+			const workerScript = await obsidianFs.readBinary(
+				".obsidian/plugins/clever-search/cs-search-worker.js",
+			);
+			logger.debug(
+				`worker script size (6x bigger than in production build): ${(
+					workerScript.byteLength / 1000
+				).toFixed(2)} KB`,
+			);
 
-            // 不直接new Worker创建child thread是为了绕过electron限制
+			// 不直接new Worker创建child thread是为了绕过electron限制
 			const blob = new Blob([workerScript], { type: "text/javascript" });
 			const workerUrl = URL.createObjectURL(blob);
 			this.worker = new Worker(workerUrl);
@@ -30,6 +36,6 @@ export class SearchClient {
 	}
 
 	async testTickToken() {
-		this.worker?.postMessage("tikToken")
+		this.worker?.postMessage("tikToken");
 	}
 }

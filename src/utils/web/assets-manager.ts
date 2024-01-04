@@ -4,30 +4,42 @@ import { logger } from "../logger";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const electron = require("electron");
-const userDataPath = (electron.app || electron.remote.app).getPath(
-    "userData",
-);
+const userDataPath = (electron.app || electron.remote.app).getPath("userData");
 
 const assetsDir = pathUtil.join(userDataPath, "clever-search");
 
 const unpkgUrl = "https://unpkg.com/";
 const tiktokenSourceUrl = unpkgUrl + "@dqbd/tiktoken@1.0.7/tiktoken_bg.wasm";
-const tiktokenTargetUrl = pathUtil.join(assetsDir,
-	"tiktoken_bg.wasm",
-);
+const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
+const jiebaSourceUrl =
+	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
+export const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 
 @singleton()
-export class AssetsDownloader {
-	async start() {
+export class AssetsManager {
+	async startDownload() {
 		logger.info("start downloading assets...");
-        logger.info(`target dir: ${assetsDir}`);
+		logger.info(`target dir: ${assetsDir}`);
 		logger.info("tiktoken source url: " + tiktokenSourceUrl);
 		logger.info("tiktoken target url: " + tiktokenTargetUrl);
-        
+
 		await this.downloadFile(tiktokenTargetUrl, tiktokenSourceUrl);
+		await this.downloadFile(jiebaTargetUrl, jiebaSourceUrl);
 	}
 
-	async downloadFile(targetPath: string, sourceUrl: string): Promise<void> {
+	async loadLibrary(path: string): Promise<ArrayBuffer | null> {
+		try {
+			return await fsUtil.promises.readFile(path);
+		} catch (e) {
+			logger.error(`failed to load ${path}`);
+			throw new Error(e);
+		}
+	}
+
+	private async downloadFile(
+		targetPath: string,
+		sourceUrl: string,
+	): Promise<void> {
 		// check if the file already exists
 		try {
 			await fsUtil.promises.access(targetPath);
@@ -55,7 +67,7 @@ export class AssetsDownloader {
 				targetPath,
 				Buffer.from(await response.arrayBuffer()),
 			);
-            logger.info(`successfully download from ${sourceUrl}`);
+			logger.info(`successfully download from ${sourceUrl}`);
 		} catch (error) {
 			logger.error(`failed to download ${sourceUrl}`);
 			throw error;

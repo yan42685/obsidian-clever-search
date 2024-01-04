@@ -44,6 +44,7 @@
 		"dexie": "^3.2.4",
 		"franc-min": "^6.1.0",
 		"fzf": "^0.5.2",
+		"jieba-wasm": "^0.0.2",
 		"minisearch": "^6.3.0",
 		"reflect-metadata": "^0.1.13",
 		"throttle-debounce": "^5.0.0",

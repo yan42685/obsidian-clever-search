@@ -14,6 +14,9 @@ dependencies:
   fzf:
     specifier: ^0.5.2
     version: 0.5.2
+  jieba-wasm:
+    specifier: ^0.0.2
+    version: 0.0.2
   minisearch:
     specifier: ^6.3.0
     version: 6.3.0
@@ -3841,6 +3844,10 @@ packages:
       - supports-color
       - ts-node
     dev: true
+
+  /jieba-wasm@0.0.2:
+    resolution: {integrity: sha512-CPmS+U/klii3LWKrccDqm/BvWmgBB3x4HV/WBxC/l7GsitVfzCzsZ8cWz+vh2riv6M5P8rvHJzCz4xsoFA79cw==}
+    dev: false
 
   /js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
