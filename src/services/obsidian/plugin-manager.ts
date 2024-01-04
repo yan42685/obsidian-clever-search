@@ -1,8 +1,8 @@
+import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
 import { getInstance } from "../../utils/my-lib";
 import { SettingManager } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
-import { FileWatcher } from "./user-data/file-watcher";
 
 @singleton()
 export class PluginManager {
@@ -10,6 +10,7 @@ export class PluginManager {
 	async initAsync() {
 		await getInstance(SettingManager).initAsync();
 		await getInstance(DataManager).initAsync();
+		await getInstance(SearchClient).createChildThreads();
 	}
 
 	// should be called in CleverSearch.onunload()

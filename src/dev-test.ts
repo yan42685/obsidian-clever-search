@@ -1,9 +1,11 @@
 import { App, TFile } from "obsidian";
+// import { encoding_for_model } from "tiktoken"
 import { PluginSetting } from "./globals/plugin-setting";
 import { SearchService } from "./services/obsidian/search-service";
 import { LexicalEngine } from "./services/search/search-engine";
 import { logger } from "./utils/logger";
-import { getInstance, monitorExecution } from "./utils/my-lib";
+import { getInstance } from "./utils/my-lib";
+import { SearchClient } from "./web-workers/client";
 
 export async function devTest() {
 	const settings = getInstance(PluginSetting);
@@ -25,10 +27,17 @@ export async function devTest() {
 	// testTsyringe();
 	// testUnsupportedExtensions();
 
-	monitorExecution(testLexicalSearch);
+	// monitorExecution(testLexicalSearch);
 	// monitorExecution(async () => await testLexicalSearch());
 	// testLexicalSearch();
-	logger.trace("test");
+	// logger.trace("test");
+
+	// const vault = getInstance(Vault);
+	// logger.info(`${vault.configDir}`);
+
+
+	// testTikToken();
+	getInstance(SearchClient).testTickToken()
 }
 
 function getApp() {
@@ -71,6 +80,25 @@ async function testLexicalSearch() {
 			logger.info(`it's a folder: ${tFile}`);
 		}
 	} else {
-		logger.info(`no document is found`)
+		logger.info(`no document is found`);
 	}
 }
+
+// async function testTikToken() {
+// 	// 获取 GPT-3.5 的 tokenizer
+// 	const enc = encoding_for_model("gpt-3.5-turbo");
+
+// 	// 对字符串进行 tokenize、encoding 和 decoding
+// 	const inputString = "hello world";
+// 	const encoded = enc.encode(inputString);
+// 	const decoded = new TextDecoder().decode(enc.decode(encoded));
+
+// 	console.log("Original String:", inputString);
+// 	console.log("Encoded Tokens:", encoded);
+// 	console.log("Decoded String:", decoded);
+
+// 	// 验证编码后再解码的字符串是否与原始字符串相同
+
+// 	// 释放 encoder 资源
+// 	enc.free();
+// }

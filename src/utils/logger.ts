@@ -97,8 +97,12 @@ class Logger {
 			(line) =>
 				// if pass a template literal, such as `show: ${value}` to methods of logger,
 				// there will be two more stack lines above the actual caller
-				!line.includes("eval") && !line.includes("Array.map"),
+				!line.includes("eval") && !line.includes("Array.map")
 		);
+		// for node.js child thread in obsidian
+		if (callerLine?.startsWith("    at blob:")) {
+			return "child-thread";
+		}
 		const match = callerLine?.match(/at (\S+)/);
 		return match ? `<${match[1]}> ` : "failed to parse caller";
 	}

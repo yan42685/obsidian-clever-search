@@ -1,44 +1,35 @@
-import { App, FileSystemAdapter } from "obsidian";
+import { DataProvider } from "src/services/obsidian/user-data/data-provider";
+import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
 @singleton()
 export class SearchClient {
 	worker?: Worker;
-	constructor() {
-		const app: App = getInstance(App);
-		const obsidianFs = app.vault.adapter as FileSystemAdapter;
-		// const workerJsPath = obsidianFs.getFullPath("./cs-search-worker.js");
-        // console.log(workerJsPath);
 
-
-
-		// this.initWorker();
-	}
-
-	async initWorker() {
+	async createChildThreads() {
+		logger.debug("init child threads...")
 		try {
-			const app: App = getInstance(App);
-			const obsidianFs = app.vault.adapter as FileSystemAdapter;
-
+			const obsidianFs = getInstance(DataProvider).obsidianFs;
 			// 'await' the Promise to get the actual ArrayBuffer.
 			const workerScript = await obsidianFs.readBinary(".obsidian/plugins/clever-search/cs-search-worker.js");
+			logger.debug(`worker script size: ${(workerScript.byteLength/1000).toFixed(2)} KB`);
 
-            // 不直接new Worker是为了绕过同源限制
+            // 不直接new Worker创建child thread是为了绕过electron限制
 			const blob = new Blob([workerScript], { type: "text/javascript" });
 			const workerUrl = URL.createObjectURL(blob);
 			this.worker = new Worker(workerUrl);
 
-			// Send data to Worker
-			const dataToShare = "hello";
-			this.worker.postMessage(dataToShare);
-
 			// Receive messages from Worker
 			this.worker.addEventListener("message", (event: any) => {
-				console.log("Received from worker:", event.data);
+				console.log("Received from worker:\n", event.data);
 			});
 		} catch (error) {
 			console.error("Error initializing worker:", error);
 		}
+	}
+
+	async testTickToken() {
+		this.worker?.postMessage("tikToken")
 	}
 }

@@ -89,7 +89,7 @@ const esbuildConfig = (outdir) => ({
 	},
 	entryPoints: {
 		main: "src/main.ts",
-		"cs-search-worker": "src/web-worker/search-worker-server.ts",
+		"cs-search-worker": "src/web-workers/server.ts",
 	},
 	bundle: true,
 	minify: prod ? true : false,

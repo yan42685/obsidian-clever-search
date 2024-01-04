@@ -17,12 +17,10 @@ import { OmnisearchIntegration } from "./integrations/omnisearch";
 import { PluginManager } from "./services/obsidian/plugin-manager";
 import { SearchModal } from "./ui/search-modal";
 import { getInstance, isDevEnvironment } from "./utils/my-lib";
-import { SearchClient } from "./web-worker/search-worker-client";
 
 export default class CleverSearch extends Plugin {
 	privacyModeEnabled = false;
 	omnisearchIntegration?: OmnisearchIntegration;
-	searchClient?: SearchClient;
 
 	async onload() {
 		// can't register `this` as CleverSearch, because it is `export default` rather than `export`
@@ -40,7 +38,6 @@ export default class CleverSearch extends Plugin {
 
 		this.omnisearchIntegration = container.resolve(OmnisearchIntegration);
 		this.omnisearchIntegration.init();
-		this.searchClient = container.resolve(SearchClient);
 
 		if (isDevEnvironment) {
 			this.addCommand({

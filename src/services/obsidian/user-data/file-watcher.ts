@@ -1,8 +1,8 @@
+import { App, TAbstractFile } from "obsidian";
+import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataManager, DocAddOperation, DocDeleteOperation } from "./data-manager";
-import { App, TAbstractFile } from "obsidian";
-import { logger } from "src/utils/logger";
 
 @singleton()
 export class FileWatcher {
@@ -15,7 +15,7 @@ export class FileWatcher {
 		this.app.vault.on("delete", this.onDelete);
 		this.app.vault.on("rename", this.onRename);
 		this.app.vault.on("modify", this.onModify);
-		logger.debug("FileWatcher started");
+		logger.trace("FileWatcher started");
 	}
 
 	stop() {
