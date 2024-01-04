@@ -12,7 +12,7 @@ const BRACKETS_AND_SPACE = /[|\[\]\(\)<>\{\} \t\n\r]/u;
 const CAMEL_CASE_REGEX = /([a-z](?=[A-Z]))/g;
 const HYPHEN_AND_CAMEL_CASE_REGEX = /-|([a-z](?=[A-Z]))/g;
 
-// const CJK_REGEX = /[\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\u31f0-\u31ff]/; 
+const CJK_REGEX = /[\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\u31f0-\u31ff]/;
 // const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
 // const JAPANESE_REGEX = /[\u3040-\u30ff\u31f0-\u31ff]/;
 // const KOREAN_REGEX = /[\uac00-\ud7af]/;
@@ -21,8 +21,9 @@ const HYPHEN_AND_CAMEL_CASE_REGEX = /-|([a-z](?=[A-Z]))/g;
 export class Tokenizer {
 	private readonly setting = getInstance(PluginSetting);
 	private readonly cjkSegmenter = getInstance(CjkPatch);
-    private logThrottled = throttle(300, (any: any) => logger.info(any)) ;
+	private logThrottled = throttle(300, (any: any) => logger.info(any));
 
+    // TODO: synonym and lemmatization
 	tokenize(text: string): string[] {
 		const tokens = new Set<string>();
 
@@ -32,26 +33,24 @@ export class Tokenizer {
 		for (const segment of segments) {
 			if (!segment) continue; // skip empty strings
 
-            // don't add long segment
-            if (segment.length < 12) {
-                tokens.add(segment);
-            }
+			// don't add long segment
+			if (segment.length < 12) {
+                // don't add single non-cjk char
+				if (!(segment.length === 1 && !CJK_REGEX.test(segment))) {
+					tokens.add(segment);
+                }
+			}
 
-            // if CJK segmentation is enabled, cjkSegmenter can handle hyphens,
-			// so we only need to split camelCase after CJK segmentation.
-			if (this.setting.enableCjkPatch) {
-                const words = this.cjkSegmenter.cutForSearch(segment, true);
-                // logger.info("called");
+			if (this.setting.enableCjkPatch && CJK_REGEX.test(segment)) {
+				const words = this.cjkSegmenter.cutForSearch(segment, true);
 				for (const word of words) {
 					tokens.add(word);
 				}
-                // this.logThrottled(`words count: ${words.length}`) 
-                this.splitCamelCase(segment, tokens);
 			} else {
 				this.splitCamelCaseAndHyphens(segment, tokens);
 			}
 		}
-        // logger.info(tokens.size);
+		// logger.info(tokens.size);
 		return Array.from(tokens);
 	}
 
