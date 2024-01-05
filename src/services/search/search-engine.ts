@@ -183,9 +183,10 @@ class LexicalOptions {
 	readonly documentChunkSize: 50;
 	readonly lineChunkSize: 500;
 	readonly fileIndexOption: Options = {
+		// terms will be lowercased by minisearch
 		tokenize: this.tokenize,
 		idField: "path",
-		fields: ["basename", "aliases", "content"] as DocumentFields,
+		fields: ["basename","folder", "aliases", "content"] as DocumentFields,
 	};
 	readonly lineIndexOption: Options = {
 		tokenize: this.tokenize,

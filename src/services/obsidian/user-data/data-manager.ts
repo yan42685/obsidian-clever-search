@@ -153,7 +153,8 @@ export class DataManager {
 			const updatedRefs = Array.from(currFiles.values()).map((file) => ({
 				path: file.path,
 				lexicalMtime: file.stat.mtime,
-				embeddingMtime: file.stat.mtime, // assuming embeddingMtime should be updated as well
+				// TODO: finish this
+				embeddingMtime: file.stat.mtime, 
 			}));
 			this.database.setDocumentRefs(updatedRefs);
 

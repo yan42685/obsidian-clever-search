@@ -115,7 +115,8 @@ async function testTokenizer() {
 	// const text= "In this digital age, 在这个数字时代, let's embrace the wisdom of the past while pushing the boundaries of the future. 让我们在推动未来的同时，拥抱过去的智慧。 past whileaaaaaaa";
 	// const text= "smart-Connection用起来还不错";
 	// const text = "快乐源【泉哈哈昂哈aaanice不错不错好,非常好不+kj错";
-	const text = "camelCase嗟尔远道之人胡为乎来哉";
+	// const text = "camelCase嗟尔远道之人胡为乎来哉";
+	const text = "abc/def/knsusg abc#def#ddd camelCase this-boy";
 	logger.info(cutter.cut(text, false));
 	logger.info(cutter.cut(text, true));
 
