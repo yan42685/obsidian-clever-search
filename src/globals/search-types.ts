@@ -47,6 +47,7 @@ export type MatchedLine = Line & { positions: Set<number> }; // positions: colum
 
 export type MatchedFile = {
 	path: string;
+	queryTerms: string[];
 	matchedTerms: string[];
 };
 
@@ -88,6 +89,7 @@ export class LineItem extends Item {
 export class FileItem extends Item {
 	engineType: EngineType;
 	path: string;
+	queryTerms: string[];
 	matchedTerms: string[];
 	subItems: FileSubItem[]; // for plaintext filetype
 	// TODO: impl this
@@ -108,6 +110,7 @@ export class FileItem extends Item {
 	constructor(
 		engineType: EngineType,
 		path: string,
+		queryTerms: string[],
 		matchedTerms: string[],
 		subItems: FileSubItem[],
 		previewContent: any,
@@ -115,6 +118,7 @@ export class FileItem extends Item {
 		super();
 		this.engineType = engineType;
 		this.path = path;
+		this.queryTerms = queryTerms;
 		this.matchedTerms = matchedTerms;
 		this.subItems = subItems;
 		this.previewContent = previewContent;

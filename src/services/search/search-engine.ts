@@ -10,6 +10,7 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
+import { BM25Calculator } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -55,6 +56,36 @@ export class LexicalEngine {
 		return this._isReady;
 	}
 
+	async addDocuments(documents: IndexedDocument[]) {
+		const docsToAdd = documents.filter(
+			(doc) => !this.filesIndex.has(doc.path),
+		);
+		await this.filesIndex.addAllAsync(docsToAdd, {
+			chunkSize: this.option.documentChunkSize,
+		});
+		logger.debug(`added ${docsToAdd.length}`);
+	}
+
+	deleteDocuments(paths: string[]) {
+		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
+		this.filesIndex.discardAll(docsToDiscard);
+		logger.debug(`deleted ${docsToDiscard.length}`);
+	}
+
+	// for in-file search
+	async fzfMatch(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
+		const fzf = new AsyncFzf(lines, {
+			selector: (item) => item.text,
+		});
+		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
+			return {
+				text: entry.item.text,
+				row: entry.item.row,
+				positions: entry.positions,
+			} as MatchedLine;
+		});
+	}
+
 	/**
 	 * Performs a search using the provided query and combination mode.
 	 * NOTE: minisearch.search() is async in fact
@@ -75,101 +106,32 @@ export class LexicalEngine {
 			query.text,
 			this.option.getFileSearchOption(combinationMode),
 		);
+
 		return minisearchResult.map((item) => {
 			return {
 				path: item.id,
+				queryTerms: item.queryTerms,
 				matchedTerms: item.terms,
 			};
 		});
 	}
 
-
-	// faster version of searchLines, but might be less accuracy, haven't test it
+	// faster version of `searchLines`, but might be less accuracy, haven't test it
 	// I write this method because when searching in a lengthy CJK language file,
 	// the tokenizing speed is unsatisfactory
 	searchLinesByTerms(
 		lines: Line[],
+		queryTerms: string[],
 		matchedTerms: string[],
 		maxParsedLines: number,
 	): MatchedLine[] {
-		const regex = new RegExp(matchedTerms.join("|"), "gi");
-		const lineScores: Map<number, { score: number; match: MatchedLine }> =
-			new Map();
-		// reuse the set rather than create it inside the loop, roughly 2x faster
-		const matchedTermSet = new Set<string>();
-
-		for (const line of lines) {
-			matchedTermSet.clear();
-			const positions = new Set<number>();
-			let match: RegExpExecArray | null;
-			let lastIndex = -1;
-
-			while ((match = regex.exec(line.text)) !== null) {
-				// skip and move to the next character if a match is an empty string or at the same position
-				if (match.index === lastIndex || match[0].length === 0) {
-					regex.lastIndex++;
-					continue;
-				}
-				matchedTermSet.add(match[0]);
-
-				for (let i = 0; i < match[0].length; i++) {
-					positions.add(match.index + i);
-				}
-
-				lastIndex = match.index;
-			}
-
-			if (matchedTermSet.size > 0) {
-				const matchInfo = {
-					text: line.text,
-					row: line.row,
-					positions: positions,
-				};
-				lineScores.set(line.row, {
-					score: matchedTermSet.size,
-					match: matchInfo,
-				});
-			}
-		}
-
-		const sortedMatchedLines = Array.from(lineScores.values())
-			.sort((a, b) => b.score - a.score || a.match.row - b.match.row)
-			.slice(0, maxParsedLines)
-			.map((entry) => entry.match);
-
-		return sortedMatchedLines;
-	}
-
-
-	async fzfMatch(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
-		const fzf = new AsyncFzf(lines, {
-			selector: (item) => item.text,
-		});
-		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
-			return {
-				text: entry.item.text,
-				row: entry.item.row,
-				positions: entry.positions,
-			} as MatchedLine;
-		});
-	}
-
-	async addDocuments(documents: IndexedDocument[]) {
-		const docsToAdd = documents.filter(
-			(doc) => !this.filesIndex.has(doc.path),
+		const bm25Calculator = new BM25Calculator(
+			lines,
+			queryTerms,
+			matchedTerms,
 		);
-		await this.filesIndex.addAllAsync(docsToAdd, {
-			chunkSize: this.option.documentChunkSize,
-		});
-		logger.debug(`added ${docsToAdd.length}`);
+		return bm25Calculator.calculate(maxParsedLines);
 	}
-
-	deleteDocuments(paths: string[]) {
-		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
-		this.filesIndex.discardAll(docsToDiscard);
-		logger.debug(`deleted ${docsToDiscard.length}`);
-	}
-
 
 	/**
 	 * @deprecated 0.1.x Use `searchLinesByTerms` instead. This method is pretty slow, and doesn't reuse the prev search result;
