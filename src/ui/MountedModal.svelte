@@ -23,7 +23,7 @@
 	export let modal: SearchModal;
 	export let searchType: SearchType;
 	export let queryText: string;
-	const cachedResult = new Map<string, SearchResult>();   // remove the unnecessary latency when backspacing
+	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
@@ -32,7 +32,7 @@
 	let currFileSubItems: FileSubItem[] = []; // for plaintext filetype
 	let currFilePreviewContent: any = undefined; // for non-plaintext filetype
 	let currSubItemIndex = NULL_NUMBER;
-	let inputEl: HTMLElement;
+	let inputEl: HTMLElement | undefined;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
@@ -177,7 +177,7 @@
 				bind:value={queryText}
 				bind:this={inputEl}
 				on:input={handleInputDebounced}
-				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
+				on:blur={() => setTimeout(() => inputEl?.focus(), 1)}
 			/>
 		</div>
 		<div class="result-items">
@@ -188,8 +188,12 @@
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
 						on:click={(event) => {
-							event.preventDefault();
 							handleItemClick(index);
+						}}
+						on:contextmenu={async (event) => {
+							event.preventDefault();
+							await handleItemClick(index);
+							await handleConfirm();
 						}}
 					>
 						{#if item instanceof LineItem}
@@ -224,6 +228,11 @@
 						{#each currFileSubItems as subItem, index}
 							<button
 								on:click={(event) => handleSubItemClick(index)}
+								on:contextmenu={(event) => {
+									event.preventDefault();
+									currSubItemIndex = index;
+									handleConfirm();
+								}}
 								bind:this={subItem.element}
 								class:selected={index === currSubItemIndex}
 								class="file-sub-item"
