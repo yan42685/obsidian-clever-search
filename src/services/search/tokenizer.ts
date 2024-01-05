@@ -42,7 +42,7 @@ export class Tokenizer {
 			}
 
 			if (this.setting.enableCjkPatch && CJK_REGEX.test(segment)) {
-				const words = this.cjkSegmenter.cutForSearch(segment, true);
+				const words = this.cjkSegmenter.cut(segment, true);
 				for (const word of words) {
 					tokens.add(word);
 				}

@@ -116,8 +116,8 @@ async function testTokenizer() {
 	// const text= "smart-Connection用起来还不错";
 	// const text = "快乐源【泉哈哈昂哈aaanice不错不错好,非常好不+kj错";
 	const text = "camelCase嗟尔远道之人胡为乎来哉";
-	logger.info(cutter.cutForSearch(text, false));
-	logger.info(cutter.cutForSearch(text, true));
+	logger.info(cutter.cut(text, false));
+	logger.info(cutter.cut(text, true));
 
 	logger.info(tokenizer.tokenize(text));
 }

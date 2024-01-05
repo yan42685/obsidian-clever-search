@@ -18,7 +18,7 @@ export class CjkPatch {
 		this.isReady = true;
 	}
 
-	cutForSearch(text: string, hmm: boolean): string[] {
+	cut(text: string, hmm: boolean): string[] {
 		if (!this.isReady && !this.reportedError) {
 			logger.error("jieba segmenter isn't ready");
 			this.reportedError = true;
