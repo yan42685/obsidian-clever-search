@@ -1,7 +1,7 @@
 import init, { cut_for_search } from "jieba-wasm/pkg/web/jieba_rs_wasm";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
-import { AssetsManager, jiebaTargetUrl } from "src/utils/web/assets-manager";
+import { AssetsProvider } from "src/utils/web/assets-provider";
 import { singleton } from "tsyringe";
 
 /**
@@ -12,8 +12,8 @@ export class CjkPatch {
 	private isReady = false;
 	private reportedError = false;
 	async initAsync() {
-		const jiebaBinary =
-			getInstance(AssetsManager).loadLibrary(jiebaTargetUrl);
+		const assets = getInstance(AssetsProvider)
+		const jiebaBinary = assets.loadLibrary(assets.jiebaTargetUrl);
 		await init(jiebaBinary);
 		this.isReady = true;
 	}

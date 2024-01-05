@@ -13,10 +13,10 @@ const tiktokenSourceUrl = unpkgUrl + "@dqbd/tiktoken@1.0.7/tiktoken_bg.wasm";
 const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
 const jiebaSourceUrl =
 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
-export const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 
 @singleton()
-export class AssetsManager {
+export class AssetsProvider {
+	readonly jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 	async startDownload() {
 		logger.info("start downloading assets...");
 		logger.info(`target dir: ${assetsDir}`);
@@ -24,7 +24,7 @@ export class AssetsManager {
 		logger.info("tiktoken target url: " + tiktokenTargetUrl);
 
 		await this.downloadFile(tiktokenTargetUrl, tiktokenSourceUrl);
-		await this.downloadFile(jiebaTargetUrl, jiebaSourceUrl);
+		await this.downloadFile(this.jiebaTargetUrl, jiebaSourceUrl);
 	}
 
 	async loadLibrary(path: string): Promise<ArrayBuffer | null> {

@@ -7,7 +7,7 @@ import { LexicalEngine } from "./services/search/search-engine";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance } from "./utils/my-lib";
-import { AssetsManager } from "./utils/web/assets-manager";
+import { AssetsProvider } from "./utils/web/assets-provider";
 
 export async function devTest() {
 	const settings = getInstance(PluginSetting);
@@ -106,7 +106,7 @@ async function testLexicalSearch() {
 
 async function testTokenizer() {
 	// getInstance(SearchClient).testTickToken()
-	getInstance(AssetsManager).startDownload();
+	getInstance(AssetsProvider).startDownload();
 	const cutter = getInstance(CjkPatch);
 	const tokenizer = getInstance(Tokenizer);
 	await cutter.initAsync();
