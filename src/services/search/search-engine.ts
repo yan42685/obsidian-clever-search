@@ -83,6 +83,97 @@ export class LexicalEngine {
 		});
 	}
 
+
+	// faster version of searchLines, but might be less accuracy, haven't test it
+	// I write this method because when searching in a lengthy CJK language file,
+	// the tokenizing speed is unsatisfactory
+	searchLinesByTerms(
+		lines: Line[],
+		matchedTerms: string[],
+		maxParsedLines: number,
+	): MatchedLine[] {
+		const regex = new RegExp(matchedTerms.join("|"), "gi");
+		const lineScores: Map<number, { score: number; match: MatchedLine }> =
+			new Map();
+		// reuse the set rather than create it inside the loop, roughly 2x faster
+		const matchedTermSet = new Set<string>();
+
+		for (const line of lines) {
+			matchedTermSet.clear();
+			const positions = new Set<number>();
+			let match: RegExpExecArray | null;
+			let lastIndex = -1;
+
+			while ((match = regex.exec(line.text)) !== null) {
+				// skip and move to the next character if a match is an empty string or at the same position
+				if (match.index === lastIndex || match[0].length === 0) {
+					regex.lastIndex++;
+					continue;
+				}
+				matchedTermSet.add(match[0]);
+
+				for (let i = 0; i < match[0].length; i++) {
+					positions.add(match.index + i);
+				}
+
+				lastIndex = match.index;
+			}
+
+			if (matchedTermSet.size > 0) {
+				const matchInfo = {
+					text: line.text,
+					row: line.row,
+					positions: positions,
+				};
+				lineScores.set(line.row, {
+					score: matchedTermSet.size,
+					match: matchInfo,
+				});
+			}
+		}
+
+		const sortedMatchedLines = Array.from(lineScores.values())
+			.sort((a, b) => b.score - a.score || a.match.row - b.match.row)
+			.slice(0, maxParsedLines)
+			.map((entry) => entry.match);
+
+		return sortedMatchedLines;
+	}
+
+
+	async fzfMatch(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
+		const fzf = new AsyncFzf(lines, {
+			selector: (item) => item.text,
+		});
+		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
+			return {
+				text: entry.item.text,
+				row: entry.item.row,
+				positions: entry.positions,
+			} as MatchedLine;
+		});
+	}
+
+	async addDocuments(documents: IndexedDocument[]) {
+		const docsToAdd = documents.filter(
+			(doc) => !this.filesIndex.has(doc.path),
+		);
+		await this.filesIndex.addAllAsync(docsToAdd, {
+			chunkSize: this.option.documentChunkSize,
+		});
+		logger.debug(`added ${docsToAdd.length}`);
+	}
+
+	deleteDocuments(paths: string[]) {
+		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
+		this.filesIndex.discardAll(docsToDiscard);
+		logger.debug(`deleted ${docsToDiscard.length}`);
+	}
+
+
+	/**
+	 * @deprecated 0.1.x Use `searchLinesByTerms` instead. This method is pretty slow, and doesn't reuse the prev search result;
+	 */
 	@monitorDecorator
 	async searchLines(
 		lines: Line[],
@@ -115,40 +206,11 @@ export class LexicalEngine {
 		});
 	}
 
-	async fzfMatch(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
-		const fzf = new AsyncFzf(lines, {
-			selector: (item) => item.text,
-		});
-		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
-			return {
-				text: entry.item.text,
-				row: entry.item.row,
-				positions: entry.positions,
-			} as MatchedLine;
-		});
-	}
-
-	async addDocuments(documents: IndexedDocument[]) {
-		const docsToAdd = documents.filter(
-			(doc) => !this.filesIndex.has(doc.path),
-		);
-		await this.filesIndex.addAllAsync(docsToAdd, {
-			chunkSize: this.option.documentChunkSize,
-		});
-		logger.debug(`added ${docsToAdd.length}`);
-	}
-
-	deleteDocuments(paths: string[]) {
-		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
-		this.filesIndex.discardAll(docsToDiscard);
-		logger.debug(`deleted ${docsToDiscard.length}`);
-	}
-
-	// TODO: only highlight terms.length >= 2 or auto-adjust by text language
 	/**
+	 * @deprecated 0.1.x Use `searchLinesByTerms` instead
 	 * find all chars positions of terms in a given line
 	 */
-	findAllTermPositions(line: string, terms: string[]): Set<number> {
+	private findAllTermPositions(line: string, terms: string[]): Set<number> {
 		const regex = new RegExp(terms.join("|"), "gi");
 		const positions = new Set<number>();
 
@@ -186,7 +248,7 @@ class LexicalOptions {
 		// terms will be lowercased by minisearch
 		tokenize: this.tokenize,
 		idField: "path",
-		fields: ["basename","folder", "aliases", "content"] as DocumentFields,
+		fields: ["basename", "folder", "aliases", "content"] as DocumentFields,
 	};
 	readonly lineIndexOption: Options = {
 		tokenize: this.tokenize,

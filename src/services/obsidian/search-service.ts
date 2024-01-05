@@ -43,6 +43,7 @@ export class SearchService {
 					return new FileItem(
 						EngineType.LEXICAL,
 						matchedFile.path,
+						matchedFile.matchedTerms,
 						[], // should be populated on demand
 						"nothing",
 					);
@@ -60,9 +61,12 @@ export class SearchService {
 	 */
 	@monitorDecorator
 	async getFileSubItems(
-		path: string,
 		queryText: string,
+		fileItem: FileItem
 	): Promise<FileSubItem[]> {
+		const path = fileItem.path;
+		const matchedTerms = fileItem.matchedTerms;
+		
 		if (FileUtil.getFileType(path) !== FileType.PLAIN_TEXT) {
 			logger.warn(
 				`file type for path "${path}" is not supported for sub-items.`,
@@ -76,11 +80,12 @@ export class SearchService {
 			.map((text, index) => new Line(text, index));
 		logger.debug("target file lines count: ", lines.length);
 
-		const matchedLines = await this.lexicalEngine.searchLines(
-			lines,
-			queryText,
-			30,
-		);
+		// const matchedLines = await this.lexicalEngine.searchLines(
+		// 	lines,
+		// 	queryText,
+		// 	30,
+		// );
+		const matchedLines = this.lexicalEngine.searchLinesByTerms(lines, matchedTerms, 30);
 
 		const fileSubItems = this.lineHighlighter
 			.parseAll(lines, matchedLines, "subItem", false)

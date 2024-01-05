@@ -36,7 +36,6 @@ export class Tokenizer {
 
 		for (const segment of segments) {
 			if (!segment) continue; // skip empty strings
-
 			if (this.isLargeCharset(segment)) {
 				if (segment.length < 11) {
 					tokens.add(segment);
@@ -48,6 +47,7 @@ export class Tokenizer {
 				}
 			}
 
+			// TODO: move this logic out side of the loop to execute faster
 			if (this.setting.enableCjkPatch && CJK_REGEX.test(segment)) {
 				const words = this.cjkSegmenter.cut(segment, true);
 				for (const word of words) {

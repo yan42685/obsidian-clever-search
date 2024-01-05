@@ -50,8 +50,8 @@
 				currFileItem = items[index] as FileItem;
 				// this result also can be cached if necessary in the future
 				currFileItem.subItems = await searchService.getFileSubItems(
-					currFileItem.path,
 					queryText,
+					currFileItem
 				);
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex = 0;

@@ -88,6 +88,7 @@ export class LineItem extends Item {
 export class FileItem extends Item {
 	engineType: EngineType;
 	path: string;
+	matchedTerms: string[];
 	subItems: FileSubItem[]; // for plaintext filetype
 	// TODO: impl this
 	previewContent: any; // for non-plaintext filetype
@@ -107,12 +108,14 @@ export class FileItem extends Item {
 	constructor(
 		engineType: EngineType,
 		path: string,
+		matchedTerms: string[],
 		subItems: FileSubItem[],
 		previewContent: any,
 	) {
 		super();
 		this.engineType = engineType;
 		this.path = path;
+		this.matchedTerms = matchedTerms;
 		this.subItems = subItems;
 		this.previewContent = previewContent;
 	}
