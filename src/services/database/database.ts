@@ -76,6 +76,7 @@ class DexieWrapper extends Dexie {
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: PluginSetting }, number>;
 	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
+	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	documentRefs!: Dexie.Table<DocumentRef, number>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {

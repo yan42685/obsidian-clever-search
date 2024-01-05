@@ -15,6 +15,9 @@ export class CjkPatch {
 		const assets = getInstance(AssetsProvider)
 		const jiebaBinary = assets.loadLibrary(assets.jiebaTargetUrl);
 		await init(jiebaBinary);
+		// perform an initial cut_for_search to warm up the system, 
+		// as the first cut operation tends to be slow
+		cut_for_search("", false);
 		this.isReady = true;
 	}
 
