@@ -7,6 +7,7 @@ export const ICON_EXPAND = '"▼"';
 export const NULL_NUMBER = -1;
 export const HTML_4_SPACES = "&nbsp;&nbsp;&nbsp;&nbsp;";
 
+// large charset language can apply fuzzier params and should show less preChars when previewing
 // currently only support Chinese
 export const LARGE_CHARSET_LANG_REGEX = /[\u4e00-\u9fa5]/;
 

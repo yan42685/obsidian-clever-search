@@ -13,7 +13,6 @@ export class DataProvider {
 	private readonly app = getInstance(App);
 	private readonly supportedExtensions = new Set(["md"]);
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter
-	// public readonly vaultAbsolutePath = this.obsidianFs.getBasePath().replace(/\\/g, "/") + "/";
 
 	private static readonly contentIndexableFileTypes = new Set([
 		FileType.PLAIN_TEXT,

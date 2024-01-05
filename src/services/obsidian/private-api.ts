@@ -14,6 +14,8 @@ export class PrivateApi {
     }
     getAppId() {
         // BUG: 最新的api移除了this.app.appId的定义，以后可能会废除这个属性
+        // if this api is removed, use the following code to identify a vault:
+        // public readonly vaultAbsolutePath = this.obsidianFs.getBasePath().replace(/\\/g, "/") + "/";
         return (this.app as any).appId;
     }
 
