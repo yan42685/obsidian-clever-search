@@ -125,6 +125,10 @@
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 	}
 
+	function handleSubItemClick(index: number) {
+		currSubItemIndex = index;
+	}
+
 	function handleNextSubItem() {
 		currSubItemIndex = viewHelper.updateSubItemIndex(
 			currFileSubItems,
@@ -219,6 +223,7 @@
 					<ul>
 						{#each currFileSubItems as subItem, index}
 							<button
+								on:click={(event) => handleSubItemClick(index)}
 								bind:this={subItem.element}
 								class:selected={index === currSubItemIndex}
 								class="file-sub-item"
