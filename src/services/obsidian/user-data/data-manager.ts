@@ -88,7 +88,7 @@ export class DataManager {
 			prevData = null;
 			logger.info("devOption: don't load index from database");
 		} else {
-			prevData = await this.database.getMiniSearchData(); 
+			prevData = await this.database.getMiniSearchData();
 		}
 		if (prevData) {
 			logger.trace("Previous minisearch data is found.");
@@ -108,10 +108,10 @@ export class DataManager {
 		logger.trace("Lexical engine is ready");
 	}
 
-    // use case: users have changed files without obsidian open. so we need to update the index
+	// use case: users have changed files without obsidian open. so we need to update the index
 	private async updateIndexDataByMtime() {
 		// update index data based on file modification time
-        // TODO: for semantic engine
+		// TODO: for semantic engine
 		if (!this.isLexicalEngineUpToDate) {
 			const currFiles = new Map<string, TFile>(
 				this.dataProvider
@@ -128,33 +128,37 @@ export class DataManager {
 			const docsToAdd: TAbstractFile[] = [];
 			const docsToDelete: string[] = [];
 
-			// identify docs to add or update
 			for (const [path, file] of currFiles) {
 				const prevRef = prevRefs.get(path);
-				if (!prevRef || file.stat.mtime > prevRef.lexicalMtime) {
+				if (!prevRef) {
+					// to add
+					docsToAdd.push(file);
+				} else if (file.stat.mtime > prevRef.lexicalMtime) {
+					// to update
+					docsToDelete.push(file.path);
 					docsToAdd.push(file);
 				}
 			}
 
-			// identify docs to delete
-			for (const prevRef of prevRefs.keys()) {
-				if (!currFiles.has(prevRef)) {
-					docsToDelete.push(prevRef);
+			// to delete
+			for (const prevPath of prevRefs.keys()) {
+				if (!currFiles.has(prevPath)) {
+					docsToDelete.push(prevPath);
 				}
 			}
 
 			// perform batch delete and add operations
-            logger.trace(`docs to add: ${docsToAdd.length}`);
-            logger.trace(`docs to delete: ${docsToDelete.length}`);
-			await this.addDocuments(docsToAdd);
+			logger.trace(`docs to delete: ${docsToDelete.length}`);
+			logger.trace(`docs to add: ${docsToAdd.length}`);
 			await this.deleteDocuments(docsToDelete);
+			await this.addDocuments(docsToAdd);
 
 			// update the document refs in the database
 			const updatedRefs = Array.from(currFiles.values()).map((file) => ({
 				path: file.path,
 				lexicalMtime: file.stat.mtime,
-				// TODO: finish this
-				embeddingMtime: file.stat.mtime, 
+				// TODO: finish this for semantic engine
+				embeddingMtime: file.stat.mtime,
 			}));
 			this.database.setDocumentRefs(updatedRefs);
 
