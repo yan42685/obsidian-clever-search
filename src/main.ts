@@ -30,10 +30,19 @@ export default class CleverSearch extends Plugin {
 
 		await pluginManager.onload();
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
-		this.app.workspace.onLayoutReady(() => { pluginManager.onLayoutReady(); });
+		this.app.workspace.onLayoutReady(() => {
+			pluginManager.onLayoutReady();
+		});
 
 		// this.exampleCode();
 		this.registerCommands();
+
+		this.addCommand({
+			id: "clever-search-in-vault",
+			name: "Search in Vault",
+			callback: () =>
+				new SearchModal(this.app, SearchType.IN_VAULT).open(),
+		});
 
 		if (isDevEnvironment) {
 			this.addCommand({
@@ -47,11 +56,6 @@ export default class CleverSearch extends Plugin {
 				id: "cs-open-test-modal",
 				name: "Open test modal",
 				callback: () => this.openTestModal(),
-			});
-			this.addCommand({
-				id: "clever-search-in-vault",
-				name: "Search in Vault",
-				callback: () => new SearchModal(this.app, SearchType.IN_VAULT).open()
 			});
 		}
 	}
@@ -95,7 +99,7 @@ export default class CleverSearch extends Plugin {
 		this.addCommand({
 			id: "cs-toggle-privacy-mode",
 			name: "Toggle privacy mode",
-			callback: () => getInstance(AuxiliaryService).togglePrivacyMode()
+			callback: () => getInstance(AuxiliaryService).togglePrivacyMode(),
 		});
 
 		this.addCommand({

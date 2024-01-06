@@ -128,6 +128,7 @@ export class LexicalEngine {
 		fileItem: FileItem,
 		maxParsedLines: number,
 	): Promise<MatchedLine[]> {
+		logger.debug(fileItem.matchedTerms);
 		// optimization for large charset language to avoid using jieba segmenter 
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
