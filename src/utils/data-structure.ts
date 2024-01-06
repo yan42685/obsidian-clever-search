@@ -89,6 +89,8 @@ export class BufferSet<T> {
 	}
 }
 
+// have a good performance for large charset language but is pretty slow for small charset language
+// maybe a Trie could solve this problem
 export class BM25Calculator {
     private termFreqMap: Map<string, number>;
     private lines: Line[];

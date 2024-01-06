@@ -128,6 +128,7 @@ export class LexicalEngine {
 		fileItem: FileItem,
 		maxParsedLines: number,
 	): Promise<MatchedLine[]> {
+		// optimization for large charset language to avoid using jieba segmenter 
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
@@ -136,6 +137,8 @@ export class LexicalEngine {
 			);
 			return bm25Calculator.calculate(maxParsedLines);
 		} else {
+			// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
+			// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
 			return await this.searchLinesForSmallCharset(lines, queryText, 30);
 		}
 	}
