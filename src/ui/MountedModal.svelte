@@ -36,6 +36,9 @@
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
+
+	// TODO: use virtual list rather than rendering all buttons
+
 	// Updates focused content and selected file index
 	async function updateItemAsync(index: number): Promise<void> {
 		// wait until all dynamic elements are mounted and rendered

@@ -9,12 +9,14 @@ export class SearchClient {
 
 	async createChildThreads() {
 		logger.debug("init child threads...");
+		const obsidianFs = getInstance(DataProvider).obsidianFs;
+		const workerPath =".obsidian/plugins/clever-search/cs-search-worker.js";
+		if (!obsidianFs.exists(workerPath)) {
+			logger.debug(`${workerPath} doesn't exist`);
+			return;
+		}
 		try {
-			const obsidianFs = getInstance(DataProvider).obsidianFs;
-			// 'await' the Promise to get the actual ArrayBuffer.
-			const workerScript = await obsidianFs.readBinary(
-				".obsidian/plugins/clever-search/cs-search-worker.js",
-			);
+			const workerScript = await obsidianFs.readBinary(workerPath);
 			logger.debug(
 				`worker script size (6x bigger than in production build): ${(
 					workerScript.byteLength / 1000

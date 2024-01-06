@@ -61,9 +61,7 @@ export class FileUtil {
 		if (dirPath === "." || dirPath === pathUtil.sep || dirPath === "/") {
 			return "./";
 		}
-		return (
-			dirPath.replace(new RegExp("\\" + pathUtil.sep, "g"), "/") + "/"
-		);
+		return dirPath.replace(new RegExp("\\" + pathUtil.sep, "g"), "/") + "/";
 	}
 
 	static countFileByExtensions(files: TFile[]): Record<string, number> {
@@ -76,4 +74,9 @@ export class FileUtil {
 		logger.trace(countResult);
 		return countResult;
 	}
+
+	// use ObsidianFs instead
+	// static doesFileExist(path: string): boolean {
+	// 	return fsUtil.existsSync(path);
+	// }
 }
