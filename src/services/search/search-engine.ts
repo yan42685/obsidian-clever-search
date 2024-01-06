@@ -4,6 +4,7 @@ import MiniSearch from "minisearch";
 import type {
 	DocumentFields,
 	DocumentWeight,
+	FileItem,
 	IndexedDocument,
 	Line,
 	LineFields,
@@ -28,6 +29,7 @@ export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
 	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
+	private tokenizer = getInstance(Tokenizer);
 	private _isReady = false;
 
 	@monitorDecorator
@@ -119,25 +121,29 @@ export class LexicalEngine {
 	// faster version of `searchLines`, but might be less accuracy, haven't test it
 	// I write this method because when searching in a lengthy CJK language file,
 	// the tokenizing speed is unsatisfactory
-	searchLinesByTerms(
+	async searchLinesByFileItem(
 		lines: Line[],
-		queryTerms: string[],
-		matchedTerms: string[],
+		queryText: string,
+		fileItem: FileItem,
 		maxParsedLines: number,
-	): MatchedLine[] {
-		const bm25Calculator = new BM25Calculator(
-			lines,
-			queryTerms,
-			matchedTerms,
-		);
-		return bm25Calculator.calculate(maxParsedLines);
+	): Promise<MatchedLine[]> {
+		if (this.tokenizer.isLargeCharset(queryText)) {
+			const bm25Calculator = new BM25Calculator(
+				lines,
+				fileItem.queryTerms,
+				fileItem.matchedTerms,
+			);
+			return bm25Calculator.calculate(maxParsedLines);
+		} else {
+			return await this.searchLinesForSmallCharset(lines, queryText, 30);
+		}
 	}
 
 	/**
-	 * @deprecated 0.1.x Use `searchLinesByTerms` instead. This method is pretty slow, and doesn't reuse the prev search result;
+	 * @deprecated 0.1.x Use `searchLinesByFileItem` instead. This method is pretty slow, and doesn't reuse the prev search result;
 	 */
 	@monitorDecorator
-	async searchLines(
+	private async searchLinesForSmallCharset(
 		lines: Line[],
 		queryText: string,
 		maxParsedLines: number,

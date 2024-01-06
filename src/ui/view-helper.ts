@@ -154,7 +154,7 @@ export class ViewHelper {
 
 	/**
 	 * @deprecated 0.1.x won't work for lengthy line, like over 500 words
-
+	 *	
 	 * This function is essential to distinguish from `scrollIntoViewForExistingView`.
 	 * Although it does not center the view as precisely as the previous function,
 	 * it is necessary because `scrollIntoViewForExistingView` has bugs when applied to new tabs,

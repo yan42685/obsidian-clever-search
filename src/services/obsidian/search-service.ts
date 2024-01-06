@@ -80,15 +80,10 @@ export class SearchService {
 			.map((text, index) => new Line(text, index));
 		logger.debug("target file lines count: ", lines.length);
 
-		// const matchedLines = await this.lexicalEngine.searchLines(
-		// 	lines,
-		// 	queryText,
-		// 	30,
-		// );
-		const matchedLines = this.lexicalEngine.searchLinesByTerms(
+		const matchedLines = await this.lexicalEngine.searchLinesByFileItem(
 			lines,
-			fileItem.queryTerms,
-			fileItem.matchedTerms,
+			queryText,
+			fileItem,
 			30,
 		);
 
