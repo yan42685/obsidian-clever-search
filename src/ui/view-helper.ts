@@ -71,7 +71,11 @@ export class ViewHelper {
 	}
 
 	// for scroll bar
-	scrollTo(direction: ScrollLogicalPosition, item: Item | undefined, behavior: ScrollBehavior) {
+	scrollTo(
+		direction: ScrollLogicalPosition,
+		item: Item | undefined,
+		behavior: ScrollBehavior,
+	) {
 		if (item && item.element) {
 			item.element.scrollIntoView({
 				behavior: behavior,
@@ -107,7 +111,15 @@ export class ViewHelper {
 				"",
 				this.setting.ui.openInNewPane,
 			);
-			this.scrollIntoViewForNewTab(row, col);
+			// this.scrollIntoViewForNewTab(row, col);
+
+			// TODO: sometimes it will fail to scroll the view, but the cursor is set correctly,
+			// maybe because of the long time it takes to open the file; A possible solution is to read the file size via obsidian api, 
+			// if it's too large, then settimeout to scroll (the user experience will be worser than scrolling instantly, but it seems to be the only solution for that)
+			this.scrollIntoViewForExistingView(row, col);
+			// setTimeout(() => {
+			// 	this.scrollIntoViewForExistingView(row, col);
+			// }, 10);
 		}
 	}
 
@@ -141,6 +153,8 @@ export class ViewHelper {
 	}
 
 	/**
+	 * @deprecated 0.1.x won't work for lengthy line, like over 500 words
+
 	 * This function is essential to distinguish from `scrollIntoViewForExistingView`.
 	 * Although it does not center the view as precisely as the previous function,
 	 * it is necessary because `scrollIntoViewForExistingView` has bugs when applied to new tabs,
