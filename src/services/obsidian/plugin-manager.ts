@@ -10,14 +10,16 @@ import { DataManager } from "./user-data/data-manager";
 @singleton()
 export class PluginManager {
 	// private readonly obFileUtil = getInstance(Vault).adapter as FileSystemAdapter;
-	async initAsync() {
+	async onload() {
 		await getInstance(SettingManager).initAsync();
-
 		const setting = getInstance(PluginSetting);
 		if (setting.enableCjkPatch) {
 			await getInstance(CjkPatch).initAsync();
 		}
 		await getInstance(SearchClient).createChildThreads();
+	}
+
+	async onLayoutReady() {
 		await getInstance(DataManager).initAsync();
 		await getInstance(OmnisearchIntegration).initAsync();
 	}

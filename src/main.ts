@@ -20,17 +20,17 @@ import { SearchModal } from "./ui/search-modal";
 import { getInstance, isDevEnvironment } from "./utils/my-lib";
 
 export default class CleverSearch extends Plugin {
-
 	async onload() {
 		// can't register `this` as CleverSearch, because it is `export default` rather than `export`
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
 		container.register(Vault, { useValue: this.app.vault });
 
+		const pluginManager = getInstance(PluginManager);
+
+		await pluginManager.onload();
 		// explicitly initialize this singleton because object is lazy-loading by default in tsyringe
-		this.app.workspace.onLayoutReady(async () => {
-			await getInstance(PluginManager).initAsync();
-		});
+		this.app.workspace.onLayoutReady(() => { pluginManager.onLayoutReady(); });
 
 		// this.exampleCode();
 		this.registerCommands();
@@ -51,9 +51,7 @@ export default class CleverSearch extends Plugin {
 			this.addCommand({
 				id: "clever-search-in-vault",
 				name: "Search in Vault",
-
-				callback: () =>
-					new SearchModal(this.app, SearchType.IN_VAULT).open(),
+				callback: () => new SearchModal(this.app, SearchType.IN_VAULT).open()
 			});
 		}
 	}

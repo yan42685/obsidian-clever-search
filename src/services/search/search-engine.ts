@@ -54,7 +54,8 @@ export class LexicalEngine {
 		logger.trace(this.filesIndex);
 	}
 
-	get isReady() {
+	// NOTE: need be checked before opening a search-in-vault modal to avoid error when search during indexing
+	get isReady(): boolean {
 		return this._isReady;
 	}
 
