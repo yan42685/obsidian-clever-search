@@ -12,7 +12,7 @@ const assetsDir = pathUtil.join(userDataPath, "clever-search");
 
 const unpkgUrl = "https://unpkg.com/";
 const myRemoteDirUrl =
-	"https://raw.githubusercontent.com/yan42685/obsidian-clever-search/dev/assets/for-program/";
+	unpkgUrl + "obsidian-clever-search@latest/assets/for-program/";
 const tiktokenSourceUrl = unpkgUrl + "@dqbd/tiktoken@1.0.7/tiktoken_bg.wasm";
 const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
 
@@ -23,7 +23,10 @@ const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 const stopWordsZhSourceUrl = myRemoteDirUrl + "stop-words-zh.txt";
 const stopWordsZhTargetUrl = pathUtil.join(assetsDir, "stop-words-zh.txt");
 const stopWordsEnSourceUrl = myRemoteDirUrl + "stop-words-en.txt";
-export const stopWordsEnTargetUrl = pathUtil.join(assetsDir, "stop-words-en.txt");
+export const stopWordsEnTargetUrl = pathUtil.join(
+	assetsDir,
+	"stop-words-en.txt",
+);
 
 const UTF_8 = "utf-8";
 @singleton()
