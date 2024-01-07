@@ -18,9 +18,9 @@ export class PluginSetting {
 export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	mySetting: "default",
 	logLevel: isDevEnvironment ? "debug" : "none",
-	enableStopWordsEn: false,
+	enableStopWordsEn: true,
 	enableChinesePatch: false,
-	enableStopWordsZh: false,
+	enableStopWordsZh: true,
 	apiProvider1: {
 		domain: "",
 		key: "",

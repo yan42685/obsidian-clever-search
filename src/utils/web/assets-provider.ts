@@ -23,7 +23,7 @@ const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 const stopWordsZhSourceUrl = myRemoteDirUrl + "stop-words-zh.txt";
 const stopWordsZhTargetUrl = pathUtil.join(assetsDir, "stop-words-zh.txt");
 const stopWordsEnSourceUrl = myRemoteDirUrl + "stop-words-en.txt";
-const stopWordsEnTargetUrl = pathUtil.join(assetsDir, "stop-words-en.txt");
+export const stopWordsEnTargetUrl = pathUtil.join(assetsDir, "stop-words-en.txt");
 
 const UTF_8 = "utf-8";
 @singleton()

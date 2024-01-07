@@ -8,6 +8,7 @@ import {
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
 
 @singleton()
@@ -65,7 +66,9 @@ class GeneralTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Use English stop words")
-			.setDesc("Meaningless words in stop-words-en.txt won't be indexed to speed up indexing and searching")
+			.setDesc(
+				`Meaningless words in stop-words-en.txt won't be indexed to speed up indexing and searching. You can turn off it or modify ${stopWordsEnTargetUrl} if some words you expected aren't indexed`,
+			)
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsEn)
@@ -77,20 +80,26 @@ class GeneralTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Enable Chinese Patch")
-			.setDesc("better search result for Chinese")
+			.setDesc("Better search result for Chinese")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableChinesePatch)
 					.onChange(async (value) => {
 						this.setting.enableChinesePatch = value;
-						logger.info(`enable chinese: ${getInstance(PluginSetting).enableChinesePatch}`)
+						logger.info(
+							`enable chinese: ${
+								getInstance(PluginSetting).enableChinesePatch
+							}`,
+						);
 						await this.settingManager.saveSettings();
 					}),
 			);
 
 		new Setting(containerEl)
 			.setName("Use Chinese stop words")
-			.setDesc("meaningless words in stop-words-zh.txt won't be indexed to speed up indexing and searching")
+			.setDesc(
+				`This setting won't take effect if Chinese Patch is turned off, Meaningless words in stop-words-zh.txt won't be indexed to speed up indexing and searching`,
+			)
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsZh)
