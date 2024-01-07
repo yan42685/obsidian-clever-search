@@ -210,7 +210,9 @@
 								<span class="filename"
 									>{@html item.basename +
 										HTML_4_SPACES +
-										item.extension}</span
+										(item.extension === "md"
+											? ""
+											: item.extension)}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
