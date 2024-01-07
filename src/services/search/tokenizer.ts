@@ -50,28 +50,30 @@ export class Tokenizer {
 				const words = this.chsSegmenter.cut(segment, true);
 				for (const word of words) {
 					if (
-						!this.setting.enableStopWordsZh ||
-						!this.stopWordsZh?.has(segment)
+						this.setting.enableStopWordsZh &&
+						this.stopWordsZh?.has(word)
 					) {
-						tokens.add(word);
+						continue;
 					}
+					tokens.add(word);
 				}
 			} else {
 				// don't add too short or too long segment for smallCharsetLanguage
 				// TODO: is this step necessary?
-				if (segment.length > 1 && segment.length < 20) {
-					tokens.add(segment);
-				}
+				// if (segment.length > 1 && segment.length < 20) {
+				// 	tokens.add(segment);
+				// }
 
 				const words = segment.split(SEPERATOR_REGEX);
 				for (const word of words) {
-					if (word.length < 2) continue; // don't index single char for small charset
 					if (
-						!this.setting.enableStopWordsEn ||
-						!this.stopWordsEn?.has(word)
+						word.length < 2 ||   // don't index single char for small charset
+						(this.setting.enableStopWordsEn &&
+							this.stopWordsEn?.has(word))
 					) {
-						tokens.add(word);
+						continue;
 					}
+					tokens.add(word);
 
 					if (word.length > 3) {
 						const subwords = word

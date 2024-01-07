@@ -64,6 +64,18 @@ class GeneralTab extends PluginSettingTab {
 		// 	);
 
 		new Setting(containerEl)
+			.setName("Use English stop words")
+			.setDesc("Meaningless words in stop-words-en.txt won't be indexed to speed up indexing and searching")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.enableStopWordsEn)
+					.onChange(async (value) => {
+						this.setting.enableStopWordsEn = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("Enable Chinese Patch")
 			.setDesc("better search result for Chinese")
 			.addToggle((toggle) =>
@@ -72,6 +84,18 @@ class GeneralTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.setting.enableChinesePatch = value;
 						logger.info(`enable chinese: ${getInstance(PluginSetting).enableChinesePatch}`)
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Use Chinese stop words")
+			.setDesc("meaningless words in stop-words-zh.txt won't be indexed to speed up indexing and searching")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.enableStopWordsZh)
+					.onChange(async (value) => {
+						this.setting.enableStopWordsZh = value;
 						await this.settingManager.saveSettings();
 					}),
 			);
