@@ -1,5 +1,5 @@
 import { PluginSetting } from "src/globals/plugin-setting";
-import { CjkPatch } from "src/integrations/languages/cjk-patch";
+import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
@@ -14,9 +14,10 @@ export class PluginManager {
 	async onload() {
 		await getInstance(SettingManager).initAsync();
 		const setting = getInstance(PluginSetting);
+
 		await getInstance(AssetsProvider).initAsync();
-		if (setting.enableCjkPatch) {
-			await getInstance(CjkPatch).initAsync();
+		if (setting.enableChinesePatch) {
+			await getInstance(ChinesePatch).initAsync();
 		}
 		await getInstance(SearchClient).createChildThreads();
 	}

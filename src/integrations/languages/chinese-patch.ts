@@ -8,12 +8,11 @@ import { singleton } from "tsyringe";
  * better segmentation for Chinese, Japanese and Korean
  */
 @singleton()
-export class CjkPatch {
+export class ChinesePatch {
 	private isReady = false;
 	private reportedError = false;
 	async initAsync() {
-		const assets = getInstance(AssetsProvider)
-		const jiebaBinary = assets.loadFileAsync(assets.jiebaTargetUrl);
+		const jiebaBinary = getInstance(AssetsProvider).assets.jiebaBinary;
 		await init(jiebaBinary);
 		// perform an initial cut_for_search to warm up the system, 
 		// as the first cut operation tends to be slow

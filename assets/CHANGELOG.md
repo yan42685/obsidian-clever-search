@@ -5,7 +5,7 @@
 ### New
 
 - Lexical search in vault (fuzzy and prefix match)
-- Language patch for Chinese, Japanese and Korean
+- Language patch for Chinese
 - Automatically move the scrollbar when navigating items by hotkey
 - Share the necessary program assets across vaults to avoid repeated downloads for each vault
 

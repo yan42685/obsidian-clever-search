@@ -64,14 +64,14 @@ class GeneralTab extends PluginSettingTab {
 		// 	);
 
 		new Setting(containerEl)
-			.setName("Enable CJK Patch")
-			.setDesc("better search result for Chinese, Japanese and Korean")
+			.setName("Enable Chinese Patch")
+			.setDesc("better search result for Chinese")
 			.addToggle((toggle) =>
 				toggle
-					.setValue(this.setting.enableCjkPatch)
+					.setValue(this.setting.enableChinesePatch)
 					.onChange(async (value) => {
-						this.setting.enableCjkPatch = value;
-						logger.info(`enablecjk: ${getInstance(PluginSetting).enableCjkPatch}`)
+						this.setting.enableChinesePatch = value;
+						logger.info(`enable chinese: ${getInstance(PluginSetting).enableChinesePatch}`)
 						await this.settingManager.saveSettings();
 					}),
 			);

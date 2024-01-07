@@ -1,12 +1,11 @@
 import { App } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
 import { PluginSetting } from "./globals/plugin-setting";
-import { CjkPatch } from "./integrations/languages/cjk-patch";
+import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
-import { AssetsProvider } from "./utils/web/assets-provider";
 
 export async function devTest() {
 	const settings = getInstance(PluginSetting);
@@ -106,7 +105,7 @@ function testUnsupportedExtensions() {
 async function testTokenizer() {
 	// getInstance(SearchClient).testTickToken()
 	// getInstance(AssetsProvider).startDownload();
-	const cutter = getInstance(CjkPatch);
+	const cutter = getInstance(ChinesePatch);
 	const tokenizer = getInstance(Tokenizer);
 	// const text= "今天天气气候不错啊";
 	// const text= "陈志敏今天似乎好像没有来学校学习啊";
@@ -122,5 +121,4 @@ async function testTokenizer() {
 	logger.info(cutter.cut(text, true));
 	logger.info(tokenizer.tokenize(text, "index"));
 	logger.info(tokenizer.tokenize(text, "search"));
-	logger.info(getInstance(AssetsProvider).getCommonAssets().stopWords);
 }

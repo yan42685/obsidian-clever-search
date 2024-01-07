@@ -11,60 +11,52 @@ const userDataPath = (electron.app || electron.remote.app).getPath("userData");
 const assetsDir = pathUtil.join(userDataPath, "clever-search");
 
 const unpkgUrl = "https://unpkg.com/";
+const myRemoteDirUrl =
+	"https://raw.githubusercontent.com/yan42685/obsidian-clever-search/dev/assets/for-program/";
 const tiktokenSourceUrl = unpkgUrl + "@dqbd/tiktoken@1.0.7/tiktoken_bg.wasm";
 const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
-const stopWordsSourceUrl = "https://raw.githubusercontent.com/goto456/stopwords/master/baidu_stopwords.txt"
-const stopWordsTargetUrl = pathUtil.join(assetsDir, "baidu_stopwords.txt");
+
 const jiebaSourceUrl =
 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
+const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 
+const stopWordsZhSourceUrl = myRemoteDirUrl + "stop-words-zh.txt";
+const stopWordsZhTargetUrl = pathUtil.join(assetsDir, "stop-words-zh.txt");
+const stopWordsEnSourceUrl = myRemoteDirUrl + "stop-words-en.txt";
+const stopWordsEnTargetUrl = pathUtil.join(assetsDir, "stop-words-en.txt");
 
 const UTF_8 = "utf-8";
 @singleton()
 export class AssetsProvider {
-	readonly jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
-
 	private readonly setting = getInstance(PluginSetting);
-	private readonly commonAssets: CommonAssets = { stopWords: new Set<string> };
+	private readonly _assets: Assets = EMPTY_ASSETS;
+	get assets() {
+		return this._assets;
+	}
 
 	async initAsync() {
-		await this.downloadAssets();
-		await this.loadCommonAssets();
-	}
-
-	async loadFileAsync(path: string): Promise<ArrayBuffer | null> {
-		try {
-			return await fsUtil.promises.readFile(path);
-		} catch (e) {
-			logger.error(`failed to load ${path}`);
-			throw new Error(e);
-		}
-	}
-
-	getCommonAssets(): CommonAssets {
-		return this.commonAssets;
-	}
-
-	private async downloadAssets() {
-		logger.trace("Downloading assets...");
+		logger.trace("preparing assets...");
 		logger.trace(`target dir: ${assetsDir}`);
 		// logger.info("tiktoken source url: " + tiktokenSourceUrl);
 		// logger.info("tiktoken target url: " + tiktokenTargetUrl);
 		// await this.downloadFile(tiktokenTargetUrl, tiktokenSourceUrl);
-		if (this.setting.enableCjkPatch) {
-			await this.downloadFile(this.jiebaTargetUrl, jiebaSourceUrl);
+		if (this.setting.enableChinesePatch) {
+			await this.downloadFile(jiebaTargetUrl, jiebaSourceUrl);
+			await this.downloadFile(stopWordsZhTargetUrl, stopWordsZhSourceUrl);
+			this._assets.jiebaBinary = fsUtil.promises.readFile(jiebaTargetUrl);
+			this._assets.stopWordsZh =
+				await this.readLinesAsSet(stopWordsZhTargetUrl);
 		}
-		await this.downloadFile(stopWordsTargetUrl, stopWordsSourceUrl);
+		await this.downloadFile(stopWordsEnTargetUrl, stopWordsEnSourceUrl);
+		this._assets.stopWordsEn =
+			await this.readLinesAsSet(stopWordsEnTargetUrl);
 	}
 
-	private async loadCommonAssets() {
-		logger.trace("Loading common assets...");
-		this.commonAssets.stopWords = new Set(
-			(
-				await fsUtil.promises.readFile(stopWordsTargetUrl, {
-					encoding: UTF_8,
-				})
-			).split(FileUtil.SPLIT_EOL),
+	private async readLinesAsSet(path: string): Promise<Set<string>> {
+		return new Set(
+			(await fsUtil.promises.readFile(path, { encoding: UTF_8 })).split(
+				FileUtil.SPLIT_EOL,
+			),
 		);
 	}
 
@@ -107,6 +99,14 @@ export class AssetsProvider {
 	}
 }
 
-type CommonAssets = {
-	stopWords: Set<string>;
+type Assets = {
+	stopWordsZh: Set<string> | null;
+	stopWordsEn: Set<string> | null;
+	jiebaBinary: Promise<ArrayBuffer | null>;
+};
+
+const EMPTY_ASSETS: Assets = {
+	stopWordsZh: null,
+	stopWordsEn: null,
+	jiebaBinary: new Promise(() => null),
 };

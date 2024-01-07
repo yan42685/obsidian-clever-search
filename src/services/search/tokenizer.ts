@@ -1,5 +1,5 @@
 import { PluginSetting } from "src/globals/plugin-setting";
-import { CjkPatch } from "src/integrations/languages/cjk-patch";
+import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
@@ -16,21 +16,22 @@ const SEPERATOR_REGEX =
 // const CAMEL_CASE_REGEX = /([a-z](?=[A-Z]))/g;
 const HYPHEN_AND_CAMEL_CASE_REGEX = /[-_]|([a-z](?=[A-Z]))/g;
 
-const CJK_REGEX = /[\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\u31f0-\u31ff]/;
 // large charset language can apply fuzzier params and should show less preChars when previewing
 // currently only support Chinese
 const LARGE_CHARSET_LANGUAGE_REGEX = /[\u4e00-\u9fa5]/;
-// const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
+const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
 // const JAPANESE_REGEX = /[\u3040-\u30ff\u31f0-\u31ff]/;
 // const KOREAN_REGEX = /[\uac00-\ud7af]/;
+// const CJK_REGEX = /[\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\u31f0-\u31ff]/;
 
 @singleton()
 export class Tokenizer {
 	private readonly setting = getInstance(PluginSetting);
-	private readonly cjkSegmenter = getInstance(CjkPatch);
+	private readonly chsSegmenter = getInstance(ChinesePatch);
 	private logThrottled = throttle(300, (any: any) => logger.info(any));
-	private readonly stopWords =
-		getInstance(AssetsProvider).getCommonAssets().stopWords;
+	private readonly assetsProvider = getInstance(AssetsProvider);
+	private readonly stopWordsZh = this.assetsProvider.assets.stopWordsZh;
+	private readonly stopWordsEn = this.assetsProvider.assets.stopWordsEn;
 
 	// TODO: synonym and lemmatization
 	tokenize(text: string, mode: "index" | "search"): string[] {
@@ -42,11 +43,16 @@ export class Tokenizer {
 		for (const segment of segments) {
 			if (!segment) continue; // skip empty strings
 
-			if (this.setting.enableCjkPatch && CJK_REGEX.test(segment)) {
-				const words = this.cjkSegmenter.cut(segment, true);
+			if (
+				this.setting.enableChinesePatch &&
+				CHINESE_REGEX.test(segment)
+			) {
+				const words = this.chsSegmenter.cut(segment, true);
 				for (const word of words) {
-					// TODO: apply stopwords to both Chinese and English
-					if (!this.stopWords.has(word)) {
+					if (
+						!this.setting.enableStopWordsZh ||
+						!this.stopWordsZh?.has(segment)
+					) {
 						tokens.add(word);
 					}
 				}
@@ -57,18 +63,23 @@ export class Tokenizer {
 					tokens.add(segment);
 				}
 
-				const subSegments = segment.split(SEPERATOR_REGEX);
-				for (const subSegment of subSegments) {
-					if (subSegment.length < 2) continue; // don't index single char for small charset
-					tokens.add(subSegment);
+				const words = segment.split(SEPERATOR_REGEX);
+				for (const word of words) {
+					if (word.length < 2) continue; // don't index single char for small charset
+					if (
+						!this.setting.enableStopWordsEn ||
+						!this.stopWordsEn?.has(word)
+					) {
+						tokens.add(word);
+					}
 
-					if (subSegment.length > 3) {
-						const words = subSegment
+					if (word.length > 3) {
+						const subwords = word
 							.replace(HYPHEN_AND_CAMEL_CASE_REGEX, "$1 ")
 							.split(" ");
-						for (const word of words) {
-							if (word.length > 1) {
-								tokens.add(word);
+						for (const subword of subwords) {
+							if (subword.length > 1) {
+								tokens.add(subword);
 							}
 						}
 					}
