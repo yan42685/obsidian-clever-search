@@ -10,6 +10,8 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
+import { MyNotice } from "./transformed-api";
+import { DataManager } from "./user-data/data-manager";
 
 @singleton()
 export class SettingManager {
@@ -109,6 +111,17 @@ class GeneralTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl)
+			.setName("Force Refresh Index")
+			.setDesc("Reindex your vault")
+			.addButton((button) => {
+				button.setButtonText("Force Refresh").onClick(async () => {
+					await getInstance(DataManager).forceRefreshAll();
+					new MyNotice("Index finished", 3000);
+				});
+			});
+
+		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
 
 		const devSettingTitle = settingGroup.createDiv({

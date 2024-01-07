@@ -1,4 +1,6 @@
 import { App, type TFile } from "obsidian";
+import { THIS_PLUGIN } from "src/globals/constants";
+import type CleverSearch from "src/main";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
@@ -7,7 +9,8 @@ import { singleton } from "tsyringe";
  */
 @singleton()
 export class PrivateApi {
-    app: App = getInstance(App);
+    app = getInstance(App) as any;
+    plugin: CleverSearch = getInstance(THIS_PLUGIN);
     getFileBacklinks(file: TFile) {
         // @ts-ignore
         this.app.metadataCache.getBacklinksForFile(file);
@@ -16,10 +19,11 @@ export class PrivateApi {
         // BUG: 最新的api移除了this.app.appId的定义，以后可能会废除这个属性
         // if this api is removed, use the following code to identify a vault:
         // public readonly vaultAbsolutePath = this.obsidianFs.getBasePath().replace(/\\/g, "/") + "/";
-        return (this.app as any).appId;
+        return this.app.appId;
     }
 
     executeCommandById(commandId: string) {
-        (this.app as any).commands.executeCommandById(commandId);
+        this.app.commands.executeCommandById(commandId);
     }
+
 }

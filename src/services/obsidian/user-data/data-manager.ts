@@ -45,7 +45,7 @@ export class DataManager {
 
 	@monitorDecorator
 	async initAsync() {
-		await this.initLexicalEngines();
+		await this.initLexicalEngines(false);
 		// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
 		eventBus.on(EventEnum.MODAL_OPEN, () =>
 			this.docOperationsBuffer.flush(),
@@ -68,6 +68,13 @@ export class DataManager {
 		this.docOperationsBuffer.add(operation);
 	}
 
+	async forceRefreshAll() {
+		await this.initLexicalEngines(true);
+		await this.database.setMiniSearchData(
+			this.lexicalEngine.filesIndex.toJSON(),
+		);
+	}
+
 	private async addDocuments(files: TAbstractFile[]) {
 		const documents = await this.dataProvider.generateAllIndexedDocuments(
 			files.filter((f) => this.dataProvider.isIndexable(f)) as TFile[],
@@ -81,12 +88,11 @@ export class DataManager {
 		);
 	}
 
-	private async initLexicalEngines() {
+	private async initLexicalEngines(forceRefresh: boolean) {
 		logger.trace("Init lexical engine...");
 		let prevData: AsPlainObject | null;
-		if (!devOption.loadIndexFromDatabase) {
+		if (!devOption.loadIndexFromDatabase || forceRefresh) {
 			prevData = null;
-			logger.info("devOption: don't load index from database");
 		} else {
 			prevData = await this.database.getMiniSearchData();
 		}
@@ -94,9 +100,7 @@ export class DataManager {
 			logger.trace("Previous minisearch data is found.");
 			await this.lexicalEngine.reIndexAll(prevData);
 		} else {
-			logger.trace(
-				"Previous minisearch data doesn't exists, reading files via obsidian...",
-			);
+			logger.trace("Indexing the whole vault...");
 			const filesToIndex = this.dataProvider.allFilesToBeIndexed();
 			const documents =
 				await this.dataProvider.generateAllIndexedDocuments(

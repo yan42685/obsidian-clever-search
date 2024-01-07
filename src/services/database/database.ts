@@ -11,6 +11,7 @@ import { PrivateApi } from "../obsidian/private-api";
 export class Database {
 	readonly db = getInstance(DexieWrapper);
 
+	// it may finished some time later even if using await
 	async setMiniSearchData(data: AsPlainObject) {
 		this.db.transaction("rw", this.db.minisearch, async () => {
 			await this.db.minisearch.clear();
