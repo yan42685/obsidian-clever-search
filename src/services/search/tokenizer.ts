@@ -42,7 +42,6 @@ export class Tokenizer {
 		// TODO: extract path for search
 		for (const segment of segments) {
 			if (!segment) continue; // skip empty strings
-
 			if (
 				this.setting.enableChinesePatch &&
 				CHINESE_REGEX.test(segment)
@@ -67,7 +66,7 @@ export class Tokenizer {
 				const words = segment.split(SEPERATOR_REGEX);
 				for (const word of words) {
 					if (
-						word.length < 2 ||   // don't index single char for small charset
+						word.length < 2 || // don't index single char for small charset
 						(this.setting.enableStopWordsEn &&
 							this.stopWordsEn?.has(word))
 					) {

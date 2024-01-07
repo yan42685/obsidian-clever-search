@@ -8,9 +8,11 @@ import {
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
-import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
+import {
+	AssetsProvider,
+	stopWordsEnTargetUrl,
+} from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
-import { MyNotice } from "./transformed-api";
 import { DataManager } from "./user-data/data-manager";
 
 @singleton()
@@ -42,6 +44,9 @@ export class SettingManager {
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(PluginSetting);
+	// WARN: this class should not initialize any other modules on fields
+	//       or there will be runtime exceptions that are hard to diagnose
+	// BE CAUTIOUS
 
 	constructor(@inject(THIS_PLUGIN) plugin: CleverSearch) {
 		super(plugin.app, plugin);
@@ -76,7 +81,7 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsEn)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsEn = value;
-						await this.settingManager.saveSettings();
+						await this.saveSettingDownloadRefresh();
 					}),
 			);
 
@@ -93,7 +98,7 @@ class GeneralTab extends PluginSettingTab {
 								getInstance(PluginSetting).enableChinesePatch
 							}`,
 						);
-						await this.settingManager.saveSettings();
+						await this.saveSettingDownloadRefresh();
 					}),
 			);
 
@@ -107,7 +112,10 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsZh)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsZh = value;
-						await this.settingManager.saveSettings();
+						logger.warn(
+							getInstance(PluginSetting).enableStopWordsZh,
+						);
+						await this.saveSettingDownloadRefresh();
 					}),
 			);
 
@@ -117,7 +125,6 @@ class GeneralTab extends PluginSettingTab {
 			.addButton((button) => {
 				button.setButtonText("Force Refresh").onClick(async () => {
 					await getInstance(DataManager).forceRefreshAll();
-					new MyNotice("Indexing finished", 3000);
 				});
 			});
 
@@ -219,5 +226,11 @@ class GeneralTab extends PluginSettingTab {
 						await this.settingManager.saveSettings();
 					}),
 			);
+	}
+
+	private async saveSettingDownloadRefresh() {
+		await getInstance(SettingManager).saveSettings();
+		await getInstance(AssetsProvider).initAsync();
+		await getInstance(DataManager).forceRefreshAll();
 	}
 }

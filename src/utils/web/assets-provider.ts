@@ -28,7 +28,6 @@ export const stopWordsEnTargetUrl = pathUtil.join(
 	"stop-words-en.txt",
 );
 
-const UTF_8 = "utf-8";
 @singleton()
 export class AssetsProvider {
 	private readonly setting = getInstance(PluginSetting);
@@ -49,6 +48,7 @@ export class AssetsProvider {
 			this._assets.jiebaBinary = fsUtil.promises.readFile(jiebaTargetUrl);
 			this._assets.stopWordsZh =
 				await this.readLinesAsSet(stopWordsZhTargetUrl);
+			logger.info(this._assets.stopWordsZh.size);
 		}
 		await this.downloadFile(stopWordsEnTargetUrl, stopWordsEnSourceUrl);
 		this._assets.stopWordsEn =
@@ -57,7 +57,7 @@ export class AssetsProvider {
 
 	private async readLinesAsSet(path: string): Promise<Set<string>> {
 		return new Set(
-			(await fsUtil.promises.readFile(path, { encoding: UTF_8 })).split(
+			(await fsUtil.promises.readFile(path, { encoding: "utf-8" })).split(
 				FileUtil.SPLIT_EOL,
 			),
 		);
@@ -93,6 +93,7 @@ export class AssetsProvider {
 			await fsUtil.promises.writeFile(
 				targetPath,
 				Buffer.from(await response.arrayBuffer()),
+				"utf-8",
 			);
 			logger.info(`successfully download from ${sourceUrl}`);
 		} catch (error) {

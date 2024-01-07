@@ -6,6 +6,7 @@ import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
+import { AssetsProvider } from "./utils/web/assets-provider";
 
 export async function devTest() {
 	const settings = getInstance(PluginSetting);
@@ -121,4 +122,6 @@ async function testTokenizer() {
 	logger.info(cutter.cut(text, true));
 	logger.info(tokenizer.tokenize(text, "index"));
 	logger.info(tokenizer.tokenize(text, "search"));
+	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.size)
+	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.has("的"));
 }

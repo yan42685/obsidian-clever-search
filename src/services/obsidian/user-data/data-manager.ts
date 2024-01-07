@@ -14,6 +14,7 @@ import {
 	monitorDecorator,
 } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import { MyNotice } from "../transformed-api";
 import { DataProvider } from "./data-provider";
 import { FileWatcher } from "./file-watcher";
 
@@ -69,10 +70,13 @@ export class DataManager {
 	}
 
 	async forceRefreshAll() {
+		const prevNotice = new MyNotice("Reindexing...", 3000);
 		await this.initLexicalEngines(true);
 		await this.database.setMiniSearchData(
 			this.lexicalEngine.filesIndex.toJSON(),
 		);
+		prevNotice.hide();
+		new MyNotice("Indexing finished", 3000);
 	}
 
 	private async addDocuments(files: TAbstractFile[]) {
