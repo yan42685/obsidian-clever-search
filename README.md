@@ -40,7 +40,7 @@
         New command:<br>"Search in file with last Omnisearch query"<br><br>
         Use case:<br>
         When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
-        Note: <br>this is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
+        Note: <br>This is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
     </details>
 
 
@@ -55,6 +55,10 @@
 | Obsidian | Search In File      | undefined                |
 | Obsidian | Toggle Privacy Mode | undefined                |
 | Obsidian | Search in file with last Omnisearch query | undefined |
+
+## Limitations
+
+In-file Search performance may be slower when a file contains over 500k characters. I plan to enhance the system by automatically adjusting the fuzzy search level for larger files in the future.
 
 ## Installation
 

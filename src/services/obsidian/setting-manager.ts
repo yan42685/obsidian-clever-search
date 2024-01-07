@@ -69,7 +69,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Use English stop words")
 			.setDesc(
-				`Meaningless words in stop-words-en.txt won't be indexed to speed up indexing and searching. You can turn off it or modify ${stopWordsEnTargetUrl} if some words you expected aren't indexed`,
+				`Enable this to exclude common English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -100,7 +100,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Use Chinese stop words")
 			.setDesc(
-				`This setting won't take effect if Chinese Patch is turned off, Meaningless words in stop-words-zh.txt won't be indexed to speed up indexing and searching`,
+				`Activates only if the Chinese Patch is enabled. This excludes common Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -117,7 +117,7 @@ class GeneralTab extends PluginSettingTab {
 			.addButton((button) => {
 				button.setButtonText("Force Refresh").onClick(async () => {
 					await getInstance(DataManager).forceRefreshAll();
-					new MyNotice("Index finished", 3000);
+					new MyNotice("Indexing finished", 3000);
 				});
 			});
 
