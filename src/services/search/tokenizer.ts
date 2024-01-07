@@ -29,7 +29,7 @@ export class Tokenizer {
 	private logThrottled = throttle(300, (any: any) => logger.info(any));
 
 	// TODO: synonym and lemmatization
-	tokenize(text: string): string[] {
+	tokenize(text: string, mode: "index" | "search"): string[] {
 		const tokens = new Set<string>();
 
 		const segments = text.split(SEGMENT_REGEX);

@@ -1,6 +1,8 @@
+import { PluginSetting } from "src/globals/plugin-setting";
 import { singleton } from "tsyringe";
-import { fsUtil, pathUtil } from "../file-util";
+import { FileUtil, fsUtil, pathUtil } from "../file-util";
 import { logger } from "../logger";
+import { getInstance } from "../my-lib";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const electron = require("electron");
@@ -11,29 +13,59 @@ const assetsDir = pathUtil.join(userDataPath, "clever-search");
 const unpkgUrl = "https://unpkg.com/";
 const tiktokenSourceUrl = unpkgUrl + "@dqbd/tiktoken@1.0.7/tiktoken_bg.wasm";
 const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
+const stopWordsSourceUrl = "https://raw.githubusercontent.com/goto456/stopwords/master/baidu_stopwords.txt"
+const stopWordsTargetUrl = pathUtil.join(assetsDir, "baidu_stopwords.txt");
 const jiebaSourceUrl =
 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
 
+
+const UTF_8 = "utf-8";
 @singleton()
 export class AssetsProvider {
 	readonly jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
-	async startDownload() {
-		logger.info("start downloading assets...");
-		logger.info(`target dir: ${assetsDir}`);
-		logger.info("tiktoken source url: " + tiktokenSourceUrl);
-		logger.info("tiktoken target url: " + tiktokenTargetUrl);
 
-		await this.downloadFile(tiktokenTargetUrl, tiktokenSourceUrl);
-		await this.downloadFile(this.jiebaTargetUrl, jiebaSourceUrl);
+	private readonly setting = getInstance(PluginSetting);
+	private readonly commonAssets: CommonAssets = { stopWords: new Set<string> };
+
+	async initAsync() {
+		await this.downloadAssets();
+		await this.loadCommonAssets();
 	}
 
-	async loadLibrary(path: string): Promise<ArrayBuffer | null> {
+	async loadFileAsync(path: string): Promise<ArrayBuffer | null> {
 		try {
 			return await fsUtil.promises.readFile(path);
 		} catch (e) {
 			logger.error(`failed to load ${path}`);
 			throw new Error(e);
 		}
+	}
+
+	getCommonAssets(): CommonAssets {
+		return this.commonAssets;
+	}
+
+	private async downloadAssets() {
+		logger.trace("Downloading assets...");
+		logger.trace(`target dir: ${assetsDir}`);
+		// logger.info("tiktoken source url: " + tiktokenSourceUrl);
+		// logger.info("tiktoken target url: " + tiktokenTargetUrl);
+		// await this.downloadFile(tiktokenTargetUrl, tiktokenSourceUrl);
+		if (this.setting.enableCjkPatch) {
+			await this.downloadFile(this.jiebaTargetUrl, jiebaSourceUrl);
+		}
+		await this.downloadFile(stopWordsTargetUrl, stopWordsSourceUrl);
+	}
+
+	private async loadCommonAssets() {
+		logger.trace("Loading common assets...");
+		this.commonAssets.stopWords = new Set(
+			(
+				await fsUtil.promises.readFile(stopWordsTargetUrl, {
+					encoding: UTF_8,
+				})
+			).split(FileUtil.SPLIT_EOL),
+		);
 	}
 
 	private async downloadFile(
@@ -74,3 +106,7 @@ export class AssetsProvider {
 		}
 	}
 }
+
+type CommonAssets = {
+	stopWords: Set<string>;
+};

@@ -93,15 +93,11 @@ export class LexicalEngine {
 	 * Performs a search using the provided query and combination mode.
 	 * NOTE: minisearch.search() is async in fact
 	 *
-	 * @param {"and"|"or"} combinationMode - The combination mode:
-	 * - "and": Requires any single token to appear in the fields.
-	 * - "or": Requires all tokens to appear across the fields.
 	 */
 	@monitorDecorator
-	async searchFiles(
-		queryText: string,
-		combinationMode: "and" | "or",
-	): Promise<MatchedFile[]> {
+	async searchFiles(queryText: string): Promise<MatchedFile[]> {
+		const combinationMode = this.tokenizer.isLargeCharset(queryText) ? "or" : "and";
+		// const combinationMode = "and";
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
@@ -128,8 +124,9 @@ export class LexicalEngine {
 		fileItem: FileItem,
 		maxParsedLines: number,
 	): Promise<MatchedLine[]> {
+		logger.debug(fileItem.queryTerms);
 		logger.debug(fileItem.matchedTerms);
-		// optimization for large charset language to avoid using jieba segmenter 
+		// optimization for large charset language to avoid using jieba segmenter
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
@@ -213,25 +210,34 @@ export class LexicalEngine {
 class LexicalOptions {
 	private readonly setting: SearchSetting = getInstance(PluginSetting).search;
 	private readonly tokenizer = getInstance(Tokenizer);
-	private readonly tokenize = (text: string) => this.tokenizer.tokenize(text);
+	private readonly tokenizeIndex = (text: string) =>
+		this.tokenizer.tokenize(text, "index");
+	private readonly tokenizeSearch = (text: string) =>
+		this.tokenizer.tokenize(text, "search");
 
 	readonly documentChunkSize: 50;
 	readonly lineChunkSize: 500;
 	readonly fileIndexOption: Options = {
 		// terms will be lowercased by minisearch
-		tokenize: this.tokenize,
+		tokenize: this.tokenizeIndex,
 		idField: "path",
 		fields: ["basename", "folder", "aliases", "content"] as DocumentFields,
 	};
 	readonly lineIndexOption: Options = {
-		tokenize: this.tokenize,
+		tokenize: this.tokenizeIndex,
 		idField: "row",
 		fields: ["text"] as LineFields,
 		// storeFields: ["text"] as LineFields,
 	};
 
+	/**
+	 * @param {"and"|"or"} combinationMode - The combination mode:
+	 * - "and": Requires any single token to appear in the fields.
+	 * - "or": Requires all tokens to appear across the fields.
+	 */
 	getFileSearchOption(combinationMode: "and" | "or"): SearchOptions {
 		return {
+			tokenize: this.tokenizeSearch,
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
 			prefix: (term) =>

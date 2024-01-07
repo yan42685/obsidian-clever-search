@@ -67,3 +67,18 @@ export type UISetting = {
 	openInNewPane: boolean,
 	showedExtension: "none" | "except md" | "all",
 }
+
+
+// transparent for users
+type InnerSetting = {
+	search: {
+		minTermLengthForPrefix: number,
+	}
+}
+
+const innerSetting: InnerSetting = {
+	search: {
+		minTermLengthForPrefix: 3
+	}
+}
+const inSetting = innerSetting

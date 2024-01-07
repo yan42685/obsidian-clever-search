@@ -1,12 +1,11 @@
-import { App, TFile } from "obsidian";
+import { App } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
 import { PluginSetting } from "./globals/plugin-setting";
 import { CjkPatch } from "./integrations/languages/cjk-patch";
 import { SearchService } from "./services/obsidian/search-service";
-import { LexicalEngine } from "./services/search/search-engine";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
-import { getInstance } from "./utils/my-lib";
+import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
 
 export async function devTest() {
@@ -38,7 +37,7 @@ export async function devTest() {
 	// logger.info(`${vault.configDir}`);
 
 	// testTikToken();
-	testTokenizer();
+	monitorExecution(() => testTokenizer());
 }
 
 function getApp() {
@@ -61,29 +60,29 @@ function testUnsupportedExtensions() {
 	logger.info(vault.getConfig("showUnsupportedFiles"));
 }
 
-async function testLexicalSearch() {
-	const lexicalEngine = getInstance(LexicalEngine);
-	// await lexicalEngine.initAsync();
-	// const query = "camera communiy";
-	const query = "whoknowthisfolder/whereisit";
-	const resultsOr = await lexicalEngine.searchFiles(query, "or");
-	const resultsAnd = await lexicalEngine.searchFiles(query, "and");
+// async function testLexicalSearch() {
+// 	const lexicalEngine = getInstance(LexicalEngine);
+// 	// await lexicalEngine.initAsync();
+// 	// const query = "camera communiy";
+// 	const query = "whoknowthisfolder/whereisit";
+// 	const resultsOr = await lexicalEngine.searchFiles(query, "or");
+// 	const resultsAnd = await lexicalEngine.searchFiles(query, "and");
 
-	logger.debug(resultsOr);
-	// logger.debug(resultsAnd);
-	const vault = getApp().vault;
-	const tFile = vault.getAbstractFileByPath(resultsOr[0]?.path);
-	if (tFile) {
-		if (tFile instanceof TFile) {
-			// const content = await vault.cachedRead(tFile);
-			logger.info(`find first one: ${tFile.path}`);
-		} else {
-			logger.info(`it's a folder: ${tFile}`);
-		}
-	} else {
-		logger.info(`no document is found`);
-	}
-}
+// 	logger.debug(resultsOr);
+// 	// logger.debug(resultsAnd);
+// 	const vault = getApp().vault;
+// 	const tFile = vault.getAbstractFileByPath(resultsOr[0]?.path);
+// 	if (tFile) {
+// 		if (tFile instanceof TFile) {
+// 			// const content = await vault.cachedRead(tFile);
+// 			logger.info(`find first one: ${tFile.path}`);
+// 		} else {
+// 			logger.info(`it's a folder: ${tFile}`);
+// 		}
+// 	} else {
+// 		logger.info(`no document is found`);
+// 	}
+// }
 
 // async function testTikToken() {
 // 	// 获取 GPT-3.5 的 tokenizer
@@ -106,20 +105,21 @@ async function testLexicalSearch() {
 
 async function testTokenizer() {
 	// getInstance(SearchClient).testTickToken()
-	getInstance(AssetsProvider).startDownload();
+	// getInstance(AssetsProvider).startDownload();
 	const cutter = getInstance(CjkPatch);
 	const tokenizer = getInstance(Tokenizer);
-	await cutter.initAsync();
 	// const text= "今天天气气候不错啊";
 	// const text= "陈志敏今天似乎好像没有来学校学习啊";
 	// const text= "In this digital age, 在这个数字时代, let's embrace the wisdom of the past while pushing the boundaries of the future. 让我们在推动未来的同时，拥抱过去的智慧。 past whileaaaaaaa";
 	// const text= "smart-Connection用起来还不错";
-	// const text = "快乐源【泉哈哈昂哈aaanice不错不错好,非常好不+kj错";
 	// const text = "camelCase嗟尔远道之人胡为乎来哉";
 	// const text = "abc/def/knsusg abc#def#ddd camelCase this-boy bush#真好 谷歌is a good thing";
-	const text = "他来到了网易杭研大厦";
+	// const text = "他来到了网易杭研大厦";
+	// const text = "生命的象征";
+	const text = "雄伟的橡树"
 	logger.info(cutter.cut(text, false));
 	logger.info(cutter.cut(text, true));
-
-	logger.info(tokenizer.tokenize(text));
+	logger.info(tokenizer.tokenize(text, "index"));
+	logger.info(tokenizer.tokenize(text, "search"));
+	logger.info(getInstance(AssetsProvider).getCommonAssets().stopWords);
 }

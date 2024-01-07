@@ -28,10 +28,7 @@ export class SearchService {
 		if (queryText.length === 0) {
 			return result;
 		}
-		const lexicalMatches = await this.lexicalEngine.searchFiles(
-			queryText,
-			"and",
-		);
+		const lexicalMatches = await this.lexicalEngine.searchFiles(queryText);
 		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
 			return {

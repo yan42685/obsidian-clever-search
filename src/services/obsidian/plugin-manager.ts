@@ -1,6 +1,7 @@
 import { PluginSetting } from "src/globals/plugin-setting";
 import { CjkPatch } from "src/integrations/languages/cjk-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
+import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
 import { getInstance } from "../../utils/my-lib";
@@ -13,6 +14,7 @@ export class PluginManager {
 	async onload() {
 		await getInstance(SettingManager).initAsync();
 		const setting = getInstance(PluginSetting);
+		await getInstance(AssetsProvider).initAsync();
 		if (setting.enableCjkPatch) {
 			await getInstance(CjkPatch).initAsync();
 		}

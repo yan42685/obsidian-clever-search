@@ -13,7 +13,7 @@ export class CjkPatch {
 	private reportedError = false;
 	async initAsync() {
 		const assets = getInstance(AssetsProvider)
-		const jiebaBinary = assets.loadLibrary(assets.jiebaTargetUrl);
+		const jiebaBinary = assets.loadFileAsync(assets.jiebaTargetUrl);
 		await init(jiebaBinary);
 		// perform an initial cut_for_search to warm up the system, 
 		// as the first cut operation tends to be slow
