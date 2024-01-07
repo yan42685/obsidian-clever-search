@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-clever-search",
-	"version": "0.0.4",
+	"version": "0.1.0",
 	"description": "Fuzzy search and semantic search plugin for obsidian",
 	"main": "main.js",
 	"scripts": {
