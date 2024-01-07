@@ -7,6 +7,7 @@
 - Lexical search in vault (fuzzy and prefix match)
 - Language patch for Chinese
 - Automatically move the scrollbar when navigating items by hotkey
+- customizable stop words list
 - Share the necessary program assets across vaults to avoid repeated downloads for each vault
 
 ### Improved

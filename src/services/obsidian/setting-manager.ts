@@ -44,12 +44,18 @@ export class SettingManager {
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(PluginSetting);
+	private shouldDownloadAndRefreshIndex = false;
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
 	// BE CAUTIOUS
 
 	constructor(@inject(THIS_PLUGIN) plugin: CleverSearch) {
 		super(plugin.app, plugin);
+	}
+	hide() {
+		if (this.shouldDownloadAndRefreshIndex) {
+			this.saveSettingDownloadRefresh();
+		}
 	}
 
 	display(): void {
@@ -74,14 +80,14 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Use English stop words")
 			.setDesc(
-				`Enable this to exclude common English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs`,
+				`Enable this to exclude meaningless English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs`,
 			)
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsEn)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsEn = value;
-						await this.saveSettingDownloadRefresh();
+						this.shouldDownloadAndRefreshIndex = true;
 					}),
 			);
 
@@ -98,35 +104,24 @@ class GeneralTab extends PluginSettingTab {
 								getInstance(PluginSetting).enableChinesePatch
 							}`,
 						);
-						await this.saveSettingDownloadRefresh();
+						this.shouldDownloadAndRefreshIndex = true;
 					}),
 			);
 
 		new Setting(containerEl)
 			.setName("Use Chinese stop words")
 			.setDesc(
-				`Activates only if the Chinese Patch is enabled. This excludes common Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed`,
+				`Activates only if the Chinese Patch is enabled. This excludes meaningless Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed`,
 			)
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsZh)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsZh = value;
-						logger.warn(
-							getInstance(PluginSetting).enableStopWordsZh,
-						);
-						await this.saveSettingDownloadRefresh();
+						this.shouldDownloadAndRefreshIndex = true;
 					}),
 			);
 
-		new Setting(containerEl)
-			.setName("Force Refresh Index")
-			.setDesc("Reindex your vault")
-			.addButton((button) => {
-				button.setButtonText("Force Refresh").onClick(async () => {
-					await getInstance(DataManager).forceRefreshAll();
-				});
-			});
 
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
@@ -202,6 +197,15 @@ class GeneralTab extends PluginSettingTab {
 						this.settingManager.saveSettings();
 					}),
 			);
+
+		new Setting(devSettingContent)
+			.setName("Force Refresh Index")
+			.setDesc("Reindex your vault")
+			.addButton((button) => {
+				button.setButtonText("Force Refresh").onClick(async () => {
+					await getInstance(DataManager).forceRefreshAll();
+				});
+			});
 
 		new Setting(devSettingContent)
 			.setName("Log level")
