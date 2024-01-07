@@ -96,8 +96,8 @@ export class LexicalEngine {
 	 */
 	@monitorDecorator
 	async searchFiles(queryText: string): Promise<MatchedFile[]> {
-		const combinationMode = this.tokenizer.isLargeCharset(queryText) ? "or" : "and";
-		// const combinationMode = "and";
+		// const combinationMode = this.tokenizer.isLargeCharset(queryText) ? "or" : "and";
+		const combinationMode = "and";
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
