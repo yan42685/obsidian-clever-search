@@ -23,6 +23,7 @@ export class DataManager {
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
 	private lexicalEngine = getInstance(LexicalEngine);
+	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
 
 	private docOperationsHandler = async (operations: DocOperation[]) => {
@@ -46,14 +47,16 @@ export class DataManager {
 
 	@monitorDecorator
 	async initAsync() {
-		await this.initLexicalEngines(false);
-		// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
-		eventBus.on(EventEnum.MODAL_OPEN, () =>
-			this.docOperationsBuffer.flush(),
-		);
-
+		await this.initLexicalEngines();
 		await this.updateIndexDataByMtime();
-		getInstance(FileWatcher).start();
+
+		if (!this.shouldForceRefresh) {
+			// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
+			eventBus.on(EventEnum.MODAL_OPEN, () =>
+				this.docOperationsBuffer.flush(),
+			);
+			getInstance(FileWatcher).start();
+		}
 
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
@@ -70,13 +73,12 @@ export class DataManager {
 	}
 
 	async forceRefreshAll() {
-		const prevNotice = new MyNotice("Reindexing...", 3000);
-		await this.initLexicalEngines(true);
-		await this.database.setMiniSearchData(
-			this.lexicalEngine.filesIndex.toJSON(),
-		);
+		const prevNotice = new MyNotice("Reindexing...");
+		this.shouldForceRefresh = true;
+		await this.initAsync();
 		prevNotice.hide();
 		new MyNotice("Indexing finished", 3000);
+		this.shouldForceRefresh = false;
 	}
 
 	private async addDocuments(files: TAbstractFile[]) {
@@ -92,10 +94,10 @@ export class DataManager {
 		);
 	}
 
-	private async initLexicalEngines(forceRefresh: boolean) {
+	private async initLexicalEngines() {
 		logger.trace("Init lexical engine...");
 		let prevData: AsPlainObject | null;
-		if (!devOption.loadIndexFromDatabase || forceRefresh) {
+		if (!devOption.loadIndexFromDatabase || this.shouldForceRefresh) {
 			prevData = null;
 		} else {
 			prevData = await this.database.getMiniSearchData();
@@ -116,7 +118,7 @@ export class DataManager {
 		logger.trace("Lexical engine is ready");
 	}
 
-	// use case: users have changed files without obsidian open. so we need to update the index
+	// use case: users have changed files without obsidian open. so we need to update the index and refs
 	private async updateIndexDataByMtime() {
 		// update index data based on file modification time
 		// TODO: for semantic engine
@@ -169,6 +171,8 @@ export class DataManager {
 				embeddingMtime: file.stat.mtime,
 			}));
 			this.database.setDocumentRefs(updatedRefs);
+			logger.trace(`${updatedRefs.length} doc refs updated`)
+
 
 			this.isLexicalEngineUpToDate = true;
 		}
