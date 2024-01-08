@@ -11,7 +11,7 @@ const userDataPath = (electron.app || electron.remote.app).getPath("userData");
 const assetsDir = pathUtil.join(userDataPath, "clever-search");
 
 const myRemoteDirUrl1 =
-	"https://gitee.com/alexyan333777/obsidian-clever-search/raw/dev/assets/for-program/";
+	"https://bitbucket.org/alexclifton37/obsidian-clever-search/raw/dev/assets/for-program/";
 const myRemoteDirUrl2 =
 	"https://raw.githubusercontent.com/yan42685/obsidian-clever-search/dev/assets/for-program/";
 
@@ -23,7 +23,6 @@ const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
 // const jiebaSourceUrl =
 // 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
 // const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
-
 
 export const stopWordsEnTargetUrl = pathUtil.join(
 	assetsDir,
