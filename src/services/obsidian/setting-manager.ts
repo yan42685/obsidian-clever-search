@@ -54,6 +54,7 @@ class GeneralTab extends PluginSettingTab {
 	}
 	hide() {
 		if (this.shouldDownloadAndRefreshIndex) {
+			this.shouldDownloadAndRefreshIndex = false;
 			this.saveSettingDownloadRefresh();
 		}
 	}
