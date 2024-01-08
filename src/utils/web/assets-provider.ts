@@ -11,8 +11,14 @@ const userDataPath = (electron.app || electron.remote.app).getPath("userData");
 const assetsDir = pathUtil.join(userDataPath, "clever-search");
 
 const unpkgUrl = "https://unpkg.com/";
-const myRemoteDirUrl =
+const myRemoteDirUrl1 =
 	unpkgUrl + "obsidian-clever-search@latest/assets/for-program/";
+const myRemoteDirUrl2 =
+	"https://raw.githubusercontent.com/yan42685/obsidian-clever-search/dev/assets/for-program/";
+const myRemoteDirUrl3 =
+	"https://gitee.com/alexyan333777/obsidian-clever-search/raw/dev/assets/for-program/";
+
+
 const tiktokenSourceUrl = unpkgUrl + "@dqbd/tiktoken@1.0.7/tiktoken_bg.wasm";
 const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
 
@@ -20,9 +26,9 @@ const jiebaSourceUrl =
 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
 const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 
-const stopWordsZhSourceUrl = myRemoteDirUrl + "stop-words-zh.txt";
+const stopWordsZhSourceUrl = myRemoteDirUrl1 + "stop-words-zh.txt";
 const stopWordsZhTargetUrl = pathUtil.join(assetsDir, "stop-words-zh.txt");
-const stopWordsEnSourceUrl = myRemoteDirUrl + "stop-words-en.txt";
+const stopWordsEnSourceUrl = myRemoteDirUrl1 + "stop-words-en.txt";
 export const stopWordsEnTargetUrl = pathUtil.join(
 	assetsDir,
 	"stop-words-en.txt",
