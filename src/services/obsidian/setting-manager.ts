@@ -5,6 +5,7 @@ import {
 	PluginSetting,
 	type LogLevelOptions,
 } from "src/globals/plugin-setting";
+import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
@@ -248,6 +249,9 @@ class GeneralTab extends PluginSettingTab {
 	private async saveSettingDownloadRefresh() {
 		await getInstance(SettingManager).saveSettings();
 		await getInstance(AssetsProvider).initAsync();
+		if (this.setting.enableChinesePatch) {
+			await getInstance(ChinesePatch).initAsync();
+		}
 		await getInstance(DataManager).forceRefreshAll();
 	}
 }

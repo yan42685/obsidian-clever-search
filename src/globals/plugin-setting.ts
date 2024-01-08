@@ -1,7 +1,6 @@
 import type { LogLevel } from "src/utils/logger";
 import { isDevEnvironment } from "src/utils/my-lib";
 
-
 export class PluginSetting {
 	mySetting: string;
 	logLevel: LogLevel;
@@ -19,7 +18,9 @@ export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	mySetting: "default",
 	logLevel: isDevEnvironment ? "debug" : "none",
 	enableStopWordsEn: true,
-	enableChinesePatch: false,
+	enableChinesePatch:
+		// TODO: 繁体中文
+		window.localStorage.getItem("language") === "zh" ? true : false,
 	enableStopWordsZh: true,
 	apiProvider1: {
 		domain: "",
@@ -45,12 +46,12 @@ export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	ui: {
 		openInNewPane: true,
 		maxItemResults: 30,
-		showedExtension: "except md"
-	}
+		showedExtension: "except md",
+	},
 };
 
 export type LogLevelOptions = {
-    [K in LogLevel]: K;
+	[K in LogLevel]: K;
 };
 
 export type ApiProvider = {
@@ -71,24 +72,22 @@ export type SearchSetting = {
 	// weightH4: number;
 };
 
-
 export type UISetting = {
-	openInNewPane: boolean,
-	maxItemResults: number,
-	showedExtension: "none" | "except md" | "all",
-}
-
+	openInNewPane: boolean;
+	maxItemResults: number;
+	showedExtension: "none" | "except md" | "all";
+};
 
 // transparent for users
 type InnerSetting = {
 	search: {
-		minTermLengthForPrefix: number,
-	}
-}
+		minTermLengthForPrefix: number;
+	};
+};
 
 const innerSetting: InnerSetting = {
 	search: {
-		minTermLengthForPrefix: 3
-	}
-}
-const inSetting = innerSetting
+		minTermLengthForPrefix: 3,
+	},
+};
+const inSetting = innerSetting;

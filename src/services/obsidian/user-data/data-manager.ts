@@ -78,7 +78,7 @@ export class DataManager {
 		this.shouldForceRefresh = true;
 		await this.initAsync();
 		prevNotice.hide();
-		new MyNotice("Indexing finished", 3000);
+		new MyNotice("Indexing finished", 5000);
 		this.shouldForceRefresh = false;
 	}
 
