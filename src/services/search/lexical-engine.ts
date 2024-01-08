@@ -390,10 +390,13 @@ class BM25Calculator {
 								(1 -
 									this.b +
 									this.b * (docLength / this.avgDocLength))));
+				// NOTE: I'm not sure if multiplying the term length will get a better result
+				// score += termScore * Math.log(term.length);
 				score += termScore;
 			}
-
-			lineScores.push({ line, score });
+			if (score > 0) {
+				lineScores.push({ line, score });
+			}
 		}
 
 		// sort the lines by score in descending order
