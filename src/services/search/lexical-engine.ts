@@ -104,8 +104,9 @@ export class LexicalEngine {
 			query.text,
 			this.option.getFileSearchOption(combinationMode),
 		);
-
-		return minisearchResult.map((item) => {
+		const maxFileItems = 100;
+		logger.debug(`maxFileItems: ${maxFileItems}`);
+		return minisearchResult.slice(0, maxFileItems).map((item) => {
 			return {
 				path: item.id,
 				queryTerms: item.queryTerms,
@@ -125,18 +126,26 @@ export class LexicalEngine {
 	): Promise<MatchedLine[]> {
 		logger.debug(fileItem.queryTerms);
 		logger.debug(fileItem.matchedTerms);
+		const maxSubItems = 50;
+		logger.debug(`max subItems: ${maxSubItems}`);
+
 		// optimization for large charset language to avoid using jieba segmenter
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
 				fileItem.queryTerms,
 				fileItem.matchedTerms,
+				(maxParsedLines = maxSubItems),
 			);
 			return bm25Calculator.parse();
 		} else {
 			// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
 			// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
-			return await this.searchLinesForSmallCharset(lines, queryText, 30);
+			return await this.searchLinesForSmallCharset(
+				lines,
+				queryText,
+				maxSubItems,
+			);
 		}
 	}
 
@@ -381,7 +390,9 @@ class BM25Calculator {
 				const tf = (line.text.match(new RegExp(term, "gi")) || [])
 					.length;
 				// additional modification for BM25
-				const lengthWeight = termLengthWeightMap.get(term.length) || MAX_TERM_LENGTH_WEIGHT;
+				const lengthWeight =
+					termLengthWeightMap.get(term.length) ||
+					MAX_TERM_LENGTH_WEIGHT;
 				const idf =
 					Math.log(
 						1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
@@ -454,7 +465,7 @@ class BM25Calculator {
 }
 
 // simulate results for const termLengthWeight = Math.min(2.5, Math.log(1 + term.length));
-const MAX_TERM_LENGTH_WEIGHT = 2.5
+const MAX_TERM_LENGTH_WEIGHT = 2.5;
 const termLengthWeightMap = new Map([
 	[1, 0.6931],
 	[2, 1.0986],
