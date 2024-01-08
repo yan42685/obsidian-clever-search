@@ -47,6 +47,7 @@ export class DataManager {
 
 	@monitorDecorator
 	async initAsync() {
+		// TODO: delete old version databases
 		await this.initLexicalEngines();
 		await this.updateIndexDataByMtime();
 
