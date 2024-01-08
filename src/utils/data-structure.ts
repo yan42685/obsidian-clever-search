@@ -92,94 +92,133 @@ export class BufferSet<T> {
 // have a good performance for large charset language but is pretty slow for small charset language
 // maybe a Trie could solve this problem
 export class BM25Calculator {
-    private termFreqMap: Map<string, number>;
-    private lines: Line[];
-    private queryTerms: string[];
-    private matchedTerms: string[];
-    private totalLength: number;
-    private avgDocLength: number;
-    private k1: number;
-    private b: number;
-  
-    constructor(lines: Line[], queryTerms: string[], matchedTerms: string[], k1 = 1.5, b = 0.75) {
-        this.lines = lines;
-        this.queryTerms = queryTerms;
-        this.matchedTerms = matchedTerms;
-        this.k1 = k1;
-        this.b = b;
-        this.termFreqMap = this.buildTermFreqMap();
-        this.totalLength = this.calculateTotalLength();
-        this.avgDocLength = this.totalLength / lines.length;
-    }
-  
-    private buildTermFreqMap(): Map<string, number> {
-        const termFreqMap = new Map<string, number>();
-        this.lines.forEach((line) => {
-            this.matchedTerms.forEach((term) => {
-                if (line.text.toLowerCase().includes(term.toLowerCase())) {
-                    termFreqMap.set(term, (termFreqMap.get(term) || 0) + 1);
-                }
-            });
-        });
-        return termFreqMap;
-    }
-  
-    private calculateTotalLength(): number {
-        return this.lines.reduce(
-            (sum, line) => sum + line.text.split(" ").length,
-            0,
-        );
-    }
-  
-    calculate(maxParsedLines: number): MatchedLine[] {
-        const lineScores = this.lines.map((line) => {
-            const { score, positions } = this.calculateBM25(line);
-            return { line, score, positions };
-        });
+	private termFreqMap: Map<string, number>;
+	private lines: Line[];
+	private matchedTerms: string[];
+	private totalLength: number;
+	private avgDocLength: number;
+	private k1: number;
+	private b: number;
+	private maxParsedLines: number;
+	private preChars: number;
+	private postChars: number;
 
-        const filteredLineScores = lineScores.filter(
-            (entry) => entry.positions.size > 0,
-        );
+	constructor(
+		lines: Line[],
+		matchedTerms: string[],
+		k1 = 1.5,
+		b = 0.75,
+		maxParsedLines = 30,
+		preChars = 50,
+		postChars = 60,
+	) {
+		this.lines = lines;
+		this.matchedTerms = matchedTerms;
+		this.k1 = k1;
+		this.b = b;
+		this.maxParsedLines = maxParsedLines;
+		this.preChars = preChars;
+		this.postChars = postChars;
+		this.termFreqMap = this.buildTermFreqMap();
+		this.totalLength = this.calculateTotalLength();
+		this.avgDocLength = this.totalLength / lines.length;
+	}
 
-        filteredLineScores.sort((a, b) => b.score - a.score);
+	private buildTermFreqMap(): Map<string, number> {
+		const termFreqMap = new Map<string, number>();
+		this.lines.forEach((line) => {
+			this.matchedTerms.forEach((term) => {
+				if (line.text.toLowerCase().includes(term.toLowerCase())) {
+					termFreqMap.set(term, (termFreqMap.get(term) || 0) + 1);
+				}
+			});
+		});
+		return termFreqMap;
+	}
 
-        return filteredLineScores.slice(0, maxParsedLines).map((entry) => ({
-            text: entry.line.text,
-            row: entry.line.row,
-            positions: entry.positions,
-        }));
-    }
+	private calculateTotalLength(): number {
+		return this.lines.reduce(
+			(sum, line) => sum + line.text.split(" ").length,
+			0,
+		);
+	}
 
-    private calculateBM25(line: Line): { score: number; positions: Set<number> } {
-        let score = 0;
-        const positions = new Set<number>();
-        const docLength = line.text.split(" ").length;
+	parse(): MatchedLine[] {
+		const lineScores = this.lines.map((line) => {
+			const score = this.getLineScore(line);
+			return { line, score };
+		});
 
-        this.queryTerms.forEach((term) => {
-            const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
-            const tf = (line.text.match(new RegExp(term, "gi")) || []).length;
-            const idf = Math.log(1 + (this.lines.length - freq + 0.5) / (freq + 0.5));
-            const termScore =
-                idf *
-                ((tf * (this.k1 + 1)) /
-                    (tf + this.k1 * (1 - this.b + this.b * (docLength / this.avgDocLength))));
+		lineScores.sort((a, b) => b.score - a.score);
+		const topLineScores = lineScores.slice(0, this.maxParsedLines);
 
-            score += termScore;
+		return topLineScores.map((entry) => {
+			const highlightedPositions = this.findHighlightPositions(
+				entry.line,
+			);
+			return {
+				text: entry.line.text,
+				row: entry.line.row,
+				positions: highlightedPositions,
+			};
+		});
+	}
 
-            // calculate term positions
-            let match;
-            const regex = new RegExp(term, "gi");
-            while ((match = regex.exec(line.text)) !== null) {
-                for (
-                    let i = match.index;
-                    i < match.index + match[0].length;
-                    i++
-                ) {
-                    positions.add(i);
-                }
-            }
-        });
+	private findHighlightPositions(line: Line): Set<number> {
+		const positions = new Set<number>();
+		this.matchedTerms.forEach((term) => {
+			let match;
+			const regex = new RegExp(term, "gi");
+			let lastMatchStart = -1,
+				lastMatchEnd = -1;
 
-        return { score, positions };
-    }
+			// find only the last occurrence of the term
+			while ((match = regex.exec(line.text)) !== null) {
+				lastMatchStart = match.index;
+				lastMatchEnd = match.index + match[0].length;
+			}
+
+			// highlight only if the term is within the specified range
+			if (lastMatchEnd !== -1) {
+				const highlightStart = Math.max(
+					0,
+					lastMatchStart - this.preChars,
+				);
+				const highlightEnd = Math.min(
+					line.text.length,
+					lastMatchEnd + this.postChars,
+				);
+				for (let i = highlightStart; i < highlightEnd; i++) {
+					if (i >= lastMatchStart && i < lastMatchEnd) {
+						positions.add(i);
+					}
+				}
+			}
+		});
+		return positions;
+	}
+
+	private getLineScore(line: Line): number {
+		let score = 0;
+		const docLength = line.text.split(" ").length;
+
+		this.matchedTerms.forEach((term) => {
+			const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
+			const tf = (line.text.match(new RegExp(term, "gi")) || []).length;
+			const idf = Math.log(
+				1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+			);
+			const termScore =
+				idf *
+				((tf * (this.k1 + 1)) /
+					(tf +
+						this.k1 *
+							(1 -
+								this.b +
+								this.b * (docLength / this.avgDocLength))));
+			score += termScore;
+		});
+
+		return score;
+	}
 }

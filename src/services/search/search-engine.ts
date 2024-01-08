@@ -130,10 +130,9 @@ export class LexicalEngine {
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
-				fileItem.queryTerms,
 				fileItem.matchedTerms,
 			);
-			return bm25Calculator.calculate(maxParsedLines);
+			return bm25Calculator.parse();
 		} else {
 			// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
 			// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment

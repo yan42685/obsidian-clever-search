@@ -52,6 +52,9 @@ export class Tokenizer {
 						this.setting.enableStopWordsZh &&
 						this.stopWordsZh?.has(word)
 					) {
+						if (mode === "search" && word.length > 1) {
+							logger.debug(`excluded: ${word}`);
+						}
 						continue;
 					}
 					tokens.add(word);
