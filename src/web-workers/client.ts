@@ -1,6 +1,6 @@
 import { DataProvider } from "src/services/obsidian/user-data/data-provider";
 import { logger } from "src/utils/logger";
-import { getInstance } from "src/utils/my-lib";
+import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
 @singleton()
@@ -8,13 +8,14 @@ export class SearchClient {
 	worker?: Worker;
 
 	async createChildThreads() {
+		if (isDevEnvironment) {
+			logger.warn("web worker only enabled on dev environment now")
+		} else {
+			return;
+		}
 		logger.debug("init child threads...");
 		const obsidianFs = getInstance(DataProvider).obsidianFs;
 		const workerPath =".obsidian/plugins/clever-search/cs-search-worker.js";
-		if (!obsidianFs.exists(workerPath)) {
-			logger.debug(`${workerPath} doesn't exist`);
-			return;
-		}
 		try {
 			const workerScript = await obsidianFs.readBinary(workerPath);
 			logger.debug(

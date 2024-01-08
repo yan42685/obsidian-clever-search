@@ -11,7 +11,6 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
-import { BM25Calculator } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -27,6 +26,7 @@ import { Tokenizer } from "./tokenizer";
 @singleton()
 export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
+	private pluginSetting = getInstance(PluginSetting);
 	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private tokenizer = getInstance(Tokenizer);
@@ -80,7 +80,7 @@ export class LexicalEngine {
 		const fzf = new AsyncFzf(lines, {
 			selector: (item) => item.text,
 		});
-		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
+		return (await fzf.find(queryText)).slice(0, this.pluginSetting.ui.maxItemResults).map((entry: FzfResultItem<Line>) => {
 			return {
 				text: entry.item.text,
 				row: entry.item.row,
@@ -105,8 +105,8 @@ export class LexicalEngine {
 			query.text,
 			this.option.getFileSearchOption(combinationMode),
 		);
-
-		return minisearchResult.map((item) => {
+		logger.debug(`maxFileItems: ${this.pluginSetting.ui.maxItemResults}`);
+		return minisearchResult.slice(0, this.pluginSetting.ui.maxItemResults).map((item) => {
 			return {
 				path: item.id,
 				queryTerms: item.queryTerms,
@@ -126,18 +126,26 @@ export class LexicalEngine {
 	): Promise<MatchedLine[]> {
 		logger.debug(fileItem.queryTerms);
 		logger.debug(fileItem.matchedTerms);
+		const maxSubItems = 50;
+		logger.debug(`max subItems: ${maxSubItems}`);
+
 		// optimization for large charset language to avoid using jieba segmenter
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
 				fileItem.queryTerms,
 				fileItem.matchedTerms,
+				(maxParsedLines = maxSubItems),
 			);
-			return bm25Calculator.calculate(maxParsedLines);
+			return bm25Calculator.parse();
 		} else {
 			// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
 			// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
-			return await this.searchLinesForSmallCharset(lines, queryText, 30);
+			return await this.searchLinesForSmallCharset(
+				lines,
+				queryText,
+				maxSubItems,
+			);
 		}
 	}
 
@@ -266,3 +274,209 @@ class LexicalOptions {
 		};
 	}
 }
+
+// have a good performance for large charset language but is pretty slow for small charset language
+// maybe a Trie could solve this problem
+class BM25Calculator {
+	private termFreqMap: Map<string, number>;
+	private lines: Line[];
+	private matchedTerms: string[];
+	private totalLength: number;
+	private avgDocLength: number;
+	private k1: number;
+	private b: number;
+	private maxParsedLines: number;
+	private preChars: number;
+	private postChars: number;
+
+	constructor(
+		lines: Line[],
+		queryTerms: string[],
+		matchedTerms: string[],
+		k1 = 1.5,
+		// b = 0.75,
+		b = 0.2, // decrease the weight of term.length / doc.length
+		maxParsedLines = 30,
+		preChars = 60,
+		postChars = 80,
+	) {
+		this.lines = lines;
+		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
+		this.k1 = k1;
+		this.b = b;
+		this.maxParsedLines = maxParsedLines;
+		this.preChars = preChars;
+		this.postChars = postChars;
+		this.termFreqMap = this.buildTermFreqMap();
+		this.totalLength = this.calculateTotalLength();
+		this.avgDocLength = this.totalLength / lines.length;
+	}
+
+	parse(): MatchedLine[] {
+		return this.getTopRelevantLines(this.lines, this.maxParsedLines);
+	}
+
+	private filterMatchedTerms(
+		queryTerms: string[],
+		matchedTerms: string[],
+	): string[] {
+		const matchedQueryTerms = queryTerms.filter(
+			(t) =>
+				!queryTerms.some(
+					(other) => other.length > t.length && other.includes(t),
+				) && matchedTerms.includes(t),
+		);
+
+		let result: string[];
+		if (matchedQueryTerms.length === 0) {
+			result = matchedTerms.filter(
+				(t) =>
+					!matchedTerms.some(
+						(other) => other.length > t.length && other.includes(t),
+					),
+			);
+		} else {
+			result = matchedQueryTerms;
+			// NOTE: based on the fact that matchedTerms only contains unique term
+			for (const mTerm of matchedTerms) {
+				if (
+					!matchedQueryTerms.includes(mTerm) &&
+					!this.isSubstringOrSuperString(mTerm, matchedTerms)
+				) {
+					result.push(mTerm);
+				}
+			}
+		}
+		return result;
+	}
+
+	private isSubstringOrSuperString(str: string, strArray: string[]): boolean {
+		return strArray.some(
+			(s) =>
+				(s.length > str.length && s.includes(str)) ||
+				(str.length > s.length && str.includes(s)),
+		);
+	}
+
+	private buildTermFreqMap(): Map<string, number> {
+		const termFreqMap = new Map<string, number>();
+		this.lines.forEach((line) => {
+			this.matchedTerms.forEach((term) => {
+				if (line.text.toLowerCase().includes(term.toLowerCase())) {
+					termFreqMap.set(term, (termFreqMap.get(term) || 0) + 1);
+				}
+			});
+		});
+		return termFreqMap;
+	}
+
+	// TODO: perf benchmark to see if it's faster than for const of
+	private calculateTotalLength(): number {
+		return this.lines.reduce(
+			(sum, line) => sum + line.text.split(" ").length,
+			0,
+		);
+	}
+
+	private getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
+		const lineScores = [];
+
+		for (const line of lines) {
+			let score = 0;
+			const docLength = line.text.split(" ").length;
+
+			for (const term of this.matchedTerms) {
+				const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
+				const tf = (line.text.match(new RegExp(term, "gi")) || [])
+					.length;
+				// additional modification for BM25
+				const lengthWeight =
+					termLengthWeightMap.get(term.length) ||
+					MAX_TERM_LENGTH_WEIGHT;
+				const idf =
+					Math.log(
+						1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+					) * lengthWeight;
+				const termScore =
+					idf *
+					((tf * (this.k1 + 1)) /
+						(tf +
+							this.k1 *
+								(1 -
+									this.b +
+									this.b * (docLength / this.avgDocLength))));
+				score += termScore;
+			}
+			if (score > 0) {
+				lineScores.push({ line, score });
+			}
+		}
+
+		// sort the lines by score in descending order
+		lineScores.sort((a, b) => b.score - a.score);
+
+		const topLineScores = lineScores.slice(0, topK);
+
+		return topLineScores.map((entry) => {
+			const highlightedPositions = this.findHighlightPositions(
+				entry.line,
+			);
+			return {
+				text: entry.line.text,
+				row: entry.line.row,
+				positions: highlightedPositions,
+			};
+		});
+	}
+
+	private findHighlightPositions(line: Line): Set<number> {
+		const positions = new Set<number>();
+		this.matchedTerms.forEach((term) => {
+			let match;
+			const regex = new RegExp(term, "gi");
+			let lastMatchStart = -1,
+				lastMatchEnd = -1;
+
+			// find only the last occurrence of the term
+			while ((match = regex.exec(line.text)) !== null) {
+				lastMatchStart = match.index;
+				lastMatchEnd = match.index + match[0].length;
+			}
+
+			// highlight only if the term is within the specified range
+			if (lastMatchEnd !== -1) {
+				const highlightStart = Math.max(
+					0,
+					lastMatchStart - this.preChars,
+				);
+				const highlightEnd = Math.min(
+					line.text.length,
+					lastMatchEnd + this.postChars,
+				);
+				for (let i = highlightStart; i < highlightEnd; i++) {
+					if (i >= lastMatchStart && i < lastMatchEnd) {
+						positions.add(i);
+					}
+				}
+			}
+		});
+		return positions;
+	}
+}
+
+// simulate results for const termLengthWeight = Math.min(2.5, Math.log(1 + term.length));
+const MAX_TERM_LENGTH_WEIGHT = 2.5;
+const termLengthWeightMap = new Map([
+	[1, 0.6931],
+	[2, 1.0986],
+	[3, 1.3863],
+	[4, 1.6094],
+	[5, 1.7918],
+	[6, 1.9459],
+	[7, 2.0794],
+	[8, 2.1972],
+	[9, 2.3026],
+	[10, 2.3979],
+	[11, 2.4849],
+	[12, 2.5],
+]);

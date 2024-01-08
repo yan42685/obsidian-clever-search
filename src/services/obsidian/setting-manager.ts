@@ -76,11 +76,24 @@ class GeneralTab extends PluginSettingTab {
 		// 			await this.settingManager.saveSettings();
 		// 		}),
 		// 	);
+		
+		new Setting(containerEl)
+			.setName("Max item results")
+			.setDesc("Due to Obsidian's limited rendering capabilities, this plugin can find thousands of results, but cannot display them all at once")
+			.addSlider(text => text
+				.setLimits(1, 300, 1)
+				.setValue(this.setting.ui.maxItemResults)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.setting.ui.maxItemResults = value;
+					await this.settingManager.saveSettings();
+				}),
+			);
 
 		new Setting(containerEl)
-			.setName("Use English stop words")
+			.setName("English word blacklist")
 			.setDesc(
-				`Enable this to exclude meaningless English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs`,
+				`Exclude some meaningless English words like "was", "two", "top" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -92,7 +105,7 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Enable Chinese Patch")
+			.setName("Chinese Patch")
 			.setDesc("Better search result for Chinese")
 			.addToggle((toggle) =>
 				toggle
@@ -109,9 +122,9 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Use Chinese stop words")
+			.setName("Chinese word blacklist")
 			.setDesc(
-				`Activates only if the Chinese Patch is enabled. This excludes meaningless Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed`,
+				`Activates only if the Chinese Patch is enabled. This excludes some meaningless Chinese words like "的", "所以", "防止" listed in 'stop-words-zh.txt', improving search efficiency and speed. More details are listed in 'English word blacklist' option`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -121,7 +134,6 @@ class GeneralTab extends PluginSettingTab {
 						this.shouldDownloadAndRefreshIndex = true;
 					}),
 			);
-
 
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");

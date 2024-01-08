@@ -1,6 +1,6 @@
 // LexicalEngine.test.ts
 
-import { LexicalEngine } from "src/services/search/search-engine";
+import { LexicalEngine } from "src/services/search/lexical-engine";
 
 describe("LexicalEngine", () => {
 	let lexicalEngine: LexicalEngine;

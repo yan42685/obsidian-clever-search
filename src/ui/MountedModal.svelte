@@ -11,7 +11,11 @@
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { FileType } from "src/utils/file-util";
-	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+	import {
+		TO_BE_IMPL,
+		getInstance,
+		isDevEnvironment,
+	} from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import type { SearchModal } from "./search-modal";
@@ -36,7 +40,6 @@
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
-
 	// TODO: use virtual list rather than rendering all buttons
 
 	// Updates focused content and selected file index
@@ -54,7 +57,7 @@
 				// this result also can be cached if necessary in the future
 				currFileItem.subItems = await searchService.getFileSubItems(
 					queryText,
-					currFileItem
+					currFileItem,
 				);
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex = 0;
@@ -207,7 +210,9 @@
 								<span class="filename"
 									>{@html item.basename +
 										HTML_4_SPACES +
-										item.extension}</span
+										(item.extension === "md"
+											? ""
+											: item.extension)}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
@@ -245,7 +250,11 @@
 						{/each}
 					</ul>
 				{:else}
-					<span> no result or to be impl</span>
+					<span>
+						{isDevEnvironment
+							? "no result or to be impl"
+							: "no result"}
+					</span>
 				{/if}
 			{/if}
 		</div>

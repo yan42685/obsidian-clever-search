@@ -42,6 +42,7 @@ export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	},
 	ui: {
 		openInNewPane: true,
+		maxItemResults: 30,
 		showedExtension: "except md"
 	}
 };
@@ -69,6 +70,7 @@ export type SearchSetting = {
 
 export type UISetting = {
 	openInNewPane: boolean,
+	maxItemResults: number,
 	showedExtension: "none" | "except md" | "all",
 }
 

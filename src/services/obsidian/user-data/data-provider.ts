@@ -5,6 +5,7 @@ import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileType, FileUtil } from "../../../utils/file-util";
 import { Tokenizer } from "../../search/tokenizer";
+import { PrivateApi } from "../private-api";
 
 @singleton()
 export class DataProvider {
@@ -12,6 +13,7 @@ export class DataProvider {
 	private readonly vault = getInstance(Vault);
 	private readonly app = getInstance(App);
 	private readonly supportedExtensions = new Set(["md"]);
+	private readonly privateApi = getInstance(PrivateApi);
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter
 
 	private static readonly contentIndexableFileTypes = new Set([
@@ -72,7 +74,7 @@ export class DataProvider {
 			path = fileOrPath.path;
 		}
 		// TODO: filter by extensions and paths
-		return this.supportedExtensions.has(FileUtil.getExtension(path));
+		return this.supportedExtensions.has(FileUtil.getExtension(path)) && this.privateApi.isNotExcludedPath(path);
 	}
 
 	// @monitorDecorator

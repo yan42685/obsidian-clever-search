@@ -48,7 +48,6 @@ export class AssetsProvider {
 			this._assets.jiebaBinary = fsUtil.promises.readFile(jiebaTargetUrl);
 			this._assets.stopWordsZh =
 				await this.readLinesAsSet(stopWordsZhTargetUrl);
-			logger.info(this._assets.stopWordsZh.size);
 		}
 		await this.downloadFile(stopWordsEnTargetUrl, stopWordsEnSourceUrl);
 		this._assets.stopWordsEn =

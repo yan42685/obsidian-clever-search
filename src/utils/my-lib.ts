@@ -1,3 +1,4 @@
+import "reflect-metadata"
 import { LanguageEnum } from "src/globals/enums";
 import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";

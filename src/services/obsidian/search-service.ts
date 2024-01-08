@@ -12,7 +12,7 @@ import {
 } from "../../globals/search-types";
 import { FileType, FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
-import { LexicalEngine } from "../search/search-engine";
+import { LexicalEngine } from "../search/lexical-engine";
 import { DataProvider } from "./user-data/data-provider";
 
 @singleton()
