@@ -11,7 +11,6 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
-import { BM25Calculator } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -264,5 +263,187 @@ class LexicalOptions {
 			combineWith: "or",
 			// combineWith: "and",
 		};
+	}
+}
+
+// have a good performance for large charset language but is pretty slow for small charset language
+// maybe a Trie could solve this problem
+class BM25Calculator {
+	private termFreqMap: Map<string, number>;
+	private lines: Line[];
+	private matchedTerms: string[];
+	private totalLength: number;
+	private avgDocLength: number;
+	private k1: number;
+	private b: number;
+	private maxParsedLines: number;
+	private preChars: number;
+	private postChars: number;
+
+	constructor(
+		lines: Line[],
+		queryTerms: string[],
+		matchedTerms: string[],
+		k1 = 1.5,
+		b = 0.75,
+		maxParsedLines = 30,
+		preChars = 50,
+		postChars = 60,
+	) {
+		this.lines = lines;
+		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
+		this.k1 = k1;
+		this.b = b;
+		this.maxParsedLines = maxParsedLines;
+		this.preChars = preChars;
+		this.postChars = postChars;
+		this.termFreqMap = this.buildTermFreqMap();
+		this.totalLength = this.calculateTotalLength();
+		this.avgDocLength = this.totalLength / lines.length;
+	}
+
+	parse(): MatchedLine[] {
+		return this.getTopRelevantLines(this.lines, this.maxParsedLines);
+	}
+
+	private filterMatchedTerms(
+		queryTerms: string[],
+		matchedTerms: string[],
+	): string[] {
+		const matchedQueryTerms = queryTerms.filter(
+			(t) =>
+				!queryTerms.some(
+					(other) => other.length > t.length && other.includes(t),
+				) && matchedTerms.includes(t),
+		);
+
+		let result: string[];
+		if (matchedQueryTerms.length === 0) {
+			result = matchedTerms.filter(
+				(t) =>
+					!matchedTerms.some(
+						(other) => other.length > t.length && other.includes(t),
+					),
+			);
+		} else {
+			result = matchedQueryTerms;
+            // NOTE: based on the fact that matchedTerms only contains unique term
+			for (const mTerm of matchedTerms) {
+				if (
+					!matchedQueryTerms.includes(mTerm) &&
+					!this.isSubstringOrSuperString(mTerm, matchedTerms)
+				) {
+					result.push(mTerm);
+				}
+			}
+		}
+		return result;
+	}
+
+	private isSubstringOrSuperString(str: string, strArray: string[]): boolean {
+		return strArray.some(
+			(s) =>
+				(s.length > str.length && s.includes(str)) ||
+				(str.length > s.length && str.includes(s)),
+		);
+	}
+
+	private buildTermFreqMap(): Map<string, number> {
+		const termFreqMap = new Map<string, number>();
+		this.lines.forEach((line) => {
+			this.matchedTerms.forEach((term) => {
+				if (line.text.toLowerCase().includes(term.toLowerCase())) {
+					termFreqMap.set(term, (termFreqMap.get(term) || 0) + 1);
+				}
+			});
+		});
+		return termFreqMap;
+	}
+
+	// TODO: perf benchmark to see if it's faster than for const of
+	private calculateTotalLength(): number {
+		return this.lines.reduce(
+			(sum, line) => sum + line.text.split(" ").length,
+			0,
+		);
+	}
+
+	private getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
+		const lineScores = [];
+
+		for (const line of lines) {
+			let score = 0;
+			const docLength = line.text.split(" ").length;
+
+			for (const term of this.matchedTerms) {
+				const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
+				const tf = (line.text.match(new RegExp(term, "gi")) || [])
+					.length;
+				const idf = Math.log(
+					1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+				);
+				const termScore =
+					idf *
+					((tf * (this.k1 + 1)) /
+						(tf +
+							this.k1 *
+								(1 -
+									this.b +
+									this.b * (docLength / this.avgDocLength))));
+				score += termScore;
+			}
+
+			lineScores.push({ line, score });
+		}
+
+		// sort the lines by score in descending order
+		lineScores.sort((a, b) => b.score - a.score);
+
+		const topLineScores = lineScores.slice(0, topK);
+
+		return topLineScores.map((entry) => {
+			const highlightedPositions = this.findHighlightPositions(
+				entry.line,
+			);
+			return {
+				text: entry.line.text,
+				row: entry.line.row,
+				positions: highlightedPositions,
+			};
+		});
+	}
+
+	private findHighlightPositions(line: Line): Set<number> {
+		const positions = new Set<number>();
+		this.matchedTerms.forEach((term) => {
+			let match;
+			const regex = new RegExp(term, "gi");
+			let lastMatchStart = -1,
+				lastMatchEnd = -1;
+
+			// find only the last occurrence of the term
+			while ((match = regex.exec(line.text)) !== null) {
+				lastMatchStart = match.index;
+				lastMatchEnd = match.index + match[0].length;
+			}
+
+			// highlight only if the term is within the specified range
+			if (lastMatchEnd !== -1) {
+				const highlightStart = Math.max(
+					0,
+					lastMatchStart - this.preChars,
+				);
+				const highlightEnd = Math.min(
+					line.text.length,
+					lastMatchEnd + this.postChars,
+				);
+				for (let i = highlightStart; i < highlightEnd; i++) {
+					if (i >= lastMatchStart && i < lastMatchEnd) {
+						positions.add(i);
+					}
+				}
+			}
+		});
+		return positions;
 	}
 }

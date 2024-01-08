@@ -4,7 +4,7 @@ import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import type { DocumentRef } from "src/globals/search-types";
 import { Database } from "src/services/database/database";
-import { LexicalEngine } from "src/services/search/search-engine";
+import { LexicalEngine } from "src/services/search/lexical-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";

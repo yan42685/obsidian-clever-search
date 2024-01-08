@@ -10,7 +10,7 @@ import { logger } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
-import { LexicalEngine } from "./search-engine";
+import { LexicalEngine } from "./lexical-engine";
 
 @singleton()
 export class LineHighlighter {
