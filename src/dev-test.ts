@@ -116,7 +116,8 @@ async function testTokenizer() {
 	// const text = "abc/def/knsusg abc#def#ddd camelCase this-boy bush#真好 谷歌is a good thing";
 	// const text = "他来到了网易杭研大厦";
 	// const text = "生命的象征";
-	const text = "个遮阳避雨的安全之所。"
+	// const text = "个遮阳避雨的安全之所。"
+	const text = "abc/nef/adg"
 
 	logger.info(cutter.cut(text, false));
 	logger.info(cutter.cut(text, true));

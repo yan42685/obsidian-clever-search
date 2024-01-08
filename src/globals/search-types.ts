@@ -7,6 +7,8 @@ export type IndexedDocument = {
 	basename: string;
 	folder: string;
 	aliases?: string;
+	tags?: string;
+	headings?: string;
 	content?: string;
 };
 

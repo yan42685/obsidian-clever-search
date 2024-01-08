@@ -33,12 +33,14 @@ export const DEFAULT_PLUGIN_SETTING: PluginSetting = {
 	search: {
 		fuzzyProportion: 0.2,
 		minTermLengthForPrefixSearch: 2,
-		weightPath: 3,
-		weightH1: 1.6,
-		weightH2: 1.4,
-		weightH3: 1.25,
-		weightH4: 1.1,
-		weightTagText: 1.1,
+		weightFilename: 3,
+		weightFolder: 2,
+		weightTagText: 1.15,
+		weightHeading: 1.27,
+		// weightH1: 1.6,
+		// weightH2: 1.4,
+		// weightH3: 1.25,
+		// weightH4: 1.1,
 	},
 	ui: {
 		openInNewPane: true,
@@ -59,12 +61,14 @@ export type ApiProvider = {
 export type SearchSetting = {
 	fuzzyProportion: 0.1 | 0.2;
 	minTermLengthForPrefixSearch: 1 | 2 | 3 | 4;
-	weightPath: number;
-	weightH1: number;
-	weightH2: number;
-	weightH3: number;
-	weightH4: number;
+	weightFilename: number;
+	weightFolder: number;
 	weightTagText: number;
+	weightHeading: number;
+	// weightH1: number;
+	// weightH2: number;
+	// weightH3: number;
+	// weightH4: number;
 };
 
 

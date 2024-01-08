@@ -1,4 +1,13 @@
-import { App, FileSystemAdapter, TAbstractFile, TFile, TFolder, Vault, parseFrontMatterAliases } from "obsidian";
+import {
+	App,
+	FileSystemAdapter,
+	TAbstractFile,
+	TFile,
+	TFolder,
+	Vault,
+	parseFrontMatterAliases,
+	type CachedMetadata,
+} from "obsidian";
 import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
@@ -14,17 +23,20 @@ export class DataProvider {
 	private readonly app = getInstance(App);
 	private readonly supportedExtensions = new Set(["md"]);
 	private readonly privateApi = getInstance(PrivateApi);
-	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter
+	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
 	private static readonly contentIndexableFileTypes = new Set([
 		FileType.PLAIN_TEXT,
 		FileType.IMAGE,
 	]);
 
-	async generateAllIndexedDocuments(files: TFile[]): Promise<IndexedDocument[]> {
+	async generateAllIndexedDocuments(
+		files: TFile[],
+	): Promise<IndexedDocument[]> {
 		return Promise.all(
 			files.map(async (file) => {
 				if (this.isContentIndexable(file)) {
+					const metaData = this.app.metadataCache.getFileCache(file);
 					if (
 						FileUtil.getFileType(file.path) === FileType.PLAIN_TEXT
 					) {
@@ -32,9 +44,11 @@ export class DataProvider {
 							path: file.path,
 							basename: file.basename,
 							folder: FileUtil.getFolderPath(file.path),
-							aliases: this.parseAliases(file),
+							aliases: this.parseAliases(metaData),
+							tags: this.parseTags(metaData),
+							headings: this.parseHeadings(metaData),
 							content: await this.readPlainText(file),
-						};
+						} as IndexedDocument;
 					} else {
 						throw new Error(TO_BE_IMPL);
 					}
@@ -74,7 +88,10 @@ export class DataProvider {
 			path = fileOrPath.path;
 		}
 		// TODO: filter by extensions and paths
-		return this.supportedExtensions.has(FileUtil.getExtension(path)) && this.privateApi.isNotExcludedPath(path);
+		return (
+			this.supportedExtensions.has(FileUtil.getExtension(path)) &&
+			this.privateApi.isNotExcludedPath(path)
+		);
 	}
 
 	// @monitorDecorator
@@ -102,9 +119,16 @@ export class DataProvider {
 		return (await this.readPlainText(fileOrPath)).split(FileUtil.SPLIT_EOL);
 	}
 
-	private parseAliases(file: TFile) {
-		const metadata = this.app.metadataCache.getFileCache(file);
-		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join("");
+	private parseAliases(metadata: CachedMetadata | null): string {
+		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join(" ");
+	}
+
+	private parseTags(metaData: CachedMetadata | null): string {
+		return metaData?.tags?.map((t) => t.tag.slice(1)).join(" ") || "";
+	}
+
+	private parseHeadings(metadata: CachedMetadata | null): string {
+		return metadata?.headings?.map((h) => h.heading).join(" ") || "";
 	}
 
 	private isContentIndexable(file: TFile): boolean {

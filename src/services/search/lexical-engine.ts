@@ -80,13 +80,15 @@ export class LexicalEngine {
 		const fzf = new AsyncFzf(lines, {
 			selector: (item) => item.text,
 		});
-		return (await fzf.find(queryText)).slice(0, this.pluginSetting.ui.maxItemResults).map((entry: FzfResultItem<Line>) => {
-			return {
-				text: entry.item.text,
-				row: entry.item.row,
-				positions: entry.positions,
-			} as MatchedLine;
-		});
+		return (await fzf.find(queryText))
+			.slice(0, this.pluginSetting.ui.maxItemResults)
+			.map((entry: FzfResultItem<Line>) => {
+				return {
+					text: entry.item.text,
+					row: entry.item.row,
+					positions: entry.positions,
+				} as MatchedLine;
+			});
 	}
 
 	/**
@@ -106,13 +108,15 @@ export class LexicalEngine {
 			this.option.getFileSearchOption(combinationMode),
 		);
 		logger.debug(`maxFileItems: ${this.pluginSetting.ui.maxItemResults}`);
-		return minisearchResult.slice(0, this.pluginSetting.ui.maxItemResults).map((item) => {
-			return {
-				path: item.id,
-				queryTerms: item.queryTerms,
-				matchedTerms: item.terms,
-			};
-		});
+		return minisearchResult
+			.slice(0, this.pluginSetting.ui.maxItemResults)
+			.map((item) => {
+				return {
+					path: item.id,
+					queryTerms: item.queryTerms,
+					matchedTerms: item.terms,
+				};
+			});
 	}
 
 	// faster version of `searchLines`, but might be less accuracy, haven't test it
@@ -223,13 +227,20 @@ class LexicalOptions {
 	private readonly tokenizeSearch = (text: string) =>
 		this.tokenizer.tokenize(text, "search");
 
-	readonly documentChunkSize: 50;
+	readonly documentChunkSize: 100;
 	readonly lineChunkSize: 500;
 	readonly fileIndexOption: Options = {
 		// terms will be lowercased by minisearch
 		tokenize: this.tokenizeIndex,
 		idField: "path",
-		fields: ["basename", "folder", "aliases", "content"] as DocumentFields,
+		fields: [
+			"basename",
+			"aliases",
+			"folder",
+			"headings",
+			"content",
+		] as DocumentFields,
+		storeFields: ["tags"] as DocumentFields,
 	};
 	readonly lineIndexOption: Options = {
 		tokenize: this.tokenizeIndex,
@@ -255,9 +266,11 @@ class LexicalOptions {
 				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
 			// if `fields` are omitted, all fields will be search with weight 1
 			boost: {
-				path: this.setting.weightPath,
-				basename: this.setting.weightPath,
-				aliases: this.setting.weightPath,
+				basename: this.setting.weightFilename,
+				aliases: this.setting.weightFilename,
+				folder: this.setting.weightFolder,
+				tags: this.setting.weightTagText,
+				headings: this.setting.weightHeading,
 			} as DocumentWeight,
 			combineWith: combinationMode,
 		};
