@@ -136,6 +136,7 @@ export class BM25Calculator {
 		return termFreqMap;
 	}
 
+	// TODO: perf benchmark to see if it's faster than for const of
 	private calculateTotalLength(): number {
 		return this.lines.reduce(
 			(sum, line) => sum + line.text.split(" ").length,
@@ -144,24 +145,7 @@ export class BM25Calculator {
 	}
 
 	parse(): MatchedLine[] {
-		const lineScores = this.lines.map((line) => {
-			const score = this.getLineScore(line);
-			return { line, score };
-		});
-
-		lineScores.sort((a, b) => b.score - a.score);
-		const topLineScores = lineScores.slice(0, this.maxParsedLines);
-
-		return topLineScores.map((entry) => {
-			const highlightedPositions = this.findHighlightPositions(
-				entry.line,
-			);
-			return {
-				text: entry.line.text,
-				row: entry.line.row,
-				positions: highlightedPositions,
-			};
-		});
+		return this.getTopRelevantLines(this.lines, this.maxParsedLines);
 	}
 
 	private findHighlightPositions(line: Line): Set<number> {
@@ -198,27 +182,48 @@ export class BM25Calculator {
 		return positions;
 	}
 
-	private getLineScore(line: Line): number {
-		let score = 0;
-		const docLength = line.text.split(" ").length;
+	getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
+		const lineScores = [];
 
-		this.matchedTerms.forEach((term) => {
-			const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
-			const tf = (line.text.match(new RegExp(term, "gi")) || []).length;
-			const idf = Math.log(
-				1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+		for (const line of lines) {
+			let score = 0;
+			const docLength = line.text.split(" ").length;
+
+			for (const term of this.matchedTerms) {
+				const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
+				const tf = (line.text.match(new RegExp(term, "gi")) || [])
+					.length;
+				const idf = Math.log(
+					1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+				);
+				const termScore =
+					idf *
+					((tf * (this.k1 + 1)) /
+						(tf +
+							this.k1 *
+								(1 -
+									this.b +
+									this.b * (docLength / this.avgDocLength))));
+				score += termScore;
+			}
+
+			lineScores.push({ line, score });
+		}
+
+		// sort the lines by score in descending order
+		lineScores.sort((a, b) => b.score - a.score);
+
+		const topLineScores = lineScores.slice(0, topK);
+
+		return topLineScores.map((entry) => {
+			const highlightedPositions = this.findHighlightPositions(
+				entry.line,
 			);
-			const termScore =
-				idf *
-				((tf * (this.k1 + 1)) /
-					(tf +
-						this.k1 *
-							(1 -
-								this.b +
-								this.b * (docLength / this.avgDocLength))));
-			score += termScore;
+			return {
+				text: entry.line.text,
+				row: entry.line.row,
+				positions: highlightedPositions,
+			};
 		});
-
-		return score;
 	}
 }
