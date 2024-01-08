@@ -79,7 +79,7 @@ class GeneralTab extends PluginSettingTab {
 		
 		new Setting(containerEl)
 			.setName("Max item results")
-			.setDesc("Due to Obsidian's limited rendering capabilities, this plugin can find thousands of results, but cannot display them all at once")
+			.setDesc("Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once")
 			.addSlider(text => text
 				.setLimits(1, 300, 1)
 				.setValue(this.setting.ui.maxItemResults)
