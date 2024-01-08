@@ -285,7 +285,8 @@ class BM25Calculator {
 		queryTerms: string[],
 		matchedTerms: string[],
 		k1 = 1.5,
-		b = 0.75,
+		// b = 0.75,
+		b = 0.2, // decrease the weight of term.length / doc.length
 		maxParsedLines = 30,
 		preChars = 60,
 		postChars = 80,
@@ -327,7 +328,7 @@ class BM25Calculator {
 			);
 		} else {
 			result = matchedQueryTerms;
-            // NOTE: based on the fact that matchedTerms only contains unique term
+			// NOTE: based on the fact that matchedTerms only contains unique term
 			for (const mTerm of matchedTerms) {
 				if (
 					!matchedQueryTerms.includes(mTerm) &&
@@ -379,9 +380,12 @@ class BM25Calculator {
 				const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
 				const tf = (line.text.match(new RegExp(term, "gi")) || [])
 					.length;
-				const idf = Math.log(
-					1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
-				);
+				// additional modification for BM25
+				const lengthWeight = termLengthWeightMap.get(term.length) || MAX_TERM_LENGTH_WEIGHT;
+				const idf =
+					Math.log(
+						1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+					) * lengthWeight;
 				const termScore =
 					idf *
 					((tf * (this.k1 + 1)) /
@@ -390,8 +394,6 @@ class BM25Calculator {
 								(1 -
 									this.b +
 									this.b * (docLength / this.avgDocLength))));
-				// NOTE: I'm not sure if multiplying the term length will get a better result
-				// score += termScore * Math.log(term.length);
 				score += termScore;
 			}
 			if (score > 0) {
@@ -450,3 +452,20 @@ class BM25Calculator {
 		return positions;
 	}
 }
+
+// simulate results for const termLengthWeight = Math.min(2.5, Math.log(1 + term.length));
+const MAX_TERM_LENGTH_WEIGHT = 2.5
+const termLengthWeightMap = new Map([
+	[1, 0.6931],
+	[2, 1.0986],
+	[3, 1.3863],
+	[4, 1.6094],
+	[5, 1.7918],
+	[6, 1.9459],
+	[7, 2.0794],
+	[8, 2.1972],
+	[9, 2.3026],
+	[10, 2.3979],
+	[11, 2.4849],
+	[12, 2.5],
+]);
