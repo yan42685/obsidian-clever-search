@@ -26,6 +26,7 @@ import { Tokenizer } from "./tokenizer";
 @singleton()
 export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
+	private pluginSetting = getInstance(PluginSetting);
 	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private tokenizer = getInstance(Tokenizer);
@@ -79,7 +80,7 @@ export class LexicalEngine {
 		const fzf = new AsyncFzf(lines, {
 			selector: (item) => item.text,
 		});
-		return (await fzf.find(queryText)).map((entry: FzfResultItem<Line>) => {
+		return (await fzf.find(queryText)).slice(0, this.pluginSetting.ui.maxItemResults).map((entry: FzfResultItem<Line>) => {
 			return {
 				text: entry.item.text,
 				row: entry.item.row,
@@ -104,9 +105,8 @@ export class LexicalEngine {
 			query.text,
 			this.option.getFileSearchOption(combinationMode),
 		);
-		const maxFileItems = 100;
-		logger.debug(`maxFileItems: ${maxFileItems}`);
-		return minisearchResult.slice(0, maxFileItems).map((item) => {
+		logger.debug(`maxFileItems: ${this.pluginSetting.ui.maxItemResults}`);
+		return minisearchResult.slice(0, this.pluginSetting.ui.maxItemResults).map((item) => {
 			return {
 				path: item.id,
 				queryTerms: item.queryTerms,

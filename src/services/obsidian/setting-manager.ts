@@ -76,6 +76,19 @@ class GeneralTab extends PluginSettingTab {
 		// 			await this.settingManager.saveSettings();
 		// 		}),
 		// 	);
+		
+		new Setting(containerEl)
+			.setName("Max item results")
+			.setDesc("Due to Obsidian's limited rendering capabilities, this plugin can find thousands of results, but cannot display them all at once")
+			.addSlider(text => text
+				.setLimits(1, 300, 1)
+				.setValue(this.setting.ui.maxItemResults)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.setting.ui.maxItemResults = value;
+					await this.settingManager.saveSettings();
+				}),
+			);
 
 		new Setting(containerEl)
 			.setName("English word blacklist")
