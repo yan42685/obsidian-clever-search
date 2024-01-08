@@ -35,12 +35,11 @@ export class LineHighlighter {
 				firstMatchedCol,
 				truncateType,
 			);
-			let matchedLineText = matchedLine.text;
+			const matchedLineText = context.matchedLineText;
 			let matchedLinePositions = matchedLine.positions;
 			if (matchedLine.row === context.lines[0].row) {
-				matchedLineText = context.lines[0].text;
 				// if the matched line locates at the first row in the context,
-				// it's been truncated and we need to adjust positions
+				// it's start part has been truncated and we need to adjust positions
 				matchedLinePositions = this.adjustPositionsByStartCol(
 					matchedLinePositions,
 					context.firstLineStartCol,
@@ -197,15 +196,16 @@ export class LineHighlighter {
 		truncateType: TruncateType,
 	): TruncatedContext {
 		if (lines.length === 0) {
-			return { lines: [], firstLineStartCol: 0 };
+			return { lines: [], firstLineStartCol: 0, matchedLineText: "" };
 		}
+
 		const limit = TruncateLimit.forType(truncateType);
 		let resultLines: Line[];
 		let firstLineStartCol = 0;
 		let postCharsCount = 0;
 
+		let matchedLineText = lines[matchedRow].text;
 		// for the matchedRow
-		const matchedLineText = lines[matchedRow].text;
 		if (firstMatchedCol < limit.maxPreChars) {
 			// don't have to truncate the start of the matched row
 			const contextAbove = this.extendContextAbove(
@@ -225,14 +225,14 @@ export class LineHighlighter {
 			// need to truncate the end of the matched row
 			if (needTruncateEnd) {
 				// logger.debug(`The end of matched line is truncated`);
-				const subStr = matchedLineText.substring(0, endCol + 1);
-				resultLines.push({ text: subStr, row: matchedRow });
+				matchedLineText = matchedLineText.substring(0, endCol + 1);
+				resultLines.push({ text: matchedLineText, row: matchedRow });
 			} else {
 				resultLines.push(lines[matchedRow]);
 			}
 			postCharsCount += endCol - firstMatchedCol;
 		} else {
-			// need to truncate the start of the matched row
+			// need to truncate the start of the matched row, 
 			const startCol = firstMatchedCol - limit.maxPreChars;
 			// logger.debug(`truncate start of the line`)
 			firstLineStartCol = startCol;
@@ -241,14 +241,13 @@ export class LineHighlighter {
 				firstMatchedCol + limit.maxPostChars,
 			);
 			const isEndTruncated = endCol < matchedLineText.length - 1;
-			let subStr: string;
 			if (isEndTruncated) {
 				// logger.debug(`The end of matched line is truncated`);
-				subStr = matchedLineText.substring(startCol, endCol + 1);
+				matchedLineText = matchedLineText.substring(startCol, endCol + 1);
 			} else {
-				subStr = matchedLineText.substring(startCol);
+				matchedLineText = matchedLineText.substring(startCol);
 			}
-			resultLines = [{ text: subStr, row: matchedRow }];
+			resultLines = [{ text: matchedLineText, row: matchedRow }];
 			postCharsCount += endCol - firstMatchedCol;
 		}
 		// logger.debug(`resultLines counts: ${resultLines.length}`)
@@ -266,6 +265,7 @@ export class LineHighlighter {
 		return {
 			lines: resultLines,
 			firstLineStartCol: firstLineStartCol,
+			matchedLineText: matchedLineText
 		};
 	}
 
@@ -429,7 +429,11 @@ export class LineHighlighter {
 		return highlightedContext.join(FileUtil.JOIN_EOL);
 	}
 }
-export type TruncatedContext = { lines: Line[]; firstLineStartCol: number };
+export type TruncatedContext = {
+	lines: Line[];
+	firstLineStartCol: number;
+	matchedLineText: string;
+};
 
 export type TruncateType = "line" | "paragraph" | "subItem";
 
