@@ -287,8 +287,8 @@ class BM25Calculator {
 		k1 = 1.5,
 		b = 0.75,
 		maxParsedLines = 30,
-		preChars = 50,
-		postChars = 60,
+		preChars = 60,
+		postChars = 80,
 	) {
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);

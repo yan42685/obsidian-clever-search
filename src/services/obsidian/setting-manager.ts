@@ -80,7 +80,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Use English stop words")
 			.setDesc(
-				`Enable this to exclude meaningless English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs`,
+				`Enable this to exclude meaningless English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs. When Log level is debug and pressing Ctrl-Shift-I, you will see which words are excluded when searching in vault`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -111,7 +111,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Use Chinese stop words")
 			.setDesc(
-				`Activates only if the Chinese Patch is enabled. This excludes meaningless Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed`,
+				`Activates only if the Chinese Patch is enabled. This excludes meaningless Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed. More details are listed in \`Use english stop words\` option`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -121,7 +121,6 @@ class GeneralTab extends PluginSettingTab {
 						this.shouldDownloadAndRefreshIndex = true;
 					}),
 			);
-
 
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
