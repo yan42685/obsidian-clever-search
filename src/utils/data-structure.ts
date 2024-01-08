@@ -105,6 +105,7 @@ export class BM25Calculator {
 
 	constructor(
 		lines: Line[],
+		queryTerms: string[],
 		matchedTerms: string[],
 		k1 = 1.5,
 		b = 0.75,
@@ -113,7 +114,7 @@ export class BM25Calculator {
 		postChars = 60,
 	) {
 		this.lines = lines;
-		this.matchedTerms = matchedTerms;
+		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.k1 = k1;
 		this.b = b;
 		this.maxParsedLines = maxParsedLines;
@@ -122,6 +123,52 @@ export class BM25Calculator {
 		this.termFreqMap = this.buildTermFreqMap();
 		this.totalLength = this.calculateTotalLength();
 		this.avgDocLength = this.totalLength / lines.length;
+	}
+
+	parse(): MatchedLine[] {
+		return this.getTopRelevantLines(this.lines, this.maxParsedLines);
+	}
+
+	private filterMatchedTerms(
+		queryTerms: string[],
+		matchedTerms: string[],
+	): string[] {
+		const matchedQueryTerms = queryTerms.filter(
+			(t) =>
+				!queryTerms.some(
+					(other) => other.length > t.length && other.includes(t),
+				) && matchedTerms.includes(t),
+		);
+
+		let result: string[];
+		if (matchedQueryTerms.length === 0) {
+			result = matchedTerms.filter(
+				(t) =>
+					!matchedTerms.some(
+						(other) => other.length > t.length && other.includes(t),
+					),
+			);
+		} else {
+			result = matchedQueryTerms;
+            // NOTE: based on the fact that matchedTerms only contains unique term
+			for (const mTerm of matchedTerms) {
+				if (
+					!matchedQueryTerms.includes(mTerm) &&
+					!this.isSubstringOrSuperString(mTerm, matchedTerms)
+				) {
+					result.push(mTerm);
+				}
+			}
+		}
+		return result;
+	}
+
+	private isSubstringOrSuperString(str: string, strArray: string[]): boolean {
+		return strArray.some(
+			(s) =>
+				(s.length > str.length && s.includes(str)) ||
+				(str.length > s.length && str.includes(s)),
+		);
 	}
 
 	private buildTermFreqMap(): Map<string, number> {
@@ -144,45 +191,7 @@ export class BM25Calculator {
 		);
 	}
 
-	parse(): MatchedLine[] {
-		return this.getTopRelevantLines(this.lines, this.maxParsedLines);
-	}
-
-	private findHighlightPositions(line: Line): Set<number> {
-		const positions = new Set<number>();
-		this.matchedTerms.forEach((term) => {
-			let match;
-			const regex = new RegExp(term, "gi");
-			let lastMatchStart = -1,
-				lastMatchEnd = -1;
-
-			// find only the last occurrence of the term
-			while ((match = regex.exec(line.text)) !== null) {
-				lastMatchStart = match.index;
-				lastMatchEnd = match.index + match[0].length;
-			}
-
-			// highlight only if the term is within the specified range
-			if (lastMatchEnd !== -1) {
-				const highlightStart = Math.max(
-					0,
-					lastMatchStart - this.preChars,
-				);
-				const highlightEnd = Math.min(
-					line.text.length,
-					lastMatchEnd + this.postChars,
-				);
-				for (let i = highlightStart; i < highlightEnd; i++) {
-					if (i >= lastMatchStart && i < lastMatchEnd) {
-						positions.add(i);
-					}
-				}
-			}
-		});
-		return positions;
-	}
-
-	getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
+	private getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
 		const lineScores = [];
 
 		for (const line of lines) {
@@ -225,5 +234,39 @@ export class BM25Calculator {
 				positions: highlightedPositions,
 			};
 		});
+	}
+
+	private findHighlightPositions(line: Line): Set<number> {
+		const positions = new Set<number>();
+		this.matchedTerms.forEach((term) => {
+			let match;
+			const regex = new RegExp(term, "gi");
+			let lastMatchStart = -1,
+				lastMatchEnd = -1;
+
+			// find only the last occurrence of the term
+			while ((match = regex.exec(line.text)) !== null) {
+				lastMatchStart = match.index;
+				lastMatchEnd = match.index + match[0].length;
+			}
+
+			// highlight only if the term is within the specified range
+			if (lastMatchEnd !== -1) {
+				const highlightStart = Math.max(
+					0,
+					lastMatchStart - this.preChars,
+				);
+				const highlightEnd = Math.min(
+					line.text.length,
+					lastMatchEnd + this.postChars,
+				);
+				for (let i = highlightStart; i < highlightEnd; i++) {
+					if (i >= lastMatchStart && i < lastMatchEnd) {
+						positions.add(i);
+					}
+				}
+			}
+		});
+		return positions;
 	}
 }

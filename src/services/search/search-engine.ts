@@ -130,6 +130,7 @@ export class LexicalEngine {
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
+				fileItem.queryTerms,
 				fileItem.matchedTerms,
 			);
 			return bm25Calculator.parse();
