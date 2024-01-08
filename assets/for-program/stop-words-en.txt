@@ -7,7 +7,6 @@
 a
 a's
 able
-ableabout
 about
 above
 abroad
@@ -173,7 +172,6 @@ can
 can't
 cannot
 cant
-caption
 case
 cases
 cause
@@ -200,10 +198,7 @@ co.
 com
 come
 comes
-computer
 con
-concerning
-consequently
 consider
 considering
 contain
@@ -324,14 +319,12 @@ fewer
 ff
 fi
 fifteen
-fifth
 fifty
 fify
 fill
 find
 finds
 fire
-first
 five
 fix
 fj
@@ -345,7 +338,6 @@ for
 forever
 former
 formerly
-forth
 forty
 forward
 found
@@ -514,7 +506,6 @@ interested
 interesting
 interests
 into
-invention
 inward
 io
 iq
@@ -860,7 +851,6 @@ regardless
 regards
 related
 relatively
-research
 reserved
 respectively
 resulted
@@ -888,10 +878,7 @@ sc
 sd
 se
 sec
-second
 secondly
-seconds
-section
 see
 seeing
 seem
@@ -989,7 +976,6 @@ sup
 sure
 sv
 sy
-system
 sz
 t
 t's
@@ -1058,7 +1044,6 @@ thing
 things
 think
 thinks
-third
 thirty
 this
 thorough
@@ -1085,7 +1070,6 @@ tk
 tm
 tn
 to
-today
 together
 too
 took
@@ -1178,11 +1162,6 @@ we'd
 we'll
 we're
 we've
-web
-webpage
-website
-wed
-welcome
 well
 wells
 went
@@ -1245,19 +1224,12 @@ widely
 width
 will
 willing
-wish
 with
 within
 without
 won
 won't
-wonder
 wont
-words
-work
-worked
-working
-works
 world
 would
 would've
@@ -1280,9 +1252,6 @@ you're
 you've
 youd
 youll
-young
-younger
-youngest
 your
 youre
 yours

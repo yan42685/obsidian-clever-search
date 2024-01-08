@@ -78,9 +78,9 @@ class GeneralTab extends PluginSettingTab {
 		// 	);
 
 		new Setting(containerEl)
-			.setName("Use English stop words")
+			.setName("English word blacklist")
 			.setDesc(
-				`Enable this to exclude meaningless English words listed in stop-words-en.txt from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs. When Log level is debug and pressing Ctrl-Shift-I, you will see which words are excluded when searching in vault`,
+				`Exclude some meaningless English words like "was", "two", "top" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -92,7 +92,7 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Enable Chinese Patch")
+			.setName("Chinese Patch")
 			.setDesc("Better search result for Chinese")
 			.addToggle((toggle) =>
 				toggle
@@ -109,9 +109,9 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Use Chinese stop words")
+			.setName("Chinese word blacklist")
 			.setDesc(
-				`Activates only if the Chinese Patch is enabled. This excludes meaningless Chinese words in stop-words-zh.txt from indexing, improving search efficiency and speed. More details are listed in \`Use english stop words\` option`,
+				`Activates only if the Chinese Patch is enabled. This excludes some meaningless Chinese words like "的", "所以", "防止" listed in 'stop-words-zh.txt', improving search efficiency and speed. More details are listed in 'English word blacklist' option`,
 			)
 			.addToggle((toggle) =>
 				toggle
