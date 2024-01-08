@@ -18,12 +18,12 @@
 
 ### Major
 
+- [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
 - [ ] AutoCompletion
 - [ ] Persistent search history
-- [ ] Fuzzy search in the vault
 - [ ] Semantic search in the vault
 
 ### Subtle Tweaks for Better UX
@@ -46,15 +46,18 @@
 
 ## Available Commands
 
-| Scope    | Name                | Hotkey                   |
-| -------- | ------------------- | ------------------------ |
-| Item     | View Item Context   | `Left Click`             |
-| Modal    | Next Item           | `Ctrl-J` or `ArrowDown`  |
-| Modal    | Previous Item       | `Ctrl-K` or `ArrorUp`    |
-| Modal    | Confirm Item        | `Enter` or `Right Click` |
-| Obsidian | Search In File      | undefined                |
-| Obsidian | Toggle Privacy Mode | undefined                |
-| Obsidian | Search in file with last Omnisearch query | undefined |
+| Scope    | Name                          |  Hotkey                   |
+| -------- | ----------------------------- | ------------------------ |
+| Item     | View item context             | `Left Click`             |
+| Modal    | Next item                     | `Ctrl-J` or `ArrowDown`  |
+| Modal    | Previous item                 | `Ctrl-K` or `ArrorUp`    |
+| Modal    | Next subItem (in-vault)       | `Ctrl-N`                 |
+| Modal    | previous subItem              | `Ctrl-P`                 |
+| Modal    | Confirm item                  | `Enter` or `Right Click` |
+| Obsidian | Search in vault               | undefined                |
+| Obsidian | Search in File                | undefined                |
+| Obsidian | Search in file with last Omnisearch query (to be deprecated) | undefined |
+| Obsidian | Toggle privacy mode           | undefined                |
 
 ## Limitations
 
