@@ -327,7 +327,9 @@ class BM25Calculator {
 	}
 
 	parse(): MatchedLine[] {
-		return this.getTopRelevantLines(this.lines, this.maxParsedLines);
+		return this.highlightLines(
+			this.getTopRelevantLines(this.lines, this.maxParsedLines),
+		);
 	}
 
 	private filterMatchedTerms(
@@ -392,7 +394,7 @@ class BM25Calculator {
 		);
 	}
 
-	private getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
+	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
 		// min heap to track topK scores
 		const pq = new PriorityQueue<number>((a, b) => a - b, topK);
 		pq.push(0);
@@ -433,50 +435,46 @@ class BM25Calculator {
 		// sort the lines by score in descending order
 		candidateLines.sort((a, b) => b.score - a.score);
 
-		const topKLines = candidateLines.slice(0, topK).map((x) => x.line);
-
-		return topKLines.map((line) => {
-			const highlightedPositions = this.findHighlightPositions(line);
-			return {
-				text: line.text,
-				row: line.row,
-				positions: highlightedPositions,
-			};
-		});
+		return candidateLines.slice(0, topK).map((x) => x.line);
 	}
 
-	private findHighlightPositions(line: Line): Set<number> {
-		const positions = new Set<number>();
-		this.matchedTerms.forEach((term) => {
-			let match;
-			const regex = new RegExp(term, "gi");
-			let lastMatchStart = -1,
-				lastMatchEnd = -1;
+	private highlightLines(lines: Line[]): MatchedLine[] {
+		return lines.map((line) => {
+			const positions = new Set<number>();
+			for (const term of this.matchedTerms) {
+				let lastMatchStart = -1,
+					lastMatchEnd = -1;
+				const regex = new RegExp(term, "gi");
+				let match;
 
-			// find only the last occurrence of the term
-			while ((match = regex.exec(line.text)) !== null) {
-				lastMatchStart = match.index;
-				lastMatchEnd = match.index + match[0].length;
-			}
+				while ((match = regex.exec(line.text)) !== null) {
+					lastMatchStart = match.index;
+					lastMatchEnd = match.index + match[0].length;
+				}
 
-			// highlight only if the term is within the specified range
-			if (lastMatchEnd !== -1) {
-				const highlightStart = Math.max(
-					0,
-					lastMatchStart - this.preChars,
-				);
-				const highlightEnd = Math.min(
-					line.text.length,
-					lastMatchEnd + this.postChars,
-				);
-				for (let i = highlightStart; i < highlightEnd; i++) {
-					if (i >= lastMatchStart && i < lastMatchEnd) {
-						positions.add(i);
+				if (lastMatchEnd !== -1) {
+					const highlightStart = Math.max(
+						0,
+						lastMatchStart - this.preChars,
+					);
+					const highlightEnd = Math.min(
+						line.text.length,
+						lastMatchEnd + this.postChars,
+					);
+					for (let i = highlightStart; i < highlightEnd; i++) {
+						if (i >= lastMatchStart && i < lastMatchEnd) {
+							positions.add(i);
+						}
 					}
 				}
 			}
+
+			return {
+				text: line.text,
+				row: line.row,
+				positions: positions,
+			};
 		});
-		return positions;
 	}
 }
 
