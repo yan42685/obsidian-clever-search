@@ -310,6 +310,7 @@ export class LineHighlighter {
 			resultLines.length > 0 &&
 			resultLines[0].text.length < boundaryLineMinChars
 		) {
+			firstLineStartCol = 0;
 			resultLines.shift();
 		}
 		return {
