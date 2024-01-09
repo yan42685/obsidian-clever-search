@@ -1,4 +1,4 @@
-import { PluginSetting } from "src/globals/plugin-setting";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { singleton } from "tsyringe";
 import { FileUtil, fsUtil, pathUtil } from "../file-util";
 import { logger } from "../logger";
@@ -35,7 +35,7 @@ const stopWordsZh = "stop-words-zh.txt";
 
 @singleton()
 export class AssetsProvider {
-	private readonly setting = getInstance(PluginSetting);
+	private readonly setting = getInstance(OuterSetting);
 	private readonly _assets: Assets = EMPTY_ASSETS;
 	get assets() {
 		return this._assets;

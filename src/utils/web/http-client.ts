@@ -1,12 +1,12 @@
 import { requestUrl } from "obsidian";
-import { PluginSetting } from "src/globals/plugin-setting";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { MyNotice } from "src/services/obsidian/transformed-api";
 import { throttle } from "throttle-debounce";
 import { logger } from "../logger";
 import { MyLib, getInstance } from "../my-lib";
 
 export class HttpClient {
-	private settings = getInstance(PluginSetting);
+	private settings = getInstance(OuterSetting);
 	private noticeThrottled = throttle(
 		5000,
 		(text: string) => new MyNotice(text),

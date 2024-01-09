@@ -1,4 +1,4 @@
-import { PluginSetting } from "src/globals/plugin-setting";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { AssetsProvider } from "src/utils/web/assets-provider";
@@ -13,7 +13,7 @@ export class PluginManager {
 	// private readonly obFileUtil = getInstance(Vault).adapter as FileSystemAdapter;
 	async onload() {
 		await getInstance(SettingManager).initAsync();
-		const setting = getInstance(PluginSetting);
+		const setting = getInstance(OuterSetting);
 
 		await getInstance(AssetsProvider).initAsync();
 		if (setting.enableChinesePatch) {

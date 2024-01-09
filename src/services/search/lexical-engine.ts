@@ -16,8 +16,8 @@ import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import {
-	PluginSetting,
-	type SearchSetting,
+	OuterSetting,
+	innerSetting
 } from "../../globals/plugin-setting";
 import { Query } from "./query";
 import { Tokenizer } from "./tokenizer";
@@ -27,7 +27,7 @@ import { Tokenizer } from "./tokenizer";
 @singleton()
 export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
-	private pluginSetting = getInstance(PluginSetting);
+	private pluginSetting = getInstance(OuterSetting);
 	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private tokenizer = getInstance(Tokenizer);
@@ -221,7 +221,8 @@ export class LexicalEngine {
 
 @singleton()
 class LexicalOptions {
-	private readonly setting: SearchSetting = getInstance(PluginSetting).search;
+	// private readonly setting: SearchSetting = getInstance(OuterSetting).search;
+	private readonly inSetting = innerSetting.search;
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly tokenizeIndex = (text: string) =>
 		this.tokenizer.tokenize(text, "index");
@@ -261,17 +262,17 @@ class LexicalOptions {
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
 			prefix: (term) =>
-				term.length >= this.setting.minTermLengthForPrefixSearch,
+				term.length >= this.inSetting.minTermLengthForPrefixSearch,
 			// TODO: fuzziness based on language
 			fuzzy: (term) =>
-				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
+				term.length <= 3 ? 0 : this.inSetting.fuzzyProportion,
 			// if `fields` are omitted, all fields will be search with weight 1
 			boost: {
-				basename: this.setting.weightFilename,
-				aliases: this.setting.weightFilename,
-				folder: this.setting.weightFolder,
-				tags: this.setting.weightTagText,
-				headings: this.setting.weightHeading,
+				basename: this.inSetting.weightFilename,
+				aliases: this.inSetting.weightFilename,
+				folder: this.inSetting.weightFolder,
+				tags: this.inSetting.weightTagText,
+				headings: this.inSetting.weightHeading,
 			} as DocumentWeight,
 			combineWith: combinationMode,
 		};
@@ -280,9 +281,9 @@ class LexicalOptions {
 	getLineSearchOption(): SearchOptions {
 		return {
 			prefix: (term) =>
-				term.length >= this.setting.minTermLengthForPrefixSearch,
+				term.length >= this.inSetting.minTermLengthForPrefixSearch,
 			fuzzy: (term) =>
-				term.length <= 3 ? 0 : this.setting.fuzzyProportion,
+				term.length <= 3 ? 0 : this.inSetting.fuzzyProportion,
 			combineWith: "or",
 			// combineWith: "and",
 		};

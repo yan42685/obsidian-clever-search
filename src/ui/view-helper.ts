@@ -2,13 +2,13 @@
 import { App, MarkdownView, type EditorPosition } from "obsidian";
 import { NULL_NUMBER } from "src/globals/constants";
 import { ObsidianCommandEnum } from "src/globals/enums";
-import { PluginSetting } from "src/globals/plugin-setting";
+import { OuterSetting } from "src/globals/plugin-setting";
 import {
-	FileItem,
-	FileSubItem,
-	Item,
-	LineItem,
-	SearchType,
+    FileItem,
+    FileSubItem,
+    Item,
+    LineItem,
+    SearchType,
 } from "src/globals/search-types";
 import { PrivateApi } from "src/services/obsidian/private-api";
 import { FileType } from "src/utils/file-util";
@@ -21,7 +21,7 @@ import type { SearchModal } from "./search-modal";
 export class ViewHelper {
 	private readonly app = getInstance(App);
 	private readonly privateApi = getInstance(PrivateApi);
-	private readonly setting = getInstance(PluginSetting);
+	private readonly setting = getInstance(OuterSetting);
 
 	updateSubItemIndex(
 		subItems: FileSubItem[],

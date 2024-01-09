@@ -1,6 +1,6 @@
 import Dexie from "dexie";
 import type { AsPlainObject } from "minisearch";
-import type { PluginSetting } from "src/globals/plugin-setting";
+import type { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
@@ -37,7 +37,7 @@ export class Database {
 		return (await this.db.documentRefs.toArray()) || null;
 	}
 
-	async setPluginSetting(setting: PluginSetting): Promise<boolean> {
+	async setPluginSetting(setting: OuterSetting): Promise<boolean> {
 		try {
 			await this.db.transaction("rw", this.db.pluginSetting, () => {
 				this.db.pluginSetting.clear();
@@ -75,7 +75,7 @@ class DexieWrapper extends Dexie {
 	private static readonly _dbVersion = 1;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
-	pluginSetting!: Dexie.Table<{ id?: number; data: PluginSetting }, number>;
+	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
 	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	documentRefs!: Dexie.Table<DocumentRef, number>;

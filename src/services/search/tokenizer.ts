@@ -1,4 +1,4 @@
-import { PluginSetting } from "src/globals/plugin-setting";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
@@ -26,7 +26,7 @@ const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
 
 @singleton()
 export class Tokenizer {
-	private readonly setting = getInstance(PluginSetting);
+	private readonly setting = getInstance(OuterSetting);
 	private readonly chsSegmenter = getInstance(ChinesePatch);
 	private logThrottled = throttle(300, (any: any) => logger.info(any));
 	private readonly assetsProvider = getInstance(AssetsProvider);

@@ -1,17 +1,17 @@
 import { PluginSettingTab, Setting } from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
-	DEFAULT_PLUGIN_SETTING,
-	PluginSetting,
-	type LogLevelOptions,
+    DEFAULT_OUTER_SETTING,
+    OuterSetting,
+    type LogLevelOptions,
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import {
-	AssetsProvider,
-	stopWordsEnTargetUrl,
+    AssetsProvider,
+    stopWordsEnTargetUrl,
 } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
 import { DataManager } from "./user-data/data-manager";
@@ -19,18 +19,18 @@ import { DataManager } from "./user-data/data-manager";
 @singleton()
 export class SettingManager {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
-	private setting: PluginSetting;
+	private setting: OuterSetting;
 
 	async initAsync() {
 		await this.loadSettings(); // must run this line before registering PluginSetting
-		container.register(PluginSetting, { useValue: this.setting });
+		container.register(OuterSetting, { useValue: this.setting });
 		this.plugin.addSettingTab(getInstance(GeneralTab));
 	}
 
 	async loadSettings() {
 		this.setting = Object.assign(
 			{},
-			DEFAULT_PLUGIN_SETTING,
+			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
 		);
 		logger.setLevel(this.setting.logLevel);
@@ -44,7 +44,7 @@ export class SettingManager {
 @singleton()
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
-	private readonly setting = getInstance(PluginSetting);
+	private readonly setting = getInstance(OuterSetting);
 	private shouldDownloadAndRefreshIndex = false;
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
@@ -116,7 +116,7 @@ class GeneralTab extends PluginSettingTab {
 						this.setting.enableChinesePatch = value;
 						logger.info(
 							`enable chinese: ${
-								getInstance(PluginSetting).enableChinesePatch
+								getInstance(OuterSetting).enableChinesePatch
 							}`,
 						);
 						this.shouldDownloadAndRefreshIndex = true;

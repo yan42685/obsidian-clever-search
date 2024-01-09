@@ -1,6 +1,6 @@
 import { App } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
-import { PluginSetting } from "./globals/plugin-setting";
+import { OuterSetting } from "./globals/plugin-setting";
 import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
@@ -9,7 +9,7 @@ import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
 
 export async function devTest() {
-	const settings = getInstance(PluginSetting);
+	const settings = getInstance(OuterSetting);
 	// ====== API Request =====
 	// const httpClient = getInstance(HttpClient);
 	// httpClient.testRequest();
