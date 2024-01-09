@@ -1,17 +1,17 @@
 import { PluginSettingTab, Setting } from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
-    DEFAULT_OUTER_SETTING,
-    OuterSetting,
-    type LogLevelOptions,
+	DEFAULT_OUTER_SETTING,
+	OuterSetting,
+	type LogLevelOptions,
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import {
-    AssetsProvider,
-    stopWordsEnTargetUrl,
+	AssetsProvider,
+	stopWordsEnTargetUrl,
 } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
 import { DataManager } from "./user-data/data-manager";
@@ -57,6 +57,8 @@ class GeneralTab extends PluginSettingTab {
 		if (this.shouldDownloadAndRefreshIndex) {
 			this.shouldDownloadAndRefreshIndex = false;
 			this.saveSettingDownloadRefresh();
+		} else {
+			this.settingManager.saveSettings();
 		}
 	}
 
