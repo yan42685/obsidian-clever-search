@@ -308,9 +308,9 @@ class BM25Calculator {
 		queryText: string,
 		queryTerms: string[],
 		matchedTerms: string[],
-		k1 = 1.5,
+		k1 = 0.3,
 		// b = 0.75,
-		b = 0.2, // decrease the weight of term.length / doc.length
+		b = 0.1, // decrease the weight of term.length / doc.length
 		maxParsedLines = 30,
 	) {
 		this.lines = lines;
@@ -464,7 +464,7 @@ class BM25Calculator {
 			let highlightStart = -1;
 			let highlightEnd = -1;
 
-			// 使用lastIndexOf查找最后一个匹配项
+			// find the last matchedTerm
 			for (let i = this.matchedTerms.length - 1; i >= 0; i--) {
 				const term = this.matchedTerms[i];
 				const lastMatchIndex = line.text.lastIndexOf(term);
@@ -478,13 +478,13 @@ class BM25Calculator {
 						line.text.length,
 						lastMatchIndex + term.length + this.postChars,
 					);
-					break; // 找到第一个匹配项后停止
+					break;
 				}
 			}
 
 			if (highlightStart !== -1 && highlightEnd !== -1) {
 				const textSlice = line.text.slice(highlightStart, highlightEnd);
-				// 在限定的范围内高亮所有匹配的词
+				// highlight all matchedTerms in a limited range
 				for (const term of this.matchedTerms) {
 					const regex = new RegExp(term, "g");
 					let match;

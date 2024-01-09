@@ -1,7 +1,9 @@
 
 // large charset language can apply fuzzier params and should show less preChars when previewing
 // currently only support Chinese
-export const LARGE_CHARSET_LANGUAGE_REGEX = /[\u4e00-\u9fa5]/;
+const LARGE_CHARSET_LANGUAGE_REGEX = /[\u4e00-\u9fa5]/;
+// match all
+const LARGE_CHARSET_LANGUAGE_REGEX_G = /[\u4e00-\u9fa5]/g;
 
 export const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
 // const JAPANESE_REGEX = /[\u3040-\u30ff\u31f0-\u31ff]/;
@@ -11,12 +13,12 @@ export const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
 export class LangUtil {
 	static isLargeCharset(text: string) {
 		const threshold = 0.35;
-		const matches = text.match(LARGE_CHARSET_LANGUAGE_REGEX) || [];
+		const matches = text.match(LARGE_CHARSET_LANGUAGE_REGEX_G) || [];
 		return matches.length >= Math.ceil(text.length * threshold);
 	}
 
 	static wideCharProportion(text: string): number {
-		const matches = text.match(LARGE_CHARSET_LANGUAGE_REGEX) || [];
+		const matches = text.match(LARGE_CHARSET_LANGUAGE_REGEX_G) || [];
 		return matches.length / text.length;
 	}
 }

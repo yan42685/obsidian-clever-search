@@ -1,6 +1,6 @@
 import { OuterSetting } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
-import { CHINESE_REGEX, LARGE_CHARSET_LANGUAGE_REGEX } from "src/utils/lang-util";
+import { CHINESE_REGEX } from "src/utils/lang-util";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
