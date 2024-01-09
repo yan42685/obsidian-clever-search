@@ -5,5 +5,5 @@
 const isDev =  process.env.NODE_ENV === "development";
 export const devOption = {
     traceLog: isDev ? false : false,
-    loadIndexFromDatabase: isDev ? false : true,
+    loadIndexFromDatabase: isDev ? true : true,
 }

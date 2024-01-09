@@ -398,33 +398,45 @@ class BM25Calculator {
 		// min heap to track topK scores
 		const pq = new PriorityQueue<number>((a, b) => a - b, topK);
 		pq.push(0);
+		const termScoreMap: Map<string, number> = new Map();
 		const candidateLines: { line: Line; score: number }[] = [];
 
 		for (const line of lines) {
 			let score = 0;
+			let termScore = 0;
 			const docLength = line.text.split(" ").length;
 
-			for (const term of this.matchedTerms) {
-				const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
-				const tf = (line.text.match(new RegExp(term, "gi")) || [])
-					.length;
-				// additional modification for BM25
-				const lengthWeight =
-					termLengthWeightMap.get(term.length) ||
-					MAX_TERM_LENGTH_WEIGHT;
-				const idf =
-					Math.log(
-						1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
-					) * lengthWeight;
-				const termScore =
-					idf *
-					((tf * (this.k1 + 1)) /
-						(tf +
-							this.k1 *
-								(1 -
-									this.b +
-									this.b * (docLength / this.avgDocLength))));
-				score += termScore;
+			for (let i = 0; i < this.matchedTerms.length; i++) {
+				const term = this.matchedTerms[i];
+				termScore = 0;
+				const prevScore = termScoreMap.get(term);
+				if (prevScore) {
+					// termScore = prevScore * 0.05;
+					termScore = 0;
+				} else {
+					const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
+					const tf = (line.text.match(new RegExp(term, "gi")) || [])
+						.length;
+					// additional modification for BM25
+					const lengthWeight =
+						termLengthWeightMap.get(term.length) ||
+						MAX_TERM_LENGTH_WEIGHT;
+					const idf =
+						Math.log(
+							1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+						) * lengthWeight;
+					termScore =
+						idf *
+						((tf * (this.k1 + 1)) /
+							(tf +
+								this.k1 *
+									(1 -
+										this.b +
+										this.b *
+											(docLength / this.avgDocLength))));
+					termScoreMap.set(term, score);
+				}
+				score += termScore * (i + 1);
 			}
 			if (score > (pq.peek() as number)) {
 				pq.push(score);
