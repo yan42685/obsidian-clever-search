@@ -109,6 +109,18 @@ export class DataManager {
 		} else {
 			logger.trace("Indexing the whole vault...");
 			const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+			let size = 0;
+			for (const file of filesToIndex) {
+				size += file.stat.size;
+			}
+			size /= 1024;
+			if (size > 2000) {
+				const sizeText = (size / 1024).toFixed(2) + " MB";
+				new MyNotice(
+					`${sizeText} files needs to be indexed. Obsidian may freeze for a while`,
+					7000,
+				);
+			}
 			const documents =
 				await this.dataProvider.generateAllIndexedDocuments(
 					filesToIndex,
@@ -172,8 +184,7 @@ export class DataManager {
 				embeddingMtime: file.stat.mtime,
 			}));
 			this.database.setDocumentRefs(updatedRefs);
-			logger.trace(`${updatedRefs.length} doc refs updated`)
-
+			logger.trace(`${updatedRefs.length} doc refs updated`);
 
 			this.isLexicalEngineUpToDate = true;
 		}
