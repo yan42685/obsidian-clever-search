@@ -1,5 +1,6 @@
 import { OuterSetting } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
+import { CHINESE_REGEX, LARGE_CHARSET_LANGUAGE_REGEX } from "src/utils/lang-util";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
@@ -16,13 +17,6 @@ const SEPERATOR_REGEX =
 // const CAMEL_CASE_REGEX = /([a-z](?=[A-Z]))/g;
 const HYPHEN_AND_CAMEL_CASE_REGEX = /[-_]|([a-z](?=[A-Z]))/g;
 
-// large charset language can apply fuzzier params and should show less preChars when previewing
-// currently only support Chinese
-const LARGE_CHARSET_LANGUAGE_REGEX = /[\u4e00-\u9fa5]/;
-const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
-// const JAPANESE_REGEX = /[\u3040-\u30ff\u31f0-\u31ff]/;
-// const KOREAN_REGEX = /[\uac00-\ud7af]/;
-// const CJK_REGEX = /[\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\u31f0-\u31ff]/;
 
 @singleton()
 export class Tokenizer {
@@ -90,30 +84,7 @@ export class Tokenizer {
 				}
 			}
 		}
-
 		// logger.info(tokens.size);
 		return Array.from(tokens);
-	}
-
-	isLargeCharset(text: string) {
-		const threshold = 0.35;
-		const requiredMatches = Math.ceil(text.length * threshold);
-		let matchedCount = 0;
-
-		for (const char of text) {
-			if (LARGE_CHARSET_LANGUAGE_REGEX.test(char)) {
-				matchedCount++;
-				if (matchedCount >= requiredMatches) {
-					return true;
-				}
-			} else {
-				// end the loop in advance if it's not possible to reach the requiredMatches
-				if (text.length - matchedCount < requiredMatches) {
-					return false;
-				}
-			}
-		}
-
-		return matchedCount >= requiredMatches;
 	}
 }

@@ -67,11 +67,11 @@ export class DataProvider {
 	allFilesToBeIndexed(): TFile[] {
 		// get all fileRefs cached by obsidian
 		const files = this.vault.getFiles();
-		logger.info(`all files: ${files.length}`);
+		logger.debug(`all files: ${files.length}`);
 		FileUtil.countFileByExtensions(files);
 
 		const filesToIndex = files.filter((file) => this.isIndexable(file));
-		logger.info(`indexable files: ${filesToIndex.length}`);
+		logger.debug(`indexable files: ${filesToIndex.length}`);
 		FileUtil.countFileByExtensions(filesToIndex);
 
 		return filesToIndex;

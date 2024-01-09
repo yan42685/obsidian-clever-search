@@ -12,6 +12,7 @@ import type {
 	MatchedLine,
 } from "src/globals/search-types";
 import { PriorityQueue } from "src/utils/data-structure";
+import { LangUtil } from "src/utils/lang-util";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -132,7 +133,7 @@ export class LexicalEngine {
 		logger.debug(`max subItems: ${maxSubItems}`);
 
 		// optimization for large charset language to avoid using jieba segmenter
-		if (this.tokenizer.isLargeCharset(queryText)) {
+		if (LangUtil.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
 				queryText,
