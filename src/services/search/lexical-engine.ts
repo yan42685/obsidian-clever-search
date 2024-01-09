@@ -11,6 +11,7 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
+import { PriorityQueue } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -392,7 +393,10 @@ class BM25Calculator {
 	}
 
 	private getTopRelevantLines(lines: Line[], topK: number): MatchedLine[] {
-		const lineScores = [];
+		// min heap to track topK scores
+		const pq = new PriorityQueue<number>((a, b) => a - b, topK);
+		pq.push(0);
+		const candidateLines: { line: Line; score: number }[] = [];
 
 		for (const line of lines) {
 			let score = 0;
@@ -420,23 +424,22 @@ class BM25Calculator {
 									this.b * (docLength / this.avgDocLength))));
 				score += termScore;
 			}
-			if (score > 0) {
-				lineScores.push({ line, score });
+			if (score > (pq.peek() as number)) {
+				pq.push(score);
+				candidateLines.push({ line, score });
 			}
 		}
 
 		// sort the lines by score in descending order
-		lineScores.sort((a, b) => b.score - a.score);
+		candidateLines.sort((a, b) => b.score - a.score);
 
-		const topLineScores = lineScores.slice(0, topK);
+		const topKLines = candidateLines.slice(0, topK).map((x) => x.line);
 
-		return topLineScores.map((entry) => {
-			const highlightedPositions = this.findHighlightPositions(
-				entry.line,
-			);
+		return topKLines.map((line) => {
+			const highlightedPositions = this.findHighlightPositions(line);
 			return {
-				text: entry.line.text,
-				row: entry.line.row,
+				text: line.text,
+				row: line.row,
 				positions: highlightedPositions,
 			};
 		});

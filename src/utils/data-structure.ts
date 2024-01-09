@@ -133,6 +133,10 @@ export class PriorityQueue<T> {
         return this.heap[0];
     }
 
+    public isEmpty(): boolean {
+        return this.heap.length === 0;
+    }
+
     public size(): number {
         return this.heap.length;
     }
@@ -195,7 +199,4 @@ export class PriorityQueue<T> {
         }
     }
 
-    public isEmpty(): boolean {
-        return this.heap.length === 0;
-    }
 }
