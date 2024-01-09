@@ -15,10 +15,7 @@ import { PriorityQueue } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import {
-	OuterSetting,
-	innerSetting
-} from "../../globals/plugin-setting";
+import { OuterSetting, innerSetting } from "../../globals/plugin-setting";
 import { Query } from "./query";
 import { Tokenizer } from "./tokenizer";
 
@@ -325,6 +322,8 @@ class BM25Calculator {
 		this.termFreqMap = this.buildTermFreqMap();
 		this.totalLength = this.calculateTotalLength();
 		this.avgDocLength = this.totalLength / lines.length;
+
+		logger.debug(`doc matchedTerms: ${this.matchedTerms.join(" ")}`);
 	}
 
 	parse(): MatchedLine[] {
@@ -397,18 +396,18 @@ class BM25Calculator {
 
 	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
 		// min heap to track topK scores
-		const pq = new PriorityQueue<number>((a, b) => a - b, topK);
-		pq.push(0);
+		const topKLineScores = new PriorityQueue<number>((a, b) => a - b, topK);
+		topKLineScores.push(0);
 		const termScoreMap: Map<string, number> = new Map();
 		const candidateLines: { line: Line; score: number }[] = [];
 
 		for (const line of lines) {
-			let score = 0;
+			termScoreMap.clear();
+			let lineScore = 0;
 			let termScore = 0;
 			const docLength = line.text.split(" ").length;
 
-			for (let i = 0; i < this.matchedTerms.length; i++) {
-				const term = this.matchedTerms[i];
+			for (const term of this.matchedTerms) {
 				termScore = 0;
 				const prevScore = termScoreMap.get(term);
 				if (prevScore) {
@@ -435,13 +434,16 @@ class BM25Calculator {
 										this.b +
 										this.b *
 											(docLength / this.avgDocLength))));
-					termScoreMap.set(term, score);
+					termScoreMap.set(term, termScore);
 				}
-				score += termScore * (i + 1);
+				lineScore += termScore;
 			}
-			if (score > (pq.peek() as number)) {
-				pq.push(score);
-				candidateLines.push({ line, score });
+
+			// significantly increase the line score if multiple terms are matched in one line
+			lineScore *= termScoreMap.size;
+			if (lineScore > (topKLineScores.peek() as number)) {
+				topKLineScores.push(lineScore);
+				candidateLines.push({ line, score: lineScore });
 			}
 		}
 
