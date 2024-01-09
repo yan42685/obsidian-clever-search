@@ -134,7 +134,7 @@ export class LexicalEngine {
 
 		// optimization for large charset language to avoid using jieba segmenter
 		if (LangUtil.isLargeCharset(queryText)) {
-			const bm25Calculator = new BM25Calculator(
+			const bm25Calculator = new LinesCalculator(
 				lines,
 				queryText,
 				fileItem.queryTerms,
@@ -291,7 +291,7 @@ class LexicalOptions {
 
 // have a good performance for large charset language but is pretty slow for small charset language
 // maybe a Trie could solve this problem
-class BM25Calculator {
+class LinesCalculator {
 	private termFreqMap: Map<string, number>;
 	private lines: Line[];
 	private matchedTerms: string[];
@@ -402,49 +402,57 @@ class BM25Calculator {
 		// min heap to track topK scores
 		const topKLineScores = new PriorityQueue<number>((a, b) => a - b, topK);
 		topKLineScores.push(0);
-		const termScoreMap: Map<string, number> = new Map();
+		// const termScoreMap: Map<string, number> = new Map();
 		const candidateLines: { line: Line; score: number }[] = [];
 
 		for (const line of lines) {
-			termScoreMap.clear();
+			// termScoreMap.clear();
 			let lineScore = 0;
 			let termScore = 0;
 			const docLength = line.text.split(" ").length;
 
 			for (const term of this.matchedTerms) {
-				termScore = 0;
-				const prevScore = termScoreMap.get(term);
-				if (prevScore) {
-					// termScore = prevScore * 0.05;
-					termScore = 0;
-				} else {
-					const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
-					const tf = (line.text.match(new RegExp(term, "gi")) || [])
-						.length;
-					// additional modification for BM25
-					const lengthWeight =
-						termLengthWeightMap.get(term.length) ||
-						MAX_TERM_LENGTH_WEIGHT;
-					const idf =
-						Math.log(
-							1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
-						) * lengthWeight;
-					termScore =
-						idf *
-						((tf * (this.k1 + 1)) /
-							(tf +
-								this.k1 *
-									(1 -
-										this.b +
-										this.b *
-											(docLength / this.avgDocLength))));
-					termScoreMap.set(term, termScore);
-				}
+				// TODO: better logic
+				const freq =
+					(line.text.match(new RegExp(term, "gi")) || []).length > 0
+						? 1
+						: 0;
+
+				termScore = Math.min(4, Math.log10(term.length + 1)) * freq;
 				lineScore += termScore;
+
+				// const prevScore = termScoreMap.get(term);
+				// if (prevScore) {
+				// 	// termScore = prevScore * 0.05;
+				// 	termScore = 0;
+				// } else {
+				// 	const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
+				// 	const tf = (line.text.match(new RegExp(term, "gi")) || [])
+				// 		.length;
+				// 	// additional modification for BM25
+				// 	const lengthWeight =
+				// 		termLengthWeightMap.get(term.length) ||
+				// 		MAX_TERM_LENGTH_WEIGHT;
+				// 	const idf =
+				// 		Math.log(
+				// 			1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
+				// 		) * lengthWeight;
+				// 	termScore =
+				// 		idf *
+				// 		((tf * (this.k1 + 1)) /
+				// 			(tf +
+				// 				this.k1 *
+				// 					(1 -
+				// 						this.b +
+				// 						this.b *
+				// 							(docLength / this.avgDocLength))));
+				// 	termScoreMap.set(term, termScore);
+				// }
+				// lineScore += termScore;
 			}
 
 			// significantly increase the line score if multiple terms are matched in one line
-			lineScore *= termScoreMap.size;
+			// lineScore *= termScoreMap.size;
 			if (lineScore > (topKLineScores.peek() as number)) {
 				topKLineScores.push(lineScore);
 				candidateLines.push({ line, score: lineScore });
