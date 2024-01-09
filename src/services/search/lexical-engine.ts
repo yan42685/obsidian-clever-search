@@ -135,6 +135,7 @@ export class LexicalEngine {
 		if (this.tokenizer.isLargeCharset(queryText)) {
 			const bm25Calculator = new BM25Calculator(
 				lines,
+				queryText,
 				fileItem.queryTerms,
 				fileItem.matchedTerms,
 				(maxParsedLines = maxSubItems),
@@ -303,22 +304,21 @@ class BM25Calculator {
 
 	constructor(
 		lines: Line[],
+		queryText: string,
 		queryTerms: string[],
 		matchedTerms: string[],
 		k1 = 1.5,
 		// b = 0.75,
 		b = 0.2, // decrease the weight of term.length / doc.length
 		maxParsedLines = 30,
-		preChars = 60,
-		postChars = 80,
 	) {
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.k1 = k1;
 		this.b = b;
 		this.maxParsedLines = maxParsedLines;
-		this.preChars = preChars;
-		this.postChars = postChars;
+		this.preChars = Math.max(30, queryText.length * 3);
+		this.postChars = Math.max(40, queryText.length * 4);
 		this.termFreqMap = this.buildTermFreqMap();
 		this.totalLength = this.calculateTotalLength();
 		this.avgDocLength = this.totalLength / lines.length;
@@ -332,6 +332,7 @@ class BM25Calculator {
 		);
 	}
 
+	// @monitorDecorator
 	private filterMatchedTerms(
 		queryTerms: string[],
 		matchedTerms: string[],
@@ -374,6 +375,7 @@ class BM25Calculator {
 		);
 	}
 
+	// @monitorDecorator
 	private buildTermFreqMap(): Map<string, number> {
 		const termFreqMap = new Map<string, number>();
 		this.lines.forEach((line) => {
@@ -394,6 +396,7 @@ class BM25Calculator {
 		);
 	}
 
+	// @monitorDecorator
 	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
 		// min heap to track topK scores
 		const topKLineScores = new PriorityQueue<number>((a, b) => a - b, topK);
@@ -453,31 +456,42 @@ class BM25Calculator {
 		return candidateLines.slice(0, topK).map((x) => x.line);
 	}
 
+	// @monitorDecorator
 	private highlightLines(lines: Line[]): MatchedLine[] {
 		return lines.map((line) => {
 			const positions = new Set<number>();
-			for (const term of this.matchedTerms) {
-				let lastMatchStart = -1,
-					lastMatchEnd = -1;
-				const regex = new RegExp(term, "gi");
-				let match;
+			let highlightStart = -1;
+			let highlightEnd = -1;
 
-				while ((match = regex.exec(line.text)) !== null) {
-					lastMatchStart = match.index;
-					lastMatchEnd = match.index + match[0].length;
-				}
+			// 使用lastIndexOf查找最后一个匹配项
+			for (let i = this.matchedTerms.length - 1; i >= 0; i--) {
+				const term = this.matchedTerms[i];
+				const lastMatchIndex = line.text.lastIndexOf(term);
 
-				if (lastMatchEnd !== -1) {
-					const highlightStart = Math.max(
+				if (lastMatchIndex !== -1) {
+					highlightStart = Math.max(
 						0,
-						lastMatchStart - this.preChars,
+						lastMatchIndex - this.preChars,
 					);
-					const highlightEnd = Math.min(
+					highlightEnd = Math.min(
 						line.text.length,
-						lastMatchEnd + this.postChars,
+						lastMatchIndex + term.length + this.postChars,
 					);
-					for (let i = highlightStart; i < highlightEnd; i++) {
-						if (i >= lastMatchStart && i < lastMatchEnd) {
+					break; // 找到第一个匹配项后停止
+				}
+			}
+
+			if (highlightStart !== -1 && highlightEnd !== -1) {
+				const textSlice = line.text.slice(highlightStart, highlightEnd);
+				// 在限定的范围内高亮所有匹配的词
+				for (const term of this.matchedTerms) {
+					const regex = new RegExp(term, "g");
+					let match;
+					while ((match = regex.exec(textSlice)) !== null) {
+						const termStart = match.index + highlightStart;
+						const termEnd = termStart + match[0].length;
+
+						for (let i = termStart; i < termEnd; i++) {
 							positions.add(i);
 						}
 					}
