@@ -1,11 +1,12 @@
 import { App } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
+import uFuzzy from "@leeoniya/ufuzzy";
 import { OuterSetting } from "./globals/plugin-setting";
 import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
-import { getInstance, monitorExecution } from "./utils/my-lib";
+import { getInstance } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
 
 export async function devTest() {
@@ -37,7 +38,8 @@ export async function devTest() {
 	// logger.info(`${vault.configDir}`);
 
 	// testTikToken();
-	monitorExecution(() => testTokenizer());
+	// monitorExecution(() => testTokenizer());
+	testUFuzzy();
 }
 
 function getApp() {
@@ -117,12 +119,32 @@ async function testTokenizer() {
 	// const text = "他来到了网易杭研大厦";
 	// const text = "生命的象征";
 	// const text = "个遮阳避雨的安全之所。"
-	const text = "abc/nef/adg"
+	const text = "abc/nef/adg";
 
 	logger.info(cutter.cut(text, false));
 	logger.info(cutter.cut(text, true));
 	logger.info(tokenizer.tokenize(text, "index"));
 	logger.info(tokenizer.tokenize(text, "search"));
-	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.size)
+	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.size);
 	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.has("的"));
+}
+
+function testUFuzzy() {
+	const haystack = ["foo", "bar", "cowbaz", "distant", "disney", "这里有一句黑色的机甲"];
+
+	const needle = "黑色 机甲";
+	const opts = {
+		unicode: true,
+		interSplit: "[^\\p{L}\\d']+",
+		intraSplit: "\\p{Ll}\\p{Lu}",
+		intraBound: "\\p{L}\\d|\\d\\p{L}|\\p{Ll}\\p{Lu}",
+		intraChars: "[\\p{L}\\d']",
+		intraContr: "'\\p{L}{1,2}\\b",
+	};
+	const uf = new uFuzzy(opts);
+	// const [idxs, info, order] = uf.search(haystack, needle);
+	const res = uf.search(haystack, needle);
+	logger.info(res[0]);
+	logger.info(res[1]);
+	logger.info(res[2]);
 }

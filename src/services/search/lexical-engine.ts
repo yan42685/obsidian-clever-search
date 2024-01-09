@@ -1,3 +1,4 @@
+import uFuzzy from "@leeoniya/ufuzzy";
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import type { AsPlainObject, Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
@@ -11,7 +12,6 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
-import { PriorityQueue } from "src/utils/data-structure";
 import { LangUtil } from "src/utils/lang-util";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
@@ -292,13 +292,8 @@ class LexicalOptions {
 // have a good performance for large charset language but is pretty slow for small charset language
 // maybe a Trie could solve this problem
 class LinesCalculator {
-	private termFreqMap: Map<string, number>;
 	private lines: Line[];
 	private matchedTerms: string[];
-	private totalLength: number;
-	private avgDocLength: number;
-	private k1: number;
-	private b: number;
 	private maxParsedLines: number;
 	private preChars: number;
 	private postChars: number;
@@ -308,21 +303,13 @@ class LinesCalculator {
 		queryText: string,
 		queryTerms: string[],
 		matchedTerms: string[],
-		k1 = 0.3,
-		// b = 0.75,
-		b = 0.1, // decrease the weight of term.length / doc.length
 		maxParsedLines = 30,
 	) {
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
-		this.k1 = k1;
-		this.b = b;
 		this.maxParsedLines = maxParsedLines;
 		this.preChars = Math.max(30, queryText.length * 3);
 		this.postChars = Math.max(40, queryText.length * 4);
-		this.termFreqMap = this.buildTermFreqMap();
-		this.totalLength = this.calculateTotalLength();
-		this.avgDocLength = this.totalLength / lines.length;
 
 		logger.debug(`doc matchedTerms: ${this.matchedTerms.join(" ")}`);
 	}
@@ -377,92 +364,27 @@ class LinesCalculator {
 	}
 
 	// @monitorDecorator
-	private buildTermFreqMap(): Map<string, number> {
-		const termFreqMap = new Map<string, number>();
-		this.lines.forEach((line) => {
-			this.matchedTerms.forEach((term) => {
-				if (line.text.toLowerCase().includes(term.toLowerCase())) {
-					termFreqMap.set(term, (termFreqMap.get(term) || 0) + 1);
-				}
-			});
-		});
-		return termFreqMap;
-	}
-
-	// TODO: perf benchmark to see if it's faster than for const of
-	private calculateTotalLength(): number {
-		return this.lines.reduce(
-			(sum, line) => sum + line.text.split(" ").length,
-			0,
-		);
-	}
-
-	// @monitorDecorator
 	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
-		// min heap to track topK scores
-		const topKLineScores = new PriorityQueue<number>((a, b) => a - b, topK);
-		topKLineScores.push(0);
-		// const termScoreMap: Map<string, number> = new Map();
-		const candidateLines: { line: Line; score: number }[] = [];
-
-		for (const line of lines) {
-			// termScoreMap.clear();
-			let lineScore = 0;
-			let termScore = 0;
-			const docLength = line.text.split(" ").length;
-
-			for (const term of this.matchedTerms) {
-				// TODO: better logic
-				const freq =
-					(line.text.match(new RegExp(term, "gi")) || []).length > 0
-						? 1
-						: 0;
-
-				termScore = Math.min(4, Math.log10(term.length + 1)) * freq;
-				lineScore += termScore;
-
-				// const prevScore = termScoreMap.get(term);
-				// if (prevScore) {
-				// 	// termScore = prevScore * 0.05;
-				// 	termScore = 0;
-				// } else {
-				// 	const freq = this.termFreqMap.get(term.toLowerCase()) || 0;
-				// 	const tf = (line.text.match(new RegExp(term, "gi")) || [])
-				// 		.length;
-				// 	// additional modification for BM25
-				// 	const lengthWeight =
-				// 		termLengthWeightMap.get(term.length) ||
-				// 		MAX_TERM_LENGTH_WEIGHT;
-				// 	const idf =
-				// 		Math.log(
-				// 			1 + (this.lines.length - freq + 0.5) / (freq + 0.5),
-				// 		) * lengthWeight;
-				// 	termScore =
-				// 		idf *
-				// 		((tf * (this.k1 + 1)) /
-				// 			(tf +
-				// 				this.k1 *
-				// 					(1 -
-				// 						this.b +
-				// 						this.b *
-				// 							(docLength / this.avgDocLength))));
-				// 	termScoreMap.set(term, termScore);
-				// }
-				// lineScore += termScore;
-			}
-
-			// significantly increase the line score if multiple terms are matched in one line
-			// lineScore *= termScoreMap.size;
-			if (lineScore > (topKLineScores.peek() as number)) {
-				topKLineScores.push(lineScore);
-				candidateLines.push({ line, score: lineScore });
-			}
+		const opts = {
+			unicode: true,
+			interSplit: "[^\\p{L}\\d']+",
+			intraSplit: "\\p{Ll}\\p{Lu}",
+			intraBound: "\\p{L}\\d|\\d\\p{L}|\\p{Ll}\\p{Lu}",
+			intraChars: "[\\p{L}\\d']",
+			intraContr: "'\\p{L}{1,2}\\b",
+		};
+		const uf = new uFuzzy(opts);
+		// const [idxs, info, order] = uf.search(haystack, needle);
+		const idx =
+			uf.filter(
+				lines.map((line) => line.text),
+				this.matchedTerms.join(" "),
+			) || [];
+		const result = [];
+		for (const i of idx.slice(0, topK)) {
+			result.push(lines[i]);
 		}
-
-		// sort the lines by score in descending order
-		candidateLines.sort((a, b) => b.score - a.score);
-
-		return candidateLines.slice(0, topK).map((x) => x.line);
+		return result;
 	}
 
 	// @monitorDecorator
@@ -515,20 +437,3 @@ class LinesCalculator {
 		});
 	}
 }
-
-// simulate results for const termLengthWeight = Math.min(2.5, Math.log(1 + term.length));
-const MAX_TERM_LENGTH_WEIGHT = 2.5;
-const termLengthWeightMap = new Map([
-	[1, 0.6931],
-	[2, 1.0986],
-	[3, 1.3863],
-	[4, 1.6094],
-	[5, 1.7918],
-	[6, 1.9459],
-	[7, 2.0794],
-	[8, 2.1972],
-	[9, 2.3026],
-	[10, 2.3979],
-	[11, 2.4849],
-	[12, 2.5],
-]);
