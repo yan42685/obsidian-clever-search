@@ -11,6 +11,7 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
+import { PriorityQueue } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -307,8 +308,8 @@ class LinesCalculator {
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.maxParsedLines = maxParsedLines;
 		// TODO: use token rather than chars
-		this.preChars = Math.max(40, queryText.length * 3);
-		this.postChars = Math.max(80, queryText.length * 4);
+		this.preChars = 60;
+		this.postChars = 80;
 
 		logger.debug(`doc matchedTerms: ${this.matchedTerms.join(" ")}`);
 	}
@@ -381,47 +382,61 @@ class LinesCalculator {
 	// for (const i of idx.slice(0, topK)) {
 	// 	result.push(lines[i]);
 	// }
-	// @monitorDecorator
-	// TODO: use PriorityQueue
+	@monitorDecorator
 	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
-		// compile a test regex from the filtered matchedTerms
+		// compile a regex to filter out unmatched lines
 		const testRegex = new RegExp(this.matchedTerms.join("|"), "i");
-		// filter lines that contain at least one matchedTerm
-		const filteredLines = lines.filter((line) => testRegex.test(line.text));
 
+		// map each matchedTerm to a global regex
 		const globalRegexes = this.matchedTerms.map(
 			(term) => new RegExp(term, "gi"),
 		);
 
-		const scores = new Map<Line, number>();
+		const topKLinesScores = new PriorityQueue<number>(
+			(a, b) => a - b,
+			topK,
+		);
+		topKLinesScores.push(0);
+
+		const candidateLineMap = new Map<Line, number>();
 		const termCounts = new Map<string, number>();
+
 		// calculate scores for each line
-		for (const line of filteredLines) {
+		for (const line of lines) {
+			// skip lines without any matchedTerm
+			if (!testRegex.test(line.text)) {
+				continue;
+			}
 			termCounts.clear();
 			let score = 0;
 
-			globalRegexes.forEach((regex, index) => {
-				let match: RegExpExecArray | null = null;
+			for (const regex of globalRegexes) {
+				regex.lastIndex = 0; // Reset lastIndex for global regex
+				let match;
 				while ((match = regex.exec(line.text)) !== null) {
-					const term = this.matchedTerms[index];
+					const term = match[0];
 					const count = (termCounts.get(term) || 0) + 1;
 					termCounts.set(term, count);
 
 					// add score: 10 * term.length for the first match, 0.1 for subsequent matches
 					score += count === 1 ? 10 * term.length : 0.1;
 				}
-			});
+			}
 
-			scores.set(line, score);
+			if (score > (topKLinesScores.peek() as number)) {
+				topKLinesScores.push(score);
+				candidateLineMap.set(line, score);
+			}
 		}
 
-		return Array.from(scores.entries())
+		// Sort and return the topK lines based on score
+		return Array.from(candidateLineMap.entries())
 			.sort((a, b) => b[1] - a[1])
 			.slice(0, topK)
 			.map((entry) => entry[0]);
 	}
 
-	// @monitorDecorator
+	@monitorDecorator
 	private highlightLines(lines: Line[]): MatchedLine[] {
 		return lines.map((line) => {
 			const positions = new Set<number>();
