@@ -34,6 +34,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		openInNewPane: true,
 		maxItemResults: 30,
 		showedExtension: "except md",
+		collapseDevSettingByDefault: isDevEnvironment ? false : true
 	},
 };
 
@@ -50,6 +51,7 @@ export type UISetting = {
 	openInNewPane: boolean;
 	maxItemResults: number;
 	showedExtension: "none" | "except md" | "all";
+	collapseDevSettingByDefault: boolean;
 };
 
 // ========== transparent for users ==========

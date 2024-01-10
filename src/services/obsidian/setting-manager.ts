@@ -8,7 +8,7 @@ import {
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
-import { getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { getInstance } from "src/utils/my-lib";
 import {
 	AssetsProvider,
 	stopWordsEnTargetUrl,
@@ -80,18 +80,21 @@ class GeneralTab extends PluginSettingTab {
 		// 			await this.settingManager.saveSettings();
 		// 		}),
 		// 	);
-		
+
 		new Setting(containerEl)
 			.setName("Max item results")
-			.setDesc("Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once")
-			.addSlider(text => text
-				.setLimits(1, 300, 1)
-				.setValue(this.setting.ui.maxItemResults)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.setting.ui.maxItemResults = value;
-					await this.settingManager.saveSettings();
-				}),
+			.setDesc(
+				"Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once",
+			)
+			.addSlider((text) =>
+				text
+					.setLimits(1, 300, 1)
+					.setValue(this.setting.ui.maxItemResults)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.setting.ui.maxItemResults = value;
+						await this.settingManager.saveSettings();
+					}),
 			);
 
 		new Setting(containerEl)
@@ -151,11 +154,15 @@ class GeneralTab extends PluginSettingTab {
 		const devSettingContent = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-content",
 		});
-		// devSettingContent.style.display = "none";
-		const initialCollapsed = isDevEnvironment ? false : true;
+
+		const collapseDevSettingByDefault =
+			this.setting.ui.collapseDevSettingByDefault;
+		devSettingContent.style.display = collapseDevSettingByDefault
+			? "none"
+			: "block";
 		devSettingTitle.style.setProperty(
 			"--cs-dev-collapse-icon",
-			initialCollapsed ? ICON_COLLAPSE : ICON_EXPAND,
+			collapseDevSettingByDefault ? ICON_COLLAPSE : ICON_EXPAND,
 		);
 
 		// 点击标题时切换设置组的显示状态，并更新伪元素的图标
@@ -246,6 +253,17 @@ class GeneralTab extends PluginSettingTab {
 						await this.settingManager.saveSettings();
 					}),
 			);
+
+		new Setting(devSettingContent)
+			.setName("Collapse development setting by default")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.ui.collapseDevSettingByDefault)
+					.onChange(async (value) => {
+						this.setting.ui.collapseDevSettingByDefault = value;
+					}),
+			);
+
 	}
 
 	private async saveSettingDownloadRefresh() {
