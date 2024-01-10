@@ -78,15 +78,21 @@ export class SearchService {
 			.map((text, index) => new Line(text, index));
 		logger.debug("target file lines count: ", lines.length);
 
-		const matchedLines =await this.lexicalEngine.searchLinesByFileItem(
+		const matchedLines = await this.lexicalEngine.searchLinesByFileItem(
 			lines,
+			"subItem",
 			queryText,
 			fileItem,
 			30,
 		);
 
 		const fileSubItems = this.lineHighlighter
-			.parseAll(lines, matchedLines, TruncateOption.forType("subItem"), false)
+			.parseAll(
+				lines,
+				matchedLines,
+				TruncateOption.forType("subItem", queryText),
+				false,
+			)
 			.map((itemContext) => {
 				return {
 					text: itemContext.text,

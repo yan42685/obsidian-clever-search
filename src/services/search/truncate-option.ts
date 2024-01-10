@@ -1,4 +1,5 @@
 import { LanguageEnum } from "src/globals/enums";
+import { LangUtil } from "src/utils/lang-util";
 
 export type TruncateType = "line" | "paragraph" | "subItem";
 
@@ -19,7 +20,7 @@ export type AllTruncateOption = {
 };
 
 export class TruncateOption {
-	// Default truncate options for all types and languages
+	// default truncate options for all types and languages
 	private static readonly default: AllTruncateOption = {
 		line: {
 			maxPreLines: 0,
@@ -38,13 +39,13 @@ export class TruncateOption {
 		subItem: {
 			maxPreLines: 3,
 			maxPostLines: 3,
-			maxPreChars: 60,
-			maxPostChars: 80,
+			maxPreChars: 180,
+			maxPostChars: 200,
 			boundaryLineMinChars: 4,
 		},
 	};
 
-	// Truncate options set by language
+	// truncate options set by language
 	private static readonly limitsByLanguage: Record<
 		LanguageEnum,
 		AllTruncateOption
@@ -52,17 +53,31 @@ export class TruncateOption {
 		[LanguageEnum.other]: TruncateOption.default,
 		[LanguageEnum.en]: TruncateOption.default,
 		[LanguageEnum.zh]: {
-			line: { ...this.default.line, maxPreChars: 30 },
-			paragraph: { ...this.default.paragraph, maxPreChars: 220 },
-			subItem: { ...this.default.subItem, maxPreChars: 50 },
+			line: { ...this.default.line, maxPreChars: 30, maxPostChars: 230 },
+			paragraph: {
+				...this.default.paragraph,
+				maxPreChars: 220,
+				maxPostChars: 600,
+			},
+			subItem: {
+				...this.default.subItem,
+				maxPreChars: 60,
+				maxPostChars: 80,
+			},
 		},
 	};
 
 	/**
-	 * Retrieve the truncate options for a given type in the current language.
+	 * retrieve the truncate options for a given type in the current language.
 	 */
-	static forType(type: TruncateType): TruncateLimit {
-		// return this.limitsByLanguage[getCurrLanguage()][type];
-		return this.limitsByLanguage[LanguageEnum.en][type];
+	// TODO: use token if performance permits. token: normal char +1  wide char +2
+	static forType(type: TruncateType, text?: string): TruncateLimit {
+		// return the option by char type, normal char or wide char
+		if (text && LangUtil.testWideChar(text)) {
+			return this.limitsByLanguage[LanguageEnum.zh][type];
+		} else {
+			// return the default option
+			return this.limitsByLanguage[LanguageEnum.en][type];
+		}
 	}
 }

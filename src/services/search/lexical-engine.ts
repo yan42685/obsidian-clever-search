@@ -18,6 +18,7 @@ import { singleton } from "tsyringe";
 import { OuterSetting, innerSetting } from "../../globals/plugin-setting";
 import { Query } from "./query";
 import { Tokenizer } from "./tokenizer";
+import { TruncateOption, type TruncateType } from "./truncate-option";
 
 // If @singleton() is not used,
 // then the lifecycle of the instance obtained through tsyringe container is transient.
@@ -122,6 +123,7 @@ export class LexicalEngine {
 	// the tokenizing speed is unsatisfactory
 	async searchLinesByFileItem(
 		lines: Line[],
+		truncateType: TruncateType,
 		queryText: string,
 		fileItem: FileItem,
 		maxParsedLines: number,
@@ -135,6 +137,7 @@ export class LexicalEngine {
 		// if (LangUtil.isLargeCharset(queryText)) {
 		const linesMatcher = new LinesMatcher(
 			lines,
+			truncateType,
 			queryText,
 			fileItem.queryTerms,
 			fileItem.matchedTerms,
@@ -297,6 +300,7 @@ class LinesMatcher {
 
 	constructor(
 		lines: Line[],
+		truncateType: TruncateType,
 		queryText: string,
 		queryTerms: string[],
 		matchedTerms: string[],
@@ -306,8 +310,9 @@ class LinesMatcher {
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.maxParsedLines = maxParsedLines;
 		// TODO: use token rather than chars
-		this.preChars = 60;
-		this.postChars = 80;
+		const truncateLimit = TruncateOption.forType(truncateType, queryText);
+		this.preChars = truncateLimit.maxPreChars;
+		this.postChars = truncateLimit.maxPostChars;
 
 		logger.debug(`doc matchedTerms: ${this.matchedTerms.join(" ")}`);
 	}

@@ -11,13 +11,13 @@ export const CHINESE_REGEX = /[\u4e00-\u9fa5]/;
 // const CJK_REGEX = /[\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\u31f0-\u31ff]/;
 
 export class LangUtil {
-	static isLargeCharset(text: string) {
+	static isLargeCharset(text: string): boolean {
 		const threshold = 0.35;
 		const matches = text.match(LARGE_CHARSET_LANGUAGE_REGEX_G) || [];
 		return matches.length >= Math.ceil(text.length * threshold);
 	}
 
-	static testWideChar(text: string) {
+	static testWideChar(text: string): boolean {
 		return LARGE_CHARSET_LANGUAGE_REGEX.test(text);
 	}
 
