@@ -345,7 +345,7 @@ class LinesMatcher {
 			);
 		} else {
 			result = matchedQueryTerms;
-			// NOTE: based on the fact that matchedTerms only contains unique term
+			// NOTE: based on the fact that matchedTerms only contain unique term
 			for (const mTerm of matchedTerms) {
 				if (
 					!matchedQueryTerms.includes(mTerm) &&
