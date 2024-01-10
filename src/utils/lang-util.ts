@@ -17,6 +17,10 @@ export class LangUtil {
 		return matches.length >= Math.ceil(text.length * threshold);
 	}
 
+	static testWideChar(text: string) {
+		return LARGE_CHARSET_LANGUAGE_REGEX.test(text);
+	}
+
 	static wideCharProportion(text: string): number {
 		const matches = text.match(LARGE_CHARSET_LANGUAGE_REGEX_G) || [];
 		return matches.length / text.length;

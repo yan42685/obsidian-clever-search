@@ -13,6 +13,7 @@ import {
 import { FileType, FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/lexical-engine";
+import { TruncateOption } from "../search/truncate-option";
 import { DataProvider } from "./user-data/data-provider";
 
 @singleton()
@@ -85,7 +86,7 @@ export class SearchService {
 		);
 
 		const fileSubItems = this.lineHighlighter
-			.parseAll(lines, matchedLines, "subItem", false)
+			.parseAll(lines, matchedLines, TruncateOption.forType("subItem"), false)
 			.map((itemContext) => {
 				return {
 					text: itemContext.text,
@@ -122,14 +123,14 @@ export class SearchService {
 			const highlightedLine = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				"line",
+				TruncateOption.forType("line"),
 				false,
 			);
 			// logger.debug(highlightedLine);
 			const paragraphContext = this.lineHighlighter.parse(
 				lines,
 				matchedLine,
-				"paragraph",
+				TruncateOption.forType("paragraph"),
 				true,
 			);
 			return new LineItem(highlightedLine, paragraphContext.text);

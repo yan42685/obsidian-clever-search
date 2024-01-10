@@ -1,4 +1,3 @@
-import { LanguageEnum } from "src/globals/enums";
 import {
 	Line,
 	LineItem,
@@ -11,6 +10,7 @@ import { MyLib, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
 import { LexicalEngine } from "./lexical-engine";
+import { TruncateOption, type TruncateLimit } from "./truncate-option";
 
 @singleton()
 export class LineHighlighter {
@@ -23,7 +23,7 @@ export class LineHighlighter {
 	parseAll(
 		allLines: Line[],
 		matchedLines: MatchedLine[],
-		truncateType: TruncateType,
+		truncateLimit: TruncateLimit,
 		hlMatchedLineBackground: boolean,
 	): HighlightedContext[] {
 		return matchedLines.map((matchedLine) => {
@@ -33,7 +33,7 @@ export class LineHighlighter {
 				allLines,
 				matchedRow,
 				firstMatchedCol,
-				truncateType,
+				truncateLimit,
 			);
 			const matchedLineText = context.matchedLineText;
 			let matchedLinePositions = matchedLine.positions;
@@ -70,13 +70,13 @@ export class LineHighlighter {
 	parse(
 		allLines: Line[],
 		matchedLine: MatchedLine,
-		truncateType: TruncateType,
+		truncateLimit: TruncateLimit,
 		hlMatchedLineBackground: boolean,
 	): HighlightedContext {
 		return this.parseAll(
 			allLines,
 			[matchedLine],
-			truncateType,
+			truncateLimit,
 			hlMatchedLineBackground,
 		)[0];
 	}
@@ -193,13 +193,13 @@ export class LineHighlighter {
 		lines: Line[],
 		matchedRow: number,
 		firstMatchedCol: number,
-		truncateType: TruncateType,
+		truncateLimit: TruncateLimit,
 	): TruncatedContext {
 		if (lines.length === 0) {
 			return { lines: [], firstLineStartCol: 0, matchedLineText: "" };
 		}
 
-		const limit = TruncateLimit.forType(truncateType);
+		const limit = truncateLimit;
 		let resultLines: Line[];
 		let firstLineStartCol = 0;
 		let postCharsCount = 0;
@@ -385,7 +385,7 @@ export class LineHighlighter {
 			lines,
 			matchedRow,
 			firstMatchedCol,
-			"paragraph",
+			TruncateOption.forType("paragraph")
 		);
 		const contextLines = context.lines;
 
@@ -435,70 +435,3 @@ export type TruncatedContext = {
 	firstLineStartCol: number;
 	matchedLineText: string;
 };
-
-export type TruncateType = "line" | "paragraph" | "subItem";
-
-export type TruncateOption = {
-	maxPreLines: number;
-	maxPostLines: number;
-	maxPreChars: number;
-	maxPostChars: number; // include the EOL
-	/**
-	 * if (currLine !== matchedLine && isFirstOrLastLine(currLine) && currLine.text.length < boundaryLineMinChars)
-	 * currLine won't be added to the context
-	 */
-	boundaryLineMinChars: number;
-};
-
-export type AllTruncateOption = {
-	[key in TruncateType]: TruncateOption;
-};
-
-export class TruncateLimit {
-	// Default truncate options for all types and languages
-	private static readonly default: AllTruncateOption = {
-		line: {
-			maxPreLines: 0,
-			maxPostLines: 0,
-			maxPreChars: 30,
-			maxPostChars: 230,
-			boundaryLineMinChars: 4,
-		},
-		paragraph: {
-			maxPreLines: 4,
-			maxPostLines: 7,
-			maxPreChars: 220,
-			maxPostChars: 600,
-			boundaryLineMinChars: 4,
-		},
-		subItem: {
-			maxPreLines: 3,
-			maxPostLines: 3,
-			maxPreChars: 60,
-			maxPostChars: 80,
-			boundaryLineMinChars: 4,
-		},
-	};
-
-	// Truncate options set by language
-	private static readonly limitsByLanguage: Record<
-		LanguageEnum,
-		AllTruncateOption
-	> = {
-		[LanguageEnum.other]: TruncateLimit.default,
-		[LanguageEnum.en]: TruncateLimit.default,
-		[LanguageEnum.zh]: {
-			line: { ...this.default.line, maxPreChars: 30 },
-			paragraph: { ...this.default.paragraph, maxPreChars: 220 },
-			subItem: { ...this.default.subItem, maxPreChars: 50 },
-		},
-	};
-
-	/**
-	 * Retrieve the truncate options for a given type in the current language.
-	 */
-	static forType(type: TruncateType): TruncateOption {
-		// return this.limitsByLanguage[getCurrLanguage()][type];
-		return this.limitsByLanguage[LanguageEnum.en][type];
-	}
-}
