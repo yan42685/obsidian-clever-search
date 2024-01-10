@@ -1,4 +1,3 @@
-import uFuzzy from "@leeoniya/ufuzzy";
 import { AsyncFzf, type FzfResultItem } from "fzf";
 import type { AsPlainObject, Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
@@ -12,7 +11,6 @@ import type {
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
-import { LangUtil } from "src/utils/lang-util";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -133,24 +131,24 @@ export class LexicalEngine {
 		logger.debug(`max subItems: ${maxSubItems}`);
 
 		// optimization for large charset language to avoid using jieba segmenter
-		if (LangUtil.isLargeCharset(queryText)) {
-			const bm25Calculator = new LinesCalculator(
-				lines,
-				queryText,
-				fileItem.queryTerms,
-				fileItem.matchedTerms,
-				(maxParsedLines = maxSubItems),
-			);
-			return bm25Calculator.parse();
-		} else {
-			// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
-			// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
-			return await this.searchLinesForSmallCharset(
-				lines,
-				queryText,
-				maxSubItems,
-			);
-		}
+		// if (LangUtil.isLargeCharset(queryText)) {
+		const linesCalculator = new LinesCalculator(
+			lines,
+			queryText,
+			fileItem.queryTerms,
+			fileItem.matchedTerms,
+			(maxParsedLines = maxSubItems),
+		);
+		return linesCalculator.parse();
+		// } else {
+		// 	// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
+		// 	// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
+		// 	return await this.searchLinesForSmallCharset(
+		// 		lines,
+		// 		queryText,
+		// 		maxSubItems,
+		// 	);
+		// }
 	}
 
 	/**
@@ -308,8 +306,9 @@ class LinesCalculator {
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.maxParsedLines = maxParsedLines;
-		this.preChars = Math.max(30, queryText.length * 3);
-		this.postChars = Math.max(40, queryText.length * 4);
+		// TODO: use token rather than chars
+		this.preChars = Math.max(40, queryText.length * 3);
+		this.postChars = Math.max(80, queryText.length * 4);
 
 		logger.debug(`doc matchedTerms: ${this.matchedTerms.join(" ")}`);
 	}
@@ -363,28 +362,63 @@ class LinesCalculator {
 		);
 	}
 
+	// const opts = {
+	// 	unicode: true,
+	// 	interSplit: "[^\\p{L}\\d']+",
+	// 	intraSplit: "\\p{Ll}\\p{Lu}",
+	// 	intraBound: "\\p{L}\\d|\\d\\p{L}|\\p{Ll}\\p{Lu}",
+	// 	intraChars: "[\\p{L}\\d']",
+	// 	intraContr: "'\\p{L}{1,2}\\b",
+	// };
+	// const uf = new uFuzzy(opts);
+	// // const [idxs, info, order] = uf.search(haystack, needle);
+	// const idx =
+	// 	uf.filter(
+	// 		lines.map((line) => line.text),
+	// 		this.matchedTerms.join(" "),
+	// 	) || [];
+	// const result = [];
+	// for (const i of idx.slice(0, topK)) {
+	// 	result.push(lines[i]);
+	// }
 	// @monitorDecorator
+	// TODO: use PriorityQueue
 	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
-		const opts = {
-			unicode: true,
-			interSplit: "[^\\p{L}\\d']+",
-			intraSplit: "\\p{Ll}\\p{Lu}",
-			intraBound: "\\p{L}\\d|\\d\\p{L}|\\p{Ll}\\p{Lu}",
-			intraChars: "[\\p{L}\\d']",
-			intraContr: "'\\p{L}{1,2}\\b",
-		};
-		const uf = new uFuzzy(opts);
-		// const [idxs, info, order] = uf.search(haystack, needle);
-		const idx =
-			uf.filter(
-				lines.map((line) => line.text),
-				this.matchedTerms.join(" "),
-			) || [];
-		const result = [];
-		for (const i of idx.slice(0, topK)) {
-			result.push(lines[i]);
+		// compile a test regex from the filtered matchedTerms
+		const testRegex = new RegExp(this.matchedTerms.join("|"), "i");
+		// filter lines that contain at least one matchedTerm
+		const filteredLines = lines.filter((line) => testRegex.test(line.text));
+
+		const globalRegexes = this.matchedTerms.map(
+			(term) => new RegExp(term, "gi"),
+		);
+
+		const scores = new Map<Line, number>();
+		const termCounts = new Map<string, number>();
+		// calculate scores for each line
+		for (const line of filteredLines) {
+			termCounts.clear();
+			let score = 0;
+
+			globalRegexes.forEach((regex, index) => {
+				let match: RegExpExecArray | null = null;
+				while ((match = regex.exec(line.text)) !== null) {
+					const term = this.matchedTerms[index];
+					const count = (termCounts.get(term) || 0) + 1;
+					termCounts.set(term, count);
+
+					// add score: 10 * term.length for the first match, 0.1 for subsequent matches
+					score += count === 1 ? 10 * term.length : 0.1;
+				}
+			});
+
+			scores.set(line, score);
 		}
-		return result;
+
+		return Array.from(scores.entries())
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, topK)
+			.map((entry) => entry[0]);
 	}
 
 	// @monitorDecorator

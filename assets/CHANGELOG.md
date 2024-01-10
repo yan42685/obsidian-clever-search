@@ -14,9 +14,10 @@
 
 - Use debounced search and cached result to decrease the latency of input
 - Better in-file search performance
-- Better preview experience: blank lines located at boundary won't appear anymore
+- Better preview experience: most of the blank lines located at boundary won't appear anymore
 - Lots of performance optimization
 - Adjust the modal styles
+
 
 ### Thanks
 
