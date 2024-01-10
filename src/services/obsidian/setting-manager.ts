@@ -97,7 +97,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("English word blacklist")
 			.setDesc(
-				`Exclude some meaningless English words like "was", "two", "top" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
+				`Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -128,7 +128,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Chinese word blacklist")
 			.setDesc(
-				`Activates only if the Chinese Patch is enabled. This excludes some meaningless Chinese words like "的", "所以", "防止" listed in 'stop-words-zh.txt', improving search efficiency and speed. More details are listed in 'English word blacklist' option`,
+				`Activates only if the Chinese Patch is enabled. This excludes some meaningless Chinese words like "的", "所以", "尽管" listed in 'stop-words-zh.txt', improving search efficiency and speed. More details are listed in 'English word blacklist' option`,
 			)
 			.addToggle((toggle) =>
 				toggle
