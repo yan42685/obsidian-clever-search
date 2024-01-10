@@ -398,6 +398,7 @@ class LinesCalculator {
 		);
 		topKLinesScores.push(0);
 
+		// line with score
 		const candidateLineMap = new Map<Line, number>();
 		const termCounts = new Map<string, number>();
 
@@ -438,24 +439,27 @@ class LinesCalculator {
 
 	@monitorDecorator
 	private highlightLines(lines: Line[]): MatchedLine[] {
+		const termRegexMap = new Map<string, RegExp>();
+		for (const term of this.matchedTerms) {
+			termRegexMap.set(term, new RegExp(term, "gi"));
+		}
 		return lines.map((line) => {
 			const positions = new Set<number>();
 			let highlightStart = -1;
 			let highlightEnd = -1;
 
-			// find the last matchedTerm
+			// find the first occurrence from right to left in the matchedTerms
 			for (let i = this.matchedTerms.length - 1; i >= 0; i--) {
 				const term = this.matchedTerms[i];
-				const lastMatchIndex = line.text.lastIndexOf(term);
+				const startIndex = line.text.search(
+					termRegexMap.get(term) as RegExp,
+				);
 
-				if (lastMatchIndex !== -1) {
-					highlightStart = Math.max(
-						0,
-						lastMatchIndex - this.preChars,
-					);
+				if (startIndex !== -1) {
+					highlightStart = Math.max(0, startIndex - this.preChars);
 					highlightEnd = Math.min(
 						line.text.length,
-						lastMatchIndex + term.length + this.postChars,
+						startIndex + term.length + this.postChars,
 					);
 					break;
 				}
@@ -465,7 +469,7 @@ class LinesCalculator {
 				const textSlice = line.text.slice(highlightStart, highlightEnd);
 				// highlight all matchedTerms in a limited range
 				for (const term of this.matchedTerms) {
-					const regex = new RegExp(term, "g");
+					const regex = termRegexMap.get(term) as RegExp;
 					let match;
 					while ((match = regex.exec(textSlice)) !== null) {
 						const termStart = match.index + highlightStart;
