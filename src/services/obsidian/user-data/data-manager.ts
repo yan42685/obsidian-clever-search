@@ -54,7 +54,7 @@ export class DataManager {
 		if (!this.shouldForceRefresh) {
 			// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
 			eventBus.on(EventEnum.MODAL_OPEN, () =>
-				this.docOperationsBuffer.flush(),
+				this.docOperationsBuffer.forceFlush(),
 			);
 			getInstance(FileWatcher).start();
 		}

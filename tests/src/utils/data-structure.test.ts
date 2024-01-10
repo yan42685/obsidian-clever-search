@@ -45,7 +45,7 @@ describe("BufferSet", () => {
 		// add more while flushing
 		bufferSet.add({ caller: "caller4", query: "query4" });
 		bufferSet.add({ caller: "caller5", query: "query5" });
-		bufferSet.flush(); // won't be called at once but will be called later
+		bufferSet.forceFlush(); // won't be called at once but will be called later
 
 		// complete first flush
 		jest.advanceTimersByTime(5);

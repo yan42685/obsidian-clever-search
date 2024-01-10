@@ -1,3 +1,4 @@
+import { throttle } from "throttle-debounce";
 import { logger } from "./logger";
 
 export class Collections {
@@ -22,8 +23,7 @@ export class BufferSet<T> {
 	private handler: (elements: T[]) => Promise<void>;
 	private identifier: (element: T) => string;
 	private autoFlushThreshold: number;
-	private isFlushing = false;
-	private pendingFlushRequested = false;
+	private flushThrottled = throttle(10000, () => this.forceFlush());
 
 	/**
 	 * Creates an instance of BufferSet.
@@ -52,39 +52,23 @@ export class BufferSet<T> {
 		this.elementsMap.set(id, element);
 
 		if (this.elementsMap.size >= this.autoFlushThreshold) {
-			this.flush();
+			this.flushThrottled();
 		}
 	}
 
 	/**
 	 * Flushes all buffered elements to the handler function and clears the buffer.
 	 */
-	async flush(): Promise<void> {
-		if (this.isFlushing) {
-			// A flush operation is already in progress, so we note that another flush is requested.
-			this.pendingFlushRequested = true;
-			return;
-		}
+	async forceFlush(): Promise<void> {
 		if (this.elementsMap.size === 0) {
 			return;
 		}
-		this.isFlushing = true;
 
 		const elementsToHandle = Array.from(this.elementsMap.values());
 		this.elementsMap.clear();
 
-		try {
-			await this.handler(elementsToHandle);
-			logger.debug("flushed");
-		} finally {
-			this.isFlushing = false;
-			// check if a new flush was requested while we were flushing.
-			if (this.pendingFlushRequested) {
-				// reset the flag and call flush again.
-				this.pendingFlushRequested = false;
-				this.flush();
-			}
-		}
+		await this.handler(elementsToHandle);
+		logger.debug("flushed");
 	}
 }
 
