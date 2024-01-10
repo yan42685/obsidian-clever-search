@@ -176,6 +176,30 @@ class GeneralTab extends PluginSettingTab {
 		};
 
 		new Setting(devSettingContent)
+			.setName("Collapse development setting by default")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.ui.collapseDevSettingByDefault)
+					.onChange(async (value) => {
+						this.setting.ui.collapseDevSettingByDefault = value;
+					}),
+			);
+
+		new Setting(devSettingContent)
+			.setName("Support the Project")
+			.setDesc(
+				"Enjoying this plugin? Show your support with a star on GitHub!",
+			)
+			.addButton((button) => {
+				button.setButtonText("Visit GitHub").onClick(() => {
+					window.open(
+						"https://github.com/yan42685/obsidian-clever-search",
+						"_blank",
+					);
+				});
+			});
+
+		new Setting(devSettingContent)
 			.setName("API provider1")
 			.setDesc("domain and key")
 			.addText((text) =>
@@ -253,17 +277,6 @@ class GeneralTab extends PluginSettingTab {
 						await this.settingManager.saveSettings();
 					}),
 			);
-
-		new Setting(devSettingContent)
-			.setName("Collapse development setting by default")
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.ui.collapseDevSettingByDefault)
-					.onChange(async (value) => {
-						this.setting.ui.collapseDevSettingByDefault = value;
-					}),
-			);
-
 	}
 
 	private async saveSettingDownloadRefresh() {
