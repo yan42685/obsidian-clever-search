@@ -133,14 +133,14 @@ export class LexicalEngine {
 
 		// optimization for large charset language to avoid using jieba segmenter
 		// if (LangUtil.isLargeCharset(queryText)) {
-		const linesCalculator = new LinesCalculator(
+		const linesMatcher = new LinesMatcher(
 			lines,
 			queryText,
 			fileItem.queryTerms,
 			fileItem.matchedTerms,
-			(maxParsedLines = maxSubItems),
+			maxParsedLines
 		);
-		return linesCalculator.parse();
+		return linesMatcher.parse();
 		// } else {
 		// 	// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
 		// 	// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
@@ -288,9 +288,7 @@ class LexicalOptions {
 	}
 }
 
-// have a good performance for large charset language but is pretty slow for small charset language
-// maybe a Trie could solve this problem
-class LinesCalculator {
+class LinesMatcher {
 	private lines: Line[];
 	private matchedTerms: string[];
 	private maxParsedLines: number;
@@ -302,7 +300,7 @@ class LinesCalculator {
 		queryText: string,
 		queryTerms: string[],
 		matchedTerms: string[],
-		maxParsedLines = 30,
+		maxParsedLines: number
 	) {
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);

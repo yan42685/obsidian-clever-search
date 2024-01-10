@@ -49,7 +49,7 @@ export class DataManager {
 	async initAsync() {
 		// TODO: delete old version databases
 		await this.initLexicalEngines();
-		await this.updateIndexDataByMtime();
+		await this.updateDocRefsByMtime();
 
 		if (!this.shouldForceRefresh) {
 			// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
@@ -132,7 +132,7 @@ export class DataManager {
 	}
 
 	// use case: users have changed files without obsidian open. so we need to update the index and refs
-	private async updateIndexDataByMtime() {
+	private async updateDocRefsByMtime() {
 		// update index data based on file modification time
 		// TODO: for semantic engine
 		if (!this.isLexicalEngineUpToDate) {
