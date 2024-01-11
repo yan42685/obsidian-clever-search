@@ -1,5 +1,6 @@
 import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
+import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
@@ -32,8 +33,9 @@ export class ExtensionView {
 		}
 	}
 
-	viewType(extension: string): ViewType {
-		const viewType = this.extensionViewMap.get(extension);
+	// return the viewType in obsidian by path
+	viewTypeByPath(path: string): ViewType {
+		const viewType = this.extensionViewMap.get(FileUtil.getExtension(path));
 		return viewType === undefined ? ViewType.UNSUPPORTED : viewType;
 	}
 

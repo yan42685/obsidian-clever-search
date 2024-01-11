@@ -10,7 +10,6 @@
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
-	import { FileType } from "src/utils/file-util";
 	import {
 		TO_BE_IMPL,
 		getInstance,
@@ -20,6 +19,7 @@
 	import { debounce } from "throttle-debounce";
 	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
+	import { ViewType } from "src/services/obsidian/extension-view";
 
 	const searchService: SearchService = getInstance(SearchService);
 	const viewHelper = getInstance(ViewHelper);
@@ -33,8 +33,8 @@
 	let currContext = ""; // for previewing in-file search
 
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
-	let currFileSubItems: FileSubItem[] = []; // for plaintext filetype
-	let currFilePreviewContent: any = undefined; // for non-plaintext filetype
+	let currFileSubItems: FileSubItem[] = []; // for markdown viewType
+	let currFilePreviewContent: any = undefined; // for non-markdown viewType
 	let currSubItemIndex = NULL_NUMBER;
 	let inputEl: HTMLElement | undefined;
 
@@ -231,7 +231,7 @@
 					<p>{@html currContext}</p>
 				{/if}
 			{:else if searchType === SearchType.IN_VAULT}
-				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
+				{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
 					<ul>
 						{#each currFileSubItems as subItem, index}
 							<button

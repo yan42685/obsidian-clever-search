@@ -10,11 +10,12 @@ import {
 	LineItem,
 	SearchResult,
 } from "../../globals/search-types";
-import { FileType, FileUtil } from "../../utils/file-util";
+import {  FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/lexical-engine";
 import { TruncateOption } from "../search/truncate-option";
 import { DataProvider } from "./user-data/data-provider";
+import { ExtensionView, ViewType } from "./extension-view";
 
 @singleton()
 export class SearchService {
@@ -22,6 +23,7 @@ export class SearchService {
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
+	private readonly extensionView = getInstance(ExtensionView);
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
@@ -65,9 +67,9 @@ export class SearchService {
 	): Promise<FileSubItem[]> {
 		const path = fileItem.path;
 
-		if (FileUtil.getFileType(path) !== FileType.PLAIN_TEXT) {
+		if (this.extensionView.viewTypeByPath(path) !== ViewType.MARKDOWN) {
 			logger.warn(
-				`file type for path "${path}" is not supported for sub-items.`,
+				`view type for path "${path}" is not supported for sub-items.`,
 			);
 			return [];
 		}
@@ -111,7 +113,8 @@ export class SearchService {
 		if (!queryText || !activeFile) {
 			return result;
 		}
-		if (FileUtil.getFileType(activeFile.path) !== FileType.PLAIN_TEXT) {
+		
+		if (this.extensionView.viewTypeByPath(activeFile.path) !== ViewType.MARKDOWN) {
 			logger.trace("Current file isn't PLAINT_TEXT");
 			return result;
 		}
@@ -157,7 +160,7 @@ export class SearchService {
 		if (
 			!queryText ||
 			!activeFile ||
-			FileUtil.getFileType(activeFile.path) !== FileType.PLAIN_TEXT
+			this.extensionView.viewTypeByPath(activeFile.path) !== ViewType.MARKDOWN
 		) {
 			return result;
 		}

@@ -12,8 +12,8 @@ import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { FileType, FileUtil } from "../../../utils/file-util";
-import { ExtensionView } from "../extension-view";
+import { FileUtil } from "../../../utils/file-util";
+import { ExtensionView, ViewType } from "../extension-view";
 import { PrivateApi } from "../private-api";
 
 @singleton()
@@ -23,11 +23,11 @@ export class DataProvider {
 	private readonly supportedExtensions =
 		getInstance(ExtensionView).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
+	private extensionView = getInstance(ExtensionView);
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
-	private static readonly contentIndexableFileTypes = new Set([
-		FileType.PLAIN_TEXT,
-		FileType.IMAGE,
+	private static readonly contentIndexableViewTypes = new Set([
+		ViewType.MARKDOWN
 	]);
 
 	async generateAllIndexedDocuments(
@@ -38,7 +38,8 @@ export class DataProvider {
 				if (this.isContentIndexable(file)) {
 					const metaData = this.app.metadataCache.getFileCache(file);
 					if (
-						FileUtil.getFileType(file.path) === FileType.PLAIN_TEXT
+						this.extensionView.viewTypeByPath(file.path) ===
+						ViewType.MARKDOWN
 					) {
 						return {
 							path: file.path,
@@ -106,7 +107,7 @@ export class DataProvider {
 			typeof fileOrPath === "string"
 				? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
 				: fileOrPath;
-		if (FileUtil.getFileType(file.path) === FileType.PLAIN_TEXT) {
+		if (this.extensionView.viewTypeByPath(file.path) === ViewType.MARKDOWN) {
 			return this.vault.cachedRead(file);
 		} else {
 			throw Error(
@@ -132,8 +133,8 @@ export class DataProvider {
 	}
 
 	private isContentIndexable(file: TFile): boolean {
-		return DataProvider.contentIndexableFileTypes.has(
-			FileUtil.getFileType(file.path),
+		return DataProvider.contentIndexableViewTypes.has(
+			this.extensionView.viewTypeByPath(file.path)
 		);
 	}
 }

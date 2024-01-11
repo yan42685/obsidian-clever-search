@@ -11,11 +11,11 @@ import {
     SearchType,
 } from "src/globals/search-types";
 import { PrivateApi } from "src/services/obsidian/private-api";
-import { FileType } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { SearchModal } from "./search-modal";
+import { ViewType } from "src/services/obsidian/extension-view";
 
 @singleton()
 export class ViewHelper {
@@ -51,17 +51,17 @@ export class ViewHelper {
 				this.jumpInFile(lineItem.line.row, lineItem.line.col);
 			} else if (searchType === SearchType.IN_VAULT) {
 				const fileItem = selectedItem as FileItem;
-				const filetype = fileItem.fileType;
+				const viewType = fileItem.viewType;
 				if (currSubItemIndex !== NULL_NUMBER) {
 					const subItem = fileItem.subItems[currSubItemIndex];
-					if (filetype === FileType.PLAIN_TEXT) {
+					if (viewType === ViewType.MARKDOWN) {
 						await this.jumpInVaultAsync(
 							fileItem.path,
 							subItem.row,
 							subItem.col,
 						);
 					} else {
-						throw Error("unsupported filetype to jump");
+						throw Error("unsupported viewType to jump");
 					}
 				}
 			} else {

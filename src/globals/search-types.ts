@@ -1,5 +1,10 @@
 import type { SearchResult as MiniResult } from "minisearch";
-import { FileType, FileUtil } from "src/utils/file-util";
+import {
+	ExtensionView,
+	type ViewType,
+} from "src/services/obsidian/extension-view";
+import { FileUtil } from "src/utils/file-util";
+import { getInstance } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
 export type IndexedDocument = {
@@ -93,11 +98,12 @@ export class FileItem extends Item {
 	path: string;
 	queryTerms: string[];
 	matchedTerms: string[];
-	subItems: FileSubItem[]; // for plaintext filetype
+	subItems: FileSubItem[]; // for markdown viewType 
 	// TODO: impl this
-	previewContent: any; // for non-plaintext filetype
-	get fileType(): FileType {
-		return FileUtil.getFileType(this.path);
+	previewContent: any; // for non-markdown viewType
+	// TODO: store the view type rather than relying on obsidian api
+	get viewType(): ViewType {
+		return getInstance(ExtensionView).viewTypeByPath(this.path);
 	}
 	get basename() {
 		return FileUtil.getBasename(this.path);
@@ -145,6 +151,6 @@ export type Location = {
 };
 
 export type LocatableFile = Location & {
-	type: FileType;
+	viewType: ViewType;
 	path: string;
 };
