@@ -7,7 +7,7 @@ import { singleton } from "tsyringe";
 // inspired by https://github.com/MeepTech/obsidian-custom-file-extensions-plugin
 
 @singleton()
-export class ExtensionView {
+export class ViewRegistry {
 	private readonly markdownExtensions = ["md", "txt"];
 	private readonly pdfExtensions = ["pdf"];
 	private readonly canvasExtensions = ["canvas"];
@@ -25,6 +25,7 @@ export class ExtensionView {
 		this.fillMap(this.audioExtensions, ViewType.AUDIO);
 		this.fillMap(this.videoExtensions, ViewType.VIDEO);
 		// register additional extensions with existing obsidian ViewType
+		// so that users can open files in the obsidian with these extensions
 		// see all viewTypes by (getInstance(App) as any).viewRegistry.viewByType
 		try {
 			this.plugin.registerExtensions(["txt"], ViewType.MARKDOWN);

@@ -1,8 +1,8 @@
 import type { SearchResult as MiniResult } from "minisearch";
 import {
-	ExtensionView,
+	ViewRegistry,
 	type ViewType,
-} from "src/services/obsidian/extension-view";
+} from "src/services/obsidian/view-registry";
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
@@ -103,7 +103,7 @@ export class FileItem extends Item {
 	previewContent: any; // for non-markdown viewType
 	// TODO: store the view type rather than relying on obsidian api
 	get viewType(): ViewType {
-		return getInstance(ExtensionView).viewTypeByPath(this.path);
+		return getInstance(ViewRegistry).viewTypeByPath(this.path);
 	}
 	get basename() {
 		return FileUtil.getBasename(this.path);

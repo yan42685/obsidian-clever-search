@@ -19,7 +19,7 @@
 	import { debounce } from "throttle-debounce";
 	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
-	import { ViewType } from "src/services/obsidian/extension-view";
+	import { ViewType } from "src/services/obsidian/view-registry";
 
 	const searchService: SearchService = getInstance(SearchService);
 	const viewHelper = getInstance(ViewHelper);

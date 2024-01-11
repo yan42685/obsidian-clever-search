@@ -5,9 +5,9 @@ import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
 import { getInstance } from "../../utils/my-lib";
-import { ExtensionView } from "./extension-view";
 import { SettingManager } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
+import { ViewRegistry } from "./view-registry";
 
 @singleton()
 export class PluginManager {
@@ -15,7 +15,7 @@ export class PluginManager {
 	async onload() {
 		await getInstance(SettingManager).initAsync();
 		const setting = getInstance(OuterSetting);
-		getInstance(ExtensionView).init();
+		getInstance(ViewRegistry).init();
 
 		await getInstance(AssetsProvider).initAsync();
 		if (setting.enableChinesePatch) {

@@ -4,18 +4,18 @@ import { NULL_NUMBER } from "src/globals/constants";
 import { ObsidianCommandEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
 import {
-    FileItem,
-    FileSubItem,
-    Item,
-    LineItem,
-    SearchType,
+	FileItem,
+	FileSubItem,
+	Item,
+	LineItem,
+	SearchType,
 } from "src/globals/search-types";
 import { PrivateApi } from "src/services/obsidian/private-api";
+import { ViewType } from "src/services/obsidian/view-registry";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { SearchModal } from "./search-modal";
-import { ViewType } from "src/services/obsidian/extension-view";
 
 @singleton()
 export class ViewHelper {

@@ -13,17 +13,17 @@ import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../../utils/file-util";
-import { ExtensionView, ViewType } from "../extension-view";
 import { PrivateApi } from "../private-api";
+import { ViewRegistry, ViewType } from "../view-registry";
 
 @singleton()
 export class DataProvider {
 	private readonly vault = getInstance(Vault);
 	private readonly app = getInstance(App);
 	private readonly supportedExtensions =
-		getInstance(ExtensionView).supportedExtensions();
+		getInstance(ViewRegistry).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
-	private extensionView = getInstance(ExtensionView);
+	private viewRegistry = getInstance(ViewRegistry);
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
 	private static readonly contentIndexableViewTypes = new Set([
@@ -38,7 +38,7 @@ export class DataProvider {
 				if (this.isContentIndexable(file)) {
 					const metaData = this.app.metadataCache.getFileCache(file);
 					if (
-						this.extensionView.viewTypeByPath(file.path) ===
+						this.viewRegistry.viewTypeByPath(file.path) ===
 						ViewType.MARKDOWN
 					) {
 						return {
@@ -107,7 +107,7 @@ export class DataProvider {
 			typeof fileOrPath === "string"
 				? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
 				: fileOrPath;
-		if (this.extensionView.viewTypeByPath(file.path) === ViewType.MARKDOWN) {
+		if (this.viewRegistry.viewTypeByPath(file.path) === ViewType.MARKDOWN) {
 			return this.vault.cachedRead(file);
 		} else {
 			throw Error(
@@ -134,7 +134,7 @@ export class DataProvider {
 
 	private isContentIndexable(file: TFile): boolean {
 		return DataProvider.contentIndexableViewTypes.has(
-			this.extensionView.viewTypeByPath(file.path)
+			this.viewRegistry.viewTypeByPath(file.path)
 		);
 	}
 }
