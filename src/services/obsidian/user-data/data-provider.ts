@@ -13,7 +13,7 @@ import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileType, FileUtil } from "../../../utils/file-util";
-import { ExtensionRegistry } from "../extension-registry";
+import { ExtensionView } from "../extension-view";
 import { PrivateApi } from "../private-api";
 
 @singleton()
@@ -21,7 +21,7 @@ export class DataProvider {
 	private readonly vault = getInstance(Vault);
 	private readonly app = getInstance(App);
 	private readonly supportedExtensions =
-		getInstance(ExtensionRegistry).supportedExtensions();
+		getInstance(ExtensionView).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
