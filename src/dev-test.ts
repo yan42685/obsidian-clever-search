@@ -148,3 +148,4 @@ function testUFuzzy() {
 	logger.info(res[1]);
 	logger.info(res[2]);
 }
+
