@@ -1,6 +1,8 @@
 import Dexie from "dexie";
-import { App, Notice } from "obsidian";
+import { App } from "obsidian";
 import { PrivateApi } from "src/services/obsidian/private-api";
+import { MyNotice } from "src/services/obsidian/transformed-api";
+import { t } from "src/services/obsidian/translations/locale-helper";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
@@ -48,10 +50,10 @@ export class OmnisearchIntegration {
 		const omnisearch = this.app.plugins.plugins.omnisearch;
 		let isAvailable = true;
 		if (!omnisearch) {
-			new Notice("Omnisearch isn't installed");
+			new MyNotice(t("Omnisearch isn't installed"));
 			isAvailable = false;
 		} else if (!omnisearch._loaded) {
-			new Notice("Omnisearch is installed but not enabled");
+			new MyNotice(t("Omnisearch is installed but not enabled"));
 			isAvailable = false;
 		}
 		return isAvailable;

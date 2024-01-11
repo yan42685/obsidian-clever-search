@@ -1,6 +1,15 @@
 import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
 
 export default {
+    // notification
+	"Reindexing...": "重建索引中...",
+	"Indexing finished": "索引完成",
+	"files need to be indexed. Obsidian may freeze for a while":
+		"文件需要被索引, Obsidian 可能会卡顿一会儿",
+    "Omnisearch isn't installed": "未安装 Omnisearch",
+    "Omnisearch is installed but not enabled": "安装了 Omnisearch 但是没有启用",
+
+	// setting tab
     "Max items count": "最大候选项数",
 	"Max items count desc":
 		"虽然本插件可以搜索到成千上万个结果，但由于底层渲染器性能限制，不能即时渲染所有结果",

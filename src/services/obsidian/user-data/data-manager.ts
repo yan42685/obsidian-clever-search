@@ -17,6 +17,7 @@ import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { DataProvider } from "./data-provider";
 import { FileWatcher } from "./file-watcher";
+import { t } from "../translations/locale-helper";
 
 @singleton()
 export class DataManager {
@@ -74,11 +75,11 @@ export class DataManager {
 	}
 
 	async forceRefreshAll() {
-		const prevNotice = new MyNotice("Reindexing...");
+		const prevNotice = new MyNotice(t("Reindexing..."));
 		this.shouldForceRefresh = true;
 		await this.initAsync();
 		prevNotice.hide();
-		new MyNotice("Indexing finished", 5000);
+		new MyNotice(t("Indexing finished"), 5000);
 		this.shouldForceRefresh = false;
 	}
 
@@ -117,7 +118,7 @@ export class DataManager {
 			if (size > 2000) {
 				const sizeText = (size / 1024).toFixed(2) + " MB";
 				new MyNotice(
-					`${sizeText} files needs to be indexed. Obsidian may freeze for a while`,
+					`${sizeText} ${t("files need to be indexed. Obsidian may freeze for a while")}`,
 					7000,
 				);
 			}

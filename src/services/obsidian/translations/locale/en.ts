@@ -1,6 +1,15 @@
 import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
 
 export default {
+	// notification
+	"Reindexing...": "Reindexing...",
+	"Indexing finished": "Indexing finished",
+	"files need to be indexed. Obsidian may freeze for a while":
+		"files need to be indexed. Obsidian may freeze for a while",
+	"Omnisearch isn't installed": "Omnisearch isn't installed",
+	"Omnisearch is installed but not enabled":
+		"Omnisearch is installed but not enabled",
+
 	// setting tab
 	"Max items count": "Max items count",
 	"Max items count desc":
@@ -17,8 +26,8 @@ export default {
 	"Support the Project": "Support the Project",
 	"Support the Project desc":
 		"Enjoying this plugin? Show your support with a star on GitHub!",
-    "Visit GitHub": "Visit GitHub",
+	"Visit GitHub": "Visit GitHub",
 	"Reindex the vault": "Reindex the vault",
-    "Reindex": "Reindex",
+	Reindex: "Reindex",
 	"Log level": "Log level",
 };
