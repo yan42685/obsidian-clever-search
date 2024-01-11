@@ -9,11 +9,9 @@ import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
-import {
-	AssetsProvider,
-	stopWordsEnTargetUrl,
-} from "src/utils/web/assets-provider";
+import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
+import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 
 @singleton()
@@ -82,10 +80,8 @@ class GeneralTab extends PluginSettingTab {
 		// 	);
 
 		new Setting(containerEl)
-			.setName("Max item results")
-			.setDesc(
-				"Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once",
-			)
+			.setName(t("Max items count"))
+			.setDesc(t("Max items count desc"))
 			.addSlider((text) =>
 				text
 					.setLimits(1, 300, 1)
@@ -98,10 +94,8 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("English word blacklist")
-			.setDesc(
-				`Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
-			)
+			.setName(t("English word blacklist"))
+			.setDesc(t("English word blacklist desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsEn)
@@ -112,8 +106,8 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Chinese Patch")
-			.setDesc("Better search result for Chinese")
+			.setName(t("Chinese patch"))
+			.setDesc(t("Chinese patch desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableChinesePatch)
@@ -129,10 +123,8 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Chinese word blacklist")
-			.setDesc(
-				`Activates only if the Chinese Patch is enabled. This excludes some meaningless Chinese words like "的", "所以", "尽管" listed in 'stop-words-zh.txt', improving search efficiency and speed. More details are listed in 'English word blacklist' option`,
-			)
+			.setName(t("Chinese word blacklist"))
+			.setDesc(t("Chinese word blacklist desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsZh)
@@ -147,7 +139,7 @@ class GeneralTab extends PluginSettingTab {
 
 		const devSettingTitle = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-title",
-			text: "For Development",
+			text: t("For Development"),
 		});
 
 		// collapse by default
@@ -176,7 +168,7 @@ class GeneralTab extends PluginSettingTab {
 		};
 
 		new Setting(devSettingContent)
-			.setName("Collapse development setting by default")
+			.setName(t("Collapse development setting by default"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.ui.collapseDevSettingByDefault)
@@ -186,12 +178,10 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(devSettingContent)
-			.setName("Support the Project")
-			.setDesc(
-				"Enjoying this plugin? Show your support with a star on GitHub!",
-			)
+			.setName(t("Support the Project"))
+			.setDesc(t("Support the Project desc"))
 			.addButton((button) => {
-				button.setButtonText("Visit GitHub").onClick(() => {
+				button.setButtonText(t("Visit GitHub")).onClick(() => {
 					window.open(
 						"https://github.com/yan42685/obsidian-clever-search",
 						"_blank",
@@ -246,18 +236,15 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(devSettingContent)
-			.setName("Force Refresh Index")
-			.setDesc("Reindex your vault")
+			.setName(t("Reindex the vault"))
 			.addButton((button) => {
-				button.setButtonText("Force Refresh").onClick(async () => {
+				button.setButtonText(t("Reindex")).onClick(async () => {
 					await getInstance(DataManager).forceRefreshAll();
 				});
 			});
 
 		new Setting(devSettingContent)
-			.setName("Log level")
-
-			.setDesc("Select the log level.")
+			.setName(t("Log level"))
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOptions({
