@@ -414,6 +414,7 @@ class LinesMatcher {
 			termCounts.clear();
 			let score = 0;
 
+			// TODO: perf: scan the line only once if necessary
 			for (const regex of globalRegexes) {
 				regex.lastIndex = 0; // Reset lastIndex for global regex
 				let match;
@@ -422,8 +423,8 @@ class LinesMatcher {
 					const count = (termCounts.get(term) || 0) + 1;
 					termCounts.set(term, count);
 
-					// add score: 10 * term.length for the first match, 0.1 for subsequent matches
-					score += count === 1 ? 10 * term.length : 0.1;
+					// add score: term.length for the first match, 0.01 for subsequent matches
+					score += count === 1 ? term.length : 0.01;
 				}
 			}
 
@@ -433,7 +434,7 @@ class LinesMatcher {
 			}
 		}
 
-		// Sort and return the topK lines based on score
+		// sort and return the topK lines based on score
 		return Array.from(candidateLineMap.entries())
 			.sort((a, b) => b[1] - a[1])
 			.slice(0, topK)
