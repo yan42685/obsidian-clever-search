@@ -8,7 +8,7 @@ import { singleton } from "tsyringe";
 
 @singleton()
 export class ViewRegistry {
-	private readonly markdownExtensions = ["md", "txt"];
+	private readonly markdownExtensions = ["md", "txt", "html"];
 	private readonly pdfExtensions = ["pdf"];
 	private readonly canvasExtensions = ["canvas"];
 	private readonly imageExtensions = ["jpg", "jpeg", "png", "gif", "svg"];

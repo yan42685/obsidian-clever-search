@@ -55,11 +55,25 @@ export class ViewHelper {
 				if (currSubItemIndex !== NULL_NUMBER) {
 					const subItem = fileItem.subItems[currSubItemIndex];
 					if (viewType === ViewType.MARKDOWN) {
-						await this.jumpInVaultAsync(
-							fileItem.path,
-							subItem.row,
-							subItem.col,
-						);
+						if (fileItem.extension === "html") {
+							const absolutePath =
+								this.privateApi.getAbsolutePath(fileItem.path);
+							const matchedText = subItem.text.replace(
+								/<mark>|<\/mark>/g,
+								"",
+							);
+							logger.info(matchedText);
+							window.open(
+								`file:///${absolutePath}#:~:text=${matchedText}`,
+								"",
+							);
+						} else {
+							await this.jumpInVaultAsync(
+								fileItem.path,
+								subItem.row,
+								subItem.col,
+							);
+						}
 					} else {
 						throw Error("unsupported viewType to jump");
 					}
@@ -114,7 +128,7 @@ export class ViewHelper {
 			// this.scrollIntoViewForNewTab(row, col);
 
 			// TODO: sometimes it will fail to scroll the view, but the cursor is set correctly,
-			// maybe because of the long time it takes to open the file; A possible solution is to read the file size via obsidian api, 
+			// maybe because of the long time it takes to open the file; A possible solution is to read the file size via obsidian api,
 			// if it's too large, then settimeout to scroll (the user experience will be worser than scrolling instantly, but it seems to be the only solution for that)
 			this.scrollIntoViewForExistingView(row, col);
 			// setTimeout(() => {
@@ -154,7 +168,7 @@ export class ViewHelper {
 
 	/**
 	 * @deprecated 0.1.x won't work for lengthy line, like over 500 words
-	 *	
+	 *
 	 * This function is essential to distinguish from `scrollIntoViewForExistingView`.
 	 * Although it does not center the view as precisely as the previous function,
 	 * it is necessary because `scrollIntoViewForExistingView` has bugs when applied to new tabs,
@@ -169,5 +183,9 @@ export class ViewHelper {
 				to: { line: row + 10, ch: 0 },
 			});
 		}
+	}
+
+	private parseSubItemOriginText(highlightedText: string): string {
+		return "a";
 	}
 }

@@ -5,6 +5,7 @@ import {
 	TFile,
 	TFolder,
 	Vault,
+	htmlToMarkdown,
 	parseFrontMatterAliases,
 	type CachedMetadata,
 } from "obsidian";
@@ -27,7 +28,7 @@ export class DataProvider {
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
 	private static readonly contentIndexableViewTypes = new Set([
-		ViewType.MARKDOWN
+		ViewType.MARKDOWN,
 	]);
 
 	async generateAllIndexedDocuments(
@@ -108,7 +109,11 @@ export class DataProvider {
 				? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
 				: fileOrPath;
 		if (this.viewRegistry.viewTypeByPath(file.path) === ViewType.MARKDOWN) {
-			return this.vault.cachedRead(file);
+			const plainText = await this.vault.cachedRead(file);
+			// return plainText;
+			return file.extension === "html"
+				? htmlToMarkdown(plainText)
+				: plainText;
 		} else {
 			throw Error(
 				`unsupported file extension as plain text to read, path: ${file.path}`,
@@ -134,7 +139,7 @@ export class DataProvider {
 
 	private isContentIndexable(file: TFile): boolean {
 		return DataProvider.contentIndexableViewTypes.has(
-			this.viewRegistry.viewTypeByPath(file.path)
+			this.viewRegistry.viewTypeByPath(file.path),
 		);
 	}
 }

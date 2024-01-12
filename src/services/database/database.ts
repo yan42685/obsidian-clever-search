@@ -10,18 +10,21 @@ import { PrivateApi } from "../obsidian/private-api";
 @singleton()
 export class Database {
 	readonly db = getInstance(DexieWrapper);
+	async deleteMinisearchData() {
+		this.db.minisearch.clear();
+	}
 
 	// it may finished some time later even if using await
-	async setMiniSearchData(data: AsPlainObject) {
+	async setMiniSearchData(strData: string) {
 		this.db.transaction("rw", this.db.minisearch, async () => {
 			await this.db.minisearch.clear();
-			await this.db.minisearch.add({ data: data });
+			await this.db.minisearch.add({ data: strData });
 			logger.trace("minisearch data saved");
 		});
 	}
 
 	@monitorDecorator
-	async getMiniSearchData(): Promise<AsPlainObject | null> {
+	async getMiniSearchData(): Promise<string | null> {
 		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
@@ -76,7 +79,7 @@ class DexieWrapper extends Dexie {
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
-	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
+	minisearch!: Dexie.Table<{ id?: number; data: string }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	documentRefs!: Dexie.Table<DocumentRef, number>;
 

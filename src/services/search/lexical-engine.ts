@@ -1,5 +1,5 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
-import type { AsPlainObject, Options, SearchOptions } from "minisearch";
+import type { Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
 import type {
 	DocumentFields,
@@ -32,7 +32,7 @@ export class LexicalEngine {
 	private _isReady = false;
 
 	@monitorDecorator
-	async reIndexAll(data: IndexedDocument[] | AsPlainObject) {
+	async reIndexAll(data: IndexedDocument[] | string) {
 		this._isReady = false;
 		this.filesIndex.removeAll();
 		// this.linesIndex.removeAll();
@@ -44,10 +44,15 @@ export class LexicalEngine {
 		} else {
 			logger.trace("Loading indexed data...");
 			// Process data with type: AsPlainObject, faster
-			this.filesIndex = MiniSearch.loadJS(
-				data,
-				this.option.fileIndexOption,
-			);
+			try {
+				this.filesIndex = MiniSearch.loadJSON(
+					data,
+					this.option.fileIndexOption,
+				);
+			} catch (e) {
+				alert("Lexical engine might have been updated, a reload is required for obsidian");
+				throw e;
+			}
 		}
 		this._isReady = true;
 		logger.trace(this.filesIndex);

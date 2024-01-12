@@ -1,6 +1,7 @@
-import { App, type TFile } from "obsidian";
+import { App, FileSystemAdapter, type TFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
+import { pathUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
@@ -9,8 +10,17 @@ import { singleton } from "tsyringe";
  */
 @singleton()
 export class PrivateApi {
-	app = getInstance(App) as any;
-	plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	private app = getInstance(App) as any;
+	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	private obsidianFs = this.app.vault.adapter as FileSystemAdapter;
+
+
+	getVaultAbsolutePath(): string {
+		return this.obsidianFs.getBasePath().replace(/\\/g, "/") + "/";
+	}
+	getAbsolutePath(relativePath: string) {
+		return pathUtil.join(this.getVaultAbsolutePath(), relativePath) ;
+	}
 	getFileBacklinks(file: TFile) {
 		// @ts-ignore
 		this.app.metadataCache.getBacklinksForFile(file);

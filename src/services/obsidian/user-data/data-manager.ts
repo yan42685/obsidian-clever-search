@@ -1,4 +1,3 @@
-import type { AsPlainObject } from "minisearch";
 import type { TAbstractFile, TFile } from "obsidian";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
@@ -15,9 +14,9 @@ import {
 } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
+import { t } from "../translations/locale-helper";
 import { DataProvider } from "./data-provider";
 import { FileWatcher } from "./file-watcher";
-import { t } from "../translations/locale-helper";
 
 @singleton()
 export class DataManager {
@@ -62,7 +61,8 @@ export class DataManager {
 
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
-			this.lexicalEngine.filesIndex.toJSON(),
+			JSON.stringify(this.lexicalEngine.filesIndex)
+			// this.lexicalEngine.filesIndex.toJSON(),
 		);
 	}
 
@@ -98,13 +98,14 @@ export class DataManager {
 
 	private async initLexicalEngines() {
 		logger.trace("Init lexical engine...");
-		let prevData: AsPlainObject | null;
+		let prevData: string | null;
 		if (!devOption.loadIndexFromDatabase || this.shouldForceRefresh) {
 			prevData = null;
 		} else {
-			prevData = await this.database.getMiniSearchData();
+			prevData= await this.database.getMiniSearchData();
 		}
 		if (prevData) {
+			this.database.deleteMinisearchData(); // for minisearch update
 			logger.trace("Previous minisearch data is found.");
 			await this.lexicalEngine.reIndexAll(prevData);
 		} else {
