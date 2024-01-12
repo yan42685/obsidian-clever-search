@@ -1,6 +1,20 @@
 # Change Log
 
-## 0.1.x
+## 0.1.1
+
+### New
+
+- Support for txt, html (rely on `Surfing` plugin)
+- Customizable filetypes to be indexed
+
+### Fixed
+
+- Performance issue related with dexie
+- Conflicts with Excalidraw
+- Excessively frequent index updates
+
+
+## 0.1.0
 
 ### New
 

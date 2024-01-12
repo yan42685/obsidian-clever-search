@@ -45,6 +45,7 @@ export class LexicalEngine {
 			logger.trace("Loading indexed data...");
 			// Process data with type: AsPlainObject, faster
 			try {
+				// slower than loadJS, but more stable, maybe I should test the perf difference someday
 				this.filesIndex = MiniSearch.loadJSON(
 					data,
 					this.option.fileIndexOption,

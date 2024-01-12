@@ -1,5 +1,4 @@
 import Dexie from "dexie";
-import type { AsPlainObject } from "minisearch";
 import type { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
@@ -17,6 +16,10 @@ export class Database {
 	// it may finished some time later even if using await
 	async setMiniSearchData(strData: string) {
 		this.db.transaction("rw", this.db.minisearch, async () => {
+			// Warning: The clear() here is just a marker for caution to avoid data duplication.
+			// Ideally, clear() should be executed at an earlier stage.
+			// Placing clear() and add() together, especially with large data sets, 
+			// may lead to conflicts and cause Obsidian to crash. It is an issue related to Dexie or IndexedDB
 			await this.db.minisearch.clear();
 			await this.db.minisearch.add({ data: strData });
 			logger.trace("minisearch data saved");
