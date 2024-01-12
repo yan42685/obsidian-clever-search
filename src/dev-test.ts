@@ -1,4 +1,12 @@
-import { App } from "obsidian";
+import {
+	App,
+	Component,
+	MarkdownRenderer,
+	Modal,
+	TFile,
+	Vault,
+	htmlToMarkdown
+} from "obsidian";
 // import { encoding_for_model } from "tiktoken"
 import uFuzzy from "@leeoniya/ufuzzy";
 import { OuterSetting } from "./globals/plugin-setting";
@@ -6,8 +14,9 @@ import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
-import { getInstance } from "./utils/my-lib";
+import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
+import { RenderMarkdownModal } from "./main";
 
 export async function devTest() {
 	const settings = getInstance(OuterSetting);
@@ -39,7 +48,8 @@ export async function devTest() {
 
 	// testTikToken();
 	// monitorExecution(() => testTokenizer());
-	testUFuzzy();
+	// testUFuzzy();
+	await testParseHtml();
 }
 
 function getApp() {
@@ -130,7 +140,14 @@ async function testTokenizer() {
 }
 
 function testUFuzzy() {
-	const haystack = ["foo", "bar", "cowbaz", "distant", "disney", "这里有一句黑色的机甲"];
+	const haystack = [
+		"foo",
+		"bar",
+		"cowbaz",
+		"distant",
+		"disney",
+		"这里有一句黑色的机甲",
+	];
 
 	const needle = "黑色 机甲";
 	const opts = {
@@ -149,3 +166,18 @@ function testUFuzzy() {
 	logger.info(res[2]);
 }
 
+async function testParseHtml() {
+	const vault = getInstance(Vault);
+
+	const file: TFile = vault
+		.getFiles()
+		.filter((f) => f.basename === "CodeMirror Reference Manual")[0];
+	monitorExecution(async () => await parseHtml(file));
+}
+
+async function parseHtml(file: TFile) {
+	const htmlText = await getInstance(Vault).cachedRead(file);
+	const mdText = htmlToMarkdown(htmlText);
+	mdText.split("\n");
+	new RenderMarkdownModal(getInstance(App), mdText).open();
+}

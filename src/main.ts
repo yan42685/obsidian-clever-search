@@ -1,7 +1,9 @@
 import {
 	App,
+	Component,
 	Editor,
 	HoverPopover,
+	MarkdownRenderer,
 	MarkdownView,
 	Modal,
 	Notice,
@@ -202,5 +204,33 @@ class RenderHTMLModal extends Modal {
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
+	}
+}
+
+export class RenderMarkdownModal extends Modal {
+	mdContent: string;
+
+	constructor(app: App, mdContent: string) {
+		super(app);
+		this.mdContent = mdContent;
+	}
+
+	onOpen() {
+		this.containerEl.empty();
+		this.containerEl.style.display = "block";
+		this.containerEl.style.overflow = "auto";
+		this.containerEl.style.backgroundColor = "black";
+		MarkdownRenderer.render(
+			getInstance(App),
+			this.mdContent,
+			this.containerEl,
+			"",
+			new Component(),
+		);
+	}
+
+	onClose() {
+		// const { contentEl } = this;
+		// contentEl.empty();
 	}
 }

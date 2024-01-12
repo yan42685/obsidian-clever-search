@@ -42,6 +42,7 @@
 	},
 	"dependencies": {
 		"@leeoniya/ufuzzy": "^1.0.14",
+		"@xenova/transformers": "^2.14.0",
 		"dexie": "^3.2.4",
 		"franc-min": "^6.1.0",
 		"fzf": "^0.5.2",
