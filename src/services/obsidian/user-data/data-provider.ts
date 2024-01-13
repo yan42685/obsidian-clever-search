@@ -95,6 +95,7 @@ export class DataProvider {
 		// TODO: filter by extensions and paths
 		return (
 			this.supportedExtensions.has(FileUtil.getExtension(path)) &&
+			path.lastIndexOf("excalidraw.md") === -1 &&
 			this.privateApi.isNotExcludedPath(path)
 		);
 	}

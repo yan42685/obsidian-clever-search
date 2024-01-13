@@ -8,7 +8,8 @@ import { singleton } from "tsyringe";
 
 @singleton()
 export class ViewRegistry {
-	private readonly markdownExtensions = ["md", "txt", "html"];
+	// private readonly markdownExtensions = ["md", "txt", "html"];
+	private readonly markdownExtensions = ["md"];
 	private readonly pdfExtensions = ["pdf"];
 	private readonly canvasExtensions = ["canvas"];
 	private readonly imageExtensions = ["jpg", "jpeg", "png", "gif", "svg"];
@@ -28,7 +29,7 @@ export class ViewRegistry {
 		// so that users can open files in the obsidian with these extensions
 		// see all viewTypes by (getInstance(App) as any).viewRegistry.viewByType
 		try {
-			this.plugin.registerExtensions(["txt"], ViewType.MARKDOWN);
+			// this.plugin.registerExtensions(["txt"], ViewType.MARKDOWN);
 		} catch (e) {
 			// do nothing to suppress the error when using hot-reload for development which triggers the `plugin.onload()` multiple times
 		}
