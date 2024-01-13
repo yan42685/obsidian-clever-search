@@ -9,6 +9,7 @@ export default {
 	"Omnisearch isn't installed": "Omnisearch isn't installed",
 	"Omnisearch is installed but not enabled":
 		"Omnisearch is installed but not enabled",
+	"Database has been updated, a reindex is required": "Database has been updated, a reindex is required",
 
 	// setting tab
 	"Max items count": "Max items count",

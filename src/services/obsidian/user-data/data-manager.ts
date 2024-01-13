@@ -61,7 +61,7 @@ export class DataManager {
 
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
-			JSON.stringify(this.lexicalEngine.filesIndex)
+			JSON.stringify(this.lexicalEngine.filesIndex),
 			// this.lexicalEngine.filesIndex.toJSON(),
 		);
 	}
@@ -102,35 +102,46 @@ export class DataManager {
 		if (!devOption.loadIndexFromDatabase || this.shouldForceRefresh) {
 			prevData = null;
 		} else {
-			prevData= await this.database.getMiniSearchData();
+			prevData = await this.database.getMiniSearchData();
 		}
 		if (prevData) {
 			this.database.deleteMinisearchData(); // for minisearch update
 			logger.trace("Previous minisearch data is found.");
-			await this.lexicalEngine.reIndexAll(prevData);
-		} else {
-			logger.trace("Indexing the whole vault...");
-			const filesToIndex = this.dataProvider.allFilesToBeIndexed();
-			let size = 0;
-			for (const file of filesToIndex) {
-				size += file.stat.size;
-			}
-			size /= 1024;
-			if (size > 2000) {
-				const sizeText = (size / 1024).toFixed(2) + " MB";
+			const isSuccessful = await this.lexicalEngine.reIndexAll(prevData);
+			if (!isSuccessful) {
 				new MyNotice(
-					`${sizeText} ${t("files need to be indexed. Obsidian may freeze for a while")}`,
+					t("Database has been updated, a reindex is required"),
 					7000,
 				);
+				await this.reindexLexicalEngineWithCurrFiles();
 			}
-			const documents =
-				await this.dataProvider.generateAllIndexedDocuments(
-					filesToIndex,
-				);
-			await this.lexicalEngine.reIndexAll(documents);
-			this.isLexicalEngineUpToDate = true;
+		} else {
+			await this.reindexLexicalEngineWithCurrFiles();
 		}
 		logger.trace("Lexical engine is ready");
+	}
+
+	private async reindexLexicalEngineWithCurrFiles() {
+		logger.trace("Indexing the whole vault...");
+		const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+		let size = 0;
+		for (const file of filesToIndex) {
+			size += file.stat.size;
+		}
+		size /= 1024;
+		if (size > 2000) {
+			const sizeText = (size / 1024).toFixed(2) + " MB";
+			new MyNotice(
+				`${sizeText} ${t(
+					"files need to be indexed. Obsidian may freeze for a while",
+				)}`,
+				7000,
+			);
+		}
+		const documents =
+			await this.dataProvider.generateAllIndexedDocuments(filesToIndex);
+		await this.lexicalEngine.reIndexAll(documents);
+		this.isLexicalEngineUpToDate = true;
 	}
 
 	// use case: users have changed files without obsidian open. so we need to update the index and refs

@@ -8,6 +8,7 @@ export default {
 		"文件需要被索引, Obsidian 可能会卡顿一会儿",
     "Omnisearch isn't installed": "未安装 Omnisearch",
     "Omnisearch is installed but not enabled": "安装了 Omnisearch 但是没有启用",
+	"Database has been updated, a reindex is required": "数据库已更新，需要重建索引",
 
 	// setting tab
     "Max items count": "最大候选项数",

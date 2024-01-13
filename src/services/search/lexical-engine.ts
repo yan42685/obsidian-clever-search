@@ -32,7 +32,7 @@ export class LexicalEngine {
 	private _isReady = false;
 
 	@monitorDecorator
-	async reIndexAll(data: IndexedDocument[] | string) {
+	async reIndexAll(data: IndexedDocument[] | string): Promise<boolean> {
 		this._isReady = false;
 		this.filesIndex.removeAll();
 		// this.linesIndex.removeAll();
@@ -51,12 +51,14 @@ export class LexicalEngine {
 					this.option.fileIndexOption,
 				);
 			} catch (e) {
-				alert("Lexical engine might have been updated, a reload is required for obsidian");
-				throw e;
+				// alert("Lexical engine might have been updated, the vault need to be reindexed\n(clever-search)");
+				logger.error(e);
+				return false;
 			}
 		}
 		this._isReady = true;
 		logger.trace(this.filesIndex);
+		return true;
 	}
 
 	// NOTE: need be checked before opening a search-in-vault modal to avoid error when search during indexing
