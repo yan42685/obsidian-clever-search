@@ -25,6 +25,9 @@ export class DataProvider {
 		getInstance(ViewRegistry).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
 	private viewRegistry = getInstance(ViewRegistry);
+	private readonly MARKDOWN_LINK_REGEX = /\[([^[\]]+)\]\([^()]*\)/g;
+	private readonly MARKDOWN_ASTERISK_REGEX = /\*\*(.*?)\*\*/g;
+	private readonly MARKDOWN_BACKTICK_REGEX = /`(.*?)`/g;
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
 	private static readonly contentIndexableViewTypes = new Set([
@@ -112,7 +115,7 @@ export class DataProvider {
 			const plainText = await this.vault.cachedRead(file);
 			// return plainText;
 			return file.extension === "html"
-				? htmlToMarkdown(plainText)
+				? this.extractHtmlContent(plainText)
 				: plainText;
 		} else {
 			throw Error(
@@ -141,5 +144,21 @@ export class DataProvider {
 		return DataProvider.contentIndexableViewTypes.has(
 			this.viewRegistry.viewTypeByPath(file.path),
 		);
+	}
+
+	private extractHtmlContent(htmlText: string) {
+		// use a replacement function to determine how to replace the matched content
+		let cleanMarkdown = htmlToMarkdown(htmlText);
+		// 使用替换函数来确定如何替换匹配到的内容
+		cleanMarkdown = cleanMarkdown.replace(this.MARKDOWN_LINK_REGEX, "$1");
+		cleanMarkdown = cleanMarkdown.replace(
+			this.MARKDOWN_ASTERISK_REGEX,
+			"$1",
+		);
+		cleanMarkdown = cleanMarkdown.replace(
+			this.MARKDOWN_BACKTICK_REGEX,
+			"$1",
+		);
+		return cleanMarkdown;
 	}
 }

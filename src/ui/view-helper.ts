@@ -62,7 +62,7 @@ export class ViewHelper {
 								/<mark>|<\/mark>/g,
 								"",
 							);
-							logger.info(matchedText);
+							// logger.info(matchedText);
 							window.open(
 								`file:///${absolutePath}#:~:text=${matchedText}`,
 								"",
