@@ -118,6 +118,16 @@ class GeneralTab extends PluginSettingTab {
 		);
 
 		new Setting(containerEl)
+			.setName(t("Customize extensions"))
+			.addButton((b) =>
+				b
+					.setButtonText(t("Manage"))
+					.onClick(() =>
+						new CustomExtensionModal(getInstance(App)).open(),
+					),
+			);
+
+		new Setting(containerEl)
 			.setName(t("English word blacklist"))
 			.setDesc(t("English word blacklist desc"))
 			.addToggle((toggle) =>
@@ -310,8 +320,9 @@ class ExcludePathModal extends Modal {
 	}
 
 	onOpen() {
-		const contentEl = this.contentEl;
+		this.modalEl.style.width= "48vw";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
+		const contentEl = this.contentEl;
 		new Setting(contentEl)
 			.setName(t("Follow Obsidian Excluded Files"))
 			.addToggle((t) =>
@@ -386,5 +397,45 @@ class ExcludePathModal extends Modal {
 				this.renderExcludedList(this.excludesEl);
 			}
 		}
+	}
+}
+
+class CustomExtensionModal extends Modal {
+	private setting = getInstance(OuterSetting);
+	private settingManager = getInstance(SettingManager);
+	onOpen(): void {
+		this.modalEl.style.width= "60vw";
+		this.modalEl.querySelector(".modal-close-button")?.remove();
+		const contentEl = this.contentEl;
+
+		new Setting(contentEl).setDesc(
+			t("extensionModal.desc")
+		);
+		new Setting(contentEl)
+			.setName(t("extensionModal.plaintextName"))
+			.setDesc(
+				t("extensionModal.plaintextDesc")
+			)
+			.addTextArea((textArea) => {
+				textArea.inputEl.style.minWidth = "20vw";
+				textArea.inputEl.style.minHeight = "20vh";
+				textArea.setValue(
+					this.setting.customExtensions.plaintext.join(" "),
+				);
+
+				textArea.onChange((newValue) => {
+					const extensions = newValue
+						.split(/[\s\n]+/)
+						.map(ext => ext.startsWith('.') ? ext.substring(1) : ext)
+						.filter((ext) => ext.length > 0)
+
+					this.setting.customExtensions.plaintext = extensions;
+					// TODO: uncomment this line
+					// this.settingManager.shouldReload = true;
+					logger.info(this.setting.customExtensions.plaintext);
+				});
+			});
+
+		new Setting(contentEl).setName("Image").setDesc("Todo");
 	}
 }

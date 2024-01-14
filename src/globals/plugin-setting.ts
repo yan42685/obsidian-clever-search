@@ -3,7 +3,9 @@ import { isDevEnvironment } from "src/utils/my-lib";
 
 // exposed to users
 export class OuterSetting {
-	
+	customExtensions: {
+		plaintext: string[];
+	};
 	followObsidianExcludedFiles: boolean;
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
@@ -18,6 +20,7 @@ export class OuterSetting {
 const isChineseUser = window.localStorage.getItem("language") === "zh";
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
+	customExtensions: { plaintext: ["md"] },
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
@@ -37,7 +40,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		openInNewPane: true,
 		maxItemResults: 30,
 		showedExtension: "except md",
-		collapseDevSettingByDefault: isDevEnvironment ? false : true
+		collapseDevSettingByDefault: isDevEnvironment ? false : true,
 	},
 };
 
@@ -60,16 +63,16 @@ export type UISetting = {
 // ========== transparent for users ==========
 type InnerSetting = {
 	search: {
-		fuzzyProportion: number,
-		minTermLengthForPrefixSearch: number
-		weightFilename: number,
-		weightFolder: number,
-		weightTagText: number,
-		weightHeading: number
-	// weightH1: number;
-	// weightH2: number;
-	// weightH3: number;
-	// weightH4: number;
+		fuzzyProportion: number;
+		minTermLengthForPrefixSearch: number;
+		weightFilename: number;
+		weightFolder: number;
+		weightTagText: number;
+		weightHeading: number;
+		// weightH1: number;
+		// weightH2: number;
+		// weightH3: number;
+		// weightH4: number;
 	};
 };
 
@@ -86,5 +89,4 @@ export const innerSetting: InnerSetting = {
 		// weightH3: 1.25,
 		// weightH4: 1.1,
 	},
-
 };

@@ -16,11 +16,18 @@ export default {
 	"Max items count": "Max items count",
 	"Max items count desc":
 		"Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once",
+	
+	"Customize extensions": "Customize extensions",
+	"extensionModal.desc":
+		"Customize the file extensions you would like to index. By default, file types not natively supported by Obsidian, such as 'txt', will be opened with an external program. To open these files within Obsidian, you may need to install plugins like 'obsidian-vscode-editor' or 'obsidian-custom-file-extension-plugin'.",
+	"extensionModal.plaintextName": "Plaintext",
+	"extensionModal.plaintextDesc":
+		"Please do not include binary file types like 'jpg', 'mp4', etc., here. Including them might cause indexing issues. Extensions should be separated by a space or a newline character.\nAdditionally, the indexing and searching of HTML files may be slower because they require conversion to clean Markdown format first. Furthermore, due to the extremely limited API, it seems impossible to automatically scroll to specific locations within HTML files.",
 	"Excluded files": "Excluded files",
-	"Manage": "Manage",
+	Manage: "Manage",
 	"Follow Obsidian Excluded Files": "Follow Obsidian Excluded Files",
 	"Enter path...": "Enter path...",
-	"Add": "Add",
+	Add: "Add",
 
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
