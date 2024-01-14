@@ -1,5 +1,5 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
-import type { Options, SearchOptions } from "minisearch";
+import type { AsPlainObject, Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
 import type {
 	DocumentFields,
@@ -32,7 +32,7 @@ export class LexicalEngine {
 	private _isReady = false;
 
 	@monitorDecorator
-	async reIndexAll(data: IndexedDocument[] | string): Promise<boolean> {
+	async reIndexAll(data: IndexedDocument[] | AsPlainObject): Promise<boolean> {
 		this._isReady = false;
 		this.filesIndex.removeAll();
 		// this.linesIndex.removeAll();
@@ -46,7 +46,7 @@ export class LexicalEngine {
 			// Process data with type: AsPlainObject, faster
 			try {
 				// slower than loadJS, but more stable, maybe I should test the perf difference someday
-				this.filesIndex = MiniSearch.loadJSON(
+				this.filesIndex = MiniSearch.loadJS(
 					data,
 					this.option.fileIndexOption,
 				);

@@ -1,8 +1,19 @@
 # Change Log
 
+## 0.1.3
+
+### New
+
+- Support arbitrary extensions for plaintext files
+- Path blacklist
+
+### Improved
+
+- Loading index around 3x faster
+
 ## 0.1.2
 
-### new
+### New
 
 - Automatically reindex the vault when the database have been updated
 
