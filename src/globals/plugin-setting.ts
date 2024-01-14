@@ -3,7 +3,8 @@ import { isDevEnvironment } from "src/utils/my-lib";
 
 // exposed to users
 export class OuterSetting {
-	excludedPaths: string[];
+	
+	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
 	enableStopWordsEn: boolean;
 	enableChinesePatch: boolean;

@@ -1,4 +1,11 @@
-import { App, Modal, PluginSettingTab, Setting, Vault } from "obsidian";
+import {
+	App,
+	Modal,
+	PluginSettingTab,
+	Setting,
+	TFolder,
+	Vault,
+} from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
 	DEFAULT_OUTER_SETTING,
@@ -11,6 +18,7 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
+import { CommonSuggester } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 
@@ -45,6 +53,8 @@ export class SettingManager {
 			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
 		);
+		// this step is necessary, or typeof this.setting.excludedPaths === object rather than Set
+		logger.info(this.setting.excludedPaths.toString());
 		logger.setLevel(this.setting.logLevel);
 	}
 
@@ -286,41 +296,42 @@ class GeneralTab extends PluginSettingTab {
 
 class FileFilterModal extends Modal {
 	private setting = getInstance(OuterSetting);
-	private excludedPaths: string[] = this.setting.excludedPaths;
+	private excludedPaths = this.setting.excludedPaths;
 	private allFolders = this.getAllFolders();
 
 	private excludesEl: HTMLElement;
-	private inputEl: HTMLInputElement; 
-	private suggestionsEl: HTMLElement; 
+	private inputEl: HTMLInputElement;
+	private suggester: CommonSuggester;
 
 	onOpen() {
-		const { contentEl } = this;
-		this.contentEl.empty();
-		contentEl.createEl("h2", { text: "Excluded Files" });
+		const contentEl = this.contentEl;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: "Excluded Paths" });
 		this.excludesEl = contentEl.createDiv("cs-excluded-paths");
-
-		this.suggestionsEl = contentEl.createDiv("suggestions-container");
 		this.renderExcludedList(this.excludesEl);
 
 		new Setting(contentEl)
-			.setName("Add filter")
 			.addText((text) => {
+				this.inputEl = text.inputEl;
 				text.setPlaceholder("Enter path...").onChange((value) => {
-					this.inputEl = text.inputEl;
-					// this.handleAutocomplete(value);
+					this.suggester.close();;
+					this.suggester.open()
 				});
 			})
 			.addButton((btn) => {
 				btn.setButtonText("Add").onClick(() => {
-					const filterValue = this.inputEl.value;
-					if (filterValue) {
-						if (!this.excludedPaths.includes(filterValue)) {
-							this.excludedPaths.push(filterValue);
-							this.renderExcludedList(this.excludesEl);
-						}
-					}
+					this.addPath(this.inputEl.value);
 				});
 			});
+
+		this.suggester = new CommonSuggester(
+			this.inputEl,
+			this.allFolders,
+			(v) => {
+				this.addPath(v);
+			},
+		);
+		this.suggester.open();
 	}
 
 	private renderExcludedList(listEl: HTMLElement) {
@@ -328,12 +339,15 @@ class FileFilterModal extends Modal {
 
 		this.excludedPaths.forEach((path, index) => {
 			const pathDiv = listEl.createDiv();
-			pathDiv.style.margin = "0.7em 0 0.7em 0";
+			pathDiv.style.overflow = "auto";
 			pathDiv.style.display = "flex";
+			pathDiv.style.margin = "0.7em 0 0.7em 0";
 			pathDiv.style.justifyContent = "space-between";
 
 			const pathText = pathDiv.createSpan();
 			pathText.setText(path);
+			pathText.style.width = "90%";
+			pathText.style.overflow = "auto";
 
 			const span = pathDiv.createSpan();
 			span.setText("✕");
@@ -345,12 +359,22 @@ class FileFilterModal extends Modal {
 		});
 	}
 
-	private getAllFolders(): string[] {
-		const folderSet = new Set(
+	private getAllFolders(): Set<string> {
+		return new Set(
 			getInstance(Vault)
-				.getFiles()
-				.map((f) => f.parent?.path || ""),
+				// all files and folders
+				.getAllLoadedFiles()
+				.filter((f) => f instanceof TFolder)
+				.map((f) => f.path),
 		);
-		return [...folderSet];
 	}
+
+	private addPath(inputPath: string) {
+		if (inputPath && !this.excludedPaths.includes(inputPath)) {
+			this.excludedPaths.push(inputPath);
+			this.renderExcludedList(this.excludesEl);
+		}
+	}
+
+	private handleAutoSuggestion() {}
 }
