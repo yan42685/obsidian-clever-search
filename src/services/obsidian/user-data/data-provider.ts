@@ -9,6 +9,7 @@ import {
 	parseFrontMatterAliases,
 	type CachedMetadata,
 } from "obsidian";
+import { OuterSetting } from "src/globals/plugin-setting";
 import type { IndexedDocument } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
@@ -21,6 +22,8 @@ import { ViewRegistry, ViewType } from "../view-registry";
 export class DataProvider {
 	private readonly vault = getInstance(Vault);
 	private readonly app = getInstance(App);
+	private readonly setting = getInstance(OuterSetting);
+	private readonly customExcludedPaths: string[] = this.setting.excludedPaths; // I'd like to use Set() but it's not easy to tackle with deserialization
 	private readonly supportedExtensions =
 		getInstance(ViewRegistry).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
@@ -94,7 +97,10 @@ export class DataProvider {
 		return (
 			this.supportedExtensions.has(FileUtil.getExtension(path)) &&
 			path.lastIndexOf("excalidraw.md") === -1 &&
-			this.privateApi.isNotExcludedPath(path)
+			(this.setting.followObsidianExcludedFiles
+				? this.privateApi.isNotObsidianExcludedPath(path)
+				: true) &&
+			this.isNotCustomExcludedPath(path)
 		);
 	}
 
@@ -145,6 +151,18 @@ export class DataProvider {
 		);
 	}
 
+	private isNotCustomExcludedPath(path: string) {
+		const parts = path.split("/");
+		let currentPath = "";
+
+		for (const part of parts) {
+			currentPath += (currentPath ? "/" : "") + part;
+			if (this.customExcludedPaths.includes(currentPath)) {
+				return false;
+			}
+		}
+		return true;
+	}
 }
 
 @singleton()

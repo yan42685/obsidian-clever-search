@@ -288,6 +288,7 @@ class GeneralTab extends PluginSettingTab {
 }
 
 class ExcludePathModal extends Modal {
+	private settingManager = getInstance(SettingManager);
 	private setting = getInstance(OuterSetting);
 	private excludedPaths = this.setting.excludedPaths;
 	private allPaths = new Set<string>();
@@ -316,9 +317,10 @@ class ExcludePathModal extends Modal {
 			.addToggle((t) =>
 				t
 					.setValue(this.setting.followObsidianExcludedFiles)
-					.onChange(
-						(v) => (this.setting.followObsidianExcludedFiles = v),
-					),
+					.onChange((v) => {
+						this.setting.followObsidianExcludedFiles = v;
+						this.settingManager.shouldReload = true;
+					}),
 			);
 		contentEl.createEl("h2", { text: t("Excluded files") });
 		this.excludesEl = contentEl.createDiv();
@@ -368,6 +370,7 @@ class ExcludePathModal extends Modal {
 			span.style.cursor = "pointer";
 			span.onClickEvent(() => {
 				this.excludedPaths.splice(index, 1);
+				this.settingManager.shouldReload = true;
 				this.renderExcludedList(listEl);
 			});
 		});
@@ -379,6 +382,7 @@ class ExcludePathModal extends Modal {
 				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
 			} else {
 				this.excludedPaths.push(inputPath);
+				this.settingManager.shouldReload = true;
 				this.renderExcludedList(this.excludesEl);
 			}
 		}
