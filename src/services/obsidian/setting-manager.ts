@@ -18,6 +18,7 @@ import { DataManager } from "./user-data/data-manager";
 export class SettingManager {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private setting: OuterSetting;
+	shouldReload = false;
 
 	async initAsync() {
 		await this.loadSettings(); // must run this line before registering PluginSetting
@@ -25,7 +26,20 @@ export class SettingManager {
 		this.plugin.addSettingTab(getInstance(GeneralTab));
 	}
 
-	async loadSettings() {
+	async saveSettings() {
+		await this.plugin.saveData(this.setting);
+	}
+
+	async postSettingUpdated() {
+		if (this.shouldReload) {
+			this.shouldReload = false;
+			await this.saveSettingDownloadRefresh();
+		} else {
+			this.saveSettings();
+		}
+	}
+
+	private async loadSettings() {
 		this.setting = Object.assign(
 			{},
 			DEFAULT_OUTER_SETTING,
@@ -34,8 +48,11 @@ export class SettingManager {
 		logger.setLevel(this.setting.logLevel);
 	}
 
-	async saveSettings() {
-		await this.plugin.saveData(this.setting);
+	private async saveSettingDownloadRefresh() {
+		await getInstance(SettingManager).saveSettings();
+		await getInstance(AssetsProvider).initAsync();
+		await getInstance(ChinesePatch).initAsync();
+		await getInstance(DataManager).forceRefreshAll();
 	}
 }
 
@@ -43,7 +60,6 @@ export class SettingManager {
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(OuterSetting);
-	private shouldDownloadAndRefreshIndex = false;
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
 	// BE CAUTIOUS
@@ -52,12 +68,7 @@ class GeneralTab extends PluginSettingTab {
 		super(plugin.app, plugin);
 	}
 	hide() {
-		if (this.shouldDownloadAndRefreshIndex) {
-			this.shouldDownloadAndRefreshIndex = false;
-			this.saveSettingDownloadRefresh();
-		} else {
-			this.settingManager.saveSettings();
-		}
+		this.settingManager.postSettingUpdated();
 	}
 
 	display(): void {
@@ -101,7 +112,7 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsEn)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsEn = value;
-						this.shouldDownloadAndRefreshIndex = true;
+						this.settingManager.shouldReload = true;
 					}),
 			);
 
@@ -118,7 +129,7 @@ class GeneralTab extends PluginSettingTab {
 								getInstance(OuterSetting).enableChinesePatch
 							}`,
 						);
-						this.shouldDownloadAndRefreshIndex = true;
+						this.settingManager.shouldReload = true;
 					}),
 			);
 
@@ -130,7 +141,7 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsZh)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsZh = value;
-						this.shouldDownloadAndRefreshIndex = true;
+						this.settingManager.shouldReload = true;
 					}),
 			);
 
@@ -264,14 +275,5 @@ class GeneralTab extends PluginSettingTab {
 						await this.settingManager.saveSettings();
 					}),
 			);
-	}
-
-	private async saveSettingDownloadRefresh() {
-		await getInstance(SettingManager).saveSettings();
-		await getInstance(AssetsProvider).initAsync();
-		if (this.setting.enableChinesePatch) {
-			await getInstance(ChinesePatch).initAsync();
-		}
-		await getInstance(DataManager).forceRefreshAll();
 	}
 }

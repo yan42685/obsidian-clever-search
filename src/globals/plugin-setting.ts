@@ -57,7 +57,6 @@ export type UISetting = {
 // ========== transparent for users ==========
 type InnerSetting = {
 	search: {
-		minTermLengthForPrefix: number;
 		fuzzyProportion: number,
 		minTermLengthForPrefixSearch: number
 		weightFilename: number,
@@ -73,7 +72,6 @@ type InnerSetting = {
 
 export const innerSetting: InnerSetting = {
 	search: {
-		minTermLengthForPrefix: 3,
 		fuzzyProportion: 0.2,
 		minTermLengthForPrefixSearch: 2,
 		weightFilename: 3,
