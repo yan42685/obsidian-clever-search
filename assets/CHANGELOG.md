@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.1.2
+
+### new
+
+- Automatically reindex the vault when the database have been updated
+
+
 ## 0.1.1
 
 ### New

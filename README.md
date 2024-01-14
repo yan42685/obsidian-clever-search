@@ -72,6 +72,8 @@ In-file Search performance may be slower when a file contains over 500k characte
     3. Move above files into the folder you created
     4. click `reload plugins` at `Settings - Community plugins - installed plugins` and enable `Clever Search`
 
+## [FAQ](https://github.com/yan42685/obsidian-clever-search/wiki/Home-%E2%80%90-en#FAQ)
+
 ## Support
 
 If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
