@@ -9,12 +9,19 @@ export default {
 	"Omnisearch isn't installed": "Omnisearch isn't installed",
 	"Omnisearch is installed but not enabled":
 		"Omnisearch is installed but not enabled",
-	"Database has been updated, a reindex is required": "Database has been updated, a reindex is required",
+	"Database has been updated, a reindex is required":
+		"Database has been updated, a reindex is required",
 
 	// setting tab
 	"Max items count": "Max items count",
 	"Max items count desc":
 		"Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once",
+	"Excluded files": "Excluded files",
+	"Manage": "Manage",
+	"Follow Obsidian Excluded Files": "Follow Obsidian Excluded Files",
+	"Enter path...": "Enter path...",
+	"Add": "Add",
+
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
 	"Chinese patch": "Chinese patch",

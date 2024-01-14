@@ -4,6 +4,7 @@ import { isDevEnvironment } from "src/utils/my-lib";
 // exposed to users
 export class OuterSetting {
 	
+	followObsidianExcludedFiles: boolean;
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
 	enableStopWordsEn: boolean;
@@ -11,13 +12,13 @@ export class OuterSetting {
 	enableStopWordsZh: boolean;
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
-	excludeExtensions: string[];
 	ui: UISetting;
 }
 
 const isChineseUser = window.localStorage.getItem("language") === "zh";
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
+	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
 	enableStopWordsEn: true,
@@ -32,7 +33,6 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		domain: "",
 		key: "",
 	},
-	excludeExtensions: [],
 	ui: {
 		openInNewPane: true,
 		maxItemResults: 30,

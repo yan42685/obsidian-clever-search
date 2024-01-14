@@ -14,6 +14,12 @@ export default {
     "Max items count": "最大候选项数",
 	"Max items count desc":
 		"虽然本插件可以搜索到成千上万个结果，但由于底层渲染器性能限制，不能即时渲染所有结果",
+	"Excluded files": "忽略文件",
+	"Manage": "管理",
+	"Follow Obsidian Excluded Files": "跟随 Obsidian 忽略文件设置",
+	"Enter path...": "请输入路径...",
+	"Add": "添加",
+
 	"English word blacklist": "英文单词黑名单",
 	"English word blacklist desc": `建立索引时，忽略一些含义模糊的单词，比如 "do", "and", "them", 可以加快索引和搜索速度，但是这些单词不会被搜索到. 可以在 ${stopWordsEnTargetUrl} 按需修改单词黑名单`,
     "Chinese patch": "中文搜索优化",

@@ -18,7 +18,7 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
-import { CommonSuggester } from "./transformed-api";
+import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 
@@ -53,8 +53,6 @@ export class SettingManager {
 			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
 		);
-		// this step is necessary, or typeof this.setting.excludedPaths === object rather than Set
-		logger.info(this.setting.excludedPaths.toString());
 		logger.setLevel(this.setting.logLevel);
 	}
 
@@ -108,15 +106,14 @@ class GeneralTab extends PluginSettingTab {
 					.setLimits(1, 300, 1)
 					.setValue(this.setting.ui.maxItemResults)
 					.setDynamicTooltip()
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.setting.ui.maxItemResults = value;
-						await this.settingManager.saveSettings();
 					}),
 			);
 
-		new Setting(containerEl).setName("Filter files").addButton((b) =>
-			b.setButtonText("Open Setting").onClick(() => {
-				new FileFilterModal(getInstance(App)).open();
+		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
+			b.setButtonText(t("Manage")).onClick(() => {
+				new ExcludePathModal(getInstance(App)).open();
 			}),
 		);
 
@@ -199,7 +196,7 @@ class GeneralTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.ui.collapseDevSettingByDefault)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.setting.ui.collapseDevSettingByDefault = value;
 					}),
 			);
@@ -236,7 +233,6 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.apiProvider1.key)
 					.onChange((key) => {
 						this.setting.apiProvider1.key = key;
-						this.settingManager.saveSettings();
 					}),
 			);
 
@@ -249,7 +245,6 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.apiProvider2.domain)
 					.onChange((domain) => {
 						this.setting.apiProvider2.domain = domain;
-						this.settingManager.saveSettings();
 					}),
 			)
 			.addText((text) =>
@@ -258,7 +253,6 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.apiProvider2.key)
 					.onChange((key) => {
 						this.setting.apiProvider2.key = key;
-						this.settingManager.saveSettings();
 					}),
 			);
 
@@ -288,38 +282,58 @@ class GeneralTab extends PluginSettingTab {
 						const level = value as LogLevel;
 						logger.setLevel(level);
 						this.setting.logLevel = level;
-						await this.settingManager.saveSettings();
 					}),
 			);
 	}
 }
 
-class FileFilterModal extends Modal {
+class ExcludePathModal extends Modal {
 	private setting = getInstance(OuterSetting);
 	private excludedPaths = this.setting.excludedPaths;
-	private allFolders = this.getAllFolders();
+	private allPaths = new Set<string>();
+	private allFolders = new Set<string>();
 
 	private excludesEl: HTMLElement;
 	private inputEl: HTMLInputElement;
 	private suggester: CommonSuggester;
 
+	constructor(app: App) {
+		super(app);
+		const allAbstractFiles = getInstance(Vault).getAllLoadedFiles();
+		for (const aFile of allAbstractFiles) {
+			this.allPaths.add(aFile.path);
+			if (aFile instanceof TFolder) {
+				this.allFolders.add(aFile.path);
+			}
+		}
+	}
+
 	onOpen() {
 		const contentEl = this.contentEl;
-		contentEl.empty();
-		contentEl.createEl("h2", { text: "Excluded Paths" });
-		this.excludesEl = contentEl.createDiv("cs-excluded-paths");
+		this.modalEl.querySelector(".modal-close-button")?.remove();
+		new Setting(contentEl)
+			.setName(t("Follow Obsidian Excluded Files"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.followObsidianExcludedFiles)
+					.onChange(
+						(v) => (this.setting.followObsidianExcludedFiles = v),
+					),
+			);
+		contentEl.createEl("h2", { text: t("Excluded files") });
+		this.excludesEl = contentEl.createDiv();
 		this.renderExcludedList(this.excludesEl);
 
 		new Setting(contentEl)
 			.addText((text) => {
 				this.inputEl = text.inputEl;
-				text.setPlaceholder("Enter path...").onChange((value) => {
-					this.suggester.close();;
-					this.suggester.open()
+				text.setPlaceholder(t("Enter path...")).onChange((value) => {
+					this.suggester.close();
+					this.suggester.open();
 				});
 			})
 			.addButton((btn) => {
-				btn.setButtonText("Add").onClick(() => {
+				btn.setButtonText(t("Add")).onClick(() => {
 					this.addPath(this.inputEl.value);
 				});
 			});
@@ -359,22 +373,14 @@ class FileFilterModal extends Modal {
 		});
 	}
 
-	private getAllFolders(): Set<string> {
-		return new Set(
-			getInstance(Vault)
-				// all files and folders
-				.getAllLoadedFiles()
-				.filter((f) => f instanceof TFolder)
-				.map((f) => f.path),
-		);
-	}
-
 	private addPath(inputPath: string) {
 		if (inputPath && !this.excludedPaths.includes(inputPath)) {
-			this.excludedPaths.push(inputPath);
-			this.renderExcludedList(this.excludesEl);
+			if (!this.allPaths.has(inputPath)) {
+				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
+			} else {
+				this.excludedPaths.push(inputPath);
+				this.renderExcludedList(this.excludesEl);
+			}
 		}
 	}
-
-	private handleAutoSuggestion() {}
 }
