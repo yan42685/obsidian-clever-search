@@ -3,6 +3,7 @@ import { isDevEnvironment } from "src/utils/my-lib";
 
 // exposed to users
 export class OuterSetting {
+	excludedPaths: string[];
 	logLevel: LogLevel;
 	enableStopWordsEn: boolean;
 	enableChinesePatch: boolean;
@@ -16,6 +17,7 @@ export class OuterSetting {
 const isChineseUser = window.localStorage.getItem("language") === "zh";
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
+	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
 	enableStopWordsEn: true,
 	// TODO: 繁体中文

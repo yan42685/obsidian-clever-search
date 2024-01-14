@@ -1,4 +1,4 @@
-import { PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, PluginSettingTab, Setting, Vault } from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
 	DEFAULT_OUTER_SETTING,
@@ -103,6 +103,12 @@ class GeneralTab extends PluginSettingTab {
 						await this.settingManager.saveSettings();
 					}),
 			);
+
+		new Setting(containerEl).setName("Filter files").addButton((b) =>
+			b.setButtonText("Open Setting").onClick(() => {
+				new FileFilterModal(getInstance(App)).open();
+			}),
+		);
 
 		new Setting(containerEl)
 			.setName(t("English word blacklist"))
@@ -275,5 +281,76 @@ class GeneralTab extends PluginSettingTab {
 						await this.settingManager.saveSettings();
 					}),
 			);
+	}
+}
+
+class FileFilterModal extends Modal {
+	private setting = getInstance(OuterSetting);
+	private excludedPaths: string[] = this.setting.excludedPaths;
+	private allFolders = this.getAllFolders();
+
+	private excludesEl: HTMLElement;
+	private inputEl: HTMLInputElement; 
+	private suggestionsEl: HTMLElement; 
+
+	onOpen() {
+		const { contentEl } = this;
+		this.contentEl.empty();
+		contentEl.createEl("h2", { text: "Excluded Files" });
+		this.excludesEl = contentEl.createDiv("cs-excluded-paths");
+
+		this.suggestionsEl = contentEl.createDiv("suggestions-container");
+		this.renderExcludedList(this.excludesEl);
+
+		new Setting(contentEl)
+			.setName("Add filter")
+			.addText((text) => {
+				text.setPlaceholder("Enter path...").onChange((value) => {
+					this.inputEl = text.inputEl;
+					// this.handleAutocomplete(value);
+				});
+			})
+			.addButton((btn) => {
+				btn.setButtonText("Add").onClick(() => {
+					const filterValue = this.inputEl.value;
+					if (filterValue) {
+						if (!this.excludedPaths.includes(filterValue)) {
+							this.excludedPaths.push(filterValue);
+							this.renderExcludedList(this.excludesEl);
+						}
+					}
+				});
+			});
+	}
+
+	private renderExcludedList(listEl: HTMLElement) {
+		listEl.empty();
+
+		this.excludedPaths.forEach((path, index) => {
+			const pathDiv = listEl.createDiv();
+			pathDiv.style.margin = "0.7em 0 0.7em 0";
+			pathDiv.style.display = "flex";
+			pathDiv.style.justifyContent = "space-between";
+
+			const pathText = pathDiv.createSpan();
+			pathText.setText(path);
+
+			const span = pathDiv.createSpan();
+			span.setText("✕");
+			span.style.cursor = "pointer";
+			span.onClickEvent(() => {
+				this.excludedPaths.splice(index, 1);
+				this.renderExcludedList(listEl);
+			});
+		});
+	}
+
+	private getAllFolders(): string[] {
+		const folderSet = new Set(
+			getInstance(Vault)
+				.getFiles()
+				.map((f) => f.parent?.path || ""),
+		);
+		return [...folderSet];
 	}
 }
