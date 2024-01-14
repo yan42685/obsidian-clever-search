@@ -25,9 +25,7 @@ export class DataProvider {
 		getInstance(ViewRegistry).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
 	private viewRegistry = getInstance(ViewRegistry);
-	private readonly MARKDOWN_LINK_REGEX = /\[([^[\]]+)\]\([^()]*\)/g;
-	private readonly MARKDOWN_ASTERISK_REGEX = /\*\*(.*?)\*\*/g;
-	private readonly MARKDOWN_BACKTICK_REGEX = /`(.*?)`/g;
+	private htmlParser = getInstance(HtmlParser);
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
 	private static readonly contentIndexableViewTypes = new Set([
@@ -116,7 +114,7 @@ export class DataProvider {
 			const plainText = await this.vault.cachedRead(file);
 			// return plainText;
 			return file.extension === "html"
-				? this.extractHtmlContent(plainText)
+				? this.htmlParser.toMarkdown(plainText)
 				: plainText;
 		} else {
 			throw Error(
@@ -147,7 +145,15 @@ export class DataProvider {
 		);
 	}
 
-	private extractHtmlContent(htmlText: string) {
+}
+
+@singleton()
+class HtmlParser {
+	private readonly MARKDOWN_LINK_REGEX = /\[([^[\]]+)\]\([^()]*\)/g;
+	private readonly MARKDOWN_ASTERISK_REGEX = /\*\*(.*?)\*\*/g;
+	private readonly MARKDOWN_BACKTICK_REGEX = /`(.*?)`/g;
+
+	toMarkdown(htmlText: string) {
 		// use a replacement function to determine how to replace the matched content
 		let cleanMarkdown = htmlToMarkdown(htmlText);
 		// 使用替换函数来确定如何替换匹配到的内容
