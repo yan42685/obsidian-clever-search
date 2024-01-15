@@ -126,15 +126,10 @@ export class ViewHelper {
 				"",
 				this.setting.ui.openInNewPane,
 			);
-			// this.scrollIntoViewForNewTab(row, col);
-
-			// TODO: sometimes it will fail to scroll the view, but the cursor is set correctly,
-			// maybe because of the long time it takes to open the file; A possible solution is to read the file size via obsidian api,
-			// if it's too large, then settimeout to scroll (the user experience will be worser than scrolling instantly, but it seems to be the only solution for that)
-			this.scrollIntoViewForExistingView(row, col);
-			// setTimeout(() => {
-			// 	this.scrollIntoViewForExistingView(row, col);
-			// }, 10);
+			// this.scrollIntoViewForExistingView(row, col);
+			this.app.workspace.onLayoutReady(() =>
+				this.scrollIntoViewForExistingView(row, col),
+			);
 		}
 	}
 
@@ -165,28 +160,5 @@ export class ViewHelper {
 		} else {
 			logger.info("No view to jump");
 		}
-	}
-
-	/**
-	 * @deprecated 0.1.x won't work for lengthy line, like over 500 words
-	 *
-	 * This function is essential to distinguish from `scrollIntoViewForExistingView`.
-	 * Although it does not center the view as precisely as the previous function,
-	 * it is necessary because `scrollIntoViewForExistingView` has bugs when applied to new tabs,
-	 * which is an inherent issue with Obsidian's API.
-	 */
-	private scrollIntoViewForNewTab(row: number, col: number) {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view) {
-			view.editor.setCursor({ line: row, ch: col });
-			view.editor.scrollIntoView({
-				from: { line: row - 10, ch: 0 },
-				to: { line: row + 10, ch: 0 },
-			});
-		}
-	}
-
-	private parseSubItemOriginText(highlightedText: string): string {
-		return "a";
 	}
 }
