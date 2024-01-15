@@ -21,7 +21,7 @@ export default {
 		"自定义希望索引的文件后缀名。默认情况下 Obsidian 不原生支持的文件类型，如 'txt'，将通过外部程序打开。要在 Obsidian 内打开这些文件，可能需要安装插件，如 'obsidian-vscode-editor' 或 'obsidian-custom-file-extension-plugin'。",
 	"extensionModal.plaintextName": "纯文本",
 	"extensionModal.plaintextDesc":
-		"请不要在此处包含像 'jpg'、'mp4' 等二进制文件类型，否则可能会导致索引问题。后缀名应该用空格或换行符分隔。另外，索引和搜索 HTML 文件可能会更慢，因为它们首先需要转换为干净的 Markdown 格式。此外，受 API 限制, 自动滚动到 HTML 文件中的特定位置似乎不可行。",
+		"后缀名使用空格或换行符分隔。请不要在此处包含 'jpg'、'mp4' 等二进制文件类型，否则可能会导致索引问题。另外，索引和搜索 HTML 文件可能会更慢，因为它们首先需要转换为干净的 Markdown 格式。此外，受 API 限制, 自动滚动到 HTML 文件中的特定位置似乎不可行。",
 
 	"Excluded files": "忽略文件",
 	Manage: "管理",

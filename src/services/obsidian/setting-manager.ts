@@ -320,7 +320,8 @@ class ExcludePathModal extends Modal {
 	}
 
 	onOpen() {
-		this.modalEl.style.width= "48vw";
+		this.modalEl.style.width = "48vw";
+		this.modalEl.style.marginBottom = "5em";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
 		new Setting(contentEl)
@@ -358,6 +359,9 @@ class ExcludePathModal extends Modal {
 				this.addPath(v);
 			},
 		);
+		setTimeout(() => {
+			this.inputEl.focus();
+		}, 1);
 	}
 
 	private renderExcludedList(listEl: HTMLElement) {
@@ -403,18 +407,14 @@ class CustomExtensionModal extends Modal {
 	private setting = getInstance(OuterSetting);
 	private settingManager = getInstance(SettingManager);
 	onOpen(): void {
-		this.modalEl.style.width= "60vw";
+		this.modalEl.style.width = "60vw";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
 
-		new Setting(contentEl).setDesc(
-			t("extensionModal.desc")
-		);
+		new Setting(contentEl).setDesc(t("extensionModal.desc"));
 		new Setting(contentEl)
 			.setName(t("extensionModal.plaintextName"))
-			.setDesc(
-				t("extensionModal.plaintextDesc")
-			)
+			.setDesc(t("extensionModal.plaintextDesc"))
 			.addTextArea((textArea) => {
 				textArea.inputEl.style.minWidth = "20vw";
 				textArea.inputEl.style.minHeight = "20vh";
@@ -425,8 +425,10 @@ class CustomExtensionModal extends Modal {
 				textArea.onChange((newValue) => {
 					const extensions = newValue
 						.split(/[\s\n]+/)
-						.map(ext => ext.startsWith('.') ? ext.substring(1) : ext)
-						.filter((ext) => ext.length > 0)
+						.map((ext) =>
+							ext.startsWith(".") ? ext.substring(1) : ext,
+						)
+						.filter((ext) => ext.length > 0);
 
 					this.setting.customExtensions.plaintext = extensions;
 					// TODO: uncomment this line

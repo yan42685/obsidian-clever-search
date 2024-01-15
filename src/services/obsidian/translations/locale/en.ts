@@ -22,7 +22,7 @@ export default {
 		"Customize the file extensions you would like to index. By default, file types not natively supported by Obsidian, such as 'txt', will be opened with an external program. To open these files within Obsidian, you may need to install plugins like 'obsidian-vscode-editor' or 'obsidian-custom-file-extension-plugin'.",
 	"extensionModal.plaintextName": "Plaintext",
 	"extensionModal.plaintextDesc":
-		"Please do not include binary file types like 'jpg', 'mp4', etc., here. Including them might cause indexing issues. Extensions should be separated by a space or a newline character.\nAdditionally, the indexing and searching of HTML files may be slower because they require conversion to clean Markdown format first. Furthermore, due to the extremely limited API, it seems impossible to automatically scroll to specific locations within HTML files.",
+		"Extensions should be separated by a space or a newline character. Please do not include binary file types like 'jpg', 'mp4', etc., here. Including them might cause indexing issues. Additionally, the indexing and searching of HTML files may be slower because they require conversion to clean Markdown format first. Furthermore, due to the extremely limited API, it seems impossible to automatically scroll to specific locations within HTML files.",
 	"Excluded files": "Excluded files",
 	Manage: "Manage",
 	"Follow Obsidian Excluded Files": "Follow Obsidian Excluded Files",
