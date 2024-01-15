@@ -55,25 +55,26 @@ export class ViewHelper {
 				if (currSubItemIndex !== NULL_NUMBER) {
 					const subItem = fileItem.subItems[currSubItemIndex];
 					if (viewType === ViewType.MARKDOWN) {
-						if (fileItem.extension === "html") {
-							const absolutePath =
-								this.privateApi.getAbsolutePath(fileItem.path);
-							const matchedText = subItem.text.replace(
-								/<mark>|<\/mark>/g,
-								"",
-							);
-							// logger.info(matchedText);
-							window.open(
-								`file:///${absolutePath}#:~:text=${matchedText}`,
-								"",
-							);
-						} else {
-							await this.jumpInVaultAsync(
-								fileItem.path,
-								subItem.row,
-								subItem.col,
-							);
-						}
+						// TODO: reuse tab for html
+						// if (fileItem.extension === "html") {
+						// 	const absolutePath =
+						// 		this.privateApi.getAbsolutePath(fileItem.path);
+						// 	const matchedText = subItem.text.replace(
+						// 		/<mark>|<\/mark>/g,
+						// 		"",
+						// 	);
+						// 	// logger.info(matchedText);
+						// 	window.open(
+						// 		`file:///${absolutePath}#:~:text=${matchedText}`,
+						// 		"",
+						// 	);
+						// } else {
+						await this.jumpInVaultAsync(
+							fileItem.path,
+							subItem.row,
+							subItem.col,
+						);
+						// }
 					} else {
 						throw Error("unsupported viewType to jump");
 					}
