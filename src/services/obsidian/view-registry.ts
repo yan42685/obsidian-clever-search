@@ -1,6 +1,8 @@
 import { THIS_PLUGIN } from "src/globals/constants";
+import { OuterSetting } from "src/globals/plugin-setting";
 import type CleverSearch from "src/main";
 import { FileUtil } from "src/utils/file-util";
+import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
@@ -8,8 +10,9 @@ import { singleton } from "tsyringe";
 
 @singleton()
 export class ViewRegistry {
+	private readonly setting = getInstance(OuterSetting);
 	// private readonly markdownExtensions = ["md", "txt", "html"];
-	private readonly markdownExtensions = ["md"];
+	private readonly markdownExtensions = this.setting.customExtensions.plaintext;
 	private readonly pdfExtensions = ["pdf"];
 	private readonly canvasExtensions = ["canvas"];
 	private readonly imageExtensions = ["jpg", "jpeg", "png", "gif", "svg"];
@@ -41,9 +44,10 @@ export class ViewRegistry {
 		return viewType === undefined ? ViewType.UNSUPPORTED : viewType;
 	}
 
-	supportedExtensions(): Set<string> {
-		// TODO: support more extensions
-		return new Set(this.markdownExtensions);
+	refreshAll() {
+		this.extensionViewMap.clear()
+		logger.info(`222 ${this.markdownExtensions}`)
+		this.init();
 	}
 
 	private fillMap(extensions: string[], viewType: ViewType) {

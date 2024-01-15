@@ -23,17 +23,28 @@ export class DataProvider {
 	private readonly vault = getInstance(Vault);
 	private readonly app = getInstance(App);
 	private readonly setting = getInstance(OuterSetting);
-	private readonly customExcludedPaths: string[] = this.setting.excludedPaths; // I'd like to use Set() but it's not easy to tackle with deserialization
-	private readonly supportedExtensions =
-		getInstance(ViewRegistry).supportedExtensions();
 	private readonly privateApi = getInstance(PrivateApi);
-	private viewRegistry = getInstance(ViewRegistry);
-	private htmlParser = getInstance(HtmlParser);
+	private readonly viewRegistry = getInstance(ViewRegistry);
+	private readonly htmlParser = getInstance(HtmlParser);
+	private excludedPaths: Set<string>;
+	private supportedExtensions:Set<string>;
 	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
 
 	private static readonly contentIndexableViewTypes = new Set([
 		ViewType.MARKDOWN,
 	]);
+
+	constructor() {
+		this.init();
+	}
+
+	// update internal states based on OuterSetting
+	init() {
+		this.excludedPaths = new Set(this.setting.excludedPaths)
+		logger.info(`aaa ${this.setting.customExtensions.plaintext}`)
+		this.supportedExtensions = new Set(this.setting.customExtensions.plaintext);
+		logger.info(`bbb ${[...this.supportedExtensions]}`)
+	}
 
 	async generateAllIndexedDocuments(
 		files: TFile[],
@@ -100,7 +111,7 @@ export class DataProvider {
 			(this.setting.followObsidianExcludedFiles
 				? this.privateApi.isNotObsidianExcludedPath(path)
 				: true) &&
-			(this.customExcludedPaths.length === 0
+			(this.excludedPaths.size === 0
 				? true
 				: this.isNotCustomExcludedPath(path))
 		);
@@ -159,7 +170,7 @@ export class DataProvider {
 
 		for (const part of parts) {
 			currentPath += (currentPath ? "/" : "") + part;
-			if (this.customExcludedPaths.includes(currentPath)) {
+			if (this.excludedPaths.has(currentPath)) {
 				return false;
 			}
 		}

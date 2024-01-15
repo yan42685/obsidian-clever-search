@@ -74,7 +74,7 @@ export class DataManager {
 		this.docOperationsBuffer.add(operation);
 	}
 
-	async forceRefreshAll() {
+	async refreshAllAsync() {
 		const prevNotice = new MyNotice(t("Reindexing..."));
 		this.shouldForceRefresh = true;
 		await this.initAsync();

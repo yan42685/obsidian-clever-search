@@ -21,6 +21,8 @@ import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
+import { DataProvider } from "./user-data/data-provider";
+import { ViewRegistry } from "./view-registry";
 
 @singleton()
 export class SettingManager {
@@ -34,6 +36,7 @@ export class SettingManager {
 		this.plugin.addSettingTab(getInstance(GeneralTab));
 	}
 
+	// NOTE: this.plugin.saveData() can't handle Set
 	async saveSettings() {
 		await this.plugin.saveData(this.setting);
 	}
@@ -56,11 +59,15 @@ export class SettingManager {
 		logger.setLevel(this.setting.logLevel);
 	}
 
+
 	private async saveSettingDownloadRefresh() {
 		await getInstance(SettingManager).saveSettings();
+		getInstance(ViewRegistry).refreshAll();
 		await getInstance(AssetsProvider).initAsync();
 		await getInstance(ChinesePatch).initAsync();
-		await getInstance(DataManager).forceRefreshAll();
+
+		getInstance(DataProvider).init();
+		await getInstance(DataManager).refreshAllAsync();
 	}
 }
 
@@ -270,7 +277,7 @@ class GeneralTab extends PluginSettingTab {
 			.setName(t("Reindex the vault"))
 			.addButton((button) => {
 				button.setButtonText(t("Reindex")).onClick(async () => {
-					await getInstance(DataManager).forceRefreshAll();
+					await getInstance(DataManager).refreshAllAsync();
 				});
 			});
 
@@ -431,9 +438,7 @@ class CustomExtensionModal extends Modal {
 						.filter((ext) => ext.length > 0);
 
 					this.setting.customExtensions.plaintext = extensions;
-					// TODO: uncomment this line
-					// this.settingManager.shouldReload = true;
-					logger.info(this.setting.customExtensions.plaintext);
+					this.settingManager.shouldReload = true;
 				});
 			});
 
