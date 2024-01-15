@@ -18,39 +18,6 @@ import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
 import { RenderMarkdownModal } from "./main";
 
-export async function devTest() {
-	const settings = getInstance(OuterSetting);
-	// ====== API Request =====
-	// const httpClient = getInstance(HttpClient);
-	// httpClient.testRequest();
-
-	// ====== vault files =====
-	// setTimeout(() => {
-	// 	monitorExecution(async () => {
-	// 		const plugin: CleverSearch = getInstance(THIS_PLUGIN);
-	// 		const vault = plugin.app.vault;
-	// 		logger.debug(vault.getRoot().path); // /
-	// 		logger.debug(vault.configDir); // .obsidian
-	// 	});
-	// }, 1300);
-
-	// testStemmer();
-	// testTsyringe();
-	// testUnsupportedExtensions();
-
-	// monitorExecution(testLexicalSearch);
-	// monitorExecution(async () => await testLexicalSearch());
-	// testLexicalSearch();
-	// logger.trace("test");
-
-	// const vault = getInstance(Vault);
-	// logger.info(`${vault.configDir}`);
-
-	// testTikToken();
-	// monitorExecution(() => testTokenizer());
-	// testUFuzzy();
-	await testParseHtml();
-}
 
 function getApp() {
 	return getInstance(App);
@@ -180,4 +147,38 @@ async function parseHtml(file: TFile) {
 	const mdText = htmlToMarkdown(htmlText);
 	mdText.split("\n");
 	new RenderMarkdownModal(getInstance(App), mdText).open();
+}
+
+export async function devTest() {
+	const settings = getInstance(OuterSetting);
+	// ====== API Request =====
+	// const httpClient = getInstance(HttpClient);
+	// httpClient.testRequest();
+
+	// ====== vault files =====
+	// setTimeout(() => {
+	// 	monitorExecution(async () => {
+	// 		const plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	// 		const vault = plugin.app.vault;
+	// 		logger.debug(vault.getRoot().path); // /
+	// 		logger.debug(vault.configDir); // .obsidian
+	// 	});
+	// }, 1300);
+
+	// testStemmer();
+	// testTsyringe();
+	// testUnsupportedExtensions();
+
+	// monitorExecution(testLexicalSearch);
+	// monitorExecution(async () => await testLexicalSearch());
+	// testLexicalSearch();
+	// logger.trace("test");
+
+	// const vault = getInstance(Vault);
+	// logger.info(`${vault.configDir}`);
+
+	// testTikToken();
+	// monitorExecution(() => testTokenizer());
+	// testUFuzzy();
+	await testParseHtml();
 }

@@ -1,4 +1,11 @@
-import { PluginSettingTab, Setting } from "obsidian";
+import {
+	App,
+	Modal,
+	PluginSettingTab,
+	Setting,
+	TFolder,
+	Vault,
+} from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
 	DEFAULT_OUTER_SETTING,
@@ -11,13 +18,17 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
+import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
+import { DataProvider } from "./user-data/data-provider";
+import { ViewRegistry } from "./view-registry";
 
 @singleton()
 export class SettingManager {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private setting: OuterSetting;
+	shouldReload = false;
 
 	async initAsync() {
 		await this.loadSettings(); // must run this line before registering PluginSetting
@@ -25,7 +36,21 @@ export class SettingManager {
 		this.plugin.addSettingTab(getInstance(GeneralTab));
 	}
 
-	async loadSettings() {
+	// NOTE: this.plugin.saveData() can't handle Set
+	async saveSettings() {
+		await this.plugin.saveData(this.setting);
+	}
+
+	async postSettingUpdated() {
+		if (this.shouldReload) {
+			this.shouldReload = false;
+			await this.saveSettingDownloadRefresh();
+		} else {
+			this.saveSettings();
+		}
+	}
+
+	private async loadSettings() {
 		this.setting = Object.assign(
 			{},
 			DEFAULT_OUTER_SETTING,
@@ -34,8 +59,15 @@ export class SettingManager {
 		logger.setLevel(this.setting.logLevel);
 	}
 
-	async saveSettings() {
-		await this.plugin.saveData(this.setting);
+
+	private async saveSettingDownloadRefresh() {
+		await getInstance(SettingManager).saveSettings();
+		getInstance(ViewRegistry).refreshAll();
+		await getInstance(AssetsProvider).initAsync();
+		await getInstance(ChinesePatch).initAsync();
+
+		getInstance(DataProvider).init();
+		await getInstance(DataManager).refreshAllAsync();
 	}
 }
 
@@ -43,7 +75,6 @@ export class SettingManager {
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(OuterSetting);
-	private shouldDownloadAndRefreshIndex = false;
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
 	// BE CAUTIOUS
@@ -52,12 +83,7 @@ class GeneralTab extends PluginSettingTab {
 		super(plugin.app, plugin);
 	}
 	hide() {
-		if (this.shouldDownloadAndRefreshIndex) {
-			this.shouldDownloadAndRefreshIndex = false;
-			this.saveSettingDownloadRefresh();
-		} else {
-			this.settingManager.saveSettings();
-		}
+		this.settingManager.postSettingUpdated();
 	}
 
 	display(): void {
@@ -87,10 +113,25 @@ class GeneralTab extends PluginSettingTab {
 					.setLimits(1, 300, 1)
 					.setValue(this.setting.ui.maxItemResults)
 					.setDynamicTooltip()
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.setting.ui.maxItemResults = value;
-						await this.settingManager.saveSettings();
 					}),
+			);
+
+		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
+			b.setButtonText(t("Manage")).onClick(() => {
+				new ExcludePathModal(getInstance(App)).open();
+			}),
+		);
+
+		new Setting(containerEl)
+			.setName(t("Customize extensions"))
+			.addButton((b) =>
+				b
+					.setButtonText(t("Manage"))
+					.onClick(() =>
+						new CustomExtensionModal(getInstance(App)).open(),
+					),
 			);
 
 		new Setting(containerEl)
@@ -101,7 +142,7 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsEn)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsEn = value;
-						this.shouldDownloadAndRefreshIndex = true;
+						this.settingManager.shouldReload = true;
 					}),
 			);
 
@@ -118,7 +159,7 @@ class GeneralTab extends PluginSettingTab {
 								getInstance(OuterSetting).enableChinesePatch
 							}`,
 						);
-						this.shouldDownloadAndRefreshIndex = true;
+						this.settingManager.shouldReload = true;
 					}),
 			);
 
@@ -130,7 +171,7 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsZh)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsZh = value;
-						this.shouldDownloadAndRefreshIndex = true;
+						this.settingManager.shouldReload = true;
 					}),
 			);
 
@@ -172,7 +213,7 @@ class GeneralTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.ui.collapseDevSettingByDefault)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.setting.ui.collapseDevSettingByDefault = value;
 					}),
 			);
@@ -209,7 +250,6 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.apiProvider1.key)
 					.onChange((key) => {
 						this.setting.apiProvider1.key = key;
-						this.settingManager.saveSettings();
 					}),
 			);
 
@@ -222,7 +262,6 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.apiProvider2.domain)
 					.onChange((domain) => {
 						this.setting.apiProvider2.domain = domain;
-						this.settingManager.saveSettings();
 					}),
 			)
 			.addText((text) =>
@@ -231,7 +270,6 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.apiProvider2.key)
 					.onChange((key) => {
 						this.setting.apiProvider2.key = key;
-						this.settingManager.saveSettings();
 					}),
 			);
 
@@ -239,7 +277,7 @@ class GeneralTab extends PluginSettingTab {
 			.setName(t("Reindex the vault"))
 			.addButton((button) => {
 				button.setButtonText(t("Reindex")).onClick(async () => {
-					await getInstance(DataManager).forceRefreshAll();
+					await getInstance(DataManager).refreshAllAsync();
 				});
 			});
 
@@ -261,17 +299,149 @@ class GeneralTab extends PluginSettingTab {
 						const level = value as LogLevel;
 						logger.setLevel(level);
 						this.setting.logLevel = level;
-						await this.settingManager.saveSettings();
 					}),
 			);
 	}
+}
 
-	private async saveSettingDownloadRefresh() {
-		await getInstance(SettingManager).saveSettings();
-		await getInstance(AssetsProvider).initAsync();
-		if (this.setting.enableChinesePatch) {
-			await getInstance(ChinesePatch).initAsync();
+class ExcludePathModal extends Modal {
+	private settingManager = getInstance(SettingManager);
+	private setting = getInstance(OuterSetting);
+	private excludedPaths = this.setting.excludedPaths;
+	private allPaths = new Set<string>();
+	private allFolders = new Set<string>();
+
+	private excludesEl: HTMLElement;
+	private inputEl: HTMLInputElement;
+	private suggester: CommonSuggester;
+
+	constructor(app: App) {
+		super(app);
+		const allAbstractFiles = getInstance(Vault).getAllLoadedFiles();
+		for (const aFile of allAbstractFiles) {
+			this.allPaths.add(aFile.path);
+			if (aFile instanceof TFolder) {
+				this.allFolders.add(aFile.path);
+			}
 		}
-		await getInstance(DataManager).forceRefreshAll();
+	}
+
+	onOpen() {
+		this.modalEl.style.width = "48vw";
+		this.modalEl.style.marginBottom = "5em";
+		this.modalEl.querySelector(".modal-close-button")?.remove();
+		const contentEl = this.contentEl;
+		new Setting(contentEl)
+			.setName(t("Follow Obsidian Excluded Files"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.followObsidianExcludedFiles)
+					.onChange((v) => {
+						this.setting.followObsidianExcludedFiles = v;
+						this.settingManager.shouldReload = true;
+					}),
+			);
+		contentEl.createEl("h2", { text: t("Excluded files") });
+		this.excludesEl = contentEl.createDiv();
+		this.renderExcludedList(this.excludesEl);
+
+		new Setting(contentEl)
+			.addText((text) => {
+				this.inputEl = text.inputEl;
+				text.setPlaceholder(t("Enter path...")).onChange((value) => {
+					this.suggester.close();
+					this.suggester.open();
+				});
+			})
+			.addButton((btn) => {
+				btn.setButtonText(t("Add")).onClick(() => {
+					this.addPath(this.inputEl.value);
+				});
+			});
+
+		this.suggester = new CommonSuggester(
+			this.inputEl,
+			this.allFolders,
+			(v) => {
+				this.addPath(v);
+			},
+		);
+		setTimeout(() => {
+			this.inputEl.focus();
+		}, 1);
+	}
+
+	private renderExcludedList(listEl: HTMLElement) {
+		listEl.empty();
+
+		this.excludedPaths.forEach((path, index) => {
+			const pathDiv = listEl.createDiv();
+			pathDiv.style.overflow = "auto";
+			pathDiv.style.display = "flex";
+			pathDiv.style.margin = "0.7em 0 0.7em 0";
+			pathDiv.style.justifyContent = "space-between";
+
+			const pathText = pathDiv.createSpan();
+			pathText.setText(path);
+			pathText.style.width = "90%";
+			pathText.style.overflow = "auto";
+
+			const span = pathDiv.createSpan();
+			span.setText("✕");
+			span.style.cursor = "pointer";
+			span.onClickEvent(() => {
+				this.excludedPaths.splice(index, 1);
+				this.settingManager.shouldReload = true;
+				this.renderExcludedList(listEl);
+			});
+		});
+	}
+
+	private addPath(inputPath: string) {
+		if (inputPath && !this.excludedPaths.includes(inputPath)) {
+			if (!this.allPaths.has(inputPath)) {
+				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
+			} else {
+				this.excludedPaths.push(inputPath);
+				this.settingManager.shouldReload = true;
+				this.renderExcludedList(this.excludesEl);
+			}
+		}
+	}
+}
+
+class CustomExtensionModal extends Modal {
+	private setting = getInstance(OuterSetting);
+	private settingManager = getInstance(SettingManager);
+	onOpen(): void {
+		this.modalEl.style.width = "60vw";
+		this.modalEl.querySelector(".modal-close-button")?.remove();
+		const contentEl = this.contentEl;
+
+		new Setting(contentEl).setDesc(t("extensionModal.desc"));
+		new Setting(contentEl)
+			.setName(t("extensionModal.plaintextName"))
+			.setDesc(t("extensionModal.plaintextDesc"))
+			.addTextArea((textArea) => {
+				textArea.inputEl.style.minWidth = "20vw";
+				textArea.inputEl.style.minHeight = "20vh";
+				textArea.setValue(
+					this.setting.customExtensions.plaintext.join(" "),
+				);
+
+				textArea.onChange((newValue) => {
+					const extensions = newValue
+						.split(/[\s\n]+/)
+						.map((ext) =>
+							ext.startsWith(".") ? ext.substring(1) : ext,
+						)
+						.filter((ext) => ext.length > 0);
+
+					this.setting.customExtensions.plaintext = extensions;
+					this.settingManager.shouldReload = true;
+				});
+			});
+
+		new Setting(contentEl).setName("Image").setDesc("Todo");
 	}
 }

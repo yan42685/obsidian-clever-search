@@ -1,3 +1,4 @@
+import type { AsPlainObject } from "minisearch";
 import type { TAbstractFile, TFile } from "obsidian";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
@@ -61,8 +62,7 @@ export class DataManager {
 
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
-			JSON.stringify(this.lexicalEngine.filesIndex),
-			// this.lexicalEngine.filesIndex.toJSON(),
+			this.lexicalEngine.filesIndex.toJSON(),
 		);
 	}
 
@@ -74,7 +74,7 @@ export class DataManager {
 		this.docOperationsBuffer.add(operation);
 	}
 
-	async forceRefreshAll() {
+	async refreshAllAsync() {
 		const prevNotice = new MyNotice(t("Reindexing..."));
 		this.shouldForceRefresh = true;
 		await this.initAsync();
@@ -98,7 +98,7 @@ export class DataManager {
 
 	private async initLexicalEngines() {
 		logger.trace("Init lexical engine...");
-		let prevData: string | null;
+		let prevData: AsPlainObject | null;
 		if (!devOption.loadIndexFromDatabase || this.shouldForceRefresh) {
 			prevData = null;
 		} else {

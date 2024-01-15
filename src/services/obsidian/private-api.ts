@@ -36,7 +36,7 @@ export class PrivateApi {
 		this.app.commands.executeCommandById(commandId);
 	}
 
-	isNotExcludedPath(path: string) {
+	isNotObsidianExcludedPath(path: string) {
 		return !(
 			this.app.metadataCache.isUserIgnored &&
 			this.app.metadataCache.isUserIgnored(path)

@@ -12,14 +12,9 @@ import {
 } from "obsidian";
 import "reflect-metadata";
 import { container } from "tsyringe";
-import { devTest } from "./dev-test";
 import { THIS_PLUGIN } from "./globals/constants";
-import { SearchType } from "./globals/search-types";
-import { OmnisearchIntegration } from "./integrations/omnisearch";
-import { AuxiliaryService } from "./services/auxiliary/auxiliary-service";
 import { PluginManager } from "./services/obsidian/plugin-manager";
-import { SearchModal } from "./ui/search-modal";
-import { getInstance, isDevEnvironment } from "./utils/my-lib";
+import { getInstance } from "./utils/my-lib";
 
 export default class CleverSearch extends Plugin {
 	async onload() {
@@ -37,29 +32,6 @@ export default class CleverSearch extends Plugin {
 		});
 
 		// this.exampleCode();
-		this.registerCommands();
-
-		this.addCommand({
-			id: "clever-search-in-vault",
-			name: "Search in Vault",
-			callback: () =>
-				new SearchModal(this.app, SearchType.IN_VAULT).open(),
-		});
-
-		if (isDevEnvironment) {
-			this.addCommand({
-				id: "clever-search-triggerTest",
-				name: "clever-search-triggerTest",
-				// hotkeys: [{modifiers: [currModifier], key: "5"}],
-				callback: async () => await devTest(),
-			});
-
-			this.addCommand({
-				id: "cs-open-test-modal",
-				name: "Open test modal",
-				callback: () => this.openTestModal(),
-			});
-		}
 	}
 
 	onunload() {
@@ -87,34 +59,6 @@ export default class CleverSearch extends Plugin {
 		} else {
 			throw Error("no active MarkdownView");
 		}
-	}
-
-	registerCommands() {
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: "clever-search-in-file",
-			name: "Search in file",
-			callback: () =>
-				new SearchModal(this.app, SearchType.IN_FILE).open(),
-		});
-
-		this.addCommand({
-			id: "cs-toggle-privacy-mode",
-			name: "Toggle privacy mode",
-			callback: () => getInstance(AuxiliaryService).togglePrivacyMode(),
-		});
-
-		this.addCommand({
-			id: "cs-in-file-search-with-omnisearch-query",
-			name: "Search in file with last Omnisearch query",
-			callback: async () => {
-				new SearchModal(
-					this.app,
-					SearchType.IN_FILE,
-					await getInstance(OmnisearchIntegration).getLastQuery(),
-				).open();
-			},
-		});
 	}
 
 	exampleCode() {
@@ -197,8 +141,6 @@ class RenderHTMLModal extends Modal {
 		this.containerEl.style.backgroundColor = "black";
 		this.containerEl.innerHTML = this.contentHTML;
 
-		// 或者如果您想将Markdown转换为HTML：
-		// contentEl.innerHTML = yourMarkdownToHTMLFunction(this.content);
 	}
 
 	onClose() {

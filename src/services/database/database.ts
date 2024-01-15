@@ -5,6 +5,7 @@ import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
+import type { AsPlainObject } from "minisearch";
 
 @singleton()
 export class Database {
@@ -14,20 +15,20 @@ export class Database {
 	}
 
 	// it may finished some time later even if using await
-	async setMiniSearchData(strData: string) {
+	async setMiniSearchData(data: AsPlainObject) {
 		this.db.transaction("rw", this.db.minisearch, async () => {
 			// Warning: The clear() here is just a marker for caution to avoid data duplication.
 			// Ideally, clear() should be executed at an earlier stage.
 			// Placing clear() and add() together, especially with large data sets, 
 			// may lead to conflicts and cause Obsidian to crash. It is an issue related to Dexie or IndexedDB
 			await this.db.minisearch.clear();
-			await this.db.minisearch.add({ data: strData });
+			await this.db.minisearch.add({ data: data });
 			logger.trace("minisearch data saved");
 		});
 	}
 
 	@monitorDecorator
-	async getMiniSearchData(): Promise<string | null> {
+	async getMiniSearchData(): Promise<AsPlainObject | null> {
 		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
@@ -82,7 +83,7 @@ class DexieWrapper extends Dexie {
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
-	minisearch!: Dexie.Table<{ id?: number; data: string }, number>;
+	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	documentRefs!: Dexie.Table<DocumentRef, number>;
 
