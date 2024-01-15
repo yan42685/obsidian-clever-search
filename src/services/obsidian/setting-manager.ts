@@ -358,7 +358,6 @@ class ExcludePathModal extends Modal {
 				this.addPath(v);
 			},
 		);
-		this.suggester.open();
 	}
 
 	private renderExcludedList(listEl: HTMLElement) {
