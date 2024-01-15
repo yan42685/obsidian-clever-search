@@ -100,7 +100,9 @@ export class DataProvider {
 			(this.setting.followObsidianExcludedFiles
 				? this.privateApi.isNotObsidianExcludedPath(path)
 				: true) &&
-			this.isNotCustomExcludedPath(path)
+			(this.customExcludedPaths.length === 0
+				? true
+				: this.isNotCustomExcludedPath(path))
 		);
 	}
 
