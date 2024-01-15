@@ -41,9 +41,7 @@ export class DataProvider {
 	// update internal states based on OuterSetting
 	init() {
 		this.excludedPaths = new Set(this.setting.excludedPaths)
-		logger.info(`aaa ${this.setting.customExtensions.plaintext}`)
 		this.supportedExtensions = new Set(this.setting.customExtensions.plaintext);
-		logger.info(`bbb ${[...this.supportedExtensions]}`)
 	}
 
 	async generateAllIndexedDocuments(

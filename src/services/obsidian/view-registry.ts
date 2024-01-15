@@ -2,7 +2,6 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import { OuterSetting } from "src/globals/plugin-setting";
 import type CleverSearch from "src/main";
 import { FileUtil } from "src/utils/file-util";
-import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 
@@ -11,23 +10,26 @@ import { singleton } from "tsyringe";
 @singleton()
 export class ViewRegistry {
 	private readonly setting = getInstance(OuterSetting);
+	// BUG: `private readonly markdownExtensions = this.setting.customExtensions.plaintext` 
+	// won't be updated if the source array is changed. Current solution is to get the latest setting by getInstance(OuterSetting);
+
 	// private readonly markdownExtensions = ["md", "txt", "html"];
-	private readonly markdownExtensions = this.setting.customExtensions.plaintext;
-	private readonly pdfExtensions = ["pdf"];
-	private readonly canvasExtensions = ["canvas"];
-	private readonly imageExtensions = ["jpg", "jpeg", "png", "gif", "svg"];
-	private readonly audioExtensions = ["mp3", "wav"];
-	private readonly videoExtensions = ["mp4", "webm"];
+	// private readonly pdfExtensions = ["pdf"];
+	// private readonly canvasExtensions = ["canvas"];
+	// private readonly imageExtensions = ["jpg", "jpeg", "png", "gif", "svg"];
+	// private readonly audioExtensions = ["mp3", "wav"];
+	// private readonly videoExtensions = ["mp4", "webm"];
 	private readonly extensionViewMap = new Map<string, ViewType>();
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 
 	init() {
-		this.fillMap(this.markdownExtensions, ViewType.MARKDOWN);
-		this.fillMap(this.pdfExtensions, ViewType.PDF);
-		this.fillMap(this.canvasExtensions, ViewType.CANVAS);
-		this.fillMap(this.imageExtensions, ViewType.IMAGE);
-		this.fillMap(this.audioExtensions, ViewType.AUDIO);
-		this.fillMap(this.videoExtensions, ViewType.VIDEO);
+		this.fillMap(this.setting.customExtensions.plaintext, ViewType.MARKDOWN);
+		// this.fillMap(this.pdfExtensions, ViewType.PDF);
+		// this.fillMap(this.canvasExtensions, ViewType.CANVAS);
+		// this.fillMap(this.imageExtensions, ViewType.IMAGE);
+		// this.fillMap(this.audioExtensions, ViewType.AUDIO);
+		// this.fillMap(this.videoExtensions, ViewType.VIDEO);
+
 		// register additional extensions with existing obsidian ViewType
 		// so that users can open files in the obsidian with these extensions
 		// see all viewTypes by (getInstance(App) as any).viewRegistry.viewByType
@@ -46,7 +48,6 @@ export class ViewRegistry {
 
 	refreshAll() {
 		this.extensionViewMap.clear()
-		logger.info(`222 ${this.markdownExtensions}`)
 		this.init();
 	}
 
