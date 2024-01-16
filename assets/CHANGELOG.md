@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.1.4
+
+### New
+
+- Copyable result text
+
+### Fixed
+
+- Sometimes it fails to scroll to the target location when opening a large file
+
 ## 0.1.3
 
 ### New
