@@ -35,6 +35,13 @@ export default {
 	"Chinese patch desc": "更好的中文搜索结果",
 	"Chinese word blacklist": "中文词语黑名单",
 	"Chinese word blacklist desc": `只在开启中文搜索优化时生效。忽略 "的", "所以", "尽管" 等词语，详细列表在 "stop-words-zh.txt"。详见 "英文单词黑名单" 选项`,
+
+	"Advanced": "进阶设置",
+	"Advanced.desc": "之前的设置通常能满足大多数使用场景，如果你想有更个性化的设置，可以调整下面的选项",
+	"Copyable text": "可复制的搜索结果",
+	"Copyable text.desc": "如果开启此选项，保持输入框焦点的功能会失效",
+
+
 	"For Development": "开发设置",
 	"Collapse development setting by default": "默认折叠开发设置",
 	"Support the Project": "支持这个项目",

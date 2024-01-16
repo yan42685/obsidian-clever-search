@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
+	import { OuterSetting, type UISetting } from "src/globals/plugin-setting";
 	import {
 		FileItem,
 		FileSubItem,
@@ -9,6 +10,7 @@
 		SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
+	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import {
 		TO_BE_IMPL,
@@ -19,9 +21,9 @@
 	import { debounce } from "throttle-debounce";
 	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
-	import { ViewType } from "src/services/obsidian/view-registry";
 
 	const searchService: SearchService = getInstance(SearchService);
+	const setting: UISetting = getInstance(OuterSetting).ui;
 	const viewHelper = getInstance(ViewHelper);
 
 	export let modal: SearchModal;
@@ -183,7 +185,10 @@
 				bind:value={queryText}
 				bind:this={inputEl}
 				on:input={handleInputDebounced}
-				on:blur={() => setTimeout(() => inputEl?.focus(), 1)}
+				on:blur={() =>
+					setting.copyableText
+						? undefined
+						: setTimeout(() => inputEl?.focus(), 1)}
 			/>
 		</div>
 		<div class="result-items">
@@ -262,6 +267,11 @@
 </div>
 
 <style>
+	div,
+	button {
+		/* enable selecting text for copying purpose if setting.ui.copyableText is enabled */
+		user-select: text;
+	}
 	.search-container {
 		display: flex;
 		white-space: pre-wrap; /* 保证空格和换行符在渲染html时不被压缩掉 */

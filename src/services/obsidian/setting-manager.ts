@@ -59,7 +59,6 @@ export class SettingManager {
 		logger.setLevel(this.setting.logLevel);
 	}
 
-
 	private async saveSettingDownloadRefresh() {
 		await getInstance(SettingManager).saveSettings();
 		getInstance(ViewRegistry).refreshAll();
@@ -173,6 +172,18 @@ class GeneralTab extends PluginSettingTab {
 						this.setting.enableStopWordsZh = value;
 						this.settingManager.shouldReload = true;
 					}),
+			);
+		new Setting(containerEl)
+			.setName(t("Advanced"))
+			.setDesc(t("Advanced.desc"));
+
+		new Setting(containerEl)
+			.setName(t("Copyable text"))
+			.setDesc(t("Copyable text.desc"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.ui.copyableText)
+					.onChange((v) => (this.setting.ui.copyableText = v)),
 			);
 
 		// ======== For Development =======

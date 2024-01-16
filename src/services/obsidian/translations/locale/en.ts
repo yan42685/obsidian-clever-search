@@ -35,6 +35,13 @@ export default {
 	"Chinese patch desc": "Better search result for Chinese",
 	"Chinese word blacklist": "Chinese word blacklist",
 	"Chinese word blacklist desc": `Activates only if the Chinese Patch is enabled. This excludes some meaningless Chinese words like "的", "所以", "尽管" listed in 'stop-words-zh.txt', improving search efficiency and speed. More details are listed in "English word blacklist" option`,
+
+	"Advanced": "Advanced",
+	"Advanced.desc": "The previous settings cover most needs. For further customization, adjust the following options",
+	"Copyable text": "Copyable result text",
+	"Copyable text.desc": "Enabling this option will disable the feature that keeps focusing the input bar",
+
+
 	"For Development": "For Development",
 	"Collapse development setting by default":
 		"Collapse development setting by default",
