@@ -25,7 +25,7 @@
 	const setting: UISetting = getInstance(OuterSetting).ui;
 	const viewHelper = getInstance(ViewHelper);
 
-	export let showRightPane: boolean;
+	export let uiType: "modal" | "floating-window";
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
 	export let queryText: string;
@@ -126,11 +126,17 @@
 		await updateItemAsync(
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
+		if (uiType === "floating-window") {
+			handleConfirm(null);
+		}
 	}
 
 	// Select the previous search result
 	async function handlePrevItem() {
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
+		if (uiType === "floating-window") {
+			handleConfirm(null);
+		}
 	}
 
 	function handleSubItemClick(index: number) {
@@ -153,8 +159,8 @@
 		);
 	}
 
-	async function handleConfirm(event: Event) {
-		event.preventDefault();
+	async function handleConfirm(event: Event | null) {
+		event?.preventDefault();
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
 			onConfirmExternal,
@@ -175,7 +181,7 @@
 	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
 	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
-	// listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
 	handleInputAsync();
 </script>
 
@@ -230,7 +236,7 @@
 			</ul>
 		</div>
 	</div>
-	{#if showRightPane}
+	{#if uiType !== "floating-window"}
 		<div class="right-pane">
 			<div class="preview-container">
 				{#if searchType === SearchType.IN_FILE}

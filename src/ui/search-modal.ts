@@ -23,28 +23,22 @@ export class SearchModal extends Modal {
 		this.mountedElement = new MountedModal({
 			target: this.modalEl,
 			props: {
-				showRightPane: true,
+				uiType: "modal",
 				onConfirmExternal: () => this.close(),
 				searchType: searchType,
 				queryText: effectiveQuery || "",
 			},
 		});
 
-		this.registerModalHotkeys();
+		getInstance(CommandRegistry).registerNavigationHotkeys(this.scope);
 	}
 
 	onOpen() {
-		// this.contentEl.empty();
-		// this.contentEl.setText("Woah!");
 	}
 
 	onClose() {
 		this.mountedElement.$destroy();
 		logger.trace("mounted element has been destroyed.");
-	}
-
-	private registerModalHotkeys() {
-		getInstance(CommandRegistry).registerNavigationHotkeys(this.scope);
 	}
 
 }

@@ -58,7 +58,7 @@ export class FloatingWindow {
 		this.mountedElement = new MountedModal({
 			target: this.contentEl,
 			props: {
-				showRightPane: false,
+				uiType: "floating-window",
 				onConfirmExternal: () => {},
 				searchType: SearchType.IN_FILE,
 				queryText: "",
