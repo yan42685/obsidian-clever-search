@@ -16,19 +16,6 @@ export default {
 	"Max items count desc":
 		"虽然本插件可以搜索到成千上万个结果，但由于底层渲染器性能限制，不能即时渲染所有结果",
 
-	"Customize extensions": "自定义后缀名",
-	"extensionModal.desc":
-		"自定义希望索引的文件后缀名。默认情况下 Obsidian 不原生支持的文件类型，如 'txt'，将通过外部程序打开。要在 Obsidian 内打开这些文件，可能需要安装插件，如 'obsidian-vscode-editor' 或 'obsidian-custom-file-extension-plugin'。",
-	"extensionModal.plaintextName": "纯文本",
-	"extensionModal.plaintextDesc":
-		"后缀名使用空格或换行符分隔。请不要在此处包含 'jpg'、'mp4' 等二进制文件类型，否则可能会导致索引问题。另外，索引和搜索 HTML 文件可能会更慢，因为它们首先需要转换为干净的 Markdown 格式。此外，受 API 限制, 自动滚动到 HTML 文件中的特定位置似乎不可行。",
-
-	"Excluded files": "忽略文件",
-	Manage: "管理",
-	"Follow Obsidian Excluded Files": "跟随 Obsidian 忽略文件设置",
-	"Enter path...": "请输入路径...",
-	Add: "添加",
-
 	"English word blacklist": "英文单词黑名单",
 	"English word blacklist desc": `建立索引时，忽略一些含义模糊的单词，比如 "do", "and", "them", 可以加快索引和搜索速度，但是这些单词不会被搜索到. 可以在 ${stopWordsEnTargetUrl} 按需修改单词黑名单`,
 	"Chinese patch": "中文搜索优化",
@@ -36,8 +23,23 @@ export default {
 	"Chinese word blacklist": "中文词语黑名单",
 	"Chinese word blacklist desc": `只在开启中文搜索优化时生效。忽略 "的", "所以", "尽管" 等词语，详细列表在 "stop-words-zh.txt"。详见 "英文单词黑名单" 选项`,
 
+
 	"Advanced": "进阶设置",
 	"Advanced.desc": "之前的设置通常能满足大多数使用场景，如果你想有更个性化的设置，可以调整下面的选项",
+
+	"Excluded files": "忽略文件",
+	Manage: "管理",
+	"Follow Obsidian Excluded Files": "跟随 Obsidian 忽略文件设置",
+	"Enter path...": "请输入路径...",
+	Add: "添加",
+
+	"Customize extensions": "自定义后缀名",
+	"extensionModal.desc":
+		"自定义希望索引的文件后缀名。默认情况下 Obsidian 不原生支持的文件类型，如 'txt'，将通过外部程序打开。要在 Obsidian 内打开这些文件，可能需要安装插件，如 'obsidian-custom-file-extension-plugin' 或 'obsidian-vscode-editor'。",
+	"extensionModal.plaintextName": "纯文本",
+	"extensionModal.plaintextDesc":
+		"后缀名使用空格或换行符分隔。请不要在此处包含 'pdf'、'jpg'、'mp4' 等无法用记事本打开的二进制文件，否则可能会导致索引问题。另外，索引和搜索 HTML 文件可能会更慢，因为它们首先需要转换为干净的 Markdown 格式。此外，受 API 限制, 自动滚动到 HTML 文件中的特定位置似乎不可行。",
+
 	"Copyable text": "可复制的搜索结果",
 	"Copyable text.desc": "如果开启此选项，保持输入框焦点的功能会失效",
 

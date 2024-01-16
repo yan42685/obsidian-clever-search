@@ -117,22 +117,6 @@ class GeneralTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
-			b.setButtonText(t("Manage")).onClick(() => {
-				new ExcludePathModal(getInstance(App)).open();
-			}),
-		);
-
-		new Setting(containerEl)
-			.setName(t("Customize extensions"))
-			.addButton((b) =>
-				b
-					.setButtonText(t("Manage"))
-					.onClick(() =>
-						new CustomExtensionModal(getInstance(App)).open(),
-					),
-			);
-
 		new Setting(containerEl)
 			.setName(t("English word blacklist"))
 			.setDesc(t("English word blacklist desc"))
@@ -177,6 +161,22 @@ class GeneralTab extends PluginSettingTab {
 			.setName(t("Advanced"))
 			.setDesc(t("Advanced.desc"));
 
+		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
+			b.setButtonText(t("Manage")).onClick(() => {
+				new ExcludePathModal(getInstance(App)).open();
+			}),
+		);
+
+		new Setting(containerEl)
+			.setName(t("Customize extensions"))
+			.addButton((b) =>
+				b
+					.setButtonText(t("Manage"))
+					.onClick(() =>
+						new CustomExtensionModal(getInstance(App)).open(),
+					),
+			);
+
 		new Setting(containerEl)
 			.setName(t("Copyable text"))
 			.setDesc(t("Copyable text.desc"))
@@ -188,6 +188,7 @@ class GeneralTab extends PluginSettingTab {
 
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
+		settingGroup.style.marginTop = "1.5em";
 
 		const devSettingTitle = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-title",
@@ -226,6 +227,35 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.ui.collapseDevSettingByDefault)
 					.onChange((value) => {
 						this.setting.ui.collapseDevSettingByDefault = value;
+					}),
+			);
+
+		new Setting(devSettingContent)
+			.setName(t("Reindex the vault"))
+			.addButton((button) => {
+				button.setButtonText(t("Reindex")).onClick(async () => {
+					await getInstance(DataManager).refreshAllAsync();
+				});
+			});
+
+		new Setting(devSettingContent)
+			.setName(t("Log level"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						trace: "trace",
+						debug: "debug",
+						info: "info",
+						warn: "warn",
+						error: "error",
+						none: "none",
+					} as LogLevelOptions)
+					// 不能用大写的字符串作为key...
+					.setValue(this.setting.logLevel.toLowerCase())
+					.onChange(async (value) => {
+						const level = value as LogLevel;
+						logger.setLevel(level);
+						this.setting.logLevel = level;
 					}),
 			);
 
@@ -284,34 +314,6 @@ class GeneralTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(devSettingContent)
-			.setName(t("Reindex the vault"))
-			.addButton((button) => {
-				button.setButtonText(t("Reindex")).onClick(async () => {
-					await getInstance(DataManager).refreshAllAsync();
-				});
-			});
-
-		new Setting(devSettingContent)
-			.setName(t("Log level"))
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						trace: "trace",
-						debug: "debug",
-						info: "info",
-						warn: "warn",
-						error: "error",
-						none: "none",
-					} as LogLevelOptions)
-					// 不能用大写的字符串作为key...
-					.setValue(this.setting.logLevel.toLowerCase())
-					.onChange(async (value) => {
-						const level = value as LogLevel;
-						logger.setLevel(level);
-						this.setting.logLevel = level;
-					}),
-			);
 	}
 }
 
