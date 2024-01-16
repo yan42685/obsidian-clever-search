@@ -1,6 +1,8 @@
 import { singleton } from "tsyringe";
 import { SearchType } from "./globals/search-types";
 import MountedModal from "./ui/MountedModal.svelte";
+import { getInstance } from "./utils/my-lib";
+import { ViewHelper } from "./ui/view-helper";
 
 @singleton()
 export class DevTestHelper {
@@ -65,8 +67,8 @@ export class DevTestHelper {
 				queryText: "",
 			},
 		});
+		getInstance(ViewHelper).focusInput();
 	}
-
 
 	private handleMouseDown = (e: MouseEvent) => {
 		this.isDragging = true;

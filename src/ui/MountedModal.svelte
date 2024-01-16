@@ -182,6 +182,7 @@
 	<div class="left-pane">
 		<div class="search-bar" data-match-count={matchCountText}>
 			<input
+				id="cs-search-input"
 				bind:value={queryText}
 				bind:this={inputEl}
 				on:input={handleInputDebounced}
@@ -318,9 +319,9 @@
 		border: none;
 		border-radius: 10px;
 		background-color: var(--cs-search-bar-bgc, #20202066);
-		box-shadow:
-			0 2px 4px rgba(0, 0, 0, 0.18),
-			0 2px 3px rgba(0, 0, 0, 0.26);
+		 box-shadow:
+			0 2px 4px rgba(0, 0, 0, 0.07),
+			0 2px 3px rgba(0, 0, 0, 0.10);
 	}
 
 	.result-items {

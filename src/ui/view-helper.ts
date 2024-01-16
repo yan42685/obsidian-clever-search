@@ -103,6 +103,11 @@ export class ViewHelper {
 		}
 	}
 
+	focusInput() {
+		const inputElement = document.getElementById('cs-search-input');
+		inputElement?.focus();
+	}
+
 	private jumpInFile(row: number, col: number) {
 		this.scrollIntoViewForExistingView(row, col);
 	}
