@@ -7,7 +7,7 @@ export enum EventEnum {
 	PREV_SUB_ITEM,
 	CONFIRM_ITEM,
 
-	MODAL_OPEN,
+	IN_VAULT_SEARCH,
 }
 
 export enum LanguageEnum {

@@ -1,11 +1,13 @@
-import { App, type Command } from "obsidian";
+import { App, Scope, type Command, type Modifier } from "obsidian";
 import { devTest } from "src/dev-test";
 import { THIS_PLUGIN } from "src/globals/constants";
+import { EventEnum } from "src/globals/enums";
 import { SearchType } from "src/globals/search-types";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import type CleverSearch from "src/main";
 import { SearchModal } from "src/ui/search-modal";
-import { getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { eventBus } from "src/utils/event-bus";
+import { currModifier, getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 
@@ -13,6 +15,10 @@ import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 export class CommandRegistry {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private app = getInstance(App);
+
+	constructor() {
+		this.registerNavigationHotkeys(this.app.scope);
+	}
 
 	// only for developer
 	addDevCommands() {
@@ -51,8 +57,10 @@ export class CommandRegistry {
 		this.addCommand({
 			id: "clever-search-in-vault",
 			name: "Search in Vault",
-			callback: () =>
-				new SearchModal(this.app, SearchType.IN_VAULT).open(),
+			callback: () => {
+				eventBus.emit(EventEnum.IN_VAULT_SEARCH);
+				new SearchModal(this.app, SearchType.IN_VAULT).open();
+			},
 		});
 
 		this.addCommand({
@@ -68,7 +76,49 @@ export class CommandRegistry {
 		});
 	}
 
+	onunload() {
+
+	}
+
 	private addCommand(command: Command) {
 		this.plugin.addCommand(command);
 	}
+
+	// register global hotkeys for FloatingWindow and scoped hotkeys for each Modal
+	registerNavigationHotkeys(scope: Scope) {
+		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
+		const modKey = currModifier;
+		// console.log("current modifier: " + modKey);
+
+		this.newHotKey(scope, [modKey], "J", EventEnum.NEXT_ITEM);
+		this.newHotKey(scope, [], "ArrowDown", EventEnum.NEXT_ITEM);
+
+		this.newHotKey(scope, [modKey], "K", EventEnum.PREV_ITEM);
+		this.newHotKey(scope, [], "ArrowUp", EventEnum.PREV_ITEM);
+
+		this.newHotKey(scope, [modKey], "N", EventEnum.NEXT_SUB_ITEM);
+		this.newHotKey(scope, [modKey], "P", EventEnum.PREV_SUB_ITEM);
+
+		this.newHotKey(scope, [], "Enter", EventEnum.CONFIRM_ITEM);
+	}
+
+	private newHotKey(
+		scope: Scope,
+		modifiers: Modifier[],
+		key: string,
+		eventEnum: EventEnum,
+	) {
+		// this.scope.register(modifiers, key, emitEvent(eventEnum));
+		scope.register(modifiers, key, emitEvent(eventEnum));
+	}
+}
+
+function emitEvent(eventEnum: EventEnum) {
+	return (e: Event) => {
+		e.preventDefault();
+		eventBus.emit(eventEnum);
+		console.log("emit...");
+
+
+	};
 }
