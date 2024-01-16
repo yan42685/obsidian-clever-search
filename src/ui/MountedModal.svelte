@@ -153,7 +153,8 @@
 		);
 	}
 
-	async function handleConfirm() {
+	async function handleConfirm(event: Event) {
+		event.preventDefault();
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
 			onConfirmExternal,
@@ -174,7 +175,7 @@
 	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
 	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
-	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+	// listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
 	handleInputAsync();
 </script>
 
@@ -202,10 +203,9 @@
 						on:click={(event) => {
 							handleItemClick(index);
 						}}
-						on:contextmenu={async (event) => {
-							event.preventDefault();
+						on:contextmenu={async (e) => {
 							await handleItemClick(index);
-							await handleConfirm();
+							await handleConfirm(e);
 						}}
 					>
 						{#if item instanceof LineItem}
@@ -235,7 +235,9 @@
 			<div class="preview-container">
 				{#if searchType === SearchType.IN_FILE}
 					{#if currContext}
-						<p>{@html currContext}</p>
+						<p on:contextmenu={(e) => handleConfirm(e)}>
+							{@html currContext}
+						</p>
 					{/if}
 				{:else if searchType === SearchType.IN_VAULT}
 					{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
@@ -244,10 +246,9 @@
 								<button
 									on:click={(event) =>
 										handleSubItemClick(index)}
-									on:contextmenu={(event) => {
-										event.preventDefault();
+									on:contextmenu={(e) => {
 										currSubItemIndex = index;
-										handleConfirm();
+										handleConfirm(e);
 									}}
 									bind:this={subItem.element}
 									class:selected={index === currSubItemIndex}
@@ -319,9 +320,9 @@
 		border: none;
 		border-radius: 10px;
 		background-color: var(--cs-search-bar-bgc, #20202066);
-		 box-shadow:
+		box-shadow:
 			0 2px 4px rgba(0, 0, 0, 0.07),
-			0 2px 3px rgba(0, 0, 0, 0.10);
+			0 2px 3px rgba(0, 0, 0, 0.1);
 	}
 
 	.result-items {
