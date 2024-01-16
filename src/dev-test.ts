@@ -1,8 +1,5 @@
 import {
 	App,
-	Component,
-	MarkdownRenderer,
-	Modal,
 	TFile,
 	Vault,
 	htmlToMarkdown
@@ -11,12 +8,13 @@ import {
 import uFuzzy from "@leeoniya/ufuzzy";
 import { OuterSetting } from "./globals/plugin-setting";
 import { ChinesePatch } from "./integrations/languages/chinese-patch";
+import { RenderMarkdownModal } from "./main";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
-import { RenderMarkdownModal } from "./main";
+import { DevTestHelper } from "./dev-test-helper";
 
 
 function getApp() {
@@ -180,5 +178,6 @@ export async function devTest() {
 	// testTikToken();
 	// monitorExecution(() => testTokenizer());
 	// testUFuzzy();
-	await testParseHtml();
+	getInstance(DevTestHelper).createFloatingWindow();
+	// await testParseHtml();
 }

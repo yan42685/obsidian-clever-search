@@ -25,7 +25,8 @@ export class SearchModal extends Modal {
 		this.mountedElement = new MountedModal({
 			target: this.modalEl,
 			props: {
-				modal: this,
+				showRightPane: true,
+				onConfirmExternal: () => this.close(),
 				searchType: searchType,
 				queryText: effectiveQuery || "",
 			},

@@ -39,12 +39,12 @@ export class ViewHelper {
 	}
 
 	async handleConfirmAsync(
-		modal: SearchModal,
+		onConfirmExternal: () => void,
 		searchType: SearchType,
 		selectedItem: Item,
 		currSubItemIndex: number,
 	) {
-		modal.close();
+		onConfirmExternal();
 		if (selectedItem) {
 			if (searchType === SearchType.IN_FILE) {
 				const lineItem = selectedItem as LineItem;

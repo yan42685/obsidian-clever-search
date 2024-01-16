@@ -19,14 +19,14 @@
 	} from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
-	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
 	const setting: UISetting = getInstance(OuterSetting).ui;
 	const viewHelper = getInstance(ViewHelper);
 
-	export let modal: SearchModal;
+	export let showRightPane: boolean;
+	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
 	export let queryText: string;
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
@@ -156,7 +156,7 @@
 	async function handleConfirm() {
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
-			modal,
+			onConfirmExternal,
 			searchType,
 			selectedItem,
 			currSubItemIndex,
@@ -229,41 +229,44 @@
 			</ul>
 		</div>
 	</div>
-	<div class="right-pane">
-		<div class="preview-container">
-			{#if searchType === SearchType.IN_FILE}
-				{#if currContext}
-					<p>{@html currContext}</p>
+	{#if showRightPane}
+		<div class="right-pane">
+			<div class="preview-container">
+				{#if searchType === SearchType.IN_FILE}
+					{#if currContext}
+						<p>{@html currContext}</p>
+					{/if}
+				{:else if searchType === SearchType.IN_VAULT}
+					{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
+						<ul>
+							{#each currFileSubItems as subItem, index}
+								<button
+									on:click={(event) =>
+										handleSubItemClick(index)}
+									on:contextmenu={(event) => {
+										event.preventDefault();
+										currSubItemIndex = index;
+										handleConfirm();
+									}}
+									bind:this={subItem.element}
+									class:selected={index === currSubItemIndex}
+									class="file-sub-item"
+								>
+									{@html subItem.text}
+								</button>
+							{/each}
+						</ul>
+					{:else}
+						<span>
+							{isDevEnvironment
+								? "no result or to be impl"
+								: "no matched content"}
+						</span>
+					{/if}
 				{/if}
-			{:else if searchType === SearchType.IN_VAULT}
-				{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
-					<ul>
-						{#each currFileSubItems as subItem, index}
-							<button
-								on:click={(event) => handleSubItemClick(index)}
-								on:contextmenu={(event) => {
-									event.preventDefault();
-									currSubItemIndex = index;
-									handleConfirm();
-								}}
-								bind:this={subItem.element}
-								class:selected={index === currSubItemIndex}
-								class="file-sub-item"
-							>
-								{@html subItem.text}
-							</button>
-						{/each}
-					</ul>
-				{:else}
-					<span>
-						{isDevEnvironment
-							? "no result or to be impl"
-							: "no matched content"}
-					</span>
-				{/if}
-			{/if}
+			</div>
 		</div>
-	</div>
+	{/if}
 </div>
 
 <style>
@@ -289,7 +292,8 @@
 		display: flex;
 		flex-direction: column;
 		align-items: left;
-		width: 40%;
+		/* width: 40%; */
+		width: 27.5vw;
 	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
