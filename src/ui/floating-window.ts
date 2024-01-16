@@ -1,11 +1,9 @@
-import { singleton } from "tsyringe";
-import { SearchType } from "./globals/search-types";
-import MountedModal from "./ui/MountedModal.svelte";
-import { getInstance } from "./utils/my-lib";
-import { ViewHelper } from "./ui/view-helper";
+import { SearchType } from "../globals/search-types";
+import { getInstance } from "../utils/my-lib";
+import MountedModal from "./MountedModal.svelte";
+import { ViewHelper } from "./view-helper";
 
-@singleton()
-export class DevTestHelper {
+export class FloatingWindow {
 	private isDragging = false;
 	private dragStartX = 0;
 	private dragStartY = 0;
@@ -14,7 +12,7 @@ export class DevTestHelper {
 	private contentEl: HTMLDivElement;
 	private mountedElement: any;
 
-	createFloatingWindow() {
+	open() {
 		this.containerEl = document.body.createDiv();
 		this.frameEl = this.containerEl.createDiv();
 		this.contentEl = this.containerEl.createDiv();
@@ -46,7 +44,7 @@ export class DevTestHelper {
 		this.contentEl.style.padding = "10px 0 10px 10px";
 		this.contentEl.style.backgroundColor = "#262626";
 
-		const closeButton = document.createElement("div");
+		const closeButton = this.frameEl.createDiv();
 		closeButton.innerText = "✖";
 		closeButton.style.cursor = "pointer";
 		closeButton.style.fontSize = "13px";
@@ -56,7 +54,6 @@ export class DevTestHelper {
 			document.removeEventListener("mouseup", this.handleMouseUp);
 			this.containerEl.remove();
 		});
-		this.frameEl.appendChild(closeButton);
 
 		this.mountedElement = new MountedModal({
 			target: this.contentEl,

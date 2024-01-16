@@ -14,7 +14,7 @@ import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
-import { DevTestHelper } from "./dev-test-helper";
+import { FloatingWindow } from "./ui/floating-window";
 
 
 function getApp() {
@@ -178,6 +178,6 @@ export async function devTest() {
 	// testTikToken();
 	// monitorExecution(() => testTokenizer());
 	// testUFuzzy();
-	getInstance(DevTestHelper).createFloatingWindow();
+	new FloatingWindow().open();
 	// await testParseHtml();
 }
