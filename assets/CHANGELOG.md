@@ -13,6 +13,7 @@
 ### BREAKING
 
 - Removed feature: keep focusing input bar
+- new style setting option: Main Background Color. Your current modal background color may be changed due to the default value for the new option
 
 ## 0.1.3
 

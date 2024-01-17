@@ -24,6 +24,7 @@ export class FloatingWindow {
 		document.addEventListener("mousemove", this.handleMouseMove);
 		document.addEventListener("mouseup", this.handleMouseUp);
 
+		this.containerEl.addClass("cs-floating-window-container");
 		this.containerEl.style.position = "fixed";
 		this.containerEl.style.top = this.uiSetting.floatingWindowTop;
 		this.containerEl.style.left = this.uiSetting.floatingWindowLeft;
@@ -52,7 +53,6 @@ export class FloatingWindow {
 		closeButton.addEventListener("click", this.onClose);
 
 		this.contentEl.style.padding = "10px 0 10px 10px";
-		this.contentEl.style.backgroundColor = "#262626";
 
 		this.mountedElement = new MountedModal({
 			target: this.contentEl,

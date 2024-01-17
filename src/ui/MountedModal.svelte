@@ -11,6 +11,7 @@
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
+	import { logger } from "src/utils/logger";
 	import {
 		TO_BE_IMPL,
 		getInstance,
@@ -19,7 +20,6 @@
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import { ViewHelper } from "./view-helper";
-	import { logger } from "src/utils/logger";
 
 	const searchService: SearchService = getInstance(SearchService);
 	const viewHelper = getInstance(ViewHelper);
