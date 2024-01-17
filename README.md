@@ -28,7 +28,6 @@
 
 ### Subtle Tweaks for Better UX
 
-- [x] keep focusing input bar even if clicking an item
 - [x] Search from selection
 - [ ] Remember last query text
 
@@ -56,7 +55,7 @@
 | Modal    | Confirm item                  | `Enter` or `Right Click` |
 | Obsidian | Search in vault               | undefined                |
 | Obsidian | Search in File                | undefined                |
-| Obsidian | Search in file with last Omnisearch query (to be deprecated) | undefined |
+| Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined |
 | Obsidian | Toggle privacy mode           | undefined                |
 
 ## Limitations

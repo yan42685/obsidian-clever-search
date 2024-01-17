@@ -96,6 +96,7 @@ export class FloatingWindow {
 		getInstance(SettingManager).postSettingUpdated();
 	};
 
+	// should be called on unload
 	onClose = () => {
 		document.removeEventListener("mousemove", this.handleMouseMove);
 		document.removeEventListener("mouseup", this.handleMouseUp);
