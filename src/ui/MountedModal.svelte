@@ -60,7 +60,7 @@
 					currFileItem,
 				);
 				currFileSubItems = currFileItem.subItems;
-				currSubItemIndex = 0;
+				currSubItemIndex = currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
 				await tick(); // wait until subItems are rendered by svelte
 				viewHelper.scrollTo(
 					"start",
@@ -77,6 +77,7 @@
 			currFileItem = null;
 			currFileSubItems = [];
 			currItemIndex = NULL_NUMBER;
+			currSubItemIndex = NULL_NUMBER;
 		}
 	}
 

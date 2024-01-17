@@ -24,16 +24,16 @@ export class ViewHelper {
 
 	updateSubItemIndex(
 		subItems: FileSubItem[],
-		currentIndex: number,
+		currSubIndex: number,
 		direction: "next" | "prev",
 	): number {
-		const subItem = subItems[currentIndex];
+		const subItem = subItems[currSubIndex];
 		const maxIndex = subItems.length - 1;
 		this.scrollTo("center", subItem, "auto");
 		if (direction === "next") {
-			return currentIndex < maxIndex ? currentIndex + 1 : currentIndex;
+			return currSubIndex < maxIndex ? currSubIndex + 1 : currSubIndex;
 		} else {
-			return currentIndex > 0 ? currentIndex - 1 : currentIndex;
+			return currSubIndex > 0 ? currSubIndex - 1 : currSubIndex;
 		}
 	}
 
@@ -82,6 +82,9 @@ export class ViewHelper {
 					} else {
 						throw Error("unsupported viewType to jump");
 					}
+				} else {
+					// no content text matched, but filenames or folders are matched
+					await this.jumpInVaultAsync(fileItem.path, 0, 0);
 				}
 			} else {
 				throw Error(`unsupported search type to jump ${searchType}`);
@@ -163,7 +166,7 @@ export class ViewHelper {
 			// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
 			// 	view.editor.focus();
 		} else {
-			logger.info("No view to jump");
+			logger.info("No markdown view to jump");
 		}
 	}
 }

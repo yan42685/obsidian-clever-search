@@ -102,6 +102,6 @@ export class FloatingWindow {
 		// destroy svelte component
 		this.mountedElement?.$destroy();
 		this.mountedElement = null;
-		this.containerEl.remove();
+		this.containerEl?.remove();
 	};
 }
