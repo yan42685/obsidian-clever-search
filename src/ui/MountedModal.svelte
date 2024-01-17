@@ -19,6 +19,7 @@
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import { ViewHelper } from "./view-helper";
+	import { logger } from "src/utils/logger";
 
 	const searchService: SearchService = getInstance(SearchService);
 	const viewHelper = getInstance(ViewHelper);
@@ -168,10 +169,16 @@
 	}
 
 	// ===================================================
+	onDestroy(() => {
+		logger.trace("mounted element has been destroyed.");
+	});
+
 	// NOTE: onMount() won't be triggered and I wonder why
 	function listenEvent(event: EventEnum, callback: EventCallback) {
 		eventBus.on(event, callback);
-		onDestroy(() => eventBus.off(event, callback));
+		onDestroy(() => {
+			eventBus.off(event, callback);
+		});
 	}
 
 	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);

@@ -49,11 +49,7 @@ export class FloatingWindow {
 		closeButton.style.cursor = "pointer";
 		closeButton.style.fontSize = "13px";
 		closeButton.style.margin = "5px";
-		closeButton.addEventListener("click", () => {
-			document.removeEventListener("mousemove", this.handleMouseMove);
-			document.removeEventListener("mouseup", this.handleMouseUp);
-			this.containerEl.remove();
-		});
+		closeButton.addEventListener("click", this.onClose);
 
 		this.contentEl.style.padding = "10px 0 10px 10px";
 		this.contentEl.style.backgroundColor = "#262626";
@@ -89,5 +85,13 @@ export class FloatingWindow {
 		this.uiSetting.floatingWindowLeft = this.containerEl.style.left;
 		this.uiSetting.floatingWindowTop = this.containerEl.style.top;
 		getInstance(SettingManager).postSettingUpdated();
+	};
+
+	private onClose = () => {
+		document.removeEventListener("mousemove", this.handleMouseMove);
+		document.removeEventListener("mouseup", this.handleMouseUp);
+		// destroy svelte component
+		this.mountedElement.$destroy();
+		this.containerEl.remove();
 	};
 }

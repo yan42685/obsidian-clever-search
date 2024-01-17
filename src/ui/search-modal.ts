@@ -33,12 +33,9 @@ export class SearchModal extends Modal {
 		getInstance(CommandRegistry).registerNavigationHotkeys(this.scope);
 	}
 
-	onOpen() {
-	}
+	onOpen() { }
 
 	onClose() {
 		this.mountedElement.$destroy();
-		logger.trace("mounted element has been destroyed.");
 	}
-
 }
