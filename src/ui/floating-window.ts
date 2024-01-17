@@ -28,7 +28,7 @@ export class FloatingWindow {
 		this.containerEl.style.position = "fixed";
 		this.containerEl.style.top = this.uiSetting.floatingWindowTop;
 		this.containerEl.style.left = this.uiSetting.floatingWindowLeft;
-		this.containerEl.style.zIndex = "1000";
+		this.containerEl.style.zIndex = "20";
 		this.containerEl.style.border = "1px solid #454545";
 		this.containerEl.style.borderRadius = "10px";
 		// avoid the frameEl overflowing so that borderRadius of containerEl is covered
@@ -68,6 +68,7 @@ export class FloatingWindow {
 
 	private handleMouseDown = (e: MouseEvent) => {
 		this.isDragging = true;
+		this.containerEl.style.opacity = "0.75";
 		this.dragStartX = e.pageX - this.containerEl.offsetLeft;
 		this.dragStartY = e.pageY - this.containerEl.offsetTop;
 		e.preventDefault(); // prevents text selection during drag
@@ -78,10 +79,12 @@ export class FloatingWindow {
 			this.containerEl.style.left = `${e.pageX - this.dragStartX}px`;
 			this.containerEl.style.top = `${e.pageY - this.dragStartY}px`;
 		}
+
 	};
 
 	private handleMouseUp = () => {
 		this.isDragging = false;
+		this.containerEl.style.opacity = "1";
 		this.uiSetting.floatingWindowLeft = this.containerEl.style.left;
 		this.uiSetting.floatingWindowTop = this.containerEl.style.top;
 		getInstance(SettingManager).postSettingUpdated();
