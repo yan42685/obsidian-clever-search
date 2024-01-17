@@ -178,6 +178,6 @@ export async function devTest() {
 	// testTikToken();
 	// monitorExecution(() => testTokenizer());
 	// testUFuzzy();
-	new FloatingWindow().open();
+	getInstance(FloatingWindow).open();
 	// await testParseHtml();
 }

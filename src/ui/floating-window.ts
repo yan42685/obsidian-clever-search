@@ -1,10 +1,12 @@
 import { OuterSetting } from "src/globals/plugin-setting";
 import { SettingManager } from "src/services/obsidian/setting-manager";
+import { singleton } from "tsyringe";
 import { SearchType } from "../globals/search-types";
 import { getInstance } from "../utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 import { ViewHelper } from "./view-helper";
 
+@singleton()
 export class FloatingWindow {
 	private isDragging = false;
 	private dragStartX = 0;
@@ -13,9 +15,13 @@ export class FloatingWindow {
 	private containerEl: HTMLDivElement;
 	private frameEl: HTMLDivElement;
 	private contentEl: HTMLDivElement;
-	private mountedElement: any;
+	private mountedElement: MountedModal | null = null;
 
 	open() {
+		if (this.mountedElement !== null) {
+			// avoid repeating open floating window
+			return;
+		}
 		this.containerEl = document.body.createDiv();
 		this.frameEl = this.containerEl.createDiv();
 		this.contentEl = this.containerEl.createDiv();
@@ -94,7 +100,8 @@ export class FloatingWindow {
 		document.removeEventListener("mousemove", this.handleMouseMove);
 		document.removeEventListener("mouseup", this.handleMouseUp);
 		// destroy svelte component
-		this.mountedElement.$destroy();
+		this.mountedElement?.$destroy();
+		this.mountedElement = null;
 		this.containerEl.remove();
 	};
 }
