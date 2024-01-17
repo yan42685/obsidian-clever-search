@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
-	import { OuterSetting, type UISetting } from "src/globals/plugin-setting";
 	import {
 		FileItem,
 		FileSubItem,
@@ -22,7 +21,6 @@
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
-	const setting: UISetting = getInstance(OuterSetting).ui;
 	const viewHelper = getInstance(ViewHelper);
 
 	export let uiType: "modal" | "floating-window";
@@ -38,7 +36,6 @@
 	let currFileSubItems: FileSubItem[] = []; // for markdown viewType
 	let currFilePreviewContent: any = undefined; // for non-markdown viewType
 	let currSubItemIndex = NULL_NUMBER;
-	let inputEl: HTMLElement | undefined;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
@@ -191,12 +188,7 @@
 			<input
 				id="cs-search-input"
 				bind:value={queryText}
-				bind:this={inputEl}
 				on:input={handleInputDebounced}
-				on:blur={() =>
-					setting.copyableText
-						? undefined
-						: setTimeout(() => inputEl?.focus(), 1)}
 			/>
 		</div>
 		<div class="result-items">

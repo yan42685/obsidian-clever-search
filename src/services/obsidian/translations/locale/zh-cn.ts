@@ -40,9 +40,6 @@ export default {
 	"extensionModal.plaintextDesc":
 		"后缀名使用空格或换行符分隔。请不要在此处包含 'pdf'、'jpg'、'mp4' 等无法用记事本打开的二进制文件，否则可能会导致索引问题。另外，索引和搜索 HTML 文件可能会更慢，因为它们首先需要转换为干净的 Markdown 格式。此外，受 API 限制, 自动滚动到 HTML 文件中的特定位置似乎不可行。",
 
-	"Copyable text": "可复制的搜索结果",
-	"Copyable text.desc": "如果开启此选项，保持输入框焦点的功能会失效",
-
 
 	"For Development": "开发设置",
 	"Collapse development setting by default": "默认折叠开发设置",

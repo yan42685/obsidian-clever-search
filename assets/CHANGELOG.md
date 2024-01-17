@@ -10,6 +10,10 @@
 
 - Sometimes it fails to scroll to the target location when opening a large file
 
+### BREAKING
+
+- Removed feature: keep focusing input bar
+
 ## 0.1.3
 
 ### New

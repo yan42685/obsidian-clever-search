@@ -43,9 +43,6 @@ export default {
 	"extensionModal.plaintextDesc":
 		"Extensions should be separated by a space or a newline character. Please do not include binary filetypes like 'pdf', 'jpg', 'mp4', etc, that can't be opened with notepad. Including them might cause indexing issues. Additionally, the indexing and searching of HTML files may be slower because they require conversion to clean Markdown format first. Furthermore, due to the extremely limited API, it seems impossible to automatically scroll to specific locations within HTML files.",
 
-	"Copyable text": "Copyable result text",
-	"Copyable text.desc": "Enabling this option will disable the feature that keeps focusing the input bar",
-
 
 	"For Development": "For Development",
 	"Collapse development setting by default":

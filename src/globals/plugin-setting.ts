@@ -38,7 +38,6 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	},
 	ui: {
 		openInNewPane: true,
-		copyableText: false,
 		maxItemResults: 30,
 		showedExtension: "except md",
 		collapseDevSettingByDefault: isDevEnvironment ? false : true,
@@ -58,7 +57,6 @@ export type ApiProvider = {
 
 export type UISetting = {
 	openInNewPane: boolean;
-	copyableText: boolean,
 	maxItemResults: number;
 	showedExtension: "none" | "except md" | "all";
 	collapseDevSettingByDefault: boolean;

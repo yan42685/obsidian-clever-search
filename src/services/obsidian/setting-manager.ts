@@ -176,15 +176,6 @@ class GeneralTab extends PluginSettingTab {
 					),
 			);
 
-		new Setting(containerEl)
-			.setName(t("Copyable text"))
-			.setDesc(t("Copyable text.desc"))
-			.addToggle((t) =>
-				t
-					.setValue(this.setting.ui.copyableText)
-					.onChange((v) => (this.setting.ui.copyableText = v)),
-			);
-
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
 		settingGroup.style.marginTop = "1.5em";
