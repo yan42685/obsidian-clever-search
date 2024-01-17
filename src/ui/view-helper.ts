@@ -15,7 +15,6 @@ import { ViewType } from "src/services/obsidian/view-registry";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import type { SearchModal } from "./search-modal";
 
 @singleton()
 export class ViewHelper {
@@ -40,6 +39,7 @@ export class ViewHelper {
 
 	async handleConfirmAsync(
 		onConfirmExternal: () => void,
+		sourcePath: string,
 		searchType: SearchType,
 		selectedItem: Item,
 		currSubItemIndex: number,
@@ -48,7 +48,11 @@ export class ViewHelper {
 		if (selectedItem) {
 			if (searchType === SearchType.IN_FILE) {
 				const lineItem = selectedItem as LineItem;
-				this.jumpInFile(lineItem.line.row, lineItem.line.col);
+				await this.jumpInVaultAsync(
+					sourcePath,
+					lineItem.line.row,
+					lineItem.line.col,
+				);
 			} else if (searchType === SearchType.IN_VAULT) {
 				const fileItem = selectedItem as FileItem;
 				const viewType = fileItem.viewType;
@@ -104,12 +108,8 @@ export class ViewHelper {
 	}
 
 	focusInput() {
-		const inputElement = document.getElementById('cs-search-input');
+		const inputElement = document.getElementById("cs-search-input");
 		inputElement?.focus();
-	}
-
-	private jumpInFile(row: number, col: number) {
-		this.scrollIntoViewForExistingView(row, col);
 	}
 
 	private async jumpInVaultAsync(path: string, row: number, col: number) {

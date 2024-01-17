@@ -1,6 +1,6 @@
 import { App } from "obsidian";
 import { logger } from "src/utils/logger";
-import { TO_BE_IMPL, getInstance, monitorDecorator } from "src/utils/my-lib";
+import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import {
 	EngineType,
@@ -31,11 +31,12 @@ export class SearchService {
 		if (queryText.length === 0) {
 			return result;
 		}
+		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
 		const lexicalMatches = await this.lexicalEngine.searchFiles(queryText);
 		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
 			return {
-				currPath: TO_BE_IMPL,
+				sourcePath: sourcePath,
 				items: lexicalMatches.map((matchedFile) => {
 					// It is necessary to use a constructor with 'new', rather than using an object literal.
 					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
@@ -145,7 +146,7 @@ export class SearchService {
 			return new LineItem(highlightedLine, paragraphContext.text);
 		});
 		return {
-			currPath: activeFile.path,
+			sourcePath: activeFile.path,
 			items: lineItems,
 		} as SearchResult;
 	}
@@ -176,7 +177,7 @@ export class SearchService {
 		);
 
 		return {
-			currPath: path,
+			sourcePath: path,
 			items: lineItems,
 		} as SearchResult;
 	}

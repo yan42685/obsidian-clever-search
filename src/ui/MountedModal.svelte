@@ -162,6 +162,7 @@
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
 			onConfirmExternal,
+			searchResult.sourcePath,
 			searchType,
 			selectedItem,
 			currSubItemIndex,
