@@ -42,6 +42,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		maxItemResults: 30,
 		showedExtension: "except md",
 		collapseDevSettingByDefault: isDevEnvironment ? false : true,
+		floatingWindowTop: "20px",
+		floatingWindowLeft: "20px",
 	},
 };
 
@@ -60,6 +62,8 @@ export type UISetting = {
 	maxItemResults: number;
 	showedExtension: "none" | "except md" | "all";
 	collapseDevSettingByDefault: boolean;
+	floatingWindowTop: string;
+	floatingWindowLeft: string,
 };
 
 // ========== transparent for users ==========

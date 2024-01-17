@@ -1,3 +1,5 @@
+import { OuterSetting } from "src/globals/plugin-setting";
+import { SettingManager } from "src/services/obsidian/setting-manager";
 import { SearchType } from "../globals/search-types";
 import { getInstance } from "../utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
@@ -7,6 +9,7 @@ export class FloatingWindow {
 	private isDragging = false;
 	private dragStartX = 0;
 	private dragStartY = 0;
+	private uiSetting = getInstance(OuterSetting).ui;
 	private containerEl: HTMLDivElement;
 	private frameEl: HTMLDivElement;
 	private contentEl: HTMLDivElement;
@@ -22,8 +25,8 @@ export class FloatingWindow {
 		document.addEventListener("mouseup", this.handleMouseUp);
 
 		this.containerEl.style.position = "fixed";
-		this.containerEl.style.top = "20px";
-		this.containerEl.style.left = "20px";
+		this.containerEl.style.top = this.uiSetting.floatingWindowTop;
+		this.containerEl.style.left = this.uiSetting.floatingWindowLeft;
 		this.containerEl.style.zIndex = "1000";
 		this.containerEl.style.border = "1px solid #454545";
 		this.containerEl.style.borderRadius = "10px";
@@ -41,10 +44,7 @@ export class FloatingWindow {
 		this.frameEl.style.justifyContent = "right";
 		this.frameEl.style.padding = "10px 0 10px 10px";
 
-		this.contentEl.style.padding = "10px 0 10px 10px";
-		this.contentEl.style.backgroundColor = "#262626";
-
-		const closeButton = this.frameEl.createDiv();
+		const closeButton = this.frameEl.createSpan();
 		closeButton.innerText = "✖";
 		closeButton.style.cursor = "pointer";
 		closeButton.style.fontSize = "13px";
@@ -54,6 +54,9 @@ export class FloatingWindow {
 			document.removeEventListener("mouseup", this.handleMouseUp);
 			this.containerEl.remove();
 		});
+
+		this.contentEl.style.padding = "10px 0 10px 10px";
+		this.contentEl.style.backgroundColor = "#262626";
 
 		this.mountedElement = new MountedModal({
 			target: this.contentEl,
@@ -83,5 +86,8 @@ export class FloatingWindow {
 
 	private handleMouseUp = () => {
 		this.isDragging = false;
+		this.uiSetting.floatingWindowLeft = this.containerEl.style.left;
+		this.uiSetting.floatingWindowTop = this.containerEl.style.top;
+		getInstance(SettingManager).postSettingUpdated();
 	};
 }

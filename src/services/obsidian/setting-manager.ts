@@ -42,11 +42,11 @@ export class SettingManager {
 	}
 
 	async postSettingUpdated() {
+		this.saveSettings();
+
 		if (this.shouldReload) {
 			this.shouldReload = false;
-			await this.saveSettingDownloadRefresh();
-		} else {
-			this.saveSettings();
+			await this.downloadAndRefresh();
 		}
 	}
 
@@ -59,8 +59,7 @@ export class SettingManager {
 		logger.setLevel(this.setting.logLevel);
 	}
 
-	private async saveSettingDownloadRefresh() {
-		await getInstance(SettingManager).saveSettings();
+	private async downloadAndRefresh() {
 		getInstance(ViewRegistry).refreshAll();
 		await getInstance(AssetsProvider).initAsync();
 		await getInstance(ChinesePatch).initAsync();
@@ -313,7 +312,6 @@ class GeneralTab extends PluginSettingTab {
 						this.setting.apiProvider2.key = key;
 					}),
 			);
-
 	}
 }
 
