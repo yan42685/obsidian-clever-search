@@ -262,6 +262,16 @@ class GeneralTab extends PluginSettingTab {
 			});
 
 		new Setting(devSettingContent)
+			.setName("Reset floating window position")
+			.setDesc("In case you move it outside of the viewport")
+			.addButton((b) =>
+				b.setButtonText("Reset Position").onClick((e) => {
+					this.setting.ui.floatingWindowLeft = "20px";
+					this.setting.ui.floatingWindowTop = "20px";
+				}),
+			);
+
+		new Setting(devSettingContent)
 			.setName("API provider1")
 			.setDesc("domain and key")
 			.addText((text) =>
