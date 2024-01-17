@@ -11,10 +11,11 @@ import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { RenderMarkdownModal } from "./main";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
+import { FloatingWindow } from "./ui/floating-window";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
-import { FloatingWindow } from "./ui/floating-window";
+import { SearchClient } from "./web-workers/client";
 
 
 function getApp() {
@@ -178,6 +179,8 @@ export async function devTest() {
 	// testTikToken();
 	// monitorExecution(() => testTokenizer());
 	// testUFuzzy();
-	getInstance(FloatingWindow).open();
+
+	getInstance(SearchClient).testImageSearch();
+
 	// await testParseHtml();
 }

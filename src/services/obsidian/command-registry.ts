@@ -5,6 +5,7 @@ import { EventEnum } from "src/globals/enums";
 import { SearchType } from "src/globals/search-types";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import type CleverSearch from "src/main";
+import { FloatingWindow } from "src/ui/floating-window";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
 import { currModifier, getInstance, isDevEnvironment } from "src/utils/my-lib";
@@ -23,6 +24,12 @@ export class CommandRegistry {
 	// only for developer
 	addDevCommands() {
 		if (isDevEnvironment) {
+			this.addCommand({
+				id: "cs-in-file-search-floating-window",
+				name: "In file search - floating window",
+				callback: () => getInstance(FloatingWindow).open()
+			})
+
 			this.addCommand({
 				id: "clever-search-triggerTest",
 				name: "clever-search-triggerTest",
