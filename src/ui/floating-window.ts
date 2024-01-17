@@ -96,7 +96,7 @@ export class FloatingWindow {
 		getInstance(SettingManager).postSettingUpdated();
 	};
 
-	private onClose = () => {
+	onClose = () => {
 		document.removeEventListener("mousemove", this.handleMouseMove);
 		document.removeEventListener("mouseup", this.handleMouseUp);
 		// destroy svelte component

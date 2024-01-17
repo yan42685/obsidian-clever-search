@@ -1,6 +1,6 @@
-import { OuterSetting } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
+import { FloatingWindow } from "src/ui/floating-window";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
@@ -36,5 +36,6 @@ export class PluginManager {
 	// should be called in CleverSearch.onunload()
 	onunload() {
 		getInstance(DataManager).onunload();
+		getInstance(FloatingWindow).onClose();
 	}
 }
