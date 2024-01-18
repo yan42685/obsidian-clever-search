@@ -18,7 +18,7 @@ export default {
 		"Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once",
 
 	"Floating window for in-file search": "Floating window for in-file search",
-	"Floating window for in-file search desc": "Disable this option to use classic modal UI",
+	"Floating window for in-file search desc": "Execute 'in-file search' command again will close the existing floating window. Disable this option to use classic modal UI",
 
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,

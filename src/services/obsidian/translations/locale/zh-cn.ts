@@ -17,7 +17,7 @@ export default {
 		"虽然本插件可以搜索到成千上万个结果，但由于底层渲染器性能限制，不能即时渲染所有结果",
 
 	"Floating window for in-file search": "文件内搜索使用悬浮窗口 UI",
-	"Floating window for in-file search desc": "关闭这个选项将使用模态框 UI",
+	"Floating window for in-file search desc": "再次执行 '文件内搜索' 命令会关闭已有的悬浮窗口。关闭这个选项将使用模态框 UI",
 
 	"English word blacklist": "英文单词黑名单",
 	"English word blacklist desc": `建立索引时，忽略一些含义模糊的单词，比如 "do", "and", "them", 可以加快索引和搜索速度，但是这些单词不会被搜索到. 可以在 ${stopWordsEnTargetUrl} 按需修改单词黑名单`,

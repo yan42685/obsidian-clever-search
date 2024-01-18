@@ -4,6 +4,7 @@
 
 ### New
 
+- `Floating window for in-file search` option
 - Copyable result text
 
 ### Fixed

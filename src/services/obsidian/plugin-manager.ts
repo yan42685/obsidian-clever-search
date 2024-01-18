@@ -41,6 +41,6 @@ export class PluginManager {
 	}
 
 	onAppQuit() {
-		getInstance(SettingManager).saveSettings();
+		// getInstance(SettingManager).saveSettings();
 	}
 }
