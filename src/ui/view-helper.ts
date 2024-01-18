@@ -98,16 +98,19 @@ export class ViewHelper {
 		item: Item | undefined,
 		behavior: ScrollBehavior,
 	) {
-		if (item && item.element) {
-			item.element.scrollIntoView({
-				behavior: behavior,
-				// behavior: "auto",
-				// behavior: "instant",
-				//@ts-ignore  the type definition mistakenly spell `block` as `lock`, so there will be a warning
-				block: direction, // vertical
-				// inline: "center"    // horizontal
-			});
-		}
+		// wait until the dom states are updated
+		setTimeout(() => {
+			if (item && item.element) {
+				item.element.scrollIntoView({
+					behavior: behavior,
+					// behavior: "auto",
+					// behavior: "instant",
+					//@ts-ignore  the type definition mistakenly spell `block` as `lock`, so there will be a warning
+					block: direction, // vertical
+					// inline: "center"    // horizontal
+				});
+			}
+		}, 0);
 	}
 
 	focusInput() {
