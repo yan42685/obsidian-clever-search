@@ -14,6 +14,7 @@ import {
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
+import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
@@ -23,7 +24,6 @@ import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 import { DataProvider } from "./user-data/data-provider";
 import { ViewRegistry } from "./view-registry";
-import { FloatingWindowManager } from "src/ui/floating-window";
 
 @singleton()
 export class SettingManager {
@@ -118,12 +118,23 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName(t("Floating window for in-file search"))
+			.setDesc(t("Floating window for in-file search desc"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.ui.floatingWindowForInFile)
+					.onChange(
+						(v) => (this.setting.ui.floatingWindowForInFile = v),
+					),
+			);
+
+		new Setting(containerEl)
 			.setName(t("English word blacklist"))
 			.setDesc(t("English word blacklist desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsEn)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.setting.enableStopWordsEn = value;
 						this.settingManager.shouldReload = true;
 					}),
@@ -251,6 +262,15 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(devSettingContent)
+			.setName(t("Reset floating window position"))
+			.setDesc(t("Reset floating window position desc"))
+			.addButton((b) =>
+				b.setButtonText(t("Reset position")).onClick((e) => {
+					getInstance(FloatingWindowManager).resetAllPositions();
+				}),
+			);
+
+		new Setting(devSettingContent)
 			.setName(t("Support the Project"))
 			.setDesc(t("Support the Project desc"))
 			.addButton((button) => {
@@ -261,15 +281,6 @@ class GeneralTab extends PluginSettingTab {
 					);
 				});
 			});
-
-		new Setting(devSettingContent)
-			.setName("Reset floating window position")
-			.setDesc("In case you move it outside of the viewport")
-			.addButton((b) =>
-				b.setButtonText("Reset Position").onClick((e) => {
-					getInstance(FloatingWindowManager).resetAllPositions();
-				}),
-			);
 
 		new Setting(devSettingContent)
 			.setName("API provider1")

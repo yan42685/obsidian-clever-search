@@ -2,6 +2,7 @@ import { App, Scope, type Command, type Modifier } from "obsidian";
 import { devTest } from "src/dev-test";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { EventEnum } from "src/globals/enums";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { SearchType } from "src/globals/search-types";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import type CleverSearch from "src/main";
@@ -15,6 +16,7 @@ import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 @singleton()
 export class CommandRegistry {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
+	private setting = getInstance(OuterSetting);
 	private app = getInstance(App);
 
 	constructor() {
@@ -27,8 +29,9 @@ export class CommandRegistry {
 			this.addCommand({
 				id: "cs-in-file-search-floating-window",
 				name: "In file search - floating window",
-				callback: () => getInstance(FloatingWindowManager).toggle("inFile")
-			})
+				callback: () =>
+					getInstance(FloatingWindowManager).toggle("inFile"),
+			});
 
 			this.addCommand({
 				id: "clever-search-triggerTest",
@@ -49,8 +52,13 @@ export class CommandRegistry {
 		this.addCommand({
 			id: "clever-search-in-file",
 			name: "Search in file",
-			callback: () =>
-				new SearchModal(this.app, SearchType.IN_FILE).open(),
+			callback: () => {
+				if (this.setting.ui.floatingWindowForInFile) {
+					getInstance(FloatingWindowManager).toggle("inFile");
+				} else {
+					new SearchModal(this.app, SearchType.IN_FILE).open();
+				}
+			},
 		});
 
 		this.addCommand({
@@ -83,9 +91,7 @@ export class CommandRegistry {
 		});
 	}
 
-	onunload() {
-
-	}
+	onunload() {}
 
 	private addCommand(command: Command) {
 		this.plugin.addCommand(command);
@@ -125,7 +131,5 @@ function emitEvent(eventEnum: EventEnum) {
 		e.preventDefault();
 		eventBus.emit(eventEnum);
 		console.log("emit...");
-
-
 	};
 }

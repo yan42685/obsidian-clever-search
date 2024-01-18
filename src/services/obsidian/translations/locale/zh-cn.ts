@@ -16,6 +16,9 @@ export default {
 	"Max items count desc":
 		"虽然本插件可以搜索到成千上万个结果，但由于底层渲染器性能限制，不能即时渲染所有结果",
 
+	"Floating window for in-file search": "文件内搜索使用悬浮窗口 UI",
+	"Floating window for in-file search desc": "关闭这个选项将使用模态框 UI",
+
 	"English word blacklist": "英文单词黑名单",
 	"English word blacklist desc": `建立索引时，忽略一些含义模糊的单词，比如 "do", "and", "them", 可以加快索引和搜索速度，但是这些单词不会被搜索到. 可以在 ${stopWordsEnTargetUrl} 按需修改单词黑名单`,
 	"Chinese patch": "中文搜索优化",
@@ -41,13 +44,18 @@ export default {
 		"后缀名使用空格或换行符分隔。请不要在此处包含 'pdf'、'jpg'、'mp4' 等无法用记事本打开的二进制文件，否则可能会导致索引问题。另外，索引和搜索 HTML 文件可能会更慢，因为它们首先需要转换为干净的 Markdown 格式。此外，受 API 限制, 自动滚动到 HTML 文件中的特定位置似乎不可行。",
 
 
+
 	"For Development": "开发设置",
 	"Collapse development setting by default": "默认折叠开发设置",
+	"Reindex the vault": "重新索引全库",
+	Reindex: "重新索引",
+	"Log level": "日志等级",
+	"Reset floating window position": "重置悬浮窗口位置",
+	"Reset floating window position desc": "如果窗口被拖到看不见的位置, 可以点此按钮重置",
+	"Reset position": "重置位置",
+
 	"Support the Project": "支持这个项目",
 	"Support the Project desc":
 		"如果觉得本插件对你有帮助，希望能到 GitHub 点个 star",
 	"Visit GitHub": "访问 GitHub",
-	"Reindex the vault": "重新索引全库",
-	Reindex: "重新索引",
-	"Log level": "日志等级",
 };

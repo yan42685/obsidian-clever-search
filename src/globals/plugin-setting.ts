@@ -39,6 +39,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	ui: {
 		openInNewPane: true,
 		maxItemResults: 30,
+		floatingWindowForInFile: true,
 		showedExtension: "except md",
 		collapseDevSettingByDefault: isDevEnvironment ? false : true,
 		inFileFloatingWindowTop: "2.7em",
@@ -58,6 +59,7 @@ export type ApiProvider = {
 export type UISetting = {
 	openInNewPane: boolean;
 	maxItemResults: number;
+	floatingWindowForInFile: boolean;
 	showedExtension: "none" | "except md" | "all";
 	collapseDevSettingByDefault: boolean;
 	inFileFloatingWindowTop: string;
