@@ -27,7 +27,7 @@ export class CommandRegistry {
 			this.addCommand({
 				id: "cs-in-file-search-floating-window",
 				name: "In file search - floating window",
-				callback: () => getInstance(FloatingWindow).open()
+				callback: () => getInstance(FloatingWindow).toggle()
 			})
 
 			this.addCommand({

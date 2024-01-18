@@ -17,9 +17,9 @@ export class FloatingWindow {
 	private contentEl: HTMLDivElement;
 	private mountedElement: MountedModal | null = null;
 
-	open() {
+	toggle() {
 		if (this.mountedElement !== null) {
-			// avoid repeating open floating window
+			this.onClose();
 			return;
 		}
 		this.containerEl = document.body.createDiv();

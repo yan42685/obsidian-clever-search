@@ -42,7 +42,7 @@
 
 	// TODO: use virtual list rather than rendering all buttons
 
-	// Updates focused content and selected file index
+	// updates focused content and selected file index
 	async function updateItemAsync(index: number): Promise<void> {
 		// wait until all dynamic elements are mounted and rendered
 		await tick();
@@ -60,7 +60,8 @@
 					currFileItem,
 				);
 				currFileSubItems = currFileItem.subItems;
-				currSubItemIndex = currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
+				currSubItemIndex =
+					currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
 				await tick(); // wait until subItems are rendered by svelte
 				viewHelper.scrollTo(
 					"start",
@@ -81,7 +82,7 @@
 		}
 	}
 
-	// Handle input changes
+	// handle input changes
 	const handleInputDebounced = debounce(100, () => handleInputAsync());
 
 	async function handleInputAsync() {
@@ -115,12 +116,12 @@
 		await updateItemAsync(0);
 	}
 
-	// Handle result click
+	// handle result click
 	async function handleItemClick(index: number) {
 		await updateItemAsync(index);
 	}
 
-	// Select the next search result
+	// select the next search result
 	async function handleNextItem() {
 		await updateItemAsync(
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
@@ -209,6 +210,9 @@
 						bind:this={item.element}
 						on:click={(event) => {
 							handleItemClick(index);
+							if (uiType === "floating-window") {
+								handleConfirm(null);
+							}
 						}}
 						on:contextmenu={async (e) => {
 							await handleItemClick(index);
@@ -281,7 +285,6 @@
 <style>
 	div,
 	button {
-		/* enable selecting text for copying purpose if setting.ui.copyableText is enabled */
 		user-select: text;
 	}
 	.search-container {
