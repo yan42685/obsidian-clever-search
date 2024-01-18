@@ -114,8 +114,10 @@ export class ViewHelper {
 	}
 
 	focusInput() {
-		const inputElement = document.getElementById("cs-search-input");
-		inputElement?.focus();
+		setTimeout(() => {
+			const inputElement = document.getElementById("cs-search-input");
+			inputElement?.focus();
+		}, 0);
 	}
 
 	private async jumpInVaultAsync(path: string, row: number, col: number) {

@@ -267,10 +267,7 @@ class GeneralTab extends PluginSettingTab {
 			.setDesc("In case you move it outside of the viewport")
 			.addButton((b) =>
 				b.setButtonText("Reset Position").onClick((e) => {
-					this.setting.ui.inFileFloatingWindowLeft = "2.7em";
-					this.setting.ui.inFileFloatingWindowTop = "2.5em";
-					getInstance(FloatingWindowManager).toggle("inFile");
-					getInstance(FloatingWindowManager).toggle("inFile");
+					getInstance(FloatingWindowManager).resetAllPositions();
 				}),
 			);
 

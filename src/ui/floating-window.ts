@@ -1,11 +1,9 @@
 import { OuterSetting } from "src/globals/plugin-setting";
 import { SettingManager } from "src/services/obsidian/setting-manager";
-import { logger } from "src/utils/logger";
 import { singleton } from "tsyringe";
 import { SearchType } from "../globals/search-types";
 import { TO_BE_IMPL, getInstance } from "../utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
-import { ViewHelper } from "./view-helper";
 
 @singleton()
 export class FloatingWindowManager {
@@ -15,6 +13,15 @@ export class FloatingWindowManager {
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
+	}
+
+	resetAllPositions() {
+		const uiSetting = getInstance(OuterSetting).ui;
+
+		uiSetting.inFileFloatingWindowLeft = "2.7em";
+		uiSetting.inFileFloatingWindowTop = "2.5em";
+		getInstance(FloatingWindowManager).toggle("inFile");
+		getInstance(FloatingWindowManager).toggle("inFile");
 	}
 
 	onunload() {
@@ -28,11 +35,10 @@ abstract class FloatingWindow {
 	protected uiSetting = getInstance(OuterSetting).ui;
 	protected containerEl: HTMLDivElement;
 	private frameEl: HTMLDivElement;
-	private contentEl: HTMLDivElement;
-	private mountedElement: MountedModal | null = null;
+	protected contentEl: HTMLDivElement;
+	protected mountedElement: MountedModal | null = null;
 
 	toggle(): FloatingWindow {
-		logger.info("abc")
 		if (this.mountedElement !== null) {
 			this.onClose();
 			return this;
@@ -75,21 +81,23 @@ abstract class FloatingWindow {
 
 		this.contentEl.style.padding = "10px 0 10px 10px";
 
-		this.mountedElement = new MountedModal({
-			target: this.contentEl,
-			props: {
-				uiType: "floating-window",
-				onConfirmExternal: () => {},
-				searchType: SearchType.IN_FILE,
-				queryText: "",
-			},
-		});
-		getInstance(ViewHelper).focusInput();
+		this.mountComponent();
 		return this;
 	}
 
+	// should be called on unload
+	onClose = () => {
+		document.removeEventListener("mousemove", this.handleMouseMove);
+		document.removeEventListener("mouseup", this.handleMouseUp);
+		// destroy svelte component
+		this.mountedElement?.$destroy();
+		this.mountedElement = null;
+		this.containerEl?.remove();
+	};
+
 	protected abstract loadContainerElStates(): void;
 	protected abstract saveContainerElStates(): void;
+	protected abstract mountComponent(): void;
 
 	private handleMouseDown = (e: MouseEvent) => {
 		this.isDragging = true;
@@ -113,20 +121,21 @@ abstract class FloatingWindow {
 		this.saveContainerElStates();
 		getInstance(SettingManager).postSettingUpdated();
 	};
-
-	// should be called on unload
-	onClose = () => {
-		document.removeEventListener("mousemove", this.handleMouseMove);
-		document.removeEventListener("mouseup", this.handleMouseUp);
-		// destroy svelte component
-		this.mountedElement?.$destroy();
-		this.mountedElement = null;
-		this.containerEl?.remove();
-	};
 }
 
 @singleton()
 class InFileFloatingWindow extends FloatingWindow {
+	protected mountComponent(): void {
+		this.mountedElement = new MountedModal({
+			target: this.contentEl,
+			props: {
+				uiType: "floatingWindow",
+				onConfirmExternal: () => {},
+				searchType: SearchType.IN_FILE,
+				queryText: "",
+			},
+		});
+	}
 	protected loadContainerElStates(): void {
 		this.containerEl.style.top = this.uiSetting.inFileFloatingWindowTop;
 		this.containerEl.style.left = this.uiSetting.inFileFloatingWindowLeft;
