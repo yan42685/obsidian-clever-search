@@ -23,6 +23,7 @@ import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 import { DataProvider } from "./user-data/data-provider";
 import { ViewRegistry } from "./view-registry";
+import { FloatingWindowManager } from "src/ui/floating-window";
 
 @singleton()
 export class SettingManager {
@@ -266,8 +267,10 @@ class GeneralTab extends PluginSettingTab {
 			.setDesc("In case you move it outside of the viewport")
 			.addButton((b) =>
 				b.setButtonText("Reset Position").onClick((e) => {
-					this.setting.ui.floatingWindowLeft = "20px";
-					this.setting.ui.floatingWindowTop = "20px";
+					this.setting.ui.inFileFloatingWindowLeft = "2.7em";
+					this.setting.ui.inFileFloatingWindowTop = "2.5em";
+					getInstance(FloatingWindowManager).toggle("inFile");
+					getInstance(FloatingWindowManager).toggle("inFile");
 				}),
 			);
 

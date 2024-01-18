@@ -30,6 +30,9 @@ export default class CleverSearch extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			pluginManager.onLayoutReady();
 		});
+		this.registerEvent(
+			this.app.workspace.on("quit", () => pluginManager.onAppQuit(), this),
+		);
 
 		// this.exampleCode();
 	}
@@ -140,7 +143,6 @@ class RenderHTMLModal extends Modal {
 		console.log(this.contentHTML);
 		this.containerEl.style.backgroundColor = "black";
 		this.containerEl.innerHTML = this.contentHTML;
-
 	}
 
 	onClose() {

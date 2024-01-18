@@ -5,7 +5,7 @@ import { EventEnum } from "src/globals/enums";
 import { SearchType } from "src/globals/search-types";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import type CleverSearch from "src/main";
-import { FloatingWindow } from "src/ui/floating-window";
+import { FloatingWindowManager } from "src/ui/floating-window";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
 import { currModifier, getInstance, isDevEnvironment } from "src/utils/my-lib";
@@ -27,7 +27,7 @@ export class CommandRegistry {
 			this.addCommand({
 				id: "cs-in-file-search-floating-window",
 				name: "In file search - floating window",
-				callback: () => getInstance(FloatingWindow).toggle()
+				callback: () => getInstance(FloatingWindowManager).toggle("inFile")
 			})
 
 			this.addCommand({

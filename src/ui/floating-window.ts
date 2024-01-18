@@ -1,26 +1,41 @@
 import { OuterSetting } from "src/globals/plugin-setting";
 import { SettingManager } from "src/services/obsidian/setting-manager";
+import { logger } from "src/utils/logger";
 import { singleton } from "tsyringe";
 import { SearchType } from "../globals/search-types";
-import { getInstance } from "../utils/my-lib";
+import { TO_BE_IMPL, getInstance } from "../utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 import { ViewHelper } from "./view-helper";
 
 @singleton()
-export class FloatingWindow {
+export class FloatingWindowManager {
+	toggle(windowType: "inFile" | "inVault") {
+		if (windowType === "inFile") {
+			getInstance(InFileFloatingWindow).toggle();
+		} else {
+			throw Error(TO_BE_IMPL);
+		}
+	}
+
+	onunload() {
+		getInstance(InFileFloatingWindow).onClose();
+	}
+}
+abstract class FloatingWindow {
 	private isDragging = false;
 	private dragStartX = 0;
 	private dragStartY = 0;
-	private uiSetting = getInstance(OuterSetting).ui;
-	private containerEl: HTMLDivElement;
+	protected uiSetting = getInstance(OuterSetting).ui;
+	protected containerEl: HTMLDivElement;
 	private frameEl: HTMLDivElement;
 	private contentEl: HTMLDivElement;
 	private mountedElement: MountedModal | null = null;
 
-	toggle() {
+	toggle(): FloatingWindow {
+		logger.info("abc")
 		if (this.mountedElement !== null) {
 			this.onClose();
-			return;
+			return this;
 		}
 		this.containerEl = document.body.createDiv();
 		this.frameEl = this.containerEl.createDiv();
@@ -32,8 +47,8 @@ export class FloatingWindow {
 
 		this.containerEl.addClass("cs-floating-window-container");
 		this.containerEl.style.position = "fixed";
-		this.containerEl.style.top = this.uiSetting.floatingWindowTop;
-		this.containerEl.style.left = this.uiSetting.floatingWindowLeft;
+		// load position and other states from setting
+		this.loadContainerElStates();
 		this.containerEl.style.zIndex = "20";
 		this.containerEl.style.border = "1px solid #454545";
 		this.containerEl.style.borderRadius = "10px";
@@ -70,7 +85,11 @@ export class FloatingWindow {
 			},
 		});
 		getInstance(ViewHelper).focusInput();
+		return this;
 	}
+
+	protected abstract loadContainerElStates(): void;
+	protected abstract saveContainerElStates(): void;
 
 	private handleMouseDown = (e: MouseEvent) => {
 		this.isDragging = true;
@@ -85,14 +104,13 @@ export class FloatingWindow {
 			this.containerEl.style.left = `${e.pageX - this.dragStartX}px`;
 			this.containerEl.style.top = `${e.pageY - this.dragStartY}px`;
 		}
-
 	};
 
 	private handleMouseUp = () => {
 		this.isDragging = false;
 		this.containerEl.style.opacity = "1";
-		this.uiSetting.floatingWindowLeft = this.containerEl.style.left;
-		this.uiSetting.floatingWindowTop = this.containerEl.style.top;
+		// remember position and other stated
+		this.saveContainerElStates();
 		getInstance(SettingManager).postSettingUpdated();
 	};
 
@@ -105,4 +123,16 @@ export class FloatingWindow {
 		this.mountedElement = null;
 		this.containerEl?.remove();
 	};
+}
+
+@singleton()
+class InFileFloatingWindow extends FloatingWindow {
+	protected loadContainerElStates(): void {
+		this.containerEl.style.top = this.uiSetting.inFileFloatingWindowTop;
+		this.containerEl.style.left = this.uiSetting.inFileFloatingWindowLeft;
+	}
+	protected saveContainerElStates(): void {
+		this.uiSetting.inFileFloatingWindowLeft = this.containerEl.style.left;
+		this.uiSetting.inFileFloatingWindowTop = this.containerEl.style.top;
+	}
 }

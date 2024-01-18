@@ -11,7 +11,6 @@ import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { RenderMarkdownModal } from "./main";
 import { SearchService } from "./services/obsidian/search-service";
 import { Tokenizer } from "./services/search/tokenizer";
-import { FloatingWindow } from "./ui/floating-window";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
