@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-clever-search",
 	"version": "0.1.0",
-	"description": "Fuzzy search and semantic search plugin for obsidian",
+	"description": "An obsidian search plugin that tunes your knowledge base to the rhythm of your fingertips.",
 	"main": "main.js",
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",

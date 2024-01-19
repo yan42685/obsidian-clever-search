@@ -3,7 +3,7 @@
 	"name": "Clever Search",
 	"version": "0.1.4",
 	"minAppVersion": "0.15.0",
-	"description": "fuzzy full text search",
+	"description": "An obsidian search plugin that tunes your knowledge base to the rhythm of your fingertips.",
 	"author": "Alex Clifton",
     "fundingUrl": "https://www.buymeacoffee.com/alexclifton",
 	"isDesktopOnly": true
