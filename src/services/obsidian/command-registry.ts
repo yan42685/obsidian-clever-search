@@ -146,7 +146,7 @@ abstract class AbstractNavigationHotkeys {
 }
 
 @singleton()
-export class GlobalNavigationHotkeys extends AbstractNavigationHotkeys {
+class GlobalNavigationHotkeys extends AbstractNavigationHotkeys {
 	constructor() {
 		super(getInstance(App).scope);
 	}
@@ -155,6 +155,7 @@ export class GlobalNavigationHotkeys extends AbstractNavigationHotkeys {
 		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
 		const modKey = currModifier;
 		// console.log("current modifier: " + modKey);
+		this.handlers = [];
 		this.register([modKey], "J", EventEnum.NEXT_ITEM_FLOATING_WINDOW);
 		this.register([modKey], "K", EventEnum.PREV_ITEM_FLOATING_WINDOW);
 	}
