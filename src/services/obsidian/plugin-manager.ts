@@ -9,6 +9,7 @@ import { SettingManager } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
 import { ViewRegistry } from "./view-registry";
 import { FloatingWindowManager } from "src/ui/floating-window";
+import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 
 @singleton()
 export class PluginManager {
@@ -23,6 +24,8 @@ export class PluginManager {
 		await getInstance(AssetsProvider).initAsync();
 		await getInstance(ChinesePatch).initAsync();
 		await getInstance(SearchClient).createChildThreads();
+
+		getInstance(AuxiliaryService).init();
 	}
 
 	async onLayoutReady() {

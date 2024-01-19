@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.1.5
+
+### New
+
+- Auto-copy on selection
+
+### Fixed
+
+- `Enter` won't insert a new line character in the editor
+
 ## 0.1.4
 
 ### New
