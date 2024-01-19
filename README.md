@@ -62,7 +62,7 @@
 
 ## Limitations
 
-In-file Search performance may be slower when a file contains over 500k characters. I plan to enhance the system by automatically adjusting the fuzzy search level for larger files in the future.
+In-file Search performance may be slower when a file contains over 500k characters. However, there is no such performance limitation for in-vault search.
 
 ## Installation
 
