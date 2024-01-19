@@ -75,6 +75,10 @@ In-file Search performance may be slower when a file contains over 500k characte
 
 ## [FAQ](https://github.com/yan42685/obsidian-clever-search/wiki/Home-%E2%80%90-en#FAQ)
 
+## Declaration
+
+In compliance with the requirements of the Obsidian developer policy, this notice declares that this plugin downloads necessary program resources from the web into the `userData` directory. The specific location of these resources can be found in the plugin settings.
+
 ## Support
 
 If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
