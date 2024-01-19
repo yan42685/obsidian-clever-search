@@ -183,12 +183,16 @@
 			eventBus.off(event, callback);
 		});
 	}
-
-	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
-	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
-	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
-	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
-	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+	if (uiType === "floatingWindow") {
+		listenEvent(EventEnum.NEXT_ITEM_FLOATING_WINDOW, handleNextItem);
+		listenEvent(EventEnum.PREV_ITEM_FLOATING_WINDOW, handlePrevItem);
+	} else {
+		listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
+		listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
+		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
+		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
+		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+	}
 	viewHelper.focusInput();
 	handleInputAsync();
 </script>

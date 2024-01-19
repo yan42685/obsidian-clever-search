@@ -1,9 +1,9 @@
 import { App, Modal } from "obsidian";
 import type { SearchType } from "src/globals/search-types";
-import { CommandRegistry } from "src/services/obsidian/command-registry";
-import { getInstance } from "src/utils/my-lib";
+import { ModalNavigationHotkeys } from "src/services/obsidian/command-registry";
 import MountedModal from "./MountedModal.svelte";
 
+// TODO: make it an abstract class
 export class SearchModal extends Modal {
 	mountedElement: any;
 	constructor(app: App, searchType: SearchType, query?: string) {
@@ -29,7 +29,8 @@ export class SearchModal extends Modal {
 			},
 		});
 
-		getInstance(CommandRegistry).registerNavigationHotkeys(this.scope, true);
+		// register for transient scope. In this scope, app.scope won't accept keyMapEvents
+		new ModalNavigationHotkeys(this.scope).registerAll();
 	}
 
 	onOpen() { }

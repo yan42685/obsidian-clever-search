@@ -1,4 +1,10 @@
-import { App, Scope, type Command, type Modifier } from "obsidian";
+import {
+	App,
+	Scope,
+	type Command,
+	type KeymapEventHandler,
+	type Modifier,
+} from "obsidian";
 import { devTest } from "src/dev-test";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { EventEnum } from "src/globals/enums";
@@ -9,6 +15,7 @@ import type CleverSearch from "src/main";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
+import { logger } from "src/utils/logger";
 import { currModifier, getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
@@ -20,7 +27,7 @@ export class CommandRegistry {
 	private app = getInstance(App);
 
 	constructor() {
-		this.registerNavigationHotkeys(this.app.scope, false);
+		getInstance(GlobalNavigationHotkeys).registerAll();
 	}
 
 	// only for developer
@@ -91,40 +98,12 @@ export class CommandRegistry {
 		});
 	}
 
-	onunload() {}
+	onunload() {
+		getInstance(GlobalNavigationHotkeys).unregisterAll();
+	}
 
 	private addCommand(command: Command) {
 		this.plugin.addCommand(command);
-	}
-
-	// register global hotkeys for FloatingWindow and scoped hotkeys for each Modal
-	registerNavigationHotkeys(scope: Scope, extraHotkeys: boolean) {
-		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
-		const modKey = currModifier;
-		// console.log("current modifier: " + modKey);
-
-		this.newHotKey(scope, [modKey], "J", EventEnum.NEXT_ITEM);
-		this.newHotKey(scope, [modKey], "K", EventEnum.PREV_ITEM);
-
-
-		// in global scope, these hotkeys shouldn't be registered
-		if (extraHotkeys) {
-			this.newHotKey(scope, [], "ArrowDown", EventEnum.NEXT_ITEM);
-			this.newHotKey(scope, [], "ArrowUp", EventEnum.PREV_ITEM);
-			this.newHotKey(scope, [], "Enter", EventEnum.CONFIRM_ITEM);
-			this.newHotKey(scope, [modKey], "N", EventEnum.NEXT_SUB_ITEM);
-			this.newHotKey(scope, [modKey], "P", EventEnum.PREV_SUB_ITEM);
-		}
-	}
-
-	private newHotKey(
-		scope: Scope,
-		modifiers: Modifier[],
-		key: string,
-		eventEnum: EventEnum,
-	) {
-		// this.scope.register(modifiers, key, emitEvent(eventEnum));
-		scope.register(modifiers, key, emitEvent(eventEnum));
 	}
 }
 
@@ -134,4 +113,70 @@ function emitEvent(eventEnum: EventEnum) {
 		eventBus.emit(eventEnum);
 		console.log("emit...");
 	};
+}
+
+// register global hotkeys for FloatingWindow and scoped hotkeys for each Modal
+abstract class AbstractNavigationHotkeys {
+	protected handlers: KeymapEventHandler[] = [];
+	protected scope: Scope;
+
+	constructor(scope: Scope) {
+		this.scope = scope;
+	}
+
+	abstract registerAll(): void;
+
+	unregisterAll() {
+		logger.info("unregister");
+		this.handlers.forEach((h) => {
+			this.scope.unregister(h);
+		});
+		this.handlers = [];
+	}
+
+	protected register(
+		modifiers: Modifier[],
+		key: string,
+		eventEnum: EventEnum,
+	) {
+		this.handlers.push(
+			this.scope.register(modifiers, key, emitEvent(eventEnum)),
+		);
+	}
+}
+
+@singleton()
+export class GlobalNavigationHotkeys extends AbstractNavigationHotkeys {
+	constructor() {
+		super(getInstance(App).scope);
+	}
+
+	registerAll() {
+		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
+		const modKey = currModifier;
+		// console.log("current modifier: " + modKey);
+		this.register([modKey], "J", EventEnum.NEXT_ITEM_FLOATING_WINDOW);
+		this.register([modKey], "K", EventEnum.PREV_ITEM_FLOATING_WINDOW);
+	}
+}
+
+// non-singleton, create for each modal
+export class ModalNavigationHotkeys extends AbstractNavigationHotkeys {
+	constructor(scope: Scope) {
+		super(scope);
+	}
+
+	registerAll(): void {
+		const modKey = currModifier;
+		// console.log("current modifier: " + modKey);
+
+		this.register([modKey], "J", EventEnum.NEXT_ITEM);
+		this.register([modKey], "K", EventEnum.PREV_ITEM);
+
+		this.register([], "ArrowDown", EventEnum.NEXT_ITEM);
+		this.register([], "ArrowUp", EventEnum.PREV_ITEM);
+		this.register([], "Enter", EventEnum.CONFIRM_ITEM);
+		this.register([modKey], "N", EventEnum.NEXT_SUB_ITEM);
+		this.register([modKey], "P", EventEnum.PREV_SUB_ITEM);
+	}
 }

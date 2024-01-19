@@ -39,6 +39,7 @@ export class PluginManager {
 
 	// should be called in CleverSearch.onunload()
 	onunload() {
+		getInstance(CommandRegistry).onunload();
 		getInstance(DataManager).onunload();
 		getInstance(FloatingWindowManager).onunload();
 	}
