@@ -6,9 +6,11 @@
 
 ## 演示
 
-### 实时搜索和预览
+### 实时高亮和预览
 
-![demo-search-in-file](assets/images/demo-search-in-file.gif)
+![demo-search-in-file](assets/images/in-file-floating-window-en.gif)
+
+![demo-search-in-file](assets/images/in-vault-modal-en.gif)
 
 ### 隐私模式
 

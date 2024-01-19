@@ -16,7 +16,7 @@ import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
-import { getInstance } from "src/utils/my-lib";
+import { MyLib, getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
@@ -52,8 +52,13 @@ export class SettingManager {
 	}
 
 	private async loadSettings() {
-		this.setting = Object.assign(
-			{},
+		// shallow merge can't handle nested object correctly
+		// this.setting = Object.assign(
+		// 	{},
+		// 	DEFAULT_OUTER_SETTING,
+		// 	await this.plugin.loadData(),
+		// );
+		this.setting = MyLib.mergeDeep(
 			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
 		);

@@ -6,9 +6,11 @@
 
 ## Demo
 
-### Realtime Search and Preview
+### Realtime highlight and preview
 
-![demo-search-in-file](assets/images/demo-search-in-file.gif)
+![demo-search-in-file](assets/images/in-file-floating-window-en.gif)
+
+![demo-search-in-file](assets/images/in-vault-modal-en.gif)
 
 ### Privacy Mode
 

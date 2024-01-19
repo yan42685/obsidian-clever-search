@@ -5,7 +5,6 @@ import {
 	htmlToMarkdown
 } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
-import uFuzzy from "@leeoniya/ufuzzy";
 import { OuterSetting } from "./globals/plugin-setting";
 import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { RenderMarkdownModal } from "./main";
@@ -104,32 +103,6 @@ async function testTokenizer() {
 	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.has("的"));
 }
 
-function testUFuzzy() {
-	const haystack = [
-		"foo",
-		"bar",
-		"cowbaz",
-		"distant",
-		"disney",
-		"这里有一句黑色的机甲",
-	];
-
-	const needle = "黑色 机甲";
-	const opts = {
-		unicode: true,
-		interSplit: "[^\\p{L}\\d']+",
-		intraSplit: "\\p{Ll}\\p{Lu}",
-		intraBound: "\\p{L}\\d|\\d\\p{L}|\\p{Ll}\\p{Lu}",
-		intraChars: "[\\p{L}\\d']",
-		intraContr: "'\\p{L}{1,2}\\b",
-	};
-	const uf = new uFuzzy(opts);
-	// const [idxs, info, order] = uf.search(haystack, needle);
-	const res = uf.search(haystack, needle);
-	logger.info(res[0]);
-	logger.info(res[1]);
-	logger.info(res[2]);
-}
 
 async function testParseHtml() {
 	const vault = getInstance(Vault);
