@@ -1,7 +1,6 @@
 import { App, Modal } from "obsidian";
 import type { SearchType } from "src/globals/search-types";
 import { CommandRegistry } from "src/services/obsidian/command-registry";
-import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import MountedModal from "./MountedModal.svelte";
 
@@ -30,7 +29,7 @@ export class SearchModal extends Modal {
 			},
 		});
 
-		getInstance(CommandRegistry).registerNavigationHotkeys(this.scope);
+		getInstance(CommandRegistry).registerNavigationHotkeys(this.scope, true);
 	}
 
 	onOpen() { }

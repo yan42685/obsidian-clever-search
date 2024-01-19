@@ -20,7 +20,7 @@ export class CommandRegistry {
 	private app = getInstance(App);
 
 	constructor() {
-		this.registerNavigationHotkeys(this.app.scope);
+		this.registerNavigationHotkeys(this.app.scope, false);
 	}
 
 	// only for developer
@@ -98,21 +98,23 @@ export class CommandRegistry {
 	}
 
 	// register global hotkeys for FloatingWindow and scoped hotkeys for each Modal
-	registerNavigationHotkeys(scope: Scope) {
+	registerNavigationHotkeys(scope: Scope, extraHotkeys: boolean) {
 		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
 		const modKey = currModifier;
 		// console.log("current modifier: " + modKey);
 
 		this.newHotKey(scope, [modKey], "J", EventEnum.NEXT_ITEM);
-		this.newHotKey(scope, [], "ArrowDown", EventEnum.NEXT_ITEM);
-
 		this.newHotKey(scope, [modKey], "K", EventEnum.PREV_ITEM);
-		this.newHotKey(scope, [], "ArrowUp", EventEnum.PREV_ITEM);
 
-		this.newHotKey(scope, [modKey], "N", EventEnum.NEXT_SUB_ITEM);
-		this.newHotKey(scope, [modKey], "P", EventEnum.PREV_SUB_ITEM);
 
-		this.newHotKey(scope, [], "Enter", EventEnum.CONFIRM_ITEM);
+		// in global scope, these hotkeys shouldn't be registered
+		if (extraHotkeys) {
+			this.newHotKey(scope, [], "ArrowDown", EventEnum.NEXT_ITEM);
+			this.newHotKey(scope, [], "ArrowUp", EventEnum.PREV_ITEM);
+			this.newHotKey(scope, [], "Enter", EventEnum.CONFIRM_ITEM);
+			this.newHotKey(scope, [modKey], "N", EventEnum.NEXT_SUB_ITEM);
+			this.newHotKey(scope, [modKey], "P", EventEnum.PREV_SUB_ITEM);
+		}
 	}
 
 	private newHotKey(
