@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
-	import { OuterSetting, type UISetting } from "src/globals/plugin-setting";
 	import {
 		FileItem,
 		FileSubItem,
@@ -12,6 +11,7 @@
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
+	import { logger } from "src/utils/logger";
 	import {
 		TO_BE_IMPL,
 		getInstance,
@@ -19,14 +19,13 @@
 	} from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
-	import type { SearchModal } from "./search-modal";
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
-	const setting: UISetting = getInstance(OuterSetting).ui;
 	const viewHelper = getInstance(ViewHelper);
 
-	export let modal: SearchModal;
+	export let uiType: "modal" | "floatingWindow";
+	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
 	export let queryText: string;
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
@@ -38,13 +37,12 @@
 	let currFileSubItems: FileSubItem[] = []; // for markdown viewType
 	let currFilePreviewContent: any = undefined; // for non-markdown viewType
 	let currSubItemIndex = NULL_NUMBER;
-	let inputEl: HTMLElement | undefined;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
 	// TODO: use virtual list rather than rendering all buttons
 
-	// Updates focused content and selected file index
+	// updates focused content and selected file index
 	async function updateItemAsync(index: number): Promise<void> {
 		// wait until all dynamic elements are mounted and rendered
 		await tick();
@@ -62,7 +60,8 @@
 					currFileItem,
 				);
 				currFileSubItems = currFileItem.subItems;
-				currSubItemIndex = 0;
+				currSubItemIndex =
+					currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
 				await tick(); // wait until subItems are rendered by svelte
 				viewHelper.scrollTo(
 					"start",
@@ -79,10 +78,11 @@
 			currFileItem = null;
 			currFileSubItems = [];
 			currItemIndex = NULL_NUMBER;
+			currSubItemIndex = NULL_NUMBER;
 		}
 	}
 
-	// Handle input changes
+	// handle input changes
 	const handleInputDebounced = debounce(100, () => handleInputAsync());
 
 	async function handleInputAsync() {
@@ -116,21 +116,27 @@
 		await updateItemAsync(0);
 	}
 
-	// Handle result click
+	// handle result click
 	async function handleItemClick(index: number) {
 		await updateItemAsync(index);
 	}
 
-	// Select the next search result
+	// select the next search result
 	async function handleNextItem() {
 		await updateItemAsync(
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
+		if (uiType === "floatingWindow") {
+			handleConfirm(null);
+		}
 	}
 
 	// Select the previous search result
 	async function handlePrevItem() {
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
+		if (uiType === "floatingWindow") {
+			handleConfirm(null);
+		}
 	}
 
 	function handleSubItemClick(index: number) {
@@ -153,10 +159,12 @@
 		);
 	}
 
-	async function handleConfirm() {
+	async function handleConfirm(event: Event | null) {
+		event?.preventDefault();
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
-			modal,
+			onConfirmExternal,
+			searchResult.sourcePath,
 			searchType,
 			selectedItem,
 			currSubItemIndex,
@@ -164,10 +172,16 @@
 	}
 
 	// ===================================================
+	onDestroy(() => {
+		logger.trace("mounted element has been destroyed.");
+	});
+
 	// NOTE: onMount() won't be triggered and I wonder why
 	function listenEvent(event: EventEnum, callback: EventCallback) {
 		eventBus.on(event, callback);
-		onDestroy(() => eventBus.off(event, callback));
+		onDestroy(() => {
+			eventBus.off(event, callback);
+		});
 	}
 
 	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
@@ -175,6 +189,7 @@
 	listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 	listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+	viewHelper.focusInput();
 	handleInputAsync();
 </script>
 
@@ -182,13 +197,9 @@
 	<div class="left-pane">
 		<div class="search-bar" data-match-count={matchCountText}>
 			<input
+				id="cs-search-input"
 				bind:value={queryText}
-				bind:this={inputEl}
 				on:input={handleInputDebounced}
-				on:blur={() =>
-					setting.copyableText
-						? undefined
-						: setTimeout(() => inputEl?.focus(), 1)}
 			/>
 		</div>
 		<div class="result-items">
@@ -200,11 +211,13 @@
 						bind:this={item.element}
 						on:click={(event) => {
 							handleItemClick(index);
+							if (uiType === "floatingWindow") {
+								handleConfirm(null);
+							}
 						}}
-						on:contextmenu={async (event) => {
-							event.preventDefault();
+						on:contextmenu={async (e) => {
 							await handleItemClick(index);
-							await handleConfirm();
+							await handleConfirm(e);
 						}}
 					>
 						{#if item instanceof LineItem}
@@ -229,47 +242,50 @@
 			</ul>
 		</div>
 	</div>
-	<div class="right-pane">
-		<div class="preview-container">
-			{#if searchType === SearchType.IN_FILE}
-				{#if currContext}
-					<p>{@html currContext}</p>
+	{#if uiType !== "floatingWindow"}
+		<div class="right-pane">
+			<div class="preview-container">
+				{#if searchType === SearchType.IN_FILE}
+					{#if currContext}
+						<p on:contextmenu={(e) => handleConfirm(e)}>
+							{@html currContext}
+						</p>
+					{/if}
+				{:else if searchType === SearchType.IN_VAULT}
+					{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
+						<ul>
+							{#each currFileSubItems as subItem, index}
+								<button
+									on:click={(event) =>
+										handleSubItemClick(index)}
+									on:contextmenu={(e) => {
+										currSubItemIndex = index;
+										handleConfirm(e);
+									}}
+									bind:this={subItem.element}
+									class:selected={index === currSubItemIndex}
+									class="file-sub-item"
+								>
+									{@html subItem.text}
+								</button>
+							{/each}
+						</ul>
+					{:else}
+						<span>
+							{isDevEnvironment
+								? "no result or to be impl"
+								: "no matched content"}
+						</span>
+					{/if}
 				{/if}
-			{:else if searchType === SearchType.IN_VAULT}
-				{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
-					<ul>
-						{#each currFileSubItems as subItem, index}
-							<button
-								on:click={(event) => handleSubItemClick(index)}
-								on:contextmenu={(event) => {
-									event.preventDefault();
-									currSubItemIndex = index;
-									handleConfirm();
-								}}
-								bind:this={subItem.element}
-								class:selected={index === currSubItemIndex}
-								class="file-sub-item"
-							>
-								{@html subItem.text}
-							</button>
-						{/each}
-					</ul>
-				{:else}
-					<span>
-						{isDevEnvironment
-							? "no result or to be impl"
-							: "no matched content"}
-					</span>
-				{/if}
-			{/if}
+			</div>
 		</div>
-	</div>
+	{/if}
 </div>
 
 <style>
 	div,
 	button {
-		/* enable selecting text for copying purpose if setting.ui.copyableText is enabled */
 		user-select: text;
 	}
 	.search-container {
@@ -289,7 +305,8 @@
 		display: flex;
 		flex-direction: column;
 		align-items: left;
-		width: 40%;
+		/* width: 40%; */
+		width: 27.5vw;
 	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
@@ -315,8 +332,8 @@
 		border-radius: 10px;
 		background-color: var(--cs-search-bar-bgc, #20202066);
 		box-shadow:
-			0 2px 4px rgba(0, 0, 0, 0.18),
-			0 2px 3px rgba(0, 0, 0, 0.26);
+			0 2px 4px rgba(0, 0, 0, 0.07),
+			0 2px 3px rgba(0, 0, 0, 0.1);
 	}
 
 	.result-items {

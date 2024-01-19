@@ -59,10 +59,10 @@ export type MatchedFile = {
 };
 
 export class SearchResult {
-	currPath: string;
+	sourcePath: string;
 	items: Item[];
 	constructor(currPath: string, items: Item[]) {
-		this.currPath = currPath;
+		this.sourcePath = currPath;
 		this.items = items;
 	}
 }

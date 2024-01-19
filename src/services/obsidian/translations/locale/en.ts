@@ -16,7 +16,9 @@ export default {
 	"Max items count": "Max items count",
 	"Max items count desc":
 		"Due to renderer's limited capabilities, this plugin can find thousands of results, but cannot display them all at once",
-	
+
+	"Floating window for in-file search": "Floating window for in-file search",
+	"Floating window for in-file search desc": "Execute 'in-file search' command again will close the existing floating window. Disable this option to use classic modal UI",
 
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
@@ -43,18 +45,19 @@ export default {
 	"extensionModal.plaintextDesc":
 		"Extensions should be separated by a space or a newline character. Please do not include binary filetypes like 'pdf', 'jpg', 'mp4', etc, that can't be opened with notepad. Including them might cause indexing issues. Additionally, the indexing and searching of HTML files may be slower because they require conversion to clean Markdown format first. Furthermore, due to the extremely limited API, it seems impossible to automatically scroll to specific locations within HTML files.",
 
-	"Copyable text": "Copyable result text",
-	"Copyable text.desc": "Enabling this option will disable the feature that keeps focusing the input bar",
-
-
+	// for development
 	"For Development": "For Development",
 	"Collapse development setting by default":
 		"Collapse development setting by default",
+	"Reindex the vault": "Reindex the vault",
+	Reindex: "Reindex",
+	"Log level": "Log level",
+	"Reset floating window position": "Reset floating window position",
+	"Reset floating window position desc": "In case the window is moved outside the visible area",
+	"Reset position": "Reset position",
+
 	"Support the Project": "Support the Project",
 	"Support the Project desc":
 		"Enjoying this plugin? Show your support with a star on GitHub!",
 	"Visit GitHub": "Visit GitHub",
-	"Reindex the vault": "Reindex the vault",
-	Reindex: "Reindex",
-	"Log level": "Log level",
 };

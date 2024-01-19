@@ -6,9 +6,11 @@
 
 ## Demo
 
-### Realtime Search and Preview
+### Realtime highlight and preview
 
-![demo-search-in-file](assets/images/demo-search-in-file.gif)
+![demo-search-in-file](assets/images/in-file-floating-window-en.gif)
+
+![demo-search-in-file](assets/images/in-vault-modal-en.gif)
 
 ### Privacy Mode
 
@@ -28,7 +30,6 @@
 
 ### Subtle Tweaks for Better UX
 
-- [x] keep focusing input bar even if clicking an item
 - [x] Search from selection
 - [ ] Remember last query text
 
@@ -56,7 +57,7 @@
 | Modal    | Confirm item                  | `Enter` or `Right Click` |
 | Obsidian | Search in vault               | undefined                |
 | Obsidian | Search in File                | undefined                |
-| Obsidian | Search in file with last Omnisearch query (to be deprecated) | undefined |
+| Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined |
 | Obsidian | Toggle privacy mode           | undefined                |
 
 ## Limitations

@@ -4,11 +4,18 @@
 
 ### New
 
+- `Floating window for in-file search` option
 - Copyable result text
 
 ### Fixed
 
 - Sometimes it fails to scroll to the target location when opening a large file
+- Can't jump if no content matched, though the filenames or folders are matched
+
+### BREAKING
+
+- Removed feature: keep focusing input bar
+- New `style settings` option: Main Background Color. Your current modal background color may be changed due to the default value for the new option
 
 ## 0.1.3
 

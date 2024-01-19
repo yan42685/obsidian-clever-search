@@ -14,8 +14,9 @@ import {
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
+import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
-import { getInstance } from "src/utils/my-lib";
+import { MyLib, getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
@@ -42,25 +43,29 @@ export class SettingManager {
 	}
 
 	async postSettingUpdated() {
+		this.saveSettings();
+
 		if (this.shouldReload) {
 			this.shouldReload = false;
-			await this.saveSettingDownloadRefresh();
-		} else {
-			this.saveSettings();
+			await this.downloadAndRefresh();
 		}
 	}
 
 	private async loadSettings() {
-		this.setting = Object.assign(
-			{},
+		// shallow merge can't handle nested object correctly
+		// this.setting = Object.assign(
+		// 	{},
+		// 	DEFAULT_OUTER_SETTING,
+		// 	await this.plugin.loadData(),
+		// );
+		this.setting = MyLib.mergeDeep(
 			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
 		);
 		logger.setLevel(this.setting.logLevel);
 	}
 
-	private async saveSettingDownloadRefresh() {
-		await getInstance(SettingManager).saveSettings();
+	private async downloadAndRefresh() {
 		getInstance(ViewRegistry).refreshAll();
 		await getInstance(AssetsProvider).initAsync();
 		await getInstance(ChinesePatch).initAsync();
@@ -118,12 +123,23 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName(t("Floating window for in-file search"))
+			.setDesc(t("Floating window for in-file search desc"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.ui.floatingWindowForInFile)
+					.onChange(
+						(v) => (this.setting.ui.floatingWindowForInFile = v),
+					),
+			);
+
+		new Setting(containerEl)
 			.setName(t("English word blacklist"))
 			.setDesc(t("English word blacklist desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.enableStopWordsEn)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.setting.enableStopWordsEn = value;
 						this.settingManager.shouldReload = true;
 					}),
@@ -175,15 +191,6 @@ class GeneralTab extends PluginSettingTab {
 					.onClick(() =>
 						new CustomExtensionModal(getInstance(App)).open(),
 					),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Copyable text"))
-			.setDesc(t("Copyable text.desc"))
-			.addToggle((t) =>
-				t
-					.setValue(this.setting.ui.copyableText)
-					.onChange((v) => (this.setting.ui.copyableText = v)),
 			);
 
 		// ======== For Development =======
@@ -260,6 +267,15 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(devSettingContent)
+			.setName(t("Reset floating window position"))
+			.setDesc(t("Reset floating window position desc"))
+			.addButton((b) =>
+				b.setButtonText(t("Reset position")).onClick((e) => {
+					getInstance(FloatingWindowManager).resetAllPositions();
+				}),
+			);
+
+		new Setting(devSettingContent)
 			.setName(t("Support the Project"))
 			.setDesc(t("Support the Project desc"))
 			.addButton((button) => {
@@ -313,7 +329,6 @@ class GeneralTab extends PluginSettingTab {
 						this.setting.apiProvider2.key = key;
 					}),
 			);
-
 	}
 }
 

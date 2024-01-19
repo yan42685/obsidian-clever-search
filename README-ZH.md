@@ -6,9 +6,11 @@
 
 ## 演示
 
-### 实时搜索和预览
+### 实时高亮和预览
 
-![demo-search-in-file](assets/images/demo-search-in-file.gif)
+![demo-search-in-file](assets/images/in-file-floating-window-en.gif)
+
+![demo-search-in-file](assets/images/in-vault-modal-en.gif)
 
 ### 隐私模式
 
@@ -28,7 +30,6 @@
 
 ### 细微调整以提升用户体验
 
-- [x] 即使点击一个匹配项也保持输入栏的焦点
 - [x] 搜索选中文本
 - [ ] 记住上次查询文本
 
@@ -55,7 +56,7 @@
 | 模态框   | 确认项             | `Enter` 或 `右键点击`    |
 | Obsidian | 在资料库搜索         | 未定义                    |
 | Obsidian | 在文件中搜索         | 未定义                    |
-| Obsidian | 在文件中搜索，并使用Omnisearch的上次搜索文本 (即将弃用) | 未定义 |
+| Obsidian | 在文件中搜索，并使用Omnisearch的上次搜索文本 (纪念对本项目的启发) | 未定义 |
 | Obsidian | 切换隐私模式         | 未定义                    |
 
 ## 局限

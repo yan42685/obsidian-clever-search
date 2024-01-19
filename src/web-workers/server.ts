@@ -1,5 +1,4 @@
 import { logger } from "src/utils/logger";
-import { testTikToken } from "./tiktoken-server";
 
 // self.addEventListener('message', (event) => {
 //     // 接收主线程数据
@@ -14,7 +13,7 @@ import { testTikToken } from "./tiktoken-server";
 self.addEventListener("message", (event) => {
 	if (event.data === "tikToken") {
 		// logger.debug("received tiktoken request from main thread");
-		self.postMessage("tikToken server: " + testTikToken());
+		self.postMessage("tikToken server: " );
 	} else {
 		logger.debug("message isn't for tiktoken")
 	}

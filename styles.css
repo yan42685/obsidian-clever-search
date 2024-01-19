@@ -10,6 +10,14 @@ settings:
 		level: 2
 		collapsed: false
 	- 
+		id: cs-search-main-bgc
+		title: Main Background Color
+		title.zh: 主要背景色
+		type: variable-color
+        opacity: true
+        format: hex
+        default: '#'
+	- 
 		id: cs-search-bar-bgc
 		title: Search Bar Background Color
 		title.zh: 搜索框背景色
@@ -74,6 +82,11 @@ settings:
 	/* remove unused room */
 	overflow: hidden;
 }
+
+.cs-modal,
+.cs-floating-window-container {
+	background-color: var(--cs-search-main-bgc, #262626);
+}
 /* mark {
     background-color: lightblue;
     color: black;
@@ -103,16 +116,15 @@ settings:
 /* ========== For Setting Tab =======*/
 /* 定义设置组标题的样式 */
 .cs-setting-group-dev-title {
-    position: relative;
-    cursor: pointer;
+	position: relative;
+	cursor: pointer;
 	margin-bottom: 15px;
 }
 
 /* 定义伪元素的样式 */
 .cs-setting-group-dev-title::before {
-    content: var(--cs-dev-collapse-icon);
-    position: absolute;
-    left: -20px;
-    top: 0;
+	content: var(--cs-dev-collapse-icon);
+	position: absolute;
+	left: -20px;
+	top: 0;
 }
-

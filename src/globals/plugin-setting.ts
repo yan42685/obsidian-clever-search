@@ -38,10 +38,12 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	},
 	ui: {
 		openInNewPane: true,
-		copyableText: false,
 		maxItemResults: 30,
+		floatingWindowForInFile: true,
 		showedExtension: "except md",
 		collapseDevSettingByDefault: isDevEnvironment ? false : true,
+		inFileFloatingWindowTop: "2.7em",
+		inFileFloatingWindowLeft: "2.5em",
 	},
 };
 
@@ -56,10 +58,12 @@ export type ApiProvider = {
 
 export type UISetting = {
 	openInNewPane: boolean;
-	copyableText: boolean,
 	maxItemResults: number;
+	floatingWindowForInFile: boolean;
 	showedExtension: "none" | "except md" | "all";
 	collapseDevSettingByDefault: boolean;
+	inFileFloatingWindowTop: string;
+	inFileFloatingWindowLeft: string,
 };
 
 // ========== transparent for users ==========

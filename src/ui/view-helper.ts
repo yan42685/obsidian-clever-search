@@ -15,7 +15,6 @@ import { ViewType } from "src/services/obsidian/view-registry";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import type { SearchModal } from "./search-modal";
 
 @singleton()
 export class ViewHelper {
@@ -25,30 +24,35 @@ export class ViewHelper {
 
 	updateSubItemIndex(
 		subItems: FileSubItem[],
-		currentIndex: number,
+		currSubIndex: number,
 		direction: "next" | "prev",
 	): number {
-		const subItem = subItems[currentIndex];
+		const subItem = subItems[currSubIndex];
 		const maxIndex = subItems.length - 1;
 		this.scrollTo("center", subItem, "auto");
 		if (direction === "next") {
-			return currentIndex < maxIndex ? currentIndex + 1 : currentIndex;
+			return currSubIndex < maxIndex ? currSubIndex + 1 : currSubIndex;
 		} else {
-			return currentIndex > 0 ? currentIndex - 1 : currentIndex;
+			return currSubIndex > 0 ? currSubIndex - 1 : currSubIndex;
 		}
 	}
 
 	async handleConfirmAsync(
-		modal: SearchModal,
+		onConfirmExternal: () => void,
+		sourcePath: string,
 		searchType: SearchType,
 		selectedItem: Item,
 		currSubItemIndex: number,
 	) {
-		modal.close();
+		onConfirmExternal();
 		if (selectedItem) {
 			if (searchType === SearchType.IN_FILE) {
 				const lineItem = selectedItem as LineItem;
-				this.jumpInFile(lineItem.line.row, lineItem.line.col);
+				await this.jumpInVaultAsync(
+					sourcePath,
+					lineItem.line.row,
+					lineItem.line.col,
+				);
 			} else if (searchType === SearchType.IN_VAULT) {
 				const fileItem = selectedItem as FileItem;
 				const viewType = fileItem.viewType;
@@ -78,6 +82,9 @@ export class ViewHelper {
 					} else {
 						throw Error("unsupported viewType to jump");
 					}
+				} else {
+					// no content text matched, but filenames or folders are matched
+					await this.jumpInVaultAsync(fileItem.path, 0, 0);
 				}
 			} else {
 				throw Error(`unsupported search type to jump ${searchType}`);
@@ -91,20 +98,26 @@ export class ViewHelper {
 		item: Item | undefined,
 		behavior: ScrollBehavior,
 	) {
-		if (item && item.element) {
-			item.element.scrollIntoView({
-				behavior: behavior,
-				// behavior: "auto",
-				// behavior: "instant",
-				//@ts-ignore  the type definition mistakenly spell `block` as `lock`, so there will be a warning
-				block: direction, // vertical
-				// inline: "center"    // horizontal
-			});
-		}
+		// wait until the dom states are updated
+		setTimeout(() => {
+			if (item && item.element) {
+				item.element.scrollIntoView({
+					behavior: behavior,
+					// behavior: "auto",
+					// behavior: "instant",
+					//@ts-ignore  the type definition mistakenly spell `block` as `lock`, so there will be a warning
+					block: direction, // vertical
+					// inline: "center"    // horizontal
+				});
+			}
+		}, 0);
 	}
 
-	private jumpInFile(row: number, col: number) {
-		this.scrollIntoViewForExistingView(row, col);
+	focusInput() {
+		setTimeout(() => {
+			const inputElement = document.getElementById("cs-search-input");
+			inputElement?.focus();
+		}, 0);
 	}
 
 	private async jumpInVaultAsync(path: string, row: number, col: number) {
@@ -158,7 +171,7 @@ export class ViewHelper {
 			// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
 			// 	view.editor.focus();
 		} else {
-			logger.info("No view to jump");
+			logger.info("No markdown view to jump");
 		}
 	}
 }

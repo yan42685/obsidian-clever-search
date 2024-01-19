@@ -37,6 +37,31 @@ export class MyLib {
 	}
 
 	/**
+	 * deep version of Object.assign   (will change the target)
+	 */
+	static mergeDeep<T>(target: T, ...sources: T[]): T {
+		if (!sources.length) return target;
+		const source = sources.shift();
+
+		if (isObject(target) && isObject(source)) {
+			for (const key in source) {
+				if (isObject(source[key])) {
+					if (!target[key as keyof T])
+						// @ts-ignore
+						Object.assign(target, { [key]: {} });
+					// @ts-ignore
+					MyLib.mergeDeep(target[key as keyof T], source[key]);
+				} else {
+					// @ts-ignore
+					Object.assign(target, { [key]: source[key] });
+				}
+			}
+		}
+
+		return MyLib.mergeDeep(target, ...sources);
+	}
+
+	/**
 	 * Get current runtime language
 	 */
 	static getCurrLanguage(): LanguageEnum {
@@ -144,4 +169,8 @@ export function getInstance<T>(token: InjectionToken<T>): T {
 		alert(msg);
 		return -1 as any;
 	}
+}
+
+function isObject(item: any): boolean {
+	return item && typeof item === "object" && !Array.isArray(item);
 }

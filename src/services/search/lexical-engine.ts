@@ -32,7 +32,9 @@ export class LexicalEngine {
 	private _isReady = false;
 
 	@monitorDecorator
-	async reIndexAll(data: IndexedDocument[] | AsPlainObject): Promise<boolean> {
+	async reIndexAll(
+		data: IndexedDocument[] | AsPlainObject,
+	): Promise<boolean> {
 		this._isReady = false;
 		this.filesIndex.removeAll();
 		// this.linesIndex.removeAll();
@@ -149,7 +151,7 @@ export class LexicalEngine {
 			queryText,
 			fileItem.queryTerms,
 			fileItem.matchedTerms,
-			maxParsedLines
+			maxParsedLines,
 		);
 		return linesMatcher.parse();
 		// } else {
@@ -312,7 +314,7 @@ class LinesMatcher {
 		queryText: string,
 		queryTerms: string[],
 		matchedTerms: string[],
-		maxParsedLines: number
+		maxParsedLines: number,
 	) {
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);

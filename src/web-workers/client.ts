@@ -2,6 +2,7 @@ import { DataProvider } from "src/services/obsidian/user-data/data-provider";
 import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import type { Message } from "./worker-types";
 
 @singleton()
 export class SearchClient {
@@ -9,13 +10,17 @@ export class SearchClient {
 
 	async createChildThreads() {
 		if (isDevEnvironment) {
-			logger.warn("web worker only enabled on dev environment now")
+			logger.warn("web worker only enabled on dev environment now");
 		} else {
 			return;
 		}
 		logger.debug("init child threads...");
 		const obsidianFs = getInstance(DataProvider).obsidianFs;
-		const workerPath =".obsidian/plugins/clever-search/cs-search-worker.js";
+		// const workerPath =
+		// 	".obsidian/plugins/clever-search/cs-search-worker.js";
+
+		const workerPath =
+			".obsidian/plugins/clever-search/dist/backend-worker.js";
 		try {
 			const workerScript = await obsidianFs.readBinary(workerPath);
 			logger.debug(
@@ -38,7 +43,7 @@ export class SearchClient {
 		}
 	}
 
-	async testTickToken() {
-		this.worker?.postMessage("tikToken");
+	async testImageSearch() {
+		this.worker?.postMessage({type: "image-search"} as Message)
 	}
 }
