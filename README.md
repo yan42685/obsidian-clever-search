@@ -31,6 +31,7 @@
 ### Subtle Tweaks for Better UX
 
 - [x] Search from selection
+- [x] Automatically copy result text on selection
 - [ ] Remember last query text
 
 ### Integrate with other plugins
