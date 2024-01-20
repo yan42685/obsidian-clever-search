@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.1.6
+
+- Auto-switch to editing mode to scroll into correct view
+
 ## 0.1.5
 
 ### New
