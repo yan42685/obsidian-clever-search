@@ -147,19 +147,19 @@ export class ViewHelper {
 	}
 
 	private scrollIntoViewForExistingView(row: number, col: number) {
-		// WARN: this command inside this function will cause a warning in the console:
-		// [Violation] Forced reflow while executing JavaScript took 55ms
-		// if executing it in the `jumpInFile` before calling this function, this warning won't appear,
-		// but if removing the command in this function, we can't focus the editor when switching to an existing view
-		this.privateApi.executeCommandById(
-			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
-		);
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const cursorPos: EditorPosition = {
 			line: row,
 			ch: col,
 		};
+
 		if (view) {
+			// auto-switch to editing mode if it's reading mode in target view
+			const tmpViewState = view.getState();
+			tmpViewState.mode = "source";
+			tmpViewState.source = true;
+			view.setState(tmpViewState, { history: false });
+
 			view.editor.setCursor(cursorPos);
 			view.editor.scrollIntoView(
 				{
@@ -168,8 +168,17 @@ export class ViewHelper {
 				},
 				true,
 			);
+
 			// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
 			// 	view.editor.focus();
+
+			// WARN: this command inside this function will cause a warning in the console:
+			// [Violation] Forced reflow while executing JavaScript took 55ms
+			// if executing it in the `jumpInFile` before calling this function, this warning won't appear,
+			// but if removing the command in this function, we can't focus the editor when switching to an existing view
+			this.privateApi.executeCommandById(
+				ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+			);
 		} else {
 			logger.info("No markdown view to jump");
 		}

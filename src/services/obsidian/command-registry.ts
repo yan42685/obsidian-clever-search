@@ -15,7 +15,6 @@ import type CleverSearch from "src/main";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
-import { logger } from "src/utils/logger";
 import { currModifier, getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
@@ -127,7 +126,6 @@ abstract class AbstractNavigationHotkeys {
 	abstract registerAll(): void;
 
 	unregisterAll() {
-		logger.info("unregister");
 		this.handlers.forEach((h) => {
 			this.scope.unregister(h);
 		});
