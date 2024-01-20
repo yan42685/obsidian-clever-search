@@ -12,7 +12,7 @@ import { singleton } from "tsyringe";
 export class PrivateApi {
 	private app = getInstance(App) as any;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
-	private obsidianFs = this.app.vault.adapter as FileSystemAdapter;
+	public obsidianFs: FileSystemAdapter = this.app.vault.adapter;
 
 
 	getVaultAbsolutePath(): string {

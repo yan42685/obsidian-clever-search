@@ -1,5 +1,5 @@
 import type { AsPlainObject } from "minisearch";
-import type { TAbstractFile, TFile } from "obsidian";
+import { TFile, type TAbstractFile } from "obsidian";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import type { DocumentRef } from "src/globals/search-types";
@@ -84,8 +84,14 @@ export class DataManager {
 	}
 
 	private async addDocuments(files: TAbstractFile[]) {
+		const tFiles: TFile[] = [];
+		for (const f of files) {
+			if (f instanceof TFile) {
+				tFiles.push(f);
+			}
+		}
 		const documents = await this.dataProvider.generateAllIndexedDocuments(
-			files.filter((f) => this.dataProvider.isIndexable(f)) as TFile[],
+			tFiles.filter((f) => this.dataProvider.isIndexable(f)),
 		);
 		await this.lexicalEngine.addDocuments(documents);
 	}

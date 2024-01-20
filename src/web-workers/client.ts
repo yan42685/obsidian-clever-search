@@ -5,6 +5,7 @@ import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Message } from "./worker-types";
+import { PrivateApi } from "src/services/obsidian/private-api";
 
 @singleton()
 export class SearchClient {
@@ -17,7 +18,7 @@ export class SearchClient {
 			return;
 		}
 		logger.debug("init child threads...");
-		const obsidianFs = getInstance(DataProvider).obsidianFs;
+		const obsidianFs = getInstance(PrivateApi).obsidianFs;
 		const obConfigDir = getInstance(Vault).configDir;
 		const workerPath = pathUtil.join(
 			obConfigDir,

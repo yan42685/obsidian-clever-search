@@ -1,6 +1,5 @@
 import {
 	App,
-	FileSystemAdapter,
 	TAbstractFile,
 	TFile,
 	TFolder,
@@ -27,8 +26,7 @@ export class DataProvider {
 	private readonly viewRegistry = getInstance(ViewRegistry);
 	private readonly htmlParser = getInstance(HtmlParser);
 	private excludedPaths: Set<string>;
-	private supportedExtensions:Set<string>;
-	public readonly obsidianFs = this.vault.adapter as FileSystemAdapter;
+	private supportedExtensions: Set<string>;
 
 	private static readonly contentIndexableViewTypes = new Set([
 		ViewType.MARKDOWN,
@@ -40,8 +38,10 @@ export class DataProvider {
 
 	// update internal states based on OuterSetting
 	init() {
-		this.excludedPaths = new Set(this.setting.excludedPaths)
-		this.supportedExtensions = new Set(this.setting.customExtensions.plaintext);
+		this.excludedPaths = new Set(this.setting.excludedPaths);
+		this.supportedExtensions = new Set(
+			this.setting.customExtensions.plaintext,
+		);
 	}
 
 	async generateAllIndexedDocuments(
@@ -125,18 +125,25 @@ export class DataProvider {
 	async readPlainText(fileOrPath: TFile | string): Promise<string> {
 		const file =
 			typeof fileOrPath === "string"
-				? (this.vault.getAbstractFileByPath(fileOrPath) as TFile)
+				? this.vault.getAbstractFileByPath(fileOrPath)
 				: fileOrPath;
-		if (this.viewRegistry.viewTypeByPath(file.path) === ViewType.MARKDOWN) {
-			const plainText = await this.vault.cachedRead(file);
-			// return plainText;
-			return file.extension === "html"
-				? this.htmlParser.toMarkdown(plainText)
-				: plainText;
+		if (file instanceof TFile) {
+			if (
+				this.viewRegistry.viewTypeByPath(file.path) ===
+				ViewType.MARKDOWN
+			) {
+				const plainText = await this.vault.cachedRead(file);
+				// return plainText;
+				return file.extension === "html"
+					? this.htmlParser.toMarkdown(plainText)
+					: plainText;
+			} else {
+				throw Error(
+					`unsupported file extension as plain text to read, path: ${file.path}`,
+				);
+			}
 		} else {
-			throw Error(
-				`unsupported file extension as plain text to read, path: ${file.path}`,
-			);
+			return "";
 		}
 	}
 
