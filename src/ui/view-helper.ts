@@ -157,7 +157,6 @@ export class ViewHelper {
 			// auto-switch to editing mode if it's reading mode in target view
 			const tmpViewState = view.getState();
 			tmpViewState.mode = "source";
-			tmpViewState.source = true;
 			view.setState(tmpViewState, { history: false });
 
 			view.editor.setCursor(cursorPos);
