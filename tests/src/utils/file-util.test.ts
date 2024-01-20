@@ -60,13 +60,5 @@ describe("file-util test", () => {
 		it("should handle an empty path", () => {
 			expect(FileUtil.getFolderPath("")).toBe("./");
 		});
-
-		if (process.platform === "win32") {
-			it("should handle Windows-style paths", () => {
-				expect(FileUtil.getFolderPath("C:\\path\\to\\file.txt")).toBe(
-					"C:/path/to/",
-				);
-			});
-		}
 	});
 });

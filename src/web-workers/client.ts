@@ -1,4 +1,6 @@
+import { Vault } from "obsidian";
 import { DataProvider } from "src/services/obsidian/user-data/data-provider";
+import { pathUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -16,11 +18,11 @@ export class SearchClient {
 		}
 		logger.debug("init child threads...");
 		const obsidianFs = getInstance(DataProvider).obsidianFs;
-		// const workerPath =
-		// 	".obsidian/plugins/clever-search/cs-search-worker.js";
-
-		const workerPath =
-			".obsidian/plugins/clever-search/dist/backend-worker.js";
+		const obConfigDir = getInstance(Vault).configDir;
+		const workerPath = pathUtil.join(
+			obConfigDir,
+			"plugins/clever-search/dist/backend-worker.js",
+		);
 		try {
 			const workerScript = await obsidianFs.readBinary(workerPath);
 			logger.debug(
@@ -44,6 +46,6 @@ export class SearchClient {
 	}
 
 	async testImageSearch() {
-		this.worker?.postMessage({type: "image-search"} as Message)
+		this.worker?.postMessage({ type: "image-search" } as Message);
 	}
 }
