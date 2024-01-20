@@ -45,12 +45,6 @@ export class CommandRegistry {
 				// hotkeys: [{modifiers: [currModifier], key: "5"}],
 				callback: async () => await devTest(),
 			});
-
-			this.addCommand({
-				id: "cs-open-test-modal",
-				name: "Open test modal",
-				callback: () => this.plugin.openTestModal(),
-			});
 		}
 	}
 
