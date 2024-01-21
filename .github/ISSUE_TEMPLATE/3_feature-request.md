@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-## Describe your idea concisely
+## Please describe your idea concisely
 
 <!-- optional -->
 ## Screenshots
