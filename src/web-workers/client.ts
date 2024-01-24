@@ -1,11 +1,10 @@
 import { Vault } from "obsidian";
-import { DataProvider } from "src/services/obsidian/user-data/data-provider";
+import { PrivateApi } from "src/services/obsidian/private-api";
 import { pathUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Message } from "./worker-types";
-import { PrivateApi } from "src/services/obsidian/private-api";
 
 @singleton()
 export class SearchClient {
@@ -22,7 +21,7 @@ export class SearchClient {
 		const obConfigDir = getInstance(Vault).configDir;
 		const workerPath = pathUtil.join(
 			obConfigDir,
-			"plugins/clever-search/dist/backend-worker.js",
+			"plugins/clever-search/dist/cs-search-worker.js",
 		);
 		try {
 			const workerScript = await obsidianFs.readBinary(workerPath);
