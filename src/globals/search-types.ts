@@ -7,15 +7,15 @@ import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
-export type IndexedDocument = {
-	path: string;
-	basename: string;
-	folder: string;
-	aliases?: string;
-	tags?: string;
-	headings?: string;
-	content?: string;
-};
+export class IndexedDocument {
+	path = "";
+	basename = "";
+	folder = "";
+	aliases = "";
+	tags = "";
+	headings = "";
+	content = "";
+}
 
 export type DocumentFields = Array<keyof IndexedDocument>;
 
@@ -98,7 +98,7 @@ export class FileItem extends Item {
 	path: string;
 	queryTerms: string[];
 	matchedTerms: string[];
-	subItems: FileSubItem[]; // for markdown viewType 
+	subItems: FileSubItem[]; // for markdown viewType
 	// TODO: impl this
 	previewContent: any; // for non-markdown viewType
 	// TODO: store the view type rather than relying on obsidian api
