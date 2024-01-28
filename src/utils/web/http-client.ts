@@ -1,8 +1,12 @@
-import { requestUrl, type RequestUrlResponsePromise } from "obsidian";
+import {
+	requestUrl,
+	type RequestUrlResponse
+} from "obsidian";
 
 export class HttpClientOption {
 	baseUrl: string;
 	protocol: "http" | "https" = "http";
+	responseProcessor: (resp: RequestUrlResponse) => any | null;
 }
 export class HttpClient {
 	option: HttpClientOption;
@@ -50,15 +54,17 @@ export class HttpClient {
 		params?: Record<string, any>,
 		body?: any,
 		headers?: Record<string, string>,
-	): Promise<RequestUrlResponsePromise> {
+	): Promise<any | null> {
 		url = this.buildUrlWithParams(url, params);
-		return requestUrl({
-			url,
-			method,
-			contentType: "application/json",
-			body: body ? JSON.stringify(body) : undefined,
-			headers,
-		});
+		return this.option.responseProcessor(
+			await requestUrl({
+				url,
+				method,
+				contentType: "application/json",
+				body: body ? JSON.stringify(body) : undefined,
+				headers,
+			}),
+		);
 	}
 
 	private buildUrlWithParams(
