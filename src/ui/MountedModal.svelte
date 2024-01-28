@@ -27,6 +27,7 @@
 	export let uiType: "modal" | "floatingWindow";
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
+	export let isSemantic = false; // only available for in-vault search
 	export let queryText: string;
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
@@ -54,11 +55,15 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
-				// this result also can be cached if necessary in the future
-				currFileItem.subItems = await searchService.getFileSubItems(
-					queryText,
-					currFileItem,
-				);
+
+				// semantic search doesn't require requesting subItems each time because
+				// all the subItems for each fileItem have been returned for newInput if it is a semantic search
+				if (!isSemantic) {
+					currFileItem.subItems = await searchService.getFileSubItems(
+						queryText,
+						currFileItem,
+					);
+				}
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex =
 					currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
@@ -92,23 +97,11 @@
 			return;
 		}
 		if (searchType === SearchType.IN_FILE) {
-			// searchResult = await searchService.deprecatedSearchInFile(queryText);
 			searchResult = await searchService.searchInFile(queryText);
-			// searchResult.items.forEach((x) => {
-			// 	const item = x as LineItem;
-			// 	console.log(item.line.text);
-			// 	if (item.element) {
-			// 		MarkdownRenderer.render(
-			// 			app,
-			// 			item.line.text,
-			// 			item.element,
-			// 			searchResult.currPath,
-			// 			new Component(),
-			// 		);
-			// 	}
-			// });
 		} else if (searchType === SearchType.IN_VAULT) {
-			searchResult = await searchService.searchInVault(queryText);
+			searchResult = isSemantic
+				? await searchService.searchInVaultSemantic(queryText)
+				: await searchService.searchInVault(queryText);
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
