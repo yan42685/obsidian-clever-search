@@ -1,28 +1,43 @@
 import { requestUrl, type RequestUrlResponsePromise } from "obsidian";
 
-class HttpClient {
-	// private retryInterval: number;
-	// private maxRetries: number;
+export class RequestOption {
+	baseUrl: string;
+	protocol: "http" | "https" = "http";
+}
+export class HttpClient {
+	option: RequestOption;
+	constructor(option: RequestOption) {
+		this.option = option;
+	}
 
-	// constructor(retryInterval = 1000, maxRetries = 3) {
-	// 	this.retryInterval = retryInterval;
-	// 	this.maxRetries = maxRetries;
-	// }
-
-	public get(url: string, headers?: Record<string, string>) {
-		return this.request("GET", url, undefined, headers);
+	public get(
+		url: string,
+		params?: Record<string, any>,
+		headers?: Record<string, string>,
+	) {
+		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
+		const fullUrl = this.buildUrlWithParams(url, params);
+		return this.request("GET", fullUrl, undefined, headers);
 	}
 
 	public post(url: string, body: any, headers?: Record<string, string>) {
+		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
 		return this.request("POST", url, body, headers);
 	}
 
 	public put(url: string, body: any, headers?: Record<string, string>) {
+		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
 		return this.request("PUT", url, body, headers);
 	}
 
-	public delete(url: string, headers?: Record<string, string>) {
-		return this.request("DELETE", url, undefined, headers);
+	public delete(
+		url: string,
+		params?: Record<string, any>,
+		headers?: Record<string, string>,
+	) {
+		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
+		const fullUrl = this.buildUrlWithParams(url, params);
+		return this.request("DELETE", fullUrl, undefined, headers);
 	}
 
 	private async request(
@@ -39,9 +54,30 @@ class HttpClient {
 			headers,
 		});
 	}
+
+	private buildUrlWithParams(
+		url: string,
+		params?: Record<string, any>,
+	): string {
+		const queryString = params ? this.serializeParams(params) : "";
+		return queryString ? `${url}?${queryString}` : url;
+	}
+
+	private serializeParams(params: Record<string, any>): string {
+		return Object.keys(params)
+			.map((key) => {
+				const value = params[key];
+				return `${encodeURIComponent(key)}=${encodeURIComponent(
+					this.stringifyParam(value),
+				)}`;
+			})
+			.join("&");
+	}
+
+	private stringifyParam(value: any): string {
+		if (typeof value === "object") {
+			return JSON.stringify(value);
+		}
+		return String(value);
+	}
 }
-
-export const request = new HttpClient();
-
-export { };
-
