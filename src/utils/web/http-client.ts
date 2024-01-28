@@ -1,51 +1,57 @@
 import { requestUrl, type RequestUrlResponsePromise } from "obsidian";
 
-export class RequestOption {
+export class HttpClientOption {
 	baseUrl: string;
 	protocol: "http" | "https" = "http";
 }
 export class HttpClient {
-	option: RequestOption;
-	constructor(option: RequestOption) {
+	option: HttpClientOption;
+	constructor(option: HttpClientOption) {
 		this.option = option;
 	}
 
-	public get(
+	async get(
 		url: string,
 		params?: Record<string, any>,
 		headers?: Record<string, string>,
 	) {
-		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
-		const fullUrl = this.buildUrlWithParams(url, params);
-		return this.request("GET", fullUrl, undefined, headers);
+		return this.request("GET", url, params, undefined, headers);
 	}
 
-	public post(url: string, body: any, headers?: Record<string, string>) {
-		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
-		return this.request("POST", url, body, headers);
+	async post(
+		url: string,
+		params?: Record<string, any>,
+		body?: any,
+		headers?: Record<string, string>,
+	) {
+		return this.request("POST", url, params, body, headers);
 	}
 
-	public put(url: string, body: any, headers?: Record<string, string>) {
-		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
-		return this.request("PUT", url, body, headers);
+	async put(
+		url: string,
+		params?: Record<string, any>,
+		body?: any,
+		headers?: Record<string, string>,
+	) {
+		return this.request("PUT", url, params, body, headers);
 	}
 
-	public delete(
+	async delete(
 		url: string,
 		params?: Record<string, any>,
 		headers?: Record<string, string>,
 	) {
-		url = `${this.option.protocol}://${this.option.baseUrl}${url}`;
-		const fullUrl = this.buildUrlWithParams(url, params);
-		return this.request("DELETE", fullUrl, undefined, headers);
+		return this.request("DELETE", url, params, undefined, headers);
 	}
 
 	private async request(
 		method: string,
 		url: string,
+		params?: Record<string, any>,
 		body?: any,
 		headers?: Record<string, string>,
 	): Promise<RequestUrlResponsePromise> {
+		url = this.buildUrlWithParams(url, params);
 		return requestUrl({
 			url,
 			method,
@@ -59,6 +65,7 @@ export class HttpClient {
 		url: string,
 		params?: Record<string, any>,
 	): string {
+		url = `${this.option.protocol}://${this.option.baseUrl}/${url}`;
 		const queryString = params ? this.serializeParams(params) : "";
 		return queryString ? `${url}?${queryString}` : url;
 	}
