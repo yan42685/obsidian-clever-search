@@ -1,5 +1,7 @@
+import type { RequestUrlResponse } from "obsidian";
 import type { FileItem, IndexedDocument } from "src/globals/search-types";
-import { getInstance } from "src/utils/my-lib";
+import { logger } from "src/utils/logger";
+import { SHOULD_NOT_HAPPEN, getInstance } from "src/utils/my-lib";
 import { HttpClient } from "src/utils/web/http-client";
 import { singleton } from "tsyringe";
 import { ViewRegistry, ViewType } from "../obsidian/view-registry";
@@ -27,9 +29,29 @@ export class SemanticEngine {
 
 @singleton()
 class RemoteRequest {
+	private responseProcessor = (resp: RequestUrlResponse): any | null => {
+		if (resp.status === 200) {
+			const res = JSON.parse(resp.json) as Result;
+			if (res.code === 0) {
+				return res.data;
+			} else if (res.code === -1) {
+				logger.error(`KnownException: ${res.message}`);
+				return null;
+			} else if (res.code === -2) {
+				logger.error(`UnknownException: ${res.message}`);
+				return null;
+			} else {
+				throw Error(SHOULD_NOT_HAPPEN);
+			}
+		} else {
+			logger.error(resp.text);
+			return null;
+		}
+	};
 	private client = new HttpClient({
 		baseUrl: "localhost:8000/api",
 		protocol: "http",
+		responseProcessor: this.responseProcessor,
 	});
 
 	async reindexAll(docs: Document[]) {
@@ -55,4 +77,10 @@ type Document = {
 	path: string;
 	view_type: ViewType;
 	content: string;
+};
+
+type Result = {
+	data: any;
+	message: string;
+	code: number;
 };
