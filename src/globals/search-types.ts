@@ -5,17 +5,18 @@ import {
 } from "src/services/obsidian/view-registry";
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
+
 export type MiniSearchResult = MiniResult;
 
-export type IndexedDocument ={
+export type IndexedDocument = {
 	path: string;
 	basename: string;
-	folder:string
-	aliases?: string
-	tags?: string
-	headings?: string
-	content?: string
-}
+	folder: string;
+	content?: string;
+	aliases?: string;
+	tags?: string;
+	headings?: string;
+};
 
 export type DocumentFields = Array<keyof IndexedDocument>;
 
