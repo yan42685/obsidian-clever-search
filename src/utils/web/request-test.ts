@@ -5,7 +5,7 @@ import { throttle } from "throttle-debounce";
 import { logger } from "../logger";
 import { MyLib, getInstance } from "../my-lib";
 
-export class HttpClient {
+export class RequestTest {
 	private settings = getInstance(OuterSetting);
 	private noticeThrottled = throttle(
 		5000,
