@@ -9,11 +9,11 @@ import { OuterSetting } from "./globals/plugin-setting";
 import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { RenderMarkdownModal } from "./main";
 import { SearchService } from "./services/obsidian/search-service";
+import { SemanticEngine } from "./services/search/semantic-engine";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
-import { SearchClient } from "./web-workers/client";
 
 
 function getApp() {
@@ -152,7 +152,8 @@ export async function devTest() {
 	// monitorExecution(() => testTokenizer());
 	// testUFuzzy();
 
-	getInstance(SearchClient).testImageSearch();
+	// getInstance(SearchClient).testImageSearch();
 
 	// await testParseHtml();
+	getInstance(SemanticEngine).reindexAll()
 }
