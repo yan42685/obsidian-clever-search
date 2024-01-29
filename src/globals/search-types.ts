@@ -7,14 +7,14 @@ import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 export type MiniSearchResult = MiniResult;
 
-export class IndexedDocument {
-	path = "";
-	basename = "";
-	folder = "";
-	aliases = "";
-	tags = "";
-	headings = "";
-	content = "";
+export type IndexedDocument ={
+	path: string;
+	basename: string;
+	folder:string
+	aliases?: string
+	tags?: string
+	headings?: string
+	content?: string
 }
 
 export type DocumentFields = Array<keyof IndexedDocument>;
