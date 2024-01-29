@@ -1,5 +1,9 @@
 import type { RequestUrlResponse } from "obsidian";
-import type { FileItem, IndexedDocument } from "src/globals/search-types";
+import {
+	FileItem,
+	FileSubItem,
+	type IndexedDocument,
+} from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { SHOULD_NOT_HAPPEN, getInstance } from "src/utils/my-lib";
 import { HttpClient } from "src/utils/web/http-client";
@@ -22,8 +26,29 @@ export class SemanticEngine {
 		await this.request.reindexAll(docs);
 	}
 
-	async search(queryText: string, viewType: ViewType) {
-		return this.request.search(queryText, viewType);
+	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
+		const rawResults = await this.request.search(queryText, viewType);
+		logger.info(rawResults);
+
+		return rawResults.map((rawResult) => {
+			const subItems = rawResult.subItems.map(
+				(subItemData) =>
+					new FileSubItem(
+						subItemData.text,
+						subItemData.row,
+						subItemData.col,
+					),
+			);
+
+			return new FileItem(
+				rawResult.engineType,
+				rawResult.path,
+				rawResult.queryTerms,
+				rawResult.matchedTerms,
+				subItems,
+				rawResult.previewContent,
+			);
+		});
 	}
 }
 
@@ -31,7 +56,7 @@ export class SemanticEngine {
 class RemoteRequest {
 	private responseProcessor = (resp: RequestUrlResponse): any | null => {
 		if (resp.status === 200) {
-			const res = JSON.parse(resp.json) as Result;
+			const res = resp.json as Result;
 			if (res.code === 0) {
 				return res.data;
 			} else if (res.code === -1) {
@@ -65,11 +90,9 @@ class RemoteRequest {
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
-		return (
-			JSON.parse(
-				(await this.client.get("search", { queryText, viewType })).json,
-			) || []
-		);
+		const res = await this.client.get("search", { queryText, viewType });
+		logger.info(res);
+		return res || [];
 	}
 }
 

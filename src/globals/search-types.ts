@@ -138,11 +138,11 @@ export class FileSubItem extends Item {
 	text: string;
 	row: number; // for precisely jumping to the original file location
 	col: number;
-	constructor(text: string, originRow: number, originCol: number) {
+	constructor(text: string, row: number, col: number) {
 		super();
 		this.text = text;
-		this.row = originRow;
-		this.col = originCol;
+		this.row = row;
+		this.col = col;
 	}
 }
 

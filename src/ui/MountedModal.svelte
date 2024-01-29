@@ -27,7 +27,7 @@
 	export let uiType: "modal" | "floatingWindow";
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
-	export let isSemantic = false; // only available for in-vault search
+	export let isSemantic: boolean; // only available for in-vault search
 	export let queryText: string;
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
