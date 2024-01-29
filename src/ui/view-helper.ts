@@ -124,7 +124,7 @@ export class ViewHelper {
 		let alreadyOpen = false;
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (
-				// leaf.view instanceof MarkdownView &&
+				leaf.view instanceof MarkdownView &&
 				leaf.getViewState().state?.file === path
 			) {
 				this.app.workspace.setActiveLeaf(leaf, { focus: true });
