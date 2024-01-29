@@ -147,6 +147,12 @@ export class ViewHelper {
 	}
 
 	private scrollIntoViewForExistingView(row: number, col: number) {
+		// WARN: this command inside this function will cause a warning in the console:
+		// [Violation] Forced reflow while executing JavaScript took 55ms
+		// if removing the command in this function, we can't focus the editor when switching to an existing view
+		this.privateApi.executeCommandById(
+			ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+		);
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const cursorPos: EditorPosition = {
 			line: row,
@@ -171,9 +177,7 @@ export class ViewHelper {
 			// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
 			// 	view.editor.focus();
 
-			// WARN: this command inside this function will cause a warning in the console:
-			// [Violation] Forced reflow while executing JavaScript took 55ms
-			// if removing the command in this function, we can't focus the editor when switching to an existing view
+			// this command need to be triggered again if the view mode has been switched to `editing` from `reading`
 			this.privateApi.executeCommandById(
 				ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
 			);
