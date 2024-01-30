@@ -115,7 +115,13 @@ async function parseHtml(file: TFile) {
 }
 
 async function testSemanticSearch() {
-	const files = getInstance(DataProvider).allFilesToBeIndexed().filter(f=>f.basename.includes("Chinese"));
+	// const files = getInstance(DataProvider).allFilesToBeIndexed().filter(f=>f.basename.includes("Chinese"));
+	const files = getInstance(DataProvider)
+		.allFilesToBeIndexed()
+		// .filter((f) => f.basename.includes("短篇小说"));
+		// .filter((f) => f.basename.includes("20万字") || f.basename.includes("Mysql"));
+		.filter((f) => f.basename.includes("Mysql"));
+
 	const indexedDocs =
 		await getInstance(DataProvider).generateAllIndexedDocuments(files);
 	getInstance(SemanticEngine).reindexAll(indexedDocs);

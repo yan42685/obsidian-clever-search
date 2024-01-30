@@ -102,6 +102,7 @@
 			searchResult = isSemantic
 				? await searchService.searchInVaultSemantic(queryText)
 				: await searchService.searchInVault(queryText);
+			logger.info(searchResult)
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
