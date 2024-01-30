@@ -28,7 +28,6 @@ export class SemanticEngine {
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
 		const rawResults = await this.request.search(queryText, viewType);
-		logger.info(rawResults);
 
 		return rawResults.map((rawResult) => {
 			const subItems = rawResult.subItems.map(
@@ -91,7 +90,6 @@ class RemoteRequest {
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
 		const res = await this.client.get("search", { queryText, viewType });
-		logger.info(res);
 		return res || [];
 	}
 }
