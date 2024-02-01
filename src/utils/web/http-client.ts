@@ -1,12 +1,10 @@
-import {
-	requestUrl,
-	type RequestUrlResponse
-} from "obsidian";
+import { requestUrl, type RequestUrlResponse } from "obsidian";
 
 export class HttpClientOption {
 	baseUrl: string;
 	protocol: "http" | "https" = "http";
 	responseProcessor: (resp: RequestUrlResponse) => any | null;
+	headers?: Record<string, string>;
 }
 export class HttpClient {
 	option: HttpClientOption;
@@ -14,38 +12,20 @@ export class HttpClient {
 		this.option = option;
 	}
 
-	async get(
-		url: string,
-		params?: Record<string, any>,
-		headers?: Record<string, string>,
-	) {
-		return this.request("GET", url, params, undefined, headers);
+	async get(url: string, params?: Record<string, any>) {
+		return this.request("GET", url, params, undefined);
 	}
 
-	async post(
-		url: string,
-		params?: Record<string, any>,
-		body?: any,
-		headers?: Record<string, string>,
-	) {
-		return this.request("POST", url, params, body, headers);
+	async post(url: string, params?: Record<string, any>, body?: any) {
+		return this.request("POST", url, params, body);
 	}
 
-	async put(
-		url: string,
-		params?: Record<string, any>,
-		body?: any,
-		headers?: Record<string, string>,
-	) {
-		return this.request("PUT", url, params, body, headers);
+	async put(url: string, params?: Record<string, any>, body?: any) {
+		return this.request("PUT", url, params, body);
 	}
 
-	async delete(
-		url: string,
-		params?: Record<string, any>,
-		headers?: Record<string, string>,
-	) {
-		return this.request("DELETE", url, params, undefined, headers);
+	async delete(url: string, params?: Record<string, any>) {
+		return this.request("DELETE", url, params, undefined);
 	}
 
 	private async request(
@@ -53,7 +33,6 @@ export class HttpClient {
 		url: string,
 		params?: Record<string, any>,
 		body?: any,
-		headers?: Record<string, string>,
 	): Promise<any | null> {
 		url = this.buildUrlWithParams(url, params);
 		return this.option.responseProcessor(
@@ -62,7 +41,7 @@ export class HttpClient {
 				method,
 				contentType: "application/json",
 				body: body ? JSON.stringify(body) : undefined,
-				headers,
+				headers: this.option.headers,
 			}),
 		);
 	}
