@@ -83,9 +83,7 @@ class RemoteRequest {
 	async reindexAll(docs: Document[]) {
 		return this.client.post(
 			"reindex_all",
-			{
-				vault_id: "test_collection",
-			},
+			undefined,
 			docs,
 		);
 	}
