@@ -8,6 +8,7 @@ import { logger } from "src/utils/logger";
 import { SHOULD_NOT_HAPPEN, getInstance } from "src/utils/my-lib";
 import { HttpClient } from "src/utils/web/http-client";
 import { singleton } from "tsyringe";
+import { PrivateApi } from "../obsidian/private-api";
 import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 
 @singleton()
@@ -76,6 +77,7 @@ class RemoteRequest {
 		baseUrl: "localhost:8000/api",
 		protocol: "http",
 		responseProcessor: this.responseProcessor,
+		headers: { "X-vaultId": getInstance(PrivateApi).getAppId() },
 	});
 
 	async reindexAll(docs: Document[]) {
