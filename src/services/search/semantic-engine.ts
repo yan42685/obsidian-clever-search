@@ -9,12 +9,22 @@ import { SHOULD_NOT_HAPPEN, getInstance } from "src/utils/my-lib";
 import { HttpClient } from "src/utils/web/http-client";
 import { singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
+import { MyNotice } from "../obsidian/transformed-api";
 import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 
 @singleton()
 export class SemanticEngine {
 	private request = getInstance(RemoteRequest);
 	private viewRegistry = getInstance(ViewRegistry);
+
+	async testConnection() {
+		const connected = await this.request.testConnection();
+		if (connected) {
+			new MyNotice("Connected", 5000);
+		} else {
+			new MyNotice("Failed to connect", 5000);
+		}
+	}
 
 	async reindexAll(data: IndexedDocument[]) {
 		const docs = data.map((x) => {
@@ -80,12 +90,18 @@ class RemoteRequest {
 		headers: { "X-vaultId": getInstance(PrivateApi).getAppId() },
 	});
 
+	async testConnection(): Promise<boolean> {
+		try {
+			const connected = await this.client.get("testConnection");
+			return connected ? true : false;
+		} catch (e) {
+			logger.error(e);
+			return false;
+		}
+	}
+
 	async reindexAll(docs: Document[]) {
-		return this.client.post(
-			"reindex_all",
-			undefined,
-			docs,
-		);
+		return this.client.post("reindex_all", undefined, docs);
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
