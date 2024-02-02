@@ -26,15 +26,18 @@ export class SemanticEngine {
 		}
 	}
 
-	async reindexAll(data: IndexedDocument[]) {
-		const docs = data.map((x) => {
-			return {
-				path: x.path,
-				view_type: this.viewRegistry.viewTypeByPath(x.path),
-				content: x.content,
-			} as Document;
-		});
+	async reindexAll(indexedDocs: IndexedDocument[]) {
+		const docs = this.convertToDocuments(indexedDocs);
 		await this.request.reindexAll(docs);
+	}
+
+	async addDocuments(indexedDocs: IndexedDocument[]): Promise<boolean> {
+		const docs = this.convertToDocuments(indexedDocs);
+		return await this.request.addDocuments(docs);
+	}
+
+	async deleteDocuments(paths: string[]): Promise<boolean> {
+		return await this.request.deleteDocuments(paths);
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
@@ -58,6 +61,16 @@ export class SemanticEngine {
 				subItems,
 				rawResult.previewContent,
 			);
+		});
+	}
+
+	private convertToDocuments(indexedDocs: IndexedDocument[]): Document[] {
+		return indexedDocs.map((x) => {
+			return {
+				path: x.path,
+				view_type: this.viewRegistry.viewTypeByPath(x.path),
+				content: x.content,
+			} as Document;
 		});
 	}
 }
@@ -102,6 +115,26 @@ class RemoteRequest {
 
 	async reindexAll(docs: Document[]) {
 		return this.client.post("reindex_all", undefined, docs);
+	}
+
+	async addDocuments(docs: Document[]): Promise<boolean> {
+		try {
+			await this.client.post("addDocuments", undefined, docs);
+			return true;
+		} catch (e) {
+			logger.error(e);
+			return false;
+		}
+	}
+
+	async deleteDocuments(paths: string[]): Promise<boolean> {
+		try {
+			await this.client.post("deleteDocuments", undefined, paths);
+			return true;
+		} catch (e) {
+			logger.error(e);
+			return false;
+		}
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
