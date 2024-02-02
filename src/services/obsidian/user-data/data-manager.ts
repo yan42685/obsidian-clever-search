@@ -2,9 +2,11 @@ import type { AsPlainObject } from "minisearch";
 import { TFile, type TAbstractFile } from "obsidian";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
+import { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import { Database } from "src/services/database/database";
 import { LexicalEngine } from "src/services/search/lexical-engine";
+import { SemanticEngine } from "src/services/search/semantic-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
@@ -24,6 +26,8 @@ export class DataManager {
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
 	private lexicalEngine = getInstance(LexicalEngine);
+	private semanticEngine = getInstance(SemanticEngine);
+	private semanticConfig = getInstance(OuterSetting).semantic;
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
 
@@ -94,12 +98,19 @@ export class DataManager {
 			tFiles.filter((f) => this.dataProvider.isIndexable(f)),
 		);
 		await this.lexicalEngine.addDocuments(documents);
+		if (this.semanticConfig.isEnabled) {
+			await this.semanticEngine.addDocuments(documents);
+		}
 	}
 
 	private async deleteDocuments(paths: string[]) {
-		this.lexicalEngine.deleteDocuments(
-			paths.filter((p) => this.dataProvider.isIndexable(p)),
+		const indexablePaths = paths.filter((p) =>
+			this.dataProvider.isIndexable(p),
 		);
+		this.lexicalEngine.deleteDocuments(indexablePaths);
+		if (this.semanticConfig.isEnabled) {
+			await this.semanticEngine.deleteDocuments(indexablePaths);
+		}
 	}
 
 	private async initLexicalEngines() {
