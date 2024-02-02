@@ -19,6 +19,7 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
+import { SemanticEngine } from "../search/semantic-engine";
 import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
@@ -176,6 +177,16 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName(t("Advanced"))
 			.setDesc(t("Advanced.desc"));
+
+		new Setting(containerEl)
+			.setName("Semantic search")
+			.addButton((b) =>
+				b
+					.setButtonText(t("Manage"))
+					.onClick(() =>
+						new SemanticSearchModal(getInstance(App)).open(),
+					),
+			);
 
 		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
 			b.setButtonText(t("Manage")).onClick(() => {
@@ -471,5 +482,46 @@ class CustomExtensionModal extends Modal {
 			});
 
 		new Setting(contentEl).setName("Image").setDesc("Todo");
+	}
+}
+
+class SemanticSearchModal extends Modal {
+	private semanticEngine = getInstance(SemanticEngine);
+	private setting = getInstance(OuterSetting).semantic;
+	private settingManager = getInstance(SettingManager);
+	onOpen(): void {
+		this.modalEl.style.width = "50vw";
+		this.modalEl.style.height = "80vh";
+		this.modalEl.querySelector(".modal-close-button")?.remove();
+		const contentEl = this.contentEl;
+		new Setting(contentEl)
+			.setName("Enable")
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.isEnabled)
+					.onChange((v) => (this.setting.isEnabled = v)),
+			);
+		new Setting(contentEl)
+			.setName("Server type")
+			.setDesc(
+				"For local server, Clever Search AI Helper needs to run in the background. For remote server, it has not been implemented yet.",
+			)
+			.addDropdown((d) =>
+				d
+					.addOptions({ local: "local", remote: "remote" })
+					.setValue(this.setting.serverType)
+					.onChange(
+						(v) =>
+							(this.setting.serverType = v as "local" | "remote"),
+					),
+			);
+		new Setting(contentEl)
+			.setName("Utilities")
+			.addButton((b) =>
+				b
+					.setButtonText("Test connection")
+					.onClick(() => this.semanticEngine.testConnection()),
+			)
+			.addButton((b) => b.setButtonText("Reindex").onClick(() => {}));
 	}
 }

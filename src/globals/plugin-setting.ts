@@ -15,6 +15,7 @@ export class OuterSetting {
 	apiProvider1: ApiProvider;
 	apiProvider2: ApiProvider;
 	ui: UISetting;
+	semantic: SemanticSetting;
 }
 
 const isChineseUser = window.localStorage.getItem("language") === "zh";
@@ -45,6 +46,10 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		inFileFloatingWindowTop: "2.7em",
 		inFileFloatingWindowLeft: "2.5em",
 	},
+	semantic: {
+		isEnabled: false,
+		serverType: "local"
+	}
 };
 
 export type LogLevelOptions = {
@@ -65,6 +70,11 @@ export type UISetting = {
 	inFileFloatingWindowTop: string;
 	inFileFloatingWindowLeft: string,
 };
+
+export type SemanticSetting = {
+	isEnabled: boolean
+	serverType: "local" | "remote"
+}
 
 // ========== transparent for users ==========
 type InnerSetting = {
