@@ -64,6 +64,10 @@ export class SemanticEngine {
 		});
 	}
 
+	async docsCount(): Promise<number | null> {
+		return this.request.docsCount();
+	}
+
 	private convertToDocuments(indexedDocs: IndexedDocument[]): Document[] {
 		return indexedDocs.map((x) => {
 			return {
@@ -97,7 +101,7 @@ class RemoteRequest {
 		}
 	};
 	private client = new HttpClient({
-		baseUrl: "localhost:8000/api",
+		baseUrl: "localhost:19528/api",
 		protocol: "http",
 		responseProcessor: this.responseProcessor,
 		headers: { "X-vaultId": getInstance(PrivateApi).getAppId() },
@@ -114,7 +118,17 @@ class RemoteRequest {
 	}
 
 	async reindexAll(docs: Document[]) {
-		return this.client.post("reindex_all", undefined, docs);
+		return this.client.post("reindexAll", undefined, docs);
+	}
+
+	async docsCount(): Promise<number | null> {
+		try {
+			const count = await this.client.get("docsCount");
+			return count;
+		} catch (e) {
+			logger.error(e);
+			return null;
+		}
 	}
 
 	async addDocuments(docs: Document[]): Promise<boolean> {
