@@ -102,7 +102,7 @@
 			searchResult = isSemantic
 				? await searchService.searchInVaultSemantic(queryText)
 				: await searchService.searchInVault(queryText);
-			logger.info(searchResult)
+			logger.info(searchResult);
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
@@ -398,6 +398,11 @@
 		height: 73.97vh;
 		width: 60%;
 	}
+
+	.right-pane button {
+		white-space: pre-wrap;
+	}
+
 	.right-pane .preview-container {
 		margin: 0.7em 0 0 0.7em;
 		height: 72.5vh;
