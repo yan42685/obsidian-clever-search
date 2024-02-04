@@ -51,10 +51,10 @@
 | Scope    | Name                          |  Hotkey                   |
 | -------- | ----------------------------- | ------------------------ |
 | Item     | View item context             | `Left Click`             |
-| Modal    | Next item                     | `Ctrl-J` or `ArrowDown`  |
-| Modal    | Previous item                 | `Ctrl-K` or `ArrorUp`    |
+| Modal    | Next item                     | `Ctrl-J`                 |
+| Modal    | Previous item                 | `Ctrl-K`                 |
 | Modal    | Next subItem (in-vault)       | `Ctrl-N`                 |
-| Modal    | previous subItem              | `Ctrl-P`                 |
+| Modal    | Previous subItem              | `Ctrl-P`                 |
 | Modal    | Confirm item                  | `Enter` or `Right Click` |
 | Obsidian | Search in vault               | undefined                |
 | Obsidian | Search in File                | undefined                |
