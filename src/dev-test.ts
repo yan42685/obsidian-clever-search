@@ -27,7 +27,7 @@ function testStemmer() {
 function testTsyringe() {
 	const obj1 = getInstance(SearchService);
 	const obj2 = getInstance(SearchService);
-	// in tsyringe, the default scope for class is singleton, so it should output "true"
+	// in tsyringe, the default scope for class is transient, so it should output "true"
 	logger.info(`test equal: ${obj1 === obj2}`);
 }
 
