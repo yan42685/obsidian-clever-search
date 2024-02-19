@@ -139,10 +139,7 @@ export class ViewHelper {
 				"",
 				this.setting.ui.openInNewPane,
 			);
-			// this.scrollIntoViewForExistingView(row, col);
-			this.app.workspace.onLayoutReady(() =>
-				this.scrollIntoViewForExistingView(row, col),
-			);
+			this.scrollIntoViewForExistingView(row, col);
 		}
 	}
 
@@ -166,21 +163,34 @@ export class ViewHelper {
 			view.setState(tmpViewState, { history: false });
 
 			view.editor.setCursor(cursorPos);
-			view.editor.scrollIntoView(
-				{
-					from: cursorPos,
-					to: cursorPos,
-				},
-				true,
-			);
 
-			// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
-			// 	view.editor.focus();
+			this.app.workspace.onLayoutReady(() => {
+				view.editor.scrollIntoView(
+					{
+						from: cursorPos,
+						to: cursorPos,
+					},
+					true,
+				);
+				// the second jump is necessary because the images are lazy-rendered
+				setTimeout(() => {
+					view.editor.scrollIntoView(
+						{
+							from: cursorPos,
+							to: cursorPos,
+						},
+						true,
+					);
 
-			// this command need to be triggered again if the view mode has been switched to `editing` from `reading`
-			this.privateApi.executeCommandById(
-				ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
-			);
+					// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
+					// 	view.editor.focus();
+
+					// this command need to be triggered again if the view mode has been switched to `editing` from `reading`
+					this.privateApi.executeCommandById(
+						ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+					);
+				}, 1);
+			});
 		} else {
 			logger.info("No markdown view to jump");
 		}
