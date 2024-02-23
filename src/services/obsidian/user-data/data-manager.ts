@@ -125,13 +125,22 @@ export class DataManager {
 				this.shouldForceRefresh ||
 				(await this.semanticEngine.doesCollectionExist()) === false
 			) {
+				let prevNotice = null;
+				if (this.semanticConfig.serverType === "local") {
+					prevNotice = new MyNotice(t("Semantic init time"), 0);
+				}
 				const filesToIndex = this.dataProvider.allFilesToBeIndexed();
 				const documents =
 					await this.dataProvider.generateAllIndexedDocuments(
 						filesToIndex,
 					);
 				await this.semanticEngine.reindexAll(documents);
+				if (prevNotice) {
+					prevNotice.hide();
+				}
+				new MyNotice(t("Semantic init finished"), 5000)
 			}
+
 		}
 	}
 

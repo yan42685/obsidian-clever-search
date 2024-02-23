@@ -10,6 +10,8 @@ export default {
 	"Omnisearch is installed but not enabled": "安装了 Omnisearch 但是没有启用",
 	"Database has been updated, a reindex is required":
 		"数据库已更新，需要重建索引",
+	"Semantic init time": "本地模型索引速度大约是 200-800 字每秒，在此期间请不要关闭 Obsidian",
+	"Semantic init finished": "语义引擎已就绪",
 
 	// setting tab
 	"Max items count": "最大候选项数",

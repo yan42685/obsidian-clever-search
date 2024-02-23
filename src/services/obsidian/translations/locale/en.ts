@@ -11,6 +11,8 @@ export default {
 		"Omnisearch is installed but not enabled",
 	"Database has been updated, a reindex is required":
 		"Database has been updated, a reindex is required",
+	"Semantic init time": "The local model indexes at a speed of approximately 100-500 words per second. During this time, please do not close Obsidian.",
+	"Semantic init finished": "Semantic engine is ready",
 
 	// setting tab
 	"Max items count": "Max items count",
