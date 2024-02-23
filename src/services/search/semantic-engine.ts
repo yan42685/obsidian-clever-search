@@ -16,8 +16,9 @@ import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 export class SemanticEngine {
 	private request = getInstance(RemoteRequest);
 	private viewRegistry = getInstance(ViewRegistry);
+	private isIndexing = false;
 
-	async testConnection() {
+	async testConnection(): Promise<void> {
 		const connected = await this.request.testConnection();
 		if (connected) {
 			new MyNotice("Connected", 5000);
@@ -26,18 +27,30 @@ export class SemanticEngine {
 		}
 	}
 
+	async doesCollectionExist(): Promise<boolean | null> {
+		return this.request.doesCollectionExist();
+	}
+
 	async reindexAll(indexedDocs: IndexedDocument[]) {
+		this.isIndexing = true;
 		const docs = this.convertToDocuments(indexedDocs);
 		await this.request.reindexAll(docs);
+		this.isIndexing = false;
 	}
 
 	async addDocuments(indexedDocs: IndexedDocument[]): Promise<boolean> {
+		this.isIndexing = true;
 		const docs = this.convertToDocuments(indexedDocs);
-		return await this.request.addDocuments(docs);
+		const result = await this.request.addDocuments(docs);
+		this.isIndexing = false;
+		return result;
 	}
 
 	async deleteDocuments(paths: string[]): Promise<boolean> {
-		return await this.request.deleteDocuments(paths);
+		this.isIndexing = true;
+		const result = await this.request.deleteDocuments(paths);
+		this.isIndexing = false;
+		return result;
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
@@ -115,6 +128,10 @@ class RemoteRequest {
 			logger.error(e);
 			return false;
 		}
+	}
+
+	async doesCollectionExist(): Promise<boolean | null> {
+		return this.client.get("doesCollectionExist", undefined);
 	}
 
 	async reindexAll(docs: Document[]) {

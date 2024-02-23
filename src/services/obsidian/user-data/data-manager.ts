@@ -53,7 +53,8 @@ export class DataManager {
 	@monitorDecorator
 	async initAsync() {
 		// TODO: delete old version databases
-		await this.initLexicalEngines();
+		await this.initLexicalEngine();
+		await this.initSemanticEngine();
 		await this.updateDocRefsByMtime();
 
 		if (!this.shouldForceRefresh) {
@@ -87,33 +88,54 @@ export class DataManager {
 		this.shouldForceRefresh = false;
 	}
 
-	private async addDocuments(files: TAbstractFile[]) {
-		const tFiles: TFile[] = [];
-		for (const f of files) {
-			if (f instanceof TFile) {
-				tFiles.push(f);
+	private async addDocuments(files: TAbstractFile[], forSemantic = false) {
+		if (files.length > 0) {
+			const tFiles: TFile[] = [];
+			for (const f of files) {
+				if (f instanceof TFile) {
+					tFiles.push(f);
+				}
+			}
+			const documents =
+				await this.dataProvider.generateAllIndexedDocuments(
+					tFiles.filter((f) => this.dataProvider.isIndexable(f)),
+				);
+			await this.lexicalEngine.addDocuments(documents);
+			if (this.semanticConfig.isEnabled && forSemantic) {
+				await this.semanticEngine.addDocuments(documents);
 			}
 		}
-		const documents = await this.dataProvider.generateAllIndexedDocuments(
-			tFiles.filter((f) => this.dataProvider.isIndexable(f)),
-		);
-		await this.lexicalEngine.addDocuments(documents);
-		if (this.semanticConfig.isEnabled) {
-			await this.semanticEngine.addDocuments(documents);
+	}
+
+	private async deleteDocuments(paths: string[], forSemantic = false) {
+		if (paths.length > 0) {
+			const indexablePaths = paths.filter((p) =>
+				this.dataProvider.isIndexable(p),
+			);
+			this.lexicalEngine.deleteDocuments(indexablePaths);
+			if (this.semanticConfig.isEnabled && forSemantic) {
+				await this.semanticEngine.deleteDocuments(indexablePaths);
+			}
 		}
 	}
 
-	private async deleteDocuments(paths: string[]) {
-		const indexablePaths = paths.filter((p) =>
-			this.dataProvider.isIndexable(p),
-		);
-		this.lexicalEngine.deleteDocuments(indexablePaths);
+	private async initSemanticEngine() {
 		if (this.semanticConfig.isEnabled) {
-			await this.semanticEngine.deleteDocuments(indexablePaths);
+			if (
+				this.shouldForceRefresh ||
+				(await this.semanticEngine.doesCollectionExist()) === false
+			) {
+				const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+				const documents =
+					await this.dataProvider.generateAllIndexedDocuments(
+						filesToIndex,
+					);
+				await this.semanticEngine.reindexAll(documents);
+			}
 		}
 	}
 
-	private async initLexicalEngines() {
+	private async initLexicalEngine() {
 		logger.trace("Init lexical engine...");
 		let prevData: AsPlainObject | null;
 		if (!devOption.loadIndexFromDatabase || this.shouldForceRefresh) {
@@ -203,8 +225,8 @@ export class DataManager {
 			// perform batch delete and add operations
 			logger.trace(`docs to delete: ${docsToDelete.length}`);
 			logger.trace(`docs to add: ${docsToAdd.length}`);
-			await this.deleteDocuments(docsToDelete);
-			await this.addDocuments(docsToAdd);
+			await this.deleteDocuments(docsToDelete, true);
+			await this.addDocuments(docsToAdd, true);
 
 			// update the document refs in the database
 			const updatedRefs = Array.from(currFiles.values()).map((file) => ({
