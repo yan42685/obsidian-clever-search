@@ -46,12 +46,6 @@ export class CommandRegistry {
 				callback: async () => await devTest(),
 			});
 
-			this.addCommand({
-				id: "clever-search-in-vault-semantic",
-				name: "Search in vault semantically",
-				callback: async () =>
-					new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
-			});
 		}
 	}
 
@@ -75,7 +69,7 @@ export class CommandRegistry {
 		});
 	}
 
-	addInVaultLexicalCommands() {
+	addInVaultCommands() {
 		this.addCommand({
 			id: "clever-search-in-vault",
 			name: "Search in Vault",
@@ -96,6 +90,13 @@ export class CommandRegistry {
 					await getInstance(OmnisearchIntegration).getLastQuery(),
 				).open();
 			},
+		});
+
+		this.addCommand({
+			id: "clever-search-in-vault-semantic",
+			name: "Search in vault semantically",
+			callback: async () =>
+				new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
 		});
 	}
 
