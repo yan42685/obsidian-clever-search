@@ -33,15 +33,15 @@ export class CommandRegistry {
 	addDevCommands() {
 		if (isDevEnvironment) {
 			this.addCommand({
-				id: "cs-in-file-search-floating-window",
+				id: "in-file-search-floating-window",
 				name: "In file search - floating window",
 				callback: () =>
 					getInstance(FloatingWindowManager).toggle("inFile"),
 			});
 
 			this.addCommand({
-				id: "clever-search-triggerTest",
-				name: "clever-search-triggerTest",
+				id: "trigger-test",
+				name: "triggerTest",
 				// hotkeys: [{modifiers: [currModifier], key: "5"}],
 				callback: async () => await devTest(),
 			});
@@ -50,7 +50,7 @@ export class CommandRegistry {
 
 	addCommandsWithoutDependency() {
 		this.addCommand({
-			id: "clever-search-in-file",
+			id: "in-file-search",
 			name: "Search in file",
 			callback: () => {
 				if (this.setting.ui.floatingWindowForInFile) {
@@ -62,7 +62,7 @@ export class CommandRegistry {
 		});
 
 		this.addCommand({
-			id: "cs-toggle-privacy-mode",
+			id: "toggle-privacy-mode",
 			name: "Toggle privacy mode",
 			callback: () => getInstance(AuxiliaryService).togglePrivacyMode(),
 		});
@@ -70,8 +70,8 @@ export class CommandRegistry {
 
 	addInVaultLexicalCommands() {
 		this.addCommand({
-			id: "clever-search-in-vault",
-			name: "Search in Vault",
+			id: "in-vault-lexical-search",
+			name: "Search in vault lexically",
 			callback: () => {
 				eventBus.emit(EventEnum.IN_VAULT_SEARCH);
 				new SearchModal(this.app, SearchType.IN_VAULT).open();
@@ -79,7 +79,7 @@ export class CommandRegistry {
 		});
 
 		this.addCommand({
-			id: "cs-in-file-search-with-omnisearch-query",
+			id: "in-file-search-with-omnisearch-query",
 			name: "Search in file with last Omnisearch query",
 			callback: async () => {
 				new SearchModal(

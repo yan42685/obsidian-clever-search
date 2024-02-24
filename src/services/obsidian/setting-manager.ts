@@ -199,7 +199,7 @@ class GeneralTab extends PluginSettingTab {
 
 		const devSettingTitle = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-title",
-			text: t("For Development"),
+			text: t("For development"),
 		});
 
 		// collapse by default
@@ -319,8 +319,8 @@ class GeneralTab extends PluginSettingTab {
 		// 	);
 
 		new Setting(devSettingContent)
-			.setName(t("Support the Project"))
-			.setDesc(t("Support the Project desc"))
+			.setName(t("Support the project"))
+			.setDesc(t("Support the project desc"))
 			.addButton((button) => {
 				button.setButtonText(t("Visit GitHub")).onClick(() => {
 					window.open(
@@ -361,7 +361,7 @@ class ExcludePathModal extends Modal {
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
 		new Setting(contentEl)
-			.setName(t("Follow Obsidian Excluded Files"))
+			.setName(t("Follow obsidian excluded files"))
 			.addToggle((t) =>
 				t
 					.setValue(this.setting.followObsidianExcludedFiles)
