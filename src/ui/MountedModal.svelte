@@ -213,10 +213,10 @@
 					<button
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
-						on:click={(event) => {
-							handleItemClick(index);
+						on:click={async (e) => {
+							await handleItemClick(index);
 							if (uiType === "floatingWindow") {
-								handleConfirm(null);
+								await handleConfirm(e);
 							}
 						}}
 						on:contextmenu={async (e) => {
