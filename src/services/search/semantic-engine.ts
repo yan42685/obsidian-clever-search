@@ -16,7 +16,8 @@ import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 export class SemanticEngine {
 	private request = getInstance(RemoteRequest);
 	private viewRegistry = getInstance(ViewRegistry);
-	private isIndexing = false;
+	public isRunning = false;
+	public isIndexing = false;
 
 	async testConnection(): Promise<void> {
 		const connected = await this.request.testConnection();
@@ -131,11 +132,21 @@ class RemoteRequest {
 	}
 
 	async doesCollectionExist(): Promise<boolean | null> {
-		return this.client.get("doesCollectionExist", undefined);
+		try {
+			const res = await this.client.get("doesCollectionExist", undefined);
+			return res;
+		} catch (e) {
+			logger.error(e)
+			return null;
+		}
 	}
 
 	async reindexAll(docs: Document[]) {
-		return this.client.post("reindexAll", undefined, docs);
+		try {
+			await this.client.post("reindexAll", undefined, docs);
+		} catch (e) {
+			logger.error(e);
+		}
 	}
 
 	async docsCount(): Promise<number | null> {
@@ -169,8 +180,16 @@ class RemoteRequest {
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
-		const res = await this.client.get("search", { queryText, viewType });
-		return res || [];
+		try {
+			const res = await this.client.get("search", {
+				queryText,
+				viewType,
+			});
+			return res || [];
+		} catch (e) {
+			logger.error(e);
+			return [];
+		}
 	}
 }
 

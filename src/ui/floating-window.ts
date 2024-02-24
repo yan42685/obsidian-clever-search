@@ -132,6 +132,7 @@ class InFileFloatingWindow extends FloatingWindow {
 				uiType: "floatingWindow",
 				onConfirmExternal: () => {},
 				searchType: SearchType.IN_FILE,
+				isSemantic: false,
 				queryText: "",
 			},
 		});
