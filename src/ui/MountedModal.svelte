@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { debounce } from "obsidian";
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
@@ -18,7 +19,6 @@
 		isDevEnvironment,
 	} from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
-	import { debounce } from "throttle-debounce";
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
@@ -83,7 +83,7 @@
 	}
 
 	// handle input changes
-	const handleInputDebounced = debounce(100, () => handleInputAsync());
+	const handleInputDebounced = debounce(() => handleInputAsync(), 100, true);
 
 	async function handleInputAsync() {
 		if (cachedResult.has(queryText)) {
