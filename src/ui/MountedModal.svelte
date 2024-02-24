@@ -14,8 +14,7 @@
 	import { logger } from "src/utils/logger";
 	import {
 		TO_BE_IMPL,
-		getInstance,
-		isDevEnvironment,
+		getInstance
 	} from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
@@ -270,9 +269,7 @@
 						</ul>
 					{:else}
 						<span>
-							{isDevEnvironment
-								? "no result or to be impl"
-								: "no matched content"}
+							{viewHelper.showNoResult(isSemantic)}
 						</span>
 					{/if}
 				{/if}

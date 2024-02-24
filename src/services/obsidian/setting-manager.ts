@@ -522,12 +522,12 @@ class SemanticSearchModal extends Modal {
 					.setButtonText("Test connection")
 					.onClick(() => this.semanticEngine.testConnection()),
 			)
-			.addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
-				const count = await this.semanticEngine.docsCount();
-				if (count) {
-					new MyNotice(`Indexed docs count: ${count}`, 5000)
-				}
-			}))
-			.addButton((b) => b.setButtonText("Reindex").onClick(() => {}));
+			// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
+			// 	const count = await this.semanticEngine.docsCount();
+			// 	if (count) {
+			// 		new MyNotice(`Indexed docs count: ${count}`, 5000)
+			// 	}
+			// }))
+			// .addButton((b) => b.setButtonText("Reindex").onClick(() => {}));
 	}
 }

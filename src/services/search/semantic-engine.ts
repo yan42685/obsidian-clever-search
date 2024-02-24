@@ -16,8 +16,11 @@ import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 export class SemanticEngine {
 	private request = getInstance(RemoteRequest);
 	private viewRegistry = getInstance(ViewRegistry);
-	public isRunning = false;
-	public isIndexing = false;
+	private _status: "stopped" | "indexing" | "ready" = "stopped";
+
+	get status() {
+		return this._status;
+	}
 
 	async testConnection(): Promise<void> {
 		const connected = await this.request.testConnection();
@@ -33,49 +36,73 @@ export class SemanticEngine {
 	}
 
 	async reindexAll(indexedDocs: IndexedDocument[]) {
-		this.isIndexing = true;
+		this._status = "indexing";
 		const docs = this.convertToDocuments(indexedDocs);
-		await this.request.reindexAll(docs);
-		this.isIndexing = false;
+		try {
+			await this.request.reindexAll(docs);
+			this._status = "ready";
+		} catch (e) {
+			logger.error(e);
+			this._status = "stopped";
+		}
 	}
 
 	async addDocuments(indexedDocs: IndexedDocument[]): Promise<boolean> {
-		this.isIndexing = true;
+		this._status = "indexing";
 		const docs = this.convertToDocuments(indexedDocs);
-		const result = await this.request.addDocuments(docs);
-		this.isIndexing = false;
-		return result;
+		try {
+			const result = await this.request.addDocuments(docs);
+			this._status = "ready";
+			return result;
+		} catch (e) {
+			logger.error(e);
+			this._status = "stopped";
+			return false;
+		}
 	}
 
 	async deleteDocuments(paths: string[]): Promise<boolean> {
-		this.isIndexing = true;
-		const result = await this.request.deleteDocuments(paths);
-		this.isIndexing = false;
-		return result;
+		this._status = "indexing";
+		try {
+			const result = await this.request.deleteDocuments(paths);
+			this._status = "ready";
+			return result;
+		} catch (e) {
+			logger.error(e);
+			this._status = "stopped";
+			return false;
+		}
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
-		const rawResults = await this.request.search(queryText, viewType);
+		try {
+			const rawResults = await this.request.search(queryText, viewType);
+			this._status = "ready";
 
-		return rawResults.map((rawResult) => {
-			const subItems = rawResult.subItems.map(
-				(subItemData) =>
-					new FileSubItem(
-						subItemData.text,
-						subItemData.row,
-						subItemData.col,
-					),
-			);
+			return rawResults.map((rawResult) => {
+				const subItems = rawResult.subItems.map(
+					(subItemData) =>
+						new FileSubItem(
+							subItemData.text,
+							subItemData.row,
+							subItemData.col,
+						),
+				);
 
-			return new FileItem(
-				rawResult.engineType,
-				rawResult.path,
-				rawResult.queryTerms,
-				rawResult.matchedTerms,
-				subItems,
-				rawResult.previewContent,
-			);
-		});
+				return new FileItem(
+					rawResult.engineType,
+					rawResult.path,
+					rawResult.queryTerms,
+					rawResult.matchedTerms,
+					subItems,
+					rawResult.previewContent,
+				);
+			});
+		} catch (e) {
+			logger.error(e);
+			this._status = "stopped";
+			return [];
+		}
 	}
 
 	async docsCount(): Promise<number | null> {
@@ -136,17 +163,13 @@ class RemoteRequest {
 			const res = await this.client.get("doesCollectionExist", undefined);
 			return res;
 		} catch (e) {
-			logger.error(e)
+			logger.error(e);
 			return null;
 		}
 	}
 
 	async reindexAll(docs: Document[]) {
-		try {
-			await this.client.post("reindexAll", undefined, docs);
-		} catch (e) {
-			logger.error(e);
-		}
+		await this.client.post("reindexAll", undefined, docs);
 	}
 
 	async docsCount(): Promise<number | null> {
@@ -160,36 +183,18 @@ class RemoteRequest {
 	}
 
 	async addDocuments(docs: Document[]): Promise<boolean> {
-		try {
-			await this.client.post("addDocuments", undefined, docs);
-			return true;
-		} catch (e) {
-			logger.error(e);
-			return false;
-		}
+		return await this.client.post("addDocuments", undefined, docs);
 	}
 
 	async deleteDocuments(paths: string[]): Promise<boolean> {
-		try {
-			await this.client.post("deleteDocuments", undefined, paths);
-			return true;
-		} catch (e) {
-			logger.error(e);
-			return false;
-		}
+		return await this.client.post("deleteDocuments", undefined, paths);
 	}
 
 	async search(queryText: string, viewType: ViewType): Promise<FileItem[]> {
-		try {
-			const res = await this.client.get("search", {
-				queryText,
-				viewType,
-			});
-			return res || [];
-		} catch (e) {
-			logger.error(e);
-			return [];
-		}
+		return await this.client.get("search", {
+			queryText,
+			viewType,
+		});
 	}
 }
 
