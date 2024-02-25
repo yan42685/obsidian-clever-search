@@ -55,7 +55,6 @@ export class DataManager {
 		// TODO: delete old version databases
 		await this.initLexicalEngine();
 		await this.initSemanticEngine();
-		await this.updateDocRefsByMtime();
 
 		if (!this.shouldForceRefresh) {
 			// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
@@ -64,11 +63,6 @@ export class DataManager {
 			);
 			getInstance(FileWatcher).start();
 		}
-
-		// serialize lexical engine
-		await this.database.setMiniSearchData(
-			this.lexicalEngine.filesIndex.toJSON(),
-		);
 	}
 
 	onunload() {
@@ -119,31 +113,6 @@ export class DataManager {
 		}
 	}
 
-	async initSemanticEngine() {
-		if (this.semanticConfig.isEnabled) {
-			if (
-				this.shouldForceRefresh ||
-				(await this.semanticEngine.doesCollectionExist()) === false
-			) {
-				let prevNotice = null;
-				if (this.semanticConfig.serverType === "local") {
-					prevNotice = new MyNotice(t("Semantic init time"), 0);
-				}
-				const filesToIndex = this.dataProvider.allFilesToBeIndexed();
-				const documents =
-					await this.dataProvider.generateAllIndexedDocuments(
-						filesToIndex,
-					);
-				await this.semanticEngine.reindexAll(documents);
-				if (prevNotice) {
-					prevNotice.hide();
-				}
-				new MyNotice(t("Semantic init finished"), 5000)
-			}
-
-		}
-	}
-
 	private async initLexicalEngine() {
 		logger.trace("Init lexical engine...");
 		let prevData: AsPlainObject | null;
@@ -167,6 +136,11 @@ export class DataManager {
 			await this.reindexLexicalEngineWithCurrFiles();
 		}
 		logger.trace("Lexical engine is ready");
+		await this.updateLexicalRefByMtime();
+		// serialize lexical engine
+		await this.database.setMiniSearchData(
+			this.lexicalEngine.filesIndex.toJSON(),
+		);
 	}
 
 	private async reindexLexicalEngineWithCurrFiles() {
@@ -193,9 +167,8 @@ export class DataManager {
 	}
 
 	// use case: users have changed files without obsidian open. so we need to update the index and refs
-	private async updateDocRefsByMtime() {
+	private async updateLexicalRefByMtime() {
 		// update index data based on file modification time
-		// TODO: for semantic engine
 		if (!this.isLexicalEngineUpToDate) {
 			const currFiles = new Map<string, TFile>(
 				this.dataProvider
@@ -237,17 +210,40 @@ export class DataManager {
 			await this.deleteDocuments(docsToDelete, true);
 			await this.addDocuments(docsToAdd, true);
 
-			// update the document refs in the database
+			// update the lexical refs in the database
 			const updatedRefs = Array.from(currFiles.values()).map((file) => ({
 				path: file.path,
 				lexicalMtime: file.stat.mtime,
-				// TODO: finish this for semantic engine
 				embeddingMtime: file.stat.mtime,
 			}));
 			this.database.setDocumentRefs(updatedRefs);
-			logger.trace(`${updatedRefs.length} doc refs updated`);
+			logger.trace(`${updatedRefs.length} lexical refs updated`);
 
 			this.isLexicalEngineUpToDate = true;
+		}
+	}
+
+	async initSemanticEngine() {
+		if (this.semanticConfig.isEnabled) {
+			if (
+				this.shouldForceRefresh ||
+				(await this.semanticEngine.doesCollectionExist()) === false
+			) {
+				let prevNotice = null;
+				if (this.semanticConfig.serverType === "local") {
+					prevNotice = new MyNotice(t("Semantic init time"), 0);
+				}
+				const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+				const documents =
+					await this.dataProvider.generateAllIndexedDocuments(
+						filesToIndex,
+					);
+				await this.semanticEngine.reindexAll(documents);
+				if (prevNotice) {
+					prevNotice.hide();
+				}
+				new MyNotice(t("Semantic init finished"), 5000);
+			}
 		}
 	}
 }
