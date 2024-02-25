@@ -16,7 +16,7 @@ import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 export class SemanticEngine {
 	private request = getInstance(RemoteRequest);
 	private viewRegistry = getInstance(ViewRegistry);
-	private _status: "stopped" | "indexing" | "ready" = "stopped";
+	private _status: "stopped" | "indexing" | "ready" = "ready";
 
 	get status() {
 		return this._status;

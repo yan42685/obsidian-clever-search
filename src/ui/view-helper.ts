@@ -123,6 +123,9 @@ export class ViewHelper {
 
 	showNoResult(isSemantic: boolean) {
 		if (isSemantic) {
+			if (!this.setting.semantic.isEnabled) {
+				return "Semantic search need to be enabled at the setting tab"
+			}
 			const semanticEngineStatus = getInstance(SemanticEngine).status;
 			if (semanticEngineStatus === "ready") {
 				return "No matched content";
