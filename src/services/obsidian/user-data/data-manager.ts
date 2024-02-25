@@ -119,7 +119,7 @@ export class DataManager {
 		}
 	}
 
-	private async initSemanticEngine() {
+	async initSemanticEngine() {
 		if (this.semanticConfig.isEnabled) {
 			if (
 				this.shouldForceRefresh ||

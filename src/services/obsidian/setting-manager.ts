@@ -489,18 +489,20 @@ class SemanticSearchModal extends Modal {
 	private semanticEngine = getInstance(SemanticEngine);
 	private setting = getInstance(OuterSetting).semantic;
 	private settingManager = getInstance(SettingManager);
+	private needInitSemanticEngine = false;
 	onOpen(): void {
 		this.modalEl.style.width = "50vw";
 		this.modalEl.style.height = "80vh";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
-		new Setting(contentEl)
-			.setName("Enable")
-			.addToggle((t) =>
-				t
-					.setValue(this.setting.isEnabled)
-					.onChange((v) => (this.setting.isEnabled = v)),
-			);
+		new Setting(contentEl).setName("Enable").addToggle((t) =>
+			t.setValue(this.setting.isEnabled).onChange((v) => {
+				this.setting.isEnabled = v;
+				if (v === true) {
+					this.needInitSemanticEngine = true;
+				}
+			}),
+		);
 		new Setting(contentEl)
 			.setName("Server type")
 			.setDesc(
@@ -521,13 +523,19 @@ class SemanticSearchModal extends Modal {
 				b
 					.setButtonText("Test connection")
 					.onClick(() => this.semanticEngine.testConnection()),
-			)
-			// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
-			// 	const count = await this.semanticEngine.docsCount();
-			// 	if (count) {
-			// 		new MyNotice(`Indexed docs count: ${count}`, 5000)
-			// 	}
-			// }))
-			// .addButton((b) => b.setButtonText("Reindex").onClick(() => {}));
+			);
+		// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
+		// 	const count = await this.semanticEngine.docsCount();
+		// 	if (count) {
+		// 		new MyNotice(`Indexed docs count: ${count}`, 5000)
+		// 	}
+		// }))
+		// .addButton((b) => b.setButtonText("Reindex").onClick(() => {}));
+	}
+	onClose(): void {
+		if (this.needInitSemanticEngine) {
+			this.needInitSemanticEngine = false;
+			getInstance(DataManager).initSemanticEngine();
+		}
 	}
 }
