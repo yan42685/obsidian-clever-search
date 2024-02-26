@@ -27,8 +27,7 @@ export type DocumentWeight = {
 export type DocumentRef = {
 	id?: number;
 	path: string;
-	lexicalMtime: number;
-	embeddingMtime: number;
+	updateTime: number;
 };
 
 export type InFileDataSource = {

@@ -1,11 +1,11 @@
 import Dexie from "dexie";
+import type { AsPlainObject } from "minisearch";
 import type { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
-import type { AsPlainObject } from "minisearch";
 
 @singleton()
 export class Database {
@@ -19,7 +19,7 @@ export class Database {
 		this.db.transaction("rw", this.db.minisearch, async () => {
 			// Warning: The clear() here is just a marker for caution to avoid data duplication.
 			// Ideally, clear() should be executed at an earlier stage.
-			// Placing clear() and add() together, especially with large data sets, 
+			// Placing clear() and add() together, especially with large data sets,
 			// may lead to conflicts and cause Obsidian to crash. It is an issue related to Dexie or IndexedDB
 			await this.db.minisearch.clear();
 			await this.db.minisearch.add({ data: data });
@@ -32,16 +32,27 @@ export class Database {
 		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
-	async setDocumentRefs(refs: DocumentRef[]) {
-		this.db.transaction("rw", this.db.documentRefs, async () => {
-			await this.db.documentRefs.clear();
-			await this.db.documentRefs.bulkAdd(refs);
+	async setLexicalDocRefs(refs: DocumentRef[]) {
+		this.db.transaction("rw", this.db.lexicalDocRefs, async () => {
+			await this.db.lexicalDocRefs.clear();
+			await this.db.lexicalDocRefs.bulkAdd(refs);
 		});
 	}
 
 	@monitorDecorator
-	async getDocumentRefs(): Promise<DocumentRef[] | null> {
-		return (await this.db.documentRefs.toArray()) || null;
+	async getLexicalDocRefs(): Promise<DocumentRef[] | null> {
+		return (await this.db.lexicalDocRefs.toArray()) || null;
+	}
+
+	async setSemanticDocRefs(refs: DocumentRef[]) {
+		this.db.transaction("rw", this.db.semanticDocRefs, async () => {
+			await this.db.semanticDocRefs.clear();
+			await this.db.semanticDocRefs.bulkAdd(refs);
+		});
+	}
+
+	async getSemanticDocRefs(): Promise<DocumentRef[] | null> {
+		return (await this.db.semanticDocRefs.toArray()) || null;
 	}
 
 	async setPluginSetting(setting: OuterSetting): Promise<boolean> {
@@ -67,7 +78,7 @@ export class Database {
 				db.version !== this.db.dbVersion * 10,
 		);
 		if (toDelete.length) {
-			logger.trace("Those IndexedDb databases will be deleted:");
+			logger.info("Old version databases will be deleted");
 			for (const db of toDelete) {
 				if (db.name) {
 					indexedDB.deleteDatabase(db.name);
@@ -79,13 +90,14 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 1;
+	private static readonly _dbVersion = 2;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
 	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
-	documentRefs!: Dexie.Table<DocumentRef, number>;
+	lexicalDocRefs!: Dexie.Table<DocumentRef, number>;
+	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {
 		super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
@@ -93,7 +105,8 @@ class DexieWrapper extends Dexie {
 		this.version(DexieWrapper._dbVersion).stores({
 			pluginSetting: "++id",
 			minisearch: "++id",
-			documentRefs: "++id",
+			lexicalDocRefs: "++id",
+			semanticDocRefs: "++id",
 		});
 	}
 	get dbVersion() {

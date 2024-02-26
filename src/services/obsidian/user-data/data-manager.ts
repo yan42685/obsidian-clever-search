@@ -52,6 +52,7 @@ export class DataManager {
 
 	@monitorDecorator
 	async initAsync() {
+		await this.database.deleteOldDatabases();
 		// TODO: delete old version databases
 		await this.initLexicalEngine();
 		await this.initSemanticEngine();
@@ -136,7 +137,10 @@ export class DataManager {
 			await this.reindexLexicalEngineWithCurrFiles();
 		}
 		logger.trace("Lexical engine is ready");
-		await this.updateLexicalRefByMtime();
+		if (!this.isLexicalEngineUpToDate) {
+			// update lexical document refs
+			await this.updateDocRefByMtime(false);
+		}
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
 			this.lexicalEngine.filesIndex.toJSON(),
@@ -167,59 +171,59 @@ export class DataManager {
 	}
 
 	// use case: users have changed files without obsidian open. so we need to update the index and refs
-	private async updateLexicalRefByMtime() {
+	private async updateDocRefByMtime(isSemantic: boolean) {
 		// update index data based on file modification time
-		if (!this.isLexicalEngineUpToDate) {
-			const currFiles = new Map<string, TFile>(
-				this.dataProvider
-					.allFilesToBeIndexed()
-					.map((file) => [file.path, file]),
-			);
-			const prevRefs = new Map<string, DocumentRef>(
-				(await this.database.getDocumentRefs())?.map((ref) => [
-					ref.path,
-					ref,
-				]),
-			);
+		const currFiles = new Map<string, TFile>(
+			this.dataProvider
+				.allFilesToBeIndexed()
+				.map((file) => [file.path, file]),
+		);
+		const preRefsList = isSemantic
+			? await this.database.getSemanticDocRefs()
+			: await this.database.getLexicalDocRefs();
+		const prevRefs = new Map<string, DocumentRef>(
+			preRefsList?.map((ref) => [ref.path, ref]),
+		);
 
-			const docsToAdd: TAbstractFile[] = [];
-			const docsToDelete: string[] = [];
+		const docsToAdd: TAbstractFile[] = [];
+		const docsToDelete: string[] = [];
 
-			for (const [path, file] of currFiles) {
-				const prevRef = prevRefs.get(path);
-				if (!prevRef) {
-					// to add
-					docsToAdd.push(file);
-				} else if (file.stat.mtime > prevRef.lexicalMtime) {
-					// to update
-					docsToDelete.push(file.path);
-					docsToAdd.push(file);
-				}
+		for (const [path, file] of currFiles) {
+			const prevRef = prevRefs.get(path);
+			if (!prevRef) {
+				// to add
+				docsToAdd.push(file);
+			} else if (file.stat.mtime > prevRef.updateTime) {
+				// to update
+				docsToDelete.push(file.path);
+				docsToAdd.push(file);
 			}
+		}
 
-			// to delete
-			for (const prevPath of prevRefs.keys()) {
-				if (!currFiles.has(prevPath)) {
-					docsToDelete.push(prevPath);
-				}
+		// to delete
+		for (const prevPath of prevRefs.keys()) {
+			if (!currFiles.has(prevPath)) {
+				docsToDelete.push(prevPath);
 			}
+		}
 
-			// perform batch delete and add operations
-			logger.trace(`docs to delete: ${docsToDelete.length}`);
-			logger.trace(`docs to add: ${docsToAdd.length}`);
-			await this.deleteDocuments(docsToDelete, true);
-			await this.addDocuments(docsToAdd, true);
+		// perform batch delete and add operations
+		logger.trace(`docs to delete: ${docsToDelete.length}`);
+		logger.trace(`docs to add: ${docsToAdd.length}`);
+		await this.deleteDocuments(docsToDelete, isSemantic);
+		await this.addDocuments(docsToAdd, isSemantic);
 
-			// update the lexical refs in the database
-			const updatedRefs = Array.from(currFiles.values()).map((file) => ({
-				path: file.path,
-				lexicalMtime: file.stat.mtime,
-				embeddingMtime: file.stat.mtime,
-			}));
-			this.database.setDocumentRefs(updatedRefs);
+		// update the lexical refs in the database
+		const updatedRefs = Array.from(currFiles.values()).map((file) => ({
+			path: file.path,
+			updateTime: file.stat.mtime,
+		}));
+		if (isSemantic) {
+			await this.database.setSemanticDocRefs(updatedRefs);
+			logger.trace(`${updatedRefs.length} semantic refs updated`);
+		} else {
+			await this.database.setLexicalDocRefs(updatedRefs);
 			logger.trace(`${updatedRefs.length} lexical refs updated`);
-
-			this.isLexicalEngineUpToDate = true;
 		}
 	}
 
