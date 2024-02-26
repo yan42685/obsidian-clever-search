@@ -16,7 +16,7 @@ import { ViewRegistry, ViewType } from "../obsidian/view-registry";
 export class SemanticEngine {
 	private request = getInstance(RemoteRequest);
 	private viewRegistry = getInstance(ViewRegistry);
-	private _status: "stopped" | "indexing" | "ready" = "ready";
+	private _status: "stopped" | "indexing" | "ready" = "stopped";
 
 	get status() {
 		return this._status;
@@ -34,14 +34,18 @@ export class SemanticEngine {
 	/**
 	 * @throws Error
 	 */
-	async doesCollectionExist(): Promise<boolean> {
+	async doesCollectionExist(): Promise<boolean | null> {
 		try {
-			return await this.request.doesCollectionExist();
+			const result = await this.request.doesCollectionExist();
+			this._status = "ready";
+			return result;
 		} catch (e) {
+			this._status = "stopped";
 			logger.warn(
 				"Semantic search is enabled but failed to connect to server",
 			);
-			throw e;
+			logger.error(e)
+			return null
 		}
 	}
 

@@ -68,13 +68,15 @@ export class SearchService {
 		} else {
 			const sourcePath =
 				this.app.workspace.getActiveFile()?.path || "no source path";
-			return {
+			const result = {
 				sourcePath: sourcePath,
 				items: await this.semanticEngine.search(
 					queryText,
 					ViewType.MARKDOWN,
 				),
-			};
+			} as SearchResult;
+			logger.debug(result)
+			return result;
 		}
 	}
 
