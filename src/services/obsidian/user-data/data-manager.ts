@@ -30,6 +30,7 @@ export class DataManager {
 	private semanticConfig = getInstance(OuterSetting).semantic;
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
+	private isSemanticEngineUpToDate = false;
 
 	private docOperationsHandler = async (operations: DocOperation[]) => {
 		operations.sort((a, b) => a.time - b.time);
@@ -83,7 +84,7 @@ export class DataManager {
 		this.shouldForceRefresh = false;
 	}
 
-	private async addDocuments(files: TAbstractFile[], forSemantic = false) {
+	private async addDocuments(files: TAbstractFile[], isSemantic = false) {
 		if (files.length > 0) {
 			const tFiles: TFile[] = [];
 			for (const f of files) {
@@ -95,20 +96,22 @@ export class DataManager {
 				await this.dataProvider.generateAllIndexedDocuments(
 					tFiles.filter((f) => this.dataProvider.isIndexable(f)),
 				);
-			await this.lexicalEngine.addDocuments(documents);
-			if (this.semanticConfig.isEnabled && forSemantic) {
+			if (!isSemantic) {
+				await this.lexicalEngine.addDocuments(documents);
+			} else if (this.semanticConfig.isEnabled) {
 				await this.semanticEngine.addDocuments(documents);
 			}
 		}
 	}
 
-	private async deleteDocuments(paths: string[], forSemantic = false) {
+	private async deleteDocuments(paths: string[], isSemantic = false) {
 		if (paths.length > 0) {
 			const indexablePaths = paths.filter((p) =>
 				this.dataProvider.isIndexable(p),
 			);
-			this.lexicalEngine.deleteDocuments(indexablePaths);
-			if (this.semanticConfig.isEnabled && forSemantic) {
+			if (!isSemantic) {
+				this.lexicalEngine.deleteDocuments(indexablePaths);
+			} else if (this.semanticConfig.isEnabled) {
 				await this.semanticEngine.deleteDocuments(indexablePaths);
 			}
 		}
@@ -136,11 +139,11 @@ export class DataManager {
 		} else {
 			await this.reindexLexicalEngineWithCurrFiles();
 		}
-		logger.trace("Lexical engine is ready");
 		if (!this.isLexicalEngineUpToDate) {
 			// update lexical document refs
 			await this.updateDocRefByMtime(false);
 		}
+		logger.trace("Lexical engine is ready");
 		// serialize lexical engine
 		await this.database.setMiniSearchData(
 			this.lexicalEngine.filesIndex.toJSON(),
@@ -230,8 +233,8 @@ export class DataManager {
 	async initSemanticEngine() {
 		if (this.semanticConfig.isEnabled) {
 			if (
-				this.shouldForceRefresh ||
-				(await this.semanticEngine.doesCollectionExist()) === false
+				(await this.semanticEngine.doesCollectionExist()) === false ||
+				this.shouldForceRefresh
 			) {
 				let prevNotice = null;
 				if (this.semanticConfig.serverType === "local") {
@@ -247,7 +250,12 @@ export class DataManager {
 					prevNotice.hide();
 				}
 				new MyNotice(t("Semantic init finished"), 5000);
+				this.isSemanticEngineUpToDate = true;
 			}
+			if (!this.isSemanticEngineUpToDate) {
+				await this.updateDocRefByMtime(true);
+			}
+			logger.trace("Semantic engine is ready");
 		}
 	}
 }

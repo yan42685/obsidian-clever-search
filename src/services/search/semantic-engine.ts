@@ -31,8 +31,18 @@ export class SemanticEngine {
 		}
 	}
 
-	async doesCollectionExist(): Promise<boolean | null> {
-		return this.request.doesCollectionExist();
+	/**
+	 * @throws Error
+	 */
+	async doesCollectionExist(): Promise<boolean> {
+		try {
+			return await this.request.doesCollectionExist();
+		} catch (e) {
+			logger.warn(
+				"Semantic search is enabled but failed to connect to server",
+			);
+			throw e;
+		}
 	}
 
 	async reindexAll(indexedDocs: IndexedDocument[]) {
@@ -158,14 +168,8 @@ class RemoteRequest {
 		}
 	}
 
-	async doesCollectionExist(): Promise<boolean | null> {
-		try {
-			const res = await this.client.get("doesCollectionExist", undefined);
-			return res;
-		} catch (e) {
-			logger.error(e);
-			return null;
-		}
+	async doesCollectionExist(): Promise<boolean> {
+		return await this.client.get("doesCollectionExist", undefined);
 	}
 
 	async reindexAll(docs: Document[]) {
