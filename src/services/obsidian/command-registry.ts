@@ -180,5 +180,6 @@ export class ModalNavigationHotkeys extends AbstractNavigationHotkeys {
 		this.register([], "Enter", EventEnum.CONFIRM_ITEM);
 		this.register([modKey], "N", EventEnum.NEXT_SUB_ITEM);
 		this.register([modKey], "P", EventEnum.PREV_SUB_ITEM);
+		this.register([modKey], "S", EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE);
 	}
 }

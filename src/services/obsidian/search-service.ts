@@ -71,7 +71,8 @@ export class SearchService {
 			const result = {
 				sourcePath: sourcePath,
 				items: await this.semanticEngine.search(
-					queryText,
+					// remove leading and trailing white spaces for consistent search result
+					queryText.trim(),
 					ViewType.MARKDOWN,
 				),
 			} as SearchResult;

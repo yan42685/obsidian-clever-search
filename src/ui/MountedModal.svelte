@@ -12,10 +12,7 @@
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { logger } from "src/utils/logger";
-	import {
-		TO_BE_IMPL,
-		getInstance
-	} from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import { ViewHelper } from "./view-helper";
@@ -163,6 +160,12 @@
 		);
 	}
 
+	function handleSwitchLexicalSemanticMode() {
+		cachedResult.delete(queryText);
+		isSemantic = !isSemantic;
+		handleInputAsync();
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		logger.trace("mounted element has been destroyed.");
@@ -184,6 +187,10 @@
 		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+		listenEvent(
+			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
+			handleSwitchLexicalSemanticMode,
+		);
 	}
 	viewHelper.focusInput();
 	handleInputAsync();
