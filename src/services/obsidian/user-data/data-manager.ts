@@ -1,9 +1,11 @@
 import type { AsPlainObject } from "minisearch";
 import { TFile, type TAbstractFile } from "obsidian";
+import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
+import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import { SemanticEngine } from "src/services/search/semantic-engine";
@@ -23,6 +25,7 @@ import { FileWatcher } from "./file-watcher";
 
 @singleton()
 export class DataManager {
+	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
 	private lexicalEngine = getInstance(LexicalEngine);
@@ -59,6 +62,14 @@ export class DataManager {
 		await this.initSemanticEngine();
 
 		if (!this.shouldForceRefresh) {
+			// try to update semantic index once clever-search-ai-helper is launched
+			this.plugin.registerInterval(
+				window.setInterval(() => {
+					if (!this.isSemanticEngineUpToDate) {
+						this.initSemanticEngine();
+					}
+				}, 3500),
+			);
 			// don't need to eventBus.off because the life cycle of this singleton is the same with eventBus
 			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
 				this.docOperationsBuffer.forceFlush(),
@@ -232,10 +243,14 @@ export class DataManager {
 
 	async initSemanticEngine() {
 		if (this.semanticConfig.isEnabled) {
-			if (
-				(await this.semanticEngine.doesCollectionExist()) === false ||
-				this.shouldForceRefresh
-			) {
+			const doesCollectionExist =
+				await this.semanticEngine.doesCollectionExist();
+
+			// failed to connect to ai-helper
+			if (doesCollectionExist === null) {
+				return;
+			}
+			if (doesCollectionExist === false || this.shouldForceRefresh) {
 				let prevNotice = null;
 				if (this.semanticConfig.serverType === "local") {
 					prevNotice = new MyNotice(t("Semantic init time"), 0);
@@ -253,6 +268,7 @@ export class DataManager {
 				this.isSemanticEngineUpToDate = true;
 			}
 			if (!this.isSemanticEngineUpToDate) {
+				this.isSemanticEngineUpToDate = true;
 				await this.updateDocRefByMtime(true);
 			}
 			logger.trace("Semantic engine is ready");

@@ -42,10 +42,10 @@ export class SemanticEngine {
 		} catch (e) {
 			this._status = "stopped";
 			logger.warn(
-				"Semantic search is enabled but failed to connect to server",
+				"failed to connect to ai-helper. launch clever-search-ai-helper or disable semantic search in the setting to avoid this warning.",
 			);
-			logger.error(e)
-			return null
+			logger.error(e);
+			return null;
 		}
 	}
 
