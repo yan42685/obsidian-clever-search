@@ -20,13 +20,13 @@
 
 ### Major
 
+- [x] Semantic search in the vault
 - [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
 - [ ] AutoCompletion
 - [ ] Persistent search history
-- [ ] Semantic search in the vault
 
 ### Subtle Tweaks for Better UX
 
@@ -38,28 +38,29 @@
 
 - [x] `Style Settings`
 - [x] `Omnisearch`
-    <details><summary>Details</summary>
-        New command:<br>"Search in file with last Omnisearch query"<br><br>
-        Use case:<br>
-        When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
-        Note: <br>This is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
-    </details>
-
+  <details><summary>Details</summary>
+      New command:<br>"Search in file with last Omnisearch query"<br><br>
+      Use case:<br>
+      When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
+      Note: <br>This is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
+  </details>
 
 ## Available Commands
 
-| Scope    | Name                          |  Hotkey                   |
-| -------- | ----------------------------- | ------------------------ |
-| Item     | View item context             | `Left Click`             |
-| Modal    | Next item                     | `Ctrl-J`                 |
-| Modal    | Previous item                 | `Ctrl-K`                 |
-| Modal    | Next subItem (in-vault)       | `Ctrl-N`                 |
-| Modal    | Previous subItem              | `Ctrl-P`                 |
-| Modal    | Confirm item                  | `Enter` or `Right Click` |
-| Obsidian | Search in vault               | undefined                |
-| Obsidian | Search in File                | undefined                |
-| Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined |
-| Obsidian | Toggle privacy mode           | undefined                |
+| Scope    | Name                                                               | Hotkey                   |
+| -------- | ------------------------------------------------------------------ | ------------------------ |
+| Item     | View item context                                                  | `Left Click`             |
+| Modal    | Next item                                                          | `Ctrl-J`                 |
+| Modal    | Previous item                                                      | `Ctrl-K`                 |
+| Modal    | Next subItem (in-vault)                                            | `Ctrl-N`                 |
+| Modal    | Previous subItem                                                   | `Ctrl-P`                 |
+| Modal    | Confirm item                                                       | `Enter` or `Right Click` |
+| Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
+| Obsidian | Search in vault semantically                                       | undefined                |
+| Obsidian | Search in vault lexically                                          | undefined                |
+| Obsidian | Search in File                                                     | undefined                |
+| Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined                |
+| Obsidian | Toggle privacy mode                                                | undefined                |
 
 ## Limitations
 

@@ -495,6 +495,7 @@ class SemanticSearchModal extends Modal {
 		this.modalEl.style.height = "40vh";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
+		new Setting(contentEl).setName(t("Introduction")).setDesc(t("Introduction.desc"))
 		new Setting(contentEl).setName("Enable").addToggle((t) =>
 			t.setValue(this.setting.isEnabled).onChange((v) => {
 				this.setting.isEnabled = v;
