@@ -70,9 +70,12 @@ export class AssetsProvider {
 				myRemoteLfsUrl + aiHelper,
 			);
 			new MyNotice(t("Download success"), 5000);
+			// open two folder in the explorer
 			// eslint-disable-next-line @typescript-eslint/no-var-requires
 			const { shell } = require("electron");
 			shell.showItemInFolder(this.targetPath(aiHelper));
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			shell.openPath(require("os").userInfo().homedir);
 		} catch (e) {
 			logger.error(e);
 			new MyNotice(t("Download failure"));
