@@ -12,11 +12,7 @@
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { logger } from "src/utils/logger";
-	import {
-		TO_BE_IMPL,
-		getInstance,
-		isDevEnvironment,
-	} from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import { ViewHelper } from "./view-helper";
@@ -27,6 +23,7 @@
 	export let uiType: "modal" | "floatingWindow";
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
+	export let isSemantic: boolean; // only available for in-vault search
 	export let queryText: string;
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
@@ -54,11 +51,15 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
-				// this result also can be cached if necessary in the future
-				currFileItem.subItems = await searchService.getFileSubItems(
-					queryText,
-					currFileItem,
-				);
+
+				// semantic search doesn't require requesting subItems each time because
+				// all the subItems for each fileItem have been returned for newInput if it is a semantic search
+				if (!isSemantic) {
+					currFileItem.subItems = await searchService.getFileSubItems(
+						queryText,
+						currFileItem,
+					);
+				}
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex =
 					currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
@@ -92,23 +93,11 @@
 			return;
 		}
 		if (searchType === SearchType.IN_FILE) {
-			// searchResult = await searchService.deprecatedSearchInFile(queryText);
 			searchResult = await searchService.searchInFile(queryText);
-			// searchResult.items.forEach((x) => {
-			// 	const item = x as LineItem;
-			// 	console.log(item.line.text);
-			// 	if (item.element) {
-			// 		MarkdownRenderer.render(
-			// 			app,
-			// 			item.line.text,
-			// 			item.element,
-			// 			searchResult.currPath,
-			// 			new Component(),
-			// 		);
-			// 	}
-			// });
 		} else if (searchType === SearchType.IN_VAULT) {
-			searchResult = await searchService.searchInVault(queryText);
+			searchResult = isSemantic
+				? await searchService.searchInVaultSemantic(queryText)
+				: await searchService.searchInVault(queryText);
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
@@ -171,6 +160,12 @@
 		);
 	}
 
+	function handleSwitchLexicalSemanticMode() {
+		cachedResult.delete(queryText);
+		isSemantic = !isSemantic;
+		handleInputAsync();
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		logger.trace("mounted element has been destroyed.");
@@ -192,6 +187,10 @@
 		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+		listenEvent(
+			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
+			handleSwitchLexicalSemanticMode,
+		);
 	}
 	viewHelper.focusInput();
 	handleInputAsync();
@@ -276,9 +275,7 @@
 						</ul>
 					{:else}
 						<span>
-							{isDevEnvironment
-								? "no result or to be impl"
-								: "no matched content"}
+							{viewHelper.showNoResult(isSemantic)}
 						</span>
 					{/if}
 				{/if}
@@ -404,6 +401,11 @@
 		height: 73.97vh;
 		width: 60%;
 	}
+
+	.right-pane button {
+		white-space: pre-wrap;
+	}
+
 	.right-pane .preview-container {
 		margin: 0.7em 0 0 0.7em;
 		height: 72.5vh;

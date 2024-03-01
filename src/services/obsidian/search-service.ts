@@ -13,6 +13,7 @@ import {
 import { FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
 import { LexicalEngine } from "../search/lexical-engine";
+import { SemanticEngine } from "../search/semantic-engine";
 import { TruncateOption } from "../search/truncate-option";
 import { DataProvider } from "./user-data/data-provider";
 import { ViewRegistry, ViewType } from "./view-registry";
@@ -22,6 +23,7 @@ export class SearchService {
 	private readonly app = getInstance(App);
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
+	private readonly semanticEngine = getInstance(SemanticEngine);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 	private readonly viewRegistry = getInstance(ViewRegistry);
 
@@ -31,7 +33,8 @@ export class SearchService {
 		if (queryText.length === 0) {
 			return result;
 		}
-		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
+		const sourcePath =
+			this.app.workspace.getActiveFile()?.path || "no source path";
 		const lexicalMatches = await this.lexicalEngine.searchFiles(queryText);
 		const lexicalResult = [] as FileItem[];
 		if (lexicalMatches.length !== 0) {
@@ -54,6 +57,26 @@ export class SearchService {
 		} else {
 			logger.trace("lexical matched files count is 0");
 			// TODO: do semantic search
+			return result;
+		}
+	}
+
+	async searchInVaultSemantic(queryText: string): Promise<SearchResult> {
+		const result = new SearchResult("no result", []);
+		if (queryText.length === 0) {
+			return result;
+		} else {
+			const sourcePath =
+				this.app.workspace.getActiveFile()?.path || "no source path";
+			const result = {
+				sourcePath: sourcePath,
+				items: await this.semanticEngine.search(
+					// remove leading and trailing white spaces for consistent search result
+					queryText.trim(),
+					ViewType.MARKDOWN,
+				),
+			} as SearchResult;
+			logger.debug(result)
 			return result;
 		}
 	}
@@ -114,8 +137,11 @@ export class SearchService {
 		if (!queryText || !activeFile) {
 			return result;
 		}
-		
-		if (this.viewRegistry.viewTypeByPath(activeFile.path) !== ViewType.MARKDOWN) {
+
+		if (
+			this.viewRegistry.viewTypeByPath(activeFile.path) !==
+			ViewType.MARKDOWN
+		) {
 			logger.trace("Current file isn't PLAINT_TEXT");
 			return result;
 		}
@@ -161,7 +187,8 @@ export class SearchService {
 		if (
 			!queryText ||
 			!activeFile ||
-			this.viewRegistry.viewTypeByPath(activeFile.path) !== ViewType.MARKDOWN
+			this.viewRegistry.viewTypeByPath(activeFile.path) !==
+				ViewType.MARKDOWN
 		) {
 			return result;
 		}

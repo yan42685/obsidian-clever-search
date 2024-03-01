@@ -6,7 +6,7 @@ import MountedModal from "./MountedModal.svelte";
 // TODO: make it an abstract class
 export class SearchModal extends Modal {
 	mountedElement: any;
-	constructor(app: App, searchType: SearchType, query?: string) {
+	constructor(app: App, searchType: SearchType, isSemantic: boolean, query?: string) {
 		super(app);
 
 		// get text selected by user
@@ -25,6 +25,7 @@ export class SearchModal extends Modal {
 				uiType: "modal",
 				onConfirmExternal: () => this.close(),
 				searchType: searchType,
+				isSemantic: isSemantic,
 				queryText: effectiveQuery || "",
 			},
 		});

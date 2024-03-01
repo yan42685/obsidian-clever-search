@@ -11,6 +11,12 @@ export default {
 		"Omnisearch is installed but not enabled",
 	"Database has been updated, a reindex is required":
 		"Database has been updated, a reindex is required",
+	"Semantic init time": "The local model indexes at a speed of approximately 100-500 words per second. During this time, please do not close Obsidian.",
+	"Semantic init finished": "Semantic engine is ready",
+
+	"Downloading aiHelper": "Downloading clever-search-ai-helper.zip (972 MB)...",
+	"Download success": "Successfully downloaded",
+	"Download failure": "Failed to download clever-search-ai-helper.zip",
 
 	// setting tab
 	"Max items count": "Max items count",
@@ -31,6 +37,18 @@ export default {
 	// Advanced setting
 	"Advanced": "Advanced",
 	"Advanced.desc": "The previous settings cover most needs. For further customization, adjust the following options",
+
+	// semantic search
+	"Introduction": "Introduction",
+	"Introduction.desc": "Semantic search is only supported on the Windows system. You need to extract the .cache folder from the downloaded archive and place it in C:\\Users\\<current user>. Then, run clever-search-ai-helper.exe to start the semantic engine. Semantic search is intended to complement lexical search and is not as effective in exact matching as lexical search.",
+	"Enable": "Enable",
+	"Server type": "Server type",
+	"Server type.desc": "For local server, Clever Search AI Helper needs to run in the background. For remote server, it will not be implemented in the short term.",
+	"local": "local",
+	"Utilities": "Utilities",
+	"Test connection": "Test connection",
+	"Download": "Download",
+
 
 	"Excluded files": "Excluded files",
 	Manage: "Manage",

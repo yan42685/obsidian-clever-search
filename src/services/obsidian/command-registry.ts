@@ -45,6 +45,7 @@ export class CommandRegistry {
 				// hotkeys: [{modifiers: [currModifier], key: "5"}],
 				callback: async () => await devTest(),
 			});
+
 		}
 	}
 
@@ -56,7 +57,7 @@ export class CommandRegistry {
 				if (this.setting.ui.floatingWindowForInFile) {
 					getInstance(FloatingWindowManager).toggle("inFile");
 				} else {
-					new SearchModal(this.app, SearchType.IN_FILE).open();
+					new SearchModal(this.app, SearchType.IN_FILE, false).open();
 				}
 			},
 		});
@@ -68,13 +69,13 @@ export class CommandRegistry {
 		});
 	}
 
-	addInVaultLexicalCommands() {
+	addInVaultCommands() {
 		this.addCommand({
 			id: "clever-search-in-vault",
 			name: "Search in Vault",
 			callback: () => {
 				eventBus.emit(EventEnum.IN_VAULT_SEARCH);
-				new SearchModal(this.app, SearchType.IN_VAULT).open();
+				new SearchModal(this.app, SearchType.IN_VAULT, false).open();
 			},
 		});
 
@@ -85,9 +86,17 @@ export class CommandRegistry {
 				new SearchModal(
 					this.app,
 					SearchType.IN_FILE,
+					false,
 					await getInstance(OmnisearchIntegration).getLastQuery(),
 				).open();
 			},
+		});
+
+		this.addCommand({
+			id: "clever-search-in-vault-semantic",
+			name: "Search in vault semantically",
+			callback: async () =>
+				new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
 		});
 	}
 
@@ -171,5 +180,6 @@ export class ModalNavigationHotkeys extends AbstractNavigationHotkeys {
 		this.register([], "Enter", EventEnum.CONFIRM_ITEM);
 		this.register([modKey], "N", EventEnum.NEXT_SUB_ITEM);
 		this.register([modKey], "P", EventEnum.PREV_SUB_ITEM);
+		this.register([modKey], "S", EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE);
 	}
 }

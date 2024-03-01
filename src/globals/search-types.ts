@@ -5,17 +5,18 @@ import {
 } from "src/services/obsidian/view-registry";
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
+
 export type MiniSearchResult = MiniResult;
 
-export type IndexedDocument ={
+export type IndexedDocument = {
 	path: string;
 	basename: string;
-	folder:string
-	aliases?: string
-	tags?: string
-	headings?: string
-	content?: string
-}
+	folder: string;
+	content?: string;
+	aliases?: string;
+	tags?: string;
+	headings?: string;
+};
 
 export type DocumentFields = Array<keyof IndexedDocument>;
 
@@ -26,8 +27,7 @@ export type DocumentWeight = {
 export type DocumentRef = {
 	id?: number;
 	path: string;
-	lexicalMtime: number;
-	embeddingMtime: number;
+	updateTime: number;
 };
 
 export type InFileDataSource = {
@@ -137,11 +137,11 @@ export class FileSubItem extends Item {
 	text: string;
 	row: number; // for precisely jumping to the original file location
 	col: number;
-	constructor(text: string, originRow: number, originCol: number) {
+	constructor(text: string, row: number, col: number) {
 		super();
 		this.text = text;
-		this.row = originRow;
-		this.col = originCol;
+		this.row = row;
+		this.col = col;
 	}
 }
 

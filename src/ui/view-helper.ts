@@ -12,6 +12,7 @@ import {
 } from "src/globals/search-types";
 import { PrivateApi } from "src/services/obsidian/private-api";
 import { ViewType } from "src/services/obsidian/view-registry";
+import { SemanticEngine } from "src/services/search/semantic-engine";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -118,6 +119,22 @@ export class ViewHelper {
 			const inputElement = document.getElementById("cs-search-input");
 			inputElement?.focus();
 		}, 0);
+	}
+
+	showNoResult(isSemantic: boolean) {
+		if (isSemantic) {
+			if (!this.setting.semantic.isEnabled) {
+				return "Semantic search need to be enabled at the setting tab"
+			}
+			const semanticEngineStatus = getInstance(SemanticEngine).status;
+			if (semanticEngineStatus === "ready") {
+				return "No matched content";
+			} else {
+				return `Semantic engine is ${semanticEngineStatus}`;
+			}
+		} else {
+			return "No matched content";
+		}
 	}
 
 	private async jumpInVaultAsync(path: string, row: number, col: number) {

@@ -1,20 +1,15 @@
-import {
-	App,
-	TFile,
-	Vault,
-	htmlToMarkdown
-} from "obsidian";
+import { App, TFile, Vault, htmlToMarkdown } from "obsidian";
 // import { encoding_for_model } from "tiktoken"
 import { OuterSetting } from "./globals/plugin-setting";
 import { ChinesePatch } from "./integrations/languages/chinese-patch";
 import { RenderMarkdownModal } from "./main";
 import { SearchService } from "./services/obsidian/search-service";
+import { DataProvider } from "./services/obsidian/user-data/data-provider";
+import { SemanticEngine } from "./services/search/semantic-engine";
 import { Tokenizer } from "./services/search/tokenizer";
 import { logger } from "./utils/logger";
 import { getInstance, monitorExecution } from "./utils/my-lib";
 import { AssetsProvider } from "./utils/web/assets-provider";
-import { SearchClient } from "./web-workers/client";
-
 
 function getApp() {
 	return getInstance(App);
@@ -103,7 +98,6 @@ async function testTokenizer() {
 	logger.info(getInstance(AssetsProvider).assets.stopWordsZh?.has("的"));
 }
 
-
 async function testParseHtml() {
 	const vault = getInstance(Vault);
 
@@ -118,6 +112,19 @@ async function parseHtml(file: TFile) {
 	const mdText = htmlToMarkdown(htmlText);
 	mdText.split("\n");
 	new RenderMarkdownModal(getInstance(App), mdText).open();
+}
+
+async function testSemanticSearch() {
+	// const files = getInstance(DataProvider).allFilesToBeIndexed().filter(f=>f.basename.includes("Chinese"));
+	const files = getInstance(DataProvider)
+		.allFilesToBeIndexed()
+		// .filter((f) => f.basename.includes("短篇小说"));
+		// .filter((f) => f.basename.includes("20万字") || f.basename.includes("Mysql"));
+		.filter((f) => f.basename.includes("Mysql") || f.basename.includes("Breath"));
+
+	const indexedDocs =
+		await getInstance(DataProvider).generateAllIndexedDocuments(files);
+	getInstance(SemanticEngine).reindexAll(indexedDocs);
 }
 
 export async function devTest() {
@@ -152,7 +159,8 @@ export async function devTest() {
 	// monitorExecution(() => testTokenizer());
 	// testUFuzzy();
 
-	getInstance(SearchClient).testImageSearch();
+	// getInstance(SearchClient).testImageSearch();
 
 	// await testParseHtml();
+	monitorExecution(() => testSemanticSearch());
 }
