@@ -1,4 +1,6 @@
 import { OuterSetting } from "src/globals/plugin-setting";
+import { MyNotice } from "src/services/obsidian/transformed-api";
+import { t } from "src/services/obsidian/translations/locale-helper";
 import { singleton } from "tsyringe";
 import { FileUtil, fsUtil, pathUtil } from "../file-util";
 import { logger } from "../logger";
@@ -14,6 +16,8 @@ const myRemoteDirUrl1 =
 	"https://bitbucket.org/alexclifton37/obsidian-clever-search/raw/dev/assets/for-program/";
 const myRemoteDirUrl2 =
 	"https://raw.githubusercontent.com/yan42685/obsidian-clever-search/dev/assets/for-program/";
+const myRemoteLfsUrl =
+	"https://bitbucket.org/alexclifton37/shared-assets/raw/master/";
 
 const unpkgUrl = "https://unpkg.com/";
 
@@ -32,6 +36,7 @@ export const stopWordsEnTargetUrl = pathUtil.join(
 const jieba = "jieba_rs_wasm_bg.wasm";
 const stopWordsEn = "stop-words-en.txt";
 const stopWordsZh = "stop-words-zh.txt";
+const aiHelper = "clever-search-ai-helper.zip";
 
 @singleton()
 export class AssetsProvider {
@@ -54,6 +59,25 @@ export class AssetsProvider {
 				logger.warn("failed to download assets");
 				throw e;
 			}
+		}
+	}
+
+	async downloadAiHelper() {
+		const notice = new MyNotice(t("Downloading aiHelper"));
+		try {
+			await this.downloadFile(
+				this.targetPath(aiHelper),
+				myRemoteLfsUrl + aiHelper,
+			);
+			new MyNotice(t("Download success"), 5000);
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const { shell } = require("electron");
+			shell.showItemInFolder(this.targetPath(aiHelper));
+		} catch (e) {
+			logger.error(e);
+			new MyNotice(t("Download failure"));
+		} finally {
+			notice.hide();
 		}
 	}
 

@@ -13,6 +13,10 @@ export default {
 	"Semantic init time": "本地模型索引速度大约是 200-800 字每秒，在此期间请不要关闭 Obsidian",
 	"Semantic init finished": "语义引擎已就绪",
 
+	"Downloading aiHelper": "正在下载 clever-search-ai-helper.zip (972 MB)...",
+	"Download success": "下载成功",
+	"Download failure": "clever-search-ai-helper.zip 下载失败",
+
 	// setting tab
 	"Max items count": "最大候选项数",
 	"Max items count desc":
@@ -35,6 +39,13 @@ export default {
 	// semantic search
 	"Introduction": "介绍",
 	"Introduction.desc": "语义搜索只支持 Windows 系统，需要将下载的压缩包解压出的 .cache 文件夹放在 C:\\Users\\<current user>, 然后运行 clever-search-ai-helper.exe 来启动语义引擎。语义搜索旨在作为词汇搜索的补充，在精确匹配上效果是不如词汇搜索的",
+	"Enable": "启用",
+	"Server type": "服务器类型",
+	"Server type.desc": "对于本地服务器，clever-search-ai-helper.exe 需要在后台运行; 远程服务器短期内不会实现",
+	"local": "本地",
+	"Utilities": "实用功能",
+	"Test connection": "测试连接",
+	"Download": "下载",
 
 	"Excluded files": "忽略文件",
 	Manage: "管理",

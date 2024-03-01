@@ -495,7 +495,9 @@ class SemanticSearchModal extends Modal {
 		this.modalEl.style.height = "40vh";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
-		new Setting(contentEl).setName(t("Introduction")).setDesc(t("Introduction.desc"))
+		new Setting(contentEl)
+			.setName(t("Introduction"))
+			.setDesc(t("Introduction.desc"));
 		new Setting(contentEl).setName("Enable").addToggle((t) =>
 			t.setValue(this.setting.isEnabled).onChange((v) => {
 				this.setting.isEnabled = v;
@@ -505,14 +507,12 @@ class SemanticSearchModal extends Modal {
 			}),
 		);
 		new Setting(contentEl)
-			.setName("Server type")
-			.setDesc(
-				"For local server, Clever Search AI Helper needs to run in the background. For remote server, it has not been implemented yet.",
-			)
+			.setName(t("Server type"))
+			.setDesc(t("Server type.desc"))
 			.addDropdown((d) =>
 				d
 					// .addOptions({ local: "local", remote: "remote" })
-					.addOptions({ local: "local"})
+					.addOptions({ local: t("local") })
 					.setValue(this.setting.serverType)
 					.onChange(
 						(v) =>
@@ -520,11 +520,18 @@ class SemanticSearchModal extends Modal {
 					),
 			);
 		new Setting(contentEl)
-			.setName("Utilities")
+			.setName(t("Utilities"))
 			.addButton((b) =>
 				b
-					.setButtonText("Test connection")
+					.setButtonText(t("Test connection"))
 					.onClick(() => this.semanticEngine.testConnection()),
+			)
+			.addButton((b) =>
+				b
+					.setButtonText(t("Download"))
+					.onClick(() =>
+						getInstance(AssetsProvider).downloadAiHelper(),
+					),
 			);
 		// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
 		// 	const count = await this.semanticEngine.docsCount();
