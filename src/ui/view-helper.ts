@@ -138,24 +138,22 @@ export class ViewHelper {
 	}
 
 	insertFileLinkToActiveMarkdown(path: string | undefined) {
-		let targetFile = null;
 		if (path) {
-			targetFile = getInstance(Vault).getAbstractFileByPath(
-				path,
-			) as TFile;
-
 			const activeMarkdownView =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!activeMarkdownView?.file) {
+				logger.info("No markdown view to insert file link");
 				return;
 			}
-			const editor = activeMarkdownView.editor;
+
+			const targetFile = getInstance(Vault).getAbstractFileByPath(
+				path,
+			) as TFile;
 			const linkText = this.app.fileManager.generateMarkdownLink(
 				targetFile,
 				activeMarkdownView.file.path,
 			);
-			editor.replaceSelection(linkText);
-			editor.replaceSelection("\n");
+			activeMarkdownView.editor.replaceSelection(linkText + "\n");
 		}
 	}
 
