@@ -166,6 +166,10 @@
 		handleInputAsync();
 	}
 
+	function handleInsertFilenameLink() {
+		logger.info("insert filename link");
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		logger.trace("mounted element has been destroyed.");
@@ -191,6 +195,7 @@
 			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
 			handleSwitchLexicalSemanticMode,
 		);
+		listenEvent(EventEnum.INSERT_FILENAME_LINK, handleInsertFilenameLink);
 	}
 	viewHelper.focusInput();
 	handleInputAsync();
