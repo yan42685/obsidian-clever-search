@@ -84,7 +84,9 @@ module.exports = {
   ],
 
   // A map from regular expressions to module names or to arrays of module names that allow to stub out resources with a single module
-  // moduleNameMapper: {},
+  moduleNameMapper: {
+    "jieba-wasm/pkg/web/jieba_rs_wasm": "<rootDir>/tests/__mocks__/jieba-wasm-mock.js",
+  },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
   modulePathIgnorePatterns: [],

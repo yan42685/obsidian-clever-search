@@ -1,20 +1,10 @@
-import * as fsLib from "fs";
-import type { TFile } from "obsidian";
-import * as pathLib from "path";
+import { LanguageEnum } from "src/globals/enums";
 import { container, type InjectionToken } from "tsyringe";
 import { logger } from "./logger";
 
-// for autocompletion
-export const fsUtils = fsLib;
-export const pathUtils = pathLib;
-
 export const isDevEnvironment = process.env.NODE_ENV === "development";
-export const TO_BE_IMPL = "This branch hasn't been implemented"
-
-// "Ctrl" for Windows/Linux;    "Mod" for MacOS
-export const currModifier = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
-	? "Mod"
-	: "Ctrl";
+export const TO_BE_IMPL = "This branch hasn't been implemented";
+export const SHOULD_NOT_HAPPEN = "this branch shouldn't be reached by design";
 
 export class MyLib {
 	static extractDomainFromHttpsUrl(url: string): string {
@@ -31,44 +21,56 @@ export class MyLib {
 			return "";
 		}
 	}
-	static getBasename(filePath: string): string {
-		return pathUtils.basename(filePath, pathUtils.extname(filePath));
-	}
-
-	static getExtension(filePath: string): string {
-		return pathUtils.extname(filePath).slice(1);
-	}
-
-	static getFolderPath(filePath: string): string {
-		const dirPath = pathUtils.dirname(filePath);
-		if (dirPath === "." || dirPath === pathUtils.sep || dirPath === "/") {
-			return "./";
+	/**
+	 * Appends elements from addition to host.
+	 */
+	static append<T>(host: T[], addition: T[]): T[] {
+		for (const element of addition) {
+			host.push(element);
 		}
-		return (
-			dirPath.replace(new RegExp("\\" + pathUtils.sep, "g"), "/") + "/"
-		);
+		return host;
 	}
 
-	static countFileByExtensions(files: TFile[]): Record<string, number> {
-		const extensionCountMap = new Map<string, number>();
-		const commonExtensions = ["no_extension", "md", "txt"];
-		const uncommonExtensionPathMap = new Map<string, string[]>();
-		files.forEach((file) => {
-			const ext = file.extension || "no_extension";
-			extensionCountMap.set(ext, (extensionCountMap.get(ext) || 0) + 1);
-			if (!commonExtensions.includes(ext)) {
-				const paths = uncommonExtensionPathMap.get(ext) || [];
-				paths.push(file.path);
-				uncommonExtensionPathMap.set(ext, paths);
+	/**
+	 * deep version of Object.assign   (will change the target)
+	 */
+	static mergeDeep<T>(target: T, ...sources: T[]): T {
+		if (!sources.length) return target;
+		const source = sources.shift();
+
+		if (isObject(target) && isObject(source)) {
+			for (const key in source) {
+				if (isObject(source[key])) {
+					if (!target[key as keyof T])
+						// @ts-ignore
+						Object.assign(target, { [key]: {} });
+					// @ts-ignore
+					MyLib.mergeDeep(target[key as keyof T], source[key]);
+				} else {
+					// @ts-ignore
+					Object.assign(target, { [key]: source[key] });
+				}
 			}
-		});
-		const countResult = Object.fromEntries(extensionCountMap);
-		const uncommonPathsResult = Object.fromEntries(
-			uncommonExtensionPathMap,
-		);
-		logger.debug(countResult);
-		logger.debug(uncommonPathsResult);
-		return countResult;
+		}
+
+		return MyLib.mergeDeep(target, ...sources);
+	}
+
+	/**
+	 * Get current runtime language
+	 */
+	static getCurrLanguage(): LanguageEnum {
+		// getItem("language") will return `null` if currLanguage === "en"
+		const langKey = window.localStorage.getItem("language") || "en";
+		if (langKey in LanguageEnum) {
+			return LanguageEnum[langKey as keyof typeof LanguageEnum];
+		} else {
+			return LanguageEnum.other;
+		}
+	}
+
+	static sleep(ms: number) {
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 }
 
@@ -87,7 +89,7 @@ export async function monitorExecution(
 }
 
 /**
- * A decorator for asynchronously measuring and logging the execution time of a class method.
+ * A decorator for measuring and logging the execution time of a class method.
  * @param target - The target class.
  * @param propertyKey - The method name.
  * @param descriptor - The method descriptor.
@@ -108,16 +110,26 @@ export function monitorDecorator(
 ) {
 	const originalMethod = descriptor.value;
 
-	descriptor.value = async function (...args: any[]) {
+	descriptor.value = function (...args: any[]) {
 		const start = Date.now();
-		const result = await originalMethod.apply(this, args);
-		const end = Date.now();
-		logger.debug(
-			`<${
-				target.constructor.name
-			}-${propertyKey}> Execution time: ${formatMillis(end - start)}`,
-		);
-		return result;
+		const result = originalMethod.apply(this, args);
+		const logExecutionTime = () => {
+			const end = Date.now();
+			logger.trace(
+				`<${
+					target.constructor.name
+				}-${propertyKey}> Execution time: ${formatMillis(end - start)}`,
+			);
+		};
+		if (result instanceof Promise) {
+			return result.then((res) => {
+				logExecutionTime();
+				return res;
+			});
+		} else {
+			logExecutionTime();
+			return result;
+		}
 	};
 
 	return descriptor;
@@ -142,5 +154,18 @@ export function formatMillis(millis: number): string {
 }
 
 export function getInstance<T>(token: InjectionToken<T>): T {
-	return container.resolve(token);
+	try {
+		return container.resolve(token);
+	} catch (e) {
+		const msg =
+			"CleverSearch for developer:\nThere might be wrong usages for tsyringe:\n1. Inject an instance for static field\n2. Cycle dependencies without delay\n3. Unknown error";
+		logger.warn(msg);
+		logger.error(e);
+		alert(msg);
+		return -1 as any;
+	}
+}
+
+function isObject(item: any): boolean {
+	return item && typeof item === "object" && !Array.isArray(item);
 }

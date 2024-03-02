@@ -6,9 +6,11 @@
 
 ## Demo
 
-### Realtime Search and Preview
+### Realtime highlight and preview
 
-![demo-search-in-file](assets/images/demo-search-in-file.gif)
+![demo-search-in-file](assets/images/in-file-floating-window-en.gif)
+
+![demo-search-in-file](assets/images/in-vault-modal-en.gif)
 
 ### Privacy Mode
 
@@ -18,43 +20,52 @@
 
 ### Major
 
+- [x] Semantic search in the vault
+- [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and Precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
 - [ ] AutoCompletion
 - [ ] Persistent search history
-- [ ] Fuzzy search in the vault
-- [ ] Semantic search in the vault
 
 ### Subtle Tweaks for Better UX
 
-- [x] keep focusing input bar even if clicking an item
 - [x] Search from selection
+- [x] Automatically copy result text on selection
 - [ ] Remember last query text
 
 ### Integrate with other plugins
 
 - [x] `Style Settings`
 - [x] `Omnisearch`
-    <details><summary>Details</summary>
-        New command:<br>"Search in file with last Omnisearch query"<br><br>
-        Use case:<br>
-        When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
-        Note: <br>this is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
-    </details>
-
+  <details><summary>Details</summary>
+      New command:<br>"Search in file with last Omnisearch query"<br><br>
+      Use case:<br>
+      When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
+      Note: <br>This is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
+  </details>
 
 ## Available Commands
 
-| Scope    | Name                | Hotkey                   |
-| -------- | ------------------- | ------------------------ |
-| Item     | View Item Context   | `Left Click`             |
-| Modal    | Next Item           | `Ctrl-J` or `ArrowDown`  |
-| Modal    | Previous Item       | `Ctrl-K` or `ArrorUp`    |
-| Modal    | Confirm Item        | `Enter` or `Right Click` |
-| Obsidian | Search In File      | undefined                |
-| Obsidian | Toggle Privacy Mode | undefined                |
-| Obsidian | Search in file with last Omnisearch query | undefined |
+| Scope    | Name                                                               | Hotkey                   |
+| -------- | ------------------------------------------------------------------ | ------------------------ |
+| Item     | View item context                                                  | `Left Click`             |
+| Modal    | Next item                                                          | `Ctrl-J`                 |
+| Modal    | Previous item                                                      | `Ctrl-K`                 |
+| Modal    | Next subItem (in-vault)                                            | `Ctrl-N`                 |
+| Modal    | Previous subItem                                                   | `Ctrl-P`                 |
+| Modal    | Confirm item                                                       | `Enter` or `Right Click` |
+| Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
+| Modal    | Insert file link                                                    | `Alt-I`                 |
+| Obsidian | Search in vault semantically                                       | undefined                |
+| Obsidian | Search in vault lexically                                          | undefined                |
+| Obsidian | Search in File                                                     | undefined                |
+| Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined                |
+| Obsidian | Toggle privacy mode                                                | undefined                |
+
+## Limitations
+
+In-file Search performance may be slower when a file contains over 500k characters. However, there is no such performance limitation for in-vault search.
 
 ## Installation
 
@@ -64,6 +75,12 @@
     2. Create a folder named `clever-search` in `.obsidian/plugins` at your vault location
     3. Move above files into the folder you created
     4. click `reload plugins` at `Settings - Community plugins - installed plugins` and enable `Clever Search`
+
+## [FAQ](https://github.com/yan42685/obsidian-clever-search/wiki/Home-%E2%80%90-en#FAQ)
+
+## Declaration
+
+In compliance with the requirements of the Obsidian developer policy, this notice declares that this plugin downloads necessary program resources from the web into the `userData` directory. The specific location of these resources can be found in the plugin settings.
 
 ## Support
 

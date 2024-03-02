@@ -20,6 +20,37 @@ describe("MyLib", () => {
 		mockLoggerDebug.mockRestore();
 	});
 
+	describe("append", () => {
+		it("appends elements from one array to another", () => {
+			const host = [1, 2, 3];
+			const addition = [4, 5, 6];
+
+			const result = MyLib.append(host, addition);
+
+			expect(result).toEqual([1, 2, 3, 4, 5, 6]);
+			// make sure the host has been changed
+			expect(host).toEqual([1, 2, 3, 4, 5, 6]);
+		});
+
+		it("handles empty arrays correctly", () => {
+			const host: number[] = [];
+			const addition = [1, 2, 3];
+
+			const result = MyLib.append(host, addition);
+
+			expect(result).toEqual([1, 2, 3]);
+		});
+
+		it("returns the original array if nothing to append", () => {
+			const host = [1, 2, 3];
+			const addition: number[] = [];
+
+			const result = MyLib.append(host, addition);
+
+			expect(result).toEqual([1, 2, 3]);
+		});
+	});
+
 	describe("extractDomainFromUrl", () => {
 		it("should extract the domain from a valid HTTPS URL", () => {
 			const url = "https://www.example.com/page";
@@ -32,72 +63,6 @@ describe("MyLib", () => {
 			const url = "http://www.example.com/page";
 			expect(MyLib.extractDomainFromHttpsUrl(url)).toBe("");
 		});
-	});
-
-	describe("getBasename", () => {
-		it("should get the basename of a simple filepath", () => {
-			const path = "/folder/file.txt";
-			expect(MyLib.getBasename(path)).toBe("file");
-		});
-
-		it("should handle filenames with multiple dots", () => {
-			const path = "/folder/my.file.name.with.dots.tar.gz";
-			expect(MyLib.getBasename(path)).toBe("my.file.name.with.dots.tar");
-		});
-
-		it("should handle filenames without extension", () => {
-			const path = "/folder/myfile";
-			expect(MyLib.getBasename(path)).toBe("myfile");
-		});
-
-		it("should handle hidden files with extension", () => {
-			const path = "/folder/.hiddenfile.txt";
-			expect(MyLib.getBasename(path)).toBe(".hiddenfile");
-		});
-	});
-
-	describe("getExtension", () => {
-		it("should get the extension of a simple filepath", () => {
-			const path = "/folder/file.txt";
-			expect(MyLib.getExtension(path)).toBe("txt");
-		});
-
-		it("should handle filenames with multiple dots", () => {
-			const path = "/folder/my.file.name.with.dots.tar.gz";
-			expect(MyLib.getExtension(path)).toBe("gz");
-		});
-
-		it("should return empty string for filenames without extension", () => {
-			const path = "/folder/myfile";
-			expect(MyLib.getExtension(path)).toBe("");
-		});
-
-		it("should handle hidden files with extension", () => {
-			const path = "/folder/.hiddenfile.txt";
-			expect(MyLib.getExtension(path)).toBe("txt");
-		});
-	});
-
-	describe("getFolderPath", () => {
-		it("should return the folder path of a file", () => {
-			expect(MyLib.getFolderPath("path/to/file.txt")).toBe("path/to/");
-		});
-
-		it('should return "./" for files in the root directory', () => {
-			expect(MyLib.getFolderPath("/file.txt")).toBe("./");
-		});
-
-		it("should handle an empty path", () => {
-			expect(MyLib.getFolderPath("")).toBe("./");
-		});
-
-		if (process.platform === "win32") {
-			it("should handle Windows-style paths", () => {
-				expect(MyLib.getFolderPath("C:\\path\\to\\file.txt")).toBe(
-					"C:/path/to/",
-				);
-			});
-		}
 	});
 
 	describe("formatMillis", () => {

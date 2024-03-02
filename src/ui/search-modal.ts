@@ -1,14 +1,14 @@
 import { App, Modal } from "obsidian";
-import { EventEnum } from "src/globals/event-enum";
 import type { SearchType } from "src/globals/search-types";
-import { eventBus } from "src/utils/event-bus";
-import { currModifier } from "src/utils/my-lib";
+import { ModalNavigationHotkeys } from "src/services/obsidian/command-registry";
 import MountedModal from "./MountedModal.svelte";
 
+// TODO: make it an abstract class
 export class SearchModal extends Modal {
 	mountedElement: any;
-	constructor(app: App, searchType: SearchType, query?: string) {
+	constructor(app: App, searchType: SearchType, isSemantic: boolean, query?: string) {
 		super(app);
+
 		// get text selected by user
 		const selectedText = window.getSelection()?.toString() || "";
 		const effectiveQuery = query || selectedText;
@@ -22,55 +22,21 @@ export class SearchModal extends Modal {
 		this.mountedElement = new MountedModal({
 			target: this.modalEl,
 			props: {
-				app: app,
-				modal: this,
+				uiType: "modal",
+				onConfirmExternal: () => this.close(),
 				searchType: searchType,
+				isSemantic: isSemantic,
 				queryText: effectiveQuery || "",
 			},
 		});
 
-		this.registerHotkeys();
+		// register for transient scope. In this scope, app.scope won't accept keyMapEvents
+		new ModalNavigationHotkeys(this.scope).registerAll();
 	}
 
-	onOpen() {
-		// this.contentEl.empty();
-		// this.contentEl.setText("Woah!");
-	}
+	onOpen() { }
 
 	onClose() {
-		this.modalEl.removeEventListener("contextmenu", handleRightClick);
 		this.mountedElement.$destroy();
-		console.log("mounted element has been destroyed.");
 	}
-
-	private registerHotkeys() {
-		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
-		const modKey = currModifier;
-		// console.log("current modifier: " + modKey);
-
-		this.scope.register([modKey], "J", emitEvent(EventEnum.NEXT_ITEM));
-		// this.scope.register([modKey], "Q", emitEvent(EventEnum.NEXT_ITEM));
-		this.scope.register([], "ArrowDown", emitEvent(EventEnum.NEXT_ITEM));
-
-		this.scope.register([modKey], "K", emitEvent(EventEnum.PREV_ITEM));
-		this.scope.register([], "ArrowUp", emitEvent(EventEnum.PREV_ITEM));
-		this.scope.register([], "Enter", emitEvent(EventEnum.CONFIRM_ITEM));
-		// right click === "contextmenu" event
-		this.modalEl.addEventListener("contextmenu", handleRightClick);
-	}
-}
-
-function emitEvent(eventEnum: EventEnum) {
-	return (e: Event) => {
-		e.preventDefault();
-		eventBus.emit(eventEnum);
-		console.log("emit...");
-	};
-}
-
-function handleRightClick(event: MouseEvent) {
-	// 防止默认的上下文菜单出现
-	event.preventDefault();
-	eventBus.emit(EventEnum.CONFIRM_ITEM);
-	console.log("Right-click on button, confirm item event emitted.");
 }

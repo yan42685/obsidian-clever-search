@@ -1,7 +1,7 @@
 {
-	"name": "clever-search",
-	"version": "1.0.0",
-	"description": "Fuzzy search and semantic search for obsidian",
+	"name": "obsidian-clever-search",
+	"version": "0.1.0",
+	"description": "An obsidian search plugin that tunes your knowledge base to the rhythm of your fingertips.",
 	"main": "main.js",
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",
@@ -10,10 +10,11 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
 	},
 	"keywords": [],
-	"author": "Alex Clifton",
+	"author": "alexclifton",
 	"license": "GPL-3",
 	"devDependencies": {
 		"@babel/core": "^7.23.6",
+		"@babel/plugin-proposal-decorators": "^7.23.6",
 		"@babel/preset-env": "^7.23.6",
 		"@babel/preset-typescript": "^7.23.3",
 		"@codemirror/state": "^6.3.3",
@@ -43,6 +44,7 @@
 		"dexie": "^3.2.4",
 		"franc-min": "^6.1.0",
 		"fzf": "^0.5.2",
+		"jieba-wasm": "^0.0.2",
 		"minisearch": "^6.3.0",
 		"reflect-metadata": "^0.1.13",
 		"throttle-debounce": "^5.0.0",

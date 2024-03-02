@@ -1,7 +1,0 @@
-export enum EventEnum {
-	TEST_EVENT_A,
-	TEST_EVENT_B,
-	NEXT_ITEM,
-	PREV_ITEM,
-	CONFIRM_ITEM,
-}

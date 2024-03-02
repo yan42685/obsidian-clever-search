@@ -1,45 +1,50 @@
-import type { FileSystemAdapter } from "obsidian";
-import { THIS_PLUGIN } from "src/globals/constants";
-import type CleverSearch from "src/main";
+import { ChinesePatch } from "src/integrations/languages/chinese-patch";
+import { OmnisearchIntegration } from "src/integrations/omnisearch";
+import { FloatingWindowManager } from "src/ui/floating-window";
+import { AssetsProvider } from "src/utils/web/assets-provider";
+import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
-import { getInstance, pathUtils } from "../../utils/my-lib";
-import { LexicalEngine } from "../search/search-engine";
-import { SettingManager } from "./setting";
+import { getInstance } from "../../utils/my-lib";
+import { AuxiliaryService } from "../auxiliary/auxiliary-service";
+import { CommandRegistry } from "./command-registry";
+import { SettingManager } from "./setting-manager";
+import { DataManager } from "./user-data/data-manager";
+import { ViewRegistry } from "./view-registry";
 
 @singleton()
 export class PluginManager {
-	private readonly plugin: CleverSearch;
-	private readonly fs: FileSystemAdapter;
-	public readonly vaultPath: string;
-	// 存放索引的表
-	public readonly indexName: string;
-	public watchedPaths: string[] = [];
+	// private readonly obFileUtil = getInstance(Vault).adapter as FileSystemAdapter;
 
-	
-	constructor() {
-		this.plugin = getInstance(THIS_PLUGIN);
-		this.fs = this.plugin.app.vault.adapter as FileSystemAdapter;
-		this.vaultPath = this.fs.getBasePath().replace(/\\/g, "/") + "/";
-		this.indexName = "obsidian_vault_" + this.plugin.app.vault.getName().toLowerCase();
-		this.updateWatchedPaths();
+	async onload() {
+		await getInstance(SettingManager).initAsync();
+		getInstance(ViewRegistry).init();
+
+		getInstance(CommandRegistry).addCommandsWithoutDependency();
+
+		await getInstance(AssetsProvider).initAsync();
+		await getInstance(ChinesePatch).initAsync();
+		await getInstance(SearchClient).createChildThreads();
+
+		getInstance(AuxiliaryService).init();
 	}
 
+	async onLayoutReady() {
+		await getInstance(DataManager).initAsync();
+		await getInstance(OmnisearchIntegration).initAsync();
 
-	async initAsync() {
-		getInstance(SettingManager);
-		await getInstance(LexicalEngine).initAsync();
+		const commandRegistry = getInstance(CommandRegistry);
+		commandRegistry.addInVaultCommands();
+		commandRegistry.addDevCommands();
 	}
 
-	updateWatchedPaths() {
-		// TODO: configurable
-		const whitelistPaths = ["abc"];
-		const blackListPaths = [".obsidian/"];
-		const relativePaths = ["abc/"];
-		this.watchedPaths = relativePaths.map(
-			(relativePath) =>
-				pathUtils
-					.join(this.vaultPath, relativePath)
-					.replace(/\\/g, "/")
-		);
+	// should be called in CleverSearch.onunload()
+	onunload() {
+		getInstance(CommandRegistry).onunload();
+		getInstance(DataManager).onunload();
+		getInstance(FloatingWindowManager).onunload();
+	}
+
+	onAppQuit() {
+		// getInstance(SettingManager).saveSettings();
 	}
 }

@@ -1,77 +1,75 @@
-import { requestUrl } from "obsidian";
-import { PluginSetting } from "src/services/obsidian/setting";
-import { MyNotice } from "src/services/obsidian/transformed-api";
-import { throttle } from "throttle-debounce";
-import { logger } from "../logger";
-import { MyLib, getInstance } from "../my-lib";
+import { requestUrl, type RequestUrlResponse } from "obsidian";
 
+export class HttpClientOption {
+	baseUrl: string;
+	protocol: "http" | "https" = "http";
+	responseProcessor: (resp: RequestUrlResponse) => any | null;
+	headers?: Record<string, string>;
+}
 export class HttpClient {
-	private settings = getInstance(PluginSetting);
-	private noticeThrottled = throttle(
-		5000,
-		(text: string) => new MyNotice(text),
-	);
-
-	private gptapiOption: any = {
-		method: "POST",
-		url: `https://${this.getDomain1()}/v1/embeddings`,
-		headers: {
-			Authorization: `Bearer ${this.settings.apiProvider1.key}`,
-			"Content-Type": "application/json",
-		},
-		contentType: "application/json",
-		body: JSON.stringify({
-			input: "test",
-			model: "text-embedding-ada-002",
-		}),
-	};
-
-	private openaiOption: any = {
-		url: `https://${this.getDomain2()}/v1/embeddings`,
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${this.settings.apiProvider2.key}`,
-			"Content-Type": "application/json",
-		},
-		contentType: "application/json",
-		body: JSON.stringify({
-			input: "test",
-			model: "text-embedding-ada-002",
-		}),
-	};
-	private getDomain1() {
-		return MyLib.extractDomainFromHttpsUrl(this.settings.apiProvider1.domain);
-	}
-	private getDomain2() {
-		return MyLib.extractDomainFromHttpsUrl(this.settings.apiProvider2.domain);
-
+	option: HttpClientOption;
+	constructor(option: HttpClientOption) {
+		this.option = option;
 	}
 
-	async testRequest() {
-		this.request(this.gptapiOption);
-
-		this.request(this.openaiOption);
+	async get(url: string, params?: Record<string, any>) {
+		return this.request("GET", url, params, undefined);
 	}
-	async request(options: any) {
-		try {
-			const res = await requestUrl(options);
-			logger.debug(res);
-			logger.debug(res.json);
-		} catch (err) {
-			if (err.message.includes("401")) {
-				const info = `Invalid key for ${MyLib.extractDomainFromHttpsUrl(
-					options.url,
+
+	async post(url: string, params?: Record<string, any>, body?: any) {
+		return this.request("POST", url, params, body);
+	}
+
+	async put(url: string, params?: Record<string, any>, body?: any) {
+		return this.request("PUT", url, params, body);
+	}
+
+	async delete(url: string, params?: Record<string, any>) {
+		return this.request("DELETE", url, params, undefined);
+	}
+
+	private async request(
+		method: string,
+		url: string,
+		params?: Record<string, any>,
+		body?: any,
+	): Promise<any | null> {
+		url = this.buildUrlWithParams(url, params);
+		return this.option.responseProcessor(
+			await requestUrl({
+				url,
+				method,
+				contentType: "application/json",
+				body: body ? JSON.stringify(body) : undefined,
+				headers: this.option.headers,
+			}),
+		);
+	}
+
+	private buildUrlWithParams(
+		url: string,
+		params?: Record<string, any>,
+	): string {
+		url = `${this.option.protocol}://${this.option.baseUrl}/${url}`;
+		const queryString = params ? this.serializeParams(params) : "";
+		return queryString ? `${url}?${queryString}` : url;
+	}
+
+	private serializeParams(params: Record<string, any>): string {
+		return Object.keys(params)
+			.map((key) => {
+				const value = params[key];
+				return `${encodeURIComponent(key)}=${encodeURIComponent(
+					this.stringifyParam(value),
 				)}`;
-				logger.error(info);
-				this.noticeThrottled(info);
-			} else {
-				const info =
-					`Failed to connect to [${this.settings.apiProvider1.domain}], maybe the domain is wrong or the api provider is not available now or there is something wrong with your Internet connection`;
-				logger.error(info);
-				this.noticeThrottled(info);
-			}
-			logger.error(err);
+			})
+			.join("&");
+	}
+
+	private stringifyParam(value: any): string {
+		if (typeof value === "object") {
+			return JSON.stringify(value);
 		}
+		return String(value);
 	}
 }
-

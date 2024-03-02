@@ -1,40 +1,48 @@
 <script lang="ts">
-	import { MarkdownView, type App, type EditorPosition } from "obsidian";
-	import { EventEnum } from "src/globals/event-enum";
+	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
+	import { EventEnum } from "src/globals/enums";
 	import {
 		FileItem,
-		FileType,
+		FileSubItem,
 		LineItem,
 		SearchResult,
 		SearchType,
 	} from "src/globals/search-types";
-	import { PrivateApi } from "src/services/obsidian/private-api";
-	import { SearchService } from "src/services/search/search-service";
+	import { SearchService } from "src/services/obsidian/search-service";
+	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
-	import { getInstance } from "src/utils/my-lib";
+	import { logger } from "src/utils/logger";
+	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
-	import type { SearchModal } from "./search-modal";
+	import { debounce } from "throttle-debounce";
+	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
+	const viewHelper = getInstance(ViewHelper);
 
-	export let app: App;
-	export let modal: SearchModal;
+	export let uiType: "modal" | "floatingWindow";
+	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
+	export let isSemantic: boolean; // only available for in-vault search
 	export let queryText: string;
-	const DEFAULT_RESULT = new SearchResult("", []);
-	let searchResult: SearchResult = DEFAULT_RESULT;
-	let currItemIndex = -1;
+	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
+	let searchResult: SearchResult = new SearchResult("", []);
+	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
 
 	let currFileItem: FileItem | null = null; // for previewing in-vault search
-	let currSubItems: string[] = [];
-	let currSubItemIndex = -1;
-	let inputEl: HTMLElement;
+	let currFileSubItems: FileSubItem[] = []; // for markdown viewType
+	let currFilePreviewContent: any = undefined; // for non-markdown viewType
+	let currSubItemIndex = NULL_NUMBER;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
-	// Updates focused content and selected file index
-	function updateItem(index: number): void {
+	// TODO: use virtual list rather than rendering all buttons
+
+	// updates focused content and selected file index
+	async function updateItemAsync(index: number): Promise<void> {
+		// wait until all dynamic elements are mounted and rendered
+		await tick();
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
 			currItemIndex = index;
@@ -43,115 +51,163 @@
 				currContext = item.context;
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
-				currSubItems = currFileItem.subItems;
+
+				// semantic search doesn't require requesting subItems each time because
+				// all the subItems for each fileItem have been returned for newInput if it is a semantic search
+				if (!isSemantic) {
+					currFileItem.subItems = await searchService.getFileSubItems(
+						queryText,
+						currFileItem,
+					);
+				}
+				currFileSubItems = currFileItem.subItems;
+				currSubItemIndex =
+					currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
+				await tick(); // wait until subItems are rendered by svelte
+				viewHelper.scrollTo(
+					"start",
+					currFileSubItems[currSubItemIndex],
+					"instant",
+				);
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
+			await tick();
+			viewHelper.scrollTo("center", items[index], "smooth");
 		} else {
 			currContext = "";
 			currFileItem = null;
-			currSubItems = [];
-			currItemIndex = -1;
+			currFileSubItems = [];
+			currItemIndex = NULL_NUMBER;
+			currSubItemIndex = NULL_NUMBER;
 		}
 	}
 
-	// Handle input changes
-	async function handleInput() {
+	// handle input changes
+	const handleInputDebounced = debounce(100, () => handleInputAsync());
+
+	async function handleInputAsync() {
+		if (cachedResult.has(queryText)) {
+			searchResult = cachedResult.get(queryText) as SearchResult;
+			await updateItemAsync(0);
+			return;
+		}
 		if (searchType === SearchType.IN_FILE) {
 			searchResult = await searchService.searchInFile(queryText);
-			searchResult.items.forEach((x) => {
-				const item = x as LineItem;
-				// console.log(item.line.text);
-				// if (item.element) {
-				// 	MarkdownRenderer.render(
-				// 		app,
-				// 		item.line.text,
-				// 		item.element,
-				// 		searchResult.currPath,
-				// 		new Component(),
-				// 	);
-				// }
-			});
 		} else if (searchType === SearchType.IN_VAULT) {
-			searchResult = await searchService.searchInVault(queryText);
-			// logger.info(searchResult);
-			// logger.info(typeof searchResult.items[0] || "nothing");
+			searchResult = isSemantic
+				? await searchService.searchInVaultSemantic(queryText)
+				: await searchService.searchInVault(queryText);
+		} else {
+			throw Error(TO_BE_IMPL);
 		}
-		updateItem(0);
-		// wait until all dynamic elements are mounted and rendered
-		await tick();
+		cachedResult.set(queryText, searchResult);
+		await updateItemAsync(0);
 	}
 
-	// Handle result click
-	function handleItemClick(index: number): void {
-		updateItem(index);
+	// handle result click
+	async function handleItemClick(index: number) {
+		await updateItemAsync(index);
 	}
 
-	// Select the next search result
-	function handleNextItem() {
-		updateItem(Math.min(currItemIndex + 1, searchResult.items.length - 1));
+	// select the next search result
+	async function handleNextItem() {
+		await updateItemAsync(
+			Math.min(currItemIndex + 1, searchResult.items.length - 1),
+		);
+		if (uiType === "floatingWindow") {
+			handleConfirm(null);
+		}
 	}
 
 	// Select the previous search result
-	function handlePrevItem() {
-		updateItem(Math.max(currItemIndex - 1, 0));
-	}
-
-	function handleConfirm() {
-		modal.close();
-		// 对应的command name是Focus on last note
-		getInstance(PrivateApi).executeCommandById("editor:focus");
-
-		if (searchType === SearchType.IN_FILE) {
-			const selectedItem = searchResult.items[
-				currItemIndex
-			] as LineItem;
-			if (selectedItem) {
-				// move the cursor and view to a specific line and column in the editor.
-				const view = app.workspace.getActiveViewOfType(MarkdownView);
-				if (view) {
-					const cursorPos: EditorPosition = {
-						line: selectedItem.line.row,
-						ch: selectedItem.line.col,
-					};
-					view.editor.setCursor(cursorPos);
-					view.editor.scrollIntoView(
-						{
-							from: cursorPos,
-							to: cursorPos,
-						},
-						true,
-					);
-				}
-			}
-		} else {
-			throw Error("unsupported search type");
+	async function handlePrevItem() {
+		await updateItemAsync(Math.max(currItemIndex - 1, 0));
+		if (uiType === "floatingWindow") {
+			handleConfirm(null);
 		}
 	}
 
-	// ===================================================
-	// NOTE: onMount() 方法不会被触发
-	function listenEvent(event: EventEnum, callback: EventCallback) {
-		eventBus.on(event, callback);
-		onDestroy(() => eventBus.off(event, callback));
+	function handleSubItemClick(index: number) {
+		currSubItemIndex = index;
 	}
 
-	listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
-	listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
-	listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
-	handleInput();
+	function handleNextSubItem() {
+		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currFileSubItems,
+			currSubItemIndex,
+			"next",
+		);
+	}
+
+	function handlePrevSubItem() {
+		currSubItemIndex = viewHelper.updateSubItemIndex(
+			currFileSubItems,
+			currSubItemIndex,
+			"prev",
+		);
+	}
+
+	async function handleConfirm(event: Event | null) {
+		event?.preventDefault();
+		const selectedItem = searchResult.items[currItemIndex];
+		await viewHelper.handleConfirmAsync(
+			onConfirmExternal,
+			searchResult.sourcePath,
+			searchType,
+			selectedItem,
+			currSubItemIndex,
+		);
+	}
+
+	function handleSwitchLexicalSemanticMode() {
+		cachedResult.delete(queryText);
+		isSemantic = !isSemantic;
+		handleInputAsync();
+	}
+
+	function handleInsertFileLink() {
+		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path)
+	}
+
+	// ===================================================
+	onDestroy(() => {
+		logger.trace("mounted element has been destroyed.");
+	});
+
+	// NOTE: onMount() won't be triggered and I wonder why
+	function listenEvent(event: EventEnum, callback: EventCallback) {
+		eventBus.on(event, callback);
+		onDestroy(() => {
+			eventBus.off(event, callback);
+		});
+	}
+	if (uiType === "floatingWindow") {
+		listenEvent(EventEnum.NEXT_ITEM_FLOATING_WINDOW, handleNextItem);
+		listenEvent(EventEnum.PREV_ITEM_FLOATING_WINDOW, handlePrevItem);
+	} else {
+		listenEvent(EventEnum.NEXT_ITEM, handleNextItem);
+		listenEvent(EventEnum.PREV_ITEM, handlePrevItem);
+		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
+		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
+		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+		listenEvent(
+			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
+			handleSwitchLexicalSemanticMode,
+		);
+		listenEvent(EventEnum.INSERT_FILE_LINK, handleInsertFileLink);
+	}
+	viewHelper.focusInput();
+	handleInputAsync();
 </script>
 
 <div class="search-container">
 	<div class="left-pane">
 		<div class="search-bar" data-match-count={matchCountText}>
-			<!-- svelte-ignore a11y-autofocus -->
 			<input
+				id="cs-search-input"
 				bind:value={queryText}
-				bind:this={inputEl}
-				on:input={handleInput}
-				on:blur={() => setTimeout(() => inputEl.focus(), 1)}
-				autofocus
+				on:input={handleInputDebounced}
 			/>
 		</div>
 		<div class="result-items">
@@ -162,60 +218,86 @@
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
 						on:click={(event) => {
-							event.preventDefault();
 							handleItemClick(index);
+							if (uiType === "floatingWindow") {
+								handleConfirm(null);
+							}
+						}}
+						on:contextmenu={async (e) => {
+							await handleItemClick(index);
+							await handleConfirm(e);
 						}}
 					>
 						{#if item instanceof LineItem}
 							<span class="line-item">{@html item.line.text}</span
 							>
 						{:else if item instanceof FileItem}
-							<div class="file-item">
-								<span class="file-basename"
-									>{item.basename}</span
-								>
-								<span class="file-extension"
-									>{item.extension}</span
+							<span class="file-item">
+								<span class="filename"
+									>{@html item.basename +
+										HTML_4_SPACES +
+										(item.extension === "md"
+											? ""
+											: item.extension)}</span
 								>
 								<span class="file-folder-path"
 									>{item.folderPath}</span
 								>
-							</div>
+							</span>
 						{/if}
 					</button>
 				{/each}
 			</ul>
 		</div>
 	</div>
-	<div class="right-pane">
-		<div class="preview-container">
-			{#if searchType === SearchType.IN_FILE}
-				{#if currContext}
-					<p>{@html currContext}</p>
+	{#if uiType !== "floatingWindow"}
+		<div class="right-pane">
+			<div class="preview-container">
+				{#if searchType === SearchType.IN_FILE}
+					{#if currContext}
+						<p on:contextmenu={(e) => handleConfirm(e)}>
+							{@html currContext}
+						</p>
+					{/if}
+				{:else if searchType === SearchType.IN_VAULT}
+					{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
+						<ul>
+							{#each currFileSubItems as subItem, index}
+								<button
+									on:click={(event) =>
+										handleSubItemClick(index)}
+									on:contextmenu={(e) => {
+										currSubItemIndex = index;
+										handleConfirm(e);
+									}}
+									bind:this={subItem.element}
+									class:selected={index === currSubItemIndex}
+									class="file-sub-item"
+								>
+									{@html subItem.text}
+								</button>
+							{/each}
+						</ul>
+					{:else}
+						<span>
+							{viewHelper.showNoResult(isSemantic)}
+						</span>
+					{/if}
 				{/if}
-			{:else if searchType === SearchType.IN_VAULT}
-				{#if currFileItem && currFileItem.fileType === FileType.PLAIN_TEXT}
-					<ul>
-						{#each currSubItems as subItem, index}
-							<p>
-								{@html subItem}
-							</p>
-						{/each}
-					</ul>
-				{:else}
-					<span> no result or to be impl</span>
-				{/if}
-			{/if}
+			</div>
 		</div>
-	</div>
+	{/if}
 </div>
 
 <style>
+	div,
+	button {
+		user-select: text;
+	}
 	.search-container {
 		display: flex;
-		margin-top: 10px;
-		/* 保证空格和换行符在渲染html时不被压缩掉 */
-		white-space: pre-wrap;
+		white-space: pre-wrap; /* 保证空格和换行符在渲染html时不被压缩掉 */
+		overflow-wrap: break-word; /* long text won't be hidden if overflow: hidden is set */
 	}
 
 	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
@@ -228,15 +310,15 @@
 	.left-pane {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		width: 40%;
+		align-items: left;
+		/* width: 40%; */
+		width: 27.5vw;
 	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
-		top: 0;
+		top: -0.2em;
 		left: 0;
-		padding-bottom: 15px;
-		width: 90%;
+		width: 97%;
 		height: 30px;
 	}
 	/* 似乎不能在input上面放伪元素 */
@@ -256,55 +338,47 @@
 		border-radius: 10px;
 		background-color: var(--cs-search-bar-bgc, #20202066);
 		box-shadow:
-			0 2px 4px rgba(0, 0, 0, 0.18),
-			0 2px 3px rgba(0, 0, 0, 0.26);
+			0 2px 4px rgba(0, 0, 0, 0.07),
+			0 2px 3px rgba(0, 0, 0, 0.1);
 	}
 
 	.result-items {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		width: 100%;
-		height: 67.3vh;
-		margin-top: 1em;
+		height: 70vh;
+		margin-top: 0.15em;
 	}
 
 	.result-items ul {
-		list-style: none; /* 移除默认的列表样式 */
 		padding: 0 0.5em 0 0;
-		margin: 0.2em 0 0 0;
-		width: 90%;
-		/* height: 36vw; */
-		overflow-y: auto;
+		margin-bottom: 0;
+		width: 97%;
 		overflow-x: hidden;
-		justify-content: left;
 	}
 
 	.result-items ul button {
-		display: flex;
 		align-items: center;
 		justify-content: left;
 		padding: 0.65em;
-		margin-bottom: 0.5em;
+		margin: 0.5em 0 0 0.15em;
 		/* width: 100%; */
-		width: 23vw;
+		width: 25.35vw;
 		height: fit-content;
 		/* max-height: 5.5em; */
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
-		border: none;
 		border-radius: 4px;
 		cursor: pointer;
-		transition: background-color 0.01s;
 	}
 
 	.result-items ul button:hover,
 	.result-items ul button.selected {
-		background-color: var(--cs-item-selected-color, #555);
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
 	/* wrap the matched line up to 3 lines and show ... if it still overflows */
-	.result-items ul button span.line-item {
+	.result-items ul button .line-item,
+	.result-items ul button .file-item {
 		text-wrap: wrap;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
@@ -313,35 +387,69 @@
 		text-overflow: ellipsis;
 	}
 
-	.result-items ul button span.file-basename {
+	.result-items ul button .file-item {
+		-webkit-line-clamp: 6; /* overwrite the previous rule */
 	}
 
-	.result-items ul button span.file-extension {
+	.result-items ul button .file-item span.filename {
+		margin-top: -0.2em;
+		display: block;
 	}
-	.result-items ul button span.file-folder-path {
+
+	.result-items ul button .file-item span.file-folder-path {
+		color: var(--cs-secondary-font-color, #a29c9c);
 		display: block;
 	}
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 6px;
-		height: 72.8vh;
+		height: 73.97vh;
 		width: 60%;
 	}
+
+	.right-pane button {
+		white-space: pre-wrap;
+	}
+
 	.right-pane .preview-container {
-		margin: 0.7em 0.5em 0.7em 0.7em;
-		height: 70vh;
-		overflow-wrap: break-word;
+		margin: 0.7em 0 0 0.7em;
+		height: 72.5vh;
 		overflow-y: auto;
 	}
 	.right-pane .preview-container p,
 	.right-pane .preview-container ul {
 		margin: 0;
 		padding: 0;
+		overflow-x: hidden;
+	}
+	.right-pane .preview-container p {
+		width: 39.7vw;
 	}
 
-	.right-pane .preview-container :global(span.target-line) {
+	.right-pane .preview-container ul button.file-sub-item {
+		text-wrap: wrap;
+		display: block;
+		text-overflow: ellipsis;
+		justify-content: left;
+		margin-bottom: 1em;
+		height: fit-content;
+		width: 39.2vw;
+		text-align: left;
+		background-color: var(--cs-pane-bgc, #20202066);
+		border-radius: 4px;
+		font-size: medium;
+	}
+
+	.right-pane .preview-container ul button.file-sub-item.selected {
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
+	}
+
+	.right-pane .preview-container :global(span.matched-line) {
 		display: inline-block;
 		width: 100%;
+	}
+
+	.right-pane .preview-container :global(span.matched-line.highlight-bg) {
 		background-color: var(--cs-hint-char-color, #468eeb33);
 	}
 </style>

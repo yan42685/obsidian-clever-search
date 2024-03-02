@@ -1,6 +1,8 @@
 import builtins from "builtin-modules";
 import esbuild from "esbuild";
 import esbuildSvelte from "esbuild-svelte";
+import * as fsUtil from "fs";
+import * as pathUtil from "path";
 import process from "process";
 import sveltePreprocess from "svelte-preprocess";
 
@@ -66,13 +68,28 @@ const prod = process.argv[2] === "production";
 // 	});
 // }
 
+async function printFilesSize(directory) {
+    console.log(`Printing file sizes in directory: ${directory}`);
+    try {
+        const files = await fsUtil.promises.readdir(directory);
+        for (const file of files) {
+            const filePath = pathUtil.join(directory, file);
+            const stats = await fsUtil.promises.stat(filePath);
+            console.log(`${file}: ${(stats.size / 1024).toFixed(2)} KB`);
+        }
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+
 const esbuildConfig = (outdir) => ({
 	banner: {
 		js: banner,
 	},
 	entryPoints: {
 		main: "src/main.ts",
-		"cs-search-worker": "src/web-worker/search-worker-server.ts",
+		"cs-search-worker": "src/web-workers/server.ts",
 	},
 	bundle: true,
 	minify: prod ? true : false,
@@ -115,11 +132,13 @@ const esbuildConfig = (outdir) => ({
 	],
 });
 
+const DIST_PATH = "dist";
 const devContext = await esbuild.context(esbuildConfig("./"));
-const releaseContext = await esbuild.context(esbuildConfig("dist"));
+const releaseContext = await esbuild.context(esbuildConfig(DIST_PATH));
 
 if (prod) {
 	await releaseContext.rebuild();
+	await printFilesSize(DIST_PATH);
 	process.exit(0);
 } else {
 	await devContext.watch();

@@ -1,10 +1,10 @@
 {
 	"id": "clever-search",
 	"name": "Clever Search",
-	"version": "0.0.4",
-	"minAppVersion": "0.15.0",
-	"description": "fuzzy full text search",
 	"author": "Alex Clifton",
+	"description": "Helping you quickly locate the notes in your mind in the easiest way, without the need for complex search syntax to find relevant content.",
+	"version": "0.2.1",
+	"minAppVersion": "0.15.0",
     "fundingUrl": "https://www.buymeacoffee.com/alexclifton",
 	"isDesktopOnly": true
 }

@@ -14,6 +14,9 @@ dependencies:
   fzf:
     specifier: ^0.5.2
     version: 0.5.2
+  jieba-wasm:
+    specifier: ^0.0.2
+    version: 0.0.2
   minisearch:
     specifier: ^6.3.0
     version: 6.3.0
@@ -31,6 +34,9 @@ devDependencies:
   '@babel/core':
     specifier: ^7.23.6
     version: 7.23.6
+  '@babel/plugin-proposal-decorators':
+    specifier: ^7.23.6
+    version: 7.23.6(@babel/core@7.23.6)
   '@babel/preset-env':
     specifier: ^7.23.6
     version: 7.23.6(@babel/core@7.23.6)
@@ -425,6 +431,21 @@ packages:
       '@babel/helper-plugin-utils': 7.22.5
     dev: true
 
+  /@babel/plugin-proposal-decorators@7.23.6(@babel/core@7.23.6):
+    resolution: {integrity: sha512-D7Ccq9LfkBFnow3azZGJvZYgcfeqAw3I1e5LoTpj6UKIFQilh8yqXsIGcRIqbBdsPWIz+Ze7ZZfggSj62Qp+Fg==}
+    engines: {node: '>=6.9.0'}
+    peerDependencies:
+      '@babel/core': ^7.0.0-0
+    dependencies:
+      '@babel/core': 7.23.6
+      '@babel/helper-create-class-features-plugin': 7.23.6(@babel/core@7.23.6)
+      '@babel/helper-plugin-utils': 7.22.5
+      '@babel/helper-replace-supers': 7.22.20(@babel/core@7.23.6)
+      '@babel/helper-skip-transparent-expression-wrappers': 7.22.5
+      '@babel/helper-split-export-declaration': 7.22.6
+      '@babel/plugin-syntax-decorators': 7.23.3(@babel/core@7.23.6)
+    dev: true
+
   /@babel/plugin-proposal-private-property-in-object@7.21.0-placeholder-for-preset-env.2(@babel/core@7.23.6):
     resolution: {integrity: sha512-SOSkfJDddaM7mak6cPEpswyTRnuRltl429hMraQEglW+OkovnCzsiszTmsrlY//qLFjCpQDFRvjdm2wA5pPm9w==}
     engines: {node: '>=6.9.0'}
@@ -463,6 +484,16 @@ packages:
 
   /@babel/plugin-syntax-class-static-block@7.14.5(@babel/core@7.23.6):
     resolution: {integrity: sha512-b+YyPmr6ldyNnM6sqYeMWE+bgJcJpO6yS4QD7ymxgH34GBPNDM/THBh8iunyvKIZztiwLH4CJZ0RxTk9emgpjw==}
+    engines: {node: '>=6.9.0'}
+    peerDependencies:
+      '@babel/core': ^7.0.0-0
+    dependencies:
+      '@babel/core': 7.23.6
+      '@babel/helper-plugin-utils': 7.22.5
+    dev: true
+
+  /@babel/plugin-syntax-decorators@7.23.3(@babel/core@7.23.6):
+    resolution: {integrity: sha512-cf7Niq4/+/juY67E0PbgH0TDhLQ5J7zS8C/Q5FFx+DWyrRa9sUQdTXkjqKu8zGvuqr7vw1muKiukseihU+PJDA==}
     engines: {node: '>=6.9.0'}
     peerDependencies:
       '@babel/core': ^7.0.0-0
@@ -3810,6 +3841,10 @@ packages:
       - supports-color
       - ts-node
     dev: true
+
+  /jieba-wasm@0.0.2:
+    resolution: {integrity: sha512-CPmS+U/klii3LWKrccDqm/BvWmgBB3x4HV/WBxC/l7GsitVfzCzsZ8cWz+vh2riv6M5P8rvHJzCz4xsoFA79cw==}
+    dev: false
 
   /js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}

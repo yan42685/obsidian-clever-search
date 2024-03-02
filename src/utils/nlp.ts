@@ -1,5 +1,10 @@
 import { franc } from "franc-min";
-import { LanguageEnum } from "src/globals/language-enum";
+import { LanguageEnum } from "src/globals/enums";
+
+/**
+ * this module need to be loaded in the subprocess or should not be used at all
+ * because the package size of "franc-min" is nearly 180kb
+ */
 
 export type LanguageProportionsResult = {
 	mainLanguage: LanguageEnum;
@@ -72,4 +77,5 @@ export class TextAnalyzer {
 		}
 		console.log("");
 	}
+
 }
