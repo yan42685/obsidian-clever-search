@@ -12,7 +12,7 @@ export enum EventEnum {
 
 	IN_VAULT_SEARCH,
 
-	INSERT_FILENAME_LINK,
+	INSERT_FILE_LINK,
 }
 
 export enum LanguageEnum {

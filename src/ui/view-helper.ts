@@ -1,5 +1,5 @@
 // src/utils/view-helper.ts
-import { App, MarkdownView, type EditorPosition } from "obsidian";
+import { App, MarkdownView, TFile, Vault, type EditorPosition } from "obsidian";
 import { NULL_NUMBER } from "src/globals/constants";
 import { ObsidianCommandEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
@@ -124,7 +124,7 @@ export class ViewHelper {
 	showNoResult(isSemantic: boolean) {
 		if (isSemantic) {
 			if (!this.setting.semantic.isEnabled) {
-				return "Semantic search need to be enabled at the setting tab"
+				return "Semantic search need to be enabled at the setting tab";
 			}
 			const semanticEngineStatus = getInstance(SemanticEngine).status;
 			if (semanticEngineStatus === "ready") {
@@ -134,6 +134,28 @@ export class ViewHelper {
 			}
 		} else {
 			return "No matched content";
+		}
+	}
+
+	insertFileLinkToActiveMarkdown(path: string | undefined) {
+		let targetFile = null;
+		if (path) {
+			targetFile = getInstance(Vault).getAbstractFileByPath(
+				path,
+			) as TFile;
+
+			const activeMarkdownView =
+				this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeMarkdownView?.file) {
+				return;
+			}
+			const editor = activeMarkdownView.editor;
+			const linkText = this.app.fileManager.generateMarkdownLink(
+				targetFile,
+				activeMarkdownView.file.path,
+			);
+			editor.replaceSelection(linkText);
+			editor.replaceSelection("\n");
 		}
 	}
 

@@ -166,8 +166,8 @@
 		handleInputAsync();
 	}
 
-	function handleInsertFilenameLink() {
-		logger.info("insert filename link");
+	function handleInsertFileLink() {
+		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path)
 	}
 
 	// ===================================================
@@ -195,7 +195,7 @@
 			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
 			handleSwitchLexicalSemanticMode,
 		);
-		listenEvent(EventEnum.INSERT_FILENAME_LINK, handleInsertFilenameLink);
+		listenEvent(EventEnum.INSERT_FILE_LINK, handleInsertFileLink);
 	}
 	viewHelper.focusInput();
 	handleInputAsync();
