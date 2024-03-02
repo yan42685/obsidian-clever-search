@@ -56,6 +56,7 @@
 | Modal    | Previous subItem                                                   | `Ctrl-P`                 |
 | Modal    | Confirm item                                                       | `Enter` or `Right Click` |
 | Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
+| Modal    | Insert file link                                                    | `Alt-I`                 |
 | Obsidian | Search in vault semantically                                       | undefined                |
 | Obsidian | Search in vault lexically                                          | undefined                |
 | Obsidian | Search in File                                                     | undefined                |

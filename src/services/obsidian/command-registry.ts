@@ -3,7 +3,7 @@ import {
 	Scope,
 	type Command,
 	type KeymapEventHandler,
-	type Modifier,
+	type Modifier
 } from "obsidian";
 import { devTest } from "src/dev-test";
 import { THIS_PLUGIN } from "src/globals/constants";
@@ -15,9 +15,13 @@ import type CleverSearch from "src/main";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
-import { currModifier, getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
+
+const CTRL: Modifier = "Ctrl";
+const ALT: Modifier = "Alt";
+const SHIFT: Modifier = "Shift";
 
 @singleton()
 export class CommandRegistry {
@@ -153,12 +157,9 @@ class GlobalNavigationHotkeys extends AbstractNavigationHotkeys {
 	}
 
 	registerAll() {
-		// 检测平台，以确定是使用 'Ctrl' 还是 'Cmd'（Mac）
-		const modKey = currModifier;
-		// console.log("current modifier: " + modKey);
 		this.handlers = [];
-		this.register([modKey], "J", EventEnum.NEXT_ITEM_FLOATING_WINDOW);
-		this.register([modKey], "K", EventEnum.PREV_ITEM_FLOATING_WINDOW);
+		this.register([CTRL], "J", EventEnum.NEXT_ITEM_FLOATING_WINDOW);
+		this.register([CTRL], "K", EventEnum.PREV_ITEM_FLOATING_WINDOW);
 	}
 }
 
@@ -169,17 +170,15 @@ export class ModalNavigationHotkeys extends AbstractNavigationHotkeys {
 	}
 
 	registerAll(): void {
-		const modKey = currModifier;
-		// console.log("current modifier: " + modKey);
-
-		this.register([modKey], "J", EventEnum.NEXT_ITEM);
-		this.register([modKey], "K", EventEnum.PREV_ITEM);
+		this.register([CTRL], "J", EventEnum.NEXT_ITEM);
+		this.register([CTRL], "K", EventEnum.PREV_ITEM);
 
 		this.register([], "ArrowDown", EventEnum.NEXT_ITEM);
 		this.register([], "ArrowUp", EventEnum.PREV_ITEM);
 		this.register([], "Enter", EventEnum.CONFIRM_ITEM);
-		this.register([modKey], "N", EventEnum.NEXT_SUB_ITEM);
-		this.register([modKey], "P", EventEnum.PREV_SUB_ITEM);
-		this.register([modKey], "S", EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE);
+		this.register([CTRL], "N", EventEnum.NEXT_SUB_ITEM);
+		this.register([CTRL], "P", EventEnum.PREV_SUB_ITEM);
+		this.register([CTRL], "S", EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE);
+		this.register([ALT], "I", EventEnum.INSERT_FILE_LINK);
 	}
 }

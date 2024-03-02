@@ -11,6 +11,8 @@ export enum EventEnum {
 	SWITCH_LEXICAL_SEMANTIC_MODE,
 
 	IN_VAULT_SEARCH,
+
+	INSERT_FILE_LINK,
 }
 
 export enum LanguageEnum {

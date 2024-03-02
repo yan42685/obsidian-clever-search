@@ -166,6 +166,10 @@
 		handleInputAsync();
 	}
 
+	function handleInsertFileLink() {
+		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path)
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		logger.trace("mounted element has been destroyed.");
@@ -191,6 +195,7 @@
 			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
 			handleSwitchLexicalSemanticMode,
 		);
+		listenEvent(EventEnum.INSERT_FILE_LINK, handleInsertFileLink);
 	}
 	viewHelper.focusInput();
 	handleInputAsync();

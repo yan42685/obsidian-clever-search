@@ -6,11 +6,6 @@ export const isDevEnvironment = process.env.NODE_ENV === "development";
 export const TO_BE_IMPL = "This branch hasn't been implemented";
 export const SHOULD_NOT_HAPPEN = "this branch shouldn't be reached by design";
 
-// "Ctrl" for Windows/Linux;    "Mod" for MacOS
-export const currModifier = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
-	? "Mod"
-	: "Ctrl";
-
 export class MyLib {
 	static extractDomainFromHttpsUrl(url: string): string {
 		if (url.startsWith("http://")) {
