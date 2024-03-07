@@ -179,7 +179,7 @@ class GeneralTab extends PluginSettingTab {
 			.setDesc(t("Advanced.desc"));
 
 		new Setting(containerEl)
-			.setName("Semantic search")
+			.setName(t("Semantic search"))
 			.addButton((b) =>
 				b
 					.setButtonText(t("Manage"))
@@ -498,7 +498,7 @@ class SemanticSearchModal extends Modal {
 		new Setting(contentEl)
 			.setName(t("Introduction"))
 			.setDesc(t("Introduction.desc"));
-		new Setting(contentEl).setName("Enable").addToggle((t) =>
+		new Setting(contentEl).setName(t("Enable")).addToggle((t) =>
 			t.setValue(this.setting.isEnabled).onChange((v) => {
 				this.setting.isEnabled = v;
 				if (v === true) {

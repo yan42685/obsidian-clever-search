@@ -23,7 +23,7 @@
 - [x] Semantic search in the vault
 - [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
-- [x] Realtime highlighting and Precise jump to the target location
+- [x] Realtime highlighting and precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
 - [ ] AutoCompletion
 - [ ] Persistent search history
@@ -59,7 +59,7 @@
 | Modal    | Insert file link                                                    | `Alt-I`                 |
 | Obsidian | Search in vault semantically                                       | undefined                |
 | Obsidian | Search in vault lexically                                          | undefined                |
-| Obsidian | Search in File                                                     | undefined                |
+| Obsidian | Search in file                                                     | undefined                |
 | Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined                |
 | Obsidian | Toggle privacy mode                                                | undefined                |
 

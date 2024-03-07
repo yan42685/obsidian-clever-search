@@ -36,7 +36,9 @@ export default {
 	"Advanced": "进阶设置",
 	"Advanced.desc": "之前的设置通常能满足大多数使用场景，如果你想有更个性化的设置，可以调整下面的选项",
 
+
 	// semantic search
+	"Semantic search": "语义搜索",
 	"Introduction": "介绍",
 	"Introduction.desc": "语义搜索只支持 Windows 系统，需要将下载的压缩包解压出的 .cache 文件夹放在 C:\\Users\\<current user>, 然后运行 clever-search-ai-helper.exe 来启动语义引擎。语义搜索旨在作为词汇搜索的补充，在精确匹配上效果是不如词汇搜索的",
 	"Enable": "启用",

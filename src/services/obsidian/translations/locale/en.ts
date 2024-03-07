@@ -39,6 +39,7 @@ export default {
 	"Advanced.desc": "The previous settings cover most needs. For further customization, adjust the following options",
 
 	// semantic search
+	"Semantic search": "Semantic search",
 	"Introduction": "Introduction",
 	"Introduction.desc": "Semantic search is only supported on the Windows system. You need to extract the .cache folder from the downloaded archive and place it in C:\\Users\\<current user>. Then, run clever-search-ai-helper.exe to start the semantic engine. Semantic search is intended to complement lexical search and is not as effective in exact matching as lexical search.",
 	"Enable": "Enable",
