@@ -492,7 +492,7 @@ class SemanticSearchModal extends Modal {
 	private needInitSemanticEngine = false;
 	onOpen(): void {
 		this.modalEl.style.width = "50vw";
-		this.modalEl.style.height = "40vh";
+		this.modalEl.style.height = "55vh";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
 		new Setting(contentEl)
