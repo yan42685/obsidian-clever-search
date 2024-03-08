@@ -29,12 +29,11 @@ export class PluginManager {
 	}
 
 	async onLayoutReady() {
-		await getInstance(DataManager).initAsync();
-		await getInstance(OmnisearchIntegration).initAsync();
-
 		const commandRegistry = getInstance(CommandRegistry);
 		commandRegistry.addInVaultCommands();
 		commandRegistry.addDevCommands();
+		await getInstance(DataManager).initAsync();
+		await getInstance(OmnisearchIntegration).initAsync();
 	}
 
 	// should be called in CleverSearch.onunload()
