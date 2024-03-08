@@ -533,6 +533,10 @@ class SemanticSearchModal extends Modal {
 						getInstance(AssetsProvider).downloadAiHelper(),
 					),
 			);
+
+		new Setting(contentEl)
+			.setName(t("Additional Information"))
+			.setDesc(t("Additional Information.desc"));
 		// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
 		// 	const count = await this.semanticEngine.docsCount();
 		// 	if (count) {

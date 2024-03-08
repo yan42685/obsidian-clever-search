@@ -40,7 +40,7 @@ export default {
 	// semantic search
 	"Semantic search": "语义搜索",
 	"Introduction": "介绍",
-	"Introduction.desc": "语义搜索只支持 Windows 系统，需要将下载的压缩包解压出的 .cache 文件夹放在 C:\\Users\\<current user>, 然后运行 clever-search-ai-helper.exe 来启动语义引擎。语义搜索旨在作为词汇搜索的补充，在精确匹配上效果是不如词汇搜索的",
+	"Introduction.desc": "语义搜索只支持 Windows 系统。仅推荐中小型资料库使用, 如果某个仓库有超过1500万字, 初次索引可能需要几十个小时。将下载的压缩包解压出的 .cache 文件夹放在 C:\\Users\\<current user>, 然后运行 clever-search-ai-helper.exe 来启动语义引擎。语义搜索旨在作为词汇搜索的补充，在精确匹配上效果是不如词汇搜索的",
 	"Enable": "启用",
 	"Server type": "服务器类型",
 	"Server type.desc": "对于本地服务器，clever-search-ai-helper.exe 需要在后台运行; 远程服务器短期内不会实现",
@@ -48,6 +48,8 @@ export default {
 	"Utilities": "实用功能",
 	"Test connection": "测试连接",
 	"Download": "下载",
+	"Additional Information": "补充信息",
+	"Additional Information.desc": "在开启语义搜索并运行 ai-helper 的情况下，重新索引 会同时应用于词汇引擎和语义引擎；每次加载插件的时候，语义引擎会自动进行一次增量索引，之后修改文件不会更新索引以避免阻塞语义搜索。",
 
 	"Excluded files": "忽略文件",
 	Manage: "管理",

@@ -20,7 +20,7 @@
 
 ### Major
 
-- [x] Semantic search in the vault
+- [x] Semantic search in the vault (Windows only)
 - [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and precise jump to the target location

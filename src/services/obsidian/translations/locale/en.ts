@@ -41,7 +41,7 @@ export default {
 	// semantic search
 	"Semantic search": "Semantic search",
 	"Introduction": "Introduction",
-	"Introduction.desc": "Semantic search is only supported on the Windows system. You need to extract the .cache folder from the downloaded archive and place it in C:\\Users\\<current user>. Then, run clever-search-ai-helper.exe to start the semantic engine. Semantic search is intended to complement lexical search and is not as effective in exact matching as lexical search.",
+	"Introduction.desc": "Semantic search is only supported on the Windows system. It is only recommended for small and medium-sized databases. If a vault has more than 8 million words, the initial indexing may take dozens of hours. You need to extract the .cache folder from the downloaded archive and place it in C:\\Users\\<current user>. Then, run clever-search-ai-helper.exe to start the semantic engine. Semantic search is intended to complement lexical search and is not as effective in exact matching as lexical search.",
 	"Enable": "Enable",
 	"Server type": "Server type",
 	"Server type.desc": "For local server, Clever Search AI Helper needs to run in the background. For remote server, it will not be implemented in the short term.",
@@ -49,6 +49,8 @@ export default {
 	"Utilities": "Utilities",
 	"Test connection": "Test connection",
 	"Download": "Download",
+	"Additional Information": "Additional Information",
+	"Additional Information.desc": "When semantic search is turned on and ai-helper is running, Reindex will be applied to both lexical and semantic engine; each time this plugin is loaded, the semantic engine will automatically perform an incremental index, and subsequent file modifications will not update the index to avoid blocking semantic search.",
 
 
 	"Excluded files": "Excluded files",
