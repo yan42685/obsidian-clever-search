@@ -204,6 +204,14 @@ class GeneralTab extends PluginSettingTab {
 					),
 			);
 
+		new Setting(containerEl)
+			.setName(t("Reindex the vault"))
+			.addButton((button) => {
+				button.setButtonText(t("Reindex")).onClick(async () => {
+					await getInstance(DataManager).refreshAllAsync();
+				});
+			});
+
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
 		settingGroup.style.marginTop = "1.5em";
@@ -247,14 +255,6 @@ class GeneralTab extends PluginSettingTab {
 						this.setting.ui.collapseDevSettingByDefault = value;
 					}),
 			);
-
-		new Setting(devSettingContent)
-			.setName(t("Reindex the vault"))
-			.addButton((button) => {
-				button.setButtonText(t("Reindex")).onClick(async () => {
-					await getInstance(DataManager).refreshAllAsync();
-				});
-			});
 
 		new Setting(devSettingContent)
 			.setName(t("Log level"))

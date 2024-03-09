@@ -41,7 +41,7 @@ export default {
 	// semantic search
 	"Semantic search": "Semantic search",
 	"Introduction": "Introduction",
-	"Introduction.desc": "Semantic search is only supported on the Windows system. It is only recommended for small and medium-sized databases. If a vault has more than 8 million words, the initial indexing may take dozens of hours. You need to extract the .cache folder from the downloaded archive and place it in C:\\Users\\<current user>. Then, run clever-search-ai-helper.exe to start the semantic engine. Semantic search is intended to complement lexical search and is not as effective in exact matching as lexical search.",
+	"Introduction.desc": "Semantic search is only supported on the Windows system. It is only recommended for small and medium-sized vault. If a vault has more than 8 million words, the initial indexing may take dozens of hours. You need to extract the .cache folder from the downloaded archive and place it in C:\\Users\\<current user>. Then, run clever-search-ai-helper.exe to start the semantic engine. Semantic search is intended to complement lexical search and is not as effective in exact matching as lexical search.",
 	"Enable": "Enable",
 	"Server type": "Server type",
 	"Server type.desc": "For local server, Clever Search AI Helper needs to run in the background. For remote server, it will not be implemented in the short term.",
