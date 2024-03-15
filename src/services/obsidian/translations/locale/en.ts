@@ -1,4 +1,13 @@
-import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
+import { pathUtil } from "src/utils/file-util";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const electron = require("electron");
+const userDataPath = (electron.app || electron.remote.app).getPath("userData");
+
+const assetsDir = pathUtil.join(userDataPath, "clever-search");
+export const stopWordsEnTargetUrl = pathUtil.join(
+	assetsDir,
+	"stop-words-en.txt",
+);
 
 export default {
 	// notification

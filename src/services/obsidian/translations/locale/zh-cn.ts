@@ -1,4 +1,5 @@
-import { stopWordsEnTargetUrl } from "src/utils/web/assets-provider";
+import { stopWordsEnTargetUrl } from "./en";
+
 
 export default {
 	// notification

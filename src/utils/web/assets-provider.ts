@@ -28,10 +28,10 @@ const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
 // 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
 // const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 
-export const stopWordsEnTargetUrl = pathUtil.join(
-	assetsDir,
-	"stop-words-en.txt",
-);
+// export const stopWordsEnTargetUrl = pathUtil.join(
+// 	assetsDir,
+// 	"stop-words-en.txt",
+// );
 
 const jieba = "jieba_rs_wasm_bg.wasm";
 const stopWordsEn = "stop-words-en.txt";
