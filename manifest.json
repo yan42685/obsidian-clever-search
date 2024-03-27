@@ -3,7 +3,7 @@
 	"name": "Clever Search",
 	"author": "Alex Clifton",
 	"description": "Helping you quickly locate the notes in your mind in the easiest way, without the need for complex search syntax to find relevant content.",
-	"version": "0.2.6",
+	"version": "0.2.7",
 	"minAppVersion": "0.15.0",
     "fundingUrl": "https://www.buymeacoffee.com/alexclifton",
 	"isDesktopOnly": true

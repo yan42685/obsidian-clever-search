@@ -25,7 +25,8 @@ export default {
 
 	"Downloading aiHelper": "Downloading clever-search-ai-helper.zip (972 MB)...",
 	"Download success": "Successfully downloaded",
-	"Download failure": "Failed to download clever-search-ai-helper.zip",
+	"Download failure": "Failed to download clever-search-ai-helper.zip  ",
+	"Download manually": "Download manually",
 
 	// setting tab
 	"Max items count": "Max items count",
