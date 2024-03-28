@@ -226,7 +226,7 @@ export class ViewHelper {
 					this.privateApi.executeCommandById(
 						ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
 					);
-				}, 1);
+				}, 500);
 			});
 		} else {
 			logger.info("No markdown view to jump");

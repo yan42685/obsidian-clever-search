@@ -218,7 +218,7 @@ class GeneralTab extends PluginSettingTab {
 
 		const devSettingTitle = settingGroup.createDiv({
 			cls: "cs-setting-group-dev-title",
-			text: t("For Development"),
+			text: t("For development"),
 		});
 
 		// collapse by default
@@ -286,9 +286,52 @@ class GeneralTab extends PluginSettingTab {
 				}),
 			);
 
+		// new Setting(devSettingContent)
+		// 	.setName("API provider1")
+		// 	.setDesc("domain and key")
+		// 	.addText((text) =>
+		// 		text
+		// 			.setPlaceholder("api.openai.com")
+		// 			.setValue(this.setting.apiProvider1.domain)
+		// 			.onChange((domain) => {
+		// 				this.setting.apiProvider1.domain = domain;
+		// 				this.settingManager.saveSettings();
+		// 			}),
+		// 	)
+
+		// 	.addText((text) =>
+		// 		text
+		// 			.setPlaceholder("API key")
+
+		// 			.setValue(this.setting.apiProvider1.key)
+		// 			.onChange((key) => {
+		// 				this.setting.apiProvider1.key = key;
+		// 			}),
+		// 	);
+
+		// new Setting(devSettingContent)
+		// 	.setName("API provider2")
+		// 	.setDesc("description")
+		// 	.addText((text) =>
+		// 		text
+		// 			.setPlaceholder("api.openai.com")
+		// 			.setValue(this.setting.apiProvider2.domain)
+		// 			.onChange((domain) => {
+		// 				this.setting.apiProvider2.domain = domain;
+		// 			}),
+		// 	)
+		// 	.addText((text) =>
+		// 		text
+		// 			.setPlaceholder("API key")
+		// 			.setValue(this.setting.apiProvider2.key)
+		// 			.onChange((key) => {
+		// 				this.setting.apiProvider2.key = key;
+		// 			}),
+		// 	);
+
 		new Setting(devSettingContent)
-			.setName(t("Support the Project"))
-			.setDesc(t("Support the Project desc"))
+			.setName(t("Support the project"))
+			.setDesc(t("Support the project desc"))
 			.addButton((button) => {
 				button.setButtonText(t("Visit GitHub")).onClick(() => {
 					window.open(
@@ -298,48 +341,6 @@ class GeneralTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(devSettingContent)
-			.setName("API provider1")
-			.setDesc("domain and key")
-			.addText((text) =>
-				text
-					.setPlaceholder("api.openai.com")
-					.setValue(this.setting.apiProvider1.domain)
-					.onChange((domain) => {
-						this.setting.apiProvider1.domain = domain;
-						this.settingManager.saveSettings();
-					}),
-			)
-
-			.addText((text) =>
-				text
-					.setPlaceholder("API key")
-
-					.setValue(this.setting.apiProvider1.key)
-					.onChange((key) => {
-						this.setting.apiProvider1.key = key;
-					}),
-			);
-
-		new Setting(devSettingContent)
-			.setName("API provider2")
-			.setDesc("description")
-			.addText((text) =>
-				text
-					.setPlaceholder("api.openai.com")
-					.setValue(this.setting.apiProvider2.domain)
-					.onChange((domain) => {
-						this.setting.apiProvider2.domain = domain;
-					}),
-			)
-			.addText((text) =>
-				text
-					.setPlaceholder("API key")
-					.setValue(this.setting.apiProvider2.key)
-					.onChange((key) => {
-						this.setting.apiProvider2.key = key;
-					}),
-			);
 	}
 }
 
@@ -347,7 +348,7 @@ class ExcludePathModal extends Modal {
 	private settingManager = getInstance(SettingManager);
 	private setting = getInstance(OuterSetting);
 	private excludedPaths = this.setting.excludedPaths;
-	private allPaths = new Set<string>();
+	// private allPaths = new Set<string>();
 	private allFolders = new Set<string>();
 
 	private excludesEl: HTMLElement;
@@ -358,7 +359,7 @@ class ExcludePathModal extends Modal {
 		super(app);
 		const allAbstractFiles = getInstance(Vault).getAllLoadedFiles();
 		for (const aFile of allAbstractFiles) {
-			this.allPaths.add(aFile.path);
+			// this.allPaths.add(aFile.path);
 			if (aFile instanceof TFolder) {
 				this.allFolders.add(aFile.path);
 			}
@@ -371,7 +372,7 @@ class ExcludePathModal extends Modal {
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
 		new Setting(contentEl)
-			.setName(t("Follow Obsidian Excluded Files"))
+			.setName(t("Follow obsidian excluded files"))
 			.addToggle((t) =>
 				t
 					.setValue(this.setting.followObsidianExcludedFiles)
@@ -438,7 +439,7 @@ class ExcludePathModal extends Modal {
 
 	private addPath(inputPath: string) {
 		if (inputPath && !this.excludedPaths.includes(inputPath)) {
-			if (!this.allPaths.has(inputPath)) {
+			if (!getInstance(Vault).getAbstractFileByPath(inputPath)) {
 				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
 			} else {
 				this.excludedPaths.push(inputPath);

@@ -43,43 +43,19 @@ abstract class FloatingWindow {
 			this.onClose();
 			return this;
 		}
-		this.containerEl = document.body.createDiv();
-		this.frameEl = this.containerEl.createDiv();
-		this.contentEl = this.containerEl.createDiv();
+		this.containerEl = document.body.createDiv({ cls: "cs-floating-window-container" });
+		this.frameEl = this.containerEl.createDiv({ cls: "cs-floating-window-frame" });
+		this.contentEl = this.containerEl.createDiv({ cls: "cs-floating-window-content" });
 
 		this.frameEl.addEventListener("mousedown", this.handleMouseDown);
 		document.addEventListener("mousemove", this.handleMouseMove);
 		document.addEventListener("mouseup", this.handleMouseUp);
 
-		this.containerEl.addClass("cs-floating-window-container");
-		this.containerEl.style.position = "fixed";
 		// load position and other states from setting
 		this.loadContainerElStates();
-		this.containerEl.style.zIndex = "20";
-		this.containerEl.style.border = "1px solid #454545";
-		this.containerEl.style.borderRadius = "10px";
-		// avoid the frameEl overflowing so that borderRadius of containerEl is covered
-		this.containerEl.style.overflow = "hidden";
-		this.containerEl.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
 
-		this.frameEl.style.width = "100%";
-		this.frameEl.style.height = "20px";
-		this.frameEl.style.backgroundColor = "#333";
-		this.frameEl.style.cursor = "move";
-		this.frameEl.style.color = "#fff";
-		this.frameEl.style.display = "flex";
-		this.frameEl.style.alignItems = "center";
-		this.frameEl.style.justifyContent = "right";
-		this.frameEl.style.padding = "10px 0 10px 10px";
-
-		const closeButton = this.frameEl.createSpan();
-		closeButton.innerText = "✖";
-		closeButton.style.cursor = "pointer";
-		closeButton.style.fontSize = "13px";
-		closeButton.style.margin = "5px";
+		const closeButton = this.frameEl.createSpan({ text: "✖", cls: "cs-floating-window-close-button" });
 		closeButton.addEventListener("click", this.onClose);
-
-		this.contentEl.style.padding = "10px 0 10px 10px";
 
 		this.mountComponent();
 		return this;
@@ -101,7 +77,7 @@ abstract class FloatingWindow {
 
 	private handleMouseDown = (e: MouseEvent) => {
 		this.isDragging = true;
-		this.containerEl.style.opacity = "0.75";
+		this.containerEl.classList.add("cs-floating-window-dragging");
 		this.dragStartX = e.pageX - this.containerEl.offsetLeft;
 		this.dragStartY = e.pageY - this.containerEl.offsetTop;
 		e.preventDefault(); // prevents text selection during drag
@@ -116,7 +92,7 @@ abstract class FloatingWindow {
 
 	private handleMouseUp = () => {
 		this.isDragging = false;
-		this.containerEl.style.opacity = "1";
+		this.containerEl.classList.remove("cs-floating-window-dragging");
 		// remember position and other stated
 		this.saveContainerElStates();
 		getInstance(SettingManager).postSettingUpdated();

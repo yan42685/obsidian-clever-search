@@ -128,3 +128,40 @@ settings:
 	left: -20px;
 	top: 0;
 }
+
+/* ==== floating-window ====*/
+.cs-floating-window-container {
+    position: fixed;
+    z-index: 20;
+    border: 1px solid #454545;
+    border-radius: 10px;
+	/* avoid the frameEl overflowing so that borderRadius of containerEl is covered */
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.cs-floating-window-frame {
+    width: 100%;
+    height: 20px;
+    background-color: #333;
+    cursor: move;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: right;
+    padding: 10px 0 10px 10px;
+}
+
+.cs-floating-window-close-button {
+    cursor: pointer;
+    font-size: 13px;
+    margin: 5px;
+}
+
+.cs-floating-window-content {
+    padding: 10px 0 10px 10px;
+}
+
+.cs-floating-window-dragging {
+    opacity: 0.75;
+}
