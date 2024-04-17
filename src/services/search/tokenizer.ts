@@ -84,7 +84,7 @@ export class Tokenizer {
 				}
 			}
 		}
-		// logger.info(tokens.size);
-		return Array.from(tokens);
+		// discard lengthy token to avoid memory-overflow
+		return Array.from(tokens).filter(token => token.length < 40);
 	}
 }
