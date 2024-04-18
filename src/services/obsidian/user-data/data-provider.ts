@@ -106,7 +106,6 @@ export class DataProvider {
 		return (
 			this.supportedExtensions.has(FileUtil.getExtension(path)) &&
 			path.lastIndexOf("excalidraw.md") === -1 &&
-			path.lastIndexOf("ex.md") === -1 &&
 			(this.setting.followObsidianExcludedFiles
 				? this.privateApi.isNotObsidianExcludedPath(path)
 				: true) &&
