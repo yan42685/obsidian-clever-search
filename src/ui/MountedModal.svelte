@@ -227,6 +227,10 @@
 							await handleItemClick(index);
 							await handleConfirm(e);
 						}}
+						on:dblclick={async (e)=>{
+							await handleItemClick(index);
+							await handleConfirm(e);
+						}}
 					>
 						{#if item instanceof LineItem}
 							<span class="line-item">{@html item.line.text}</span
@@ -255,7 +259,7 @@
 			<div class="preview-container">
 				{#if searchType === SearchType.IN_FILE}
 					{#if currContext}
-						<p on:contextmenu={(e) => handleConfirm(e)}>
+						<p on:contextmenu={(e) => handleConfirm(e)} on:dblclick={(e) => handleConfirm(e)}>
 							{@html currContext}
 						</p>
 					{/if}
@@ -267,6 +271,10 @@
 									on:click={(event) =>
 										handleSubItemClick(index)}
 									on:contextmenu={(e) => {
+										currSubItemIndex = index;
+										handleConfirm(e);
+									}}
+									on:dblclick={(e) => {
 										currSubItemIndex = index;
 										handleConfirm(e);
 									}}

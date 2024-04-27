@@ -85,6 +85,6 @@ export class Tokenizer {
 			}
 		}
 		// discard lengthy token to avoid memory-overflow
-		return Array.from(tokens).filter(token => token.length < 40);
+		return Array.from(tokens).filter(token => token.length < 30);
 	}
 }
