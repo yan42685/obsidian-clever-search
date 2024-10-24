@@ -16,12 +16,19 @@ import { SemanticEngine } from "src/services/search/semantic-engine";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+// TODO: When DOMPurify 3.1.8 is released, remove @types/dompurify due to an unreleased PR: https://github.com/cure53/DOMPurify/pull/1006
+import DOMPurify from "dompurify";
 
 @singleton()
 export class ViewHelper {
 	private readonly app = getInstance(App);
 	private readonly privateApi = getInstance(PrivateApi);
 	private readonly setting = getInstance(OuterSetting);
+
+	// avoid XSS
+	purifyHTML(rawHtml: string): string {
+		return DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+	}
 
 	updateSubItemIndex(
 		subItems: FileSubItem[],

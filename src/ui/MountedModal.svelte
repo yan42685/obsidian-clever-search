@@ -233,7 +233,7 @@
 						}}
 					>
 						{#if item instanceof LineItem}
-							<span class="line-item">{@html item.line.text}</span
+							<span class="line-item">{@html viewHelper.purifyHTML(item.line.text)}</span
 							>
 						{:else if item instanceof FileItem}
 							<span class="file-item">
@@ -260,7 +260,7 @@
 				{#if searchType === SearchType.IN_FILE}
 					{#if currContext}
 						<p on:contextmenu={(e) => handleConfirm(e)} on:dblclick={(e) => handleConfirm(e)}>
-							{@html currContext}
+							{@html viewHelper.purifyHTML(currContext)}
 						</p>
 					{/if}
 				{:else if searchType === SearchType.IN_VAULT}
@@ -282,7 +282,7 @@
 									class:selected={index === currSubItemIndex}
 									class="file-sub-item"
 								>
-									{@html subItem.text}
+									{@html viewHelper.purifyHTML(subItem.text)}
 								</button>
 							{/each}
 						</ul>
