@@ -11,7 +11,7 @@ export class OuterSetting {
 	logLevel: LogLevel;
 	isCaseSensitive: boolean;
 	isPrefixMatch: boolean;
-	isCharacterFuzzyAllowed: boolean;
+	isFuzzy: boolean;
 	enableStopWordsEn: boolean;
 	enableChinesePatch: boolean;
 	enableStopWordsZh: boolean;
@@ -30,7 +30,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	logLevel: isDevEnvironment ? "trace" : "info",
 	isCaseSensitive: false,
 	isPrefixMatch: true,
-	isCharacterFuzzyAllowed: true,
+	isFuzzy: true,
 	enableStopWordsEn: true,
 	// TODO: 繁体中文
 	enableChinesePatch: isChineseUser ? true : false,

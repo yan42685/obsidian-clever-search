@@ -16,7 +16,6 @@ import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { OuterSetting, innerSetting } from "../../globals/plugin-setting";
-import { Query } from "./query";
 import { Tokenizer } from "./tokenizer";
 import { TruncateOption, type TruncateType } from "./truncate-option";
 
@@ -107,14 +106,12 @@ export class LexicalEngine {
 	 */
 	@monitorDecorator
 	async searchFiles(queryText: string): Promise<MatchedFile[]> {
-		// const combinationMode = this.tokenizer.isLargeCharset(queryText) ? "or" : "and";
-		const combinationMode = "and";
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
 		const minisearchResult = this.filesIndex.search(
 			query.text,
-			this.option.getFileSearchOption(combinationMode),
+			this.option.getFileSearchOption(query.userOption),
 		);
 		logger.debug(`maxFileItems: ${this.outerSetting.ui.maxItemResults}`);
 		return minisearchResult
@@ -271,18 +268,18 @@ class LexicalOptions {
 	 * - "and": Requires any single token to appear in the fields.
 	 * - "or": Requires all tokens to appear across the fields.
 	 */
-	getFileSearchOption(combinationMode: "and" | "or"): SearchOptions {
+	getFileSearchOption(userOption: UserSearchOption): SearchOptions {
 		return {
 			tokenize: this.tokenizeSearch,
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
 			prefix: (term) =>
-				this.outerSetting.isPrefixMatch
+				userOption.isPrefixMatch
 					? term.length >= this.inSetting.minTermLengthForPrefixSearch
 					: false,
 			// TODO: fuzziness based on language
 			fuzzy: (term) =>
-				this.outerSetting.isCharacterFuzzyAllowed
+				userOption.isFuzzy
 					? term.length <= 3
 						? 0
 						: this.inSetting.fuzzyProportion
@@ -295,7 +292,7 @@ class LexicalOptions {
 				tags: this.inSetting.weightTagText,
 				headings: this.inSetting.weightHeading,
 			} as DocumentWeight,
-			combineWith: combinationMode,
+			combineWith: "and",
 		};
 	}
 
@@ -312,6 +309,8 @@ class LexicalOptions {
 }
 
 class LinesMatcher {
+	private outerSetting = getInstance(OuterSetting);
+	private userOption: UserSearchOption;
 	private lines: Line[];
 	private matchedTerms: string[];
 	private maxParsedLines: number;
@@ -326,11 +325,14 @@ class LinesMatcher {
 		matchedTerms: string[],
 		maxParsedLines: number,
 	) {
+		const query = new Query(queryText);
+
+		this.userOption = query.userOption;
 		this.lines = lines;
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.maxParsedLines = maxParsedLines;
 		// TODO: use token rather than chars
-		const truncateLimit = TruncateOption.forType(truncateType, queryText);
+		const truncateLimit = TruncateOption.forType(truncateType, query.text);
 		this.preChars = truncateLimit.maxPreChars;
 		this.postChars = truncateLimit.maxPostChars;
 
@@ -412,7 +414,8 @@ class LinesMatcher {
 
 		// map each matchedTerm to a global regex
 		const globalRegexes = this.matchedTerms.map(
-			(term) => new RegExp(term, "gi"),
+			// (term) => new RegExp(term, "gi"),
+			(term) => this.generateRegExpForTerm(term),
 		);
 
 		const topKLinesScores = new PriorityQueue<number>(
@@ -465,7 +468,8 @@ class LinesMatcher {
 	private highlightLines(lines: Line[]): MatchedLine[] {
 		const termRegexMap = new Map<string, RegExp>();
 		for (const term of this.matchedTerms) {
-			termRegexMap.set(term, new RegExp(term, "gi"));
+			// termRegexMap.set(term, new RegExp(term, "gi"));
+			termRegexMap.set(term, this.generateRegExpForTerm(term));
 		}
 		return lines.map((line) => {
 			const positions = new Set<number>();
@@ -513,14 +517,78 @@ class LinesMatcher {
 			};
 		});
 	}
+
+	private generateRegExpForTerm(term: string): RegExp {
+		const flags = this.outerSetting.isCaseSensitive ? "g" : "gi";
+		const pattern = this.userOption.isPrefixMatch
+			? term
+			: `${term}(?![a-zA-Z])`;
+		return new RegExp(pattern, flags);
+	}
 }
 
 class UserSearchOption {
-	public readonly isPrefixMatch: boolean;
-	public readonly isCharacterFuzzyAllowed: boolean;
+	private outerSetting = getInstance(OuterSetting);
+	public isPrefixMatch: boolean;
+	public isFuzzy: boolean;
 
-	constructor(isPrefixMatch: boolean, isCharacterFuzzyAllowed: boolean) {
-		this.isPrefixMatch = isPrefixMatch;
-		this.isCharacterFuzzyAllowed = isCharacterFuzzyAllowed;
+	constructor() {
+		this.isPrefixMatch = this.outerSetting.isPrefixMatch;
+		this.isFuzzy = this.outerSetting.isFuzzy;
+	}
+}
+
+class Query {
+	private static readonly registeredCommands = new Set([
+		"ap", // allow prefix matching
+		"np", // no prefix matching
+		"af", // allow fuzziness
+		"nf", // no fuzziness
+	]);
+
+	// text to be searched
+	public text: string;
+	public userOption: UserSearchOption = new UserSearchOption();
+
+	constructor(queryText: string) {
+		this.parse(queryText);
+	}
+
+	private parse(queryText: string): void {
+		let commandPart = "";
+
+		// parse commandPart
+		if (queryText.startsWith("/")) {
+			const spaceIndex = queryText.indexOf(" ");
+			if (spaceIndex !== -1) {
+				commandPart = queryText.slice(0, spaceIndex);
+				this.text = queryText.slice(spaceIndex + 1);
+			} else {
+				commandPart = queryText; // no space found, treat the whole thing as command
+				this.text = "";
+			}
+
+			const commands = commandPart.split("/").filter((part) => part); // skip empty parts
+
+			for (const command of commands) {
+				if (command === "ap") {
+					this.userOption.isPrefixMatch = true;
+				} else if (command === "np") {
+					this.userOption.isPrefixMatch = false;
+				} else if (command === "af") {
+					this.userOption.isFuzzy = true;
+				} else if (command === "nf") {
+					this.userOption.isFuzzy = false;
+				} else {
+					// if an unregistered command is encountered, stop further parsing and reset the options
+					this.userOption = new UserSearchOption();
+					logger.info("invalid command: /" + command);
+					break;
+				}
+			}
+		} else {
+			// no leading '/', treat entire queryText as search text
+			this.text = queryText;
+		}
 	}
 }

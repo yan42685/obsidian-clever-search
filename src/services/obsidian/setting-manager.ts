@@ -152,8 +152,8 @@ class GeneralTab extends PluginSettingTab {
 			.setName(t("Character fuzzy allowed"))
 			.addToggle((t) =>
 				t
-					.setValue(this.setting.isCharacterFuzzyAllowed)
-					.onChange((v) => (this.setting.isCharacterFuzzyAllowed = v)),
+					.setValue(this.setting.isFuzzy)
+					.onChange((v) => (this.setting.isFuzzy = v)),
 			);
 
 		new Setting(containerEl)

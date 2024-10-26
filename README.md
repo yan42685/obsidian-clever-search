@@ -32,7 +32,16 @@
 
 - [x] Search from selection
 - [x] Automatically copy result text on selection
-- [ ] Remember last query text
+- [x] Search commands (in-vault lexical search only)
+  <details><summary>Details</summary>
+  You can temporarily change the search options by entering the following commands in the search box. These commands take priority over the settings in the settings tab. The commands must appear at the beginning of the input and should be separated from the search text by a space. You can combine the commands in any way, for example, "/ap/np/nf something". The commands that appear later will override previous commands of the same type; for instance, /np will override /ap.
+
+      /ap   allow prefix matching
+      /np   no prefix matching
+      /af   allow fuzziness
+      /nf   no fuzziness
+  </details>
+
 
 ### Integrate with other plugins
 
