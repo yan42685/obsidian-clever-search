@@ -9,6 +9,7 @@ import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 import { CommandRegistry } from "./command-registry";
 import { SettingManager } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
+import { RecentFileManager } from "./user-data/recent-file-manager";
 import { ViewRegistry } from "./view-registry";
 
 @singleton()
@@ -18,6 +19,7 @@ export class PluginManager {
 	async onload() {
 		await getInstance(SettingManager).initAsync();
 		getInstance(ViewRegistry).init();
+		getInstance(RecentFileManager).init();
 
 		getInstance(CommandRegistry).addCommandsWithoutDependency();
 
