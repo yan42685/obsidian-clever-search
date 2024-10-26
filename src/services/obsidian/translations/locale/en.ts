@@ -36,6 +36,10 @@ export default {
 	"Floating window for in-file search": "Floating window for in-file search",
 	"Floating window for in-file search desc": "Execute 'in-file search' command again will close the existing floating window. Disable this option to use classic modal UI",
 
+	"Case sensitive": "Case sensitive",
+	"Prefix match":"Prefix match",
+	"Character fuzzy allowed": "Character fuzzy allowed",
+
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,
 	"Chinese patch": "Chinese patch",

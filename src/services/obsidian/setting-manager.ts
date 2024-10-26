@@ -134,6 +134,28 @@ class GeneralTab extends PluginSettingTab {
 					),
 			);
 
+		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>
+			t.setValue(this.setting.isCaseSensitive).onChange((v) => {
+				this.setting.isCaseSensitive = v;
+				this.settingManager.shouldReload = true;
+			}),
+		);
+		new Setting(containerEl)
+			.setName(t("Prefix match"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.isPrefixMatch)
+					.onChange((v) => (this.setting.isPrefixMatch = v)),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Character fuzzy allowed"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.isCharacterFuzzyAllowed)
+					.onChange((v) => (this.setting.isCharacterFuzzyAllowed = v)),
+			);
+
 		new Setting(containerEl)
 			.setName(t("English word blacklist"))
 			.setDesc(t("English word blacklist desc"))

@@ -25,7 +25,7 @@ import { TruncateOption, type TruncateType } from "./truncate-option";
 @singleton()
 export class LexicalEngine {
 	private option = getInstance(LexicalOptions);
-	private pluginSetting = getInstance(OuterSetting);
+	private outerSetting = getInstance(OuterSetting);
 	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private tokenizer = getInstance(Tokenizer);
@@ -90,7 +90,7 @@ export class LexicalEngine {
 			selector: (item) => item.text,
 		});
 		return (await fzf.find(queryText))
-			.slice(0, this.pluginSetting.ui.maxItemResults)
+			.slice(0, this.outerSetting.ui.maxItemResults)
 			.map((entry: FzfResultItem<Line>) => {
 				return {
 					text: entry.item.text,
@@ -116,9 +116,9 @@ export class LexicalEngine {
 			query.text,
 			this.option.getFileSearchOption(combinationMode),
 		);
-		logger.debug(`maxFileItems: ${this.pluginSetting.ui.maxItemResults}`);
+		logger.debug(`maxFileItems: ${this.outerSetting.ui.maxItemResults}`);
 		return minisearchResult
-			.slice(0, this.pluginSetting.ui.maxItemResults)
+			.slice(0, this.outerSetting.ui.maxItemResults)
 			.map((item) => {
 				return {
 					path: item.id,
@@ -233,6 +233,7 @@ export class LexicalEngine {
 @singleton()
 class LexicalOptions {
 	// private readonly setting: SearchSetting = getInstance(OuterSetting).search;
+	private readonly outerSetting = getInstance(OuterSetting);
 	private readonly inSetting = innerSetting.search;
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly tokenizeIndex = (text: string) =>
@@ -254,6 +255,9 @@ class LexicalOptions {
 			"content",
 		] as DocumentFields,
 		storeFields: ["tags"] as DocumentFields,
+		// will be applied when indexing and searching
+		processTerm: (term) =>
+			this.outerSetting.isCaseSensitive ? term : term.toLocaleLowerCase(),
 	};
 	readonly lineIndexOption: Options = {
 		tokenize: this.tokenizeIndex,
@@ -273,10 +277,16 @@ class LexicalOptions {
 			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
 			// at the last index of the query terms
 			prefix: (term) =>
-				term.length >= this.inSetting.minTermLengthForPrefixSearch,
+				this.outerSetting.isPrefixMatch
+					? term.length >= this.inSetting.minTermLengthForPrefixSearch
+					: false,
 			// TODO: fuzziness based on language
 			fuzzy: (term) =>
-				term.length <= 3 ? 0 : this.inSetting.fuzzyProportion,
+				this.outerSetting.isCharacterFuzzyAllowed
+					? term.length <= 3
+						? 0
+						: this.inSetting.fuzzyProportion
+					: false,
 			// if `fields` are omitted, all fields will be search with weight 1
 			boost: {
 				basename: this.inSetting.weightFilename,
@@ -502,5 +512,15 @@ class LinesMatcher {
 				positions: positions,
 			};
 		});
+	}
+}
+
+class UserSearchOption {
+	public readonly isPrefixMatch: boolean;
+	public readonly isCharacterFuzzyAllowed: boolean;
+
+	constructor(isPrefixMatch: boolean, isCharacterFuzzyAllowed: boolean) {
+		this.isPrefixMatch = isPrefixMatch;
+		this.isCharacterFuzzyAllowed = isCharacterFuzzyAllowed;
 	}
 }

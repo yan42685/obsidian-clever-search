@@ -9,6 +9,9 @@ export class OuterSetting {
 	followObsidianExcludedFiles: boolean;
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
+	isCaseSensitive: boolean;
+	isPrefixMatch: boolean;
+	isCharacterFuzzyAllowed: boolean;
 	enableStopWordsEn: boolean;
 	enableChinesePatch: boolean;
 	enableStopWordsZh: boolean;
@@ -25,6 +28,9 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
+	isCaseSensitive: false,
+	isPrefixMatch: true,
+	isCharacterFuzzyAllowed: true,
 	enableStopWordsEn: true,
 	// TODO: 繁体中文
 	enableChinesePatch: isChineseUser ? true : false,
