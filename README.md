@@ -32,8 +32,10 @@
 
 - [x] Search from selection
 - [x] Automatically copy result text on selection
-- [x] Search commands (In-vault lexical search only)<br>
-  You can temporarily change the search options by entering the following commands in the search bar. These commands take priority over the settings in the settings tab. The commands must appear at the beginning of the input and should be separated from the search text by a space. You can combine the commands in any way, for example, "/ap/np/nf something". The commands that appear later will override previous commands of the same type; for instance, /np will override /ap.
+- [x] Search commands (In-vault lexical search only)<br><br>
+  You can temporarily change search options using commands in the search bar. These commands take priority over settings in the settings tab and must be at the beginning or end of the input, separated from the search text by a space. <br><br>
+
+  Commands cannot be placed in the middle of the search text. You can combine commands, e.g., `/ap/nf something /np`. Later commands override earlier ones of the same type (e.g., `/np` overrides `/ap`).
 
       /ap   allow prefix matching
       /np   no prefix matching

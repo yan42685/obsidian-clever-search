@@ -546,7 +546,6 @@ class Query {
 		"nf", // no fuzziness
 	]);
 
-	// text to be searched
 	public text: string;
 	public userOption: UserSearchOption = new UserSearchOption();
 
@@ -555,40 +554,42 @@ class Query {
 	}
 
 	private parse(queryText: string): void {
-		let commandPart = "";
+		const parts = queryText.split(" ");
+		const commands = [];
 
-		// parse commandPart
-		if (queryText.startsWith("/")) {
-			const spaceIndex = queryText.indexOf(" ");
-			if (spaceIndex !== -1) {
-				commandPart = queryText.slice(0, spaceIndex);
-				this.text = queryText.slice(spaceIndex + 1);
+		// check if the first part is a command
+		if (parts[0].startsWith("/")) {
+			const firstPart = parts.shift() as string; // remove the first part 
+			commands.push(...firstPart.split("/"));
+		}
+
+		// check if the last part is a command
+		if (parts.length > 0 && parts[parts.length - 1].startsWith("/")) {
+			const lastPart = parts.pop() as string; // remove the last part
+			commands.push(...lastPart.split("/"));
+		}
+
+		// remaining parts are the search text
+		this.text = parts.join(" ");
+
+		for (const command of commands) {
+			if (command === "") {
+				continue;
+			}
+			if (command === "ap") {
+				this.userOption.isPrefixMatch = true;
+			} else if (command === "np") {
+				this.userOption.isPrefixMatch = false;
+			} else if (command === "af") {
+				this.userOption.isFuzzy = true;
+			} else if (command === "nf") {
+				this.userOption.isFuzzy = false;
 			} else {
-				commandPart = queryText; // no space found, treat the whole thing as command
-				this.text = "";
+				// reset options if an unregistered command is encountered
+				this.userOption = new UserSearchOption();
+				logger.info("invalid command: /" + command);
+				break;
 			}
-
-			const commands = commandPart.split("/").filter((part) => part); // skip empty parts
-
-			for (const command of commands) {
-				if (command === "ap") {
-					this.userOption.isPrefixMatch = true;
-				} else if (command === "np") {
-					this.userOption.isPrefixMatch = false;
-				} else if (command === "af") {
-					this.userOption.isFuzzy = true;
-				} else if (command === "nf") {
-					this.userOption.isFuzzy = false;
-				} else {
-					// if an unregistered command is encountered, stop further parsing and reset the options
-					this.userOption = new UserSearchOption();
-					logger.info("invalid command: /" + command);
-					break;
-				}
-			}
-		} else {
-			// no leading '/', treat entire queryText as search text
-			this.text = queryText;
 		}
 	}
 }
