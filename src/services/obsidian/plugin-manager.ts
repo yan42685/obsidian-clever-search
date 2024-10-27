@@ -1,10 +1,11 @@
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { FloatingWindowManager } from "src/ui/floating-window";
+import { logger } from "src/utils/logger";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
-import { getInstance } from "../../utils/my-lib";
+import { getInstance, isDevEnvironment } from "../../utils/my-lib";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 import { CommandRegistry } from "./command-registry";
 import { SettingManager } from "./setting-manager";
@@ -19,7 +20,10 @@ export class PluginManager {
 	async onload() {
 		await getInstance(SettingManager).initAsync();
 		getInstance(ViewRegistry).init();
-		getInstance(RecentFileManager).init();
+		if (isDevEnvironment) {
+			logger.warn("仅在开发模式开启RecentFileManager")
+			getInstance(RecentFileManager).init();
+		}
 
 		getInstance(CommandRegistry).addCommandsWithoutDependency();
 
