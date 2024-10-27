@@ -1,6 +1,6 @@
 import { App, MarkdownView, WorkspaceLeaf } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
-import CleverSearch from "src/main";
+import type CleverSearch from "src/main";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { debounce } from "throttle-debounce";
