@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { debounce } from "obsidian";
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
@@ -14,7 +15,6 @@
 	import { logger } from "src/utils/logger";
 	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
-	import { debounce } from "throttle-debounce";
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
@@ -84,7 +84,7 @@
 	}
 
 	// handle input changes
-	const handleInputDebounced = debounce(100, () => handleInputAsync());
+	const handleInputDebounced = debounce(() => handleInputAsync(), 100, true);
 
 	async function handleInputAsync() {
 		if (cachedResult.has(queryText)) {
@@ -217,10 +217,10 @@
 					<button
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
-						on:click={(event) => {
-							handleItemClick(index);
+						on:click={async (e) => {
+							await handleItemClick(index);
 							if (uiType === "floatingWindow") {
-								handleConfirm(null);
+								await handleConfirm(e);
 							}
 						}}
 						on:contextmenu={async (e) => {

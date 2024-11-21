@@ -69,7 +69,7 @@ export default {
 
 	"Excluded files": "Excluded files",
 	Manage: "Manage",
-	"Follow Obsidian Excluded Files": "Follow Obsidian Excluded Files",
+	"Follow obsidian excluded files": "Follow obsidian excluded files",
 	"Enter path...": "Enter path...",
 	Add: "Add",
 
@@ -81,7 +81,7 @@ export default {
 		"Extensions should be separated by a space or a newline character. Please do not include binary filetypes like 'pdf', 'jpg', 'mp4', etc, that can't be opened with notepad. Including them might cause indexing issues. Additionally, the indexing and searching of HTML files may be slower because they require conversion to clean Markdown format first. Furthermore, due to the extremely limited API, it seems impossible to automatically scroll to specific locations within HTML files.",
 
 	// for development
-	"For Development": "For Development",
+	"For development": "For development",
 	"Collapse development setting by default":
 		"Collapse development setting by default",
 	"Reindex the vault": "Reindex the vault",
@@ -91,8 +91,8 @@ export default {
 	"Reset floating window position desc": "In case the window is moved outside the visible area",
 	"Reset position": "Reset position",
 
-	"Support the Project": "Support the Project",
-	"Support the Project desc":
+	"Support the project": "Support the project",
+	"Support the project desc":
 		"Enjoying this plugin? Show your support with a star on GitHub!",
 	"Visit GitHub": "Visit GitHub",
 };
