@@ -116,7 +116,7 @@
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
 		if (uiType === "floatingWindow") {
-			handleConfirm(null);
+			handleConfirm(null, false);
 		}
 	}
 
@@ -124,7 +124,7 @@
 	async function handlePrevItem() {
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 		if (uiType === "floatingWindow") {
-			handleConfirm(null);
+			handleConfirm(null, false);
 		}
 	}
 
@@ -148,16 +148,19 @@
 		);
 	}
 
-	async function handleConfirm(event: Event | null) {
+	async function handleConfirm(event: Event | null, inBackground: boolean) {
 		event?.preventDefault();
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
-			onConfirmExternal,
+			inBackground ? () => {} : onConfirmExternal,
 			searchResult.sourcePath,
 			searchType,
 			selectedItem,
 			currSubItemIndex,
 		);
+	}
+	async function handleConfirmInBackground() {
+		handleConfirm(null, true);
 	}
 
 	function handleSwitchLexicalSemanticMode() {
@@ -191,6 +194,7 @@
 		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+		listenEvent(EventEnum.CONFIRM_ITEM_IN_BACKGROUND, handleConfirmInBackground);
 		listenEvent(
 			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
 			handleSwitchLexicalSemanticMode,
@@ -220,16 +224,16 @@
 						on:click={(event) => {
 							handleItemClick(index);
 							if (uiType === "floatingWindow") {
-								handleConfirm(null);
+								handleConfirm(null, false);
 							}
 						}}
 						on:contextmenu={async (e) => {
 							await handleItemClick(index);
-							await handleConfirm(e);
+							await handleConfirm(e, e.ctrlKey);
 						}}
 						on:dblclick={async (e)=>{
 							await handleItemClick(index);
-							await handleConfirm(e);
+							await handleConfirm(e, e.ctrlKey);
 						}}
 					>
 						{#if item instanceof LineItem}
@@ -259,7 +263,7 @@
 			<div class="preview-container">
 				{#if searchType === SearchType.IN_FILE}
 					{#if currContext}
-						<p on:contextmenu={(e) => handleConfirm(e)} on:dblclick={(e) => handleConfirm(e)}>
+						<p on:contextmenu={(e) => handleConfirm(e, e.ctrlKey)} on:dblclick={(e) => handleConfirm(e, e.ctrlKey)}>
 							{@html viewHelper.purifyHTML(currContext)}
 						</p>
 					{/if}
@@ -272,11 +276,11 @@
 										handleSubItemClick(index)}
 									on:contextmenu={(e) => {
 										currSubItemIndex = index;
-										handleConfirm(e);
+										handleConfirm(e, e.ctrlKey);
 									}}
 									on:dblclick={(e) => {
 										currSubItemIndex = index;
-										handleConfirm(e);
+										handleConfirm(e, e.ctrlKey);
 									}}
 									bind:this={subItem.element}
 									class:selected={index === currSubItemIndex}

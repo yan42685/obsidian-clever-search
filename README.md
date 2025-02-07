@@ -63,7 +63,8 @@
 | Modal    | Previous item                                                      | `Ctrl-K`                 |
 | Modal    | Next subItem (in-vault)                                            | `Ctrl-N`                 |
 | Modal    | Previous subItem                                                   | `Ctrl-P`                 |
-| Modal    | Confirm item                                                       | `Enter` or `Right Click` |
+| Modal    | Confirm item                                                       | `Enter` / `Right Click` / `Double Click` |
+| Modal | Confirm item in the background | `Ctrl` + `Enter` / `Right Click` / `Double Click` |
 | Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
 | Modal    | Insert file link                                                    | `Alt-I`                 |
 | Obsidian | Search in vault semantically                                       | undefined                |

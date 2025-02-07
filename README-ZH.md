@@ -62,7 +62,8 @@
 | 模态框   | 上一项           | `Ctrl-K`                  |
 | 模态框    | 下一子项 (全库搜索)          | `Ctrl-N`                 |
 | 模态框    | 上一子项          | `Ctrl-P`                 |
-| 模态框   | 确认项             | `Enter` 或 `右键点击`    |
+| 模态框    | 确认项                                                       | `Enter` / `Right Click` / `Double Click` |
+| 模态框 | 在后台确认项 | `Ctrl` + `Enter` / `Right Click` / `Double Click` |
 | 模态框    | 切换语义 / 词汇搜索          | `Ctrl-S`                 |
 | 模态框    | 插入文件链接                                                    | `Alt-I`                 |
 | Obsidian | 在资料库搜索 (语义)         | 未定义                    |
