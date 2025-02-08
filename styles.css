@@ -113,7 +113,7 @@ settings:
 	filter: none !important;
 }
 
-/* ========== For Setting Tab =======*/
+/* ========== For setting tab =======*/
 /* 定义设置组标题的样式 */
 .cs-setting-group-dev-title {
 	position: relative;
@@ -127,4 +127,64 @@ settings:
 	position: absolute;
 	left: -20px;
 	top: 0;
+}
+
+/* ======== For light theme ======== */
+.theme-light /* 亮色模式 */ {
+    --background-center: #FFFFFF; /* 按钮主体背景色 */
+    --background-others: #F6F6F6; /* 整体背景色 */
+    --background-select: #EFF4FF; /* 被选中时的背景色 */
+}
+
+/* 设置整体背景色 */
+.theme-light .cs-modal,
+.theme-light .cs-floating-window-container {
+    background-color: var(--background-others) !important;
+}
+
+/* 设置搜索框背景色 */
+.theme-light .cs-modal .search-bar input {
+    background-color: var(--background-center) !important;
+}
+
+/* 当按钮没有被选中时 */
+/* 设置按钮背景色 */
+.theme-light .cs-modal button {
+    background-color: var(--background-center) !important;
+}
+/* 设置关键词高亮样式 */
+.theme-light .search-container mark {
+    padding-left: 0;
+    padding-right: 0;
+
+    background-color: transparent !important;
+    color: var(--text-accent) !important;
+
+    font-weight: bold !important;
+}
+
+
+/* 当按钮被选中时 */
+/* 设置按钮背景色，并加粗字体 */
+.theme-light .cs-modal button.selected {
+    background-color: var(--background-select) !important;
+    font-weight: bold !important;
+}
+/* 设置关键词高亮样式 */
+.theme-light .search-container button.selected mark {
+    padding-left: 0;
+    padding-right: 0;
+
+    background-color: transparent !important;
+    color: var(--text-accent) !important;
+
+    font-weight: bolder !important;
+}
+
+/* 取消其它背景色 */
+.theme-light .cs-modal .right-pane {
+    background-color: unset !important;
+}
+.theme-light .cs-modal .right-pane .preview-container ul button.file-sub-item {
+    background-color: unset;
 }
