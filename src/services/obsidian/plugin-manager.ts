@@ -1,14 +1,16 @@
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { FloatingWindowManager } from "src/ui/floating-window";
+import { logger } from "src/utils/logger";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
 import { singleton } from "tsyringe";
-import { getInstance } from "../../utils/my-lib";
+import { getInstance, isDevEnvironment } from "../../utils/my-lib";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 import { CommandRegistry } from "./command-registry";
 import { SettingManager } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
+import { RecentFileManager } from "./user-data/recent-file-manager";
 import { ViewRegistry } from "./view-registry";
 
 @singleton()
@@ -18,6 +20,10 @@ export class PluginManager {
 	async onload() {
 		await getInstance(SettingManager).initAsync();
 		getInstance(ViewRegistry).init();
+		if (isDevEnvironment) {
+			logger.warn("仅在开发模式开启RecentFileManager")
+			getInstance(RecentFileManager).init();
+		}
 
 		getInstance(CommandRegistry).addCommandsWithoutDependency();
 
@@ -29,12 +35,11 @@ export class PluginManager {
 	}
 
 	async onLayoutReady() {
-		await getInstance(DataManager).initAsync();
-		await getInstance(OmnisearchIntegration).initAsync();
-
 		const commandRegistry = getInstance(CommandRegistry);
 		commandRegistry.addInVaultCommands();
 		commandRegistry.addDevCommands();
+		await getInstance(DataManager).initAsync();
+		await getInstance(OmnisearchIntegration).initAsync();
 	}
 
 	// should be called in CleverSearch.onunload()

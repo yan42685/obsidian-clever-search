@@ -226,9 +226,11 @@ export class DataManager {
 		logger.trace(`docs to add: ${docsToAdd.length}`);
 		await this.deleteDocuments(docsToDelete, isSemantic);
 		await this.addDocuments(docsToAdd, isSemantic);
+		await this.saveDocRefs(Array.from(currFiles.values()), isSemantic);
+	}
 
-		// update the lexical refs in the database
-		const updatedRefs = Array.from(currFiles.values()).map((file) => ({
+	private async saveDocRefs(files: TFile[], isSemantic: boolean) {
+		const updatedRefs = files.map((file) => ({
 			path: file.path,
 			updateTime: file.stat.mtime,
 		}));
@@ -256,6 +258,7 @@ export class DataManager {
 					prevNotice = new MyNotice(t("Semantic init time"), 0);
 				}
 				const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+				await this.saveDocRefs(filesToIndex, true);
 				const documents =
 					await this.dataProvider.generateAllIndexedDocuments(
 						filesToIndex,
@@ -264,7 +267,7 @@ export class DataManager {
 				if (prevNotice) {
 					prevNotice.hide();
 				}
-				new MyNotice(t("Semantic init finished"), 5000);
+				new MyNotice(t("Semantic init finished"), 0);
 				this.isSemanticEngineUpToDate = true;
 			}
 			if (!this.isSemanticEngineUpToDate) {

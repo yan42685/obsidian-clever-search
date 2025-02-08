@@ -20,10 +20,10 @@
 
 ### Major
 
-- [x] Semantic search in the vault
+- [x] Semantic search in the vault (Windows only)
 - [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
-- [x] Realtime highlighting and Precise jump to the target location
+- [x] Realtime highlighting and precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
 - [ ] AutoCompletion
 - [ ] Persistent search history
@@ -32,7 +32,16 @@
 
 - [x] Search from selection
 - [x] Automatically copy result text on selection
-- [ ] Remember last query text
+- [x] Search commands (In-vault lexical search only)<br><br>
+  You can temporarily change search options using commands in the search bar. These commands take priority over settings in the settings tab and must be at the beginning or end of the input, separated from the search text by a space. 
+
+  Commands cannot be placed in the middle of the search text. You can combine commands, e.g., `/ap/nf something /np`. Later commands override earlier ones of the same type (e.g., `/np` overrides `/ap`).
+
+      /ap   allow prefix matching
+      /np   no prefix matching
+      /af   allow fuzziness
+      /nf   no fuzziness
+
 
 ### Integrate with other plugins
 
@@ -54,12 +63,13 @@
 | Modal    | Previous item                                                      | `Ctrl-K`                 |
 | Modal    | Next subItem (in-vault)                                            | `Ctrl-N`                 |
 | Modal    | Previous subItem                                                   | `Ctrl-P`                 |
-| Modal    | Confirm item                                                       | `Enter` or `Right Click` |
+| Modal    | Confirm item                                                       | `Enter` / `Right Click` / `Double Click` |
+| Modal | Confirm item in the background | `Ctrl` + `Enter` / `Right Click` / `Double Click` |
 | Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
 | Modal    | Insert file link                                                    | `Alt-I`                 |
 | Obsidian | Search in vault semantically                                       | undefined                |
 | Obsidian | Search in vault lexically                                          | undefined                |
-| Obsidian | Search in File                                                     | undefined                |
+| Obsidian | Search in file                                                     | undefined                |
 | Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined                |
 | Obsidian | Toggle privacy mode                                                | undefined                |
 
@@ -87,3 +97,5 @@ In compliance with the requirements of the Obsidian developer policy, this notic
 If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
 
 [![image](assets/images/buymeacoffee.png)](https://www.buymeacoffee.com/AlexClifton)
+
+> Special thanks to @Moyf for the generous contribution to this project.

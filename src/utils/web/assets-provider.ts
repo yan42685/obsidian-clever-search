@@ -1,3 +1,4 @@
+import { Notice } from "obsidian";
 import { OuterSetting } from "src/globals/plugin-setting";
 import { MyNotice } from "src/services/obsidian/transformed-api";
 import { t } from "src/services/obsidian/translations/locale-helper";
@@ -28,10 +29,10 @@ const tiktokenTargetUrl = pathUtil.join(assetsDir, "tiktoken_bg.wasm");
 // 	unpkgUrl + "jieba-wasm@0.0.2/pkg/web/jieba_rs_wasm_bg.wasm";
 // const jiebaTargetUrl = pathUtil.join(assetsDir, "jieba_rs_wasm_bg.wasm");
 
-export const stopWordsEnTargetUrl = pathUtil.join(
-	assetsDir,
-	"stop-words-en.txt",
-);
+// export const stopWordsEnTargetUrl = pathUtil.join(
+// 	assetsDir,
+// 	"stop-words-en.txt",
+// );
 
 const jieba = "jieba_rs_wasm_bg.wasm";
 const stopWordsEn = "stop-words-en.txt";
@@ -63,7 +64,7 @@ export class AssetsProvider {
 	}
 
 	async downloadAiHelper() {
-		const notice = new MyNotice(t("Downloading aiHelper"));
+		const downloadingNotice = new MyNotice(t("Downloading aiHelper"));
 		try {
 			await this.downloadFile(
 				this.targetPath(aiHelper),
@@ -78,9 +79,19 @@ export class AssetsProvider {
 			shell.openPath(require("os").userInfo().homedir);
 		} catch (e) {
 			logger.error(e);
-			new MyNotice(t("Download failure"));
+			const failureInfo = document.createDocumentFragment();
+			const textNode: Text = document.createTextNode(t("Download failure"));
+			const button: HTMLButtonElement = document.createElement("button");
+			button.textContent = t("Download manually");
+			button.onclick = () =>
+				window.open(
+					"https://bitbucket.org/alexclifton37/shared-assets/raw/master/clever-search-ai-helper.zip",
+				);
+			failureInfo.appendChild(textNode);
+			failureInfo.appendChild(button);
+			new Notice(failureInfo, 0);
 		} finally {
-			notice.hide();
+			downloadingNotice.hide();
 		}
 	}
 

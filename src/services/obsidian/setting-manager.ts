@@ -134,6 +134,28 @@ class GeneralTab extends PluginSettingTab {
 					),
 			);
 
+		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>
+			t.setValue(this.setting.isCaseSensitive).onChange((v) => {
+				this.setting.isCaseSensitive = v;
+				this.settingManager.shouldReload = true;
+			}),
+		);
+		new Setting(containerEl)
+			.setName(t("Prefix match"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.isPrefixMatch)
+					.onChange((v) => (this.setting.isPrefixMatch = v)),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Character fuzzy allowed"))
+			.addToggle((t) =>
+				t
+					.setValue(this.setting.isFuzzy)
+					.onChange((v) => (this.setting.isFuzzy = v)),
+			);
+
 		new Setting(containerEl)
 			.setName(t("English word blacklist"))
 			.setDesc(t("English word blacklist desc"))
@@ -179,7 +201,7 @@ class GeneralTab extends PluginSettingTab {
 			.setDesc(t("Advanced.desc"));
 
 		new Setting(containerEl)
-			.setName("Semantic search")
+			.setName(t("Semantic search"))
 			.addButton((b) =>
 				b
 					.setButtonText(t("Manage"))
@@ -203,6 +225,14 @@ class GeneralTab extends PluginSettingTab {
 						new CustomExtensionModal(getInstance(App)).open(),
 					),
 			);
+
+		new Setting(containerEl)
+			.setName(t("Reindex the vault"))
+			.addButton((button) => {
+				button.setButtonText(t("Reindex")).onClick(async () => {
+					await getInstance(DataManager).refreshAllAsync();
+				});
+			});
 
 		// ======== For Development =======
 		const settingGroup = containerEl.createDiv("cs-dev-setting-group");
@@ -247,14 +277,6 @@ class GeneralTab extends PluginSettingTab {
 						this.setting.ui.collapseDevSettingByDefault = value;
 					}),
 			);
-
-		new Setting(devSettingContent)
-			.setName(t("Reindex the vault"))
-			.addButton((button) => {
-				button.setButtonText(t("Reindex")).onClick(async () => {
-					await getInstance(DataManager).refreshAllAsync();
-				});
-			});
 
 		new Setting(devSettingContent)
 			.setName(t("Log level"))
@@ -492,13 +514,13 @@ class SemanticSearchModal extends Modal {
 	private needInitSemanticEngine = false;
 	onOpen(): void {
 		this.modalEl.style.width = "50vw";
-		this.modalEl.style.height = "40vh";
+		this.modalEl.style.height = "55vh";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const contentEl = this.contentEl;
 		new Setting(contentEl)
 			.setName(t("Introduction"))
 			.setDesc(t("Introduction.desc"));
-		new Setting(contentEl).setName("Enable").addToggle((t) =>
+		new Setting(contentEl).setName(t("Enable")).addToggle((t) =>
 			t.setValue(this.setting.isEnabled).onChange((v) => {
 				this.setting.isEnabled = v;
 				if (v === true) {
@@ -533,6 +555,10 @@ class SemanticSearchModal extends Modal {
 						getInstance(AssetsProvider).downloadAiHelper(),
 					),
 			);
+
+		new Setting(contentEl)
+			.setName(t("Additional Information"))
+			.setDesc(t("Additional Information.desc"));
 		// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
 		// 	const count = await this.semanticEngine.docsCount();
 		// 	if (count) {

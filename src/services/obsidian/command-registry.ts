@@ -176,6 +176,7 @@ export class ModalNavigationHotkeys extends AbstractNavigationHotkeys {
 		this.register([], "ArrowDown", EventEnum.NEXT_ITEM);
 		this.register([], "ArrowUp", EventEnum.PREV_ITEM);
 		this.register([], "Enter", EventEnum.CONFIRM_ITEM);
+		this.register([CTRL], "Enter", EventEnum.CONFIRM_ITEM_IN_BACKGROUND);
 		this.register([CTRL], "N", EventEnum.NEXT_SUB_ITEM);
 		this.register([CTRL], "P", EventEnum.PREV_SUB_ITEM);
 		this.register([CTRL], "S", EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE);
