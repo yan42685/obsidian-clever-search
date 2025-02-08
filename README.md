@@ -97,3 +97,5 @@ In compliance with the requirements of the Obsidian developer policy, this notic
 If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
 
 [![image](assets/images/buymeacoffee.png)](https://www.buymeacoffee.com/AlexClifton)
+
+> Special thanks to @Moyf for the generous contribution to this project.
