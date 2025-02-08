@@ -32,6 +32,11 @@ abstract class FloatingWindow {
 	private isDragging = false;
 	private dragStartX = 0;
 	private dragStartY = 0;
+	private isResizing = false;
+	private resizeStartX = 0;
+	private resizeStartY = 0;
+	private resizeStartWidth = 0;
+	private resizeStartHeight = 0;
 	protected uiSetting = getInstance(OuterSetting).ui;
 	protected containerEl: HTMLDivElement;
 	private frameEl: HTMLDivElement;
@@ -53,6 +58,8 @@ abstract class FloatingWindow {
 
 		this.containerEl.addClass("cs-floating-window-container");
 		this.containerEl.style.position = "fixed";
+		this.containerEl.style.minWidth = "200px";
+		this.containerEl.style.minHeight = "100px";
 		// load position and other states from setting
 		this.loadContainerElStates();
 		this.containerEl.style.zIndex = "20";
@@ -81,6 +88,20 @@ abstract class FloatingWindow {
 
 		this.contentEl.style.padding = "10px 0 10px 10px";
 
+		// 添加调整大小的手柄
+		const resizeHandle = this.containerEl.createDiv();
+		resizeHandle.addClass("cs-resize-handle");
+		resizeHandle.style.position = "absolute";
+		resizeHandle.style.right = "0";
+		resizeHandle.style.bottom = "0";
+		resizeHandle.style.width = "10px";
+		resizeHandle.style.height = "10px";
+		resizeHandle.style.cursor = "se-resize";
+		
+		resizeHandle.addEventListener("mousedown", this.handleResizeStart);
+		document.addEventListener("mousemove", this.handleResize);
+		document.addEventListener("mouseup", this.handleResizeEnd);
+
 		this.mountComponent();
 		return this;
 	}
@@ -89,6 +110,8 @@ abstract class FloatingWindow {
 	onClose = () => {
 		document.removeEventListener("mousemove", this.handleMouseMove);
 		document.removeEventListener("mouseup", this.handleMouseUp);
+		document.removeEventListener("mousemove", this.handleResize);
+		document.removeEventListener("mouseup", this.handleResizeEnd);
 		// destroy svelte component
 		this.mountedElement?.$destroy();
 		this.mountedElement = null;
@@ -121,6 +144,33 @@ abstract class FloatingWindow {
 		this.saveContainerElStates();
 		getInstance(SettingManager).postSettingUpdated();
 	};
+
+	private handleResizeStart = (e: MouseEvent) => {
+		this.isResizing = true;
+		this.resizeStartX = e.pageX;
+		this.resizeStartY = e.pageY;
+		this.resizeStartWidth = this.containerEl.offsetWidth;
+		this.resizeStartHeight = this.containerEl.offsetHeight;
+		e.preventDefault();
+	};
+
+	private handleResize = (e: MouseEvent) => {
+		if (!this.isResizing) return;
+		
+		const newWidth = this.resizeStartWidth + (e.pageX - this.resizeStartX);
+		const newHeight = this.resizeStartHeight + (e.pageY - this.resizeStartY);
+		
+		// 设置最小尺寸限制
+		this.containerEl.style.width = `${Math.max(200, newWidth)}px`;
+		this.containerEl.style.height = `${Math.max(100, newHeight)}px`;
+	};
+
+	private handleResizeEnd = () => {
+		if (!this.isResizing) return;
+		this.isResizing = false;
+		this.saveContainerElStates();
+		getInstance(SettingManager).postSettingUpdated();
+	};
 }
 
 @singleton()
@@ -140,9 +190,13 @@ class InFileFloatingWindow extends FloatingWindow {
 	protected loadContainerElStates(): void {
 		this.containerEl.style.top = this.uiSetting.inFileFloatingWindowTop;
 		this.containerEl.style.left = this.uiSetting.inFileFloatingWindowLeft;
+		this.containerEl.style.width = this.uiSetting.inFileFloatingWindowWidth || "300px";
+		this.containerEl.style.height = this.uiSetting.inFileFloatingWindowHeight || "200px";
 	}
 	protected saveContainerElStates(): void {
 		this.uiSetting.inFileFloatingWindowLeft = this.containerEl.style.left;
 		this.uiSetting.inFileFloatingWindowTop = this.containerEl.style.top;
+		this.uiSetting.inFileFloatingWindowWidth = this.containerEl.style.width;
+		this.uiSetting.inFileFloatingWindowHeight = this.containerEl.style.height;
 	}
 }
