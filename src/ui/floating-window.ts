@@ -50,6 +50,7 @@ abstract class FloatingWindow {
 		}
 		this.containerEl = document.body.createDiv();
 		this.frameEl = this.containerEl.createDiv();
+		this.frameEl.addClass('cs-floating-window-header');
 		this.contentEl = this.containerEl.createDiv();
 
 		this.frameEl.addEventListener("mousedown", this.handleMouseDown);
@@ -80,6 +81,7 @@ abstract class FloatingWindow {
 		this.frameEl.style.padding = "10px 0 10px 10px";
 
 		const closeButton = this.frameEl.createSpan();
+		closeButton.addClass("cs-close-btn");
 		closeButton.innerText = "✖";
 		closeButton.style.cursor = "pointer";
 		closeButton.style.fontSize = "13px";
@@ -102,6 +104,9 @@ abstract class FloatingWindow {
 		document.addEventListener("mousemove", this.handleResize);
 		document.addEventListener("mouseup", this.handleResizeEnd);
 
+		// 添加窗口大小变化监听
+		window.addEventListener("resize", this.handleWindowResize);
+
 		this.mountComponent();
 		return this;
 	}
@@ -112,6 +117,7 @@ abstract class FloatingWindow {
 		document.removeEventListener("mouseup", this.handleMouseUp);
 		document.removeEventListener("mousemove", this.handleResize);
 		document.removeEventListener("mouseup", this.handleResizeEnd);
+		window.removeEventListener("resize", this.handleWindowResize);
 		// destroy svelte component
 		this.mountedElement?.$destroy();
 		this.mountedElement = null;
@@ -132,8 +138,14 @@ abstract class FloatingWindow {
 
 	private handleMouseMove = (e: MouseEvent) => {
 		if (this.isDragging) {
-			this.containerEl.style.left = `${e.pageX - this.dragStartX}px`;
-			this.containerEl.style.top = `${e.pageY - this.dragStartY}px`;
+			const newLeft = e.pageX - this.dragStartX;
+			const newTop = e.pageY - this.dragStartY;
+			
+			this.containerEl.style.left = `${newLeft}px`;
+			this.containerEl.style.top = `${newTop}px`;
+			
+			// 在拖动时也进行位置调整
+			this.adjustPosition();
 		}
 	};
 
@@ -161,8 +173,20 @@ abstract class FloatingWindow {
 		const newHeight = this.resizeStartHeight + (e.pageY - this.resizeStartY);
 		
 		// 设置最小尺寸限制
-		this.containerEl.style.width = `${Math.max(200, newWidth)}px`;
-		this.containerEl.style.height = `${Math.max(100, newHeight)}px`;
+		const width = Math.max(200, newWidth);
+		const height = Math.max(100, newHeight);
+		
+		// 确保调整大小时不会超出视口
+		const viewportWidth = window.innerWidth;
+		const viewportHeight = window.innerHeight;
+		const rect = this.containerEl.getBoundingClientRect();
+		
+		if (rect.left + width <= viewportWidth) {
+			this.containerEl.style.width = `${width}px`;
+		}
+		if (rect.top + height <= viewportHeight) {
+			this.containerEl.style.height = `${height}px`;
+		}
 	};
 
 	private handleResizeEnd = () => {
@@ -171,6 +195,47 @@ abstract class FloatingWindow {
 		this.saveContainerElStates();
 		getInstance(SettingManager).postSettingUpdated();
 	};
+
+	private handleWindowResize = () => {
+		if (this.containerEl) {
+			this.adjustPosition();
+		}
+	};
+
+	private adjustPosition() {
+		const rect = this.containerEl.getBoundingClientRect();
+		const viewportWidth = window.innerWidth;
+		const viewportHeight = window.innerHeight;
+
+		// 计算新位置，确保窗口完全在视口内
+		let newLeft = parseInt(this.containerEl.style.left);
+		let newTop = parseInt(this.containerEl.style.top);
+
+		// 处理右边界
+		if (rect.right > viewportWidth) {
+			newLeft = viewportWidth - rect.width;
+		}
+		// 处理下边界
+		if (rect.bottom > viewportHeight) {
+			newTop = viewportHeight - rect.height;
+		}
+		// 处理左边界
+		if (rect.left < 0) {
+			newLeft = 0;
+		}
+		// 处理上边界
+		if (rect.top < 0) {
+			newTop = 0;
+		}
+
+		// 应用新位置
+		this.containerEl.style.left = `${newLeft}px`;
+		this.containerEl.style.top = `${newTop}px`;
+
+		// 保存新位置到设置
+		this.saveContainerElStates();
+		getInstance(SettingManager).postSettingUpdated();
+	}
 }
 
 @singleton()

@@ -128,3 +128,17 @@ settings:
 	left: -20px;
 	top: 0;
 }
+
+.cs-resize-handle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 10px;
+    height: 10px;
+    background-color: #666;
+    cursor: se-resize;
+}
+
+.cs-resize-handle:hover {
+    background-color: #888;
+}
