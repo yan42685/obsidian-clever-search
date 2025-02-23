@@ -25,6 +25,7 @@
 	export let searchType: SearchType;
 	export let isSemantic: boolean; // only available for in-vault search
 	export let queryText: string;
+	
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
@@ -355,6 +356,11 @@
 		flex-direction: column;
 		height: 70vh;
 		margin-top: 0.15em;
+		overflow-y: auto;
+	}
+
+	:global(.cs-floating-window-container) .result-items {
+		height: calc(100% - 40px); /* 减去搜索栏的高度 */
 	}
 
 	.result-items ul {
@@ -362,6 +368,10 @@
 		margin-bottom: 0;
 		width: 97%;
 		overflow-x: hidden;
+	}
+
+	:global(.cs-floating-window-container) .result-items ul button {
+		width: 100%;
 	}
 
 	.result-items ul button {

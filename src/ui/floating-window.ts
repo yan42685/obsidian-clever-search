@@ -47,7 +47,8 @@ abstract class FloatingWindow {
 		if (this.mountedElement !== null) {
 			this.onClose();
 			return this;
-		}
+		}	
+
 		this.containerEl = document.body.createDiv();
 		this.frameEl = this.containerEl.createDiv();
 		this.frameEl.addClass('cs-floating-window-header');
@@ -80,15 +81,35 @@ abstract class FloatingWindow {
 		this.frameEl.style.justifyContent = "right";
 		this.frameEl.style.padding = "10px 0 10px 10px";
 
+		// 关闭按钮
 		const closeButton = this.frameEl.createSpan();
 		closeButton.addClass("cs-close-btn");
-		closeButton.innerText = "✖";
+		closeButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<line x1="18" y1="6" x2="6" y2="18"></line>
+			<line x1="6" y1="6" x2="18" y2="18"></line>
+		</svg>`;
 		closeButton.style.cursor = "pointer";
-		closeButton.style.fontSize = "13px";
+		closeButton.style.padding = "2px";
 		closeButton.style.margin = "5px";
+		closeButton.style.display = "flex";
+		closeButton.style.alignItems = "center";
+		closeButton.style.justifyContent = "center";
+		closeButton.style.borderRadius = "4px";
+		closeButton.style.transition = "background-color 0.2s ease";
+		closeButton.addEventListener("mouseover", () => {
+			closeButton.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
+		});
+		closeButton.addEventListener("mouseout", () => {
+			closeButton.style.backgroundColor = "transparent";
+		});
 		closeButton.addEventListener("click", this.onClose);
+		this.frameEl.appendChild(closeButton);
 
 		this.contentEl.style.padding = "10px 0 10px 10px";
+		// 添加滚动条支持
+		this.contentEl.style.overflow = "auto";
+		this.contentEl.style.height = "calc(100% - 40px)"; // 减去标题栏高度
+		this.contentEl.style.boxSizing = "border-box";
 
 		// 添加调整大小的手柄
 		const resizeHandle = this.containerEl.createDiv();
@@ -180,11 +201,14 @@ abstract class FloatingWindow {
 		const viewportWidth = window.innerWidth;
 		const viewportHeight = window.innerHeight;
 		const rect = this.containerEl.getBoundingClientRect();
+
+		// 设置一个尺寸比例限制，让浮动窗口可以一定程度超出范围
+		const ratio = 0.5;
 		
-		if (rect.left + width <= viewportWidth) {
+		if (rect.left * ratio + width <= viewportWidth) {
 			this.containerEl.style.width = `${width}px`;
 		}
-		if (rect.top + height <= viewportHeight) {
+		if (rect.top * ratio + height <= viewportHeight) {
 			this.containerEl.style.height = `${height}px`;
 		}
 	};
@@ -211,13 +235,16 @@ abstract class FloatingWindow {
 		let newLeft = parseInt(this.containerEl.style.left);
 		let newTop = parseInt(this.containerEl.style.top);
 
+		// 设置一个尺寸比例限制，让浮动窗口可以一定程度超出范围
+		const ratio = 0.5;
+
 		// 处理右边界
-		if (rect.right > viewportWidth) {
-			newLeft = viewportWidth - rect.width;
+		if (rect.right - rect.width * ratio > viewportWidth) {
+			newLeft = viewportWidth - rect.width * ratio;
 		}
 		// 处理下边界
-		if (rect.bottom > viewportHeight) {
-			newTop = viewportHeight - rect.height;
+		if (rect.bottom - rect.height * ratio > viewportHeight) {
+			newTop = viewportHeight - rect.height * ratio;
 		}
 		// 处理左边界
 		if (rect.left < 0) {
@@ -252,12 +279,14 @@ class InFileFloatingWindow extends FloatingWindow {
 			},
 		});
 	}
+
 	protected loadContainerElStates(): void {
 		this.containerEl.style.top = this.uiSetting.inFileFloatingWindowTop;
 		this.containerEl.style.left = this.uiSetting.inFileFloatingWindowLeft;
 		this.containerEl.style.width = this.uiSetting.inFileFloatingWindowWidth || "300px";
 		this.containerEl.style.height = this.uiSetting.inFileFloatingWindowHeight || "200px";
 	}
+
 	protected saveContainerElStates(): void {
 		this.uiSetting.inFileFloatingWindowLeft = this.containerEl.style.left;
 		this.uiSetting.inFileFloatingWindowTop = this.containerEl.style.top;
