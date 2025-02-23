@@ -268,6 +268,10 @@ abstract class FloatingWindow {
 @singleton()
 class InFileFloatingWindow extends FloatingWindow {
 	protected mountComponent(): void {
+		// 获取当前选中的文本
+		const selection = window.getSelection();
+		const selectedText = selection ? selection.toString().trim() : "";
+
 		this.mountedElement = new MountedModal({
 			target: this.contentEl,
 			props: {
@@ -275,7 +279,7 @@ class InFileFloatingWindow extends FloatingWindow {
 				onConfirmExternal: () => {},
 				searchType: SearchType.IN_FILE,
 				isSemantic: false,
-				queryText: "",
+				queryText: selectedText,
 			},
 		});
 	}
