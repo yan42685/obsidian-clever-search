@@ -107,8 +107,8 @@ abstract class FloatingWindow {
 
 		this.contentEl.style.padding = "10px 0 10px 10px";
 		// 添加滚动条支持
-		this.contentEl.style.overflow = "auto";
-		this.contentEl.style.height = "calc(100% - 40px)"; // 减去标题栏高度
+		// this.contentEl.style.overflow = "auto";
+		// this.contentEl.style.height = "calc(100% - 40px)"; // 减去标题栏高度
 		this.contentEl.style.boxSizing = "border-box";
 
 		// 添加调整大小的手柄

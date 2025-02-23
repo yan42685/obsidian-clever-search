@@ -109,6 +109,9 @@
 	// handle result click
 	async function handleItemClick(index: number) {
 		await updateItemAsync(index);
+		if (uiType === "floatingWindow") {
+			await handleConfirm(null);
+		}
 	}
 
 	// select the next search result
@@ -117,7 +120,7 @@
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
 		if (uiType === "floatingWindow") {
-			handleConfirm(null);
+			await handleConfirm(null);
 		}
 	}
 
@@ -125,7 +128,7 @@
 	async function handlePrevItem() {
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 		if (uiType === "floatingWindow") {
-			handleConfirm(null);
+			await handleConfirm(null);
 		}
 	}
 
@@ -158,6 +161,7 @@
 			searchType,
 			selectedItem,
 			currSubItemIndex,
+			queryText // 添加搜索关键字参数
 		);
 	}
 
@@ -323,6 +327,9 @@
 		/* width: 40%; */
 		width: 27.5vw;
 	}
+	.cs-floating-window-container .left-pane {
+		width: 100%;
+	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
 		top: -0.2em;
@@ -359,9 +366,6 @@
 		overflow-y: auto;
 	}
 
-	:global(.cs-floating-window-container) .result-items {
-		height: calc(100% - 40px); /* 减去搜索栏的高度 */
-	}
 
 	.result-items ul {
 		padding: 0 0.5em 0 0;
@@ -370,9 +374,6 @@
 		overflow-x: hidden;
 	}
 
-	:global(.cs-floating-window-container) .result-items ul button {
-		width: 100%;
-	}
 
 	.result-items ul button {
 		align-items: center;
