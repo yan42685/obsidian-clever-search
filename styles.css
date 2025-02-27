@@ -129,62 +129,129 @@ settings:
 	top: 0;
 }
 
-/* ======== For light theme ======== */
+.cs-resize-handle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 10px;
+    height: 10px;
+    background-color: #666;
+    cursor: se-resize;
+}
+
+.cs-resize-handle:hover {
+    background-color: #888;
+}
+
+/* 浮动窗口的亮色模式 */
+
+/* 可在此处更改颜色 ⬇ */
 .theme-light /* 亮色模式 */ {
-    --background-center: #FFFFFF; /* 按钮主体背景色 */
-    --background-others: #F6F6F6; /* 整体背景色 */
-    --background-select: #EFF4FF; /* 被选中时的背景色 */
-}
-
-/* 设置整体背景色 */
-.theme-light .cs-modal,
-.theme-light .cs-floating-window-container {
-    background-color: var(--background-others) !important;
-}
-
-/* 设置搜索框背景色 */
-.theme-light .cs-modal .search-bar input {
-    background-color: var(--background-center) !important;
-}
-
-/* 当按钮没有被选中时 */
-/* 设置按钮背景色 */
-.theme-light .cs-modal button {
-    background-color: var(--background-center) !important;
-}
-/* 设置关键词高亮样式 */
-.theme-light .search-container mark {
-    padding-left: 0;
-    padding-right: 0;
-
-    background-color: transparent !important;
-    color: var(--text-accent) !important;
-
-    font-weight: bold !important;
-}
-
-
-/* 当按钮被选中时 */
-/* 设置按钮背景色，并加粗字体 */
-.theme-light .cs-modal button.selected {
-    background-color: var(--background-select) !important;
-    font-weight: bold !important;
-}
-/* 设置关键词高亮样式 */
-.theme-light .search-container button.selected mark {
-    padding-left: 0;
-    padding-right: 0;
-
-    background-color: transparent !important;
-    color: var(--text-accent) !important;
-
-    font-weight: bolder !important;
-}
-
-/* 取消其它背景色 */
-.theme-light .cs-modal .right-pane {
-    background-color: unset !important;
-}
-.theme-light .cs-modal .right-pane .preview-container ul button.file-sub-item {
-    background-color: unset;
-}
+	--cs-background-center: #FFFFFF; /* 按钮主体背景色 */
+	--cs-background-others: #F6F6F6; /* 整体背景色 */
+	--cs-background-select: #474747; /* 被选中时的背景色 */
+  }
+  .theme-dark /* 暗色模式 */ {
+	--cs-background-center: var(--background-primary); /* 按钮主体背景色 */
+	--cs-background-others: #262626; /* 整体背景色 */
+	/* 被选中时的背景色 */
+	/* --cs-background-select: #1E222E;  */
+	--cs-background-select: var(background-secondary);
+  }
+  
+  .cs-floating-window-container {
+	background-color: var(--cs-background-center) !important;
+  }
+  
+  /* .theme-light .cs-modal .svelte-1k7yxfd */
+  .theme-light .cs-modal button,
+  .theme-light .cs-floating-window-container button {
+	  background-color: unset !important;
+  }
+  
+  
+  .theme-light .cs-modal button.selected {
+	/* background-color: var(--color-accent) !important; */
+	/* 默认选一个暗色作为亮色模式下的选中背景 */
+	background-color: var(--cs-background-select) !important;
+	
+	/* 文本就用白色，作为对比 */
+	color: white !important;
+  }
+  
+  /* 亮色模式下的浮动窗口 */
+  .theme-light .cs-floating-window-container button.selected {
+	background-color: #444 !important;
+	color: white !important;
+  }
+  
+  /* 整体边框 */
+  
+  .theme-light .cs-floating-window-container {
+	border: 1px solid rgb(235, 235, 235) !important;
+  
+	.cs-floating-window-header {
+		background-color: var(--background-secondary) !important;
+  
+		.cs-close-btn {
+			color: var(--text-accent) !important;
+		}
+	}
+  
+  
+	.search-bar input {
+		background-color: var(--background-primary) !important;
+		border: 1px solid rgb(235, 235, 235) !important;
+	}
+  }
+  
+  
+  .theme-light .cs-modal .right-pane,
+  .theme-light .cs-modal .search-bar input {
+	  background-color: unset !important;
+  }
+  
+  
+  .theme-light .cs-modal .right-pane .preview-container ul button.file-sub-item {
+	background-color: unset;
+  }
+  
+  /* 浮动窗口的滚动条 */
+  .cs-floating-window-container {
+	overflow-y: auto !important;
+  }
+  
+  /* CS  的文件内浮动搜索框，限制大小 */
+  .cs-floating-window-container .search-container {
+  
+	/* overflow-y: scroll !important; */
+  
+	.left-pane {
+		max-width: 100% !important;
+		width: 100% !important;
+	}
+  
+	button {
+		max-width: calc(100% - 1.5em) !important;
+		margin-left: 1em !important;
+	}
+  
+	/* sticky header */
+	.search-bar {
+		input {
+			border-radius: 6px !important;
+		}
+		position: absolute !important;
+		margin-left: 10px !important;
+		margin-top: 20px !important;
+		top: 10px !important;
+		width: calc(100% - 30px) !important;
+		/* top: 20px !important; */
+	}
+  
+	.result-items {
+		margin-top: 30px !important;
+	}
+  }
+  
+  

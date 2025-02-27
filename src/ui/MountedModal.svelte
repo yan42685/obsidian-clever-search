@@ -25,6 +25,7 @@
 	export let searchType: SearchType;
 	export let isSemantic: boolean; // only available for in-vault search
 	export let queryText: string;
+	
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
@@ -108,6 +109,9 @@
 	// handle result click
 	async function handleItemClick(index: number) {
 		await updateItemAsync(index);
+		if (uiType === "floatingWindow") {
+			await handleConfirm(null);
+		}
 	}
 
 	// select the next search result
@@ -116,7 +120,7 @@
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
 		if (uiType === "floatingWindow") {
-			handleConfirm(null, false);
+			await handleConfirm(null);
 		}
 	}
 
@@ -124,7 +128,7 @@
 	async function handlePrevItem() {
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 		if (uiType === "floatingWindow") {
-			handleConfirm(null, false);
+			await handleConfirm(null);
 		}
 	}
 
@@ -157,6 +161,7 @@
 			searchType,
 			selectedItem,
 			currSubItemIndex,
+			queryText // 添加搜索关键字参数
 		);
 	}
 	async function handleConfirmInBackground() {
@@ -326,6 +331,9 @@
 		/* width: 40%; */
 		width: 27.5vw;
 	}
+	.cs-floating-window-container .left-pane {
+		width: 100%;
+	}
 	.search-bar {
 		position: sticky; /* 固定位置 */
 		top: -0.2em;
@@ -359,7 +367,9 @@
 		flex-direction: column;
 		height: 70vh;
 		margin-top: 0.15em;
+		overflow-y: auto;
 	}
+
 
 	.result-items ul {
 		padding: 0 0.5em 0 0;
@@ -367,6 +377,7 @@
 		width: 97%;
 		overflow-x: hidden;
 	}
+
 
 	.result-items ul button {
 		align-items: center;

@@ -75,7 +75,9 @@ export type UISetting = {
 	showedExtension: "none" | "except md" | "all";
 	collapseDevSettingByDefault: boolean;
 	inFileFloatingWindowTop: string;
-	inFileFloatingWindowLeft: string,
+	inFileFloatingWindowLeft: string;
+	inFileFloatingWindowWidth?: string;
+	inFileFloatingWindowHeight?: string;
 };
 
 export type SemanticSetting = {

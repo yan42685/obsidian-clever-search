@@ -51,6 +51,7 @@ export class ViewHelper {
 		searchType: SearchType,
 		selectedItem: Item,
 		currSubItemIndex: number,
+		queryText: string,
 	) {
 		onConfirmExternal();
 		if (selectedItem) {
@@ -60,6 +61,7 @@ export class ViewHelper {
 					sourcePath,
 					lineItem.line.row,
 					lineItem.line.col,
+					queryText,
 				);
 			} else if (searchType === SearchType.IN_VAULT) {
 				const fileItem = selectedItem as FileItem;
@@ -85,6 +87,7 @@ export class ViewHelper {
 							fileItem.path,
 							subItem.row,
 							subItem.col,
+							queryText,
 						);
 						// }
 					} else {
@@ -92,7 +95,7 @@ export class ViewHelper {
 					}
 				} else {
 					// no content text matched, but filenames or folders are matched
-					await this.jumpInVaultAsync(fileItem.path, 0, 0);
+					await this.jumpInVaultAsync(fileItem.path, 0, 0, queryText);
 				}
 			} else {
 				throw Error(`unsupported search type to jump ${searchType}`);
@@ -164,7 +167,12 @@ export class ViewHelper {
 		}
 	}
 
-	private async jumpInVaultAsync(path: string, row: number, col: number) {
+	private async jumpInVaultAsync(
+		path: string,
+		row: number,
+		col: number,
+		queryText: string,
+	) {
 		let alreadyOpen = false;
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (
@@ -176,18 +184,22 @@ export class ViewHelper {
 			}
 		});
 		if (alreadyOpen) {
-			this.scrollIntoViewForExistingView(row, col);
+			this.scrollIntoViewForExistingView(row, col, queryText);
 		} else {
 			await this.app.workspace.openLinkText(
 				path,
 				"",
 				this.setting.ui.openInNewPane,
 			);
-			this.scrollIntoViewForExistingView(row, col);
+			this.scrollIntoViewForExistingView(row, col, queryText);
 		}
 	}
 
-	private scrollIntoViewForExistingView(row: number, col: number) {
+	private scrollIntoViewForExistingView(
+		row: number,
+		col: number,
+		queryText: string,
+	) {
 		// WARN: this command inside this function will cause a warning in the console:
 		// [Violation] Forced reflow while executing JavaScript took 55ms
 		// if removing the command in this function, we can't focus the editor when switching to an existing view
@@ -228,6 +240,16 @@ export class ViewHelper {
 
 					// It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
 					// 	view.editor.focus();
+					// 选中搜索关键字
+					const line = view.editor.getLine(row);
+					const textLength = queryText.length;
+					const startPos = line.indexOf(queryText, col);
+					if (startPos !== -1) {
+						view.editor.setSelection(
+							{ line: row, ch: startPos },
+							{ line: row, ch: startPos + textLength },
+						);
+					}
 
 					// this command need to be triggered again if the view mode has been switched to `editing` from `reading`
 					this.privateApi.executeCommandById(
