@@ -113,7 +113,7 @@ settings:
 	filter: none !important;
 }
 
-/* ========== For Setting Tab =======*/
+/* ========== For setting tab =======*/
 /* 定义设置组标题的样式 */
 .cs-setting-group-dev-title {
 	position: relative;
@@ -255,4 +255,3 @@ settings:
   }
   
   
-

@@ -162,16 +162,23 @@ export class LineHighlighter {
 		lineText: string,
 		positions: Set<number>,
 	): string {
-		return lineText
-			.split("")
-			.map((char, i) => {
-				// avoid spaces being ignored when rendering html
-				// if (char === " ") {
-				// 	return "&nbsp;";
-				// }
-				return positions.has(i) ? `<mark>${char}</mark>` : char;
-			})
-			.join("");
+		let result = "";
+		let i = 0;
+
+		while (i < lineText.length) {
+			if (positions.has(i)) {
+				const start = i;
+				while (i < lineText.length && positions.has(i)) {
+					i++;
+				}
+				result += `<mark>${lineText.slice(start, i)}</mark>`;
+			} else {
+				result += lineText[i];
+				i++;
+			}
+		}
+
+		return result;
 	}
 
 	private adjustPositionsByStartCol(
@@ -232,7 +239,7 @@ export class LineHighlighter {
 			}
 			postCharsCount += endCol - firstMatchedCol;
 		} else {
-			// need to truncate the start of the matched row, 
+			// need to truncate the start of the matched row,
 			const startCol = firstMatchedCol - limit.maxPreChars;
 			// logger.debug(`truncate start of the line`)
 			firstLineStartCol = startCol;
@@ -243,7 +250,10 @@ export class LineHighlighter {
 			const isEndTruncated = endCol < matchedLineText.length - 1;
 			if (isEndTruncated) {
 				// logger.debug(`The end of matched line is truncated`);
-				matchedLineText = matchedLineText.substring(startCol, endCol + 1);
+				matchedLineText = matchedLineText.substring(
+					startCol,
+					endCol + 1,
+				);
 			} else {
 				matchedLineText = matchedLineText.substring(startCol);
 			}
@@ -265,7 +275,7 @@ export class LineHighlighter {
 		return {
 			lines: resultLines,
 			firstLineStartCol: firstLineStartCol,
-			matchedLineText: matchedLineText
+			matchedLineText: matchedLineText,
 		};
 	}
 
@@ -385,7 +395,7 @@ export class LineHighlighter {
 			lines,
 			matchedRow,
 			firstMatchedCol,
-			TruncateOption.forType("paragraph")
+			TruncateOption.forType("paragraph"),
 		);
 		const contextLines = context.lines;
 

@@ -63,7 +63,8 @@
 | Modal    | Previous item                                                      | `Ctrl-K`                 |
 | Modal    | Next subItem (in-vault)                                            | `Ctrl-N`                 |
 | Modal    | Previous subItem                                                   | `Ctrl-P`                 |
-| Modal    | Confirm item                                                       | `Enter` or `Right Click` |
+| Modal    | Confirm item                                                       | `Enter` / `Right Click` / `Double Click` |
+| Modal | Confirm item in the background | `Ctrl` + `Enter` / `Right Click` / `Double Click` |
 | Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
 | Modal    | Insert file link                                                    | `Alt-I`                 |
 | Obsidian | Search in vault semantically                                       | undefined                |
@@ -96,3 +97,5 @@ In compliance with the requirements of the Obsidian developer policy, this notic
 If this plugin has been useful to you, I'd be sincerely thankful for your star⭐ or donation❤️.
 
 [![image](assets/images/buymeacoffee.png)](https://www.buymeacoffee.com/AlexClifton)
+
+> Special thanks to @Moyf for the generous contribution to this project.
