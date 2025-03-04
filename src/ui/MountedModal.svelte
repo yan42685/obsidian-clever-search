@@ -110,7 +110,7 @@
 	async function handleItemClick(index: number) {
 		await updateItemAsync(index);
 		if (uiType === "floatingWindow") {
-			await handleConfirm(null);
+			await handleConfirm(null, false);
 		}
 	}
 
@@ -120,7 +120,7 @@
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
 		if (uiType === "floatingWindow") {
-			await handleConfirm(null);
+			await handleConfirm(null, false);
 		}
 	}
 
@@ -128,7 +128,7 @@
 	async function handlePrevItem() {
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 		if (uiType === "floatingWindow") {
-			await handleConfirm(null);
+			await handleConfirm(null, false);
 		}
 	}
 
