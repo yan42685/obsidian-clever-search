@@ -85,7 +85,7 @@ settings:
 
 .cs-modal,
 .cs-floating-window-container {
-	background-color: var(--cs-search-main-bgc, #262626);
+	background-color: var(--cs-search-main-bgc, var(--cs-background-center));
 }
 /* mark {
     background-color: lightblue;
