@@ -166,7 +166,7 @@ settings:
 }
   
   
-.theme-light .cs-modal button.selected {
+.cs-modal button.selected {
 	/* background-color: var(--color-accent) !important; */
 	/* 默认选一个暗色作为亮色模式下的选中背景 */
 	background-color: var(--cs-item-selected-color, var(--cs-background-select)) !important;
@@ -175,7 +175,7 @@ settings:
 }
   
 /* 亮色模式下的浮动窗口 */
-.theme-light .cs-floating-window-container button.selected {
+.cs-floating-window-container button.selected {
 	background-color: var(--cs-item-selected-color, var(--tag-background)) !important;
 	color: var(--tag-color) !important;
 }
