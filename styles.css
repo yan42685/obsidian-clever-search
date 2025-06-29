@@ -147,47 +147,47 @@ settings:
 
 /* 可在此处更改颜色 ⬇ */
 .theme-light /* 亮色模式 */ {
-	--cs-background-center: #FFFFFF; /* 按钮主体背景色 */
+	--cs-background-center: var(--background-secondary); /* 按钮主体背景色 */
 	--cs-background-others: #F6F6F6; /* 整体背景色 */
-	--cs-background-select: #474747; /* 被选中时的背景色 */
+	--cs-background-select: var(--tag-background); /* 被选中时的背景色 */
   }
-  .theme-dark /* 暗色模式 */ {
+.theme-dark /* 暗色模式 */ {
 	--cs-background-center: var(--background-primary); /* 按钮主体背景色 */
 	--cs-background-others: #262626; /* 整体背景色 */
 	/* 被选中时的背景色 */
 	/* --cs-background-select: #1E222E;  */
-	--cs-background-select: var(background-secondary);
-  }
-  
-  .cs-floating-window-container {
-	background-color: var(--cs-background-center) !important;
-  }
-  
+	--cs-background-select: var(--background-secondary);
+}
+
   /* .theme-light .cs-modal .svelte-1k7yxfd */
-  .theme-light .cs-modal button,
-  .theme-light .cs-floating-window-container button {
-	  background-color: unset !important;
-  }
+.theme-light .cs-modal button,
+.theme-light .cs-floating-window-container button {
+	background-color: unset !important;
+}
   
   
-  .theme-light .cs-modal button.selected {
+.theme-light .cs-modal button.selected {
 	/* background-color: var(--color-accent) !important; */
 	/* 默认选一个暗色作为亮色模式下的选中背景 */
-	background-color: var(--cs-background-select) !important;
-	
+	background-color: var(--cs-item-selected-color, var(--cs-background-select)) !important;
 	/* 文本就用白色，作为对比 */
-	color: white !important;
-  }
+	color: var(--tag-color) !important;
+}
   
-  /* 亮色模式下的浮动窗口 */
-  .theme-light .cs-floating-window-container button.selected {
-	background-color: #444 !important;
-	color: white !important;
-  }
+/* 亮色模式下的浮动窗口 */
+.theme-light .cs-floating-window-container button.selected {
+	background-color: var(--cs-item-selected-color, var(--tag-background)) !important;
+	color: var(--tag-color) !important;
+}
+
+/* 搜索结果标题行修复 */
+.result-items.svelte-1dbevw ul button .file-item span.filename.svelte-1dbevw.svelte-1dbevw{
+	margin:0.1em !important;
+}
+
+/* 整体边框 */
   
-  /* 整体边框 */
-  
-  .theme-light .cs-floating-window-container {
+.theme-light .cs-floating-window-container {
 	border: 1px solid rgb(235, 235, 235) !important;
   
 	.cs-floating-window-header {
@@ -203,26 +203,29 @@ settings:
 		background-color: var(--background-primary) !important;
 		border: 1px solid rgb(235, 235, 235) !important;
 	}
-  }
+}
   
   
-  .theme-light .cs-modal .right-pane,
-  .theme-light .cs-modal .search-bar input {
-	  background-color: unset !important;
-  }
+.theme-light .cs-modal .right-pane {
+	background-color: var(--cs-pane-bgc, var(--background-primary)) !important;
+}
+
+.theme-light .cs-modal .search-bar input {
+	background-color: var(--cs-search-bar-bgc, var(--background-primary)) !important;
+}
   
   
-  .theme-light .cs-modal .right-pane .preview-container ul button.file-sub-item {
-	background-color: unset;
-  }
+.theme-light .cs-modal .right-pane .preview-container ul button.file-sub-item {
+	background-color: var(--cs-pane-bgc, var(--background-primary));
+}
   
-  /* 浮动窗口的滚动条 */
-  .cs-floating-window-container {
+/* 浮动窗口的滚动条 */
+.cs-floating-window-container {
 	overflow-y: auto !important;
-  }
+}
   
-  /* CS  的文件内浮动搜索框，限制大小 */
-  .cs-floating-window-container .search-container {
+/* CS  的文件内浮动搜索框，限制大小 */
+.cs-floating-window-container .search-container {
   
 	/* overflow-y: scroll !important; */
   
@@ -252,6 +255,4 @@ settings:
 	.result-items {
 		margin-top: 30px !important;
 	}
-  }
-  
-  
+}
