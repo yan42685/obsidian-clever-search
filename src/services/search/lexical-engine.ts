@@ -263,11 +263,6 @@ class LexicalOptions {
 		// storeFields: ["text"] as LineFields,
 	};
 
-	/**
-	 * @param {"and"|"or"} combinationMode - The combination mode:
-	 * - "and": Requires any single token to appear in the fields.
-	 * - "or": Requires all tokens to appear across the fields.
-	 */
 	getFileSearchOption(userOption: UserSearchOption): SearchOptions {
 		return {
 			tokenize: this.tokenizeSearch,

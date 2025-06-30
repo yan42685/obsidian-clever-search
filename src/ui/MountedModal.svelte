@@ -2,11 +2,11 @@
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
-		FileItem,
-		FileSubItem,
-		LineItem,
-		SearchResult,
-		SearchType,
+	    FileItem,
+	    FileSubItem,
+	    LineItem,
+	    SearchResult,
+	    SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
@@ -330,9 +330,6 @@
 		align-items: left;
 		/* width: 40%; */
 		width: 27.5vw;
-	}
-	.cs-floating-window-container .left-pane {
-		width: 100%;
 	}
 	.search-bar {
 		position: sticky; /* 固定位置 */

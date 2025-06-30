@@ -166,12 +166,15 @@ settings:
 }
   
   
-.cs-modal button.selected {
-	/* background-color: var(--color-accent) !important; */
+.theme-light .cs-modal button.selected {
 	/* 默认选一个暗色作为亮色模式下的选中背景 */
-	background-color: var(--cs-item-selected-color, var(--cs-background-select)) !important;
+	background-color: var(--cs-item-selected-color, rgba(102, 129, 153, 0.1)) !important;
 	/* 文本就用白色，作为对比 */
-	color: var(--tag-color) !important;
+	/* color: var(--tag-color) !important; */
+}
+
+.theme-dark .cs-modal button.selected {
+	background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.45)) !important;
 }
   
 /* 亮色模式下的浮动窗口 */
