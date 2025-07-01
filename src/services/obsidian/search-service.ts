@@ -109,7 +109,7 @@ export class SearchService {
 			"subItem",
 			queryText,
 			fileItem,
-			30,
+			60,
 		);
 
 		const fileSubItems = this.lineHighlighter

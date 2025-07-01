@@ -39,6 +39,7 @@ class Logger {
 		}
 	}
 
+	// NOTE: 如果console不显示debug信息，需要在所有级别里勾选详细
 	debug(...args: any[]) {
 		if (this.shouldLog("debug")) {
 			if (devOption.traceLog) {

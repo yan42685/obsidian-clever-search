@@ -307,6 +307,7 @@ class LinesMatcher {
 	private outerSetting = getInstance(OuterSetting);
 	private userOption: UserSearchOption;
 	private lines: Line[];
+	private queryTermsLowerCase: string[];
 	private matchedTerms: string[];
 	private maxParsedLines: number;
 	private preChars: number;
@@ -324,6 +325,7 @@ class LinesMatcher {
 
 		this.userOption = query.userOption;
 		this.lines = lines;
+		this.queryTermsLowerCase = queryTerms.map((t)=>t.toLocaleLowerCase());
 		this.matchedTerms = this.filterMatchedTerms(queryTerms, matchedTerms);
 		this.maxParsedLines = maxParsedLines;
 		// TODO: use token rather than chars
@@ -442,7 +444,7 @@ class LinesMatcher {
 					termCounts.set(term, count);
 
 					// add score: term.length for the first match, 0.01 for subsequent matches
-					score += count === 1 ? term.length : 0.01;
+					score += (count === 1 ? term.length : 0.01) * this.positionWeight(term);
 				}
 			}
 
@@ -519,6 +521,36 @@ class LinesMatcher {
 			? term
 			: `${term}(?![a-zA-Z])`;
 		return new RegExp(pattern, flags);
+	}
+
+	// generate a weight for each term based on its position in the query
+	private positionWeight(matchedTerm: string): number {
+		const lowerTerm = matchedTerm.toLocaleLowerCase();
+		const exactIndex = this.queryTermsLowerCase.indexOf(lowerTerm);
+		
+		// if exact match exists, prioritize it with (index+1)^2
+		if (exactIndex !== -1) {
+			return (exactIndex + 1) * (exactIndex + 1);
+		}
+		
+		// find the longest prefix match among query terms
+		let longestPreMatchIndex = -1;
+		let maxPrefixLength = 0;
+		
+		for (let i = 0; i <this.queryTermsLowerCase.length; i++) {
+			const queryTerm = this.queryTermsLowerCase[i];
+			if (lowerTerm.startsWith(queryTerm) && queryTerm.length > maxPrefixLength) {
+				maxPrefixLength = queryTerm.length;
+				longestPreMatchIndex = i;
+			}
+		}
+		
+		// not the exact match, but a fuzzy match or indirect match
+		if (longestPreMatchIndex === -1) {
+			return 1;
+		} else {
+			return  (longestPreMatchIndex + 1) * (longestPreMatchIndex + 1) 
+		}
 	}
 }
 
