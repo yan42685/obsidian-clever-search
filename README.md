@@ -99,3 +99,5 @@ If this plugin has been useful to you, I'd be sincerely thankful for your starâ­
 [![image](assets/images/buymeacoffee.png)](https://www.buymeacoffee.com/AlexClifton)
 
 > Special thanks to @Moyf for the generous contribution to this project.
+
+> Thanks again, @Moyf, for your second donation! (Received: August 28, 2025)
