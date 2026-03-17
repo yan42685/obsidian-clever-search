@@ -1,108 +1,69 @@
 name: Release Clever Search
 
 on:
-    push:
-        tags:
-            - "*"
+  push:
+    tags:
+      - "*"
 
 env:
-    PLUGIN_NAME: clever-search # Change this to match the id of your plugin.
+  PLUGIN_NAME: clever-search # 确保此处与你的插件 ID 一致
 
 jobs:
-    build:
-        runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
 
-        steps:
-            - uses: actions/checkout@v4
-              with: 
-                fetch-depth: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with: 
+          fetch-depth: 0 # 必须为 0 才能正确读取 git 历史生成日志
 
-            - uses: pnpm/action-setup@v4
-              with:
-                  version: 8.12.1
-                  run_install: true
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8.12.1
+          run_install: true
 
-            - name: Use Node.js
-              uses: actions/setup-node@v4
-              with:
-                cache: 'pnpm'
-                node-version: "20.x"
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: 'pnpm'
 
-            - name: Build
-              id: build
-              run: |
-                  pnpm install
-                  pnpm run build
-                  mkdir ${{ env.PLUGIN_NAME }}
-                  cp dist/main.js ./styles.css ./manifest.json dist/cs-search-worker.js ${{ env.PLUGIN_NAME }}
-                  zip -r ${{ env.PLUGIN_NAME }}.zip ${{ env.PLUGIN_NAME }}
-                  ls
-                  echo "::set-output name=tag_name::$(git tag --sort version:refname | tail -n 1)"
+      - name: Build and Package
+        id: build
+        run: |
+          # 1. 编译项目
+          pnpm install
+          pnpm run build
+          
+          # 2. 获取当前 Tag 名字 (例如 0.2.20)
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          # 3. 创建打包目录并复制必要文件
+          mkdir ${{ env.PLUGIN_NAME }}
+          cp dist/main.js ./styles.css ./manifest.json dist/cs-search-worker.js ${{ env.PLUGIN_NAME }}
+          
+          # 4. 压缩成带版本号的 ZIP 包
+          zip -r ${{ env.PLUGIN_NAME }}-$TAG_NAME.zip ${{ env.PLUGIN_NAME }}
+          
+          # 5. 提取日志：先删掉 \r 处理 Windows 换行符，再截取最新版本块
+          cat CHANGELOG.md | tr -d '\r' | sed -n '/^## \[/,/^## \[/p' | sed '$d' > latest_changelog.md
 
-            - name: Create Release
-              id: create_release
-              uses: actions/create-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  VERSION: ${{ github.ref }}
-              with:
-                  tag_name: ${{ github.ref }}
-                  release_name: ${{ github.ref }}
-                  draft: false
-                  prerelease: false
-
-            - name: Upload zip file
-              id: upload-zip
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }}
-                  asset_path: ./${{ env.PLUGIN_NAME }}.zip
-                  asset_name: ${{ env.PLUGIN_NAME }}-${{ steps.build.outputs.tag_name }}.zip
-                  asset_content_type: application/zip
-
-            - name: Upload main.js
-              id: upload-main
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }}
-                  asset_path: ./dist/main.js
-                  asset_name: main.js
-                  asset_content_type: text/javascript
-
-            - name: Upload manifest.json
-              id: upload-manifest
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }}
-                  asset_path: ./manifest.json
-                  asset_name: manifest.json
-                  asset_content_type: application/json
-
-            - name: Upload styles.css
-              id: upload-styles
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }}
-                  asset_path: ./styles.css
-                  asset_name: styles.css
-                  asset_content_type: text/css
-
-            # this is for test, might be removed in the future
-            - name: Upload cs-search-worker.js
-              id: upload-cs-search-worker
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }}
-                  asset_path: ./dist/cs-search-worker.js
-                  asset_name: cs-search-worker.js
-                  asset_content_type: text/javascript
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build.outputs.tag_name }}
+          name: Release ${{ steps.build.outputs.tag_name }}
+          body_path: latest_changelog.md # 使用刚才生成的临时日志文件
+          draft: false
+          prerelease: false
+          files: |
+            ${{ env.PLUGIN_NAME }}-${{ steps.build.outputs.tag_name }}.zip
+            dist/main.js
+            manifest.json
+            styles.css
+            dist/cs-search-worker.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
