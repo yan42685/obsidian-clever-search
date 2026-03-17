@@ -276,9 +276,16 @@ export class ViewHelper {
         const textLength = queryText.length;
         const startPos = line.indexOf(queryText, col);
         if (startPos !== -1) {
-          view.editor.setSelection(
-            { line: row, ch: startPos },
-            { line: row, ch: startPos + textLength },
+          const fromPos = { line: row, ch: startPos };
+          const toPos = { line: row, ch: startPos + textLength };
+
+          // 使用 Obsidian 内置的高亮方法
+          // 第一个参数是范围数组，第二个参数是 CSS 类名（'is-flashing' 是 Obsidian 内置的闪烁高亮类）
+          // 第三个参数 true 表示如果已经有高亮则清除之前的
+          (view.editor as any).addHighlights(
+            [{ from: fromPos, to: toPos }],
+            "is-flashing",
+            true,
           );
         }
 
