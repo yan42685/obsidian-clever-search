@@ -7,7 +7,8 @@
 		"preinstall": "npx only-allow pnpm",
 		"dev": "node esbuild.config.mjs development",
 		"test": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"release": "node release-script.mjs"
 	},
 	"keywords": [],
 	"author": "alexclifton",

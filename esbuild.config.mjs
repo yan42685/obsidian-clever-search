@@ -2,6 +2,7 @@ import builtins from "builtin-modules";
 import esbuild from "esbuild";
 import esbuildSvelte from "esbuild-svelte";
 import * as fsUtil from "fs";
+import { copyFileSync, existsSync, mkdirSync } from "fs"; // 新增导入
 import * as pathUtil from "path";
 import process from "process";
 import sveltePreprocess from "svelte-preprocess";
@@ -82,64 +83,79 @@ async function printFilesSize(directory) {
     }
 }
 
-
-const esbuildConfig = (outdir) => ({
-	banner: {
-		js: banner,
-	},
-	entryPoints: {
-		main: "src/main.ts",
-		"cs-search-worker": "src/web-workers/server.ts",
-	},
-	bundle: true,
-	minify: prod ? true : false,
-	external: [
-		"obsidian",
-		"electron",
-		"@codemirror/autocomplete",
-		"@codemirror/collab",
-		"@codemirror/commands",
-		"@codemirror/language",
-		"@codemirror/lint",
-		"@codemirror/search",
-		"@codemirror/state",
-		"@codemirror/view",
-		"@lezer/common",
-		"@lezer/highlight",
-		"@lezer/lr",
-		...builtins,
-		// 不打包测试文件夹
-		"tests/*",
-	],
-	format: "cjs",
-	platform: "node",
-	target: "es2018",
-	logLevel: "info",
-	sourcemap: prod ? false : "inline",
-	treeShaking: true,
-	outdir: outdir,
-	define: {
-		// need nested quotation mark
-		// "process.env.NODE_ENV": prod ? '"production"' : '"development"',
-		"process.env.NODE_ENV": `'${process.argv[2]}'`,
-	},
-
-	plugins: [
-		esbuildSvelte({
-			compilerOptions: { css: true },
-			preprocess: sveltePreprocess(),
-		}),
-	],
-});
-
 const DIST_PATH = "dist";
-const devContext = await esbuild.context(esbuildConfig("./"));
-const releaseContext = await esbuild.context(esbuildConfig(DIST_PATH));
+// 根据环境决定输出位置：生产环境去 dist，开发环境留根目录
+const outDir = prod ? DIST_PATH : "./";
+
+if (prod && !existsSync(DIST_PATH)) {
+    mkdirSync(DIST_PATH, { recursive: true });
+}
+
+const esbuildConfig = {
+    banner: {
+        js: banner,
+    },
+    entryPoints: {
+        main: "src/main.ts",
+        "cs-search-worker": "src/web-workers/server.ts",
+    },
+    bundle: true,
+    minify: prod,
+    external: [
+        "obsidian",
+        "electron",
+        "@codemirror/autocomplete",
+        "@codemirror/collab",
+        "@codemirror/commands",
+        "@codemirror/language",
+        "@codemirror/lint",
+        "@codemirror/search",
+        "@codemirror/state",
+        "@codemirror/view",
+        "@lezer/common",
+        "@lezer/highlight",
+        "@lezer/lr",
+        ...builtins,
+        "tests/*", // 不打包测试文件夹
+    ],
+    format: "cjs",
+    platform: "node",
+    target: "es2018",
+    logLevel: "info",
+    sourcemap: prod ? false : "inline",
+    treeShaking: true,
+    outdir: outDir, 
+    define: {
+        "process.env.NODE_ENV": prod ? '"production"' : '"development"',
+    },
+    plugins: [
+        esbuildSvelte({
+            compilerOptions: { css: true },
+            preprocess: sveltePreprocess(),
+        }),
+    ],
+};
+
+const context = await esbuild.context(esbuildConfig);
 
 if (prod) {
-	await releaseContext.rebuild();
-	await printFilesSize(DIST_PATH);
-	process.exit(0);
+    // 生产环境构建逻辑
+    await context.rebuild();
+    
+    // 自动将根目录的资源复制到 dist 文件夹，方便 GitHub Release 直接打包
+    const filesToCopy = ["manifest.json", "styles.css"];
+    for (const file of filesToCopy) {
+        if (existsSync(file)) {
+            copyFileSync(file, pathUtil.join(DIST_PATH, file));
+            console.log(`📑 Copied ${file} to ${DIST_PATH}/`);
+        }
+    }
+
+    await printFilesSize(DIST_PATH);
+    await context.dispose();
+    process.exit(0);
 } else {
-	await devContext.watch();
+    // 开发环境：直接监听并生成到根目录
+    console.log("\n🚀 Development mode: output to root");
+    await context.watch();
 }
