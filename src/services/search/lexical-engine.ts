@@ -405,61 +405,141 @@ class LinesMatcher {
 	// 	result.push(lines[i]);
 	// }
 	@monitorDecorator
-	private getTopRelevantLines(lines: Line[], topK: number): Line[] {
-		// compile a regex to filter out unmatched lines
-		const testRegex = new RegExp(this.matchedTerms.join("|"), "i");
+private getTopRelevantLines(lines: Line[], topK: number): Line[] {
+    const nTerms = this.matchedTerms.length;
+    if (nTerms === 0) return [];
 
-		// map each matchedTerm to a global regex
-		const globalRegexes = this.matchedTerms.map(
-			// (term) => new RegExp(term, "gi"),
-			(term) => this.generateRegExpForTerm(term),
-		);
+    /**
+     * 1. 【核心优化：构造单次扫描正则】
+     * 将所有搜索词合并为一个带捕获组的巨型正则。
+     * 排序逻辑：长词排在前面（如 "obsidian" 排在 "obs" 前），防止短词因正则贪婪匹配而拦截长词。
+     */
+    const sortedMatchedTerms = [...this.matchedTerms].sort((a, b) => b.length - a.length);
+    const combinedPattern = sortedMatchedTerms
+        .map(term => `(${this.generateRegExpForTerm(term).source})`)
+        .join("|");
+    const flags = this.outerSetting.isCaseSensitive ? "g" : "gi";
+    const bigRegex = new RegExp(combinedPattern, flags);
 
-		const topKLinesScores = new PriorityQueue<number>(
-			(a, b) => a - b,
-			topK,
-		);
-		topKLinesScores.push(0);
+    /**
+     * 2. 【预处理权重与位掩码】
+     * 提前计算每个捕获组对应的权重，避免在循环内进行复杂计算。
+     */
+    const termWeightMap = new Map<number, { weight: number, bit: number }>();
+    sortedMatchedTerms.forEach((term, index) => {
+        const lower = term.toLowerCase();
+        // 查找当前词在用户原始输入中的位置，用于计算“末尾词权重”
+        const queryIdx = this.queryTermsLowerCase.findIndex(q => lower.startsWith(q));
+        
+        termWeightMap.set(index + 1, { // 正则捕获组索引从 1 开始
+            // 权重采用 10^i，确保后一个搜索词的权重绝对压倒前词总和（符合直觉）
+            weight: queryIdx !== -1 ? Math.pow(10, queryIdx) : 1,
+            // 位掩码：用二进制中的一位记录该词是否出现，方便后续计算“覆盖了多少个词”
+            bit: 1 << (queryIdx !== -1 ? queryIdx : 15)
+        });
+    });
 
-		// line with score
-		const candidateLineMap = new Map<Line, number>();
-		const termCounts = new Map<string, number>();
+    const topKLinesScores = new PriorityQueue<number>((a, b) => a - b, topK);
+    topKLinesScores.push(0);
+    const candidateLineMap = new Map<Line, number>();
+    
+    // 唯一词覆盖数的乘数，确保“覆盖更多搜索词”拥有最高优先级
+    const UNIQUE_TERM_MULTIPLIER = 1_000_000_000;
 
-		// calculate scores for each line
-		for (const line of lines) {
-			// skip lines without any matchedTerm
-			if (!testRegex.test(line.text)) {
-				continue;
-			}
-			termCounts.clear();
-			let score = 0;
+    /**
+     * 3. 【高性能主循环】
+     * 遍历十几万行数据。由于使用了单次扫描正则，每行字符串只会被正则引擎处理一遍。
+     */
+    for (let i = 0, len = lines.length; i < len; i++) {
+        const line = lines[i];
+        const text = line.text;
+        
+        bigRegex.lastIndex = 0; // 重置正则扫描位置
+        let match;
+        let matchedBits = 0;    // 位掩码状态，记录匹配到的关键词种类
+        let weightedScore = 0;  // 基础加权分
+        let proximityBonus = 0; // 连续性/短语加分
+        let lastMatchEnd = -1;  // 记录上一个匹配结束的位置，计算距离
+        let lastQueryIdx = -1;  // 记录上一个匹配词的索引，判断顺序
+        let hasMatch = false;
 
-			// TODO: perf: scan the line only once if necessary
-			for (const regex of globalRegexes) {
-				regex.lastIndex = 0; // Reset lastIndex for global regex
-				let match;
-				while ((match = regex.exec(line.text)) !== null) {
-					const term = match[0];
-					const count = (termCounts.get(term) || 0) + 1;
-					termCounts.set(term, count);
+        while ((match = bigRegex.exec(text)) !== null) {
+            hasMatch = true;
+            
+            // 确定是哪个捕获组（关键词）被匹配到了
+            let groupIdx = 1;
+            while (!match[groupIdx]) groupIdx++;
+            
+            const data = termWeightMap.get(groupIdx)!;
+            const matchStart = match.index;
+            const matchText = match[0];
+            const currentQueryIdx = Math.log10(data.weight); // 通过权重反推在 Query 中的索引位
 
-					// add score: term.length for the first match, 0.01 for subsequent matches
-					score += (count === 1 ? term.length : 0.01) * this.positionWeight(term);
-				}
-			}
+            // 更新唯一词追踪位
+            matchedBits |= data.bit;
 
-			if (score > (topKLinesScores.peek() as number)) {
-				topKLinesScores.push(score);
-				candidateLineMap.set(line, score);
-			}
-		}
+            // 基础分：权重 * 匹配长度
+            weightedScore += data.weight * matchText.length;
 
-		// sort and return the topK lines based on score
-		return Array.from(candidateLineMap.entries())
-			.sort((a, b) => b[1] - a[1])
-			.slice(0, topK)
-			.map((entry) => entry[0]);
-	}
+            /**
+             * 【智能排序：连续性与顺序加分】
+             * 如果当前词紧跟在上一个词后面（短语匹配），或符合输入顺序，给予额外奖励。
+             */
+            if (lastMatchEnd !== -1) {
+                const distance = matchStart - lastMatchEnd;
+                // 距离奖分：距离越近（如挨在一起的短语），分数越高
+                if (distance < 10) {
+                    proximityBonus += 500 / (distance + 1);
+                }
+                // 顺序奖分：如果原文中出现的顺序和搜索框输入的顺序一致，加分
+                if (currentQueryIdx > lastQueryIdx) {
+                    proximityBonus += 50;
+                }
+            }
+
+            lastMatchEnd = matchStart + matchText.length;
+            lastQueryIdx = currentQueryIdx;
+        }
+
+        if (!hasMatch) continue;
+
+        /**
+         * 4. 【最终评分计算】
+         * 计算公式：(唯一词个数 * 10亿) + 基础权重分 + 连续性奖分 + 长度惩罚
+         */
+        const uniqueCount = this.popcount(matchedBits); // 计算二进制中有几个 1（即几个不同词）
+        
+        // 长度惩罚：在同等匹配情况下，行越短（密度越高）排名越靠前
+        const lengthPenalty = (1 / text.length) * 0.1;
+        
+        const finalScore = (uniqueCount * UNIQUE_TERM_MULTIPLIER) + 
+                           weightedScore + 
+                           proximityBonus + 
+                           lengthPenalty;
+
+        // 使用优先队列只保留前 topK 个高分结果
+        if (finalScore > (topKLinesScores.peek() as number)) {
+            topKLinesScores.push(finalScore);
+            candidateLineMap.set(line, finalScore);
+        }
+    }
+
+    // 5. 将 Map 转换回数组，按最终得分降序排列并返回
+    return Array.from(candidateLineMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topK)
+        .map((entry) => entry[0]);
+}
+
+/**
+ * 计算二进制位中 1 的个数（Hamming Weight）
+ * 极速算法：利用位移和掩码在常数时间内求得结果，避免循环。
+ */
+private popcount(n: number): number {
+    n = n - ((n >> 1) & 0x55555555);
+    n = (n & 0x33333333) + ((n >> 2) & 0x33333333);
+    return (((n + (n >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
+}
 
 	@monitorDecorator
 	private highlightLines(lines: Line[]): MatchedLine[] {
