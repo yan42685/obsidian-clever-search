@@ -1,0 +1,2 @@
+# 强制所有文本文件在提交时转为 LF
+* text=auto eol=lf
