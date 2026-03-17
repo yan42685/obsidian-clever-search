@@ -68,13 +68,16 @@ export class LexicalEngine {
 	}
 
 	async addDocuments(documents: IndexedDocument[]) {
-		const docsToAdd = documents.filter(
-			(doc) => !this.filesIndex.has(doc.path),
-		);
-		await this.filesIndex.addAllAsync(docsToAdd, {
-			chunkSize: this.option.documentChunkSize,
-		});
-		logger.debug(`added ${docsToAdd.length}`);
+	// 1. 获取所有待处理路径
+    const paths = documents.map(doc => doc.path);
+    // 2. 强制先从索引中移除旧条目（minisearch.discard 会处理不存在的情况）
+    this.filesIndex.discardAll(paths); 
+    
+    // 3. 现在可以安全地添加了
+    await this.filesIndex.addAllAsync(documents, {
+        chunkSize: this.option.documentChunkSize,
+    });
+    logger.debug(`updated/added ${documents.length} docs`);
 	}
 
 	deleteDocuments(paths: string[]) {

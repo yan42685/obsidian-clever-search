@@ -1,4 +1,4 @@
-import { App, TAbstractFile } from "obsidian";
+import { App, TAbstractFile, TFile } from "obsidian";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -8,6 +8,7 @@ import { DataManager, DocAddOperation, DocDeleteOperation } from "./data-manager
 export class FileWatcher {
 	private readonly dataManager = getInstance(DataManager);
 	private readonly app = getInstance(App);
+	private modifyTimers: Map<string, NodeJS.Timeout> = new Map();
 
 	start() {
 		this.stop(); // in case THIS_PLUGIN.onunload isn't called correctly, sometimes it happens
@@ -40,10 +41,23 @@ export class FileWatcher {
 		this.dataManager.receiveDocOperation(new DocDeleteOperation(oldPath));
 		this.dataManager.receiveDocOperation(new DocAddOperation(file));
 	};
+	// 有防抖功能
 	private readonly onModify = (file: TAbstractFile) => {
-		logger.debug(`modified: ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
-		this.dataManager.receiveDocOperation(new DocAddOperation(file));
+		if (!(file instanceof TFile)) return;
+		
+		const path = file.path;
+		if (this.modifyTimers.has(path)) clearTimeout(this.modifyTimers.get(path));
+
+		const timer = setTimeout(() => {
+			// 关键：触发时再次确认文件是否还在
+			const currentFile = this.app.vault.getAbstractFileByPath(path);
+			if (currentFile instanceof TFile) {
+				this.dataManager.receiveDocOperation(new DocAddOperation(currentFile));
+			}
+			this.modifyTimers.delete(path);
+		}, 800);
+
+		this.modifyTimers.set(path, timer);
 	};
 
 }

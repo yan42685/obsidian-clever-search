@@ -13,9 +13,8 @@ import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
 import {
-	SHOULD_NOT_HAPPEN,
 	getInstance,
-	monitorDecorator,
+	monitorDecorator
 } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
@@ -36,22 +35,21 @@ export class DataManager {
 	private isSemanticEngineUpToDate = false;
 
 	private docOperationsHandler = async (operations: DocOperation[]) => {
-		operations.sort((a, b) => a.time - b.time);
+		// 此时 operations 里的每个 path 都是唯一的（被 BufferSet 合并了）
 		for (const op of operations) {
-			if (op instanceof DocAddOperation) {
-				await this.addDocuments([op.file]);
-			} else if (op instanceof DocDeleteOperation) {
+			if (op instanceof DocDeleteOperation) {
 				await this.deleteDocuments([op.path]);
-			} else {
-				throw Error(SHOULD_NOT_HAPPEN);
+			} else if (op instanceof DocAddOperation) {
+				// 这里包含了真正的 "Add" 和 "Update" (因为 LexicalEngine 内部会先 discard)
+				await this.addDocuments([op.file]);
 			}
 		}
 	};
 	// help avoid unnecessary add or delete operations
 	private docOperationsBuffer = new BufferSet<DocOperation>(
 		this.docOperationsHandler,
-		(op) => op.path + op.type,
-		3,
+		(op) => op.path, // 关键：同一个文件的操作在 Buffer 期内只保留最后一个
+		3, 
 	);
 
 	@monitorDecorator
