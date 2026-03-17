@@ -173,29 +173,59 @@ export class ViewHelper {
     col: number,
     queryText: string,
   ) {
-    let alreadyOpen = false;
+    // 1. 尝试寻找已打开的 Leaf
+    let targetLeaf: any = null;
     this.app.workspace.iterateAllLeaves((leaf) => {
       if (
         leaf.view instanceof MarkdownView &&
         leaf.getViewState().state?.file === path
       ) {
-        this.app.workspace.setActiveLeaf(leaf, { focus: true });
-        alreadyOpen = true;
+        targetLeaf = leaf;
       }
     });
-    if (alreadyOpen) {
-      this.scrollIntoViewForExistingView(row, col, queryText);
+
+    if (targetLeaf) {
+      // 如果已打开，强制激活并聚焦
+      this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
     } else {
+      // 2. 如果未打开，执行打开动作
+      // 注意：openLinkText 之后，Obsidian 会异步创建新 Leaf
       await this.app.workspace.openLinkText(
         path,
         "",
         this.setting.ui.openInNewPane,
       );
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          this.scrollIntoViewForExistingView(row, col, queryText);
+
+      // 3. 关键：重新扫描一次，抓取那个刚刚被设为 Active 的新 Leaf
+      targetLeaf = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
+
+      // 如果抓不到（比如库太慢），就再遍历一次确认路径
+      if (!targetLeaf || (targetLeaf.view as any).file?.path !== path) {
+        this.app.workspace.iterateAllLeaves((leaf) => {
+          if (
+            leaf.view instanceof MarkdownView &&
+            leaf.view.file?.path === path
+          ) {
+            targetLeaf = leaf;
+          }
         });
-      });
+      }
+    }
+
+    if (targetLeaf && targetLeaf.view instanceof MarkdownView) {
+      const view = targetLeaf.view;
+
+      // 强制确保当前 Leaf 是活动状态（解决“只打开不切换”的问题）
+      this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+
+      // 4. 精准等待编辑器就绪，不再使用魔术数字 50ms
+      const isReady = await this.waitForEditor(view);
+
+      if (isReady) {
+        this.scrollIntoViewForExistingView(row, col, queryText);
+      } else {
+        console.warn("Editor failed to initialize in time.");
+      }
     }
   }
 
@@ -222,7 +252,15 @@ export class ViewHelper {
 
       view.editor.setCursor(cursorPos);
 
-      this.app.workspace.onLayoutReady(() => {
+      view.editor.scrollIntoView(
+        {
+          from: cursorPos,
+          to: cursorPos,
+        },
+        true,
+      );
+      // the second jump is necessary because the images are lazy-rendered
+      setTimeout(() => {
         view.editor.scrollIntoView(
           {
             from: cursorPos,
@@ -230,37 +268,43 @@ export class ViewHelper {
           },
           true,
         );
-        // the second jump is necessary because the images are lazy-rendered
-        setTimeout(() => {
-          view.editor.scrollIntoView(
-            {
-              from: cursorPos,
-              to: cursorPos,
-            },
-            true,
-          );
 
-          // It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
-          // 	view.editor.focus();
-          // 选中搜索关键字
-          const line = view.editor.getLine(row);
-          const textLength = queryText.length;
-          const startPos = line.indexOf(queryText, col);
-          if (startPos !== -1) {
-            view.editor.setSelection(
-              { line: row, ch: startPos },
-              { line: row, ch: startPos + textLength },
-            );
-          }
-
-          // this command need to be triggered again if the view mode has been switched to `editing` from `reading`
-          this.privateApi.executeCommandById(
-            ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+        // It doesn't take effect , use ObsidianCommandEnum.FOCUS_ON_LAST_NOTE instead
+        // 	view.editor.focus();
+        // 选中搜索关键字
+        const line = view.editor.getLine(row);
+        const textLength = queryText.length;
+        const startPos = line.indexOf(queryText, col);
+        if (startPos !== -1) {
+          view.editor.setSelection(
+            { line: row, ch: startPos },
+            { line: row, ch: startPos + textLength },
           );
-        }, 1);
-      });
+        }
+
+        // this command need to be triggered again if the view mode has been switched to `editing` from `reading`
+        this.privateApi.executeCommandById(
+          ObsidianCommandEnum.FOCUS_ON_LAST_NOTE,
+        );
+      }, 1);
     } else {
       logger.info("No markdown view to jump");
     }
+  }
+  // 等待新的 editor tab 绘制完成
+  private async waitForEditor(
+    view: MarkdownView,
+    timeout = 2000,
+  ): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      // 检查 CodeMirror 实例和编辑器对象是否都已存在
+      if (view.editor && (view.editor as any).cm) {
+        return true;
+      }
+      // 交出控制权，等待下一帧重绘
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    return false; // 超时
   }
 }
