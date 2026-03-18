@@ -1,0 +1,52 @@
+# --- 依赖与锁定文件 (极其消耗 Token，必关) ---
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+node_modules/
+
+# --- 编译与打包产物 ---
+dist/
+lib/
+build/
+.next/
+out/
+*.gem
+*.exe
+*.dll
+
+# 如果你有特定的模板文件夹也可以排除
+Templates/
+Archive/
+Attachments/
+*.png
+*.jpg
+*.pdf
+*.canvas
+
+# --- Orama 索引与持久化数据 ---
+# 这些是生成的二进制或巨大 JSON，读取它们毫无意义
+**/index.json
+**/orama-cache/
+**/vectors.bin
+**/search-index.db
+
+# --- 系统与日志 ---
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.eslintcache
+
+# --- 配置文件 (可选：如果你不想让 AI 看到你的 API Key) ---
+.env
+.env.*
+.secrets
+
+
+# 屏蔽 Obsidian 插件最终生成的那个大文件
+main.js
+
+*.md
+!README.md
+!CLAUDE.md
+!.claude/
