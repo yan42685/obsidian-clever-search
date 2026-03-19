@@ -15,6 +15,9 @@ import { LineHighlighter } from "../search/highlighter";
 import { HybridEngine } from "../search/hybrid/hybrid-engine";
 import { LexicalEngine } from "../search/lexical-engine";
 import { TruncateOption } from "../search/truncate-option";
+import { throttle } from "throttle-debounce";
+import { MyNotice } from "./transformed-api";
+import { t } from "./translations/locale-helper";
 import { DataProvider } from "./user-data/data-provider";
 import { ViewRegistry, ViewType } from "./view-registry";
 
@@ -26,6 +29,10 @@ export class SearchService {
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 	private readonly viewRegistry = getInstance(ViewRegistry);
 	readonly hybridEngine = new HybridEngine();
+	private readonly noticeHybridFallback = throttle(
+		5000,
+		(message: string) => new MyNotice(message, 5000),
+	);
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
@@ -70,6 +77,11 @@ export class SearchService {
 		}
 		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
 		const items = await this.hybridEngine.search(queryText);
+		const fallbackNoticeKey =
+			this.hybridEngine.consumeSearchFallbackNoticeKey();
+		if (fallbackNoticeKey) {
+			this.noticeHybridFallback(t(fallbackNoticeKey));
+		}
 		return { sourcePath, items } as SearchResult;
 	}
 

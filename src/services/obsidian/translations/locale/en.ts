@@ -13,6 +13,8 @@ export default {
 	// notification
 	"Reindexing...": "Reindexing...",
 	"Indexing finished": "Indexing finished",
+	"hybridNotice.indexFallbackToBm25": "Indexing finished, but semantic indexing is unavailable. Results are currently downgraded to BM25.",
+	"hybridNotice.searchFallbackToBm25": "Semantic search is unavailable. Current results have been downgraded to BM25.",
 	"files need to be indexed. Obsidian may freeze for a while":
 		"files need to be indexed. Obsidian may freeze for a while",
 	"Omnisearch isn't installed": "Omnisearch isn't installed",

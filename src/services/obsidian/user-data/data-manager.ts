@@ -63,7 +63,10 @@ export class DataManager {
 	async initAsync() {
 		await this.database.deleteOldDatabases();
 		await this.initLexicalEngine();
-		this.initHybridEngine().catch(e => logger.warn("hybrid engine init failed:", e));
+		await this.initHybridEngine().catch((e) => {
+			logger.warn("hybrid engine init failed:", e);
+			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+		});
 
 		if (!this.shouldForceRefresh) {
 			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
@@ -187,6 +190,11 @@ export class DataManager {
 			await this.hybridEngine.indexFile(file.path, text, file.stat.mtime).catch((e) =>
 				logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
 			);
+		}
+		const fallbackNoticeKey =
+			this.hybridEngine.consumeIndexingFallbackNoticeKey();
+		if (fallbackNoticeKey) {
+			new MyNotice(t(fallbackNoticeKey), 7000);
 		}
 	}
 

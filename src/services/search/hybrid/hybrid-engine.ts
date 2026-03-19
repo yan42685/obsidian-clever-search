@@ -1,14 +1,12 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
+import type { LocaleKey } from 'src/services/obsidian/translations/locale-helper';
 import { getInstance } from 'src/utils/my-lib';
 import { Database } from 'src/services/database/database';
 import type { VectorPrecision, BigChunk, RawBigChunk } from './hybrid-types';
 import { chunkFile } from './chunker';
 import {
 	Embedder,
-	HybridDisabledError,
-	NoApiKeyError,
-	WeeklyTokenLimitExceededError,
 } from './embedder';
 import { BM25Engine } from './bm25';
 import { HnswIndex } from './hnsw';
@@ -37,6 +35,8 @@ export class HybridEngine {
 	private precision: VectorPrecision = 'int8';
 	private _ready = false;
 	private _canSearch = false; // false → BM25-only fallback
+	private lastIndexingFallbackNoticeKey: LocaleKey | null = null;
+	private lastSearchFallbackNoticeKey: LocaleKey | null = null;
 
 	// ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -57,6 +57,16 @@ export class HybridEngine {
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
 	isEmpty(): boolean { return this.bm25.docCount === 0; }
+	consumeIndexingFallbackNoticeKey(): LocaleKey | null {
+		const key = this.lastIndexingFallbackNoticeKey;
+		this.lastIndexingFallbackNoticeKey = null;
+		return key;
+	}
+	consumeSearchFallbackNoticeKey(): LocaleKey | null {
+		const key = this.lastSearchFallbackNoticeKey;
+		this.lastSearchFallbackNoticeKey = null;
+		return key;
+	}
 	shouldIndexPath(filePath: string): boolean {
 		if (!this.isEnabled()) return false;
 		return !this.isExcludedPath(filePath);
@@ -92,13 +102,11 @@ export class HybridEngine {
 				this.embedder.embedBatch(smallTexts, this.precision),
 			]);
 			this._canSearch = true;
+			this.lastIndexingFallbackNoticeKey = null;
 		} catch (e) {
-			if (
-				e instanceof NoApiKeyError ||
-				e instanceof WeeklyTokenLimitExceededError ||
-				e instanceof HybridDisabledError
-			) {
 				this._canSearch = false;
+				this.lastIndexingFallbackNoticeKey =
+					"hybridNotice.indexFallbackToBm25";
 				// Index BM25 only
 				for (let i = 0; i < rawBig.length; i++) {
 					// We need a temporary id — use a placeholder; real id assigned after DB insert
@@ -106,8 +114,6 @@ export class HybridEngine {
 				}
 				await this.indexBm25Only(filePath, rawBig, updateTime);
 				return;
-			}
-			throw e;
 		}
 
 		// Persist big chunks
@@ -213,6 +219,10 @@ export class HybridEngine {
 		const bm25Results = this.bm25.search(query, topK * 2);
 
 		if (!this._canSearch || bm25Results.length === 0) {
+			if (!this._canSearch && bm25Results.length > 0) {
+				this.lastSearchFallbackNoticeKey =
+					"hybridNotice.searchFallbackToBm25";
+			}
 			return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
 		}
 
@@ -226,16 +236,12 @@ export class HybridEngine {
 			queryVec = q.vec;
 			queryScale = q.scale;
 			queryVecF16 = q.vecF16;
+			this.lastSearchFallbackNoticeKey = null;
 		} catch (e) {
-			if (
-				e instanceof NoApiKeyError ||
-				e instanceof WeeklyTokenLimitExceededError ||
-				e instanceof HybridDisabledError
-			) {
-				this._canSearch = false;
-				return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
-			}
-			throw e;
+			this._canSearch = false;
+			this.lastSearchFallbackNoticeKey =
+				"hybridNotice.searchFallbackToBm25";
+			return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
 		}
 
 		const vecSmallRaw = this.hnswSmall.search(queryVec, queryScale, topK * 3, undefined, this.precision, queryVecF16);
@@ -375,6 +381,10 @@ export class HybridEngine {
 		if (small) this.hnswSmall.deserialize(await blobToHnsw(small.data));
 		if (big) this.hnswBig.deserialize(await blobToHnsw(big.data));
 		this._canSearch = this.hnswSmall.isNonEmpty();
+		if (!this._canSearch) {
+			this.lastSearchFallbackNoticeKey =
+				"hybridNotice.searchFallbackToBm25";
+		}
 	}
 
 	private isExcludedPath(filePath: string): boolean {
