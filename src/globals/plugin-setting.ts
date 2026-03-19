@@ -39,6 +39,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		apiKey: '',
 		weeklyTokenLimit: 0,
 		indexConcurrency: 3,
+		vectorCompression: "int8",
+		fileRankStrategy: "bestPlusSupport",
 		excludedPaths: [],
 	},
 	ui: {
@@ -63,8 +65,17 @@ export type HybridSetting = {
 	apiKey: string;
 	weeklyTokenLimit: number; // 0 = unlimited
 	indexConcurrency: number;
+	vectorCompression: HybridVectorCompression;
+	fileRankStrategy: HybridFileRankStrategy;
 	excludedPaths: string[];
 };
+
+export type HybridVectorCompression = "int8" | "float16";
+
+export type HybridFileRankStrategy =
+	| "bestChunk"
+	| "bestPlusSupport"
+	| "sumTopChunks";
 
 /** One record per (filePath, dateKey) where dateKey = "YYYY-MM-DD" */
 export type HybridTokenRecord = {

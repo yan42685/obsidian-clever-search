@@ -118,8 +118,14 @@ export class Embedder {
 	}
 
 	private get apiDomain(): string {
-		const domain = this.setting.hybrid?.apiDomain;
-		return domain ? `https://${domain.replace(/^https?:\/\//, '')}/v1/embeddings` : OPENAI_EMBED_URL;
+		const domain = this.setting.hybrid?.apiDomain?.trim();
+		// 1. 去掉前缀协议
+		// 2. 去掉末尾可能存在的斜杠
+		const cleanDomain = domain
+			.replace(/^https?:\/\//, '')
+			.replace(/\/+$/, ''); 
+
+		return `https://${cleanDomain}/v1/embeddings`;
 	}
 
 	/** Embed a single query string (cached). */

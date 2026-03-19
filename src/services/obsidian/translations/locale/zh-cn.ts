@@ -115,4 +115,13 @@ export default {
 	"Visit GitHub": "访问 GitHub",
 	"hybridModal.indexConcurrency": "å¹¶å‘ç´¢å¼•æ•°",
 	"hybridModal.indexConcurrency.desc": "hybrid ç´¢å¼•æ—¶åŒæ—¶å¹¶è¡Œ embedding çš„æ–‡ä»¶æ•°ã€‚è®¾å¾—æ›´é«˜å¯èƒ½æ›´å¿«ï¼Œä½†ä¹Ÿæ›´å®¹æ˜“è§¦å‘é™æµã€�è¶…æ—¶æˆ–å¢žåŠ UI åŽ‹åŠ›ã€‚",
+	"hybridModal.vectorCompression": "向量精度",
+	"hybridModal.vectorCompression.desc": "控制语义排序保留多少 embedding 精度。修改后需要重建 hybrid 索引。",
+	"hybridModal.vectorCompression.int8": "仅 Int8（最快、最省空间）",
+	"hybridModal.vectorCompression.float16": "Int8 + Float16 复排（更准）",
+	"hybridModal.fileRankStrategy": "文件排序方式",
+	"hybridModal.fileRankStrategy.desc": "同一文件命中多个 chunk 时，如何合并成文件级排序分数。",
+	"hybridModal.fileRankStrategy.bestPlusSupport": "最高 chunk + 辅助加分",
+	"hybridModal.fileRankStrategy.bestChunk": "只看最高 chunk",
+	"hybridModal.fileRankStrategy.sumTopChunks": "Top chunk 总分",
 };
