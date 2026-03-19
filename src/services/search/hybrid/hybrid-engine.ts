@@ -369,8 +369,8 @@ export class HybridEngine {
 		// BM25 search (always available)
 		const bm25Results = this.bm25.search(query, topK * 2);
 
-		if (!this._canSearch || bm25Results.length === 0) {
-			if (!this._canSearch && bm25Results.length > 0) {
+		if (!this._canSearch) {
+			if (bm25Results.length > 0) {
 				this.lastSearchFallbackNoticeKey =
 					"hybridNotice.searchFallbackToBm25";
 			}
