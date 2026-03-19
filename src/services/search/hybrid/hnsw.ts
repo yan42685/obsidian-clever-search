@@ -106,6 +106,17 @@ export class HnswIndex {
 		deletedSet: new Set(),
 	};
 
+	clear(): void {
+		this.graph = {
+			entryPoint: null,
+			maxLevel: 0,
+			nodes: new Map(),
+			vectors: new Map(),
+			scales: new Map(),
+			deletedSet: new Set(),
+		};
+	}
+
 	// ─── Insert ───────────────────────────────────────────────────────────────
 
 	insert(id: number, vec: Int8Array, scale: number, vecF16?: Uint16Array): void {
@@ -256,6 +267,7 @@ export class HnswIndex {
 	}
 
 	deserialize(data: HnswGraphData): void {
+		this.clear();
 		this.graph.entryPoint = data.entryPoint;
 		this.graph.maxLevel = data.maxLevel;
 		this.graph.nodes = new Map(data.nodes);

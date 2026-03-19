@@ -53,6 +53,25 @@ export class HybridEngine {
 		this._ready = true;
 	}
 
+	async clearAll(): Promise<void> {
+		this.bm25.clear();
+		this.hnswSmall.clear();
+		this.hnswBig.clear();
+		this._ready = false;
+		this._canSearch = false;
+		this.lastIndexingFallbackNoticeKey = null;
+		this.lastSearchFallbackNoticeKey = null;
+
+		await Promise.all([
+			this.db.db.hybridChunks.clear(),
+			this.db.db.hybridBigChunks.clear(),
+			this.db.db.hybridBm25Index.clear(),
+			this.db.db.hybridHnswSmall.clear(),
+			this.db.db.hybridHnswBig.clear(),
+			this.db.db.hybridDocRefs.clear(),
+		]);
+	}
+
 	isEnabled(): boolean { return this.setting.hybrid.enabled; }
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
@@ -369,11 +388,14 @@ export class HybridEngine {
 	}
 
 	private async loadBm25(): Promise<void> {
+		this.bm25.clear();
 		const record = await this.db.db.hybridBm25Index.get(0);
 		if (record) this.bm25.deserialize(await blobToBm25(record.data));
 	}
 
 	private async loadHnsw(): Promise<void> {
+		this.hnswSmall.clear();
+		this.hnswBig.clear();
 		const [small, big] = await Promise.all([
 			this.db.db.hybridHnswSmall.get(0),
 			this.db.db.hybridHnswBig.get(0),

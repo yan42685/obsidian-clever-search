@@ -87,10 +87,15 @@ export class DataManager {
 	async refreshAllAsync() {
 		const prevNotice = new MyNotice(t("Reindexing..."));
 		this.shouldForceRefresh = true;
-		await this.initAsync();
-		prevNotice.hide();
-		new MyNotice(t("Indexing finished"), 5000);
-		this.shouldForceRefresh = false;
+		getInstance(FileWatcher).stop();
+		try {
+			await this.initAsync();
+			new MyNotice(t("Indexing finished"), 5000);
+		} finally {
+			prevNotice.hide();
+			this.shouldForceRefresh = false;
+			getInstance(FileWatcher).start();
+		}
 	}
 
 	private async addDocuments(files: TAbstractFile[]) {
@@ -142,6 +147,10 @@ export class DataManager {
 	private async initHybridEngine() {
 		if (!this.hybridEngine.isEnabled()) {
 			return;
+		}
+
+		if (this.shouldForceRefresh) {
+			await this.hybridEngine.clearAll();
 		}
 
 		await this.hybridEngine.load();
@@ -210,6 +219,7 @@ export class DataManager {
 		}
 		const documents = await this.dataProvider.generateAllIndexedDocuments(filesToIndex);
 		await this.lexicalEngine.reIndexAll(documents);
+		await this.saveLexicalDocRefs(filesToIndex);
 		this.isLexicalEngineUpToDate = true;
 	}
 

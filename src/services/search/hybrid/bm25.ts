@@ -24,6 +24,16 @@ export class BM25Engine {
 
 	get docCount(): number { return this._docCount; }
 
+	clear(): void {
+		this.termDict.clear();
+		this.postings.clear();
+		this.docLengths.clear();
+		this.nextTermId = 0;
+		this._docCount = 0;
+		this.avgBigChunkLen = 0;
+		this.totalDocLen = 0;
+	}
+
 	// ─── Indexing ─────────────────────────────────────────────────────────────
 
 	addDocument(bigChunkId: number, text: string): void {
@@ -184,9 +194,7 @@ export class BM25Engine {
 	}
 
 	deserialize(data: BM25Index): void {
-		this.termDict.clear();
-		this.postings.clear();
-		this.docLengths.clear();
+		this.clear();
 
 		for (const [term, entry] of Object.entries(data.termDict)) {
 			this.termDict.set(term, { termId: entry.termId, df: entry.df });
