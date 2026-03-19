@@ -1,6 +1,7 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
 import type { LocaleKey } from 'src/services/obsidian/translations/locale-helper';
+import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { Database } from 'src/services/database/database';
 import type { VectorPrecision, BigChunk, RawBigChunk } from './hybrid-types';
@@ -241,6 +242,7 @@ export class HybridEngine {
 		updateTime = Date.now(),
 		option: HybridWriteOption = {},
 	): Promise<void> {
+		const totalStart = Date.now();
 		if (!this.shouldIndexPath(filePath)) {
 			await this.deleteFile(filePath, option);
 			return;
@@ -250,17 +252,25 @@ export class HybridEngine {
 
 		const { bigChunks: rawBig, chunks: rawSmall } = chunkFile(filePath, plainText);
 		if (rawBig.length === 0) return;
+		logger.debug(
+			`hybrid indexFileStrict chunked: file=${filePath}, bigChunks=${rawBig.length}, smallChunks=${rawSmall.length}, chars=${plainText.length}`,
+		);
 
 		const bigTexts = rawBig.map((b) => b.text);
 		const smallTexts = rawSmall.map((s) => s.text);
+		const embedStart = Date.now();
 		const [bigVecs, smallVecs] = await Promise.all([
 			this.embedder.embedBatch(bigTexts, this.precision, filePath),
 			this.embedder.embedBatch(smallTexts, this.precision, filePath),
 		]);
+		logger.debug(
+			`hybrid indexFileStrict embedded: file=${filePath}, elapsed=${Date.now() - embedStart} ms`,
+		);
 
 		this._canSearch = true;
 		this.lastIndexingFallbackNoticeKey = null;
 
+		const dbWriteStart = Date.now();
 		const bigRows = rawBig.map((rb, i) => {
 			const { vec, scale, vecF16 } = bigVecs[i];
 			return bigChunkToRow({
@@ -312,7 +322,11 @@ export class HybridEngine {
 			chunkIds: JSON.stringify(bigChunkChildIds.get(bigChunkIds[i]) ?? []),
 		}));
 		await this.db.db.hybridBigChunks.bulkPut(updatedBigRows);
+		logger.debug(
+			`hybrid indexFileStrict db-write: file=${filePath}, bigRows=${bigRows.length}, smallRows=${smallRows.length}, elapsed=${Date.now() - dbWriteStart} ms`,
+		);
 
+		const memoryIndexStart = Date.now();
 		for (let i = 0; i < rawBig.length; i++) {
 			const bigId = bigChunkIds[i];
 			const { vec, scale, vecF16 } = bigVecs[i];
@@ -330,11 +344,21 @@ export class HybridEngine {
 				vecF16,
 			);
 		}
+		logger.debug(
+			`hybrid indexFileStrict memory-index: file=${filePath}, elapsed=${Date.now() - memoryIndexStart} ms`,
+		);
 
 		if (option.persistIndices ?? true) {
+			const persistStart = Date.now();
 			await this.persistIndices();
+			logger.debug(
+				`hybrid indexFileStrict persistIndices: file=${filePath}, elapsed=${Date.now() - persistStart} ms`,
+			);
 		}
 		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
+		logger.debug(
+			`hybrid indexFileStrict finished: file=${filePath}, total=${Date.now() - totalStart} ms`,
+		);
 	}
 
 	// ─── Search ───────────────────────────────────────────────────────────────
@@ -484,7 +508,9 @@ export class HybridEngine {
 	}
 
 	async persistIndicesForBatch(): Promise<void> {
+		const persistStart = Date.now();
 		await this.persistIndices();
+		logger.debug(`hybrid batch persistIndices finished in ${Date.now() - persistStart} ms`);
 	}
 
 	private async persistBm25(): Promise<void> {

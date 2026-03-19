@@ -1,6 +1,7 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import { Database } from 'src/services/database/database';
 import { MyNotice } from 'src/services/obsidian/transformed-api';
+import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type VectorPrecision } from './hybrid-types';
@@ -53,6 +54,7 @@ const noticeWeeklyLimitReached = throttle(
 
 // ─── Quantization helpers ─────────────────────────────────────────────────────
 
+// TODO: 检查千问，OpenAI代理返回的向量是不是归一化的, 如果是那这一步可以去掉
 /** L2-normalize a float32 array in-place. */
 function l2Normalize(v: number[]): void {
 	let norm = 0;
@@ -146,11 +148,19 @@ export class Embedder {
 		if (!this.apiKey) throw new NoApiKeyError();
 
 		const results: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> = [];
+		const batchStart = Date.now();
+		logger.debug(
+			`embedBatch start: file=${filePath || '<query>'}, chunks=${texts.length}, precision=${precision}`,
+		);
 
 		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
 			const batch = texts.slice(i, i + BATCH_SIZE);
+			const requestStart = Date.now();
 			await this.ensureWeeklyLimitAllows(batch);
 			const { embeddings: floats, tokensUsed } = await this.fetchEmbeddings(batch);
+			logger.debug(
+				`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
+			);
 			if (tokensUsed > 0) {
 				await recordTokenUsage(filePath, tokensUsed);
 			}
@@ -164,6 +174,10 @@ export class Embedder {
 				results.push(entry);
 			}
 		}
+
+		logger.debug(
+			`embedBatch finished: file=${filePath || '<query>'}, chunks=${texts.length}, elapsed=${Date.now() - batchStart} ms`,
+		);
 
 		return results;
 	}

@@ -113,4 +113,6 @@ export default {
 	"Support the Project desc":
 		"如果觉得本插件对你有帮助，希望能到 GitHub 点个 star",
 	"Visit GitHub": "访问 GitHub",
+	"hybridModal.indexConcurrency": "å¹¶å‘ç´¢å¼•æ•°",
+	"hybridModal.indexConcurrency.desc": "hybrid ç´¢å¼•æ—¶åŒæ—¶å¹¶è¡Œ embedding çš„æ–‡ä»¶æ•°ã€‚è®¾å¾—æ›´é«˜å¯èƒ½æ›´å¿«ï¼Œä½†ä¹Ÿæ›´å®¹æ˜“è§¦å‘é™æµã€�è¶…æ—¶æˆ–å¢žåŠ UI åŽ‹åŠ›ã€‚",
 };

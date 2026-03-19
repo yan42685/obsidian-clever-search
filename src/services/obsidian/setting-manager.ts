@@ -335,6 +335,7 @@ class HybridSearchModal extends Modal {
 	private inputEl: HTMLInputElement;
 	private suggester: CommonSuggester;
 	private weeklyLimitInputEl: HTMLInputElement;
+	private indexConcurrencyInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
 	private statsEl: HTMLElement;
 
@@ -423,6 +424,25 @@ class HybridSearchModal extends Modal {
 		this.weeklyQuotaEl = contentEl.createDiv();
 		this.weeklyQuotaEl.style.marginBottom = "1em";
 		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
+
+		new Setting(contentEl)
+			.setName(t("hybridModal.indexConcurrency"))
+			.setDesc(t("hybridModal.indexConcurrency.desc"))
+			.addText((text) => {
+				this.indexConcurrencyInputEl = text.inputEl;
+				text
+					.setPlaceholder("3")
+					.setValue(String(this.setting.hybrid.indexConcurrency ?? 3));
+				text.inputEl.type = "number";
+				text.inputEl.min = "1";
+				text.inputEl.max = "8";
+				text.inputEl.step = "1";
+			})
+			.addButton((button) =>
+				button.setButtonText(t("Update")).onClick(async () => {
+					await this.updateIndexConcurrency();
+				}),
+			);
 
 		// ── Excluded paths ────────────────────────────────────────────────────
 		contentEl.createEl("h3", { text: t("hybridModal.excludedPaths") });
@@ -527,6 +547,15 @@ class HybridSearchModal extends Modal {
 		}
 
 		await this.refreshTokenStats();
+	}
+
+	private async updateIndexConcurrency() {
+		const parsed = parseInt(this.indexConcurrencyInputEl.value, 10);
+		const nextValue =
+			Number.isNaN(parsed) || parsed < 1 ? 3 : Math.min(parsed, 8);
+		this.setting.hybrid.indexConcurrency = nextValue;
+		this.indexConcurrencyInputEl.value = String(nextValue);
+		await this.settingManager.saveSettings();
 	}
 
 	private async refreshTokenStats() {

@@ -38,6 +38,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		apiDomain: '',
 		apiKey: '',
 		weeklyTokenLimit: 0,
+		indexConcurrency: 3,
 		excludedPaths: [],
 	},
 	ui: {
@@ -61,6 +62,7 @@ export type HybridSetting = {
 	apiDomain: string;
 	apiKey: string;
 	weeklyTokenLimit: number; // 0 = unlimited
+	indexConcurrency: number;
 	excludedPaths: string[];
 };
 

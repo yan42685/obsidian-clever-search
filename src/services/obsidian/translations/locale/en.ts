@@ -79,6 +79,8 @@ export default {
 	"hybridModal.weeklyTokenLimit": "Weekly token limit",
 	"hybridModal.weeklyTokenLimit.desc": "Maximum tokens to consume per week (Mon–Sun). Set to 0 for unlimited.",
 	"hybridModal.weeklyUsed": "This week used",
+	"hybridModal.indexConcurrency": "Index concurrency",
+	"hybridModal.indexConcurrency.desc": "How many files to embed in parallel during hybrid indexing. Higher values may be faster but can increase rate limits, timeouts, and UI pressure.",
 	"hybridModal.weeklyRemaining": "Remaining quota",
 	"hybridModal.unlimited": "Unlimited",
 	"hybridModal.weeklyLimitExceededNotice": "This week's token usage already exceeds the limit. Remaining quota is 0.",

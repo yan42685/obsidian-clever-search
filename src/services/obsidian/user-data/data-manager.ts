@@ -3,6 +3,7 @@ import { TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
+import { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
@@ -32,12 +33,12 @@ type HybridIndexFailure = {
 
 @singleton()
 export class DataManager {
-	private static readonly HYBRID_INDEX_CONCURRENCY = 3;
 	private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
 	private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
+	private setting = getInstance(OuterSetting);
 	private lexicalEngine = getInstance(LexicalEngine);
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
@@ -205,6 +206,11 @@ export class DataManager {
 
 		logger.trace(`hybrid docs to delete: ${docsToDelete.length}`);
 		logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
+		const hybridIndexStart = Date.now();
+		const concurrency = this.getHybridIndexConcurrency();
+		logger.debug(
+			`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
+		);
 
 		for (const path of docsToDelete) {
 			await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
@@ -214,7 +220,7 @@ export class DataManager {
 		const failures: HybridIndexFailure[] = [];
 		await this.processFilesWithConcurrency(
 			docsToAdd,
-			DataManager.HYBRID_INDEX_CONCURRENCY,
+			concurrency,
 			async (file) => {
 				const failure = await this.indexHybridFileWithRetry(file);
 				if (failure) {
@@ -230,6 +236,9 @@ export class DataManager {
 		} else if (fallbackNoticeKey) {
 			new MyNotice(t(fallbackNoticeKey), 7000);
 		}
+		logger.debug(
+			`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true`,
+		);
 	}
 
 	private async reindexLexicalEngineWithCurrFiles() {
@@ -311,6 +320,7 @@ export class DataManager {
 	private async indexHybridFileWithRetry(
 		file: TFile,
 	): Promise<HybridIndexFailure | null> {
+		const fileIndexStart = Date.now();
 		const text = await this.dataProvider.readPlainText(file.path);
 		let lastError: unknown = null;
 		let attempts = 0;
@@ -327,6 +337,9 @@ export class DataManager {
 					text,
 					file.stat.mtime,
 					{ persistIndices: false },
+				);
+				logger.debug(
+					`hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
 				);
 				return null;
 			} catch (error) {
@@ -368,6 +381,11 @@ export class DataManager {
 			attempts,
 			bm25FallbackIndexed,
 		};
+	}
+
+	private getHybridIndexConcurrency(): number {
+		const configured = this.setting.hybrid.indexConcurrency ?? 3;
+		return Math.max(1, Math.min(configured, 8));
 	}
 
 	private isRetryableHybridIndexError(error: unknown): boolean {
