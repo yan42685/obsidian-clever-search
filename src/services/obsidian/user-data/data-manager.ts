@@ -207,7 +207,7 @@ export class DataManager {
 		logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
 
 		for (const path of docsToDelete) {
-			await this.hybridEngine.deleteFile(path).catch((e) =>
+			await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
 				logger.warn(`hybrid deleteFile failed for ${path}:`, e),
 			);
 		}
@@ -222,6 +222,7 @@ export class DataManager {
 				}
 			},
 		);
+		await this.hybridEngine.persistIndicesForBatch();
 		const fallbackNoticeKey =
 			this.hybridEngine.consumeIndexingFallbackNoticeKey();
 		if (failures.length > 0) {
@@ -325,6 +326,7 @@ export class DataManager {
 					file.path,
 					text,
 					file.stat.mtime,
+					{ persistIndices: false },
 				);
 				return null;
 			} catch (error) {

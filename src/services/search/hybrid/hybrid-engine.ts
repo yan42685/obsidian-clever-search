@@ -24,6 +24,10 @@ import {
 const RRF_K = 60;
 const VEC_BIG_WEIGHT = 0.7; // big-chunk vector is semantically coarser
 
+type HybridWriteOption = {
+	persistIndices?: boolean;
+};
+
 export class HybridEngine {
 	private readonly db = getInstance(Database);
 	private readonly setting = getInstance(OuterSetting);
@@ -197,7 +201,10 @@ export class HybridEngine {
 		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
 	}
 
-	async deleteFile(filePath: string): Promise<void> {
+	async deleteFile(
+		filePath: string,
+		option: HybridWriteOption = {},
+	): Promise<void> {
 		// Get big chunk ids for this file
 		const bigRows = await this.db.db.hybridBigChunks.where('filePath').equals(filePath).toArray();
 		const bigIds = bigRows.map(r => r.id!);
@@ -223,20 +230,23 @@ export class HybridEngine {
 		// Rebuild HNSW if too many deleted nodes
 		if (this.hnswSmall.needsRebuild()) this.hnswSmall.rebuild();
 		if (this.hnswBig.needsRebuild()) this.hnswBig.rebuild();
-		await this.persistIndices();
+		if (option.persistIndices ?? true) {
+			await this.persistIndices();
+		}
 	}
 
 	async indexFileStrict(
 		filePath: string,
 		plainText: string,
 		updateTime = Date.now(),
+		option: HybridWriteOption = {},
 	): Promise<void> {
 		if (!this.shouldIndexPath(filePath)) {
-			await this.deleteFile(filePath);
+			await this.deleteFile(filePath, option);
 			return;
 		}
 
-		await this.deleteFile(filePath);
+		await this.deleteFile(filePath, option);
 
 		const { bigChunks: rawBig, chunks: rawSmall } = chunkFile(filePath, plainText);
 		if (rawBig.length === 0) return;
@@ -251,11 +261,9 @@ export class HybridEngine {
 		this._canSearch = true;
 		this.lastIndexingFallbackNoticeKey = null;
 
-		const bigChunkIds: number[] = [];
-		for (let i = 0; i < rawBig.length; i++) {
-			const rb = rawBig[i];
+		const bigRows = rawBig.map((rb, i) => {
 			const { vec, scale, vecF16 } = bigVecs[i];
-			const row = bigChunkToRow({
+			return bigChunkToRow({
 				id: undefined,
 				filePath: rb.filePath,
 				text: rb.text,
@@ -266,18 +274,19 @@ export class HybridEngine {
 				scale,
 				vectorF16: vecF16,
 			});
-			const id = await this.db.db.hybridBigChunks.add(row);
-			bigChunkIds.push(id as number);
-		}
+		});
+		const bigChunkIds = await (this.db.db.hybridBigChunks as any).bulkAdd(
+			bigRows,
+			{ allKeys: true },
+		) as number[];
 
 		const bigChunkChildIds: Map<number, number[]> = new Map(
 			bigChunkIds.map((id) => [id, []]),
 		);
-		for (let i = 0; i < rawSmall.length; i++) {
-			const rs = rawSmall[i];
+		const smallRows = rawSmall.map((rs, i) => {
 			const bigId = bigChunkIds[rs.bigChunkIdx];
 			const { vec, scale, vecF16 } = smallVecs[i];
-			const row = chunkToRow({
+			return chunkToRow({
 				id: undefined,
 				bigChunkId: bigId,
 				filePath,
@@ -285,15 +294,24 @@ export class HybridEngine {
 				scale,
 				vectorF16: vecF16,
 			});
-			const id = await this.db.db.hybridChunks.add(row);
+		});
+		const smallChunkIds = await (this.db.db.hybridChunks as any).bulkAdd(
+			smallRows,
+			{ allKeys: true },
+		) as number[];
+		for (let i = 0; i < rawSmall.length; i++) {
+			const rs = rawSmall[i];
+			const bigId = bigChunkIds[rs.bigChunkIdx];
+			const id = smallChunkIds[i];
 			bigChunkChildIds.get(bigId)!.push(id as number);
 		}
 
-		for (const [bigId, childIds] of bigChunkChildIds) {
-			await this.db.db.hybridBigChunks.update(bigId, {
-				chunkIds: JSON.stringify(childIds),
-			});
-		}
+		const updatedBigRows = bigRows.map((row, i) => ({
+			...row,
+			id: bigChunkIds[i],
+			chunkIds: JSON.stringify(bigChunkChildIds.get(bigChunkIds[i]) ?? []),
+		}));
+		await this.db.db.hybridBigChunks.bulkPut(updatedBigRows);
 
 		for (let i = 0; i < rawBig.length; i++) {
 			const bigId = bigChunkIds[i];
@@ -302,22 +320,20 @@ export class HybridEngine {
 			this.hnswBig.insert(bigId, vec, scale, vecF16);
 		}
 
-		const smallRows = await this.db.db.hybridChunks
-			.where('filePath')
-			.equals(filePath)
-			.toArray();
-		for (let i = 0; i < smallRows.length; i++) {
-			const row = smallRows[i];
-			const chunk = await rowToChunk(row);
+		for (let i = 0; i < smallChunkIds.length; i++) {
+			const chunkId = smallChunkIds[i];
+			const { vec, scale, vecF16 } = smallVecs[i];
 			this.hnswSmall.insert(
-				chunk.id,
-				chunk.vector,
-				chunk.scale,
-				chunk.vectorF16,
+				chunkId,
+				vec,
+				scale,
+				vecF16,
 			);
 		}
 
-		await this.persistIndices();
+		if (option.persistIndices ?? true) {
+			await this.persistIndices();
+		}
 		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
 	}
 
@@ -465,6 +481,10 @@ export class HybridEngine {
 
 	private async persistIndices(): Promise<void> {
 		await Promise.all([this.persistBm25(), this.persistHnsw()]);
+	}
+
+	async persistIndicesForBatch(): Promise<void> {
+		await this.persistIndices();
 	}
 
 	private async persistBm25(): Promise<void> {
