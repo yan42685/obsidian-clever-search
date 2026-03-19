@@ -56,7 +56,7 @@ export class DataManager {
 	async initAsync() {
 		await this.database.deleteOldDatabases();
 		await this.initLexicalEngine();
-		this.hybridEngine.load().catch(e => logger.warn("hybrid engine load failed:", e));
+		this.initHybridEngine().catch(e => logger.warn("hybrid engine init failed:", e));
 
 		if (!this.shouldForceRefresh) {
 			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
@@ -127,6 +127,21 @@ export class DataManager {
 		}
 		logger.trace("Lexical engine is ready");
 		await this.database.setMiniSearchData(this.lexicalEngine.filesIndex.toJSON());
+	}
+
+	private async initHybridEngine() {
+		await this.hybridEngine.load();
+		if (this.hybridEngine.isEmpty()) {
+			logger.trace("Hybrid index is empty, indexing all vault files...");
+			const files = this.dataProvider.allFilesToBeIndexed();
+			for (const file of files) {
+				const text = await this.dataProvider.readPlainText(file.path);
+				await this.hybridEngine.indexFile(file.path, text).catch(e =>
+					logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
+				);
+			}
+			logger.trace("Hybrid initial indexing complete");
+		}
 	}
 
 	private async reindexLexicalEngineWithCurrFiles() {

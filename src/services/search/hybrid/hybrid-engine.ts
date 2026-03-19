@@ -43,6 +43,7 @@ export class HybridEngine {
 
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
+	isEmpty(): boolean { return this.bm25.docCount === 0; }
 
 	// ─── Indexing ─────────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ export class HybridEngine {
 			const rb = rawBig[i];
 			const { vec, scale, vecF16 } = bigVecs[i];
 			const row = bigChunkToRow({
-				id: 0, // auto-assigned
+				id: undefined,
 				filePath: rb.filePath,
 				text: rb.text,
 				startLine: rb.startLine,
@@ -107,7 +108,7 @@ export class HybridEngine {
 			const bigId = bigChunkIds[rs.bigChunkIdx];
 			const { vec, scale, vecF16 } = smallVecs[i];
 			const row = chunkToRow({
-				id: 0,
+				id: undefined,
 				bigChunkId: bigId,
 				filePath,
 				vector: vec,
@@ -253,7 +254,7 @@ export class HybridEngine {
 	private async indexBm25Only(filePath: string, rawBig: RawBigChunk[]): Promise<void> {
 		for (const rb of rawBig) {
 			const row = bigChunkToRow({
-				id: 0,
+				id: undefined,
 				filePath: rb.filePath,
 				text: rb.text,
 				startLine: rb.startLine,

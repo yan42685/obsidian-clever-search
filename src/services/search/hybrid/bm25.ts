@@ -16,11 +16,13 @@ export class BM25Engine {
 	private termDict = new Map<string, { termId: number; df: number }>();
 	private postings = new Map<number, PostingList>();
 	private nextTermId = 0;
-	private docCount = 0;
+	private _docCount = 0;
 	private avgBigChunkLen = 0;
 	private docLengths = new Map<number, number>(); // bigChunkId → token count
 	// sum of all doc lengths, used to recompute avg incrementally
 	private totalDocLen = 0;
+
+	get docCount(): number { return this._docCount; }
 
 	// ─── Indexing ─────────────────────────────────────────────────────────────
 
@@ -35,8 +37,8 @@ export class BM25Engine {
 
 		this.docLengths.set(bigChunkId, dl);
 		this.totalDocLen += dl;
-		this.docCount++;
-		this.avgBigChunkLen = this.totalDocLen / this.docCount;
+		this._docCount++;
+		this.avgBigChunkLen = this.totalDocLen / this._docCount;
 
 		// Count term frequencies and collect positions
 		const tfMap = new Map<string, { tf: number; positions: number[] }>();
@@ -80,8 +82,8 @@ export class BM25Engine {
 
 		this.docLengths.delete(bigChunkId);
 		this.totalDocLen -= dl;
-		this.docCount--;
-		if (this.docCount > 0) this.avgBigChunkLen = this.totalDocLen / this.docCount;
+		this._docCount--;
+		if (this._docCount > 0) this.avgBigChunkLen = this.totalDocLen / this._docCount;
 
 		// Remove from all posting lists
 		for (const [, list] of this.postings) {
@@ -106,10 +108,10 @@ export class BM25Engine {
 
 	search(query: string, topK = 20): BM25SearchResult[] {
 		const terms = this.tokenizer.tokenize(query, 'search');
-		if (terms.length === 0 || this.docCount === 0) return [];
+		if (terms.length === 0 || this._docCount === 0) return [];
 
 		const scores = new Map<number, number>();
-		const N = this.docCount;
+		const N = this._docCount;
 
 		// Collect per-doc positions for proximity scoring
 		const docPositions = new Map<number, Map<string, number[]>>(); // docId → term → positions
@@ -175,7 +177,7 @@ export class BM25Engine {
 		return {
 			termDict: termDictObj,
 			postings: postingsObj,
-			docCount: this.docCount,
+			docCount: this._docCount,
 			avgBigChunkLen: this.avgBigChunkLen,
 			docLengths: docLengthsObj,
 		};
@@ -195,7 +197,7 @@ export class BM25Engine {
 		for (const [idStr, len] of Object.entries(data.docLengths)) {
 			this.docLengths.set(Number(idStr), len as number);
 		}
-		this.docCount = data.docCount;
+		this._docCount = data.docCount;
 		this.avgBigChunkLen = data.avgBigChunkLen;
 		this.totalDocLen = data.avgBigChunkLen * data.docCount;
 		this.nextTermId = Math.max(0, ...Array.from(this.termDict.values()).map(e => e.termId)) + 1;

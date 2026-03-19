@@ -72,9 +72,8 @@ export async function blobToHnsw(blob: Blob): Promise<HnswGraphData> {
 
 // ─── BigChunk ↔ Row conversion ────────────────────────────────────────────────
 
-export function bigChunkToRow(bc: BigChunk): BigChunkRow {
-	return {
-		id: bc.id,
+export function bigChunkToRow(bc: Omit<BigChunk, 'id'> & { id?: number }): BigChunkRow {
+	const row: BigChunkRow = {
 		filePath: bc.filePath,
 		text: bc.text,
 		startLine: bc.startLine,
@@ -84,6 +83,8 @@ export function bigChunkToRow(bc: BigChunk): BigChunkRow {
 		scale: bc.scale,
 		vectorF16: bc.vectorF16 ? uint16ToBlob(bc.vectorF16) : undefined,
 	};
+	if (bc.id !== undefined) row.id = bc.id;
+	return row;
 }
 
 export async function rowToBigChunk(row: BigChunkRow): Promise<BigChunk> {
@@ -100,9 +101,8 @@ export async function rowToBigChunk(row: BigChunkRow): Promise<BigChunk> {
 	};
 }
 
-export function chunkToRow(c: Chunk): ChunkRow {
-	return {
-		id: c.id,
+export function chunkToRow(c: Omit<Chunk, 'id'> & { id?: number }): ChunkRow {
+	const row: ChunkRow = {
 		bigChunkId: c.bigChunkId,
 		filePath: c.filePath,
 		vector: int8ToBlob(c.vector),
@@ -110,6 +110,8 @@ export function chunkToRow(c: Chunk): ChunkRow {
 		precision: c.vectorF16 ? 'float16' : 'int8',
 		vectorF16: c.vectorF16 ? uint16ToBlob(c.vectorF16) : undefined,
 	};
+	if (c.id !== undefined) row.id = c.id;
+	return row;
 }
 
 export async function rowToChunk(row: ChunkRow): Promise<Chunk> {
