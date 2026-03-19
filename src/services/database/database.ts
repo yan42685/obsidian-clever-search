@@ -2,6 +2,7 @@ import Dexie from "dexie";
 import type { AsPlainObject } from "minisearch";
 import type { OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
+import type { BigChunkRow, BlobRecord, ChunkRow, HybridDocRef } from "src/services/search/hybrid/hybrid-store";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
@@ -90,7 +91,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 2;
+	private static readonly _dbVersion = 3;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -98,15 +99,34 @@ class DexieWrapper extends Dexie {
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	lexicalDocRefs!: Dexie.Table<DocumentRef, number>;
 	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
+	// Hybrid search tables (v3)
+	hybridChunks!: Dexie.Table<ChunkRow, number>;
+	hybridBigChunks!: Dexie.Table<BigChunkRow, number>;
+	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
+	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
+	hybridHnswBig!: Dexie.Table<BlobRecord, number>;
+	hybridDocRefs!: Dexie.Table<HybridDocRef, string>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {
 		super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
 		this.privateApi = privateApi;
+		this.version(2).stores({
+			pluginSetting: "++id",
+			minisearch: "++id",
+			lexicalDocRefs: "++id",
+			semanticDocRefs: "++id",
+		});
 		this.version(DexieWrapper._dbVersion).stores({
 			pluginSetting: "++id",
 			minisearch: "++id",
 			lexicalDocRefs: "++id",
 			semanticDocRefs: "++id",
+			hybridChunks: "++id, bigChunkId, filePath",
+			hybridBigChunks: "++id, filePath",
+			hybridBm25Index: "id",
+			hybridHnswSmall: "id",
+			hybridHnswBig: "id",
+			hybridDocRefs: "path",
 		});
 	}
 	get dbVersion() {

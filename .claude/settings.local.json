@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "WebSearch"
     ]
   }
 }
