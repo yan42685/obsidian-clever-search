@@ -6,11 +6,16 @@ import { EventEnum } from "src/globals/enums";
 import type { DocumentRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
+import {
+	HybridDisabledError,
+	NoApiKeyError,
+	WeeklyTokenLimitExceededError,
+} from "src/services/search/hybrid/embedder";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
-import { getInstance, monitorDecorator } from "src/utils/my-lib";
+import { MyLib, getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t } from "../translations/locale-helper";
@@ -18,9 +23,18 @@ import { SearchService } from "../search-service";
 import { DataProvider } from "./data-provider";
 import { FileWatcher } from "./file-watcher";
 
+type HybridIndexFailure = {
+	path: string;
+	reason: string;
+	attempts: number;
+	bm25FallbackIndexed: boolean;
+};
+
 @singleton()
 export class DataManager {
 	private static readonly HYBRID_INDEX_CONCURRENCY = 3;
+	private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
+	private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -47,8 +61,10 @@ export class DataManager {
 					this.dataProvider.isIndexable(op.file) &&
 					this.hybridEngine.shouldIndexPath(op.file.path)
 				) {
-					const text = await this.dataProvider.readPlainText(op.file.path);
-					await this.hybridEngine.indexFile(op.file.path, text, op.file.stat.mtime).catch(e => logger.warn("hybrid indexFile failed:", e));
+					const failure = await this.indexHybridFileWithRetry(op.file);
+					if (failure) {
+						this.noticeHybridIndexFailures([failure]);
+					}
 				}
 			}
 		}
@@ -195,21 +211,22 @@ export class DataManager {
 				logger.warn(`hybrid deleteFile failed for ${path}:`, e),
 			);
 		}
+		const failures: HybridIndexFailure[] = [];
 		await this.processFilesWithConcurrency(
 			docsToAdd,
 			DataManager.HYBRID_INDEX_CONCURRENCY,
 			async (file) => {
-				const text = await this.dataProvider.readPlainText(file.path);
-				await this.hybridEngine
-					.indexFile(file.path, text, file.stat.mtime)
-					.catch((e) =>
-						logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
-					);
+				const failure = await this.indexHybridFileWithRetry(file);
+				if (failure) {
+					failures.push(failure);
+				}
 			},
 		);
 		const fallbackNoticeKey =
 			this.hybridEngine.consumeIndexingFallbackNoticeKey();
-		if (fallbackNoticeKey) {
+		if (failures.length > 0) {
+			this.noticeHybridIndexFailures(failures);
+		} else if (fallbackNoticeKey) {
 			new MyNotice(t(fallbackNoticeKey), 7000);
 		}
 	}
@@ -288,6 +305,166 @@ export class DataManager {
 				}
 			}),
 		);
+	}
+
+	private async indexHybridFileWithRetry(
+		file: TFile,
+	): Promise<HybridIndexFailure | null> {
+		const text = await this.dataProvider.readPlainText(file.path);
+		let lastError: unknown = null;
+		let attempts = 0;
+
+		for (
+			let attempt = 1;
+			attempt <= DataManager.HYBRID_INDEX_MAX_RETRIES;
+			attempt++
+		) {
+			attempts = attempt;
+			try {
+				await this.hybridEngine.indexFileStrict(
+					file.path,
+					text,
+					file.stat.mtime,
+				);
+				return null;
+			} catch (error) {
+				lastError = error;
+				const reason = this.formatHybridIndexError(error);
+				const retryable = this.isRetryableHybridIndexError(error);
+				logger.warn(
+					`hybrid semantic index attempt ${attempt}/${DataManager.HYBRID_INDEX_MAX_RETRIES} failed for ${file.path}: ${reason}`,
+				);
+				if (
+					!retryable ||
+					attempt >= DataManager.HYBRID_INDEX_MAX_RETRIES
+				) {
+					break;
+				}
+				await MyLib.sleep(
+					DataManager.HYBRID_INDEX_RETRY_DELAY_MS * attempt,
+				);
+			}
+		}
+
+		let bm25FallbackIndexed = false;
+		try {
+			await this.hybridEngine.indexFile(file.path, text, file.stat.mtime);
+			bm25FallbackIndexed = true;
+		} catch (fallbackError) {
+			logger.error(
+				`hybrid BM25 fallback indexing failed for ${file.path}:`,
+				fallbackError,
+			);
+			if (lastError === null) {
+				lastError = fallbackError;
+			}
+		}
+
+		return {
+			path: file.path,
+			reason: this.formatHybridIndexError(lastError),
+			attempts,
+			bm25FallbackIndexed,
+		};
+	}
+
+	private isRetryableHybridIndexError(error: unknown): boolean {
+		if (
+			error instanceof NoApiKeyError ||
+			error instanceof WeeklyTokenLimitExceededError ||
+			error instanceof HybridDisabledError
+		) {
+			return false;
+		}
+
+		if (!(error instanceof Error)) {
+			return false;
+		}
+
+		const message = `${error.name}: ${error.message}`.toLowerCase();
+		if (
+			message.includes("insufficient_quota") ||
+			message.includes("quota") ||
+			message.includes("weekly token limit exceeded")
+		) {
+			return false;
+		}
+
+		const statusMatch = message.match(/embedding api error (\d{3})/);
+		if (statusMatch) {
+			const status = Number(statusMatch[1]);
+			if (status === 408 || status === 409 || status === 425 || status === 429) {
+				return true;
+			}
+			if (status >= 500) {
+				return true;
+			}
+			return false;
+		}
+
+		return (
+			error.name === "TypeError" ||
+			message.includes("failed to fetch") ||
+			message.includes("network") ||
+			message.includes("timeout") ||
+			message.includes("econn") ||
+			message.includes("socket")
+		);
+	}
+
+	private formatHybridIndexError(error: unknown): string {
+		if (error instanceof Error) {
+			return `${error.name}: ${error.message}`;
+		}
+		return String(error);
+	}
+
+	private noticeHybridIndexFailures(failures: HybridIndexFailure[]) {
+		if (failures.length === 0) {
+			return;
+		}
+
+		const failedWithoutBm25 = failures.filter(
+			(item) => !item.bm25FallbackIndexed,
+		).length;
+		const message = this.buildHybridFailureNotice(
+			failures.length,
+			failedWithoutBm25,
+		);
+		new MyNotice(message, 12000);
+
+		console.groupCollapsed(
+			`[clever-search] Hybrid semantic indexing incomplete (${failures.length} files)`,
+		);
+		failures.forEach((failure) => {
+			console.error(
+				`[clever-search] ${failure.path}\nAttempts: ${failure.attempts}\nBM25 fallback indexed: ${failure.bm25FallbackIndexed}\nReason: ${failure.reason}`,
+			);
+		});
+		console.groupEnd();
+	}
+
+	private buildHybridFailureNotice(
+		failureCount: number,
+		failedWithoutBm25: number,
+	): string {
+		const isChinese =
+			(window.localStorage.getItem("language") || "")
+				.toLowerCase()
+				.startsWith("zh");
+		if (isChinese) {
+			const fallbackText =
+				failedWithoutBm25 > 0
+					? `，其中 ${failedWithoutBm25} 个文件连 BM25 降级索引也失败了`
+					: "";
+			return `由于网络或 token/额度等问题，${failureCount} 个文件在 ${DataManager.HYBRID_INDEX_MAX_RETRIES} 次尝试后仍未完成 embedding 索引${fallbackText}。按 Ctrl+Shift+I 在控制台查看具体原因。`;
+		}
+
+		const fallbackText =
+			failedWithoutBm25 > 0
+				? ` ${failedWithoutBm25} file(s) also failed BM25 fallback indexing.`
+				: "";
+		return `${failureCount} file(s) did not finish semantic embedding indexing after ${DataManager.HYBRID_INDEX_MAX_RETRIES} attempts due to network or quota/token issues.${fallbackText} Press Ctrl+Shift+I to view details in the console.`;
 	}
 }
 

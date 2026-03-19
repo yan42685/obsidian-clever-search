@@ -226,6 +226,101 @@ export class HybridEngine {
 		await this.persistIndices();
 	}
 
+	async indexFileStrict(
+		filePath: string,
+		plainText: string,
+		updateTime = Date.now(),
+	): Promise<void> {
+		if (!this.shouldIndexPath(filePath)) {
+			await this.deleteFile(filePath);
+			return;
+		}
+
+		await this.deleteFile(filePath);
+
+		const { bigChunks: rawBig, chunks: rawSmall } = chunkFile(filePath, plainText);
+		if (rawBig.length === 0) return;
+
+		const bigTexts = rawBig.map((b) => b.text);
+		const smallTexts = rawSmall.map((s) => s.text);
+		const [bigVecs, smallVecs] = await Promise.all([
+			this.embedder.embedBatch(bigTexts, this.precision, filePath),
+			this.embedder.embedBatch(smallTexts, this.precision, filePath),
+		]);
+
+		this._canSearch = true;
+		this.lastIndexingFallbackNoticeKey = null;
+
+		const bigChunkIds: number[] = [];
+		for (let i = 0; i < rawBig.length; i++) {
+			const rb = rawBig[i];
+			const { vec, scale, vecF16 } = bigVecs[i];
+			const row = bigChunkToRow({
+				id: undefined,
+				filePath: rb.filePath,
+				text: rb.text,
+				startLine: rb.startLine,
+				endLine: rb.endLine,
+				chunkIds: [],
+				vector: vec,
+				scale,
+				vectorF16: vecF16,
+			});
+			const id = await this.db.db.hybridBigChunks.add(row);
+			bigChunkIds.push(id as number);
+		}
+
+		const bigChunkChildIds: Map<number, number[]> = new Map(
+			bigChunkIds.map((id) => [id, []]),
+		);
+		for (let i = 0; i < rawSmall.length; i++) {
+			const rs = rawSmall[i];
+			const bigId = bigChunkIds[rs.bigChunkIdx];
+			const { vec, scale, vecF16 } = smallVecs[i];
+			const row = chunkToRow({
+				id: undefined,
+				bigChunkId: bigId,
+				filePath,
+				vector: vec,
+				scale,
+				vectorF16: vecF16,
+			});
+			const id = await this.db.db.hybridChunks.add(row);
+			bigChunkChildIds.get(bigId)!.push(id as number);
+		}
+
+		for (const [bigId, childIds] of bigChunkChildIds) {
+			await this.db.db.hybridBigChunks.update(bigId, {
+				chunkIds: JSON.stringify(childIds),
+			});
+		}
+
+		for (let i = 0; i < rawBig.length; i++) {
+			const bigId = bigChunkIds[i];
+			const { vec, scale, vecF16 } = bigVecs[i];
+			this.bm25.addDocument(bigId, rawBig[i].text);
+			this.hnswBig.insert(bigId, vec, scale, vecF16);
+		}
+
+		const smallRows = await this.db.db.hybridChunks
+			.where('filePath')
+			.equals(filePath)
+			.toArray();
+		for (let i = 0; i < smallRows.length; i++) {
+			const row = smallRows[i];
+			const chunk = await rowToChunk(row);
+			this.hnswSmall.insert(
+				chunk.id,
+				chunk.vector,
+				chunk.scale,
+				chunk.vectorF16,
+			);
+		}
+
+		await this.persistIndices();
+		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
+	}
+
 	// ─── Search ───────────────────────────────────────────────────────────────
 
 	async search(query: string, topK = 20): Promise<FileItem[]> {
