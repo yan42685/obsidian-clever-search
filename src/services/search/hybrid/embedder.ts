@@ -110,7 +110,6 @@ export class Embedder {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly cache = new Map<string, CacheEntry>();
 	/** Current file being indexed — set by HybridEngine before calling embedBatch */
-	currentFilePath = '';
 
 	private get apiKey(): string {
 		return this.setting.hybrid?.apiKey ?? '';
@@ -141,6 +140,7 @@ export class Embedder {
 	async embedBatch(
 		texts: string[],
 		precision: VectorPrecision = 'int8',
+		filePath = '',
 	): Promise<Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>> {
 		if (!this.setting.hybrid?.enabled) throw new HybridDisabledError();
 		if (!this.apiKey) throw new NoApiKeyError();
@@ -152,7 +152,7 @@ export class Embedder {
 			await this.ensureWeeklyLimitAllows(batch);
 			const { embeddings: floats, tokensUsed } = await this.fetchEmbeddings(batch);
 			if (tokensUsed > 0) {
-				await recordTokenUsage(this.currentFilePath, tokensUsed);
+				await recordTokenUsage(filePath, tokensUsed);
 			}
 			for (const f of floats) {
 				l2Normalize(f);

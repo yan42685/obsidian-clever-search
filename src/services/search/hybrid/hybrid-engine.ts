@@ -112,13 +112,10 @@ export class HybridEngine {
 		let bigVecs: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>;
 		let smallVecs: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>;
 
-		// Set current file for token tracking
-		this.embedder.currentFilePath = filePath;
-
 		try {
 			[bigVecs, smallVecs] = await Promise.all([
-				this.embedder.embedBatch(bigTexts, this.precision),
-				this.embedder.embedBatch(smallTexts, this.precision),
+				this.embedder.embedBatch(bigTexts, this.precision, filePath),
+				this.embedder.embedBatch(smallTexts, this.precision, filePath),
 			]);
 			this._canSearch = true;
 			this.lastIndexingFallbackNoticeKey = null;

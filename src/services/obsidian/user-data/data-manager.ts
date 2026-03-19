@@ -20,6 +20,7 @@ import { FileWatcher } from "./file-watcher";
 
 @singleton()
 export class DataManager {
+	private static readonly HYBRID_INDEX_CONCURRENCY = 3;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -194,12 +195,18 @@ export class DataManager {
 				logger.warn(`hybrid deleteFile failed for ${path}:`, e),
 			);
 		}
-		for (const file of docsToAdd) {
-			const text = await this.dataProvider.readPlainText(file.path);
-			await this.hybridEngine.indexFile(file.path, text, file.stat.mtime).catch((e) =>
-				logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
-			);
-		}
+		await this.processFilesWithConcurrency(
+			docsToAdd,
+			DataManager.HYBRID_INDEX_CONCURRENCY,
+			async (file) => {
+				const text = await this.dataProvider.readPlainText(file.path);
+				await this.hybridEngine
+					.indexFile(file.path, text, file.stat.mtime)
+					.catch((e) =>
+						logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
+					);
+			},
+		);
 		const fallbackNoticeKey =
 			this.hybridEngine.consumeIndexingFallbackNoticeKey();
 		if (fallbackNoticeKey) {
@@ -259,6 +266,28 @@ export class DataManager {
 		const updatedRefs = files.map((file) => ({ path: file.path, updateTime: file.stat.mtime }));
 		await this.database.setLexicalDocRefs(updatedRefs);
 		logger.trace(`${updatedRefs.length} lexical refs updated`);
+	}
+
+	private async processFilesWithConcurrency<T>(
+		items: T[],
+		concurrency: number,
+		handler: (item: T) => Promise<void>,
+	) {
+		if (items.length === 0) {
+			return;
+		}
+
+		const safeConcurrency = Math.max(1, Math.min(concurrency, items.length));
+		let nextIndex = 0;
+
+		await Promise.all(
+			Array.from({ length: safeConcurrency }, async () => {
+				while (nextIndex < items.length) {
+					const currentIndex = nextIndex++;
+					await handler(items[currentIndex]);
+				}
+			}),
+		);
 	}
 }
 
