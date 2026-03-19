@@ -64,8 +64,13 @@ export default {
 	"hybridModal.apiDomain": "API 域名",
 	"hybridModal.apiDomain.desc": "留空则使用 api.openai.com。如需使用自定义/代理端点，仅填写域名（例如 my-proxy.example.com）。",
 	"hybridModal.apiKey": "API 密钥",
+	"hybridModal.apiKeyNotice": "这里显示的 token 与实际消耗可能有偏差，请以接口返回和实际计费为准。当前只支持 text-embedding-3-small 模型，请确认你的 API key 支持这个模型。",
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc": "每周（周一至周日）最多消耗的 token 数量，设为 0 表示不限制。",
+	"hybridModal.weeklyUsed": "本周已使用",
+	"hybridModal.weeklyRemaining": "剩余可用额度",
+	"hybridModal.unlimited": "不限",
+	"hybridModal.weeklyLimitExceededNotice": "本周使用的 token 已超过限制，可用额度为 0。",
 	"hybridModal.excludedPaths": "排除路径（混合搜索索引）",
 	"hybridModal.tokenStats": "Token 使用统计",
 	"hybridModal.tokenStats.loading": "加载统计中...",
@@ -82,6 +87,7 @@ export default {
 	"Follow Obsidian Excluded Files": "跟随 Obsidian 忽略文件设置",
 	"Enter path...": "请输入路径...",
 	Add: "添加",
+	Update: "更新",
 
 	"Customize extensions": "自定义后缀名",
 	"extensionModal.desc":

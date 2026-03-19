@@ -35,12 +35,19 @@ export class DataManager {
 		for (const op of operations) {
 			if (op instanceof DocDeleteOperation) {
 				await this.deleteDocuments([op.path]);
-				await this.hybridEngine.deleteFile(op.path);
+				if (this.hybridEngine.isEnabled()) {
+					await this.hybridEngine.deleteFile(op.path);
+				}
 			} else if (op instanceof DocAddOperation) {
 				await this.addDocuments([op.file]);
-				if (op.file instanceof TFile && this.dataProvider.isIndexable(op.file)) {
+				if (
+					this.hybridEngine.isEnabled() &&
+					op.file instanceof TFile &&
+					this.dataProvider.isIndexable(op.file) &&
+					this.hybridEngine.shouldIndexPath(op.file.path)
+				) {
 					const text = await this.dataProvider.readPlainText(op.file.path);
-					await this.hybridEngine.indexFile(op.file.path, text).catch(e => logger.warn("hybrid indexFile failed:", e));
+					await this.hybridEngine.indexFile(op.file.path, text, op.file.stat.mtime).catch(e => logger.warn("hybrid indexFile failed:", e));
 				}
 			}
 		}
@@ -130,17 +137,56 @@ export class DataManager {
 	}
 
 	private async initHybridEngine() {
+		if (!this.hybridEngine.isEnabled()) {
+			return;
+		}
+
 		await this.hybridEngine.load();
-		if (this.hybridEngine.isEmpty()) {
-			logger.trace("Hybrid index is empty, indexing all vault files...");
-			const files = this.dataProvider.allFilesToBeIndexed();
-			for (const file of files) {
-				const text = await this.dataProvider.readPlainText(file.path);
-				await this.hybridEngine.indexFile(file.path, text).catch(e =>
-					logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
-				);
+		const currFiles = new Map<string, TFile>(
+			this.dataProvider
+				.allFilesToBeIndexed()
+				.filter((file) => this.hybridEngine.shouldIndexPath(file.path))
+				.map((file) => [file.path, file]),
+		);
+		const prevRefs = new Map(
+			(await this.database.db.hybridDocRefs.toArray()).map((ref) => [
+				ref.path,
+				ref,
+			]),
+		);
+
+		const docsToAdd: TFile[] = [];
+		const docsToDelete: string[] = [];
+
+		for (const [path, file] of currFiles) {
+			const prevRef = prevRefs.get(path);
+			if (!prevRef) {
+				docsToAdd.push(file);
+			} else if (file.stat.mtime > prevRef.updateTime) {
+				docsToDelete.push(path);
+				docsToAdd.push(file);
 			}
-			logger.trace("Hybrid initial indexing complete");
+		}
+
+		for (const prevPath of prevRefs.keys()) {
+			if (!currFiles.has(prevPath)) {
+				docsToDelete.push(prevPath);
+			}
+		}
+
+		logger.trace(`hybrid docs to delete: ${docsToDelete.length}`);
+		logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
+
+		for (const path of docsToDelete) {
+			await this.hybridEngine.deleteFile(path).catch((e) =>
+				logger.warn(`hybrid deleteFile failed for ${path}:`, e),
+			);
+		}
+		for (const file of docsToAdd) {
+			const text = await this.dataProvider.readPlainText(file.path);
+			await this.hybridEngine.indexFile(file.path, text, file.stat.mtime).catch((e) =>
+				logger.warn(`hybrid indexFile failed for ${file.path}:`, e),
+			);
 		}
 	}
 

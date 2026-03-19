@@ -12,45 +12,25 @@ export class RequestTest {
 		(text: string) => new MyNotice(text),
 	);
 
-	private gptapiOption: any = {
-		method: "POST",
-		url: `https://${this.getDomain1()}/v1/embeddings`,
-		headers: {
-			Authorization: `Bearer ${this.settings.apiProvider1.key}`,
-			"Content-Type": "application/json",
-		},
-		contentType: "application/json",
-		body: JSON.stringify({
-			input: "test",
-			model: "text-embedding-ada-002",
-		}),
-	};
-
-	private openaiOption: any = {
-		url: `https://${this.getDomain2()}/v1/embeddings`,
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${this.settings.apiProvider2.key}`,
-			"Content-Type": "application/json",
-		},
-		contentType: "application/json",
-		body: JSON.stringify({
-			input: "test",
-			model: "text-embedding-ada-002",
-		}),
-	};
-	private getDomain1() {
-		return MyLib.extractDomainFromHttpsUrl(this.settings.apiProvider1.domain);
-	}
-	private getDomain2() {
-		return MyLib.extractDomainFromHttpsUrl(this.settings.apiProvider2.domain);
-
+	private buildRequestOption(): any {
+		const domain = this.settings.hybrid.apiDomain?.trim() || "api.openai.com";
+		return {
+			method: "POST",
+			url: `https://${domain.replace(/^https?:\/\//, "")}/v1/embeddings`,
+			headers: {
+				Authorization: `Bearer ${this.settings.hybrid.apiKey}`,
+				"Content-Type": "application/json",
+			},
+			contentType: "application/json",
+			body: JSON.stringify({
+				input: "test",
+				model: "text-embedding-3-small",
+			}),
+		};
 	}
 
 	async testRequest() {
-		this.request(this.gptapiOption);
-
-		this.request(this.openaiOption);
+		this.request(this.buildRequestOption());
 	}
 	async request(options: any) {
 		try {
@@ -66,7 +46,7 @@ export class RequestTest {
 				this.noticeThrottled(info);
 			} else {
 				const info =
-					`Failed to connect to [${this.settings.apiProvider1.domain}], maybe the domain is wrong or the api provider is not available now or there is something wrong with your Internet connection`;
+					`Failed to connect to [${options.url}], maybe the domain is wrong or the api provider is not available now or there is something wrong with your Internet connection`;
 				logger.error(info);
 				this.noticeThrottled(info);
 			}

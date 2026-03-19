@@ -14,7 +14,12 @@ import {
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
-import { getTopTokenFiles, getTotalTokens } from "src/services/search/hybrid/embedder";
+import {
+	getCurrentWeekDateRange,
+	getCurrentWeekTokenUsage,
+	getTopTokenFiles,
+	getTotalTokens,
+} from "src/services/search/hybrid/embedder";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
@@ -329,6 +334,9 @@ class HybridSearchModal extends Modal {
 	private excludesEl: HTMLElement;
 	private inputEl: HTMLInputElement;
 	private suggester: CommonSuggester;
+	private weeklyLimitInputEl: HTMLInputElement;
+	private weeklyQuotaEl: HTMLElement;
+	private statsEl: HTMLElement;
 
 	constructor(app: App) {
 		super(app);
@@ -358,6 +366,7 @@ class HybridSearchModal extends Modal {
 					.setValue(this.setting.hybrid.enabled)
 					.onChange((v) => {
 						this.setting.hybrid.enabled = v;
+						this.settingManager.shouldReload = true;
 						this.settingManager.saveSettings();
 					}),
 			);
@@ -392,19 +401,28 @@ class HybridSearchModal extends Modal {
 			});
 
 		// ── Weekly token limit ────────────────────────────────────────────────
+		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
+
 		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
 			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
-			.addText((text) =>
+			.addText((text) => {
+				this.weeklyLimitInputEl = text.inputEl;
 				text
 					.setPlaceholder("0")
-					.setValue(String(this.setting.hybrid.weeklyTokenLimit ?? 0))
-					.onChange((v) => {
-						const n = parseInt(v, 10);
-						this.setting.hybrid.weeklyTokenLimit = isNaN(n) ? 0 : n;
-						this.settingManager.saveSettings();
-					}),
+					.setValue(String(this.setting.hybrid.weeklyTokenLimit ?? 0));
+				text.inputEl.type = "number";
+				text.inputEl.min = "0";
+				text.inputEl.step = "1";
+			})
+			.addButton((button) =>
+				button.setButtonText(t("Update")).onClick(async () => {
+					await this.updateWeeklyTokenLimit();
+				}),
 			);
+		this.weeklyQuotaEl = contentEl.createDiv();
+		this.weeklyQuotaEl.style.marginBottom = "1em";
+		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
 
 		// ── Excluded paths ────────────────────────────────────────────────────
 		contentEl.createEl("h3", { text: t("hybridModal.excludedPaths") });
@@ -414,6 +432,10 @@ class HybridSearchModal extends Modal {
 		new Setting(contentEl)
 			.addText((text) => {
 				this.inputEl = text.inputEl;
+				text.inputEl.onfocus = () => {
+					this.suggester?.close();
+					this.suggester?.open();
+				};
 				text.setPlaceholder(t("Enter path...")).onChange(() => {
 					this.suggester.close();
 					this.suggester.open();
@@ -427,8 +449,8 @@ class HybridSearchModal extends Modal {
 
 		// Autocomplete: exclude paths already in the hybrid exclusion list
 		const hybridExcluded = new Set(this.setting.hybrid.excludedPaths ?? []);
-		const availableFolders = new Set(
-			[...this.allFolders].filter((p) => {
+		const availablePaths = new Set(
+			[...this.allPaths].filter((p) => {
 				// Remove paths that are already excluded or are sub-paths of excluded entries
 				for (const ex of hybridExcluded) {
 					if (p === ex || p.startsWith(ex + "/")) return false;
@@ -439,16 +461,19 @@ class HybridSearchModal extends Modal {
 
 		this.suggester = new CommonSuggester(
 			this.inputEl,
-			availableFolders,
+			availablePaths,
 			(v) => { this.addPath(v); },
 		);
-		setTimeout(() => { this.inputEl.focus(); }, 1);
 
 		// ── Token usage stats ─────────────────────────────────────────────────
 		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
-		const statsEl = contentEl.createDiv();
-		statsEl.setText(t("hybridModal.tokenStats.loading"));
-		this.loadTokenStats(statsEl);
+		this.statsEl = contentEl.createDiv();
+		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
+		void this.refreshTokenStats();
+	}
+
+	onClose() {
+		void this.settingManager.postSettingUpdated();
 	}
 
 	private renderExcludedList(listEl: HTMLElement) {
@@ -463,6 +488,7 @@ class HybridSearchModal extends Modal {
 			del.style.cursor = "pointer";
 			del.onClickEvent(() => {
 				paths.splice(index, 1);
+				this.settingManager.shouldReload = true;
 				this.settingManager.saveSettings();
 				this.renderExcludedList(listEl);
 			});
@@ -477,6 +503,7 @@ class HybridSearchModal extends Modal {
 			} else {
 				paths.push(inputPath);
 				this.setting.hybrid.excludedPaths = paths;
+				this.settingManager.shouldReload = true;
 				this.settingManager.saveSettings();
 				this.renderExcludedList(this.excludesEl);
 				this.inputEl.value = "";
@@ -484,46 +511,75 @@ class HybridSearchModal extends Modal {
 		}
 	}
 
+	private async updateWeeklyTokenLimit() {
+		const parsed = parseInt(this.weeklyLimitInputEl.value, 10);
+		this.setting.hybrid.weeklyTokenLimit =
+			Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+		this.weeklyLimitInputEl.value = String(this.setting.hybrid.weeklyTokenLimit);
+		await this.settingManager.saveSettings();
+
+		const used = await getCurrentWeekTokenUsage();
+		if (
+			this.setting.hybrid.weeklyTokenLimit > 0 &&
+			used >= this.setting.hybrid.weeklyTokenLimit
+		) {
+			new MyNotice(t("hybridModal.weeklyLimitExceededNotice"), 5000);
+		}
+
+		await this.refreshTokenStats();
+	}
+
+	private async refreshTokenStats() {
+		await this.loadTokenStats(this.statsEl);
+	}
+
 	private async loadTokenStats(container: HTMLElement) {
 		const now = new Date();
 		const pad = (n: number) => String(n).padStart(2, "0");
 		const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-
-		// Daily: today
-		const dailyFrom = todayKey;
-		const dailyTo = todayKey;
-
-		// Weekly: last 7 days
-		const weekAgo = new Date(now);
-		weekAgo.setDate(weekAgo.getDate() - 6);
-		const weeklyFrom = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth() + 1)}-${pad(weekAgo.getDate())}`;
-
-		// Monthly: last 30 days
-		const monthAgo = new Date(now);
-		monthAgo.setDate(monthAgo.getDate() - 29);
-		const monthlyFrom = `${monthAgo.getFullYear()}-${pad(monthAgo.getMonth() + 1)}-${pad(monthAgo.getDate())}`;
+		const { fromDate: weeklyFrom, toDate: weeklyTo } =
+			getCurrentWeekDateRange(now);
+		const monthlyFrom = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
 
 		const [dailyTop, weeklyTop, monthlyTop, weeklyTotal] = await Promise.all([
-			getTopTokenFiles(dailyFrom, dailyTo, 20),
-			getTopTokenFiles(weeklyFrom, todayKey, 20),
+			getTopTokenFiles(todayKey, todayKey, 20),
+			getTopTokenFiles(weeklyFrom, weeklyTo, 20),
 			getTopTokenFiles(monthlyFrom, todayKey, 20),
-			getTotalTokens(weeklyFrom, todayKey),
+			getTotalTokens(weeklyFrom, weeklyTo),
 		]);
 
 		container.empty();
+		this.renderWeeklyQuotaSummary(weeklyTotal);
 
-		// Weekly total vs limit
 		const limit = this.setting.hybrid.weeklyTokenLimit ?? 0;
-		const limitText = limit > 0
-			? `${weeklyTotal.toLocaleString()} / ${limit.toLocaleString()}`
-			: `${weeklyTotal.toLocaleString()}`;
+		const limitText =
+			limit > 0
+				? `${weeklyTotal.toLocaleString()} / ${limit.toLocaleString()}`
+				: `${weeklyTotal.toLocaleString()}`;
 		container.createEl("p", {
 			text: `${t("hybridModal.weeklyUsage")}: ${limitText}`,
 		});
+		this.renderTokenTabs(container, [
+			{ title: t("hybridModal.dailyTop"), items: dailyTop },
+			{ title: t("hybridModal.weeklyTop"), items: weeklyTop },
+			{ title: t("hybridModal.monthlyTop"), items: monthlyTop },
+		]);
+	}
 
-		this.renderTopList(container, t("hybridModal.dailyTop"), dailyTop);
-		this.renderTopList(container, t("hybridModal.weeklyTop"), weeklyTop);
-		this.renderTopList(container, t("hybridModal.monthlyTop"), monthlyTop);
+	private renderWeeklyQuotaSummary(used: number) {
+		this.weeklyQuotaEl.empty();
+		const limit = this.setting.hybrid.weeklyTokenLimit ?? 0;
+		const remaining = limit > 0 ? Math.max(0, limit - used) : Infinity;
+		this.weeklyQuotaEl.createEl("p", {
+			text: `${t("hybridModal.weeklyUsed")}: ${this.formatTokenCompact(used)}`,
+		});
+		this.weeklyQuotaEl.createEl("p", {
+			text:
+				`${t("hybridModal.weeklyRemaining")}: ` +
+				(limit > 0
+					? this.formatTokenCompact(remaining)
+					: t("hybridModal.unlimited")),
+		});
 	}
 
 	private renderTopList(
@@ -545,11 +601,70 @@ class HybridSearchModal extends Modal {
 		});
 		items.forEach(({ filePath, tokens }, i) => {
 			const tr = table.createEl("tr");
-			[String(i + 1), filePath, tokens.toLocaleString()].forEach((cell) => {
+			[String(i + 1), filePath, this.formatTokenCompact(tokens)].forEach((cell) => {
 				const td = tr.createEl("td", { text: cell });
 				td.style.cssText = "padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:30vw;";
 			});
 		});
+	}
+
+	private renderTokenTabs(
+		parent: HTMLElement,
+		tabs: Array<{
+			title: string;
+			items: Array<{ filePath: string; tokens: number }>;
+		}>,
+	) {
+		const tabRow = parent.createDiv();
+		tabRow.style.cssText = "display:flex;gap:8px;margin:0.75em 0 0.5em 0;";
+		const panelEl = parent.createDiv();
+		let activeIndex = 1;
+
+		const renderActiveTab = () => {
+			panelEl.empty();
+			Array.from(tabRow.children).forEach((child, index) => {
+				const button = child as HTMLButtonElement;
+				button.style.backgroundColor =
+					index === activeIndex
+						? "var(--interactive-accent)"
+						: "var(--background-secondary)";
+				button.style.color =
+					index === activeIndex
+						? "var(--text-on-accent)"
+						: "var(--text-normal)";
+			});
+			this.renderTopList(
+				panelEl,
+				tabs[activeIndex].title,
+				tabs[activeIndex].items,
+			);
+		};
+
+		tabs.forEach((tab, index) => {
+			const button = tabRow.createEl("button", { text: tab.title });
+			button.style.cssText =
+				"flex:1;padding:6px 10px;border:1px solid var(--background-modifier-border);border-radius:6px;cursor:pointer;";
+			button.onClickEvent(() => {
+				activeIndex = index;
+				renderActiveTab();
+			});
+		});
+
+		renderActiveTab();
+	}
+
+	private formatTokenCompact(value: number): string {
+		if (value >= 1_000_000) {
+			return this.stripTrailingZero((value / 1_000_000).toFixed(1)) + "M";
+		}
+		if (value >= 1_000) {
+			return this.stripTrailingZero((value / 1_000).toFixed(1)) + "K";
+		}
+		return value.toString();
+	}
+
+	private stripTrailingZero(value: string): string {
+		return value.replace(/\.0$/, "");
 	}
 }
 

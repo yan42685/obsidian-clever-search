@@ -1,9 +1,15 @@
+import { OuterSetting } from 'src/globals/plugin-setting';
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
 import { getInstance } from 'src/utils/my-lib';
 import { Database } from 'src/services/database/database';
 import type { VectorPrecision, BigChunk, RawBigChunk } from './hybrid-types';
 import { chunkFile } from './chunker';
-import { Embedder, NoApiKeyError } from './embedder';
+import {
+	Embedder,
+	HybridDisabledError,
+	NoApiKeyError,
+	WeeklyTokenLimitExceededError,
+} from './embedder';
 import { BM25Engine } from './bm25';
 import { HnswIndex } from './hnsw';
 import {
@@ -22,6 +28,7 @@ const VEC_BIG_WEIGHT = 0.7; // big-chunk vector is semantically coarser
 
 export class HybridEngine {
 	private readonly db = getInstance(Database);
+	private readonly setting = getInstance(OuterSetting);
 	private readonly embedder = new Embedder();
 	private readonly bm25 = new BM25Engine();
 	private readonly hnswSmall = new HnswIndex();
@@ -34,6 +41,11 @@ export class HybridEngine {
 	// ─── Lifecycle ────────────────────────────────────────────────────────────
 
 	async load(): Promise<void> {
+		if (!this.isEnabled()) {
+			this._ready = true;
+			this._canSearch = false;
+			return;
+		}
 		await Promise.all([
 			this.loadBm25(),
 			this.loadHnsw(),
@@ -41,13 +53,23 @@ export class HybridEngine {
 		this._ready = true;
 	}
 
+	isEnabled(): boolean { return this.setting.hybrid.enabled; }
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
 	isEmpty(): boolean { return this.bm25.docCount === 0; }
+	shouldIndexPath(filePath: string): boolean {
+		if (!this.isEnabled()) return false;
+		return !this.isExcludedPath(filePath);
+	}
 
 	// ─── Indexing ─────────────────────────────────────────────────────────────
 
-	async indexFile(filePath: string, plainText: string): Promise<void> {
+	async indexFile(filePath: string, plainText: string, updateTime = Date.now()): Promise<void> {
+		if (!this.shouldIndexPath(filePath)) {
+			await this.deleteFile(filePath);
+			return;
+		}
+
 		// Remove stale data first
 		await this.deleteFile(filePath);
 
@@ -71,14 +93,18 @@ export class HybridEngine {
 			]);
 			this._canSearch = true;
 		} catch (e) {
-			if (e instanceof NoApiKeyError) {
+			if (
+				e instanceof NoApiKeyError ||
+				e instanceof WeeklyTokenLimitExceededError ||
+				e instanceof HybridDisabledError
+			) {
 				this._canSearch = false;
 				// Index BM25 only
 				for (let i = 0; i < rawBig.length; i++) {
 					// We need a temporary id — use a placeholder; real id assigned after DB insert
 					// For BM25-only mode we skip vector indexing
 				}
-				await this.indexBm25Only(filePath, rawBig);
+				await this.indexBm25Only(filePath, rawBig, updateTime);
 				return;
 			}
 			throw e;
@@ -146,7 +172,7 @@ export class HybridEngine {
 		await this.persistIndices();
 
 		// Update doc ref
-		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime: Date.now() });
+		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
 	}
 
 	async deleteFile(filePath: string): Promise<void> {
@@ -175,12 +201,13 @@ export class HybridEngine {
 		// Rebuild HNSW if too many deleted nodes
 		if (this.hnswSmall.needsRebuild()) this.hnswSmall.rebuild();
 		if (this.hnswBig.needsRebuild()) this.hnswBig.rebuild();
+		await this.persistIndices();
 	}
 
 	// ─── Search ───────────────────────────────────────────────────────────────
 
 	async search(query: string, topK = 20): Promise<FileItem[]> {
-		if (!this._ready) return [];
+		if (!this.isEnabled() || !this._ready) return [];
 
 		// BM25 search (always available)
 		const bm25Results = this.bm25.search(query, topK * 2);
@@ -200,7 +227,11 @@ export class HybridEngine {
 			queryScale = q.scale;
 			queryVecF16 = q.vecF16;
 		} catch (e) {
-			if (e instanceof NoApiKeyError) {
+			if (
+				e instanceof NoApiKeyError ||
+				e instanceof WeeklyTokenLimitExceededError ||
+				e instanceof HybridDisabledError
+			) {
 				this._canSearch = false;
 				return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
 			}
@@ -254,7 +285,7 @@ export class HybridEngine {
 
 	// ─── Private helpers ──────────────────────────────────────────────────────
 
-	private async indexBm25Only(filePath: string, rawBig: RawBigChunk[]): Promise<void> {
+	private async indexBm25Only(filePath: string, rawBig: RawBigChunk[], updateTime: number): Promise<void> {
 		for (const rb of rawBig) {
 			const row = bigChunkToRow({
 				id: undefined,
@@ -270,7 +301,7 @@ export class HybridEngine {
 			this.bm25.addDocument(id as number, rb.text);
 		}
 		await this.persistBm25();
-		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime: Date.now() });
+		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
 	}
 
 	private async buildSmallToBigMap(smallIds: number[]): Promise<Map<number, number>> {
@@ -344,6 +375,14 @@ export class HybridEngine {
 		if (small) this.hnswSmall.deserialize(await blobToHnsw(small.data));
 		if (big) this.hnswBig.deserialize(await blobToHnsw(big.data));
 		this._canSearch = this.hnswSmall.isNonEmpty();
+	}
+
+	private isExcludedPath(filePath: string): boolean {
+		const excludedPaths = this.setting.hybrid.excludedPaths ?? [];
+		return excludedPaths.some(
+			(excludedPath) =>
+				filePath === excludedPath || filePath.startsWith(`${excludedPath}/`),
+		);
 	}
 }
 

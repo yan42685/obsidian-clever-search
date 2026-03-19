@@ -65,6 +65,9 @@ export class SearchService {
 		if (queryText.length === 0) {
 			return new SearchResult("no result", []);
 		}
+		if (!this.hybridEngine.isEnabled()) {
+			return this.searchInVault(queryText);
+		}
 		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
 		const items = await this.hybridEngine.search(queryText);
 		return { sourcePath, items } as SearchResult;

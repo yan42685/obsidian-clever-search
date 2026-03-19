@@ -73,8 +73,13 @@ export default {
 	"hybridModal.apiDomain": "API domain",
 	"hybridModal.apiDomain.desc": "Leave blank to use api.openai.com. For custom/proxy endpoints enter the domain only (e.g. my-proxy.example.com).",
 	"hybridModal.apiKey": "API key",
+	"hybridModal.apiKeyNotice": "Token values shown here may differ from actual provider usage. Actual billing and quota are determined by the provider response. Only the text-embedding-3-small model is supported, so confirm your API key has access to that model.",
 	"hybridModal.weeklyTokenLimit": "Weekly token limit",
 	"hybridModal.weeklyTokenLimit.desc": "Maximum tokens to consume per week (Mon–Sun). Set to 0 for unlimited.",
+	"hybridModal.weeklyUsed": "This week used",
+	"hybridModal.weeklyRemaining": "Remaining quota",
+	"hybridModal.unlimited": "Unlimited",
+	"hybridModal.weeklyLimitExceededNotice": "This week's token usage already exceeds the limit. Remaining quota is 0.",
 	"hybridModal.excludedPaths": "Excluded paths (hybrid indexing)",
 	"hybridModal.tokenStats": "Token usage statistics",
 	"hybridModal.tokenStats.loading": "Loading stats...",
@@ -91,6 +96,7 @@ export default {
 	"Follow Obsidian Excluded Files": "Follow Obsidian Excluded Files",
 	"Enter path...": "Enter path...",
 	Add: "Add",
+	Update: "Update",
 
 	"Customize extensions": "Customize extensions",
 	"extensionModal.desc":

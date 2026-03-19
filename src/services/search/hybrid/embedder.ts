@@ -1,6 +1,8 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import { Database } from 'src/services/database/database';
+import { MyNotice } from 'src/services/obsidian/transformed-api';
 import { getInstance } from 'src/utils/my-lib';
+import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type VectorPrecision } from './hybrid-types';
 
 const OPENAI_EMBED_URL = 'https://api.openai.com/v1/embeddings';
@@ -16,12 +18,38 @@ export class NoApiKeyError extends Error {
 	}
 }
 
+export class WeeklyTokenLimitExceededError extends Error {
+	readonly limit: number;
+	readonly used: number;
+	readonly estimated: number;
+
+	constructor(limit: number, used: number, estimated: number) {
+		super('Weekly token limit exceeded before sending embedding request');
+		this.name = 'WeeklyTokenLimitExceededError';
+		this.limit = limit;
+		this.used = used;
+		this.estimated = estimated;
+	}
+}
+
+export class HybridDisabledError extends Error {
+	constructor() {
+		super('Hybrid search disabled');
+		this.name = 'HybridDisabledError';
+	}
+}
+
 type CacheEntry = {
 	vec: Int8Array;
 	scale: number;
 	vecF16?: Uint16Array;
 	ts: number;
 };
+
+const noticeWeeklyLimitReached = throttle(
+	5000,
+	(text: string) => new MyNotice(text, 5000),
+);
 
 // ─── Quantization helpers ─────────────────────────────────────────────────────
 
@@ -114,12 +142,14 @@ export class Embedder {
 		texts: string[],
 		precision: VectorPrecision = 'int8',
 	): Promise<Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>> {
+		if (!this.setting.hybrid?.enabled) throw new HybridDisabledError();
 		if (!this.apiKey) throw new NoApiKeyError();
 
 		const results: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> = [];
 
 		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
 			const batch = texts.slice(i, i + BATCH_SIZE);
+			await this.ensureWeeklyLimitAllows(batch);
 			const { embeddings: floats, tokensUsed } = await this.fetchEmbeddings(batch);
 			if (tokensUsed > 0) {
 				await recordTokenUsage(this.currentFilePath, tokensUsed);
@@ -168,6 +198,20 @@ export class Embedder {
 
 	// ─── LRU cache ───────────────────────────────────────────────────────────
 
+	private async ensureWeeklyLimitAllows(texts: string[]): Promise<void> {
+		const limit = this.setting.hybrid?.weeklyTokenLimit ?? 0;
+		if (limit <= 0) return;
+
+		const used = await getCurrentWeekTokenUsage();
+		const estimated = estimateBatchTokens(texts);
+		if (used < limit && used + estimated <= limit) return;
+
+		noticeWeeklyLimitReached(
+			`Weekly token limit reached: used ${used}, limit ${limit}, remaining quota 0`,
+		);
+		throw new WeeklyTokenLimitExceededError(limit, used, estimated);
+	}
+
 	private getCache(text: string): CacheEntry | null {
 		const entry = this.cache.get(text);
 		if (!entry) return null;
@@ -197,6 +241,33 @@ export class Embedder {
 function todayKey(): string {
 	const d = new Date();
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dateKey(date: Date): string {
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+export function getCurrentWeekDateRange(now = new Date()): { fromDate: string; toDate: string } {
+	const current = new Date(now);
+	current.setHours(0, 0, 0, 0);
+
+	const start = new Date(current);
+	const day = start.getDay();
+	const diffToMonday = day === 0 ? 6 : day - 1;
+	start.setDate(start.getDate() - diffToMonday);
+
+	const end = new Date(start);
+	end.setDate(start.getDate() + 6);
+
+	return {
+		fromDate: dateKey(start),
+		toDate: dateKey(end),
+	};
+}
+
+export async function getCurrentWeekTokenUsage(): Promise<number> {
+	const { fromDate, toDate } = getCurrentWeekDateRange();
+	return getTotalTokens(fromDate, toDate);
 }
 
 export async function recordTokenUsage(filePath: string, tokens: number): Promise<void> {
@@ -255,4 +326,21 @@ export async function getTotalTokens(fromDate: string, toDate: string): Promise<
 	} catch {
 		return 0;
 	}
+}
+
+function estimateBatchTokens(texts: string[]): number {
+	return texts.reduce((sum, text) => sum + estimateTextTokens(text), 0);
+}
+
+function estimateTextTokens(text: string): number {
+	let asciiChars = 0;
+	let nonAsciiChars = 0;
+	for (const char of text) {
+		if (char.charCodeAt(0) <= 0x7f) {
+			asciiChars++;
+		} else {
+			nonAsciiChars++;
+		}
+	}
+	return Math.max(1, Math.ceil(nonAsciiChars + asciiChars / 4));
 }
