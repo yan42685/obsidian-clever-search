@@ -37,6 +37,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		enabled: false,
 		apiDomain: '',
 		apiKey: '',
+		weeklyTokenLimit: 0,
+		excludedPaths: [],
 	},
 	ui: {
 		openInNewPane: true,
@@ -58,6 +60,16 @@ export type HybridSetting = {
 	enabled: boolean;
 	apiDomain: string;
 	apiKey: string;
+	weeklyTokenLimit: number; // 0 = unlimited
+	excludedPaths: string[];
+};
+
+/** One record per (filePath, dateKey) where dateKey = "YYYY-MM-DD" */
+export type HybridTokenRecord = {
+	id?: number;
+	filePath: string;
+	dateKey: string; // "YYYY-MM-DD"
+	tokens: number;
 };
 
 export type UISetting = {

@@ -1,6 +1,6 @@
 import Dexie from "dexie";
 import type { AsPlainObject } from "minisearch";
-import type { OuterSetting } from "src/globals/plugin-setting";
+import type { HybridTokenRecord, OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import type { BigChunkRow, BlobRecord, ChunkRow, HybridDocRef } from "src/services/search/hybrid/hybrid-store";
 import { logger } from "src/utils/logger";
@@ -91,7 +91,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 3;
+	private static readonly _dbVersion = 4;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -106,6 +106,8 @@ class DexieWrapper extends Dexie {
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
 	hybridHnswBig!: Dexie.Table<BlobRecord, number>;
 	hybridDocRefs!: Dexie.Table<HybridDocRef, string>;
+	// Token stats (v4)
+	hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {
 		super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
@@ -115,6 +117,18 @@ class DexieWrapper extends Dexie {
 			minisearch: "++id",
 			lexicalDocRefs: "++id",
 			semanticDocRefs: "++id",
+		});
+		this.version(3).stores({
+			pluginSetting: "++id",
+			minisearch: "++id",
+			lexicalDocRefs: "++id",
+			semanticDocRefs: "++id",
+			hybridChunks: "++id, bigChunkId, filePath",
+			hybridBigChunks: "++id, filePath",
+			hybridBm25Index: "id",
+			hybridHnswSmall: "id",
+			hybridHnswBig: "id",
+			hybridDocRefs: "path",
 		});
 		this.version(DexieWrapper._dbVersion).stores({
 			pluginSetting: "++id",
@@ -127,6 +141,7 @@ class DexieWrapper extends Dexie {
 			hybridHnswSmall: "id",
 			hybridHnswBig: "id",
 			hybridDocRefs: "path",
+			hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
 		});
 	}
 	get dbVersion() {

@@ -14,6 +14,7 @@ import {
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
+import { getTopTokenFiles, getTotalTokens } from "src/services/search/hybrid/embedder";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
@@ -202,31 +203,11 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName(t("Hybrid search"))
 			.setDesc(t("Hybrid search desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.hybrid.enabled)
-					.onChange((v) => {
-						this.setting.hybrid.enabled = v;
-					}),
-			)
-			.addText((text) =>
-				text
-					.setPlaceholder("api.openai.com")
-					.setValue(this.setting.hybrid.apiDomain)
-					.onChange((domain) => {
-						this.setting.hybrid.apiDomain = domain;
-					}),
-			)
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text
-					.setPlaceholder("API key")
-					.setValue(this.setting.hybrid.apiKey)
-					.onChange((key) => {
-						this.setting.hybrid.apiKey = key;
-						this.settingManager.saveSettings();
-					});
-			});
+			.addButton((b) =>
+				b.setButtonText(t("Manage")).onClick(() => {
+					new HybridSearchModal(getInstance(App)).open();
+				}),
+			);
 
 		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
 			b.setButtonText(t("Manage")).onClick(() => {
@@ -337,6 +318,238 @@ class GeneralTab extends PluginSettingTab {
 					);
 				});
 			});
+	}
+}
+
+class HybridSearchModal extends Modal {
+	private settingManager = getInstance(SettingManager);
+	private setting = getInstance(OuterSetting);
+	private allPaths = new Set<string>();
+	private allFolders = new Set<string>();
+	private excludesEl: HTMLElement;
+	private inputEl: HTMLInputElement;
+	private suggester: CommonSuggester;
+
+	constructor(app: App) {
+		super(app);
+		const allAbstractFiles = getInstance(Vault).getAllLoadedFiles();
+		for (const aFile of allAbstractFiles) {
+			this.allPaths.add(aFile.path);
+			if (aFile instanceof TFolder) {
+				this.allFolders.add(aFile.path);
+			}
+		}
+	}
+
+	onOpen() {
+		this.modalEl.style.width = "56vw";
+		this.modalEl.style.marginBottom = "5em";
+		this.modalEl.querySelector(".modal-close-button")?.remove();
+		const contentEl = this.contentEl;
+
+		// ── Introduction ──────────────────────────────────────────────────────
+		new Setting(contentEl).setDesc(t("hybridModal.desc"));
+
+		// ── Enable ────────────────────────────────────────────────────────────
+		new Setting(contentEl)
+			.setName(t("Enable"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.hybrid.enabled)
+					.onChange((v) => {
+						this.setting.hybrid.enabled = v;
+						this.settingManager.saveSettings();
+					}),
+			);
+
+		// ── API Domain ────────────────────────────────────────────────────────
+		new Setting(contentEl)
+			.setName(t("hybridModal.apiDomain"))
+			.setDesc(t("hybridModal.apiDomain.desc"))
+			.addText((text) =>
+				text
+					.setPlaceholder("api.openai.com")
+					.setValue(this.setting.hybrid.apiDomain)
+					.onChange((v) => {
+						this.setting.hybrid.apiDomain = v;
+						this.settingManager.saveSettings();
+					}),
+			);
+
+		// ── API Key ───────────────────────────────────────────────────────────
+		new Setting(contentEl)
+			.setName(t("hybridModal.apiKey"))
+			.addText((text) => {
+				text.inputEl.type = "password";
+				text.inputEl.style.width = "100%";
+				text
+					.setPlaceholder("sk-...")
+					.setValue(this.setting.hybrid.apiKey)
+					.onChange((v) => {
+						this.setting.hybrid.apiKey = v;
+						this.settingManager.saveSettings();
+					});
+			});
+
+		// ── Weekly token limit ────────────────────────────────────────────────
+		new Setting(contentEl)
+			.setName(t("hybridModal.weeklyTokenLimit"))
+			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
+			.addText((text) =>
+				text
+					.setPlaceholder("0")
+					.setValue(String(this.setting.hybrid.weeklyTokenLimit ?? 0))
+					.onChange((v) => {
+						const n = parseInt(v, 10);
+						this.setting.hybrid.weeklyTokenLimit = isNaN(n) ? 0 : n;
+						this.settingManager.saveSettings();
+					}),
+			);
+
+		// ── Excluded paths ────────────────────────────────────────────────────
+		contentEl.createEl("h3", { text: t("hybridModal.excludedPaths") });
+		this.excludesEl = contentEl.createDiv();
+		this.renderExcludedList(this.excludesEl);
+
+		new Setting(contentEl)
+			.addText((text) => {
+				this.inputEl = text.inputEl;
+				text.setPlaceholder(t("Enter path...")).onChange(() => {
+					this.suggester.close();
+					this.suggester.open();
+				});
+			})
+			.addButton((btn) =>
+				btn.setButtonText(t("Add")).onClick(() => {
+					this.addPath(this.inputEl.value);
+				}),
+			);
+
+		// Autocomplete: exclude paths already in the hybrid exclusion list
+		const hybridExcluded = new Set(this.setting.hybrid.excludedPaths ?? []);
+		const availableFolders = new Set(
+			[...this.allFolders].filter((p) => {
+				// Remove paths that are already excluded or are sub-paths of excluded entries
+				for (const ex of hybridExcluded) {
+					if (p === ex || p.startsWith(ex + "/")) return false;
+				}
+				return true;
+			}),
+		);
+
+		this.suggester = new CommonSuggester(
+			this.inputEl,
+			availableFolders,
+			(v) => { this.addPath(v); },
+		);
+		setTimeout(() => { this.inputEl.focus(); }, 1);
+
+		// ── Token usage stats ─────────────────────────────────────────────────
+		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
+		const statsEl = contentEl.createDiv();
+		statsEl.setText(t("hybridModal.tokenStats.loading"));
+		this.loadTokenStats(statsEl);
+	}
+
+	private renderExcludedList(listEl: HTMLElement) {
+		listEl.empty();
+		const paths = this.setting.hybrid.excludedPaths ?? [];
+		paths.forEach((path, index) => {
+			const row = listEl.createDiv();
+			row.style.cssText = "display:flex;justify-content:space-between;margin:0.5em 0;overflow:auto;";
+			const span = row.createSpan({ text: path });
+			span.style.cssText = "width:90%;overflow:auto;";
+			const del = row.createSpan({ text: "✕" });
+			del.style.cursor = "pointer";
+			del.onClickEvent(() => {
+				paths.splice(index, 1);
+				this.settingManager.saveSettings();
+				this.renderExcludedList(listEl);
+			});
+		});
+	}
+
+	private addPath(inputPath: string) {
+		const paths = this.setting.hybrid.excludedPaths ?? [];
+		if (inputPath && !paths.includes(inputPath)) {
+			if (!this.allPaths.has(inputPath)) {
+				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
+			} else {
+				paths.push(inputPath);
+				this.setting.hybrid.excludedPaths = paths;
+				this.settingManager.saveSettings();
+				this.renderExcludedList(this.excludesEl);
+				this.inputEl.value = "";
+			}
+		}
+	}
+
+	private async loadTokenStats(container: HTMLElement) {
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, "0");
+		const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+		// Daily: today
+		const dailyFrom = todayKey;
+		const dailyTo = todayKey;
+
+		// Weekly: last 7 days
+		const weekAgo = new Date(now);
+		weekAgo.setDate(weekAgo.getDate() - 6);
+		const weeklyFrom = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth() + 1)}-${pad(weekAgo.getDate())}`;
+
+		// Monthly: last 30 days
+		const monthAgo = new Date(now);
+		monthAgo.setDate(monthAgo.getDate() - 29);
+		const monthlyFrom = `${monthAgo.getFullYear()}-${pad(monthAgo.getMonth() + 1)}-${pad(monthAgo.getDate())}`;
+
+		const [dailyTop, weeklyTop, monthlyTop, weeklyTotal] = await Promise.all([
+			getTopTokenFiles(dailyFrom, dailyTo, 20),
+			getTopTokenFiles(weeklyFrom, todayKey, 20),
+			getTopTokenFiles(monthlyFrom, todayKey, 20),
+			getTotalTokens(weeklyFrom, todayKey),
+		]);
+
+		container.empty();
+
+		// Weekly total vs limit
+		const limit = this.setting.hybrid.weeklyTokenLimit ?? 0;
+		const limitText = limit > 0
+			? `${weeklyTotal.toLocaleString()} / ${limit.toLocaleString()}`
+			: `${weeklyTotal.toLocaleString()}`;
+		container.createEl("p", {
+			text: `${t("hybridModal.weeklyUsage")}: ${limitText}`,
+		});
+
+		this.renderTopList(container, t("hybridModal.dailyTop"), dailyTop);
+		this.renderTopList(container, t("hybridModal.weeklyTop"), weeklyTop);
+		this.renderTopList(container, t("hybridModal.monthlyTop"), monthlyTop);
+	}
+
+	private renderTopList(
+		parent: HTMLElement,
+		title: string,
+		items: Array<{ filePath: string; tokens: number }>,
+	) {
+		parent.createEl("h4", { text: title });
+		if (items.length === 0) {
+			parent.createEl("p", { text: t("hybridModal.noData") });
+			return;
+		}
+		const table = parent.createEl("table");
+		table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.85em;";
+		const header = table.createEl("tr");
+		["#", t("hybridModal.file"), t("hybridModal.tokens")].forEach((h) => {
+			const th = header.createEl("th", { text: h });
+			th.style.cssText = "text-align:left;padding:2px 6px;border-bottom:1px solid var(--background-modifier-border);";
+		});
+		items.forEach(({ filePath, tokens }, i) => {
+			const tr = table.createEl("tr");
+			[String(i + 1), filePath, tokens.toLocaleString()].forEach((cell) => {
+				const td = tr.createEl("td", { text: cell });
+				td.style.cssText = "padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:30vw;";
+			});
+		});
 	}
 }
 

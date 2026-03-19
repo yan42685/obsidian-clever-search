@@ -1,4 +1,5 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
+import { Database } from 'src/services/database/database';
 import { getInstance } from 'src/utils/my-lib';
 import { EMBED_DIM, type VectorPrecision } from './hybrid-types';
 
@@ -80,6 +81,8 @@ function float32ToFloat16(val: number): number {
 export class Embedder {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly cache = new Map<string, CacheEntry>();
+	/** Current file being indexed — set by HybridEngine before calling embedBatch */
+	currentFilePath = '';
 
 	private get apiKey(): string {
 		return this.setting.hybrid?.apiKey ?? '';
@@ -117,7 +120,10 @@ export class Embedder {
 
 		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
 			const batch = texts.slice(i, i + BATCH_SIZE);
-			const floats = await this.fetchEmbeddings(batch);
+			const { embeddings: floats, tokensUsed } = await this.fetchEmbeddings(batch);
+			if (tokensUsed > 0) {
+				await recordTokenUsage(this.currentFilePath, tokensUsed);
+			}
 			for (const f of floats) {
 				l2Normalize(f);
 				const { vec, scale } = quantizeInt8(f);
@@ -132,7 +138,7 @@ export class Embedder {
 		return results;
 	}
 
-	private async fetchEmbeddings(texts: string[]): Promise<number[][]> {
+	private async fetchEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokensUsed: number }> {
 		const resp = await fetch(this.apiDomain, {
 			method: 'POST',
 			headers: {
@@ -156,7 +162,8 @@ export class Embedder {
 		// Sort by index to preserve order (OpenAI may reorder)
 		const data: Array<{ index: number; embedding: number[] }> = json.data;
 		data.sort((a, b) => a.index - b.index);
-		return data.map(d => d.embedding);
+		const tokensUsed: number = json.usage?.total_tokens ?? 0;
+		return { embeddings: data.map(d => d.embedding), tokensUsed };
 	}
 
 	// ─── LRU cache ───────────────────────────────────────────────────────────
@@ -182,5 +189,70 @@ export class Embedder {
 			if (oldestKey) this.cache.delete(oldestKey);
 		}
 		this.cache.set(text, { ...entry, ts: Date.now() });
+	}
+}
+
+// ─── Token usage tracking ─────────────────────────────────────────────────────
+
+function todayKey(): string {
+	const d = new Date();
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export async function recordTokenUsage(filePath: string, tokens: number): Promise<void> {
+	if (!filePath || tokens <= 0) return;
+	try {
+		const db = getInstance(Database).db;
+		const dateKey = todayKey();
+		const existing = await db.hybridTokenStats
+			.where('[filePath+dateKey]')
+			.equals([filePath, dateKey])
+			.first();
+		if (existing?.id !== undefined) {
+			await db.hybridTokenStats.update(existing.id, { tokens: existing.tokens + tokens });
+		} else {
+			await db.hybridTokenStats.add({ filePath, dateKey, tokens });
+		}
+	} catch {
+		// non-critical — ignore errors
+	}
+}
+
+/** Returns top-N files by total tokens within the given date range (inclusive). */
+export async function getTopTokenFiles(
+	fromDate: string,
+	toDate: string,
+	topN = 20,
+): Promise<Array<{ filePath: string; tokens: number }>> {
+	try {
+		const db = getInstance(Database).db;
+		const records = await db.hybridTokenStats
+			.where('dateKey')
+			.between(fromDate, toDate, true, true)
+			.toArray();
+		const totals = new Map<string, number>();
+		for (const r of records) {
+			totals.set(r.filePath, (totals.get(r.filePath) ?? 0) + r.tokens);
+		}
+		return Array.from(totals.entries())
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, topN)
+			.map(([filePath, tokens]) => ({ filePath, tokens }));
+	} catch {
+		return [];
+	}
+}
+
+/** Returns total tokens consumed within the given date range. */
+export async function getTotalTokens(fromDate: string, toDate: string): Promise<number> {
+	try {
+		const db = getInstance(Database).db;
+		const records = await db.hybridTokenStats
+			.where('dateKey')
+			.between(fromDate, toDate, true, true)
+			.toArray();
+		return records.reduce((sum, r) => sum + r.tokens, 0);
+	} catch {
+		return 0;
 	}
 }
