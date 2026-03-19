@@ -15,10 +15,8 @@ export class OuterSetting {
 	enableStopWordsEn: boolean;
 	enableChinesePatch: boolean;
 	enableStopWordsZh: boolean;
-	apiProvider1: ApiProvider;
-	apiProvider2: ApiProvider;
+	hybrid: HybridSetting;
 	ui: UISetting;
-	semantic: SemanticSetting;
 }
 
 const isChineseUser = window.localStorage.getItem("language") === "zh";
@@ -35,13 +33,10 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	// TODO: 繁体中文
 	enableChinesePatch: isChineseUser ? true : false,
 	enableStopWordsZh: isChineseUser ? true : false,
-	apiProvider1: {
-		domain: "",
-		key: "",
-	},
-	apiProvider2: {
-		domain: "",
-		key: "",
+	hybrid: {
+		enabled: false,
+		apiDomain: '',
+		apiKey: '',
 	},
 	ui: {
 		openInNewPane: true,
@@ -53,19 +48,16 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		inFileFloatingWindowTop: "2.7em",
 		inFileFloatingWindowLeft: "2.5em",
 	},
-	semantic: {
-		isEnabled: false,
-		serverType: "local"
-	}
 };
 
 export type LogLevelOptions = {
 	[K in LogLevel]: K;
 };
 
-export type ApiProvider = {
-	domain: string;
-	key: string;
+export type HybridSetting = {
+	enabled: boolean;
+	apiDomain: string;
+	apiKey: string;
 };
 
 export type UISetting = {
@@ -79,11 +71,6 @@ export type UISetting = {
 	inFileFloatingWindowWidth?: string;
 	inFileFloatingWindowHeight?: string;
 };
-
-export type SemanticSetting = {
-	isEnabled: boolean
-	serverType: "local" | "remote"
-}
 
 // ========== transparent for users ==========
 type InnerSetting = {

@@ -82,7 +82,12 @@ export class Embedder {
 	private readonly cache = new Map<string, CacheEntry>();
 
 	private get apiKey(): string {
-		return this.setting.apiProvider1?.key ?? '';
+		return this.setting.hybrid?.apiKey ?? '';
+	}
+
+	private get apiDomain(): string {
+		const domain = this.setting.hybrid?.apiDomain;
+		return domain ? `https://${domain.replace(/^https?:\/\//, '')}/v1/embeddings` : OPENAI_EMBED_URL;
 	}
 
 	/** Embed a single query string (cached). */
@@ -128,7 +133,7 @@ export class Embedder {
 	}
 
 	private async fetchEmbeddings(texts: string[]): Promise<number[][]> {
-		const resp = await fetch(OPENAI_EMBED_URL, {
+		const resp = await fetch(this.apiDomain, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',

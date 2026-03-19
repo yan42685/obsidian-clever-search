@@ -19,7 +19,6 @@ import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
-import { SemanticEngine } from "../search/semantic-engine";
 import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
@@ -201,14 +200,33 @@ class GeneralTab extends PluginSettingTab {
 			.setDesc(t("Advanced.desc"));
 
 		new Setting(containerEl)
-			.setName(t("Semantic search"))
-			.addButton((b) =>
-				b
-					.setButtonText(t("Manage"))
-					.onClick(() =>
-						new SemanticSearchModal(getInstance(App)).open(),
-					),
-			);
+			.setName(t("Hybrid search"))
+			.setDesc(t("Hybrid search desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.hybrid.enabled)
+					.onChange((v) => {
+						this.setting.hybrid.enabled = v;
+					}),
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("api.openai.com")
+					.setValue(this.setting.hybrid.apiDomain)
+					.onChange((domain) => {
+						this.setting.hybrid.apiDomain = domain;
+					}),
+			)
+			.addText((text) => {
+				text.inputEl.type = "password";
+				text
+					.setPlaceholder("API key")
+					.setValue(this.setting.hybrid.apiKey)
+					.onChange((key) => {
+						this.setting.hybrid.apiKey = key;
+						this.settingManager.saveSettings();
+					});
+			});
 
 		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
 			b.setButtonText(t("Manage")).onClick(() => {
@@ -319,49 +337,6 @@ class GeneralTab extends PluginSettingTab {
 					);
 				});
 			});
-
-		new Setting(devSettingContent)
-			.setName("API provider1")
-			.setDesc("domain and key")
-			.addText((text) =>
-				text
-					.setPlaceholder("api.openai.com")
-					.setValue(this.setting.apiProvider1.domain)
-					.onChange((domain) => {
-						this.setting.apiProvider1.domain = domain;
-						this.settingManager.saveSettings();
-					}),
-			)
-
-			.addText((text) =>
-				text
-					.setPlaceholder("API key")
-
-					.setValue(this.setting.apiProvider1.key)
-					.onChange((key) => {
-						this.setting.apiProvider1.key = key;
-					}),
-			);
-
-		new Setting(devSettingContent)
-			.setName("API provider2")
-			.setDesc("description")
-			.addText((text) =>
-				text
-					.setPlaceholder("api.openai.com")
-					.setValue(this.setting.apiProvider2.domain)
-					.onChange((domain) => {
-						this.setting.apiProvider2.domain = domain;
-					}),
-			)
-			.addText((text) =>
-				text
-					.setPlaceholder("API key")
-					.setValue(this.setting.apiProvider2.key)
-					.onChange((key) => {
-						this.setting.apiProvider2.key = key;
-					}),
-			);
 	}
 }
 
@@ -504,73 +479,5 @@ class CustomExtensionModal extends Modal {
 			});
 
 		new Setting(contentEl).setName("Image").setDesc("Todo");
-	}
-}
-
-class SemanticSearchModal extends Modal {
-	private semanticEngine = getInstance(SemanticEngine);
-	private setting = getInstance(OuterSetting).semantic;
-	private settingManager = getInstance(SettingManager);
-	private needInitSemanticEngine = false;
-	onOpen(): void {
-		this.modalEl.style.width = "50vw";
-		this.modalEl.style.height = "55vh";
-		this.modalEl.querySelector(".modal-close-button")?.remove();
-		const contentEl = this.contentEl;
-		new Setting(contentEl)
-			.setName(t("Introduction"))
-			.setDesc(t("Introduction.desc"));
-		new Setting(contentEl).setName(t("Enable")).addToggle((t) =>
-			t.setValue(this.setting.isEnabled).onChange((v) => {
-				this.setting.isEnabled = v;
-				if (v === true) {
-					this.needInitSemanticEngine = true;
-				}
-			}),
-		);
-		new Setting(contentEl)
-			.setName(t("Server type"))
-			.setDesc(t("Server type.desc"))
-			.addDropdown((d) =>
-				d
-					// .addOptions({ local: "local", remote: "remote" })
-					.addOptions({ local: t("local") })
-					.setValue(this.setting.serverType)
-					.onChange(
-						(v) =>
-							(this.setting.serverType = v as "local" | "remote"),
-					),
-			);
-		new Setting(contentEl)
-			.setName(t("Utilities"))
-			.addButton((b) =>
-				b
-					.setButtonText(t("Test connection"))
-					.onClick(() => this.semanticEngine.testConnection()),
-			)
-			.addButton((b) =>
-				b
-					.setButtonText(t("Download"))
-					.onClick(() =>
-						getInstance(AssetsProvider).downloadAiHelper(),
-					),
-			);
-
-		new Setting(contentEl)
-			.setName(t("Additional Information"))
-			.setDesc(t("Additional Information.desc"));
-		// .addButton(b=>b.setButtonText("Refresh states").onClick(async ()=>{
-		// 	const count = await this.semanticEngine.docsCount();
-		// 	if (count) {
-		// 		new MyNotice(`Indexed docs count: ${count}`, 5000)
-		// 	}
-		// }))
-		// .addButton((b) => b.setButtonText("Reindex").onClick(() => {}));
-	}
-	onClose(): void {
-		if (this.needInitSemanticEngine) {
-			this.needInitSemanticEngine = false;
-			getInstance(DataManager).initSemanticEngine();
-		}
 	}
 }

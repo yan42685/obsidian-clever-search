@@ -66,6 +66,8 @@ export default {
 	"Additional Information": "Additional Information",
 	"Additional Information.desc": "When semantic search is turned on and ai-helper is running, Reindex will be applied to both lexical and semantic engine; each time this plugin is loaded, the semantic engine will automatically perform an incremental index, and subsequent file modifications will not update the index to avoid blocking semantic search.",
 
+	"Hybrid search": "Hybrid search",
+	"Hybrid search desc": "Hybrid lexical and semantic search with graceful degradation to lexical search upon semantic failure (e.g., network issues or insufficient tokens).",
 
 	"Excluded files": "Excluded files",
 	Manage: "Manage",

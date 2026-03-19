@@ -57,6 +57,9 @@ export default {
 	"Additional Information": "补充信息",
 	"Additional Information.desc": "在开启语义搜索并运行 ai-helper 的情况下，重新索引 会同时应用于词汇引擎和语义引擎；每次加载插件的时候，语义引擎会自动进行一次增量索引，之后修改文件不会更新索引以避免阻塞语义搜索。",
 
+	"Hybrid search": "混合搜索",
+	"Hybrid search desc": "混合词义和语义搜索，语义搜索由于网络、token不足等原因失败时退化到词义搜索",
+
 	"Excluded files": "忽略文件",
 	Manage: "管理",
 	"Follow Obsidian Excluded Files": "跟随 Obsidian 忽略文件设置",
