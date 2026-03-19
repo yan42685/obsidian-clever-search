@@ -23,7 +23,7 @@
 	export let uiType: "modal" | "floatingWindow";
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
-	export let isSemantic: boolean; // only available for in-vault search
+	export let isHybrid: boolean = false; // hybrid BM25+vector search
 	export let queryText: string;
 	
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
@@ -53,9 +53,8 @@
 			} else if (searchType === SearchType.IN_VAULT) {
 				currFileItem = items[index] as FileItem;
 
-				// semantic search doesn't require requesting subItems each time because
-				// all the subItems for each fileItem have been returned for newInput if it is a semantic search
-				if (!isSemantic) {
+				// hybrid search returns subItems directly; lexical fetches on demand
+				if (!isHybrid) {
 					currFileItem.subItems = await searchService.getFileSubItems(
 						queryText,
 						currFileItem,
@@ -96,9 +95,11 @@
 		if (searchType === SearchType.IN_FILE) {
 			searchResult = await searchService.searchInFile(queryText);
 		} else if (searchType === SearchType.IN_VAULT) {
-			searchResult = isSemantic
-				? await searchService.searchInVaultSemantic(queryText)
-				: await searchService.searchInVault(queryText);
+			if (isHybrid) {
+				searchResult = await searchService.searchInVaultHybrid(queryText);
+			} else {
+				searchResult = await searchService.searchInVault(queryText);
+			}
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
@@ -168,12 +169,6 @@
 		handleConfirm(null, true);
 	}
 
-	function handleSwitchLexicalSemanticMode() {
-		cachedResult.delete(queryText);
-		isSemantic = !isSemantic;
-		handleInputAsync();
-	}
-
 	function handleInsertFileLink() {
 		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path)
 	}
@@ -200,10 +195,6 @@
 		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
 		listenEvent(EventEnum.CONFIRM_ITEM_IN_BACKGROUND, handleConfirmInBackground);
-		listenEvent(
-			EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE,
-			handleSwitchLexicalSemanticMode,
-		);
 		listenEvent(EventEnum.INSERT_FILE_LINK, handleInsertFileLink);
 	}
 	viewHelper.focusInput();
@@ -297,7 +288,7 @@
 						</ul>
 					{:else}
 						<span>
-							{viewHelper.showNoResult(isSemantic)}
+							{viewHelper.showNoResult()}
 						</span>
 					{/if}
 				{/if}

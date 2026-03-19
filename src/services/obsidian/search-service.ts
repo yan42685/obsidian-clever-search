@@ -12,8 +12,8 @@ import {
 } from "../../globals/search-types";
 import { FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
+import { HybridEngine } from "../search/hybrid/hybrid-engine";
 import { LexicalEngine } from "../search/lexical-engine";
-import { SemanticEngine } from "../search/semantic-engine";
 import { TruncateOption } from "../search/truncate-option";
 import { DataProvider } from "./user-data/data-provider";
 import { ViewRegistry, ViewType } from "./view-registry";
@@ -23,9 +23,9 @@ export class SearchService {
 	private readonly app = getInstance(App);
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
-	private readonly semanticEngine = getInstance(SemanticEngine);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 	private readonly viewRegistry = getInstance(ViewRegistry);
+	readonly hybridEngine = new HybridEngine();
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
@@ -61,24 +61,13 @@ export class SearchService {
 		}
 	}
 
-	async searchInVaultSemantic(queryText: string): Promise<SearchResult> {
-		const result = new SearchResult("no result", []);
+	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
 		if (queryText.length === 0) {
-			return result;
-		} else {
-			const sourcePath =
-				this.app.workspace.getActiveFile()?.path || "no source path";
-			const result = {
-				sourcePath: sourcePath,
-				items: await this.semanticEngine.search(
-					// remove leading and trailing white spaces for consistent search result
-					queryText.trim(),
-					ViewType.MARKDOWN,
-				),
-			} as SearchResult;
-			logger.debug(result)
-			return result;
+			return new SearchResult("no result", []);
 		}
+		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
+		const items = await this.hybridEngine.search(queryText);
+		return { sourcePath, items } as SearchResult;
 	}
 
 	/**

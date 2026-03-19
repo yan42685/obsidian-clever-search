@@ -50,6 +50,12 @@ export class CommandRegistry {
 				callback: async () => await devTest(),
 			});
 
+			this.addCommand({
+				id: "cs-hybrid-search",
+				name: "Hybrid search (BM25 + vector) [dev]",
+				callback: () =>
+					new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
+			});
 		}
 	}
 
@@ -61,7 +67,7 @@ export class CommandRegistry {
 				if (this.setting.ui.floatingWindowForInFile) {
 					getInstance(FloatingWindowManager).toggle("inFile");
 				} else {
-					new SearchModal(this.app, SearchType.IN_FILE, false).open();
+					new SearchModal(this.app, SearchType.IN_FILE).open();
 				}
 			},
 		});
@@ -79,7 +85,7 @@ export class CommandRegistry {
 			name: "Search in Vault",
 			callback: () => {
 				eventBus.emit(EventEnum.IN_VAULT_SEARCH);
-				new SearchModal(this.app, SearchType.IN_VAULT, false).open();
+				new SearchModal(this.app, SearchType.IN_VAULT).open();
 			},
 		});
 
@@ -94,13 +100,6 @@ export class CommandRegistry {
 					await getInstance(OmnisearchIntegration).getLastQuery(),
 				).open();
 			},
-		});
-
-		this.addCommand({
-			id: "clever-search-in-vault-semantic",
-			name: "Search in vault semantically",
-			callback: async () =>
-				new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
 		});
 	}
 
@@ -179,7 +178,6 @@ export class ModalNavigationHotkeys extends AbstractNavigationHotkeys {
 		this.register([CTRL], "Enter", EventEnum.CONFIRM_ITEM_IN_BACKGROUND);
 		this.register([CTRL], "N", EventEnum.NEXT_SUB_ITEM);
 		this.register([CTRL], "P", EventEnum.PREV_SUB_ITEM);
-		this.register([CTRL], "S", EventEnum.SWITCH_LEXICAL_SEMANTIC_MODE);
 		this.register([ALT], "I", EventEnum.INSERT_FILE_LINK);
 	}
 }

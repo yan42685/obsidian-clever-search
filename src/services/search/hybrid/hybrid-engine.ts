@@ -1,7 +1,7 @@
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
 import { getInstance } from 'src/utils/my-lib';
 import { Database } from 'src/services/database/database';
-import type { VectorPrecision, BigChunk, Chunk, RawBigChunk, RawChunk } from './hybrid-types';
+import type { VectorPrecision, BigChunk, RawBigChunk } from './hybrid-types';
 import { chunkFile } from './chunker';
 import { Embedder, NoApiKeyError } from './embedder';
 import { BM25Engine } from './bm25';
