@@ -16,6 +16,7 @@ import {
 	chunkToRow,
 	hnswToBlob,
 	rowToChunk,
+	rowToChunkVector,
 } from './hybrid-store';
 import type { Chunk, RawChunk, VectorPrecision } from './hybrid-types';
 import type { RankedResult } from './ranking';
@@ -415,6 +416,9 @@ export class HybridEngine {
 	}
 
 	private async persistHnsw(): Promise<void> {
+		if (this.hnswSmall.hasDeletedNodes()) {
+			this.hnswSmall.rebuild();
+		}
 		await this.db.db.hybridHnswSmall.put({ id: 0, data: hnswToBlob(this.hnswSmall.serialize()) });
 	}
 
@@ -430,12 +434,43 @@ export class HybridEngine {
 		this.hnswSmall.clear();
 		const small = await this.db.db.hybridHnswSmall.get(0);
 		if (small) {
-			this.hnswSmall.deserialize(await blobToHnsw(small.data));
+			const data = await blobToHnsw(small.data);
+			const shouldRewriteBlob =
+				Boolean(data.vectors?.length) ||
+				Boolean(data.scales?.length) ||
+				Boolean(data.vectorsF16?.length) ||
+				data.deletedSet.length > 0;
+			this.hnswSmall.deserialize(data);
+			// Old persisted graphs may still include lazy-deleted nodes; compact first so
+			// every in-memory node can hydrate from an existing hybridChunks row.
+			if (this.hnswSmall.hasDeletedNodes()) {
+				this.hnswSmall.rebuild();
+			}
+			await this.hydrateHnswVectors();
+			if (shouldRewriteBlob) {
+				await this.persistHnsw();
+			}
 		}
-		this._canSearch = this.hnswSmall.isNonEmpty();
+		this._canSearch = this.hnswSmall.isNonEmpty() && this.hnswSmall.hasVectors();
 		if (!this._canSearch) {
 			this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
 		}
+	}
+
+	private async hydrateHnswVectors(): Promise<void> {
+		const ids = this.hnswSmall.nodeIds();
+		if (ids.length === 0) {
+			this.hnswSmall.hydrateVectors([]);
+			return;
+		}
+
+		const rows = await this.db.db.hybridChunks.bulkGet(ids);
+		const records = await Promise.all(
+			rows
+				.filter((row): row is ChunkRow => Boolean(row?.id))
+				.map((row) => rowToChunkVector(row)),
+		);
+		this.hnswSmall.hydrateVectors(records);
 	}
 
 	private isExcludedPath(filePath: string): boolean {

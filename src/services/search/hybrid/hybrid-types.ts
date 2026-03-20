@@ -58,8 +58,8 @@ export type HnswGraphData = {
 	entryPoint: number | null;
 	maxLevel: number;
 	nodes: [number, HnswNode][];
-	vectors: [number, number[]][];
-	scales: [number, number][];
+	vectors?: [number, number[]][];
+	scales?: [number, number][];
 	vectorsF16?: [number, number[]][];
 	deletedSet: number[];
 };

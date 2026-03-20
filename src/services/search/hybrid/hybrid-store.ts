@@ -23,6 +23,13 @@ export type HybridDocRef = {
 	updateTime: number;
 };
 
+export type ChunkVectorRecord = {
+	id: number;
+	vector: Int8Array;
+	scale: number;
+	vectorF16?: Uint16Array;
+};
+
 export function int8ToBlob(arr: Int8Array): Blob {
 	return new Blob([arr.buffer]);
 }
@@ -173,6 +180,15 @@ export async function rowToChunk(row: ChunkRow): Promise<Chunk> {
 		startLine: row.startLine,
 		startCol: row.startCol ?? 0,
 		endLine: row.endLine,
+		vector: await blobToInt8(row.vector),
+		scale: row.scale,
+		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,
+	};
+}
+
+export async function rowToChunkVector(row: ChunkRow): Promise<ChunkVectorRecord> {
+	return {
+		id: row.id!,
 		vector: await blobToInt8(row.vector),
 		scale: row.scale,
 		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,

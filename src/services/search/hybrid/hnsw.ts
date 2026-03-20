@@ -7,6 +7,7 @@ import {
 	type HnswNode,
 	type VectorPrecision,
 } from './hybrid-types';
+import type { ChunkVectorRecord } from './hybrid-store';
 
 const ML = 1 / Math.log(HNSW_M); // level multiplier
 
@@ -224,6 +225,38 @@ export class HnswIndex {
 		return this.graph.nodes.size > this.graph.deletedSet.size;
 	}
 
+	hasVectors(): boolean {
+		return this.graph.vectors.size > 0;
+	}
+
+	hasDeletedNodes(): boolean {
+		return this.graph.deletedSet.size > 0;
+	}
+
+	nodeIds(): number[] {
+		return Array.from(this.graph.nodes.keys()).filter(
+			(id) => !this.graph.deletedSet.has(id),
+		);
+	}
+
+	hydrateVectors(records: ChunkVectorRecord[]): void {
+		this.graph.vectors = new Map();
+		this.graph.scales = new Map();
+		this.graph.vectorsF16 = undefined;
+
+		for (const record of records) {
+			if (!this.graph.nodes.has(record.id) || this.graph.deletedSet.has(record.id)) {
+				continue;
+			}
+			this.graph.vectors.set(record.id, record.vector);
+			this.graph.scales.set(record.id, record.scale);
+			if (record.vectorF16) {
+				if (!this.graph.vectorsF16) this.graph.vectorsF16 = new Map();
+				this.graph.vectorsF16.set(record.id, record.vectorF16);
+			}
+		}
+	}
+
 	/** Rebuild graph without deleted nodes. */
 	rebuild(): void {
 		const toKeep = Array.from(this.graph.nodes.keys()).filter(
@@ -257,11 +290,6 @@ export class HnswIndex {
 			entryPoint: this.graph.entryPoint,
 			maxLevel: this.graph.maxLevel,
 			nodes: Array.from(this.graph.nodes.entries()),
-			vectors: Array.from(this.graph.vectors.entries()).map(([id, v]) => [id, Array.from(v)]),
-			scales: Array.from(this.graph.scales.entries()),
-			vectorsF16: this.graph.vectorsF16
-				? Array.from(this.graph.vectorsF16.entries()).map(([id, v]) => [id, Array.from(v)])
-				: undefined,
 			deletedSet: Array.from(this.graph.deletedSet),
 		};
 	}
@@ -271,8 +299,12 @@ export class HnswIndex {
 		this.graph.entryPoint = data.entryPoint;
 		this.graph.maxLevel = data.maxLevel;
 		this.graph.nodes = new Map(data.nodes);
-		this.graph.vectors = new Map(data.vectors.map(([id, arr]) => [id, new Int8Array(arr)]));
-		this.graph.scales = new Map(data.scales);
+		this.graph.vectors = data.vectors
+			? new Map(data.vectors.map(([id, arr]) => [id, new Int8Array(arr)]))
+			: new Map();
+		this.graph.scales = data.scales
+			? new Map(data.scales)
+			: new Map();
 		this.graph.vectorsF16 = data.vectorsF16
 			? new Map(data.vectorsF16.map(([id, arr]) => [id, new Uint16Array(arr)]))
 			: undefined;
