@@ -16,7 +16,7 @@ import { LexicalEngine } from "src/services/search/lexical-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
-import { MyLib, getInstance, monitorDecorator } from "src/utils/my-lib";
+import { MyLib, getInstance, isDevEnvironment, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t } from "../translations/locale-helper";
@@ -91,6 +91,10 @@ export class DataManager {
 				this.docOperationsBuffer.forceFlush(),
 			);
 			getInstance(FileWatcher).start();
+		}
+
+		if (isDevEnvironment) {
+			await this.noticeDevStorageStats();
 		}
 	}
 
@@ -485,6 +489,112 @@ export class DataManager {
 				? ` ${failedWithoutBm25} file(s) also failed BM25 fallback indexing.`
 				: "";
 		return `${failureCount} file(s) did not finish semantic embedding indexing after ${DataManager.HYBRID_INDEX_MAX_RETRIES} attempts due to network or quota/token issues.${fallbackText} Press Ctrl+Shift+I to view details in the console.`;
+	}
+
+	private async noticeDevStorageStats() {
+		const indexableFiles = this.dataProvider.allFilesToBeIndexed();
+		const indexableBytes = indexableFiles.reduce(
+			(sum, file) => sum + file.stat.size,
+			0,
+		);
+		const storageUsage = await this.database.estimatePluginStorageUsage();
+		const bytesByName = new Map(
+			storageUsage.tables.map((item) => [item.name, item.bytes]),
+		);
+
+		const miniSearchBytes = bytesByName.get("minisearch") ?? 0;
+		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
+		const hnswBytes =
+			(bytesByName.get("hybridHnswSmall") ?? 0) +
+			(bytesByName.get("hybridHnswBig") ?? 0);
+		const chunkStoreBytes =
+			(bytesByName.get("hybridChunks") ?? 0) +
+			(bytesByName.get("hybridBigChunks") ?? 0);
+		const otherBytes = Math.max(
+			0,
+			storageUsage.totalBytes -
+				miniSearchBytes -
+				bm25Bytes -
+				hnswBytes -
+				chunkStoreBytes,
+		);
+
+		new MyNotice(
+			this.buildDevStorageNotice(
+				indexableBytes,
+				storageUsage.totalBytes,
+				miniSearchBytes,
+				chunkStoreBytes,
+				bm25Bytes,
+				hnswBytes,
+				otherBytes,
+			),
+			15000,
+		);
+
+		console.groupCollapsed("[clever-search] 开发模式索引与存储统计");
+		console.log(
+			`可索引文件总大小: ${this.formatBytes(indexableBytes)}\n插件本地存储估算: ${this.formatBytes(storageUsage.totalBytes)}`,
+		);
+		console.table(
+			storageUsage.tables
+				.map((item) => ({
+					table: item.name,
+					rows: item.rows,
+					bytes: item.bytes,
+					size: this.formatBytes(item.bytes),
+				}))
+				.sort((a, b) => b.bytes - a.bytes),
+		);
+		console.groupEnd();
+	}
+
+	private buildDevStorageNotice(
+		indexableBytes: number,
+		totalBytes: number,
+		miniSearchBytes: number,
+		chunkStoreBytes: number,
+		bm25Bytes: number,
+		hnswBytes: number,
+		otherBytes: number,
+	): string {
+		const isChinese =
+			(window.localStorage.getItem("language") || "")
+				.toLowerCase()
+				.startsWith("zh");
+
+		if (isChinese) {
+			return [
+				`开发模式统计`,
+				`可索引文件总大小: ${this.formatBytes(indexableBytes)}`,
+				`插件本地存储估算: ${this.formatBytes(totalBytes)}`,
+				`MiniSearch ${this.formatBytes(miniSearchBytes)} | Chunk ${this.formatBytes(chunkStoreBytes)} | BM25 ${this.formatBytes(bm25Bytes)} | HNSW ${this.formatBytes(hnswBytes)} | 其他 ${this.formatBytes(otherBytes)}`,
+			].join("\n");
+		}
+
+		return [
+			`Dev stats`,
+			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
+			`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
+			`MiniSearch ${this.formatBytes(miniSearchBytes)} | Chunk ${this.formatBytes(chunkStoreBytes)} | BM25 ${this.formatBytes(bm25Bytes)} | HNSW ${this.formatBytes(hnswBytes)} | Other ${this.formatBytes(otherBytes)}`,
+		].join("\n");
+	}
+
+	private formatBytes(bytes: number): string {
+		if (bytes < 1024) {
+			return `${bytes} B`;
+		}
+
+		const units = ["KB", "MB", "GB", "TB"];
+		let value = bytes / 1024;
+		let unitIndex = 0;
+
+		while (value >= 1024 && unitIndex < units.length - 1) {
+			value /= 1024;
+			unitIndex++;
+		}
+
+		return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 	}
 }
 

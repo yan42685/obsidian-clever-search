@@ -11,6 +11,42 @@ import { PrivateApi } from "../obsidian/private-api";
 @singleton()
 export class Database {
 	readonly db = getInstance(DexieWrapper);
+
+	async estimatePluginStorageUsage(): Promise<{
+		totalBytes: number;
+		tables: Array<{ name: string; rows: number; bytes: number }>;
+	}> {
+		const tableEntries = [
+			{ name: "pluginSetting", table: this.db.pluginSetting },
+			{ name: "minisearch", table: this.db.minisearch },
+			{ name: "lexicalDocRefs", table: this.db.lexicalDocRefs },
+			{ name: "semanticDocRefs", table: this.db.semanticDocRefs },
+			{ name: "hybridChunks", table: this.db.hybridChunks },
+			{ name: "hybridBigChunks", table: this.db.hybridBigChunks },
+			{ name: "hybridBm25Index", table: this.db.hybridBm25Index },
+			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
+			{ name: "hybridHnswBig", table: this.db.hybridHnswBig },
+			{ name: "hybridDocRefs", table: this.db.hybridDocRefs },
+			{ name: "hybridTokenStats", table: this.db.hybridTokenStats },
+		] as const;
+
+		const tables = await Promise.all(
+			tableEntries.map(async ({ name, table }) => {
+				const rows = await table.toArray();
+				return {
+					name,
+					rows: rows.length,
+					bytes: estimateValueBytes(rows),
+				};
+			}),
+		);
+
+		return {
+			totalBytes: tables.reduce((sum, item) => sum + item.bytes, 0),
+			tables,
+		};
+	}
+
 	async deleteMinisearchData() {
 		this.db.minisearch.clear();
 	}
@@ -174,4 +210,64 @@ class DexieWrapper extends Dexie {
 	get dbName() {
 		return DexieWrapper.dbNamePrefix + this.privateApi.getAppId();
 	}
+}
+
+const textEncoder = new TextEncoder();
+
+function estimateValueBytes(value: unknown, visited = new WeakSet<object>()): number {
+	if (value === null || value === undefined) {
+		return 0;
+	}
+
+	if (typeof value === "string") {
+		return textEncoder.encode(value).length;
+	}
+
+	if (typeof value === "number") {
+		return 8;
+	}
+
+	if (typeof value === "boolean") {
+		return 4;
+	}
+
+	if (typeof value === "bigint") {
+		return textEncoder.encode(value.toString()).length;
+	}
+
+	if (value instanceof Blob) {
+		return value.size;
+	}
+
+	if (value instanceof Date) {
+		return textEncoder.encode(value.toISOString()).length;
+	}
+
+	if (value instanceof ArrayBuffer) {
+		return value.byteLength;
+	}
+
+	if (ArrayBuffer.isView(value)) {
+		return value.byteLength;
+	}
+
+	if (Array.isArray(value)) {
+		return value.reduce(
+			(sum, item) => sum + estimateValueBytes(item, visited),
+			0,
+		);
+	}
+
+	if (typeof value === "object") {
+		if (visited.has(value)) {
+			return 0;
+		}
+		visited.add(value);
+
+		return Object.entries(value).reduce((sum, [key, childValue]) => {
+			return sum + textEncoder.encode(key).length + estimateValueBytes(childValue, visited);
+		}, 0);
+	}
+
+	return textEncoder.encode(String(value)).length;
 }
