@@ -373,7 +373,6 @@
 
 	.search-container {
 		display: flex;
-		margin-top: 2.4em;
 		white-space: pre-wrap;
 		overflow-wrap: break-word;
 	}
@@ -393,7 +392,7 @@
 	.result-items {
 		display: flex;
 		flex-direction: column;
-		height: calc(70vh - 2.4em);
+		height: 70vh;
 		margin-top: 0.15em;
 		overflow-y: auto;
 	}
@@ -468,7 +467,7 @@
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 6px;
-		height: calc(73.97vh - 2.4em);
+		height: 73.97vh;
 		width: 60%;
 	}
 
@@ -478,7 +477,7 @@
 
 	.right-pane .preview-container {
 		margin: 0.7em 0 0 0.7em;
-		height: calc(72.5vh - 2.4em);
+		height: 72.5vh;
 		overflow-y: auto;
 	}
 

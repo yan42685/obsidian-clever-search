@@ -75,6 +75,12 @@ settings:
         default: '#'
 
 */
+.cs-modal-container {
+	box-sizing: border-box;
+	padding-top: 2.4em;
+	overflow: visible;
+}
+
 .cs-modal {
 	width: 71.5%;
 	height: 80%;

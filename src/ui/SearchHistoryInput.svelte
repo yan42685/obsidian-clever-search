@@ -236,21 +236,23 @@
 	{#if isHistoryDropdownOpen}
 		<ul bind:this={suggestionsEl} class="history-suggestions">
 			{#each displayedHistorySuggestions as entry, index}
-				<button
-					class:selected={getOriginalIndex(index) === currHistoryIndex}
-					class="history-suggestion"
-					on:mousedown|preventDefault={() => {
-						acceptSuggestion(entry.queryText);
-					}}
-					on:mouseenter={() => {
-						currHistoryIndex = getOriginalIndex(index);
-					}}
-				>
-					<span class="history-query">{entry.queryText}</span>
-					{#if (entry.count ?? 1) > 1}
-						<span class="history-count">{entry.count}</span>
-					{/if}
-				</button>
+				<li class="history-suggestion-item">
+					<button
+						class:selected={getOriginalIndex(index) === currHistoryIndex}
+						class="history-suggestion"
+						on:mousedown|preventDefault={() => {
+							acceptSuggestion(entry.queryText);
+						}}
+						on:mouseenter={() => {
+							currHistoryIndex = getOriginalIndex(index);
+						}}
+					>
+						<span class="history-query">{entry.queryText}</span>
+						{#if (entry.count ?? 1) > 1}
+							<span class="history-count">{entry.count}</span>
+						{/if}
+					</button>
+				</li>
 			{/each}
 		</ul>
 	{/if}
@@ -258,19 +260,24 @@
 
 <style>
 	.search-bar {
+		--cs-history-row-height: 1.9em;
+		--cs-history-row-gap: 0.06em;
 		position: sticky;
 		top: -0.2em;
 		left: 0;
+		display: flex;
+		align-items: center;
 		z-index: 2;
 		width: 97%;
-		height: 30px;
+		height: 2.15em;
+		min-height: 30px;
 	}
 
 	.search-bar::after {
 		content: attr(data-match-count);
 		position: absolute;
 		right: 0.6em;
-		top: 1.4em;
+		top: 50%;
 		font-size: 0.8em;
 		transform: translateY(-50%);
 		color: var(--cs-hint-char-color, grey);
@@ -278,7 +285,10 @@
 
 	.search-bar .input-shell {
 		position: relative;
+		display: flex;
+		align-items: stretch;
 		width: 100%;
+		height: 100%;
 		border-radius: 10px;
 		background-color: var(--cs-search-bar-bgc, #20202066);
 		box-shadow:
@@ -291,7 +301,7 @@
 		inset: 0;
 		display: flex;
 		align-items: center;
-		padding: 8px 12px;
+		padding: 0 12px;
 		overflow: hidden;
 		pointer-events: none;
 		white-space: nowrap;
@@ -309,7 +319,9 @@
 		position: relative;
 		z-index: 1;
 		width: 100%;
-		padding: 8px 12px;
+		height: 100%;
+		padding: 0 12px;
+		line-height: 1.2;
 		border: none;
 		border-radius: 10px;
 		background-color: transparent;
@@ -322,9 +334,14 @@
 		left: 0;
 		z-index: 3;
 		width: calc(100% + 0.2em);
+		display: flex;
+		flex-direction: column;
+		gap: var(--cs-history-row-gap);
 		box-sizing: border-box;
-		max-height: calc(4 * 1.9em + 3 * 0.06em + 0.24em);
-		padding: 0.12em 0.18em;
+		max-height: calc(
+			4 * var(--cs-history-row-height) + 3 * var(--cs-history-row-gap)
+		);
+		padding: 0;
 		margin: 0;
 		list-style: none;
 		overflow-y: auto;
@@ -335,24 +352,29 @@
 			0 2px 8px rgba(0, 0, 0, 0.08);
 	}
 
+	.search-bar .history-suggestions .history-suggestion-item {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
 	.search-bar .history-suggestions .history-suggestion {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		width: 100%;
-		height: 1.9em;
+		min-height: var(--cs-history-row-height);
+		height: var(--cs-history-row-height);
+		max-height: var(--cs-history-row-height);
 		box-sizing: border-box;
 		padding: 0 0.44em;
-		margin: 0 0 0.06em 0;
+		margin: 0;
 		text-align: left;
 		line-height: 1.15;
 		background-color: transparent;
+		border: none;
 		border-radius: 6px;
 		cursor: pointer;
-	}
-
-	.search-bar .history-suggestions .history-suggestion:last-child {
-		margin-bottom: 0;
 	}
 
 	.search-bar .history-suggestions .history-suggestion:hover,
