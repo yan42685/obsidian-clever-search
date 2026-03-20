@@ -1,4 +1,3 @@
-import type { AsPlainObject } from "minisearch";
 import { TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
@@ -13,6 +12,7 @@ import {
 	WeeklyTokenLimitExceededError,
 } from "src/services/search/hybrid/embedder";
 import { LexicalEngine } from "src/services/search/lexical-engine";
+import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
@@ -142,8 +142,12 @@ export class DataManager {
 
 	private async initLexicalEngine() {
 		logger.trace("Init lexical engine...");
-		let prevData: AsPlainObject | null;
-		if (!devOption.loadIndexFromDatabase || this.shouldForceRefresh) {
+		let prevData: SerializedFileSearchIndex | null;
+		if (
+			!devOption.loadIndexFromDatabase ||
+			this.shouldForceRefresh ||
+			!this.lexicalEngine.supportsSerializedFileIndex()
+		) {
 			prevData = null;
 		} else {
 			prevData = await this.database.getMiniSearchData();
@@ -163,7 +167,10 @@ export class DataManager {
 			await this.updateDocRefByMtime();
 		}
 		logger.trace("Lexical engine is ready");
-		await this.database.setMiniSearchData(this.lexicalEngine.filesIndex.toJSON());
+		const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
+		if (lexicalIndexData) {
+			await this.database.setMiniSearchData(lexicalIndexData);
+		}
 	}
 
 	private async initHybridEngine() {
@@ -502,7 +509,7 @@ export class DataManager {
 			storageUsage.tables.map((item) => [item.name, item.bytes]),
 		);
 
-		const miniSearchBytes = bytesByName.get("minisearch") ?? 0;
+		const lexicalFileIndexBytes = bytesByName.get("minisearch") ?? 0;
 		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
 		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
@@ -510,7 +517,7 @@ export class DataManager {
 		const otherBytes = Math.max(
 			0,
 			storageUsage.totalBytes -
-				miniSearchBytes -
+				lexicalFileIndexBytes -
 				vectorShardBytes -
 				bm25Bytes -
 				hnswBytes -
@@ -522,7 +529,7 @@ export class DataManager {
 				indexableBytes,
 				storageUsage.totalBytes,
 				this.setting.hybrid.vectorCompression,
-				miniSearchBytes,
+				lexicalFileIndexBytes,
 				chunkStoreBytes,
 				vectorShardBytes,
 				bm25Bytes,
@@ -538,10 +545,13 @@ export class DataManager {
 		);
 		console.table(
 			storageUsage.tables
-				.map((item) => ({
-					table: item.name,
-					rows: item.rows,
-					bytes: item.bytes,
+					.map((item) => ({
+						table:
+							item.name === "minisearch"
+								? `lexicalFileIndex(${this.setting.fileSearchBackend})`
+								: item.name,
+						rows: item.rows,
+						bytes: item.bytes,
 					size: this.formatBytes(item.bytes),
 				}))
 				.sort((a, b) => b.bytes - a.bytes),
@@ -591,7 +601,7 @@ export class DataManager {
 		indexableBytes: number,
 		totalBytes: number,
 		precision: string,
-		miniSearchBytes: number,
+		lexicalFileIndexBytes: number,
 		chunkStoreBytes: number,
 		vectorShardBytes: number,
 		bm25Bytes: number,
@@ -607,8 +617,9 @@ export class DataManager {
 			return [
 				`开发模式统计`,
 				`可索引文件总大小: ${this.formatBytes(indexableBytes)}`,
+				`当前向量量化: ${precision}`,
 				`插件本地存储估算: ${this.formatBytes(totalBytes)}`,
-				`MiniSearch ${this.formatBytes(miniSearchBytes)} | Chunk ${this.formatBytes(chunkStoreBytes)} | BM25 ${this.formatBytes(bm25Bytes)} | HNSW ${this.formatBytes(hnswBytes)} | 其他 ${this.formatBytes(otherBytes)}`,
+				`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)} | 其他 ${this.formatBytes(otherBytes)}`,
 			].join("\n");
 		}
 
@@ -617,7 +628,7 @@ export class DataManager {
 			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
 			`Current vector quantization: ${precision}`,
 			`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
-			`MiniSearch ${this.formatBytes(miniSearchBytes)} | Chunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | BM25 ${this.formatBytes(bm25Bytes)} | HNSW ${this.formatBytes(hnswBytes)} | Other ${this.formatBytes(otherBytes)}`,
+			`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)} | Other ${this.formatBytes(otherBytes)}`,
 		].join("\n");
 	}
 

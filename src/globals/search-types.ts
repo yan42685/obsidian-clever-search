@@ -56,6 +56,7 @@ export type MatchedFile = {
 	path: string;
 	queryTerms: string[];
 	matchedTerms: string[];
+	score?: number;
 };
 
 export class SearchResult {

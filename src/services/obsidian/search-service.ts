@@ -1,4 +1,5 @@
 import { App } from "obsidian";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -10,6 +11,7 @@ import {
 	LineItem,
 	SearchResult,
 } from "../../globals/search-types";
+import type { MatchedFile } from "../../globals/search-types";
 import { FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
 import { HybridEngine } from "../search/hybrid/hybrid-engine";
@@ -23,7 +25,13 @@ import { ViewRegistry, ViewType } from "./view-registry";
 
 @singleton()
 export class SearchService {
+	private static readonly LEXICAL_FILE_CANDIDATE_CAP = 48;
+	private static readonly LEXICAL_FILE_CANDIDATE_BONUS = 12;
+	private static readonly LEXICAL_LINE_RERANK_MAX_LINES = 6;
+	private static readonly LEXICAL_LINE_EVIDENCE_WEIGHT = 0.4;
+	private static readonly LEXICAL_LINE_COUNT_WEIGHT = 0.12;
 	private readonly app = getInstance(App);
+	private readonly setting = getInstance(OuterSetting);
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
@@ -42,12 +50,21 @@ export class SearchService {
 		}
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
-		const lexicalMatches = await this.lexicalEngine.searchFiles(queryText);
-		const lexicalResult = [] as FileItem[];
-		if (lexicalMatches.length !== 0) {
+		const maxDisplayItems = this.setting.ui.maxItemResults;
+		const lexicalMatches = await this.lexicalEngine.searchFiles(
+			queryText,
+			this.getLexicalFileCandidateLimit(maxDisplayItems),
+		);
+		const rerankedMatches = await this.rerankLexicalMatchesByLineEvidence(
+			queryText,
+			lexicalMatches,
+		);
+		if (rerankedMatches.length !== 0) {
 			return {
 				sourcePath: sourcePath,
-				items: lexicalMatches.map((matchedFile) => {
+				items: rerankedMatches
+					.slice(0, maxDisplayItems)
+					.map((matchedFile) => {
 					// It is necessary to use a constructor with 'new', rather than using an object literal.
 					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
 					// (to correctly display data in Svelte components).
@@ -59,7 +76,7 @@ export class SearchService {
 						[], // should be populated on demand
 						"nothing",
 					);
-				}),
+					}),
 			};
 		} else {
 			logger.trace("lexical matched files count is 0");
@@ -132,6 +149,142 @@ export class SearchService {
 			});
 
 		return fileSubItems;
+	}
+
+	private getLexicalFileCandidateLimit(maxDisplayItems: number): number {
+		return Math.min(
+			SearchService.LEXICAL_FILE_CANDIDATE_CAP,
+			Math.max(
+				maxDisplayItems,
+				maxDisplayItems * 2,
+				maxDisplayItems + SearchService.LEXICAL_FILE_CANDIDATE_BONUS,
+			),
+		);
+	}
+
+	private async rerankLexicalMatchesByLineEvidence(
+		queryText: string,
+		matchedFiles: MatchedFile[],
+	): Promise<MatchedFile[]> {
+		if (matchedFiles.length <= 1) {
+			return matchedFiles;
+		}
+
+		const evidenceRows = await Promise.all(
+			matchedFiles.map((matchedFile, index) =>
+				this.collectLexicalLineEvidence(queryText, matchedFile, index),
+			),
+		);
+		const maxBaseScore =
+			Math.max(...evidenceRows.map((row) => row.baseScore), 0) || 1;
+		const maxBestDensity =
+			Math.max(...evidenceRows.map((row) => row.bestLineDensity), 0) || 1;
+		const maxLineCount =
+			Math.max(...evidenceRows.map((row) => row.lineCount), 0) || 1;
+
+		return evidenceRows
+			.map((row) => {
+				const baseSignal =
+					row.baseScore > 0
+						? row.baseScore / maxBaseScore
+						: (matchedFiles.length - row.baseRank) / matchedFiles.length;
+				const lineDensitySignal =
+					row.bestLineDensity > 0
+						? row.bestLineDensity / maxBestDensity
+						: 0;
+				const lineCountSignal =
+					row.lineCount > 0 ? row.lineCount / maxLineCount : 0;
+				return {
+					...row,
+					finalScore:
+						baseSignal +
+						lineDensitySignal *
+							SearchService.LEXICAL_LINE_EVIDENCE_WEIGHT +
+						lineCountSignal *
+							SearchService.LEXICAL_LINE_COUNT_WEIGHT,
+				};
+			})
+			.sort((a, b) => {
+				if (b.finalScore !== a.finalScore) {
+					return b.finalScore - a.finalScore;
+				}
+				if (b.baseScore !== a.baseScore) {
+					return b.baseScore - a.baseScore;
+				}
+				return a.matchedFile.path.localeCompare(b.matchedFile.path);
+			})
+			.map((row) => row.matchedFile);
+	}
+
+	private async collectLexicalLineEvidence(
+		queryText: string,
+		matchedFile: MatchedFile,
+		baseRank: number,
+	): Promise<{
+		matchedFile: MatchedFile;
+		baseRank: number;
+		baseScore: number;
+		bestLineDensity: number;
+		lineCount: number;
+	}> {
+		if (this.viewRegistry.viewTypeByPath(matchedFile.path) !== ViewType.MARKDOWN) {
+			return {
+				matchedFile,
+				baseRank,
+				baseScore: matchedFile.score ?? 0,
+				bestLineDensity: 0,
+				lineCount: 0,
+			};
+		}
+
+		try {
+			const content = await this.dataProvider.readPlainText(matchedFile.path);
+			const lines = content
+				.split(FileUtil.SPLIT_EOL)
+				.map((text, index) => new Line(text, index));
+			const tempFileItem = new FileItem(
+				EngineType.LEXICAL,
+				matchedFile.path,
+				matchedFile.queryTerms,
+				matchedFile.matchedTerms,
+				[],
+				"nothing",
+			);
+			const matchedLines = await this.lexicalEngine.searchLinesByFileItem(
+				lines,
+				"subItem",
+				queryText,
+				tempFileItem,
+				SearchService.LEXICAL_LINE_RERANK_MAX_LINES,
+			);
+			let bestLineDensity = 0;
+			for (const matchedLine of matchedLines) {
+				bestLineDensity = Math.max(
+					bestLineDensity,
+					matchedLine.positions.size / Math.max(1, matchedLine.text.length),
+				);
+			}
+
+			return {
+				matchedFile,
+				baseRank,
+				baseScore: matchedFile.score ?? 0,
+				bestLineDensity,
+				lineCount: matchedLines.length,
+			};
+		} catch (error) {
+			logger.warn(
+				`failed to collect lexical line evidence for ${matchedFile.path}:`,
+				error,
+			);
+			return {
+				matchedFile,
+				baseRank,
+				baseScore: matchedFile.score ?? 0,
+				bestLineDensity: 0,
+				lineCount: 0,
+			};
+		}
 	}
 
 	@monitorDecorator

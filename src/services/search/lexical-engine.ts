@@ -1,13 +1,9 @@
 import { AsyncFzf, type FzfResultItem } from "fzf";
-import type { AsPlainObject, Options, SearchOptions } from "minisearch";
 import MiniSearch from "minisearch";
 import type {
-	DocumentFields,
-	DocumentWeight,
 	FileItem,
 	IndexedDocument,
 	Line,
-	LineFields,
 	MatchedFile,
 	MatchedLine,
 } from "src/globals/search-types";
@@ -15,50 +11,41 @@ import { PriorityQueue } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { OuterSetting, innerSetting } from "../../globals/plugin-setting";
-import { Tokenizer } from "./tokenizer";
+import { OuterSetting } from "../../globals/plugin-setting";
+import {
+	FileSearchEngineFactory,
+	FileSearchOptions,
+	type SerializedFileSearchIndex,
+} from "./file-search-engine";
 import { TruncateOption, type TruncateType } from "./truncate-option";
 
 // If @singleton() is not used,
 // then the lifecycle of the instance obtained through tsyringe container is transient.
 @singleton()
 export class LexicalEngine {
-	private option = getInstance(LexicalOptions);
+	private option = getInstance(FileSearchOptions);
 	private outerSetting = getInstance(OuterSetting);
-	public filesIndex = new MiniSearch(this.option.fileIndexOption);
 	private linesIndex = new MiniSearch(this.option.lineIndexOption);
-	private tokenizer = getInstance(Tokenizer);
+	private fileSearchEngineFactory = getInstance(FileSearchEngineFactory);
 	private _isReady = false;
+
+	private get fileSearchEngine() {
+		return this.fileSearchEngineFactory.getActiveEngine();
+	}
+
+	supportsSerializedFileIndex(): boolean {
+		return this.fileSearchEngine.supportsSerialization;
+	}
 
 	@monitorDecorator
 	async reIndexAll(
-		data: IndexedDocument[] | AsPlainObject,
+		data: IndexedDocument[] | SerializedFileSearchIndex,
 	): Promise<boolean> {
 		this._isReady = false;
-		this.filesIndex.removeAll();
 		// this.linesIndex.removeAll();
-
-		if (Array.isArray(data)) {
-			logger.trace("Indexing all documents...");
-			// Process data with type: IndexedDocument[], need lots of time to create reversed indexes
-			await this.addDocuments(data);
-		} else {
-			logger.trace("Loading indexed data...");
-			// Process data with type: AsPlainObject, faster
-			try {
-				// slower than loadJS, but more stable, maybe I should test the perf difference someday
-				this.filesIndex = MiniSearch.loadJS(
-					data,
-					this.option.fileIndexOption,
-				);
-			} catch (e) {
-				// alert("Lexical engine might have been updated, the vault need to be reindexed\n(clever-search)");
-				logger.error(e);
-				return false;
-			}
-		}
+		const isSuccessful = await this.fileSearchEngine.reIndexAll(data);
+		if (!isSuccessful) return false;
 		this._isReady = true;
-		logger.trace(this.filesIndex);
 		return true;
 	}
 
@@ -68,21 +55,11 @@ export class LexicalEngine {
 	}
 
 	async addDocuments(documents: IndexedDocument[]) {
-		const paths = documents.map(doc => doc.path);
-		const existingPaths = paths.filter(p => this.filesIndex.has(p));
-		if (existingPaths.length > 0) {
-			this.filesIndex.discardAll(existingPaths);
-		}
-		await this.filesIndex.addAllAsync(documents, {
-			chunkSize: this.option.documentChunkSize,
-		});
-		logger.debug(`updated/added ${documents.length} docs`);
+		await this.fileSearchEngine.addDocuments(documents);
 	}
 
 	deleteDocuments(paths: string[]) {
-		const docsToDiscard = paths.filter((path) => this.filesIndex.has(path));
-		this.filesIndex.discardAll(docsToDiscard);
-		logger.debug(`deleted ${docsToDiscard.length}`);
+		this.fileSearchEngine.deleteDocuments(paths);
 	}
 
 	// for in-file search
@@ -107,24 +84,24 @@ export class LexicalEngine {
 	 *
 	 */
 	@monitorDecorator
-	async searchFiles(queryText: string): Promise<MatchedFile[]> {
+	async searchFiles(
+		queryText: string,
+		maxItemResults = this.outerSetting.ui.maxItemResults,
+	): Promise<MatchedFile[]> {
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
 		const query = new Query(queryText);
-		const minisearchResult = this.filesIndex.search(
-			query.text,
-			this.option.getFileSearchOption(query.userOption),
-		);
-		logger.debug(`maxFileItems: ${this.outerSetting.ui.maxItemResults}`);
-		return minisearchResult
-			.slice(0, this.outerSetting.ui.maxItemResults)
-			.map((item) => {
-				return {
-					path: item.id,
-					queryTerms: item.queryTerms,
-					matchedTerms: item.terms,
-				};
-			});
+		logger.debug(`maxFileItems: ${maxItemResults}`);
+		return this.fileSearchEngine.searchFiles({
+			queryText: query.text,
+			isPrefixMatch: query.userOption.isPrefixMatch,
+			isFuzzy: query.userOption.isFuzzy,
+			maxItemResults,
+		});
+	}
+
+	serializeFileIndex(): SerializedFileSearchIndex | null {
+		return this.fileSearchEngine.serialize();
 	}
 
 	// faster version of `searchLines`, but might be less accuracy, haven't test it
@@ -226,82 +203,6 @@ export class LexicalEngine {
 
 		return positions;
 		// return new Set([1]);  // test if this function consumes too much time
-	}
-}
-
-@singleton()
-class LexicalOptions {
-	// private readonly setting: SearchSetting = getInstance(OuterSetting).search;
-	private readonly outerSetting = getInstance(OuterSetting);
-	private readonly inSetting = innerSetting.search;
-	private readonly tokenizer = getInstance(Tokenizer);
-	private readonly tokenizeIndex = (text: string) =>
-		this.tokenizer.tokenize(text, "index");
-	private readonly tokenizeSearch = (text: string) =>
-		this.tokenizer.tokenize(text, "search");
-
-	readonly documentChunkSize: 100;
-	readonly lineChunkSize: 500;
-	readonly fileIndexOption: Options = {
-		// terms will be lowercased by minisearch
-		tokenize: this.tokenizeIndex,
-		idField: "path",
-		fields: [
-			"basename",
-			"aliases",
-			"folder",
-			"headings",
-			"content",
-		] as DocumentFields,
-		storeFields: ["tags"] as DocumentFields,
-		// will be applied when indexing and searching
-		processTerm: (term) =>
-			this.outerSetting.isCaseSensitive ? term : term.toLocaleLowerCase(),
-	};
-	readonly lineIndexOption: Options = {
-		tokenize: this.tokenizeIndex,
-		idField: "row",
-		fields: ["text"] as LineFields,
-		// storeFields: ["text"] as LineFields,
-	};
-
-	getFileSearchOption(userOption: UserSearchOption): SearchOptions {
-		return {
-			tokenize: this.tokenizeSearch,
-			// TODO: for autosuggestion, we can choose to do a prefix match only when the term is
-			// at the last index of the query terms
-			prefix: (term) =>
-				userOption.isPrefixMatch
-					? term.length >= this.inSetting.minTermLengthForPrefixSearch
-					: false,
-			// TODO: fuzziness based on language
-			fuzzy: (term) =>
-				userOption.isFuzzy
-					? term.length <= 3
-						? 0
-						: this.inSetting.fuzzyProportion
-					: false,
-			// if `fields` are omitted, all fields will be search with weight 1
-			boost: {
-				basename: this.inSetting.weightFilename,
-				aliases: this.inSetting.weightFilename,
-				folder: this.inSetting.weightFolder,
-				tags: this.inSetting.weightTagText,
-				headings: this.inSetting.weightHeading,
-			} as DocumentWeight,
-			combineWith: "and",
-		};
-	}
-
-	getLineSearchOption(): SearchOptions {
-		return {
-			prefix: (term) =>
-				term.length >= this.inSetting.minTermLengthForPrefixSearch,
-			fuzzy: (term) =>
-				term.length <= 3 ? 0 : this.inSetting.fuzzyProportion,
-			combineWith: "or",
-			// combineWith: "and",
-		};
 	}
 }
 

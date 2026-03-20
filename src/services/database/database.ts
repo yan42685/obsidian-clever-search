@@ -1,5 +1,4 @@
 import Dexie from "dexie";
-import type { AsPlainObject } from "minisearch";
 import type { HybridTokenRecord, OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import type {
@@ -8,6 +7,7 @@ import type {
 	ChunkVectorShardRow,
 	HybridDocRef,
 } from "src/services/search/hybrid/hybrid-store";
+import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
@@ -118,7 +118,7 @@ export class Database {
 	}
 
 	// it may finished some time later even if using await
-	async setMiniSearchData(data: AsPlainObject) {
+	async setMiniSearchData(data: SerializedFileSearchIndex) {
 		this.db.transaction("rw", this.db.minisearch, async () => {
 			// Warning: The clear() here is just a marker for caution to avoid data duplication.
 			// Ideally, clear() should be executed at an earlier stage.
@@ -131,7 +131,7 @@ export class Database {
 	}
 
 	@monitorDecorator
-	async getMiniSearchData(): Promise<AsPlainObject | null> {
+	async getMiniSearchData(): Promise<SerializedFileSearchIndex | null> {
 		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
@@ -193,11 +193,11 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 8;
+	private static readonly _dbVersion = 9;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
-	minisearch!: Dexie.Table<{ id?: number; data: AsPlainObject }, number>;
+	minisearch!: Dexie.Table<{ id?: number; data: SerializedFileSearchIndex }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	lexicalDocRefs!: Dexie.Table<DocumentRef, number>;
 	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
@@ -274,6 +274,8 @@ class DexieWrapper extends Dexie {
 			})
 			.upgrade(async (tx) => {
 				await Promise.all([
+					tx.table("minisearch").clear(),
+					tx.table("lexicalDocRefs").clear(),
 					tx.table("hybridChunks").clear(),
 					tx.table("hybridChunkVectors").clear(),
 					tx.table("hybridBm25Index").clear(),

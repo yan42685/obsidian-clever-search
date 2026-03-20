@@ -8,6 +8,7 @@
 		"dev": "node esbuild.config.mjs development",
 		"test": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"benchmark:file-search": "node scripts/file-search-benchmark.mjs",
 		"release": "node release-script.mjs"
 	},
 	"keywords": [],

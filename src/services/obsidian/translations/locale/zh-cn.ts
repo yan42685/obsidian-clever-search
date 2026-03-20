@@ -45,4 +45,9 @@ export default {
 	"hybridModal.tokens": "Tokens",
 	"hybridNotice.indexFallbackToBm25": "语义索引当前不可用，已降级为 BM25 索引。",
 	"hybridNotice.searchFallbackToBm25": "语义搜索当前不可用，本次结果已降级为 BM25。",
+	"File search backend": "文件搜索后端",
+	"File search backend desc":
+		"一键切换词法文件检索后端。MiniSearch 更保守稳定；自定义 BM25 在前缀匹配和元数据感知方面更强。",
+	"fileSearchBackend.minisearch": "MiniSearch（稳定）",
+	"fileSearchBackend.customBm25": "自定义 BM25",
 };

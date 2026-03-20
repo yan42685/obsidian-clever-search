@@ -10,6 +10,7 @@ import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import {
 	DEFAULT_OUTER_SETTING,
 	OuterSetting,
+	type FileSearchBackend,
 	type LogLevelOptions,
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
@@ -159,6 +160,22 @@ class GeneralTab extends PluginSettingTab {
 				t
 					.setValue(this.setting.isFuzzy)
 					.onChange((v) => (this.setting.isFuzzy = v)),
+			);
+
+		new Setting(containerEl)
+			.setName(t("File search backend"))
+			.setDesc(t("File search backend desc"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						minisearch: t("fileSearchBackend.minisearch"),
+						"custom-bm25": t("fileSearchBackend.customBm25"),
+					})
+					.setValue(this.setting.fileSearchBackend)
+					.onChange((value) => {
+						this.setting.fileSearchBackend = value as FileSearchBackend;
+						this.settingManager.shouldReload = true;
+					}),
 			);
 
 		new Setting(containerEl)

@@ -127,6 +127,11 @@ export default {
 	"Reindex the vault": "Reindex the vault",
 	Reindex: "Reindex",
 	"Log level": "Log level",
+	"File search backend": "File search backend",
+	"File search backend desc":
+		"Switch lexical file retrieval with one click. MiniSearch is the conservative choice; Custom BM25 is better at prefix-heavy and metadata-aware matching.",
+	"fileSearchBackend.minisearch": "MiniSearch (stable)",
+	"fileSearchBackend.customBm25": "Custom BM25",
 	"Reset floating window position": "Reset floating window position",
 	"Reset floating window position desc": "In case the window is moved outside the visible area",
 	"Reset position": "Reset position",

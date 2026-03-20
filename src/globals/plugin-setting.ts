@@ -9,6 +9,7 @@ export class OuterSetting {
 	followObsidianExcludedFiles: boolean;
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
+	fileSearchBackend: FileSearchBackend;
 	isCaseSensitive: boolean;
 	isPrefixMatch: boolean;
 	isFuzzy: boolean;
@@ -26,6 +27,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
+	fileSearchBackend: "minisearch",
 	isCaseSensitive: false,
 	isPrefixMatch: true,
 	isFuzzy: true,
@@ -59,6 +61,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 export type LogLevelOptions = {
 	[K in LogLevel]: K;
 };
+
+export type FileSearchBackend = "minisearch" | "custom-bm25";
 
 export type HybridSetting = {
 	enabled: boolean;
