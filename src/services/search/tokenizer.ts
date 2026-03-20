@@ -29,8 +29,17 @@ export class Tokenizer {
 
 	// TODO: synonym and lemmatization
 	tokenize(text: string, mode: "index" | "search"): string[] {
-		const tokens = new Set<string>();
+		const tokens = this.tokenizeSequence(text, mode);
+		const deduped = new Set<string>();
+		for (const token of tokens) {
+			deduped.add(token);
+		}
+		// discard lengthy token to avoid memory-overflow
+		return Array.from(deduped).filter(token => token.length < 30);
+	}
 
+	tokenizeSequence(text: string, mode: "index" | "search"): string[] {
+		const tokens: string[] = [];
 		const segments = text.split(SEGMENT_REGEX);
 
 		// TODO: extract path for search
@@ -51,13 +60,13 @@ export class Tokenizer {
 						}
 						continue;
 					}
-					tokens.add(word);
+					tokens.push(word);
 				}
 			} else {
 				// don't add too short or too long segment for smallCharsetLanguage
 				// TODO: is this step necessary?
 				// if (segment.length > 1 && segment.length < 20) {
-				// 	tokens.add(segment);
+				// 	tokens.push(segment);
 				// }
 
 				const words = segment.split(SEPERATOR_REGEX);
@@ -69,7 +78,7 @@ export class Tokenizer {
 					) {
 						continue;
 					}
-					tokens.add(word);
+					tokens.push(word);
 
 					if (word.length > 3) {
 						const subwords = word
@@ -77,7 +86,7 @@ export class Tokenizer {
 							.split(" ");
 						for (const subword of subwords) {
 							if (subword.length > 1) {
-								tokens.add(subword);
+								tokens.push(subword);
 							}
 						}
 					}
@@ -85,6 +94,6 @@ export class Tokenizer {
 			}
 		}
 		// discard lengthy token to avoid memory-overflow
-		return Array.from(tokens).filter(token => token.length < 30);
+		return tokens.filter(token => token.length < 30);
 	}
 }

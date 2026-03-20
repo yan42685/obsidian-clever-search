@@ -65,7 +65,7 @@ export type BigChunk = {
 export type BM25PostingEntry = {
 	docId: number;      // bigChunkId (uint32 range)
 	tfNorm: number;     // pre-computed tf*(k1+1)/(tf+k1*(1-b+b*dl/avgdl))
-	positions: number[]; // delta-encoded token positions (uint16)
+	positions: number[]; // delta-encoded bucket positions
 };
 
 export type PostingList = {

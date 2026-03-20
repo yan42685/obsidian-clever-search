@@ -10,6 +10,9 @@ import {
 
 type BM25SearchResult = { bigChunkId: number; score: number };
 
+const BM25_POSITION_BUCKET_SIZE = 4;
+const BM25_MAX_POSITIONS_PER_TERM = 8;
+
 export class BM25Engine {
 	private readonly tokenizer = getInstance(Tokenizer);
 
@@ -37,7 +40,7 @@ export class BM25Engine {
 	// ─── Indexing ─────────────────────────────────────────────────────────────
 
 	addDocument(bigChunkId: number, text: string): void {
-		const terms = this.tokenizer.tokenize(text, 'index');
+		const terms = this.tokenizer.tokenizeSequence(text, 'index');
 		const dl = terms.length;
 
 		// Remove existing doc if re-indexing
@@ -55,11 +58,17 @@ export class BM25Engine {
 		for (let pos = 0; pos < terms.length; pos++) {
 			const t = terms[pos];
 			const entry = tfMap.get(t);
+			const bucketPos = Math.floor(pos / BM25_POSITION_BUCKET_SIZE);
 			if (entry) {
 				entry.tf++;
-				entry.positions.push(pos);
+				if (
+					entry.positions.length < BM25_MAX_POSITIONS_PER_TERM &&
+					entry.positions[entry.positions.length - 1] !== bucketPos
+				) {
+					entry.positions.push(bucketPos);
+				}
 			} else {
-				tfMap.set(t, { tf: 1, positions: [pos] });
+				tfMap.set(t, { tf: 1, positions: [bucketPos] });
 			}
 		}
 
@@ -155,7 +164,8 @@ export class BM25Engine {
 				if (termPos.size < 2) continue;
 				const span = minSpan(termPos, terms);
 				if (span < Infinity) {
-					const bonus = 200 / (span + 1);
+					const approxTokenSpan = span * BM25_POSITION_BUCKET_SIZE;
+					const bonus = 200 / (approxTokenSpan + 1);
 					scores.set(docId, (scores.get(docId) ?? 0) + bonus);
 				}
 			}
