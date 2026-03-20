@@ -91,7 +91,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 4;
+	private static readonly _dbVersion = 5;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -130,7 +130,7 @@ class DexieWrapper extends Dexie {
 			hybridHnswBig: "id",
 			hybridDocRefs: "path",
 		});
-		this.version(DexieWrapper._dbVersion).stores({
+		this.version(4).stores({
 			pluginSetting: "++id",
 			minisearch: "++id",
 			lexicalDocRefs: "++id",
@@ -143,6 +143,30 @@ class DexieWrapper extends Dexie {
 			hybridDocRefs: "path",
 			hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
 		});
+		this.version(DexieWrapper._dbVersion)
+			.stores({
+				pluginSetting: "++id",
+				minisearch: "++id",
+				lexicalDocRefs: "++id",
+				semanticDocRefs: "++id",
+				hybridChunks: "++id, bigChunkId, filePath",
+				hybridBigChunks: "++id, filePath",
+				hybridBm25Index: "id",
+				hybridHnswSmall: "id",
+				hybridHnswBig: "id",
+				hybridDocRefs: "path",
+				hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+			})
+			.upgrade(async (tx) => {
+				await Promise.all([
+					tx.table("hybridChunks").clear(),
+					tx.table("hybridBigChunks").clear(),
+					tx.table("hybridBm25Index").clear(),
+					tx.table("hybridHnswSmall").clear(),
+					tx.table("hybridHnswBig").clear(),
+					tx.table("hybridDocRefs").clear(),
+				]);
+			});
 	}
 	get dbVersion() {
 		return DexieWrapper._dbVersion;

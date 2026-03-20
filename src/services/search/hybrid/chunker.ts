@@ -76,23 +76,6 @@ function offsetToLine(offsets: number[], offset: number): number {
 	return lo;
 }
 
-function offsetToLineCol(
-	text: string,
-	baseLine: number,
-	baseCol: number,
-	offset: number,
-): { line: number; col: number } {
-	const prefix = text.slice(0, Math.max(0, offset));
-	const lines = prefix.split("\n");
-	const lineOffset = lines.length - 1;
-	const colWithinLine = lines[lines.length - 1]?.length ?? 0;
-
-	return {
-		line: baseLine + lineOffset,
-		col: lineOffset === 0 ? baseCol + colWithinLine : colWithinLine,
-	};
-}
-
 function isWhitespaceCharCode(code: number): boolean {
 	return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
 }
@@ -471,28 +454,18 @@ export function createTokenWindows(
 function makeSmallChunks(
 	bigChunkIdx: number,
 	text: string,
-	baseLine: number,
-	baseCol: number,
 ): RawChunk[] {
 	return createChunkRanges(
 		text,
 		SMALL_CHUNK_TARGET,
 		SMALL_CHUNK_TARGET * (1 + CHUNK_MAX_OVERFLOW_RATIO),
 	)
-		.map((range) => {
-			const start = offsetToLineCol(
-				text,
-				baseLine,
-				baseCol,
-				range.startOffset,
-			);
-			return {
-				bigChunkIdx,
-				text: text.slice(range.startOffset, range.endOffset),
-				startLine: start.line,
-				startCol: start.col,
-			};
-		})
+		.map((range) => ({
+			bigChunkIdx,
+			text: text.slice(range.startOffset, range.endOffset),
+			startOffset: range.startOffset,
+			endOffset: range.endOffset,
+		}))
 		.filter((chunk) => chunk.text.trim().length > 0);
 }
 
@@ -525,12 +498,7 @@ export function chunkFile(filePath: string, plainText: string): ChunkerOutput {
 			endLine,
 		});
 
-		const smallChunks = makeSmallChunks(
-			bigChunks.length - 1,
-			text,
-			startLine,
-			startCol,
-		);
+		const smallChunks = makeSmallChunks(bigChunks.length - 1, text);
 		for (const sc of smallChunks) chunks.push(sc);
 	}
 

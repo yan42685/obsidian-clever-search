@@ -39,13 +39,12 @@ type HybridWriteOption = {
 	persistIndices?: boolean;
 };
 
-type SmallChunkMatch = {
+type SmallChunkHit = {
 	id: number;
 	bigChunkId: number;
 	filePath: string;
-	text: string;
-	row: number;
-	col: number;
+	startOffset: number;
+	endOffset: number;
 	score: number;
 };
 
@@ -58,7 +57,7 @@ type BigChunkCandidate = {
 	endLine: number;
 	score: number;
 	order: number;
-	smallMatches: SmallChunkMatch[];
+	smallMatches: SmallChunkHit[];
 };
 
 export class HybridEngine {
@@ -261,8 +260,12 @@ export class HybridEngine {
 			}
 		}
 
+		const globalBigChunkOrder = selectedBigCandidates
+			.map((candidate) => candidate.id);
+
 		return this.buildFileItemsFromBigCandidates(
 			selectedBigCandidates,
+			globalBigChunkOrder,
 			query,
 			topK,
 		);
@@ -368,9 +371,8 @@ export class HybridEngine {
 				id: undefined,
 				bigChunkId: bigId,
 				filePath,
-				text: chunk.text,
-				startLine: chunk.startLine,
-				startCol: chunk.startCol,
+				startOffset: chunk.startOffset,
+				endOffset: chunk.endOffset,
 				vector: vec,
 				scale,
 				vectorF16: vecF16,
@@ -443,9 +445,8 @@ export class HybridEngine {
 				id: undefined,
 				bigChunkId: bigChunkIds[chunk.bigChunkIdx],
 				filePath,
-				text: chunk.text,
-				startLine: chunk.startLine,
-				startCol: chunk.startCol,
+				startOffset: chunk.startOffset,
+				endOffset: chunk.endOffset,
 				vector: new Int8Array(0),
 				scale: 1,
 			});
@@ -461,7 +462,7 @@ export class HybridEngine {
 		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
 	}
 
-	private async loadSmallChunkMatches(ranking: RankedResult[]): Promise<SmallChunkMatch[]> {
+	private async loadSmallChunkMatches(ranking: RankedResult[]): Promise<SmallChunkHit[]> {
 		const rows = await this.db.db.hybridChunks.bulkGet(ranking.map((item) => item.id));
 		const chunksById = new Map<number, Chunk>();
 		for (const row of rows) {
@@ -477,20 +478,19 @@ export class HybridEngine {
 					id: chunk.id,
 					bigChunkId: chunk.bigChunkId,
 					filePath: chunk.filePath,
-					text: chunk.text,
-					row: chunk.startLine,
-					col: chunk.startCol,
+					startOffset: chunk.startOffset,
+					endOffset: chunk.endOffset,
 					score: item.score,
-				} as SmallChunkMatch;
+				} as SmallChunkHit;
 			})
-			.filter((item): item is SmallChunkMatch => item !== null);
+			.filter((item): item is SmallChunkHit => item !== null);
 	}
 
 	private async buildBigChunkCandidates(
-		smallMatches: SmallChunkMatch[],
+		smallMatches: SmallChunkHit[],
 	): Promise<BigChunkCandidate[]> {
 		const bigOrder = new Map<number, number>();
-		const groupedSmallMatches = new Map<number, SmallChunkMatch[]>();
+		const groupedSmallMatches = new Map<number, SmallChunkHit[]>();
 
 		smallMatches.forEach((match, index) => {
 			if (!bigOrder.has(match.bigChunkId)) {
@@ -534,30 +534,26 @@ export class HybridEngine {
 
 	private buildFileItemsFromBigCandidates(
 		bigCandidates: BigChunkCandidate[],
+		globalBigChunkOrder: number[],
 		query: string,
 		topK: number,
 	): FileItem[] {
-		const byFile = new Map<string, { filePath: string; subItems: FileSubItem[] }>();
+		const candidateById = new Map(
+			bigCandidates.map((candidate) => [candidate.id, candidate]),
+		);
+		const byFile = new Map<
+			string,
+			{ filePath: string; orderedBigChunks: BigChunkCandidate[] }
+		>();
 
-		for (const candidate of bigCandidates) {
+		for (const bigChunkId of globalBigChunkOrder) {
+			const candidate = candidateById.get(bigChunkId);
+			if (!candidate) continue;
 			const entry = byFile.get(candidate.filePath) ?? {
 				filePath: candidate.filePath,
-				subItems: [],
+				orderedBigChunks: [],
 			};
-			for (const smallMatch of candidate.smallMatches) {
-				if (entry.subItems.length >= MAX_SUBITEMS_PER_FILE) {
-					break;
-				}
-				entry.subItems.push(
-					new FileSubItem(
-						buildSmallChunkSnippet(smallMatch.text, query),
-						smallMatch.row,
-						smallMatch.col,
-						smallMatch.score,
-						buildSmallChunkSnippet(smallMatch.text, query),
-					),
-				);
-			}
+			entry.orderedBigChunks.push(candidate);
 			if (!byFile.has(candidate.filePath)) {
 				byFile.set(candidate.filePath, entry);
 			}
@@ -571,10 +567,49 @@ export class HybridEngine {
 					entry.filePath,
 					[query],
 					[],
-					entry.subItems,
+					this.buildOrderedSubItems(entry.orderedBigChunks, query),
 					null,
 				),
 			);
+	}
+
+	private buildOrderedSubItems(
+		orderedBigChunks: BigChunkCandidate[],
+		query: string,
+	): FileSubItem[] {
+		const subItems: FileSubItem[] = [];
+
+		for (const bigChunk of orderedBigChunks) {
+			const orderedSmallMatches = [...bigChunk.smallMatches].sort(
+				(a, b) => b.score - a.score,
+			);
+			for (const smallMatch of orderedSmallMatches) {
+				if (subItems.length >= MAX_SUBITEMS_PER_FILE) {
+					return subItems;
+				}
+				const snippetText = buildSmallChunkSnippet(
+					bigChunk.text.slice(smallMatch.startOffset, smallMatch.endOffset),
+					query,
+				);
+				const location = offsetToLocation(
+					bigChunk.text,
+					bigChunk.startLine,
+					bigChunk.startCol,
+					smallMatch.startOffset,
+				);
+				subItems.push(
+					new FileSubItem(
+						snippetText,
+						location.row,
+						location.col,
+						smallMatch.score,
+						snippetText,
+					),
+				);
+			}
+		}
+
+		return subItems;
 	}
 
 	private toRerankCandidate(candidate: BigChunkCandidate): RerankCandidate {
@@ -718,4 +753,21 @@ function scoreSnippetWindow(
 
 function cleanSnippet(text: string): string {
 	return text.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHAR_LIMIT);
+}
+
+function offsetToLocation(
+	text: string,
+	baseRow: number,
+	baseCol: number,
+	offset: number,
+): { row: number; col: number } {
+	const prefix = text.slice(0, Math.max(0, offset));
+	const lines = prefix.split('\n');
+	const lineOffset = lines.length - 1;
+	const colWithinLine = lines[lines.length - 1]?.length ?? 0;
+
+	return {
+		row: baseRow + lineOffset,
+		col: lineOffset === 0 ? baseCol + colWithinLine : colWithinLine,
+	};
 }

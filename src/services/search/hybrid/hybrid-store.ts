@@ -6,9 +6,8 @@ export type ChunkRow = {
 	id?: number;
 	bigChunkId: number;
 	filePath: string;
-	text?: string;
-	startLine?: number;
-	startCol?: number;
+	startOffset?: number;
+	endOffset?: number;
 	vector: Blob;       // Int8Array serialized
 	scale: number;
 	precision: string;  // 'int8' | 'float16'
@@ -111,9 +110,8 @@ export function chunkToRow(c: Omit<Chunk, 'id'> & { id?: number }): ChunkRow {
 	const row: ChunkRow = {
 		bigChunkId: c.bigChunkId,
 		filePath: c.filePath,
-		text: c.text,
-		startLine: c.startLine,
-		startCol: c.startCol,
+		startOffset: c.startOffset,
+		endOffset: c.endOffset,
 		vector: int8ToBlob(c.vector),
 		scale: c.scale,
 		precision: c.vectorF16 ? 'float16' : 'int8',
@@ -128,9 +126,8 @@ export async function rowToChunk(row: ChunkRow): Promise<Chunk> {
 		id: row.id!,
 		bigChunkId: row.bigChunkId,
 		filePath: row.filePath,
-		text: row.text ?? '',
-		startLine: row.startLine ?? 0,
-		startCol: row.startCol ?? 0,
+		startOffset: row.startOffset ?? 0,
+		endOffset: row.endOffset ?? 0,
 		vector: await blobToInt8(row.vector),
 		scale: row.scale,
 		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,
