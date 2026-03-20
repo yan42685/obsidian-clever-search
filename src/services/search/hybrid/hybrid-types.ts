@@ -11,13 +11,34 @@ export type RawChunk = {
 export type Chunk = {
 	id: number;
 	filePath: string;
+	chunkIndex: number;
 	text: string;
 	startLine: number;
 	startCol: number;
 	endLine: number;
+};
+
+export type Int8Vector = {
+	precision: 'int8';
 	vector: Int8Array;
 	scale: number;
-	vectorF16?: Uint16Array;
+};
+
+export type Float16Vector = {
+	precision: 'float16';
+	vector: Uint16Array;
+};
+
+export type StoredVector = Int8Vector | Float16Vector;
+
+export type ChunkVectorShard = {
+	filePath: string;
+	precision: VectorPrecision;
+	dim: number;
+	chunkCount: number;
+	chunkIds: Uint32Array;
+	vectorData: Int8Array | Uint16Array;
+	scaleData?: Float32Array;
 };
 
 export type BM25PostingEntry = {
@@ -47,20 +68,16 @@ export type HnswNode = {
 export type HnswGraph = {
 	entryPoint: number | null;
 	maxLevel: number;
+	precision: VectorPrecision;
 	nodes: Map<number, HnswNode>;
-	vectors: Map<number, Int8Array>;
-	scales: Map<number, number>;
-	vectorsF16?: Map<number, Uint16Array>;
 	deletedSet: Set<number>;
 };
 
 export type HnswGraphData = {
 	entryPoint: number | null;
 	maxLevel: number;
+	precision: VectorPrecision;
 	nodes: [number, HnswNode][];
-	vectors?: [number, number[]][];
-	scales?: [number, number][];
-	vectorsF16?: [number, number[]][];
 	deletedSet: number[];
 };
 

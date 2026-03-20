@@ -11,16 +11,21 @@ import { HnswIndex } from './hnsw';
 import {
 	blobToBm25,
 	blobToHnsw,
+	buildChunkVectorShard,
 	bm25ToBlob,
+	chunkVectorShardToRow,
 	type ChunkRow,
+	type ChunkVectorShardRow,
 	chunkToRow,
 	hnswToBlob,
 	rowToChunk,
-	rowToChunkVector,
+	rowToChunkVectorShard,
+	shardToChunkVectorRecords,
 } from './hybrid-store';
-import type { Chunk, RawChunk, VectorPrecision } from './hybrid-types';
+import type { Chunk, RawChunk, StoredVector, VectorPrecision } from './hybrid-types';
 import type { RankedResult } from './ranking';
 import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
+import { EMBED_DIM } from './hybrid-types';
 
 const BM25_RECALL_LIMIT = 20;
 const DENSE_RECALL_LIMIT = 20;
@@ -71,13 +76,14 @@ export class HybridEngine {
 	}
 
 	async load(): Promise<void> {
+		this.hnswSmall.clear(this.precision);
 		await Promise.all([this.loadBm25(), this.loadHnsw()]);
 		this._ready = true;
 	}
 
 	async clearAll(): Promise<void> {
 		this.bm25.clear();
-		this.hnswSmall.clear();
+		this.hnswSmall.clear(this.precision);
 		this._ready = false;
 		this._canSearch = false;
 		this.lastIndexingFallbackNoticeKey = null;
@@ -85,6 +91,7 @@ export class HybridEngine {
 
 		await Promise.all([
 			this.db.db.hybridChunks.clear(),
+			this.db.db.hybridChunkVectors.clear(),
 			this.db.db.hybridBm25Index.clear(),
 			this.db.db.hybridHnswSmall.clear(),
 			this.db.db.hybridDocRefs.clear(),
@@ -134,6 +141,7 @@ export class HybridEngine {
 		const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
 		await this.db.db.hybridChunks.bulkDelete(ids);
+		await this.db.db.hybridChunkVectors.delete(filePath);
 		await this.db.db.hybridDocRefs.delete(filePath);
 
 		for (const id of ids) {
@@ -161,14 +169,8 @@ export class HybridEngine {
 		try {
 			if (this._canSearch) {
 				const embedded = await this.embedder.embedQuery(query, this.precision, SEARCH_EMBED_TOKEN_KEY);
-				denseSmall = this.hnswSmall.search(
-					embedded.vec,
-					embedded.scale,
-					DENSE_RECALL_LIMIT,
-					SEARCH_EF,
-					this.precision,
-					embedded.vecF16,
-				).map((result) => ({ id: result.id, score: result.score }));
+				denseSmall = this.hnswSmall.search(embedded, DENSE_RECALL_LIMIT, SEARCH_EF)
+					.map((result) => ({ id: result.id, score: result.score }));
 			}
 		} catch (error) {
 			logger.warn('hybrid query embedding failed; rerank will use BM25-only chunks.', error);
@@ -212,7 +214,7 @@ export class HybridEngine {
 		const { chunks: rawChunks } = chunkFile(filePath, plainText);
 		if (rawChunks.length === 0) return;
 
-		let vectors: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> = [];
+		let vectors: StoredVector[] = [];
 		try {
 			vectors = await this.embedder.embedBatch(
 				rawChunks.map((chunk) => chunk.text),
@@ -229,12 +231,12 @@ export class HybridEngine {
 			return;
 		}
 
-		const chunkIds = await this.persistChunks(filePath, rawChunks, vectors, strict);
+		const chunkIds = await this.persistChunks(filePath, rawChunks, strict);
+		await this.persistVectorShard(filePath, chunkIds, vectors);
 		for (let i = 0; i < chunkIds.length; i++) {
 			const chunkId = chunkIds[i];
-			const { vec, scale, vecF16 } = vectors[i];
 			this.bm25.addDocument(chunkId, rawChunks[i].text);
-			this.hnswSmall.insert(chunkId, vec, scale, vecF16);
+			this.hnswSmall.insert(chunkId, vectors[i]);
 		}
 
 		if (option.persistIndices ?? true) {
@@ -246,21 +248,17 @@ export class HybridEngine {
 	private async persistChunks(
 		filePath: string,
 		rawChunks: RawChunk[],
-		vectors: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>,
 		strict: boolean,
 	): Promise<number[]> {
 		const rows = rawChunks.map((chunk, index) => {
-			const { vec, scale, vecF16 } = vectors[index];
 			return chunkToRow({
 				id: undefined,
 				filePath,
+				chunkIndex: index,
 				text: chunk.text,
 				startLine: chunk.startLine,
 				startCol: chunk.startCol,
 				endLine: chunk.endLine,
-				vector: vec,
-				scale,
-				vectorF16: vecF16,
 			});
 		});
 
@@ -278,6 +276,15 @@ export class HybridEngine {
 		}).bulkAdd(rows, { allKeys: true });
 	}
 
+	private async persistVectorShard(
+		filePath: string,
+		chunkIds: number[],
+		vectors: StoredVector[],
+	): Promise<void> {
+		const shard = buildChunkVectorShard(filePath, chunkIds, vectors, EMBED_DIM);
+		await this.db.db.hybridChunkVectors.put(chunkVectorShardToRow(shard));
+	}
+
 	private async indexBm25Only(
 		filePath: string,
 		rawChunks: RawChunk[],
@@ -289,12 +296,11 @@ export class HybridEngine {
 			const row = chunkToRow({
 				id: undefined,
 				filePath,
+				chunkIndex: ids.length,
 				text: chunk.text,
 				startLine: chunk.startLine,
 				startCol: chunk.startCol,
 				endLine: chunk.endLine,
-				vector: new Int8Array(0),
-				scale: 1,
 			});
 			const id = await this.db.db.hybridChunks.add(row);
 			ids.push(id as number);
@@ -431,25 +437,10 @@ export class HybridEngine {
 	}
 
 	private async loadHnsw(): Promise<void> {
-		this.hnswSmall.clear();
 		const small = await this.db.db.hybridHnswSmall.get(0);
 		if (small) {
-			const data = await blobToHnsw(small.data);
-			const shouldRewriteBlob =
-				Boolean(data.vectors?.length) ||
-				Boolean(data.scales?.length) ||
-				Boolean(data.vectorsF16?.length) ||
-				data.deletedSet.length > 0;
-			this.hnswSmall.deserialize(data);
-			// Old persisted graphs may still include lazy-deleted nodes; compact first so
-			// every in-memory node can hydrate from an existing hybridChunks row.
-			if (this.hnswSmall.hasDeletedNodes()) {
-				this.hnswSmall.rebuild();
-			}
+			this.hnswSmall.deserialize(await blobToHnsw(small.data));
 			await this.hydrateHnswVectors();
-			if (shouldRewriteBlob) {
-				await this.persistHnsw();
-			}
 		}
 		this._canSearch = this.hnswSmall.isNonEmpty() && this.hnswSmall.hasVectors();
 		if (!this._canSearch) {
@@ -458,18 +449,16 @@ export class HybridEngine {
 	}
 
 	private async hydrateHnswVectors(): Promise<void> {
-		const ids = this.hnswSmall.nodeIds();
-		if (ids.length === 0) {
+		const rows = await this.db.db.hybridChunkVectors.toArray();
+		if (rows.length === 0) {
 			this.hnswSmall.hydrateVectors([]);
 			return;
 		}
 
-		const rows = await this.db.db.hybridChunks.bulkGet(ids);
-		const records = await Promise.all(
-			rows
-				.filter((row): row is ChunkRow => Boolean(row?.id))
-				.map((row) => rowToChunkVector(row)),
+		const shards = await Promise.all(
+			rows.map((row) => rowToChunkVectorShard(row as ChunkVectorShardRow)),
 		);
+		const records = shards.flatMap((shard) => shardToChunkVectorRecords(shard));
 		this.hnswSmall.hydrateVectors(records);
 	}
 

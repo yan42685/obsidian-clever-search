@@ -503,6 +503,7 @@ export class DataManager {
 		);
 
 		const miniSearchBytes = bytesByName.get("minisearch") ?? 0;
+		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
 		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
 		const chunkStoreBytes = bytesByName.get("hybridChunks") ?? 0;
@@ -510,6 +511,7 @@ export class DataManager {
 			0,
 			storageUsage.totalBytes -
 				miniSearchBytes -
+				vectorShardBytes -
 				bm25Bytes -
 				hnswBytes -
 				chunkStoreBytes,
@@ -519,8 +521,10 @@ export class DataManager {
 			this.buildDevStorageNotice(
 				indexableBytes,
 				storageUsage.totalBytes,
+				this.setting.hybrid.vectorCompression,
 				miniSearchBytes,
 				chunkStoreBytes,
+				vectorShardBytes,
 				bm25Bytes,
 				hnswBytes,
 				otherBytes,
@@ -550,19 +554,33 @@ export class DataManager {
 					size: this.formatBytes(storageUsage.hybridChunkBreakdown.textBytes),
 				},
 				{
-					segment: "chunk-vector",
-					bytes: storageUsage.hybridChunkBreakdown.vectorBytes,
-					size: this.formatBytes(storageUsage.hybridChunkBreakdown.vectorBytes),
-				},
-				{
-					segment: "chunk-vector-f16",
-					bytes: storageUsage.hybridChunkBreakdown.vectorF16Bytes,
-					size: this.formatBytes(storageUsage.hybridChunkBreakdown.vectorF16Bytes),
-				},
-				{
 					segment: "chunk-metadata",
 					bytes: storageUsage.hybridChunkBreakdown.metadataBytes,
 					size: this.formatBytes(storageUsage.hybridChunkBreakdown.metadataBytes),
+				},
+			]);
+		}
+		if (storageUsage.hybridVectorBreakdown) {
+			console.table([
+				{
+					segment: "vector-shard-ids",
+					bytes: storageUsage.hybridVectorBreakdown.chunkIdBytes,
+					size: this.formatBytes(storageUsage.hybridVectorBreakdown.chunkIdBytes),
+				},
+				{
+					segment: "vector-shard-data",
+					bytes: storageUsage.hybridVectorBreakdown.vectorBytes,
+					size: this.formatBytes(storageUsage.hybridVectorBreakdown.vectorBytes),
+				},
+				{
+					segment: "vector-shard-scale",
+					bytes: storageUsage.hybridVectorBreakdown.scaleBytes,
+					size: this.formatBytes(storageUsage.hybridVectorBreakdown.scaleBytes),
+				},
+				{
+					segment: "vector-shard-metadata",
+					bytes: storageUsage.hybridVectorBreakdown.metadataBytes,
+					size: this.formatBytes(storageUsage.hybridVectorBreakdown.metadataBytes),
 				},
 			]);
 		}
@@ -572,8 +590,10 @@ export class DataManager {
 	private buildDevStorageNotice(
 		indexableBytes: number,
 		totalBytes: number,
+		precision: string,
 		miniSearchBytes: number,
 		chunkStoreBytes: number,
+		vectorShardBytes: number,
 		bm25Bytes: number,
 		hnswBytes: number,
 		otherBytes: number,
@@ -595,8 +615,9 @@ export class DataManager {
 		return [
 			`Dev stats`,
 			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
+			`Current vector quantization: ${precision}`,
 			`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
-			`MiniSearch ${this.formatBytes(miniSearchBytes)} | Chunk ${this.formatBytes(chunkStoreBytes)} | BM25 ${this.formatBytes(bm25Bytes)} | HNSW ${this.formatBytes(hnswBytes)} | Other ${this.formatBytes(otherBytes)}`,
+			`MiniSearch ${this.formatBytes(miniSearchBytes)} | Chunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | BM25 ${this.formatBytes(bm25Bytes)} | HNSW ${this.formatBytes(hnswBytes)} | Other ${this.formatBytes(otherBytes)}`,
 		].join("\n");
 	}
 

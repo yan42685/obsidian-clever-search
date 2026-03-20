@@ -5,6 +5,7 @@ import {
 	type HnswGraph,
 	type HnswGraphData,
 	type HnswNode,
+	type StoredVector,
 	type VectorPrecision,
 } from './hybrid-types';
 import type { ChunkVectorRecord } from './hybrid-store';
@@ -13,28 +14,26 @@ const ML = 1 / Math.log(HNSW_M); // level multiplier
 
 type Candidate = { id: number; dist: number };
 
-// ─── Distance ─────────────────────────────────────────────────────────────────
-
-/**
- * Approximate cosine similarity via int8 dot product.
- * sim = dot(a, b) / (scaleA * scaleB * 127²)
- * Returns value in [-1, 1]; higher = more similar.
- */
 function int8CosineSim(
-	a: Int8Array, scaleA: number,
-	b: Int8Array, scaleB: number,
+	a: Int8Array,
+	scaleA: number,
+	b: Int8Array,
+	scaleB: number,
 ): number {
 	let dot = 0;
 	for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
 	return dot / (scaleA * scaleB * 127 * 127);
 }
 
-/** Distance = 1 - similarity (for min-heap logic). */
-function int8Dist(a: Int8Array, scaleA: number, b: Int8Array, scaleB: number): number {
+function int8Dist(
+	a: Int8Array,
+	scaleA: number,
+	b: Int8Array,
+	scaleB: number,
+): number {
 	return 1 - int8CosineSim(a, scaleA, b, scaleB);
 }
 
-// float16 dequantize for rescoring
 function float16ToFloat32(h: number): number {
 	const sign = (h >>> 15) ? -1 : 1;
 	const exp = (h >>> 10) & 0x1f;
@@ -49,16 +48,17 @@ function f16CosineSim(a: Uint16Array, b: Uint16Array): number {
 	for (let i = 0; i < a.length; i++) {
 		dot += float16ToFloat32(a[i]) * float16ToFloat32(b[i]);
 	}
-	return dot; // vectors are already L2-normalized
+	return dot; // vectors are already normalized
 }
 
-// ─── Min-heap ─────────────────────────────────────────────────────────────────
+function f16Dist(a: Uint16Array, b: Uint16Array): number {
+	return 1 - f16CosineSim(a, b);
+}
 
 class MinHeap {
 	private data: Candidate[] = [];
 
 	get size() { return this.data.length; }
-	peek(): Candidate { return this.data[0]; }
 
 	push(c: Candidate): void {
 		this.data.push(c);
@@ -68,7 +68,10 @@ class MinHeap {
 	pop(): Candidate {
 		const top = this.data[0];
 		const last = this.data.pop()!;
-		if (this.data.length > 0) { this.data[0] = last; this.siftDown(0); }
+		if (this.data.length > 0) {
+			this.data[0] = last;
+			this.siftDown(0);
+		}
 		return top;
 	}
 
@@ -85,7 +88,8 @@ class MinHeap {
 		const n = this.data.length;
 		while (true) {
 			let smallest = i;
-			const l = 2 * i + 1, r = 2 * i + 2;
+			const l = 2 * i + 1;
+			const r = 2 * i + 2;
 			if (l < n && this.data[l].dist < this.data[smallest].dist) smallest = l;
 			if (r < n && this.data[r].dist < this.data[smallest].dist) smallest = r;
 			if (smallest === i) break;
@@ -95,42 +99,53 @@ class MinHeap {
 	}
 }
 
-// ─── HNSW ─────────────────────────────────────────────────────────────────────
-
 export class HnswIndex {
-	private graph: HnswGraph = {
-		entryPoint: null,
-		maxLevel: 0,
-		nodes: new Map(),
-		vectors: new Map(),
-		scales: new Map(),
-		deletedSet: new Set(),
-	};
+	private graph: HnswGraph = this.createEmptyGraph('int8');
+	private readonly vectorsInt8 = new Map<number, Int8Array>();
+	private readonly scalesInt8 = new Map<number, number>();
+	private readonly vectorsFloat16 = new Map<number, Uint16Array>();
 
-	clear(): void {
-		this.graph = {
+	constructor(precision: VectorPrecision = 'int8') {
+		this.graph = this.createEmptyGraph(precision);
+	}
+
+	private createEmptyGraph(precision: VectorPrecision): HnswGraph {
+		return {
 			entryPoint: null,
 			maxLevel: 0,
+			precision,
 			nodes: new Map(),
-			vectors: new Map(),
-			scales: new Map(),
 			deletedSet: new Set(),
 		};
 	}
 
-	// ─── Insert ───────────────────────────────────────────────────────────────
+	get precision(): VectorPrecision {
+		return this.graph.precision;
+	}
 
-	insert(id: number, vec: Int8Array, scale: number, vecF16?: Uint16Array): void {
+	setPrecision(precision: VectorPrecision): void {
+		this.clear(precision);
+	}
+
+	clear(precision: VectorPrecision = this.graph.precision): void {
+		this.graph = this.createEmptyGraph(precision);
+		this.vectorsInt8.clear();
+		this.scalesInt8.clear();
+		this.vectorsFloat16.clear();
+	}
+
+	insert(id: number, vector: StoredVector): void {
+		this.ensurePrecision(vector.precision);
+		this.storeVector(id, vector);
+
 		const level = this.randomLevel();
-		const node: HnswNode = { id, level, neighbors: Array.from({ length: level + 1 }, () => []) };
+		const node: HnswNode = {
+			id,
+			level,
+			neighbors: Array.from({ length: level + 1 }, () => []),
+		};
 
 		this.graph.nodes.set(id, node);
-		this.graph.vectors.set(id, vec);
-		this.graph.scales.set(id, scale);
-		if (vecF16) {
-			if (!this.graph.vectorsF16) this.graph.vectorsF16 = new Map();
-			this.graph.vectorsF16.set(id, vecF16);
-		}
 
 		if (this.graph.entryPoint === null) {
 			this.graph.entryPoint = id;
@@ -141,25 +156,21 @@ export class HnswIndex {
 		let ep = this.graph.entryPoint;
 		const epLevel = this.graph.nodes.get(ep)!.level;
 
-		// Greedy descent from top level to level+1
 		for (let lc = epLevel; lc > level; lc--) {
-			ep = this.greedySearch(vec, scale, ep, lc);
+			ep = this.greedySearch(vector, ep, lc);
 		}
 
-		// Insert at each level from min(level, epLevel) down to 0
 		for (let lc = Math.min(level, epLevel); lc >= 0; lc--) {
-			const candidates = this.searchLayer(vec, scale, ep, HNSW_EF_CONSTRUCTION, lc);
+			const candidates = this.searchLayer(vector, ep, HNSW_EF_CONSTRUCTION, lc);
 			const neighbors = this.selectNeighbors(candidates, HNSW_M);
-			node.neighbors[lc] = neighbors.map(c => c.id);
+			node.neighbors[lc] = neighbors.map((c) => c.id);
 
-			// Add back-links
 			for (const nb of neighbors) {
 				const nbNode = this.graph.nodes.get(nb.id)!;
 				if (!nbNode.neighbors[lc]) nbNode.neighbors[lc] = [];
 				nbNode.neighbors[lc].push(id);
-				// Prune if over M
 				if (nbNode.neighbors[lc].length > HNSW_M) {
-					nbNode.neighbors[lc] = this.pruneNeighbors(nbNode.neighbors[lc], vec, scale, HNSW_M);
+					nbNode.neighbors[lc] = this.pruneNeighbors(nbNode.neighbors[lc], HNSW_M);
 				}
 			}
 
@@ -172,49 +183,31 @@ export class HnswIndex {
 		}
 	}
 
-	// ─── Search ───────────────────────────────────────────────────────────────
-
 	search(
-		queryVec: Int8Array,
-		queryScale: number,
+		queryVector: StoredVector,
 		topK: number,
 		ef = HNSW_EF,
-		precision: VectorPrecision = 'int8',
-		queryVecF16?: Uint16Array,
 	): Array<{ id: number; score: number }> {
-		if (this.graph.entryPoint === null) return [];
+		if (this.graph.entryPoint === null || topK <= 0) return [];
+		this.ensurePrecision(queryVector.precision);
 
 		let ep = this.graph.entryPoint;
 		const epLevel = this.graph.nodes.get(ep)!.level;
 
 		for (let lc = epLevel; lc > 0; lc--) {
-			ep = this.greedySearch(queryVec, queryScale, ep, lc);
+			ep = this.greedySearch(queryVector, ep, lc);
 		}
 
-		const candidates = this.searchLayer(queryVec, queryScale, ep, ef, 0);
-		const active = candidates.filter(c => !this.graph.deletedSet.has(c.id));
-		const top = active.slice(0, topK);
-
-		// float16 rescoring branch
-		if (precision === 'float16' && queryVecF16 && this.graph.vectorsF16) {
-			// Expand to top-50 then rescore
-			const expanded = active.slice(0, Math.max(topK, 50));
-			const rescored = expanded.map(c => {
-				const f16 = this.graph.vectorsF16!.get(c.id);
-				const score = f16 ? f16CosineSim(queryVecF16, f16) : 1 - c.dist;
-				return { id: c.id, score };
-			});
-			rescored.sort((a, b) => b.score - a.score);
-			return rescored.slice(0, topK);
-		}
-
-		return top.map(c => ({ id: c.id, score: 1 - c.dist }));
+		const candidates = this.searchLayer(queryVector, ep, ef, 0);
+		return candidates
+			.filter((candidate) => !this.graph.deletedSet.has(candidate.id))
+			.slice(0, topK)
+			.map((candidate) => ({ id: candidate.id, score: 1 - candidate.dist }));
 	}
-
-	// ─── Delete (lazy) ────────────────────────────────────────────────────────
 
 	delete(id: number): void {
 		this.graph.deletedSet.add(id);
+		this.deleteVector(id);
 	}
 
 	needsRebuild(): boolean {
@@ -226,92 +219,107 @@ export class HnswIndex {
 	}
 
 	hasVectors(): boolean {
-		return this.graph.vectors.size > 0;
+		return this.graph.precision === 'int8'
+			? this.vectorsInt8.size > 0
+			: this.vectorsFloat16.size > 0;
 	}
 
 	hasDeletedNodes(): boolean {
 		return this.graph.deletedSet.size > 0;
 	}
 
-	nodeIds(): number[] {
-		return Array.from(this.graph.nodes.keys()).filter(
-			(id) => !this.graph.deletedSet.has(id),
-		);
-	}
-
 	hydrateVectors(records: ChunkVectorRecord[]): void {
-		this.graph.vectors = new Map();
-		this.graph.scales = new Map();
-		this.graph.vectorsF16 = undefined;
+		this.vectorsInt8.clear();
+		this.scalesInt8.clear();
+		this.vectorsFloat16.clear();
 
 		for (const record of records) {
 			if (!this.graph.nodes.has(record.id) || this.graph.deletedSet.has(record.id)) {
 				continue;
 			}
-			this.graph.vectors.set(record.id, record.vector);
-			this.graph.scales.set(record.id, record.scale);
-			if (record.vectorF16) {
-				if (!this.graph.vectorsF16) this.graph.vectorsF16 = new Map();
-				this.graph.vectorsF16.set(record.id, record.vectorF16);
+			if (record.vector.precision !== this.graph.precision) {
+				continue;
 			}
+			this.storeVector(record.id, record.vector);
 		}
 	}
 
-	/** Rebuild graph without deleted nodes. */
 	rebuild(): void {
+		const precision = this.graph.precision;
 		const toKeep = Array.from(this.graph.nodes.keys()).filter(
-			id => !this.graph.deletedSet.has(id),
+			(id) => !this.graph.deletedSet.has(id),
 		);
-		const vecs = new Map(toKeep.map(id => [id, this.graph.vectors.get(id)!]));
-		const scales = new Map(toKeep.map(id => [id, this.graph.scales.get(id)!]));
-		const vecsF16 = this.graph.vectorsF16
-			? new Map(toKeep.filter(id => this.graph.vectorsF16!.has(id)).map(id => [id, this.graph.vectorsF16!.get(id)!]))
-			: undefined;
+		const vectors = toKeep
+			.map((id) => {
+				const vector = this.getStoredVector(id);
+				if (!vector) return null;
+				return { id, vector };
+			})
+			.filter((item): item is { id: number; vector: StoredVector } => item !== null);
 
-		this.graph = {
-			entryPoint: null,
-			maxLevel: 0,
-			nodes: new Map(),
-			vectors: new Map(),
-			scales: new Map(),
-			vectorsF16: vecsF16,
-			deletedSet: new Set(),
-		};
-
-		for (const id of toKeep) {
-			this.insert(id, vecs.get(id)!, scales.get(id)!, vecsF16?.get(id));
+		this.clear(precision);
+		for (const item of vectors) {
+			this.insert(item.id, item.vector);
 		}
 	}
-
-	// ─── Serialization ────────────────────────────────────────────────────────
 
 	serialize(): HnswGraphData {
 		return {
 			entryPoint: this.graph.entryPoint,
 			maxLevel: this.graph.maxLevel,
+			precision: this.graph.precision,
 			nodes: Array.from(this.graph.nodes.entries()),
 			deletedSet: Array.from(this.graph.deletedSet),
 		};
 	}
 
 	deserialize(data: HnswGraphData): void {
-		this.clear();
+		this.clear(data.precision);
 		this.graph.entryPoint = data.entryPoint;
 		this.graph.maxLevel = data.maxLevel;
 		this.graph.nodes = new Map(data.nodes);
-		this.graph.vectors = data.vectors
-			? new Map(data.vectors.map(([id, arr]) => [id, new Int8Array(arr)]))
-			: new Map();
-		this.graph.scales = data.scales
-			? new Map(data.scales)
-			: new Map();
-		this.graph.vectorsF16 = data.vectorsF16
-			? new Map(data.vectorsF16.map(([id, arr]) => [id, new Uint16Array(arr)]))
-			: undefined;
 		this.graph.deletedSet = new Set(data.deletedSet);
 	}
 
-	// ─── Private helpers ──────────────────────────────────────────────────────
+	private ensurePrecision(precision: VectorPrecision): void {
+		if (precision !== this.graph.precision) {
+			throw new Error(
+				`Vector precision mismatch: graph=${this.graph.precision}, input=${precision}`,
+			);
+		}
+	}
+
+	private storeVector(id: number, vector: StoredVector): void {
+		if (vector.precision === 'int8') {
+			this.vectorsInt8.set(id, vector.vector);
+			this.scalesInt8.set(id, vector.scale);
+			this.vectorsFloat16.delete(id);
+			return;
+		}
+
+		this.vectorsFloat16.set(id, vector.vector);
+		this.vectorsInt8.delete(id);
+		this.scalesInt8.delete(id);
+	}
+
+	private deleteVector(id: number): void {
+		this.vectorsInt8.delete(id);
+		this.scalesInt8.delete(id);
+		this.vectorsFloat16.delete(id);
+	}
+
+	private getStoredVector(id: number): StoredVector | null {
+		if (this.graph.precision === 'int8') {
+			const vector = this.vectorsInt8.get(id);
+			const scale = this.scalesInt8.get(id);
+			if (!vector || scale === undefined) return null;
+			return { precision: 'int8', vector, scale };
+		}
+
+		const vector = this.vectorsFloat16.get(id);
+		if (!vector) return null;
+		return { precision: 'float16', vector };
+	}
 
 	private randomLevel(): number {
 		let level = 0;
@@ -319,9 +327,9 @@ export class HnswIndex {
 		return level;
 	}
 
-	private greedySearch(queryVec: Int8Array, queryScale: number, ep: number, layer: number): number {
+	private greedySearch(queryVector: StoredVector, ep: number, layer: number): number {
 		let best = ep;
-		let bestDist = this.dist(queryVec, queryScale, ep);
+		let bestDist = this.dist(queryVector, ep);
 		let changed = true;
 		while (changed) {
 			changed = false;
@@ -329,16 +337,19 @@ export class HnswIndex {
 			if (!node || !node.neighbors[layer]) break;
 			for (const nb of node.neighbors[layer]) {
 				if (this.graph.deletedSet.has(nb)) continue;
-				const d = this.dist(queryVec, queryScale, nb);
-				if (d < bestDist) { bestDist = d; best = nb; changed = true; }
+				const dist = this.dist(queryVector, nb);
+				if (dist < bestDist) {
+					bestDist = dist;
+					best = nb;
+					changed = true;
+				}
 			}
 		}
 		return best;
 	}
 
 	private searchLayer(
-		queryVec: Int8Array,
-		queryScale: number,
+		queryVector: StoredVector,
 		ep: number,
 		ef: number,
 		layer: number,
@@ -347,13 +358,16 @@ export class HnswIndex {
 		const candidates = new MinHeap();
 		const results: Candidate[] = [];
 
-		const epDist = this.dist(queryVec, queryScale, ep);
+		const epDist = this.dist(queryVector, ep);
 		candidates.push({ id: ep, dist: epDist });
 		results.push({ id: ep, dist: epDist });
 
 		while (candidates.size > 0) {
 			const curr = candidates.pop();
-			const worstResult = results.reduce((w, r) => r.dist > w.dist ? r : w, results[0]);
+			const worstResult = results.reduce(
+				(worst, result) => (result.dist > worst.dist ? result : worst),
+				results[0],
+			);
 
 			if (curr.dist > worstResult.dist && results.length >= ef) break;
 
@@ -363,13 +377,16 @@ export class HnswIndex {
 			for (const nb of node.neighbors[layer]) {
 				if (visited.has(nb)) continue;
 				visited.add(nb);
-				const d = this.dist(queryVec, queryScale, nb);
-				if (results.length < ef || d < worstResult.dist) {
-					candidates.push({ id: nb, dist: d });
-					results.push({ id: nb, dist: d });
+				const dist = this.dist(queryVector, nb);
+				if (results.length < ef || dist < worstResult.dist) {
+					candidates.push({ id: nb, dist });
+					results.push({ id: nb, dist });
 					if (results.length > ef) {
-						// Remove worst
-						const worstIdx = results.reduce((wi, r, i) => r.dist > results[wi].dist ? i : wi, 0);
+						const worstIdx = results.reduce(
+							(worstIdxInner, result, index) =>
+								result.dist > results[worstIdxInner].dist ? index : worstIdxInner,
+							0,
+						);
 						results.splice(worstIdx, 1);
 					}
 				}
@@ -384,19 +401,22 @@ export class HnswIndex {
 		return candidates.slice(0, m);
 	}
 
-	private pruneNeighbors(
-		neighborIds: number[],
-		_queryVec: Int8Array,
-		_queryScale: number,
-		m: number,
-	): number[] {
+	private pruneNeighbors(neighborIds: number[], m: number): number[] {
 		return neighborIds.slice(0, m);
 	}
 
-	private dist(queryVec: Int8Array, queryScale: number, id: number): number {
-		const vec = this.graph.vectors.get(id);
-		const scale = this.graph.scales.get(id);
-		if (!vec || scale === undefined) return Infinity;
-		return int8Dist(queryVec, queryScale, vec, scale);
+	private dist(queryVector: StoredVector, id: number): number {
+		if (this.graph.precision === 'int8') {
+			if (queryVector.precision !== 'int8') return Infinity;
+			const vector = this.vectorsInt8.get(id);
+			const scale = this.scalesInt8.get(id);
+			if (!vector || scale === undefined) return Infinity;
+			return int8Dist(queryVector.vector, queryVector.scale, vector, scale);
+		}
+
+		if (queryVector.precision !== 'float16') return Infinity;
+		const vector = this.vectorsFloat16.get(id);
+		if (!vector) return Infinity;
+		return f16Dist(queryVector.vector, vector);
 	}
 }

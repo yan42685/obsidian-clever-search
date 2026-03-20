@@ -5,7 +5,7 @@ import { estimateTokenCount } from 'src/services/search/hybrid/chunker';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
-import { EMBED_DIM, type VectorPrecision } from './hybrid-types';
+import { EMBED_DIM, type StoredVector, type VectorPrecision } from './hybrid-types';
 
 const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
 const EMBED_MODEL = 'text-embedding-v4';
@@ -42,9 +42,7 @@ export class HybridDisabledError extends Error {
 }
 
 type CacheEntry = {
-	vec: Int8Array;
-	scale: number;
-	vecF16?: Uint16Array;
+	vector: StoredVector;
 	ts: number;
 };
 
@@ -115,12 +113,12 @@ export class Embedder {
 		text: string,
 		precision: VectorPrecision = 'int8',
 		filePath = '',
-	): Promise<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> {
-		const cached = this.getCache(text);
+	): Promise<StoredVector> {
+		const cached = this.getCache(text, precision);
 		if (cached) return cached;
 
 		const [result] = await this.embedBatch([text], precision, filePath);
-		this.setCache(text, result);
+		this.setCache(text, precision, result);
 		return result;
 	}
 
@@ -128,11 +126,11 @@ export class Embedder {
 		texts: string[],
 		precision: VectorPrecision = 'int8',
 		filePath = '',
-	): Promise<Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>> {
+	): Promise<StoredVector[]> {
 		if (!this.setting.hybrid?.enabled) throw new HybridDisabledError();
 		if (!this.apiKey) throw new NoApiKeyError();
 
-		const results: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> = [];
+		const results: StoredVector[] = [];
 		const batchStart = Date.now();
 		logger.debug(
 			`embedBatch start: file=${filePath || '<query>'}, chunks=${texts.length}, precision=${precision}`,
@@ -151,12 +149,19 @@ export class Embedder {
 			}
 			for (const f of floats) {
 				l2Normalize(f);
-				const { vec, scale } = quantizeInt8(f);
-				const entry: { vec: Int8Array; scale: number; vecF16?: Uint16Array } = { vec, scale };
 				if (precision === 'float16') {
-					entry.vecF16 = quantizeFloat16(f);
+					results.push({
+						precision: 'float16',
+						vector: quantizeFloat16(f),
+					});
+					continue;
 				}
-				results.push(entry);
+				const { vec, scale } = quantizeInt8(f);
+				results.push({
+					precision: 'int8',
+					vector: vec,
+					scale,
+				});
 			}
 		}
 
@@ -202,17 +207,17 @@ export class Embedder {
 		return { embeddings: data.map((item) => item.embedding), tokensUsed };
 	}
 
-	private getCache(text: string): CacheEntry | null {
-		const entry = this.cache.get(text);
+	private getCache(text: string, precision: VectorPrecision): StoredVector | null {
+		const entry = this.cache.get(this.buildCacheKey(text, precision));
 		if (!entry) return null;
 		if (Date.now() - entry.ts > CACHE_TTL_MS) {
-			this.cache.delete(text);
+			this.cache.delete(this.buildCacheKey(text, precision));
 			return null;
 		}
-		return entry;
+		return entry.vector;
 	}
 
-	private setCache(text: string, entry: Omit<CacheEntry, 'ts'>): void {
+	private setCache(text: string, precision: VectorPrecision, vector: StoredVector): void {
 		if (this.cache.size >= CACHE_MAX) {
 			let oldestKey = '';
 			let oldestTs = Infinity;
@@ -224,7 +229,11 @@ export class Embedder {
 			}
 			if (oldestKey) this.cache.delete(oldestKey);
 		}
-		this.cache.set(text, { ...entry, ts: Date.now() });
+		this.cache.set(this.buildCacheKey(text, precision), { vector, ts: Date.now() });
+	}
+
+	private buildCacheKey(text: string, precision: VectorPrecision): string {
+		return `${precision}:${text}`;
 	}
 }
 

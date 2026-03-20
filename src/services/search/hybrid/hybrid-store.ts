@@ -1,16 +1,30 @@
-import type { BM25Index, Chunk, HnswGraphData } from './hybrid-types';
+import type {
+	BM25Index,
+	Chunk,
+	ChunkVectorShard,
+	HnswGraphData,
+	StoredVector,
+	VectorPrecision,
+} from './hybrid-types';
 
 export type ChunkRow = {
 	id?: number;
 	filePath: string;
+	chunkIndex: number;
 	text: string;
 	startLine: number;
 	startCol: number;
 	endLine: number;
-	vector: Blob;
-	scale: number;
+};
+
+export type ChunkVectorShardRow = {
+	filePath: string;
 	precision: string;
-	vectorF16?: Blob;
+	dim: number;
+	chunkCount: number;
+	chunkIds: Blob;
+	vectorData: Blob;
+	scaleData?: Blob;
 };
 
 export type BlobRecord = {
@@ -25,9 +39,7 @@ export type HybridDocRef = {
 
 export type ChunkVectorRecord = {
 	id: number;
-	vector: Int8Array;
-	scale: number;
-	vectorF16?: Uint16Array;
+	vector: StoredVector;
 };
 
 export function int8ToBlob(arr: Int8Array): Blob {
@@ -39,6 +51,15 @@ export async function blobToInt8(blob: Blob): Promise<Int8Array> {
 	return new Int8Array(buf);
 }
 
+export function uint32ToBlob(arr: Uint32Array): Blob {
+	return new Blob([arr.buffer]);
+}
+
+export async function blobToUint32(blob: Blob): Promise<Uint32Array> {
+	const buf = await readBlobAsArrayBuffer(blob);
+	return new Uint32Array(buf);
+}
+
 export function uint16ToBlob(arr: Uint16Array): Blob {
 	return new Blob([arr.buffer]);
 }
@@ -46,6 +67,15 @@ export function uint16ToBlob(arr: Uint16Array): Blob {
 export async function blobToUint16(blob: Blob): Promise<Uint16Array> {
 	const buf = await readBlobAsArrayBuffer(blob);
 	return new Uint16Array(buf);
+}
+
+export function float32ToBlob(arr: Float32Array): Blob {
+	return new Blob([arr.buffer]);
+}
+
+export async function blobToFloat32(blob: Blob): Promise<Float32Array> {
+	const buf = await readBlobAsArrayBuffer(blob);
+	return new Float32Array(buf);
 }
 
 export function bm25ToBlob(index: BM25Index): Blob {
@@ -159,14 +189,11 @@ export async function blobToHnsw(blob: Blob): Promise<HnswGraphData> {
 export function chunkToRow(c: Omit<Chunk, 'id'> & { id?: number }): ChunkRow {
 	const row: ChunkRow = {
 		filePath: c.filePath,
+		chunkIndex: c.chunkIndex,
 		text: c.text,
 		startLine: c.startLine,
 		startCol: c.startCol,
 		endLine: c.endLine,
-		vector: int8ToBlob(c.vector),
-		scale: c.scale,
-		precision: c.vectorF16 ? 'float16' : 'int8',
-		vectorF16: c.vectorF16 ? uint16ToBlob(c.vectorF16) : undefined,
 	};
 	if (c.id !== undefined) row.id = c.id;
 	return row;
@@ -176,23 +203,137 @@ export async function rowToChunk(row: ChunkRow): Promise<Chunk> {
 	return {
 		id: row.id!,
 		filePath: row.filePath,
+		chunkIndex: row.chunkIndex,
 		text: row.text,
 		startLine: row.startLine,
 		startCol: row.startCol ?? 0,
 		endLine: row.endLine,
-		vector: await blobToInt8(row.vector),
-		scale: row.scale,
-		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,
 	};
 }
 
-export async function rowToChunkVector(row: ChunkRow): Promise<ChunkVectorRecord> {
+export function chunkVectorShardToRow(shard: ChunkVectorShard): ChunkVectorShardRow {
 	return {
-		id: row.id!,
-		vector: await blobToInt8(row.vector),
-		scale: row.scale,
-		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,
+		filePath: shard.filePath,
+		precision: shard.precision,
+		dim: shard.dim,
+		chunkCount: shard.chunkCount,
+		chunkIds: uint32ToBlob(shard.chunkIds),
+		vectorData:
+			shard.precision === 'int8'
+				? int8ToBlob(shard.vectorData as Int8Array)
+				: uint16ToBlob(shard.vectorData as Uint16Array),
+		scaleData: shard.scaleData ? float32ToBlob(shard.scaleData) : undefined,
 	};
+}
+
+export async function rowToChunkVectorShard(row: ChunkVectorShardRow): Promise<ChunkVectorShard> {
+	const precision = parseVectorPrecision(row.precision);
+	return {
+		filePath: row.filePath,
+		precision,
+		dim: row.dim,
+		chunkCount: row.chunkCount,
+		chunkIds: await blobToUint32(row.chunkIds),
+		vectorData:
+			precision === 'int8'
+				? await blobToInt8(row.vectorData)
+				: await blobToUint16(row.vectorData),
+		scaleData: row.scaleData ? await blobToFloat32(row.scaleData) : undefined,
+	};
+}
+
+export function buildChunkVectorShard(
+	filePath: string,
+	chunkIds: number[],
+	vectors: StoredVector[],
+	dim: number,
+): ChunkVectorShard {
+	if (chunkIds.length !== vectors.length) {
+		throw new Error('Chunk ids and vectors length mismatch');
+	}
+	if (vectors.length === 0) {
+		throw new Error('Cannot build an empty chunk vector shard');
+	}
+
+	const precision = vectors[0].precision;
+	const chunkIdArray = Uint32Array.from(chunkIds);
+
+	if (precision === 'int8') {
+		const flat = new Int8Array(chunkIds.length * dim);
+		const scales = new Float32Array(chunkIds.length);
+		for (let i = 0; i < vectors.length; i++) {
+			const vector = vectors[i];
+			if (vector.precision !== 'int8') {
+				throw new Error('Mixed vector precisions in shard');
+			}
+			flat.set(vector.vector, i * dim);
+			scales[i] = vector.scale;
+		}
+		return {
+			filePath,
+			precision,
+			dim,
+			chunkCount: chunkIds.length,
+			chunkIds: chunkIdArray,
+			vectorData: flat,
+			scaleData: scales,
+		};
+	}
+
+	const flat = new Uint16Array(chunkIds.length * dim);
+	for (let i = 0; i < vectors.length; i++) {
+		const vector = vectors[i];
+		if (vector.precision !== 'float16') {
+			throw new Error('Mixed vector precisions in shard');
+		}
+		flat.set(vector.vector, i * dim);
+	}
+	return {
+		filePath,
+		precision,
+		dim,
+		chunkCount: chunkIds.length,
+		chunkIds: chunkIdArray,
+		vectorData: flat,
+	};
+}
+
+export function shardToChunkVectorRecords(shard: ChunkVectorShard): ChunkVectorRecord[] {
+	const records: ChunkVectorRecord[] = [];
+	if (shard.precision === 'int8') {
+		const vectorData = shard.vectorData as Int8Array;
+		const scaleData = shard.scaleData;
+		if (!scaleData || scaleData.length !== shard.chunkCount) {
+			throw new Error('Invalid int8 chunk vector shard scale data');
+		}
+		for (let i = 0; i < shard.chunkCount; i++) {
+			records.push({
+				id: shard.chunkIds[i],
+				vector: {
+					precision: 'int8',
+					vector: vectorData.subarray(i * shard.dim, (i + 1) * shard.dim),
+					scale: scaleData[i],
+				},
+			});
+		}
+		return records;
+	}
+
+	const vectorData = shard.vectorData as Uint16Array;
+	for (let i = 0; i < shard.chunkCount; i++) {
+		records.push({
+			id: shard.chunkIds[i],
+			vector: {
+				precision: 'float16',
+				vector: vectorData.subarray(i * shard.dim, (i + 1) * shard.dim),
+			},
+		});
+	}
+	return records;
+}
+
+function parseVectorPrecision(value: string): VectorPrecision {
+	return value === 'float16' ? 'float16' : 'int8';
 }
 
 const BM25_BINARY_MAGIC = Uint8Array.from([0x43, 0x53, 0x42, 0x31]);

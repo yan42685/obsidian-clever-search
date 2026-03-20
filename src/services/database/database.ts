@@ -2,7 +2,12 @@ import Dexie from "dexie";
 import type { AsPlainObject } from "minisearch";
 import type { HybridTokenRecord, OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
-import type { BlobRecord, ChunkRow, HybridDocRef } from "src/services/search/hybrid/hybrid-store";
+import type {
+	BlobRecord,
+	ChunkRow,
+	ChunkVectorShardRow,
+	HybridDocRef,
+} from "src/services/search/hybrid/hybrid-store";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
@@ -21,6 +26,12 @@ export class Database {
 			vectorF16Bytes: number;
 			metadataBytes: number;
 		};
+		hybridVectorBreakdown?: {
+			chunkIdBytes: number;
+			vectorBytes: number;
+			scaleBytes: number;
+			metadataBytes: number;
+		};
 	}> {
 		const tableEntries = [
 			{ name: "pluginSetting", table: this.db.pluginSetting },
@@ -28,6 +39,7 @@ export class Database {
 			{ name: "lexicalDocRefs", table: this.db.lexicalDocRefs },
 			{ name: "semanticDocRefs", table: this.db.semanticDocRefs },
 			{ name: "hybridChunks", table: this.db.hybridChunks },
+			{ name: "hybridChunkVectors", table: this.db.hybridChunkVectors },
 			{ name: "hybridBm25Index", table: this.db.hybridBm25Index },
 			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
 			{ name: "hybridDocRefs", table: this.db.hybridDocRefs },
@@ -45,12 +57,15 @@ export class Database {
 			}),
 		);
 		const hybridChunkRows = await this.db.hybridChunks.toArray();
+		const hybridVectorRows = await this.db.hybridChunkVectors.toArray();
 		const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(hybridChunkRows);
+		const hybridVectorBreakdown = this.estimateHybridVectorBreakdown(hybridVectorRows);
 
 		return {
 			totalBytes: tables.reduce((sum, item) => sum + item.bytes, 0),
 			tables,
 			hybridChunkBreakdown,
+			hybridVectorBreakdown,
 		};
 	}
 
@@ -64,16 +79,35 @@ export class Database {
 
 		for (const row of rows) {
 			breakdown.textBytes += estimateValueBytes(row.text);
-			breakdown.vectorBytes += row.vector?.size ?? 0;
-			breakdown.vectorF16Bytes += row.vectorF16?.size ?? 0;
 			breakdown.metadataBytes +=
 				estimateValueBytes(row.id) +
 				estimateValueBytes(row.filePath) +
+				estimateValueBytes(row.chunkIndex) +
 				estimateValueBytes(row.startLine) +
 				estimateValueBytes(row.startCol) +
-				estimateValueBytes(row.endLine) +
-				estimateValueBytes(row.scale) +
-				estimateValueBytes(row.precision);
+				estimateValueBytes(row.endLine);
+		}
+
+		return breakdown;
+	}
+
+	private estimateHybridVectorBreakdown(rows: ChunkVectorShardRow[]) {
+		const breakdown = {
+			chunkIdBytes: 0,
+			vectorBytes: 0,
+			scaleBytes: 0,
+			metadataBytes: 0,
+		};
+
+		for (const row of rows) {
+			breakdown.chunkIdBytes += row.chunkIds?.size ?? 0;
+			breakdown.vectorBytes += row.vectorData?.size ?? 0;
+			breakdown.scaleBytes += row.scaleData?.size ?? 0;
+			breakdown.metadataBytes +=
+				estimateValueBytes(row.filePath) +
+				estimateValueBytes(row.precision) +
+				estimateValueBytes(row.dim) +
+				estimateValueBytes(row.chunkCount);
 		}
 
 		return breakdown;
@@ -159,7 +193,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 6;
+	private static readonly _dbVersion = 7;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -169,6 +203,7 @@ class DexieWrapper extends Dexie {
 	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
 	// Hybrid search tables
 	hybridChunks!: Dexie.Table<ChunkRow, number>;
+	hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
 	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
 	hybridDocRefs!: Dexie.Table<HybridDocRef, string>;
@@ -204,7 +239,7 @@ class DexieWrapper extends Dexie {
 			hybridDocRefs: "path",
 			hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
 		});
-		this.version(DexieWrapper._dbVersion)
+		this.version(6)
 			.stores({
 				pluginSetting: "++id",
 				minisearch: "++id",
@@ -219,6 +254,28 @@ class DexieWrapper extends Dexie {
 			.upgrade(async (tx) => {
 				await Promise.all([
 					tx.table("hybridChunks").clear(),
+					tx.table("hybridBm25Index").clear(),
+					tx.table("hybridHnswSmall").clear(),
+					tx.table("hybridDocRefs").clear(),
+				]);
+			});
+		this.version(DexieWrapper._dbVersion)
+			.stores({
+				pluginSetting: "++id",
+				minisearch: "++id",
+				lexicalDocRefs: "++id",
+				semanticDocRefs: "++id",
+				hybridChunks: "++id, filePath",
+				hybridChunkVectors: "filePath",
+				hybridBm25Index: "id",
+				hybridHnswSmall: "id",
+				hybridDocRefs: "path",
+				hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+			})
+			.upgrade(async (tx) => {
+				await Promise.all([
+					tx.table("hybridChunks").clear(),
+					tx.table("hybridChunkVectors").clear(),
 					tx.table("hybridBm25Index").clear(),
 					tx.table("hybridHnswSmall").clear(),
 					tx.table("hybridDocRefs").clear(),
