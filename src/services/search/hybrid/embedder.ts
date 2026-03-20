@@ -104,7 +104,7 @@ export class Embedder {
 	private readonly cache = new Map<string, CacheEntry>();
 
 	private get apiKey(): string {
-		return this.setting.hybrid?.apiKey ?? '';
+		return this.setting.hybrid?.apiKey?.trim() ?? '';
 	}
 
 	private get apiDomain(): string {
@@ -184,6 +184,9 @@ export class Embedder {
 
 		if (!resp.ok) {
 			const body = await resp.text();
+			logger.error(
+				`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
+			);
 			throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
 		}
 

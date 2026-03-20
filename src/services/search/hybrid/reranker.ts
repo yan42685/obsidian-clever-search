@@ -31,7 +31,7 @@ export class HybridReranker {
 	private readonly setting = getInstance(OuterSetting);
 
 	private get apiKey(): string {
-		return this.setting.hybrid?.apiKey ?? '';
+		return this.setting.hybrid?.apiKey?.trim() ?? '';
 	}
 
 	private get apiUrl(): string {
@@ -76,6 +76,9 @@ export class HybridReranker {
 
 		if (!resp.ok) {
 			const body = await resp.text();
+			logger.error(
+				`Qwen rerank request failed: status=${resp.status}, url=${this.apiUrl}, body=${body}`,
+			);
 			throw new Error(`Qwen rerank API error ${resp.status}: ${body}`);
 		}
 
