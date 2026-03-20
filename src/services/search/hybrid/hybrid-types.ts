@@ -1,91 +1,47 @@
-// ─── Quantization ────────────────────────────────────────────────────────────
-
 export type VectorPrecision = 'int8' | 'float16';
 
-// ─── Raw types (pre-DB, used during indexing) ────────────────────────────────
-
-/** Output of chunker — not yet persisted */
-export type RawBigChunk = {
+export type RawChunk = {
 	filePath: string;
-	text: string;       // original text slice from the file
+	text: string;
 	startLine: number;
 	startCol: number;
 	endLine: number;
 };
 
-/** Output of chunker — not yet persisted */
-export type RawChunk = {
-	bigChunkIdx: number; // index into RawBigChunk[], replaced by real id after DB insert
-	text: string;
-	startOffset: number;
-	endOffset: number;
-};
-
-// ─── Persisted types ─────────────────────────────────────────────────────────
-
-/**
- * Small chunk — sliding window over a BigChunk.
- * Stores int8 vector + scale; no original text (saves space).
- */
 export type Chunk = {
 	id: number;
-	bigChunkId: number;
-	filePath: string;
-	startOffset: number;
-	endOffset: number;
-	vector: Int8Array;   // int8 quantized, length = EMBED_DIM
-	scale: number;       // max(|float32[i]|), used for dequantization
-	// float16 rescoring branch
-	vectorF16?: Uint16Array; // IEEE 754 half-precision, same length
-};
-
-/**
- * Big chunk — section-level.
- * Stores original text (for context output) + int8 vector (dual-layer).
- */
-export type BigChunk = {
-	id: number;
 	filePath: string;
 	text: string;
 	startLine: number;
 	startCol: number;
 	endLine: number;
-	chunkIds: number[];  // child small-chunk ids
 	vector: Int8Array;
 	scale: number;
 	vectorF16?: Uint16Array;
 };
 
-// ─── BM25 ─────────────────────────────────────────────────────────────────────
-
-/**
- * One entry in a BM25 posting list.
- * positions are delta-encoded uint16 (position[i] = Σ delta[0..i]).
- */
 export type BM25PostingEntry = {
-	docId: number;      // bigChunkId (uint32 range)
-	tfNorm: number;     // pre-computed tf*(k1+1)/(tf+k1*(1-b+b*dl/avgdl))
-	positions: number[]; // delta-encoded bucket positions
+	docId: number;
+	tfNorm: number;
+	positions: number[];
 };
 
 export type PostingList = {
-	entries: BM25PostingEntry[]; // sorted by docId
+	entries: BM25PostingEntry[];
 };
 
 export type BM25Index = {
 	termDict: Record<string, { termId: number; df: number }>;
-	postings: Record<number, PostingList>; // termId → PostingList
+	postings: Record<number, PostingList>;
 	docCount: number;
-	avgBigChunkLen: number;
-	docLengths: Record<number, number>; // bigChunkId → token count
+	avgDocLen: number;
+	docLengths: Record<number, number>;
 };
-
-// ─── HNSW ─────────────────────────────────────────────────────────────────────
 
 export type HnswNode = {
 	id: number;
 	level: number;
-	neighbors: number[][]; // neighbors[layer] = neighbor ids
+	neighbors: number[][];
 };
 
 export type HnswGraph = {
@@ -94,45 +50,21 @@ export type HnswGraph = {
 	nodes: Map<number, HnswNode>;
 	vectors: Map<number, Int8Array>;
 	scales: Map<number, number>;
-	// float16 rescoring branch
 	vectorsF16?: Map<number, Uint16Array>;
 	deletedSet: Set<number>;
 };
 
-// Serializable form for persistence
 export type HnswGraphData = {
 	entryPoint: number | null;
 	maxLevel: number;
 	nodes: [number, HnswNode][];
-	vectors: [number, number[]][];   // Int8Array → plain array for JSON
+	vectors: [number, number[]][];
 	scales: [number, number][];
-	vectorsF16?: [number, number[]][]; // Uint16Array → plain array
+	vectorsF16?: [number, number[]][];
 	deletedSet: number[];
 };
 
-// ─── Search results ───────────────────────────────────────────────────────────
-
-export type BigChunkMatch = {
-	bigChunkId: number;
-	filePath: string;
-	text: string;
-	startLine: number;
-	startCol: number;
-	endLine: number;
-	score: number;
-};
-
-export type HybridSearchResult = {
-	filePath: string;
-	matchedBigChunks: BigChunkMatch[];
-	totalScore: number;
-};
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 export const EMBED_DIM = 512;
-export const BIG_CHUNK_TARGET = 1000;
-export const BIG_CHUNK_MAX = BIG_CHUNK_TARGET * 1.15;
 export const SMALL_CHUNK_TARGET = 300;
 export const CHUNK_MAX_OVERFLOW_RATIO = 0.15;
 export const CHUNK_OVERLAP_MIN_RATIO = 0.14;

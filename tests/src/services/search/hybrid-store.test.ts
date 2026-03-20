@@ -22,7 +22,7 @@ describe("hybrid BM25 storage", () => {
 				},
 			},
 			docCount: 2,
-			avgBigChunkLen: 17.5,
+			avgDocLen: 17.5,
 			docLengths: {
 				10: 18,
 				20: 17,
@@ -35,29 +35,11 @@ describe("hybrid BM25 storage", () => {
 		await expect(blobToBm25(blob)).resolves.toEqual(index);
 	});
 
-	test("keeps compatibility with legacy JSON BM25 blobs", async () => {
-		const legacyIndex: BM25Index = {
-			termDict: {
-				query: { termId: 0, df: 1 },
-			},
-			postings: {
-				0: {
-					entries: [
-						{ docId: 7, tfNorm: 2, positions: [5, 3] },
-					],
-				},
-			},
-			docCount: 1,
-			avgBigChunkLen: 12,
-			docLengths: {
-				7: 12,
-			},
-		};
-
-		const blob = new Blob([JSON.stringify(legacyIndex)], {
+	test("rejects legacy JSON BM25 blobs after schema upgrade", async () => {
+		const blob = new Blob(["{\"legacy\":true}"], {
 			type: "application/json",
 		});
 
-		await expect(blobToBm25(blob)).resolves.toEqual(legacyIndex);
+		await expect(blobToBm25(blob)).rejects.toThrow("Unsupported BM25 blob format");
 	});
 });

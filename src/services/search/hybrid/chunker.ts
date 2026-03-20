@@ -1,17 +1,13 @@
 import {
-	BIG_CHUNK_MAX,
-	BIG_CHUNK_TARGET,
 	CHUNK_MAX_OVERFLOW_RATIO,
 	CHUNK_OVERLAP_MAX_RATIO,
 	CHUNK_OVERLAP_MIN_RATIO,
 	CHUNK_OVERLAP_TARGET_RATIO,
 	SMALL_CHUNK_TARGET,
-	type RawBigChunk,
 	type RawChunk,
 } from "./hybrid-types";
 
 export type ChunkerOutput = {
-	bigChunks: RawBigChunk[];
 	chunks: RawChunk[];
 };
 
@@ -447,60 +443,36 @@ export function createTokenWindows(
 	return createChunkRanges(text, targetTokens, maxTokens);
 }
 
-/**
- * Sliding-window small chunks over a big chunk's text.
- * Target ~SMALL_CHUNK_TARGET tokens, overlap ~16% with sentence/newline boundaries.
- */
 function makeSmallChunks(
-	bigChunkIdx: number,
+	filePath: string,
 	text: string,
+	lineOffsets: number[],
 ): RawChunk[] {
 	return createChunkRanges(
 		text,
 		SMALL_CHUNK_TARGET,
 		SMALL_CHUNK_TARGET * (1 + CHUNK_MAX_OVERFLOW_RATIO),
 	)
-		.map((range) => ({
-			bigChunkIdx,
-			text: text.slice(range.startOffset, range.endOffset),
-			startOffset: range.startOffset,
-			endOffset: range.endOffset,
-		}))
+		.map((range) => {
+			const startLine = offsetToLine(lineOffsets, range.startOffset);
+			const lastOffset = Math.max(range.startOffset, range.endOffset - 1);
+			const endLine = offsetToLine(lineOffsets, lastOffset);
+			const startCol = range.startOffset - (lineOffsets[startLine] ?? 0);
+
+			return {
+				filePath,
+				text: text.slice(range.startOffset, range.endOffset),
+				startLine,
+				startCol,
+				endLine,
+			} as RawChunk;
+		})
 		.filter((chunk) => chunk.text.trim().length > 0);
 }
 
-/**
- * Main entry point.
- * @param filePath  vault-relative file path (stored in BigChunk for retrieval)
- * @param plainText plain text content of the file (Markdown OK)
- */
 export function chunkFile(filePath: string, plainText: string): ChunkerOutput {
 	const lineOffsets = buildLineOffsets(plainText);
-	const segments = createChunkRanges(plainText, BIG_CHUNK_TARGET, BIG_CHUNK_MAX);
-
-	const bigChunks: RawBigChunk[] = [];
-	const chunks: RawChunk[] = [];
-
-	for (let i = 0; i < segments.length; i++) {
-		const seg = segments[i];
-		const startLine = offsetToLine(lineOffsets, seg.startOffset);
-		const lastOffset = Math.max(seg.startOffset, seg.endOffset - 1);
-		const endLine = offsetToLine(lineOffsets, lastOffset);
-		const startCol = seg.startOffset - (lineOffsets[startLine] ?? 0);
-		const text = plainText.slice(seg.startOffset, seg.endOffset);
-		if (!text.trim()) continue;
-
-		bigChunks.push({
-			filePath,
-			text,
-			startLine,
-			startCol,
-			endLine,
-		});
-
-		const smallChunks = makeSmallChunks(bigChunks.length - 1, text);
-		for (const sc of smallChunks) chunks.push(sc);
-	}
-
-	return { bigChunks, chunks };
+	return {
+		chunks: makeSmallChunks(filePath, plainText, lineOffsets),
+	};
 }

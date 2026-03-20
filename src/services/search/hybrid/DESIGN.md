@@ -1,185 +1,340 @@
 # Hybrid Search 设计文档
 
-## 背景与目标
+## 目标
+当前 hybrid 搜索已经收敛为一条“小块优先”的本地检索链路：
 
-在原有 Lexical（BM25 via MiniSearch）和 Semantic（外部 AI helper）之外，新增一条完全内置的 hybrid 搜索路径：
-- 不依赖外部 AI helper 进程
-- 直接调用 OpenAI Embedding API（text-embedding-3-small, dim=512）
-- BM25 + 双层向量（小块 + 大块）三路 RRF 融合
-- 无 API key 时自动降级到纯 BM25
+- 只保留小块索引，不再维护大块索引
+- 小块直接存储原文、起始行列和向量
+- 本地召回使用 `BM25 + dense HNSW`
+- 双路召回去重后，直接送 `qwen3-rerank`
+- 最终结果按文件聚合，但排序基础仍然是小块
 
----
+这版设计的重点不是做一个“通用检索框架”，而是在 Obsidian 插件场景里尽量用更低的复杂度换取：
 
-## 用户决策（已确认）
-
-| 项目 | 决策 |
-|------|------|
-| 向量精度主路径 | int8 量化 |
-| Rescoring 分支 | float16（留口子，可切换） |
-| BM25 proximity | 要，存 delta 编码 positions |
-| 向量层 | 小块 + 大块双层 |
-| Web Worker | 暂不用 |
-| Embedding 模型 | OpenAI text-embedding-3-small, dimensions=512 |
+- 可接受的本地搜索速度
+- 可控的索引体积
+- 对精确关键词和语义相关都还不错的召回
+- 结构尽量简单，便于继续迭代
 
 ---
 
-## 模块结构（7 个文件）
+## 当前架构
 
-```
+目录结构：
+
+```text
 src/services/search/hybrid/
-├── hybrid-types.ts    — 所有类型定义 + 常量
-├── chunker.ts         — 文本切块（大块 + 小块）
-├── embedder.ts        — OpenAI 嵌入 + int8/float16 量化 + LRU 缓存
-├── bm25.ts            — 内存 BM25 倒排索引
-├── hnsw.ts            — HNSW 向量图（纯 TS 实现）
-├── hybrid-store.ts    — Dexie 行类型 + Blob 序列化工具
-└── hybrid-engine.ts   — 对外入口：indexFile / deleteFile / search
+├── hybrid-types.ts
+├── chunker.ts
+├── embedder.ts
+├── bm25.ts
+├── hnsw.ts
+├── hybrid-store.ts
+├── reranker.ts
+└── hybrid-engine.ts
 ```
 
----
+各模块职责：
 
-## chunker.ts
-
-**输入:** `filePath + plainText`
-**输出:** `{ bigChunks: RawBigChunk[], chunks: RawChunk[] }`
-
-### 大块（BigChunk）切分策略
-1. 按 ATX 标题（`#` / `##` / `###`）分 section
-2. section 内按空行（`\n\n`）进一步分段落
-3. 段落合并：目标 500 chars，超过时 flush
-4. 超长段落（> 900 chars）：在句号 / 换行处切断
-5. 每个大块保留所属标题作为 prefix（提升 BM25 权重）
-
-### 小块（Chunk）切分策略
-- 对每个大块做滑动窗口：目标 150 chars，overlap 30 chars
-- 记录 `bigChunkIdx`（临时索引，入库后换成真实 id）
-
-### 行号映射
-- 预构建 `lineOffsets[]`（每行起始 char offset）
-- 二分查找 offset → line number，O(log n)
-
----
-
-## embedder.ts
-
-- 批量调用 OpenAI API，batch size = 100
-- 返回 float32[]，已 L2 归一化
-- **int8 量化:** `scale = max(|v[i]|)`，`int8[i] = round(v[i] / scale * 127)`
-- **float16 量化:** 手动 IEEE 754 half-precision 转换，存 `Uint16Array`
-- **Query LRU 缓存:** `Map<string, {vec, scale, ts}>`，50 条，TTL 10 min
-- 无 API key → 抛 `NoApiKeyError`，hybrid-engine 捕获后降级到纯 BM25
+- `chunker.ts`
+  - 把文件切成约 `300 token` 的小块
+  - 小块带 overlap
+  - 直接产出小块文本和起始行列信息
+- `embedder.ts`
+  - 调用千问 embedding API
+  - 负责 token 预算检查与记账
+  - 向量量化为 `int8` 或 `float16`
+- `bm25.ts`
+  - 本地 BM25 倒排索引
+  - 保留 token 顺序与重复
+  - 额外保存“位置桶”以支持近似 proximity bonus
+- `hnsw.ts`
+  - 本地 dense 向量 ANN 检索
+  - 当前只维护小块 HNSW
+- `hybrid-store.ts`
+  - Dexie 行类型
+  - BM25/HNSW 的 Blob 序列化与反序列化
+- `reranker.ts`
+  - 调用 `qwen3-rerank`
+  - 搜索阶段 token 用量计入每周限额
+- `hybrid-engine.ts`
+  - 对外入口：索引、删除、加载、搜索
 
 ---
 
-## bm25.ts
+## 小块切分
 
-### 数据结构（全内存）
-```
-termDict:    Map<string, {termId, df}>
-postings:    Map<termId, PostingList>   // 按 docId 排序
-docLengths:  Map<bigChunkId, number>
-docCount:    number
-avgBigChunkLen: number
-```
+当前不再有“大块 -> 小块”的两级结构。
 
-### 索引时
-- 复用现有 `Tokenizer.tokenize()`
-- 预计算 `tf_norm = tf*(k1+1) / (tf + k1*(1 - b + b*dl/avgdl))`，k1=1.5，b=0.75
-- positions 存 delta 编码 uint16[]
+`chunkFile(filePath, plainText)` 直接返回：
 
-### 搜索时
-- `score = Σ tf_norm * ln((N - df + 0.5) / (df + 0.5) + 1)`
-- **Proximity bonus:** 找多 term 最小 span → `+200 / (span + 1)`（滑动窗口算法）
-
-### 持久化
-- 整个索引 JSON → Blob → IndexedDB 单条记录（`hybridBm25Index` 表，id=0）
-
----
-
-## hnsw.ts
-
-**参数:** M=16, efConstruction=100, ef=40
-
-### 距离函数
-```
-dot = Σ a[i] * b[i]          // int32 累加，防溢出
-sim = dot / (scaleA * scaleB * 127²)   // 近似余弦相似度
-dist = 1 - sim
-```
-
-### 核心操作
-- `insert(id, int8Vec, scale, vecF16?)` — 随机层级，逐层建邻居
-- `search(queryVec, queryScale, topK, ef)` — 贪心下降 + 候选集扩展
-- `delete(id)` — lazy deletion，记录 `deletedSet`
-- `needsRebuild()` — `deletedSet.size > nodes.size * 0.2` 时触发重建
-- `rebuild()` — 过滤已删节点，重新 insert
-
-### float16 Rescoring 分支
-- `precision='float16'` 时，search 先取 top-50，再用 float16 向量精确重排
-
-### 持久化
-- 序列化为 plain object（Map → Array）→ JSON → Blob
-
----
-
-## hybrid-store.ts
-
-扩展 `DexieWrapper`，版本 2 → 3，新增 6 张表：
-
-| 表名 | 用途 |
-|------|------|
-| `hybridChunks` | 小块：id, bigChunkId, filePath, vector(Blob), scale, precision |
-| `hybridBigChunks` | 大块：id, filePath, text, startLine, endLine, chunkIds(JSON), vector?, scale? |
-| `hybridBm25Index` | BM25 整体序列化，id=0 单条 |
-| `hybridHnswSmall` | 小块 HNSW 图序列化，id=0 单条 |
-| `hybridHnswBig` | 大块 HNSW 图序列化，id=0 单条 |
-| `hybridDocRefs` | 增量更新用，path + updateTime |
-
----
-
-## hybrid-engine.ts
-
-### 对外接口
 ```ts
-indexFile(filePath, plainText)  // 切块 → embed → 建索引 → 持久化
-deleteFile(filePath)            // 删除该文件所有数据，更新内存索引
-search(query, topK=20)          // 三路 RRF → FileItem[]
-isReady()                       // DB 加载完成
-canSearch()                     // false 时降级纯 BM25
+type ChunkerOutput = {
+  chunks: RawChunk[];
+};
 ```
 
-### 搜索流程（三路 RRF）
-```
-1. embed(query) → queryVec（带 LRU 缓存）
-2. hnswSmall.search → [{chunkId, score}]
-   → rollup by bigChunkId（取 maxScore）
-3. hnswBig.search → [{bigChunkId, score}]
-4. bm25.search → [{bigChunkId, score}]
-5. RRF(k=60):
-   score = 1/(60+rank_vec_small)
-         + 0.7/(60+rank_vec_big)   ← 大块语义更模糊，权重略低
-         + 1/(60+rank_bm25)
-6. 按 filePath 聚合，取每文件 top bigChunks
-7. 返回 FileItem[]（复用现有类型）
+`RawChunk` 包含：
+
+```ts
+type RawChunk = {
+  filePath: string;
+  text: string;
+  startLine: number;
+  startCol: number;
+  endLine: number;
+};
 ```
 
-### 降级策略
-- `NoApiKeyError` → `_canSearch = false` → 只走 BM25
-- 任何 embed 失败 → 同上，不影响 BM25 结果
+切分策略：
+
+- 目标大小：`SMALL_CHUNK_TARGET = 300 token`
+- 允许少量超出：`CHUNK_MAX_OVERFLOW_RATIO = 0.15`
+- 保留 overlap：
+  - `CHUNK_OVERLAP_MIN_RATIO = 0.14`
+  - `CHUNK_OVERLAP_TARGET_RATIO = 0.16`
+  - `CHUNK_OVERLAP_MAX_RATIO = 0.18`
+- 尽量在句号、问号、感叹号、换行等边界附近切开
+
+设计原因：
+
+- 直接用小块就足够支撑当前 rerank 方案
+- 去掉大块后，索引结构、持久化和搜索逻辑都明显更简单
+- 小块直接存原文后，不再需要依赖大块做文本恢复
 
 ---
 
-## 接入现有代码
+## 小块持久化
 
-| 复用点 | 用途 |
-|--------|------|
-| `Tokenizer.tokenize()` | BM25 分词 |
-| `FileItem / FileSubItem` | 搜索结果类型 |
-| `DexieWrapper` | 存储（版本升级） |
-| `getInstance / monitorDecorator` | DI + 性能监控 |
-| `OuterSetting.apiProvider1.key` | OpenAI API key 读取 |
-| `DataProvider.readPlainText()` | 文件内容读取 |
-| `DataManager.docOperationsHandler` | 文件增删时同步更新 hybrid 索引 |
-| `SearchService` | 暴露 `hybridEngine` 实例 + `searchInVaultHybrid()` |
-| `MountedModal.svelte` | `isHybrid` prop 触发 hybrid 搜索路径 |
-| `CommandRegistry.addDevCommands()` | dev 模式下注册 "Hybrid search" 命令 |
+当前 `Chunk` 结构：
+
+```ts
+type Chunk = {
+  id: number;
+  filePath: string;
+  text: string;
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  vector: Int8Array;
+  scale: number;
+  vectorF16?: Uint16Array;
+};
+```
+
+对应 Dexie 行：
+
+```ts
+type ChunkRow = {
+  id?: number;
+  filePath: string;
+  text: string;
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  vector: Blob;
+  scale: number;
+  precision: string;
+  vectorF16?: Blob;
+};
+```
+
+当前权衡：
+
+- 优点：
+  - 搜索结果展示直接用小块原文
+  - 不需要依赖大块或回源文件做二次展开
+  - 删除大块后整条链路更干净
+- 代价：
+  - overlap 会导致部分文本重复存储
+  - 但在当前版本里，这比继续维护一套大块结构更划算
+
+---
+
+## BM25 设计
+
+### 基本思路
+
+BM25 现在是小块级索引，一条小块就是一条 BM25 文档。
+
+`addDocument(docId, text)` 时：
+
+- 使用 `Tokenizer.tokenizeSequence()` 获取“保序且不去重”的 token 序列
+- 这样 `tf`、`dl` 和 proximity 才有实际意义
+
+### 词距信息
+
+当前没有保存“精确 token 位置”，而是保存“位置桶”：
+
+- `BM25_POSITION_BUCKET_SIZE = 4`
+- 每 4 个 token 一个桶
+- 每个 term 最多保留 `8` 个位置桶
+
+这样做的目的：
+
+- 保留近似 proximity 能力
+- 显著降低 posting 体积
+
+### proximity bonus
+
+搜索时，如果 query 至少有两个词：
+
+- 汇总各词在文档里的位置桶
+- 计算覆盖所有 query term 的最小 span
+- 转回近似 token 距离
+- 加一个 bonus：
+
+```ts
+bonus = 200 / (approxTokenSpan + 1)
+```
+
+它的作用是：
+
+- query 词彼此更靠近的小块，排位更前
+
+### 持久化
+
+BM25 不再使用 JSON 持久化。
+
+当前做法：
+
+- 二进制编码后存入 `hybridBm25Index`
+- 只支持当前二进制格式
+- 旧 JSON BM25 通过数据库版本升级自动失效并重建
+
+这样做的原因：
+
+- JSON 体积太大
+- `number[]` + 对象层级的存储开销太高
+
+---
+
+## Dense HNSW 设计
+
+当前只保留小块 HNSW。
+
+参数：
+
+- `M = 16`
+- `efConstruction = 100`
+- 搜索 `ef = 40`
+
+向量精度：
+
+- 默认 `int8`
+- 可切换 `float16`
+
+当前用途：
+
+- 从语义角度召回 topK 小块
+- 不再维护大块级 dense 索引
+
+---
+
+## 搜索流程
+
+`HybridEngine.search(query, topK=20)` 的当前流程：
+
+1. BM25 召回小块 `top25`
+2. 如果语义可用：
+   - query embedding
+   - HNSW dense 召回小块 `top25`
+3. 双路结果按小块 `id` 去重
+4. 去重后的小块直接送 `qwen3-rerank`
+5. rerank 结果按分数降序
+6. 按文件聚合：
+   - 文件顺序由该文件最高分小块决定
+   - 文件内 subitems 按小块分数顺序排列
+
+当前不再做：
+
+- 大块排序
+- RRF 融合
+- 大块展开后再取小块
+
+---
+
+## rerank 设计
+
+当前使用：
+
+- 模型：`qwen3-rerank`
+- instruct：`Retrieve semantically similar text.`
+
+输入：
+
+- query
+- 去重后的小块原文列表
+
+输出：
+
+- rerank score
+
+展示层：
+
+- `subitem.score` 显示 rerank 分数
+- 保留 3 位小数
+- 直接显示原始小块全文
+
+---
+
+## 降级策略
+
+### 索引阶段
+
+如果 embedding 失败：
+
+- 当前文件退回 BM25-only 建索引
+- 记录 fallback notice
+
+### 搜索阶段
+
+如果 query embedding 失败：
+
+- 只用 BM25 候选做 rerank
+
+如果 rerank 失败：
+
+- 直接按召回阶段顺序回退
+
+---
+
+## 数据库版本
+
+当前数据库版本：`6`
+
+升级目的：
+
+- 移除大块表与大块 HNSW
+- 移除旧 BM25 JSON 兼容
+- 统一切到“小块直存原文”的结构
+
+升级后会清空 hybrid 相关索引并自动重建。
+
+---
+
+## 当前已知取舍
+
+### 优势
+
+- 结构明显比“大块 + 小块双层”简单
+- 结果展示更直接
+- 小块已经足够支撑当前 rerank 实验方案
+- BM25 体积比旧版下降很多，同时保留近似词距
+
+### 局限
+
+- 小块原文直存仍然会有 overlap 带来的重复文本
+- BM25 的 proximity 现在是近似词距，不是精确词位
+- 最终整体延迟在很多场景下仍会被远端 rerank 主导
+
+---
+
+## 后续可能方向
+
+值得继续观察的方向：
+
+- BM25 体积和召回质量的平衡是否已经足够
+- 是否还需要进一步减少 chunk overlap
+- 是否要为 hybrid 搜索加入更细的触发策略
+- 是否需要把 storage stats 和查询统计做成开发命令

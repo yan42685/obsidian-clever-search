@@ -1,34 +1,20 @@
-import type { BM25Index, BigChunk, Chunk, HnswGraphData } from './hybrid-types';
-
-// ─── Row types for Dexie tables ───────────────────────────────────────────────
+import type { BM25Index, Chunk, HnswGraphData } from './hybrid-types';
 
 export type ChunkRow = {
-	id?: number;
-	bigChunkId: number;
-	filePath: string;
-	startOffset?: number;
-	endOffset?: number;
-	vector: Blob;       // Int8Array serialized
-	scale: number;
-	precision: string;  // 'int8' | 'float16'
-	vectorF16?: Blob;   // Uint16Array serialized, only when precision='float16'
-};
-
-export type BigChunkRow = {
 	id?: number;
 	filePath: string;
 	text: string;
 	startLine: number;
 	startCol: number;
 	endLine: number;
-	chunkIds: string;   // JSON array of chunk ids
-	vector?: Blob;
-	scale?: number;
+	vector: Blob;
+	scale: number;
+	precision: string;
 	vectorF16?: Blob;
 };
 
 export type BlobRecord = {
-	id: number;         // always 0 (single-record tables)
+	id: number;
 	data: Blob;
 };
 
@@ -36,8 +22,6 @@ export type HybridDocRef = {
 	path: string;
 	updateTime: number;
 };
-
-// ─── Serialization helpers ────────────────────────────────────────────────────
 
 export function int8ToBlob(arr: Int8Array): Blob {
 	return new Blob([arr.buffer]);
@@ -68,7 +52,7 @@ export function bm25ToBlob(index: BM25Index): Blob {
 
 	chunks.push(BM25_BINARY_MAGIC);
 	chunks.push(writeUint32(index.docCount));
-	chunks.push(writeFloat32(index.avgBigChunkLen));
+	chunks.push(writeFloat32(index.avgDocLen));
 
 	chunks.push(writeUint32(termEntries.length));
 	for (const [term, entry] of termEntries) {
@@ -105,14 +89,14 @@ export function bm25ToBlob(index: BM25Index): Blob {
 export async function blobToBm25(blob: Blob): Promise<BM25Index> {
 	const buf = await readBlobAsArrayBuffer(blob);
 	if (!isBm25Binary(buf)) {
-		return JSON.parse(await readBlobAsText(blob)) as BM25Index;
+		throw new Error('Unsupported BM25 blob format');
 	}
 
 	const reader = new BinaryReader(buf);
 	reader.skip(BM25_BINARY_MAGIC.length);
 
 	const docCount = reader.readUint32();
-	const avgBigChunkLen = reader.readFloat32();
+	const avgDocLen = reader.readFloat32();
 
 	const termCount = reader.readUint32();
 	const termDict: BM25Index['termDict'] = {};
@@ -152,7 +136,7 @@ export async function blobToBm25(blob: Blob): Promise<BM25Index> {
 		termDict,
 		postings,
 		docCount,
-		avgBigChunkLen,
+		avgDocLen,
 		docLengths,
 	};
 }
@@ -165,45 +149,13 @@ export async function blobToHnsw(blob: Blob): Promise<HnswGraphData> {
 	return JSON.parse(await readBlobAsText(blob)) as HnswGraphData;
 }
 
-// ─── BigChunk ↔ Row conversion ────────────────────────────────────────────────
-
-export function bigChunkToRow(bc: Omit<BigChunk, 'id'> & { id?: number }): BigChunkRow {
-	const row: BigChunkRow = {
-		filePath: bc.filePath,
-		text: bc.text,
-		startLine: bc.startLine,
-		startCol: bc.startCol,
-		endLine: bc.endLine,
-		chunkIds: JSON.stringify(bc.chunkIds),
-		vector: bc.vector ? int8ToBlob(bc.vector) : undefined,
-		scale: bc.scale,
-		vectorF16: bc.vectorF16 ? uint16ToBlob(bc.vectorF16) : undefined,
-	};
-	if (bc.id !== undefined) row.id = bc.id;
-	return row;
-}
-
-export async function rowToBigChunk(row: BigChunkRow): Promise<BigChunk> {
-	return {
-		id: row.id!,
-		filePath: row.filePath,
-		text: row.text,
-		startLine: row.startLine,
-		startCol: row.startCol ?? 0,
-		endLine: row.endLine,
-		chunkIds: JSON.parse(row.chunkIds) as number[],
-		vector: row.vector ? await blobToInt8(row.vector) : new Int8Array(0),
-		scale: row.scale ?? 1,
-		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,
-	};
-}
-
 export function chunkToRow(c: Omit<Chunk, 'id'> & { id?: number }): ChunkRow {
 	const row: ChunkRow = {
-		bigChunkId: c.bigChunkId,
 		filePath: c.filePath,
-		startOffset: c.startOffset,
-		endOffset: c.endOffset,
+		text: c.text,
+		startLine: c.startLine,
+		startCol: c.startCol,
+		endLine: c.endLine,
 		vector: int8ToBlob(c.vector),
 		scale: c.scale,
 		precision: c.vectorF16 ? 'float16' : 'int8',
@@ -216,17 +168,18 @@ export function chunkToRow(c: Omit<Chunk, 'id'> & { id?: number }): ChunkRow {
 export async function rowToChunk(row: ChunkRow): Promise<Chunk> {
 	return {
 		id: row.id!,
-		bigChunkId: row.bigChunkId,
 		filePath: row.filePath,
-		startOffset: row.startOffset ?? 0,
-		endOffset: row.endOffset ?? 0,
+		text: row.text,
+		startLine: row.startLine,
+		startCol: row.startCol ?? 0,
+		endLine: row.endLine,
 		vector: await blobToInt8(row.vector),
 		scale: row.scale,
 		vectorF16: row.vectorF16 ? await blobToUint16(row.vectorF16) : undefined,
 	};
 }
 
-const BM25_BINARY_MAGIC = Uint8Array.from([0x43, 0x53, 0x42, 0x31]); // CSB1
+const BM25_BINARY_MAGIC = Uint8Array.from([0x43, 0x53, 0x42, 0x31]);
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -310,24 +263,24 @@ class BinaryReader {
 }
 
 async function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-	if (typeof blob.arrayBuffer === "function") {
+	if (typeof blob.arrayBuffer === 'function') {
 		return blob.arrayBuffer();
 	}
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
-		reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob as ArrayBuffer"));
+		reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob as ArrayBuffer'));
 		reader.onload = () => resolve(reader.result as ArrayBuffer);
 		reader.readAsArrayBuffer(blob);
 	});
 }
 
 async function readBlobAsText(blob: Blob): Promise<string> {
-	if (typeof blob.text === "function") {
+	if (typeof blob.text === 'function') {
 		return blob.text();
 	}
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
-		reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob as text"));
+		reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob as text'));
 		reader.onload = () => resolve(reader.result as string);
 		reader.readAsText(blob);
 	});

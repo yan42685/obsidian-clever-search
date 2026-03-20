@@ -1,8 +1,4 @@
-import {
-	BIG_CHUNK_MAX,
-	BIG_CHUNK_TARGET,
-	SMALL_CHUNK_TARGET,
-} from "src/services/search/hybrid/hybrid-types";
+import { SMALL_CHUNK_TARGET } from "src/services/search/hybrid/hybrid-types";
 import {
 	chunkFile,
 	estimateTokenCount,
@@ -33,36 +29,7 @@ describe("hybrid chunker", () => {
 		expect(estimateTokenCount("A B C D")).toBeCloseTo(1, 5);
 	});
 
-	test("builds token-based big chunks with overlap and start column tracking", () => {
-		const text = buildLongSingleLineText(240);
-		const { bigChunks } = chunkFile("demo.md", text);
-
-		expect(bigChunks.length).toBeGreaterThan(1);
-		expect(estimateTokenCount(bigChunks[0].text)).toBeLessThanOrEqual(
-			BIG_CHUNK_MAX + 1,
-		);
-		expect(bigChunks[1].startLine).toBe(0);
-		expect(bigChunks[1].startCol).toBeGreaterThan(0);
-
-		const overlapText = sharedOverlapText(
-			bigChunks[0].text,
-			bigChunks[1].text,
-		);
-		const overlapTokens = estimateTokenCount(overlapText);
-		const overlapRatio = overlapTokens / BIG_CHUNK_TARGET;
-		expect(overlapRatio).toBeGreaterThanOrEqual(0.12);
-		expect(overlapRatio).toBeLessThanOrEqual(0.2);
-
-		const firstChunkLine = bigChunks[1].text.split("\n")[0];
-		expect(
-			text.slice(
-				bigChunks[1].startCol,
-				bigChunks[1].startCol + firstChunkLine.length,
-			),
-		).toBe(firstChunkLine);
-	});
-
-	test("builds small chunks with sentence-aware overlap inside each big chunk", () => {
+	test("builds small chunks with sentence-aware overlap and start column tracking", () => {
 		const text = buildLongSingleLineText(240);
 		const { chunks } = chunkFile("demo.md", text);
 
@@ -77,5 +44,15 @@ describe("hybrid chunker", () => {
 		expect(overlapRatio).toBeGreaterThanOrEqual(0.12);
 		expect(overlapRatio).toBeLessThanOrEqual(0.2);
 		expect(/[.\n]\s*$/.test(chunks[0].text)).toBe(true);
+		expect(chunks[1].startLine).toBe(0);
+		expect(chunks[1].startCol).toBeGreaterThan(0);
+
+		const firstChunkLine = chunks[1].text.split("\n")[0];
+		expect(
+			text.slice(
+				chunks[1].startCol,
+				chunks[1].startCol + firstChunkLine.length,
+			),
+		).toBe(firstChunkLine);
 	});
 });

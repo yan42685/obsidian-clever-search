@@ -504,12 +504,8 @@ export class DataManager {
 
 		const miniSearchBytes = bytesByName.get("minisearch") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
-		const hnswBytes =
-			(bytesByName.get("hybridHnswSmall") ?? 0) +
-			(bytesByName.get("hybridHnswBig") ?? 0);
-		const chunkStoreBytes =
-			(bytesByName.get("hybridChunks") ?? 0) +
-			(bytesByName.get("hybridBigChunks") ?? 0);
+		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
+		const chunkStoreBytes = bytesByName.get("hybridChunks") ?? 0;
 		const otherBytes = Math.max(
 			0,
 			storageUsage.totalBytes -

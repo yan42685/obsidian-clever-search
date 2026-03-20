@@ -2,7 +2,7 @@ import Dexie from "dexie";
 import type { AsPlainObject } from "minisearch";
 import type { HybridTokenRecord, OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
-import type { BigChunkRow, BlobRecord, ChunkRow, HybridDocRef } from "src/services/search/hybrid/hybrid-store";
+import type { BlobRecord, ChunkRow, HybridDocRef } from "src/services/search/hybrid/hybrid-store";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
@@ -22,10 +22,8 @@ export class Database {
 			{ name: "lexicalDocRefs", table: this.db.lexicalDocRefs },
 			{ name: "semanticDocRefs", table: this.db.semanticDocRefs },
 			{ name: "hybridChunks", table: this.db.hybridChunks },
-			{ name: "hybridBigChunks", table: this.db.hybridBigChunks },
 			{ name: "hybridBm25Index", table: this.db.hybridBm25Index },
 			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
-			{ name: "hybridHnswBig", table: this.db.hybridHnswBig },
 			{ name: "hybridDocRefs", table: this.db.hybridDocRefs },
 			{ name: "hybridTokenStats", table: this.db.hybridTokenStats },
 		] as const;
@@ -127,7 +125,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 5;
+	private static readonly _dbVersion = 6;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -135,14 +133,11 @@ class DexieWrapper extends Dexie {
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	lexicalDocRefs!: Dexie.Table<DocumentRef, number>;
 	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
-	// Hybrid search tables (v3)
+	// Hybrid search tables
 	hybridChunks!: Dexie.Table<ChunkRow, number>;
-	hybridBigChunks!: Dexie.Table<BigChunkRow, number>;
 	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
-	hybridHnswBig!: Dexie.Table<BlobRecord, number>;
 	hybridDocRefs!: Dexie.Table<HybridDocRef, string>;
-	// Token stats (v4)
 	hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {
@@ -160,10 +155,8 @@ class DexieWrapper extends Dexie {
 			lexicalDocRefs: "++id",
 			semanticDocRefs: "++id",
 			hybridChunks: "++id, bigChunkId, filePath",
-			hybridBigChunks: "++id, filePath",
 			hybridBm25Index: "id",
 			hybridHnswSmall: "id",
-			hybridHnswBig: "id",
 			hybridDocRefs: "path",
 		});
 		this.version(4).stores({
@@ -172,10 +165,8 @@ class DexieWrapper extends Dexie {
 			lexicalDocRefs: "++id",
 			semanticDocRefs: "++id",
 			hybridChunks: "++id, bigChunkId, filePath",
-			hybridBigChunks: "++id, filePath",
 			hybridBm25Index: "id",
 			hybridHnswSmall: "id",
-			hybridHnswBig: "id",
 			hybridDocRefs: "path",
 			hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
 		});
@@ -185,21 +176,17 @@ class DexieWrapper extends Dexie {
 				minisearch: "++id",
 				lexicalDocRefs: "++id",
 				semanticDocRefs: "++id",
-				hybridChunks: "++id, bigChunkId, filePath",
-				hybridBigChunks: "++id, filePath",
+				hybridChunks: "++id, filePath",
 				hybridBm25Index: "id",
 				hybridHnswSmall: "id",
-				hybridHnswBig: "id",
 				hybridDocRefs: "path",
 				hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
 			})
 			.upgrade(async (tx) => {
 				await Promise.all([
 					tx.table("hybridChunks").clear(),
-					tx.table("hybridBigChunks").clear(),
 					tx.table("hybridBm25Index").clear(),
 					tx.table("hybridHnswSmall").clear(),
-					tx.table("hybridHnswBig").clear(),
 					tx.table("hybridDocRefs").clear(),
 				]);
 			});
