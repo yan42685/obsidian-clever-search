@@ -20,11 +20,19 @@ type ChunkRange = {
 	endOffset: number;
 };
 
+type TokenCheckpointLookup = {
+	textLength: number;
+	checkpointStride: number;
+	checkpoints: Uint32Array;
+	totalUnits: number;
+};
+
 const TOKEN_UNIT_SCALE = 20;
 const TOKEN_UNITS_WIDE = 13; // 0.65
 const TOKEN_UNITS_ASCII = 5; // 0.25
 const TOKEN_UNITS_ASCII_STRUCTURAL = 7; // 0.35
 const TOKEN_UNITS_UNICODE_OTHER = 8; // 0.4
+const TOKEN_CHECKPOINT_STRIDE = 1024;
 
 const SENTENCE_BOUNDARY_CHARS = new Set(["\u3002", "\uff01", "\uff1f", ".", "!", "?"]);
 const CLOSING_BOUNDARY_CHARS = new Set([
@@ -121,20 +129,100 @@ function charTokenUnits(code: number): number {
 	return TOKEN_UNITS_UNICODE_OTHER;
 }
 
-function buildTokenPrefix(text: string): Uint32Array {
-	const prefix = new Uint32Array(text.length + 1);
+function buildTokenCheckpoints(text: string): TokenCheckpointLookup {
+	const checkpointCount =
+		Math.floor(text.length / TOKEN_CHECKPOINT_STRIDE) + 1;
+	const checkpoints = new Uint32Array(checkpointCount + 1);
+	let totalUnits = 0;
+
 	for (let i = 0; i < text.length; i++) {
-		prefix[i + 1] = prefix[i] + charTokenUnits(text.charCodeAt(i));
+		totalUnits += charTokenUnits(text.charCodeAt(i));
+		if ((i + 1) % TOKEN_CHECKPOINT_STRIDE === 0) {
+			checkpoints[(i + 1) / TOKEN_CHECKPOINT_STRIDE] = totalUnits;
+		}
 	}
-	return prefix;
+
+	checkpoints[checkpointCount] = totalUnits;
+	return {
+		textLength: text.length,
+		checkpointStride: TOKEN_CHECKPOINT_STRIDE,
+		checkpoints,
+		totalUnits,
+	};
+}
+
+function tokenUnitsAtOffset(
+	text: string,
+	lookup: TokenCheckpointLookup,
+	offset: number,
+): number {
+	const clampedOffset = Math.max(0, Math.min(offset, lookup.textLength));
+	const blockIndex = Math.floor(clampedOffset / lookup.checkpointStride);
+	let units = lookup.checkpoints[blockIndex];
+	const blockStart = blockIndex * lookup.checkpointStride;
+
+	for (let i = blockStart; i < clampedOffset; i++) {
+		units += charTokenUnits(text.charCodeAt(i));
+	}
+
+	return units;
+}
+
+function findCheckpointIndexForUnits(
+	checkpoints: Uint32Array,
+	targetUnits: number,
+): number {
+	let lo = 0;
+	let hi = checkpoints.length - 1;
+	while (lo < hi) {
+		const mid = (lo + hi) >> 1;
+		if (checkpoints[mid] < targetUnits) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
+function offsetForAbsoluteUnits(
+	text: string,
+	lookup: TokenCheckpointLookup,
+	targetUnits: number,
+): number {
+	if (targetUnits <= 0) {
+		return 0;
+	}
+	if (targetUnits >= lookup.totalUnits) {
+		return lookup.textLength;
+	}
+
+	const checkpointIndex = findCheckpointIndexForUnits(
+		lookup.checkpoints,
+		targetUnits,
+	);
+	if (lookup.checkpoints[checkpointIndex] === targetUnits) {
+		return Math.min(
+			checkpointIndex * lookup.checkpointStride,
+			lookup.textLength,
+		);
+	}
+
+	const blockIndex = Math.max(0, checkpointIndex - 1);
+	let offset = blockIndex * lookup.checkpointStride;
+	let units = lookup.checkpoints[blockIndex];
+
+	while (offset < lookup.textLength && units < targetUnits) {
+		units += charTokenUnits(text.charCodeAt(offset));
+		offset++;
+	}
+
+	return offset;
 }
 
 export function estimateTokenCount(text: string): number {
-	if (text.length === 0) {
-		return 0;
+	let totalUnits = 0;
+	for (let i = 0; i < text.length; i++) {
+		totalUnits += charTokenUnits(text.charCodeAt(i));
 	}
-	const prefix = buildTokenPrefix(text);
-	return prefix[prefix.length - 1] / TOKEN_UNIT_SCALE;
+	return totalUnits / TOKEN_UNIT_SCALE;
 }
 
 function buildPreferredBoundaries(text: string): number[] {
@@ -164,7 +252,7 @@ function buildPreferredBoundaries(text: string): number[] {
 }
 
 function lowerBound(
-	values: Uint32Array,
+	values: number[],
 	target: number,
 	start = 0,
 	end = values.length,
@@ -180,37 +268,41 @@ function lowerBound(
 }
 
 function offsetForForwardTokens(
-	prefix: Uint32Array,
+	text: string,
+	lookup: TokenCheckpointLookup,
 	startOffset: number,
 	targetTokens: number,
-	textLength: number,
 ): number {
-	const targetValue =
-		prefix[startOffset] + Math.ceil(targetTokens * TOKEN_UNIT_SCALE);
-	const index = lowerBound(prefix, targetValue, startOffset + 1);
-	return Math.min(index, textLength);
+	const startUnits = tokenUnitsAtOffset(text, lookup, startOffset);
+	const targetUnits =
+		startUnits + Math.ceil(targetTokens * TOKEN_UNIT_SCALE);
+	return offsetForAbsoluteUnits(text, lookup, targetUnits);
 }
 
 function offsetForBackwardTokens(
-	prefix: Uint32Array,
+	text: string,
+	lookup: TokenCheckpointLookup,
 	endOffset: number,
 	targetTokens: number,
 ): number {
-	const targetValue = Math.max(
+	const endUnits = tokenUnitsAtOffset(text, lookup, endOffset);
+	const targetUnits = Math.max(
 		0,
-		prefix[endOffset] - Math.ceil(targetTokens * TOKEN_UNIT_SCALE),
+		endUnits - Math.ceil(targetTokens * TOKEN_UNIT_SCALE),
 	);
-	return lowerBound(prefix, targetValue, 0, endOffset);
+	return offsetForAbsoluteUnits(text, lookup, targetUnits);
 }
 
 function pickClosestBoundary(
-	candidates: number[],
+	boundaries: number[],
+	startIndex: number,
+	endIndexExclusive: number,
 	targetOffset: number,
 ): number {
-	let best = candidates[0];
+	let best = boundaries[startIndex];
 	let bestDistance = Math.abs(best - targetOffset);
-	for (let i = 1; i < candidates.length; i++) {
-		const candidate = candidates[i];
+	for (let i = startIndex + 1; i < endIndexExclusive; i++) {
+		const candidate = boundaries[i];
 		const distance = Math.abs(candidate - targetOffset);
 		if (
 			distance < bestDistance ||
@@ -232,57 +324,63 @@ function createChunkRanges(
 		return [];
 	}
 
-	const tokenPrefix = buildTokenPrefix(text);
+	const lookup = buildTokenCheckpoints(text);
 	const preferredBoundaries = buildPreferredBoundaries(text);
-	const textLength = text.length;
 	const ranges: ChunkRange[] = [];
 	let startOffset = 0;
 
-	while (startOffset < textLength) {
+	while (startOffset < lookup.textLength) {
 		while (
-			startOffset < textLength &&
+			startOffset < lookup.textLength &&
 			isWhitespaceCharCode(text.charCodeAt(startOffset))
 		) {
 			startOffset++;
 		}
-		if (startOffset >= textLength) {
+		if (startOffset >= lookup.textLength) {
 			break;
 		}
 
 		const remainingTokens =
-			(tokenPrefix[textLength] - tokenPrefix[startOffset]) /
+			(lookup.totalUnits - tokenUnitsAtOffset(text, lookup, startOffset)) /
 			TOKEN_UNIT_SCALE;
 		let endOffset: number;
 		if (remainingTokens <= maxTokens) {
-			endOffset = textLength;
+			endOffset = lookup.textLength;
 		} else {
 			const targetOffset = offsetForForwardTokens(
-				tokenPrefix,
+				text,
+				lookup,
 				startOffset,
 				targetTokens,
-				textLength,
 			);
 			const maxOffset = offsetForForwardTokens(
-				tokenPrefix,
+				text,
+				lookup,
 				startOffset,
 				maxTokens,
-				textLength,
 			);
 			const minPreferredOffset = offsetForForwardTokens(
-				tokenPrefix,
+				text,
+				lookup,
 				startOffset,
 				targetTokens * 0.75,
-				textLength,
 			);
-			const boundaryCandidates = preferredBoundaries.filter(
-				(offset) =>
-					offset > startOffset &&
-					offset <= maxOffset &&
-					offset >= minPreferredOffset,
+			const candidateStart = lowerBound(
+				preferredBoundaries,
+				Math.max(startOffset + 1, minPreferredOffset),
+			);
+			const candidateEnd = lowerBound(
+				preferredBoundaries,
+				maxOffset + 1,
 			);
 			endOffset =
-				boundaryCandidates.length > 0
-					? pickClosestBoundary(boundaryCandidates, targetOffset)
+				candidateStart < candidateEnd
+					? pickClosestBoundary(
+						preferredBoundaries,
+						candidateStart,
+						candidateEnd,
+						targetOffset,
+					)
 					: Math.max(startOffset + 1, maxOffset);
 		}
 
@@ -290,35 +388,44 @@ function createChunkRanges(
 			break;
 		}
 		ranges.push({ startOffset, endOffset });
-		if (endOffset >= textLength) {
+		if (endOffset >= lookup.textLength) {
 			break;
 		}
 
 		const earliestNextStart = offsetForBackwardTokens(
-			tokenPrefix,
+			text,
+			lookup,
 			endOffset,
 			targetTokens * CHUNK_OVERLAP_MAX_RATIO,
 		);
 		const latestNextStart = offsetForBackwardTokens(
-			tokenPrefix,
+			text,
+			lookup,
 			endOffset,
 			targetTokens * CHUNK_OVERLAP_MIN_RATIO,
 		);
 		const desiredNextStart = offsetForBackwardTokens(
-			tokenPrefix,
+			text,
+			lookup,
 			endOffset,
 			targetTokens * CHUNK_OVERLAP_TARGET_RATIO,
 		);
-		const overlapCandidates = preferredBoundaries.filter(
-			(offset) =>
-				offset > startOffset &&
-				offset < endOffset &&
-				offset >= earliestNextStart &&
-				offset <= latestNextStart,
+		const overlapStart = lowerBound(
+			preferredBoundaries,
+			Math.max(startOffset + 1, earliestNextStart),
+		);
+		const overlapEnd = lowerBound(
+			preferredBoundaries,
+			Math.min(endOffset - 1, latestNextStart) + 1,
 		);
 		const nextStart =
-			overlapCandidates.length > 0
-				? pickClosestBoundary(overlapCandidates, desiredNextStart)
+			overlapStart < overlapEnd
+				? pickClosestBoundary(
+					preferredBoundaries,
+					overlapStart,
+					overlapEnd,
+					desiredNextStart,
+				)
 				: Math.min(
 					endOffset - 1,
 					Math.max(startOffset + 1, desiredNextStart),
