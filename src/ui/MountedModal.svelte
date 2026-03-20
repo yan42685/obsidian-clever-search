@@ -2,22 +2,25 @@
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import {
-	    FileItem,
-	    FileSubItem,
-	    LineItem,
-	    SearchResult,
-	    SearchType,
+		FileItem,
+		FileSubItem,
+		LineItem,
+		SearchResult,
+		SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
+	import { SearchHistoryService } from "src/services/obsidian/user-data/search-history-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { logger } from "src/utils/logger";
 	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
+	import SearchHistoryInput from "./SearchHistoryInput.svelte";
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
+	const searchHistoryService = getInstance(SearchHistoryService);
 	const viewHelper = getInstance(ViewHelper);
 
 	export let uiType: "modal" | "floatingWindow";
@@ -25,7 +28,7 @@
 	export let searchType: SearchType;
 	export let isHybrid: boolean = false; // hybrid BM25+vector search
 	export let queryText: string;
-	
+
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
 	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
@@ -93,7 +96,10 @@
 		const currentQueryText = queryText;
 
 		if (cachedResult.has(currentQueryText)) {
-			if (requestId !== latestSearchRequestId || currentQueryText !== queryText) {
+			if (
+				requestId !== latestSearchRequestId ||
+				currentQueryText !== queryText
+			) {
 				return;
 			}
 			searchResult = cachedResult.get(currentQueryText) as SearchResult;
@@ -106,7 +112,9 @@
 			nextResult = await searchService.searchInFile(currentQueryText);
 		} else if (searchType === SearchType.IN_VAULT) {
 			if (isHybrid) {
-				nextResult = await searchService.searchInVaultHybrid(currentQueryText);
+				nextResult = await searchService.searchInVaultHybrid(
+					currentQueryText,
+				);
 			} else {
 				nextResult = await searchService.searchInVault(currentQueryText);
 			}
@@ -114,7 +122,10 @@
 			throw Error(TO_BE_IMPL);
 		}
 
-		if (requestId !== latestSearchRequestId || currentQueryText !== queryText) {
+		if (
+			requestId !== latestSearchRequestId ||
+			currentQueryText !== queryText
+		) {
 			return;
 		}
 
@@ -186,15 +197,17 @@
 			searchType,
 			selectedItem,
 			currSubItemIndex,
-			queryText // 添加搜索关键字参数
+			queryText,
 		);
+		await searchHistoryService.recordQuery(queryText);
 	}
+
 	async function handleConfirmInBackground() {
-		handleConfirm(null, true);
+		await handleConfirm(null, true);
 	}
 
 	function handleInsertFileLink() {
-		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path)
+		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path);
 	}
 
 	function formatScore(score?: number): string {
@@ -225,7 +238,10 @@
 		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
-		listenEvent(EventEnum.CONFIRM_ITEM_IN_BACKGROUND, handleConfirmInBackground);
+		listenEvent(
+			EventEnum.CONFIRM_ITEM_IN_BACKGROUND,
+			handleConfirmInBackground,
+		);
 		listenEvent(EventEnum.INSERT_FILE_LINK, handleInsertFileLink);
 	}
 	viewHelper.focusInput();
@@ -234,21 +250,19 @@
 
 <div class="search-container">
 	<div class="left-pane">
-		<div class="search-bar" data-match-count={matchCountText}>
-			<input
-				id="cs-search-input"
-				bind:value={queryText}
-				on:input={handleInput}
-			/>
-		</div>
+		<SearchHistoryInput
+			bind:queryText
+			{matchCountText}
+			on:querychange={handleInput}
+		/>
 		<div class="result-items">
-			<!-- ul 用来保证button位置不受外层div是否出现滚轮而影响 -->
+			<!-- ul used to keep button positioning stable when the outer container scrolls -->
 			<ul>
 				{#each searchResult.items as item, index}
 					<button
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
-						on:click={(event) => {
+						on:click={() => {
 							handleItemClick(index);
 							if (uiType === "floatingWindow") {
 								handleConfirm(null, false);
@@ -258,13 +272,14 @@
 							await handleItemClick(index);
 							await handleConfirm(e, e.ctrlKey);
 						}}
-						on:dblclick={async (e)=>{
+						on:dblclick={async (e) => {
 							await handleItemClick(index);
 							await handleConfirm(e, e.ctrlKey);
 						}}
 					>
 						{#if item instanceof LineItem}
-							<span class="line-item">{@html viewHelper.purifyHTML(item.line.text)}</span
+							<span class="line-item"
+								>{@html viewHelper.purifyHTML(item.line.text)}</span
 							>
 						{:else if item instanceof FileItem}
 							<span class="file-item">
@@ -290,7 +305,10 @@
 			<div class="preview-container">
 				{#if searchType === SearchType.IN_FILE}
 					{#if currContext}
-						<p on:contextmenu={(e) => handleConfirm(e, e.ctrlKey)} on:dblclick={(e) => handleConfirm(e, e.ctrlKey)}>
+						<p
+							on:contextmenu={(e) => handleConfirm(e, e.ctrlKey)}
+							on:dblclick={(e) => handleConfirm(e, e.ctrlKey)}
+						>
 							{@html viewHelper.purifyHTML(currContext)}
 						</p>
 					{/if}
@@ -299,8 +317,7 @@
 						<ul>
 							{#each currFileSubItems as subItem, index}
 								<button
-									on:click={(event) =>
-										handleSubItemClick(index)}
+									on:click={() => handleSubItemClick(index)}
 									on:contextmenu={(e) => {
 										currSubItemIndex = index;
 										handleConfirm(e, e.ctrlKey);
@@ -314,10 +331,14 @@
 									class="file-sub-item"
 								>
 									{#if subItem.score !== undefined}
-										<span class="subitem-score">score {formatScore(subItem.score)}</span>
+										<span class="subitem-score"
+											>score {formatScore(subItem.score)}</span
+										>
 									{/if}
 									<span class="subitem-snippet">
-										{@html viewHelper.purifyHTML(subItem.snippet ?? subItem.text)}
+										{@html viewHelper.purifyHTML(
+											subItem.snippet ?? subItem.text,
+										)}
 									</span>
 								</button>
 							{/each}
@@ -338,14 +359,14 @@
 	button {
 		user-select: text;
 	}
+
 	.search-container {
 		display: flex;
-		white-space: pre-wrap; /* 保证空格和换行符在渲染html时不被压缩掉 */
-		overflow-wrap: break-word; /* long text won't be hidden if overflow: hidden is set */
+		margin-top: 2.4em;
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
 	}
 
-	/* 所有在 .search-container 类内部的 mark 元素都会被选中并应用样式，而不影响其他地方的 mark 元素。
-	 * 想要插件内部全局生效，就写在源码最外面的style.css里 */
 	:global(.search-container mark) {
 		background-color: var(--cs-highlight-bgc, rgba(219, 204, 149, 0.9));
 		color: var(--cs-highlight-char-color, #111);
@@ -355,45 +376,16 @@
 		display: flex;
 		flex-direction: column;
 		align-items: left;
-		/* width: 40%; */
 		width: 27.5vw;
-	}
-	.search-bar {
-		position: sticky; /* 固定位置 */
-		top: -0.2em;
-		left: 0;
-		width: 97%;
-		height: 30px;
-	}
-	/* 似乎不能在input上面放伪元素 */
-	.search-bar::after {
-		content: attr(data-match-count);
-		position: absolute;
-		right: 0.6em;
-		top: 1.4em;
-		font-size: 0.8em;
-		transform: translateY(-50%);
-		color: var(--cs-hint-char-color, grey);
-	}
-	.search-bar input {
-		width: 100%;
-		padding: 8px 12px;
-		border: none;
-		border-radius: 10px;
-		background-color: var(--cs-search-bar-bgc, #20202066);
-		box-shadow:
-			0 2px 4px rgba(0, 0, 0, 0.07),
-			0 2px 3px rgba(0, 0, 0, 0.1);
 	}
 
 	.result-items {
 		display: flex;
 		flex-direction: column;
-		height: 70vh;
+		height: calc(70vh - 2.4em);
 		margin-top: 0.15em;
 		overflow-y: auto;
 	}
-
 
 	.result-items ul {
 		padding: 0 0.5em 0 0;
@@ -402,16 +394,13 @@
 		overflow-x: hidden;
 	}
 
-
 	.result-items ul button {
 		align-items: center;
 		justify-content: left;
 		padding: 0.65em;
 		margin: 0.5em 0 0 0.15em;
-		/* width: 100%; */
 		width: 25.35vw;
 		height: fit-content;
-		/* max-height: 5.5em; */
 		text-align: left;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 4px;
@@ -423,7 +412,6 @@
 		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
-	/* wrap the matched line up to 3 lines and show ... if it still overflows */
 	.result-items ul button .line-item,
 	.result-items ul button .file-item {
 		text-wrap: wrap;
@@ -435,7 +423,7 @@
 	}
 
 	.result-items ul button .file-item {
-		-webkit-line-clamp: 6; /* overwrite the previous rule */
+		-webkit-line-clamp: 6;
 	}
 
 	.result-items ul button .file-item span.filename {
@@ -469,7 +457,7 @@
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 6px;
-		height: 73.97vh;
+		height: calc(73.97vh - 2.4em);
 		width: 60%;
 	}
 
@@ -479,15 +467,17 @@
 
 	.right-pane .preview-container {
 		margin: 0.7em 0 0 0.7em;
-		height: 72.5vh;
+		height: calc(72.5vh - 2.4em);
 		overflow-y: auto;
 	}
+
 	.right-pane .preview-container p,
 	.right-pane .preview-container ul {
 		margin: 0;
 		padding: 0;
 		overflow-x: hidden;
 	}
+
 	.right-pane .preview-container p {
 		width: 39.7vw;
 	}

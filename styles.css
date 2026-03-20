@@ -79,8 +79,8 @@ settings:
 	width: 71.5%;
 	height: 80%;
 	padding: 1.5em 1em 1.5em 1.5em;
-	/* remove unused room */
-	overflow: hidden;
+	/* allow the search-history popover to escape the modal bounds */
+	overflow: visible;
 }
 
 .cs-modal,
@@ -202,7 +202,7 @@ settings:
 	}
   
   
-	.search-bar input {
+	.search-bar .input-shell {
 		background-color: var(--background-primary) !important;
 		border: 1px solid rgb(235, 235, 235) !important;
 	}
@@ -213,7 +213,7 @@ settings:
 	background-color: var(--cs-pane-bgc, var(--background-primary)) !important;
 }
 
-.theme-light .cs-modal .search-bar input {
+.theme-light .cs-modal .search-bar .input-shell {
 	background-color: var(--cs-search-bar-bgc, var(--background-primary)) !important;
 }
   

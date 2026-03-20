@@ -12,6 +12,7 @@ import {
 	OuterSetting,
 	type FileSearchBackend,
 	type LogLevelOptions,
+	type SearchHistoryMaxItems,
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
@@ -30,6 +31,7 @@ import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 import { DataProvider } from "./user-data/data-provider";
+import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
 
 @singleton()
@@ -86,6 +88,7 @@ export class SettingManager {
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(OuterSetting);
+	private readonly searchHistoryService = getInstance(SearchHistoryService);
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
 	// BE CAUTIOUS
@@ -138,6 +141,72 @@ class GeneralTab extends PluginSettingTab {
 					.onChange(
 						(v) => (this.setting.ui.floatingWindowForInFile = v),
 					),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Search history"))
+			.setDesc(t("Search history desc"));
+
+		new Setting(containerEl)
+			.setName(t("Enable search history"))
+			.setDesc(t("Enable search history desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.enabled)
+					.onChange((value) => {
+						this.setting.searchHistory.enabled = value;
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Search history suggestions"))
+			.setDesc(t("Search history suggestions desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.showSuggestions)
+					.onChange((value) => {
+						this.setting.searchHistory.showSuggestions = value;
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Search history ghost completion"))
+			.setDesc(t("Search history ghost completion desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.enableGhostCompletion)
+					.onChange((value) => {
+						this.setting.searchHistory.enableGhostCompletion = value;
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Search history max items"))
+			.setDesc(t("Search history max items desc"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						20: "20",
+						50: "50",
+						100: "100",
+					})
+					.setValue(String(this.setting.searchHistory.maxItems))
+					.onChange((value) => {
+						this.setting.searchHistory.maxItems =
+							Number(value) as SearchHistoryMaxItems;
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("Clear search history"))
+			.setDesc(
+				`${t("Clear search history desc")} (${this.searchHistoryService.getEntryCount()})`,
+			)
+			.addButton((button) =>
+				button.setButtonText(t("Clear")).onClick(async () => {
+					await this.searchHistoryService.clearHistory();
+					this.display();
+				}),
 			);
 
 		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>

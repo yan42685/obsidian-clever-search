@@ -4,6 +4,15 @@
 
 [中文文档](README-ZH.md) | [English Doc](README.md)
 
+## What's New in 0.3
+
+Version 0.3 focuses on making Clever Search feel faster, more forgiving, and easier to reuse across repeated searches.
+
+- Hybrid vault search: combine lexical retrieval with semantic ranking, with graceful fallback to lexical-only results when the semantic path is unavailable
+- Search history autocomplete: previously confirmed queries are remembered and suggested by prefix while typing
+- Search history controls: enable or disable history, choose the maximum history size, and clear saved history from settings
+- Cleaner repeat-search workflow: history suggestions support mouse selection, keyboard navigation, and Enter confirmation without changing result ranking logic
+
 ## Demo
 
 ### Realtime highlight and preview
@@ -20,13 +29,14 @@
 
 ### Major
 
+- [x] Hybrid search in the vault (lexical + semantic, with fallback)
 - [x] Semantic search in the vault (Windows only)
 - [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
 - [x] Realtime highlighting and precise jump to the target location
 - [x] Toggle privacy mode (Edit mode only)
-- [ ] AutoCompletion
-- [ ] Persistent search history
+- [x] Search history autocomplete
+- [x] Persistent search history
 
 ### Subtle Tweaks for Better UX
 

@@ -17,6 +17,7 @@ export class OuterSetting {
 	enableChinesePatch: boolean;
 	enableStopWordsZh: boolean;
 	hybrid: HybridSetting;
+	searchHistory: SearchHistorySetting;
 	ui: UISetting;
 }
 
@@ -45,6 +46,13 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		vectorCompression: "int8",
 		fileRankStrategy: "bestPlusSupport",
 		excludedPaths: [],
+	},
+	searchHistory: {
+		enabled: true,
+		maxItems: 50,
+		showSuggestions: true,
+		enableGhostCompletion: true,
+		entries: [],
 	},
 	ui: {
 		openInNewPane: true,
@@ -82,6 +90,22 @@ export type HybridFileRankStrategy =
 	| "bestChunk"
 	| "bestPlusSupport"
 	| "sumTopChunks";
+
+export type SearchHistoryEntry = {
+	queryText: string;
+	timestamp: number;
+	count?: number;
+};
+
+export type SearchHistoryMaxItems = 20 | 50 | 100;
+
+export type SearchHistorySetting = {
+	enabled: boolean;
+	maxItems: SearchHistoryMaxItems;
+	showSuggestions: boolean;
+	enableGhostCompletion: boolean;
+	entries: SearchHistoryEntry[];
+};
 
 /** One record per (filePath, dateKey) where dateKey = "YYYY-MM-DD" */
 export type HybridTokenRecord = {
