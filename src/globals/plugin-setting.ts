@@ -38,6 +38,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		apiDomain: '',
 		apiKey: '',
 		weeklyTokenLimit: 0,
+		maxResultCount: 5,
 		indexConcurrency: 3,
 		vectorCompression: "int8",
 		fileRankStrategy: "bestPlusSupport",
@@ -64,6 +65,7 @@ export type HybridSetting = {
 	apiDomain: string;
 	apiKey: string;
 	weeklyTokenLimit: number; // 0 = unlimited
+	maxResultCount: number;
 	indexConcurrency: number;
 	vectorCompression: HybridVectorCompression;
 	fileRankStrategy: HybridFileRankStrategy;

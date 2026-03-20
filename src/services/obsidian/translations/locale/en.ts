@@ -78,6 +78,8 @@ export default {
 	"hybridModal.apiKeyNotice": "Token values shown here come from the provider response usage fields. Hybrid search currently uses text-embedding-v4 and qwen3-rerank, so confirm your API key has access to both models.",
 	"hybridModal.weeklyTokenLimit": "Weekly token limit",
 	"hybridModal.weeklyTokenLimit.desc": "Maximum tokens to consume per week (Mon–Sun). Set to 0 for unlimited.",
+	"hybridModal.maxResultCount": "Hybrid result count",
+	"hybridModal.maxResultCount.desc": "How many reranked hybrid results to return and display per search.",
 	"hybridModal.weeklyUsed": "This week used",
 	"hybridModal.indexConcurrency": "Index concurrency",
 	"hybridModal.indexConcurrency.desc": "How many files to embed in parallel during hybrid indexing. Higher values may be faster but can increase rate limits, timeouts, and UI pressure.",

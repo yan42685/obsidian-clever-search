@@ -426,6 +426,20 @@ class HybridSearchModal extends Modal {
 		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
 
 		new Setting(contentEl)
+			.setName(t("hybridModal.maxResultCount"))
+			.setDesc(t("hybridModal.maxResultCount.desc"))
+			.addSlider((slider) =>
+				slider
+					.setLimits(1, 30, 1)
+					.setValue(this.setting.hybrid.maxResultCount ?? 5)
+					.setDynamicTooltip()
+					.onChange((value) => {
+						this.setting.hybrid.maxResultCount = value;
+						this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
 			.setName(t("hybridModal.indexConcurrency"))
 			.setDesc(t("hybridModal.indexConcurrency.desc"))
 			.addText((text) => {

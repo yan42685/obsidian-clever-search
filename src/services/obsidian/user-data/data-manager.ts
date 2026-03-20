@@ -542,6 +542,30 @@ export class DataManager {
 				}))
 				.sort((a, b) => b.bytes - a.bytes),
 		);
+		if (storageUsage.hybridChunkBreakdown) {
+			console.table([
+				{
+					segment: "chunk-text",
+					bytes: storageUsage.hybridChunkBreakdown.textBytes,
+					size: this.formatBytes(storageUsage.hybridChunkBreakdown.textBytes),
+				},
+				{
+					segment: "chunk-vector",
+					bytes: storageUsage.hybridChunkBreakdown.vectorBytes,
+					size: this.formatBytes(storageUsage.hybridChunkBreakdown.vectorBytes),
+				},
+				{
+					segment: "chunk-vector-f16",
+					bytes: storageUsage.hybridChunkBreakdown.vectorF16Bytes,
+					size: this.formatBytes(storageUsage.hybridChunkBreakdown.vectorF16Bytes),
+				},
+				{
+					segment: "chunk-metadata",
+					bytes: storageUsage.hybridChunkBreakdown.metadataBytes,
+					size: this.formatBytes(storageUsage.hybridChunkBreakdown.metadataBytes),
+				},
+			]);
+		}
 		console.groupEnd();
 	}
 

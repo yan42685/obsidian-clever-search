@@ -21,10 +21,12 @@ import type { Chunk, RawChunk, VectorPrecision } from './hybrid-types';
 import type { RankedResult } from './ranking';
 import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
 
-const BM25_RECALL_LIMIT = 25;
-const DENSE_RECALL_LIMIT = 25;
+const BM25_RECALL_LIMIT = 20;
+const DENSE_RECALL_LIMIT = 20;
 const SEARCH_EF = 80;
-const MAX_FILE_RESULTS = 20;
+const DEFAULT_MAX_FILE_RESULTS = 5;
+const MIN_FILE_RESULTS = 1;
+const MAX_FILE_RESULTS = 30;
 
 type HybridWriteOption = {
 	persistIndices?: boolean;
@@ -54,6 +56,17 @@ export class HybridEngine {
 
 	private get precision(): VectorPrecision {
 		return this.setting.hybrid.vectorCompression === 'float16' ? 'float16' : 'int8';
+	}
+
+	private get defaultResultCount(): number {
+		const configured = this.setting.hybrid.maxResultCount;
+		if (!Number.isFinite(configured)) {
+			return DEFAULT_MAX_FILE_RESULTS;
+		}
+		return Math.min(
+			MAX_FILE_RESULTS,
+			Math.max(MIN_FILE_RESULTS, Math.round(configured)),
+		);
 	}
 
 	async load(): Promise<void> {
@@ -135,7 +148,7 @@ export class HybridEngine {
 		}
 	}
 
-	async search(query: string, topK = MAX_FILE_RESULTS): Promise<FileItem[]> {
+	async search(query: string, topK = this.defaultResultCount): Promise<FileItem[]> {
 		if (!this.isEnabled() || !this._ready || !query.trim()) return [];
 
 		const bm25Small = this.bm25.search(query, BM25_RECALL_LIMIT).map((result) => ({
@@ -348,7 +361,7 @@ export class HybridEngine {
 				endLine: candidate.row,
 				recallScore: candidate.score,
 			}) as RerankCandidate),
-			smallCandidates.length,
+			topK,
 		);
 
 		const rerankScoreById = new Map(rerankResults.map((item) => [item.id, item.score]));
@@ -368,9 +381,10 @@ export class HybridEngine {
 		orderedSmallCandidates: SmallChunkCandidate[],
 		topK: number,
 	): FileItem[] {
+		const limitedCandidates = orderedSmallCandidates.slice(0, topK);
 		const byFile = new Map<string, { filePath: string; subItems: FileSubItem[]; bestScore: number }>();
 
-		for (const candidate of orderedSmallCandidates) {
+		for (const candidate of limitedCandidates) {
 			const entry = byFile.get(candidate.filePath) ?? {
 				filePath: candidate.filePath,
 				subItems: [],
@@ -387,7 +401,6 @@ export class HybridEngine {
 
 		return Array.from(byFile.values())
 			.sort((a, b) => b.bestScore - a.bestScore)
-			.slice(0, topK)
 			.map((entry) =>
 				new FileItem(EngineType.SEMANTIC, entry.filePath, [query], [], entry.subItems, null),
 			);

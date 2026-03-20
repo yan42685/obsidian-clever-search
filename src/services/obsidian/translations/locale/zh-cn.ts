@@ -69,6 +69,8 @@ export default {
 	"hybridModal.apiKeyNotice": "这里显示的 token 以千问接口返回的 usage 为准。当前混合搜索会使用 text-embedding-v4 和 qwen3-rerank，请确认你的 API key 支持这两个模型。",
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc": "每周（周一至周日）最多消耗的 token 数量，设为 0 表示不限制。",
+	"hybridModal.maxResultCount": "混合搜索结果数量",
+	"hybridModal.maxResultCount.desc": "每次混合搜索返回并展示的 rerank 结果数量。",
 	"hybridModal.weeklyUsed": "本周已使用",
 	"hybridModal.weeklyRemaining": "剩余可用额度",
 	"hybridModal.unlimited": "不限",

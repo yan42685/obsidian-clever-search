@@ -15,6 +15,12 @@ export class Database {
 	async estimatePluginStorageUsage(): Promise<{
 		totalBytes: number;
 		tables: Array<{ name: string; rows: number; bytes: number }>;
+		hybridChunkBreakdown?: {
+			textBytes: number;
+			vectorBytes: number;
+			vectorF16Bytes: number;
+			metadataBytes: number;
+		};
 	}> {
 		const tableEntries = [
 			{ name: "pluginSetting", table: this.db.pluginSetting },
@@ -38,11 +44,39 @@ export class Database {
 				};
 			}),
 		);
+		const hybridChunkRows = await this.db.hybridChunks.toArray();
+		const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(hybridChunkRows);
 
 		return {
 			totalBytes: tables.reduce((sum, item) => sum + item.bytes, 0),
 			tables,
+			hybridChunkBreakdown,
 		};
+	}
+
+	private estimateHybridChunkBreakdown(rows: ChunkRow[]) {
+		const breakdown = {
+			textBytes: 0,
+			vectorBytes: 0,
+			vectorF16Bytes: 0,
+			metadataBytes: 0,
+		};
+
+		for (const row of rows) {
+			breakdown.textBytes += estimateValueBytes(row.text);
+			breakdown.vectorBytes += row.vector?.size ?? 0;
+			breakdown.vectorF16Bytes += row.vectorF16?.size ?? 0;
+			breakdown.metadataBytes +=
+				estimateValueBytes(row.id) +
+				estimateValueBytes(row.filePath) +
+				estimateValueBytes(row.startLine) +
+				estimateValueBytes(row.startCol) +
+				estimateValueBytes(row.endLine) +
+				estimateValueBytes(row.scale) +
+				estimateValueBytes(row.precision);
+		}
+
+		return breakdown;
 	}
 
 	async deleteMinisearchData() {
