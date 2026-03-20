@@ -378,7 +378,7 @@ class HybridSearchModal extends Modal {
 			.setDesc(t("hybridModal.apiDomain.desc"))
 			.addText((text) =>
 				text
-					.setPlaceholder("api.openai.com")
+					.setPlaceholder("dashscope.aliyuncs.com")
 					.setValue(this.setting.hybrid.apiDomain)
 					.onChange((v) => {
 						this.setting.hybrid.apiDomain = v;

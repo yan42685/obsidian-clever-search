@@ -1,20 +1,21 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import { Database } from 'src/services/database/database';
 import { MyNotice } from 'src/services/obsidian/transformed-api';
+import { estimateTokenCount } from 'src/services/search/hybrid/chunker';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type VectorPrecision } from './hybrid-types';
 
-const OPENAI_EMBED_URL = 'https://api.openai.com/v1/embeddings';
-const EMBED_MODEL = 'text-embedding-3-small';
-const BATCH_SIZE = 100;
+const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
+const EMBED_MODEL = 'text-embedding-v4';
+const BATCH_SIZE = 10;
 const CACHE_MAX = 50;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 
 export class NoApiKeyError extends Error {
 	constructor() {
-		super('No OpenAI API key configured — falling back to BM25-only search');
+		super('No Qwen API key configured; falling back to BM25-only search');
 		this.name = 'NoApiKeyError';
 	}
 }
@@ -25,7 +26,7 @@ export class WeeklyTokenLimitExceededError extends Error {
 	readonly estimated: number;
 
 	constructor(limit: number, used: number, estimated: number) {
-		super('Weekly token limit exceeded before sending embedding request');
+		super('Weekly token limit exceeded before sending provider request');
 		this.name = 'WeeklyTokenLimitExceededError';
 		this.limit = limit;
 		this.used = used;
@@ -52,10 +53,6 @@ const noticeWeeklyLimitReached = throttle(
 	(text: string) => new MyNotice(text, 5000),
 );
 
-// ─── Quantization helpers ─────────────────────────────────────────────────────
-
-// TODO: 检查千问，OpenAI代理返回的向量是不是归一化的, 如果是那这一步可以去掉
-/** L2-normalize a float32 array in-place. */
 function l2Normalize(v: number[]): void {
 	let norm = 0;
 	for (const x of v) norm += x * x;
@@ -64,7 +61,6 @@ function l2Normalize(v: number[]): void {
 	for (let i = 0; i < v.length; i++) v[i] /= norm;
 }
 
-/** Quantize float32[] → Int8Array + scale. */
 export function quantizeInt8(v: number[]): { vec: Int8Array; scale: number } {
 	let maxAbs = 0;
 	for (const x of v) if (Math.abs(x) > maxAbs) maxAbs = Math.abs(x);
@@ -76,7 +72,6 @@ export function quantizeInt8(v: number[]): { vec: Int8Array; scale: number } {
 	return { vec, scale };
 }
 
-/** Quantize float32[] → Uint16Array (IEEE 754 half-precision). */
 export function quantizeFloat16(v: number[]): Uint16Array {
 	const out = new Uint16Array(v.length);
 	for (let i = 0; i < v.length; i++) {
@@ -93,58 +88,42 @@ function float32ToFloat16(val: number): number {
 	const exp = (bits >>> 23) & 0xff;
 	const frac = bits & 0x7fffff;
 	if (exp === 0xff) {
-		// NaN or Inf
 		return (sign << 15) | 0x7c00 | (frac ? 0x200 : 0);
 	}
 	const newExp = exp - 127 + 15;
-	if (newExp >= 31) return (sign << 15) | 0x7c00; // overflow → Inf
+	if (newExp >= 31) return (sign << 15) | 0x7c00;
 	if (newExp <= 0) {
-		// subnormal
 		const shift = 14 - newExp;
 		return (sign << 15) | ((frac | 0x800000) >> shift);
 	}
 	return (sign << 15) | (newExp << 10) | (frac >> 13);
 }
 
-// ─── Embedder ─────────────────────────────────────────────────────────────────
-
 export class Embedder {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly cache = new Map<string, CacheEntry>();
-	/** Current file being indexed — set by HybridEngine before calling embedBatch */
 
 	private get apiKey(): string {
 		return this.setting.hybrid?.apiKey ?? '';
 	}
 
 	private get apiDomain(): string {
-		const domain = this.setting.hybrid?.apiDomain?.trim();
-		// 1. 去掉前缀协议
-		// 2. 去掉末尾可能存在的斜杠
-		const cleanDomain = domain
-			.replace(/^https?:\/\//, '')
-			.replace(/\/+$/, ''); 
-
-		return `https://${cleanDomain}/v1/embeddings`;
+		return buildDashScopeApiUrl(this.setting.hybrid?.apiDomain, 'embedding');
 	}
 
-	/** Embed a single query string (cached). */
 	async embedQuery(
 		text: string,
 		precision: VectorPrecision = 'int8',
+		filePath = '',
 	): Promise<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> {
 		const cached = this.getCache(text);
 		if (cached) return cached;
 
-		const [result] = await this.embedBatch([text], precision);
+		const [result] = await this.embedBatch([text], precision, filePath);
 		this.setCache(text, result);
 		return result;
 	}
 
-	/**
-	 * Embed a batch of texts.
-	 * Automatically splits into chunks of BATCH_SIZE.
-	 */
 	async embedBatch(
 		texts: string[],
 		precision: VectorPrecision = 'int8',
@@ -162,7 +141,7 @@ export class Embedder {
 		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
 			const batch = texts.slice(i, i + BATCH_SIZE);
 			const requestStart = Date.now();
-			await this.ensureWeeklyLimitAllows(batch);
+			await ensureWeeklyTokenBudget(estimateTextsTokenUsage(batch));
 			const { embeddings: floats, tokensUsed } = await this.fetchEmbeddings(batch);
 			logger.debug(
 				`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
@@ -205,31 +184,19 @@ export class Embedder {
 
 		if (!resp.ok) {
 			const body = await resp.text();
-			throw new Error(`OpenAI embedding API error ${resp.status}: ${body}`);
+			throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
 		}
 
-		const json = await resp.json();
-		// Sort by index to preserve order (OpenAI may reorder)
-		const data: Array<{ index: number; embedding: number[] }> = json.data;
+		const json = await resp.json() as {
+			data?: Array<{ index: number; embedding: number[] }>;
+			usage?: { total_tokens?: number; input_tokens?: number };
+		};
+		const data: Array<{ index: number; embedding: number[] }> = Array.isArray(json.data)
+			? json.data
+			: [];
 		data.sort((a, b) => a.index - b.index);
-		const tokensUsed: number = json.usage?.total_tokens ?? 0;
-		return { embeddings: data.map(d => d.embedding), tokensUsed };
-	}
-
-	// ─── LRU cache ───────────────────────────────────────────────────────────
-
-	private async ensureWeeklyLimitAllows(texts: string[]): Promise<void> {
-		const limit = this.setting.hybrid?.weeklyTokenLimit ?? 0;
-		if (limit <= 0) return;
-
-		const used = await getCurrentWeekTokenUsage();
-		const estimated = estimateBatchTokens(texts);
-		if (used < limit && used + estimated <= limit) return;
-
-		noticeWeeklyLimitReached(
-			`Weekly token limit reached: used ${used}, limit ${limit}, remaining quota 0`,
-		);
-		throw new WeeklyTokenLimitExceededError(limit, used, estimated);
+		const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
+		return { embeddings: data.map((item) => item.embedding), tokensUsed };
 	}
 
 	private getCache(text: string): CacheEntry | null {
@@ -244,19 +211,19 @@ export class Embedder {
 
 	private setCache(text: string, entry: Omit<CacheEntry, 'ts'>): void {
 		if (this.cache.size >= CACHE_MAX) {
-			// Evict oldest
 			let oldestKey = '';
 			let oldestTs = Infinity;
 			for (const [k, v] of this.cache) {
-				if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+				if (v.ts < oldestTs) {
+					oldestTs = v.ts;
+					oldestKey = k;
+				}
 			}
 			if (oldestKey) this.cache.delete(oldestKey);
 		}
 		this.cache.set(text, { ...entry, ts: Date.now() });
 	}
 }
-
-// ─── Token usage tracking ─────────────────────────────────────────────────────
 
 function todayKey(): string {
 	const d = new Date();
@@ -294,22 +261,21 @@ export async function recordTokenUsage(filePath: string, tokens: number): Promis
 	if (!filePath || tokens <= 0) return;
 	try {
 		const db = getInstance(Database).db;
-		const dateKey = todayKey();
+		const key = todayKey();
 		const existing = await db.hybridTokenStats
 			.where('[filePath+dateKey]')
-			.equals([filePath, dateKey])
+			.equals([filePath, key])
 			.first();
 		if (existing?.id !== undefined) {
 			await db.hybridTokenStats.update(existing.id, { tokens: existing.tokens + tokens });
 		} else {
-			await db.hybridTokenStats.add({ filePath, dateKey, tokens });
+			await db.hybridTokenStats.add({ filePath, dateKey: key, tokens });
 		}
 	} catch {
-		// non-critical — ignore errors
+		// non-critical
 	}
 }
 
-/** Returns top-N files by total tokens within the given date range (inclusive). */
 export async function getTopTokenFiles(
 	fromDate: string,
 	toDate: string,
@@ -334,7 +300,6 @@ export async function getTopTokenFiles(
 	}
 }
 
-/** Returns total tokens consumed within the given date range. */
 export async function getTotalTokens(fromDate: string, toDate: string): Promise<number> {
 	try {
 		const db = getInstance(Database).db;
@@ -348,19 +313,55 @@ export async function getTotalTokens(fromDate: string, toDate: string): Promise<
 	}
 }
 
-function estimateBatchTokens(texts: string[]): number {
-	return texts.reduce((sum, text) => sum + estimateTextTokens(text), 0);
+export function normalizeApiDomain(domain?: string): string {
+	const raw = domain?.trim();
+	if (!raw) {
+		return DEFAULT_DASHSCOPE_DOMAIN;
+	}
+
+	const withoutProtocol = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+	const compatibleIndex = withoutProtocol.search(/\/compatible-(mode|api)\b/i);
+	const hostAndMaybePath =
+		compatibleIndex >= 0
+			? withoutProtocol.slice(0, compatibleIndex)
+			: withoutProtocol;
+
+	return hostAndMaybePath.split('/')[0] || DEFAULT_DASHSCOPE_DOMAIN;
 }
 
-function estimateTextTokens(text: string): number {
-	let asciiChars = 0;
-	let nonAsciiChars = 0;
-	for (const char of text) {
-		if (char.charCodeAt(0) <= 0x7f) {
-			asciiChars++;
-		} else {
-			nonAsciiChars++;
-		}
+export function buildDashScopeApiUrl(
+	domain: string | undefined,
+	apiType: 'embedding' | 'rerank',
+): string {
+	const host = normalizeApiDomain(domain);
+	const path =
+		apiType === 'embedding'
+			? '/compatible-mode/v1/embeddings'
+			: '/compatible-api/v1/reranks';
+	return `https://${host}${path}`;
+}
+
+export function estimateTextTokenUsage(text: string): number {
+	return Math.max(1, Math.ceil(estimateTokenCount(text)));
+}
+
+export function estimateTextsTokenUsage(texts: string[]): number {
+	return texts.reduce((sum, text) => sum + estimateTextTokenUsage(text), 0);
+}
+
+export async function ensureWeeklyTokenBudget(estimatedTokens: number): Promise<void> {
+	const limit = getInstance(OuterSetting).hybrid?.weeklyTokenLimit ?? 0;
+	if (limit <= 0 || estimatedTokens <= 0) {
+		return;
 	}
-	return Math.max(1, Math.ceil(nonAsciiChars + asciiChars / 4));
+
+	const used = await getCurrentWeekTokenUsage();
+	if (used < limit && used + estimatedTokens <= limit) {
+		return;
+	}
+
+	noticeWeeklyLimitReached(
+		`Weekly token limit reached: used ${used}, limit ${limit}, remaining quota 0`,
+	);
+	throw new WeeklyTokenLimitExceededError(limit, used, estimatedTokens);
 }

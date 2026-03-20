@@ -20,6 +20,8 @@ type ChunkRange = {
 	endOffset: number;
 };
 
+export type TokenWindow = ChunkRange;
+
 type TokenCheckpointLookup = {
 	textLength: number;
 	checkpointStride: number;
@@ -72,6 +74,23 @@ function offsetToLine(offsets: number[], offset: number): number {
 		else hi = mid - 1;
 	}
 	return lo;
+}
+
+function offsetToLineCol(
+	text: string,
+	baseLine: number,
+	baseCol: number,
+	offset: number,
+): { line: number; col: number } {
+	const prefix = text.slice(0, Math.max(0, offset));
+	const lines = prefix.split("\n");
+	const lineOffset = lines.length - 1;
+	const colWithinLine = lines[lines.length - 1]?.length ?? 0;
+
+	return {
+		line: baseLine + lineOffset,
+		col: lineOffset === 0 ? baseCol + colWithinLine : colWithinLine,
+	};
 }
 
 function isWhitespaceCharCode(code: number): boolean {
@@ -437,20 +456,43 @@ function createChunkRanges(
 	return ranges;
 }
 
+export function createTokenWindows(
+	text: string,
+	targetTokens: number,
+	maxTokens = targetTokens * (1 + CHUNK_MAX_OVERFLOW_RATIO),
+): TokenWindow[] {
+	return createChunkRanges(text, targetTokens, maxTokens);
+}
+
 /**
  * Sliding-window small chunks over a big chunk's text.
  * Target ~SMALL_CHUNK_TARGET tokens, overlap ~16% with sentence/newline boundaries.
  */
-function makeSmallChunks(bigChunkIdx: number, text: string): RawChunk[] {
+function makeSmallChunks(
+	bigChunkIdx: number,
+	text: string,
+	baseLine: number,
+	baseCol: number,
+): RawChunk[] {
 	return createChunkRanges(
 		text,
 		SMALL_CHUNK_TARGET,
 		SMALL_CHUNK_TARGET * (1 + CHUNK_MAX_OVERFLOW_RATIO),
 	)
-		.map((range) => ({
-			bigChunkIdx,
-			text: text.slice(range.startOffset, range.endOffset),
-		}))
+		.map((range) => {
+			const start = offsetToLineCol(
+				text,
+				baseLine,
+				baseCol,
+				range.startOffset,
+			);
+			return {
+				bigChunkIdx,
+				text: text.slice(range.startOffset, range.endOffset),
+				startLine: start.line,
+				startCol: start.col,
+			};
+		})
 		.filter((chunk) => chunk.text.trim().length > 0);
 }
 
@@ -483,7 +525,12 @@ export function chunkFile(filePath: string, plainText: string): ChunkerOutput {
 			endLine,
 		});
 
-		const smallChunks = makeSmallChunks(bigChunks.length - 1, text);
+		const smallChunks = makeSmallChunks(
+			bigChunks.length - 1,
+			text,
+			startLine,
+			startCol,
+		);
 		for (const sc of smallChunks) chunks.push(sc);
 	}
 

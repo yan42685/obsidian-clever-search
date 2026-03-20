@@ -173,6 +173,13 @@
 		viewHelper.insertFileLinkToActiveMarkdown(currFileItem?.path)
 	}
 
+	function formatScore(score?: number): string {
+		if (score === undefined || Number.isNaN(score)) {
+			return "";
+		}
+		return score.toFixed(4);
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		logger.trace("mounted element has been destroyed.");
@@ -282,7 +289,12 @@
 									class:selected={index === currSubItemIndex}
 									class="file-sub-item"
 								>
-									{@html viewHelper.purifyHTML(subItem.text)}
+									{#if subItem.score !== undefined}
+										<span class="subitem-score">score {formatScore(subItem.score)}</span>
+									{/if}
+									<span class="subitem-snippet">
+										{@html viewHelper.purifyHTML(subItem.snippet ?? subItem.text)}
+									</span>
 								</button>
 							{/each}
 						</ul>
@@ -411,6 +423,25 @@
 		color: var(--cs-secondary-font-color, #a29c9c);
 		display: block;
 	}
+
+	.file-sub-item {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.3em;
+	}
+
+	.file-sub-item .subitem-score {
+		font-family: var(--font-monospace);
+		font-size: 0.82em;
+		color: var(--cs-secondary-font-color, #a29c9c);
+	}
+
+	.file-sub-item .subitem-snippet {
+		display: block;
+		width: 100%;
+	}
+
 	.right-pane {
 		background-color: var(--cs-pane-bgc, #20202066);
 		border-radius: 6px;

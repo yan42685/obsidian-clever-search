@@ -1,26 +1,19 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
 import type { LocaleKey } from 'src/services/obsidian/translations/locale-helper';
-import { Tokenizer } from 'src/services/search/tokenizer';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { Database } from 'src/services/database/database';
-import type { VectorPrecision, BigChunk, RawBigChunk } from './hybrid-types';
-import { chunkFile } from './chunker';
-import {
-	Embedder,
-} from './embedder';
+import type { VectorPrecision, BigChunk, RawBigChunk, RawChunk, Chunk } from './hybrid-types';
+import { chunkFile, createTokenWindows } from './chunker';
+import { Embedder } from './embedder';
 import { BM25Engine } from './bm25';
 import { HnswIndex } from './hnsw';
+import { reciprocalRankFuse, type RankedResult } from './ranking';
+import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
 import {
-	buildHybridQueryProfile,
-	buildSemanticQueryVariants,
-	filterSemanticMatches,
-	mergeHybridRankings,
-	scoreFileChunkMatches,
-	type RankedResult,
-} from './ranking';
-import {
+	type BigChunkRow,
+	type ChunkRow,
 	bigChunkToRow,
 	blobToBm25,
 	blobToHnsw,
@@ -31,42 +24,65 @@ import {
 	rowToChunk,
 } from './hybrid-store';
 
+const BM25_RECALL_LIMIT = 50;
+const DENSE_RECALL_LIMIT = 50;
+const RRF_LIMIT = 100;
+const SEARCH_EF = 80;
+const BIG_CHUNK_RERANK_LIMIT = 60;
+const MAX_FILE_RESULTS = 20;
+const MAX_SUBITEMS_PER_FILE = 3;
+const SNIPPET_CHAR_LIMIT = 240;
+const SNIPPET_TOKEN_TARGET = 100;
+const SNIPPET_TOKEN_MAX = 120;
+
 type HybridWriteOption = {
 	persistIndices?: boolean;
+};
+
+type SmallChunkMatch = {
+	id: number;
+	bigChunkId: number;
+	filePath: string;
+	text: string;
+	row: number;
+	col: number;
+	score: number;
+};
+
+type BigChunkCandidate = {
+	id: number;
+	filePath: string;
+	text: string;
+	startLine: number;
+	startCol: number;
+	endLine: number;
+	score: number;
+	order: number;
+	smallMatches: SmallChunkMatch[];
 };
 
 export class HybridEngine {
 	private readonly db = getInstance(Database);
 	private readonly setting = getInstance(OuterSetting);
 	private readonly embedder = new Embedder();
+	private readonly reranker = new HybridReranker();
 	private readonly bm25 = new BM25Engine();
 	private readonly hnswSmall = new HnswIndex();
 	private readonly hnswBig = new HnswIndex();
-	private readonly tokenizer = getInstance(Tokenizer);
 
 	private _ready = false;
-	private _canSearch = false; // false → BM25-only fallback
+	private _canSearch = false;
 	private lastIndexingFallbackNoticeKey: LocaleKey | null = null;
 	private lastSearchFallbackNoticeKey: LocaleKey | null = null;
 
 	private get precision(): VectorPrecision {
-		return this.setting.hybrid.vectorCompression === "float16"
-			? "float16"
-			: "int8";
+		return this.setting.hybrid.vectorCompression === 'float16'
+			? 'float16'
+			: 'int8';
 	}
 
-	// ─── Lifecycle ────────────────────────────────────────────────────────────
-
 	async load(): Promise<void> {
-		if (!this.isEnabled()) {
-			this._ready = true;
-			this._canSearch = false;
-			return;
-		}
-		await Promise.all([
-			this.loadBm25(),
-			this.loadHnsw(),
-		]);
+		await Promise.all([this.loadBm25(), this.loadHnsw()]);
 		this._ready = true;
 	}
 
@@ -89,164 +105,33 @@ export class HybridEngine {
 		]);
 	}
 
-	isEnabled(): boolean { return this.setting.hybrid.enabled; }
+	isEnabled(): boolean {
+		return this.setting.hybrid.enabled;
+	}
+
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
 	isEmpty(): boolean { return this.bm25.docCount === 0; }
+
 	consumeIndexingFallbackNoticeKey(): LocaleKey | null {
 		const key = this.lastIndexingFallbackNoticeKey;
 		this.lastIndexingFallbackNoticeKey = null;
 		return key;
 	}
+
 	consumeSearchFallbackNoticeKey(): LocaleKey | null {
 		const key = this.lastSearchFallbackNoticeKey;
 		this.lastSearchFallbackNoticeKey = null;
 		return key;
 	}
+
 	shouldIndexPath(filePath: string): boolean {
 		if (!this.isEnabled()) return false;
 		return !this.isExcludedPath(filePath);
 	}
 
-	// ─── Indexing ─────────────────────────────────────────────────────────────
-
 	async indexFile(filePath: string, plainText: string, updateTime = Date.now()): Promise<void> {
-		if (!this.shouldIndexPath(filePath)) {
-			await this.deleteFile(filePath);
-			return;
-		}
-
-		// Remove stale data first
-		await this.deleteFile(filePath);
-
-		const { bigChunks: rawBig, chunks: rawSmall } = chunkFile(filePath, plainText);
-		if (rawBig.length === 0) return;
-
-		// Embed all texts
-		const bigTexts = rawBig.map(b => b.text);
-		const smallTexts = rawSmall.map(s => s.text);
-
-		let bigVecs: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>;
-		let smallVecs: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>;
-
-		try {
-			[bigVecs, smallVecs] = await Promise.all([
-				this.embedder.embedBatch(bigTexts, this.precision, filePath),
-				this.embedder.embedBatch(smallTexts, this.precision, filePath),
-			]);
-			this._canSearch = true;
-			this.lastIndexingFallbackNoticeKey = null;
-		} catch (e) {
-				this._canSearch = false;
-				this.lastIndexingFallbackNoticeKey =
-					"hybridNotice.indexFallbackToBm25";
-				// Index BM25 only
-				for (let i = 0; i < rawBig.length; i++) {
-					// We need a temporary id — use a placeholder; real id assigned after DB insert
-					// For BM25-only mode we skip vector indexing
-				}
-				await this.indexBm25Only(filePath, rawBig, updateTime);
-				return;
-		}
-
-		// Persist big chunks
-		const bigChunkIds: number[] = [];
-		for (let i = 0; i < rawBig.length; i++) {
-			const rb = rawBig[i];
-			const { vec, scale, vecF16 } = bigVecs[i];
-			const row = bigChunkToRow({
-				id: undefined,
-				filePath: rb.filePath,
-				text: rb.text,
-				startLine: rb.startLine,
-				startCol: rb.startCol,
-				endLine: rb.endLine,
-				chunkIds: [],
-				vector: vec,
-				scale,
-				vectorF16: vecF16,
-			});
-			const id = await this.db.db.hybridBigChunks.add(row);
-			bigChunkIds.push(id as number);
-		}
-
-		// Persist small chunks and collect ids per big chunk
-		const bigChunkChildIds: Map<number, number[]> = new Map(bigChunkIds.map(id => [id, []]));
-		for (let i = 0; i < rawSmall.length; i++) {
-			const rs = rawSmall[i];
-			const bigId = bigChunkIds[rs.bigChunkIdx];
-			const { vec, scale, vecF16 } = smallVecs[i];
-			const row = chunkToRow({
-				id: undefined,
-				bigChunkId: bigId,
-				filePath,
-				vector: vec,
-				scale,
-				vectorF16: vecF16,
-			});
-			const id = await this.db.db.hybridChunks.add(row);
-			bigChunkChildIds.get(bigId)!.push(id as number);
-		}
-
-		// Update big chunk chunkIds
-		for (const [bigId, childIds] of bigChunkChildIds) {
-			await this.db.db.hybridBigChunks.update(bigId, { chunkIds: JSON.stringify(childIds) });
-		}
-
-		// Build in-memory indices
-		for (let i = 0; i < rawBig.length; i++) {
-			const bigId = bigChunkIds[i];
-			const { vec, scale, vecF16 } = bigVecs[i];
-			this.bm25.addDocument(bigId, rawBig[i].text);
-			this.hnswBig.insert(bigId, vec, scale, vecF16);
-		}
-
-		const smallRows = await this.db.db.hybridChunks.where('filePath').equals(filePath).toArray();
-		for (let i = 0; i < smallRows.length; i++) {
-			const row = smallRows[i];
-			const chunk = await rowToChunk(row);
-			this.hnswSmall.insert(chunk.id, chunk.vector, chunk.scale, chunk.vectorF16);
-		}
-
-		// Persist updated indices
-		await this.persistIndices();
-
-		// Update doc ref
-		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
-	}
-
-	async deleteFile(
-		filePath: string,
-		option: HybridWriteOption = {},
-	): Promise<void> {
-		// Get big chunk ids for this file
-		const bigRows = await this.db.db.hybridBigChunks.where('filePath').equals(filePath).toArray();
-		const bigIds = bigRows.map(r => r.id!);
-
-		// Get small chunk ids
-		const smallRows = await this.db.db.hybridChunks.where('filePath').equals(filePath).toArray();
-		const smallIds = smallRows.map(r => r.id!);
-
-		// Remove from DB
-		await this.db.db.hybridBigChunks.bulkDelete(bigIds);
-		await this.db.db.hybridChunks.bulkDelete(smallIds);
-		await this.db.db.hybridDocRefs.delete(filePath);
-
-		// Remove from in-memory indices
-		for (const id of bigIds) {
-			this.bm25.removeDocument(id);
-			this.hnswBig.delete(id);
-		}
-		for (const id of smallIds) {
-			this.hnswSmall.delete(id);
-		}
-
-		// Rebuild HNSW if too many deleted nodes
-		if (this.hnswSmall.needsRebuild()) this.hnswSmall.rebuild();
-		if (this.hnswBig.needsRebuild()) this.hnswBig.rebuild();
-		if (option.persistIndices ?? true) {
-			await this.persistIndices();
-		}
+		await this.indexInternal(filePath, plainText, updateTime, {}, false);
 	}
 
 	async indexFileStrict(
@@ -255,7 +140,141 @@ export class HybridEngine {
 		updateTime = Date.now(),
 		option: HybridWriteOption = {},
 	): Promise<void> {
-		const totalStart = Date.now();
+		await this.indexInternal(filePath, plainText, updateTime, option, true);
+	}
+
+	async deleteFile(filePath: string, option: HybridWriteOption = {}): Promise<void> {
+		const bigRows = await this.db.db.hybridBigChunks.where('filePath').equals(filePath).toArray();
+		const bigIds = bigRows.map((row) => row.id!).filter((id) => id !== undefined);
+		const smallRows = await this.db.db.hybridChunks.where('filePath').equals(filePath).toArray();
+		const smallIds = smallRows.map((row) => row.id!).filter((id) => id !== undefined);
+
+		await this.db.db.hybridBigChunks.bulkDelete(bigIds);
+		await this.db.db.hybridChunks.bulkDelete(smallIds);
+		await this.db.db.hybridDocRefs.delete(filePath);
+
+		for (const id of smallIds) {
+			this.bm25.removeDocument(id);
+			this.hnswSmall.delete(id);
+		}
+		for (const id of bigIds) {
+			this.hnswBig.delete(id);
+		}
+
+		if (this.hnswSmall.needsRebuild()) this.hnswSmall.rebuild();
+		if (this.hnswBig.needsRebuild()) this.hnswBig.rebuild();
+		if (option.persistIndices ?? true) {
+			await this.persistIndices();
+		}
+	}
+
+	async search(query: string, topK = MAX_FILE_RESULTS): Promise<FileItem[]> {
+		if (!this.isEnabled() || !this._ready || !query.trim()) return [];
+
+		const bm25Small = this.bm25.search(query, BM25_RECALL_LIMIT).map((result) => ({
+			id: result.bigChunkId,
+			score: result.score,
+		}));
+
+		if (!this._canSearch) {
+			if (bm25Small.length > 0) {
+				this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
+			}
+			return this.searchFromSmallChunkRanking(query, bm25Small, topK, false);
+		}
+
+		let denseSmall: RankedResult[];
+		try {
+			const embedded = await this.embedder.embedQuery(
+				query,
+				this.precision,
+				SEARCH_EMBED_TOKEN_KEY,
+			);
+			denseSmall = this.hnswSmall.search(
+				embedded.vec,
+				embedded.scale,
+				DENSE_RECALL_LIMIT,
+				SEARCH_EF,
+				this.precision,
+				embedded.vecF16,
+			).map((result) => ({
+				id: result.id,
+				score: result.score,
+			}));
+		} catch (error) {
+			logger.warn('hybrid query embedding failed; falling back to BM25.', error);
+			this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
+			return this.searchFromSmallChunkRanking(query, bm25Small, topK, false);
+		}
+
+		const fusedSmall = reciprocalRankFuse([bm25Small, denseSmall], RRF_LIMIT);
+		if (fusedSmall.length === 0) {
+			return [];
+		}
+
+		try {
+			const items = await this.searchFromSmallChunkRanking(query, fusedSmall, topK, true);
+			this.lastSearchFallbackNoticeKey = null;
+			return items;
+		} catch (error) {
+			logger.warn('hybrid rerank failed; falling back to RRF-only ordering.', error);
+			this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
+			return this.searchFromSmallChunkRanking(query, fusedSmall, topK, false);
+		}
+	}
+
+	async persistIndicesForBatch(): Promise<void> {
+		await this.persistIndices();
+	}
+
+	private async searchFromSmallChunkRanking(
+		query: string,
+		smallRanking: RankedResult[],
+		topK: number,
+		shouldRerankBigChunks: boolean,
+	): Promise<FileItem[]> {
+		const smallMatches = await this.loadSmallChunkMatches(smallRanking);
+		if (smallMatches.length === 0) {
+			return [];
+		}
+
+		const bigCandidates = await this.buildBigChunkCandidates(smallMatches);
+		if (bigCandidates.length === 0) {
+			return [];
+		}
+
+		let selectedBigCandidates = bigCandidates;
+		if (shouldRerankBigChunks) {
+			const rerankResults = await this.reranker.rerank(
+				query,
+				bigCandidates
+					.slice(0, BIG_CHUNK_RERANK_LIMIT)
+					.map((candidate) => this.toRerankCandidate(candidate)),
+				Math.min(BIG_CHUNK_RERANK_LIMIT, bigCandidates.length),
+			);
+			const selectedIds = new Set(rerankResults.map((item) => item.id));
+			selectedBigCandidates = bigCandidates.filter((candidate) =>
+				selectedIds.has(candidate.id),
+			);
+			if (selectedBigCandidates.length === 0) {
+				selectedBigCandidates = bigCandidates;
+			}
+		}
+
+		return this.buildFileItemsFromBigCandidates(
+			selectedBigCandidates,
+			query,
+			topK,
+		);
+	}
+
+	private async indexInternal(
+		filePath: string,
+		plainText: string,
+		updateTime: number,
+		option: HybridWriteOption,
+		strict: boolean,
+	): Promise<void> {
 		if (!this.shouldIndexPath(filePath)) {
 			await this.deleteFile(filePath, option);
 			return;
@@ -265,393 +284,320 @@ export class HybridEngine {
 
 		const { bigChunks: rawBig, chunks: rawSmall } = chunkFile(filePath, plainText);
 		if (rawBig.length === 0) return;
-		logger.debug(
-			`hybrid indexFileStrict chunked: file=${filePath}, bigChunks=${rawBig.length}, smallChunks=${rawSmall.length}, chars=${plainText.length}`,
-		);
 
-		const bigTexts = rawBig.map((b) => b.text);
-		const smallTexts = rawSmall.map((s) => s.text);
-		const embedStart = Date.now();
-		const [bigVecs, smallVecs] = await Promise.all([
-			this.embedder.embedBatch(bigTexts, this.precision, filePath),
-			this.embedder.embedBatch(smallTexts, this.precision, filePath),
-		]);
-		logger.debug(
-			`hybrid indexFileStrict embedded: file=${filePath}, elapsed=${Date.now() - embedStart} ms`,
-		);
-
-		this._canSearch = true;
-		this.lastIndexingFallbackNoticeKey = null;
-
-		const dbWriteStart = Date.now();
-		const bigRows = rawBig.map((rb, i) => {
-			const { vec, scale, vecF16 } = bigVecs[i];
-			return bigChunkToRow({
-				id: undefined,
-				filePath: rb.filePath,
-				text: rb.text,
-				startLine: rb.startLine,
-				startCol: rb.startCol,
-				endLine: rb.endLine,
-				chunkIds: [],
-				vector: vec,
-				scale,
-				vectorF16: vecF16,
-			});
-		});
-		const bigChunkIds = await (this.db.db.hybridBigChunks as any).bulkAdd(
-			bigRows,
-			{ allKeys: true },
-		) as number[];
-
-		const bigChunkChildIds: Map<number, number[]> = new Map(
-			bigChunkIds.map((id) => [id, []]),
-		);
-		const smallRows = rawSmall.map((rs, i) => {
-			const bigId = bigChunkIds[rs.bigChunkIdx];
-			const { vec, scale, vecF16 } = smallVecs[i];
-			return chunkToRow({
-				id: undefined,
-				bigChunkId: bigId,
+		let smallVecs: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }> = [];
+		try {
+			smallVecs = await this.embedder.embedBatch(
+				rawSmall.map((chunk) => chunk.text),
+				this.precision,
 				filePath,
-				vector: vec,
-				scale,
-				vectorF16: vecF16,
-			});
-		});
-		const smallChunkIds = await (this.db.db.hybridChunks as any).bulkAdd(
-			smallRows,
-			{ allKeys: true },
-		) as number[];
-		for (let i = 0; i < rawSmall.length; i++) {
-			const rs = rawSmall[i];
-			const bigId = bigChunkIds[rs.bigChunkIdx];
-			const id = smallChunkIds[i];
-			bigChunkChildIds.get(bigId)!.push(id as number);
+			);
+			this._canSearch = true;
+			this.lastIndexingFallbackNoticeKey = null;
+		} catch (error) {
+			logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
+			this._canSearch = false;
+			this.lastIndexingFallbackNoticeKey = 'hybridNotice.indexFallbackToBm25';
+			await this.indexBm25Only(filePath, rawBig, rawSmall, updateTime, option);
+			return;
 		}
 
-		const updatedBigRows = bigRows.map((row, i) => ({
-			...row,
-			id: bigChunkIds[i],
-			chunkIds: JSON.stringify(bigChunkChildIds.get(bigChunkIds[i]) ?? []),
-		}));
-		await this.db.db.hybridBigChunks.bulkPut(updatedBigRows);
-		logger.debug(
-			`hybrid indexFileStrict db-write: file=${filePath}, bigRows=${bigRows.length}, smallRows=${smallRows.length}, elapsed=${Date.now() - dbWriteStart} ms`,
+		const bigChunkIds = await this.persistBigChunks(rawBig, strict);
+		const smallChunkIds = await this.persistSmallChunks(
+			filePath,
+			rawSmall,
+			bigChunkIds,
+			smallVecs,
+			strict,
 		);
-
-		const memoryIndexStart = Date.now();
-		for (let i = 0; i < rawBig.length; i++) {
-			const bigId = bigChunkIds[i];
-			const { vec, scale, vecF16 } = bigVecs[i];
-			this.bm25.addDocument(bigId, rawBig[i].text);
-			this.hnswBig.insert(bigId, vec, scale, vecF16);
-		}
+		await this.updateBigChunkChildIds(bigChunkIds, rawSmall, smallChunkIds, strict);
 
 		for (let i = 0; i < smallChunkIds.length; i++) {
 			const chunkId = smallChunkIds[i];
 			const { vec, scale, vecF16 } = smallVecs[i];
-			this.hnswSmall.insert(
-				chunkId,
-				vec,
-				scale,
-				vecF16,
-			);
+			this.bm25.addDocument(chunkId, rawSmall[i].text);
+			this.hnswSmall.insert(chunkId, vec, scale, vecF16);
 		}
-		logger.debug(
-			`hybrid indexFileStrict memory-index: file=${filePath}, elapsed=${Date.now() - memoryIndexStart} ms`,
-		);
 
 		if (option.persistIndices ?? true) {
-			const persistStart = Date.now();
 			await this.persistIndices();
-			logger.debug(
-				`hybrid indexFileStrict persistIndices: file=${filePath}, elapsed=${Date.now() - persistStart} ms`,
-			);
 		}
 		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
-		logger.debug(
-			`hybrid indexFileStrict finished: file=${filePath}, total=${Date.now() - totalStart} ms`,
-		);
 	}
 
-	// ─── Search ───────────────────────────────────────────────────────────────
-
-	async search(query: string, topK = 20): Promise<FileItem[]> {
-		if (!this.isEnabled() || !this._ready) return [];
-
-		// BM25 search (always available)
-		const bm25Results = this.bm25.search(query, topK * 2);
-
-		if (!this._canSearch) {
-			if (bm25Results.length > 0) {
-				this.lastSearchFallbackNoticeKey =
-					"hybridNotice.searchFallbackToBm25";
-			}
-			return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
-		}
-
-		const queryTokens = this.tokenizer.tokenize(query, 'search');
-		const queryProfile = buildHybridQueryProfile(
-			query,
-			queryTokens.length,
-			bm25Results.length > 0,
-		);
-		const queryVariants = buildSemanticQueryVariants(
-			query,
-			queryTokens,
-			queryProfile.queryVariantLimit,
-		);
-
-		const vecSmallByBig = new Map<number, number>();
-		const vecBigById = new Map<number, number>();
-		let semanticSucceeded = false;
-
-		for (const variant of queryVariants) {
-			try {
-				await this.collectSemanticMatchesForVariant(
-					variant.text,
-					variant.weight,
-					queryProfile,
-					topK,
-					vecSmallByBig,
-					vecBigById,
-				);
-				semanticSucceeded = true;
-				this.lastSearchFallbackNoticeKey = null;
-			} catch (e) {
-				logger.warn(
-					`hybrid semantic query variant failed: "${variant.text}"`,
-					e,
-				);
-			}
-		}
-
-		if (!semanticSucceeded) {
-			this._canSearch = false;
-			this.lastSearchFallbackNoticeKey =
-				"hybridNotice.searchFallbackToBm25";
-			return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
-		}
-
-		const vecSmallRanked = filterSemanticMatches(
-			Array.from(vecSmallByBig.entries()).map(([id, score]) => ({ id, score })),
-			queryProfile.vecSmallMinScore,
-			queryProfile.semanticWindow,
-			topK * 4,
-		);
-		const vecBigRanked = filterSemanticMatches(
-			Array.from(vecBigById.entries()).map(([id, score]) => ({ id, score })),
-			queryProfile.vecBigMinScore,
-			queryProfile.semanticWindow,
-			topK * 3,
-		);
-		const bm25Ranked = rankByScore(
-			bm25Results.map((result) => ({
-				id: result.bigChunkId,
-				score: result.score,
-			})),
-		);
-		const topBigChunks = mergeHybridRankings(
-			bm25Ranked,
-			vecSmallRanked,
-			vecBigRanked,
-			queryProfile,
-			topK * 6,
-		);
-
-		if (topBigChunks.length === 0) {
-			return this.bm25ResultsToFileItems(bm25Results.slice(0, topK), query);
-		}
-
-		return this.bigIdsToFileItems(topBigChunks, query, topK);
-	}
-
-	// ─── Private helpers ──────────────────────────────────────────────────────
-
-	private async indexBm25Only(filePath: string, rawBig: RawBigChunk[], updateTime: number): Promise<void> {
-		for (const rb of rawBig) {
-			const row = bigChunkToRow({
+	private async persistBigChunks(rawBig: RawBigChunk[], strict: boolean): Promise<number[]> {
+		const bigRows = rawBig.map((chunk) =>
+			bigChunkToRow({
 				id: undefined,
-				filePath: rb.filePath,
-				text: rb.text,
-				startLine: rb.startLine,
-				startCol: rb.startCol,
-				endLine: rb.endLine,
+				filePath: chunk.filePath,
+				text: chunk.text,
+				startLine: chunk.startLine,
+				startCol: chunk.startCol,
+				endLine: chunk.endLine,
 				chunkIds: [],
 				vector: new Int8Array(0),
 				scale: 1,
-			});
-			const id = await this.db.db.hybridBigChunks.add(row);
-			this.bm25.addDocument(id as number, rb.text);
+			}),
+		);
+
+		if (!strict) {
+			const ids: number[] = [];
+			for (const row of bigRows) {
+				const id = await this.db.db.hybridBigChunks.add(row);
+				ids.push(id as number);
+			}
+			return ids;
 		}
-		await this.persistBm25();
+
+		return await (this.db.db.hybridBigChunks as unknown as {
+			bulkAdd(rows: BigChunkRow[], option: { allKeys: true }): Promise<number[]>;
+		}).bulkAdd(bigRows, { allKeys: true });
+	}
+
+	private async persistSmallChunks(
+		filePath: string,
+		rawSmall: RawChunk[],
+		bigChunkIds: number[],
+		smallVecs: Array<{ vec: Int8Array; scale: number; vecF16?: Uint16Array }>,
+		strict: boolean,
+	): Promise<number[]> {
+		const rows = rawSmall.map((chunk, index) => {
+			const bigId = bigChunkIds[chunk.bigChunkIdx];
+			const { vec, scale, vecF16 } = smallVecs[index];
+			return chunkToRow({
+				id: undefined,
+				bigChunkId: bigId,
+				filePath,
+				text: chunk.text,
+				startLine: chunk.startLine,
+				startCol: chunk.startCol,
+				vector: vec,
+				scale,
+				vectorF16: vecF16,
+			});
+		});
+
+		if (!strict) {
+			const ids: number[] = [];
+			for (const row of rows) {
+				const id = await this.db.db.hybridChunks.add(row);
+				ids.push(id as number);
+			}
+			return ids;
+		}
+
+		return await (this.db.db.hybridChunks as unknown as {
+			bulkAdd(rows: ChunkRow[], option: { allKeys: true }): Promise<number[]>;
+		}).bulkAdd(rows, { allKeys: true });
+	}
+
+	private async updateBigChunkChildIds(
+		bigChunkIds: number[],
+		rawSmall: RawChunk[],
+		smallChunkIds: number[],
+		strict: boolean,
+	): Promise<void> {
+		const bigChunkChildIds = new Map<number, number[]>(
+			bigChunkIds.map((id) => [id, []]),
+		);
+
+		for (let i = 0; i < rawSmall.length; i++) {
+			const bigId = bigChunkIds[rawSmall[i].bigChunkIdx];
+			bigChunkChildIds.get(bigId)?.push(smallChunkIds[i]);
+		}
+
+		if (!strict) {
+			for (const [bigId, childIds] of bigChunkChildIds) {
+				await this.db.db.hybridBigChunks.update(bigId, {
+					chunkIds: JSON.stringify(childIds),
+				});
+			}
+			return;
+		}
+
+		const bigRows = await this.db.db.hybridBigChunks.bulkGet(bigChunkIds);
+		const updatedRows = bigRows
+			.map((row) => {
+				if (!row?.id) return null;
+				return {
+					...row,
+					chunkIds: JSON.stringify(bigChunkChildIds.get(row.id) ?? []),
+				};
+			})
+			.filter((row): row is NonNullable<typeof row> => row !== null);
+		await this.db.db.hybridBigChunks.bulkPut(updatedRows);
+	}
+
+	private async indexBm25Only(
+		filePath: string,
+		rawBig: RawBigChunk[],
+		rawSmall: RawChunk[],
+		updateTime: number,
+		option: HybridWriteOption,
+	): Promise<void> {
+		const bigChunkIds = await this.persistBigChunks(rawBig, false);
+		const smallChunkIds: number[] = [];
+
+		for (const chunk of rawSmall) {
+			const row = chunkToRow({
+				id: undefined,
+				bigChunkId: bigChunkIds[chunk.bigChunkIdx],
+				filePath,
+				text: chunk.text,
+				startLine: chunk.startLine,
+				startCol: chunk.startCol,
+				vector: new Int8Array(0),
+				scale: 1,
+			});
+			const id = await this.db.db.hybridChunks.add(row);
+			smallChunkIds.push(id as number);
+			this.bm25.addDocument(id as number, chunk.text);
+		}
+
+		await this.updateBigChunkChildIds(bigChunkIds, rawSmall, smallChunkIds, false);
+		if (option.persistIndices ?? true) {
+			await this.persistIndices();
+		}
 		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
 	}
 
-	private async buildSmallToBigMap(smallIds: number[]): Promise<Map<number, number>> {
-		const map = new Map<number, number>();
-		if (smallIds.length === 0) return map;
-		const rows = await this.db.db.hybridChunks.bulkGet(smallIds);
-		for (const row of rows) {
-			if (row) map.set(row.id!, row.bigChunkId);
-		}
-		return map;
-	}
-
-	private async collectSemanticMatchesForVariant(
-		queryText: string,
-		weight: number,
-		queryProfile: ReturnType<typeof buildHybridQueryProfile>,
-		topK: number,
-		vecSmallByBig: Map<number, number>,
-		vecBigById: Map<number, number>,
-	): Promise<void> {
-		const embedded = await this.embedder.embedQuery(queryText, this.precision);
-		const vecSmallRaw = this.hnswSmall.search(
-			embedded.vec,
-			embedded.scale,
-			topK * queryProfile.smallSearchMultiplier,
-			queryProfile.searchEf,
-			this.precision,
-			embedded.vecF16,
-		);
-		const vecBigRaw = this.hnswBig.search(
-			embedded.vec,
-			embedded.scale,
-			topK * queryProfile.bigSearchMultiplier,
-			queryProfile.searchEf,
-			this.precision,
-			embedded.vecF16,
-		);
-
-		const smallToBig = await this.buildSmallToBigMap(vecSmallRaw.map((item) => item.id));
-		for (const item of vecSmallRaw) {
-			const bigId = smallToBig.get(item.id);
-			if (bigId === undefined) continue;
-			const weightedScore = item.score * weight;
-			const prev = vecSmallByBig.get(bigId) ?? 0;
-			if (weightedScore > prev) {
-				vecSmallByBig.set(bigId, weightedScore);
-			}
-		}
-
-		for (const item of vecBigRaw) {
-			const weightedScore = item.score * weight;
-			const prev = vecBigById.get(item.id) ?? 0;
-			if (weightedScore > prev) {
-				vecBigById.set(item.id, weightedScore);
-			}
-		}
-	}
-
-	private async bigIdsToFileItems(
-		bigIds: RankedResult[],
-		query: string,
-		topK: number,
-	): Promise<FileItem[]> {
-		const rows = await this.db.db.hybridBigChunks.bulkGet(
-			bigIds.map((item) => item.id),
-		);
-		const chunksById = new Map<number, BigChunk>();
-
+	private async loadSmallChunkMatches(ranking: RankedResult[]): Promise<SmallChunkMatch[]> {
+		const rows = await this.db.db.hybridChunks.bulkGet(ranking.map((item) => item.id));
+		const chunksById = new Map<number, Chunk>();
 		for (const row of rows) {
 			if (!row?.id) continue;
-			chunksById.set(row.id, await rowToBigChunk(row));
+			chunksById.set(row.id, await rowToChunk(row));
 		}
 
-		const byFile = new Map<
-			string,
-			{
-				chunks: Array<BigChunk & { score: number }>;
-				totalScore: number;
-				bestScore: number;
-			}
-		>();
-
-		for (const item of bigIds) {
-			const chunk = chunksById.get(item.id);
-			if (!chunk) continue;
-
-			const entry = byFile.get(chunk.filePath) ?? {
-				chunks: [],
-				totalScore: 0,
-				bestScore: 0,
-			};
-			entry.chunks.push({ ...chunk, score: item.score });
-			byFile.set(chunk.filePath, entry);
-		}
-
-		const rankedFiles = Array.from(byFile.entries())
-			.map(([filePath, entry]) => {
-				entry.chunks.sort((a, b) => b.score - a.score);
-				const topChunks = entry.chunks.slice(0, 3);
-				const totalScore = scoreFileChunkMatches(
-					topChunks.map((chunk) => chunk.score),
-					this.setting.hybrid.fileRankStrategy ?? "bestPlusSupport",
-				);
+		return ranking
+			.map((item) => {
+				const chunk = chunksById.get(item.id);
+				if (!chunk) return null;
 				return {
-					filePath,
-					topChunks,
-					totalScore,
-					bestScore: topChunks[0]?.score ?? 0,
-				};
+					id: chunk.id,
+					bigChunkId: chunk.bigChunkId,
+					filePath: chunk.filePath,
+					text: chunk.text,
+					row: chunk.startLine,
+					col: chunk.startCol,
+					score: item.score,
+				} as SmallChunkMatch;
 			})
-			.sort(
-				(a, b) =>
-					b.totalScore - a.totalScore || b.bestScore - a.bestScore,
-			)
-			.slice(0, topK);
+			.filter((item): item is SmallChunkMatch => item !== null);
+	}
 
-		return rankedFiles.map(({ filePath, topChunks }) => {
-			const subItems = topChunks.map(
-				(chunk) =>
-					new FileSubItem(
-						chunk.text.trimStart().slice(0, 120),
-						chunk.startLine,
-						chunk.startCol,
-					),
-			);
-			return new FileItem(
-				EngineType.SEMANTIC,
-				filePath,
-				[query],
-				[],
-				subItems,
-				null,
-			);
+	private async buildBigChunkCandidates(
+		smallMatches: SmallChunkMatch[],
+	): Promise<BigChunkCandidate[]> {
+		const bigOrder = new Map<number, number>();
+		const groupedSmallMatches = new Map<number, SmallChunkMatch[]>();
+
+		smallMatches.forEach((match, index) => {
+			if (!bigOrder.has(match.bigChunkId)) {
+				bigOrder.set(match.bigChunkId, index);
+			}
+			const bucket = groupedSmallMatches.get(match.bigChunkId) ?? [];
+			bucket.push(match);
+			groupedSmallMatches.set(match.bigChunkId, bucket);
 		});
+
+		const bigIds = Array.from(bigOrder.entries())
+			.sort((a, b) => a[1] - b[1])
+			.map(([bigChunkId]) => bigChunkId);
+		const rows = await this.db.db.hybridBigChunks.bulkGet(bigIds);
+		const bigChunksById = new Map<number, BigChunk>();
+		for (const row of rows) {
+			if (!row?.id) continue;
+			bigChunksById.set(row.id, await rowToBigChunk(row));
+		}
+
+		return bigIds
+			.map((bigChunkId) => {
+				const bigChunk = bigChunksById.get(bigChunkId);
+				if (!bigChunk) return null;
+				const orderedSmallMatches = (groupedSmallMatches.get(bigChunkId) ?? [])
+					.sort((a, b) => b.score - a.score);
+				return {
+					id: bigChunk.id,
+					filePath: bigChunk.filePath,
+					text: bigChunk.text,
+					startLine: bigChunk.startLine,
+					startCol: bigChunk.startCol,
+					endLine: bigChunk.endLine,
+					score: orderedSmallMatches[0]?.score ?? 0,
+					order: bigOrder.get(bigChunkId) ?? Number.MAX_SAFE_INTEGER,
+					smallMatches: orderedSmallMatches,
+				} as BigChunkCandidate;
+			})
+			.filter((item): item is BigChunkCandidate => item !== null);
 	}
 
-	private async bm25ResultsToFileItems(
-		results: Array<{ bigChunkId: number; score: number }>,
+	private buildFileItemsFromBigCandidates(
+		bigCandidates: BigChunkCandidate[],
 		query: string,
-	): Promise<FileItem[]> {
-		return this.bigIdsToFileItems(
-			results.map((result) => ({
-				id: result.bigChunkId,
-				score: result.score,
-			})),
-			query,
-			results.length,
-		);
+		topK: number,
+	): FileItem[] {
+		const byFile = new Map<string, { filePath: string; subItems: FileSubItem[] }>();
+
+		for (const candidate of bigCandidates) {
+			const entry = byFile.get(candidate.filePath) ?? {
+				filePath: candidate.filePath,
+				subItems: [],
+			};
+			for (const smallMatch of candidate.smallMatches) {
+				if (entry.subItems.length >= MAX_SUBITEMS_PER_FILE) {
+					break;
+				}
+				entry.subItems.push(
+					new FileSubItem(
+						buildSmallChunkSnippet(smallMatch.text, query),
+						smallMatch.row,
+						smallMatch.col,
+						smallMatch.score,
+						buildSmallChunkSnippet(smallMatch.text, query),
+					),
+				);
+			}
+			if (!byFile.has(candidate.filePath)) {
+				byFile.set(candidate.filePath, entry);
+			}
+		}
+
+		return Array.from(byFile.values())
+			.slice(0, topK)
+			.map((entry) =>
+				new FileItem(
+					EngineType.SEMANTIC,
+					entry.filePath,
+					[query],
+					[],
+					entry.subItems,
+					null,
+				),
+			);
 	}
 
-	// ─── Persistence ─────────────────────────────────────────────────────────
+	private toRerankCandidate(candidate: BigChunkCandidate): RerankCandidate {
+		return {
+			id: candidate.id,
+			filePath: candidate.filePath,
+			text: candidate.text,
+			startLine: candidate.startLine,
+			startCol: candidate.startCol,
+			endLine: candidate.endLine,
+			recallScore: candidate.score,
+		};
+	}
 
 	private async persistIndices(): Promise<void> {
 		await Promise.all([this.persistBm25(), this.persistHnsw()]);
 	}
 
-	async persistIndicesForBatch(): Promise<void> {
-		const persistStart = Date.now();
-		await this.persistIndices();
-		logger.debug(`hybrid batch persistIndices finished in ${Date.now() - persistStart} ms`);
-	}
-
 	private async persistBm25(): Promise<void> {
-		const blob = bm25ToBlob(this.bm25.serialize());
-		await this.db.db.hybridBm25Index.put({ id: 0, data: blob });
+		await this.db.db.hybridBm25Index.put({
+			id: 0,
+			data: bm25ToBlob(this.bm25.serialize()),
+		});
 	}
 
 	private async persistHnsw(): Promise<void> {
@@ -664,7 +610,9 @@ export class HybridEngine {
 	private async loadBm25(): Promise<void> {
 		this.bm25.clear();
 		const record = await this.db.db.hybridBm25Index.get(0);
-		if (record) this.bm25.deserialize(await blobToBm25(record.data));
+		if (record) {
+			this.bm25.deserialize(await blobToBm25(record.data));
+		}
 	}
 
 	private async loadHnsw(): Promise<void> {
@@ -678,8 +626,7 @@ export class HybridEngine {
 		if (big) this.hnswBig.deserialize(await blobToHnsw(big.data));
 		this._canSearch = this.hnswSmall.isNonEmpty();
 		if (!this._canSearch) {
-			this.lastSearchFallbackNoticeKey =
-				"hybridNotice.searchFallbackToBm25";
+			this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
 		}
 	}
 
@@ -692,8 +639,83 @@ export class HybridEngine {
 	}
 }
 
-// ─── Utility ──────────────────────────────────────────────────────────────────
+function buildSmallChunkSnippet(text: string, query: string): string {
+	const normalizedText = text.trim();
+	if (!normalizedText) {
+		return '';
+	}
 
-function rankByScore(items: Array<{ id: number; score: number }>): Array<{ id: number; score: number }> {
-	return [...items].sort((a, b) => b.score - a.score);
+	const windows = createTokenWindows(
+		normalizedText,
+		SNIPPET_TOKEN_TARGET,
+		SNIPPET_TOKEN_MAX,
+	);
+	if (windows.length === 0) {
+		return cleanSnippet(normalizedText);
+	}
+
+	const queryLower = query.trim().toLowerCase();
+	const queryTerms = Array.from(
+		new Set(
+			queryLower
+				.split(/\s+/)
+				.map((term) => term.trim())
+				.filter((term) => term.length >= 2),
+		),
+	);
+
+	let bestWindow = windows[0];
+	let bestScore = scoreSnippetWindow(
+		normalizedText.slice(bestWindow.startOffset, bestWindow.endOffset),
+		queryLower,
+		queryTerms,
+	);
+
+	for (let i = 1; i < windows.length; i++) {
+		const window = windows[i];
+		const score = scoreSnippetWindow(
+			normalizedText.slice(window.startOffset, window.endOffset),
+			queryLower,
+			queryTerms,
+		);
+		if (score > bestScore) {
+			bestScore = score;
+			bestWindow = window;
+		}
+	}
+
+	return cleanSnippet(
+		normalizedText.slice(bestWindow.startOffset, bestWindow.endOffset),
+	);
+}
+
+function scoreSnippetWindow(
+	snippet: string,
+	queryLower: string,
+	queryTerms: string[],
+): number {
+	const normalized = snippet.toLowerCase();
+	let score = 0;
+
+	if (queryLower && normalized.includes(queryLower)) {
+		score += Math.max(20, queryLower.length * 1.5);
+	}
+
+	for (const term of queryTerms) {
+		let searchStart = 0;
+		let hits = 0;
+		while (searchStart < normalized.length) {
+			const index = normalized.indexOf(term, searchStart);
+			if (index < 0) break;
+			hits++;
+			searchStart = index + term.length;
+		}
+		score += hits * Math.max(3, Math.min(term.length, 12));
+	}
+
+	return score;
+}
+
+function cleanSnippet(text: string): string {
+	return text.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHAR_LIMIT);
 }

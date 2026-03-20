@@ -29,6 +29,32 @@ export type SemanticQueryVariant = {
 const RRF_K = 60;
 const MIN_SCORE_SPREAD = 0.05;
 
+export function reciprocalRankFuse(
+	lists: RankedResult[][],
+	limit: number,
+): RankedResult[] {
+	if (limit <= 0) {
+		return [];
+	}
+
+	const merged = new Map<number, number>();
+	for (const list of lists) {
+		const ranked = sortRankedResults(list);
+		for (let index = 0; index < ranked.length; index++) {
+			const item = ranked[index];
+			merged.set(
+				item.id,
+				(merged.get(item.id) ?? 0) + reciprocalRankScore(index),
+			);
+		}
+	}
+
+	return Array.from(merged.entries())
+		.map(([id, score]) => ({ id, score }))
+		.sort((a, b) => b.score - a.score)
+		.slice(0, limit);
+}
+
 export function buildHybridQueryProfile(
 	query: string,
 	queryTokenCount: number,

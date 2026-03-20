@@ -69,13 +69,13 @@ export default {
 	"Additional Information.desc": "When semantic search is turned on and ai-helper is running, Reindex will be applied to both lexical and semantic engine; each time this plugin is loaded, the semantic engine will automatically perform an incremental index, and subsequent file modifications will not update the index to avoid blocking semantic search.",
 
 	"Hybrid search": "Hybrid search",
-	"Hybrid search desc": "Hybrid lexical and semantic search with graceful degradation to lexical search upon semantic failure (e.g., network issues or insufficient tokens).",
+	"Hybrid search desc": "Hybrid lexical plus semantic search with graceful fallback to lexical-only results when the Qwen embedding or rerank path fails.",
 
-	"hybridModal.desc": "Hybrid search combines lexical and semantic (embedding) search. Semantic search calls an OpenAI-compatible embedding API and consumes tokens. When semantic search fails (network error, quota exceeded, etc.) it gracefully falls back to lexical search.",
+	"hybridModal.desc": "Hybrid search combines lexical search with Qwen-based semantic retrieval. Indexing uses text-embedding-v4, search reranking uses qwen3-rerank, and both provider-reported token costs are counted toward the weekly limit. If the semantic path fails (network error, quota exceeded, etc.), results automatically fall back to lexical search.",
 	"hybridModal.apiDomain": "API domain",
-	"hybridModal.apiDomain.desc": "Leave blank to use api.openai.com. For custom/proxy endpoints enter the domain only (e.g. my-proxy.example.com).",
+	"hybridModal.apiDomain.desc": "Leave blank to use dashscope.aliyuncs.com. For custom/proxy endpoints enter the domain only (e.g. my-proxy.example.com).",
 	"hybridModal.apiKey": "API key",
-	"hybridModal.apiKeyNotice": "Token values shown here may differ from actual provider usage. Actual billing and quota are determined by the provider response. Only the text-embedding-3-small model is supported, so confirm your API key has access to that model.",
+	"hybridModal.apiKeyNotice": "Token values shown here come from the provider response usage fields. Hybrid search currently uses text-embedding-v4 and qwen3-rerank, so confirm your API key has access to both models.",
 	"hybridModal.weeklyTokenLimit": "Weekly token limit",
 	"hybridModal.weeklyTokenLimit.desc": "Maximum tokens to consume per week (Mon–Sun). Set to 0 for unlimited.",
 	"hybridModal.weeklyUsed": "This week used",

@@ -3,6 +3,7 @@ import {
 	buildSemanticQueryVariants,
 	filterSemanticMatches,
 	mergeHybridRankings,
+	reciprocalRankFuse,
 	scoreFileChunkMatches,
 } from "src/services/search/hybrid/ranking";
 
@@ -89,5 +90,26 @@ describe("hybrid ranking", () => {
 		expect(variants[0]?.weight).toBe(1);
 		expect(variants[1]?.text).toContain("rotate aws access keys");
 		expect(variants[2]?.weight).toBeLessThan(variants[1]?.weight ?? 1);
+	});
+
+	test("fuses lexical and dense small chunk rankings with RRF", () => {
+		const fused = reciprocalRankFuse(
+			[
+				[
+					{ id: 1, score: 10 },
+					{ id: 2, score: 8 },
+					{ id: 3, score: 6 },
+				],
+				[
+					{ id: 2, score: 0.92 },
+					{ id: 1, score: 0.88 },
+					{ id: 4, score: 0.8 },
+				],
+			],
+			10,
+		);
+
+		expect(fused.slice(0, 2).map((item) => item.id)).toEqual([1, 2]);
+		expect(fused.some((item) => item.id === 4)).toBe(true);
 	});
 });

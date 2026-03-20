@@ -17,6 +17,8 @@ export type RawBigChunk = {
 export type RawChunk = {
 	bigChunkIdx: number; // index into RawBigChunk[], replaced by real id after DB insert
 	text: string;
+	startLine: number;
+	startCol: number;
 };
 
 // ─── Persisted types ─────────────────────────────────────────────────────────
@@ -29,6 +31,9 @@ export type Chunk = {
 	id: number;
 	bigChunkId: number;
 	filePath: string;
+	text: string;
+	startLine: number;
+	startCol: number;
 	vector: Int8Array;   // int8 quantized, length = EMBED_DIM
 	scale: number;       // max(|float32[i]|), used for dequantization
 	// float16 rescoring branch

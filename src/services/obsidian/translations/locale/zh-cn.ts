@@ -60,13 +60,13 @@ export default {
 	"Additional Information.desc": "在开启语义搜索并运行 ai-helper 的情况下，重新索引 会同时应用于词汇引擎和语义引擎；每次加载插件的时候，语义引擎会自动进行一次增量索引，之后修改文件不会更新索引以避免阻塞语义搜索。",
 
 	"Hybrid search": "混合搜索",
-	"Hybrid search desc": "混合词义和语义搜索，语义搜索由于网络、token不足等原因失败时退化到词义搜索",
+	"Hybrid search desc": "混合词法搜索与千问语义搜索。当千问 embedding 或 rerank 链路失败时，会自动降级为纯词法搜索。",
 
-	"hybridModal.desc": "混合搜索结合了词汇搜索和语义（向量嵌入）搜索。语义搜索会调用兼容 OpenAI 的嵌入 API 并消耗 token。当语义搜索失败（网络错误、配额超限等）时，会自动降级为词汇搜索。",
+	"hybridModal.desc": "混合搜索结合了词法搜索和基于千问的语义检索。建立索引时会调用 text-embedding-v4，搜索阶段会调用 qwen3-rerank，这两部分接口返回的 token 用量都会计入每周限额。当语义链路失败（网络错误、配额超限等）时，会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",
-	"hybridModal.apiDomain.desc": "留空则使用 api.openai.com。如需使用自定义/代理端点，仅填写域名（例如 my-proxy.example.com）。",
+	"hybridModal.apiDomain.desc": "留空则使用 dashscope.aliyuncs.com。如需使用自定义或代理端点，只填写域名即可，例如 my-proxy.example.com。",
 	"hybridModal.apiKey": "API 密钥",
-	"hybridModal.apiKeyNotice": "这里显示的 token 与实际消耗可能有偏差，请以接口返回和实际计费为准。当前只支持 text-embedding-3-small 模型，请确认你的 API key 支持这个模型。",
+	"hybridModal.apiKeyNotice": "这里显示的 token 以千问接口返回的 usage 为准。当前混合搜索会使用 text-embedding-v4 和 qwen3-rerank，请确认你的 API key 支持这两个模型。",
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc": "每周（周一至周日）最多消耗的 token 数量，设为 0 表示不限制。",
 	"hybridModal.weeklyUsed": "本周已使用",
