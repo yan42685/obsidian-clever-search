@@ -7,8 +7,9 @@ export type VectorPrecision = 'int8' | 'float16';
 /** Output of chunker — not yet persisted */
 export type RawBigChunk = {
 	filePath: string;
-	text: string;       // full text including heading prefix
+	text: string;       // original text slice from the file
 	startLine: number;
+	startCol: number;
 	endLine: number;
 };
 
@@ -43,6 +44,7 @@ export type BigChunk = {
 	filePath: string;
 	text: string;
 	startLine: number;
+	startCol: number;
 	endLine: number;
 	chunkIds: number[];  // child small-chunk ids
 	vector: Int8Array;
@@ -111,6 +113,7 @@ export type BigChunkMatch = {
 	filePath: string;
 	text: string;
 	startLine: number;
+	startCol: number;
 	endLine: number;
 	score: number;
 };
@@ -124,10 +127,13 @@ export type HybridSearchResult = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const EMBED_DIM = 512;
-export const BIG_CHUNK_TARGET = 500;
-export const BIG_CHUNK_MAX = 900;
-export const SMALL_CHUNK_TARGET = 150;
-export const SMALL_CHUNK_OVERLAP = 30;
+export const BIG_CHUNK_TARGET = 1000;
+export const BIG_CHUNK_MAX = BIG_CHUNK_TARGET * 1.15;
+export const SMALL_CHUNK_TARGET = 300;
+export const CHUNK_MAX_OVERFLOW_RATIO = 0.15;
+export const CHUNK_OVERLAP_MIN_RATIO = 0.14;
+export const CHUNK_OVERLAP_TARGET_RATIO = 0.16;
+export const CHUNK_OVERLAP_MAX_RATIO = 0.18;
 export const BM25_K1 = 1.5;
 export const BM25_B = 0.75;
 export const HNSW_M = 16;

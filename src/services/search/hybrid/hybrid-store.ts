@@ -17,6 +17,7 @@ export type BigChunkRow = {
 	filePath: string;
 	text: string;
 	startLine: number;
+	startCol: number;
 	endLine: number;
 	chunkIds: string;   // JSON array of chunk ids
 	vector?: Blob;
@@ -77,6 +78,7 @@ export function bigChunkToRow(bc: Omit<BigChunk, 'id'> & { id?: number }): BigCh
 		filePath: bc.filePath,
 		text: bc.text,
 		startLine: bc.startLine,
+		startCol: bc.startCol,
 		endLine: bc.endLine,
 		chunkIds: JSON.stringify(bc.chunkIds),
 		vector: bc.vector ? int8ToBlob(bc.vector) : undefined,
@@ -93,6 +95,7 @@ export async function rowToBigChunk(row: BigChunkRow): Promise<BigChunk> {
 		filePath: row.filePath,
 		text: row.text,
 		startLine: row.startLine,
+		startCol: row.startCol ?? 0,
 		endLine: row.endLine,
 		chunkIds: JSON.parse(row.chunkIds) as number[],
 		vector: row.vector ? await blobToInt8(row.vector) : new Int8Array(0),

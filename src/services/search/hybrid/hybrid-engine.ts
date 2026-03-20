@@ -159,6 +159,7 @@ export class HybridEngine {
 				filePath: rb.filePath,
 				text: rb.text,
 				startLine: rb.startLine,
+				startCol: rb.startCol,
 				endLine: rb.endLine,
 				chunkIds: [],
 				vector: vec,
@@ -290,6 +291,7 @@ export class HybridEngine {
 				filePath: rb.filePath,
 				text: rb.text,
 				startLine: rb.startLine,
+				startCol: rb.startCol,
 				endLine: rb.endLine,
 				chunkIds: [],
 				vector: vec,
@@ -474,6 +476,7 @@ export class HybridEngine {
 				filePath: rb.filePath,
 				text: rb.text,
 				startLine: rb.startLine,
+				startCol: rb.startCol,
 				endLine: rb.endLine,
 				chunkIds: [],
 				vector: new Int8Array(0),
@@ -603,7 +606,11 @@ export class HybridEngine {
 		return rankedFiles.map(({ filePath, topChunks }) => {
 			const subItems = topChunks.map(
 				(chunk) =>
-					new FileSubItem(chunk.text.slice(0, 120), chunk.startLine, 0),
+					new FileSubItem(
+						chunk.text.trimStart().slice(0, 120),
+						chunk.startLine,
+						chunk.startCol,
+					),
 			);
 			return new FileItem(
 				EngineType.SEMANTIC,
