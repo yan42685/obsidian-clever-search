@@ -88,36 +88,41 @@ export function bm25ToBlob(index: BM25Index): Blob {
 		.sort((a, b) => Number(a[0]) - Number(b[0]));
 
 	chunks.push(BM25_BINARY_MAGIC);
-	chunks.push(writeUint32(index.docCount));
+	chunks.push(writeVarUint(index.docCount));
 	chunks.push(writeFloat32(index.avgDocLen));
 
-	chunks.push(writeUint32(termEntries.length));
+	chunks.push(writeVarUint(termEntries.length));
 	for (const [term, entry] of termEntries) {
 		const termBytes = textEncoder.encode(term);
-		chunks.push(writeUint32(entry.termId));
-		chunks.push(writeUint32(entry.df));
-		chunks.push(writeUint32(termBytes.length));
+		chunks.push(writeVarUint(entry.termId));
+		chunks.push(writeVarUint(entry.df));
+		chunks.push(writeVarUint(termBytes.length));
 		chunks.push(termBytes);
 	}
 
-	chunks.push(writeUint32(postingEntries.length));
+	chunks.push(writeVarUint(postingEntries.length));
 	for (const [termId, list] of postingEntries) {
-		chunks.push(writeUint32(Number(termId)));
-		chunks.push(writeUint32(list.entries.length));
+		chunks.push(writeVarUint(Number(termId)));
+		chunks.push(writeVarUint(list.entries.length));
+		let prevDocId = 0;
 		for (const entry of list.entries) {
-			chunks.push(writeUint32(entry.docId));
-			chunks.push(writeFloat32(entry.tfNorm));
-			chunks.push(writeUint8(entry.positions.length));
+			chunks.push(writeVarUint(entry.docId - prevDocId));
+			prevDocId = entry.docId;
+			chunks.push(writeUint16(quantizeTfNorm(entry.tfNorm)));
+			chunks.push(writeVarUint(entry.positions.length));
 			for (const delta of entry.positions) {
-				chunks.push(writeUint16(delta));
+				chunks.push(writeVarUint(delta));
 			}
 		}
 	}
 
-	chunks.push(writeUint32(docLengthEntries.length));
+	chunks.push(writeVarUint(docLengthEntries.length));
+	let prevDocId = 0;
 	for (const [docId, length] of docLengthEntries) {
-		chunks.push(writeUint32(Number(docId)));
-		chunks.push(writeUint32(length));
+		const numericDocId = Number(docId);
+		chunks.push(writeVarUint(numericDocId - prevDocId));
+		prevDocId = numericDocId;
+		chunks.push(writeVarUint(length));
 	}
 
 	return new Blob(chunks, { type: 'application/octet-stream' });
@@ -132,41 +137,44 @@ export async function blobToBm25(blob: Blob): Promise<BM25Index> {
 	const reader = new BinaryReader(buf);
 	reader.skip(BM25_BINARY_MAGIC.length);
 
-	const docCount = reader.readUint32();
+	const docCount = reader.readVarUint();
 	const avgDocLen = reader.readFloat32();
 
-	const termCount = reader.readUint32();
+	const termCount = reader.readVarUint();
 	const termDict: BM25Index['termDict'] = {};
 	for (let i = 0; i < termCount; i++) {
-		const termId = reader.readUint32();
-		const df = reader.readUint32();
-		const term = reader.readString(reader.readUint32());
+		const termId = reader.readVarUint();
+		const df = reader.readVarUint();
+		const term = reader.readString(reader.readVarUint());
 		termDict[term] = { termId, df };
 	}
 
-	const postingsCount = reader.readUint32();
+	const postingsCount = reader.readVarUint();
 	const postings: BM25Index['postings'] = {};
 	for (let i = 0; i < postingsCount; i++) {
-		const termId = reader.readUint32();
-		const entryCount = reader.readUint32();
+		const termId = reader.readVarUint();
+		const entryCount = reader.readVarUint();
 		const entries = [];
+		let docId = 0;
 		for (let j = 0; j < entryCount; j++) {
-			const docId = reader.readUint32();
-			const tfNorm = reader.readFloat32();
-			const positionCount = reader.readUint8();
+			docId += reader.readVarUint();
+			const tfNorm = dequantizeTfNorm(reader.readUint16());
+			const positionCount = reader.readVarUint();
 			const positions: number[] = [];
 			for (let k = 0; k < positionCount; k++) {
-				positions.push(reader.readUint16());
+				positions.push(reader.readVarUint());
 			}
 			entries.push({ docId, tfNorm, positions });
 		}
 		postings[termId] = { entries };
 	}
 
-	const docLengthCount = reader.readUint32();
+	const docLengthCount = reader.readVarUint();
 	const docLengths: BM25Index['docLengths'] = {};
+	let docId = 0;
 	for (let i = 0; i < docLengthCount; i++) {
-		docLengths[reader.readUint32()] = reader.readUint32();
+		docId += reader.readVarUint();
+		docLengths[docId] = reader.readVarUint();
 	}
 
 	return {
@@ -336,7 +344,8 @@ function parseVectorPrecision(value: string): VectorPrecision {
 	return value === 'float16' ? 'float16' : 'int8';
 }
 
-const BM25_BINARY_MAGIC = Uint8Array.from([0x43, 0x53, 0x42, 0x31]);
+const BM25_BINARY_MAGIC = Uint8Array.from([0x43, 0x53, 0x42, 0x32]);
+const BM25_TF_NORM_SCALE = 4096;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -356,10 +365,36 @@ function writeUint32(value: number): Uint8Array {
 	return new Uint8Array(buf);
 }
 
+function writeVarUint(value: number): Uint8Array {
+	if (!Number.isInteger(value) || value < 0) {
+		throw new Error(`VarUint only supports non-negative integers, got ${value}`);
+	}
+	const bytes: number[] = [];
+	let current = value;
+	do {
+		let byte = current & 0x7f;
+		current = Math.floor(current / 128);
+		if (current > 0) {
+			byte |= 0x80;
+		}
+		bytes.push(byte);
+	} while (current > 0);
+	return Uint8Array.from(bytes);
+}
+
 function writeFloat32(value: number): Uint8Array {
 	const buf = new ArrayBuffer(4);
 	new DataView(buf).setFloat32(0, value, true);
 	return new Uint8Array(buf);
+}
+
+function quantizeTfNorm(value: number): number {
+	const scaled = Math.round(value * BM25_TF_NORM_SCALE);
+	return Math.max(0, Math.min(0xffff, scaled));
+}
+
+function dequantizeTfNorm(value: number): number {
+	return value / BM25_TF_NORM_SCALE;
 }
 
 function isBm25Binary(buf: ArrayBuffer): boolean {
@@ -403,6 +438,22 @@ class BinaryReader {
 		const value = this.view.getUint32(this.offset, true);
 		this.offset += 4;
 		return value;
+	}
+
+	readVarUint(): number {
+		let value = 0;
+		let shift = 0;
+		while (true) {
+			const byte = this.readUint8();
+			value += (byte & 0x7f) * 2 ** shift;
+			if ((byte & 0x80) === 0) {
+				return value;
+			}
+			shift += 7;
+			if (shift > 35) {
+				throw new Error('Invalid varuint encoding');
+			}
+		}
 	}
 
 	readFloat32(): number {

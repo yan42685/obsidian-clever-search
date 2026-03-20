@@ -110,6 +110,14 @@ It keeps:
 - document lengths
 - bucketed positional information for approximate proximity bonus
 
+The current BM25 blob uses a compact binary layout:
+
+- `docId` values are delta encoded and stored as varints
+- positional deltas are stored as varints
+- `tfNorm` is quantized to `uint16`
+
+This keeps chunk-level recall unchanged while reducing storage overhead.
+
 ## Database Layout
 
 Current hybrid-related tables:
@@ -122,6 +130,7 @@ Current hybrid-related tables:
 - `hybridTokenStats`
 
 DB version upgrades clear hybrid tables and trigger rebuilding.
+The BM25 binary format is not backward compatible across versions; rebuilding is intentional.
 
 ## Search Output Semantics
 
