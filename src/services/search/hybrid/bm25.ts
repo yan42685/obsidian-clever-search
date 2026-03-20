@@ -12,6 +12,11 @@ type BM25SearchResult = { docId: number; score: number };
 
 const BM25_POSITION_BUCKET_SIZE = 4;
 const BM25_MAX_POSITIONS_PER_TERM = 8;
+const BM25_PROXIMITY_MAX_SCORE_RATIO = 0.22;
+const BM25_PROXIMITY_SPAN_WEIGHT = 0.11;
+const BM25_PROXIMITY_ORDER_WEIGHT = 0.05;
+const BM25_PROXIMITY_ADJACENT_WEIGHT = 0.04;
+const BM25_PROXIMITY_COMPACT_WEIGHT = 0.02;
 
 export class BM25Engine {
 	private readonly tokenizer = getInstance(Tokenizer);
@@ -122,6 +127,7 @@ export class BM25Engine {
 	search(query: string, topK = 20): BM25SearchResult[] {
 		const terms = this.tokenizer.tokenize(query, 'search');
 		if (terms.length === 0 || this._docCount === 0) return [];
+		const orderedTerms = uniqueTermsInOrder(terms);
 
 		const scores = new Map<number, number>();
 		const docPositions = new Map<number, Map<string, number[]>>();
@@ -137,7 +143,7 @@ export class BM25Engine {
 			const idf = Math.log((N - termEntry.df + 0.5) / (termEntry.df + 0.5) + 1);
 			for (const entry of list.entries) {
 				scores.set(entry.docId, (scores.get(entry.docId) ?? 0) + entry.tfNorm * idf);
-				if (terms.length > 1) {
+				if (orderedTerms.length > 1) {
 					let termPos = docPositions.get(entry.docId);
 					if (!termPos) {
 						termPos = new Map();
@@ -148,13 +154,18 @@ export class BM25Engine {
 			}
 		}
 
-		if (terms.length > 1) {
+		if (orderedTerms.length > 1) {
 			for (const [docId, termPos] of docPositions) {
 				if (termPos.size < 2) continue;
-				const span = minSpan(termPos, terms);
-				if (span < Infinity) {
-					const approxTokenSpan = span * BM25_POSITION_BUCKET_SIZE;
-					scores.set(docId, (scores.get(docId) ?? 0) + 200 / (approxTokenSpan + 1));
+				const baseScore = scores.get(docId) ?? 0;
+				if (baseScore <= 0) continue;
+				const proximityBonus = computeProximityBonus(
+					termPos,
+					orderedTerms,
+					baseScore,
+				);
+				if (proximityBonus > 0) {
+					scores.set(docId, baseScore + proximityBonus);
 				}
 			}
 		}
@@ -213,6 +224,36 @@ export class BM25Engine {
 		const avgdl = this.avgDocLen || 1;
 		return (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * (dl / avgdl)));
 	}
+}
+
+function computeProximityBonus(
+	termPos: Map<string, number[]>,
+	terms: string[],
+	baseScore: number,
+): number {
+	const span = minSpan(termPos, terms);
+	if (span === Infinity) {
+		return 0;
+	}
+
+	const approxTokenSpan = span * BM25_POSITION_BUCKET_SIZE;
+	const spanSignal = 1 / (approxTokenSpan + 1);
+	const orderedSignal = computeOrderedPairSignal(termPos, terms);
+	const adjacentSignal = computeAdjacentPairSignal(termPos, terms);
+	const compactSignal =
+		approxTokenSpan <= Math.max(BM25_POSITION_BUCKET_SIZE, terms.length * BM25_POSITION_BUCKET_SIZE)
+			? 1
+			: 0;
+
+	const proximityRatio = Math.min(
+		BM25_PROXIMITY_MAX_SCORE_RATIO,
+		spanSignal * BM25_PROXIMITY_SPAN_WEIGHT +
+			orderedSignal * BM25_PROXIMITY_ORDER_WEIGHT +
+			adjacentSignal * BM25_PROXIMITY_ADJACENT_WEIGHT +
+			compactSignal * BM25_PROXIMITY_COMPACT_WEIGHT,
+	);
+
+	return baseScore * proximityRatio;
 }
 
 function encodeDelta(positions: number[]): number[] {
@@ -277,4 +318,90 @@ function minSpan(termPos: Map<string, number[]>, terms: string[]): number {
 		}
 	}
 	return minS;
+}
+
+function computeOrderedPairSignal(
+	termPos: Map<string, number[]>,
+	terms: string[],
+): number {
+	if (terms.length < 2) {
+		return 0;
+	}
+
+	let matchedPairs = 0;
+	let totalScore = 0;
+	for (let i = 0; i < terms.length - 1; i++) {
+		const left = termPos.get(terms[i]);
+		const right = termPos.get(terms[i + 1]);
+		if (!left || !right) {
+			continue;
+		}
+		const gap = minOrderedGap(left, right);
+		if (gap === Infinity) {
+			continue;
+		}
+		matchedPairs++;
+		const approxTokenGap = gap * BM25_POSITION_BUCKET_SIZE;
+		totalScore += 1 / (approxTokenGap + 1);
+	}
+
+	if (matchedPairs === 0) {
+		return 0;
+	}
+	return totalScore / Math.max(1, terms.length - 1);
+}
+
+function computeAdjacentPairSignal(
+	termPos: Map<string, number[]>,
+	terms: string[],
+): number {
+	if (terms.length < 2) {
+		return 0;
+	}
+
+	let tightPairs = 0;
+	for (let i = 0; i < terms.length - 1; i++) {
+		const left = termPos.get(terms[i]);
+		const right = termPos.get(terms[i + 1]);
+		if (!left || !right) {
+			continue;
+		}
+		const gap = minOrderedGap(left, right);
+		if (gap <= 1) {
+			tightPairs++;
+		}
+	}
+
+	return tightPairs / Math.max(1, terms.length - 1);
+}
+
+function minOrderedGap(left: number[], right: number[]): number {
+	let minGap = Infinity;
+	let j = 0;
+	for (const leftPos of left) {
+		while (j < right.length && right[j] < leftPos) {
+			j++;
+		}
+		for (let k = j; k < right.length; k++) {
+			if (right[k] < leftPos) {
+				continue;
+			}
+			minGap = Math.min(minGap, right[k] - leftPos);
+			break;
+		}
+	}
+	return minGap;
+}
+
+function uniqueTermsInOrder(terms: string[]): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const term of terms) {
+		if (seen.has(term)) {
+			continue;
+		}
+		seen.add(term);
+		out.push(term);
+	}
+	return out;
 }
