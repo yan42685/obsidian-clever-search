@@ -77,6 +77,13 @@
 		searchInputEl?.focus();
 	}
 
+	function getSelectedSuggestion(): SearchHistoryEntry | null {
+		if (!isHistoryDropdownOpen || historySuggestions.length === 0) {
+			return null;
+		}
+		return historySuggestions[currHistoryIndex] ?? historySuggestions[0] ?? null;
+	}
+
 	function handleInput() {
 		updateSuggestionsState();
 		notifyQueryChanged();
@@ -91,6 +98,17 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === "Tab" && isHistoryDropdownOpen) {
+			const selectedHistory = getSelectedSuggestion();
+			if (!selectedHistory) {
+				return;
+			}
+			event.preventDefault();
+			event.stopPropagation();
+			acceptSuggestion(selectedHistory.queryText);
+			return;
+		}
+
 		if (event.key === "Tab" && ghostSuffix && ghostSuggestion) {
 			event.preventDefault();
 			event.stopPropagation();
@@ -119,8 +137,7 @@
 		}
 
 		if (event.key === "Enter") {
-			const selectedHistory =
-				historySuggestions[currHistoryIndex] ?? historySuggestions[0];
+			const selectedHistory = getSelectedSuggestion();
 			if (!selectedHistory) {
 				return;
 			}
@@ -154,6 +171,30 @@
 
 	function getOriginalIndex(displayIndex: number): number {
 		return historySuggestions.length - 1 - displayIndex;
+	}
+
+	export function isSuggestionsActive(): boolean {
+		return isHistoryDropdownOpen;
+	}
+
+	export async function moveSelectionByHotkey(
+		direction: "next" | "prev",
+	): Promise<boolean> {
+		if (!isHistoryDropdownOpen || historySuggestions.length === 0) {
+			return false;
+		}
+		moveHistorySelection(direction);
+		await scrollSelectedSuggestionIntoView();
+		return true;
+	}
+
+	export function acceptSelectedSuggestion(): boolean {
+		const selectedHistory = getSelectedSuggestion();
+		if (!selectedHistory) {
+			return false;
+		}
+		acceptSuggestion(selectedHistory.queryText);
+		return true;
 	}
 
 	async function scrollSuggestionsToBottom() {

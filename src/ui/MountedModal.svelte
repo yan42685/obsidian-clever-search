@@ -39,6 +39,7 @@
 	let currFilePreviewContent: any = undefined; // for non-markdown viewType
 	let currSubItemIndex = NULL_NUMBER;
 	let latestSearchRequestId = 0;
+	let historyInputRef: any;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
@@ -152,6 +153,9 @@
 
 	// select the next search result
 	async function handleNextItem() {
+		if (await historyInputRef?.moveSelectionByHotkey?.("prev")) {
+			return;
+		}
 		await updateItemAsync(
 			Math.min(currItemIndex + 1, searchResult.items.length - 1),
 		);
@@ -162,6 +166,9 @@
 
 	// Select the previous search result
 	async function handlePrevItem() {
+		if (await historyInputRef?.moveSelectionByHotkey?.("next")) {
+			return;
+		}
 		await updateItemAsync(Math.max(currItemIndex - 1, 0));
 		if (uiType === "floatingWindow") {
 			await handleConfirm(null, false);
@@ -190,6 +197,9 @@
 
 	async function handleConfirm(event: Event | null, inBackground: boolean) {
 		event?.preventDefault();
+		if (!inBackground && historyInputRef?.acceptSelectedSuggestion?.()) {
+			return;
+		}
 		const selectedItem = searchResult.items[currItemIndex];
 		await viewHelper.handleConfirmAsync(
 			inBackground ? () => {} : onConfirmExternal,
@@ -251,6 +261,7 @@
 <div class="search-container">
 	<div class="left-pane">
 		<SearchHistoryInput
+			bind:this={historyInputRef}
 			bind:queryText
 			{matchCountText}
 			on:querychange={handleInput}
