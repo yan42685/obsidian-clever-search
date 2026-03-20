@@ -35,6 +35,7 @@
 	let currFileSubItems: FileSubItem[] = []; // for markdown viewType
 	let currFilePreviewContent: any = undefined; // for non-markdown viewType
 	let currSubItemIndex = NULL_NUMBER;
+	let latestSearchRequestId = 0;
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
@@ -85,26 +86,49 @@
 
 	// handle input changes
 	const handleInputDebounced = debounce(100, () => handleInputAsync());
+	const handleHybridInputDebounced = debounce(400, () => handleInputAsync());
 
 	async function handleInputAsync() {
-		if (cachedResult.has(queryText)) {
-			searchResult = cachedResult.get(queryText) as SearchResult;
+		const requestId = ++latestSearchRequestId;
+		const currentQueryText = queryText;
+
+		if (cachedResult.has(currentQueryText)) {
+			if (requestId !== latestSearchRequestId || currentQueryText !== queryText) {
+				return;
+			}
+			searchResult = cachedResult.get(currentQueryText) as SearchResult;
 			await updateItemAsync(0);
 			return;
 		}
+
+		let nextResult: SearchResult;
 		if (searchType === SearchType.IN_FILE) {
-			searchResult = await searchService.searchInFile(queryText);
+			nextResult = await searchService.searchInFile(currentQueryText);
 		} else if (searchType === SearchType.IN_VAULT) {
 			if (isHybrid) {
-				searchResult = await searchService.searchInVaultHybrid(queryText);
+				nextResult = await searchService.searchInVaultHybrid(currentQueryText);
 			} else {
-				searchResult = await searchService.searchInVault(queryText);
+				nextResult = await searchService.searchInVault(currentQueryText);
 			}
 		} else {
 			throw Error(TO_BE_IMPL);
 		}
-		cachedResult.set(queryText, searchResult);
+
+		if (requestId !== latestSearchRequestId || currentQueryText !== queryText) {
+			return;
+		}
+
+		searchResult = nextResult;
+		cachedResult.set(currentQueryText, searchResult);
 		await updateItemAsync(0);
+	}
+
+	function handleInput() {
+		if (searchType === SearchType.IN_VAULT && isHybrid) {
+			handleHybridInputDebounced();
+			return;
+		}
+		handleInputDebounced();
 	}
 
 	// handle result click
@@ -214,7 +238,7 @@
 			<input
 				id="cs-search-input"
 				bind:value={queryText}
-				on:input={handleInputDebounced}
+				on:input={handleInput}
 			/>
 		</div>
 		<div class="result-items">
