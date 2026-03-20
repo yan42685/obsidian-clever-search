@@ -258,13 +258,14 @@ const FILE_SEARCH_FIELD_WEIGHTS: Record<FileSearchField, number> = {
 const FILE_SEARCH_BM25_K1 = 1.5;
 const FILE_SEARCH_BM25_B = 0.75;
 const FILE_SEARCH_PREFIX_EXPANSION_LIMIT = 128;
-const FILE_SEARCH_FUZZY_EXPANSION_LIMIT = 24;
+const FILE_SEARCH_FUZZY_EXPANSION_LIMIT = 96;
 const FILE_SEARCH_MAX_FUZZY_EDITS = 2;
 const FILE_SEARCH_FIELD_COORDINATION_BONUS = 0.9;
 const FILE_SEARCH_METADATA_COORDINATION_BONUS = 1.8;
 const FILE_SEARCH_METADATA_EXPANDED_MATCH_BONUS = 1.25;
 const FILE_SEARCH_METADATA_FULL_FIELD_COVERAGE_BONUS = 2.4;
 const FILE_SEARCH_PREFIX_EXACT_MATCH_BOOST = 0.72;
+const FILE_SEARCH_FUZZY_WHEN_PREFIX_EXISTS_BOOST = 0.92;
 const FILE_SEARCH_BINARY_MAGIC = [0x43, 0x53, 0x46, 0x42] as const;
 const FILE_SEARCH_BINARY_FORMAT_VERSION = 1;
 
@@ -751,26 +752,34 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 				});
 			}
 		}
+		const hasExactMatch = matchedTerms.get(queryTerm)?.kind === "exact";
+		if (allowFuzzy && !hasExactMatch) {
+			for (const { term, distance } of this.expandFuzzyTerms(queryTerm)) {
+				if (matchedTerms.has(term)) {
+					continue;
+				}
+				matchedTerms.set(term, {
+					term,
+					boost:
+						computeFuzzyBoost(distance) *
+						(prefixTerms.length > 0
+							? FILE_SEARCH_FUZZY_WHEN_PREFIX_EXISTS_BOOST
+							: 1),
+					kind: "fuzzy",
+					fields:
+						prefixTerms.length > 0
+							? FILE_SEARCH_METADATA_FIELDS
+							: undefined,
+				});
+			}
+		}
 		if (matchedTerms.size > 0) {
 			return {
 				matchedTerms: Array.from(matchedTerms.values()),
 			};
 		}
-
-		if (!allowFuzzy) {
-			return {
-				matchedTerms: [],
-			};
-		}
-
 		return {
-			matchedTerms: this.expandFuzzyTerms(queryTerm).map(
-				({ term, distance }) => ({
-					term,
-					boost: computeFuzzyBoost(distance),
-					kind: "fuzzy",
-				}),
-			),
+			matchedTerms: [],
 		};
 	}
 
@@ -864,6 +873,16 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 		candidates.sort((a, b) => {
 			if (a.distance !== b.distance) {
 				return a.distance - b.distance;
+			}
+			const lengthDeltaA = Math.abs(a.term.length - queryTerm.length);
+			const lengthDeltaB = Math.abs(b.term.length - queryTerm.length);
+			if (lengthDeltaA !== lengthDeltaB) {
+				return lengthDeltaA - lengthDeltaB;
+			}
+			const sharedPrefixA = countSharedPrefix(queryTerm, a.term);
+			const sharedPrefixB = countSharedPrefix(queryTerm, b.term);
+			if (sharedPrefixA !== sharedPrefixB) {
+				return sharedPrefixB - sharedPrefixA;
 			}
 			if (a.term.length !== b.term.length) {
 				return a.term.length - b.term.length;

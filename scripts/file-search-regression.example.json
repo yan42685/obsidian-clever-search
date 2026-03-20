@@ -1,0 +1,39 @@
+{
+  "suites": [
+    {
+      "name": "real_plugin_queries",
+      "defaultOptions": {
+        "prefix": true,
+        "fuzzy": true,
+        "limit": 20
+      },
+      "queries": [
+        {
+          "name": "calendar exact",
+          "query": "calendar",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "calendar prefix",
+          "query": "calen",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "calendar multi term",
+          "query": "full calen",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "dataview typo",
+          "query": "dateview",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "dataview exact",
+          "query": "dataview",
+          "targetIncludes": "240110_Obsidian"
+        }
+      ]
+    }
+  ]
+}

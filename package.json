@@ -9,6 +9,7 @@
 		"test": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"benchmark:file-search": "node scripts/file-search-benchmark.mjs",
+		"benchmark:file-search:regression": "node scripts/file-search-benchmark.mjs --mode=regression",
 		"release": "node release-script.mjs"
 	},
 	"keywords": [],

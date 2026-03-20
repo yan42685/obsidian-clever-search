@@ -54,13 +54,14 @@ const FILE_SEARCH_FIELD_WEIGHTS = {
 const FILE_SEARCH_BM25_K1 = 1.5;
 const FILE_SEARCH_BM25_B = 0.75;
 const FILE_SEARCH_PREFIX_EXPANSION_LIMIT = 128;
-const FILE_SEARCH_FUZZY_EXPANSION_LIMIT = 24;
+const FILE_SEARCH_FUZZY_EXPANSION_LIMIT = 96;
 const FILE_SEARCH_MAX_FUZZY_EDITS = 2;
 const FILE_SEARCH_FIELD_COORDINATION_BONUS = 0.9;
 const FILE_SEARCH_METADATA_COORDINATION_BONUS = 1.8;
 const FILE_SEARCH_METADATA_EXPANDED_MATCH_BONUS = 1.25;
 const FILE_SEARCH_METADATA_FULL_FIELD_COVERAGE_BONUS = 2.4;
 const FILE_SEARCH_PREFIX_EXACT_MATCH_BOOST = 0.72;
+const FILE_SEARCH_FUZZY_WHEN_PREFIX_EXISTS_BOOST = 0.92;
 const FILE_SEARCH_BINARY_MAGIC = [0x43, 0x53, 0x46, 0x42];
 const FILE_SEARCH_BINARY_FORMAT_VERSION = 1;
 const textEncoder = new TextEncoder();
@@ -69,6 +70,7 @@ function parseArgs(argv) {
 	const args = {
 		mode: "synthetic",
 		vault: "",
+		queries: "",
 		limit: DEFAULT_LIMIT,
 		syntheticFiles: DEFAULT_SYNTHETIC_FILES,
 	};
@@ -77,6 +79,8 @@ function parseArgs(argv) {
 			args.mode = arg.slice("--mode=".length);
 		} else if (arg.startsWith("--vault=")) {
 			args.vault = arg.slice("--vault=".length);
+		} else if (arg.startsWith("--queries=")) {
+			args.queries = arg.slice("--queries=".length);
 		} else if (arg.startsWith("--limit=")) {
 			args.limit = Number(arg.slice("--limit=".length)) || DEFAULT_LIMIT;
 		} else if (arg.startsWith("--synthetic-files=")) {
@@ -373,15 +377,26 @@ class CustomFileSearchBenchmarkEngine {
 				});
 			}
 		}
+		const hasExactMatch = matchedTerms.get(queryTerm)?.kind === "exact";
+		if (allowFuzzy && !hasExactMatch) {
+			for (const { term, distance } of this.expandFuzzyTerms(queryTerm)) {
+				if (matchedTerms.has(term)) continue;
+				matchedTerms.set(term, {
+					term,
+					boost:
+						Math.max(0.55, 1 - distance * 0.18) *
+						(prefixTerms.length > 0
+							? FILE_SEARCH_FUZZY_WHEN_PREFIX_EXISTS_BOOST
+							: 1),
+					kind: "fuzzy",
+					fields: prefixTerms.length > 0 ? FILE_SEARCH_METADATA_FIELDS : undefined,
+				});
+			}
+		}
 		if (matchedTerms.size > 0) {
 			return [...matchedTerms.values()];
 		}
-		if (!allowFuzzy) return [];
-		return this.expandFuzzyTerms(queryTerm).map(({ term, distance }) => ({
-			term,
-			boost: Math.max(0.55, 1 - distance * 0.18),
-			kind: "fuzzy",
-		}));
+		return [];
 	}
 
 	expandPrefixTerms(prefix) {
@@ -412,6 +427,10 @@ class CustomFileSearchBenchmarkEngine {
 		candidates.sort(
 			(a, b) =>
 				a.distance - b.distance ||
+				Math.abs(a.term.length - queryTerm.length) -
+					Math.abs(b.term.length - queryTerm.length) ||
+				countSharedPrefix(queryTerm, b.term) -
+					countSharedPrefix(queryTerm, a.term) ||
 				a.term.length - b.term.length ||
 				a.term.localeCompare(b.term),
 		);
@@ -630,6 +649,17 @@ function rankOf(list, target) {
 	return idx === -1 ? null : idx + 1;
 }
 
+function bestRankOf(list, targets) {
+	let bestRank = null;
+	for (const target of targets) {
+		const rank = rankOf(list, target);
+		if (rank !== null && (bestRank === null || rank < bestRank)) {
+			bestRank = rank;
+		}
+	}
+	return bestRank;
+}
+
 function summarizeRows(rows, engineKey) {
 	return {
 		count: rows.length,
@@ -645,21 +675,73 @@ function summarizeRows(rows, engineKey) {
 	};
 }
 
+function summarizeComparison(rows) {
+	let miniBetter = 0;
+	let customBetter = 0;
+	let tied = 0;
+	let bothMissed = 0;
+
+	for (const row of rows) {
+		if (row.mini === null && row.custom === null) {
+			bothMissed++;
+			continue;
+		}
+		if (row.mini === row.custom) {
+			tied++;
+			continue;
+		}
+		if (row.mini === null || (row.custom !== null && row.custom < row.mini)) {
+			customBetter++;
+			continue;
+		}
+		if (row.custom === null || row.mini < row.custom) {
+			miniBetter++;
+			continue;
+		}
+		tied++;
+	}
+
+	return {
+		miniBetter,
+		customBetter,
+		tied,
+		bothMissed,
+	};
+}
+
 function evaluateSuite(name, queries, mini, custom, limit = DEFAULT_LIMIT) {
-	const rows = queries.map((query) => ({
-		query: query.query,
-		target: query.target,
-		mini: rankOf(mini.search(query.query, { prefix: true, fuzzy: true, limit }), query.target),
-		custom: rankOf(
-			custom.search(query.query, { prefix: true, fuzzy: true, limit }),
-			query.target,
-		),
-	}));
+	const rows = queries.map((queryCase) => {
+		const targets = Array.isArray(queryCase.targets)
+			? queryCase.targets
+			: queryCase.target
+				? [queryCase.target]
+				: [];
+		const options = {
+			prefix: queryCase.prefix ?? true,
+			fuzzy: queryCase.fuzzy ?? true,
+			limit: queryCase.limit ?? limit,
+		};
+		const miniResults = mini.search(queryCase.query, options);
+		const customResults = custom.search(queryCase.query, options);
+		return {
+			name: queryCase.name ?? queryCase.query,
+			query: queryCase.query,
+			targets,
+			mini: bestRankOf(miniResults, targets),
+			custom: bestRankOf(customResults, targets),
+			prefix: options.prefix,
+			fuzzy: options.fuzzy,
+			limit: options.limit,
+			miniTop3: miniResults.slice(0, 3),
+			customTop3: customResults.slice(0, 3),
+		};
+	});
 	return {
 		name,
 		mini: summarizeRows(rows, "mini"),
 		custom: summarizeRows(rows, "custom"),
-		samples: rows.filter((row) => row.mini !== row.custom).slice(0, 5),
+		comparison: summarizeComparison(rows),
+		samples: rows.filter((row) => row.mini !== row.custom).slice(0, 8),
 	};
 }
 
@@ -952,6 +1034,60 @@ function buildVaultSuites(docs) {
 	];
 }
 
+function buildRegressionSuites(queryFile, docs) {
+	const queryPath = path.resolve(queryFile);
+	const raw = JSON.parse(fs.readFileSync(queryPath, "utf8"));
+	const suites = Array.isArray(raw) ? raw : raw.suites;
+	if (!Array.isArray(suites) || suites.length === 0) {
+		throw new Error("regression mode requires a non-empty suites array");
+	}
+
+	const knownPaths = new Set(docs.map((doc) => doc.path));
+	const allPaths = docs.map((doc) => doc.path);
+	return suites.map((suite, suiteIndex) => {
+		const defaultOptions = suite.defaultOptions || {};
+		const queries = (suite.queries || []).map((queryCase, queryIndex) => {
+			const explicitTargets = Array.isArray(queryCase.targets)
+				? queryCase.targets
+				: queryCase.target
+					? [queryCase.target]
+					: [];
+			const targetIncludes = Array.isArray(queryCase.targetIncludes)
+				? queryCase.targetIncludes
+				: queryCase.targetIncludes
+					? [queryCase.targetIncludes]
+					: [];
+			const fuzzyTargets = targetIncludes.flatMap((fragment) =>
+				allPaths.filter((filePath) => filePath.includes(fragment)),
+			);
+			const targets = Array.from(new Set([...explicitTargets, ...fuzzyTargets]));
+			if (!queryCase.query || targets.length === 0) {
+				throw new Error(
+					`Invalid regression case at suite ${suiteIndex + 1}, query ${queryIndex + 1}`,
+				);
+			}
+			const missingTargets = targets.filter((target) => !knownPaths.has(target));
+			if (missingTargets.length > 0) {
+				throw new Error(
+					`Regression targets not found in vault: ${missingTargets.join(", ")}`,
+				);
+			}
+			return {
+				name: queryCase.name,
+				query: queryCase.query,
+				targets,
+				prefix: queryCase.prefix ?? defaultOptions.prefix ?? true,
+				fuzzy: queryCase.fuzzy ?? defaultOptions.fuzzy ?? true,
+				limit: queryCase.limit ?? defaultOptions.limit ?? DEFAULT_LIMIT,
+			};
+		});
+		return {
+			name: suite.name || `regression_suite_${suiteIndex + 1}`,
+			queries,
+		};
+	});
+}
+
 function runBenchmark(docs, suites, limit) {
 	const mini = new MiniSearchAdapter();
 	const custom = new CustomFileSearchBenchmarkEngine();
@@ -986,13 +1122,23 @@ function mulberry32(a) {
 
 async function main() {
 	const args = parseArgs(process.argv);
-	if (args.mode === "vault") {
+	if (args.mode === "vault" || args.mode === "regression") {
 		if (!args.vault) {
-			throw new Error("vault mode requires --vault=/absolute/path");
+			throw new Error(`${args.mode} mode requires --vault=/absolute/path`);
 		}
 		const files = walkMarkdownFiles(args.vault);
 		const docs = files.map((file) => parseMarkdownDoc(args.vault, file));
-		const suites = buildVaultSuites(docs);
+		const suites =
+			args.mode === "regression"
+				? (() => {
+						if (!args.queries) {
+							throw new Error(
+								"regression mode requires --queries=/absolute/or/relative/path.json",
+							);
+						}
+						return buildRegressionSuites(args.queries, docs);
+					})()
+				: buildVaultSuites(docs);
 		console.log(JSON.stringify(runBenchmark(docs, suites, args.limit), null, 2));
 		return;
 	}
