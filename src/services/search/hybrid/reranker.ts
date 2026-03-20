@@ -67,10 +67,7 @@ export class HybridReranker {
 				query,
 				documents: candidates.map((candidate) => candidate.text),
 				top_n: Math.min(candidates.length, topK),
-				instruct:
-					`Retrieve semantically similar text\n` +
-					`请根据搜索词 ${query}，给返回结果的各个文档替换成原文最相关的100token连续字符序列，并给出排序分数。` +
-					`请按 JSON 格式返回：{ "score": 0.98, "snippet": "..." }`,
+				instruct: "Retrieve semantically similar text.",
 			}),
 		});
 

@@ -177,7 +177,7 @@
 		if (score === undefined || Number.isNaN(score)) {
 			return "";
 		}
-		return score.toFixed(4);
+		return score.toFixed(3);
 	}
 
 	// ===================================================
