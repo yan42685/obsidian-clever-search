@@ -1,7 +1,7 @@
 {
   "suites": [
     {
-      "name": "real_plugin_queries",
+      "name": "plugin_catalog_queries",
       "defaultOptions": {
         "prefix": true,
         "fuzzy": true,
@@ -32,6 +32,141 @@
           "name": "dataview exact",
           "query": "dataview",
           "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "omnisearch exact",
+          "query": "omnisearch",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "omnisearch typo",
+          "query": "omniseach",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "quick switcher prefix",
+          "query": "quick swit",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "smart connections",
+          "query": "smart conn",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "modal form",
+          "query": "modal form",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "folder notes",
+          "query": "folder note",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "zotero integration",
+          "query": "zotero integ",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "cursor history",
+          "query": "cursor hist",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "dashboard plus",
+          "query": "dashboard",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "metadata menu",
+          "query": "metadata menu",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "remote exact",
+          "query": "remote",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "kanban exact",
+          "query": "kanban",
+          "targetIncludes": "240110_Obsidian"
+        },
+        {
+          "name": "git exact",
+          "query": "git",
+          "targetIncludes": "240110_Obsidian"
+        }
+      ]
+    },
+    {
+      "name": "plugin_notes_queries",
+      "defaultOptions": {
+        "prefix": true,
+        "fuzzy": true,
+        "limit": 20
+      },
+      "queries": [
+        {
+          "name": "metabind exact",
+          "query": "metabind",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "advanced canvas",
+          "query": "advanced canvas",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "obsidian columns",
+          "query": "obsidian columns",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "obsidian opener",
+          "query": "obsidian opener",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "obsidian tracker",
+          "query": "obsidian tracker",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "better plugin page",
+          "query": "better plugin page",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "jumptodate",
+          "query": "jump to date",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "custom suggester",
+          "query": "custom suggester",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "canvas minimap",
+          "query": "canvas minimap",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "title renamer",
+          "query": "title renamer",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "execute code",
+          "query": "execute code",
+          "targetIncludes": "240314_"
+        },
+        {
+          "name": "git heading",
+          "query": "git",
+          "targetIncludes": "240314_"
         }
       ]
     }
