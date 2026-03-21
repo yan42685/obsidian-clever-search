@@ -77,7 +77,8 @@ export class SearchService {
 						"nothing",
 					);
 					}),
-			};
+				hybridFallbackNoticeKey: null,
+			} as SearchResult;
 		} else {
 			logger.trace("lexical matched files count is 0");
 			// TODO: do semantic search
@@ -99,7 +100,7 @@ export class SearchService {
 		if (fallbackNoticeKey) {
 			this.noticeHybridFallback(t(fallbackNoticeKey));
 		}
-		return { sourcePath, items } as SearchResult;
+		return new SearchResult(sourcePath, items, fallbackNoticeKey);
 	}
 
 	/**

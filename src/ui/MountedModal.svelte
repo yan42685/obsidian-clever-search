@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
+	import { OuterSetting } from "src/globals/plugin-setting";
 	import {
 		FileItem,
 		FileSubItem,
@@ -9,6 +10,7 @@
 		SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
+	import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
 	import { SearchHistoryService } from "src/services/obsidian/user-data/search-history-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -16,11 +18,17 @@
 	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
+	import {
+		AutoHybridFallbackController,
+		getMountedModalFileItemScore,
+		usesDirectFileSubItems,
+	} from "./mounted-modal-helper";
 	import SearchHistoryInput from "./SearchHistoryInput.svelte";
 	import { ViewHelper } from "./view-helper";
 
 	const searchService: SearchService = getInstance(SearchService);
 	const searchHistoryService = getInstance(SearchHistoryService);
+	const setting = getInstance(OuterSetting);
 	const viewHelper = getInstance(ViewHelper);
 
 	export let uiType: "modal" | "floatingWindow";
@@ -40,6 +48,24 @@
 	let currSubItemIndex = NULL_NUMBER;
 	let latestSearchRequestId = 0;
 	let historyInputRef: any;
+	let autoHybridFallbackFailureNoticeKey: LocaleKey | null = null;
+
+	const autoHybridFallback = new AutoHybridFallbackController({
+		searchService,
+		setting,
+		searchType,
+		isHybrid,
+		getLatestRequestId: () => latestSearchRequestId,
+		getCurrentQueryText: () => queryText,
+		onFailureNoticeChange: (key) => {
+			autoHybridFallbackFailureNoticeKey = key;
+		},
+		onResultApplied: async (query, result) => {
+			searchResult = result;
+			cachedResult.set(query, result);
+			await updateItemAsync(0);
+		},
+	});
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
@@ -59,7 +85,7 @@
 				currFileItem = items[index] as FileItem;
 
 				// hybrid search returns subItems directly; lexical fetches on demand
-				if (!isHybrid) {
+				if (!usesDirectFileSubItems(currFileItem)) {
 					currFileItem.subItems = await searchService.getFileSubItems(
 						queryText,
 						currFileItem,
@@ -104,7 +130,17 @@
 				return;
 			}
 			searchResult = cachedResult.get(currentQueryText) as SearchResult;
+			autoHybridFallback.syncFailureNoticeFromResult(searchResult);
 			await updateItemAsync(0);
+			if (
+				searchType === SearchType.IN_VAULT &&
+				!isHybrid &&
+				searchResult.items.length === 0
+			) {
+				autoHybridFallback.schedule(currentQueryText, requestId);
+			} else {
+				autoHybridFallback.clear();
+			}
 			return;
 		}
 
@@ -131,8 +167,19 @@
 		}
 
 		searchResult = nextResult;
+		autoHybridFallback.syncFailureNoticeFromResult(nextResult);
 		cachedResult.set(currentQueryText, searchResult);
 		await updateItemAsync(0);
+
+		if (
+			searchType === SearchType.IN_VAULT &&
+			!isHybrid &&
+			nextResult.items.length === 0
+		) {
+			autoHybridFallback.schedule(currentQueryText, requestId);
+		} else {
+			autoHybridFallback.clear();
+		}
 	}
 
 	function handleInput() {
@@ -232,11 +279,12 @@
 	}
 
 	function getFileItemScore(item: FileItem): number | undefined {
-		return item.subItems[0]?.score;
+		return getMountedModalFileItemScore(item);
 	}
 
 	// ===================================================
 	onDestroy(() => {
+		autoHybridFallback.clear();
 		logger.trace("mounted element has been destroyed.");
 	});
 
@@ -342,7 +390,24 @@
 						</p>
 					{/if}
 				{:else if searchType === SearchType.IN_VAULT}
-					{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
+					{#if autoHybridFallbackFailureNoticeKey}
+						<div class="hybrid-fallback-failure">
+							<p class="hybrid-fallback-failure-title">
+								{t("hybridModal.autoFallbackFailed.title")}
+							</p>
+							<p class="hybrid-fallback-failure-detail">
+								{t(autoHybridFallbackFailureNoticeKey)}
+							</p>
+							<p class="hybrid-fallback-failure-causes">
+								{t("hybridModal.autoFallbackFailed.possibleCauses")}
+							</p>
+							<ul>
+								<li>{t("hybridModal.autoFallbackFailed.cause.api")}</li>
+								<li>{t("hybridModal.autoFallbackFailed.cause.network")}</li>
+								<li>{t("hybridModal.autoFallbackFailed.cause.index")}</li>
+							</ul>
+						</div>
+					{:else if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
 						<ul>
 							{#each currFileSubItems as subItem, index}
 								<button
@@ -498,6 +563,31 @@
 	.file-sub-item .subitem-snippet {
 		display: block;
 		width: 100%;
+	}
+
+	.hybrid-fallback-failure {
+		padding-right: 0.7em;
+		color: var(--text-normal);
+	}
+
+	.hybrid-fallback-failure-title {
+		font-weight: 600;
+		margin-bottom: 0.55em;
+	}
+
+	.hybrid-fallback-failure-detail,
+	.hybrid-fallback-failure-causes {
+		color: var(--cs-secondary-font-color, #a29c9c);
+		margin-bottom: 0.55em;
+	}
+
+	.hybrid-fallback-failure ul {
+		padding-left: 1.2em;
+		margin: 0;
+	}
+
+	.hybrid-fallback-failure li {
+		margin-bottom: 0.4em;
 	}
 
 	.right-pane {

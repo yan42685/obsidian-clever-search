@@ -3,6 +3,7 @@ import {
 	ViewRegistry,
 	type ViewType,
 } from "src/services/obsidian/view-registry";
+import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 
@@ -62,9 +63,15 @@ export type MatchedFile = {
 export class SearchResult {
 	sourcePath: string;
 	items: Item[];
-	constructor(currPath: string, items: Item[]) {
+	hybridFallbackNoticeKey?: LocaleKey | null;
+	constructor(
+		currPath: string,
+		items: Item[],
+		hybridFallbackNoticeKey?: LocaleKey | null,
+	) {
 		this.sourcePath = currPath;
 		this.items = items;
+		this.hybridFallbackNoticeKey = hybridFallbackNoticeKey ?? null;
 	}
 }
 

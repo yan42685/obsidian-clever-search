@@ -465,6 +465,20 @@ class HybridSearchModal extends Modal {
 
 		// ── API Domain ────────────────────────────────────────────────────────
 		new Setting(contentEl)
+			.setName(t("hybridModal.autoShowResultsWhenLexicalEmpty"))
+			.setDesc(t("hybridModal.autoShowResultsWhenLexicalEmpty.desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(
+						this.setting.hybrid.autoShowResultsWhenLexicalEmpty ?? false,
+					)
+					.onChange((value) => {
+						this.setting.hybrid.autoShowResultsWhenLexicalEmpty = value;
+						this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
 			.setName(t("hybridModal.apiDomain"))
 			.setDesc(t("hybridModal.apiDomain.desc"))
 			.addText((text) =>

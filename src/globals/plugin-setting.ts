@@ -38,9 +38,10 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	enableStopWordsZh: isChineseUser ? true : false,
 	hybrid: {
 		enabled: false,
+		autoShowResultsWhenLexicalEmpty: false,
 		apiDomain: '',
 		apiKey: '',
-		weeklyTokenLimit: 0,
+		weeklyTokenLimit: 3000000,
 		maxResultCount: 5,
 		indexConcurrency: 3,
 		vectorCompression: "int8",
@@ -74,6 +75,7 @@ export type FileSearchBackend = "minisearch" | "custom-bm25";
 
 export type HybridSetting = {
 	enabled: boolean;
+	autoShowResultsWhenLexicalEmpty: boolean;
 	apiDomain: string;
 	apiKey: string;
 	weeklyTokenLimit: number; // 0 = unlimited
