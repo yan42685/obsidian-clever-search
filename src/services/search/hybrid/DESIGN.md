@@ -411,6 +411,8 @@ Practical rule:
 - schedule files by in-flight byte budget, not only by file-count concurrency
 - index large files in chunk batches so one file does not hold the full embedding input list in memory
 - hydrate vector shards in small startup batches instead of loading all shard blobs at once
+- surface rebuild progress using processed source-file bytes, not estimated index bytes
+- run startup self-healing before incremental diffing so orphan rows do not pollute reindex decisions
 
 ### Priority 2: Index Consistency
 

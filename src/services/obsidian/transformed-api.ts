@@ -3,7 +3,13 @@ import { getInstance } from "src/utils/my-lib";
 
 export class MyNotice extends Notice {
 	constructor(text: string, duration = 0) {
-		super(text + "\n(clever-search)", duration);
+		super("", duration);
+		this.setText(text);
+	}
+
+	setText(text: string) {
+		this.setMessage(text + "\n(clever-search)");
+		return this;
 	}
 }
 
