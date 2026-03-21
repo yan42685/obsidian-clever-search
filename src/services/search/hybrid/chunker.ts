@@ -717,22 +717,31 @@ export function buildChunkEmbeddingInputs(
 	chunks: RawChunk[],
 	headingOutline?: HeadingOutlineEntry[],
 ): string[] {
-	if (chunks.length === 0) {
-		return [];
-	}
+	const buildInput = createChunkEmbeddingInputBuilder(
+		filePath,
+		plainText,
+		headingOutline,
+	);
+	return chunks.map((chunk) => buildInput(chunk));
+}
 
+export function createChunkEmbeddingInputBuilder(
+	filePath: string,
+	plainText: string,
+	headingOutline?: HeadingOutlineEntry[],
+): (chunk: RawChunk) => string {
 	const lineCount = plainText.split("\n").length;
 	const outline =
 		headingOutline && headingOutline.length > 0
 			? headingOutline
 			: parseFallbackHeadingOutline(plainText);
 	const contextsByLine = buildHeadingContextsByLine(lineCount, outline);
-	return chunks.map((chunk) => {
+	return (chunk: RawChunk) => {
 		const headingTitles = contextsByLine[chunk.startLine] ?? [];
 		const context = buildChunkEmbedContext(filePath, headingTitles);
 		if (!context) {
 			return chunk.text;
 		}
 		return `${context}\n\n${chunk.text}`;
-	});
+	};
 }

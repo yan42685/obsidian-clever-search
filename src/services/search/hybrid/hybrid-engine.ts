@@ -5,14 +5,14 @@ import { Database } from 'src/services/database/database';
 import { Tokenizer } from 'src/services/search/tokenizer';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
-import { buildChunkEmbeddingInputs, chunkFile } from './chunker';
+import { createChunkEmbeddingInputBuilder, chunkFile } from './chunker';
 import { BM25Engine } from './bm25';
 import { Embedder } from './embedder';
 import { HnswIndex } from './hnsw';
 import {
 	blobToBm25,
 	blobToHnsw,
-	buildChunkVectorShard,
+	ChunkVectorShardBuilder,
 	bm25ToBlob,
 	chunkVectorShardToRow,
 	type ChunkRow,
@@ -28,7 +28,6 @@ import type {
 	Chunk,
 	HeadingOutlineEntry,
 	RawChunk,
-	StoredVector,
 	VectorPrecision,
 } from './hybrid-types';
 import { buildHybridQueryProfile, type RankedResult } from './ranking';
@@ -43,6 +42,8 @@ const HYBRID_BM25_ENABLE_QUERY_EXPANSION = true;
 const DEFAULT_MAX_FILE_RESULTS = 5;
 const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 30;
+const INDEX_CHUNK_BATCH_SIZE = 24;
+const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 
 type HybridWriteOption = {
 	persistIndices?: boolean;
@@ -257,36 +258,51 @@ export class HybridEngine {
 
 		const { chunks: rawChunks } = chunkFile(filePath, plainText);
 		if (rawChunks.length === 0) return;
-		const embedInputs = buildChunkEmbeddingInputs(
+		const buildEmbedInput = createChunkEmbeddingInputBuilder(
 			filePath,
 			plainText,
-			rawChunks,
 			headingOutline,
 		);
 
-		let vectors: StoredVector[] = [];
 		try {
-			vectors = await this.embedder.embedBatch(
-				embedInputs,
-				this.precision,
-				filePath,
-			);
+			const shardBuilder = new ChunkVectorShardBuilder(this.precision, EMBED_DIM);
+			for (
+				let chunkStart = 0;
+				chunkStart < rawChunks.length;
+				chunkStart += INDEX_CHUNK_BATCH_SIZE
+			) {
+				const batchChunks = rawChunks.slice(
+					chunkStart,
+					chunkStart + INDEX_CHUNK_BATCH_SIZE,
+				);
+				const batchVectors = await this.embedder.embedBatch(
+					batchChunks.map((chunk) => buildEmbedInput(chunk)),
+					this.precision,
+					filePath,
+				);
+				const batchChunkIds = await this.persistChunks(
+					filePath,
+					batchChunks,
+					strict,
+					chunkStart,
+				);
+				shardBuilder.append(batchChunkIds, batchVectors);
+				for (let i = 0; i < batchChunkIds.length; i++) {
+					const chunkId = batchChunkIds[i];
+					this.bm25.addDocument(chunkId, batchChunks[i].text);
+					this.hnswSmall.insert(chunkId, batchVectors[i]);
+				}
+			}
+			await this.persistVectorShard(shardBuilder.build(filePath));
 			this._canSearch = true;
 			this.lastIndexingFallbackNoticeKey = null;
 		} catch (error) {
+			await this.deleteFile(filePath, { persistIndices: false });
 			logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
 			this._canSearch = false;
 			this.lastIndexingFallbackNoticeKey = 'hybridNotice.indexFallbackToBm25';
 			await this.indexBm25Only(filePath, rawChunks, updateTime, option);
 			return;
-		}
-
-		const chunkIds = await this.persistChunks(filePath, rawChunks, strict);
-		await this.persistVectorShard(filePath, chunkIds, vectors);
-		for (let i = 0; i < chunkIds.length; i++) {
-			const chunkId = chunkIds[i];
-			this.bm25.addDocument(chunkId, rawChunks[i].text);
-			this.hnswSmall.insert(chunkId, vectors[i]);
 		}
 
 		if (option.persistIndices ?? true) {
@@ -299,12 +315,13 @@ export class HybridEngine {
 		filePath: string,
 		rawChunks: RawChunk[],
 		strict: boolean,
+		chunkIndexOffset = 0,
 	): Promise<number[]> {
 		const rows = rawChunks.map((chunk, index) => {
 			return chunkToRow({
 				id: undefined,
 				filePath,
-				chunkIndex: index,
+				chunkIndex: chunkIndexOffset + index,
 				text: chunk.text,
 				startLine: chunk.startLine,
 				startCol: chunk.startCol,
@@ -326,12 +343,7 @@ export class HybridEngine {
 		}).bulkAdd(rows, { allKeys: true });
 	}
 
-	private async persistVectorShard(
-		filePath: string,
-		chunkIds: number[],
-		vectors: StoredVector[],
-	): Promise<void> {
-		const shard = buildChunkVectorShard(filePath, chunkIds, vectors, EMBED_DIM);
+	private async persistVectorShard(shard: ReturnType<ChunkVectorShardBuilder['build']>): Promise<void> {
 		await this.db.db.hybridChunkVectors.put(chunkVectorShardToRow(shard));
 	}
 
@@ -341,20 +353,24 @@ export class HybridEngine {
 		updateTime: number,
 		option: HybridWriteOption,
 	): Promise<void> {
-		const ids: number[] = [];
-		for (const chunk of rawChunks) {
-			const row = chunkToRow({
-				id: undefined,
+		for (
+			let chunkStart = 0;
+			chunkStart < rawChunks.length;
+			chunkStart += INDEX_CHUNK_BATCH_SIZE
+		) {
+			const batchChunks = rawChunks.slice(
+				chunkStart,
+				chunkStart + INDEX_CHUNK_BATCH_SIZE,
+			);
+			const ids = await this.persistChunks(
 				filePath,
-				chunkIndex: ids.length,
-				text: chunk.text,
-				startLine: chunk.startLine,
-				startCol: chunk.startCol,
-				endLine: chunk.endLine,
-			});
-			const id = await this.db.db.hybridChunks.add(row);
-			ids.push(id as number);
-			this.bm25.addDocument(id as number, chunk.text);
+				batchChunks,
+				false,
+				chunkStart,
+			);
+			for (let i = 0; i < ids.length; i++) {
+				this.bm25.addDocument(ids[i], batchChunks[i].text);
+			}
 		}
 
 		if (option.persistIndices ?? true) {
@@ -504,17 +520,30 @@ export class HybridEngine {
 	}
 
 	private async hydrateHnswVectors(): Promise<void> {
-		const rows = await this.db.db.hybridChunkVectors.toArray();
-		if (rows.length === 0) {
-			this.hnswSmall.hydrateVectors([]);
-			return;
-		}
+		let offset = 0;
+		let append = false;
+		while (true) {
+			const rows = await this.db.db.hybridChunkVectors
+				.orderBy('filePath')
+				.offset(offset)
+				.limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
+				.toArray();
+			if (rows.length === 0) {
+				if (!append) {
+					this.hnswSmall.hydrateVectors([]);
+				}
+				return;
+			}
 
-		const shards = await Promise.all(
-			rows.map((row) => rowToChunkVectorShard(row as ChunkVectorShardRow)),
-		);
-		const records = shards.flatMap((shard) => shardToChunkVectorRecords(shard));
-		this.hnswSmall.hydrateVectors(records);
+			const records = (
+				await Promise.all(
+					rows.map((row) => rowToChunkVectorShard(row as ChunkVectorShardRow)),
+				)
+			).flatMap((shard) => shardToChunkVectorRecords(shard));
+			this.hnswSmall.hydrateVectors(records, { append });
+			append = true;
+			offset += rows.length;
+		}
 	}
 
 	private isExcludedPath(filePath: string): boolean {

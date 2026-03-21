@@ -226,10 +226,15 @@ export class HnswIndex {
 		return this.graph.deletedSet.size > 0;
 	}
 
-	hydrateVectors(records: ChunkVectorRecord[]): void {
-		this.vectorsInt8.clear();
-		this.scalesInt8.clear();
-		this.vectorsFloat16.clear();
+	hydrateVectors(
+		records: ChunkVectorRecord[],
+		option: { append?: boolean } = {},
+	): void {
+		if (!(option.append ?? false)) {
+			this.vectorsInt8.clear();
+			this.scalesInt8.clear();
+			this.vectorsFloat16.clear();
+		}
 
 		for (const record of records) {
 			if (!this.graph.nodes.has(record.id) || this.graph.deletedSet.has(record.id)) {

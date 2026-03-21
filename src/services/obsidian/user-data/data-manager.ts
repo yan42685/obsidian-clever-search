@@ -11,12 +11,13 @@ import {
 	NoApiKeyError,
 	WeeklyTokenLimitExceededError,
 } from "src/services/search/hybrid/embedder";
+import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
-import { MyLib, getInstance, isDevEnvironment, monitorDecorator } from "src/utils/my-lib";
+import { getInstance, isDevEnvironment, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t } from "../translations/locale-helper";
@@ -52,6 +53,7 @@ export class DataManager {
 	private static readonly HYBRID_STORAGE_RATIO_FALLBACK = 1.6;
 	private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
 	private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
+	private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -325,28 +327,6 @@ export class DataManager {
 		logger.trace(`${updatedRefs.length} lexical refs updated`);
 	}
 
-	private async processFilesWithConcurrency<T>(
-		items: T[],
-		concurrency: number,
-		handler: (item: T) => Promise<void>,
-	) {
-		if (items.length === 0) {
-			return;
-		}
-
-		const safeConcurrency = Math.max(1, Math.min(concurrency, items.length));
-		let nextIndex = 0;
-
-		await Promise.all(
-			Array.from({ length: safeConcurrency }, async () => {
-				while (nextIndex < items.length) {
-					const currentIndex = nextIndex++;
-					await handler(items[currentIndex]);
-				}
-			}),
-		);
-	}
-
 	private async indexHybridFilesInBatches(
 		files: TFile[],
 		concurrency: number,
@@ -372,12 +352,16 @@ export class DataManager {
 			`hybrid batch tiers: large=${largeFiles.length}, normal=${normalFiles.length}, normalConcurrency=${concurrency}`,
 		);
 
-		if (largeFiles.length > 0) {
-			await this.processFilesWithConcurrency(largeFiles, 1, handler);
-		}
-		if (normalFiles.length > 0) {
-			await this.processFilesWithConcurrency(normalFiles, concurrency, handler);
-		}
+		await runWeightedTasks(
+			[...largeFiles, ...normalFiles],
+			{
+				maxConcurrent: concurrency,
+				maxWeight: DataManager.HYBRID_IN_FLIGHT_BYTES_BUDGET,
+				getWeight: (file) => file.stat.size,
+				isExclusive: (file) => file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES,
+			},
+			handler,
+		);
 	}
 
 	private async indexHybridFileWithRetry(
@@ -386,42 +370,41 @@ export class DataManager {
 		const fileIndexStart = Date.now();
 		const text = await this.dataProvider.readPlainText(file.path);
 		const headingOutline = this.dataProvider.getHeadingOutline(file);
-		let lastError: unknown = null;
 		let attempts = 0;
-
-		for (
-			let attempt = 1;
-			attempt <= DataManager.HYBRID_INDEX_MAX_RETRIES;
-			attempt++
-		) {
-			attempts = attempt;
-			try {
-				await this.hybridEngine.indexFileStrict(
-					file.path,
-					text,
+		let lastError: unknown = null;
+		try {
+			await retryAsync(
+				async (attempt) => {
+					attempts = attempt;
+					await this.hybridEngine.indexFileStrict(
+						file.path,
+						text,
 					file.stat.mtime,
 					{ persistIndices: false },
-					headingOutline,
-				);
-				logger.debug(
-					`hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
-				);
-				return null;
-			} catch (error) {
-				lastError = error;
-				const reason = this.formatHybridIndexError(error);
-				const retryable = this.isRetryableHybridIndexError(error);
-				logger.warn(
-					`hybrid semantic index attempt ${attempt}/${DataManager.HYBRID_INDEX_MAX_RETRIES} failed for ${file.path}: ${reason}`,
-				);
-				if (
-					!retryable ||
-					attempt >= DataManager.HYBRID_INDEX_MAX_RETRIES
-				) {
-					break;
-				}
-				await MyLib.sleep(this.getHybridRetryDelayMs(error, attempt));
-			}
+						headingOutline,
+					);
+				},
+				{
+					maxAttempts: DataManager.HYBRID_INDEX_MAX_RETRIES,
+					shouldRetry: (error, attempt) => {
+						lastError = error;
+						const reason = this.formatHybridIndexError(error);
+						const retryable = this.isRetryableHybridIndexError(error);
+						logger.warn(
+							`hybrid semantic index attempt ${attempt}/${DataManager.HYBRID_INDEX_MAX_RETRIES} failed for ${file.path}: ${reason}`,
+						);
+						return retryable;
+					},
+					getDelayMs: (error, attempt) =>
+						this.getHybridRetryDelayMs(error, attempt),
+				},
+			);
+			logger.debug(
+				`hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
+			);
+			return null;
+		} catch (error) {
+			lastError = error;
 		}
 
 		let bm25FallbackIndexed = false;

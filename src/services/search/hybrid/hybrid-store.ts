@@ -68,6 +68,79 @@ export type ChunkVectorRecord = {
 	vector: StoredVector;
 };
 
+export class ChunkVectorShardBuilder {
+	private readonly chunkIds: number[] = [];
+	private readonly int8Blocks: Int8Array[] = [];
+	private readonly float16Blocks: Uint16Array[] = [];
+	private readonly scaleBlocks: number[] = [];
+
+	constructor(
+		private readonly precision: VectorPrecision,
+		private readonly dim: number,
+	) {}
+
+	append(chunkIds: number[], vectors: StoredVector[]): void {
+		if (chunkIds.length !== vectors.length) {
+			throw new Error("Chunk ids and vectors length mismatch");
+		}
+		for (let i = 0; i < vectors.length; i++) {
+			const vector = vectors[i];
+			if (vector.precision !== this.precision) {
+				throw new Error("Mixed vector precisions in shard builder");
+			}
+			this.chunkIds.push(chunkIds[i]);
+			if (this.precision === "int8") {
+				this.int8Blocks.push(vector.vector as Int8Array);
+				this.scaleBlocks.push((vector as Extract<StoredVector, { precision: "int8" }>).scale);
+			} else {
+				this.float16Blocks.push(vector.vector as Uint16Array);
+			}
+		}
+	}
+
+	isEmpty(): boolean {
+		return this.chunkIds.length === 0;
+	}
+
+	build(filePath: string): ChunkVectorShard {
+		if (this.chunkIds.length === 0) {
+			throw new Error("Cannot build an empty chunk vector shard");
+		}
+
+		const chunkIdArray = Uint32Array.from(this.chunkIds);
+		if (this.precision === "int8") {
+			const flat = new Int8Array(this.chunkIds.length * this.dim);
+			const scales = new Float32Array(this.chunkIds.length);
+			for (let i = 0; i < this.int8Blocks.length; i++) {
+				flat.set(this.int8Blocks[i], i * this.dim);
+				scales[i] = this.scaleBlocks[i];
+			}
+			return {
+				filePath,
+				precision: this.precision,
+				dim: this.dim,
+				chunkCount: this.chunkIds.length,
+				chunkIds: chunkIdArray,
+				vectorData: flat,
+				scaleData: scales,
+			};
+		}
+
+		const flat = new Uint16Array(this.chunkIds.length * this.dim);
+		for (let i = 0; i < this.float16Blocks.length; i++) {
+			flat.set(this.float16Blocks[i], i * this.dim);
+		}
+		return {
+			filePath,
+			precision: this.precision,
+			dim: this.dim,
+			chunkCount: this.chunkIds.length,
+			chunkIds: chunkIdArray,
+			vectorData: flat,
+		};
+	}
+}
+
 export function int8ToBlob(arr: Int8Array): Blob {
 	return new Blob([arr.buffer]);
 }

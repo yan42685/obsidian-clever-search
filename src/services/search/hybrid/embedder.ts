@@ -3,9 +3,10 @@ import { Database } from 'src/services/database/database';
 import { MyNotice } from 'src/services/obsidian/transformed-api';
 import { estimateTokenCount } from 'src/services/search/hybrid/chunker';
 import { logger } from 'src/utils/logger';
-import { MyLib, getInstance } from 'src/utils/my-lib';
+import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type StoredVector, type VectorPrecision } from './hybrid-types';
+import { AsyncRateGate, retryAsync } from './runtime-control';
 
 const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
 const EMBED_MODEL = 'text-embedding-v4';
@@ -104,8 +105,7 @@ function float32ToFloat16(val: number): number {
 export class Embedder {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly cache = new Map<string, CacheEntry>();
-	private static requestGate: Promise<void> = Promise.resolve();
-	private static nextRequestAt = 0;
+	private static requestGate = new AsyncRateGate(REQUEST_MIN_SPACING_MS);
 
 	private get apiKey(): string {
 		return this.setting.hybrid?.apiKey?.trim() ?? '';
@@ -179,12 +179,12 @@ export class Embedder {
 	}
 
 	private async fetchEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokensUsed: number }> {
-		let lastError: unknown = null;
-		for (let attempt = 1; attempt <= REQUEST_MAX_RETRIES; attempt++) {
+		return retryAsync(
+			async (attempt) => {
 			const controller = new AbortController();
 			const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 			try {
-				await this.waitForRequestSlot();
+					await Embedder.requestGate.wait();
 				const resp = await fetch(this.apiDomain, {
 					method: 'POST',
 					headers: {
@@ -205,16 +205,11 @@ export class Embedder {
 					logger.error(
 						`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
 					);
-					if (this.isRetryableStatus(resp.status) && attempt < REQUEST_MAX_RETRIES) {
-						const delayMs = this.getRetryDelayMs(
-							attempt,
-							resp.headers.get('retry-after'),
-						);
-						logger.warn(
-							`Qwen embedding request will retry: status=${resp.status}, attempt=${attempt}/${REQUEST_MAX_RETRIES}, delay=${delayMs} ms`,
-						);
-						await MyLib.sleep(delayMs);
-						continue;
+					if (this.isRetryableStatus(resp.status)) {
+						const error = new Error(`Qwen embedding API error ${resp.status}: ${body}`);
+						(error as Error & { retryAfterHeader?: string | null }).retryAfterHeader =
+							resp.headers.get('retry-after');
+						throw error;
 					}
 					throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
 				}
@@ -229,45 +224,26 @@ export class Embedder {
 				data.sort((a, b) => a.index - b.index);
 				const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
 				return { embeddings: data.map((item) => item.embedding), tokensUsed };
-			} catch (error) {
-				lastError = error;
-				if (this.isRetryableError(error) && attempt < REQUEST_MAX_RETRIES) {
-					const delayMs = this.getRetryDelayMs(attempt);
-					logger.warn(
-						`Qwen embedding request retrying after transport failure: attempt=${attempt}/${REQUEST_MAX_RETRIES}, delay=${delayMs} ms`,
-						error,
-					);
-					await MyLib.sleep(delayMs);
-					continue;
-				}
-				throw error;
 			} finally {
 				clearTimeout(timeoutId);
 			}
-		}
-
-		throw lastError instanceof Error
-			? lastError
-			: new Error('Qwen embedding request failed after retries');
-	}
-
-	private async waitForRequestSlot(): Promise<void> {
-		let release!: () => void;
-		const previousGate = Embedder.requestGate;
-		Embedder.requestGate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-
-		await previousGate;
-		try {
-			const delayMs = Math.max(0, Embedder.nextRequestAt - Date.now());
-			if (delayMs > 0) {
-				await MyLib.sleep(delayMs);
-			}
-			Embedder.nextRequestAt = Date.now() + REQUEST_MIN_SPACING_MS;
-		} finally {
-			release();
-		}
+			},
+			{
+				maxAttempts: REQUEST_MAX_RETRIES,
+				shouldRetry: (error) => this.isRetryableError(error),
+				getDelayMs: (error, attempt) =>
+					this.getRetryDelayMs(
+						attempt,
+						(error as Error & { retryAfterHeader?: string | null }).retryAfterHeader,
+					),
+				onRetry: (error, attempt, delayMs) => {
+					logger.warn(
+						`Qwen embedding request retrying: attempt=${attempt}/${REQUEST_MAX_RETRIES}, delay=${delayMs} ms`,
+						error,
+					);
+				},
+			},
+		);
 	}
 
 	private getRetryDelayMs(attempt: number, retryAfterHeader?: string | null): number {

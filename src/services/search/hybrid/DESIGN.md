@@ -407,6 +407,10 @@ Practical rule:
 - prefer graceful slowdown over aggressive concurrency
 - prefer local preflight estimates over blind rebuilds
 - prefer request-level retry/backoff before file-level full retry
+- use a shared runtime-control layer for retry, rate-gating, and weighted scheduling
+- schedule files by in-flight byte budget, not only by file-count concurrency
+- index large files in chunk batches so one file does not hold the full embedding input list in memory
+- hydrate vector shards in small startup batches instead of loading all shard blobs at once
 
 ### Priority 2: Index Consistency
 
