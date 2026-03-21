@@ -33,6 +33,10 @@ import type {
 import { buildHybridQueryProfile, type RankedResult } from './ranking';
 import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
 import { EMBED_DIM } from './hybrid-types';
+import {
+	profileHybridStage,
+	recordHybridProfileMetric,
+} from './hybrid-profiler';
 
 const BM25_RECALL_LIMIT = 20;
 const DENSE_RECALL_LIMIT = 30;
@@ -89,7 +93,10 @@ export class HybridEngine {
 
 	async load(): Promise<void> {
 		this.hnswSmall.clear(this.precision);
-		await Promise.all([this.loadBm25(), this.loadHnsw()]);
+		await Promise.all([
+			profileHybridStage('startup.load_bm25', async () => await this.loadBm25()),
+			profileHybridStage('startup.load_hnsw', async () => await this.loadHnsw()),
+		]);
 		this._ready = true;
 	}
 
@@ -256,13 +263,21 @@ export class HybridEngine {
 
 		await this.deleteFile(filePath, option);
 
-		const { chunks: rawChunks } = chunkFile(filePath, plainText);
-		if (rawChunks.length === 0) return;
-		const buildEmbedInput = createChunkEmbeddingInputBuilder(
-			filePath,
-			plainText,
-			headingOutline,
+		const { chunks: rawChunks } = await profileHybridStage(
+			'index.chunk_file',
+			async () => chunkFile(filePath, plainText),
 		);
+		if (rawChunks.length === 0) return;
+		const buildEmbedInput = await profileHybridStage(
+			'index.build_embed_context',
+			async () =>
+				createChunkEmbeddingInputBuilder(
+					filePath,
+					plainText,
+					headingOutline,
+				),
+		);
+		recordHybridProfileMetric('index.chunk_count', rawChunks.length);
 
 		try {
 			const shardBuilder = new ChunkVectorShardBuilder(this.precision, EMBED_DIM);
@@ -275,25 +290,41 @@ export class HybridEngine {
 					chunkStart,
 					chunkStart + INDEX_CHUNK_BATCH_SIZE,
 				);
-				const batchVectors = await this.embedder.embedBatch(
-					batchChunks.map((chunk) => buildEmbedInput(chunk)),
-					this.precision,
-					filePath,
+				const batchInputs = await profileHybridStage(
+					'index.build_batch_embed_inputs',
+					async () => batchChunks.map((chunk) => buildEmbedInput(chunk)),
 				);
-				const batchChunkIds = await this.persistChunks(
-					filePath,
-					batchChunks,
-					strict,
-					chunkStart,
+				const batchVectors = await profileHybridStage(
+					'index.embed_batch',
+					async () =>
+						await this.embedder.embedBatch(
+							batchInputs,
+							this.precision,
+							filePath,
+						),
+				);
+				const batchChunkIds = await profileHybridStage(
+					'index.persist_chunks',
+					async () =>
+						await this.persistChunks(
+							filePath,
+							batchChunks,
+							strict,
+							chunkStart,
+						),
 				);
 				shardBuilder.append(batchChunkIds, batchVectors);
-				for (let i = 0; i < batchChunkIds.length; i++) {
-					const chunkId = batchChunkIds[i];
-					this.bm25.addDocument(chunkId, batchChunks[i].text);
-					this.hnswSmall.insert(chunkId, batchVectors[i]);
-				}
+				await profileHybridStage('index.update_memory_indices', async () => {
+					for (let i = 0; i < batchChunkIds.length; i++) {
+						const chunkId = batchChunkIds[i];
+						this.bm25.addDocument(chunkId, batchChunks[i].text);
+						this.hnswSmall.insert(chunkId, batchVectors[i]);
+					}
+				});
 			}
-			await this.persistVectorShard(shardBuilder.build(filePath));
+			await profileHybridStage('index.persist_vector_shard', async () => {
+				await this.persistVectorShard(shardBuilder.build(filePath));
+			});
 			this._canSearch = true;
 			this.lastIndexingFallbackNoticeKey = null;
 		} catch (error) {
@@ -362,15 +393,21 @@ export class HybridEngine {
 				chunkStart,
 				chunkStart + INDEX_CHUNK_BATCH_SIZE,
 			);
-			const ids = await this.persistChunks(
-				filePath,
-				batchChunks,
-				false,
-				chunkStart,
+			const ids = await profileHybridStage(
+				'index.persist_chunks_bm25_only',
+				async () =>
+					await this.persistChunks(
+						filePath,
+						batchChunks,
+						false,
+						chunkStart,
+					),
 			);
-			for (let i = 0; i < ids.length; i++) {
-				this.bm25.addDocument(ids[i], batchChunks[i].text);
-			}
+			await profileHybridStage('index.update_memory_indices_bm25_only', async () => {
+				for (let i = 0; i < ids.length; i++) {
+					this.bm25.addDocument(ids[i], batchChunks[i].text);
+				}
+			});
 		}
 
 		if (option.persistIndices ?? true) {
@@ -523,11 +560,15 @@ export class HybridEngine {
 		let offset = 0;
 		let append = false;
 		while (true) {
-			const rows = await this.db.db.hybridChunkVectors
-				.orderBy('filePath')
-				.offset(offset)
-				.limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
-				.toArray();
+			const rows = await profileHybridStage(
+				'startup.load_vector_shards',
+				async () =>
+					await this.db.db.hybridChunkVectors
+						.orderBy('filePath')
+						.offset(offset)
+						.limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
+						.toArray(),
+			);
 			if (rows.length === 0) {
 				if (!append) {
 					this.hnswSmall.hydrateVectors([]);
@@ -535,12 +576,19 @@ export class HybridEngine {
 				return;
 			}
 
-			const records = (
-				await Promise.all(
-					rows.map((row) => rowToChunkVectorShard(row as ChunkVectorShardRow)),
-				)
-			).flatMap((shard) => shardToChunkVectorRecords(shard));
-			this.hnswSmall.hydrateVectors(records, { append });
+			const records = await profileHybridStage(
+				'startup.decode_vector_shards',
+				async () =>
+					(
+						await Promise.all(
+							rows.map((row) => rowToChunkVectorShard(row as ChunkVectorShardRow)),
+						)
+					).flatMap((shard) => shardToChunkVectorRecords(shard)),
+			);
+			recordHybridProfileMetric('startup.hydrated_vector_count', records.length);
+			await profileHybridStage('startup.hydrate_hnsw_vectors', async () => {
+				this.hnswSmall.hydrateVectors(records, { append });
+			});
 			append = true;
 			offset += rows.length;
 		}

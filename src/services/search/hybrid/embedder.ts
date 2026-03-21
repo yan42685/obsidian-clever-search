@@ -6,6 +6,10 @@ import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type StoredVector, type VectorPrecision } from './hybrid-types';
+import {
+	profileHybridStage,
+	recordHybridProfileMetric,
+} from './hybrid-profiler';
 import { AsyncRateGate, retryAsync } from './runtime-control';
 
 const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
@@ -145,30 +149,39 @@ export class Embedder {
 		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
 			const batch = texts.slice(i, i + BATCH_SIZE);
 			const requestStart = Date.now();
-			await ensureWeeklyTokenBudget(estimateTextsTokenUsage(batch));
-			const { embeddings: floats, tokensUsed } = await this.fetchEmbeddings(batch);
+			await profileHybridStage('embed.ensure_weekly_budget', async () => {
+				await ensureWeeklyTokenBudget(estimateTextsTokenUsage(batch));
+			});
+			const { embeddings: floats, tokensUsed } = await profileHybridStage(
+				'embed.fetch_embeddings',
+				async () => await this.fetchEmbeddings(batch),
+			);
 			logger.debug(
 				`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
 			);
 			if (tokensUsed > 0) {
+				recordHybridProfileMetric('provider_tokens', tokensUsed);
 				await recordTokenUsage(filePath, tokensUsed);
 			}
-			for (const f of floats) {
-				l2Normalize(f);
-				if (precision === 'float16') {
+			await profileHybridStage('embed.quantize_vectors', async () => {
+				for (const f of floats) {
+					l2Normalize(f);
+					if (precision === 'float16') {
+						results.push({
+							precision: 'float16',
+							vector: quantizeFloat16(f),
+						});
+						continue;
+					}
+					const { vec, scale } = quantizeInt8(f);
 					results.push({
-						precision: 'float16',
-						vector: quantizeFloat16(f),
+						precision: 'int8',
+						vector: vec,
+						scale,
 					});
-					continue;
 				}
-				const { vec, scale } = quantizeInt8(f);
-				results.push({
-					precision: 'int8',
-					vector: vec,
-					scale,
-				});
-			}
+				return;
+			});
 		}
 
 		logger.debug(

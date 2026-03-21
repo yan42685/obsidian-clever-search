@@ -11,6 +11,13 @@ import {
 	NoApiKeyError,
 	WeeklyTokenLimitExceededError,
 } from "src/services/search/hybrid/embedder";
+import {
+	beginHybridProfile,
+	endHybridProfile,
+	getHybridProfileMetric,
+	profileHybridStage,
+	setHybridProfileMeta,
+} from "src/services/search/hybrid/hybrid-profiler";
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
@@ -56,6 +63,7 @@ type HybridIndexProgress = {
 	processedFiles: number;
 	repairedPaths: number;
 	failedFiles: number;
+	sessionTokens: number;
 };
 
 class HybridIndexProgressNotice {
@@ -81,15 +89,19 @@ class HybridIndexProgressNotice {
 
 	private buildMessage(progress: HybridIndexProgress): string {
 		if (progress.stage === "repair") {
-			return `Hybrid self-healing: repaired ${progress.repairedPaths} file state(s). Preparing reindex...`;
+			return `Hybrid self-healing: repaired ${progress.repairedPaths} file state(s). Preparing reindex... ${this.buildTokenLabel(progress.sessionTokens)}`;
 		}
 		if (progress.stage === "done") {
 			if (progress.totalFiles === 0) {
-				return `Hybrid self-healing finished: repaired ${progress.repairedPaths} file state(s), failed ${progress.failedFiles}.`;
+				return `Hybrid self-healing finished: repaired ${progress.repairedPaths} file state(s), failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
 			}
-			return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} (${progress.processedFiles}/${progress.totalFiles} files), repaired ${progress.repairedPaths}, failed ${progress.failedFiles}.`;
+			return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} (${progress.processedFiles}/${progress.totalFiles} files), repaired ${progress.repairedPaths}, failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
 		}
-		return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} (${progress.processedFiles}/${progress.totalFiles} files), repaired ${progress.repairedPaths}, failed ${progress.failedFiles}.`;
+		return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} (${progress.processedFiles}/${progress.totalFiles} files), repaired ${progress.repairedPaths}, failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+	}
+
+	private buildTokenLabel(tokens: number): string {
+		return `Session tokens ${tokens}`;
 	}
 }
 
@@ -268,106 +280,135 @@ export class DataManager {
 		if (!this.hybridEngine.isEnabled()) {
 			return;
 		}
+		beginHybridProfile("hybrid-init", {
+			forceRefresh: this.shouldForceRefresh ? 1 : 0,
+		});
 
-		if (this.shouldForceRefresh) {
-			await this.hybridEngine.clearAll();
-		}
-
-		await this.hybridEngine.load();
-		const currFiles = new Map<string, TFile>(
-			this.dataProvider
-				.allFilesToBeIndexed()
-				.filter((file) => this.hybridEngine.shouldIndexPath(file.path))
-				.map((file) => [file.path, file]),
-		);
-		const repairReport = await this.repairHybridStoredState(currFiles);
-		const prevRefs = new Map(
-			(await this.database.db.hybridDocRefs.toArray()).map((ref) => [ref.path, ref]),
-		);
-
-		const docsToAdd: TFile[] = [];
-		const docsToDelete: string[] = [];
-
-		for (const [path, file] of currFiles) {
-			const prevRef = prevRefs.get(path);
-			if (!prevRef) {
-				docsToAdd.push(file);
-			} else if (file.stat.mtime > prevRef.updateTime) {
-				docsToDelete.push(path);
-				docsToAdd.push(file);
-			}
-		}
-
-		for (const prevPath of prevRefs.keys()) {
-			if (!currFiles.has(prevPath)) {
-				docsToDelete.push(prevPath);
-			}
-		}
-		for (const reindexPath of repairReport.reindexedPaths) {
-			const file = currFiles.get(reindexPath);
-			if (file && !docsToAdd.some((item) => item.path === reindexPath)) {
-				docsToAdd.push(file);
-			}
-		}
-
-		logger.trace(`hybrid docs to delete: ${docsToDelete.length}`);
-		logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
-		const hybridIndexStart = Date.now();
-		const concurrency = this.getHybridIndexConcurrency();
-		logger.debug(
-			`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
-		);
-		await this.runHybridPreflight(currFiles, docsToAdd, docsToDelete);
-		const progressNotice = this.createHybridIndexProgressNotice(
-			docsToAdd,
-			repairReport.repairedPaths.length,
-		);
-
-		for (const path of docsToDelete) {
-			await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
-				logger.warn(`hybrid deleteFile failed for ${path}:`, e),
-			);
-		}
-		const failures: HybridIndexFailure[] = [];
 		try {
-			await this.indexHybridFilesInBatches(
+			if (this.shouldForceRefresh) {
+				await profileHybridStage("startup.clear_all", async () => {
+					await this.hybridEngine.clearAll();
+				});
+			}
+			await profileHybridStage("startup.load_engine", async () => {
+				await this.hybridEngine.load();
+			});
+			const currFiles = await profileHybridStage("startup.scan_indexable_files", async () =>
+				new Map<string, TFile>(
+					this.dataProvider
+						.allFilesToBeIndexed()
+						.filter((file) => this.hybridEngine.shouldIndexPath(file.path))
+						.map((file) => [file.path, file]),
+				),
+			);
+			const repairReport = await profileHybridStage(
+				"startup.repair_stored_state",
+				async () => await this.repairHybridStoredState(currFiles),
+			);
+			const prevRefs = new Map(
+				(await this.database.db.hybridDocRefs.toArray()).map((ref) => [ref.path, ref]),
+			);
+
+			const docsToAdd: TFile[] = [];
+			const docsToDelete: string[] = [];
+
+			for (const [path, file] of currFiles) {
+				const prevRef = prevRefs.get(path);
+				if (!prevRef) {
+					docsToAdd.push(file);
+				} else if (file.stat.mtime > prevRef.updateTime) {
+					docsToDelete.push(path);
+					docsToAdd.push(file);
+				}
+			}
+
+			for (const prevPath of prevRefs.keys()) {
+				if (!currFiles.has(prevPath)) {
+					docsToDelete.push(prevPath);
+				}
+			}
+			for (const reindexPath of repairReport.reindexedPaths) {
+				const file = currFiles.get(reindexPath);
+				if (file && !docsToAdd.some((item) => item.path === reindexPath)) {
+					docsToAdd.push(file);
+				}
+			}
+
+			logger.trace(`hybrid docs to delete: ${docsToDelete.length}`);
+			logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
+			const hybridIndexStart = Date.now();
+			const concurrency = this.getHybridIndexConcurrency();
+			setHybridProfileMeta("concurrency", concurrency);
+			setHybridProfileMeta("docsToAdd", docsToAdd.length);
+			setHybridProfileMeta("docsToDelete", docsToDelete.length);
+			logger.debug(
+				`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
+			);
+			await this.runHybridPreflight(currFiles, docsToAdd, docsToDelete);
+			const progressNotice = this.createHybridIndexProgressNotice(
 				docsToAdd,
-				concurrency,
-				async (file, complete) => {
-					const failure = await this.indexHybridFileWithRetry(file);
-					if (failure) {
-						failures.push(failure);
-					}
-					complete(failure !== null);
-				},
-				progressNotice,
 				repairReport.repairedPaths.length,
 			);
-			await this.hybridEngine.persistIndicesForBatch();
-			const fallbackNoticeKey =
-				this.hybridEngine.consumeIndexingFallbackNoticeKey();
-			if (failures.length > 0) {
-				this.noticeHybridIndexFailures(failures);
-			} else if (fallbackNoticeKey) {
-				new MyNotice(t(fallbackNoticeKey), 7000);
-			}
-			progressNotice?.update(
-				{
-					stage: "done",
-					totalBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
-					totalFiles: docsToAdd.length,
-					processedBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
-					processedFiles: docsToAdd.length,
+			const failures: HybridIndexFailure[] = [];
+			try {
+				await profileHybridStage("startup.delete_stale_paths", async () => {
+					for (const path of docsToDelete) {
+						await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
+							logger.warn(`hybrid deleteFile failed for ${path}:`, e),
+						);
+					}
+				});
+				await profileHybridStage("startup.index_files", async () => {
+					await this.indexHybridFilesInBatches(
+						docsToAdd,
+						concurrency,
+						async (file, complete) => {
+							const failure = await this.indexHybridFileWithRetry(file);
+							if (failure) {
+								failures.push(failure);
+							}
+							complete(failure !== null);
+						},
+						progressNotice,
+						repairReport.repairedPaths.length,
+					);
+				});
+				await profileHybridStage("startup.persist_indices_batch", async () => {
+					await this.hybridEngine.persistIndicesForBatch();
+				});
+				const fallbackNoticeKey =
+					this.hybridEngine.consumeIndexingFallbackNoticeKey();
+				if (failures.length > 0) {
+					this.noticeHybridIndexFailures(failures);
+				} else if (fallbackNoticeKey) {
+					new MyNotice(t(fallbackNoticeKey), 7000);
+				}
+				progressNotice?.update(
+					{
+						stage: "done",
+						totalBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
+						totalFiles: docsToAdd.length,
+						processedBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
+						processedFiles: docsToAdd.length,
+						repairedPaths: repairReport.repairedPaths.length,
+						failedFiles: failures.length,
+						sessionTokens: getHybridProfileMetric("provider_tokens"),
+					},
+					true,
+				);
+				logger.debug(
+					`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
+				);
+				endHybridProfile({
+					failures: failures.length,
 					repairedPaths: repairReport.repairedPaths.length,
-					failedFiles: failures.length,
-				},
-				true,
-			);
-			logger.debug(
-				`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
-			);
-		} finally {
-			progressNotice?.hide();
+				});
+			} finally {
+				progressNotice?.hide();
+			}
+		} catch (error) {
+			endHybridProfile({ error: error instanceof Error ? error.message : String(error) });
+			throw error;
 		}
 	}
 
@@ -442,6 +483,7 @@ export class DataManager {
 					processedFiles: 0,
 					repairedPaths,
 					failedFiles: 0,
+					sessionTokens: getHybridProfileMetric("provider_tokens"),
 				},
 				true,
 			);
@@ -477,6 +519,7 @@ export class DataManager {
 				processedFiles: 0,
 				repairedPaths,
 				failedFiles: 0,
+				sessionTokens: getHybridProfileMetric("provider_tokens"),
 			},
 			true,
 		);
@@ -504,6 +547,7 @@ export class DataManager {
 						processedFiles,
 						repairedPaths,
 						failedFiles,
+						sessionTokens: getHybridProfileMetric("provider_tokens"),
 					});
 				});
 			},
@@ -629,6 +673,7 @@ export class DataManager {
 					processedFiles: 0,
 					repairedPaths,
 					failedFiles: 0,
+					sessionTokens: getHybridProfileMetric("provider_tokens"),
 				},
 				true,
 			);
