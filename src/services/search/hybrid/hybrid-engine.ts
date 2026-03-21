@@ -16,6 +16,10 @@ import { BM25Engine } from './bm25';
 import { Embedder } from './embedder';
 import { HnswIndex } from './hnsw';
 import {
+	computeUnchangedOffsetBlocks,
+	hashStableText,
+} from './incremental-reuse';
+import {
 	blobToBm25,
 	blobToHnsw,
 	ChunkVectorShardBuilder,
@@ -83,63 +87,6 @@ type PlannedChunk = {
 	embedKey: string;
 	reusedVector?: StoredVector;
 };
-
-type UnchangedWindowReuse = {
-	prefixLength: number;
-	suffixLength: number;
-	delta: number;
-};
-
-function hashEmbedInput(text: string): string {
-	let h1 = 0xdeadbeef ^ text.length;
-	let h2 = 0x41c6ce57 ^ text.length;
-	for (let i = 0; i < text.length; i++) {
-		const ch = text.charCodeAt(i);
-		h1 = Math.imul(h1 ^ ch, 2654435761);
-		h2 = Math.imul(h2 ^ ch, 1597334677);
-	}
-	h1 =
-		Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^
-		Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-	h2 =
-		Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^
-		Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-	return `${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0)
-		.toString(16)
-		.padStart(8, '0')}`;
-}
-
-function computeUnchangedWindowReuse(
-	oldText: string,
-	newText: string,
-): UnchangedWindowReuse {
-	const maxPrefix = Math.min(oldText.length, newText.length);
-	let prefixLength = 0;
-	while (
-		prefixLength < maxPrefix &&
-		oldText.charCodeAt(prefixLength) === newText.charCodeAt(prefixLength)
-	) {
-		prefixLength += 1;
-	}
-
-	let suffixLength = 0;
-	const oldRemaining = oldText.length - prefixLength;
-	const newRemaining = newText.length - prefixLength;
-	const maxSuffix = Math.min(oldRemaining, newRemaining);
-	while (
-		suffixLength < maxSuffix &&
-		oldText.charCodeAt(oldText.length - 1 - suffixLength) ===
-			newText.charCodeAt(newText.length - 1 - suffixLength)
-	) {
-		suffixLength += 1;
-	}
-
-	return {
-		prefixLength,
-		suffixLength,
-		delta: newText.length - oldText.length,
-	};
-}
 
 export class HybridEngine {
 	private readonly db = getInstance(Database);
@@ -621,7 +568,7 @@ export class HybridEngine {
 	): Promise<PlannedChunk[]> {
 		const basePlan = (chunks: RawChunk[]): PlannedChunk[] =>
 			chunks.map((rawChunk) => {
-				const embedKey = hashEmbedInput(buildEmbedInput(rawChunk));
+				const embedKey = hashStableText(buildEmbedInput(rawChunk));
 				return {
 					rawChunk,
 					embedKey,
@@ -636,72 +583,73 @@ export class HybridEngine {
 		}
 
 		const oldText = previousState.snapshot.plainText;
-		const reuseWindow = computeUnchangedWindowReuse(oldText, plainText);
-		if (
-			reuseWindow.prefixLength === 0 &&
-			reuseWindow.suffixLength === 0
-		) {
+		const unchangedBlocks = computeUnchangedOffsetBlocks(oldText, plainText);
+		if (unchangedBlocks.length === 0) {
 			return basePlan(fullChunks);
 		}
 
-		const oldSuffixStart = oldText.length - reuseWindow.suffixLength;
-		const newSuffixStart = plainText.length - reuseWindow.suffixLength;
-		const prefixRows = previousState.chunkRows.filter(
-			(row) => row.endOffset <= reuseWindow.prefixLength,
-		);
-		const prefixIds = new Set(prefixRows.map((row) => row.id));
-		const suffixRows = previousState.chunkRows.filter(
-			(row) =>
-				row.startOffset >= oldSuffixStart &&
-				!prefixIds.has(row.id),
-		);
-
-		const prefixPlans = prefixRows
-			.map((row) =>
-				this.reuseStoredChunk(
-					row,
-					plainText,
-					lineOffsets,
-					buildEmbedInput,
-					previousState.vectorsByChunkId,
-					row.startOffset,
-					row.endOffset,
-				),
+		const reusedPlans = unchangedBlocks
+			.flatMap((block) =>
+				previousState.chunkRows
+					.filter(
+						(row) =>
+							row.startOffset >= block.oldStartOffset &&
+							row.endOffset <= block.oldEndOffset,
+					)
+					.map((row) =>
+						this.reuseStoredChunk(
+							row,
+							plainText,
+							lineOffsets,
+							buildEmbedInput,
+							previousState.vectorsByChunkId,
+							block.newStartOffset + (row.startOffset - block.oldStartOffset),
+							block.newStartOffset + (row.endOffset - block.oldStartOffset),
+						),
+					)
+					.filter((chunk): chunk is PlannedChunk => chunk !== null),
 			)
-			.filter((chunk): chunk is PlannedChunk => chunk !== null);
-		const suffixPlans = suffixRows
-			.map((row) =>
-				this.reuseStoredChunk(
-					row,
-					plainText,
-					lineOffsets,
-					buildEmbedInput,
-					previousState.vectorsByChunkId,
-					newSuffixStart + (row.startOffset - oldSuffixStart),
-					newSuffixStart + (row.endOffset - oldSuffixStart),
+			.sort((left, right) => left.rawChunk.startOffset - right.rawChunk.startOffset);
+
+		if (reusedPlans.length === 0) {
+			return basePlan(fullChunks);
+		}
+
+		const plannedChunks: PlannedChunk[] = [];
+		let cursor = 0;
+		for (const chunk of reusedPlans) {
+			if (cursor < chunk.rawChunk.startOffset) {
+				plannedChunks.push(
+					...basePlan(
+						chunkFileRange(
+							filePath,
+							plainText,
+							cursor,
+							chunk.rawChunk.startOffset,
+							lineOffsets,
+						),
+					),
+				);
+			}
+			plannedChunks.push(chunk);
+			cursor = Math.max(cursor, chunk.rawChunk.endOffset);
+		}
+		if (cursor < plainText.length) {
+			plannedChunks.push(
+				...basePlan(
+					chunkFileRange(
+						filePath,
+						plainText,
+						cursor,
+						plainText.length,
+						lineOffsets,
+					),
 				),
-			)
-			.filter((chunk): chunk is PlannedChunk => chunk !== null);
+			);
+		}
 
-		const middleStart =
-			prefixPlans.length > 0
-				? prefixPlans[prefixPlans.length - 1].rawChunk.endOffset
-				: 0;
-		const middleEnd =
-			suffixPlans.length > 0
-				? suffixPlans[0].rawChunk.startOffset
-				: plainText.length;
-		const middlePlans = basePlan(
-			chunkFileRange(
-				filePath,
-				plainText,
-				middleStart,
-				middleEnd,
-				lineOffsets,
-			),
-		);
-
-		return [...prefixPlans, ...middlePlans, ...suffixPlans]
+		return plannedChunks
+			.filter((chunk) => chunk.rawChunk.text.trim().length > 0)
 			.sort((left, right) => left.rawChunk.startOffset - right.rawChunk.startOffset);
 	}
 
@@ -725,7 +673,7 @@ export class HybridEngine {
 			return null;
 		}
 
-		const embedKey = hashEmbedInput(buildEmbedInput(rawChunk));
+		const embedKey = hashStableText(buildEmbedInput(rawChunk));
 		return {
 			rawChunk,
 			embedKey,
