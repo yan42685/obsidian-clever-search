@@ -31,10 +31,27 @@ type HybridIndexFailure = {
 	bm25FallbackIndexed: boolean;
 };
 
+type HybridPreflightReport = {
+	totalBytes: number;
+	filesToAdd: number;
+	filesToDelete: number;
+	largeFiles: TFile[];
+	largestFile: TFile | null;
+	estimatedHybridBytes: number;
+	currentHybridBytes: number;
+	projectedUsageRatio: number | null;
+};
+
 @singleton()
 export class DataManager {
 	private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
 	private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
+	private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
+	private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
+	private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
+	private static readonly HYBRID_STORAGE_RATIO_FALLBACK = 1.6;
+	private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
+	private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -227,6 +244,7 @@ export class DataManager {
 		logger.debug(
 			`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
 		);
+		await this.runHybridPreflight(currFiles, docsToAdd, docsToDelete);
 
 		for (const path of docsToDelete) {
 			await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
@@ -234,16 +252,12 @@ export class DataManager {
 			);
 		}
 		const failures: HybridIndexFailure[] = [];
-		await this.processFilesWithConcurrency(
-			docsToAdd,
-			concurrency,
-			async (file) => {
-				const failure = await this.indexHybridFileWithRetry(file);
-				if (failure) {
-					failures.push(failure);
-				}
-			},
-		);
+		await this.indexHybridFilesInBatches(docsToAdd, concurrency, async (file) => {
+			const failure = await this.indexHybridFileWithRetry(file);
+			if (failure) {
+				failures.push(failure);
+			}
+		});
 		await this.hybridEngine.persistIndicesForBatch();
 		const fallbackNoticeKey =
 			this.hybridEngine.consumeIndexingFallbackNoticeKey();
@@ -333,11 +347,45 @@ export class DataManager {
 		);
 	}
 
+	private async indexHybridFilesInBatches(
+		files: TFile[],
+		concurrency: number,
+		handler: (file: TFile) => Promise<void>,
+	) {
+		if (files.length === 0) {
+			return;
+		}
+
+		const largeFiles: TFile[] = [];
+		const normalFiles: TFile[] = [];
+		for (const file of files) {
+			if (file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES) {
+				largeFiles.push(file);
+			} else {
+				normalFiles.push(file);
+			}
+		}
+
+		largeFiles.sort((left, right) => right.stat.size - left.stat.size);
+		normalFiles.sort((left, right) => right.stat.size - left.stat.size);
+		logger.debug(
+			`hybrid batch tiers: large=${largeFiles.length}, normal=${normalFiles.length}, normalConcurrency=${concurrency}`,
+		);
+
+		if (largeFiles.length > 0) {
+			await this.processFilesWithConcurrency(largeFiles, 1, handler);
+		}
+		if (normalFiles.length > 0) {
+			await this.processFilesWithConcurrency(normalFiles, concurrency, handler);
+		}
+	}
+
 	private async indexHybridFileWithRetry(
 		file: TFile,
 	): Promise<HybridIndexFailure | null> {
 		const fileIndexStart = Date.now();
 		const text = await this.dataProvider.readPlainText(file.path);
+		const headingOutline = this.dataProvider.getHeadingOutline(file);
 		let lastError: unknown = null;
 		let attempts = 0;
 
@@ -353,6 +401,7 @@ export class DataManager {
 					text,
 					file.stat.mtime,
 					{ persistIndices: false },
+					headingOutline,
 				);
 				logger.debug(
 					`hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
@@ -371,15 +420,18 @@ export class DataManager {
 				) {
 					break;
 				}
-				await MyLib.sleep(
-					DataManager.HYBRID_INDEX_RETRY_DELAY_MS * attempt,
-				);
+				await MyLib.sleep(this.getHybridRetryDelayMs(error, attempt));
 			}
 		}
 
 		let bm25FallbackIndexed = false;
 		try {
-			await this.hybridEngine.indexFile(file.path, text, file.stat.mtime);
+			await this.hybridEngine.indexFile(
+				file.path,
+				text,
+				file.stat.mtime,
+				headingOutline,
+			);
 			bm25FallbackIndexed = true;
 		} catch (fallbackError) {
 			logger.error(
@@ -402,6 +454,32 @@ export class DataManager {
 	private getHybridIndexConcurrency(): number {
 		const configured = this.setting.hybrid.indexConcurrency ?? 3;
 		return Math.max(1, Math.min(configured, 8));
+	}
+
+	private getHybridRetryDelayMs(error: unknown, attempt: number): number {
+		if (!(error instanceof Error)) {
+			return DataManager.HYBRID_INDEX_RETRY_DELAY_MS * attempt;
+		}
+		const message = `${error.name}: ${error.message}`.toLowerCase();
+		if (message.includes("429")) {
+			return 4_000 * attempt;
+		}
+		if (
+			message.includes("408") ||
+			message.includes("425") ||
+			message.includes("timeout")
+		) {
+			return 2_500 * attempt;
+		}
+		if (
+			message.includes("500") ||
+			message.includes("502") ||
+			message.includes("503") ||
+			message.includes("504")
+		) {
+			return 3_000 * attempt;
+		}
+		return DataManager.HYBRID_INDEX_RETRY_DELAY_MS * attempt;
 	}
 
 	private isRetryableHybridIndexError(error: unknown): boolean {
@@ -501,6 +579,141 @@ export class DataManager {
 				? ` ${failedWithoutBm25} file(s) also failed BM25 fallback indexing.`
 				: "";
 		return `${failureCount} file(s) did not finish semantic embedding indexing after ${DataManager.HYBRID_INDEX_MAX_RETRIES} attempts due to network or quota/token issues.${fallbackText} Press Ctrl+Shift+I to view details in the console.`;
+	}
+
+	private async runHybridPreflight(
+		currFiles: Map<string, TFile>,
+		docsToAdd: TFile[],
+		docsToDelete: string[],
+	): Promise<void> {
+		if (
+			docsToAdd.length === 0 &&
+			docsToDelete.length === 0 &&
+			!this.shouldForceRefresh
+		) {
+			return;
+		}
+
+		const report = await this.buildHybridPreflightReport(
+			currFiles,
+			docsToAdd,
+			docsToDelete,
+		);
+		console.groupCollapsed("[clever-search] Hybrid indexing preflight");
+		console.table([
+			{
+				filesToAdd: report.filesToAdd,
+				filesToDelete: report.filesToDelete,
+				totalSize: this.formatBytes(report.totalBytes),
+				largeFiles: report.largeFiles.length,
+				largestFile: report.largestFile
+					? `${report.largestFile.path} (${this.formatBytes(report.largestFile.stat.size)})`
+					: "-",
+				estimatedHybridSize: this.formatBytes(report.estimatedHybridBytes),
+				currentHybridSize: this.formatBytes(report.currentHybridBytes),
+				projectedQuotaUsage:
+					report.projectedUsageRatio === null
+						? "n/a"
+						: `${(report.projectedUsageRatio * 100).toFixed(1)}%`,
+			},
+		]);
+		console.groupEnd();
+
+		const shouldNotice =
+			this.shouldForceRefresh ||
+			report.totalBytes >= DataManager.HYBRID_PRECHECK_NOTICE_BYTES ||
+			report.largeFiles.length > 0 ||
+			(report.projectedUsageRatio ?? 0) >= DataManager.HYBRID_QUOTA_WARN_RATIO;
+		if (!shouldNotice) {
+			return;
+		}
+
+		new MyNotice(this.buildHybridPreflightNotice(report), 12000);
+	}
+
+	private async buildHybridPreflightReport(
+		currFiles: Map<string, TFile>,
+		docsToAdd: TFile[],
+		docsToDelete: string[],
+	): Promise<HybridPreflightReport> {
+		const currFileList = Array.from(currFiles.values());
+		const totalBytes = currFileList.reduce((sum, file) => sum + file.stat.size, 0);
+		const largeFiles = currFileList.filter(
+			(file) => file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES,
+		);
+		const largestFile =
+			largeFiles.length > 0
+				? largeFiles.reduce((max, file) =>
+					file.stat.size > max.stat.size ? file : max,
+				)
+				: null;
+
+		const storageUsage = await this.database.estimatePluginStorageUsage();
+		const currentHybridBytes = storageUsage.tables
+			.filter((item) =>
+				item.name === "hybridChunks" ||
+				item.name === "hybridChunkVectors" ||
+				item.name === "hybridBm25Index" ||
+				item.name === "hybridHnswSmall" ||
+				item.name === "hybridDocRefs",
+			)
+			.reduce((sum, item) => sum + item.bytes, 0);
+
+		const existingHybridRefs = new Set(
+			(await this.database.db.hybridDocRefs.toArray()).map((ref) => ref.path),
+		);
+		const indexedSourceBytes = currFileList
+			.filter((file) => existingHybridRefs.has(file.path))
+			.reduce((sum, file) => sum + file.stat.size, 0);
+		const ratioFromCurrent =
+			indexedSourceBytes > 0 && currentHybridBytes > 0
+				? currentHybridBytes / indexedSourceBytes
+				: DataManager.HYBRID_STORAGE_RATIO_FALLBACK;
+		const estimatedRatio = Math.min(
+			DataManager.HYBRID_STORAGE_RATIO_MAX,
+			Math.max(DataManager.HYBRID_STORAGE_RATIO_MIN, ratioFromCurrent),
+		);
+		const estimatedHybridBytes = Math.round(totalBytes * estimatedRatio);
+
+		const storageEstimate = await navigator.storage?.estimate?.().catch(() => null);
+		const quotaBytes =
+			storageEstimate && typeof storageEstimate.quota === "number"
+				? storageEstimate.quota
+				: null;
+		const usageBytes =
+			storageEstimate && typeof storageEstimate.usage === "number"
+				? storageEstimate.usage
+				: null;
+		const projectedUsageRatio =
+			quotaBytes && usageBytes !== null
+				? Math.min(
+					1,
+					(usageBytes - currentHybridBytes + estimatedHybridBytes) / quotaBytes,
+				)
+				: null;
+
+		return {
+			totalBytes,
+			filesToAdd: docsToAdd.length,
+			filesToDelete: docsToDelete.length,
+			largeFiles,
+			largestFile,
+			estimatedHybridBytes,
+			currentHybridBytes,
+			projectedUsageRatio,
+		};
+	}
+
+	private buildHybridPreflightNotice(report: HybridPreflightReport): string {
+		const quotaText =
+			report.projectedUsageRatio === null
+				? "IndexedDB quota: n/a"
+				: `IndexedDB quota usage may reach ${(report.projectedUsageRatio * 100).toFixed(0)}%`;
+		const largeFileText =
+			report.largeFiles.length > 0
+				? `, ${report.largeFiles.length} large file(s)`
+				: "";
+		return `Hybrid indexing preflight: ${report.filesToAdd} file(s) to add/update, ${report.filesToDelete} to delete, vault ${this.formatBytes(report.totalBytes)}${largeFileText}, estimated hybrid storage ${this.formatBytes(report.estimatedHybridBytes)}. ${quotaText}. Large files will be indexed serially.`;
 	}
 
 	private async noticeDevStorageStats() {

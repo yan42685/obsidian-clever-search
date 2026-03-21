@@ -8,6 +8,12 @@ export type RawChunk = {
 	endLine: number;
 };
 
+export type HeadingOutlineEntry = {
+	line: number;
+	level: number;
+	title: string;
+};
+
 export type Chunk = {
 	id: number;
 	filePath: string;

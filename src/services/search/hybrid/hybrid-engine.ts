@@ -5,7 +5,7 @@ import { Database } from 'src/services/database/database';
 import { Tokenizer } from 'src/services/search/tokenizer';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
-import { chunkFile } from './chunker';
+import { buildChunkEmbeddingInputs, chunkFile } from './chunker';
 import { BM25Engine } from './bm25';
 import { Embedder } from './embedder';
 import { HnswIndex } from './hnsw';
@@ -24,7 +24,13 @@ import {
 	rowToChunkVectorShard,
 	shardToChunkVectorRecords,
 } from './hybrid-store';
-import type { Chunk, RawChunk, StoredVector, VectorPrecision } from './hybrid-types';
+import type {
+	Chunk,
+	HeadingOutlineEntry,
+	RawChunk,
+	StoredVector,
+	VectorPrecision,
+} from './hybrid-types';
 import { buildHybridQueryProfile, type RankedResult } from './ranking';
 import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
 import { EMBED_DIM } from './hybrid-types';
@@ -128,8 +134,13 @@ export class HybridEngine {
 		return !this.isExcludedPath(filePath);
 	}
 
-	async indexFile(filePath: string, plainText: string, updateTime = Date.now()): Promise<void> {
-		await this.indexInternal(filePath, plainText, updateTime, {}, false);
+	async indexFile(
+		filePath: string,
+		plainText: string,
+		updateTime = Date.now(),
+		headingOutline: HeadingOutlineEntry[] = [],
+	): Promise<void> {
+		await this.indexInternal(filePath, plainText, updateTime, {}, false, headingOutline);
 	}
 
 	async indexFileStrict(
@@ -137,8 +148,9 @@ export class HybridEngine {
 		plainText: string,
 		updateTime = Date.now(),
 		option: HybridWriteOption = {},
+		headingOutline: HeadingOutlineEntry[] = [],
 	): Promise<void> {
-		await this.indexInternal(filePath, plainText, updateTime, option, true);
+		await this.indexInternal(filePath, plainText, updateTime, option, true, headingOutline);
 	}
 
 	async deleteFile(filePath: string, option: HybridWriteOption = {}): Promise<void> {
@@ -234,6 +246,7 @@ export class HybridEngine {
 		updateTime: number,
 		option: HybridWriteOption,
 		strict: boolean,
+		headingOutline: HeadingOutlineEntry[],
 	): Promise<void> {
 		if (!this.shouldIndexPath(filePath)) {
 			await this.deleteFile(filePath, option);
@@ -244,11 +257,17 @@ export class HybridEngine {
 
 		const { chunks: rawChunks } = chunkFile(filePath, plainText);
 		if (rawChunks.length === 0) return;
+		const embedInputs = buildChunkEmbeddingInputs(
+			filePath,
+			plainText,
+			rawChunks,
+			headingOutline,
+		);
 
 		let vectors: StoredVector[] = [];
 		try {
 			vectors = await this.embedder.embedBatch(
-				rawChunks.map((chunk) => chunk.text),
+				embedInputs,
 				this.precision,
 				filePath,
 			);

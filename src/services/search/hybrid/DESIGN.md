@@ -374,9 +374,73 @@ These dev storage stats are local-only:
 - no rerank API
 - no token usage
 
+## Reliability Roadmap
+
+The next implementation priority is no longer pure retrieval tuning.
+
+The order is:
+
+1. initialization and rebuild robustness
+2. index consistency under file add/delete/modify
+3. hybrid BM25 storage compression
+
+Reason:
+
+- reranker already reduces the value of over-optimizing first-stage internal ordering
+- hybrid quality is now good enough that engineering stability has higher product value
+- a system that occasionally rate-limits, half-writes, or bloats IndexedDB is worse than a slightly less optimal recall curve
+
+### Priority 1: Initialization And Rebuild Robustness
+
+This phase should harden:
+
+- large vault startup and full rebuild behavior
+- very large file handling
+- long-running rebuild memory peaks
+- batch throttling to reduce provider bursts
+- request retry and backoff behavior
+- local index-size estimation before or during rebuild
+- IndexedDB quota awareness and early warning
+
+Practical rule:
+
+- prefer graceful slowdown over aggressive concurrency
+- prefer local preflight estimates over blind rebuilds
+- prefer request-level retry/backoff before file-level full retry
+
+### Priority 2: Index Consistency
+
+This phase should ensure hybrid storage never drifts into a mixed-generation state.
+
+The main targets are:
+
+- no orphan `hybridChunks`
+- no orphan `hybridChunkVectors`
+- no stale `hybridDocRefs`
+- no partial file replacement that leaves old and new chunks mixed together
+- no crash window where persisted rows and in-memory BM25/HNSW state disagree for long
+
+Practical rule:
+
+- file replacement should be treated as one logical unit
+- startup should detect and repair inconsistent hybrid file state
+- incremental updates should prefer idempotent cleanup over assuming the previous write finished cleanly
+
+### Priority 3: Hybrid BM25 Size
+
+Only after phases 1 and 2 are in place should we return to storage compression.
+
+Reason:
+
+- current hybrid BM25 size is a cost issue, not the top reliability risk
+- storage reductions are easier to evaluate once rebuild and consistency behavior are trustworthy
+- size work should not be allowed to reintroduce rebuild fragility
+
 ## Planning Direction
 
-The next planning phase should optimize hybrid retrieval as a reranker-fed candidate generator.
+Retrieval tuning remains important, but it is now subordinate to the reliability roadmap above.
+
+The retrieval planning phase should continue treating hybrid as a reranker-fed candidate generator.
 
 ### Phase 1
 
@@ -409,8 +473,10 @@ The next planning phase should optimize hybrid retrieval as a reranker-fed candi
 
 Possible next steps:
 
-- benchmark query-aware BM25/HNSW budget strategies
+- complete rebuild preflight, throttling, and quota guardrails
+- add hybrid startup self-healing for inconsistent file state
+- benchmark query-aware BM25/HNSW budget strategies only after stability work lands
 - improve HNSW recall on lexical-failure-like queries
 - add hybrid-only normalization that is strictly isolated from `lexicalengine`
 - reconsider positional encoding only if it improves `hits@25` or cutoff behavior
-- revisit storage compression only after recall goals are stable
+- revisit storage compression only after stability and consistency goals are stable

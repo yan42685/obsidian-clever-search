@@ -1,5 +1,6 @@
 import {
 	App,
+	type HeadingCache,
 	TAbstractFile,
 	TFile,
 	TFolder,
@@ -10,6 +11,7 @@ import {
 } from "obsidian";
 import { OuterSetting } from "src/globals/plugin-setting";
 import type { IndexedDocument } from "src/globals/search-types";
+import type { HeadingOutlineEntry } from "src/services/search/hybrid/hybrid-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -151,6 +153,19 @@ export class DataProvider {
 		return (await this.readPlainText(fileOrPath)).split(FileUtil.SPLIT_EOL);
 	}
 
+	getHeadingOutline(fileOrPath: TFile | string): HeadingOutlineEntry[] {
+		const file =
+			typeof fileOrPath === "string"
+				? this.vault.getAbstractFileByPath(fileOrPath)
+				: fileOrPath;
+		if (!(file instanceof TFile)) {
+			return [];
+		}
+
+		const metadata = this.app.metadataCache.getFileCache(file);
+		return this.parseHeadingOutline(metadata);
+	}
+
 	private parseAliases(metadata: CachedMetadata | null): string {
 		return (parseFrontMatterAliases(metadata?.frontmatter) || []).join(" ");
 	}
@@ -161,6 +176,29 @@ export class DataProvider {
 
 	private parseHeadings(metadata: CachedMetadata | null): string {
 		return metadata?.headings?.map((h) => h.heading).join(" ") || "";
+	}
+
+	private parseHeadingOutline(
+		metadata: CachedMetadata | null,
+	): HeadingOutlineEntry[] {
+		return (metadata?.headings ?? [])
+			.map((heading) => this.toHeadingOutlineEntry(heading))
+			.filter((heading): heading is HeadingOutlineEntry => heading !== null);
+	}
+
+	private toHeadingOutlineEntry(
+		heading: HeadingCache,
+	): HeadingOutlineEntry | null {
+		const title = heading.heading?.replace(/\s+/g, " ").trim();
+		if (!title) {
+			return null;
+		}
+
+		return {
+			line: heading.position.start.line,
+			level: heading.level,
+			title,
+		};
 	}
 
 	private isContentIndexable(file: TFile): boolean {

@@ -3,7 +3,7 @@ import { Database } from 'src/services/database/database';
 import { MyNotice } from 'src/services/obsidian/transformed-api';
 import { estimateTokenCount } from 'src/services/search/hybrid/chunker';
 import { logger } from 'src/utils/logger';
-import { getInstance } from 'src/utils/my-lib';
+import { MyLib, getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type StoredVector, type VectorPrecision } from './hybrid-types';
 
@@ -12,6 +12,10 @@ const EMBED_MODEL = 'text-embedding-v4';
 const BATCH_SIZE = 10;
 const CACHE_MAX = 50;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const REQUEST_TIMEOUT_MS = 45_000;
+const REQUEST_MAX_RETRIES = 4;
+const REQUEST_MIN_SPACING_MS = 250;
+const REQUEST_RETRY_BASE_MS = 1_200;
 
 export class NoApiKeyError extends Error {
 	constructor() {
@@ -100,6 +104,8 @@ function float32ToFloat16(val: number): number {
 export class Embedder {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly cache = new Map<string, CacheEntry>();
+	private static requestGate: Promise<void> = Promise.resolve();
+	private static nextRequestAt = 0;
 
 	private get apiKey(): string {
 		return this.setting.hybrid?.apiKey?.trim() ?? '';
@@ -173,38 +179,125 @@ export class Embedder {
 	}
 
 	private async fetchEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokensUsed: number }> {
-		const resp = await fetch(this.apiDomain, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${this.apiKey}`,
-			},
-			body: JSON.stringify({
-				model: EMBED_MODEL,
-				input: texts,
-				dimensions: EMBED_DIM,
-				encoding_format: 'float',
-			}),
-		});
+		let lastError: unknown = null;
+		for (let attempt = 1; attempt <= REQUEST_MAX_RETRIES; attempt++) {
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+			try {
+				await this.waitForRequestSlot();
+				const resp = await fetch(this.apiDomain, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						Authorization: `Bearer ${this.apiKey}`,
+					},
+					body: JSON.stringify({
+						model: EMBED_MODEL,
+						input: texts,
+						dimensions: EMBED_DIM,
+						encoding_format: 'float',
+					}),
+					signal: controller.signal,
+				});
 
-		if (!resp.ok) {
-			const body = await resp.text();
-			logger.error(
-				`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
-			);
-			throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
+				if (!resp.ok) {
+					const body = await resp.text();
+					logger.error(
+						`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
+					);
+					if (this.isRetryableStatus(resp.status) && attempt < REQUEST_MAX_RETRIES) {
+						const delayMs = this.getRetryDelayMs(
+							attempt,
+							resp.headers.get('retry-after'),
+						);
+						logger.warn(
+							`Qwen embedding request will retry: status=${resp.status}, attempt=${attempt}/${REQUEST_MAX_RETRIES}, delay=${delayMs} ms`,
+						);
+						await MyLib.sleep(delayMs);
+						continue;
+					}
+					throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
+				}
+
+				const json = await resp.json() as {
+					data?: Array<{ index: number; embedding: number[] }>;
+					usage?: { total_tokens?: number; input_tokens?: number };
+				};
+				const data: Array<{ index: number; embedding: number[] }> = Array.isArray(json.data)
+					? json.data
+					: [];
+				data.sort((a, b) => a.index - b.index);
+				const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
+				return { embeddings: data.map((item) => item.embedding), tokensUsed };
+			} catch (error) {
+				lastError = error;
+				if (this.isRetryableError(error) && attempt < REQUEST_MAX_RETRIES) {
+					const delayMs = this.getRetryDelayMs(attempt);
+					logger.warn(
+						`Qwen embedding request retrying after transport failure: attempt=${attempt}/${REQUEST_MAX_RETRIES}, delay=${delayMs} ms`,
+						error,
+					);
+					await MyLib.sleep(delayMs);
+					continue;
+				}
+				throw error;
+			} finally {
+				clearTimeout(timeoutId);
+			}
 		}
 
-		const json = await resp.json() as {
-			data?: Array<{ index: number; embedding: number[] }>;
-			usage?: { total_tokens?: number; input_tokens?: number };
-		};
-		const data: Array<{ index: number; embedding: number[] }> = Array.isArray(json.data)
-			? json.data
-			: [];
-		data.sort((a, b) => a.index - b.index);
-		const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
-		return { embeddings: data.map((item) => item.embedding), tokensUsed };
+		throw lastError instanceof Error
+			? lastError
+			: new Error('Qwen embedding request failed after retries');
+	}
+
+	private async waitForRequestSlot(): Promise<void> {
+		let release!: () => void;
+		const previousGate = Embedder.requestGate;
+		Embedder.requestGate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		await previousGate;
+		try {
+			const delayMs = Math.max(0, Embedder.nextRequestAt - Date.now());
+			if (delayMs > 0) {
+				await MyLib.sleep(delayMs);
+			}
+			Embedder.nextRequestAt = Date.now() + REQUEST_MIN_SPACING_MS;
+		} finally {
+			release();
+		}
+	}
+
+	private getRetryDelayMs(attempt: number, retryAfterHeader?: string | null): number {
+		const retryAfterSeconds = Number(retryAfterHeader ?? '');
+		if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+			return Math.round(retryAfterSeconds * 1000);
+		}
+		const jitter = Math.round(Math.random() * 250);
+		return REQUEST_RETRY_BASE_MS * attempt * attempt + jitter;
+	}
+
+	private isRetryableStatus(status: number): boolean {
+		return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+	}
+
+	private isRetryableError(error: unknown): boolean {
+		if (!(error instanceof Error)) {
+			return false;
+		}
+		if (error.name === 'AbortError' || error.name === 'TypeError') {
+			return true;
+		}
+		const message = `${error.name}: ${error.message}`.toLowerCase();
+		return (
+			message.includes('failed to fetch') ||
+			message.includes('network') ||
+			message.includes('timeout') ||
+			message.includes('econn') ||
+			message.includes('socket')
+		);
 	}
 
 	private getCache(text: string, precision: VectorPrecision): StoredVector | null {
