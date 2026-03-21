@@ -306,10 +306,9 @@ export class SearchService {
 		const lines = (
 			await this.dataProvider.readPlainTextLines(activeFile.path)
 		).map((line, index) => new Line(line, index));
-		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 
-		const matchedLines = await this.lexicalEngine.fzfMatch(
-			queryTextNoSpaces,
+		const matchedLines = await this.lexicalEngine.matchLinesFuzzy(
+			queryText,
 			lines,
 		);
 		const lineItems = matchedLines.map((matchedLine) => {

@@ -4,6 +4,7 @@
 		SearchHistoryService,
 		type SearchHistorySuggestion,
 	} from "src/services/obsidian/user-data/search-history-service";
+	import { t } from "src/services/obsidian/translations/locale-helper";
 	import { getInstance } from "src/utils/my-lib";
 	import { createEventDispatcher, tick } from "svelte";
 
@@ -20,6 +21,8 @@
 		text: string;
 		matched: boolean;
 	};
+	const RECENT_SELECTION_WINDOW_MS = 1000 * 60 * 60 * 24 * 7;
+	const MAX_RECENT_BADGES = 3;
 
 	let historySuggestions: SearchHistorySuggestion[] = [];
 	let currHistoryIndex = -1;
@@ -37,9 +40,11 @@
 	let suggestionsEl: HTMLUListElement;
 	let normalizedQueryText = "";
 	let ghostSuffix = "";
+	let recentSuggestionQueries = new Set<string>();
 
 	$: normalizedQueryText = normalizeEditableText(queryText).trim();
 	$: ghostSuffix = getGhostSuffix(ghostSuggestion, normalizedQueryText);
+	$: recentSuggestionQueries = getRecentSuggestionQueries(historySuggestions);
 	$: if (searchInputEl) {
 		const normalizedQueryText = normalizeEditableText(queryText);
 		if (searchInputEl.textContent !== normalizedQueryText) {
@@ -393,6 +398,22 @@
 		};
 	}
 
+	function getRecentSuggestionQueries(
+		suggestions: SearchHistorySuggestion[],
+	): Set<string> {
+		const cutoff = Date.now() - RECENT_SELECTION_WINDOW_MS;
+		return new Set(
+			suggestions
+				.filter((entry) => (entry.selectionTimestamp ?? 0) >= cutoff)
+				.sort(
+					(left, right) =>
+						(right.selectionTimestamp ?? 0) - (left.selectionTimestamp ?? 0),
+				)
+				.slice(0, MAX_RECENT_BADGES)
+				.map((entry) => entry.queryText),
+		);
+	}
+
 	export function isSuggestionsActive(): boolean {
 		return isHistoryDropdownOpen;
 	}
@@ -533,6 +554,9 @@
 									{/if}
 								{/each}
 							</span>
+							{#if recentSuggestionQueries.has(entry.queryText)}
+								<span class="history-recent">{t("Recent")}</span>
+							{/if}
 							{#if (entry.count ?? 1) > 1}
 								<span class="history-count">{entry.count}</span>
 							{/if}
@@ -745,5 +769,18 @@
 		margin-left: 0.5em;
 		font-size: 0.74em;
 		color: var(--cs-secondary-font-color, #a29c9c);
+	}
+
+	.history-recent {
+		flex: none;
+		margin-left: 0.45em;
+		padding: 0.02em 0.42em;
+		font-size: 0.64em;
+		line-height: 1.35;
+		color: var(--cs-secondary-font-color, #a29c9c);
+		background-color: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.06);
+		border-radius: 999px;
+		text-transform: lowercase;
 	}
 </style>

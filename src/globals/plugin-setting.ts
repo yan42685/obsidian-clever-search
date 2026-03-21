@@ -99,7 +99,7 @@ export type SearchHistoryEntry = {
 	selectionTimestamp?: number;
 };
 
-export type SearchHistoryMaxItems = 20 | 50 | 100;
+export type SearchHistoryMaxItems = 20 | 50 | 100 | 1000 | 3000 | 5000 | 10000;
 
 export type SearchHistorySetting = {
 	enabled: boolean;

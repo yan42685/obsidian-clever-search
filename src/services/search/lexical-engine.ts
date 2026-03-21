@@ -1,4 +1,3 @@
-import { AsyncFzf, type FzfResultItem } from "fzf";
 import MiniSearch from "minisearch";
 import type {
 	FileItem,
@@ -17,6 +16,10 @@ import {
 	FileSearchOptions,
 	type SerializedFileSearchIndex,
 } from "./file-search-engine";
+import {
+	createLightweightFuzzyIndex,
+	matchLightweightFuzzy,
+} from "./lightweight-fuzzy-matcher";
 import { TruncateOption, type TruncateType } from "./truncate-option";
 
 // If @singleton() is not used,
@@ -62,20 +65,62 @@ export class LexicalEngine {
 		this.fileSearchEngine.deleteDocuments(paths);
 	}
 
-	// for in-file search
-	async fzfMatch(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
-		const fzf = new AsyncFzf(lines, {
-			selector: (item) => item.text,
+	// Shared lightweight matcher for in-file line ranking.
+	async matchLinesFuzzy(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
+		const matches: Array<{ line: Line; score: number; positions: Set<number> }> = [];
+		const maxItemResults = this.outerSetting.ui.maxItemResults;
+
+		for (const line of lines) {
+			const match = matchLightweightFuzzy(
+				queryText,
+				createLightweightFuzzyIndex(line.text),
+			);
+			if (!match) {
+				continue;
+			}
+			this.insertTopLineMatch(
+				matches,
+				{
+					line,
+					score: match.score,
+					positions: new Set(match.positions),
+				},
+				maxItemResults,
+			);
+		}
+
+		return matches.map((entry) => {
+			return {
+				text: entry.line.text,
+				row: entry.line.row,
+				positions: entry.positions,
+			} as MatchedLine;
 		});
-		return (await fzf.find(queryText))
-			.slice(0, this.outerSetting.ui.maxItemResults)
-			.map((entry: FzfResultItem<Line>) => {
-				return {
-					text: entry.item.text,
-					row: entry.item.row,
-					positions: entry.positions,
-				} as MatchedLine;
-			});
+	}
+
+	private insertTopLineMatch(
+		matches: Array<{ line: Line; score: number; positions: Set<number> }>,
+		nextMatch: { line: Line; score: number; positions: Set<number> },
+		limit: number,
+	) {
+		let insertIndex = 0;
+		while (
+			insertIndex < matches.length &&
+			(matches[insertIndex].score > nextMatch.score ||
+				(matches[insertIndex].score === nextMatch.score &&
+					matches[insertIndex].line.row < nextMatch.line.row))
+		) {
+			insertIndex++;
+		}
+
+		if (insertIndex >= limit) {
+			return;
+		}
+
+		matches.splice(insertIndex, 0, nextMatch);
+		if (matches.length > limit) {
+			matches.pop();
+		}
 	}
 
 	/**

@@ -189,6 +189,10 @@ class GeneralTab extends PluginSettingTab {
 						20: "20",
 						50: "50",
 						100: "100",
+						1000: "1000",
+						3000: "3000",
+						5000: "5000",
+						10000: "10000",
 					})
 					.setValue(String(this.setting.searchHistory.maxItems))
 					.onChange((value) => {

@@ -21,9 +21,10 @@ export default {
 	"Search history ghost completion": "自动显示影子补全提示",
 	"Search history ghost completion desc": "自动显示最佳历史记录的影子补全提示，并可用 Tab 接受补全。只有确认过的搜索才会被记录。",
 	"Search history max items": "搜索历史最大条数",
-	"Search history max items desc": "保留的搜索历史记录最大条数。",
+	"Search history max items desc": "保留的搜索历史记录最大条数，当前最高支持 10000 条。",
 	"Clear search history": "清空搜索历史",
 	"Clear search history desc": "删除已保存的搜索词记录。",
+	Recent: "最近",
 	"hybridModal.desc":
 		"混合搜索结合了词法搜索与千问语义检索。索引阶段使用 text-embedding-v4，搜索阶段使用 qwen3-rerank，接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",

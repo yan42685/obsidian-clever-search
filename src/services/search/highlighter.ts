@@ -88,11 +88,10 @@ export class LineHighlighter {
 		lines: Line[],
 		queryText: string,
 	): Promise<LineItem[]> {
-		const queryTextNoSpaces = queryText.replace(/\s/g, "");
 		const lineItems: LineItem[] = [];
 
-		const matchedLines = await this.lexicalEngine.fzfMatch(
-			queryTextNoSpaces,
+		const matchedLines = await this.lexicalEngine.matchLinesFuzzy(
+			queryText,
 			lines,
 		);
 		for (const matchedLine of matchedLines) {
@@ -402,8 +401,7 @@ export class LineHighlighter {
 		const highlightedContext = await Promise.all(
 			contextLines.map(async (line, index) => {
 				if (line.row === matchedRow) {
-					// apply fzfMatch to the targetLine
-					const matchedLines = await this.lexicalEngine.fzfMatch(
+					const matchedLines = await this.lexicalEngine.matchLinesFuzzy(
 						queryText,
 						[line],
 					);

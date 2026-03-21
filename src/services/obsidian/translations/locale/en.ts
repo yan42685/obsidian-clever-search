@@ -46,9 +46,10 @@ export default {
 	"Search history ghost completion": "Auto ghost completion hint",
 	"Search history ghost completion desc": "Automatically show the best matched history suffix as a ghost completion and accept it with Tab. Only confirmed searches are recorded.",
 	"Search history max items": "Search history max items",
-	"Search history max items desc": "Maximum number of history queries to keep.",
+	"Search history max items desc": "Maximum number of history queries to keep. Supports up to 10000 entries.",
 	"Clear search history": "Clear search history",
 	"Clear search history desc": "Remove all saved search queries.",
+	Recent: "recent",
 	Clear: "Clear",
 
 	"Case sensitive": "Case sensitive",
