@@ -15,7 +15,6 @@ export class SearchModal extends Modal {
 
 		// remove predefined child node
 		this.modalEl.replaceChildren();
-		this.containerEl.addClass("cs-modal-container");
 		this.modalEl.addClass("cs-modal");
 
 		// BUG: In fact, the onMount method won't be called

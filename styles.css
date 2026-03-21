@@ -75,12 +75,6 @@ settings:
         default: '#'
 
 */
-.cs-modal-container {
-	box-sizing: border-box;
-	padding-top: 2.4em;
-	overflow: visible;
-}
-
 .cs-modal {
 	width: 71.5%;
 	height: 80%;
@@ -208,7 +202,7 @@ settings:
 	}
   
   
-	.search-bar .input-shell {
+	.search-bar > input {
 		background-color: var(--background-primary) !important;
 		border: 1px solid rgb(235, 235, 235) !important;
 	}
@@ -219,7 +213,7 @@ settings:
 	background-color: var(--cs-pane-bgc, var(--background-primary)) !important;
 }
 
-.theme-light .cs-modal .search-bar .input-shell {
+.theme-light .cs-modal .search-bar > input {
 	background-color: var(--cs-search-bar-bgc, var(--background-primary)) !important;
 }
   

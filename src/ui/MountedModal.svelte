@@ -197,7 +197,7 @@
 
 	async function handleConfirm(event: Event | null, inBackground: boolean) {
 		event?.preventDefault();
-		if (!inBackground && historyInputRef?.acceptSelectedSuggestion?.()) {
+		if (!inBackground && !event && historyInputRef?.acceptSelectedSuggestion?.()) {
 			return;
 		}
 		const selectedItem = searchResult.items[currItemIndex];
@@ -214,6 +214,10 @@
 
 	async function handleConfirmInBackground() {
 		await handleConfirm(null, true);
+	}
+
+	function handleToggleHistorySuggestions() {
+		historyInputRef?.toggleSuggestionsByHotkey?.();
 	}
 
 	function handleInsertFileLink() {
@@ -248,6 +252,10 @@
 		listenEvent(EventEnum.NEXT_SUB_ITEM, handleNextSubItem);
 		listenEvent(EventEnum.PREV_SUB_ITEM, handlePrevSubItem);
 		listenEvent(EventEnum.CONFIRM_ITEM, handleConfirm);
+		listenEvent(
+			EventEnum.TOGGLE_HISTORY_SUGGESTIONS,
+			handleToggleHistorySuggestions,
+		);
 		listenEvent(
 			EventEnum.CONFIRM_ITEM_IN_BACKGROUND,
 			handleConfirmInBackground,

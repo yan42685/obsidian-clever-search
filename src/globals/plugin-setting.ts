@@ -95,6 +95,8 @@ export type SearchHistoryEntry = {
 	queryText: string;
 	timestamp: number;
 	count?: number;
+	selectionCount?: number;
+	selectionTimestamp?: number;
 };
 
 export type SearchHistoryMaxItems = 20 | 50 | 100;
