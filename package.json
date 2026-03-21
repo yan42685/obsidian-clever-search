@@ -10,6 +10,11 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"benchmark:file-search": "node scripts/file-search-benchmark.mjs",
 		"benchmark:file-search:regression": "node scripts/file-search-benchmark.mjs --mode=regression",
+		"benchmark:hybrid": "node scripts/hybrid-search-benchmark.mjs",
+		"benchmark:hybrid:bm25-size": "node scripts/hybrid-search-benchmark.mjs --mode=bm25-size",
+		"benchmark:hybrid:regression": "node scripts/hybrid-search-benchmark.mjs --mode=regression",
+		"benchmark:hybrid:tune": "node scripts/hybrid-search-benchmark.mjs --mode=tune",
+		"benchmark:hybrid:tune:regression": "node scripts/hybrid-search-benchmark.mjs --mode=tune-regression",
 		"release": "node release-script.mjs"
 	},
 	"keywords": [],

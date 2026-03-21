@@ -1,10 +1,11 @@
-import type {
-	BM25Index,
-	Chunk,
-	ChunkVectorShard,
-	HnswGraphData,
-	StoredVector,
-	VectorPrecision,
+import {
+	BM25_K1,
+	type BM25Index,
+	type Chunk,
+	type ChunkVectorShard,
+	type HnswGraphData,
+	type StoredVector,
+	type VectorPrecision,
 } from './hybrid-types';
 
 export type ChunkRow = {
@@ -30,6 +31,31 @@ export type ChunkVectorShardRow = {
 export type BlobRecord = {
 	id: number;
 	data: Blob;
+};
+
+export type Bm25BlobBreakdown = {
+	version: 2 | 3 | 4;
+	totalBytes: number;
+	headerBytes: number;
+	termTextBytes: number;
+	termMetaBytes: number;
+	postingHeaderBytes: number;
+	postingDocDeltaBytes: number;
+	postingTfNormBytes: number;
+	postingPositionCountBytes: number;
+	postingPositionDeltaBytes: number;
+	docLengthsBytes: number;
+	termCount: number;
+	postingCount: number;
+	postingsWithPositions: number;
+	termsWithPositions: number;
+	positionValueCount: number;
+	topPositionHeavyTerms: Array<{
+		term: string;
+		df: number;
+		positionBytes: number;
+		positionCount: number;
+	}>;
 };
 
 export type HybridDocRef = {
@@ -81,42 +107,38 @@ export async function blobToFloat32(blob: Blob): Promise<Float32Array> {
 export function bm25ToBlob(index: BM25Index): Blob {
 	const chunks: Uint8Array[] = [];
 	const termEntries = Object.entries(index.termDict)
-		.sort((a, b) => a[1].termId - b[1].termId);
-	const postingEntries = Object.entries(index.postings)
-		.sort((a, b) => Number(a[0]) - Number(b[0]));
+		.sort((a, b) => compareTerms(a[0], b[0]));
 	const docLengthEntries = Object.entries(index.docLengths)
 		.sort((a, b) => Number(a[0]) - Number(b[0]));
 
-	chunks.push(BM25_BINARY_MAGIC);
+	chunks.push(BM25_BINARY_MAGIC_V4);
 	chunks.push(writeVarUint(index.docCount));
 	chunks.push(writeFloat32(index.avgDocLen));
 
 	chunks.push(writeVarUint(termEntries.length));
+	let prevTerm = '';
 	for (const [term, entry] of termEntries) {
-		const termBytes = textEncoder.encode(term);
-		chunks.push(writeVarUint(entry.termId));
 		chunks.push(writeVarUint(entry.df));
-		chunks.push(writeVarUint(termBytes.length));
-		chunks.push(termBytes);
-	}
+		const { prefixLength, suffixBytes } = encodeFrontCodedTerm(prevTerm, term);
+		chunks.push(writeVarUint(prefixLength));
+		chunks.push(writeVarUint(suffixBytes.length));
+		chunks.push(suffixBytes);
 
-	chunks.push(writeVarUint(postingEntries.length));
-	for (const [termId, list] of postingEntries) {
-		chunks.push(writeVarUint(Number(termId)));
-		chunks.push(writeVarUint(list.entries.length));
+		const list = index.postings[entry.termId];
+		const entries = list?.entries ?? [];
 		let prevDocId = 0;
-		for (const entry of list.entries) {
-			chunks.push(writeVarUint(entry.docId - prevDocId));
-			prevDocId = entry.docId;
-			chunks.push(writeUint16(quantizeTfNorm(entry.tfNorm)));
-			chunks.push(writeVarUint(entry.positions.length));
-			for (const delta of entry.positions) {
+		for (const posting of entries) {
+			chunks.push(writeVarUint(posting.docId - prevDocId));
+			prevDocId = posting.docId;
+			chunks.push(writeUint8(quantizeTfNormByte(posting.tfNorm)));
+			chunks.push(writeVarUint(posting.positions.length));
+			for (const delta of posting.positions) {
 				chunks.push(writeVarUint(delta));
 			}
 		}
+		prevTerm = term;
 	}
 
-	chunks.push(writeVarUint(docLengthEntries.length));
 	let prevDocId = 0;
 	for (const [docId, length] of docLengthEntries) {
 		const numericDocId = Number(docId);
@@ -130,12 +152,139 @@ export function bm25ToBlob(index: BM25Index): Blob {
 
 export async function blobToBm25(blob: Blob): Promise<BM25Index> {
 	const buf = await readBlobAsArrayBuffer(blob);
-	if (!isBm25Binary(buf)) {
+	const version = getBm25BinaryVersion(buf);
+	if (version === null) {
 		throw new Error('Unsupported BM25 blob format');
 	}
 
 	const reader = new BinaryReader(buf);
-	reader.skip(BM25_BINARY_MAGIC.length);
+	if (version === 4) {
+		return readBm25V4(reader);
+	}
+	if (version === 3) {
+		return readBm25V3(reader);
+	}
+	return readBm25V2(reader);
+}
+
+export async function analyzeBm25Blob(blob: Blob): Promise<Bm25BlobBreakdown> {
+	const buf = await readBlobAsArrayBuffer(blob);
+	const version = getBm25BinaryVersion(buf);
+	if (version === null) {
+		throw new Error('Unsupported BM25 blob format');
+	}
+
+	return version === 4
+		? analyzeBm25BlobV4(new BinaryReader(buf), blob.size)
+		: version === 3
+		? analyzeBm25BlobV3(new BinaryReader(buf), blob.size)
+		: analyzeBm25BlobV2(new BinaryReader(buf), blob.size);
+}
+
+export async function getBm25BlobVersion(blob: Blob): Promise<2 | 3 | 4 | null> {
+	return getBm25BinaryVersion(await readBlobAsArrayBuffer(blob));
+}
+
+function readBm25V4(reader: BinaryReader): BM25Index {
+	reader.skip(BM25_BINARY_MAGIC_V4.length);
+
+	const docCount = reader.readVarUint();
+	const avgDocLen = reader.readFloat32();
+
+	const termCount = reader.readVarUint();
+	const termDict: BM25Index['termDict'] = {};
+	const postings: BM25Index['postings'] = {};
+	let prevTerm = '';
+	for (let termId = 0; termId < termCount; termId++) {
+		const df = reader.readVarUint();
+		const prefixLength = reader.readVarUint();
+		const suffix = reader.readString(reader.readVarUint());
+		const term = decodeFrontCodedTerm(prevTerm, prefixLength, suffix);
+		prevTerm = term;
+		termDict[term] = { termId, df };
+
+		const entries = [];
+		let docId = 0;
+		for (let j = 0; j < df; j++) {
+			docId += reader.readVarUint();
+			const tfNorm = dequantizeTfNormByte(reader.readUint8());
+			const positionCount = reader.readVarUint();
+			const positions: number[] = [];
+			for (let k = 0; k < positionCount; k++) {
+				positions.push(reader.readVarUint());
+			}
+			entries.push({ docId, tfNorm, positions });
+		}
+		postings[termId] = { entries };
+	}
+
+	const docLengths: BM25Index['docLengths'] = {};
+	let docId = 0;
+	for (let i = 0; i < docCount; i++) {
+		docId += reader.readVarUint();
+		docLengths[docId] = reader.readVarUint();
+	}
+
+	return {
+		termDict,
+		postings,
+		docCount,
+		avgDocLen,
+		docLengths,
+	};
+}
+
+function readBm25V3(reader: BinaryReader): BM25Index {
+	reader.skip(BM25_BINARY_MAGIC_V3.length);
+
+	const docCount = reader.readVarUint();
+	const avgDocLen = reader.readFloat32();
+
+	const termCount = reader.readVarUint();
+	const termDict: BM25Index['termDict'] = {};
+	const postings: BM25Index['postings'] = {};
+	let prevTerm = '';
+	for (let termId = 0; termId < termCount; termId++) {
+		const df = reader.readVarUint();
+		const prefixLength = reader.readVarUint();
+		const suffix = reader.readString(reader.readVarUint());
+		const term = decodeFrontCodedTerm(prevTerm, prefixLength, suffix);
+		prevTerm = term;
+		termDict[term] = { termId, df };
+
+		const entries = [];
+		let docId = 0;
+		for (let j = 0; j < df; j++) {
+			docId += reader.readVarUint();
+			const tfNorm = dequantizeTfNorm(reader.readUint16());
+			const positionCount = reader.readVarUint();
+			const positions: number[] = [];
+			for (let k = 0; k < positionCount; k++) {
+				positions.push(reader.readVarUint());
+			}
+			entries.push({ docId, tfNorm, positions });
+		}
+		postings[termId] = { entries };
+	}
+
+	const docLengths: BM25Index['docLengths'] = {};
+	let docId = 0;
+	for (let i = 0; i < docCount; i++) {
+		docId += reader.readVarUint();
+		docLengths[docId] = reader.readVarUint();
+	}
+
+	return {
+		termDict,
+		postings,
+		docCount,
+		avgDocLen,
+		docLengths,
+	};
+}
+
+function readBm25V2(reader: BinaryReader): BM25Index {
+	reader.skip(BM25_BINARY_MAGIC_V2.length);
 
 	const docCount = reader.readVarUint();
 	const avgDocLen = reader.readFloat32();
@@ -183,6 +332,353 @@ export async function blobToBm25(blob: Blob): Promise<BM25Index> {
 		docCount,
 		avgDocLen,
 		docLengths,
+	};
+}
+
+function analyzeBm25BlobV3(reader: BinaryReader, totalBytes: number): Bm25BlobBreakdown {
+	const termById = new Map<number, string>();
+	const positionHeavyTerms: Bm25BlobBreakdown['topPositionHeavyTerms'] = [];
+
+	reader.skip(BM25_BINARY_MAGIC_V3.length);
+	const docCountStart = reader.position;
+	const docCount = reader.readVarUint();
+	reader.readFloat32();
+
+	let headerBytes = reader.position - docCountStart + BM25_BINARY_MAGIC_V3.length;
+	let termTextBytes = 0;
+	let termMetaBytes = 0;
+	let postingHeaderBytes = 0;
+	let postingDocDeltaBytes = 0;
+	let postingTfNormBytes = 0;
+	let postingPositionCountBytes = 0;
+	let postingPositionDeltaBytes = 0;
+	let docLengthsBytes = 0;
+	let postingCount = 0;
+	let postingsWithPositions = 0;
+	let termsWithPositions = 0;
+	let positionValueCount = 0;
+
+	const termCountStart = reader.position;
+	const termCount = reader.readVarUint();
+	headerBytes += reader.position - termCountStart;
+	let prevTerm = '';
+	for (let termId = 0; termId < termCount; termId++) {
+		const metaStart = reader.position;
+		const entryCount = reader.readVarUint();
+		const prefixLength = reader.readVarUint();
+		const termByteLength = reader.readVarUint();
+		termMetaBytes += reader.position - metaStart;
+		termTextBytes += termByteLength;
+		const suffix = reader.readString(termByteLength);
+		const term = decodeFrontCodedTerm(prevTerm, prefixLength, suffix);
+		prevTerm = term;
+		termById.set(termId, term);
+
+		let listHasPositions = false;
+		let listPositionBytes = 0;
+		let listPositionCount = 0;
+		for (let j = 0; j < entryCount; j++) {
+			postingCount++;
+
+			const docDeltaStart = reader.position;
+			reader.readVarUint();
+			postingDocDeltaBytes += reader.position - docDeltaStart;
+
+			reader.readUint16();
+			postingTfNormBytes += 2;
+
+			const positionCountStart = reader.position;
+			const positionCount = reader.readVarUint();
+			postingPositionCountBytes += reader.position - positionCountStart;
+
+			if (positionCount > 0) {
+				postingsWithPositions++;
+				listHasPositions = true;
+			}
+			listPositionCount += positionCount;
+			positionValueCount += positionCount;
+			for (let k = 0; k < positionCount; k++) {
+				const deltaStart = reader.position;
+				reader.readVarUint();
+				const deltaBytes = reader.position - deltaStart;
+				postingPositionDeltaBytes += deltaBytes;
+				listPositionBytes += deltaBytes;
+			}
+		}
+
+		if (listHasPositions) {
+			termsWithPositions++;
+		}
+
+		positionHeavyTerms.push({
+			term: termById.get(termId) ?? String(termId),
+			df: entryCount,
+			positionBytes: listPositionBytes,
+			positionCount: listPositionCount,
+		});
+	}
+
+	for (let i = 0; i < docCount; i++) {
+		const entryStart = reader.position;
+		reader.readVarUint();
+		reader.readVarUint();
+		docLengthsBytes += reader.position - entryStart;
+	}
+
+	return {
+		version: 3,
+		totalBytes,
+		headerBytes,
+		termTextBytes,
+		termMetaBytes,
+		postingHeaderBytes,
+		postingDocDeltaBytes,
+		postingTfNormBytes,
+		postingPositionCountBytes,
+		postingPositionDeltaBytes,
+		docLengthsBytes,
+		termCount,
+		postingCount,
+		postingsWithPositions,
+		termsWithPositions,
+		positionValueCount,
+		topPositionHeavyTerms: positionHeavyTerms
+			.sort((a, b) => b.positionBytes - a.positionBytes)
+			.slice(0, 10),
+	};
+}
+
+function analyzeBm25BlobV4(reader: BinaryReader, totalBytes: number): Bm25BlobBreakdown {
+	const termById = new Map<number, string>();
+	const positionHeavyTerms: Bm25BlobBreakdown['topPositionHeavyTerms'] = [];
+
+	reader.skip(BM25_BINARY_MAGIC_V4.length);
+	const docCountStart = reader.position;
+	const docCount = reader.readVarUint();
+	reader.readFloat32();
+
+	let headerBytes = reader.position - docCountStart + BM25_BINARY_MAGIC_V4.length;
+	let termTextBytes = 0;
+	let termMetaBytes = 0;
+	let postingHeaderBytes = 0;
+	let postingDocDeltaBytes = 0;
+	let postingTfNormBytes = 0;
+	let postingPositionCountBytes = 0;
+	let postingPositionDeltaBytes = 0;
+	let docLengthsBytes = 0;
+	let postingCount = 0;
+	let postingsWithPositions = 0;
+	let termsWithPositions = 0;
+	let positionValueCount = 0;
+
+	const termCountStart = reader.position;
+	const termCount = reader.readVarUint();
+	headerBytes += reader.position - termCountStart;
+	let prevTerm = '';
+	for (let termId = 0; termId < termCount; termId++) {
+		const metaStart = reader.position;
+		const entryCount = reader.readVarUint();
+		const prefixLength = reader.readVarUint();
+		const termByteLength = reader.readVarUint();
+		termMetaBytes += reader.position - metaStart;
+		termTextBytes += termByteLength;
+		const suffix = reader.readString(termByteLength);
+		const term = decodeFrontCodedTerm(prevTerm, prefixLength, suffix);
+		prevTerm = term;
+		termById.set(termId, term);
+
+		let listHasPositions = false;
+		let listPositionBytes = 0;
+		let listPositionCount = 0;
+		for (let j = 0; j < entryCount; j++) {
+			postingCount++;
+
+			const docDeltaStart = reader.position;
+			reader.readVarUint();
+			postingDocDeltaBytes += reader.position - docDeltaStart;
+
+			reader.readUint8();
+			postingTfNormBytes += 1;
+
+			const positionCountStart = reader.position;
+			const positionCount = reader.readVarUint();
+			postingPositionCountBytes += reader.position - positionCountStart;
+
+			if (positionCount > 0) {
+				postingsWithPositions++;
+				listHasPositions = true;
+			}
+			listPositionCount += positionCount;
+			positionValueCount += positionCount;
+			for (let k = 0; k < positionCount; k++) {
+				const deltaStart = reader.position;
+				reader.readVarUint();
+				const deltaBytes = reader.position - deltaStart;
+				postingPositionDeltaBytes += deltaBytes;
+				listPositionBytes += deltaBytes;
+			}
+		}
+
+		if (listHasPositions) {
+			termsWithPositions++;
+		}
+
+		positionHeavyTerms.push({
+			term: termById.get(termId) ?? String(termId),
+			df: entryCount,
+			positionBytes: listPositionBytes,
+			positionCount: listPositionCount,
+		});
+	}
+
+	for (let i = 0; i < docCount; i++) {
+		const entryStart = reader.position;
+		reader.readVarUint();
+		reader.readVarUint();
+		docLengthsBytes += reader.position - entryStart;
+	}
+
+	return {
+		version: 4,
+		totalBytes,
+		headerBytes,
+		termTextBytes,
+		termMetaBytes,
+		postingHeaderBytes,
+		postingDocDeltaBytes,
+		postingTfNormBytes,
+		postingPositionCountBytes,
+		postingPositionDeltaBytes,
+		docLengthsBytes,
+		termCount,
+		postingCount,
+		postingsWithPositions,
+		termsWithPositions,
+		positionValueCount,
+		topPositionHeavyTerms: positionHeavyTerms
+			.sort((a, b) => b.positionBytes - a.positionBytes)
+			.slice(0, 10),
+	};
+}
+
+function analyzeBm25BlobV2(reader: BinaryReader, totalBytes: number): Bm25BlobBreakdown {
+	reader.skip(BM25_BINARY_MAGIC_V2.length);
+	const docCountStart = reader.position;
+	reader.readVarUint();
+	reader.readFloat32();
+
+	let headerBytes = reader.position - docCountStart + BM25_BINARY_MAGIC_V2.length;
+	let termTextBytes = 0;
+	let termMetaBytes = 0;
+	let postingHeaderBytes = 0;
+	let postingDocDeltaBytes = 0;
+	let postingTfNormBytes = 0;
+	let postingPositionCountBytes = 0;
+	let postingPositionDeltaBytes = 0;
+	let docLengthsBytes = 0;
+	let postingCount = 0;
+	let postingsWithPositions = 0;
+	let termsWithPositions = 0;
+	let positionValueCount = 0;
+	const termById = new Map<number, string>();
+	const positionHeavyTerms: Bm25BlobBreakdown['topPositionHeavyTerms'] = [];
+
+	const termCountStart = reader.position;
+	const termCount = reader.readVarUint();
+	headerBytes += reader.position - termCountStart;
+	for (let i = 0; i < termCount; i++) {
+		const metaStart = reader.position;
+		const termId = reader.readVarUint();
+		reader.readVarUint();
+		const termByteLength = reader.readVarUint();
+		termMetaBytes += reader.position - metaStart;
+		termTextBytes += termByteLength;
+		termById.set(termId, reader.readString(termByteLength));
+	}
+
+	const postingListCountStart = reader.position;
+	const postingListCount = reader.readVarUint();
+	headerBytes += reader.position - postingListCountStart;
+	for (let i = 0; i < postingListCount; i++) {
+		const listHeaderStart = reader.position;
+		const termId = reader.readVarUint();
+		const entryCount = reader.readVarUint();
+		postingHeaderBytes += reader.position - listHeaderStart;
+
+		let listHasPositions = false;
+		let listPositionBytes = 0;
+		let listPositionCount = 0;
+		for (let j = 0; j < entryCount; j++) {
+			postingCount++;
+
+			const docDeltaStart = reader.position;
+			reader.readVarUint();
+			postingDocDeltaBytes += reader.position - docDeltaStart;
+
+			reader.readUint16();
+			postingTfNormBytes += 2;
+
+			const positionCountStart = reader.position;
+			const positionCount = reader.readVarUint();
+			postingPositionCountBytes += reader.position - positionCountStart;
+
+			if (positionCount > 0) {
+				postingsWithPositions++;
+				listHasPositions = true;
+			}
+			listPositionCount += positionCount;
+			positionValueCount += positionCount;
+			for (let k = 0; k < positionCount; k++) {
+				const deltaStart = reader.position;
+				reader.readVarUint();
+				const deltaBytes = reader.position - deltaStart;
+				postingPositionDeltaBytes += deltaBytes;
+				listPositionBytes += deltaBytes;
+			}
+		}
+
+		if (listHasPositions) {
+			termsWithPositions++;
+		}
+
+		positionHeavyTerms.push({
+			term: termById.get(termId) ?? String(termId),
+			df: entryCount,
+			positionBytes: listPositionBytes,
+			positionCount: listPositionCount,
+		});
+	}
+
+	const docLengthCountStart = reader.position;
+	const docLengthCount = reader.readVarUint();
+	headerBytes += reader.position - docLengthCountStart;
+	for (let i = 0; i < docLengthCount; i++) {
+		const entryStart = reader.position;
+		reader.readVarUint();
+		reader.readVarUint();
+		docLengthsBytes += reader.position - entryStart;
+	}
+
+	return {
+		version: 2,
+		totalBytes,
+		headerBytes,
+		termTextBytes,
+		termMetaBytes,
+		postingHeaderBytes,
+		postingDocDeltaBytes,
+		postingTfNormBytes,
+		postingPositionCountBytes,
+		postingPositionDeltaBytes,
+		docLengthsBytes,
+		termCount,
+		postingCount,
+		postingsWithPositions,
+		termsWithPositions,
+		positionValueCount,
+		topPositionHeavyTerms: positionHeavyTerms
+			.sort((a, b) => b.positionBytes - a.positionBytes)
+			.slice(0, 10),
 	};
 }
 
@@ -344,8 +840,11 @@ function parseVectorPrecision(value: string): VectorPrecision {
 	return value === 'float16' ? 'float16' : 'int8';
 }
 
-const BM25_BINARY_MAGIC = Uint8Array.from([0x43, 0x53, 0x42, 0x32]);
+const BM25_BINARY_MAGIC_V2 = Uint8Array.from([0x43, 0x53, 0x42, 0x32]);
+const BM25_BINARY_MAGIC_V3 = Uint8Array.from([0x43, 0x53, 0x42, 0x33]);
+const BM25_BINARY_MAGIC_V4 = Uint8Array.from([0x43, 0x53, 0x42, 0x34]);
 const BM25_TF_NORM_SCALE = 4096;
+const BM25_TF_NORM_MAX = BM25_K1 + 1;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -397,17 +896,69 @@ function dequantizeTfNorm(value: number): number {
 	return value / BM25_TF_NORM_SCALE;
 }
 
-function isBm25Binary(buf: ArrayBuffer): boolean {
-	if (buf.byteLength < BM25_BINARY_MAGIC.length) {
+function quantizeTfNormByte(value: number): number {
+	const clamped = Math.max(0, Math.min(BM25_TF_NORM_MAX, value));
+	return Math.round((clamped / BM25_TF_NORM_MAX) * 255);
+}
+
+function dequantizeTfNormByte(value: number): number {
+	return (value / 255) * BM25_TF_NORM_MAX;
+}
+
+function getBm25BinaryVersion(buf: ArrayBuffer): 2 | 3 | 4 | null {
+	if (hasMagic(buf, BM25_BINARY_MAGIC_V4)) {
+		return 4;
+	}
+	if (hasMagic(buf, BM25_BINARY_MAGIC_V3)) {
+		return 3;
+	}
+	if (hasMagic(buf, BM25_BINARY_MAGIC_V2)) {
+		return 2;
+	}
+	return null;
+}
+
+function hasMagic(buf: ArrayBuffer, magic: Uint8Array): boolean {
+	if (buf.byteLength < magic.length) {
 		return false;
 	}
-	const bytes = new Uint8Array(buf, 0, BM25_BINARY_MAGIC.length);
-	for (let i = 0; i < BM25_BINARY_MAGIC.length; i++) {
-		if (bytes[i] !== BM25_BINARY_MAGIC[i]) {
+	const bytes = new Uint8Array(buf, 0, magic.length);
+	for (let i = 0; i < magic.length; i++) {
+		if (bytes[i] !== magic[i]) {
 			return false;
 		}
 	}
 	return true;
+}
+
+function compareTerms(left: string, right: string): number {
+	if (left < right) return -1;
+	if (left > right) return 1;
+	return 0;
+}
+
+function encodeFrontCodedTerm(prevTerm: string, term: string): {
+	prefixLength: number;
+	suffixBytes: Uint8Array;
+} {
+	const prefixLength = sharedPrefixLength(prevTerm, term);
+	return {
+		prefixLength,
+		suffixBytes: textEncoder.encode(term.slice(prefixLength)),
+	};
+}
+
+function decodeFrontCodedTerm(prevTerm: string, prefixLength: number, suffix: string): string {
+	return prevTerm.slice(0, prefixLength) + suffix;
+}
+
+function sharedPrefixLength(left: string, right: string): number {
+	const limit = Math.min(left.length, right.length);
+	let index = 0;
+	while (index < limit && left.charCodeAt(index) === right.charCodeAt(index)) {
+		index++;
+	}
+	return index;
 }
 
 class BinaryReader {
@@ -420,6 +971,10 @@ class BinaryReader {
 
 	skip(length: number): void {
 		this.offset += length;
+	}
+
+	get position(): number {
+		return this.offset;
 	}
 
 	readUint8(): number {

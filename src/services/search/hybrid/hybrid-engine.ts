@@ -17,6 +17,7 @@ import {
 	type ChunkRow,
 	type ChunkVectorShardRow,
 	chunkToRow,
+	getBm25BlobVersion,
 	hnswToBlob,
 	rowToChunk,
 	rowToChunkVectorShard,
@@ -28,8 +29,9 @@ import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './
 import { EMBED_DIM } from './hybrid-types';
 
 const BM25_RECALL_LIMIT = 20;
-const DENSE_RECALL_LIMIT = 20;
+const DENSE_RECALL_LIMIT = 30;
 const SEARCH_EF = 80;
+const HYBRID_BM25_USE_PROXIMITY = false;
 const DEFAULT_MAX_FILE_RESULTS = 5;
 const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 30;
@@ -160,7 +162,9 @@ export class HybridEngine {
 	async search(query: string, topK = this.defaultResultCount): Promise<FileItem[]> {
 		if (!this.isEnabled() || !this._ready || !query.trim()) return [];
 
-		const bm25Small = this.bm25.search(query, BM25_RECALL_LIMIT).map((result) => ({
+		const bm25Small = this.bm25.search(query, BM25_RECALL_LIMIT, {
+			useProximity: HYBRID_BM25_USE_PROXIMITY,
+		}).map((result) => ({
 			id: result.docId,
 			score: result.score,
 		}));
@@ -195,6 +199,22 @@ export class HybridEngine {
 
 	async persistIndicesForBatch(): Promise<void> {
 		await this.persistIndices();
+	}
+
+	async migrateBm25StorageFormatIfNeeded(): Promise<boolean> {
+		const record = await this.db.db.hybridBm25Index.get(0);
+		if (!record) {
+			return false;
+		}
+		const blobVersion = await getBm25BlobVersion(record.data);
+		if (blobVersion === 4) {
+			return false;
+		}
+
+		const migrated = new BM25Engine();
+		migrated.deserialize(await blobToBm25(record.data));
+		await this.db.db.hybridBm25Index.put({ id: 0, data: bm25ToBlob(migrated.serialize()) });
+		return true;
 	}
 
 	private async indexInternal(
@@ -418,6 +438,7 @@ export class HybridEngine {
 	}
 
 	private async persistBm25(): Promise<void> {
+		this.bm25.optimizeStorage();
 		await this.db.db.hybridBm25Index.put({ id: 0, data: bm25ToBlob(this.bm25.serialize()) });
 	}
 
@@ -432,7 +453,11 @@ export class HybridEngine {
 		this.bm25.clear();
 		const record = await this.db.db.hybridBm25Index.get(0);
 		if (record) {
+			const blobVersion = await getBm25BlobVersion(record.data);
 			this.bm25.deserialize(await blobToBm25(record.data));
+			if (blobVersion !== 4 || this.bm25.optimizeStorage()) {
+				await this.persistBm25();
+			}
 		}
 	}
 

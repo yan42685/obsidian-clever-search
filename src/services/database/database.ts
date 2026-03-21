@@ -2,6 +2,7 @@ import Dexie from "dexie";
 import type { HybridTokenRecord, OuterSetting } from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import type {
+	Bm25BlobBreakdown,
 	BlobRecord,
 	ChunkRow,
 	ChunkVectorShardRow,
@@ -12,6 +13,7 @@ import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
+import { analyzeBm25Blob } from "../search/hybrid/hybrid-store";
 
 @singleton()
 export class Database {
@@ -32,6 +34,7 @@ export class Database {
 			scaleBytes: number;
 			metadataBytes: number;
 		};
+		hybridBm25Breakdown?: Bm25BlobBreakdown;
 	}> {
 		const tableEntries = [
 			{ name: "pluginSetting", table: this.db.pluginSetting },
@@ -58,14 +61,22 @@ export class Database {
 		);
 		const hybridChunkRows = await this.db.hybridChunks.toArray();
 		const hybridVectorRows = await this.db.hybridChunkVectors.toArray();
+		const hybridBm25Row = await this.db.hybridBm25Index.get(0);
 		const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(hybridChunkRows);
 		const hybridVectorBreakdown = this.estimateHybridVectorBreakdown(hybridVectorRows);
+		const hybridBm25Breakdown = hybridBm25Row
+			? await analyzeBm25Blob(hybridBm25Row.data).catch((error) => {
+				logger.warn("failed to analyze hybrid BM25 blob", error);
+				return undefined;
+			})
+			: undefined;
 
 		return {
 			totalBytes: tables.reduce((sum, item) => sum + item.bytes, 0),
 			tables,
 			hybridChunkBreakdown,
 			hybridVectorBreakdown,
+			hybridBm25Breakdown,
 		};
 	}
 

@@ -1,0 +1,656 @@
+{
+  "suites": [
+    {
+      "name": "plugin_intents_en",
+      "tier": "core",
+      "queries": [
+        {
+          "name": "calendar exact name",
+          "text": "full calendar",
+          "family": "lexical",
+          "targetConcepts": ["calendar"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "calendar monthly planning",
+          "text": "monthly planning board for events",
+          "family": "phrase",
+          "targetConcepts": ["calendar"],
+          "semanticHints": ["calendar"],
+          "relevantRoles": ["exact"]
+        },
+        {
+          "name": "dataview note properties",
+          "text": "query note properties as a table",
+          "family": "phrase",
+          "targetConcepts": ["dataview"],
+          "semanticHints": ["dataview"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "dataview metadata intent",
+          "text": "show notes filtered by metadata",
+          "family": "semantic",
+          "targetConcepts": ["dataview"],
+          "semanticHints": ["dataview"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "kanban exact name",
+          "text": "kanban board",
+          "family": "lexical",
+          "targetConcepts": ["kanban"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "kanban workflow intent",
+          "text": "move task cards across columns",
+          "family": "semantic",
+          "targetConcepts": ["kanban"],
+          "semanticHints": ["kanban"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "zotero exact integration",
+          "text": "zotero integration",
+          "family": "lexical",
+          "targetConcepts": ["zotero"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "zotero highlights workflow",
+          "text": "sync paper highlights and references",
+          "family": "semantic",
+          "targetConcepts": ["zotero"],
+          "semanticHints": ["zotero"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "canvas visual board",
+          "text": "visual board with linked cards",
+          "family": "phrase",
+          "targetConcepts": ["canvas"],
+          "semanticHints": ["canvas"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "git vault backup",
+          "text": "vault backup with git history",
+          "family": "semantic",
+          "targetConcepts": ["git"],
+          "semanticHints": ["git"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "flashcards spaced repetition",
+          "text": "spaced repetition flashcards",
+          "family": "lexical",
+          "targetConcepts": ["flashcards"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "templater note scaffold",
+          "text": "generate note boilerplate with commands",
+          "family": "semantic",
+          "targetConcepts": ["templates"],
+          "semanticHints": ["templates"],
+          "relevantRoles": ["semantic", "mixed"]
+        }
+      ]
+    },
+    {
+      "name": "plugin_intents_zh",
+      "tier": "core",
+      "queries": [
+        {
+          "name": "日历插件",
+          "text": "日历排期 calendar",
+          "family": "mixed",
+          "targetConcepts": ["calendar"],
+          "semanticHints": ["calendar"],
+          "relevantRoles": ["mixed", "exact"]
+        },
+        {
+          "name": "属性表格查询",
+          "text": "按属性筛选笔记表格 dataview",
+          "family": "mixed",
+          "targetConcepts": ["dataview"],
+          "semanticHints": ["dataview"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "任务看板",
+          "text": "任务卡片 看板 kanban",
+          "family": "mixed",
+          "targetConcepts": ["kanban"],
+          "semanticHints": ["kanban"],
+          "relevantRoles": ["mixed", "exact"]
+        },
+        {
+          "name": "文献高亮同步",
+          "text": "同步论文高亮和参考文献 zotero",
+          "family": "mixed",
+          "targetConcepts": ["zotero"],
+          "semanticHints": ["zotero"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "白板卡片",
+          "text": "白板 连接卡片 canvas",
+          "family": "mixed",
+          "targetConcepts": ["canvas"],
+          "semanticHints": ["canvas"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "仓库备份",
+          "text": "用 git 备份仓库和历史",
+          "family": "mixed",
+          "targetConcepts": ["git"],
+          "semanticHints": ["git"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "间隔复习",
+          "text": "间隔复习 记忆卡片 anki",
+          "family": "mixed",
+          "targetConcepts": ["flashcards"],
+          "semanticHints": ["flashcards"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "模板脚手架",
+          "text": "自动生成笔记模板 templater",
+          "family": "mixed",
+          "targetConcepts": ["templates"],
+          "semanticHints": ["templates"],
+          "relevantRoles": ["mixed", "semantic"]
+        }
+      ]
+    },
+    {
+      "name": "hard_cases",
+      "tier": "adversarial",
+      "queries": [
+        {
+          "name": "ambiguous board planning",
+          "text": "planning board",
+          "family": "mixed",
+          "targetConcepts": ["calendar", "kanban"],
+          "semanticHints": ["calendar", "kanban"],
+          "relevantRoles": ["mixed"]
+        },
+        {
+          "name": "metadata versus canvas noise",
+          "text": "linked notes table and properties",
+          "family": "mixed",
+          "targetConcepts": ["dataview", "canvas"],
+          "semanticHints": ["dataview", "canvas"],
+          "relevantRoles": ["mixed"]
+        },
+        {
+          "name": "research backup overlap",
+          "text": "save research library history",
+          "family": "mixed",
+          "targetConcepts": ["zotero", "git"],
+          "semanticHints": ["zotero", "git"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "capture automation overlap",
+          "text": "capture workflow and note generation",
+          "family": "mixed",
+          "targetConcepts": ["templates", "calendar"],
+          "semanticHints": ["templates", "calendar"],
+          "relevantRoles": ["mixed", "semantic"]
+        }
+      ]
+    },
+    {
+      "name": "hybrid_entry_modes",
+      "tier": "core",
+      "queries": [
+        {
+          "name": "calendar direct hybrid entity",
+          "text": "full-calendar plugin",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["calendar"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "calendar fallback semantic rewrite",
+          "text": "reserve time slots on a day grid",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["calendar"],
+          "semanticHints": ["calendar"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "dataview direct hybrid entity",
+          "text": "dataview inline fields",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["dataview"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "dataview fallback semantic rewrite",
+          "text": "browse note attributes like a lightweight database",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["dataview"],
+          "semanticHints": ["dataview"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "kanban direct hybrid entity",
+          "text": "kanban lane cards",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["kanban"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "kanban fallback semantic rewrite",
+          "text": "drag work items across status columns",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["kanban"],
+          "semanticHints": ["kanban"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "zotero direct hybrid entity",
+          "text": "zotero pdf highlights",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["zotero"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "zotero fallback semantic rewrite",
+          "text": "pull annotations from a paper manager into notes",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["zotero"],
+          "semanticHints": ["zotero"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "canvas direct hybrid entity",
+          "text": "canvas edge cards",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["canvas"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "canvas fallback semantic rewrite",
+          "text": "whiteboard for arranging linked idea blocks",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["canvas"],
+          "semanticHints": ["canvas"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "git direct hybrid entity",
+          "text": "obsidian git history",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["git"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "git fallback semantic rewrite",
+          "text": "restore earlier note snapshots from a repository",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["git"],
+          "semanticHints": ["git"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "flashcards direct hybrid entity",
+          "text": "anki review plugin",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["flashcards"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "flashcards fallback semantic rewrite",
+          "text": "memorization system with scheduled recall sessions",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["flashcards"],
+          "semanticHints": ["flashcards"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "templater direct hybrid entity",
+          "text": "templater command snippets",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["templates"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "templater fallback semantic rewrite",
+          "text": "pre-fill a new note with generated sections",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["templates"],
+          "semanticHints": ["templates"],
+          "relevantRoles": ["semantic", "mixed"]
+        }
+      ]
+    },
+    {
+      "name": "adversarial_top25",
+      "tier": "adversarial",
+      "queries": [
+        {
+          "name": "calendar adversarial board planning",
+          "text": "planning board with weekly lanes and event cards",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["calendar"],
+          "semanticHints": ["calendar"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "dataview adversarial property cards",
+          "text": "linked property cards rendered as a table view",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["dataview"],
+          "semanticHints": ["dataview"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "kanban adversarial planning timeline",
+          "text": "project planning board with timeline cards and status lanes",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["kanban"],
+          "semanticHints": ["kanban"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "zotero adversarial history sync",
+          "text": "research library history with pdf annotations and sync",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["zotero"],
+          "semanticHints": ["zotero"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "canvas adversarial metadata board",
+          "text": "spatial board for linked metadata cards",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["canvas"],
+          "semanticHints": ["canvas"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "git adversarial library snapshots",
+          "text": "save note history and library snapshots from a repository",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["git"],
+          "semanticHints": ["git"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "flashcards adversarial review workflow",
+          "text": "review workflow with scheduled memory cards and intervals",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["flashcards"],
+          "semanticHints": ["flashcards"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "templates adversarial capture automation",
+          "text": "automation snippets for project capture workflow",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["templates"],
+          "semanticHints": ["templates"],
+          "relevantRoles": ["semantic", "mixed"]
+        }
+      ]
+    },
+    {
+      "name": "holdout_generalization",
+      "tier": "holdout",
+      "queries": [
+        {
+          "name": "calendar holdout meeting planner",
+          "text": "weekly meeting planner laid out on a date grid",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["calendar"],
+          "semanticHints": ["calendar"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "dataview holdout property browser",
+          "text": "browse note properties as sortable rows",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["dataview"],
+          "semanticHints": ["dataview"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "kanban holdout project board",
+          "text": "move project work across status board columns",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["kanban"],
+          "semanticHints": ["kanban"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "zotero holdout paper notes",
+          "text": "bring paper highlights and bibliography notes together",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["zotero"],
+          "semanticHints": ["zotero"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "canvas holdout idea map",
+          "text": "arrange linked idea cards on a whiteboard map",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["canvas"],
+          "semanticHints": ["canvas"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "git holdout restore history",
+          "text": "restore note revisions from repository history",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["git"],
+          "semanticHints": ["git"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "flashcards holdout spaced reviews",
+          "text": "scheduled review cards for spaced memory practice",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["flashcards"],
+          "semanticHints": ["flashcards"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "templates holdout note generator",
+          "text": "generate new note sections from reusable command templates",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["templates"],
+          "semanticHints": ["templates"],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "calendar holdout direct hybrid entity",
+          "text": "calendar event grid",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["calendar"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "dataview holdout direct hybrid entity",
+          "text": "dataview inline properties",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["dataview"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "kanban holdout direct hybrid entity",
+          "text": "kanban status lanes",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["kanban"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "zotero holdout mixed entity",
+          "text": "citation highlights for research notes",
+          "family": "mixed",
+          "entryPath": "mixed_entry",
+          "targetConcepts": ["zotero"],
+          "semanticHints": ["zotero"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "canvas holdout mixed entity",
+          "text": "whiteboard cards with links and edges",
+          "family": "mixed",
+          "entryPath": "mixed_entry",
+          "targetConcepts": ["canvas"],
+          "semanticHints": ["canvas"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "git holdout direct hybrid entity",
+          "text": "git vault history",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["git"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "flashcards holdout mixed entity",
+          "text": "anki memory review intervals",
+          "family": "mixed",
+          "entryPath": "mixed_entry",
+          "targetConcepts": ["flashcards"],
+          "semanticHints": ["flashcards"],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "templates holdout direct hybrid entity",
+          "text": "templater snippets commands",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["templates"],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "calendar holdout ambiguous planner board",
+          "text": "drag appointments across a weekly planning board",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["calendar"],
+          "semanticHints": [],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "dataview holdout typo entity",
+          "text": "dateview inline fields",
+          "family": "lexical",
+          "entryPath": "direct_hybrid",
+          "targetConcepts": ["dataview"],
+          "semanticHints": [],
+          "relevantRoles": ["exact", "mixed"]
+        },
+        {
+          "name": "dataview holdout ambiguous property cards",
+          "text": "metadata cards grouped as query rows",
+          "family": "mixed",
+          "entryPath": "mixed_entry",
+          "targetConcepts": ["dataview"],
+          "semanticHints": [],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "kanban holdout alias workflow pipeline",
+          "text": "workflow pipeline columns for task cards",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["kanban"],
+          "semanticHints": [],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "zotero holdout alias reference manager",
+          "text": "reference manager pdf notes and highlights",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["zotero"],
+          "semanticHints": [],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "canvas holdout ambiguous linked board",
+          "text": "linked cards in a spatial board with edges",
+          "family": "mixed",
+          "entryPath": "mixed_entry",
+          "targetConcepts": ["canvas"],
+          "semanticHints": [],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "git holdout alias snapshots",
+          "text": "versioned vault snapshots with restore history",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["git"],
+          "semanticHints": [],
+          "relevantRoles": ["semantic", "mixed"]
+        },
+        {
+          "name": "flashcards holdout typo spaced repetition",
+          "text": "spaced repetiton review cards",
+          "family": "mixed",
+          "entryPath": "mixed_entry",
+          "targetConcepts": ["flashcards"],
+          "semanticHints": [],
+          "relevantRoles": ["mixed", "semantic"]
+        },
+        {
+          "name": "templates holdout alias boilerplate commands",
+          "text": "boilerplate commands for new note capture",
+          "family": "semantic",
+          "entryPath": "lexical_fallback_like",
+          "targetConcepts": ["templates"],
+          "semanticHints": [],
+          "relevantRoles": ["semantic", "mixed"]
+        }
+      ]
+    }
+  ]
+}

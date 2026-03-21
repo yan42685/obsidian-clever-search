@@ -9,6 +9,9 @@ import {
 } from './hybrid-types';
 
 type BM25SearchResult = { docId: number; score: number };
+type BM25SearchOptions = {
+	useProximity?: boolean;
+};
 
 const BM25_POSITION_BUCKET_SIZE = 4;
 const BM25_MAX_POSITIONS_PER_TERM = 8;
@@ -124,10 +127,11 @@ export class BM25Engine {
 		}
 	}
 
-	search(query: string, topK = 20): BM25SearchResult[] {
+	search(query: string, topK = 20, options: BM25SearchOptions = {}): BM25SearchResult[] {
 		const terms = this.tokenizer.tokenize(query, 'search');
 		if (terms.length === 0 || this._docCount === 0) return [];
 		const orderedTerms = uniqueTermsInOrder(terms);
+		const useProximity = options.useProximity ?? true;
 
 		const scores = new Map<number, number>();
 		const docPositions = new Map<number, Map<string, number[]>>();
@@ -143,7 +147,7 @@ export class BM25Engine {
 			const idf = Math.log((N - termEntry.df + 0.5) / (termEntry.df + 0.5) + 1);
 			for (const entry of list.entries) {
 				scores.set(entry.docId, (scores.get(entry.docId) ?? 0) + entry.tfNorm * idf);
-				if (orderedTerms.length > 1) {
+				if (useProximity && orderedTerms.length > 1 && entry.positions.length > 0) {
 					let termPos = docPositions.get(entry.docId);
 					if (!termPos) {
 						termPos = new Map();
@@ -154,7 +158,7 @@ export class BM25Engine {
 			}
 		}
 
-		if (orderedTerms.length > 1) {
+		if (useProximity && orderedTerms.length > 1) {
 			for (const [docId, termPos] of docPositions) {
 				if (termPos.size < 2) continue;
 				const baseScore = scores.get(docId) ?? 0;
@@ -220,10 +224,18 @@ export class BM25Engine {
 		this.nextTermId = Math.max(0, ...Array.from(this.termDict.values()).map((entry) => entry.termId)) + 1;
 	}
 
+	optimizeStorage(): boolean {
+		// Position pruning is intentionally disabled for now.
+		// The previous high-DF heuristic did not show measurable blob savings
+		// on real vaults, but it could still weaken proximity signals.
+		return false;
+	}
+
 	private computeTfNorm(tf: number, dl: number): number {
 		const avgdl = this.avgDocLen || 1;
 		return (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * (dl / avgdl)));
 	}
+
 }
 
 function computeProximityBonus(

@@ -81,6 +81,11 @@ export class DataManager {
 	async initAsync() {
 		await this.database.deleteOldDatabases();
 		await this.initLexicalEngine();
+		if (!this.hybridEngine.isEnabled()) {
+			await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
+				logger.warn("hybrid BM25 storage migration failed:", e);
+			});
+		}
 		await this.initHybridEngine().catch((e) => {
 			logger.warn("hybrid engine init failed:", e);
 			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
@@ -523,9 +528,16 @@ export class DataManager {
 				hnswBytes -
 				chunkStoreBytes,
 		);
+		const isChineseDevLocale =
+			(window.localStorage.getItem("language") || "")
+				.toLowerCase()
+				.startsWith("zh");
+		const localOnlyHint = isChineseDevLocale
+			? "本次统计纯本地，不会调用 embedding/rerank API，不消耗 token"
+			: "This report is local-only: no embedding API, no rerank API, no token usage.";
 
 		new MyNotice(
-			this.buildDevStorageNotice(
+			`${this.buildDevStorageNotice(
 				indexableBytes,
 				storageUsage.totalBytes,
 				this.setting.hybrid.vectorCompression,
@@ -535,7 +547,7 @@ export class DataManager {
 				bm25Bytes,
 				hnswBytes,
 				otherBytes,
-			),
+			)}\n${localOnlyHint}`,
 			15000,
 		);
 
@@ -556,6 +568,7 @@ export class DataManager {
 				}))
 				.sort((a, b) => b.bytes - a.bytes),
 		);
+		console.log(`[clever-search] ${localOnlyHint}`);
 		if (storageUsage.hybridChunkBreakdown) {
 			console.table([
 				{
@@ -593,6 +606,59 @@ export class DataManager {
 					size: this.formatBytes(storageUsage.hybridVectorBreakdown.metadataBytes),
 				},
 			]);
+		}
+		if (storageUsage.hybridBm25Breakdown) {
+			console.table([
+				{
+					segment: "bm25-header",
+					bytes: storageUsage.hybridBm25Breakdown.headerBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.headerBytes),
+				},
+				{
+					segment: "bm25-term-text",
+					bytes: storageUsage.hybridBm25Breakdown.termTextBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.termTextBytes),
+				},
+				{
+					segment: "bm25-term-meta",
+					bytes: storageUsage.hybridBm25Breakdown.termMetaBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.termMetaBytes),
+				},
+				{
+					segment: "bm25-posting-header",
+					bytes: storageUsage.hybridBm25Breakdown.postingHeaderBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.postingHeaderBytes),
+				},
+				{
+					segment: "bm25-posting-doc-delta",
+					bytes: storageUsage.hybridBm25Breakdown.postingDocDeltaBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.postingDocDeltaBytes),
+				},
+				{
+					segment: "bm25-posting-tfNorm",
+					bytes: storageUsage.hybridBm25Breakdown.postingTfNormBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.postingTfNormBytes),
+				},
+				{
+					segment: "bm25-posting-pos-count",
+					bytes: storageUsage.hybridBm25Breakdown.postingPositionCountBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.postingPositionCountBytes),
+				},
+				{
+					segment: "bm25-posting-pos-delta",
+					bytes: storageUsage.hybridBm25Breakdown.postingPositionDeltaBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.postingPositionDeltaBytes),
+				},
+				{
+					segment: "bm25-doc-lengths",
+					bytes: storageUsage.hybridBm25Breakdown.docLengthsBytes,
+					size: this.formatBytes(storageUsage.hybridBm25Breakdown.docLengthsBytes),
+				},
+			]);
+			console.log(
+				`[clever-search] HybridBM25 details: version=${storageUsage.hybridBm25Breakdown.version}, terms=${storageUsage.hybridBm25Breakdown.termCount}, postings=${storageUsage.hybridBm25Breakdown.postingCount}, postingsWithPositions=${storageUsage.hybridBm25Breakdown.postingsWithPositions}, termsWithPositions=${storageUsage.hybridBm25Breakdown.termsWithPositions}, positionValues=${storageUsage.hybridBm25Breakdown.positionValueCount}`,
+			);
+			console.table(storageUsage.hybridBm25Breakdown.topPositionHeavyTerms);
 		}
 		console.groupEnd();
 	}
