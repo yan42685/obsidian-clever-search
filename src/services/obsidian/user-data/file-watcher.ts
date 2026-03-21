@@ -2,7 +2,12 @@ import { App, TAbstractFile, TFile } from "obsidian";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { DataManager, DocAddOperation, DocDeleteOperation } from "./data-manager";
+import { DataManager } from "./data-manager";
+import {
+	DocAddOperation,
+	DocDeleteOperation,
+	DocRenameOperation,
+} from "./doc-operation-buffer";
 
 @singleton()
 export class FileWatcher {
@@ -24,6 +29,7 @@ export class FileWatcher {
 		this.app.vault.off("delete", this.onDelete);
 		this.app.vault.off("rename", this.onRename);
 		this.app.vault.off("modify", this.onModify);
+		this.clearAllModifyTimers();
 	}
 
 	// should define callbacks as arrow functions rather than methods,
@@ -38,15 +44,14 @@ export class FileWatcher {
 	};
 	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
 		logger.debug(`renamed: ${oldPath} => ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocDeleteOperation(oldPath));
-		this.dataManager.receiveDocOperation(new DocAddOperation(file));
+		this.dataManager.receiveDocOperation(new DocRenameOperation(oldPath, file));
 	};
 	// 有防抖功能
 	private readonly onModify = (file: TAbstractFile) => {
 		if (!(file instanceof TFile)) return;
 		
 		const path = file.path;
-		if (this.modifyTimers.has(path)) clearTimeout(this.modifyTimers.get(path));
+		this.clearModifyTimer(path);
 
 		const timer = setTimeout(() => {
 			// 关键：触发时再次确认文件是否还在
@@ -59,5 +64,21 @@ export class FileWatcher {
 
 		this.modifyTimers.set(path, timer);
 	};
+
+	private clearModifyTimer(path: string): void {
+		const timer = this.modifyTimers.get(path);
+		if (!timer) {
+			return;
+		}
+		clearTimeout(timer);
+		this.modifyTimers.delete(path);
+	}
+
+	private clearAllModifyTimers(): void {
+		for (const timer of this.modifyTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.modifyTimers.clear();
+	}
 
 }

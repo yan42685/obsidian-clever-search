@@ -22,7 +22,6 @@ import type { HybridDocRef, HybridDocState } from "src/services/search/hybrid/hy
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
-import { BufferSet } from "src/utils/data-structure";
 import { eventBus } from "src/utils/event-bus";
 import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment, monitorDecorator } from "src/utils/my-lib";
@@ -31,6 +30,13 @@ import { MyNotice } from "../transformed-api";
 import { t } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
 import { DataProvider } from "./data-provider";
+import {
+	DocAddOperation,
+	DocDeleteOperation,
+	type DocOperation,
+	type ReducedDocOperation,
+	DocOperationBuffer,
+} from "./doc-operation-buffer";
 import { FileWatcher } from "./file-watcher";
 
 type HybridIndexFailure = {
@@ -156,14 +162,14 @@ export class DataManager {
 		return getInstance(SearchService).hybridEngine;
 	}
 
-	private docOperationsHandler = async (operations: DocOperation[]) => {
+	private docOperationsHandler = async (operations: ReducedDocOperation[]) => {
 		for (const op of operations) {
-			if (op instanceof DocDeleteOperation) {
+			if (op.type === "delete") {
 				await this.deleteDocuments([op.path]);
 				if (this.hybridEngine.isEnabled()) {
 					await this.hybridEngine.deleteFile(op.path);
 				}
-			} else if (op instanceof DocAddOperation) {
+			} else {
 				await this.addDocuments([op.file]);
 				if (
 					this.hybridEngine.isEnabled() &&
@@ -180,9 +186,8 @@ export class DataManager {
 		}
 	};
 
-	private docOperationsBuffer = new BufferSet<DocOperation>(
+	private docOperationsBuffer = new DocOperationBuffer(
 		this.docOperationsHandler,
-		(op) => op.path,
 		3,
 	);
 
@@ -1245,33 +1250,5 @@ export class DataManager {
 
 	private formatBytes(bytes: number): string {
 		return formatBytesLabel(bytes);
-	}
-}
-
-abstract class DocOperation {
-	readonly type: "add" | "delete";
-	readonly path: string;
-	readonly time: number = performance.now();
-	constructor(type: "add" | "delete", fileOrPath: string | TAbstractFile) {
-		this.type = type;
-		if (typeof fileOrPath === "string") {
-			this.path = fileOrPath;
-		} else {
-			this.path = fileOrPath.path;
-		}
-	}
-}
-
-export class DocAddOperation extends DocOperation {
-	readonly file: TAbstractFile;
-	constructor(file: TAbstractFile) {
-		super("add", file);
-		this.file = file;
-	}
-}
-
-export class DocDeleteOperation extends DocOperation {
-	constructor(path: string) {
-		super("delete", path);
 	}
 }
