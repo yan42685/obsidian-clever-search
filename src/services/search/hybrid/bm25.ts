@@ -11,6 +11,16 @@ import {
 type BM25SearchResult = { docId: number; score: number };
 type BM25SearchOptions = {
 	useProximity?: boolean;
+	enableQueryExpansion?: boolean;
+};
+type BM25MatchedTerm = {
+	term: string;
+	boost: number;
+	kind: 'exact' | 'prefix' | 'fuzzy';
+};
+type BM25ResolvedQueryTerm = {
+	normalizedTerm: string;
+	matchedTerms: BM25MatchedTerm[];
 };
 
 const BM25_POSITION_BUCKET_SIZE = 4;
@@ -20,12 +30,19 @@ const BM25_PROXIMITY_SPAN_WEIGHT = 0.11;
 const BM25_PROXIMITY_ORDER_WEIGHT = 0.05;
 const BM25_PROXIMITY_ADJACENT_WEIGHT = 0.04;
 const BM25_PROXIMITY_COMPACT_WEIGHT = 0.02;
+const HYBRID_QUERY_PREFIX_MIN_LENGTH = 4;
+const HYBRID_QUERY_PREFIX_EXPANSION_LIMIT = 6;
+const HYBRID_QUERY_FUZZY_MIN_LENGTH = 5;
+const HYBRID_QUERY_FUZZY_EXPANSION_LIMIT = 4;
+const HYBRID_QUERY_EXPANDABLE_TERM_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
 export class BM25Engine {
 	private readonly tokenizer = getInstance(Tokenizer);
 
 	private termDict = new Map<string, { termId: number; df: number }>();
 	private postings = new Map<number, PostingList>();
+	private normalizedTerms = new Map<string, string[]>();
+	private sortedNormalizedTerms: string[] = [];
 	private nextTermId = 0;
 	private _docCount = 0;
 	private avgDocLen = 0;
@@ -37,6 +54,8 @@ export class BM25Engine {
 	clear(): void {
 		this.termDict.clear();
 		this.postings.clear();
+		this.normalizedTerms.clear();
+		this.sortedNormalizedTerms = [];
 		this.docLengths.clear();
 		this.nextTermId = 0;
 		this._docCount = 0;
@@ -80,6 +99,7 @@ export class BM25Engine {
 			if (!termEntry) {
 				termEntry = { termId: this.nextTermId++, df: 0 };
 				this.termDict.set(term, termEntry);
+				this.insertNormalizedLexicon(term);
 			}
 			termEntry.df++;
 
@@ -121,6 +141,7 @@ export class BM25Engine {
 			if (!list || list.entries.length === 0) {
 				this.termDict.delete(term);
 				this.postings.delete(termEntry.termId);
+				this.removeNormalizedLexicon(term);
 			} else {
 				termEntry.df = list.entries.length;
 			}
@@ -128,32 +149,50 @@ export class BM25Engine {
 	}
 
 	search(query: string, topK = 20, options: BM25SearchOptions = {}): BM25SearchResult[] {
-		const terms = this.tokenizer.tokenize(query, 'search');
-		if (terms.length === 0 || this._docCount === 0) return [];
-		const orderedTerms = uniqueTermsInOrder(terms);
+		const rawTerms = this.tokenizer.tokenize(query, 'search');
+		if (rawTerms.length === 0 || this._docCount === 0) return [];
+		const orderedTerms = uniqueTermsInOrder(rawTerms.map((term) => this.normalizeQueryTerm(term)));
 		const useProximity = options.useProximity ?? true;
+		const enableQueryExpansion = options.enableQueryExpansion ?? false;
+		const resolvedTerms = rawTerms.map((term) =>
+			this.resolveQueryTerms(term, enableQueryExpansion),
+		);
 
 		const scores = new Map<number, number>();
 		const docPositions = new Map<number, Map<string, number[]>>();
 		const N = this._docCount;
 
-		for (const term of terms) {
-			const termEntry = this.termDict.get(term);
-			if (!termEntry) continue;
+		for (const queryTerm of resolvedTerms) {
+			for (const matchedTerm of queryTerm.matchedTerms) {
+				const termEntry = this.termDict.get(matchedTerm.term);
+				if (!termEntry) continue;
 
-			const list = this.postings.get(termEntry.termId);
-			if (!list) continue;
+				const list = this.postings.get(termEntry.termId);
+				if (!list) continue;
 
-			const idf = Math.log((N - termEntry.df + 0.5) / (termEntry.df + 0.5) + 1);
-			for (const entry of list.entries) {
-				scores.set(entry.docId, (scores.get(entry.docId) ?? 0) + entry.tfNorm * idf);
-				if (useProximity && orderedTerms.length > 1 && entry.positions.length > 0) {
-					let termPos = docPositions.get(entry.docId);
-					if (!termPos) {
-						termPos = new Map();
-						docPositions.set(entry.docId, termPos);
+				const idf = Math.log((N - termEntry.df + 0.5) / (termEntry.df + 0.5) + 1);
+				for (const entry of list.entries) {
+					scores.set(
+						entry.docId,
+						(scores.get(entry.docId) ?? 0) + entry.tfNorm * idf * matchedTerm.boost,
+					);
+					if (
+						useProximity &&
+						matchedTerm.kind === 'exact' &&
+						orderedTerms.length > 1 &&
+						entry.positions.length > 0
+					) {
+						let termPos = docPositions.get(entry.docId);
+						if (!termPos) {
+							termPos = new Map();
+							docPositions.set(entry.docId, termPos);
+						}
+						mergePositions(
+							termPos,
+							queryTerm.normalizedTerm,
+							decodeDelta(entry.positions),
+						);
 					}
-					termPos.set(term, decodeDelta(entry.positions));
 				}
 			}
 		}
@@ -210,6 +249,7 @@ export class BM25Engine {
 
 		for (const [term, entry] of Object.entries(data.termDict)) {
 			this.termDict.set(term, { termId: entry.termId, df: entry.df });
+			this.insertNormalizedLexicon(term);
 		}
 		for (const [termIdStr, list] of Object.entries(data.postings)) {
 			this.postings.set(Number(termIdStr), list as PostingList);
@@ -234,6 +274,155 @@ export class BM25Engine {
 	private computeTfNorm(tf: number, dl: number): number {
 		const avgdl = this.avgDocLen || 1;
 		return (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * (dl / avgdl)));
+	}
+
+	private resolveQueryTerms(
+		queryTerm: string,
+		enableQueryExpansion: boolean,
+	): BM25ResolvedQueryTerm {
+		const normalizedTerm = this.normalizeQueryTerm(queryTerm);
+		const exactTerms = this.normalizedTerms.get(normalizedTerm) ?? [];
+		if (exactTerms.length > 0) {
+			return {
+				normalizedTerm,
+				matchedTerms: exactTerms.map((term) => ({
+					term,
+					boost: 1,
+					kind: 'exact' as const,
+				})),
+			};
+		}
+
+		if (!enableQueryExpansion || !this.shouldExpandTerm(normalizedTerm)) {
+			return { normalizedTerm, matchedTerms: [] };
+		}
+
+		const prefixMatches = this.expandPrefixTerms(normalizedTerm);
+		if (prefixMatches.length > 0) {
+			return {
+				normalizedTerm,
+				matchedTerms: prefixMatches.flatMap((matchedNormalizedTerm) =>
+					(this.normalizedTerms.get(matchedNormalizedTerm) ?? []).map((term) => ({
+						term,
+						boost: computePrefixBoost(normalizedTerm, matchedNormalizedTerm),
+						kind: 'prefix' as const,
+					})),
+				),
+			};
+		}
+
+		return {
+			normalizedTerm,
+			matchedTerms: this.expandFuzzyTerms(normalizedTerm).flatMap(({ term, distance }) =>
+				(this.normalizedTerms.get(term) ?? []).map((actualTerm) => ({
+					term: actualTerm,
+					boost: computeFuzzyBoost(distance),
+					kind: 'fuzzy' as const,
+				})),
+			),
+		};
+	}
+
+	private shouldExpandTerm(term: string): boolean {
+		return (
+			term.length >= HYBRID_QUERY_PREFIX_MIN_LENGTH &&
+			HYBRID_QUERY_EXPANDABLE_TERM_REGEX.test(term)
+		);
+	}
+
+	private expandPrefixTerms(prefix: string): string[] {
+		const matches: string[] = [];
+		let index = lowerBoundString(this.sortedNormalizedTerms, prefix);
+		while (index < this.sortedNormalizedTerms.length) {
+			const current = this.sortedNormalizedTerms[index];
+			if (!current.startsWith(prefix)) {
+				break;
+			}
+			matches.push(current);
+			if (matches.length >= HYBRID_QUERY_PREFIX_EXPANSION_LIMIT) {
+				break;
+			}
+			index++;
+		}
+		return matches;
+	}
+
+	private expandFuzzyTerms(queryTerm: string): Array<{ term: string; distance: number }> {
+		const maxDistance = computeMaxFuzzyDistance(queryTerm);
+		if (maxDistance <= 0) {
+			return [];
+		}
+
+		const matches: Array<{ term: string; distance: number }> = [];
+		for (const term of this.sortedNormalizedTerms) {
+			if (Math.abs(term.length - queryTerm.length) > maxDistance) {
+				continue;
+			}
+			if (term[0] !== queryTerm[0]) {
+				continue;
+			}
+			const distance = boundedLevenshtein(term, queryTerm, maxDistance);
+			if (distance <= maxDistance) {
+				matches.push({ term, distance });
+			}
+		}
+
+		matches.sort((left, right) => {
+			if (left.distance !== right.distance) {
+				return left.distance - right.distance;
+			}
+			const lengthDeltaLeft = Math.abs(left.term.length - queryTerm.length);
+			const lengthDeltaRight = Math.abs(right.term.length - queryTerm.length);
+			if (lengthDeltaLeft !== lengthDeltaRight) {
+				return lengthDeltaLeft - lengthDeltaRight;
+			}
+			const prefixLeft = countSharedPrefix(queryTerm, left.term);
+			const prefixRight = countSharedPrefix(queryTerm, right.term);
+			if (prefixLeft !== prefixRight) {
+				return prefixRight - prefixLeft;
+			}
+			return left.term.localeCompare(right.term);
+		});
+
+		return matches.slice(0, HYBRID_QUERY_FUZZY_EXPANSION_LIMIT);
+	}
+
+	private insertNormalizedLexicon(term: string): void {
+		const normalizedTerm = this.normalizeQueryTerm(term);
+		let terms = this.normalizedTerms.get(normalizedTerm);
+		if (!terms) {
+			terms = [];
+			this.normalizedTerms.set(normalizedTerm, terms);
+			const index = lowerBoundString(this.sortedNormalizedTerms, normalizedTerm);
+			if (this.sortedNormalizedTerms[index] !== normalizedTerm) {
+				this.sortedNormalizedTerms.splice(index, 0, normalizedTerm);
+			}
+		}
+		if (!terms.includes(term)) {
+			terms.push(term);
+		}
+	}
+
+	private removeNormalizedLexicon(term: string): void {
+		const normalizedTerm = this.normalizeQueryTerm(term);
+		const terms = this.normalizedTerms.get(normalizedTerm);
+		if (!terms) {
+			return;
+		}
+		const nextTerms = terms.filter((current) => current !== term);
+		if (nextTerms.length > 0) {
+			this.normalizedTerms.set(normalizedTerm, nextTerms);
+			return;
+		}
+		this.normalizedTerms.delete(normalizedTerm);
+		const index = lowerBoundString(this.sortedNormalizedTerms, normalizedTerm);
+		if (this.sortedNormalizedTerms[index] === normalizedTerm) {
+			this.sortedNormalizedTerms.splice(index, 1);
+		}
+	}
+
+	private normalizeQueryTerm(term: string): string {
+		return term.toLocaleLowerCase();
 	}
 
 }
@@ -288,12 +477,37 @@ function decodeDelta(deltas: number[]): number[] {
 	return out;
 }
 
+function mergePositions(
+	termPositions: Map<string, number[]>,
+	term: string,
+	positions: number[],
+): void {
+	const existing = termPositions.get(term);
+	if (!existing) {
+		termPositions.set(term, positions);
+		return;
+	}
+	const merged = Array.from(new Set([...existing, ...positions])).sort((left, right) => left - right);
+	termPositions.set(term, merged);
+}
+
 function lowerBound(entries: BM25PostingEntry[], target: number): number {
 	let lo = 0;
 	let hi = entries.length;
 	while (lo < hi) {
 		const mid = (lo + hi) >> 1;
 		if (entries[mid].docId < target) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
+function lowerBoundString(values: string[], target: string): number {
+	let lo = 0;
+	let hi = values.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >> 1;
+		if (values[mid].localeCompare(target) < 0) lo = mid + 1;
 		else hi = mid;
 	}
 	return lo;
@@ -416,4 +630,68 @@ function uniqueTermsInOrder(terms: string[]): string[] {
 		out.push(term);
 	}
 	return out;
+}
+
+function computeMaxFuzzyDistance(queryTerm: string): number {
+	if (queryTerm.length < HYBRID_QUERY_FUZZY_MIN_LENGTH) {
+		return 0;
+	}
+	return queryTerm.length >= 8 ? 2 : 1;
+}
+
+function computePrefixBoost(queryTerm: string, matchedTerm: string): number {
+	return Math.max(
+		0.72,
+		Math.min(0.96, queryTerm.length / Math.max(queryTerm.length, matchedTerm.length)),
+	);
+}
+
+function computeFuzzyBoost(distance: number): number {
+	return Math.max(0.64, 1 - distance * 0.18);
+}
+
+function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
+	if (a === b) {
+		return 0;
+	}
+	if (Math.abs(a.length - b.length) > maxDistance) {
+		return maxDistance + 1;
+	}
+
+	const previous = new Array<number>(b.length + 1);
+	const current = new Array<number>(b.length + 1);
+	for (let j = 0; j <= b.length; j++) {
+		previous[j] = j;
+	}
+
+	for (let i = 1; i <= a.length; i++) {
+		current[0] = i;
+		let rowMin = current[0];
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			current[j] = Math.min(
+				previous[j] + 1,
+				current[j - 1] + 1,
+				previous[j - 1] + cost,
+			);
+			rowMin = Math.min(rowMin, current[j]);
+		}
+		if (rowMin > maxDistance) {
+			return maxDistance + 1;
+		}
+		for (let j = 0; j <= b.length; j++) {
+			previous[j] = current[j];
+		}
+	}
+
+	return previous[b.length];
+}
+
+function countSharedPrefix(left: string, right: string): number {
+	const limit = Math.min(left.length, right.length);
+	let index = 0;
+	while (index < limit && left[index] === right[index]) {
+		index++;
+	}
+	return index;
 }

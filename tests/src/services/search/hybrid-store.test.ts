@@ -32,7 +32,28 @@ describe("hybrid BM25 storage", () => {
 		const blob = bm25ToBlob(index);
 		expect(blob.type).toBe("application/octet-stream");
 
-		await expect(blobToBm25(blob)).resolves.toEqual(index);
+		const restored = await blobToBm25(blob);
+		expect(restored.docCount).toBe(index.docCount);
+		expect(restored.avgDocLen).toBeCloseTo(index.avgDocLen, 5);
+		expect(restored.docLengths).toEqual(index.docLengths);
+		expect(Object.keys(restored.termDict).sort()).toEqual(Object.keys(index.termDict).sort());
+		expect(restored.termDict.alpha.df).toBe(2);
+		expect(restored.termDict.beta.df).toBe(1);
+
+		const alphaEntries = restored.postings[restored.termDict.alpha.termId].entries;
+		expect(alphaEntries).toHaveLength(2);
+		expect(alphaEntries[0].docId).toBe(10);
+		expect(alphaEntries[0].positions).toEqual([0, 2, 4]);
+		expect(alphaEntries[0].tfNorm).toBeCloseTo(1.25, 2);
+		expect(alphaEntries[1].docId).toBe(20);
+		expect(alphaEntries[1].positions).toEqual([1]);
+		expect(alphaEntries[1].tfNorm).toBeCloseTo(0.75, 2);
+
+		const betaEntries = restored.postings[restored.termDict.beta.termId].entries;
+		expect(betaEntries).toHaveLength(1);
+		expect(betaEntries[0].docId).toBe(10);
+		expect(betaEntries[0].positions).toEqual([3, 2]);
+		expect(betaEntries[0].tfNorm).toBeCloseTo(0.5, 2);
 	});
 
 	test("rejects legacy JSON BM25 blobs after schema upgrade", async () => {

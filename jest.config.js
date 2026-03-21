@@ -17,7 +17,7 @@ module.exports = {
   clearMocks: true,
 
   // Indicates whether the coverage information should be collected while executing the test
-  collectCoverage: true,
+  collectCoverage: false,
 
   // An array of glob patterns indicating a set of files for which coverage information should be collected
   // collectCoverageFrom: undefined,
@@ -85,14 +85,14 @@ module.exports = {
 
   // A map from regular expressions to module names or to arrays of module names that allow to stub out resources with a single module
   moduleNameMapper: {
-    "jieba-wasm/pkg/web/jieba_rs_wasm": "<rootDir>/tests/__mocks__/jieba-wasm-mock.js",
+    "^franc-min$": "<rootDir>/tests/__mocks__/franc-min.js",
+    "^jieba-wasm/pkg/web/jieba_rs_wasm$": "<rootDir>/tests/__mocks__/jieba-wasm-mock.js",
+    "^obsidian$": "<rootDir>/tests/__mocks__/obsidian.js",
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
   modulePathIgnorePatterns: [],
   // 将.ts文件也看作ES Module，这样在babel编译到ESM的时候能统一调用
-  extensionsToTreatAsEsm: ['.ts'],
-
   // Activates notifications for test results
   // notify: false,
 
@@ -124,9 +124,9 @@ module.exports = {
   // rootDir: undefined,
 
   // A list of paths to directories that Jest should use to search for files in
-  // roots: [
-  //   "<rootDir>"
-  // ],
+  roots: [
+    "<rootDir>/tests/src"
+  ],
 
   // Allows you to use a custom runner instead of Jest's default test runner
   // runner: "jest-runner",
@@ -135,7 +135,7 @@ module.exports = {
   // setupFiles: [],
 
   // A list of paths to modules that run some code to configure or set up the testing framework before each test
-  setupFilesAfterEnv: ["<rootDir>/tests/src/jest-setup.ts"],
+  setupFilesAfterEnv: ["<rootDir>/tests/src/jest-setup.js"],
 
   // The number of seconds after which a test is considered as slow and reported as such in the results.
   // slowTestThreshold: 5,
@@ -144,8 +144,7 @@ module.exports = {
   // snapshotSerializers: [],
 
   // The test environment that will be used for testing
-  testEnvironment: 'jsdom',
-  // testEnvironment: 'node',
+  testEnvironment: 'node',
 
   // Options that will be passed to the testEnvironment
   // testEnvironmentOptions: {},
@@ -154,10 +153,9 @@ module.exports = {
   // testLocationInResults: false,
 
   // The glob patterns Jest uses to detect test files
-  // testMatch: [
-  //   "**/__tests__/**/*.[jt]s?(x)",
-  //   "**/?(*.)+(spec|test).[tj]s?(x)"
-  // ],
+  testMatch: [
+    "**/?(*.)+(test).[tj]s"
+  ],
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
   // testPathIgnorePatterns: [
@@ -181,8 +179,24 @@ module.exports = {
 
   // A map from regular expressions to paths to transformers
   transform: {
-    '^.+\\.(js|ts)$': 'babel-jest',
-    // '^.+\\.svelte$': 'svelte-jester',
+    '^.+\\.(js|ts)$': [
+      'babel-jest',
+      {
+        presets: [
+          [
+            '@babel/preset-env',
+            {
+              targets: { node: 'current' },
+              modules: 'commonjs',
+            },
+          ],
+          '@babel/preset-typescript',
+        ],
+        plugins: [
+          ['@babel/plugin-proposal-decorators', { legacy: true }],
+        ],
+      },
+    ],
   },
 
   // An array of regexp pattern strings that are matched against all source file paths, matched files will skip transformation

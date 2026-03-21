@@ -32,6 +32,7 @@ const BM25_RECALL_LIMIT = 20;
 const DENSE_RECALL_LIMIT = 30;
 const SEARCH_EF = 80;
 const HYBRID_BM25_USE_PROXIMITY = false;
+const HYBRID_BM25_ENABLE_QUERY_EXPANSION = true;
 const DEFAULT_MAX_FILE_RESULTS = 5;
 const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 30;
@@ -164,6 +165,7 @@ export class HybridEngine {
 
 		const bm25Small = this.bm25.search(query, BM25_RECALL_LIMIT, {
 			useProximity: HYBRID_BM25_USE_PROXIMITY,
+			enableQueryExpansion: HYBRID_BM25_ENABLE_QUERY_EXPANSION,
 		}).map((result) => ({
 			id: result.docId,
 			score: result.score,

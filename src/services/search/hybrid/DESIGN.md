@@ -263,6 +263,7 @@ Practical rule:
 
 - any token normalization, expansion, typo handling, or query rewriting for hybrid should stay inside `src/services/search/hybrid/*`
 - do not change `lexicalengine` behavior as a side effect of hybrid recall work
+- lightweight case-folding / prefix / typo expansion is acceptable inside hybrid BM25 as long as it does not increase rerank candidate count
 
 ## Search Output Semantics
 
