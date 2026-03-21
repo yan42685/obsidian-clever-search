@@ -4,6 +4,7 @@ import {
 	chunkFile,
 	estimateTokenCount,
 } from "src/services/search/hybrid/chunker";
+import type { RawChunk } from "src/services/search/hybrid/hybrid-types";
 
 function buildLongSingleLineText(sentenceCount: number): string {
 	return Array.from({ length: sentenceCount }, (_, index) =>
@@ -23,6 +24,29 @@ function sharedOverlapText(left: string, right: string): string {
 
 function extractContext(input: string, chunkText: string): string {
 	return input.slice(0, input.length - chunkText.length).trim();
+}
+
+function createRawChunk(
+	filePath: string,
+	text: string,
+	chunkText: string,
+	startLine: number,
+	startCol: number,
+	endLine: number,
+): RawChunk {
+	const startOffset = text.indexOf(chunkText);
+	if (startOffset < 0) {
+		throw new Error(`chunk text not found: ${chunkText}`);
+	}
+	return {
+		filePath,
+		text: chunkText,
+		startOffset,
+		endOffset: startOffset + chunkText.length,
+		startLine,
+		startCol,
+		endLine,
+	};
 }
 
 describe("hybrid chunker", () => {
@@ -81,20 +105,22 @@ describe("hybrid chunker", () => {
 			"Query note properties as a table.",
 		].join("\n");
 		const chunks = [
-			{
-				filePath: "planning/full-calendar-notes.md",
-				text: "Use Full Calendar for weekly scheduling and event planning.",
-				startLine: 5,
-				startCol: 0,
-				endLine: 5,
-			},
-			{
-				filePath: "planning/full-calendar-notes.md",
-				text: "Timeline and agenda views help compare appointments.",
-				startLine: 8,
-				startCol: 0,
-				endLine: 8,
-			},
+			createRawChunk(
+				"planning/full-calendar-notes.md",
+				text,
+				"Use Full Calendar for weekly scheduling and event planning.",
+				5,
+				0,
+				5,
+			),
+			createRawChunk(
+				"planning/full-calendar-notes.md",
+				text,
+				"Timeline and agenda views help compare appointments.",
+				8,
+				0,
+				8,
+			),
 		];
 		const embedInputs = buildChunkEmbeddingInputs(
 			"planning/full-calendar-notes.md",
@@ -122,20 +148,22 @@ describe("hybrid chunker", () => {
 			"Paragraph in second section.",
 		].join("\n");
 		const chunks = [
-			{
-				filePath: "planning/full-calendar-notes.md",
-				text: "Paragraph under the wrong visible heading.",
-				startLine: 2,
-				startCol: 0,
-				endLine: 2,
-			},
-			{
-				filePath: "planning/full-calendar-notes.md",
-				text: "Paragraph in second section.",
-				startLine: 5,
-				startCol: 0,
-				endLine: 5,
-			},
+			createRawChunk(
+				"planning/full-calendar-notes.md",
+				text,
+				"Paragraph under the wrong visible heading.",
+				2,
+				0,
+				2,
+			),
+			createRawChunk(
+				"planning/full-calendar-notes.md",
+				text,
+				"Paragraph in second section.",
+				5,
+				0,
+				5,
+			),
 		];
 		const outline = [
 			{ line: 0, level: 1, title: "Plugin Index" },
@@ -169,13 +197,14 @@ describe("hybrid chunker", () => {
 			"Important chunk content.",
 		].join("\n");
 		const chunks = [
-			{
-				filePath: "planning/calendar-atlas.md",
-				text: "Important chunk content.",
-				startLine: 9,
-				startCol: 0,
-				endLine: 9,
-			},
+			createRawChunk(
+				"planning/calendar-atlas.md",
+				text,
+				"Important chunk content.",
+				9,
+				0,
+				9,
+			),
 		];
 
 		const embedInputs = buildChunkEmbeddingInputs(
@@ -201,13 +230,14 @@ describe("hybrid chunker", () => {
 		].join("\n");
 		const chunkText = "Chunk body that should stay untouched.";
 		const chunks = [
-			{
-				filePath: "planning/extremely-verbose-calendar-planning-notebook-reference.md",
-				text: chunkText,
-				startLine: 3,
-				startCol: 0,
-				endLine: 3,
-			},
+			createRawChunk(
+				"planning/extremely-verbose-calendar-planning-notebook-reference.md",
+				text,
+				chunkText,
+				3,
+				0,
+				3,
+			),
 		];
 
 		const embedInputs = buildChunkEmbeddingInputs(

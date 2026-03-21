@@ -3,6 +3,8 @@ export type VectorPrecision = 'int8' | 'float16';
 export type RawChunk = {
 	filePath: string;
 	text: string;
+	startOffset: number;
+	endOffset: number;
 	startLine: number;
 	startCol: number;
 	endLine: number;
@@ -19,9 +21,12 @@ export type Chunk = {
 	filePath: string;
 	chunkIndex: number;
 	text: string;
+	startOffset: number;
+	endOffset: number;
 	startLine: number;
 	startCol: number;
 	endLine: number;
+	embedKey: string;
 };
 
 export type Int8Vector = {

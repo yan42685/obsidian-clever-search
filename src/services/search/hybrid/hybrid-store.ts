@@ -12,10 +12,18 @@ export type ChunkRow = {
 	id?: number;
 	filePath: string;
 	chunkIndex: number;
-	text: string;
+	startOffset: number;
+	endOffset: number;
 	startLine: number;
 	startCol: number;
 	endLine: number;
+	embedKey: string;
+};
+
+export type HybridFileSnapshotRow = {
+	filePath: string;
+	plainText: string;
+	generation?: number;
 };
 
 export type ChunkVectorShardRow = {
@@ -778,24 +786,29 @@ export function chunkToRow(c: Omit<Chunk, 'id'> & { id?: number }): ChunkRow {
 	const row: ChunkRow = {
 		filePath: c.filePath,
 		chunkIndex: c.chunkIndex,
-		text: c.text,
+		startOffset: c.startOffset,
+		endOffset: c.endOffset,
 		startLine: c.startLine,
 		startCol: c.startCol,
 		endLine: c.endLine,
+		embedKey: c.embedKey,
 	};
 	if (c.id !== undefined) row.id = c.id;
 	return row;
 }
 
-export async function rowToChunk(row: ChunkRow): Promise<Chunk> {
+export function rowToChunk(row: ChunkRow, plainText: string): Chunk {
 	return {
 		id: row.id!,
 		filePath: row.filePath,
 		chunkIndex: row.chunkIndex,
-		text: row.text,
+		text: plainText.slice(row.startOffset, row.endOffset),
+		startOffset: row.startOffset,
+		endOffset: row.endOffset,
 		startLine: row.startLine,
 		startCol: row.startCol ?? 0,
 		endLine: row.endLine,
+		embedKey: row.embedKey,
 	};
 }
 

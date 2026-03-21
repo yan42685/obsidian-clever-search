@@ -5,7 +5,13 @@ import { Database } from 'src/services/database/database';
 import { Tokenizer } from 'src/services/search/tokenizer';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
-import { createChunkEmbeddingInputBuilder, chunkFile } from './chunker';
+import {
+	buildLineOffsets,
+	buildRawChunkFromOffsets,
+	chunkFile,
+	chunkFileRange,
+	createChunkEmbeddingInputBuilder,
+} from './chunker';
 import { BM25Engine } from './bm25';
 import { Embedder } from './embedder';
 import { HnswIndex } from './hnsw';
@@ -15,6 +21,7 @@ import {
 	ChunkVectorShardBuilder,
 	bm25ToBlob,
 	chunkVectorShardToRow,
+	type HybridFileSnapshotRow,
 	type HybridDocRef,
 	type ChunkRow,
 	type ChunkVectorShardRow,
@@ -29,6 +36,7 @@ import type {
 	Chunk,
 	HeadingOutlineEntry,
 	RawChunk,
+	StoredVector,
 	VectorPrecision,
 } from './hybrid-types';
 import { buildHybridQueryProfile, type RankedResult } from './ranking';
@@ -63,6 +71,75 @@ type SmallChunkCandidate = {
 	col: number;
 	score: number;
 };
+
+type StoredFileIndexState = {
+	snapshot?: HybridFileSnapshotRow;
+	chunkRows: ChunkRow[];
+	vectorsByChunkId: Map<number, StoredVector>;
+};
+
+type PlannedChunk = {
+	rawChunk: RawChunk;
+	embedKey: string;
+	reusedVector?: StoredVector;
+};
+
+type UnchangedWindowReuse = {
+	prefixLength: number;
+	suffixLength: number;
+	delta: number;
+};
+
+function hashEmbedInput(text: string): string {
+	let h1 = 0xdeadbeef ^ text.length;
+	let h2 = 0x41c6ce57 ^ text.length;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text.charCodeAt(i);
+		h1 = Math.imul(h1 ^ ch, 2654435761);
+		h2 = Math.imul(h2 ^ ch, 1597334677);
+	}
+	h1 =
+		Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^
+		Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+	h2 =
+		Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^
+		Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+	return `${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0)
+		.toString(16)
+		.padStart(8, '0')}`;
+}
+
+function computeUnchangedWindowReuse(
+	oldText: string,
+	newText: string,
+): UnchangedWindowReuse {
+	const maxPrefix = Math.min(oldText.length, newText.length);
+	let prefixLength = 0;
+	while (
+		prefixLength < maxPrefix &&
+		oldText.charCodeAt(prefixLength) === newText.charCodeAt(prefixLength)
+	) {
+		prefixLength += 1;
+	}
+
+	let suffixLength = 0;
+	const oldRemaining = oldText.length - prefixLength;
+	const newRemaining = newText.length - prefixLength;
+	const maxSuffix = Math.min(oldRemaining, newRemaining);
+	while (
+		suffixLength < maxSuffix &&
+		oldText.charCodeAt(oldText.length - 1 - suffixLength) ===
+			newText.charCodeAt(newText.length - 1 - suffixLength)
+	) {
+		suffixLength += 1;
+	}
+
+	return {
+		prefixLength,
+		suffixLength,
+		delta: newText.length - oldText.length,
+	};
+}
 
 export class HybridEngine {
 	private readonly db = getInstance(Database);
@@ -113,6 +190,7 @@ export class HybridEngine {
 
 		await Promise.all([
 			this.db.db.hybridChunks.clear(),
+			this.db.db.hybridFileSnapshots.clear(),
 			this.db.db.hybridChunkVectors.clear(),
 			this.db.db.hybridBm25Index.clear(),
 			this.db.db.hybridHnswSmall.clear(),
@@ -184,16 +262,21 @@ export class HybridEngine {
 				.where("filePath")
 				.equals(oldPath)
 				.toArray();
+			const snapshotRow = await this.db.db.hybridFileSnapshots.get(oldPath);
 			const vectorRow = await this.db.db.hybridChunkVectors.get(oldPath);
 			const docRef = await this.db.db.hybridDocRefs.get(oldPath);
 			const hasStoredData =
-				chunkRows.length > 0 || vectorRow !== undefined || docRef !== undefined;
+				chunkRows.length > 0 ||
+				snapshotRow !== undefined ||
+				vectorRow !== undefined ||
+				docRef !== undefined;
 			if (!hasStoredData) {
 				return false;
 			}
 
 			const hasTargetData =
 				(await this.db.db.hybridChunks.where("filePath").equals(newPath).count()) > 0 ||
+				(await this.db.db.hybridFileSnapshots.get(newPath)) !== undefined ||
 				(await this.db.db.hybridChunkVectors.get(newPath)) !== undefined ||
 				(await this.db.db.hybridDocRefs.get(newPath)) !== undefined;
 			if (hasTargetData) {
@@ -209,6 +292,14 @@ export class HybridEngine {
 						filePath: newPath,
 					})),
 				);
+			}
+
+			if (snapshotRow) {
+				await this.db.db.hybridFileSnapshots.put({
+					...snapshotRow,
+					filePath: newPath,
+				});
+				await this.db.db.hybridFileSnapshots.delete(oldPath);
 			}
 
 			if (vectorRow) {
@@ -241,6 +332,7 @@ export class HybridEngine {
 		const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
 		await this.db.db.hybridChunks.bulkDelete(ids);
+		await this.db.db.hybridFileSnapshots.delete(filePath);
 		await this.db.db.hybridChunkVectors.delete(filePath);
 		if (option.deleteDocRef ?? true) {
 			await this.db.db.hybridDocRefs.delete(filePath);
@@ -340,6 +432,7 @@ export class HybridEngine {
 			}
 
 			const generation = Date.now();
+			const previousState = await this.loadStoredFileIndexState(filePath);
 			await this.putHybridDocRef({
 				path: filePath,
 				updateTime,
@@ -356,13 +449,6 @@ export class HybridEngine {
 				'index.chunk_file',
 				async () => chunkFile(filePath, plainText),
 			);
-			if (rawChunks.length === 0) {
-				await this.db.db.hybridDocRefs.delete(filePath);
-				if (option.persistIndices ?? true) {
-					await this.persistIndices();
-				}
-				return;
-			}
 			const buildEmbedInput = await profileHybridStage(
 				'index.build_embed_context',
 				async () =>
@@ -372,31 +458,43 @@ export class HybridEngine {
 						headingOutline,
 					),
 			);
-			recordHybridProfileMetric('index.chunk_count', rawChunks.length);
+			const lineOffsets = buildLineOffsets(plainText);
+			const plannedChunks = await profileHybridStage(
+				'index.plan_incremental_reuse',
+				async () =>
+					await this.planIncrementalChunks(
+						filePath,
+						plainText,
+						lineOffsets,
+						buildEmbedInput,
+						rawChunks,
+						previousState,
+					),
+			);
+			if (plannedChunks.length === 0) {
+				await this.db.db.hybridDocRefs.delete(filePath);
+				if (option.persistIndices ?? true) {
+					await this.persistIndices();
+				}
+				return;
+			}
+			recordHybridProfileMetric('index.chunk_count', plannedChunks.length);
 
 			try {
 				const shardBuilder = new ChunkVectorShardBuilder(this.precision, EMBED_DIM);
 				for (
 					let chunkStart = 0;
-					chunkStart < rawChunks.length;
+					chunkStart < plannedChunks.length;
 					chunkStart += INDEX_CHUNK_BATCH_SIZE
 				) {
-					const batchChunks = rawChunks.slice(
+					const batchChunks = plannedChunks.slice(
 						chunkStart,
 						chunkStart + INDEX_CHUNK_BATCH_SIZE,
 					);
-					const batchInputs = await profileHybridStage(
-						'index.build_batch_embed_inputs',
-						async () => batchChunks.map((chunk) => buildEmbedInput(chunk)),
-					);
-					const batchVectors = await profileHybridStage(
-						'index.embed_batch',
-						async () =>
-							await this.embedder.embedBatch(
-								batchInputs,
-								this.precision,
-								filePath,
-							),
+					const batchVectors = await this.resolveBatchVectors(
+						filePath,
+						batchChunks,
+						buildEmbedInput,
 					);
 					const batchChunkIds = await profileHybridStage(
 						'index.persist_chunks',
@@ -412,7 +510,7 @@ export class HybridEngine {
 					await profileHybridStage('index.update_memory_indices', async () => {
 						for (let i = 0; i < batchChunkIds.length; i++) {
 							const chunkId = batchChunkIds[i];
-							this.bm25.addDocument(chunkId, batchChunks[i].text);
+							this.bm25.addDocument(chunkId, batchChunks[i].rawChunk.text);
 							this.hnswSmall.insert(chunkId, batchVectors[i]);
 						}
 					});
@@ -423,6 +521,7 @@ export class HybridEngine {
 						generation,
 					});
 				});
+				await this.persistSnapshot(filePath, plainText, generation);
 				this._canSearch = true;
 				this.lastIndexingFallbackNoticeKey = null;
 			} catch (error) {
@@ -434,13 +533,14 @@ export class HybridEngine {
 				this._canSearch = false;
 				this.lastIndexingFallbackNoticeKey = 'hybridNotice.indexFallbackToBm25';
 				try {
-					await this.indexBm25Only(filePath, rawChunks, updateTime, option, generation);
+					await this.indexBm25Only(filePath, plannedChunks, updateTime, option, generation);
+					await this.persistSnapshot(filePath, plainText, generation);
 					await this.putHybridDocRef({
 						path: filePath,
 						updateTime,
 						state: 'bm25_only',
 						generation,
-						chunkCount: rawChunks.length,
+						chunkCount: plannedChunks.length,
 						vectorPrecision: null,
 						indexedAt: Date.now(),
 						lastErrorKind: this.classifyIndexErrorKind(error),
@@ -469,7 +569,7 @@ export class HybridEngine {
 				updateTime,
 				state: 'ready',
 				generation,
-				chunkCount: rawChunks.length,
+				chunkCount: plannedChunks.length,
 				vectorPrecision: this.precision,
 				indexedAt: Date.now(),
 				lastErrorKind: null,
@@ -477,21 +577,220 @@ export class HybridEngine {
 		});
 	}
 
+	private async loadStoredFileIndexState(
+		filePath: string,
+	): Promise<StoredFileIndexState> {
+		const [snapshot, chunkRows, vectorRow] = await Promise.all([
+			this.db.db.hybridFileSnapshots.get(filePath),
+			this.db.db.hybridChunks.where('filePath').equals(filePath).sortBy('chunkIndex'),
+			this.db.db.hybridChunkVectors.get(filePath),
+		]);
+		const vectorsByChunkId = new Map<number, StoredVector>();
+		if (vectorRow && vectorRow.precision === this.precision) {
+			const shard = await rowToChunkVectorShard(vectorRow);
+			for (const record of shardToChunkVectorRecords(shard)) {
+				vectorsByChunkId.set(record.id, record.vector);
+			}
+		}
+		return {
+			snapshot,
+			chunkRows,
+			vectorsByChunkId,
+		};
+	}
+
+	private async persistSnapshot(
+		filePath: string,
+		plainText: string,
+		generation: number,
+	): Promise<void> {
+		await this.db.db.hybridFileSnapshots.put({
+			filePath,
+			plainText,
+			generation,
+		});
+	}
+
+	private async planIncrementalChunks(
+		filePath: string,
+		plainText: string,
+		lineOffsets: number[],
+		buildEmbedInput: (chunk: RawChunk) => string,
+		fullChunks: RawChunk[],
+		previousState: StoredFileIndexState,
+	): Promise<PlannedChunk[]> {
+		const basePlan = (chunks: RawChunk[]): PlannedChunk[] =>
+			chunks.map((rawChunk) => {
+				const embedKey = hashEmbedInput(buildEmbedInput(rawChunk));
+				return {
+					rawChunk,
+					embedKey,
+				};
+			});
+
+		if (
+			!previousState.snapshot ||
+			previousState.chunkRows.length === 0
+		) {
+			return basePlan(fullChunks);
+		}
+
+		const oldText = previousState.snapshot.plainText;
+		const reuseWindow = computeUnchangedWindowReuse(oldText, plainText);
+		if (
+			reuseWindow.prefixLength === 0 &&
+			reuseWindow.suffixLength === 0
+		) {
+			return basePlan(fullChunks);
+		}
+
+		const oldSuffixStart = oldText.length - reuseWindow.suffixLength;
+		const newSuffixStart = plainText.length - reuseWindow.suffixLength;
+		const prefixRows = previousState.chunkRows.filter(
+			(row) => row.endOffset <= reuseWindow.prefixLength,
+		);
+		const prefixIds = new Set(prefixRows.map((row) => row.id));
+		const suffixRows = previousState.chunkRows.filter(
+			(row) =>
+				row.startOffset >= oldSuffixStart &&
+				!prefixIds.has(row.id),
+		);
+
+		const prefixPlans = prefixRows
+			.map((row) =>
+				this.reuseStoredChunk(
+					row,
+					plainText,
+					lineOffsets,
+					buildEmbedInput,
+					previousState.vectorsByChunkId,
+					row.startOffset,
+					row.endOffset,
+				),
+			)
+			.filter((chunk): chunk is PlannedChunk => chunk !== null);
+		const suffixPlans = suffixRows
+			.map((row) =>
+				this.reuseStoredChunk(
+					row,
+					plainText,
+					lineOffsets,
+					buildEmbedInput,
+					previousState.vectorsByChunkId,
+					newSuffixStart + (row.startOffset - oldSuffixStart),
+					newSuffixStart + (row.endOffset - oldSuffixStart),
+				),
+			)
+			.filter((chunk): chunk is PlannedChunk => chunk !== null);
+
+		const middleStart =
+			prefixPlans.length > 0
+				? prefixPlans[prefixPlans.length - 1].rawChunk.endOffset
+				: 0;
+		const middleEnd =
+			suffixPlans.length > 0
+				? suffixPlans[0].rawChunk.startOffset
+				: plainText.length;
+		const middlePlans = basePlan(
+			chunkFileRange(
+				filePath,
+				plainText,
+				middleStart,
+				middleEnd,
+				lineOffsets,
+			),
+		);
+
+		return [...prefixPlans, ...middlePlans, ...suffixPlans]
+			.sort((left, right) => left.rawChunk.startOffset - right.rawChunk.startOffset);
+	}
+
+	private reuseStoredChunk(
+		row: ChunkRow,
+		plainText: string,
+		lineOffsets: number[],
+		buildEmbedInput: (chunk: RawChunk) => string,
+		vectorsByChunkId: Map<number, StoredVector>,
+		startOffset: number,
+		endOffset: number,
+	): PlannedChunk | null {
+		const rawChunk = buildRawChunkFromOffsets(
+			row.filePath,
+			plainText,
+			lineOffsets,
+			startOffset,
+			endOffset,
+		);
+		if (!rawChunk) {
+			return null;
+		}
+
+		const embedKey = hashEmbedInput(buildEmbedInput(rawChunk));
+		return {
+			rawChunk,
+			embedKey,
+			reusedVector:
+				row.embedKey === embedKey && row.id !== undefined
+					? vectorsByChunkId.get(row.id)
+					: undefined,
+		};
+	}
+
+	private async resolveBatchVectors(
+		filePath: string,
+		batchChunks: PlannedChunk[],
+		buildEmbedInput: (chunk: RawChunk) => string,
+	): Promise<StoredVector[]> {
+		const vectors = new Array<StoredVector>(batchChunks.length);
+		const pendingIndexes: number[] = [];
+		const pendingInputs: string[] = [];
+
+		for (let i = 0; i < batchChunks.length; i++) {
+			const reusedVector = batchChunks[i].reusedVector;
+			if (reusedVector) {
+				vectors[i] = reusedVector;
+				continue;
+			}
+			pendingIndexes.push(i);
+			pendingInputs.push(buildEmbedInput(batchChunks[i].rawChunk));
+		}
+
+		if (pendingInputs.length > 0) {
+			const embedded = await profileHybridStage(
+				'index.embed_batch',
+				async () =>
+					await this.embedder.embedBatch(
+						pendingInputs,
+						this.precision,
+						filePath,
+					),
+			);
+			for (let i = 0; i < pendingIndexes.length; i++) {
+				vectors[pendingIndexes[i]] = embedded[i];
+			}
+		}
+
+		return vectors;
+	}
+
 	private async persistChunks(
 		filePath: string,
-		rawChunks: RawChunk[],
+		plannedChunks: PlannedChunk[],
 		strict: boolean,
 		chunkIndexOffset = 0,
 	): Promise<number[]> {
-		const rows = rawChunks.map((chunk, index) => {
+		const rows = plannedChunks.map((chunk, index) => {
 			return chunkToRow({
 				id: undefined,
 				filePath,
 				chunkIndex: chunkIndexOffset + index,
-				text: chunk.text,
-				startLine: chunk.startLine,
-				startCol: chunk.startCol,
-				endLine: chunk.endLine,
+				text: chunk.rawChunk.text,
+				startOffset: chunk.rawChunk.startOffset,
+				endOffset: chunk.rawChunk.endOffset,
+				startLine: chunk.rawChunk.startLine,
+				startCol: chunk.rawChunk.startCol,
+				endLine: chunk.rawChunk.endLine,
+				embedKey: chunk.embedKey,
 			});
 		});
 
@@ -515,17 +814,17 @@ export class HybridEngine {
 
 	private async indexBm25Only(
 		filePath: string,
-		rawChunks: RawChunk[],
+		plannedChunks: PlannedChunk[],
 		updateTime: number,
 		option: HybridWriteOption,
 		generation?: number,
 	): Promise<void> {
 		for (
 			let chunkStart = 0;
-			chunkStart < rawChunks.length;
+			chunkStart < plannedChunks.length;
 			chunkStart += INDEX_CHUNK_BATCH_SIZE
 		) {
-			const batchChunks = rawChunks.slice(
+			const batchChunks = plannedChunks.slice(
 				chunkStart,
 				chunkStart + INDEX_CHUNK_BATCH_SIZE,
 			);
@@ -541,7 +840,7 @@ export class HybridEngine {
 			);
 			await profileHybridStage('index.update_memory_indices_bm25_only', async () => {
 				for (let i = 0; i < ids.length; i++) {
-					this.bm25.addDocument(ids[i], batchChunks[i].text);
+					this.bm25.addDocument(ids[i], batchChunks[i].rawChunk.text);
 				}
 			});
 		}
@@ -554,7 +853,7 @@ export class HybridEngine {
 			updateTime,
 			state: 'bm25_only',
 			generation,
-			chunkCount: rawChunks.length,
+			chunkCount: plannedChunks.length,
 			vectorPrecision: null,
 			indexedAt: Date.now(),
 			lastErrorKind: null,
@@ -641,10 +940,17 @@ export class HybridEngine {
 
 	private async loadSmallChunkCandidates(ranking: RankedResult[]): Promise<SmallChunkCandidate[]> {
 		const rows = await this.db.db.hybridChunks.bulkGet(ranking.map((item) => item.id));
+		const snapshotByPath = await this.loadSnapshotTextByPaths(
+			rows
+				.filter((row): row is ChunkRow => row !== undefined)
+				.map((row) => row.filePath),
+		);
 		const chunksById = new Map<number, Chunk>();
 		for (const row of rows) {
 			if (!row?.id) continue;
-			chunksById.set(row.id, await rowToChunk(row));
+			const plainText = snapshotByPath.get(row.filePath);
+			if (!plainText) continue;
+			chunksById.set(row.id, rowToChunk(row, plainText));
 		}
 
 		return ranking
@@ -661,6 +967,21 @@ export class HybridEngine {
 				} as SmallChunkCandidate;
 			})
 			.filter((item): item is SmallChunkCandidate => item !== null);
+	}
+
+	private async loadSnapshotTextByPaths(filePaths: string[]): Promise<Map<string, string>> {
+		const uniquePaths = Array.from(new Set(filePaths));
+		if (uniquePaths.length === 0) {
+			return new Map();
+		}
+
+		const rows = await this.db.db.hybridFileSnapshots.bulkGet(uniquePaths);
+		const snapshots = new Map<string, string>();
+		for (const row of rows) {
+			if (!row) continue;
+			snapshots.set(row.filePath, row.plainText);
+		}
+		return snapshots;
 	}
 
 	private async rerankAndBuildFileItems(

@@ -6,6 +6,7 @@ import type {
 	BlobRecord,
 	ChunkRow,
 	ChunkVectorShardRow,
+	HybridFileSnapshotRow,
 	HybridDocRef,
 } from "src/services/search/hybrid/hybrid-store";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
@@ -42,6 +43,7 @@ export class Database {
 			{ name: "lexicalDocRefs", table: this.db.lexicalDocRefs },
 			{ name: "semanticDocRefs", table: this.db.semanticDocRefs },
 			{ name: "hybridChunks", table: this.db.hybridChunks },
+			{ name: "hybridFileSnapshots", table: this.db.hybridFileSnapshots },
 			{ name: "hybridChunkVectors", table: this.db.hybridChunkVectors },
 			{ name: "hybridBm25Index", table: this.db.hybridBm25Index },
 			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
@@ -60,9 +62,13 @@ export class Database {
 			}),
 		);
 		const hybridChunkRows = await this.db.hybridChunks.toArray();
+		const hybridSnapshotRows = await this.db.hybridFileSnapshots.toArray();
 		const hybridVectorRows = await this.db.hybridChunkVectors.toArray();
 		const hybridBm25Row = await this.db.hybridBm25Index.get(0);
-		const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(hybridChunkRows);
+		const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(
+			hybridChunkRows,
+			hybridSnapshotRows,
+		);
 		const hybridVectorBreakdown = this.estimateHybridVectorBreakdown(hybridVectorRows);
 		const hybridBm25Breakdown = hybridBm25Row
 			? await analyzeBm25Blob(hybridBm25Row.data).catch((error) => {
@@ -80,7 +86,10 @@ export class Database {
 		};
 	}
 
-	private estimateHybridChunkBreakdown(rows: ChunkRow[]) {
+	private estimateHybridChunkBreakdown(
+		rows: ChunkRow[],
+		snapshots: HybridFileSnapshotRow[],
+	) {
 		const breakdown = {
 			textBytes: 0,
 			vectorBytes: 0,
@@ -88,15 +97,22 @@ export class Database {
 			metadataBytes: 0,
 		};
 
+		for (const snapshot of snapshots) {
+			breakdown.textBytes += estimateValueBytes(snapshot.plainText);
+			breakdown.metadataBytes += estimateValueBytes(snapshot.filePath);
+		}
+
 		for (const row of rows) {
-			breakdown.textBytes += estimateValueBytes(row.text);
 			breakdown.metadataBytes +=
 				estimateValueBytes(row.id) +
 				estimateValueBytes(row.filePath) +
 				estimateValueBytes(row.chunkIndex) +
+				estimateValueBytes(row.startOffset) +
+				estimateValueBytes(row.endOffset) +
 				estimateValueBytes(row.startLine) +
 				estimateValueBytes(row.startCol) +
-				estimateValueBytes(row.endLine);
+				estimateValueBytes(row.endLine) +
+				estimateValueBytes(row.embedKey);
 		}
 
 		return breakdown;
@@ -204,7 +220,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 9;
+	private static readonly _dbVersion = 10;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -214,6 +230,7 @@ class DexieWrapper extends Dexie {
 	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
 	// Hybrid search tables
 	hybridChunks!: Dexie.Table<ChunkRow, number>;
+	hybridFileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
 	hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
 	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
@@ -277,6 +294,7 @@ class DexieWrapper extends Dexie {
 				lexicalDocRefs: "++id",
 				semanticDocRefs: "++id",
 				hybridChunks: "++id, filePath",
+				hybridFileSnapshots: "filePath",
 				hybridChunkVectors: "filePath",
 				hybridBm25Index: "id",
 				hybridHnswSmall: "id",
@@ -288,6 +306,7 @@ class DexieWrapper extends Dexie {
 					tx.table("minisearch").clear(),
 					tx.table("lexicalDocRefs").clear(),
 					tx.table("hybridChunks").clear(),
+					tx.table("hybridFileSnapshots").clear(),
 					tx.table("hybridChunkVectors").clear(),
 					tx.table("hybridBm25Index").clear(),
 					tx.table("hybridHnswSmall").clear(),

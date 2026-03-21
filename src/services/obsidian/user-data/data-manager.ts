@@ -865,6 +865,10 @@ export class DataManager {
 			chunkCountByPath.set(row.filePath, (chunkCountByPath.get(row.filePath) ?? 0) + 1);
 		}
 		const vectorRows = await this.database.db.hybridChunkVectors.toArray();
+		const snapshotRows = await this.database.db.hybridFileSnapshots.toArray();
+		const snapshotByPath = new Map(
+			snapshotRows.map((row) => [row.filePath, row]),
+		);
 		const vectorInfoByPath = new Map<
 			string,
 			{ precision: string; chunkCount: number; generation?: number }
@@ -883,6 +887,7 @@ export class DataManager {
 		const docRefPaths = new Set(docRefByPath.keys());
 		const allPaths = new Set<string>([
 			...chunkPaths,
+			...snapshotByPath.keys(),
 			...vectorInfoByPath.keys(),
 			...docRefPaths,
 		]);
@@ -896,6 +901,7 @@ export class DataManager {
 			const vectorInfo = vectorInfoByPath.get(path);
 			const hasVector = vectorInfo !== undefined;
 			const vectorPrecision = vectorInfo?.precision;
+			const hasSnapshot = snapshotByPath.has(path);
 			const hasDocRef = docRefPaths.has(path);
 			const existsNow = currFiles.has(path);
 			const docRef = docRefByPath.get(path);
@@ -903,9 +909,11 @@ export class DataManager {
 			const chunkCount = chunkCountByPath.get(path) ?? 0;
 			const vectorChunkCount = vectorInfo?.chunkCount ?? 0;
 			const isPendingOrFailed = docState === "pending" || docState === "failed";
-			const readyMissingData = docState === "ready" && (!hasChunks || !hasVector || !hasDocRef);
+			const readyMissingData =
+				docState === "ready" && (!hasChunks || !hasSnapshot || !hasVector || !hasDocRef);
 			const bm25OnlyShapeMismatch =
-				docState === "bm25_only" && (!hasChunks || hasVector || !hasDocRef);
+				docState === "bm25_only" &&
+				(!hasChunks || !hasSnapshot || hasVector || !hasDocRef);
 			const chunkCountMismatch =
 				hasDocRef &&
 				docRef?.chunkCount !== undefined &&
@@ -914,15 +922,17 @@ export class DataManager {
 				hasVector && hasChunks && vectorChunkCount !== chunkCount;
 			const generationMismatch =
 				hasDocRef &&
-				hasVector &&
+				(hasVector || hasSnapshot) &&
 				docRef?.generation !== undefined &&
-				vectorInfo?.generation !== undefined &&
-				docRef.generation !== vectorInfo.generation;
+				((vectorInfo?.generation !== undefined &&
+					docRef.generation !== vectorInfo.generation) ||
+					(snapshotByPath.get(path)?.generation !== undefined &&
+						docRef.generation !== snapshotByPath.get(path)?.generation));
 
 			const inconsistent =
 				(hasVector && !hasChunks) ||
-				(!hasDocRef && (hasChunks || hasVector)) ||
-				(hasDocRef && !hasChunks) ||
+				(!hasDocRef && (hasChunks || hasVector || hasSnapshot)) ||
+				(hasDocRef && (!hasChunks || !hasSnapshot)) ||
 				isPendingOrFailed ||
 				readyMissingData ||
 				bm25OnlyShapeMismatch ||
@@ -930,9 +940,10 @@ export class DataManager {
 				vectorChunkCountMismatch ||
 				generationMismatch;
 			const obsolete = !existsNow && (hasChunks || hasVector || hasDocRef);
+			const obsoleteSnapshot = !existsNow && hasSnapshot;
 			const precisionMismatch =
 				hasVector && vectorPrecision !== currentPrecision;
-			if (!inconsistent && !obsolete && !precisionMismatch) {
+			if (!inconsistent && !obsolete && !obsoleteSnapshot && !precisionMismatch) {
 				continue;
 			}
 
@@ -954,6 +965,7 @@ export class DataManager {
 				path,
 				inVault: currFiles.has(path),
 				hasChunks: chunkPaths.has(path),
+				hasSnapshot: snapshotByPath.has(path),
 				hasVector: vectorInfoByPath.has(path),
 				hasDocRef: docRefPaths.has(path),
 				docState: normalizeHybridDocState(
@@ -1147,6 +1159,7 @@ export class DataManager {
 		const currentHybridBytes = storageUsage.tables
 			.filter((item) =>
 				item.name === "hybridChunks" ||
+				item.name === "hybridFileSnapshots" ||
 				item.name === "hybridChunkVectors" ||
 				item.name === "hybridBm25Index" ||
 				item.name === "hybridHnswSmall" ||
@@ -1226,7 +1239,9 @@ export class DataManager {
 		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
 		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
-		const chunkStoreBytes = bytesByName.get("hybridChunks") ?? 0;
+		const chunkStoreBytes =
+			(bytesByName.get("hybridChunks") ?? 0) +
+			(bytesByName.get("hybridFileSnapshots") ?? 0);
 		const otherBytes = Math.max(
 			0,
 			storageUsage.totalBytes -

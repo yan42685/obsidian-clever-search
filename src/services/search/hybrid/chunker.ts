@@ -103,7 +103,7 @@ const CLOSING_BOUNDARY_CHARS = new Set([
  * Build a line-start offset array for O(1) line-number lookup.
  * lineOffsets[i] = char offset of line i (0-indexed).
  */
-function buildLineOffsets(text: string): number[] {
+export function buildLineOffsets(text: string): number[] {
 	const offsets = [0];
 	for (let i = 0; i < text.length; i++) {
 		if (text[i] === "\n") offsets.push(i + 1);
@@ -112,7 +112,7 @@ function buildLineOffsets(text: string): number[] {
 }
 
 /** Binary search: return 0-indexed line number for a char offset. */
-function offsetToLine(offsets: number[], offset: number): number {
+export function offsetToLine(offsets: number[], offset: number): number {
 	let lo = 0;
 	let hi = offsets.length - 1;
 	while (lo < hi) {
@@ -513,6 +513,8 @@ function makeSmallChunks(
 			return {
 				filePath,
 				text: text.slice(range.startOffset, range.endOffset),
+				startOffset: range.startOffset,
+				endOffset: range.endOffset,
 				startLine,
 				startCol,
 				endLine,
@@ -526,6 +528,68 @@ export function chunkFile(filePath: string, plainText: string): ChunkerOutput {
 	return {
 		chunks: makeSmallChunks(filePath, plainText, lineOffsets),
 	};
+}
+
+export function buildRawChunkFromOffsets(
+	filePath: string,
+	plainText: string,
+	lineOffsets: number[],
+	startOffset: number,
+	endOffset: number,
+): RawChunk | null {
+	if (endOffset <= startOffset) {
+		return null;
+	}
+
+	const text = plainText.slice(startOffset, endOffset);
+	if (text.trim().length === 0) {
+		return null;
+	}
+
+	const startLine = offsetToLine(lineOffsets, startOffset);
+	const lastOffset = Math.max(startOffset, endOffset - 1);
+	const endLine = offsetToLine(lineOffsets, lastOffset);
+	const startCol = startOffset - (lineOffsets[startLine] ?? 0);
+	return {
+		filePath,
+		text,
+		startOffset,
+		endOffset,
+		startLine,
+		startCol,
+		endLine,
+	};
+}
+
+export function chunkFileRange(
+	filePath: string,
+	plainText: string,
+	startOffset: number,
+	endOffset: number,
+	lineOffsets = buildLineOffsets(plainText),
+): RawChunk[] {
+	if (endOffset <= startOffset) {
+		return [];
+	}
+
+	const segmentText = plainText.slice(startOffset, endOffset);
+	const segmentRanges = createChunkRanges(
+		segmentText,
+		SMALL_CHUNK_TARGET,
+		SMALL_CHUNK_TARGET * (1 + CHUNK_MAX_OVERFLOW_RATIO),
+	);
+
+	return segmentRanges
+		.map((range) =>
+			buildRawChunkFromOffsets(
+				filePath,
+				plainText,
+				lineOffsets,
+				startOffset + range.startOffset,
+				startOffset + range.endOffset,
+			),
+		)
+		.filter((chunk): chunk is RawChunk => chunk !== null);
 }
 
 function normalizeEmbedContextText(text: string): string {
