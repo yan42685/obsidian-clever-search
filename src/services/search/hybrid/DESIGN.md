@@ -131,6 +131,23 @@ Current practical conclusion:
 - do not rush query-aware recall budgets online yet
 - first verify whether disabling BM25 proximity inside hybrid improves large-corpus `hits@25` without harming direct hybrid lexical queries
 
+## Semantic Rewrite Query Policy
+
+Semantic rewrite and multi-variant query expansion are currently not part of the main online direction.
+
+Reason:
+
+- offline evidence did not show stable gains
+- the extra complexity is not justified by the observed improvement
+- strong lexical-anchor queries are easy to hurt
+- reranker cannot recover chunks that never enter top25
+
+Current rule:
+
+- keep the original user query as the main retrieval input
+- do not prioritize semantic rewrite work unless new evidence shows a clear `hits@25` gain
+- spend optimization effort on better dense recall and better chunk representation instead
+
 ## Chunk Storage
 
 `hybridChunks` stores only document-facing data:
@@ -164,6 +181,47 @@ This is a practical continuous-buffer design for IndexedDB:
 - one row per file instead of one row per chunk
 - vectors are stored as contiguous typed-array blobs
 - startup can batch-load vectors efficiently
+
+## Embedding Input Strategy
+
+Hybrid embedding input is allowed to be richer than stored chunk text.
+
+Current direction:
+
+- persist and display the original small chunk text
+- build embedding input only at indexing time
+- prepend lightweight structure hints such as:
+  - file basename
+  - nearest heading path, capped by a small token budget instead of a fixed heading count
+- heading path should prefer Obsidian `metadataCache.headings` as the primary source
+- lightweight markdown parsing remains only as a fallback when heading metadata is unavailable
+
+Current online context policy:
+
+- total context budget is fixed at about `22` tokens
+- file basename gets a reserved share first, typically around `4-6` tokens
+- remaining budget is filled by heading titles starting from the nearest heading and walking upward
+- at most the last `4` heading levels are considered
+- clearly generic headings such as `记录 / 想法 / welcome / tasks` are skipped when better headings exist
+
+Why:
+
+- improves semantic identity of chunks whose local text is underspecified
+- preserves document identity even when nearby headings are too generic
+- does not require storing extra text in IndexedDB
+- does not change HNSW graph size, chunk row size, or query-time search flow
+
+Tradeoff:
+
+- indexing-time embedding token usage increases slightly
+- query latency and on-disk index size stay almost unchanged
+
+Guardrails:
+
+- this enrichment is hybrid-only
+- it must not change lexical search behavior
+- context should stay short and structural, not become large section-prefix text
+- Obsidian-specific metadata access should stay above the chunker layer; chunker should consume a plain heading outline instead
 
 ## Quantization Modes
 

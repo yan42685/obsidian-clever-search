@@ -4,12 +4,63 @@ import {
 	CHUNK_OVERLAP_MIN_RATIO,
 	CHUNK_OVERLAP_TARGET_RATIO,
 	SMALL_CHUNK_TARGET,
+	type HeadingOutlineEntry,
 	type RawChunk,
 } from "./hybrid-types";
+import { FileUtil } from "src/utils/file-util";
 
 export type ChunkerOutput = {
 	chunks: RawChunk[];
 };
+
+const MARKDOWN_HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+const MARKDOWN_FENCE_RE = /^(```|~~~)/;
+const EMBED_CONTEXT_TOTAL_BUDGET = 22;
+const EMBED_CONTEXT_FILE_MIN_BUDGET = 4;
+const EMBED_CONTEXT_FILE_MAX_BUDGET = 6;
+const EMBED_CONTEXT_HEADING_LIMIT = 4;
+const EMBED_CONTEXT_TITLE_LIMIT = 80;
+const EMBED_CONTEXT_PREFIX_FILE = "File: ";
+const EMBED_CONTEXT_PREFIX_SECTION = "Section: ";
+const LOW_SIGNAL_HEADING_KEYS = new Set([
+	"welcome",
+	"task",
+	"tasks",
+	"todo",
+	"todos",
+	"daily",
+	"weekly",
+	"monthly",
+	"yearly",
+	"journal",
+	"log",
+	"logs",
+	"note",
+	"notes",
+	"record",
+	"records",
+	"idea",
+	"ideas",
+	"thought",
+	"thoughts",
+	"summary",
+	"summaries",
+	"inbox",
+	"记录",
+	"想法",
+	"笔记",
+	"任务",
+	"待办",
+	"欢迎",
+	"总结",
+	"随想",
+	"杂记",
+	"日志",
+	"日记",
+	"周记",
+	"月记",
+	"年记",
+]);
 
 type ChunkRange = {
 	startOffset: number;
@@ -475,4 +526,213 @@ export function chunkFile(filePath: string, plainText: string): ChunkerOutput {
 	return {
 		chunks: makeSmallChunks(filePath, plainText, lineOffsets),
 	};
+}
+
+function normalizeEmbedContextText(text: string): string {
+	return text.replace(/\s+/g, " ").trim().slice(0, EMBED_CONTEXT_TITLE_LIMIT);
+}
+
+function truncateToTokenBudget(text: string, tokenBudget: number): string {
+	const normalized = normalizeEmbedContextText(text);
+	if (!normalized || tokenBudget <= 0) {
+		return "";
+	}
+	if (estimateTokenCount(normalized) <= tokenBudget) {
+		return normalized;
+	}
+
+	const lookup = buildTokenCheckpoints(normalized);
+	const endOffset = offsetForAbsoluteUnits(
+		normalized,
+		lookup,
+		Math.max(1, Math.floor(tokenBudget * TOKEN_UNIT_SCALE)),
+	);
+	return normalized.slice(0, endOffset).trim();
+}
+
+function normalizeHeadingSignalKey(title: string): string {
+	return title
+		.toLowerCase()
+		.replace(/[`~!@#$%^&*()\-_=+\[\]{}\\|;:'",.<>/?]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function isLowSignalHeading(title: string): boolean {
+	const normalized = normalizeHeadingSignalKey(title);
+	if (!normalized) {
+		return true;
+	}
+	if (LOW_SIGNAL_HEADING_KEYS.has(normalized.replace(/\s+/g, ""))) {
+		return true;
+	}
+
+	const terms = normalized
+		.split(" ")
+		.map((term) => term.trim())
+		.filter((term) => term.length > 0);
+	return (
+		terms.length > 0 &&
+		terms.every((term) => LOW_SIGNAL_HEADING_KEYS.has(term))
+	);
+}
+
+function parseFallbackHeadingOutline(plainText: string): HeadingOutlineEntry[] {
+	const lines = plainText.split("\n");
+	const outline: HeadingOutlineEntry[] = [];
+	let inFence = false;
+
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+		const trimmed = lines[lineIndex].trim();
+		if (MARKDOWN_FENCE_RE.test(trimmed)) {
+			inFence = !inFence;
+			continue;
+		}
+
+		if (!inFence) {
+			const headingMatch = trimmed.match(MARKDOWN_HEADING_RE);
+			if (headingMatch) {
+				const level = headingMatch[1].length;
+				const title = normalizeEmbedContextText(headingMatch[2]);
+				if (title) {
+					outline.push({ line: lineIndex, level, title });
+				}
+			}
+		}
+	}
+
+	return outline;
+}
+
+function buildHeadingContextsByLine(
+	lineCount: number,
+	outline: HeadingOutlineEntry[],
+): string[][] {
+	const contextsByLine: string[][] = new Array(lineCount);
+	const stack: HeadingOutlineEntry[] = [];
+	const sortedOutline = [...outline]
+		.filter((entry) => entry.title.trim().length > 0 && entry.line >= 0)
+		.sort((left, right) => left.line - right.line || left.level - right.level);
+	let outlineIndex = 0;
+
+	for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+		while (
+			outlineIndex < sortedOutline.length &&
+			sortedOutline[outlineIndex].line === lineIndex
+		) {
+			const heading = sortedOutline[outlineIndex];
+			while (stack.length > 0 && stack[stack.length - 1].level >= heading.level) {
+				stack.pop();
+			}
+			stack.push({
+				line: heading.line,
+				level: heading.level,
+				title: normalizeEmbedContextText(heading.title),
+			});
+			outlineIndex += 1;
+		}
+		contextsByLine[lineIndex] = stack.map((entry) => entry.title);
+	}
+
+	return contextsByLine;
+}
+
+function buildChunkEmbedContext(
+	filePath: string,
+	headingTitles: string[],
+): string {
+	const basename = normalizeEmbedContextText(FileUtil.getBasename(filePath));
+	const lines: string[] = [];
+	let remainingBudget = EMBED_CONTEXT_TOTAL_BUDGET;
+
+	if (basename) {
+		const basenameBudget = Math.min(
+			remainingBudget,
+			Math.max(
+				EMBED_CONTEXT_FILE_MIN_BUDGET,
+				Math.min(
+					EMBED_CONTEXT_FILE_MAX_BUDGET,
+					Math.ceil(estimateTokenCount(basename)),
+				),
+			),
+		);
+		const truncatedBasename = truncateToTokenBudget(basename, basenameBudget);
+		if (truncatedBasename) {
+			const fileLine = `${EMBED_CONTEXT_PREFIX_FILE}${truncatedBasename}`;
+			const fileLineTokens = estimateTokenCount(fileLine);
+			lines.push(fileLine);
+			remainingBudget = Math.max(0, remainingBudget - fileLineTokens);
+		}
+	}
+
+	if (remainingBudget <= estimateTokenCount(EMBED_CONTEXT_PREFIX_SECTION)) {
+		return lines.join("\n");
+	}
+
+	const candidateSectionTitles = headingTitles
+		.filter((title) => title.length > 0)
+		.map((title) => normalizeEmbedContextText(title))
+		.slice(-EMBED_CONTEXT_HEADING_LIMIT);
+	const informativeTitles = candidateSectionTitles.filter(
+		(title) => !isLowSignalHeading(title),
+	);
+	const fallbackTitles =
+		informativeTitles.length > 0 ? informativeTitles : candidateSectionTitles;
+
+	const selectedTitles: string[] = [];
+	for (let index = fallbackTitles.length - 1; index >= 0; index--) {
+		const candidate = fallbackTitles[index];
+		const nextTitles = [candidate, ...selectedTitles];
+		const sectionLine = `${EMBED_CONTEXT_PREFIX_SECTION}${nextTitles.join(" > ")}`;
+		if (estimateTokenCount(sectionLine) <= remainingBudget) {
+			selectedTitles.unshift(candidate);
+		}
+	}
+
+	if (selectedTitles.length > 0) {
+		lines.push(`${EMBED_CONTEXT_PREFIX_SECTION}${selectedTitles.join(" > ")}`);
+		return lines.join("\n");
+	}
+
+	const nearestTitle = fallbackTitles[fallbackTitles.length - 1];
+	if (!nearestTitle) {
+		return lines.join("\n");
+	}
+
+	const nearestBudget = Math.max(
+		1,
+		remainingBudget - estimateTokenCount(EMBED_CONTEXT_PREFIX_SECTION),
+	);
+	const truncatedNearestTitle = truncateToTokenBudget(nearestTitle, nearestBudget);
+	if (truncatedNearestTitle) {
+		lines.push(`${EMBED_CONTEXT_PREFIX_SECTION}${truncatedNearestTitle}`);
+	}
+
+	return lines.join("\n");
+}
+
+export function buildChunkEmbeddingInputs(
+	filePath: string,
+	plainText: string,
+	chunks: RawChunk[],
+	headingOutline?: HeadingOutlineEntry[],
+): string[] {
+	if (chunks.length === 0) {
+		return [];
+	}
+
+	const lineCount = plainText.split("\n").length;
+	const outline =
+		headingOutline && headingOutline.length > 0
+			? headingOutline
+			: parseFallbackHeadingOutline(plainText);
+	const contextsByLine = buildHeadingContextsByLine(lineCount, outline);
+	return chunks.map((chunk) => {
+		const headingTitles = contextsByLine[chunk.startLine] ?? [];
+		const context = buildChunkEmbedContext(filePath, headingTitles);
+		if (!context) {
+			return chunk.text;
+		}
+		return `${context}\n\n${chunk.text}`;
+	});
 }
