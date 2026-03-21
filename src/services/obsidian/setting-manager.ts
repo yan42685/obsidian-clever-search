@@ -535,8 +535,8 @@ class HybridSearchModal extends Modal {
 			.setDesc(t("hybridModal.maxResultCount.desc"))
 			.addSlider((slider) =>
 				slider
-					.setLimits(1, 30, 1)
-					.setValue(this.setting.hybrid.maxResultCount ?? 5)
+					.setLimits(1, 50, 1)
+					.setValue(this.setting.hybrid.maxResultCount ?? 10)
 					.setDynamicTooltip()
 					.onChange((value) => {
 						this.setting.hybrid.maxResultCount = value;

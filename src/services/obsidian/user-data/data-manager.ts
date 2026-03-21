@@ -23,6 +23,7 @@ import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { eventBus } from "src/utils/event-bus";
+import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -31,8 +32,6 @@ import { t } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
 import { DataProvider } from "./data-provider";
 import {
-	DocAddOperation,
-	DocDeleteOperation,
 	type DocOperation,
 	type ReducedDocOperation,
 	DocOperationBuffer,
@@ -150,6 +149,7 @@ export class DataManager {
 	private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
 	private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
 	private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
+	private static readonly HYBRID_MIN_FULL_REINDEX_INTERVAL_MS = 15_000;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -157,6 +157,7 @@ export class DataManager {
 	private lexicalEngine = getInstance(LexicalEngine);
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
+	private readonly hybridDeferredReindexTimers = new Map<string, NodeJS.Timeout>();
 
 	private get hybridEngine() {
 		return getInstance(SearchService).hybridEngine;
@@ -165,24 +166,20 @@ export class DataManager {
 	private docOperationsHandler = async (operations: ReducedDocOperation[]) => {
 		for (const op of operations) {
 			if (op.type === "delete") {
-				await this.deleteDocuments([op.path]);
-				if (this.hybridEngine.isEnabled()) {
-					await this.hybridEngine.deleteFile(op.path);
-				}
-			} else {
-				await this.addDocuments([op.file]);
-				if (
-					this.hybridEngine.isEnabled() &&
-					op.file instanceof TFile &&
-					this.dataProvider.isIndexable(op.file) &&
-					this.hybridEngine.shouldIndexPath(op.file.path)
-				) {
-					const failure = await this.indexHybridFileWithRetry(op.file);
-					if (failure) {
-						this.noticeHybridIndexFailures([failure]);
-					}
-				}
+				await this.handleDeleteOperation(op.path);
+				continue;
 			}
+
+			if (op.type === "move") {
+				await this.handleMoveOperation(
+					op.oldPath,
+					op.path,
+					op.requiresReindex,
+				);
+				continue;
+			}
+
+			await this.handleUpsertOperation(op.path);
 		}
 	};
 
@@ -219,6 +216,7 @@ export class DataManager {
 
 	onunload() {
 		getInstance(FileWatcher).stop();
+		this.clearAllDeferredHybridReindexTimers();
 	}
 
 	receiveDocOperation(operation: DocOperation) {
@@ -256,6 +254,166 @@ export class DataManager {
 		if (paths.length > 0) {
 			const indexablePaths = paths.filter((p) => this.dataProvider.isIndexable(p));
 			this.lexicalEngine.deleteDocuments(indexablePaths);
+		}
+	}
+
+	private async handleDeleteOperation(path: string): Promise<void> {
+		this.cancelDeferredHybridReindex(path);
+		await this.deleteDocuments([path]);
+		if (this.hybridEngine.isEnabled()) {
+			await this.hybridEngine.deleteFile(path);
+		}
+	}
+
+	private async handleUpsertOperation(path: string): Promise<void> {
+		const file = this.dataProvider.getFileByPath(path);
+		if (!file || !this.dataProvider.isIndexable(file)) {
+			await this.handleDeleteOperation(path);
+			return;
+		}
+
+		await this.addDocuments([file]);
+		if (
+			this.hybridEngine.isEnabled() &&
+			this.hybridEngine.shouldIndexPath(file.path)
+		) {
+			const failure = await this.requestHybridReindex(file);
+			if (failure) {
+				this.noticeHybridIndexFailures([failure]);
+			}
+			return;
+		}
+
+		if (this.hybridEngine.isEnabled()) {
+			await this.hybridEngine.deleteFile(path);
+		}
+	}
+
+	private async handleMoveOperation(
+		oldPath: string,
+		newPath: string,
+		requiresReindex: boolean,
+	): Promise<void> {
+		this.cancelDeferredHybridReindex(oldPath);
+		this.cancelDeferredHybridReindex(newPath);
+		await this.deleteDocuments([oldPath]);
+
+		const file = this.dataProvider.getFileByPath(newPath);
+		if (!file || !this.dataProvider.isIndexable(file)) {
+			await this.handleDeleteOperation(newPath);
+			if (this.hybridEngine.isEnabled()) {
+				await this.hybridEngine.deleteFile(oldPath);
+			}
+			return;
+		}
+
+		await this.addDocuments([file]);
+
+		if (
+			!this.hybridEngine.isEnabled() ||
+			!this.hybridEngine.shouldIndexPath(file.path)
+		) {
+			if (this.hybridEngine.isEnabled()) {
+				await this.hybridEngine.deleteFile(oldPath);
+				await this.hybridEngine.deleteFile(newPath);
+			}
+			return;
+		}
+
+		const basenameChanged =
+			FileUtil.getBasename(oldPath) !== FileUtil.getBasename(newPath);
+		const moved = await this.hybridEngine.moveFile(
+			oldPath,
+			newPath,
+			file.stat.mtime,
+		);
+
+		if (moved && !basenameChanged && !requiresReindex) {
+			return;
+		}
+
+		const failure = await this.requestHybridReindex(file);
+		if (failure) {
+			this.noticeHybridIndexFailures([failure]);
+		}
+	}
+
+	private async requestHybridReindex(
+		file: TFile,
+	): Promise<HybridIndexFailure | null> {
+		this.cancelDeferredHybridReindex(file.path);
+		const delayMs = await this.getHybridReindexDelayMs(file.path);
+		if (delayMs > 0) {
+			this.scheduleDeferredHybridReindex(file.path, delayMs);
+			return null;
+		}
+		return await this.indexHybridFileWithRetry(file);
+	}
+
+	private async getHybridReindexDelayMs(filePath: string): Promise<number> {
+		const ref = await this.database.db.hybridDocRefs.get(filePath);
+		const indexedAt = ref?.indexedAt ?? 0;
+		if (indexedAt <= 0) {
+			return 0;
+		}
+		const elapsed = Date.now() - indexedAt;
+		if (elapsed >= DataManager.HYBRID_MIN_FULL_REINDEX_INTERVAL_MS) {
+			return 0;
+		}
+		return DataManager.HYBRID_MIN_FULL_REINDEX_INTERVAL_MS - elapsed;
+	}
+
+	private scheduleDeferredHybridReindex(path: string, delayMs: number): void {
+		this.cancelDeferredHybridReindex(path);
+		const timer = setTimeout(() => {
+			void this.flushDeferredHybridReindex(path, timer);
+		}, delayMs);
+		this.hybridDeferredReindexTimers.set(path, timer);
+	}
+
+	private cancelDeferredHybridReindex(path: string): void {
+		const timer = this.hybridDeferredReindexTimers.get(path);
+		if (!timer) {
+			return;
+		}
+		clearTimeout(timer);
+		this.hybridDeferredReindexTimers.delete(path);
+	}
+
+	private clearAllDeferredHybridReindexTimers(): void {
+		for (const timer of this.hybridDeferredReindexTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.hybridDeferredReindexTimers.clear();
+	}
+
+	private async flushDeferredHybridReindex(
+		path: string,
+		timer: NodeJS.Timeout,
+	): Promise<void> {
+		if (this.hybridDeferredReindexTimers.get(path) !== timer) {
+			return;
+		}
+		this.hybridDeferredReindexTimers.delete(path);
+
+		const file = this.dataProvider.getFileByPath(path);
+		if (
+			!file ||
+			!this.dataProvider.isIndexable(file) ||
+			!this.hybridEngine.isEnabled() ||
+			!this.hybridEngine.shouldIndexPath(path)
+		) {
+			if (this.hybridEngine.isEnabled()) {
+				await this.hybridEngine.deleteFile(path).catch((error) =>
+					logger.warn(`hybrid deferred delete failed for ${path}:`, error),
+				);
+			}
+			return;
+		}
+
+		const failure = await this.indexHybridFileWithRetry(file);
+		if (failure) {
+			this.noticeHybridIndexFailures([failure]);
 		}
 	}
 

@@ -4,9 +4,9 @@ import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataManager } from "./data-manager";
 import {
-	DocAddOperation,
 	DocDeleteOperation,
-	DocRenameOperation,
+	DocMoveOperation,
+	DocUpsertOperation,
 } from "./doc-operation-buffer";
 
 @singleton()
@@ -36,28 +36,32 @@ export class FileWatcher {
 	// otherwise `this` will be changed when used as callbacks
 	private readonly onCreate = (file: TAbstractFile) => {
 		logger.debug(`created: ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocAddOperation(file));
+		this.dataManager.receiveDocOperation(new DocUpsertOperation(file.path));
 	};
+
 	private readonly onDelete = (file: TAbstractFile) => {
 		logger.debug(`deleted: ${file.path}`);
 		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
 	};
+
 	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
 		logger.debug(`renamed: ${oldPath} => ${file.path}`);
-		this.dataManager.receiveDocOperation(new DocRenameOperation(oldPath, file));
+		this.dataManager.receiveDocOperation(
+			new DocMoveOperation(oldPath, file.path),
+		);
 	};
-	// 有防抖功能
+
+	// Debounce modify events and always re-read the latest file state at flush time.
 	private readonly onModify = (file: TAbstractFile) => {
 		if (!(file instanceof TFile)) return;
-		
+
 		const path = file.path;
 		this.clearModifyTimer(path);
 
 		const timer = setTimeout(() => {
-			// 关键：触发时再次确认文件是否还在
 			const currentFile = this.app.vault.getAbstractFileByPath(path);
 			if (currentFile instanceof TFile) {
-				this.dataManager.receiveDocOperation(new DocAddOperation(currentFile));
+				this.dataManager.receiveDocOperation(new DocUpsertOperation(path));
 			}
 			this.modifyTimers.delete(path);
 		}, 800);
@@ -80,5 +84,4 @@ export class FileWatcher {
 		}
 		this.modifyTimers.clear();
 	}
-
 }

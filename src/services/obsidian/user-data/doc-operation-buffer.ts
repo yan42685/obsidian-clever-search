@@ -1,31 +1,20 @@
-import type { TAbstractFile } from "obsidian";
 import { throttle } from "throttle-debounce";
 import { logger } from "src/utils/logger";
 
 export abstract class DocOperation {
-	readonly type: "add" | "delete" | "rename";
+	readonly type: "upsert" | "delete" | "move";
 	readonly path: string;
 	readonly time: number = performance.now();
 
-	protected constructor(
-		type: "add" | "delete" | "rename",
-		fileOrPath: string | TAbstractFile,
-	) {
+	protected constructor(type: "upsert" | "delete" | "move", path: string) {
 		this.type = type;
-		if (typeof fileOrPath === "string") {
-			this.path = fileOrPath;
-		} else {
-			this.path = fileOrPath.path;
-		}
+		this.path = path;
 	}
 }
 
-export class DocAddOperation extends DocOperation {
-	readonly file: TAbstractFile;
-
-	constructor(file: TAbstractFile) {
-		super("add", file);
-		this.file = file;
+export class DocUpsertOperation extends DocOperation {
+	constructor(path: string) {
+		super("upsert", path);
 	}
 }
 
@@ -35,14 +24,12 @@ export class DocDeleteOperation extends DocOperation {
 	}
 }
 
-export class DocRenameOperation extends DocOperation {
+export class DocMoveOperation extends DocOperation {
 	readonly oldPath: string;
-	readonly file: TAbstractFile;
 
-	constructor(oldPath: string, file: TAbstractFile) {
-		super("rename", file);
+	constructor(oldPath: string, newPath: string) {
+		super("move", newPath);
 		this.oldPath = oldPath;
-		this.file = file;
 	}
 }
 
@@ -56,62 +43,41 @@ type ReducedDeleteOperation = {
 type ReducedUpsertOperation = {
 	type: "upsert";
 	path: string;
-	file: TAbstractFile;
 	time: number;
 	order: number;
 };
 
+type ReducedMoveOperation = {
+	type: "move";
+	oldPath: string;
+	path: string;
+	time: number;
+	order: number;
+	requiresReindex: boolean;
+};
+
 export type ReducedDocOperation =
 	| ReducedDeleteOperation
-	| ReducedUpsertOperation;
+	| ReducedUpsertOperation
+	| ReducedMoveOperation;
 
-function reduceDocOperation(
-	reducedByPath: Map<string, ReducedDocOperation>,
-	operation: DocOperation,
-	allocateOrder: () => number,
-): void {
-	if (operation instanceof DocAddOperation) {
-		reducedByPath.set(operation.path, {
-			type: "upsert",
-			path: operation.path,
-			file: operation.file,
-			time: operation.time,
-			order: allocateOrder(),
-		});
-		return;
-	}
+type PendingDelete = {
+	time: number;
+	order: number;
+};
 
-	if (operation instanceof DocDeleteOperation) {
-		reducedByPath.set(operation.path, {
-			type: "delete",
-			path: operation.path,
-			time: operation.time,
-			order: allocateOrder(),
-		});
-		return;
-	}
-
-	if (operation instanceof DocRenameOperation) {
-		reducedByPath.set(operation.oldPath, {
-			type: "delete",
-			path: operation.oldPath,
-			time: operation.time,
-			order: allocateOrder(),
-		});
-		reducedByPath.set(operation.file.path, {
-			type: "upsert",
-			path: operation.file.path,
-			file: operation.file,
-			time: operation.time,
-			order: allocateOrder(),
-		});
-	}
-}
+type PendingDirty = {
+	time: number;
+	order: number;
+	requiresReindex: boolean;
+};
 
 export function reduceDocOperations(
 	operations: DocOperation[],
 ): ReducedDocOperation[] {
-	const reducedByPath = new Map<string, ReducedDocOperation>();
+	const pendingDeletes = new Map<string, PendingDelete>();
+	const pendingDirty = new Map<string, PendingDirty>();
+	const sourcePathByCurrentPath = new Map<string, string>();
 	let nextOrder = 0;
 	const allocateOrder = () => {
 		nextOrder += 1;
@@ -119,12 +85,91 @@ export function reduceDocOperations(
 	};
 
 	for (const operation of operations) {
-		reduceDocOperation(reducedByPath, operation, allocateOrder);
+		if (operation instanceof DocUpsertOperation) {
+			pendingDeletes.delete(operation.path);
+			pendingDirty.set(operation.path, {
+				time: operation.time,
+				order: allocateOrder(),
+				requiresReindex: true,
+			});
+			continue;
+		}
+
+		if (operation instanceof DocDeleteOperation) {
+			pendingDirty.delete(operation.path);
+			pendingDeletes.set(operation.path, {
+				time: operation.time,
+				order: allocateOrder(),
+			});
+			sourcePathByCurrentPath.delete(operation.path);
+			continue;
+		}
+
+		if (operation instanceof DocMoveOperation) {
+			const sourcePath =
+				sourcePathByCurrentPath.get(operation.oldPath) ?? operation.oldPath;
+			sourcePathByCurrentPath.delete(operation.oldPath);
+			sourcePathByCurrentPath.set(operation.path, sourcePath);
+			pendingDirty.delete(operation.oldPath);
+			pendingDeletes.set(operation.oldPath, {
+				time: operation.time,
+				order: allocateOrder(),
+			});
+			pendingDeletes.delete(operation.path);
+			pendingDirty.set(operation.path, {
+				time: operation.time,
+				order: allocateOrder(),
+				requiresReindex: false,
+			});
+		}
 	}
 
-	return Array.from(reducedByPath.values()).sort(
-		(left, right) => left.order - right.order,
-	);
+	const reduced: ReducedDocOperation[] = [];
+	const moveTargets = new Set<string>();
+	const moveSources = new Set<string>();
+
+	for (const [path, dirty] of pendingDirty) {
+		const sourcePath = sourcePathByCurrentPath.get(path);
+		if (!sourcePath || sourcePath === path) {
+			continue;
+		}
+		moveTargets.add(path);
+		moveSources.add(sourcePath);
+		reduced.push({
+			type: "move",
+			oldPath: sourcePath,
+			path,
+			time: dirty.time,
+			order: dirty.order,
+			requiresReindex: dirty.requiresReindex,
+		});
+	}
+
+	for (const [path, pendingDelete] of pendingDeletes) {
+		if (moveSources.has(path)) {
+			continue;
+		}
+		reduced.push({
+			type: "delete",
+			path,
+			time: pendingDelete.time,
+			order: pendingDelete.order,
+		});
+	}
+
+	for (const [path, dirty] of pendingDirty) {
+		if (moveTargets.has(path)) {
+			continue;
+		}
+		reduced.push({
+			type: "upsert",
+			path,
+			time: dirty.time,
+			order: dirty.order,
+		});
+	}
+
+	return reduced.sort((left, right) => left.order - right.order);
 }
 
 export class DocOperationBuffer {

@@ -153,6 +153,11 @@ export class DataProvider {
 		return (await this.readPlainText(fileOrPath)).split(FileUtil.SPLIT_EOL);
 	}
 
+	getFileByPath(path: string): TFile | null {
+		const file = this.vault.getAbstractFileByPath(path);
+		return file instanceof TFile ? file : null;
+	}
+
 	getHeadingOutline(fileOrPath: TFile | string): HeadingOutlineEntry[] {
 		const file =
 			typeof fileOrPath === "string"

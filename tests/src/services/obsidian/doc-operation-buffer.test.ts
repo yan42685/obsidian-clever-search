@@ -1,21 +1,17 @@
 import {
-	DocAddOperation,
 	DocDeleteOperation,
+	DocMoveOperation,
 	DocOperationBuffer,
-	DocRenameOperation,
+	DocUpsertOperation,
 	reduceDocOperations,
 } from "src/services/obsidian/user-data/doc-operation-buffer";
-
-function createFile(path: string) {
-	return { path } as any;
-}
 
 describe("DocOperationBuffer", () => {
 	test("reduceDocOperations keeps only the final same-path intent", () => {
 		const reduced = reduceDocOperations([
-			new DocAddOperation(createFile("note.md")),
+			new DocUpsertOperation("note.md"),
 			new DocDeleteOperation("note.md"),
-			new DocAddOperation(createFile("note.md")),
+			new DocUpsertOperation("note.md"),
 		]);
 
 		expect(reduced).toEqual([
@@ -32,9 +28,9 @@ describe("DocOperationBuffer", () => {
 			batches.push(operations);
 		}, 99);
 
-		buffer.add(new DocAddOperation(createFile("note.md")));
+		buffer.add(new DocUpsertOperation("note.md"));
 		buffer.add(new DocDeleteOperation("note.md"));
-		buffer.add(new DocAddOperation(createFile("note.md")));
+		buffer.add(new DocUpsertOperation("note.md"));
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
@@ -46,25 +42,23 @@ describe("DocOperationBuffer", () => {
 		]);
 	});
 
-	test("reduces rename followed by modify on new path to delete old and upsert new", async () => {
+	test("reduces rename followed by modify on new path to move old content and require reindex", async () => {
 		const batches: any[] = [];
 		const buffer = new DocOperationBuffer(async (operations) => {
 			batches.push(operations);
 		}, 99);
 
-		buffer.add(new DocRenameOperation("old.md", createFile("new.md")));
-		buffer.add(new DocAddOperation(createFile("new.md")));
+		buffer.add(new DocMoveOperation("old.md", "new.md"));
+		buffer.add(new DocUpsertOperation("new.md"));
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
 		expect(batches[0]).toEqual([
 			expect.objectContaining({
-				type: "delete",
-				path: "old.md",
-			}),
-			expect.objectContaining({
-				type: "upsert",
+				type: "move",
+				oldPath: "old.md",
 				path: "new.md",
+				requiresReindex: true,
 			}),
 		]);
 	});
@@ -75,23 +69,44 @@ describe("DocOperationBuffer", () => {
 			batches.push(operations);
 		}, 99);
 
-		buffer.add(new DocRenameOperation("a.md", createFile("b.md")));
-		buffer.add(new DocRenameOperation("b.md", createFile("c.md")));
+		buffer.add(new DocMoveOperation("a.md", "b.md"));
+		buffer.add(new DocMoveOperation("b.md", "c.md"));
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
 		expect(batches[0]).toEqual([
 			expect.objectContaining({
 				type: "delete",
-				path: "a.md",
+				path: "b.md",
 			}),
 			expect.objectContaining({
-				type: "delete",
+				type: "move",
+				oldPath: "a.md",
+				path: "c.md",
+			}),
+		]);
+	});
+
+	test("keeps move intent before recreating the old path", async () => {
+		const batches: any[] = [];
+		const buffer = new DocOperationBuffer(async (operations) => {
+			batches.push(operations);
+		}, 99);
+
+		buffer.add(new DocMoveOperation("a.md", "b.md"));
+		buffer.add(new DocUpsertOperation("a.md"));
+		await buffer.forceFlush();
+
+		expect(batches).toHaveLength(1);
+		expect(batches[0]).toEqual([
+			expect.objectContaining({
+				type: "move",
+				oldPath: "a.md",
 				path: "b.md",
 			}),
 			expect.objectContaining({
 				type: "upsert",
-				path: "c.md",
+				path: "a.md",
 			}),
 		]);
 	});

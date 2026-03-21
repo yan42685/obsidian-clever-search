@@ -42,7 +42,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		apiDomain: '',
 		apiKey: '',
 		weeklyTokenLimit: 3000000,
-		maxResultCount: 5,
+		maxResultCount: 10,
 		indexConcurrency: 3,
 		vectorCompression: "int8",
 		fileRankStrategy: "bestPlusSupport",

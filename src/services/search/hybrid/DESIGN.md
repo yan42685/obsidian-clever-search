@@ -418,6 +418,53 @@ Practical rule:
 - rename should be modeled as old-path cleanup plus new-path indexing, with a deterministic final state
 - per-file write serialization is acceptable because it is cheaper than reasoning about arbitrary interleavings later
 
+### Event Reduction Model For Runtime Updates
+
+The runtime file-event model should now bias toward current vault truth rather than trying to preserve detailed event algebra.
+
+Primary goal:
+
+- stop writing special reduction rules for `rename + upsert`, repeated `upsert`, or other event-sequence combinations
+- let final behavior be decided by the current vault state observed at flush time
+
+Practical rule:
+
+- `FileWatcher` should emit raw path-level change intent, not long-lived file snapshots
+- the buffer should mainly track dirty paths and stale paths within a time window
+- flush should re-read the current vault state and only then expand work into executable actions
+- executable actions should stay minimal: `delete(path)` and `upsert(latest file state)`
+- runtime correctness is more important than preserving the exact intermediate history of transient file events
+
+Why:
+
+- in this plugin, the vault is a strong source of truth
+- modeling path invalidation is much cheaper and safer than modeling every event composition precisely
+- this keeps reducer complexity bounded even when rename and modify events interleave
+
+### Token-Cost Control During Incremental Hybrid Updates
+
+Hybrid correctness is not enough by itself; incremental updates must also keep embedding-token cost acceptable.
+
+Current decision:
+
+- do not introduce `contentHash` or `contextSignature` as part of the near-term mainline
+- reason: truly no-op modify events appear infrequent enough that the extra metadata and branching are not currently worth the added complexity
+
+Practical rule:
+
+- the first low-risk win should be a rename fast path
+- if a rename only changes folder/path while preserving the same basename, hybrid should update references without re-embedding
+- rename-specific state such as `contextStale` is not part of the near-term plan
+- file rename is considered much lower frequency than content modification, so the system should prefer a simple minimum full-reindex interval over adding extra rename-only state machinery
+- token-saving work should target cases with high real cost first, especially large files and repeated edits
+
+Near-term priority order:
+
+1. stabilize the dirty-path flush model
+2. add low-cost rename handling
+3. add a minimum interval for full-file reindex so repeated updates do not immediately force another full embedding pass
+4. keep large-file token cost under control through chunk-level incremental embedding reuse
+
 ### Priority 2: Initialization And Rebuild Robustness
 
 This phase should harden:
@@ -579,3 +626,8 @@ Possible next steps:
 - reconsider positional encoding only if it improves `hits@25` or cutoff behavior
 - revisit storage compression only after stability and consistency goals are stable
 - treat larger lexical-stack replacement as a separate architecture phase, not a quick optimization pass
+
+Priority follow-up object:
+
+- chunk-level incremental embedding reuse should be treated as the main future lever for reducing hybrid token cost on large, frequently edited files
+- compared with rename-specific stale-context machinery, this is expected to deliver meaningfully higher token savings for roughly the same or better product value

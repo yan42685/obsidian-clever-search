@@ -44,9 +44,9 @@ const DENSE_RECALL_LIMIT = 30;
 const SEARCH_EF = 80;
 const HYBRID_BM25_USE_PROXIMITY = false;
 const HYBRID_BM25_ENABLE_QUERY_EXPANSION = true;
-const DEFAULT_MAX_FILE_RESULTS = 5;
+const DEFAULT_MAX_FILE_RESULTS = 10;
 const MIN_FILE_RESULTS = 1;
-const MAX_FILE_RESULTS = 30;
+const MAX_FILE_RESULTS = 50;
 const INDEX_CHUNK_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 
@@ -167,6 +167,69 @@ export class HybridEngine {
 	async deleteFile(filePath: string, option: HybridWriteOption = {}): Promise<void> {
 		await this.withFileWriteLock(filePath, async () => {
 			await this.deleteStoredFileData(filePath, option);
+		});
+	}
+
+	async moveFile(
+		oldPath: string,
+		newPath: string,
+		updateTime = Date.now(),
+	): Promise<boolean> {
+		if (oldPath === newPath) {
+			return false;
+		}
+
+		return await this.withFileWriteLocks([oldPath, newPath], async () => {
+			const chunkRows = await this.db.db.hybridChunks
+				.where("filePath")
+				.equals(oldPath)
+				.toArray();
+			const vectorRow = await this.db.db.hybridChunkVectors.get(oldPath);
+			const docRef = await this.db.db.hybridDocRefs.get(oldPath);
+			const hasStoredData =
+				chunkRows.length > 0 || vectorRow !== undefined || docRef !== undefined;
+			if (!hasStoredData) {
+				return false;
+			}
+
+			const hasTargetData =
+				(await this.db.db.hybridChunks.where("filePath").equals(newPath).count()) > 0 ||
+				(await this.db.db.hybridChunkVectors.get(newPath)) !== undefined ||
+				(await this.db.db.hybridDocRefs.get(newPath)) !== undefined;
+			if (hasTargetData) {
+				await this.deleteStoredFileData(newPath, {
+					persistIndices: false,
+				});
+			}
+
+			if (chunkRows.length > 0) {
+				await this.db.db.hybridChunks.bulkPut(
+					chunkRows.map((row) => ({
+						...row,
+						filePath: newPath,
+					})),
+				);
+			}
+
+			if (vectorRow) {
+				await this.db.db.hybridChunkVectors.put({
+					...vectorRow,
+					filePath: newPath,
+				});
+				await this.db.db.hybridChunkVectors.delete(oldPath);
+			}
+
+			if (docRef) {
+				// Path-only move keeps the same semantic payload and generation.
+				await this.putHybridDocRef({
+					...docRef,
+					path: newPath,
+					updateTime,
+				});
+				await this.db.db.hybridDocRefs.delete(oldPath);
+			}
+
+			return true;
 		});
 	}
 
@@ -541,6 +604,24 @@ export class HybridEngine {
 				this.fileWriteLocks.delete(filePath);
 			}
 		}
+	}
+
+	private async withFileWriteLocks<T>(
+		filePaths: string[],
+		work: () => Promise<T>,
+	): Promise<T> {
+		const orderedPaths = Array.from(new Set(filePaths)).sort((left, right) =>
+			left.localeCompare(right),
+		);
+
+		const run = async (index: number): Promise<T> => {
+			if (index >= orderedPaths.length) {
+				return await work();
+			}
+			return await this.withFileWriteLock(orderedPaths[index], async () => await run(index + 1));
+		};
+
+		return await run(0);
 	}
 
 	private async loadDedupedSmallChunkCandidates(rankings: RankedResult[][]): Promise<SmallChunkCandidate[]> {
