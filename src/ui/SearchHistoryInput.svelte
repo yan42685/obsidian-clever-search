@@ -53,6 +53,16 @@
 		}
 	}
 
+	function usePlaintextOnlyContenteditable(node: HTMLDivElement) {
+		node.setAttribute("contenteditable", "plaintext-only");
+
+		return {
+			destroy() {
+				node.removeAttribute("contenteditable");
+			},
+		};
+	}
+
 	function updateSuggestionsState() {
 		const prevSelectedQuery = getSelectedSuggestion()?.queryText ?? null;
 		clearAutoSuppressionsIfNeeded();
@@ -511,8 +521,9 @@
 		<div
 			id="cs-search-input"
 			bind:this={searchInputEl}
+			use:usePlaintextOnlyContenteditable
 			class="history-editable"
-			contenteditable="plaintext-only"
+			contenteditable={true}
 			role="textbox"
 			aria-autocomplete="both"
 			aria-multiline="false"

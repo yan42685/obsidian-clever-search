@@ -119,6 +119,7 @@ export default {
 	"hybridModal.noData": "No data yet.",
 	"hybridModal.file": "File",
 	"hybridModal.tokens": "Tokens",
+	"hybridModal.tokenStats.pinned": "Pinned",
 
 	"Excluded files": "Excluded files",
 	Manage: "Manage",

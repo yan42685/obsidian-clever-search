@@ -231,6 +231,10 @@
 		return score.toFixed(3);
 	}
 
+	function getFileItemScore(item: FileItem): number | undefined {
+		return item.subItems[0]?.score;
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		logger.trace("mounted element has been destroyed.");
@@ -279,6 +283,7 @@
 			<ul>
 				{#each searchResult.items as item, index}
 					<button
+						class:file-item-button={item instanceof FileItem}
 						class:selected={index === currItemIndex}
 						bind:this={item.element}
 						on:click={() => {
@@ -301,6 +306,11 @@
 								>{@html viewHelper.purifyHTML(item.line.text)}</span
 							>
 						{:else if item instanceof FileItem}
+							{#if getFileItemScore(item) !== undefined}
+								<span class="file-item-score"
+									>{formatScore(getFileItemScore(item))}</span
+								>
+							{/if}
 							<span class="file-item">
 								<span class="filename"
 									>{@html item.basename +
@@ -425,6 +435,10 @@
 		cursor: pointer;
 	}
 
+	.result-items ul button.file-item-button {
+		position: relative;
+	}
+
 	.result-items ul button:hover,
 	.result-items ul button.selected {
 		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
@@ -433,20 +447,34 @@
 	.result-items ul button .line-item,
 	.result-items ul button .file-item {
 		text-wrap: wrap;
-		display: -webkit-box;
-		-webkit-line-clamp: 3;
-		-webkit-box-orient: vertical;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
+	.result-items ul button .line-item {
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+	}
+
 	.result-items ul button .file-item {
-		-webkit-line-clamp: 6;
+		display: block;
+		padding-right: 4.6em;
 	}
 
 	.result-items ul button .file-item span.filename {
 		margin-top: -0.2em;
 		display: block;
+	}
+
+	.result-items ul button span.file-item-score {
+		position: absolute;
+		top: 0.62em;
+		right: 0.85em;
+		font-family: var(--font-monospace);
+		font-size: 0.8em;
+		line-height: 1.2;
+		color: var(--cs-secondary-font-color, #a29c9c);
 	}
 
 	.result-items ul button .file-item span.file-folder-path {

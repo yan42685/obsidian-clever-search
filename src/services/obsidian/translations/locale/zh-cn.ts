@@ -68,6 +68,7 @@ export default {
 	"hybridModal.noData": "暂无数据",
 	"hybridModal.file": "文件",
 	"hybridModal.tokens": "Tokens",
+	"hybridModal.tokenStats.pinned": "置顶",
 	"hybridNotice.indexFallbackToBm25":
 		"语义索引当前不可用，已降级为 BM25 索引。",
 	"hybridNotice.searchFallbackToBm25":

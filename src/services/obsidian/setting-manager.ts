@@ -22,6 +22,7 @@ import {
 	getTopTokenFiles,
 	getTotalTokens,
 } from "src/services/search/hybrid/embedder";
+import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
@@ -768,6 +769,7 @@ class HybridSearchModal extends Modal {
 			parent.createEl("p", { text: t("hybridModal.noData") });
 			return;
 		}
+		const rankedItems = this.sortTokenStatItems(items);
 		const table = parent.createEl("table");
 		table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.85em;";
 		const header = table.createEl("tr");
@@ -775,13 +777,34 @@ class HybridSearchModal extends Modal {
 			const th = header.createEl("th", { text: h });
 			th.style.cssText = "text-align:left;padding:2px 6px;border-bottom:1px solid var(--background-modifier-border);";
 		});
-		items.forEach(({ filePath, tokens }, i) => {
+		rankedItems.forEach(({ filePath, tokens }, i) => {
 			const tr = table.createEl("tr");
-			[String(i + 1), filePath, this.formatTokenCompact(tokens)].forEach((cell) => {
+			const displayIndex = this.isPinnedTokenStat(filePath) ? "0" : String(i);
+			const displayPath = this.isPinnedTokenStat(filePath)
+				? `${filePath} (${t("hybridModal.tokenStats.pinned")})`
+				: filePath;
+			[displayIndex, displayPath, this.formatTokenCompact(tokens)].forEach((cell) => {
 				const td = tr.createEl("td", { text: cell });
 				td.style.cssText = "padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:30vw;";
 			});
 		});
+	}
+
+	private sortTokenStatItems(
+		items: Array<{ filePath: string; tokens: number }>,
+	): Array<{ filePath: string; tokens: number }> {
+		return [...items].sort((left, right) => {
+			const leftPinned = this.isPinnedTokenStat(left.filePath);
+			const rightPinned = this.isPinnedTokenStat(right.filePath);
+			if (leftPinned !== rightPinned) {
+				return leftPinned ? -1 : 1;
+			}
+			return right.tokens - left.tokens;
+		});
+	}
+
+	private isPinnedTokenStat(filePath: string): boolean {
+		return filePath === SEARCH_RERANK_TOKEN_KEY;
 	}
 
 	private renderTokenTabs(
