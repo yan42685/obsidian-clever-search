@@ -378,19 +378,47 @@ These dev storage stats are local-only:
 
 The next implementation priority is no longer pure retrieval tuning.
 
-The order is:
+The primary order is:
 
-1. initialization and rebuild robustness
-2. index consistency under file add/delete/modify
-3. hybrid BM25 storage compression
+1. file-event consistency closure
+2. initialization and rebuild robustness
+3. state and fallback observability
+4. local runtime rebuild benchmarking
+5. retrieval-quality tuning
+6. hybrid BM25 storage compression
+7. larger lexical-stack replacement work
 
 Reason:
 
 - reranker already reduces the value of over-optimizing first-stage internal ordering
 - hybrid quality is now good enough that engineering stability has higher product value
 - a system that occasionally rate-limits, half-writes, or bloats IndexedDB is worse than a slightly less optimal recall curve
+- mixed-generation storage and unclear fallback states are currently a higher product risk than another small benchmark gain
 
-### Priority 1: Initialization And Rebuild Robustness
+### Priority 1: File-Event Consistency Closure
+
+This phase should ensure runtime file operations never drift into mixed-generation state.
+
+The main targets are:
+
+- no orphan `hybridChunks`
+- no orphan `hybridChunkVectors`
+- no stale `hybridDocRefs`
+- no partial file replacement that leaves old and new chunks mixed together
+- no rename path where the old path survives after the new path is indexed
+- no modify burst where an older task overwrites a newer file version
+- no long-lived `pending` file state after a crash or interrupted write
+
+Practical rule:
+
+- file replacement should be treated as one logical unit
+- startup should detect and repair inconsistent hybrid file state
+- incremental updates should prefer idempotent cleanup over assuming the previous write finished cleanly
+- file events should be merged by path before indexing work is expanded
+- rename should be modeled as old-path cleanup plus new-path indexing, with a deterministic final state
+- per-file write serialization is acceptable because it is cheaper than reasoning about arbitrary interleavings later
+
+### Priority 2: Initialization And Rebuild Robustness
 
 This phase should harden:
 
@@ -413,76 +441,141 @@ Practical rule:
 - hydrate vector shards in small startup batches instead of loading all shard blobs at once
 - surface rebuild progress using processed source-file bytes, not estimated index bytes
 - run startup self-healing before incremental diffing so orphan rows do not pollute reindex decisions
+- when hybrid is enabled, showing session token usage during initialization/rebuild is acceptable as long as it is clearly session-scoped rather than a weekly total
 
-### Priority 2: Index Consistency
+### Priority 3: State And Fallback Observability
 
-This phase should ensure hybrid storage never drifts into a mixed-generation state.
+This phase should make hybrid health visible enough that debugging does not require reading raw logs first.
 
 The main targets are:
 
-- no orphan `hybridChunks`
-- no orphan `hybridChunkVectors`
-- no stale `hybridDocRefs`
-- no partial file replacement that leaves old and new chunks mixed together
-- no crash window where persisted rows and in-memory BM25/HNSW state disagree for long
+- explicit file states such as `pending`, `ready`, `bm25_only`, and `failed`
+- visible fallback reason categories such as missing key, weekly limit, timeout, `429`, network failure, or provider `5xx`
+- rebuild summaries that report how many files ended in full hybrid versus BM25-only fallback
+- developer-facing visibility into recent abnormal files without exposing noisy low-level internals to ordinary users
 
 Practical rule:
 
-- file replacement should be treated as one logical unit
-- startup should detect and repair inconsistent hybrid file state
-- incremental updates should prefer idempotent cleanup over assuming the previous write finished cleanly
+- prefer compact aggregated summaries over noisy per-file notices
+- keep detailed state visibility in developer mode first
+- do not blur together healthy BM25-only fallback and abnormal half-written state
 
-### Priority 3: Hybrid BM25 Size
+### Priority 4: Local Runtime Rebuild Benchmarking
 
-Only after phases 1 and 2 are in place should we return to storage compression.
+This phase should create a stable zero-token benchmark for the real indexing pipeline.
+
+The main targets are:
+
+- measure actual startup and rebuild flow instead of only offline retrieval quality
+- compare commits on the same machine without needing provider access
+- isolate local pipeline cost from embedding provider latency by using fixed-cost or mocked embedding work
+- report per-stage timing, not only total wall-clock time
+
+Practical rule:
+
+- benchmark the real runtime path: chunking, context building, local quantization, BM25/HNSW updates, persistence, and hydration
+- treat provider latency as a controlled constant when the goal is engineering regression detection
+- keep the benchmark lightweight enough for routine use
+
+### Priority 5: Retrieval-Quality Tuning
+
+Retrieval tuning remains important, but it is now subordinate to the reliability roadmap above.
+
+The retrieval planning phase should continue treating hybrid as a reranker-fed candidate generator.
+
+The current optimization order is:
+
+1. `hybrid-hits@25`
+2. `hnsw-only gain@25`
+3. candidate noise control
+4. adequate `bm25-hits@25` for direct hybrid queries
+
+Practical rule:
+
+- optimize candidate admission before candidate ordering
+- prefer improvements in dense recall and candidate complementarity over more complex first-stage ranking logic
+- only optimize internal candidate ordering when it changes top-25 admission, fallback quality, or noise
+- keep hybrid-specific query normalization isolated from `lexicalengine`
+
+### Priority 6: Hybrid BM25 Size
+
+Only after priorities 1 through 5 are stable should we return to storage compression.
 
 Reason:
 
 - current hybrid BM25 size is a cost issue, not the top reliability risk
 - storage reductions are easier to evaluate once rebuild and consistency behavior are trustworthy
 - size work should not be allowed to reintroduce rebuild fragility
+- if reranker-fed candidate quality is already acceptable, aggressive compression should not outrank stability work
 
-## Planning Direction
+### Priority 7: Lexical Stack Replacement
 
-Retrieval tuning remains important, but it is now subordinate to the reliability roadmap above.
+Replacing more of the lexical stack remains a strategic option, not the current execution mainline.
 
-The retrieval planning phase should continue treating hybrid as a reranker-fed candidate generator.
+The eventual target may be:
 
-### Phase 1
+- reusing custom lexical/BM25 infrastructure more broadly
+- reducing duplicate index storage
+- preserving field-aware, prefix, and fuzzy lexical behavior without depending fully on MiniSearch
 
-- redefine benchmark priorities around `hits@25`
-- add explicit reporting for:
-  - `bm25-hits@25`
-  - `hnsw-hits@25`
-  - `hybrid-hits@25`
-  - `hnsw-only gain@25`
-  - `bm25-only anchor gain@25`
-  - candidate noise rate
-- current runtime default uses a fixed plain candidate budget: `BM25 20 + HNSW 30`
-- current offline results do not justify switching runtime to `25/25`, and they also do not justify paying extra query-embedding cost for dense query variants
+Practical rule:
 
-### Phase 2
+- do not advance this work unless recall quality, feature parity, and operational stability are all acceptable
+- treat this as a deliberate architecture program, not a side effect of hybrid tuning
 
-- study query-aware recall budgets instead of assuming one global BM25/HNSW ratio
-- treat these query families separately:
-  - keyword/entity/path-like queries
-  - semantic rewrite queries
-  - mixed queries
+## Next-Phase Program
 
-### Phase 3
+The next development phase should be read as four parallel tracks with different urgency:
 
-- optimize HNSW first as the primary semantic gain source
-- optimize hybrid BM25 second as a stable lexical anchor source
-- only optimize internal candidate ordering when it changes top-25 admission, fallback quality, or noise
+- stability track: priorities 1, 2, and 3
+- measurement track: priority 4
+- retrieval track: priority 5
+- storage and architecture track: priorities 6 and 7
+
+Practical rule:
+
+- stability work is the default mainline
+- measurement work exists to keep stability and retrieval work honest
+- retrieval work should continue, but not at the cost of reopening consistency or rebuild risks
+- storage and lexical replacement work should remain gated behind evidence, not intuition
+
+### Stability Track
+
+- close file-event consistency gaps under create, modify, rename, and delete
+- keep hybrid file state explicit and recoverable
+- harden large-vault rebuild behavior and quota awareness
+- make fallback states observable enough that real-vault failures can be diagnosed quickly
+
+### Measurement Track
+
+- maintain a zero-token local runtime benchmark for rebuild and startup
+- maintain offline retrieval guardrails for `hits@25`, `hnsw-only gain@25`, and candidate noise
+- compare versions under the same fixed embedding-cost assumption when the goal is engineering regression detection
+
+### Retrieval Track
+
+- keep current runtime candidate budget simple unless new evidence clearly beats it
+- improve HNSW as the main semantic value source
+- keep hybrid BM25 good enough for direct hybrid queries and fallback behavior
+- explore query-aware budgets only after stability work lands and only if holdout-style evidence remains positive
+
+### Storage And Architecture Track
+
+- revisit hybrid BM25 compression only after runtime correctness is stable
+- keep the possibility of replacing more of the lexical stack open, but do not treat it as near-term default work
+- require feature parity, acceptable recall, and acceptable runtime cost before reducing MiniSearch reliance further
 
 ## Future Improvements
 
 Possible next steps:
 
+- finish file-event consistency closure under rename and repeated modify bursts
 - complete rebuild preflight, throttling, and quota guardrails
-- add hybrid startup self-healing for inconsistent file state
+- make hybrid state and fallback reasons visible in developer mode summaries
+- add a real runtime local rebuild benchmark with fixed-cost embedding mocks
 - benchmark query-aware BM25/HNSW budget strategies only after stability work lands
 - improve HNSW recall on lexical-failure-like queries
 - add hybrid-only normalization that is strictly isolated from `lexicalengine`
 - reconsider positional encoding only if it improves `hits@25` or cutoff behavior
 - revisit storage compression only after stability and consistency goals are stable
+- treat larger lexical-stack replacement as a separate architecture phase, not a quick optimization pass
