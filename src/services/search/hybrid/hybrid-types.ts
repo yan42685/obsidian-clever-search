@@ -42,6 +42,7 @@ export type ChunkVectorShard = {
 	precision: VectorPrecision;
 	dim: number;
 	chunkCount: number;
+	generation?: number;
 	chunkIds: Uint32Array;
 	vectorData: Int8Array | Uint16Array;
 	scaleData?: Float32Array;

@@ -23,6 +23,7 @@ export type ChunkVectorShardRow = {
 	precision: string;
 	dim: number;
 	chunkCount: number;
+	generation?: number;
 	chunkIds: Blob;
 	vectorData: Blob;
 	scaleData?: Blob;
@@ -58,9 +59,17 @@ export type Bm25BlobBreakdown = {
 	}>;
 };
 
+export type HybridDocState = "pending" | "ready" | "bm25_only" | "failed";
+
 export type HybridDocRef = {
 	path: string;
 	updateTime: number;
+	state?: HybridDocState;
+	generation?: number;
+	chunkCount?: number;
+	vectorPrecision?: VectorPrecision | null;
+	indexedAt?: number;
+	lastErrorKind?: string | null;
 };
 
 export type ChunkVectorRecord = {
@@ -120,6 +129,7 @@ export class ChunkVectorShardBuilder {
 				precision: this.precision,
 				dim: this.dim,
 				chunkCount: this.chunkIds.length,
+				generation: undefined,
 				chunkIds: chunkIdArray,
 				vectorData: flat,
 				scaleData: scales,
@@ -135,6 +145,7 @@ export class ChunkVectorShardBuilder {
 			precision: this.precision,
 			dim: this.dim,
 			chunkCount: this.chunkIds.length,
+			generation: undefined,
 			chunkIds: chunkIdArray,
 			vectorData: flat,
 		};
@@ -794,6 +805,7 @@ export function chunkVectorShardToRow(shard: ChunkVectorShard): ChunkVectorShard
 		precision: shard.precision,
 		dim: shard.dim,
 		chunkCount: shard.chunkCount,
+		generation: shard.generation,
 		chunkIds: uint32ToBlob(shard.chunkIds),
 		vectorData:
 			shard.precision === 'int8'
@@ -810,6 +822,7 @@ export async function rowToChunkVectorShard(row: ChunkVectorShardRow): Promise<C
 		precision,
 		dim: row.dim,
 		chunkCount: row.chunkCount,
+		generation: row.generation,
 		chunkIds: await blobToUint32(row.chunkIds),
 		vectorData:
 			precision === 'int8'
@@ -851,6 +864,7 @@ export function buildChunkVectorShard(
 			precision,
 			dim,
 			chunkCount: chunkIds.length,
+			generation: undefined,
 			chunkIds: chunkIdArray,
 			vectorData: flat,
 			scaleData: scales,
@@ -870,6 +884,7 @@ export function buildChunkVectorShard(
 		precision,
 		dim,
 		chunkCount: chunkIds.length,
+		generation: undefined,
 		chunkIds: chunkIdArray,
 		vectorData: flat,
 	};

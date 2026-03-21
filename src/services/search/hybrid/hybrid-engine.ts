@@ -15,6 +15,7 @@ import {
 	ChunkVectorShardBuilder,
 	bm25ToBlob,
 	chunkVectorShardToRow,
+	type HybridDocRef,
 	type ChunkRow,
 	type ChunkVectorShardRow,
 	chunkToRow,
@@ -51,6 +52,7 @@ const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 
 type HybridWriteOption = {
 	persistIndices?: boolean;
+	deleteDocRef?: boolean;
 };
 
 type SmallChunkCandidate = {
@@ -75,6 +77,7 @@ export class HybridEngine {
 	private _canSearch = false;
 	private lastIndexingFallbackNoticeKey: LocaleKey | null = null;
 	private lastSearchFallbackNoticeKey: LocaleKey | null = null;
+	private readonly fileWriteLocks = new Map<string, Promise<void>>();
 
 	private get precision(): VectorPrecision {
 		return this.setting.hybrid.vectorCompression === 'float16' ? 'float16' : 'int8';
@@ -162,12 +165,23 @@ export class HybridEngine {
 	}
 
 	async deleteFile(filePath: string, option: HybridWriteOption = {}): Promise<void> {
+		await this.withFileWriteLock(filePath, async () => {
+			await this.deleteStoredFileData(filePath, option);
+		});
+	}
+
+	private async deleteStoredFileData(
+		filePath: string,
+		option: HybridWriteOption = {},
+	): Promise<void> {
 		const rows = await this.db.db.hybridChunks.where('filePath').equals(filePath).toArray();
 		const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
 		await this.db.db.hybridChunks.bulkDelete(ids);
 		await this.db.db.hybridChunkVectors.delete(filePath);
-		await this.db.db.hybridDocRefs.delete(filePath);
+		if (option.deleteDocRef ?? true) {
+			await this.db.db.hybridDocRefs.delete(filePath);
+		}
 
 		for (const id of ids) {
 			this.bm25.removeDocument(id);
@@ -256,90 +270,148 @@ export class HybridEngine {
 		strict: boolean,
 		headingOutline: HeadingOutlineEntry[],
 	): Promise<void> {
-		if (!this.shouldIndexPath(filePath)) {
-			await this.deleteFile(filePath, option);
-			return;
-		}
-
-		await this.deleteFile(filePath, option);
-
-		const { chunks: rawChunks } = await profileHybridStage(
-			'index.chunk_file',
-			async () => chunkFile(filePath, plainText),
-		);
-		if (rawChunks.length === 0) return;
-		const buildEmbedInput = await profileHybridStage(
-			'index.build_embed_context',
-			async () =>
-				createChunkEmbeddingInputBuilder(
-					filePath,
-					plainText,
-					headingOutline,
-				),
-		);
-		recordHybridProfileMetric('index.chunk_count', rawChunks.length);
-
-		try {
-			const shardBuilder = new ChunkVectorShardBuilder(this.precision, EMBED_DIM);
-			for (
-				let chunkStart = 0;
-				chunkStart < rawChunks.length;
-				chunkStart += INDEX_CHUNK_BATCH_SIZE
-			) {
-				const batchChunks = rawChunks.slice(
-					chunkStart,
-					chunkStart + INDEX_CHUNK_BATCH_SIZE,
-				);
-				const batchInputs = await profileHybridStage(
-					'index.build_batch_embed_inputs',
-					async () => batchChunks.map((chunk) => buildEmbedInput(chunk)),
-				);
-				const batchVectors = await profileHybridStage(
-					'index.embed_batch',
-					async () =>
-						await this.embedder.embedBatch(
-							batchInputs,
-							this.precision,
-							filePath,
-						),
-				);
-				const batchChunkIds = await profileHybridStage(
-					'index.persist_chunks',
-					async () =>
-						await this.persistChunks(
-							filePath,
-							batchChunks,
-							strict,
-							chunkStart,
-						),
-				);
-				shardBuilder.append(batchChunkIds, batchVectors);
-				await profileHybridStage('index.update_memory_indices', async () => {
-					for (let i = 0; i < batchChunkIds.length; i++) {
-						const chunkId = batchChunkIds[i];
-						this.bm25.addDocument(chunkId, batchChunks[i].text);
-						this.hnswSmall.insert(chunkId, batchVectors[i]);
-					}
-				});
+		await this.withFileWriteLock(filePath, async () => {
+			if (!this.shouldIndexPath(filePath)) {
+				await this.deleteStoredFileData(filePath, option);
+				return;
 			}
-			await profileHybridStage('index.persist_vector_shard', async () => {
-				await this.persistVectorShard(shardBuilder.build(filePath));
-			});
-			this._canSearch = true;
-			this.lastIndexingFallbackNoticeKey = null;
-		} catch (error) {
-			await this.deleteFile(filePath, { persistIndices: false });
-			logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
-			this._canSearch = false;
-			this.lastIndexingFallbackNoticeKey = 'hybridNotice.indexFallbackToBm25';
-			await this.indexBm25Only(filePath, rawChunks, updateTime, option);
-			return;
-		}
 
-		if (option.persistIndices ?? true) {
-			await this.persistIndices();
-		}
-		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
+			const generation = Date.now();
+			await this.putHybridDocRef({
+				path: filePath,
+				updateTime,
+				state: 'pending',
+				generation,
+				chunkCount: 0,
+				vectorPrecision: null,
+				indexedAt: generation,
+				lastErrorKind: null,
+			});
+			await this.deleteStoredFileData(filePath, { ...option, deleteDocRef: false });
+
+			const { chunks: rawChunks } = await profileHybridStage(
+				'index.chunk_file',
+				async () => chunkFile(filePath, plainText),
+			);
+			if (rawChunks.length === 0) {
+				await this.db.db.hybridDocRefs.delete(filePath);
+				if (option.persistIndices ?? true) {
+					await this.persistIndices();
+				}
+				return;
+			}
+			const buildEmbedInput = await profileHybridStage(
+				'index.build_embed_context',
+				async () =>
+					createChunkEmbeddingInputBuilder(
+						filePath,
+						plainText,
+						headingOutline,
+					),
+			);
+			recordHybridProfileMetric('index.chunk_count', rawChunks.length);
+
+			try {
+				const shardBuilder = new ChunkVectorShardBuilder(this.precision, EMBED_DIM);
+				for (
+					let chunkStart = 0;
+					chunkStart < rawChunks.length;
+					chunkStart += INDEX_CHUNK_BATCH_SIZE
+				) {
+					const batchChunks = rawChunks.slice(
+						chunkStart,
+						chunkStart + INDEX_CHUNK_BATCH_SIZE,
+					);
+					const batchInputs = await profileHybridStage(
+						'index.build_batch_embed_inputs',
+						async () => batchChunks.map((chunk) => buildEmbedInput(chunk)),
+					);
+					const batchVectors = await profileHybridStage(
+						'index.embed_batch',
+						async () =>
+							await this.embedder.embedBatch(
+								batchInputs,
+								this.precision,
+								filePath,
+							),
+					);
+					const batchChunkIds = await profileHybridStage(
+						'index.persist_chunks',
+						async () =>
+							await this.persistChunks(
+								filePath,
+								batchChunks,
+								strict,
+								chunkStart,
+							),
+					);
+					shardBuilder.append(batchChunkIds, batchVectors);
+					await profileHybridStage('index.update_memory_indices', async () => {
+						for (let i = 0; i < batchChunkIds.length; i++) {
+							const chunkId = batchChunkIds[i];
+							this.bm25.addDocument(chunkId, batchChunks[i].text);
+							this.hnswSmall.insert(chunkId, batchVectors[i]);
+						}
+					});
+				}
+				await profileHybridStage('index.persist_vector_shard', async () => {
+					await this.persistVectorShard({
+						...shardBuilder.build(filePath),
+						generation,
+					});
+				});
+				this._canSearch = true;
+				this.lastIndexingFallbackNoticeKey = null;
+			} catch (error) {
+				await this.deleteStoredFileData(filePath, {
+					persistIndices: false,
+					deleteDocRef: false,
+				});
+				logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
+				this._canSearch = false;
+				this.lastIndexingFallbackNoticeKey = 'hybridNotice.indexFallbackToBm25';
+				try {
+					await this.indexBm25Only(filePath, rawChunks, updateTime, option, generation);
+					await this.putHybridDocRef({
+						path: filePath,
+						updateTime,
+						state: 'bm25_only',
+						generation,
+						chunkCount: rawChunks.length,
+						vectorPrecision: null,
+						indexedAt: Date.now(),
+						lastErrorKind: this.classifyIndexErrorKind(error),
+					});
+					return;
+				} catch (fallbackError) {
+					await this.putHybridDocRef({
+						path: filePath,
+						updateTime,
+						state: 'failed',
+						generation,
+						chunkCount: 0,
+						vectorPrecision: null,
+						indexedAt: Date.now(),
+						lastErrorKind: this.classifyIndexErrorKind(fallbackError),
+					});
+					throw fallbackError;
+				}
+			}
+
+			if (option.persistIndices ?? true) {
+				await this.persistIndices();
+			}
+			await this.putHybridDocRef({
+				path: filePath,
+				updateTime,
+				state: 'ready',
+				generation,
+				chunkCount: rawChunks.length,
+				vectorPrecision: this.precision,
+				indexedAt: Date.now(),
+				lastErrorKind: null,
+			});
+		});
 	}
 
 	private async persistChunks(
@@ -383,6 +455,7 @@ export class HybridEngine {
 		rawChunks: RawChunk[],
 		updateTime: number,
 		option: HybridWriteOption,
+		generation?: number,
 	): Promise<void> {
 		for (
 			let chunkStart = 0;
@@ -413,7 +486,61 @@ export class HybridEngine {
 		if (option.persistIndices ?? true) {
 			await this.persistIndices();
 		}
-		await this.db.db.hybridDocRefs.put({ path: filePath, updateTime });
+		await this.putHybridDocRef({
+			path: filePath,
+			updateTime,
+			state: 'bm25_only',
+			generation,
+			chunkCount: rawChunks.length,
+			vectorPrecision: null,
+			indexedAt: Date.now(),
+			lastErrorKind: null,
+		});
+	}
+
+	private async putHybridDocRef(ref: HybridDocRef): Promise<void> {
+		await this.db.db.hybridDocRefs.put(ref);
+	}
+
+	private classifyIndexErrorKind(error: unknown): string {
+		if (!(error instanceof Error)) {
+			return 'unknown';
+		}
+		const message = `${error.name}: ${error.message}`.toLowerCase();
+		if (message.includes('weekly token limit')) return 'weekly_token_limit';
+		if (message.includes('api key')) return 'missing_api_key';
+		if (message.includes('429')) return 'provider_429';
+		if (message.includes('408') || message.includes('timeout')) return 'timeout';
+		if (
+			message.includes('500') ||
+			message.includes('502') ||
+			message.includes('503') ||
+			message.includes('504')
+		) {
+			return 'provider_5xx';
+		}
+		if (message.includes('network') || message.includes('failed to fetch')) {
+			return 'network';
+		}
+		return 'unknown';
+	}
+
+	private async withFileWriteLock<T>(filePath: string, work: () => Promise<T>): Promise<T> {
+		const previous = this.fileWriteLocks.get(filePath);
+		let release!: () => void;
+		const current = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		this.fileWriteLocks.set(filePath, current);
+		await previous?.catch(() => undefined);
+		try {
+			return await work();
+		} finally {
+			release();
+			if (this.fileWriteLocks.get(filePath) === current) {
+				this.fileWriteLocks.delete(filePath);
+			}
+		}
 	}
 
 	private async loadDedupedSmallChunkCandidates(rankings: RankedResult[][]): Promise<SmallChunkCandidate[]> {

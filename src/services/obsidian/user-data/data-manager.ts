@@ -18,6 +18,7 @@ import {
 	profileHybridStage,
 	setHybridProfileMeta,
 } from "src/services/search/hybrid/hybrid-profiler";
+import type { HybridDocRef, HybridDocState } from "src/services/search/hybrid/hybrid-store";
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
@@ -54,6 +55,16 @@ type HybridStorageRepairReport = {
 	repairedPaths: string[];
 	reindexedPaths: string[];
 };
+
+function normalizeHybridDocState(
+	ref: HybridDocRef | undefined,
+	hasVector: boolean,
+): HybridDocState | null {
+	if (!ref?.state) {
+		return hasVector ? "ready" : "bm25_only";
+	}
+	return ref.state;
+}
 
 type HybridIndexProgress = {
 	stage: "repair" | "index" | "done";
@@ -684,18 +695,32 @@ export class DataManager {
 	private async repairHybridStoredState(
 		currFiles: Map<string, TFile>,
 	): Promise<HybridStorageRepairReport> {
-		const chunkPaths = new Set<string>(
-			(await this.database.db.hybridChunks.orderBy("filePath").keys()) as string[],
-		);
+		const chunkRows = await this.database.db.hybridChunks.orderBy("filePath").toArray();
+		const chunkPaths = new Set<string>(chunkRows.map((row) => row.filePath));
+		const chunkCountByPath = new Map<string, number>();
+		for (const row of chunkRows) {
+			chunkCountByPath.set(row.filePath, (chunkCountByPath.get(row.filePath) ?? 0) + 1);
+		}
 		const vectorRows = await this.database.db.hybridChunkVectors.toArray();
-		const vectorPrecisionByPath = new Map<string, string>(
-			vectorRows.map((row) => [row.filePath, row.precision]),
+		const vectorInfoByPath = new Map<
+			string,
+			{ precision: string; chunkCount: number; generation?: number }
+		>(
+			vectorRows.map((row) => [
+				row.filePath,
+				{
+					precision: row.precision,
+					chunkCount: row.chunkCount,
+					generation: row.generation,
+				},
+			]),
 		);
 		const docRefs = await this.database.db.hybridDocRefs.toArray();
-		const docRefPaths = new Set(docRefs.map((ref) => ref.path));
+		const docRefByPath = new Map(docRefs.map((ref) => [ref.path, ref]));
+		const docRefPaths = new Set(docRefByPath.keys());
 		const allPaths = new Set<string>([
 			...chunkPaths,
-			...vectorPrecisionByPath.keys(),
+			...vectorInfoByPath.keys(),
 			...docRefPaths,
 		]);
 		const currentPrecision =
@@ -705,15 +730,42 @@ export class DataManager {
 
 		for (const path of allPaths) {
 			const hasChunks = chunkPaths.has(path);
-			const vectorPrecision = vectorPrecisionByPath.get(path);
-			const hasVector = vectorPrecision !== undefined;
+			const vectorInfo = vectorInfoByPath.get(path);
+			const hasVector = vectorInfo !== undefined;
+			const vectorPrecision = vectorInfo?.precision;
 			const hasDocRef = docRefPaths.has(path);
 			const existsNow = currFiles.has(path);
+			const docRef = docRefByPath.get(path);
+			const docState = normalizeHybridDocState(docRef, hasVector);
+			const chunkCount = chunkCountByPath.get(path) ?? 0;
+			const vectorChunkCount = vectorInfo?.chunkCount ?? 0;
+			const isPendingOrFailed = docState === "pending" || docState === "failed";
+			const readyMissingData = docState === "ready" && (!hasChunks || !hasVector || !hasDocRef);
+			const bm25OnlyShapeMismatch =
+				docState === "bm25_only" && (!hasChunks || hasVector || !hasDocRef);
+			const chunkCountMismatch =
+				hasDocRef &&
+				docRef?.chunkCount !== undefined &&
+				docRef.chunkCount !== chunkCount;
+			const vectorChunkCountMismatch =
+				hasVector && hasChunks && vectorChunkCount !== chunkCount;
+			const generationMismatch =
+				hasDocRef &&
+				hasVector &&
+				docRef?.generation !== undefined &&
+				vectorInfo?.generation !== undefined &&
+				docRef.generation !== vectorInfo.generation;
 
 			const inconsistent =
 				(hasVector && !hasChunks) ||
 				(!hasDocRef && (hasChunks || hasVector)) ||
-				(hasDocRef && !hasChunks);
+				(hasDocRef && !hasChunks) ||
+				isPendingOrFailed ||
+				readyMissingData ||
+				bm25OnlyShapeMismatch ||
+				chunkCountMismatch ||
+				vectorChunkCountMismatch ||
+				generationMismatch;
 			const obsolete = !existsNow && (hasChunks || hasVector || hasDocRef);
 			const precisionMismatch =
 				hasVector && vectorPrecision !== currentPrecision;
@@ -739,9 +791,16 @@ export class DataManager {
 				path,
 				inVault: currFiles.has(path),
 				hasChunks: chunkPaths.has(path),
-				hasVector: vectorPrecisionByPath.has(path),
+				hasVector: vectorInfoByPath.has(path),
 				hasDocRef: docRefPaths.has(path),
-				vectorPrecision: vectorPrecisionByPath.get(path) ?? "-",
+				docState: normalizeHybridDocState(
+					docRefByPath.get(path),
+					vectorInfoByPath.has(path),
+				) ?? "-",
+				chunkCount: chunkCountByPath.get(path) ?? 0,
+				docRefChunkCount: docRefByPath.get(path)?.chunkCount ?? "-",
+				vectorChunkCount: vectorInfoByPath.get(path)?.chunkCount ?? "-",
+				vectorPrecision: vectorInfoByPath.get(path)?.precision ?? "-",
 			})),
 		);
 		console.groupEnd();

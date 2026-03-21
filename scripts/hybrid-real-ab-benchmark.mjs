@@ -498,6 +498,34 @@ function printDryRun(plan) {
 	for (const row of plan.cases) console.log(`${row.id}  [${row.style}]  ${row.query}  ->  ${row.targetPath}`);
 }
 
+function estimateApiBudget(plan, args) {
+	const variants = args.contextVariants
+		.map(parseVariant)
+		.filter(Boolean)
+		.sort((a, b) => a.sortValue - b.sortValue);
+	const queryTokens = plan.cases.reduce((acc, row) => acc + countTokens(row.query), 0);
+	const baseChunkTokens = plan.allChunks.reduce((acc, chunk) => acc + countTokens(chunk.text), 0);
+	const variantBudgets = variants.map((variant) => {
+		const variantInputTokens = plan.allChunks.reduce(
+			(acc, chunk) => acc + countTokens(buildInput(chunk, variant, args.contextMaxDepth)),
+			0,
+		);
+		return {
+			label: variant.label,
+			chunkTokens: variantInputTokens,
+			totalTokensOneShot: queryTokens + baseChunkTokens + variantInputTokens,
+			extraContextTokens: variantInputTokens - baseChunkTokens,
+		};
+	});
+	return {
+		queryTokens,
+		baseChunkTokens,
+		variantBudgets,
+		allVariantsTotalTokens:
+			queryTokens + baseChunkTokens + variantBudgets.reduce((acc, row) => acc + row.chunkTokens, 0),
+	};
+}
+
 function runLocalBudgetSweep(plan, args) {
 	const variants = args.contextVariants.map(parseVariant).filter(Boolean).sort((a, b) => a.sortValue - b.sortValue);
 	const bodyOnly = plan.allChunks.map((chunk) => chunk.text);
@@ -572,9 +600,24 @@ function printSweep(plan, payload) {
 async function main() {
 	const args = parseArgs(process.argv);
 	const plan = buildPlan(args);
+	const budget = estimateApiBudget(plan, args);
 	printDryRun(plan);
+	console.log("");
+	console.log("Estimated API Budget");
+	console.log("--------------------");
+	console.log(`queryTokens=${budget.queryTokens}, baseChunkTokens=${budget.baseChunkTokens}`);
+	for (const row of budget.variantBudgets) {
+		console.log(
+			`variant=${row.label} oneShotTotal=${row.totalTokensOneShot} extraContext=${row.extraContextTokens}`,
+		);
+	}
+	console.log(`allVariantsTotal=${budget.allVariantsTotalTokens}`);
 	if (args.dryRun) {
-		fs.writeFileSync(args.output, `${JSON.stringify({ mode: "dry-run", ...plan, candidateDocsByCase: undefined, chunksByFile: undefined, allChunks: undefined }, null, 2)}\n`, "utf8");
+		fs.writeFileSync(
+			args.output,
+			`${JSON.stringify({ mode: "dry-run", ...plan, budget, candidateDocsByCase: undefined, chunksByFile: undefined, allChunks: undefined }, null, 2)}\n`,
+			"utf8",
+		);
 		return;
 	}
 	if (args.mode === "local-budget-sweep") {
