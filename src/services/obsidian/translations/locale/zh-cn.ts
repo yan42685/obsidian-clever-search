@@ -34,13 +34,6 @@ export default {
 	"hybridModal.apiKeyNotice":
 		"这里显示的 token 以千问接口返回的 usage 为准。当前混合搜索会使用 text-embedding-v4 和 qwen3-rerank，请确认 API Key 已开通这两个模型。",
 	"hybridModal.autoShowResultsWhenLexicalEmpty": "词法无结果时自动展示 hybrid",
-	"hybridModal.autoShowResultsWhenLexicalEmpty.desc":
-		"??????????????? lexical ?????0 ???????????? 3 ????????? hybrid ??????????????????????????????????????500ms ???????????????????? hybrid ????????hybrid ??????????????? lexical ????????",
-		"hybridModal.autoFallbackFailed.title": "Lexical ??? 0?Hybrid ???????",
-	"hybridModal.autoFallbackFailed.possibleCauses": "?????",
-	"hybridModal.autoFallbackFailed.cause.api": "API Key?API ??????????????????",
-	"hybridModal.autoFallbackFailed.cause.network": "????????????????????????",
-	"hybridModal.autoFallbackFailed.cause.index": "Hybrid ????????????????????",
 "hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc":
 		"每周（周一至周日）最多允许消耗的 token 数量，设为 0 表示不限制。",
@@ -86,4 +79,85 @@ export default {
 		"一键切换词法文件检索后端。MiniSearch 更保守稳定；自定义 BM25 在前缀匹配和元数据感知方面更强。",
 	"fileSearchBackend.minisearch": "MiniSearch（稳定）",
 	"fileSearchBackend.customBm25": "自定义 BM25",
+	"Manage hybrid search": "管理混合搜索",
+	"hybridModal.manageIntro":
+		"在这里可以集中管理 hybrid 搜索的接口配置、token 预算、排序策略和索引范围。",
+	"hybridModal.todayUsed": "本日",
+	"hybridModal.thisWeekUsed": "本周",
+	"hybridModal.thisMonthUsed": "本月",
+	"hybridModal.autoShowResultsWhenLexicalEmpty.desc":
+		"在普通库内搜索中，如果词法搜索结果为 0，且查询长度至少为 3，则自动展示 hybrid 结果。第一次触发会立即执行，之后连续出现 0 结果时会以 500ms 的 trailing debounce 展示最后一次对应的 hybrid 结果。展示 hybrid 结果后，搜索框仍然处于 lexical 搜索模式。",
+	"hybridModal.autoFallbackFailed.title":
+		"词法结果为 0，且 hybrid 搜索也失败了。",
+	"hybridModal.autoFallbackFailed.possibleCauses": "可能原因：",
+	"hybridModal.autoFallbackFailed.cause.api":
+		"API Key、API 域名或模型权限不可用或无效。",
+	"hybridModal.autoFallbackFailed.cause.network":
+		"网络、供应商超时、限流或额度问题阻塞了语义链路。",
+	"hybridModal.autoFallbackFailed.cause.index":
+		"Hybrid 语义索引不可用、不完整，或仍在加载中。",
+	"files need to be indexed. Obsidian may freeze for a while":
+		"有文件需要建立索引，Obsidian 可能会暂时卡顿。",
+	"Omnisearch isn't installed": "未安装 Omnisearch。",
+	"Omnisearch is installed but not enabled": "Omnisearch 已安装，但尚未启用。",
+	"Semantic init time":
+		"本地模型建立索引的速度大约为每秒 100-500 词。在此期间请不要关闭 Obsidian。",
+	"Semantic init finished": "语义引擎已就绪",
+	"Downloading aiHelper": "正在下载 clever-search-ai-helper.zip（972 MB）...",
+	"Download success": "下载成功",
+	"Download failure": "下载 clever-search-ai-helper.zip 失败",
+	"Download manually": "手动下载",
+	"Max items count": "最大结果条数",
+	"Max items count desc":
+		"受渲染器能力限制，插件可以找到成千上万条结果，但无法一次性全部显示。",
+	"Floating window for in-file search": "文件内搜索使用浮动窗口",
+	"Floating window for in-file search desc":
+		"再次执行“文件内搜索”命令会关闭已存在的浮动窗口。关闭此选项可改为使用经典模态框。",
+	"Case sensitive": "区分大小写",
+	"Prefix match": "前缀匹配",
+	"Character fuzzy allowed": "允许字符级模糊匹配",
+	"English word blacklist": "英文停用词",
+	"English word blacklist desc":
+		"将 do、and、them 等意义较弱的英文词排除出索引，可提升搜索与建索引速度。可按需修改 stop-words-en.txt。",
+	"Chinese patch": "中文补丁",
+	"Chinese patch desc": "为中文提供更好的搜索结果",
+	"Chinese word blacklist": "中文停用词",
+	"Chinese word blacklist desc":
+		"仅在启用中文补丁时生效。会将 stop-words-zh.txt 中列出的一些中文虚词排除出索引，以提升搜索效率与速度。",
+	"Advanced": "高级设置",
+	"Advanced.desc": "前面的设置已覆盖大多数需求，如需进一步自定义，可调整以下选项。",
+	"Semantic search": "语义搜索",
+	"Introduction": "介绍",
+	"Introduction.desc":
+		"语义搜索目前仅支持 Windows，且更适合中小型库。如果库内超过 800 万词，初次建索引可能需要数十小时。你需要将下载压缩包中的 .cache 文件夹解压到 C:\\Users\\<当前用户>，然后运行 clever-search-ai-helper.exe 启动语义引擎。语义搜索主要用于补充词法搜索，在精确匹配上通常不如词法搜索。",
+	"Server type": "服务类型",
+	"Server type.desc":
+		"如果使用本地服务，需要在后台运行 Clever Search AI Helper。远程服务短期内不会实现。",
+	"local": "本地",
+	"Utilities": "工具",
+	"Test connection": "测试连接",
+	"Download": "下载",
+	"Additional Information": "补充说明",
+	"Additional Information.desc":
+		"启用语义搜索且 ai-helper 正在运行时，重建索引会同时作用于词法与语义引擎；每次插件加载时语义引擎也会自动执行增量索引。为避免阻塞语义搜索，后续文件修改不会实时更新语义索引。",
+	"Excluded files": "排除文件",
+	"Follow Obsidian Excluded Files": "跟随 Obsidian 排除文件设置",
+	"Customize extensions": "自定义扩展名",
+	"extensionModal.desc":
+		"自定义你希望建立索引的文件扩展名。默认情况下，Obsidian 原生不支持的文件类型（如 txt）会由外部程序打开。若希望在 Obsidian 内打开它们，可能需要安装 obsidian-custom-file-extension-plugin 或 obsidian-vscode-editor 等插件。",
+	"extensionModal.plaintextName": "纯文本",
+	"extensionModal.plaintextDesc":
+		"扩展名之间请用空格或换行分隔。请不要包含 pdf、jpg、mp4 等无法用记事本打开的二进制文件，否则可能导致索引异常。此外，HTML 文件在索引与搜索时通常更慢，因为需要先转换为干净的 Markdown；同时由于 API 限制，HTML 文件似乎也无法自动滚动到指定位置。",
+	"For Development": "开发选项",
+	"Collapse development setting by default": "默认折叠开发设置",
+	"Reindex the vault": "重建整个库的索引",
+	"Reindex": "重建索引",
+	"Log level": "日志级别",
+	"Reset floating window position": "重置浮动窗口位置",
+	"Reset floating window position desc":
+		"当浮动窗口被拖到可视区域之外时，可用此项重置位置。",
+	"Reset position": "重置位置",
+	"Support the Project": "支持项目",
+	"Support the Project desc": "如果这个插件对你有帮助，欢迎去 GitHub 点个 Star。",
+	"Visit GitHub": "访问 GitHub",
 };

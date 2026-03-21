@@ -84,7 +84,9 @@ export default {
 
 	"Hybrid search": "Hybrid search",
 	"Hybrid search desc": "Hybrid lexical plus semantic search with graceful fallback to lexical-only results when the Qwen embedding or rerank path fails.",
+	"Manage hybrid search": "Manage hybrid search",
 
+	"hybridModal.manageIntro": "Configure the hybrid pipeline here, including provider access, token budget, ranking, and indexing scope.",
 	"hybridModal.desc": "Hybrid search combines lexical search with Qwen-based semantic retrieval. Indexing uses text-embedding-v4, search reranking uses qwen3-rerank, and both provider-reported token costs are counted toward the weekly limit. If the semantic path fails (network error, quota exceeded, etc.), results automatically fall back to lexical search.",
 	"hybridModal.apiDomain": "API domain",
 	"hybridModal.apiDomain.desc": "Leave blank to use dashscope.aliyuncs.com. For custom/proxy endpoints enter the domain only (e.g. my-proxy.example.com).",
@@ -119,6 +121,9 @@ export default {
 	"hybridModal.excludedPaths": "Excluded paths (hybrid indexing)",
 	"hybridModal.tokenStats": "Token usage statistics",
 	"hybridModal.tokenStats.loading": "Loading stats...",
+	"hybridModal.todayUsed": "Today",
+	"hybridModal.thisWeekUsed": "This week",
+	"hybridModal.thisMonthUsed": "This month",
 	"hybridModal.weeklyUsage": "This week's token usage",
 	"hybridModal.dailyTop": "Top 20 files today",
 	"hybridModal.weeklyTop": "Top 20 files this week",

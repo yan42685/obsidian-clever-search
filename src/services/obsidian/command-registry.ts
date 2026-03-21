@@ -18,6 +18,7 @@ import { eventBus } from "src/utils/event-bus";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
+import { openHybridSearchModal } from "./setting-manager";
 
 const CTRL: Modifier = "Ctrl";
 const ALT: Modifier = "Alt";
@@ -76,6 +77,12 @@ export class CommandRegistry {
 			id: "cs-toggle-privacy-mode",
 			name: "Toggle privacy mode",
 			callback: () => getInstance(AuxiliaryService).togglePrivacyMode(),
+		});
+
+		this.addCommand({
+			id: "cs-manage-hybrid-search",
+			name: "Manage hybrid search",
+			callback: () => openHybridSearchModal(this.app),
 		});
 	}
 
