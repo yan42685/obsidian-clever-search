@@ -27,6 +27,17 @@ export type LightweightFuzzyMatch = {
 	positions: number[];
 };
 
+export type LightweightFuzzyMode = "default" | "history";
+
+export type PreparedLightweightFuzzyQuery = {
+	normalizedQuery: string;
+	queryTerms: string[];
+	collapsedQuery: string;
+	hasCollapsedVariant: boolean;
+	allowInitialism: boolean;
+	mode: LightweightFuzzyMode;
+};
+
 export function normalizeLightweightFuzzyText(text: string): string {
 	return text.trim().toLocaleLowerCase();
 }
@@ -48,11 +59,33 @@ export function createLightweightFuzzyIndex(
 	};
 }
 
-export function matchLightweightFuzzy(
+export function prepareLightweightFuzzyQuery(
 	queryText: string,
+	mode: LightweightFuzzyMode = "default",
+): PreparedLightweightFuzzyQuery {
+	const normalizedQuery = normalizeLightweightFuzzyText(queryText);
+	const queryTerms = splitQueryTerms(normalizedQuery);
+	const collapsedQuery = collapseWhitespace(normalizedQuery);
+	return {
+		normalizedQuery,
+		queryTerms,
+		collapsedQuery,
+		hasCollapsedVariant:
+			collapsedQuery.length > 0 && collapsedQuery !== normalizedQuery,
+		allowInitialism: queryTerms.length === 1 && collapsedQuery.length <= 6,
+		mode,
+	};
+}
+
+export function matchLightweightFuzzy(
+	queryTextOrPrepared: string | PreparedLightweightFuzzyQuery,
 	index: LightweightFuzzyIndex,
 ): LightweightFuzzyMatch | null {
-	const normalizedQuery = normalizeLightweightFuzzyText(queryText);
+	const preparedQuery =
+		typeof queryTextOrPrepared === "string"
+			? prepareLightweightFuzzyQuery(queryTextOrPrepared)
+			: queryTextOrPrepared;
+	const { normalizedQuery, queryTerms, collapsedQuery } = preparedQuery;
 	if (normalizedQuery.length === 0 || index.normalizedText.length === 0) {
 		return null;
 	}
@@ -71,16 +104,14 @@ export function matchLightweightFuzzy(
 		),
 	);
 
-	const queryTerms = splitQueryTerms(normalizedQuery);
 	bestMatch = pickBetterMatch(
 		bestMatch,
 		matchCoverageTerms(queryTerms, index.normalizedText),
 	);
 
-	const collapsedQuery = collapseWhitespace(normalizedQuery);
 	if (
 		collapsedQuery.length > 0 &&
-		(collapsedQuery !== normalizedQuery ||
+		(preparedQuery.hasCollapsedVariant ||
 			index.collapsedText !== index.normalizedText)
 	) {
 		bestMatch = pickBetterMatch(
@@ -89,26 +120,31 @@ export function matchLightweightFuzzy(
 		);
 	}
 
-	if (queryTerms.length === 1 && collapsedQuery.length <= 6) {
+	if (preparedQuery.allowInitialism) {
 		bestMatch = pickBetterMatch(
 			bestMatch,
 			matchInitialism(collapsedQuery, index),
 		);
 	}
 
-	bestMatch = pickBetterMatch(
-		bestMatch,
-		matchSubsequenceAgainstText(normalizedQuery, index.normalizedText),
-	);
-
+	// History suggestions already have term coverage and contiguous matching.
+	// Skipping the broadest subsequence fallback for multi-term history queries
+	// trims hot-path cost without materially hurting suggestion quality.
 	if (
-		collapsedQuery !== normalizedQuery &&
-		index.collapsedText.length > 0
+		preparedQuery.mode !== "history" ||
+		preparedQuery.queryTerms.length <= 1
 	) {
 		bestMatch = pickBetterMatch(
 			bestMatch,
-			matchCollapsedSubsequence(collapsedQuery, index),
+			matchSubsequenceAgainstText(normalizedQuery, index.normalizedText),
 		);
+
+		if (preparedQuery.hasCollapsedVariant && index.collapsedText.length > 0) {
+			bestMatch = pickBetterMatch(
+				bestMatch,
+				matchCollapsedSubsequence(collapsedQuery, index),
+			);
+		}
 	}
 
 	return bestMatch;
@@ -156,9 +192,7 @@ function matchCoverageTerms(
 	const firstStart = sortedHits[0]?.start ?? 0;
 	const lastEnd = sortedHits[sortedHits.length - 1]?.end ?? firstStart;
 	const span = lastEnd - firstStart;
-	const positions = [...new Set(hits.flatMap((hit) => hit.positions))].sort(
-		(left, right) => left - right,
-	);
+	const positions = createCoveragePositions(sortedHits);
 
 	return {
 		score:
@@ -191,7 +225,6 @@ function findBestTermOccurrence(
 			start: index,
 			end: index + term.length,
 			isBoundary: isWordBoundary(text, index),
-			positions: createContiguousPositions(index, term.length),
 		};
 		if (
 			!bestHit ||
@@ -444,6 +477,23 @@ function createContiguousPositions(start: number, length: number): number[] {
 	return Array.from({ length }, (_, index) => start + index);
 }
 
+function createCoveragePositions(sortedHits: TermOccurrence[]): number[] {
+	const positions: number[] = [];
+	let lastPosition = -1;
+
+	for (const hit of sortedHits) {
+		for (let position = hit.start; position < hit.end; position++) {
+			if (position <= lastPosition) {
+				continue;
+			}
+			positions.push(position);
+			lastPosition = position;
+		}
+	}
+
+	return positions;
+}
+
 function pickBetterMatch(
 	left: LightweightFuzzyMatch | null,
 	right: LightweightFuzzyMatch | null,
@@ -461,5 +511,4 @@ type TermOccurrence = {
 	start: number;
 	end: number;
 	isBoundary: boolean;
-	positions: number[];
 };

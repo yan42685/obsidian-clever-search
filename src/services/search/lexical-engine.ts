@@ -19,6 +19,7 @@ import {
 import {
 	createLightweightFuzzyIndex,
 	matchLightweightFuzzy,
+	prepareLightweightFuzzyQuery,
 } from "./lightweight-fuzzy-matcher";
 import { TruncateOption, type TruncateType } from "./truncate-option";
 
@@ -69,10 +70,11 @@ export class LexicalEngine {
 	async matchLinesFuzzy(queryText: string, lines: Line[]): Promise<MatchedLine[]> {
 		const matches: Array<{ line: Line; score: number; positions: Set<number> }> = [];
 		const maxItemResults = this.outerSetting.ui.maxItemResults;
+		const preparedQuery = prepareLightweightFuzzyQuery(queryText);
 
 		for (const line of lines) {
 			const match = matchLightweightFuzzy(
-				queryText,
+				preparedQuery,
 				createLightweightFuzzyIndex(line.text),
 			);
 			if (!match) {

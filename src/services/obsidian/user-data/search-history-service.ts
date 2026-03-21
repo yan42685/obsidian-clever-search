@@ -4,6 +4,7 @@ import type CleverSearch from "src/main";
 import {
 	createLightweightFuzzyIndex,
 	matchLightweightFuzzy,
+	prepareLightweightFuzzyQuery,
 	type LightweightFuzzyIndex,
 } from "src/services/search/lightweight-fuzzy-matcher";
 import { getInstance } from "src/utils/my-lib";
@@ -122,6 +123,10 @@ export class SearchHistoryService {
 			return [];
 		}
 		const scoreContext = this.createHistoryScoreContext(allEntries);
+		const preparedQuery = prepareLightweightFuzzyQuery(
+			normalizedQuery,
+			"history",
+		);
 		const suggestions: SearchHistorySuggestion[] = [];
 
 		for (const indexedEntry of allEntries) {
@@ -129,7 +134,7 @@ export class SearchHistoryService {
 				continue;
 			}
 
-			const match = this.matchCandidateQuery(normalizedQuery, indexedEntry);
+			const match = this.matchCandidateQuery(preparedQuery, indexedEntry);
 			if (!match) {
 				continue;
 			}
@@ -325,7 +330,7 @@ export class SearchHistoryService {
 	}
 
 	private matchCandidateQuery(
-		queryText: string,
+		queryText: ReturnType<typeof prepareLightweightFuzzyQuery>,
 		entry: IndexedSearchHistoryEntry,
 	) {
 		// The shared matcher only measures textual relevance.
