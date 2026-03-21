@@ -162,16 +162,14 @@ export class HnswIndex {
 
 		for (let lc = Math.min(level, epLevel); lc >= 0; lc--) {
 			const candidates = this.searchLayer(vector, ep, HNSW_EF_CONSTRUCTION, lc);
-			const neighbors = this.selectNeighbors(candidates, HNSW_M);
+			const neighbors = this.selectNeighbors(id, candidates, HNSW_M);
 			node.neighbors[lc] = neighbors.map((c) => c.id);
 
 			for (const nb of neighbors) {
 				const nbNode = this.graph.nodes.get(nb.id)!;
 				if (!nbNode.neighbors[lc]) nbNode.neighbors[lc] = [];
 				nbNode.neighbors[lc].push(id);
-				if (nbNode.neighbors[lc].length > HNSW_M) {
-					nbNode.neighbors[lc] = this.pruneNeighbors(nbNode.neighbors[lc], HNSW_M);
-				}
+				nbNode.neighbors[lc] = this.pruneNeighbors(nb.id, nbNode.neighbors[lc], HNSW_M);
 			}
 
 			ep = candidates[0]?.id ?? ep;
@@ -397,12 +395,80 @@ export class HnswIndex {
 		return results;
 	}
 
-	private selectNeighbors(candidates: Candidate[], m: number): Candidate[] {
-		return candidates.slice(0, m);
+	private selectNeighbors(nodeId: number, candidates: Candidate[], m: number): Candidate[] {
+		const deduped: Candidate[] = [];
+		const seen = new Set<number>();
+		for (const candidate of candidates) {
+			if (candidate.id === nodeId || seen.has(candidate.id) || this.graph.deletedSet.has(candidate.id)) {
+				continue;
+			}
+			seen.add(candidate.id);
+			deduped.push(candidate);
+		}
+
+		const selected: Candidate[] = [];
+		for (const candidate of deduped) {
+			let keep = true;
+			for (const existing of selected) {
+				const pairDist = this.distBetweenNodes(candidate.id, existing.id);
+				if (pairDist < candidate.dist) {
+					keep = false;
+					break;
+				}
+			}
+			if (!keep) {
+				continue;
+			}
+			selected.push(candidate);
+			if (selected.length >= m) {
+				return selected;
+			}
+		}
+
+		for (const candidate of deduped) {
+			if (selected.some((item) => item.id === candidate.id)) {
+				continue;
+			}
+			selected.push(candidate);
+			if (selected.length >= m) {
+				break;
+			}
+		}
+
+		return selected;
 	}
 
-	private pruneNeighbors(neighborIds: number[], m: number): number[] {
-		return neighborIds.slice(0, m);
+	private pruneNeighbors(nodeId: number, neighborIds: number[], m: number): number[] {
+		const candidates = Array.from(new Set(neighborIds))
+			.filter((neighborId) => neighborId !== nodeId && !this.graph.deletedSet.has(neighborId))
+			.map((neighborId) => ({
+				id: neighborId,
+				dist: this.distBetweenNodes(nodeId, neighborId),
+			}))
+			.filter((item) => Number.isFinite(item.dist))
+			.sort((left, right) => left.dist - right.dist || left.id - right.id);
+
+		return this.selectNeighbors(nodeId, candidates, m).map((item) => item.id);
+	}
+
+	private distBetweenNodes(leftId: number, rightId: number): number {
+		if (this.graph.precision === 'int8') {
+			const leftVector = this.vectorsInt8.get(leftId);
+			const leftScale = this.scalesInt8.get(leftId);
+			const rightVector = this.vectorsInt8.get(rightId);
+			const rightScale = this.scalesInt8.get(rightId);
+			if (!leftVector || leftScale === undefined || !rightVector || rightScale === undefined) {
+				return Infinity;
+			}
+			return int8Dist(leftVector, leftScale, rightVector, rightScale);
+		}
+
+		const leftVector = this.vectorsFloat16.get(leftId);
+		const rightVector = this.vectorsFloat16.get(rightId);
+		if (!leftVector || !rightVector) {
+			return Infinity;
+		}
+		return f16Dist(leftVector, rightVector);
 	}
 
 	private dist(queryVector: StoredVector, id: number): number {

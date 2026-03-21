@@ -8,6 +8,7 @@ const DEFAULT_RUNS = 1;
 const DEFAULT_TARGET_LIBRARY_MB = 200;
 const DEFAULT_DIFFICULTY = "normal";
 const DEFAULT_SUITE_PROFILE = "daily";
+const DEFAULT_DENSE_BACKEND = "hnsw";
 const DEFAULT_SIZE_SWEEP_MBS = [50, 120, 300];
 const DEFAULT_BUDGET_COMPARE_NAMES = [
 	"current-20x30-prox",
@@ -30,6 +31,9 @@ const BM25_PROXIMITY_SPAN_WEIGHT = 0.11;
 const BM25_PROXIMITY_ORDER_WEIGHT = 0.05;
 const BM25_PROXIMITY_ADJACENT_WEIGHT = 0.04;
 const BM25_PROXIMITY_COMPACT_WEIGHT = 0.02;
+const BENCH_HNSW_M = 16;
+const BENCH_HNSW_EF_CONSTRUCTION = 100;
+const BENCH_HNSW_EF = 40;
 
 const stopWords = new Set([
 	"the",
@@ -321,6 +325,7 @@ const concepts = [
 
 function parseArgs(argv) {
 	let hasExplicitTargetLibraryMb = false;
+	let hasExplicitDifficulty = false;
 	const args = {
 		mode: "benchmark",
 		filesPerConcept: DEFAULT_FILES_PER_CONCEPT,
@@ -329,6 +334,7 @@ function parseArgs(argv) {
 		runs: DEFAULT_RUNS,
 		targetLibraryMb: DEFAULT_TARGET_LIBRARY_MB,
 		difficulty: DEFAULT_DIFFICULTY,
+		denseBackend: DEFAULT_DENSE_BACKEND,
 		queries: "",
 		suite: "",
 		suiteProfile: DEFAULT_SUITE_PROFILE,
@@ -353,7 +359,11 @@ function parseArgs(argv) {
 			args.targetLibraryMb =
 				Number(arg.slice("--target-library-mb=".length)) || DEFAULT_TARGET_LIBRARY_MB;
 		} else if (arg.startsWith("--difficulty=")) {
+			hasExplicitDifficulty = true;
 			args.difficulty = arg.slice("--difficulty=".length) || DEFAULT_DIFFICULTY;
+		} else if (arg.startsWith("--dense-backend=")) {
+			const backend = arg.slice("--dense-backend=".length).trim();
+			args.denseBackend = backend === "exact" ? "exact" : DEFAULT_DENSE_BACKEND;
 		} else if (arg.startsWith("--queries=")) {
 			args.queries = arg.slice("--queries=".length);
 		} else if (arg.startsWith("--suite=")) {
@@ -378,6 +388,15 @@ function parseArgs(argv) {
 			args.mode === "bm25-size")
 	) {
 		args.targetLibraryMb = 40;
+	}
+	if (
+		!hasExplicitDifficulty &&
+		(args.mode === "regression" ||
+			args.mode === "tune-regression" ||
+			args.mode === "budget-compare" ||
+			args.mode === "size-sweep")
+	) {
+		args.difficulty = "hard";
 	}
 	return args;
 }
@@ -593,6 +612,286 @@ class BenchmarkBM25Engine {
 			avgDocLen: this.avgDocLen,
 			docLengths,
 		};
+	}
+}
+
+class BenchmarkMinHeap {
+	constructor() {
+		this.data = [];
+	}
+
+	get size() {
+		return this.data.length;
+	}
+
+	push(item) {
+		this.data.push(item);
+		this.bubbleUp(this.data.length - 1);
+	}
+
+	pop() {
+		const top = this.data[0];
+		const last = this.data.pop();
+		if (this.data.length > 0) {
+			this.data[0] = last;
+			this.siftDown(0);
+		}
+		return top;
+	}
+
+	bubbleUp(index) {
+		while (index > 0) {
+			const parent = (index - 1) >> 1;
+			if (this.data[parent].dist <= this.data[index].dist) {
+				break;
+			}
+			[this.data[parent], this.data[index]] = [this.data[index], this.data[parent]];
+			index = parent;
+		}
+	}
+
+	siftDown(index) {
+		const size = this.data.length;
+		while (true) {
+			let smallest = index;
+			const left = index * 2 + 1;
+			const right = index * 2 + 2;
+			if (left < size && this.data[left].dist < this.data[smallest].dist) {
+				smallest = left;
+			}
+			if (right < size && this.data[right].dist < this.data[smallest].dist) {
+				smallest = right;
+			}
+			if (smallest === index) {
+				break;
+			}
+			[this.data[smallest], this.data[index]] = [this.data[index], this.data[smallest]];
+			index = smallest;
+		}
+	}
+}
+
+class BenchmarkHnswIndex {
+	constructor(rng) {
+		this.rng = rng;
+		this.entryPoint = null;
+		this.maxLevel = 0;
+		this.nodes = new Map();
+		this.vectors = new Map();
+	}
+
+	insert(id, vector) {
+		this.vectors.set(id, vector);
+		const level = this.randomLevel();
+		const node = {
+			id,
+			level,
+			neighbors: Array.from({ length: level + 1 }, () => []),
+		};
+		this.nodes.set(id, node);
+
+		if (this.entryPoint === null) {
+			this.entryPoint = id;
+			this.maxLevel = level;
+			return;
+		}
+
+		let ep = this.entryPoint;
+		const epLevel = this.nodes.get(ep).level;
+		for (let layer = epLevel; layer > level; layer--) {
+			ep = this.greedySearch(vector, ep, layer);
+		}
+
+		for (let layer = Math.min(level, epLevel); layer >= 0; layer--) {
+			const candidates = this.searchLayer(vector, ep, BENCH_HNSW_EF_CONSTRUCTION, layer);
+			const neighbors = this.selectNeighbors(id, candidates, BENCH_HNSW_M);
+			node.neighbors[layer] = neighbors.map((candidate) => candidate.id);
+
+			for (const neighbor of neighbors) {
+				const neighborNode = this.nodes.get(neighbor.id);
+				if (!neighborNode.neighbors[layer]) {
+					neighborNode.neighbors[layer] = [];
+				}
+				neighborNode.neighbors[layer].push(id);
+				neighborNode.neighbors[layer] = this.pruneNeighbors(
+					neighbor.id,
+					neighborNode.neighbors[layer],
+					BENCH_HNSW_M,
+				);
+			}
+
+			ep = candidates[0]?.id ?? ep;
+		}
+
+		if (level > this.maxLevel) {
+			this.maxLevel = level;
+			this.entryPoint = id;
+		}
+	}
+
+	search(queryVector, topK, ef = BENCH_HNSW_EF) {
+		if (this.entryPoint === null || topK <= 0) {
+			return [];
+		}
+
+		let ep = this.entryPoint;
+		const epLevel = this.nodes.get(ep).level;
+		for (let layer = epLevel; layer > 0; layer--) {
+			ep = this.greedySearch(queryVector, ep, layer);
+		}
+
+		return this.searchLayer(queryVector, ep, ef, 0)
+			.slice(0, topK)
+			.map((candidate) => ({ id: candidate.id, score: 1 - candidate.dist }));
+	}
+
+	randomLevel() {
+		let level = 0;
+		while (this.rng() < 1 / BENCH_HNSW_M && level < 16) {
+			level += 1;
+		}
+		return level;
+	}
+
+	greedySearch(queryVector, entryPoint, layer) {
+		let bestId = entryPoint;
+		let bestDist = this.distToNode(queryVector, entryPoint);
+		let changed = true;
+		while (changed) {
+			changed = false;
+			const node = this.nodes.get(bestId);
+			if (!node || !node.neighbors[layer]) {
+				break;
+			}
+			for (const neighborId of node.neighbors[layer]) {
+				const neighborDist = this.distToNode(queryVector, neighborId);
+				if (neighborDist < bestDist) {
+					bestDist = neighborDist;
+					bestId = neighborId;
+					changed = true;
+				}
+			}
+		}
+		return bestId;
+	}
+
+	searchLayer(queryVector, entryPoint, ef, layer) {
+		const visited = new Set([entryPoint]);
+		const queue = new BenchmarkMinHeap();
+		const results = [];
+		const entryDist = this.distToNode(queryVector, entryPoint);
+
+		queue.push({ id: entryPoint, dist: entryDist });
+		results.push({ id: entryPoint, dist: entryDist });
+
+		while (queue.size > 0) {
+			const current = queue.pop();
+			const worst = results.reduce(
+				(currentWorst, item) => (item.dist > currentWorst.dist ? item : currentWorst),
+				results[0],
+			);
+			if (results.length >= ef && current.dist > worst.dist) {
+				break;
+			}
+
+			const node = this.nodes.get(current.id);
+			if (!node || !node.neighbors[layer]) {
+				continue;
+			}
+
+			for (const neighborId of node.neighbors[layer]) {
+				if (visited.has(neighborId)) {
+					continue;
+				}
+				visited.add(neighborId);
+				const neighborDist = this.distToNode(queryVector, neighborId);
+				if (results.length < ef || neighborDist < worst.dist) {
+					queue.push({ id: neighborId, dist: neighborDist });
+					results.push({ id: neighborId, dist: neighborDist });
+					if (results.length > ef) {
+						const worstIndex = results.reduce(
+							(indexWorst, item, index) =>
+								item.dist > results[indexWorst].dist ? index : indexWorst,
+							0,
+						);
+						results.splice(worstIndex, 1);
+					}
+				}
+			}
+		}
+
+		return results.sort((left, right) => left.dist - right.dist);
+	}
+
+	selectNeighbors(nodeId, candidates, limit) {
+		const deduped = [];
+		const seen = new Set();
+		for (const candidate of candidates) {
+			if (candidate.id === nodeId || seen.has(candidate.id)) {
+				continue;
+			}
+			seen.add(candidate.id);
+			deduped.push(candidate);
+		}
+
+		const selected = [];
+		for (const candidate of deduped) {
+			let keep = true;
+			for (const existing of selected) {
+				if (this.distBetweenNodes(candidate.id, existing.id) < candidate.dist) {
+					keep = false;
+					break;
+				}
+			}
+			if (!keep) {
+				continue;
+			}
+			selected.push(candidate);
+			if (selected.length >= limit) {
+				return selected;
+			}
+		}
+
+		for (const candidate of deduped) {
+			if (selected.some((item) => item.id === candidate.id)) {
+				continue;
+			}
+			selected.push(candidate);
+			if (selected.length >= limit) {
+				break;
+			}
+		}
+
+		return selected;
+	}
+
+	pruneNeighbors(nodeId, neighborIds, limit) {
+		const candidates = Array.from(new Set(neighborIds))
+			.filter((neighborId) => neighborId !== nodeId)
+			.map((neighborId) => ({
+				id: neighborId,
+				dist: this.distBetweenNodes(nodeId, neighborId),
+			}))
+			.filter((item) => Number.isFinite(item.dist))
+			.sort((left, right) => left.dist - right.dist || left.id - right.id);
+		return this.selectNeighbors(nodeId, candidates, limit).map((item) => item.id);
+	}
+
+	distToNode(queryVector, nodeId) {
+		const vector = this.vectors.get(nodeId);
+		if (!vector) {
+			return Infinity;
+		}
+		return 1 - normalizedCosine(queryVector, vector);
+	}
+
+	distBetweenNodes(leftId, rightId) {
+		const left = this.vectors.get(leftId);
+		const right = this.vectors.get(rightId);
+		if (!left || !right) {
+			return Infinity;
+		}
+		return 1 - normalizedCosine(left, right);
 	}
 }
 
@@ -1526,19 +1825,25 @@ function loadRegressionQueries(args) {
 	};
 }
 
-function buildEngines(chunkById) {
+function buildEngines(chunkById, seed, denseBackend = DEFAULT_DENSE_BACKEND) {
 	const bm25NoProx = new BenchmarkBM25Engine({ proximity: false });
 	const bm25Prox = new BenchmarkBM25Engine({ proximity: true });
+	const hnswApprox =
+		denseBackend === "hnsw" ? new BenchmarkHnswIndex(createRng(seed ^ 0x9e3779b9)) : null;
 	for (const chunk of chunkById.values()) {
 		bm25NoProx.addDocumentTerms(chunk.id, chunk.tokens);
 		bm25Prox.addDocumentTerms(chunk.id, chunk.tokens);
+		hnswApprox?.insert(chunk.id, chunk.vector);
 	}
-	return { bm25NoProx, bm25Prox };
+	return { bm25NoProx, bm25Prox, hnswApprox };
 }
 
 function denseSearch(query, chunkById, limit, options = {}) {
 	const difficultyProfile = resolveDifficultyProfile(query.difficulty);
 	const useQueryVariants = options.useQueryVariants ?? false;
+	const denseBackend = options.backend ?? DEFAULT_DENSE_BACKEND;
+	const hnswApprox = options.hnswApprox ?? null;
+	const searchEf = options.searchEf ?? BENCH_HNSW_EF;
 	const queryTokens = tokenize(query.text);
 	const variants = useQueryVariants
 		? buildSemanticQueryVariants(
@@ -1557,6 +1862,16 @@ function denseSearch(query, chunkById, limit, options = {}) {
 	}));
 	const mergedScores = new Map();
 	for (const variant of queryVectors) {
+		if (denseBackend === "hnsw" && hnswApprox) {
+			for (const hit of hnswApprox.search(variant.vector, limit, searchEf)) {
+				const score = hit.score * variant.weight;
+				if (score > (mergedScores.get(hit.id) ?? Number.NEGATIVE_INFINITY)) {
+					mergedScores.set(hit.id, score);
+				}
+			}
+			continue;
+		}
+
 		for (const chunk of chunkById.values()) {
 			const score = normalizedCosine(variant.vector, chunk.vector) * variant.weight;
 			if (score > (mergedScores.get(chunk.id) ?? Number.NEGATIVE_INFINITY)) {
@@ -1929,6 +2244,7 @@ function evaluateRun(args, runIndex, config = null) {
 		filesPerConcept: args.filesPerConcept,
 		seed,
 		targetLibraryBytes: Math.round(args.targetLibraryMb * 1024 * 1024),
+		difficulty: args.difficulty,
 	});
 	const querySource =
 		args.mode === "regression" || args.mode === "tune-regression"
@@ -1939,7 +2255,11 @@ function evaluateRun(args, runIndex, config = null) {
 					queries: buildQueries(),
 				};
 	const queries = querySource.queries;
-	const { bm25NoProx, bm25Prox } = buildEngines(corpus.chunkById);
+	const { bm25NoProx, bm25Prox, hnswApprox } = buildEngines(
+		corpus.chunkById,
+		seed,
+		args.denseBackend,
+	);
 	const activeConfig = config ?? createDefaultTuningConfig(args.recallLimit);
 	const mergeUsesProximity = activeConfig.useProximity ?? true;
 
@@ -2003,6 +2323,9 @@ function evaluateRun(args, runIndex, config = null) {
 			activeConfig.profileTuning,
 		);
 		const dense = denseSearch(query, corpus.chunkById, denseRecallLimit, {
+			backend: args.denseBackend,
+			hnswApprox,
+			searchEf: profile.searchEf,
 			useQueryVariants: activeConfig.useDenseQueryVariants ?? false,
 			queryVariantLimit: profile.queryVariantLimit,
 		});
@@ -2648,7 +2971,7 @@ function printSummary(args, runs) {
 	console.log("Hybrid Search Synthetic Benchmark");
 	console.log("================================");
 	console.log(
-		`runs=${runs.length}, files=${runs[0].fileCount}, chunks=${runs[0].chunkCount}, logicalCorpus=${formatMb(runs[0].logicalBytes)}, target=${args.targetLibraryMb}MB, queries=${runs[0].queryCount}, recallLimit=${args.recallLimit}, topK=${args.topK}, difficulty=${args.difficulty}`,
+		`runs=${runs.length}, files=${runs[0].fileCount}, chunks=${runs[0].chunkCount}, logicalCorpus=${formatMb(runs[0].logicalBytes)}, target=${args.targetLibraryMb}MB, queries=${runs[0].queryCount}, recallLimit=${args.recallLimit}, topK=${args.topK}, difficulty=${args.difficulty}, denseBackend=${args.denseBackend}`,
 	);
 	console.log(
 		`querySource=${runs[0].querySource.path ? runs[0].querySource.path : "built-in synthetic"}, suiteProfile=${runs[0].querySource.suiteProfile ?? "synthetic"}, suites=${runs[0].querySource.suiteNames.join(", ")}`,
@@ -2926,7 +3249,7 @@ function printTuningSummary(args, rankedConfigs, corpusSummary) {
 	console.log("Hybrid Search Tuning Sweep");
 	console.log("==========================");
 	console.log(
-		`configs=${rankedConfigs.length}, logicalCorpus=${formatMb(corpusSummary.logicalBytes)}, files=${corpusSummary.fileCount}, chunks=${corpusSummary.chunkCount}, runs=${args.runs}, difficulty=${args.difficulty}`,
+		`configs=${rankedConfigs.length}, logicalCorpus=${formatMb(corpusSummary.logicalBytes)}, files=${corpusSummary.fileCount}, chunks=${corpusSummary.chunkCount}, runs=${args.runs}, difficulty=${args.difficulty}, denseBackend=${args.denseBackend}`,
 	);
 	console.log(
 		`querySource=${rankedConfigs[0].runs?.[0]?.querySource?.path ?? "built-in synthetic"}, suiteProfile=${rankedConfigs[0].runs?.[0]?.querySource?.suiteProfile ?? "synthetic"}`,
@@ -3008,7 +3331,7 @@ function printBudgetCompareSummary(args, rows) {
 	console.log("Hybrid Budget Compare");
 	console.log("=====================");
 	console.log(
-		`logicalSizes=${args.sizes.join(", ")}MB, runs=${args.runs}, difficulty=${args.difficulty}, mode=offline-in-memory`,
+		`logicalSizes=${args.sizes.join(", ")}MB, runs=${args.runs}, difficulty=${args.difficulty}, denseBackend=${args.denseBackend}, mode=offline-in-memory`,
 	);
 	console.log("offline-only: no API calls, no embedding requests, no rerank requests, no token usage");
 	for (const suiteProfile of ["daily", "holdout"]) {
@@ -3076,7 +3399,7 @@ function printSizeSweepSummary(args, rows) {
 	console.log("Hybrid Search Size Sweep");
 	console.log("========================");
 	console.log(
-		`logicalSizes=${args.sizes.join(", ")}MB, runs=${args.runs}, difficulty=${args.difficulty}, mode=offline-in-memory`,
+		`logicalSizes=${args.sizes.join(", ")}MB, runs=${args.runs}, difficulty=${args.difficulty}, denseBackend=${args.denseBackend}, mode=offline-in-memory`,
 	);
 	console.log("offline-only: no API calls, no embedding requests, no rerank requests, no token usage");
 	console.log("");

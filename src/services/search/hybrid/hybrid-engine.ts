@@ -2,6 +2,7 @@ import { OuterSetting } from 'src/globals/plugin-setting';
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
 import type { LocaleKey } from 'src/services/obsidian/translations/locale-helper';
 import { Database } from 'src/services/database/database';
+import { Tokenizer } from 'src/services/search/tokenizer';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import { chunkFile } from './chunker';
@@ -24,7 +25,7 @@ import {
 	shardToChunkVectorRecords,
 } from './hybrid-store';
 import type { Chunk, RawChunk, StoredVector, VectorPrecision } from './hybrid-types';
-import type { RankedResult } from './ranking';
+import { buildHybridQueryProfile, type RankedResult } from './ranking';
 import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
 import { EMBED_DIM } from './hybrid-types';
 
@@ -53,6 +54,7 @@ type SmallChunkCandidate = {
 export class HybridEngine {
 	private readonly db = getInstance(Database);
 	private readonly setting = getInstance(OuterSetting);
+	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly embedder = new Embedder();
 	private readonly reranker = new HybridReranker();
 	private readonly bm25 = new BM25Engine();
@@ -163,6 +165,7 @@ export class HybridEngine {
 	async search(query: string, topK = this.defaultResultCount): Promise<FileItem[]> {
 		if (!this.isEnabled() || !this._ready || !query.trim()) return [];
 
+		const queryTokens = this.tokenizer.tokenize(query, 'search');
 		const bm25Small = this.bm25.search(query, BM25_RECALL_LIMIT, {
 			useProximity: HYBRID_BM25_USE_PROXIMITY,
 			enableQueryExpansion: HYBRID_BM25_ENABLE_QUERY_EXPANSION,
@@ -170,12 +173,18 @@ export class HybridEngine {
 			id: result.docId,
 			score: result.score,
 		}));
+		const queryProfile = buildHybridQueryProfile(
+			query,
+			queryTokens.length,
+			bm25Small.length > 0,
+		);
+		const denseSearchEf = Math.max(SEARCH_EF, queryProfile.searchEf);
 
 		let denseSmall: RankedResult[] = [];
 		try {
 			if (this._canSearch) {
 				const embedded = await this.embedder.embedQuery(query, this.precision, SEARCH_EMBED_TOKEN_KEY);
-				denseSmall = this.hnswSmall.search(embedded, DENSE_RECALL_LIMIT, SEARCH_EF)
+				denseSmall = this.hnswSmall.search(embedded, DENSE_RECALL_LIMIT, denseSearchEf)
 					.map((result) => ({ id: result.id, score: result.score }));
 			}
 		} catch (error) {
