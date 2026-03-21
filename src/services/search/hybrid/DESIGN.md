@@ -271,6 +271,7 @@ Practical rule:
 - rerank output size is controlled by settings
 - if rerank returns `N` chunks, the UI displays `N` chunks total
 - files are only grouping containers in the UI
+- dense recall is currently single-query in runtime; lightweight query variants are benchmark-only until they show clear recall gains
 
 ## Fallback Behavior
 
@@ -329,7 +330,8 @@ The next planning phase should optimize hybrid retrieval as a reranker-fed candi
   - `hnsw-only gain@25`
   - `bm25-only anchor gain@25`
   - candidate noise rate
-- current offline regression recommendation favors a slightly HNSW-heavy default budget: `BM25 20 + HNSW 30`
+- current runtime default uses a fixed plain candidate budget: `BM25 20 + HNSW 30`
+- current offline results do not justify switching runtime to `25/25`, and they also do not justify paying extra query-embedding cost for dense query variants
 
 ### Phase 2
 

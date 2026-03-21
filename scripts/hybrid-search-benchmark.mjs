@@ -12,6 +12,8 @@ const DEFAULT_SIZE_SWEEP_MBS = [50, 120, 300];
 const DEFAULT_BUDGET_COMPARE_NAMES = [
 	"current-20x30-prox",
 	"current-20x30-plain",
+	"current-25x25-plain",
+	"current-25x25-plain-variants",
 	"entry-aware-fallback-dense-current-plain",
 	"entry-aware-dense-max-current-plain",
 	"entry-aware-direct-balanced-current-plain",
@@ -781,18 +783,24 @@ function buildHybridQueryProfile(query, queryTokenCount, hasLexicalHits, tuning 
 			lexicalWeight: 1.35,
 			vecSmallWeight: 0.45,
 			vecSmallMinScore: 0.26,
+			searchEf: 56,
+			queryVariantLimit: 1,
 		};
 	} else if (!hasLexicalHits && queryTokenCount >= 3) {
 		baseProfile = {
 			lexicalWeight: 0.72,
 			vecSmallWeight: 1.05,
 			vecSmallMinScore: 0.12,
+			searchEf: 96,
+			queryVariantLimit: 3,
 		};
 	} else {
 		baseProfile = {
 			lexicalWeight: 1.0,
 			vecSmallWeight: 0.9,
 			vecSmallMinScore: 0.18,
+			searchEf: 72,
+			queryVariantLimit: 2,
 		};
 	}
 
@@ -804,7 +812,39 @@ function buildHybridQueryProfile(query, queryTokenCount, hasLexicalHits, tuning 
 		vecSmallMinScore: clamp01(
 			baseProfile.vecSmallMinScore + (tuning.vecMinScoreDelta ?? 0),
 		),
+		searchEf: baseProfile.searchEf,
+		queryVariantLimit: baseProfile.queryVariantLimit,
 	};
+}
+
+function buildSemanticQueryVariants(query, queryTokens, limit) {
+	const variants = [];
+	const seen = new Set();
+
+	const addVariant = (text, weight) => {
+		const normalized = text.trim().replace(/\s+/g, " ");
+		if (!normalized || seen.has(normalized)) {
+			return;
+		}
+		seen.add(normalized);
+		variants.push({ text: normalized, weight });
+	};
+
+	addVariant(query, 1);
+	if (limit <= 1 || queryTokens.length <= 2) {
+		return variants.slice(0, limit);
+	}
+
+	addVariant(queryTokens.slice(0, Math.min(queryTokens.length, 10)).join(" "), 0.9);
+	if (limit <= 2 || queryTokens.length <= 5) {
+		return variants.slice(0, limit);
+	}
+
+	addVariant(
+		[...queryTokens.slice(0, 4), ...queryTokens.slice(-3)].join(" "),
+		0.78,
+	);
+	return variants.slice(0, limit);
 }
 
 function mergeHybridRankings(bm25, vecSmall, profile, limit, tuning = {}) {
@@ -1496,22 +1536,37 @@ function buildEngines(chunkById) {
 	return { bm25NoProx, bm25Prox };
 }
 
-function denseSearch(query, chunkById, limit) {
+function denseSearch(query, chunkById, limit, options = {}) {
 	const difficultyProfile = resolveDifficultyProfile(query.difficulty);
-	const queryVector = createSemanticVector(
-		query.text,
-		difficultyProfile.name === "hard" ? [] : query.semanticHints ?? [],
-		query.semanticHints ?? [],
-	);
-	const ranking = [];
-	for (const chunk of chunkById.values()) {
-		ranking.push({
-			id: chunk.id,
-			score: normalizedCosine(queryVector, chunk.vector),
-		});
+	const useQueryVariants = options.useQueryVariants ?? false;
+	const queryTokens = tokenize(query.text);
+	const variants = useQueryVariants
+		? buildSemanticQueryVariants(
+			query.text,
+			queryTokens,
+			Math.max(1, options.queryVariantLimit ?? 1),
+		)
+		: [{ text: query.text, weight: 1 }];
+	const queryVectors = variants.map((variant) => ({
+		...variant,
+		vector: createSemanticVector(
+			variant.text,
+			difficultyProfile.name === "hard" ? [] : query.semanticHints ?? [],
+			query.semanticHints ?? [],
+		),
+	}));
+	const mergedScores = new Map();
+	for (const variant of queryVectors) {
+		for (const chunk of chunkById.values()) {
+			const score = normalizedCosine(variant.vector, chunk.vector) * variant.weight;
+			if (score > (mergedScores.get(chunk.id) ?? Number.NEGATIVE_INFINITY)) {
+				mergedScores.set(chunk.id, score);
+			}
+		}
 	}
+	const ranking = Array.from(mergedScores.entries()).map(([id, score]) => ({ id, score }));
 	return {
-		queryVector,
+		queryVector: queryVectors[0]?.vector,
 		results: ranking.sort((a, b) => b.score - a.score).slice(0, limit),
 	};
 }
@@ -1714,10 +1769,11 @@ function noiseRateAtK(relevantSet, rankedItems, k) {
 
 function createDefaultTuningConfig(defaultRecallLimit) {
 	return {
-		name: "current-20x20-prox",
-		bm25RecallLimit: defaultRecallLimit,
-		denseRecallLimit: defaultRecallLimit,
-		useProximity: true,
+		name: "current-runtime-20x30-plain",
+		bm25RecallLimit: Math.max(20, defaultRecallLimit),
+		denseRecallLimit: Math.max(30, defaultRecallLimit),
+		useProximity: false,
+		useDenseQueryVariants: false,
 		profileTuning: {
 			lexicalWeightMultiplier: 1,
 			vecWeightMultiplier: 1,
@@ -1768,6 +1824,7 @@ function buildTuningConfigs() {
 	const configs = [];
 	const recallPairs = [
 		[20, 20],
+		[25, 25],
 		[30, 20],
 		[20, 30],
 		[30, 30],
@@ -1831,14 +1888,20 @@ function buildTuningConfigs() {
 	for (const [bm25RecallLimit, denseRecallLimit] of recallPairs) {
 		for (const useProximity of [true, false]) {
 			for (const profile of profiles) {
-				configs.push({
-					name: `${profile.name}-${bm25RecallLimit}x${denseRecallLimit}-${useProximity ? "prox" : "plain"}`,
-					bm25RecallLimit,
-					denseRecallLimit,
-					useProximity,
-					profileTuning: profile.profileTuning,
-					mergeTuning: profile.mergeTuning,
-				});
+				for (const useDenseQueryVariants of [false, true]) {
+					if (useDenseQueryVariants && !(bm25RecallLimit === 25 && denseRecallLimit === 25 && !useProximity)) {
+						continue;
+					}
+					configs.push({
+						name: `${profile.name}-${bm25RecallLimit}x${denseRecallLimit}-${useProximity ? "prox" : "plain"}${useDenseQueryVariants ? "-variants" : ""}`,
+						bm25RecallLimit,
+						denseRecallLimit,
+						useProximity,
+						useDenseQueryVariants,
+						profileTuning: profile.profileTuning,
+						mergeTuning: profile.mergeTuning,
+					});
+				}
 			}
 		}
 	}
@@ -1932,15 +1995,18 @@ function evaluateRun(args, runIndex, config = null) {
 		);
 		const bm25BaseChunks = bm25NoProx.search(query.text, bm25RecallLimit);
 		const bm25ProxChunks = bm25Prox.search(query.text, bm25RecallLimit);
-		const dense = denseSearch(query, corpus.chunkById, denseRecallLimit);
 		const activeBm25Chunks = mergeUsesProximity ? bm25ProxChunks : bm25BaseChunks;
-		const unionChunks = dedupeSequential(activeBm25Chunks, dense.results);
 		const profile = buildHybridQueryProfile(
 			query.text,
 			tokenize(query.text).length,
 			activeBm25Chunks.length > 0,
 			activeConfig.profileTuning,
 		);
+		const dense = denseSearch(query, corpus.chunkById, denseRecallLimit, {
+			useQueryVariants: activeConfig.useDenseQueryVariants ?? false,
+			queryVariantLimit: profile.queryVariantLimit,
+		});
+		const unionChunks = dedupeSequential(activeBm25Chunks, dense.results);
 		const mergeChunks = mergeHybridRankings(
 			activeBm25Chunks,
 			dense.results,
