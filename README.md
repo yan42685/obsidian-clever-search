@@ -9,9 +9,9 @@
 Version 0.3 focuses on making Clever Search feel faster, more forgiving, and easier to reuse across repeated searches.
 
 - Hybrid vault search: combine lexical retrieval with semantic ranking, with graceful fallback to lexical-only results when the semantic path is unavailable
-- Search history autocomplete: previously confirmed queries are remembered with fuzzy-ranked candidates, top-history ghost completion, and matched-character emphasis while typing
-- Search history controls: enable or disable history, choose the maximum history size, and clear saved history from settings
-- Cleaner repeat-search workflow: history suggestions support mouse selection, keyboard navigation, per-entry deletion, and Enter confirmation without changing result ranking logic
+- Search history autocomplete: only previously confirmed queries are recorded, then reused for fuzzy-ranked candidates, top-history ghost completion, and matched-character emphasis while typing
+- Search history controls: enable or disable history, choose the maximum history size, clear saved history from settings, and remove individual entries directly from the candidate list
+- Cleaner repeat-search workflow: history suggestions support mouse selection, keyboard navigation, `Ctrl+R` manual toggle, `Tab` ghost acceptance, `Delete` or `x` removal, and Enter confirmation without changing result ranking logic
 
 ## Demo
 

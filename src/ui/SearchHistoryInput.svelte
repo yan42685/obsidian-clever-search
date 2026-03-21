@@ -38,17 +38,18 @@
 	let lastAcceptedQuery = "";
 	let searchInputEl: HTMLDivElement;
 	let suggestionsEl: HTMLUListElement;
+	let editableQueryText = "";
 	let normalizedQueryText = "";
 	let ghostSuffix = "";
 	let recentSuggestionQueries = new Set<string>();
 
-	$: normalizedQueryText = normalizeEditableText(queryText).trim();
-	$: ghostSuffix = getGhostSuffix(ghostSuggestion, normalizedQueryText);
+	$: editableQueryText = normalizeEditableText(queryText);
+	$: normalizedQueryText = editableQueryText.trim();
+	$: ghostSuffix = getGhostSuffix(ghostSuggestion, editableQueryText);
 	$: recentSuggestionQueries = getRecentSuggestionQueries(historySuggestions);
 	$: if (searchInputEl) {
-		const normalizedQueryText = normalizeEditableText(queryText);
-		if (searchInputEl.textContent !== normalizedQueryText) {
-			searchInputEl.textContent = normalizedQueryText;
+		if (searchInputEl.textContent !== editableQueryText) {
+			searchInputEl.textContent = editableQueryText;
 		}
 	}
 
@@ -271,24 +272,24 @@
 
 	function getGhostSuffix(
 		suggestion: SearchHistoryEntry | null,
-		normalizedQuery: string,
+		rawQueryText: string,
 	): string {
-		if (!suggestion || normalizedQuery.length === 0) {
+		if (!suggestion || rawQueryText.trim().length === 0) {
 			return "";
 		}
 
-		const normalizedSuggestion = suggestion.queryText.trim();
+		const normalizedSuggestion = normalizeEditableText(suggestion.queryText);
 		if (
 			!normalizedSuggestion
 				.toLocaleLowerCase()
-				.startsWith(normalizedQuery.toLocaleLowerCase())
+				.startsWith(rawQueryText.toLocaleLowerCase())
 		) {
 			return "";
 		}
-		if (normalizedSuggestion.length <= normalizedQuery.length) {
+		if (normalizedSuggestion.length <= rawQueryText.length) {
 			return "";
 		}
-		return normalizedSuggestion.slice(normalizedQuery.length);
+		return normalizedSuggestion.slice(rawQueryText.length);
 	}
 
 	function normalizeEditableText(text: string): string {
@@ -502,7 +503,7 @@
 <div class="search-bar" data-match-count={matchCountText}>
 	<div class="history-input-shell">
 		<div class="history-input-overlay" aria-hidden="true">
-			<span class="history-input-text">{normalizeEditableText(queryText)}</span>
+			<span class="history-input-text">{editableQueryText}</span>
 			{#if ghostSuffix}
 				<span class="history-input-ghost">{ghostSuffix}</span>
 			{/if}
