@@ -71,9 +71,9 @@ export default {
 		"语义索引当前不可用，已降级为 BM25 索引。",
 	"hybridNotice.searchFallbackToBm25":
 		"语义搜索当前不可用，本次结果已降级为 BM25。",
-	"File search backend": "文件搜索后端",
+	"File search backend": "词法搜索引擎",
 	"File search backend desc":
-		"一键切换词法文件检索后端。MiniSearch 更保守稳定；自定义 BM25 在前缀匹配和元数据感知方面更强。",
+		"MiniSearch 更保守稳定；自定义 BM25 在前缀匹配和元数据感知方面更强。不同搜索习惯带来的命中率也会不同，推荐选一个更贴合自己习惯的作为日常主力；如果追求更高召回率，最终还是需要混合搜索兜底。",
 	"fileSearchBackend.minisearch": "MiniSearch（稳定）",
 	"fileSearchBackend.customBm25": "自定义 BM25",
 	"Manage hybrid search": "管理混合搜索",
