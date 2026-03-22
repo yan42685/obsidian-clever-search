@@ -2,6 +2,7 @@ import { SMALL_CHUNK_TARGET } from "src/services/search/hybrid/hybrid-types";
 import {
 	buildChunkEmbeddingInputs,
 	chunkFile,
+	createChunkContextBuilderFromOutline,
 	estimateTokenCount,
 } from "src/services/search/hybrid/chunker";
 import type { RawChunk } from "src/services/search/hybrid/hybrid-types";
@@ -181,6 +182,46 @@ describe("hybrid chunker", () => {
 		expect(embedInputs[0]).not.toContain("Wrong Title In Text");
 		expect(embedInputs[1]).toContain("Section: Plugin Index > Calendar");
 		expect(embedInputs[1]).not.toContain("Another Wrong Section");
+	});
+
+	test("reuses provided heading outline to rebuild the same chunk context", () => {
+		const text = [
+			"# Plugin Index",
+			"",
+			"## Calendar",
+			"Use Full Calendar for weekly scheduling and event planning.",
+			"",
+			"### Advanced Views",
+			"Timeline and agenda views help compare appointments.",
+		].join("\n");
+		const chunk = createRawChunk(
+			"planning/full-calendar-notes.md",
+			text,
+			"Timeline and agenda views help compare appointments.",
+			6,
+			0,
+			6,
+		);
+		const outline = [
+			{ line: 0, level: 1, title: "Plugin Index" },
+			{ line: 2, level: 2, title: "Calendar" },
+			{ line: 5, level: 3, title: "Advanced Views" },
+		];
+
+		const [embedInput] = buildChunkEmbeddingInputs(
+			"planning/full-calendar-notes.md",
+			text,
+			[chunk],
+			outline,
+		);
+		const buildContext = createChunkContextBuilderFromOutline(
+			"planning/full-calendar-notes.md",
+			text.split("\n").length,
+			outline,
+		);
+		const context = buildContext(chunk.startLine);
+
+		expect(embedInput).toBe(`${context}\n\n${chunk.text}`);
 	});
 
 	test("skips low-signal headings and keeps up to four nearest informative headings", () => {

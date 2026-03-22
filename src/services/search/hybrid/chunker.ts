@@ -789,20 +789,49 @@ export function buildChunkEmbeddingInputs(
 	return chunks.map((chunk) => buildInput(chunk));
 }
 
-export function createChunkEmbeddingInputBuilder(
+export function createChunkContextBuilder(
 	filePath: string,
 	plainText: string,
 	headingOutline?: HeadingOutlineEntry[],
-): (chunk: RawChunk) => string {
+): (startLine: number) => string {
 	const lineCount = plainText.split("\n").length;
 	const outline =
 		headingOutline && headingOutline.length > 0
 			? headingOutline
 			: parseFallbackHeadingOutline(plainText);
-	const contextsByLine = buildHeadingContextsByLine(lineCount, outline);
+	return createChunkContextBuilderFromOutline(
+		filePath,
+		lineCount,
+		outline,
+	);
+}
+
+export function createChunkContextBuilderFromOutline(
+	filePath: string,
+	lineCount: number,
+	headingOutline: HeadingOutlineEntry[],
+): (startLine: number) => string {
+	const contextsByLine = buildHeadingContextsByLine(lineCount, headingOutline);
+
+	return (startLine: number) => {
+		const headingTitles = contextsByLine[startLine] ?? [];
+		return buildChunkEmbedContext(filePath, headingTitles);
+	};
+}
+
+export function createChunkEmbeddingInputBuilder(
+	filePath: string,
+	plainText: string,
+	headingOutline?: HeadingOutlineEntry[],
+): (chunk: RawChunk) => string {
+	const buildContext = createChunkContextBuilder(
+		filePath,
+		plainText,
+		headingOutline,
+	);
+
 	return (chunk: RawChunk) => {
-		const headingTitles = contextsByLine[chunk.startLine] ?? [];
-		const context = buildChunkEmbedContext(filePath, headingTitles);
+		const context = buildContext(chunk.startLine);
 		if (!context) {
 			return chunk.text;
 		}

@@ -2,6 +2,7 @@ import { OuterSetting } from 'src/globals/plugin-setting';
 import { EngineType, FileItem, FileSubItem } from 'src/globals/search-types';
 import type { LocaleKey } from 'src/services/obsidian/translations/locale-helper';
 import { Database } from 'src/services/database/database';
+import { DataProvider } from 'src/services/obsidian/user-data/data-provider';
 import { Tokenizer } from 'src/services/search/tokenizer';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
@@ -10,13 +11,16 @@ import {
 	buildRawChunkFromOffsets,
 	chunkFile,
 	chunkFileRange,
+	createChunkContextBuilderFromOutline,
 	createChunkEmbeddingInputBuilder,
 } from './chunker';
 import { BM25Engine } from './bm25';
 import {
 	Embedder,
 	estimateTextsTokenUsage,
+	NoApiKeyError,
 	recordEstimatedTokenSavings,
+	WeeklyTokenLimitExceededError,
 } from './embedder';
 import { HnswIndex } from './hnsw';
 import {
@@ -83,6 +87,7 @@ type SmallChunkCandidate = {
 	id: number;
 	filePath: string;
 	text: string;
+	rerankText: string;
 	row: number;
 	col: number;
 	score: number;
@@ -106,6 +111,7 @@ type PlannedChunk = {
 export class HybridEngine {
 	private readonly db = getInstance(Database);
 	private readonly setting = getInstance(OuterSetting);
+	private readonly dataProvider = getInstance(DataProvider);
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly embedder = new Embedder();
 	private readonly reranker = new HybridReranker();
@@ -981,14 +987,35 @@ export class HybridEngine {
 	}
 
 	private classifyIndexErrorKind(error: unknown): string {
+		if (error instanceof NoApiKeyError) return 'missing_api_key';
+		if (error instanceof WeeklyTokenLimitExceededError) {
+			return 'weekly_token_limit';
+		}
 		if (!(error instanceof Error)) {
 			return 'unknown';
 		}
 		const message = `${error.name}: ${error.message}`.toLowerCase();
 		if (message.includes('weekly token limit')) return 'weekly_token_limit';
 		if (message.includes('api key')) return 'missing_api_key';
-		if (message.includes('429')) return 'provider_429';
-		if (message.includes('408') || message.includes('timeout')) return 'timeout';
+		if (
+			message.includes('insufficient_quota') ||
+			message.includes('quota exhausted') ||
+			message.includes('quota exceeded')
+		) {
+			return 'quota_exhausted';
+		}
+		const statusMatch = message.match(/embedding api error (\d{3})/);
+		if (statusMatch) {
+			const status = Number(statusMatch[1]);
+			if (status === 401) return 'auth_401';
+			if (status === 403) return 'auth_403';
+			if (status === 408) return 'timeout';
+			if (status === 409 || status === 425 || status === 429) {
+				return 'provider_429';
+			}
+			if (status >= 500) return 'provider_5xx';
+		}
+		if (message.includes('timeout')) return 'timeout';
 		if (
 			message.includes('500') ||
 			message.includes('502') ||
@@ -1061,6 +1088,7 @@ export class HybridEngine {
 				.filter((row): row is ChunkRow => row !== undefined)
 				.map((row) => row.filePath),
 		);
+		const contextBuilderByPath = this.buildRerankContextBuilderByPath(snapshotByPath);
 		const chunksById = new Map<number, Chunk>();
 		for (const row of rows) {
 			if (!row?.id) continue;
@@ -1073,10 +1101,13 @@ export class HybridEngine {
 			.map((item) => {
 				const chunk = chunksById.get(item.id);
 				if (!chunk) return null;
+				const buildContext = contextBuilderByPath.get(chunk.filePath);
+				const context = buildContext?.(chunk.startLine) ?? '';
 				return {
 					id: chunk.id,
 					filePath: chunk.filePath,
 					text: chunk.text,
+					rerankText: context ? `${context}\n\n${chunk.text}` : chunk.text,
 					row: chunk.startLine,
 					col: chunk.startCol,
 					score: item.score,
@@ -1110,7 +1141,7 @@ export class HybridEngine {
 			smallCandidates.map((candidate) => ({
 				id: candidate.id,
 				filePath: candidate.filePath,
-				text: candidate.text,
+				text: candidate.rerankText,
 				startLine: candidate.row,
 				startCol: candidate.col,
 				endLine: candidate.row,
@@ -1239,10 +1270,42 @@ export class HybridEngine {
 		}
 	}
 
+	private buildRerankContextBuilderByPath(
+		snapshotByPath: Map<string, string>,
+	): Map<string, (startLine: number) => string> {
+		const builders = new Map<string, (startLine: number) => string>();
+		for (const [filePath, plainText] of snapshotByPath) {
+			const headingOutline = this.dataProvider.getHeadingOutline(filePath);
+			builders.set(
+				filePath,
+				createChunkContextBuilderFromOutline(
+					filePath,
+					countLines(plainText),
+					headingOutline,
+				),
+			);
+		}
+		return builders;
+	}
+
 	private isExcludedPath(filePath: string): boolean {
 		const excludedPaths = this.setting.hybrid.excludedPaths ?? [];
 		return excludedPaths.some(
 			(excludedPath) => filePath === excludedPath || filePath.startsWith(`${excludedPath}/`),
 		);
 	}
+}
+
+function countLines(text: string): number {
+	if (text.length === 0) {
+		return 0;
+	}
+
+	let count = 1;
+	for (let index = 0; index < text.length; index++) {
+		if (text[index] === '\n') {
+			count++;
+		}
+	}
+	return count;
 }

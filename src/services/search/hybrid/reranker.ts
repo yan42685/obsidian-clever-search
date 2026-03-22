@@ -50,9 +50,10 @@ export class HybridReranker {
 			}));
 		}
 
+		const documents = candidates.map((candidate) => candidate.text);
 		const estimatedTokens = estimateTextsTokenUsage([
 			query,
-			...candidates.map((candidate) => candidate.text),
+			...documents,
 		]);
 		await ensureWeeklyTokenBudget(estimatedTokens);
 
@@ -65,7 +66,7 @@ export class HybridReranker {
 			body: JSON.stringify({
 				model: RERANK_MODEL,
 				query,
-				documents: candidates.map((candidate) => candidate.text),
+				documents,
 				top_n: Math.min(candidates.length, topK),
 				instruct: "Retrieve semantically similar text.",
 			}),

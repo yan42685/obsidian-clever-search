@@ -21,6 +21,7 @@ import { throttle } from "throttle-debounce";
 import { MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataProvider } from "./user-data/data-provider";
+import { DataManager } from "./user-data/data-manager";
 import { ViewRegistry, ViewType } from "./view-registry";
 
 @singleton()
@@ -44,7 +45,48 @@ export class SearchService {
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
-		const result = new SearchResult("no result", []);
+		return await this.searchInVaultLexical(queryText);
+	}
+
+	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
+		if (queryText.length === 0) {
+			return new SearchResult("no result", []);
+		}
+		if (!this.hybridEngine.isEnabled()) {
+			return await this.searchInVaultLexical(queryText);
+		}
+
+		const dataManager = getInstance(DataManager);
+		if (dataManager.isHybridSearchUnavailable()) {
+			return await this.searchInVaultLexical(queryText);
+		}
+		if (dataManager.hasHybridFailedEmbeddings()) {
+			return await this.searchInVaultLexical(queryText, {
+				hybridEmbeddingIncomplete: true,
+			});
+		}
+		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
+		const items = await this.hybridEngine.search(queryText);
+		const fallbackNoticeKey =
+			this.hybridEngine.consumeSearchFallbackNoticeKey();
+		if (fallbackNoticeKey) {
+			this.noticeHybridFallback(t(fallbackNoticeKey));
+		}
+		return new SearchResult(sourcePath, items, fallbackNoticeKey, false);
+	}
+
+	private async searchInVaultLexical(
+		queryText: string,
+		options: {
+			hybridEmbeddingIncomplete?: boolean;
+		} = {},
+	): Promise<SearchResult> {
+		const result = new SearchResult(
+			"no result",
+			[],
+			null,
+			options.hybridEmbeddingIncomplete ?? false,
+		);
 		if (queryText.length === 0) {
 			return result;
 		}
@@ -59,48 +101,26 @@ export class SearchService {
 			queryText,
 			lexicalMatches,
 		);
-		if (rerankedMatches.length !== 0) {
-			return {
-				sourcePath: sourcePath,
-				items: rerankedMatches
-					.slice(0, maxDisplayItems)
-					.map((matchedFile) => {
-					// It is necessary to use a constructor with 'new', rather than using an object literal.
-					// Otherwise, it is impossible to determine the type using 'instanceof', achieving polymorphic effects based on inheritance
-					// (to correctly display data in Svelte components).
-					return new FileItem(
-						EngineType.LEXICAL,
-						matchedFile.path,
-						matchedFile.queryTerms,
-						matchedFile.matchedTerms,
-						[], // should be populated on demand
-						"nothing",
-					);
-					}),
-				hybridFallbackNoticeKey: null,
-			} as SearchResult;
-		} else {
+		if (rerankedMatches.length === 0) {
 			logger.trace("lexical matched files count is 0");
-			// TODO: do semantic search
 			return result;
 		}
-	}
 
-	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
-		if (queryText.length === 0) {
-			return new SearchResult("no result", []);
-		}
-		if (!this.hybridEngine.isEnabled()) {
-			return this.searchInVault(queryText);
-		}
-		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
-		const items = await this.hybridEngine.search(queryText);
-		const fallbackNoticeKey =
-			this.hybridEngine.consumeSearchFallbackNoticeKey();
-		if (fallbackNoticeKey) {
-			this.noticeHybridFallback(t(fallbackNoticeKey));
-		}
-		return new SearchResult(sourcePath, items, fallbackNoticeKey);
+		return new SearchResult(
+			sourcePath,
+			rerankedMatches.slice(0, maxDisplayItems).map((matchedFile) => {
+				return new FileItem(
+					EngineType.LEXICAL,
+					matchedFile.path,
+					matchedFile.queryTerms,
+					matchedFile.matchedTerms,
+					[],
+					"nothing",
+				);
+			}),
+			null,
+			options.hybridEmbeddingIncomplete ?? false,
+		);
 	}
 
 	/**

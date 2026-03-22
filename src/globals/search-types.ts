@@ -64,14 +64,17 @@ export class SearchResult {
 	sourcePath: string;
 	items: Item[];
 	hybridFallbackNoticeKey?: LocaleKey | null;
+	hybridEmbeddingIncomplete?: boolean;
 	constructor(
 		currPath: string,
 		items: Item[],
 		hybridFallbackNoticeKey?: LocaleKey | null,
+		hybridEmbeddingIncomplete?: boolean,
 	) {
 		this.sourcePath = currPath;
 		this.items = items;
 		this.hybridFallbackNoticeKey = hybridFallbackNoticeKey ?? null;
+		this.hybridEmbeddingIncomplete = hybridEmbeddingIncomplete ?? false;
 	}
 }
 
