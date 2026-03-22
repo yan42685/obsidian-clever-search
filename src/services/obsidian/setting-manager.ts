@@ -633,12 +633,10 @@ class HybridSearchModal extends Modal {
 
 		// ── Introduction ──────────────────────────────────────────────────────
 		contentEl.createEl("h2", { text: t("Manage hybrid search") });
-		new Setting(contentEl).setDesc(t("hybridModal.manageIntro"));
-		new Setting(contentEl).setDesc(t("hybridModal.desc"));
 
 		// ── Enable ────────────────────────────────────────────────────────────
 		new Setting(contentEl)
-			.setName(t("Enable"))
+			.setName(t("hybridModal.enableHybridSearch"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.hybrid.enabled)
@@ -651,8 +649,8 @@ class HybridSearchModal extends Modal {
 
 		// ── API Domain ────────────────────────────────────────────────────────
 		new Setting(contentEl)
-			.setName(t("hybridModal.autoShowResultsWhenLexicalEmpty"))
-			.setDesc(t("hybridModal.autoShowResultsWhenLexicalEmpty.desc"))
+			.setName(t("hybridModal.autoShowMixedSearchResults"))
+			.setDesc(t("hybridModal.autoShowMixedSearchResults.desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(
