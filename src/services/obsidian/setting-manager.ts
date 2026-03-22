@@ -475,9 +475,11 @@ class HybridSearchModal extends Modal {
 	private hybridHealthNotice: MyNotice | null = null;
 	private openedApiDomain = "";
 	private openedApiKey = "";
+	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
+	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
 	private readonly failedEmbeddingStatusListener: EventCallback = () => {
-		void this.refreshHybridRuntimeStatus();
+		void this.refreshHybridRuntimeStatusFromData();
 	};
 
 	constructor(app: App) {
@@ -502,7 +504,7 @@ class HybridSearchModal extends Modal {
 			this.failedEmbeddingStatusListener,
 		);
 		this.failedEmbeddingStatusTimer = window.setInterval(() => {
-			void this.refreshHybridRuntimeStatus();
+			this.renderHybridRuntimeStatus();
 		}, 15_000);
 		const contentEl = this.contentEl;
 
@@ -744,7 +746,7 @@ class HybridSearchModal extends Modal {
 		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
-		void this.refreshHybridRuntimeStatus();
+		void this.refreshHybridRuntimeStatusFromData();
 		void this.refreshTokenStats();
 	}
 
@@ -821,7 +823,7 @@ class HybridSearchModal extends Modal {
 		await getInstance(DataManager).retryFailedEmbeddingsOnConfigChange(
 			"weekly-token-limit-updated",
 		);
-		await this.refreshHybridRuntimeStatus();
+		await this.refreshHybridRuntimeStatusFromData();
 		await this.refreshTokenStats();
 	}
 
@@ -854,21 +856,30 @@ class HybridSearchModal extends Modal {
 		this.failedEmbeddingRetryIntervalInputEl.value = String(nextValue);
 		await this.settingManager.saveSettings();
 		getInstance(DataManager).refreshFailedEmbeddingRetrySchedule();
-		await this.refreshHybridRuntimeStatus();
+		await this.refreshHybridRuntimeStatusFromData();
 	}
 
 	private async refreshTokenStats() {
 		await this.loadTokenStats(this.statsEl);
 	}
 
-	private async refreshHybridRuntimeStatus() {
+	private async refreshHybridRuntimeStatusFromData() {
 		const dataManager = getInstance(DataManager);
-		const [failedSummary, deferredSummary] = await Promise.all([
+		[this.currentFailedEmbeddingSummary, this.currentDeferredEmbeddingSummary] =
+			await Promise.all([
 			dataManager.getHybridFailedEmbeddingSummary(),
 			dataManager.getHybridDeferredEmbeddingSummary(),
 		]);
-		this.renderFailedEmbeddingStatus(failedSummary);
-		this.renderDeferredEmbeddingStatus(deferredSummary);
+		this.renderHybridRuntimeStatus();
+	}
+
+	private renderHybridRuntimeStatus() {
+		if (this.currentFailedEmbeddingSummary) {
+			this.renderFailedEmbeddingStatus(this.currentFailedEmbeddingSummary);
+		}
+		if (this.currentDeferredEmbeddingSummary) {
+			this.renderDeferredEmbeddingStatus(this.currentDeferredEmbeddingSummary);
+		}
 	}
 
 	private async runHybridHealthCheck() {

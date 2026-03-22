@@ -353,36 +353,4 @@ export class SearchService {
 			items: lineItems,
 		} as SearchResult;
 	}
-
-	@monitorDecorator
-	/**
-	 * @deprecated since 0.1.x, use SearchService.searchInFile instead
-	 */
-	async deprecatedSearchInFile(queryText: string): Promise<SearchResult> {
-		const result = new SearchResult("", []);
-		const activeFile = this.app.workspace.getActiveFile();
-		if (
-			!queryText ||
-			!activeFile ||
-			this.viewRegistry.viewTypeByPath(activeFile.path) !==
-				ViewType.MARKDOWN
-		) {
-			return result;
-		}
-
-		const path = activeFile.path;
-
-		const lines = (await this.dataProvider.readPlainTextLines(path)).map(
-			(line, index) => new Line(line, index),
-		);
-		const lineItems = await this.lineHighlighter.parseLineItems(
-			lines,
-			queryText,
-		);
-
-		return {
-			sourcePath: path,
-			items: lineItems,
-		} as SearchResult;
-	}
 }

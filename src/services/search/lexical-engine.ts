@@ -1,4 +1,3 @@
-import MiniSearch from "minisearch";
 import type {
 	FileItem,
 	IndexedDocument,
@@ -13,7 +12,6 @@ import { singleton } from "tsyringe";
 import { OuterSetting } from "../../globals/plugin-setting";
 import {
 	FileSearchEngineFactory,
-	FileSearchOptions,
 	type SerializedFileSearchIndex,
 } from "./file-search-engine";
 import {
@@ -27,9 +25,7 @@ import { TruncateOption, type TruncateType } from "./truncate-option";
 // then the lifecycle of the instance obtained through tsyringe container is transient.
 @singleton()
 export class LexicalEngine {
-	private option = getInstance(FileSearchOptions);
 	private outerSetting = getInstance(OuterSetting);
-	private linesIndex = new MiniSearch(this.option.lineIndexOption);
 	private fileSearchEngineFactory = getInstance(FileSearchEngineFactory);
 	private _isReady = false;
 
@@ -165,9 +161,6 @@ export class LexicalEngine {
 		logger.debug(fileItem.matchedTerms);
 		const maxSubItems = 50;
 		logger.debug(`max subItems: ${maxSubItems}`);
-
-		// optimization for large charset language to avoid using jieba segmenter
-		// if (LangUtil.isLargeCharset(queryText)) {
 		const linesMatcher = new LinesMatcher(
 			lines,
 			truncateType,
@@ -177,79 +170,6 @@ export class LexicalEngine {
 			maxParsedLines,
 		);
 		return linesMatcher.parse();
-		// } else {
-		// 	// NOTE: lengthy Japanese and Korean file might be a bit slow due to the jieba segmenter,
-		// 	// and they are small charset language, so I don't know how to optimize them using bm25Calculator at the moment
-		// 	return await this.searchLinesForSmallCharset(
-		// 		lines,
-		// 		queryText,
-		// 		maxSubItems,
-		// 	);
-		// }
-	}
-
-	/**
-	 * @deprecated 0.1.x Use `searchLinesByFileItem` instead. This method is pretty slow, and doesn't reuse the prev search result;
-	 */
-	@monitorDecorator
-	private async searchLinesForSmallCharset(
-		lines: Line[],
-		queryText: string,
-		maxParsedLines: number,
-	): Promise<MatchedLine[]> {
-		this.linesIndex.removeAll();
-		// logger.info(lines);
-
-		// NOTE: can't use `addAllAsync` here, there might be some bugs in minisearch
-		this.linesIndex.addAll(lines);
-		// await this.linesIndex.addAllAsync(lines, {
-		// 	chunkSize: this.option.lineChunkSize,
-		// });
-
-		const minisearchResult = this.linesIndex.search(
-			queryText,
-			this.option.getLineSearchOption(),
-		);
-
-		logger.debug(`matched lines count: ${minisearchResult.length}`);
-		logger.debug(`only parse top ${maxParsedLines} matched lines per file`);
-		return minisearchResult.slice(0, maxParsedLines).map((item) => {
-			const lineText = lines[item.id].text;
-			return {
-				text: lineText,
-				row: item.id,
-				positions: this.findAllTermPositions(lineText, item.terms),
-			} as MatchedLine;
-		});
-	}
-
-	/**
-	 * @deprecated 0.1.x Use `searchLinesByTerms` instead
-	 * find all chars positions of terms in a given line
-	 */
-	private findAllTermPositions(line: string, terms: string[]): Set<number> {
-		const regex = new RegExp(terms.join("|"), "gi");
-		const positions = new Set<number>();
-
-		let match: RegExpExecArray | null;
-		let lastIndex = -1;
-
-		while ((match = regex.exec(line)) !== null) {
-			// skip and move to the next character if a match is an empty string or at the same position
-			if (match.index === lastIndex || match[0].length === 0) {
-				regex.lastIndex++;
-				continue;
-			}
-
-			for (let i = 0; i < match[0].length; i++) {
-				positions.add(match.index + i);
-			}
-
-			lastIndex = match.index;
-		}
-
-		return positions;
-		// return new Set([1]);  // test if this function consumes too much time
 	}
 }
 

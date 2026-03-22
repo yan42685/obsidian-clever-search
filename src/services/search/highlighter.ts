@@ -1,21 +1,16 @@
-import {
+import type {
 	Line,
-	LineItem,
-	type HighlightedContext,
-	type MatchedLine,
+	HighlightedContext,
+	MatchedLine,
 } from "src/globals/search-types";
 import { Collections } from "src/utils/data-structure";
-import { logger } from "src/utils/logger";
-import { MyLib, getInstance } from "src/utils/my-lib";
+import { MyLib } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { FileUtil } from "../../utils/file-util";
-import { LexicalEngine } from "./lexical-engine";
-import { TruncateOption, type TruncateLimit } from "./truncate-option";
+import type { TruncateLimit } from "./truncate-option";
 
 @singleton()
 export class LineHighlighter {
-	private readonly lexicalEngine = getInstance(LexicalEngine);
-
 	// @monitorDecorator
 	/**
 	 * @param queryText used for highlight context except matchedLine
@@ -81,60 +76,6 @@ export class LineHighlighter {
 		)[0];
 	}
 
-	/**
-	 * @deprecated since 0.1.x, use SearchService.searchInFile instead
-	 */
-	async parseLineItems(
-		lines: Line[],
-		queryText: string,
-	): Promise<LineItem[]> {
-		const lineItems: LineItem[] = [];
-
-		const matchedLines = await this.lexicalEngine.matchLinesFuzzy(
-			queryText,
-			lines,
-		);
-		for (const matchedLine of matchedLines) {
-			const row = matchedLine.row;
-			const firstMatchedCol = Collections.minInSet(matchedLine.positions);
-			const originLine = lines[row].text;
-
-			// only show part of the line that contains the highlighted chars
-			const start = Math.max(firstMatchedCol - 30, 0);
-			const end = Math.min(start + 200, originLine.length);
-			const substring = originLine.substring(start, end);
-
-			const adjustedPositions = this.adjustPositionsByStartCol(
-				matchedLine.positions,
-				start,
-			);
-
-			const highlightedText = this.highlightLineByCharPositions(
-				substring,
-				adjustedPositions,
-			);
-
-			const paragraphContext = await this.getLineHighlightedContext(
-				lines,
-				row,
-				firstMatchedCol,
-				queryText,
-			);
-
-			lineItems.push(
-				new LineItem(
-					{
-						text: highlightedText,
-						row: row,
-						col: firstMatchedCol,
-					} as HighlightedContext,
-					paragraphContext,
-				),
-			);
-		}
-		return lineItems;
-	}
-
 	private highlightMatchedLine(
 		lineText: string,
 		positions: Set<number>,
@@ -151,12 +92,6 @@ export class LineHighlighter {
 					positions,
 			  )}</span>`;
 	}
-
-	private highlightContextLine(lineText: string, queryText: string): string {
-		const regex = new RegExp(queryText, "gi");
-		return lineText.replace(regex, (match) => `<mark>${match}</mark>`);
-	}
-
 	private highlightLineByCharPositions(
 		lineText: string,
 		positions: Set<number>,
@@ -372,70 +307,6 @@ export class LineHighlighter {
 			resultLines.pop();
 		}
 		return resultLines;
-	}
-
-	/**
-	 * Get the HTML of context lines surrounding a matched line in a document.
-	
-	 * @deprecated Since 0.1.x
-	 * @param matchedRow - The row number of the matched line.
-	 * @param firstMatchedCol - The column number of the first matched character in the matched line.
-	 * @param queryText - The query text used for matching.
-	 * @returns A string representing the highlighted context HTML.
-	 */
-	private async getLineHighlightedContext(
-		lines: Line[],
-		matchedRow: number,
-		firstMatchedCol: number,
-		queryText: string,
-	): Promise<string> {
-		const currLang = MyLib.getCurrLanguage();
-		const context = this.getTruncatedContext(
-			lines,
-			matchedRow,
-			firstMatchedCol,
-			TruncateOption.forType("paragraph"),
-		);
-		const contextLines = context.lines;
-
-		const highlightedContext = await Promise.all(
-			contextLines.map(async (line, index) => {
-				if (line.row === matchedRow) {
-					const matchedLines = await this.lexicalEngine.matchLinesFuzzy(
-						queryText,
-						[line],
-					);
-					try {
-						// There should be only one matchedLine
-						const matchedLine = matchedLines[0];
-						let positions = matchedLine.positions;
-						if (index === 0) {
-							// the first line has been truncated
-							positions = this.adjustPositionsByStartCol(
-								positions,
-								context.firstLineStartCol,
-							);
-						}
-						return this.highlightMatchedLine(
-							line.text,
-							positions,
-							true,
-						);
-					} catch (e) {
-						logger.warn(
-							"There might be inconsistency with previous search step, which lead to a missed match to target line",
-						);
-						logger.error(e);
-					}
-				} else {
-					// Perform strict matching on other lines
-					return this.highlightContextLine(line.text, queryText);
-					// .replace(/ /g, "&nbsp;");
-				}
-			}),
-		);
-
-		return highlightedContext.join(FileUtil.JOIN_EOL);
 	}
 }
 export type TruncatedContext = {

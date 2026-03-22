@@ -184,7 +184,7 @@ export class DataManager {
 	private hybridFailedEmbeddingRetryTimer: NodeJS.Timeout | null = null;
 	private readonly hybridEmbeddingRecovery =
 		new HybridEmbeddingRecoveryManager(() =>
-			this.notifyHybridFailedEmbeddingsChanged(),
+			this.notifyHybridRuntimeStatusChanged(),
 		);
 
 	private get hybridEngine() {
@@ -196,28 +196,13 @@ export class DataManager {
 	}
 
 	getHybridFailedEmbeddingSummary(): HybridFailedEmbeddingSummary {
-		const totalFiles = this.hybridEngine.isEnabled()
-			? this.plugin.app.vault
-				.getFiles()
-				.filter(
-					(file) =>
-						this.dataProvider.isIndexable(file) &&
-						this.hybridEngine.shouldIndexPath(file.path),
-				).length
-			: 0;
-		return this.hybridEmbeddingRecovery.getSummary(totalFiles);
+		return this.hybridEmbeddingRecovery.getSummary(
+			this.countHybridTrackedFiles(),
+		);
 	}
 
 	async getHybridDeferredEmbeddingSummary(): Promise<HybridDeferredEmbeddingSummary> {
-		const totalFiles = this.hybridEngine.isEnabled()
-			? this.plugin.app.vault
-				.getFiles()
-				.filter(
-					(file) =>
-						this.dataProvider.isIndexable(file) &&
-						this.hybridEngine.shouldIndexPath(file.path),
-				).length
-			: 0;
+		const totalFiles = this.countHybridTrackedFiles();
 		if (!this.hybridEngine.isEnabled()) {
 			return {
 				deferredCount: 0,
@@ -252,6 +237,19 @@ export class DataManager {
 			nextEligibleAt,
 			totalFiles,
 		};
+	}
+
+	private countHybridTrackedFiles(): number {
+		if (!this.hybridEngine.isEnabled()) {
+			return 0;
+		}
+		return this.plugin.app.vault
+			.getFiles()
+			.filter(
+				(file) =>
+					this.dataProvider.isIndexable(file) &&
+					this.hybridEngine.shouldIndexPath(file.path),
+			).length;
 	}
 
 	async retryFailedEmbeddingsOnConfigChange(
@@ -393,9 +391,8 @@ export class DataManager {
 		this.clearFailedHybridEmbedding(path);
 		await this.deleteDocuments([path]);
 		if (this.hybridEngine.isEnabled()) {
-			await this.hybridEngine.deleteFile(path);
+			await this.deleteHybridFileAndRefreshRuntimeStatus(path);
 		}
-		this.notifyHybridRuntimeStatusChanged();
 	}
 
 	private async handleUpsertOperation(path: string): Promise<void> {
@@ -468,7 +465,6 @@ export class DataManager {
 
 		if (moved && !basenameChanged && !requiresReindex) {
 			this.moveFailedHybridEmbedding(oldPath, newPath);
-			this.notifyHybridRuntimeStatusChanged();
 			return;
 		}
 
@@ -536,7 +532,6 @@ export class DataManager {
 	private clearHybridFailedEmbeddingState(): void {
 		this.hybridEmbeddingRecovery.clearAll();
 		this.clearFailedEmbeddingRetryTimer();
-		this.notifyHybridRuntimeStatusChanged();
 	}
 
 	private clearFailedEmbeddingRetryTimer(): void {
@@ -1003,7 +998,11 @@ export class DataManager {
 		}
 
 		if (task.mode === "full") {
-			return await this.indexHybridFileWithRetry(file, "full");
+			const failure = await this.indexHybridFileWithRetry(file, "full");
+			if (failure === null) {
+				this.notifyHybridRuntimeStatusChanged();
+			}
+			return failure;
 		}
 
 		const eligibleAt = await this.getIncrementalEmbedEligibleAt(task.path);
@@ -1015,6 +1014,7 @@ export class DataManager {
 			if (failure) {
 				return failure;
 			}
+			this.notifyHybridRuntimeStatusChanged();
 			this.enqueueHybridRepair({
 				path: task.path,
 				mode: "incremental",
@@ -1024,7 +1024,11 @@ export class DataManager {
 			return null;
 		}
 
-		return await this.indexHybridFileWithRetry(file, "incremental");
+		const failure = await this.indexHybridFileWithRetry(file, "incremental");
+		if (failure === null) {
+			this.notifyHybridRuntimeStatusChanged();
+		}
+		return failure;
 	}
 
 	private async indexHybridFileWithRetry(
@@ -1067,7 +1071,6 @@ export class DataManager {
 				`hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
 			);
 			this.clearFailedHybridEmbedding(file.path);
-			this.notifyHybridRuntimeStatusChanged();
 			return null;
 		} catch (error) {
 			lastError = error;
@@ -1125,7 +1128,6 @@ export class DataManager {
 				{ persistIndices: false },
 				headingOutline,
 			);
-			this.notifyHybridRuntimeStatusChanged();
 			return null;
 		} catch (error) {
 			return {
@@ -1236,8 +1238,10 @@ export class DataManager {
 		this.scheduleFailedEmbeddingRetry();
 	}
 
-	private notifyHybridFailedEmbeddingsChanged(): void {
-		eventBus.emit(EventEnum.HYBRID_FAILED_EMBEDDINGS_CHANGED);
+	private async deleteHybridFileAndRefreshRuntimeStatus(
+		path: string,
+	): Promise<void> {
+		await this.hybridEngine.deleteFile(path);
 		this.notifyHybridRuntimeStatusChanged();
 	}
 
