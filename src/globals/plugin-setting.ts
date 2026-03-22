@@ -44,6 +44,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		weeklyTokenLimit: 3000000,
 		maxResultCount: 10,
 		indexConcurrency: 3,
+		minIncrementalEmbedIntervalSec: 60,
 		vectorCompression: "int8",
 		excludedPaths: [],
 	},
@@ -80,6 +81,7 @@ export type HybridSetting = {
 	weeklyTokenLimit: number; // 0 = unlimited
 	maxResultCount: number;
 	indexConcurrency: number;
+	minIncrementalEmbedIntervalSec: number;
 	vectorCompression: HybridVectorCompression;
 	excludedPaths: string[];
 };

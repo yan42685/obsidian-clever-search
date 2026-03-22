@@ -61,6 +61,16 @@ type HybridStorageRepairReport = {
 	reindexedPaths: string[];
 };
 
+type HybridRepairMode = "incremental" | "full";
+
+type HybridRepairTask = {
+	path: string;
+	mode: HybridRepairMode;
+	reason: string;
+	eligibleAt: number;
+	enqueuedAt: number;
+};
+
 function normalizeHybridDocState(
 	ref: HybridDocRef | undefined,
 	hasVector: boolean,
@@ -149,7 +159,6 @@ export class DataManager {
 	private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
 	private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
 	private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
-	private static readonly HYBRID_MIN_FULL_REINDEX_INTERVAL_MS = 15_000;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -157,7 +166,9 @@ export class DataManager {
 	private lexicalEngine = getInstance(LexicalEngine);
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
-	private readonly hybridDeferredReindexTimers = new Map<string, NodeJS.Timeout>();
+	private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
+	private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
+	private hybridRepairWorker: Promise<void> | null = null;
 
 	private get hybridEngine() {
 		return getInstance(SearchService).hybridEngine;
@@ -216,7 +227,7 @@ export class DataManager {
 
 	onunload() {
 		getInstance(FileWatcher).stop();
-		this.clearAllDeferredHybridReindexTimers();
+		this.clearHybridRepairScheduler();
 	}
 
 	receiveDocOperation(operation: DocOperation) {
@@ -258,7 +269,7 @@ export class DataManager {
 	}
 
 	private async handleDeleteOperation(path: string): Promise<void> {
-		this.cancelDeferredHybridReindex(path);
+		this.cancelHybridRepair(path);
 		await this.deleteDocuments([path]);
 		if (this.hybridEngine.isEnabled()) {
 			await this.hybridEngine.deleteFile(path);
@@ -277,10 +288,11 @@ export class DataManager {
 			this.hybridEngine.isEnabled() &&
 			this.hybridEngine.shouldIndexPath(file.path)
 		) {
-			const failure = await this.requestHybridReindex(file);
-			if (failure) {
-				this.noticeHybridIndexFailures([failure]);
-			}
+			this.enqueueHybridRepair({
+				path: file.path,
+				mode: "incremental",
+				reason: "runtime-incremental-edit",
+			});
 			return;
 		}
 
@@ -294,8 +306,8 @@ export class DataManager {
 		newPath: string,
 		requiresReindex: boolean,
 	): Promise<void> {
-		this.cancelDeferredHybridReindex(oldPath);
-		this.cancelDeferredHybridReindex(newPath);
+		this.cancelHybridRepair(oldPath);
+		this.cancelHybridRepair(newPath);
 		await this.deleteDocuments([oldPath]);
 
 		const file = this.dataProvider.getFileByPath(newPath);
@@ -332,88 +344,123 @@ export class DataManager {
 			return;
 		}
 
-		const failure = await this.requestHybridReindex(file);
-		if (failure) {
-			this.noticeHybridIndexFailures([failure]);
+		this.enqueueHybridRepair({
+			path: file.path,
+			mode: basenameChanged ? "full" : "incremental",
+			reason: basenameChanged
+				? "runtime-basename-changed-full-rebuild"
+				: "runtime-incremental-edit",
+		});
+	}
+
+	private enqueueHybridRepair(
+		task: Omit<HybridRepairTask, "eligibleAt" | "enqueuedAt"> & {
+			eligibleAt?: number;
+		},
+	): void {
+		const nextTask: HybridRepairTask = {
+			...task,
+			eligibleAt: task.eligibleAt ?? Date.now(),
+			enqueuedAt: Date.now(),
+		};
+		const existing = this.hybridRepairQueue.get(task.path);
+		if (!existing) {
+			this.hybridRepairQueue.set(task.path, nextTask);
+			this.scheduleHybridRepairFlush();
+			return;
+		}
+
+		this.hybridRepairQueue.set(task.path, {
+			path: task.path,
+			mode:
+				existing.mode === "full" || nextTask.mode === "full"
+					? "full"
+					: "incremental",
+			reason: nextTask.reason,
+			eligibleAt:
+				nextTask.mode === "full"
+					? Date.now()
+					: Math.min(existing.eligibleAt, nextTask.eligibleAt),
+			enqueuedAt: Math.min(existing.enqueuedAt, nextTask.enqueuedAt),
+		});
+		this.scheduleHybridRepairFlush();
+	}
+
+	private cancelHybridRepair(path: string): void {
+		this.hybridRepairQueue.delete(path);
+		if (this.hybridRepairQueue.size === 0 && this.hybridRepairFlushTimer) {
+			clearTimeout(this.hybridRepairFlushTimer);
+			this.hybridRepairFlushTimer = null;
 		}
 	}
 
-	private async requestHybridReindex(
-		file: TFile,
-	): Promise<HybridIndexFailure | null> {
-		this.cancelDeferredHybridReindex(file.path);
-		const delayMs = await this.getHybridReindexDelayMs(file.path);
-		if (delayMs > 0) {
-			this.scheduleDeferredHybridReindex(file.path, delayMs);
+	private clearHybridRepairScheduler(): void {
+		if (this.hybridRepairFlushTimer) {
+			clearTimeout(this.hybridRepairFlushTimer);
+			this.hybridRepairFlushTimer = null;
+		}
+		this.hybridRepairQueue.clear();
+	}
+
+	private scheduleHybridRepairFlush(): void {
+		if (this.hybridRepairWorker) {
+			return;
+		}
+		const delayMs = this.getNextHybridRepairDelayMs();
+		if (delayMs === null) {
+			return;
+		}
+		if (this.hybridRepairFlushTimer) {
+			clearTimeout(this.hybridRepairFlushTimer);
+		}
+		this.hybridRepairFlushTimer = setTimeout(() => {
+			this.hybridRepairFlushTimer = null;
+			void this.flushHybridRepairQueue();
+		}, delayMs);
+	}
+
+	private getNextHybridRepairDelayMs(): number | null {
+		let earliestAt = Number.POSITIVE_INFINITY;
+		for (const task of this.hybridRepairQueue.values()) {
+			earliestAt = Math.min(earliestAt, task.eligibleAt);
+		}
+		if (!Number.isFinite(earliestAt)) {
 			return null;
 		}
-		return await this.indexHybridFileWithRetry(file);
+		return Math.max(0, earliestAt - Date.now());
 	}
 
-	private async getHybridReindexDelayMs(filePath: string): Promise<number> {
-		const ref = await this.database.db.hybridDocRefs.get(filePath);
-		const indexedAt = ref?.indexedAt ?? 0;
-		if (indexedAt <= 0) {
-			return 0;
+	private async flushHybridRepairQueue(): Promise<void> {
+		if (this.hybridRepairWorker) {
+			return await this.hybridRepairWorker;
 		}
-		const elapsed = Date.now() - indexedAt;
-		if (elapsed >= DataManager.HYBRID_MIN_FULL_REINDEX_INTERVAL_MS) {
-			return 0;
-		}
-		return DataManager.HYBRID_MIN_FULL_REINDEX_INTERVAL_MS - elapsed;
-	}
 
-	private scheduleDeferredHybridReindex(path: string, delayMs: number): void {
-		this.cancelDeferredHybridReindex(path);
-		const timer = setTimeout(() => {
-			void this.flushDeferredHybridReindex(path, timer);
-		}, delayMs);
-		this.hybridDeferredReindexTimers.set(path, timer);
-	}
-
-	private cancelDeferredHybridReindex(path: string): void {
-		const timer = this.hybridDeferredReindexTimers.get(path);
-		if (!timer) {
+		const readyTasks = Array.from(this.hybridRepairQueue.values())
+			.filter((task) => task.eligibleAt <= Date.now())
+			.sort((left, right) => left.enqueuedAt - right.enqueuedAt);
+		if (readyTasks.length === 0) {
+			this.scheduleHybridRepairFlush();
 			return;
 		}
-		clearTimeout(timer);
-		this.hybridDeferredReindexTimers.delete(path);
-	}
 
-	private clearAllDeferredHybridReindexTimers(): void {
-		for (const timer of this.hybridDeferredReindexTimers.values()) {
-			clearTimeout(timer);
+		for (const task of readyTasks) {
+			this.hybridRepairQueue.delete(task.path);
 		}
-		this.hybridDeferredReindexTimers.clear();
-	}
 
-	private async flushDeferredHybridReindex(
-		path: string,
-		timer: NodeJS.Timeout,
-	): Promise<void> {
-		if (this.hybridDeferredReindexTimers.get(path) !== timer) {
-			return;
-		}
-		this.hybridDeferredReindexTimers.delete(path);
-
-		const file = this.dataProvider.getFileByPath(path);
-		if (
-			!file ||
-			!this.dataProvider.isIndexable(file) ||
-			!this.hybridEngine.isEnabled() ||
-			!this.hybridEngine.shouldIndexPath(path)
-		) {
-			if (this.hybridEngine.isEnabled()) {
-				await this.hybridEngine.deleteFile(path).catch((error) =>
-					logger.warn(`hybrid deferred delete failed for ${path}:`, error),
-				);
+		const failures: HybridIndexFailure[] = [];
+		const worker = (async () => {
+			try {
+				await this.runHybridRepairTasks(readyTasks, null, 0, failures);
+				await this.hybridEngine.persistIndicesForBatch();
+			} finally {
+				this.hybridRepairWorker = null;
+				this.scheduleHybridRepairFlush();
 			}
-			return;
-		}
-
-		const failure = await this.indexHybridFileWithRetry(file);
-		if (failure) {
-			this.noticeHybridIndexFailures([failure]);
+		})();
+		this.hybridRepairWorker = worker;
+		await worker;
+		if (failures.length > 0) {
+			this.noticeHybridIndexFailures(failures);
 		}
 	}
 
@@ -524,6 +571,13 @@ export class DataManager {
 				repairReport.repairedPaths.length,
 			);
 			const failures: HybridIndexFailure[] = [];
+			const repairTasks: HybridRepairTask[] = docsToAdd.map((file) => ({
+				path: file.path,
+				mode: "incremental",
+				reason: "startup-self-heal",
+				eligibleAt: Date.now(),
+				enqueuedAt: Date.now(),
+			}));
 			try {
 				await profileHybridStage("startup.delete_stale_paths", async () => {
 					for (const path of docsToDelete) {
@@ -533,18 +587,11 @@ export class DataManager {
 					}
 				});
 				await profileHybridStage("startup.index_files", async () => {
-					await this.indexHybridFilesInBatches(
-						docsToAdd,
-						concurrency,
-						async (file, complete) => {
-							const failure = await this.indexHybridFileWithRetry(file);
-							if (failure) {
-								failures.push(failure);
-							}
-							complete(failure !== null);
-						},
+					await this.runHybridRepairTasks(
+						repairTasks,
 						progressNotice,
 						repairReport.repairedPaths.length,
+						failures,
 					);
 				});
 				await profileHybridStage("startup.persist_indices_batch", async () => {
@@ -640,14 +687,13 @@ export class DataManager {
 		logger.trace(`${updatedRefs.length} lexical refs updated`);
 	}
 
-	private async indexHybridFilesInBatches(
-		files: TFile[],
-		concurrency: number,
-		handler: (file: TFile, complete: (failed: boolean) => void) => Promise<void>,
+	private async runHybridRepairTasks(
+		tasks: HybridRepairTask[],
 		progressNotice: HybridIndexProgressNotice | null,
 		repairedPaths: number,
+		failures: HybridIndexFailure[],
 	) {
-		if (files.length === 0) {
+		if (tasks.length === 0) {
 			progressNotice?.update(
 				{
 					stage: "done",
@@ -664,25 +710,33 @@ export class DataManager {
 			return;
 		}
 
-		const largeFiles: TFile[] = [];
-		const normalFiles: TFile[] = [];
-		for (const file of files) {
+		const concurrency = this.getHybridIndexConcurrency();
+		const files = tasks
+			.map((task) => {
+				const file = this.dataProvider.getFileByPath(task.path);
+				return file ? { task, file } : null;
+			})
+			.filter((item): item is { task: HybridRepairTask; file: TFile } => item !== null);
+		const largeFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
+		const normalFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
+		for (const item of files) {
+			const file = item.file;
 			if (file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES) {
-				largeFiles.push(file);
+				largeFiles.push(item);
 			} else {
-				normalFiles.push(file);
+				normalFiles.push(item);
 			}
 		}
 
-		largeFiles.sort((left, right) => right.stat.size - left.stat.size);
-		normalFiles.sort((left, right) => right.stat.size - left.stat.size);
+		largeFiles.sort((left, right) => right.file.stat.size - left.file.stat.size);
+		normalFiles.sort((left, right) => right.file.stat.size - left.file.stat.size);
 		logger.debug(
 			`hybrid batch tiers: large=${largeFiles.length}, normal=${normalFiles.length}, normalConcurrency=${concurrency}`,
 		);
 		let processedBytes = 0;
 		let processedFiles = 0;
 		let failedFiles = 0;
-		const totalBytes = files.reduce((sum, file) => sum + file.stat.size, 0);
+		const totalBytes = files.reduce((sum, item) => sum + item.file.stat.size, 0);
 		const totalFiles = files.length;
 		progressNotice?.update(
 			{
@@ -703,14 +757,18 @@ export class DataManager {
 			{
 				maxConcurrent: concurrency,
 				maxWeight: DataManager.HYBRID_IN_FLIGHT_BYTES_BUDGET,
-				getWeight: (file) => file.stat.size,
-				isExclusive: (file) => file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES,
+				getWeight: (item) => item.file.stat.size,
+				isExclusive: (item) =>
+					item.file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES,
 			},
-			async (file) => {
-				await handler(file, (failed) => {
-					processedBytes += file.stat.size;
+			async (item) => {
+				const failure = await this.runHybridRepairTask(item.task, item.file);
+				if (failure) {
+					failures.push(failure);
+				}
+				processedBytes += item.file.stat.size;
 					processedFiles += 1;
-					if (failed) {
+					if (failure) {
 						failedFiles += 1;
 					}
 					progressNotice?.update({
@@ -723,9 +781,51 @@ export class DataManager {
 						failedFiles,
 						sessionTokens: getHybridProfileMetric("provider_tokens"),
 					});
-				});
 			},
 		);
+	}
+
+	private async runHybridRepairTask(
+		task: HybridRepairTask,
+		file: TFile,
+	): Promise<HybridIndexFailure | null> {
+		logger.debug(
+			`hybrid repair task ${task.mode} for ${task.path} (${task.reason})`,
+		);
+		if (
+			!this.dataProvider.isIndexable(file) ||
+			!this.hybridEngine.isEnabled() ||
+			!this.hybridEngine.shouldIndexPath(task.path)
+		) {
+			await this.hybridEngine.deleteFile(task.path).catch((error) =>
+				logger.warn(`hybrid repair delete failed for ${task.path}:`, error),
+			);
+			return null;
+		}
+
+		if (task.mode === "full") {
+			return await this.indexHybridFileWithRetry(file);
+		}
+
+		const eligibleAt = await this.getIncrementalEmbedEligibleAt(task.path);
+		if (eligibleAt > Date.now()) {
+			logger.debug(
+				`hybrid repair deferred embedding for ${task.path} until ${new Date(eligibleAt).toISOString()}`,
+			);
+			const failure = await this.indexHybridFileStructureOnly(file);
+			if (failure) {
+				return failure;
+			}
+			this.enqueueHybridRepair({
+				path: task.path,
+				mode: "incremental",
+				reason: "resume-deferred-embedding",
+				eligibleAt,
+			});
+			return null;
+		}
+
+		return await this.indexHybridFileWithRetry(file);
 	}
 
 	private async indexHybridFileWithRetry(
@@ -743,8 +843,8 @@ export class DataManager {
 					await this.hybridEngine.indexFileStrict(
 						file.path,
 						text,
-					file.stat.mtime,
-					{ persistIndices: false },
+						file.stat.mtime,
+						{ persistIndices: false },
 						headingOutline,
 					);
 				},
@@ -796,6 +896,46 @@ export class DataManager {
 			attempts,
 			bm25FallbackIndexed,
 		};
+	}
+
+	private async indexHybridFileStructureOnly(
+		file: TFile,
+	): Promise<HybridIndexFailure | null> {
+		try {
+			const text = await this.dataProvider.readPlainText(file.path);
+			const headingOutline = this.dataProvider.getHeadingOutline(file);
+			await this.hybridEngine.indexFileStructureOnly(
+				file.path,
+				text,
+				file.stat.mtime,
+				{ persistIndices: false },
+				headingOutline,
+			);
+			return null;
+		} catch (error) {
+			return {
+				path: file.path,
+				reason: this.formatHybridIndexError(error),
+				attempts: 1,
+				bm25FallbackIndexed: false,
+			};
+		}
+	}
+
+	private async getIncrementalEmbedEligibleAt(filePath: string): Promise<number> {
+		const ref = await this.database.db.hybridDocRefs.get(filePath);
+		const lastIncrementalEmbedAt = ref?.lastIncrementalEmbedAt ?? 0;
+		if (lastIncrementalEmbedAt <= 0) {
+			return 0;
+		}
+		return (
+			lastIncrementalEmbedAt + this.getMinIncrementalEmbedIntervalMs()
+		);
+	}
+
+	private getMinIncrementalEmbedIntervalMs(): number {
+		const configured = this.setting.hybrid.minIncrementalEmbedIntervalSec ?? 60;
+		return Math.max(0, configured) * 1000;
 	}
 
 	private getHybridIndexConcurrency(): number {
@@ -949,6 +1089,16 @@ export class DataManager {
 
 			repairedPaths.push(path);
 			if (existsNow) {
+				reindexedPaths.push(path);
+			}
+		}
+
+		for (const [path, docRef] of docRefByPath) {
+			if (
+				currFiles.has(path) &&
+				docRef.embeddingDeferred === true &&
+				!reindexedPaths.includes(path)
+			) {
 				reindexedPaths.push(path);
 			}
 		}

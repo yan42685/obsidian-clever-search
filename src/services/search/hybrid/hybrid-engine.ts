@@ -71,6 +71,14 @@ type HybridWriteOption = {
 	deleteDocRef?: boolean;
 };
 
+type HybridIndexMode = 'full' | 'structure-only';
+
+type Bm25OnlyDocRefMeta = {
+	lastErrorKind: string | null;
+	lastIncrementalEmbedAt?: number;
+	embeddingDeferred?: boolean;
+};
+
 type SmallChunkCandidate = {
 	id: number;
 	filePath: string;
@@ -190,7 +198,33 @@ export class HybridEngine {
 		option: HybridWriteOption = {},
 		headingOutline: HeadingOutlineEntry[] = [],
 	): Promise<void> {
-		await this.indexInternal(filePath, plainText, updateTime, option, true, headingOutline);
+		await this.indexInternal(
+			filePath,
+			plainText,
+			updateTime,
+			option,
+			true,
+			headingOutline,
+			'full',
+		);
+	}
+
+	async indexFileStructureOnly(
+		filePath: string,
+		plainText: string,
+		updateTime = Date.now(),
+		option: HybridWriteOption = {},
+		headingOutline: HeadingOutlineEntry[] = [],
+	): Promise<void> {
+		await this.indexInternal(
+			filePath,
+			plainText,
+			updateTime,
+			option,
+			false,
+			headingOutline,
+			'structure-only',
+		);
 	}
 
 	async deleteFile(filePath: string, option: HybridWriteOption = {}): Promise<void> {
@@ -375,6 +409,7 @@ export class HybridEngine {
 		option: HybridWriteOption,
 		strict: boolean,
 		headingOutline: HeadingOutlineEntry[],
+		mode: HybridIndexMode = 'full',
 	): Promise<void> {
 		await this.withFileWriteLock(filePath, async () => {
 			if (!this.shouldIndexPath(filePath)) {
@@ -384,6 +419,7 @@ export class HybridEngine {
 
 			const generation = Date.now();
 			const previousState = await this.loadStoredFileIndexState(filePath);
+			const previousDocRef = await this.db.db.hybridDocRefs.get(filePath);
 			await this.putHybridDocRef({
 				path: filePath,
 				updateTime,
@@ -393,6 +429,8 @@ export class HybridEngine {
 				vectorPrecision: null,
 				indexedAt: generation,
 				lastErrorKind: null,
+				lastIncrementalEmbedAt: previousDocRef?.lastIncrementalEmbedAt,
+				embeddingDeferred: false,
 			});
 			await this.deleteStoredFileData(filePath, { ...option, deleteDocRef: false });
 
@@ -430,6 +468,23 @@ export class HybridEngine {
 				return;
 			}
 			recordHybridProfileMetric('index.chunk_count', plannedChunks.length);
+
+			if (mode === 'structure-only') {
+				await this.indexBm25Only(
+					filePath,
+					plannedChunks,
+					updateTime,
+					option,
+					generation,
+					{
+						lastErrorKind: null,
+						lastIncrementalEmbedAt: previousDocRef?.lastIncrementalEmbedAt,
+						embeddingDeferred: true,
+					},
+				);
+				await this.persistSnapshot(filePath, plainText, generation);
+				return;
+			}
 
 			try {
 				const shardBuilder = new ChunkVectorShardBuilder(this.precision, EMBED_DIM);
@@ -495,6 +550,8 @@ export class HybridEngine {
 						vectorPrecision: null,
 						indexedAt: Date.now(),
 						lastErrorKind: this.classifyIndexErrorKind(error),
+						lastIncrementalEmbedAt: previousDocRef?.lastIncrementalEmbedAt,
+						embeddingDeferred: false,
 					});
 					return;
 				} catch (fallbackError) {
@@ -507,11 +564,14 @@ export class HybridEngine {
 						vectorPrecision: null,
 						indexedAt: Date.now(),
 						lastErrorKind: this.classifyIndexErrorKind(fallbackError),
+						lastIncrementalEmbedAt: previousDocRef?.lastIncrementalEmbedAt,
+						embeddingDeferred: false,
 					});
 					throw fallbackError;
 				}
 			}
 
+			const indexedAt = Date.now();
 			if (option.persistIndices ?? true) {
 				await this.persistIndices();
 			}
@@ -522,8 +582,10 @@ export class HybridEngine {
 				generation,
 				chunkCount: plannedChunks.length,
 				vectorPrecision: this.precision,
-				indexedAt: Date.now(),
+				indexedAt,
 				lastErrorKind: null,
+				lastIncrementalEmbedAt: indexedAt,
+				embeddingDeferred: false,
 			});
 		});
 	}
@@ -781,6 +843,7 @@ export class HybridEngine {
 		updateTime: number,
 		option: HybridWriteOption,
 		generation?: number,
+		meta?: Bm25OnlyDocRefMeta,
 	): Promise<void> {
 		for (
 			let chunkStart = 0;
@@ -819,7 +882,9 @@ export class HybridEngine {
 			chunkCount: plannedChunks.length,
 			vectorPrecision: null,
 			indexedAt: Date.now(),
-			lastErrorKind: null,
+			lastErrorKind: meta?.lastErrorKind ?? null,
+			lastIncrementalEmbedAt: meta?.lastIncrementalEmbedAt,
+			embeddingDeferred: meta?.embeddingDeferred ?? false,
 		});
 	}
 

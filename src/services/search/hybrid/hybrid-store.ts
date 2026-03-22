@@ -78,6 +78,8 @@ export type HybridDocRef = {
 	vectorPrecision?: VectorPrecision | null;
 	indexedAt?: number;
 	lastErrorKind?: string | null;
+	lastIncrementalEmbedAt?: number;
+	embeddingDeferred?: boolean;
 };
 
 export type ChunkVectorRecord = {

@@ -174,4 +174,6 @@ export default {
 	"hybridModal.healthSummary.check": "检查",
 	"hybridModal.healthSummary.flag.yes": "是",
 	"hybridModal.healthSummary.flag.no": "否",
+	"hybridModal.minIncrementalEmbedInterval": "\u6700\u5c0f\u589e\u91cf Embedding \u95f4\u9694",
+	"hybridModal.minIncrementalEmbedInterval.desc": "\u540c\u4e00\u6587\u4ef6\u518d\u6b21\u5c1d\u8bd5\u589e\u91cf embedding \u4e4b\u524d\u81f3\u5c11\u7b49\u5f85\u591a\u5c11\u79d2\u3002\u7ed3\u6784\u4fee\u590d\u4ecd\u4f1a\u7acb\u5373\u6267\u884c\uff0c\u53ea\u662f\u5411\u91cf\u8865\u5168\u4f1a\u5ef6\u540e\u3002",
 };

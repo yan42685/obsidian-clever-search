@@ -460,6 +460,7 @@ class HybridSearchModal extends Modal {
 	private suggester: CommonSuggester;
 	private weeklyLimitInputEl: HTMLInputElement;
 	private indexConcurrencyInputEl: HTMLInputElement;
+	private minIncrementalEmbedIntervalInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
 	private statsEl: HTMLElement;
 	private hybridHealthNotice: MyNotice | null = null;
@@ -610,6 +611,26 @@ class HybridSearchModal extends Modal {
 
 		// ── Excluded paths ────────────────────────────────────────────────────
 		new Setting(contentEl)
+			.setName(t("hybridModal.minIncrementalEmbedInterval"))
+			.setDesc(t("hybridModal.minIncrementalEmbedInterval.desc"))
+			.addText((text) => {
+				this.minIncrementalEmbedIntervalInputEl = text.inputEl;
+				text
+					.setPlaceholder("60")
+					.setValue(
+						String(this.setting.hybrid.minIncrementalEmbedIntervalSec ?? 60),
+					);
+				text.inputEl.type = "number";
+				text.inputEl.min = "0";
+				text.inputEl.step = "1";
+			})
+			.addButton((button) =>
+				button.setButtonText(t("Update")).onClick(async () => {
+					await this.updateMinIncrementalEmbedInterval();
+				}),
+			);
+
+		new Setting(contentEl)
 			.setName(t("hybridModal.vectorCompression"))
 			.setDesc(t("hybridModal.vectorCompression.desc"))
 			.addDropdown((dropdown) =>
@@ -737,6 +758,15 @@ class HybridSearchModal extends Modal {
 			Number.isNaN(parsed) || parsed < 1 ? 3 : Math.min(parsed, 8);
 		this.setting.hybrid.indexConcurrency = nextValue;
 		this.indexConcurrencyInputEl.value = String(nextValue);
+		await this.settingManager.saveSettings();
+	}
+
+	private async updateMinIncrementalEmbedInterval() {
+		const parsed = parseInt(this.minIncrementalEmbedIntervalInputEl.value, 10);
+		const nextValue =
+			Number.isNaN(parsed) || parsed < 0 ? 60 : Math.min(parsed, 3600);
+		this.setting.hybrid.minIncrementalEmbedIntervalSec = nextValue;
+		this.minIncrementalEmbedIntervalInputEl.value = String(nextValue);
 		await this.settingManager.saveSettings();
 	}
 

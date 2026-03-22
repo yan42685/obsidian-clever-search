@@ -106,6 +106,8 @@ export default {
 	"hybridModal.weeklyUsed": "This week used",
 	"hybridModal.indexConcurrency": "Index concurrency",
 	"hybridModal.indexConcurrency.desc": "How many files to embed in parallel during hybrid indexing. Higher values may be faster but can increase rate limits, timeouts, and UI pressure.",
+	"hybridModal.minIncrementalEmbedInterval": "Min incremental embed interval",
+	"hybridModal.minIncrementalEmbedInterval.desc": "Minimum seconds between incremental embedding retries for the same file. Structure repair still runs immediately; only vector refill is delayed.",
 	"hybridModal.vectorCompression": "Vector quantization",
 	"hybridModal.vectorCompression.desc": "Choose how hybrid vectors are quantized and stored. Int8 uses less disk and searches faster; Float16 uses more disk and is usually more stable on purely semantic matches. Changing this requires rebuilding the hybrid index.",
 	"hybridModal.vectorCompression.int8": "Int8 only (smaller, faster)",
