@@ -103,22 +103,14 @@ Current online default:
 - HNSW top 30
 - hybrid BM25 candidate recall uses plain BM25 scoring without proximity bonus
 
-Current offline benchmark recommendation:
+Current online benchmark-backed recommendation:
 
-- `direct_hybrid`: BM25 25 + HNSW 25
-- `lexical_fallback_like`: BM25 15 + HNSW 35
-- `mixed_entry`: BM25 20 + HNSW 30
-
-Why this is promising:
-
-- it preserves the same top-line `union hits@25` as fixed `20/30`
-- it slightly lowers candidate noise
-- it aligns better with the product intent that fallback-like hybrid queries should lean more on dense recall
+- fixed recall budget: BM25 10 + HNSW 30
 
 Current status:
 
-- this entry-aware budget is benchmark-only for now
-- it should not be moved online until real-vault validation confirms the gain is worth the added runtime complexity
+- query-aware recall routing was removed after real-vault validation showed the complexity was not worth the token savings
+- online runtime now uses one fixed recall budget for all hybrid queries
 
 Latest offline evidence after adding `daily + holdout + size-sweep`:
 
@@ -147,6 +139,11 @@ Current rule:
 - keep the original user query as the main retrieval input
 - do not prioritize semantic rewrite work unless new evidence shows a clear `hits@25` gain
 - spend optimization effort on better dense recall and better chunk representation instead
+
+Status:
+
+- rejected for the current mainline
+- may only be revisited if future real-vault evidence shows stable top-25 recall gains
 
 ## Chunk Storage
 
@@ -330,6 +327,33 @@ Practical rule:
 - if rerank returns `N` chunks, the UI displays `N` chunks total
 - files are only grouping containers in the UI
 - dense recall is currently single-query in runtime; lightweight query variants are benchmark-only until they show clear recall gains
+
+## Rejected Or Deferred Directions
+
+These directions are intentionally not part of the current mainline.
+
+### Rejected For Now
+
+- semantic rewrite / multi-variant query expansion in runtime
+- query-aware online BM25/HNSW recall budgets
+- over-optimizing first-stage internal ordering beyond top-25 admission impact
+
+Reason:
+
+- offline and local evidence has not shown stable enough gains
+- reranker already lowers the product value of more complex first-stage ordering tricks
+- these directions increase runtime and maintenance complexity faster than they improve real user value
+
+### Deferred Until Stronger Evidence
+
+- conservative runtime slowdown mode during rebuild
+- deeper lexical-stack replacement beyond the current custom file-search work
+- further hybrid BM25 compression work beyond low-risk binary improvements
+
+Reason:
+
+- these may still be valuable later, but they are not currently justified without stronger runtime pain or clearer product upside
+- stability validation and complexity control are currently higher priority
 
 ## Fallback Behavior
 
@@ -544,6 +568,12 @@ Practical rule:
 - only optimize internal candidate ordering when it changes top-25 admission, fallback quality, or noise
 - keep hybrid-specific query normalization isolated from `lexicalengine`
 
+Non-goals inside this phase:
+
+- do not re-open semantic rewrite or multi-query runtime expansion without new evidence
+- do not move query-aware recall-budget logic online just because it benchmarks well in a narrow setup
+- do not add complexity whose only benefit is better rank precision inside an already-reranked top-25
+
 ### Priority 6: Hybrid BM25 Size
 
 Only after priorities 1 through 5 are stable should we return to storage compression.
@@ -614,18 +644,15 @@ Practical rule:
 
 ## Future Improvements
 
-Possible next steps:
+Current mainline follow-ups:
 
 - finish file-event consistency closure under rename and repeated modify bursts
-- complete rebuild preflight, throttling, and quota guardrails
+- complete rebuild preflight, quota guardrails, and large-vault stability validation
 - make hybrid state and fallback reasons visible in developer mode summaries
-- add a real runtime local rebuild benchmark with fixed-cost embedding mocks
-- benchmark query-aware BM25/HNSW budget strategies only after stability work lands
+- keep the local runtime rebuild benchmark usable for regression detection
 - improve HNSW recall on lexical-failure-like queries
-- add hybrid-only normalization that is strictly isolated from `lexicalengine`
-- reconsider positional encoding only if it improves `hits@25` or cutoff behavior
+- add hybrid-only normalization only when it is clearly isolated from `lexicalengine`
 - revisit storage compression only after stability and consistency goals are stable
-- treat larger lexical-stack replacement as a separate architecture phase, not a quick optimization pass
 
 Priority follow-up object:
 

@@ -24,6 +24,10 @@ data.json
 # Custom
 coverage/
 dist/
+.env
+.env.local
+.env.release
+.env.release.local
 
 .editorconfig
 cs-search-worker.js
