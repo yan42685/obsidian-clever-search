@@ -36,7 +36,7 @@ import type { SerializedFileSearchIndex } from "src/services/search/file-search-
 import { eventBus } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
-import { getInstance, isDevEnvironment, monitorDecorator } from "src/utils/my-lib";
+import { getInstance, isDevEnvironment, monitorDecorator, MyLib } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t } from "../translations/locale-helper";
@@ -173,6 +173,7 @@ export class DataManager {
 	private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
 	private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
 	private static readonly HYBRID_TABLE_SCAN_BATCH_SIZE = 512;
+	private static readonly LEXICAL_REINDEX_BATCH_SIZE = 64;
 	private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
 	private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
 	private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
@@ -868,8 +869,27 @@ export class DataManager {
 			const sizeText = (size / 1024).toFixed(2) + " MB";
 			new MyNotice(`${sizeText} ${t("files need to be indexed. Obsidian may freeze for a while")}`, 7000);
 		}
-		const documents = await this.dataProvider.generateAllIndexedDocuments(filesToIndex);
-		await this.lexicalEngine.reIndexAll(documents);
+		this.lexicalEngine.beginBatchReindex();
+		try {
+			for (
+				let start = 0;
+				start < filesToIndex.length;
+				start += DataManager.LEXICAL_REINDEX_BATCH_SIZE
+			) {
+				const batchFiles = filesToIndex.slice(
+					start,
+					start + DataManager.LEXICAL_REINDEX_BATCH_SIZE,
+				);
+				await this.addDocuments(batchFiles);
+				if (start + DataManager.LEXICAL_REINDEX_BATCH_SIZE < filesToIndex.length) {
+					await MyLib.sleep(0);
+				}
+			}
+			this.lexicalEngine.finishBatchReindex();
+		} catch (error) {
+			this.lexicalEngine.abortBatchReindex();
+			throw error;
+		}
 		await this.saveLexicalIndexedFileRefs(filesToIndex);
 		this.isLexicalEngineUpToDate = true;
 	}

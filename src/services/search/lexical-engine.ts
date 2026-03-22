@@ -49,6 +49,20 @@ export class LexicalEngine {
 		return true;
 	}
 
+	beginBatchReindex(): void {
+		this._isReady = false;
+		this.fileSearchEngine.clearIndex();
+	}
+
+	finishBatchReindex(): void {
+		this._isReady = true;
+	}
+
+	abortBatchReindex(): void {
+		this.fileSearchEngine.clearIndex();
+		this._isReady = false;
+	}
+
 	// NOTE: need be checked before opening a search-in-vault modal to avoid error when search during indexing
 	get isReady(): boolean {
 		return this._isReady;

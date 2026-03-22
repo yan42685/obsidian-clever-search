@@ -32,6 +32,7 @@ export interface FileSearchEngine {
 	readonly backend: FileSearchBackend;
 	readonly supportsSerialization: boolean;
 	reIndexAll(data: IndexedDocument[] | SerializedFileSearchIndex): Promise<boolean>;
+	clearIndex(): void;
 	addDocuments(documents: IndexedDocument[]): Promise<void>;
 	deleteDocuments(paths: string[]): void;
 	searchFiles(request: FileSearchRequest): Promise<MatchedFile[]>;
@@ -116,7 +117,7 @@ export class MiniSearchFileEngine implements FileSearchEngine {
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
 	): Promise<boolean> {
-		this.filesIndex.removeAll();
+		this.clearIndex();
 
 		if (Array.isArray(data)) {
 			logger.trace("Indexing all documents...");
@@ -150,6 +151,10 @@ export class MiniSearchFileEngine implements FileSearchEngine {
 			chunkSize: this.option.documentChunkSize,
 		});
 		logger.debug(`updated/added ${documents.length} docs`);
+	}
+
+	clearIndex(): void {
+		this.filesIndex.removeAll();
 	}
 
 	deleteDocuments(paths: string[]) {
@@ -295,7 +300,7 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
 	): Promise<boolean> {
-		this.clear();
+		this.clearIndex();
 		if (Array.isArray(data)) {
 			await this.addDocuments(data);
 			return true;
@@ -308,7 +313,7 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 			return false;
 		} catch (error) {
 			logger.error(error);
-			this.clear();
+			this.clearIndex();
 			return false;
 		}
 	}
@@ -318,6 +323,10 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 			this.indexDocument(document);
 		}
 		logger.debug(`custom file search indexed/updated ${documents.length} docs`);
+	}
+
+	clearIndex(): void {
+		this.clear();
 	}
 
 	deleteDocuments(paths: string[]): void {
