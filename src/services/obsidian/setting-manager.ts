@@ -515,6 +515,26 @@ class HybridSearchModal extends Modal {
 
 		// ── Weekly token limit ────────────────────────────────────────────────
 		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
+		new Setting(contentEl)
+			.setName(t("hybridModal.weeklyTokenLimit"))
+			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
+			.addText((text) => {
+				this.weeklyLimitInputEl = text.inputEl;
+				text
+					.setPlaceholder("0")
+					.setValue(String(this.setting.hybrid.weeklyTokenLimit ?? 0));
+				text.inputEl.type = "number";
+				text.inputEl.min = "0";
+				text.inputEl.step = "1";
+			})
+			.addButton((button) =>
+				button.setButtonText(t("Update")).onClick(async () => {
+					await this.updateWeeklyTokenLimit();
+				}),
+			);
+		this.weeklyQuotaEl = contentEl.createDiv();
+		this.weeklyQuotaEl.style.margin = "0.35em 0 1em 0";
+		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
 
 		new Setting(contentEl)
 			.setName(t("hybridModal.maxResultCount"))
@@ -637,26 +657,6 @@ class HybridSearchModal extends Modal {
 		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
-		new Setting(contentEl)
-			.setName(t("hybridModal.weeklyTokenLimit"))
-			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
-			.addText((text) => {
-				this.weeklyLimitInputEl = text.inputEl;
-				text
-					.setPlaceholder("0")
-					.setValue(String(this.setting.hybrid.weeklyTokenLimit ?? 0));
-				text.inputEl.type = "number";
-				text.inputEl.min = "0";
-				text.inputEl.step = "1";
-			})
-			.addButton((button) =>
-				button.setButtonText(t("Update")).onClick(async () => {
-					await this.updateWeeklyTokenLimit();
-				}),
-			);
-		this.weeklyQuotaEl = contentEl.createDiv();
-		this.weeklyQuotaEl.style.margin = "0.35em 0 1em 0";
-		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
 		void this.refreshTokenStats();
 	}
 
@@ -785,9 +785,9 @@ class HybridSearchModal extends Modal {
 		this.weeklyQuotaEl.createEl("p", {
 			text:
 				`${t("hybridModal.weeklyRemaining")}: ` +
-					(limit > 0
-						? this.formatTokenCompact(remaining)
-						: t("hybridModal.unlimited")),
+				(limit > 0
+					? this.formatTokenCompact(remaining)
+					: t("hybridModal.unlimited")),
 		});
 	}
 

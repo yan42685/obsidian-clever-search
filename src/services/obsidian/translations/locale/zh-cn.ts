@@ -34,17 +34,17 @@ export default {
 	"hybridModal.apiKeyNotice":
 		"这里显示的 token 以千问接口返回的 usage 为准。当前混合搜索会使用 text-embedding-v4 和 qwen3-rerank，请确认 API Key 已开通这两个模型。",
 	"hybridModal.autoShowResultsWhenLexicalEmpty": "词法无结果时自动展示 hybrid",
-"hybridModal.weeklyTokenLimit": "每周 token 限额",
+	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc":
 		"每周（周一至周日）最多允许消耗的 token 数量，设为 0 表示不限制。",
 	"hybridModal.maxResultCount": "混合搜索结果数量",
 	"hybridModal.maxResultCount.desc":
 		"每次混合搜索返回并展示的 rerank 结果数量。",
 	"hybridModal.weeklyUsed": "本周已使用",
-	"hybridModal.weeklyRemaining": "剩余额度",
+	"hybridModal.weeklyRemaining": "本周剩余额度",
 	"hybridModal.unlimited": "不限",
 	"hybridModal.weeklyLimitExceededNotice":
-		"本周 token 用量已超过限制，剩余额度为 0。",
+		"本周 token 用量已超过限制，本周剩余额度为 0。",
 	"hybridModal.indexConcurrency": "索引并发数",
 	"hybridModal.indexConcurrency.desc":
 		"混合索引时并行调用 embedding 的文件数量。更高的值可能更快，但也更容易触发限流、超时或增加 UI 压力。",
@@ -71,8 +71,8 @@ export default {
 	"hybridModal.tokens": "Tokens",
 	"hybridModal.tokenStats.pinned": "置顶",
 	"hybridModal.estimatedSavings": "估算节省 Token",
-	"hybridModal.estimatedSavings.weekly": "由于增量chunk embedding技术，本周估算节省",
-	"hybridModal.estimatedSavings.total": "累计估算节省",
+	"hybridModal.estimatedSavings.weekly": "由于增量 chunk embedding 技术，本周估算节省 ",
+	"hybridModal.estimatedSavings.total": "累计估算节省 ",
 	"hybridNotice.indexFallbackToBm25":
 		"语义索引当前不可用，已降级为 BM25 索引。",
 	"hybridNotice.searchFallbackToBm25":
@@ -89,7 +89,7 @@ export default {
 	"hybridModal.thisWeekUsed": "本周",
 	"hybridModal.thisMonthUsed": "本月",
 	"hybridModal.autoShowResultsWhenLexicalEmpty.desc":
-		"在普通库内搜索中，如果词法搜索结果为 0，且查询长度至少为 3，则自动展示 hybrid 结果。第一次触发会立即执行，之后连续出现 0 结果时会以 500ms 的 trailing debounce 展示最后一次对应的 hybrid 结果。展示 hybrid 结果后，搜索框仍然处于 lexical 搜索模式。",
+		"在普通库内搜索中，如果词法搜索结果为 0，且查询长度至少为 3，则自动展示 hybrid 结果。第一次触发会立即执行，之后连续出现 0 结果时会以 500 ms 的 trailing debounce 展示最后一次对应的 hybrid 结果。展示 hybrid 结果后，搜索框仍然处于 lexical 搜索模式。",
 	"hybridModal.autoFallbackFailed.title":
 		"词法结果为 0，且 hybrid 搜索也失败了。",
 	"hybridModal.autoFallbackFailed.possibleCauses": "可能原因：",
