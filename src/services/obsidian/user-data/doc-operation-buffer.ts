@@ -33,33 +33,26 @@ export class DocMoveOperation extends DocOperation {
 	}
 }
 
-type ReducedDeleteOperation = {
-	type: "delete";
+export type ReducedDirtyPath = {
 	path: string;
 	time: number;
 	order: number;
-};
-
-type ReducedUpsertOperation = {
-	type: "upsert";
-	path: string;
-	time: number;
-	order: number;
-};
-
-type ReducedMoveOperation = {
-	type: "move";
-	oldPath: string;
-	path: string;
-	time: number;
-	order: number;
+	renameFromPath?: string;
 	requiresReindex: boolean;
 };
 
-export type ReducedDocOperation =
-	| ReducedDeleteOperation
-	| ReducedUpsertOperation
-	| ReducedMoveOperation;
+export type ReducedStalePath = {
+	path: string;
+	time: number;
+	order: number;
+};
+
+export type ReducedDocOperationBatch = {
+	// Dirty paths are re-read from the vault at flush time.
+	dirtyPaths: ReducedDirtyPath[];
+	// Stale paths are cleanup targets whose previous indexed state must be removed.
+	stalePaths: ReducedStalePath[];
+};
 
 type PendingDelete = {
 	time: number;
@@ -74,7 +67,7 @@ type PendingDirty = {
 
 export function reduceDocOperations(
 	operations: DocOperation[],
-): ReducedDocOperation[] {
+): ReducedDocOperationBatch {
 	const pendingDeletes = new Map<string, PendingDelete>();
 	const pendingDirty = new Map<string, PendingDirty>();
 	const sourcePathByCurrentPath = new Map<string, string>();
@@ -124,52 +117,34 @@ export function reduceDocOperations(
 		}
 	}
 
-	const reduced: ReducedDocOperation[] = [];
-	const moveTargets = new Set<string>();
-	const moveSources = new Set<string>();
+	const dirtyPaths = Array.from(pendingDirty.entries())
+		.map(([path, dirty]) => {
+			const sourcePath = sourcePathByCurrentPath.get(path);
+			return {
+				path,
+				time: dirty.time,
+				order: dirty.order,
+				renameFromPath:
+					sourcePath && sourcePath !== path ? sourcePath : undefined,
+				requiresReindex: dirty.requiresReindex,
+			};
+		})
+		.sort((left, right) => left.order - right.order);
 
-	for (const [path, dirty] of pendingDirty) {
-		const sourcePath = sourcePathByCurrentPath.get(path);
-		if (!sourcePath || sourcePath === path) {
-			continue;
-		}
-		moveTargets.add(path);
-		moveSources.add(sourcePath);
-		reduced.push({
-			type: "move",
-			oldPath: sourcePath,
-			path,
-			time: dirty.time,
-			order: dirty.order,
-			requiresReindex: dirty.requiresReindex,
-		});
-	}
-
-	for (const [path, pendingDelete] of pendingDeletes) {
-		if (moveSources.has(path)) {
-			continue;
-		}
-		reduced.push({
-			type: "delete",
+	const dirtyPathSet = new Set(dirtyPaths.map((item) => item.path));
+	const stalePaths = Array.from(pendingDeletes.entries())
+		.filter(([path]) => !dirtyPathSet.has(path))
+		.map(([path, pendingDelete]) => ({
 			path,
 			time: pendingDelete.time,
 			order: pendingDelete.order,
-		});
-	}
+		}))
+		.sort((left, right) => left.order - right.order);
 
-	for (const [path, dirty] of pendingDirty) {
-		if (moveTargets.has(path)) {
-			continue;
-		}
-		reduced.push({
-			type: "upsert",
-			path,
-			time: dirty.time,
-			order: dirty.order,
-		});
-	}
-
-	return reduced.sort((left, right) => left.order - right.order);
+	return {
+		dirtyPaths,
+		stalePaths,
+	};
 }
 
 export class DocOperationBuffer {
@@ -180,7 +155,7 @@ export class DocOperationBuffer {
 	private flushQueue: Promise<void> = Promise.resolve();
 
 	constructor(
-		private readonly handler: (operations: ReducedDocOperation[]) => Promise<void>,
+		private readonly handler: (operations: ReducedDocOperationBatch) => Promise<void>,
 		private readonly autoFlushThreshold: number,
 	) {}
 

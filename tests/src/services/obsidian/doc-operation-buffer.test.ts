@@ -14,12 +14,15 @@ describe("DocOperationBuffer", () => {
 			new DocUpsertOperation("note.md"),
 		]);
 
-		expect(reduced).toEqual([
-			expect.objectContaining({
-				type: "upsert",
-				path: "note.md",
-			}),
-		]);
+		expect(reduced).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "note.md",
+					renameFromPath: undefined,
+				}),
+			],
+			stalePaths: [],
+		});
 	});
 
 	test("reduces same-path add delete add into the last upsert intent", async () => {
@@ -34,12 +37,15 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual([
-			expect.objectContaining({
-				type: "upsert",
-				path: "note.md",
-			}),
-		]);
+		expect(batches[0]).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "note.md",
+					renameFromPath: undefined,
+				}),
+			],
+			stalePaths: [],
+		});
 	});
 
 	test("reduces rename followed by modify on new path to move old content and require reindex", async () => {
@@ -53,14 +59,20 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual([
-			expect.objectContaining({
-				type: "move",
-				oldPath: "old.md",
-				path: "new.md",
-				requiresReindex: true,
-			}),
-		]);
+		expect(batches[0]).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "new.md",
+					renameFromPath: "old.md",
+					requiresReindex: true,
+				}),
+			],
+			stalePaths: [
+				expect.objectContaining({
+					path: "old.md",
+				}),
+			],
+		});
 	});
 
 	test("reduces chained renames to the final surviving path", async () => {
@@ -74,17 +86,23 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual([
-			expect.objectContaining({
-				type: "delete",
-				path: "b.md",
-			}),
-			expect.objectContaining({
-				type: "move",
-				oldPath: "a.md",
-				path: "c.md",
-			}),
-		]);
+		expect(batches[0]).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "c.md",
+					renameFromPath: "a.md",
+					requiresReindex: false,
+				}),
+			],
+			stalePaths: [
+				expect.objectContaining({
+					path: "a.md",
+				}),
+				expect.objectContaining({
+					path: "b.md",
+				}),
+			],
+		});
 	});
 
 	test("keeps move intent before recreating the old path", async () => {
@@ -98,16 +116,41 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual([
-			expect.objectContaining({
-				type: "move",
-				oldPath: "a.md",
-				path: "b.md",
-			}),
-			expect.objectContaining({
-				type: "upsert",
-				path: "a.md",
-			}),
+		expect(batches[0]).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "b.md",
+					renameFromPath: "a.md",
+				}),
+				expect.objectContaining({
+					path: "a.md",
+					renameFromPath: undefined,
+				}),
+			],
+			stalePaths: [],
+		});
+	});
+
+	test("reduces rename chain followed by delete to pure stale cleanup", () => {
+		const reduced = reduceDocOperations([
+			new DocMoveOperation("a.md", "b.md"),
+			new DocMoveOperation("b.md", "c.md"),
+			new DocDeleteOperation("c.md"),
 		]);
+
+		expect(reduced).toEqual({
+			dirtyPaths: [],
+			stalePaths: [
+				expect.objectContaining({
+					path: "a.md",
+				}),
+				expect.objectContaining({
+					path: "b.md",
+				}),
+				expect.objectContaining({
+					path: "c.md",
+				}),
+			],
+		});
 	});
 });

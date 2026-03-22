@@ -33,7 +33,7 @@ import { SearchService } from "../search-service";
 import { DataProvider } from "./data-provider";
 import {
 	type DocOperation,
-	type ReducedDocOperation,
+	type ReducedDocOperationBatch,
 	DocOperationBuffer,
 } from "./doc-operation-buffer";
 import { FileWatcher } from "./file-watcher";
@@ -286,23 +286,29 @@ export class DataManager {
 		this.scheduleFailedEmbeddingRetry();
 	}
 
-	private docOperationsHandler = async (operations: ReducedDocOperation[]) => {
-		for (const op of operations) {
-			if (op.type === "delete") {
-				await this.handleDeleteOperation(op.path);
-				continue;
-			}
-
-			if (op.type === "move") {
+	private docOperationsHandler = async (operations: ReducedDocOperationBatch) => {
+		const consumedStalePaths = new Set<string>();
+		// Apply surviving dirty paths first so rename fast-paths can reuse old-path data
+		// before the stale cleanup pass removes it.
+		for (const op of operations.dirtyPaths) {
+			if (op.renameFromPath) {
 				await this.handleMoveOperation(
-					op.oldPath,
+					op.renameFromPath,
 					op.path,
 					op.requiresReindex,
 				);
+				consumedStalePaths.add(op.renameFromPath);
 				continue;
 			}
 
 			await this.handleUpsertOperation(op.path);
+		}
+
+		for (const op of operations.stalePaths) {
+			if (consumedStalePaths.has(op.path)) {
+				continue;
+			}
+			await this.handleDeleteOperation(op.path);
 		}
 	};
 
