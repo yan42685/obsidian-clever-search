@@ -24,7 +24,7 @@ import {
 	getTopTokenFiles,
 	getTotalTokens,
 } from "src/services/search/hybrid/embedder";
-import type { HybridDocRef } from "src/services/search/hybrid/hybrid-store";
+import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
 import { Database } from "src/services/database/database";
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
@@ -972,7 +972,7 @@ class HybridSearchModal extends Modal {
 	}
 
 	private collectTopHybridErrorKinds(
-		docRefs: HybridDocRef[],
+		docRefs: HybridIndexedFileRef[],
 	): Array<{ kind: string; count: number }> {
 		const counts = new Map<string, number>();
 		for (const ref of docRefs) {

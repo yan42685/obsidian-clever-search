@@ -1,3 +1,4 @@
+import type { BaseIndexedFileRef } from "src/globals/search-types";
 import {
 	BM25_K1,
 	type BM25Index,
@@ -69,9 +70,7 @@ export type Bm25BlobBreakdown = {
 
 export type HybridDocState = "pending" | "ready" | "bm25_only" | "failed";
 
-export type HybridDocRef = {
-	path: string;
-	updateTime: number;
+export type HybridIndexedFileRef = BaseIndexedFileRef & {
 	state?: HybridDocState;
 	generation?: number;
 	chunkCount?: number;

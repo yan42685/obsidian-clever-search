@@ -4,14 +4,14 @@ import type {
 	HybridTokenSavingRecord,
 	OuterSetting,
 } from "src/globals/plugin-setting";
-import type { DocumentRef } from "src/globals/search-types";
+import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type {
 	Bm25BlobBreakdown,
 	BlobRecord,
 	ChunkRow,
 	ChunkVectorShardRow,
 	HybridFileSnapshotRow,
-	HybridDocRef,
+	HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { logger } from "src/utils/logger";
@@ -167,7 +167,7 @@ export class Database {
 		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
-	async setLexicalDocRefs(refs: DocumentRef[]) {
+	async setLexicalDocRefs(refs: BaseIndexedFileRef[]) {
 		this.db.transaction("rw", this.db.lexicalDocRefs, async () => {
 			await this.db.lexicalDocRefs.clear();
 			await this.db.lexicalDocRefs.bulkAdd(refs);
@@ -175,18 +175,18 @@ export class Database {
 	}
 
 	@monitorDecorator
-	async getLexicalDocRefs(): Promise<DocumentRef[] | null> {
+	async getLexicalDocRefs(): Promise<BaseIndexedFileRef[] | null> {
 		return (await this.db.lexicalDocRefs.toArray()) || null;
 	}
 
-	async setSemanticDocRefs(refs: DocumentRef[]) {
+	async setSemanticDocRefs(refs: BaseIndexedFileRef[]) {
 		this.db.transaction("rw", this.db.semanticDocRefs, async () => {
 			await this.db.semanticDocRefs.clear();
 			await this.db.semanticDocRefs.bulkAdd(refs);
 		});
 	}
 
-	async getSemanticDocRefs(): Promise<DocumentRef[] | null> {
+	async getSemanticDocRefs(): Promise<BaseIndexedFileRef[] | null> {
 		return (await this.db.semanticDocRefs.toArray()) || null;
 	}
 
@@ -231,15 +231,15 @@ class DexieWrapper extends Dexie {
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
 	minisearch!: Dexie.Table<{ id?: number; data: SerializedFileSearchIndex }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
-	lexicalDocRefs!: Dexie.Table<DocumentRef, number>;
-	semanticDocRefs!: Dexie.Table<DocumentRef, number>;
+	lexicalDocRefs!: Dexie.Table<BaseIndexedFileRef, number>;
+	semanticDocRefs!: Dexie.Table<BaseIndexedFileRef, number>;
 	// Hybrid search tables
 	hybridChunks!: Dexie.Table<ChunkRow, number>;
 	hybridFileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
 	hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
 	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
-	hybridDocRefs!: Dexie.Table<HybridDocRef, string>;
+	hybridDocRefs!: Dexie.Table<HybridIndexedFileRef, string>;
 	hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
 	hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
 

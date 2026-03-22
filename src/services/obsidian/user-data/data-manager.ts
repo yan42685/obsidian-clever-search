@@ -3,7 +3,7 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
-import type { DocumentRef } from "src/globals/search-types";
+import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
 import {
@@ -18,7 +18,7 @@ import {
 	profileHybridStage,
 	setHybridProfileMeta,
 } from "src/services/search/hybrid/hybrid-profiler";
-import type { HybridDocRef, HybridDocState } from "src/services/search/hybrid/hybrid-store";
+import type { HybridIndexedFileRef, HybridDocState } from "src/services/search/hybrid/hybrid-store";
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
@@ -83,7 +83,7 @@ type HybridRepairTask = {
 };
 
 function normalizeHybridDocState(
-	ref: HybridDocRef | undefined,
+	ref: HybridIndexedFileRef | undefined,
 	hasVector: boolean,
 ): HybridDocState | null {
 	if (!ref?.state) {
@@ -847,7 +847,7 @@ export class DataManager {
 			this.dataProvider.allFilesToBeIndexed().map((file) => [file.path, file]),
 		);
 		const preRefsList = await this.database.getLexicalDocRefs();
-		const prevRefs = new Map<string, DocumentRef>(
+		const prevRefs = new Map<string, BaseIndexedFileRef>(
 			preRefsList?.map((ref) => [ref.path, ref]),
 		);
 

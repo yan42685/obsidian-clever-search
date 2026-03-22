@@ -25,7 +25,7 @@ export type DocumentWeight = {
 	[K in keyof IndexedDocument]?: number;
 };
 
-export type DocumentRef = {
+export type BaseIndexedFileRef = {
 	id?: number;
 	path: string;
 	updateTime: number;

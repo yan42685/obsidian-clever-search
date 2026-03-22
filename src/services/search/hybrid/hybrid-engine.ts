@@ -34,7 +34,7 @@ import {
 	bm25ToBlob,
 	chunkVectorShardToRow,
 	type HybridFileSnapshotRow,
-	type HybridDocRef,
+	type HybridIndexedFileRef,
 	type ChunkRow,
 	type ChunkVectorShardRow,
 	chunkToRow,
@@ -633,7 +633,7 @@ export class HybridEngine {
 	private getReusableStoredFileIndexState(
 		filePath: string,
 		previousState: StoredFileIndexState,
-		previousDocRef: HybridDocRef | undefined,
+		previousDocRef: HybridIndexedFileRef | undefined,
 	): StoredFileIndexState {
 		const inconsistencyReasons: string[] = [];
 		const chunkCount = previousState.chunkRows.length;
@@ -982,7 +982,7 @@ export class HybridEngine {
 		});
 	}
 
-	private async putHybridDocRef(ref: HybridDocRef): Promise<void> {
+	private async putHybridDocRef(ref: HybridIndexedFileRef): Promise<void> {
 		await this.db.db.hybridDocRefs.put(ref);
 	}
 
