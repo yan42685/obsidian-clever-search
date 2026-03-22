@@ -18,10 +18,16 @@ import {
 	profileHybridStage,
 	setHybridProfileMeta,
 } from "src/services/search/hybrid/hybrid-profiler";
-import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
+import type {
+	ChunkRow,
+	ChunkVectorShardRow,
+	HybridFileSnapshotRow,
+	HybridIndexedFileRef,
+} from "src/services/search/hybrid/hybrid-store";
 import {
 	analyzeHybridStoredFileConsistency,
 	normalizeHybridIndexedFileState,
+	type HybridStoredVectorInfo,
 } from "src/services/search/hybrid/hybrid-consistency";
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
@@ -69,6 +75,14 @@ type HybridPreflightReport = {
 type HybridStorageRepairReport = {
 	repairedPaths: string[];
 	reindexedPaths: string[];
+	previousIndexedFileRefs: Map<string, HybridIndexedFileRef>;
+};
+
+type HybridStoredPathSummary = {
+	chunkCount: number;
+	snapshotGeneration?: number;
+	vectorInfo?: HybridStoredVectorInfo;
+	indexedFileRef?: HybridIndexedFileRef;
 };
 
 type HybridSearchAvailability = "blocked" | "available";
@@ -158,6 +172,7 @@ function formatBytesLabel(bytes: number): string {
 export class DataManager {
 	private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
 	private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
+	private static readonly HYBRID_TABLE_SCAN_BATCH_SIZE = 512;
 	private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
 	private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
 	private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
@@ -725,9 +740,7 @@ export class DataManager {
 				"startup.repair_stored_state",
 				async () => await this.repairHybridStoredState(currFiles),
 			);
-			const previousIndexedFileRefs = new Map(
-				(await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => [ref.path, ref]),
-			);
+			const previousIndexedFileRefs = repairReport.previousIndexedFileRefs;
 
 			const docsToAdd: TFile[] = [];
 			const docsToDelete: string[] = [];
@@ -764,7 +777,12 @@ export class DataManager {
 			logger.debug(
 				`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
 			);
-			await this.runHybridPreflight(currFiles, docsToAdd, docsToDelete);
+			await this.runHybridPreflight(
+				currFiles,
+				docsToAdd,
+				docsToDelete,
+				repairReport.previousIndexedFileRefs,
+			);
 			const progressNotice = this.createHybridIndexProgressNotice(
 				docsToAdd,
 				repairReport.repairedPaths.length,
@@ -1292,59 +1310,181 @@ export class DataManager {
 		return progressNotice;
 	}
 
+	private async scanRowsInBatches<Row, Key extends string | number>(
+		loadBatch: (lastKey: Key | null, batchSize: number) => Promise<Row[]>,
+		getLastKey: (row: Row) => Key,
+		handleBatch: (rows: Row[]) => void | Promise<void>,
+	): Promise<void> {
+		let lastKey: Key | null = null;
+		while (true) {
+			const rows = await loadBatch(
+				lastKey,
+				DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+			);
+			if (rows.length === 0) {
+				return;
+			}
+			await handleBatch(rows);
+			lastKey = getLastKey(rows[rows.length - 1]);
+		}
+	}
+
+	private getOrCreateHybridStoredPathSummary(
+		summaries: Map<string, HybridStoredPathSummary>,
+		path: string,
+	): HybridStoredPathSummary {
+		const existing = summaries.get(path);
+		if (existing) {
+			return existing;
+		}
+		const created: HybridStoredPathSummary = { chunkCount: 0 };
+		summaries.set(path, created);
+		return created;
+	}
+
+	private async collectHybridStoredPathSummaries(): Promise<
+		Map<string, HybridStoredPathSummary>
+	> {
+		const summaries = new Map<string, HybridStoredPathSummary>();
+
+		await this.scanRowsInBatches<ChunkRow, number>(
+			(lastId, batchSize) => {
+				if (lastId === null) {
+					return this.database.db.hybridChunks
+						.orderBy(":id")
+						.limit(batchSize)
+						.toArray();
+				}
+				return this.database.db.hybridChunks
+					.where(":id")
+					.above(lastId)
+					.limit(batchSize)
+					.toArray();
+			},
+			(row) => row.id ?? 0,
+			(rows) => {
+				for (const row of rows) {
+					const summary = this.getOrCreateHybridStoredPathSummary(
+						summaries,
+						row.filePath,
+					);
+					summary.chunkCount += 1;
+				}
+			},
+		);
+
+		await this.scanRowsInBatches<HybridFileSnapshotRow, string>(
+			(lastPath, batchSize) => {
+				if (lastPath === null) {
+					return this.database.db.hybridFileSnapshots
+						.orderBy(":id")
+						.limit(batchSize)
+						.toArray();
+				}
+				return this.database.db.hybridFileSnapshots
+					.where(":id")
+					.above(lastPath)
+					.limit(batchSize)
+					.toArray();
+			},
+			(row) => row.filePath,
+			(rows) => {
+				for (const row of rows) {
+					const summary = this.getOrCreateHybridStoredPathSummary(
+						summaries,
+						row.filePath,
+					);
+					summary.snapshotGeneration = row.generation;
+				}
+			},
+		);
+
+		await this.scanRowsInBatches<ChunkVectorShardRow, string>(
+			(lastPath, batchSize) => {
+				if (lastPath === null) {
+					return this.database.db.hybridChunkVectors
+						.orderBy(":id")
+						.limit(batchSize)
+						.toArray();
+				}
+				return this.database.db.hybridChunkVectors
+					.where(":id")
+					.above(lastPath)
+					.limit(batchSize)
+					.toArray();
+			},
+			(row) => row.filePath,
+			(rows) => {
+				for (const row of rows) {
+					const summary = this.getOrCreateHybridStoredPathSummary(
+						summaries,
+						row.filePath,
+					);
+					summary.vectorInfo = {
+						precision: (
+							row.precision === "float16" ? "float16" : "int8"
+						) as VectorPrecision,
+						chunkCount: row.chunkCount,
+						generation: row.generation,
+					};
+				}
+			},
+		);
+
+		await this.scanRowsInBatches<HybridIndexedFileRef, string>(
+			(lastPath, batchSize) => {
+				if (lastPath === null) {
+					return this.database.db.hybridIndexedFileRefs
+						.orderBy(":id")
+						.limit(batchSize)
+						.toArray();
+				}
+				return this.database.db.hybridIndexedFileRefs
+					.where(":id")
+					.above(lastPath)
+					.limit(batchSize)
+					.toArray();
+			},
+			(row) => row.path,
+			(rows) => {
+				for (const row of rows) {
+					const summary = this.getOrCreateHybridStoredPathSummary(
+						summaries,
+						row.path,
+					);
+					summary.indexedFileRef = row;
+				}
+			},
+		);
+
+		return summaries;
+	}
+
 	private async repairHybridStoredState(
 		currFiles: Map<string, TFile>,
 	): Promise<HybridStorageRepairReport> {
-		const chunkRows = await this.database.db.hybridChunks.orderBy("filePath").toArray();
-		const chunkPaths = new Set<string>(chunkRows.map((row) => row.filePath));
-		const chunkCountByPath = new Map<string, number>();
-		for (const row of chunkRows) {
-			chunkCountByPath.set(row.filePath, (chunkCountByPath.get(row.filePath) ?? 0) + 1);
-		}
-		const vectorRows = await this.database.db.hybridChunkVectors.toArray();
-		const snapshotRows = await this.database.db.hybridFileSnapshots.toArray();
-		const snapshotByPath = new Map(
-			snapshotRows.map((row) => [row.filePath, row]),
-		);
-		const vectorInfoByPath = new Map<
-			string,
-			{ precision: VectorPrecision; chunkCount: number; generation?: number }
-		>(
-			vectorRows.map((row) => [
-				row.filePath,
-				{
-					precision: (row.precision === "float16" ? "float16" : "int8") as VectorPrecision,
-					chunkCount: row.chunkCount,
-					generation: row.generation,
-				},
-			]),
-		);
-		const indexedFileRefs = await this.database.db.hybridIndexedFileRefs.toArray();
-		const indexedFileRefByPath = new Map(indexedFileRefs.map((ref) => [ref.path, ref]));
-		const indexedFileRefPaths = new Set(indexedFileRefByPath.keys());
-		const allPaths = new Set<string>([
-			...chunkPaths,
-			...snapshotByPath.keys(),
-			...vectorInfoByPath.keys(),
-			...indexedFileRefPaths,
-		]);
+		const summaries = await this.collectHybridStoredPathSummaries();
+		const previousIndexedFileRefs = new Map<string, HybridIndexedFileRef>();
 		const currentPrecision =
 			this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8";
 		const repairedPaths = new Set<string>();
 		const reindexedPaths = new Set<string>();
 
-		for (const path of allPaths) {
-			const vectorInfo = vectorInfoByPath.get(path);
+		for (const [path, summary] of summaries) {
 			const existsNow = currFiles.has(path);
-			const indexedFileRef = indexedFileRefByPath.get(path);
+			const indexedFileRef = summary.indexedFileRef;
+			if (indexedFileRef) {
+				previousIndexedFileRefs.set(path, indexedFileRef);
+			}
 			const consistency = analyzeHybridStoredFileConsistency({
 				existsInVault: existsNow,
-				hasChunks: chunkPaths.has(path),
-				chunkCount: chunkCountByPath.get(path) ?? 0,
-				snapshot: snapshotByPath.get(path)
-					? { generation: snapshotByPath.get(path)?.generation }
+				hasChunks: summary.chunkCount > 0,
+				chunkCount: summary.chunkCount,
+				snapshot:
+					summary.snapshotGeneration !== undefined
+						? { generation: summary.snapshotGeneration }
 					: undefined,
-				vectorInfo,
+				vectorInfo: summary.vectorInfo,
 				indexedFileRef,
 				currentPrecision,
 			});
@@ -1358,7 +1498,7 @@ export class DataManager {
 			}
 		}
 
-		for (const [path, indexedFileRef] of indexedFileRefByPath) {
+		for (const [path, indexedFileRef] of previousIndexedFileRefs) {
 			if (
 				currFiles.has(path) &&
 				indexedFileRef.embeddingDeferred === true &&
@@ -1369,7 +1509,11 @@ export class DataManager {
 		}
 
 		if (repairedPaths.size === 0) {
-			return { repairedPaths: [], reindexedPaths: Array.from(reindexedPaths) };
+			return {
+				repairedPaths: [],
+				reindexedPaths: Array.from(reindexedPaths),
+				previousIndexedFileRefs,
+			};
 		}
 
 		const repairedPathList = Array.from(repairedPaths);
@@ -1380,18 +1524,19 @@ export class DataManager {
 			repairedPathList.map((path) => ({
 				path,
 				inVault: currFiles.has(path),
-				hasChunks: chunkPaths.has(path),
-				hasSnapshot: snapshotByPath.has(path),
-				hasVector: vectorInfoByPath.has(path),
-				hasIndexedFileRef: indexedFileRefPaths.has(path),
+				hasChunks: (summaries.get(path)?.chunkCount ?? 0) > 0,
+				hasSnapshot: summaries.get(path)?.snapshotGeneration !== undefined,
+				hasVector: summaries.get(path)?.vectorInfo !== undefined,
+				hasIndexedFileRef: summaries.get(path)?.indexedFileRef !== undefined,
 				indexedFileState: normalizeHybridIndexedFileState(
-					indexedFileRefByPath.get(path),
-					vectorInfoByPath.has(path),
+					summaries.get(path)?.indexedFileRef,
+					summaries.get(path)?.vectorInfo !== undefined,
 				) ?? "-",
-				chunkCount: chunkCountByPath.get(path) ?? 0,
-				indexedFileRefChunkCount: indexedFileRefByPath.get(path)?.chunkCount ?? "-",
-				vectorChunkCount: vectorInfoByPath.get(path)?.chunkCount ?? "-",
-				vectorPrecision: vectorInfoByPath.get(path)?.precision ?? "-",
+				chunkCount: summaries.get(path)?.chunkCount ?? 0,
+				indexedFileRefChunkCount:
+					summaries.get(path)?.indexedFileRef?.chunkCount ?? "-",
+				vectorChunkCount: summaries.get(path)?.vectorInfo?.chunkCount ?? "-",
+				vectorPrecision: summaries.get(path)?.vectorInfo?.precision ?? "-",
 			})),
 		);
 		console.groupEnd();
@@ -1405,6 +1550,7 @@ export class DataManager {
 		return {
 			repairedPaths: repairedPathList,
 			reindexedPaths: Array.from(reindexedPaths),
+			previousIndexedFileRefs,
 		};
 	}
 
@@ -1525,6 +1671,7 @@ export class DataManager {
 		currFiles: Map<string, TFile>,
 		docsToAdd: TFile[],
 		docsToDelete: string[],
+		previousIndexedFileRefs?: ReadonlyMap<string, HybridIndexedFileRef>,
 	): Promise<void> {
 		if (
 			docsToAdd.length === 0 &&
@@ -1538,6 +1685,7 @@ export class DataManager {
 			currFiles,
 			docsToAdd,
 			docsToDelete,
+			previousIndexedFileRefs,
 		);
 		console.groupCollapsed("[clever-search] Hybrid indexing preflight");
 		console.table([
@@ -1575,6 +1723,7 @@ export class DataManager {
 		currFiles: Map<string, TFile>,
 		docsToAdd: TFile[],
 		docsToDelete: string[],
+		previousIndexedFileRefs?: ReadonlyMap<string, HybridIndexedFileRef>,
 	): Promise<HybridPreflightReport> {
 		const currFileList = Array.from(currFiles.values());
 		const totalBytes = currFileList.reduce((sum, file) => sum + file.stat.size, 0);
@@ -1600,9 +1749,12 @@ export class DataManager {
 			)
 			.reduce((sum, item) => sum + item.bytes, 0);
 
-		const existingHybridRefs = new Set(
-			(await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => ref.path),
-		);
+		const existingHybridRefs =
+			previousIndexedFileRefs !== undefined
+				? new Set(previousIndexedFileRefs.keys())
+				: new Set(
+					(await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => ref.path),
+				);
 		const indexedSourceBytes = currFileList
 			.filter((file) => existingHybridRefs.has(file.path))
 			.reduce((sum, file) => sum + file.stat.size, 0);
