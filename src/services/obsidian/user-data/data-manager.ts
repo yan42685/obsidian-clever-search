@@ -18,8 +18,13 @@ import {
 	profileHybridStage,
 	setHybridProfileMeta,
 } from "src/services/search/hybrid/hybrid-profiler";
-import type { HybridIndexedFileRef, HybridDocState } from "src/services/search/hybrid/hybrid-store";
+import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
+import {
+	analyzeHybridStoredFileConsistency,
+	normalizeHybridIndexedFileState,
+} from "src/services/search/hybrid/hybrid-consistency";
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
+import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { eventBus } from "src/utils/event-bus";
@@ -81,16 +86,6 @@ type HybridRepairTask = {
 	eligibleAt: number;
 	enqueuedAt: number;
 };
-
-function normalizeHybridDocState(
-	ref: HybridIndexedFileRef | undefined,
-	hasVector: boolean,
-): HybridDocState | null {
-	if (!ref?.state) {
-		return hasVector ? "ready" : "bm25_only";
-	}
-	return ref.state;
-}
 
 type HybridIndexProgress = {
 	stage: "repair" | "index" | "done";
@@ -211,7 +206,7 @@ export class DataManager {
 			};
 		}
 
-		const indexedFileRefs = await this.database.db.hybridDocRefs.toArray();
+		const indexedFileRefs = await this.database.db.hybridIndexedFileRefs.toArray();
 		let deferredCount = 0;
 		let nextEligibleAt: number | null = null;
 		for (const ref of indexedFileRefs) {
@@ -731,7 +726,7 @@ export class DataManager {
 				async () => await this.repairHybridStoredState(currFiles),
 			);
 			const previousIndexedFileRefs = new Map(
-				(await this.database.db.hybridDocRefs.toArray()).map((ref) => [ref.path, ref]),
+				(await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => [ref.path, ref]),
 			);
 
 			const docsToAdd: TFile[] = [];
@@ -1162,7 +1157,7 @@ export class DataManager {
 	}
 
 	private async getIncrementalEmbedEligibleAt(filePath: string): Promise<number> {
-		const ref = await this.database.db.hybridDocRefs.get(filePath);
+		const ref = await this.database.db.hybridIndexedFileRefs.get(filePath);
 		const lastIncrementalEmbedAt = ref?.lastIncrementalEmbedAt ?? 0;
 		if (lastIncrementalEmbedAt <= 0) {
 			return 0;
@@ -1313,18 +1308,18 @@ export class DataManager {
 		);
 		const vectorInfoByPath = new Map<
 			string,
-			{ precision: string; chunkCount: number; generation?: number }
+			{ precision: VectorPrecision; chunkCount: number; generation?: number }
 		>(
 			vectorRows.map((row) => [
 				row.filePath,
 				{
-					precision: row.precision,
+					precision: (row.precision === "float16" ? "float16" : "int8") as VectorPrecision,
 					chunkCount: row.chunkCount,
 					generation: row.generation,
 				},
 			]),
 		);
-		const indexedFileRefs = await this.database.db.hybridDocRefs.toArray();
+		const indexedFileRefs = await this.database.db.hybridIndexedFileRefs.toArray();
 		const indexedFileRefByPath = new Map(indexedFileRefs.map((ref) => [ref.path, ref]));
 		const indexedFileRefPaths = new Set(indexedFileRefByPath.keys());
 		const allPaths = new Set<string>([
@@ -1335,65 +1330,31 @@ export class DataManager {
 		]);
 		const currentPrecision =
 			this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8";
-		const repairedPaths: string[] = [];
-		const reindexedPaths: string[] = [];
+		const repairedPaths = new Set<string>();
+		const reindexedPaths = new Set<string>();
 
 		for (const path of allPaths) {
-			const hasChunks = chunkPaths.has(path);
 			const vectorInfo = vectorInfoByPath.get(path);
-			const hasVector = vectorInfo !== undefined;
-			const vectorPrecision = vectorInfo?.precision;
-			const hasSnapshot = snapshotByPath.has(path);
-			const hasIndexedFileRef = indexedFileRefPaths.has(path);
 			const existsNow = currFiles.has(path);
 			const indexedFileRef = indexedFileRefByPath.get(path);
-			const indexedFileState = normalizeHybridDocState(indexedFileRef, hasVector);
-			const chunkCount = chunkCountByPath.get(path) ?? 0;
-			const vectorChunkCount = vectorInfo?.chunkCount ?? 0;
-			const isPendingOrFailed =
-				indexedFileState === "pending" || indexedFileState === "failed";
-			const readyMissingData =
-				indexedFileState === "ready" &&
-				(!hasChunks || !hasSnapshot || !hasVector || !hasIndexedFileRef);
-			const bm25OnlyShapeMismatch =
-				indexedFileState === "bm25_only" &&
-				(!hasChunks || !hasSnapshot || hasVector || !hasIndexedFileRef);
-			const chunkCountMismatch =
-				hasIndexedFileRef &&
-				indexedFileRef?.chunkCount !== undefined &&
-				indexedFileRef.chunkCount !== chunkCount;
-			const vectorChunkCountMismatch =
-				hasVector && hasChunks && vectorChunkCount !== chunkCount;
-			const generationMismatch =
-				hasIndexedFileRef &&
-				(hasVector || hasSnapshot) &&
-				indexedFileRef?.generation !== undefined &&
-				((vectorInfo?.generation !== undefined &&
-					indexedFileRef.generation !== vectorInfo.generation) ||
-					(snapshotByPath.get(path)?.generation !== undefined &&
-						indexedFileRef.generation !== snapshotByPath.get(path)?.generation));
-
-			const inconsistent =
-				(hasVector && !hasChunks) ||
-				(!hasIndexedFileRef && (hasChunks || hasVector || hasSnapshot)) ||
-				(hasIndexedFileRef && (!hasChunks || !hasSnapshot)) ||
-				isPendingOrFailed ||
-				readyMissingData ||
-				bm25OnlyShapeMismatch ||
-				chunkCountMismatch ||
-				vectorChunkCountMismatch ||
-				generationMismatch;
-			const obsolete = !existsNow && (hasChunks || hasVector || hasIndexedFileRef);
-			const obsoleteSnapshot = !existsNow && hasSnapshot;
-			const precisionMismatch =
-				hasVector && vectorPrecision !== currentPrecision;
-			if (!inconsistent && !obsolete && !obsoleteSnapshot && !precisionMismatch) {
+			const consistency = analyzeHybridStoredFileConsistency({
+				existsInVault: existsNow,
+				hasChunks: chunkPaths.has(path),
+				chunkCount: chunkCountByPath.get(path) ?? 0,
+				snapshot: snapshotByPath.get(path)
+					? { generation: snapshotByPath.get(path)?.generation }
+					: undefined,
+				vectorInfo,
+				indexedFileRef,
+				currentPrecision,
+			});
+			if (consistency.repairReasons.length === 0) {
 				continue;
 			}
 
-			repairedPaths.push(path);
+			repairedPaths.add(path);
 			if (existsNow) {
-				reindexedPaths.push(path);
+				reindexedPaths.add(path);
 			}
 		}
 
@@ -1401,28 +1362,29 @@ export class DataManager {
 			if (
 				currFiles.has(path) &&
 				indexedFileRef.embeddingDeferred === true &&
-				!reindexedPaths.includes(path)
+				!reindexedPaths.has(path)
 			) {
-				reindexedPaths.push(path);
+				reindexedPaths.add(path);
 			}
 		}
 
-		if (repairedPaths.length === 0) {
-			return { repairedPaths, reindexedPaths };
+		if (repairedPaths.size === 0) {
+			return { repairedPaths: [], reindexedPaths: Array.from(reindexedPaths) };
 		}
 
+		const repairedPathList = Array.from(repairedPaths);
 		console.groupCollapsed(
-			`[clever-search] Hybrid startup self-healing (${repairedPaths.length} paths)`,
+			`[clever-search] Hybrid startup self-healing (${repairedPathList.length} paths)`,
 		);
 		console.table(
-			repairedPaths.map((path) => ({
+			repairedPathList.map((path) => ({
 				path,
 				inVault: currFiles.has(path),
 				hasChunks: chunkPaths.has(path),
 				hasSnapshot: snapshotByPath.has(path),
 				hasVector: vectorInfoByPath.has(path),
 				hasIndexedFileRef: indexedFileRefPaths.has(path),
-				indexedFileState: normalizeHybridDocState(
+				indexedFileState: normalizeHybridIndexedFileState(
 					indexedFileRefByPath.get(path),
 					vectorInfoByPath.has(path),
 				) ?? "-",
@@ -1434,13 +1396,16 @@ export class DataManager {
 		);
 		console.groupEnd();
 
-		for (const path of repairedPaths) {
+		for (const path of repairedPathList) {
 			await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((error) =>
 				logger.warn(`hybrid self-healing delete failed for ${path}:`, error),
 			);
 		}
 
-		return { repairedPaths, reindexedPaths };
+		return {
+			repairedPaths: repairedPathList,
+			reindexedPaths: Array.from(reindexedPaths),
+		};
 	}
 
 	private isRetryableHybridIndexError(error: unknown): boolean {
@@ -1631,12 +1596,12 @@ export class DataManager {
 				item.name === "hybridChunkVectors" ||
 				item.name === "hybridBm25Index" ||
 				item.name === "hybridHnswSmall" ||
-				item.name === "hybridDocRefs",
+				item.name === "hybridIndexedFileRefs",
 			)
 			.reduce((sum, item) => sum + item.bytes, 0);
 
 		const existingHybridRefs = new Set(
-			(await this.database.db.hybridDocRefs.toArray()).map((ref) => ref.path),
+			(await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => ref.path),
 		);
 		const indexedSourceBytes = currFileList
 			.filter((file) => existingHybridRefs.has(file.path))

@@ -44,14 +44,13 @@ export class Database {
 		const tableEntries = [
 			{ name: "pluginSetting", table: this.db.pluginSetting },
 			{ name: "minisearch", table: this.db.minisearch },
-			{ name: "lexicalDocRefs", table: this.db.lexicalDocRefs },
-			{ name: "semanticDocRefs", table: this.db.semanticDocRefs },
+			{ name: "lexicalIndexedFileRefs", table: this.db.lexicalIndexedFileRefs },
 			{ name: "hybridChunks", table: this.db.hybridChunks },
 			{ name: "hybridFileSnapshots", table: this.db.hybridFileSnapshots },
 			{ name: "hybridChunkVectors", table: this.db.hybridChunkVectors },
 			{ name: "hybridBm25Index", table: this.db.hybridBm25Index },
 			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
-			{ name: "hybridDocRefs", table: this.db.hybridDocRefs },
+			{ name: "hybridIndexedFileRefs", table: this.db.hybridIndexedFileRefs },
 			{ name: "hybridTokenStats", table: this.db.hybridTokenStats },
 			{ name: "hybridTokenSavings", table: this.db.hybridTokenSavings },
 		] as const;
@@ -168,26 +167,15 @@ export class Database {
 	}
 
 	async setLexicalIndexedFileRefs(refs: BaseIndexedFileRef[]) {
-		this.db.transaction("rw", this.db.lexicalDocRefs, async () => {
-			await this.db.lexicalDocRefs.clear();
-			await this.db.lexicalDocRefs.bulkAdd(refs);
+		this.db.transaction("rw", this.db.lexicalIndexedFileRefs, async () => {
+			await this.db.lexicalIndexedFileRefs.clear();
+			await this.db.lexicalIndexedFileRefs.bulkAdd(refs);
 		});
 	}
 
 	@monitorDecorator
 	async getLexicalIndexedFileRefs(): Promise<BaseIndexedFileRef[] | null> {
-		return (await this.db.lexicalDocRefs.toArray()) || null;
-	}
-
-	async setSemanticIndexedFileRefs(refs: BaseIndexedFileRef[]) {
-		this.db.transaction("rw", this.db.semanticDocRefs, async () => {
-			await this.db.semanticDocRefs.clear();
-			await this.db.semanticDocRefs.bulkAdd(refs);
-		});
-	}
-
-	async getSemanticIndexedFileRefs(): Promise<BaseIndexedFileRef[] | null> {
-		return (await this.db.semanticDocRefs.toArray()) || null;
+		return (await this.db.lexicalIndexedFileRefs.toArray()) || null;
 	}
 
 	async setPluginSetting(setting: OuterSetting): Promise<boolean> {
@@ -225,21 +213,20 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 11;
+	private static readonly _dbVersion = 12;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
 	minisearch!: Dexie.Table<{ id?: number; data: SerializedFileSearchIndex }, number>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
-	lexicalDocRefs!: Dexie.Table<BaseIndexedFileRef, number>;
-	semanticDocRefs!: Dexie.Table<BaseIndexedFileRef, number>;
+	lexicalIndexedFileRefs!: Dexie.Table<BaseIndexedFileRef, number>;
 	// Hybrid search tables
 	hybridChunks!: Dexie.Table<ChunkRow, number>;
 	hybridFileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
 	hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
 	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
-	hybridDocRefs!: Dexie.Table<HybridIndexedFileRef, string>;
+	hybridIndexedFileRefs!: Dexie.Table<HybridIndexedFileRef, string>;
 	hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
 	hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
 
@@ -293,7 +280,7 @@ class DexieWrapper extends Dexie {
 					tx.table("hybridDocRefs").clear(),
 				]);
 			});
-		this.version(DexieWrapper._dbVersion)
+		this.version(11)
 			.stores({
 				pluginSetting: "++id",
 				minisearch: "++id",
@@ -319,6 +306,35 @@ class DexieWrapper extends Dexie {
 					tx.table("hybridHnswSmall").clear(),
 					tx.table("hybridDocRefs").clear(),
 				]);
+			});
+		this.version(DexieWrapper._dbVersion)
+			.stores({
+				pluginSetting: "++id",
+				minisearch: "++id",
+				lexicalIndexedFileRefs: "++id",
+				hybridChunks: "++id, filePath",
+				hybridFileSnapshots: "filePath",
+				hybridChunkVectors: "filePath",
+				hybridBm25Index: "id",
+				hybridHnswSmall: "id",
+				hybridIndexedFileRefs: "path",
+				hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+				hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+			})
+			.upgrade(async (tx) => {
+				const lexicalIndexedFileRefs = await tx
+					.table("lexicalDocRefs")
+					.toArray() as BaseIndexedFileRef[];
+				if (lexicalIndexedFileRefs.length > 0) {
+					await tx.table("lexicalIndexedFileRefs").bulkPut(lexicalIndexedFileRefs);
+				}
+
+				const hybridIndexedFileRefs = await tx
+					.table("hybridDocRefs")
+					.toArray() as HybridIndexedFileRef[];
+				if (hybridIndexedFileRefs.length > 0) {
+					await tx.table("hybridIndexedFileRefs").bulkPut(hybridIndexedFileRefs);
+				}
 			});
 	}
 	get dbVersion() {

@@ -58,6 +58,9 @@ import {
 	profileHybridStage,
 	recordHybridProfileMetric,
 } from './hybrid-profiler';
+import {
+	analyzeHybridStoredFileConsistency,
+} from './hybrid-consistency';
 
 const BM25_RECALL_LIMIT = 20;
 const DENSE_RECALL_LIMIT = 30;
@@ -162,7 +165,7 @@ export class HybridEngine {
 			this.db.db.hybridChunkVectors.clear(),
 			this.db.db.hybridBm25Index.clear(),
 			this.db.db.hybridHnswSmall.clear(),
-			this.db.db.hybridDocRefs.clear(),
+			this.db.db.hybridIndexedFileRefs.clear(),
 		]);
 	}
 
@@ -258,7 +261,7 @@ export class HybridEngine {
 				.toArray();
 			const snapshotRow = await this.db.db.hybridFileSnapshots.get(oldPath);
 			const vectorRow = await this.db.db.hybridChunkVectors.get(oldPath);
-			const indexedFileRef = await this.db.db.hybridDocRefs.get(oldPath);
+			const indexedFileRef = await this.db.db.hybridIndexedFileRefs.get(oldPath);
 			const hasStoredData =
 				chunkRows.length > 0 ||
 				snapshotRow !== undefined ||
@@ -272,7 +275,7 @@ export class HybridEngine {
 				(await this.db.db.hybridChunks.where("filePath").equals(newPath).count()) > 0 ||
 				(await this.db.db.hybridFileSnapshots.get(newPath)) !== undefined ||
 				(await this.db.db.hybridChunkVectors.get(newPath)) !== undefined ||
-				(await this.db.db.hybridDocRefs.get(newPath)) !== undefined;
+				(await this.db.db.hybridIndexedFileRefs.get(newPath)) !== undefined;
 			if (hasTargetData) {
 				await this.deleteStoredFileData(newPath, {
 					persistIndices: false,
@@ -311,7 +314,7 @@ export class HybridEngine {
 					path: newPath,
 					updateTime,
 				});
-				await this.db.db.hybridDocRefs.delete(oldPath);
+				await this.db.db.hybridIndexedFileRefs.delete(oldPath);
 			}
 
 			return true;
@@ -329,7 +332,7 @@ export class HybridEngine {
 		await this.db.db.hybridFileSnapshots.delete(filePath);
 		await this.db.db.hybridChunkVectors.delete(filePath);
 		if (option.deleteIndexedFileRef ?? true) {
-			await this.db.db.hybridDocRefs.delete(filePath);
+			await this.db.db.hybridIndexedFileRefs.delete(filePath);
 		}
 
 		for (const id of ids) {
@@ -428,7 +431,7 @@ export class HybridEngine {
 
 			const generation = Date.now();
 			const previousState = await this.loadStoredFileIndexState(filePath);
-			const previousIndexedFileRef = await this.db.db.hybridDocRefs.get(filePath);
+			const previousIndexedFileRef = await this.db.db.hybridIndexedFileRefs.get(filePath);
 			const reusableState = this.getReusableStoredFileIndexState(
 				filePath,
 				previousState,
@@ -475,7 +478,7 @@ export class HybridEngine {
 					),
 			);
 			if (plannedChunks.length === 0) {
-				await this.db.db.hybridDocRefs.delete(filePath);
+				await this.db.db.hybridIndexedFileRefs.delete(filePath);
 				if (option.persistIndices ?? true) {
 					await this.persistIndices();
 				}
@@ -635,62 +638,27 @@ export class HybridEngine {
 		previousState: StoredFileIndexState,
 		previousIndexedFileRef: HybridIndexedFileRef | undefined,
 	): StoredFileIndexState {
-		const inconsistencyReasons: string[] = [];
-		const chunkCount = previousState.chunkRows.length;
-		const hasSnapshot = previousState.snapshot !== undefined;
-		const hasVectorShard = previousState.vectorChunkCount !== undefined;
-		const indexedFileState = previousIndexedFileRef?.state;
-
-		if (!previousIndexedFileRef && (hasSnapshot || chunkCount > 0 || hasVectorShard)) {
-			inconsistencyReasons.push('missing_indexed_file_ref');
-		}
-		if (
-			(indexedFileState === 'pending' || indexedFileState === 'failed') &&
-			(hasSnapshot || chunkCount > 0 || hasVectorShard)
-		) {
-			inconsistencyReasons.push(`indexed_file_state_${indexedFileState}`);
-		}
-		if (
-			indexedFileState === 'ready' &&
-			(!hasSnapshot || chunkCount === 0 || !hasVectorShard)
-		) {
-			inconsistencyReasons.push('ready_missing_data');
-		}
-		if (indexedFileState === 'bm25_only' && hasVectorShard) {
-			inconsistencyReasons.push('bm25_only_has_vector');
-		}
-		if (
-			previousIndexedFileRef?.chunkCount !== undefined &&
-			previousIndexedFileRef.chunkCount !== chunkCount
-		) {
-			inconsistencyReasons.push('indexed_file_ref_chunk_count_mismatch');
-		}
-		if (
-			previousState.vectorChunkCount !== undefined &&
-			previousState.vectorChunkCount !== chunkCount
-		) {
-			inconsistencyReasons.push('vector_chunk_count_mismatch');
-		}
-		if (
-			hasVectorShard &&
-			previousState.vectorPrecision !== this.precision
-		) {
-			inconsistencyReasons.push('vector_precision_mismatch');
-		}
-		if (
-			previousIndexedFileRef?.generation !== undefined &&
-			previousState.snapshot?.generation !== undefined &&
-			previousIndexedFileRef.generation !== previousState.snapshot.generation
-		) {
-			inconsistencyReasons.push('snapshot_generation_mismatch');
-		}
-		if (
-			previousIndexedFileRef?.generation !== undefined &&
-			previousState.vectorGeneration !== undefined &&
-			previousIndexedFileRef.generation !== previousState.vectorGeneration
-		) {
-			inconsistencyReasons.push('vector_generation_mismatch');
-		}
+		const consistency = analyzeHybridStoredFileConsistency({
+			existsInVault: true,
+			hasChunks: previousState.chunkRows.length > 0,
+			chunkCount: previousState.chunkRows.length,
+			snapshot: previousState.snapshot
+				? { generation: previousState.snapshot.generation }
+				: undefined,
+			vectorInfo:
+				previousState.vectorChunkCount !== undefined &&
+				previousState.vectorPrecision !== null &&
+				previousState.vectorPrecision !== undefined
+					? {
+						precision: previousState.vectorPrecision,
+						chunkCount: previousState.vectorChunkCount,
+						generation: previousState.vectorGeneration,
+					}
+					: undefined,
+			indexedFileRef: previousIndexedFileRef,
+			currentPrecision: this.precision,
+		});
+		const inconsistencyReasons = consistency.reuseBlockedReasons;
 
 		if (inconsistencyReasons.length === 0) {
 			return previousState;
@@ -986,7 +954,7 @@ export class HybridEngine {
 	}
 
 	private async putHybridIndexedFileRef(ref: HybridIndexedFileRef): Promise<void> {
-		await this.db.db.hybridDocRefs.put(ref);
+		await this.db.db.hybridIndexedFileRefs.put(ref);
 	}
 
 	private classifyIndexErrorKind(error: unknown): string {

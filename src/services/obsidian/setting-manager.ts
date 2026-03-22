@@ -927,7 +927,7 @@ class HybridSearchModal extends Modal {
 		const db = getInstance(Database).db;
 		const [indexedFileRefs, chunkRows, snapshotRows, vectorShards, bm25Blob, hnswBlob] =
 			await Promise.all([
-				db.hybridDocRefs.toArray(),
+				db.hybridIndexedFileRefs.toArray(),
 				db.hybridChunks.count(),
 				db.hybridFileSnapshots.count(),
 				db.hybridChunkVectors.count(),
