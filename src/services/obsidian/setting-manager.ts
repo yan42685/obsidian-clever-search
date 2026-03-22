@@ -462,6 +462,7 @@ class HybridSearchModal extends Modal {
 	private indexConcurrencyInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
 	private statsEl: HTMLElement;
+	private hybridHealthNotice: MyNotice | null = null;
 
 	constructor(app: App) {
 		super(app);
@@ -745,7 +746,12 @@ class HybridSearchModal extends Modal {
 
 	private async runHybridHealthCheck() {
 		const summary = await this.getHybridHealthSummary();
-		new MyNotice(this.buildHybridHealthNotice(summary), 12000);
+		const message = this.buildHybridHealthNotice(summary);
+		if (this.hybridHealthNotice?.noticeEl?.isConnected) {
+			this.hybridHealthNotice.setText(message);
+			return;
+		}
+		this.hybridHealthNotice = new MyNotice(message, 0);
 	}
 
 	private buildHybridHealthNotice(summary: HybridHealthSummary): string {
