@@ -14,6 +14,7 @@ import {
 	type LogLevelOptions,
 	type SearchHistoryMaxItems,
 } from "src/globals/plugin-setting";
+import { EventEnum } from "src/globals/enums";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import {
@@ -30,11 +31,16 @@ import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
+import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
 import { SearchService } from "./search-service";
 import { t } from "./translations/locale-helper";
-import { DataManager } from "./user-data/data-manager";
+import {
+	DataManager,
+	type HybridDeferredEmbeddingSummary,
+} from "./user-data/data-manager";
+import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-recovery-manager";
 import { DataProvider } from "./user-data/data-provider";
 import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
@@ -461,9 +467,18 @@ class HybridSearchModal extends Modal {
 	private weeklyLimitInputEl: HTMLInputElement;
 	private indexConcurrencyInputEl: HTMLInputElement;
 	private minIncrementalEmbedIntervalInputEl: HTMLInputElement;
+	private failedEmbeddingRetryIntervalInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
+	private failedEmbeddingStatusEl: HTMLElement;
+	private deferredEmbeddingStatusEl: HTMLElement;
 	private statsEl: HTMLElement;
 	private hybridHealthNotice: MyNotice | null = null;
+	private openedApiDomain = "";
+	private openedApiKey = "";
+	private failedEmbeddingStatusTimer: number | null = null;
+	private readonly failedEmbeddingStatusListener: EventCallback = () => {
+		void this.refreshHybridRuntimeStatus();
+	};
 
 	constructor(app: App) {
 		super(app);
@@ -480,6 +495,15 @@ class HybridSearchModal extends Modal {
 		this.modalEl.style.width = "56vw";
 		this.modalEl.style.marginBottom = "5em";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
+		this.openedApiDomain = this.setting.hybrid.apiDomain ?? "";
+		this.openedApiKey = this.setting.hybrid.apiKey ?? "";
+		eventBus.on(
+			EventEnum.HYBRID_RUNTIME_STATUS_CHANGED,
+			this.failedEmbeddingStatusListener,
+		);
+		this.failedEmbeddingStatusTimer = window.setInterval(() => {
+			void this.refreshHybridRuntimeStatus();
+		}, 15_000);
 		const contentEl = this.contentEl;
 
 		// ── Introduction ──────────────────────────────────────────────────────
@@ -631,6 +655,34 @@ class HybridSearchModal extends Modal {
 			);
 
 		new Setting(contentEl)
+			.setName(t("hybridModal.failedEmbeddingRetryInterval"))
+			.setDesc(t("hybridModal.failedEmbeddingRetryInterval.desc"))
+			.addText((text) => {
+				this.failedEmbeddingRetryIntervalInputEl = text.inputEl;
+				text
+					.setPlaceholder("10")
+					.setValue(
+						String(
+							this.setting.hybrid.failedEmbeddingRetryIntervalMin ?? 10,
+						),
+					);
+				text.inputEl.type = "number";
+				text.inputEl.min = "1";
+				text.inputEl.step = "1";
+			})
+			.addButton((button) =>
+				button.setButtonText(t("Update")).onClick(async () => {
+					await this.updateFailedEmbeddingRetryInterval();
+				}),
+			);
+		this.failedEmbeddingStatusEl = contentEl.createDiv();
+		this.failedEmbeddingStatusEl.style.margin = "0.35em 0 1em 0";
+		this.failedEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
+		this.deferredEmbeddingStatusEl = contentEl.createDiv();
+		this.deferredEmbeddingStatusEl.style.margin = "0 0 1em 0";
+		this.deferredEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
+
+		new Setting(contentEl)
 			.setName(t("hybridModal.vectorCompression"))
 			.setDesc(t("hybridModal.vectorCompression.desc"))
 			.addDropdown((dropdown) =>
@@ -692,10 +744,27 @@ class HybridSearchModal extends Modal {
 		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
+		void this.refreshHybridRuntimeStatus();
 		void this.refreshTokenStats();
 	}
 
 	onClose() {
+		eventBus.off(
+			EventEnum.HYBRID_RUNTIME_STATUS_CHANGED,
+			this.failedEmbeddingStatusListener,
+		);
+		if (this.failedEmbeddingStatusTimer !== null) {
+			window.clearInterval(this.failedEmbeddingStatusTimer);
+			this.failedEmbeddingStatusTimer = null;
+		}
+		const providerChanged =
+			(this.openedApiDomain ?? "") !== (this.setting.hybrid.apiDomain ?? "") ||
+			(this.openedApiKey ?? "") !== (this.setting.hybrid.apiKey ?? "");
+		if (providerChanged) {
+			void getInstance(DataManager).retryFailedEmbeddingsOnConfigChange(
+				"provider-config-changed",
+			);
+		}
 		void this.settingManager.postSettingUpdated();
 	}
 
@@ -749,6 +818,10 @@ class HybridSearchModal extends Modal {
 			new MyNotice(t("hybridModal.weeklyLimitExceededNotice"), 5000);
 		}
 
+		await getInstance(DataManager).retryFailedEmbeddingsOnConfigChange(
+			"weekly-token-limit-updated",
+		);
+		await this.refreshHybridRuntimeStatus();
 		await this.refreshTokenStats();
 	}
 
@@ -770,8 +843,32 @@ class HybridSearchModal extends Modal {
 		await this.settingManager.saveSettings();
 	}
 
+	private async updateFailedEmbeddingRetryInterval() {
+		const parsed = parseInt(
+			this.failedEmbeddingRetryIntervalInputEl.value,
+			10,
+		);
+		const nextValue =
+			Number.isNaN(parsed) || parsed < 1 ? 10 : Math.min(parsed, 24 * 60);
+		this.setting.hybrid.failedEmbeddingRetryIntervalMin = nextValue;
+		this.failedEmbeddingRetryIntervalInputEl.value = String(nextValue);
+		await this.settingManager.saveSettings();
+		getInstance(DataManager).refreshFailedEmbeddingRetrySchedule();
+		await this.refreshHybridRuntimeStatus();
+	}
+
 	private async refreshTokenStats() {
 		await this.loadTokenStats(this.statsEl);
+	}
+
+	private async refreshHybridRuntimeStatus() {
+		const dataManager = getInstance(DataManager);
+		const [failedSummary, deferredSummary] = await Promise.all([
+			dataManager.getHybridFailedEmbeddingSummary(),
+			dataManager.getHybridDeferredEmbeddingSummary(),
+		]);
+		this.renderFailedEmbeddingStatus(failedSummary);
+		this.renderDeferredEmbeddingStatus(deferredSummary);
 	}
 
 	private async runHybridHealthCheck() {
@@ -878,6 +975,84 @@ class HybridSearchModal extends Modal {
 			.sort((left, right) => right[1] - left[1])
 			.slice(0, 3)
 			.map(([kind, count]) => ({ kind, count }));
+	}
+
+	private renderFailedEmbeddingStatus(
+		summary: HybridFailedEmbeddingSummary,
+	) {
+		this.failedEmbeddingStatusEl.empty();
+		this.failedEmbeddingStatusEl.createEl("p", {
+			text:
+				`${t("hybridModal.failedEmbeddingStatus.summary")}: ` +
+				`${summary.failedCount} / ${summary.totalFiles}`,
+		});
+
+		if (summary.failedCount === 0) {
+			this.failedEmbeddingStatusEl.createEl("p", {
+				text: t("hybridModal.failedEmbeddingStatus.none"),
+			});
+			return;
+		}
+
+		if (summary.blockingKinds.length > 0) {
+			this.failedEmbeddingStatusEl.createEl("p", {
+				text:
+					`${t("hybridModal.failedEmbeddingStatus.blocked")}: ` +
+					this.formatFailedEmbeddingKinds(summary.blockingKinds),
+			});
+		}
+
+		if (summary.retryableKinds.length > 0) {
+			this.failedEmbeddingStatusEl.createEl("p", {
+				text:
+					`${t("hybridModal.failedEmbeddingStatus.retrying")}: ` +
+					this.formatFailedEmbeddingKinds(summary.retryableKinds),
+			});
+		}
+
+		if (summary.retryableCount > 0 && summary.nextRetryAt !== null) {
+			this.failedEmbeddingStatusEl.createEl("p", {
+				text:
+					`${t("hybridModal.failedEmbeddingStatus.nextRetry")}: ` +
+					this.formatRelativeTime(summary.nextRetryAt),
+			});
+		}
+	}
+
+	private renderDeferredEmbeddingStatus(
+		summary: HybridDeferredEmbeddingSummary,
+	) {
+		this.deferredEmbeddingStatusEl.empty();
+		this.deferredEmbeddingStatusEl.createEl("p", {
+			text:
+				`${t("hybridModal.deferredEmbeddingStatus.summary")}: ` +
+				`${summary.deferredCount} / ${summary.totalFiles}`,
+		});
+		if (summary.deferredCount === 0) {
+			this.deferredEmbeddingStatusEl.createEl("p", {
+				text: t("hybridModal.deferredEmbeddingStatus.none"),
+			});
+			return;
+		}
+
+		if (summary.nextEligibleAt !== null) {
+			this.deferredEmbeddingStatusEl.createEl("p", {
+				text:
+					`${t("hybridModal.deferredEmbeddingStatus.nextResume")}: ` +
+					this.formatRelativeTime(summary.nextEligibleAt),
+			});
+		}
+	}
+
+	private formatFailedEmbeddingKinds(
+		items: Array<{ kind: string; count: number }>,
+	): string {
+		return items
+			.map(
+				(item) =>
+					`${t(`hybridModal.failedEmbeddingReason.${item.kind}` as any)} x${item.count}`,
+			)
+			.join(" | ");
 	}
 
 	private async loadTokenStats(container: HTMLElement) {
@@ -1048,6 +1223,20 @@ class HybridSearchModal extends Modal {
 		return value
 			? t("hybridModal.healthSummary.flag.yes")
 			: t("hybridModal.healthSummary.flag.no");
+	}
+
+	private formatRelativeTime(targetAt: number): string {
+		const remainingMs = Math.max(0, targetAt - Date.now());
+		if (remainingMs < 60_000) {
+			return t("hybridModal.failedEmbeddingStatus.soon");
+		}
+		const minutes = Math.ceil(remainingMs / 60_000);
+		if (minutes < 60) {
+			return `${minutes}m`;
+		}
+		const hours = Math.floor(minutes / 60);
+		const mins = minutes % 60;
+		return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
 	}
 
 	private stripTrailingZero(value: string): string {

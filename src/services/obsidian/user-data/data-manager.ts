@@ -37,6 +37,11 @@ import {
 	DocOperationBuffer,
 } from "./doc-operation-buffer";
 import { FileWatcher } from "./file-watcher";
+import {
+	HybridEmbeddingRecoveryManager,
+	type HybridFailedEmbeddingSummary,
+	type HybridRepairMode,
+} from "./hybrid-embedding-recovery-manager";
 
 type HybridIndexFailure = {
 	path: string;
@@ -61,7 +66,13 @@ type HybridStorageRepairReport = {
 	reindexedPaths: string[];
 };
 
-type HybridRepairMode = "incremental" | "full";
+type HybridSearchAvailability = "blocked" | "available";
+
+export type HybridDeferredEmbeddingSummary = {
+	deferredCount: number;
+	nextEligibleAt: number | null;
+	totalFiles: number;
+};
 
 type HybridRepairTask = {
 	path: string;
@@ -166,12 +177,115 @@ export class DataManager {
 	private lexicalEngine = getInstance(LexicalEngine);
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
+	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
 	private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
 	private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
 	private hybridRepairWorker: Promise<void> | null = null;
+	private hybridFailedEmbeddingRetryTimer: NodeJS.Timeout | null = null;
+	private readonly hybridEmbeddingRecovery =
+		new HybridEmbeddingRecoveryManager(() =>
+			this.notifyHybridFailedEmbeddingsChanged(),
+		);
 
 	private get hybridEngine() {
 		return getInstance(SearchService).hybridEngine;
+	}
+
+	hasHybridFailedEmbeddings(): boolean {
+		return this.hybridEmbeddingRecovery.hasFailures();
+	}
+
+	getHybridFailedEmbeddingSummary(): HybridFailedEmbeddingSummary {
+		const totalFiles = this.hybridEngine.isEnabled()
+			? this.plugin.app.vault
+				.getFiles()
+				.filter(
+					(file) =>
+						this.dataProvider.isIndexable(file) &&
+						this.hybridEngine.shouldIndexPath(file.path),
+				).length
+			: 0;
+		return this.hybridEmbeddingRecovery.getSummary(totalFiles);
+	}
+
+	async getHybridDeferredEmbeddingSummary(): Promise<HybridDeferredEmbeddingSummary> {
+		const totalFiles = this.hybridEngine.isEnabled()
+			? this.plugin.app.vault
+				.getFiles()
+				.filter(
+					(file) =>
+						this.dataProvider.isIndexable(file) &&
+						this.hybridEngine.shouldIndexPath(file.path),
+				).length
+			: 0;
+		if (!this.hybridEngine.isEnabled()) {
+			return {
+				deferredCount: 0,
+				nextEligibleAt: null,
+				totalFiles,
+			};
+		}
+
+		const docRefs = await this.database.db.hybridDocRefs.toArray();
+		let deferredCount = 0;
+		let nextEligibleAt: number | null = null;
+		for (const ref of docRefs) {
+			if (ref.embeddingDeferred !== true) {
+				continue;
+			}
+			if (!this.canRetryHybridEmbeddingPath(ref.path)) {
+				continue;
+			}
+			deferredCount += 1;
+			const lastIncrementalEmbedAt = ref.lastIncrementalEmbedAt ?? 0;
+			const eligibleAt =
+				lastIncrementalEmbedAt > 0
+					? lastIncrementalEmbedAt + this.getMinIncrementalEmbedIntervalMs()
+					: Date.now();
+			if (nextEligibleAt === null || eligibleAt < nextEligibleAt) {
+				nextEligibleAt = eligibleAt;
+			}
+		}
+
+		return {
+			deferredCount,
+			nextEligibleAt,
+			totalFiles,
+		};
+	}
+
+	async retryFailedEmbeddingsOnConfigChange(
+		reason = "config-changed",
+	): Promise<void> {
+		for (const path of this.hybridEmbeddingRecovery.listTrackedPaths()) {
+			if (!this.canRetryHybridEmbeddingPath(path)) {
+				this.hybridEmbeddingRecovery.clearPath(path);
+			}
+		}
+		this.hybridEmbeddingRecovery.listTrackedPaths().forEach((path) => {
+			const entry = this.hybridEmbeddingRecovery.getEntry(path);
+			if (!entry) {
+				return;
+			}
+			this.enqueueHybridRepair({
+				path: entry.path,
+				mode: entry.mode,
+				reason,
+				eligibleAt: Date.now(),
+			});
+			this.hybridEmbeddingRecovery.markRetryQueued(
+				entry.path,
+				this.getFailedEmbeddingRetryIntervalMs(),
+			);
+		});
+		this.scheduleFailedEmbeddingRetry();
+	}
+
+	refreshFailedEmbeddingRetrySchedule(): void {
+		this.hybridEmbeddingRecovery.refreshRetrySchedule(
+			this.getFailedEmbeddingRetryIntervalMs(),
+		);
+		this.scheduleFailedEmbeddingRetry();
 	}
 
 	private docOperationsHandler = async (operations: ReducedDocOperation[]) => {
@@ -201,6 +315,8 @@ export class DataManager {
 
 	@monitorDecorator
 	async initAsync() {
+		this.clearHybridFailedEmbeddingState();
+		this.setHybridSearchAvailability("blocked");
 		await this.database.deleteOldDatabases();
 		await this.initLexicalEngine();
 		if (!this.hybridEngine.isEnabled()) {
@@ -228,6 +344,8 @@ export class DataManager {
 	onunload() {
 		getInstance(FileWatcher).stop();
 		this.clearHybridRepairScheduler();
+		this.clearFailedEmbeddingRetryTimer();
+		this.hybridEmbeddingRecovery.clearAll();
 	}
 
 	receiveDocOperation(operation: DocOperation) {
@@ -237,6 +355,8 @@ export class DataManager {
 	async refreshAllAsync() {
 		const prevNotice = new MyNotice(t("Reindexing..."));
 		this.shouldForceRefresh = true;
+		this.clearHybridFailedEmbeddingState();
+		this.setHybridSearchAvailability("blocked");
 		getInstance(FileWatcher).stop();
 		try {
 			await this.initAsync();
@@ -270,10 +390,12 @@ export class DataManager {
 
 	private async handleDeleteOperation(path: string): Promise<void> {
 		this.cancelHybridRepair(path);
+		this.clearFailedHybridEmbedding(path);
 		await this.deleteDocuments([path]);
 		if (this.hybridEngine.isEnabled()) {
 			await this.hybridEngine.deleteFile(path);
 		}
+		this.notifyHybridRuntimeStatusChanged();
 	}
 
 	private async handleUpsertOperation(path: string): Promise<void> {
@@ -312,6 +434,8 @@ export class DataManager {
 
 		const file = this.dataProvider.getFileByPath(newPath);
 		if (!file || !this.dataProvider.isIndexable(file)) {
+			this.clearFailedHybridEmbedding(oldPath);
+			this.clearFailedHybridEmbedding(newPath);
 			await this.handleDeleteOperation(newPath);
 			if (this.hybridEngine.isEnabled()) {
 				await this.hybridEngine.deleteFile(oldPath);
@@ -325,6 +449,8 @@ export class DataManager {
 			!this.hybridEngine.isEnabled() ||
 			!this.hybridEngine.shouldIndexPath(file.path)
 		) {
+			this.clearFailedHybridEmbedding(oldPath);
+			this.clearFailedHybridEmbedding(newPath);
 			if (this.hybridEngine.isEnabled()) {
 				await this.hybridEngine.deleteFile(oldPath);
 				await this.hybridEngine.deleteFile(newPath);
@@ -341,8 +467,13 @@ export class DataManager {
 		);
 
 		if (moved && !basenameChanged && !requiresReindex) {
+			this.moveFailedHybridEmbedding(oldPath, newPath);
+			this.notifyHybridRuntimeStatusChanged();
 			return;
 		}
+
+		this.clearFailedHybridEmbedding(oldPath);
+		this.clearFailedHybridEmbedding(newPath);
 
 		this.enqueueHybridRepair({
 			path: file.path,
@@ -400,6 +531,59 @@ export class DataManager {
 			this.hybridRepairFlushTimer = null;
 		}
 		this.hybridRepairQueue.clear();
+	}
+
+	private clearHybridFailedEmbeddingState(): void {
+		this.hybridEmbeddingRecovery.clearAll();
+		this.clearFailedEmbeddingRetryTimer();
+		this.notifyHybridRuntimeStatusChanged();
+	}
+
+	private clearFailedEmbeddingRetryTimer(): void {
+		if (this.hybridFailedEmbeddingRetryTimer) {
+			clearTimeout(this.hybridFailedEmbeddingRetryTimer);
+			this.hybridFailedEmbeddingRetryTimer = null;
+		}
+	}
+
+	private scheduleFailedEmbeddingRetry(): void {
+		this.clearFailedEmbeddingRetryTimer();
+		const nextRetryAt = this.hybridEmbeddingRecovery.getNextRetryAt();
+		if (nextRetryAt === null) {
+			return;
+		}
+		this.hybridFailedEmbeddingRetryTimer = setTimeout(() => {
+			this.hybridFailedEmbeddingRetryTimer = null;
+			void this.flushFailedEmbeddingRetryQueue();
+		}, Math.max(0, nextRetryAt - Date.now()));
+	}
+
+	private async flushFailedEmbeddingRetryQueue(): Promise<void> {
+		if (!this.hybridEmbeddingRecovery.hasFailures()) {
+			return;
+		}
+
+		for (const path of this.hybridEmbeddingRecovery.listPathsReadyForRetry()) {
+			if (!this.canRetryHybridEmbeddingPath(path)) {
+				this.hybridEmbeddingRecovery.clearPath(path);
+				continue;
+			}
+			const entry = this.hybridEmbeddingRecovery.getEntry(path);
+			if (!entry) {
+				continue;
+			}
+			this.enqueueHybridRepair({
+				path: entry.path,
+				mode: entry.mode,
+				reason: "failed-embedding-auto-retry",
+				eligibleAt: Date.now(),
+			});
+			this.hybridEmbeddingRecovery.markRetryQueued(
+				entry.path,
+				this.getFailedEmbeddingRetryIntervalMs(),
+			);
+		}
+		this.scheduleFailedEmbeddingRetry();
 	}
 
 	private scheduleHybridRepairFlush(): void {
@@ -499,11 +683,13 @@ export class DataManager {
 
 	private async initHybridEngine() {
 		if (!this.hybridEngine.isEnabled()) {
+			this.setHybridSearchAvailability("blocked");
 			return;
 		}
 		beginHybridProfile("hybrid-init", {
 			forceRefresh: this.shouldForceRefresh ? 1 : 0,
 		});
+		let loadedSearchableIndex = false;
 
 		try {
 			if (this.shouldForceRefresh) {
@@ -514,6 +700,10 @@ export class DataManager {
 			await profileHybridStage("startup.load_engine", async () => {
 				await this.hybridEngine.load();
 			});
+			loadedSearchableIndex = this.hybridEngine.canSearch();
+			if (!this.shouldForceRefresh && loadedSearchableIndex) {
+				this.setHybridSearchAvailability("available");
+			}
 			const currFiles = await profileHybridStage("startup.scan_indexable_files", async () =>
 				new Map<string, TFile>(
 					this.dataProvider
@@ -620,6 +810,9 @@ export class DataManager {
 				logger.debug(
 					`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
 				);
+				this.setHybridSearchAvailability(
+					this.hybridEngine.canSearch() ? "available" : "blocked",
+				);
 				endHybridProfile({
 					failures: failures.length,
 					repairedPaths: repairReport.repairedPaths.length,
@@ -628,6 +821,11 @@ export class DataManager {
 				progressNotice?.hide();
 			}
 		} catch (error) {
+			this.setHybridSearchAvailability(
+				!this.shouldForceRefresh && loadedSearchableIndex
+					? "available"
+					: "blocked",
+			);
 			endHybridProfile({ error: error instanceof Error ? error.message : String(error) });
 			throw error;
 		}
@@ -797,6 +995,7 @@ export class DataManager {
 			!this.hybridEngine.isEnabled() ||
 			!this.hybridEngine.shouldIndexPath(task.path)
 		) {
+			this.clearFailedHybridEmbedding(task.path);
 			await this.hybridEngine.deleteFile(task.path).catch((error) =>
 				logger.warn(`hybrid repair delete failed for ${task.path}:`, error),
 			);
@@ -804,7 +1003,7 @@ export class DataManager {
 		}
 
 		if (task.mode === "full") {
-			return await this.indexHybridFileWithRetry(file);
+			return await this.indexHybridFileWithRetry(file, "full");
 		}
 
 		const eligibleAt = await this.getIncrementalEmbedEligibleAt(task.path);
@@ -825,11 +1024,12 @@ export class DataManager {
 			return null;
 		}
 
-		return await this.indexHybridFileWithRetry(file);
+		return await this.indexHybridFileWithRetry(file, "incremental");
 	}
 
 	private async indexHybridFileWithRetry(
 		file: TFile,
+		mode: HybridRepairMode,
 	): Promise<HybridIndexFailure | null> {
 		const fileIndexStart = Date.now();
 		const text = await this.dataProvider.readPlainText(file.path);
@@ -866,12 +1066,15 @@ export class DataManager {
 			logger.debug(
 				`hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
 			);
+			this.clearFailedHybridEmbedding(file.path);
+			this.notifyHybridRuntimeStatusChanged();
 			return null;
 		} catch (error) {
 			lastError = error;
 		}
 
 		let bm25FallbackIndexed = false;
+		let fallbackError: unknown = null;
 		try {
 			await this.hybridEngine.indexFile(
 				file.path,
@@ -880,19 +1083,30 @@ export class DataManager {
 				headingOutline,
 			);
 			bm25FallbackIndexed = true;
-		} catch (fallbackError) {
+		} catch (caughtFallbackError) {
 			logger.error(
 				`hybrid BM25 fallback indexing failed for ${file.path}:`,
-				fallbackError,
+				caughtFallbackError,
 			);
-			if (lastError === null) {
-				lastError = fallbackError;
-			}
+			fallbackError = caughtFallbackError;
 		}
+
+		const failureError = fallbackError ?? lastError;
+		const failureReason = this.formatHybridFailureReason(
+			lastError,
+			fallbackError,
+		);
+
+		this.registerFailedHybridEmbedding(
+			file.path,
+			mode,
+			failureError,
+			failureReason,
+		);
 
 		return {
 			path: file.path,
-			reason: this.formatHybridIndexError(lastError),
+			reason: failureReason,
 			attempts,
 			bm25FallbackIndexed,
 		};
@@ -911,6 +1125,7 @@ export class DataManager {
 				{ persistIndices: false },
 				headingOutline,
 			);
+			this.notifyHybridRuntimeStatusChanged();
 			return null;
 		} catch (error) {
 			return {
@@ -936,6 +1151,32 @@ export class DataManager {
 	private getMinIncrementalEmbedIntervalMs(): number {
 		const configured = this.setting.hybrid.minIncrementalEmbedIntervalSec ?? 60;
 		return Math.max(0, configured) * 1000;
+	}
+
+	private getFailedEmbeddingRetryIntervalMs(): number {
+		const configured =
+			this.setting.hybrid.failedEmbeddingRetryIntervalMin ?? 10;
+		return Math.max(1, configured) * 60_000;
+	}
+
+	private canRetryHybridEmbeddingPath(path: string): boolean {
+		const file = this.dataProvider.getFileByPath(path);
+		return (
+			file !== null &&
+			this.dataProvider.isIndexable(file) &&
+			this.hybridEngine.isEnabled() &&
+			this.hybridEngine.shouldIndexPath(file.path)
+		);
+	}
+
+	isHybridSearchUnavailable(): boolean {
+		return this.hybridSearchAvailability === "blocked";
+	}
+
+	private setHybridSearchAvailability(
+		availability: HybridSearchAvailability,
+	): void {
+		this.hybridSearchAvailability = availability;
 	}
 
 	private getHybridIndexConcurrency(): number {
@@ -967,6 +1208,41 @@ export class DataManager {
 			return 3_000 * attempt;
 		}
 		return DataManager.HYBRID_INDEX_RETRY_DELAY_MS * attempt;
+	}
+
+	private clearFailedHybridEmbedding(path: string): void {
+		this.hybridEmbeddingRecovery.clearPath(path);
+		this.scheduleFailedEmbeddingRetry();
+	}
+
+	private moveFailedHybridEmbedding(oldPath: string, newPath: string): void {
+		this.hybridEmbeddingRecovery.movePath(oldPath, newPath);
+		this.scheduleFailedEmbeddingRetry();
+	}
+
+	private registerFailedHybridEmbedding(
+		path: string,
+		mode: HybridRepairMode,
+		error: unknown,
+		reason: string,
+	): void {
+		this.hybridEmbeddingRecovery.recordFailure(
+			path,
+			mode,
+			error,
+			reason,
+			this.getFailedEmbeddingRetryIntervalMs(),
+		);
+		this.scheduleFailedEmbeddingRetry();
+	}
+
+	private notifyHybridFailedEmbeddingsChanged(): void {
+		eventBus.emit(EventEnum.HYBRID_FAILED_EMBEDDINGS_CHANGED);
+		this.notifyHybridRuntimeStatusChanged();
+	}
+
+	private notifyHybridRuntimeStatusChanged(): void {
+		eventBus.emit(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED);
 	}
 
 	private createHybridIndexProgressNotice(
@@ -1188,6 +1464,20 @@ export class DataManager {
 			return `${error.name}: ${error.message}`;
 		}
 		return String(error);
+	}
+
+	private formatHybridFailureReason(
+		embeddingError: unknown,
+		fallbackError: unknown,
+	): string {
+		if (fallbackError !== null && fallbackError !== undefined) {
+			const fallbackReason = this.formatHybridIndexError(fallbackError);
+			if (embeddingError !== null && embeddingError !== undefined) {
+				return `Embedding failed: ${this.formatHybridIndexError(embeddingError)} | BM25 fallback failed: ${fallbackReason}`;
+			}
+			return `BM25 fallback failed: ${fallbackReason}`;
+		}
+		return this.formatHybridIndexError(embeddingError);
 	}
 
 	private noticeHybridIndexFailures(failures: HybridIndexFailure[]) {

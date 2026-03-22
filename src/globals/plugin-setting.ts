@@ -38,13 +38,14 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	enableStopWordsZh: isChineseUser ? true : false,
 	hybrid: {
 		enabled: false,
-		autoShowResultsWhenLexicalEmpty: false,
+		autoShowResultsWhenLexicalEmpty: true,
 		apiDomain: '',
 		apiKey: '',
 		weeklyTokenLimit: 3000000,
 		maxResultCount: 10,
 		indexConcurrency: 3,
 		minIncrementalEmbedIntervalSec: 60,
+		failedEmbeddingRetryIntervalMin: 10,
 		vectorCompression: "int8",
 		excludedPaths: [],
 	},
@@ -82,6 +83,7 @@ export type HybridSetting = {
 	maxResultCount: number;
 	indexConcurrency: number;
 	minIncrementalEmbedIntervalSec: number;
+	failedEmbeddingRetryIntervalMin: number;
 	vectorCompression: HybridVectorCompression;
 	excludedPaths: string[];
 };

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
+	import { devOption } from "src/globals/dev-option";
 	import { EventEnum } from "src/globals/enums";
 	import { OuterSetting } from "src/globals/plugin-setting";
 	import {
@@ -49,6 +50,12 @@
 	let latestSearchRequestId = 0;
 	let historyInputRef: any;
 	let autoHybridFallbackFailureNoticeKey: LocaleKey | null = null;
+	$: forceShowEmbeddingIncompleteNotice =
+		devOption.forceShowHybridEmbeddingIncompleteNotice === true &&
+		searchType === SearchType.IN_VAULT;
+	$: showEmbeddingIncompleteNotice =
+		forceShowEmbeddingIncompleteNotice ||
+		searchResult.hybridEmbeddingIncomplete;
 
 	const autoHybridFallback = new AutoHybridFallbackController({
 		searchService,
@@ -135,7 +142,8 @@
 			if (
 				searchType === SearchType.IN_VAULT &&
 				!isHybrid &&
-				searchResult.items.length === 0
+				searchResult.items.length === 0 &&
+				!searchResult.hybridEmbeddingIncomplete
 			) {
 				autoHybridFallback.schedule(currentQueryText, requestId);
 			} else {
@@ -174,7 +182,8 @@
 		if (
 			searchType === SearchType.IN_VAULT &&
 			!isHybrid &&
-			nextResult.items.length === 0
+			nextResult.items.length === 0 &&
+			!nextResult.hybridEmbeddingIncomplete
 		) {
 			autoHybridFallback.schedule(currentQueryText, requestId);
 		} else {
@@ -407,40 +416,52 @@
 								<li>{t("hybridModal.autoFallbackFailed.cause.index")}</li>
 							</ul>
 						</div>
-					{:else if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
-						<ul>
-							{#each currFileSubItems as subItem, index}
-								<button
-									on:click={() => handleSubItemClick(index)}
-									on:contextmenu={(e) => {
-										currSubItemIndex = index;
-										handleConfirm(e, e.ctrlKey);
-									}}
-									on:dblclick={(e) => {
-										currSubItemIndex = index;
-										handleConfirm(e, e.ctrlKey);
-									}}
-									bind:this={subItem.element}
-									class:selected={index === currSubItemIndex}
-									class="file-sub-item"
-								>
-									{#if subItem.score !== undefined}
-										<span class="subitem-score"
-											>score {formatScore(subItem.score)}</span
-										>
-									{/if}
-									<span class="subitem-snippet">
-										{@html viewHelper.purifyHTML(
-											subItem.snippet ?? subItem.text,
-										)}
-									</span>
-								</button>
-							{/each}
-						</ul>
 					{:else}
-						<span>
-							{viewHelper.showNoResult()}
-						</span>
+						{#if showEmbeddingIncompleteNotice}
+							<div class="hybrid-fallback-failure">
+								<p class="hybrid-fallback-failure-title">
+									{t("hybridModal.embeddingIncompleteFallback.title")}
+								</p>
+								<p class="hybrid-fallback-failure-detail">
+									{t("hybridModal.embeddingIncompleteFallback.desc")}
+								</p>
+							</div>
+						{/if}
+						{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
+							<ul>
+								{#each currFileSubItems as subItem, index}
+									<button
+										on:click={() => handleSubItemClick(index)}
+										on:contextmenu={(e) => {
+											currSubItemIndex = index;
+											handleConfirm(e, e.ctrlKey);
+										}}
+										on:dblclick={(e) => {
+											currSubItemIndex = index;
+											handleConfirm(e, e.ctrlKey);
+										}}
+										bind:this={subItem.element}
+										class:selected={index === currSubItemIndex}
+										class="file-sub-item"
+									>
+										{#if subItem.score !== undefined}
+											<span class="subitem-score"
+												>score {formatScore(subItem.score)}</span
+											>
+										{/if}
+										<span class="subitem-snippet">
+											{@html viewHelper.purifyHTML(
+												subItem.snippet ?? subItem.text,
+											)}
+										</span>
+									</button>
+								{/each}
+							</ul>
+						{:else}
+							<span>
+								{viewHelper.showNoResult()}
+							</span>
+						{/if}
 					{/if}
 				{/if}
 			</div>
