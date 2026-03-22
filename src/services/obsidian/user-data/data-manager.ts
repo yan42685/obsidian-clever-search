@@ -18,11 +18,12 @@ import {
 	profileHybridStage,
 	setHybridProfileMeta,
 } from "src/services/search/hybrid/hybrid-profiler";
-import type {
-	ChunkRow,
-	ChunkVectorShardRow,
-	HybridFileSnapshotRow,
-	HybridIndexedFileRef,
+import {
+	bm25ToBlob,
+	type ChunkRow,
+	type ChunkVectorShardRow,
+	type HybridFileSnapshotRow,
+	type HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import {
 	analyzeHybridStoredFileConsistency,
@@ -31,6 +32,7 @@ import {
 } from "src/services/search/hybrid/hybrid-consistency";
 import { retryAsync, runWeightedTasks } from "src/services/search/hybrid/runtime-control";
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
+import { BM25Engine } from "src/services/search/hybrid/bm25";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { eventBus } from "src/utils/event-bus";
@@ -99,6 +101,12 @@ type HybridRepairTask = {
 	reason: string;
 	eligibleAt: number;
 	enqueuedAt: number;
+};
+
+type HybridRefreshOptions = {
+	forceRefresh?: boolean;
+	syncFileSetWithoutEmbedding?: boolean;
+	rebuildBm25FromStore?: boolean;
 };
 
 type HybridIndexProgress = {
@@ -181,6 +189,7 @@ export class DataManager {
 	private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
 	private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
 	private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
+	private static readonly HYBRID_BM25_REBUILD_BATCH_SIZE = 512;
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private database = getInstance(Database);
 	private dataProvider = getInstance(DataProvider);
@@ -383,17 +392,174 @@ export class DataManager {
 		}
 	}
 
-	async refreshHybridStateAsync() {
+	async refreshLexicalStateAsync() {
+		const prevNotice = new MyNotice(t("Reindexing..."));
+		getInstance(FileWatcher).stop();
+		try {
+			await this.reindexLexicalEngineWithCurrFiles();
+			const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
+			if (lexicalIndexData) {
+				await this.database.setMiniSearchData(lexicalIndexData);
+			}
+			new MyNotice(t("Indexing finished"), 5000);
+		} finally {
+			prevNotice.hide();
+			getInstance(FileWatcher).start();
+		}
+	}
+
+	async refreshHybridStateAsync(options: HybridRefreshOptions = {}) {
 		this.clearHybridFailedEmbeddingState();
 		this.setHybridSearchAvailability("blocked");
+		const previousForceRefresh = this.shouldForceRefresh;
+		getInstance(FileWatcher).stop();
 		try {
-			await this.initHybridEngine().catch((e) => {
-				logger.warn("hybrid engine init failed:", e);
-				new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
-			});
+			if (options.forceRefresh) {
+				this.shouldForceRefresh = true;
+				await this.initHybridEngine().catch((e) => {
+					logger.warn("hybrid engine init failed:", e);
+					new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+				});
+			} else if (
+				options.syncFileSetWithoutEmbedding ||
+				options.rebuildBm25FromStore
+			) {
+				await this.refreshHybridStateLocally({
+					syncFileSetWithoutEmbedding:
+						options.syncFileSetWithoutEmbedding ?? false,
+					rebuildBm25FromStore: options.rebuildBm25FromStore ?? false,
+				});
+			} else {
+				await this.initHybridEngine().catch((e) => {
+					logger.warn("hybrid engine init failed:", e);
+					new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+				});
+			}
 		} finally {
+			this.shouldForceRefresh = previousForceRefresh;
 			this.notifyHybridRuntimeStatusChanged();
+			getInstance(FileWatcher).start();
 		}
+	}
+
+	private async refreshHybridStateLocally(options: {
+		syncFileSetWithoutEmbedding: boolean;
+		rebuildBm25FromStore: boolean;
+	}): Promise<void> {
+		if (!this.hybridEngine.isEnabled()) {
+			this.setHybridSearchAvailability("blocked");
+			return;
+		}
+
+		await this.hybridEngine.load();
+		const failures: HybridIndexFailure[] = [];
+
+		if (options.syncFileSetWithoutEmbedding) {
+			const currFiles = new Map<string, TFile>(
+				this.dataProvider
+					.allFilesToBeIndexed()
+					.filter((file) => this.hybridEngine.shouldIndexPath(file.path))
+					.map((file) => [file.path, file]),
+			);
+			const previousIndexedFileRefs = new Map<string, HybridIndexedFileRef>(
+				(await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => [
+					ref.path,
+					ref,
+				]),
+			);
+			const docsToAdd: TFile[] = [];
+			const docsToDelete: string[] = [];
+
+			for (const [path, file] of currFiles) {
+				const previousIndexedFileRef = previousIndexedFileRefs.get(path);
+				if (!previousIndexedFileRef) {
+					docsToAdd.push(file);
+				} else if (file.stat.mtime > previousIndexedFileRef.updateTime) {
+					docsToDelete.push(path);
+					docsToAdd.push(file);
+				}
+			}
+			for (const prevPath of previousIndexedFileRefs.keys()) {
+				if (!currFiles.has(prevPath)) {
+					docsToDelete.push(prevPath);
+				}
+			}
+
+			logger.trace(`hybrid local refresh docs to delete: ${docsToDelete.length}`);
+			logger.trace(`hybrid local refresh docs to add: ${docsToAdd.length}`);
+
+			for (const path of docsToDelete) {
+				this.cancelHybridRepair(path);
+				this.clearFailedHybridEmbedding(path);
+				await this.hybridEngine.deleteFile(path, {
+					persistIndices: false,
+				}).catch((error) =>
+					logger.warn(`hybrid local refresh delete failed for ${path}:`, error),
+				);
+			}
+
+			for (const file of docsToAdd) {
+				this.cancelHybridRepair(file.path);
+				this.clearFailedHybridEmbedding(file.path);
+				const failure = await this.indexHybridFileStructureOnly(file);
+				if (failure) {
+					failures.push(failure);
+				}
+			}
+
+			await this.hybridEngine.persistIndicesForBatch();
+		}
+
+		if (options.rebuildBm25FromStore) {
+			await this.rebuildHybridBm25FromStore();
+		}
+
+		if (failures.length > 0) {
+			this.noticeHybridIndexFailures(failures);
+		}
+		this.setHybridSearchAvailability(
+			this.hybridEngine.canSearch() ? "available" : "blocked",
+		);
+	}
+
+	private async rebuildHybridBm25FromStore(): Promise<void> {
+		const bm25 = new BM25Engine();
+		let offset = 0;
+
+		while (true) {
+			const snapshots = await this.database.db.hybridFileSnapshots
+				.orderBy("filePath")
+				.offset(offset)
+				.limit(DataManager.HYBRID_BM25_REBUILD_BATCH_SIZE)
+				.toArray();
+			if (snapshots.length === 0) {
+				break;
+			}
+
+			for (const snapshot of snapshots) {
+				const rows = await this.database.db.hybridChunks
+					.where("filePath")
+					.equals(snapshot.filePath)
+					.sortBy("chunkIndex");
+				for (const row of rows) {
+					if (row.id === undefined) {
+						continue;
+					}
+					bm25.addDocument(
+						row.id,
+						snapshot.plainText.slice(row.startOffset, row.endOffset),
+					);
+				}
+			}
+
+			offset += snapshots.length;
+		}
+
+		await this.database.db.hybridBm25Index.put({
+			id: 0,
+			data: bm25ToBlob(bm25.serialize()),
+		});
+		await this.hybridEngine.load();
 	}
 
 	private async addDocuments(files: TAbstractFile[]) {

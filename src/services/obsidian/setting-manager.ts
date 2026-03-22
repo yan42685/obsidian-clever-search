@@ -70,12 +70,31 @@ type HybridHealthSummary = {
 	topErrorKinds: Array<{ kind: string; count: number }>;
 };
 
+type PendingRefreshState = {
+	reloadAssets: boolean;
+	lexicalReindex: boolean;
+	hybridRuntimeRefresh: boolean;
+	hybridSyncFileSetWithoutEmbedding: boolean;
+	hybridRebuildBm25FromStore: boolean;
+	hybridFullReindex: boolean;
+};
+
+function createPendingRefreshState(): PendingRefreshState {
+	return {
+		reloadAssets: false,
+		lexicalReindex: false,
+		hybridRuntimeRefresh: false,
+		hybridSyncFileSetWithoutEmbedding: false,
+		hybridRebuildBm25FromStore: false,
+		hybridFullReindex: false,
+	};
+}
+
 @singleton()
 export class SettingManager {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private setting: OuterSetting;
-	shouldReload = false;
-	shouldRefreshHybridOnly = false;
+	private pendingRefresh = createPendingRefreshState();
 
 	async initAsync() {
 		await this.loadSettings(); // must run this line before registering PluginSetting
@@ -89,18 +108,40 @@ export class SettingManager {
 	}
 
 	async postSettingUpdated() {
-		this.saveSettings();
-
-		if (this.shouldReload) {
-			this.shouldReload = false;
-			this.shouldRefreshHybridOnly = false;
-			await this.downloadAndRefresh();
+		await this.saveSettings();
+		const pendingRefresh = this.consumePendingRefresh();
+		if (!this.hasPendingRefresh(pendingRefresh)) {
 			return;
 		}
 
-		if (this.shouldRefreshHybridOnly) {
-			this.shouldRefreshHybridOnly = false;
-			await this.refreshHybridOnly();
+		getInstance(ViewRegistry).refreshAll();
+		if (pendingRefresh.reloadAssets) {
+			await getInstance(AssetsProvider).initAsync();
+			await getInstance(ChinesePatch).initAsync();
+		}
+		getInstance(DataProvider).init();
+
+		const dataManager = getInstance(DataManager);
+		if (pendingRefresh.lexicalReindex) {
+			await dataManager.refreshLexicalStateAsync();
+		}
+		if (pendingRefresh.hybridFullReindex) {
+			await dataManager.refreshHybridStateAsync({ forceRefresh: true });
+			return;
+		}
+		if (pendingRefresh.hybridRuntimeRefresh) {
+			await dataManager.refreshHybridStateAsync();
+		}
+		if (
+			pendingRefresh.hybridSyncFileSetWithoutEmbedding ||
+			pendingRefresh.hybridRebuildBm25FromStore
+		) {
+			await dataManager.refreshHybridStateAsync({
+				syncFileSetWithoutEmbedding:
+					pendingRefresh.hybridSyncFileSetWithoutEmbedding,
+				rebuildBm25FromStore:
+					pendingRefresh.hybridRebuildBm25FromStore,
+			});
 		}
 	}
 
@@ -118,19 +159,45 @@ export class SettingManager {
 		logger.setLevel(this.setting.logLevel);
 	}
 
-	private async downloadAndRefresh() {
-		getInstance(ViewRegistry).refreshAll();
-		await getInstance(AssetsProvider).initAsync();
-		await getInstance(ChinesePatch).initAsync();
-
-		getInstance(DataProvider).init();
-		await getInstance(DataManager).refreshAllAsync();
+	private hasPendingRefresh(state: PendingRefreshState): boolean {
+		return Object.values(state).some(Boolean);
 	}
 
-	private async refreshHybridOnly() {
-		getInstance(ViewRegistry).refreshAll();
-		getInstance(DataProvider).init();
-		await getInstance(DataManager).refreshHybridStateAsync();
+	private consumePendingRefresh(): PendingRefreshState {
+		const current = this.pendingRefresh;
+		this.pendingRefresh = createPendingRefreshState();
+		return current;
+	}
+
+	requestLexicalReindex(options: { reloadAssets?: boolean } = {}): void {
+		this.pendingRefresh.lexicalReindex = true;
+		this.pendingRefresh.reloadAssets =
+			this.pendingRefresh.reloadAssets || (options.reloadAssets ?? false);
+	}
+
+	requestHybridRuntimeRefresh(): void {
+		this.pendingRefresh.hybridRuntimeRefresh = true;
+	}
+
+	requestHybridLocalRefresh(options: {
+		syncFileSetWithoutEmbedding?: boolean;
+		rebuildBm25FromStore?: boolean;
+		reloadAssets?: boolean;
+	} = {}): void {
+		this.pendingRefresh.hybridSyncFileSetWithoutEmbedding =
+			this.pendingRefresh.hybridSyncFileSetWithoutEmbedding ||
+			(options.syncFileSetWithoutEmbedding ?? false);
+		this.pendingRefresh.hybridRebuildBm25FromStore =
+			this.pendingRefresh.hybridRebuildBm25FromStore ||
+			(options.rebuildBm25FromStore ?? false);
+		this.pendingRefresh.reloadAssets =
+			this.pendingRefresh.reloadAssets || (options.reloadAssets ?? false);
+	}
+
+	requestHybridFullReindex(options: { reloadAssets?: boolean } = {}): void {
+		this.pendingRefresh.hybridFullReindex = true;
+		this.pendingRefresh.reloadAssets =
+			this.pendingRefresh.reloadAssets || (options.reloadAssets ?? false);
 	}
 }
 
@@ -270,7 +337,7 @@ class GeneralTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>
 			t.setValue(this.setting.isCaseSensitive).onChange((v) => {
 				this.setting.isCaseSensitive = v;
-				this.settingManager.shouldReload = true;
+				this.settingManager.requestLexicalReindex();
 			}),
 		);
 		new Setting(containerEl)
@@ -301,7 +368,7 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.fileSearchBackend)
 					.onChange((value) => {
 						this.setting.fileSearchBackend = value as FileSearchBackend;
-						this.settingManager.shouldReload = true;
+						this.settingManager.requestLexicalReindex();
 					}),
 			);
 
@@ -313,7 +380,10 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsEn)
 					.onChange((value) => {
 						this.setting.enableStopWordsEn = value;
-						this.settingManager.shouldReload = true;
+						this.settingManager.requestLexicalReindex();
+						this.settingManager.requestHybridLocalRefresh({
+							rebuildBm25FromStore: true,
+						});
 					}),
 			);
 
@@ -330,7 +400,13 @@ class GeneralTab extends PluginSettingTab {
 								getInstance(OuterSetting).enableChinesePatch
 							}`,
 						);
-						this.settingManager.shouldReload = true;
+						this.settingManager.requestLexicalReindex({
+							reloadAssets: true,
+						});
+						this.settingManager.requestHybridLocalRefresh({
+							rebuildBm25FromStore: true,
+							reloadAssets: true,
+						});
 					}),
 			);
 
@@ -342,7 +418,13 @@ class GeneralTab extends PluginSettingTab {
 					.setValue(this.setting.enableStopWordsZh)
 					.onChange(async (value) => {
 						this.setting.enableStopWordsZh = value;
-						this.settingManager.shouldReload = true;
+						this.settingManager.requestLexicalReindex({
+							reloadAssets: true,
+						});
+						this.settingManager.requestHybridLocalRefresh({
+							rebuildBm25FromStore: true,
+							reloadAssets: true,
+						});
 					}),
 			);
 		new Setting(containerEl)
@@ -535,7 +617,7 @@ class HybridSearchModal extends Modal {
 					.setValue(this.setting.hybrid.enabled)
 					.onChange((v) => {
 						this.setting.hybrid.enabled = v;
-						this.settingManager.shouldRefreshHybridOnly = true;
+						this.settingManager.requestHybridRuntimeRefresh();
 						this.settingManager.saveSettings();
 					}),
 			);
@@ -630,6 +712,7 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
+
 		new Setting(contentEl)
 			.setName(t("hybridModal.indexConcurrency"))
 			.setDesc(t("hybridModal.indexConcurrency.desc"))
@@ -711,7 +794,7 @@ class HybridSearchModal extends Modal {
 					.onChange((value) => {
 						this.setting.hybrid.vectorCompression =
 							value === "float16" ? "float16" : "int8";
-						this.settingManager.shouldReload = true;
+						this.settingManager.requestHybridFullReindex();
 						this.settingManager.saveSettings();
 					}),
 			);
@@ -796,7 +879,9 @@ class HybridSearchModal extends Modal {
 			del.style.cursor = "pointer";
 			del.onClickEvent(() => {
 				paths.splice(index, 1);
-				this.settingManager.shouldReload = true;
+				this.settingManager.requestHybridLocalRefresh({
+					syncFileSetWithoutEmbedding: true,
+				});
 				this.settingManager.saveSettings();
 				this.renderExcludedList(listEl);
 			});
@@ -811,7 +896,9 @@ class HybridSearchModal extends Modal {
 			} else {
 				paths.push(inputPath);
 				this.setting.hybrid.excludedPaths = paths;
-				this.settingManager.shouldReload = true;
+				this.settingManager.requestHybridLocalRefresh({
+					syncFileSetWithoutEmbedding: true,
+				});
 				this.settingManager.saveSettings();
 				this.renderExcludedList(this.excludesEl);
 				this.inputEl.value = "";
@@ -1303,7 +1390,10 @@ class ExcludePathModal extends Modal {
 					.setValue(this.setting.followObsidianExcludedFiles)
 					.onChange((v) => {
 						this.setting.followObsidianExcludedFiles = v;
-						this.settingManager.shouldReload = true;
+						this.settingManager.requestLexicalReindex();
+						this.settingManager.requestHybridLocalRefresh({
+							syncFileSetWithoutEmbedding: true,
+						});
 					}),
 			);
 		contentEl.createEl("h2", { text: t("Excluded files") });
@@ -1356,7 +1446,10 @@ class ExcludePathModal extends Modal {
 			span.style.cursor = "pointer";
 			span.onClickEvent(() => {
 				this.excludedPaths.splice(index, 1);
-				this.settingManager.shouldReload = true;
+				this.settingManager.requestLexicalReindex();
+				this.settingManager.requestHybridLocalRefresh({
+					syncFileSetWithoutEmbedding: true,
+				});
 				this.renderExcludedList(listEl);
 			});
 		});
@@ -1368,7 +1461,10 @@ class ExcludePathModal extends Modal {
 				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
 			} else {
 				this.excludedPaths.push(inputPath);
-				this.settingManager.shouldReload = true;
+				this.settingManager.requestLexicalReindex();
+				this.settingManager.requestHybridLocalRefresh({
+					syncFileSetWithoutEmbedding: true,
+				});
 				this.renderExcludedList(this.excludesEl);
 			}
 		}
@@ -1403,7 +1499,10 @@ class CustomExtensionModal extends Modal {
 						.filter((ext) => ext.length > 0);
 
 					this.setting.customExtensions.plaintext = extensions;
-					this.settingManager.shouldReload = true;
+					this.settingManager.requestLexicalReindex();
+					this.settingManager.requestHybridLocalRefresh({
+						syncFileSetWithoutEmbedding: true,
+					});
 				});
 			});
 
