@@ -51,7 +51,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	},
 	searchHistory: {
 		enabled: true,
-		maxItems: 50,
+		maxItems: 5000,
 		showSuggestions: true,
 		enableGhostCompletion: true,
 		entries: [],

@@ -199,4 +199,7 @@ export default {
 	"hybridModal.failedEmbeddingReason.unknown": "\u5176\u4ed6\u539f\u56e0\uff0c\u8bf7\u770b\u63a7\u5236\u53f0",
 	"hybridModal.embeddingIncompleteFallback.title": "\u90e8\u5206\u6587\u4ef6\u7684 Embedding \u8fd8\u4e0d\u662f\u6700\u65b0\u3002",
 	"hybridModal.embeddingIncompleteFallback.desc": "\u8bf7\u5230 Hybrid \u8bbe\u7f6e\u9875\u67e5\u770b\u8be6\u60c5\u3002\u5f53\u524d\u5df2 fallback \u4e3a lexical \u641c\u7d22\u3002",
+	"Manage search history": "\u7ba1\u7406\u641c\u7d22\u5386\u53f2",
+	"Search history completion": "\u641c\u7d22\u5386\u53f2\u8865\u5168",
+	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",
 };

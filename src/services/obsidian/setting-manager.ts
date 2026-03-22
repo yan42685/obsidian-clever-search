@@ -206,11 +206,14 @@ export function openHybridSearchModal(app: App) {
 	new HybridSearchModal(app).open();
 }
 
+export function openSearchHistoryModal(app: App) {
+	new SearchHistoryModal(app).open();
+}
+
 @singleton()
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(OuterSetting);
-	private readonly searchHistoryService = getInstance(SearchHistoryService);
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
 	// BE CAUTIOUS
@@ -267,71 +270,10 @@ class GeneralTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName(t("Search history"))
-			.setDesc(t("Search history desc"));
-
-		new Setting(containerEl)
-			.setName(t("Enable search history"))
-			.setDesc(t("Enable search history desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.searchHistory.enabled)
-					.onChange((value) => {
-						this.setting.searchHistory.enabled = value;
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Search history suggestions"))
-			.setDesc(t("Search history suggestions desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.searchHistory.showSuggestions)
-					.onChange((value) => {
-						this.setting.searchHistory.showSuggestions = value;
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Search history ghost completion"))
-			.setDesc(t("Search history ghost completion desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.searchHistory.enableGhostCompletion)
-					.onChange((value) => {
-						this.setting.searchHistory.enableGhostCompletion = value;
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Search history max items"))
-			.setDesc(t("Search history max items desc"))
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						20: "20",
-						50: "50",
-						100: "100",
-						1000: "1000",
-						3000: "3000",
-						5000: "5000",
-						10000: "10000",
-					})
-					.setValue(String(this.setting.searchHistory.maxItems))
-					.onChange((value) => {
-						this.setting.searchHistory.maxItems =
-							Number(value) as SearchHistoryMaxItems;
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Clear search history"))
-			.setDesc(
-				`${t("Clear search history desc")} (${this.searchHistoryService.getEntryCount()})`,
-			)
+			.setDesc(t("Search history desc"))
 			.addButton((button) =>
-				button.setButtonText(t("Clear")).onClick(async () => {
-					await this.searchHistoryService.clearHistory();
-					this.display();
+				button.setButtonText(t("Manage")).onClick(() => {
+					openSearchHistoryModal(getInstance(App));
 				}),
 			);
 
@@ -550,6 +492,90 @@ class GeneralTab extends PluginSettingTab {
 					);
 				});
 			});
+	}
+}
+
+class SearchHistoryModal extends Modal {
+	private readonly settingManager = getInstance(SettingManager);
+	private readonly setting = getInstance(OuterSetting);
+	private readonly searchHistoryService = getInstance(SearchHistoryService);
+
+	onOpen() {
+		this.modalEl.style.width = "42vw";
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: t("Search history") });
+		new Setting(contentEl).setDesc(t("Search history desc"));
+
+		new Setting(contentEl)
+			.setName(t("Search history completion"))
+			.setDesc(t("Search history completion desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.enabled)
+					.onChange(async (value) => {
+						this.setting.searchHistory.enabled = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history suggestions"))
+			.setDesc(t("Search history suggestions desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.showSuggestions)
+					.onChange(async (value) => {
+						this.setting.searchHistory.showSuggestions = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history ghost completion"))
+			.setDesc(t("Search history ghost completion desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.enableGhostCompletion)
+					.onChange(async (value) => {
+						this.setting.searchHistory.enableGhostCompletion = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history max items"))
+			.setDesc(t("Search history max items desc"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						20: "20",
+						50: "50",
+						100: "100",
+						1000: "1000",
+						3000: "3000",
+						5000: "5000",
+						10000: "10000",
+					})
+					.setValue(String(this.setting.searchHistory.maxItems))
+					.onChange(async (value) => {
+						this.setting.searchHistory.maxItems =
+							Number(value) as SearchHistoryMaxItems;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Clear search history"))
+			.setDesc(
+				`${t("Clear search history desc")} (${this.searchHistoryService.getEntryCount()})`,
+			)
+			.addButton((button) =>
+				button.setButtonText(t("Clear")).onClick(async () => {
+					await this.searchHistoryService.clearHistory();
+					this.onOpen();
+				}),
+			);
 	}
 }
 
