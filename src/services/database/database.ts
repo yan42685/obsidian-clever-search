@@ -167,7 +167,7 @@ export class Database {
 		return (await this.db.minisearch.toArray())[0]?.data || null;
 	}
 
-	async setLexicalDocRefs(refs: BaseIndexedFileRef[]) {
+	async setLexicalIndexedFileRefs(refs: BaseIndexedFileRef[]) {
 		this.db.transaction("rw", this.db.lexicalDocRefs, async () => {
 			await this.db.lexicalDocRefs.clear();
 			await this.db.lexicalDocRefs.bulkAdd(refs);
@@ -175,18 +175,18 @@ export class Database {
 	}
 
 	@monitorDecorator
-	async getLexicalDocRefs(): Promise<BaseIndexedFileRef[] | null> {
+	async getLexicalIndexedFileRefs(): Promise<BaseIndexedFileRef[] | null> {
 		return (await this.db.lexicalDocRefs.toArray()) || null;
 	}
 
-	async setSemanticDocRefs(refs: BaseIndexedFileRef[]) {
+	async setSemanticIndexedFileRefs(refs: BaseIndexedFileRef[]) {
 		this.db.transaction("rw", this.db.semanticDocRefs, async () => {
 			await this.db.semanticDocRefs.clear();
 			await this.db.semanticDocRefs.bulkAdd(refs);
 		});
 	}
 
-	async getSemanticDocRefs(): Promise<BaseIndexedFileRef[] | null> {
+	async getSemanticIndexedFileRefs(): Promise<BaseIndexedFileRef[] | null> {
 		return (await this.db.semanticDocRefs.toArray()) || null;
 	}
 

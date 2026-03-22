@@ -211,10 +211,10 @@ export class DataManager {
 			};
 		}
 
-		const docRefs = await this.database.db.hybridDocRefs.toArray();
+		const indexedFileRefs = await this.database.db.hybridDocRefs.toArray();
 		let deferredCount = 0;
 		let nextEligibleAt: number | null = null;
-		for (const ref of docRefs) {
+		for (const ref of indexedFileRefs) {
 			if (ref.embeddingDeferred !== true) {
 				continue;
 			}
@@ -673,7 +673,7 @@ export class DataManager {
 			await this.reindexLexicalEngineWithCurrFiles();
 		}
 		if (!this.isLexicalEngineUpToDate) {
-			await this.updateDocRefByMtime();
+			await this.updateLexicalIndexedFileRefsByMtime();
 		}
 		logger.trace("Lexical engine is ready");
 		const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
@@ -717,7 +717,7 @@ export class DataManager {
 				"startup.repair_stored_state",
 				async () => await this.repairHybridStoredState(currFiles),
 			);
-			const prevRefs = new Map(
+			const previousIndexedFileRefs = new Map(
 				(await this.database.db.hybridDocRefs.toArray()).map((ref) => [ref.path, ref]),
 			);
 
@@ -725,16 +725,16 @@ export class DataManager {
 			const docsToDelete: string[] = [];
 
 			for (const [path, file] of currFiles) {
-				const prevRef = prevRefs.get(path);
-				if (!prevRef) {
+				const previousIndexedFileRef = previousIndexedFileRefs.get(path);
+				if (!previousIndexedFileRef) {
 					docsToAdd.push(file);
-				} else if (file.stat.mtime > prevRef.updateTime) {
+				} else if (file.stat.mtime > previousIndexedFileRef.updateTime) {
 					docsToDelete.push(path);
 					docsToAdd.push(file);
 				}
 			}
 
-			for (const prevPath of prevRefs.keys()) {
+			for (const prevPath of previousIndexedFileRefs.keys()) {
 				if (!currFiles.has(prevPath)) {
 					docsToDelete.push(prevPath);
 				}
@@ -844,32 +844,32 @@ export class DataManager {
 		}
 		const documents = await this.dataProvider.generateAllIndexedDocuments(filesToIndex);
 		await this.lexicalEngine.reIndexAll(documents);
-		await this.saveLexicalDocRefs(filesToIndex);
+		await this.saveLexicalIndexedFileRefs(filesToIndex);
 		this.isLexicalEngineUpToDate = true;
 	}
 
-	private async updateDocRefByMtime() {
+	private async updateLexicalIndexedFileRefsByMtime() {
 		const currFiles = new Map<string, TFile>(
 			this.dataProvider.allFilesToBeIndexed().map((file) => [file.path, file]),
 		);
-		const preRefsList = await this.database.getLexicalDocRefs();
-		const prevRefs = new Map<string, BaseIndexedFileRef>(
-			preRefsList?.map((ref) => [ref.path, ref]),
+		const previousIndexedFileRefsList = await this.database.getLexicalIndexedFileRefs();
+		const previousIndexedFileRefs = new Map<string, BaseIndexedFileRef>(
+			previousIndexedFileRefsList?.map((ref) => [ref.path, ref]),
 		);
 
 		const docsToAdd: TAbstractFile[] = [];
 		const docsToDelete: string[] = [];
 
 		for (const [path, file] of currFiles) {
-			const prevRef = prevRefs.get(path);
-			if (!prevRef) {
+			const previousIndexedFileRef = previousIndexedFileRefs.get(path);
+			if (!previousIndexedFileRef) {
 				docsToAdd.push(file);
-			} else if (file.stat.mtime > prevRef.updateTime) {
+			} else if (file.stat.mtime > previousIndexedFileRef.updateTime) {
 				docsToDelete.push(file.path);
 				docsToAdd.push(file);
 			}
 		}
-		for (const prevPath of prevRefs.keys()) {
+		for (const prevPath of previousIndexedFileRefs.keys()) {
 			if (!currFiles.has(prevPath)) docsToDelete.push(prevPath);
 		}
 
@@ -877,13 +877,16 @@ export class DataManager {
 		logger.trace(`docs to add: ${docsToAdd.length}`);
 		await this.deleteDocuments(docsToDelete);
 		await this.addDocuments(docsToAdd);
-		await this.saveLexicalDocRefs(Array.from(currFiles.values()));
+		await this.saveLexicalIndexedFileRefs(Array.from(currFiles.values()));
 	}
 
-	private async saveLexicalDocRefs(files: TFile[]) {
-		const updatedRefs = files.map((file) => ({ path: file.path, updateTime: file.stat.mtime }));
-		await this.database.setLexicalDocRefs(updatedRefs);
-		logger.trace(`${updatedRefs.length} lexical refs updated`);
+	private async saveLexicalIndexedFileRefs(files: TFile[]) {
+		const updatedIndexedFileRefs = files.map((file) => ({
+			path: file.path,
+			updateTime: file.stat.mtime,
+		}));
+		await this.database.setLexicalIndexedFileRefs(updatedIndexedFileRefs);
+		logger.trace(`${updatedIndexedFileRefs.length} lexical indexed file refs updated`);
 	}
 
 	private async runHybridRepairTasks(
@@ -1308,14 +1311,14 @@ export class DataManager {
 				},
 			]),
 		);
-		const docRefs = await this.database.db.hybridDocRefs.toArray();
-		const docRefByPath = new Map(docRefs.map((ref) => [ref.path, ref]));
-		const docRefPaths = new Set(docRefByPath.keys());
+		const indexedFileRefs = await this.database.db.hybridDocRefs.toArray();
+		const indexedFileRefByPath = new Map(indexedFileRefs.map((ref) => [ref.path, ref]));
+		const indexedFileRefPaths = new Set(indexedFileRefByPath.keys());
 		const allPaths = new Set<string>([
 			...chunkPaths,
 			...snapshotByPath.keys(),
 			...vectorInfoByPath.keys(),
-			...docRefPaths,
+			...indexedFileRefPaths,
 		]);
 		const currentPrecision =
 			this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8";
@@ -1328,44 +1331,46 @@ export class DataManager {
 			const hasVector = vectorInfo !== undefined;
 			const vectorPrecision = vectorInfo?.precision;
 			const hasSnapshot = snapshotByPath.has(path);
-			const hasDocRef = docRefPaths.has(path);
+			const hasIndexedFileRef = indexedFileRefPaths.has(path);
 			const existsNow = currFiles.has(path);
-			const docRef = docRefByPath.get(path);
-			const docState = normalizeHybridDocState(docRef, hasVector);
+			const indexedFileRef = indexedFileRefByPath.get(path);
+			const indexedFileState = normalizeHybridDocState(indexedFileRef, hasVector);
 			const chunkCount = chunkCountByPath.get(path) ?? 0;
 			const vectorChunkCount = vectorInfo?.chunkCount ?? 0;
-			const isPendingOrFailed = docState === "pending" || docState === "failed";
+			const isPendingOrFailed =
+				indexedFileState === "pending" || indexedFileState === "failed";
 			const readyMissingData =
-				docState === "ready" && (!hasChunks || !hasSnapshot || !hasVector || !hasDocRef);
+				indexedFileState === "ready" &&
+				(!hasChunks || !hasSnapshot || !hasVector || !hasIndexedFileRef);
 			const bm25OnlyShapeMismatch =
-				docState === "bm25_only" &&
-				(!hasChunks || !hasSnapshot || hasVector || !hasDocRef);
+				indexedFileState === "bm25_only" &&
+				(!hasChunks || !hasSnapshot || hasVector || !hasIndexedFileRef);
 			const chunkCountMismatch =
-				hasDocRef &&
-				docRef?.chunkCount !== undefined &&
-				docRef.chunkCount !== chunkCount;
+				hasIndexedFileRef &&
+				indexedFileRef?.chunkCount !== undefined &&
+				indexedFileRef.chunkCount !== chunkCount;
 			const vectorChunkCountMismatch =
 				hasVector && hasChunks && vectorChunkCount !== chunkCount;
 			const generationMismatch =
-				hasDocRef &&
+				hasIndexedFileRef &&
 				(hasVector || hasSnapshot) &&
-				docRef?.generation !== undefined &&
+				indexedFileRef?.generation !== undefined &&
 				((vectorInfo?.generation !== undefined &&
-					docRef.generation !== vectorInfo.generation) ||
+					indexedFileRef.generation !== vectorInfo.generation) ||
 					(snapshotByPath.get(path)?.generation !== undefined &&
-						docRef.generation !== snapshotByPath.get(path)?.generation));
+						indexedFileRef.generation !== snapshotByPath.get(path)?.generation));
 
 			const inconsistent =
 				(hasVector && !hasChunks) ||
-				(!hasDocRef && (hasChunks || hasVector || hasSnapshot)) ||
-				(hasDocRef && (!hasChunks || !hasSnapshot)) ||
+				(!hasIndexedFileRef && (hasChunks || hasVector || hasSnapshot)) ||
+				(hasIndexedFileRef && (!hasChunks || !hasSnapshot)) ||
 				isPendingOrFailed ||
 				readyMissingData ||
 				bm25OnlyShapeMismatch ||
 				chunkCountMismatch ||
 				vectorChunkCountMismatch ||
 				generationMismatch;
-			const obsolete = !existsNow && (hasChunks || hasVector || hasDocRef);
+			const obsolete = !existsNow && (hasChunks || hasVector || hasIndexedFileRef);
 			const obsoleteSnapshot = !existsNow && hasSnapshot;
 			const precisionMismatch =
 				hasVector && vectorPrecision !== currentPrecision;
@@ -1379,10 +1384,10 @@ export class DataManager {
 			}
 		}
 
-		for (const [path, docRef] of docRefByPath) {
+		for (const [path, indexedFileRef] of indexedFileRefByPath) {
 			if (
 				currFiles.has(path) &&
-				docRef.embeddingDeferred === true &&
+				indexedFileRef.embeddingDeferred === true &&
 				!reindexedPaths.includes(path)
 			) {
 				reindexedPaths.push(path);
@@ -1403,13 +1408,13 @@ export class DataManager {
 				hasChunks: chunkPaths.has(path),
 				hasSnapshot: snapshotByPath.has(path),
 				hasVector: vectorInfoByPath.has(path),
-				hasDocRef: docRefPaths.has(path),
-				docState: normalizeHybridDocState(
-					docRefByPath.get(path),
+				hasIndexedFileRef: indexedFileRefPaths.has(path),
+				indexedFileState: normalizeHybridDocState(
+					indexedFileRefByPath.get(path),
 					vectorInfoByPath.has(path),
 				) ?? "-",
 				chunkCount: chunkCountByPath.get(path) ?? 0,
-				docRefChunkCount: docRefByPath.get(path)?.chunkCount ?? "-",
+				indexedFileRefChunkCount: indexedFileRefByPath.get(path)?.chunkCount ?? "-",
 				vectorChunkCount: vectorInfoByPath.get(path)?.chunkCount ?? "-",
 				vectorPrecision: vectorInfoByPath.get(path)?.precision ?? "-",
 			})),

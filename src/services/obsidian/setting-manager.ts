@@ -57,7 +57,7 @@ type HybridHealthSummary = {
 	engineReady: boolean;
 	canSearch: boolean;
 	isEmpty: boolean;
-	docRefs: number;
+	indexedFileRefs: number;
 	readyCount: number;
 	bm25OnlyCount: number;
 	failedCount: number;
@@ -897,7 +897,7 @@ class HybridSearchModal extends Modal {
 			t("hybridModal.healthSummary.localOnly"),
 			`${t("hybridModal.healthSummary.status")}: ${t(`hybridModal.healthSummary.state.${summary.status}`)}`,
 			`${t("hybridModal.healthSummary.engine")}: enabled ${this.formatHybridFlag(summary.enabled)} | ready ${this.formatHybridFlag(summary.engineReady)} | canSearch ${this.formatHybridFlag(summary.canSearch)} | empty ${this.formatHybridFlag(summary.isEmpty)}`,
-			`${t("hybridModal.healthSummary.docs")}: total ${summary.docRefs} | ready ${summary.readyCount} | bm25_only ${summary.bm25OnlyCount} | failed ${summary.failedCount} | pending ${summary.pendingCount}`,
+			`${t("hybridModal.healthSummary.docs")}: total ${summary.indexedFileRefs} | ready ${summary.readyCount} | bm25_only ${summary.bm25OnlyCount} | failed ${summary.failedCount} | pending ${summary.pendingCount}`,
 			`${t("hybridModal.healthSummary.storage")}: chunkRows ${summary.chunkRows} | snapshots ${summary.snapshotRows} | vectorShards ${summary.vectorShards} | bm25 ${this.formatHybridFlag(summary.hasBm25)} | hnsw ${this.formatHybridFlag(summary.hasHnsw)}`,
 			summary.topErrorKinds.length > 0
 				? `${t("hybridModal.healthSummary.errors")}: ${summary.topErrorKinds
@@ -911,7 +911,7 @@ class HybridSearchModal extends Modal {
 	private async getHybridHealthSummary(): Promise<HybridHealthSummary> {
 		const hybridEngine = getInstance(SearchService).hybridEngine;
 		const db = getInstance(Database).db;
-		const [docRefs, chunkRows, snapshotRows, vectorShards, bm25Blob, hnswBlob] =
+		const [indexedFileRefs, chunkRows, snapshotRows, vectorShards, bm25Blob, hnswBlob] =
 			await Promise.all([
 				db.hybridDocRefs.toArray(),
 				db.hybridChunks.count(),
@@ -921,15 +921,15 @@ class HybridSearchModal extends Modal {
 				db.hybridHnswSmall.get(0),
 			]);
 
-		const readyCount = docRefs.filter((ref) => ref.state === "ready").length;
-		const bm25OnlyCount = docRefs.filter((ref) => ref.state === "bm25_only").length;
-		const failedCount = docRefs.filter((ref) => ref.state === "failed").length;
-		const pendingCount = docRefs.filter((ref) => ref.state === "pending").length;
-		const topErrorKinds = this.collectTopHybridErrorKinds(docRefs);
+		const readyCount = indexedFileRefs.filter((ref) => ref.state === "ready").length;
+		const bm25OnlyCount = indexedFileRefs.filter((ref) => ref.state === "bm25_only").length;
+		const failedCount = indexedFileRefs.filter((ref) => ref.state === "failed").length;
+		const pendingCount = indexedFileRefs.filter((ref) => ref.state === "pending").length;
+		const topErrorKinds = this.collectTopHybridErrorKinds(indexedFileRefs);
 		const hasBm25 = bm25Blob !== undefined;
 		const hasHnsw = hnswBlob !== undefined;
 		const hasAnyLocalHybridData =
-			docRefs.length > 0 ||
+			indexedFileRefs.length > 0 ||
 			chunkRows > 0 ||
 			snapshotRows > 0 ||
 			vectorShards > 0 ||
@@ -957,7 +957,7 @@ class HybridSearchModal extends Modal {
 			engineReady: hybridEngine.isReady(),
 			canSearch: hybridEngine.canSearch(),
 			isEmpty: hybridEngine.isEmpty(),
-			docRefs: docRefs.length,
+			indexedFileRefs: indexedFileRefs.length,
 			readyCount,
 			bm25OnlyCount,
 			failedCount,
@@ -972,10 +972,10 @@ class HybridSearchModal extends Modal {
 	}
 
 	private collectTopHybridErrorKinds(
-		docRefs: HybridIndexedFileRef[],
+		indexedFileRefs: HybridIndexedFileRef[],
 	): Array<{ kind: string; count: number }> {
 		const counts = new Map<string, number>();
-		for (const ref of docRefs) {
+		for (const ref of indexedFileRefs) {
 			const kind = ref.lastErrorKind?.trim();
 			if (!kind) {
 				continue;
