@@ -71,7 +71,7 @@ type HybridWriteOption = {
 	deleteDocRef?: boolean;
 };
 
-type HybridIndexMode = 'full' | 'structure-only';
+type HybridIndexMode = 'full' | 'without-embedding';
 
 type Bm25OnlyDocRefMeta = {
 	lastErrorKind: string | null;
@@ -92,6 +92,9 @@ type StoredFileIndexState = {
 	snapshot?: HybridFileSnapshotRow;
 	chunkRows: ChunkRow[];
 	vectorsByChunkId: Map<number, StoredVector>;
+	vectorGeneration?: number;
+	vectorChunkCount?: number;
+	vectorPrecision?: VectorPrecision | null;
 };
 
 type PlannedChunk = {
@@ -209,7 +212,7 @@ export class HybridEngine {
 		);
 	}
 
-	async indexFileStructureOnly(
+	async indexFileWithoutEmbedding(
 		filePath: string,
 		plainText: string,
 		updateTime = Date.now(),
@@ -223,7 +226,7 @@ export class HybridEngine {
 			option,
 			false,
 			headingOutline,
-			'structure-only',
+			'without-embedding',
 		);
 	}
 
@@ -420,6 +423,11 @@ export class HybridEngine {
 			const generation = Date.now();
 			const previousState = await this.loadStoredFileIndexState(filePath);
 			const previousDocRef = await this.db.db.hybridDocRefs.get(filePath);
+			const reusableState = this.getReusableStoredFileIndexState(
+				filePath,
+				previousState,
+				previousDocRef,
+			);
 			await this.putHybridDocRef({
 				path: filePath,
 				updateTime,
@@ -457,7 +465,7 @@ export class HybridEngine {
 						lineOffsets,
 						buildEmbedInput,
 						rawChunks,
-						previousState,
+						reusableState,
 					),
 			);
 			if (plannedChunks.length === 0) {
@@ -469,7 +477,7 @@ export class HybridEngine {
 			}
 			recordHybridProfileMetric('index.chunk_count', plannedChunks.length);
 
-			if (mode === 'structure-only') {
+			if (mode === 'without-embedding') {
 				await this.indexBm25Only(
 					filePath,
 					plannedChunks,
@@ -609,6 +617,86 @@ export class HybridEngine {
 			snapshot,
 			chunkRows,
 			vectorsByChunkId,
+			vectorGeneration: vectorRow?.generation,
+			vectorChunkCount: vectorRow?.chunkCount,
+			vectorPrecision:
+				vectorRow?.precision === this.precision ? this.precision : null,
+		};
+	}
+
+	private getReusableStoredFileIndexState(
+		filePath: string,
+		previousState: StoredFileIndexState,
+		previousDocRef: HybridDocRef | undefined,
+	): StoredFileIndexState {
+		const inconsistencyReasons: string[] = [];
+		const chunkCount = previousState.chunkRows.length;
+		const hasSnapshot = previousState.snapshot !== undefined;
+		const hasVectorShard = previousState.vectorChunkCount !== undefined;
+		const docState = previousDocRef?.state;
+
+		if (!previousDocRef && (hasSnapshot || chunkCount > 0 || hasVectorShard)) {
+			inconsistencyReasons.push('missing_doc_ref');
+		}
+		if (
+			(docState === 'pending' || docState === 'failed') &&
+			(hasSnapshot || chunkCount > 0 || hasVectorShard)
+		) {
+			inconsistencyReasons.push(`doc_state_${docState}`);
+		}
+		if (docState === 'ready' && (!hasSnapshot || chunkCount === 0 || !hasVectorShard)) {
+			inconsistencyReasons.push('ready_missing_data');
+		}
+		if (docState === 'bm25_only' && hasVectorShard) {
+			inconsistencyReasons.push('bm25_only_has_vector');
+		}
+		if (
+			previousDocRef?.chunkCount !== undefined &&
+			previousDocRef.chunkCount !== chunkCount
+		) {
+			inconsistencyReasons.push('doc_ref_chunk_count_mismatch');
+		}
+		if (
+			previousState.vectorChunkCount !== undefined &&
+			previousState.vectorChunkCount !== chunkCount
+		) {
+			inconsistencyReasons.push('vector_chunk_count_mismatch');
+		}
+		if (
+			hasVectorShard &&
+			previousState.vectorPrecision !== this.precision
+		) {
+			inconsistencyReasons.push('vector_precision_mismatch');
+		}
+		if (
+			previousDocRef?.generation !== undefined &&
+			previousState.snapshot?.generation !== undefined &&
+			previousDocRef.generation !== previousState.snapshot.generation
+		) {
+			inconsistencyReasons.push('snapshot_generation_mismatch');
+		}
+		if (
+			previousDocRef?.generation !== undefined &&
+			previousState.vectorGeneration !== undefined &&
+			previousDocRef.generation !== previousState.vectorGeneration
+		) {
+			inconsistencyReasons.push('vector_generation_mismatch');
+		}
+
+		if (inconsistencyReasons.length === 0) {
+			return previousState;
+		}
+
+		logger.debug(
+			`hybrid incremental reuse ignored inconsistent local state for ${filePath}: ${inconsistencyReasons.join(', ')}`,
+		);
+		return {
+			snapshot: undefined,
+			chunkRows: [],
+			vectorsByChunkId: new Map<number, StoredVector>(),
+			vectorGeneration: undefined,
+			vectorChunkCount: undefined,
+			vectorPrecision: null,
 		};
 	}
 

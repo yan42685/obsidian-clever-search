@@ -904,7 +904,7 @@ export class DataManager {
 		try {
 			const text = await this.dataProvider.readPlainText(file.path);
 			const headingOutline = this.dataProvider.getHeadingOutline(file);
-			await this.hybridEngine.indexFileStructureOnly(
+			await this.hybridEngine.indexFileWithoutEmbedding(
 				file.path,
 				text,
 				file.stat.mtime,
