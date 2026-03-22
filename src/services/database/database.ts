@@ -1,5 +1,9 @@
 import Dexie from "dexie";
-import type { HybridTokenRecord, OuterSetting } from "src/globals/plugin-setting";
+import type {
+	HybridTokenRecord,
+	HybridTokenSavingRecord,
+	OuterSetting,
+} from "src/globals/plugin-setting";
 import type { DocumentRef } from "src/globals/search-types";
 import type {
 	Bm25BlobBreakdown,
@@ -49,6 +53,7 @@ export class Database {
 			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
 			{ name: "hybridDocRefs", table: this.db.hybridDocRefs },
 			{ name: "hybridTokenStats", table: this.db.hybridTokenStats },
+			{ name: "hybridTokenSavings", table: this.db.hybridTokenSavings },
 		] as const;
 
 		const tables = await Promise.all(
@@ -220,7 +225,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 10;
+	private static readonly _dbVersion = 11;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -236,6 +241,7 @@ class DexieWrapper extends Dexie {
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
 	hybridDocRefs!: Dexie.Table<HybridDocRef, string>;
 	hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
+	hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
 
 	constructor(@inject(PrivateApi) privateApi: PrivateApi) {
 		super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
@@ -300,6 +306,7 @@ class DexieWrapper extends Dexie {
 				hybridHnswSmall: "id",
 				hybridDocRefs: "path",
 				hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+				hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
 			})
 			.upgrade(async (tx) => {
 				await Promise.all([

@@ -119,6 +119,13 @@ export type HybridTokenRecord = {
 	tokens: number;
 };
 
+export type HybridTokenSavingRecord = {
+	id?: number;
+	scope: "week" | "total";
+	periodKey: string;
+	tokens: number;
+};
+
 export type UISetting = {
 	openInNewPane: boolean;
 	maxItemResults: number;

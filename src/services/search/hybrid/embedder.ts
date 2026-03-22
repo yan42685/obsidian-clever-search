@@ -21,6 +21,7 @@ const REQUEST_TIMEOUT_MS = 45_000;
 const REQUEST_MAX_RETRIES = 4;
 const REQUEST_MIN_SPACING_MS = 250;
 const REQUEST_RETRY_BASE_MS = 1_200;
+const TOKEN_SAVINGS_TOTAL_KEY = 'all';
 
 export class NoApiKeyError extends Error {
 	constructor() {
@@ -328,6 +329,10 @@ function dateKey(date: Date): string {
 	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function currentWeekSavingsKey(now = new Date()): string {
+	return getCurrentWeekDateRange(now).fromDate;
+}
+
 export function getCurrentWeekDateRange(now = new Date()): { fromDate: string; toDate: string } {
 	const current = new Date(now);
 	current.setHours(0, 0, 0, 0);
@@ -367,6 +372,86 @@ export async function recordTokenUsage(filePath: string, tokens: number): Promis
 		}
 	} catch {
 		// non-critical
+	}
+}
+
+async function accumulateTokenSavings(
+	table: Database['db']['hybridTokenSavings'],
+	scope: 'week' | 'total',
+	periodKey: string,
+	tokens: number,
+): Promise<void> {
+	const existing = await table
+		.where('[scope+periodKey]')
+		.equals([scope, periodKey])
+		.first();
+	if (existing?.id !== undefined) {
+		await table.update(existing.id, {
+			tokens: existing.tokens + tokens,
+		});
+		return;
+	}
+	await table.add({
+		scope,
+		periodKey,
+		tokens,
+	});
+}
+
+export async function recordEstimatedTokenSavings(
+	tokens: number,
+	now = new Date(),
+): Promise<void> {
+	if (tokens <= 0) {
+		return;
+	}
+	try {
+		const db = getInstance(Database).db;
+		const weekKey = currentWeekSavingsKey(now);
+		await db.transaction('rw', db.hybridTokenSavings, async () => {
+			await accumulateTokenSavings(
+				db.hybridTokenSavings,
+				'week',
+				weekKey,
+				tokens,
+			);
+			await accumulateTokenSavings(
+				db.hybridTokenSavings,
+				'total',
+				TOKEN_SAVINGS_TOTAL_KEY,
+				tokens,
+			);
+		});
+	} catch {
+		// non-critical
+	}
+}
+
+export async function getEstimatedTokenSavingsSummary(
+	now = new Date(),
+): Promise<{ week: number; total: number }> {
+	try {
+		const db = getInstance(Database).db;
+		const weekKey = currentWeekSavingsKey(now);
+		const [weekRecord, totalRecord] = await Promise.all([
+			db.hybridTokenSavings
+				.where('[scope+periodKey]')
+				.equals(['week', weekKey])
+				.first(),
+			db.hybridTokenSavings
+				.where('[scope+periodKey]')
+				.equals(['total', TOKEN_SAVINGS_TOTAL_KEY])
+				.first(),
+		]);
+		return {
+			week: weekRecord?.tokens ?? 0,
+			total: totalRecord?.tokens ?? 0,
+		};
+	} catch {
+		return {
+			week: 0,
+			total: 0,
+		};
 	}
 }
 

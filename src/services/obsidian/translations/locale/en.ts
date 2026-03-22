@@ -132,6 +132,9 @@ export default {
 	"hybridModal.file": "File",
 	"hybridModal.tokens": "Tokens",
 	"hybridModal.tokenStats.pinned": "Pinned",
+	"hybridModal.estimatedSavings": "Estimated token savings",
+	"hybridModal.estimatedSavings.weekly": "Estimated tokens saved this week by incremental chunk embedding: ",
+	"hybridModal.estimatedSavings.total": "Estimated cumulative tokens saved by incremental chunk embedding: ",
 
 	"Excluded files": "Excluded files",
 	Manage: "Manage",

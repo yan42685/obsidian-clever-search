@@ -13,7 +13,11 @@ import {
 	createChunkEmbeddingInputBuilder,
 } from './chunker';
 import { BM25Engine } from './bm25';
-import { Embedder } from './embedder';
+import {
+	Embedder,
+	estimateTextsTokenUsage,
+	recordEstimatedTokenSavings,
+} from './embedder';
 import { HnswIndex } from './hnsw';
 import {
 	computeUnchangedOffsetBlocks,
@@ -692,15 +696,18 @@ export class HybridEngine {
 		const vectors = new Array<StoredVector>(batchChunks.length);
 		const pendingIndexes: number[] = [];
 		const pendingInputs: string[] = [];
+		const fullInputs = new Array<string>(batchChunks.length);
 
 		for (let i = 0; i < batchChunks.length; i++) {
+			const input = buildEmbedInput(batchChunks[i].rawChunk);
+			fullInputs[i] = input;
 			const reusedVector = batchChunks[i].reusedVector;
 			if (reusedVector) {
 				vectors[i] = reusedVector;
 				continue;
 			}
 			pendingIndexes.push(i);
-			pendingInputs.push(buildEmbedInput(batchChunks[i].rawChunk));
+			pendingInputs.push(input);
 		}
 
 		if (pendingInputs.length > 0) {
@@ -716,6 +723,14 @@ export class HybridEngine {
 			for (let i = 0; i < pendingIndexes.length; i++) {
 				vectors[pendingIndexes[i]] = embedded[i];
 			}
+		}
+
+		const savedEstimatedTokens = Math.max(
+			0,
+			estimateTextsTokenUsage(fullInputs) - estimateTextsTokenUsage(pendingInputs),
+		);
+		if (savedEstimatedTokens > 0) {
+			await recordEstimatedTokenSavings(savedEstimatedTokens);
 		}
 
 		return vectors;

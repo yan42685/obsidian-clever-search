@@ -17,6 +17,7 @@ import {
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import {
+	getEstimatedTokenSavingsSummary,
 	getCurrentWeekDateRange,
 	getCurrentWeekTokenUsage,
 	getTopTokenFiles,
@@ -636,9 +637,6 @@ class HybridSearchModal extends Modal {
 		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
-		this.weeklyQuotaEl = contentEl.createDiv();
-		this.weeklyQuotaEl.style.margin = "0.35em 0 1em 0";
-		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
 		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
 			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
@@ -656,6 +654,9 @@ class HybridSearchModal extends Modal {
 					await this.updateWeeklyTokenLimit();
 				}),
 			);
+		this.weeklyQuotaEl = contentEl.createDiv();
+		this.weeklyQuotaEl.style.margin = "0.35em 0 1em 0";
+		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
 		void this.refreshTokenStats();
 	}
 
@@ -744,6 +745,7 @@ class HybridSearchModal extends Modal {
 			dailyTotal,
 			weeklyTotal,
 			monthlyTotal,
+			savingsSummary,
 		] = await Promise.all([
 			getTopTokenFiles(todayKey, todayKey, 20),
 			getTopTokenFiles(weeklyFrom, weeklyTo, 20),
@@ -751,6 +753,7 @@ class HybridSearchModal extends Modal {
 			getTotalTokens(todayKey, todayKey),
 			getTotalTokens(weeklyFrom, weeklyTo),
 			getTotalTokens(monthlyFrom, todayKey),
+			getEstimatedTokenSavingsSummary(),
 		]);
 
 		container.empty();
@@ -760,6 +763,13 @@ class HybridSearchModal extends Modal {
 				`${t("hybridModal.todayUsed")}: ${this.formatTokenCompact(dailyTotal)}  |  ` +
 				`${t("hybridModal.thisWeekUsed")}: ${this.formatTokenCompact(weeklyTotal)}  |  ` +
 				`${t("hybridModal.thisMonthUsed")}: ${this.formatTokenCompact(monthlyTotal)}`,
+		});
+		container.createEl("p", {
+			text:
+				`${t("hybridModal.estimatedSavings.weekly")}` +
+				`${this.formatTokenCompact(savingsSummary.week)} token  |  ` +
+				`${t("hybridModal.estimatedSavings.total")}` +
+				`${this.formatTokenCompact(savingsSummary.total)} token`,
 		});
 		this.renderTokenTabs(container, [
 			{ title: t("hybridModal.dailyTop"), items: dailyTop },
@@ -773,14 +783,11 @@ class HybridSearchModal extends Modal {
 		const limit = this.setting.hybrid.weeklyTokenLimit ?? 0;
 		const remaining = limit > 0 ? Math.max(0, limit - used) : Infinity;
 		this.weeklyQuotaEl.createEl("p", {
-			text: `${t("hybridModal.weeklyUsed")}: ${this.formatTokenCompact(used)}`,
-		});
-		this.weeklyQuotaEl.createEl("p", {
 			text:
 				`${t("hybridModal.weeklyRemaining")}: ` +
-				(limit > 0
-					? this.formatTokenCompact(remaining)
-					: t("hybridModal.unlimited")),
+					(limit > 0
+						? this.formatTokenCompact(remaining)
+						: t("hybridModal.unlimited")),
 		});
 	}
 
