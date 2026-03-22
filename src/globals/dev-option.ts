@@ -6,5 +6,4 @@ const isDev =  process.env.NODE_ENV === "development";
 export const devOption = {
     traceLog: isDev ? false : false,
     loadIndexFromDatabase: isDev ? true : true,
-    forceShowHybridEmbeddingIncompleteNotice: isDev ? true : false,
 }

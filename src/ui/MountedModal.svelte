@@ -1,14 +1,13 @@
-<script lang="ts">
+	<script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
-	import { devOption } from "src/globals/dev-option";
 	import { EventEnum } from "src/globals/enums";
 	import { OuterSetting } from "src/globals/plugin-setting";
 	import {
-		FileItem,
-		FileSubItem,
-		LineItem,
-		SearchResult,
-		SearchType,
+	    FileItem,
+	    FileSubItem,
+	    LineItem,
+	    SearchResult,
+	    SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
@@ -20,9 +19,9 @@
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import {
-		AutoHybridFallbackController,
-		getMountedModalFileItemScore,
-		usesDirectFileSubItems,
+	    AutoHybridFallbackController,
+	    getMountedModalFileItemScore,
+	    usesDirectFileSubItems,
 	} from "./mounted-modal-helper";
 	import SearchHistoryInput from "./SearchHistoryInput.svelte";
 	import { ViewHelper } from "./view-helper";
@@ -50,12 +49,6 @@
 	let latestSearchRequestId = 0;
 	let historyInputRef: any;
 	let autoHybridFallbackFailureNoticeKey: LocaleKey | null = null;
-	$: forceShowEmbeddingIncompleteNotice =
-		devOption.forceShowHybridEmbeddingIncompleteNotice === true &&
-		searchType === SearchType.IN_VAULT;
-	$: showEmbeddingIncompleteNotice =
-		forceShowEmbeddingIncompleteNotice ||
-		searchResult.hybridEmbeddingIncomplete;
 
 	const autoHybridFallback = new AutoHybridFallbackController({
 		searchService,
@@ -417,14 +410,14 @@
 							</ul>
 						</div>
 					{:else}
-						{#if showEmbeddingIncompleteNotice}
+						{#if searchResult.hybridEmbeddingIncomplete}
 							<div class="hybrid-fallback-failure">
-								<p class="hybrid-fallback-failure-title">
+								<span class="hybrid-fallback-failure-detail">
 									{t("hybridModal.embeddingIncompleteFallback.title")}
-								</p>
-								<p class="hybrid-fallback-failure-detail">
+								</span>
+								<span class="hybrid-fallback-failure-detail hybrid-fallback-failure-detail-secondary">
 									{t("hybridModal.embeddingIncompleteFallback.desc")}
-								</p>
+								</span>
 							</div>
 						{/if}
 						{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
@@ -589,6 +582,7 @@
 	.hybrid-fallback-failure {
 		padding-right: 0.7em;
 		color: var(--text-normal);
+		margin-bottom: 0.75em;
 	}
 
 	.hybrid-fallback-failure-title {
@@ -599,7 +593,15 @@
 	.hybrid-fallback-failure-detail,
 	.hybrid-fallback-failure-causes {
 		color: var(--cs-secondary-font-color, #a29c9c);
-		margin-bottom: 0.55em;
+		margin-bottom: 0;
+	}
+
+	.hybrid-fallback-failure-detail {
+		display: block;
+	}
+
+	.hybrid-fallback-failure-detail-secondary {
+		margin-top: -0.73em;
 	}
 
 	.hybrid-fallback-failure ul {
