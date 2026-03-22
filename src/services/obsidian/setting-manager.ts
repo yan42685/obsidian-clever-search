@@ -75,6 +75,7 @@ export class SettingManager {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private setting: OuterSetting;
 	shouldReload = false;
+	shouldRefreshHybridOnly = false;
 
 	async initAsync() {
 		await this.loadSettings(); // must run this line before registering PluginSetting
@@ -92,7 +93,14 @@ export class SettingManager {
 
 		if (this.shouldReload) {
 			this.shouldReload = false;
+			this.shouldRefreshHybridOnly = false;
 			await this.downloadAndRefresh();
+			return;
+		}
+
+		if (this.shouldRefreshHybridOnly) {
+			this.shouldRefreshHybridOnly = false;
+			await this.refreshHybridOnly();
 		}
 	}
 
@@ -117,6 +125,12 @@ export class SettingManager {
 
 		getInstance(DataProvider).init();
 		await getInstance(DataManager).refreshAllAsync();
+	}
+
+	private async refreshHybridOnly() {
+		getInstance(ViewRegistry).refreshAll();
+		getInstance(DataProvider).init();
+		await getInstance(DataManager).refreshHybridStateAsync();
 	}
 }
 
@@ -521,7 +535,7 @@ class HybridSearchModal extends Modal {
 					.setValue(this.setting.hybrid.enabled)
 					.onChange((v) => {
 						this.setting.hybrid.enabled = v;
-						this.settingManager.shouldReload = true;
+						this.settingManager.shouldRefreshHybridOnly = true;
 						this.settingManager.saveSettings();
 					}),
 			);

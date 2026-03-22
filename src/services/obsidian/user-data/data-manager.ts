@@ -372,6 +372,19 @@ export class DataManager {
 		}
 	}
 
+	async refreshHybridStateAsync() {
+		this.clearHybridFailedEmbeddingState();
+		this.setHybridSearchAvailability("blocked");
+		try {
+			await this.initHybridEngine().catch((e) => {
+				logger.warn("hybrid engine init failed:", e);
+				new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+			});
+		} finally {
+			this.notifyHybridRuntimeStatusChanged();
+		}
+	}
+
 	private async addDocuments(files: TAbstractFile[]) {
 		if (files.length > 0) {
 			const tFiles: TFile[] = [];
