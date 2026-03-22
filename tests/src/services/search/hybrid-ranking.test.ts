@@ -2,8 +2,10 @@ import {
 	buildHybridQueryProfile,
 	buildSemanticQueryVariants,
 	filterSemanticMatches,
+	getHybridBm25ProbeLimit,
 	mergeHybridRankings,
 	reciprocalRankFuse,
+	resolveHybridRecallBudget,
 } from "src/services/search/hybrid/ranking";
 
 describe("hybrid ranking", () => {
@@ -26,9 +28,18 @@ describe("hybrid ranking", () => {
 		]);
 	});
 
-	test("short keyword queries bias toward lexical hits", () => {
-		const profile = buildHybridQueryProfile("docker", 1, true);
-		expect(profile.queryVariantLimit).toBe(1);
+	test("hybrid recall budget is fixed at 10x30", () => {
+		expect(getHybridBm25ProbeLimit()).toBe(10);
+		expect(resolveHybridRecallBudget()).toEqual({
+			bm25RecallLimit: 10,
+			denseRecallLimit: 30,
+		});
+	});
+
+	test("fixed hybrid profile still lets strong lexical hits win", () => {
+		const profile = buildHybridQueryProfile();
+		expect(profile.queryVariantLimit).toBe(2);
+		expect(profile.searchEf).toBe(72);
 		const merged = mergeHybridRankings(
 			[
 				{ id: 101, score: 12 },
@@ -48,9 +59,7 @@ describe("hybrid ranking", () => {
 	});
 
 	test("semantic-only results still rank when lexical has no hits", () => {
-		const profile = buildHybridQueryProfile("how to rotate aws access keys safely", 7, false);
-		expect(profile.queryVariantLimit).toBe(3);
-		expect(profile.searchEf).toBeGreaterThan(80);
+		const profile = buildHybridQueryProfile();
 		const merged = mergeHybridRankings(
 			[],
 			[

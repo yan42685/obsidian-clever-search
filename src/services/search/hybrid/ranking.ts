@@ -3,6 +3,11 @@ export type RankedResult = {
 	score: number;
 };
 
+export type HybridRecallBudget = {
+	bm25RecallLimit: number;
+	denseRecallLimit: number;
+};
+
 export type HybridQueryProfile = {
 	lexicalWeight: number;
 	vecSmallWeight: number;
@@ -23,6 +28,22 @@ export type SemanticQueryVariant = {
 
 const RRF_K = 60;
 const MIN_SCORE_SPREAD = 0.05;
+const FIXED_HYBRID_RECALL_BUDGET: HybridRecallBudget = {
+	bm25RecallLimit: 10,
+	denseRecallLimit: 30,
+};
+const FIXED_HYBRID_QUERY_PROFILE: HybridQueryProfile = {
+	lexicalWeight: 1.0,
+	vecSmallWeight: 0.9,
+	vecBigWeight: 0.32,
+	vecSmallMinScore: 0.18,
+	vecBigMinScore: 0.14,
+	semanticWindow: 0.12,
+	smallSearchMultiplier: 6,
+	bigSearchMultiplier: 4,
+	searchEf: 72,
+	queryVariantLimit: 2,
+};
 
 export function reciprocalRankFuse(
 	lists: RankedResult[][],
@@ -50,59 +71,16 @@ export function reciprocalRankFuse(
 		.slice(0, limit);
 }
 
-export function buildHybridQueryProfile(
-	query: string,
-	queryTokenCount: number,
-	hasLexicalHits: boolean,
-): HybridQueryProfile {
-	const trimmed = query.trim();
-	const looksPathLike = /[\\/._#:-]/.test(trimmed);
-	const shortKeywordQuery =
-		hasLexicalHits &&
-		(looksPathLike || queryTokenCount <= 2 || trimmed.length <= 8);
+export function buildHybridQueryProfile(): HybridQueryProfile {
+	return { ...FIXED_HYBRID_QUERY_PROFILE };
+}
 
-	if (shortKeywordQuery) {
-		return {
-			lexicalWeight: 1.35,
-			vecSmallWeight: 0.45,
-			vecBigWeight: 0.16,
-			vecSmallMinScore: 0.26,
-			vecBigMinScore: 0.22,
-			semanticWindow: 0.08,
-			smallSearchMultiplier: 4,
-			bigSearchMultiplier: 3,
-			searchEf: 56,
-			queryVariantLimit: 1,
-		};
-	}
+export function resolveHybridRecallBudget(): HybridRecallBudget {
+	return { ...FIXED_HYBRID_RECALL_BUDGET };
+}
 
-	if (!hasLexicalHits && queryTokenCount >= 3) {
-		return {
-			lexicalWeight: 0.72,
-			vecSmallWeight: 1.05,
-			vecBigWeight: 0.4,
-			vecSmallMinScore: 0.12,
-			vecBigMinScore: 0.1,
-			semanticWindow: 0.18,
-			smallSearchMultiplier: 8,
-			bigSearchMultiplier: 6,
-			searchEf: 96,
-			queryVariantLimit: 3,
-		};
-	}
-
-	return {
-		lexicalWeight: 1.0,
-		vecSmallWeight: 0.9,
-		vecBigWeight: 0.32,
-		vecSmallMinScore: 0.18,
-		vecBigMinScore: 0.14,
-		semanticWindow: 0.12,
-		smallSearchMultiplier: 6,
-		bigSearchMultiplier: 4,
-		searchEf: 72,
-		queryVariantLimit: 2,
-	};
+export function getHybridBm25ProbeLimit(): number {
+	return FIXED_HYBRID_RECALL_BUDGET.bm25RecallLimit;
 }
 
 export function buildSemanticQueryVariants(

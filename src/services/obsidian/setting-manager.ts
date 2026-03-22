@@ -156,6 +156,7 @@ export class SettingManager {
 			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
 		);
+		delete (this.setting.hybrid as Record<string, unknown>).searchStrategy;
 		logger.setLevel(this.setting.logLevel);
 	}
 
