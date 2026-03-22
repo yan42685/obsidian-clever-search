@@ -23,6 +23,8 @@ import {
 	getTopTokenFiles,
 	getTotalTokens,
 } from "src/services/search/hybrid/embedder";
+import type { HybridDocRef } from "src/services/search/hybrid/hybrid-store";
+import { Database } from "src/services/database/database";
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
@@ -30,11 +32,37 @@ import { MyLib, getInstance } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
+import { SearchService } from "./search-service";
 import { t } from "./translations/locale-helper";
 import { DataManager } from "./user-data/data-manager";
 import { DataProvider } from "./user-data/data-provider";
 import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
+
+type HybridHealthSummary = {
+	status:
+		| "disabled"
+		| "empty"
+		| "ready"
+		| "bm25_only"
+		| "degraded"
+		| "partial";
+	enabled: boolean;
+	engineReady: boolean;
+	canSearch: boolean;
+	isEmpty: boolean;
+	docRefs: number;
+	readyCount: number;
+	bm25OnlyCount: number;
+	failedCount: number;
+	pendingCount: number;
+	chunkRows: number;
+	snapshotRows: number;
+	vectorShards: number;
+	hasBm25: boolean;
+	hasHnsw: boolean;
+	topErrorKinds: Array<{ kind: string; count: number }>;
+};
 
 @singleton()
 export class SettingManager {
@@ -516,6 +544,16 @@ class HybridSearchModal extends Modal {
 		// ── Weekly token limit ────────────────────────────────────────────────
 		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
 		new Setting(contentEl)
+			.setName(t("hybridModal.healthSummary"))
+			.setDesc(t("hybridModal.healthSummary.localOnly"))
+			.addButton((button) =>
+				button
+					.setButtonText(t("hybridModal.healthSummary.check"))
+					.onClick(async () => {
+						await this.runHybridHealthCheck();
+					}),
+			);
+		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
 			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
 			.addText((text) => {
@@ -705,6 +743,107 @@ class HybridSearchModal extends Modal {
 		await this.loadTokenStats(this.statsEl);
 	}
 
+	private async runHybridHealthCheck() {
+		const summary = await this.getHybridHealthSummary();
+		new MyNotice(this.buildHybridHealthNotice(summary), 12000);
+	}
+
+	private buildHybridHealthNotice(summary: HybridHealthSummary): string {
+		const lines = [
+			t("hybridModal.healthSummary.localOnly"),
+			`${t("hybridModal.healthSummary.status")}: ${t(`hybridModal.healthSummary.state.${summary.status}`)}`,
+			`${t("hybridModal.healthSummary.engine")}: enabled ${this.formatHybridFlag(summary.enabled)} | ready ${this.formatHybridFlag(summary.engineReady)} | canSearch ${this.formatHybridFlag(summary.canSearch)} | empty ${this.formatHybridFlag(summary.isEmpty)}`,
+			`${t("hybridModal.healthSummary.docs")}: total ${summary.docRefs} | ready ${summary.readyCount} | bm25_only ${summary.bm25OnlyCount} | failed ${summary.failedCount} | pending ${summary.pendingCount}`,
+			`${t("hybridModal.healthSummary.storage")}: chunkRows ${summary.chunkRows} | snapshots ${summary.snapshotRows} | vectorShards ${summary.vectorShards} | bm25 ${this.formatHybridFlag(summary.hasBm25)} | hnsw ${this.formatHybridFlag(summary.hasHnsw)}`,
+			summary.topErrorKinds.length > 0
+				? `${t("hybridModal.healthSummary.errors")}: ${summary.topErrorKinds
+					.map((item) => `${item.kind} x${item.count}`)
+					.join(" | ")}`
+				: `${t("hybridModal.healthSummary.errors")}: ${t("hybridModal.noData")}`,
+		];
+		return lines.join("\n");
+	}
+
+	private async getHybridHealthSummary(): Promise<HybridHealthSummary> {
+		const hybridEngine = getInstance(SearchService).hybridEngine;
+		const db = getInstance(Database).db;
+		const [docRefs, chunkRows, snapshotRows, vectorShards, bm25Blob, hnswBlob] =
+			await Promise.all([
+				db.hybridDocRefs.toArray(),
+				db.hybridChunks.count(),
+				db.hybridFileSnapshots.count(),
+				db.hybridChunkVectors.count(),
+				db.hybridBm25Index.get(0),
+				db.hybridHnswSmall.get(0),
+			]);
+
+		const readyCount = docRefs.filter((ref) => ref.state === "ready").length;
+		const bm25OnlyCount = docRefs.filter((ref) => ref.state === "bm25_only").length;
+		const failedCount = docRefs.filter((ref) => ref.state === "failed").length;
+		const pendingCount = docRefs.filter((ref) => ref.state === "pending").length;
+		const topErrorKinds = this.collectTopHybridErrorKinds(docRefs);
+		const hasBm25 = bm25Blob !== undefined;
+		const hasHnsw = hnswBlob !== undefined;
+		const hasAnyLocalHybridData =
+			docRefs.length > 0 ||
+			chunkRows > 0 ||
+			snapshotRows > 0 ||
+			vectorShards > 0 ||
+			hasBm25 ||
+			hasHnsw;
+
+		let status: HybridHealthSummary["status"];
+		if (!hybridEngine.isEnabled()) {
+			status = "disabled";
+		} else if (!hasAnyLocalHybridData) {
+			status = "empty";
+		} else if (failedCount > 0 || pendingCount > 0) {
+			status = "degraded";
+		} else if (readyCount === 0 && bm25OnlyCount > 0) {
+			status = "bm25_only";
+		} else if (readyCount > 0 && hybridEngine.canSearch()) {
+			status = "ready";
+		} else {
+			status = "partial";
+		}
+
+		return {
+			status,
+			enabled: hybridEngine.isEnabled(),
+			engineReady: hybridEngine.isReady(),
+			canSearch: hybridEngine.canSearch(),
+			isEmpty: hybridEngine.isEmpty(),
+			docRefs: docRefs.length,
+			readyCount,
+			bm25OnlyCount,
+			failedCount,
+			pendingCount,
+			chunkRows,
+			snapshotRows,
+			vectorShards,
+			hasBm25,
+			hasHnsw,
+			topErrorKinds,
+		};
+	}
+
+	private collectTopHybridErrorKinds(
+		docRefs: HybridDocRef[],
+	): Array<{ kind: string; count: number }> {
+		const counts = new Map<string, number>();
+		for (const ref of docRefs) {
+			const kind = ref.lastErrorKind?.trim();
+			if (!kind) {
+				continue;
+			}
+			counts.set(kind, (counts.get(kind) ?? 0) + 1);
+		}
+		return Array.from(counts.entries())
+			.sort((left, right) => right[1] - left[1])
+			.slice(0, 3)
+			.map(([kind, count]) => ({ kind, count }));
+	}
+
 	private async loadTokenStats(container: HTMLElement) {
 		const now = new Date();
 		const pad = (n: number) => String(n).padStart(2, "0");
@@ -867,6 +1006,12 @@ class HybridSearchModal extends Modal {
 			return this.stripTrailingZero((value / 1_000).toFixed(1)) + "K";
 		}
 		return value.toString();
+	}
+
+	private formatHybridFlag(value: boolean): string {
+		return value
+			? t("hybridModal.healthSummary.flag.yes")
+			: t("hybridModal.healthSummary.flag.no");
 	}
 
 	private stripTrailingZero(value: string): string {

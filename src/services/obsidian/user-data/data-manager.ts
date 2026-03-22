@@ -1242,6 +1242,13 @@ export class DataManager {
 		const chunkStoreBytes =
 			(bytesByName.get("hybridChunks") ?? 0) +
 			(bytesByName.get("hybridFileSnapshots") ?? 0);
+		const hybridTotalBytes =
+			chunkStoreBytes + vectorShardBytes + bm25Bytes + hnswBytes;
+		const hybridState = !this.setting.hybrid.enabled
+			? "disabled"
+			: hybridTotalBytes > 0
+				? "ready"
+				: "empty";
 		const otherBytes = Math.max(
 			0,
 			storageUsage.totalBytes -
@@ -1265,6 +1272,7 @@ export class DataManager {
 				storageUsage.totalBytes,
 				this.setting.hybrid.vectorCompression,
 				lexicalFileIndexBytes,
+				hybridState,
 				chunkStoreBytes,
 				vectorShardBytes,
 				bm25Bytes,
@@ -1278,6 +1286,11 @@ export class DataManager {
 		console.log(
 			`可索引文件总大小: ${this.formatBytes(indexableBytes)}\n插件本地存储估算: ${this.formatBytes(storageUsage.totalBytes)}`,
 		);
+		if (hybridState === "disabled") {
+			console.log("[clever-search] Hybrid storage: disabled");
+		} else if (hybridState === "empty") {
+			console.log("[clever-search] Hybrid storage: enabled but currently empty");
+		}
 		console.table(
 			storageUsage.tables
 					.map((item) => ({
@@ -1391,6 +1404,7 @@ export class DataManager {
 		totalBytes: number,
 		precision: string,
 		lexicalFileIndexBytes: number,
+		hybridState: "disabled" | "empty" | "ready",
 		chunkStoreBytes: number,
 		vectorShardBytes: number,
 		bm25Bytes: number,
@@ -1403,21 +1417,33 @@ export class DataManager {
 				.startsWith("zh");
 
 		if (isChinese) {
+			const hybridSummary =
+				hybridState === "disabled"
+					? "Hybrid: 未启用"
+					: hybridState === "empty"
+						? "Hybrid: 已启用，但当前无索引数据"
+						: `HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
 			return [
 				`开发模式统计`,
 				`可索引文件总大小: ${this.formatBytes(indexableBytes)}`,
 				`当前向量量化: ${precision}`,
 				`插件本地存储估算: ${this.formatBytes(totalBytes)}`,
-				`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)} | 其他 ${this.formatBytes(otherBytes)}`,
+				`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | ${hybridSummary} | 其他 ${this.formatBytes(otherBytes)}`,
 			].join("\n");
 		}
 
+		const hybridSummary =
+			hybridState === "disabled"
+				? "Hybrid: disabled"
+				: hybridState === "empty"
+					? "Hybrid: enabled but currently empty"
+					: `HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
 		return [
 			`Dev stats`,
 			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
 			`Current vector quantization: ${precision}`,
 			`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
-			`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)} | Other ${this.formatBytes(otherBytes)}`,
+			`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | ${hybridSummary} | Other ${this.formatBytes(otherBytes)}`,
 		].join("\n");
 	}
 
