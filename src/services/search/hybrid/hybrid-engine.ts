@@ -1248,7 +1248,10 @@ export class HybridEngine {
 	): Map<string, (startLine: number) => string> {
 		const builders = new Map<string, (startLine: number) => string>();
 		for (const [filePath, plainText] of snapshotByPath) {
-			const headingOutline = this.dataProvider.getHeadingOutline(filePath);
+			const headingOutline = this.dataProvider.getHeadingOutlineForText(
+				filePath,
+				plainText,
+			);
 			builders.set(
 				filePath,
 				createChunkContextBuilderFromOutline(

@@ -641,7 +641,7 @@ function isLowSignalHeading(title: string): boolean {
 	);
 }
 
-function parseFallbackHeadingOutline(plainText: string): HeadingOutlineEntry[] {
+export function parseTextHeadingOutline(plainText: string): HeadingOutlineEntry[] {
 	const lines = plainText.split("\n");
 	const outline: HeadingOutlineEntry[] = [];
 	let inFence = false;
@@ -798,7 +798,7 @@ export function createChunkContextBuilder(
 	const outline =
 		headingOutline && headingOutline.length > 0
 			? headingOutline
-			: parseFallbackHeadingOutline(plainText);
+			: parseTextHeadingOutline(plainText);
 	return createChunkContextBuilderFromOutline(
 		filePath,
 		lineCount,

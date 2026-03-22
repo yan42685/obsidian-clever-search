@@ -11,6 +11,7 @@ import {
 } from "obsidian";
 import { OuterSetting } from "src/globals/plugin-setting";
 import type { IndexedDocument } from "src/globals/search-types";
+import { parseTextHeadingOutline } from "src/services/search/hybrid/chunker";
 import type { HeadingOutlineEntry } from "src/services/search/hybrid/hybrid-types";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
@@ -169,6 +170,17 @@ export class DataProvider {
 
 		const metadata = this.app.metadataCache.getFileCache(file);
 		return this.parseHeadingOutline(metadata);
+	}
+
+	getHeadingOutlineForText(
+		fileOrPath: TFile | string,
+		plainText: string,
+	): HeadingOutlineEntry[] {
+		const textOutline = parseTextHeadingOutline(plainText);
+		if (textOutline.length > 0) {
+			return textOutline;
+		}
+		return this.getHeadingOutline(fileOrPath);
 	}
 
 	private parseAliases(metadata: CachedMetadata | null): string {

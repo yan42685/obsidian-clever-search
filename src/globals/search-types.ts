@@ -29,6 +29,7 @@ export type BaseIndexedFileRef = {
 	id?: number;
 	path: string;
 	updateTime: number;
+	size?: number;
 };
 
 export type InFileDataSource = {

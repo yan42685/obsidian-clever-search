@@ -1076,7 +1076,7 @@ export class DataManager {
 			const previousIndexedFileRef = previousIndexedFileRefs.get(path);
 			if (!previousIndexedFileRef) {
 				docsToAdd.push(file);
-			} else if (file.stat.mtime > previousIndexedFileRef.updateTime) {
+			} else if (this.hasIndexedFileRefChanged(file, previousIndexedFileRef)) {
 				docsToDelete.push(file.path);
 				docsToAdd.push(file);
 			}
@@ -1096,9 +1096,23 @@ export class DataManager {
 		const updatedIndexedFileRefs = files.map((file) => ({
 			path: file.path,
 			updateTime: file.stat.mtime,
+			size: file.stat.size,
 		}));
 		await this.database.setLexicalIndexedFileRefs(updatedIndexedFileRefs);
 		logger.trace(`${updatedIndexedFileRefs.length} lexical indexed file refs updated`);
+	}
+
+	private hasIndexedFileRefChanged(
+		file: TFile,
+		indexedFileRef: BaseIndexedFileRef,
+	): boolean {
+		if (file.stat.mtime > indexedFileRef.updateTime) {
+			return true;
+		}
+		if (indexedFileRef.size === undefined) {
+			return false;
+		}
+		return file.stat.size !== indexedFileRef.size;
 	}
 
 	private async runHybridRepairTasks(
@@ -1258,7 +1272,7 @@ export class DataManager {
 	): Promise<HybridIndexFailure | null> {
 		const fileIndexStart = Date.now();
 		const text = await this.dataProvider.readPlainText(file.path);
-		const headingOutline = this.dataProvider.getHeadingOutline(file);
+		const headingOutline = this.dataProvider.getHeadingOutlineForText(file, text);
 		let attempts = 0;
 		let lastError: unknown = null;
 		try {
@@ -1341,7 +1355,7 @@ export class DataManager {
 	): Promise<HybridIndexFailure | null> {
 		try {
 			const text = await this.dataProvider.readPlainText(file.path);
-			const headingOutline = this.dataProvider.getHeadingOutline(file);
+			const headingOutline = this.dataProvider.getHeadingOutlineForText(file, text);
 			await this.hybridEngine.indexFileWithoutEmbedding(
 				file.path,
 				text,
