@@ -45,7 +45,6 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		maxResultCount: 10,
 		indexConcurrency: 3,
 		vectorCompression: "int8",
-		fileRankStrategy: "bestPlusSupport",
 		excludedPaths: [],
 	},
 	searchHistory: {
@@ -82,16 +81,10 @@ export type HybridSetting = {
 	maxResultCount: number;
 	indexConcurrency: number;
 	vectorCompression: HybridVectorCompression;
-	fileRankStrategy: HybridFileRankStrategy;
 	excludedPaths: string[];
 };
 
 export type HybridVectorCompression = "int8" | "float16";
-
-export type HybridFileRankStrategy =
-	| "bestChunk"
-	| "bestPlusSupport"
-	| "sumTopChunks";
 
 export type SearchHistoryEntry = {
 	queryText: string;

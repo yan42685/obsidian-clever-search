@@ -4,7 +4,6 @@ import {
 	filterSemanticMatches,
 	mergeHybridRankings,
 	reciprocalRankFuse,
-	scoreFileChunkMatches,
 } from "src/services/search/hybrid/ranking";
 
 describe("hybrid ranking", () => {
@@ -68,15 +67,6 @@ describe("hybrid ranking", () => {
 
 		expect(merged.map((item) => item.id)).toEqual([11, 22]);
 		expect(merged[0]?.score).toBeGreaterThan(merged[1]?.score ?? 0);
-	});
-
-	test("best-plus-support does not overreward many weak chunks", () => {
-		expect(
-			scoreFileChunkMatches([0.88, 0.31, 0.22], "bestPlusSupport"),
-		).toBeGreaterThan(scoreFileChunkMatches([0.88, 0.31, 0.22], "bestChunk"));
-		expect(
-			scoreFileChunkMatches([0.88, 0.31, 0.22], "bestPlusSupport"),
-		).toBeLessThan(scoreFileChunkMatches([0.88, 0.31, 0.22], "sumTopChunks"));
 	});
 
 	test("builds extra semantic query variants for long queries", () => {

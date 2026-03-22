@@ -588,31 +588,6 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		new Setting(contentEl)
-			.setName(t("hybridModal.fileRankStrategy"))
-			.setDesc(t("hybridModal.fileRankStrategy.desc"))
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						bestPlusSupport: t("hybridModal.fileRankStrategy.bestPlusSupport"),
-						bestChunk: t("hybridModal.fileRankStrategy.bestChunk"),
-						sumTopChunks: t("hybridModal.fileRankStrategy.sumTopChunks"),
-					})
-					.setValue(
-						this.setting.hybrid.fileRankStrategy ?? "bestPlusSupport",
-					)
-					.onChange((value) => {
-						if (
-							value === "bestChunk" ||
-							value === "sumTopChunks" ||
-							value === "bestPlusSupport"
-						) {
-							this.setting.hybrid.fileRankStrategy = value;
-							this.settingManager.saveSettings();
-						}
-					}),
-			);
-
 		contentEl.createEl("h3", { text: t("hybridModal.excludedPaths") });
 		this.excludesEl = contentEl.createDiv();
 		this.renderExcludedList(this.excludesEl);

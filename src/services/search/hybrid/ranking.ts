@@ -16,11 +16,6 @@ export type HybridQueryProfile = {
 	queryVariantLimit: number;
 };
 
-export type HybridFileRankStrategy =
-	| "bestChunk"
-	| "bestPlusSupport"
-	| "sumTopChunks";
-
 export type SemanticQueryVariant = {
 	text: string;
 	weight: number;
@@ -219,28 +214,6 @@ export function mergeHybridRankings(
 	}
 
 	return merged.sort((a, b) => b.score - a.score).slice(0, limit);
-}
-
-export function scoreFileChunkMatches(
-	scores: number[],
-	strategy: HybridFileRankStrategy,
-): number {
-	if (scores.length === 0) {
-		return 0;
-	}
-
-	const ranked = [...scores].sort((a, b) => b - a);
-	switch (strategy) {
-		case "bestChunk":
-			return ranked[0];
-		case "sumTopChunks":
-			return ranked.reduce((sum, score) => sum + score, 0);
-		case "bestPlusSupport":
-		default: {
-			const [best = 0, second = 0, third = 0] = ranked;
-			return best + second * 0.35 + third * 0.2;
-		}
-	}
 }
 
 function normalizeBm25Scores(items: RankedResult[]): Map<number, number> {

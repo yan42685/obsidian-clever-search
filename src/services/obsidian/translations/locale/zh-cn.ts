@@ -53,12 +53,6 @@ export default {
 		"选择混合搜索向量的量化与存储方式。Int8 占用更小、搜索更快；Float16 占用更大，但在纯语义匹配时通常更稳定。修改后需要重建 hybrid 索引。",
 	"hybridModal.vectorCompression.int8": "仅 Int8（更小、更快）",
 	"hybridModal.vectorCompression.float16": "仅 Float16（语义召回更稳）",
-	"hybridModal.fileRankStrategy": "文件排序策略",
-	"hybridModal.fileRankStrategy.desc":
-		"同一文件命中多个小块时，如何合并成文件级排序分数。",
-	"hybridModal.fileRankStrategy.bestPlusSupport": "最佳小块 + 辅助支持",
-	"hybridModal.fileRankStrategy.bestChunk": "仅最佳小块",
-	"hybridModal.fileRankStrategy.sumTopChunks": "Top 小块累加",
 	"hybridModal.excludedPaths": "排除路径（混合索引）",
 	"hybridModal.tokenStats": "Token 使用统计",
 	"hybridModal.tokenStats.loading": "正在加载统计...",
