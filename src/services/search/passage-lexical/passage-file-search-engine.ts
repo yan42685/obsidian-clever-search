@@ -11,6 +11,7 @@ import type {
 import {
 	createFileSearchQueryPlanner,
 	type FileSearchQueryPlanner,
+	type FileSearchQueryKind,
 	type FileSearchQueryTermStats,
 } from "../file-search-query-planner";
 import { Tokenizer } from "../tokenizer";
@@ -122,6 +123,21 @@ type PassageUnit = {
 
 type QueryTermWeightMap = Map<number, number>;
 
+type QueryTermDecomposition = {
+	queryKind: FileSearchQueryKind | null;
+	activeTermIndexes: ReadonlySet<number>;
+	anchorTermIndexes: ReadonlySet<number>;
+	bodyTermIndexes: ReadonlySet<number>;
+	noiseTermIndexes: ReadonlySet<number>;
+};
+
+type QueryDecompositionSignals = {
+	bodyEvidenceCoverageRatio: number;
+	anchorSatisfiedRatio: number;
+	metadataOnlyNoiseRatio: number;
+	bodyAnchorSynergyRatio: number;
+};
+
 type MetadataLaneField =
 	| "basename"
 	| "aliases"
@@ -229,6 +245,9 @@ const FILE_PATH_ONLY_ANCHOR_BONUS = 0.66;
 const FILE_BODY_PATH_MIX_BONUS = 0.52;
 const FILE_METADATA_DOMINANT_QUERY_BONUS = 0.7;
 const FILE_PATHLIKE_METADATA_QUERY_BONUS = 1.05;
+const FILE_DECOMPOSITION_BODY_EVIDENCE_BONUS = 0.96;
+const FILE_DECOMPOSITION_BODY_ANCHOR_BONUS = 0.88;
+const FILE_DECOMPOSITION_METADATA_NOISE_PENALTY = 0.92;
 const FILE_SHORT_TITLE_FAST_PATH_EXACT = 7.4;
 const FILE_SHORT_TITLE_FAST_PATH_PREFIX = 5.2;
 const FILE_SHORT_HEADING_FAST_PATH_EXACT = 3.1;
@@ -535,10 +554,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				fileStates,
 			);
 		}
+		const queryTermDecomposition = buildQueryTermDecomposition(
+			termStats,
+			planner,
+		);
 		const queryTermWeights = buildQueryTermWeightMap(
 			termStats,
 			this.pathByFileId.size,
 			planner,
+			queryTermDecomposition,
 		);
 		const totalQueryWeight = getTotalQueryWeight(queryTerms, queryTermWeights);
 		const queryScoringCache = this.createQueryScoringCache();
@@ -578,6 +602,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryRoute,
 				fileStates,
 				queryTermWeights,
+				queryTermDecomposition,
 				totalQueryWeight,
 				queryScriptProfile,
 				queryScoringCache,
@@ -593,6 +618,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					planner,
 					queryRoute,
 					queryTermWeights,
+					queryTermDecomposition,
 					totalQueryWeight,
 					queryScriptProfile,
 					queryScoringCache,
@@ -646,6 +672,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		queryRoute: ExperimentalQueryRoute,
 		fileStates: Map<number, FileCandidateState>,
 		queryTermWeights: QueryTermWeightMap,
+		queryTermDecomposition: QueryTermDecomposition,
 		totalQueryWeight: number,
 		queryScriptProfile: ScriptProfile,
 		queryScoringCache: QueryScoringCache,
@@ -663,6 +690,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						planner,
 						queryRoute,
 						queryTermWeights,
+						queryTermDecomposition,
 						totalQueryWeight,
 						queryScriptProfile,
 						queryScoringCache,
@@ -678,6 +706,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						planner,
 						queryRoute,
 						queryTermWeights,
+						queryTermDecomposition,
 						totalQueryWeight,
 						queryScriptProfile,
 						queryScoringCache,
@@ -714,6 +743,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					planner,
 					queryRoute,
 					queryTermWeights,
+					queryTermDecomposition,
 					totalQueryWeight,
 					queryScriptProfile,
 					queryScoringCache,
@@ -1466,6 +1496,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		planner: FileSearchQueryPlanner | null,
 		queryRoute: ExperimentalQueryRoute,
 		queryTermWeights: QueryTermWeightMap,
+		queryTermDecomposition: QueryTermDecomposition,
 		totalQueryWeight: number,
 		queryScriptProfile: ScriptProfile,
 		queryScoringCache: QueryScoringCache,
@@ -1619,6 +1650,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			basenameAliasAnchorWeight / totalQueryWeight;
 		const headingAnchorRatio = headingAnchorWeight / totalQueryWeight;
 		const pathAnchorRatio = pathAnchorWeight / totalQueryWeight;
+		const queryDecompositionSignals = this.computeQueryDecompositionSignals({
+			state,
+			contentMatches,
+			queryTermWeights,
+			queryTermDecomposition,
+		});
 		const bodyMetadataBlendBonus =
 			state.bestPassageScore > 0 && metadataAnchorWeight > 0
 				? metadataAnchorRatio *
@@ -1677,6 +1714,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					? FILE_PATHLIKE_METADATA_QUERY_BONUS * metadataCoverageRatio
 					: FILE_METADATA_DOMINANT_QUERY_BONUS * metadataCoverageRatio
 				: 0;
+		const decompositionBodyBonus =
+			queryDecompositionSignals.bodyEvidenceCoverageRatio *
+			FILE_DECOMPOSITION_BODY_EVIDENCE_BONUS;
+		const decompositionBodyAnchorBonus =
+			queryDecompositionSignals.bodyAnchorSynergyRatio *
+			FILE_DECOMPOSITION_BODY_ANCHOR_BONUS;
+		const decompositionMetadataNoisePenalty =
+			queryDecompositionSignals.metadataOnlyNoiseRatio *
+			FILE_DECOMPOSITION_METADATA_NOISE_PENALTY;
 		const baseScore =
 			state.bestPassageScore +
 			state.secondPassageScore * FILE_SECOND_PASSAGE_DECAY +
@@ -1689,6 +1735,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			titleHeadingBlendBonus +
 			pathBlendBonus +
 			metadataDominantBonus +
+			decompositionBodyBonus +
+			decompositionBodyAnchorBonus -
+			decompositionMetadataNoisePenalty +
 			Math.min(0.55, state.charHits * FILE_CHAR_HIT_BONUS);
 		const shortTitleFastPathScore = this.computeShortTitleFastPathScore({
 			planner,
@@ -1735,6 +1784,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			metadataCoreScore,
 			mixedEvidenceScore,
 			contentCoverageRatio,
+			bodyEvidenceCoverageRatio:
+				queryDecompositionSignals.bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio:
+				queryDecompositionSignals.anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio:
+				queryDecompositionSignals.metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio:
+				queryDecompositionSignals.bodyAnchorSynergyRatio,
 			basenameAliasExactRatio,
 			basenameAliasExpandedRatio,
 			basenameAliasCoverageRatio,
@@ -1782,6 +1839,64 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			headingAnchorRatio,
 			pathCoverageRatio,
 			pathAnchorRatio,
+		};
+	}
+
+	private computeQueryDecompositionSignals(params: {
+		state: FileCandidateState;
+		contentMatches: ReadonlySet<number>;
+		queryTermWeights: QueryTermWeightMap;
+		queryTermDecomposition: QueryTermDecomposition;
+	}): QueryDecompositionSignals {
+		const { state, contentMatches, queryTermWeights, queryTermDecomposition } = params;
+		const bodyWeight = getSetWeight(
+			queryTermDecomposition.bodyTermIndexes,
+			queryTermWeights,
+		);
+		const anchorWeight = getSetWeight(
+			queryTermDecomposition.anchorTermIndexes,
+			queryTermWeights,
+		);
+		const noiseWeight = getSetWeight(
+			queryTermDecomposition.noiseTermIndexes,
+			queryTermWeights,
+		);
+		const bodyContentWeight = getOverlapWeight(
+			contentMatches,
+			queryTermDecomposition.bodyTermIndexes,
+			queryTermWeights,
+		);
+		const anchorMatchedWeight = getOverlapWeight(
+			state.matchedQueryTerms,
+			queryTermDecomposition.anchorTermIndexes,
+			queryTermWeights,
+		);
+		const metadataOnlyMatches = new Set<number>();
+		for (const queryTermIndex of state.matchedMetadataQueryTerms) {
+			if (!contentMatches.has(queryTermIndex)) {
+				metadataOnlyMatches.add(queryTermIndex);
+			}
+		}
+		const metadataOnlyNoiseWeight = getOverlapWeight(
+			metadataOnlyMatches,
+			queryTermDecomposition.noiseTermIndexes,
+			queryTermWeights,
+		);
+		const bodyEvidenceCoverageRatio =
+			bodyWeight > 0 ? bodyContentWeight / bodyWeight : 0;
+		const anchorSatisfiedRatio =
+			anchorWeight > 0 ? anchorMatchedWeight / anchorWeight : 0;
+		const metadataOnlyNoiseRatio =
+			noiseWeight > 0 ? metadataOnlyNoiseWeight / noiseWeight : 0;
+		const bodyAnchorSynergyRatio =
+			bodyWeight > 0 && anchorWeight > 0
+				? bodyEvidenceCoverageRatio * anchorSatisfiedRatio
+				: 0;
+		return {
+			bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio,
 		};
 	}
 
@@ -1920,6 +2035,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		metadataCoreScore: number;
 		mixedEvidenceScore: number;
 		contentCoverageRatio: number;
+		bodyEvidenceCoverageRatio: number;
+		anchorSatisfiedRatio: number;
+		metadataOnlyNoiseRatio: number;
+		bodyAnchorSynergyRatio: number;
 		basenameAliasExactRatio: number;
 		basenameAliasExpandedRatio: number;
 		basenameAliasCoverageRatio: number;
@@ -1952,6 +2071,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			metadataCoreScore,
 			mixedEvidenceScore,
 			contentCoverageRatio,
+			bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio,
 			basenameAliasExactRatio,
 			basenameAliasExpandedRatio,
 			basenameAliasCoverageRatio,
@@ -1994,6 +2117,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			bodyCoreScore * 1.4 +
 			mixedEvidenceScore * 0.88 +
 			contentCoverageRatio * 7.6 +
+			bodyEvidenceCoverageRatio * 5.4 +
+			anchorSatisfiedRatio * 1.3 +
+			bodyAnchorSynergyRatio * 4.6 -
+			metadataOnlyNoiseRatio * 3.4 +
 			passageBestCoverageRatio * 5.2 +
 			passageCorroboratedCoverageRatio * 2.6 +
 			passageWindowCoverageRatio * 3.8 +
@@ -2044,6 +2171,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					bodyCoreScore * 1.18 +
 					mixedEvidenceScore * 1.5 +
 					contentCoverageRatio * 6.5 +
+					bodyEvidenceCoverageRatio * 4.4 +
+					bodyAnchorSynergyRatio * 5 +
+					anchorSatisfiedRatio * 1.2 -
+					metadataOnlyNoiseRatio * 3.2 +
 					titleAnchorEvidence * 11.4 +
 					titleHeadingCoverageRatio * 2.5 +
 					titleOnlyCoverageRatio * 1.8 +
@@ -2062,6 +2193,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					bodyCoreScore * 1.22 +
 					mixedEvidenceScore * 1.28 +
 					contentCoverageRatio * 6.8 +
+					bodyEvidenceCoverageRatio * 3.8 +
+					bodyAnchorSynergyRatio * 4.2 +
+					anchorSatisfiedRatio * 1.1 -
+					metadataOnlyNoiseRatio * 2.8 +
 					pathAnchorEvidence * 10.2 +
 					titleHeadingAnchorRatio * 2.5 +
 					passageBestCoverageRatio * 1.7 +
@@ -3643,10 +3778,93 @@ function getSetDifferenceWeight(
 	return total;
 }
 
+function buildQueryTermDecomposition(
+	termStats: readonly FileSearchQueryTermStats[],
+	planner: FileSearchQueryPlanner | null,
+): QueryTermDecomposition {
+	const activeStats = termStats.filter((stat) => stat.hasAnyMatch);
+	const activeTermIndexes = new Set(activeStats.map((stat) => stat.index));
+	if (!planner) {
+		return {
+			queryKind: null,
+			activeTermIndexes,
+			anchorTermIndexes: new Set<number>(),
+			bodyTermIndexes: new Set(activeTermIndexes),
+			noiseTermIndexes: new Set<number>(),
+		};
+	}
+
+	const anchorTermIndexes = new Set<number>();
+	for (const stat of activeStats) {
+		if (planner.anchorTermIndexes.has(stat.index)) {
+			anchorTermIndexes.add(stat.index);
+		}
+	}
+
+	const noiseTermIndexes = new Set<number>();
+	if (planner.queryKind !== "short_anchor") {
+		for (const stat of activeStats) {
+			if (
+				planner.optionalTermIndexes.has(stat.index) &&
+				!anchorTermIndexes.has(stat.index)
+			) {
+				noiseTermIndexes.add(stat.index);
+			}
+		}
+	}
+
+	const bodyTermIndexes = new Set<number>();
+	for (const stat of activeStats) {
+		if (
+			!anchorTermIndexes.has(stat.index) &&
+			!noiseTermIndexes.has(stat.index)
+		) {
+			bodyTermIndexes.add(stat.index);
+		}
+	}
+
+	if (bodyTermIndexes.size === 0 && planner.queryKind !== "short_anchor") {
+		const fallbackBodyStat = activeStats
+			.filter((stat) => !anchorTermIndexes.has(stat.index))
+			.sort((left, right) => {
+				const leftBodyBias =
+					left.matchedDocCount - left.matchedMetadataDocCount;
+				const rightBodyBias =
+					right.matchedDocCount - right.matchedMetadataDocCount;
+				if (leftBodyBias !== rightBodyBias) {
+					return rightBodyBias - leftBodyBias;
+				}
+				if (left.hasExactMatch !== right.hasExactMatch) {
+					return left.hasExactMatch ? -1 : 1;
+				}
+				if (left.matchedDocCount !== right.matchedDocCount) {
+					return left.matchedDocCount - right.matchedDocCount;
+				}
+				if (left.queryTerm.length !== right.queryTerm.length) {
+					return right.queryTerm.length - left.queryTerm.length;
+				}
+				return left.index - right.index;
+			})[0];
+		if (fallbackBodyStat) {
+			bodyTermIndexes.add(fallbackBodyStat.index);
+			noiseTermIndexes.delete(fallbackBodyStat.index);
+		}
+	}
+
+	return {
+		queryKind: planner.queryKind,
+		activeTermIndexes,
+		anchorTermIndexes,
+		bodyTermIndexes,
+		noiseTermIndexes,
+	};
+}
+
 function buildQueryTermWeightMap(
 	termStats: readonly FileSearchQueryTermStats[],
 	docCount: number,
 	planner: FileSearchQueryPlanner | null,
+	queryTermDecomposition: QueryTermDecomposition,
 ): QueryTermWeightMap {
 	const weights = new Map<number, number>();
 	for (const stat of termStats) {
@@ -3655,8 +3873,27 @@ function buildQueryTermWeightMap(
 				? Math.log((docCount + 1) / (stat.matchedDocCount + 1)) + 1
 				: 0;
 		const anchorBoost =
-			planner?.anchorTermIndexes.has(stat.index) ? 0.35 : 0;
-		weights.set(stat.index, baseWeight + anchorBoost);
+			planner?.anchorTermIndexes.has(stat.index)
+				? queryTermDecomposition.queryKind === "short_anchor"
+					? 0.42
+					: 0.3
+				: 0;
+		const bodyBoost =
+			queryTermDecomposition.bodyTermIndexes.has(stat.index) &&
+			queryTermDecomposition.queryKind !== "short_anchor"
+				? queryTermDecomposition.queryKind === "sentence_like"
+					? 0.24
+					: 0.16
+				: 0;
+		const noisePenalty = queryTermDecomposition.noiseTermIndexes.has(stat.index)
+			? queryTermDecomposition.queryKind === "path_like"
+				? 0.1
+				: 0.18
+			: 0;
+		weights.set(
+			stat.index,
+			Math.max(0, baseWeight + anchorBoost + bodyBoost - noisePenalty),
+		);
 	}
 	return weights;
 }

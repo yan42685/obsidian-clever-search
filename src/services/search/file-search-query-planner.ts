@@ -41,6 +41,7 @@ export type FileSearchQueryPlanner = {
 	strictTermCount: number;
 	activeTermCount: number;
 	anchorTermIndexes: ReadonlySet<number>;
+	optionalTermIndexes: ReadonlySet<number>;
 	relaxedMinimumMatchCount: number;
 	shouldUseRelaxedResults(strictResultCount: number, maxItemResults: number): boolean;
 	matches(docState: FileSearchPlannerDocState, mode: FileSearchPlannerMode): boolean;
@@ -100,6 +101,7 @@ export function createFileSearchQueryPlanner(params: {
 		strictTermCount,
 		activeTermCount,
 		anchorTermIndexes,
+		optionalTermIndexes,
 		relaxedMinimumMatchCount,
 		shouldUseRelaxedResults(strictResultCount, maxItemResults) {
 			if (
