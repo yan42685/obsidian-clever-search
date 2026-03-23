@@ -13,6 +13,7 @@ import { SearchType } from "src/globals/search-types";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import type CleverSearch from "src/main";
 import { FloatingWindowManager } from "src/ui/floating-window";
+import { QuickSwitchModal } from "src/ui/quick-switch-modal";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
@@ -71,6 +72,12 @@ export class CommandRegistry {
 					new SearchModal(this.app, SearchType.IN_FILE).open();
 				}
 			},
+		});
+
+		this.addCommand({
+			id: "cs-quickswitch",
+			name: "QuickSwitch",
+			callback: () => new QuickSwitchModal(this.app).open(),
 		});
 
 		this.addCommand({

@@ -1,20 +1,8 @@
-<script context="module" lang="ts">
-	export type PassageSearchHit = {
-		id?: string | number;
-		path: string;
-		title?: string;
-		heading?: string;
-		snippet: string;
-		score?: number;
-		line?: number;
-		column?: number;
-	};
-</script>
-
 <script lang="ts">
+	import { createEventDispatcher } from "svelte";
 	import type { SearchHistoryInput } from "./SearchHistoryInput.svelte";
 	import SearchHistoryInputView from "./SearchHistoryInput.svelte";
-	import { createEventDispatcher } from "svelte";
+	import type { PassageSearchHit } from "./passage-search-types";
 
 	export let queryText = "";
 	export let placeholder = "";
@@ -22,7 +10,7 @@
 	export let selectedResultIndex = -1;
 	export let isSearching = false;
 	export let emptyStateText = "No matched passages";
-	export let loadingText = "Searching…";
+	export let loadingText = "Searching...";
 	export let resultCountText = "";
 
 	const dispatch = createEventDispatcher<{
@@ -30,6 +18,7 @@
 		submit: { queryText: string };
 		selectresult: { hit: PassageSearchHit; index: number };
 		hoverresult: { hit: PassageSearchHit; index: number };
+		moveresult: { direction: "next" | "prev" };
 	}>();
 
 	let historyInputRef: SearchHistoryInput | null = null;
@@ -49,11 +38,8 @@
 		return segments[segments.length - 1] ?? normalized;
 	}
 
-	function getMetaText(hit: PassageSearchHit): string {
-		const parts: string[] = [];
-		if (hit.heading?.trim()) {
-			parts.push(hit.heading);
-		}
+	function getPathText(hit: PassageSearchHit): string {
+		const parts: string[] = [hit.path];
 		if (typeof hit.line === "number" && hit.line > 0) {
 			const lineLabel =
 				typeof hit.column === "number" && hit.column > 0
@@ -62,6 +48,11 @@
 			parts.push(lineLabel);
 		}
 		return parts.join(" · ");
+	}
+
+	function getSnippetText(hit: PassageSearchHit): string {
+		const headingPrefix = hit.heading?.trim() ? `${hit.heading} — ` : "";
+		return `${headingPrefix}${hit.snippet}`;
 	}
 
 	function formatScore(score: number | undefined): string {
@@ -103,7 +94,11 @@
 			if (moved) {
 				event.preventDefault();
 				event.stopPropagation();
+				return;
 			}
+			event.preventDefault();
+			event.stopPropagation();
+			dispatch("moveresult", { direction: isPrev ? "prev" : "next" });
 			return;
 		}
 
@@ -163,11 +158,8 @@
 									<span class="passage-result-score">{formatScore(hit.score)}</span>
 								{/if}
 							</div>
-							<div class="passage-result-path">{hit.path}</div>
-							{#if getMetaText(hit)}
-								<div class="passage-result-meta">{getMetaText(hit)}</div>
-							{/if}
-							<div class="passage-result-snippet">{hit.snippet}</div>
+							<div class="passage-result-path">{getPathText(hit)}</div>
+							<div class="passage-result-snippet">{getSnippetText(hit)}</div>
 						</button>
 					</li>
 				{/each}
@@ -278,8 +270,7 @@
 		color: var(--text-muted);
 	}
 
-	.passage-result-path,
-	.passage-result-meta {
+	.passage-result-path {
 		font-size: 0.79rem;
 		line-height: 1.35;
 		color: var(--text-muted);
