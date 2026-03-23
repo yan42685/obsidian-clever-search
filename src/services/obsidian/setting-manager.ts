@@ -24,8 +24,6 @@ import {
 	getTopTokenFiles,
 	getTotalTokens,
 } from "src/services/search/hybrid/embedder";
-import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
-import { Database } from "src/services/database/database";
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
@@ -34,7 +32,6 @@ import { AssetsProvider } from "src/utils/web/assets-provider";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
-import { SearchService } from "./search-service";
 import { t } from "./translations/locale-helper";
 import {
 	DataManager,
@@ -44,31 +41,6 @@ import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-
 import { DataProvider } from "./user-data/data-provider";
 import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
-
-type HybridHealthSummary = {
-	status:
-		| "disabled"
-		| "empty"
-		| "ready"
-		| "bm25_only"
-		| "degraded"
-		| "partial";
-	enabled: boolean;
-	engineReady: boolean;
-	canSearch: boolean;
-	isEmpty: boolean;
-	indexedFileRefs: number;
-	readyCount: number;
-	bm25OnlyCount: number;
-	failedCount: number;
-	pendingCount: number;
-	chunkRows: number;
-	snapshotRows: number;
-	vectorShards: number;
-	hasBm25: boolean;
-	hasHnsw: boolean;
-	topErrorKinds: Array<{ kind: string; count: number }>;
-};
 
 type PendingRefreshState = {
 	reloadAssets: boolean;
@@ -588,14 +560,10 @@ class HybridSearchModal extends Modal {
 	private inputEl: HTMLInputElement;
 	private suggester: CommonSuggester;
 	private weeklyLimitInputEl: HTMLInputElement;
-	private indexConcurrencyInputEl: HTMLInputElement;
-	private minIncrementalEmbedIntervalInputEl: HTMLInputElement;
-	private failedEmbeddingRetryIntervalInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
 	private failedEmbeddingStatusEl: HTMLElement;
 	private deferredEmbeddingStatusEl: HTMLElement;
 	private statsEl: HTMLElement;
-	private hybridHealthNotice: MyNotice | null = null;
 	private openedApiDomain = "";
 	private openedApiKey = "";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
@@ -693,16 +661,6 @@ class HybridSearchModal extends Modal {
 		// ── Weekly token limit ────────────────────────────────────────────────
 		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
 		new Setting(contentEl)
-			.setName(t("hybridModal.healthSummary"))
-			.setDesc(t("hybridModal.healthSummary.localOnly"))
-			.addButton((button) =>
-				button
-					.setButtonText(t("hybridModal.healthSummary.check"))
-					.onClick(async () => {
-						await this.runHybridHealthCheck();
-					}),
-			);
-		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
 			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
 			.addText((text) => {
@@ -728,76 +686,52 @@ class HybridSearchModal extends Modal {
 			.setDesc(t("hybridModal.maxResultCount.desc"))
 			.addSlider((slider) =>
 				slider
-					.setLimits(1, 50, 1)
+					.setLimits(1, 30, 1)
 					.setValue(this.setting.hybrid.maxResultCount ?? 10)
 					.setDynamicTooltip()
-					.onChange((value) => {
+					.onChange(async (value) => {
 						this.setting.hybrid.maxResultCount = value;
-						this.settingManager.saveSettings();
+						await this.settingManager.saveSettings();
 					}),
-			);
-
-
-		new Setting(contentEl)
-			.setName(t("hybridModal.indexConcurrency"))
-			.setDesc(t("hybridModal.indexConcurrency.desc"))
-			.addText((text) => {
-				this.indexConcurrencyInputEl = text.inputEl;
-				text
-					.setPlaceholder("3")
-					.setValue(String(this.setting.hybrid.indexConcurrency ?? 3));
-				text.inputEl.type = "number";
-				text.inputEl.min = "1";
-				text.inputEl.max = "8";
-				text.inputEl.step = "1";
-			})
-			.addButton((button) =>
-				button.setButtonText(t("Update")).onClick(async () => {
-					await this.updateIndexConcurrency();
-				}),
 			);
 
 		// ── Excluded paths ────────────────────────────────────────────────────
 		new Setting(contentEl)
 			.setName(t("hybridModal.minIncrementalEmbedInterval"))
 			.setDesc(t("hybridModal.minIncrementalEmbedInterval.desc"))
-			.addText((text) => {
-				this.minIncrementalEmbedIntervalInputEl = text.inputEl;
-				text
-					.setPlaceholder("60")
+			.addSlider((slider) =>
+				slider
+					.setLimits(1, 60, 1)
 					.setValue(
-						String(this.setting.hybrid.minIncrementalEmbedIntervalSec ?? 60),
-					);
-				text.inputEl.type = "number";
-				text.inputEl.min = "0";
-				text.inputEl.step = "1";
-			})
-			.addButton((button) =>
-				button.setButtonText(t("Update")).onClick(async () => {
-					await this.updateMinIncrementalEmbedInterval();
-				}),
+						Math.max(
+							1,
+							Math.round(
+								(this.setting.hybrid.minIncrementalEmbedIntervalSec ??
+									180) / 60,
+							),
+						),
+					)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.setting.hybrid.minIncrementalEmbedIntervalSec = value * 60;
+						await this.settingManager.saveSettings();
+					}),
 			);
 
 		new Setting(contentEl)
 			.setName(t("hybridModal.failedEmbeddingRetryInterval"))
 			.setDesc(t("hybridModal.failedEmbeddingRetryInterval.desc"))
-			.addText((text) => {
-				this.failedEmbeddingRetryIntervalInputEl = text.inputEl;
-				text
-					.setPlaceholder("10")
-					.setValue(
-						String(
-							this.setting.hybrid.failedEmbeddingRetryIntervalMin ?? 10,
-						),
-					);
-				text.inputEl.type = "number";
-				text.inputEl.min = "1";
-				text.inputEl.step = "1";
-			})
-			.addButton((button) =>
-				button.setButtonText(t("Update")).onClick(async () => {
-					await this.updateFailedEmbeddingRetryInterval();
-				}),
+			.addSlider((slider) =>
+				slider
+					.setLimits(5, 60, 1)
+					.setValue(this.setting.hybrid.failedEmbeddingRetryIntervalMin ?? 10)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.setting.hybrid.failedEmbeddingRetryIntervalMin = value;
+						await this.settingManager.saveSettings();
+						getInstance(DataManager).refreshFailedEmbeddingRetrySchedule();
+						await this.refreshHybridRuntimeStatusFromData();
+					}),
 			);
 		this.failedEmbeddingStatusEl = contentEl.createDiv();
 		this.failedEmbeddingStatusEl.style.margin = "0.35em 0 1em 0";
@@ -953,38 +887,6 @@ class HybridSearchModal extends Modal {
 		await this.refreshTokenStats();
 	}
 
-	private async updateIndexConcurrency() {
-		const parsed = parseInt(this.indexConcurrencyInputEl.value, 10);
-		const nextValue =
-			Number.isNaN(parsed) || parsed < 1 ? 3 : Math.min(parsed, 8);
-		this.setting.hybrid.indexConcurrency = nextValue;
-		this.indexConcurrencyInputEl.value = String(nextValue);
-		await this.settingManager.saveSettings();
-	}
-
-	private async updateMinIncrementalEmbedInterval() {
-		const parsed = parseInt(this.minIncrementalEmbedIntervalInputEl.value, 10);
-		const nextValue =
-			Number.isNaN(parsed) || parsed < 0 ? 60 : Math.min(parsed, 3600);
-		this.setting.hybrid.minIncrementalEmbedIntervalSec = nextValue;
-		this.minIncrementalEmbedIntervalInputEl.value = String(nextValue);
-		await this.settingManager.saveSettings();
-	}
-
-	private async updateFailedEmbeddingRetryInterval() {
-		const parsed = parseInt(
-			this.failedEmbeddingRetryIntervalInputEl.value,
-			10,
-		);
-		const nextValue =
-			Number.isNaN(parsed) || parsed < 1 ? 10 : Math.min(parsed, 24 * 60);
-		this.setting.hybrid.failedEmbeddingRetryIntervalMin = nextValue;
-		this.failedEmbeddingRetryIntervalInputEl.value = String(nextValue);
-		await this.settingManager.saveSettings();
-		getInstance(DataManager).refreshFailedEmbeddingRetrySchedule();
-		await this.refreshHybridRuntimeStatusFromData();
-	}
-
 	private async refreshTokenStats() {
 		await this.loadTokenStats(this.statsEl);
 	}
@@ -1008,112 +910,6 @@ class HybridSearchModal extends Modal {
 		}
 	}
 
-	private async runHybridHealthCheck() {
-		const summary = await this.getHybridHealthSummary();
-		const message = this.buildHybridHealthNotice(summary);
-		if (this.hybridHealthNotice?.noticeEl?.isConnected) {
-			this.hybridHealthNotice.setText(message);
-			return;
-		}
-		this.hybridHealthNotice = new MyNotice(message, 0);
-	}
-
-	private buildHybridHealthNotice(summary: HybridHealthSummary): string {
-		const lines = [
-			t("hybridModal.healthSummary.localOnly"),
-			`${t("hybridModal.healthSummary.status")}: ${t(`hybridModal.healthSummary.state.${summary.status}`)}`,
-			`${t("hybridModal.healthSummary.engine")}: enabled ${this.formatHybridFlag(summary.enabled)} | ready ${this.formatHybridFlag(summary.engineReady)} | canSearch ${this.formatHybridFlag(summary.canSearch)} | empty ${this.formatHybridFlag(summary.isEmpty)}`,
-			`${t("hybridModal.healthSummary.docs")}: total ${summary.indexedFileRefs} | ready ${summary.readyCount} | bm25_only ${summary.bm25OnlyCount} | failed ${summary.failedCount} | pending ${summary.pendingCount}`,
-			`${t("hybridModal.healthSummary.storage")}: chunkRows ${summary.chunkRows} | snapshots ${summary.snapshotRows} | vectorShards ${summary.vectorShards} | bm25 ${this.formatHybridFlag(summary.hasBm25)} | hnsw ${this.formatHybridFlag(summary.hasHnsw)}`,
-			summary.topErrorKinds.length > 0
-				? `${t("hybridModal.healthSummary.errors")}: ${summary.topErrorKinds
-					.map((item) => `${item.kind} x${item.count}`)
-					.join(" | ")}`
-				: `${t("hybridModal.healthSummary.errors")}: ${t("hybridModal.noData")}`,
-		];
-		return lines.join("\n");
-	}
-
-	private async getHybridHealthSummary(): Promise<HybridHealthSummary> {
-		const hybridEngine = getInstance(SearchService).hybridEngine;
-		const db = getInstance(Database).db;
-		const [indexedFileRefs, chunkRows, snapshotRows, vectorShards, bm25Blob, hnswBlob] =
-			await Promise.all([
-				db.hybridIndexedFileRefs.toArray(),
-				db.hybridChunks.count(),
-				db.hybridFileSnapshots.count(),
-				db.hybridChunkVectors.count(),
-				db.hybridBm25Index.get(0),
-				db.hybridHnswSmall.get(0),
-			]);
-
-		const readyCount = indexedFileRefs.filter((ref) => ref.state === "ready").length;
-		const bm25OnlyCount = indexedFileRefs.filter((ref) => ref.state === "bm25_only").length;
-		const failedCount = indexedFileRefs.filter((ref) => ref.state === "failed").length;
-		const pendingCount = indexedFileRefs.filter((ref) => ref.state === "pending").length;
-		const topErrorKinds = this.collectTopHybridErrorKinds(indexedFileRefs);
-		const hasBm25 = bm25Blob !== undefined;
-		const hasHnsw = hnswBlob !== undefined;
-		const hasAnyLocalHybridData =
-			indexedFileRefs.length > 0 ||
-			chunkRows > 0 ||
-			snapshotRows > 0 ||
-			vectorShards > 0 ||
-			hasBm25 ||
-			hasHnsw;
-
-		let status: HybridHealthSummary["status"];
-		if (!hybridEngine.isEnabled()) {
-			status = "disabled";
-		} else if (!hasAnyLocalHybridData) {
-			status = "empty";
-		} else if (failedCount > 0 || pendingCount > 0) {
-			status = "degraded";
-		} else if (readyCount === 0 && bm25OnlyCount > 0) {
-			status = "bm25_only";
-		} else if (readyCount > 0 && hybridEngine.canSearch()) {
-			status = "ready";
-		} else {
-			status = "partial";
-		}
-
-		return {
-			status,
-			enabled: hybridEngine.isEnabled(),
-			engineReady: hybridEngine.isReady(),
-			canSearch: hybridEngine.canSearch(),
-			isEmpty: hybridEngine.isEmpty(),
-			indexedFileRefs: indexedFileRefs.length,
-			readyCount,
-			bm25OnlyCount,
-			failedCount,
-			pendingCount,
-			chunkRows,
-			snapshotRows,
-			vectorShards,
-			hasBm25,
-			hasHnsw,
-			topErrorKinds,
-		};
-	}
-
-	private collectTopHybridErrorKinds(
-		indexedFileRefs: HybridIndexedFileRef[],
-	): Array<{ kind: string; count: number }> {
-		const counts = new Map<string, number>();
-		for (const ref of indexedFileRefs) {
-			const kind = ref.lastErrorKind?.trim();
-			if (!kind) {
-				continue;
-			}
-			counts.set(kind, (counts.get(kind) ?? 0) + 1);
-		}
-		return Array.from(counts.entries())
-			.sort((left, right) => right[1] - left[1])
-			.slice(0, 3)
-			.map(([kind, count]) => ({ kind, count }));
-	}
-
 	private renderFailedEmbeddingStatus(
 		summary: HybridFailedEmbeddingSummary,
 	) {
@@ -1121,7 +917,7 @@ class HybridSearchModal extends Modal {
 		this.failedEmbeddingStatusEl.createEl("p", {
 			text:
 				`${t("hybridModal.failedEmbeddingStatus.summary")}: ` +
-				`${summary.failedCount} / ${summary.totalFiles}`,
+				`${summary.failedCount}`,
 		});
 
 		if (summary.failedCount === 0) {
@@ -1163,7 +959,7 @@ class HybridSearchModal extends Modal {
 		this.deferredEmbeddingStatusEl.createEl("p", {
 			text:
 				`${t("hybridModal.deferredEmbeddingStatus.summary")}: ` +
-				`${summary.deferredCount} / ${summary.totalFiles}`,
+				`${summary.deferredCount}`,
 		});
 		if (summary.deferredCount === 0) {
 			this.deferredEmbeddingStatusEl.createEl("p", {
@@ -1354,12 +1150,6 @@ class HybridSearchModal extends Modal {
 			return this.stripTrailingZero((value / 1_000).toFixed(1)) + "K";
 		}
 		return value.toString();
-	}
-
-	private formatHybridFlag(value: boolean): string {
-		return value
-			? t("hybridModal.healthSummary.flag.yes")
-			: t("hybridModal.healthSummary.flag.no");
 	}
 
 	private formatRelativeTime(targetAt: number): string {

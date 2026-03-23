@@ -44,7 +44,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		weeklyTokenLimit: 3000000,
 		maxResultCount: 10,
 		indexConcurrency: 3,
-		minIncrementalEmbedIntervalSec: 60,
+		minIncrementalEmbedIntervalSec: 180,
 		failedEmbeddingRetryIntervalMin: 10,
 		vectorCompression: "int8",
 		excludedPaths: [],
