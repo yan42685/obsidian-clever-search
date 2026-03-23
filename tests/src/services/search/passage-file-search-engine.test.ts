@@ -212,6 +212,83 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
+	test("prefers a decisive core witness span over broader noisy overlap", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/incidents/checkpoint-replay.md",
+				basename: "checkpoint replay incident",
+				folder: "notes incidents",
+				content: [
+					"checkpoint replay caused rerank drift during recovery after a stale warm start survived pruning",
+					buildFillerParagraph(41),
+					"operators tracked latency during the same recovery window",
+				].join("\n\n"),
+			},
+			{
+				path: "notes/ops/recovery-notes.md",
+				basename: "recovery notes",
+				folder: "notes ops",
+				content: [
+					"recovery notes mention recovery and drift and property cleanup for operators",
+					"another paragraph mentions checkpoint metadata and replay tooling separately from rerank details",
+					"property cleanup repeats drift reminders without the checkpoint replay incident explanation",
+				].join("\n\n"),
+			},
+		]);
+
+		const results = (await engine.searchFiles({
+			queryText: "checkpoint replay rerank drift notes",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		})) as Array<any>;
+
+		expect(results[0]?.path).toBe("notes/incidents/checkpoint-replay.md");
+		expect(results[0]?.coreWitnessScore).toBeGreaterThan(
+			results[1]?.coreWitnessScore ?? 0,
+		);
+	});
+
+	test("prefers the sibling whose topic markers corroborate the core witness", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/concepts/configuration/configmap.md",
+				basename: "configmap",
+				folder: "docs concepts configuration",
+				content:
+					"configmap stores non confidential pod data and mounted configuration files for workloads",
+			},
+			{
+				path: "docs/concepts/configuration/secret.md",
+				basename: "secret",
+				folder: "docs concepts configuration",
+				content:
+					"secret stores sensitive pod data and credentials for workloads and access control",
+			},
+			{
+				path: "docs/ops/configuration-overview.md",
+				basename: "configuration overview",
+				folder: "docs ops",
+				content:
+					"configuration overview mentions configmap secret pod and data repeatedly without resolving which concept is the focus",
+			},
+		]);
+
+		const results = (await engine.searchFiles({
+			queryText: "secret pod data",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		})) as Array<any>;
+
+		expect(results[0]?.path).toBe("docs/concepts/configuration/secret.md");
+		expect(results[0]?.queryRouteScore).toBeGreaterThan(
+			results[1]?.queryRouteScore ?? 0,
+		);
+	});
+
 	test("keeps path-like metadata queries viable", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
@@ -1182,6 +1259,88 @@ describe("PassageFileSearchEngine", () => {
 
 		expect(results[0]?.path).toBe(
 			"tech-en/content/en/docs/concepts/configuration/secret.md",
+		);
+	});
+
+	test("keeps service first for service pod traffic across the full concept set", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/controllers/deployment.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "service pod traffic",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/services-networking/service.md",
+		);
+	});
+
+	test("keeps deployment first for deployment pod rollout across the full concept set", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/controllers/deployment.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "deployment pod rollout",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/workloads/controllers/deployment.md",
 		);
 	});
 

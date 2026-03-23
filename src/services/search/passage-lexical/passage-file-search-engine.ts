@@ -105,6 +105,13 @@ type FilePassageSetSignals = {
 	localExplanationCorroboratedCoverageRatio: number;
 	localExplanationAnchorRatio: number;
 	localExplanationCompactnessRatio: number;
+	localExplanationMatchedQueryTerms: ReadonlySet<number>;
+	localExplanationCorroboratedQueryTerms: ReadonlySet<number>;
+	coreWitnessScore: number;
+	coreWitnessCoverageRatio: number;
+	coreWitnessQueryTerms: ReadonlySet<number>;
+	supportWitnessCoverageRatio: number;
+	witnessCompactnessRatio: number;
 	decisiveLocalVerifierScore: number;
 	verifierSupportSpanRatio: number;
 	verifierAnchorAgreementRatio: number;
@@ -173,6 +180,10 @@ type QueryTermDecomposition = {
 	anchorTermIndexes: ReadonlySet<number>;
 	bodyTermIndexes: ReadonlySet<number>;
 	noiseTermIndexes: ReadonlySet<number>;
+	metadataAnchorTermIndexes: ReadonlySet<number>;
+	localeAnchorTermIndexes: ReadonlySet<number>;
+	decisiveBodyTermIndexes: ReadonlySet<number>;
+	supportBodyTermIndexes: ReadonlySet<number>;
 };
 
 type QueryDecompositionSignals = {
@@ -180,6 +191,9 @@ type QueryDecompositionSignals = {
 	anchorSatisfiedRatio: number;
 	metadataOnlyNoiseRatio: number;
 	bodyAnchorSynergyRatio: number;
+	decisiveBodyCoverageRatio: number;
+	supportBodyCoverageRatio: number;
+	decisiveBodyAnchorSynergyRatio: number;
 };
 
 type MetadataLaneField =
@@ -205,6 +219,7 @@ type ExperimentalQueryRoute =
 	| "body_local";
 
 type RankedMatchedFile = MatchedFile & {
+	fileId: number;
 	queryRouteScore: number;
 	metadataLaneScore: number;
 	metadataLaneTier: number;
@@ -221,15 +236,25 @@ type RankedMatchedFile = MatchedFile & {
 	verifierAnchorAgreementRatio: number;
 	verifierTemplatePenaltyRatio: number;
 	bodyEvidenceCoverageRatio: number;
+	decisiveBodyCoverageRatio: number;
+	supportBodyCoverageRatio: number;
+	decisiveBodyAnchorSynergyRatio: number;
 	anchorSatisfiedRatio: number;
 	metadataOnlyNoiseRatio: number;
 	bodyAnchorSynergyRatio: number;
+	coreWitnessScore: number;
+	coreWitnessCoverageRatio: number;
+	supportWitnessCoverageRatio: number;
+	witnessCompactnessRatio: number;
 	basenameAliasCoverageRatio: number;
 	basenameAliasAnchorRatio: number;
 	headingCoverageRatio: number;
 	headingAnchorRatio: number;
 	pathCoverageRatio: number;
 	pathAnchorRatio: number;
+	queryTermSupportScores: ReadonlyMap<number, number>;
+	queryTermMetadataSupportScores: ReadonlyMap<number, number>;
+	queryTermBodySupportScores: ReadonlyMap<number, number>;
 };
 
 type ScriptProfile = {
@@ -375,6 +400,7 @@ const EMPTY_LOCAL_WINDOW_SET: QueryConditionedLocalWindowSet = {
 	anchorCoverageRatio: 0,
 	compactnessRatio: 0,
 };
+const EMPTY_QUERY_TERM_SET = new Set<number>();
 const EMPTY_VERIFIER_SIGNALS: VerifierSignals = {
 	score: 0,
 	coverageRatio: 0,
@@ -710,6 +736,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			),
 			planner,
 			queryRoute,
+			queryTermDecomposition,
+			queryTermWeights,
 			{
 				queryTerms,
 				queryScriptProfile,
@@ -805,10 +833,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
-		const strictSorted = this.sortMatchedFiles(strictResults, planner, queryRoute, {
-			queryTerms,
-			queryScriptProfile,
-		});
+		const strictSorted = this.sortMatchedFiles(
+			strictResults,
+			planner,
+			queryRoute,
+			queryTermDecomposition,
+			queryTermWeights,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
+		);
 		if (
 			!planner.shouldUseRelaxedResults(
 				strictSorted.length,
@@ -822,6 +857,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			relaxedResults,
 			planner,
 			queryRoute,
+			queryTermDecomposition,
+			queryTermWeights,
 			{
 				queryTerms,
 				queryScriptProfile,
@@ -848,6 +885,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			),
 			planner,
 			queryRoute,
+			queryTermDecomposition,
+			queryTermWeights,
 			{
 				queryTerms,
 				queryScriptProfile,
@@ -1743,6 +1782,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			planner,
 			queryTermWeights,
 			totalQueryWeight,
+			queryTermDecomposition,
 			queryScoringCache,
 		});
 		const metadataAnchorRatio = metadataAnchorWeight / totalQueryWeight;
@@ -1892,12 +1932,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			contentCoverageRatio,
 			bodyEvidenceCoverageRatio:
 				queryDecompositionSignals.bodyEvidenceCoverageRatio,
+			decisiveBodyCoverageRatio:
+				queryDecompositionSignals.decisiveBodyCoverageRatio,
+			supportBodyCoverageRatio:
+				queryDecompositionSignals.supportBodyCoverageRatio,
 			anchorSatisfiedRatio:
 				queryDecompositionSignals.anchorSatisfiedRatio,
 			metadataOnlyNoiseRatio:
 				queryDecompositionSignals.metadataOnlyNoiseRatio,
 			bodyAnchorSynergyRatio:
 				queryDecompositionSignals.bodyAnchorSynergyRatio,
+			decisiveBodyAnchorSynergyRatio:
+				queryDecompositionSignals.decisiveBodyAnchorSynergyRatio,
 			basenameAliasExactRatio,
 			basenameAliasExpandedRatio,
 			basenameAliasCoverageRatio,
@@ -1932,6 +1978,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				passageSetSignals.localExplanationAnchorRatio,
 			localExplanationCompactnessRatio:
 				passageSetSignals.localExplanationCompactnessRatio,
+			coreWitnessScore: passageSetSignals.coreWitnessScore,
+			coreWitnessCoverageRatio:
+				passageSetSignals.coreWitnessCoverageRatio,
+			supportWitnessCoverageRatio:
+				passageSetSignals.supportWitnessCoverageRatio,
+			witnessCompactnessRatio:
+				passageSetSignals.witnessCompactnessRatio,
 			decisiveLocalVerifierScore:
 				passageSetSignals.decisiveLocalVerifierScore,
 			verifierSupportSpanRatio:
@@ -1998,10 +2051,20 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				passageSetSignals.verifierAnchorAgreementRatio,
 			verifierTemplatePenaltyRatio:
 				passageSetSignals.verifierTemplatePenaltyRatio,
-			scriptFitScore,
-			pathLocaleFitScore,
+				scriptFitScore,
+				pathLocaleFitScore,
+		});
+		const {
+			totalScores: queryTermSupportScores,
+			metadataScores: queryTermMetadataSupportScores,
+			bodyScores: queryTermBodySupportScores,
+		} = this.buildContrastiveQueryTermSupportScores({
+			state,
+			passageSetSignals,
+			queryTermDecomposition,
 		});
 		return {
+			fileId: state.fileId,
 			path: state.filePath,
 			queryTerms,
 			matchedTerms: Array.from(state.matchedTerms),
@@ -2028,17 +2091,127 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				passageSetSignals.verifierTemplatePenaltyRatio,
 			bodyEvidenceCoverageRatio:
 				queryDecompositionSignals.bodyEvidenceCoverageRatio,
+			decisiveBodyCoverageRatio:
+				queryDecompositionSignals.decisiveBodyCoverageRatio,
+			supportBodyCoverageRatio:
+				queryDecompositionSignals.supportBodyCoverageRatio,
 			anchorSatisfiedRatio: queryDecompositionSignals.anchorSatisfiedRatio,
 			metadataOnlyNoiseRatio:
 				queryDecompositionSignals.metadataOnlyNoiseRatio,
 			bodyAnchorSynergyRatio:
 				queryDecompositionSignals.bodyAnchorSynergyRatio,
+			decisiveBodyAnchorSynergyRatio:
+				queryDecompositionSignals.decisiveBodyAnchorSynergyRatio,
+			coreWitnessScore: passageSetSignals.coreWitnessScore,
+			coreWitnessCoverageRatio:
+				passageSetSignals.coreWitnessCoverageRatio,
+			supportWitnessCoverageRatio:
+				passageSetSignals.supportWitnessCoverageRatio,
+			witnessCompactnessRatio:
+				passageSetSignals.witnessCompactnessRatio,
 			basenameAliasCoverageRatio,
 			basenameAliasAnchorRatio,
 			headingCoverageRatio,
 			headingAnchorRatio,
 			pathCoverageRatio,
 			pathAnchorRatio,
+			queryTermSupportScores,
+			queryTermMetadataSupportScores,
+			queryTermBodySupportScores,
+		};
+	}
+
+	private buildContrastiveQueryTermSupportScores(params: {
+		state: FileCandidateState;
+		passageSetSignals: FilePassageSetSignals;
+		queryTermDecomposition: QueryTermDecomposition;
+	}): {
+		totalScores: ReadonlyMap<number, number>;
+		metadataScores: ReadonlyMap<number, number>;
+		bodyScores: ReadonlyMap<number, number>;
+	} {
+		const { state, passageSetSignals, queryTermDecomposition } = params;
+		const totalScores = new Map<number, number>();
+		const metadataScores = new Map<number, number>();
+		const bodyScores = new Map<number, number>();
+		const addScore = (
+			target: Map<number, number>,
+			queryTermIndex: number,
+			delta: number,
+		) => {
+			if (delta <= 0) {
+				return;
+			}
+			target.set(queryTermIndex, (target.get(queryTermIndex) ?? 0) + delta);
+		};
+		const addBlendedScore = (
+			queryTermIndex: number,
+			metadataDelta: number,
+			bodyDelta: number,
+		) => {
+			addScore(metadataScores, queryTermIndex, metadataDelta);
+			addScore(bodyScores, queryTermIndex, bodyDelta);
+			addScore(totalScores, queryTermIndex, metadataDelta + bodyDelta);
+		};
+		const addFieldScores = (
+			field: SearchField,
+			exactDelta: number,
+			expandedDelta: number,
+			channel: "metadata" | "body",
+		) => {
+			for (const queryTermIndex of state.matchedQueryTermsByField.get(field) ?? []) {
+				if (channel === "metadata") {
+					addBlendedScore(queryTermIndex, exactDelta, 0);
+				} else {
+					addBlendedScore(queryTermIndex, 0, exactDelta);
+				}
+			}
+			for (const queryTermIndex of state.matchedExpandedQueryTermsByField.get(field) ??
+				[]) {
+				if ((state.matchedQueryTermsByField.get(field)?.has(queryTermIndex) ?? false)) {
+					continue;
+				}
+				if (channel === "metadata") {
+					addBlendedScore(queryTermIndex, expandedDelta, 0);
+				} else {
+					addBlendedScore(queryTermIndex, 0, expandedDelta);
+				}
+			}
+		};
+
+		addFieldScores("basename", 1.8, 1.15, "metadata");
+		addFieldScores("aliases", 1.55, 1.02, "metadata");
+		addFieldScores("headings", 1.1, 0.72, "metadata");
+		addFieldScores("folder", 0.72, 0.42, "metadata");
+		addFieldScores("tags", 0.45, 0.24, "metadata");
+		addFieldScores("content", 0.18, 0.1, "body");
+
+		for (const queryTermIndex of passageSetSignals.localExplanationMatchedQueryTerms) {
+			addBlendedScore(queryTermIndex, 0, 0.9);
+		}
+		for (const queryTermIndex of passageSetSignals.localExplanationCorroboratedQueryTerms) {
+			addBlendedScore(queryTermIndex, 0, 0.72);
+		}
+		for (const queryTermIndex of passageSetSignals.coreWitnessQueryTerms) {
+			addBlendedScore(queryTermIndex, 0, 1.28);
+			if (queryTermDecomposition.decisiveBodyTermIndexes.has(queryTermIndex)) {
+				addBlendedScore(queryTermIndex, 0, 0.34);
+			}
+			if (queryTermDecomposition.metadataAnchorTermIndexes.has(queryTermIndex)) {
+				addBlendedScore(queryTermIndex, 0.42, 0);
+			}
+		}
+
+		for (const queryTermIndex of queryTermDecomposition.decisiveBodyTermIndexes) {
+			if ((totalScores.get(queryTermIndex) ?? 0) > 0) {
+				addBlendedScore(queryTermIndex, 0, 0.28);
+			}
+		}
+
+		return {
+			totalScores,
+			metadataScores,
+			bodyScores,
 		};
 	}
 
@@ -2053,6 +2226,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTermDecomposition.bodyTermIndexes,
 			queryTermWeights,
 		);
+		const decisiveBodyWeight = getSetWeight(
+			queryTermDecomposition.decisiveBodyTermIndexes,
+			queryTermWeights,
+		);
+		const supportBodyWeight = getSetWeight(
+			queryTermDecomposition.supportBodyTermIndexes,
+			queryTermWeights,
+		);
 		const anchorWeight = getSetWeight(
 			queryTermDecomposition.anchorTermIndexes,
 			queryTermWeights,
@@ -2064,6 +2245,16 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const bodyContentWeight = getOverlapWeight(
 			contentMatches,
 			queryTermDecomposition.bodyTermIndexes,
+			queryTermWeights,
+		);
+		const decisiveBodyContentWeight = getOverlapWeight(
+			contentMatches,
+			queryTermDecomposition.decisiveBodyTermIndexes,
+			queryTermWeights,
+		);
+		const supportBodyContentWeight = getOverlapWeight(
+			contentMatches,
+			queryTermDecomposition.supportBodyTermIndexes,
 			queryTermWeights,
 		);
 		const anchorMatchedWeight = getOverlapWeight(
@@ -2082,8 +2273,20 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTermDecomposition.noiseTermIndexes,
 			queryTermWeights,
 		);
+		const decisiveBodyCoverageRatio =
+			decisiveBodyWeight > 0 ? decisiveBodyContentWeight / decisiveBodyWeight : 0;
+		const supportBodyCoverageRatio =
+			supportBodyWeight > 0 ? supportBodyContentWeight / supportBodyWeight : 0;
 		const bodyEvidenceCoverageRatio =
-			bodyWeight > 0 ? bodyContentWeight / bodyWeight : 0;
+			decisiveBodyWeight > 0
+				? Math.min(
+						1,
+						decisiveBodyCoverageRatio * 0.76 +
+							supportBodyCoverageRatio * 0.24,
+					)
+				: bodyWeight > 0
+					? bodyContentWeight / bodyWeight
+					: 0;
 		const anchorSatisfiedRatio =
 			anchorWeight > 0 ? anchorMatchedWeight / anchorWeight : 0;
 		const metadataOnlyNoiseRatio =
@@ -2092,11 +2295,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			bodyWeight > 0 && anchorWeight > 0
 				? bodyEvidenceCoverageRatio * anchorSatisfiedRatio
 				: 0;
+		const decisiveBodyAnchorSynergyRatio =
+			decisiveBodyWeight > 0 && anchorWeight > 0
+				? decisiveBodyCoverageRatio * anchorSatisfiedRatio
+				: 0;
 		return {
 			bodyEvidenceCoverageRatio,
 			anchorSatisfiedRatio,
 			metadataOnlyNoiseRatio,
 			bodyAnchorSynergyRatio,
+			decisiveBodyCoverageRatio,
+			supportBodyCoverageRatio,
+			decisiveBodyAnchorSynergyRatio,
 		};
 	}
 
@@ -2104,6 +2314,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		results: RankedMatchedFile[],
 		planner: FileSearchQueryPlanner | null = null,
 		queryRoute: ExperimentalQueryRoute = "body_local",
+		queryTermDecomposition: QueryTermDecomposition | null = null,
+		queryTermWeights: QueryTermWeightMap | null = null,
 		localeContext: {
 			queryTerms: readonly string[];
 			queryScriptProfile: ScriptProfile;
@@ -2250,6 +2462,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (candidateDecision !== 0) {
 					return candidateDecision;
 				}
+				const contrastiveTopicDecision =
+					queryTermDecomposition && queryTermWeights
+						? this.compareContrastiveSiblingTopicDecision(
+								left,
+								right,
+								queryRoute,
+								queryTermDecomposition,
+								queryTermWeights,
+							)
+						: 0;
+				if (contrastiveTopicDecision !== 0) {
+					return contrastiveTopicDecision;
+				}
 				const bodyOnlyTopicDecision = this.compareBodyOnlyTopicDecision(
 					left,
 					right,
@@ -2265,6 +2490,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				);
 				if (conceptCollisionDecision !== 0) {
 					return conceptCollisionDecision;
+				}
+				const genericSupportDecision = this.compareGenericSupportOnlyDecision(
+					left,
+					right,
+					queryRoute,
+				);
+				if (genericSupportDecision !== 0) {
+					return genericSupportDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -2307,6 +2540,43 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				: 0;
 			if (localePreference !== 0) {
 				return localePreference;
+			}
+			const contrastiveTopicDecision =
+				queryTermDecomposition && queryTermWeights
+					? this.compareContrastiveSiblingTopicDecision(
+							left,
+							right,
+							queryRoute,
+							queryTermDecomposition,
+							queryTermWeights,
+						)
+					: 0;
+			if (contrastiveTopicDecision !== 0) {
+				return contrastiveTopicDecision;
+			}
+			const bodyOnlyTopicDecision = this.compareBodyOnlyTopicDecision(
+				left,
+				right,
+				queryRoute,
+			);
+			if (bodyOnlyTopicDecision !== 0) {
+				return bodyOnlyTopicDecision;
+			}
+			const conceptCollisionDecision = this.compareConceptCollisionDecision(
+				left,
+				right,
+				queryRoute,
+			);
+			if (conceptCollisionDecision !== 0) {
+				return conceptCollisionDecision;
+			}
+			const genericSupportDecision = this.compareGenericSupportOnlyDecision(
+				left,
+				right,
+				queryRoute,
+			);
+			if (genericSupportDecision !== 0) {
+				return genericSupportDecision;
 			}
 			if (right.queryRouteScore !== left.queryRouteScore) {
 				return right.queryRouteScore - left.queryRouteScore;
@@ -2450,12 +2720,94 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return decisionGap;
 	}
 
+	private compareContrastiveSiblingTopicDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+		queryTermDecomposition: QueryTermDecomposition,
+		queryTermWeights: QueryTermWeightMap,
+	): number {
+		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
+			return 0;
+		}
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		if (queryRouteScoreGap > 20 || scoreGap > 16) {
+			return 0;
+		}
+		const bodyEvidenceGate = Math.max(
+			left.bodyEvidenceCoverageRatio,
+			right.bodyEvidenceCoverageRatio,
+		);
+		const witnessGate = Math.max(
+			left.coreWitnessScore,
+			right.coreWitnessScore,
+			left.localExplanationCompetitionScore,
+			right.localExplanationCompetitionScore,
+		);
+		if (bodyEvidenceGate < 0.18 || witnessGate < 0.28) {
+			return 0;
+		}
+		if (!this.areLikelyContrastiveSiblingFamily(left, right)) {
+			return 0;
+		}
+
+		const prioritizedTermIndexes = this.rankContrastiveTermIndexes(
+			left,
+			right,
+			queryTermDecomposition,
+			queryTermWeights,
+		);
+		if (prioritizedTermIndexes.length === 0) {
+			return 0;
+		}
+
+		let decisionScore = 0;
+		let decisiveEdge = 0;
+		let decisiveComparisons = 0;
+		for (const queryTermIndex of prioritizedTermIndexes.slice(0, 4)) {
+			const leftSupport = this.computeContrastiveTermSupport(
+				left,
+				queryTermIndex,
+				queryTermDecomposition,
+			);
+			const rightSupport = this.computeContrastiveTermSupport(
+				right,
+				queryTermIndex,
+				queryTermDecomposition,
+			);
+			const supportGap = rightSupport - leftSupport;
+			if (Math.abs(supportGap) < 0.42) {
+				continue;
+			}
+			const queryWeight = Math.min(2.4, queryTermWeights.get(queryTermIndex) ?? 1);
+			const termPriority = this.getContrastiveTermPriority(
+				queryTermIndex,
+				queryTermDecomposition,
+			);
+			const weightedGap = supportGap * queryWeight * termPriority;
+			decisionScore += weightedGap;
+			if (termPriority >= 1.2) {
+				decisiveEdge += weightedGap;
+				decisiveComparisons += 1;
+			}
+		}
+
+		if (
+			decisiveComparisons === 0 ||
+			(Math.abs(decisiveEdge) < 1.35 && Math.abs(decisionScore) < 1.9)
+		) {
+			return 0;
+		}
+		return decisionScore;
+	}
+
 	private compareConceptCollisionDecision(
 		left: RankedMatchedFile,
 		right: RankedMatchedFile,
 		queryRoute: ExperimentalQueryRoute,
 	): number {
-		if (queryRoute !== "mixed_anchor") {
+		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
 			return 0;
 		}
 		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
@@ -2475,6 +2827,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			left.bodyEvidenceCoverageRatio,
 			right.bodyEvidenceCoverageRatio,
 		);
+		const decisiveBodyGate = Math.max(
+			left.decisiveBodyCoverageRatio,
+			right.decisiveBodyCoverageRatio,
+		);
+		const coreWitnessGate = Math.max(
+			left.coreWitnessScore,
+			right.coreWitnessScore,
+		);
 		const anchorSupportGate = Math.max(
 			left.basenameAliasAnchorRatio,
 			left.pathAnchorRatio,
@@ -2482,8 +2842,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			right.pathAnchorRatio,
 		);
 		if (
+			(this.areMirrorLocaleVariants(left.path, right.path) &&
+				Math.abs(left.scriptFitScore - right.scriptFitScore) >= 0.08) ||
 			anchorSupportGate < 0.12 ||
-			decisiveVerifierGate < 0.75 ||
+			(decisiveVerifierGate < 0.75 && coreWitnessGate < 0.48) ||
+			(coreWitnessGate < 0.42 && decisiveBodyGate < 0.42) ||
 			localExplanationGate < 0.32 ||
 			bodyEvidenceGate < 0.22
 		) {
@@ -2503,7 +2866,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		right: RankedMatchedFile,
 		queryRoute: ExperimentalQueryRoute,
 	): number {
-		if (queryRoute !== "mixed_anchor") {
+		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
 			return 0;
 		}
 		const anchorSupportGate = Math.max(
@@ -2519,6 +2882,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			left.bodyEvidenceCoverageRatio,
 			right.bodyEvidenceCoverageRatio,
 		);
+		const coreWitnessGate = Math.max(
+			left.coreWitnessScore,
+			right.coreWitnessScore,
+		);
 		const localExplanationGate = Math.max(
 			left.localExplanationCompetitionScore,
 			right.localExplanationCompetitionScore,
@@ -2527,7 +2894,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			left.anchorSatisfiedRatio,
 			right.anchorSatisfiedRatio,
 		);
-		if (bodyEvidenceGate < 0.22 || localExplanationGate < 0.3) {
+		if (
+			(this.areMirrorLocaleVariants(left.path, right.path) &&
+				Math.abs(left.scriptFitScore - right.scriptFitScore) >= 0.08) ||
+			bodyEvidenceGate < 0.22 ||
+			localExplanationGate < 0.3 ||
+			coreWitnessGate < 0.42
+		) {
 			return 0;
 		}
 		if (anchorSatisfiedGate >= 0.08) {
@@ -2545,6 +2918,167 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return 0;
 		}
 		return decisionGap;
+	}
+
+	private areLikelyContrastiveSiblingFamily(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+	): boolean {
+		if (this.areMirrorLocaleVariants(left.path, right.path)) {
+			return true;
+		}
+		return this.countNormalizedPathPrefixSegments(left.path, right.path) >= 4;
+	}
+
+	private countNormalizedPathPrefixSegments(
+		leftPath: string,
+		rightPath: string,
+	): number {
+		const leftSegments = this.normalizeMirrorLocalePath(leftPath)
+			.split("/")
+			.filter((segment) => segment.length > 0);
+		const rightSegments = this.normalizeMirrorLocalePath(rightPath)
+			.split("/")
+			.filter((segment) => segment.length > 0);
+		let sharedCount = 0;
+		for (
+			let index = 0;
+			index < Math.min(leftSegments.length, rightSegments.length);
+			index++
+		) {
+			if (leftSegments[index] !== rightSegments[index]) {
+				break;
+			}
+			sharedCount += 1;
+		}
+		return sharedCount;
+	}
+
+	private rankContrastiveTermIndexes(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryTermDecomposition: QueryTermDecomposition,
+		queryTermWeights: QueryTermWeightMap,
+	): number[] {
+		const candidateIndexes = new Set<number>();
+		for (const [queryTermIndex, support] of left.queryTermSupportScores) {
+			if (support > 0) {
+				candidateIndexes.add(queryTermIndex);
+			}
+		}
+		for (const [queryTermIndex, support] of right.queryTermSupportScores) {
+			if (support > 0) {
+				candidateIndexes.add(queryTermIndex);
+			}
+		}
+		return Array.from(candidateIndexes)
+			.filter(
+				(queryTermIndex) =>
+					!queryTermDecomposition.localeAnchorTermIndexes.has(queryTermIndex),
+			)
+			.sort((leftIndex, rightIndex) => {
+				const leftPriority = this.getContrastiveTermPriority(
+					leftIndex,
+					queryTermDecomposition,
+				);
+				const rightPriority = this.getContrastiveTermPriority(
+					rightIndex,
+					queryTermDecomposition,
+				);
+				if (leftPriority !== rightPriority) {
+					return rightPriority - leftPriority;
+				}
+				const leftWeight = queryTermWeights.get(leftIndex) ?? 1;
+				const rightWeight = queryTermWeights.get(rightIndex) ?? 1;
+				if (leftWeight !== rightWeight) {
+					return rightWeight - leftWeight;
+				}
+				const leftGap = Math.abs(
+					(left.queryTermSupportScores.get(leftIndex) ?? 0) -
+						(right.queryTermSupportScores.get(leftIndex) ?? 0),
+				);
+				const rightGap = Math.abs(
+					(left.queryTermSupportScores.get(rightIndex) ?? 0) -
+						(right.queryTermSupportScores.get(rightIndex) ?? 0),
+				);
+				if (leftGap !== rightGap) {
+					return rightGap - leftGap;
+				}
+				return leftIndex - rightIndex;
+			});
+	}
+
+	private computeContrastiveTermSupport(
+		result: RankedMatchedFile,
+		queryTermIndex: number,
+		queryTermDecomposition: QueryTermDecomposition,
+	): number {
+		const metadataSupport =
+			result.queryTermMetadataSupportScores.get(queryTermIndex) ?? 0;
+		const bodySupport = result.queryTermBodySupportScores.get(queryTermIndex) ?? 0;
+		if (queryTermDecomposition.metadataAnchorTermIndexes.has(queryTermIndex)) {
+			return metadataSupport * 1.45 + bodySupport * 0.42;
+		}
+		if (queryTermDecomposition.decisiveBodyTermIndexes.has(queryTermIndex)) {
+			return metadataSupport * 0.28 + bodySupport * 1.35;
+		}
+		if (queryTermDecomposition.anchorTermIndexes.has(queryTermIndex)) {
+			return metadataSupport * 1.15 + bodySupport * 0.62;
+		}
+		return metadataSupport * 0.35 + bodySupport;
+	}
+
+	private getContrastiveTermPriority(
+		queryTermIndex: number,
+		queryTermDecomposition: QueryTermDecomposition,
+	): number {
+		if (queryTermDecomposition.metadataAnchorTermIndexes.has(queryTermIndex)) {
+			return 1.55;
+		}
+		if (queryTermDecomposition.decisiveBodyTermIndexes.has(queryTermIndex)) {
+			return 1.35;
+		}
+		if (queryTermDecomposition.anchorTermIndexes.has(queryTermIndex)) {
+			return 1.15;
+		}
+		if (queryTermDecomposition.bodyTermIndexes.has(queryTermIndex)) {
+			return 0.95;
+		}
+		return 0.7;
+	}
+
+	private compareGenericSupportOnlyDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+	): number {
+		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
+			return 0;
+		}
+		const genericSupportGate = Math.min(
+			left.supportBodyCoverageRatio,
+			right.supportBodyCoverageRatio,
+		);
+		if (
+			genericSupportGate < 0.85 ||
+			left.decisiveBodyCoverageRatio > 0.000001 ||
+			right.decisiveBodyCoverageRatio > 0.000001 ||
+			left.anchorSatisfiedRatio > 0.000001 ||
+			right.anchorSatisfiedRatio > 0.000001
+		) {
+			return 0;
+		}
+		const headingCrowdingGap = Math.abs(
+			left.headingCoverageRatio - right.headingCoverageRatio,
+		);
+		if (
+			headingCrowdingGap < 0.18 ||
+			Math.abs(left.queryRouteScore - right.queryRouteScore) > 2.5 ||
+			Math.abs((left.score ?? 0) - (right.score ?? 0)) > 8
+		) {
+			return 0;
+		}
+		return left.headingCoverageRatio - right.headingCoverageRatio;
 	}
 
 	private determineExperimentalQueryRoute(
@@ -2592,6 +3126,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				: Math.max(titleAnchorSignal, pathAnchorSignal);
 		const compactBodySupportSignal =
 			result.bodyEvidenceCoverageRatio * 5 +
+			result.decisiveBodyCoverageRatio * 4.6 +
+			result.coreWitnessScore * 4.8 +
+			result.coreWitnessCoverageRatio * 5.4 +
+			result.witnessCompactnessRatio * 2.6 +
 			result.bodyAnchorSynergyRatio * 5.6 +
 			result.bestPassageScore * 0.12 +
 			result.localExplanationCompetitionScore * 0.92 +
@@ -2616,6 +3154,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			result.anchorSatisfiedRatio * 2.8 -
 			result.metadataOnlyNoiseRatio * 3.2 -
 			result.verifierTemplatePenaltyRatio * 2.4 -
+			Math.max(
+				0,
+				result.decisiveBodyCoverageRatio * 0.8 -
+					(result.coreWitnessCoverageRatio * 0.75 +
+						result.coreWitnessScore * 0.55),
+			) *
+				4.2 -
 			anchorDriftPenalty * 3.1 +
 			result.pathLocaleFitScore * 4.4 +
 			result.scriptFitScore * 0.55
@@ -2632,6 +3177,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			result.pathCoverageRatio * 0.35;
 		const localClosureSignal =
 			result.bodyEvidenceCoverageRatio * 5.6 +
+			result.decisiveBodyCoverageRatio * 4.4 +
+			result.coreWitnessScore * 5.2 +
+			result.coreWitnessCoverageRatio * 6 +
+			result.supportWitnessCoverageRatio * 1.4 +
+			result.witnessCompactnessRatio * 2.8 +
 			result.bodyAnchorSynergyRatio * 5.8 +
 			result.localExplanationCompetitionScore * 1.55 +
 			result.decisiveLocalVerifierScore * 2.2 +
@@ -2653,6 +3203,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			result.anchorSatisfiedRatio * 1.8 -
 			result.metadataOnlyNoiseRatio * 2.5 -
 			result.verifierTemplatePenaltyRatio * 2.8 -
+			Math.max(
+				0,
+				result.decisiveBodyCoverageRatio * 0.85 -
+					(result.coreWitnessCoverageRatio * 0.78 +
+						result.coreWitnessScore * 0.6),
+			) *
+				4.4 -
 			driftPenalty * 2.4 +
 			result.pathLocaleFitScore * 0.9 +
 			result.scriptFitScore * 0.25
@@ -2670,11 +3227,23 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		);
 		return (
 			result.bodyEvidenceCoverageRatio * 4.6 +
+			result.decisiveBodyCoverageRatio * 4 +
+			result.coreWitnessScore * 5.4 +
+			result.coreWitnessCoverageRatio * 5.8 +
+			result.supportWitnessCoverageRatio * 1.2 +
+			result.witnessCompactnessRatio * 2.2 +
 			result.localExplanationCompetitionScore * 2.25 +
 			result.verifierSupportSpanRatio * 1.4 +
 			result.bestPassageScore * 0.03 -
 			result.metadataOnlyNoiseRatio * 1.8 -
 			result.verifierTemplatePenaltyRatio * 1.5 -
+			Math.max(
+				0,
+				result.decisiveBodyCoverageRatio * 0.8 -
+					(result.coreWitnessCoverageRatio * 0.82 +
+						result.coreWitnessScore * 0.58),
+			) *
+				4.2 -
 			verifierDriftPenalty * 0.85 +
 			result.scriptFitScore * 0.2
 		);
@@ -2801,9 +3370,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		mixedEvidenceScore: number;
 		contentCoverageRatio: number;
 		bodyEvidenceCoverageRatio: number;
+		decisiveBodyCoverageRatio: number;
+		supportBodyCoverageRatio: number;
 		anchorSatisfiedRatio: number;
 		metadataOnlyNoiseRatio: number;
 		bodyAnchorSynergyRatio: number;
+		decisiveBodyAnchorSynergyRatio: number;
 		basenameAliasExactRatio: number;
 		basenameAliasExpandedRatio: number;
 		basenameAliasCoverageRatio: number;
@@ -2830,6 +3402,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		localExplanationCorroboratedCoverageRatio: number;
 		localExplanationAnchorRatio: number;
 		localExplanationCompactnessRatio: number;
+		coreWitnessScore: number;
+		coreWitnessCoverageRatio: number;
+		supportWitnessCoverageRatio: number;
+		witnessCompactnessRatio: number;
 		decisiveLocalVerifierScore: number;
 		verifierSupportSpanRatio: number;
 		verifierAnchorAgreementRatio: number;
@@ -2851,9 +3427,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			mixedEvidenceScore,
 			contentCoverageRatio,
 			bodyEvidenceCoverageRatio,
+			decisiveBodyCoverageRatio,
+			supportBodyCoverageRatio,
 			anchorSatisfiedRatio,
 			metadataOnlyNoiseRatio,
 			bodyAnchorSynergyRatio,
+			decisiveBodyAnchorSynergyRatio,
 			basenameAliasExactRatio,
 			basenameAliasExpandedRatio,
 			basenameAliasCoverageRatio,
@@ -2880,6 +3459,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			localExplanationCorroboratedCoverageRatio,
 			localExplanationAnchorRatio,
 			localExplanationCompactnessRatio,
+			coreWitnessScore,
+			coreWitnessCoverageRatio,
+			supportWitnessCoverageRatio,
+			witnessCompactnessRatio,
 			decisiveLocalVerifierScore,
 			verifierSupportSpanRatio,
 			verifierAnchorAgreementRatio,
@@ -2964,15 +3547,46 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						activeVerifierAnchorAgreementRatio * 0.8,
 				),
 		);
-		const bodyOnlyVerifierOverreachPenalty = Math.max(
-			0,
-			decisiveLocalVerifierScore -
-				(localExplanationCompetitionScore * 1.65 +
-					localExplanationCorroboratedCoverageRatio * 4.8 +
-					passageCorroboratedCoverageRatio * 4 +
-					activeVerifierSupportSpanRatio * 1.6 +
-					passageWindowCoverageRatio * 1.2),
-		) * bodyOnlyVerifierOverreachRiskRatio;
+		const genericSupportOnlyBodyRisk =
+			decisiveBodyCoverageRatio <= 0.000001 &&
+			supportBodyCoverageRatio >= 0.85 &&
+			anchorSatisfiedRatio <= 0.000001
+				? 1
+				: 0;
+		const genericSupportOnlyPenalty =
+			genericSupportOnlyBodyRisk *
+			(decisiveLocalVerifierScore * 0.38 +
+				activeVerifierSupportSpanRatio * 6.2 +
+				headingCoverageRatio * 9.5);
+		const bodyOnlyVerifierOverreachPenalty =
+			Math.max(
+				0,
+				decisiveLocalVerifierScore -
+					(localExplanationCompetitionScore * 1.65 +
+						localExplanationCorroboratedCoverageRatio * 4.8 +
+						passageCorroboratedCoverageRatio * 4 +
+						activeVerifierSupportSpanRatio * 1.6 +
+						passageWindowCoverageRatio * 1.2),
+			) *
+			bodyOnlyVerifierOverreachRiskRatio *
+			(1 + genericSupportOnlyBodyRisk * 1.35);
+		const missingCoreWitnessPenalty =
+			decisiveBodyCoverageRatio > 0.000001
+				? Math.max(
+						0,
+						decisiveBodyCoverageRatio * 0.92 -
+							(coreWitnessCoverageRatio * 0.74 +
+								coreWitnessScore * 0.62 +
+								witnessCompactnessRatio * 0.18),
+					)
+				: 0;
+		const contrastiveTopicSupportScore =
+			coreWitnessScore * 2.1 +
+			coreWitnessCoverageRatio * 2.8 +
+			supportWitnessCoverageRatio * 0.85 +
+			witnessCompactnessRatio * 1.25 +
+			decisiveBodyCoverageRatio * 1.6 +
+			decisiveBodyAnchorSynergyRatio * 1.25;
 		const exactBasenameCorroborationScore =
 			basenameAliasExactRatio >= 0.999
 				? bodyCoreScore * 1.05 +
@@ -2995,6 +3609,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			mixedEvidenceScore * 0.88 +
 			contentCoverageRatio * 7.6 +
 			bodyEvidenceCoverageRatio * 5.4 +
+			decisiveBodyCoverageRatio * 4.9 +
+			supportBodyCoverageRatio * 1.3 +
 			anchorSatisfiedRatio * 1.3 +
 			bodyAnchorSynergyRatio * 4.6 -
 			metadataOnlyNoiseRatio * 3.4 +
@@ -3008,6 +3624,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			localExplanationCorroboratedCoverageRatio * 1.6 +
 			localExplanationAnchorRatio * 0.75 +
 			localExplanationCompactnessRatio * 0.6 +
+			contrastiveTopicSupportScore * 1.08 +
 			decisiveLocalVerifierScore * 0.72 +
 			activeVerifierSupportSpanRatio * 1.35 +
 			activeVerifierAnchorAgreementRatio * 1.4 +
@@ -3015,6 +3632,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			activeVerifierTemplatePenaltyRatio * 2.1 +
 			verifierOverreachPenalty * -1.45 +
 			bodyOnlyVerifierOverreachPenalty * -0.95 +
+			genericSupportOnlyPenalty * -1 +
+			missingCoreWitnessPenalty * -4.2 +
 			weakDuplicateFamilyPenaltyRatio * -7.2 +
 			passageAnchorAgreementRatio * 2.4 -
 			passageFragmentationRatio * 4.6 +
@@ -3073,7 +3692,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					mixedEvidenceScore * 1.5 +
 					contentCoverageRatio * 6.5 +
 					bodyEvidenceCoverageRatio * 4.4 +
+					decisiveBodyCoverageRatio * 3.8 +
 					bodyAnchorSynergyRatio * 5 +
+					decisiveBodyAnchorSynergyRatio * 2.6 +
 					anchorSatisfiedRatio * 1.2 -
 					metadataOnlyNoiseRatio * 3.2 +
 					titleAnchorEvidence * 11.4 +
@@ -3090,6 +3711,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					localExplanationCorroboratedCoverageRatio * 1 +
 					localExplanationAnchorRatio * 0.45 +
 					localExplanationCompactnessRatio * 0.3 +
+					contrastiveTopicSupportScore * 0.95 +
 					decisiveLocalVerifierScore * 1.1 +
 					activeVerifierSupportSpanRatio * 2.6 +
 					activeVerifierAnchorAgreementRatio * 3 +
@@ -3097,6 +3719,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					activeVerifierTemplatePenaltyRatio * 2.8 +
 					verifierOverreachPenalty * -0.9 +
 					bodyOnlyVerifierOverreachPenalty * -1.15 +
+					genericSupportOnlyPenalty * -0.92 +
+					missingCoreWitnessPenalty * -3.6 +
 					weakDuplicateFamilyPenaltyRatio * -6.2 +
 					passageAnchorAgreementRatio * 2 -
 					passageFragmentationRatio * 2.4 +
@@ -3108,7 +3732,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					mixedEvidenceScore * 1.28 +
 					contentCoverageRatio * 6.8 +
 					bodyEvidenceCoverageRatio * 3.8 +
+					decisiveBodyCoverageRatio * 3.4 +
 					bodyAnchorSynergyRatio * 4.2 +
+					decisiveBodyAnchorSynergyRatio * 2.2 +
 					anchorSatisfiedRatio * 1.1 -
 					metadataOnlyNoiseRatio * 2.8 +
 					pathAnchorEvidence * 10.2 +
@@ -3120,12 +3746,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					passageWindowCompactnessRatio * 1.2 +
 					localExplanationCompetitionScore * 0.45 +
 					localExplanationUnionCoverageRatio * 0.7 +
+					contrastiveTopicSupportScore * 0.42 +
 					decisiveLocalVerifierScore * 0.18 +
 					activeVerifierSupportSpanRatio * 0.35 +
 					activeVerifierAnchorAgreementRatio * 0.3 -
 					activeVerifierTemplatePenaltyRatio * 0.45 +
 					verifierOverreachPenalty * -0.2 +
 					bodyOnlyVerifierOverreachPenalty * -0.35 +
+					genericSupportOnlyPenalty * -0.78 +
+					missingCoreWitnessPenalty * -2.1 +
 					weakDuplicateFamilyPenaltyRatio * -0.8 +
 					passageAnchorAgreementRatio * 1.7 -
 					passageFragmentationRatio * 2.1 +
@@ -3147,6 +3776,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						mixedEvidenceScore * 1.35 +
 						contentCoverageRatio * 7.3 +
 						bodyEvidenceCoverageRatio * 8.4 +
+						decisiveBodyCoverageRatio * 6.4 +
 						anchorSatisfiedRatio * 1.25 +
 						bodyAnchorSynergyRatio * 6.4 -
 						metadataOnlyNoiseRatio * 2.4 +
@@ -3160,6 +3790,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						localExplanationCompetitionScore * 1.4 +
 						localExplanationUnionCoverageRatio * 2.2 +
 						localExplanationCorroboratedCoverageRatio * 1.8 +
+						contrastiveTopicSupportScore * 1.2 +
 						decisiveLocalVerifierScore * 0.3 +
 						activeVerifierSupportSpanRatio * 0.7 +
 						activeVerifierAnchorAgreementRatio * 0.55 +
@@ -3167,6 +3798,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						activeVerifierTemplatePenaltyRatio * 0.6 +
 						verifierOverreachPenalty * -0.35 +
 						bodyOnlyVerifierOverreachPenalty * -0.28 +
+						genericSupportOnlyPenalty * -0.88 +
+						missingCoreWitnessPenalty * -2.8 +
 						weakDuplicateFamilyPenaltyRatio * -0.7 +
 						passageAnchorAgreementRatio * 2.6 -
 						passageFragmentationRatio * 2.2 +
@@ -3991,6 +4624,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		planner: FileSearchQueryPlanner | null;
 		queryTermWeights: QueryTermWeightMap;
 		totalQueryWeight: number;
+		queryTermDecomposition: QueryTermDecomposition;
 		queryScoringCache: QueryScoringCache;
 	}): FilePassageSetSignals {
 		const {
@@ -3999,6 +4633,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			planner,
 			queryTermWeights,
 			totalQueryWeight,
+			queryTermDecomposition,
 			queryScoringCache,
 		} = params;
 		const evidences = state.topPassageEvidences.slice(0, MAX_FILE_PASSAGE_EVIDENCES);
@@ -4020,6 +4655,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				localExplanationCorroboratedCoverageRatio: 0,
 				localExplanationAnchorRatio: 0,
 				localExplanationCompactnessRatio: 0,
+				localExplanationMatchedQueryTerms: EMPTY_QUERY_TERM_SET,
+				localExplanationCorroboratedQueryTerms: EMPTY_QUERY_TERM_SET,
+				coreWitnessScore: 0,
+				coreWitnessCoverageRatio: 0,
+				coreWitnessQueryTerms: EMPTY_QUERY_TERM_SET,
+				supportWitnessCoverageRatio: 0,
+				witnessCompactnessRatio: 0,
 				decisiveLocalVerifierScore: 0,
 				verifierSupportSpanRatio: 0,
 				verifierAnchorAgreementRatio: 0,
@@ -4074,6 +4716,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			planner,
 			queryTermWeights,
 			totalQueryWeight,
+			queryTermDecomposition,
 			queryScoringCache,
 		});
 		const fileVerifierSignals = this.computeFileVerifierSignals({
@@ -4248,6 +4891,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				fileLocalExplanationSignals.anchorCoverageRatio,
 			localExplanationCompactnessRatio:
 				fileLocalExplanationSignals.compactnessRatio,
+			localExplanationMatchedQueryTerms:
+				fileLocalExplanationSignals.localExplanationMatchedQueryTerms,
+			localExplanationCorroboratedQueryTerms:
+				fileLocalExplanationSignals.localExplanationCorroboratedQueryTerms,
+			coreWitnessScore: fileLocalExplanationSignals.coreWitnessScore,
+			coreWitnessCoverageRatio:
+				fileLocalExplanationSignals.coreWitnessCoverageRatio,
+			coreWitnessQueryTerms: fileLocalExplanationSignals.coreWitnessQueryTerms,
+			supportWitnessCoverageRatio:
+				fileLocalExplanationSignals.supportWitnessCoverageRatio,
+			witnessCompactnessRatio:
+				fileLocalExplanationSignals.witnessCompactnessRatio,
 			decisiveLocalVerifierScore:
 				fileVerifierSignals.decisiveLocalVerifierScore,
 			verifierSupportSpanRatio:
@@ -4473,6 +5128,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		planner: FileSearchQueryPlanner | null;
 		queryTermWeights: QueryTermWeightMap;
 		totalQueryWeight: number;
+		queryTermDecomposition: QueryTermDecomposition;
 		queryScoringCache: QueryScoringCache;
 	}): {
 		competitionScore: number;
@@ -4480,6 +5136,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		corroboratedCoverageRatio: number;
 		anchorCoverageRatio: number;
 		compactnessRatio: number;
+		localExplanationMatchedQueryTerms: ReadonlySet<number>;
+		localExplanationCorroboratedQueryTerms: ReadonlySet<number>;
+		coreWitnessScore: number;
+		coreWitnessCoverageRatio: number;
+		coreWitnessQueryTerms: ReadonlySet<number>;
+		supportWitnessCoverageRatio: number;
+		witnessCompactnessRatio: number;
 	} {
 		const {
 			evidences,
@@ -4487,6 +5150,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			planner,
 			queryTermWeights,
 			totalQueryWeight,
+			queryTermDecomposition,
 			queryScoringCache,
 		} = params;
 		if (evidences.length === 0) {
@@ -4496,6 +5160,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				corroboratedCoverageRatio: 0,
 				anchorCoverageRatio: 0,
 				compactnessRatio: 0,
+				localExplanationMatchedQueryTerms: EMPTY_QUERY_TERM_SET,
+				localExplanationCorroboratedQueryTerms: EMPTY_QUERY_TERM_SET,
+				coreWitnessScore: 0,
+				coreWitnessCoverageRatio: 0,
+				coreWitnessQueryTerms: EMPTY_QUERY_TERM_SET,
+				supportWitnessCoverageRatio: 0,
+				witnessCompactnessRatio: 0,
 			};
 		}
 		const bestEvidenceScore = evidences[0]?.score ?? 0;
@@ -4559,6 +5230,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				corroboratedCoverageRatio: 0,
 				anchorCoverageRatio: 0,
 				compactnessRatio: 0,
+				localExplanationMatchedQueryTerms: EMPTY_QUERY_TERM_SET,
+				localExplanationCorroboratedQueryTerms: EMPTY_QUERY_TERM_SET,
+				coreWitnessScore: 0,
+				coreWitnessCoverageRatio: 0,
+				coreWitnessQueryTerms: EMPTY_QUERY_TERM_SET,
+				supportWitnessCoverageRatio: 0,
+				witnessCompactnessRatio: 0,
 			};
 		}
 		candidates.sort((left, right) => {
@@ -4604,9 +5282,23 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const corroboratedQueryTerms = new Set<number>();
 		const explanationMatchCounts = new Map<number, number>();
 		const explainedQueryTerms = new Set<number>();
+		const decisiveBodyWeight = getSetWeight(
+			queryTermDecomposition.decisiveBodyTermIndexes,
+			queryTermWeights,
+		);
+		const supportBodyWeight = getSetWeight(
+			queryTermDecomposition.supportBodyTermIndexes,
+			queryTermWeights,
+		);
 		let competitionScore = 0;
 		let anchorCoverageRatio = 0;
 		let compactnessRatio = 0;
+		let bestCoreWitnessPresenceRatio = 0;
+		let coreWitnessScore = 0;
+		let coreWitnessCoverageRatio = 0;
+		let coreWitnessQueryTerms = new Set<number>();
+		let supportWitnessCoverageRatio = 0;
+		let witnessCompactnessRatio = 0;
 		let decayWeightSum = 0;
 		for (let index = 0; index < selected.length; index++) {
 			const explanation = selected[index];
@@ -4625,10 +5317,67 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				explanationWeight > 0
 					? getSetWeight(novelQueryTerms, queryTermWeights) / explanationWeight
 					: 0;
+			const decisiveBodyCoverageRatio =
+				decisiveBodyWeight > 0
+					? getOverlapWeight(
+							explanation.matchedQueryTerms,
+							queryTermDecomposition.decisiveBodyTermIndexes,
+							queryTermWeights,
+						) / decisiveBodyWeight
+					: 0;
+			const supportBodyCoverageRatio =
+				supportBodyWeight > 0
+					? getOverlapWeight(
+							explanation.matchedQueryTerms,
+							queryTermDecomposition.supportBodyTermIndexes,
+							queryTermWeights,
+						) / supportBodyWeight
+					: 0;
+			const witnessCoverageRatio =
+				decisiveBodyWeight > 0
+					? Math.min(
+							1,
+							decisiveBodyCoverageRatio * 0.78 +
+								supportBodyCoverageRatio * 0.22,
+						)
+					: 0;
+			const witnessPresenceRatio =
+				decisiveBodyWeight > 0
+					? Math.max(
+							0,
+							witnessCoverageRatio * (0.58 + explanation.compactnessRatio * 0.42),
+						)
+					: 0;
 			competitionScore +=
-				explanation.weightedScore * decay * (0.34 + noveltyRatio * 0.66);
+				explanation.weightedScore *
+				decay *
+				(0.24 + noveltyRatio * 0.44 + witnessPresenceRatio * 0.72);
 			anchorCoverageRatio += explanation.anchorCoverageRatio * decay;
 			compactnessRatio += explanation.compactnessRatio * decay;
+			coreWitnessScore = Math.max(
+				coreWitnessScore,
+				witnessPresenceRatio * (0.7 + explanation.compactnessRatio * 0.3),
+			);
+			const weightedWitnessPresenceRatio =
+				witnessPresenceRatio * (0.76 + explanation.compactnessRatio * 0.24);
+			if (weightedWitnessPresenceRatio > bestCoreWitnessPresenceRatio) {
+				bestCoreWitnessPresenceRatio = weightedWitnessPresenceRatio;
+				coreWitnessQueryTerms = new Set(explanation.matchedQueryTerms);
+			}
+			coreWitnessCoverageRatio = Math.max(
+				coreWitnessCoverageRatio,
+				decisiveBodyCoverageRatio,
+			);
+			supportWitnessCoverageRatio = Math.max(
+				supportWitnessCoverageRatio,
+				supportBodyCoverageRatio,
+			);
+			witnessCompactnessRatio = Math.max(
+				witnessCompactnessRatio,
+				decisiveBodyCoverageRatio > 0.000001
+					? explanation.compactnessRatio
+					: witnessCompactnessRatio,
+			);
 			decayWeightSum += decay;
 			for (const queryTermIndex of explanation.matchedQueryTerms) {
 				explainedQueryTerms.add(queryTermIndex);
@@ -4648,13 +5397,24 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			competitionScore:
 				competitionScore +
 				unionCoverageRatio * 1.05 +
-				corroboratedCoverageRatio * 0.82,
+				corroboratedCoverageRatio * 0.82 +
+				coreWitnessScore * 1.08 +
+				coreWitnessCoverageRatio * 0.84 +
+				supportWitnessCoverageRatio * 0.32 +
+				witnessCompactnessRatio * 0.36,
 			unionCoverageRatio,
 			corroboratedCoverageRatio,
 			anchorCoverageRatio:
 				decayWeightSum > 0 ? anchorCoverageRatio / decayWeightSum : 0,
 			compactnessRatio:
 				decayWeightSum > 0 ? compactnessRatio / decayWeightSum : 0,
+			localExplanationMatchedQueryTerms: new Set(unionMatchedQueryTerms),
+			localExplanationCorroboratedQueryTerms: new Set(corroboratedQueryTerms),
+			coreWitnessScore,
+			coreWitnessCoverageRatio,
+			coreWitnessQueryTerms,
+			supportWitnessCoverageRatio,
+			witnessCompactnessRatio,
 		};
 	}
 
@@ -5468,12 +6228,27 @@ function buildQueryTermDecomposition(
 	const activeStats = termStats.filter((stat) => stat.hasAnyMatch);
 	const activeTermIndexes = new Set(activeStats.map((stat) => stat.index));
 	if (!planner) {
+		const decisiveBodyTermIndexes = new Set<number>();
+		const supportBodyTermIndexes = new Set<number>();
+		let isFirstBodyTerm = true;
+		for (const index of activeTermIndexes) {
+			if (isFirstBodyTerm) {
+				decisiveBodyTermIndexes.add(index);
+				isFirstBodyTerm = false;
+			} else {
+				supportBodyTermIndexes.add(index);
+			}
+		}
 		return {
 			queryKind: null,
 			activeTermIndexes,
 			anchorTermIndexes: new Set<number>(),
 			bodyTermIndexes: new Set(activeTermIndexes),
 			noiseTermIndexes: new Set<number>(),
+			metadataAnchorTermIndexes: new Set<number>(),
+			localeAnchorTermIndexes: new Set<number>(),
+			decisiveBodyTermIndexes,
+			supportBodyTermIndexes,
 		};
 	}
 
@@ -5483,6 +6258,20 @@ function buildQueryTermDecomposition(
 			anchorTermIndexes.add(stat.index);
 		}
 	}
+	const localeAnchorTermIndexes = new Set<number>();
+	for (const stat of activeStats) {
+		if (
+			anchorTermIndexes.has(stat.index) &&
+			isLikelyLocaleAnchorTerm(stat.queryTerm)
+		) {
+			localeAnchorTermIndexes.add(stat.index);
+		}
+	}
+	const metadataAnchorTermIndexes = new Set<number>(
+		Array.from(anchorTermIndexes).filter(
+			(index) => !localeAnchorTermIndexes.has(index),
+		),
+	);
 
 	const noiseTermIndexes = new Set<number>();
 	if (planner.queryKind !== "short_anchor") {
@@ -5522,6 +6311,46 @@ function buildQueryTermDecomposition(
 			noiseTermIndexes.delete(fallbackBodyStat.index);
 		}
 	}
+	const decisiveBodyTermIndexes = new Set<number>();
+	if (planner.queryKind !== "short_anchor" && bodyTermIndexes.size > 0) {
+		const desiredDecisiveBodyTermCount =
+			planner.queryKind === "mixed" || planner.queryKind === "sentence_like"
+				? Math.min(2, bodyTermIndexes.size)
+				: 1;
+		const rankedBodyStats = activeStats
+			.filter((stat) => bodyTermIndexes.has(stat.index))
+			.filter((stat) => !isLikelyLocaleAnchorTerm(stat.queryTerm))
+			.sort(compareFallbackBodyStats);
+		const minMatchedDocCount = rankedBodyStats.reduce(
+			(minimum, stat) => Math.min(minimum, stat.matchedDocCount),
+			Number.POSITIVE_INFINITY,
+		);
+		const maxBodyBias = rankedBodyStats.reduce(
+			(maximum, stat) =>
+				Math.max(maximum, stat.matchedDocCount - stat.matchedMetadataDocCount),
+			Number.NEGATIVE_INFINITY,
+		);
+		for (const stat of rankedBodyStats) {
+			if (decisiveBodyTermIndexes.size >= desiredDecisiveBodyTermCount) {
+				break;
+			}
+			if (
+				!isEligibleDecisiveBodyStat(stat, {
+					minMatchedDocCount,
+					maxBodyBias,
+				})
+			) {
+				continue;
+			}
+			decisiveBodyTermIndexes.add(stat.index);
+		}
+	}
+	const supportBodyTermIndexes = new Set<number>();
+	for (const index of bodyTermIndexes) {
+		if (!decisiveBodyTermIndexes.has(index)) {
+			supportBodyTermIndexes.add(index);
+		}
+	}
 
 	return {
 		queryKind: planner.queryKind,
@@ -5529,6 +6358,10 @@ function buildQueryTermDecomposition(
 		anchorTermIndexes,
 		bodyTermIndexes,
 		noiseTermIndexes,
+		metadataAnchorTermIndexes,
+		localeAnchorTermIndexes,
+		decisiveBodyTermIndexes,
+		supportBodyTermIndexes,
 	};
 }
 
@@ -5551,6 +6384,50 @@ function compareFallbackBodyStats(
 		return right.queryTerm.length - left.queryTerm.length;
 	}
 	return left.index - right.index;
+}
+
+function isLikelyLocaleAnchorTerm(term: string): boolean {
+	const normalized = term.trim().toLowerCase();
+	return (
+		normalized === "zh" ||
+		normalized === "en" ||
+		normalized === "cn" ||
+		normalized === "zh-cn" ||
+		normalized === "en-us" ||
+		normalized === "tech-zh" ||
+		normalized === "tech-en" ||
+		normalized === "english" ||
+		normalized === "chinese"
+	);
+}
+
+function isEligibleDecisiveBodyStat(
+	stat: FileSearchQueryTermStats,
+	context: {
+		minMatchedDocCount: number;
+		maxBodyBias: number;
+	},
+): boolean {
+	const bodyBias = stat.matchedDocCount - stat.matchedMetadataDocCount;
+	const normalized = stat.queryTerm.trim().toLowerCase();
+	if (normalized.length <= 2) {
+		return false;
+	}
+	if (/^\d+$/.test(normalized)) {
+		return false;
+	}
+	const looksSubstantive =
+		normalized.length >= 5 || /[\u4e00-\u9fff]/.test(normalized);
+	const rareEnough =
+		looksSubstantive &&
+		(stat.matchedDocCount <= context.minMatchedDocCount + 1 ||
+			stat.matchedDocCount <= 3);
+	const bodyBiasedEnough =
+		looksSubstantive &&
+		context.maxBodyBias > 0 &&
+		bodyBias >= context.maxBodyBias * 0.82;
+	const longConceptLikeTerm = normalized.length >= 8;
+	return rareEnough || bodyBiasedEnough || longConceptLikeTerm;
 }
 
 function buildQueryTermWeightMap(
