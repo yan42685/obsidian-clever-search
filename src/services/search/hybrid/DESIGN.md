@@ -1231,6 +1231,193 @@ Promotion gate:
 
 This roadmap is ordered by expected product value, not by implementation convenience.
 
+### Active reset: March 23, 2026
+
+The previous experimental branch tried to push quality further through more aggressive
+`decisiveBody` / `contentNoise` late scoring on top of the current passage stack.
+
+What happened:
+
+- that branch did not produce a stable benchmark lift
+- it also introduced a concrete regression on the `tech-zh pod data` full-concept-set case
+- repeated local coefficient tightening did not remove the regression cleanly
+
+Decision:
+
+- do not continue that branch
+- keep the current stable passage backend as the working baseline
+- the next quality push must come from a new decision mechanism, not from another round of generic late-score blending
+- treat this as a local ceiling signal for the current fixed-passage blending shape, not as evidence that the broader passage-first direction has run out of room
+
+Immediate execution rule:
+
+- no more broad coefficient sweeps unless attached to a narrow mechanism with its own benchmark slice
+- the next implementation should start with candidate-structure changes that can open a real gap over `MiniSearch`
+- benchmark work should be expanded only where it improves diagnosis, not just corpus size
+- do not reintroduce a broad `basename/title coverage` gate in mixed sorting; local experiments showed that it reopens `namespace vs pod-lifecycle` and `secret/configmap` regressions without lifting the full benchmark
+
+What now counts as a high-quality fruit:
+
+- it improves a concrete hard family that currently matters to real use, especially `topic_collision`, `body_path_anchor`, `partial_memory`, or mixed-script technical search
+- it changes the decision structure or candidate structure rather than adding another generic blend term
+- it preserves or improves the current global guardrails instead of borrowing wins from already-strong families
+- it is explainable in product terms: "why this note should beat its sibling" must be clearer after the mechanism lands
+
+What does **not** count as a high-quality fruit anymore:
+
+- another broad coefficient sweep over `bodyCore`, verifier, metadata, or mixed bonuses
+- a benchmark-only heuristic that wins one synthetic query family without a reusable decision rule
+- a larger or slower mechanism that cannot show a visible `top1` lift on the hard families
+
+Active execution order from here:
+
+1. strengthen route-specific candidate decision for `body + metadata-anchor` mixed queries
+2. add decisive local winner selection on close candidates instead of more additive scoring
+3. only then revisit selective topic corroboration, and only as a narrow decision lane
+4. keep benchmark additions small and diagnostic so iteration speed stays high
+
+#### Immediate mechanism track A: Document-Topic Corroboration
+
+Current status:
+
+- paused as a generic late-score path
+- the broad version did not produce a stable lift and introduced regression risk
+
+Why it still matters:
+
+- several remaining misses are not caused by missing lexical recall; they fail because multiple files share the same surface terms, but only one file has the correct dominant topic neighborhood
+- the problem is real, but the last attempted attachment point was too generic
+- it is especially relevant for `content_noisy`, concept-family collisions, and "query terms appear everywhere but only one note is really about that thing" failures
+
+Mechanism idea:
+
+- derive a lightweight per-file topic sketch from the existing sparse index rather than adding a heavy new embedding path
+- separate `topic terms` from `incidental local terms`
+- reward files whose strongest local windows are corroborated by the file-level topic sketch, and penalize files that only have one lucky local hit against an off-topic document body
+
+Design shape:
+
+- build a compact document-topic signature from rare/body-skewed terms and selective ordered pairs
+- keep the signature small and query-agnostic; it should be a corroboration channel, not a second full index
+- if revisited, use it only in a narrow late candidate decision stage after candidate narrowing, not as another broad score bonus
+- do not let topic corroboration override truly exact metadata-first lookups
+
+Primary targets:
+
+- `content_noisy`
+- same-family concept collisions like `configmap` vs `secret`
+- long notes where one paragraph matches but the note is mostly about something else
+
+Acceptance:
+
+- visible `top1` lift on `content_noisy`
+- fewer "one lucky paragraph beats the actually-about-this-topic file" cases
+- no material regression on `title_exact`, `title_prefix`, or obvious metadata-first queries
+
+Promotion rule:
+
+- do not resume this track unless a narrow decision-stage version clearly outperforms the current stable baseline on `topic_collision`-style cases without reopening `tech-zh pod data`
+
+#### Immediate mechanism track B: Body-Path-Anchor Candidate Decision
+
+Current status:
+
+- active
+- this is now the highest-priority implementation track
+
+Why this is now first:
+
+- the current planner correctly recognizes many path/body mixed queries, but the late decision is still too dependent on generic blended scores
+- `body_path_anchor` is already a relative strength; making it decisive is a high-value way to open a wider gap over `MiniSearch`
+- the failed `tech-zh pod data` experiment showed that this should not be solved by more generic body boosts
+- this same decision family also covers a large part of `topic_collision`: one candidate has the right anchor neighborhood, but another sibling has tempting broad body overlap
+
+Mechanism idea:
+
+- treat `bridge/path-like metadata + decisive body evidence` as its own decision family
+- require an explicit two-part win:
+  - a metadata/path anchor that places the file in the right neighborhood
+  - a compact local body explanation that actually says the target thing
+
+Design shape:
+
+- keep candidate generation permissive enough to retain recall
+- perform a dedicated late candidate decision over only the narrow path/body frontier
+- use route-specific evidence such as:
+  - bridge-term satisfaction
+  - path/folder/basename agreement
+  - compact body corroboration around the non-metadata terms
+  - anti-drift penalties when only the path matches but the body topic is wrong
+- avoid sharing this decision logic blindly with pure `path_like` or pure `body_local` queries
+
+Implementation rule:
+
+- favor explicit close-candidate winner selection over more additive route score terms
+- when two candidates are close, prefer the one whose metadata anchor and compact body explanation support the same interpretation
+- penalize candidates whose metadata/path anchor is attractive but whose best local body explanation resolves to a different topic
+
+Primary targets:
+
+- `body_path_anchor`
+- mixed Chinese-English technical queries like `tech-zh pod data`
+- `path/folder +正文` and `标题部分词 +正文` combinations
+
+Acceptance:
+
+- `body_path_anchor` benchmark family moves up materially in `top1`
+- `tech-zh` family gains come from route-specific decisions, not from global weight inflation
+- full-concept-set adversarial cases stop flipping to sibling documents with the wrong dominant topic
+- `topic_collision` should improve when the intended winner has a better anchor-supported local explanation, even if a sibling has broader generic body overlap
+
+#### Immediate benchmark track: Harder But Bounded
+
+Goal:
+
+- make benchmark failure modes more diagnostic without letting routine runtime drift too far upward
+
+Principles:
+
+- prefer harder queries over simply more queries
+- add small, mechanism-targeted families rather than another large generic corpus
+- every added family must correspond to a concrete failure mode or product scenario
+
+Next benchmark families to add:
+
+1. topic-collision hard set
+
+- same folder / same concept family / overlapping vocabulary
+- examples: `configmap` vs `secret`, `service` vs `ingress`, `deployment` vs `pod`
+- target: test whether the winner is the file actually about the query topic
+
+2. body-path-anchor hard set
+
+- path/folder clue plus partial body memory
+- include both clean and adversarial siblings
+- explicitly include mixed-script and locale-marker variants such as `tech-zh`
+
+3. partial-memory noisy set
+
+- only part of the true phrase is remembered
+- add common connector noise and broad domain terms
+- target: distinguish genuine topic corroboration from accidental dense term overlap
+
+4. metadata-body contradiction set
+
+- a file wins metadata/path evidence but loses body-topic evidence
+- a sibling wins body-topic evidence but has weaker or missing metadata agreement
+- target: validate the new route-specific decision boundary
+
+5. bilingual mirror discrimination set
+
+- zh/en mirrors, slug anchors, locale markers, and body clues
+- target: force the backend to choose the intended locale/file, not just any mirror sibling
+
+Runtime guardrail for the expanded benchmark:
+
+- keep the default benchmark under roughly the current day-to-day comfort range
+- if a harder family is expensive, gate it behind a dedicated mode rather than bloating the default suite
+- prefer adding `20-60` sharp queries over adding another broad corpus snapshot
+
 #### Priority 1: Query-Conditioned Local Window Competition
 
 Status:
@@ -1324,6 +1511,8 @@ Acceptance:
 Status:
 
 - valuable but should follow the two decision-structure upgrades above
+- the first query-time trial was rejected: computing selective ordered-pair signals inside local-window, locality, and verifier stages did not improve the benchmark and materially hurt latency
+- do not revive that three-stage query-time form; if this track returns, it should come back only as a much narrower admission / decision-stage mechanism or as a compact indexed sparse channel
 
 Why this is fourth:
 
@@ -1334,12 +1523,14 @@ Implementation targets:
 
 - index only high-signal ordered pairs / phrase signatures
 - use them for admission and local competition, not generic global score dumping
+- never recompute them broadly across local-window, locality, and verifier on the hot path
 - keep storage growth controlled and mechanism-specific
 
 Acceptance:
 
 - better top1 on sentence-fragment and compact local evidence queries
 - no material latency regression and no uncontrolled index blow-up
+- must beat the stable baseline on `topic_collision`-style cases without reopening `tech-zh pod data`
 
 #### Priority 5: Metadata Exact-Prefix Dominance Completion
 
@@ -1518,6 +1709,138 @@ Immediate next steps after the current pass:
 - improve partial-memory families with one correct anchor, two decisive body clues, and one intentionally misleading metadata token
 - strengthen bilingual duplicate / mirror-note hard cases only if they remain diagnostic at small query counts
 - if verifier early termination is revisited, require an upper-bound-backed or feature-local design; naive frontier clipping should not be promoted
+
+### Current execution reset: March 23, 2026 (fruit 1 + fruit 2)
+
+The next implementation phase should focus on only two mechanism-level fruits:
+
+1. decisive core witness lane
+2. contrastive sibling topic discriminator
+
+Reason for this narrowed scope:
+
+- the current backend is already near the ceiling of adding more blended score terms
+- the remaining benchmark gap is no longer mainly a retrieval-recall gap
+- the high-value misses now mostly come from choosing the wrong local explanation or the wrong sibling document after recall already succeeded
+- these two fruits attack the current weak zones directly: `content_noisy`, `partial_memory`, and `topic_collision`
+
+#### Fruit 1: Decisive Core Witness Lane
+
+Goal:
+
+- make ranking depend on whether a candidate contains a compact local witness span for the decisive remembered body clues, not just broad body overlap
+
+Problem it solves:
+
+- today the query decomposition is still too coarse: `anchor / body / noise`
+- that shape is enough to improve mixed queries, but not enough to distinguish decisive remembered clues from generic support words
+- as a result, `content_noisy` and `partial_memory` queries can still be hijacked by files with broad overlap and one lucky span
+
+Design shape:
+
+- upgrade decomposition from `anchor / body / noise` into a stronger decision-oriented split:
+  - metadata-anchor
+  - locale-anchor
+  - decisive-body-core
+  - support-body
+  - suspect-noise
+- compute a compact `core witness` score only from local spans that satisfy enough decisive body core
+- require support terms to help, but do not let them replace missing decisive body core
+- reward files whose best local explanation contains a witness span rather than only broad file-level co-occurrence
+- keep this lane narrow and local; do not turn it into another global additive score dump
+
+Implementation slices:
+
+1. stronger query-term role assignment
+
+- detect the rarest / most body-skewed query terms and mark them as `decisive-body-core`
+- demote broad connector-like or metadata-dominant terms into `suspect-noise`
+- keep path / basename / locale markers outside the body-core set even when they are rare
+
+2. local witness extraction
+
+- for each candidate passage / local explanation, compute whether there exists a compact span covering enough decisive body core
+- record witness compactness, witness coverage, and witness-support balance
+- when no witness exists, do not let broad coverage fully substitute for it on body-local or noisy-memory routes
+
+3. route-specific late decision
+
+- make `body_local`, `mixed_anchor`, and partial-memory-like cases depend more directly on witness presence
+- keep metadata-exact and short-anchor routes mostly isolated from this mechanism
+
+Primary targets:
+
+- `content_noisy`
+- `partial_memory`
+- the body-heavy part of `body_path_anchor` / `body_title_anchor`
+
+Acceptance:
+
+- visible `top1` lift on `content_noisy`
+- fewer partial-memory misses caused by one noisy term or broad off-topic overlap
+- no regression on exact metadata-first families
+
+#### Fruit 2: Contrastive Sibling Topic Discriminator
+
+Goal:
+
+- when recall already brings back multiple same-family candidates, choose the file whose local evidence matches its own dominant topic rather than the sibling that merely shares vocabulary
+
+Problem it solves:
+
+- current late decisions still rely too much on positive evidence inside each file independently
+- in `topic_collision` cases, multiple sibling files often look individually plausible because they share folder, title fragments, and domain vocabulary
+- the missing step is contrastive: the engine should ask why one sibling is more about this concept than the others
+
+Design shape:
+
+- build a lightweight contrastive topic sketch per file or duplicate family using already-available sparse signals
+- prefer body-skewed rare terms and stable concept markers, not broad domain words
+- use this sketch only on a narrow close-candidate frontier
+- compare candidates against each other; do not attach the sketch as another universal global bonus
+
+Implementation slices:
+
+1. sibling / family grouping
+
+- derive narrow comparison families from basename similarity, folder locality, locale mirror structure, or overlapping metadata anchors
+- only activate the contrastive mechanism when candidates are genuinely close and likely confusable
+
+2. lightweight contrastive signature
+
+- compute a small set of topic markers from body-skewed / rare terms already present in the sparse index
+- separate shared-family vocabulary from file-specific topic markers
+- no heavy positional index and no new embedding path
+
+3. contrastive late decision
+
+- on close-candidate families, reward the file whose best local explanation is corroborated by its contrastive topic sketch
+- penalize files that only win through shared family vocabulary plus one weak local hit
+- keep this mechanism after candidate narrowing so latency stays interactive
+
+Primary targets:
+
+- `topic_collision`
+- concept-family pairs such as `configmap` vs `secret`, `service` vs `ingress`, `namespace` vs `pod-lifecycle`
+- mixed locale mirror / sibling collisions when both files share Latin anchors
+
+Acceptance:
+
+- visible `top1` lift on `topic_collision`
+- fewer same-family sibling flips on full-concept-set queries
+- no reopening of `tech-zh pod data`-style regressions
+
+Execution order:
+
+1. land fruit 1 first, because it should improve the largest real-user failure family without increasing index size
+2. land fruit 2 second, because it depends on stronger local witness evidence to avoid becoming another broad topic bonus
+3. only after both land, reassess whether phrase-signature admission is still worth revisiting
+
+Non-goals during this phase:
+
+- no broad coefficient sweeps
+- no hot-path phrase-signature recomputation
+- no benchmark-only heuristic that cannot be explained as a reusable decision rule
 
 ## Future Improvements
 

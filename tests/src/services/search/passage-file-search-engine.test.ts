@@ -997,6 +997,38 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
+	test("keeps namespaces first for the benchmark query namespace pod object", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "namespace pod object",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+		);
+	});
+
 	test("keeps configmap first for the benchmark query tech-zh pod data", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
@@ -1078,6 +1110,190 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe(
 			"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
 		);
+	});
+
+	test("keeps configmap first for the body-title query configmap pod data", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "configmap pod data",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+		);
+	});
+
+	test("keeps secret first for secret pod data across the full concept set", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/controllers/deployment.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "secret pod data",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/configuration/secret.md",
+		);
+	});
+
+	test("keeps ingress first for ingressclass service across the full concept set", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/controllers/deployment.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "ingressclass service",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+		);
+	});
+
+	test("keeps zh ingress first for tech-zh ingress service to across the full concept set", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/workloads/controllers/deployment.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "tech-zh ingress service to",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+		);
+	});
+
+	test("prefers a title-anchor body match over a sibling with broader body overlap", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/playbooks/internal-links.md",
+				basename: "internal links playbook",
+				folder: "notes playbooks",
+				content:
+					"internal links create blocks that keep note navigation stable during editing and large refactors",
+			},
+			{
+				path: "notes/drifts/aliases.md",
+				basename: "aliases drift notes",
+				folder: "notes drifts",
+				content:
+					"aliases create blocks and aliases create links repeatedly in body notes, but the page is mainly about drift cleanup",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "internal links create blocks",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("notes/playbooks/internal-links.md");
 	});
 
 	test("uses the char channel when the tokenizer provides no Han tokens", async () => {

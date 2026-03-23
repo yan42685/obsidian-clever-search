@@ -212,12 +212,18 @@ type RankedMatchedFile = MatchedFile & {
 	shortAnchorLaneTier: number;
 	scriptFitScore: number;
 	pathLocaleFitScore: number;
+	titleAnchorDecisionScore: number;
+	pathAnchorDecisionScore: number;
 	bestPassageScore: number;
 	localExplanationCompetitionScore: number;
 	decisiveLocalVerifierScore: number;
 	verifierSupportSpanRatio: number;
 	verifierAnchorAgreementRatio: number;
 	verifierTemplatePenaltyRatio: number;
+	bodyEvidenceCoverageRatio: number;
+	anchorSatisfiedRatio: number;
+	metadataOnlyNoiseRatio: number;
+	bodyAnchorSynergyRatio: number;
 	basenameAliasCoverageRatio: number;
 	basenameAliasAnchorRatio: number;
 	headingCoverageRatio: number;
@@ -1946,6 +1952,55 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			scriptFitScore,
 			pathLocaleFitScore,
 		});
+		const titleAnchorDecisionScore =
+			this.computeTitleAnchorSupportedBodyDecisionScore({
+				basenameAliasCoverageRatio,
+				basenameAliasAnchorRatio,
+				headingCoverageRatio,
+				headingAnchorRatio,
+				bodyEvidenceCoverageRatio:
+					queryDecompositionSignals.bodyEvidenceCoverageRatio,
+				anchorSatisfiedRatio: queryDecompositionSignals.anchorSatisfiedRatio,
+				metadataOnlyNoiseRatio:
+					queryDecompositionSignals.metadataOnlyNoiseRatio,
+				bodyAnchorSynergyRatio:
+					queryDecompositionSignals.bodyAnchorSynergyRatio,
+				localExplanationCompetitionScore:
+					passageSetSignals.localExplanationCompetitionScore,
+				decisiveLocalVerifierScore:
+					passageSetSignals.decisiveLocalVerifierScore,
+				verifierSupportSpanRatio:
+					passageSetSignals.verifierSupportSpanRatio,
+				verifierAnchorAgreementRatio:
+					passageSetSignals.verifierAnchorAgreementRatio,
+				verifierTemplatePenaltyRatio:
+					passageSetSignals.verifierTemplatePenaltyRatio,
+				scriptFitScore,
+				pathLocaleFitScore,
+			});
+		const pathAnchorDecisionScore = this.computePathAnchorSupportedBodyDecisionScore({
+			pathCoverageRatio,
+			pathAnchorRatio,
+			bodyEvidenceCoverageRatio:
+				queryDecompositionSignals.bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio: queryDecompositionSignals.anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio:
+				queryDecompositionSignals.metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio:
+				queryDecompositionSignals.bodyAnchorSynergyRatio,
+			localExplanationCompetitionScore:
+				passageSetSignals.localExplanationCompetitionScore,
+			decisiveLocalVerifierScore:
+				passageSetSignals.decisiveLocalVerifierScore,
+			verifierSupportSpanRatio:
+				passageSetSignals.verifierSupportSpanRatio,
+			verifierAnchorAgreementRatio:
+				passageSetSignals.verifierAnchorAgreementRatio,
+			verifierTemplatePenaltyRatio:
+				passageSetSignals.verifierTemplatePenaltyRatio,
+			scriptFitScore,
+			pathLocaleFitScore,
+		});
 		return {
 			path: state.filePath,
 			queryTerms,
@@ -1958,6 +2013,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			shortAnchorLaneTier,
 			scriptFitScore,
 			pathLocaleFitScore,
+			titleAnchorDecisionScore,
+			pathAnchorDecisionScore,
 			bestPassageScore: state.bestPassageScore,
 			localExplanationCompetitionScore:
 				passageSetSignals.localExplanationCompetitionScore,
@@ -1969,6 +2026,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				passageSetSignals.verifierAnchorAgreementRatio,
 			verifierTemplatePenaltyRatio:
 				passageSetSignals.verifierTemplatePenaltyRatio,
+			bodyEvidenceCoverageRatio:
+				queryDecompositionSignals.bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio: queryDecompositionSignals.anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio:
+				queryDecompositionSignals.metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio:
+				queryDecompositionSignals.bodyAnchorSynergyRatio,
 			basenameAliasCoverageRatio,
 			basenameAliasAnchorRatio,
 			headingCoverageRatio,
@@ -2132,11 +2196,75 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "mixed_anchor") {
 			return results.sort((left, right) => {
+				const titleAnchorGate = Math.max(
+					left.basenameAliasAnchorRatio,
+					right.basenameAliasAnchorRatio,
+				);
+				const titleAnchorDecisionGap = Math.abs(
+					right.titleAnchorDecisionScore - left.titleAnchorDecisionScore,
+				);
+				if (
+					titleAnchorGate >= 0.18 &&
+					Math.abs(
+						right.basenameAliasAnchorRatio - left.basenameAliasAnchorRatio,
+					) >= 0.14 &&
+					titleAnchorDecisionGap >= 1.1 &&
+					Math.abs(right.queryRouteScore - left.queryRouteScore) <= 30 &&
+					Math.abs((right.score ?? 0) - (left.score ?? 0)) <= 24
+				) {
+					return right.titleAnchorDecisionScore - left.titleAnchorDecisionScore;
+				}
+				const pathAnchorGate = Math.max(
+					left.pathCoverageRatio,
+					left.pathAnchorRatio,
+					right.pathCoverageRatio,
+					right.pathAnchorRatio,
+				);
+				const pathAnchorGap = Math.max(
+					Math.abs(left.pathCoverageRatio - right.pathCoverageRatio),
+					Math.abs(left.pathAnchorRatio - right.pathAnchorRatio),
+				);
+				const pathAnchorDecisionGap = Math.abs(
+					right.pathAnchorDecisionScore - left.pathAnchorDecisionScore,
+				);
+				if (
+					pathAnchorGate >= 0.18 &&
+					pathAnchorGap >= 0.14 &&
+					pathAnchorDecisionGap >= 1.1 &&
+					Math.abs(right.queryRouteScore - left.queryRouteScore) <= 42 &&
+					Math.abs((right.score ?? 0) - (left.score ?? 0)) <= 30
+				) {
+					return right.pathAnchorDecisionScore - left.pathAnchorDecisionScore;
+				}
 				const localePreference = localeContext
 					? this.compareMirrorLocalePreference(left, right, localeContext)
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
+				}
+				const candidateDecision = this.compareAnchorSupportedBodyDecision(
+					left,
+					right,
+					queryRoute,
+				);
+				if (candidateDecision !== 0) {
+					return candidateDecision;
+				}
+				const bodyOnlyTopicDecision = this.compareBodyOnlyTopicDecision(
+					left,
+					right,
+					queryRoute,
+				);
+				if (bodyOnlyTopicDecision !== 0) {
+					return bodyOnlyTopicDecision;
+				}
+				const conceptCollisionDecision = this.compareConceptCollisionDecision(
+					left,
+					right,
+					queryRoute,
+				);
+				if (conceptCollisionDecision !== 0) {
+					return conceptCollisionDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -2253,8 +2381,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
 		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
-		const queryRouteGapThreshold = preference.explicit ? 18 : 12;
-		const scoreGapThreshold = preference.explicit ? 10 : 7;
+		const queryRouteGapThreshold = preference.explicit ? 48 : 36;
+		const scoreGapThreshold = preference.explicit ? 32 : 24;
 		if (
 			queryRouteScoreGap > queryRouteGapThreshold ||
 			scoreGap > scoreGapThreshold
@@ -2262,6 +2390,161 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return 0;
 		}
 		return leftLocale === preference.locale ? -1 : 1;
+	}
+
+	private compareAnchorSupportedBodyDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+	): number {
+		if (queryRoute !== "mixed_anchor") {
+			return 0;
+		}
+		const leftAnchorGate = Math.max(
+			left.basenameAliasCoverageRatio,
+			left.basenameAliasAnchorRatio,
+			left.pathCoverageRatio,
+			left.pathAnchorRatio,
+		);
+		const rightAnchorGate = Math.max(
+			right.basenameAliasCoverageRatio,
+			right.basenameAliasAnchorRatio,
+			right.pathCoverageRatio,
+			right.pathAnchorRatio,
+		);
+		if (Math.max(leftAnchorGate, rightAnchorGate) < 0.18) {
+			return 0;
+		}
+		const anchorGap = Math.max(
+			Math.abs(left.basenameAliasCoverageRatio - right.basenameAliasCoverageRatio),
+			Math.abs(left.basenameAliasAnchorRatio - right.basenameAliasAnchorRatio),
+			Math.abs(left.pathCoverageRatio - right.pathCoverageRatio),
+			Math.abs(left.pathAnchorRatio - right.pathAnchorRatio),
+		);
+		const mirrorLocaleVariants = this.areMirrorLocaleVariants(left.path, right.path);
+		if (!mirrorLocaleVariants && anchorGap < 0.14) {
+			return 0;
+		}
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		const queryRouteGapThreshold = 24;
+		const scoreGapThreshold = 18;
+		if (
+			queryRouteScoreGap > queryRouteGapThreshold ||
+			scoreGap > scoreGapThreshold
+		) {
+			return 0;
+		}
+		const leftDecisionScore = this.computeAnchorSupportedBodyDecisionScore(
+			left,
+			queryRoute,
+		);
+		const rightDecisionScore = this.computeAnchorSupportedBodyDecisionScore(
+			right,
+			queryRoute,
+		);
+		const decisionGap = rightDecisionScore - leftDecisionScore;
+		if (Math.abs(decisionGap) < 1.15) {
+			return 0;
+		}
+		return decisionGap;
+	}
+
+	private compareConceptCollisionDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+	): number {
+		if (queryRoute !== "mixed_anchor") {
+			return 0;
+		}
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		if (queryRouteScoreGap > 22 || scoreGap > 20) {
+			return 0;
+		}
+		const decisiveVerifierGate = Math.max(
+			left.decisiveLocalVerifierScore,
+			right.decisiveLocalVerifierScore,
+		);
+		const localExplanationGate = Math.max(
+			left.localExplanationCompetitionScore,
+			right.localExplanationCompetitionScore,
+		);
+		const bodyEvidenceGate = Math.max(
+			left.bodyEvidenceCoverageRatio,
+			right.bodyEvidenceCoverageRatio,
+		);
+		const anchorSupportGate = Math.max(
+			left.basenameAliasAnchorRatio,
+			left.pathAnchorRatio,
+			right.basenameAliasAnchorRatio,
+			right.pathAnchorRatio,
+		);
+		if (
+			anchorSupportGate < 0.12 ||
+			decisiveVerifierGate < 0.75 ||
+			localExplanationGate < 0.32 ||
+			bodyEvidenceGate < 0.22
+		) {
+			return 0;
+		}
+		const leftDecisionScore = this.computeConceptCollisionDecisionScore(left);
+		const rightDecisionScore = this.computeConceptCollisionDecisionScore(right);
+		const decisionGap = rightDecisionScore - leftDecisionScore;
+		if (Math.abs(decisionGap) < 1.05) {
+			return 0;
+		}
+		return decisionGap;
+	}
+
+	private compareBodyOnlyTopicDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+	): number {
+		if (queryRoute !== "mixed_anchor") {
+			return 0;
+		}
+		const anchorSupportGate = Math.max(
+			left.basenameAliasAnchorRatio,
+			left.pathAnchorRatio,
+			right.basenameAliasAnchorRatio,
+			right.pathAnchorRatio,
+		);
+		if (anchorSupportGate >= 0.12) {
+			return 0;
+		}
+		const bodyEvidenceGate = Math.max(
+			left.bodyEvidenceCoverageRatio,
+			right.bodyEvidenceCoverageRatio,
+		);
+		const localExplanationGate = Math.max(
+			left.localExplanationCompetitionScore,
+			right.localExplanationCompetitionScore,
+		);
+		const anchorSatisfiedGate = Math.max(
+			left.anchorSatisfiedRatio,
+			right.anchorSatisfiedRatio,
+		);
+		if (bodyEvidenceGate < 0.22 || localExplanationGate < 0.3) {
+			return 0;
+		}
+		if (anchorSatisfiedGate >= 0.08) {
+			return 0;
+		}
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		if (queryRouteScoreGap > 12 || scoreGap > 8) {
+			return 0;
+		}
+		const leftDecisionScore = this.computeBodyOnlyTopicDecisionScore(left);
+		const rightDecisionScore = this.computeBodyOnlyTopicDecisionScore(right);
+		const decisionGap = rightDecisionScore - leftDecisionScore;
+		if (Math.abs(decisionGap) < 0.7) {
+			return 0;
+		}
+		return decisionGap;
 	}
 
 	private determineExperimentalQueryRoute(
@@ -2278,6 +2561,237 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			default:
 				return "body_local";
 		}
+	}
+
+	private computeAnchorSupportedBodyDecisionScore(
+		result: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+	): number {
+		const titleAnchorSignal =
+			result.basenameAliasCoverageRatio * 1.8 +
+			result.basenameAliasAnchorRatio * 2.4 +
+			result.headingCoverageRatio * 0.28 +
+			result.headingAnchorRatio * 0.46;
+		const pathAnchorSignal =
+			result.pathCoverageRatio * 1.55 +
+			result.pathAnchorRatio * 2.15 +
+			result.metadataLaneTier * 0.85 +
+			result.metadataLaneScore * 0.06;
+		const pathSupportedBodyBonus =
+			result.pathCoverageRatio > 0 &&
+			result.bodyEvidenceCoverageRatio >= 0.35
+				? result.pathCoverageRatio * 10.5 +
+					result.pathAnchorRatio * 12.5 +
+					result.bodyAnchorSynergyRatio * 3.8 +
+					result.localExplanationCompetitionScore * 0.44 +
+					result.verifierSupportSpanRatio * 2.4
+				: 0;
+		const activeAnchorSignal =
+			queryRoute === "path_anchor"
+				? pathAnchorSignal
+				: Math.max(titleAnchorSignal, pathAnchorSignal);
+		const compactBodySupportSignal =
+			result.bodyEvidenceCoverageRatio * 5 +
+			result.bodyAnchorSynergyRatio * 5.6 +
+			result.bestPassageScore * 0.12 +
+			result.localExplanationCompetitionScore * 0.92 +
+			result.decisiveLocalVerifierScore * 0.16 +
+			result.verifierSupportSpanRatio * 3.2 +
+			result.verifierAnchorAgreementRatio * 3.1;
+		const supportedAnchorBodyBonus =
+			activeAnchorSignal >= 0.3 && result.bodyEvidenceCoverageRatio >= 0.16
+				? activeAnchorSignal * 4.6 + compactBodySupportSignal * 1.38
+				: 0;
+		const anchorDriftPenalty = Math.max(
+			0,
+			activeAnchorSignal * 0.72 -
+				(result.bodyAnchorSynergyRatio * 3.2 +
+					result.localExplanationCompetitionScore * 0.62 +
+					result.verifierSupportSpanRatio * 2.2),
+		);
+		return (
+			supportedAnchorBodyBonus +
+			pathSupportedBodyBonus +
+			compactBodySupportSignal +
+			result.anchorSatisfiedRatio * 2.8 -
+			result.metadataOnlyNoiseRatio * 3.2 -
+			result.verifierTemplatePenaltyRatio * 2.4 -
+			anchorDriftPenalty * 3.1 +
+			result.pathLocaleFitScore * 4.4 +
+			result.scriptFitScore * 0.55
+		);
+	}
+
+	private computeConceptCollisionDecisionScore(
+		result: RankedMatchedFile,
+	): number {
+		const anchorSupportSignal =
+			result.basenameAliasAnchorRatio * 2.8 +
+			result.pathAnchorRatio * 2.25 +
+			result.headingAnchorRatio * 0.42 +
+			result.pathCoverageRatio * 0.35;
+		const localClosureSignal =
+			result.bodyEvidenceCoverageRatio * 5.6 +
+			result.bodyAnchorSynergyRatio * 5.8 +
+			result.localExplanationCompetitionScore * 1.55 +
+			result.decisiveLocalVerifierScore * 2.2 +
+			result.verifierSupportSpanRatio * 4.2 +
+			result.verifierAnchorAgreementRatio * 3 +
+			result.bestPassageScore * 0.05;
+		const driftPenalty = Math.max(
+			0,
+			(result.basenameAliasCoverageRatio * 0.85 +
+				result.pathCoverageRatio * 0.7 +
+				result.headingCoverageRatio * 0.28) -
+				(result.bodyAnchorSynergyRatio * 2.4 +
+					result.localExplanationCompetitionScore * 0.95 +
+					result.verifierSupportSpanRatio * 1.5),
+		);
+		return (
+			localClosureSignal +
+			anchorSupportSignal +
+			result.anchorSatisfiedRatio * 1.8 -
+			result.metadataOnlyNoiseRatio * 2.5 -
+			result.verifierTemplatePenaltyRatio * 2.8 -
+			driftPenalty * 2.4 +
+			result.pathLocaleFitScore * 0.9 +
+			result.scriptFitScore * 0.25
+		);
+	}
+
+	private computeBodyOnlyTopicDecisionScore(
+		result: RankedMatchedFile,
+	): number {
+		const verifierDriftPenalty = Math.max(
+			0,
+			result.decisiveLocalVerifierScore -
+				(result.localExplanationCompetitionScore * 2.5 +
+					result.verifierSupportSpanRatio * 7),
+		);
+		return (
+			result.bodyEvidenceCoverageRatio * 4.6 +
+			result.localExplanationCompetitionScore * 2.25 +
+			result.verifierSupportSpanRatio * 1.4 +
+			result.bestPassageScore * 0.03 -
+			result.metadataOnlyNoiseRatio * 1.8 -
+			result.verifierTemplatePenaltyRatio * 1.5 -
+			verifierDriftPenalty * 0.85 +
+			result.scriptFitScore * 0.2
+		);
+	}
+
+	private computeTitleAnchorSupportedBodyDecisionScore(params: {
+		basenameAliasCoverageRatio: number;
+		basenameAliasAnchorRatio: number;
+		headingCoverageRatio: number;
+		headingAnchorRatio: number;
+		bodyEvidenceCoverageRatio: number;
+		anchorSatisfiedRatio: number;
+		metadataOnlyNoiseRatio: number;
+		bodyAnchorSynergyRatio: number;
+		localExplanationCompetitionScore: number;
+		decisiveLocalVerifierScore: number;
+		verifierSupportSpanRatio: number;
+		verifierAnchorAgreementRatio: number;
+		verifierTemplatePenaltyRatio: number;
+		scriptFitScore: number;
+		pathLocaleFitScore: number;
+	}): number {
+		const {
+			basenameAliasCoverageRatio,
+			basenameAliasAnchorRatio,
+			headingCoverageRatio,
+			headingAnchorRatio,
+			bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio,
+			localExplanationCompetitionScore,
+			decisiveLocalVerifierScore,
+			verifierSupportSpanRatio,
+			verifierAnchorAgreementRatio,
+			verifierTemplatePenaltyRatio,
+			scriptFitScore,
+			pathLocaleFitScore,
+		} = params;
+		const titleAnchorSignal =
+			basenameAliasCoverageRatio * 9.5 +
+			basenameAliasAnchorRatio * 11.5 +
+			headingCoverageRatio * 0.8 +
+			headingAnchorRatio * 1.2;
+		const compactBodySupportSignal =
+			bodyEvidenceCoverageRatio * 4.6 +
+			bodyAnchorSynergyRatio * 5.2 +
+			localExplanationCompetitionScore * 0.85 +
+			decisiveLocalVerifierScore * 0.18 +
+			verifierSupportSpanRatio * 2.6 +
+			verifierAnchorAgreementRatio * 2.5;
+		const titleDriftPenalty = Math.max(
+			0,
+			headingCoverageRatio * 0.45 +
+				headingAnchorRatio * 0.55 -
+				(basenameAliasCoverageRatio * 1.8 +
+					basenameAliasAnchorRatio * 2.1),
+		);
+		return (
+			titleAnchorSignal +
+			compactBodySupportSignal +
+			anchorSatisfiedRatio * 2.4 -
+			metadataOnlyNoiseRatio * 2.6 -
+			verifierTemplatePenaltyRatio * 2.2 -
+			titleDriftPenalty * 4.5 +
+			scriptFitScore * 0.45 +
+			pathLocaleFitScore * 0.2
+		);
+	}
+
+	private computePathAnchorSupportedBodyDecisionScore(params: {
+		pathCoverageRatio: number;
+		pathAnchorRatio: number;
+		bodyEvidenceCoverageRatio: number;
+		anchorSatisfiedRatio: number;
+		metadataOnlyNoiseRatio: number;
+		bodyAnchorSynergyRatio: number;
+		localExplanationCompetitionScore: number;
+		decisiveLocalVerifierScore: number;
+		verifierSupportSpanRatio: number;
+		verifierAnchorAgreementRatio: number;
+		verifierTemplatePenaltyRatio: number;
+		scriptFitScore: number;
+		pathLocaleFitScore: number;
+	}): number {
+		const {
+			pathCoverageRatio,
+			pathAnchorRatio,
+			bodyEvidenceCoverageRatio,
+			anchorSatisfiedRatio,
+			metadataOnlyNoiseRatio,
+			bodyAnchorSynergyRatio,
+			localExplanationCompetitionScore,
+			decisiveLocalVerifierScore,
+			verifierSupportSpanRatio,
+			verifierAnchorAgreementRatio,
+			verifierTemplatePenaltyRatio,
+			scriptFitScore,
+			pathLocaleFitScore,
+		} = params;
+		const pathAnchorSignal =
+			pathCoverageRatio * 10.2 + pathAnchorRatio * 12.4 + pathLocaleFitScore * 1.8;
+		const compactBodySupportSignal =
+			bodyEvidenceCoverageRatio * 4.2 +
+			bodyAnchorSynergyRatio * 4.8 +
+			localExplanationCompetitionScore * 0.72 +
+			decisiveLocalVerifierScore * 0.12 +
+			verifierSupportSpanRatio * 2.8 +
+			verifierAnchorAgreementRatio * 2.4;
+		return (
+			pathAnchorSignal +
+			compactBodySupportSignal +
+			anchorSatisfiedRatio * 2.2 -
+			metadataOnlyNoiseRatio * 2.6 -
+			verifierTemplatePenaltyRatio * 2.1 +
+			scriptFitScore * 0.35
+		);
 	}
 
 	private computeQueryRouteScore(params: {
@@ -2437,6 +2951,28 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					localExplanationCorroboratedCoverageRatio * 1.2 +
 					passageWindowCompactnessRatio * 1.1),
 		) * verifierOverreachRiskRatio;
+		const bodyOnlyVerifierOverreachRiskRatio = Math.max(
+			0,
+			1 -
+				Math.min(
+					1,
+					anchorSatisfiedRatio * 1.9 +
+					titleHeadingAnchorRatio * 1.8 +
+						pathAnchorRatio * 1.6 +
+						localExplanationCorroboratedCoverageRatio * 1.25 +
+						passageCorroboratedCoverageRatio * 1.1 +
+						activeVerifierAnchorAgreementRatio * 0.8,
+				),
+		);
+		const bodyOnlyVerifierOverreachPenalty = Math.max(
+			0,
+			decisiveLocalVerifierScore -
+				(localExplanationCompetitionScore * 1.65 +
+					localExplanationCorroboratedCoverageRatio * 4.8 +
+					passageCorroboratedCoverageRatio * 4 +
+					activeVerifierSupportSpanRatio * 1.6 +
+					passageWindowCoverageRatio * 1.2),
+		) * bodyOnlyVerifierOverreachRiskRatio;
 		const exactBasenameCorroborationScore =
 			basenameAliasExactRatio >= 0.999
 				? bodyCoreScore * 1.05 +
@@ -2478,6 +3014,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			activeVerifierExactPhraseRatio * 0.95 -
 			activeVerifierTemplatePenaltyRatio * 2.1 +
 			verifierOverreachPenalty * -1.45 +
+			bodyOnlyVerifierOverreachPenalty * -0.95 +
 			weakDuplicateFamilyPenaltyRatio * -7.2 +
 			passageAnchorAgreementRatio * 2.4 -
 			passageFragmentationRatio * 4.6 +
@@ -2559,6 +3096,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					activeVerifierExactPhraseRatio * 1.2 -
 					activeVerifierTemplatePenaltyRatio * 2.8 +
 					verifierOverreachPenalty * -0.9 +
+					bodyOnlyVerifierOverreachPenalty * -1.15 +
 					weakDuplicateFamilyPenaltyRatio * -6.2 +
 					passageAnchorAgreementRatio * 2 -
 					passageFragmentationRatio * 2.4 +
@@ -2587,6 +3125,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					activeVerifierAnchorAgreementRatio * 0.3 -
 					activeVerifierTemplatePenaltyRatio * 0.45 +
 					verifierOverreachPenalty * -0.2 +
+					bodyOnlyVerifierOverreachPenalty * -0.35 +
 					weakDuplicateFamilyPenaltyRatio * -0.8 +
 					passageAnchorAgreementRatio * 1.7 -
 					passageFragmentationRatio * 2.1 +
@@ -2627,6 +3166,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						activeVerifierExactPhraseRatio * 0.25 -
 						activeVerifierTemplatePenaltyRatio * 0.6 +
 						verifierOverreachPenalty * -0.35 +
+						bodyOnlyVerifierOverreachPenalty * -0.28 +
 						weakDuplicateFamilyPenaltyRatio * -0.7 +
 						passageAnchorAgreementRatio * 2.6 -
 						passageFragmentationRatio * 2.2 +
@@ -4966,29 +5506,18 @@ function buildQueryTermDecomposition(
 		}
 	}
 
-	if (bodyTermIndexes.size === 0 && planner.queryKind !== "short_anchor") {
-		const fallbackBodyStat = activeStats
+	if (planner.queryKind !== "short_anchor") {
+		const desiredBodyTermCount = planner.queryKind === "mixed" ? 2 : 1;
+		const fallbackBodyStats = activeStats
 			.filter((stat) => !anchorTermIndexes.has(stat.index))
-			.sort((left, right) => {
-				const leftBodyBias =
-					left.matchedDocCount - left.matchedMetadataDocCount;
-				const rightBodyBias =
-					right.matchedDocCount - right.matchedMetadataDocCount;
-				if (leftBodyBias !== rightBodyBias) {
-					return rightBodyBias - leftBodyBias;
-				}
-				if (left.hasExactMatch !== right.hasExactMatch) {
-					return left.hasExactMatch ? -1 : 1;
-				}
-				if (left.matchedDocCount !== right.matchedDocCount) {
-					return left.matchedDocCount - right.matchedDocCount;
-				}
-				if (left.queryTerm.length !== right.queryTerm.length) {
-					return right.queryTerm.length - left.queryTerm.length;
-				}
-				return left.index - right.index;
-			})[0];
-		if (fallbackBodyStat) {
+			.sort(compareFallbackBodyStats);
+		for (const fallbackBodyStat of fallbackBodyStats) {
+			if (bodyTermIndexes.size >= desiredBodyTermCount) {
+				break;
+			}
+			if (bodyTermIndexes.has(fallbackBodyStat.index)) {
+				continue;
+			}
 			bodyTermIndexes.add(fallbackBodyStat.index);
 			noiseTermIndexes.delete(fallbackBodyStat.index);
 		}
@@ -5001,6 +5530,27 @@ function buildQueryTermDecomposition(
 		bodyTermIndexes,
 		noiseTermIndexes,
 	};
+}
+
+function compareFallbackBodyStats(
+	left: FileSearchQueryTermStats,
+	right: FileSearchQueryTermStats,
+): number {
+	const leftBodyBias = left.matchedDocCount - left.matchedMetadataDocCount;
+	const rightBodyBias = right.matchedDocCount - right.matchedMetadataDocCount;
+	if (leftBodyBias !== rightBodyBias) {
+		return rightBodyBias - leftBodyBias;
+	}
+	if (left.hasExactMatch !== right.hasExactMatch) {
+		return left.hasExactMatch ? -1 : 1;
+	}
+	if (left.matchedDocCount !== right.matchedDocCount) {
+		return left.matchedDocCount - right.matchedDocCount;
+	}
+	if (left.queryTerm.length !== right.queryTerm.length) {
+		return right.queryTerm.length - left.queryTerm.length;
+	}
+	return left.index - right.index;
 }
 
 function buildQueryTermWeightMap(

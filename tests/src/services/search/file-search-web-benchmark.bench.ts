@@ -37,6 +37,7 @@ type QueryType =
 	| "title_prefix"
 	| "content_dense"
 	| "content_noisy"
+	| "topic_collision"
 	| "unordered_terms"
 	| "mixed_anchor"
 	| "body_path_anchor"
@@ -189,6 +190,7 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"title_prefix",
 	"content_dense",
 	"content_noisy",
+	"topic_collision",
 	"unordered_terms",
 	"mixed_anchor",
 	"body_path_anchor",
@@ -441,6 +443,7 @@ function getDefaultSuiteForType(type: QueryType): BenchmarkSuite {
 			return "core";
 		case "unordered_terms":
 		case "content_noisy":
+		case "topic_collision":
 		case "mixed_anchor":
 		case "body_path_anchor":
 		case "body_title_anchor":
@@ -1087,6 +1090,182 @@ function createManualBenchmarkCorpus(
 			query: "retrieval 前沿 checkpoint trimming",
 			relevantPath: "adversarial/pkm-en/projects/retrieval-frontier-en.md",
 			bucket: "pkm-en",
+			type: "bilingual_mirror",
+			suite: "adversarial",
+		},
+		{
+			query: "configmap pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+			bucket: "tech-en",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "secret pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/secret.md",
+			bucket: "tech-en",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "ingressclass service",
+			relevantPath: "tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			bucket: "tech-en",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "service pod traffic",
+			relevantPath: "tech-en/content/en/docs/concepts/services-networking/service.md",
+			bucket: "tech-en",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "deployment pod rollout",
+			relevantPath:
+				"tech-en/content/en/docs/concepts/workloads/controllers/deployment.md",
+			bucket: "tech-en",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "namespace pod object",
+			relevantPath:
+				"tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+			bucket: "tech-en",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh pod data",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			bucket: "tech-zh",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh secret pod data",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			bucket: "tech-zh",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh ingress service to",
+			relevantPath:
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			bucket: "tech-zh",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh service pod traffic",
+			relevantPath:
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/service.md",
+			bucket: "tech-zh",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh deployment pod rollout",
+			relevantPath:
+				"tech-zh/content/zh-cn/docs/concepts/workloads/controllers/deployment.md",
+			bucket: "tech-zh",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh namespace pod object",
+			relevantPath:
+				"tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+			bucket: "tech-zh",
+			type: "topic_collision",
+			suite: "adversarial",
+		},
+		{
+			query: "concepts configuration pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+			bucket: "tech-en",
+			type: "body_path_anchor",
+			suite: "adversarial",
+		},
+		{
+			query: "concepts ingressclass service",
+			relevantPath: "tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			bucket: "tech-en",
+			type: "body_path_anchor",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh concepts pod data",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			bucket: "tech-zh",
+			type: "body_path_anchor",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh concepts ingress service",
+			relevantPath:
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			bucket: "tech-zh",
+			type: "body_path_anchor",
+			suite: "adversarial",
+		},
+		{
+			query: "configuration sensitive pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/secret.md",
+			bucket: "tech-en",
+			type: "anchor_contradiction",
+			suite: "adversarial",
+		},
+		{
+			query: "configuration mounted files pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+			bucket: "tech-en",
+			type: "anchor_contradiction",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh configuration pod sensitive data",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			bucket: "tech-zh",
+			type: "anchor_contradiction",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh configuration mounted pod data",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			bucket: "tech-zh",
+			type: "anchor_contradiction",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-en configmap pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+			bucket: "tech-en",
+			type: "bilingual_mirror",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-en ingress service",
+			relevantPath: "tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			bucket: "tech-en",
+			type: "bilingual_mirror",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh configmap pod data",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			bucket: "tech-zh",
+			type: "bilingual_mirror",
+			suite: "adversarial",
+		},
+		{
+			query: "tech-zh ingress service",
+			relevantPath:
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			bucket: "tech-zh",
 			type: "bilingual_mirror",
 			suite: "adversarial",
 		},
