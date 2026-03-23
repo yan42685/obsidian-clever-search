@@ -3302,12 +3302,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				passageState.exactMatchedQueryTerms,
 				new Set(positionsByQueryTerm.keys()),
 			) / Math.max(1, positionsByQueryTerm.size);
-		const exactPhraseHit = hasExactPhraseMatch(
-			passage.tokenSequence,
-			queryTerms,
-			positionsByQueryTerm,
-			rawQueryText,
-		);
 		const passageAnchorCoverage =
 			planner && planner.anchorTermIndexes.size > 0
 				? countOverlap(passageState.matchedQueryTerms, planner.anchorTermIndexes) /
@@ -3343,6 +3337,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryScoringCache,
 			computeIfMissing: true,
 		});
+		const exactPhraseHit = hasExactPhraseMatch(
+			passage.text,
+			passage.tokenSequence,
+			queryTerms,
+			positionsByQueryTerm,
+			rawQueryText,
+		);
 
 		let score =
 			coverage * VERIFIER_COVERAGE_WEIGHT +
@@ -3809,19 +3810,26 @@ function computeRareTermLift(
 }
 
 function hasExactPhraseMatch(
+	passageText: string,
 	tokenSequence: readonly string[],
 	queryTerms: readonly string[],
 	positionsByQueryTerm: ReadonlyMap<number, number[]>,
 	rawQueryText: string,
 ): boolean {
-	const orderedQueryTerms = queryTerms.filter((_, index) =>
-		positionsByQueryTerm.has(index),
+	const orderedQueryIndexes = Array.from(positionsByQueryTerm.keys()).sort(
+		(left, right) => left - right,
 	);
-	if (orderedQueryTerms.length < 2) {
+	if (orderedQueryIndexes.length < 2) {
 		return false;
 	}
+	const orderedQueryTerms = orderedQueryIndexes.map((index) => queryTerms[index]);
+	const candidateStarts =
+		positionsByQueryTerm.get(orderedQueryIndexes[0]) ?? [];
 
-	for (let start = 0; start <= tokenSequence.length - orderedQueryTerms.length; start++) {
+	for (const start of candidateStarts) {
+		if (start > tokenSequence.length - orderedQueryTerms.length) {
+			continue;
+		}
 		let matched = true;
 		for (let offset = 0; offset < orderedQueryTerms.length; offset++) {
 			if (tokenSequence[start + offset] !== orderedQueryTerms[offset]) {
@@ -3836,6 +3844,6 @@ function hasExactPhraseMatch(
 
 	const normalizedRaw = rawQueryText.trim().toLocaleLowerCase();
 	return normalizedRaw.length > 0
-		? tokenSequence.join(" ").includes(normalizedRaw)
+		? passageText.toLocaleLowerCase().includes(normalizedRaw)
 		: false;
 }
