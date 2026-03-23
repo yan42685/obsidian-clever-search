@@ -1077,6 +1077,26 @@ The experimental lexical backend now moves from "tune a passage-first BM25 varia
 
 The route below is intentionally staged so quality can improve step by step without losing the current fallback path or UI integration.
 
+### Ceiling Assessment
+
+Current judgment:
+
+- the experimental path is **not** yet near the absolute ceiling of the passage-first lexical architecture
+- it **is** getting close to the ceiling of "keep the same fixed-passage structure and continue blending scores harder"
+- future visible gains should come from mechanism upgrades, not another round of broad coefficient tuning
+
+Interpretation:
+
+- route-aware fusion, metadata exact lanes, and local-window reuse have already extracted most of the easy quality wins
+- if further work is dominated by adding more `if` branches or retuning generic blend weights, expected gains are now small and regression risk rises
+- the next meaningful gap-opening work should change the local decision structure: local window competition, decisive verifier behavior, mixed-script bridge handling, or selective phrase-signature admission
+
+Execution rule from this point:
+
+- prefer changes that create a stronger retrieval / decision mechanism
+- treat benchmark gains as validation of the mechanism, not the mechanism itself
+- do not spend a cycle on generic score tuning unless it is attached to one of the priority mechanism jumps below
+
 ### Phase A: Metadata Exact-Prefix Lane
 
 Status:
@@ -1207,6 +1227,137 @@ Promotion gate:
 - `core` and `adversarial` both need to improve, especially `top1`
 - if the new architecture wins only by benchmark fitting and not by mechanism, do not promote it
 
+### Priority Roadmap From Here
+
+This roadmap is ordered by expected product value, not by implementation convenience.
+
+#### Priority 1: Query-Conditioned Local Window Competition
+
+Status:
+
+- highest-value remaining route
+- should be treated as the main mechanism jump, not an optional polish item
+
+Why this is first:
+
+- the current fixed-passage unit still leaves quality on the table when only one very small local region is actually decisive
+- this is the most promising route for opening a visible gap over `MiniSearch` on long-note clutter, duplicate siblings, template contamination, and "all terms exist but only one place actually says the thing" queries
+
+Implementation targets:
+
+- generate short local windows around rare terms, anchor terms, and high-signal ordered pairs
+- let each file compete with its best `2-3` local explanations, not only one aggregated passage score
+- compute local-window evidence only on the narrow locality / verifier frontier and reuse it downstream
+
+Acceptance:
+
+- higher `top1` on body-local and mixed-anchor hard queries
+- fewer cases where the right file is in `top5` but the wrong local explanation wins `top1`
+- latency remains within the current interactive guardrails
+
+#### Priority 2: Decisive Local Verifier
+
+Status:
+
+- active direction
+- current verifier is useful but still too additive in the final decision
+
+Why this is second:
+
+- the next large quality jump depends on making the verifier choose among competing local explanations rather than merely add proximity points
+- this is the most promising route for archive-vs-live siblings, template-vs-real-note separation, and duplicate-family disambiguation
+
+Implementation targets:
+
+- make final ranking depend more directly on the best supported local explanation
+- add support-span logic, stronger duplicate-family disambiguation, and more explicit anchor-agreement checks
+- let verifier evidence dominate late decisions when the candidate set is already narrow
+
+Acceptance:
+
+- cleaner separation on near-duplicate, template, and heading-collision families
+- higher `top1` on partial-memory and mixed-anchor ambiguity cases
+
+#### Priority 3: Mixed-Script And Alias Bridge Lane
+
+Status:
+
+- high-value unresolved gap
+- should be treated as a first-class lexical problem, not a tokenizer side effect
+
+Why this is third:
+
+- `tech-zh` remains one of the clearest remaining weak zones
+- mixed Chinese-English technical search quality is a strong user-facing differentiator and a place where `MiniSearch` is structurally weak
+
+Implementation targets:
+
+- bridge `slug`, locale marker, alias, acronym, and joined-term variants explicitly
+- add selective mixed-script local-order features where they improve local-body ranking
+- keep bilingual mirror-note disambiguation narrow and query-conditioned
+
+Acceptance:
+
+- `tech-zh` `top1` moves materially upward
+- bilingual / mixed-script mirror-note queries become more discriminative without widening the index indiscriminately
+
+#### Priority 4: Selective Phrase-Signature Admission
+
+Status:
+
+- valuable but should follow the two decision-structure upgrades above
+
+Why this is fourth:
+
+- selective ordered-pair / phrase-signature signals can improve body-local `top1` without paying the full cost of a heavy positional index
+- this is a strong complement to local windows and verifier competition
+
+Implementation targets:
+
+- index only high-signal ordered pairs / phrase signatures
+- use them for admission and local competition, not generic global score dumping
+- keep storage growth controlled and mechanism-specific
+
+Acceptance:
+
+- better top1 on sentence-fragment and compact local evidence queries
+- no material latency regression and no uncontrolled index blow-up
+
+#### Priority 5: Metadata Exact-Prefix Dominance Completion
+
+Status:
+
+- still important, but no longer the main gap-opening route
+
+Why this is fifth:
+
+- it matters for replacement readiness, especially `title_prefix`
+- but it is less likely than the routes above to create a large visible gap over `MiniSearch` on body-first search quality
+
+Implementation targets:
+
+- finish independent metadata exact-prefix candidate generation
+- strengthen `basename / alias / heading / folder-basename` dominance for short metadata-first queries
+- preserve isolation inside `src/services/search/passage-lexical/`
+
+Acceptance:
+
+- `title_exact` and `title_prefix` no longer lag the stable lexical backend
+- metadata-first short lookups improve without sacrificing body-local wins
+
+#### Priority 6: Harder Benchmark Families
+
+Status:
+
+- always-on guardrail work
+- should validate mechanism upgrades rather than replace them
+
+Execution rule:
+
+- only add benchmark families that expose a real retrieval failure mode
+- keep the hard set small, sharp, and diagnostic
+- preserve routine runtime for day-to-day use
+
 ### Stage Checkpoint: March 23, 2026
 
 This checkpoint exists so future work does not dissolve the current gains back into generic score tweaking.
@@ -1219,9 +1370,9 @@ Scope of this checkpoint:
 
 Current headline metrics:
 
-- `PassageBM25`: `top1=0.760`, `top5=0.936`, `zeroRate=0.052`, `avg=8.462ms`, `p95=26.268ms`
+- `PassageBM25`: `top1=0.757`, `top5=0.940`, `zeroRate=0.052`, `avg=7.653ms`, `p95=23.973ms`
 - `MiniSearch`: `top1=0.678`, `top5=0.854`, `zeroRate=0.146`, `avg=54.983ms`, `p95=121.711ms`
-- `CustomBM25`: `top1=0.655`, `top5=0.869`, `zeroRate=0.124`, `avg=0.509ms`, `p95=0.754ms`
+- `CustomBM25`: `top1=0.652`, `top5=0.865`, `zeroRate=0.127`, `avg=0.558ms`, `p95=0.795ms`
 
 What this milestone has already proven:
 
@@ -1233,17 +1384,17 @@ What this milestone has already proven:
 
 Current differentiators worth protecting:
 
-- `content_noisy`: `0.438` vs `0.063` for `MiniSearch` and `0.000` for `custom-bm25`
+- `content_noisy`: `0.375` vs `0.063` for `MiniSearch` and `0.000` for `custom-bm25`
 - `mixed_anchor`: `0.875` vs `0.813` for both baselines
-- `body_path_anchor`: `0.857` vs `0.800` for `MiniSearch` and `0.686` for `custom-bm25`
+- `body_path_anchor`: `0.829` vs `0.800` for `MiniSearch` and `0.657` for `custom-bm25`
 - `partial_memory`: `0.667` vs `0.000` for `MiniSearch`
 - `anchor_contradiction`: `1.000` vs `0.333` for `MiniSearch`
 
 Known weak spots at this checkpoint:
 
 - `title_prefix` is still weaker than `custom-bm25`, so metadata-first short lookups are not yet dominated end to end
-- `tech-zh` `top1` remains only `0.569`, so mixed-script / Chinese technical retrieval still has headroom
-- `content_noisy` improved sharply but is still only `0.438`, which means noisy body-memory queries remain a major frontier
+- `tech-zh` `top1` remains only `0.492`, so mixed-script / Chinese technical retrieval still has headroom
+- `content_noisy` improved sharply but is still only `0.375`, which means noisy body-memory queries remain a major frontier
 - the experimental index is much larger than both baselines, so quality work should continue to justify its storage cost
 - `bilingual_mirror` is now covered but not yet discriminative, so it should stay small until a stronger mixed-script mechanism lands
 
@@ -1259,9 +1410,15 @@ Do-not-lose guardrails for future work:
 Recommended interpretation:
 
 - this is the right moment to extract and preserve the current milestone
-- next work should aim at another mechanism jump such as verifier early termination, bilingual duplicate disambiguation, or phrase-signature admission
+- next work should aim at another mechanism jump such as query-conditioned local windows, a more decisive verifier, mixed-script bridge handling, or phrase-signature admission
 - do not go back to broad coefficient tuning unless it is attached to one of those stronger mechanisms
 - see `benchmarks/file-search-web-harvest.md` for the structured harvest package: milestone summary, weakness ranking, guardrails, and staged roadmap
+
+Current ceiling interpretation:
+
+- the project is near the ceiling of generic fixed-passage score blending
+- it is not near the ceiling of the broader passage-first architecture
+- the remaining large gains should come from changing the decision unit and decision stage, not from another coefficient sweep
 
 ### Gap-Opening Routes Against MiniSearch
 

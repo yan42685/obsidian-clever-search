@@ -61,7 +61,10 @@ export function createFileSearchQueryPlanner(params: {
 	docCount: number;
 }): FileSearchQueryPlanner {
 	const { rawQueryText, queryTerms, termStats, docCount } = params;
-	const queryKind = classifyFileSearchQuery(rawQueryText, queryTerms);
+	const queryKind = promoteQueryKindWithTermStats(
+		classifyFileSearchQuery(rawQueryText, queryTerms),
+		termStats,
+	);
 	const matchedStats = termStats.filter((stat) => stat.hasAnyMatch);
 	const matchedTermIndexes = new Set(matchedStats.map((stat) => stat.index));
 	const optionalTermIndexes = selectOptionalTermIndexes(
@@ -175,6 +178,40 @@ export function createFileSearchQueryPlanner(params: {
 			return bonus;
 		},
 	};
+}
+
+function promoteQueryKindWithTermStats(
+	queryKind: FileSearchQueryKind,
+	termStats: readonly FileSearchQueryTermStats[],
+): FileSearchQueryKind {
+	if (queryKind === "short_anchor" || queryKind === "path_like") {
+		return queryKind;
+	}
+
+	const hasStrongMetadataSlugAnchor = termStats.some((stat) => {
+		if (
+			!stat.hasAnyMatch ||
+			stat.matchedMetadataDocCount === 0 ||
+			stat.matchedMetadataDocCount !== stat.matchedDocCount
+		) {
+			return false;
+		}
+		if (!/[-_/]/u.test(stat.queryTerm) || stat.queryTerm.length < 4) {
+			return false;
+		}
+		return true;
+	});
+
+	const hasBodySkewedTerm = termStats.some(
+		(stat) =>
+			stat.hasAnyMatch &&
+			stat.matchedDocCount > stat.matchedMetadataDocCount &&
+			stat.queryTerm.length >= 2,
+	);
+
+	return hasStrongMetadataSlugAnchor && hasBodySkewedTerm
+		? "path_like"
+		: queryKind;
 }
 
 export function classifyFileSearchQuery(

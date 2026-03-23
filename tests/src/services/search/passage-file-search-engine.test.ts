@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { container } from "tsyringe";
 
 jest.mock("src/services/search/tokenizer", () => ({
@@ -34,6 +36,43 @@ function createMockTokenizer(): MockTokenizer {
 
 function buildFillerParagraph(seed: number): string {
 	return Array.from({ length: 24 }, (_, index) => `filler${seed}_${index}`).join(" ");
+}
+
+function stripFrontmatter(raw: string): string {
+	return raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+function extractHeadings(raw: string): string[] {
+	return Array.from(raw.matchAll(/^#{1,6}\s+(.+)$/gm)).map((match) =>
+		match[1].trim(),
+	);
+}
+
+function extractTitle(raw: string, fallback: string): string {
+	const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+	const titleMatch = frontmatter?.[1].match(/^title:\s*(.+)$/m);
+	if (titleMatch?.[1]) {
+		return titleMatch[1].trim().replace(/^["']|["']$/g, "");
+	}
+	return extractHeadings(raw)[0] ?? fallback;
+}
+
+function loadBenchmarkDocument(relativePath: string) {
+	const absolutePath = path.join(
+		process.cwd(),
+		"benchmarks",
+		"corpora",
+		"web-notes-v2",
+		...relativePath.split("/"),
+	);
+	const raw = fs.readFileSync(absolutePath, "utf8");
+	return {
+		path: relativePath,
+		basename: extractTitle(raw, path.basename(relativePath, path.extname(relativePath))),
+		folder: path.posix.dirname(relativePath),
+		headings: extractHeadings(raw).join(" "),
+		content: stripFrontmatter(raw),
+	};
 }
 
 describe("PassageFileSearchEngine", () => {
@@ -604,6 +643,353 @@ describe("PassageFileSearchEngine", () => {
 		});
 
 		expect(results[0]?.path).toBe("notes/en/configmap.md");
+	});
+
+	test("uses body corroboration to break same-basename short-anchor ties", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/content/configmap.md",
+				basename: "configmap",
+				folder: "docs content",
+				content: [
+					"configmap stores non secret configuration data for pods and configmap keys can be injected into containers",
+					buildFillerParagraph(20),
+					"another configmap example shows configmap data mounted into a pod volume for application startup",
+					buildFillerParagraph(21),
+					"configmap updates can refresh pod environment values during a staged rollout",
+				].join("\n\n"),
+			},
+			{
+				path: "docs/reference/configmap.md",
+				basename: "configmap",
+				folder: "docs reference",
+				content: "configmap definition and overview",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "configmap",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/content/configmap.md");
+	});
+
+	test("prefers the richer configmap concept note over same-family stubs", async () => {
+		const engine = createEngine();
+		const configmapContent = fs.readFileSync(
+			path.join(
+				process.cwd(),
+				"benchmarks",
+				"corpora",
+				"web-notes-v2",
+				"tech-en",
+				"content",
+				"en",
+				"docs",
+				"concepts",
+				"configuration",
+				"configmap.md",
+			),
+			"utf8",
+		);
+		await engine.addDocuments([
+			{
+				path: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+				basename: "ConfigMaps",
+				folder: "tech en content en docs concepts configuration",
+				content: configmapContent,
+			},
+			{
+				path: "core/tech-en/guides/configmaps-rollout.md",
+				basename: "ConfigMaps rollout guide",
+				folder: "core tech en guides",
+				headings: "Restart order",
+				content:
+					"configmaps rollout guidance explains restart order and configmap refresh during staged deployment",
+			},
+			{
+				path: "adversarial/tech-en/configmaps-rollout-en.md",
+				basename: "ConfigMaps rollout guide",
+				folder: "adversarial tech en",
+				headings: "Apply order Restart checks",
+				content: [
+					"Keep rollout notes short.",
+					"Applying namespace defaults before mounting env files avoids stale data during restart.",
+					"This guide explains why ConfigMaps rollout order matters for stable recovery.",
+				].join("\n\n"),
+			},
+			{
+				path: "core/tech-en/reference/configmap.md",
+				basename: "ConfigMap",
+				folder: "core tech en reference",
+				headings: "Definition",
+				content:
+					"configmap stores non-secret configuration for pods and workloads",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "configmap",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/configuration/configmap.md",
+		);
+	});
+
+	test("prefers exact title plus decisive body evidence for unordered terms", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/concepts/secret.md",
+				basename: "secret",
+				folder: "docs concepts",
+				content:
+					"secret stores sensitive data for workloads and secret data can be mounted into pods as files",
+			},
+			{
+				path: "docs/guides/secrets-rotation.md",
+				basename: "secrets rotation guide",
+				folder: "docs guides",
+				content:
+					"secret rotation guide focuses on secret rollout audit checks and secret update timing",
+			},
+			{
+				path: "docs/storage/persistent-volumes.md",
+				basename: "persistent volumes",
+				folder: "docs storage",
+				content:
+					"persistent volumes keep data durable for workloads and stateful services",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "data to secret",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/concepts/secret.md");
+	});
+
+	test("keeps a body-plus-folder anchor query on the file that joins both clues", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "tech-zh/configuration/configmap.md",
+				basename: "configmap",
+				folder: "tech zh configuration",
+				content:
+					"configmap can provide pod data through environment variables and mounted files in one configuration flow",
+			},
+			{
+				path: "tech-zh/configuration/secret.md",
+				basename: "secret",
+				folder: "tech zh configuration",
+				content:
+					"secret stores sensitive data for workloads and cluster access controls",
+			},
+			{
+				path: "tech-zh/workloads/pod-lifecycle.md",
+				basename: "pod lifecycle",
+				folder: "tech zh workloads",
+				content:
+					"pod lifecycle explains restarts scheduling phases and graceful termination behavior",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "tech zh pod data",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("tech-zh/configuration/configmap.md");
+	});
+
+	test("keeps secret first for the benchmark query data to secret", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "data to secret",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/configuration/secret.md",
+		);
+	});
+
+	test("keeps ingress first for the benchmark query ingressclass to service", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/service.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "ingressclass to service",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+		);
+	});
+
+	test("keeps ingress first for the benchmark query ingress service to", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/secret.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "ingress service to",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-en/content/en/docs/concepts/services-networking/ingress.md",
+		);
+	});
+
+	test("keeps configmap first for the benchmark query tech-zh pod data", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "tech-zh pod data",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+		);
+	});
+
+	test("keeps configmap first for tech-zh pod data across the full concept set", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/services-networking/service.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/workloads/controllers/deployment.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/workloads/pods/pod-lifecycle.md",
+			),
+			{
+				path: "adversarial/tech-zh/configmaps-rollout-zh.md",
+				basename: "ConfigMap 发布指南",
+				folder: "adversarial/tech-zh",
+				headings: "Apply order Restart checks",
+				content: [
+					"ConfigMaps rollout 需要先应用命名空间默认值，再挂载环境文件，否则会出现陈旧数据。",
+					"这份笔记主要记录发布顺序和重启后的校验步骤。",
+				].join("\n\n"),
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "tech-zh pod data",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe(
+			"tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+		);
 	});
 
 	test("uses the char channel when the tokenizer provides no Han tokens", async () => {

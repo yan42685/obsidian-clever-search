@@ -167,6 +167,7 @@ type RankedMatchedFile = MatchedFile & {
 	shortAnchorLaneScore: number;
 	shortAnchorLaneTier: number;
 	scriptFitScore: number;
+	pathLocaleFitScore: number;
 	bestPassageScore: number;
 	basenameAliasCoverageRatio: number;
 	basenameAliasAnchorRatio: number;
@@ -179,6 +180,11 @@ type RankedMatchedFile = MatchedFile & {
 type ScriptProfile = {
 	hasLatin: boolean;
 	hasHan: boolean;
+};
+
+type QueryLocalePreference = {
+	locale: "en" | "zh" | null;
+	explicit: boolean;
 };
 
 const METADATA_FIELDS: MetadataField[] = [
@@ -624,6 +630,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					queryScoringCache,
 				),
 			),
+			planner,
+			queryRoute,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
 		).slice(0, request.maxItemResults);
 	}
 
@@ -715,7 +727,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
-		const strictSorted = this.sortMatchedFiles(strictResults, planner, queryRoute);
+		const strictSorted = this.sortMatchedFiles(strictResults, planner, queryRoute, {
+			queryTerms,
+			queryScriptProfile,
+		});
 		if (
 			!planner.shouldUseRelaxedResults(
 				strictSorted.length,
@@ -729,6 +744,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			relaxedResults,
 			planner,
 			queryRoute,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
 		);
 		if (relaxedSorted.length > 0) {
 			return relaxedSorted.slice(0, request.maxItemResults);
@@ -751,6 +770,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			),
 			planner,
 			queryRoute,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
 		).slice(0, request.maxItemResults);
 	}
 
@@ -1761,6 +1784,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			state.fileId,
 			queryScriptProfile,
 		);
+		const pathLocaleFitScore = this.computePathLocaleFitScore(
+			state.filePath,
+			queryTerms,
+			queryScriptProfile,
+		);
 		const bodyCoreScore =
 			state.bestPassageScore +
 			state.secondPassageScore * FILE_SECOND_PASSAGE_DECAY +
@@ -1798,6 +1826,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			basenameAliasOnlyCoverageRatio,
 			basenameAliasAnchorRatio,
 			headingCoverageRatio,
+			headingCompactness,
 			headingAnchorRatio,
 			metadataAnchorRatio,
 			titleHeadingCoverageRatio,
@@ -1815,11 +1844,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			passageWindowAnchorRatio: passageSetSignals.bestWindowAnchorRatio,
 			passageWindowCompactnessRatio:
 				passageSetSignals.bestWindowCompactnessRatio,
+			secondPassageScore: state.secondPassageScore,
 			metadataLaneTier: state.metadataLaneTier,
 			metadataLaneScore: state.metadataLaneScore,
 			shortAnchorLaneScore: shortTitleFastPathScore,
 			shortAnchorLaneTier,
 			scriptFitScore,
+			pathLocaleFitScore,
 		});
 		return {
 			path: state.filePath,
@@ -1832,6 +1863,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			shortAnchorLaneScore: shortTitleFastPathScore,
 			shortAnchorLaneTier,
 			scriptFitScore,
+			pathLocaleFitScore,
 			bestPassageScore: state.bestPassageScore,
 			basenameAliasCoverageRatio,
 			basenameAliasAnchorRatio,
@@ -1904,6 +1936,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		results: RankedMatchedFile[],
 		planner: FileSearchQueryPlanner | null = null,
 		queryRoute: ExperimentalQueryRoute = "body_local",
+		localeContext: {
+			queryTerms: readonly string[];
+			queryScriptProfile: ScriptProfile;
+		} | null = null,
 	): RankedMatchedFile[] {
 		if (
 			queryRoute === "metadata_exact" &&
@@ -1911,6 +1947,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			this.shouldRouteShortAnchorResults(results)
 		) {
 			return results.sort((left, right) => {
+				const localePreference = localeContext
+					? this.compareMirrorLocalePreference(left, right, localeContext)
+					: 0;
+				if (localePreference !== 0) {
+					return localePreference;
+				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
 				}
@@ -1930,6 +1972,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "metadata_exact" && this.shouldRouteMetadataLaneResults(results)) {
 			return results.sort((left, right) => {
+				const localePreference = localeContext
+					? this.compareMirrorLocalePreference(left, right, localeContext)
+					: 0;
+				if (localePreference !== 0) {
+					return localePreference;
+				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
 				}
@@ -1952,6 +2000,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "path_anchor" && this.shouldRouteMetadataLaneResults(results)) {
 			return results.sort((left, right) => {
+				const localePreference = localeContext
+					? this.compareMirrorLocalePreference(left, right, localeContext)
+					: 0;
+				if (localePreference !== 0) {
+					return localePreference;
+				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
 				}
@@ -1974,6 +2028,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "mixed_anchor") {
 			return results.sort((left, right) => {
+				const localePreference = localeContext
+					? this.compareMirrorLocalePreference(left, right, localeContext)
+					: 0;
+				if (localePreference !== 0) {
+					return localePreference;
+				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
 				}
@@ -1992,6 +2052,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			});
 		}
 		return results.sort((left, right) => {
+			const localePreference = localeContext
+				? this.compareMirrorLocalePreference(left, right, localeContext)
+				: 0;
+			if (localePreference !== 0) {
+				return localePreference;
+			}
 			if (right.queryRouteScore !== left.queryRouteScore) {
 				return right.queryRouteScore - left.queryRouteScore;
 			}
@@ -2011,6 +2077,47 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		results: ReadonlyArray<RankedMatchedFile>,
 	): boolean {
 		return results.some((result) => result.metadataLaneTier > 0);
+	}
+
+	private compareMirrorLocalePreference(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		context: {
+			queryTerms: readonly string[];
+			queryScriptProfile: ScriptProfile;
+		},
+	): number {
+		const preference = this.getQueryLocalePreference(
+			context.queryTerms,
+			context.queryScriptProfile,
+		);
+		if (!preference.locale) {
+			return 0;
+		}
+		const leftLocale = this.detectPathLocale(left.path);
+		const rightLocale = this.detectPathLocale(right.path);
+		if (
+			!leftLocale ||
+			!rightLocale ||
+			leftLocale === rightLocale ||
+			(leftLocale !== preference.locale && rightLocale !== preference.locale)
+		) {
+			return 0;
+		}
+		if (!this.areMirrorLocaleVariants(left.path, right.path)) {
+			return 0;
+		}
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		const queryRouteGapThreshold = preference.explicit ? 18 : 12;
+		const scoreGapThreshold = preference.explicit ? 10 : 7;
+		if (
+			queryRouteScoreGap > queryRouteGapThreshold ||
+			scoreGap > scoreGapThreshold
+		) {
+			return 0;
+		}
+		return leftLocale === preference.locale ? -1 : 1;
 	}
 
 	private determineExperimentalQueryRoute(
@@ -2045,6 +2152,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		basenameAliasOnlyCoverageRatio: number;
 		basenameAliasAnchorRatio: number;
 		headingCoverageRatio: number;
+		headingCompactness: number;
 		headingAnchorRatio: number;
 		metadataAnchorRatio: number;
 		titleHeadingCoverageRatio: number;
@@ -2059,11 +2167,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		passageWindowCoverageRatio: number;
 		passageWindowAnchorRatio: number;
 		passageWindowCompactnessRatio: number;
+		secondPassageScore: number;
 		metadataLaneTier: number;
 		metadataLaneScore: number;
 		shortAnchorLaneScore: number;
 		shortAnchorLaneTier: number;
 		scriptFitScore: number;
+		pathLocaleFitScore: number;
 	}): number {
 		const {
 			queryRoute,
@@ -2081,6 +2191,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			basenameAliasOnlyCoverageRatio,
 			basenameAliasAnchorRatio,
 			headingCoverageRatio,
+			headingCompactness,
 			headingAnchorRatio,
 			metadataAnchorRatio,
 			titleHeadingCoverageRatio,
@@ -2095,11 +2206,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			passageWindowCoverageRatio,
 			passageWindowAnchorRatio,
 			passageWindowCompactnessRatio,
+			secondPassageScore,
 			metadataLaneTier,
 			metadataLaneScore,
 			shortAnchorLaneScore,
 			shortAnchorLaneTier,
 			scriptFitScore,
+			pathLocaleFitScore,
 		} = params;
 		const titleAnchorEvidence =
 			basenameAliasExactRatio * 1.9 +
@@ -2113,6 +2226,23 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			pathCoverageRatio * 1.2 +
 			pathAnchorRatio * 1.7 +
 			metadataAnchorRatio * 0.55;
+		const exactBasenameCorroborationScore =
+			basenameAliasExactRatio >= 0.999
+				? bodyCoreScore * 1.05 +
+					passageBestCoverageRatio * 4.8 +
+					passageWindowCoverageRatio * 3.6 +
+					passageWindowCompactnessRatio * 2.2 +
+					passageAnchorAgreementRatio * 1.4 -
+					passageFragmentationRatio * 1.8
+				: 0;
+		const expandedBasenameCorroborationScore =
+			basenameAliasExactRatio < 0.999 &&
+			basenameAliasExpandedRatio >= 0.999 &&
+			passageCorroboratedCoverageRatio > 0
+				? secondPassageScore * 90 +
+					passageCorroboratedCoverageRatio * 120 +
+					bodyCoreScore * 6
+				: 0;
 		const bodyLocalScore =
 			bodyCoreScore * 1.4 +
 			mixedEvidenceScore * 0.88 +
@@ -2147,6 +2277,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					basenameAliasAnchorRatio * 18 +
 					headingAnchorRatio * 6 +
 					scriptFitScore * 6 +
+					pathLocaleFitScore * 4.5 +
+					exactBasenameCorroborationScore +
+					expandedBasenameCorroborationScore +
 					bodyCoreScore * 0.18 +
 					metadataCoreScore * 0.25
 				);
@@ -2164,9 +2297,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					passageWindowAnchorRatio * 1.8 +
 					passageAnchorAgreementRatio * 1.6 -
 					passageFragmentationRatio * 2.2 +
-					scriptFitScore * 2
+					scriptFitScore * 2 +
+					pathLocaleFitScore * 5.5
 				);
 			case "mixed_anchor": {
+				const mixedBodyPathIntent =
+					pathCoverageRatio >= 0.4 &&
+					pathAnchorRatio < 0.1 &&
+					bodyEvidenceCoverageRatio >= 0.22 &&
+					basenameAliasCoverageRatio < 0.12 &&
+					basenameAliasExpandedRatio < 0.12 &&
+					basenameAliasAnchorRatio < 0.12;
 				const mixedTitleScore =
 					bodyCoreScore * 1.18 +
 					mixedEvidenceScore * 1.5 +
@@ -2209,7 +2350,54 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					metadataLaneTier * 3.5 +
 					metadataLaneScore * 0.28 +
 					scriptFitScore;
-				return Math.max(bodyLocalScore, mixedTitleScore, mixedPathScore);
+				const headingCrowdingPenalty =
+					(headingCoverageRatio > 0
+						? (headingCoverageRatio /
+								Math.max(0.0025, headingCompactness)) *
+							0.24
+						: 0) +
+					headingCoverageRatio * 6.8 +
+					titleHeadingCoverageRatio * 2.2 +
+					titleHeadingAnchorRatio * 1.4;
+				const bodyPathScore = mixedBodyPathIntent
+					? bodyCoreScore * 0.9 +
+						secondPassageScore * 2.8 +
+						mixedEvidenceScore * 1.35 +
+						contentCoverageRatio * 7.3 +
+						bodyEvidenceCoverageRatio * 8.4 +
+						anchorSatisfiedRatio * 1.25 +
+						bodyAnchorSynergyRatio * 6.4 -
+						metadataOnlyNoiseRatio * 2.4 +
+						pathCoverageRatio * 6.2 +
+						pathAnchorRatio * 3.4 +
+						passageBestCoverageRatio * 6.4 +
+						passageCorroboratedCoverageRatio * 9.6 +
+						passageWindowCoverageRatio * 11.2 +
+						passageWindowAnchorRatio * 1.8 +
+						passageWindowCompactnessRatio * 8.6 +
+						passageAnchorAgreementRatio * 2.6 -
+						passageFragmentationRatio * 2.2 +
+						-headingCrowdingPenalty +
+						metadataLaneTier * 1.8 +
+						metadataLaneScore * 0.12 +
+						scriptFitScore * 0.5
+					: Number.NEGATIVE_INFINITY;
+				const bodyLocalAdjustedScore = mixedBodyPathIntent
+					? bodyLocalScore - headingCrowdingPenalty * 0.9
+					: bodyLocalScore;
+				const mixedPathAdjustedScore = mixedBodyPathIntent
+					? mixedPathScore - headingCrowdingPenalty * 0.65
+					: mixedPathScore;
+				const mixedTitleAdjustedScore = mixedBodyPathIntent
+					? mixedTitleScore -
+						headingCrowdingPenalty * 1.1
+					: mixedTitleScore;
+				return Math.max(
+					bodyLocalAdjustedScore,
+					mixedTitleAdjustedScore,
+					mixedPathAdjustedScore,
+					bodyPathScore,
+				);
 			}
 			case "body_local":
 			default:
@@ -2675,6 +2863,90 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 		return 0;
+	}
+
+	private computePathLocaleFitScore(
+		filePath: string,
+		queryTerms: readonly string[],
+		queryScriptProfile: ScriptProfile,
+	): number {
+		const pathLocale = this.detectPathLocale(filePath);
+		if (!pathLocale) {
+			return 0;
+		}
+		const preference = this.getQueryLocalePreference(
+			queryTerms,
+			queryScriptProfile,
+		);
+		if (!preference.locale) {
+			return 0;
+		}
+		if (preference.explicit) {
+			if (pathLocale === preference.locale) {
+				return preference.locale === "zh" ? 0.65 : 0.45;
+			}
+			return preference.locale === "zh" ? -0.35 : -0.65;
+		}
+		if (pathLocale === preference.locale) {
+			return 0.7;
+		}
+		return -0.95;
+	}
+
+	private getQueryLocalePreference(
+		queryTerms: readonly string[],
+		queryScriptProfile: ScriptProfile,
+	): QueryLocalePreference {
+		const normalizedTerms = new Set(queryTerms.map((term) => term.toLowerCase()));
+		const hasExplicitZhHint =
+			normalizedTerms.has("zh") ||
+			normalizedTerms.has("zh-cn") ||
+			normalizedTerms.has("cn");
+		const hasExplicitEnHint = normalizedTerms.has("en");
+		if (hasExplicitZhHint && !hasExplicitEnHint) {
+			return { locale: "zh", explicit: true };
+		}
+		if (hasExplicitEnHint && !hasExplicitZhHint) {
+			return { locale: "en", explicit: true };
+		}
+		if (queryScriptProfile.hasLatin && !queryScriptProfile.hasHan) {
+			return { locale: "en", explicit: false };
+		}
+		if (queryScriptProfile.hasHan && !queryScriptProfile.hasLatin) {
+			return { locale: "zh", explicit: false };
+		}
+		return { locale: null, explicit: false };
+	}
+
+	private detectPathLocale(filePath: string): "en" | "zh" | null {
+		const normalizedPath = filePath.toLowerCase();
+		if (
+			/(^|\/)(zh|zh-cn)(\/|$)/u.test(normalizedPath) ||
+			/(^|\/)tech-zh(\/|$)/u.test(normalizedPath)
+		) {
+			return "zh";
+		}
+		if (
+			/(^|\/)en(\/|$)/u.test(normalizedPath) ||
+			/(^|\/)tech-en(\/|$)/u.test(normalizedPath)
+		) {
+			return "en";
+		}
+		return null;
+	}
+
+	private areMirrorLocaleVariants(leftPath: string, rightPath: string): boolean {
+		return (
+			this.normalizeMirrorLocalePath(leftPath) ===
+			this.normalizeMirrorLocalePath(rightPath)
+		);
+	}
+
+	private normalizeMirrorLocalePath(filePath: string): string {
+		return filePath
+			.toLowerCase()
+			.replace(/(^|\/)tech-(?:en|zh)(?=\/|$)/gu, "$1tech-__locale__")
+			.replace(/(^|\/)(?:en|zh-cn|zh)(?=\/|$)/gu, "$1__locale__");
 	}
 
 	private computeShortAnchorLaneTier(params: {
