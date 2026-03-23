@@ -23,6 +23,7 @@ const REQUEST_MIN_SPACING_MS = 250;
 const REQUEST_RETRY_BASE_MS = 1_200;
 const TOKEN_SAVINGS_TOTAL_KEY = 'all';
 let inFlightEstimatedTokens = 0;
+let lastKnownCurrentWeekTokenUsage: { weekKey: string; tokens: number } | null = null;
 
 export class NoApiKeyError extends Error {
 	constructor() {
@@ -362,9 +363,26 @@ export function getCurrentWeekDateRange(now = new Date()): { fromDate: string; t
 	};
 }
 
-export async function getCurrentWeekTokenUsage(): Promise<number> {
+async function readCurrentWeekTokenUsageStrict(): Promise<number> {
 	const { fromDate, toDate } = getCurrentWeekDateRange();
-	return getTotalTokens(fromDate, toDate);
+	const tokens = await getTotalTokensStrict(fromDate, toDate);
+	lastKnownCurrentWeekTokenUsage = {
+		weekKey: fromDate,
+		tokens,
+	};
+	return tokens;
+}
+
+export async function getCurrentWeekTokenUsage(): Promise<number> {
+	try {
+		return await readCurrentWeekTokenUsageStrict();
+	} catch {
+		const { fromDate } = getCurrentWeekDateRange();
+		if (lastKnownCurrentWeekTokenUsage?.weekKey === fromDate) {
+			return lastKnownCurrentWeekTokenUsage.tokens;
+		}
+		return 0;
+	}
 }
 
 export async function recordTokenUsage(filePath: string, tokens: number): Promise<void> {
@@ -508,15 +526,19 @@ export async function getTopTokenFiles(
 
 export async function getTotalTokens(fromDate: string, toDate: string): Promise<number> {
 	try {
-		const db = getInstance(Database).db;
-		const records = await db.hybridTokenStats
-			.where('dateKey')
-			.between(fromDate, toDate, true, true)
-			.toArray();
-		return records.reduce((sum, r) => sum + r.tokens, 0);
+		return await getTotalTokensStrict(fromDate, toDate);
 	} catch {
 		return 0;
 	}
+}
+
+async function getTotalTokensStrict(fromDate: string, toDate: string): Promise<number> {
+	const db = getInstance(Database).db;
+	const records = await db.hybridTokenStats
+		.where('dateKey')
+		.between(fromDate, toDate, true, true)
+		.toArray();
+	return records.reduce((sum, r) => sum + r.tokens, 0);
 }
 
 export function normalizeApiDomain(domain?: string): string {
@@ -574,7 +596,19 @@ export async function reserveWeeklyTokenBudget(
 		return { release: () => undefined };
 	}
 
-	const used = await getCurrentWeekTokenUsage();
+	let used: number;
+	try {
+		used = await readCurrentWeekTokenUsageStrict();
+	} catch (error) {
+		const { fromDate } = getCurrentWeekDateRange();
+		if (lastKnownCurrentWeekTokenUsage?.weekKey === fromDate) {
+			used = lastKnownCurrentWeekTokenUsage.tokens;
+			logger.warn('Failed to read weekly token usage from DB; using last known current-week value.', error);
+		} else {
+			logger.error('Failed to verify weekly token usage; refusing provider request.', error);
+			throw new Error('Unable to verify weekly token usage before sending provider request');
+		}
+	}
 	const effectiveUsed = used + inFlightEstimatedTokens;
 	if (effectiveUsed < limit && effectiveUsed + estimatedTokens <= limit) {
 		inFlightEstimatedTokens += estimatedTokens;
