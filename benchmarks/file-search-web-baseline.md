@@ -16,9 +16,9 @@ Scope:
 
 | Engine | top1 | top5 | zeroRate | avgMs/query | p50 | p95 | estimatedIndexKB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| PassageBM25 | 0.760 | 0.936 | 0.052 | 8.445 | 4.808 | 26.294 | 9228.873 |
-| MiniSearch | 0.678 | 0.854 | 0.146 | 55.631 | 54.376 | 123.197 | 642.151 |
-| CustomBM25 | 0.655 | 0.869 | 0.124 | 0.491 | 0.177 | 0.895 | 181.524 |
+| PassageBM25 | 0.760 | 0.936 | 0.052 | 8.462 | 4.085 | 26.268 | 9228.873 |
+| MiniSearch | 0.678 | 0.854 | 0.146 | 54.983 | 54.760 | 121.711 | 642.151 |
+| CustomBM25 | 0.655 | 0.869 | 0.124 | 0.509 | 0.190 | 0.754 | 181.524 |
 
 ## What This Milestone Proves
 
@@ -26,6 +26,7 @@ Scope:
 - the strongest lift is still on body-first retrieval rather than metadata-first short lookup
 - local-window competition and route-aware file fusion produce a real top1 gain while staying interactive
 - the current implementation is fast enough to continue evolving without reverting to a simpler baseline
+- the latest verifier pass confirms that lightweight exact-phrase optimization is worth keeping, while naive verifier frontier clipping is not yet justified
 
 ## High-Signal Wins
 
@@ -58,4 +59,5 @@ Treat the following as checkpoint guardrails unless there is a deliberate re-bas
 ## Recommended Next Step
 
 - focus next on a new mechanism jump rather than more broad coefficient tuning
-- highest-value candidates remain verifier early termination, bilingual duplicate disambiguation, and a lightweight phrase-signature admission channel
+- the best next candidates are structured query decomposition, bilingual duplicate disambiguation, and a lightweight phrase-signature admission channel
+- if verifier early termination returns, it should be upper-bound-backed or feature-local; naive frontier clipping has not yet earned promotion

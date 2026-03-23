@@ -1219,9 +1219,9 @@ Scope of this checkpoint:
 
 Current headline metrics:
 
-- `PassageBM25`: `top1=0.760`, `top5=0.936`, `zeroRate=0.052`, `avg=8.445ms`, `p95=26.294ms`
-- `MiniSearch`: `top1=0.678`, `top5=0.854`, `zeroRate=0.146`, `avg=55.631ms`, `p95=123.197ms`
-- `CustomBM25`: `top1=0.655`, `top5=0.869`, `zeroRate=0.124`, `avg=0.491ms`, `p95=0.895ms`
+- `PassageBM25`: `top1=0.760`, `top5=0.936`, `zeroRate=0.052`, `avg=8.462ms`, `p95=26.268ms`
+- `MiniSearch`: `top1=0.678`, `top5=0.854`, `zeroRate=0.146`, `avg=54.983ms`, `p95=121.711ms`
+- `CustomBM25`: `top1=0.655`, `top5=0.869`, `zeroRate=0.124`, `avg=0.509ms`, `p95=0.754ms`
 
 What this milestone has already proven:
 
@@ -1229,6 +1229,7 @@ What this milestone has already proven:
 - `adversarial` quality is materially above both baselines, which is the strongest signal that the architecture is doing more than weight tuning
 - query-conditioned local-window competition plus route-aware file fusion is a real mechanism lift, not a cosmetic rescoring trick
 - latency is back in the interactive range after query-scoped caching and frontier reuse, so the new mechanism is no longer obviously too expensive to iterate on
+- a lightweight verifier exact-phrase path optimization can be promoted without changing ranking behavior or hurting benchmark stability
 
 Current differentiators worth protecting:
 
@@ -1260,6 +1261,7 @@ Recommended interpretation:
 - this is the right moment to extract and preserve the current milestone
 - next work should aim at another mechanism jump such as verifier early termination, bilingual duplicate disambiguation, or phrase-signature admission
 - do not go back to broad coefficient tuning unless it is attached to one of those stronger mechanisms
+- see `benchmarks/file-search-web-harvest.md` for the structured harvest package: milestone summary, weakness ranking, guardrails, and staged roadmap
 
 ### Gap-Opening Routes Against MiniSearch
 
@@ -1338,9 +1340,9 @@ Promotion gate for harder benchmark batches:
 
 Immediate next steps after the current pass:
 
-- add verifier-side early termination so weak frontier passages do not pay the full local decision cost
-- make partial-memory families harder with one correct anchor, two decisive body clues, and one intentionally misleading metadata token
-- add bilingual duplicate / mirror-note hard cases only if they remain diagnostic at small query counts
+- improve partial-memory families with one correct anchor, two decisive body clues, and one intentionally misleading metadata token
+- strengthen bilingual duplicate / mirror-note hard cases only if they remain diagnostic at small query counts
+- if verifier early termination is revisited, require an upper-bound-backed or feature-local design; naive frontier clipping should not be promoted
 
 ## Future Improvements
 

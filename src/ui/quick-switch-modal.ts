@@ -10,9 +10,6 @@ export class QuickSwitchModal extends Modal {
 		this.modalEl.addClass("cs-modal", "cs-quickswitch-modal");
 		this.mountedElement = new QuickSwitchModalView({
 			target: this.modalEl,
-			props: {
-				onCloseExternal: () => this.close(),
-			},
 		});
 	}
 

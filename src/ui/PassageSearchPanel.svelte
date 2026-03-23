@@ -152,13 +152,13 @@
 							on:click={() => selectResult(index)}
 							on:mouseenter={() => hoverResult(index)}
 						>
-							<div class="passage-result-topline">
+							<div class="passage-file-item">
 								<span class="passage-result-title">{getDisplayTitle(hit)}</span>
 								{#if formatScore(hit.score)}
 									<span class="passage-result-score">{formatScore(hit.score)}</span>
 								{/if}
+								<span class="passage-result-path">{getPathText(hit)}</span>
 							</div>
-							<div class="passage-result-path">{getPathText(hit)}</div>
 							<div class="passage-result-snippet">{getSnippetText(hit)}</div>
 						</button>
 					</li>
@@ -172,8 +172,9 @@
 	.passage-search-panel {
 		display: flex;
 		flex-direction: column;
-		gap: 0.9rem;
+		gap: 0.85rem;
 		width: 100%;
+		min-width: 0;
 		min-height: 0;
 		color: var(--text-normal);
 	}
@@ -186,13 +187,15 @@
 		background: linear-gradient(
 			to bottom,
 			var(--background-primary, transparent) 0%,
-			var(--background-primary, transparent) 70%,
+			var(--background-primary, transparent) 72%,
 			transparent 100%
 		);
 	}
 
 	.passage-search-results {
-		min-height: 12rem;
+		min-width: 0;
+		min-height: 16rem;
+		overflow-x: hidden;
 	}
 
 	.passage-search-state {
@@ -206,86 +209,102 @@
 		font-size: 0.95rem;
 		text-align: center;
 		border: 1px dashed var(--background-modifier-border, rgba(255, 255, 255, 0.08));
-		border-radius: 14px;
+		border-radius: 10px;
 		background: var(--background-secondary, rgba(255, 255, 255, 0.02));
 	}
 
 	.passage-result-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.55rem;
+		gap: 0.4rem;
+		width: 100%;
+		min-width: 0;
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
 
 	.passage-result-item {
+		width: 100%;
+		min-width: 0;
 		margin: 0;
 		padding: 0;
 	}
 
 	.passage-result-button {
-		display: flex;
-		flex-direction: column;
-		gap: 0.28rem;
+		position: relative;
+		display: block;
 		width: 100%;
-		padding: 0.85rem 0.95rem;
+		min-width: 0;
+		padding: 0.7em 0.8em;
 		box-sizing: border-box;
-		color: inherit;
 		text-align: left;
-		background: var(--background-primary-alt, rgba(255, 255, 255, 0.02));
+		color: inherit;
+		background-color: var(--cs-pane-bgc, #20202066);
 		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
-		border-radius: 14px;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+		border-radius: 8px;
+		box-shadow: none;
 		cursor: pointer;
-		transition:
-			border-color 120ms ease,
-			background-color 120ms ease,
-			transform 120ms ease;
 	}
 
 	.passage-result-button:hover,
 	.passage-result-item.selected .passage-result-button {
-		background: var(--background-secondary, rgba(255, 255, 255, 0.04));
-		border-color: var(--interactive-accent, rgba(120, 160, 255, 0.45));
-		transform: translateY(-1px);
+		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
-	.passage-result-topline {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 0.75rem;
+	.passage-file-item {
+		display: block;
+		width: 100%;
+		min-width: 0;
+		padding-right: 4.9em;
+		box-sizing: border-box;
 	}
 
-	.passage-result-title {
-		font-size: 0.98rem;
-		font-weight: 600;
-		color: var(--text-normal);
-	}
-
-	.passage-result-score {
-		flex: none;
-		font-size: 0.76rem;
-		color: var(--text-muted);
-	}
-
+	.passage-result-title,
 	.passage-result-path {
-		font-size: 0.79rem;
-		line-height: 1.35;
-		color: var(--text-muted);
+		display: block;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	.passage-result-title {
+		margin-top: -0.05em;
+		font-size: 1rem;
+		font-weight: 600;
+		color: var(--text-normal);
+	}
+
+	.passage-result-score {
+		position: absolute;
+		top: 0.82em;
+		right: 0.9em;
+		font-family: var(--font-monospace);
+		font-size: 0.8em;
+		line-height: 1.2;
+		color: var(--cs-secondary-font-color, #a29c9c);
+	}
+
+	.passage-result-path {
+		margin-top: 0.1rem;
+		font-size: 0.82rem;
+		line-height: 1.35;
+		color: var(--cs-secondary-font-color, #a29c9c);
+	}
+
 	.passage-result-snippet {
 		display: -webkit-box;
+		width: 100%;
+		min-width: 0;
+		margin-top: 0.42rem;
 		overflow: hidden;
 		color: var(--text-normal);
 		font-size: 0.9rem;
-		line-height: 1.45;
+		line-height: 1.42;
 		text-overflow: ellipsis;
+		white-space: normal;
+		overflow-wrap: anywhere;
 		-webkit-box-orient: vertical;
 		-webkit-line-clamp: 3;
 	}

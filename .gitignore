@@ -33,3 +33,8 @@ dist/
 cs-search-worker.js
 
 benchmarks/
+!benchmarks/
+benchmarks/corpora/
+!benchmarks/README.md
+!benchmarks/file-search-web-baseline.md
+!benchmarks/file-search-web-harvest.md

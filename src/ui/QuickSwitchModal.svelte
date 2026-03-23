@@ -80,20 +80,31 @@
 	/>
 
 	<div class="quickswitch-footer">
-		<span>Mock preview · hit-level cards</span>
+		<span>Mock preview · passage-level cards</span>
 		<span>Ctrl+J / Ctrl+K move history or results</span>
 	</div>
 </div>
 
 <style>
+	:global(.cs-modal.cs-quickswitch-modal) {
+		width: min(72rem, 92vw);
+		max-width: 92vw;
+		height: min(82vh, 54rem);
+		padding: 1.15rem 1rem 0.9rem;
+		overflow: hidden;
+	}
+
 	.quickswitch-shell {
 		display: flex;
 		flex-direction: column;
 		gap: 0.7rem;
-		width: min(56rem, 86vw);
-		min-height: 26rem;
-		padding: 0.35rem 0.25rem 0.1rem;
+		width: 100%;
+		min-width: 0;
+		height: 100%;
+		min-height: 0;
+		padding: 0.1rem 0;
 		box-sizing: border-box;
+		overflow: hidden;
 	}
 
 	.quickswitch-footer {
@@ -101,6 +112,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.8rem;
+		min-width: 0;
 		font-size: 0.76rem;
 		color: var(--text-muted);
 	}
