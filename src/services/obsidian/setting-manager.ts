@@ -62,6 +62,8 @@ function createPendingRefreshState(): PendingRefreshState {
 	};
 }
 
+const HYBRID_RUNTIME_STATUS_REFRESH_MS = 1_000;
+
 @singleton()
 export class SettingManager {
 	private plugin: CleverSearch = getInstance(THIS_PLUGIN);
@@ -241,7 +243,7 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName(t("Search history"))
+			.setName(t("Search history completion"))
 			.setDesc(t("Search history desc"))
 			.addButton((button) =>
 				button.setButtonText(t("Manage")).onClick(() => {
@@ -476,8 +478,6 @@ class SearchHistoryModal extends Modal {
 		this.modalEl.style.width = "42vw";
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl("h2", { text: t("Search history") });
-		new Setting(contentEl).setDesc(t("Search history desc"));
 
 		new Setting(contentEl)
 			.setName(t("Search history completion"))
@@ -596,11 +596,10 @@ class HybridSearchModal extends Modal {
 		);
 		this.failedEmbeddingStatusTimer = window.setInterval(() => {
 			this.renderHybridRuntimeStatus();
-		}, 15_000);
+		}, HYBRID_RUNTIME_STATUS_REFRESH_MS);
 		const contentEl = this.contentEl;
 
 		// ── Introduction ──────────────────────────────────────────────────────
-		contentEl.createEl("h2", { text: t("Manage hybrid search") });
 
 		// ── Enable ────────────────────────────────────────────────────────────
 		new Setting(contentEl)
@@ -914,41 +913,42 @@ class HybridSearchModal extends Modal {
 		summary: HybridFailedEmbeddingSummary,
 	) {
 		this.failedEmbeddingStatusEl.empty();
-		this.failedEmbeddingStatusEl.createEl("p", {
-			text:
-				`${t("hybridModal.failedEmbeddingStatus.summary")}: ` +
-				`${summary.failedCount}`,
-		});
+		this.appendStatusLine(
+			this.failedEmbeddingStatusEl,
+			t("hybridModal.failedEmbeddingStatus.summary"),
+			String(summary.failedCount),
+		);
 
 		if (summary.failedCount === 0) {
-			this.failedEmbeddingStatusEl.createEl("p", {
-				text: t("hybridModal.failedEmbeddingStatus.none"),
-			});
+			this.appendStatusText(
+				this.failedEmbeddingStatusEl,
+				t("hybridModal.failedEmbeddingStatus.none"),
+			);
 			return;
 		}
 
 		if (summary.blockingKinds.length > 0) {
-			this.failedEmbeddingStatusEl.createEl("p", {
-				text:
-					`${t("hybridModal.failedEmbeddingStatus.blocked")}: ` +
-					this.formatFailedEmbeddingKinds(summary.blockingKinds),
-			});
+			this.appendStatusLine(
+				this.failedEmbeddingStatusEl,
+				t("hybridModal.failedEmbeddingStatus.blocked"),
+				this.formatFailedEmbeddingKinds(summary.blockingKinds),
+			);
 		}
 
 		if (summary.retryableKinds.length > 0) {
-			this.failedEmbeddingStatusEl.createEl("p", {
-				text:
-					`${t("hybridModal.failedEmbeddingStatus.retrying")}: ` +
-					this.formatFailedEmbeddingKinds(summary.retryableKinds),
-			});
+			this.appendStatusLine(
+				this.failedEmbeddingStatusEl,
+				t("hybridModal.failedEmbeddingStatus.retrying"),
+				this.formatFailedEmbeddingKinds(summary.retryableKinds),
+			);
 		}
 
 		if (summary.retryableCount > 0 && summary.nextRetryAt !== null) {
-			this.failedEmbeddingStatusEl.createEl("p", {
-				text:
-					`${t("hybridModal.failedEmbeddingStatus.nextRetry")}: ` +
-					this.formatRelativeTime(summary.nextRetryAt),
-			});
+			this.appendStatusLine(
+				this.failedEmbeddingStatusEl,
+				t("hybridModal.failedEmbeddingStatus.nextRetry"),
+				this.formatRelativeTime(summary.nextRetryAt),
+			);
 		}
 	}
 
@@ -956,25 +956,38 @@ class HybridSearchModal extends Modal {
 		summary: HybridDeferredEmbeddingSummary,
 	) {
 		this.deferredEmbeddingStatusEl.empty();
-		this.deferredEmbeddingStatusEl.createEl("p", {
-			text:
-				`${t("hybridModal.deferredEmbeddingStatus.summary")}: ` +
-				`${summary.deferredCount}`,
-		});
+		this.appendStatusLine(
+			this.deferredEmbeddingStatusEl,
+			t("hybridModal.deferredEmbeddingStatus.summary"),
+			String(summary.deferredCount),
+		);
 		if (summary.deferredCount === 0) {
-			this.deferredEmbeddingStatusEl.createEl("p", {
-				text: t("hybridModal.deferredEmbeddingStatus.none"),
-			});
+			this.appendStatusText(
+				this.deferredEmbeddingStatusEl,
+				t("hybridModal.deferredEmbeddingStatus.none"),
+			);
 			return;
 		}
 
 		if (summary.nextEligibleAt !== null) {
-			this.deferredEmbeddingStatusEl.createEl("p", {
-				text:
-					`${t("hybridModal.deferredEmbeddingStatus.nextResume")}: ` +
-					this.formatRelativeTime(summary.nextEligibleAt),
-			});
+			this.appendStatusLine(
+				this.deferredEmbeddingStatusEl,
+				t("hybridModal.deferredEmbeddingStatus.nextResume"),
+				this.formatRelativeTime(summary.nextEligibleAt),
+			);
 		}
+	}
+
+	private appendStatusText(container: HTMLElement, text: string) {
+		container.createEl("p", { text });
+	}
+
+	private appendStatusLine(
+		container: HTMLElement,
+		label: string,
+		value: string,
+	) {
+		this.appendStatusText(container, `${label}: ${value}`);
 	}
 
 	private formatFailedEmbeddingKinds(
@@ -1154,16 +1167,10 @@ class HybridSearchModal extends Modal {
 
 	private formatRelativeTime(targetAt: number): string {
 		const remainingMs = Math.max(0, targetAt - Date.now());
-		if (remainingMs < 60_000) {
-			return t("hybridModal.failedEmbeddingStatus.soon");
-		}
-		const minutes = Math.ceil(remainingMs / 60_000);
-		if (minutes < 60) {
-			return `${minutes}m`;
-		}
-		const hours = Math.floor(minutes / 60);
-		const mins = minutes % 60;
-		return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
+		const totalSeconds = Math.ceil(remainingMs / 1000);
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		return `${minutes} min ${seconds} s`;
 	}
 
 	private stripTrailingZero(value: string): string {
