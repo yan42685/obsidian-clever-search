@@ -1266,8 +1266,9 @@ Acceptance:
 
 Status:
 
-- active direction
-- current verifier is useful but still too additive in the final decision
+- active
+- first implementation slice is now in place: verifier signals are cached structurally, file-stage ranking reuses them, and duplicate-family path penalties are wired into late body/mixed decisions
+- current verifier is still not the final decision-maker yet, but it is no longer only a flat additive bonus
 
 Why this is second:
 
@@ -1279,6 +1280,16 @@ Implementation targets:
 - make final ranking depend more directly on the best supported local explanation
 - add support-span logic, stronger duplicate-family disambiguation, and more explicit anchor-agreement checks
 - let verifier evidence dominate late decisions when the candidate set is already narrow
+
+Current implementation note:
+
+- verifier now emits structured per-passage signals instead of only a scalar bonus
+- file-stage scoring reuses support-span and verifier-local agreement signals for late ranking
+- template / archive / draft-style duplicate families now receive a narrow penalty only on body-local and mixed-anchor routes
+- verifier activation is now qualified more narrowly, so weak local hints do not automatically become file-level decisive evidence
+- body-local scoring now penalizes verifier overreach when it is not corroborated by compact local-explanation competition, which helps same-title archive/live siblings
+- path-dominant mixed routes now use a much weaker verifier contribution so body-path queries are less likely to be distorted by unrelated local verifier spikes
+- remaining work should focus on making the verifier choose among rival local explanations even more explicitly, rather than only pushing the late score
 
 Acceptance:
 

@@ -410,14 +410,48 @@ describe("PassageFileSearchEngine", () => {
 			},
 		]);
 
-		const results = await engine.searchFiles({
+		const results = (await engine.searchFiles({
 			queryText: "incident summary checkpoint replay verifier frontier",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 10,
-		});
+		})) as Array<any>;
 
 		expect(results[0]?.path).toBe("notes/projects/incident-summary.md");
+	});
+
+	test("uses decisive verifier on title plus heading anchors against a template sibling", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/projects/incident-summary.md",
+				basename: "incident summary",
+				folder: "notes projects",
+				headings: "symptoms root cause fix",
+				content:
+					"checkpoint replay pushed a stale warm-start passage into the verifier frontier and caused rerank drift during recovery",
+			},
+			{
+				path: "notes/templates/incident-summary.md",
+				basename: "incident summary",
+				folder: "notes templates",
+				headings: "symptoms root cause fix",
+				content:
+					"template text for writing an incident summary with owner review timeline and follow-up actions",
+			},
+		]);
+
+		const results = (await engine.searchFiles({
+			queryText: "incident summary symptoms checkpoint replay",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		})) as Array<any>;
+
+		expect(results[0]?.path).toBe("notes/projects/incident-summary.md");
+		expect(results[0]?.queryRouteScore).toBeGreaterThan(
+			results[1]?.queryRouteScore ?? 0,
+		);
 	});
 
 	test("prefers the same-title sibling with a compact local passage over dispersed evidence", async () => {
@@ -448,14 +482,17 @@ describe("PassageFileSearchEngine", () => {
 			},
 		]);
 
-		const results = await engine.searchFiles({
+		const results = (await engine.searchFiles({
 			queryText: "restart window stale cache configmap",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 10,
-		});
+		})) as Array<any>;
 
 		expect(results[0]?.path).toBe("notes/projects/restart-window.md");
+		expect(results[0]?.localExplanationCompetitionScore).toBeGreaterThan(
+			results[1]?.localExplanationCompetitionScore ?? 0,
+		);
 	});
 
 	test("prefers decisive body evidence over a misleading metadata-style anchor", async () => {
