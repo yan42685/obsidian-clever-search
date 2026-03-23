@@ -1235,8 +1235,9 @@ This roadmap is ordered by expected product value, not by implementation conveni
 
 Status:
 
-- highest-value remaining route
-- should be treated as the main mechanism jump, not an optional polish item
+- active
+- first implementation slice is now in place: query-scoped `top-K` local explanation extraction and file-stage local explanation competition are wired into the passage backend
+- the next remaining step is to make those explanations more decisive in the final verifier / late-stage decision, not merely another additive score source
 
 Why this is first:
 
@@ -1248,6 +1249,12 @@ Implementation targets:
 - generate short local windows around rare terms, anchor terms, and high-signal ordered pairs
 - let each file compete with its best `2-3` local explanations, not only one aggregated passage score
 - compute local-window evidence only on the narrow locality / verifier frontier and reuse it downstream
+
+Current implementation note:
+
+- the backend now caches distinct local explanations per passage on the locality / verifier frontier instead of only the single best window
+- file-stage ranking can now reuse those cached explanations and reward the best `2-3` local windows with novelty-aware aggregation
+- remaining work should focus on making the verifier choose among competing explanations more decisively and validating the lift on broader hard benchmarks
 
 Acceptance:
 

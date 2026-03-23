@@ -100,6 +100,11 @@ type FilePassageSetSignals = {
 	bestWindowCoverageRatio: number;
 	bestWindowAnchorRatio: number;
 	bestWindowCompactnessRatio: number;
+	localExplanationCompetitionScore: number;
+	localExplanationUnionCoverageRatio: number;
+	localExplanationCorroboratedCoverageRatio: number;
+	localExplanationAnchorRatio: number;
+	localExplanationCompactnessRatio: number;
 };
 
 type LocalWindowSignals = {
@@ -110,9 +115,30 @@ type LocalWindowSignals = {
 	compactnessRatio: number;
 };
 
+type LocalWindowExplanation = LocalWindowSignals & {
+	startPosition: number;
+	endPosition: number;
+	matchedQueryTerms: Set<number>;
+};
+
+type QueryConditionedLocalWindowSet = {
+	bestSignals: LocalWindowSignals;
+	explanations: LocalWindowExplanation[];
+	competitionScore: number;
+	unionCoverageRatio: number;
+	corroboratedCoverageRatio: number;
+	anchorCoverageRatio: number;
+	compactnessRatio: number;
+};
+
+type FileLocalExplanationCandidate = LocalWindowExplanation & {
+	passageId: number;
+	weightedScore: number;
+};
+
 type QueryScoringCache = {
 	positionsByPassageId: Map<number, Map<number, number[]>>;
-	localWindowSignalsByPassageId: Map<number, LocalWindowSignals>;
+	localWindowSetsByPassageId: Map<number, QueryConditionedLocalWindowSet>;
 };
 
 type PassageUnit = {
@@ -169,6 +195,7 @@ type RankedMatchedFile = MatchedFile & {
 	scriptFitScore: number;
 	pathLocaleFitScore: number;
 	bestPassageScore: number;
+	localExplanationCompetitionScore: number;
 	basenameAliasCoverageRatio: number;
 	basenameAliasAnchorRatio: number;
 	headingCoverageRatio: number;
@@ -298,12 +325,25 @@ const LOCAL_WINDOW_COMPACTNESS_WEIGHT = 0.96;
 const LOCAL_WINDOW_ORDER_WEIGHT = 0.34;
 const LOCAL_WINDOW_TIGHT_PAIR_WEIGHT = 0.22;
 const LOCAL_WINDOW_RARE_TERM_WEIGHT = 0.16;
+const MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE = 3;
+const MAX_FILE_LOCAL_EXPLANATIONS = 3;
+const LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.72;
+const LOCAL_WINDOW_DUPLICATE_TERM_OVERLAP_THRESHOLD = 0.85;
 const MIN_LONG_CHUNK_CHARS = 220;
 const HAN_SEQUENCE_REGEX = /\p{Script=Han}+/gu;
 const EMPTY_LOCAL_WINDOW_SIGNALS: LocalWindowSignals = {
 	score: 0,
 	coverageRatio: 0,
 	exactCoverageRatio: 0,
+	anchorCoverageRatio: 0,
+	compactnessRatio: 0,
+};
+const EMPTY_LOCAL_WINDOW_SET: QueryConditionedLocalWindowSet = {
+	bestSignals: EMPTY_LOCAL_WINDOW_SIGNALS,
+	explanations: [],
+	competitionScore: 0,
+	unionCoverageRatio: 0,
+	corroboratedCoverageRatio: 0,
 	anchorCoverageRatio: 0,
 	compactnessRatio: 0,
 };
@@ -1844,6 +1884,16 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			passageWindowAnchorRatio: passageSetSignals.bestWindowAnchorRatio,
 			passageWindowCompactnessRatio:
 				passageSetSignals.bestWindowCompactnessRatio,
+			localExplanationCompetitionScore:
+				passageSetSignals.localExplanationCompetitionScore,
+			localExplanationUnionCoverageRatio:
+				passageSetSignals.localExplanationUnionCoverageRatio,
+			localExplanationCorroboratedCoverageRatio:
+				passageSetSignals.localExplanationCorroboratedCoverageRatio,
+			localExplanationAnchorRatio:
+				passageSetSignals.localExplanationAnchorRatio,
+			localExplanationCompactnessRatio:
+				passageSetSignals.localExplanationCompactnessRatio,
 			secondPassageScore: state.secondPassageScore,
 			metadataLaneTier: state.metadataLaneTier,
 			metadataLaneScore: state.metadataLaneScore,
@@ -1865,6 +1915,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			scriptFitScore,
 			pathLocaleFitScore,
 			bestPassageScore: state.bestPassageScore,
+			localExplanationCompetitionScore:
+				passageSetSignals.localExplanationCompetitionScore,
 			basenameAliasCoverageRatio,
 			basenameAliasAnchorRatio,
 			headingCoverageRatio,
@@ -2037,6 +2089,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
 				}
+				if (
+					right.localExplanationCompetitionScore !==
+					left.localExplanationCompetitionScore
+				) {
+					return (
+						right.localExplanationCompetitionScore -
+						left.localExplanationCompetitionScore
+					);
+				}
 				const leftScore = left.score ?? 0;
 				const rightScore = right.score ?? 0;
 				if (rightScore !== leftScore) {
@@ -2060,6 +2121,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 			if (right.queryRouteScore !== left.queryRouteScore) {
 				return right.queryRouteScore - left.queryRouteScore;
+			}
+			if (
+				right.localExplanationCompetitionScore !==
+				left.localExplanationCompetitionScore
+			) {
+				return (
+					right.localExplanationCompetitionScore -
+					left.localExplanationCompetitionScore
+				);
 			}
 			const leftScore = left.score ?? 0;
 			const rightScore = right.score ?? 0;
@@ -2167,6 +2237,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		passageWindowCoverageRatio: number;
 		passageWindowAnchorRatio: number;
 		passageWindowCompactnessRatio: number;
+		localExplanationCompetitionScore: number;
+		localExplanationUnionCoverageRatio: number;
+		localExplanationCorroboratedCoverageRatio: number;
+		localExplanationAnchorRatio: number;
+		localExplanationCompactnessRatio: number;
 		secondPassageScore: number;
 		metadataLaneTier: number;
 		metadataLaneScore: number;
@@ -2206,6 +2281,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			passageWindowCoverageRatio,
 			passageWindowAnchorRatio,
 			passageWindowCompactnessRatio,
+			localExplanationCompetitionScore,
+			localExplanationUnionCoverageRatio,
+			localExplanationCorroboratedCoverageRatio,
+			localExplanationAnchorRatio,
+			localExplanationCompactnessRatio,
 			secondPassageScore,
 			metadataLaneTier,
 			metadataLaneScore,
@@ -2256,6 +2336,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			passageWindowCoverageRatio * 3.8 +
 			passageWindowAnchorRatio * 2.2 +
 			passageWindowCompactnessRatio * 2.5 +
+			localExplanationCompetitionScore * 1.25 +
+			localExplanationUnionCoverageRatio * 1.9 +
+			localExplanationCorroboratedCoverageRatio * 1.6 +
+			localExplanationAnchorRatio * 0.75 +
+			localExplanationCompactnessRatio * 0.6 +
 			passageAnchorAgreementRatio * 2.4 -
 			passageFragmentationRatio * 4.6 +
 			titleAnchorEvidence * 1.8 +
@@ -2325,6 +2410,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					passageWindowCoverageRatio * 2.4 +
 					passageWindowAnchorRatio * 2.2 +
 					passageWindowCompactnessRatio * 1.6 +
+					localExplanationCompetitionScore * 0.85 +
+					localExplanationUnionCoverageRatio * 1.2 +
+					localExplanationCorroboratedCoverageRatio * 1 +
+					localExplanationAnchorRatio * 0.45 +
+					localExplanationCompactnessRatio * 0.3 +
 					passageAnchorAgreementRatio * 2 -
 					passageFragmentationRatio * 2.4 +
 					metadataLaneTier * 4.5 +
@@ -2345,6 +2435,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					passageWindowCoverageRatio * 1.8 +
 					passageWindowAnchorRatio * 1.9 +
 					passageWindowCompactnessRatio * 1.2 +
+					localExplanationCompetitionScore * 0.45 +
+					localExplanationUnionCoverageRatio * 0.7 +
 					passageAnchorAgreementRatio * 1.7 -
 					passageFragmentationRatio * 2.1 +
 					metadataLaneTier * 3.5 +
@@ -2375,6 +2467,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						passageWindowCoverageRatio * 11.2 +
 						passageWindowAnchorRatio * 1.8 +
 						passageWindowCompactnessRatio * 8.6 +
+						localExplanationCompetitionScore * 1.4 +
+						localExplanationUnionCoverageRatio * 2.2 +
+						localExplanationCorroboratedCoverageRatio * 1.8 +
 						passageAnchorAgreementRatio * 2.6 -
 						passageFragmentationRatio * 2.2 +
 						-headingCrowdingPenalty +
@@ -3062,7 +3157,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private createQueryScoringCache(): QueryScoringCache {
 		return {
 			positionsByPassageId: new Map<number, Map<number, number[]>>(),
-			localWindowSignalsByPassageId: new Map<number, LocalWindowSignals>(),
+			localWindowSetsByPassageId: new Map<number, QueryConditionedLocalWindowSet>(),
 		};
 	}
 
@@ -3115,7 +3210,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return positionsByQueryTerm;
 	}
 
-	private getLocalWindowSignalsForPassage(params: {
+	private getLocalWindowSetForPassage(params: {
 		passage: PassageRecord;
 		matchedQueryTerms: ReadonlySet<number>;
 		matchedTermsByQueryTerm: ReadonlyMap<number, ReadonlySet<string>>;
@@ -3126,7 +3221,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		totalQueryWeight: number;
 		queryScoringCache: QueryScoringCache;
 		computeIfMissing: boolean;
-	}): LocalWindowSignals {
+	}): QueryConditionedLocalWindowSet {
 		const {
 			passage,
 			matchedQueryTerms,
@@ -3146,14 +3241,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				matchedQueryTermsCount: matchedQueryTerms.size,
 			})
 		) {
-			return EMPTY_LOCAL_WINDOW_SIGNALS;
+			return EMPTY_LOCAL_WINDOW_SET;
 		}
-		const cached = queryScoringCache.localWindowSignalsByPassageId.get(passage.id);
+		const cached = queryScoringCache.localWindowSetsByPassageId.get(passage.id);
 		if (cached) {
 			return cached;
 		}
 		if (!computeIfMissing) {
-			return EMPTY_LOCAL_WINDOW_SIGNALS;
+			return EMPTY_LOCAL_WINDOW_SET;
 		}
 		const positionsByQueryTerm = this.getCachedPassagePositionsByQueryTerm({
 			passage,
@@ -3163,17 +3258,32 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryScoringCache,
 		});
 		if (positionsByQueryTerm.size <= 1) {
-			return EMPTY_LOCAL_WINDOW_SIGNALS;
+			return EMPTY_LOCAL_WINDOW_SET;
 		}
-		const signals = this.computeQueryConditionedLocalWindowSignals(
+		const signals = this.computeQueryConditionedLocalWindowSet(
 			positionsByQueryTerm,
 			exactMatchedQueryTerms,
 			planner,
 			queryTermWeights,
 			totalQueryWeight,
 		);
-		queryScoringCache.localWindowSignalsByPassageId.set(passage.id, signals);
+		queryScoringCache.localWindowSetsByPassageId.set(passage.id, signals);
 		return signals;
+	}
+
+	private getLocalWindowSignalsForPassage(params: {
+		passage: PassageRecord;
+		matchedQueryTerms: ReadonlySet<number>;
+		matchedTermsByQueryTerm: ReadonlyMap<number, ReadonlySet<string>>;
+		exactMatchedQueryTerms: ReadonlySet<number>;
+		queryTerms: readonly string[];
+		planner: FileSearchQueryPlanner | null;
+		queryTermWeights: QueryTermWeightMap;
+		totalQueryWeight: number;
+		queryScoringCache: QueryScoringCache;
+		computeIfMissing: boolean;
+	}): LocalWindowSignals {
+		return this.getLocalWindowSetForPassage(params).bestSignals;
 	}
 
 	private computePassageSetSignals(params: {
@@ -3206,6 +3316,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				bestWindowCoverageRatio: 0,
 				bestWindowAnchorRatio: 0,
 				bestWindowCompactnessRatio: 0,
+				localExplanationCompetitionScore: 0,
+				localExplanationUnionCoverageRatio: 0,
+				localExplanationCorroboratedCoverageRatio: 0,
+				localExplanationAnchorRatio: 0,
+				localExplanationCompactnessRatio: 0,
 			};
 		}
 
@@ -3230,8 +3345,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		let bestWindowAnchorRatio = 0;
 		let bestWindowCompactnessRatio = 0;
 		const bestPassage = this.passageById.get(bestEvidence.passageId);
-		const bestLocalWindowSignals = bestPassage
-			? this.getLocalWindowSignalsForPassage({
+		const bestLocalWindowSet = bestPassage
+			? this.getLocalWindowSetForPassage({
 					passage: bestPassage,
 					matchedQueryTerms: bestEvidence.matchedQueryTerms,
 					matchedTermsByQueryTerm: bestEvidence.matchedTermsByQueryTerm,
@@ -3243,10 +3358,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					queryScoringCache,
 					computeIfMissing: false,
 				})
-			: EMPTY_LOCAL_WINDOW_SIGNALS;
+			: EMPTY_LOCAL_WINDOW_SET;
+		const bestLocalWindowSignals = bestLocalWindowSet.bestSignals;
 		bestWindowCoverageRatio = bestLocalWindowSignals.coverageRatio;
 		bestWindowAnchorRatio = bestLocalWindowSignals.anchorCoverageRatio;
 		bestWindowCompactnessRatio = bestLocalWindowSignals.compactnessRatio;
+		const fileLocalExplanationSignals = this.computeFileLocalExplanationSignals({
+			evidences,
+			queryTerms,
+			planner,
+			queryTermWeights,
+			totalQueryWeight,
+			queryScoringCache,
+		});
 
 		for (let evidenceIndex = 0; evidenceIndex < evidences.length; evidenceIndex++) {
 			const evidence = evidences[evidenceIndex];
@@ -3300,7 +3424,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				overlapRatio * 0.78 + anchorOverlapRatio * 0.32,
 			);
 			const localWindowSignals =
-				queryScoringCache.localWindowSignalsByPassageId.get(evidence.passageId);
+				queryScoringCache.localWindowSetsByPassageId.get(evidence.passageId)
+					?.bestSignals;
 			const localWindowSupport =
 				localWindowSignals?.coverageRatio ??
 				Math.min(1, evidenceMatchedWeight / totalQueryWeight);
@@ -3400,16 +3525,26 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			bestWindowCoverageRatio,
 			bestWindowAnchorRatio,
 			bestWindowCompactnessRatio,
+			localExplanationCompetitionScore:
+				fileLocalExplanationSignals.competitionScore,
+			localExplanationUnionCoverageRatio:
+				fileLocalExplanationSignals.unionCoverageRatio,
+			localExplanationCorroboratedCoverageRatio:
+				fileLocalExplanationSignals.corroboratedCoverageRatio,
+			localExplanationAnchorRatio:
+				fileLocalExplanationSignals.anchorCoverageRatio,
+			localExplanationCompactnessRatio:
+				fileLocalExplanationSignals.compactnessRatio,
 		};
 	}
 
-	private computeQueryConditionedLocalWindowSignals(
+	private computeQueryConditionedLocalWindowSet(
 		positionsByQueryTerm: ReadonlyMap<number, number[]>,
 		exactMatchedQueryTerms: ReadonlySet<number>,
 		planner: FileSearchQueryPlanner | null,
 		queryTermWeights: QueryTermWeightMap,
 		totalQueryWeight: number,
-	): LocalWindowSignals {
+	): QueryConditionedLocalWindowSet {
 		const occurrences: Array<{ position: number; queryTermIndex: number }> = [];
 		for (const [queryTermIndex, positions] of positionsByQueryTerm) {
 			for (const position of positions) {
@@ -3417,13 +3552,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 		if (occurrences.length === 0) {
-			return {
-				score: 0,
-				coverageRatio: 0,
-				exactCoverageRatio: 0,
-				anchorCoverageRatio: 0,
-				compactnessRatio: 0,
-			};
+			return EMPTY_LOCAL_WINDOW_SET;
 		}
 		occurrences.sort((left, right) => left.position - right.position);
 		const anchorWeight =
@@ -3438,13 +3567,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					LOCAL_WINDOW_BASE_SPAN,
 			),
 		);
-		let bestSignals: LocalWindowSignals = {
-			score: 0,
-			coverageRatio: 0,
-			exactCoverageRatio: 0,
-			anchorCoverageRatio: 0,
-			compactnessRatio: 0,
-		};
+		const explanations: LocalWindowExplanation[] = [];
 		for (let leftIndex = 0; leftIndex < occurrences.length; leftIndex++) {
 			const windowPositions = new Map<number, number[]>();
 			for (let rightIndex = leftIndex; rightIndex < occurrences.length; rightIndex++) {
@@ -3499,25 +3622,392 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					orderedRatio * LOCAL_WINDOW_ORDER_WEIGHT +
 					tightOrderedPairRatio * LOCAL_WINDOW_TIGHT_PAIR_WEIGHT +
 					rareTermLift * LOCAL_WINDOW_RARE_TERM_WEIGHT;
-				if (
-					score > bestSignals.score ||
-					(score === bestSignals.score &&
-						coverageRatio > bestSignals.coverageRatio) ||
-					(score === bestSignals.score &&
-						coverageRatio === bestSignals.coverageRatio &&
-						compactnessRatio > bestSignals.compactnessRatio)
-				) {
-					bestSignals = {
+				this.insertLocalWindowExplanation(
+					explanations,
+					{
 						score,
 						coverageRatio,
 						exactCoverageRatio,
 						anchorCoverageRatio,
 						compactnessRatio,
-					};
+						startPosition: left.position,
+						endPosition: right.position,
+						matchedQueryTerms: windowMatchedQueryTerms,
+					},
+					queryTermWeights,
+				);
+			}
+		}
+		return this.buildLocalWindowSet(
+			explanations,
+			queryTermWeights,
+			totalQueryWeight,
+		);
+	}
+
+	private insertLocalWindowExplanation(
+		explanations: LocalWindowExplanation[],
+		candidate: LocalWindowExplanation,
+		queryTermWeights: QueryTermWeightMap,
+	) {
+		for (let index = 0; index < explanations.length; index++) {
+			const existing = explanations[index];
+			if (
+				!this.areLocalWindowExplanationsDuplicate(
+					existing,
+					candidate,
+					queryTermWeights,
+				)
+			) {
+				continue;
+			}
+			if (this.isBetterLocalWindowExplanation(candidate, existing)) {
+				explanations[index] = candidate;
+			}
+			explanations.sort((left, right) =>
+				this.compareLocalWindowExplanations(left, right),
+			);
+			if (explanations.length > MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE) {
+				explanations.length = MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE;
+			}
+			return;
+		}
+		explanations.push(candidate);
+		explanations.sort((left, right) =>
+			this.compareLocalWindowExplanations(left, right),
+		);
+		if (explanations.length > MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE) {
+			explanations.length = MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE;
+		}
+	}
+
+	private buildLocalWindowSet(
+		explanations: readonly LocalWindowExplanation[],
+		queryTermWeights: QueryTermWeightMap,
+		totalQueryWeight: number,
+	): QueryConditionedLocalWindowSet {
+		if (explanations.length === 0) {
+			return EMPTY_LOCAL_WINDOW_SET;
+		}
+		const unionMatchedQueryTerms = new Set<number>();
+		const corroboratedQueryTerms = new Set<number>();
+		const explanationMatchCounts = new Map<number, number>();
+		let competitionScore = 0;
+		let anchorCoverageRatio = 0;
+		let compactnessRatio = 0;
+		let decayWeightSum = 0;
+		for (let index = 0; index < explanations.length; index++) {
+			const explanation = explanations[index];
+			const decay = index === 0 ? 1 : index === 1 ? 0.62 : 0.38;
+			competitionScore += explanation.score * decay;
+			anchorCoverageRatio += explanation.anchorCoverageRatio * decay;
+			compactnessRatio += explanation.compactnessRatio * decay;
+			decayWeightSum += decay;
+			for (const queryTermIndex of explanation.matchedQueryTerms) {
+				unionMatchedQueryTerms.add(queryTermIndex);
+				const nextCount = (explanationMatchCounts.get(queryTermIndex) ?? 0) + 1;
+				explanationMatchCounts.set(queryTermIndex, nextCount);
+				if (nextCount >= 2) {
+					corroboratedQueryTerms.add(queryTermIndex);
 				}
 			}
 		}
-		return bestSignals;
+		const unionCoverageRatio =
+			getSetWeight(unionMatchedQueryTerms, queryTermWeights) / totalQueryWeight;
+		const corroboratedCoverageRatio =
+			getSetWeight(corroboratedQueryTerms, queryTermWeights) / totalQueryWeight;
+		const weightedAnchorCoverageRatio =
+			decayWeightSum > 0 ? anchorCoverageRatio / decayWeightSum : 0;
+		const weightedCompactnessRatio =
+			decayWeightSum > 0 ? compactnessRatio / decayWeightSum : 0;
+		const bestSignals = explanations[0];
+		return {
+			bestSignals: {
+				score: bestSignals.score,
+				coverageRatio: bestSignals.coverageRatio,
+				exactCoverageRatio: bestSignals.exactCoverageRatio,
+				anchorCoverageRatio: bestSignals.anchorCoverageRatio,
+				compactnessRatio: bestSignals.compactnessRatio,
+			},
+			explanations: [...explanations],
+			competitionScore:
+				competitionScore +
+				unionCoverageRatio * 0.92 +
+				corroboratedCoverageRatio * 0.74 +
+				weightedAnchorCoverageRatio * 0.52 +
+				weightedCompactnessRatio * 0.48,
+			unionCoverageRatio,
+			corroboratedCoverageRatio,
+			anchorCoverageRatio: weightedAnchorCoverageRatio,
+			compactnessRatio: weightedCompactnessRatio,
+		};
+	}
+
+	private computeFileLocalExplanationSignals(params: {
+		evidences: readonly FilePassageEvidence[];
+		queryTerms: readonly string[];
+		planner: FileSearchQueryPlanner | null;
+		queryTermWeights: QueryTermWeightMap;
+		totalQueryWeight: number;
+		queryScoringCache: QueryScoringCache;
+	}): {
+		competitionScore: number;
+		unionCoverageRatio: number;
+		corroboratedCoverageRatio: number;
+		anchorCoverageRatio: number;
+		compactnessRatio: number;
+	} {
+		const {
+			evidences,
+			queryTerms,
+			planner,
+			queryTermWeights,
+			totalQueryWeight,
+			queryScoringCache,
+		} = params;
+		if (evidences.length === 0) {
+			return {
+				competitionScore: 0,
+				unionCoverageRatio: 0,
+				corroboratedCoverageRatio: 0,
+				anchorCoverageRatio: 0,
+				compactnessRatio: 0,
+			};
+		}
+		const bestEvidenceScore = evidences[0]?.score ?? 0;
+		const candidates: FileLocalExplanationCandidate[] = [];
+		for (let evidenceIndex = 0; evidenceIndex < evidences.length; evidenceIndex++) {
+			const evidence = evidences[evidenceIndex];
+			const passage = this.passageById.get(evidence.passageId);
+			if (!passage) {
+				continue;
+			}
+			const localWindowSet = this.getLocalWindowSetForPassage({
+				passage,
+				matchedQueryTerms: evidence.matchedQueryTerms,
+				matchedTermsByQueryTerm: evidence.matchedTermsByQueryTerm,
+				exactMatchedQueryTerms: evidence.exactMatchedQueryTerms,
+				queryTerms,
+				planner,
+				queryTermWeights,
+				totalQueryWeight,
+				queryScoringCache,
+				computeIfMissing: false,
+			});
+			if (localWindowSet.explanations.length === 0) {
+				continue;
+			}
+			const evidenceScoreRatio =
+				bestEvidenceScore > 0
+					? Math.min(
+							1.2,
+							evidence.score / Math.max(0.000001, bestEvidenceScore),
+						)
+					: 1;
+			const evidenceRankDecay = Math.max(0.48, 1 - evidenceIndex * 0.16);
+			for (
+				let explanationIndex = 0;
+				explanationIndex < localWindowSet.explanations.length;
+				explanationIndex++
+			) {
+				const explanation = localWindowSet.explanations[explanationIndex];
+				const explanationRankDecay =
+					explanationIndex === 0
+						? 1
+						: explanationIndex === 1
+							? 0.76
+							: 0.58;
+				candidates.push({
+					...explanation,
+					passageId: evidence.passageId,
+					weightedScore:
+						explanation.score *
+						evidenceScoreRatio *
+						evidenceRankDecay *
+						explanationRankDecay,
+				});
+			}
+		}
+		if (candidates.length === 0) {
+			return {
+				competitionScore: 0,
+				unionCoverageRatio: 0,
+				corroboratedCoverageRatio: 0,
+				anchorCoverageRatio: 0,
+				compactnessRatio: 0,
+			};
+		}
+		candidates.sort((left, right) => {
+			if (right.weightedScore !== left.weightedScore) {
+				return right.weightedScore - left.weightedScore;
+			}
+			return this.compareLocalWindowExplanations(left, right);
+		});
+		const selected: FileLocalExplanationCandidate[] = [];
+		for (const candidate of candidates) {
+			const duplicateIndex = selected.findIndex((existing) =>
+				this.areFileLocalExplanationCandidatesDuplicate(
+					existing,
+					candidate,
+					queryTermWeights,
+				),
+			);
+			if (duplicateIndex >= 0) {
+				if (
+					candidate.weightedScore > selected[duplicateIndex].weightedScore ||
+					(candidate.weightedScore === selected[duplicateIndex].weightedScore &&
+						this.isBetterLocalWindowExplanation(
+							candidate,
+							selected[duplicateIndex],
+						))
+				) {
+					selected[duplicateIndex] = candidate;
+				}
+				continue;
+			}
+			selected.push(candidate);
+			if (selected.length >= MAX_FILE_LOCAL_EXPLANATIONS) {
+				break;
+			}
+		}
+		selected.sort((left, right) => {
+			if (right.weightedScore !== left.weightedScore) {
+				return right.weightedScore - left.weightedScore;
+			}
+			return this.compareLocalWindowExplanations(left, right);
+		});
+		const unionMatchedQueryTerms = new Set<number>();
+		const corroboratedQueryTerms = new Set<number>();
+		const explanationMatchCounts = new Map<number, number>();
+		const explainedQueryTerms = new Set<number>();
+		let competitionScore = 0;
+		let anchorCoverageRatio = 0;
+		let compactnessRatio = 0;
+		let decayWeightSum = 0;
+		for (let index = 0; index < selected.length; index++) {
+			const explanation = selected[index];
+			const decay = index === 0 ? 1 : index === 1 ? 0.68 : 0.42;
+			const explanationWeight = getSetWeight(
+				explanation.matchedQueryTerms,
+				queryTermWeights,
+			);
+			const novelQueryTerms = new Set<number>();
+			for (const queryTermIndex of explanation.matchedQueryTerms) {
+				if (!explainedQueryTerms.has(queryTermIndex)) {
+					novelQueryTerms.add(queryTermIndex);
+				}
+			}
+			const noveltyRatio =
+				explanationWeight > 0
+					? getSetWeight(novelQueryTerms, queryTermWeights) / explanationWeight
+					: 0;
+			competitionScore +=
+				explanation.weightedScore * decay * (0.34 + noveltyRatio * 0.66);
+			anchorCoverageRatio += explanation.anchorCoverageRatio * decay;
+			compactnessRatio += explanation.compactnessRatio * decay;
+			decayWeightSum += decay;
+			for (const queryTermIndex of explanation.matchedQueryTerms) {
+				explainedQueryTerms.add(queryTermIndex);
+				unionMatchedQueryTerms.add(queryTermIndex);
+				const nextCount = (explanationMatchCounts.get(queryTermIndex) ?? 0) + 1;
+				explanationMatchCounts.set(queryTermIndex, nextCount);
+				if (nextCount >= 2) {
+					corroboratedQueryTerms.add(queryTermIndex);
+				}
+			}
+		}
+		const unionCoverageRatio =
+			getSetWeight(unionMatchedQueryTerms, queryTermWeights) / totalQueryWeight;
+		const corroboratedCoverageRatio =
+			getSetWeight(corroboratedQueryTerms, queryTermWeights) / totalQueryWeight;
+		return {
+			competitionScore:
+				competitionScore +
+				unionCoverageRatio * 1.05 +
+				corroboratedCoverageRatio * 0.82,
+			unionCoverageRatio,
+			corroboratedCoverageRatio,
+			anchorCoverageRatio:
+				decayWeightSum > 0 ? anchorCoverageRatio / decayWeightSum : 0,
+			compactnessRatio:
+				decayWeightSum > 0 ? compactnessRatio / decayWeightSum : 0,
+		};
+	}
+
+	private compareLocalWindowExplanations(
+		left: LocalWindowExplanation,
+		right: LocalWindowExplanation,
+	): number {
+		if (right.score !== left.score) {
+			return right.score - left.score;
+		}
+		if (right.coverageRatio !== left.coverageRatio) {
+			return right.coverageRatio - left.coverageRatio;
+		}
+		if (right.compactnessRatio !== left.compactnessRatio) {
+			return right.compactnessRatio - left.compactnessRatio;
+		}
+		return left.startPosition - right.startPosition;
+	}
+
+	private isBetterLocalWindowExplanation(
+		candidate: LocalWindowExplanation,
+		existing: LocalWindowExplanation,
+	): boolean {
+		return this.compareLocalWindowExplanations(candidate, existing) < 0;
+	}
+
+	private areFileLocalExplanationCandidatesDuplicate(
+		left: FileLocalExplanationCandidate,
+		right: FileLocalExplanationCandidate,
+		queryTermWeights: QueryTermWeightMap,
+	): boolean {
+		if (left.passageId !== right.passageId) {
+			return false;
+		}
+		return this.areLocalWindowExplanationsDuplicate(
+			left,
+			right,
+			queryTermWeights,
+		);
+	}
+
+	private areLocalWindowExplanationsDuplicate(
+		left: LocalWindowExplanation,
+		right: LocalWindowExplanation,
+		queryTermWeights: QueryTermWeightMap,
+	): boolean {
+		const spanOverlapRatio = this.computeLocalWindowSpanOverlapRatio(left, right);
+		if (spanOverlapRatio < LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD) {
+			return false;
+		}
+		const leftWeight = getSetWeight(left.matchedQueryTerms, queryTermWeights);
+		const rightWeight = getSetWeight(right.matchedQueryTerms, queryTermWeights);
+		if (leftWeight <= 0 || rightWeight <= 0) {
+			return true;
+		}
+		const termOverlapRatio =
+			getOverlapWeight(
+				left.matchedQueryTerms,
+				right.matchedQueryTerms,
+				queryTermWeights,
+			) / Math.max(0.000001, Math.min(leftWeight, rightWeight));
+		return termOverlapRatio >= LOCAL_WINDOW_DUPLICATE_TERM_OVERLAP_THRESHOLD;
+	}
+
+	private computeLocalWindowSpanOverlapRatio(
+		left: LocalWindowExplanation,
+		right: LocalWindowExplanation,
+	): number {
+		const overlapStart = Math.max(left.startPosition, right.startPosition);
+		const overlapEnd = Math.min(left.endPosition, right.endPosition);
+		if (overlapEnd < overlapStart) {
+			return 0;
+		}
+		const overlapLength = overlapEnd - overlapStart + 1;
+		const leftLength = left.endPosition - left.startPosition + 1;
+		const rightLength = right.endPosition - right.startPosition + 1;
+		return overlapLength / Math.max(1, Math.min(leftLength, rightLength));
 	}
 
 	private computeShortTitleFastPathScore(params: {

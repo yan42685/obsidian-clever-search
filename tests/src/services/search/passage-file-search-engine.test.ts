@@ -161,6 +161,57 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("notes/local.md");
 	});
 
+	test("lets a file win with multiple decisive local explanations instead of one noisy hit", async () => {
+		const engine = createEngine();
+		const longGap = Array.from({ length: 6 }, (_, index) =>
+			buildFillerParagraph(300 + index),
+		).join("\n\n");
+		await engine.addDocuments([
+			{
+				path: "docs/concepts/secret-rollout.md",
+				basename: "secret rollout",
+				folder: "docs concepts",
+				content: [
+					"secret stores sensitive data for pods and workloads",
+					longGap,
+					"after a secret update restart the pod so the new data is loaded",
+					longGap,
+					"mount secret data into the pod filesystem for runtime configuration",
+				].join("\n\n"),
+			},
+			{
+				path: "docs/troubleshooting/pod-restart-checklist.md",
+				basename: "pod restart checklist",
+				folder: "docs troubleshooting",
+				content: [
+					"pod restart troubleshooting notes list secret references and data paths for operators",
+					"the checklist mentions restart order secret metadata and pod event history in one noisy paragraph",
+					"another restart checklist keeps repeating pod and data reminders without the core secret rollout explanation",
+				].join("\n\n"),
+			},
+			{
+				path: "docs/reference/secret.md",
+				basename: "secret reference",
+				folder: "docs reference",
+				content:
+					"secret reference notes describe data keys for a pod filesystem but do not explain restart flow",
+			},
+		]);
+
+		const results = (await engine.searchFiles({
+			queryText: "secret data pod restart filesystem",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		})) as Array<any>;
+
+		expect(results.length).toBeGreaterThanOrEqual(2);
+		expect(results[0]?.path).toBe("docs/concepts/secret-rollout.md");
+		expect(results[0]?.localExplanationCompetitionScore).toBeGreaterThan(
+			results[1]?.localExplanationCompetitionScore ?? 0,
+		);
+	});
+
 	test("keeps path-like metadata queries viable", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
