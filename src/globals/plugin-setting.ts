@@ -72,7 +72,10 @@ export type LogLevelOptions = {
 	[K in LogLevel]: K;
 };
 
-export type FileSearchBackend = "minisearch" | "custom-bm25";
+export type FileSearchBackend =
+	| "minisearch"
+	| "custom-bm25"
+	| "passage-bm25";
 
 export type HybridSetting = {
 	enabled: boolean;

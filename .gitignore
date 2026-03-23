@@ -31,3 +31,5 @@ dist/
 
 .editorconfig
 cs-search-worker.js
+
+benchmarks/

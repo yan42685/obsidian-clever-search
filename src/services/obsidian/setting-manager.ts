@@ -281,6 +281,7 @@ class GeneralTab extends PluginSettingTab {
 					.addOptions({
 						minisearch: t("fileSearchBackend.minisearch"),
 						"custom-bm25": t("fileSearchBackend.customBm25"),
+						"passage-bm25": t("fileSearchBackend.passageBm25"),
 					})
 					.setValue(this.setting.fileSearchBackend)
 					.onChange((value) => {

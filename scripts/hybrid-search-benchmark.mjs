@@ -10,6 +10,8 @@ const DEFAULT_DIFFICULTY = "normal";
 const DEFAULT_SUITE_PROFILE = "daily";
 const DEFAULT_DENSE_BACKEND = "hnsw";
 const DEFAULT_SIZE_SWEEP_MBS = [50, 120, 300];
+const OVERLAP_CUTOFFS = [5, 10, 15];
+const RERANK_OVERLAP_TOP_K = 5;
 const DEFAULT_BUDGET_COMPARE_NAMES = [
 	"current-20x30-prox",
 	"current-20x30-plain",
@@ -385,6 +387,7 @@ function parseArgs(argv) {
 		!hasExplicitTargetLibraryMb &&
 		(args.mode === "regression" ||
 			args.mode === "tune-regression" ||
+			args.mode === "rerank-source-overlap" ||
 			args.mode === "bm25-size")
 	) {
 		args.targetLibraryMb = 40;
@@ -393,6 +396,7 @@ function parseArgs(argv) {
 		!hasExplicitDifficulty &&
 		(args.mode === "regression" ||
 			args.mode === "tune-regression" ||
+			args.mode === "rerank-source-overlap" ||
 			args.mode === "budget-compare" ||
 			args.mode === "size-sweep")
 	) {
@@ -1964,6 +1968,122 @@ function rerankCandidates(query, candidates, chunkById, queryVector, limit) {
 	return reranked.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
+function takeTopIds(items, limit) {
+	return new Set(items.slice(0, limit).map((item) => item.id));
+}
+
+function takeTopFileIdsFromChunks(items, chunkById, limit) {
+	const fileIds = new Set();
+	for (const item of items.slice(0, limit)) {
+		const chunk = chunkById.get(item.id);
+		if (!chunk) continue;
+		fileIds.add(chunk.fileId);
+	}
+	return fileIds;
+}
+
+function countOverlap(items, idSet, limit) {
+	let count = 0;
+	for (const item of items.slice(0, limit)) {
+		if (idSet.has(item.id)) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
+function countFileOverlap(items, fileIdSet, chunkById, limit) {
+	let count = 0;
+	const seenFileIds = new Set();
+	for (const item of items.slice(0, limit)) {
+		const chunk = chunkById.get(item.id);
+		if (!chunk || seenFileIds.has(chunk.fileId)) continue;
+		seenFileIds.add(chunk.fileId);
+		if (fileIdSet.has(chunk.fileId)) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
+function computeCandidateFileStats(items, chunkById) {
+	const countsByFile = new Map();
+	for (const item of items) {
+		const chunk = chunkById.get(item.id);
+		if (!chunk) continue;
+		countsByFile.set(chunk.fileId, (countsByFile.get(chunk.fileId) ?? 0) + 1);
+	}
+	let maxChunksPerFile = 0;
+	for (const count of countsByFile.values()) {
+		if (count > maxChunksPerFile) {
+			maxChunksPerFile = count;
+		}
+	}
+	return {
+		uniqueFileCount: countsByFile.size,
+		maxChunksPerFile,
+	};
+}
+
+function computeRerankSourceOverlap(query, bm25Chunks, denseChunks, unionChunks, rerankChunks, chunkById) {
+	const rerankTopChunks = rerankChunks.slice(0, RERANK_OVERLAP_TOP_K);
+	const candidateFileStats = computeCandidateFileStats(unionChunks, chunkById);
+	const rerankTopChunkFileStats = computeCandidateFileStats(rerankTopChunks, chunkById);
+	const chunkOverlap = {};
+	const fileOverlap = {};
+	const candidateWindows = {};
+
+	for (const cutoff of OVERLAP_CUTOFFS) {
+		const bm25ChunkIds = takeTopIds(bm25Chunks, cutoff);
+		const denseChunkIds = takeTopIds(denseChunks, cutoff);
+		const unionChunkIds = new Set([...bm25ChunkIds, ...denseChunkIds]);
+		const bm25FileIds = takeTopFileIdsFromChunks(bm25Chunks, chunkById, cutoff);
+		const denseFileIds = takeTopFileIdsFromChunks(denseChunks, chunkById, cutoff);
+		const unionFileIds = new Set([...bm25FileIds, ...denseFileIds]);
+
+		chunkOverlap[`bm25_${cutoff}`] = countOverlap(rerankTopChunks, bm25ChunkIds, RERANK_OVERLAP_TOP_K);
+		chunkOverlap[`dense_${cutoff}`] = countOverlap(rerankTopChunks, denseChunkIds, RERANK_OVERLAP_TOP_K);
+		chunkOverlap[`union_${cutoff}`] = countOverlap(rerankTopChunks, unionChunkIds, RERANK_OVERLAP_TOP_K);
+
+		fileOverlap[`bm25_${cutoff}`] = countFileOverlap(
+			rerankTopChunks,
+			bm25FileIds,
+			chunkById,
+			RERANK_OVERLAP_TOP_K,
+		);
+		fileOverlap[`dense_${cutoff}`] = countFileOverlap(
+			rerankTopChunks,
+			denseFileIds,
+			chunkById,
+			RERANK_OVERLAP_TOP_K,
+		);
+		fileOverlap[`union_${cutoff}`] = countFileOverlap(
+			rerankTopChunks,
+			unionFileIds,
+			chunkById,
+			RERANK_OVERLAP_TOP_K,
+		);
+
+		candidateWindows[`union_${cutoff}`] = unionChunkIds.size;
+	}
+
+	return {
+		queryId: query.id,
+		name: query.name ?? query.text,
+		text: query.text,
+		family: query.family,
+		entryPath: query.entryPath,
+		rerankTopChunkCount: rerankTopChunks.length,
+		rerankTopUniqueFiles: rerankTopChunkFileStats.uniqueFileCount,
+		candidateCount: unionChunks.length,
+		candidateUniqueFiles: candidateFileStats.uniqueFileCount,
+		candidateMaxChunksPerFile: candidateFileStats.maxChunksPerFile,
+		chunkOverlap,
+		fileOverlap,
+		candidateWindows,
+	};
+}
+
 function scoreFile(scores) {
 	const ranked = [...scores].sort((a, b) => b - a);
 	const [best = 0, second = 0, third = 0] = ranked;
@@ -2247,7 +2367,9 @@ function evaluateRun(args, runIndex, config = null) {
 		difficulty: args.difficulty,
 	});
 	const querySource =
-		args.mode === "regression" || args.mode === "tune-regression"
+		args.mode === "regression" ||
+		args.mode === "tune-regression" ||
+		args.mode === "rerank-source-overlap"
 			? loadRegressionQueries(args)
 			: {
 					path: null,
@@ -2282,6 +2404,7 @@ function evaluateRun(args, runIndex, config = null) {
 		["bm25_prox_vs_dense", []],
 		["bm25_base_vs_dense", []],
 	]);
+	const rerankSourceOverlapResults = [];
 	const proximityExamples = [];
 	const rerankExamples = [];
 
@@ -2343,6 +2466,16 @@ function evaluateRun(args, runIndex, config = null) {
 			corpus.chunkById,
 			dense.queryVector,
 			args.topK,
+		);
+		rerankSourceOverlapResults.push(
+			computeRerankSourceOverlap(
+				query,
+				activeBm25Chunks,
+				dense.results,
+				unionChunks,
+				rerankChunks,
+				corpus.chunkById,
+			),
 		);
 
 		const rankings = {
@@ -2457,6 +2590,7 @@ function evaluateRun(args, runIndex, config = null) {
 		fileSystems,
 		candidateSystems,
 		complementSystems,
+		rerankSourceOverlapResults,
 		proximityExamples,
 		rerankExamples,
 	};
@@ -2542,6 +2676,59 @@ function summarizeComplementResults(results) {
 		denseOnlyGain25: total.denseOnlyGain25 / count,
 		bm25OnlyGain25: total.bm25OnlyGain25 / count,
 		unionGain25: total.unionGain25 / count,
+	};
+}
+
+function summarizeRerankSourceOverlap(results) {
+	const count = results.length || 1;
+	const total = {
+		candidateCount: 0,
+		candidateUniqueFiles: 0,
+		candidateMaxChunksPerFile: 0,
+		rerankTopChunkCount: 0,
+		rerankTopUniqueFiles: 0,
+	};
+	const chunkOverlap = {};
+	const fileOverlap = {};
+	const candidateWindows = {};
+
+	for (const result of results) {
+		total.candidateCount += result.candidateCount;
+		total.candidateUniqueFiles += result.candidateUniqueFiles;
+		total.candidateMaxChunksPerFile += result.candidateMaxChunksPerFile;
+		total.rerankTopChunkCount += result.rerankTopChunkCount;
+		total.rerankTopUniqueFiles += result.rerankTopUniqueFiles;
+		for (const [key, value] of Object.entries(result.chunkOverlap)) {
+			chunkOverlap[key] = (chunkOverlap[key] ?? 0) + value;
+		}
+		for (const [key, value] of Object.entries(result.fileOverlap)) {
+			fileOverlap[key] = (fileOverlap[key] ?? 0) + value;
+		}
+		for (const [key, value] of Object.entries(result.candidateWindows)) {
+			candidateWindows[key] = (candidateWindows[key] ?? 0) + value;
+		}
+	}
+
+	for (const key of Object.keys(chunkOverlap)) {
+		chunkOverlap[key] /= count;
+	}
+	for (const key of Object.keys(fileOverlap)) {
+		fileOverlap[key] /= count;
+	}
+	for (const key of Object.keys(candidateWindows)) {
+		candidateWindows[key] /= count;
+	}
+
+	return {
+		queryCount: results.length,
+		candidateCount: total.candidateCount / count,
+		candidateUniqueFiles: total.candidateUniqueFiles / count,
+		candidateMaxChunksPerFile: total.candidateMaxChunksPerFile / count,
+		rerankTopChunkCount: total.rerankTopChunkCount / count,
+		rerankTopUniqueFiles: total.rerankTopUniqueFiles / count,
+		chunkOverlap,
+		fileOverlap,
+		candidateWindows,
 	};
 }
 
@@ -2712,6 +2899,14 @@ function mergeExamples(items) {
 
 function formatMetric(value) {
 	return Number.isFinite(value) ? value.toFixed(3) : "inf";
+}
+
+function formatOverlapCount(value, denom = RERANK_OVERLAP_TOP_K) {
+	if (!Number.isFinite(value)) {
+		return "n/a";
+	}
+	const share = denom > 0 ? (value / denom) * 100 : 0;
+	return `${value.toFixed(2)} (${share.toFixed(0)}%)`;
 }
 
 function displayRank(rank) {
@@ -3428,6 +3623,70 @@ function printSizeSweepSummary(args, rows) {
 	console.log("- compare `daily` vs `holdout` to spot likely overfitting.");
 }
 
+function printRerankSourceOverlapSummary(args, runs) {
+	const overallSummary = summarizeRerankSourceOverlap(
+		runs.flatMap((run) => run.rerankSourceOverlapResults),
+	);
+	const entrySummary = new Map();
+	for (const run of runs) {
+		for (const result of run.rerankSourceOverlapResults) {
+			const bucket = entrySummary.get(result.entryPath) ?? [];
+			bucket.push(result);
+			entrySummary.set(result.entryPath, bucket);
+		}
+	}
+
+	console.log("");
+	console.log("Hybrid Rerank Source Overlap");
+	console.log("============================");
+	console.log(
+		`runs=${runs.length}, queries=${runs[0].queryCount}, recallLimit=${args.recallLimit}, topK=${args.topK}, difficulty=${args.difficulty}, denseBackend=${args.denseBackend}`,
+	);
+	console.log(
+		`querySource=${runs[0].querySource.path ? runs[0].querySource.path : "built-in synthetic"}, suiteProfile=${runs[0].querySource.suiteProfile ?? "synthetic"}, suites=${runs[0].querySource.suiteNames.join(", ")}`,
+	);
+	console.log("offline-only: no API calls, no embedding requests, no rerank requests, no token usage");
+	console.log("");
+	console.log("Overall");
+	console.log("-------");
+	console.log(
+		`candidateCount=${overallSummary.candidateCount.toFixed(2)}, uniqueFiles=${overallSummary.candidateUniqueFiles.toFixed(2)}, maxChunksPerFile=${overallSummary.candidateMaxChunksPerFile.toFixed(2)}, rerankTop5UniqueFiles=${overallSummary.rerankTopUniqueFiles.toFixed(2)}`,
+	);
+
+	console.log("");
+	console.log("Chunk Overlap With Rerank Top5");
+	console.log("------------------------------");
+	console.log("entryPath              queries  union@5         union@10        union@15        bm25@5          bm25@10         bm25@15         dense@5         dense@10        dense@15");
+	for (const entryPath of ["direct_hybrid", "lexical_fallback_like", "mixed_entry"]) {
+		const results = entrySummary.get(entryPath);
+		if (!results || results.length === 0) continue;
+		const summary = summarizeRerankSourceOverlap(results);
+		console.log(
+			`${entryPath.padEnd(21)} ${String(summary.queryCount).padStart(6)}  ${formatOverlapCount(summary.chunkOverlap.union_5).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.union_10).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.union_15).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.bm25_5).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.bm25_10).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.bm25_15).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.dense_5).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.dense_10).padStart(13)} ${formatOverlapCount(summary.chunkOverlap.dense_15).padStart(13)}`,
+		);
+	}
+
+	console.log("");
+	console.log("Candidate Window Size");
+	console.log("---------------------");
+	console.log("entryPath              union@5-size  union@10-size  union@15-size  candidateCount  uniqueFiles");
+	for (const entryPath of ["direct_hybrid", "lexical_fallback_like", "mixed_entry"]) {
+		const results = entrySummary.get(entryPath);
+		if (!results || results.length === 0) continue;
+		const summary = summarizeRerankSourceOverlap(results);
+		console.log(
+			`${entryPath.padEnd(21)} ${summary.candidateWindows.union_5.toFixed(2).padStart(12)} ${summary.candidateWindows.union_10.toFixed(2).padStart(14)} ${summary.candidateWindows.union_15.toFixed(2).padStart(14)} ${summary.candidateCount.toFixed(2).padStart(14)} ${summary.candidateUniqueFiles.toFixed(2).padStart(12)}`,
+		);
+	}
+
+	console.log("");
+	console.log("Interpretation");
+	console.log("--------------");
+	console.log("- `union@N` means rerank top5 chunks already covered by the deduped union of BM25 topN and dense topN.");
+	console.log("- If `union@15` is already near 5.00, cutting each source to 15 is probably low risk for rerank top5 chunk coverage.");
+	console.log("- Compare `bm25@N` vs `dense@N` to see which source contributes more directly to the final rerank top5.");
+}
+
 function runSizeSweep(args) {
 	const rows = [];
 	for (const sizeMb of args.sizes) {
@@ -3472,6 +3731,14 @@ function main() {
 	}
 	if (args.mode === "size-sweep") {
 		runSizeSweep(args);
+		return;
+	}
+	if (args.mode === "rerank-source-overlap") {
+		const runs = [];
+		for (let i = 0; i < args.runs; i++) {
+			runs.push(evaluateRun(args, i));
+		}
+		printRerankSourceOverlapSummary(args, runs);
 		return;
 	}
 	if (args.mode === "tune" || args.mode === "tune-regression") {

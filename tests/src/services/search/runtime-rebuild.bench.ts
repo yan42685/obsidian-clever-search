@@ -127,8 +127,7 @@ describe("runtime rebuild benchmark", () => {
 			blobToHnsw,
 			buildChunkVectorShard,
 			chunkVectorShardToRow,
-			rowToChunkVectorShard,
-			shardToChunkVectorRecords,
+			rowToChunkVectorRecords,
 			chunkToRow,
 			rowToChunk,
 		} = require("src/services/search/hybrid/hybrid-store");
@@ -200,14 +199,13 @@ describe("runtime rebuild benchmark", () => {
 			const hydratedHnsw = new HnswIndex("int8");
 			hydratedHnsw.deserialize(restoredHnswData);
 
-			const restoredShards = await Promise.all(
-				shardRows.map((row) => rowToChunkVectorShard(row)),
-			);
-			const restoredVectors = restoredShards.flatMap((shard) =>
-				shardToChunkVectorRecords(shard),
-			);
-			hydratedHnsw.hydrateVectors(restoredVectors);
-			restoredVectorCount = restoredVectors.length;
+			for (let index = 0; index < shardRows.length; index++) {
+				const restoredVectors = await rowToChunkVectorRecords(shardRows[index]);
+				hydratedHnsw.hydrateVectors(restoredVectors, {
+					append: index > 0,
+				});
+				restoredVectorCount += restoredVectors.length;
+			}
 
 			const snapshotByPath = new Map(
 				snapshotRows.map((row) => [row.filePath, row.plainText] as const),

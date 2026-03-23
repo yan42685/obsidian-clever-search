@@ -40,8 +40,7 @@ import {
 	getBm25BlobVersion,
 	hnswToBlob,
 	rowToChunk,
-	rowToChunkVectorShard,
-	shardToChunkVectorRecords,
+	rowToChunkVectorRecords,
 } from './hybrid-store';
 import type {
 	Chunk,
@@ -619,8 +618,7 @@ export class HybridEngine {
 		]);
 		const vectorsByChunkId = new Map<number, StoredVector>();
 		if (vectorRow && vectorRow.precision === this.precision) {
-			const shard = await rowToChunkVectorShard(vectorRow);
-			for (const record of shardToChunkVectorRecords(shard)) {
+			for (const record of await rowToChunkVectorRecords(vectorRow)) {
 				vectorsByChunkId.set(record.id, record.vector);
 			}
 		}
@@ -1206,17 +1204,24 @@ export class HybridEngine {
 	}
 
 	private async hydrateHnswVectors(): Promise<void> {
-		let offset = 0;
+		let lastFilePath: string | null = null;
 		let append = false;
 		while (true) {
 			const rows = await profileHybridStage(
 				'startup.load_vector_shards',
-				async () =>
-					await this.db.db.hybridChunkVectors
-						.orderBy('filePath')
-						.offset(offset)
+				async () => {
+					if (lastFilePath === null) {
+						return await this.db.db.hybridChunkVectors
+							.orderBy('filePath')
+							.limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
+							.toArray();
+					}
+					return await this.db.db.hybridChunkVectors
+						.where('filePath')
+						.above(lastFilePath)
 						.limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
-						.toArray(),
+						.toArray();
+				},
 			);
 			if (rows.length === 0) {
 				if (!append) {
@@ -1225,21 +1230,19 @@ export class HybridEngine {
 				return;
 			}
 
-			const records = await profileHybridStage(
-				'startup.decode_vector_shards',
-				async () =>
-					(
-						await Promise.all(
-							rows.map((row) => rowToChunkVectorShard(row as ChunkVectorShardRow)),
-						)
-					).flatMap((shard) => shardToChunkVectorRecords(shard)),
-			);
-			recordHybridProfileMetric('startup.hydrated_vector_count', records.length);
-			await profileHybridStage('startup.hydrate_hnsw_vectors', async () => {
-				this.hnswSmall.hydrateVectors(records, { append });
-			});
-			append = true;
-			offset += rows.length;
+			for (const row of rows) {
+				const records = await profileHybridStage(
+					'startup.decode_vector_shards',
+					async () =>
+						await rowToChunkVectorRecords(row as ChunkVectorShardRow),
+				);
+				recordHybridProfileMetric('startup.hydrated_vector_count', records.length);
+				await profileHybridStage('startup.hydrate_hnsw_vectors', async () => {
+					this.hnswSmall.hydrateVectors(records, { append });
+				});
+				append = true;
+			}
+			lastFilePath = rows[rows.length - 1].filePath;
 		}
 	}
 

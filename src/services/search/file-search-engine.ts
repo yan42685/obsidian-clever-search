@@ -15,6 +15,11 @@ import {
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import {
+	createFileSearchQueryPlanner,
+	type FileSearchQueryTermStats,
+} from "./file-search-query-planner";
+import { PassageFileSearchEngine } from "./passage-lexical/passage-file-search-engine";
 import { Tokenizer } from "./tokenizer";
 
 export type FileSearchRequest = {
@@ -207,6 +212,15 @@ type QueryTermMatch = {
 
 type MatchedQueryTerm = QueryTermMatch["matchedTerms"][number];
 
+type CandidateDocState = {
+	score: number;
+	matchedTerms: Set<string>;
+	matchedQueryTerms: Set<number>;
+	matchedMetadataQueryTerms: Set<number>;
+	matchedExpandedMetadataQueryTerms: Set<number>;
+	matchedQueryTermsByField: Map<FileSearchField, Set<number>>;
+};
+
 type SerializedFieldId = 0 | 1 | 2 | 3 | 4 | 5;
 
 type SerializedBinaryCustomFileSearchIndex = {
@@ -357,23 +371,19 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 				request.isFuzzy,
 			),
 		);
-		if (termMatches.some((match) => match.matchedTerms.length === 0)) {
+		if (termMatches.every((match) => match.matchedTerms.length === 0)) {
 			return [];
 		}
 
-		const candidateScores = new Map<number, number>();
-		const matchedCounts = new Map<number, number>();
-		const matchedTermsByDoc = new Map<number, Set<string>>();
-		const matchedQueryTermsByField = new Map<
-			number,
-			Map<FileSearchField, Set<number>>
-		>();
-		const matchedQueryTermsInMetadata = new Map<number, Set<number>>();
-		const matchedExpandedQueryTermsInMetadata = new Map<number, Set<number>>();
+		const candidateStates = new Map<number, CandidateDocState>();
+		const termStats: FileSearchQueryTermStats[] = [];
 
+		// Collect candidate evidence once, then let the planner decide whether
+		// strict all-term matching is enough or whether a relaxed pass is warranted.
 		for (let queryTermIndex = 0; queryTermIndex < termMatches.length; queryTermIndex++) {
 			const match = termMatches[queryTermIndex];
 			const docsMatchedForTerm = new Set<number>();
+			const metadataDocsMatchedForTerm = new Set<number>();
 
 			for (const matchedTerm of match.matchedTerms) {
 				const fieldMap = this.termPostings.get(matchedTerm.term);
@@ -397,52 +407,36 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 							avgFieldLength,
 						);
 						const fieldWeight = FILE_SEARCH_FIELD_WEIGHTS[field];
-						candidateScores.set(
-							docId,
-							(candidateScores.get(docId) ?? 0) +
-								fieldWeight * idf * tfNorm * matchedTerm.boost,
-						);
-
-						let matchedTerms = matchedTermsByDoc.get(docId);
-						if (!matchedTerms) {
-							matchedTerms = new Set<string>();
-							matchedTermsByDoc.set(docId, matchedTerms);
+						let candidateState = candidateStates.get(docId);
+						if (!candidateState) {
+							candidateState = {
+								score: 0,
+								matchedTerms: new Set<string>(),
+								matchedQueryTerms: new Set<number>(),
+								matchedMetadataQueryTerms: new Set<number>(),
+								matchedExpandedMetadataQueryTerms: new Set<number>(),
+								matchedQueryTermsByField: new Map<FileSearchField, Set<number>>(),
+							};
+							candidateStates.set(docId, candidateState);
 						}
-						matchedTerms.add(matchedTerm.term);
+						candidateState.score +=
+							fieldWeight * idf * tfNorm * matchedTerm.boost;
+						candidateState.matchedTerms.add(matchedTerm.term);
+						candidateState.matchedQueryTerms.add(queryTermIndex);
 
-						let docFieldMatches = matchedQueryTermsByField.get(docId);
-						if (!docFieldMatches) {
-							docFieldMatches = new Map();
-							matchedQueryTermsByField.set(docId, docFieldMatches);
-						}
-						let fieldMatches = docFieldMatches.get(field);
+						let fieldMatches = candidateState.matchedQueryTermsByField.get(field);
 						if (!fieldMatches) {
 							fieldMatches = new Set<number>();
-							docFieldMatches.set(field, fieldMatches);
+							candidateState.matchedQueryTermsByField.set(field, fieldMatches);
 						}
 						fieldMatches.add(queryTermIndex);
 						if (FILE_SEARCH_METADATA_FIELDS.includes(field)) {
-							let metadataMatches =
-								matchedQueryTermsInMetadata.get(docId);
-							if (!metadataMatches) {
-								metadataMatches = new Set<number>();
-								matchedQueryTermsInMetadata.set(
-									docId,
-									metadataMatches,
-								);
-							}
-							metadataMatches.add(queryTermIndex);
+							candidateState.matchedMetadataQueryTerms.add(queryTermIndex);
+							metadataDocsMatchedForTerm.add(docId);
 							if (matchedTerm.kind !== "exact") {
-								let expandedMetadataMatches =
-									matchedExpandedQueryTermsInMetadata.get(docId);
-								if (!expandedMetadataMatches) {
-									expandedMetadataMatches = new Set<number>();
-									matchedExpandedQueryTermsInMetadata.set(
-										docId,
-										expandedMetadataMatches,
-									);
-								}
-								expandedMetadataMatches.add(queryTermIndex);
+								candidateState.matchedExpandedMetadataQueryTerms.add(
+									queryTermIndex,
+								);
 							}
 						}
 						docsMatchedForTerm.add(docId);
@@ -450,37 +444,61 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 				}
 			}
 
-			for (const docId of docsMatchedForTerm) {
-				matchedCounts.set(docId, (matchedCounts.get(docId) ?? 0) + 1);
+			termStats.push({
+				index: queryTermIndex,
+				queryTerm: queryTerms[queryTermIndex],
+				matchedDocCount: docsMatchedForTerm.size,
+				matchedMetadataDocCount: metadataDocsMatchedForTerm.size,
+				hasAnyMatch: docsMatchedForTerm.size > 0,
+				hasExactMatch: match.matchedTerms.some((term) => term.kind === "exact"),
+			});
+		}
+
+		const planner = createFileSearchQueryPlanner({
+			rawQueryText: request.queryText,
+			queryTerms,
+			termStats,
+			docCount: this.pathByDocId.size,
+		});
+		const effectiveQueryTermCount = Math.max(1, planner.activeTermCount);
+		const strictResults: MatchedFile[] = [];
+		const relaxedResults: MatchedFile[] = [];
+
+		for (const [docId, candidateState] of candidateStates) {
+			this.applyFieldCoordinationBonus(candidateState, effectiveQueryTermCount);
+			if (planner.matches(candidateState, "strict")) {
+				strictResults.push(
+					this.createMatchedFile(
+						docId,
+						queryTerms,
+						candidateState,
+						planner.computeScoreBonus(candidateState, "strict"),
+					),
+				);
+			}
+			if (planner.matches(candidateState, "relaxed")) {
+				relaxedResults.push(
+					this.createMatchedFile(
+						docId,
+						queryTerms,
+						candidateState,
+						planner.computeScoreBonus(candidateState, "relaxed"),
+					),
+				);
 			}
 		}
 
-		for (const docId of candidateScores.keys()) {
-			this.applyFieldCoordinationBonus(
-				docId,
-				candidateScores,
-				matchedQueryTermsByField,
-				matchedQueryTermsInMetadata,
-				matchedExpandedQueryTermsInMetadata,
-				termMatches.length,
-			);
+		const strictSorted = this.sortMatchedFiles(strictResults);
+		if (
+			!planner.shouldUseRelaxedResults(
+				strictSorted.length,
+				request.maxItemResults,
+			)
+		) {
+			return strictSorted.slice(0, request.maxItemResults);
 		}
 
-		return Array.from(candidateScores.entries())
-			.filter(([docId]) => matchedCounts.get(docId) === termMatches.length)
-			.sort((a, b) => {
-				if (b[1] !== a[1]) return b[1] - a[1];
-				const pathA = this.pathByDocId.get(a[0]) ?? "";
-				const pathB = this.pathByDocId.get(b[0]) ?? "";
-				return pathA.localeCompare(pathB);
-			})
-			.slice(0, request.maxItemResults)
-			.map(([docId]) => ({
-				path: this.pathByDocId.get(docId)!,
-				queryTerms,
-				matchedTerms: Array.from(matchedTermsByDoc.get(docId) ?? []),
-				score: candidateScores.get(docId) ?? 0,
-			}));
+		return this.sortMatchedFiles(relaxedResults).slice(0, request.maxItemResults);
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
@@ -903,25 +921,12 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 	}
 
 	private applyFieldCoordinationBonus(
-		docId: number,
-		candidateScores: Map<number, number>,
-		matchedQueryTermsByField: Map<number, Map<FileSearchField, Set<number>>>,
-		matchedQueryTermsInMetadata: Map<number, Set<number>>,
-		matchedExpandedQueryTermsInMetadata: Map<number, Set<number>>,
+		candidateState: CandidateDocState,
 		queryTermCount: number,
 	) {
-		const currentScore = candidateScores.get(docId);
-		if (currentScore === undefined) {
-			return;
-		}
-		const fieldMatches = matchedQueryTermsByField.get(docId);
-		if (!fieldMatches) {
-			return;
-		}
-
 		let bestBonus = 0;
 		for (const field of FILE_SEARCH_FIELDS) {
-			const matches = fieldMatches.get(field);
+			const matches = candidateState.matchedQueryTermsByField.get(field);
 			if (!matches || matches.size === 0) continue;
 			const coverage = matches.size / Math.max(1, queryTermCount);
 			const bonus =
@@ -940,7 +945,7 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
-		const metadataMatches = matchedQueryTermsInMetadata.get(docId);
+		const metadataMatches = candidateState.matchedMetadataQueryTerms;
 		if (metadataMatches && metadataMatches.size > 0) {
 			const metadataCoverage =
 				metadataMatches.size / Math.max(1, queryTermCount);
@@ -952,7 +957,7 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 			);
 		}
 		const expandedMetadataMatches =
-			matchedExpandedQueryTermsInMetadata.get(docId);
+			candidateState.matchedExpandedMetadataQueryTerms;
 		if (expandedMetadataMatches && expandedMetadataMatches.size > 0) {
 			const expandedMetadataCoverage =
 				expandedMetadataMatches.size / Math.max(1, queryTermCount);
@@ -962,7 +967,32 @@ export class CustomFileSearchEngine implements FileSearchEngine {
 				expandedMetadataMatches.size;
 		}
 
-		candidateScores.set(docId, currentScore + bestBonus);
+		candidateState.score += bestBonus;
+	}
+
+	private createMatchedFile(
+		docId: number,
+		queryTerms: string[],
+		candidateState: CandidateDocState,
+		scoreBonus: number,
+	): MatchedFile {
+		return {
+			path: this.pathByDocId.get(docId)!,
+			queryTerms,
+			matchedTerms: Array.from(candidateState.matchedTerms),
+			score: candidateState.score + scoreBonus,
+		};
+	}
+
+	private sortMatchedFiles(results: MatchedFile[]): MatchedFile[] {
+		return results.sort((left, right) => {
+			const leftScore = left.score ?? 0;
+			const rightScore = right.score ?? 0;
+			if (rightScore !== leftScore) {
+				return rightScore - leftScore;
+			}
+			return left.path.localeCompare(right.path);
+		});
 	}
 }
 
@@ -971,8 +1001,12 @@ export class FileSearchEngineFactory {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly miniSearch = getInstance(MiniSearchFileEngine);
 	private readonly custom = getInstance(CustomFileSearchEngine);
+	private readonly passage = getInstance(PassageFileSearchEngine);
 
 	getActiveEngine(): FileSearchEngine {
+		if (this.setting.fileSearchBackend === "passage-bm25") {
+			return this.passage;
+		}
 		if (this.setting.fileSearchBackend === "custom-bm25") {
 			return this.custom;
 		}

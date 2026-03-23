@@ -204,6 +204,7 @@ export default {
 		"MiniSearch is the conservative choice; Custom BM25 is better at prefix-heavy and metadata-aware matching. Different search habits can lead to different hit rates, so it is recommended to pick the one that best fits your daily workflow as the default. If you want maximum recall, hybrid search is still the fallback that covers the gap.",
 	"fileSearchBackend.minisearch": "MiniSearch (stable)",
 	"fileSearchBackend.customBm25": "Custom BM25",
+	"fileSearchBackend.passageBm25": "Passage BM25 (experimental)",
 	"Reset floating window position": "Reset floating window position",
 	"Reset floating window position desc": "In case the window is moved outside the visible area",
 	"Reset position": "Reset position",

@@ -846,6 +846,50 @@ export async function rowToChunkVectorShard(row: ChunkVectorShardRow): Promise<C
 	};
 }
 
+export async function rowToChunkVectorRecords(
+	row: ChunkVectorShardRow,
+): Promise<ChunkVectorRecord[]> {
+	const precision = parseVectorPrecision(row.precision);
+	const [chunkIds, vectorData, scaleData] = await Promise.all([
+		blobToUint32(row.chunkIds),
+		precision === 'int8'
+			? blobToInt8(row.vectorData)
+			: blobToUint16(row.vectorData),
+		row.scaleData ? blobToFloat32(row.scaleData) : Promise.resolve(undefined),
+	]);
+
+	const records: ChunkVectorRecord[] = [];
+	if (precision === 'int8') {
+		const int8VectorData = vectorData as Int8Array;
+		if (!scaleData || scaleData.length !== row.chunkCount) {
+			throw new Error('Invalid int8 chunk vector shard scale data');
+		}
+		for (let i = 0; i < row.chunkCount; i++) {
+			records.push({
+				id: chunkIds[i],
+				vector: {
+					precision: 'int8',
+					vector: int8VectorData.subarray(i * row.dim, (i + 1) * row.dim),
+					scale: scaleData[i],
+				},
+			});
+		}
+		return records;
+	}
+
+	const float16VectorData = vectorData as Uint16Array;
+	for (let i = 0; i < row.chunkCount; i++) {
+		records.push({
+			id: chunkIds[i],
+			vector: {
+				precision: 'float16',
+				vector: float16VectorData.subarray(i * row.dim, (i + 1) * row.dim),
+			},
+		});
+	}
+	return records;
+}
+
 export function buildChunkVectorShard(
 	filePath: string,
 	chunkIds: number[],
