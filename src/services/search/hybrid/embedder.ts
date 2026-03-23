@@ -22,6 +22,7 @@ const REQUEST_MAX_RETRIES = 4;
 const REQUEST_MIN_SPACING_MS = 250;
 const REQUEST_RETRY_BASE_MS = 1_200;
 const TOKEN_SAVINGS_TOTAL_KEY = 'all';
+let inFlightEstimatedTokens = 0;
 
 export class NoApiKeyError extends Error {
 	constructor() {
@@ -50,6 +51,10 @@ export class HybridDisabledError extends Error {
 		this.name = 'HybridDisabledError';
 	}
 }
+
+export type WeeklyTokenReservation = {
+	release: () => void;
+};
 
 type CacheEntry = {
 	vector: StoredVector;
@@ -150,39 +155,45 @@ export class Embedder {
 		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
 			const batch = texts.slice(i, i + BATCH_SIZE);
 			const requestStart = Date.now();
-			await profileHybridStage('embed.ensure_weekly_budget', async () => {
-				await ensureWeeklyTokenBudget(estimateTextsTokenUsage(batch));
-			});
-			const { embeddings: floats, tokensUsed } = await profileHybridStage(
-				'embed.fetch_embeddings',
-				async () => await this.fetchEmbeddings(batch),
+			const estimatedTokens = estimateTextsTokenUsage(batch);
+			const reservation = await profileHybridStage(
+				'embed.ensure_weekly_budget',
+				async () => await reserveWeeklyTokenBudget(estimatedTokens),
 			);
-			logger.debug(
-				`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
-			);
-			if (tokensUsed > 0) {
-				recordHybridProfileMetric('provider_tokens', tokensUsed);
-				await recordTokenUsage(filePath, tokensUsed);
-			}
-			await profileHybridStage('embed.quantize_vectors', async () => {
-				for (const f of floats) {
-					l2Normalize(f);
-					if (precision === 'float16') {
-						results.push({
-							precision: 'float16',
-							vector: quantizeFloat16(f),
-						});
-						continue;
-					}
-					const { vec, scale } = quantizeInt8(f);
-					results.push({
-						precision: 'int8',
-						vector: vec,
-						scale,
-					});
+			try {
+				const { embeddings: floats, tokensUsed } = await profileHybridStage(
+					'embed.fetch_embeddings',
+					async () => await this.fetchEmbeddings(batch),
+				);
+				logger.debug(
+					`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
+				);
+				if (tokensUsed > 0) {
+					recordHybridProfileMetric('provider_tokens', tokensUsed);
+					await recordTokenUsage(filePath, tokensUsed);
 				}
-				return;
-			});
+				await profileHybridStage('embed.quantize_vectors', async () => {
+					for (const f of floats) {
+						l2Normalize(f);
+						if (precision === 'float16') {
+							results.push({
+								precision: 'float16',
+								vector: quantizeFloat16(f),
+							});
+							continue;
+						}
+						const { vec, scale } = quantizeInt8(f);
+						results.push({
+							precision: 'int8',
+							vector: vec,
+							scale,
+						});
+					}
+					return;
+				});
+			} finally {
+				reservation.release();
+			}
 		}
 
 		logger.debug(
@@ -361,15 +372,31 @@ export async function recordTokenUsage(filePath: string, tokens: number): Promis
 	try {
 		const db = getInstance(Database).db;
 		const key = todayKey();
-		const existing = await db.hybridTokenStats
-			.where('[filePath+dateKey]')
-			.equals([filePath, key])
-			.first();
-		if (existing?.id !== undefined) {
-			await db.hybridTokenStats.update(existing.id, { tokens: existing.tokens + tokens });
-		} else {
-			await db.hybridTokenStats.add({ filePath, dateKey: key, tokens });
-		}
+		await db.transaction('rw', db.hybridTokenStats, async () => {
+			const existingRecords = await db.hybridTokenStats
+				.where('[filePath+dateKey]')
+				.equals([filePath, key])
+				.toArray();
+			if (existingRecords.length === 0) {
+				await db.hybridTokenStats.add({ filePath, dateKey: key, tokens });
+				return;
+			}
+
+			const [primaryRecord, ...duplicateRecords] = existingRecords;
+			if (primaryRecord?.id === undefined) {
+				return;
+			}
+
+			const mergedTokens = existingRecords.reduce((sum, record) => sum + record.tokens, 0) + tokens;
+			await db.hybridTokenStats.update(primaryRecord.id, { tokens: mergedTokens });
+
+			const duplicateIds = duplicateRecords
+				.map((record) => record.id)
+				.filter((id): id is number => id !== undefined);
+			if (duplicateIds.length > 0) {
+				await db.hybridTokenStats.bulkDelete(duplicateIds);
+			}
+		});
 	} catch {
 		// non-critical
 	}
@@ -528,19 +555,48 @@ export function estimateTextsTokenUsage(texts: string[]): number {
 	return texts.reduce((sum, text) => sum + estimateTextTokenUsage(text), 0);
 }
 
-export async function ensureWeeklyTokenBudget(estimatedTokens: number): Promise<void> {
-	const limit = getInstance(OuterSetting).hybrid?.weeklyTokenLimit ?? 0;
-	if (limit <= 0 || estimatedTokens <= 0) {
+function releaseInFlightEstimatedTokens(tokens: number): void {
+	if (tokens <= 0) {
 		return;
+	}
+	inFlightEstimatedTokens = Math.max(0, inFlightEstimatedTokens - tokens);
+}
+
+export async function reserveWeeklyTokenBudget(
+	estimatedTokens: number,
+): Promise<WeeklyTokenReservation> {
+	if (estimatedTokens <= 0) {
+		return { release: () => undefined };
+	}
+
+	const limit = getInstance(OuterSetting).hybrid?.weeklyTokenLimit ?? 0;
+	if (limit <= 0) {
+		return { release: () => undefined };
 	}
 
 	const used = await getCurrentWeekTokenUsage();
-	if (used < limit && used + estimatedTokens <= limit) {
-		return;
+	const effectiveUsed = used + inFlightEstimatedTokens;
+	if (effectiveUsed < limit && effectiveUsed + estimatedTokens <= limit) {
+		inFlightEstimatedTokens += estimatedTokens;
+		let released = false;
+		return {
+			release: () => {
+				if (released) {
+					return;
+				}
+				released = true;
+				releaseInFlightEstimatedTokens(estimatedTokens);
+			},
+		};
 	}
 
 	noticeWeeklyLimitReached(
-		`Weekly token limit reached: used ${used}, limit ${limit}, remaining quota 0`,
+		`Weekly token limit reached: used ${used}, in-flight ${inFlightEstimatedTokens}, limit ${limit}, remaining quota 0`,
 	);
-	throw new WeeklyTokenLimitExceededError(limit, used, estimatedTokens);
+	throw new WeeklyTokenLimitExceededError(limit, effectiveUsed, estimatedTokens);
+}
+
+export async function ensureWeeklyTokenBudget(estimatedTokens: number): Promise<void> {
+	const reservation = await reserveWeeklyTokenBudget(estimatedTokens);
+	reservation.release();
 }

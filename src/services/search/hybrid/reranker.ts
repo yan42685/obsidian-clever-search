@@ -1,9 +1,9 @@
 import { OuterSetting } from 'src/globals/plugin-setting';
 import {
 	buildDashScopeApiUrl,
-	ensureWeeklyTokenBudget,
 	estimateTextsTokenUsage,
 	recordTokenUsage,
+	reserveWeeklyTokenBudget,
 } from './embedder';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
@@ -55,56 +55,60 @@ export class HybridReranker {
 			query,
 			...documents,
 		]);
-		await ensureWeeklyTokenBudget(estimatedTokens);
+		const reservation = await reserveWeeklyTokenBudget(estimatedTokens);
+		let ranked: RerankResult[] = [];
+		try {
+			const resp = await fetch(this.apiUrl, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${this.apiKey}`,
+				},
+				body: JSON.stringify({
+					model: RERANK_MODEL,
+					query,
+					documents,
+					top_n: Math.min(candidates.length, topK),
+					instruct: "Retrieve semantically similar text.",
+				}),
+			});
 
-		const resp = await fetch(this.apiUrl, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${this.apiKey}`,
-			},
-			body: JSON.stringify({
-				model: RERANK_MODEL,
-				query,
-				documents,
-				top_n: Math.min(candidates.length, topK),
-				instruct: "Retrieve semantically similar text.",
-			}),
-		});
+			if (!resp.ok) {
+				const body = await resp.text();
+				logger.error(
+					`Qwen rerank request failed: status=${resp.status}, url=${this.apiUrl}, body=${body}`,
+				);
+				throw new Error(`Qwen rerank API error ${resp.status}: ${body}`);
+			}
 
-		if (!resp.ok) {
-			const body = await resp.text();
-			logger.error(
-				`Qwen rerank request failed: status=${resp.status}, url=${this.apiUrl}, body=${body}`,
-			);
-			throw new Error(`Qwen rerank API error ${resp.status}: ${body}`);
-		}
-
-		const json = await resp.json() as {
-			results?: Array<{ index: number; relevance_score?: number; score?: number }>;
-			data?: Array<{ index: number; relevance_score?: number; score?: number }>;
-			output?: {
+			const json = await resp.json() as {
 				results?: Array<{ index: number; relevance_score?: number; score?: number }>;
+				data?: Array<{ index: number; relevance_score?: number; score?: number }>;
+				output?: {
+					results?: Array<{ index: number; relevance_score?: number; score?: number }>;
+				};
+				usage?: { total_tokens?: number; input_tokens?: number };
 			};
-			usage?: { total_tokens?: number; input_tokens?: number };
-		};
-		const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
-		if (tokensUsed > 0) {
-			await recordTokenUsage(SEARCH_RERANK_TOKEN_KEY, tokensUsed);
-		}
+			const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
+			if (tokensUsed > 0) {
+				await recordTokenUsage(SEARCH_RERANK_TOKEN_KEY, tokensUsed);
+			}
 
-		const ranked = this.extractRankedItems(json)
-			.map((item) => {
-				const candidate = candidates[item.index];
-				if (!candidate) {
-					return null;
-				}
-				return {
-					id: candidate.id,
-					score: item.score,
-				} as RerankResult;
-			})
-			.filter((item): item is RerankResult => item !== null);
+			ranked = this.extractRankedItems(json)
+				.map((item) => {
+					const candidate = candidates[item.index];
+					if (!candidate) {
+						return null;
+					}
+					return {
+						id: candidate.id,
+						score: item.score,
+					} as RerankResult;
+				})
+				.filter((item): item is RerankResult => item !== null);
+		} finally {
+			reservation.release();
+		}
 
 		if (ranked.length === 0) {
 			logger.warn('Qwen rerank returned no ranked items; falling back to recall ordering.');
