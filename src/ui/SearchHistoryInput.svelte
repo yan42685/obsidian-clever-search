@@ -16,6 +16,9 @@
 
 	export let queryText: string;
 	export let matchCountText: string;
+	export let placeholder = "";
+	export let variant: "default" | "omni" = "default";
+	export let showMatchCount = true;
 
 	type HighlightPart = {
 		text: string;
@@ -465,6 +468,11 @@
 		return true;
 	}
 
+	export function focusInput(): void {
+		searchInputEl?.focus();
+		placeCaretAtEnd();
+	}
+
 	async function scrollSelectedSuggestionIntoView() {
 		await tick();
 		const selectedEl = suggestionsEl?.querySelector(
@@ -510,10 +518,19 @@
 	}
 </script>
 
-<div class="search-bar" data-match-count={matchCountText}>
+<div
+	class="search-bar"
+	class:omni-variant={variant === "omni"}
+	class:hide-match-count={!showMatchCount || !matchCountText}
+	data-match-count={showMatchCount ? matchCountText : ""}
+>
 	<div class="history-input-shell">
 		<div class="history-input-overlay" aria-hidden="true">
-			<span class="history-input-text">{editableQueryText}</span>
+			{#if !editableQueryText && !ghostSuffix && placeholder}
+				<span class="history-placeholder">{placeholder}</span>
+			{:else}
+				<span class="history-input-text">{editableQueryText}</span>
+			{/if}
 			{#if ghostSuffix}
 				<span class="history-input-ghost">{ghostSuffix}</span>
 			{/if}
@@ -612,6 +629,10 @@
 		color: var(--cs-hint-char-color, grey);
 	}
 
+	.search-bar.hide-match-count::after {
+		content: none;
+	}
+
 	.history-input-shell {
 		position: absolute;
 		inset: 0;
@@ -637,6 +658,15 @@
 		font: inherit;
 		line-height: inherit;
 		letter-spacing: inherit;
+	}
+
+	.history-placeholder {
+		flex: none;
+		color: var(--text-muted);
+		font: inherit;
+		line-height: inherit;
+		letter-spacing: inherit;
+		white-space: pre;
 	}
 
 	.history-input-text {
@@ -794,5 +824,39 @@
 		border: 1px solid rgba(255, 255, 255, 0.06);
 		border-radius: 999px;
 		text-transform: lowercase;
+	}
+
+	.search-bar.omni-variant {
+		position: relative;
+		top: auto;
+		left: auto;
+		width: 100%;
+		height: 2.75rem;
+	}
+
+	.search-bar.omni-variant .history-input-shell {
+		border-radius: 14px;
+		background-color: var(--background-primary, #1f1f1f);
+		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
+		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+	}
+
+	.search-bar.omni-variant .history-input-overlay,
+	.search-bar.omni-variant .history-editable {
+		padding: 0.8rem 0.95rem;
+	}
+
+	.search-bar.omni-variant .history-suggestions-anchor {
+		top: calc(100% + 0.35rem);
+		transform: none;
+	}
+
+	.search-bar.omni-variant .history-suggestions {
+		flex-direction: column;
+		max-height: calc(
+			4 * var(--cs-history-row-height) + 3 * var(--cs-history-row-gap) + 0.2rem
+		);
+		background-color: var(--background-primary, #1f1f1f);
+		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
 	}
 </style>
