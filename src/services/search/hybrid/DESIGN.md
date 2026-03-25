@@ -1097,6 +1097,22 @@ Execution rule from this point:
 - treat benchmark gains as validation of the mechanism, not the mechanism itself
 - do not spend a cycle on generic score tuning unless it is attached to one of the priority mechanism jumps below
 
+### Complexity Discipline
+
+This now becomes an explicit engineering rule for `passage-bm25` and any follow-up lexical backend work:
+
+- when multiple fine-grained score terms are describing the same mechanism, prefer keeping the aggregate mechanism score and deleting the duplicate blend terms
+- local explanation competition should be treated as the main reusable signal; do not keep extra union / anchor / compactness bonuses unless they demonstrably win a reusable hard family
+- decisive local verifier should be treated as the main reusable verifier signal; exact-phrase micro bonuses should stay folded into verifier construction instead of being blended again later
+- keep only the smallest effective safeguard for a known hard regression family; do not preserve a whole heuristic tree when one narrow guardrail is enough
+- if a heuristic adds noticeable code and does not move benchmark families in a stable way, default action is removal, not more retuning
+- new score terms should justify themselves in one of two ways only: they either own a distinct decision stage, or they produce a visible lift on a hard family without reopening old regressions
+
+Practical rollback rule:
+
+- if a change is best described as "another bonus or penalty inside the generic route score", assume it is low-priority unless it is the minimum effective guardrail for a live failure
+- when quality is already preserved by an upstream aggregate signal, remove downstream duplicate bonuses first before adding any new term
+
 ### Phase A: Metadata Exact-Prefix Lane
 
 Status:
