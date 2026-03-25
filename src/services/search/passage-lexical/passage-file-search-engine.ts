@@ -2371,6 +2371,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		left: RankedMatchedFile,
 		right: RankedMatchedFile,
 	): number {
+		const leftTitleAnchorPreferenceScore =
+			this.computeMixedTitleAnchorPreferenceScore(left);
+		const rightTitleAnchorPreferenceScore =
+			this.computeMixedTitleAnchorPreferenceScore(right);
+		const leftPathAnchorPreferenceScore =
+			this.computeMixedPathAnchorPreferenceScore(left);
+		const rightPathAnchorPreferenceScore =
+			this.computeMixedPathAnchorPreferenceScore(right);
 		const leftAnchorGate = Math.max(
 			left.basenameAliasCoverageRatio,
 			left.basenameAliasAnchorRatio,
@@ -2405,8 +2413,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				0.18 &&
 			titleAnchorGap >= 0.14 &&
 			Math.abs(
-				this.computeMixedTitleAnchorPreferenceScore(right) -
-					this.computeMixedTitleAnchorPreferenceScore(left),
+				rightTitleAnchorPreferenceScore - leftTitleAnchorPreferenceScore,
 			) >= 1.1;
 		const pathAnchorReady =
 			Math.max(
@@ -2417,10 +2424,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			) >= 0.18 &&
 			pathAnchorGap >= 0.14 &&
 			Math.abs(
-				this.computeMixedPathAnchorPreferenceScore(right) -
-					this.computeMixedPathAnchorPreferenceScore(left),
-			) >=
-				1.1;
+				rightPathAnchorPreferenceScore - leftPathAnchorPreferenceScore,
+			) >= 1.1;
 		if (!titleAnchorReady && !pathAnchorReady && !mirrorLocaleVariants && anchorGap < 0.14) {
 			return 0;
 		}
@@ -2435,41 +2440,37 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return 0;
 		}
 		if (titleAnchorReady && !pathAnchorReady) {
-			const decisionGap =
-				this.computeMixedTitleAnchorPreferenceScore(right) -
-				this.computeMixedTitleAnchorPreferenceScore(left);
-			return Math.abs(decisionGap) < 1.1 ? 0 : decisionGap;
+			return this.compareDecisionGap(
+				leftTitleAnchorPreferenceScore,
+				rightTitleAnchorPreferenceScore,
+				1.1,
+			);
 		}
 		if (pathAnchorReady && !titleAnchorReady) {
-			const decisionGap =
-				this.computeMixedPathAnchorPreferenceScore(right) -
-				this.computeMixedPathAnchorPreferenceScore(left);
-			return Math.abs(decisionGap) < 1.1 ? 0 : decisionGap;
+			return this.compareDecisionGap(
+				leftPathAnchorPreferenceScore,
+				rightPathAnchorPreferenceScore,
+				1.1,
+			);
 		}
 		if (titleAnchorReady && pathAnchorReady) {
 			const leftDecisionScore = Math.max(
-				this.computeMixedTitleAnchorPreferenceScore(left),
-				this.computeMixedPathAnchorPreferenceScore(left),
+				leftTitleAnchorPreferenceScore,
+				leftPathAnchorPreferenceScore,
 				this.computeMixedAnchorDecisionScore(left),
 			);
 			const rightDecisionScore = Math.max(
-				this.computeMixedTitleAnchorPreferenceScore(right),
-				this.computeMixedPathAnchorPreferenceScore(right),
+				rightTitleAnchorPreferenceScore,
+				rightPathAnchorPreferenceScore,
 				this.computeMixedAnchorDecisionScore(right),
 			);
-			const decisionGap = rightDecisionScore - leftDecisionScore;
-			if (Math.abs(decisionGap) < 1.1) {
-				return 0;
-			}
-			return decisionGap;
+			return this.compareDecisionGap(leftDecisionScore, rightDecisionScore, 1.1);
 		}
-		const decisionGap =
-			this.computeMixedAnchorDecisionScore(right) -
-			this.computeMixedAnchorDecisionScore(left);
-		if (Math.abs(decisionGap) < 1.15) {
-			return 0;
-		}
-		return decisionGap;
+		return this.compareDecisionGap(
+			this.computeMixedAnchorDecisionScore(left),
+			this.computeMixedAnchorDecisionScore(right),
+			1.15,
+		);
 	}
 
 	private compareConceptCollisionDecision(
@@ -2477,30 +2478,23 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		right: RankedMatchedFile,
 		queryRoute: ExperimentalQueryRoute,
 	): number {
-		const context = this.getBodyDecisionComparisonContext(left, right, queryRoute, {
-			maxQueryRouteScoreGap: 22,
-			maxScoreGap: 20,
-			minBodyEvidence: 0.22,
-			minLocalExplanation: 0.32,
-			minCoreWitness: 0.42,
+		return this.compareBodyDecision(left, right, queryRoute, {
+			thresholds: {
+				maxQueryRouteScoreGap: 22,
+				maxScoreGap: 20,
+				minBodyEvidence: 0.22,
+				minLocalExplanation: 0.32,
+				minCoreWitness: 0.42,
+			},
+			minDecisionGap: 1.05,
+			acceptContext: (context) =>
+				context.anchorSupportGate >= 0.12 &&
+				(context.decisiveVerifierGate >= 0.75 ||
+					context.coreWitnessGate >= 0.48) &&
+				(context.coreWitnessGate >= 0.42 || context.decisiveBodyGate >= 0.42),
+			getDecisionScore: (result) =>
+				this.computeConceptCollisionDecisionScore(result),
 		});
-		if (!context) {
-			return 0;
-		}
-		if (
-			context.anchorSupportGate < 0.12 ||
-			(context.decisiveVerifierGate < 0.75 && context.coreWitnessGate < 0.48) ||
-			(context.coreWitnessGate < 0.42 && context.decisiveBodyGate < 0.42)
-		) {
-			return 0;
-		}
-		const leftDecisionScore = this.computeConceptCollisionDecisionScore(left);
-		const rightDecisionScore = this.computeConceptCollisionDecisionScore(right);
-		const decisionGap = rightDecisionScore - leftDecisionScore;
-		if (Math.abs(decisionGap) < 1.05) {
-			return 0;
-		}
-		return decisionGap;
 	}
 
 	private compareBodyOnlyTopicDecision(
@@ -2508,29 +2502,69 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		right: RankedMatchedFile,
 		queryRoute: ExperimentalQueryRoute,
 	): number {
-		const context = this.getBodyDecisionComparisonContext(left, right, queryRoute, {
-			maxQueryRouteScoreGap: 12,
-			maxScoreGap: 8,
-			minBodyEvidence: 0.22,
-			minLocalExplanation: 0.3,
-			minCoreWitness: 0.42,
+		return this.compareBodyDecision(left, right, queryRoute, {
+			thresholds: {
+				maxQueryRouteScoreGap: 12,
+				maxScoreGap: 8,
+				minBodyEvidence: 0.22,
+				minLocalExplanation: 0.3,
+				minCoreWitness: 0.42,
+			},
+			minDecisionGap: 0.7,
+			acceptContext: (context) =>
+				context.anchorSupportGate < 0.12 &&
+				context.anchorSatisfiedGate < 0.08,
+			getDecisionScore: (result) =>
+				this.computeBodyOnlyTopicDecisionScore(result),
 		});
-		if (!context) {
+	}
+
+	private compareBodyDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+		options: {
+			thresholds: {
+				maxQueryRouteScoreGap: number;
+				maxScoreGap: number;
+				minBodyEvidence: number;
+				minLocalExplanation: number;
+				minCoreWitness: number;
+			};
+			minDecisionGap: number;
+			acceptContext: (context: {
+				anchorSupportGate: number;
+				anchorSatisfiedGate: number;
+				coreWitnessGate: number;
+				decisiveVerifierGate: number;
+				decisiveBodyGate: number;
+			}) => boolean;
+			getDecisionScore: (result: RankedMatchedFile) => number;
+		},
+	): number {
+		const context = this.getBodyDecisionComparisonContext(
+			left,
+			right,
+			queryRoute,
+			options.thresholds,
+		);
+		if (!context || !options.acceptContext(context)) {
 			return 0;
 		}
-		if (
-			context.anchorSupportGate >= 0.12 ||
-			context.anchorSatisfiedGate >= 0.08
-		) {
-			return 0;
-		}
-		const leftDecisionScore = this.computeBodyOnlyTopicDecisionScore(left);
-		const rightDecisionScore = this.computeBodyOnlyTopicDecisionScore(right);
+		return this.compareDecisionGap(
+			options.getDecisionScore(left),
+			options.getDecisionScore(right),
+			options.minDecisionGap,
+		);
+	}
+
+	private compareDecisionGap(
+		leftDecisionScore: number,
+		rightDecisionScore: number,
+		minDecisionGap: number,
+	): number {
 		const decisionGap = rightDecisionScore - leftDecisionScore;
-		if (Math.abs(decisionGap) < 0.7) {
-			return 0;
-		}
-		return decisionGap;
+		return Math.abs(decisionGap) < minDecisionGap ? 0 : decisionGap;
 	}
 
 	private getBodyDecisionComparisonContext(
@@ -2548,8 +2582,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		| {
 				anchorSupportGate: number;
 				anchorSatisfiedGate: number;
-				bodyEvidenceGate: number;
-				localExplanationGate: number;
 				coreWitnessGate: number;
 				decisiveVerifierGate: number;
 				decisiveBodyGate: number;
@@ -2599,8 +2631,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				left.anchorSatisfiedRatio,
 				right.anchorSatisfiedRatio,
 			),
-			bodyEvidenceGate,
-			localExplanationGate,
 			coreWitnessGate,
 			decisiveVerifierGate: Math.max(
 				left.decisiveLocalVerifierScore,
