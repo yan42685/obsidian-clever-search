@@ -37,10 +37,13 @@ type QueryTermMatch = {
 type PassageRecord = {
 	id: number;
 	fileId: number;
-	filePath: string;
-	text: string;
+	startOffset: number;
+	endOffset: number;
 	length: number;
-	tokenSequence: string[];
+};
+
+type IndexedPassageBuild = {
+	record: PassageRecord;
 	wordTf: Map<string, number>;
 	charTf: Map<string, number>;
 };
@@ -155,12 +158,16 @@ type QueryScoringCache = {
 	positionsByPassageId: Map<number, Map<number, number[]>>;
 	localWindowSetsByPassageId: Map<number, QueryConditionedLocalWindowSet>;
 	verifierSignalsByPassageId: Map<number, VerifierSignals>;
+	tokenSequenceByPassageId: Map<number, string[]>;
+	passageTextByPassageId: Map<number, string>;
 };
 
 type PassageUnit = {
 	text: string;
 	tokens: string[];
 	charTerms: string[];
+	startOffset?: number;
+	endOffset?: number;
 };
 
 type QueryTermWeightMap = Map<number, number>;
@@ -362,6 +369,7 @@ const MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE = 3;
 const MAX_FILE_LOCAL_EXPLANATIONS = 3;
 const LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.72;
 const LOCAL_WINDOW_DUPLICATE_TERM_OVERLAP_THRESHOLD = 0.85;
+const PASSAGE_RUNTIME_CACHE_SIZE = 384;
 const MIN_LONG_CHUNK_CHARS = 220;
 const HAN_SEQUENCE_REGEX = /\p{Script=Han}+/gu;
 const EMPTY_LOCAL_WINDOW_SIGNALS: LocalWindowSignals = {
@@ -414,6 +422,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	};
 	private readonly fileIdByPath = new Map<string, number>();
 	private readonly pathByFileId = new Map<number, string>();
+	private readonly fileContentById = new Map<number, string>();
 	private readonly fileMetadataTokens = new Map<
 		number,
 		Record<MetadataField, string[]>
@@ -422,6 +431,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private readonly filePassageIds = new Map<number, number[]>();
 	private readonly passageById = new Map<number, PassageRecord>();
 	private readonly passageLengths = new Map<number, number>();
+	private readonly passageRuntimeCache = new Map<
+		number,
+		{ text: string; tokenSequence?: string[] }
+	>();
 	private nextFileId = 1;
 	private nextPassageId = 1;
 	private totalPassageLength = 0;
@@ -736,12 +749,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 			0,
 		);
+		for (const path of this.pathByFileId.values()) {
+			total += Buffer.byteLength(path, "utf8");
+		}
+		for (const content of this.fileContentById.values()) {
+			total += Buffer.byteLength(content, "utf8");
+		}
 		for (const passage of this.passageById.values()) {
-			total += Buffer.byteLength(passage.filePath, "utf8");
-			total += Buffer.byteLength(passage.text, "utf8");
-			total += passage.length * 4;
-			total += passage.wordTf.size * 16;
-			total += passage.charTf.size * 12;
+			total += 24;
+		}
+		for (const passageIds of this.filePassageIds.values()) {
+			total += passageIds.length * 4;
 		}
 		for (const field of METADATA_FIELDS) {
 			total += this.metadataFieldStats[field].docLengths.size * 8;
@@ -873,11 +891,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.sortedCharTerms.length = 0;
 		this.fileIdByPath.clear();
 		this.pathByFileId.clear();
+		this.fileContentById.clear();
 		this.fileMetadataTokens.clear();
 		this.fileScriptProfiles.clear();
 		this.filePassageIds.clear();
 		this.passageById.clear();
 		this.passageLengths.clear();
+		this.passageRuntimeCache.clear();
 		this.nextFileId = 1;
 		this.nextPassageId = 1;
 		this.totalPassageLength = 0;
@@ -896,6 +916,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const fileId = this.nextFileId++;
 		this.fileIdByPath.set(document.path, fileId);
 		this.pathByFileId.set(fileId, document.path);
+		const content = document.content ?? "";
+		this.fileContentById.set(fileId, content);
 		this.fileScriptProfiles.set(
 			fileId,
 			this.buildScriptProfile(
@@ -904,7 +926,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					document.basename ?? "",
 					document.aliases ?? "",
 					document.headings ?? "",
-					(document.content ?? "").slice(0, 512),
+					content.slice(0, 512),
 				].join("\n"),
 			),
 		);
@@ -939,15 +961,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
-		const passages = this.buildPassages(fileId, document.path, document.content ?? "");
+		const passages = this.buildIndexedPassages(fileId, content);
 		this.filePassageIds.set(
 			fileId,
-			passages.map((passage) => passage.id),
+			passages.map((passage) => passage.record.id),
 		);
 		for (const passage of passages) {
-			this.passageById.set(passage.id, passage);
-			this.passageLengths.set(passage.id, passage.length);
-			this.totalPassageLength += passage.length;
+			this.passageById.set(passage.record.id, passage.record);
+			this.passageLengths.set(passage.record.id, passage.record.length);
+			this.totalPassageLength += passage.record.length;
 
 			for (const [term, tf] of passage.wordTf) {
 				let postings = this.passageWordPostings.get(term);
@@ -956,7 +978,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					this.passageWordPostings.set(term, postings);
 					this.insertWordTerm(term);
 				}
-				postings.set(passage.id, tf);
+				postings.set(passage.record.id, tf);
 			}
 
 			for (const [term, tf] of passage.charTf) {
@@ -966,7 +988,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					this.charBigramPostings.set(term, postings);
 					this.insertCharTerm(term);
 				}
-				postings.set(passage.id, tf);
+				postings.set(passage.record.id, tf);
 			}
 		}
 	}
@@ -1003,14 +1025,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
+		const fileContent = this.fileContentById.get(fileId) ?? "";
 		const passageIds = this.filePassageIds.get(fileId) ?? [];
-		for (const passageId of passageIds) {
-			const passage = this.passageById.get(passageId);
-			if (!passage) {
-				continue;
-			}
+		const indexedPassages = this.buildIndexedPassages(fileId, fileContent, passageIds);
+		for (const passage of indexedPassages) {
+			const passageId = passage.record.id;
 			this.totalPassageLength -= this.passageLengths.get(passageId) ?? 0;
 			this.passageLengths.delete(passageId);
+			this.passageRuntimeCache.delete(passageId);
 
 			for (const term of passage.wordTf.keys()) {
 				const postings = this.passageWordPostings.get(term);
@@ -1035,6 +1057,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			this.passageById.delete(passageId);
 		}
 
+		this.fileContentById.delete(fileId);
 		this.fileMetadataTokens.delete(fileId);
 		this.fileScriptProfiles.delete(fileId);
 		this.filePassageIds.delete(fileId);
@@ -1042,18 +1065,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.pathByFileId.delete(fileId);
 	}
 
-	private buildPassages(
+	private buildIndexedPassages(
 		fileId: number,
-		filePath: string,
 		content: string,
-	): PassageRecord[] {
-		const units = this.buildPassageUnits(content);
+		existingPassageIds?: readonly number[],
+	): IndexedPassageBuild[] {
+		const units = this.buildPassageUnitsWithOffsets(content);
 		if (units.length === 0) {
 			return [];
 		}
 
-		const passages: PassageRecord[] = [];
+		const passages: IndexedPassageBuild[] = [];
 		let startIndex = 0;
+		let passageIndex = 0;
 		while (startIndex < units.length) {
 			let endIndex = startIndex;
 			let tokenCount = 0;
@@ -1077,17 +1101,22 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			const tokens = selectedUnits.flatMap((unit) => unit.tokens);
 			const charTerms = selectedUnits.flatMap((unit) => unit.charTerms);
 			if (tokens.length > 0 || charTerms.length > 0) {
-				const text = selectedUnits.map((unit) => unit.text).join("\n");
+				const startOffset = selectedUnits[0].startOffset;
+				const endOffset = selectedUnits[selectedUnits.length - 1].endOffset;
+				const passageId =
+					existingPassageIds?.[passageIndex] ?? this.nextPassageId++;
 				passages.push({
-					id: this.nextPassageId++,
-					fileId,
-					filePath,
-					text,
-					length: Math.max(tokens.length, charTerms.length, 1),
-					tokenSequence: tokens,
+					record: {
+						id: passageId,
+						fileId,
+						startOffset,
+						endOffset,
+						length: Math.max(tokens.length, charTerms.length, 1),
+					},
 					wordTf: buildTfMap(tokens),
 					charTf: buildTfMap(charTerms),
 				});
+				passageIndex += 1;
 			}
 
 			if (endIndex >= units.length) {
@@ -1159,6 +1188,117 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						text: normalizedContent,
 						tokens: fallbackTokens,
 						charTerms: fallbackCharTerms,
+					},
+				]
+			: [];
+	}
+
+	private buildPassageUnitsWithOffsets(
+		content: string,
+	): Array<PassageUnit & { startOffset: number; endOffset: number }> {
+		const trimmedRange = trimSliceRange(content, 0, content.length);
+		if (trimmedRange.startOffset >= trimmedRange.endOffset) {
+			return [];
+		}
+
+		const normalizedContent = content.slice(
+			trimmedRange.startOffset,
+			trimmedRange.endOffset,
+		);
+		const units: Array<PassageUnit & { startOffset: number; endOffset: number }> = [];
+
+		for (const paragraphMatch of normalizedContent.matchAll(/\S[\s\S]*?(?=(?:\r?\n\s*\r?\n+)|$)/gu)) {
+			const paragraph = paragraphMatch[0];
+			const paragraphStartOffset =
+				trimmedRange.startOffset + (paragraphMatch.index ?? 0);
+			const sentenceMatches = Array.from(
+				paragraph.matchAll(/[^。！？!?；;\n]+[。！？!?；;]?/gu),
+			);
+			const sourceMatches =
+				sentenceMatches.length > 0
+					? sentenceMatches
+					: [{ 0: paragraph, index: 0 }] as Array<{
+							0: string;
+							index?: number;
+					  }>;
+			for (const sentenceMatch of sourceMatches) {
+				const rawSentence = sentenceMatch[0];
+				const rawStartOffset =
+					paragraphStartOffset + (sentenceMatch.index ?? 0);
+				const rawEndOffset = rawStartOffset + rawSentence.length;
+				const sentenceRange = trimSliceRange(
+					content,
+					rawStartOffset,
+					rawEndOffset,
+				);
+				if (sentenceRange.startOffset >= sentenceRange.endOffset) {
+					continue;
+				}
+
+				const trimmed = content.slice(
+					sentenceRange.startOffset,
+					sentenceRange.endOffset,
+				);
+				const tokens = this.tokenizeContent(trimmed);
+				const charTerms = this.extractCjkBigrams(trimmed);
+				if (tokens.length === 0 && charTerms.length === 0) {
+					continue;
+				}
+
+				if (tokens.length <= PASSAGE_TARGET_TOKENS * 1.5) {
+					units.push({
+						text: trimmed,
+						tokens,
+						charTerms,
+						startOffset: sentenceRange.startOffset,
+						endOffset: sentenceRange.endOffset,
+					});
+					continue;
+				}
+
+				for (const chunkRange of sliceLongTextRanges(
+					content,
+					sentenceRange.startOffset,
+					sentenceRange.endOffset,
+					MIN_LONG_CHUNK_CHARS,
+				)) {
+					const chunk = content.slice(
+						chunkRange.startOffset,
+						chunkRange.endOffset,
+					);
+					const chunkTokens = this.tokenizeContent(chunk);
+					const chunkCharTerms = this.extractCjkBigrams(chunk);
+					if (chunkTokens.length > 0 || chunkCharTerms.length > 0) {
+						units.push({
+							text: chunk,
+							tokens: chunkTokens,
+							charTerms: chunkCharTerms,
+							startOffset: chunkRange.startOffset,
+							endOffset: chunkRange.endOffset,
+						});
+					}
+				}
+			}
+		}
+
+		if (units.length > 0) {
+			return units;
+		}
+
+		const fallbackText = content.slice(
+			trimmedRange.startOffset,
+			trimmedRange.endOffset,
+		);
+		const fallbackTokens = this.tokenizeContent(fallbackText);
+		const fallbackCharTerms = this.extractCjkBigrams(fallbackText);
+		return fallbackTokens.length > 0 || fallbackCharTerms.length > 0
+			? [
+					{
+						text: fallbackText,
+						tokens: fallbackTokens,
+						charTerms: fallbackCharTerms,
+						startOffset: trimmedRange.startOffset,
+						endOffset: trimmedRange.endOffset,
 					},
 				]
 			: [];
@@ -3916,7 +4056,75 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			positionsByPassageId: new Map<number, Map<number, number[]>>(),
 			localWindowSetsByPassageId: new Map<number, QueryConditionedLocalWindowSet>(),
 			verifierSignalsByPassageId: new Map<number, VerifierSignals>(),
+			tokenSequenceByPassageId: new Map<number, string[]>(),
+			passageTextByPassageId: new Map<number, string>(),
 		};
+	}
+
+	private getPassageText(
+		passage: PassageRecord,
+		queryScoringCache: QueryScoringCache,
+	): string {
+		const runtimeCached = this.passageRuntimeCache.get(passage.id);
+		if (runtimeCached) {
+			this.touchPassageRuntimeCache(passage.id, runtimeCached);
+			queryScoringCache.passageTextByPassageId.set(passage.id, runtimeCached.text);
+			return runtimeCached.text;
+		}
+		const cached = queryScoringCache.passageTextByPassageId.get(passage.id);
+		if (cached !== undefined) {
+			return cached;
+		}
+		const fileContent = this.fileContentById.get(passage.fileId) ?? "";
+		const text = fileContent.slice(passage.startOffset, passage.endOffset).trim();
+		queryScoringCache.passageTextByPassageId.set(passage.id, text);
+		this.touchPassageRuntimeCache(passage.id, { text });
+		return text;
+	}
+
+	private getPassageTokenSequence(
+		passage: PassageRecord,
+		queryScoringCache: QueryScoringCache,
+	): string[] {
+		const runtimeCached = this.passageRuntimeCache.get(passage.id);
+		if (runtimeCached?.tokenSequence) {
+			this.touchPassageRuntimeCache(passage.id, runtimeCached);
+			queryScoringCache.tokenSequenceByPassageId.set(
+				passage.id,
+				runtimeCached.tokenSequence,
+			);
+			if (!queryScoringCache.passageTextByPassageId.has(passage.id)) {
+				queryScoringCache.passageTextByPassageId.set(
+					passage.id,
+					runtimeCached.text,
+				);
+			}
+			return runtimeCached.tokenSequence;
+		}
+		const cached = queryScoringCache.tokenSequenceByPassageId.get(passage.id);
+		if (cached) {
+			return cached;
+		}
+		const text = this.getPassageText(passage, queryScoringCache);
+		const tokenSequence = this.tokenizeContent(text);
+		queryScoringCache.tokenSequenceByPassageId.set(passage.id, tokenSequence);
+		this.touchPassageRuntimeCache(passage.id, { text, tokenSequence });
+		return tokenSequence;
+	}
+
+	private touchPassageRuntimeCache(
+		passageId: number,
+		entry: { text: string; tokenSequence?: string[] },
+	): void {
+		this.passageRuntimeCache.delete(passageId);
+		this.passageRuntimeCache.set(passageId, entry);
+		if (this.passageRuntimeCache.size <= PASSAGE_RUNTIME_CACHE_SIZE) {
+			return;
+		}
+		const oldestKey = this.passageRuntimeCache.keys().next().value;
+		if (oldestKey !== undefined) {
+			this.passageRuntimeCache.delete(oldestKey);
+		}
 	}
 
 	private shouldUseLocalWindowScoring(params: {
@@ -3958,8 +4166,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (cached) {
 			return cached;
 		}
+		const tokenSequence = this.getPassageTokenSequence(passage, queryScoringCache);
 		const positionsByQueryTerm = this.collectPositionsByMatchedTerms(
-			passage.tokenSequence,
+			tokenSequence,
 			matchedQueryTerms,
 			matchedTermsByQueryTerm,
 			queryTerms,
@@ -5143,7 +5352,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		fileState: FileCandidateState | undefined,
 		queryScoringCache: QueryScoringCache,
 	): VerifierSignals {
-		if (passage.tokenSequence.length === 0 || passageState.matchedQueryTerms.size === 0) {
+		const tokenSequence = this.getPassageTokenSequence(passage, queryScoringCache);
+		if (tokenSequence.length === 0 || passageState.matchedQueryTerms.size === 0) {
 			return EMPTY_VERIFIER_SIGNALS;
 		}
 
@@ -5207,8 +5417,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			computeIfMissing: true,
 		});
 		const exactPhraseHit = hasExactPhraseMatch(
-			passage.text,
-			passage.tokenSequence,
+			this.getPassageText(passage, queryScoringCache),
+			tokenSequence,
 			queryTerms,
 			positionsByQueryTerm,
 			rawQueryText,
@@ -5307,7 +5517,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		totalQueryWeight: number,
 		queryScoringCache: QueryScoringCache,
 	): number {
-		if (passage.tokenSequence.length === 0 || passageState.matchedQueryTerms.size <= 1) {
+		const tokenSequence = this.getPassageTokenSequence(passage, queryScoringCache);
+		if (tokenSequence.length === 0 || passageState.matchedQueryTerms.size <= 1) {
 			return 0;
 		}
 		const positionsByQueryTerm = this.getCachedPassagePositionsByQueryTerm({
@@ -5424,6 +5635,44 @@ function sliceLongText(text: string, chunkSize: number): string[] {
 		start += chunkSize;
 	}
 	return chunks.filter((chunk) => chunk.length > 0);
+}
+
+function sliceLongTextRanges(
+	text: string,
+	startOffset: number,
+	endOffset: number,
+	chunkSize: number,
+): Array<{ startOffset: number; endOffset: number }> {
+	const ranges: Array<{ startOffset: number; endOffset: number }> = [];
+	let cursor = startOffset;
+	while (cursor < endOffset) {
+		const rawEndOffset = Math.min(endOffset, cursor + chunkSize);
+		const trimmedRange = trimSliceRange(text, cursor, rawEndOffset);
+		if (trimmedRange.startOffset < trimmedRange.endOffset) {
+			ranges.push(trimmedRange);
+		}
+		cursor += chunkSize;
+	}
+	return ranges;
+}
+
+function trimSliceRange(
+	text: string,
+	startOffset: number,
+	endOffset: number,
+): { startOffset: number; endOffset: number } {
+	let trimmedStart = startOffset;
+	let trimmedEnd = endOffset;
+	while (trimmedStart < trimmedEnd && /\s/u.test(text[trimmedStart] ?? "")) {
+		trimmedStart += 1;
+	}
+	while (trimmedEnd > trimmedStart && /\s/u.test(text[trimmedEnd - 1] ?? "")) {
+		trimmedEnd -= 1;
+	}
+	return {
+		startOffset: trimmedStart,
+		endOffset: trimmedEnd,
+	};
 }
 
 function lowerBoundString(values: string[], target: string): number {
