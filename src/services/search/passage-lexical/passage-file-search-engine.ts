@@ -224,8 +224,6 @@ type RankedMatchedFile = MatchedFile & {
 	verifierTemplatePenaltyRatio: number;
 	bodyEvidenceCoverageRatio: number;
 	decisiveBodyCoverageRatio: number;
-	supportBodyCoverageRatio: number;
-	decisiveBodyAnchorSynergyRatio: number;
 	anchorSatisfiedRatio: number;
 	metadataOnlyNoiseRatio: number;
 	bodyAnchorSynergyRatio: number;
@@ -1993,15 +1991,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryDecompositionSignals.bodyEvidenceCoverageRatio,
 			decisiveBodyCoverageRatio:
 				queryDecompositionSignals.decisiveBodyCoverageRatio,
-			supportBodyCoverageRatio:
-				queryDecompositionSignals.supportBodyCoverageRatio,
 			anchorSatisfiedRatio: queryDecompositionSignals.anchorSatisfiedRatio,
 			metadataOnlyNoiseRatio:
 				queryDecompositionSignals.metadataOnlyNoiseRatio,
 			bodyAnchorSynergyRatio:
 				queryDecompositionSignals.bodyAnchorSynergyRatio,
-			decisiveBodyAnchorSynergyRatio:
-				queryDecompositionSignals.decisiveBodyAnchorSynergyRatio,
 			coreWitnessScore: passageSetSignals.coreWitnessScore,
 			coreWitnessCoverageRatio:
 				passageSetSignals.coreWitnessCoverageRatio,
@@ -2483,48 +2477,20 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		right: RankedMatchedFile,
 		queryRoute: ExperimentalQueryRoute,
 	): number {
-		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
+		const context = this.getBodyDecisionComparisonContext(left, right, queryRoute, {
+			maxQueryRouteScoreGap: 22,
+			maxScoreGap: 20,
+			minBodyEvidence: 0.22,
+			minLocalExplanation: 0.32,
+			minCoreWitness: 0.42,
+		});
+		if (!context) {
 			return 0;
 		}
-		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
-		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
-		if (queryRouteScoreGap > 22 || scoreGap > 20) {
-			return 0;
-		}
-		const decisiveVerifierGate = Math.max(
-			left.decisiveLocalVerifierScore,
-			right.decisiveLocalVerifierScore,
-		);
-		const localExplanationGate = Math.max(
-			left.localExplanationCompetitionScore,
-			right.localExplanationCompetitionScore,
-		);
-		const bodyEvidenceGate = Math.max(
-			left.bodyEvidenceCoverageRatio,
-			right.bodyEvidenceCoverageRatio,
-		);
-		const decisiveBodyGate = Math.max(
-			left.decisiveBodyCoverageRatio,
-			right.decisiveBodyCoverageRatio,
-		);
-		const coreWitnessGate = Math.max(
-			left.coreWitnessScore,
-			right.coreWitnessScore,
-		);
-		const anchorSupportGate = Math.max(
-			left.basenameAliasAnchorRatio,
-			left.pathAnchorRatio,
-			right.basenameAliasAnchorRatio,
-			right.pathAnchorRatio,
-		);
 		if (
-			(this.areMirrorLocaleVariants(left.path, right.path) &&
-				Math.abs(left.scriptFitScore - right.scriptFitScore) >= 0.08) ||
-			anchorSupportGate < 0.12 ||
-			(decisiveVerifierGate < 0.75 && coreWitnessGate < 0.48) ||
-			(coreWitnessGate < 0.42 && decisiveBodyGate < 0.42) ||
-			localExplanationGate < 0.32 ||
-			bodyEvidenceGate < 0.22
+			context.anchorSupportGate < 0.12 ||
+			(context.decisiveVerifierGate < 0.75 && context.coreWitnessGate < 0.48) ||
+			(context.coreWitnessGate < 0.42 && context.decisiveBodyGate < 0.42)
 		) {
 			return 0;
 		}
@@ -2542,49 +2508,20 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		right: RankedMatchedFile,
 		queryRoute: ExperimentalQueryRoute,
 	): number {
-		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
+		const context = this.getBodyDecisionComparisonContext(left, right, queryRoute, {
+			maxQueryRouteScoreGap: 12,
+			maxScoreGap: 8,
+			minBodyEvidence: 0.22,
+			minLocalExplanation: 0.3,
+			minCoreWitness: 0.42,
+		});
+		if (!context) {
 			return 0;
 		}
-		const anchorSupportGate = Math.max(
-			left.basenameAliasAnchorRatio,
-			left.pathAnchorRatio,
-			right.basenameAliasAnchorRatio,
-			right.pathAnchorRatio,
-		);
-		if (anchorSupportGate >= 0.12) {
-			return 0;
-		}
-		const bodyEvidenceGate = Math.max(
-			left.bodyEvidenceCoverageRatio,
-			right.bodyEvidenceCoverageRatio,
-		);
-		const coreWitnessGate = Math.max(
-			left.coreWitnessScore,
-			right.coreWitnessScore,
-		);
-		const localExplanationGate = Math.max(
-			left.localExplanationCompetitionScore,
-			right.localExplanationCompetitionScore,
-		);
-		const anchorSatisfiedGate = Math.max(
-			left.anchorSatisfiedRatio,
-			right.anchorSatisfiedRatio,
-		);
 		if (
-			(this.areMirrorLocaleVariants(left.path, right.path) &&
-				Math.abs(left.scriptFitScore - right.scriptFitScore) >= 0.08) ||
-			bodyEvidenceGate < 0.22 ||
-			localExplanationGate < 0.3 ||
-			coreWitnessGate < 0.42
+			context.anchorSupportGate >= 0.12 ||
+			context.anchorSatisfiedGate >= 0.08
 		) {
-			return 0;
-		}
-		if (anchorSatisfiedGate >= 0.08) {
-			return 0;
-		}
-		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
-		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
-		if (queryRouteScoreGap > 12 || scoreGap > 8) {
 			return 0;
 		}
 		const leftDecisionScore = this.computeBodyOnlyTopicDecisionScore(left);
@@ -2594,6 +2531,86 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return 0;
 		}
 		return decisionGap;
+	}
+
+	private getBodyDecisionComparisonContext(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+		queryRoute: ExperimentalQueryRoute,
+		thresholds: {
+			maxQueryRouteScoreGap: number;
+			maxScoreGap: number;
+			minBodyEvidence: number;
+			minLocalExplanation: number;
+			minCoreWitness: number;
+		},
+	):
+		| {
+				anchorSupportGate: number;
+				anchorSatisfiedGate: number;
+				bodyEvidenceGate: number;
+				localExplanationGate: number;
+				coreWitnessGate: number;
+				decisiveVerifierGate: number;
+				decisiveBodyGate: number;
+		  }
+		| null {
+		if (queryRoute !== "mixed_anchor" && queryRoute !== "body_local") {
+			return null;
+		}
+		if (
+			this.areMirrorLocaleVariants(left.path, right.path) &&
+			Math.abs(left.scriptFitScore - right.scriptFitScore) >= 0.08
+		) {
+			return null;
+		}
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		if (
+			queryRouteScoreGap > thresholds.maxQueryRouteScoreGap ||
+			scoreGap > thresholds.maxScoreGap
+		) {
+			return null;
+		}
+		const bodyEvidenceGate = Math.max(
+			left.bodyEvidenceCoverageRatio,
+			right.bodyEvidenceCoverageRatio,
+		);
+		const localExplanationGate = Math.max(
+			left.localExplanationCompetitionScore,
+			right.localExplanationCompetitionScore,
+		);
+		const coreWitnessGate = Math.max(left.coreWitnessScore, right.coreWitnessScore);
+		if (
+			bodyEvidenceGate < thresholds.minBodyEvidence ||
+			localExplanationGate < thresholds.minLocalExplanation ||
+			coreWitnessGate < thresholds.minCoreWitness
+		) {
+			return null;
+		}
+		return {
+			anchorSupportGate: Math.max(
+				left.basenameAliasAnchorRatio,
+				left.pathAnchorRatio,
+				right.basenameAliasAnchorRatio,
+				right.pathAnchorRatio,
+			),
+			anchorSatisfiedGate: Math.max(
+				left.anchorSatisfiedRatio,
+				right.anchorSatisfiedRatio,
+			),
+			bodyEvidenceGate,
+			localExplanationGate,
+			coreWitnessGate,
+			decisiveVerifierGate: Math.max(
+				left.decisiveLocalVerifierScore,
+				right.decisiveLocalVerifierScore,
+			),
+			decisiveBodyGate: Math.max(
+				left.decisiveBodyCoverageRatio,
+				right.decisiveBodyCoverageRatio,
+			),
+		};
 	}
 
 	private determineExperimentalQueryRoute(
