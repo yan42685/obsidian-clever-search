@@ -5,7 +5,6 @@ import {
 	TFile,
 	TFolder,
 	Vault,
-	htmlToMarkdown,
 	parseFrontMatterAliases,
 	type CachedMetadata,
 } from "obsidian";
@@ -13,6 +12,7 @@ import { OuterSetting } from "src/globals/plugin-setting";
 import type { IndexedDocument } from "src/globals/search-types";
 import { parseTextHeadingOutline } from "src/services/search/hybrid/chunker";
 import type { HeadingOutlineEntry } from "src/services/search/hybrid/hybrid-types";
+import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { logger } from "src/utils/logger";
 import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -27,7 +27,7 @@ export class DataProvider {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly privateApi = getInstance(PrivateApi);
 	private readonly viewRegistry = getInstance(ViewRegistry);
-	private readonly htmlParser = getInstance(HtmlParser);
+	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private excludedPaths: Set<string>;
 	private supportedExtensions: Set<string>;
 
@@ -135,11 +135,7 @@ export class DataProvider {
 				this.viewRegistry.viewTypeByPath(file.path) ===
 				ViewType.MARKDOWN
 			) {
-				const plainText = await this.vault.cachedRead(file);
-				// return plainText;
-				return file.extension === "html"
-					? this.htmlParser.toMarkdown(plainText)
-					: plainText;
+				return await this.fileSnapshotStore.readCurrentFileText(file);
 			} else {
 				throw Error(
 					`unsupported file extension as plain text to read, path: ${file.path}`,
@@ -235,28 +231,5 @@ export class DataProvider {
 			}
 		}
 		return true;
-	}
-}
-
-@singleton()
-class HtmlParser {
-	private readonly MARKDOWN_LINK_REGEX = /\[([^[\]]+)\]\([^()]*\)/g;
-	private readonly MARKDOWN_ASTERISK_REGEX = /\*\*(.*?)\*\*/g;
-	private readonly MARKDOWN_BACKTICK_REGEX = /`(.*?)`/g;
-
-	toMarkdown(htmlText: string) {
-		// use a replacement function to determine how to replace the matched content
-		let cleanMarkdown = htmlToMarkdown(htmlText);
-		// 使用替换函数来确定如何替换匹配到的内容
-		cleanMarkdown = cleanMarkdown.replace(this.MARKDOWN_LINK_REGEX, "$1");
-		cleanMarkdown = cleanMarkdown.replace(
-			this.MARKDOWN_ASTERISK_REGEX,
-			"$1",
-		);
-		cleanMarkdown = cleanMarkdown.replace(
-			this.MARKDOWN_BACKTICK_REGEX,
-			"$1",
-		);
-		return cleanMarkdown;
 	}
 }

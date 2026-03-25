@@ -39,6 +39,7 @@ import {
 } from "./user-data/data-manager";
 import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-recovery-manager";
 import { DataProvider } from "./user-data/data-provider";
+import { FileSnapshotStore } from "../search/shared/file-snapshot-store";
 import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
 
@@ -84,6 +85,11 @@ export class SettingManager {
 	async postSettingUpdated() {
 		await this.saveSettings();
 		const pendingRefresh = this.consumePendingRefresh();
+		const dataProvider = getInstance(DataProvider);
+		dataProvider.init();
+		await getInstance(FileSnapshotStore).refreshHighPerformanceState(
+			dataProvider.allFilesToBeIndexed(),
+		);
 		if (!this.hasPendingRefresh(pendingRefresh)) {
 			return;
 		}
@@ -93,8 +99,6 @@ export class SettingManager {
 			await getInstance(AssetsProvider).initAsync();
 			await getInstance(ChinesePatch).initAsync();
 		}
-		getInstance(DataProvider).init();
-
 		const dataManager = getInstance(DataManager);
 		if (pendingRefresh.lexicalReindex) {
 			await dataManager.refreshLexicalStateAsync();
@@ -131,6 +135,7 @@ export class SettingManager {
 			await this.plugin.loadData(),
 		);
 		delete (this.setting.hybrid as Record<string, unknown>).searchStrategy;
+		delete (this.setting.hybrid as Record<string, unknown>).enableHighPerformanceMode;
 		logger.setLevel(this.setting.logLevel);
 	}
 
@@ -555,6 +560,8 @@ class SearchHistoryModal extends Modal {
 class HybridSearchModal extends Modal {
 	private settingManager = getInstance(SettingManager);
 	private setting = getInstance(OuterSetting);
+	private fileSnapshotStore = getInstance(FileSnapshotStore);
+	private dataProvider = getInstance(DataProvider);
 	private allPaths = new Set<string>();
 	private allFolders = new Set<string>();
 	private excludesEl: HTMLElement;
@@ -562,6 +569,7 @@ class HybridSearchModal extends Modal {
 	private suggester: CommonSuggester;
 	private weeklyLimitInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
+	private highPerformanceInfoSetting: Setting;
 	private failedEmbeddingStatusEl: HTMLElement;
 	private deferredEmbeddingStatusEl: HTMLElement;
 	private statsEl: HTMLElement;
@@ -629,6 +637,26 @@ class HybridSearchModal extends Modal {
 						this.settingManager.saveSettings();
 					}),
 			);
+
+		this.highPerformanceInfoSetting = new Setting(contentEl)
+			.setName(t("hybridModal.highPerformanceMode"))
+			.setDesc(t("hybridModal.highPerformanceMode.desc"));
+
+		new Setting(contentEl)
+			.setName(t("hybridModal.highPerformanceThreshold"))
+			.setDesc(t("hybridModal.highPerformanceThreshold.desc"))
+			.addSlider((slider) =>
+				slider
+					.setLimits(0, 120, 1)
+					.setValue(this.setting.hybrid.highPerformanceMaxMb ?? 60)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.setting.hybrid.highPerformanceMaxMb = value;
+						await this.settingManager.saveSettings();
+						await this.refreshHighPerformanceStatus();
+					}),
+			);
+		void this.refreshHighPerformanceStatus();
 
 		new Setting(contentEl)
 			.setName(t("hybridModal.apiDomain"))
@@ -863,6 +891,18 @@ class HybridSearchModal extends Modal {
 				this.inputEl.value = "";
 			}
 		}
+	}
+
+	private async refreshHighPerformanceStatus() {
+		const indexableFiles = this.dataProvider.allFilesToBeIndexed();
+		await this.fileSnapshotStore.refreshHighPerformanceState(indexableFiles);
+		const summary = this.fileSnapshotStore.getStatusSummary(indexableFiles);
+		this.highPerformanceInfoSetting.setName(
+			`${t("hybridModal.highPerformanceMode")} (${summary.active ? t("hybridModal.highPerformanceMode.on") : t("hybridModal.highPerformanceMode.off")})`,
+		);
+		this.highPerformanceInfoSetting.setDesc(
+			`${t("hybridModal.highPerformanceMode.notice")} ${t("hybridModal.highPerformanceMode.total")}: ${this.formatBytes(summary.totalIndexableBytes)}`,
+		);
 	}
 
 	private async updateWeeklyTokenLimit() {
@@ -1164,6 +1204,16 @@ class HybridSearchModal extends Modal {
 			return this.stripTrailingZero((value / 1_000).toFixed(1)) + "K";
 		}
 		return value.toString();
+	}
+
+	private formatBytes(value: number): string {
+		if (value >= 1024 * 1024) {
+			return this.stripTrailingZero((value / (1024 * 1024)).toFixed(1)) + " MB";
+		}
+		if (value >= 1024) {
+			return this.stripTrailingZero((value / 1024).toFixed(1)) + " KB";
+		}
+		return `${value} B`;
 	}
 
 	private formatRelativeTime(targetAt: number): string {

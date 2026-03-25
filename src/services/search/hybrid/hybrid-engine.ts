@@ -64,6 +64,7 @@ import {
 import {
 	analyzeHybridStoredFileConsistency,
 } from './hybrid-consistency';
+import { FileSnapshotStore } from '../shared/file-snapshot-store';
 
 const SEARCH_EF = 80;
 const HYBRID_BM25_USE_PROXIMITY = false;
@@ -120,6 +121,7 @@ export class HybridEngine {
 	private readonly reranker = new HybridReranker();
 	private readonly bm25 = new BM25Engine();
 	private readonly hnswSmall = new HnswIndex();
+	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 
 	private _ready = false;
 	private _canSearch = false;
@@ -167,6 +169,7 @@ export class HybridEngine {
 			this.db.db.hybridHnswSmall.clear(),
 			this.db.db.hybridIndexedFileRefs.clear(),
 		]);
+		this.fileSnapshotStore.clearIndexedSnapshots();
 	}
 
 	isEnabled(): boolean {
@@ -297,6 +300,11 @@ export class HybridEngine {
 					filePath: newPath,
 				});
 				await this.db.db.hybridFileSnapshots.delete(oldPath);
+				this.fileSnapshotStore.renameIndexedSnapshot(
+					oldPath,
+					newPath,
+					snapshotRow.generation,
+				);
 			}
 
 			if (vectorRow) {
@@ -331,6 +339,7 @@ export class HybridEngine {
 		await this.db.db.hybridChunks.bulkDelete(ids);
 		await this.db.db.hybridFileSnapshots.delete(filePath);
 		await this.db.db.hybridChunkVectors.delete(filePath);
+		this.fileSnapshotStore.deleteIndexedSnapshot(filePath);
 		if (option.deleteIndexedFileRef ?? true) {
 			await this.db.db.hybridIndexedFileRefs.delete(filePath);
 		}
@@ -687,6 +696,7 @@ export class HybridEngine {
 			plainText,
 			generation,
 		});
+		this.fileSnapshotStore.setIndexedSnapshot(filePath, plainText, generation);
 	}
 
 	private async planIncrementalChunks(
@@ -1088,18 +1098,7 @@ export class HybridEngine {
 	}
 
 	private async loadSnapshotTextByPaths(filePaths: string[]): Promise<Map<string, string>> {
-		const uniquePaths = Array.from(new Set(filePaths));
-		if (uniquePaths.length === 0) {
-			return new Map();
-		}
-
-		const rows = await this.db.db.hybridFileSnapshots.bulkGet(uniquePaths);
-		const snapshots = new Map<string, string>();
-		for (const row of rows) {
-			if (!row) continue;
-			snapshots.set(row.filePath, row.plainText);
-		}
-		return snapshots;
+		return await this.fileSnapshotStore.getIndexedSnapshotTexts(filePaths);
 	}
 
 	private async rerankAndBuildFileItems(

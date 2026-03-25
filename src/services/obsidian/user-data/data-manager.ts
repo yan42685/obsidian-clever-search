@@ -35,6 +35,7 @@ import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { BM25Engine } from "src/services/search/hybrid/bm25";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
+import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { eventBus } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
@@ -195,6 +196,7 @@ export class DataManager {
 	private dataProvider = getInstance(DataProvider);
 	private setting = getInstance(OuterSetting);
 	private lexicalEngine = getInstance(LexicalEngine);
+	private fileSnapshotStore = getInstance(FileSnapshotStore);
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
 	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
@@ -352,6 +354,9 @@ export class DataManager {
 			logger.warn("hybrid engine init failed:", e);
 			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
 		});
+		await this.fileSnapshotStore.refreshHighPerformanceState(
+			this.dataProvider.allFilesToBeIndexed(),
+		);
 
 		if (!this.shouldForceRefresh) {
 			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
@@ -404,6 +409,9 @@ export class DataManager {
 			if (isDevEnvironment) {
 				await this.noticeDevStorageStats();
 			}
+			await this.fileSnapshotStore.refreshHighPerformanceState(
+				this.dataProvider.allFilesToBeIndexed(),
+			);
 			new MyNotice(t("Indexing finished"), 5000);
 		} finally {
 			prevNotice.hide();
@@ -439,6 +447,9 @@ export class DataManager {
 				});
 			}
 		} finally {
+			await this.fileSnapshotStore.refreshHighPerformanceState(
+				this.dataProvider.allFilesToBeIndexed(),
+			);
 			this.shouldForceRefresh = previousForceRefresh;
 			this.notifyHybridRuntimeStatusChanged();
 			getInstance(FileWatcher).start();
@@ -586,15 +597,20 @@ export class DataManager {
 	}
 
 	private async handleDeleteOperation(path: string): Promise<void> {
+		this.fileSnapshotStore.invalidateCurrentFile(path);
 		this.cancelHybridRepair(path);
 		this.clearFailedHybridEmbedding(path);
 		await this.deleteDocuments([path]);
 		if (this.hybridEngine.isEnabled()) {
 			await this.deleteHybridFileAndRefreshRuntimeStatus(path);
 		}
+		await this.fileSnapshotStore.refreshHighPerformanceState(
+			this.dataProvider.allFilesToBeIndexed(),
+		);
 	}
 
 	private async handleUpsertOperation(path: string): Promise<void> {
+		this.fileSnapshotStore.invalidateCurrentFile(path);
 		const file = this.dataProvider.getFileByPath(path);
 		if (!file || !this.dataProvider.isIndexable(file)) {
 			await this.handleDeleteOperation(path);
@@ -617,6 +633,9 @@ export class DataManager {
 		if (this.hybridEngine.isEnabled()) {
 			await this.hybridEngine.deleteFile(path);
 		}
+		await this.fileSnapshotStore.refreshHighPerformanceState(
+			this.dataProvider.allFilesToBeIndexed(),
+		);
 	}
 
 	private async handleMoveOperation(
@@ -624,6 +643,8 @@ export class DataManager {
 		newPath: string,
 		requiresReindex: boolean,
 	): Promise<void> {
+		this.fileSnapshotStore.invalidateCurrentFile(oldPath);
+		this.fileSnapshotStore.invalidateCurrentFile(newPath);
 		this.cancelHybridRepair(oldPath);
 		this.cancelHybridRepair(newPath);
 		await this.deleteDocuments([oldPath]);
@@ -636,6 +657,9 @@ export class DataManager {
 			if (this.hybridEngine.isEnabled()) {
 				await this.hybridEngine.deleteFile(oldPath);
 			}
+			await this.fileSnapshotStore.refreshHighPerformanceState(
+				this.dataProvider.allFilesToBeIndexed(),
+			);
 			return;
 		}
 
@@ -651,6 +675,9 @@ export class DataManager {
 				await this.hybridEngine.deleteFile(oldPath);
 				await this.hybridEngine.deleteFile(newPath);
 			}
+			await this.fileSnapshotStore.refreshHighPerformanceState(
+				this.dataProvider.allFilesToBeIndexed(),
+			);
 			return;
 		}
 
@@ -664,6 +691,9 @@ export class DataManager {
 
 		if (moved && !basenameChanged && !requiresReindex) {
 			this.moveFailedHybridEmbedding(oldPath, newPath);
+			await this.fileSnapshotStore.refreshHighPerformanceState(
+				this.dataProvider.allFilesToBeIndexed(),
+			);
 			return;
 		}
 
@@ -677,6 +707,9 @@ export class DataManager {
 				? "runtime-basename-changed-full-rebuild"
 				: "runtime-incremental-edit",
 		});
+		await this.fileSnapshotStore.refreshHighPerformanceState(
+			this.dataProvider.allFilesToBeIndexed(),
+		);
 	}
 
 	private enqueueHybridRepair(

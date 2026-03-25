@@ -38,6 +38,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	enableStopWordsZh: isChineseUser ? true : false,
 	hybrid: {
 		enabled: false,
+		highPerformanceMaxMb: 60,
 		autoShowResultsWhenLexicalEmpty: true,
 		apiDomain: '',
 		apiKey: '',
@@ -79,6 +80,7 @@ export type FileSearchBackend =
 
 export type HybridSetting = {
 	enabled: boolean;
+	highPerformanceMaxMb: number;
 	autoShowResultsWhenLexicalEmpty: boolean;
 	apiDomain: string;
 	apiKey: string;
