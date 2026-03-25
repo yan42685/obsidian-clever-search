@@ -43,6 +43,7 @@ export interface FileSearchEngine {
 	searchFiles(request: FileSearchRequest): Promise<MatchedFile[]>;
 	serialize(): SerializedFileSearchIndex | null;
 	estimateIndexBytes?(): number | null;
+	getIndexBreakdown?(): Record<string, unknown> | null;
 }
 
 @singleton()

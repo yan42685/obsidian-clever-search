@@ -2064,6 +2064,7 @@ export class DataManager {
 			this.setting.fileSearchBackend === "passage-bm25"
 				? "LexicalFileIndex(passage-bm25 estimated)"
 				: `LexicalFileIndex(${this.setting.fileSearchBackend})`;
+		const lexicalIndexBreakdown = this.lexicalEngine.getFileIndexBreakdown();
 		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
 		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
@@ -2146,6 +2147,40 @@ export class DataManager {
 			});
 		}
 		console.table(storageRows.sort((a, b) => b.bytes - a.bytes));
+		if (
+			this.setting.fileSearchBackend === "passage-bm25" &&
+			lexicalIndexBreakdown
+		) {
+			const breakdown = lexicalIndexBreakdown as Record<string, unknown>;
+			const estimatedBytes =
+				(breakdown.estimatedBytes as Record<string, number> | undefined) ?? {};
+			console.table([
+				{
+					files: breakdown.files ?? 0,
+					passages: breakdown.passages ?? 0,
+					wordTerms: breakdown.wordTerms ?? 0,
+					charTerms: breakdown.charTerms ?? 0,
+					metadataTerms: breakdown.metadataTerms ?? 0,
+					wordPostings: breakdown.wordPostings ?? 0,
+					charPostings: breakdown.charPostings ?? 0,
+					metadataPostings: breakdown.metadataPostings ?? 0,
+					passagePostingTermRefs: breakdown.passagePostingTermRefs ?? 0,
+				},
+			]);
+			console.table(
+				Object.entries(estimatedBytes).map(([segment, bytes]) => ({
+					segment,
+					bytes,
+					size: this.formatBytes(bytes),
+				})),
+			);
+			console.table(
+				(breakdown.topWordTerms as Array<{ term: string; postings: number }> | undefined) ?? [],
+			);
+			console.table(
+				(breakdown.topCharTerms as Array<{ term: string; postings: number }> | undefined) ?? [],
+			);
+		}
 		console.log(`[clever-search] ${localOnlyHint}`);
 		if (storageUsage.hybridChunkBreakdown) {
 			console.table([

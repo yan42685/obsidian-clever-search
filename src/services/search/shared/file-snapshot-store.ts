@@ -1,8 +1,8 @@
 import { TFile, Vault, htmlToMarkdown } from "obsidian";
 import { OuterSetting } from "src/globals/plugin-setting";
-import { Database } from "src/services/database/database";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import type { Database } from "src/services/database/database";
 
 type IndexedSnapshotCacheEntry = {
 	text: string;
@@ -23,7 +23,6 @@ export type FileSnapshotStoreStatus = {
 @singleton()
 export class FileSnapshotStore {
 	private readonly vault = getInstance(Vault);
-	private readonly database = getInstance(Database);
 	private readonly setting = getInstance(OuterSetting);
 	private readonly currentFileCache = new Map<string, string>();
 	private readonly indexedSnapshotCache = new Map<string, IndexedSnapshotCacheEntry>();
@@ -55,6 +54,10 @@ export class FileSnapshotStore {
 
 	setCurrentFileText(path: string, text: string): void {
 		this.currentFileCache.set(path, text);
+	}
+
+	peekCurrentFileText(path: string): string | undefined {
+		return this.currentFileCache.get(path);
 	}
 
 	invalidateCurrentFile(path: string): void {
@@ -173,7 +176,6 @@ export class FileSnapshotStore {
 		if (!shouldActivate) {
 			this.cancelPreloads();
 			if (this.highPerformanceActive) {
-				this.currentFileCache.clear();
 				this.indexedSnapshotCache.clear();
 			}
 			this.highPerformanceActive = false;
@@ -280,5 +282,13 @@ export class FileSnapshotStore {
 			.replace(/\[([^[\]]+)\]\([^()]*\)/g, "$1")
 			.replace(/\*\*(.*?)\*\*/g, "$1")
 			.replace(/`(.*?)`/g, "$1");
+	}
+
+	private get database(): Database {
+		const { Database } =
+			// Delay loading the Dexie-backed module so lexical-only tests do not have
+			// to parse the decorated database class eagerly.
+			require("src/services/database/database") as typeof import("src/services/database/database");
+		return getInstance(Database);
 	}
 }

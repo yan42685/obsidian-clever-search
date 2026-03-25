@@ -1,8 +1,9 @@
+import { Vault } from "obsidian";
 import type { IndexedDocument, MatchedFile } from "src/globals/search-types";
 import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
-import { singleton } from "tsyringe";
+import { container, singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
@@ -14,6 +15,7 @@ import {
 	type FileSearchQueryKind,
 	type FileSearchQueryTermStats,
 } from "../file-search-query-planner";
+import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
 
 type MetadataField = "basename" | "aliases" | "folder" | "tags" | "headings";
@@ -46,6 +48,11 @@ type IndexedPassageBuild = {
 	record: PassageRecord;
 	wordTf: Map<string, number>;
 	charTf: Map<string, number>;
+};
+
+type PassagePostingTerms = {
+	wordTerms: string[];
+	charTerms: string[];
 };
 
 type PassageCandidateState = {
@@ -422,19 +429,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	};
 	private readonly fileIdByPath = new Map<string, number>();
 	private readonly pathByFileId = new Map<number, string>();
-	private readonly fileContentById = new Map<number, string>();
 	private readonly fileMetadataTokens = new Map<
 		number,
 		Record<MetadataField, string[]>
 	>();
+	private readonly fallbackFileContentById = new Map<number, string>();
 	private readonly fileScriptProfiles = new Map<number, ScriptProfile>();
 	private readonly filePassageIds = new Map<number, number[]>();
 	private readonly passageById = new Map<number, PassageRecord>();
+	private readonly passagePostingTermsById = new Map<number, PassagePostingTerms>();
 	private readonly passageLengths = new Map<number, number>();
 	private readonly passageRuntimeCache = new Map<
 		number,
 		{ text: string; tokenSequence?: string[] }
 	>();
+	private fileSnapshotStore: FileSnapshotStore | null | undefined;
 	private nextFileId = 1;
 	private nextPassageId = 1;
 	private totalPassageLength = 0;
@@ -752,11 +761,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const path of this.pathByFileId.values()) {
 			total += Buffer.byteLength(path, "utf8");
 		}
-		for (const content of this.fileContentById.values()) {
-			total += Buffer.byteLength(content, "utf8");
-		}
 		for (const passage of this.passageById.values()) {
 			total += 24;
+		}
+		for (const postingTerms of this.passagePostingTermsById.values()) {
+			total += postingTerms.wordTerms.reduce(
+				(sum, term) => sum + Buffer.byteLength(term, "utf8"),
+				0,
+			);
+			total += postingTerms.charTerms.reduce(
+				(sum, term) => sum + Buffer.byteLength(term, "utf8"),
+				0,
+			);
 		}
 		for (const passageIds of this.filePassageIds.values()) {
 			total += passageIds.length * 4;
@@ -776,6 +792,71 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			total += postings.size * 10;
 		}
 		return total;
+	}
+
+	getIndexBreakdown(): Record<string, unknown> | null {
+		return {
+			files: this.pathByFileId.size,
+			passages: this.passageById.size,
+			wordTerms: this.passageWordPostings.size,
+			charTerms: this.charBigramPostings.size,
+			metadataTerms: this.metadataTermPostings.size,
+			wordPostings: sumPostingSizes(this.passageWordPostings),
+			charPostings: sumPostingSizes(this.charBigramPostings),
+			metadataPostings: sumNestedPostingSizes(this.metadataTermPostings),
+			passagePostingTermRefs: Array.from(this.passagePostingTermsById.values()).reduce(
+				(sum, item) => sum + item.wordTerms.length + item.charTerms.length,
+				0,
+			),
+			estimatedBytes: {
+				total: this.estimateIndexBytes(),
+				paths: Array.from(this.pathByFileId.values()).reduce(
+					(sum, path) => sum + Buffer.byteLength(path, "utf8"),
+					0,
+				),
+				metadataTokens: Array.from(this.fileMetadataTokens.values()).reduce(
+					(sum, fields) =>
+						sum +
+						METADATA_FIELDS.reduce(
+							(fieldSum, field) =>
+								fieldSum +
+								fields[field].reduce(
+									(tokenSum, token) => tokenSum + Buffer.byteLength(token, "utf8"),
+									0,
+								),
+							0,
+						),
+					0,
+				),
+				passageRecords: this.passageById.size * 24,
+				passagePostingTerms: Array.from(this.passagePostingTermsById.values()).reduce(
+					(sum, item) =>
+						sum +
+						item.wordTerms.reduce(
+							(termSum, term) => termSum + Buffer.byteLength(term, "utf8"),
+							0,
+						) +
+						item.charTerms.reduce(
+							(termSum, term) => termSum + Buffer.byteLength(term, "utf8"),
+							0,
+						),
+					0,
+				),
+				wordLexicon: this.sortedWordTerms.reduce(
+					(sum, term) => sum + Buffer.byteLength(term, "utf8"),
+					0,
+				),
+				charLexicon: this.sortedCharTerms.reduce(
+					(sum, term) => sum + Buffer.byteLength(term, "utf8"),
+					0,
+				),
+				wordPostings: sumPostingSizes(this.passageWordPostings) * 12,
+				charPostings: sumPostingSizes(this.charBigramPostings) * 10,
+				metadataPostings: sumNestedPostingSizes(this.metadataTermPostings) * 12,
+			},
+			topWordTerms: topPostingTerms(this.passageWordPostings),
+			topCharTerms: topPostingTerms(this.charBigramPostings),
+		};
 	}
 
 	private searchWithPlanner(
@@ -891,11 +972,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.sortedCharTerms.length = 0;
 		this.fileIdByPath.clear();
 		this.pathByFileId.clear();
-		this.fileContentById.clear();
 		this.fileMetadataTokens.clear();
+		this.fallbackFileContentById.clear();
 		this.fileScriptProfiles.clear();
 		this.filePassageIds.clear();
 		this.passageById.clear();
+		this.passagePostingTermsById.clear();
 		this.passageLengths.clear();
 		this.passageRuntimeCache.clear();
 		this.nextFileId = 1;
@@ -917,7 +999,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.fileIdByPath.set(document.path, fileId);
 		this.pathByFileId.set(fileId, document.path);
 		const content = document.content ?? "";
-		this.fileContentById.set(fileId, content);
+		const fileSnapshotStore = this.getFileSnapshotStore();
+		if (fileSnapshotStore) {
+			fileSnapshotStore.setCurrentFileText(document.path, content);
+		} else {
+			this.fallbackFileContentById.set(fileId, content);
+		}
 		this.fileScriptProfiles.set(
 			fileId,
 			this.buildScriptProfile(
@@ -968,6 +1055,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		);
 		for (const passage of passages) {
 			this.passageById.set(passage.record.id, passage.record);
+			this.passagePostingTermsById.set(passage.record.id, {
+				wordTerms: Array.from(passage.wordTf.keys()),
+				charTerms: Array.from(passage.charTf.keys()),
+			});
 			this.passageLengths.set(passage.record.id, passage.record.length);
 			this.totalPassageLength += passage.record.length;
 
@@ -1025,16 +1116,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
-		const fileContent = this.fileContentById.get(fileId) ?? "";
 		const passageIds = this.filePassageIds.get(fileId) ?? [];
-		const indexedPassages = this.buildIndexedPassages(fileId, fileContent, passageIds);
-		for (const passage of indexedPassages) {
-			const passageId = passage.record.id;
+		for (const passageId of passageIds) {
 			this.totalPassageLength -= this.passageLengths.get(passageId) ?? 0;
 			this.passageLengths.delete(passageId);
 			this.passageRuntimeCache.delete(passageId);
+			const postingTerms = this.passagePostingTermsById.get(passageId);
 
-			for (const term of passage.wordTf.keys()) {
+			for (const term of postingTerms?.wordTerms ?? []) {
 				const postings = this.passageWordPostings.get(term);
 				postings?.delete(passageId);
 				if (postings && postings.size === 0) {
@@ -1045,7 +1134,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				}
 			}
 
-			for (const term of passage.charTf.keys()) {
+			for (const term of postingTerms?.charTerms ?? []) {
 				const postings = this.charBigramPostings.get(term);
 				postings?.delete(passageId);
 				if (postings && postings.size === 0) {
@@ -1055,10 +1144,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 
 			this.passageById.delete(passageId);
+			this.passagePostingTermsById.delete(passageId);
 		}
 
-		this.fileContentById.delete(fileId);
 		this.fileMetadataTokens.delete(fileId);
+		this.fallbackFileContentById.delete(fileId);
 		this.fileScriptProfiles.delete(fileId);
 		this.filePassageIds.delete(fileId);
 		this.fileIdByPath.delete(path);
@@ -4075,11 +4165,30 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (cached !== undefined) {
 			return cached;
 		}
-		const fileContent = this.fileContentById.get(passage.fileId) ?? "";
+		const filePath = this.pathByFileId.get(passage.fileId);
+		const fileSnapshotStore = this.getFileSnapshotStore();
+		const fileContent =
+			(filePath && fileSnapshotStore
+				? fileSnapshotStore.peekCurrentFileText(filePath)
+				: undefined) ??
+			this.fallbackFileContentById.get(passage.fileId) ??
+			"";
 		const text = fileContent.slice(passage.startOffset, passage.endOffset).trim();
 		queryScoringCache.passageTextByPassageId.set(passage.id, text);
 		this.touchPassageRuntimeCache(passage.id, { text });
 		return text;
+	}
+
+	private getFileSnapshotStore(): FileSnapshotStore | null {
+		if (this.fileSnapshotStore !== undefined) {
+			return this.fileSnapshotStore;
+		}
+		if (!container.isRegistered(Vault, true)) {
+			this.fileSnapshotStore = null;
+			return null;
+		}
+		this.fileSnapshotStore = getInstance(FileSnapshotStore);
+		return this.fileSnapshotStore;
 	}
 
 	private getPassageTokenSequence(
@@ -6223,4 +6332,36 @@ function hasExactPhraseMatch(
 	return normalizedRaw.length > 0
 		? passageText.toLocaleLowerCase().includes(normalizedRaw)
 		: false;
+}
+
+function sumPostingSizes(postingsByTerm: Map<string, Map<number, number>>): number {
+	let total = 0;
+	for (const postings of postingsByTerm.values()) {
+		total += postings.size;
+	}
+	return total;
+}
+
+function sumNestedPostingSizes(
+	postingsByTerm: Map<string, Map<MetadataField, Map<number, number>>>,
+): number {
+	let total = 0;
+	for (const fieldMap of postingsByTerm.values()) {
+		for (const postings of fieldMap.values()) {
+			total += postings.size;
+		}
+	}
+	return total;
+}
+
+function topPostingTerms(
+	postingsByTerm: Map<string, Map<number, number>>,
+): Array<{ term: string; postings: number }> {
+	return Array.from(postingsByTerm.entries())
+		.map(([term, postings]) => ({
+			term,
+			postings: postings.size,
+		}))
+		.sort((left, right) => right.postings - left.postings)
+		.slice(0, 12);
 }

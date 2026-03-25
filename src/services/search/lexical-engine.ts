@@ -49,6 +49,10 @@ export class LexicalEngine {
 		return fallbackBytes;
 	}
 
+	getFileIndexBreakdown(): Record<string, unknown> | null {
+		return this.fileSearchEngine.getIndexBreakdown?.() ?? null;
+	}
+
 	@monitorDecorator
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
