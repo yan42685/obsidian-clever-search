@@ -42,6 +42,7 @@ export interface FileSearchEngine {
 	deleteDocuments(paths: string[]): void;
 	searchFiles(request: FileSearchRequest): Promise<MatchedFile[]>;
 	serialize(): SerializedFileSearchIndex | null;
+	estimateIndexBytes?(): number | null;
 }
 
 @singleton()

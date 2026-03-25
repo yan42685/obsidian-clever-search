@@ -37,6 +37,18 @@ export class LexicalEngine {
 		return this.fileSearchEngine.supportsSerialization;
 	}
 
+	estimateFileIndexBytes(fallbackBytes = 0): number {
+		const estimatedBytes = this.fileSearchEngine.estimateIndexBytes?.();
+		if (
+			typeof estimatedBytes === "number" &&
+			Number.isFinite(estimatedBytes) &&
+			estimatedBytes >= 0
+		) {
+			return estimatedBytes;
+		}
+		return fallbackBytes;
+	}
+
 	@monitorDecorator
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,

@@ -401,6 +401,9 @@ export class DataManager {
 			if (lexicalIndexData) {
 				await this.database.setMiniSearchData(lexicalIndexData);
 			}
+			if (isDevEnvironment) {
+				await this.noticeDevStorageStats();
+			}
 			new MyNotice(t("Indexing finished"), 5000);
 		} finally {
 			prevNotice.hide();
@@ -2020,7 +2023,14 @@ export class DataManager {
 			storageUsage.tables.map((item) => [item.name, item.bytes]),
 		);
 
-		const lexicalFileIndexBytes = bytesByName.get("minisearch") ?? 0;
+		const persistedLexicalFileIndexBytes = bytesByName.get("minisearch") ?? 0;
+		const lexicalFileIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
+			persistedLexicalFileIndexBytes,
+		);
+		const lexicalFileIndexLabel =
+			this.setting.fileSearchBackend === "passage-bm25"
+				? "LexicalFileIndex(passage-bm25 estimated)"
+				: `LexicalFileIndex(${this.setting.fileSearchBackend})`;
 		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
 		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
@@ -2037,7 +2047,7 @@ export class DataManager {
 		const otherBytes = Math.max(
 			0,
 			storageUsage.totalBytes -
-				lexicalFileIndexBytes -
+				persistedLexicalFileIndexBytes -
 				vectorShardBytes -
 				bm25Bytes -
 				hnswBytes -
@@ -2056,6 +2066,7 @@ export class DataManager {
 				indexableBytes,
 				storageUsage.totalBytes,
 				this.setting.hybrid.vectorCompression,
+				lexicalFileIndexLabel,
 				lexicalFileIndexBytes,
 				hybridState,
 				chunkStoreBytes,
@@ -2076,19 +2087,32 @@ export class DataManager {
 		} else if (hybridState === "empty") {
 			console.log("[clever-search] Hybrid storage: enabled but currently empty");
 		}
-		console.table(
-			storageUsage.tables
-					.map((item) => ({
-						table:
-							item.name === "minisearch"
-								? `lexicalFileIndex(${this.setting.fileSearchBackend})`
-								: item.name,
-						rows: item.rows,
-						bytes: item.bytes,
-					size: this.formatBytes(item.bytes),
-				}))
-				.sort((a, b) => b.bytes - a.bytes),
-		);
+		const storageRows: Array<{
+			table: string;
+			rows: number | string;
+			bytes: number;
+			size: string;
+		}> = storageUsage.tables
+			.map((item) => ({
+				table:
+					item.name === "minisearch"
+						? this.setting.fileSearchBackend === "passage-bm25"
+							? "minisearch(persisted)"
+							: lexicalFileIndexLabel
+						: item.name,
+				rows: item.rows,
+				bytes: item.bytes,
+				size: this.formatBytes(item.bytes),
+			}));
+		if (this.setting.fileSearchBackend === "passage-bm25") {
+			storageRows.push({
+				table: lexicalFileIndexLabel,
+				rows: "memory-estimate",
+				bytes: lexicalFileIndexBytes,
+				size: this.formatBytes(lexicalFileIndexBytes),
+			});
+		}
+		console.table(storageRows.sort((a, b) => b.bytes - a.bytes));
 		console.log(`[clever-search] ${localOnlyHint}`);
 		if (storageUsage.hybridChunkBreakdown) {
 			console.table([
@@ -2188,6 +2212,7 @@ export class DataManager {
 		indexableBytes: number,
 		totalBytes: number,
 		precision: string,
+		lexicalFileIndexLabel: string,
 		lexicalFileIndexBytes: number,
 		hybridState: "disabled" | "empty" | "ready",
 		chunkStoreBytes: number,
@@ -2200,6 +2225,22 @@ export class DataManager {
 			(window.localStorage.getItem("language") || "")
 				.toLowerCase()
 				.startsWith("zh");
+
+		if (isChinese) {
+			const chineseHybridSummary =
+				hybridState === "disabled"
+					? "Hybrid: disabled"
+					: hybridState === "empty"
+						? "Hybrid: enabled but currently empty"
+						: `HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
+			return [
+				`Dev stats`,
+				`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
+				`Current vector quantization: ${precision}`,
+				`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
+				`${lexicalFileIndexLabel} ${this.formatBytes(lexicalFileIndexBytes)} | ${chineseHybridSummary} | Other ${this.formatBytes(otherBytes)}`,
+			].join("\n");
+		}
 
 		if (isChinese) {
 			const hybridSummary =
@@ -2228,7 +2269,7 @@ export class DataManager {
 			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
 			`Current vector quantization: ${precision}`,
 			`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
-			`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | ${hybridSummary} | Other ${this.formatBytes(otherBytes)}`,
+			`${lexicalFileIndexLabel} ${this.formatBytes(lexicalFileIndexBytes)} | ${hybridSummary} | Other ${this.formatBytes(otherBytes)}`,
 		].join("\n");
 	}
 
