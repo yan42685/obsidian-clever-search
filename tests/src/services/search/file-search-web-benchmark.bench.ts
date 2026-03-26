@@ -95,7 +95,7 @@ type BenchmarkSummary = {
 	mrr: number;
 	avgMsPerQuery: number;
 	p50Ms: number;
-	p95Ms: number;
+	p100Ms: number;
 	estimatedIndexBytes: number;
 	byBucket: Record<
 		CorpusBucket,
@@ -1669,7 +1669,7 @@ async function runBenchmark(
 			mrr: reciprocalRank / total,
 			avgMsPerQuery: timings.reduce((sum, item) => sum + item, 0) / total,
 			p50Ms: percentile(timings, 0.5),
-			p95Ms: percentile(timings, 0.95),
+			p100Ms: timings.length > 0 ? Math.max(...timings) : 0,
 			estimatedIndexBytes: estimateIndexBytes(engine),
 			byBucket: buildMetricRecord(CORPUS_BUCKETS, bucketTotals),
 			byType: buildMetricRecord(QUERY_TYPES, typeTotals),
@@ -1898,7 +1898,7 @@ describe("file search benchmark on web-notes-v2", () => {
 					mrr: round(summary.mrr),
 					avgMsPerQuery: round(summary.avgMsPerQuery),
 					p50Ms: round(summary.p50Ms),
-					p95Ms: round(summary.p95Ms),
+					p100Ms: round(summary.p100Ms),
 					estimatedIndexKB: round(summary.estimatedIndexBytes / 1024),
 					byBucket: Object.fromEntries(
 						Object.entries(summary.byBucket).map(([bucket, stats]) => [

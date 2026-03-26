@@ -842,11 +842,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryScriptProfile,
 			},
 		);
-		return this.applyPrefixCandidateVerifierLane(
-			fallbackSorted,
-			enablePrefixCandidateVerifierLane,
+		return this.finalizeMatchedFiles(
+			this.applyPrefixCandidateVerifierLane(
+				fallbackSorted,
+				enablePrefixCandidateVerifierLane,
+				queryTerms,
+				fileStates,
+				queryScoringCache,
+			),
+			request.maxItemResults,
+			fileStates,
 			queryTerms,
-		).slice(0, request.maxItemResults);
+			queryScoringCache,
+		);
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
@@ -1002,6 +1010,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			),
 			enablePrefixCandidateVerifierLane,
 			queryTerms,
+			fileStates,
+			queryScoringCache,
 		);
 		if (
 			!planner.shouldUseRelaxedResults(
@@ -1009,7 +1019,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				request.maxItemResults,
 			)
 		) {
-			return strictSorted.slice(0, request.maxItemResults);
+			return this.finalizeMatchedFiles(
+				strictSorted,
+				request.maxItemResults,
+				fileStates,
+				queryTerms,
+				queryScoringCache,
+			);
 		}
 
 		const relaxedSorted = this.applyPrefixCandidateVerifierLane(
@@ -1024,9 +1040,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			),
 			enablePrefixCandidateVerifierLane,
 			queryTerms,
+			fileStates,
+			queryScoringCache,
 		);
 		if (relaxedSorted.length > 0) {
-			return relaxedSorted.slice(0, request.maxItemResults);
+			return this.finalizeMatchedFiles(
+				relaxedSorted,
+				request.maxItemResults,
+				fileStates,
+				queryTerms,
+				queryScoringCache,
+			);
 		}
 
 		const fallbackSorted = this.applyPrefixCandidateVerifierLane(
@@ -1052,8 +1076,39 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			),
 			enablePrefixCandidateVerifierLane,
 			queryTerms,
+			fileStates,
+			queryScoringCache,
 		);
-		return fallbackSorted.slice(0, request.maxItemResults);
+		return this.finalizeMatchedFiles(
+			fallbackSorted,
+			request.maxItemResults,
+			fileStates,
+			queryTerms,
+			queryScoringCache,
+		);
+	}
+
+	private finalizeMatchedFiles(
+		results: RankedMatchedFile[],
+		maxItemResults: number,
+		fileStates: Map<number, FileCandidateState>,
+		queryTerms: readonly string[],
+		queryScoringCache: QueryScoringCache,
+	): MatchedFile[] {
+		const finalResults = results.slice(0, maxItemResults);
+		for (const result of finalResults) {
+			const fileState = fileStates.get(result.fileId);
+			if (!fileState) {
+				result.directSubItems = [];
+				continue;
+			}
+			result.directSubItems = this.buildDirectSubItems(
+				fileState,
+				queryTerms,
+				queryScoringCache,
+			);
+		}
+		return finalResults;
 	}
 
 	private collectRankedFiles(params: {
@@ -3016,11 +3071,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			path: state.filePath,
 			queryTerms,
 			matchedTerms: Array.from(state.matchedTerms),
-			directSubItems: this.buildDirectSubItems(
-				state,
-				queryTerms,
-				queryScoringCache,
-			),
 			score: baseScore + scoreBonus,
 			queryRouteScore,
 			metadataLaneScore: state.metadataLaneScore,
@@ -3163,6 +3213,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		results: RankedMatchedFile[],
 		enablePrefixCandidateVerifierLane: boolean,
 		queryTerms: readonly string[],
+		fileStates: Map<number, FileCandidateState>,
+		queryScoringCache: QueryScoringCache,
 	): RankedMatchedFile[] {
 		if (!enablePrefixCandidateVerifierLane || queryTerms.length < 2 || results.length < 2) {
 			return results;
@@ -3188,6 +3240,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			const signals = this.computePrefixCandidateVerifierSignals(
 				result,
 				normalizedQueryTerms,
+				fileStates,
+				queryScoringCache,
 			);
 			signalsByFileId.set(result.fileId, signals);
 			strongestCoverage = Math.max(strongestCoverage, signals.coverageRatio);
@@ -3267,12 +3321,25 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private computePrefixCandidateVerifierSignals(
 		result: RankedMatchedFile,
 		queryTerms: readonly string[],
+		fileStates: Map<number, FileCandidateState>,
+		queryScoringCache: QueryScoringCache,
 	): PrefixCandidateVerifierSignals {
-		const directSubItems = result.directSubItems ?? [];
 		let bestSignals = EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
-		for (const subItem of directSubItems) {
+		const fileState = fileStates.get(result.fileId);
+		if (!fileState) {
+			return bestSignals;
+		}
+		for (const evidence of fileState.topPassageEvidences) {
+			const passage = this.getPassageRecord(evidence.passageId);
+			if (!passage) {
+				continue;
+			}
+			const snippetText = this.getPassageText(passage, queryScoringCache);
+			if (!snippetText) {
+				continue;
+			}
 			const signals = this.computePrefixSnippetVerifierSignals(
-				subItem.text,
+				snippetText,
 				queryTerms,
 			);
 			if (
@@ -5341,13 +5408,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					row,
 					col,
 					evidence.score,
-					this.highlightPassageSnippet(
-						passage,
-						snippetText,
-						evidence,
-						queryTerms,
-						queryScoringCache,
-					),
+					() =>
+						this.highlightPassageSnippet(
+							passage,
+							snippetText,
+							evidence,
+							queryTerms,
+							queryScoringCache,
+						),
 				);
 			})
 			.filter((subItem): subItem is FileSubItem => subItem !== null);

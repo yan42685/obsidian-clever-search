@@ -151,20 +151,39 @@ export class FileSubItem extends Item {
 	row: number; // for precisely jumping to the original file location
 	col: number;
 	score?: number;
-	snippet?: string;
+	private cachedSnippet?: string;
+	private snippetBuilder?: () => string;
+
+	get snippet(): string {
+		if (this.cachedSnippet === undefined && this.snippetBuilder) {
+			this.cachedSnippet = this.snippetBuilder();
+		}
+		return this.cachedSnippet ?? this.text;
+	}
+
+	set snippet(value: string) {
+		this.cachedSnippet = value;
+		this.snippetBuilder = undefined;
+	}
+
 	constructor(
 		text: string,
 		row: number,
 		col: number,
 		score?: number,
-		snippet?: string,
+		snippet?: string | (() => string),
 	) {
 		super();
 		this.text = text;
 		this.row = row;
 		this.col = col;
 		this.score = score;
-		this.snippet = snippet ?? text;
+		if (typeof snippet === "function") {
+			this.snippetBuilder = snippet;
+			this.cachedSnippet = undefined;
+			return;
+		}
+		this.cachedSnippet = snippet ?? text;
 	}
 }
 
