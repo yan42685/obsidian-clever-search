@@ -2014,6 +2014,20 @@ Acceptance:
 - rename and delete paths still converge cleanly
 - no extra full-text copies are introduced during runtime updates
 
+Status: mostly completed on March 26, 2026
+
+Landed:
+
+- watcher/runtime flow now propagates a single `sourceGeneration` through current-cache priming, lexical update, hybrid repair scheduling, and shared snapshot commit
+- `currentFileCache` now rejects stale writes by generation, so older completions do not overwrite newer current text
+- reduced doc-operation batches preserve `sourceGeneration`
+- repeated upsert / rename+modify reducer behavior is now covered by tests
+
+Remaining gap:
+
+- there is still no higher-level integration test that drives a realistic `DataManager` rename / modify burst end-to-end across lexical plus hybrid runtime state
+- current confidence comes from targeted reducer tests, snapshot restore tests, and passage runtime tests rather than one full-stack burst test
+
 ### Stage 4: Cleanup, Migration, And Verification
 
 Goals:
@@ -2033,3 +2047,17 @@ Acceptance:
 - smaller persisted lexical footprint
 - no functional regression in lexical or hybrid search
 - codebase is simpler than before the refactor, not just differently complex
+
+Status: partially completed on March 26, 2026
+
+Completed:
+
+- old `passage-bm25` full-document snapshot compatibility was removed instead of being kept indefinitely
+- startup restore glue that copied passage snapshot document content back into an indexed-snapshot cache was removed
+- dead dual-cache code in `FileSnapshotStore` was removed together with its preload / status branches
+- snapshot size and restore behavior were revalidated with the passage serialization benchmark
+
+Still to do:
+
+- add a more realistic rebuild / rename / modify-burst integration validation beyond the current focused tests
+- do one explicit post-refactor check of persisted storage breakdown and startup restore behavior on the real plugin path, not only the passage benchmark path
