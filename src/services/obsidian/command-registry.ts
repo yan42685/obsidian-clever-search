@@ -82,15 +82,18 @@ export class CommandRegistry {
 				id: "cs-dev-search-bootstrap-summary",
 				name: "Show search bootstrap summary [dev]",
 				callback: () => {
-					const metrics = getInstance(DataManager).getSearchBootstrapMetrics();
+					const dataManager = getInstance(DataManager);
+					const metrics = dataManager.getSearchBootstrapMetrics();
 					if (!metrics) {
 						new MyNotice("Search bootstrap metrics are unavailable.", 4000);
 						return;
 					}
 					const summary =
-						`Search bootstrap: searchable ${metrics.searchableMs ?? 0} ms, ` +
-						`restore ${metrics.restoreMs ?? 0} ms, ` +
-						`heal ${metrics.healMs ?? 0} ms, ` +
+						`Search bootstrap: lexical ${dataManager.getLexicalBootstrapState()} ` +
+						`(restore ${metrics.lexical.restoreMs ?? 0} ms, heal ${metrics.lexical.healMs ?? 0} ms), ` +
+						`hybrid ${dataManager.getHybridBootstrapState()} ` +
+						`(restore ${metrics.hybrid.restoreMs ?? 0} ms, heal ${metrics.hybrid.healMs ?? 0} ms), ` +
+						`searchable ${metrics.searchableMs ?? 0} ms, ` +
 						`commit ${metrics.commitMs ?? 0} ms, ` +
 						`commitPending ${metrics.commitPending ? "yes" : "no"}, ` +
 						`commitFailed ${metrics.commitFailed ? "yes" : "no"}.`;

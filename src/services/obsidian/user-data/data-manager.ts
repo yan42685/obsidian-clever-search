@@ -96,21 +96,29 @@ export type SearchBootstrapState =
 	| "searchable"
 	| "failed";
 
-type SearchBootstrapPhase = "restore" | "heal" | "commit";
+type SearchBootstrapPhase = "restore" | "heal";
+type SearchBootstrapComponent = "lexical" | "hybrid";
+
+type SearchBootstrapComponentMetrics = {
+	restoreStartedAt: number | null;
+	restoreCompletedAt: number | null;
+	healStartedAt: number | null;
+	healCompletedAt: number | null;
+	restoreMs: number | null;
+	healMs: number | null;
+};
 
 export type SearchBootstrapMetrics = {
 	startedAt: number;
-	restoreCompletedAt: number | null;
-	healCompletedAt: number | null;
 	searchableAt: number | null;
 	commitStartedAt: number | null;
 	commitCompletedAt: number | null;
-	restoreMs: number | null;
-	healMs: number | null;
 	searchableMs: number | null;
 	commitMs: number | null;
 	commitPending: boolean;
 	commitFailed: boolean;
+	lexical: SearchBootstrapComponentMetrics;
+	hybrid: SearchBootstrapComponentMetrics;
 };
 
 type LexicalBootstrapPlan = {
@@ -235,7 +243,8 @@ export class DataManager {
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
 	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
-	private searchBootstrapState: SearchBootstrapState = "blocked";
+	private lexicalBootstrapState: SearchBootstrapState = "blocked";
+	private hybridBootstrapState: SearchBootstrapState = "blocked";
 	private searchBootstrapMetrics: SearchBootstrapMetrics | null = null;
 	private searchBootstrapCommitTask: Promise<void> | null = null;
 	private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
@@ -386,10 +395,12 @@ export class DataManager {
 		this.beginSearchBootstrapRun();
 		try {
 			await this.runSearchBootstrapPipeline();
-			this.finishSearchBootstrapSearchable();
 			this.kickOffSearchBootstrapCommit();
 		} catch (error) {
-			this.setSearchBootstrapState("failed");
+			this.setLexicalBootstrapState("failed");
+			if (this.hybridEngine.isEnabled()) {
+				this.setHybridBootstrapState("failed");
+			}
 			this.failSearchBootstrapRun();
 			throw error;
 		}
@@ -401,7 +412,8 @@ export class DataManager {
 		this.clearFailedEmbeddingRetryTimer();
 		this.hybridEmbeddingRecovery.clearAll();
 		this.searchBootstrapCommitTask = null;
-		this.setSearchBootstrapState("blocked");
+		this.setLexicalBootstrapState("blocked");
+		this.setHybridBootstrapState("blocked");
 	}
 
 	receiveDocOperation(operation: DocOperation) {
@@ -410,23 +422,47 @@ export class DataManager {
 
 	private async runSearchBootstrapPipeline(): Promise<void> {
 		await this.database.deleteOldDatabases();
-		this.setSearchBootstrapState("restoring");
+		this.setLexicalBootstrapState("restoring");
+		this.markSearchBootstrapPhaseStarted("lexical", "restore");
 		const lexicalPlan = await this.prepareLexicalBootstrapPlan();
+		this.markSearchBootstrapPhaseCompleted("lexical", "restore");
+
 		if (!this.hybridEngine.isEnabled()) {
+			this.setHybridBootstrapState("blocked");
 			await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
 				logger.warn("hybrid BM25 storage migration failed:", e);
 			});
+		} else {
+			this.setHybridBootstrapState("restoring");
+			this.markSearchBootstrapPhaseStarted("hybrid", "restore");
 		}
 		const hybridPlan = await this.prepareHybridBootstrapPlan();
-		this.markSearchBootstrapPhaseCompleted("restore");
+		if (hybridPlan) {
+			this.markSearchBootstrapPhaseCompleted("hybrid", "restore");
+		}
 
-		this.setSearchBootstrapState("healing");
+		this.setLexicalBootstrapState("healing");
+		this.markSearchBootstrapPhaseStarted("lexical", "heal");
 		await this.healLexicalBootstrapPlan(lexicalPlan);
+		this.markSearchBootstrapPhaseCompleted("lexical", "heal");
+		this.setLexicalBootstrapState("searchable");
+		this.markSearchBootstrapSearchable();
+
+		if (!hybridPlan) {
+			return;
+		}
+
+		this.setHybridBootstrapState("healing");
+		this.markSearchBootstrapPhaseStarted("hybrid", "heal");
 		await this.healHybridBootstrapPlan(hybridPlan).catch((e) => {
 			logger.warn("hybrid engine init failed:", e);
+			this.setHybridBootstrapState("failed");
 			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
 		});
-		this.markSearchBootstrapPhaseCompleted("heal");
+		if (this.hybridBootstrapState === "healing") {
+			this.markSearchBootstrapPhaseCompleted("hybrid", "heal");
+			this.setHybridBootstrapState("searchable");
+		}
 	}
 
 	async refreshAllAsync() {
@@ -447,7 +483,7 @@ export class DataManager {
 
 	async refreshLexicalStateAsync() {
 		const prevNotice = new MyNotice(t("Reindexing..."));
-		this.setSearchBootstrapState("healing");
+		this.setLexicalBootstrapState("healing");
 		getInstance(FileWatcher).stop();
 		try {
 			await this.reindexLexicalEngineWithCurrFiles();
@@ -462,9 +498,9 @@ export class DataManager {
 				this.dataProvider.allFilesToBeIndexed(),
 			);
 			new MyNotice(t("Indexing finished"), 5000);
-			this.setSearchBootstrapState("searchable");
+			this.setLexicalBootstrapState("searchable");
 		} catch (error) {
-			this.setSearchBootstrapState("failed");
+			this.setLexicalBootstrapState("failed");
 			throw error;
 		} finally {
 			prevNotice.hide();
@@ -1581,21 +1617,34 @@ export class DataManager {
 	}
 
 	isSearchSearchable(): boolean {
-		return this.searchBootstrapState === "searchable";
+		return this.lexicalBootstrapState === "searchable";
 	}
 
 	getSearchBootstrapState(): SearchBootstrapState {
-		return this.searchBootstrapState;
+		return this.lexicalBootstrapState;
+	}
+
+	getLexicalBootstrapState(): SearchBootstrapState {
+		return this.lexicalBootstrapState;
+	}
+
+	getHybridBootstrapState(): SearchBootstrapState {
+		return this.hybridBootstrapState;
 	}
 
 	getSearchBootstrapMetrics(): SearchBootstrapMetrics | null {
-		return this.searchBootstrapMetrics
-			? { ...this.searchBootstrapMetrics }
-			: null;
+		if (!this.searchBootstrapMetrics) {
+			return null;
+		}
+		return {
+			...this.searchBootstrapMetrics,
+			lexical: { ...this.searchBootstrapMetrics.lexical },
+			hybrid: { ...this.searchBootstrapMetrics.hybrid },
+		};
 	}
 
 	getSearchBootstrapNoticeKey(): LocaleKey | null {
-		switch (this.searchBootstrapState) {
+		switch (this.lexicalBootstrapState) {
 			case "restoring":
 				return "searchBootstrap.restoring";
 			case "healing":
@@ -1613,68 +1662,119 @@ export class DataManager {
 		this.hybridSearchAvailability = availability;
 	}
 
-	private setSearchBootstrapState(state: SearchBootstrapState): void {
-		this.searchBootstrapState = state;
+	private setLexicalBootstrapState(state: SearchBootstrapState): void {
+		this.lexicalBootstrapState = state;
+	}
+
+	private setHybridBootstrapState(state: SearchBootstrapState): void {
+		this.hybridBootstrapState = state;
+	}
+
+	private createSearchBootstrapComponentMetrics(): SearchBootstrapComponentMetrics {
+		return {
+			restoreStartedAt: null,
+			restoreCompletedAt: null,
+			healStartedAt: null,
+			healCompletedAt: null,
+			restoreMs: null,
+			healMs: null,
+		};
+	}
+
+	private getSearchBootstrapComponentMetrics(
+		component: SearchBootstrapComponent,
+	): SearchBootstrapComponentMetrics | null {
+		const metrics = this.searchBootstrapMetrics;
+		if (!metrics) {
+			return null;
+		}
+		return component === "lexical" ? metrics.lexical : metrics.hybrid;
 	}
 
 	private beginSearchBootstrapRun(): void {
 		this.searchBootstrapMetrics = {
 			startedAt: Date.now(),
-			restoreCompletedAt: null,
-			healCompletedAt: null,
 			searchableAt: null,
 			commitStartedAt: null,
 			commitCompletedAt: null,
-			restoreMs: null,
-			healMs: null,
 			searchableMs: null,
 			commitMs: null,
 			commitPending: false,
 			commitFailed: false,
+			lexical: this.createSearchBootstrapComponentMetrics(),
+			hybrid: this.createSearchBootstrapComponentMetrics(),
 		};
-		this.setSearchBootstrapState("restoring");
+		this.setLexicalBootstrapState("blocked");
+		this.setHybridBootstrapState("blocked");
+	}
+
+	private markSearchBootstrapPhaseStarted(
+		component: SearchBootstrapComponent,
+		phase: SearchBootstrapPhase,
+	): void {
+		const metrics = this.getSearchBootstrapComponentMetrics(component);
+		if (!metrics) {
+			return;
+		}
+		if (phase === "restore") {
+			metrics.restoreStartedAt = Date.now();
+			return;
+		}
+		metrics.healStartedAt = Date.now();
 	}
 
 	private markSearchBootstrapPhaseCompleted(
-		phase: SearchBootstrapPhase,
+		component: SearchBootstrapComponent | "commit",
+		phase: SearchBootstrapPhase | "commit",
 	): void {
 		const metrics = this.searchBootstrapMetrics;
 		if (!metrics) {
 			return;
 		}
 		const now = Date.now();
+		if (component === "commit" || phase === "commit") {
+			const phaseStart =
+				metrics.commitStartedAt ??
+				metrics.searchableAt ??
+				metrics.startedAt;
+			metrics.commitCompletedAt = now;
+			metrics.commitMs = now - phaseStart;
+			metrics.commitPending = false;
+			return;
+		}
+
+		const componentMetrics = this.getSearchBootstrapComponentMetrics(component);
+		if (!componentMetrics) {
+			return;
+		}
 		if (phase === "restore") {
-			metrics.restoreCompletedAt = now;
-			metrics.restoreMs = now - metrics.startedAt;
+			componentMetrics.restoreCompletedAt = now;
+			const phaseStart =
+				componentMetrics.restoreStartedAt ?? metrics.startedAt;
+			componentMetrics.restoreMs = now - phaseStart;
 			return;
 		}
-		if (phase === "heal") {
-			metrics.healCompletedAt = now;
-			const phaseStart = metrics.restoreCompletedAt ?? metrics.startedAt;
-			metrics.healMs = now - phaseStart;
-			return;
-		}
+
+		componentMetrics.healCompletedAt = now;
 		const phaseStart =
-			metrics.commitStartedAt ??
-			metrics.healCompletedAt ??
-			metrics.restoreCompletedAt ??
+			componentMetrics.healStartedAt ??
+			componentMetrics.restoreCompletedAt ??
+			componentMetrics.restoreStartedAt ??
 			metrics.startedAt;
-		metrics.commitCompletedAt = now;
-		metrics.commitMs = now - phaseStart;
-		metrics.commitPending = false;
+		componentMetrics.healMs = now - phaseStart;
 	}
 
-	private finishSearchBootstrapSearchable(): void {
+	private markSearchBootstrapSearchable(): void {
 		const metrics = this.searchBootstrapMetrics;
 		const searchableAt = Date.now();
 		if (metrics) {
 			metrics.searchableAt = searchableAt;
 			metrics.searchableMs = searchableAt - metrics.startedAt;
 		}
-		this.setSearchBootstrapState("searchable");
 		logger.info(
 			`[clever-search] search bootstrap searchable in ${metrics?.searchableMs ?? 0} ms` +
-				` (restore ${metrics?.restoreMs ?? 0} ms, heal ${metrics?.healMs ?? 0} ms)`,
+				` (lexical restore ${metrics?.lexical.restoreMs ?? 0} ms, lexical heal ${metrics?.lexical.healMs ?? 0} ms, ` +
+				`hybrid restore ${metrics?.hybrid.restoreMs ?? 0} ms, hybrid heal ${metrics?.hybrid.healMs ?? 0} ms)`,
 		);
 	}
 
@@ -1706,7 +1806,7 @@ export class DataManager {
 
 		const task = this.commitSearchBootstrapRun()
 			.then(() => {
-				this.markSearchBootstrapPhaseCompleted("commit");
+				this.markSearchBootstrapPhaseCompleted("commit", "commit");
 				if (isDevEnvironment) {
 					const commitMs = this.searchBootstrapMetrics?.commitMs ?? 0;
 					logger.info(
