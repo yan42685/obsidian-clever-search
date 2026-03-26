@@ -200,7 +200,11 @@ describe("PassageFileSearchEngine", () => {
 			maxItemResults: 10,
 		});
 
-		expect(alphaResults.some((result) => result.path === "notes/topic.md")).toBe(false);
+		expect(
+			alphaResults.some(
+				(result: { path: string }) => result.path === "notes/topic.md",
+			),
+		).toBe(false);
 		expect(betaResults[0]?.path).toBe("notes/topic.md");
 	});
 

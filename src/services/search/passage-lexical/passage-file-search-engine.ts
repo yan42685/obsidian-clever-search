@@ -50,6 +50,13 @@ type IndexedPassageBuild = {
 };
 
 type StoredIndexedDocument = Omit<IndexedDocument, "content">;
+type PackedMetadataTokens = Record<MetadataField, Uint32Array>;
+type PackedFilePassageStore = {
+	ids: Uint32Array;
+	startOffsets: Uint32Array;
+	endOffsets: Uint32Array;
+	lengths: Uint16Array;
+};
 
 type PassageCandidateState = {
 	score: number;
@@ -476,15 +483,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private readonly fileIdByPath = new Map<string, number>();
 	private readonly pathByFileId = new Map<number, string>();
 	private readonly liveDocumentsByPath = new Map<string, StoredIndexedDocument>();
-	private readonly fileMetadataTokens = new Map<
-		number,
-		Record<MetadataField, string[]>
-	>();
+	private readonly fileMetadataTokens = new Map<number, PackedMetadataTokens>();
 	private readonly fileCharLengths = new Map<number, number>();
 	private readonly fallbackFileContentById = new Map<number, string>();
 	private readonly fileScriptProfiles = new Map<number, ScriptProfile>();
-	private readonly filePassageIds = new Map<number, number[]>();
-	private readonly passageById = new Map<number, PassageRecord>();
+	private readonly filePassageStores = new Map<number, PackedFilePassageStore>();
 	private readonly tombstonedFileIds = new Set<number>();
 	private readonly passageRuntimeCache = new Map<
 		number,
@@ -493,6 +496,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private readonly wordTermIdByTerm = new Map<string, number>();
 	private readonly wordTermById = new Map<number, string>();
 	private fileSnapshotStore: FileSnapshotStore | null | undefined;
+	private passageFileIdsById = new Uint32Array(0);
+	private passageLocalIndexesById = new Uint32Array(0);
 	private nextFileId = 1;
 	private nextPassageId = 1;
 	private nextWordTermId = 1;
@@ -596,7 +601,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (contentPostings) {
 					const activeDf = countActivePassagePostings(
 						contentPostings,
-						this.passageById,
+						this.passageFileIdsById,
 						this.pathByFileId,
 					);
 					if (activeDf === 0) {
@@ -604,12 +609,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					}
 					const idf = this.computePassageIdf(activeDf);
 					const avgdl = this.averagePassageLength();
-					for (let postingIndex = 0; postingIndex < contentPostings.size; postingIndex++) {
-						const passageId = contentPostings.ids[postingIndex];
-						const tf = contentPostings.tfs[postingIndex];
-						const passage = this.passageById.get(passageId);
+					contentPostings.forEach((passageId, tf) => {
+						const passage = this.getPassageRecord(passageId);
 						if (!passage || !this.isPassageActive(passage)) {
-							continue;
+							return;
 						}
 						const passageState = this.ensurePassageState(
 							passageStates,
@@ -629,7 +632,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 							passageState.exactMatchedQueryTerms.add(queryTermIndex);
 						}
 						docsMatchedForTerm.add(passage.fileId);
-					}
+					});
 				}
 
 				const metadataFields =
@@ -651,11 +654,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					}
 					const idf = this.computeMetadataIdf(activeDf);
 					const avgdl = this.averageMetadataFieldLength(field);
-					for (let postingIndex = 0; postingIndex < postings.size; postingIndex++) {
-						const fileId = postings.ids[postingIndex];
-						const tf = postings.tfs[postingIndex];
+					postings.forEach((fileId, tf) => {
 						if (!this.isFileActive(fileId)) {
-							continue;
+							return;
 						}
 						const fileState = this.ensureFileState(fileStates, fileId);
 						const fileLength =
@@ -679,7 +680,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						this.ensureFieldMatch(fileState, field).add(queryTermIndex);
 						docsMatchedForTerm.add(fileId);
 						metadataDocsMatchedForTerm.add(fileId);
-					}
+					});
 				}
 			}
 
@@ -773,7 +774,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		);
 
 		for (const [passageId, passageState] of topPassages) {
-			const passage = this.passageById.get(passageId);
+			const passage = this.getPassageRecord(passageId);
 			if (!passage) {
 				continue;
 			}
@@ -846,27 +847,30 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const path of this.pathByFileId.values()) {
 			total += Buffer.byteLength(path, "utf8");
 		}
-		for (const passage of this.passageById.values()) {
-			total += 24;
-		}
-		for (const passageIds of this.filePassageIds.values()) {
-			total += passageIds.length * 4;
+		for (const store of this.filePassageStores.values()) {
+			total +=
+				store.ids.byteLength +
+				store.startOffsets.byteLength +
+				store.endOffsets.byteLength +
+				store.lengths.byteLength;
 		}
 		for (const field of METADATA_FIELDS) {
 			total += this.metadataFieldStats[field].docLengths.size * 8;
 		}
-		for (const fieldMap of this.metadataTermPostings.values()) {
-			for (const postings of fieldMap.values()) {
-				total += postings.size * 12;
-			}
-		}
 		for (const postings of this.passageWordPostings.values()) {
-			total += postings.size * 6;
+			total += postings.byteLength;
 		}
 		for (const postings of this.fileCharPostings.values()) {
-			total += postings.size * 6;
+			total += postings.byteLength;
+		}
+		for (const fieldMap of this.metadataTermPostings.values()) {
+			for (const postings of fieldMap.values()) {
+				total += postings.byteLength;
+			}
 		}
 		total += this.tombstonedFileIds.size * 4;
+		total +=
+			this.passageFileIdsById.byteLength + this.passageLocalIndexesById.byteLength;
 		return total;
 	}
 
@@ -893,16 +897,23 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						sum +
 						METADATA_FIELDS.reduce(
 							(fieldSum, field) =>
-								fieldSum +
-								fields[field].reduce(
-									(tokenSum, token) => tokenSum + Buffer.byteLength(token, "utf8"),
-									0,
-								),
+								fieldSum + fields[field].byteLength,
 							0,
 						),
 					0,
 				),
-				passageRecords: this.passageById.size * 24,
+				passageRecords:
+					Array.from(this.filePassageStores.values()).reduce(
+						(sum, store) =>
+							sum +
+							store.ids.byteLength +
+							store.startOffsets.byteLength +
+							store.endOffsets.byteLength +
+							store.lengths.byteLength,
+						0,
+					) +
+					this.passageFileIdsById.byteLength +
+					this.passageLocalIndexesById.byteLength,
 				wordLexicon: this.sortedWordTerms.reduce(
 					(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 					0,
@@ -912,9 +923,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						sum + Buffer.byteLength(this.wordTermById.get(termId) ?? "", "utf8"),
 					0,
 				),
-				wordPostings: sumPostingSizes(this.passageWordPostings) * 6,
-				charPostings: sumPostingSizes(this.fileCharPostings) * 6,
-				metadataPostings: sumNestedPostingSizes(this.metadataTermPostings) * 12,
+				wordPostings: sumPostingBytes(this.passageWordPostings),
+				charPostings: sumPostingBytes(this.fileCharPostings),
+				metadataPostings: sumNestedPostingBytes(this.metadataTermPostings),
 				tombstones: this.tombstonedFileIds.size * 4,
 			},
 			topWordTerms: topPostingTerms(
@@ -1047,10 +1058,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.fileCharLengths.clear();
 		this.fallbackFileContentById.clear();
 		this.fileScriptProfiles.clear();
-		this.filePassageIds.clear();
-		this.passageById.clear();
+		this.filePassageStores.clear();
 		this.tombstonedFileIds.clear();
 		this.passageRuntimeCache.clear();
+		this.passageFileIdsById = new Uint32Array(0);
+		this.passageLocalIndexesById = new Uint32Array(0);
 		this.nextFileId = 1;
 		this.nextPassageId = 1;
 		this.nextWordTermId = 1;
@@ -1103,26 +1115,31 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		);
 
 		const metadataTokens = {
-			basename: this.tokenizeMetadata(document.basename ?? ""),
-			aliases: this.tokenizeMetadata(document.aliases ?? ""),
-			folder: this.tokenizeMetadata(document.folder ?? ""),
-			tags: this.tokenizeMetadata(document.tags ?? ""),
-			headings: this.tokenizeMetadata(document.headings ?? ""),
-		};
+			basename: this.encodeTermSequence(
+				this.tokenizeMetadata(document.basename ?? ""),
+			),
+			aliases: this.encodeTermSequence(
+				this.tokenizeMetadata(document.aliases ?? ""),
+			),
+			folder: this.encodeTermSequence(this.tokenizeMetadata(document.folder ?? "")),
+			tags: this.encodeTermSequence(this.tokenizeMetadata(document.tags ?? "")),
+			headings: this.encodeTermSequence(
+				this.tokenizeMetadata(document.headings ?? ""),
+			),
+		} satisfies PackedMetadataTokens;
 		this.fileMetadataTokens.set(fileId, metadataTokens);
 
 		for (const field of METADATA_FIELDS) {
-			const tokens = metadataTokens[field];
-			this.metadataFieldStats[field].docLengths.set(fileId, tokens.length);
-			this.metadataFieldStats[field].totalLength += tokens.length;
-			const tfMap = buildTfMap(tokens);
-			for (const [term, tf] of tfMap) {
-				const termId = this.getOrCreateWordLikeTermId(term);
+			const tokenIds = metadataTokens[field];
+			this.metadataFieldStats[field].docLengths.set(fileId, tokenIds.length);
+			this.metadataFieldStats[field].totalLength += tokenIds.length;
+			const tfMap = buildNumericTfMap(tokenIds);
+			for (const [termId, tf] of tfMap) {
 				let fieldMap = this.metadataTermPostings.get(termId);
 				if (!fieldMap) {
 					fieldMap = new Map();
 					this.metadataTermPostings.set(termId, fieldMap);
-					this.insertWordTerm(term);
+					this.insertWordTerm(this.wordTermById.get(termId) ?? String(termId));
 				}
 				let postings = fieldMap.get(field);
 				if (!postings) {
@@ -1154,13 +1171,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 
 		const passages = this.buildIndexedPassages(fileId, content);
-		this.filePassageIds.set(
-			fileId,
-			passages.map((passage) => passage.record.id),
-		);
+		this.filePassageStores.set(fileId, createPackedFilePassageStore(passages));
 		this.livePassageCount += passages.length;
-		for (const passage of passages) {
-			this.passageById.set(passage.record.id, passage.record);
+		for (let passageIndex = 0; passageIndex < passages.length; passageIndex++) {
+			const passage = passages[passageIndex];
+			this.setPassageReference(
+				passage.record.id,
+				fileId,
+				passageIndex,
+			);
 			this.totalPassageLength += passage.record.length;
 
 			for (const [term, tf] of passage.wordTf) {
@@ -1202,18 +1221,22 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.totalFileCharLength -= fileCharLength;
 		this.fileCharLengths.delete(fileId);
 
-		const passageIds = this.filePassageIds.get(fileId) ?? [];
-		for (const passageId of passageIds) {
-			this.totalPassageLength -= this.passageById.get(passageId)?.length ?? 0;
+		const passageStore = this.filePassageStores.get(fileId);
+		for (let index = 0; index < (passageStore?.ids.length ?? 0); index++) {
+			const passageId = passageStore!.ids[index];
+			this.totalPassageLength -= passageStore!.lengths[index] ?? 0;
 			this.passageRuntimeCache.delete(passageId);
 		}
-		this.livePassageCount = Math.max(0, this.livePassageCount - passageIds.length);
-		this.stalePassageCount += passageIds.length;
+		this.livePassageCount = Math.max(
+			0,
+			this.livePassageCount - (passageStore?.ids.length ?? 0),
+		);
+		this.stalePassageCount += passageStore?.ids.length ?? 0;
 
 		this.fileMetadataTokens.delete(fileId);
 		this.fallbackFileContentById.delete(fileId);
 		this.fileScriptProfiles.delete(fileId);
-		this.filePassageIds.delete(fileId);
+		this.filePassageStores.delete(fileId);
 		this.fileIdByPath.delete(path);
 		this.pathByFileId.delete(fileId);
 		this.getFileSnapshotStore()?.invalidateCurrentFile(path);
@@ -1274,6 +1297,75 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			(fileId !== undefined ? this.fallbackFileContentById.get(fileId) : undefined) ??
 			""
 		);
+	}
+
+	private encodeTermSequence(tokens: readonly string[]): Uint32Array {
+		const termIds = new Uint32Array(tokens.length);
+		for (let index = 0; index < tokens.length; index++) {
+			termIds[index] = this.getOrCreateWordLikeTermId(tokens[index]);
+		}
+		return termIds;
+	}
+
+	private decodeTermSequence(termIds: Uint32Array): string[] {
+		const terms = new Array<string>(termIds.length);
+		for (let index = 0; index < termIds.length; index++) {
+			terms[index] = this.wordTermById.get(termIds[index]) ?? "";
+		}
+		return terms;
+	}
+
+	private ensurePassageReferenceCapacity(passageId: number): void {
+		if (passageId < this.passageFileIdsById.length) {
+			return;
+		}
+		const nextLength = Math.max(
+			passageId + 1,
+			this.passageFileIdsById.length > 0
+				? this.passageFileIdsById.length * 2
+				: 16,
+		);
+		const nextFileIds = new Uint32Array(nextLength);
+		nextFileIds.set(this.passageFileIdsById);
+		this.passageFileIdsById = nextFileIds;
+		const nextLocalIndexes = new Uint32Array(nextLength);
+		nextLocalIndexes.set(this.passageLocalIndexesById);
+		this.passageLocalIndexesById = nextLocalIndexes;
+	}
+
+	private setPassageReference(
+		passageId: number,
+		fileId: number,
+		localIndex: number,
+	): void {
+		this.ensurePassageReferenceCapacity(passageId);
+		this.passageFileIdsById[passageId] = fileId;
+		this.passageLocalIndexesById[passageId] = localIndex;
+	}
+
+	private getPassageRecord(passageId: number): PassageRecord | null {
+		if (passageId <= 0 || passageId >= this.passageFileIdsById.length) {
+			return null;
+		}
+		const fileId = this.passageFileIdsById[passageId];
+		if (fileId === 0) {
+			return null;
+		}
+		const store = this.filePassageStores.get(fileId);
+		if (!store) {
+			return null;
+		}
+		const localIndex = this.passageLocalIndexesById[passageId];
+		if (localIndex >= store.ids.length || store.ids[localIndex] !== passageId) {
+			return null;
+		}
+		return {
+			id: passageId,
+			fileId,
+			startOffset: store.startOffsets[localIndex] ?? 0,
+			endOffset: store.endOffsets[localIndex] ?? 0,
+			length: store.lengths[localIndex] ?? 0,
+		};
 	}
 
 	private buildIndexedPassages(
@@ -1593,11 +1685,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 			const idf = this.computeFileCharIdf(activeDf);
 			const avgdl = this.averageFileCharLength();
-			for (let postingIndex = 0; postingIndex < postings.size; postingIndex++) {
-				const fileId = postings.ids[postingIndex];
-				const tf = postings.tfs[postingIndex];
+			postings.forEach((fileId, tf) => {
 				if (!this.isFileActive(fileId)) {
-					continue;
+					return;
 				}
 				const state = this.ensureFileState(fileStates, fileId);
 				state.score +=
@@ -1606,7 +1696,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					this.computeTfNorm(tf, this.fileCharLengths.get(fileId) ?? tf, avgdl);
 				state.charHits += 1;
 				state.matchedTerms.add(charTerm);
-			}
+			});
 		}
 	}
 
@@ -1864,7 +1954,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		const contentDf = countActivePassagePostings(
 			this.passageWordPostings.get(termId),
-			this.passageById,
+			this.passageFileIdsById,
 			this.pathByFileId,
 		);
 		const metadataDf = Array.from(
@@ -2003,8 +2093,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			if (!state) {
 				continue;
 			}
-			for (const passageId of this.filePassageIds.get(fileId) ?? []) {
-				const passage = this.passageById.get(passageId);
+			const passageStore = this.filePassageStores.get(fileId);
+			for (const passageId of passageStore?.ids ?? []) {
+				const passage = this.getPassageRecord(passageId);
 				if (!passage) {
 					continue;
 				}
@@ -3765,16 +3856,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					if (!postings) {
 						continue;
 					}
-					for (const fileId of postings.ids) {
+					let shouldStop = false;
+					postings.forEachId((fileId) => {
 						if (!this.isFileActive(fileId)) {
-							continue;
+							return;
 						}
 						candidateFileIds.add(fileId);
 						if (candidateFileIds.size >= 384) {
-							break;
+							shouldStop = true;
 						}
-					}
-					if (candidateFileIds.size >= 384) {
+					});
+					if (shouldStop || candidateFileIds.size >= 384) {
 						break;
 					}
 				}
@@ -3911,12 +4003,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		prefixTerm: string | null,
 		planner: FileSearchQueryPlanner,
 	): MetadataLaneMatch | null {
-		const metadataTokens = this.fileMetadataTokens.get(fileId);
-		if (!metadataTokens) {
+		const sequence = this.getMetadataLaneSequence(fileId, laneField);
+		if (!sequence) {
 			return null;
 		}
-
-		const sequence = this.getMetadataLaneSequence(metadataTokens, laneField);
 		const sequenceMatch = this.computeMetadataLaneSequenceMatch(
 			sequence.tokens,
 			queryTerms,
@@ -3960,25 +4050,35 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	}
 
 	private getMetadataLaneSequence(
-		metadataTokens: Record<MetadataField, string[]>,
+		fileId: number,
 		laneField: MetadataLaneField,
-	): { tokens: string[]; constituentFields: MetadataField[] } {
+	): { tokens: string[]; constituentFields: MetadataField[] } | null {
+		const metadataTokens = this.fileMetadataTokens.get(fileId);
+		if (!metadataTokens) {
+			return null;
+		}
 		switch (laneField) {
 			case "basename":
 			case "aliases":
 			case "headings":
 				return {
-					tokens: metadataTokens[laneField],
+					tokens: this.decodeTermSequence(metadataTokens[laneField]),
 					constituentFields: [laneField],
 				};
 			case "folder_basename":
 				return {
-					tokens: [...metadataTokens.folder, ...metadataTokens.basename],
+					tokens: [
+						...this.decodeTermSequence(metadataTokens.folder),
+						...this.decodeTermSequence(metadataTokens.basename),
+					],
 					constituentFields: ["folder", "basename"],
 				};
 			case "folder_aliases":
 				return {
-					tokens: [...metadataTokens.folder, ...metadataTokens.aliases],
+					tokens: [
+						...this.decodeTermSequence(metadataTokens.folder),
+						...this.decodeTermSequence(metadataTokens.aliases),
+					],
 					constituentFields: ["folder", "aliases"],
 				};
 		}
@@ -4384,7 +4484,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		let count = 0;
 		for (const field of fields) {
-			count += metadataTokens[field]?.length ?? 0;
+			count += metadataTokens[field].length;
 		}
 		return count;
 	}
@@ -4674,7 +4774,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		let bestWindowCoverageRatio = 0;
 		let bestWindowAnchorRatio = 0;
 		let bestWindowCompactnessRatio = 0;
-		const bestPassage = this.passageById.get(bestEvidence.passageId);
+		const bestPassage = this.getPassageRecord(bestEvidence.passageId);
 		const bestLocalWindowSet = bestPassage
 			? this.getLocalWindowSetForPassage({
 					passage: bestPassage,
@@ -5123,7 +5223,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const candidates: FileLocalExplanationCandidate[] = [];
 		for (let evidenceIndex = 0; evidenceIndex < evidences.length; evidenceIndex++) {
 			const evidence = evidences[evidenceIndex];
-			const passage = this.passageById.get(evidence.passageId);
+			const passage = this.getPassageRecord(evidence.passageId);
 			if (!passage) {
 				continue;
 			}
@@ -5616,7 +5716,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				})
 				.slice(0, MAX_LOCALITY_FRONTIER);
 			for (const [passageId, passageState] of localityFrontier) {
-				const passage = this.passageById.get(passageId);
+				const passage = this.getPassageRecord(passageId);
 				if (!passage) {
 					continue;
 				}
@@ -5643,7 +5743,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 		if (queryTerms.length > 0) {
 			for (const [passageId, passageState] of verifierFrontier) {
-				const passage = this.passageById.get(passageId);
+				const passage = this.getPassageRecord(passageId);
 				if (!passage) {
 					continue;
 				}
@@ -6042,19 +6142,20 @@ function computeBodyTermInformationScore(term: string, tf: number): number {
 
 function countActivePassagePostings(
 	postings: PackedPostingList | undefined,
-	passagesById: ReadonlyMap<number, PassageRecord>,
+	passageFileIdsById: Uint32Array,
 	activePathsByFileId: ReadonlyMap<number, string>,
 ): number {
 	if (!postings) {
 		return 0;
 	}
 	let total = 0;
-	for (const passageId of postings.ids) {
-		const passage = passagesById.get(passageId);
-		if (passage && activePathsByFileId.has(passage.fileId)) {
+	postings.forEachId((passageId) => {
+		const fileId =
+			passageId < passageFileIdsById.length ? passageFileIdsById[passageId] : 0;
+		if (fileId !== 0 && activePathsByFileId.has(fileId)) {
 			total += 1;
 		}
-	}
+	});
 	return total;
 }
 
@@ -6066,11 +6167,11 @@ function countActiveFilePostings(
 		return 0;
 	}
 	let total = 0;
-	for (const fileId of postings.ids) {
+	postings.forEachId((fileId) => {
 		if (activePathsByFileId.has(fileId)) {
 			total += 1;
 		}
-	}
+	});
 	return total;
 }
 
@@ -6673,30 +6774,105 @@ function hasExactPhraseMatch(
 }
 
 class PackedPostingList {
-	readonly ids: number[] = [];
-	readonly tfs: number[] = [];
+	private buffer = new Uint8Array(16);
+	private usedBytes = 0;
+	private postingCount = 0;
+	private lastId = 0;
 
 	get size(): number {
-		return this.ids.length;
+		return this.postingCount;
+	}
+
+	get byteLength(): number {
+		return this.usedBytes;
 	}
 
 	set(id: number, tf: number): void {
-		const index = lowerBoundNumber(this.ids, id);
-		if (this.ids[index] === id) {
-			this.tfs[index] = tf;
+		if (this.postingCount === 0 || id > this.lastId) {
+			this.append(id, tf);
 			return;
 		}
-		this.ids.splice(index, 0, id);
-		this.tfs.splice(index, 0, tf);
+		const ids: number[] = [];
+		const tfs: number[] = [];
+		let updated = false;
+		this.forEach((currentId, currentTf) => {
+			if (!updated && currentId > id) {
+				ids.push(id);
+				tfs.push(tf);
+				updated = true;
+			}
+			if (currentId === id) {
+				ids.push(id);
+				tfs.push(tf);
+				updated = true;
+				return;
+			}
+			ids.push(currentId);
+			tfs.push(currentTf);
+		});
+		if (!updated) {
+			ids.push(id);
+			tfs.push(tf);
+		}
+		this.rebuild(ids, tfs);
 	}
 
-	delete(id: number): void {
-		const index = lowerBoundNumber(this.ids, id);
-		if (this.ids[index] !== id) {
+	forEach(callback: (id: number, tf: number, index: number) => void): void {
+		let offset = 0;
+		let decodedId = 0;
+		for (let index = 0; index < this.postingCount; index++) {
+			const delta = readVarint(this.buffer, offset);
+			offset = delta.nextOffset;
+			decodedId += delta.value;
+			const tfValue = readVarint(this.buffer, offset);
+			offset = tfValue.nextOffset;
+			callback(decodedId, tfValue.value, index);
+		}
+	}
+
+	forEachId(callback: (id: number, index: number) => void): void {
+		this.forEach((id, _tf, index) => callback(id, index));
+	}
+
+	private append(id: number, tf: number): void {
+		const delta = id - this.lastId;
+		const bytesNeeded = getVarintByteLength(delta) + getVarintByteLength(tf);
+		this.ensureCapacity(this.usedBytes + bytesNeeded);
+		let offset = writeVarint(this.buffer, this.usedBytes, delta);
+		offset = writeVarint(this.buffer, offset, tf);
+		this.usedBytes = offset;
+		this.postingCount += 1;
+		this.lastId = id;
+	}
+
+	private rebuild(ids: readonly number[], tfs: readonly number[]): void {
+		let requiredBytes = 0;
+		let previousId = 0;
+		for (let index = 0; index < ids.length; index++) {
+			requiredBytes += getVarintByteLength(ids[index] - previousId);
+			requiredBytes += getVarintByteLength(tfs[index]);
+			previousId = ids[index];
+		}
+		this.buffer = new Uint8Array(Math.max(16, requiredBytes));
+		this.usedBytes = 0;
+		this.postingCount = 0;
+		this.lastId = 0;
+		for (let index = 0; index < ids.length; index++) {
+			this.append(ids[index], tfs[index]);
+		}
+	}
+
+	private ensureCapacity(requiredBytes: number): void {
+		if (requiredBytes <= this.buffer.length) {
 			return;
 		}
-		this.ids.splice(index, 1);
-		this.tfs.splice(index, 1);
+		let nextLength = this.buffer.length;
+		while (nextLength < requiredBytes) {
+			nextLength *= 2;
+		}
+		const nextBuffer = new Uint8Array(nextLength);
+		nextBuffer.set(this.buffer.subarray(0, this.usedBytes));
+		this.buffer = nextBuffer;
 	}
 }
 
@@ -6704,6 +6880,14 @@ function sumPostingSizes(postingsByTerm: Map<number, PackedPostingList>): number
 	let total = 0;
 	for (const postings of postingsByTerm.values()) {
 		total += postings.size;
+	}
+	return total;
+}
+
+function sumPostingBytes(postingsByTerm: Map<number, PackedPostingList>): number {
+	let total = 0;
+	for (const postings of postingsByTerm.values()) {
+		total += postings.byteLength;
 	}
 	return total;
 }
@@ -6720,6 +6904,18 @@ function sumNestedPostingSizes(
 	return total;
 }
 
+function sumNestedPostingBytes(
+	postingsByTerm: Map<number, Map<MetadataField, PackedPostingList>>,
+): number {
+	let total = 0;
+	for (const fieldMap of postingsByTerm.values()) {
+		for (const postings of fieldMap.values()) {
+			total += postings.byteLength;
+		}
+	}
+	return total;
+}
+
 function topPostingTerms(
 	postingsByTerm: Map<number, PackedPostingList>,
 	resolveTerm: (termId: number) => string,
@@ -6731,6 +6927,75 @@ function topPostingTerms(
 		}))
 		.sort((left, right) => right.postings - left.postings)
 		.slice(0, 12);
+}
+
+function createPackedFilePassageStore(
+	passages: readonly IndexedPassageBuild[],
+): PackedFilePassageStore {
+	const ids = new Uint32Array(passages.length);
+	const startOffsets = new Uint32Array(passages.length);
+	const endOffsets = new Uint32Array(passages.length);
+	const lengths = new Uint16Array(passages.length);
+	for (let index = 0; index < passages.length; index++) {
+		const record = passages[index].record;
+		ids[index] = record.id;
+		startOffsets[index] = record.startOffset;
+		endOffsets[index] = record.endOffset;
+		lengths[index] = Math.min(record.length, 0xffff);
+	}
+	return { ids, startOffsets, endOffsets, lengths };
+}
+
+function buildNumericTfMap(tokens: Uint32Array): Map<number, number> {
+	const tfMap = new Map<number, number>();
+	for (const token of tokens) {
+		tfMap.set(token, (tfMap.get(token) ?? 0) + 1);
+	}
+	return tfMap;
+}
+
+function getVarintByteLength(value: number): number {
+	let length = 1;
+	let remaining = value >>> 0;
+	while (remaining >= 0x80) {
+		remaining >>>= 7;
+		length += 1;
+	}
+	return length;
+}
+
+function writeVarint(buffer: Uint8Array, offset: number, value: number): number {
+	let remaining = value >>> 0;
+	while (remaining >= 0x80) {
+		buffer[offset++] = (remaining & 0x7f) | 0x80;
+		remaining >>>= 7;
+	}
+	buffer[offset++] = remaining & 0x7f;
+	return offset;
+}
+
+function readVarint(
+	buffer: Uint8Array,
+	offset: number,
+): { value: number; nextOffset: number } {
+	let value = 0;
+	let shift = 0;
+	let cursor = offset;
+	while (cursor < buffer.length) {
+		const byte = buffer[cursor++];
+		value |= (byte & 0x7f) << shift;
+		if ((byte & 0x80) === 0) {
+			return {
+				value: value >>> 0,
+				nextOffset: cursor,
+			};
+		}
+		shift += 7;
+	}
+	return {
+		value: value >>> 0,
+		nextOffset: cursor,
+	};
 }
 
 function countSubstringOccurrences(text: string, pattern: string): number {
