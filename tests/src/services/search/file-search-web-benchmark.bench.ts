@@ -1425,6 +1425,13 @@ function createManualBenchmarkCorpus(
 			suite: "adversarial",
 		},
 		{
+			query: "config data ro pas",
+			relevantPath: "adversarial/prefix-lab/en/exact-prefix-family.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
 			query: "con pol tim",
 			relevantPath: "adversarial/prefix-lab/en/connection-policy-timeout.md",
 			bucket: "tech-en",

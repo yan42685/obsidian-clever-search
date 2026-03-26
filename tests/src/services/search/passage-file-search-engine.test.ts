@@ -161,6 +161,46 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("notes/local.md");
 	});
 
+	test("restores from serialized passage snapshot without re-reading source files", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/restore-target.md",
+				basename: "restore target",
+				folder: "notes",
+				headings: "Alpha heading",
+				content:
+					"alpha beta gamma live together in one compact paragraph for restore verification",
+			},
+			{
+				path: "notes/distractor.md",
+				basename: "distractor",
+				folder: "notes",
+				content:
+					"alpha appears here but beta and gamma are separated by unrelated filler text",
+			},
+		]);
+
+		const snapshot = engine.serialize();
+		expect(snapshot).not.toBeNull();
+
+		const restored = createEngine();
+		const restoredOk = await restored.reIndexAll(snapshot!);
+		expect(restoredOk).toBe(true);
+
+		const results = await restored.searchFiles({
+			queryText: "alpha beta gamma",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("notes/restore-target.md");
+		expect(results[0]?.matchedTerms).toEqual(
+			expect.arrayContaining(["alpha", "beta", "gamma"]),
+		);
+	});
+
 	test("does not return stale passages after updating the same path", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
@@ -812,6 +852,64 @@ describe("PassageFileSearchEngine", () => {
 		});
 
 		expect(results[0]?.path).toBe("docs/exact-prefix.md");
+	});
+
+	test("keeps the compact exact family witness first with exact head terms and trailing prefix tails", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/exact-prefix-family.md",
+				basename: "exact prefix family",
+				folder: "docs",
+				content:
+					"config data rollout keeps exact family evidence in one compact passage",
+			},
+			{
+				path: "docs/exact-prefix-noise.md",
+				basename: "exact prefix noise",
+				folder: "docs",
+				content:
+					"configmap dashboard rollout keeper repeats expanded family fragments without the exact config data rollout witness",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "config da ro keep",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/exact-prefix-family.md");
+	});
+
+	test("keeps the exact family witness ahead when only the target carries the trailing passage family", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/exact-prefix-family.md",
+				basename: "exact prefix family",
+				folder: "docs",
+				content:
+					"config data rollout keeps exact family evidence in one compact passage",
+			},
+			{
+				path: "docs/exact-prefix-noise.md",
+				basename: "exact prefix noise",
+				folder: "docs",
+				content:
+					"configmap dashboard rollout keeper repeats expanded family fragments without the exact config data rollout witness",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "config data ro pas",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/exact-prefix-family.md");
 	});
 
 	test("does not expand multi-term prefix families when prefix search is disabled", async () => {
