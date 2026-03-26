@@ -3,7 +3,7 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
-import type { BaseIndexedFileRef } from "src/globals/search-types";
+import type { BaseIndexedFileRef, IndexedDocument } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
 import {
@@ -95,6 +95,32 @@ export type SearchBootstrapState =
 	| "healing"
 	| "ready"
 	| "failed";
+
+type SearchBootstrapPhase = "restore" | "heal" | "commit";
+
+export type SearchBootstrapMetrics = {
+	startedAt: number;
+	restoreCompletedAt: number | null;
+	healCompletedAt: number | null;
+	commitCompletedAt: number | null;
+	readyAt: number | null;
+	restoreMs: number | null;
+	healMs: number | null;
+	commitMs: number | null;
+	totalMs: number | null;
+};
+
+type LexicalBootstrapPlan = {
+	needsFullReindex: boolean;
+	needsRefHeal: boolean;
+};
+
+type HybridBootstrapPlan = {
+	currFiles: Map<string, TFile>;
+	repairReport: HybridStorageRepairReport;
+	docsToAdd: TFile[];
+	docsToDelete: string[];
+};
 
 export type HybridDeferredEmbeddingSummary = {
 	deferredCount: number;
@@ -207,6 +233,7 @@ export class DataManager {
 	private isLexicalEngineUpToDate = false;
 	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
 	private searchBootstrapState: SearchBootstrapState = "blocked";
+	private searchBootstrapMetrics: SearchBootstrapMetrics | null = null;
 	private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
 	private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
 	private hybridRepairWorker: Promise<void> | null = null;
@@ -351,37 +378,14 @@ export class DataManager {
 		this.clearHybridFailedEmbeddingState();
 		this.fileSnapshotStore.clearCurrentFiles();
 		this.fileSnapshotStore.clearIndexedSnapshots();
-		this.setSearchBootstrapState("restoring");
 		this.setHybridSearchAvailability("blocked");
+		this.beginSearchBootstrapRun();
 		try {
-			await this.database.deleteOldDatabases();
-			await this.initLexicalEngine();
-			if (!this.hybridEngine.isEnabled()) {
-				await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
-					logger.warn("hybrid BM25 storage migration failed:", e);
-				});
-			}
-			await this.initHybridEngine().catch((e) => {
-				logger.warn("hybrid engine init failed:", e);
-				new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
-			});
-			await this.fileSnapshotStore.refreshHighPerformanceState(
-				this.dataProvider.allFilesToBeIndexed(),
-			);
-
-			if (!this.shouldForceRefresh) {
-				eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
-					this.docOperationsBuffer.forceFlush(),
-				);
-				getInstance(FileWatcher).start();
-			}
-
-			if (isDevEnvironment) {
-				await this.noticeDevStorageStats();
-			}
-			this.setSearchBootstrapState("ready");
+			await this.runSearchBootstrapPipeline();
+			this.finishSearchBootstrapRun();
 		} catch (error) {
 			this.setSearchBootstrapState("failed");
+			this.failSearchBootstrapRun();
 			throw error;
 		}
 	}
@@ -396,6 +400,31 @@ export class DataManager {
 
 	receiveDocOperation(operation: DocOperation) {
 		this.docOperationsBuffer.add(operation);
+	}
+
+	private async runSearchBootstrapPipeline(): Promise<void> {
+		await this.database.deleteOldDatabases();
+		this.setSearchBootstrapState("restoring");
+		const lexicalPlan = await this.prepareLexicalBootstrapPlan();
+		if (!this.hybridEngine.isEnabled()) {
+			await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
+				logger.warn("hybrid BM25 storage migration failed:", e);
+			});
+		}
+		const hybridPlan = await this.prepareHybridBootstrapPlan();
+		this.markSearchBootstrapPhaseCompleted("restore");
+
+		this.setSearchBootstrapState("healing");
+		await this.healLexicalBootstrapPlan(lexicalPlan);
+		await this.healHybridBootstrapPlan(hybridPlan).catch((e) => {
+			logger.warn("hybrid engine init failed:", e);
+			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+		});
+		this.markSearchBootstrapPhaseCompleted("heal");
+
+		await this.commitLexicalBootstrapPlan();
+		await this.commitSearchBootstrapRun();
+		this.markSearchBootstrapPhaseCompleted("commit");
 	}
 
 	async refreshAllAsync() {
@@ -902,7 +931,7 @@ export class DataManager {
 		}
 	}
 
-	private async initLexicalEngine() {
+	private async prepareLexicalBootstrapPlan(): Promise<LexicalBootstrapPlan> {
 		logger.trace("Init lexical engine...");
 		let prevData: SerializedFileSearchIndex | null;
 		if (
@@ -914,23 +943,56 @@ export class DataManager {
 		} else {
 			prevData = await this.database.getMiniSearchData();
 		}
-		if (prevData) {
-			this.setSearchBootstrapState("restoring");
-			this.database.deleteMinisearchData();
-			logger.trace("Previous minisearch data is found.");
-			const isSuccessful = await this.lexicalEngine.reIndexAll(prevData);
-			if (!isSuccessful) {
-				new MyNotice(t("Database has been updated, a reindex is required"), 7000);
-				await this.reindexLexicalEngineWithCurrFiles();
-			}
-		} else {
-			this.setSearchBootstrapState("healing");
-			await this.reindexLexicalEngineWithCurrFiles();
+
+		if (!prevData) {
+			return {
+				needsFullReindex: true,
+				needsRefHeal: false,
+			};
 		}
-		if (!this.isLexicalEngineUpToDate) {
-			this.setSearchBootstrapState("healing");
+
+		await this.database.deleteMinisearchData();
+		logger.trace("Previous minisearch data is found.");
+		const isSuccessful = await this.lexicalEngine.reIndexAll(prevData);
+		if (!isSuccessful) {
+			new MyNotice(t("Database has been updated, a reindex is required"), 7000);
+			return {
+				needsFullReindex: true,
+				needsRefHeal: false,
+			};
+		}
+
+		if (
+			typeof prevData === "object" &&
+			prevData !== null &&
+			(prevData as Record<string, unknown>).__backend === "passage-bm25" &&
+			Array.isArray((prevData as Record<string, unknown>).documents)
+		) {
+			const snapshotDocuments = (prevData as { documents: IndexedDocument[] }).documents;
+			for (const document of snapshotDocuments) {
+				this.fileSnapshotStore.setIndexedSnapshotFromDocument(document);
+			}
+		}
+
+		return {
+			needsFullReindex: false,
+			needsRefHeal: !this.isLexicalEngineUpToDate,
+		};
+	}
+
+	private async healLexicalBootstrapPlan(
+		plan: LexicalBootstrapPlan,
+	): Promise<void> {
+		if (plan.needsFullReindex) {
+			await this.reindexLexicalEngineWithCurrFiles();
+			return;
+		}
+		if (plan.needsRefHeal) {
 			await this.updateLexicalIndexedFileRefsByMtime();
 		}
+	}
+
+	private async commitLexicalBootstrapPlan(): Promise<void> {
 		logger.trace("Lexical engine is ready");
 		const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
 		if (lexicalIndexData) {
@@ -939,11 +1001,15 @@ export class DataManager {
 	}
 
 	private async initHybridEngine() {
+		const plan = await this.prepareHybridBootstrapPlan();
+		await this.healHybridBootstrapPlan(plan);
+	}
+
+	private async prepareHybridBootstrapPlan(): Promise<HybridBootstrapPlan | null> {
 		if (!this.hybridEngine.isEnabled()) {
 			this.setHybridSearchAvailability("blocked");
-			return;
+			return null;
 		}
-		this.setSearchBootstrapState("healing");
 		beginHybridProfile("hybrid-init", {
 			forceRefresh: this.shouldForceRefresh ? 1 : 0,
 		});
@@ -970,7 +1036,6 @@ export class DataManager {
 				async () => await this.repairHybridStoredState(currFiles),
 			);
 			const previousIndexedFileRefs = repairReport.previousIndexedFileRefs;
-
 			const docsToAdd: TFile[] = [];
 			const docsToDelete: string[] = [];
 
@@ -983,7 +1048,6 @@ export class DataManager {
 					docsToAdd.push(file);
 				}
 			}
-
 			for (const prevPath of previousIndexedFileRefs.keys()) {
 				if (!currFiles.has(prevPath)) {
 					docsToDelete.push(prevPath);
@@ -998,88 +1062,109 @@ export class DataManager {
 
 			logger.trace(`hybrid docs to delete: ${docsToDelete.length}`);
 			logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
-			const hybridIndexStart = Date.now();
-			const concurrency = this.getHybridIndexConcurrency();
-			setHybridProfileMeta("concurrency", concurrency);
-			setHybridProfileMeta("docsToAdd", docsToAdd.length);
-			setHybridProfileMeta("docsToDelete", docsToDelete.length);
-			logger.debug(
-				`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
-			);
-			await this.runHybridPreflight(
+			return {
 				currFiles,
+				repairReport,
 				docsToAdd,
 				docsToDelete,
-				repairReport.previousIndexedFileRefs,
-			);
-			const progressNotice = this.createHybridIndexProgressNotice(
-				docsToAdd,
-				repairReport.repairedPaths.length,
-			);
-			const failures: HybridIndexFailure[] = [];
-			const repairTasks: HybridRepairTask[] = docsToAdd.map((file) => ({
-				path: file.path,
-				mode: "incremental",
-				reason: "startup-self-heal",
-				eligibleAt: Date.now(),
-				enqueuedAt: Date.now(),
-			}));
-			try {
-				await profileHybridStage("startup.delete_stale_paths", async () => {
-					for (const path of docsToDelete) {
-						await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
-							logger.warn(`hybrid deleteFile failed for ${path}:`, e),
-						);
-					}
-				});
-				await profileHybridStage("startup.index_files", async () => {
-					await this.runHybridRepairTasks(
-						repairTasks,
-						progressNotice,
-						repairReport.repairedPaths.length,
-						failures,
-					);
-				});
-				await profileHybridStage("startup.persist_indices_batch", async () => {
-					await this.hybridEngine.persistIndicesForBatch();
-				});
-				const fallbackNoticeKey =
-					this.hybridEngine.consumeIndexingFallbackNoticeKey();
-				if (failures.length > 0) {
-					this.noticeHybridIndexFailures(failures);
-				} else if (fallbackNoticeKey) {
-					new MyNotice(t(fallbackNoticeKey), 7000);
-				}
-				progressNotice?.update(
-					{
-						stage: "done",
-						totalBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
-						totalFiles: docsToAdd.length,
-						processedBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
-						processedFiles: docsToAdd.length,
-						repairedPaths: repairReport.repairedPaths.length,
-						failedFiles: failures.length,
-						sessionTokens: getHybridProfileMetric("provider_tokens"),
-					},
-					true,
-				);
-				logger.debug(
-					`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
-				);
-				this.setHybridSearchAvailability(
-					this.hybridEngine.canSearch() ? "available" : "blocked",
-				);
-				endHybridProfile({
-					failures: failures.length,
-					repairedPaths: repairReport.repairedPaths.length,
-				});
-			} finally {
-				progressNotice?.hide();
-			}
+			};
 		} catch (error) {
 			this.setHybridSearchAvailability("blocked");
 			endHybridProfile({ error: error instanceof Error ? error.message : String(error) });
 			throw error;
+		}
+	}
+
+	private async healHybridBootstrapPlan(
+		plan: HybridBootstrapPlan | null,
+	): Promise<void> {
+		if (!plan) {
+			return;
+		}
+
+		const { currFiles, repairReport, docsToAdd, docsToDelete } = plan;
+		const hybridIndexStart = Date.now();
+		const concurrency = this.getHybridIndexConcurrency();
+		setHybridProfileMeta("concurrency", concurrency);
+		setHybridProfileMeta("docsToAdd", docsToAdd.length);
+		setHybridProfileMeta("docsToDelete", docsToDelete.length);
+		logger.debug(
+			`hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, concurrency=${concurrency}`,
+		);
+		await this.runHybridPreflight(
+			currFiles,
+			docsToAdd,
+			docsToDelete,
+			repairReport.previousIndexedFileRefs,
+		);
+		const progressNotice = this.createHybridIndexProgressNotice(
+			docsToAdd,
+			repairReport.repairedPaths.length,
+		);
+		const failures: HybridIndexFailure[] = [];
+		const repairTasks: HybridRepairTask[] = docsToAdd.map((file) => ({
+			path: file.path,
+			mode: "incremental",
+			reason: "startup-self-heal",
+			eligibleAt: Date.now(),
+			enqueuedAt: Date.now(),
+		}));
+
+		try {
+			await profileHybridStage("startup.delete_stale_paths", async () => {
+				for (const path of docsToDelete) {
+					await this.hybridEngine.deleteFile(path, { persistIndices: false }).catch((e) =>
+						logger.warn(`hybrid deleteFile failed for ${path}:`, e),
+					);
+				}
+			});
+			await profileHybridStage("startup.index_files", async () => {
+				await this.runHybridRepairTasks(
+					repairTasks,
+					progressNotice,
+					repairReport.repairedPaths.length,
+					failures,
+				);
+			});
+			await profileHybridStage("startup.persist_indices_batch", async () => {
+				await this.hybridEngine.persistIndicesForBatch();
+			});
+			const fallbackNoticeKey =
+				this.hybridEngine.consumeIndexingFallbackNoticeKey();
+			if (failures.length > 0) {
+				this.noticeHybridIndexFailures(failures);
+			} else if (fallbackNoticeKey) {
+				new MyNotice(t(fallbackNoticeKey), 7000);
+			}
+			progressNotice?.update(
+				{
+					stage: "done",
+					totalBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
+					totalFiles: docsToAdd.length,
+					processedBytes: docsToAdd.reduce((sum, file) => sum + file.stat.size, 0),
+					processedFiles: docsToAdd.length,
+					repairedPaths: repairReport.repairedPaths.length,
+					failedFiles: failures.length,
+					sessionTokens: getHybridProfileMetric("provider_tokens"),
+				},
+				true,
+			);
+			logger.debug(
+				`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
+			);
+			this.setHybridSearchAvailability(
+				this.hybridEngine.canSearch() ? "available" : "blocked",
+			);
+			endHybridProfile({
+				failures: failures.length,
+				repairedPaths: repairReport.repairedPaths.length,
+			});
+		} catch (error) {
+			this.setHybridSearchAvailability("blocked");
+			endHybridProfile({ error: error instanceof Error ? error.message : String(error) });
+			throw error;
+		} finally {
+			progressNotice?.hide();
 		}
 	}
 
@@ -1504,6 +1589,12 @@ export class DataManager {
 		return this.searchBootstrapState;
 	}
 
+	getSearchBootstrapMetrics(): SearchBootstrapMetrics | null {
+		return this.searchBootstrapMetrics
+			? { ...this.searchBootstrapMetrics }
+			: null;
+	}
+
 	getSearchBootstrapNoticeKey(): LocaleKey | null {
 		switch (this.searchBootstrapState) {
 			case "restoring":
@@ -1525,6 +1616,88 @@ export class DataManager {
 
 	private setSearchBootstrapState(state: SearchBootstrapState): void {
 		this.searchBootstrapState = state;
+	}
+
+	private beginSearchBootstrapRun(): void {
+		this.searchBootstrapMetrics = {
+			startedAt: Date.now(),
+			restoreCompletedAt: null,
+			healCompletedAt: null,
+			commitCompletedAt: null,
+			readyAt: null,
+			restoreMs: null,
+			healMs: null,
+			commitMs: null,
+			totalMs: null,
+		};
+		this.setSearchBootstrapState("restoring");
+	}
+
+	private markSearchBootstrapPhaseCompleted(
+		phase: SearchBootstrapPhase,
+	): void {
+		const metrics = this.searchBootstrapMetrics;
+		if (!metrics) {
+			return;
+		}
+		const now = Date.now();
+		if (phase === "restore") {
+			metrics.restoreCompletedAt = now;
+			metrics.restoreMs = now - metrics.startedAt;
+			return;
+		}
+		if (phase === "heal") {
+			metrics.healCompletedAt = now;
+			const phaseStart = metrics.restoreCompletedAt ?? metrics.startedAt;
+			metrics.healMs = now - phaseStart;
+			return;
+		}
+		metrics.commitCompletedAt = now;
+		const phaseStart =
+			metrics.healCompletedAt ??
+			metrics.restoreCompletedAt ??
+			metrics.startedAt;
+		metrics.commitMs = now - phaseStart;
+	}
+
+	private finishSearchBootstrapRun(): void {
+		const metrics = this.searchBootstrapMetrics;
+		const readyAt = Date.now();
+		if (metrics) {
+			metrics.readyAt = readyAt;
+			metrics.totalMs = readyAt - metrics.startedAt;
+		}
+		this.setSearchBootstrapState("ready");
+		logger.info(
+			`[clever-search] search bootstrap ready in ${metrics?.totalMs ?? 0} ms` +
+				` (restore ${metrics?.restoreMs ?? 0} ms, heal ${metrics?.healMs ?? 0} ms, commit ${metrics?.commitMs ?? 0} ms)`,
+		);
+	}
+
+	private failSearchBootstrapRun(): void {
+		if (!this.searchBootstrapMetrics) {
+			return;
+		}
+		this.searchBootstrapMetrics.readyAt = null;
+		this.searchBootstrapMetrics.totalMs = null;
+	}
+
+	private async commitSearchBootstrapRun(): Promise<void> {
+		await this.fileSnapshotStore.refreshHighPerformanceState(
+			this.dataProvider.allFilesToBeIndexed(),
+		);
+
+		if (!this.shouldForceRefresh) {
+			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
+				this.docOperationsBuffer.forceFlush(),
+			);
+			getInstance(FileWatcher).start();
+		}
+
+		if (isDevEnvironment) {
+			await this.noticeDevStorageStats();
+		}
+		this.notifyHybridRuntimeStatusChanged();
 	}
 
 	private getHybridIndexConcurrency(): number {

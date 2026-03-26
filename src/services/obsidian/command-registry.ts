@@ -80,6 +80,25 @@ export class CommandRegistry {
 				callback: async () =>
 					await getInstance(DevFileReadBenchmark).runBigCorpus(),
 			});
+
+			this.addCommand({
+				id: "cs-dev-search-bootstrap-summary",
+				name: "Show search bootstrap summary [dev]",
+				callback: () => {
+					const metrics = getInstance(DataManager).getSearchBootstrapMetrics();
+					if (!metrics) {
+						new MyNotice("Search bootstrap metrics are unavailable.", 4000);
+						return;
+					}
+					const summary =
+						`Search bootstrap: total ${metrics.totalMs ?? 0} ms, ` +
+						`restore ${metrics.restoreMs ?? 0} ms, ` +
+						`heal ${metrics.healMs ?? 0} ms, ` +
+						`commit ${metrics.commitMs ?? 0} ms.`;
+					console.log("[clever-search]", summary, metrics);
+					new MyNotice(summary, 5000);
+				},
+			});
 		}
 	}
 

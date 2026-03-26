@@ -1,0 +1,249 @@
+export {};
+
+const mockInstanceMap = new Map<any, any>();
+let mockHybridEngine: any;
+const mockNotices: Array<{ message: string; timeout?: number }> = [];
+
+jest.mock("obsidian", () => ({
+	App: class App {},
+}));
+
+jest.mock("src/utils/my-lib", () => ({
+	getInstance: jest.fn((token: any) => {
+		if (!mockInstanceMap.has(token)) {
+			throw new Error(`Missing test instance for token: ${token?.name ?? String(token)}`);
+		}
+		return mockInstanceMap.get(token);
+	}),
+	monitorDecorator: (
+		_target: unknown,
+		_propertyKey: string,
+		descriptor: PropertyDescriptor,
+	) => descriptor,
+}));
+
+jest.mock("throttle-debounce", () => ({
+	throttle: (_ms: number, fn: (...args: any[]) => unknown) => fn,
+}));
+
+jest.mock("src/services/obsidian/transformed-api", () => ({
+	MyNotice: class MyNotice {
+		constructor(message: string, timeout?: number) {
+			mockNotices.push({ message, timeout });
+		}
+
+		hide() {}
+		setText() {}
+	},
+}));
+
+jest.mock("src/services/obsidian/translations/locale-helper", () => ({
+	t: (key: string) => key,
+}));
+
+jest.mock("src/globals/plugin-setting", () => ({
+	OuterSetting: class OuterSetting {},
+	DEFAULT_OUTER_SETTING: {
+		ui: {
+			maxItemResults: 10,
+		},
+	},
+}));
+
+jest.mock("src/services/obsidian/user-data/data-provider", () => ({
+	DataProvider: class DataProvider {},
+}));
+
+jest.mock("src/services/search/lexical-engine", () => ({
+	LexicalEngine: class LexicalEngine {},
+}));
+
+jest.mock("src/services/search/highlighter", () => ({
+	LineHighlighter: class LineHighlighter {},
+}));
+
+jest.mock("src/services/obsidian/view-registry", () => ({
+	ViewRegistry: class ViewRegistry {},
+	ViewType: {
+		MARKDOWN: "markdown",
+	},
+}));
+
+jest.mock("src/services/obsidian/user-data/data-manager", () => ({
+	DataManager: class DataManager {},
+}));
+
+jest.mock("src/services/search/hybrid/hybrid-engine", () => ({
+	HybridEngine: jest.fn().mockImplementation(() => mockHybridEngine),
+}));
+
+describe("SearchService bootstrap gate", () => {
+	beforeEach(() => {
+		jest.resetModules();
+		mockInstanceMap.clear();
+		mockNotices.length = 0;
+		mockHybridEngine = {
+			isEnabled: jest.fn().mockReturnValue(false),
+			search: jest.fn().mockResolvedValue([]),
+			consumeSearchFallbackNoticeKey: jest.fn().mockReturnValue(null),
+		};
+		(global as any).window = {
+			localStorage: {
+				getItem: jest.fn(() => "en"),
+			},
+		};
+	});
+
+	afterEach(() => {
+		delete (global as any).window;
+	});
+
+	function createHarness(options: {
+		ready: boolean;
+		hybridEnabled?: boolean;
+		lexicalMatches?: any[];
+		hybridItems?: any[];
+	}) {
+		const { App } = require("obsidian");
+		const { OuterSetting } = require("src/globals/plugin-setting");
+		const { DataProvider } = require("src/services/obsidian/user-data/data-provider");
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const { LineHighlighter } = require("src/services/search/highlighter");
+		const {
+			ViewRegistry,
+			ViewType,
+		} = require("src/services/obsidian/view-registry");
+		const { DataManager } = require("src/services/obsidian/user-data/data-manager");
+		const {
+			FileItem,
+			EngineType,
+		} = require("src/globals/search-types");
+
+		const app = {
+			workspace: {
+				getActiveFile: jest.fn(() => ({ path: "notes/current.md" })),
+			},
+		};
+		const setting = {
+			ui: {
+				maxItemResults: 10,
+			},
+		};
+		const dataProvider = {
+			readPlainText: jest.fn(),
+			readPlainTextLines: jest.fn().mockResolvedValue(["alpha beta"]),
+		};
+		const lexicalEngine = {
+			searchFiles: jest
+				.fn()
+				.mockResolvedValue(options.lexicalMatches ?? []),
+			searchLinesByFileItem: jest.fn().mockResolvedValue([]),
+			matchLinesFuzzy: jest.fn().mockResolvedValue([]),
+		};
+		const lineHighlighter = {
+			parse: jest.fn(),
+		};
+		const viewRegistry = {
+			viewTypeByPath: jest.fn(() => ViewType.MARKDOWN),
+		};
+		const dataManager = {
+			isSearchReady: jest.fn(() => options.ready),
+			getSearchBootstrapNoticeKey: jest.fn(() =>
+				options.ready ? null : "searchBootstrap.restoring",
+			),
+			isHybridSearchUnavailable: jest.fn(() => false),
+			hasHybridFailedEmbeddings: jest.fn(() => false),
+		};
+
+		mockHybridEngine.isEnabled.mockReturnValue(options.hybridEnabled ?? false);
+		mockHybridEngine.search.mockResolvedValue(options.hybridItems ?? []);
+		mockHybridEngine.consumeSearchFallbackNoticeKey.mockReturnValue(null);
+
+		mockInstanceMap.set(App, app);
+		mockInstanceMap.set(OuterSetting, setting);
+		mockInstanceMap.set(DataProvider, dataProvider);
+		mockInstanceMap.set(LexicalEngine, lexicalEngine);
+		mockInstanceMap.set(LineHighlighter, lineHighlighter);
+		mockInstanceMap.set(ViewRegistry, viewRegistry);
+		mockInstanceMap.set(DataManager, dataManager);
+
+		const { SearchService } = require("src/services/obsidian/search-service");
+		const service = new SearchService();
+
+		return {
+			service,
+			app,
+			dataProvider,
+			dataManager,
+			lexicalEngine,
+			FileItem,
+			EngineType,
+		};
+	}
+
+	test("blocks lexical, hybrid, and in-file search before ready", async () => {
+		const { service, lexicalEngine, dataProvider } = createHarness({
+			ready: false,
+			hybridEnabled: true,
+		});
+
+		const lexicalResult = await service.searchInVault("alpha");
+		const hybridResult = await service.searchInVaultHybrid("alpha");
+		const inFileResult = await service.searchInFile("alpha");
+
+		expect(lexicalResult.items).toEqual([]);
+		expect(hybridResult.items).toEqual([]);
+		expect(inFileResult.items).toEqual([]);
+		expect(lexicalEngine.searchFiles).not.toHaveBeenCalled();
+		expect(mockHybridEngine.search).not.toHaveBeenCalled();
+		expect(dataProvider.readPlainTextLines).not.toHaveBeenCalled();
+		expect(mockNotices.map((entry) => entry.message)).toContain(
+			"searchBootstrap.restoring",
+		);
+	});
+
+	test("delegates to lexical search after ready", async () => {
+		const { service, lexicalEngine, FileItem } = createHarness({
+			ready: true,
+			lexicalMatches: [
+				{
+					path: "notes/alpha.md",
+					queryTerms: ["alpha"],
+					matchedTerms: ["alpha"],
+					score: 1,
+				},
+			],
+		});
+
+		const result = await service.searchInVault("alpha");
+
+		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("alpha", 22);
+		expect(result.items).toHaveLength(1);
+		expect(result.items[0]).toBeInstanceOf(FileItem);
+		expect((result.items[0] as any).path).toBe("notes/alpha.md");
+	});
+
+	test("delegates to hybrid search after ready", async () => {
+		const { service, EngineType, FileItem } = createHarness({
+			ready: true,
+			hybridEnabled: true,
+			hybridItems: [],
+		});
+		mockHybridEngine.search.mockResolvedValue([
+			new FileItem(
+				EngineType.SEMANTIC,
+				"notes/hybrid.md",
+				["hybrid"],
+				["hybrid"],
+				[],
+				"nothing",
+			),
+		]);
+
+		const result = await service.searchInVaultHybrid("hybrid");
+
+		expect(mockHybridEngine.search).toHaveBeenCalledWith("hybrid");
+		expect(result.items).toHaveLength(1);
+		expect((result.items[0] as any).path).toBe("notes/hybrid.md");
+	});
+});
