@@ -36,6 +36,14 @@ type QueryTermMatch = {
 	matchedTerms: MatchedQueryTerm[];
 };
 
+type QueryTermPositionSignal = {
+	positions: number[];
+	strongestMatchWeight: number;
+	exactMatchCount: number;
+	prefixExpansionCount: number;
+	fuzzyMatchCount: number;
+};
+
 type PassageRecord = {
 	id: number;
 	fileId: number;
@@ -51,6 +59,13 @@ type IndexedPassageBuild = {
 
 type StoredIndexedDocument = Omit<IndexedDocument, "content">;
 type PackedMetadataTokens = Record<MetadataField, Uint32Array>;
+type PackedMetadataPostingSet = [
+	PackedPostingList | undefined,
+	PackedPostingList | undefined,
+	PackedPostingList | undefined,
+	PackedPostingList | undefined,
+	PackedPostingList | undefined,
+];
 type PackedFilePassageStore = {
 	ids: Uint32Array;
 	startOffsets: Uint32Array;
@@ -166,6 +181,7 @@ type VerifierSignals = {
 
 type QueryScoringCache = {
 	positionsByPassageId: Map<number, Map<number, number[]>>;
+	positionSignalsByPassageId: Map<number, Map<number, QueryTermPositionSignal>>;
 	localWindowSetsByPassageId: Map<number, QueryConditionedLocalWindowSet>;
 	verifierSignalsByPassageId: Map<number, VerifierSignals>;
 	tokenSequenceByPassageId: Map<number, string[]>;
@@ -287,6 +303,8 @@ const WORD_PREFIX_EXPANSION_LIMIT = 96;
 const WORD_FUZZY_EXPANSION_LIMIT = 64;
 const WORD_MAX_FUZZY_EDITS = 2;
 const WORD_EXPANSION_DOC_VISIT_BUDGET = 2200;
+const MULTI_TERM_PREFIX_EXPANSION_LIMIT = 24;
+const MULTI_TERM_PREFIX_MAX_TRAILING_TERMS = 3;
 const PASSAGE_TARGET_TOKENS = 120;
 const PASSAGE_MIN_TOKENS = 48;
 const PASSAGE_OVERLAP_TOKENS = 48;
@@ -350,6 +368,8 @@ const PASSAGE_LOCALITY_RARE_TERM_WEIGHT = 0.24;
 const PASSAGE_LOCALITY_ANCHOR_WEIGHT = 0.22;
 const PASSAGE_LOCALITY_TIGHT_PAIR_WEIGHT = 0.24;
 const PASSAGE_LOCALITY_EXACT_QUERY_WEIGHT = 0.18;
+const PASSAGE_LOCALITY_MATCH_SPECIFICITY_WEIGHT = 0;
+const PASSAGE_LOCALITY_ORDERED_SPECIFICITY_WEIGHT = 0;
 const PASSAGE_LOCALITY_TIGHT_WINDOW_BONUS = 0.24;
 const VERIFIER_COVERAGE_WEIGHT = 0.92;
 const VERIFIER_ORDER_WEIGHT = 0.78;
@@ -358,6 +378,8 @@ const VERIFIER_RARE_TERM_WEIGHT = 0.48;
 const VERIFIER_TIGHT_PAIR_WEIGHT = 0.42;
 const VERIFIER_EXACT_QUERY_WEIGHT = 0.26;
 const VERIFIER_EXACT_PHRASE_BONUS = 2.1;
+const VERIFIER_MATCH_SPECIFICITY_WEIGHT = 0;
+const VERIFIER_ORDERED_SPECIFICITY_WEIGHT = 0;
 const VERIFIER_METADATA_ANCHOR_BONUS = 0.8;
 const VERIFIER_PASSAGE_ANCHOR_BONUS = 0.72;
 const VERIFIER_BASENAME_ALIAS_ALIGNMENT_BONUS = 0.44;
@@ -375,6 +397,8 @@ const LOCAL_WINDOW_COMPACTNESS_WEIGHT = 0.96;
 const LOCAL_WINDOW_ORDER_WEIGHT = 0.34;
 const LOCAL_WINDOW_TIGHT_PAIR_WEIGHT = 0.22;
 const LOCAL_WINDOW_RARE_TERM_WEIGHT = 0.16;
+const LOCAL_WINDOW_MATCH_SPECIFICITY_WEIGHT = 0;
+const LOCAL_WINDOW_ORDERED_SPECIFICITY_WEIGHT = 0;
 const MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE = 3;
 const MAX_FILE_LOCAL_EXPLANATIONS = 3;
 const LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.72;
@@ -459,6 +483,13 @@ const EMPTY_VERIFIER_SIGNALS: VerifierSignals = {
 	templatePenaltyRatio: 0,
 	exactPhraseRatio: 0,
 };
+const METADATA_FIELD_INDEX: Record<MetadataField, 0 | 1 | 2 | 3 | 4> = {
+	basename: 0,
+	aliases: 1,
+	folder: 2,
+	tags: 3,
+	headings: 4,
+};
 
 @singleton()
 export class PassageFileSearchEngine implements FileSearchEngine {
@@ -466,10 +497,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	readonly supportsSerialization = false;
 	private readonly outerSetting = getInstance(OuterSetting);
 	private readonly tokenizer = getInstance(Tokenizer);
-	private readonly metadataTermPostings = new Map<
-		number,
-		Map<MetadataField, PackedPostingList>
-	>();
+	private readonly metadataTermPostings = new Map<number, PackedMetadataPostingSet>();
 	private readonly passageWordPostings = new Map<number, PackedPostingList>();
 	private readonly fileCharPostings = new Map<number, PackedPostingList>();
 	private readonly sortedWordTerms: string[] = [];
@@ -550,6 +578,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return [];
 		}
 
+		const prefixEligibleQueryTermIndexes = request.isPrefixMatch
+			? this.collectTrailingPrefixQueryTermIndexes(queryTerms)
+			: new Set<number>();
 		const prefixTerm =
 			request.isPrefixMatch &&
 			queryTerms.length > 0 &&
@@ -566,7 +597,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			.map((queryTerm, queryTermIndex) => {
 				const match = this.resolveWordMatches(
 					queryTerm,
-					prefixTerm === queryTerm,
+					prefixTerm === queryTerm ||
+						prefixEligibleQueryTermIndexes.has(queryTermIndex),
 					request.isFuzzy,
 				);
 				return {
@@ -635,19 +667,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					});
 				}
 
-				const metadataFields =
-					matchedTermId !== undefined
-						? this.metadataTermPostings.get(matchedTermId)
-						: undefined;
-				if (!metadataFields) {
+			const metadataFields =
+				matchedTermId !== undefined
+					? this.metadataTermPostings.get(matchedTermId)
+					: undefined;
+			if (!metadataFields) {
+				continue;
+			}
+
+			for (const field of METADATA_FIELDS) {
+				const postings = getMetadataPosting(metadataFields, field);
+				if (!postings || postings.size === 0) {
 					continue;
 				}
-
-				for (const field of METADATA_FIELDS) {
-					const postings = metadataFields.get(field);
-					if (!postings || postings.size === 0) {
-						continue;
-					}
 					const activeDf = countActiveFilePostings(postings, this.pathByFileId);
 					if (activeDf === 0) {
 						continue;
@@ -863,9 +895,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const postings of this.fileCharPostings.values()) {
 			total += postings.byteLength;
 		}
-		for (const fieldMap of this.metadataTermPostings.values()) {
-			for (const postings of fieldMap.values()) {
-				total += postings.byteLength;
+		for (const postingSet of this.metadataTermPostings.values()) {
+			for (const postings of postingSet) {
+				total += postings?.byteLength ?? 0;
 			}
 		}
 		total += this.tombstonedFileIds.size * 4;
@@ -1134,21 +1166,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			this.metadataFieldStats[field].docLengths.set(fileId, tokenIds.length);
 			this.metadataFieldStats[field].totalLength += tokenIds.length;
 			const tfMap = buildNumericTfMap(tokenIds);
-			for (const [termId, tf] of tfMap) {
-				let fieldMap = this.metadataTermPostings.get(termId);
-				if (!fieldMap) {
-					fieldMap = new Map();
-					this.metadataTermPostings.set(termId, fieldMap);
-					this.insertWordTerm(this.wordTermById.get(termId) ?? String(termId));
-				}
-				let postings = fieldMap.get(field);
-				if (!postings) {
-					postings = new PackedPostingList();
-					fieldMap.set(field, postings);
-				}
-				postings.set(fileId, tf);
+		for (const [termId, tf] of tfMap) {
+			let postingSet = this.metadataTermPostings.get(termId);
+			if (!postingSet) {
+				postingSet = createEmptyMetadataPostingSet();
+				this.metadataTermPostings.set(termId, postingSet);
+				this.insertWordTerm(this.wordTermById.get(termId) ?? String(termId));
 			}
+			let postings = getMetadataPosting(postingSet, field);
+			if (!postings) {
+				postings = new PackedPostingList();
+				setMetadataPosting(postingSet, field, postings);
+			}
+			postings.set(fileId, tf);
 		}
+	}
 
 			const fileCharTf = buildTfMap(
 			this.extractCjkBigrams(
@@ -1849,6 +1881,51 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return retained;
 	}
 
+	private collectTrailingPrefixQueryTermIndexes(
+		queryTerms: readonly string[],
+	): Set<number> {
+		const indexes = new Set<number>();
+		for (
+			let index = queryTerms.length - 1;
+			index >= 0 && indexes.size < MULTI_TERM_PREFIX_MAX_TRAILING_TERMS;
+			index--
+		) {
+			if (!this.isMultiTermPrefixEligible(queryTerms[index])) {
+				break;
+			}
+			indexes.add(index);
+		}
+		return indexes;
+	}
+
+	private isMultiTermPrefixEligible(term: string): boolean {
+		if (term.length < innerSetting.search.minTermLengthForPrefixSearch) {
+			return false;
+		}
+		if (this.hasIndexedExactTerm(term)) {
+			return false;
+		}
+		return (
+			this.countPrefixExpansionCandidates(
+				term,
+				MULTI_TERM_PREFIX_EXPANSION_LIMIT + 1,
+			) <= MULTI_TERM_PREFIX_EXPANSION_LIMIT
+		);
+	}
+
+	private countPrefixExpansionCandidates(prefix: string, limit: number): number {
+		let count = 0;
+		let index = lowerBoundString(this.sortedWordTerms, prefix);
+		while (index < this.sortedWordTerms.length && count < limit) {
+			if (!this.sortedWordTerms[index].startsWith(prefix)) {
+				break;
+			}
+			count += 1;
+			index += 1;
+		}
+		return count;
+	}
+
 	private expandPrefixTerms(prefix: string): string[] {
 		const terms: string[] = [];
 		let index = lowerBoundString(this.sortedWordTerms, prefix);
@@ -1907,6 +1984,16 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			: term.toLocaleLowerCase();
 	}
 
+	private hasIndexedExactTerm(term: string): boolean {
+		const termId = this.wordTermIdByTerm.get(term);
+		if (termId === undefined) {
+			return false;
+		}
+		return (
+			this.passageWordPostings.has(termId) || this.metadataTermPostings.has(termId)
+		);
+	}
+
 	private computePassageIdf(df: number): number {
 		const docCount = Math.max(1, this.livePassageCount);
 		return Math.log((docCount - df + 0.5) / (df + 0.5) + 1);
@@ -1958,11 +2045,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			this.pathByFileId,
 		);
 		const metadataDf = Array.from(
-			this.metadataTermPostings.get(termId)?.values() ?? [],
-		).reduce(
-			(sum, postings) => sum + countActiveFilePostings(postings, this.pathByFileId),
-			0,
-		);
+			this.metadataTermPostings.get(termId) ?? [],
+		).reduce((sum, postings) => {
+			return sum + countActiveFilePostings(postings, this.pathByFileId);
+		}, 0);
 		return contentDf + metadataDf;
 	}
 
@@ -3851,7 +3937,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					const termId = this.wordTermIdByTerm.get(term);
 					const postings =
 						termId !== undefined
-							? this.metadataTermPostings.get(termId)?.get(field)
+							? getMetadataPosting(
+									this.metadataTermPostings.get(termId),
+									field,
+								)
 							: undefined;
 					if (!postings) {
 						continue;
@@ -4492,6 +4581,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private createQueryScoringCache(): QueryScoringCache {
 		return {
 			positionsByPassageId: new Map<number, Map<number, number[]>>(),
+			positionSignalsByPassageId: new Map<
+				number,
+				Map<number, QueryTermPositionSignal>
+			>(),
 			localWindowSetsByPassageId: new Map<number, QueryConditionedLocalWindowSet>(),
 			verifierSignalsByPassageId: new Map<number, VerifierSignals>(),
 			tokenSequenceByPassageId: new Map<number, string[]>(),
@@ -4623,15 +4716,53 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (cached) {
 			return cached;
 		}
+		const cachedSignals = queryScoringCache.positionSignalsByPassageId.get(
+			passage.id,
+		);
+		if (cachedSignals) {
+			const positionsByQueryTerm = projectQueryTermPositions(cachedSignals);
+			queryScoringCache.positionsByPassageId.set(passage.id, positionsByQueryTerm);
+			return positionsByQueryTerm;
+		}
 		const tokenSequence = this.getPassageTokenSequence(passage, queryScoringCache);
-		const positionsByQueryTerm = this.collectPositionsByMatchedTerms(
+		const positionSignals = this.collectQueryTermPositionSignals(
 			tokenSequence,
 			matchedQueryTerms,
 			matchedTermsByQueryTerm,
 			queryTerms,
 		);
+		const positionsByQueryTerm = projectQueryTermPositions(positionSignals);
+		queryScoringCache.positionSignalsByPassageId.set(passage.id, positionSignals);
 		queryScoringCache.positionsByPassageId.set(passage.id, positionsByQueryTerm);
 		return positionsByQueryTerm;
+	}
+
+	private getCachedPassagePositionSignals(params: {
+		passage: PassageRecord;
+		matchedQueryTerms: ReadonlySet<number>;
+		matchedTermsByQueryTerm: ReadonlyMap<number, ReadonlySet<string>>;
+		queryTerms: readonly string[];
+		queryScoringCache: QueryScoringCache;
+	}): Map<number, QueryTermPositionSignal> {
+		const {
+			passage,
+			matchedQueryTerms,
+			matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		} = params;
+		const cached = queryScoringCache.positionSignalsByPassageId.get(passage.id);
+		if (cached) {
+			return cached;
+		}
+		this.getCachedPassagePositionsByQueryTerm({
+			passage,
+			matchedQueryTerms,
+			matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		});
+		return queryScoringCache.positionSignalsByPassageId.get(passage.id) ?? new Map();
 	}
 
 	private getLocalWindowSetForPassage(params: {
@@ -4681,11 +4812,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTerms,
 			queryScoringCache,
 		});
+		const positionSignals = this.getCachedPassagePositionSignals({
+			passage,
+			matchedQueryTerms,
+			matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		});
 		if (positionsByQueryTerm.size <= 1) {
 			return EMPTY_LOCAL_WINDOW_SET;
 		}
 		const signals = this.computeQueryConditionedLocalWindowSet(
 			positionsByQueryTerm,
+			positionSignals,
 			exactMatchedQueryTerms,
 			planner,
 			queryTermWeights,
@@ -4985,6 +5124,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 	private computeQueryConditionedLocalWindowSet(
 		positionsByQueryTerm: ReadonlyMap<number, number[]>,
+		positionSignalsByQueryTerm: ReadonlyMap<number, QueryTermPositionSignal>,
 		exactMatchedQueryTerms: ReadonlySet<number>,
 		planner: FileSearchQueryPlanner | null,
 		queryTermWeights: QueryTermWeightMap,
@@ -5059,6 +5199,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					windowPositions,
 					queryTermWeights,
 				);
+				const matchSpecificityRatio = computeMatchSpecificityRatio(
+					positionSignalsByQueryTerm,
+					windowMatchedQueryTerms,
+				);
+				const orderedSpecificityRatio = computeOrderedSpecificityRatio(
+					windowMatchedQueryTerms,
+					positionSignalsByQueryTerm,
+					windowPositions,
+				);
 				const score =
 					coverageRatio * LOCAL_WINDOW_COVERAGE_WEIGHT +
 					exactCoverageRatio * LOCAL_WINDOW_EXACT_WEIGHT +
@@ -5066,7 +5215,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					compactnessRatio * LOCAL_WINDOW_COMPACTNESS_WEIGHT +
 					orderedRatio * LOCAL_WINDOW_ORDER_WEIGHT +
 					tightOrderedPairRatio * LOCAL_WINDOW_TIGHT_PAIR_WEIGHT +
-					rareTermLift * LOCAL_WINDOW_RARE_TERM_WEIGHT;
+					rareTermLift * LOCAL_WINDOW_RARE_TERM_WEIGHT +
+					matchSpecificityRatio * LOCAL_WINDOW_MATCH_SPECIFICITY_WEIGHT +
+					orderedSpecificityRatio * LOCAL_WINDOW_ORDERED_SPECIFICITY_WEIGHT;
 				this.insertLocalWindowExplanation(
 					explanations,
 					{
@@ -5821,6 +5972,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTerms,
 			queryScoringCache,
 		});
+		const positionSignals = this.getCachedPassagePositionSignals({
+			passage,
+			matchedQueryTerms: passageState.matchedQueryTerms,
+			matchedTermsByQueryTerm: passageState.matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		});
 		if (positionsByQueryTerm.size === 0) {
 			return EMPTY_VERIFIER_SIGNALS;
 		}
@@ -5918,6 +6076,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					)
 				: 0;
 		const exactPhraseRatio = exactPhraseHit ? 1 : 0;
+		const matchSpecificityRatio = computeMatchSpecificityRatio(
+			positionSignals,
+			new Set(positionsByQueryTerm.keys()),
+		);
+		const orderedSpecificityRatio = computeOrderedSpecificityRatio(
+			new Set(positionsByQueryTerm.keys()),
+			positionSignals,
+			positionsByQueryTerm,
+		);
 
 		let score =
 			coverage * VERIFIER_COVERAGE_WEIGHT +
@@ -5926,6 +6093,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			rareTermLift * VERIFIER_RARE_TERM_WEIGHT +
 			tightOrderedPairRatio * VERIFIER_TIGHT_PAIR_WEIGHT +
 			exactQueryCoverage * VERIFIER_EXACT_QUERY_WEIGHT +
+			matchSpecificityRatio * VERIFIER_MATCH_SPECIFICITY_WEIGHT +
+			orderedSpecificityRatio * VERIFIER_ORDERED_SPECIFICITY_WEIGHT +
 			localWindowSignals.score * VERIFIER_LOCAL_WINDOW_WEIGHT;
 		if (exactPhraseHit) {
 			score += VERIFIER_EXACT_PHRASE_BONUS;
@@ -5985,6 +6154,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTerms,
 			queryScoringCache,
 		});
+		const positionSignals = this.getCachedPassagePositionSignals({
+			passage,
+			matchedQueryTerms: passageState.matchedQueryTerms,
+			matchedTermsByQueryTerm: passageState.matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		});
 		if (positionsByQueryTerm.size <= 1) {
 			return 0;
 		}
@@ -6019,6 +6195,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryScoringCache,
 			computeIfMissing: true,
 		});
+		const matchSpecificityRatio = computeMatchSpecificityRatio(
+			positionSignals,
+			new Set(positionsByQueryTerm.keys()),
+		);
+		const orderedSpecificityRatio = computeOrderedSpecificityRatio(
+			new Set(positionsByQueryTerm.keys()),
+			positionSignals,
+			positionsByQueryTerm,
+		);
 
 		let score =
 			coverage * PASSAGE_LOCALITY_COVERAGE_WEIGHT +
@@ -6027,6 +6212,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			rareTermLift * PASSAGE_LOCALITY_RARE_TERM_WEIGHT +
 			tightOrderedPairRatio * PASSAGE_LOCALITY_TIGHT_PAIR_WEIGHT +
 			exactQueryCoverage * PASSAGE_LOCALITY_EXACT_QUERY_WEIGHT +
+			matchSpecificityRatio * PASSAGE_LOCALITY_MATCH_SPECIFICITY_WEIGHT +
+			orderedSpecificityRatio *
+				PASSAGE_LOCALITY_ORDERED_SPECIFICITY_WEIGHT +
 			anchorCoverage * PASSAGE_LOCALITY_ANCHOR_WEIGHT +
 			localWindowSignals.score * PASSAGE_LOCALITY_LOCAL_WINDOW_WEIGHT;
 		if (
@@ -6043,36 +6231,61 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		passageState: PassageCandidateState,
 		queryTerms: readonly string[],
 	): Map<number, number[]> {
-		return this.collectPositionsByMatchedTerms(
-			tokenSequence,
-			passageState.matchedQueryTerms,
-			passageState.matchedTermsByQueryTerm,
-			queryTerms,
+		return projectQueryTermPositions(
+			this.collectQueryTermPositionSignals(
+				tokenSequence,
+				passageState.matchedQueryTerms,
+				passageState.matchedTermsByQueryTerm,
+				queryTerms,
+			),
 		);
 	}
 
-	private collectPositionsByMatchedTerms(
+	private collectQueryTermPositionSignals(
 		tokenSequence: readonly string[],
 		matchedQueryTerms: ReadonlySet<number>,
 		matchedTermsByQueryTerm: ReadonlyMap<number, ReadonlySet<string>>,
 		queryTerms: readonly string[],
-	): Map<number, number[]> {
-		const positionsByQueryTerm = new Map<number, number[]>();
+	): Map<number, QueryTermPositionSignal> {
+		const signalsByQueryTerm = new Map<number, QueryTermPositionSignal>();
 		for (const queryTermIndex of matchedQueryTerms) {
 			const acceptedTerms =
 				matchedTermsByQueryTerm.get(queryTermIndex) ??
 				new Set<string>([queryTerms[queryTermIndex]]);
 			const positions: number[] = [];
+			let strongestMatchWeight = 0;
+			let exactMatchCount = 0;
+			let prefixExpansionCount = 0;
+			let fuzzyMatchCount = 0;
 			for (let index = 0; index < tokenSequence.length; index++) {
-				if (acceptedTerms.has(tokenSequence[index])) {
+				const token = tokenSequence[index];
+				if (acceptedTerms.has(token)) {
 					positions.push(index);
+					const specificity = computeMatchedTermSpecificityWeight(
+						queryTerms[queryTermIndex],
+						token,
+					);
+					strongestMatchWeight = Math.max(strongestMatchWeight, specificity);
+					if (token === queryTerms[queryTermIndex]) {
+						exactMatchCount += 1;
+					} else if (token.startsWith(queryTerms[queryTermIndex])) {
+						prefixExpansionCount += 1;
+					} else {
+						fuzzyMatchCount += 1;
+					}
 				}
 			}
 			if (positions.length > 0) {
-				positionsByQueryTerm.set(queryTermIndex, positions);
+				signalsByQueryTerm.set(queryTermIndex, {
+					positions,
+					strongestMatchWeight,
+					exactMatchCount,
+					prefixExpansionCount,
+					fuzzyMatchCount,
+				});
 			}
 		}
-		return positionsByQueryTerm;
+		return signalsByQueryTerm;
 	}
 }
 
@@ -6256,6 +6469,78 @@ function computePrefixBoost(queryTerm: string, matchedTerm: string): number {
 
 function computeFuzzyBoost(distance: number): number {
 	return Math.max(0.55, 1 - distance * 0.18);
+}
+
+function computeMatchedTermSpecificityWeight(
+	queryTerm: string,
+	matchedTerm: string,
+): number {
+	if (matchedTerm === queryTerm) {
+		return 1.08;
+	}
+	if (matchedTerm.startsWith(queryTerm)) {
+		return Math.min(0.9, 0.6 + computePrefixBoost(queryTerm, matchedTerm) * 0.28);
+	}
+	return 0.58;
+}
+
+function projectQueryTermPositions(
+	signalsByQueryTerm: ReadonlyMap<number, QueryTermPositionSignal>,
+): Map<number, number[]> {
+	const positionsByQueryTerm = new Map<number, number[]>();
+	for (const [queryTermIndex, signals] of signalsByQueryTerm) {
+		positionsByQueryTerm.set(queryTermIndex, signals.positions);
+	}
+	return positionsByQueryTerm;
+}
+
+function computeMatchSpecificityRatio(
+	signalsByQueryTerm: ReadonlyMap<number, QueryTermPositionSignal>,
+	matchedQueryTerms: ReadonlySet<number>,
+): number {
+	if (matchedQueryTerms.size === 0) {
+		return 0;
+	}
+	let total = 0;
+	for (const queryTermIndex of matchedQueryTerms) {
+		total += signalsByQueryTerm.get(queryTermIndex)?.strongestMatchWeight ?? 0;
+	}
+	return total / (matchedQueryTerms.size * 1.08);
+}
+
+function computeOrderedSpecificityRatio(
+	matchedQueryTerms: ReadonlySet<number>,
+	signalsByQueryTerm: ReadonlyMap<number, QueryTermPositionSignal>,
+	positionsByQueryTerm: ReadonlyMap<number, number[]>,
+): number {
+	const indexes = Array.from(matchedQueryTerms).sort((left, right) => left - right);
+	if (indexes.length <= 1) {
+		return indexes.length;
+	}
+	let total = 0;
+	let pairCount = 0;
+	for (let index = 0; index < indexes.length - 1; index++) {
+		const leftIndex = indexes[index];
+		const rightIndex = indexes[index + 1];
+		const leftPositions = positionsByQueryTerm.get(leftIndex) ?? [];
+		const rightPositions = positionsByQueryTerm.get(rightIndex) ?? [];
+		if (leftPositions.length === 0 || rightPositions.length === 0) {
+			continue;
+		}
+		pairCount += 1;
+		if (!hasIncreasingPosition(leftPositions, rightPositions)) {
+			continue;
+		}
+		const leftWeight =
+			signalsByQueryTerm.get(leftIndex)?.strongestMatchWeight ?? 0;
+		const rightWeight =
+			signalsByQueryTerm.get(rightIndex)?.strongestMatchWeight ?? 0;
+		total += Math.sqrt(leftWeight * rightWeight) / 1.08;
+	}
+	if (pairCount === 0) {
+		return 0;
+	}
+	return total / pairCount;
 }
 
 function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
@@ -6893,24 +7178,24 @@ function sumPostingBytes(postingsByTerm: Map<number, PackedPostingList>): number
 }
 
 function sumNestedPostingSizes(
-	postingsByTerm: Map<number, Map<MetadataField, PackedPostingList>>,
+	postingsByTerm: Map<number, PackedMetadataPostingSet>,
 ): number {
 	let total = 0;
-	for (const fieldMap of postingsByTerm.values()) {
-		for (const postings of fieldMap.values()) {
-			total += postings.size;
+	for (const postingSet of postingsByTerm.values()) {
+		for (const postings of postingSet) {
+			total += postings?.size ?? 0;
 		}
 	}
 	return total;
 }
 
 function sumNestedPostingBytes(
-	postingsByTerm: Map<number, Map<MetadataField, PackedPostingList>>,
+	postingsByTerm: Map<number, PackedMetadataPostingSet>,
 ): number {
 	let total = 0;
-	for (const fieldMap of postingsByTerm.values()) {
-		for (const postings of fieldMap.values()) {
-			total += postings.byteLength;
+	for (const postingSet of postingsByTerm.values()) {
+		for (const postings of postingSet) {
+			total += postings?.byteLength ?? 0;
 		}
 	}
 	return total;
@@ -6944,6 +7229,25 @@ function createPackedFilePassageStore(
 		lengths[index] = Math.min(record.length, 0xffff);
 	}
 	return { ids, startOffsets, endOffsets, lengths };
+}
+
+function createEmptyMetadataPostingSet(): PackedMetadataPostingSet {
+	return [undefined, undefined, undefined, undefined, undefined];
+}
+
+function getMetadataPosting(
+	postingSet: PackedMetadataPostingSet | undefined,
+	field: MetadataField,
+): PackedPostingList | undefined {
+	return postingSet?.[METADATA_FIELD_INDEX[field]];
+}
+
+function setMetadataPosting(
+	postingSet: PackedMetadataPostingSet,
+	field: MetadataField,
+	postings: PackedPostingList,
+): void {
+	postingSet[METADATA_FIELD_INDEX[field]] = postings;
 }
 
 function buildNumericTfMap(tokens: Uint32Array): Map<number, number> {

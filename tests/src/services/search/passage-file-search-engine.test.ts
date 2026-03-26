@@ -757,6 +757,63 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("notes/configmap.md");
 	});
 
+	test("prefers in-order multi-term prefix evidence over the same terms out of order", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/ordered.md",
+				basename: "ordered prefix note",
+				folder: "docs",
+				content:
+					"alphaone betatwo gammathree explain the ordered prefix retrieval flow",
+			},
+			{
+				path: "docs/unordered.md",
+				basename: "unordered prefix note",
+				folder: "docs",
+				content:
+					"betatwo gammathree alphaone explain the same retrieval flow in shuffled order",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "alp bet gam",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/ordered.md");
+	});
+
+	test("prefers exact query terms over prefix-expanded alternatives", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/exact-prefix.md",
+				basename: "exact prefix note",
+				folder: "docs",
+				content: "config data rollout keeps the exact term family in one place",
+			},
+			{
+				path: "docs/expanded-prefix.md",
+				basename: "expanded prefix note",
+				folder: "docs",
+				content:
+					"configmap data rollout keeps the expanded term family in one place",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "config da ro",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/exact-prefix.md");
+	});
+
 	test("uses a metadata lane across folder and basename for path-like queries", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
