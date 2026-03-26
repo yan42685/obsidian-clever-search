@@ -679,6 +679,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						queryExecutions.length,
 						executionIndex + 1,
 					),
+					prefixFamilyMode,
 				);
 			}
 		}
@@ -696,7 +697,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				);
 			}
 			if (passageStates.size > PASSAGE_PRUNE_KEEP) {
-				this.prunePassageStates(passageStates, PASSAGE_PRUNE_KEEP);
+				this.prunePassageStates(
+					passageStates,
+					PASSAGE_PRUNE_KEEP,
+					prefixFamilyMode,
+				);
 			}
 		}
 
@@ -2711,6 +2716,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			Math.min(0.55, state.charHits * FILE_CHAR_HIT_BONUS);
 		const shortTitleFastPathScore = this.computeShortTitleFastPathScore({
 			planner,
+			prefixFamilyMode: queryScoringCache.prefixFamilyMode,
 			coverageRatio,
 			contentCoverageRatio,
 			basenameAliasExactRatio,
@@ -4889,10 +4895,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		queryTerms: readonly string[];
 		planner: FileSearchQueryPlanner | null;
 		matchedQueryTermsCount: number;
+		prefixFamilyMode: boolean;
 	}): boolean {
-		const { queryTerms, planner, matchedQueryTermsCount } = params;
+		const { queryTerms, planner, matchedQueryTermsCount, prefixFamilyMode } = params;
 		if (queryTerms.length <= 2 || matchedQueryTermsCount <= 1) {
 			return false;
+		}
+		if (prefixFamilyMode && matchedQueryTermsCount >= 2) {
+			return true;
 		}
 		if (
 			planner?.queryKind === "short_anchor" ||
@@ -5003,6 +5013,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				planner,
 				matchedQueryTermsCount: matchedQueryTerms.size,
+				prefixFamilyMode: queryScoringCache.prefixFamilyMode,
 			})
 		) {
 			return EMPTY_LOCAL_WINDOW_SET;
@@ -5999,6 +6010,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 	private computeShortTitleFastPathScore(params: {
 		planner: FileSearchQueryPlanner | null;
+		prefixFamilyMode: boolean;
 		coverageRatio: number;
 		contentCoverageRatio: number;
 		basenameAliasExactRatio: number;
@@ -6010,6 +6022,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	}): number {
 		const {
 			planner,
+			prefixFamilyMode,
 			coverageRatio,
 			contentCoverageRatio,
 			basenameAliasExactRatio,
@@ -6022,7 +6035,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (planner?.queryKind !== "short_anchor") {
 			return 0;
 		}
-		const fastPathScore =
+		let fastPathScore =
 			basenameAliasExactRatio * FILE_SHORT_TITLE_FAST_PATH_EXACT +
 			basenameAliasExpandedRatio * FILE_SHORT_TITLE_FAST_PATH_PREFIX +
 			headingExactRatio * FILE_SHORT_HEADING_FAST_PATH_EXACT +
@@ -6042,12 +6055,22 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					? FILE_SHORT_TITLE_ALL_TERMS_PREFIX_BONUS +
 						FILE_SHORT_TITLE_STRONG_MATCH_FLOOR
 					: 0);
+		if (prefixFamilyMode) {
+			const exactRatio = basenameAliasExactRatio + headingExactRatio;
+			const expandedRatio = basenameAliasExpandedRatio + headingExpandedRatio;
+			if (contentCoverageRatio <= 0.001 && exactRatio <= 0.001) {
+				fastPathScore *= 0.48;
+			} else if (expandedRatio > exactRatio) {
+				fastPathScore -= Math.min(1.2, (expandedRatio - exactRatio) * 2.2);
+			}
+		}
 		return fastPathScore;
 	}
 
 	private prunePassageStates(
 		passageStates: Map<number, PassageCandidateState>,
 		keepCount: number,
+		prefixFamilyMode = false,
 	) {
 		if (passageStates.size <= keepCount) {
 			return;
@@ -6055,6 +6078,24 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const keptIds = new Set(
 			Array.from(passageStates.entries())
 				.sort((left, right) => {
+					if (prefixFamilyMode) {
+						if (
+							right[1].matchedQueryTerms.size !== left[1].matchedQueryTerms.size
+						) {
+							return (
+								right[1].matchedQueryTerms.size - left[1].matchedQueryTerms.size
+							);
+						}
+						if (
+							right[1].exactMatchedQueryTerms.size !==
+							left[1].exactMatchedQueryTerms.size
+						) {
+							return (
+								right[1].exactMatchedQueryTerms.size -
+								left[1].exactMatchedQueryTerms.size
+							);
+						}
+					}
 					if (right[1].score !== left[1].score) {
 						return right[1].score - left[1].score;
 					}
@@ -6080,14 +6121,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		totalQueryWeight: number,
 		queryScoringCache: QueryScoringCache,
 	): Array<[number, PassageCandidateState]> {
-		this.prunePassageStates(passageStates, PASSAGE_PRUNE_KEEP);
+		this.prunePassageStates(
+			passageStates,
+			PASSAGE_PRUNE_KEEP,
+			queryScoringCache.prefixFamilyMode,
+		);
 		if (queryTerms.length > 1) {
 			const localityFrontier = Array.from(passageStates.entries())
 				.sort((left, right) => {
-					if (right[1].score !== left[1].score) {
-						return right[1].score - left[1].score;
-					}
-					return left[0] - right[0];
+					return comparePassageCandidateEntries(
+						left,
+						right,
+						queryScoringCache.prefixFamilyMode,
+					);
 				})
 				.slice(0, MAX_LOCALITY_FRONTIER);
 			for (const [passageId, passageState] of localityFrontier) {
@@ -6109,10 +6155,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 		const verifierFrontier = Array.from(passageStates.entries())
 			.sort((left, right) => {
-				if (right[1].score !== left[1].score) {
-					return right[1].score - left[1].score;
-				}
-				return left[0] - right[0];
+				return comparePassageCandidateEntries(
+					left,
+					right,
+					queryScoringCache.prefixFamilyMode,
+				);
 			})
 			.slice(0, MAX_VERIFIER_FRONTIER);
 
@@ -6139,10 +6186,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 		return Array.from(passageStates.entries())
 			.sort((left, right) => {
-				if (right[1].score !== left[1].score) {
-					return right[1].score - left[1].score;
-				}
-				return left[0] - right[0];
+				return comparePassageCandidateEntries(
+					left,
+					right,
+					queryScoringCache.prefixFamilyMode,
+				);
 			})
 			.slice(0, MAX_PASSAGE_FRONTIER);
 	}
@@ -6827,6 +6875,33 @@ function compareMatchedKindPriority(
 		fuzzy: 2,
 	};
 	return priority[left] - priority[right];
+}
+
+function comparePassageCandidateEntries(
+	left: readonly [number, PassageCandidateState],
+	right: readonly [number, PassageCandidateState],
+	prefixFamilyMode: boolean,
+): number {
+	if (prefixFamilyMode) {
+		if (
+			right[1].matchedQueryTerms.size !== left[1].matchedQueryTerms.size
+		) {
+			return right[1].matchedQueryTerms.size - left[1].matchedQueryTerms.size;
+		}
+		if (
+			right[1].exactMatchedQueryTerms.size !==
+			left[1].exactMatchedQueryTerms.size
+		) {
+			return (
+				right[1].exactMatchedQueryTerms.size -
+				left[1].exactMatchedQueryTerms.size
+			);
+		}
+	}
+	if (right[1].score !== left[1].score) {
+		return right[1].score - left[1].score;
+	}
+	return left[0] - right[0];
 }
 
 function isBetterFamilyRepresentative(
