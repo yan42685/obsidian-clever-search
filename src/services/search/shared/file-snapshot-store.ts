@@ -77,21 +77,8 @@ export class FileSnapshotStore {
 		return this.currentFileCache.get(path)?.text;
 	}
 
-	peekCurrentFileGeneration(path: string): number | undefined {
-		return this.currentFileCache.get(path)?.generation;
-	}
-
 	invalidateCurrentFile(path: string): void {
 		this.currentFileCache.delete(path);
-	}
-
-	renameCurrentFile(oldPath: string, newPath: string, generation?: number): void {
-		const cached = this.currentFileCache.get(oldPath);
-		if (cached === undefined) {
-			return;
-		}
-		this.currentFileCache.delete(oldPath);
-		this.setCurrentFileText(newPath, cached.text, generation ?? cached.generation);
 	}
 
 	async persistIndexedSnapshot(
@@ -151,23 +138,6 @@ export class FileSnapshotStore {
 			return;
 		}
 		await this.database.db.hybridFileSnapshots.bulkDelete(Array.from(filePaths));
-	}
-
-	async getIndexedSnapshotText(
-		filePath: string,
-		expectedGeneration?: number,
-	): Promise<string | undefined> {
-		const current = this.currentFileCache.get(filePath);
-		if (
-			expectedGeneration !== undefined &&
-			current?.generation !== undefined &&
-			current.generation === expectedGeneration
-		) {
-			return current.text;
-		}
-
-		const row = await this.database.db.hybridFileSnapshots.get(filePath);
-		return row?.plainText;
 	}
 
 	async getIndexedSnapshotTexts(

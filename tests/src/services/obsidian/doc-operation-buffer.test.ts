@@ -91,6 +91,22 @@ describe("DocOperationBuffer", () => {
 		]);
 	});
 
+	test("keeps latest sourceGeneration through rename then modify burst on new path", () => {
+		const reduced = reduceDocOperations([
+			new DocMoveOperation("old.md", "new.md", 120),
+			new DocUpsertOperation("new.md", 160),
+		]);
+
+		expect(reduced.dirtyPaths).toEqual([
+			expect.objectContaining({
+				path: "new.md",
+				renameFromPath: "old.md",
+				requiresReindex: true,
+				sourceGeneration: 160,
+			}),
+		]);
+	});
+
 	test("reduces chained renames to the final surviving path", async () => {
 		const batches: any[] = [];
 		const buffer = new DocOperationBuffer(async (operations) => {
