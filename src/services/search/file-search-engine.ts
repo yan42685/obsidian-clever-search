@@ -31,7 +31,15 @@ export type FileSearchRequest = {
 
 export type SerializedFileSearchIndex =
 	| AsPlainObject
-	| SerializedBinaryCustomFileSearchIndex;
+	| SerializedBinaryCustomFileSearchIndex
+	| SerializedPassageFileSearchSnapshot;
+
+export type SerializedPassageFileSearchSnapshot = {
+	__backend: "passage-bm25";
+	__version: 1;
+	__format: "document-snapshot";
+	documents: IndexedDocument[];
+};
 
 export interface FileSearchEngine {
 	readonly backend: FileSearchBackend;

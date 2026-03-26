@@ -19,6 +19,7 @@ import { eventBus } from "src/utils/event-bus";
 import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
+import { DevFileReadBenchmark } from "./dev-file-read-benchmark";
 import { openHybridSearchModal } from "./setting-manager";
 
 const CTRL: Modifier = "Ctrl";
@@ -57,6 +58,20 @@ export class CommandRegistry {
 				name: "Hybrid search (BM25 + vector) [dev]",
 				callback: () =>
 					new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
+			});
+
+			this.addCommand({
+				id: "cs-dev-file-read-benchmark",
+				name: "Benchmark file read paths [dev]",
+				callback: async () =>
+					await getInstance(DevFileReadBenchmark).run(),
+			});
+
+			this.addCommand({
+				id: "cs-dev-big-corpus-file-read-benchmark",
+				name: "Benchmark big corpus read paths [dev]",
+				callback: async () =>
+					await getInstance(DevFileReadBenchmark).runBigCorpus(),
 			});
 		}
 	}
