@@ -310,6 +310,19 @@ type QueryLocalePreference = {
 	explicit: boolean;
 };
 
+type LocalePreferenceComparisonContext = {
+	preference: QueryLocalePreference;
+	localeByPath: ReadonlyMap<string, "en" | "zh" | null>;
+	mirrorKeyByPath: ReadonlyMap<string, string>;
+};
+
+type MixedAnchorComparisonContext = {
+	titleAnchorPreferenceScoreByPath: ReadonlyMap<string, number>;
+	pathAnchorPreferenceScoreByPath: ReadonlyMap<string, number>;
+	decisionScoreByPath: ReadonlyMap<string, number>;
+	mirrorKeyByPath: ReadonlyMap<string, string>;
+};
+
 const METADATA_FIELDS: MetadataField[] = [
 	"basename",
 	"aliases",
@@ -3523,14 +3536,26 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryScriptProfile: ScriptProfile;
 		} | null,
 	): (left: RankedMatchedFile, right: RankedMatchedFile) => number {
+		const localePreferenceContext = this.createLocalePreferenceComparisonContext(
+			results,
+			localeContext,
+		);
+		const mixedAnchorContext =
+			queryRoute === "mixed_anchor"
+				? this.createMixedAnchorComparisonContext(results)
+				: null;
 		if (
 			queryRoute === "metadata_exact" &&
 			planner?.queryKind === "short_anchor" &&
 			this.shouldRouteShortAnchorResults(results)
 		) {
 			return (left, right) => {
-				const localePreference = localeContext
-					? this.compareMirrorLocalePreference(left, right, localeContext)
+				const localePreference = localePreferenceContext
+					? this.compareMirrorLocalePreference(
+							left,
+							right,
+							localePreferenceContext,
+						)
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
@@ -3554,8 +3579,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "metadata_exact" && this.shouldRouteMetadataLaneResults(results)) {
 			return (left, right) => {
-				const localePreference = localeContext
-					? this.compareMirrorLocalePreference(left, right, localeContext)
+				const localePreference = localePreferenceContext
+					? this.compareMirrorLocalePreference(
+							left,
+							right,
+							localePreferenceContext,
+						)
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
@@ -3582,8 +3611,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "path_anchor" && this.shouldRouteMetadataLaneResults(results)) {
 			return (left, right) => {
-				const localePreference = localeContext
-					? this.compareMirrorLocalePreference(left, right, localeContext)
+				const localePreference = localePreferenceContext
+					? this.compareMirrorLocalePreference(
+							left,
+							right,
+							localePreferenceContext,
+						)
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
@@ -3610,31 +3643,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		if (queryRoute === "mixed_anchor") {
 			return (left, right) => {
-				const mixedAnchorDecision = this.compareMixedAnchorDecision(left, right);
+				const mixedAnchorDecision = mixedAnchorContext
+					? this.compareMixedAnchorDecision(left, right, mixedAnchorContext)
+					: 0;
 				if (mixedAnchorDecision !== 0) {
 					return mixedAnchorDecision;
 				}
-				const localePreference = localeContext
-					? this.compareMirrorLocalePreference(left, right, localeContext)
+				const localePreference = localePreferenceContext
+					? this.compareMirrorLocalePreference(
+							left,
+							right,
+							localePreferenceContext,
+						)
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
-				}
-				const bodyOnlyTopicDecision = this.compareBodyOnlyTopicDecision(
-					left,
-					right,
-					queryRoute,
-				);
-				if (bodyOnlyTopicDecision !== 0) {
-					return bodyOnlyTopicDecision;
-				}
-				const conceptCollisionDecision = this.compareConceptCollisionDecision(
-					left,
-					right,
-					queryRoute,
-				);
-				if (conceptCollisionDecision !== 0) {
-					return conceptCollisionDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -3672,27 +3695,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			};
 		}
 		return (left, right) => {
-			const localePreference = localeContext
-				? this.compareMirrorLocalePreference(left, right, localeContext)
+			const localePreference = localePreferenceContext
+				? this.compareMirrorLocalePreference(left, right, localePreferenceContext)
 				: 0;
 			if (localePreference !== 0) {
 				return localePreference;
-			}
-			const bodyOnlyTopicDecision = this.compareBodyOnlyTopicDecision(
-				left,
-				right,
-				queryRoute,
-			);
-			if (bodyOnlyTopicDecision !== 0) {
-				return bodyOnlyTopicDecision;
-			}
-			const conceptCollisionDecision = this.compareConceptCollisionDecision(
-				left,
-				right,
-				queryRoute,
-			);
-			if (conceptCollisionDecision !== 0) {
-				return conceptCollisionDecision;
 			}
 			if (right.queryRouteScore !== left.queryRouteScore) {
 				return right.queryRouteScore - left.queryRouteScore;
@@ -3770,20 +3777,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private compareMirrorLocalePreference(
 		left: RankedMatchedFile,
 		right: RankedMatchedFile,
-		context: {
-			queryTerms: readonly string[];
-			queryScriptProfile: ScriptProfile;
-		},
+		context: LocalePreferenceComparisonContext,
 	): number {
-		const preference = this.getQueryLocalePreference(
-			context.queryTerms,
-			context.queryScriptProfile,
-		);
+		const { preference, localeByPath, mirrorKeyByPath } = context;
 		if (!preference.locale) {
 			return 0;
 		}
-		const leftLocale = this.detectPathLocale(left.path);
-		const rightLocale = this.detectPathLocale(right.path);
+		const leftLocale = localeByPath.get(left.path) ?? null;
+		const rightLocale = localeByPath.get(right.path) ?? null;
 		if (
 			!leftLocale ||
 			!rightLocale ||
@@ -3792,7 +3793,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		) {
 			return 0;
 		}
-		if (!this.areMirrorLocaleVariants(left.path, right.path)) {
+		if (
+			(mirrorKeyByPath.get(left.path) ?? left.path) !==
+			(mirrorKeyByPath.get(right.path) ?? right.path)
+		) {
 			return 0;
 		}
 		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
@@ -3808,17 +3812,68 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return leftLocale === preference.locale ? -1 : 1;
 	}
 
+	private createLocalePreferenceComparisonContext(
+		results: readonly RankedMatchedFile[],
+		localeContext: {
+			queryTerms: readonly string[];
+			queryScriptProfile: ScriptProfile;
+		} | null,
+	): LocalePreferenceComparisonContext | null {
+		if (!localeContext) {
+			return null;
+		}
+		const preference = this.getQueryLocalePreference(
+			localeContext.queryTerms,
+			localeContext.queryScriptProfile,
+		);
+		if (!preference.locale) {
+			return null;
+		}
+		const localeByPath = new Map<string, "en" | "zh" | null>();
+		const mirrorKeyByPath = new Map<string, string>();
+		for (const result of results) {
+			if (!localeByPath.has(result.path)) {
+				localeByPath.set(result.path, this.detectPathLocale(result.path));
+				mirrorKeyByPath.set(
+					result.path,
+					this.normalizeMirrorLocalePath(result.path),
+				);
+			}
+		}
+		return {
+			preference,
+			localeByPath,
+			mirrorKeyByPath,
+		};
+	}
+
 	private compareMixedAnchorDecision(
 		left: RankedMatchedFile,
 		right: RankedMatchedFile,
+		context: MixedAnchorComparisonContext,
 	): number {
+		const {
+			titleAnchorPreferenceScoreByPath,
+			pathAnchorPreferenceScoreByPath,
+			decisionScoreByPath,
+			mirrorKeyByPath,
+		} = context;
+		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
+		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
+		if (queryRouteScoreGap > 42 || scoreGap > 30) {
+			return 0;
+		}
 		const leftTitleAnchorPreferenceScore =
+			titleAnchorPreferenceScoreByPath.get(left.path) ??
 			this.computeMixedTitleAnchorPreferenceScore(left);
 		const rightTitleAnchorPreferenceScore =
+			titleAnchorPreferenceScoreByPath.get(right.path) ??
 			this.computeMixedTitleAnchorPreferenceScore(right);
 		const leftPathAnchorPreferenceScore =
+			pathAnchorPreferenceScoreByPath.get(left.path) ??
 			this.computeMixedPathAnchorPreferenceScore(left);
 		const rightPathAnchorPreferenceScore =
+			pathAnchorPreferenceScoreByPath.get(right.path) ??
 			this.computeMixedPathAnchorPreferenceScore(right);
 		const leftAnchorGate = Math.max(
 			left.basenameAliasCoverageRatio,
@@ -3841,7 +3896,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			Math.abs(left.pathCoverageRatio - right.pathCoverageRatio),
 			Math.abs(left.pathAnchorRatio - right.pathAnchorRatio),
 		);
-		const mirrorLocaleVariants = this.areMirrorLocaleVariants(left.path, right.path);
+		const mirrorLocaleVariants =
+			(mirrorKeyByPath.get(left.path) ?? left.path) ===
+			(mirrorKeyByPath.get(right.path) ?? right.path);
 		const titleAnchorGap = Math.abs(
 			left.basenameAliasAnchorRatio - right.basenameAliasAnchorRatio,
 		);
@@ -3870,8 +3927,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (!titleAnchorReady && !pathAnchorReady && !mirrorLocaleVariants && anchorGap < 0.14) {
 			return 0;
 		}
-		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
-		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
 		const queryRouteGapThreshold = pathAnchorReady ? 42 : titleAnchorReady ? 30 : 24;
 		const scoreGapThreshold = pathAnchorReady ? 30 : titleAnchorReady ? 24 : 18;
 		if (
@@ -3898,20 +3953,60 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			const leftDecisionScore = Math.max(
 				leftTitleAnchorPreferenceScore,
 				leftPathAnchorPreferenceScore,
-				this.computeMixedAnchorDecisionScore(left),
+				decisionScoreByPath.get(left.path) ??
+					this.computeMixedAnchorDecisionScore(left),
 			);
 			const rightDecisionScore = Math.max(
 				rightTitleAnchorPreferenceScore,
 				rightPathAnchorPreferenceScore,
-				this.computeMixedAnchorDecisionScore(right),
+				decisionScoreByPath.get(right.path) ??
+					this.computeMixedAnchorDecisionScore(right),
 			);
 			return this.compareDecisionGap(leftDecisionScore, rightDecisionScore, 1.1);
 		}
 		return this.compareDecisionGap(
-			this.computeMixedAnchorDecisionScore(left),
-			this.computeMixedAnchorDecisionScore(right),
+			decisionScoreByPath.get(left.path) ??
+				this.computeMixedAnchorDecisionScore(left),
+			decisionScoreByPath.get(right.path) ??
+				this.computeMixedAnchorDecisionScore(right),
 			1.15,
 		);
+	}
+
+	private createMixedAnchorComparisonContext(
+		results: readonly RankedMatchedFile[],
+	): MixedAnchorComparisonContext {
+		const titleAnchorPreferenceScoreByPath = new Map<string, number>();
+		const pathAnchorPreferenceScoreByPath = new Map<string, number>();
+		const decisionScoreByPath = new Map<string, number>();
+		const mirrorKeyByPath = new Map<string, string>();
+		for (const result of results) {
+			if (decisionScoreByPath.has(result.path)) {
+				continue;
+			}
+			titleAnchorPreferenceScoreByPath.set(
+				result.path,
+				this.computeMixedTitleAnchorPreferenceScore(result),
+			);
+			pathAnchorPreferenceScoreByPath.set(
+				result.path,
+				this.computeMixedPathAnchorPreferenceScore(result),
+			);
+			decisionScoreByPath.set(
+				result.path,
+				this.computeMixedAnchorDecisionScore(result),
+			);
+			mirrorKeyByPath.set(
+				result.path,
+				this.normalizeMirrorLocalePath(result.path),
+			);
+		}
+		return {
+			titleAnchorPreferenceScoreByPath,
+			pathAnchorPreferenceScoreByPath,
+			decisionScoreByPath,
+			mirrorKeyByPath,
+		};
 	}
 
 	private compareConceptCollisionDecision(
