@@ -161,6 +161,72 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("notes/local.md");
 	});
 
+	test("does not return stale passages after updating the same path", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/topic.md",
+				basename: "topic",
+				folder: "notes",
+				content: "alpha legacy marker only lives in the first version",
+			},
+			{
+				path: "notes/reference.md",
+				basename: "reference",
+				folder: "notes",
+				content: "beta stable reference note",
+			},
+		]);
+
+		await engine.addDocuments([
+			{
+				path: "notes/topic.md",
+				basename: "topic",
+				folder: "notes",
+				content: "beta fresh marker only lives in the new version",
+			},
+		]);
+
+		const alphaResults = await engine.searchFiles({
+			queryText: "alpha legacy marker",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+		const betaResults = await engine.searchFiles({
+			queryText: "beta fresh marker",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(alphaResults.some((result) => result.path === "notes/topic.md")).toBe(false);
+		expect(betaResults[0]?.path).toBe("notes/topic.md");
+	});
+
+	test("compacts stale postings after enough deletes accumulate", async () => {
+		const engine = createEngine() as any;
+		const documents = Array.from({ length: 30 }, (_, index) => ({
+			path: `notes/doc-${index}.md`,
+			basename: `doc ${index}`,
+			folder: "notes",
+			content: `marker${index} compact verification text`,
+		}));
+		await engine.addDocuments(documents);
+
+		engine.deleteDocuments(
+			Array.from({ length: 24 }, (_, index) => `notes/doc-${index}.md`),
+		);
+
+		const breakdown = engine.getIndexBreakdown?.() as
+			| { staleFiles?: number; stalePassages?: number; files?: number }
+			| undefined;
+
+		expect(breakdown?.staleFiles ?? -1).toBe(0);
+		expect(breakdown?.stalePassages ?? -1).toBe(0);
+		expect(breakdown?.files).toBe(6);
+	});
+
 	test("lets a file win with multiple decisive local explanations instead of one noisy hit", async () => {
 		const engine = createEngine();
 		const longGap = Array.from({ length: 6 }, (_, index) =>

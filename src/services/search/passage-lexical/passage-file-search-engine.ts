@@ -49,9 +49,7 @@ type IndexedPassageBuild = {
 	wordTf: Map<string, number>;
 };
 
-type PassagePostingTerms = {
-	wordTermIds: Uint32Array;
-};
+type StoredIndexedDocument = Omit<IndexedDocument, "content">;
 
 type PassageCandidateState = {
 	score: number;
@@ -376,7 +374,58 @@ const LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.72;
 const LOCAL_WINDOW_DUPLICATE_TERM_OVERLAP_THRESHOLD = 0.85;
 const PASSAGE_RUNTIME_CACHE_SIZE = 384;
 const MIN_LONG_CHUNK_CHARS = 220;
+const BODY_TERM_PRUNE_TRIGGER = 96;
+const BODY_TERM_PRUNE_KEEP = 80;
+const COMPACT_MIN_STALE_FILES = 24;
+const COMPACT_MIN_STALE_PASSAGES = 256;
+const COMPACT_STALE_FILE_RATIO = 0.35;
+const COMPACT_STALE_PASSAGE_RATIO = 0.4;
+const COMPACT_MUTATION_INTERVAL = 192;
 const HAN_SEQUENCE_REGEX = /\p{Script=Han}+/gu;
+const ASCII_ALPHA_REGEX = /^[a-z]+$/u;
+const ASCII_ALPHANUM_REGEX = /^[a-z0-9_-]+$/u;
+const NUMERIC_TOKEN_REGEX = /^\d+$/u;
+const BODY_STOPWORD_TERMS = new Set([
+	"a",
+	"an",
+	"and",
+	"are",
+	"as",
+	"at",
+	"be",
+	"been",
+	"but",
+	"by",
+	"for",
+	"from",
+	"had",
+	"has",
+	"have",
+	"he",
+	"her",
+	"his",
+	"in",
+	"is",
+	"it",
+	"its",
+	"of",
+	"on",
+	"or",
+	"our",
+	"she",
+	"that",
+	"the",
+		"their",
+	"them",
+	"there",
+	"they",
+	"this",
+	"to",
+	"was",
+	"were",
+	"will",
+	"with",
+]);
 const EMPTY_LOCAL_WINDOW_SIGNALS: LocalWindowSignals = {
 	score: 0,
 	coverageRatio: 0,
@@ -426,18 +475,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	};
 	private readonly fileIdByPath = new Map<string, number>();
 	private readonly pathByFileId = new Map<number, string>();
+	private readonly liveDocumentsByPath = new Map<string, StoredIndexedDocument>();
 	private readonly fileMetadataTokens = new Map<
 		number,
 		Record<MetadataField, string[]>
 	>();
 	private readonly fileCharLengths = new Map<number, number>();
-	private readonly fileCharTermIdsByFileId = new Map<number, Uint32Array>();
 	private readonly fallbackFileContentById = new Map<number, string>();
 	private readonly fileScriptProfiles = new Map<number, ScriptProfile>();
 	private readonly filePassageIds = new Map<number, number[]>();
 	private readonly passageById = new Map<number, PassageRecord>();
-	private readonly passagePostingTermsById = new Map<number, PassagePostingTerms>();
-	private readonly passageLengths = new Map<number, number>();
+	private readonly tombstonedFileIds = new Set<number>();
 	private readonly passageRuntimeCache = new Map<
 		number,
 		{ text: string; tokenSequence?: string[] }
@@ -448,6 +496,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private nextFileId = 1;
 	private nextPassageId = 1;
 	private nextWordTermId = 1;
+	private livePassageCount = 0;
+	private stalePassageCount = 0;
+	private mutationCountSinceCompact = 0;
 	private totalPassageLength = 0;
 	private totalFileCharLength = 0;
 
@@ -466,6 +517,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const document of documents) {
 			this.indexDocument(document);
 		}
+		this.maybeCompactIndex();
 		logger.debug(`passage lexical indexed/updated ${documents.length} docs`);
 	}
 
@@ -475,8 +527,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 	deleteDocuments(paths: string[]): void {
 		for (const path of paths) {
-			this.removeDocument(path);
+			this.tombstoneDocument(path);
 		}
+		this.maybeCompactIndex();
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
@@ -541,13 +594,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						? this.passageWordPostings.get(matchedTermId)
 						: undefined;
 				if (contentPostings) {
-					const idf = this.computePassageIdf(contentPostings.size);
+					const activeDf = countActivePassagePostings(
+						contentPostings,
+						this.passageById,
+						this.pathByFileId,
+					);
+					if (activeDf === 0) {
+						continue;
+					}
+					const idf = this.computePassageIdf(activeDf);
 					const avgdl = this.averagePassageLength();
 					for (let postingIndex = 0; postingIndex < contentPostings.size; postingIndex++) {
 						const passageId = contentPostings.ids[postingIndex];
 						const tf = contentPostings.tfs[postingIndex];
 						const passage = this.passageById.get(passageId);
-						if (!passage) {
+						if (!passage || !this.isPassageActive(passage)) {
 							continue;
 						}
 						const passageState = this.ensurePassageState(
@@ -584,11 +645,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					if (!postings || postings.size === 0) {
 						continue;
 					}
-					const idf = this.computeMetadataIdf(postings.size);
+					const activeDf = countActiveFilePostings(postings, this.pathByFileId);
+					if (activeDf === 0) {
+						continue;
+					}
+					const idf = this.computeMetadataIdf(activeDf);
 					const avgdl = this.averageMetadataFieldLength(field);
 					for (let postingIndex = 0; postingIndex < postings.size; postingIndex++) {
 						const fileId = postings.ids[postingIndex];
 						const tf = postings.tfs[postingIndex];
+						if (!this.isFileActive(fileId)) {
+							continue;
+						}
 						const fileState = this.ensureFileState(fileStates, fileId);
 						const fileLength =
 							this.metadataFieldStats[field].docLengths.get(fileId) ?? 0;
@@ -781,12 +849,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const passage of this.passageById.values()) {
 			total += 24;
 		}
-		for (const postingTerms of this.passagePostingTermsById.values()) {
-			total += postingTerms.wordTermIds.length * 4;
-		}
-		for (const termIds of this.fileCharTermIdsByFileId.values()) {
-			total += termIds.length * 4;
-		}
 		for (const passageIds of this.filePassageIds.values()) {
 			total += passageIds.length * 4;
 		}
@@ -804,27 +866,22 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const postings of this.fileCharPostings.values()) {
 			total += postings.size * 6;
 		}
+		total += this.tombstonedFileIds.size * 4;
 		return total;
 	}
 
 	getIndexBreakdown(): Record<string, unknown> | null {
 		return {
 			files: this.pathByFileId.size,
-			passages: this.passageById.size,
+			passages: this.livePassageCount,
+			staleFiles: this.tombstonedFileIds.size,
+			stalePassages: this.stalePassageCount,
 			wordTerms: this.passageWordPostings.size,
 			charTerms: this.fileCharPostings.size,
 			metadataTerms: this.metadataTermPostings.size,
 			wordPostings: sumPostingSizes(this.passageWordPostings),
 			charPostings: sumPostingSizes(this.fileCharPostings),
 			metadataPostings: sumNestedPostingSizes(this.metadataTermPostings),
-			passagePostingTermRefs: Array.from(this.passagePostingTermsById.values()).reduce(
-				(sum, item) => sum + item.wordTermIds.length,
-				0,
-			),
-			fileCharTermRefs: Array.from(this.fileCharTermIdsByFileId.values()).reduce(
-				(sum, item) => sum + item.length,
-				0,
-			),
 			estimatedBytes: {
 				total: this.estimateIndexBytes(),
 				paths: Array.from(this.pathByFileId.values()).reduce(
@@ -846,14 +903,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					0,
 				),
 				passageRecords: this.passageById.size * 24,
-				passagePostingTerms: Array.from(this.passagePostingTermsById.values()).reduce(
-					(sum, item) => sum + item.wordTermIds.length * 4,
-					0,
-				),
-				fileCharTermRefs: Array.from(this.fileCharTermIdsByFileId.values()).reduce(
-					(sum, item) => sum + item.length * 4,
-					0,
-				),
 				wordLexicon: this.sortedWordTerms.reduce(
 					(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 					0,
@@ -866,6 +915,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				wordPostings: sumPostingSizes(this.passageWordPostings) * 6,
 				charPostings: sumPostingSizes(this.fileCharPostings) * 6,
 				metadataPostings: sumNestedPostingSizes(this.metadataTermPostings) * 12,
+				tombstones: this.tombstonedFileIds.size * 4,
 			},
 			topWordTerms: topPostingTerms(
 				this.passageWordPostings,
@@ -992,19 +1042,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.wordTermById.clear();
 		this.fileIdByPath.clear();
 		this.pathByFileId.clear();
+		this.liveDocumentsByPath.clear();
 		this.fileMetadataTokens.clear();
 		this.fileCharLengths.clear();
-		this.fileCharTermIdsByFileId.clear();
 		this.fallbackFileContentById.clear();
 		this.fileScriptProfiles.clear();
 		this.filePassageIds.clear();
 		this.passageById.clear();
-		this.passagePostingTermsById.clear();
-		this.passageLengths.clear();
+		this.tombstonedFileIds.clear();
 		this.passageRuntimeCache.clear();
 		this.nextFileId = 1;
 		this.nextPassageId = 1;
 		this.nextWordTermId = 1;
+		this.livePassageCount = 0;
+		this.stalePassageCount = 0;
+		this.mutationCountSinceCompact = 0;
 		this.totalPassageLength = 0;
 		this.totalFileCharLength = 0;
 		for (const field of METADATA_FIELDS) {
@@ -1016,10 +1068,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private indexDocument(document: IndexedDocument) {
 		const existingFileId = this.fileIdByPath.get(document.path);
 		if (existingFileId !== undefined) {
-			this.removeDocument(document.path);
+			this.tombstoneDocument(document.path);
 		}
 
 		const fileId = this.nextFileId++;
+		this.liveDocumentsByPath.set(document.path, {
+			path: document.path,
+			basename: document.basename,
+			folder: document.folder,
+			aliases: document.aliases,
+			tags: document.tags,
+			headings: document.headings,
+		});
 		this.fileIdByPath.set(document.path, fileId);
 		this.pathByFileId.set(fileId, document.path);
 		const content = document.content ?? "";
@@ -1078,7 +1138,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				[document.basename ?? "", document.headings ?? "", content].join("\n"),
 			),
 		);
-		const fileCharTermIds: number[] = [];
 		this.fileCharLengths.set(
 			fileId,
 			Array.from(fileCharTf.values()).reduce((sum, tf) => sum + tf, 0),
@@ -1086,7 +1145,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.totalFileCharLength += this.fileCharLengths.get(fileId) ?? 0;
 		for (const [term, tf] of fileCharTf) {
 			const termId = this.getOrCreateWordLikeTermId(term);
-			fileCharTermIds.push(termId);
 			let postings = this.fileCharPostings.get(termId);
 			if (!postings) {
 				postings = new PackedPostingList();
@@ -1094,21 +1152,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 			postings.set(fileId, tf);
 		}
-		this.fileCharTermIdsByFileId.set(fileId, Uint32Array.from(fileCharTermIds));
 
 		const passages = this.buildIndexedPassages(fileId, content);
 		this.filePassageIds.set(
 			fileId,
 			passages.map((passage) => passage.record.id),
 		);
+		this.livePassageCount += passages.length;
 		for (const passage of passages) {
 			this.passageById.set(passage.record.id, passage.record);
-			this.passagePostingTermsById.set(passage.record.id, {
-				wordTermIds: Uint32Array.from(Array.from(passage.wordTf.keys(), (term) =>
-					this.getOrCreateWordLikeTermId(term),
-				)),
-			});
-			this.passageLengths.set(passage.record.id, passage.record.length);
 			this.totalPassageLength += passage.record.length;
 
 			for (const [term, tf] of passage.wordTf) {
@@ -1122,13 +1174,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				postings.set(passage.record.id, tf);
 			}
 		}
+		this.mutationCountSinceCompact += 1;
 	}
 
-	private removeDocument(path: string) {
+	private tombstoneDocument(path: string) {
 		const fileId = this.fileIdByPath.get(path);
 		if (fileId === undefined) {
 			return;
 		}
+		if (this.tombstonedFileIds.has(fileId)) {
+			return;
+		}
+		this.tombstonedFileIds.add(fileId);
+		this.liveDocumentsByPath.delete(path);
 
 		const metadataTokens = this.fileMetadataTokens.get(fileId);
 		if (metadataTokens) {
@@ -1137,69 +1195,20 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					this.metadataFieldStats[field].docLengths.get(fileId) ?? 0;
 				this.metadataFieldStats[field].docLengths.delete(fileId);
 				this.metadataFieldStats[field].totalLength -= docLength;
-
-				const tfMap = buildTfMap(metadataTokens[field]);
-				for (const term of tfMap.keys()) {
-					const termId = this.wordTermIdByTerm.get(term);
-					const fieldMap =
-						termId !== undefined
-							? this.metadataTermPostings.get(termId)
-							: undefined;
-					const postings = fieldMap?.get(field);
-					postings?.delete(fileId);
-					if (postings && postings.size === 0) {
-						fieldMap?.delete(field);
-					}
-					if (fieldMap && fieldMap.size === 0) {
-						this.metadataTermPostings.delete(termId!);
-						if (
-							termId !== undefined &&
-							!this.passageWordPostings.has(termId)
-						) {
-							this.removeWordTerm(term);
-						}
-					}
-				}
 			}
 		}
 
 		const fileCharLength = this.fileCharLengths.get(fileId) ?? 0;
 		this.totalFileCharLength -= fileCharLength;
 		this.fileCharLengths.delete(fileId);
-		for (const termId of this.fileCharTermIdsByFileId.get(fileId) ?? []) {
-			const postings = this.fileCharPostings.get(termId);
-			postings?.delete(fileId);
-			if (postings && postings.size === 0) {
-				this.fileCharPostings.delete(termId);
-			}
-		}
-		this.fileCharTermIdsByFileId.delete(fileId);
 
 		const passageIds = this.filePassageIds.get(fileId) ?? [];
 		for (const passageId of passageIds) {
-			this.totalPassageLength -= this.passageLengths.get(passageId) ?? 0;
-			this.passageLengths.delete(passageId);
+			this.totalPassageLength -= this.passageById.get(passageId)?.length ?? 0;
 			this.passageRuntimeCache.delete(passageId);
-			const postingTerms = this.passagePostingTermsById.get(passageId);
-
-			for (const termId of postingTerms?.wordTermIds ?? []) {
-				const term = this.wordTermById.get(termId);
-				if (!term) {
-					continue;
-				}
-				const postings = this.passageWordPostings.get(termId);
-				postings?.delete(passageId);
-				if (postings && postings.size === 0) {
-					this.passageWordPostings.delete(termId);
-					if (!this.metadataTermPostings.has(termId)) {
-						this.removeWordTerm(term);
-					}
-				}
-			}
-
-			this.passageById.delete(passageId);
-			this.passagePostingTermsById.delete(passageId);
 		}
+		this.livePassageCount = Math.max(0, this.livePassageCount - passageIds.length);
+		this.stalePassageCount += passageIds.length;
 
 		this.fileMetadataTokens.delete(fileId);
 		this.fallbackFileContentById.delete(fileId);
@@ -1207,6 +1216,64 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.filePassageIds.delete(fileId);
 		this.fileIdByPath.delete(path);
 		this.pathByFileId.delete(fileId);
+		this.getFileSnapshotStore()?.invalidateCurrentFile(path);
+		this.mutationCountSinceCompact += 1;
+	}
+
+	private maybeCompactIndex(): void {
+		if (this.tombstonedFileIds.size === 0) {
+			return;
+		}
+		const liveFileCount = this.pathByFileId.size;
+		const livePassageCount = this.livePassageCount;
+		const shouldCompactByFiles =
+			this.tombstonedFileIds.size >= COMPACT_MIN_STALE_FILES &&
+			this.tombstonedFileIds.size >=
+				Math.max(1, Math.ceil(liveFileCount * COMPACT_STALE_FILE_RATIO));
+		const shouldCompactByPassages =
+			this.stalePassageCount >= COMPACT_MIN_STALE_PASSAGES &&
+			this.stalePassageCount >=
+				Math.max(1, Math.ceil(livePassageCount * COMPACT_STALE_PASSAGE_RATIO));
+		const shouldCompactByMutations =
+			this.mutationCountSinceCompact >= COMPACT_MUTATION_INTERVAL;
+		if (
+			!shouldCompactByFiles &&
+			!shouldCompactByPassages &&
+			!shouldCompactByMutations
+		) {
+			return;
+		}
+
+		const liveDocuments = this.captureLiveDocuments();
+		this.clear();
+		for (const document of liveDocuments) {
+			this.indexDocument(document);
+		}
+		this.mutationCountSinceCompact = 0;
+		logger.debug(
+			`passage lexical compacted index: docs=${liveDocuments.length}`,
+		);
+	}
+
+	private captureLiveDocuments(): IndexedDocument[] {
+		const documents: IndexedDocument[] = [];
+		for (const document of this.liveDocumentsByPath.values()) {
+			documents.push({
+				...document,
+				content: this.getCurrentDocumentContent(document.path),
+			});
+		}
+		return documents;
+	}
+
+	private getCurrentDocumentContent(path: string): string {
+		const fileId = this.fileIdByPath.get(path);
+		const fileSnapshotStore = this.getFileSnapshotStore();
+		return (
+			fileSnapshotStore?.peekCurrentFileText(path) ??
+			(fileId !== undefined ? this.fallbackFileContentById.get(fileId) : undefined) ??
+			""
+		);
 	}
 
 	private buildIndexedPassages(
@@ -1260,7 +1327,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						endOffset,
 						length: Math.max(tokens.length, 1),
 					},
-					wordTf: buildTfMap(tokens),
+					wordTf: prunePassageWordTf(buildTfMap(tokens)),
 				});
 				passageIndex += 1;
 			}
@@ -1520,11 +1587,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			if (!postings) {
 				continue;
 			}
-			const idf = this.computeFileCharIdf(postings.size);
+			const activeDf = countActiveFilePostings(postings, this.pathByFileId);
+			if (activeDf === 0) {
+				continue;
+			}
+			const idf = this.computeFileCharIdf(activeDf);
 			const avgdl = this.averageFileCharLength();
 			for (let postingIndex = 0; postingIndex < postings.size; postingIndex++) {
 				const fileId = postings.ids[postingIndex];
 				const tf = postings.tfs[postingIndex];
+				if (!this.isFileActive(fileId)) {
+					continue;
+				}
 				const state = this.ensureFileState(fileStates, fileId);
 				state.score +=
 					CHAR_CHANNEL_WEIGHT *
@@ -1744,7 +1818,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	}
 
 	private computePassageIdf(df: number): number {
-		const docCount = Math.max(1, this.passageById.size);
+		const docCount = Math.max(1, this.livePassageCount);
 		return Math.log((docCount - df + 0.5) / (df + 0.5) + 1);
 	}
 
@@ -1769,7 +1843,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	}
 
 	private averagePassageLength(): number {
-		return this.totalPassageLength / Math.max(1, this.passageById.size);
+		return this.totalPassageLength / Math.max(1, this.livePassageCount);
 	}
 
 	private averageFileCharLength(): number {
@@ -1788,11 +1862,26 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (termId === undefined) {
 			return 0;
 		}
-		const contentDf = this.passageWordPostings.get(termId)?.size ?? 0;
+		const contentDf = countActivePassagePostings(
+			this.passageWordPostings.get(termId),
+			this.passageById,
+			this.pathByFileId,
+		);
 		const metadataDf = Array.from(
 			this.metadataTermPostings.get(termId)?.values() ?? [],
-		).reduce((sum, postings) => sum + postings.size, 0);
+		).reduce(
+			(sum, postings) => sum + countActiveFilePostings(postings, this.pathByFileId),
+			0,
+		);
 		return contentDf + metadataDf;
+	}
+
+	private isFileActive(fileId: number): boolean {
+		return this.pathByFileId.has(fileId) && !this.tombstonedFileIds.has(fileId);
+	}
+
+	private isPassageActive(passage: PassageRecord): boolean {
+		return this.isFileActive(passage.fileId);
 	}
 
 	private ensurePassageState(
@@ -3677,6 +3766,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						continue;
 					}
 					for (const fileId of postings.ids) {
+						if (!this.isFileActive(fileId)) {
+							continue;
+						}
 						candidateFileIds.add(fileId);
 						if (candidateFileIds.size >= 384) {
 							break;
@@ -5890,6 +5982,96 @@ function buildTfMap(tokens: string[]): Map<string, number> {
 		tfMap.set(token, (tfMap.get(token) ?? 0) + 1);
 	}
 	return tfMap;
+}
+
+function prunePassageWordTf(wordTf: Map<string, number>): Map<string, number> {
+	if (wordTf.size <= BODY_TERM_PRUNE_TRIGGER) {
+		return wordTf;
+	}
+	const rankedTerms = Array.from(wordTf.entries()).sort((left, right) => {
+		const scoreDiff =
+			computeBodyTermInformationScore(right[0], right[1]) -
+			computeBodyTermInformationScore(left[0], left[1]);
+		if (scoreDiff !== 0) {
+			return scoreDiff;
+		}
+		if (right[1] !== left[1]) {
+			return right[1] - left[1];
+		}
+		if (right[0].length !== left[0].length) {
+			return right[0].length - left[0].length;
+		}
+		return left[0].localeCompare(right[0]);
+	});
+	const retained = new Map<string, number>();
+	for (const [term, tf] of rankedTerms.slice(0, BODY_TERM_PRUNE_KEEP)) {
+		retained.set(term, tf);
+	}
+	return retained;
+}
+
+function computeBodyTermInformationScore(term: string, tf: number): number {
+	let score = tf * 2;
+	if (BODY_STOPWORD_TERMS.has(term)) {
+		score -= 4;
+	}
+	if (NUMERIC_TOKEN_REGEX.test(term)) {
+		score -= term.length <= 2 ? 3 : 1.2;
+	}
+	if (ASCII_ALPHA_REGEX.test(term)) {
+		if (term.length <= 2) {
+			score -= 3.5;
+		} else if (term.length === 3) {
+			score -= 1.8;
+		} else {
+			score += Math.min(2.2, term.length * 0.2);
+		}
+	} else if (ASCII_ALPHANUM_REGEX.test(term)) {
+		score += Math.min(1.8, term.length * 0.16);
+	} else {
+		score += Math.min(2.8, term.length * 0.22);
+	}
+	if (/\p{Script=Han}/u.test(term)) {
+		score += 2.8;
+	}
+	if (/[A-Z]/u.test(term) || /[0-9]/u.test(term) || /[_-]/u.test(term)) {
+		score += 0.8;
+	}
+	return score;
+}
+
+function countActivePassagePostings(
+	postings: PackedPostingList | undefined,
+	passagesById: ReadonlyMap<number, PassageRecord>,
+	activePathsByFileId: ReadonlyMap<number, string>,
+): number {
+	if (!postings) {
+		return 0;
+	}
+	let total = 0;
+	for (const passageId of postings.ids) {
+		const passage = passagesById.get(passageId);
+		if (passage && activePathsByFileId.has(passage.fileId)) {
+			total += 1;
+		}
+	}
+	return total;
+}
+
+function countActiveFilePostings(
+	postings: PackedPostingList | undefined,
+	activePathsByFileId: ReadonlyMap<number, string>,
+): number {
+	if (!postings) {
+		return 0;
+	}
+	let total = 0;
+	for (const fileId of postings.ids) {
+		if (activePathsByFileId.has(fileId)) {
+			total += 1;
+		}
+	}
+	return total;
 }
 
 function sliceLongText(text: string, chunkSize: number): string[] {
