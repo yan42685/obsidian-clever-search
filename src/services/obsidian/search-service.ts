@@ -29,6 +29,7 @@ export class SearchService {
 	private static readonly LEXICAL_FILE_CANDIDATE_CAP = 48;
 	private static readonly LEXICAL_FILE_CANDIDATE_BONUS = 12;
 	private static readonly LEXICAL_LINE_RERANK_MAX_LINES = 6;
+	private static readonly LEXICAL_SUBITEM_MAX_LINES = 60;
 	private static readonly LEXICAL_LINE_EVIDENCE_WEIGHT = 0.4;
 	private static readonly LEXICAL_LINE_COUNT_WEIGHT = 0.12;
 	private readonly app = getInstance(App);
@@ -151,7 +152,7 @@ export class SearchService {
 			"subItem",
 			queryText,
 			fileItem,
-			60,
+			SearchService.LEXICAL_SUBITEM_MAX_LINES,
 		);
 
 		const fileSubItems = this.lineHighlighter

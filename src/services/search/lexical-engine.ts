@@ -189,8 +189,7 @@ export class LexicalEngine {
 	): Promise<MatchedLine[]> {
 		logger.debug(fileItem.queryTerms);
 		logger.debug(fileItem.matchedTerms);
-		const maxSubItems = 50;
-		logger.debug(`max subItems: ${maxSubItems}`);
+		logger.debug(`max parsed lines: ${maxParsedLines}`);
 		const linesMatcher = new LinesMatcher(
 			lines,
 			truncateType,
