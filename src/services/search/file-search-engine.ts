@@ -35,11 +35,13 @@ export type SerializedFileSearchIndex =
 	| SerializedBinaryCustomFileSearchIndex
 	| SerializedPassageFileSearchSnapshot;
 
-export type SerializedPassageIndexedDocument = Omit<IndexedDocument, "content">;
+export type SerializedPassageIndexedDocument = Omit<IndexedDocument, "content"> & {
+	generation?: number;
+};
 
 export type SerializedPassageFileSearchSnapshot = {
 	__backend: "passage-bm25";
-	__version: 2;
+	__version: 3;
 	__format: "structural-snapshot";
 	documents: SerializedPassageIndexedDocument[];
 };
@@ -145,10 +147,7 @@ export class MiniSearchFileEngine implements FileSearchEngine {
 
 		logger.trace("Loading indexed data...");
 		try {
-			if (
-				isSerializedBinaryCustomFileSearchIndex(data) ||
-				isSerializedPassageFileSearchSnapshot(data)
-			) {
+			if (!isSerializedMiniSearchFileIndex(data)) {
 				return false;
 			}
 			this.filesIndex = MiniSearch.loadJS(
@@ -1221,8 +1220,19 @@ function isSerializedPassageFileSearchSnapshot(
 		typeof data === "object" &&
 		data !== null &&
 		(data as Record<string, unknown>).__backend === "passage-bm25" &&
-		(data as Record<string, unknown>).__version === 2 &&
+		(data as Record<string, unknown>).__version === 3 &&
 		(data as Record<string, unknown>).__format === "structural-snapshot" &&
 		Array.isArray((data as Record<string, unknown>).documents)
+	);
+}
+
+function isSerializedMiniSearchFileIndex(
+	data: SerializedFileSearchIndex,
+): data is AsPlainObject {
+	return (
+		typeof data === "object" &&
+		data !== null &&
+		!isSerializedBinaryCustomFileSearchIndex(data) &&
+		!isSerializedPassageFileSearchSnapshot(data)
 	);
 }

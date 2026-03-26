@@ -16,7 +16,11 @@ type MockTokenizer = {
 };
 
 let mockCurrentFileTexts = new Map<string, string>();
-let mockIndexedSnapshotTexts = new Map<string, string>();
+let mockCurrentFileGenerations = new Map<string, number | undefined>();
+let mockIndexedSnapshotEntries = new Map<
+	string,
+	{ text: string; generation?: number }
+>();
 
 function createMockTokenizer(): MockTokenizer {
 	return {
@@ -86,7 +90,11 @@ describe("PassageFileSearchEngine", () => {
 			container.clearInstances();
 		}
 		mockCurrentFileTexts = new Map<string, string>();
-		mockIndexedSnapshotTexts = new Map<string, string>();
+		mockCurrentFileGenerations = new Map<string, number | undefined>();
+		mockIndexedSnapshotEntries = new Map<
+			string,
+			{ text: string; generation?: number }
+		>();
 		(global as any).window = {
 			localStorage: {
 				getItem: jest.fn(() => "en"),
@@ -130,25 +138,37 @@ describe("PassageFileSearchEngine", () => {
 		container.register(Vault, { useValue: {} });
 		container.register(FileSnapshotStore, {
 			useValue: {
-				setCurrentFileText(path: string, text: string) {
+				setCurrentFileText(path: string, text: string, generation?: number) {
 					mockCurrentFileTexts.set(path, text);
-					mockIndexedSnapshotTexts.set(path, text);
+					mockCurrentFileGenerations.set(path, generation);
+					mockIndexedSnapshotEntries.set(path, { text, generation });
 				},
 				peekCurrentFileText(path: string) {
 					return mockCurrentFileTexts.get(path);
 				},
-				async getIndexedSnapshotTexts(paths: string[]) {
+				peekCurrentFileGeneration(path: string) {
+					return mockCurrentFileGenerations.get(path);
+				},
+				async getIndexedSnapshotTexts(
+					paths: string[],
+					expectedGenerations?: ReadonlyMap<string, number | undefined>,
+				) {
 					const snapshots = new Map<string, string>();
 					for (const path of paths) {
-						const text = mockIndexedSnapshotTexts.get(path);
-						if (text !== undefined) {
-							snapshots.set(path, text);
+						const entry = mockIndexedSnapshotEntries.get(path);
+						if (
+							entry !== undefined &&
+							(expectedGenerations?.get(path) === undefined ||
+								entry.generation === expectedGenerations.get(path))
+						) {
+							snapshots.set(path, entry.text);
 						}
 					}
 					return snapshots;
 				},
 				invalidateCurrentFile(path: string) {
 					mockCurrentFileTexts.delete(path);
+					mockCurrentFileGenerations.delete(path);
 				},
 			},
 		});
@@ -233,6 +253,34 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.matchedTerms).toEqual(
 			expect.arrayContaining(["alpha", "beta", "gamma"]),
 		);
+	});
+
+	test("refuses restore when shared snapshot generation no longer matches", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/generation-target.md",
+				basename: "generation target",
+				folder: "notes",
+				content: "alpha beta gamma generation aligned content",
+			},
+		]);
+
+		const snapshot = engine.serialize();
+		expect(snapshot).not.toBeNull();
+		if (!snapshot || !("documents" in snapshot)) {
+			throw new Error("expected passage snapshot");
+		}
+
+		snapshot.documents[0].generation = 11;
+		mockIndexedSnapshotEntries.set("notes/generation-target.md", {
+			text: "stale content",
+			generation: 12,
+		});
+
+		const restored = createEngine();
+		const restoredOk = await restored.reIndexAll(snapshot);
+		expect(restoredOk).toBe(false);
 	});
 
 	test("does not return stale passages after updating the same path", async () => {
@@ -1039,6 +1087,64 @@ describe("PassageFileSearchEngine", () => {
 		});
 
 		expect(results[0]?.path).toBe("docs/target.md");
+	});
+
+	test("prefers broader distinct query-term coverage over piling up one prefix-typo family", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/better-plugin.md",
+				basename: "better plugin note",
+				folder: "docs",
+				content:
+					"better plugin page explains how to review useful extensions in one compact guide",
+			},
+			{
+				path: "docs/plugin-family-noise.md",
+				basename: "plugin family noise",
+				folder: "docs",
+				content:
+					"plugin plugins plugin plugon plvg plag pluq plugin plugins repeat one family without the other query clue",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "better plug",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/better-plugin.md");
+	});
+
+	test("prefers prefix family witnesses over typo-heavy family witnesses at the same term coverage", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/prefix-family.md",
+				basename: "prefix family",
+				folder: "docs",
+				content:
+					"better plugin page keeps the intended prefix family witness compact and readable",
+			},
+			{
+				path: "docs/typo-family.md",
+				basename: "typo family",
+				folder: "docs",
+				content:
+					"better plvg plag pluq page keeps only typo family variants and extra family noise",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "better plug",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/prefix-family.md");
 	});
 
 	test("uses a metadata lane across folder and basename for path-like queries", async () => {

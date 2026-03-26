@@ -49,6 +49,9 @@ type FamilyPostingMatch = {
 	bestKind: MatchedQueryTerm["kind"];
 	bestBoost: number;
 	matchedTerms: Set<string>;
+	exactTermCount: number;
+	prefixTermCount: number;
+	fuzzyTermCount: number;
 };
 
 type QueryTermPositionSignal = {
@@ -452,6 +455,12 @@ const PREFIX_FAMILY_LOCAL_WINDOW_COVERAGE_BONUS = 0.42;
 const PREFIX_FAMILY_VERIFIER_COVERAGE_BONUS = 0.54;
 const PREFIX_FAMILY_LOCALITY_COVERAGE_BONUS = 0.34;
 const PREFIX_FAMILY_ORDER_SCALE = 0.42;
+const PREFIX_FAMILY_EXTRA_PREFIX_TERM_PENALTY = 0.08;
+const PREFIX_FAMILY_EXTRA_FUZZY_TERM_PENALTY = 0.16;
+const PREFIX_FAMILY_EXACT_PREFIX_BLEND_PENALTY = 0.03;
+const PREFIX_FAMILY_FUZZY_BLEND_PENALTY = 0.08;
+const PREFIX_FAMILY_SOLO_FUZZY_PENALTY = 0.04;
+const PREFIX_FAMILY_MIN_SCORE_SCALE = 0.45;
 const MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE = 3;
 const MAX_FILE_LOCAL_EXPLANATIONS = 3;
 const LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.72;
@@ -887,7 +896,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	serialize(): SerializedFileSearchIndex | null {
 		return {
 			__backend: "passage-bm25",
-			__version: 2,
+			__version: 3,
 			__format: "structural-snapshot",
 			documents: this.captureLiveDocumentMetadata(),
 		};
@@ -1491,8 +1500,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	}
 
 	private captureLiveDocumentMetadata(): SerializedPassageIndexedDocument[] {
+		const fileSnapshotStore = this.getFileSnapshotStore();
 		return Array.from(this.liveDocumentsByPath.values(), (document) => ({
 			...document,
+			generation: fileSnapshotStore?.peekCurrentFileGeneration(document.path),
 		}));
 	}
 
@@ -1527,8 +1538,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (!fileSnapshotStore) {
 			return null;
 		}
+		const expectedGenerations = new Map<string, number | undefined>();
+		for (const document of snapshot.documents) {
+			expectedGenerations.set(document.path, document.generation);
+		}
 		const snapshotTexts = await fileSnapshotStore.getIndexedSnapshotTexts(
 			snapshot.documents.map((document) => document.path),
+			expectedGenerations,
 		);
 		if (snapshotTexts.size !== snapshot.documents.length) {
 			return null;
@@ -2495,7 +2511,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		for (const [passageId, familyMatch] of familyMatches) {
 			const passageState = this.ensurePassageState(passageStates, passageId);
-			passageState.score += familyMatch.score;
+			passageState.score +=
+				familyMatch.score * computeFamilyMatchScoreScale(familyMatch);
 			passageState.matchedQueryTerms.add(queryTermIndex);
 			for (const matchedTerm of familyMatch.matchedTerms) {
 				passageState.matchedTerms.add(matchedTerm);
@@ -2597,7 +2614,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const [fileId, fieldMatches] of familyMatches) {
 			const fileState = this.ensureFileState(fileStates, fileId);
 			for (const [field, familyMatch] of fieldMatches) {
-				fileState.metadataScore += familyMatch.score;
+				fileState.metadataScore +=
+					familyMatch.score * computeFamilyMatchScoreScale(familyMatch);
 				fileState.matchedQueryTerms.add(queryTermIndex);
 				fileState.matchedMetadataQueryTerms.add(queryTermIndex);
 				for (const matchedTerm of familyMatch.matchedTerms) {
@@ -2626,6 +2644,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				bestKind: matchedTerm.kind,
 				bestBoost: matchedTerm.boost,
 				matchedTerms: new Set<string>(),
+				exactTermCount: 0,
+				prefixTermCount: 0,
+				fuzzyTermCount: 0,
 			};
 			matches.set(targetId, familyMatch);
 		} else if (
@@ -2643,7 +2664,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			familyMatch.bestKind = matchedTerm.kind;
 			familyMatch.bestBoost = matchedTerm.boost;
 		}
-		familyMatch.matchedTerms.add(matchedTerm.term);
+		registerFamilyMatchedTerm(familyMatch, matchedTerm);
 	}
 
 	private updateNestedFamilyPostingMatch<TField extends string>(
@@ -2666,6 +2687,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				bestKind: matchedTerm.kind,
 				bestBoost: matchedTerm.boost,
 				matchedTerms: new Set<string>(),
+				exactTermCount: 0,
+				prefixTermCount: 0,
+				fuzzyTermCount: 0,
 			};
 			fieldMatches.set(field, familyMatch);
 		} else if (
@@ -2683,7 +2707,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			familyMatch.bestKind = matchedTerm.kind;
 			familyMatch.bestBoost = matchedTerm.boost;
 		}
-		familyMatch.matchedTerms.add(matchedTerm.term);
+		registerFamilyMatchedTerm(familyMatch, matchedTerm);
 	}
 
 	private seedCharPassageEvidence(
@@ -7081,37 +7105,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private prunePassageStates(
 		passageStates: Map<number, PassageCandidateState>,
 		keepCount: number,
-		prefixFamilyMode = false,
+		_prefixFamilyMode = false,
 	) {
 		if (passageStates.size <= keepCount) {
 			return;
 		}
 		const keptIds = new Set(
 			Array.from(passageStates.entries())
-				.sort((left, right) => {
-					if (prefixFamilyMode) {
-						if (
-							right[1].matchedQueryTerms.size !== left[1].matchedQueryTerms.size
-						) {
-							return (
-								right[1].matchedQueryTerms.size - left[1].matchedQueryTerms.size
-							);
-						}
-						if (
-							right[1].exactMatchedQueryTerms.size !==
-							left[1].exactMatchedQueryTerms.size
-						) {
-							return (
-								right[1].exactMatchedQueryTerms.size -
-								left[1].exactMatchedQueryTerms.size
-							);
-						}
-					}
-					if (right[1].score !== left[1].score) {
-						return right[1].score - left[1].score;
-					}
-					return left[0] - right[0];
-				})
+				.sort(comparePassageCandidateEntries)
 				.slice(0, keepCount)
 				.map(([passageId]) => passageId),
 		);
@@ -7139,13 +7140,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		);
 		if (queryTerms.length > 1) {
 			const localityFrontier = Array.from(passageStates.entries())
-				.sort((left, right) => {
-					return comparePassageCandidateEntries(
-						left,
-						right,
-						queryScoringCache.prefixFamilyMode,
-					);
-				})
+				.sort(comparePassageCandidateEntries)
 				.slice(0, MAX_LOCALITY_FRONTIER);
 			for (const [passageId, passageState] of localityFrontier) {
 				const passage = this.getPassageRecord(passageId);
@@ -7165,13 +7160,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 
 		const verifierFrontier = Array.from(passageStates.entries())
-			.sort((left, right) => {
-				return comparePassageCandidateEntries(
-					left,
-					right,
-					queryScoringCache.prefixFamilyMode,
-				);
-			})
+			.sort(comparePassageCandidateEntries)
 			.slice(0, MAX_VERIFIER_FRONTIER);
 
 		if (queryTerms.length > 0) {
@@ -7196,13 +7185,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 
 		return Array.from(passageStates.entries())
-			.sort((left, right) => {
-				return comparePassageCandidateEntries(
-					left,
-					right,
-					queryScoringCache.prefixFamilyMode,
-				);
-			})
+			.sort(comparePassageCandidateEntries)
 			.slice(0, MAX_PASSAGE_FRONTIER);
 	}
 
@@ -7962,26 +7945,65 @@ function compareMatchedKindPriority(
 	return priority[left] - priority[right];
 }
 
+function registerFamilyMatchedTerm(
+	familyMatch: FamilyPostingMatch,
+	matchedTerm: MatchedQueryTerm,
+): void {
+	if (familyMatch.matchedTerms.has(matchedTerm.term)) {
+		return;
+	}
+	familyMatch.matchedTerms.add(matchedTerm.term);
+	if (matchedTerm.kind === "exact") {
+		familyMatch.exactTermCount += 1;
+	} else if (matchedTerm.kind === "prefix") {
+		familyMatch.prefixTermCount += 1;
+	} else {
+		familyMatch.fuzzyTermCount += 1;
+	}
+}
+
+function computeFamilyMatchScoreScale(familyMatch: FamilyPostingMatch): number {
+	const hasExactRepresentative = familyMatch.exactTermCount > 0;
+	const hasPrefixRepresentative = familyMatch.prefixTermCount > 0;
+	const prefixAllowance = hasExactRepresentative ? 0 : hasPrefixRepresentative ? 1 : 0;
+	const fuzzyAllowance =
+		hasExactRepresentative || hasPrefixRepresentative
+			? 0
+			: familyMatch.fuzzyTermCount > 0
+				? 1
+				: 0;
+	const extraPrefixTerms = Math.max(
+		0,
+		familyMatch.prefixTermCount - prefixAllowance,
+	);
+	const extraFuzzyTerms = Math.max(0, familyMatch.fuzzyTermCount - fuzzyAllowance);
+	const penalty =
+		extraPrefixTerms * PREFIX_FAMILY_EXTRA_PREFIX_TERM_PENALTY +
+		extraFuzzyTerms * PREFIX_FAMILY_EXTRA_FUZZY_TERM_PENALTY +
+		(hasExactRepresentative
+			? familyMatch.prefixTermCount * PREFIX_FAMILY_EXACT_PREFIX_BLEND_PENALTY
+			: 0) +
+		(hasExactRepresentative || hasPrefixRepresentative
+			? familyMatch.fuzzyTermCount * PREFIX_FAMILY_FUZZY_BLEND_PENALTY
+			: familyMatch.fuzzyTermCount * PREFIX_FAMILY_SOLO_FUZZY_PENALTY);
+	return Math.max(PREFIX_FAMILY_MIN_SCORE_SCALE, 1 - penalty);
+}
+
 function comparePassageCandidateEntries(
 	left: readonly [number, PassageCandidateState],
 	right: readonly [number, PassageCandidateState],
-	prefixFamilyMode: boolean,
 ): number {
-	if (prefixFamilyMode) {
-		if (
-			right[1].matchedQueryTerms.size !== left[1].matchedQueryTerms.size
-		) {
-			return right[1].matchedQueryTerms.size - left[1].matchedQueryTerms.size;
-		}
-		if (
-			right[1].exactMatchedQueryTerms.size !==
+	if (right[1].matchedQueryTerms.size !== left[1].matchedQueryTerms.size) {
+		return right[1].matchedQueryTerms.size - left[1].matchedQueryTerms.size;
+	}
+	if (
+		right[1].exactMatchedQueryTerms.size !==
+		left[1].exactMatchedQueryTerms.size
+	) {
+		return (
+			right[1].exactMatchedQueryTerms.size -
 			left[1].exactMatchedQueryTerms.size
-		) {
-			return (
-				right[1].exactMatchedQueryTerms.size -
-				left[1].exactMatchedQueryTerms.size
-			);
-		}
+		);
 	}
 	if (right[1].score !== left[1].score) {
 		return right[1].score - left[1].score;
@@ -8051,6 +8073,12 @@ function rankObservedFamilyTerms(
 		}
 		if (left[1].strongestMatchWeight !== right[1].strongestMatchWeight) {
 			return right[1].strongestMatchWeight - left[1].strongestMatchWeight;
+		}
+		if (left[1].fuzzyMatchCount !== right[1].fuzzyMatchCount) {
+			return left[1].fuzzyMatchCount - right[1].fuzzyMatchCount;
+		}
+		if (left[1].prefixExpansionCount !== right[1].prefixExpansionCount) {
+			return left[1].prefixExpansionCount - right[1].prefixExpansionCount;
 		}
 		if (left[1].positions.length !== right[1].positions.length) {
 			return right[1].positions.length - left[1].positions.length;
@@ -8955,7 +8983,7 @@ function isSerializedPassageFileSearchSnapshot(
 		typeof data === "object" &&
 		data !== null &&
 		(data as Record<string, unknown>).__backend === "passage-bm25" &&
-		(data as Record<string, unknown>).__version === 2 &&
+		(data as Record<string, unknown>).__version === 3 &&
 		(data as Record<string, unknown>).__format === "structural-snapshot" &&
 		Array.isArray((data as Record<string, unknown>).documents)
 	);

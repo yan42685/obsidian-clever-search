@@ -15,6 +15,8 @@ type PersistedFileSnapshotRow = {
 	generation?: number;
 };
 
+const textEncoder = new TextEncoder();
+
 export type FileSnapshotStoreStatus = {
 	enabled: boolean;
 	active: boolean;
@@ -77,8 +79,24 @@ export class FileSnapshotStore {
 		return this.currentFileCache.get(path)?.text;
 	}
 
+	peekCurrentFileGeneration(path: string): number | undefined {
+		return this.currentFileCache.get(path)?.generation;
+	}
+
 	invalidateCurrentFile(path: string): void {
 		this.currentFileCache.delete(path);
+	}
+
+	estimateCurrentCacheBytes(): number {
+		let total = 0;
+		for (const [path, entry] of this.currentFileCache) {
+			total += textEncoder.encode(path).length;
+			total += textEncoder.encode(entry.text).length;
+			if (entry.generation !== undefined) {
+				total += 8;
+			}
+		}
+		return total;
 	}
 
 	async persistIndexedSnapshot(
@@ -169,6 +187,13 @@ export class FileSnapshotStore {
 		const rows = await this.database.db.fileSnapshots.bulkGet(missingPaths);
 		for (const row of rows) {
 			if (!row) {
+				continue;
+			}
+			const expectedGeneration = expectedGenerations?.get(row.filePath);
+			if (
+				expectedGeneration !== undefined &&
+				row.generation !== expectedGeneration
+			) {
 				continue;
 			}
 			snapshots.set(row.filePath, row.plainText);

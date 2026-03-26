@@ -109,6 +109,13 @@ type SearchBootstrapComponentMetrics = {
 	healMs: number | null;
 };
 
+type DevStorageSummaryRow = {
+	category: string;
+	rows: number | string;
+	bytes: number;
+	size: string;
+};
+
 export type SearchBootstrapMetrics = {
 	startedAt: number;
 	searchableAt: number | null;
@@ -244,6 +251,8 @@ export class DataManager {
 	private fileSnapshotStore = getInstance(FileSnapshotStore);
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
+	private lexicalIndexedFileRefsLoaded = false;
+	private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
 	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
 	private lexicalBootstrapState: SearchBootstrapState = "blocked";
 	private hybridBootstrapState: SearchBootstrapState = "blocked";
@@ -393,6 +402,8 @@ export class DataManager {
 	async initAsync() {
 		this.clearHybridFailedEmbeddingState();
 		this.fileSnapshotStore.clearCurrentFiles();
+		this.lexicalIndexedFileRefsLoaded = false;
+		this.lexicalIndexedFileRefsByPath.clear();
 		this.setHybridSearchAvailability("blocked");
 		this.beginSearchBootstrapRun();
 		try {
@@ -687,12 +698,29 @@ export class DataManager {
 		}
 	}
 
+	private async commitLexicalFileState(
+		file: TFile,
+		generation = file.stat.mtime,
+	): Promise<void> {
+		await this.addDocuments([file]);
+		await this.fileSnapshotStore.commitCurrentFileAsIndexed(file.path, generation);
+		await this.upsertLexicalIndexedFileRef(file, generation);
+	}
+
+	private async deleteLexicalFileState(paths: readonly string[]): Promise<void> {
+		if (paths.length === 0) {
+			return;
+		}
+		await this.deleteDocuments(Array.from(paths));
+		await this.fileSnapshotStore.deleteIndexedSnapshots(paths);
+		await this.deleteLexicalIndexedFileRefs(paths);
+	}
+
 	private async handleDeleteOperation(path: string): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(path);
-		await this.fileSnapshotStore.deleteIndexedSnapshot(path);
 		this.cancelHybridRepair(path);
 		this.clearFailedHybridEmbedding(path);
-		await this.deleteDocuments([path]);
+		await this.deleteLexicalFileState([path]);
 		if (this.hybridEngine.isEnabled()) {
 			await this.deleteHybridFileAndRefreshRuntimeStatus(path);
 		}
@@ -712,11 +740,7 @@ export class DataManager {
 		}
 
 		await this.primeCurrentFileText(file, sourceGeneration);
-		await this.addDocuments([file]);
-		await this.fileSnapshotStore.commitCurrentFileAsIndexed(
-			file.path,
-			file.stat.mtime,
-		);
+		await this.commitLexicalFileState(file);
 		if (
 			this.hybridEngine.isEnabled() &&
 			this.hybridEngine.shouldIndexPath(file.path)
@@ -746,10 +770,9 @@ export class DataManager {
 	): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(oldPath);
 		this.fileSnapshotStore.invalidateCurrentFile(newPath);
-		await this.fileSnapshotStore.deleteIndexedSnapshots([oldPath, newPath]);
 		this.cancelHybridRepair(oldPath);
 		this.cancelHybridRepair(newPath);
-		await this.deleteDocuments([oldPath]);
+		await this.deleteLexicalFileState([oldPath, newPath]);
 
 		const file = this.dataProvider.getFileByPath(newPath);
 		if (!file || !this.dataProvider.isIndexable(file)) {
@@ -766,11 +789,7 @@ export class DataManager {
 		}
 
 		await this.primeCurrentFileText(file, sourceGeneration);
-		await this.addDocuments([file]);
-		await this.fileSnapshotStore.commitCurrentFileAsIndexed(
-			file.path,
-			file.stat.mtime,
-		);
+		await this.commitLexicalFileState(file);
 
 		if (
 			!this.hybridEngine.isEnabled() ||
@@ -1031,6 +1050,7 @@ export class DataManager {
 				needsRefHeal: false,
 			};
 		}
+		await this.reloadLexicalIndexedFileRefs();
 
 		return {
 			needsFullReindex: false,
@@ -1323,7 +1343,58 @@ export class DataManager {
 			size: file.stat.size,
 		}));
 		await this.database.setLexicalIndexedFileRefs(updatedIndexedFileRefs);
+		await this.reloadLexicalIndexedFileRefs();
 		logger.trace(`${updatedIndexedFileRefs.length} lexical indexed file refs updated`);
+	}
+
+	private async ensureLexicalIndexedFileRefsLoaded(): Promise<void> {
+		if (this.lexicalIndexedFileRefsLoaded) {
+			return;
+		}
+		await this.reloadLexicalIndexedFileRefs();
+	}
+
+	private async reloadLexicalIndexedFileRefs(): Promise<void> {
+		const refs = (await this.database.getLexicalIndexedFileRefs()) ?? [];
+		this.lexicalIndexedFileRefsByPath = new Map(
+			refs.map((ref) => [ref.path, ref]),
+		);
+		this.lexicalIndexedFileRefsLoaded = true;
+	}
+
+	private async upsertLexicalIndexedFileRef(
+		file: TFile,
+		generation = file.stat.mtime,
+	): Promise<void> {
+		await this.ensureLexicalIndexedFileRefsLoaded();
+		const previous = this.lexicalIndexedFileRefsByPath.get(file.path);
+		const nextRef: BaseIndexedFileRef = {
+			id: previous?.id,
+			path: file.path,
+			updateTime: generation,
+			size: file.stat.size,
+		};
+		const id = await this.database.db.lexicalIndexedFileRefs.put(nextRef);
+		this.lexicalIndexedFileRefsByPath.set(file.path, {
+			...nextRef,
+			id: typeof id === "number" ? id : previous?.id,
+		});
+	}
+
+	private async deleteLexicalIndexedFileRefs(
+		paths: readonly string[],
+	): Promise<void> {
+		if (paths.length === 0) {
+			return;
+		}
+		await this.ensureLexicalIndexedFileRefsLoaded();
+		for (const path of paths) {
+			const previous = this.lexicalIndexedFileRefsByPath.get(path);
+			if (previous?.id !== undefined) {
+				await this.database.db.lexicalIndexedFileRefs.delete(previous.id);
+			}
+			this.lexicalIndexedFileRefsByPath.delete(path);
+		}
 	}
 
 	private hasIndexedFileRefChanged(
@@ -2311,18 +2382,6 @@ export class DataManager {
 		failureCount: number,
 		failedWithoutBm25: number,
 	): string {
-		const isChinese =
-			(window.localStorage.getItem("language") || "")
-				.toLowerCase()
-				.startsWith("zh");
-		if (isChinese) {
-			const fallbackText =
-				failedWithoutBm25 > 0
-					? `，其中 ${failedWithoutBm25} 个文件连 BM25 降级索引也失败了`
-					: "";
-			return `由于网络或 token/额度等问题，${failureCount} 个文件在 ${DataManager.HYBRID_INDEX_MAX_RETRIES} 次尝试后仍未完成 embedding 索引${fallbackText}。按 Ctrl+Shift+I 在控制台查看具体原因。`;
-		}
-
 		const fallbackText =
 			failedWithoutBm25 > 0
 				? ` ${failedWithoutBm25} file(s) also failed BM25 fallback indexing.`
@@ -2475,7 +2534,6 @@ export class DataManager {
 				: "";
 		return `Hybrid indexing preflight: ${report.filesToAdd} file(s) to add/update, ${report.filesToDelete} to delete, vault ${this.formatBytes(report.totalBytes)}${largeFileText}, shared snapshots ${this.formatBytes(report.sharedSnapshotBytes)}, current hybrid index ${this.formatBytes(report.currentHybridBytes)}, estimated hybrid index ${this.formatBytes(report.estimatedHybridBytes)}. ${quotaText}. Large files will be indexed serially.`;
 	}
-
 	private async noticeDevStorageStats() {
 		const indexableFiles = this.dataProvider.allFilesToBeIndexed();
 		const indexableBytes = indexableFiles.reduce(
@@ -2483,114 +2541,128 @@ export class DataManager {
 			0,
 		);
 		const storageUsage = await this.database.estimatePluginStorageUsage();
+		const rowsByName = new Map(
+			storageUsage.tables.map((item) => [item.name, item.rows]),
+		);
 		const bytesByName = new Map(
 			storageUsage.tables.map((item) => [item.name, item.bytes]),
 		);
-
-		const persistedLexicalFileIndexBytes =
+		const persistedLexicalSnapshotBytes =
 			bytesByName.get("lexicalSearchSnapshots") ?? 0;
 		const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
-			persistedLexicalFileIndexBytes,
+			persistedLexicalSnapshotBytes,
 		);
-		const persistedLexicalSnapshotLabel =
-			`LexicalSnapshot(${this.setting.fileSearchBackend} persisted)`;
-		const runtimeLexicalIndexLabel =
-			`LexicalRuntimeIndex(${this.setting.fileSearchBackend} estimated)`;
-		const shouldShowRuntimeLexicalEstimate =
-			this.setting.fileSearchBackend === "passage-bm25";
 		const lexicalIndexBreakdown = this.lexicalEngine.getFileIndexBreakdown();
-		const sharedSnapshotBytes = bytesByName.get("fileSnapshots") ?? 0;
-		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
-		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
-		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
-		const hybridChunkBytes = bytesByName.get("hybridChunks") ?? 0;
-		const hybridTotalBytes =
-			hybridChunkBytes + vectorShardBytes + bm25Bytes + hnswBytes;
-		const hybridState = !this.setting.hybrid.enabled
-			? "disabled"
-			: hybridTotalBytes > 0
-				? "ready"
-				: "empty";
-		const otherBytes = Math.max(
+		const hybridRuntimeEstimate = this.hybridEngine.getRuntimeMemoryEstimate();
+		const currentFileCacheBytes = this.fileSnapshotStore.estimateCurrentCacheBytes();
+		const localOnlyHint =
+			"Local-only: no embedding API, no rerank API, no token usage.";
+
+		const persistedRows: DevStorageSummaryRow[] = [
+			this.createDevStorageSummaryRow(
+				"LexicalSnapshot",
+				persistedLexicalSnapshotBytes,
+				rowsByName.get("lexicalSearchSnapshots") ?? 0,
+			),
+			this.createDevStorageSummaryRow(
+				"SharedFileSnapshot",
+				bytesByName.get("fileSnapshots") ?? 0,
+				rowsByName.get("fileSnapshots") ?? 0,
+			),
+			this.createDevStorageSummaryRow(
+				"HybridChunk",
+				bytesByName.get("hybridChunks") ?? 0,
+				rowsByName.get("hybridChunks") ?? 0,
+			),
+			this.createDevStorageSummaryRow(
+				"VectorShard",
+				bytesByName.get("hybridChunkVectors") ?? 0,
+				rowsByName.get("hybridChunkVectors") ?? 0,
+			),
+			this.createDevStorageSummaryRow(
+				"HybridBM25",
+				bytesByName.get("hybridBm25Index") ?? 0,
+				rowsByName.get("hybridBm25Index") ?? 0,
+			),
+			this.createDevStorageSummaryRow(
+				"HybridHNSW",
+				bytesByName.get("hybridHnswSmall") ?? 0,
+				rowsByName.get("hybridHnswSmall") ?? 0,
+			),
+		];
+		const runtimeRows: DevStorageSummaryRow[] = [
+			this.createDevStorageSummaryRow(
+				"LexicalRuntimeIndex",
+				runtimeLexicalIndexBytes,
+				"estimate",
+			),
+			this.createDevStorageSummaryRow(
+				"HybridRuntimeVectors",
+				hybridRuntimeEstimate.vectorsBytes,
+				"estimate",
+			),
+			this.createDevStorageSummaryRow(
+				"HybridRuntimeGraph",
+				hybridRuntimeEstimate.graphBytes,
+				"estimate",
+			),
+			this.createDevStorageSummaryRow(
+				"HybridRuntimeBm25",
+				hybridRuntimeEstimate.bm25Bytes,
+				"estimate",
+			),
+			this.createDevStorageSummaryRow(
+				"CurrentFileCache",
+				currentFileCacheBytes,
+				"estimate",
+			),
+		];
+		const persistedListedBytes = persistedRows.reduce(
+			(sum, row) => sum + row.bytes,
 			0,
-			storageUsage.totalBytes -
-				persistedLexicalFileIndexBytes -
-				sharedSnapshotBytes -
-				vectorShardBytes -
-				bm25Bytes -
-				hnswBytes -
-				hybridChunkBytes,
 		);
-		const isChineseDevLocale =
-			(window.localStorage.getItem("language") || "")
-				.toLowerCase()
-				.startsWith("zh");
-		const localOnlyHint = isChineseDevLocale
-			? "本次统计纯本地，不会调用 embedding/rerank API，不消耗 token"
-			: "This report is local-only: no embedding API, no rerank API, no token usage.";
+		const persistedUnlistedBytes = Math.max(
+			0,
+			storageUsage.totalBytes - persistedListedBytes,
+		);
+		const runtimeTotalBytes = runtimeRows.reduce(
+			(sum, row) => sum + row.bytes,
+			0,
+		);
 
 		new MyNotice(
 			`${this.buildDevStorageSummaryNotice(
 				indexableBytes,
 				storageUsage.totalBytes,
+				runtimeTotalBytes,
 				this.setting.hybrid.vectorCompression,
-				persistedLexicalSnapshotLabel,
-				persistedLexicalFileIndexBytes,
-				runtimeLexicalIndexLabel,
-				shouldShowRuntimeLexicalEstimate
-					? runtimeLexicalIndexBytes
-					: null,
-				hybridState,
-				sharedSnapshotBytes,
-				hybridChunkBytes,
-				vectorShardBytes,
-				bm25Bytes,
-				hnswBytes,
-				otherBytes,
+				persistedRows,
+				runtimeRows,
+				persistedUnlistedBytes,
 			)}\n${localOnlyHint}`,
 			15000,
 		);
 
-		console.groupCollapsed("[clever-search] 开发模式索引与存储统计");
+		console.groupCollapsed("[clever-search] dev storage and runtime stats");
+		console.log(`Indexable vault size: ${this.formatBytes(indexableBytes)}`);
 		console.log(
-			`可索引文件总大小: ${this.formatBytes(indexableBytes)}\n插件本地存储估算: ${this.formatBytes(storageUsage.totalBytes)}`,
+			`Current vector quantization: ${this.setting.hybrid.vectorCompression}`,
 		);
-		if (hybridState === "disabled") {
-			console.log("[clever-search] Hybrid storage: disabled");
-		} else if (hybridState === "empty") {
-			console.log("[clever-search] Hybrid storage: enabled but currently empty");
+		console.log(
+			`Persisted total (all tables): ${this.formatBytes(storageUsage.totalBytes)}`,
+		);
+		if (persistedUnlistedBytes > 0) {
+			console.log(
+				`Persisted total includes ${this.formatBytes(persistedUnlistedBytes)} from refs/settings tables not listed below.`,
+			);
 		}
-		const storageRows: Array<{
-			scope: string;
-			table: string;
-			rows: number | string;
-			bytes: number;
-			size: string;
-		}> = storageUsage.tables
-			.map((item) => ({
-				scope: "persisted",
-				table:
-					item.name === "lexicalSearchSnapshots"
-						? persistedLexicalSnapshotLabel
-						: item.name === "fileSnapshots"
-							? "SharedFileSnapshot"
-							: item.name === "hybridChunks"
-								? "HybridChunk"
-						: item.name,
-				rows: item.rows,
-				bytes: item.bytes,
-				size: this.formatBytes(item.bytes),
-			}));
-		if (shouldShowRuntimeLexicalEstimate) {
-			storageRows.push({
-				scope: "runtime-estimate",
-				table: runtimeLexicalIndexLabel,
-				rows: "memory-estimate",
-				bytes: runtimeLexicalIndexBytes,
-				size: this.formatBytes(runtimeLexicalIndexBytes),
-			});
-		}
-		console.table(storageRows.sort((a, b) => b.bytes - a.bytes));
+		console.log(
+			`Runtime total (estimate): ${this.formatBytes(runtimeTotalBytes)}`,
+		);
+		console.log("[clever-search] Persisted storage");
+		console.table(persistedRows);
+		console.log("[clever-search] Runtime memory estimate");
+		console.table(runtimeRows);
 		if (
 			this.setting.fileSearchBackend === "passage-bm25" &&
 			lexicalIndexBreakdown
@@ -2732,136 +2804,52 @@ export class DataManager {
 		console.groupEnd();
 	}
 
-	private buildDevStorageNotice(
-		indexableBytes: number,
-		totalBytes: number,
-		precision: string,
-		lexicalFileIndexLabel: string,
-		lexicalFileIndexBytes: number,
-		hybridState: "disabled" | "empty" | "ready",
-		sharedSnapshotBytes: number,
-		hybridChunkBytes: number,
-		vectorShardBytes: number,
-		bm25Bytes: number,
-		hnswBytes: number,
-		otherBytes: number,
-	): string {
-		const isChinese =
-			(window.localStorage.getItem("language") || "")
-				.toLowerCase()
-				.startsWith("zh");
-		const hybridStorageSummary =
-			hybridState === "disabled"
-				? "Hybrid: disabled"
-				: hybridState === "empty"
-					? "Hybrid: enabled but currently empty"
-					: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
-
-		if (isChinese) {
-			const chineseHybridSummary =
-				hybridState === "disabled"
-					? "Hybrid: disabled"
-					: hybridState === "empty"
-						? "Hybrid: enabled but currently empty"
-						: hybridStorageSummary;
-			return [
-				`Dev stats`,
-				`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
-				`Current vector quantization: ${precision}`,
-				`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
-				`${lexicalFileIndexLabel} ${this.formatBytes(lexicalFileIndexBytes)} | ${chineseHybridSummary} | Other ${this.formatBytes(otherBytes)}`,
-			].join("\n");
-		}
-
-		if (isChinese) {
-			const hybridSummary =
-				hybridState === "disabled"
-					? "Hybrid: 未启用"
-					: hybridState === "empty"
-						? "Hybrid: 已启用，但当前无索引数据"
-						: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
-			return [
-				`开发模式统计`,
-				`可索引文件总大小: ${this.formatBytes(indexableBytes)}`,
-				`当前向量量化: ${precision}`,
-				`插件本地存储估算: ${this.formatBytes(totalBytes)}`,
-				`LexicalFileIndex ${this.formatBytes(lexicalFileIndexBytes)} | ${hybridSummary} | 其他 ${this.formatBytes(otherBytes)}`,
-			].join("\n");
-		}
-
-		const hybridSummary =
-			hybridState === "disabled"
-				? "Hybrid: disabled"
-				: hybridState === "empty"
-					? "Hybrid: enabled but currently empty"
-					: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
-		return [
-			`Dev stats`,
-			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
-			`Current vector quantization: ${precision}`,
-			`Estimated plugin storage: ${this.formatBytes(totalBytes)}`,
-			`${lexicalFileIndexLabel} ${this.formatBytes(lexicalFileIndexBytes)} | ${hybridSummary} | Other ${this.formatBytes(otherBytes)}`,
-		].join("\n");
+	private createDevStorageSummaryRow(
+		category: string,
+		bytes: number,
+		rows: number | string,
+	): DevStorageSummaryRow {
+		return {
+			category,
+			rows,
+			bytes,
+			size: this.formatBytes(bytes),
+		};
 	}
 
 	private buildDevStorageSummaryNotice(
 		indexableBytes: number,
 		persistedTotalBytes: number,
+		runtimeTotalBytes: number,
 		precision: string,
-		persistedLexicalSnapshotLabel: string,
-		persistedLexicalSnapshotBytes: number,
-		runtimeLexicalIndexLabel: string,
-		runtimeLexicalIndexBytes: number | null,
-		hybridState: "disabled" | "empty" | "ready",
-		sharedSnapshotBytes: number,
-		hybridChunkBytes: number,
-		vectorShardBytes: number,
-		bm25Bytes: number,
-		hnswBytes: number,
-		otherBytes: number,
+		persistedRows: DevStorageSummaryRow[],
+		runtimeRows: DevStorageSummaryRow[],
+		persistedUnlistedBytes: number,
 	): string {
-		const isChinese =
-			(window.localStorage.getItem("language") || "")
-				.toLowerCase()
-				.startsWith("zh");
-		const hybridSummary =
-			hybridState === "disabled"
-				? "Hybrid: disabled"
-				: hybridState === "empty"
-					? "Hybrid: enabled but currently empty"
-					: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
-		const runtimeSummary =
-			runtimeLexicalIndexBytes === null
-				? null
-				: `${runtimeLexicalIndexLabel} ${this.formatBytes(runtimeLexicalIndexBytes)}`;
-
-		if (isChinese) {
-			return [
-				`开发模式统计`,
-				`可索引文件总大小: ${this.formatBytes(indexableBytes)}`,
-				`当前向量量化: ${precision}`,
-				`持久化插件存储: ${this.formatBytes(persistedTotalBytes)}`,
-				runtimeSummary === null
-					? null
-					: `${runtimeSummary}（不计入上面的持久化总量）`,
-				`${persistedLexicalSnapshotLabel} ${this.formatBytes(persistedLexicalSnapshotBytes)} | ${hybridSummary} | Other ${this.formatBytes(otherBytes)}`,
-			]
-				.filter((line): line is string => line !== null)
-				.join("\n");
-		}
-
 		return [
 			`Dev stats`,
 			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
 			`Current vector quantization: ${precision}`,
-			`Persisted plugin storage: ${this.formatBytes(persistedTotalBytes)}`,
-			runtimeSummary === null
-				? null
-				: `${runtimeSummary} (not included in persisted total)`,
-			`${persistedLexicalSnapshotLabel} ${this.formatBytes(persistedLexicalSnapshotBytes)} | ${hybridSummary} | Other ${this.formatBytes(otherBytes)}`,
+			`Persisted total (all tables): ${this.formatBytes(persistedTotalBytes)}`,
+			persistedUnlistedBytes > 0
+				? `Persisted total includes ${this.formatBytes(persistedUnlistedBytes)} from refs/settings tables not listed below.`
+				: null,
+			`Persisted storage`,
+			this.formatDevStorageSummaryLine(persistedRows.slice(0, 3)),
+			this.formatDevStorageSummaryLine(persistedRows.slice(3)),
+			`Runtime memory estimate`,
+			this.formatDevStorageSummaryLine(runtimeRows.slice(0, 3)),
+			this.formatDevStorageSummaryLine(runtimeRows.slice(3)),
+			`Runtime total (estimate): ${this.formatBytes(runtimeTotalBytes)}`,
 		]
 			.filter((line): line is string => line !== null)
 			.join("\n");
+	}
+
+	private formatDevStorageSummaryLine(rows: DevStorageSummaryRow[]): string {
+		return rows
+			.map((row) => `${row.category} ${row.size}`)
+			.join(" | ");
 	}
 
 	private formatBytes(bytes: number): string {

@@ -1,4 +1,5 @@
 import { container } from "tsyringe";
+import type { BaseIndexedFileRef } from "src/globals/search-types";
 
 jest.mock("obsidian", () => {
 	class TAbstractFile {
@@ -197,6 +198,9 @@ function createMockFileSnapshotStore() {
 			},
 		),
 		peekCurrentFileText: jest.fn((path: string) => current.get(path)?.text),
+		peekCurrentFileGeneration: jest.fn(
+			(path: string) => current.get(path)?.generation,
+		),
 		commitCurrentFileAsIndexed: jest.fn(
 			async (path: string, generation?: number) => {
 				const currentEntry = current.get(path);
@@ -231,17 +235,27 @@ function createMockFileSnapshotStore() {
 				persisted.delete(path);
 			}
 		}),
-		getIndexedSnapshotTexts: jest.fn(async (paths: string[]) => {
+		getIndexedSnapshotTexts: jest.fn(
+			async (
+				paths: string[],
+				expectedGenerations?: ReadonlyMap<string, number | undefined>,
+			) => {
 			const result = new Map<string, string>();
 			for (const path of paths) {
 				const entry = persisted.get(path);
-				if (entry) {
+				if (
+					entry &&
+					(expectedGenerations?.get(path) === undefined ||
+						entry.generation === expectedGenerations.get(path))
+				) {
 					result.set(path, entry.text);
 				}
 			}
 			return result;
-		}),
+			},
+		),
 		refreshHighPerformanceState: jest.fn(async () => {}),
+		estimateCurrentCacheBytes: jest.fn(() => 0),
 	};
 }
 
@@ -252,6 +266,12 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
 		moveFile: jest.fn(async () => true),
 		deleteFile: jest.fn(async () => {}),
 		canSearch: jest.fn(() => false),
+		getRuntimeMemoryEstimate: jest.fn(() => ({
+			vectorsBytes: 0,
+			graphBytes: 0,
+			bm25Bytes: 0,
+			totalBytes: 0,
+		})),
 		migrateBm25StorageFormatIfNeeded: jest.fn(async () => false),
 		persistIndicesForBatch: jest.fn(async () => {}),
 		...overrides,
@@ -259,18 +279,55 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
 }
 
 function createMockDatabase(overrides: Record<string, unknown> = {}) {
+	const lexicalIndexedFileRefs: Array<BaseIndexedFileRef> = [];
+	let nextLexicalIndexedFileRefId = 1;
+
 	return {
 		deleteOldDatabases: jest.fn(async () => {}),
 		getLexicalSearchSnapshot: jest.fn(async () => null),
 		deleteLexicalSearchSnapshot: jest.fn(async () => {}),
 		setLexicalSearchSnapshot: jest.fn(async () => {}),
-		getLexicalIndexedFileRefs: jest.fn(async () => []),
-		setLexicalIndexedFileRefs: jest.fn(async () => {}),
+		getLexicalIndexedFileRefs: jest.fn(async () => [...lexicalIndexedFileRefs]),
+		setLexicalIndexedFileRefs: jest.fn(async (refs: BaseIndexedFileRef[]) => {
+			lexicalIndexedFileRefs.splice(
+				0,
+				lexicalIndexedFileRefs.length,
+				...refs.map((ref) => ({
+					...ref,
+					id: nextLexicalIndexedFileRefId++,
+				})),
+			);
+		}),
 		estimatePluginStorageUsage: jest.fn(async () => ({
 			totalBytes: 0,
 			tables: [],
 		})),
-		db: {},
+		db: {
+			lexicalIndexedFileRefs: {
+				put: jest.fn(async (ref: BaseIndexedFileRef) => {
+					if (ref.id !== undefined) {
+						const index = lexicalIndexedFileRefs.findIndex(
+							(item) => item.id === ref.id,
+						);
+						if (index >= 0) {
+							lexicalIndexedFileRefs[index] = { ...ref };
+							return ref.id;
+						}
+					}
+					const id = nextLexicalIndexedFileRefId++;
+					lexicalIndexedFileRefs.push({ ...ref, id });
+					return id;
+				}),
+				delete: jest.fn(async (id: number) => {
+					const index = lexicalIndexedFileRefs.findIndex(
+						(item) => item.id === id,
+					);
+					if (index >= 0) {
+						lexicalIndexedFileRefs.splice(index, 1);
+					}
+				}),
+			},
+		},
 		...overrides,
 	};
 }
@@ -426,7 +483,10 @@ describe("DataManager integration", () => {
 		manager.receiveDocOperation(new DocUpsertOperation(newPath, 220));
 		await (manager as any).docOperationsBuffer.forceFlush();
 
-		expect(lexicalEngine.deleteDocuments).toHaveBeenCalledWith([oldPath]);
+		expect(lexicalEngine.deleteDocuments).toHaveBeenCalledWith([
+			oldPath,
+			newPath,
+		]);
 		expect(lexicalEngine.addDocuments).toHaveBeenCalledWith([
 			expect.objectContaining({
 				path: newPath,
@@ -438,6 +498,13 @@ describe("DataManager integration", () => {
 			text: newText,
 			generation: 220,
 		});
+		expect(await database.getLexicalIndexedFileRefs()).toEqual([
+			expect.objectContaining({
+				path: newPath,
+				updateTime: 220,
+				size: newFile.stat.size,
+			}),
+		]);
 		expect(hybridEngine.moveFile).toHaveBeenCalledWith(oldPath, newPath, 220);
 		expect(hybridEngine.deleteFile).not.toHaveBeenCalledWith(oldPath);
 		const queuedRepair = (manager as any).hybridRepairQueue.get(newPath);
@@ -492,8 +559,15 @@ describe("DataManager integration", () => {
 			})),
 		});
 		const fileSnapshotStore = createMockFileSnapshotStore();
+		fileSnapshotStore.estimateCurrentCacheBytes.mockReturnValue(5120);
 		const hybridEngine = createMockHybridEngine({
 			isEnabled: jest.fn(() => false),
+			getRuntimeMemoryEstimate: jest.fn(() => ({
+				vectorsBytes: 16384,
+				graphBytes: 8192,
+				bm25Bytes: 4096,
+				totalBytes: 28672,
+			})),
 		});
 
 		const { fileWatcher } = registerDataManagerDeps({
@@ -522,17 +596,16 @@ describe("DataManager integration", () => {
 		const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
 		const groupSpy = jest.spyOn(console, "groupCollapsed").mockImplementation(() => {});
 		const endSpy = jest.spyOn(console, "groupEnd").mockImplementation(() => {});
-
 		await (manager as any).noticeDevStorageStats();
 
+		const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
+		expect(latestNotice).toContain("Persisted storage");
+		expect(latestNotice).toContain("Runtime memory estimate");
+		expect(latestNotice).toContain("LexicalSnapshot");
+		expect(latestNotice).toContain("CurrentFileCache");
 		expect(groupSpy).toHaveBeenCalled();
 		expect(endSpy).toHaveBeenCalled();
 		expect(logSpy).toHaveBeenCalled();
-		const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
-		expect(latestNotice).toContain("持久化插件存储");
-		expect(latestNotice).toContain("LexicalSnapshot(passage-bm25 persisted)");
-		expect(latestNotice).toContain("LexicalRuntimeIndex(passage-bm25 estimated)");
-		expect(latestNotice).toContain("不计入上面的持久化总量");
 
 		const tableRows = tableSpy.mock.calls.flatMap((call) =>
 			Array.isArray(call[0]) ? call[0] : [],
@@ -540,19 +613,33 @@ describe("DataManager integration", () => {
 		expect(tableRows).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					scope: "persisted",
-					table: "LexicalSnapshot(passage-bm25 persisted)",
+					category: "LexicalSnapshot",
+					rows: 1,
 					bytes: 3559,
 				}),
 				expect.objectContaining({
-					scope: "persisted",
-					table: "SharedFileSnapshot",
+					category: "SharedFileSnapshot",
 					bytes: 71257,
 				}),
 				expect.objectContaining({
-					scope: "runtime-estimate",
-					table: "LexicalRuntimeIndex(passage-bm25 estimated)",
+					category: "LexicalRuntimeIndex",
 					bytes: 80258,
+				}),
+				expect.objectContaining({
+					category: "HybridRuntimeVectors",
+					bytes: 16384,
+				}),
+				expect.objectContaining({
+					category: "HybridRuntimeGraph",
+					bytes: 8192,
+				}),
+				expect.objectContaining({
+					category: "HybridRuntimeBm25",
+					bytes: 4096,
+				}),
+				expect.objectContaining({
+					category: "CurrentFileCache",
+					bytes: 5120,
 				}),
 			]),
 		);
