@@ -86,7 +86,7 @@ export class FileSnapshotStore {
 		text: string,
 		generation?: number,
 	): Promise<void> {
-		await this.database.db.hybridFileSnapshots.put({
+		await this.database.db.fileSnapshots.put({
 			filePath,
 			plainText: text,
 			generation,
@@ -126,18 +126,18 @@ export class FileSnapshotStore {
 		if (rows.length === 0) {
 			return;
 		}
-		await this.database.db.hybridFileSnapshots.bulkPut(rows);
+		await this.database.db.fileSnapshots.bulkPut(rows);
 	}
 
 	async deleteIndexedSnapshot(filePath: string): Promise<void> {
-		await this.database.db.hybridFileSnapshots.delete(filePath);
+		await this.database.db.fileSnapshots.delete(filePath);
 	}
 
 	async deleteIndexedSnapshots(filePaths: readonly string[]): Promise<void> {
 		if (filePaths.length === 0) {
 			return;
 		}
-		await this.database.db.hybridFileSnapshots.bulkDelete(Array.from(filePaths));
+		await this.database.db.fileSnapshots.bulkDelete(Array.from(filePaths));
 	}
 
 	async getIndexedSnapshotTexts(
@@ -166,7 +166,7 @@ export class FileSnapshotStore {
 			return snapshots;
 		}
 
-		const rows = await this.database.db.hybridFileSnapshots.bulkGet(missingPaths);
+		const rows = await this.database.db.fileSnapshots.bulkGet(missingPaths);
 		for (const row of rows) {
 			if (!row) {
 				continue;

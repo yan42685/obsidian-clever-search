@@ -894,7 +894,7 @@ Primary goals:
 
 Practical rules:
 
-- `hybridFileSnapshots` should become the shared file-snapshot store for both hybrid and `passage-bm25`
+- `fileSnapshots` is the shared file-snapshot store for both hybrid and `passage-bm25`
 - `FileSnapshotStore` should keep only one memory cache:
   - `currentFileCache[path] = { text, generation }`
 - `indexedSnapshotCache` should be removed rather than maintained in parallel

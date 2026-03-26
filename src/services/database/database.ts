@@ -28,10 +28,9 @@ export class Database {
 		totalBytes: number;
 		tables: Array<{ name: string; rows: number; bytes: number }>;
 		hybridChunkBreakdown?: {
-			textBytes: number;
-			vectorBytes: number;
-			vectorF16Bytes: number;
-			metadataBytes: number;
+			sharedSnapshotTextBytes: number;
+			sharedSnapshotPathBytes: number;
+			chunkMetadataBytes: number;
 		};
 		hybridVectorBreakdown?: {
 			chunkIdBytes: number;
@@ -43,10 +42,10 @@ export class Database {
 	}> {
 		const tableEntries = [
 			{ name: "pluginSetting", table: this.db.pluginSetting },
-			{ name: "minisearch", table: this.db.minisearch },
+			{ name: "lexicalSearchSnapshots", table: this.db.lexicalSearchSnapshots },
 			{ name: "lexicalIndexedFileRefs", table: this.db.lexicalIndexedFileRefs },
 			{ name: "hybridChunks", table: this.db.hybridChunks },
-			{ name: "hybridFileSnapshots", table: this.db.hybridFileSnapshots },
+			{ name: "fileSnapshots", table: this.db.fileSnapshots },
 			{ name: "hybridChunkVectors", table: this.db.hybridChunkVectors },
 			{ name: "hybridBm25Index", table: this.db.hybridBm25Index },
 			{ name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
@@ -66,7 +65,7 @@ export class Database {
 			}),
 		);
 		const hybridChunkRows = await this.db.hybridChunks.toArray();
-		const hybridSnapshotRows = await this.db.hybridFileSnapshots.toArray();
+		const hybridSnapshotRows = await this.db.fileSnapshots.toArray();
 		const hybridVectorRows = await this.db.hybridChunkVectors.toArray();
 		const hybridBm25Row = await this.db.hybridBm25Index.get(0);
 		const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(
@@ -95,19 +94,20 @@ export class Database {
 		snapshots: HybridFileSnapshotRow[],
 	) {
 		const breakdown = {
-			textBytes: 0,
-			vectorBytes: 0,
-			vectorF16Bytes: 0,
-			metadataBytes: 0,
+			sharedSnapshotTextBytes: 0,
+			sharedSnapshotPathBytes: 0,
+			chunkMetadataBytes: 0,
 		};
 
 		for (const snapshot of snapshots) {
-			breakdown.textBytes += estimateValueBytes(snapshot.plainText);
-			breakdown.metadataBytes += estimateValueBytes(snapshot.filePath);
+			breakdown.sharedSnapshotTextBytes += estimateValueBytes(
+				snapshot.plainText,
+			);
+			breakdown.sharedSnapshotPathBytes += estimateValueBytes(snapshot.filePath);
 		}
 
 		for (const row of rows) {
-			breakdown.metadataBytes +=
+			breakdown.chunkMetadataBytes +=
 				estimateValueBytes(row.id) +
 				estimateValueBytes(row.filePath) +
 				estimateValueBytes(row.chunkIndex) +
@@ -144,26 +144,26 @@ export class Database {
 		return breakdown;
 	}
 
-	async deleteMinisearchData() {
-		this.db.minisearch.clear();
+	async deleteLexicalSearchSnapshot() {
+		await this.db.lexicalSearchSnapshots.clear();
 	}
 
 	// it may finished some time later even if using await
-	async setMiniSearchData(data: SerializedFileSearchIndex) {
-		this.db.transaction("rw", this.db.minisearch, async () => {
+	async setLexicalSearchSnapshot(data: SerializedFileSearchIndex) {
+		await this.db.transaction("rw", this.db.lexicalSearchSnapshots, async () => {
 			// Warning: The clear() here is just a marker for caution to avoid data duplication.
 			// Ideally, clear() should be executed at an earlier stage.
 			// Placing clear() and add() together, especially with large data sets,
 			// may lead to conflicts and cause Obsidian to crash. It is an issue related to Dexie or IndexedDB
-			await this.db.minisearch.clear();
-			await this.db.minisearch.add({ data: data });
-			logger.trace("minisearch data saved");
+			await this.db.lexicalSearchSnapshots.clear();
+			await this.db.lexicalSearchSnapshots.add({ data: data });
+			logger.trace("lexical search snapshot saved");
 		});
 	}
 
 	@monitorDecorator
-	async getMiniSearchData(): Promise<SerializedFileSearchIndex | null> {
-		return (await this.db.minisearch.toArray())[0]?.data || null;
+	async getLexicalSearchSnapshot(): Promise<SerializedFileSearchIndex | null> {
+		return (await this.db.lexicalSearchSnapshots.toArray())[0]?.data || null;
 	}
 
 	async setLexicalIndexedFileRefs(refs: BaseIndexedFileRef[]) {
@@ -213,16 +213,19 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-	private static readonly _dbVersion = 12;
+	private static readonly _dbVersion = 13;
 	private static readonly dbNamePrefix = "clever-search/";
 	private privateApi: PrivateApi;
 	pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
-	minisearch!: Dexie.Table<{ id?: number; data: SerializedFileSearchIndex }, number>;
+	lexicalSearchSnapshots!: Dexie.Table<
+		{ id?: number; data: SerializedFileSearchIndex },
+		number
+	>;
 	// TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
 	lexicalIndexedFileRefs!: Dexie.Table<BaseIndexedFileRef, number>;
 	// Hybrid search tables
 	hybridChunks!: Dexie.Table<ChunkRow, number>;
-	hybridFileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
+	fileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
 	hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
 	hybridBm25Index!: Dexie.Table<BlobRecord, number>;
 	hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
@@ -307,7 +310,7 @@ class DexieWrapper extends Dexie {
 					tx.table("hybridDocRefs").clear(),
 				]);
 			});
-		this.version(DexieWrapper._dbVersion)
+		this.version(12)
 			.stores({
 				pluginSetting: "++id",
 				minisearch: "++id",
@@ -334,6 +337,35 @@ class DexieWrapper extends Dexie {
 					.toArray() as HybridIndexedFileRef[];
 				if (hybridIndexedFileRefs.length > 0) {
 					await tx.table("hybridIndexedFileRefs").bulkPut(hybridIndexedFileRefs);
+				}
+			});
+		this.version(DexieWrapper._dbVersion)
+			.stores({
+				pluginSetting: "++id",
+				lexicalSearchSnapshots: "++id",
+				lexicalIndexedFileRefs: "++id",
+				hybridChunks: "++id, filePath",
+				fileSnapshots: "filePath",
+				hybridChunkVectors: "filePath",
+				hybridBm25Index: "id",
+				hybridHnswSmall: "id",
+				hybridIndexedFileRefs: "path",
+				hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+				hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+			})
+			.upgrade(async (tx) => {
+				const lexicalSnapshots = await tx
+					.table("minisearch")
+					.toArray() as Array<{ id?: number; data: SerializedFileSearchIndex }>;
+				if (lexicalSnapshots.length > 0) {
+					await tx.table("lexicalSearchSnapshots").bulkPut(lexicalSnapshots);
+				}
+
+				const fileSnapshots = await tx
+					.table("hybridFileSnapshots")
+					.toArray() as HybridFileSnapshotRow[];
+				if (fileSnapshots.length > 0) {
+					await tx.table("fileSnapshots").bulkPut(fileSnapshots);
 				}
 			});
 	}

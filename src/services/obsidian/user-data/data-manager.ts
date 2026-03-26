@@ -70,6 +70,7 @@ type HybridPreflightReport = {
 	filesToDelete: number;
 	largeFiles: TFile[];
 	largestFile: TFile | null;
+	sharedSnapshotBytes: number;
 	estimatedHybridBytes: number;
 	currentHybridBytes: number;
 	projectedUsageRatio: number | null;
@@ -490,7 +491,7 @@ export class DataManager {
 			await this.reindexLexicalEngineWithCurrFiles();
 			const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
 			if (lexicalIndexData) {
-				await this.database.setMiniSearchData(lexicalIndexData);
+				await this.database.setLexicalSearchSnapshot(lexicalIndexData);
 			}
 			if (isDevEnvironment) {
 				await this.noticeDevStorageStats();
@@ -631,7 +632,7 @@ export class DataManager {
 		let offset = 0;
 
 		while (true) {
-			const snapshots = await this.database.db.hybridFileSnapshots
+			const snapshots = await this.database.db.fileSnapshots
 				.orderBy("filePath")
 				.offset(offset)
 				.limit(DataManager.HYBRID_BM25_REBUILD_BATCH_SIZE)
@@ -1010,7 +1011,7 @@ export class DataManager {
 		) {
 			prevData = null;
 		} else {
-			prevData = await this.database.getMiniSearchData();
+			prevData = await this.database.getLexicalSearchSnapshot();
 		}
 
 		if (!prevData) {
@@ -1020,8 +1021,8 @@ export class DataManager {
 			};
 		}
 
-		await this.database.deleteMinisearchData();
-		logger.trace("Previous minisearch data is found.");
+		await this.database.deleteLexicalSearchSnapshot();
+		logger.trace("Previous lexical search snapshot is found.");
 		const isSuccessful = await this.lexicalEngine.reIndexAll(prevData);
 		if (!isSuccessful) {
 			new MyNotice(t("Database has been updated, a reindex is required"), 7000);
@@ -1053,7 +1054,7 @@ export class DataManager {
 		logger.trace("Lexical engine is ready");
 		const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
 		if (lexicalIndexData) {
-			await this.database.setMiniSearchData(lexicalIndexData);
+			await this.database.setLexicalSearchSnapshot(lexicalIndexData);
 		}
 	}
 
@@ -2038,12 +2039,12 @@ export class DataManager {
 		await this.scanRowsInBatches<HybridFileSnapshotRow, string>(
 			(lastPath, batchSize) => {
 				if (lastPath === null) {
-					return this.database.db.hybridFileSnapshots
+					return this.database.db.fileSnapshots
 						.orderBy(":id")
 						.limit(batchSize)
 						.toArray();
 				}
-				return this.database.db.hybridFileSnapshots
+				return this.database.db.fileSnapshots
 					.where(":id")
 					.above(lastPath)
 					.limit(batchSize)
@@ -2359,8 +2360,9 @@ export class DataManager {
 				largestFile: report.largestFile
 					? `${report.largestFile.path} (${this.formatBytes(report.largestFile.stat.size)})`
 					: "-",
-				estimatedHybridSize: this.formatBytes(report.estimatedHybridBytes),
-				currentHybridSize: this.formatBytes(report.currentHybridBytes),
+				sharedSnapshotSize: this.formatBytes(report.sharedSnapshotBytes),
+				currentHybridIndexSize: this.formatBytes(report.currentHybridBytes),
+				estimatedHybridIndexSize: this.formatBytes(report.estimatedHybridBytes),
 				projectedQuotaUsage:
 					report.projectedUsageRatio === null
 						? "n/a"
@@ -2400,10 +2402,12 @@ export class DataManager {
 				: null;
 
 		const storageUsage = await this.database.estimatePluginStorageUsage();
+		const sharedSnapshotBytes = storageUsage.tables
+			.filter((item) => item.name === "fileSnapshots")
+			.reduce((sum, item) => sum + item.bytes, 0);
 		const currentHybridBytes = storageUsage.tables
 			.filter((item) =>
 				item.name === "hybridChunks" ||
-				item.name === "hybridFileSnapshots" ||
 				item.name === "hybridChunkVectors" ||
 				item.name === "hybridBm25Index" ||
 				item.name === "hybridHnswSmall" ||
@@ -2453,6 +2457,7 @@ export class DataManager {
 			filesToDelete: docsToDelete.length,
 			largeFiles,
 			largestFile,
+			sharedSnapshotBytes,
 			estimatedHybridBytes,
 			currentHybridBytes,
 			projectedUsageRatio,
@@ -2468,7 +2473,7 @@ export class DataManager {
 			report.largeFiles.length > 0
 				? `, ${report.largeFiles.length} large file(s)`
 				: "";
-		return `Hybrid indexing preflight: ${report.filesToAdd} file(s) to add/update, ${report.filesToDelete} to delete, vault ${this.formatBytes(report.totalBytes)}${largeFileText}, estimated hybrid storage ${this.formatBytes(report.estimatedHybridBytes)}. ${quotaText}. Large files will be indexed serially.`;
+		return `Hybrid indexing preflight: ${report.filesToAdd} file(s) to add/update, ${report.filesToDelete} to delete, vault ${this.formatBytes(report.totalBytes)}${largeFileText}, shared snapshots ${this.formatBytes(report.sharedSnapshotBytes)}, current hybrid index ${this.formatBytes(report.currentHybridBytes)}, estimated hybrid index ${this.formatBytes(report.estimatedHybridBytes)}. ${quotaText}. Large files will be indexed serially.`;
 	}
 
 	private async noticeDevStorageStats() {
@@ -2482,7 +2487,8 @@ export class DataManager {
 			storageUsage.tables.map((item) => [item.name, item.bytes]),
 		);
 
-		const persistedLexicalFileIndexBytes = bytesByName.get("minisearch") ?? 0;
+		const persistedLexicalFileIndexBytes =
+			bytesByName.get("lexicalSearchSnapshots") ?? 0;
 		const lexicalFileIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
 			persistedLexicalFileIndexBytes,
 		);
@@ -2491,14 +2497,13 @@ export class DataManager {
 				? "LexicalFileIndex(passage-bm25 estimated)"
 				: `LexicalFileIndex(${this.setting.fileSearchBackend})`;
 		const lexicalIndexBreakdown = this.lexicalEngine.getFileIndexBreakdown();
+		const sharedSnapshotBytes = bytesByName.get("fileSnapshots") ?? 0;
 		const vectorShardBytes = bytesByName.get("hybridChunkVectors") ?? 0;
 		const bm25Bytes = bytesByName.get("hybridBm25Index") ?? 0;
 		const hnswBytes = bytesByName.get("hybridHnswSmall") ?? 0;
-		const chunkStoreBytes =
-			(bytesByName.get("hybridChunks") ?? 0) +
-			(bytesByName.get("hybridFileSnapshots") ?? 0);
+		const hybridChunkBytes = bytesByName.get("hybridChunks") ?? 0;
 		const hybridTotalBytes =
-			chunkStoreBytes + vectorShardBytes + bm25Bytes + hnswBytes;
+			hybridChunkBytes + vectorShardBytes + bm25Bytes + hnswBytes;
 		const hybridState = !this.setting.hybrid.enabled
 			? "disabled"
 			: hybridTotalBytes > 0
@@ -2508,10 +2513,11 @@ export class DataManager {
 			0,
 			storageUsage.totalBytes -
 				persistedLexicalFileIndexBytes -
+				sharedSnapshotBytes -
 				vectorShardBytes -
 				bm25Bytes -
 				hnswBytes -
-				chunkStoreBytes,
+				hybridChunkBytes,
 		);
 		const isChineseDevLocale =
 			(window.localStorage.getItem("language") || "")
@@ -2529,7 +2535,8 @@ export class DataManager {
 				lexicalFileIndexLabel,
 				lexicalFileIndexBytes,
 				hybridState,
-				chunkStoreBytes,
+				sharedSnapshotBytes,
+				hybridChunkBytes,
 				vectorShardBytes,
 				bm25Bytes,
 				hnswBytes,
@@ -2555,10 +2562,14 @@ export class DataManager {
 		}> = storageUsage.tables
 			.map((item) => ({
 				table:
-					item.name === "minisearch"
+					item.name === "lexicalSearchSnapshots"
 						? this.setting.fileSearchBackend === "passage-bm25"
-							? "minisearch(persisted)"
+							? "LexicalSnapshot(persisted)"
 							: lexicalFileIndexLabel
+						: item.name === "fileSnapshots"
+							? "SharedFileSnapshot"
+							: item.name === "hybridChunks"
+								? "HybridChunk"
 						: item.name,
 				rows: item.rows,
 				bytes: item.bytes,
@@ -2612,14 +2623,25 @@ export class DataManager {
 		if (storageUsage.hybridChunkBreakdown) {
 			console.table([
 				{
-					segment: "chunk-text",
-					bytes: storageUsage.hybridChunkBreakdown.textBytes,
-					size: this.formatBytes(storageUsage.hybridChunkBreakdown.textBytes),
+					segment: "shared-snapshot-text",
+					bytes: storageUsage.hybridChunkBreakdown.sharedSnapshotTextBytes,
+					size: this.formatBytes(
+						storageUsage.hybridChunkBreakdown.sharedSnapshotTextBytes,
+					),
 				},
 				{
-					segment: "chunk-metadata",
-					bytes: storageUsage.hybridChunkBreakdown.metadataBytes,
-					size: this.formatBytes(storageUsage.hybridChunkBreakdown.metadataBytes),
+					segment: "shared-snapshot-path",
+					bytes: storageUsage.hybridChunkBreakdown.sharedSnapshotPathBytes,
+					size: this.formatBytes(
+						storageUsage.hybridChunkBreakdown.sharedSnapshotPathBytes,
+					),
+				},
+				{
+					segment: "hybrid-chunk-metadata",
+					bytes: storageUsage.hybridChunkBreakdown.chunkMetadataBytes,
+					size: this.formatBytes(
+						storageUsage.hybridChunkBreakdown.chunkMetadataBytes,
+					),
 				},
 			]);
 		}
@@ -2710,7 +2732,8 @@ export class DataManager {
 		lexicalFileIndexLabel: string,
 		lexicalFileIndexBytes: number,
 		hybridState: "disabled" | "empty" | "ready",
-		chunkStoreBytes: number,
+		sharedSnapshotBytes: number,
+		hybridChunkBytes: number,
 		vectorShardBytes: number,
 		bm25Bytes: number,
 		hnswBytes: number,
@@ -2720,6 +2743,12 @@ export class DataManager {
 			(window.localStorage.getItem("language") || "")
 				.toLowerCase()
 				.startsWith("zh");
+		const hybridStorageSummary =
+			hybridState === "disabled"
+				? "Hybrid: disabled"
+				: hybridState === "empty"
+					? "Hybrid: enabled but currently empty"
+					: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
 
 		if (isChinese) {
 			const chineseHybridSummary =
@@ -2727,7 +2756,7 @@ export class DataManager {
 					? "Hybrid: disabled"
 					: hybridState === "empty"
 						? "Hybrid: enabled but currently empty"
-						: `HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
+						: hybridStorageSummary;
 			return [
 				`Dev stats`,
 				`Indexable vault size: ${this.formatBytes(indexableBytes)}`,
@@ -2743,7 +2772,7 @@ export class DataManager {
 					? "Hybrid: 未启用"
 					: hybridState === "empty"
 						? "Hybrid: 已启用，但当前无索引数据"
-						: `HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
+						: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
 			return [
 				`开发模式统计`,
 				`可索引文件总大小: ${this.formatBytes(indexableBytes)}`,
@@ -2758,7 +2787,7 @@ export class DataManager {
 				? "Hybrid: disabled"
 				: hybridState === "empty"
 					? "Hybrid: enabled but currently empty"
-					: `HybridChunk ${this.formatBytes(chunkStoreBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
+					: `SharedFileSnapshot ${this.formatBytes(sharedSnapshotBytes)} | HybridChunk ${this.formatBytes(hybridChunkBytes)} | VectorShard ${this.formatBytes(vectorShardBytes)} | HybridBM25 ${this.formatBytes(bm25Bytes)} | HybridHNSW ${this.formatBytes(hnswBytes)}`;
 		return [
 			`Dev stats`,
 			`Indexable vault size: ${this.formatBytes(indexableBytes)}`,

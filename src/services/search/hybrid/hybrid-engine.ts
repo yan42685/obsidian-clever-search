@@ -163,7 +163,7 @@ export class HybridEngine {
 
 		await Promise.all([
 			this.db.db.hybridChunks.clear(),
-			this.db.db.hybridFileSnapshots.clear(),
+			this.db.db.fileSnapshots.clear(),
 			this.db.db.hybridChunkVectors.clear(),
 			this.db.db.hybridBm25Index.clear(),
 			this.db.db.hybridHnswSmall.clear(),
@@ -261,7 +261,7 @@ export class HybridEngine {
 				.where("filePath")
 				.equals(oldPath)
 				.toArray();
-			const snapshotRow = await this.db.db.hybridFileSnapshots.get(oldPath);
+			const snapshotRow = await this.db.db.fileSnapshots.get(oldPath);
 			const vectorRow = await this.db.db.hybridChunkVectors.get(oldPath);
 			const indexedFileRef = await this.db.db.hybridIndexedFileRefs.get(oldPath);
 			const hasStoredData =
@@ -275,7 +275,7 @@ export class HybridEngine {
 
 			const hasTargetData =
 				(await this.db.db.hybridChunks.where("filePath").equals(newPath).count()) > 0 ||
-				(await this.db.db.hybridFileSnapshots.get(newPath)) !== undefined ||
+				(await this.db.db.fileSnapshots.get(newPath)) !== undefined ||
 				(await this.db.db.hybridChunkVectors.get(newPath)) !== undefined ||
 				(await this.db.db.hybridIndexedFileRefs.get(newPath)) !== undefined;
 			if (hasTargetData) {
@@ -294,11 +294,11 @@ export class HybridEngine {
 			}
 
 			if (snapshotRow) {
-				await this.db.db.hybridFileSnapshots.put({
+				await this.db.db.fileSnapshots.put({
 					...snapshotRow,
 					filePath: newPath,
 				});
-				await this.db.db.hybridFileSnapshots.delete(oldPath);
+				await this.db.db.fileSnapshots.delete(oldPath);
 			}
 
 			if (vectorRow) {
@@ -331,7 +331,7 @@ export class HybridEngine {
 		const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
 		await this.db.db.hybridChunks.bulkDelete(ids);
-		await this.db.db.hybridFileSnapshots.delete(filePath);
+		await this.db.db.fileSnapshots.delete(filePath);
 		await this.db.db.hybridChunkVectors.delete(filePath);
 		if (option.deleteIndexedFileRef ?? true) {
 			await this.db.db.hybridIndexedFileRefs.delete(filePath);
@@ -617,7 +617,7 @@ export class HybridEngine {
 		filePath: string,
 	): Promise<StoredFileIndexState> {
 		const [snapshot, chunkRows, vectorRow] = await Promise.all([
-			this.db.db.hybridFileSnapshots.get(filePath),
+			this.db.db.fileSnapshots.get(filePath),
 			this.db.db.hybridChunks.where('filePath').equals(filePath).sortBy('chunkIndex'),
 			this.db.db.hybridChunkVectors.get(filePath),
 		]);
