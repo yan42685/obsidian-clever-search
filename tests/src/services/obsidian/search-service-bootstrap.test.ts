@@ -99,7 +99,7 @@ describe("SearchService bootstrap gate", () => {
 	});
 
 	function createHarness(options: {
-		ready: boolean;
+		searchable: boolean;
 		hybridEnabled?: boolean;
 		lexicalMatches?: any[];
 		hybridItems?: any[];
@@ -147,9 +147,9 @@ describe("SearchService bootstrap gate", () => {
 			viewTypeByPath: jest.fn(() => ViewType.MARKDOWN),
 		};
 		const dataManager = {
-			isSearchReady: jest.fn(() => options.ready),
+			isSearchSearchable: jest.fn(() => options.searchable),
 			getSearchBootstrapNoticeKey: jest.fn(() =>
-				options.ready ? null : "searchBootstrap.restoring",
+				options.searchable ? null : "searchBootstrap.restoring",
 			),
 			isHybridSearchUnavailable: jest.fn(() => false),
 			hasHybridFailedEmbeddings: jest.fn(() => false),
@@ -181,9 +181,9 @@ describe("SearchService bootstrap gate", () => {
 		};
 	}
 
-	test("blocks lexical, hybrid, and in-file search before ready", async () => {
+	test("blocks lexical, hybrid, and in-file search before searchable", async () => {
 		const { service, lexicalEngine, dataProvider } = createHarness({
-			ready: false,
+			searchable: false,
 			hybridEnabled: true,
 		});
 
@@ -202,9 +202,9 @@ describe("SearchService bootstrap gate", () => {
 		);
 	});
 
-	test("delegates to lexical search after ready", async () => {
+	test("delegates to lexical search after searchable", async () => {
 		const { service, lexicalEngine, FileItem } = createHarness({
-			ready: true,
+			searchable: true,
 			lexicalMatches: [
 				{
 					path: "notes/alpha.md",
@@ -217,15 +217,15 @@ describe("SearchService bootstrap gate", () => {
 
 		const result = await service.searchInVault("alpha");
 
-		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("alpha", 22);
+		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("alpha", 22, 10);
 		expect(result.items).toHaveLength(1);
 		expect(result.items[0]).toBeInstanceOf(FileItem);
 		expect((result.items[0] as any).path).toBe("notes/alpha.md");
 	});
 
-	test("delegates to hybrid search after ready", async () => {
+	test("delegates to hybrid search after searchable", async () => {
 		const { service, EngineType, FileItem } = createHarness({
-			ready: true,
+			searchable: true,
 			hybridEnabled: true,
 			hybridItems: [],
 		});

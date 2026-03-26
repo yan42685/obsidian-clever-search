@@ -28,6 +28,11 @@ import { ViewRegistry, ViewType } from "./view-registry";
 export class SearchService {
 	private static readonly LEXICAL_FILE_CANDIDATE_CAP = 48;
 	private static readonly LEXICAL_FILE_CANDIDATE_BONUS = 12;
+	private static readonly LEXICAL_LINE_RERANK_CANDIDATE_CAP = 36;
+	private static readonly LEXICAL_LINE_RERANK_CANDIDATE_BONUS = 8;
+	private static readonly LEXICAL_LINE_RERANK_MIN_WINDOW = 12;
+	private static readonly LEXICAL_LINE_RERANK_SKIP_ABS_GAP = 1.6;
+	private static readonly LEXICAL_LINE_RERANK_SKIP_REL_GAP = 0.12;
 	private static readonly LEXICAL_LINE_RERANK_MAX_LINES = 6;
 	private static readonly LEXICAL_SUBITEM_MAX_LINES = 60;
 	private static readonly LEXICAL_LINE_EVIDENCE_WEIGHT = 0.4;
@@ -109,6 +114,7 @@ export class SearchService {
 		const lexicalMatches = await this.lexicalEngine.searchFiles(
 			queryText,
 			this.getLexicalFileCandidateLimit(maxDisplayItems),
+			maxDisplayItems,
 		);
 		const rerankedMatches = await this.rerankLexicalMatchesByLineEvidence(
 			queryText,
@@ -203,9 +209,16 @@ export class SearchService {
 		if (matchedFiles.length <= 1) {
 			return matchedFiles;
 		}
+		if (this.shouldSkipLexicalLineRerank(matchedFiles)) {
+			return matchedFiles;
+		}
+		const rerankCandidateCount = this.getLexicalLineRerankCandidateCount(
+			matchedFiles.length,
+		);
+		const rerankWindow = matchedFiles.slice(0, rerankCandidateCount);
 
 		const evidenceRows = await Promise.all(
-			matchedFiles.map((matchedFile, index) =>
+			rerankWindow.map((matchedFile, index) =>
 				this.collectLexicalLineEvidence(queryText, matchedFile, index),
 			),
 		);
@@ -247,7 +260,53 @@ export class SearchService {
 				}
 				return a.matchedFile.path.localeCompare(b.matchedFile.path);
 			})
-			.map((row) => row.matchedFile);
+			.map((row) => row.matchedFile)
+			.concat(matchedFiles.slice(rerankCandidateCount));
+	}
+
+	private getLexicalLineRerankCandidateCount(totalCandidates: number): number {
+		const maxDisplayItems = this.setting.ui.maxItemResults;
+		return Math.min(
+			totalCandidates,
+			Math.max(
+				SearchService.LEXICAL_LINE_RERANK_MIN_WINDOW,
+				maxDisplayItems,
+				Math.min(
+					SearchService.LEXICAL_LINE_RERANK_CANDIDATE_CAP,
+					maxDisplayItems + SearchService.LEXICAL_LINE_RERANK_CANDIDATE_BONUS,
+				),
+			),
+		);
+	}
+
+	private shouldSkipLexicalLineRerank(matchedFiles: MatchedFile[]): boolean {
+		if (matchedFiles.length < 3) {
+			return false;
+		}
+		const topScore = matchedFiles[0].score ?? 0;
+		const secondScore = matchedFiles[1].score ?? 0;
+		const probeScore =
+			matchedFiles[
+				Math.min(matchedFiles.length - 1, this.setting.ui.maxItemResults - 1)
+			]?.score ?? secondScore;
+		if (
+			!Number.isFinite(topScore) ||
+			!Number.isFinite(secondScore) ||
+			topScore <= secondScore
+		) {
+			return false;
+		}
+		const leadGap = topScore - secondScore;
+		const probeGap = topScore - probeScore;
+		return (
+			leadGap >= SearchService.LEXICAL_LINE_RERANK_SKIP_ABS_GAP &&
+			leadGap >=
+				Math.max(
+					Math.abs(topScore) * SearchService.LEXICAL_LINE_RERANK_SKIP_REL_GAP,
+					0.6,
+				) &&
+			probeGap >= leadGap * 1.4
+		);
 	}
 
 	private async collectLexicalLineEvidence(
@@ -376,7 +435,7 @@ export class SearchService {
 			return null;
 		}
 		const dataManager = getInstance(DataManager);
-		if (dataManager.isSearchReady()) {
+		if (dataManager.isSearchSearchable()) {
 			return null;
 		}
 		const noticeKey = dataManager.getSearchBootstrapNoticeKey();

@@ -353,6 +353,8 @@ const CHAR_PASSAGE_SEED_FILE_LIMIT = 24;
 const MAX_FILE_PASSAGE_EVIDENCES = 4;
 const PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT = 24;
 const PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH = 2;
+const PARTIAL_SORT_MIN_RESULTS = 128;
+const PARTIAL_SORT_LIMIT_SCALE = 4;
 const FILE_SECOND_PASSAGE_DECAY = 0.34;
 const FILE_PASSAGE_SET_BEST_COVERAGE_BONUS = 1.12;
 const FILE_PASSAGE_SET_UNION_COVERAGE_BONUS = 0.42;
@@ -841,6 +843,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
+			this.computeResultSelectionLimit(
+				request.maxItemResults,
+				enablePrefixCandidateVerifierLane,
+			),
 		);
 		return this.finalizeMatchedFiles(
 			this.applyPrefixCandidateVerifierLane(
@@ -851,6 +857,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryScoringCache,
 			),
 			request.maxItemResults,
+			request.maxDirectSubItemResults ?? request.maxItemResults,
 			fileStates,
 			queryTerms,
 			queryScoringCache,
@@ -1007,6 +1014,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
+			this.computeResultSelectionLimit(
+				request.maxItemResults,
+				enablePrefixCandidateVerifierLane,
+			),
 			),
 			enablePrefixCandidateVerifierLane,
 			queryTerms,
@@ -1022,6 +1033,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return this.finalizeMatchedFiles(
 				strictSorted,
 				request.maxItemResults,
+				request.maxDirectSubItemResults ?? request.maxItemResults,
 				fileStates,
 				queryTerms,
 				queryScoringCache,
@@ -1037,6 +1049,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
+			this.computeResultSelectionLimit(
+				request.maxItemResults,
+				enablePrefixCandidateVerifierLane,
+			),
 			),
 			enablePrefixCandidateVerifierLane,
 			queryTerms,
@@ -1047,6 +1063,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return this.finalizeMatchedFiles(
 				relaxedSorted,
 				request.maxItemResults,
+				request.maxDirectSubItemResults ?? request.maxItemResults,
 				fileStates,
 				queryTerms,
 				queryScoringCache,
@@ -1073,6 +1090,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
+			this.computeResultSelectionLimit(
+				request.maxItemResults,
+				enablePrefixCandidateVerifierLane,
+			),
 			),
 			enablePrefixCandidateVerifierLane,
 			queryTerms,
@@ -1082,6 +1103,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return this.finalizeMatchedFiles(
 			fallbackSorted,
 			request.maxItemResults,
+			request.maxDirectSubItemResults ?? request.maxItemResults,
 			fileStates,
 			queryTerms,
 			queryScoringCache,
@@ -1091,12 +1113,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private finalizeMatchedFiles(
 		results: RankedMatchedFile[],
 		maxItemResults: number,
+		maxDirectSubItemResults: number,
 		fileStates: Map<number, FileCandidateState>,
 		queryTerms: readonly string[],
 		queryScoringCache: QueryScoringCache,
 	): MatchedFile[] {
 		const finalResults = results.slice(0, maxItemResults);
-		for (const result of finalResults) {
+		for (const result of finalResults.slice(0, maxDirectSubItemResults)) {
 			const fileState = fileStates.get(result.fileId);
 			if (!fileState) {
 				result.directSubItems = [];
@@ -1109,6 +1132,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			);
 		}
 		return finalResults;
+	}
+
+	private computeResultSelectionLimit(
+		maxItemResults: number,
+		enablePrefixCandidateVerifierLane: boolean,
+	): number {
+		return Math.max(
+			maxItemResults,
+			enablePrefixCandidateVerifierLane
+				? PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT
+				: 0,
+		);
 	}
 
 	private collectRankedFiles(params: {
@@ -3460,13 +3495,40 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTerms: readonly string[];
 			queryScriptProfile: ScriptProfile;
 		} | null = null,
+		limit: number | null = null,
 	): RankedMatchedFile[] {
+		const comparator = this.createMatchedFileComparator(
+			results,
+			planner,
+			queryRoute,
+			localeContext,
+		);
+		if (
+			limit !== null &&
+			results.length > limit &&
+			results.length >=
+				Math.max(PARTIAL_SORT_MIN_RESULTS, limit * PARTIAL_SORT_LIMIT_SCALE)
+		) {
+			return this.selectTopMatchedFiles(results, limit, comparator);
+		}
+		return results.sort(comparator);
+	}
+
+	private createMatchedFileComparator(
+		results: RankedMatchedFile[],
+		planner: FileSearchQueryPlanner | null,
+		queryRoute: ExperimentalQueryRoute,
+		localeContext: {
+			queryTerms: readonly string[];
+			queryScriptProfile: ScriptProfile;
+		} | null,
+	): (left: RankedMatchedFile, right: RankedMatchedFile) => number {
 		if (
 			queryRoute === "metadata_exact" &&
 			planner?.queryKind === "short_anchor" &&
 			this.shouldRouteShortAnchorResults(results)
 		) {
-			return results.sort((left, right) => {
+			return (left, right) => {
 				const localePreference = localeContext
 					? this.compareMirrorLocalePreference(left, right, localeContext)
 					: 0;
@@ -3488,10 +3550,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					return rightScore - leftScore;
 				}
 				return left.path.localeCompare(right.path);
-			});
+			};
 		}
 		if (queryRoute === "metadata_exact" && this.shouldRouteMetadataLaneResults(results)) {
-			return results.sort((left, right) => {
+			return (left, right) => {
 				const localePreference = localeContext
 					? this.compareMirrorLocalePreference(left, right, localeContext)
 					: 0;
@@ -3516,10 +3578,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					return right.shortAnchorLaneScore - left.shortAnchorLaneScore;
 				}
 				return left.path.localeCompare(right.path);
-			});
+			};
 		}
 		if (queryRoute === "path_anchor" && this.shouldRouteMetadataLaneResults(results)) {
-			return results.sort((left, right) => {
+			return (left, right) => {
 				const localePreference = localeContext
 					? this.compareMirrorLocalePreference(left, right, localeContext)
 					: 0;
@@ -3544,10 +3606,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					return rightScore - leftScore;
 				}
 				return left.path.localeCompare(right.path);
-			});
+			};
 		}
 		if (queryRoute === "mixed_anchor") {
-			return results.sort((left, right) => {
+			return (left, right) => {
 				const mixedAnchorDecision = this.compareMixedAnchorDecision(left, right);
 				if (mixedAnchorDecision !== 0) {
 					return mixedAnchorDecision;
@@ -3607,9 +3669,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					return right.scriptFitScore - left.scriptFitScore;
 				}
 				return left.path.localeCompare(right.path);
-			});
+			};
 		}
-		return results.sort((left, right) => {
+		return (left, right) => {
 			const localePreference = localeContext
 				? this.compareMirrorLocalePreference(left, right, localeContext)
 				: 0;
@@ -3666,7 +3728,37 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				return right.scriptFitScore - left.scriptFitScore;
 			}
 			return left.path.localeCompare(right.path);
-		});
+		};
+	}
+
+	private selectTopMatchedFiles(
+		results: readonly RankedMatchedFile[],
+		limit: number,
+		comparator: (left: RankedMatchedFile, right: RankedMatchedFile) => number,
+	): RankedMatchedFile[] {
+		const selected: RankedMatchedFile[] = [];
+		for (const result of results) {
+			let insertAt = 0;
+			let low = 0;
+			let high = selected.length;
+			while (low < high) {
+				const mid = Math.floor((low + high) / 2);
+				if (comparator(result, selected[mid]) < 0) {
+					high = mid;
+				} else {
+					low = mid + 1;
+				}
+			}
+			insertAt = low;
+			if (insertAt >= limit) {
+				continue;
+			}
+			selected.splice(insertAt, 0, result);
+			if (selected.length > limit) {
+				selected.pop();
+			}
+		}
+		return selected;
 	}
 
 	private shouldRouteMetadataLaneResults(
