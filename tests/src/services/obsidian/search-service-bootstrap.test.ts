@@ -141,7 +141,15 @@ describe("SearchService bootstrap gate", () => {
 			matchLinesFuzzy: jest.fn().mockResolvedValue([]),
 		};
 		const lineHighlighter = {
-			parse: jest.fn(),
+			parse: jest.fn((lines: any[], matchedLine: any, truncateOption: any, isParagraph: boolean) =>
+				isParagraph
+					? { text: matchedLine?.text ?? lines?.[0]?.text ?? "" }
+					: {
+						text: matchedLine?.text ?? lines?.[0]?.text ?? "",
+						row: matchedLine?.row ?? 0,
+						col: 0,
+					},
+			),
 		};
 		const viewRegistry = {
 			viewTypeByPath: jest.fn(() => ViewType.MARKDOWN),
@@ -181,7 +189,7 @@ describe("SearchService bootstrap gate", () => {
 		};
 	}
 
-	test("blocks lexical, hybrid, and in-file search before searchable", async () => {
+	test("blocks lexical and hybrid search before searchable, but keeps in-file search available", async () => {
 		const { service, lexicalEngine, dataProvider } = createHarness({
 			searchable: false,
 			hybridEnabled: true,
@@ -193,10 +201,10 @@ describe("SearchService bootstrap gate", () => {
 
 		expect(lexicalResult.items).toEqual([]);
 		expect(hybridResult.items).toEqual([]);
-		expect(inFileResult.items).toEqual([]);
 		expect(lexicalEngine.searchFiles).not.toHaveBeenCalled();
 		expect(mockHybridEngine.search).not.toHaveBeenCalled();
-		expect(dataProvider.readPlainTextLines).not.toHaveBeenCalled();
+		expect(dataProvider.readPlainTextLines).toHaveBeenCalledWith("notes/current.md");
+		expect(inFileResult.items).toHaveLength(0);
 		expect(mockNotices.map((entry) => entry.message)).toContain(
 			"searchBootstrap.restoring",
 		);

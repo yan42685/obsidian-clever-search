@@ -387,10 +387,6 @@ export class SearchService {
 		if (!queryText || !activeFile) {
 			return result;
 		}
-		const blocked = this.getBlockedSearchResult(queryText);
-		if (blocked) {
-			return blocked;
-		}
 
 		if (
 			this.viewRegistry.viewTypeByPath(activeFile.path) !==

@@ -93,7 +93,7 @@ export type SearchBootstrapState =
 	| "blocked"
 	| "restoring"
 	| "healing"
-	| "ready"
+	| "searchable"
 	| "failed";
 
 type SearchBootstrapPhase = "restore" | "heal" | "commit";
@@ -102,12 +102,15 @@ export type SearchBootstrapMetrics = {
 	startedAt: number;
 	restoreCompletedAt: number | null;
 	healCompletedAt: number | null;
+	searchableAt: number | null;
+	commitStartedAt: number | null;
 	commitCompletedAt: number | null;
-	readyAt: number | null;
 	restoreMs: number | null;
 	healMs: number | null;
+	searchableMs: number | null;
 	commitMs: number | null;
-	totalMs: number | null;
+	commitPending: boolean;
+	commitFailed: boolean;
 };
 
 type LexicalBootstrapPlan = {
@@ -234,6 +237,7 @@ export class DataManager {
 	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
 	private searchBootstrapState: SearchBootstrapState = "blocked";
 	private searchBootstrapMetrics: SearchBootstrapMetrics | null = null;
+	private searchBootstrapCommitTask: Promise<void> | null = null;
 	private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
 	private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
 	private hybridRepairWorker: Promise<void> | null = null;
@@ -382,7 +386,8 @@ export class DataManager {
 		this.beginSearchBootstrapRun();
 		try {
 			await this.runSearchBootstrapPipeline();
-			this.finishSearchBootstrapRun();
+			this.finishSearchBootstrapSearchable();
+			this.kickOffSearchBootstrapCommit();
 		} catch (error) {
 			this.setSearchBootstrapState("failed");
 			this.failSearchBootstrapRun();
@@ -395,6 +400,7 @@ export class DataManager {
 		this.clearHybridRepairScheduler();
 		this.clearFailedEmbeddingRetryTimer();
 		this.hybridEmbeddingRecovery.clearAll();
+		this.searchBootstrapCommitTask = null;
 		this.setSearchBootstrapState("blocked");
 	}
 
@@ -421,10 +427,6 @@ export class DataManager {
 			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
 		});
 		this.markSearchBootstrapPhaseCompleted("heal");
-
-		await this.commitLexicalBootstrapPlan();
-		await this.commitSearchBootstrapRun();
-		this.markSearchBootstrapPhaseCompleted("commit");
 	}
 
 	async refreshAllAsync() {
@@ -460,7 +462,7 @@ export class DataManager {
 				this.dataProvider.allFilesToBeIndexed(),
 			);
 			new MyNotice(t("Indexing finished"), 5000);
-			this.setSearchBootstrapState("ready");
+			this.setSearchBootstrapState("searchable");
 		} catch (error) {
 			this.setSearchBootstrapState("failed");
 			throw error;
@@ -1126,9 +1128,6 @@ export class DataManager {
 					failures,
 				);
 			});
-			await profileHybridStage("startup.persist_indices_batch", async () => {
-				await this.hybridEngine.persistIndicesForBatch();
-			});
 			const fallbackNoticeKey =
 				this.hybridEngine.consumeIndexingFallbackNoticeKey();
 			if (failures.length > 0) {
@@ -1581,8 +1580,8 @@ export class DataManager {
 		return this.hybridSearchAvailability === "blocked";
 	}
 
-	isSearchReady(): boolean {
-		return this.searchBootstrapState === "ready";
+	isSearchSearchable(): boolean {
+		return this.searchBootstrapState === "searchable";
 	}
 
 	getSearchBootstrapState(): SearchBootstrapState {
@@ -1623,12 +1622,15 @@ export class DataManager {
 			startedAt: Date.now(),
 			restoreCompletedAt: null,
 			healCompletedAt: null,
+			searchableAt: null,
+			commitStartedAt: null,
 			commitCompletedAt: null,
-			readyAt: null,
 			restoreMs: null,
 			healMs: null,
+			searchableMs: null,
 			commitMs: null,
-			totalMs: null,
+			commitPending: false,
+			commitFailed: false,
 		};
 		this.setSearchBootstrapState("restoring");
 	}
@@ -1652,25 +1654,27 @@ export class DataManager {
 			metrics.healMs = now - phaseStart;
 			return;
 		}
-		metrics.commitCompletedAt = now;
 		const phaseStart =
+			metrics.commitStartedAt ??
 			metrics.healCompletedAt ??
 			metrics.restoreCompletedAt ??
 			metrics.startedAt;
+		metrics.commitCompletedAt = now;
 		metrics.commitMs = now - phaseStart;
+		metrics.commitPending = false;
 	}
 
-	private finishSearchBootstrapRun(): void {
+	private finishSearchBootstrapSearchable(): void {
 		const metrics = this.searchBootstrapMetrics;
-		const readyAt = Date.now();
+		const searchableAt = Date.now();
 		if (metrics) {
-			metrics.readyAt = readyAt;
-			metrics.totalMs = readyAt - metrics.startedAt;
+			metrics.searchableAt = searchableAt;
+			metrics.searchableMs = searchableAt - metrics.startedAt;
 		}
-		this.setSearchBootstrapState("ready");
+		this.setSearchBootstrapState("searchable");
 		logger.info(
-			`[clever-search] search bootstrap ready in ${metrics?.totalMs ?? 0} ms` +
-				` (restore ${metrics?.restoreMs ?? 0} ms, heal ${metrics?.healMs ?? 0} ms, commit ${metrics?.commitMs ?? 0} ms)`,
+			`[clever-search] search bootstrap searchable in ${metrics?.searchableMs ?? 0} ms` +
+				` (restore ${metrics?.restoreMs ?? 0} ms, heal ${metrics?.healMs ?? 0} ms)`,
 		);
 	}
 
@@ -1678,14 +1682,18 @@ export class DataManager {
 		if (!this.searchBootstrapMetrics) {
 			return;
 		}
-		this.searchBootstrapMetrics.readyAt = null;
-		this.searchBootstrapMetrics.totalMs = null;
+		this.searchBootstrapMetrics.searchableAt = null;
+		this.searchBootstrapMetrics.searchableMs = null;
+		this.searchBootstrapMetrics.commitPending = false;
 	}
 
-	private async commitSearchBootstrapRun(): Promise<void> {
-		await this.fileSnapshotStore.refreshHighPerformanceState(
-			this.dataProvider.allFilesToBeIndexed(),
-		);
+	private kickOffSearchBootstrapCommit(): void {
+		const metrics = this.searchBootstrapMetrics;
+		if (metrics) {
+			metrics.commitPending = true;
+			metrics.commitFailed = false;
+			metrics.commitStartedAt = Date.now();
+		}
 
 		if (!this.shouldForceRefresh) {
 			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
@@ -1694,10 +1702,44 @@ export class DataManager {
 			getInstance(FileWatcher).start();
 		}
 
+		this.notifyHybridRuntimeStatusChanged();
+
+		const task = this.commitSearchBootstrapRun()
+			.then(() => {
+				this.markSearchBootstrapPhaseCompleted("commit");
+				if (isDevEnvironment) {
+					const commitMs = this.searchBootstrapMetrics?.commitMs ?? 0;
+					logger.info(
+						`[clever-search] search bootstrap commit finished in ${commitMs} ms`,
+					);
+				}
+			})
+			.catch((error) => {
+				logger.warn("[clever-search] search bootstrap commit failed:", error);
+				if (this.searchBootstrapMetrics) {
+					this.searchBootstrapMetrics.commitPending = false;
+					this.searchBootstrapMetrics.commitFailed = true;
+				}
+			})
+			.finally(() => {
+				if (this.searchBootstrapCommitTask === task) {
+					this.searchBootstrapCommitTask = null;
+				}
+			});
+		this.searchBootstrapCommitTask = task;
+	}
+
+	private async commitSearchBootstrapRun(): Promise<void> {
+		await this.commitLexicalBootstrapPlan();
+		if (this.hybridEngine.isEnabled()) {
+			await this.hybridEngine.persistIndicesForBatch();
+		}
+		await this.fileSnapshotStore.refreshHighPerformanceState(
+			this.dataProvider.allFilesToBeIndexed(),
+		);
 		if (isDevEnvironment) {
 			await this.noticeDevStorageStats();
 		}
-		this.notifyHybridRuntimeStatusChanged();
 	}
 
 	private getHybridIndexConcurrency(): number {
