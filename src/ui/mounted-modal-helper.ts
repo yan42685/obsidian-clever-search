@@ -20,7 +20,7 @@ type AutoHybridFallbackControllerOptions = {
 };
 
 export function usesDirectFileSubItems(item: FileItem): boolean {
-	return item.engineType === EngineType.SEMANTIC;
+	return item.engineType === EngineType.SEMANTIC || item.subItems.length > 0;
 }
 
 export function getMountedModalFileItemScore(

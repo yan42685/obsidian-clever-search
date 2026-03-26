@@ -115,7 +115,7 @@ export class SearchService {
 					matchedFile.path,
 					matchedFile.queryTerms,
 					matchedFile.matchedTerms,
-					[],
+					matchedFile.directSubItems ?? [],
 					"nothing",
 				);
 			}),

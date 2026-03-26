@@ -1,5 +1,9 @@
 import { Vault } from "obsidian";
-import type { IndexedDocument, MatchedFile } from "src/globals/search-types";
+import {
+	FileSubItem,
+	type IndexedDocument,
+	type MatchedFile,
+} from "src/globals/search-types";
 import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
@@ -16,6 +20,7 @@ import {
 	type FileSearchQueryKind,
 	type FileSearchQueryTermStats,
 } from "../file-search-query-planner";
+import { buildLineOffsets, offsetToLine } from "../hybrid/chunker";
 import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
 
@@ -198,6 +203,8 @@ type QueryScoringCache = {
 	verifierSignalsByPassageId: Map<number, VerifierSignals>;
 	tokenSequenceByPassageId: Map<number, string[]>;
 	passageTextByPassageId: Map<number, string>;
+	fileTextByFileId: Map<number, string>;
+	lineOffsetsByFileId: Map<number, number[]>;
 };
 
 type PassageUnit = {
@@ -2166,12 +2173,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 			insertIndex += 1;
 		}
-		if (insertIndex < MAX_FILE_PASSAGE_EVIDENCES) {
-			evidences.splice(insertIndex, 0, evidence);
-			if (evidences.length > MAX_FILE_PASSAGE_EVIDENCES) {
-				evidences.length = MAX_FILE_PASSAGE_EVIDENCES;
-			}
-		}
+		evidences.splice(insertIndex, 0, evidence);
 		state.bestPassageScore = evidences[0]?.score ?? 0;
 		state.secondPassageScore = evidences[1]?.score ?? 0;
 	}
@@ -2912,6 +2914,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			path: state.filePath,
 			queryTerms,
 			matchedTerms: Array.from(state.matchedTerms),
+			directSubItems: this.buildDirectSubItems(
+				state,
+				queryTerms,
+				queryScoringCache,
+			),
 			score: baseScore + scoreBonus,
 			queryRouteScore,
 			metadataLaneScore: state.metadataLaneScore,
@@ -4917,7 +4924,29 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			verifierSignalsByPassageId: new Map<number, VerifierSignals>(),
 			tokenSequenceByPassageId: new Map<number, string[]>(),
 			passageTextByPassageId: new Map<number, string>(),
+			fileTextByFileId: new Map<number, string>(),
+			lineOffsetsByFileId: new Map<number, number[]>(),
 		};
+	}
+
+	private getFileText(
+		fileId: number,
+		queryScoringCache: QueryScoringCache,
+	): string {
+		const cached = queryScoringCache.fileTextByFileId.get(fileId);
+		if (cached !== undefined) {
+			return cached;
+		}
+		const filePath = this.pathByFileId.get(fileId);
+		const fileSnapshotStore = this.getFileSnapshotStore();
+		const fileText =
+			(filePath && fileSnapshotStore
+				? fileSnapshotStore.peekCurrentFileText(filePath)
+				: undefined) ??
+			this.fallbackFileContentById.get(fileId) ??
+			"";
+		queryScoringCache.fileTextByFileId.set(fileId, fileText);
+		return fileText;
 	}
 
 	private getPassageText(
@@ -4934,18 +4963,268 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (cached !== undefined) {
 			return cached;
 		}
-		const filePath = this.pathByFileId.get(passage.fileId);
-		const fileSnapshotStore = this.getFileSnapshotStore();
-		const fileContent =
-			(filePath && fileSnapshotStore
-				? fileSnapshotStore.peekCurrentFileText(filePath)
-				: undefined) ??
-			this.fallbackFileContentById.get(passage.fileId) ??
-			"";
+		const fileContent = this.getFileText(passage.fileId, queryScoringCache);
 		const text = fileContent.slice(passage.startOffset, passage.endOffset).trim();
 		queryScoringCache.passageTextByPassageId.set(passage.id, text);
 		this.touchPassageRuntimeCache(passage.id, { text });
 		return text;
+	}
+
+	private getFileLineOffsets(
+		fileId: number,
+		queryScoringCache: QueryScoringCache,
+	): number[] {
+		const cached = queryScoringCache.lineOffsetsByFileId.get(fileId);
+		if (cached) {
+			return cached;
+		}
+		const offsets = buildLineOffsets(this.getFileText(fileId, queryScoringCache));
+		queryScoringCache.lineOffsetsByFileId.set(fileId, offsets);
+		return offsets;
+	}
+
+	private buildDirectSubItems(
+		state: FileCandidateState,
+		queryTerms: readonly string[],
+		queryScoringCache: QueryScoringCache,
+	): FileSubItem[] {
+		if (state.topPassageEvidences.length === 0) {
+			return [];
+		}
+		if (!this.getFileText(state.fileId, queryScoringCache)) {
+			return [];
+		}
+		const lineOffsets = this.getFileLineOffsets(state.fileId, queryScoringCache);
+		return state.topPassageEvidences
+			.map((evidence) => {
+				const passage = this.getPassageRecord(evidence.passageId);
+				if (!passage) {
+					return null;
+				}
+				const snippetText = this.getPassageText(passage, queryScoringCache);
+				if (!snippetText) {
+					return null;
+				}
+				const row = offsetToLine(lineOffsets, passage.startOffset);
+				const lineStartOffset = lineOffsets[row] ?? 0;
+				const col = Math.max(0, passage.startOffset - lineStartOffset);
+				return new FileSubItem(
+					snippetText,
+					row,
+					col,
+					evidence.score,
+					this.highlightPassageSnippet(
+						passage,
+						snippetText,
+						evidence,
+						queryTerms,
+						queryScoringCache,
+					),
+				);
+			})
+			.filter((subItem): subItem is FileSubItem => subItem !== null);
+	}
+
+	private highlightPassageSnippet(
+		passage: PassageRecord,
+		snippetText: string,
+		evidence: FilePassageEvidence,
+		queryTerms: readonly string[],
+		queryScoringCache: QueryScoringCache,
+	): string {
+		const positionSignals = this.getCachedPassagePositionSignals({
+			passage,
+			matchedQueryTerms: evidence.matchedQueryTerms,
+			matchedTermsByQueryTerm: evidence.matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		});
+		const highlightTerms = this.selectHighlightTermsForPassage(
+			positionSignals,
+			snippetText,
+		);
+		if (highlightTerms.length === 0) {
+			return escapeHtml(snippetText);
+		}
+
+		const ranges = this.collectSnippetHighlightRanges(snippetText, highlightTerms);
+		if (ranges.length === 0) {
+			return escapeHtml(snippetText);
+		}
+		const snippetWindow = this.selectSnippetWindow(snippetText, ranges);
+		return this.renderHighlightedSnippet(snippetWindow.text, snippetWindow.ranges, {
+			prefixEllipsis: snippetWindow.start > 0,
+			suffixEllipsis: snippetWindow.end < snippetText.length,
+		});
+	}
+
+	private selectHighlightTermsForPassage(
+		positionSignals: ReadonlyMap<number, QueryTermPositionSignal>,
+		snippetText: string,
+	): string[] {
+		const entries = Array.from(positionSignals.entries())
+			.map(([queryTermIndex, signal]) => ({
+				queryTermIndex,
+				term: signal.representativeTerm,
+				positions: signal.positions,
+			}))
+			.filter(
+				(entry) =>
+					entry.term.trim().length > 0 && entry.positions.length > 0,
+			);
+		if (entries.length === 0) {
+			return [];
+		}
+		if (snippetText.length <= 220 || entries.length <= 2) {
+			return uniqueSortedTerms(entries.map((entry) => entry.term));
+		}
+
+		const windowedPositions = entries
+			.flatMap((entry) =>
+				entry.positions.map((position) => ({
+					queryTermIndex: entry.queryTermIndex,
+					position,
+				})),
+			)
+			.sort((left, right) => left.position - right.position);
+		if (windowedPositions.length === 0) {
+			return uniqueSortedTerms(entries.map((entry) => entry.term));
+		}
+
+		const MAX_HIGHLIGHT_WINDOW_TOKENS = 18;
+		let bestStart = 0;
+		let bestEnd = 0;
+		let bestScore = -Infinity;
+		for (let start = 0; start < windowedPositions.length; start++) {
+			let end = start;
+			while (
+				end + 1 < windowedPositions.length &&
+				windowedPositions[end + 1].position - windowedPositions[start].position <=
+					MAX_HIGHLIGHT_WINDOW_TOKENS
+			) {
+				end += 1;
+			}
+			const queryTermsInWindow = new Set<number>();
+			for (let index = start; index <= end; index++) {
+				queryTermsInWindow.add(windowedPositions[index].queryTermIndex);
+			}
+			const span =
+				windowedPositions[end].position - windowedPositions[start].position;
+			const score = queryTermsInWindow.size * 100 - span;
+			if (score > bestScore) {
+				bestScore = score;
+				bestStart = start;
+				bestEnd = end;
+			}
+		}
+
+		const highlightedQueryTerms = new Set<number>();
+		for (let index = bestStart; index <= bestEnd; index++) {
+			highlightedQueryTerms.add(windowedPositions[index].queryTermIndex);
+		}
+		return uniqueSortedTerms(
+			entries
+				.filter((entry) => highlightedQueryTerms.has(entry.queryTermIndex))
+				.map((entry) => entry.term),
+		);
+	}
+
+	private collectSnippetHighlightRanges(
+		snippetText: string,
+		highlightTerms: readonly string[],
+	): Array<{ start: number; end: number }> {
+		const ranges: Array<{ start: number; end: number }> = [];
+		const lowerSnippet = snippetText.toLocaleLowerCase();
+		for (const term of highlightTerms) {
+			const lowerTerm = term.toLocaleLowerCase();
+			if (!lowerTerm) {
+				continue;
+			}
+			let startIndex = 0;
+			while (startIndex < lowerSnippet.length) {
+				const foundIndex = lowerSnippet.indexOf(lowerTerm, startIndex);
+				if (foundIndex === -1) {
+					break;
+				}
+				ranges.push({
+					start: foundIndex,
+					end: foundIndex + lowerTerm.length,
+				});
+				startIndex = foundIndex + lowerTerm.length;
+			}
+		}
+		return mergeRanges(ranges);
+	}
+
+	private selectSnippetWindow(
+		snippetText: string,
+		ranges: readonly { start: number; end: number }[],
+	): {
+		text: string;
+		ranges: Array<{ start: number; end: number }>;
+		start: number;
+		end: number;
+	} {
+		const MAX_SNIPPET_WINDOW_CHARS = 220;
+		if (snippetText.length <= MAX_SNIPPET_WINDOW_CHARS || ranges.length === 0) {
+			return {
+				text: snippetText,
+				ranges: ranges.map((range) => ({ ...range })),
+				start: 0,
+				end: snippetText.length,
+			};
+		}
+		const firstRange = ranges[0];
+		const lastRange = ranges[ranges.length - 1];
+		const highlightCenter = Math.round((firstRange.start + lastRange.end) / 2);
+		const start = Math.max(
+			0,
+			Math.min(
+				firstRange.start - 36,
+				highlightCenter - Math.floor(MAX_SNIPPET_WINDOW_CHARS / 2),
+			),
+		);
+		const end = Math.min(snippetText.length, start + MAX_SNIPPET_WINDOW_CHARS);
+		const windowStart = Math.max(0, end - MAX_SNIPPET_WINDOW_CHARS);
+		return {
+			text: snippetText.slice(windowStart, end),
+			ranges: ranges
+				.filter((range) => range.end > windowStart && range.start < end)
+				.map((range) => ({
+					start: Math.max(0, range.start - windowStart),
+					end: Math.min(end - windowStart, range.end - windowStart),
+				})),
+			start: windowStart,
+			end,
+		};
+	}
+
+	private renderHighlightedSnippet(
+		snippetText: string,
+		ranges: readonly { start: number; end: number }[],
+		options: {
+			prefixEllipsis: boolean;
+			suffixEllipsis: boolean;
+		},
+	): string {
+		if (ranges.length === 0) {
+			return escapeHtml(snippetText);
+		}
+		const orderedRanges = mergeRanges(ranges);
+		let highlighted = options.prefixEllipsis ? "&hellip;" : "";
+		let cursor = 0;
+		for (const range of orderedRanges) {
+			highlighted += escapeHtml(snippetText.slice(cursor, range.start));
+			highlighted += `<mark>${escapeHtml(
+				snippetText.slice(range.start, range.end),
+			)}</mark>`;
+			cursor = range.end;
+		}
+		highlighted += escapeHtml(snippetText.slice(cursor));
+		if (options.suffixEllipsis) {
+			highlighted += "&hellip;";
+		}
+		return highlighted;
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -7924,6 +8203,43 @@ function countSubstringOccurrences(text: string, pattern: string): number {
 		startIndex = foundIndex + 1;
 	}
 	return count;
+}
+
+function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+function mergeRanges(
+	ranges: readonly { start: number; end: number }[],
+): Array<{ start: number; end: number }> {
+	if (ranges.length === 0) {
+		return [];
+	}
+	const sortedRanges = [...ranges].sort((left, right) => {
+		if (left.start !== right.start) {
+			return left.start - right.start;
+		}
+		return right.end - left.end;
+	});
+	const mergedRanges: Array<{ start: number; end: number }> = [];
+	for (const range of sortedRanges) {
+		const lastRange = mergedRanges[mergedRanges.length - 1];
+		if (!lastRange || range.start > lastRange.end) {
+			mergedRanges.push({ ...range });
+			continue;
+		}
+		lastRange.end = Math.max(lastRange.end, range.end);
+	}
+	return mergedRanges;
+}
+
+function uniqueSortedTerms(terms: readonly string[]): string[] {
+	return Array.from(new Set(terms)).sort((left, right) => right.length - left.length);
 }
 
 function lowerBoundNumber(values: readonly number[], target: number): number {

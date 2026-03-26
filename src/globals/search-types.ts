@@ -59,6 +59,7 @@ export type MatchedFile = {
 	queryTerms: string[];
 	matchedTerms: string[];
 	score?: number;
+	directSubItems?: FileSubItem[];
 };
 
 export class SearchResult {
