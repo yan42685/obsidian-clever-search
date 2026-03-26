@@ -2165,6 +2165,7 @@ export class DataManager {
 					charPostings: breakdown.charPostings ?? 0,
 					metadataPostings: breakdown.metadataPostings ?? 0,
 					passagePostingTermRefs: breakdown.passagePostingTermRefs ?? 0,
+					fileCharTermRefs: breakdown.fileCharTermRefs ?? 0,
 				},
 			]);
 			console.table(

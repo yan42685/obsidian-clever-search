@@ -47,12 +47,10 @@ type PassageRecord = {
 type IndexedPassageBuild = {
 	record: PassageRecord;
 	wordTf: Map<string, number>;
-	charTf: Map<string, number>;
 };
 
 type PassagePostingTerms = {
-	wordTerms: string[];
-	charTerms: string[];
+	wordTermIds: number[];
 };
 
 type PassageCandidateState = {
@@ -172,7 +170,7 @@ type QueryScoringCache = {
 type PassageUnit = {
 	text: string;
 	tokens: string[];
-	charTerms: string[];
+	charLength: number;
 	startOffset?: number;
 	endOffset?: number;
 };
@@ -297,7 +295,7 @@ const MAX_LOCALITY_FRONTIER = 96;
 const MAX_VERIFIER_FRONTIER = 48;
 const CHAR_CHANNEL_WEIGHT = 0.38;
 const CHAR_QUERY_BIGRAM_LIMIT = 16;
-const CHAR_CHANNEL_EXISTING_STATE_THRESHOLD = 224;
+const CHAR_PASSAGE_SEED_FILE_LIMIT = 24;
 const MAX_FILE_PASSAGE_EVIDENCES = 4;
 const FILE_SECOND_PASSAGE_DECAY = 0.34;
 const FILE_PASSAGE_SET_BEST_COVERAGE_BONUS = 1.12;
@@ -417,9 +415,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		Map<MetadataField, Map<number, number>>
 	>();
 	private readonly passageWordPostings = new Map<string, Map<number, number>>();
-	private readonly charBigramPostings = new Map<string, Map<number, number>>();
+	private readonly fileCharPostings = new Map<string, Map<number, number>>();
 	private readonly sortedWordTerms: string[] = [];
-	private readonly sortedCharTerms: string[] = [];
 	private readonly metadataFieldStats: Record<MetadataField, FieldStats> = {
 		basename: { docLengths: new Map(), totalLength: 0 },
 		aliases: { docLengths: new Map(), totalLength: 0 },
@@ -433,6 +430,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		number,
 		Record<MetadataField, string[]>
 	>();
+	private readonly fileCharLengths = new Map<number, number>();
+	private readonly fileCharTermIdsByFileId = new Map<number, number[]>();
 	private readonly fallbackFileContentById = new Map<number, string>();
 	private readonly fileScriptProfiles = new Map<number, ScriptProfile>();
 	private readonly filePassageIds = new Map<number, number[]>();
@@ -443,10 +442,14 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		number,
 		{ text: string; tokenSequence?: string[] }
 	>();
+	private readonly wordTermIdByTerm = new Map<string, number>();
+	private readonly wordTermById = new Map<number, string>();
 	private fileSnapshotStore: FileSnapshotStore | null | undefined;
 	private nextFileId = 1;
 	private nextPassageId = 1;
+	private nextWordTermId = 1;
 	private totalPassageLength = 0;
+	private totalFileCharLength = 0;
 
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
@@ -627,15 +630,18 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 		termStats.sort((left, right) => left.index - right.index);
+		const queryScoringCache = this.createQueryScoringCache();
 
 		if (queryCharTerms.length > 0) {
-			this.scoreCharChannel(
-				queryCharTerms,
-				passageStates,
-				passageStates.size === 0 ||
-					queryTerms.length === 0 ||
-					passageStates.size < CHAR_CHANNEL_EXISTING_STATE_THRESHOLD,
-			);
+			this.scoreCharChannel(queryCharTerms, fileStates);
+			if (queryTerms.length === 0) {
+				this.seedCharPassageEvidence(
+					fileStates,
+					queryCharTerms,
+					request.queryText,
+					queryScoringCache,
+				);
+			}
 			if (passageStates.size > PASSAGE_PRUNE_KEEP) {
 				this.prunePassageStates(passageStates, PASSAGE_PRUNE_KEEP);
 			}
@@ -676,7 +682,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTermDecomposition,
 		);
 		const totalQueryWeight = getTotalQueryWeight(queryTerms, queryTermWeights);
-		const queryScoringCache = this.createQueryScoringCache();
 		const topPassages = this.selectTopPassages(
 			passageStates,
 			queryTerms,
@@ -754,7 +759,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 			0,
 		);
-		total += this.sortedCharTerms.reduce(
+		total += Array.from(this.fileCharPostings.keys()).reduce(
 			(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 			0,
 		);
@@ -765,14 +770,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			total += 24;
 		}
 		for (const postingTerms of this.passagePostingTermsById.values()) {
-			total += postingTerms.wordTerms.reduce(
-				(sum, term) => sum + Buffer.byteLength(term, "utf8"),
-				0,
-			);
-			total += postingTerms.charTerms.reduce(
-				(sum, term) => sum + Buffer.byteLength(term, "utf8"),
-				0,
-			);
+			total += postingTerms.wordTermIds.length * 4;
+		}
+		for (const termIds of this.fileCharTermIdsByFileId.values()) {
+			total += termIds.length * 4;
 		}
 		for (const passageIds of this.filePassageIds.values()) {
 			total += passageIds.length * 4;
@@ -788,7 +789,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const postings of this.passageWordPostings.values()) {
 			total += postings.size * 12;
 		}
-		for (const postings of this.charBigramPostings.values()) {
+		for (const postings of this.fileCharPostings.values()) {
 			total += postings.size * 10;
 		}
 		return total;
@@ -799,13 +800,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			files: this.pathByFileId.size,
 			passages: this.passageById.size,
 			wordTerms: this.passageWordPostings.size,
-			charTerms: this.charBigramPostings.size,
+			charTerms: this.fileCharPostings.size,
 			metadataTerms: this.metadataTermPostings.size,
 			wordPostings: sumPostingSizes(this.passageWordPostings),
-			charPostings: sumPostingSizes(this.charBigramPostings),
+			charPostings: sumPostingSizes(this.fileCharPostings),
 			metadataPostings: sumNestedPostingSizes(this.metadataTermPostings),
 			passagePostingTermRefs: Array.from(this.passagePostingTermsById.values()).reduce(
-				(sum, item) => sum + item.wordTerms.length + item.charTerms.length,
+				(sum, item) => sum + item.wordTermIds.length,
+				0,
+			),
+			fileCharTermRefs: Array.from(this.fileCharTermIdsByFileId.values()).reduce(
+				(sum, item) => sum + item.length,
 				0,
 			),
 			estimatedBytes: {
@@ -830,32 +835,27 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				),
 				passageRecords: this.passageById.size * 24,
 				passagePostingTerms: Array.from(this.passagePostingTermsById.values()).reduce(
-					(sum, item) =>
-						sum +
-						item.wordTerms.reduce(
-							(termSum, term) => termSum + Buffer.byteLength(term, "utf8"),
-							0,
-						) +
-						item.charTerms.reduce(
-							(termSum, term) => termSum + Buffer.byteLength(term, "utf8"),
-							0,
-						),
+					(sum, item) => sum + item.wordTermIds.length * 4,
+					0,
+				),
+				fileCharTermRefs: Array.from(this.fileCharTermIdsByFileId.values()).reduce(
+					(sum, item) => sum + item.length * 4,
 					0,
 				),
 				wordLexicon: this.sortedWordTerms.reduce(
 					(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 					0,
 				),
-				charLexicon: this.sortedCharTerms.reduce(
+				charLexicon: Array.from(this.fileCharPostings.keys()).reduce(
 					(sum, term) => sum + Buffer.byteLength(term, "utf8"),
 					0,
 				),
 				wordPostings: sumPostingSizes(this.passageWordPostings) * 12,
-				charPostings: sumPostingSizes(this.charBigramPostings) * 10,
+				charPostings: sumPostingSizes(this.fileCharPostings) * 10,
 				metadataPostings: sumNestedPostingSizes(this.metadataTermPostings) * 12,
 			},
 			topWordTerms: topPostingTerms(this.passageWordPostings),
-			topCharTerms: topPostingTerms(this.charBigramPostings),
+			topCharTerms: topPostingTerms(this.fileCharPostings),
 		};
 	}
 
@@ -967,12 +967,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private clear() {
 		this.metadataTermPostings.clear();
 		this.passageWordPostings.clear();
-		this.charBigramPostings.clear();
+		this.fileCharPostings.clear();
 		this.sortedWordTerms.length = 0;
-		this.sortedCharTerms.length = 0;
+		this.wordTermIdByTerm.clear();
+		this.wordTermById.clear();
 		this.fileIdByPath.clear();
 		this.pathByFileId.clear();
 		this.fileMetadataTokens.clear();
+		this.fileCharLengths.clear();
+		this.fileCharTermIdsByFileId.clear();
 		this.fallbackFileContentById.clear();
 		this.fileScriptProfiles.clear();
 		this.filePassageIds.clear();
@@ -982,7 +985,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		this.passageRuntimeCache.clear();
 		this.nextFileId = 1;
 		this.nextPassageId = 1;
+		this.nextWordTermId = 1;
 		this.totalPassageLength = 0;
+		this.totalFileCharLength = 0;
 		for (const field of METADATA_FIELDS) {
 			this.metadataFieldStats[field].docLengths.clear();
 			this.metadataFieldStats[field].totalLength = 0;
@@ -1048,6 +1053,28 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
+		const fileCharTf = buildTfMap(
+			this.extractCjkBigrams(
+				[document.basename ?? "", document.headings ?? "", content].join("\n"),
+			),
+		);
+		const fileCharTermIds: number[] = [];
+		this.fileCharLengths.set(
+			fileId,
+			Array.from(fileCharTf.values()).reduce((sum, tf) => sum + tf, 0),
+		);
+		this.totalFileCharLength += this.fileCharLengths.get(fileId) ?? 0;
+		for (const [term, tf] of fileCharTf) {
+			fileCharTermIds.push(this.getOrCreateWordLikeTermId(term));
+			let postings = this.fileCharPostings.get(term);
+			if (!postings) {
+				postings = new Map();
+				this.fileCharPostings.set(term, postings);
+			}
+			postings.set(fileId, tf);
+		}
+		this.fileCharTermIdsByFileId.set(fileId, fileCharTermIds);
+
 		const passages = this.buildIndexedPassages(fileId, content);
 		this.filePassageIds.set(
 			fileId,
@@ -1056,8 +1083,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		for (const passage of passages) {
 			this.passageById.set(passage.record.id, passage.record);
 			this.passagePostingTermsById.set(passage.record.id, {
-				wordTerms: Array.from(passage.wordTf.keys()),
-				charTerms: Array.from(passage.charTf.keys()),
+				wordTermIds: Array.from(passage.wordTf.keys(), (term) =>
+					this.getOrCreateWordLikeTermId(term),
+				),
 			});
 			this.passageLengths.set(passage.record.id, passage.record.length);
 			this.totalPassageLength += passage.record.length;
@@ -1068,16 +1096,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					postings = new Map();
 					this.passageWordPostings.set(term, postings);
 					this.insertWordTerm(term);
-				}
-				postings.set(passage.record.id, tf);
-			}
-
-			for (const [term, tf] of passage.charTf) {
-				let postings = this.charBigramPostings.get(term);
-				if (!postings) {
-					postings = new Map();
-					this.charBigramPostings.set(term, postings);
-					this.insertCharTerm(term);
 				}
 				postings.set(passage.record.id, tf);
 			}
@@ -1116,6 +1134,22 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
+		const fileCharLength = this.fileCharLengths.get(fileId) ?? 0;
+		this.totalFileCharLength -= fileCharLength;
+		this.fileCharLengths.delete(fileId);
+		for (const termId of this.fileCharTermIdsByFileId.get(fileId) ?? []) {
+			const term = this.wordTermById.get(termId);
+			if (!term) {
+				continue;
+			}
+			const postings = this.fileCharPostings.get(term);
+			postings?.delete(fileId);
+			if (postings && postings.size === 0) {
+				this.fileCharPostings.delete(term);
+			}
+		}
+		this.fileCharTermIdsByFileId.delete(fileId);
+
 		const passageIds = this.filePassageIds.get(fileId) ?? [];
 		for (const passageId of passageIds) {
 			this.totalPassageLength -= this.passageLengths.get(passageId) ?? 0;
@@ -1123,7 +1157,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			this.passageRuntimeCache.delete(passageId);
 			const postingTerms = this.passagePostingTermsById.get(passageId);
 
-			for (const term of postingTerms?.wordTerms ?? []) {
+			for (const termId of postingTerms?.wordTermIds ?? []) {
+				const term = this.wordTermById.get(termId);
+				if (!term) {
+					continue;
+				}
 				const postings = this.passageWordPostings.get(term);
 				postings?.delete(passageId);
 				if (postings && postings.size === 0) {
@@ -1131,15 +1169,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					if (!this.metadataTermPostings.has(term)) {
 						this.removeWordTerm(term);
 					}
-				}
-			}
-
-			for (const term of postingTerms?.charTerms ?? []) {
-				const postings = this.charBigramPostings.get(term);
-				postings?.delete(passageId);
-				if (postings && postings.size === 0) {
-					this.charBigramPostings.delete(term);
-					this.removeCharTerm(term);
 				}
 			}
 
@@ -1189,8 +1218,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 			const selectedUnits = units.slice(startIndex, endIndex);
 			const tokens = selectedUnits.flatMap((unit) => unit.tokens);
-			const charTerms = selectedUnits.flatMap((unit) => unit.charTerms);
-			if (tokens.length > 0 || charTerms.length > 0) {
+			const charLength = selectedUnits.reduce(
+				(sum, unit) => sum + unit.charLength,
+				0,
+			);
+			if (tokens.length > 0 || charLength > 0) {
 				const startOffset = selectedUnits[0].startOffset;
 				const endOffset = selectedUnits[selectedUnits.length - 1].endOffset;
 				const passageId =
@@ -1201,10 +1233,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						fileId,
 						startOffset,
 						endOffset,
-						length: Math.max(tokens.length, charTerms.length, 1),
+						length: Math.max(tokens.length, 1),
 					},
 					wordTf: buildTfMap(tokens),
-					charTf: buildTfMap(charTerms),
 				});
 				passageIndex += 1;
 			}
@@ -1242,24 +1273,24 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				}
 
 				const tokens = this.tokenizeContent(trimmed);
-				const charTerms = this.extractCjkBigrams(trimmed);
-				if (tokens.length === 0 && charTerms.length === 0) {
+				const charLength = this.estimateCjkLength(trimmed);
+				if (tokens.length === 0 && charLength === 0) {
 					continue;
 				}
 
 				if (tokens.length <= PASSAGE_TARGET_TOKENS * 1.5) {
-					units.push({ text: trimmed, tokens, charTerms });
+					units.push({ text: trimmed, tokens, charLength });
 					continue;
 				}
 
 				for (const chunk of sliceLongText(trimmed, MIN_LONG_CHUNK_CHARS)) {
 					const chunkTokens = this.tokenizeContent(chunk);
-					const chunkCharTerms = this.extractCjkBigrams(chunk);
-					if (chunkTokens.length > 0 || chunkCharTerms.length > 0) {
+					const chunkCharLength = this.estimateCjkLength(chunk);
+					if (chunkTokens.length > 0 || chunkCharLength > 0) {
 						units.push({
 							text: chunk,
 							tokens: chunkTokens,
-							charTerms: chunkCharTerms,
+							charLength: chunkCharLength,
 						});
 					}
 				}
@@ -1271,13 +1302,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 
 		const fallbackTokens = this.tokenizeContent(normalizedContent);
-		const fallbackCharTerms = this.extractCjkBigrams(normalizedContent);
-		return fallbackTokens.length > 0 || fallbackCharTerms.length > 0
+		const fallbackCharLength = this.estimateCjkLength(normalizedContent);
+		return fallbackTokens.length > 0 || fallbackCharLength > 0
 			? [
 					{
 						text: normalizedContent,
 						tokens: fallbackTokens,
-						charTerms: fallbackCharTerms,
+						charLength: fallbackCharLength,
 					},
 				]
 			: [];
@@ -1330,8 +1361,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					sentenceRange.endOffset,
 				);
 				const tokens = this.tokenizeContent(trimmed);
-				const charTerms = this.extractCjkBigrams(trimmed);
-				if (tokens.length === 0 && charTerms.length === 0) {
+				const charLength = this.estimateCjkLength(trimmed);
+				if (tokens.length === 0 && charLength === 0) {
 					continue;
 				}
 
@@ -1339,7 +1370,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					units.push({
 						text: trimmed,
 						tokens,
-						charTerms,
+						charLength,
 						startOffset: sentenceRange.startOffset,
 						endOffset: sentenceRange.endOffset,
 					});
@@ -1357,12 +1388,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						chunkRange.endOffset,
 					);
 					const chunkTokens = this.tokenizeContent(chunk);
-					const chunkCharTerms = this.extractCjkBigrams(chunk);
-					if (chunkTokens.length > 0 || chunkCharTerms.length > 0) {
+					const chunkCharLength = this.estimateCjkLength(chunk);
+					if (chunkTokens.length > 0 || chunkCharLength > 0) {
 						units.push({
 							text: chunk,
 							tokens: chunkTokens,
-							charTerms: chunkCharTerms,
+							charLength: chunkCharLength,
 							startOffset: chunkRange.startOffset,
 							endOffset: chunkRange.endOffset,
 						});
@@ -1380,13 +1411,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			trimmedRange.endOffset,
 		);
 		const fallbackTokens = this.tokenizeContent(fallbackText);
-		const fallbackCharTerms = this.extractCjkBigrams(fallbackText);
-		return fallbackTokens.length > 0 || fallbackCharTerms.length > 0
+		const fallbackCharLength = this.estimateCjkLength(fallbackText);
+		return fallbackTokens.length > 0 || fallbackCharLength > 0
 			? [
 					{
 						text: fallbackText,
 						tokens: fallbackTokens,
-						charTerms: fallbackCharTerms,
+						charLength: fallbackCharLength,
 						startOffset: trimmedRange.startOffset,
 						endOffset: trimmedRange.endOffset,
 					},
@@ -1402,7 +1433,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		let overlapTokens = 0;
 		let nextStart = endIndex;
 		for (let index = endIndex - 1; index >= startIndex; index--) {
-			overlapTokens += units[index].tokens.length;
+			overlapTokens += Math.max(units[index].tokens.length, units[index].charLength);
 			nextStart = index;
 			if (overlapTokens >= PASSAGE_OVERLAP_TOKENS) {
 				break;
@@ -1440,31 +1471,36 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return bigrams;
 	}
 
+	private estimateCjkLength(text: string): number {
+		let total = 0;
+		for (const match of text.normalize("NFKC").matchAll(HAN_SEQUENCE_REGEX)) {
+			const length = Array.from(match[0]).length;
+			if (length === 1) {
+				total += 1;
+			} else {
+				total += length - 1;
+			}
+		}
+		return total;
+	}
+
 	private scoreCharChannel(
 		queryCharTerms: string[],
-		passageStates: Map<number, PassageCandidateState>,
-		allowNewStates: boolean,
+		fileStates: Map<number, FileCandidateState>,
 	) {
 		for (const charTerm of queryCharTerms) {
-			const postings = this.charBigramPostings.get(charTerm);
+			const postings = this.fileCharPostings.get(charTerm);
 			if (!postings) {
 				continue;
 			}
-			const idf = this.computePassageIdf(postings.size);
-			const avgdl = this.averagePassageLength();
-			for (const [passageId, tf] of postings) {
-				const passage = this.passageById.get(passageId);
-				if (
-					!passage ||
-					(!allowNewStates && !passageStates.has(passageId))
-				) {
-					continue;
-				}
-				const state = this.ensurePassageState(passageStates, passageId);
+			const idf = this.computeFileCharIdf(postings.size);
+			const avgdl = this.averageFileCharLength();
+			for (const [fileId, tf] of postings) {
+				const state = this.ensureFileState(fileStates, fileId);
 				state.score +=
 					CHAR_CHANNEL_WEIGHT *
 					idf *
-					this.computeTfNorm(tf, passage.length, avgdl);
+					this.computeTfNorm(tf, this.fileCharLengths.get(fileId) ?? tf, avgdl);
 				state.charHits += 1;
 				state.matchedTerms.add(charTerm);
 			}
@@ -1683,6 +1719,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return Math.log((docCount - df + 0.5) / (df + 0.5) + 1);
 	}
 
+	private computeFileCharIdf(df: number): number {
+		const docCount = Math.max(1, this.pathByFileId.size);
+		return Math.log((docCount - df + 0.5) / (df + 0.5) + 1);
+	}
+
 	private computeTfNorm(tf: number, dl: number, avgdl: number): number {
 		const normalizedAvg = avgdl || 1;
 		return (
@@ -1695,6 +1736,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 	private averagePassageLength(): number {
 		return this.totalPassageLength / Math.max(1, this.passageById.size);
+	}
+
+	private averageFileCharLength(): number {
+		return this.totalFileCharLength / Math.max(1, this.fileCharLengths.size || 1);
 	}
 
 	private averageMetadataFieldLength(field: MetadataField): number {
@@ -1804,6 +1849,75 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		state.bestPassageScore = evidences[0]?.score ?? 0;
 		state.secondPassageScore = evidences[1]?.score ?? 0;
+	}
+
+	private seedCharPassageEvidence(
+		fileStates: Map<number, FileCandidateState>,
+		queryCharTerms: readonly string[],
+		rawQueryText: string,
+		queryScoringCache: QueryScoringCache,
+	) {
+		const normalizedQuery = rawQueryText.trim().normalize("NFKC");
+		const topFileIds = Array.from(fileStates.values())
+			.sort((left, right) => {
+				if (right.score !== left.score) {
+					return right.score - left.score;
+				}
+				if (right.charHits !== left.charHits) {
+					return right.charHits - left.charHits;
+				}
+				return left.fileId - right.fileId;
+			})
+			.slice(0, CHAR_PASSAGE_SEED_FILE_LIMIT)
+			.map((state) => state.fileId);
+
+		for (const fileId of topFileIds) {
+			const state = fileStates.get(fileId);
+			if (!state) {
+				continue;
+			}
+			for (const passageId of this.filePassageIds.get(fileId) ?? []) {
+				const passage = this.passageById.get(passageId);
+				if (!passage) {
+					continue;
+				}
+				const passageText = this.getPassageText(passage, queryScoringCache);
+				if (!passageText) {
+					continue;
+				}
+				const normalizedPassage = passageText.normalize("NFKC");
+				const matchedTerms = new Set<string>();
+				let charHits = 0;
+				let score = 0;
+				for (const charTerm of queryCharTerms) {
+					const hitCount = countSubstringOccurrences(normalizedPassage, charTerm);
+					if (hitCount <= 0) {
+						continue;
+					}
+					matchedTerms.add(charTerm);
+					charHits += 1;
+					score +=
+						CHAR_CHANNEL_WEIGHT *
+						(this.computeFileCharIdf(this.fileCharPostings.get(charTerm)?.size ?? 1) +
+							Math.log1p(hitCount));
+				}
+				if (matchedTerms.size === 0) {
+					continue;
+				}
+				score += Math.min(0.8, matchedTerms.size / Math.max(1, queryCharTerms.length));
+				if (normalizedQuery.length > 0 && normalizedPassage.includes(normalizedQuery)) {
+					score += 1.2;
+				}
+				this.insertFilePassageEvidence(state, passageId, {
+					score,
+					matchedTerms,
+					matchedQueryTerms: new Set<number>(),
+					matchedTermsByQueryTerm: new Map<number, Set<string>>(),
+					exactMatchedQueryTerms: new Set<number>(),
+					charHits,
+				});
+			}
+		}
 	}
 
 	private ensureFieldMatch(
@@ -4086,18 +4200,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 	}
 
-	private insertCharTerm(term: string) {
-		const index = lowerBoundString(this.sortedCharTerms, term);
-		if (this.sortedCharTerms[index] !== term) {
-			this.sortedCharTerms.splice(index, 0, term);
+	private getOrCreateWordLikeTermId(term: string): number {
+		const existing = this.wordTermIdByTerm.get(term);
+		if (existing !== undefined) {
+			return existing;
 		}
-	}
-
-	private removeCharTerm(term: string) {
-		const index = lowerBoundString(this.sortedCharTerms, term);
-		if (this.sortedCharTerms[index] === term) {
-			this.sortedCharTerms.splice(index, 1);
-		}
+		const termId = this.nextWordTermId++;
+		this.wordTermIdByTerm.set(term, termId);
+		this.wordTermById.set(termId, term);
+		return termId;
 	}
 
 	private getUnionFieldMatches(
@@ -6364,4 +6475,21 @@ function topPostingTerms(
 		}))
 		.sort((left, right) => right.postings - left.postings)
 		.slice(0, 12);
+}
+
+function countSubstringOccurrences(text: string, pattern: string): number {
+	if (!text || !pattern) {
+		return 0;
+	}
+	let count = 0;
+	let startIndex = 0;
+	while (startIndex <= text.length - pattern.length) {
+		const foundIndex = text.indexOf(pattern, startIndex);
+		if (foundIndex < 0) {
+			break;
+		}
+		count += 1;
+		startIndex = foundIndex + 1;
+	}
+	return count;
 }
