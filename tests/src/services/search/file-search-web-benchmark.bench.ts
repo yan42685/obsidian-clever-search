@@ -35,6 +35,7 @@ type CorpusBucket = "pkm-en" | "tech-en" | "general-zh" | "tech-zh";
 type QueryType =
 	| "title_exact"
 	| "title_prefix"
+	| "prefix_family"
 	| "content_dense"
 	| "content_noisy"
 	| "topic_collision"
@@ -188,6 +189,7 @@ const CORPUS_BUCKETS: readonly CorpusBucket[] = [
 const QUERY_TYPES: readonly QueryType[] = [
 	"title_exact",
 	"title_prefix",
+	"prefix_family",
 	"content_dense",
 	"content_noisy",
 	"topic_collision",
@@ -441,6 +443,7 @@ function getDefaultSuiteForType(type: QueryType): BenchmarkSuite {
 		case "title_prefix":
 		case "content_dense":
 			return "core";
+		case "prefix_family":
 		case "unordered_terms":
 		case "content_noisy":
 		case "topic_collision":
@@ -866,6 +869,96 @@ function createManualBenchmarkCorpus(
 				"stale mount state was mentioned in an unrelated migration note.",
 			].join("\n\n"),
 		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/ordered-prefix-family.md",
+			basename: "Ordered prefix family note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Family scoring",
+			content:
+				"alphaone betatwo gammathree keeps ordered family evidence compact for prefix retrieval",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/shuffled-prefix-family.md",
+			basename: "Shuffled prefix family note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Family scoring",
+			content:
+				"betatwo gammathree alphaone keeps the same family evidence in a noisier shuffled order",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/exact-prefix-family.md",
+			basename: "Exact prefix family note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Compact witness",
+			content:
+				"config data rollout keeps exact family evidence in one compact passage",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/expanded-prefix-family.md",
+			basename: "Expanded prefix family note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Compact witness",
+			content:
+				"configmap datastore rollout keeps expanded family evidence in one compact passage",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/connection-policy-timeout.md",
+			basename: "Connection policy timeout",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Compact witness",
+			content:
+				"connection policy timeout keeps one compact control path stable during service recovery",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/config-container-timer-noise.md",
+			basename: "Config container timer noise",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Noisy witness",
+			content:
+				"config configmap container connector timers and topic fragments create many short prefix collisions without the real policy timeout explanation",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/unordered-full-family.md",
+			basename: "Unordered full family note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Coverage witness",
+			content:
+				"betatwo alphaone gammathree keeps all three family witnesses inside one compact passage",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/ordered-partial-family.md",
+			basename: "Ordered partial family note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Coverage witness",
+			content:
+				"gammathree alphaone keeps an ordered pair but lacks the third family witness",
+		},
+		{
+			bucket: "tech-zh",
+			path: "adversarial/prefix-lab/zh/hybrid-prefix-family.md",
+			basename: "混合 prefix family",
+			folder: "adversarial/prefix-lab/zh",
+			headings: "局部顺序",
+			content:
+				"混合检索 prefix family scoring keeps ordered evidence compact across scripts",
+		},
+		{
+			bucket: "tech-zh",
+			path: "adversarial/prefix-lab/zh/hybrid-prefix-noise.md",
+			basename: "混合 prefix noise",
+			folder: "adversarial/prefix-lab/zh",
+			headings: "局部顺序",
+			content:
+				"prefix guide for mixed scripts keeps family scoring noisy and reversed 检索混合",
+		},
 	];
 
 	const queryCases: QueryCase[] = [
@@ -1267,6 +1360,41 @@ function createManualBenchmarkCorpus(
 				"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
 			bucket: "tech-zh",
 			type: "bilingual_mirror",
+			suite: "adversarial",
+		},
+		{
+			query: "alp bet gam",
+			relevantPath: "adversarial/prefix-lab/en/ordered-prefix-family.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "gam alp bet",
+			relevantPath: "adversarial/prefix-lab/en/unordered-full-family.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "config da ro",
+			relevantPath: "adversarial/prefix-lab/en/exact-prefix-family.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "con pol tim",
+			relevantPath: "adversarial/prefix-lab/en/connection-policy-timeout.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "混合 pre fam",
+			relevantPath: "adversarial/prefix-lab/zh/hybrid-prefix-family.md",
+			bucket: "tech-zh",
+			type: "prefix_family",
 			suite: "adversarial",
 		},
 	];

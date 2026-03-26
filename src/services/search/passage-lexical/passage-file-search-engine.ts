@@ -36,12 +36,22 @@ type QueryTermMatch = {
 	matchedTerms: MatchedQueryTerm[];
 };
 
+type FamilyPostingMatch = {
+	score: number;
+	bestTerm: string;
+	bestKind: MatchedQueryTerm["kind"];
+	bestBoost: number;
+	matchedTerms: Set<string>;
+};
+
 type QueryTermPositionSignal = {
 	positions: number[];
 	strongestMatchWeight: number;
 	exactMatchCount: number;
 	prefixExpansionCount: number;
 	fuzzyMatchCount: number;
+	representativeTerm: string;
+	representativeKind: MatchedQueryTerm["kind"];
 };
 
 type PassageRecord = {
@@ -180,6 +190,7 @@ type VerifierSignals = {
 };
 
 type QueryScoringCache = {
+	prefixFamilyMode: boolean;
 	positionsByPassageId: Map<number, Map<number, number[]>>;
 	positionSignalsByPassageId: Map<number, Map<number, QueryTermPositionSignal>>;
 	localWindowSetsByPassageId: Map<number, QueryConditionedLocalWindowSet>;
@@ -588,6 +599,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				innerSetting.search.minTermLengthForPrefixSearch
 				? queryTerms[queryTerms.length - 1]
 				: null;
+		const prefixFamilyMode =
+			request.isPrefixMatch && prefixEligibleQueryTermIndexes.size > 0;
 
 		const passageStates = new Map<number, PassageCandidateState>();
 		const fileStates = new Map<number, FileCandidateState>();
@@ -624,97 +637,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			const docsMatchedForTerm = new Set<number>();
 			const metadataDocsMatchedForTerm = new Set<number>();
 
-			for (const matchedTerm of match.matchedTerms) {
-				const matchedTermId = this.wordTermIdByTerm.get(matchedTerm.term);
-				const contentPostings =
-					matchedTermId !== undefined
-						? this.passageWordPostings.get(matchedTermId)
-						: undefined;
-				if (contentPostings) {
-					const activeDf = countActivePassagePostings(
-						contentPostings,
-						this.passageFileIdsById,
-						this.pathByFileId,
-					);
-					if (activeDf === 0) {
-						continue;
-					}
-					const idf = this.computePassageIdf(activeDf);
-					const avgdl = this.averagePassageLength();
-					contentPostings.forEach((passageId, tf) => {
-						const passage = this.getPassageRecord(passageId);
-						if (!passage || !this.isPassageActive(passage)) {
-							return;
-						}
-						const passageState = this.ensurePassageState(
-							passageStates,
-							passageId,
-						);
-						passageState.score +=
-							idf *
-							this.computeTfNorm(tf, passage.length, avgdl) *
-							matchedTerm.boost;
-						passageState.matchedTerms.add(matchedTerm.term);
-						passageState.matchedQueryTerms.add(queryTermIndex);
-						this.ensurePassageQueryTermMatch(
-							passageState,
-							queryTermIndex,
-						).add(matchedTerm.term);
-						if (matchedTerm.kind === "exact") {
-							passageState.exactMatchedQueryTerms.add(queryTermIndex);
-						}
-						docsMatchedForTerm.add(passage.fileId);
-					});
-				}
-
-			const metadataFields =
-				matchedTermId !== undefined
-					? this.metadataTermPostings.get(matchedTermId)
-					: undefined;
-			if (!metadataFields) {
-				continue;
-			}
-
-			for (const field of METADATA_FIELDS) {
-				const postings = getMetadataPosting(metadataFields, field);
-				if (!postings || postings.size === 0) {
-					continue;
-				}
-					const activeDf = countActiveFilePostings(postings, this.pathByFileId);
-					if (activeDf === 0) {
-						continue;
-					}
-					const idf = this.computeMetadataIdf(activeDf);
-					const avgdl = this.averageMetadataFieldLength(field);
-					postings.forEach((fileId, tf) => {
-						if (!this.isFileActive(fileId)) {
-							return;
-						}
-						const fileState = this.ensureFileState(fileStates, fileId);
-						const fileLength =
-							this.metadataFieldStats[field].docLengths.get(fileId) ?? 0;
-						fileState.metadataScore +=
-							METADATA_FIELD_WEIGHTS[field] *
-							idf *
-							this.computeTfNorm(tf, fileLength, avgdl) *
-							matchedTerm.boost;
-						fileState.matchedTerms.add(matchedTerm.term);
-						fileState.matchedQueryTerms.add(queryTermIndex);
-						fileState.matchedMetadataQueryTerms.add(queryTermIndex);
-						if (matchedTerm.kind !== "exact") {
-							fileState.matchedExpandedMetadataQueryTerms.add(
-								queryTermIndex,
-							);
-							this.ensureExpandedFieldMatch(fileState, field).add(
-								queryTermIndex,
-							);
-						}
-						this.ensureFieldMatch(fileState, field).add(queryTermIndex);
-						docsMatchedForTerm.add(fileId);
-						metadataDocsMatchedForTerm.add(fileId);
-					});
-				}
-			}
+			this.applyQueryTermContentMatches({
+				match,
+				queryTermIndex,
+				prefixFamilyMode,
+				passageStates,
+				docsMatchedForTerm,
+			});
+			this.applyQueryTermMetadataMatches({
+				match,
+				queryTermIndex,
+				prefixFamilyMode,
+				fileStates,
+				docsMatchedForTerm,
+				metadataDocsMatchedForTerm,
+			});
 
 			termStats.push({
 				index: queryTermIndex,
@@ -742,7 +679,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 		}
 		termStats.sort((left, right) => left.index - right.index);
-		const queryScoringCache = this.createQueryScoringCache();
+		const queryScoringCache = this.createQueryScoringCache(prefixFamilyMode);
 
 		if (queryCharTerms.length > 0) {
 			this.scoreCharChannel(queryCharTerms, fileStates);
@@ -2152,6 +2089,272 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 		state.bestPassageScore = evidences[0]?.score ?? 0;
 		state.secondPassageScore = evidences[1]?.score ?? 0;
+	}
+
+	private applyQueryTermContentMatches(params: {
+		match: QueryTermMatch;
+		queryTermIndex: number;
+		prefixFamilyMode: boolean;
+		passageStates: Map<number, PassageCandidateState>;
+		docsMatchedForTerm: Set<number>;
+	}): void {
+		const {
+			match,
+			queryTermIndex,
+			prefixFamilyMode,
+			passageStates,
+			docsMatchedForTerm,
+		} = params;
+		const avgdl = this.averagePassageLength();
+		const familyMatches = prefixFamilyMode
+			? new Map<number, FamilyPostingMatch>()
+			: null;
+
+		for (const matchedTerm of match.matchedTerms) {
+			const matchedTermId = this.wordTermIdByTerm.get(matchedTerm.term);
+			const contentPostings =
+				matchedTermId !== undefined
+					? this.passageWordPostings.get(matchedTermId)
+					: undefined;
+			if (!contentPostings) {
+				continue;
+			}
+			const activeDf = countActivePassagePostings(
+				contentPostings,
+				this.passageFileIdsById,
+				this.pathByFileId,
+			);
+			if (activeDf === 0) {
+				continue;
+			}
+			const idf = this.computePassageIdf(activeDf);
+			contentPostings.forEach((passageId, tf) => {
+				const passage = this.getPassageRecord(passageId);
+				if (!passage || !this.isPassageActive(passage)) {
+					return;
+				}
+				const score =
+					idf *
+					this.computeTfNorm(tf, passage.length, avgdl) *
+					matchedTerm.boost;
+				if (familyMatches) {
+					this.updateFamilyPostingMatch(
+						familyMatches,
+						passageId,
+						matchedTerm,
+						score,
+					);
+				} else {
+					const passageState = this.ensurePassageState(passageStates, passageId);
+					passageState.score += score;
+					passageState.matchedTerms.add(matchedTerm.term);
+					passageState.matchedQueryTerms.add(queryTermIndex);
+					this.ensurePassageQueryTermMatch(
+						passageState,
+						queryTermIndex,
+					).add(matchedTerm.term);
+					if (matchedTerm.kind === "exact") {
+						passageState.exactMatchedQueryTerms.add(queryTermIndex);
+					}
+				}
+				docsMatchedForTerm.add(passage.fileId);
+			});
+		}
+
+		if (!familyMatches) {
+			return;
+		}
+		for (const [passageId, familyMatch] of familyMatches) {
+			const passageState = this.ensurePassageState(passageStates, passageId);
+			passageState.score += familyMatch.score;
+			passageState.matchedQueryTerms.add(queryTermIndex);
+			for (const matchedTerm of familyMatch.matchedTerms) {
+				passageState.matchedTerms.add(matchedTerm);
+				this.ensurePassageQueryTermMatch(
+					passageState,
+					queryTermIndex,
+				).add(matchedTerm);
+			}
+			if (familyMatch.bestKind === "exact") {
+				passageState.exactMatchedQueryTerms.add(queryTermIndex);
+			}
+		}
+	}
+
+	private applyQueryTermMetadataMatches(params: {
+		match: QueryTermMatch;
+		queryTermIndex: number;
+		prefixFamilyMode: boolean;
+		fileStates: Map<number, FileCandidateState>;
+		docsMatchedForTerm: Set<number>;
+		metadataDocsMatchedForTerm: Set<number>;
+	}): void {
+		const {
+			match,
+			queryTermIndex,
+			prefixFamilyMode,
+			fileStates,
+			docsMatchedForTerm,
+			metadataDocsMatchedForTerm,
+		} = params;
+		const familyMatches = prefixFamilyMode
+			? new Map<number, Map<MetadataField, FamilyPostingMatch>>()
+			: null;
+
+		for (const matchedTerm of match.matchedTerms) {
+			const matchedTermId = this.wordTermIdByTerm.get(matchedTerm.term);
+			const metadataFields =
+				matchedTermId !== undefined
+					? this.metadataTermPostings.get(matchedTermId)
+					: undefined;
+			if (!metadataFields) {
+				continue;
+			}
+			for (const field of METADATA_FIELDS) {
+				const postings = getMetadataPosting(metadataFields, field);
+				if (!postings || postings.size === 0) {
+					continue;
+				}
+				const activeDf = countActiveFilePostings(postings, this.pathByFileId);
+				if (activeDf === 0) {
+					continue;
+				}
+				const idf = this.computeMetadataIdf(activeDf);
+				const avgdl = this.averageMetadataFieldLength(field);
+				postings.forEach((fileId, tf) => {
+					if (!this.isFileActive(fileId)) {
+						return;
+					}
+					const fileLength =
+						this.metadataFieldStats[field].docLengths.get(fileId) ?? 0;
+					const score =
+						METADATA_FIELD_WEIGHTS[field] *
+						idf *
+						this.computeTfNorm(tf, fileLength, avgdl) *
+						matchedTerm.boost;
+					if (familyMatches) {
+						this.updateNestedFamilyPostingMatch(
+							familyMatches,
+							fileId,
+							field,
+							matchedTerm,
+							score,
+						);
+					} else {
+						const fileState = this.ensureFileState(fileStates, fileId);
+						fileState.metadataScore += score;
+						fileState.matchedTerms.add(matchedTerm.term);
+						fileState.matchedQueryTerms.add(queryTermIndex);
+						fileState.matchedMetadataQueryTerms.add(queryTermIndex);
+						if (matchedTerm.kind !== "exact") {
+							fileState.matchedExpandedMetadataQueryTerms.add(
+								queryTermIndex,
+							);
+							this.ensureExpandedFieldMatch(fileState, field).add(
+								queryTermIndex,
+							);
+						}
+						this.ensureFieldMatch(fileState, field).add(queryTermIndex);
+					}
+					docsMatchedForTerm.add(fileId);
+					metadataDocsMatchedForTerm.add(fileId);
+				});
+			}
+		}
+
+		if (!familyMatches) {
+			return;
+		}
+		for (const [fileId, fieldMatches] of familyMatches) {
+			const fileState = this.ensureFileState(fileStates, fileId);
+			for (const [field, familyMatch] of fieldMatches) {
+				fileState.metadataScore += familyMatch.score;
+				fileState.matchedQueryTerms.add(queryTermIndex);
+				fileState.matchedMetadataQueryTerms.add(queryTermIndex);
+				for (const matchedTerm of familyMatch.matchedTerms) {
+					fileState.matchedTerms.add(matchedTerm);
+				}
+				this.ensureFieldMatch(fileState, field).add(queryTermIndex);
+				if (familyMatch.bestKind !== "exact") {
+					fileState.matchedExpandedMetadataQueryTerms.add(queryTermIndex);
+					this.ensureExpandedFieldMatch(fileState, field).add(queryTermIndex);
+				}
+			}
+		}
+	}
+
+	private updateFamilyPostingMatch(
+		matches: Map<number, FamilyPostingMatch>,
+		targetId: number,
+		matchedTerm: MatchedQueryTerm,
+		score: number,
+	): void {
+		let familyMatch = matches.get(targetId);
+		if (!familyMatch) {
+			familyMatch = {
+				score,
+				bestTerm: matchedTerm.term,
+				bestKind: matchedTerm.kind,
+				bestBoost: matchedTerm.boost,
+				matchedTerms: new Set<string>(),
+			};
+			matches.set(targetId, familyMatch);
+		} else if (
+			isBetterFamilyRepresentative(
+				matchedTerm,
+				score,
+				familyMatch.bestKind,
+				familyMatch.bestBoost,
+				familyMatch.score,
+				familyMatch.bestTerm,
+			)
+		) {
+			familyMatch.score = score;
+			familyMatch.bestTerm = matchedTerm.term;
+			familyMatch.bestKind = matchedTerm.kind;
+			familyMatch.bestBoost = matchedTerm.boost;
+		}
+		familyMatch.matchedTerms.add(matchedTerm.term);
+	}
+
+	private updateNestedFamilyPostingMatch<TField extends string>(
+		matches: Map<number, Map<TField, FamilyPostingMatch>>,
+		targetId: number,
+		field: TField,
+		matchedTerm: MatchedQueryTerm,
+		score: number,
+	): void {
+		let fieldMatches = matches.get(targetId);
+		if (!fieldMatches) {
+			fieldMatches = new Map<TField, FamilyPostingMatch>();
+			matches.set(targetId, fieldMatches);
+		}
+		let familyMatch = fieldMatches.get(field);
+		if (!familyMatch) {
+			familyMatch = {
+				score,
+				bestTerm: matchedTerm.term,
+				bestKind: matchedTerm.kind,
+				bestBoost: matchedTerm.boost,
+				matchedTerms: new Set<string>(),
+			};
+			fieldMatches.set(field, familyMatch);
+		} else if (
+			isBetterFamilyRepresentative(
+				matchedTerm,
+				score,
+				familyMatch.bestKind,
+				familyMatch.bestBoost,
+				familyMatch.score,
+				familyMatch.bestTerm,
+			)
+		) {
+			familyMatch.score = score;
+			familyMatch.bestTerm = matchedTerm.term;
+			familyMatch.bestKind = matchedTerm.kind;
+			familyMatch.bestBoost = matchedTerm.boost;
+		}
+		familyMatch.matchedTerms.add(matchedTerm.term);
 	}
 
 	private seedCharPassageEvidence(
@@ -4578,8 +4781,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		return count;
 	}
 
-	private createQueryScoringCache(): QueryScoringCache {
+	private createQueryScoringCache(prefixFamilyMode: boolean): QueryScoringCache {
 		return {
+			prefixFamilyMode,
 			positionsByPassageId: new Map<number, Map<number, number[]>>(),
 			positionSignalsByPassageId: new Map<
 				number,
@@ -4730,6 +4934,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			matchedQueryTerms,
 			matchedTermsByQueryTerm,
 			queryTerms,
+			queryScoringCache.prefixFamilyMode,
 		);
 		const positionsByQueryTerm = projectQueryTermPositions(positionSignals);
 		queryScoringCache.positionSignalsByPassageId.set(passage.id, positionSignals);
@@ -6237,6 +6442,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				passageState.matchedQueryTerms,
 				passageState.matchedTermsByQueryTerm,
 				queryTerms,
+				false,
 			),
 		);
 	}
@@ -6246,42 +6452,95 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		matchedQueryTerms: ReadonlySet<number>,
 		matchedTermsByQueryTerm: ReadonlyMap<number, ReadonlySet<string>>,
 		queryTerms: readonly string[],
+		prefixFamilyMode: boolean,
 	): Map<number, QueryTermPositionSignal> {
 		const signalsByQueryTerm = new Map<number, QueryTermPositionSignal>();
 		for (const queryTermIndex of matchedQueryTerms) {
 			const acceptedTerms =
 				matchedTermsByQueryTerm.get(queryTermIndex) ??
 				new Set<string>([queryTerms[queryTermIndex]]);
-			const positions: number[] = [];
-			let strongestMatchWeight = 0;
-			let exactMatchCount = 0;
-			let prefixExpansionCount = 0;
-			let fuzzyMatchCount = 0;
+			const termMatches = new Map<
+				string,
+				{
+					positions: number[];
+					strongestMatchWeight: number;
+					exactMatchCount: number;
+					prefixExpansionCount: number;
+					fuzzyMatchCount: number;
+					kind: MatchedQueryTerm["kind"];
+				}
+			>();
 			for (let index = 0; index < tokenSequence.length; index++) {
 				const token = tokenSequence[index];
 				if (acceptedTerms.has(token)) {
-					positions.push(index);
+					const kind = classifyObservedFamilyMatchKind(
+						queryTerms[queryTermIndex],
+						token,
+					);
 					const specificity = computeMatchedTermSpecificityWeight(
 						queryTerms[queryTermIndex],
 						token,
 					);
-					strongestMatchWeight = Math.max(strongestMatchWeight, specificity);
-					if (token === queryTerms[queryTermIndex]) {
-						exactMatchCount += 1;
-					} else if (token.startsWith(queryTerms[queryTermIndex])) {
-						prefixExpansionCount += 1;
+					let signal = termMatches.get(token);
+					if (!signal) {
+						signal = {
+							positions: [],
+							strongestMatchWeight: 0,
+							exactMatchCount: 0,
+							prefixExpansionCount: 0,
+							fuzzyMatchCount: 0,
+							kind,
+						};
+						termMatches.set(token, signal);
+					}
+					signal.positions.push(index);
+					signal.strongestMatchWeight = Math.max(
+						signal.strongestMatchWeight,
+						specificity,
+					);
+					if (kind === "exact") {
+						signal.exactMatchCount += 1;
+					} else if (kind === "prefix") {
+						signal.prefixExpansionCount += 1;
 					} else {
-						fuzzyMatchCount += 1;
+						signal.fuzzyMatchCount += 1;
 					}
 				}
 			}
-			if (positions.length > 0) {
+			if (termMatches.size > 0) {
+				const rankedTerms = rankObservedFamilyTerms(termMatches);
+				const representativeTerms = prefixFamilyMode
+					? rankedTerms.slice(0, 1)
+					: Array.from(termMatches.entries());
+				const positions: number[] = [];
+				let strongestMatchWeight = 0;
+				let exactMatchCount = 0;
+				let prefixExpansionCount = 0;
+				let fuzzyMatchCount = 0;
+				const representativeTerm =
+					rankedTerms[0]?.[0] ?? queryTerms[queryTermIndex];
+				let representativeKind =
+					rankedTerms[0]?.[1].kind ?? ("fuzzy" as const);
+				for (const [term, signal] of representativeTerms) {
+					positions.push(...signal.positions);
+					strongestMatchWeight = Math.max(
+						strongestMatchWeight,
+						signal.strongestMatchWeight,
+					);
+					exactMatchCount += signal.exactMatchCount;
+					prefixExpansionCount += signal.prefixExpansionCount;
+					fuzzyMatchCount += signal.fuzzyMatchCount;
+					representativeKind = rankedTerms[0]?.[1].kind ?? representativeKind;
+				}
+				positions.sort((left, right) => left - right);
 				signalsByQueryTerm.set(queryTermIndex, {
 					positions,
 					strongestMatchWeight,
 					exactMatchCount,
 					prefixExpansionCount,
 					fuzzyMatchCount,
+					representativeTerm,
+					representativeKind,
 				});
 			}
 		}
@@ -6482,6 +6741,104 @@ function computeMatchedTermSpecificityWeight(
 		return Math.min(0.9, 0.6 + computePrefixBoost(queryTerm, matchedTerm) * 0.28);
 	}
 	return 0.58;
+}
+
+function classifyObservedFamilyMatchKind(
+	queryTerm: string,
+	matchedTerm: string,
+): MatchedQueryTerm["kind"] {
+	if (matchedTerm === queryTerm) {
+		return "exact";
+	}
+	if (matchedTerm.startsWith(queryTerm)) {
+		return "prefix";
+	}
+	return "fuzzy";
+}
+
+function compareMatchedKindPriority(
+	left: MatchedQueryTerm["kind"],
+	right: MatchedQueryTerm["kind"],
+): number {
+	const priority: Record<MatchedQueryTerm["kind"], number> = {
+		exact: 0,
+		prefix: 1,
+		fuzzy: 2,
+	};
+	return priority[left] - priority[right];
+}
+
+function isBetterFamilyRepresentative(
+	candidate: MatchedQueryTerm,
+	candidateScore: number,
+	currentKind: MatchedQueryTerm["kind"],
+	currentBoost: number,
+	currentScore: number,
+	currentTerm: string,
+): boolean {
+	const kindComparison = compareMatchedKindPriority(
+		candidate.kind,
+		currentKind,
+	);
+	if (kindComparison !== 0) {
+		return kindComparison < 0;
+	}
+	if (candidate.boost !== currentBoost) {
+		return candidate.boost > currentBoost;
+	}
+	if (candidateScore !== currentScore) {
+		return candidateScore > currentScore;
+	}
+	if (candidate.term.length !== currentTerm.length) {
+		return candidate.term.length < currentTerm.length;
+	}
+	return candidate.term.localeCompare(currentTerm) < 0;
+}
+
+function rankObservedFamilyTerms(
+	termMatches: ReadonlyMap<
+		string,
+		{
+			positions: number[];
+			strongestMatchWeight: number;
+			exactMatchCount: number;
+			prefixExpansionCount: number;
+			fuzzyMatchCount: number;
+			kind: MatchedQueryTerm["kind"];
+		}
+	>,
+): Array<
+	[
+		string,
+		{
+			positions: number[];
+			strongestMatchWeight: number;
+			exactMatchCount: number;
+			prefixExpansionCount: number;
+			fuzzyMatchCount: number;
+			kind: MatchedQueryTerm["kind"];
+		},
+	]
+> {
+	return Array.from(termMatches.entries()).sort((left, right) => {
+		const kindComparison = compareMatchedKindPriority(
+			left[1].kind,
+			right[1].kind,
+		);
+		if (kindComparison !== 0) {
+			return kindComparison;
+		}
+		if (left[1].strongestMatchWeight !== right[1].strongestMatchWeight) {
+			return right[1].strongestMatchWeight - left[1].strongestMatchWeight;
+		}
+		if (left[1].positions.length !== right[1].positions.length) {
+			return right[1].positions.length - left[1].positions.length;
+		}
+		if (left[0].length !== right[0].length) {
+			return left[0].length - right[0].length;
+		}
+		return left[0].localeCompare(right[0]);
+	});
 }
 
 function projectQueryTermPositions(

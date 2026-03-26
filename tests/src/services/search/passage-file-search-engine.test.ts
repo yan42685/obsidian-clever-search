@@ -814,6 +814,57 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("docs/exact-prefix.md");
 	});
 
+	test("does not expand multi-term prefix families when prefix search is disabled", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/ordered.md",
+				basename: "ordered prefix note",
+				folder: "docs",
+				content:
+					"alphaone betatwo gammathree explain the ordered prefix retrieval flow",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "alp bet gam",
+			isPrefixMatch: false,
+			isFuzzy: false,
+			maxItemResults: 10,
+		});
+
+		expect(results).toHaveLength(0);
+	});
+
+	test("prefers broader query-family coverage over repeated short-prefix noise", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/target.md",
+				basename: "target family note",
+				folder: "docs",
+				content:
+					"connection policy timeout keeps one compact control path stable during recovery",
+			},
+			{
+				path: "docs/noise.md",
+				basename: "noise family note",
+				folder: "docs",
+				content:
+					"config configmap container connector topic timing timer fragments create many short prefix collisions without the real explanation",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "con pol tim",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("docs/target.md");
+	});
+
 	test("uses a metadata lane across folder and basename for path-like queries", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
