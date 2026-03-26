@@ -21,6 +21,9 @@ import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 import { DevFileReadBenchmark } from "./dev-file-read-benchmark";
 import { openHybridSearchModal } from "./setting-manager";
+import { DataManager } from "./user-data/data-manager";
+import { MyNotice } from "./transformed-api";
+import { t } from "./translations/locale-helper";
 
 const CTRL: Modifier = "Ctrl";
 const ALT: Modifier = "Alt";
@@ -43,7 +46,9 @@ export class CommandRegistry {
 				id: "cs-in-file-search-floating-window",
 				name: "In file search - floating window",
 				callback: () =>
-					getInstance(FloatingWindowManager).toggle("inFile"),
+					this.runWhenSearchReady(() =>
+						getInstance(FloatingWindowManager).toggle("inFile"),
+					),
 			});
 
 			this.addCommand({
@@ -57,7 +62,9 @@ export class CommandRegistry {
 				id: "cs-hybrid-search",
 				name: "Hybrid search (BM25 + vector) [dev]",
 				callback: () =>
-					new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
+					this.runWhenSearchReady(() =>
+						new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
+					),
 			});
 
 			this.addCommand({
@@ -81,11 +88,13 @@ export class CommandRegistry {
 			id: "clever-search-in-file",
 			name: "Search in file",
 			callback: () => {
-				if (this.setting.ui.floatingWindowForInFile) {
-					getInstance(FloatingWindowManager).toggle("inFile");
-				} else {
-					new SearchModal(this.app, SearchType.IN_FILE).open();
-				}
+				this.runWhenSearchReady(() => {
+					if (this.setting.ui.floatingWindowForInFile) {
+						getInstance(FloatingWindowManager).toggle("inFile");
+					} else {
+						new SearchModal(this.app, SearchType.IN_FILE).open();
+					}
+				});
 			},
 		});
 
@@ -112,22 +121,25 @@ export class CommandRegistry {
 		this.addCommand({
 			id: "clever-search-in-vault",
 			name: "Search in Vault",
-			callback: () => {
-				eventBus.emit(EventEnum.IN_VAULT_SEARCH);
-				new SearchModal(this.app, SearchType.IN_VAULT).open();
-			},
+			callback: () =>
+				this.runWhenSearchReady(() => {
+					eventBus.emit(EventEnum.IN_VAULT_SEARCH);
+					new SearchModal(this.app, SearchType.IN_VAULT).open();
+				}),
 		});
 
 		this.addCommand({
 			id: "cs-in-file-search-with-omnisearch-query",
 			name: "Search in file with last Omnisearch query",
 			callback: async () => {
-				new SearchModal(
-					this.app,
-					SearchType.IN_FILE,
-					false,
-					await getInstance(OmnisearchIntegration).getLastQuery(),
-				).open();
+				this.runWhenSearchReady(async () => {
+					new SearchModal(
+						this.app,
+						SearchType.IN_FILE,
+						false,
+						await getInstance(OmnisearchIntegration).getLastQuery(),
+					).open();
+				});
 			},
 		});
 	}
@@ -138,6 +150,18 @@ export class CommandRegistry {
 
 	private addCommand(command: Command) {
 		this.plugin.addCommand(command);
+	}
+
+	private runWhenSearchReady(callback: () => void | Promise<void>): void {
+		const dataManager = getInstance(DataManager);
+		if (dataManager.isSearchReady()) {
+			void callback();
+			return;
+		}
+		const noticeKey = dataManager.getSearchBootstrapNoticeKey();
+		if (noticeKey) {
+			new MyNotice(t(noticeKey), 2500);
+		}
 	}
 }
 

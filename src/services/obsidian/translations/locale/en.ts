@@ -15,6 +15,9 @@ export default {
 	"Indexing finished": "Indexing finished",
 	"hybridNotice.indexFallbackToBm25": "Indexing finished, but semantic indexing is unavailable. Results are currently downgraded to BM25.",
 	"hybridNotice.searchFallbackToBm25": "Semantic search is unavailable. Current results have been downgraded to BM25.",
+	"searchBootstrap.restoring": "Search is still restoring its last committed index. Please wait a moment.",
+	"searchBootstrap.healing": "Search is still finishing startup self-healing. Please wait a moment.",
+	"searchBootstrap.failed": "Search is unavailable because startup indexing failed. Please check the console or rebuild the index.",
 	"files need to be indexed. Obsidian may freeze for a while":
 		"files need to be indexed. Obsidian may freeze for a while",
 	"Omnisearch isn't installed": "Omnisearch isn't installed",

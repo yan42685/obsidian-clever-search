@@ -142,7 +142,10 @@ export class MiniSearchFileEngine implements FileSearchEngine {
 
 		logger.trace("Loading indexed data...");
 		try {
-			if (isSerializedBinaryCustomFileSearchIndex(data)) {
+			if (
+				isSerializedBinaryCustomFileSearchIndex(data) ||
+				isSerializedPassageFileSearchSnapshot(data)
+			) {
 				return false;
 			}
 			this.filesIndex = MiniSearch.loadJS(
@@ -1205,5 +1208,16 @@ function isSerializedBinaryCustomFileSearchIndex(
 		(data as Record<string, unknown>).__version === 6 &&
 		(data as Record<string, unknown>).__encoding === "binary" &&
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
+	);
+}
+
+function isSerializedPassageFileSearchSnapshot(
+	data: SerializedFileSearchIndex,
+): data is SerializedPassageFileSearchSnapshot {
+	return (
+		typeof data === "object" &&
+		data !== null &&
+		(data as Record<string, unknown>).__backend === "passage-bm25" &&
+		Array.isArray((data as Record<string, unknown>).documents)
 	);
 }

@@ -43,13 +43,25 @@ export class SearchService {
 		5000,
 		(message: string) => new MyNotice(message, 5000),
 	);
+	private readonly noticeSearchBootstrapBlocked = throttle(
+		2000,
+		(message: string) => new MyNotice(message, 2500),
+	);
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
+		const blocked = this.getBlockedSearchResult(queryText);
+		if (blocked) {
+			return blocked;
+		}
 		return await this.searchInVaultLexical(queryText);
 	}
 
 	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
+		const blocked = this.getBlockedSearchResult(queryText);
+		if (blocked) {
+			return blocked;
+		}
 		if (queryText.length === 0) {
 			return new SearchResult("no result", []);
 		}
@@ -316,6 +328,10 @@ export class SearchService {
 		if (!queryText || !activeFile) {
 			return result;
 		}
+		const blocked = this.getBlockedSearchResult(queryText);
+		if (blocked) {
+			return blocked;
+		}
 
 		if (
 			this.viewRegistry.viewTypeByPath(activeFile.path) !==
@@ -353,5 +369,20 @@ export class SearchService {
 			sourcePath: activeFile.path,
 			items: lineItems,
 		} as SearchResult;
+	}
+
+	private getBlockedSearchResult(queryText: string): SearchResult | null {
+		if (queryText.length === 0) {
+			return null;
+		}
+		const dataManager = getInstance(DataManager);
+		if (dataManager.isSearchReady()) {
+			return null;
+		}
+		const noticeKey = dataManager.getSearchBootstrapNoticeKey();
+		if (noticeKey) {
+			this.noticeSearchBootstrapBlocked(t(noticeKey));
+		}
+		return new SearchResult("no result", []);
 	}
 }

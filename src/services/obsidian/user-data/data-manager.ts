@@ -42,7 +42,7 @@ import { logger } from "src/utils/logger";
 import { getInstance, isDevEnvironment, monitorDecorator, MyLib } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
-import { t } from "../translations/locale-helper";
+import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
 import { DataProvider } from "./data-provider";
 import {
@@ -89,6 +89,12 @@ type HybridStoredPathSummary = {
 };
 
 type HybridSearchAvailability = "blocked" | "available";
+export type SearchBootstrapState =
+	| "blocked"
+	| "restoring"
+	| "healing"
+	| "ready"
+	| "failed";
 
 export type HybridDeferredEmbeddingSummary = {
 	deferredCount: number;
@@ -200,6 +206,7 @@ export class DataManager {
 	private shouldForceRefresh = false;
 	private isLexicalEngineUpToDate = false;
 	private hybridSearchAvailability: HybridSearchAvailability = "blocked";
+	private searchBootstrapState: SearchBootstrapState = "blocked";
 	private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
 	private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
 	private hybridRepairWorker: Promise<void> | null = null;
@@ -342,31 +349,40 @@ export class DataManager {
 	@monitorDecorator
 	async initAsync() {
 		this.clearHybridFailedEmbeddingState();
+		this.fileSnapshotStore.clearCurrentFiles();
+		this.fileSnapshotStore.clearIndexedSnapshots();
+		this.setSearchBootstrapState("restoring");
 		this.setHybridSearchAvailability("blocked");
-		await this.database.deleteOldDatabases();
-		await this.initLexicalEngine();
-		if (!this.hybridEngine.isEnabled()) {
-			await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
-				logger.warn("hybrid BM25 storage migration failed:", e);
+		try {
+			await this.database.deleteOldDatabases();
+			await this.initLexicalEngine();
+			if (!this.hybridEngine.isEnabled()) {
+				await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
+					logger.warn("hybrid BM25 storage migration failed:", e);
+				});
+			}
+			await this.initHybridEngine().catch((e) => {
+				logger.warn("hybrid engine init failed:", e);
+				new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
 			});
-		}
-		await this.initHybridEngine().catch((e) => {
-			logger.warn("hybrid engine init failed:", e);
-			new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
-		});
-		await this.fileSnapshotStore.refreshHighPerformanceState(
-			this.dataProvider.allFilesToBeIndexed(),
-		);
-
-		if (!this.shouldForceRefresh) {
-			eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
-				this.docOperationsBuffer.forceFlush(),
+			await this.fileSnapshotStore.refreshHighPerformanceState(
+				this.dataProvider.allFilesToBeIndexed(),
 			);
-			getInstance(FileWatcher).start();
-		}
 
-		if (isDevEnvironment) {
-			await this.noticeDevStorageStats();
+			if (!this.shouldForceRefresh) {
+				eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
+					this.docOperationsBuffer.forceFlush(),
+				);
+				getInstance(FileWatcher).start();
+			}
+
+			if (isDevEnvironment) {
+				await this.noticeDevStorageStats();
+			}
+			this.setSearchBootstrapState("ready");
+		} catch (error) {
+			this.setSearchBootstrapState("failed");
+			throw error;
 		}
 	}
 
@@ -375,6 +391,7 @@ export class DataManager {
 		this.clearHybridRepairScheduler();
 		this.clearFailedEmbeddingRetryTimer();
 		this.hybridEmbeddingRecovery.clearAll();
+		this.setSearchBootstrapState("blocked");
 	}
 
 	receiveDocOperation(operation: DocOperation) {
@@ -399,6 +416,7 @@ export class DataManager {
 
 	async refreshLexicalStateAsync() {
 		const prevNotice = new MyNotice(t("Reindexing..."));
+		this.setSearchBootstrapState("healing");
 		getInstance(FileWatcher).stop();
 		try {
 			await this.reindexLexicalEngineWithCurrFiles();
@@ -413,6 +431,10 @@ export class DataManager {
 				this.dataProvider.allFilesToBeIndexed(),
 			);
 			new MyNotice(t("Indexing finished"), 5000);
+			this.setSearchBootstrapState("ready");
+		} catch (error) {
+			this.setSearchBootstrapState("failed");
+			throw error;
 		} finally {
 			prevNotice.hide();
 			getInstance(FileWatcher).start();
@@ -598,6 +620,7 @@ export class DataManager {
 
 	private async handleDeleteOperation(path: string): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(path);
+		this.fileSnapshotStore.deleteIndexedSnapshot(path);
 		this.cancelHybridRepair(path);
 		this.clearFailedHybridEmbedding(path);
 		await this.deleteDocuments([path]);
@@ -618,6 +641,7 @@ export class DataManager {
 		}
 
 		await this.addDocuments([file]);
+		this.fileSnapshotStore.commitCurrentFileAsIndexed(file.path, file.stat.mtime);
 		if (
 			this.hybridEngine.isEnabled() &&
 			this.hybridEngine.shouldIndexPath(file.path)
@@ -645,6 +669,8 @@ export class DataManager {
 	): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(oldPath);
 		this.fileSnapshotStore.invalidateCurrentFile(newPath);
+		this.fileSnapshotStore.deleteIndexedSnapshot(oldPath);
+		this.fileSnapshotStore.deleteIndexedSnapshot(newPath);
 		this.cancelHybridRepair(oldPath);
 		this.cancelHybridRepair(newPath);
 		await this.deleteDocuments([oldPath]);
@@ -664,6 +690,7 @@ export class DataManager {
 		}
 
 		await this.addDocuments([file]);
+		this.fileSnapshotStore.commitCurrentFileAsIndexed(file.path, file.stat.mtime);
 
 		if (
 			!this.hybridEngine.isEnabled() ||
@@ -888,6 +915,7 @@ export class DataManager {
 			prevData = await this.database.getMiniSearchData();
 		}
 		if (prevData) {
+			this.setSearchBootstrapState("restoring");
 			this.database.deleteMinisearchData();
 			logger.trace("Previous minisearch data is found.");
 			const isSuccessful = await this.lexicalEngine.reIndexAll(prevData);
@@ -896,9 +924,11 @@ export class DataManager {
 				await this.reindexLexicalEngineWithCurrFiles();
 			}
 		} else {
+			this.setSearchBootstrapState("healing");
 			await this.reindexLexicalEngineWithCurrFiles();
 		}
 		if (!this.isLexicalEngineUpToDate) {
+			this.setSearchBootstrapState("healing");
 			await this.updateLexicalIndexedFileRefsByMtime();
 		}
 		logger.trace("Lexical engine is ready");
@@ -913,10 +943,10 @@ export class DataManager {
 			this.setHybridSearchAvailability("blocked");
 			return;
 		}
+		this.setSearchBootstrapState("healing");
 		beginHybridProfile("hybrid-init", {
 			forceRefresh: this.shouldForceRefresh ? 1 : 0,
 		});
-		let loadedSearchableIndex = false;
 
 		try {
 			if (this.shouldForceRefresh) {
@@ -927,10 +957,6 @@ export class DataManager {
 			await profileHybridStage("startup.load_engine", async () => {
 				await this.hybridEngine.load();
 			});
-			loadedSearchableIndex = this.hybridEngine.canSearch();
-			if (!this.shouldForceRefresh && loadedSearchableIndex) {
-				this.setHybridSearchAvailability("available");
-			}
 			const currFiles = await profileHybridStage("startup.scan_indexable_files", async () =>
 				new Map<string, TFile>(
 					this.dataProvider
@@ -1051,11 +1077,7 @@ export class DataManager {
 				progressNotice?.hide();
 			}
 		} catch (error) {
-			this.setHybridSearchAvailability(
-				!this.shouldForceRefresh && loadedSearchableIndex
-					? "available"
-					: "blocked",
-			);
+			this.setHybridSearchAvailability("blocked");
 			endHybridProfile({ error: error instanceof Error ? error.message : String(error) });
 			throw error;
 		}
@@ -1093,6 +1115,12 @@ export class DataManager {
 			throw error;
 		}
 		await this.saveLexicalIndexedFileRefs(filesToIndex);
+		this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+			filesToIndex.map((file) => ({
+				path: file.path,
+				generation: file.stat.mtime,
+			})),
+		);
 		this.isLexicalEngineUpToDate = true;
 	}
 
@@ -1124,7 +1152,29 @@ export class DataManager {
 		logger.trace(`docs to delete: ${docsToDelete.length}`);
 		logger.trace(`docs to add: ${docsToAdd.length}`);
 		await this.deleteDocuments(docsToDelete);
+		for (const path of docsToDelete) {
+			this.fileSnapshotStore.deleteIndexedSnapshot(path);
+		}
 		await this.addDocuments(docsToAdd);
+		this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+			docsToAdd
+				.map((file) =>
+					file instanceof TFile
+						? {
+							path: file.path,
+							generation: file.stat.mtime,
+						}
+						: null,
+				)
+				.filter(
+					(
+						file,
+					): file is {
+						path: string;
+						generation: number;
+					} => file !== null,
+				),
+		);
 		await this.saveLexicalIndexedFileRefs(Array.from(currFiles.values()));
 	}
 
@@ -1446,10 +1496,35 @@ export class DataManager {
 		return this.hybridSearchAvailability === "blocked";
 	}
 
+	isSearchReady(): boolean {
+		return this.searchBootstrapState === "ready";
+	}
+
+	getSearchBootstrapState(): SearchBootstrapState {
+		return this.searchBootstrapState;
+	}
+
+	getSearchBootstrapNoticeKey(): LocaleKey | null {
+		switch (this.searchBootstrapState) {
+			case "restoring":
+				return "searchBootstrap.restoring";
+			case "healing":
+				return "searchBootstrap.healing";
+			case "failed":
+				return "searchBootstrap.failed";
+			default:
+				return null;
+		}
+	}
+
 	private setHybridSearchAvailability(
 		availability: HybridSearchAvailability,
 	): void {
 		this.hybridSearchAvailability = availability;
+	}
+
+	private setSearchBootstrapState(state: SearchBootstrapState): void {
+		this.searchBootstrapState = state;
 	}
 
 	private getHybridIndexConcurrency(): number {

@@ -1,5 +1,6 @@
 import { TFile, Vault, htmlToMarkdown } from "obsidian";
 import { OuterSetting } from "src/globals/plugin-setting";
+import type { IndexedDocument } from "src/globals/search-types";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
@@ -56,6 +57,10 @@ export class FileSnapshotStore {
 		this.currentFileCache.set(path, text);
 	}
 
+	clearCurrentFiles(): void {
+		this.currentFileCache.clear();
+	}
+
 	peekCurrentFileText(path: string): string | undefined {
 		return this.currentFileCache.get(path);
 	}
@@ -79,6 +84,29 @@ export class FileSnapshotStore {
 		generation?: number,
 	): void {
 		this.indexedSnapshotCache.set(filePath, { text, generation });
+	}
+
+	setIndexedSnapshotFromDocument(
+		document: IndexedDocument,
+		generation?: number,
+	): void {
+		this.setIndexedSnapshot(document.path, document.content ?? "", generation);
+	}
+
+	commitCurrentFileAsIndexed(filePath: string, generation?: number): void {
+		const text = this.currentFileCache.get(filePath);
+		if (text === undefined) {
+			return;
+		}
+		this.setIndexedSnapshot(filePath, text, generation);
+	}
+
+	commitCurrentFilesAsIndexed(
+		files: ReadonlyArray<{ path: string; generation?: number }>,
+	): void {
+		for (const file of files) {
+			this.commitCurrentFileAsIndexed(file.path, file.generation);
+		}
 	}
 
 	deleteIndexedSnapshot(filePath: string): void {

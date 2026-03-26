@@ -16,6 +16,7 @@ import type {
 } from "../file-search-engine";
 import {
 	createFileSearchQueryPlanner,
+	type FileSearchQueryKind,
 	type FileSearchQueryPlanner,
 	type FileSearchQueryTermStats,
 } from "../file-search-query-planner";
