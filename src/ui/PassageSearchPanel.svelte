@@ -175,6 +175,7 @@
 		gap: 0.85rem;
 		width: 100%;
 		min-width: 0;
+		height: 100%;
 		min-height: 0;
 		color: var(--text-normal);
 	}
@@ -193,9 +194,11 @@
 	}
 
 	.passage-search-results {
+		flex: 1 1 auto;
 		min-width: 0;
-		min-height: 16rem;
+		min-height: 0;
 		overflow-x: hidden;
+		overflow-y: auto;
 	}
 
 	.passage-search-state {
@@ -214,9 +217,6 @@
 	}
 
 	.passage-result-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
 		width: 100%;
 		min-width: 0;
 		margin: 0;
@@ -225,20 +225,33 @@
 	}
 
 	.passage-result-item {
+		flex: none;
 		width: 100%;
 		min-width: 0;
-		margin: 0;
+		margin: 0 0 0.4rem;
 		padding: 0;
+	}
+
+	.passage-result-item:last-child {
+		margin-bottom: 0;
 	}
 
 	.passage-result-button {
 		position: relative;
-		display: block;
+		display: flex !important;
+		flex-direction: column;
+		align-items: flex-start;
+		justify-content: flex-start;
+		flex: none;
 		width: 100%;
+		height: auto !important;
+		min-height: unset !important;
+		max-height: none !important;
 		min-width: 0;
 		padding: 0.7em 0.8em;
 		box-sizing: border-box;
 		text-align: left;
+		white-space: normal !important;
 		color: inherit;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
@@ -304,6 +317,7 @@
 		line-height: 1.42;
 		text-overflow: ellipsis;
 		white-space: normal;
+		word-break: break-word;
 		overflow-wrap: anywhere;
 		-webkit-box-orient: vertical;
 		-webkit-line-clamp: 3;
