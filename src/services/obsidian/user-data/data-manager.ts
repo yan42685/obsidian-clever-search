@@ -1000,18 +1000,6 @@ export class DataManager {
 			};
 		}
 
-		if (
-			typeof prevData === "object" &&
-			prevData !== null &&
-			(prevData as Record<string, unknown>).__backend === "passage-bm25" &&
-			Array.isArray((prevData as Record<string, unknown>).documents)
-		) {
-			const snapshotDocuments = (prevData as { documents: IndexedDocument[] }).documents;
-			for (const document of snapshotDocuments) {
-				this.fileSnapshotStore.setIndexedSnapshotFromDocument(document);
-			}
-		}
-
 		return {
 			needsFullReindex: false,
 			needsRefHeal: !this.isLexicalEngineUpToDate,

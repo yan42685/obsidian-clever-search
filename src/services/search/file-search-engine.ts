@@ -35,11 +35,13 @@ export type SerializedFileSearchIndex =
 	| SerializedBinaryCustomFileSearchIndex
 	| SerializedPassageFileSearchSnapshot;
 
+export type SerializedPassageIndexedDocument = Omit<IndexedDocument, "content">;
+
 export type SerializedPassageFileSearchSnapshot = {
 	__backend: "passage-bm25";
-	__version: 1;
-	__format: "document-snapshot";
-	documents: IndexedDocument[];
+	__version: 2;
+	__format: "structural-snapshot";
+	documents: SerializedPassageIndexedDocument[];
 };
 
 export interface FileSearchEngine {
@@ -1219,6 +1221,8 @@ function isSerializedPassageFileSearchSnapshot(
 		typeof data === "object" &&
 		data !== null &&
 		(data as Record<string, unknown>).__backend === "passage-bm25" &&
+		(data as Record<string, unknown>).__version === 2 &&
+		(data as Record<string, unknown>).__format === "structural-snapshot" &&
 		Array.isArray((data as Record<string, unknown>).documents)
 	);
 }

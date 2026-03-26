@@ -881,6 +881,79 @@ Why:
 - modeling path invalidation is much cheaper and safer than modeling every event composition precisely
 - this keeps reducer complexity bounded even when rename and modify events interleave
 
+### Unified Snapshot Storage Draft
+
+The next storage simplification should explicitly move to one shared snapshot system for both lexical and hybrid paths.
+
+Primary goals:
+
+- keep only one persisted plain-text snapshot per indexed file
+- keep only one in-memory plain-text cache per file
+- let `passage-bm25` restore from the shared snapshot path instead of embedding full document text inside its serialized index snapshot
+- make generation semantics unambiguous so cache hits stay safe
+
+Practical rules:
+
+- `hybridFileSnapshots` should become the shared file-snapshot store for both hybrid and `passage-bm25`
+- `FileSnapshotStore` should keep only one memory cache:
+  - `currentFileCache[path] = { text, generation }`
+- `indexedSnapshotCache` should be removed rather than maintained in parallel
+- `passage-bm25` serialized state should store structural index data only, not full `documents[].content`
+- if `passage-bm25` needs full text during restore, snippet building, or local verification, it should read through `FileSnapshotStore`
+
+Generation semantics:
+
+- `generation` means source file version, not indexing completion time
+- within one file-update pipeline, `generation` must be sampled once from the source file state and propagated through all writes
+- the recommended value is the flushed file's `file.stat.mtime`
+- `indexedAt` may still exist, but only as an observability timestamp and never as the cache-alignment key
+
+This distinction is mandatory:
+
+- `generation = source version`
+- `indexedAt = index completion time`
+
+They should never be merged into one field.
+
+Read rules:
+
+- read latest text:
+  - prefer `currentFileCache`
+  - if missing, read disk via vault, normalize, and backfill `currentFileCache`
+- read indexed-aligned text for lexical or hybrid:
+  - if `currentFileCache[path].generation === expectedGeneration`, use the current cache directly
+  - otherwise fall back to the persisted file snapshot row
+
+Write rules for runtime updates:
+
+1. watcher debounce flush resolves the current `TFile`
+2. sample `sourceGeneration = file.stat.mtime` once
+3. read normalized latest text once
+4. write `currentFileCache[path] = { text, generation: sourceGeneration }`
+5. run lexical / hybrid incremental update using the same `sourceGeneration`
+6. after a successful index write, persist the same text into the shared file snapshot store with `generation = sourceGeneration`
+7. each index record that needs alignment should also store `generation = sourceGeneration`
+
+Safety rule for races:
+
+- if a newer edit arrives while an older indexing task is still finishing, the older task must not overwrite `currentFileCache` with stale text
+- it may still commit its own persisted snapshot and index state under its own `generation`
+- later indexed-text reads must then miss the current cache and safely fall back to the persisted snapshot for that older generation
+
+Why this is the preferred simplification:
+
+- it removes duplicate persisted full text between hybrid snapshots and `passage-bm25`
+- it removes duplicate in-memory full-text caches with different meanings
+- it keeps the "latest file text" and "indexed baseline text" model explicit without requiring two hot caches
+- it preserves safe mixed-generation behavior instead of relying on lucky timing
+
+Implementation boundary for this draft:
+
+- do not redesign chunk rows or vector storage in this phase
+- do not try to eliminate persisted snapshots entirely
+- do not let `passage-bm25` fall back to storing full text inside MiniSearch JSON again
+- treat snapshot unification as a storage / consistency refactor, not a retrieval-quality project
+
 ### Token-Cost Control During Incremental Hybrid Updates
 
 Hybrid correctness is not enough by itself; incremental updates must also keep embedding-token cost acceptable.
@@ -1875,3 +1948,88 @@ Priority follow-up object:
 
 - chunk-level incremental embedding reuse should be treated as the main future lever for reducing hybrid token cost on large, frequently edited files
 - compared with rename-specific stale-context machinery, this is expected to deliver meaningfully higher token savings for roughly the same or better product value
+
+## TODO: Snapshot Unification Rollout
+
+This work should be executed as a short staged refactor rather than a large all-at-once rewrite.
+
+### Stage 1: Lock Semantics And Persistence Shape
+
+Goals:
+
+- formalize `generation` vs `indexedAt`
+- stop `passage-bm25` from persisting full plain text inside its serialized snapshot
+- define the shared snapshot row as the only persisted full-text source of truth for indexed text
+
+Concrete tasks:
+
+- change the `passage-bm25` serialized snapshot format so it contains only index structure and file refs, not `documents[].content`
+- update restore logic so full text is loaded via `FileSnapshotStore`
+- audit hybrid indexed-file refs and snapshot writes so `generation` always means source version
+- keep `indexedAt` only where it is actually useful for diagnostics
+
+Acceptance:
+
+- no persisted duplicate full text between `passage-bm25` snapshot data and shared file snapshots
+- restore still works without forcing a full lexical rebuild
+- generation semantics are documented and reflected in code comments / types
+
+### Stage 2: Collapse FileSnapshotStore To One Memory Cache
+
+Goals:
+
+- remove `indexedSnapshotCache`
+- keep only one memory cache with generation-aware entries
+
+Concrete tasks:
+
+- change `currentFileCache` to store `{ text, generation }`
+- update read APIs to support both "latest text" and "indexed-aligned text"
+- make indexed-aligned reads use current cache only on generation match, otherwise use persisted snapshots
+- remove preload / status logic that only exists to support the second cache
+
+Acceptance:
+
+- one in-memory full-text cache only
+- no correctness regression on rename / modify / delete flows
+- high-performance mode still behaves predictably
+
+### Stage 3: Rewire Runtime Update Flow
+
+Goals:
+
+- make watcher-driven updates propagate one sampled source generation through cache, index, and snapshot writes
+- avoid mixed-generation cache poisoning
+
+Concrete tasks:
+
+- on watcher flush, read the latest text once and write `currentFileCache[path] = { text, generation: file.stat.mtime }`
+- pass the same generation into lexical and hybrid incremental updates
+- after successful update, persist the same text into shared snapshots
+- make stale completion paths unable to overwrite newer current-cache state
+
+Acceptance:
+
+- repeated modify bursts do not create cache/index generation drift
+- rename and delete paths still converge cleanly
+- no extra full-text copies are introduced during runtime updates
+
+### Stage 4: Cleanup, Migration, And Verification
+
+Goals:
+
+- remove dead compatibility paths
+- verify size and runtime benefits
+
+Concrete tasks:
+
+- remove old `passage-bm25` full-document snapshot compatibility once migration is safe
+- trim now-unused restore glue in data-manager and file-search-engine
+- run rebuild / restore / modify-burst validation
+- measure persisted size change and startup / search regression risk
+
+Acceptance:
+
+- smaller persisted lexical footprint
+- no functional regression in lexical or hybrid search
+- codebase is simpler than before the refactor, not just differently complex

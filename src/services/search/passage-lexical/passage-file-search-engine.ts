@@ -11,6 +11,7 @@ import { container, singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
+	SerializedPassageIndexedDocument,
 	SerializedPassageFileSearchSnapshot,
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
@@ -606,7 +607,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (!isSerializedPassageFileSearchSnapshot(data)) {
 			return false;
 		}
-		await this.addDocuments(data.documents);
+		const restoredDocuments = await this.restoreDocumentsFromSnapshot(data);
+		if (!restoredDocuments) {
+			this.clearIndex();
+			return false;
+		}
+		await this.addDocuments(restoredDocuments);
 		return true;
 	}
 
@@ -880,9 +886,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	serialize(): SerializedFileSearchIndex | null {
 		return {
 			__backend: "passage-bm25",
-			__version: 1,
-			__format: "document-snapshot",
-			documents: this.captureLiveDocuments(),
+			__version: 2,
+			__format: "structural-snapshot",
+			documents: this.captureLiveDocumentMetadata(),
 		};
 	}
 
@@ -1481,6 +1487,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		);
 	}
 
+	private captureLiveDocumentMetadata(): SerializedPassageIndexedDocument[] {
+		return Array.from(this.liveDocumentsByPath.values(), (document) => ({
+			...document,
+		}));
+	}
+
 	private captureLiveDocuments(): IndexedDocument[] {
 		const documents: IndexedDocument[] = [];
 		for (const document of this.liveDocumentsByPath.values()) {
@@ -1500,6 +1512,28 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			(fileId !== undefined ? this.fallbackFileContentById.get(fileId) : undefined) ??
 			""
 		);
+	}
+
+	private async restoreDocumentsFromSnapshot(
+		snapshot: SerializedPassageFileSearchSnapshot,
+	): Promise<IndexedDocument[] | null> {
+		if (snapshot.documents.length === 0) {
+			return [];
+		}
+		const fileSnapshotStore = this.getFileSnapshotStore();
+		if (!fileSnapshotStore) {
+			return null;
+		}
+		const snapshotTexts = await fileSnapshotStore.getIndexedSnapshotTexts(
+			snapshot.documents.map((document) => document.path),
+		);
+		if (snapshotTexts.size !== snapshot.documents.length) {
+			return null;
+		}
+		return snapshot.documents.map((document) => ({
+			...document,
+			content: snapshotTexts.get(document.path) ?? "",
+		}));
 	}
 
 	private encodeTermSequence(tokens: readonly string[]): Uint32Array {
@@ -6338,9 +6372,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return EMPTY_LOCAL_WINDOW_SET;
 		}
 		occurrences.sort((left, right) => left.position - right.position);
+		const anchorTermIndexes = planner?.anchorTermIndexes ?? null;
 		const anchorWeight =
-			planner && planner.anchorTermIndexes.size > 0
-				? getSetWeight(planner.anchorTermIndexes, queryTermWeights)
+			anchorTermIndexes && anchorTermIndexes.size > 0
+				? getSetWeight(anchorTermIndexes, queryTermWeights)
 				: 0;
 		const maxWindowSpan = Math.min(
 			LOCAL_WINDOW_MAX_SPAN_LIMIT,
@@ -6353,6 +6388,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const explanations: LocalWindowExplanation[] = [];
 		for (let leftIndex = 0; leftIndex < occurrences.length; leftIndex++) {
 			const windowPositions = new Map<number, number[]>();
+			const windowMatchedQueryTerms = new Set<number>();
+			let matchedWeight = 0;
+			let exactMatchedWeight = 0;
+			let anchorMatchedWeight = 0;
 			for (let rightIndex = leftIndex; rightIndex < occurrences.length; rightIndex++) {
 				const left = occurrences[leftIndex];
 				const right = occurrences[rightIndex];
@@ -6364,28 +6403,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (!termPositions) {
 					termPositions = [];
 					windowPositions.set(right.queryTermIndex, termPositions);
+					windowMatchedQueryTerms.add(right.queryTermIndex);
+					const queryTermWeight =
+						queryTermWeights.get(right.queryTermIndex) ?? 1;
+					matchedWeight += queryTermWeight;
+					if (exactMatchedQueryTerms.has(right.queryTermIndex)) {
+						exactMatchedWeight += queryTermWeight;
+					}
+					if (anchorTermIndexes?.has(right.queryTermIndex)) {
+						anchorMatchedWeight += queryTermWeight;
+					}
 				}
 				termPositions.push(right.position);
-				const windowMatchedQueryTerms = new Set<number>(windowPositions.keys());
-				const matchedWeight = getSetWeight(
-					windowMatchedQueryTerms,
-					queryTermWeights,
-				);
 				const coverageRatio = matchedWeight / totalQueryWeight;
-				const exactCoverageRatio =
-					getOverlapWeight(
-						windowMatchedQueryTerms,
-						exactMatchedQueryTerms,
-						queryTermWeights,
-					) / totalQueryWeight;
-				const anchorCoverageRatio =
-					anchorWeight > 0 && planner
-						? getOverlapWeight(
-								windowMatchedQueryTerms,
-								planner.anchorTermIndexes,
-								queryTermWeights,
-							) / anchorWeight
-						: 0;
+				const exactCoverageRatio = exactMatchedWeight / totalQueryWeight;
+				const anchorCoverageRatio = anchorWeight > 0 ? anchorMatchedWeight / anchorWeight : 0;
 				const compactnessRatio = Math.min(
 					1.35,
 					(matchedWeight / Math.max(1, span)) * 2.6,
@@ -6439,7 +6471,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						compactnessRatio,
 						startPosition: left.position,
 						endPosition: right.position,
-						matchedQueryTerms: windowMatchedQueryTerms,
+						matchedQueryTerms: new Set<number>(windowMatchedQueryTerms),
 					},
 					queryTermWeights,
 				);
@@ -8846,8 +8878,8 @@ function isSerializedPassageFileSearchSnapshot(
 		typeof data === "object" &&
 		data !== null &&
 		(data as Record<string, unknown>).__backend === "passage-bm25" &&
-		(data as Record<string, unknown>).__version === 1 &&
-		(data as Record<string, unknown>).__format === "document-snapshot" &&
+		(data as Record<string, unknown>).__version === 2 &&
+		(data as Record<string, unknown>).__format === "structural-snapshot" &&
 		Array.isArray((data as Record<string, unknown>).documents)
 	);
 }

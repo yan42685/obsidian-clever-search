@@ -33,6 +33,9 @@ type IndexedDocument = {
 	headings?: string;
 };
 
+let mockCurrentFileTexts = new Map<string, string>();
+let mockIndexedSnapshotTexts = new Map<string, string>();
+
 function createMockTokenizer(): MockTokenizer {
 	const segmentRegex = /[\p{Script=Han}]+|[a-z0-9][a-z0-9_-]*/gu;
 	return {
@@ -85,6 +88,10 @@ function createEngine() {
 	const { PassageFileSearchEngine } = require(
 		"src/services/search/passage-lexical/passage-file-search-engine",
 	);
+	const { FileSnapshotStore } = require(
+		"src/services/search/shared/file-snapshot-store",
+	);
+	const { Vault } = require("obsidian");
 
 	const setting = JSON.parse(JSON.stringify(DEFAULT_OUTER_SETTING));
 	setting.fileSearchBackend = "passage-bm25";
@@ -95,6 +102,31 @@ function createEngine() {
 
 	container.register(OuterSetting, { useValue: setting });
 	container.register(Tokenizer, { useValue: createMockTokenizer() });
+	container.register(Vault, { useValue: {} });
+	container.register(FileSnapshotStore, {
+		useValue: {
+			setCurrentFileText(path: string, text: string) {
+				mockCurrentFileTexts.set(path, text);
+				mockIndexedSnapshotTexts.set(path, text);
+			},
+			peekCurrentFileText(path: string) {
+				return mockCurrentFileTexts.get(path);
+			},
+			async getIndexedSnapshotTexts(paths: string[]) {
+				const snapshots = new Map<string, string>();
+				for (const path of paths) {
+					const text = mockIndexedSnapshotTexts.get(path);
+					if (text !== undefined) {
+						snapshots.set(path, text);
+					}
+				}
+				return snapshots;
+			},
+			invalidateCurrentFile(path: string) {
+				mockCurrentFileTexts.delete(path);
+			},
+		},
+	});
 
 	return new PassageFileSearchEngine() as InstanceType<typeof PassageFileSearchEngine>;
 }
@@ -142,6 +174,8 @@ describe("Passage serialization benchmark", () => {
 		} else {
 			container.clearInstances();
 		}
+		mockCurrentFileTexts = new Map<string, string>();
+		mockIndexedSnapshotTexts = new Map<string, string>();
 		(global as any).window = {
 			localStorage: {
 				getItem: jest.fn(() => "en"),

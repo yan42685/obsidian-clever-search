@@ -439,7 +439,8 @@ export class HybridEngine {
 				return;
 			}
 
-			const generation = Date.now();
+			const generation = updateTime;
+			const pendingIndexedAt = Date.now();
 			const previousState = await this.loadStoredFileIndexState(filePath);
 			const previousIndexedFileRef = await this.db.db.hybridIndexedFileRefs.get(filePath);
 			const reusableState = this.getReusableStoredFileIndexState(
@@ -454,7 +455,7 @@ export class HybridEngine {
 				generation,
 				chunkCount: 0,
 				vectorPrecision: null,
-				indexedAt: generation,
+				indexedAt: pendingIndexedAt,
 				lastErrorKind: null,
 				lastIncrementalEmbedAt: previousIndexedFileRef?.lastIncrementalEmbedAt,
 				embeddingDeferred: false,
@@ -568,6 +569,7 @@ export class HybridEngine {
 				try {
 					await this.indexBm25Only(filePath, plannedChunks, updateTime, option, generation);
 					await this.persistSnapshot(filePath, plainText, generation);
+					const fallbackIndexedAt = Date.now();
 					await this.putHybridIndexedFileRef({
 						path: filePath,
 						updateTime,
@@ -575,13 +577,14 @@ export class HybridEngine {
 						generation,
 						chunkCount: plannedChunks.length,
 						vectorPrecision: null,
-						indexedAt: Date.now(),
+						indexedAt: fallbackIndexedAt,
 						lastErrorKind: this.classifyIndexErrorKind(error),
 						lastIncrementalEmbedAt: previousIndexedFileRef?.lastIncrementalEmbedAt,
 						embeddingDeferred: false,
 					});
 					return;
 				} catch (fallbackError) {
+					const failedIndexedAt = Date.now();
 					await this.putHybridIndexedFileRef({
 						path: filePath,
 						updateTime,
@@ -589,7 +592,7 @@ export class HybridEngine {
 						generation,
 						chunkCount: 0,
 						vectorPrecision: null,
-						indexedAt: Date.now(),
+						indexedAt: failedIndexedAt,
 						lastErrorKind: this.classifyIndexErrorKind(fallbackError),
 						lastIncrementalEmbedAt: previousIndexedFileRef?.lastIncrementalEmbedAt,
 						embeddingDeferred: false,
