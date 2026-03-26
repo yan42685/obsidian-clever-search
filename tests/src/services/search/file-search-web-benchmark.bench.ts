@@ -912,7 +912,7 @@ function createManualBenchmarkCorpus(
 			folder: "adversarial/prefix-lab/en",
 			headings: "Compact witness",
 			content:
-				"connection policy timeout keeps one compact control path stable during service recovery",
+				"connection policy timeout keeps one compact control path stable during service recovery and retry",
 		},
 		{
 			bucket: "tech-en",
@@ -930,7 +930,7 @@ function createManualBenchmarkCorpus(
 			folder: "adversarial/prefix-lab/en",
 			headings: "Coverage witness",
 			content:
-				"betatwo alphaone gammathree keeps all three family witnesses inside one compact passage",
+				"betatwo deltafour alphaone gammathree keeps all four family witnesses inside one compact passage",
 		},
 		{
 			bucket: "tech-en",
@@ -939,7 +939,25 @@ function createManualBenchmarkCorpus(
 			folder: "adversarial/prefix-lab/en",
 			headings: "Coverage witness",
 			content:
-				"gammathree alphaone keeps an ordered pair but lacks the third family witness",
+				"gammathree alphaone deltafour keeps an ordered trio but lacks the betatwo family witness",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/unordered-prefix-noise.md",
+			basename: "Unordered prefix noise note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Coverage witness",
+			content:
+				"deltaforce alphabet gossip and connector fragments look similar to multiple prefix families but never provide full compact coverage",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/prefix-lab/en/exact-prefix-noise.md",
+			basename: "Exact prefix noise note",
+			folder: "adversarial/prefix-lab/en",
+			headings: "Compact witness",
+			content:
+				"configmap dashboard rollout keeper repeats expanded family fragments without the exact config data rollout witness",
 		},
 		{
 			bucket: "tech-zh",
@@ -958,6 +976,15 @@ function createManualBenchmarkCorpus(
 			headings: "局部顺序",
 			content:
 				"prefix guide for mixed scripts keeps family scoring noisy and reversed 检索混合",
+		},
+		{
+			bucket: "tech-zh",
+			path: "adversarial/prefix-lab/zh/hybrid-prefix-quad.md",
+			basename: "混合 prefix quad",
+			folder: "adversarial/prefix-lab/zh",
+			headings: "局部顺序",
+			content:
+				"混合检索 prefix family scoring keeps compact evidence across scripts and retry windows",
 		},
 	];
 
@@ -1370,7 +1397,14 @@ function createManualBenchmarkCorpus(
 			suite: "adversarial",
 		},
 		{
-			query: "gam alp bet",
+			query: "gam alp del bet",
+			relevantPath: "adversarial/prefix-lab/en/unordered-full-family.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "del bet alp gam",
 			relevantPath: "adversarial/prefix-lab/en/unordered-full-family.md",
 			bucket: "tech-en",
 			type: "prefix_family",
@@ -1384,7 +1418,21 @@ function createManualBenchmarkCorpus(
 			suite: "adversarial",
 		},
 		{
+			query: "config da ro keep",
+			relevantPath: "adversarial/prefix-lab/en/exact-prefix-family.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
 			query: "con pol tim",
+			relevantPath: "adversarial/prefix-lab/en/connection-policy-timeout.md",
+			bucket: "tech-en",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "con pol tim rec",
 			relevantPath: "adversarial/prefix-lab/en/connection-policy-timeout.md",
 			bucket: "tech-en",
 			type: "prefix_family",
@@ -1393,6 +1441,20 @@ function createManualBenchmarkCorpus(
 		{
 			query: "混合 pre fam",
 			relevantPath: "adversarial/prefix-lab/zh/hybrid-prefix-family.md",
+			bucket: "tech-zh",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "混合 检 pre fam",
+			relevantPath: "adversarial/prefix-lab/zh/hybrid-prefix-family.md",
+			bucket: "tech-zh",
+			type: "prefix_family",
+			suite: "adversarial",
+		},
+		{
+			query: "混合 检 pre fam ret",
+			relevantPath: "adversarial/prefix-lab/zh/hybrid-prefix-quad.md",
 			bucket: "tech-zh",
 			type: "prefix_family",
 			suite: "adversarial",

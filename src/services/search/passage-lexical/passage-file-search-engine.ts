@@ -361,17 +361,17 @@ const FILE_DECOMPOSITION_BODY_EVIDENCE_BONUS = 0.96;
 const FILE_DECOMPOSITION_BODY_ANCHOR_BONUS = 0.88;
 const FILE_DECOMPOSITION_METADATA_NOISE_PENALTY = 0.92;
 const FILE_SHORT_TITLE_FAST_PATH_EXACT = 7.4;
-const FILE_SHORT_TITLE_FAST_PATH_PREFIX = 5.2;
+const FILE_SHORT_TITLE_FAST_PATH_PREFIX = 4.7;
 const FILE_SHORT_HEADING_FAST_PATH_EXACT = 3.1;
-const FILE_SHORT_HEADING_FAST_PATH_PREFIX = 2.05;
+const FILE_SHORT_HEADING_FAST_PATH_PREFIX = 1.8;
 const FILE_SHORT_TITLE_FAST_PATH_COVERAGE = 1.35;
 const FILE_SHORT_TITLE_FAST_PATH_COMPACTNESS = 2.6;
 const FILE_SHORT_HEADING_FAST_PATH_COMPACTNESS = 1.1;
 const FILE_SHORT_TITLE_ALL_TERMS_EXACT_BONUS = 4.4;
-const FILE_SHORT_TITLE_ALL_TERMS_PREFIX_BONUS = 2.25;
-const FILE_SHORT_TITLE_STRONG_MATCH_FLOOR = 5.2;
+const FILE_SHORT_TITLE_ALL_TERMS_PREFIX_BONUS = 1.85;
+const FILE_SHORT_TITLE_STRONG_MATCH_FLOOR = 4.8;
 const FILE_SHORT_TITLE_CONTENT_CONFIRM_BONUS = 0.42;
-const FILE_SHORT_TITLE_ROUTE_THRESHOLD = 8.5;
+const FILE_SHORT_TITLE_ROUTE_THRESHOLD = 8.9;
 const PASSAGE_LOCALITY_COVERAGE_WEIGHT = 0.52;
 const PASSAGE_LOCALITY_ORDER_WEIGHT = 0.4;
 const PASSAGE_LOCALITY_COMPACTNESS_WEIGHT = 0.66;
@@ -410,6 +410,10 @@ const LOCAL_WINDOW_TIGHT_PAIR_WEIGHT = 0.22;
 const LOCAL_WINDOW_RARE_TERM_WEIGHT = 0.16;
 const LOCAL_WINDOW_MATCH_SPECIFICITY_WEIGHT = 0;
 const LOCAL_WINDOW_ORDERED_SPECIFICITY_WEIGHT = 0;
+const PREFIX_FAMILY_LOCAL_WINDOW_COVERAGE_BONUS = 0.42;
+const PREFIX_FAMILY_VERIFIER_COVERAGE_BONUS = 0.54;
+const PREFIX_FAMILY_LOCALITY_COVERAGE_BONUS = 0.34;
+const PREFIX_FAMILY_ORDER_SCALE = 0.42;
 const MAX_LOCAL_WINDOW_EXPLANATIONS_PER_PASSAGE = 3;
 const MAX_FILE_LOCAL_EXPLANATIONS = 3;
 const LOCAL_WINDOW_DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.72;
@@ -5034,6 +5038,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			planner,
 			queryTermWeights,
 			totalQueryWeight,
+			queryScoringCache.prefixFamilyMode,
 		);
 		queryScoringCache.localWindowSetsByPassageId.set(passage.id, signals);
 		return signals;
@@ -5334,6 +5339,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		planner: FileSearchQueryPlanner | null,
 		queryTermWeights: QueryTermWeightMap,
 		totalQueryWeight: number,
+		prefixFamilyMode: boolean,
 	): QueryConditionedLocalWindowSet {
 		const occurrences: Array<{ position: number; queryTermIndex: number }> = [];
 		for (const [queryTermIndex, positions] of positionsByQueryTerm) {
@@ -5413,16 +5419,29 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					positionSignalsByQueryTerm,
 					windowPositions,
 				);
+				const prefixFamilyCoverageBonus = prefixFamilyMode
+					? computePrefixFamilyCoverageBonus({
+							coverageRatio,
+							compactnessRatio,
+							tightOrderedPairRatio,
+						}) * PREFIX_FAMILY_LOCAL_WINDOW_COVERAGE_BONUS
+					: 0;
+				const orderWeightScale = prefixFamilyMode ? PREFIX_FAMILY_ORDER_SCALE : 1;
 				const score =
 					coverageRatio * LOCAL_WINDOW_COVERAGE_WEIGHT +
 					exactCoverageRatio * LOCAL_WINDOW_EXACT_WEIGHT +
 					anchorCoverageRatio * LOCAL_WINDOW_ANCHOR_WEIGHT +
 					compactnessRatio * LOCAL_WINDOW_COMPACTNESS_WEIGHT +
-					orderedRatio * LOCAL_WINDOW_ORDER_WEIGHT +
-					tightOrderedPairRatio * LOCAL_WINDOW_TIGHT_PAIR_WEIGHT +
+					orderedRatio * LOCAL_WINDOW_ORDER_WEIGHT * orderWeightScale +
+					tightOrderedPairRatio *
+						LOCAL_WINDOW_TIGHT_PAIR_WEIGHT *
+						orderWeightScale +
 					rareTermLift * LOCAL_WINDOW_RARE_TERM_WEIGHT +
 					matchSpecificityRatio * LOCAL_WINDOW_MATCH_SPECIFICITY_WEIGHT +
-					orderedSpecificityRatio * LOCAL_WINDOW_ORDERED_SPECIFICITY_WEIGHT;
+					orderedSpecificityRatio *
+						LOCAL_WINDOW_ORDERED_SPECIFICITY_WEIGHT *
+						orderWeightScale +
+					prefixFamilyCoverageBonus;
 				this.insertLocalWindowExplanation(
 					explanations,
 					{
@@ -6290,17 +6309,30 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			positionSignals,
 			positionsByQueryTerm,
 		);
+		const prefixFamilyCoverageBonus = queryScoringCache.prefixFamilyMode
+			? computePrefixFamilyCoverageBonus({
+					coverageRatio: coverage,
+					compactnessRatio: coverWindow.ratio,
+					tightOrderedPairRatio,
+				}) * PREFIX_FAMILY_VERIFIER_COVERAGE_BONUS
+			: 0;
+		const orderWeightScale = queryScoringCache.prefixFamilyMode
+			? PREFIX_FAMILY_ORDER_SCALE
+			: 1;
 
 		let score =
 			coverage * VERIFIER_COVERAGE_WEIGHT +
-			orderedRatio * VERIFIER_ORDER_WEIGHT +
+			orderedRatio * VERIFIER_ORDER_WEIGHT * orderWeightScale +
 			coverWindow.ratio * VERIFIER_COMPACTNESS_WEIGHT +
 			rareTermLift * VERIFIER_RARE_TERM_WEIGHT +
-			tightOrderedPairRatio * VERIFIER_TIGHT_PAIR_WEIGHT +
+			tightOrderedPairRatio * VERIFIER_TIGHT_PAIR_WEIGHT * orderWeightScale +
 			exactQueryCoverage * VERIFIER_EXACT_QUERY_WEIGHT +
 			matchSpecificityRatio * VERIFIER_MATCH_SPECIFICITY_WEIGHT +
-			orderedSpecificityRatio * VERIFIER_ORDERED_SPECIFICITY_WEIGHT +
-			localWindowSignals.score * VERIFIER_LOCAL_WINDOW_WEIGHT;
+			orderedSpecificityRatio *
+				VERIFIER_ORDERED_SPECIFICITY_WEIGHT *
+				orderWeightScale +
+			localWindowSignals.score * VERIFIER_LOCAL_WINDOW_WEIGHT +
+			prefixFamilyCoverageBonus;
 		if (exactPhraseHit) {
 			score += VERIFIER_EXACT_PHRASE_BONUS;
 		}
@@ -6409,19 +6441,33 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			positionSignals,
 			positionsByQueryTerm,
 		);
+		const prefixFamilyCoverageBonus = queryScoringCache.prefixFamilyMode
+			? computePrefixFamilyCoverageBonus({
+					coverageRatio: coverage,
+					compactnessRatio: coverWindow.ratio,
+					tightOrderedPairRatio,
+				}) * PREFIX_FAMILY_LOCALITY_COVERAGE_BONUS
+			: 0;
+		const orderWeightScale = queryScoringCache.prefixFamilyMode
+			? PREFIX_FAMILY_ORDER_SCALE
+			: 1;
 
 		let score =
 			coverage * PASSAGE_LOCALITY_COVERAGE_WEIGHT +
-			orderedRatio * PASSAGE_LOCALITY_ORDER_WEIGHT +
+			orderedRatio * PASSAGE_LOCALITY_ORDER_WEIGHT * orderWeightScale +
 			coverWindow.ratio * PASSAGE_LOCALITY_COMPACTNESS_WEIGHT +
 			rareTermLift * PASSAGE_LOCALITY_RARE_TERM_WEIGHT +
-			tightOrderedPairRatio * PASSAGE_LOCALITY_TIGHT_PAIR_WEIGHT +
+			tightOrderedPairRatio *
+				PASSAGE_LOCALITY_TIGHT_PAIR_WEIGHT *
+				orderWeightScale +
 			exactQueryCoverage * PASSAGE_LOCALITY_EXACT_QUERY_WEIGHT +
 			matchSpecificityRatio * PASSAGE_LOCALITY_MATCH_SPECIFICITY_WEIGHT +
 			orderedSpecificityRatio *
-				PASSAGE_LOCALITY_ORDERED_SPECIFICITY_WEIGHT +
+				PASSAGE_LOCALITY_ORDERED_SPECIFICITY_WEIGHT *
+				orderWeightScale +
 			anchorCoverage * PASSAGE_LOCALITY_ANCHOR_WEIGHT +
-			localWindowSignals.score * PASSAGE_LOCALITY_LOCAL_WINDOW_WEIGHT;
+			localWindowSignals.score * PASSAGE_LOCALITY_LOCAL_WINDOW_WEIGHT +
+			prefixFamilyCoverageBonus;
 		if (
 			Number.isFinite(coverWindow.span) &&
 			coverWindow.span <= positionsByQueryTerm.size + 1
@@ -6741,6 +6787,21 @@ function computeMatchedTermSpecificityWeight(
 		return Math.min(0.9, 0.6 + computePrefixBoost(queryTerm, matchedTerm) * 0.28);
 	}
 	return 0.58;
+}
+
+function computePrefixFamilyCoverageBonus(params: {
+	coverageRatio: number;
+	compactnessRatio: number;
+	tightOrderedPairRatio: number;
+}): number {
+	const { coverageRatio, compactnessRatio, tightOrderedPairRatio } = params;
+	if (coverageRatio < 0.999) {
+		return 0;
+	}
+	return Math.min(
+		1.2,
+		compactnessRatio * 0.82 + Math.min(1, tightOrderedPairRatio) * 0.18,
+	);
 }
 
 function classifyObservedFamilyMatchKind(
