@@ -9,6 +9,7 @@ import { singleton } from "tsyringe";
 
 const SEGMENT_REGEX = /[\[\]{}()<>\s]+/u;
 // Thanks to @scambier's Omnisearch, whose code was served as a reference
+const SEGMENTED_TOKEN_HAS_LEXICAL_CHAR_REGEX = /[\p{L}\p{N}]/u;
 
 // ^=#%/*,.`:;?@_
 const SEPERATOR_REGEX =
@@ -51,16 +52,20 @@ export class Tokenizer {
 			) {
 				const words = this.chsSegmenter.cut(segment, true);
 				for (const word of words) {
+					const normalizedWord = sanitizeSegmentedToken(word);
+					if (!normalizedWord) {
+						continue;
+					}
 					if (
 						this.setting.enableStopWordsZh &&
-						this.stopWordsZh?.has(word)
+						this.stopWordsZh?.has(normalizedWord)
 					) {
-						if (mode === "search" && word.length > 1) {
-							logger.debug(`excluded: ${word}`);
+						if (mode === "search" && normalizedWord.length > 1) {
+							logger.debug(`excluded: ${normalizedWord}`);
 						}
 						continue;
 					}
-					tokens.push(word);
+					tokens.push(normalizedWord);
 				}
 			} else {
 				// don't add too short or too long segment for smallCharsetLanguage
@@ -96,4 +101,14 @@ export class Tokenizer {
 		// discard lengthy token to avoid memory-overflow
 		return tokens.filter(token => token.length < 30);
 	}
+}
+
+function sanitizeSegmentedToken(token: string): string | null {
+	const normalized = token.trim();
+	if (!normalized) {
+		return null;
+	}
+	return SEGMENTED_TOKEN_HAS_LEXICAL_CHAR_REGEX.test(normalized)
+		? normalized
+		: null;
 }

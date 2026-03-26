@@ -460,6 +460,7 @@ const PASSAGE_RUNTIME_CACHE_SIZE = 384;
 const MIN_LONG_CHUNK_CHARS = 220;
 const BODY_TERM_PRUNE_TRIGGER = 96;
 const BODY_TERM_PRUNE_KEEP = 80;
+const BODY_TERM_PRUNE_RECALL_GUARD_SLOTS = 12;
 const COMPACT_MIN_STALE_FILES = 24;
 const COMPACT_MIN_STALE_PASSAGES = 256;
 const COMPACT_STALE_FILE_RATIO = 0.35;
@@ -7680,8 +7681,51 @@ function prunePassageWordTf(wordTf: Map<string, number>): Map<string, number> {
 		return left[0].localeCompare(right[0]);
 	});
 	const retained = new Map<string, number>();
-	for (const [term, tf] of rankedTerms.slice(0, BODY_TERM_PRUNE_KEEP)) {
+	const guaranteedKeep = Math.max(
+		0,
+		BODY_TERM_PRUNE_KEEP - BODY_TERM_PRUNE_RECALL_GUARD_SLOTS,
+	);
+	for (const [term, tf] of rankedTerms.slice(0, guaranteedKeep)) {
 		retained.set(term, tf);
+	}
+	const guardedTail = rankedTerms
+		.slice(guaranteedKeep)
+		.filter(([term, tf]) => shouldProtectPassageBodyTerm(term, tf))
+		.sort((left, right) => {
+			const guardScoreDiff =
+				computeBodyTermRecallGuardScore(right[0], right[1]) -
+				computeBodyTermRecallGuardScore(left[0], left[1]);
+			if (guardScoreDiff !== 0) {
+				return guardScoreDiff;
+			}
+			const infoScoreDiff =
+				computeBodyTermInformationScore(right[0], right[1]) -
+				computeBodyTermInformationScore(left[0], left[1]);
+			if (infoScoreDiff !== 0) {
+				return infoScoreDiff;
+			}
+			if (right[1] !== left[1]) {
+				return right[1] - left[1];
+			}
+			return left[0].localeCompare(right[0]);
+		});
+	for (const [term, tf] of guardedTail) {
+		if (retained.size >= BODY_TERM_PRUNE_KEEP) {
+			break;
+		}
+		retained.set(term, tf);
+	}
+	if (retained.size >= BODY_TERM_PRUNE_KEEP) {
+		return retained;
+	}
+	for (const [term, tf] of rankedTerms) {
+		if (retained.has(term)) {
+			continue;
+		}
+		retained.set(term, tf);
+		if (retained.size >= BODY_TERM_PRUNE_KEEP) {
+			break;
+		}
 	}
 	return retained;
 }
@@ -7712,6 +7756,37 @@ function computeBodyTermInformationScore(term: string, tf: number): number {
 	}
 	if (/[A-Z]/u.test(term) || /[0-9]/u.test(term) || /[_-]/u.test(term)) {
 		score += 0.8;
+	}
+	return score;
+}
+
+function shouldProtectPassageBodyTerm(term: string, tf: number): boolean {
+	if (tf <= 0 || BODY_STOPWORD_TERMS.has(term) || NUMERIC_TOKEN_REGEX.test(term)) {
+		return false;
+	}
+	if (ASCII_ALPHA_REGEX.test(term) || ASCII_ALPHANUM_REGEX.test(term)) {
+		return term.length >= 4;
+	}
+	if (/\p{Script=Han}/u.test(term)) {
+		return term.length >= 2;
+	}
+	return term.length >= 4 && /[\p{L}\p{N}]/u.test(term);
+}
+
+function computeBodyTermRecallGuardScore(term: string, tf: number): number {
+	let score = computeBodyTermInformationScore(term, tf);
+	if (ASCII_ALPHA_REGEX.test(term) || ASCII_ALPHANUM_REGEX.test(term)) {
+		if (term.length <= 8) {
+			score += 6;
+		} else if (term.length <= 16) {
+			score += 4;
+		} else {
+			score += 2;
+		}
+	} else if (/\p{Script=Han}/u.test(term)) {
+		score += term.length <= 6 ? 5.5 : 3.5;
+	} else {
+		score += 2.5;
 	}
 	return score;
 }
