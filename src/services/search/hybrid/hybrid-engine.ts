@@ -169,7 +169,6 @@ export class HybridEngine {
 			this.db.db.hybridHnswSmall.clear(),
 			this.db.db.hybridIndexedFileRefs.clear(),
 		]);
-		this.fileSnapshotStore.clearIndexedSnapshots();
 	}
 
 	isEnabled(): boolean {
@@ -300,11 +299,6 @@ export class HybridEngine {
 					filePath: newPath,
 				});
 				await this.db.db.hybridFileSnapshots.delete(oldPath);
-				this.fileSnapshotStore.renameIndexedSnapshot(
-					oldPath,
-					newPath,
-					snapshotRow.generation,
-				);
 			}
 
 			if (vectorRow) {
@@ -339,7 +333,6 @@ export class HybridEngine {
 		await this.db.db.hybridChunks.bulkDelete(ids);
 		await this.db.db.hybridFileSnapshots.delete(filePath);
 		await this.db.db.hybridChunkVectors.delete(filePath);
-		this.fileSnapshotStore.deleteIndexedSnapshot(filePath);
 		if (option.deleteIndexedFileRef ?? true) {
 			await this.db.db.hybridIndexedFileRefs.delete(filePath);
 		}
@@ -694,12 +687,11 @@ export class HybridEngine {
 		plainText: string,
 		generation: number,
 	): Promise<void> {
-		await this.db.db.hybridFileSnapshots.put({
+		await this.fileSnapshotStore.persistIndexedSnapshot(
 			filePath,
 			plainText,
 			generation,
-		});
-		this.fileSnapshotStore.setIndexedSnapshot(filePath, plainText, generation);
+		);
 	}
 
 	private async planIncrementalChunks(

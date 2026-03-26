@@ -390,7 +390,6 @@ export class DataManager {
 	async initAsync() {
 		this.clearHybridFailedEmbeddingState();
 		this.fileSnapshotStore.clearCurrentFiles();
-		this.fileSnapshotStore.clearIndexedSnapshots();
 		this.setHybridSearchAvailability("blocked");
 		this.beginSearchBootstrapRun();
 		try {
@@ -687,7 +686,7 @@ export class DataManager {
 
 	private async handleDeleteOperation(path: string): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(path);
-		this.fileSnapshotStore.deleteIndexedSnapshot(path);
+		await this.fileSnapshotStore.deleteIndexedSnapshot(path);
 		this.cancelHybridRepair(path);
 		this.clearFailedHybridEmbedding(path);
 		await this.deleteDocuments([path]);
@@ -708,7 +707,10 @@ export class DataManager {
 		}
 
 		await this.addDocuments([file]);
-		this.fileSnapshotStore.commitCurrentFileAsIndexed(file.path, file.stat.mtime);
+		await this.fileSnapshotStore.commitCurrentFileAsIndexed(
+			file.path,
+			file.stat.mtime,
+		);
 		if (
 			this.hybridEngine.isEnabled() &&
 			this.hybridEngine.shouldIndexPath(file.path)
@@ -736,8 +738,7 @@ export class DataManager {
 	): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(oldPath);
 		this.fileSnapshotStore.invalidateCurrentFile(newPath);
-		this.fileSnapshotStore.deleteIndexedSnapshot(oldPath);
-		this.fileSnapshotStore.deleteIndexedSnapshot(newPath);
+		await this.fileSnapshotStore.deleteIndexedSnapshots([oldPath, newPath]);
 		this.cancelHybridRepair(oldPath);
 		this.cancelHybridRepair(newPath);
 		await this.deleteDocuments([oldPath]);
@@ -757,7 +758,10 @@ export class DataManager {
 		}
 
 		await this.addDocuments([file]);
-		this.fileSnapshotStore.commitCurrentFileAsIndexed(file.path, file.stat.mtime);
+		await this.fileSnapshotStore.commitCurrentFileAsIndexed(
+			file.path,
+			file.stat.mtime,
+		);
 
 		if (
 			!this.hybridEngine.isEnabled() ||
@@ -1223,7 +1227,7 @@ export class DataManager {
 			throw error;
 		}
 		await this.saveLexicalIndexedFileRefs(filesToIndex);
-		this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+		await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
 			filesToIndex.map((file) => ({
 				path: file.path,
 				generation: file.stat.mtime,
@@ -1260,11 +1264,9 @@ export class DataManager {
 		logger.trace(`docs to delete: ${docsToDelete.length}`);
 		logger.trace(`docs to add: ${docsToAdd.length}`);
 		await this.deleteDocuments(docsToDelete);
-		for (const path of docsToDelete) {
-			this.fileSnapshotStore.deleteIndexedSnapshot(path);
-		}
+		await this.fileSnapshotStore.deleteIndexedSnapshots(docsToDelete);
 		await this.addDocuments(docsToAdd);
-		this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+		await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
 			docsToAdd
 				.map((file) =>
 					file instanceof TFile

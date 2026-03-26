@@ -1,12 +1,17 @@
 import { TFile, Vault, htmlToMarkdown } from "obsidian";
 import { OuterSetting } from "src/globals/plugin-setting";
-import type { IndexedDocument } from "src/globals/search-types";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
 
-type IndexedSnapshotCacheEntry = {
+type CurrentFileCacheEntry = {
 	text: string;
+	generation?: number;
+};
+
+type PersistedFileSnapshotRow = {
+	filePath: string;
+	plainText: string;
 	generation?: number;
 };
 
@@ -15,22 +20,17 @@ export type FileSnapshotStoreStatus = {
 	active: boolean;
 	thresholdMb: number;
 	totalIndexableBytes: number;
-	currentCachedFileCount: number;
-	indexedCachedFileCount: number;
-	currentPreloading: boolean;
-	indexedPreloading: boolean;
+	cachedFileCount: number;
+	preloading: boolean;
 };
 
 @singleton()
 export class FileSnapshotStore {
 	private readonly vault = getInstance(Vault);
 	private readonly setting = getInstance(OuterSetting);
-	private readonly currentFileCache = new Map<string, string>();
-	private readonly indexedSnapshotCache = new Map<string, IndexedSnapshotCacheEntry>();
+	private readonly currentFileCache = new Map<string, CurrentFileCacheEntry>();
 	private currentPreloadTask: Promise<void> | null = null;
-	private indexedPreloadTask: Promise<void> | null = null;
 	private currentPreloadRunId = 0;
-	private indexedPreloadRunId = 0;
 	private lastIndexableBytes = 0;
 	private highPerformanceActive = false;
 
@@ -44,17 +44,20 @@ export class FileSnapshotStore {
 		}
 		const cached = this.currentFileCache.get(file.path);
 		if (cached !== undefined) {
-			return cached;
+			return cached.text;
 		}
 		const plainText = await this.vault.cachedRead(file);
 		const normalized =
 			file.extension === "html" ? this.normalizeHtmlToText(plainText) : plainText;
-		this.currentFileCache.set(file.path, normalized);
+		this.currentFileCache.set(file.path, {
+			text: normalized,
+			generation: file.stat.mtime,
+		});
 		return normalized;
 	}
 
-	setCurrentFileText(path: string, text: string): void {
-		this.currentFileCache.set(path, text);
+	setCurrentFileText(path: string, text: string, generation?: number): void {
+		this.currentFileCache.set(path, { text, generation });
 	}
 
 	clearCurrentFiles(): void {
@@ -62,113 +65,118 @@ export class FileSnapshotStore {
 	}
 
 	peekCurrentFileText(path: string): string | undefined {
-		return this.currentFileCache.get(path);
+		return this.currentFileCache.get(path)?.text;
 	}
 
 	invalidateCurrentFile(path: string): void {
 		this.currentFileCache.delete(path);
 	}
 
-	renameCurrentFile(oldPath: string, newPath: string): void {
+	renameCurrentFile(oldPath: string, newPath: string, generation?: number): void {
 		const cached = this.currentFileCache.get(oldPath);
 		if (cached === undefined) {
 			return;
 		}
 		this.currentFileCache.delete(oldPath);
-		this.currentFileCache.set(newPath, cached);
-	}
-
-	setIndexedSnapshot(
-		filePath: string,
-		text: string,
-		generation?: number,
-	): void {
-		this.indexedSnapshotCache.set(filePath, { text, generation });
-	}
-
-	setIndexedSnapshotFromDocument(
-		document: IndexedDocument,
-		generation?: number,
-	): void {
-		this.setIndexedSnapshot(document.path, document.content ?? "", generation);
-	}
-
-	commitCurrentFileAsIndexed(filePath: string, generation?: number): void {
-		const text = this.currentFileCache.get(filePath);
-		if (text === undefined) {
-			return;
-		}
-		this.setIndexedSnapshot(filePath, text, generation);
-	}
-
-	commitCurrentFilesAsIndexed(
-		files: ReadonlyArray<{ path: string; generation?: number }>,
-	): void {
-		for (const file of files) {
-			this.commitCurrentFileAsIndexed(file.path, file.generation);
-		}
-	}
-
-	deleteIndexedSnapshot(filePath: string): void {
-		this.indexedSnapshotCache.delete(filePath);
-	}
-
-	clearIndexedSnapshots(): void {
-		this.indexedSnapshotCache.clear();
-	}
-
-	renameIndexedSnapshot(
-		oldPath: string,
-		newPath: string,
-		generation?: number,
-	): void {
-		const cached = this.indexedSnapshotCache.get(oldPath);
-		if (cached === undefined) {
-			return;
-		}
-		this.indexedSnapshotCache.delete(oldPath);
-		this.indexedSnapshotCache.set(newPath, {
+		this.currentFileCache.set(newPath, {
 			text: cached.text,
 			generation: generation ?? cached.generation,
 		});
+	}
+
+	async persistIndexedSnapshot(
+		filePath: string,
+		text: string,
+		generation?: number,
+	): Promise<void> {
+		await this.database.db.hybridFileSnapshots.put({
+			filePath,
+			plainText: text,
+			generation,
+		});
+	}
+
+	async commitCurrentFileAsIndexed(
+		filePath: string,
+		generation?: number,
+	): Promise<void> {
+		const cached = this.currentFileCache.get(filePath);
+		if (cached === undefined) {
+			return;
+		}
+		await this.persistIndexedSnapshot(
+			filePath,
+			cached.text,
+			generation ?? cached.generation,
+		);
+	}
+
+	async commitCurrentFilesAsIndexed(
+		files: ReadonlyArray<{ path: string; generation?: number }>,
+	): Promise<void> {
+		const rows: PersistedFileSnapshotRow[] = [];
+		for (const file of files) {
+			const cached = this.currentFileCache.get(file.path);
+			if (!cached) {
+				continue;
+			}
+			rows.push({
+				filePath: file.path,
+				plainText: cached.text,
+				generation: file.generation ?? cached.generation,
+			});
+		}
+		if (rows.length === 0) {
+			return;
+		}
+		await this.database.db.hybridFileSnapshots.bulkPut(rows);
+	}
+
+	async deleteIndexedSnapshot(filePath: string): Promise<void> {
+		await this.database.db.hybridFileSnapshots.delete(filePath);
+	}
+
+	async deleteIndexedSnapshots(filePaths: readonly string[]): Promise<void> {
+		if (filePaths.length === 0) {
+			return;
+		}
+		await this.database.db.hybridFileSnapshots.bulkDelete(Array.from(filePaths));
 	}
 
 	async getIndexedSnapshotText(
 		filePath: string,
 		expectedGeneration?: number,
 	): Promise<string | undefined> {
-		const cached = this.indexedSnapshotCache.get(filePath);
+		const current = this.currentFileCache.get(filePath);
 		if (
-			cached &&
-			(expectedGeneration === undefined ||
-				cached.generation === undefined ||
-				cached.generation === expectedGeneration)
+			expectedGeneration !== undefined &&
+			current?.generation !== undefined &&
+			current.generation === expectedGeneration
 		) {
-			return cached.text;
+			return current.text;
 		}
 
 		const row = await this.database.db.hybridFileSnapshots.get(filePath);
-		if (!row) {
-			return undefined;
-		}
-		this.indexedSnapshotCache.set(filePath, {
-			text: row.plainText,
-			generation: row.generation,
-		});
-		return row.plainText;
+		return row?.plainText;
 	}
 
 	async getIndexedSnapshotTexts(
 		filePaths: string[],
+		expectedGenerations?: ReadonlyMap<string, number | undefined>,
 	): Promise<Map<string, string>> {
 		const uniquePaths = Array.from(new Set(filePaths));
 		const snapshots = new Map<string, string>();
 		const missingPaths: string[] = [];
 
 		for (const filePath of uniquePaths) {
-			const cached = this.indexedSnapshotCache.get(filePath);
-			if (cached) {
-				snapshots.set(filePath, cached.text);
+			const expectedGeneration = expectedGenerations?.get(filePath);
+			const current = this.currentFileCache.get(filePath);
+			if (
+				expectedGeneration !== undefined &&
+				current?.generation !== undefined &&
+				current.generation === expectedGeneration
+			) {
+				snapshots.set(filePath, current.text);
 				continue;
 			}
 			missingPaths.push(filePath);
@@ -183,10 +191,6 @@ export class FileSnapshotStore {
 			if (!row) {
 				continue;
 			}
-			this.indexedSnapshotCache.set(row.filePath, {
-				text: row.plainText,
-				generation: row.generation,
-			});
 			snapshots.set(row.filePath, row.plainText);
 		}
 
@@ -203,17 +207,11 @@ export class FileSnapshotStore {
 		const shouldActivate = this.isHighPerformanceActive();
 		if (!shouldActivate) {
 			this.cancelPreloads();
-			if (this.highPerformanceActive) {
-				this.indexedSnapshotCache.clear();
-			}
 			this.highPerformanceActive = false;
 			return;
 		}
 		this.highPerformanceActive = true;
 		void this.preloadCurrentFiles(indexableFiles);
-		if (this.setting.hybrid.enabled) {
-			void this.preloadIndexedSnapshots();
-		}
 	}
 
 	getStatusSummary(
@@ -232,10 +230,8 @@ export class FileSnapshotStore {
 				totalIndexableBytes <= this.getHighPerformanceThresholdBytes(),
 			thresholdMb: this.setting.hybrid.highPerformanceMaxMb ?? 60,
 			totalIndexableBytes,
-			currentCachedFileCount: this.currentFileCache.size,
-			indexedCachedFileCount: this.indexedSnapshotCache.size,
-			currentPreloading: this.currentPreloadTask !== null,
-			indexedPreloading: this.indexedPreloadTask !== null,
+			cachedFileCount: this.currentFileCache.size,
+			preloading: this.currentPreloadTask !== null,
 		};
 	}
 
@@ -250,9 +246,7 @@ export class FileSnapshotStore {
 
 	private cancelPreloads(): void {
 		this.currentPreloadRunId++;
-		this.indexedPreloadRunId++;
 		this.currentPreloadTask = null;
-		this.indexedPreloadTask = null;
 	}
 
 	private async preloadCurrentFiles(indexableFiles: readonly TFile[]): Promise<void> {
@@ -276,33 +270,6 @@ export class FileSnapshotStore {
 			}
 		});
 		return this.currentPreloadTask;
-	}
-
-	private async preloadIndexedSnapshots(): Promise<void> {
-		if (this.indexedPreloadTask) {
-			return this.indexedPreloadTask;
-		}
-		const runId = ++this.indexedPreloadRunId;
-		this.indexedPreloadTask = (async () => {
-			const rows = await this.database.db.hybridFileSnapshots.toArray();
-			for (const row of rows) {
-				if (runId !== this.indexedPreloadRunId || !this.isHighPerformanceActive()) {
-					return;
-				}
-				if (this.indexedSnapshotCache.has(row.filePath)) {
-					continue;
-				}
-				this.indexedSnapshotCache.set(row.filePath, {
-					text: row.plainText,
-					generation: row.generation,
-				});
-			}
-		})().finally(() => {
-			if (runId === this.indexedPreloadRunId) {
-				this.indexedPreloadTask = null;
-			}
-		});
-		return this.indexedPreloadTask;
 	}
 
 	private normalizeHtmlToText(htmlText: string): string {
