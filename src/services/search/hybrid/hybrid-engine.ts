@@ -425,7 +425,7 @@ export class HybridEngine {
 			return false;
 		}
 		const blobVersion = await getBm25BlobVersion(record.data);
-		if (blobVersion === 4) {
+		if (blobVersion === 5) {
 			return false;
 		}
 
@@ -1197,7 +1197,7 @@ export class HybridEngine {
 		if (record) {
 			const blobVersion = await getBm25BlobVersion(record.data);
 			this.bm25.deserialize(await blobToBm25(record.data));
-			if (blobVersion !== 4 || this.bm25.optimizeStorage()) {
+			if (blobVersion !== 5 || this.bm25.optimizeStorage()) {
 				await this.persistBm25();
 			}
 		}

@@ -4,8 +4,6 @@ import {
 	BM25_B,
 	BM25_K1,
 	type BM25Index,
-	type BM25PostingEntry,
-	type PostingList,
 } from './hybrid-types';
 
 type BM25SearchResult = { docId: number; score: number };
@@ -22,29 +20,27 @@ type BM25ResolvedQueryTerm = {
 	normalizedTerm: string;
 	matchedTerms: BM25MatchedTerm[];
 };
+type PackedPostingList = {
+	docIds: Uint32Array;
+	tfNorms: Float32Array;
+};
 
 const textEncoder = new TextEncoder();
 
-const BM25_POSITION_BUCKET_SIZE = 4;
-const BM25_MAX_POSITIONS_PER_TERM = 8;
-const BM25_PROXIMITY_MAX_SCORE_RATIO = 0.22;
-const BM25_PROXIMITY_SPAN_WEIGHT = 0.11;
-const BM25_PROXIMITY_ORDER_WEIGHT = 0.05;
-const BM25_PROXIMITY_ADJACENT_WEIGHT = 0.04;
-const BM25_PROXIMITY_COMPACT_WEIGHT = 0.02;
 const HYBRID_QUERY_PREFIX_MIN_LENGTH = 4;
 const HYBRID_QUERY_PREFIX_EXPANSION_LIMIT = 6;
 const HYBRID_QUERY_FUZZY_MIN_LENGTH = 5;
 const HYBRID_QUERY_FUZZY_EXPANSION_LIMIT = 4;
 const HYBRID_QUERY_EXPANDABLE_TERM_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
+const BM25_MAX_TF_NORM = BM25_K1 + 1;
 
 export class BM25Engine {
 	private readonly tokenizer = getInstance(Tokenizer);
 
 	private termDict = new Map<string, { termId: number; df: number }>();
-	private postings = new Map<number, PostingList>();
-	private normalizedTerms = new Map<string, string[]>();
-	private sortedNormalizedTerms: string[] = [];
+	private postings = new Map<number, PackedPostingList>();
+	private sortedNormalizedTerms: string[] | null = null;
+	private expansionLexiconDirty = true;
 	private nextTermId = 0;
 	private _docCount = 0;
 	private avgDocLen = 0;
@@ -56,8 +52,8 @@ export class BM25Engine {
 	clear(): void {
 		this.termDict.clear();
 		this.postings.clear();
-		this.normalizedTerms.clear();
-		this.sortedNormalizedTerms = [];
+		this.sortedNormalizedTerms = null;
+		this.expansionLexiconDirty = true;
 		this.docLengths.clear();
 		this.nextTermId = 0;
 		this._docCount = 0;
@@ -66,59 +62,40 @@ export class BM25Engine {
 	}
 
 	addDocument(docId: number, text: string): void {
-		const terms = this.tokenizer.tokenizeSequence(text, 'index');
-		const dl = terms.length;
-
 		if (this.docLengths.has(docId)) {
 			this.removeDocument(docId);
 		}
+
+		const terms = this.tokenizer
+			.tokenizeSequence(text, 'index')
+			.map((term) => this.normalizeIndexedTerm(term))
+			.filter((term) => term.length > 0);
+		const dl = terms.length;
 
 		this.docLengths.set(docId, dl);
 		this.totalDocLen += dl;
 		this._docCount++;
 		this.avgDocLen = this.totalDocLen / this._docCount;
 
-		const tfMap = new Map<string, { tf: number; positions: number[] }>();
-		for (let pos = 0; pos < terms.length; pos++) {
-			const term = terms[pos];
-			const bucketPos = Math.floor(pos / BM25_POSITION_BUCKET_SIZE);
-			const entry = tfMap.get(term);
-			if (entry) {
-				entry.tf++;
-				if (
-					entry.positions.length < BM25_MAX_POSITIONS_PER_TERM &&
-					entry.positions[entry.positions.length - 1] !== bucketPos
-				) {
-					entry.positions.push(bucketPos);
-				}
-			} else {
-				tfMap.set(term, { tf: 1, positions: [bucketPos] });
-			}
+		const tfMap = new Map<string, number>();
+		for (const term of terms) {
+			tfMap.set(term, (tfMap.get(term) ?? 0) + 1);
 		}
 
-		for (const [term, { tf, positions }] of tfMap) {
+		for (const [term, tf] of tfMap) {
 			let termEntry = this.termDict.get(term);
 			if (!termEntry) {
 				termEntry = { termId: this.nextTermId++, df: 0 };
 				this.termDict.set(term, termEntry);
-				this.insertNormalizedLexicon(term);
+				this.expansionLexiconDirty = true;
 			}
 			termEntry.df++;
 
 			const tfNorm = this.computeTfNorm(tf, dl);
-			const posting: BM25PostingEntry = {
-				docId,
-				tfNorm,
-				positions: encodeDelta(positions),
-			};
-
-			let list = this.postings.get(termEntry.termId);
-			if (!list) {
-				list = { entries: [] };
-				this.postings.set(termEntry.termId, list);
-			}
-			const idx = lowerBound(list.entries, docId);
-			list.entries.splice(idx, 0, posting);
+			this.postings.set(
+				termEntry.termId,
+				insertPosting(this.postings.get(termEntry.termId), docId, tfNorm),
+			);
 		}
 	}
 
@@ -131,37 +108,40 @@ export class BM25Engine {
 		this._docCount--;
 		this.avgDocLen = this._docCount > 0 ? this.totalDocLen / this._docCount : 0;
 
-		for (const [, list] of this.postings) {
-			const idx = list.entries.findIndex((entry) => entry.docId === docId);
-			if (idx !== -1) {
-				list.entries.splice(idx, 1);
-			}
-		}
-
-		for (const [term, termEntry] of this.termDict) {
-			const list = this.postings.get(termEntry.termId);
-			if (!list || list.entries.length === 0) {
+		for (const [term, termEntry] of Array.from(this.termDict.entries())) {
+			const currentList = this.postings.get(termEntry.termId);
+			if (!currentList) {
 				this.termDict.delete(term);
-				this.postings.delete(termEntry.termId);
-				this.removeNormalizedLexicon(term);
-			} else {
-				termEntry.df = list.entries.length;
+				this.expansionLexiconDirty = true;
+				continue;
 			}
+
+			const nextList = removePosting(currentList, docId);
+			if (!nextList || nextList.docIds.length === 0) {
+				this.postings.delete(termEntry.termId);
+				this.termDict.delete(term);
+				this.expansionLexiconDirty = true;
+				continue;
+			}
+
+			this.postings.set(termEntry.termId, nextList);
+			termEntry.df = nextList.docIds.length;
 		}
 	}
 
 	search(query: string, topK = 20, options: BM25SearchOptions = {}): BM25SearchResult[] {
-		const rawTerms = this.tokenizer.tokenize(query, 'search');
+		const rawTerms = this.tokenizer
+			.tokenize(query, 'search')
+			.map((term) => this.normalizeQueryTerm(term))
+			.filter((term) => term.length > 0);
 		if (rawTerms.length === 0 || this._docCount === 0) return [];
-		const orderedTerms = uniqueTermsInOrder(rawTerms.map((term) => this.normalizeQueryTerm(term)));
-		const useProximity = options.useProximity ?? true;
+
 		const enableQueryExpansion = options.enableQueryExpansion ?? false;
 		const resolvedTerms = rawTerms.map((term) =>
 			this.resolveQueryTerms(term, enableQueryExpansion),
 		);
 
 		const scores = new Map<number, number>();
-		const docPositions = new Map<number, Map<string, number[]>>();
 		const N = this._docCount;
 
 		for (const queryTerm of resolvedTerms) {
@@ -173,44 +153,13 @@ export class BM25Engine {
 				if (!list) continue;
 
 				const idf = Math.log((N - termEntry.df + 0.5) / (termEntry.df + 0.5) + 1);
-				for (const entry of list.entries) {
+				for (let index = 0; index < list.docIds.length; index++) {
+					const docId = list.docIds[index];
+					const tfNorm = list.tfNorms[index];
 					scores.set(
-						entry.docId,
-						(scores.get(entry.docId) ?? 0) + entry.tfNorm * idf * matchedTerm.boost,
+						docId,
+						(scores.get(docId) ?? 0) + tfNorm * idf * matchedTerm.boost,
 					);
-					if (
-						useProximity &&
-						matchedTerm.kind === 'exact' &&
-						orderedTerms.length > 1 &&
-						entry.positions.length > 0
-					) {
-						let termPos = docPositions.get(entry.docId);
-						if (!termPos) {
-							termPos = new Map();
-							docPositions.set(entry.docId, termPos);
-						}
-						mergePositions(
-							termPos,
-							queryTerm.normalizedTerm,
-							decodeDelta(entry.positions),
-						);
-					}
-				}
-			}
-		}
-
-		if (useProximity && orderedTerms.length > 1) {
-			for (const [docId, termPos] of docPositions) {
-				if (termPos.size < 2) continue;
-				const baseScore = scores.get(docId) ?? 0;
-				if (baseScore <= 0) continue;
-				const proximityBonus = computeProximityBonus(
-					termPos,
-					orderedTerms,
-					baseScore,
-				);
-				if (proximityBonus > 0) {
-					scores.set(docId, baseScore + proximityBonus);
 				}
 			}
 		}
@@ -229,7 +178,12 @@ export class BM25Engine {
 
 		const postingsObj: BM25Index['postings'] = {};
 		for (const [termId, list] of this.postings) {
-			postingsObj[termId] = list;
+			postingsObj[termId] = {
+				entries: Array.from(list.docIds, (docId, index) => ({
+					docId,
+					tfNorm: list.tfNorms[index],
+				})),
+			};
 		}
 
 		const docLengthsObj: BM25Index['docLengths'] = {};
@@ -249,27 +203,64 @@ export class BM25Engine {
 	deserialize(data: BM25Index): void {
 		this.clear();
 
-		for (const [term, entry] of Object.entries(data.termDict)) {
-			this.termDict.set(term, { termId: entry.termId, df: entry.df });
-			this.insertNormalizedLexicon(term);
-		}
-		for (const [termIdStr, list] of Object.entries(data.postings)) {
-			this.postings.set(Number(termIdStr), list as PostingList);
-		}
 		for (const [idStr, len] of Object.entries(data.docLengths)) {
 			this.docLengths.set(Number(idStr), len as number);
 		}
 
 		this._docCount = data.docCount;
 		this.avgDocLen = data.avgDocLen;
-		this.totalDocLen = data.avgDocLen * data.docCount;
-		this.nextTermId = Math.max(0, ...Array.from(this.termDict.values()).map((entry) => entry.termId)) + 1;
+		this.totalDocLen = Array.from(this.docLengths.values()).reduce((sum, len) => sum + len, 0);
+		if (this.totalDocLen === 0 && data.docCount > 0) {
+			this.totalDocLen = data.avgDocLen * data.docCount;
+		}
+
+		const mergedEntriesByTerm = new Map<string, Map<number, number>>();
+		for (const [term, entry] of Object.entries(data.termDict)) {
+			const normalizedTerm = this.normalizeIndexedTerm(term);
+			if (normalizedTerm.length === 0) {
+				continue;
+			}
+
+			const postingEntries = data.postings[entry.termId]?.entries ?? [];
+			let docScores = mergedEntriesByTerm.get(normalizedTerm);
+			if (!docScores) {
+				docScores = new Map<number, number>();
+				mergedEntriesByTerm.set(normalizedTerm, docScores);
+			}
+
+			for (const posting of postingEntries) {
+				docScores.set(
+					posting.docId,
+					Math.min(
+						BM25_MAX_TF_NORM,
+						(docScores.get(posting.docId) ?? 0) + posting.tfNorm,
+					),
+				);
+			}
+		}
+
+		const mergedTerms = Array.from(mergedEntriesByTerm.keys())
+			.sort((left, right) => left.localeCompare(right));
+		for (const term of mergedTerms) {
+			const docScores = mergedEntriesByTerm.get(term);
+			if (!docScores || docScores.size === 0) {
+				continue;
+			}
+
+			const entries = Array.from(docScores.entries())
+				.sort((left, right) => left[0] - right[0]);
+			const termId = this.nextTermId++;
+			this.termDict.set(term, { termId, df: entries.length });
+			this.postings.set(termId, {
+				docIds: Uint32Array.from(entries.map(([docId]) => docId)),
+				tfNorms: Float32Array.from(entries.map(([, tfNorm]) => tfNorm)),
+			});
+		}
+
+		this.expansionLexiconDirty = true;
 	}
 
 	optimizeStorage(): boolean {
-		// Position pruning is intentionally disabled for now.
-		// The previous high-DF heuristic did not show measurable blob savings
-		// on real vaults, but it could still weaken proximity signals.
 		return false;
 	}
 
@@ -283,24 +274,23 @@ export class BM25Engine {
 			if (!postingList) {
 				continue;
 			}
-			for (const posting of postingList.entries) {
-				total += 16;
-				total += posting.positions.length * 8;
+			total += postingList.docIds.byteLength;
+			total += postingList.tfNorms.byteLength;
+			total += 24;
+		}
+
+		for (const [docId] of this.docLengths) {
+			total += 8;
+			total += 8;
+			void docId;
+		}
+
+		if (this.sortedNormalizedTerms !== null) {
+			for (const normalizedTerm of this.sortedNormalizedTerms) {
+				total += textEncoder.encode(normalizedTerm).length;
 			}
 		}
 
-		for (const [normalizedTerm, variants] of this.normalizedTerms) {
-			total += textEncoder.encode(normalizedTerm).length + 8;
-			for (const variant of variants) {
-				total += textEncoder.encode(variant).length;
-			}
-		}
-
-		for (const normalizedTerm of this.sortedNormalizedTerms) {
-			total += textEncoder.encode(normalizedTerm).length;
-		}
-
-		total += this.docLengths.size * 16;
 		return total;
 	}
 
@@ -314,15 +304,14 @@ export class BM25Engine {
 		enableQueryExpansion: boolean,
 	): BM25ResolvedQueryTerm {
 		const normalizedTerm = this.normalizeQueryTerm(queryTerm);
-		const exactTerms = this.normalizedTerms.get(normalizedTerm) ?? [];
-		if (exactTerms.length > 0) {
+		if (this.termDict.has(normalizedTerm)) {
 			return {
 				normalizedTerm,
-				matchedTerms: exactTerms.map((term) => ({
-					term,
+				matchedTerms: [{
+					term: normalizedTerm,
 					boost: 1,
-					kind: 'exact' as const,
-				})),
+					kind: 'exact',
+				}],
 			};
 		}
 
@@ -334,25 +323,21 @@ export class BM25Engine {
 		if (prefixMatches.length > 0) {
 			return {
 				normalizedTerm,
-				matchedTerms: prefixMatches.flatMap((matchedNormalizedTerm) =>
-					(this.normalizedTerms.get(matchedNormalizedTerm) ?? []).map((term) => ({
-						term,
-						boost: computePrefixBoost(normalizedTerm, matchedNormalizedTerm),
-						kind: 'prefix' as const,
-					})),
-				),
+				matchedTerms: prefixMatches.map((term) => ({
+					term,
+					boost: computePrefixBoost(normalizedTerm, term),
+					kind: 'prefix',
+				})),
 			};
 		}
 
 		return {
 			normalizedTerm,
-			matchedTerms: this.expandFuzzyTerms(normalizedTerm).flatMap(({ term, distance }) =>
-				(this.normalizedTerms.get(term) ?? []).map((actualTerm) => ({
-					term: actualTerm,
-					boost: computeFuzzyBoost(distance),
-					kind: 'fuzzy' as const,
-				})),
-			),
+			matchedTerms: this.expandFuzzyTerms(normalizedTerm).map(({ term, distance }) => ({
+				term,
+				boost: computeFuzzyBoost(distance),
+				kind: 'fuzzy',
+			})),
 		};
 	}
 
@@ -364,10 +349,11 @@ export class BM25Engine {
 	}
 
 	private expandPrefixTerms(prefix: string): string[] {
+		const sortedNormalizedTerms = this.getSortedNormalizedTerms();
 		const matches: string[] = [];
-		let index = lowerBoundString(this.sortedNormalizedTerms, prefix);
-		while (index < this.sortedNormalizedTerms.length) {
-			const current = this.sortedNormalizedTerms[index];
+		let index = lowerBoundString(sortedNormalizedTerms, prefix);
+		while (index < sortedNormalizedTerms.length) {
+			const current = sortedNormalizedTerms[index];
 			if (!current.startsWith(prefix)) {
 				break;
 			}
@@ -387,7 +373,7 @@ export class BM25Engine {
 		}
 
 		const matches: Array<{ term: string; distance: number }> = [];
-		for (const term of this.sortedNormalizedTerms) {
+		for (const term of this.getSortedNormalizedTerms()) {
 			if (Math.abs(term.length - queryTerm.length) > maxDistance) {
 				continue;
 			}
@@ -420,117 +406,87 @@ export class BM25Engine {
 		return matches.slice(0, HYBRID_QUERY_FUZZY_EXPANSION_LIMIT);
 	}
 
-	private insertNormalizedLexicon(term: string): void {
-		const normalizedTerm = this.normalizeQueryTerm(term);
-		let terms = this.normalizedTerms.get(normalizedTerm);
-		if (!terms) {
-			terms = [];
-			this.normalizedTerms.set(normalizedTerm, terms);
-			const index = lowerBoundString(this.sortedNormalizedTerms, normalizedTerm);
-			if (this.sortedNormalizedTerms[index] !== normalizedTerm) {
-				this.sortedNormalizedTerms.splice(index, 0, normalizedTerm);
-			}
+	private getSortedNormalizedTerms(): string[] {
+		if (!this.expansionLexiconDirty && this.sortedNormalizedTerms !== null) {
+			return this.sortedNormalizedTerms;
 		}
-		if (!terms.includes(term)) {
-			terms.push(term);
-		}
+
+		this.sortedNormalizedTerms = Array.from(this.termDict.keys())
+			.sort((left, right) => left.localeCompare(right));
+		this.expansionLexiconDirty = false;
+		return this.sortedNormalizedTerms;
 	}
 
-	private removeNormalizedLexicon(term: string): void {
-		const normalizedTerm = this.normalizeQueryTerm(term);
-		const terms = this.normalizedTerms.get(normalizedTerm);
-		if (!terms) {
-			return;
-		}
-		const nextTerms = terms.filter((current) => current !== term);
-		if (nextTerms.length > 0) {
-			this.normalizedTerms.set(normalizedTerm, nextTerms);
-			return;
-		}
-		this.normalizedTerms.delete(normalizedTerm);
-		const index = lowerBoundString(this.sortedNormalizedTerms, normalizedTerm);
-		if (this.sortedNormalizedTerms[index] === normalizedTerm) {
-			this.sortedNormalizedTerms.splice(index, 1);
-		}
+	private normalizeIndexedTerm(term: string): string {
+		return term.toLocaleLowerCase();
 	}
 
 	private normalizeQueryTerm(term: string): string {
 		return term.toLocaleLowerCase();
 	}
-
 }
 
-function computeProximityBonus(
-	termPos: Map<string, number[]>,
-	terms: string[],
-	baseScore: number,
-): number {
-	const span = minSpan(termPos, terms);
-	if (span === Infinity) {
-		return 0;
+function insertPosting(
+	list: PackedPostingList | undefined,
+	docId: number,
+	tfNorm: number,
+): PackedPostingList {
+	if (!list) {
+		return {
+			docIds: Uint32Array.of(docId),
+			tfNorms: Float32Array.of(tfNorm),
+		};
 	}
 
-	const approxTokenSpan = span * BM25_POSITION_BUCKET_SIZE;
-	const spanSignal = 1 / (approxTokenSpan + 1);
-	const orderedSignal = computeOrderedPairSignal(termPos, terms);
-	const adjacentSignal = computeAdjacentPairSignal(termPos, terms);
-	const compactSignal =
-		approxTokenSpan <= Math.max(BM25_POSITION_BUCKET_SIZE, terms.length * BM25_POSITION_BUCKET_SIZE)
-			? 1
-			: 0;
-
-	const proximityRatio = Math.min(
-		BM25_PROXIMITY_MAX_SCORE_RATIO,
-		spanSignal * BM25_PROXIMITY_SPAN_WEIGHT +
-			orderedSignal * BM25_PROXIMITY_ORDER_WEIGHT +
-			adjacentSignal * BM25_PROXIMITY_ADJACENT_WEIGHT +
-			compactSignal * BM25_PROXIMITY_COMPACT_WEIGHT,
-	);
-
-	return baseScore * proximityRatio;
+	const index = lowerBoundUint32(list.docIds, docId);
+	const nextDocIds = new Uint32Array(list.docIds.length + 1);
+	const nextTfNorms = new Float32Array(list.tfNorms.length + 1);
+	nextDocIds.set(list.docIds.subarray(0, index), 0);
+	nextTfNorms.set(list.tfNorms.subarray(0, index), 0);
+	nextDocIds[index] = docId;
+	nextTfNorms[index] = tfNorm;
+	nextDocIds.set(list.docIds.subarray(index), index + 1);
+	nextTfNorms.set(list.tfNorms.subarray(index), index + 1);
+	return {
+		docIds: nextDocIds,
+		tfNorms: nextTfNorms,
+	};
 }
 
-function encodeDelta(positions: number[]): number[] {
-	const out: number[] = [];
-	let prev = 0;
-	for (const pos of positions) {
-		out.push(pos - prev);
-		prev = pos;
+function removePosting(
+	list: PackedPostingList,
+	docId: number,
+): PackedPostingList | null {
+	const index = lowerBoundUint32(list.docIds, docId);
+	if (index >= list.docIds.length || list.docIds[index] !== docId) {
+		return list;
 	}
-	return out;
-}
-
-function decodeDelta(deltas: number[]): number[] {
-	const out: number[] = [];
-	let acc = 0;
-	for (const delta of deltas) {
-		acc += delta;
-		out.push(acc);
+	if (list.docIds.length === 1) {
+		return null;
 	}
-	return out;
+
+	const nextDocIds = new Uint32Array(list.docIds.length - 1);
+	const nextTfNorms = new Float32Array(list.tfNorms.length - 1);
+	nextDocIds.set(list.docIds.subarray(0, index), 0);
+	nextTfNorms.set(list.tfNorms.subarray(0, index), 0);
+	nextDocIds.set(list.docIds.subarray(index + 1), index);
+	nextTfNorms.set(list.tfNorms.subarray(index + 1), index);
+	return {
+		docIds: nextDocIds,
+		tfNorms: nextTfNorms,
+	};
 }
 
-function mergePositions(
-	termPositions: Map<string, number[]>,
-	term: string,
-	positions: number[],
-): void {
-	const existing = termPositions.get(term);
-	if (!existing) {
-		termPositions.set(term, positions);
-		return;
-	}
-	const merged = Array.from(new Set([...existing, ...positions])).sort((left, right) => left - right);
-	termPositions.set(term, merged);
-}
-
-function lowerBound(entries: BM25PostingEntry[], target: number): number {
+function lowerBoundUint32(values: Uint32Array, target: number): number {
 	let lo = 0;
-	let hi = entries.length;
+	let hi = values.length;
 	while (lo < hi) {
 		const mid = (lo + hi) >> 1;
-		if (entries[mid].docId < target) lo = mid + 1;
-		else hi = mid;
+		if (values[mid] < target) {
+			lo = mid + 1;
+		} else {
+			hi = mid;
+		}
 	}
 	return lo;
 }
@@ -544,125 +500,6 @@ function lowerBoundString(values: string[], target: string): number {
 		else hi = mid;
 	}
 	return lo;
-}
-
-function minSpan(termPos: Map<string, number[]>, terms: string[]): number {
-	const events: Array<{ pos: number; termIdx: number }> = [];
-	const termList = terms.filter((term) => termPos.has(term));
-	for (let ti = 0; ti < termList.length; ti++) {
-		for (const pos of termPos.get(termList[ti])!) {
-			events.push({ pos, termIdx: ti });
-		}
-	}
-	events.sort((a, b) => a.pos - b.pos);
-
-	const needed = termList.length;
-	const counts = new Array<number>(needed).fill(0);
-	let have = 0;
-	let left = 0;
-	let minS = Infinity;
-
-	for (let right = 0; right < events.length; right++) {
-		const { termIdx } = events[right];
-		if (counts[termIdx] === 0) have++;
-		counts[termIdx]++;
-
-		while (have === needed) {
-			const span = events[right].pos - events[left].pos;
-			if (span < minS) minS = span;
-			const leftTermIdx = events[left].termIdx;
-			counts[leftTermIdx]--;
-			if (counts[leftTermIdx] === 0) have--;
-			left++;
-		}
-	}
-	return minS;
-}
-
-function computeOrderedPairSignal(
-	termPos: Map<string, number[]>,
-	terms: string[],
-): number {
-	if (terms.length < 2) {
-		return 0;
-	}
-
-	let matchedPairs = 0;
-	let totalScore = 0;
-	for (let i = 0; i < terms.length - 1; i++) {
-		const left = termPos.get(terms[i]);
-		const right = termPos.get(terms[i + 1]);
-		if (!left || !right) {
-			continue;
-		}
-		const gap = minOrderedGap(left, right);
-		if (gap === Infinity) {
-			continue;
-		}
-		matchedPairs++;
-		const approxTokenGap = gap * BM25_POSITION_BUCKET_SIZE;
-		totalScore += 1 / (approxTokenGap + 1);
-	}
-
-	if (matchedPairs === 0) {
-		return 0;
-	}
-	return totalScore / Math.max(1, terms.length - 1);
-}
-
-function computeAdjacentPairSignal(
-	termPos: Map<string, number[]>,
-	terms: string[],
-): number {
-	if (terms.length < 2) {
-		return 0;
-	}
-
-	let tightPairs = 0;
-	for (let i = 0; i < terms.length - 1; i++) {
-		const left = termPos.get(terms[i]);
-		const right = termPos.get(terms[i + 1]);
-		if (!left || !right) {
-			continue;
-		}
-		const gap = minOrderedGap(left, right);
-		if (gap <= 1) {
-			tightPairs++;
-		}
-	}
-
-	return tightPairs / Math.max(1, terms.length - 1);
-}
-
-function minOrderedGap(left: number[], right: number[]): number {
-	let minGap = Infinity;
-	let j = 0;
-	for (const leftPos of left) {
-		while (j < right.length && right[j] < leftPos) {
-			j++;
-		}
-		for (let k = j; k < right.length; k++) {
-			if (right[k] < leftPos) {
-				continue;
-			}
-			minGap = Math.min(minGap, right[k] - leftPos);
-			break;
-		}
-	}
-	return minGap;
-}
-
-function uniqueTermsInOrder(terms: string[]): string[] {
-	const out: string[] = [];
-	const seen = new Set<string>();
-	for (const term of terms) {
-		if (seen.has(term)) {
-			continue;
-		}
-		seen.add(term);
-		out.push(term);
-	}
-	return out;
 }
 
 function computeMaxFuzzyDistance(queryTerm: string): number {

@@ -44,7 +44,7 @@ export type BlobRecord = {
 };
 
 export type Bm25BlobBreakdown = {
-	version: 2 | 3 | 4;
+	version: 2 | 3 | 4 | 5;
 	totalBytes: number;
 	headerBytes: number;
 	termTextBytes: number;
@@ -204,7 +204,7 @@ export function bm25ToBlob(index: BM25Index): Blob {
 	const docLengthEntries = Object.entries(index.docLengths)
 		.sort((a, b) => Number(a[0]) - Number(b[0]));
 
-	chunks.push(BM25_BINARY_MAGIC_V4);
+	chunks.push(BM25_BINARY_MAGIC_V5);
 	chunks.push(writeVarUint(index.docCount));
 	chunks.push(writeFloat32(index.avgDocLen));
 
@@ -224,10 +224,6 @@ export function bm25ToBlob(index: BM25Index): Blob {
 			chunks.push(writeVarUint(posting.docId - prevDocId));
 			prevDocId = posting.docId;
 			chunks.push(writeUint8(quantizeTfNormByte(posting.tfNorm)));
-			chunks.push(writeVarUint(posting.positions.length));
-			for (const delta of posting.positions) {
-				chunks.push(writeVarUint(delta));
-			}
 		}
 		prevTerm = term;
 	}
@@ -251,6 +247,9 @@ export async function blobToBm25(blob: Blob): Promise<BM25Index> {
 	}
 
 	const reader = new BinaryReader(buf);
+	if (version === 5) {
+		return readBm25V5(reader);
+	}
 	if (version === 4) {
 		return readBm25V4(reader);
 	}
@@ -267,15 +266,61 @@ export async function analyzeBm25Blob(blob: Blob): Promise<Bm25BlobBreakdown> {
 		throw new Error('Unsupported BM25 blob format');
 	}
 
-	return version === 4
+	return version === 5
+		? analyzeBm25BlobV5(new BinaryReader(buf), blob.size)
+		: version === 4
 		? analyzeBm25BlobV4(new BinaryReader(buf), blob.size)
 		: version === 3
 		? analyzeBm25BlobV3(new BinaryReader(buf), blob.size)
 		: analyzeBm25BlobV2(new BinaryReader(buf), blob.size);
 }
 
-export async function getBm25BlobVersion(blob: Blob): Promise<2 | 3 | 4 | null> {
+export async function getBm25BlobVersion(blob: Blob): Promise<2 | 3 | 4 | 5 | null> {
 	return getBm25BinaryVersion(await readBlobAsArrayBuffer(blob));
+}
+
+function readBm25V5(reader: BinaryReader): BM25Index {
+	reader.skip(BM25_BINARY_MAGIC_V5.length);
+
+	const docCount = reader.readVarUint();
+	const avgDocLen = reader.readFloat32();
+
+	const termCount = reader.readVarUint();
+	const termDict: BM25Index['termDict'] = {};
+	const postings: BM25Index['postings'] = {};
+	let prevTerm = '';
+	for (let termId = 0; termId < termCount; termId++) {
+		const df = reader.readVarUint();
+		const prefixLength = reader.readVarUint();
+		const suffix = reader.readString(reader.readVarUint());
+		const term = decodeFrontCodedTerm(prevTerm, prefixLength, suffix);
+		prevTerm = term;
+		termDict[term] = { termId, df };
+
+		const entries = [];
+		let docId = 0;
+		for (let j = 0; j < df; j++) {
+			docId += reader.readVarUint();
+			const tfNorm = dequantizeTfNormByte(reader.readUint8());
+			entries.push({ docId, tfNorm });
+		}
+		postings[termId] = { entries };
+	}
+
+	const docLengths: BM25Index['docLengths'] = {};
+	let docId = 0;
+	for (let i = 0; i < docCount; i++) {
+		docId += reader.readVarUint();
+		docLengths[docId] = reader.readVarUint();
+	}
+
+	return {
+		termDict,
+		postings,
+		docCount,
+		avgDocLen,
+		docLengths,
+	};
 }
 
 function readBm25V4(reader: BinaryReader): BM25Index {
@@ -538,6 +583,78 @@ function analyzeBm25BlobV3(reader: BinaryReader, totalBytes: number): Bm25BlobBr
 		topPositionHeavyTerms: positionHeavyTerms
 			.sort((a, b) => b.positionBytes - a.positionBytes)
 			.slice(0, 10),
+	};
+}
+
+function analyzeBm25BlobV5(reader: BinaryReader, totalBytes: number): Bm25BlobBreakdown {
+	reader.skip(BM25_BINARY_MAGIC_V5.length);
+	const docCountStart = reader.position;
+	const docCount = reader.readVarUint();
+	reader.readFloat32();
+
+	let headerBytes = reader.position - docCountStart + BM25_BINARY_MAGIC_V5.length;
+	let termTextBytes = 0;
+	let termMetaBytes = 0;
+	let postingHeaderBytes = 0;
+	let postingDocDeltaBytes = 0;
+	let postingTfNormBytes = 0;
+	let postingPositionCountBytes = 0;
+	let postingPositionDeltaBytes = 0;
+	let docLengthsBytes = 0;
+	let postingCount = 0;
+
+	const termCountStart = reader.position;
+	const termCount = reader.readVarUint();
+	headerBytes += reader.position - termCountStart;
+	let prevTerm = '';
+	for (let termId = 0; termId < termCount; termId++) {
+		const metaStart = reader.position;
+		const entryCount = reader.readVarUint();
+		const prefixLength = reader.readVarUint();
+		const termByteLength = reader.readVarUint();
+		termMetaBytes += reader.position - metaStart;
+		termTextBytes += termByteLength;
+		const suffix = reader.readString(termByteLength);
+		prevTerm = decodeFrontCodedTerm(prevTerm, prefixLength, suffix);
+		void termId;
+
+		for (let j = 0; j < entryCount; j++) {
+			postingCount++;
+
+			const docDeltaStart = reader.position;
+			reader.readVarUint();
+			postingDocDeltaBytes += reader.position - docDeltaStart;
+
+			reader.readUint8();
+			postingTfNormBytes += 1;
+		}
+	}
+
+	for (let i = 0; i < docCount; i++) {
+		const entryStart = reader.position;
+		reader.readVarUint();
+		reader.readVarUint();
+		docLengthsBytes += reader.position - entryStart;
+	}
+
+	return {
+		version: 5,
+		totalBytes,
+		headerBytes,
+		termTextBytes,
+		termMetaBytes,
+		postingHeaderBytes,
+		postingDocDeltaBytes,
+		postingTfNormBytes,
+		postingPositionCountBytes,
+		postingPositionDeltaBytes,
+		docLengthsBytes,
+		termCount,
+		postingCount,
+		postingsWithPositions: 0,
+		termsWithPositions: 0,
+		positionValueCount: 0,
+		topPositionHeavyTerms: [],
 	};
 }
 
@@ -989,6 +1106,7 @@ function parseVectorPrecision(value: string): VectorPrecision {
 const BM25_BINARY_MAGIC_V2 = Uint8Array.from([0x43, 0x53, 0x42, 0x32]);
 const BM25_BINARY_MAGIC_V3 = Uint8Array.from([0x43, 0x53, 0x42, 0x33]);
 const BM25_BINARY_MAGIC_V4 = Uint8Array.from([0x43, 0x53, 0x42, 0x34]);
+const BM25_BINARY_MAGIC_V5 = Uint8Array.from([0x43, 0x53, 0x42, 0x35]);
 const BM25_TF_NORM_SCALE = 4096;
 const BM25_TF_NORM_MAX = BM25_K1 + 1;
 const textEncoder = new TextEncoder();
@@ -1051,7 +1169,10 @@ function dequantizeTfNormByte(value: number): number {
 	return (value / 255) * BM25_TF_NORM_MAX;
 }
 
-function getBm25BinaryVersion(buf: ArrayBuffer): 2 | 3 | 4 | null {
+function getBm25BinaryVersion(buf: ArrayBuffer): 2 | 3 | 4 | 5 | null {
+	if (hasMagic(buf, BM25_BINARY_MAGIC_V5)) {
+		return 5;
+	}
 	if (hasMagic(buf, BM25_BINARY_MAGIC_V4)) {
 		return 4;
 	}

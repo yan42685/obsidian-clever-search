@@ -50,6 +50,19 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results[0]?.docId).toBe(1);
 	});
 
+	test("exact search does not depend on building the expansion lexicon first", () => {
+		const bm25 = new BM25Engine();
+		bm25.addDocument(1, "markdown export flow");
+		bm25.addDocument(2, "kanban lane cards");
+
+		const results = bm25.search("MARKDOWN", 5, {
+			useProximity: false,
+			enableQueryExpansion: false,
+		});
+
+		expect(results[0]?.docId).toBe(1);
+	});
+
 	test("expands prefix queries for longer hybrid entity terms", () => {
 		const bm25 = new BM25Engine();
 		bm25.addDocument(1, "calendar event schedule");

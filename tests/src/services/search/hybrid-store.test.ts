@@ -11,13 +11,13 @@ describe("hybrid BM25 storage", () => {
 			postings: {
 				1: {
 					entries: [
-						{ docId: 10, tfNorm: 1.25, positions: [0, 2, 4] },
-						{ docId: 20, tfNorm: 0.75, positions: [1] },
+						{ docId: 10, tfNorm: 1.25 },
+						{ docId: 20, tfNorm: 0.75 },
 					],
 				},
 				3: {
 					entries: [
-						{ docId: 10, tfNorm: 0.5, positions: [3, 2] },
+						{ docId: 10, tfNorm: 0.5 },
 					],
 				},
 			},
@@ -43,16 +43,16 @@ describe("hybrid BM25 storage", () => {
 		const alphaEntries = restored.postings[restored.termDict.alpha.termId].entries;
 		expect(alphaEntries).toHaveLength(2);
 		expect(alphaEntries[0].docId).toBe(10);
-		expect(alphaEntries[0].positions).toEqual([0, 2, 4]);
+		expect(alphaEntries[0].positions).toBeUndefined();
 		expect(alphaEntries[0].tfNorm).toBeCloseTo(1.25, 2);
 		expect(alphaEntries[1].docId).toBe(20);
-		expect(alphaEntries[1].positions).toEqual([1]);
+		expect(alphaEntries[1].positions).toBeUndefined();
 		expect(alphaEntries[1].tfNorm).toBeCloseTo(0.75, 2);
 
 		const betaEntries = restored.postings[restored.termDict.beta.termId].entries;
 		expect(betaEntries).toHaveLength(1);
 		expect(betaEntries[0].docId).toBe(10);
-		expect(betaEntries[0].positions).toEqual([3, 2]);
+		expect(betaEntries[0].positions).toBeUndefined();
 		expect(betaEntries[0].tfNorm).toBeCloseTo(0.5, 2);
 	});
 

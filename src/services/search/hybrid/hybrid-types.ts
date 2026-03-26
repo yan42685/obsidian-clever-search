@@ -56,7 +56,7 @@ export type ChunkVectorShard = {
 export type BM25PostingEntry = {
 	docId: number;
 	tfNorm: number;
-	positions: number[];
+	positions?: number[];
 };
 
 export type PostingList = {
