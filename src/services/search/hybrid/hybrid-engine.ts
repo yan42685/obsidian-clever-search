@@ -113,6 +113,13 @@ type PlannedChunk = {
 	reusedVector?: StoredVector;
 };
 
+export type HybridRuntimeMemoryEstimate = {
+	vectorsBytes: number;
+	graphBytes: number;
+	bm25Bytes: number;
+	totalBytes: number;
+};
+
 export class HybridEngine {
 	private readonly db = getInstance(Database);
 	private readonly setting = getInstance(OuterSetting);
@@ -178,6 +185,17 @@ export class HybridEngine {
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
 	isEmpty(): boolean { return this.bm25.docCount === 0; }
+
+	getRuntimeMemoryEstimate(): HybridRuntimeMemoryEstimate {
+		const hnswEstimate = this.hnswSmall.estimateRuntimeMemoryBytes();
+		const bm25Bytes = this.bm25.estimateRuntimeMemoryBytes();
+		return {
+			vectorsBytes: hnswEstimate.vectorBytes,
+			graphBytes: hnswEstimate.graphBytes,
+			bm25Bytes,
+			totalBytes: hnswEstimate.totalBytes + bm25Bytes,
+		};
+	}
 
 	consumeIndexingFallbackNoticeKey(): LocaleKey | null {
 		const key = this.lastIndexingFallbackNoticeKey;

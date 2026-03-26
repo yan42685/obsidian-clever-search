@@ -13,6 +13,11 @@ import type { ChunkVectorRecord } from './hybrid-store';
 const ML = 1 / Math.log(HNSW_M); // level multiplier
 
 type Candidate = { id: number; dist: number };
+type HnswRuntimeMemoryEstimate = {
+	vectorBytes: number;
+	graphBytes: number;
+	totalBytes: number;
+};
 
 function int8CosineSim(
 	a: Int8Array,
@@ -224,6 +229,36 @@ export class HnswIndex {
 
 	hasDeletedNodes(): boolean {
 		return this.graph.deletedSet.size > 0;
+	}
+
+	estimateRuntimeMemoryBytes(): HnswRuntimeMemoryEstimate {
+		let vectorBytes = 0;
+		if (this.graph.precision === 'int8') {
+			for (const vector of this.vectorsInt8.values()) {
+				vectorBytes += vector.byteLength;
+			}
+			vectorBytes += this.scalesInt8.size * 8;
+		} else {
+			for (const vector of this.vectorsFloat16.values()) {
+				vectorBytes += vector.byteLength;
+			}
+		}
+
+		let graphBytes = 24;
+		graphBytes += this.graph.deletedSet.size * 8;
+		for (const node of this.graph.nodes.values()) {
+			graphBytes += 16;
+			graphBytes += node.neighbors.length * 8;
+			for (const neighbors of node.neighbors) {
+				graphBytes += neighbors.length * 8;
+			}
+		}
+
+		return {
+			vectorBytes,
+			graphBytes,
+			totalBytes: vectorBytes + graphBytes,
+		};
 	}
 
 	hydrateVectors(

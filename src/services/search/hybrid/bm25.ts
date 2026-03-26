@@ -23,6 +23,8 @@ type BM25ResolvedQueryTerm = {
 	matchedTerms: BM25MatchedTerm[];
 };
 
+const textEncoder = new TextEncoder();
+
 const BM25_POSITION_BUCKET_SIZE = 4;
 const BM25_MAX_POSITIONS_PER_TERM = 8;
 const BM25_PROXIMITY_MAX_SCORE_RATIO = 0.22;
@@ -269,6 +271,37 @@ export class BM25Engine {
 		// The previous high-DF heuristic did not show measurable blob savings
 		// on real vaults, but it could still weaken proximity signals.
 		return false;
+	}
+
+	estimateRuntimeMemoryBytes(): number {
+		let total = 0;
+
+		for (const [term, entry] of this.termDict) {
+			total += textEncoder.encode(term).length + 16;
+			total += 16;
+			const postingList = this.postings.get(entry.termId);
+			if (!postingList) {
+				continue;
+			}
+			for (const posting of postingList.entries) {
+				total += 16;
+				total += posting.positions.length * 8;
+			}
+		}
+
+		for (const [normalizedTerm, variants] of this.normalizedTerms) {
+			total += textEncoder.encode(normalizedTerm).length + 8;
+			for (const variant of variants) {
+				total += textEncoder.encode(variant).length;
+			}
+		}
+
+		for (const normalizedTerm of this.sortedNormalizedTerms) {
+			total += textEncoder.encode(normalizedTerm).length;
+		}
+
+		total += this.docLengths.size * 16;
+		return total;
 	}
 
 	private computeTfNorm(tf: number, dl: number): number {
