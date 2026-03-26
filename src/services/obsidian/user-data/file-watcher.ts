@@ -3,6 +3,7 @@ import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataManager } from "./data-manager";
+import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import {
 	DocDeleteOperation,
 	DocMoveOperation,
@@ -12,6 +13,7 @@ import {
 @singleton()
 export class FileWatcher {
 	private readonly dataManager = getInstance(DataManager);
+	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private readonly app = getInstance(App);
 	private modifyTimers: Map<string, NodeJS.Timeout> = new Map();
 
@@ -36,6 +38,10 @@ export class FileWatcher {
 	// otherwise `this` will be changed when used as callbacks
 	private readonly onCreate = (file: TAbstractFile) => {
 		logger.debug(`created: ${file.path}`);
+		if (file instanceof TFile) {
+			void this.enqueuePrimedUpsert(file);
+			return;
+		}
 		this.dataManager.receiveDocOperation(new DocUpsertOperation(file.path));
 	};
 
@@ -46,9 +52,11 @@ export class FileWatcher {
 
 	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
 		logger.debug(`renamed: ${oldPath} => ${file.path}`);
-		this.dataManager.receiveDocOperation(
-			new DocMoveOperation(oldPath, file.path),
-		);
+		if (file instanceof TFile) {
+			void this.enqueuePrimedMove(oldPath, file);
+			return;
+		}
+		this.dataManager.receiveDocOperation(new DocMoveOperation(oldPath, file.path));
 	};
 
 	// Debounce modify events and always re-read the latest file state at flush time.
@@ -61,7 +69,7 @@ export class FileWatcher {
 		const timer = setTimeout(() => {
 			const currentFile = this.app.vault.getAbstractFileByPath(path);
 			if (currentFile instanceof TFile) {
-				this.dataManager.receiveDocOperation(new DocUpsertOperation(path));
+				void this.enqueuePrimedUpsert(currentFile);
 			}
 			this.modifyTimers.delete(path);
 		}, 800);
@@ -83,5 +91,29 @@ export class FileWatcher {
 			clearTimeout(timer);
 		}
 		this.modifyTimers.clear();
+	}
+
+	private async enqueuePrimedUpsert(file: TFile): Promise<void> {
+		const sourceGeneration = await this.primeCurrentFileText(file);
+		this.dataManager.receiveDocOperation(
+			new DocUpsertOperation(file.path, sourceGeneration),
+		);
+	}
+
+	private async enqueuePrimedMove(oldPath: string, file: TFile): Promise<void> {
+		const sourceGeneration = await this.primeCurrentFileText(file);
+		this.dataManager.receiveDocOperation(
+			new DocMoveOperation(oldPath, file.path, sourceGeneration),
+		);
+	}
+
+	private async primeCurrentFileText(file: TFile): Promise<number> {
+		try {
+			const text = await this.fileSnapshotStore.readCurrentFileText(file);
+			this.fileSnapshotStore.setCurrentFileText(file.path, text, file.stat.mtime);
+		} catch (error) {
+			logger.warn(`failed to prime current file text for ${file.path}:`, error);
+		}
+		return file.stat.mtime;
 	}
 }

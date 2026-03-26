@@ -75,6 +75,22 @@ describe("DocOperationBuffer", () => {
 		});
 	});
 
+	test("preserves the latest sourceGeneration on reduced dirty paths", () => {
+		const reduced = reduceDocOperations([
+			new DocUpsertOperation("note.md", 100),
+			new DocUpsertOperation("note.md", 140),
+			new DocMoveOperation("note.md", "renamed.md", 180),
+		]);
+
+		expect(reduced.dirtyPaths).toEqual([
+			expect.objectContaining({
+				path: "renamed.md",
+				renameFromPath: "note.md",
+				sourceGeneration: 180,
+			}),
+		]);
+	});
+
 	test("reduces chained renames to the final surviving path", async () => {
 		const batches: any[] = [];
 		const buffer = new DocOperationBuffer(async (operations) => {

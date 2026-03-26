@@ -43,21 +43,30 @@ export class FileSnapshotStore {
 			return "";
 		}
 		const cached = this.currentFileCache.get(file.path);
-		if (cached !== undefined) {
+		if (
+			cached !== undefined &&
+			(cached.generation === undefined ||
+				file.stat.mtime === undefined ||
+				cached.generation >= file.stat.mtime)
+		) {
 			return cached.text;
 		}
 		const plainText = await this.vault.cachedRead(file);
 		const normalized =
 			file.extension === "html" ? this.normalizeHtmlToText(plainText) : plainText;
-		this.currentFileCache.set(file.path, {
-			text: normalized,
-			generation: file.stat.mtime,
-		});
-		return normalized;
+		return this.setCurrentFileText(file.path, normalized, file.stat.mtime);
 	}
 
-	setCurrentFileText(path: string, text: string, generation?: number): void {
+	setCurrentFileText(path: string, text: string, generation?: number): string {
+		const existing = this.currentFileCache.get(path);
+		if (
+			existing &&
+			!this.shouldReplaceCurrentEntry(existing.generation, generation)
+		) {
+			return existing.text;
+		}
 		this.currentFileCache.set(path, { text, generation });
+		return text;
 	}
 
 	clearCurrentFiles(): void {
@@ -66,6 +75,10 @@ export class FileSnapshotStore {
 
 	peekCurrentFileText(path: string): string | undefined {
 		return this.currentFileCache.get(path)?.text;
+	}
+
+	peekCurrentFileGeneration(path: string): number | undefined {
+		return this.currentFileCache.get(path)?.generation;
 	}
 
 	invalidateCurrentFile(path: string): void {
@@ -78,10 +91,7 @@ export class FileSnapshotStore {
 			return;
 		}
 		this.currentFileCache.delete(oldPath);
-		this.currentFileCache.set(newPath, {
-			text: cached.text,
-			generation: generation ?? cached.generation,
-		});
+		this.setCurrentFileText(newPath, cached.text, generation ?? cached.generation);
 	}
 
 	async persistIndexedSnapshot(
@@ -277,6 +287,19 @@ export class FileSnapshotStore {
 			.replace(/\[([^[\]]+)\]\([^()]*\)/g, "$1")
 			.replace(/\*\*(.*?)\*\*/g, "$1")
 			.replace(/`(.*?)`/g, "$1");
+	}
+
+	private shouldReplaceCurrentEntry(
+		existingGeneration: number | undefined,
+		nextGeneration: number | undefined,
+	): boolean {
+		if (existingGeneration === undefined) {
+			return true;
+		}
+		if (nextGeneration === undefined) {
+			return false;
+		}
+		return nextGeneration >= existingGeneration;
 	}
 
 	private get database(): Database {

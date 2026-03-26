@@ -145,6 +145,7 @@ type HybridRepairTask = {
 	reason: string;
 	eligibleAt: number;
 	enqueuedAt: number;
+	sourceGeneration?: number;
 };
 
 type HybridRefreshOptions = {
@@ -365,12 +366,13 @@ export class DataManager {
 					op.renameFromPath,
 					op.path,
 					op.requiresReindex,
+					op.sourceGeneration,
 				);
 				consumedStalePaths.add(op.renameFromPath);
 				continue;
 			}
 
-			await this.handleUpsertOperation(op.path);
+			await this.handleUpsertOperation(op.path, op.sourceGeneration);
 		}
 
 		for (const op of operations.stalePaths) {
@@ -698,14 +700,17 @@ export class DataManager {
 		);
 	}
 
-	private async handleUpsertOperation(path: string): Promise<void> {
-		this.fileSnapshotStore.invalidateCurrentFile(path);
+	private async handleUpsertOperation(
+		path: string,
+		sourceGeneration?: number,
+	): Promise<void> {
 		const file = this.dataProvider.getFileByPath(path);
 		if (!file || !this.dataProvider.isIndexable(file)) {
 			await this.handleDeleteOperation(path);
 			return;
 		}
 
+		await this.primeCurrentFileText(file, sourceGeneration);
 		await this.addDocuments([file]);
 		await this.fileSnapshotStore.commitCurrentFileAsIndexed(
 			file.path,
@@ -719,6 +724,7 @@ export class DataManager {
 				path: file.path,
 				mode: "incremental",
 				reason: "runtime-incremental-edit",
+				sourceGeneration: file.stat.mtime,
 			});
 			return;
 		}
@@ -735,6 +741,7 @@ export class DataManager {
 		oldPath: string,
 		newPath: string,
 		requiresReindex: boolean,
+		sourceGeneration?: number,
 	): Promise<void> {
 		this.fileSnapshotStore.invalidateCurrentFile(oldPath);
 		this.fileSnapshotStore.invalidateCurrentFile(newPath);
@@ -757,6 +764,7 @@ export class DataManager {
 			return;
 		}
 
+		await this.primeCurrentFileText(file, sourceGeneration);
 		await this.addDocuments([file]);
 		await this.fileSnapshotStore.commitCurrentFileAsIndexed(
 			file.path,
@@ -804,9 +812,22 @@ export class DataManager {
 			reason: basenameChanged
 				? "runtime-basename-changed-full-rebuild"
 				: "runtime-incremental-edit",
+			sourceGeneration: file.stat.mtime,
 		});
 		await this.fileSnapshotStore.refreshHighPerformanceState(
 			this.dataProvider.allFilesToBeIndexed(),
+		);
+	}
+
+	private async primeCurrentFileText(
+		file: TFile,
+		sourceGeneration?: number,
+	): Promise<string> {
+		const text = await this.dataProvider.readPlainText(file);
+		return this.fileSnapshotStore.setCurrentFileText(
+			file.path,
+			text,
+			sourceGeneration ?? file.stat.mtime,
 		);
 	}
 
@@ -839,6 +860,12 @@ export class DataManager {
 					? Date.now()
 					: Math.min(existing.eligibleAt, nextTask.eligibleAt),
 			enqueuedAt: Math.min(existing.enqueuedAt, nextTask.enqueuedAt),
+			sourceGeneration:
+				existing.sourceGeneration === undefined
+					? nextTask.sourceGeneration
+					: nextTask.sourceGeneration === undefined
+						? existing.sourceGeneration
+						: Math.max(existing.sourceGeneration, nextTask.sourceGeneration),
 		});
 		this.scheduleHybridRepairFlush();
 	}
@@ -1428,6 +1455,22 @@ export class DataManager {
 			return null;
 		}
 
+		if (
+			task.sourceGeneration !== undefined &&
+			file.stat.mtime > task.sourceGeneration
+		) {
+			logger.debug(
+				`skip stale hybrid repair task for ${task.path}: taskGeneration=${task.sourceGeneration}, currentGeneration=${file.stat.mtime}`,
+			);
+			this.enqueueHybridRepair({
+				path: task.path,
+				mode: task.mode,
+				reason: "runtime-generation-advanced",
+				sourceGeneration: file.stat.mtime,
+			});
+			return null;
+		}
+
 		if (task.mode === "full") {
 			const failure = await this.indexHybridFileWithRetry(file, "full");
 			if (failure === null) {
@@ -1451,6 +1494,7 @@ export class DataManager {
 				mode: "incremental",
 				reason: "resume-deferred-embedding",
 				eligibleAt,
+				sourceGeneration: task.sourceGeneration ?? file.stat.mtime,
 			});
 			return null;
 		}
@@ -1468,6 +1512,7 @@ export class DataManager {
 	): Promise<HybridIndexFailure | null> {
 		const fileIndexStart = Date.now();
 		const text = await this.dataProvider.readPlainText(file.path);
+		this.fileSnapshotStore.setCurrentFileText(file.path, text, file.stat.mtime);
 		const headingOutline = this.dataProvider.getHeadingOutlineForText(file, text);
 		let attempts = 0;
 		let lastError: unknown = null;
@@ -1551,6 +1596,7 @@ export class DataManager {
 	): Promise<HybridIndexFailure | null> {
 		try {
 			const text = await this.dataProvider.readPlainText(file.path);
+			this.fileSnapshotStore.setCurrentFileText(file.path, text, file.stat.mtime);
 			const headingOutline = this.dataProvider.getHeadingOutlineForText(file, text);
 			await this.hybridEngine.indexFileWithoutEmbedding(
 				file.path,

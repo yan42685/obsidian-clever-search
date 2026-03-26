@@ -1306,7 +1306,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const content = document.content ?? "";
 		const fileSnapshotStore = this.getFileSnapshotStore();
 		if (fileSnapshotStore) {
-			fileSnapshotStore.setCurrentFileText(document.path, content);
+			if (fileSnapshotStore.peekCurrentFileText(document.path) === undefined) {
+				fileSnapshotStore.setCurrentFileText(document.path, content);
+			}
 		} else {
 			this.fallbackFileContentById.set(fileId, content);
 		}

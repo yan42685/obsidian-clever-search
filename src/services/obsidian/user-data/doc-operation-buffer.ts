@@ -5,16 +5,22 @@ export abstract class DocOperation {
 	readonly type: "upsert" | "delete" | "move";
 	readonly path: string;
 	readonly time: number = performance.now();
+	readonly sourceGeneration?: number;
 
-	protected constructor(type: "upsert" | "delete" | "move", path: string) {
+	protected constructor(
+		type: "upsert" | "delete" | "move",
+		path: string,
+		sourceGeneration?: number,
+	) {
 		this.type = type;
 		this.path = path;
+		this.sourceGeneration = sourceGeneration;
 	}
 }
 
 export class DocUpsertOperation extends DocOperation {
-	constructor(path: string) {
-		super("upsert", path);
+	constructor(path: string, sourceGeneration?: number) {
+		super("upsert", path, sourceGeneration);
 	}
 }
 
@@ -27,8 +33,8 @@ export class DocDeleteOperation extends DocOperation {
 export class DocMoveOperation extends DocOperation {
 	readonly oldPath: string;
 
-	constructor(oldPath: string, newPath: string) {
-		super("move", newPath);
+	constructor(oldPath: string, newPath: string, sourceGeneration?: number) {
+		super("move", newPath, sourceGeneration);
 		this.oldPath = oldPath;
 	}
 }
@@ -39,6 +45,7 @@ export type ReducedDirtyPath = {
 	order: number;
 	renameFromPath?: string;
 	requiresReindex: boolean;
+	sourceGeneration?: number;
 };
 
 export type ReducedStalePath = {
@@ -63,6 +70,7 @@ type PendingDirty = {
 	time: number;
 	order: number;
 	requiresReindex: boolean;
+	sourceGeneration?: number;
 };
 
 export function reduceDocOperations(
@@ -84,6 +92,7 @@ export function reduceDocOperations(
 				time: operation.time,
 				order: allocateOrder(),
 				requiresReindex: true,
+				sourceGeneration: operation.sourceGeneration,
 			});
 			continue;
 		}
@@ -113,6 +122,7 @@ export function reduceDocOperations(
 				time: operation.time,
 				order: allocateOrder(),
 				requiresReindex: false,
+				sourceGeneration: operation.sourceGeneration,
 			});
 		}
 	}
@@ -127,6 +137,7 @@ export function reduceDocOperations(
 				renameFromPath:
 					sourcePath && sourcePath !== path ? sourcePath : undefined,
 				requiresReindex: dirty.requiresReindex,
+				sourceGeneration: dirty.sourceGeneration,
 			};
 		})
 		.sort((left, right) => left.order - right.order);
