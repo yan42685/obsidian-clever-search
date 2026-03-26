@@ -13,7 +13,7 @@ import {
 	createChunkContextBuilderFromOutline,
 	createChunkEmbeddingInputBuilder,
 } from './chunker';
-import { BM25Engine } from './bm25';
+import { BM25Engine, type BM25RuntimeMemoryBreakdown } from './bm25';
 import {
 	Embedder,
 	estimateTextsTokenUsage,
@@ -117,6 +117,7 @@ export type HybridRuntimeMemoryEstimate = {
 	vectorsBytes: number;
 	graphBytes: number;
 	bm25Bytes: number;
+	bm25Breakdown: BM25RuntimeMemoryBreakdown;
 	totalBytes: number;
 };
 
@@ -188,11 +189,13 @@ export class HybridEngine {
 
 	getRuntimeMemoryEstimate(): HybridRuntimeMemoryEstimate {
 		const hnswEstimate = this.hnswSmall.estimateRuntimeMemoryBytes();
-		const bm25Bytes = this.bm25.estimateRuntimeMemoryBytes();
+		const bm25Breakdown = this.bm25.estimateRuntimeMemoryBreakdown();
+		const bm25Bytes = bm25Breakdown.totalBytes;
 		return {
 			vectorsBytes: hnswEstimate.vectorBytes,
 			graphBytes: hnswEstimate.graphBytes,
 			bm25Bytes,
+			bm25Breakdown,
 			totalBytes: hnswEstimate.totalBytes + bm25Bytes,
 		};
 	}
