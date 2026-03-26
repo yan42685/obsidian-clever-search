@@ -17,7 +17,6 @@ import type {
 import {
 	createFileSearchQueryPlanner,
 	type FileSearchQueryPlanner,
-	type FileSearchQueryKind,
 	type FileSearchQueryTermStats,
 } from "../file-search-query-planner";
 import { buildLineOffsets, offsetToLine } from "../hybrid/chunker";
@@ -296,6 +295,15 @@ type ScriptProfile = {
 	hasHan: boolean;
 };
 
+type PrefixCandidateVerifierSignals = {
+	score: number;
+	coverageRatio: number;
+	exactCoverageRatio: number;
+	shortCoverageRatio: number;
+	compactnessRatio: number;
+	orderRatio: number;
+};
+
 type QueryLocalePreference = {
 	locale: "en" | "zh" | null;
 	explicit: boolean;
@@ -342,6 +350,8 @@ const CHAR_CHANNEL_WEIGHT = 0.38;
 const CHAR_QUERY_BIGRAM_LIMIT = 16;
 const CHAR_PASSAGE_SEED_FILE_LIMIT = 24;
 const MAX_FILE_PASSAGE_EVIDENCES = 4;
+const PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT = 24;
+const PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH = 2;
 const FILE_SECOND_PASSAGE_DECAY = 0.34;
 const FILE_PASSAGE_SET_BEST_COVERAGE_BONUS = 1.12;
 const FILE_PASSAGE_SET_UNION_COVERAGE_BONUS = 0.42;
@@ -498,6 +508,14 @@ const EMPTY_LOCAL_WINDOW_SET: QueryConditionedLocalWindowSet = {
 	corroboratedCoverageRatio: 0,
 	anchorCoverageRatio: 0,
 	compactnessRatio: 0,
+};
+const EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS: PrefixCandidateVerifierSignals = {
+	score: 0,
+	coverageRatio: 0,
+	exactCoverageRatio: 0,
+	shortCoverageRatio: 0,
+	compactnessRatio: 0,
+	orderRatio: 0,
 };
 const EMPTY_VERIFIER_SIGNALS: VerifierSignals = {
 	score: 0,
@@ -725,6 +743,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 
 		const activeWordTerms = termStats.some((stat) => stat.hasAnyMatch);
+		const enablePrefixCandidateVerifierLane =
+			request.isPrefixMatch &&
+			this.shouldEnablePrefixCandidateVerifierLane(queryTerms, termStats);
 		const planner =
 			queryTerms.length > 0 && activeWordTerms
 				? createFileSearchQueryPlanner({
@@ -793,32 +814,37 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTermWeights,
 				queryTermDecomposition,
 				totalQueryWeight,
+				enablePrefixCandidateVerifierLane,
 				queryScriptProfile,
 				queryScoringCache,
 			);
 		}
 
-		return this.sortMatchedFiles(
-			Array.from(fileStates.values()).map((state) =>
-				this.createMatchedFile(
-					state,
-					queryTerms.length > 0 ? queryTerms : queryCharTerms,
-					0,
-					planner,
-					queryRoute,
-					queryTermWeights,
-					queryTermDecomposition,
-					totalQueryWeight,
-					queryScriptProfile,
-					queryScoringCache,
-				),
-			),
+		const rankedFiles = this.collectRankedFiles({
+			fileStates,
+			queryTerms: queryTerms.length > 0 ? queryTerms : queryCharTerms,
+			planner,
+			queryRoute,
+			queryTermWeights,
+			queryTermDecomposition,
+			totalQueryWeight,
+			queryScriptProfile,
+			queryScoringCache,
+			includeFallbackResults: true,
+		});
+		const fallbackSorted = this.sortMatchedFiles(
+			rankedFiles.fallbackResults,
 			planner,
 			queryRoute,
 			{
 				queryTerms,
 				queryScriptProfile,
 			},
+		);
+		return this.applyPrefixCandidateVerifierLane(
+			fallbackSorted,
+			enablePrefixCandidateVerifierLane,
+			queryTerms,
 		).slice(0, request.maxItemResults);
 	}
 
@@ -946,14 +972,138 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		queryTermWeights: QueryTermWeightMap,
 		queryTermDecomposition: QueryTermDecomposition,
 		totalQueryWeight: number,
+		enablePrefixCandidateVerifierLane: boolean,
 		queryScriptProfile: ScriptProfile,
 		queryScoringCache: QueryScoringCache,
 	): MatchedFile[] {
+		const { strictResults, relaxedResults } = this.collectRankedFiles({
+				fileStates,
+				queryTerms,
+				planner,
+			queryRoute,
+			queryTermWeights,
+			queryTermDecomposition,
+			totalQueryWeight,
+			queryScriptProfile,
+			queryScoringCache,
+			includeFallbackResults: false,
+		});
+
+		const strictSorted = this.applyPrefixCandidateVerifierLane(
+			this.sortMatchedFiles(
+			strictResults,
+			planner,
+			queryRoute,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
+			),
+			enablePrefixCandidateVerifierLane,
+			queryTerms,
+		);
+		if (
+			!planner.shouldUseRelaxedResults(
+				strictSorted.length,
+				request.maxItemResults,
+			)
+		) {
+			return strictSorted.slice(0, request.maxItemResults);
+		}
+
+		const relaxedSorted = this.applyPrefixCandidateVerifierLane(
+			this.sortMatchedFiles(
+			relaxedResults,
+			planner,
+			queryRoute,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
+			),
+			enablePrefixCandidateVerifierLane,
+			queryTerms,
+		);
+		if (relaxedSorted.length > 0) {
+			return relaxedSorted.slice(0, request.maxItemResults);
+		}
+
+		const fallbackSorted = this.applyPrefixCandidateVerifierLane(
+			this.sortMatchedFiles(
+			this.collectRankedFiles({
+				fileStates,
+				queryTerms,
+				planner,
+				queryRoute,
+				queryTermWeights,
+				queryTermDecomposition,
+				totalQueryWeight,
+				queryScriptProfile,
+				queryScoringCache,
+				includeFallbackResults: true,
+			}).fallbackResults,
+			planner,
+			queryRoute,
+			{
+				queryTerms,
+				queryScriptProfile,
+			},
+			),
+			enablePrefixCandidateVerifierLane,
+			queryTerms,
+		);
+		return fallbackSorted.slice(0, request.maxItemResults);
+	}
+
+	private collectRankedFiles(params: {
+		fileStates: Map<number, FileCandidateState>;
+		queryTerms: string[];
+		planner: FileSearchQueryPlanner | null;
+		queryRoute: ExperimentalQueryRoute;
+		queryTermWeights: QueryTermWeightMap;
+		queryTermDecomposition: QueryTermDecomposition;
+		totalQueryWeight: number;
+		queryScriptProfile: ScriptProfile;
+		queryScoringCache: QueryScoringCache;
+		includeFallbackResults: boolean;
+	}): {
+		strictResults: RankedMatchedFile[];
+		relaxedResults: RankedMatchedFile[];
+		fallbackResults: RankedMatchedFile[];
+	} {
+		const {
+			fileStates,
+			queryTerms,
+			planner,
+			queryRoute,
+			queryTermWeights,
+			queryTermDecomposition,
+			totalQueryWeight,
+			queryScriptProfile,
+			queryScoringCache,
+			includeFallbackResults,
+		} = params;
 		const strictResults: RankedMatchedFile[] = [];
 		const relaxedResults: RankedMatchedFile[] = [];
-
+		const fallbackResults: RankedMatchedFile[] = [];
 		for (const state of fileStates.values()) {
-			if (planner.matches(state, "strict")) {
+			if (includeFallbackResults) {
+				fallbackResults.push(
+					this.createMatchedFile(
+						state,
+						queryTerms,
+						0,
+						planner,
+						queryRoute,
+						queryTermWeights,
+						queryTermDecomposition,
+						totalQueryWeight,
+						queryScriptProfile,
+						queryScoringCache,
+					),
+				);
+			}
+			if (planner?.matches(state, "strict")) {
 				strictResults.push(
 					this.createMatchedFile(
 						state,
@@ -969,7 +1119,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					),
 				);
 			}
-			if (planner.matches(state, "relaxed")) {
+			if (planner?.matches(state, "relaxed")) {
 				relaxedResults.push(
 					this.createMatchedFile(
 						state,
@@ -986,60 +1136,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				);
 			}
 		}
-
-		const strictSorted = this.sortMatchedFiles(
+		return {
 			strictResults,
-			planner,
-			queryRoute,
-			{
-				queryTerms,
-				queryScriptProfile,
-			},
-		);
-		if (
-			!planner.shouldUseRelaxedResults(
-				strictSorted.length,
-				request.maxItemResults,
-			)
-		) {
-			return strictSorted.slice(0, request.maxItemResults);
-		}
-
-		const relaxedSorted = this.sortMatchedFiles(
 			relaxedResults,
-			planner,
-			queryRoute,
-			{
-				queryTerms,
-				queryScriptProfile,
-			},
-		);
-		if (relaxedSorted.length > 0) {
-			return relaxedSorted.slice(0, request.maxItemResults);
-		}
-
-		return this.sortMatchedFiles(
-			Array.from(fileStates.values()).map((state) =>
-				this.createMatchedFile(
-					state,
-					queryTerms,
-					0,
-					planner,
-					queryRoute,
-					queryTermWeights,
-					queryTermDecomposition,
-					totalQueryWeight,
-					queryScriptProfile,
-					queryScoringCache,
-				),
-			),
-			planner,
-			queryRoute,
-			{
-				queryTerms,
-				queryScriptProfile,
-			},
-		).slice(0, request.maxItemResults);
+			fallbackResults,
+		};
 	}
 
 	private clear() {
@@ -3054,6 +3155,232 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			decisiveBodyCoverageRatio,
 			supportBodyCoverageRatio,
 			decisiveBodyAnchorSynergyRatio,
+		};
+	}
+
+	private applyPrefixCandidateVerifierLane(
+		results: RankedMatchedFile[],
+		enablePrefixCandidateVerifierLane: boolean,
+		queryTerms: readonly string[],
+	): RankedMatchedFile[] {
+		if (!enablePrefixCandidateVerifierLane || queryTerms.length < 2 || results.length < 2) {
+			return results;
+		}
+		const normalizedQueryTerms = queryTerms
+			.map((term) => this.normalizeTerm(term))
+			.filter((term) => term.length >= PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH);
+		if (normalizedQueryTerms.length < 2) {
+			return results;
+		}
+		const candidateCount = Math.min(
+			results.length,
+			PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT,
+		);
+		const originalWindow = results.slice(0, candidateCount);
+		const originalOrder = new Map(
+			originalWindow.map((result, index) => [result.fileId, index]),
+		);
+		const signalsByFileId = new Map<number, PrefixCandidateVerifierSignals>();
+		let strongestCoverage = 0;
+		let strongestShortCoverage = 0;
+		for (const result of originalWindow) {
+			const signals = this.computePrefixCandidateVerifierSignals(
+				result,
+				normalizedQueryTerms,
+			);
+			signalsByFileId.set(result.fileId, signals);
+			strongestCoverage = Math.max(strongestCoverage, signals.coverageRatio);
+			strongestShortCoverage = Math.max(
+				strongestShortCoverage,
+				signals.shortCoverageRatio,
+			);
+		}
+		if (strongestCoverage < 0.74 && strongestShortCoverage < 0.34) {
+			return results;
+		}
+		const rerankedWindow = [...originalWindow].sort((left, right) => {
+			const laneDecision = this.comparePrefixCandidateVerifierSignals(
+				signalsByFileId.get(left.fileId) ??
+					EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS,
+				signalsByFileId.get(right.fileId) ??
+					EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS,
+			);
+			if (laneDecision !== 0) {
+				return laneDecision;
+			}
+			return (
+				(originalOrder.get(left.fileId) ?? 0) -
+				(originalOrder.get(right.fileId) ?? 0)
+			);
+		});
+		return [...rerankedWindow, ...results.slice(candidateCount)];
+	}
+
+	private shouldEnablePrefixCandidateVerifierLane(
+		queryTerms: readonly string[],
+		termStats: readonly FileSearchQueryTermStats[],
+	): boolean {
+		if (queryTerms.length < 2 || termStats.length === 0) {
+			return false;
+		}
+		let degradedFamilyWeight = 0;
+		let expandedOnlyFamilies = 0;
+		for (const stat of termStats) {
+			const queryTerm = queryTerms[stat.index] ?? "";
+			if (queryTerm.length < PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH) {
+				continue;
+			}
+			if (!stat.hasAnyMatch) {
+				degradedFamilyWeight +=
+					queryTerm.length <
+					innerSetting.search.minTermLengthForPrefixSearch
+						? 1.4
+						: 1;
+				continue;
+			}
+			if (!stat.hasExactMatch) {
+				degradedFamilyWeight += 1;
+				expandedOnlyFamilies += 1;
+			}
+		}
+		return degradedFamilyWeight >= 1.4 || expandedOnlyFamilies >= 2;
+	}
+
+	private comparePrefixCandidateVerifierSignals(
+		left: PrefixCandidateVerifierSignals,
+		right: PrefixCandidateVerifierSignals,
+	): number {
+		const readinessGate =
+			Math.max(left.coverageRatio, right.coverageRatio) >= 0.74 ||
+			Math.max(left.shortCoverageRatio, right.shortCoverageRatio) >= 0.34;
+		if (!readinessGate) {
+			return 0;
+		}
+		const decisionGap = right.score - left.score;
+		if (Math.abs(decisionGap) < 1.15) {
+			return 0;
+		}
+		return decisionGap;
+	}
+
+	private computePrefixCandidateVerifierSignals(
+		result: RankedMatchedFile,
+		queryTerms: readonly string[],
+	): PrefixCandidateVerifierSignals {
+		const directSubItems = result.directSubItems ?? [];
+		let bestSignals = EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
+		for (const subItem of directSubItems) {
+			const signals = this.computePrefixSnippetVerifierSignals(
+				subItem.text,
+				queryTerms,
+			);
+			if (
+				signals.score > bestSignals.score ||
+				(signals.score === bestSignals.score &&
+					signals.coverageRatio > bestSignals.coverageRatio)
+			) {
+				bestSignals = signals;
+			}
+		}
+		return bestSignals;
+	}
+
+	private computePrefixSnippetVerifierSignals(
+		text: string,
+		queryTerms: readonly string[],
+	): PrefixCandidateVerifierSignals {
+		const tokenSequence = this.tokenizer
+			.tokenizeSequence(text, "search")
+			.map((term) => this.normalizeTerm(term))
+			.filter((term) => term.length > 0);
+		if (tokenSequence.length === 0) {
+			return EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
+		}
+
+		const matches: Array<{
+			position: number;
+			quality: number;
+			exact: boolean;
+			short: boolean;
+		}> = [];
+		for (const queryTerm of queryTerms) {
+			let bestPosition = -1;
+			let bestQuality = 0;
+			let bestExact = false;
+			for (let position = 0; position < tokenSequence.length; position++) {
+				const token = tokenSequence[position];
+				if (token === queryTerm) {
+					bestPosition = position;
+					bestQuality = 1.28;
+					bestExact = true;
+					break;
+				}
+				if (!token.startsWith(queryTerm)) {
+					continue;
+				}
+				const suffixLength = Math.max(0, token.length - queryTerm.length);
+				const shortQueryPenalty = queryTerm.length <= 2 ? 0.08 : 0;
+				const quality = Math.max(
+					0.52,
+					0.98 -
+						Math.min(0.32, suffixLength * 0.055) -
+						shortQueryPenalty,
+				);
+				if (quality > bestQuality) {
+					bestPosition = position;
+					bestQuality = quality;
+				}
+			}
+			if (bestPosition >= 0) {
+				matches.push({
+					position: bestPosition,
+					quality: bestQuality,
+					exact: bestExact,
+					short: queryTerm.length <= 3,
+				});
+			}
+		}
+		if (matches.length === 0) {
+			return EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
+		}
+
+		let orderedPairs = 0;
+		for (let index = 1; index < matches.length; index++) {
+			if (matches[index].position >= matches[index - 1].position) {
+				orderedPairs += 1;
+			}
+		}
+		const matchedCount = matches.length;
+		const exactCount = matches.filter((match) => match.exact).length;
+		const shortEligibleCount = queryTerms.filter((term) => term.length <= 3).length;
+		const shortMatchedCount = matches.filter((match) => match.short).length;
+		const minPosition = Math.min(...matches.map((match) => match.position));
+		const maxPosition = Math.max(...matches.map((match) => match.position));
+		const span = Math.max(1, maxPosition - minPosition + 1);
+		const coverageRatio = matchedCount / queryTerms.length;
+		const exactCoverageRatio = exactCount / queryTerms.length;
+		const shortCoverageRatio =
+			shortEligibleCount > 0 ? shortMatchedCount / shortEligibleCount : 0;
+		const compactnessRatio = Math.min(1, matchedCount / span);
+		const orderRatio =
+			matchedCount > 1 ? orderedPairs / (matchedCount - 1) : coverageRatio;
+		const meanQuality =
+			matches.reduce((sum, match) => sum + match.quality, 0) / queryTerms.length;
+		const fullCoverageBonus = coverageRatio >= 0.999 ? 3.2 : 0;
+		return {
+			score:
+				coverageRatio * 12.5 +
+				exactCoverageRatio * 4.4 +
+				shortCoverageRatio * 3.2 +
+				compactnessRatio * 4.2 +
+				orderRatio * 2.1 +
+				meanQuality * 3.6 +
+				fullCoverageBonus,
+			coverageRatio,
+			exactCoverageRatio,
+			shortCoverageRatio,
+			compactnessRatio,
+			orderRatio,
 		};
 	}
 

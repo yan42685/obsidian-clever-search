@@ -912,6 +912,50 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("docs/exact-prefix-family.md");
 	});
 
+	test("uses a small prefix verifier lane to recover compact exact-family witnesses against benchmark competitors", async () => {
+		const engine = createEngine();
+		await engine.addDocuments([
+			loadBenchmarkDocument("tech-en/content/en/docs/concepts/configuration/secret.md"),
+			loadBenchmarkDocument("tech-zh/content/zh-cn/docs/concepts/configuration/secret.md"),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-zh/content/zh-cn/docs/concepts/storage/persistent-volumes.md",
+			),
+			loadBenchmarkDocument(
+				"tech-en/content/en/docs/concepts/configuration/configmap.md",
+			),
+			{
+				path: "adversarial/prefix-lab/en/exact-prefix-family.md",
+				basename: "Exact prefix family note",
+				folder: "adversarial/prefix-lab/en",
+				headings: "Compact witness",
+				content:
+					"config data rollout keeps exact family evidence in one compact passage",
+			},
+			{
+				path: "adversarial/prefix-lab/en/exact-prefix-noise.md",
+				basename: "Exact prefix noise note",
+				folder: "adversarial/prefix-lab/en",
+				headings: "Compact witness",
+				content:
+					"configmap dashboard rollout keeper repeats expanded family fragments without the exact config data rollout witness",
+			},
+		]);
+
+		for (const queryText of ["config da ro keep", "config data ro pas"]) {
+			const results = await engine.searchFiles({
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 10,
+			});
+
+			expect(results[0]?.path).toBe("adversarial/prefix-lab/en/exact-prefix-family.md");
+		}
+	});
+
 	test("does not expand multi-term prefix families when prefix search is disabled", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
