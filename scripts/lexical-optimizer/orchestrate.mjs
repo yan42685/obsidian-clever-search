@@ -235,6 +235,7 @@ function writeSummaryFiles(outputDir, summary) {
 		`- dryRun: ${summary.dryRun}`,
 		`- generateOnly: ${summary.generateOnly}`,
 		`- lanes: ${summary.lanes.join(", ")}`,
+		`- execution: ${summary.execution}`,
 		`- parallelWorkers: ${summary.parallelWorkers}`,
 		`- revalidateTopK: ${summary.revalidateTopK}`,
 		`- laneConcurrency: ${summary.laneConcurrency}`,
@@ -250,25 +251,6 @@ function writeSummaryFiles(outputDir, summary) {
 	lines.push("");
 	fs.writeFileSync(mdPath, `${lines.join("\n")}\n`, "utf8");
 	return { jsonPath, mdPath };
-}
-
-async function runWithConcurrency(items, concurrency, runner) {
-	const results = [];
-	let nextIndex = 0;
-	async function runNext() {
-		if (nextIndex >= items.length) {
-			return;
-		}
-		const item = items[nextIndex++];
-		results.push(await runner(item));
-		await runNext();
-	}
-	await Promise.all(
-		Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, () =>
-			runNext(),
-		),
-	);
-	return results;
 }
 
 async function main() {
@@ -309,31 +291,33 @@ async function main() {
 						},
 			);
 		} else {
-			laneRuns = await runWithConcurrency(
-				manifests.filter((manifest) => !NON_PARAMETER_LANES.has(manifest.lane)),
-				args.laneConcurrency,
-				async (manifest) => {
-					try {
-						return await spawnLaneRun({
+			laneRuns = [];
+			for (const manifest of manifests) {
+				if (NON_PARAMETER_LANES.has(manifest.lane)) {
+					continue;
+				}
+				try {
+					laneRuns.push(
+						await spawnLaneRun({
 							lane: manifest.lane,
 							parallelWorkers: args.parallelWorkers,
 							revalidateTopK: args.revalidateTopK,
 							dryRun: false,
 							autoCommit: false,
 							cleanupTempResources: args.cleanupTempResources,
-						});
-					} catch (error) {
-						return {
-							lane: manifest.lane,
-							code: -1,
-							decision: "blocked",
-							reason: error?.message ?? String(error),
-							stdout: "",
-							stderr: "",
-						};
-					}
-				},
-			);
+						}),
+					);
+				} catch (error) {
+					laneRuns.push({
+						lane: manifest.lane,
+						code: -1,
+						decision: "blocked",
+						reason: error?.message ?? String(error),
+						stdout: "",
+						stderr: "",
+					});
+				}
+			}
 			for (const manifest of manifests) {
 				if (!NON_PARAMETER_LANES.has(manifest.lane)) {
 					continue;
@@ -393,9 +377,10 @@ async function main() {
 		dryRun: args.dryRun,
 		generateOnly: args.generateOnly,
 		lanes: manifests.map((manifest) => manifest.lane),
-		parallelWorkers: args.parallelWorkers,
+		execution: "serial",
+		parallelWorkers: `${args.parallelWorkers} (compat-only)`,
 		revalidateTopK: args.revalidateTopK,
-		laneConcurrency: args.laneConcurrency,
+		laneConcurrency: `${args.laneConcurrency} (compat-only)`,
 		autoCommitWinner: args.autoCommitWinner,
 		cleanupTempResources: args.cleanupTempResources,
 		committedLane,

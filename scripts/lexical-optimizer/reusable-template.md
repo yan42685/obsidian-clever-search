@@ -53,7 +53,7 @@ Use this template when you want to port the current automation loop to another l
 1. `node scripts/lexical-optimizer/run.mjs --help`
 2. `node scripts/lexical-optimizer/candidate-generator.mjs --lane=mechanism-a`
 3. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
-4. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --parallel-workers=2 --revalidate-topk=3`
+4. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --revalidate-topk=3`
 5. `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`
 6. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --no-auto-commit`
 7. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
@@ -63,7 +63,7 @@ Use this template when you want to port the current automation loop to another l
 
 - default automated runs should evaluate without mutating baseline until a retained winner is known
 - after selection, automation may rerun the winning lane with automatic apply+commit enabled
-- default automated runs should clean temporary worktrees and scratch run directories unless debugging requires `--no-cleanup`
+- default automated runs should clean temporary scratch run directories unless debugging requires `--no-cleanup`
 
 ## Keep Rules
 
@@ -75,6 +75,5 @@ Use this template when you want to port the current automation loop to another l
 
 ## Evaluation Protocol
 
-- stage1 should do parallel coarse screening with isolated worktrees
-- stage2 should serially revalidate the top K winners
-- only stage2 results should drive final keep/rollback
+- candidate evaluation should run serially in the current workspace
+- final keep/rollback decisions should use those serial benchmark results directly

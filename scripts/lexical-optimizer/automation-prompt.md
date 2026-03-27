@@ -32,14 +32,13 @@ If this file conflicts with either of them, those files win.
 2. Decide whether it is parameter-level or mechanism-level.
 3. Keep one main hypothesis per cycle and one lane per cycle.
 4. Generate candidates instead of relying on a fixed built-in grid.
-5. Let stage1 do parallel coarse screening and stage2 do serial revalidation.
+5. Evaluate candidates serially in the current workspace.
 6. Multi-lane orchestration should evaluate lanes without mutating baseline first, then auto-commit only the final retained winner.
+7. Automation benchmark focus: compare `CoverageLexical` against `MiniSearch`, and keep one full run under `20s`.
 
 ## Workspace Setup
 
-- when running inside a worktree, prefer reusing the primary workspace assets instead of reinstalling or redownloading per worktree
-- if the main workspace already has `node_modules`, point the worktree `node_modules` at it with a junction/symlink rather than running a fresh install
-- if the main workspace already has `benchmarks/corpora/web-notes-v2`, point the worktree corpus directory at it with a junction/symlink rather than copying or downloading again
+- run candidate evaluation serially in the primary workspace
 - treat shared dependencies and shared benchmark corpora as execution infrastructure; do not count this reuse as part of the optimization diff
 
 ## Keep Rule

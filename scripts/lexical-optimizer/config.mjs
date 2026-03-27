@@ -69,7 +69,7 @@ export const DEFAULT_CANDIDATE_FILE = path.resolve(
 
 export const DEFAULT_TOP_K_REVALIDATE = 3;
 
-export const DEFAULT_PARALLEL_WORKERS = 2;
+export const DEFAULT_PARALLEL_WORKERS = 1;
 
 export const DEFAULT_BASELINE_REF = "HEAD";
 
@@ -105,8 +105,4 @@ export function buildLaneResultsJsonl(lane) {
 
 export function buildLaneLatestReport(lane) {
 	return path.join(buildLaneResultsDir(lane), "latest-report.md");
-}
-
-export function buildParallelRunDir(runLabel) {
-	return path.join(DEFAULT_RESULTS_DIR, "parallel", runLabel);
 }

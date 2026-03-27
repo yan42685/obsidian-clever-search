@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
 import {
 	DEFAULT_BASELINE_REF,
 	DEFAULT_BENCHMARK_ARGS,
@@ -14,7 +13,6 @@ import {
 	buildLaneCandidateFile,
 	buildLaneLatestReport,
 	buildLaneResultsJsonl,
-	buildParallelRunDir,
 	sanitizeLaneName,
 } from "./config.mjs";
 import { BenchmarkUnavailableError, runBenchmark } from "./benchmark.mjs";
@@ -22,9 +20,7 @@ import {
 	GitUnavailableError,
 	cleanupOptimizerResources,
 	commitScopedFiles,
-	createWorktreeAtRef,
 	readRepoState,
-	removeWorktree,
 	withWorktreeAtRef,
 } from "./git.mjs";
 import { appendJsonl, writeLatestReport } from "./report.mjs";
@@ -46,32 +42,6 @@ function sanitizeLabel(value, fallback = "run") {
 		.replace(/[^a-z0-9_-]+/g, "-")
 		.replace(/^-+|-+$/g, "");
 	return normalized || fallback;
-}
-
-function ensureParentDir(filePath) {
-	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-function resolvePathWithinWorktree(worktreePath, sourcePath) {
-	const relativePath = path.relative(process.cwd(), sourcePath);
-	if (!relativePath || relativePath.startsWith("..")) {
-		throw new Error(`Source path must stay inside workspace: ${sourcePath}`);
-	}
-	return path.join(worktreePath, relativePath);
-}
-
-function syncSourcePathToWorktree(worktreePath, sourcePath) {
-	if (!fs.existsSync(sourcePath)) {
-		return;
-	}
-	const targetPath = resolvePathWithinWorktree(worktreePath, sourcePath);
-	ensureParentDir(targetPath);
-	const stats = fs.statSync(sourcePath);
-	if (stats.isDirectory()) {
-		fs.cpSync(sourcePath, targetPath, { recursive: true });
-		return;
-	}
-	fs.copyFileSync(sourcePath, targetPath);
 }
 
 function syncWorktreeBenchmarkAssets(worktreePath) {
@@ -112,8 +82,6 @@ function parseArgs(argv) {
 		parallelWorkers: DEFAULT_PARALLEL_WORKERS,
 		revalidateTopK: DEFAULT_TOP_K_REVALIDATE,
 		syncFiles: [],
-		jobFile: "",
-		outputJson: "",
 	};
 
 	for (const arg of argv.slice(2)) {
@@ -159,10 +127,6 @@ function parseArgs(argv) {
 				Math.max(1, Number(arg.slice("--revalidate-topk=".length)) || 1);
 		} else if (arg.startsWith("--sync-file=")) {
 			args.syncFiles.push(path.resolve(arg.slice("--sync-file=".length)));
-		} else if (arg.startsWith("--job-file=")) {
-			args.jobFile = path.resolve(arg.slice("--job-file=".length));
-		} else if (arg.startsWith("--output-json=")) {
-			args.outputJson = path.resolve(arg.slice("--output-json=".length));
 		}
 	}
 
@@ -359,8 +323,6 @@ function buildParameterCommand(args, options = {}) {
 		"--mode=parameter",
 		`--lane=${args.lane}`,
 		`--candidate-file=${formatPathForCommand(args.candidateFile)}`,
-		`--parallel-workers=${options.parallelWorkers ?? args.parallelWorkers}`,
-		`--revalidate-topk=${options.revalidateTopK ?? args.revalidateTopK}`,
 	];
 	if (args.parameterFile !== DEFAULT_PARAMETER_TARGET_FILE) {
 		parts.push(`--parameter-file=${formatPathForCommand(args.parameterFile)}`);
@@ -522,161 +484,6 @@ function evaluateCandidateInCurrentWorkspace(args, originalSource, candidate) {
 	}
 }
 
-function evaluateCandidateInWorktree(job) {
-	const worktreePath = createWorktreeAtRef(job.ref, job.jobLabel);
-	try {
-		syncWorktreeBenchmarkAssets(worktreePath);
-		for (const sourcePath of job.syncFiles) {
-			syncSourcePathToWorktree(worktreePath, sourcePath);
-		}
-		const worktreeParameterFile = resolvePathWithinWorktree(
-			worktreePath,
-			job.parameterFile,
-		);
-		const syncedSource = readParameterFile(worktreeParameterFile);
-		const patchedSource = patchTuningValues(syncedSource, job.candidate);
-		fs.writeFileSync(worktreeParameterFile, patchedSource, "utf8");
-		const benchmarkRun = runBenchmark(worktreePath, job.benchmarkArgs);
-		return {
-			ok: true,
-			candidate: job.candidate,
-			run: benchmarkRun,
-			jobLabel: job.jobLabel,
-		};
-	} catch (error) {
-		return {
-			ok: false,
-			candidate: job.candidate,
-			jobLabel: job.jobLabel,
-			error: {
-				name: error?.name ?? "Error",
-				message: error?.message ?? String(error),
-			},
-		};
-	} finally {
-		removeWorktree(worktreePath);
-	}
-}
-
-function writeJson(filePath, value) {
-	ensureParentDir(filePath);
-	fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function readJson(filePath) {
-	return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
-function spawnWorkerProcess(jobFile, outputJson) {
-	return new Promise((resolve, reject) => {
-		const child = spawn(
-			process.execPath,
-			[
-				path.resolve(process.cwd(), "scripts/lexical-optimizer/run.mjs"),
-				"--mode=parameter-worker",
-				`--job-file=${jobFile}`,
-				`--output-json=${outputJson}`,
-			],
-			{
-				cwd: process.cwd(),
-				stdio: ["ignore", "pipe", "pipe"],
-			},
-		);
-		let stdout = "";
-		let stderr = "";
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk.toString();
-		});
-		child.stderr.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		child.on("error", reject);
-		child.on("close", (code) => {
-			if (code !== 0) {
-				reject(
-					new Error(
-						[
-							`worker exited with code ${code}`,
-							stdout.trim(),
-							stderr.trim(),
-						]
-							.filter(Boolean)
-							.join("\n\n"),
-					),
-				);
-				return;
-			}
-			resolve({
-				outputJson,
-				stdout,
-				stderr,
-			});
-		});
-	});
-}
-
-async function runParallelCandidateScreen(args, repoState, candidates) {
-	const runLabel = `${sanitizeLabel(args.label || args.lane, args.lane)}-${Date.now()}`;
-	const runDir = buildParallelRunDir(runLabel);
-	const jobsDir = path.join(runDir, "jobs");
-	fs.mkdirSync(jobsDir, { recursive: true });
-
-	const jobs = candidates.map((candidate, index) => {
-		const candidateLabel = sanitizeLabel(candidate.label, `candidate-${index + 1}`);
-		const jobDir = path.join(jobsDir, `${String(index + 1).padStart(3, "0")}-${candidateLabel}`);
-		fs.mkdirSync(jobDir, { recursive: true });
-		const jobFile = path.join(jobDir, "job.json");
-		const outputJson = path.join(jobDir, "result.json");
-		writeJson(jobFile, {
-			candidate,
-			ref: repoState.head,
-			jobLabel: `${args.lane}-${candidateLabel}`,
-			parameterFile: args.parameterFile,
-			benchmarkArgs: args.benchmarkArgs,
-			syncFiles: args.syncFiles,
-		});
-		return {
-			candidate,
-			jobFile,
-			outputJson,
-		};
-	});
-
-	const workerCount = Math.max(1, Math.min(args.parallelWorkers, jobs.length));
-	const results = [];
-	let nextIndex = 0;
-
-	async function runNext() {
-		if (nextIndex >= jobs.length) {
-			return;
-		}
-		const job = jobs[nextIndex++];
-		const workerResult = await spawnWorkerProcess(job.jobFile, job.outputJson);
-		results.push({
-			...readJson(workerResult.outputJson),
-			stdout: workerResult.stdout,
-			stderr: workerResult.stderr,
-		});
-		await runNext();
-	}
-
-	await Promise.all(
-		Array.from({ length: workerCount }, () => runNext()),
-	);
-
-	return {
-		runDir,
-		results,
-	};
-}
-
-function shortlistParallelResults(results, topK) {
-	return results
-		.filter((entry) => entry.ok && entry.run?.backend)
-		.sort((left, right) => compareBackends(left.run.backend, right.run.backend))
-		.slice(0, Math.max(1, topK));
-}
-
 async function runParameterMode(args) {
 	const originalSource = readParameterFile(args.parameterFile);
 	const baselineProfile = extractCurrentTuningProfile(originalSource);
@@ -691,8 +498,9 @@ async function runParameterMode(args) {
 		`candidateFile=${args.candidateFile}`,
 		`resultsJsonl=${args.resultsJsonl}`,
 		`latestReport=${args.latestReport}`,
-		`parallelWorkers=${args.parallelWorkers}`,
-		`revalidateTopK=${args.revalidateTopK}`,
+		"execution=serial",
+		`parallelWorkers=${args.parallelWorkers} (compat-only)`,
+		`revalidateTopK=${args.revalidateTopK} (compat-only)`,
 		`baselineProfile=${JSON.stringify(baselineProfile)}`,
 	]);
 	const label = args.label || (args.dryRun ? "parameter-dry-run" : "parameter");
@@ -702,7 +510,7 @@ async function runParameterMode(args) {
 			"parameter",
 			label,
 			candidates.length > 0
-				? `would evaluate ${candidates.length} tuning candidates via stage1 parallel coarse screen and stage2 serial revalidation`
+				? `would evaluate ${candidates.length} tuning candidates serially in the current workspace`
 				: "no candidate manifest provided; automation should generate candidates",
 			notes,
 			args,
@@ -745,33 +553,6 @@ async function runParameterMode(args) {
 	}
 	printBackend("baseline", baselineRun.backend);
 
-	let coarseResults = [];
-	let parallelRunDir = "";
-	if (args.parallelWorkers > 1 && candidates.length > 1 && repoState.available) {
-		try {
-			const parallelScreen = await runParallelCandidateScreen(args, repoState, candidates);
-			parallelRunDir = parallelScreen.runDir;
-			coarseResults = parallelScreen.results;
-			console.log(
-				`stage1: parallel coarse screen completed lane=${args.lane} workers=${Math.min(args.parallelWorkers, candidates.length)} runDir=${parallelRunDir}`,
-			);
-		} catch (error) {
-			notes.push(
-				`parallel coarse screen fallback=${error?.message ?? String(error)}`,
-			);
-		}
-	}
-
-	const shortlistedCandidates =
-		coarseResults.length > 0
-			? shortlistParallelResults(coarseResults, args.revalidateTopK).map(
-					(entry) => entry.candidate,
-				)
-			: candidates;
-	console.log(
-		`stage2: serial revalidation candidates=${shortlistedCandidates.length} shortlistedFrom=${coarseResults.length || candidates.length}`,
-	);
-
 	let best = {
 		run: baselineRun,
 		decision: "baseline",
@@ -780,7 +561,7 @@ async function runParameterMode(args) {
 	};
 	const revalidated = [];
 
-	for (const candidate of shortlistedCandidates) {
+	for (const candidate of candidates) {
 		let candidateRun;
 		try {
 			candidateRun = evaluateCandidateInCurrentWorkspace(args, originalSource, candidate);
@@ -858,14 +639,13 @@ async function runParameterMode(args) {
 		fs.writeFileSync(args.parameterFile, originalSource, "utf8");
 	}
 	if (args.cleanupTempResources) {
-		cleanupOptimizerResources(parallelRunDir);
+		cleanupOptimizerResources();
 	}
 
 	const finalNotes = [
 		...notes,
-		`stage1ParallelCandidates=${coarseResults.length}`,
-		`stage2SerialRevalidated=${revalidated.length}`,
-		parallelRunDir ? `parallelRunDir=${parallelRunDir}` : "parallelRunDir=none",
+		`serialCandidates=${candidates.length}`,
+		`serialEvaluated=${revalidated.length}`,
 		`cleanupTempResources=${args.cleanupTempResources}`,
 		autoCommitNote,
 		revalidated.length > 0
@@ -1013,40 +793,31 @@ function runMechanismMode(args) {
 	return record;
 }
 
-function runParameterWorkerMode(args) {
-	if (!args.jobFile || !args.outputJson) {
-		throw new Error("parameter-worker mode requires --job-file and --output-json");
-	}
-	const job = readJson(args.jobFile);
-	const result = evaluateCandidateInWorktree(job);
-	writeJson(args.outputJson, result);
-}
-
 function printHelp() {
 	console.log(
 		[
 			"Lexical Optimizer",
 			"",
 			"Usage:",
-			"  node scripts/lexical-optimizer/run.mjs --mode=parameter [--lane=mechanism-a] [--candidate-file=...] [--parallel-workers=2] [--revalidate-topk=3] [--no-auto-commit] [--no-cleanup]",
+			"  node scripts/lexical-optimizer/run.mjs --mode=parameter [--lane=mechanism-a] [--candidate-file=...] [--no-auto-commit] [--no-cleanup]",
 			"  node scripts/lexical-optimizer/run.mjs --mode=mechanism [--lane=mechanism-a] [--baseline-ref=HEAD] [--no-auto-commit] [--no-cleanup]",
 			"",
 			"Lane conventions:",
 			"  - each lane gets its own candidate manifest and output files",
 			"  - default lane files live under .codex-bench/lexical-optimizer/lanes/<lane>/...",
-			"  - stage1 uses parallel worktree coarse screen",
-			"  - stage2 serially revalidates top K winners in the current workspace",
+			"  - parameter mode evaluates candidates serially in the current workspace",
+			"  - mechanism mode still compares the current workspace against a baseline ref",
 			"",
 			"Recommended local workflow:",
 			"  1. Prepare a lane-specific manifest",
 			`     ${formatPathForCommand(buildLaneCandidateFile("mechanism-a"))}`,
 			"  2. Dry-run the lane:",
 			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]), { dryRun: true })}`,
-			"  3. Run stage1+stage2 without auto-applying any winner:",
+			"  3. Run the lane serially without auto-applying any winner:",
 			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]), { disableAutoCommit: true })}`,
 			"  4. Run the same lane with automatic apply+commit enabled:",
 			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]))}`,
-			"  5. Compare the whole current workspace against the baseline worktree:",
+			"  5. Compare the whole current workspace against the baseline ref:",
 			`     ${buildMechanismCommand(parseArgs(["node", "run", "--lane=mechanism-a"]))}`,
 		].join("\n"),
 	);
@@ -1065,10 +836,6 @@ async function main() {
 		}
 		if (args.mode === "parameter") {
 			await runParameterMode(args);
-			return;
-		}
-		if (args.mode === "parameter-worker") {
-			runParameterWorkerMode(args);
 			return;
 		}
 		throw new Error(`Unsupported mode: ${args.mode}`);
