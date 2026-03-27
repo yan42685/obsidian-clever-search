@@ -34,53 +34,69 @@ export function compareCoverageLexicalResultSignals(
 	plan: CoverageLexicalPlan,
 ): number {
 	if (plan.route === "metadata-first") {
-		return (
-			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-			compareAreaSignals(left.coreBody, right.coreBody) ||
-			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-			comparePhraseBridgeSignals(left, right) ||
-			compareCoverageLexicalWindowFusionSignals(
-				left.localEvidence,
-				right.localEvidence,
-			) ||
-			compareAreaSignals(left.softBody, right.softBody) ||
-			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
-		);
+		return compareMetadataFirstStages(left, right);
 	}
-
 	if (plan.route === "body-with-anchor") {
-		if (
-			plan.hasPathShapeHint ||
-			plan.hasTitleShapeHint ||
-			plan.hasMixedScriptHint
-		) {
-			return (
-				compareAreaSignals(left.coreBody, right.coreBody) ||
-				compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-				compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-				comparePhraseBridgeSignals(left, right) ||
-				compareCoverageLexicalWindowFusionSignals(
-					left.localEvidence,
-					right.localEvidence,
-				) ||
-				compareAreaSignals(left.softBody, right.softBody) ||
-				compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
-			);
-		}
+		return compareBodyWithAnchorStages(left, right, plan);
+	}
+	return compareBodyFirstStages(left, right);
+}
+
+function compareMetadataFirstStages(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	return (
+		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+		comparePhraseBridgeSignals(left, right) ||
+		compareCoverageLexicalWindowFusionSignals(
+			left.localEvidence,
+			right.localEvidence,
+		) ||
+		compareAreaSignals(left.softBody, right.softBody) ||
+		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
+	);
+}
+
+function compareBodyWithAnchorStages(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	if (plan.hasPathShapeHint || plan.hasTitleShapeHint || plan.hasMixedScriptHint) {
 		return (
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
 				right.localEvidence,
 			) ||
-			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			compareAreaSignals(left.softBody, right.softBody) ||
 			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 		);
 	}
+	return (
+		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+		comparePhraseBridgeSignals(left, right) ||
+		compareCoverageLexicalWindowFusionSignals(
+			left.localEvidence,
+			right.localEvidence,
+		) ||
+		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareAreaSignals(left.softBody, right.softBody) ||
+		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
+	);
+}
 
+function compareBodyFirstStages(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
 	return (
 		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||

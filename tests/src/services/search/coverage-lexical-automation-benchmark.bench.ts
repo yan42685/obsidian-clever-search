@@ -110,6 +110,8 @@ type EngineLike = {
 		maxItemResults: number;
 	}): Promise<MatchedFile[]>;
 	serialize(): unknown;
+	estimateIndexBytes?(): number | null;
+	getIndexBreakdown?(): Record<string, unknown> | null;
 };
 
 const QUERY_TYPES: readonly QueryType[] = [
@@ -1884,6 +1886,12 @@ function buildMetricRecord<T extends string>(
 }
 
 function estimateIndexBytes(engine: EngineLike): number {
+	if (typeof engine.estimateIndexBytes === "function") {
+		const estimated = engine.estimateIndexBytes();
+		if (typeof estimated === "number" && Number.isFinite(estimated) && estimated > 0) {
+			return estimated;
+		}
+	}
 	const snapshot = engine.serialize();
 	if (!snapshot) {
 		return 0;
@@ -2507,6 +2515,17 @@ describe("coverage lexical automation benchmark", () => {
 						]),
 					),
 				})),
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] index-breakdown",
+			JSON.stringify(
+				{
+					MiniSearch: mini.getIndexBreakdown?.() ?? null,
+					CoverageLexical: coverageLexical.getIndexBreakdown?.() ?? null,
+				},
 				null,
 				2,
 			),
