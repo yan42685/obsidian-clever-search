@@ -8,16 +8,17 @@ If any short prompt summary conflicts with this file, this file wins.
 
 ## Architecture Direction
 
-1. `passage lexical ranker` and `passage-bm25 recall/index` should be treated as separate layers.
+1. The next lexical engine must be fully independent from legacy `passage-bm25` code and storage.
 
 - the designated implementation target for the next lexical engine is `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
-- `src/services/search/passage-lexical/passage-lexical-ranker.ts` remains the smaller tuning / orchestration surface around that engine
-- future replacement should be able to swap the ranker without forcing a recall-layer rewrite
-- automated tuning should primarily target the ranker layer and its segmentation / verification profile
-- default tuning surface should be `src/services/search/passage-lexical/passage-lexical-ranker.ts`
+- the next engine may still choose a passage-first or local-window evidence model, but that model must be implemented inside the new backend rather than imported from the old passage path
+- future replacement should be able to swap ranking, verifier, and recall layers through neutral interfaces without forcing a rewrite of unrelated layers
+- automated tuning should primarily target the new backend modules, not legacy passage ranker files
+- default tuning surface should be `coverage-lexical` planner / ranker / verifier / recall modules, not `src/services/search/passage-lexical/passage-lexical-ranker.ts`
 - low-level posting or storage changes are still allowed, but only when the benchmark shows they materially help speed or size without hurting the ranking guardrails
 - the next lexical engine must be code-wise independent from `src/services/search/passage-lexical/passage-file-search-engine.ts`
 - do not evolve the old engine in place and relabel it as the new backend
+- do not reuse the old `passage-bm25` index format, recall path, scorer, verifier, comparator, or tuning tables as hidden dependencies of the new backend
 - do not import old scorer / verifier / comparator helpers into the new backend
 - shared infrastructure is allowed only for neutral utilities such as tokenizer, benchmark harness, or generic interfaces, not ranking logic
 
@@ -26,7 +27,7 @@ If any short prompt summary conflicts with this file, this file wins.
 - the purpose is to discover a clearly better lexical backend, not to keep shaving decimals on the legacy `passage-bm25` path
 - repeated no-lift coefficient tuning on the old engine counts as failure mode, not progress
 - when benchmark movement stalls, the next cycle should bias toward a structural hypothesis inside `src/services/search/coverage-lexical/coverage-lexical-engine.ts`: new verifier, new planner path, new family scorer, new retrieval/ranking split, or a new coverage-first backend structure
-- `passage-lexical-ranker.ts` should be treated as the stable automation entry surface for smaller tuning, but mechanism work belongs to `coverage-lexical-engine.ts`
+- old passage files may be consulted as historical reference only; retained mechanism work must land in the isolated `coverage-lexical` backend
 
 3. The controller must not own the search space.
 
@@ -272,5 +273,12 @@ Benchmark should be optimized for the intended search behavior, not for protecti
 - do not preserve easy synthetic cases just because they are historical
 - do not require changes to preserve legacy heuristics that are not part of the ranking invariants
 - do not treat code size as a primary benchmark metric when ranking quality and interactive latency clearly improve
-- benchmark reporting for `coverage-lexical` should compare against `MiniSearch` as the external baseline; avoid carrying unrelated legacy backend comparisons in the default automation loop unless a regression lane explicitly asks for them`r`n`r`n4. Keep the automation benchmark focused and fast.`r`n`r`n- compare `CoverageLexical` against `MiniSearch` only`r`n- do not spend automation benchmark budget on `custom-bm25` or `passage-bm25``r`n- target one full benchmark run under `20s` on a normal development machine`r`n- if runtime drifts above budget, reduce redundant cases before weakening core invariant coverage
+- benchmark reporting for `coverage-lexical` should compare against `MiniSearch` as the external baseline; avoid carrying unrelated legacy backend comparisons in the default automation loop unless a regression lane explicitly asks for them
+
+4. Keep the automation benchmark focused and fast.
+
+- compare `CoverageLexical` against `MiniSearch` only
+- do not spend automation benchmark budget on `custom-bm25` or `passage-bm25`
+- target one full benchmark run under `20s` on a normal development machine
+- if runtime drifts above budget, reduce redundant cases before weakening core invariant coverage
 

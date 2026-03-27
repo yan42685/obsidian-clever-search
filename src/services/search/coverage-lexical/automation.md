@@ -12,8 +12,9 @@ It exists so automation work does not drift back into `passage-file-search-engin
 
 1. `recall` and `coverage-first ranking` must stay separate.
 
-- short term: reuse a stable recall source if needed
-- medium term: replace recall incrementally without rewriting the ranker contract
+- the isolated backend should own its own recall contract and storage decisions
+- passage-first or local-window evidence is allowed, but it must be implemented natively inside `coverage-lexical`
+- do not depend on `passage-bm25` code paths, snapshot formats, or scorer/verifier helpers as the hidden recall layer
 - the isolated backend should own its own `planner`, `family decomposition`, and `comparator`
 
 2. Keep the MVP surface intentionally small.
@@ -22,12 +23,15 @@ It exists so automation work does not drift back into `passage-file-search-engin
 - `coverage-lexical-families.ts`: family decomposition and core/soft classification
 - `coverage-lexical-planner.ts`: route selection and query-shape flags
 - `coverage-lexical-ranker.ts`: family-first comparator only
+- `coverage-lexical-windowing.ts`: query-conditioned passage / local-window evidence
+- `coverage-lexical-fusion.ts`: file-level fusion of family-first and local evidence
 
 3. Avoid copying passage-local machinery into the MVP.
 
 - no passage verifier migration in the MVP
 - no metadata lane score soup
 - no heuristic blend copied from `passage-bm25`
+- no legacy `passage-file-search-engine` dependency disguised as shared infrastructure
 
 ## MVP Ranking Contract
 
@@ -38,7 +42,11 @@ The comparator should implement this order directly:
 3. tail-weighted core quality
 4. route-specific metadata anchor support
 
-The MVP may omit rich local-window evidence until the family-first comparator is stable.
+The MVP should include lightweight local-window evidence from the start.
+
+- do not stop at a pure file-level family comparator
+- use passage-first or query-conditioned local-window evidence as the default body evidence unit
+- richer verifier layers may still be staged later if the lightweight local-window layer proves insufficient
 
 ## Benchmark Direction
 
