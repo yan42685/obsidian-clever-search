@@ -214,6 +214,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	): Map<string, CoverageLexicalCandidateState> {
 		const candidates = new Map<string, CoverageLexicalCandidateState>();
 		for (const family of families) {
+			if (family.role === "noise") {
+				continue;
+			}
 			this.collectCandidatesForTerm(
 				candidates,
 				family.index,
@@ -227,7 +230,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			candidates.size < request.maxItemResults * COVERAGE_CANDIDATE_MULTIPLIER
 		) {
 			for (const family of families) {
-				if (!family.allowPrefix) {
+				if (family.role === "noise" || !family.allowPrefix) {
 					continue;
 				}
 				for (const term of this.expandPrefixTerms(family.normalizedTerm)) {
@@ -244,7 +247,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			candidates.size < request.maxItemResults * COVERAGE_CANDIDATE_MULTIPLIER
 		) {
 			for (const family of families) {
-				if (!family.allowFuzzy) {
+				if (family.role === "noise" || !family.allowFuzzy) {
 					continue;
 				}
 				for (const term of this.expandFuzzyTerms(family.normalizedTerm)) {
@@ -287,8 +290,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	): CoverageLexicalRankableResult | null {
 		const signal = buildCoverageSignal(families, state);
 		if (
-			signal.body.coverageCount === 0 &&
-			signal.metadata.coverageCount === 0
+			signal.coreBody.coverageCount === 0 &&
+			signal.softBody.coverageCount === 0 &&
+			signal.metadataAnchor.coverageCount === 0
 		) {
 			return null;
 		}
@@ -355,39 +359,55 @@ function buildCoverageSignal(
 	families: readonly CoverageLexicalFamily[],
 	state: CoverageLexicalCandidateState,
 ): CoverageLexicalFamilySignal {
-	const body = createEmptyAreaSignal();
-	const metadata = createEmptyAreaSignal();
-	let tailWeight = 0;
-	let metadataWeight = 0;
+	const coreBody = createEmptyAreaSignal();
+	const softBody = createEmptyAreaSignal();
+	const metadataAnchor = createEmptyAreaSignal();
+	let tailCoreWeight = 0;
+	let tailSoftWeight = 0;
 	const matchedTerms = new Set<string>();
 
 	for (const family of families) {
 		const bodyKind = state.bodyMatches.get(family.index) ?? null;
 		const metadataKind = state.metadataMatches.get(family.index) ?? null;
-		if (!family.isCore && !bodyKind && !metadataKind) {
+		if (family.role === "noise" || (!bodyKind && !metadataKind)) {
 			continue;
 		}
 
 		const weight = computeFamilyTailWeight(family.index);
 		const bestKind = pickBetterMatchKind(bodyKind, metadataKind);
 		if (bestKind) {
-			tailWeight += weight;
 			matchedTerms.add(family.normalizedTerm);
 		}
-		if (bodyKind && family.isCore) {
-			applyMatch(body, bodyKind, weight);
+		if (family.role === "body") {
+			if (bodyKind && family.strength === "core") {
+				applyMatch(coreBody, bodyKind, weight);
+				tailCoreWeight += weight;
+				continue;
+			}
+			if (bodyKind) {
+				applyMatch(softBody, bodyKind, weight);
+				tailSoftWeight += weight;
+			}
+			continue;
 		}
-		if (metadataKind && family.isMetadataCapable) {
-			applyMatch(metadata, metadataKind, weight);
-			metadataWeight += weight;
+		if (family.role === "anchor") {
+			if (metadataKind && family.isMetadataCapable) {
+				applyMatch(metadataAnchor, metadataKind, weight);
+				continue;
+			}
+			if (bodyKind) {
+				applyMatch(softBody, bodyKind, weight);
+				tailSoftWeight += weight;
+			}
 		}
 	}
 
 	return {
-		body,
-		metadata,
-		tailWeight,
-		metadataWeight,
+		coreBody,
+		softBody,
+		metadataAnchor,
+		tailCoreWeight,
+		tailSoftWeight,
 		matchedTerms: Array.from(matchedTerms),
 	};
 }
@@ -438,12 +458,14 @@ function computeFamilyTailWeight(index: number): number {
 
 function computeFallbackScore(signal: CoverageLexicalFamilySignal): number {
 	return (
-		signal.body.coverageCount * 100 +
-		signal.body.exactWeight * 3 +
-		signal.body.prefixWeight * 2 +
-		signal.metadata.coverageCount * 10 +
-		signal.metadata.exactWeight +
-		signal.tailWeight * 0.01
+		signal.coreBody.coverageCount * 100 +
+		signal.coreBody.exactWeight * 3 +
+		signal.coreBody.prefixWeight * 2 +
+		signal.softBody.coverageCount * 20 +
+		signal.metadataAnchor.coverageCount * 10 +
+		signal.metadataAnchor.exactWeight +
+		signal.tailCoreWeight * 0.01 +
+		signal.tailSoftWeight * 0.001
 	);
 }
 

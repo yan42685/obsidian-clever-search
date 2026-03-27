@@ -34,30 +34,36 @@ function compareCoverageLexicalSignals(
 ): number {
 	if (plan.route === "metadata-first") {
 		return (
-			compareAreaSignals(left.metadata, right.metadata) ||
-			compareDescendingMetric(left.body.coverageCount, right.body.coverageCount) ||
-			compareDescendingMetric(left.body.exactWeight, right.body.exactWeight) ||
-			compareDescendingMetric(left.body.prefixWeight, right.body.prefixWeight) ||
-			compareDescendingMetric(left.body.fuzzyWeight, right.body.fuzzyWeight) ||
-			compareDescendingMetric(left.tailWeight, right.tailWeight)
+			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+			compareAreaSignals(left.coreBody, right.coreBody) ||
+			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+			compareAreaSignals(left.softBody, right.softBody) ||
+			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
+		);
+	}
+
+	if (plan.route === "body-with-anchor") {
+		return (
+			compareAreaSignals(left.coreBody, right.coreBody) ||
+			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+			compareAreaSignals(left.softBody, right.softBody) ||
+			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 		);
 	}
 
 	return (
-		compareDescendingMetric(left.body.coverageCount, right.body.coverageCount) ||
-		compareAreaSignals(left.body, right.body) ||
-		(plan.route === "body-with-anchor"
-			? compareDescendingMetric(left.metadata.coverageCount, right.metadata.coverageCount) ||
-				compareAreaSignals(left.metadata, right.metadata)
-			: 0) ||
-		compareDescendingMetric(left.metadataWeight, right.metadataWeight) ||
-		compareDescendingMetric(left.tailWeight, right.tailWeight)
+		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+		compareAreaSignals(left.softBody, right.softBody) ||
+		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 	);
 }
 
 function compareAreaSignals(
-	left: CoverageLexicalFamilySignal["body"],
-	right: CoverageLexicalFamilySignal["body"],
+	left: CoverageLexicalFamilySignal["coreBody"],
+	right: CoverageLexicalFamilySignal["coreBody"],
 ): number {
 	return (
 		compareDescendingMetric(left.coverageCount, right.coverageCount) ||

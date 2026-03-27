@@ -1,10 +1,15 @@
 export type CoverageFamilyMatchKind = "exact" | "prefix" | "fuzzy" | null;
 
+export type CoverageLexicalFamilyStrength = "core" | "soft";
+
+export type CoverageLexicalFamilyRole = "body" | "anchor" | "noise";
+
 export type CoverageLexicalFamily = {
 	index: number;
 	rawTerm: string;
 	normalizedTerm: string;
-	isCore: boolean;
+	strength: CoverageLexicalFamilyStrength;
+	role: CoverageLexicalFamilyRole;
 	isMetadataCapable: boolean;
 	allowPrefix: boolean;
 	allowFuzzy: boolean;
@@ -22,9 +27,12 @@ export type CoverageLexicalFamilyProbe = {
 
 export type CoverageLexicalPlan = {
 	families: CoverageLexicalFamily[];
-	isShortQuery: boolean;
+	shortQueryOverlay: boolean;
 	hasMetadataHint: boolean;
 	route: CoverageLexicalRoute;
+	coreFamilyCount: number;
+	anchorFamilyCount: number;
+	bodyFamilyCount: number;
 };
 
 export type CoverageLexicalAreaSignal = {
@@ -35,9 +43,10 @@ export type CoverageLexicalAreaSignal = {
 };
 
 export type CoverageLexicalFamilySignal = {
-	body: CoverageLexicalAreaSignal;
-	metadata: CoverageLexicalAreaSignal;
-	tailWeight: number;
-	metadataWeight: number;
+	coreBody: CoverageLexicalAreaSignal;
+	softBody: CoverageLexicalAreaSignal;
+	metadataAnchor: CoverageLexicalAreaSignal;
+	tailCoreWeight: number;
+	tailSoftWeight: number;
 	matchedTerms: string[];
 };

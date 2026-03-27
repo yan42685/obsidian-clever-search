@@ -11,54 +11,61 @@ export function buildCoverageLexicalPlan(
 	queryTerms: readonly string[],
 	probes: readonly CoverageLexicalFamilyProbe[] = [],
 ): CoverageLexicalPlan {
-	const families = buildCoverageLexicalFamilies(queryTerms);
-	const isShortQuery = families.length <= 2;
-	const metadataCapableCount = families.filter(
-		(family) => family.isMetadataCapable,
-	).length;
+	const families = buildCoverageLexicalFamilies(queryTerms, probes);
+	const activeFamilies = families.filter((family) => family.role !== "noise");
+	const shortQueryOverlay = activeFamilies.length <= 2;
+	const anchorFamilies = activeFamilies.filter((family) => family.role === "anchor");
+	const bodyFamilies = activeFamilies.filter((family) => family.role === "body");
+	const coreFamilies = activeFamilies.filter((family) => family.strength === "core");
 	const hasMetadataHint = METADATA_HINT_REGEX.test(queryText);
 	const route = selectRoute(
 		hasMetadataHint,
-		families.length,
-		metadataCapableCount,
+		bodyFamilies,
+		anchorFamilies,
 		probes,
 	);
 
 	return {
 		families,
-		isShortQuery,
+		shortQueryOverlay,
 		hasMetadataHint,
 		route,
+		coreFamilyCount: coreFamilies.length,
+		anchorFamilyCount: anchorFamilies.length,
+		bodyFamilyCount: bodyFamilies.length,
 	};
 }
 
 function selectRoute(
 	hasMetadataHint: boolean,
-	familyCount: number,
-	metadataCapableCount: number,
+	bodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	anchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
 	probes: readonly CoverageLexicalFamilyProbe[],
 ): CoverageLexicalPlan["route"] {
-	const bodyExactSignal = probes.reduce(
-		(total, probe) => total + probe.bodyExactDocCount,
+	const bodyExactSignal = bodyFamilies.reduce(
+		(total, family) => total + (probes[family.index]?.bodyExactDocCount ?? 0),
 		0,
 	);
-	const metadataExactSignal = probes.reduce(
-		(total, probe) => total + probe.metadataExactDocCount,
+	const metadataExactSignal = anchorFamilies.reduce(
+		(total, family) => total + (probes[family.index]?.metadataExactDocCount ?? 0),
 		0,
 	);
 	const metadataDominant =
-		metadataCapableCount > 0 &&
+		anchorFamilies.length > 0 &&
 		metadataExactSignal > 0 &&
 		metadataExactSignal >= Math.max(2, bodyExactSignal * 2);
 
 	if (
-		hasMetadataHint ||
-		(metadataCapableCount >= Math.max(2, familyCount) && metadataDominant)
+		anchorFamilies.length > 0 &&
+		(bodyFamilies.length === 0 || metadataDominant)
 	) {
 		return "metadata-first";
 	}
-	if (metadataCapableCount > 0) {
+	if (anchorFamilies.length > 0 && bodyFamilies.length > 0) {
 		return "body-with-anchor";
+	}
+	if (hasMetadataHint && anchorFamilies.length > 0) {
+		return bodyFamilies.length > 0 ? "body-with-anchor" : "metadata-first";
 	}
 	return "body-first";
 }
