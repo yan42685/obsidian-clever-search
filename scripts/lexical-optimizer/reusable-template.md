@@ -22,7 +22,7 @@ Use this template when you want to port the current automation loop to another l
 
 ## Default Files
 
-- tuning surface: `src/services/search/passage-lexical/passage-lexical-ranker-tuning.ts`
+- tuning surface: `src/services/search/passage-lexical/passage-lexical-ranker.ts`
 - candidate manifest: `.codex-bench/lexical-optimizer/candidates.json`
 - example manifest: `scripts/lexical-optimizer/candidate-manifest.example.json`
 - operator prompt: `scripts/lexical-optimizer/automation-prompt.md`
@@ -41,3 +41,4 @@ Use this template when you want to port the current automation loop to another l
 - or keep if quality is effectively flat and speed or size materially improves
 - rollback if `hits@1` clearly regresses
 - rollback if the change only helps a tiny slice and weakens the guardrails
+- if repeated coefficient-only edits do not move the benchmark, switch to a mechanism-level hypothesis instead of continuing local patching

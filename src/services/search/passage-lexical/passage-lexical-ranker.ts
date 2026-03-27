@@ -1,3 +1,7 @@
+// This file is the automation-facing surface for passage lexical ranking.
+// Consumer implementations may import it, but automated tuning should patch
+// this file directly instead of editing engine code.
+
 export const PASSAGE_LEXICAL_SEGMENTATION_TUNING = {
 	targetTokens: 120,
 	minTokens: 48,

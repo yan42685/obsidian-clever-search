@@ -12,10 +12,17 @@ If any short prompt summary conflicts with this file, this file wins.
 
 - future replacement should be able to swap the ranker without forcing a recall-layer rewrite
 - automated tuning should primarily target the ranker layer and its segmentation / verification profile
-- default tuning surface should be `src/services/search/passage-lexical/passage-lexical-ranker-tuning.ts`
+- default tuning surface should be `src/services/search/passage-lexical/passage-lexical-ranker.ts`
 - low-level posting or storage changes are still allowed, but only when the benchmark shows they materially help speed or size without hurting the ranking guardrails
 
-2. The controller must not own the search space.
+2. Automation must be mechanism-first, not coefficient-first.
+
+- the purpose is to discover a clearly better lexical backend, not to keep shaving decimals on the legacy `passage-bm25` path
+- repeated no-lift coefficient tuning on the old engine counts as failure mode, not progress
+- when benchmark movement stalls, the next cycle should bias toward a structural hypothesis: new verifier, new planner path, new family scorer, new retrieval/ranking split, or a new backend module under `src/services/search/passage-lexical/`
+- `passage-lexical-ranker.ts` should be treated as the stable automation entry surface, but mechanism work may add or replace supporting modules behind it
+
+3. The controller must not own the search space.
 
 - automation should decide which candidates to try in each cycle
 - candidate generation belongs to Codex / the automation prompt, not to a fixed hard-coded grid in the runner
@@ -182,6 +189,7 @@ Automation should be allowed to explore implementation details aggressively, but
 - planner thresholds and route gating
 - prefix / fuzzy fallback gating
 - local verifier and local-window shape
+- replacement scorer or replacement backend modules that still plug into the same benchmark loop
 - postings / positions / dictionary compression
 - early termination and partial top-k selection
 - passage token target and overlap ratio using the existing tokenizer
@@ -214,6 +222,7 @@ Automation should be allowed to explore implementation details aggressively, but
 - keep the experimental backend isolated
 - keep core production code small and hard, not heuristic-heavy
 - treat benchmark and verification tooling as separate support code rather than an excuse to bloat the hot path
+- if two or more consecutive cycles only tweak constants without a meaningful benchmark lift, stop local tuning and move to a mechanism-level change
 
 ## Benchmark Design Rules
 

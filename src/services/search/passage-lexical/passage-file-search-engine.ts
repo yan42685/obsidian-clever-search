@@ -27,7 +27,7 @@ import { Tokenizer } from "../tokenizer";
 import {
 	PASSAGE_LEXICAL_RANKER_TUNING,
 	PASSAGE_LEXICAL_SEGMENTATION_TUNING,
-} from "./passage-lexical-ranker-tuning";
+} from "./passage-lexical-ranker";
 
 type MetadataField = "basename" | "aliases" | "folder" | "tags" | "headings";
 type SearchField = MetadataField | "content";

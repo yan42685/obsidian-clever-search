@@ -39,7 +39,7 @@ export const DEFAULT_BENCHMARK_ARGS = [
 
 export const DEFAULT_PARAMETER_TARGET_FILE = path.resolve(
 	process.cwd(),
-	"src/services/search/passage-lexical/passage-lexical-ranker-tuning.ts",
+	"src/services/search/passage-lexical/passage-lexical-ranker.ts",
 );
 
 export const DEFAULT_CANDIDATE_FILE = path.resolve(
