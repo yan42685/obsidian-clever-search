@@ -1568,18 +1568,357 @@ function createAutomationCorpus(): {
 		return `- 中文补充\n  - 场景：混合笔记\n  - path hint: ${pathHint}\n  - mixed terms: note context summary`;
 	}
 
+	function buildMarkdownSyntaxTail(document: IndexedDocument): string {
+		const pathHint = document.path.split("/").slice(-2).join("/");
+		const aliasHint = document.aliases ?? document.basename;
+		const tagHint = document.tags ?? "note";
+		const headingHint = document.headings ?? "heading";
+		return [
+			"---",
+			`title: "${document.basename}"`,
+			`aliases: ["${aliasHint}"]`,
+			`tags: ["${tagHint}"]`,
+			"---",
+			"",
+			`# ${document.basename}`,
+			"",
+			"> [!note]",
+			`> path hint: \`${pathHint}\``,
+			`> heading hint: **${headingHint}**`,
+			"",
+			"- overview",
+			`  - [[${document.basename}]]`,
+			`  - [ref](${pathHint.replace(/ /g, "-")}.md)`,
+			`  - inline code: \`${headingHint}\``,
+			"  - tasks",
+			"    - [ ] revisit ranking note",
+			"    - [x] keep markdown noise in corpus",
+			"",
+			"1. capture note",
+			"2. compare aliases",
+			"3. check nested bullets",
+			"",
+			"| field | value |",
+			"| --- | --- |",
+			`| path | ${pathHint} |`,
+			`| alias | ${aliasHint} |`,
+			"",
+			"```md",
+			`- nested bullet for ${pathHint}`,
+			`  - alias: ${aliasHint}`,
+			`  - tag: ${tagHint}`,
+			"```",
+			"",
+			"Text with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+		].join("\n");
+	}
+
 	for (let index = 0; index < documents.length; index++) {
+		const document = documents[index];
+		const syntaxTail = buildMarkdownSyntaxTail(document);
 		if (index % 2 !== 0) {
+			document.content = `${document.content ?? ""}\n${syntaxTail}`;
 			continue;
 		}
-		const document = documents[index];
-		document.content = `${document.content ?? ""}\n${buildMixedMarkdownTail(document)}`;
+		document.content = `${document.content ?? ""}\n${buildMixedMarkdownTail(document)}\n${syntaxTail}`;
 	}
+
+	const rebalancedQueryCases = rebalanceQueryLanguageMix(queryCases);
 
 	return {
 		documents,
-		queryCases,
+		queryCases: rebalancedQueryCases,
 	};
+}
+
+type QueryLanguageBucket = "zh" | "mixed" | "en";
+
+function detectQueryLanguageBucket(query: string): QueryLanguageBucket {
+	const hasHan = /[\u4e00-\u9fff]/.test(query);
+	const hasLatin = /[A-Za-z]/.test(query);
+	if (hasHan && hasLatin) {
+		return "mixed";
+	}
+	if (hasHan) {
+		return "zh";
+	}
+	return "en";
+}
+
+function queryDifficultyWeight(queryCase: QueryCase): number {
+	const typeWeight: Record<QueryType, number> = {
+		coverage_guardrail: 20,
+		quality_guardrail: 22,
+		tail_guardrail: 24,
+		locality_guardrail: 20,
+		title_exact: 35,
+		title_prefix: 40,
+		content_dense: 65,
+		prefix_metadata: 55,
+		prefix_body: 70,
+		body_path_anchor: 72,
+		body_title_anchor: 60,
+		duplicate_conflict: 62,
+		mixed_anchor: 78,
+		template_collision: 74,
+		bilingual_mirror: 80,
+		partial_memory: 90,
+	};
+	const suiteWeight: Record<BenchmarkSuite, number> = {
+		core: 5,
+		coverage_invariants: 0,
+		adversarial: 10,
+		messy_pkm: 15,
+	};
+	return typeWeight[queryCase.type] + suiteWeight[queryCase.suite];
+}
+
+function pathIncludesAny(path: string, patterns: string[]): boolean {
+	return patterns.some((pattern) => path.includes(pattern));
+}
+
+function variantTail(seed: string, mode: Exclude<QueryLanguageBucket, "en">): string {
+	const hash = Array.from(seed).reduce(
+		(sum, char, index) => sum + char.charCodeAt(0) * (index + 1),
+		0,
+	);
+	if (mode === "zh") {
+		const options = [
+			"写在哪个提示块或列表里",
+			"具体是哪条标题下的记录",
+			"是在那份表格说明里",
+			"元数据别名里怎么写",
+		];
+		return options[hash % options.length];
+	}
+	const options = [
+		"写在哪个 callout 或 note 里",
+		"具体是哪份 guide 的 nested list",
+		"是在那个 checklist table 里",
+		"对应哪页 docs frontmatter",
+	];
+	return options[hash % options.length];
+}
+
+function buildLocalizedQueryVariant(
+	queryCase: QueryCase,
+	mode: Exclude<QueryLanguageBucket, "en">,
+): string {
+	const path = queryCase.relevantPath.toLowerCase();
+	const type = queryCase.type;
+	const withTail = (base: string): string => `${base} ${variantTail(queryCase.query, mode)}`;
+
+	if (pathIncludesAny(path, ["cache-restore-checklist", "cache-replay-runbook"])) {
+		if (mode === "zh") {
+			return withTail(type === "partial_memory"
+				? "缓存恢复清单里还要核对哪些回放步骤"
+				: "回放说明里还有哪些恢复校验");
+		}
+		return withTail(type === "partial_memory"
+			? "cache 恢复清单里还要核对哪些 replay 步骤"
+			: "replay 说明里还有哪些 restore 校验");
+	}
+
+	if (pathIncludesAny(path, ["vector-cache-postmortem", "cache-warm-start", "incident-review", "recovery-checklist"])) {
+		if (mode === "zh") {
+			return withTail(type === "template_collision"
+				? "热启动事故用的复盘模板"
+				: "事故复盘里写了哪些缓解和恢复动作");
+		}
+		return withTail(type === "template_collision"
+			? "warm start 事故用的 review 模板"
+			: "incident 复盘里写了哪些 mitigation 和 recovery 动作");
+	}
+
+	if (pathIncludesAny(path, ["daily/2026-02-14", "daily/2026-02-19", "restart-cache-after-outage", "cache-restart-verification", "vector-cache-hotfix", "sdk-cache-rollback"])) {
+		if (mode === "zh") {
+			return withTail("日报和操作笔记里记的回放修复与重启校验");
+		}
+		return withTail("daily 和 ops 笔记里记的 replay 修复与 restart 校验");
+	}
+
+	if (pathIncludesAny(path, ["vector-cache.md", "checkpoint", "retro", "drift-log"])) {
+		if (mode === "zh") {
+			return withTail(type === "duplicate_conflict"
+				? "归档和项目里的缓存恢复记录"
+				: "检查点恢复里写的回放顺序和经验");
+		}
+		return withTail(type === "duplicate_conflict"
+			? "archive 和 project 里的 cache 恢复记录"
+			: "checkpoint 恢复里写的 replay 顺序和 lessons");
+	}
+
+	if (pathIncludesAny(path, ["aliases", "wikilink", "rename-map", "old-project", "alias-migration"])) {
+		if (mode === "zh") {
+			return withTail(type === "partial_memory"
+				? "旧项目名和别名迁移的清理记录"
+				: "项目改名后维基链接和别名怎么兼容");
+		}
+		return withTail(type === "partial_memory"
+			? "old project 名和 alias 迁移的 cleanup 记录"
+			: "项目改名后 wiki link 和 alias 怎么兼容");
+	}
+
+	if (pathIncludesAny(path, ["plugin", "compatibility", "release", "better-plugins", "upgrade"])) {
+		if (mode === "zh") {
+			if (type === "prefix_metadata") {
+				return withTail("浏览插件的总览页面和路线图");
+			}
+			if (type === "template_collision") {
+				return withTail("测试版插件发布兼容清单");
+			}
+			return withTail("插件升级前要看的兼容说明和发布时间");
+		}
+		if (type === "prefix_metadata") {
+			return withTail("浏览 plugin 的 overview 页面和 roadmap");
+		}
+		if (type === "template_collision") {
+			return withTail("beta plugin 发布 compatibility checklist");
+		}
+		return withTail("plugin 升级前要看的 compatibility 说明和 release 时间");
+	}
+
+	if (pathIncludesAny(path, ["projected", "service-account", "configmap", "secret", "namespace", "ingress"])) {
+		if (mode === "zh") {
+			if (type === "bilingual_mirror") {
+				return withTail("中文技术文档里的容器凭证和投射卷说明");
+			}
+			if (type === "body_path_anchor") {
+				return withTail("容器里一起挂载令牌密钥和配置映射的说明");
+			}
+			return withTail("容器挂载配置和凭证的技术说明");
+		}
+		if (type === "bilingual_mirror") {
+			return withTail("中文 tech 文档里 pod 凭证和 projected volume 说明");
+		}
+		if (type === "body_path_anchor") {
+			return withTail("pod 里一起挂载 token secret configmap 的 tech 说明");
+		}
+		return withTail("pod 挂载 config 和 credential 的 tech 说明");
+	}
+
+	if (mode === "zh") {
+		return withTail("笔记里写的关键信息和后续动作");
+	}
+	return withTail("笔记里写的关键 note 和 follow up");
+}
+
+function normalizeLocalizedQuery(
+	query: string,
+	mode: Exclude<QueryLanguageBucket, "en">,
+): string {
+	const collapsed = query.replace(/\s+/g, " ").trim();
+	if (mode === "zh") {
+		return collapsed.replace(/[A-Za-z]+/g, " ").replace(/\s+/g, " ").trim();
+	}
+	if (/[A-Za-z]/.test(collapsed) && /[\u4e00-\u9fff]/.test(collapsed)) {
+		return collapsed;
+	}
+	return `${collapsed} markdown note`;
+}
+
+function buildLocalizedQueryCase(
+	queryCase: QueryCase,
+	mode: Exclude<QueryLanguageBucket, "en">,
+	variantIndex: number,
+): QueryCase {
+	const markdownCueOptions =
+		mode === "zh"
+			? [
+				"看标题下面的提示块",
+				"在元数据别名和标签里提到的",
+				"嵌套列表里的回滚步骤",
+				"表格字段里的兼容说明",
+				"代码块旁边的补充备注",
+				"维基链接附近的迁移说明",
+			]
+			: [
+				"看 frontmatter alias 和 tag",
+				"在 callout 和 nested list 里",
+				"table 字段里的 compatibility 说明",
+				"heading 下面的 rollout note",
+				"code block 旁边的 restore 备注",
+				"wiki link 附近的 alias 迁移",
+			];
+	const baseQuery = buildLocalizedQueryVariant(queryCase, mode);
+	const markdownCue = markdownCueOptions[variantIndex % markdownCueOptions.length];
+	const shouldAppendCue =
+		variantIndex >= markdownCueOptions.length || queryDifficultyWeight(queryCase) >= 80;
+	const localizedQuery = shouldAppendCue
+		? `${baseQuery} ${markdownCue}`
+		: baseQuery;
+	return {
+		...queryCase,
+		query: normalizeLocalizedQuery(localizedQuery, mode),
+	};
+}
+
+function buildLocalizedBatch(
+	source: QueryCase[],
+	mode: Exclude<QueryLanguageBucket, "en">,
+	targetCount: number,
+	startOffset = 0,
+): QueryCase[] {
+	if (source.length === 0 || targetCount <= 0) {
+		return [];
+	}
+	return Array.from({ length: targetCount }, (_, index) =>
+		buildLocalizedQueryCase(
+			source[(startOffset + index) % source.length],
+			mode,
+			index,
+		),
+	);
+}
+
+function rebalanceQueryLanguageMix(seedCases: QueryCase[]): QueryCase[] {
+	const invariants = seedCases.filter(
+		(queryCase) => queryCase.suite === "coverage_invariants",
+	);
+	const others = seedCases.filter(
+		(queryCase) => queryCase.suite !== "coverage_invariants",
+	);
+	const sortedOthers = [...others].sort((left, right) => {
+		const difficultyGap =
+			queryDifficultyWeight(right) - queryDifficultyWeight(left);
+		if (difficultyGap !== 0) {
+			return difficultyGap;
+		}
+		return left.query.localeCompare(right.query);
+	});
+
+	const targetCounts: Record<QueryLanguageBucket, number> = {
+		en: 45,
+		mixed: 45,
+		zh: 60,
+	};
+	const invariantCounts = computeQueryLanguageMix(invariants);
+	const englishPool = sortedOthers.filter(
+		(queryCase) => detectQueryLanguageBucket(queryCase.query) === "en",
+	);
+	const englishOthersNeeded = Math.max(
+		0,
+		targetCounts.en - invariantCounts.en,
+	);
+	const englishOthers = englishPool.slice(0, englishOthersNeeded);
+	const selectedEnglishQueries = new Set(englishOthers);
+	const transformPool = sortedOthers.filter(
+		(queryCase) => !selectedEnglishQueries.has(queryCase),
+	);
+	const localizedMixed = buildLocalizedBatch(
+		transformPool,
+		"mixed",
+		Math.max(0, targetCounts.mixed - invariantCounts.mixed),
+		0,
+	);
+	const localizedZh = buildLocalizedBatch(
+		transformPool,
+		"zh",
+		Math.max(0, targetCounts.zh - invariantCounts.zh),
+		localizedMixed.length,
+	);
+
+	return [...invariants, ...englishOthers, ...localizedMixed, ...localizedZh];
 }
 
 function createEngineHarness(
@@ -1732,6 +2071,20 @@ function computeLanguageMix(documents: IndexedDocument[]): {
 		hanRatio: docsWithHan / total,
 		mixedRatio: docsWithLatinAndHan / total,
 	};
+}
+
+function computeQueryLanguageMix(queryCases: QueryCase[]): Record<QueryLanguageBucket, number> {
+	return queryCases.reduce<Record<QueryLanguageBucket, number>>(
+		(acc, queryCase) => {
+			acc[detectQueryLanguageBucket(queryCase.query)] += 1;
+			return acc;
+		},
+		{
+			zh: 0,
+			mixed: 0,
+			en: 0,
+		},
+	);
 }
 
 async function runBenchmark(
@@ -1993,6 +2346,7 @@ describe("coverage lexical automation benchmark", () => {
 		const tokenizer = createMockTokenizer();
 		const { documents, queryCases } = createAutomationCorpus();
 		const languageMix = computeLanguageMix(documents);
+		const queryLanguageMix = computeQueryLanguageMix(queryCases);
 		const { MiniSearchFileEngine } = require(
 			"src/services/search/file-search-engine",
 		);
@@ -2049,6 +2403,12 @@ describe("coverage lexical automation benchmark", () => {
 					docsWithLatinAndHan: languageMix.docsWithLatinAndHan,
 					hanRatio: round(languageMix.hanRatio),
 					mixedRatio: round(languageMix.mixedRatio),
+					queryZhCount: queryLanguageMix.zh,
+					queryMixedCount: queryLanguageMix.mixed,
+					queryEnCount: queryLanguageMix.en,
+					queryZhRatio: round(queryLanguageMix.zh / queryCases.length),
+					queryMixedRatio: round(queryLanguageMix.mixed / queryCases.length),
+					queryEnRatio: round(queryLanguageMix.en / queryCases.length),
 					totalElapsedMs: round(benchmarkElapsedMs),
 					bySuite: queryCases.reduce<Record<BenchmarkSuite, number>>(
 						(acc, queryCase) => {
@@ -2144,10 +2504,16 @@ describe("coverage lexical automation benchmark", () => {
 		);
 
 		expect(documents.length).toBeGreaterThanOrEqual(70);
-		expect(queryCases.length).toBeGreaterThanOrEqual(130);
+		expect(queryCases.length).toBeGreaterThanOrEqual(145);
 		expect(languageMix.hanRatio).toBeGreaterThanOrEqual(0.4);
 		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.6);
 		expect(languageMix.mixedRatio).toBeGreaterThanOrEqual(0.4);
+		expect(queryLanguageMix.mixed / queryCases.length).toBeGreaterThanOrEqual(0.25);
+		expect(queryLanguageMix.mixed / queryCases.length).toBeLessThanOrEqual(0.35);
+		expect(queryLanguageMix.zh / queryCases.length).toBeGreaterThanOrEqual(0.34);
+		expect(queryLanguageMix.zh / queryCases.length).toBeLessThanOrEqual(0.46);
+		expect(queryLanguageMix.en / queryCases.length).toBeGreaterThanOrEqual(0.25);
+		expect(queryLanguageMix.en / queryCases.length).toBeLessThanOrEqual(0.35);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "coverage_invariants"),
 		).toHaveLength(8);
