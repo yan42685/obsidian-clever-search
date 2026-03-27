@@ -35,6 +35,13 @@ If this file conflicts with either of them, those files win.
 5. Let stage1 do parallel coarse screening and stage2 do serial revalidation.
 6. Multi-lane orchestration should evaluate lanes without mutating baseline first, then auto-commit only the final retained winner.
 
+## Workspace Setup
+
+- when running inside a worktree, prefer reusing the primary workspace assets instead of reinstalling or redownloading per worktree
+- if the main workspace already has `node_modules`, point the worktree `node_modules` at it with a junction/symlink rather than running a fresh install
+- if the main workspace already has `benchmarks/corpora/web-notes-v2`, point the worktree corpus directory at it with a junction/symlink rather than copying or downloading again
+- treat shared dependencies and shared benchmark corpora as execution infrastructure; do not count this reuse as part of the optimization diff
+
 ## Keep Rule
 
 - keep only if the primary objective improves, or quality is effectively preserved while speed or size materially improves

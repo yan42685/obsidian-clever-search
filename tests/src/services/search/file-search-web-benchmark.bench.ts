@@ -1836,19 +1836,19 @@ function summarizeWins(
 	leftOutcomes: QueryOutcome[],
 	rightOutcomes: QueryOutcome[],
 ): {
-	leftWins: QueryOutcome[];
-	rightWins: QueryOutcome[];
-	leftTop1Wins: QueryOutcome[];
-	rightTop1Wins: QueryOutcome[];
+	leftWinCount: number;
+	rightWinCount: number;
+	leftTop1WinCount: number;
+	rightTop1WinCount: number;
 	leftTop1WinsByType: Partial<Record<QueryType, number>>;
 	rightTop1WinsByType: Partial<Record<QueryType, number>>;
 	leftTop1WinsBySuite: Partial<Record<BenchmarkSuite, number>>;
 	rightTop1WinsBySuite: Partial<Record<BenchmarkSuite, number>>;
 } {
-	const leftWins: QueryOutcome[] = [];
-	const rightWins: QueryOutcome[] = [];
-	const leftTop1Wins: QueryOutcome[] = [];
-	const rightTop1Wins: QueryOutcome[] = [];
+	let leftWinCount = 0;
+	let rightWinCount = 0;
+	let leftTop1WinCount = 0;
+	let rightTop1WinCount = 0;
 	const leftTop1WinsByType: Partial<Record<QueryType, number>> = {};
 	const rightTop1WinsByType: Partial<Record<QueryType, number>> = {};
 	const leftTop1WinsBySuite: Partial<Record<BenchmarkSuite, number>> = {};
@@ -1857,19 +1857,19 @@ function summarizeWins(
 		const left = leftOutcomes[i];
 		const right = rightOutcomes[i];
 		if (left.hitTop5 && !right.hitTop5) {
-			leftWins.push(left);
+			leftWinCount += 1;
 		}
 		if (right.hitTop5 && !left.hitTop5) {
-			rightWins.push(right);
+			rightWinCount += 1;
 		}
 		if (left.hitTop1 && !right.hitTop1) {
-			leftTop1Wins.push(left);
+			leftTop1WinCount += 1;
 			leftTop1WinsByType[left.type] = (leftTop1WinsByType[left.type] ?? 0) + 1;
 			leftTop1WinsBySuite[left.suite] =
 				(leftTop1WinsBySuite[left.suite] ?? 0) + 1;
 		}
 		if (right.hitTop1 && !left.hitTop1) {
-			rightTop1Wins.push(right);
+			rightTop1WinCount += 1;
 			rightTop1WinsByType[right.type] =
 				(rightTop1WinsByType[right.type] ?? 0) + 1;
 			rightTop1WinsBySuite[right.suite] =
@@ -1877,10 +1877,10 @@ function summarizeWins(
 		}
 	}
 	return {
-		leftWins: leftWins.slice(0, 8),
-		rightWins: rightWins.slice(0, 8),
-		leftTop1Wins: leftTop1Wins.slice(0, 8),
-		rightTop1Wins: rightTop1Wins.slice(0, 8),
+		leftWinCount,
+		rightWinCount,
+		leftTop1WinCount,
+		rightTop1WinCount,
 		leftTop1WinsByType,
 		rightTop1WinsByType,
 		leftTop1WinsBySuite,
@@ -1913,7 +1913,7 @@ describe("file search benchmark on web-notes-v2", () => {
 		}
 	});
 
-	test("compare current custom bm25 against minisearch on web-notes-v2", async () => {
+	test("compare coverage lexical against minisearch on web-notes-v2", async () => {
 		const tokenizer = createMockTokenizer();
 		const webNotes = createCorpusNotes(tokenizer);
 		const manualCorpus = createManualBenchmarkCorpus(tokenizer);
@@ -1929,41 +1929,16 @@ describe("file search benchmark on web-notes-v2", () => {
 			...webNotes.map((note) => note.bucket),
 			...manualCorpus.documents.map((document) => document.bucket),
 		];
-		const { MiniSearchFileEngine, CustomFileSearchEngine } = require(
+		const { MiniSearchFileEngine } = require(
 			"src/services/search/file-search-engine",
 		);
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
-		const { PassageFileSearchEngine } = require(
-			"src/services/search/passage-lexical/passage-file-search-engine",
-		);
 
 		const mini = createEngineHarness(MiniSearchFileEngine, tokenizer, "minisearch");
-		const custom = createEngineHarness(CustomFileSearchEngine, tokenizer, "custom-bm25");
-		const passage = createEngineHarness(
-			PassageFileSearchEngine,
-			tokenizer,
-			"passage-bm25",
-		);
 
 		const miniResult = await runBenchmark("MiniSearch", mini, documents, queryCases);
-
-		if ("reset" in container && typeof (container as any).reset === "function") {
-			(container as any).reset();
-		} else {
-			container.clearInstances();
-		}
-		(global as any).window = {
-			localStorage: {
-				getItem: jest.fn(() => "zh"),
-				setItem: jest.fn(),
-				removeItem: jest.fn(),
-			},
-		};
-
-		const customResult = await runBenchmark("CustomBM25", custom, documents, queryCases);
-		const customVsMini = summarizeWins(customResult.outcomes, miniResult.outcomes);
 
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -1990,33 +1965,9 @@ describe("file search benchmark on web-notes-v2", () => {
 			documents,
 			queryCases,
 		);
-		const coverageVsCustom = summarizeWins(
+		const coverageVsMini = summarizeWins(
 			coverageResult.outcomes,
-			customResult.outcomes,
-		);
-
-		if ("reset" in container && typeof (container as any).reset === "function") {
-			(container as any).reset();
-		} else {
-			container.clearInstances();
-		}
-		(global as any).window = {
-			localStorage: {
-				getItem: jest.fn(() => "zh"),
-				setItem: jest.fn(),
-				removeItem: jest.fn(),
-			},
-		};
-
-		const passageResult = await runBenchmark(
-			"PassageBM25",
-			passage,
-			documents,
-			queryCases,
-		);
-		const passageVsCustom = summarizeWins(
-			passageResult.outcomes,
-			customResult.outcomes,
+			miniResult.outcomes,
 		);
 
 		console.log(
@@ -2075,9 +2026,7 @@ describe("file search benchmark on web-notes-v2", () => {
 			JSON.stringify(
 				[
 					miniResult.summary,
-					customResult.summary,
 					coverageResult.summary,
-					passageResult.summary,
 				].map((summary) => ({
 					name: summary.name,
 					objective: round(summary.objective),
@@ -2136,9 +2085,7 @@ describe("file search benchmark on web-notes-v2", () => {
 			"[file-search-web-benchmark] sample-diffs",
 			JSON.stringify(
 				{
-					customVsMini,
-					coverageVsCustom,
-					passageVsCustom,
+					coverageVsMini,
 				},
 				null,
 				2,

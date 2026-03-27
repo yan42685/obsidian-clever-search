@@ -247,6 +247,8 @@ Automation should be allowed to explore implementation details aggressively, but
 - stage2: serial revalidation of the top K winners in the current workspace
 - do not treat stage1 latency numbers as final truth when multiple candidates were competing for machine resources
 - final keep/rollback decisions must use stage2 serial revalidation
+- when stage1 uses worktrees, reuse the primary workspace `node_modules` and `benchmarks/corpora/web-notes-v2` via junction/symlink if they already exist there
+- avoid repeated dependency installs or corpus downloads per worktree unless the shared assets are missing or known-bad
 
 ## Benchmark Design Rules
 
@@ -273,3 +275,4 @@ Benchmark should be optimized for the intended search behavior, not for protecti
 - do not preserve easy synthetic cases just because they are historical
 - do not require changes to preserve legacy heuristics that are not part of the ranking invariants
 - do not treat code size as a primary benchmark metric when ranking quality and interactive latency clearly improve
+- benchmark reporting for `coverage-lexical` should compare against `MiniSearch` as the external baseline; avoid carrying unrelated legacy backend comparisons in the default automation loop unless a regression lane explicitly asks for them

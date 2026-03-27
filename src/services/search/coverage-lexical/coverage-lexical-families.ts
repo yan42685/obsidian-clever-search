@@ -2,6 +2,7 @@ import type { CoverageLexicalFamily } from "./coverage-lexical-types";
 
 const STRUCTURAL_TOKEN_REGEX = /^[._/\-]+$/u;
 const NUMBERISH_TOKEN_REGEX = /^(?:\d+|v?\d+(?:[.\-]\d+)+)$/u;
+const ASCII_ALPHA_NUMERIC_REGEX = /^[a-z0-9_-]+$/u;
 
 export function buildCoverageLexicalFamilies(
 	queryTerms: readonly string[],
@@ -15,6 +16,8 @@ export function buildCoverageLexicalFamilies(
 			normalizedTerm,
 			isCore: isCoreFamily(normalizedTerm, index, queryTerms.length),
 			isMetadataCapable,
+			allowPrefix: canUsePrefixExpansion(normalizedTerm),
+			allowFuzzy: canUseFuzzyExpansion(normalizedTerm),
 		};
 	});
 }
@@ -61,4 +64,12 @@ function isWeakToken(term: string): boolean {
 
 function isStructuralToken(term: string): boolean {
 	return term.length === 0 || STRUCTURAL_TOKEN_REGEX.test(term);
+}
+
+function canUsePrefixExpansion(term: string): boolean {
+	return ASCII_ALPHA_NUMERIC_REGEX.test(term) && term.length >= 3;
+}
+
+function canUseFuzzyExpansion(term: string): boolean {
+	return ASCII_ALPHA_NUMERIC_REGEX.test(term) && term.length >= 5;
 }
