@@ -107,12 +107,22 @@ function ensureDir(dirPath) {
 	fs.mkdirSync(dirPath, { recursive: true });
 }
 
-export function withWorktreeAtRef(ref = DEFAULT_BASELINE_REF, callback) {
-	ensureDir(DEFAULT_WORKTREE_ROOT);
-	const worktreePath = path.join(
+function buildWorktreePath(label = "") {
+	const suffix = String(label || "")
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	const stem = `${Date.now()}-${process.pid}`;
+	return path.join(
 		DEFAULT_WORKTREE_ROOT,
-		`${Date.now()}-${process.pid}`,
+		suffix ? `${stem}-${suffix}` : stem,
 	);
+}
+
+export function createWorktreeAtRef(ref = DEFAULT_BASELINE_REF, label = "") {
+	ensureDir(DEFAULT_WORKTREE_ROOT);
+	const worktreePath = buildWorktreePath(label);
 	try {
 		runGit(["worktree", "add", "--detach", worktreePath, ref]);
 	} catch (error) {
@@ -127,16 +137,25 @@ export function withWorktreeAtRef(ref = DEFAULT_BASELINE_REF, callback) {
 		}
 		throw error;
 	}
+	return worktreePath;
+}
+
+export function removeWorktree(worktreePath) {
+	try {
+		runGit(["worktree", "remove", "--force", worktreePath]);
+	} catch (error) {
+		if (!(error instanceof GitUnavailableError)) {
+			throw error;
+		}
+	}
+}
+
+export function withWorktreeAtRef(ref = DEFAULT_BASELINE_REF, callback, label = "") {
+	const worktreePath = createWorktreeAtRef(ref, label);
 	try {
 		return callback(worktreePath);
 	} finally {
-		try {
-			runGit(["worktree", "remove", "--force", worktreePath]);
-		} catch (error) {
-			if (!(error instanceof GitUnavailableError)) {
-				throw error;
-			}
-		}
+		removeWorktree(worktreePath);
 	}
 }
 

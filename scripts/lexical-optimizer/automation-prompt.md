@@ -37,22 +37,34 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 
 1. Form one primary hypothesis from `automation-design.md`.
 2. Decide whether that hypothesis is `parameter-level` or `mechanism-level`; prefer `mechanism-level` when the expected gain is structural.
-3. Land mechanism-level backend work in `src/services/search/passage-lexical/coverage-lexical-engine.ts`.
-4. Use `src/services/search/passage-lexical/passage-lexical-ranker.ts` only as the smaller tuning / orchestration surface around that backend.
-5. If extra backend modules are required, keep them clearly within the new coverage backend rather than borrowing legacy engine code.
-6. If the change is only numeric, keep it small and reversible.
-7. Write a candidate manifest to `.codex-bench/lexical-optimizer/candidates.json`.
-8. Run `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json`.
-9. Keep only changes that satisfy the keep rules.
-10. Revert low-value complexity.
+3. Place the work in one explicit lane:
+   - `mechanism-a`: coverage comparator + family scorer
+   - `mechanism-b`: local verifier + compactness/order/local window
+   - `mechanism-c`: planner / route selection / metadata-body split
+   - `benchmark`: benchmark expansion only
+   - `regression`: validation and reporting only
+4. Land mechanism-level backend work in `src/services/search/passage-lexical/coverage-lexical-engine.ts`.
+5. Use `src/services/search/passage-lexical/passage-lexical-ranker.ts` only as the smaller tuning / orchestration surface around that backend.
+6. If extra backend modules are required, keep them clearly within the new coverage backend rather than borrowing legacy engine code.
+7. If the change is only numeric, keep it small and reversible.
+8. Write lane-specific candidate manifests under `.codex-bench/lexical-optimizer/lanes/<lane>/candidates.json`.
+9. Prefer generating candidates automatically with `node scripts/lexical-optimizer/candidate-generator.mjs --lane=<lane>`.
+10. For multi-lane research, prefer `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`.
+11. `run.mjs --mode=parameter --lane=<lane>` remains the per-lane evaluator.
+12. Let stage1 do parallel coarse screen and stage2 do serial revalidation of top K winners.
+13. Keep only changes that satisfy the keep rules.
+14. Revert low-value complexity.
 
 ## Local Loop Commands
 
 - inspect the built-in workflow help with `node scripts/lexical-optimizer/run.mjs --help`
-- preview a candidate set with `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json --dry-run`
-- evaluate candidates with `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json`
-- apply the current best candidate with `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json --apply-best`
-- compare the current workspace against the baseline worktree with `node scripts/lexical-optimizer/run.mjs --mode=mechanism --baseline-ref=HEAD`
+- auto-generate a lane manifest with `node scripts/lexical-optimizer/candidate-generator.mjs --lane=mechanism-a`
+- orchestrate the default research lanes with `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`
+- preview a lane with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
+- evaluate a lane with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
+- tune worker count with `--parallel-workers=<n>` and serial revalidation breadth with `--revalidate-topk=<k>`
+- apply the current best candidate with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --apply-best`
+- compare the current workspace against the baseline worktree with `node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a --baseline-ref=HEAD`
 
 ## Benchmark Discipline
 

@@ -1199,6 +1199,7 @@ This split is intentional:
 - `scripts/lexical-optimizer/automation-prompt.md` is the short operator prompt for Codex-style automation loops, while `automation-design.md` remains the higher-priority detailed rule file
 - automation should be mechanism-first: if repeated coefficient-only edits on the old `passage-bm25` path do not move the benchmark, the next cycle should switch to a structural backend hypothesis instead of continuing patch-style tuning
 - the intended replacement backend must be code-wise independent from `passage-bm25`; shared benchmark harness or utility code is fine, but ranking logic must not be inherited from `src/services/search/passage-lexical/passage-file-search-engine.ts`
+- research execution should be lane-based, with per-lane manifests / outputs and a default two-stage evaluation protocol: stage1 parallel coarse screen in isolated worktrees, stage2 serial revalidation of the top K winners
 
 Execution rule:
 

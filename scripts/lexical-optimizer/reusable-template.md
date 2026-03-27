@@ -34,14 +34,29 @@ Use this template when you want to port the current automation loop to another l
 - candidate manifest: `.codex-bench/lexical-optimizer/candidates.json`
 - example manifest: `scripts/lexical-optimizer/candidate-manifest.example.json`
 - operator prompt: `scripts/lexical-optimizer/automation-prompt.md`
+- auto candidate generator: `scripts/lexical-optimizer/candidate-generator.mjs`
+- multi-lane orchestrator: `scripts/lexical-optimizer/orchestrate.mjs`
+
+## Lane Split
+
+- use lane-specific manifests under `.codex-bench/lexical-optimizer/lanes/<lane>/candidates.json`
+- use lane-specific outputs under `.codex-bench/lexical-optimizer/lanes/<lane>/results/...`
+- recommended lanes:
+  - `mechanism-a`
+  - `mechanism-b`
+  - `mechanism-c`
+  - `benchmark`
+  - `regression`
 
 ## Command Loop
 
 1. `node scripts/lexical-optimizer/run.mjs --help`
-2. `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json --dry-run`
-3. `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json`
-4. `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json --apply-best`
-5. `node scripts/lexical-optimizer/run.mjs --mode=mechanism --baseline-ref=HEAD`
+2. `node scripts/lexical-optimizer/candidate-generator.mjs --lane=mechanism-a`
+3. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
+4. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --parallel-workers=2 --revalidate-topk=3`
+5. `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`
+6. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --apply-best`
+7. `node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a --baseline-ref=HEAD`
 
 ## Keep Rules
 
@@ -50,3 +65,9 @@ Use this template when you want to port the current automation loop to another l
 - rollback if `hits@1` clearly regresses
 - rollback if the change only helps a tiny slice and weakens the guardrails
 - if repeated coefficient-only edits do not move the benchmark, switch to a mechanism-level hypothesis instead of continuing local patching
+
+## Evaluation Protocol
+
+- stage1 should do parallel coarse screening with isolated worktrees
+- stage2 should serially revalidate the top K winners
+- only stage2 results should drive final keep/rollback

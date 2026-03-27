@@ -29,6 +29,7 @@ export function writeLatestReport(record, outputFile = DEFAULT_LATEST_REPORT) {
 		"",
 		`- time: ${record.time}`,
 		`- mode: ${record.mode}`,
+		`- lane: ${record.lane ?? "default"}`,
 		`- label: ${record.label}`,
 		`- decision: ${record.decision}`,
 		`- reason: ${record.reason}`,

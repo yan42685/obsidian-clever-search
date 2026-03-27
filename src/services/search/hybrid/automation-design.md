@@ -34,6 +34,16 @@ If any short prompt summary conflicts with this file, this file wins.
 - candidate generation belongs to Codex / the automation prompt, not to a fixed hard-coded grid in the runner
 - the benchmark runner should only evaluate, compare, report, and help keep or rollback
 
+4. Research should be lane-based, not one giant mixed thread.
+
+- `mechanism-a`: coverage comparator + family scorer
+- `mechanism-b`: local verifier + compactness/order/local window
+- `mechanism-c`: planner / route selection / metadata-body split
+- `benchmark`: benchmark expansion and harder guardrail construction
+- `regression`: validation and reporting only
+- each lane should own its own candidate manifest and output files under `.codex-bench/lexical-optimizer/lanes/<lane>/...`
+- lanes may run in parallel, but final merge and keep/rollback is still serial
+
 ## Ranking Invariants
 
 1. The primary unit of evidence is a `query family`, not raw hit count.
@@ -205,6 +215,7 @@ Automation should be allowed to explore implementation details aggressively, but
 - each automated cycle should have one primary hypothesis
 - tightly coupled edits that are required by that one hypothesis are allowed
 - avoid multi-axis "blend everything and hope" iterations
+- the primary hypothesis should stay inside one lane
 
 5. Keep conditions:
 
@@ -229,6 +240,13 @@ Automation should be allowed to explore implementation details aggressively, but
 - keep core production code small and hard, not heuristic-heavy
 - treat benchmark and verification tooling as separate support code rather than an excuse to bloat the hot path
 - if two or more consecutive cycles only tweak constants without a meaningful benchmark lift, stop local tuning and move to a mechanism-level change
+
+9. Two-stage evaluation is the default.
+
+- stage1: parallel coarse screen of candidates using isolated worktrees
+- stage2: serial revalidation of the top K winners in the current workspace
+- do not treat stage1 latency numbers as final truth when multiple candidates were competing for machine resources
+- final keep/rollback decisions must use stage2 serial revalidation
 
 ## Benchmark Design Rules
 
