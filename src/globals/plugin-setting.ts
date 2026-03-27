@@ -76,7 +76,8 @@ export type LogLevelOptions = {
 export type FileSearchBackend =
 	| "minisearch"
 	| "custom-bm25"
-	| "passage-bm25";
+	| "passage-bm25"
+	| "coverage-lexical";
 
 export type HybridSetting = {
 	enabled: boolean;

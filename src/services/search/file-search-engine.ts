@@ -15,6 +15,7 @@ import {
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import { CoverageLexicalFileSearchEngine } from "./coverage-lexical/coverage-lexical-engine";
 import {
 	createFileSearchQueryPlanner,
 	type FileSearchQueryTermStats,
@@ -57,6 +58,7 @@ export interface FileSearchEngine {
 	serialize(): SerializedFileSearchIndex | null;
 	estimateIndexBytes?(): number | null;
 	getIndexBreakdown?(): Record<string, unknown> | null;
+	debugTermAvailability?(term: string): Record<string, unknown> | null;
 }
 
 @singleton()
@@ -1017,8 +1019,12 @@ export class FileSearchEngineFactory {
 	private readonly miniSearch = getInstance(MiniSearchFileEngine);
 	private readonly custom = getInstance(CustomFileSearchEngine);
 	private readonly passage = getInstance(PassageFileSearchEngine);
+	private readonly coverageLexical = getInstance(CoverageLexicalFileSearchEngine);
 
 	getActiveEngine(): FileSearchEngine {
+		if (this.setting.fileSearchBackend === "coverage-lexical") {
+			return this.coverageLexical;
+		}
 		if (this.setting.fileSearchBackend === "passage-bm25") {
 			return this.passage;
 		}

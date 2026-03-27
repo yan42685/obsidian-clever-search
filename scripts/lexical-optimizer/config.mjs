@@ -59,7 +59,7 @@ export const DEFAULT_PARAMETER_TARGET_FILE = path.resolve(
 
 export const DEFAULT_IMPLEMENTATION_TARGET_FILE = path.resolve(
 	process.cwd(),
-	"src/services/search/passage-lexical/coverage-lexical-engine.ts",
+	"src/services/search/coverage-lexical/coverage-lexical-engine.ts",
 );
 
 export const DEFAULT_CANDIDATE_FILE = path.resolve(

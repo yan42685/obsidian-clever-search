@@ -53,7 +53,11 @@ type QueryType =
 	| "partial_memory"
 	| "anchor_contradiction"
 	| "bilingual_mirror";
-type BenchmarkSuite = "core" | "adversarial" | "messy_pkm";
+type BenchmarkSuite =
+	| "core"
+	| "coverage_invariants"
+	| "adversarial"
+	| "messy_pkm";
 type BenchmarkMetric = {
 	top1: number;
 	top3: number;
@@ -94,6 +98,7 @@ type QueryCase = {
 
 type BenchmarkSummary = {
 	name: string;
+	objective: number;
 	top1: number;
 	top3: number;
 	top5: number;
@@ -216,6 +221,7 @@ const QUERY_TYPES: readonly QueryType[] = [
 ];
 const BENCHMARK_SUITES: readonly BenchmarkSuite[] = [
 	"core",
+	"coverage_invariants",
 	"adversarial",
 	"messy_pkm",
 ];
@@ -1561,28 +1567,28 @@ function createManualBenchmarkCorpus(
 			relevantPath: "adversarial/ranker-lab/en/coverage-full.md",
 			bucket: "tech-en",
 			type: "coverage_guardrail",
-			suite: "adversarial",
+			suite: "coverage_invariants",
 		},
 		{
 			query: "config data rollout",
 			relevantPath: "adversarial/ranker-lab/en/exact-quality-witness.md",
 			bucket: "tech-en",
 			type: "quality_guardrail",
-			suite: "adversarial",
+			suite: "coverage_invariants",
 		},
 		{
 			query: "connection policy timeout recovery",
 			relevantPath: "adversarial/ranker-lab/en/tail-decisive-recovery.md",
 			bucket: "tech-en",
 			type: "tail_guardrail",
-			suite: "adversarial",
+			suite: "coverage_invariants",
 		},
 		{
 			query: "stale mount restart window",
 			relevantPath: "adversarial/ranker-lab/en/locality-compact.md",
 			bucket: "tech-en",
 			type: "locality_guardrail",
-			suite: "adversarial",
+			suite: "coverage_invariants",
 		},
 	];
 
@@ -1597,7 +1603,7 @@ function createManualBenchmarkCorpus(
 function createEngineHarness(
 	EngineCtor: new () => EngineLike,
 	tokenizer: MockTokenizer,
-	backend: "minisearch" | "custom-bm25" | "passage-bm25",
+	backend: "minisearch" | "custom-bm25" | "passage-bm25" | "coverage-lexical",
 ): EngineLike {
 	const {
 		OuterSetting,
@@ -1792,6 +1798,11 @@ async function runBenchmark(
 	return {
 		summary: {
 			name,
+			objective: computePrimaryObjective(
+				top1Hits / total,
+				top3Hits / total,
+				top5Hits / total,
+			),
 			top1: top1Hits / total,
 			top3: top3Hits / total,
 			top5: top5Hits / total,
@@ -1811,6 +1822,14 @@ async function runBenchmark(
 
 function round(value: number): number {
 	return Number(value.toFixed(3));
+}
+
+function computePrimaryObjective(
+	top1: number,
+	top3: number,
+	top5: number,
+): number {
+	return 0.55 * top1 + 0.25 * top3 + 0.2 * top5;
 }
 
 function summarizeWins(
@@ -1913,6 +1932,9 @@ describe("file search benchmark on web-notes-v2", () => {
 		const { MiniSearchFileEngine, CustomFileSearchEngine } = require(
 			"src/services/search/file-search-engine",
 		);
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		);
 		const { PassageFileSearchEngine } = require(
 			"src/services/search/passage-lexical/passage-file-search-engine",
 		);
@@ -1942,6 +1964,36 @@ describe("file search benchmark on web-notes-v2", () => {
 
 		const customResult = await runBenchmark("CustomBM25", custom, documents, queryCases);
 		const customVsMini = summarizeWins(customResult.outcomes, miniResult.outcomes);
+
+		if ("reset" in container && typeof (container as any).reset === "function") {
+			(container as any).reset();
+		} else {
+			container.clearInstances();
+		}
+		(global as any).window = {
+			localStorage: {
+				getItem: jest.fn(() => "zh"),
+				setItem: jest.fn(),
+				removeItem: jest.fn(),
+			},
+		};
+
+		const coverageLexical = createEngineHarness(
+			CoverageLexicalFileSearchEngine,
+			tokenizer,
+			"coverage-lexical",
+		);
+
+		const coverageResult = await runBenchmark(
+			"CoverageLexical",
+			coverageLexical,
+			documents,
+			queryCases,
+		);
+		const coverageVsCustom = summarizeWins(
+			coverageResult.outcomes,
+			customResult.outcomes,
+		);
 
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -2007,6 +2059,7 @@ describe("file search benchmark on web-notes-v2", () => {
 						},
 						{
 							core: 0,
+							coverage_invariants: 0,
 							adversarial: 0,
 							messy_pkm: 0,
 						},
@@ -2020,8 +2073,14 @@ describe("file search benchmark on web-notes-v2", () => {
 		console.log(
 			"[file-search-web-benchmark] summary",
 			JSON.stringify(
-				[miniResult.summary, customResult.summary, passageResult.summary].map((summary) => ({
+				[
+					miniResult.summary,
+					customResult.summary,
+					coverageResult.summary,
+					passageResult.summary,
+				].map((summary) => ({
 					name: summary.name,
+					objective: round(summary.objective),
 					top1: round(summary.top1),
 					top3: round(summary.top3),
 					top5: round(summary.top5),
@@ -2078,6 +2137,7 @@ describe("file search benchmark on web-notes-v2", () => {
 			JSON.stringify(
 				{
 					customVsMini,
+					coverageVsCustom,
 					passageVsCustom,
 				},
 				null,
@@ -2088,6 +2148,11 @@ describe("file search benchmark on web-notes-v2", () => {
 		expect(webNotes.length).toBe(32);
 		expect(documents.length).toBeGreaterThanOrEqual(40);
 		expect(queryCases.length).toBeGreaterThanOrEqual(200);
+		expect(
+			queryCases.some(
+				(queryCase) => queryCase.suite === "coverage_invariants",
+			),
+		).toBe(true);
 		expect(queryCases.some((queryCase) => queryCase.suite === "messy_pkm")).toBe(
 			true,
 		);

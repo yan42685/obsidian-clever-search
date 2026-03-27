@@ -219,4 +219,5 @@ export default {
 	"Manage search history": "\u7ba1\u7406\u641c\u7d22\u5386\u53f2",
 	"Search history completion": "\u641c\u7d22\u5386\u53f2\u8865\u5168",
 	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",
+	"fileSearchBackend.coverageLexical": "Coverage Lexical\uff08\u5b9e\u9a8c\uff09",
 };

@@ -38,6 +38,8 @@ function parseArgs(argv) {
 		laneConcurrency: 1,
 		dryRun: false,
 		generateOnly: false,
+		autoCommitWinner: true,
+		cleanupTempResources: true,
 		runLabel: "",
 	};
 	for (const arg of argv.slice(2)) {
@@ -73,6 +75,10 @@ function parseArgs(argv) {
 			args.dryRun = true;
 		} else if (arg === "--generate-only") {
 			args.generateOnly = true;
+		} else if (arg === "--no-auto-commit") {
+			args.autoCommitWinner = false;
+		} else if (arg === "--no-cleanup") {
+			args.cleanupTempResources = false;
 		} else if (arg.startsWith("--label=")) {
 			args.runLabel = arg.slice("--label=".length);
 		}
@@ -102,7 +108,14 @@ function readLastJsonlRecord(filePath) {
 	return JSON.parse(lines[lines.length - 1]);
 }
 
-function spawnLaneRun({ lane, parallelWorkers, revalidateTopK, dryRun }) {
+function spawnLaneRun({
+	lane,
+	parallelWorkers,
+	revalidateTopK,
+	dryRun,
+	autoCommit,
+	cleanupTempResources,
+}) {
 	return new Promise((resolve, reject) => {
 		const args = [
 			path.resolve(process.cwd(), "scripts/lexical-optimizer/run.mjs"),
@@ -113,6 +126,12 @@ function spawnLaneRun({ lane, parallelWorkers, revalidateTopK, dryRun }) {
 		];
 		if (dryRun) {
 			args.push("--dry-run");
+		}
+		if (!autoCommit) {
+			args.push("--no-auto-commit");
+		}
+		if (!cleanupTempResources) {
+			args.push("--no-cleanup");
 		}
 		const child = spawn(process.execPath, args, {
 			cwd: process.cwd(),
@@ -162,6 +181,44 @@ function buildLaneSummary(lane, manifest, runResult, record) {
 				: null,
 		candidateMeta: record?.candidateMeta ?? null,
 	};
+}
+
+function compareLaneRecords(left, right) {
+	const leftBackend = left?.candidate?.backend ?? null;
+	const rightBackend = right?.candidate?.backend ?? null;
+	if (!leftBackend && !rightBackend) {
+		return 0;
+	}
+	if (!leftBackend) {
+		return 1;
+	}
+	if (!rightBackend) {
+		return -1;
+	}
+	if (leftBackend.objective !== rightBackend.objective) {
+		return rightBackend.objective - leftBackend.objective;
+	}
+	if (leftBackend.hits1 !== rightBackend.hits1) {
+		return rightBackend.hits1 - leftBackend.hits1;
+	}
+	if (leftBackend.hits3 !== rightBackend.hits3) {
+		return rightBackend.hits3 - leftBackend.hits3;
+	}
+	if (leftBackend.avgLatencyMs !== rightBackend.avgLatencyMs) {
+		return leftBackend.avgLatencyMs - rightBackend.avgLatencyMs;
+	}
+	return leftBackend.persistedIndexBytes - rightBackend.persistedIndexBytes;
+}
+
+function pickWinningLane(laneArtifacts) {
+	return [...laneArtifacts]
+		.filter(
+			(entry) =>
+				!NON_PARAMETER_LANES.has(entry.manifest.lane) &&
+				entry.record?.decision === "keep" &&
+				entry.record?.candidate?.backend,
+		)
+		.sort((left, right) => compareLaneRecords(left.record, right.record))[0] ?? null;
 }
 
 function writeSummaryFiles(outputDir, summary) {
@@ -262,6 +319,8 @@ async function main() {
 							parallelWorkers: args.parallelWorkers,
 							revalidateTopK: args.revalidateTopK,
 							dryRun: false,
+							autoCommit: false,
+							cleanupTempResources: args.cleanupTempResources,
 						});
 					} catch (error) {
 						return {
@@ -291,14 +350,42 @@ async function main() {
 		}
 	}
 
-	const laneResults = manifests.map((manifest) => {
+	const laneArtifacts = manifests.map((manifest) => {
 		const runResult = laneRuns.find((entry) => entry.lane === manifest.lane) ?? null;
 		const record =
 			args.dryRun || args.generateOnly
 				? null
 				: readLastJsonlRecord(buildLaneResultsJsonl(manifest.lane));
-		return buildLaneSummary(manifest.lane, manifest, runResult, record);
+		return {
+			manifest,
+			runResult,
+			record,
+		};
 	});
+
+	let committedLane = null;
+	if (!args.dryRun && !args.generateOnly && args.autoCommitWinner) {
+		const winner = pickWinningLane(laneArtifacts);
+		if (winner) {
+			const rerunResult = await spawnLaneRun({
+				lane: winner.manifest.lane,
+				parallelWorkers: args.parallelWorkers,
+				revalidateTopK: args.revalidateTopK,
+				dryRun: false,
+				autoCommit: true,
+				cleanupTempResources: args.cleanupTempResources,
+			});
+			winner.runResult = rerunResult;
+			winner.record = readLastJsonlRecord(
+				buildLaneResultsJsonl(winner.manifest.lane),
+			);
+			committedLane = winner.manifest.lane;
+		}
+	}
+
+	const laneResults = laneArtifacts.map(({ manifest, runResult, record }) =>
+		buildLaneSummary(manifest.lane, manifest, runResult, record),
+	);
 
 	const summary = {
 		time: new Date().toISOString(),
@@ -309,6 +396,9 @@ async function main() {
 		parallelWorkers: args.parallelWorkers,
 		revalidateTopK: args.revalidateTopK,
 		laneConcurrency: args.laneConcurrency,
+		autoCommitWinner: args.autoCommitWinner,
+		cleanupTempResources: args.cleanupTempResources,
+		committedLane,
 		laneResults,
 	};
 	const files = writeSummaryFiles(outputDir, summary);

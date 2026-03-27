@@ -20,6 +20,8 @@ import {
 import { BenchmarkUnavailableError, runBenchmark } from "./benchmark.mjs";
 import {
 	GitUnavailableError,
+	cleanupOptimizerResources,
+	commitScopedFiles,
 	createWorktreeAtRef,
 	readRepoState,
 	removeWorktree,
@@ -96,6 +98,9 @@ function parseArgs(argv) {
 		dryRun: false,
 		help: false,
 		applyBest: false,
+		autoCommit: true,
+		cleanupTempResources: true,
+		commitMessage: "",
 		maxCandidates: Number.POSITIVE_INFINITY,
 		benchmarkArgs: DEFAULT_BENCHMARK_ARGS,
 		parameterFile: DEFAULT_PARAMETER_TARGET_FILE,
@@ -124,6 +129,12 @@ function parseArgs(argv) {
 			args.dryRun = true;
 		} else if (arg === "--apply-best") {
 			args.applyBest = true;
+		} else if (arg === "--no-auto-commit") {
+			args.autoCommit = false;
+		} else if (arg === "--no-cleanup") {
+			args.cleanupTempResources = false;
+		} else if (arg.startsWith("--commit-message=")) {
+			args.commitMessage = arg.slice("--commit-message=".length);
 		} else if (arg.startsWith("--max-candidates=")) {
 			args.maxCandidates = Number(arg.slice("--max-candidates=".length)) || 0;
 		} else if (arg.startsWith("--parameter-file=")) {
@@ -173,6 +184,14 @@ function parseArgs(argv) {
 	}
 	args.syncFiles = Array.from(new Set(args.syncFiles.map((file) => path.resolve(file))));
 	return args;
+}
+
+function buildAutoCommitMessage(args, candidateMeta) {
+	if (args.commitMessage) {
+		return args.commitMessage;
+	}
+	const candidateLabel = sanitizeLabel(candidateMeta?.label, "best");
+	return `自动优化 lexical ${args.lane}: ${candidateLabel}`;
 }
 
 function summarizeDelta(baseline, candidate) {
@@ -309,6 +328,14 @@ function buildRepoNotes(extraNotes = []) {
 	};
 }
 
+function hasPreexistingScopedChange(repoState, filePath) {
+	if (!repoState?.available || !filePath) {
+		return false;
+	}
+	const relativePath = path.relative(process.cwd(), path.resolve(filePath));
+	return repoState.dirtyFiles.some((entry) => entry.endsWith(relativePath));
+}
+
 function formatPathForCommand(filePath) {
 	const relativePath = path.relative(process.cwd(), filePath);
 	if (relativePath && !relativePath.startsWith("..")) {
@@ -347,6 +374,12 @@ function buildParameterCommand(args, options = {}) {
 	if (options.applyBest) {
 		parts.push("--apply-best");
 	}
+	if (options.disableAutoCommit || !args.autoCommit) {
+		parts.push("--no-auto-commit");
+	}
+	if (options.disableCleanup || !args.cleanupTempResources) {
+		parts.push("--no-cleanup");
+	}
 	return buildCommand(parts);
 }
 
@@ -360,6 +393,12 @@ function buildMechanismCommand(args, options = {}) {
 	];
 	if (options.dryRun) {
 		parts.push("--dry-run");
+	}
+	if (options.disableAutoCommit || !args.autoCommit) {
+		parts.push("--no-auto-commit");
+	}
+	if (options.disableCleanup || !args.cleanupTempResources) {
+		parts.push("--no-cleanup");
 	}
 	return buildCommand(parts);
 }
@@ -380,26 +419,26 @@ function buildRecommendedCommands(args, context) {
 			return commands;
 		}
 		if (context.decision === "dry-run") {
+			commands.push(
+				buildParameterCommand(args, {
+					disableAutoCommit: true,
+				}),
+			);
 			commands.push(buildParameterCommand(args));
-			commands.push(buildParameterCommand(args, { applyBest: true }));
 			return commands;
 		}
 		if (context.decision === "keep") {
-			if (!args.applyBest) {
-				commands.push(buildParameterCommand(args, { applyBest: true }));
-			}
-			commands.push(
-				buildCommand([
-					"git",
-					"diff",
-					"--",
-					formatPathForCommand(args.parameterFile),
-				]),
-			);
+			commands.push(buildCommand(["git", "show", "--stat", "--oneline", "HEAD"]));
+			commands.push(buildCommand(["git", "status", "--short"]));
 			return commands;
 		}
-		commands.push(buildParameterCommand(args, { dryRun: true }));
-		commands.push(buildParameterCommand(args));
+		commands.push(
+			buildParameterCommand(args, {
+				dryRun: true,
+				disableAutoCommit: true,
+			}),
+		);
+		commands.push(buildParameterCommand(args, { disableAutoCommit: true }));
 		return commands;
 	}
 
@@ -783,17 +822,43 @@ async function runParameterMode(args) {
 	}
 
 	const shouldApplyBest =
-		args.applyBest &&
+		(args.applyBest || args.autoCommit) &&
 		best.candidateMeta &&
 		JSON.stringify(best.candidateMeta) !== JSON.stringify(baselineProfile);
+	let autoCommitNote = "autoCommit=skipped";
 	if (shouldApplyBest) {
 		fs.writeFileSync(
 			args.parameterFile,
 			patchTuningValues(originalSource, best.candidateMeta),
 			"utf8",
 		);
+		if (
+			args.autoCommit &&
+			best.decision !== "baseline" &&
+			!hasPreexistingScopedChange(repoState, args.parameterFile)
+		) {
+			try {
+				const commitResult = commitScopedFiles(
+					[args.parameterFile],
+					buildAutoCommitMessage(args, best.candidateMeta),
+				);
+				autoCommitNote = commitResult.committed
+					? `autoCommit=${commitResult.commit}`
+					: `autoCommit=${commitResult.reason}`;
+			} catch (error) {
+				autoCommitNote = `autoCommitError=${error?.message ?? String(error)}`;
+			}
+		} else if (
+			args.autoCommit &&
+			hasPreexistingScopedChange(repoState, args.parameterFile)
+		) {
+			autoCommitNote = "autoCommit=skipped-preexisting-dirty-target";
+		}
 	} else {
 		fs.writeFileSync(args.parameterFile, originalSource, "utf8");
+	}
+	if (args.cleanupTempResources) {
+		cleanupOptimizerResources(parallelRunDir);
 	}
 
 	const finalNotes = [
@@ -801,6 +866,8 @@ async function runParameterMode(args) {
 		`stage1ParallelCandidates=${coarseResults.length}`,
 		`stage2SerialRevalidated=${revalidated.length}`,
 		parallelRunDir ? `parallelRunDir=${parallelRunDir}` : "parallelRunDir=none",
+		`cleanupTempResources=${args.cleanupTempResources}`,
+		autoCommitNote,
 		revalidated.length > 0
 			? `revalidatedCandidates=${revalidated
 					.map((entry) => entry.candidate.label)
@@ -905,6 +972,30 @@ function runMechanismMode(args) {
 	printBackend("baseline", baselineRun.backend);
 
 	const verdict = decideCandidate(baselineRun.backend, candidateRun.backend);
+	const mechanismNotes = [...notes];
+	if (args.autoCommit && verdict.decision === "keep") {
+		try {
+			const commitResult = commitScopedFiles(
+				args.syncFiles,
+				buildAutoCommitMessage(args, { label: args.lane }),
+			);
+			mechanismNotes.push(
+				commitResult.committed
+					? `autoCommit=${commitResult.commit}`
+					: `autoCommit=${commitResult.reason}`,
+			);
+		} catch (error) {
+			mechanismNotes.push(
+				`autoCommitError=${error?.message ?? String(error)}`,
+			);
+		}
+	} else {
+		mechanismNotes.push(`autoCommit=${args.autoCommit ? "skipped" : "disabled"}`);
+	}
+	if (args.cleanupTempResources) {
+		cleanupOptimizerResources();
+	}
+	mechanismNotes.push(`cleanupTempResources=${args.cleanupTempResources}`);
 	const record = createFinalRecord(
 		{
 			mode: "mechanism",
@@ -914,7 +1005,7 @@ function runMechanismMode(args) {
 			candidate: candidateRun,
 			decision: verdict.decision,
 			reason: verdict.reason,
-			notes,
+			notes: mechanismNotes,
 		},
 		args,
 	);
@@ -937,8 +1028,8 @@ function printHelp() {
 			"Lexical Optimizer",
 			"",
 			"Usage:",
-			"  node scripts/lexical-optimizer/run.mjs --mode=parameter [--lane=mechanism-a] [--candidate-file=...] [--parallel-workers=2] [--revalidate-topk=3] [--apply-best]",
-			"  node scripts/lexical-optimizer/run.mjs --mode=mechanism [--lane=mechanism-a] [--baseline-ref=HEAD]",
+			"  node scripts/lexical-optimizer/run.mjs --mode=parameter [--lane=mechanism-a] [--candidate-file=...] [--parallel-workers=2] [--revalidate-topk=3] [--no-auto-commit] [--no-cleanup]",
+			"  node scripts/lexical-optimizer/run.mjs --mode=mechanism [--lane=mechanism-a] [--baseline-ref=HEAD] [--no-auto-commit] [--no-cleanup]",
 			"",
 			"Lane conventions:",
 			"  - each lane gets its own candidate manifest and output files",
@@ -951,10 +1042,10 @@ function printHelp() {
 			`     ${formatPathForCommand(buildLaneCandidateFile("mechanism-a"))}`,
 			"  2. Dry-run the lane:",
 			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]), { dryRun: true })}`,
-			"  3. Run stage1+stage2:",
+			"  3. Run stage1+stage2 without auto-applying any winner:",
+			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]), { disableAutoCommit: true })}`,
+			"  4. Run the same lane with automatic apply+commit enabled:",
 			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]))}`,
-			"  4. If the report says keep, apply the winning candidate:",
-			`     ${buildParameterCommand(parseArgs(["node", "run", "--lane=mechanism-a"]), { applyBest: true })}`,
 			"  5. Compare the whole current workspace against the baseline worktree:",
 			`     ${buildMechanismCommand(parseArgs(["node", "run", "--lane=mechanism-a"]))}`,
 		].join("\n"),

@@ -10,7 +10,7 @@ If any short prompt summary conflicts with this file, this file wins.
 
 1. `passage lexical ranker` and `passage-bm25 recall/index` should be treated as separate layers.
 
-- the designated implementation target for the next lexical engine is `src/services/search/passage-lexical/coverage-lexical-engine.ts`
+- the designated implementation target for the next lexical engine is `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - `src/services/search/passage-lexical/passage-lexical-ranker.ts` remains the smaller tuning / orchestration surface around that engine
 - future replacement should be able to swap the ranker without forcing a recall-layer rewrite
 - automated tuning should primarily target the ranker layer and its segmentation / verification profile
@@ -25,7 +25,7 @@ If any short prompt summary conflicts with this file, this file wins.
 
 - the purpose is to discover a clearly better lexical backend, not to keep shaving decimals on the legacy `passage-bm25` path
 - repeated no-lift coefficient tuning on the old engine counts as failure mode, not progress
-- when benchmark movement stalls, the next cycle should bias toward a structural hypothesis inside `src/services/search/passage-lexical/coverage-lexical-engine.ts`: new verifier, new planner path, new family scorer, new retrieval/ranking split, or a new coverage-first backend structure
+- when benchmark movement stalls, the next cycle should bias toward a structural hypothesis inside `src/services/search/coverage-lexical/coverage-lexical-engine.ts`: new verifier, new planner path, new family scorer, new retrieval/ranking split, or a new coverage-first backend structure
 - `passage-lexical-ranker.ts` should be treated as the stable automation entry surface for smaller tuning, but mechanism work belongs to `coverage-lexical-engine.ts`
 
 3. The controller must not own the search space.

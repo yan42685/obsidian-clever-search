@@ -107,6 +107,13 @@ function ensureDir(dirPath) {
 	fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function removeDirIfPresent(dirPath) {
+	if (!dirPath || !fs.existsSync(dirPath)) {
+		return;
+	}
+	fs.rmSync(dirPath, { recursive: true, force: true });
+}
+
 function buildWorktreePath(label = "") {
 	const suffix = String(label || "")
 		.trim()
@@ -148,6 +155,69 @@ export function removeWorktree(worktreePath) {
 			throw error;
 		}
 	}
+}
+
+export function pruneWorktrees() {
+	try {
+		runGit(["worktree", "prune"]);
+	} catch (error) {
+		if (!(error instanceof GitUnavailableError)) {
+			throw error;
+		}
+	}
+}
+
+export function cleanupOptimizerResources(runDir = "") {
+	removeDirIfPresent(runDir);
+	pruneWorktrees();
+	try {
+		if (
+			fs.existsSync(DEFAULT_WORKTREE_ROOT) &&
+			fs.readdirSync(DEFAULT_WORKTREE_ROOT).length === 0
+		) {
+			fs.rmdirSync(DEFAULT_WORKTREE_ROOT);
+		}
+	} catch (error) {
+		if (error?.code !== "ENOENT") {
+			throw error;
+		}
+	}
+}
+
+export function commitScopedFiles(filePaths, message) {
+	const normalizedPaths = Array.from(
+		new Set(
+			(filePaths ?? [])
+				.filter(Boolean)
+				.map((filePath) => path.relative(process.cwd(), path.resolve(filePath)))
+				.filter((filePath) => filePath && !filePath.startsWith("..")),
+		),
+	);
+	if (normalizedPaths.length === 0) {
+		return {
+			committed: false,
+			reason: "no scoped files",
+			commit: null,
+		};
+	}
+
+	const statusOutput = runGit(["status", "--porcelain", "--", ...normalizedPaths]);
+	if (!statusOutput.trim()) {
+		return {
+			committed: false,
+			reason: "no scoped changes",
+			commit: null,
+		};
+	}
+
+	runGit(["add", "--", ...normalizedPaths]);
+	runGit(["commit", "-m", message, "--", ...normalizedPaths]);
+	return {
+		committed: true,
+		reason: "committed",
+		commit: getCurrentHead(),
+		files: normalizedPaths,
+	};
 }
 
 export function withWorktreeAtRef(ref = DEFAULT_BASELINE_REF, callback, label = "") {

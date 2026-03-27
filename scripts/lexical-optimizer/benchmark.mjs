@@ -124,7 +124,7 @@ export function normalizeSummary(summary) {
 	};
 }
 
-export function runBenchmark(cwd, benchmarkArgs, backendName = "PassageBM25") {
+export function runBenchmark(cwd, benchmarkArgs, backendName = "CoverageLexical") {
 	const result = runNodeCommand(cwd, benchmarkArgs);
 	if (result.status !== 0) {
 		throw new Error(

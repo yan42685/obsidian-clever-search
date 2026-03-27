@@ -4,7 +4,7 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 
 ## Ownership
 
-- treat `src/services/search/passage-lexical/coverage-lexical-engine.ts` as the designated implementation target for the new lexical engine
+- treat `src/services/search/coverage-lexical/coverage-lexical-engine.ts` as the designated implementation target for the new lexical engine
 - treat `src/services/search/passage-lexical/passage-lexical-ranker.ts` as the smaller tuning / orchestration surface around that engine
 - the new lexical engine must be code-wise independent from the legacy `passage-bm25` implementation
 - do not modify or reuse `src/services/search/passage-lexical/passage-file-search-engine.ts` as the optimization target
@@ -18,7 +18,7 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 - prefer mechanism-level gains over coefficient-only tuning
 - if a hypothesis needs a new verifier lane, planner path, scoring structure, or backend module, implement it in new backend code instead of only nudging numeric weights
 - do not spend repeated cycles on tiny constant changes unless the previous cycle already proved a clear benchmark lift
-- mechanism-level work should land in `src/services/search/passage-lexical/coverage-lexical-engine.ts` unless there is a very strong reason to split additional new-backend modules beside it
+- mechanism-level work should land in `src/services/search/coverage-lexical/coverage-lexical-engine.ts` unless there is a very strong reason to split additional new-backend modules beside it
 - when the legacy `passage-bm25` hot path seems to be the bottleneck, build or extend the replacement engine without depending on old engine internals
 - the goal is a new lexical stack that can clearly outperform the current baseline, not a long tail of low-yield patching
 
@@ -43,7 +43,7 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
    - `mechanism-c`: planner / route selection / metadata-body split
    - `benchmark`: benchmark expansion only
    - `regression`: validation and reporting only
-4. Land mechanism-level backend work in `src/services/search/passage-lexical/coverage-lexical-engine.ts`.
+4. Land mechanism-level backend work in `src/services/search/coverage-lexical/coverage-lexical-engine.ts`.
 5. Use `src/services/search/passage-lexical/passage-lexical-ranker.ts` only as the smaller tuning / orchestration surface around that backend.
 6. If extra backend modules are required, keep them clearly within the new coverage backend rather than borrowing legacy engine code.
 7. If the change is only numeric, keep it small and reversible.
@@ -52,8 +52,10 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 10. For multi-lane research, prefer `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`.
 11. `run.mjs --mode=parameter --lane=<lane>` remains the per-lane evaluator.
 12. Let stage1 do parallel coarse screen and stage2 do serial revalidation of top K winners.
-13. Keep only changes that satisfy the keep rules.
-14. Revert low-value complexity.
+13. Default automation behavior should auto-commit only retained winners; use `--no-auto-commit` when you only want evaluation.
+14. Default automation behavior should clean temporary worktrees and per-run scratch resources; use `--no-cleanup` only when you explicitly need to inspect them.
+15. Keep only changes that satisfy the keep rules.
+16. Revert low-value complexity.
 
 ## Local Loop Commands
 
@@ -61,9 +63,10 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 - auto-generate a lane manifest with `node scripts/lexical-optimizer/candidate-generator.mjs --lane=mechanism-a`
 - orchestrate the default research lanes with `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`
 - preview a lane with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
-- evaluate a lane with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
+- evaluate a lane without mutating the workspace with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --no-auto-commit`
+- evaluate and auto-commit the retained winner with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
 - tune worker count with `--parallel-workers=<n>` and serial revalidation breadth with `--revalidate-topk=<k>`
-- apply the current best candidate with `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --apply-best`
+- disable temp cleanup for debugging with `--no-cleanup`
 - compare the current workspace against the baseline worktree with `node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a --baseline-ref=HEAD`
 
 ## Benchmark Discipline

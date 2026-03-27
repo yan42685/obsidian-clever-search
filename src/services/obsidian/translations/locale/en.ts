@@ -220,6 +220,7 @@ export default {
 	"fileSearchBackend.minisearch": "MiniSearch (stable)",
 	"fileSearchBackend.customBm25": "Custom BM25",
 	"fileSearchBackend.passageBm25": "Passage BM25 (experimental)",
+	"fileSearchBackend.coverageLexical": "Coverage Lexical (experimental)",
 	"Reset floating window position": "Reset floating window position",
 	"Reset floating window position desc": "In case the window is moved outside the visible area",
 	"Reset position": "Reset position",

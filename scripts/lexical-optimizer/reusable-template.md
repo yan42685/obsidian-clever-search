@@ -13,7 +13,7 @@ Use this template when you want to port the current automation loop to another l
 
 2. Provide one explicit implementation target file for mechanism work.
 
-- for this repository, that file is `src/services/search/passage-lexical/coverage-lexical-engine.ts`
+- for this repository, that file is `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - keep new backend mechanism work there rather than inside the legacy engine
 - use the tuning surface only for smaller orchestration and numeric tuning
 
@@ -30,7 +30,7 @@ Use this template when you want to port the current automation loop to another l
 ## Default Files
 
 - tuning surface: `src/services/search/passage-lexical/passage-lexical-ranker.ts`
-- implementation target: `src/services/search/passage-lexical/coverage-lexical-engine.ts`
+- implementation target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - candidate manifest: `.codex-bench/lexical-optimizer/candidates.json`
 - example manifest: `scripts/lexical-optimizer/candidate-manifest.example.json`
 - operator prompt: `scripts/lexical-optimizer/automation-prompt.md`
@@ -55,8 +55,15 @@ Use this template when you want to port the current automation loop to another l
 3. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
 4. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --parallel-workers=2 --revalidate-topk=3`
 5. `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`
-6. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --apply-best`
-7. `node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a --baseline-ref=HEAD`
+6. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --no-auto-commit`
+7. `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
+8. `node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a --baseline-ref=HEAD`
+
+## Automation Hygiene
+
+- default automated runs should evaluate without mutating baseline until a retained winner is known
+- after selection, automation may rerun the winning lane with automatic apply+commit enabled
+- default automated runs should clean temporary worktrees and scratch run directories unless debugging requires `--no-cleanup`
 
 ## Keep Rules
 
