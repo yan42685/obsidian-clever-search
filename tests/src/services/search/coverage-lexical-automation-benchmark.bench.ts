@@ -90,6 +90,17 @@ type QueryOutcome = {
 	results: string[];
 };
 
+type RecallContractType =
+	| QueryType
+	| "basename_partial_body"
+	| "path_partial_body";
+
+type RecallContractCase = {
+	query: string;
+	relevantPath: string;
+	type: RecallContractType;
+};
+
 type EngineLike = {
 	addDocuments(documents: IndexedDocument[]): Promise<void>;
 	searchFiles(request: {
@@ -1921,6 +1932,73 @@ function rebalanceQueryLanguageMix(seedCases: QueryCase[]): QueryCase[] {
 	return [...invariants, ...englishOthers, ...localizedMixed, ...localizedZh];
 }
 
+function buildRecallContractCases(): RecallContractCase[] {
+	return [
+		{
+			type: "title_exact",
+			query: "guide for replay order after restore",
+			relevantPath: "pkm-en/guides/shard-checkpoint-guide.md",
+		},
+		{
+			type: "title_exact",
+			query: "playbook for cache eviction restore",
+			relevantPath: "pkm-en/projects/sdk/vector-cache.md",
+		},
+		{
+			type: "title_prefix",
+			query: "shard checkpoint",
+			relevantPath: "pkm-en/guides/shard-checkpoint-guide.md",
+		},
+		{
+			type: "title_prefix",
+			query: "vector cache",
+			relevantPath: "pkm-en/projects/sdk/vector-cache.md",
+		},
+		{
+			type: "prefix_metadata",
+			query: "better plu",
+			relevantPath: "docs/plugins/better-plugins-page.md",
+		},
+		{
+			type: "prefix_metadata",
+			query: "better plugin road",
+			relevantPath: "docs/plugins/better-plugins-roadmap.md",
+		},
+		{
+			type: "body_path_anchor",
+			query: "tech-en service account token",
+			relevantPath:
+				"tech-en/content/en/docs/tasks/configure-pod-container/configure-service-account.md",
+		},
+		{
+			type: "body_path_anchor",
+			query: "tech-en configmap pod data",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+		},
+		{
+			type: "body_title_anchor",
+			query: "mounted configuration data for pods",
+			relevantPath: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+		},
+		{
+			type: "body_title_anchor",
+			query: "mounted projected credentials for runtime access",
+			relevantPath:
+				"tech-en/content/en/docs/tasks/configure-pod-container/configure-service-account.md",
+		},
+		{
+			type: "basename_partial_body",
+			query: "vector cache restore",
+			relevantPath: "pkm-en/projects/sdk/vector-cache.md",
+		},
+		{
+			type: "path_partial_body",
+			query: "sdk cache restore",
+			relevantPath: "pkm-en/projects/sdk/vector-cache.md",
+		},
+	];
+}
+
 function createEngineHarness(
 	EngineCtor: new () => EngineLike,
 	tokenizer: MockTokenizer,
@@ -2183,6 +2261,165 @@ async function runBenchmark(
 	};
 }
 
+function createCoverageRecallIndex(engine: any) {
+	return {
+		bodyPostings: engine.bodyPostings,
+		metadataAliasPhrasePostings: engine.metadataAliasPhrasePostings,
+		metadataAliasPostings: engine.metadataAliasPostings,
+		metadataBasenamePhrasePostings: engine.metadataBasenamePhrasePostings,
+		metadataBasenamePostings: engine.metadataBasenamePostings,
+		metadataFolderPhrasePostings: engine.metadataFolderPhrasePostings,
+		metadataFolderPostings: engine.metadataFolderPostings,
+		metadataHeadingPhrasePostings: engine.metadataHeadingPhrasePostings,
+		metadataHeadingPostings: engine.metadataHeadingPostings,
+		metadataPostings: engine.metadataPostings,
+		bodyPhrasePostings: engine.bodyPhrasePostings,
+		metadataPhrasePostings: engine.metadataPhrasePostings,
+		metadataTagPhrasePostings: engine.metadataTagPhrasePostings,
+		metadataTagPostings: engine.metadataTagPostings,
+		sortedLexicon: engine.sortedLexicon,
+		documentBodyTokensByPath: new Map(
+			Array.from(engine.documents.entries()).map(
+				([docPath, document]: [string, { bodyTokenSequence: string[] }]) => [
+					docPath,
+					document.bodyTokenSequence,
+				],
+			),
+		),
+	};
+}
+
+async function runCoverageRecallContract(
+	engine: any,
+	tokenizer: MockTokenizer,
+	queryCases: RecallContractCase[],
+): Promise<{
+	unionHitRate: number;
+	zeroRate: number;
+	byType: Record<
+		RecallContractType,
+		{ unionHitRate: number; zeroRate: number; count: number }
+	>;
+	laneHitCounts: Record<string, number>;
+	misses: Array<{
+		query: string;
+		type: RecallContractType;
+		relevantPath: string;
+		queryKind: string;
+		hardAnchors: string[];
+		decisiveBodies: string[];
+		lanes: Array<{ laneName: string; admittedCount: number }>;
+	}>;
+}> {
+	const { buildCoverageLexicalPlan } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-planner",
+	);
+	const {
+		buildCoverageLexicalPhraseSignatures,
+		buildCoverageLexicalStructuredMetadataSignatures,
+	} = require("src/services/search/coverage-lexical/coverage-lexical-bridge");
+	const {
+		collectCoverageLexicalCandidateStatesWithDebug,
+	} = require("src/services/search/coverage-lexical/coverage-lexical-recall");
+
+	const index = createCoverageRecallIndex(engine);
+	let unionHits = 0;
+	const laneHitCounts: Record<string, number> = {};
+	const typeTotals = new Map<
+		RecallContractType,
+		{ unionHits: number; misses: number; count: number }
+	>();
+	const misses: Array<{
+		query: string;
+		type: RecallContractType;
+		relevantPath: string;
+		queryKind: string;
+		hardAnchors: string[];
+		decisiveBodies: string[];
+		lanes: Array<{ laneName: string; admittedCount: number }>;
+	}> = [];
+
+	for (const queryCase of queryCases) {
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryCase.query, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engine.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryCase.query, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryCase.query,
+				plan.families,
+			),
+		];
+		const { candidates, debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			index,
+			plan,
+			phraseSignatures,
+			{
+				queryText: queryCase.query,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 10,
+			},
+		);
+		const hit = candidates.has(queryCase.relevantPath);
+		if (hit) {
+			unionHits += 1;
+		}
+		for (const lane of debug.lanes) {
+			if (lane.admittedPaths.includes(queryCase.relevantPath)) {
+				laneHitCounts[lane.laneName] = (laneHitCounts[lane.laneName] ?? 0) + 1;
+			}
+		}
+		const total =
+			typeTotals.get(queryCase.type) ?? { unionHits: 0, misses: 0, count: 0 };
+		total.count += 1;
+		if (hit) {
+			total.unionHits += 1;
+		} else {
+			total.misses += 1;
+			misses.push({
+				query: queryCase.query,
+				type: queryCase.type,
+				relevantPath: queryCase.relevantPath,
+				queryKind: plan.queryKind,
+				hardAnchors: plan.hardAnchorFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
+				decisiveBodies: plan.decisiveBodyFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
+				lanes: debug.lanes.map((lane: { laneName: string; admittedCount: number }) => ({
+					laneName: lane.laneName,
+					admittedCount: lane.admittedCount,
+				})),
+			});
+		}
+		typeTotals.set(queryCase.type, total);
+	}
+
+	const byType = {} as Record<
+		RecallContractType,
+		{ unionHitRate: number; zeroRate: number; count: number }
+	>;
+	for (const queryCase of queryCases) {
+		const total = typeTotals.get(queryCase.type);
+		if (!total || byType[queryCase.type]) {
+			continue;
+		}
+		byType[queryCase.type] = {
+			unionHitRate: total.unionHits / Math.max(1, total.count),
+			zeroRate: total.misses / Math.max(1, total.count),
+			count: total.count,
+		};
+	}
+
+	return {
+		unionHitRate: unionHits / Math.max(1, queryCases.length),
+		zeroRate: 1 - unionHits / Math.max(1, queryCases.length),
+		byType,
+		laneHitCounts,
+		misses,
+	};
+}
+
 function summarizeWins(
 	leftOutcomes: QueryOutcome[],
 	rightOutcomes: QueryOutcome[],
@@ -2381,6 +2618,11 @@ describe("coverage lexical automation benchmark", () => {
 			documents,
 			queryCases,
 		);
+		const recallContract = await runCoverageRecallContract(
+			coverageLexical as any,
+			tokenizer,
+			buildRecallContractCases(),
+		);
 		const coverageVsMini = summarizeWins(
 			coverageResult.outcomes,
 			miniResult.outcomes,
@@ -2481,6 +2723,29 @@ describe("coverage lexical automation benchmark", () => {
 						]),
 					),
 				})),
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] recall-contract",
+			JSON.stringify(
+				{
+					unionHitRate: round(recallContract.unionHitRate),
+					zeroRate: round(recallContract.zeroRate),
+					byType: Object.fromEntries(
+						Object.entries(recallContract.byType).map(([type, metric]) => [
+							type,
+							{
+								unionHitRate: round(metric.unionHitRate),
+								zeroRate: round(metric.zeroRate),
+								count: metric.count,
+							},
+						]),
+					),
+					laneHitCounts: recallContract.laneHitCounts,
+					misses: recallContract.misses.slice(0, 10),
+				},
 				null,
 				2,
 			),

@@ -48,6 +48,23 @@ export type CoverageLexicalCandidateState = {
 	phraseMatches: Set<number>;
 };
 
+export type CoverageLexicalRecallLaneDebug = {
+	laneName:
+		| "strict_metadata_lane"
+		| "strict_hybrid_lane"
+		| "relaxed_hybrid_lane"
+		| "local_body_lane"
+		| "bridge_lane";
+	candidateCount: number;
+	admittedCount: number;
+	admittedPaths: string[];
+};
+
+export type CoverageLexicalRecallDebug = {
+	lanes: CoverageLexicalRecallLaneDebug[];
+	unionSize: number;
+};
+
 export type CoverageLexicalRoute =
 	| "body-first"
 	| "body-with-anchor"
@@ -63,6 +80,43 @@ export type CoverageLexicalQueryKind =
 export type CoverageLexicalFamilyProbe = {
 	bodyExactDocCount: number;
 	metadataExactDocCount: number;
+	basenameExactDocCount: number;
+	folderExactDocCount: number;
+	headingExactDocCount: number;
+	aliasExactDocCount: number;
+};
+
+export type CoverageLexicalQuerySpanKind =
+	| "raw_shape"
+	| "title_path"
+	| "metadata_intent"
+	| "filler"
+	| "body";
+
+export type CoverageLexicalQuerySpan = {
+	text: string;
+	kind: CoverageLexicalQuerySpanKind;
+	reason: string;
+};
+
+export type CoverageLexicalPlanFamilyReason = {
+	familyIndex: number;
+	term: string;
+	bucket:
+		| "hard_anchor"
+		| "decisive_body"
+		| "support_body"
+		| "optional"
+		| "noise"
+		| "bridge";
+	reasons: string[];
+	spanKinds: CoverageLexicalQuerySpanKind[];
+};
+
+export type CoverageLexicalPlanExplain = {
+	spans: CoverageLexicalQuerySpan[];
+	familyReasons: CoverageLexicalPlanFamilyReason[];
+	queryKindReasons: string[];
 };
 
 export type CoverageLexicalPlan = {
@@ -84,6 +138,7 @@ export type CoverageLexicalPlan = {
 	coreFamilyCount: number;
 	anchorFamilyCount: number;
 	bodyFamilyCount: number;
+	explain: CoverageLexicalPlanExplain;
 };
 
 export type CoverageLexicalAreaSignal = {

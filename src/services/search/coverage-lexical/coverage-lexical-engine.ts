@@ -520,6 +520,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return queryTerms.map((term) => ({
 			bodyExactDocCount: this.bodyPostings.get(term)?.size ?? 0,
 			metadataExactDocCount: this.metadataPostings.get(term)?.size ?? 0,
+			basenameExactDocCount: this.metadataBasenamePostings.get(term)?.size ?? 0,
+			folderExactDocCount: this.metadataFolderPostings.get(term)?.size ?? 0,
+			headingExactDocCount: this.metadataHeadingPostings.get(term)?.size ?? 0,
+			aliasExactDocCount: this.metadataAliasPostings.get(term)?.size ?? 0,
 		}));
 	}
 

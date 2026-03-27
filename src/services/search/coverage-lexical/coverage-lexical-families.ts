@@ -1,4 +1,7 @@
-import type { CoverageLexicalFamily } from "./coverage-lexical-types";
+import type {
+	CoverageLexicalFamily,
+	CoverageLexicalFamilyProbe,
+} from "./coverage-lexical-types";
 
 const STRUCTURAL_TOKEN_REGEX = /^[._/\-]+$/u;
 const NUMBERISH_TOKEN_REGEX = /^(?:\d+|v?\d+(?:[.\-]\d+)+)$/u;
@@ -8,7 +11,7 @@ const EXPLICIT_METADATA_TERM_REGEX =
 
 export function buildCoverageLexicalFamilies(
 	queryTerms: readonly string[],
-	probes: ReadonlyArray<{ bodyExactDocCount: number; metadataExactDocCount: number }> = [],
+	probes: ReadonlyArray<CoverageLexicalFamilyProbe> = [],
 ): CoverageLexicalFamily[] {
 	const shortQueryOverlay = queryTerms.filter((term) => !isStructuralToken(term.trim())).length <= 2;
 	return queryTerms.map((rawTerm, index) => {
@@ -75,7 +78,7 @@ function classifyFamilyRole(
 	strength: CoverageLexicalFamily["strength"],
 	shortQueryOverlay: boolean,
 	isMetadataCapable: boolean,
-	probe: { bodyExactDocCount: number; metadataExactDocCount: number } | undefined,
+	probe: CoverageLexicalFamilyProbe | undefined,
 ): CoverageLexicalFamily["role"] {
 	if (isStructuralToken(term)) {
 		return "noise";
