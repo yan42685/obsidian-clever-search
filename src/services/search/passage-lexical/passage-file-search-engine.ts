@@ -24,6 +24,10 @@ import {
 import { buildLineOffsets, offsetToLine } from "../hybrid/chunker";
 import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
+import {
+	PASSAGE_LEXICAL_RANKER_TUNING,
+	PASSAGE_LEXICAL_SEGMENTATION_TUNING,
+} from "./passage-lexical-ranker-tuning";
 
 type MetadataField = "basename" | "aliases" | "folder" | "tags" | "headings";
 type SearchField = MetadataField | "content";
@@ -123,6 +127,7 @@ type FileCandidateState = {
 	metadataScore: number;
 	metadataLaneScore: number;
 	metadataLaneTier: number;
+	metadataSortSignal: TermFamilySortSignal | null;
 	bestPassageScore: number;
 	secondPassageScore: number;
 	topPassageEvidences: FilePassageEvidence[];
@@ -255,6 +260,7 @@ type MetadataLaneMatch = {
 	matchedQueryTermIndexes: Set<number>;
 	expandedQueryTermIndexes: Set<number>;
 	constituentFields: MetadataField[];
+	sortSignal: TermFamilySortSignal;
 };
 
 type ExperimentalQueryRoute =
@@ -265,6 +271,7 @@ type ExperimentalQueryRoute =
 
 type RankedMatchedFile = MatchedFile & {
 	fileId: number;
+	termFamilySortSignal: TermFamilySortSignal;
 	queryRouteScore: number;
 	metadataLaneScore: number;
 	metadataLaneTier: number;
@@ -300,13 +307,16 @@ type ScriptProfile = {
 	hasHan: boolean;
 };
 
-type PrefixCandidateVerifierSignals = {
+type TermFamilySortSignal = {
 	score: number;
-	coverageRatio: number;
-	exactCoverageRatio: number;
-	shortCoverageRatio: number;
+	matchedQueryTermCount: number;
+	exactWeight: number;
+	prefixWeight: number;
+	fuzzyWeight: number;
+	passageMatchedQueryTermCount: number;
 	compactnessRatio: number;
 	orderRatio: number;
+	span: number;
 };
 
 type QueryLocalePreference = {
@@ -353,9 +363,10 @@ const WORD_EXPANSION_DOC_VISIT_BUDGET = 2200;
 const MULTI_TERM_PREFIX_EXPANSION_LIMIT = 24;
 const MULTI_TERM_PREFIX_MAX_TRAILING_TERMS = 3;
 const PREFIX_EXPANSION_SCAN_LIMIT = 192;
-const PASSAGE_TARGET_TOKENS = 120;
-const PASSAGE_MIN_TOKENS = 48;
-const PASSAGE_OVERLAP_TOKENS = 48;
+const PASSAGE_TARGET_TOKENS = PASSAGE_LEXICAL_SEGMENTATION_TUNING.targetTokens;
+const PASSAGE_MIN_TOKENS = PASSAGE_LEXICAL_SEGMENTATION_TUNING.minTokens;
+const PASSAGE_OVERLAP_TOKENS =
+	PASSAGE_LEXICAL_SEGMENTATION_TUNING.overlapTokens;
 const MAX_PASSAGE_FRONTIER = 192;
 const PASSAGE_PRUNE_TRIGGER = 640;
 const PASSAGE_PRUNE_KEEP = 256;
@@ -368,7 +379,6 @@ const CHAR_CHANNEL_WEIGHT = 0.38;
 const CHAR_QUERY_BIGRAM_LIMIT = 16;
 const CHAR_PASSAGE_SEED_FILE_LIMIT = 24;
 const MAX_FILE_PASSAGE_EVIDENCES = 4;
-const PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT = 24;
 const PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH = 2;
 const PARTIAL_SORT_MIN_RESULTS = 128;
 const PARTIAL_SORT_LIMIT_SCALE = 4;
@@ -382,12 +392,14 @@ const FILE_PASSAGE_SET_SUPPORT_BONUS = 0.72;
 const FILE_PASSAGE_SET_ANCHOR_AGREEMENT_BONUS = 0.68;
 const FILE_PASSAGE_SET_FRAGMENTATION_PENALTY = 1.05;
 const FILE_PASSAGE_SET_DIFFUSE_SUPPORT_PENALTY = 0.62;
-const FILE_METADATA_PRIOR = 0.28;
-const FILE_COVERAGE_BONUS = 1.15;
+const FILE_METADATA_PRIOR = PASSAGE_LEXICAL_RANKER_TUNING.fileMetadataPrior;
+const FILE_COVERAGE_BONUS = PASSAGE_LEXICAL_RANKER_TUNING.fileCoverageBonus;
 const FILE_CHAR_HIT_BONUS = 0.06;
-const FILE_METADATA_ANCHOR_BLEND = 0.82;
+const FILE_METADATA_ANCHOR_BLEND =
+	PASSAGE_LEXICAL_RANKER_TUNING.fileMetadataAnchorBlend;
 const FILE_PATHLIKE_METADATA_ANCHOR_BLEND = 1.28;
-const FILE_MIXED_QUERY_BODY_METADATA_BONUS = 0.74;
+const FILE_MIXED_QUERY_BODY_METADATA_BONUS =
+	PASSAGE_LEXICAL_RANKER_TUNING.fileMixedQueryBodyMetadataBonus;
 const FILE_BASENAME_ALIAS_ANCHOR_BLEND = 1.34;
 const FILE_BASENAME_ALIAS_ONLY_ANCHOR_BONUS = 1.02;
 const FILE_BASENAME_ALIAS_BODY_MIX_BONUS = 0.94;
@@ -413,48 +425,66 @@ const FILE_SHORT_TITLE_ALL_TERMS_PREFIX_BONUS = 1.85;
 const FILE_SHORT_TITLE_STRONG_MATCH_FLOOR = 4.8;
 const FILE_SHORT_TITLE_CONTENT_CONFIRM_BONUS = 0.42;
 const FILE_SHORT_TITLE_ROUTE_THRESHOLD = 8.9;
-const PASSAGE_LOCALITY_COVERAGE_WEIGHT = 0.52;
-const PASSAGE_LOCALITY_ORDER_WEIGHT = 0.4;
-const PASSAGE_LOCALITY_COMPACTNESS_WEIGHT = 0.66;
+const PASSAGE_LOCALITY_COVERAGE_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.passageLocalityCoverageWeight;
+const PASSAGE_LOCALITY_ORDER_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.passageLocalityOrderWeight;
+const PASSAGE_LOCALITY_COMPACTNESS_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.passageLocalityCompactnessWeight;
 const PASSAGE_LOCALITY_RARE_TERM_WEIGHT = 0.24;
 const PASSAGE_LOCALITY_ANCHOR_WEIGHT = 0.22;
 const PASSAGE_LOCALITY_TIGHT_PAIR_WEIGHT = 0.24;
 const PASSAGE_LOCALITY_EXACT_QUERY_WEIGHT = 0.18;
 const PASSAGE_LOCALITY_MATCH_SPECIFICITY_WEIGHT = 0;
 const PASSAGE_LOCALITY_ORDERED_SPECIFICITY_WEIGHT = 0;
-const PASSAGE_LOCALITY_TIGHT_WINDOW_BONUS = 0.24;
-const VERIFIER_COVERAGE_WEIGHT = 0.92;
-const VERIFIER_ORDER_WEIGHT = 0.78;
-const VERIFIER_COMPACTNESS_WEIGHT = 1.1;
+const PASSAGE_LOCALITY_TIGHT_WINDOW_BONUS =
+	PASSAGE_LEXICAL_RANKER_TUNING.passageLocalityTightWindowBonus;
+const VERIFIER_COVERAGE_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.verifierCoverageWeight;
+const VERIFIER_ORDER_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.verifierOrderWeight;
+const VERIFIER_COMPACTNESS_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.verifierCompactnessWeight;
 const VERIFIER_RARE_TERM_WEIGHT = 0.48;
 const VERIFIER_TIGHT_PAIR_WEIGHT = 0.42;
 const VERIFIER_EXACT_QUERY_WEIGHT = 0.26;
-const VERIFIER_EXACT_PHRASE_BONUS = 2.1;
+const VERIFIER_EXACT_PHRASE_BONUS =
+	PASSAGE_LEXICAL_RANKER_TUNING.verifierExactPhraseBonus;
 const VERIFIER_MATCH_SPECIFICITY_WEIGHT = 0;
 const VERIFIER_ORDERED_SPECIFICITY_WEIGHT = 0;
 const VERIFIER_METADATA_ANCHOR_BONUS = 0.8;
 const VERIFIER_PASSAGE_ANCHOR_BONUS = 0.72;
 const VERIFIER_BASENAME_ALIAS_ALIGNMENT_BONUS = 0.44;
 const VERIFIER_HEADING_ALIGNMENT_BONUS = 0.12;
-const VERIFIER_TIGHT_WINDOW_BONUS = 0.55;
-const VERIFIER_LOCAL_WINDOW_WEIGHT = 0.78;
-const PASSAGE_LOCALITY_LOCAL_WINDOW_WEIGHT = 0.42;
+const VERIFIER_TIGHT_WINDOW_BONUS =
+	PASSAGE_LEXICAL_RANKER_TUNING.verifierTightWindowBonus;
+const VERIFIER_LOCAL_WINDOW_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.verifierLocalWindowWeight;
+const PASSAGE_LOCALITY_LOCAL_WINDOW_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.passageLocalityLocalWindowWeight;
 const LOCAL_WINDOW_MAX_SPAN_LIMIT = 32;
 const LOCAL_WINDOW_BASE_SPAN = 8;
 const LOCAL_WINDOW_SPAN_PER_TERM = 5;
-const LOCAL_WINDOW_COVERAGE_WEIGHT = 1.24;
+const LOCAL_WINDOW_COVERAGE_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.localWindowCoverageWeight;
 const LOCAL_WINDOW_EXACT_WEIGHT = 0.22;
-const LOCAL_WINDOW_ANCHOR_WEIGHT = 0.54;
-const LOCAL_WINDOW_COMPACTNESS_WEIGHT = 0.96;
-const LOCAL_WINDOW_ORDER_WEIGHT = 0.34;
+const LOCAL_WINDOW_ANCHOR_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.localWindowAnchorWeight;
+const LOCAL_WINDOW_COMPACTNESS_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.localWindowCompactnessWeight;
+const LOCAL_WINDOW_ORDER_WEIGHT =
+	PASSAGE_LEXICAL_RANKER_TUNING.localWindowOrderWeight;
 const LOCAL_WINDOW_TIGHT_PAIR_WEIGHT = 0.22;
 const LOCAL_WINDOW_RARE_TERM_WEIGHT = 0.16;
 const LOCAL_WINDOW_MATCH_SPECIFICITY_WEIGHT = 0;
 const LOCAL_WINDOW_ORDERED_SPECIFICITY_WEIGHT = 0;
 const PREFIX_FAMILY_LOCAL_WINDOW_COVERAGE_BONUS = 0.42;
-const PREFIX_FAMILY_VERIFIER_COVERAGE_BONUS = 0.54;
-const PREFIX_FAMILY_LOCALITY_COVERAGE_BONUS = 0.34;
-const PREFIX_FAMILY_ORDER_SCALE = 0.42;
+const PREFIX_FAMILY_VERIFIER_COVERAGE_BONUS =
+	PASSAGE_LEXICAL_RANKER_TUNING.prefixFamilyVerifierCoverageBonus;
+const PREFIX_FAMILY_LOCALITY_COVERAGE_BONUS =
+	PASSAGE_LEXICAL_RANKER_TUNING.prefixFamilyLocalityCoverageBonus;
+const PREFIX_FAMILY_ORDER_SCALE =
+	PASSAGE_LEXICAL_RANKER_TUNING.prefixFamilyOrderScale;
 const PREFIX_FAMILY_EXTRA_PREFIX_TERM_PENALTY = 0.08;
 const PREFIX_FAMILY_EXTRA_FUZZY_TERM_PENALTY = 0.16;
 const PREFIX_FAMILY_EXACT_PREFIX_BLEND_PENALTY = 0.03;
@@ -536,13 +566,16 @@ const EMPTY_LOCAL_WINDOW_SET: QueryConditionedLocalWindowSet = {
 	anchorCoverageRatio: 0,
 	compactnessRatio: 0,
 };
-const EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS: PrefixCandidateVerifierSignals = {
+const EMPTY_TERM_FAMILY_SORT_SIGNAL: TermFamilySortSignal = {
 	score: 0,
-	coverageRatio: 0,
-	exactCoverageRatio: 0,
-	shortCoverageRatio: 0,
+	matchedQueryTermCount: 0,
+	exactWeight: 0,
+	prefixWeight: 0,
+	fuzzyWeight: 0,
+	passageMatchedQueryTermCount: 0,
 	compactnessRatio: 0,
 	orderRatio: 0,
+	span: Number.POSITIVE_INFINITY,
 };
 const EMPTY_VERIFIER_SIGNALS: VerifierSignals = {
 	score: 0,
@@ -554,6 +587,7 @@ const EMPTY_VERIFIER_SIGNALS: VerifierSignals = {
 	templatePenaltyRatio: 0,
 	exactPhraseRatio: 0,
 };
+
 const METADATA_FIELD_INDEX: Record<MetadataField, 0 | 1 | 2 | 3 | 4> = {
 	basename: 0,
 	aliases: 1,
@@ -775,9 +809,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		}
 
 		const activeWordTerms = termStats.some((stat) => stat.hasAnyMatch);
-		const enablePrefixCandidateVerifierLane =
-			request.isPrefixMatch &&
-			this.shouldEnablePrefixCandidateVerifierLane(queryTerms, termStats);
+		const enableTermFamilySort = queryTerms.length >= 2 && activeWordTerms;
 		const planner =
 			queryTerms.length > 0 && activeWordTerms
 				? createFileSearchQueryPlanner({
@@ -791,7 +823,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		if (planner && queryTerms.length > 0) {
 			this.applyMetadataExactPrefixLane(
 				queryTerms,
-				prefixTerm,
+				prefixEligibleQueryTermIndexes,
 				planner,
 				termStats,
 				fileStates,
@@ -846,7 +878,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTermWeights,
 				queryTermDecomposition,
 				totalQueryWeight,
-				enablePrefixCandidateVerifierLane,
+				enableTermFamilySort,
 				queryScriptProfile,
 				queryScoringCache,
 			);
@@ -872,19 +904,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
-			this.computeResultSelectionLimit(
-				request.maxItemResults,
-				enablePrefixCandidateVerifierLane,
-			),
+			request.maxItemResults,
+			enableTermFamilySort,
 		);
 		return this.finalizeMatchedFiles(
-			this.applyPrefixCandidateVerifierLane(
-				fallbackSorted,
-				enablePrefixCandidateVerifierLane,
-				queryTerms,
-				fileStates,
-				queryScoringCache,
-			),
+			fallbackSorted,
 			request.maxItemResults,
 			request.maxDirectSubItemResults ?? request.maxItemResults,
 			fileStates,
@@ -1008,6 +1032,34 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		};
 	}
 
+	debugTermAvailability(term: string): Record<string, unknown> | null {
+		const normalizedTerm = this.normalizeTerm(term);
+		const termId = this.wordTermIdByTerm.get(normalizedTerm);
+		const passagePostings =
+			termId !== undefined ? this.passageWordPostings.get(termId) : undefined;
+		const metadataPostingSet =
+			termId !== undefined ? this.metadataTermPostings.get(termId) : undefined;
+		const contentDf = countActivePassagePostings(
+			passagePostings,
+			this.passageFileIdsById,
+			this.pathByFileId,
+		);
+		const metadataDf = Array.from(metadataPostingSet ?? []).reduce((sum, postings) => {
+			return sum + countActiveFilePostings(postings, this.pathByFileId);
+		}, 0);
+
+		return {
+			backend: this.backend,
+			term,
+			normalizedTerm,
+			termId: termId ?? null,
+			hasExactTerm: termId !== undefined,
+			contentDf,
+			metadataDf,
+			totalDf: contentDf + metadataDf,
+		};
+	}
+
 	private searchWithPlanner(
 		request: FileSearchRequest,
 		queryTerms: string[],
@@ -1017,7 +1069,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		queryTermWeights: QueryTermWeightMap,
 		queryTermDecomposition: QueryTermDecomposition,
 		totalQueryWeight: number,
-		enablePrefixCandidateVerifierLane: boolean,
+		enableTermFamilySort: boolean,
 		queryScriptProfile: ScriptProfile,
 		queryScoringCache: QueryScoringCache,
 	): MatchedFile[] {
@@ -1034,8 +1086,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			includeFallbackResults: false,
 		});
 
-		const strictSorted = this.applyPrefixCandidateVerifierLane(
-			this.sortMatchedFiles(
+		const strictSorted = this.sortMatchedFiles(
 			strictResults,
 			planner,
 			queryRoute,
@@ -1043,15 +1094,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
-			this.computeResultSelectionLimit(
-				request.maxItemResults,
-				enablePrefixCandidateVerifierLane,
-			),
-			),
-			enablePrefixCandidateVerifierLane,
-			queryTerms,
-			fileStates,
-			queryScoringCache,
+			request.maxItemResults,
+			enableTermFamilySort,
 		);
 		if (
 			!planner.shouldUseRelaxedResults(
@@ -1069,8 +1113,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			);
 		}
 
-		const relaxedSorted = this.applyPrefixCandidateVerifierLane(
-			this.sortMatchedFiles(
+		const relaxedSorted = this.sortMatchedFiles(
 			relaxedResults,
 			planner,
 			queryRoute,
@@ -1078,15 +1121,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
-			this.computeResultSelectionLimit(
-				request.maxItemResults,
-				enablePrefixCandidateVerifierLane,
-			),
-			),
-			enablePrefixCandidateVerifierLane,
-			queryTerms,
-			fileStates,
-			queryScoringCache,
+			request.maxItemResults,
+			enableTermFamilySort,
 		);
 		if (relaxedSorted.length > 0) {
 			return this.finalizeMatchedFiles(
@@ -1099,8 +1135,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			);
 		}
 
-		const fallbackSorted = this.applyPrefixCandidateVerifierLane(
-			this.sortMatchedFiles(
+		const fallbackSorted = this.sortMatchedFiles(
 			this.collectRankedFiles({
 				fileStates,
 				queryTerms,
@@ -1119,15 +1154,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				queryTerms,
 				queryScriptProfile,
 			},
-			this.computeResultSelectionLimit(
-				request.maxItemResults,
-				enablePrefixCandidateVerifierLane,
-			),
-			),
-			enablePrefixCandidateVerifierLane,
-			queryTerms,
-			fileStates,
-			queryScoringCache,
+			request.maxItemResults,
+			enableTermFamilySort,
 		);
 		return this.finalizeMatchedFiles(
 			fallbackSorted,
@@ -1161,18 +1189,6 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			);
 		}
 		return finalResults;
-	}
-
-	private computeResultSelectionLimit(
-		maxItemResults: number,
-		enablePrefixCandidateVerifierLane: boolean,
-	): number {
-		return Math.max(
-			maxItemResults,
-			enablePrefixCandidateVerifierLane
-				? PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT
-				: 0,
-		);
 	}
 
 	private collectRankedFiles(params: {
@@ -2126,10 +2142,17 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			index >= 0 && indexes.size < MULTI_TERM_PREFIX_MAX_TRAILING_TERMS;
 			index--
 		) {
-			if (!this.isMultiTermPrefixEligible(queryTerms[index])) {
-				break;
+			const term = queryTerms[index];
+			if (this.isMultiTermPrefixEligible(term)) {
+				indexes.add(index);
+				continue;
 			}
-			indexes.add(index);
+			// Allow an exact tail term without disabling prefix-family expansion
+			// for earlier trailing prefix-eligible terms.
+			if (this.hasIndexedExactTerm(term)) {
+				continue;
+			}
+			break;
 		}
 		return indexes;
 	}
@@ -2390,6 +2413,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				metadataScore: 0,
 				metadataLaneScore: 0,
 				metadataLaneTier: 0,
+				metadataSortSignal: null,
 				bestPassageScore: 0,
 				secondPassageScore: 0,
 				topPassageEvidences: [],
@@ -3105,6 +3129,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			metadataDominantBonus;
 		const queryRouteScore = this.computeQueryRouteScore({
 			queryRoute,
+			queryKind: planner?.queryKind ?? null,
 			prefixFamilyMode: queryScoringCache.prefixFamilyMode,
 			bodyCoreScore,
 			metadataCoreScore,
@@ -3181,6 +3206,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTerms,
 			matchedTerms: Array.from(state.matchedTerms),
 			score: baseScore + scoreBonus,
+			termFamilySortSignal: this.computeFileTermFamilySortSignal(
+				state,
+				queryTerms,
+				queryScoringCache,
+			),
 			queryRouteScore,
 			metadataLaneScore: state.metadataLaneScore,
 			metadataLaneTier: state.metadataLaneTier,
@@ -3318,247 +3348,102 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		};
 	}
 
-	private applyPrefixCandidateVerifierLane(
-		results: RankedMatchedFile[],
-		enablePrefixCandidateVerifierLane: boolean,
+	private computeFileTermFamilySortSignal(
+		fileState: FileCandidateState,
 		queryTerms: readonly string[],
-		fileStates: Map<number, FileCandidateState>,
 		queryScoringCache: QueryScoringCache,
-	): RankedMatchedFile[] {
-		if (!enablePrefixCandidateVerifierLane || queryTerms.length < 2 || results.length < 2) {
-			return results;
-		}
-		const normalizedQueryTerms = queryTerms
-			.map((term) => this.normalizeTerm(term))
-			.filter((term) => term.length >= PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH);
-		if (normalizedQueryTerms.length < 2) {
-			return results;
-		}
-		const candidateCount = Math.min(
-			results.length,
-			PREFIX_VERIFIER_LANE_CANDIDATE_LIMIT,
-		);
-		const originalWindow = results.slice(0, candidateCount);
-		const originalOrder = new Map(
-			originalWindow.map((result, index) => [result.fileId, index]),
-		);
-		const signalsByFileId = new Map<number, PrefixCandidateVerifierSignals>();
-		let strongestCoverage = 0;
-		let strongestShortCoverage = 0;
-		for (const result of originalWindow) {
-			const signals = this.computePrefixCandidateVerifierSignals(
-				result,
-				normalizedQueryTerms,
-				fileStates,
-				queryScoringCache,
+	): TermFamilySortSignal {
+		const bestKindByQueryTerm = new Map<number, MatchedQueryTerm["kind"]>();
+		let bestDistanceSignal =
+			fileState.metadataSortSignal ?? EMPTY_TERM_FAMILY_SORT_SIGNAL;
+		let bestPassageMatchedQueryTermCount = 0;
+		for (const queryTermIndex of fileState.matchedMetadataQueryTerms) {
+			bestKindByQueryTerm.set(
+				queryTermIndex,
+				fileState.matchedExpandedMetadataQueryTerms.has(queryTermIndex)
+					? "prefix"
+					: "exact",
 			);
-			signalsByFileId.set(result.fileId, signals);
-			strongestCoverage = Math.max(strongestCoverage, signals.coverageRatio);
-			strongestShortCoverage = Math.max(
-				strongestShortCoverage,
-				signals.shortCoverageRatio,
-			);
-		}
-		if (strongestCoverage < 0.74 && strongestShortCoverage < 0.34) {
-			return results;
-		}
-		const rerankedWindow = [...originalWindow].sort((left, right) => {
-			const laneDecision = this.comparePrefixCandidateVerifierSignals(
-				signalsByFileId.get(left.fileId) ??
-					EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS,
-				signalsByFileId.get(right.fileId) ??
-					EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS,
-			);
-			if (laneDecision !== 0) {
-				return laneDecision;
-			}
-			return (
-				(originalOrder.get(left.fileId) ?? 0) -
-				(originalOrder.get(right.fileId) ?? 0)
-			);
-		});
-		return [...rerankedWindow, ...results.slice(candidateCount)];
-	}
-
-	private shouldEnablePrefixCandidateVerifierLane(
-		queryTerms: readonly string[],
-		termStats: readonly FileSearchQueryTermStats[],
-	): boolean {
-		if (queryTerms.length < 2 || termStats.length === 0) {
-			return false;
-		}
-		let degradedFamilyWeight = 0;
-		let expandedOnlyFamilies = 0;
-		for (const stat of termStats) {
-			const queryTerm = queryTerms[stat.index] ?? "";
-			if (queryTerm.length < PREFIX_VERIFIER_LANE_MIN_TERM_LENGTH) {
-				continue;
-			}
-			if (!stat.hasAnyMatch) {
-				degradedFamilyWeight +=
-					queryTerm.length <
-					innerSetting.search.minTermLengthForPrefixSearch
-						? 1.4
-						: 1;
-				continue;
-			}
-			if (!stat.hasExactMatch) {
-				degradedFamilyWeight += 1;
-				expandedOnlyFamilies += 1;
-			}
-		}
-		return degradedFamilyWeight >= 1.4 || expandedOnlyFamilies >= 2;
-	}
-
-	private comparePrefixCandidateVerifierSignals(
-		left: PrefixCandidateVerifierSignals,
-		right: PrefixCandidateVerifierSignals,
-	): number {
-		const readinessGate =
-			Math.max(left.coverageRatio, right.coverageRatio) >= 0.74 ||
-			Math.max(left.shortCoverageRatio, right.shortCoverageRatio) >= 0.34;
-		if (!readinessGate) {
-			return 0;
-		}
-		const decisionGap = right.score - left.score;
-		if (Math.abs(decisionGap) < 1.15) {
-			return 0;
-		}
-		return decisionGap;
-	}
-
-	private computePrefixCandidateVerifierSignals(
-		result: RankedMatchedFile,
-		queryTerms: readonly string[],
-		fileStates: Map<number, FileCandidateState>,
-		queryScoringCache: QueryScoringCache,
-	): PrefixCandidateVerifierSignals {
-		let bestSignals = EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
-		const fileState = fileStates.get(result.fileId);
-		if (!fileState) {
-			return bestSignals;
 		}
 		for (const evidence of fileState.topPassageEvidences) {
 			const passage = this.getPassageRecord(evidence.passageId);
 			if (!passage) {
 				continue;
 			}
-			const snippetText = this.getPassageText(passage, queryScoringCache);
-			if (!snippetText) {
-				continue;
-			}
-			const signals = this.computePrefixSnippetVerifierSignals(
-				snippetText,
+			const positionSignals = this.getCachedPassagePositionSignals({
+				passage,
+				matchedQueryTerms: evidence.matchedQueryTerms,
+				matchedTermsByQueryTerm: evidence.matchedTermsByQueryTerm,
 				queryTerms,
+				queryScoringCache,
+			});
+			const signal = buildPassageTermFamilySortSignal({
+				positionSignalsByQueryTerm: positionSignals,
+				queryTermCount: queryTerms.length,
+			});
+			bestPassageMatchedQueryTermCount = Math.max(
+				bestPassageMatchedQueryTermCount,
+				signal.matchedQueryTermCount,
 			);
-			if (
-				signals.score > bestSignals.score ||
-				(signals.score === bestSignals.score &&
-					signals.coverageRatio > bestSignals.coverageRatio)
-			) {
-				bestSignals = signals;
+			if (compareTermFamilyDistanceTieBreak(signal, bestDistanceSignal) < 0) {
+				bestDistanceSignal = signal;
+			}
+			for (const [queryTermIndex, positionSignal] of positionSignals) {
+				const existingKind = bestKindByQueryTerm.get(queryTermIndex);
+				if (
+					existingKind === undefined ||
+					compareMatchedKindPriority(
+						positionSignal.representativeKind,
+						existingKind,
+					) < 0
+				) {
+					bestKindByQueryTerm.set(
+						queryTermIndex,
+						positionSignal.representativeKind,
+					);
+				}
 			}
 		}
-		return bestSignals;
+		const exactQueryTermIndexes: number[] = [];
+		const prefixQueryTermIndexes: number[] = [];
+		const fuzzyQueryTermIndexes: number[] = [];
+		for (const [queryTermIndex, kind] of bestKindByQueryTerm) {
+			if (kind === "exact") {
+				exactQueryTermIndexes.push(queryTermIndex);
+			} else if (kind === "prefix") {
+				prefixQueryTermIndexes.push(queryTermIndex);
+			} else {
+				fuzzyQueryTermIndexes.push(queryTermIndex);
+			}
+		}
+		return buildTermFamilySortSignal({
+			exactQueryTermIndexes,
+			prefixQueryTermIndexes,
+			fuzzyQueryTermIndexes,
+			passageMatchedQueryTermCount: bestPassageMatchedQueryTermCount,
+			compactnessRatio: bestDistanceSignal.compactnessRatio,
+			orderRatio: bestDistanceSignal.orderRatio,
+			span: bestDistanceSignal.span,
+		});
 	}
 
-	private computePrefixSnippetVerifierSignals(
-		text: string,
+	private computePassageTermFamilySortSignal(
+		passage: PassageRecord,
+		evidence: FilePassageEvidence,
 		queryTerms: readonly string[],
-	): PrefixCandidateVerifierSignals {
-		const tokenSequence = this.tokenizer
-			.tokenizeSequence(text, "search")
-			.map((term) => this.normalizeTerm(term))
-			.filter((term) => term.length > 0);
-		if (tokenSequence.length === 0) {
-			return EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
-		}
-
-		const matches: Array<{
-			position: number;
-			quality: number;
-			exact: boolean;
-			short: boolean;
-		}> = [];
-		for (const queryTerm of queryTerms) {
-			let bestPosition = -1;
-			let bestQuality = 0;
-			let bestExact = false;
-			for (let position = 0; position < tokenSequence.length; position++) {
-				const token = tokenSequence[position];
-				if (token === queryTerm) {
-					bestPosition = position;
-					bestQuality = 1.28;
-					bestExact = true;
-					break;
-				}
-				if (!token.startsWith(queryTerm)) {
-					continue;
-				}
-				const suffixLength = Math.max(0, token.length - queryTerm.length);
-				const shortQueryPenalty = queryTerm.length <= 2 ? 0.08 : 0;
-				const quality = Math.max(
-					0.52,
-					0.98 -
-						Math.min(0.32, suffixLength * 0.055) -
-						shortQueryPenalty,
-				);
-				if (quality > bestQuality) {
-					bestPosition = position;
-					bestQuality = quality;
-				}
-			}
-			if (bestPosition >= 0) {
-				matches.push({
-					position: bestPosition,
-					quality: bestQuality,
-					exact: bestExact,
-					short: queryTerm.length <= 3,
-				});
-			}
-		}
-		if (matches.length === 0) {
-			return EMPTY_PREFIX_CANDIDATE_VERIFIER_SIGNALS;
-		}
-
-		let orderedPairs = 0;
-		for (let index = 1; index < matches.length; index++) {
-			if (matches[index].position >= matches[index - 1].position) {
-				orderedPairs += 1;
-			}
-		}
-		const matchedCount = matches.length;
-		const exactCount = matches.filter((match) => match.exact).length;
-		const shortEligibleCount = queryTerms.filter((term) => term.length <= 3).length;
-		const shortMatchedCount = matches.filter((match) => match.short).length;
-		const minPosition = Math.min(...matches.map((match) => match.position));
-		const maxPosition = Math.max(...matches.map((match) => match.position));
-		const span = Math.max(1, maxPosition - minPosition + 1);
-		const coverageRatio = matchedCount / queryTerms.length;
-		const exactCoverageRatio = exactCount / queryTerms.length;
-		const shortCoverageRatio =
-			shortEligibleCount > 0 ? shortMatchedCount / shortEligibleCount : 0;
-		const compactnessRatio = Math.min(1, matchedCount / span);
-		const orderRatio =
-			matchedCount > 1 ? orderedPairs / (matchedCount - 1) : coverageRatio;
-		const meanQuality =
-			matches.reduce((sum, match) => sum + match.quality, 0) / queryTerms.length;
-		const fullCoverageBonus = coverageRatio >= 0.999 ? 3.2 : 0;
-		return {
-			score:
-				coverageRatio * 12.5 +
-				exactCoverageRatio * 4.4 +
-				shortCoverageRatio * 3.2 +
-				compactnessRatio * 4.2 +
-				orderRatio * 2.1 +
-				meanQuality * 3.6 +
-				fullCoverageBonus,
-			coverageRatio,
-			exactCoverageRatio,
-			shortCoverageRatio,
-			compactnessRatio,
-			orderRatio,
-		};
+		queryScoringCache: QueryScoringCache,
+	): TermFamilySortSignal {
+		const positionSignals = this.getCachedPassagePositionSignals({
+			passage,
+			matchedQueryTerms: evidence.matchedQueryTerms,
+			matchedTermsByQueryTerm: evidence.matchedTermsByQueryTerm,
+			queryTerms,
+			queryScoringCache,
+		});
+		return buildPassageTermFamilySortSignal({
+			positionSignalsByQueryTerm: positionSignals,
+			queryTermCount: queryTerms.length,
+		});
 	}
 
 	private sortMatchedFiles(
@@ -3570,22 +3455,27 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryScriptProfile: ScriptProfile;
 		} | null = null,
 		limit: number | null = null,
+		enableTermFamilySort: boolean = false,
 	): RankedMatchedFile[] {
 		const comparator = this.createMatchedFileComparator(
 			results,
 			planner,
 			queryRoute,
 			localeContext,
+			enableTermFamilySort,
 		);
+		let sortedResults: RankedMatchedFile[];
 		if (
 			limit !== null &&
 			results.length > limit &&
 			results.length >=
 				Math.max(PARTIAL_SORT_MIN_RESULTS, limit * PARTIAL_SORT_LIMIT_SCALE)
 		) {
-			return this.selectTopMatchedFiles(results, limit, comparator);
+			sortedResults = this.selectTopMatchedFiles(results, limit, comparator);
+		} else {
+			sortedResults = results.sort(comparator);
 		}
-		return results.sort(comparator);
+		return sortedResults;
 	}
 
 	private createMatchedFileComparator(
@@ -3596,6 +3486,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryTerms: readonly string[];
 			queryScriptProfile: ScriptProfile;
 		} | null,
+		enableTermFamilySort: boolean,
 	): (left: RankedMatchedFile, right: RankedMatchedFile) => number {
 		const localePreferenceContext = this.createLocalePreferenceComparisonContext(
 			results,
@@ -3605,12 +3496,48 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			queryRoute === "mixed_anchor"
 				? this.createMixedAnchorComparisonContext(results)
 				: null;
+		const useBodyTermFamilyDistance =
+			enableTermFamilySort && queryRoute === "body_local";
+		const compareRankedFileTermFamilyLeading = (
+			left: RankedMatchedFile,
+			right: RankedMatchedFile,
+		): number =>
+			enableTermFamilySort
+				? compareTermFamilyLeadingSignals(
+						left.termFamilySortSignal,
+						right.termFamilySortSignal,
+					)
+				: 0;
+		const compareRankedFileTermFamilyDistance = (
+			left: RankedMatchedFile,
+			right: RankedMatchedFile,
+		): number => {
+			if (!useBodyTermFamilyDistance) {
+				return 0;
+			}
+			const leftSignal = left.termFamilySortSignal;
+			const rightSignal = right.termFamilySortSignal;
+			if (
+				leftSignal.prefixWeight <= 0 &&
+				rightSignal.prefixWeight <= 0 &&
+				leftSignal.fuzzyWeight <= 0 &&
+				rightSignal.fuzzyWeight <= 0
+			) {
+				return 0;
+			}
+			return compareTermFamilyDistanceTieBreak(leftSignal, rightSignal);
+		};
 		if (
 			queryRoute === "metadata_exact" &&
 			planner?.queryKind === "short_anchor" &&
 			this.shouldRouteShortAnchorResults(results)
 		) {
 			return (left, right) => {
+				const shortAnchorRichPrefixDecision =
+					this.compareShortAnchorRichPrefixDecision(left, right);
+				if (shortAnchorRichPrefixDecision !== 0) {
+					return shortAnchorRichPrefixDecision;
+				}
 				const localePreference = localePreferenceContext
 					? this.compareMirrorLocalePreference(
 							left,
@@ -3620,6 +3547,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
+				}
+				const termFamilyDecision = compareRankedFileTermFamilyLeading(left, right);
+				if (termFamilyDecision !== 0) {
+					return termFamilyDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -3635,6 +3566,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (rightScore !== leftScore) {
 					return rightScore - leftScore;
 				}
+				const termFamilyDistanceDecision =
+					compareRankedFileTermFamilyDistance(left, right);
+				if (termFamilyDistanceDecision !== 0) {
+					return termFamilyDistanceDecision;
+				}
 				return left.path.localeCompare(right.path);
 			};
 		}
@@ -3649,6 +3585,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
+				}
+				const termFamilyDecision = compareRankedFileTermFamilyLeading(left, right);
+				if (termFamilyDecision !== 0) {
+					return termFamilyDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -3667,6 +3607,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (right.shortAnchorLaneScore !== left.shortAnchorLaneScore) {
 					return right.shortAnchorLaneScore - left.shortAnchorLaneScore;
 				}
+				const termFamilyDistanceDecision =
+					compareRankedFileTermFamilyDistance(left, right);
+				if (termFamilyDistanceDecision !== 0) {
+					return termFamilyDistanceDecision;
+				}
 				return left.path.localeCompare(right.path);
 			};
 		}
@@ -3681,6 +3626,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
+				}
+				const termFamilyDecision = compareRankedFileTermFamilyLeading(left, right);
+				if (termFamilyDecision !== 0) {
+					return termFamilyDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -3699,17 +3648,16 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (rightScore !== leftScore) {
 					return rightScore - leftScore;
 				}
+				const termFamilyDistanceDecision =
+					compareRankedFileTermFamilyDistance(left, right);
+				if (termFamilyDistanceDecision !== 0) {
+					return termFamilyDistanceDecision;
+				}
 				return left.path.localeCompare(right.path);
 			};
 		}
 		if (queryRoute === "mixed_anchor") {
 			return (left, right) => {
-				const mixedAnchorDecision = mixedAnchorContext
-					? this.compareMixedAnchorDecision(left, right, mixedAnchorContext)
-					: 0;
-				if (mixedAnchorDecision !== 0) {
-					return mixedAnchorDecision;
-				}
 				const localePreference = localePreferenceContext
 					? this.compareMirrorLocalePreference(
 							left,
@@ -3719,6 +3667,21 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					: 0;
 				if (localePreference !== 0) {
 					return localePreference;
+				}
+				const termFamilyDecision = compareRankedFileTermFamilyLeading(left, right);
+				if (termFamilyDecision !== 0) {
+					return termFamilyDecision;
+				}
+				const mixedAnchorDecision = mixedAnchorContext
+					? this.compareMixedAnchorDecision(
+							left,
+							right,
+							mixedAnchorContext,
+							planner?.queryKind ?? null,
+						)
+					: 0;
+				if (mixedAnchorDecision !== 0) {
+					return mixedAnchorDecision;
 				}
 				if (right.queryRouteScore !== left.queryRouteScore) {
 					return right.queryRouteScore - left.queryRouteScore;
@@ -3752,6 +3715,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (right.scriptFitScore !== left.scriptFitScore) {
 					return right.scriptFitScore - left.scriptFitScore;
 				}
+				const termFamilyDistanceDecision =
+					compareRankedFileTermFamilyDistance(left, right);
+				if (termFamilyDistanceDecision !== 0) {
+					return termFamilyDistanceDecision;
+				}
 				return left.path.localeCompare(right.path);
 			};
 		}
@@ -3761,6 +3729,10 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				: 0;
 			if (localePreference !== 0) {
 				return localePreference;
+			}
+			const termFamilyDecision = compareRankedFileTermFamilyLeading(left, right);
+			if (termFamilyDecision !== 0) {
+				return termFamilyDecision;
 			}
 			if (right.queryRouteScore !== left.queryRouteScore) {
 				return right.queryRouteScore - left.queryRouteScore;
@@ -3794,6 +3766,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 			if (right.scriptFitScore !== left.scriptFitScore) {
 				return right.scriptFitScore - left.scriptFitScore;
+			}
+			const termFamilyDistanceDecision =
+				compareRankedFileTermFamilyDistance(left, right);
+			if (termFamilyDistanceDecision !== 0) {
+				return termFamilyDistanceDecision;
 			}
 			return left.path.localeCompare(right.path);
 		};
@@ -3912,6 +3889,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		left: RankedMatchedFile,
 		right: RankedMatchedFile,
 		context: MixedAnchorComparisonContext,
+		queryKind: FileSearchQueryKind | null,
 	): number {
 		const {
 			titleAnchorPreferenceScoreByPath,
@@ -3921,7 +3899,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		} = context;
 		const queryRouteScoreGap = Math.abs(left.queryRouteScore - right.queryRouteScore);
 		const scoreGap = Math.abs((left.score ?? 0) - (right.score ?? 0));
-		if (queryRouteScoreGap > 42 || scoreGap > 30) {
+		if (queryRouteScoreGap > 10 || scoreGap > 8) {
 			return 0;
 		}
 		const leftTitleAnchorPreferenceScore =
@@ -4032,6 +4010,31 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				this.computeMixedAnchorDecisionScore(right),
 			1.15,
 		);
+	}
+
+	private compareShortAnchorRichPrefixDecision(
+		left: RankedMatchedFile,
+		right: RankedMatchedFile,
+	): number {
+		const leftExactTitle = left.shortAnchorLaneTier >= 5;
+		const rightExactTitle = right.shortAnchorLaneTier >= 5;
+		if (leftExactTitle === rightExactTitle) {
+			return 0;
+		}
+		const exactCandidate = leftExactTitle ? left : right;
+		const expandedCandidate = leftExactTitle ? right : left;
+		if (expandedCandidate.shortAnchorLaneTier < 3) {
+			return 0;
+		}
+		const expandedScore = expandedCandidate.score ?? 0;
+		const exactScore = exactCandidate.score ?? 0;
+		if (
+			expandedScore - exactScore < 4 ||
+			expandedCandidate.queryRouteScore < exactCandidate.queryRouteScore * 0.25
+		) {
+			return 0;
+		}
+		return leftExactTitle ? 1 : -1;
 	}
 
 	private createMixedAnchorComparisonContext(
@@ -4245,10 +4248,11 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	): ExperimentalQueryRoute {
 		switch (planner?.queryKind) {
 			case "short_anchor":
+			case "path_prefix":
 				return "metadata_exact";
 			case "path_like":
-				return "path_anchor";
 			case "mixed":
+			case "body_prefix":
 				return "mixed_anchor";
 			case "sentence_like":
 			default:
@@ -4453,6 +4457,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 	private computeQueryRouteScore(params: {
 		queryRoute: ExperimentalQueryRoute;
+		queryKind: FileSearchQueryKind | null;
 		prefixFamilyMode: boolean;
 		bodyCoreScore: number;
 		metadataCoreScore: number;
@@ -4506,6 +4511,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	}): number {
 		const {
 			queryRoute,
+			queryKind,
 			prefixFamilyMode,
 			bodyCoreScore,
 			metadataCoreScore,
@@ -4821,13 +4827,13 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					titleAnchorEvidence * 10.8 +
 					titleHeadingCoverageRatio * 2.3 +
 					metadataAnchorRatio * 5.2 +
-					metadataLaneTier * 4.2 +
-					metadataLaneScore * 0.3;
+					metadataLaneTier * (queryKind === "body_prefix" ? 1.5 : 4.2) +
+					metadataLaneScore * (queryKind === "body_prefix" ? 0.045 : 0.3);
 				const pathLaneBonus =
 					pathAnchorEvidence * 9.8 +
 					titleHeadingAnchorRatio * 2.4 +
-					metadataLaneTier * 3.3 +
-					metadataLaneScore * 0.24 +
+					metadataLaneTier * (queryKind === "body_prefix" ? 1.25 : 3.3) +
+					metadataLaneScore * (queryKind === "body_prefix" ? 0.035 : 0.24) +
 					pathLocaleFitScore * 0.9;
 				const anchoredMixedScore =
 					bodyCoreScore * 1.2 +
@@ -4887,7 +4893,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 
 	private applyMetadataExactPrefixLane(
 		queryTerms: string[],
-		prefixTerm: string | null,
+		prefixEligibleQueryTermIndexes: ReadonlySet<number>,
 		planner: FileSearchQueryPlanner,
 		termStats: readonly FileSearchQueryTermStats[],
 		fileStates: Map<number, FileCandidateState>,
@@ -4901,7 +4907,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const anchorTerm = queryTerms[anchorIndex];
 		const anchorTerms = this.getMetadataLaneCandidateTerms(
 			anchorTerm,
-			prefixTerm === anchorTerm,
+			prefixEligibleQueryTermIndexes.has(anchorIndex),
 		);
 		if (anchorTerms.length === 0) {
 			return;
@@ -4952,7 +4958,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					fileId,
 					laneField,
 					queryTerms,
-					prefixTerm,
+					prefixEligibleQueryTermIndexes,
 					planner,
 				);
 				if (!match) {
@@ -4979,6 +4985,15 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				state.metadataLaneTier = bestMatch.tier;
 				state.metadataLaneScore = bestMatch.score;
 			}
+			if (
+				!state.metadataSortSignal ||
+				compareTermFamilySortSignals(
+					bestMatch.sortSignal,
+					state.metadataSortSignal,
+				) < 0
+			) {
+				state.metadataSortSignal = bestMatch.sortSignal;
+			}
 			for (const term of bestMatch.matchedTerms) {
 				state.matchedTerms.add(term);
 			}
@@ -5004,7 +5019,16 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		switch (planner.queryKind) {
 			case "short_anchor":
 				return ["basename", "aliases", "headings"];
+			case "body_prefix":
+				return [
+					"basename",
+					"aliases",
+					"folder_basename",
+					"folder_aliases",
+					"headings",
+				];
 			case "path_like":
+			case "path_prefix":
 				return [
 					"folder_basename",
 					"folder_aliases",
@@ -5066,7 +5090,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		fileId: number,
 		laneField: MetadataLaneField,
 		queryTerms: string[],
-		prefixTerm: string | null,
+		prefixEligibleQueryTermIndexes: ReadonlySet<number>,
 		planner: FileSearchQueryPlanner,
 	): MetadataLaneMatch | null {
 		const sequence = this.getMetadataLaneSequence(fileId, laneField);
@@ -5076,8 +5100,9 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		const sequenceMatch = this.computeMetadataLaneSequenceMatch(
 			sequence.tokens,
 			queryTerms,
-			prefixTerm,
-			planner.queryKind === "path_like" &&
+			prefixEligibleQueryTermIndexes,
+			(planner.queryKind === "path_like" ||
+				planner.queryKind === "path_prefix") &&
 				(laneField === "folder_basename" || laneField === "folder_aliases"),
 		);
 		if (!sequenceMatch) {
@@ -5103,15 +5128,20 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			matchedQueryTermIndexes: new Set(
 				queryTerms.map((_, index) => index),
 			),
-			expandedQueryTermIndexes: sequenceMatch.usedPrefix
-				? new Set(
-						queryTerms
-							.map((term, index) => ({ term, index }))
-							.filter(({ term }) => term === prefixTerm)
-							.map(({ index }) => index),
-					)
-				: new Set<number>(),
+			expandedQueryTermIndexes: new Set(sequenceMatch.usedPrefixQueryTermIndexes),
 			constituentFields: sequence.constituentFields,
+			sortSignal: buildMetadataTermFamilySortSignal({
+				queryTermCount: queryTerms.length,
+				exactQueryTermIndexes: new Set(
+					queryTerms
+						.map((_, index) => index)
+						.filter(
+							(index) => !sequenceMatch.usedPrefixQueryTermIndexes.has(index),
+						),
+				),
+				prefixQueryTermIndexes: sequenceMatch.usedPrefixQueryTermIndexes,
+				span: sequenceMatch.spanLength,
+			}),
 		};
 	}
 
@@ -5168,7 +5198,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private computeMetadataLaneSequenceMatch(
 		fieldTokens: readonly string[],
 		queryTerms: readonly string[],
-		prefixTerm: string | null,
+		prefixEligibleQueryTermIndexes: ReadonlySet<number>,
 		allowGaps: boolean,
 	):
 		| {
@@ -5176,6 +5206,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				spanLength: number;
 				exactMatchCount: number;
 				usedPrefix: boolean;
+				usedPrefixQueryTermIndexes: Set<number>;
 				matchedTerms: string[];
 		  }
 		| null {
@@ -5189,6 +5220,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					spanLength: number;
 					exactMatchCount: number;
 					usedPrefix: boolean;
+					usedPrefixQueryTermIndexes: Set<number>;
 					matchedTerms: string[];
 			  }
 			| null = null;
@@ -5198,6 +5230,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			}
 			let exactMatchCount = 0;
 			let usedPrefix = false;
+			const usedPrefixQueryTermIndexes = new Set<number>();
 			const matchedTerms: string[] = [];
 			let matchedAll = true;
 			let currentFieldIndex = startIndex;
@@ -5208,7 +5241,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					? this.findMetadataLaneTokenMatch(
 							fieldTokens,
 							queryTerm,
-							prefixTerm,
+							prefixEligibleQueryTermIndexes.has(offset),
 							currentFieldIndex,
 						)
 					: currentFieldIndex < fieldTokens.length
@@ -5222,8 +5255,12 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				if (fieldTerm === queryTerm) {
 					exactMatchCount += 1;
 					matchedTerms.push(fieldTerm);
-				} else if (queryTerm === prefixTerm && fieldTerm.startsWith(queryTerm)) {
+				} else if (
+					prefixEligibleQueryTermIndexes.has(offset) &&
+					fieldTerm.startsWith(queryTerm)
+				) {
 					usedPrefix = true;
+					usedPrefixQueryTermIndexes.add(offset);
 					matchedTerms.push(fieldTerm);
 				} else {
 					matchedAll = false;
@@ -5254,6 +5291,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 					spanLength,
 					exactMatchCount,
 					usedPrefix,
+					usedPrefixQueryTermIndexes,
 					matchedTerms,
 				};
 			}
@@ -5264,7 +5302,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 	private findMetadataLaneTokenMatch(
 		fieldTokens: readonly string[],
 		queryTerm: string,
-		prefixTerm: string | null,
+		allowPrefix: boolean,
 		startIndex: number,
 	): number {
 		for (let index = startIndex; index < fieldTokens.length; index++) {
@@ -5272,7 +5310,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			if (fieldTerm === queryTerm) {
 				return index;
 			}
-			if (queryTerm === prefixTerm && fieldTerm.startsWith(queryTerm)) {
+			if (allowPrefix && fieldTerm.startsWith(queryTerm)) {
 				return index;
 			}
 		}
@@ -5290,7 +5328,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			case "aliases":
 				return usedPrefix ? 6 : 7;
 			case "folder_basename":
-				return planner.queryKind === "path_like"
+				return planner.queryKind === "path_like" ||
+					planner.queryKind === "path_prefix"
 					? usedPrefix
 						? 6
 						: 7
@@ -5298,7 +5337,8 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 						? 5
 						: 6;
 			case "folder_aliases":
-				return planner.queryKind === "path_like"
+				return planner.queryKind === "path_like" ||
+					planner.queryKind === "path_prefix"
 					? usedPrefix
 						? 5
 						: 6
@@ -5638,7 +5678,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 			return [];
 		}
 		const lineOffsets = this.getFileLineOffsets(state.fileId, queryScoringCache);
-		return state.topPassageEvidences
+		const directSubItems = state.topPassageEvidences
 			.map((evidence) => {
 				const passage = this.getPassageRecord(evidence.passageId);
 				if (!passage) {
@@ -5651,7 +5691,7 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 				const row = offsetToLine(lineOffsets, passage.startOffset);
 				const lineStartOffset = lineOffsets[row] ?? 0;
 				const col = Math.max(0, passage.startOffset - lineStartOffset);
-				return new FileSubItem(
+				const subItem = new FileSubItem(
 					snippetText,
 					row,
 					col,
@@ -5665,8 +5705,55 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 							queryScoringCache,
 						),
 				);
+				return {
+					subItem,
+					evidence,
+					snippetText,
+				};
 			})
-			.filter((subItem): subItem is FileSubItem => subItem !== null);
+			.filter(
+				(
+					entry,
+				): entry is {
+					subItem: FileSubItem;
+					evidence: FilePassageEvidence;
+					snippetText: string;
+				} => entry !== null,
+			);
+		if (queryTerms.length >= 2) {
+			const signalsByPassageId = new Map<number, TermFamilySortSignal>();
+			for (const entry of directSubItems) {
+				const passage = this.getPassageRecord(entry.evidence.passageId);
+				if (!passage) {
+					continue;
+				}
+				const signals = this.computePassageTermFamilySortSignal(
+					passage,
+					entry.evidence,
+					queryTerms,
+					queryScoringCache,
+				);
+				signalsByPassageId.set(entry.evidence.passageId, signals);
+			}
+			directSubItems.sort((left, right) => {
+				const laneDecision = comparePassageTermFamilySortSignals(
+					signalsByPassageId.get(left.evidence.passageId) ??
+						EMPTY_TERM_FAMILY_SORT_SIGNAL,
+					signalsByPassageId.get(right.evidence.passageId) ??
+						EMPTY_TERM_FAMILY_SORT_SIGNAL,
+				);
+				if (laneDecision !== 0) {
+					return laneDecision;
+				}
+				const leftScore = left.subItem.score ?? 0;
+				const rightScore = right.subItem.score ?? 0;
+				if (rightScore !== leftScore) {
+					return rightScore - leftScore;
+				}
+				return left.evidence.passageId - right.evidence.passageId;
+			});
+		}
+		return directSubItems.map((entry) => entry.subItem);
 	}
 
 	private highlightPassageSnippet(
@@ -5935,15 +6022,19 @@ export class PassageFileSearchEngine implements FileSearchEngine {
 		prefixFamilyMode: boolean;
 	}): boolean {
 		const { queryTerms, planner, matchedQueryTermsCount, prefixFamilyMode } = params;
-		if (queryTerms.length <= 2 || matchedQueryTermsCount <= 1) {
+		if (matchedQueryTermsCount <= 1) {
 			return false;
 		}
 		if (prefixFamilyMode && matchedQueryTermsCount >= 2) {
 			return true;
 		}
+		if (queryTerms.length <= 2) {
+			return false;
+		}
 		if (
 			planner?.queryKind === "short_anchor" ||
-			planner?.queryKind === "path_like"
+			planner?.queryKind === "path_like" ||
+			planner?.queryKind === "path_prefix"
 		) {
 			return false;
 		}
@@ -7920,6 +8011,221 @@ function computePrefixFamilyCoverageBonus(params: {
 	);
 }
 
+function computeQueryTermSortWeight(queryTermIndex: number): number {
+	return queryTermIndex + 1;
+}
+
+function sumQueryTermSortWeights(
+	queryTermIndexes: Iterable<number>,
+): number {
+	let total = 0;
+	for (const queryTermIndex of queryTermIndexes) {
+		total += computeQueryTermSortWeight(queryTermIndex);
+	}
+	return total;
+}
+
+function compareDescendingMetric(left: number, right: number): number {
+	const diff = right - left;
+	return Math.abs(diff) > 0.000001 ? diff : 0;
+}
+
+function compareAscendingMetric(left: number, right: number): number {
+	const diff = left - right;
+	return Math.abs(diff) > 0.000001 ? diff : 0;
+}
+
+function computeQueryTermOrderRatio(
+	positionsByQueryTerm: ReadonlyMap<number, number[]>,
+): number {
+	const orderedQueryTermIndexes = Array.from(positionsByQueryTerm.keys()).sort(
+		(left, right) => left - right,
+	);
+	if (orderedQueryTermIndexes.length <= 1) {
+		return orderedQueryTermIndexes.length;
+	}
+	let satisfiedPairWeight = 0;
+	let totalPairWeight = 0;
+	for (let index = 0; index < orderedQueryTermIndexes.length - 1; index++) {
+		const leftQueryTermIndex = orderedQueryTermIndexes[index];
+		const rightQueryTermIndex = orderedQueryTermIndexes[index + 1];
+		const leftPositions = positionsByQueryTerm.get(leftQueryTermIndex) ?? [];
+		const rightPositions = positionsByQueryTerm.get(rightQueryTermIndex) ?? [];
+		if (leftPositions.length === 0 || rightPositions.length === 0) {
+			continue;
+		}
+		const pairWeight =
+			computeQueryTermSortWeight(leftQueryTermIndex) +
+			computeQueryTermSortWeight(rightQueryTermIndex);
+		totalPairWeight += pairWeight;
+		if (hasIncreasingPosition(leftPositions, rightPositions)) {
+			satisfiedPairWeight += pairWeight;
+		}
+	}
+	if (totalPairWeight <= 0) {
+		return 0;
+	}
+	return satisfiedPairWeight / totalPairWeight;
+}
+
+function buildTermFamilySortSignal(params: {
+	exactQueryTermIndexes: Iterable<number>;
+	prefixQueryTermIndexes: Iterable<number>;
+	fuzzyQueryTermIndexes: Iterable<number>;
+	passageMatchedQueryTermCount?: number;
+	compactnessRatio: number;
+	orderRatio: number;
+	span: number;
+}): TermFamilySortSignal {
+	const matchedQueryTermIndexes = new Set<number>();
+	for (const queryTermIndex of params.exactQueryTermIndexes) {
+		matchedQueryTermIndexes.add(queryTermIndex);
+	}
+	for (const queryTermIndex of params.prefixQueryTermIndexes) {
+		matchedQueryTermIndexes.add(queryTermIndex);
+	}
+	for (const queryTermIndex of params.fuzzyQueryTermIndexes) {
+		matchedQueryTermIndexes.add(queryTermIndex);
+	}
+	const exactWeight = sumQueryTermSortWeights(params.exactQueryTermIndexes);
+	const prefixWeight = sumQueryTermSortWeights(params.prefixQueryTermIndexes);
+	const fuzzyWeight = sumQueryTermSortWeights(params.fuzzyQueryTermIndexes);
+	return {
+		score:
+			matchedQueryTermIndexes.size * 1_000_000 +
+			exactWeight * 10_000 +
+			prefixWeight * 100 +
+			fuzzyWeight +
+			params.compactnessRatio * 0.01 +
+			params.orderRatio * 0.001 -
+			(Number.isFinite(params.span) ? params.span : 0) * 0.000001,
+		matchedQueryTermCount: matchedQueryTermIndexes.size,
+		exactWeight,
+		prefixWeight,
+		fuzzyWeight,
+		passageMatchedQueryTermCount: params.passageMatchedQueryTermCount ?? 0,
+		compactnessRatio: params.compactnessRatio,
+		orderRatio: params.orderRatio,
+		span: params.span,
+	};
+}
+
+function compareTermFamilySortSignals(
+	left: TermFamilySortSignal,
+	right: TermFamilySortSignal,
+): number {
+	return (
+		compareTermFamilyLeadingSignals(left, right) ||
+		compareTermFamilyDistanceTieBreak(left, right)
+	);
+}
+
+function comparePassageTermFamilySortSignals(
+	left: TermFamilySortSignal,
+	right: TermFamilySortSignal,
+): number {
+	return (
+		compareTermFamilyLeadingSignals(left, right) ||
+		compareTermFamilyDistanceTieBreak(left, right)
+	);
+}
+
+function compareTermFamilyLeadingSignals(
+	left: TermFamilySortSignal,
+	right: TermFamilySortSignal,
+): number {
+	return (
+		compareDescendingMetric(left.matchedQueryTermCount, right.matchedQueryTermCount) ||
+		compareDescendingMetric(left.exactWeight, right.exactWeight) ||
+		compareDescendingMetric(left.prefixWeight, right.prefixWeight) ||
+		compareDescendingMetric(left.fuzzyWeight, right.fuzzyWeight)
+	);
+}
+
+function compareTermFamilyDistanceTieBreak(
+	left: TermFamilySortSignal,
+	right: TermFamilySortSignal,
+): number {
+	if (
+		left.passageMatchedQueryTermCount > 0 &&
+		right.passageMatchedQueryTermCount > 0
+	) {
+		const passageDecision = compareDescendingMetric(
+			left.passageMatchedQueryTermCount,
+			right.passageMatchedQueryTermCount,
+		);
+		if (passageDecision !== 0) {
+			return passageDecision;
+		}
+	}
+	return (
+		compareDescendingMetric(left.compactnessRatio, right.compactnessRatio) ||
+		compareDescendingMetric(
+			left.passageMatchedQueryTermCount,
+			right.passageMatchedQueryTermCount,
+		) ||
+		compareAscendingMetric(left.span, right.span) ||
+		compareDescendingMetric(left.orderRatio, right.orderRatio) ||
+		compareDescendingMetric(left.score, right.score)
+	);
+}
+
+function buildMetadataTermFamilySortSignal(params: {
+	queryTermCount: number;
+	exactQueryTermIndexes: ReadonlySet<number>;
+	prefixQueryTermIndexes: ReadonlySet<number>;
+	span: number;
+}): TermFamilySortSignal {
+	const matchedQueryTermCount =
+		params.exactQueryTermIndexes.size + params.prefixQueryTermIndexes.size;
+	const compactnessRatio =
+		matchedQueryTermCount > 0 && Number.isFinite(params.span)
+			? matchedQueryTermCount / Math.max(1, params.span)
+			: 0;
+	return buildTermFamilySortSignal({
+		exactQueryTermIndexes: params.exactQueryTermIndexes,
+		prefixQueryTermIndexes: params.prefixQueryTermIndexes,
+		fuzzyQueryTermIndexes: [],
+		passageMatchedQueryTermCount: 0,
+		compactnessRatio,
+		orderRatio: matchedQueryTermCount <= 1 ? matchedQueryTermCount : 1,
+		span: params.span,
+	});
+}
+
+function buildPassageTermFamilySortSignal(params: {
+	positionSignalsByQueryTerm: ReadonlyMap<number, QueryTermPositionSignal>;
+	queryTermCount: number;
+}): TermFamilySortSignal {
+	const exactQueryTermIndexes: number[] = [];
+	const prefixQueryTermIndexes: number[] = [];
+	const fuzzyQueryTermIndexes: number[] = [];
+	const positionsByQueryTerm = new Map<number, number[]>();
+	for (const [queryTermIndex, signal] of params.positionSignalsByQueryTerm) {
+		if (signal.positions.length === 0) {
+			continue;
+		}
+		positionsByQueryTerm.set(queryTermIndex, signal.positions);
+		if (signal.representativeKind === "exact") {
+			exactQueryTermIndexes.push(queryTermIndex);
+		} else if (signal.representativeKind === "prefix") {
+			prefixQueryTermIndexes.push(queryTermIndex);
+		} else {
+			fuzzyQueryTermIndexes.push(queryTermIndex);
+		}
+	}
+	const coverWindow = computeMinimumCoverWindow(positionsByQueryTerm);
+	return buildTermFamilySortSignal({
+		exactQueryTermIndexes,
+		prefixQueryTermIndexes,
+		fuzzyQueryTermIndexes,
+		passageMatchedQueryTermCount: positionsByQueryTerm.size,
+		compactnessRatio: coverWindow.ratio,
+		orderRatio: computeQueryTermOrderRatio(positionsByQueryTerm),
+		span: coverWindow.span,
+	});
+}
+
 function classifyObservedFamilyMatchKind(
 	queryTerm: string,
 	matchedTerm: string,
@@ -8307,7 +8613,10 @@ function buildQueryTermDecomposition(
 	}
 
 	if (planner.queryKind !== "short_anchor") {
-		const desiredBodyTermCount = planner.queryKind === "mixed" ? 2 : 1;
+		const desiredBodyTermCount =
+			planner.queryKind === "mixed" || planner.queryKind === "body_prefix"
+				? 2
+				: 1;
 		const fallbackBodyStats = activeStats
 			.filter((stat) => !anchorTermIndexes.has(stat.index))
 			.sort(compareFallbackBodyStats);
@@ -8325,7 +8634,9 @@ function buildQueryTermDecomposition(
 	const decisiveBodyTermIndexes = new Set<number>();
 	if (planner.queryKind !== "short_anchor" && bodyTermIndexes.size > 0) {
 		const desiredDecisiveBodyTermCount =
-			planner.queryKind === "mixed" || planner.queryKind === "sentence_like"
+			planner.queryKind === "mixed" ||
+			planner.queryKind === "body_prefix" ||
+			planner.queryKind === "sentence_like"
 				? Math.min(2, bodyTermIndexes.size)
 				: 1;
 		const rankedBodyStats = activeStats
@@ -8346,6 +8657,7 @@ function buildQueryTermDecomposition(
 				break;
 			}
 			if (
+				planner.queryKind !== "body_prefix" &&
 				!isEligibleDecisiveBodyStat(stat, {
 					minMatchedDocCount,
 					maxBodyBias,
@@ -8455,6 +8767,8 @@ function buildQueryTermWeightMap(
 			planner?.anchorTermIndexes.has(stat.index)
 				? queryTermDecomposition.queryKind === "short_anchor"
 					? 0.42
+					: queryTermDecomposition.queryKind === "path_prefix"
+						? 0.34
 					: 0.3
 				: 0;
 		const bodyBoost =
@@ -8462,10 +8776,13 @@ function buildQueryTermWeightMap(
 			queryTermDecomposition.queryKind !== "short_anchor"
 				? queryTermDecomposition.queryKind === "sentence_like"
 					? 0.24
+					: queryTermDecomposition.queryKind === "body_prefix"
+						? 0.22
 					: 0.16
 				: 0;
 		const noisePenalty = queryTermDecomposition.noiseTermIndexes.has(stat.index)
-			? queryTermDecomposition.queryKind === "path_like"
+			? queryTermDecomposition.queryKind === "path_like" ||
+				queryTermDecomposition.queryKind === "path_prefix"
 				? 0.1
 				: 0.18
 			: 0;

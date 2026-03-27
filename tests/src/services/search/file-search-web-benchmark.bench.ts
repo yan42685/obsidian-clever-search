@@ -36,6 +36,10 @@ type QueryType =
 	| "title_exact"
 	| "title_prefix"
 	| "prefix_family"
+	| "coverage_guardrail"
+	| "quality_guardrail"
+	| "tail_guardrail"
+	| "locality_guardrail"
 	| "content_dense"
 	| "content_noisy"
 	| "topic_collision"
@@ -52,6 +56,7 @@ type QueryType =
 type BenchmarkSuite = "core" | "adversarial" | "messy_pkm";
 type BenchmarkMetric = {
 	top1: number;
+	top3: number;
 	top5: number;
 	zeroRate: number;
 	count: number;
@@ -90,6 +95,7 @@ type QueryCase = {
 type BenchmarkSummary = {
 	name: string;
 	top1: number;
+	top3: number;
 	top5: number;
 	zeroRate: number;
 	mrr: number;
@@ -99,15 +105,15 @@ type BenchmarkSummary = {
 	estimatedIndexBytes: number;
 	byBucket: Record<
 		CorpusBucket,
-		{ top1: number; top5: number; zeroRate: number; count: number }
+		{ top1: number; top3: number; top5: number; zeroRate: number; count: number }
 	>;
 	byType: Record<
 		QueryType,
-		{ top1: number; top5: number; zeroRate: number; count: number }
+		{ top1: number; top3: number; top5: number; zeroRate: number; count: number }
 	>;
 	bySuite: Record<
 		BenchmarkSuite,
-		{ top1: number; top5: number; zeroRate: number; count: number }
+		{ top1: number; top3: number; top5: number; zeroRate: number; count: number }
 	>;
 };
 
@@ -190,6 +196,10 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"title_exact",
 	"title_prefix",
 	"prefix_family",
+	"coverage_guardrail",
+	"quality_guardrail",
+	"tail_guardrail",
+	"locality_guardrail",
 	"content_dense",
 	"content_noisy",
 	"topic_collision",
@@ -444,6 +454,10 @@ function getDefaultSuiteForType(type: QueryType): BenchmarkSuite {
 		case "content_dense":
 			return "core";
 		case "prefix_family":
+		case "coverage_guardrail":
+		case "quality_guardrail":
+		case "tail_guardrail":
+		case "locality_guardrail":
 		case "unordered_terms":
 		case "content_noisy":
 		case "topic_collision":
@@ -986,6 +1000,82 @@ function createManualBenchmarkCorpus(
 			content:
 				"混合检索 prefix family scoring keeps compact evidence across scripts and retry windows",
 		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/coverage-full.md",
+			basename: "Coverage full witness",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Coverage guardrail",
+			content:
+				"alphaone betatwo gammathree deltafour keeps the only full exact coverage witness for stable rollout recovery",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/coverage-tight-partial.md",
+			basename: "Coverage tight partial",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Coverage guardrail",
+			content:
+				"alphaone betatwo gammathree stays inside one tighter window but never contains the deltafour witness",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/exact-quality-witness.md",
+			basename: "Exact quality witness",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Quality guardrail",
+			content:
+				"config data rollout keeps the exact witness compact inside one decisive passage",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/expanded-quality-noise.md",
+			basename: "Expanded quality noise",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Quality guardrail",
+			content:
+				"configmap datastore rollout keeps expanded witness coverage in one compact passage without the exact phrase",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/tail-decisive-recovery.md",
+			basename: "Tail decisive recovery",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Tail guardrail",
+			content:
+				"connection policy timeout recovery explains the real remediation path after a failed deploy",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/tail-decisive-retry.md",
+			basename: "Tail decisive retry",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Tail guardrail",
+			content:
+				"connection policy timeout retry explains a noisy fallback path and avoids the real recovery decision",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/locality-compact.md",
+			basename: "Locality compact witness",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Locality guardrail",
+			content:
+				"stale mount restart window keeps the decisive diagnosis compact inside one short operational note",
+		},
+		{
+			bucket: "tech-en",
+			path: "adversarial/ranker-lab/en/locality-diffuse.md",
+			basename: "Locality diffuse witness",
+			folder: "adversarial/ranker-lab/en",
+			headings: "Locality guardrail",
+			content: [
+				"stale mount can appear during long migrations.",
+				"unrelated rollout reminders stay in a copied appendix.",
+				"restart planning belongs to another checklist.",
+				"the critical window discussion is scattered across the page.",
+			].join("\n\n"),
+		},
 	];
 
 	const queryCases: QueryCase[] = [
@@ -1466,6 +1556,34 @@ function createManualBenchmarkCorpus(
 			type: "prefix_family",
 			suite: "adversarial",
 		},
+		{
+			query: "alphaone betatwo gammathree deltafour",
+			relevantPath: "adversarial/ranker-lab/en/coverage-full.md",
+			bucket: "tech-en",
+			type: "coverage_guardrail",
+			suite: "adversarial",
+		},
+		{
+			query: "config data rollout",
+			relevantPath: "adversarial/ranker-lab/en/exact-quality-witness.md",
+			bucket: "tech-en",
+			type: "quality_guardrail",
+			suite: "adversarial",
+		},
+		{
+			query: "connection policy timeout recovery",
+			relevantPath: "adversarial/ranker-lab/en/tail-decisive-recovery.md",
+			bucket: "tech-en",
+			type: "tail_guardrail",
+			suite: "adversarial",
+		},
+		{
+			query: "stale mount restart window",
+			relevantPath: "adversarial/ranker-lab/en/locality-compact.md",
+			bucket: "tech-en",
+			type: "locality_guardrail",
+			suite: "adversarial",
+		},
 	];
 
 	return {
@@ -1539,6 +1657,7 @@ function estimateIndexBytes(engine: EngineLike): number {
 function createEmptyMetric(): BenchmarkMetric {
 	return {
 		top1: 0,
+		top3: 0,
 		top5: 0,
 		zeroRate: 0,
 		count: 0,
@@ -1548,12 +1667,16 @@ function createEmptyMetric(): BenchmarkMetric {
 function incrementMetric(
 	metric: BenchmarkMetric,
 	hitTop1: boolean,
+	hitTop3: boolean,
 	hitTop5: boolean,
 	missed: boolean,
 ) {
 	metric.count += 1;
 	if (hitTop1) {
 		metric.top1 += 1;
+	}
+	if (hitTop3) {
+		metric.top3 += 1;
 	}
 	if (hitTop5) {
 		metric.top5 += 1;
@@ -1566,6 +1689,7 @@ function incrementMetric(
 function finalizeMetric(metric: BenchmarkMetric): BenchmarkMetric {
 	return {
 		top1: metric.top1 / Math.max(1, metric.count),
+		top3: metric.top3 / Math.max(1, metric.count),
 		top5: metric.top5 / Math.max(1, metric.count),
 		zeroRate: metric.zeroRate / Math.max(1, metric.count),
 		count: metric.count,
@@ -1594,6 +1718,7 @@ async function runBenchmark(
 	const timings: number[] = [];
 	const outcomes: QueryOutcome[] = [];
 	let top1Hits = 0;
+	let top3Hits = 0;
 	let top5Hits = 0;
 	let zeroHits = 0;
 	let reciprocalRank = 0;
@@ -1618,11 +1743,15 @@ async function runBenchmark(
 		const paths = results.map((result) => result.path);
 		const rank = paths.findIndex((item) => item === queryCase.relevantPath) + 1;
 		const hitTop1 = rank === 1;
+		const hitTop3 = rank > 0 && rank <= 3;
 		const hitTop5 = rank > 0 && rank <= 5;
 		const missed = rank === 0;
 
 		if (hitTop1) {
 			top1Hits += 1;
+		}
+		if (hitTop3) {
+			top3Hits += 1;
 		}
 		if (hitTop5) {
 			top5Hits += 1;
@@ -1634,16 +1763,16 @@ async function runBenchmark(
 
 		const bucketMetric =
 			bucketTotals.get(queryCase.bucket) ?? createEmptyMetric();
-		incrementMetric(bucketMetric, hitTop1, hitTop5, missed);
+		incrementMetric(bucketMetric, hitTop1, hitTop3, hitTop5, missed);
 		bucketTotals.set(queryCase.bucket, bucketMetric);
 
 		const typeMetric = typeTotals.get(queryCase.type) ?? createEmptyMetric();
-		incrementMetric(typeMetric, hitTop1, hitTop5, missed);
+		incrementMetric(typeMetric, hitTop1, hitTop3, hitTop5, missed);
 		typeTotals.set(queryCase.type, typeMetric);
 
 		const suiteMetric =
 			suiteTotals.get(queryCase.suite) ?? createEmptyMetric();
-		incrementMetric(suiteMetric, hitTop1, hitTop5, missed);
+		incrementMetric(suiteMetric, hitTop1, hitTop3, hitTop5, missed);
 		suiteTotals.set(queryCase.suite, suiteMetric);
 
 		outcomes.push({
@@ -1664,6 +1793,7 @@ async function runBenchmark(
 		summary: {
 			name,
 			top1: top1Hits / total,
+			top3: top3Hits / total,
 			top5: top5Hits / total,
 			zeroRate: zeroHits / total,
 			mrr: reciprocalRank / total,
@@ -1893,6 +2023,7 @@ describe("file search benchmark on web-notes-v2", () => {
 				[miniResult.summary, customResult.summary, passageResult.summary].map((summary) => ({
 					name: summary.name,
 					top1: round(summary.top1),
+					top3: round(summary.top3),
 					top5: round(summary.top5),
 					zeroRate: round(summary.zeroRate),
 					mrr: round(summary.mrr),
@@ -1905,6 +2036,7 @@ describe("file search benchmark on web-notes-v2", () => {
 							bucket,
 							{
 								top1: round(stats.top1),
+								top3: round(stats.top3),
 								top5: round(stats.top5),
 								zeroRate: round(stats.zeroRate),
 								count: stats.count,
@@ -1916,6 +2048,7 @@ describe("file search benchmark on web-notes-v2", () => {
 							type,
 							{
 								top1: round(stats.top1),
+								top3: round(stats.top3),
 								top5: round(stats.top5),
 								zeroRate: round(stats.zeroRate),
 								count: stats.count,
@@ -1927,6 +2060,7 @@ describe("file search benchmark on web-notes-v2", () => {
 							suite,
 							{
 								top1: round(stats.top1),
+								top3: round(stats.top3),
 								top5: round(stats.top5),
 								zeroRate: round(stats.zeroRate),
 								count: stats.count,

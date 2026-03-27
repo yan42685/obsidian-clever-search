@@ -1186,6 +1186,22 @@ Practical rollback rule:
 - if a change is best described as "another bonus or penalty inside the generic route score", assume it is low-priority unless it is the minimum effective guardrail for a live failure
 - when quality is already preserved by an upstream aggregate signal, remove downstream duplicate bonuses first before adding any new term
 
+### Meta Rules For The Next Lexical Backend
+
+The detailed automation-facing meta rules now live in `src/services/search/hybrid/automation-design.md`.
+
+This split is intentional:
+
+- `DESIGN.md` stays focused on architecture, staging, and execution strategy
+- `automation-design.md` becomes the single source of truth for detailed ranking invariants, family rules, planner rules, fallback rules, passage-shape tuning rules, and automated keep-or-revert protocol
+- `src/services/search/passage-lexical/passage-lexical-ranker-tuning.ts` is the default tuning surface for automation; the benchmark controller should evaluate candidate manifests against that layer rather than owning a fixed grid itself
+- `scripts/lexical-optimizer/automation-prompt.md` is the short operator prompt for Codex-style automation loops, while `automation-design.md` remains the higher-priority detailed rule file
+
+Execution rule:
+
+- any automation or agentic optimization loop for the next lexical backend must read `automation-design.md` before starting a cycle
+- if a short prompt summary conflicts with the detailed file, `automation-design.md` wins
+
 ### Phase A: Metadata Exact-Prefix Lane
 
 Status:

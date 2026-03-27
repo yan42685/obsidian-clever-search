@@ -14,6 +14,7 @@
 		"benchmark:file-search": "node scripts/file-search-benchmark.mjs",
 		"benchmark:file-search:regression": "node scripts/file-search-benchmark.mjs --mode=regression",
 		"benchmark:file-search:web": "node node_modules/jest/bin/jest.js --config jest.file-search-web-benchmark.config.js --runInBand",
+		"benchmark:file-search:autotune": "node scripts/passage-file-autotune.mjs",
 		"benchmark:hybrid": "node scripts/hybrid-search-benchmark.mjs",
 		"benchmark:runtime-rebuild": "node node_modules/jest/bin/jest.js --config jest.runtime-rebuild.config.js --runInBand",
 		"benchmark:hybrid:real-ab": "node scripts/hybrid-real-ab-benchmark.mjs --dry-run",
@@ -22,6 +23,9 @@
 		"benchmark:hybrid:regression": "node scripts/hybrid-search-benchmark.mjs --mode=regression",
 		"benchmark:hybrid:tune": "node scripts/hybrid-search-benchmark.mjs --mode=tune",
 		"benchmark:hybrid:tune:regression": "node scripts/hybrid-search-benchmark.mjs --mode=tune-regression",
+		"optimize:lexical": "node scripts/lexical-optimizer/run.mjs",
+		"optimize:lexical:parameter": "node scripts/lexical-optimizer/run.mjs --mode=parameter",
+		"optimize:lexical:mechanism": "node scripts/lexical-optimizer/run.mjs --mode=mechanism",
 		"release": "node release-script.mjs"
 	},
 	"keywords": [],

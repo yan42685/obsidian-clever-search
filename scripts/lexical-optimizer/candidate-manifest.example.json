@@ -1,0 +1,22 @@
+{
+	"candidates": [
+		{
+			"label": "smaller-passages-stronger-verifier",
+			"values": {
+				"targetTokens": 108,
+				"overlapTokens": 40,
+				"verifierCoverageWeight": 1.02,
+				"localWindowCompactnessWeight": 1.04
+			}
+		},
+		{
+			"label": "body-heavier-local-window",
+			"values": {
+				"fileMetadataPrior": 0.24,
+				"passageLocalityCoverageWeight": 0.6,
+				"verifierLocalWindowWeight": 0.84,
+				"prefixFamilyOrderScale": 0.46
+			}
+		}
+	]
+}
