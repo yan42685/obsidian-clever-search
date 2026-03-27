@@ -42,11 +42,27 @@ export type CoverageLexicalAreaSignal = {
 	fuzzyWeight: number;
 };
 
+export type CoverageLexicalLocalWindowSignal = {
+	start: number;
+	end: number;
+	coreCoverageCount: number;
+	exactCoreWeight: number;
+	prefixCoreWeight: number;
+	fuzzyCoreWeight: number;
+	anchorCoverageCount: number;
+	softCoverageCount: number;
+	orderedPairCount: number;
+	orderRatio: number;
+	compactnessRatio: number;
+	score: number;
+};
+
 export type CoverageLexicalFamilySignal = {
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
 	tailCoreWeight: number;
 	tailSoftWeight: number;
+	localWindow: CoverageLexicalLocalWindowSignal;
 	matchedTerms: string[];
 };

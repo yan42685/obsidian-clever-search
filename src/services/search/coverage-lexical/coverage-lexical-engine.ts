@@ -14,15 +14,18 @@ import {
 	rankCoverageLexicalResults,
 	type CoverageLexicalRankableResult,
 } from "./coverage-lexical-ranker";
+import { buildCoverageLexicalLocalWindowSignal } from "./coverage-lexical-windowing";
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
 	CoverageLexicalFamily,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalFamilySignal,
+	CoverageLexicalLocalWindowSignal,
 } from "./coverage-lexical-types";
 
 type CoverageLexicalDocument = {
+	bodyTokenSequence: string[];
 	bodyTerms: Set<string>;
 	metadataTerms: Set<string>;
 };
@@ -35,6 +38,8 @@ type CoverageLexicalCandidateState = {
 const MAX_PREFIX_EXPANSIONS = 48;
 const MAX_FUZZY_EXPANSIONS = 24;
 const COVERAGE_CANDIDATE_MULTIPLIER = 4;
+const LOCAL_WINDOW_RERANK_MULTIPLIER = 6;
+const MIN_LOCAL_WINDOW_RERANK_BUDGET = 48;
 
 @singleton()
 export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
@@ -99,10 +104,34 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			return [];
 		}
 
+		const coarseResults = Array.from(candidates.entries())
+			.map(([path, state]) =>
+				this.createRankableResult(path, queryTerms, plan.families, state, false),
+			)
+			.filter((result): result is CoverageLexicalRankableResult => result !== null);
+		const coarseRanked = rankCoverageLexicalResults(coarseResults, plan);
+		const localWindowBudget = Math.min(
+			coarseRanked.length,
+			Math.max(
+				MIN_LOCAL_WINDOW_RERANK_BUDGET,
+				request.maxItemResults * LOCAL_WINDOW_RERANK_MULTIPLIER,
+			),
+		);
+		const localWindowPaths = new Set(
+			coarseRanked
+				.slice(0, localWindowBudget)
+				.map((result) => result.path),
+		);
 		const ranked = rankCoverageLexicalResults(
 			Array.from(candidates.entries())
 				.map(([path, state]) =>
-					this.createRankableResult(path, queryTerms, plan.families, state),
+					this.createRankableResult(
+						path,
+						queryTerms,
+						plan.families,
+						state,
+						localWindowPaths.has(path),
+					),
 				)
 				.filter((result): result is CoverageLexicalRankableResult => result !== null),
 			plan,
@@ -134,11 +163,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private indexDocument(document: IndexedDocument): void {
 		this.removeDocument(document.path);
 
-		const bodyTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(document.content ?? "", "index")
-				.map((term) => term.toLowerCase()),
-		);
+		const bodyTokenSequence = this.tokenizer
+			.tokenizeSequence(document.content ?? "", "index")
+			.map((term) => term.toLowerCase());
+		const bodyTerms = new Set(bodyTokenSequence);
 		const metadataTerms = new Set(
 			this.tokenizer
 				.tokenizeSequence(
@@ -155,6 +183,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		);
 
 		this.documents.set(document.path, {
+			bodyTokenSequence,
 			bodyTerms,
 			metadataTerms,
 		});
@@ -287,8 +316,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		queryTerms: readonly string[],
 		families: readonly CoverageLexicalFamily[],
 		state: CoverageLexicalCandidateState,
+		includeLocalWindow: boolean,
 	): CoverageLexicalRankableResult | null {
-		const signal = buildCoverageSignal(families, state);
+		const document = this.documents.get(path);
+		if (!document) {
+			return null;
+		}
+		const signal = buildCoverageSignal(
+			families,
+			state,
+			document.bodyTokenSequence,
+			includeLocalWindow,
+		);
 		if (
 			signal.coreBody.coverageCount === 0 &&
 			signal.softBody.coverageCount === 0 &&
@@ -358,6 +397,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 function buildCoverageSignal(
 	families: readonly CoverageLexicalFamily[],
 	state: CoverageLexicalCandidateState,
+	bodyTokenSequence: readonly string[],
+	includeLocalWindow: boolean,
 ): CoverageLexicalFamilySignal {
 	const coreBody = createEmptyAreaSignal();
 	const softBody = createEmptyAreaSignal();
@@ -408,6 +449,9 @@ function buildCoverageSignal(
 		metadataAnchor,
 		tailCoreWeight,
 		tailSoftWeight,
+		localWindow: includeLocalWindow
+			? buildCoverageLexicalLocalWindowSignal(bodyTokenSequence, families)
+			: createEmptyLocalWindowSignal(),
 		matchedTerms: Array.from(matchedTerms),
 	};
 }
@@ -431,6 +475,23 @@ function createEmptyAreaSignal(): CoverageLexicalAreaSignal {
 		exactWeight: 0,
 		prefixWeight: 0,
 		fuzzyWeight: 0,
+	};
+}
+
+function createEmptyLocalWindowSignal(): CoverageLexicalLocalWindowSignal {
+	return {
+		start: -1,
+		end: -1,
+		coreCoverageCount: 0,
+		exactCoreWeight: 0,
+		prefixCoreWeight: 0,
+		fuzzyCoreWeight: 0,
+		anchorCoverageCount: 0,
+		softCoverageCount: 0,
+		orderedPairCount: 0,
+		orderRatio: 0,
+		compactnessRatio: 0,
+		score: 0,
 	};
 }
 
