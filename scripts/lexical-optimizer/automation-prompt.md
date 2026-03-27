@@ -4,8 +4,11 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 
 ## Ownership
 
-- treat `src/services/search/passage-lexical/passage-lexical-ranker.ts` as the primary tuning surface
-- treat that file as the orchestration surface for the next lexical backend, not as a license to endlessly patch the legacy `passage-bm25` engine
+- treat `src/services/search/passage-lexical/coverage-lexical-engine.ts` as the designated implementation target for the new lexical engine
+- treat `src/services/search/passage-lexical/passage-lexical-ranker.ts` as the smaller tuning / orchestration surface around that engine
+- the new lexical engine must be code-wise independent from the legacy `passage-bm25` implementation
+- do not modify or reuse `src/services/search/passage-lexical/passage-file-search-engine.ts` as the optimization target
+- do not copy old scorer, verifier, comparator, or route logic into the new backend and call it a new engine
 - do not treat the controller's old fixed parameter grid as the source of truth
 - `scripts/lexical-optimizer/run.mjs` is only an evaluator and report writer
 - automation should generate candidate manifests; the controller should not invent the search space
@@ -13,9 +16,10 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 ## Mechanism Bias
 
 - prefer mechanism-level gains over coefficient-only tuning
-- if a hypothesis needs a new verifier lane, planner path, scoring structure, or backend module, implement it instead of only nudging numeric weights
+- if a hypothesis needs a new verifier lane, planner path, scoring structure, or backend module, implement it in new backend code instead of only nudging numeric weights
 - do not spend repeated cycles on tiny constant changes unless the previous cycle already proved a clear benchmark lift
-- when the legacy `passage-bm25` hot path seems to be the bottleneck, propose or implement a replacement module under `src/services/search/passage-lexical/` rather than adding more patch layers to the old engine
+- mechanism-level work should land in `src/services/search/passage-lexical/coverage-lexical-engine.ts` unless there is a very strong reason to split additional new-backend modules beside it
+- when the legacy `passage-bm25` hot path seems to be the bottleneck, build or extend the replacement engine without depending on old engine internals
 - the goal is a new lexical stack that can clearly outperform the current baseline, not a long tail of low-yield patching
 
 ## What To Optimize
@@ -33,12 +37,14 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 
 1. Form one primary hypothesis from `automation-design.md`.
 2. Decide whether that hypothesis is `parameter-level` or `mechanism-level`; prefer `mechanism-level` when the expected gain is structural.
-3. Edit `src/services/search/passage-lexical/passage-lexical-ranker.ts` and any new ranker/backend modules needed by that hypothesis.
-4. If the change is only numeric, keep it small and reversible.
-5. Write a candidate manifest to `.codex-bench/lexical-optimizer/candidates.json`.
-6. Run `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json`.
-7. Keep only changes that satisfy the keep rules.
-8. Revert low-value complexity.
+3. Land mechanism-level backend work in `src/services/search/passage-lexical/coverage-lexical-engine.ts`.
+4. Use `src/services/search/passage-lexical/passage-lexical-ranker.ts` only as the smaller tuning / orchestration surface around that backend.
+5. If extra backend modules are required, keep them clearly within the new coverage backend rather than borrowing legacy engine code.
+6. If the change is only numeric, keep it small and reversible.
+7. Write a candidate manifest to `.codex-bench/lexical-optimizer/candidates.json`.
+8. Run `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json`.
+9. Keep only changes that satisfy the keep rules.
+10. Revert low-value complexity.
 
 ## Local Loop Commands
 

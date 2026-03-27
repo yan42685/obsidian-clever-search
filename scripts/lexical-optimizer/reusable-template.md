@@ -9,13 +9,20 @@ Use this template when you want to port the current automation loop to another l
 - keep segmentation and ranker weights in one small file
 - let automation patch that file directly
 - avoid patching the full engine when only tuning is needed
+- if the goal is a replacement backend, keep its ranking logic code-wise independent from the legacy engine rather than evolving the old engine in place
 
-2. Provide one benchmark entrypoint.
+2. Provide one explicit implementation target file for mechanism work.
+
+- for this repository, that file is `src/services/search/passage-lexical/coverage-lexical-engine.ts`
+- keep new backend mechanism work there rather than inside the legacy engine
+- use the tuning surface only for smaller orchestration and numeric tuning
+
+3. Provide one benchmark entrypoint.
 
 - it must print a machine-readable summary marker
 - it must include `hits@1`, `hits@3`, `hits@5`, average latency, tail latency, and persisted index size
 
-3. Provide one candidate manifest file.
+4. Provide one candidate manifest file.
 
 - format: JSON array or `{ "candidates": [...] }`
 - each candidate should contain a `label` and numeric `values`
@@ -23,6 +30,7 @@ Use this template when you want to port the current automation loop to another l
 ## Default Files
 
 - tuning surface: `src/services/search/passage-lexical/passage-lexical-ranker.ts`
+- implementation target: `src/services/search/passage-lexical/coverage-lexical-engine.ts`
 - candidate manifest: `.codex-bench/lexical-optimizer/candidates.json`
 - example manifest: `scripts/lexical-optimizer/candidate-manifest.example.json`
 - operator prompt: `scripts/lexical-optimizer/automation-prompt.md`

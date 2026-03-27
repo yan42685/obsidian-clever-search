@@ -1194,9 +1194,11 @@ This split is intentional:
 
 - `DESIGN.md` stays focused on architecture, staging, and execution strategy
 - `automation-design.md` becomes the single source of truth for detailed ranking invariants, family rules, planner rules, fallback rules, passage-shape tuning rules, and automated keep-or-revert protocol
-- `src/services/search/passage-lexical/passage-lexical-ranker.ts` is the default tuning surface for automation; the benchmark controller should evaluate candidate manifests against that layer rather than owning a fixed grid itself
+- `src/services/search/passage-lexical/coverage-lexical-engine.ts` is the designated implementation file for the replacement lexical backend
+- `src/services/search/passage-lexical/passage-lexical-ranker.ts` remains the smaller tuning surface for automation; the benchmark controller should evaluate candidate manifests against that layer rather than owning a fixed grid itself
 - `scripts/lexical-optimizer/automation-prompt.md` is the short operator prompt for Codex-style automation loops, while `automation-design.md` remains the higher-priority detailed rule file
 - automation should be mechanism-first: if repeated coefficient-only edits on the old `passage-bm25` path do not move the benchmark, the next cycle should switch to a structural backend hypothesis instead of continuing patch-style tuning
+- the intended replacement backend must be code-wise independent from `passage-bm25`; shared benchmark harness or utility code is fine, but ranking logic must not be inherited from `src/services/search/passage-lexical/passage-file-search-engine.ts`
 
 Execution rule:
 
