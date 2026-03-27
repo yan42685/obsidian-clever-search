@@ -35,16 +35,22 @@ import type {
 	CoverageLexicalFamily,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalFamilySignal,
+	CoverageLexicalMetadataField,
 	CoverageLexicalPairSignature,
 	CoverageLexicalPhraseSignature,
 } from "./coverage-lexical-types";
 
 type CoverageLexicalDocument = {
+	aliasTerms: Set<string>;
+	basenameTerms: Set<string>;
 	bodyTokenSequence: string[];
 	bodyPhraseTerms: Set<string>;
 	bodyTerms: Set<string>;
+	folderTerms: Set<string>;
+	headingTerms: Set<string>;
 	metadataPhraseTerms: Set<string>;
 	metadataTerms: Set<string>;
+	tagTerms: Set<string>;
 };
 const LOCAL_WINDOW_RERANK_MULTIPLIER = 6;
 const MIN_LOCAL_WINDOW_RERANK_BUDGET = 48;
@@ -58,8 +64,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
 	private readonly bodyPostings = new Map<string, Set<string>>();
 	private readonly bodyPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataAliasPostings = new Map<string, Set<string>>();
+	private readonly metadataBasenamePostings = new Map<string, Set<string>>();
+	private readonly metadataFolderPostings = new Map<string, Set<string>>();
+	private readonly metadataHeadingPostings = new Map<string, Set<string>>();
 	private readonly metadataPostings = new Map<string, Set<string>>();
 	private readonly metadataPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataTagPostings = new Map<string, Set<string>>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexicon: string[] = [];
 
@@ -83,8 +94,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.clear();
 		this.bodyPostings.clear();
 		this.bodyPhrasePostings.clear();
+		this.metadataAliasPostings.clear();
+		this.metadataBasenamePostings.clear();
+		this.metadataFolderPostings.clear();
+		this.metadataHeadingPostings.clear();
 		this.metadataPostings.clear();
 		this.metadataPhrasePostings.clear();
+		this.metadataTagPostings.clear();
 		this.lexicon.clear();
 		this.sortedLexicon = [];
 	}
@@ -116,9 +132,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const candidates = collectCoverageLexicalCandidateStates(
 			{
 				bodyPostings: this.bodyPostings,
+				metadataAliasPostings: this.metadataAliasPostings,
+				metadataBasenamePostings: this.metadataBasenamePostings,
+				metadataFolderPostings: this.metadataFolderPostings,
+				metadataHeadingPostings: this.metadataHeadingPostings,
 				metadataPostings: this.metadataPostings,
 				bodyPhrasePostings: this.bodyPhrasePostings,
 				metadataPhrasePostings: this.metadataPhrasePostings,
+				metadataTagPostings: this.metadataTagPostings,
 				sortedLexicon: this.sortedLexicon,
 			},
 			plan,
@@ -153,6 +174,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						candidates.get(result.path) ?? {
 							bodyMatches: new Map(),
 							metadataMatches: new Map(),
+							metadataFieldMatches: {
+								basename: new Map(),
+								aliases: new Map(),
+								folder: new Map(),
+								headings: new Map(),
+								tags: new Map(),
+							},
 							phraseMatches: new Set(),
 						},
 						phraseSignatures,
@@ -222,8 +250,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const tokenCount =
 			sumPostingEntries(this.bodyPostings) +
 			sumPostingEntries(this.bodyPhrasePostings) +
+			sumPostingEntries(this.metadataAliasPostings) +
+			sumPostingEntries(this.metadataBasenamePostings) +
+			sumPostingEntries(this.metadataFolderPostings) +
+			sumPostingEntries(this.metadataHeadingPostings) +
 			sumPostingEntries(this.metadataPostings) +
-			sumPostingEntries(this.metadataPhrasePostings);
+			sumPostingEntries(this.metadataPhrasePostings) +
+			sumPostingEntries(this.metadataTagPostings);
 		return tokenCount * 24;
 	}
 
@@ -232,8 +265,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			documentCount: this.documents.size,
 			bodyTermCount: this.bodyPostings.size,
 			bodyPhraseTermCount: this.bodyPhrasePostings.size,
+			metadataAliasTermCount: this.metadataAliasPostings.size,
+			metadataBasenameTermCount: this.metadataBasenamePostings.size,
+			metadataFolderTermCount: this.metadataFolderPostings.size,
+			metadataHeadingTermCount: this.metadataHeadingPostings.size,
 			metadataTermCount: this.metadataPostings.size,
 			metadataPhraseTermCount: this.metadataPhrasePostings.size,
+			metadataTagTermCount: this.metadataTagPostings.size,
 			lexiconSize: this.sortedLexicon.length,
 		};
 	}
@@ -245,18 +283,38 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			.tokenizeSequence(document.content ?? "", "index")
 			.map((term) => term.toLowerCase());
 		const bodyTerms = new Set(bodyTokenSequence);
-		const metadataTokenSequence = this.tokenizer
-			.tokenizeSequence(
-				[
-					document.basename,
-					document.folder,
-					document.aliases ?? "",
-					document.tags ?? "",
-					document.headings ?? "",
-				].join(" "),
-				"index",
-			)
-			.map((term) => term.toLowerCase());
+		const basenameTerms = new Set(
+			this.tokenizer
+				.tokenizeSequence(document.basename ?? "", "index")
+				.map((term) => term.toLowerCase()),
+		);
+		const folderTerms = new Set(
+			this.tokenizer
+				.tokenizeSequence(document.folder ?? "", "index")
+				.map((term) => term.toLowerCase()),
+		);
+		const aliasTerms = new Set(
+			this.tokenizer
+				.tokenizeSequence(document.aliases ?? "", "index")
+				.map((term) => term.toLowerCase()),
+		);
+		const tagTerms = new Set(
+			this.tokenizer
+				.tokenizeSequence(document.tags ?? "", "index")
+				.map((term) => term.toLowerCase()),
+		);
+		const headingTerms = new Set(
+			this.tokenizer
+				.tokenizeSequence(document.headings ?? "", "index")
+				.map((term) => term.toLowerCase()),
+		);
+		const metadataTokenSequence = [
+			...basenameTerms,
+			...folderTerms,
+			...aliasTerms,
+			...tagTerms,
+			...headingTerms,
+		];
 		const metadataTerms = new Set(metadataTokenSequence);
 		const bodyPhraseTerms = new Set(
 			buildCoverageLexicalPhraseTerms(bodyTokenSequence),
@@ -266,11 +324,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		);
 
 		this.documents.set(document.path, {
+			aliasTerms,
+			basenameTerms,
 			bodyTokenSequence,
 			bodyPhraseTerms,
 			bodyTerms,
+			folderTerms,
+			headingTerms,
 			metadataPhraseTerms,
 			metadataTerms,
+			tagTerms,
 		});
 
 		for (const term of bodyTerms) {
@@ -280,12 +343,32 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of bodyPhraseTerms) {
 			addPosting(this.bodyPhrasePostings, term, document.path);
 		}
+		for (const term of aliasTerms) {
+			addPosting(this.metadataAliasPostings, term, document.path);
+			this.lexicon.add(term);
+		}
+		for (const term of basenameTerms) {
+			addPosting(this.metadataBasenamePostings, term, document.path);
+			this.lexicon.add(term);
+		}
+		for (const term of folderTerms) {
+			addPosting(this.metadataFolderPostings, term, document.path);
+			this.lexicon.add(term);
+		}
+		for (const term of headingTerms) {
+			addPosting(this.metadataHeadingPostings, term, document.path);
+			this.lexicon.add(term);
+		}
 		for (const term of metadataTerms) {
 			addPosting(this.metadataPostings, term, document.path);
 			this.lexicon.add(term);
 		}
 		for (const term of metadataPhraseTerms) {
 			addPosting(this.metadataPhrasePostings, term, document.path);
+		}
+		for (const term of tagTerms) {
+			addPosting(this.metadataTagPostings, term, document.path);
+			this.lexicon.add(term);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
 	}
@@ -302,11 +385,26 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of existing.bodyPhraseTerms) {
 			removePosting(this.bodyPhrasePostings, term, path);
 		}
+		for (const term of existing.aliasTerms) {
+			removePosting(this.metadataAliasPostings, term, path);
+		}
+		for (const term of existing.basenameTerms) {
+			removePosting(this.metadataBasenamePostings, term, path);
+		}
+		for (const term of existing.folderTerms) {
+			removePosting(this.metadataFolderPostings, term, path);
+		}
+		for (const term of existing.headingTerms) {
+			removePosting(this.metadataHeadingPostings, term, path);
+		}
 		for (const term of existing.metadataTerms) {
 			removePosting(this.metadataPostings, term, path);
 		}
 		for (const term of existing.metadataPhraseTerms) {
 			removePosting(this.metadataPhrasePostings, term, path);
+		}
+		for (const term of existing.tagTerms) {
+			removePosting(this.metadataTagPostings, term, path);
 		}
 		this.documents.delete(path);
 		this.rebuildLexicon();
@@ -413,14 +511,20 @@ function buildCoverageSignal(
 				continue;
 			}
 			if (metadataKind) {
-				applyMatch(softBody, metadataKind, weight);
-				tailSoftWeight += weight;
+				const boostedWeight =
+					weight * getMetadataFieldBoost(state, family.index, metadataKind);
+				applyMatch(softBody, metadataKind, boostedWeight);
+				tailSoftWeight += boostedWeight;
 			}
 			continue;
 		}
 		if (family.role === "anchor") {
 			if (metadataKind && family.isMetadataCapable) {
-				applyMatch(metadataAnchor, metadataKind, weight);
+				applyMatch(
+					metadataAnchor,
+					metadataKind,
+					weight * getMetadataFieldBoost(state, family.index, metadataKind),
+				);
 				continue;
 			}
 			if (bodyKind) {
@@ -489,6 +593,40 @@ function applyMatch(
 		return;
 	}
 	area.fuzzyWeight += weight;
+}
+
+function getMetadataFieldBoost(
+	state: CoverageLexicalCandidateState,
+	familyIndex: number,
+	kind: Exclude<CoverageFamilyMatchKind, null>,
+): number {
+	let bestBoost = 1;
+	for (const [field, matches] of Object.entries(
+		state.metadataFieldMatches,
+	) as Array<[CoverageLexicalMetadataField, Map<number, CoverageFamilyMatchKind>]>) {
+		if (matches.get(familyIndex) !== kind) {
+			continue;
+		}
+		bestBoost = Math.max(bestBoost, getMetadataFieldWeight(field));
+	}
+	return bestBoost;
+}
+
+function getMetadataFieldWeight(field: CoverageLexicalMetadataField): number {
+	switch (field) {
+		case "basename":
+			return 4;
+		case "aliases":
+			return 3;
+		case "headings":
+			return 3;
+		case "folder":
+			return 2;
+		case "tags":
+			return 2;
+		default:
+			return 1;
+	}
 }
 
 function computeFamilyTailWeight(index: number): number {

@@ -3,15 +3,21 @@ import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalCandidateState,
 	CoverageLexicalFamily,
+	CoverageLexicalMetadataField,
 	CoverageLexicalPhraseSignature,
 	CoverageLexicalPlan,
 } from "./coverage-lexical-types";
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataAliasPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataBasenamePostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataFolderPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataHeadingPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	bodyPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataTagPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	sortedLexicon: readonly string[];
 };
 
@@ -158,14 +164,14 @@ function collectCandidatesForTerm(
 		}
 	}
 
-	const metadataMatches = index.metadataPostings.get(term);
-	if (metadataMatches) {
-		for (const path of metadataMatches) {
-			const state = getOrCreateCandidateState(candidates, path);
-			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
-			getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
-		}
-	}
+	collectMetadataFieldCandidatesForTerm(
+		index,
+		candidates,
+		familyMatchedPaths,
+		familyIndex,
+		term,
+		kind,
+	);
 }
 
 function collectCandidatesForPhraseSignature(
@@ -253,11 +259,56 @@ function getOrCreateCandidateState(
 		state = {
 			bodyMatches: new Map(),
 			metadataMatches: new Map(),
+			metadataFieldMatches: createEmptyMetadataFieldMatches(),
 			phraseMatches: new Set(),
 		};
 		candidates.set(path, state);
 	}
 	return state;
+}
+
+function collectMetadataFieldCandidatesForTerm(
+	index: CoverageLexicalRecallIndex,
+	candidates: Map<string, CoverageLexicalCandidateState>,
+	familyMatchedPaths: Map<number, Set<string>>,
+	familyIndex: number,
+	term: string,
+	kind: Exclude<CoverageFamilyMatchKind, null>,
+): void {
+	const fieldEntries: Array<
+		[
+			CoverageLexicalMetadataField,
+			ReadonlyMap<string, ReadonlySet<string>>,
+		]
+	> = [
+		["basename", index.metadataBasenamePostings],
+		["aliases", index.metadataAliasPostings],
+		["folder", index.metadataFolderPostings],
+		["headings", index.metadataHeadingPostings],
+		["tags", index.metadataTagPostings],
+	];
+	for (const [field, postings] of fieldEntries) {
+		const matches = postings.get(term);
+		if (!matches) {
+			continue;
+		}
+		for (const path of matches) {
+			const state = getOrCreateCandidateState(candidates, path);
+			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
+			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
+			getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+		}
+	}
+
+	const metadataMatches = index.metadataPostings.get(term);
+	if (!metadataMatches) {
+		return;
+	}
+	for (const path of metadataMatches) {
+		const state = getOrCreateCandidateState(candidates, path);
+		recordFamilyMatch(state.metadataMatches, familyIndex, kind);
+		getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+	}
 }
 
 function recordFamilyMatch(
@@ -283,6 +334,16 @@ function pickBetterMatchKind(
 		null: 0,
 	} as const;
 	return rank[left ?? "null"] >= rank[right ?? "null"] ? left : right;
+}
+
+function createEmptyMetadataFieldMatches(): CoverageLexicalCandidateState["metadataFieldMatches"] {
+	return {
+		basename: new Map(),
+		aliases: new Map(),
+		folder: new Map(),
+		headings: new Map(),
+		tags: new Map(),
+	};
 }
 
 function expandPrefixTerms(

@@ -30,9 +30,20 @@ export type CoverageLexicalPairSignature = {
 	allowCandidateRecall: boolean;
 };
 
+export type CoverageLexicalMetadataField =
+	| "basename"
+	| "aliases"
+	| "folder"
+	| "headings"
+	| "tags";
+
 export type CoverageLexicalCandidateState = {
 	bodyMatches: Map<number, CoverageFamilyMatchKind>;
 	metadataMatches: Map<number, CoverageFamilyMatchKind>;
+	metadataFieldMatches: Record<
+		CoverageLexicalMetadataField,
+		Map<number, CoverageFamilyMatchKind>
+	>;
 	phraseMatches: Set<number>;
 };
 
