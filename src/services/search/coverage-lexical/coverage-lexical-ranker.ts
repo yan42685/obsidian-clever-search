@@ -3,7 +3,7 @@ import type {
 	CoverageLexicalFamilySignal,
 	CoverageLexicalPlan,
 } from "./coverage-lexical-types";
-import { compareLocalWindowSignals } from "./coverage-lexical-windowing";
+import { compareCoverageLexicalWindowFusionSignals } from "./coverage-lexical-fusion";
 
 export function rankCoverageLexicalResults(
 	results: readonly CoverageLexicalRankableResult[],
@@ -38,7 +38,10 @@ function compareCoverageLexicalSignals(
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-			compareLocalWindowSignals(left.localWindow, right.localWindow) ||
+			compareCoverageLexicalWindowFusionSignals(
+				left.localEvidence,
+				right.localEvidence,
+			) ||
 			compareAreaSignals(left.softBody, right.softBody) ||
 			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 		);
@@ -48,7 +51,10 @@ function compareCoverageLexicalSignals(
 		return (
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-			compareLocalWindowSignals(left.localWindow, right.localWindow) ||
+			compareCoverageLexicalWindowFusionSignals(
+				left.localEvidence,
+				right.localEvidence,
+			) ||
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			compareAreaSignals(left.softBody, right.softBody) ||
 			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
@@ -58,7 +64,10 @@ function compareCoverageLexicalSignals(
 	return (
 		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-		compareLocalWindowSignals(left.localWindow, right.localWindow) ||
+		compareCoverageLexicalWindowFusionSignals(
+			left.localEvidence,
+			right.localEvidence,
+		) ||
 		compareAreaSignals(left.softBody, right.softBody) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)

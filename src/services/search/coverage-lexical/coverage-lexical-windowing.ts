@@ -3,27 +3,31 @@ import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalFamily,
 	CoverageLexicalLocalWindowSignal,
+	CoverageLexicalPairSignature,
 } from "./coverage-lexical-types";
 
 const MIN_WINDOW_SIZE = 8;
 const MAX_WINDOW_SIZE = 28;
+const MAX_LOCAL_WINDOW_CANDIDATES = 12;
+const MAX_ADJACENT_PAIR_GAP = 3;
 
 type FamilyTokenMatch = {
 	familyIndex: number;
 	kind: Exclude<CoverageFamilyMatchKind, null>;
 };
 
-export function buildCoverageLexicalLocalWindowSignal(
+export function buildCoverageLexicalLocalWindowSignals(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
-): CoverageLexicalLocalWindowSignal {
+	pairSignatures: readonly CoverageLexicalPairSignature[],
+): CoverageLexicalLocalWindowSignal[] {
 	if (tokens.length === 0 || families.length === 0) {
-		return createEmptyLocalWindowSignal();
+		return [];
 	}
 
 	const candidateFamilies = families.filter((family) => family.role !== "noise");
 	if (candidateFamilies.length === 0) {
-		return createEmptyLocalWindowSignal();
+		return [];
 	}
 
 	const matchesByPosition: FamilyTokenMatch[][] = Array.from(
@@ -49,7 +53,7 @@ export function buildCoverageLexicalLocalWindowSignal(
 	}
 
 	if (candidateCenters.length === 0) {
-		return createEmptyLocalWindowSignal();
+		return [];
 	}
 
 	const baseWindowSize = Math.min(
@@ -63,7 +67,7 @@ export function buildCoverageLexicalLocalWindowSignal(
 		]),
 	);
 
-	let bestSignal = createEmptyLocalWindowSignal();
+	const candidateSignals: CoverageLexicalLocalWindowSignal[] = [];
 	const seenWindows = new Set<string>();
 	for (const center of candidateCenters) {
 		for (const windowSize of candidateWindowSizes) {
@@ -74,26 +78,35 @@ export function buildCoverageLexicalLocalWindowSignal(
 				continue;
 			}
 			seenWindows.add(key);
-			const signal = scoreWindow(start, end, matchesByPosition, families);
-			if (compareLocalWindowSignals(signal, bestSignal) < 0) {
-				bestSignal = signal;
-			}
+			const signal = scoreWindow(
+				start,
+				end,
+				tokens,
+				matchesByPosition,
+				families,
+				pairSignatures,
+			);
+			insertCandidateSignal(candidateSignals, signal);
 		}
 	}
 
-	return bestSignal;
+	return candidateSignals;
 }
 
 function scoreWindow(
 	start: number,
 	end: number,
+	tokens: readonly string[],
 	matchesByPosition: ReadonlyArray<ReadonlyArray<FamilyTokenMatch>>,
 	families: readonly CoverageLexicalFamily[],
+	pairSignatures: readonly CoverageLexicalPairSignature[],
 ): CoverageLexicalLocalWindowSignal {
 	const bestKindByFamily = new Map<number, Exclude<CoverageFamilyMatchKind, null>>();
 	const firstPositionByFamily = new Map<number, number>();
+	const tokenSet = new Set<string>();
 
 	for (let tokenIndex = start; tokenIndex <= end; tokenIndex++) {
+		tokenSet.add(tokens[tokenIndex]);
 		for (const match of matchesByPosition[tokenIndex]) {
 			const previous = bestKindByFamily.get(match.familyIndex) ?? null;
 			if (pickBetterMatchKind(previous, match.kind) !== match.kind) {
@@ -112,7 +125,14 @@ function scoreWindow(
 	let fuzzyCoreWeight = 0;
 	let anchorCoverageCount = 0;
 	let softCoverageCount = 0;
+	let adjacentCorePairCount = 0;
+	let adjacentCorePairWeight = 0;
 	const matchedCorePositions: Array<{ index: number; position: number }> = [];
+	const matchedExactCoreFamilyIndices: number[] = [];
+	const matchedPrefixCoreFamilyIndices: number[] = [];
+	const matchedFuzzyCoreFamilyIndices: number[] = [];
+	const matchedAnchorFamilyIndices: number[] = [];
+	const matchedSoftFamilyIndices: number[] = [];
 
 	for (const family of families) {
 		const kind = bestKindByFamily.get(family.index) ?? null;
@@ -125,10 +145,13 @@ function scoreWindow(
 			coreCoverageCount += 1;
 			if (kind === "exact") {
 				exactCoreWeight += weight;
+				matchedExactCoreFamilyIndices.push(family.index);
 			} else if (kind === "prefix") {
 				prefixCoreWeight += weight;
+				matchedPrefixCoreFamilyIndices.push(family.index);
 			} else {
 				fuzzyCoreWeight += weight;
+				matchedFuzzyCoreFamilyIndices.push(family.index);
 			}
 			matchedCorePositions.push({
 				index: family.index,
@@ -138,10 +161,19 @@ function scoreWindow(
 		}
 		if (family.role === "anchor") {
 			anchorCoverageCount += 1;
+			matchedAnchorFamilyIndices.push(family.index);
 			continue;
 		}
 		if (family.role === "body") {
 			softCoverageCount += 1;
+			matchedSoftFamilyIndices.push(family.index);
+		}
+	}
+
+	for (const pairSignature of pairSignatures) {
+		if (matchesPairSignature(pairSignature, firstPositionByFamily, tokenSet)) {
+			adjacentCorePairCount += 1;
+			adjacentCorePairWeight += pairSignature.tailWeight;
 		}
 	}
 
@@ -173,13 +205,22 @@ function scoreWindow(
 		fuzzyCoreWeight,
 		anchorCoverageCount,
 		softCoverageCount,
+		adjacentCorePairCount,
+		adjacentCorePairWeight,
 		orderedPairCount,
 		orderRatio,
 		compactnessRatio,
+		matchedExactCoreFamilyIndices,
+		matchedPrefixCoreFamilyIndices,
+		matchedFuzzyCoreFamilyIndices,
+		matchedAnchorFamilyIndices,
+		matchedSoftFamilyIndices,
 		score:
 			coreCoverageCount * 100 +
 			exactCoreWeight * 4 +
 			prefixCoreWeight * 2 +
+			adjacentCorePairCount * 25 +
+			adjacentCorePairWeight * 0.5 +
 			anchorCoverageCount * 15 +
 			softCoverageCount * 5 +
 			orderRatio * 20 +
@@ -195,6 +236,9 @@ export function compareLocalWindowSignals(
 		compareDescendingMetric(left.coreCoverageCount, right.coreCoverageCount) ||
 		compareDescendingMetric(left.exactCoreWeight, right.exactCoreWeight) ||
 		compareDescendingMetric(left.prefixCoreWeight, right.prefixCoreWeight) ||
+		compareDescendingMetric(left.fuzzyCoreWeight, right.fuzzyCoreWeight) ||
+		compareDescendingMetric(left.adjacentCorePairCount, right.adjacentCorePairCount) ||
+		compareDescendingMetric(left.adjacentCorePairWeight, right.adjacentCorePairWeight) ||
 		compareDescendingMetric(left.anchorCoverageCount, right.anchorCoverageCount) ||
 		compareDescendingMetric(left.softCoverageCount, right.softCoverageCount) ||
 		compareDescendingMetric(left.orderedPairCount, right.orderedPairCount) ||
@@ -204,7 +248,7 @@ export function compareLocalWindowSignals(
 	);
 }
 
-function createEmptyLocalWindowSignal(): CoverageLexicalLocalWindowSignal {
+export function createEmptyCoverageLexicalLocalWindowSignal(): CoverageLexicalLocalWindowSignal {
 	return {
 		start: -1,
 		end: -1,
@@ -214,11 +258,59 @@ function createEmptyLocalWindowSignal(): CoverageLexicalLocalWindowSignal {
 		fuzzyCoreWeight: 0,
 		anchorCoverageCount: 0,
 		softCoverageCount: 0,
+		adjacentCorePairCount: 0,
+		adjacentCorePairWeight: 0,
 		orderedPairCount: 0,
 		orderRatio: 0,
 		compactnessRatio: 0,
 		score: 0,
+		matchedExactCoreFamilyIndices: [],
+		matchedPrefixCoreFamilyIndices: [],
+		matchedFuzzyCoreFamilyIndices: [],
+		matchedAnchorFamilyIndices: [],
+		matchedSoftFamilyIndices: [],
 	};
+}
+
+function insertCandidateSignal(
+	candidates: CoverageLexicalLocalWindowSignal[],
+	signal: CoverageLexicalLocalWindowSignal,
+): void {
+	let insertAt = 0;
+	while (
+		insertAt < candidates.length &&
+		compareLocalWindowSignals(candidates[insertAt], signal) <= 0
+	) {
+		insertAt += 1;
+	}
+	if (insertAt >= MAX_LOCAL_WINDOW_CANDIDATES) {
+		return;
+	}
+	candidates.splice(insertAt, 0, signal);
+	if (candidates.length > MAX_LOCAL_WINDOW_CANDIDATES) {
+		candidates.pop();
+	}
+}
+
+function matchesPairSignature(
+	pairSignature: CoverageLexicalPairSignature,
+	firstPositionByFamily: ReadonlyMap<number, number>,
+	tokenSet: ReadonlySet<string>,
+): boolean {
+	for (const variant of pairSignature.variants) {
+		if (tokenSet.has(variant)) {
+			return true;
+		}
+	}
+	const leftPosition = firstPositionByFamily.get(pairSignature.leftFamilyIndex);
+	const rightPosition = firstPositionByFamily.get(pairSignature.rightFamilyIndex);
+	if (leftPosition === undefined || rightPosition === undefined) {
+		return false;
+	}
+	return (
+		leftPosition <= rightPosition &&
+		rightPosition - leftPosition <= MAX_ADJACENT_PAIR_GAP
+	);
 }
 
 function matchTokenToFamily(

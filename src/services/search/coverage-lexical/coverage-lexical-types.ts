@@ -15,6 +15,14 @@ export type CoverageLexicalFamily = {
 	allowFuzzy: boolean;
 };
 
+export type CoverageLexicalPairSignature = {
+	leftFamilyIndex: number;
+	rightFamilyIndex: number;
+	variants: string[];
+	tailWeight: number;
+	allowCandidateRecall: boolean;
+};
+
 export type CoverageLexicalRoute =
 	| "body-first"
 	| "body-with-anchor"
@@ -51,10 +59,29 @@ export type CoverageLexicalLocalWindowSignal = {
 	fuzzyCoreWeight: number;
 	anchorCoverageCount: number;
 	softCoverageCount: number;
+	adjacentCorePairCount: number;
+	adjacentCorePairWeight: number;
 	orderedPairCount: number;
 	orderRatio: number;
 	compactnessRatio: number;
 	score: number;
+	matchedExactCoreFamilyIndices: number[];
+	matchedPrefixCoreFamilyIndices: number[];
+	matchedFuzzyCoreFamilyIndices: number[];
+	matchedAnchorFamilyIndices: number[];
+	matchedSoftFamilyIndices: number[];
+};
+
+export type CoverageLexicalWindowFusionSignal = {
+	primary: CoverageLexicalLocalWindowSignal;
+	support: CoverageLexicalLocalWindowSignal;
+	supportWindowCount: number;
+	corroboratedCoreCoverageCount: number;
+	corroboratedExactCoreWeight: number;
+	corroboratedPrefixCoreWeight: number;
+	corroboratedFuzzyCoreWeight: number;
+	corroboratedAnchorCoverageCount: number;
+	corroboratedSoftCoverageCount: number;
 };
 
 export type CoverageLexicalFamilySignal = {
@@ -63,6 +90,6 @@ export type CoverageLexicalFamilySignal = {
 	metadataAnchor: CoverageLexicalAreaSignal;
 	tailCoreWeight: number;
 	tailSoftWeight: number;
-	localWindow: CoverageLexicalLocalWindowSignal;
+	localEvidence: CoverageLexicalWindowFusionSignal;
 	matchedTerms: string[];
 };

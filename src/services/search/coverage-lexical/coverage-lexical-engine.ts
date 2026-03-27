@@ -10,18 +10,22 @@ import type {
 } from "../file-search-engine";
 import { Tokenizer } from "../tokenizer";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
+import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
 import {
 	rankCoverageLexicalResults,
 	type CoverageLexicalRankableResult,
 } from "./coverage-lexical-ranker";
-import { buildCoverageLexicalLocalWindowSignal } from "./coverage-lexical-windowing";
+import {
+	buildCoverageLexicalWindowFusionSignal,
+	createEmptyCoverageLexicalWindowFusionSignal,
+} from "./coverage-lexical-fusion";
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
 	CoverageLexicalFamily,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalFamilySignal,
-	CoverageLexicalLocalWindowSignal,
+	CoverageLexicalPairSignature,
 } from "./coverage-lexical-types";
 
 type CoverageLexicalDocument = {
@@ -99,14 +103,26 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 		const familyProbes = this.buildFamilyProbes(queryTerms);
 		const plan = buildCoverageLexicalPlan(request.queryText, queryTerms, familyProbes);
-		const candidates = this.collectCandidateStates(plan.families, request);
+		const pairSignatures = buildCoverageLexicalPairSignatures(plan.families);
+		const candidates = this.collectCandidateStates(
+			plan.families,
+			pairSignatures,
+			request,
+		);
 		if (candidates.size === 0) {
 			return [];
 		}
 
 		const coarseResults = Array.from(candidates.entries())
 			.map(([path, state]) =>
-				this.createRankableResult(path, queryTerms, plan.families, state, false),
+				this.createRankableResult(
+					path,
+					queryTerms,
+					plan.families,
+					state,
+					false,
+					pairSignatures,
+				),
 			)
 			.filter((result): result is CoverageLexicalRankableResult => result !== null);
 		const coarseRanked = rankCoverageLexicalResults(coarseResults, plan);
@@ -131,6 +147,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						plan.families,
 						state,
 						localWindowPaths.has(path),
+						pairSignatures,
 					),
 				)
 				.filter((result): result is CoverageLexicalRankableResult => result !== null),
@@ -239,6 +256,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private collectCandidateStates(
 		families: readonly CoverageLexicalFamily[],
+		pairSignatures: readonly CoverageLexicalPairSignature[],
 		request: FileSearchRequest,
 	): Map<string, CoverageLexicalCandidateState> {
 		const candidates = new Map<string, CoverageLexicalCandidateState>();
@@ -252,6 +270,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				family.normalizedTerm,
 				"exact",
 			);
+		}
+		for (const pairSignature of pairSignatures) {
+			this.collectCandidatesForPairSignature(candidates, pairSignature);
 		}
 
 		if (
@@ -311,12 +332,49 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 	}
 
+	private collectCandidatesForPairSignature(
+		candidates: Map<string, CoverageLexicalCandidateState>,
+		pairSignature: CoverageLexicalPairSignature,
+	): void {
+		if (!pairSignature.allowCandidateRecall) {
+			return;
+		}
+		for (const variant of pairSignature.variants) {
+			const bodyMatches = this.bodyPostings.get(variant);
+			if (bodyMatches) {
+				for (const path of bodyMatches) {
+					const state = getOrCreateCandidateState(candidates, path);
+					recordFamilyMatch(state.bodyMatches, pairSignature.leftFamilyIndex, "prefix");
+					recordFamilyMatch(state.bodyMatches, pairSignature.rightFamilyIndex, "prefix");
+				}
+			}
+
+			const metadataMatches = this.metadataPostings.get(variant);
+			if (metadataMatches) {
+				for (const path of metadataMatches) {
+					const state = getOrCreateCandidateState(candidates, path);
+					recordFamilyMatch(
+						state.metadataMatches,
+						pairSignature.leftFamilyIndex,
+						"prefix",
+					);
+					recordFamilyMatch(
+						state.metadataMatches,
+						pairSignature.rightFamilyIndex,
+						"prefix",
+					);
+				}
+			}
+		}
+	}
+
 	private createRankableResult(
 		path: string,
 		queryTerms: readonly string[],
 		families: readonly CoverageLexicalFamily[],
 		state: CoverageLexicalCandidateState,
 		includeLocalWindow: boolean,
+		pairSignatures: readonly CoverageLexicalPairSignature[],
 	): CoverageLexicalRankableResult | null {
 		const document = this.documents.get(path);
 		if (!document) {
@@ -327,6 +385,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			state,
 			document.bodyTokenSequence,
 			includeLocalWindow,
+			pairSignatures,
 		);
 		if (
 			signal.coreBody.coverageCount === 0 &&
@@ -399,6 +458,7 @@ function buildCoverageSignal(
 	state: CoverageLexicalCandidateState,
 	bodyTokenSequence: readonly string[],
 	includeLocalWindow: boolean,
+	pairSignatures: readonly CoverageLexicalPairSignature[],
 ): CoverageLexicalFamilySignal {
 	const coreBody = createEmptyAreaSignal();
 	const softBody = createEmptyAreaSignal();
@@ -449,9 +509,13 @@ function buildCoverageSignal(
 		metadataAnchor,
 		tailCoreWeight,
 		tailSoftWeight,
-		localWindow: includeLocalWindow
-			? buildCoverageLexicalLocalWindowSignal(bodyTokenSequence, families)
-			: createEmptyLocalWindowSignal(),
+		localEvidence: includeLocalWindow
+			? buildCoverageLexicalWindowFusionSignal(
+				bodyTokenSequence,
+				families,
+				pairSignatures,
+			)
+			: createEmptyCoverageLexicalWindowFusionSignal(),
 		matchedTerms: Array.from(matchedTerms),
 	};
 }
@@ -475,23 +539,6 @@ function createEmptyAreaSignal(): CoverageLexicalAreaSignal {
 		exactWeight: 0,
 		prefixWeight: 0,
 		fuzzyWeight: 0,
-	};
-}
-
-function createEmptyLocalWindowSignal(): CoverageLexicalLocalWindowSignal {
-	return {
-		start: -1,
-		end: -1,
-		coreCoverageCount: 0,
-		exactCoreWeight: 0,
-		prefixCoreWeight: 0,
-		fuzzyCoreWeight: 0,
-		anchorCoverageCount: 0,
-		softCoverageCount: 0,
-		orderedPairCount: 0,
-		orderRatio: 0,
-		compactnessRatio: 0,
-		score: 0,
 	};
 }
 
@@ -525,6 +572,7 @@ function computeFallbackScore(signal: CoverageLexicalFamilySignal): number {
 		signal.softBody.coverageCount * 20 +
 		signal.metadataAnchor.coverageCount * 10 +
 		signal.metadataAnchor.exactWeight +
+		signal.localEvidence.primary.coreCoverageCount * 2 +
 		signal.tailCoreWeight * 0.01 +
 		signal.tailSoftWeight * 0.001
 	);
