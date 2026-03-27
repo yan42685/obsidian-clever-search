@@ -45,17 +45,19 @@ The MVP may omit rich local-window evidence until the family-first comparator is
 Benchmark work should serve `coverage-lexical` directly.
 
 1. Add explicit `CoverageLexical` reporting as a first-class system.
-2. Keep `coverage_invariants` as an explicit benchmark suite rather than burying family-first rules in a generic adversarial pool.
+2. Compare `CoverageLexical` against `MiniSearch` only inside the automation benchmark loop.
+3. Keep one full benchmark run under `20s` on a normal development machine.
+4. Keep `coverage_invariants` as an explicit benchmark suite rather than burying family-first rules in a generic adversarial pool.
 - this suite should own the ranking guardrails: coverage, exact-prefix-fuzzy ordering, subordinate tail bias, and tie-only locality
-3. Keep a separate broader adversarial pool for mixed-script, metadata+body, collision, and messy-note stress.
-4. Benchmark output should report the primary objective directly:
+5. Keep a separate broader adversarial pool for mixed-script, metadata+body, collision, and messy-note stress.
+6. Benchmark output should report the primary objective directly:
 - `0.55 * hits@1 + 0.25 * hits@3 + 0.20 * hits@5`
-5. Prefer adversarial sets that stress:
+7. Prefer adversarial sets that stress:
 - coverage beats repeated noise
 - exact beats prefix beats fuzzy on tied coverage
 - tail decides only after coverage and quality tie
 - metadata helps only when route says it should
-6. Keep existing broad corpus coverage, but do not let legacy expectations dictate the new comparator.
+8. Keep existing broad corpus coverage, but do not let legacy expectations dictate the new comparator.
 
 ## Exploration Order
 

@@ -614,8 +614,8 @@ function createManualBenchmarkCorpus(
 			folder: "adversarial/tech-zh",
 			headings: "Apply order Restart checks",
 			content: [
-				"ConfigMaps rollout 需要先应用命名空间默认值，再挂载环境文件，否则会出现陈旧数据。",
-				"这份笔记主要记录发布顺序和重启后的校验步骤。",
+				"ConfigMaps rollout 需要先应用命名空间默认值，再挂载环境文件，否则会出现陈旧数据�?,
+				"这份笔记主要记录发布顺序和重启后的校验步骤�?,
 			].join("\n\n"),
 		},
 		{
@@ -764,12 +764,12 @@ function createManualBenchmarkCorpus(
 			path: "messy-pkm/zh/weekly/2026-w12.md",
 			basename: "周报",
 			folder: "messy-pkm/zh/weekly",
-			aliases: "检索 漂移 事故",
+			aliases: "检�?漂移 事故",
 			tags: "周报 日志",
 			headings: "任务 记录 决定",
 			content: [
-				"本周排查发现检索抖动来自陈旧分段检查点回放，重启后缓存漂移再次出现。",
-				"最终决定先缩小窗口，再补 verifier。",
+				"本周排查发现检索抖动来自陈旧分段检查点回放，重启后缓存漂移再次出现�?,
+				"最终决定先缩小窗口，再�?verifier�?,
 			].join("\n"),
 		},
 		{
@@ -780,8 +780,8 @@ function createManualBenchmarkCorpus(
 			tags: "模板",
 			headings: "任务 记录 决定",
 			content: [
-				"本模板用于记录任务、决定和下周计划。",
-				"如无特殊情况，请保持段落顺序一致。",
+				"本模板用于记录任务、决定和下周计划�?,
+				"如无特殊情况，请保持段落顺序一致�?,
 			].join("\n"),
 		},
 		{
@@ -844,13 +844,13 @@ function createManualBenchmarkCorpus(
 		{
 			bucket: "general-zh",
 			path: "adversarial/general-zh/retrieval-frontier-zh.md",
-			basename: "检索前沿排查",
+			basename: "检索前沿排�?,
 			folder: "adversarial/general-zh",
 			aliases: "retrieval frontier",
 			headings: "warm start",
 			content: [
-				"检索前沿排查记录了 warm start 期间 verifier frontier 因旧 checkpoint 而出现 rerank drift。",
-				"真正的问题不是 latency budgeting，而是 local window 证据被旧缓存放大。",
+				"检索前沿排查记录了 warm start 期间 verifier frontier 因旧 checkpoint 而出�?rerank drift�?,
+				"真正的问题不�?latency budgeting，而是 local window 证据被旧缓存放大�?,
 			].join("\n\n"),
 		},
 		{
@@ -858,7 +858,7 @@ function createManualBenchmarkCorpus(
 			path: "adversarial/pkm-en/projects/retrieval-frontier-en.md",
 			basename: "Retrieval frontier notes",
 			folder: "adversarial/pkm-en/projects",
-			aliases: "检索前沿",
+			aliases: "检索前�?,
 			headings: "warm start",
 			content: [
 				"retrieval frontier notes describe warm start checkpoint trimming and latency budgeting for interactive search.",
@@ -984,27 +984,27 @@ function createManualBenchmarkCorpus(
 			path: "adversarial/prefix-lab/zh/hybrid-prefix-family.md",
 			basename: "混合 prefix family",
 			folder: "adversarial/prefix-lab/zh",
-			headings: "局部顺序",
+			headings: "局部顺�?,
 			content:
-				"混合检索 prefix family scoring keeps ordered evidence compact across scripts",
+				"混合检�?prefix family scoring keeps ordered evidence compact across scripts",
 		},
 		{
 			bucket: "tech-zh",
 			path: "adversarial/prefix-lab/zh/hybrid-prefix-noise.md",
 			basename: "混合 prefix noise",
 			folder: "adversarial/prefix-lab/zh",
-			headings: "局部顺序",
+			headings: "局部顺�?,
 			content:
-				"prefix guide for mixed scripts keeps family scoring noisy and reversed 检索混合",
+				"prefix guide for mixed scripts keeps family scoring noisy and reversed 检索混�?,
 		},
 		{
 			bucket: "tech-zh",
 			path: "adversarial/prefix-lab/zh/hybrid-prefix-quad.md",
 			basename: "混合 prefix quad",
 			folder: "adversarial/prefix-lab/zh",
-			headings: "局部顺序",
+			headings: "局部顺�?,
 			content:
-				"混合检索 prefix family scoring keeps compact evidence across scripts and retry windows",
+				"混合检�?prefix family scoring keeps compact evidence across scripts and retry windows",
 		},
 		{
 			bucket: "tech-en",
@@ -1170,7 +1170,7 @@ function createManualBenchmarkCorpus(
 			suite: "messy_pkm",
 		},
 		{
-			query: "检索 抖动 检查点 回放",
+			query: "检�?抖动 检查点 回放",
 			relevantPath: "messy-pkm/zh/weekly/2026-w12.md",
 			bucket: "general-zh",
 			type: "content_dense",
@@ -1296,7 +1296,7 @@ function createManualBenchmarkCorpus(
 			suite: "adversarial",
 		},
 		{
-			query: "检索 frontier rerank drift",
+			query: "检�?frontier rerank drift",
 			relevantPath: "adversarial/general-zh/retrieval-frontier-zh.md",
 			bucket: "general-zh",
 			type: "bilingual_mirror",
@@ -1914,6 +1914,7 @@ describe("file search benchmark on web-notes-v2", () => {
 	});
 
 	test("compare coverage lexical against minisearch on web-notes-v2", async () => {
+		const benchmarkStartedAt = performance.now();
 		const tokenizer = createMockTokenizer();
 		const webNotes = createCorpusNotes(tokenizer);
 		const manualCorpus = createManualBenchmarkCorpus(tokenizer);
@@ -1969,6 +1970,7 @@ describe("file search benchmark on web-notes-v2", () => {
 			coverageResult.outcomes,
 			miniResult.outcomes,
 		);
+		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
 		console.log(
 			"[file-search-web-benchmark] corpus",
@@ -1978,6 +1980,7 @@ describe("file search benchmark on web-notes-v2", () => {
 					syntheticNoteCount: manualCorpus.documents.length,
 					noteCount: documents.length,
 					queryCount: queryCases.length,
+					totalElapsedMs: round(benchmarkElapsedMs),
 					byBucket: noteBuckets.reduce<Record<CorpusBucket, number>>(
 						(acc, bucket) => {
 							acc[bucket] += 1;
@@ -2103,5 +2106,7 @@ describe("file search benchmark on web-notes-v2", () => {
 		expect(queryCases.some((queryCase) => queryCase.suite === "messy_pkm")).toBe(
 			true,
 		);
+		expect(benchmarkElapsedMs).toBeLessThan(20000);
 	});
 });
+
