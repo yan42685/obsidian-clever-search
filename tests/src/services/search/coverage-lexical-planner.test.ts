@@ -183,4 +183,40 @@ describe("coverage lexical planner", () => {
 		expect(plan.hardAnchorFamilies).toHaveLength(0);
 		expect(plan.queryKind).toBe("body_only_local");
 	});
+
+	test("promotes localized plugin overview query into metadata/hard-anchor buckets", () => {
+		const queryTerms = ["浏览插件的总览页面和路线图", "具体是哪条标题下的记录"];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 2,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 2,
+				headingExactDocCount: 2,
+				aliasExactDocCount: 0,
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"浏览插件的总览页面和路线图 具体是哪条标题下的记录",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.queryKind).not.toBe("body_only_local");
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toContain(
+			"浏览插件的总览页面和路线图",
+		);
+		expect(plan.syntheticTerms.some((term) => term.bucket === "hard_anchor")).toBe(
+			true,
+		);
+	});
 });

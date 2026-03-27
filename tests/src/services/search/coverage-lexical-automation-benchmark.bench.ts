@@ -1882,6 +1882,37 @@ function buildLocalizedBatch(
 	);
 }
 
+function buildLocalizedRecallContractCases(): RecallContractCase[] {
+	const baseCases: QueryCase[] = buildRecallContractCases().map((queryCase) => ({
+		query: queryCase.query,
+		relevantPath: queryCase.relevantPath,
+		type:
+			queryCase.type === "basename_partial_body" ||
+			queryCase.type === "path_partial_body"
+				? "body_path_anchor"
+				: (queryCase.type as QueryType),
+		suite: "adversarial",
+	}));
+	const localized = [
+		...baseCases.slice(0, 5).map((queryCase, index) =>
+			buildLocalizedQueryCase(queryCase, "mixed", index),
+		),
+		...baseCases.slice(5).map((queryCase, index) =>
+			buildLocalizedQueryCase(queryCase, "zh", index),
+		),
+	];
+	return localized.map((queryCase, index) => ({
+		query: queryCase.query,
+		relevantPath: queryCase.relevantPath,
+		type:
+			index === localized.length - 2
+				? "basename_partial_body"
+				: index === localized.length - 1
+					? "path_partial_body"
+					: (queryCase.type as RecallContractType),
+	}));
+}
+
 function rebalanceQueryLanguageMix(seedCases: QueryCase[]): QueryCase[] {
 	const invariants = seedCases.filter(
 		(queryCase) => queryCase.suite === "coverage_invariants",
@@ -2623,6 +2654,11 @@ describe("coverage lexical automation benchmark", () => {
 			tokenizer,
 			buildRecallContractCases(),
 		);
+		const localizedRecallContract = await runCoverageRecallContract(
+			coverageLexical as any,
+			tokenizer,
+			buildLocalizedRecallContractCases(),
+		);
 		const coverageVsMini = summarizeWins(
 			coverageResult.outcomes,
 			miniResult.outcomes,
@@ -2745,6 +2781,29 @@ describe("coverage lexical automation benchmark", () => {
 					),
 					laneHitCounts: recallContract.laneHitCounts,
 					misses: recallContract.misses.slice(0, 10),
+				},
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] localized-recall-contract",
+			JSON.stringify(
+				{
+					unionHitRate: round(localizedRecallContract.unionHitRate),
+					zeroRate: round(localizedRecallContract.zeroRate),
+					byType: Object.fromEntries(
+						Object.entries(localizedRecallContract.byType).map(([type, metric]) => [
+							type,
+							{
+								unionHitRate: round(metric.unionHitRate),
+								zeroRate: round(metric.zeroRate),
+								count: metric.count,
+							},
+						]),
+					),
+					laneHitCounts: localizedRecallContract.laneHitCounts,
+					misses: localizedRecallContract.misses.slice(0, 10),
 				},
 				null,
 				2,
