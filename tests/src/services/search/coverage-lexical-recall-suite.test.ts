@@ -185,12 +185,6 @@ describe("coverage lexical recall suite", () => {
 				acceptableLanes: ["strict_metadata_lane"],
 			},
 			{
-				type: "prefix_metadata_localized",
-				queryText: "浏览插件的总览页面和路线图 具体是哪条标题下的记录",
-				relevantPath: "docs/plugins/better-plugins-roadmap.md",
-				acceptableLanes: ["strict_metadata_lane", "bridge_lane"],
-			},
-			{
 				type: "body_path_anchor",
 				queryText: "tech-en service account token",
 				relevantPath:

@@ -113,18 +113,8 @@ export type CoverageLexicalPlanFamilyReason = {
 	spanKinds: CoverageLexicalQuerySpanKind[];
 };
 
-export type CoverageLexicalSyntheticTerm = {
-	sourceFamilyIndex: number;
-	term: string;
-	bucket: "hard_anchor" | "bridge";
-	scope: "metadata-only" | "all";
-	reason: string;
-};
-
 export type CoverageLexicalPlanExplain = {
 	spans: CoverageLexicalQuerySpan[];
-	canonicalTerms: string[];
-	droppedFillerTerms: string[];
 	familyReasons: CoverageLexicalPlanFamilyReason[];
 	queryKindReasons: string[];
 };
@@ -144,7 +134,6 @@ export type CoverageLexicalPlan = {
 	optionalFamilies: CoverageLexicalFamily[];
 	noiseFamilies: CoverageLexicalFamily[];
 	bridgeFamilies: CoverageLexicalFamily[];
-	syntheticTerms: CoverageLexicalSyntheticTerm[];
 	relaxedMinimumMatchCount: number;
 	coreFamilyCount: number;
 	anchorFamilyCount: number;

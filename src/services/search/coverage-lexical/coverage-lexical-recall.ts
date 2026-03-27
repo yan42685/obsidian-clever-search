@@ -11,7 +11,6 @@ import type {
 	CoverageLexicalPhraseSignature,
 	CoverageLexicalPlan,
 	CoverageLexicalRecallDebug,
-	CoverageLexicalSyntheticTerm,
 } from "./coverage-lexical-types";
 
 type CoverageLexicalRecallIndex = {
@@ -217,10 +216,7 @@ function runStrictMetadataLane(
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
-	const hasSyntheticHardAnchor = plan.syntheticTerms.some(
-		(term) => term.bucket === "hard_anchor",
-	);
-	if (plan.hardAnchorFamilies.length === 0 && !hasSyntheticHardAnchor) {
+	if (plan.hardAnchorFamilies.length === 0) {
 		return;
 	}
 	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
@@ -233,7 +229,6 @@ function runStrictMetadataLane(
 		includePrefix: request.isPrefixMatch,
 		includeFuzzy: false,
 	});
-	collectSyntheticTerms(index, laneCandidates, plan.syntheticTerms, "hard_anchor");
 	collectPhraseCandidates(
 		index,
 		laneCandidates,
@@ -268,11 +263,8 @@ function runStrictHybridLane(
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
-	const hasSyntheticHardAnchor = plan.syntheticTerms.some(
-		(term) => term.bucket === "hard_anchor",
-	);
 	if (
-		(plan.hardAnchorFamilies.length === 0 && !hasSyntheticHardAnchor) ||
+		plan.hardAnchorFamilies.length === 0 ||
 		plan.decisiveBodyFamilies.length === 0
 	) {
 		return;
@@ -283,7 +275,6 @@ function runStrictHybridLane(
 		includePrefix: request.isPrefixMatch,
 		includeFuzzy: false,
 	});
-	collectSyntheticTerms(index, laneCandidates, plan.syntheticTerms, "hard_anchor");
 	collectFamilySetCandidates(
 		index,
 		laneCandidates,
@@ -335,11 +326,8 @@ function runRelaxedHybridLane(
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
-	const hasSyntheticHardAnchor = plan.syntheticTerms.some(
-		(term) => term.bucket === "hard_anchor",
-	);
 	if (
-		(plan.hardAnchorFamilies.length === 0 && !hasSyntheticHardAnchor) ||
+		plan.hardAnchorFamilies.length === 0 ||
 		plan.relaxedMinimumMatchCount <= 0
 	) {
 		return;
@@ -350,7 +338,6 @@ function runRelaxedHybridLane(
 		includePrefix: request.isPrefixMatch,
 		includeFuzzy: false,
 	});
-	collectSyntheticTerms(index, laneCandidates, plan.syntheticTerms, "hard_anchor");
 	collectFamilySetCandidates(
 		index,
 		laneCandidates,
@@ -472,7 +459,6 @@ function runBridgeLane(
 			includeFuzzy: request.isFuzzy,
 		},
 	);
-	collectSyntheticTerms(index, laneCandidates, plan.syntheticTerms, "bridge");
 	collectPhraseCandidates(
 		index,
 		laneCandidates,
@@ -860,27 +846,6 @@ function collectFamilySetCandidates(
 				);
 			}
 		}
-	}
-}
-
-function collectSyntheticTerms(
-	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
-	syntheticTerms: readonly CoverageLexicalSyntheticTerm[],
-	bucket: CoverageLexicalSyntheticTerm["bucket"],
-): void {
-	for (const syntheticTerm of syntheticTerms) {
-		if (syntheticTerm.bucket !== bucket) {
-			continue;
-		}
-		collectCandidatesForTerm(
-			index,
-			candidates,
-			syntheticTerm.sourceFamilyIndex,
-			syntheticTerm.term,
-			"prefix",
-			syntheticTerm.scope,
-		);
 	}
 }
 

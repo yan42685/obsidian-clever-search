@@ -7,7 +7,6 @@ import type {
 	CoverageLexicalQuerySpan,
 	CoverageLexicalQuerySpanKind,
 	CoverageLexicalPlan,
-	CoverageLexicalSyntheticTerm,
 } from "./coverage-lexical-types";
 
 const METADATA_HINT_REGEX = /[\\/]|(?:^|\s)(?:tag|path|title|folder):/iu;
@@ -24,26 +23,6 @@ const TITLE_PATH_SEGMENT_REGEX =
 const FILLER_SEGMENT_REGEX =
 	/(?:callout|nested list|checklist table|frontmatter|table|heading|code block|wiki link|alias migration|where|which|written|mentioned|note|notes)/iu;
 const RAW_QUERY_SEGMENT_REGEX = /[\p{Script=Han}]+|[a-z0-9._/-]+/giu;
-const LOCALIZED_SYNTHETIC_TERM_RULES: Array<{
-	pattern: RegExp;
-	terms: string[];
-	preferAnchor: boolean;
-}> = [
-	{ pattern: /检查点|checkpoint/u, terms: ["checkpoint"], preferAnchor: true },
-	{ pattern: /回放|replay/u, terms: ["replay"], preferAnchor: false },
-	{ pattern: /恢复|restore/u, terms: ["restore"], preferAnchor: false },
-	{ pattern: /插件|plugin/u, terms: ["plugin", "plugins"], preferAnchor: true },
-	{ pattern: /路线图|roadmap/u, terms: ["roadmap"], preferAnchor: true },
-	{ pattern: /页面|总览|overview|page/u, terms: ["page"], preferAnchor: true },
-	{ pattern: /配置映射|configmap/u, terms: ["configmap"], preferAnchor: true },
-	{ pattern: /配置|configuration/u, terms: ["configuration"], preferAnchor: false },
-	{ pattern: /凭证|credential|secret/u, terms: ["credentials", "secret"], preferAnchor: false },
-	{ pattern: /令牌|token/u, terms: ["token"], preferAnchor: false },
-	{ pattern: /服务账号|service account/u, terms: ["service", "account"], preferAnchor: true },
-	{ pattern: /挂载|mounted|mount/u, terms: ["mounted"], preferAnchor: false },
-	{ pattern: /容器|pod/u, terms: ["pod", "pods"], preferAnchor: false },
-	{ pattern: /技术说明|docs|guide/u, terms: ["docs", "guide"], preferAnchor: true },
-];
 
 type CoverageLexicalPlannerFamilyEvidence = {
 	familyIndex: number;
@@ -54,14 +33,7 @@ type CoverageLexicalPlannerFamilyEvidence = {
 	titleSignal: number;
 	fillerScore: number;
 	bodyScore: number;
-	canonicalScore: number;
 };
-
-function hasSyntheticHardAnchorTerms(
-	syntheticTerms: readonly CoverageLexicalSyntheticTerm[],
-): boolean {
-	return syntheticTerms.some((term) => term.bucket === "hard_anchor");
-}
 
 export function buildCoverageLexicalPlan(
 	queryText: string,
@@ -75,24 +47,12 @@ export function buildCoverageLexicalPlan(
 		spans,
 		probes,
 	);
-	const syntheticTerms = synthesizeLocalizedTerms(
-		families,
-		spans,
-		familyEvidence,
-	);
-	const canonicalFamilies = selectCanonicalFamilies(families, familyEvidence);
 	const noiseFamilies = families.filter((family) => family.role === "noise");
 	const activeFamilies = families.filter((family) => family.role !== "noise");
-	const canonicalActiveFamilies = canonicalFamilies.filter(
-		(family) => family.role !== "noise",
-	);
 	const shortQueryOverlay = activeFamilies.length <= 2;
 	const anchorFamilies = activeFamilies.filter((family) => family.role === "anchor");
 	const bodyFamilies = activeFamilies.filter((family) => family.role === "body");
 	const coreFamilies = activeFamilies.filter((family) => family.strength === "core");
-	const canonicalBodyFamilies = canonicalActiveFamilies.filter(
-		(family) => family.role === "body",
-	);
 	const coreBodyFamilies = bodyFamilies.filter((family) => family.strength === "core");
 	const softBodyFamilies = bodyFamilies.filter((family) => family.strength !== "core");
 	const hasMetadataHint = METADATA_HINT_REGEX.test(queryText);
@@ -104,11 +64,9 @@ export function buildCoverageLexicalPlan(
 		queryKindReasons,
 	} = selectQueryKind({
 		activeFamilies,
-		canonicalActiveFamilies,
 		anchorFamilies,
 		bodyFamilies,
 		coreBodyFamilies,
-		canonicalBodyFamilies,
 		noiseFamilies,
 		familyEvidence,
 		spans,
@@ -117,14 +75,12 @@ export function buildCoverageLexicalPlan(
 		hasPathShapeHint,
 		hasTitleShapeHint,
 		hasMixedScriptHint,
-		syntheticTerms,
 		probes,
 	});
 	const hardAnchorFamilies = selectHardAnchorFamilies(
 		queryKind,
 		activeFamilies,
 		familyEvidence,
-		syntheticTerms,
 		probes,
 		shortQueryOverlay,
 	);
@@ -139,16 +95,8 @@ export function buildCoverageLexicalPlan(
 		[...hardAnchorFamilies, ...decisiveBodyFamilies].map((family) => family.index),
 	);
 	const supportBodyFamilies = [
-		...coreBodyFamilies.filter(
-			(family) =>
-				!reservedFamilyIndices.has(family.index) &&
-				isSupportBodyCandidate(family, familyEvidence),
-		),
-		...softBodyFamilies.filter(
-			(family) =>
-				!reservedFamilyIndices.has(family.index) &&
-				isSupportBodyCandidate(family, familyEvidence),
-		),
+		...coreBodyFamilies.filter((family) => !reservedFamilyIndices.has(family.index)),
+		...softBodyFamilies.filter((family) => !reservedFamilyIndices.has(family.index)),
 	];
 	const supportFamilyIndices = new Set(
 		supportBodyFamilies.map((family) => family.index),
@@ -193,7 +141,6 @@ export function buildCoverageLexicalPlan(
 		optionalFamilies,
 		noiseFamilies,
 		bridgeFamilies,
-		syntheticTerms,
 		relaxedMinimumMatchCount,
 		coreFamilyCount: coreFamilies.length,
 		anchorFamilyCount: anchorFamilies.length,
@@ -209,8 +156,6 @@ export function buildCoverageLexicalPlan(
 			bridgeFamilies,
 			familyEvidence,
 			queryKindReasons,
-			canonicalFamilies,
-			syntheticTerms,
 		),
 	};
 }
@@ -231,11 +176,9 @@ function selectRoute(
 
 function selectQueryKind(input: {
 	activeFamilies: CoverageLexicalPlan["families"];
-	canonicalActiveFamilies: CoverageLexicalPlan["families"];
 	anchorFamilies: CoverageLexicalPlan["families"];
 	bodyFamilies: CoverageLexicalPlan["families"];
 	coreBodyFamilies: CoverageLexicalPlan["families"];
-	canonicalBodyFamilies: CoverageLexicalPlan["families"];
 	noiseFamilies: CoverageLexicalPlan["families"];
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>;
 	spans: CoverageLexicalQuerySpan[];
@@ -244,7 +187,6 @@ function selectQueryKind(input: {
 	hasPathShapeHint: boolean;
 	hasTitleShapeHint: boolean;
 	hasMixedScriptHint: boolean;
-	syntheticTerms: readonly CoverageLexicalSyntheticTerm[];
 	probes: readonly CoverageLexicalFamilyProbe[];
 }): {
 	queryKind: CoverageLexicalQueryKind;
@@ -252,11 +194,9 @@ function selectQueryKind(input: {
 } {
 	const {
 		activeFamilies,
-		canonicalActiveFamilies,
 		anchorFamilies,
 		bodyFamilies,
 		coreBodyFamilies,
-		canonicalBodyFamilies,
 		noiseFamilies,
 		familyEvidence,
 		spans,
@@ -265,7 +205,6 @@ function selectQueryKind(input: {
 		hasPathShapeHint,
 		hasTitleShapeHint,
 		hasMixedScriptHint,
-		syntheticTerms,
 		probes,
 	} = input;
 	const reasons: string[] = [];
@@ -278,23 +217,19 @@ function selectQueryKind(input: {
 	const structuredAnchorCount = activeFamilies.filter((family) =>
 		isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
 	).length;
-	const syntheticHardAnchorCount = hasSyntheticHardAnchorTerms(syntheticTerms) ? 1 : 0;
-	const canonicalBodyCount = canonicalBodyFamilies.length;
-	const canonicalActiveCount = canonicalActiveFamilies.length;
 	const titlePathSpanCount = spans.filter((span) => span.kind === "title_path").length;
 	const metadataIntentSpanCount = spans.filter(
 		(span) => span.kind === "metadata_intent",
 	).length;
 	const fillerSpanCount = spans.filter((span) => span.kind === "filler").length;
 	const looksMetadataOnly =
-		(anchorFamilies.length > 0 || structuredAnchorCount > 0 || syntheticHardAnchorCount > 0) &&
-		(canonicalBodyCount === 0 ||
+		(anchorFamilies.length > 0 || structuredAnchorCount > 0) &&
+		(bodyFamilies.length === 0 ||
 			(shortQueryOverlay &&
 				(hasTitleShapeHint ||
 					hasPathShapeHint ||
 					hasMetadataHint ||
 					structuredAnchorCount > 0 ||
-					syntheticHardAnchorCount > 0 ||
 					titlePathSpanCount > 0 ||
 					metadataIntentSpanCount > 0 ||
 					metadataDominantAnchorCount >= Math.max(1, anchorFamilies.length))));
@@ -313,14 +248,13 @@ function selectQueryKind(input: {
 		};
 	}
 	if (
-		(anchorFamilies.length > 0 || structuredAnchorCount > 0 || syntheticHardAnchorCount > 0) &&
-		canonicalBodyCount > 0 &&
+		(anchorFamilies.length > 0 || structuredAnchorCount > 0) &&
+		bodyFamilies.length > 0 &&
 		(
 			hasMetadataHint ||
 			hasPathShapeHint ||
 			hasTitleShapeHint ||
 			structuredAnchorCount > 0 ||
-			syntheticHardAnchorCount > 0 ||
 			titlePathSpanCount > 0 ||
 			metadataIntentSpanCount > 0
 		)
@@ -334,7 +268,7 @@ function selectQueryKind(input: {
 	if (
 		coreBodyFamilies.length >= 2 &&
 		(softOrNoiseCount > 0 || fillerSpanCount > 0) &&
-		canonicalActiveCount >= 3
+		activeFamilies.length >= 4
 	) {
 		reasons.push("multiple body families plus filler/noise suggests relaxed memory query");
 		return {
@@ -360,7 +294,6 @@ function selectHardAnchorFamilies(
 	queryKind: CoverageLexicalQueryKind,
 	activeFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
-	syntheticTerms: readonly CoverageLexicalSyntheticTerm[],
 	probes: readonly CoverageLexicalFamilyProbe[],
 	shortQueryOverlay: boolean,
 ): CoverageLexicalPlan["hardAnchorFamilies"] {
@@ -370,15 +303,9 @@ function selectHardAnchorFamilies(
 	) {
 		return [];
 	}
-	const syntheticHardAnchorFamilyIndices = new Set(
-		syntheticTerms
-			.filter((term) => term.bucket === "hard_anchor")
-			.map((term) => term.sourceFamilyIndex),
-	);
 	const anchorFamilies = activeFamilies.filter(
 		(family) =>
 			family.role === "anchor" ||
-			syntheticHardAnchorFamilyIndices.has(family.index) ||
 			isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
 	);
 	if (anchorFamilies.length === 0) {
@@ -592,50 +519,6 @@ function computeBodyPriority(
 	return computeTailWeight(family.index) + rarityBonus + bodyBonus;
 }
 
-function selectCanonicalFamilies(
-	families: readonly CoverageLexicalPlan["families"][number][],
-	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
-): CoverageLexicalPlan["families"] {
-	return families.filter((family) => {
-		if (family.role === "noise") {
-			return false;
-		}
-		const evidence = familyEvidence.get(family.index);
-		if (!evidence) {
-			return family.role !== "noise";
-		}
-		if (
-			evidence.spanKinds.includes("raw_shape") ||
-			evidence.spanKinds.includes("title_path") ||
-			evidence.spanKinds.includes("metadata_intent")
-		) {
-			return true;
-		}
-		if (evidence.bodyScore > evidence.fillerScore) {
-			return true;
-		}
-		return evidence.canonicalScore > 0;
-	});
-}
-
-function isSupportBodyCandidate(
-	family: CoverageLexicalPlan["families"][number],
-	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
-): boolean {
-	const evidence = familyEvidence.get(family.index);
-	if (!evidence) {
-		return family.role === "body";
-	}
-	return (
-		family.role === "body" &&
-		(
-			evidence.bodyScore > 0 ||
-			evidence.canonicalScore > 0
-		) &&
-		evidence.fillerScore <= evidence.bodyScore
-	);
-}
-
 function computeTailWeight(index: number): number {
 	const position = index + 1;
 	return position * position;
@@ -826,9 +709,6 @@ function buildCoverageLexicalPlannerFamilyEvidence(
 			titleSignal,
 			fillerScore: matchedSpans.filter((span) => span.kind === "filler").length,
 			bodyScore: matchedSpans.filter((span) => span.kind === "body").length,
-			canonicalScore:
-				spanKinds.filter((kind) => kind !== "filler").length -
-				matchedSpans.filter((span) => span.kind === "filler").length,
 		});
 	}
 	return evidenceByFamily;
@@ -845,8 +725,6 @@ function buildPlanExplain(
 	bridgeFamilies: readonly CoverageLexicalPlan["families"][number][],
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
 	queryKindReasons: readonly string[],
-	canonicalFamilies: readonly CoverageLexicalPlan["families"][number][],
-	syntheticTerms: readonly CoverageLexicalSyntheticTerm[],
 ): CoverageLexicalPlanExplain {
 	const familyReasons: CoverageLexicalPlanFamilyReason[] = [];
 	const pushFamilyReasons = (
@@ -872,68 +750,7 @@ function buildPlanExplain(
 	pushFamilyReasons("bridge", bridgeFamilies);
 	return {
 		spans: [...spans],
-		canonicalTerms: canonicalFamilies.map((family) => family.normalizedTerm),
-		droppedFillerTerms: families
-			.filter((family) => !canonicalFamilies.some((candidate) => candidate.index === family.index))
-			.map((family) => family.normalizedTerm),
 		familyReasons,
-		queryKindReasons: [
-			...queryKindReasons,
-			...syntheticTerms.map(
-				(term) => `synthetic-${term.bucket}:${term.term}:${term.reason}`,
-			),
-		],
+		queryKindReasons: [...queryKindReasons],
 	};
-}
-
-function synthesizeLocalizedTerms(
-	families: readonly CoverageLexicalPlan["families"][number][],
-	spans: readonly CoverageLexicalQuerySpan[],
-	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
-): CoverageLexicalSyntheticTerm[] {
-	const out: CoverageLexicalSyntheticTerm[] = [];
-	const seen = new Set<string>();
-	for (const family of families) {
-		const evidence = familyEvidence.get(family.index);
-		if (!evidence) {
-			continue;
-		}
-		const matchedSpans = spans.filter((span) =>
-			span.text.includes(family.normalizedTerm) ||
-			family.normalizedTerm.includes(span.text),
-		);
-		for (const span of matchedSpans) {
-			for (const rule of LOCALIZED_SYNTHETIC_TERM_RULES) {
-				if (!rule.pattern.test(span.text)) {
-					continue;
-				}
-				for (const term of rule.terms) {
-					const bucket: CoverageLexicalSyntheticTerm["bucket"] =
-						rule.preferAnchor &&
-						(
-							span.kind === "title_path" ||
-							span.kind === "metadata_intent" ||
-							span.kind === "raw_shape"
-						)
-							? "hard_anchor"
-							: "bridge";
-					const scope: CoverageLexicalSyntheticTerm["scope"] =
-						bucket === "hard_anchor" ? "metadata-only" : "all";
-					const key = `${family.index}:${term}:${bucket}:${scope}`;
-					if (seen.has(key)) {
-						continue;
-					}
-					seen.add(key);
-					out.push({
-						sourceFamilyIndex: family.index,
-						term,
-						bucket,
-						scope,
-						reason: `${span.kind}:${span.text}`,
-					});
-				}
-			}
-		}
-	}
-	return out;
 }

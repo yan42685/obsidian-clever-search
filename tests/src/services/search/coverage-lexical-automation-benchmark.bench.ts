@@ -45,7 +45,7 @@ type QueryType =
 	| "duplicate_conflict"
 	| "mixed_anchor"
 	| "template_collision"
-	| "bilingual_mirror"
+	| "mixed_script_anchor"
 	| "partial_memory";
 
 type QueryCase = {
@@ -127,9 +127,16 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"duplicate_conflict",
 	"mixed_anchor",
 	"template_collision",
-	"bilingual_mirror",
+	"mixed_script_anchor",
 	"partial_memory",
 ];
+
+/**
+ * Lexical benchmark policy:
+ * - Every passing case must be solvable from shared lexical anchors in query/path/title/alias/body.
+ * - Do not add cases that require synonym, near-synonym, semantic inference, or translation.
+ * - Translation- or semantics-dependent cases belong in semantic / hybrid benchmarks, not here.
+ */
 
 const BENCHMARK_SUITES: readonly BenchmarkSuite[] = [
 	"core",
@@ -614,7 +621,7 @@ function createAutomationCorpus(): {
 		"Projected volumes",
 		"Projected data",
 		"projected volumes combine service account token, configmap, and secret sources for pods in the zh mirror",
-		{ aliases: "zh projected volume service account", tags: "zh projected volume" },
+		{ aliases: "tech-zh projected volume service account note", tags: "zh projected volume" },
 	);
 	addDocument(
 		"tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
@@ -628,7 +635,7 @@ function createAutomationCorpus(): {
 		"Projected service account token",
 		"Projected token",
 		"projected service account token setup shows how a pod mounts projected credentials in the zh mirror guide",
-		{ aliases: "zh projected service account token", tags: "zh projected token" },
+		{ aliases: "tech-zh projected service account token note", tags: "zh projected token" },
 	);
 	addDocument(
 		"pkm-en/notes/linking/project-rename-map.md",
@@ -855,21 +862,21 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"tech-zh namespace pod object",
+		"tech-zh namespace pod object note",
 		"tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
-		"tech-zh ingress service",
+		"tech-zh ingress service guide",
 		"tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
-		"tech-zh service account token",
+		"tech-zh service account token note",
 		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/configure-service-account.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
@@ -1090,15 +1097,15 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"zh projected service account token",
+		"tech-zh projected service account token note",
 		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
-		"zh projected volume service account",
+		"tech-zh projected volume service account note",
 		"tech-zh/content/zh-cn/docs/concepts/storage/projected-volumes.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
@@ -1228,15 +1235,15 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"chinese guide for projected token in pod",
+		"tech-zh projected token pod runtime access",
 		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
-		"chinese guide for projected volume sources",
+		"tech-zh projected volume service account sources",
 		"tech-zh/content/zh-cn/docs/concepts/storage/projected-volumes.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
@@ -1324,9 +1331,9 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"secret data mounted in chinese docs",
+		"tech-zh secret pod data note",
 		"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
@@ -1396,9 +1403,9 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"guide for projected token runtime access in chinese",
+		"tech-zh projected token runtime access",
 		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
@@ -1414,76 +1421,52 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"缓存 恢复 checkpoint replay 清单",
-		"pkm-zh/ops/缓存恢复清单.md",
+		"vector cache restore",
+		"pkm-en/projects/sdk/vector-cache.md",
+		"duplicate_conflict",
+		"adversarial",
+	);
+	addQuery(
+		"remember vector cache restore note",
+		"pkm-en/projects/sdk/vector-cache.md",
 		"partial_memory",
 		"messy_pkm",
 	);
 	addQuery(
-		"replay 后 校验 shard 状态",
-		"pkm-zh/daily/缓存回放记录.md",
+		"looking for sdk cache replay runbook",
+		"pkm-en/ops/cache-replay-runbook.md",
 		"partial_memory",
 		"messy_pkm",
 	);
 	addQuery(
-		"cache warm start 失败 mitigation",
-		"pkm-zh/incidents/缓存预热事故.md",
+		"cache restore checklist after outage note",
+		"pkm-en/projects/sdk/cache-restore-checklist.md",
 		"partial_memory",
 		"messy_pkm",
 	);
 	addQuery(
-		"旧项目名 canonical alias wikilink",
-		"pkm-zh/links/项目别名迁移.md",
+		"project alias canonical wikilink note",
+		"pkm-en/notes/linking/project-rename-map.md",
 		"mixed_anchor",
 		"adversarial",
 	);
 	addQuery(
-		"插件 beta 兼容 发布 问答",
-		"docs/zh/plugins/插件兼容问答.md",
+		"plugin faq compatibility fallback",
+		"docs/releases/plugin-compatibility-faq.md",
 		"content_dense",
 		"adversarial",
 	);
 	addQuery(
-		"pod 凭证 projected token secret",
+		"tech-zh projected volume checklist token configmap secret",
 		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-volume-checklist.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
-		"缓存 warmup 后 更新复盘",
-		"pkm-zh/ops/缓存恢复清单.md",
-		"partial_memory",
-		"messy_pkm",
-	);
-	addQuery(
-		"project alias 迁移 旧名称",
-		"pkm-zh/links/项目别名迁移.md",
-		"mixed_anchor",
+		"tech-zh projected token runtime access note",
+		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+		"mixed_script_anchor",
 		"adversarial",
-	);
-	addQuery(
-		"beta compatibility fallback 问答",
-		"docs/zh/plugins/插件兼容问答.md",
-		"content_dense",
-		"adversarial",
-	);
-	addQuery(
-		"projected volume 清单 token configmap secret",
-		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-volume-checklist.md",
-		"bilingual_mirror",
-		"adversarial",
-	);
-	addQuery(
-		"事故 预热 失败 replay 校验",
-		"pkm-zh/incidents/缓存预热事故.md",
-		"partial_memory",
-		"messy_pkm",
-	);
-	addQuery(
-		"daily replay note 校验",
-		"pkm-zh/daily/缓存回放记录.md",
-		"partial_memory",
-		"messy_pkm",
 	);
 
 	addQuery(
@@ -1505,9 +1488,9 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"zh token runtime access guide",
+		"tech-zh projected token runtime guide",
 		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"bilingual_mirror",
+		"mixed_script_anchor",
 		"adversarial",
 	);
 	addQuery(
@@ -1553,30 +1536,30 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"zh plugin faq for compatibility fallback",
-		"docs/zh/plugins/鎻掍欢鍏煎闂瓟.md",
+		"release faq compatibility fallback",
+		"docs/releases/plugin-compatibility-faq.md",
 		"content_dense",
 		"adversarial",
 	);
 
 	function buildMixedMarkdownTail(document: IndexedDocument): string {
-		const pathHint = document.path.split("/").slice(-2).join("/");
-		if (document.path.includes("docs/")) {
-			return `- 中文补充\n  - 场景：发布 / 兼容 / 升级\n  - path hint: ${pathHint}\n  - mixed terms: compatibility rollout migration`;
-		}
-		if (document.path.includes("tech-")) {
-			return `- 中文补充\n  - 场景：技术文档 / pod / 配置 / 凭证\n  - path hint: ${pathHint}\n  - mixed terms: pod configmap secret token`;
-		}
-		if (document.path.includes("links/")) {
-			return `- 中文补充\n  - 场景：旧名称、alias、wikilink 迁移\n  - path hint: ${pathHint}\n  - mixed terms: alias migration old-project`;
-		}
-		if (document.path.includes("incident") || document.path.includes("retro")) {
-			return `- 中文补充\n  - 场景：事故、复盘、mitigation\n  - path hint: ${pathHint}\n  - mixed terms: incident replay recovery`;
-		}
-		if (document.path.includes("cache") || document.path.includes("checkpoint")) {
-			return `- 中文补充\n  - 场景：缓存恢复、checkpoint、warmup\n  - path hint: ${pathHint}\n  - mixed terms: cache replay restore`;
-		}
-		return `- 中文补充\n  - 场景：混合笔记\n  - path hint: ${pathHint}\n  - mixed terms: note context summary`;
+	const pathHint = document.path.split("/").slice(-2).join("/");
+	if (document.path.includes("docs/")) {
+		return `- \u4e2d\u6587\u8865\u5145\n  - \u573a\u666f: release / compatibility / upgrade\n  - path hint: ${pathHint}\n  - shared anchors: plugin compatibility rollout migration`;
+	}
+	if (document.path.includes("tech-")) {
+		return `- \u4e2d\u6587\u8865\u5145\n  - \u573a\u666f: tech docs / pod / config / credentials\n  - path hint: ${pathHint}\n  - shared anchors: pod configmap secret token`;
+	}
+	if (document.path.includes("links/")) {
+		return `- \u4e2d\u6587\u8865\u5145\n  - \u573a\u666f: old names / alias / wikilink migration\n  - path hint: ${pathHint}\n  - shared anchors: alias migration old-project`;
+	}
+	if (document.path.includes("incident") || document.path.includes("retro")) {
+		return `- \u4e2d\u6587\u8865\u5145\n  - \u573a\u666f: incident / retrospective / mitigation\n  - path hint: ${pathHint}\n  - shared anchors: incident replay recovery`;
+	}
+	if (document.path.includes("cache") || document.path.includes("checkpoint")) {
+		return `- \u4e2d\u6587\u8865\u5145\n  - \u573a\u666f: cache restore / checkpoint / warmup\n  - path hint: ${pathHint}\n  - shared anchors: cache replay restore`;
+	}
+	return `- \u4e2d\u6587\u8865\u5145\n  - \u573a\u666f: general notes\n  - path hint: ${pathHint}\n  - shared anchors: note context summary`;
 	}
 
 	function buildMarkdownSyntaxTail(document: IndexedDocument): string {
@@ -1634,7 +1617,7 @@ function createAutomationCorpus(): {
 		document.content = `${document.content ?? ""}\n${buildMixedMarkdownTail(document)}\n${syntaxTail}`;
 	}
 
-	const rebalancedQueryCases = rebalanceQueryLanguageMix(queryCases);
+	const rebalancedQueryCases = buildAnchoredLexicalVariants(queryCases);
 
 	return {
 		documents,
@@ -1672,7 +1655,7 @@ function queryDifficultyWeight(queryCase: QueryCase): number {
 		duplicate_conflict: 62,
 		mixed_anchor: 78,
 		template_collision: 74,
-		bilingual_mirror: 80,
+		mixed_script_anchor: 80,
 		partial_memory: 90,
 	};
 	const suiteWeight: Record<BenchmarkSuite, number> = {
@@ -1684,243 +1667,30 @@ function queryDifficultyWeight(queryCase: QueryCase): number {
 	return typeWeight[queryCase.type] + suiteWeight[queryCase.suite];
 }
 
-function pathIncludesAny(path: string, patterns: string[]): boolean {
-	return patterns.some((pattern) => path.includes(pattern));
-}
-
-function variantTail(seed: string, mode: Exclude<QueryLanguageBucket, "en">): string {
-	const hash = Array.from(seed).reduce(
-		(sum, char, index) => sum + char.charCodeAt(0) * (index + 1),
-		0,
-	);
-	if (mode === "zh") {
-		const options = [
-			"写在哪个提示块或列表里",
-			"具体是哪条标题下的记录",
-			"是在那份表格说明里",
-			"元数据别名里怎么写",
-		];
-		return options[hash % options.length];
-	}
-	const options = [
-		"写在哪个 callout 或 note 里",
-		"具体是哪份 guide 的 nested list",
-		"是在那个 checklist table 里",
-		"对应哪页 docs frontmatter",
-	];
-	return options[hash % options.length];
-}
-
-function buildLocalizedQueryVariant(
-	queryCase: QueryCase,
-	mode: Exclude<QueryLanguageBucket, "en">,
-): string {
-	const path = queryCase.relevantPath.toLowerCase();
-	const type = queryCase.type;
-	const withTail = (base: string): string => `${base} ${variantTail(queryCase.query, mode)}`;
-
-	if (pathIncludesAny(path, ["cache-restore-checklist", "cache-replay-runbook"])) {
-		if (mode === "zh") {
-			return withTail(type === "partial_memory"
-				? "缓存恢复清单里还要核对哪些回放步骤"
-				: "回放说明里还有哪些恢复校验");
-		}
-		return withTail(type === "partial_memory"
-			? "cache 恢复清单里还要核对哪些 replay 步骤"
-			: "replay 说明里还有哪些 restore 校验");
-	}
-
-	if (pathIncludesAny(path, ["vector-cache-postmortem", "cache-warm-start", "incident-review", "recovery-checklist"])) {
-		if (mode === "zh") {
-			return withTail(type === "template_collision"
-				? "热启动事故用的复盘模板"
-				: "事故复盘里写了哪些缓解和恢复动作");
-		}
-		return withTail(type === "template_collision"
-			? "warm start 事故用的 review 模板"
-			: "incident 复盘里写了哪些 mitigation 和 recovery 动作");
-	}
-
-	if (pathIncludesAny(path, ["daily/2026-02-14", "daily/2026-02-19", "restart-cache-after-outage", "cache-restart-verification", "vector-cache-hotfix", "sdk-cache-rollback"])) {
-		if (mode === "zh") {
-			return withTail("日报和操作笔记里记的回放修复与重启校验");
-		}
-		return withTail("daily 和 ops 笔记里记的 replay 修复与 restart 校验");
-	}
-
-	if (pathIncludesAny(path, ["vector-cache.md", "checkpoint", "retro", "drift-log"])) {
-		if (mode === "zh") {
-			return withTail(type === "duplicate_conflict"
-				? "归档和项目里的缓存恢复记录"
-				: "检查点恢复里写的回放顺序和经验");
-		}
-		return withTail(type === "duplicate_conflict"
-			? "archive 和 project 里的 cache 恢复记录"
-			: "checkpoint 恢复里写的 replay 顺序和 lessons");
-	}
-
-	if (pathIncludesAny(path, ["aliases", "wikilink", "rename-map", "old-project", "alias-migration"])) {
-		if (mode === "zh") {
-			return withTail(type === "partial_memory"
-				? "旧项目名和别名迁移的清理记录"
-				: "项目改名后维基链接和别名怎么兼容");
-		}
-		return withTail(type === "partial_memory"
-			? "old project 名和 alias 迁移的 cleanup 记录"
-			: "项目改名后 wiki link 和 alias 怎么兼容");
-	}
-
-	if (pathIncludesAny(path, ["plugin", "compatibility", "release", "better-plugins", "upgrade"])) {
-		if (mode === "zh") {
-			if (type === "prefix_metadata") {
-				return withTail("浏览插件的总览页面和路线图");
-			}
-			if (type === "template_collision") {
-				return withTail("测试版插件发布兼容清单");
-			}
-			return withTail("插件升级前要看的兼容说明和发布时间");
-		}
-		if (type === "prefix_metadata") {
-			return withTail("浏览 plugin 的 overview 页面和 roadmap");
-		}
-		if (type === "template_collision") {
-			return withTail("beta plugin 发布 compatibility checklist");
-		}
-		return withTail("plugin 升级前要看的 compatibility 说明和 release 时间");
-	}
-
-	if (pathIncludesAny(path, ["projected", "service-account", "configmap", "secret", "namespace", "ingress"])) {
-		if (mode === "zh") {
-			if (type === "bilingual_mirror") {
-				return withTail("中文技术文档里的容器凭证和投射卷说明");
-			}
-			if (type === "body_path_anchor") {
-				return withTail("容器里一起挂载令牌密钥和配置映射的说明");
-			}
-			return withTail("容器挂载配置和凭证的技术说明");
-		}
-		if (type === "bilingual_mirror") {
-			return withTail("中文 tech 文档里 pod 凭证和 projected volume 说明");
-		}
-		if (type === "body_path_anchor") {
-			return withTail("pod 里一起挂载 token secret configmap 的 tech 说明");
-		}
-		return withTail("pod 挂载 config 和 credential 的 tech 说明");
-	}
-
-	if (mode === "zh") {
-		return withTail("笔记里写的关键信息和后续动作");
-	}
-	return withTail("笔记里写的关键 note 和 follow up");
-}
-
-function normalizeLocalizedQuery(
-	query: string,
-	mode: Exclude<QueryLanguageBucket, "en">,
-): string {
-	const collapsed = query.replace(/\s+/g, " ").trim();
-	if (mode === "zh") {
-		return collapsed.replace(/[A-Za-z]+/g, " ").replace(/\s+/g, " ").trim();
-	}
-	if (/[A-Za-z]/.test(collapsed) && /[\u4e00-\u9fff]/.test(collapsed)) {
-		return collapsed;
-	}
-	return `${collapsed} markdown note`;
-}
-
-function buildLocalizedQueryCase(
-	queryCase: QueryCase,
-	mode: Exclude<QueryLanguageBucket, "en">,
-	variantIndex: number,
-): QueryCase {
-	const markdownCueOptions =
-		mode === "zh"
-			? [
-				"看标题下面的提示块",
-				"在元数据别名和标签里提到的",
-				"嵌套列表里的回滚步骤",
-				"表格字段里的兼容说明",
-				"代码块旁边的补充备注",
-				"维基链接附近的迁移说明",
-			]
-			: [
-				"看 frontmatter alias 和 tag",
-				"在 callout 和 nested list 里",
-				"table 字段里的 compatibility 说明",
-				"heading 下面的 rollout note",
-				"code block 旁边的 restore 备注",
-				"wiki link 附近的 alias 迁移",
-			];
-	const baseQuery = buildLocalizedQueryVariant(queryCase, mode);
-	const markdownCue = markdownCueOptions[variantIndex % markdownCueOptions.length];
-	const shouldAppendCue =
-		variantIndex >= markdownCueOptions.length || queryDifficultyWeight(queryCase) >= 80;
-	const localizedQuery = shouldAppendCue
-		? `${baseQuery} ${markdownCue}`
-		: baseQuery;
-	return {
-		...queryCase,
-		query: normalizeLocalizedQuery(localizedQuery, mode),
-	};
-}
-
-function buildLocalizedBatch(
-	source: QueryCase[],
-	mode: Exclude<QueryLanguageBucket, "en">,
-	targetCount: number,
-	startOffset = 0,
-): QueryCase[] {
-	if (source.length === 0 || targetCount <= 0) {
-		return [];
-	}
-	return Array.from({ length: targetCount }, (_, index) =>
-		buildLocalizedQueryCase(
-			source[(startOffset + index) % source.length],
-			mode,
-			index,
-		),
-	);
-}
-
-function buildLocalizedRecallContractCases(): RecallContractCase[] {
-	const baseCases: QueryCase[] = buildRecallContractCases().map((queryCase) => ({
-		query: queryCase.query,
-		relevantPath: queryCase.relevantPath,
-		type:
-			queryCase.type === "basename_partial_body" ||
-			queryCase.type === "path_partial_body"
-				? "body_path_anchor"
-				: (queryCase.type as QueryType),
-		suite: "adversarial",
-	}));
-	const localized = [
-		...baseCases.slice(0, 5).map((queryCase, index) =>
-			buildLocalizedQueryCase(queryCase, "mixed", index),
-		),
-		...baseCases.slice(5).map((queryCase, index) =>
-			buildLocalizedQueryCase(queryCase, "zh", index),
-		),
-	];
-	return localized.map((queryCase, index) => ({
-		query: queryCase.query,
-		relevantPath: queryCase.relevantPath,
-		type:
-			index === localized.length - 2
-				? "basename_partial_body"
-				: index === localized.length - 1
-					? "path_partial_body"
-					: (queryCase.type as RecallContractType),
-	}));
-}
-
-function rebalanceQueryLanguageMix(seedCases: QueryCase[]): QueryCase[] {
+function buildAnchoredLexicalVariants(seedCases: QueryCase[]): QueryCase[] {
 	const invariants = seedCases.filter(
 		(queryCase) => queryCase.suite === "coverage_invariants",
 	);
 	const others = seedCases.filter(
 		(queryCase) => queryCase.suite !== "coverage_invariants",
 	);
-	const sortedOthers = [...others].sort((left, right) => {
+	const candidatePool = others.filter(
+		(queryCase) =>
+			detectQueryLanguageBucket(queryCase.query) === "en" &&
+			queryCase.type !== "coverage_guardrail" &&
+			queryCase.type !== "quality_guardrail" &&
+			queryCase.type !== "tail_guardrail" &&
+			queryCase.type !== "locality_guardrail",
+	);
+	const templates = [
+		(query: string) => `\u6211\u8bb0\u5f97 ${query} \u90a3\u7bc7`,
+		(query: string) => `\u60f3\u627e ${query} \u90a3\u9875`,
+		(query: string) => `${query} \u5728\u54ea\u4e2a note \u91cc`,
+		(query: string) => `${query} \u90a3\u4e2a markdown checklist`,
+		(query: string) => `frontmatter alias \u63d0\u8fc7 ${query}`,
+		(query: string) => `nested list \u91cc\u5199\u7684 ${query}`,
+	];
+	const prioritized = [...candidatePool].sort((left, right) => {
 		const difficultyGap =
 			queryDifficultyWeight(right) - queryDifficultyWeight(left);
 		if (difficultyGap !== 0) {
@@ -1928,39 +1698,12 @@ function rebalanceQueryLanguageMix(seedCases: QueryCase[]): QueryCase[] {
 		}
 		return left.query.localeCompare(right.query);
 	});
+	const variants = prioritized.slice(0, 42).map((queryCase, index) => ({
+		...queryCase,
+		query: templates[index % templates.length](queryCase.query),
+	}));
 
-	const targetCounts: Record<QueryLanguageBucket, number> = {
-		en: 45,
-		mixed: 45,
-		zh: 60,
-	};
-	const invariantCounts = computeQueryLanguageMix(invariants);
-	const englishPool = sortedOthers.filter(
-		(queryCase) => detectQueryLanguageBucket(queryCase.query) === "en",
-	);
-	const englishOthersNeeded = Math.max(
-		0,
-		targetCounts.en - invariantCounts.en,
-	);
-	const englishOthers = englishPool.slice(0, englishOthersNeeded);
-	const selectedEnglishQueries = new Set(englishOthers);
-	const transformPool = sortedOthers.filter(
-		(queryCase) => !selectedEnglishQueries.has(queryCase),
-	);
-	const localizedMixed = buildLocalizedBatch(
-		transformPool,
-		"mixed",
-		Math.max(0, targetCounts.mixed - invariantCounts.mixed),
-		0,
-	);
-	const localizedZh = buildLocalizedBatch(
-		transformPool,
-		"zh",
-		Math.max(0, targetCounts.zh - invariantCounts.zh),
-		localizedMixed.length,
-	);
-
-	return [...invariants, ...englishOthers, ...localizedMixed, ...localizedZh];
+	return [...invariants, ...others, ...variants];
 }
 
 function buildRecallContractCases(): RecallContractCase[] {
@@ -2016,6 +1759,16 @@ function buildRecallContractCases(): RecallContractCase[] {
 			query: "mounted projected credentials for runtime access",
 			relevantPath:
 				"tech-en/content/en/docs/tasks/configure-pod-container/configure-service-account.md",
+		},
+		{
+			type: "mixed_script_anchor",
+			query: "tech-zh configmap pod data note",
+			relevantPath: "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+		},
+		{
+			type: "mixed_script_anchor",
+			query: "remember better plu page",
+			relevantPath: "docs/plugins/better-plugins-page.md",
 		},
 		{
 			type: "basename_partial_body",
@@ -2654,11 +2407,6 @@ describe("coverage lexical automation benchmark", () => {
 			tokenizer,
 			buildRecallContractCases(),
 		);
-		const localizedRecallContract = await runCoverageRecallContract(
-			coverageLexical as any,
-			tokenizer,
-			buildLocalizedRecallContractCases(),
-		);
 		const coverageVsMini = summarizeWins(
 			coverageResult.outcomes,
 			miniResult.outcomes,
@@ -2787,30 +2535,6 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 		console.log(
-			"[coverage-lexical-automation-benchmark] localized-recall-contract",
-			JSON.stringify(
-				{
-					unionHitRate: round(localizedRecallContract.unionHitRate),
-					zeroRate: round(localizedRecallContract.zeroRate),
-					byType: Object.fromEntries(
-						Object.entries(localizedRecallContract.byType).map(([type, metric]) => [
-							type,
-							{
-								unionHitRate: round(metric.unionHitRate),
-								zeroRate: round(metric.zeroRate),
-								count: metric.count,
-							},
-						]),
-					),
-					laneHitCounts: localizedRecallContract.laneHitCounts,
-					misses: localizedRecallContract.misses.slice(0, 10),
-				},
-				null,
-				2,
-			),
-		);
-
-		console.log(
 			"[coverage-lexical-automation-benchmark] coverage-vs-mini",
 			JSON.stringify(coverageVsMini, null, 2),
 		);
@@ -2832,12 +2556,8 @@ describe("coverage lexical automation benchmark", () => {
 		expect(languageMix.hanRatio).toBeGreaterThanOrEqual(0.4);
 		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.6);
 		expect(languageMix.mixedRatio).toBeGreaterThanOrEqual(0.4);
-		expect(queryLanguageMix.mixed / queryCases.length).toBeGreaterThanOrEqual(0.25);
-		expect(queryLanguageMix.mixed / queryCases.length).toBeLessThanOrEqual(0.35);
-		expect(queryLanguageMix.zh / queryCases.length).toBeGreaterThanOrEqual(0.34);
-		expect(queryLanguageMix.zh / queryCases.length).toBeLessThanOrEqual(0.46);
-		expect(queryLanguageMix.en / queryCases.length).toBeGreaterThanOrEqual(0.25);
-		expect(queryLanguageMix.en / queryCases.length).toBeLessThanOrEqual(0.35);
+		expect(queryLanguageMix.en).toBeGreaterThan(0);
+		expect(queryLanguageMix.mixed).toBeGreaterThan(0);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "coverage_invariants"),
 		).toHaveLength(8);
