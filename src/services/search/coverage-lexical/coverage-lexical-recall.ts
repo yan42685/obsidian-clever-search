@@ -10,13 +10,18 @@ import type {
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataAliasPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataAliasPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataBasenamePhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataBasenamePostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataFolderPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataFolderPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataHeadingPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataHeadingPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	bodyPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataTagPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataTagPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	sortedLexicon: readonly string[];
 };
@@ -181,53 +186,64 @@ function collectCandidatesForPhraseSignature(
 	signature: CoverageLexicalPhraseSignature,
 ): void {
 	for (const variant of signature.variants) {
-		const bodyTokenMatches = index.bodyPostings.get(variant);
-		if (bodyTokenMatches) {
-			for (const path of bodyTokenMatches) {
-				const state = getOrCreateCandidateState(candidates, path);
-				state.phraseMatches.add(signature.index);
-				for (const familyIndex of signature.familyIndices) {
-					recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
-					getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+		if (!signature.preferredFields || signature.preferredFields.length === 0) {
+			const bodyTokenMatches = index.bodyPostings.get(variant);
+			if (bodyTokenMatches) {
+				for (const path of bodyTokenMatches) {
+					const state = getOrCreateCandidateState(candidates, path);
+					state.phraseMatches.add(signature.index);
+					for (const familyIndex of signature.familyIndices) {
+						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
+						getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+					}
 				}
 			}
+
+			const bodyMatches = index.bodyPhrasePostings.get(variant);
+			if (bodyMatches) {
+				for (const path of bodyMatches) {
+					const state = getOrCreateCandidateState(candidates, path);
+					state.phraseMatches.add(signature.index);
+					for (const familyIndex of signature.familyIndices) {
+						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
+						getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+					}
+				}
+			}
+
+			const metadataTokenMatches = index.metadataPostings.get(variant);
+			if (metadataTokenMatches) {
+				for (const path of metadataTokenMatches) {
+					const state = getOrCreateCandidateState(candidates, path);
+					state.phraseMatches.add(signature.index);
+					for (const familyIndex of signature.familyIndices) {
+						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
+						getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+					}
+				}
+			}
+
+			const metadataMatches = index.metadataPhrasePostings.get(variant);
+			if (metadataMatches) {
+				for (const path of metadataMatches) {
+					const state = getOrCreateCandidateState(candidates, path);
+					state.phraseMatches.add(signature.index);
+					for (const familyIndex of signature.familyIndices) {
+						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
+						getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+					}
+				}
+			}
+			continue;
 		}
 
-		const bodyMatches = index.bodyPhrasePostings.get(variant);
-		if (bodyMatches) {
-			for (const path of bodyMatches) {
-				const state = getOrCreateCandidateState(candidates, path);
-				state.phraseMatches.add(signature.index);
-				for (const familyIndex of signature.familyIndices) {
-					recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
-					getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
-				}
-			}
-		}
-
-		const metadataTokenMatches = index.metadataPostings.get(variant);
-		if (metadataTokenMatches) {
-			for (const path of metadataTokenMatches) {
-				const state = getOrCreateCandidateState(candidates, path);
-				state.phraseMatches.add(signature.index);
-				for (const familyIndex of signature.familyIndices) {
-					recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
-					getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
-				}
-			}
-		}
-
-		const metadataMatches = index.metadataPhrasePostings.get(variant);
-		if (metadataMatches) {
-			for (const path of metadataMatches) {
-				const state = getOrCreateCandidateState(candidates, path);
-				state.phraseMatches.add(signature.index);
-				for (const familyIndex of signature.familyIndices) {
-					recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
-					getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
-				}
-			}
-		}
+		collectPreferredMetadataPhraseMatches(
+			index,
+			candidates,
+			familyMatchedPaths,
+			signature,
+			variant,
+		);
 	}
 }
 
@@ -308,6 +324,45 @@ function collectMetadataFieldCandidatesForTerm(
 		const state = getOrCreateCandidateState(candidates, path);
 		recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 		getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+	}
+}
+
+function collectPreferredMetadataPhraseMatches(
+	index: CoverageLexicalRecallIndex,
+	candidates: Map<string, CoverageLexicalCandidateState>,
+	familyMatchedPaths: Map<number, Set<string>>,
+	signature: CoverageLexicalPhraseSignature,
+	variant: string,
+): void {
+	const fieldPhraseEntries: Array<
+		[
+			CoverageLexicalMetadataField,
+			ReadonlyMap<string, ReadonlySet<string>>,
+		]
+	> = [
+		["basename", index.metadataBasenamePhrasePostings],
+		["aliases", index.metadataAliasPhrasePostings],
+		["folder", index.metadataFolderPhrasePostings],
+		["headings", index.metadataHeadingPhrasePostings],
+		["tags", index.metadataTagPhrasePostings],
+	];
+	for (const [field, postings] of fieldPhraseEntries) {
+		if (!signature.preferredFields?.includes(field)) {
+			continue;
+		}
+		const matches = postings.get(variant);
+		if (!matches) {
+			continue;
+		}
+		for (const path of matches) {
+			const state = getOrCreateCandidateState(candidates, path);
+			state.phraseMatches.add(signature.index);
+			for (const familyIndex of signature.familyIndices) {
+				recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
+				recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, "exact");
+				getOrCreateFamilyMatchedPaths(familyMatchedPaths, familyIndex).add(path);
+			}
+		}
 	}
 }
 

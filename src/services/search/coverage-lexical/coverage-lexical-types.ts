@@ -20,6 +20,7 @@ export type CoverageLexicalPhraseSignature = {
 	familyIndices: number[];
 	variants: string[];
 	tailWeight: number;
+	preferredFields?: CoverageLexicalMetadataField[] | null;
 };
 
 export type CoverageLexicalPairSignature = {
@@ -61,6 +62,9 @@ export type CoverageLexicalPlan = {
 	families: CoverageLexicalFamily[];
 	shortQueryOverlay: boolean;
 	hasMetadataHint: boolean;
+	hasMixedScriptHint: boolean;
+	hasPathShapeHint: boolean;
+	hasTitleShapeHint: boolean;
 	route: CoverageLexicalRoute;
 	coreFamilyCount: number;
 	anchorFamilyCount: number;

@@ -14,6 +14,7 @@ import {
 } from "./coverage-lexical-admission";
 import {
 	buildCoverageLexicalPhraseSignatures,
+	buildCoverageLexicalStructuredMetadataSignatures,
 	buildCoverageLexicalPhraseTerms,
 } from "./coverage-lexical-bridge";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
@@ -41,15 +42,20 @@ import type {
 } from "./coverage-lexical-types";
 
 type CoverageLexicalDocument = {
+	aliasPhraseTerms: Set<string>;
 	aliasTerms: Set<string>;
+	basenamePhraseTerms: Set<string>;
 	basenameTerms: Set<string>;
 	bodyTokenSequence: string[];
 	bodyPhraseTerms: Set<string>;
 	bodyTerms: Set<string>;
+	folderPhraseTerms: Set<string>;
 	folderTerms: Set<string>;
+	headingPhraseTerms: Set<string>;
 	headingTerms: Set<string>;
 	metadataPhraseTerms: Set<string>;
 	metadataTerms: Set<string>;
+	tagPhraseTerms: Set<string>;
 	tagTerms: Set<string>;
 };
 const LOCAL_WINDOW_RERANK_MULTIPLIER = 6;
@@ -64,12 +70,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
 	private readonly bodyPostings = new Map<string, Set<string>>();
 	private readonly bodyPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataAliasPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataAliasPostings = new Map<string, Set<string>>();
+	private readonly metadataBasenamePhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataBasenamePostings = new Map<string, Set<string>>();
+	private readonly metadataFolderPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataFolderPostings = new Map<string, Set<string>>();
+	private readonly metadataHeadingPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPostings = new Map<string, Set<string>>();
 	private readonly metadataPostings = new Map<string, Set<string>>();
 	private readonly metadataPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataTagPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataTagPostings = new Map<string, Set<string>>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexicon: string[] = [];
@@ -94,12 +105,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.clear();
 		this.bodyPostings.clear();
 		this.bodyPhrasePostings.clear();
+		this.metadataAliasPhrasePostings.clear();
 		this.metadataAliasPostings.clear();
+		this.metadataBasenamePhrasePostings.clear();
 		this.metadataBasenamePostings.clear();
+		this.metadataFolderPhrasePostings.clear();
 		this.metadataFolderPostings.clear();
+		this.metadataHeadingPhrasePostings.clear();
 		this.metadataHeadingPostings.clear();
 		this.metadataPostings.clear();
 		this.metadataPhrasePostings.clear();
+		this.metadataTagPhrasePostings.clear();
 		this.metadataTagPostings.clear();
 		this.lexicon.clear();
 		this.sortedLexicon = [];
@@ -128,17 +144,28 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const familyProbes = this.buildFamilyProbes(queryTerms);
 		const plan = buildCoverageLexicalPlan(request.queryText, queryTerms, familyProbes);
 		const pairSignatures = buildCoverageLexicalPairSignatures(plan.families);
-		const phraseSignatures = buildCoverageLexicalPhraseSignatures(plan.families);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				request.queryText,
+				plan.families,
+			),
+		];
 		const candidates = collectCoverageLexicalCandidateStates(
 			{
 				bodyPostings: this.bodyPostings,
+				metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
 				metadataAliasPostings: this.metadataAliasPostings,
+				metadataBasenamePhrasePostings: this.metadataBasenamePhrasePostings,
 				metadataBasenamePostings: this.metadataBasenamePostings,
+				metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
 				metadataFolderPostings: this.metadataFolderPostings,
+				metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
 				metadataHeadingPostings: this.metadataHeadingPostings,
 				metadataPostings: this.metadataPostings,
 				bodyPhrasePostings: this.bodyPhrasePostings,
 				metadataPhrasePostings: this.metadataPhrasePostings,
+				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
 				metadataTagPostings: this.metadataTagPostings,
 				sortedLexicon: this.sortedLexicon,
 			},
@@ -250,12 +277,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const tokenCount =
 			sumPostingEntries(this.bodyPostings) +
 			sumPostingEntries(this.bodyPhrasePostings) +
+			sumPostingEntries(this.metadataAliasPhrasePostings) +
 			sumPostingEntries(this.metadataAliasPostings) +
+			sumPostingEntries(this.metadataBasenamePhrasePostings) +
 			sumPostingEntries(this.metadataBasenamePostings) +
+			sumPostingEntries(this.metadataFolderPhrasePostings) +
 			sumPostingEntries(this.metadataFolderPostings) +
+			sumPostingEntries(this.metadataHeadingPhrasePostings) +
 			sumPostingEntries(this.metadataHeadingPostings) +
 			sumPostingEntries(this.metadataPostings) +
 			sumPostingEntries(this.metadataPhrasePostings) +
+			sumPostingEntries(this.metadataTagPhrasePostings) +
 			sumPostingEntries(this.metadataTagPostings);
 		return tokenCount * 24;
 	}
@@ -265,12 +297,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			documentCount: this.documents.size,
 			bodyTermCount: this.bodyPostings.size,
 			bodyPhraseTermCount: this.bodyPhrasePostings.size,
+			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
+			metadataBasenamePhraseTermCount: this.metadataBasenamePhrasePostings.size,
 			metadataBasenameTermCount: this.metadataBasenamePostings.size,
+			metadataFolderPhraseTermCount: this.metadataFolderPhrasePostings.size,
 			metadataFolderTermCount: this.metadataFolderPostings.size,
+			metadataHeadingPhraseTermCount: this.metadataHeadingPhrasePostings.size,
 			metadataHeadingTermCount: this.metadataHeadingPostings.size,
 			metadataTermCount: this.metadataPostings.size,
 			metadataPhraseTermCount: this.metadataPhrasePostings.size,
+			metadataTagPhraseTermCount: this.metadataTagPhrasePostings.size,
 			metadataTagTermCount: this.metadataTagPostings.size,
 			lexiconSize: this.sortedLexicon.length,
 		};
@@ -316,23 +353,41 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			...headingTerms,
 		];
 		const metadataTerms = new Set(metadataTokenSequence);
+		const aliasPhraseTerms = new Set(buildCoverageLexicalPhraseTerms(Array.from(aliasTerms)));
+		const basenamePhraseTerms = new Set(
+			buildCoverageLexicalPhraseTerms(Array.from(basenameTerms)),
+		);
 		const bodyPhraseTerms = new Set(
 			buildCoverageLexicalPhraseTerms(bodyTokenSequence),
+		);
+		const folderPhraseTerms = new Set(
+			buildCoverageLexicalPhraseTerms(Array.from(folderTerms)),
+		);
+		const headingPhraseTerms = new Set(
+			buildCoverageLexicalPhraseTerms(Array.from(headingTerms)),
 		);
 		const metadataPhraseTerms = new Set(
 			buildCoverageLexicalPhraseTerms(metadataTokenSequence),
 		);
+		const tagPhraseTerms = new Set(
+			buildCoverageLexicalPhraseTerms(Array.from(tagTerms)),
+		);
 
 		this.documents.set(document.path, {
+			aliasPhraseTerms,
 			aliasTerms,
+			basenamePhraseTerms,
 			basenameTerms,
 			bodyTokenSequence,
 			bodyPhraseTerms,
 			bodyTerms,
+			folderPhraseTerms,
 			folderTerms,
+			headingPhraseTerms,
 			headingTerms,
 			metadataPhraseTerms,
 			metadataTerms,
+			tagPhraseTerms,
 			tagTerms,
 		});
 
@@ -347,17 +402,29 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addPosting(this.metadataAliasPostings, term, document.path);
 			this.lexicon.add(term);
 		}
+		for (const term of aliasPhraseTerms) {
+			addPosting(this.metadataAliasPhrasePostings, term, document.path);
+		}
 		for (const term of basenameTerms) {
 			addPosting(this.metadataBasenamePostings, term, document.path);
 			this.lexicon.add(term);
+		}
+		for (const term of basenamePhraseTerms) {
+			addPosting(this.metadataBasenamePhrasePostings, term, document.path);
 		}
 		for (const term of folderTerms) {
 			addPosting(this.metadataFolderPostings, term, document.path);
 			this.lexicon.add(term);
 		}
+		for (const term of folderPhraseTerms) {
+			addPosting(this.metadataFolderPhrasePostings, term, document.path);
+		}
 		for (const term of headingTerms) {
 			addPosting(this.metadataHeadingPostings, term, document.path);
 			this.lexicon.add(term);
+		}
+		for (const term of headingPhraseTerms) {
+			addPosting(this.metadataHeadingPhrasePostings, term, document.path);
 		}
 		for (const term of metadataTerms) {
 			addPosting(this.metadataPostings, term, document.path);
@@ -369,6 +436,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of tagTerms) {
 			addPosting(this.metadataTagPostings, term, document.path);
 			this.lexicon.add(term);
+		}
+		for (const term of tagPhraseTerms) {
+			addPosting(this.metadataTagPhrasePostings, term, document.path);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
 	}
@@ -388,14 +458,26 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of existing.aliasTerms) {
 			removePosting(this.metadataAliasPostings, term, path);
 		}
+		for (const term of existing.aliasPhraseTerms) {
+			removePosting(this.metadataAliasPhrasePostings, term, path);
+		}
 		for (const term of existing.basenameTerms) {
 			removePosting(this.metadataBasenamePostings, term, path);
+		}
+		for (const term of existing.basenamePhraseTerms) {
+			removePosting(this.metadataBasenamePhrasePostings, term, path);
 		}
 		for (const term of existing.folderTerms) {
 			removePosting(this.metadataFolderPostings, term, path);
 		}
+		for (const term of existing.folderPhraseTerms) {
+			removePosting(this.metadataFolderPhrasePostings, term, path);
+		}
 		for (const term of existing.headingTerms) {
 			removePosting(this.metadataHeadingPostings, term, path);
+		}
+		for (const term of existing.headingPhraseTerms) {
+			removePosting(this.metadataHeadingPhrasePostings, term, path);
 		}
 		for (const term of existing.metadataTerms) {
 			removePosting(this.metadataPostings, term, path);
@@ -405,6 +487,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		for (const term of existing.tagTerms) {
 			removePosting(this.metadataTagPostings, term, path);
+		}
+		for (const term of existing.tagPhraseTerms) {
+			removePosting(this.metadataTagPhrasePostings, term, path);
 		}
 		this.documents.delete(path);
 		this.rebuildLexicon();

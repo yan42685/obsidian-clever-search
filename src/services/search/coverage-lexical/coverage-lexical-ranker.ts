@@ -49,6 +49,24 @@ export function compareCoverageLexicalResultSignals(
 	}
 
 	if (plan.route === "body-with-anchor") {
+		if (
+			plan.hasPathShapeHint ||
+			plan.hasTitleShapeHint ||
+			plan.hasMixedScriptHint
+		) {
+			return (
+				compareAreaSignals(left.coreBody, right.coreBody) ||
+				compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+				compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+				comparePhraseBridgeSignals(left, right) ||
+				compareCoverageLexicalWindowFusionSignals(
+					left.localEvidence,
+					right.localEvidence,
+				) ||
+				compareAreaSignals(left.softBody, right.softBody) ||
+				compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
+			);
+		}
 		return (
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
