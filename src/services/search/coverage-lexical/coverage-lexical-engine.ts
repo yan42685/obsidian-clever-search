@@ -1,5 +1,4 @@
 import type { IndexedDocument, MatchedFile } from "src/globals/search-types";
-import { innerSetting } from "src/globals/plugin-setting";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -9,9 +8,19 @@ import type {
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
 import { Tokenizer } from "../tokenizer";
+import {
+	buildCoverageLexicalPassageAdmissionSignal,
+	compareCoverageLexicalPassageAdmissionSignals,
+} from "./coverage-lexical-admission";
+import {
+	buildCoverageLexicalPhraseSignatures,
+	buildCoverageLexicalPhraseTerms,
+} from "./coverage-lexical-bridge";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
+import { collectCoverageLexicalCandidateStates } from "./coverage-lexical-recall";
 import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
 import {
+	compareCoverageLexicalResultSignals,
 	rankCoverageLexicalResults,
 	type CoverageLexicalRankableResult,
 } from "./coverage-lexical-ranker";
@@ -22,26 +31,21 @@ import {
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
+	CoverageLexicalCandidateState,
 	CoverageLexicalFamily,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalPairSignature,
+	CoverageLexicalPhraseSignature,
 } from "./coverage-lexical-types";
 
 type CoverageLexicalDocument = {
 	bodyTokenSequence: string[];
+	bodyPhraseTerms: Set<string>;
 	bodyTerms: Set<string>;
+	metadataPhraseTerms: Set<string>;
 	metadataTerms: Set<string>;
 };
-
-type CoverageLexicalCandidateState = {
-	bodyMatches: Map<number, CoverageFamilyMatchKind>;
-	metadataMatches: Map<number, CoverageFamilyMatchKind>;
-};
-
-const MAX_PREFIX_EXPANSIONS = 48;
-const MAX_FUZZY_EXPANSIONS = 24;
-const COVERAGE_CANDIDATE_MULTIPLIER = 4;
 const LOCAL_WINDOW_RERANK_MULTIPLIER = 6;
 const MIN_LOCAL_WINDOW_RERANK_BUDGET = 48;
 
@@ -53,7 +57,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
 	private readonly bodyPostings = new Map<string, Set<string>>();
+	private readonly bodyPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataPostings = new Map<string, Set<string>>();
+	private readonly metadataPhrasePostings = new Map<string, Set<string>>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexicon: string[] = [];
 
@@ -76,7 +82,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	clearIndex(): void {
 		this.documents.clear();
 		this.bodyPostings.clear();
+		this.bodyPhrasePostings.clear();
 		this.metadataPostings.clear();
+		this.metadataPhrasePostings.clear();
 		this.lexicon.clear();
 		this.sortedLexicon = [];
 	}
@@ -104,9 +112,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const familyProbes = this.buildFamilyProbes(queryTerms);
 		const plan = buildCoverageLexicalPlan(request.queryText, queryTerms, familyProbes);
 		const pairSignatures = buildCoverageLexicalPairSignatures(plan.families);
-		const candidates = this.collectCandidateStates(
-			plan.families,
-			pairSignatures,
+		const phraseSignatures = buildCoverageLexicalPhraseSignatures(plan.families);
+		const candidates = collectCoverageLexicalCandidateStates(
+			{
+				bodyPostings: this.bodyPostings,
+				metadataPostings: this.metadataPostings,
+				bodyPhrasePostings: this.bodyPhrasePostings,
+				metadataPhrasePostings: this.metadataPhrasePostings,
+				sortedLexicon: this.sortedLexicon,
+			},
+			plan,
+			phraseSignatures,
 			request,
 		);
 		if (candidates.size === 0) {
@@ -121,11 +137,50 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					plan.families,
 					state,
 					false,
+					phraseSignatures,
 					pairSignatures,
 				),
 			)
 			.filter((result): result is CoverageLexicalRankableResult => result !== null);
-		const coarseRanked = rankCoverageLexicalResults(coarseResults, plan);
+		const admissionSignals = new Map(
+			coarseResults.map((result) => {
+				const document = this.documents.get(result.path);
+				return [
+					result.path,
+					buildCoverageLexicalPassageAdmissionSignal(
+						document?.bodyTokenSequence ?? [],
+						plan.families,
+						candidates.get(result.path) ?? {
+							bodyMatches: new Map(),
+							metadataMatches: new Map(),
+							phraseMatches: new Set(),
+						},
+						phraseSignatures,
+					),
+				] as const;
+			}),
+		);
+		const coarseRanked = [...coarseResults].sort((left, right) => {
+			const signalDecision = compareCoverageLexicalResultSignals(
+				left.coverageLexicalSignal,
+				right.coverageLexicalSignal,
+				plan,
+			);
+			if (signalDecision !== 0) {
+				return signalDecision;
+			}
+			const admissionDecision = compareCoverageLexicalPassageAdmissionSignals(
+				admissionSignals.get(left.path)!,
+				admissionSignals.get(right.path)!,
+			);
+			if (admissionDecision !== 0) {
+				return admissionDecision;
+			}
+			return (
+				(right.score ?? 0) - (left.score ?? 0) ||
+				left.path.localeCompare(right.path)
+			);
+		});
 		const localWindowBudget = Math.min(
 			coarseRanked.length,
 			Math.max(
@@ -147,6 +202,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						plan.families,
 						state,
 						localWindowPaths.has(path),
+						phraseSignatures,
 						pairSignatures,
 					),
 				)
@@ -164,7 +220,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	estimateIndexBytes(): number | null {
 		const tokenCount =
-			sumPostingEntries(this.bodyPostings) + sumPostingEntries(this.metadataPostings);
+			sumPostingEntries(this.bodyPostings) +
+			sumPostingEntries(this.bodyPhrasePostings) +
+			sumPostingEntries(this.metadataPostings) +
+			sumPostingEntries(this.metadataPhrasePostings);
 		return tokenCount * 24;
 	}
 
@@ -172,7 +231,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return {
 			documentCount: this.documents.size,
 			bodyTermCount: this.bodyPostings.size,
+			bodyPhraseTermCount: this.bodyPhrasePostings.size,
 			metadataTermCount: this.metadataPostings.size,
+			metadataPhraseTermCount: this.metadataPhrasePostings.size,
 			lexiconSize: this.sortedLexicon.length,
 		};
 	}
@@ -184,24 +245,31 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			.tokenizeSequence(document.content ?? "", "index")
 			.map((term) => term.toLowerCase());
 		const bodyTerms = new Set(bodyTokenSequence);
-		const metadataTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(
-					[
-						document.basename,
-						document.folder,
-						document.aliases ?? "",
-						document.tags ?? "",
-						document.headings ?? "",
-					].join(" "),
-					"index",
-				)
-				.map((term) => term.toLowerCase()),
+		const metadataTokenSequence = this.tokenizer
+			.tokenizeSequence(
+				[
+					document.basename,
+					document.folder,
+					document.aliases ?? "",
+					document.tags ?? "",
+					document.headings ?? "",
+				].join(" "),
+				"index",
+			)
+			.map((term) => term.toLowerCase());
+		const metadataTerms = new Set(metadataTokenSequence);
+		const bodyPhraseTerms = new Set(
+			buildCoverageLexicalPhraseTerms(bodyTokenSequence),
+		);
+		const metadataPhraseTerms = new Set(
+			buildCoverageLexicalPhraseTerms(metadataTokenSequence),
 		);
 
 		this.documents.set(document.path, {
 			bodyTokenSequence,
+			bodyPhraseTerms,
 			bodyTerms,
+			metadataPhraseTerms,
 			metadataTerms,
 		});
 
@@ -209,9 +277,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addPosting(this.bodyPostings, term, document.path);
 			this.lexicon.add(term);
 		}
+		for (const term of bodyPhraseTerms) {
+			addPosting(this.bodyPhrasePostings, term, document.path);
+		}
 		for (const term of metadataTerms) {
 			addPosting(this.metadataPostings, term, document.path);
 			this.lexicon.add(term);
+		}
+		for (const term of metadataPhraseTerms) {
+			addPosting(this.metadataPhrasePostings, term, document.path);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
 	}
@@ -225,8 +299,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of existing.bodyTerms) {
 			removePosting(this.bodyPostings, term, path);
 		}
+		for (const term of existing.bodyPhraseTerms) {
+			removePosting(this.bodyPhrasePostings, term, path);
+		}
 		for (const term of existing.metadataTerms) {
 			removePosting(this.metadataPostings, term, path);
+		}
+		for (const term of existing.metadataPhraseTerms) {
+			removePosting(this.metadataPhrasePostings, term, path);
 		}
 		this.documents.delete(path);
 		this.rebuildLexicon();
@@ -254,126 +334,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}));
 	}
 
-	private collectCandidateStates(
-		families: readonly CoverageLexicalFamily[],
-		pairSignatures: readonly CoverageLexicalPairSignature[],
-		request: FileSearchRequest,
-	): Map<string, CoverageLexicalCandidateState> {
-		const candidates = new Map<string, CoverageLexicalCandidateState>();
-		for (const family of families) {
-			if (family.role === "noise") {
-				continue;
-			}
-			this.collectCandidatesForTerm(
-				candidates,
-				family.index,
-				family.normalizedTerm,
-				"exact",
-			);
-		}
-		for (const pairSignature of pairSignatures) {
-			this.collectCandidatesForPairSignature(candidates, pairSignature);
-		}
-
-		if (
-			request.isPrefixMatch &&
-			candidates.size < request.maxItemResults * COVERAGE_CANDIDATE_MULTIPLIER
-		) {
-			for (const family of families) {
-				if (family.role === "noise" || !family.allowPrefix) {
-					continue;
-				}
-				for (const term of this.expandPrefixTerms(family.normalizedTerm)) {
-					if (term === family.normalizedTerm) {
-						continue;
-					}
-					this.collectCandidatesForTerm(candidates, family.index, term, "prefix");
-				}
-			}
-		}
-
-		if (
-			request.isFuzzy &&
-			candidates.size < request.maxItemResults * COVERAGE_CANDIDATE_MULTIPLIER
-		) {
-			for (const family of families) {
-				if (family.role === "noise" || !family.allowFuzzy) {
-					continue;
-				}
-				for (const term of this.expandFuzzyTerms(family.normalizedTerm)) {
-					this.collectCandidatesForTerm(candidates, family.index, term, "fuzzy");
-				}
-			}
-		}
-
-		return candidates;
-	}
-
-	private collectCandidatesForTerm(
-		candidates: Map<string, CoverageLexicalCandidateState>,
-		familyIndex: number,
-		term: string,
-		kind: Exclude<CoverageFamilyMatchKind, null>,
-	): void {
-		const bodyMatches = this.bodyPostings.get(term);
-		if (bodyMatches) {
-			for (const path of bodyMatches) {
-				const state = getOrCreateCandidateState(candidates, path);
-				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
-			}
-		}
-
-		const metadataMatches = this.metadataPostings.get(term);
-		if (metadataMatches) {
-			for (const path of metadataMatches) {
-				const state = getOrCreateCandidateState(candidates, path);
-				recordFamilyMatch(state.metadataMatches, familyIndex, kind);
-			}
-		}
-	}
-
-	private collectCandidatesForPairSignature(
-		candidates: Map<string, CoverageLexicalCandidateState>,
-		pairSignature: CoverageLexicalPairSignature,
-	): void {
-		if (!pairSignature.allowCandidateRecall) {
-			return;
-		}
-		for (const variant of pairSignature.variants) {
-			const bodyMatches = this.bodyPostings.get(variant);
-			if (bodyMatches) {
-				for (const path of bodyMatches) {
-					const state = getOrCreateCandidateState(candidates, path);
-					recordFamilyMatch(state.bodyMatches, pairSignature.leftFamilyIndex, "prefix");
-					recordFamilyMatch(state.bodyMatches, pairSignature.rightFamilyIndex, "prefix");
-				}
-			}
-
-			const metadataMatches = this.metadataPostings.get(variant);
-			if (metadataMatches) {
-				for (const path of metadataMatches) {
-					const state = getOrCreateCandidateState(candidates, path);
-					recordFamilyMatch(
-						state.metadataMatches,
-						pairSignature.leftFamilyIndex,
-						"prefix",
-					);
-					recordFamilyMatch(
-						state.metadataMatches,
-						pairSignature.rightFamilyIndex,
-						"prefix",
-					);
-				}
-			}
-		}
-	}
-
 	private createRankableResult(
 		path: string,
 		queryTerms: readonly string[],
 		families: readonly CoverageLexicalFamily[],
 		state: CoverageLexicalCandidateState,
 		includeLocalWindow: boolean,
+		phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 		pairSignatures: readonly CoverageLexicalPairSignature[],
 	): CoverageLexicalRankableResult | null {
 		const document = this.documents.get(path);
@@ -385,6 +352,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			state,
 			document.bodyTokenSequence,
 			includeLocalWindow,
+			phraseSignatures,
 			pairSignatures,
 		);
 		if (
@@ -404,53 +372,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		};
 	}
 
-	private expandPrefixTerms(prefix: string): string[] {
-		const out: string[] = [];
-		let index = lowerBoundString(this.sortedLexicon, prefix);
-		while (index < this.sortedLexicon.length) {
-			const term = this.sortedLexicon[index];
-			if (!term.startsWith(prefix)) {
-				break;
-			}
-			out.push(term);
-			if (out.length >= MAX_PREFIX_EXPANSIONS) {
-				break;
-			}
-			index += 1;
-		}
-		return out;
-	}
-
-	private expandFuzzyTerms(queryTerm: string): string[] {
-		const maxDistance = computeMaxFuzzyDistance(queryTerm);
-		if (maxDistance <= 0) {
-			return [];
-		}
-
-		const candidates: Array<{ term: string; distance: number }> = [];
-		for (const term of this.sortedLexicon) {
-			if (Math.abs(term.length - queryTerm.length) > maxDistance) {
-				continue;
-			}
-			if (term[0] !== queryTerm[0]) {
-				continue;
-			}
-			const distance = boundedLevenshtein(term, queryTerm, maxDistance);
-			if (distance <= maxDistance) {
-				candidates.push({ term, distance });
-			}
-		}
-
-		candidates.sort((left, right) => {
-			if (left.distance !== right.distance) {
-				return left.distance - right.distance;
-			}
-			return left.term.localeCompare(right.term);
-		});
-		return candidates
-			.slice(0, MAX_FUZZY_EXPANSIONS)
-			.map((candidate) => candidate.term);
-	}
 }
 
 function buildCoverageSignal(
@@ -458,6 +379,7 @@ function buildCoverageSignal(
 	state: CoverageLexicalCandidateState,
 	bodyTokenSequence: readonly string[],
 	includeLocalWindow: boolean,
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 ): CoverageLexicalFamilySignal {
 	const coreBody = createEmptyAreaSignal();
@@ -488,6 +410,11 @@ function buildCoverageSignal(
 			if (bodyKind) {
 				applyMatch(softBody, bodyKind, weight);
 				tailSoftWeight += weight;
+				continue;
+			}
+			if (metadataKind) {
+				applyMatch(softBody, metadataKind, weight);
+				tailSoftWeight += weight;
 			}
 			continue;
 		}
@@ -509,6 +436,11 @@ function buildCoverageSignal(
 		metadataAnchor,
 		tailCoreWeight,
 		tailSoftWeight,
+		phraseBridgeCount: state.phraseMatches.size,
+		phraseBridgeWeight: Array.from(state.phraseMatches).reduce(
+			(total, index) => total + (phraseSignatures[index]?.tailWeight ?? 0),
+			0,
+		),
 		localEvidence: includeLocalWindow
 			? buildCoverageLexicalWindowFusionSignal(
 				bodyTokenSequence,
@@ -612,92 +544,4 @@ function removePosting(
 	if (docs.size === 0) {
 		postings.delete(term);
 	}
-}
-
-function getOrCreateCandidateState(
-	candidates: Map<string, CoverageLexicalCandidateState>,
-	path: string,
-): CoverageLexicalCandidateState {
-	let state = candidates.get(path);
-	if (!state) {
-		state = {
-			bodyMatches: new Map(),
-			metadataMatches: new Map(),
-		};
-		candidates.set(path, state);
-	}
-	return state;
-}
-
-function recordFamilyMatch(
-	matches: Map<number, CoverageFamilyMatchKind>,
-	familyIndex: number,
-	kind: Exclude<CoverageFamilyMatchKind, null>,
-): void {
-	const previous = matches.get(familyIndex) ?? null;
-	if (pickBetterMatchKind(previous, kind) === previous) {
-		return;
-	}
-	matches.set(familyIndex, kind);
-}
-
-function lowerBoundString(values: readonly string[], target: string): number {
-	let lo = 0;
-	let hi = values.length;
-	while (lo < hi) {
-		const mid = (lo + hi) >> 1;
-		if (values[mid].localeCompare(target) < 0) {
-			lo = mid + 1;
-		} else {
-			hi = mid;
-		}
-	}
-	return lo;
-}
-
-function computeMaxFuzzyDistance(queryTerm: string): number {
-	if (queryTerm.length <= 4) {
-		return 0;
-	}
-	return Math.min(
-		2,
-		Math.max(1, Math.round(queryTerm.length * innerSetting.search.fuzzyProportion)),
-	);
-}
-
-function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
-	if (a === b) {
-		return 0;
-	}
-	if (Math.abs(a.length - b.length) > maxDistance) {
-		return maxDistance + 1;
-	}
-
-	const prev = new Array<number>(b.length + 1);
-	const curr = new Array<number>(b.length + 1);
-	for (let index = 0; index <= b.length; index++) {
-		prev[index] = index;
-	}
-
-	for (let row = 1; row <= a.length; row++) {
-		curr[0] = row;
-		let rowMin = curr[0];
-		for (let column = 1; column <= b.length; column++) {
-			const cost = a[row - 1] === b[column - 1] ? 0 : 1;
-			curr[column] = Math.min(
-				prev[column] + 1,
-				curr[column - 1] + 1,
-				prev[column - 1] + cost,
-			);
-			rowMin = Math.min(rowMin, curr[column]);
-		}
-		if (rowMin > maxDistance) {
-			return maxDistance + 1;
-		}
-		for (let index = 0; index <= b.length; index++) {
-			prev[index] = curr[index];
-		}
-	}
-
-	return prev[b.length];
 }

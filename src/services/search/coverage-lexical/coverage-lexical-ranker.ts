@@ -13,7 +13,7 @@ export function rankCoverageLexicalResults(
 		return [...results];
 	}
 	return [...results].sort((left, right) => {
-		const signalDecision = compareCoverageLexicalSignals(
+		const signalDecision = compareCoverageLexicalResultSignals(
 			left.coverageLexicalSignal,
 			right.coverageLexicalSignal,
 			plan,
@@ -28,7 +28,7 @@ export function rankCoverageLexicalResults(
 	});
 }
 
-function compareCoverageLexicalSignals(
+export function compareCoverageLexicalResultSignals(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
@@ -38,6 +38,7 @@ function compareCoverageLexicalSignals(
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
 				right.localEvidence,
@@ -51,6 +52,7 @@ function compareCoverageLexicalSignals(
 		return (
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
 				right.localEvidence,
@@ -64,6 +66,7 @@ function compareCoverageLexicalSignals(
 	return (
 		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
 			left.localEvidence,
 			right.localEvidence,
@@ -88,6 +91,16 @@ function compareAreaSignals(
 
 function compareDescendingMetric(left: number, right: number): number {
 	return right - left;
+}
+
+function comparePhraseBridgeSignals(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	return (
+		compareDescendingMetric(left.phraseBridgeCount, right.phraseBridgeCount) ||
+		compareDescendingMetric(left.phraseBridgeWeight, right.phraseBridgeWeight)
+	);
 }
 
 export type CoverageLexicalRankableResult = MatchedFile & {

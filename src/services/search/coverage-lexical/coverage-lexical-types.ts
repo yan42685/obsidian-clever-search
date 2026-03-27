@@ -15,12 +15,25 @@ export type CoverageLexicalFamily = {
 	allowFuzzy: boolean;
 };
 
+export type CoverageLexicalPhraseSignature = {
+	index: number;
+	familyIndices: number[];
+	variants: string[];
+	tailWeight: number;
+};
+
 export type CoverageLexicalPairSignature = {
 	leftFamilyIndex: number;
 	rightFamilyIndex: number;
 	variants: string[];
 	tailWeight: number;
 	allowCandidateRecall: boolean;
+};
+
+export type CoverageLexicalCandidateState = {
+	bodyMatches: Map<number, CoverageFamilyMatchKind>;
+	metadataMatches: Map<number, CoverageFamilyMatchKind>;
+	phraseMatches: Set<number>;
 };
 
 export type CoverageLexicalRoute =
@@ -84,12 +97,26 @@ export type CoverageLexicalWindowFusionSignal = {
 	corroboratedSoftCoverageCount: number;
 };
 
+export type CoverageLexicalPassageAdmissionSignal = {
+	coreCoverageCount: number;
+	exactWeight: number;
+	prefixWeight: number;
+	fuzzyWeight: number;
+	anchorCoverageCount: number;
+	softCoverageCount: number;
+	phraseMatchCount: number;
+	phraseMatchWeight: number;
+	compactnessScore: number;
+};
+
 export type CoverageLexicalFamilySignal = {
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
 	tailCoreWeight: number;
 	tailSoftWeight: number;
+	phraseBridgeCount: number;
+	phraseBridgeWeight: number;
 	localEvidence: CoverageLexicalWindowFusionSignal;
 	matchedTerms: string[];
 };

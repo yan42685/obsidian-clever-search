@@ -82,11 +82,13 @@ function classifyFamilyRole(
 		(probe?.metadataExactDocCount ?? 0) > 0 &&
 		(probe?.metadataExactDocCount ?? 0) >=
 			Math.max(2, (probe?.bodyExactDocCount ?? 0) * 2);
+	if (metadataDominant) {
+		return "anchor";
+	}
 	if (
 		isMetadataCapable &&
 		(isExplicitMetadataTerm(term) ||
-			hasStrongPathShape(term) ||
-			metadataDominant)
+			hasStrongPathShape(term))
 	) {
 		return "anchor";
 	}
