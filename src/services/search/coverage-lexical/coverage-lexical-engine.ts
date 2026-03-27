@@ -168,6 +168,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
 				metadataTagPostings: this.metadataTagPostings,
 				sortedLexicon: this.sortedLexicon,
+				documentBodyTokensByPath: new Map(
+					Array.from(this.documents.entries()).map(([path, document]) => [
+						path,
+						document.bodyTokenSequence,
+					]),
+				),
 			},
 			plan,
 			phraseSignatures,
@@ -604,7 +610,7 @@ function buildCoverageSignal(
 			continue;
 		}
 		if (family.role === "anchor") {
-			if (metadataKind && family.isMetadataCapable) {
+			if (metadataKind) {
 				applyMatch(
 					metadataAnchor,
 					metadataKind,

@@ -53,6 +53,13 @@ export type CoverageLexicalRoute =
 	| "body-with-anchor"
 	| "metadata-first";
 
+export type CoverageLexicalQueryKind =
+	| "metadata_only_anchored"
+	| "body_only_local"
+	| "anchor_body_hybrid"
+	| "bridge_dependent"
+	| "memory_relaxed";
+
 export type CoverageLexicalFamilyProbe = {
 	bodyExactDocCount: number;
 	metadataExactDocCount: number;
@@ -60,12 +67,20 @@ export type CoverageLexicalFamilyProbe = {
 
 export type CoverageLexicalPlan = {
 	families: CoverageLexicalFamily[];
+	queryKind: CoverageLexicalQueryKind;
 	shortQueryOverlay: boolean;
 	hasMetadataHint: boolean;
 	hasMixedScriptHint: boolean;
 	hasPathShapeHint: boolean;
 	hasTitleShapeHint: boolean;
 	route: CoverageLexicalRoute;
+	hardAnchorFamilies: CoverageLexicalFamily[];
+	decisiveBodyFamilies: CoverageLexicalFamily[];
+	supportBodyFamilies: CoverageLexicalFamily[];
+	optionalFamilies: CoverageLexicalFamily[];
+	noiseFamilies: CoverageLexicalFamily[];
+	bridgeFamilies: CoverageLexicalFamily[];
+	relaxedMinimumMatchCount: number;
 	coreFamilyCount: number;
 	anchorFamilyCount: number;
 	bodyFamilyCount: number;

@@ -24,6 +24,7 @@ export function buildCoverageLexicalFamilies(
 		const role = classifyFamilyRole(
 			normalizedTerm,
 			strength,
+			shortQueryOverlay,
 			isMetadataCapable,
 			probe,
 		);
@@ -72,6 +73,7 @@ function shouldPromoteTailFamily(
 function classifyFamilyRole(
 	term: string,
 	strength: CoverageLexicalFamily["strength"],
+	shortQueryOverlay: boolean,
 	isMetadataCapable: boolean,
 	probe: { bodyExactDocCount: number; metadataExactDocCount: number } | undefined,
 ): CoverageLexicalFamily["role"] {
@@ -83,6 +85,15 @@ function classifyFamilyRole(
 		(probe?.metadataExactDocCount ?? 0) >=
 			Math.max(2, (probe?.bodyExactDocCount ?? 0) * 2);
 	if (metadataDominant) {
+		return "anchor";
+	}
+	const shortMetadataAnchor =
+		shortQueryOverlay &&
+		strength === "core" &&
+		(probe?.metadataExactDocCount ?? 0) > 0 &&
+		(probe?.metadataExactDocCount ?? 0) >=
+			Math.max(1, Math.floor((probe?.bodyExactDocCount ?? 0) / 2));
+	if (shortMetadataAnchor) {
 		return "anchor";
 	}
 	if (
