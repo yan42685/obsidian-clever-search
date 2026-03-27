@@ -1,7 +1,10 @@
 import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
-import { DEFAULT_WORKTREE_ROOT } from "./config.mjs";
+import {
+	DEFAULT_BASELINE_REF,
+	DEFAULT_WORKTREE_ROOT,
+} from "./config.mjs";
 
 export class GitUnavailableError extends Error {
 	constructor(message, options = {}) {
@@ -104,18 +107,18 @@ function ensureDir(dirPath) {
 	fs.mkdirSync(dirPath, { recursive: true });
 }
 
-export function withHeadWorktree(callback) {
+export function withWorktreeAtRef(ref = DEFAULT_BASELINE_REF, callback) {
 	ensureDir(DEFAULT_WORKTREE_ROOT);
 	const worktreePath = path.join(
 		DEFAULT_WORKTREE_ROOT,
 		`${Date.now()}-${process.pid}`,
 	);
 	try {
-		runGit(["worktree", "add", "--detach", worktreePath, "HEAD"]);
+		runGit(["worktree", "add", "--detach", worktreePath, ref]);
 	} catch (error) {
 		if (error instanceof GitUnavailableError) {
 			throw new GitUnavailableError(
-				`${error.message}\n\nMechanism mode needs git worktree support to compare the current workspace against HEAD.`,
+				`${error.message}\n\nMechanism mode needs git worktree support to compare the current workspace against ${ref}.`,
 				{
 					code: error.code,
 					cause: error,
@@ -135,4 +138,8 @@ export function withHeadWorktree(callback) {
 			}
 		}
 	}
+}
+
+export function withHeadWorktree(callback) {
+	return withWorktreeAtRef(DEFAULT_BASELINE_REF, callback);
 }

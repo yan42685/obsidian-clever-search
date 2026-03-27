@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import {
+	DEFAULT_BASELINE_REF,
 	DEFAULT_BENCHMARK_ARGS,
 	DEFAULT_CANDIDATE_FILE,
 	DEFAULT_PARAMETER_TARGET_FILE,
@@ -10,7 +11,7 @@ import { BenchmarkUnavailableError, runBenchmark } from "./benchmark.mjs";
 import {
 	GitUnavailableError,
 	readRepoState,
-	withHeadWorktree,
+	withWorktreeAtRef,
 } from "./git.mjs";
 import { appendJsonl, writeLatestReport } from "./report.mjs";
 import {
@@ -29,15 +30,19 @@ function parseArgs(argv) {
 		mode: "parameter",
 		label: "",
 		dryRun: false,
+		help: false,
 		applyBest: false,
 		maxCandidates: Number.POSITIVE_INFINITY,
 		benchmarkArgs: DEFAULT_BENCHMARK_ARGS,
 		parameterFile: DEFAULT_PARAMETER_TARGET_FILE,
 		candidateFile: DEFAULT_CANDIDATE_FILE,
+		baselineRef: DEFAULT_BASELINE_REF,
 	};
 
 	for (const arg of argv.slice(2)) {
-		if (arg.startsWith("--mode=")) {
+		if (arg === "--help" || arg === "-h") {
+			args.help = true;
+		} else if (arg.startsWith("--mode=")) {
 			args.mode = arg.slice("--mode=".length);
 		} else if (arg.startsWith("--label=")) {
 			args.label = arg.slice("--label=".length);
@@ -51,6 +56,8 @@ function parseArgs(argv) {
 			args.parameterFile = path.resolve(arg.slice("--parameter-file=".length));
 		} else if (arg.startsWith("--candidate-file=")) {
 			args.candidateFile = path.resolve(arg.slice("--candidate-file=".length));
+		} else if (arg.startsWith("--baseline-ref=")) {
+			args.baselineRef = arg.slice("--baseline-ref=".length) || DEFAULT_BASELINE_REF;
 		}
 	}
 
@@ -145,6 +152,7 @@ function buildRecord({
 	reason,
 	notes = [],
 	candidateMeta = null,
+	recommendedCommands = [],
 }) {
 	return {
 		time: new Date().toISOString(),
@@ -154,6 +162,7 @@ function buildRecord({
 		reason,
 		notes,
 		candidateMeta,
+		recommendedCommands,
 		baseline,
 		candidate,
 	};
@@ -194,49 +203,216 @@ function buildRepoNotes(extraNotes = []) {
 	};
 }
 
-function createDryRunRecord(mode, label, reason, notes, candidateMeta = null) {
-	const record = buildRecord({
-		mode,
-		label,
-		baseline: null,
-		candidate: null,
-		decision: "dry-run",
-		reason,
-		notes,
-		candidateMeta,
-	});
-	appendJsonl(record);
-	writeLatestReport(record);
-	return record;
+function formatPathForCommand(filePath) {
+	const relativePath = path.relative(process.cwd(), filePath);
+	if (relativePath && !relativePath.startsWith("..")) {
+		return relativePath.replace(/\//g, "\\");
+	}
+	return filePath;
 }
 
-function createBlockedRecord(mode, label, reason, notes, candidateMeta = null) {
-	const record = buildRecord({
-		mode,
-		label,
-		baseline: null,
-		candidate: null,
-		decision: "blocked",
-		reason,
-		notes,
-		candidateMeta,
-	});
-	appendJsonl(record);
-	writeLatestReport(record);
-	return record;
+function quoteCommandPart(value) {
+	return /\s/.test(value) ? `"${value}"` : value;
+}
+
+function buildCommand(parts) {
+	return parts.map(quoteCommandPart).join(" ");
+}
+
+function buildParameterCommand(args, options = {}) {
+	const parts = [
+		"node",
+		"scripts/lexical-optimizer/run.mjs",
+		"--mode=parameter",
+		`--candidate-file=${formatPathForCommand(args.candidateFile)}`,
+	];
+	if (args.parameterFile !== DEFAULT_PARAMETER_TARGET_FILE) {
+		parts.push(`--parameter-file=${formatPathForCommand(args.parameterFile)}`);
+	}
+	if (Number.isFinite(args.maxCandidates)) {
+		parts.push(`--max-candidates=${args.maxCandidates}`);
+	}
+	if (options.dryRun) {
+		parts.push("--dry-run");
+	}
+	if (options.applyBest) {
+		parts.push("--apply-best");
+	}
+	return buildCommand(parts);
+}
+
+function buildMechanismCommand(args, options = {}) {
+	const parts = [
+		"node",
+		"scripts/lexical-optimizer/run.mjs",
+		"--mode=mechanism",
+		`--baseline-ref=${args.baselineRef}`,
+	];
+	if (options.dryRun) {
+		parts.push("--dry-run");
+	}
+	return buildCommand(parts);
+}
+
+function buildRecommendedCommands(args, context) {
+	const commands = [];
+	if (context.mode === "parameter") {
+		if (context.reason?.includes("no candidate manifest provided")) {
+			commands.push(
+				buildCommand([
+					"Copy-Item",
+					"scripts\\lexical-optimizer\\candidate-manifest.example.json",
+					formatPathForCommand(args.candidateFile),
+				]),
+			);
+			commands.push(buildParameterCommand(args, { dryRun: true }));
+			commands.push(buildParameterCommand(args));
+			return commands;
+		}
+		if (context.decision === "dry-run") {
+			commands.push(buildParameterCommand(args));
+			commands.push(buildParameterCommand(args, { applyBest: true }));
+			return commands;
+		}
+		if (context.decision === "keep") {
+			if (!args.applyBest) {
+				commands.push(buildParameterCommand(args, { applyBest: true }));
+			}
+			commands.push(
+				buildCommand([
+					"git",
+					"diff",
+					"--",
+					formatPathForCommand(args.parameterFile),
+				]),
+			);
+			return commands;
+		}
+		commands.push(buildParameterCommand(args, { dryRun: true }));
+		commands.push(buildParameterCommand(args));
+		return commands;
+	}
+
+	if (context.mode === "mechanism") {
+		if (context.decision === "dry-run") {
+			commands.push(buildMechanismCommand(args));
+			return commands;
+		}
+		commands.push(buildMechanismCommand(args));
+		commands.push(
+			buildCommand(["git", "diff", args.baselineRef, "--"]),
+		);
+		commands.push(buildCommand(["git", "status", "--short"]));
+		return commands;
+	}
+
+	return commands;
+}
+
+function syncWorktreeBenchmarkAssets(worktreePath) {
+	const relativePaths = ["benchmarks/corpora"];
+	for (const relativePath of relativePaths) {
+		const sourcePath = path.join(process.cwd(), relativePath);
+		if (!fs.existsSync(sourcePath)) {
+			continue;
+		}
+		const targetPath = path.join(worktreePath, relativePath);
+		if (fs.existsSync(targetPath)) {
+			continue;
+		}
+		fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+		fs.cpSync(sourcePath, targetPath, { recursive: true });
+	}
+}
+
+function persistRecord(record, args) {
+	const enrichedRecord = {
+		...record,
+		recommendedCommands:
+			record.recommendedCommands?.length > 0
+				? record.recommendedCommands
+				: buildRecommendedCommands(args, record),
+	};
+	appendJsonl(enrichedRecord);
+	writeLatestReport(enrichedRecord);
+	return enrichedRecord;
+}
+
+function createDryRunRecord(mode, label, reason, notes, args, candidateMeta = null) {
+	return persistRecord(
+		buildRecord({
+			mode,
+			label,
+			baseline: null,
+			candidate: null,
+			decision: "dry-run",
+			reason,
+			notes,
+			candidateMeta,
+		}),
+		args,
+	);
+}
+
+function createBlockedRecord(
+	mode,
+	label,
+	reason,
+	notes,
+	args,
+	candidateMeta = null,
+) {
+	return persistRecord(
+		buildRecord({
+			mode,
+			label,
+			baseline: null,
+			candidate: null,
+			decision: "blocked",
+			reason,
+			notes,
+			candidateMeta,
+		}),
+		args,
+	);
+}
+
+function createFinalRecord(params, args) {
+	return persistRecord(buildRecord(params), args);
+}
+
+function printHelp() {
+	console.log(
+		[
+			"Lexical Optimizer",
+			"",
+			"Usage:",
+			"  node scripts/lexical-optimizer/run.mjs --mode=parameter [--candidate-file=...] [--apply-best]",
+			"  node scripts/lexical-optimizer/run.mjs --mode=mechanism [--baseline-ref=HEAD]",
+			"",
+			"Recommended local workflow:",
+			"  1. Prepare candidates in .codex-bench/lexical-optimizer/candidates.json",
+			"  2. Dry-run the parameter loop:",
+			`     ${buildParameterCommand(parseArgs(["node", "run", "--dry-run"]), { dryRun: true })}`,
+			"  3. Run the actual comparison loop:",
+			`     ${buildParameterCommand(parseArgs(["node", "run"]))}`,
+			"  4. If the report says keep, apply the winning candidate:",
+			`     ${buildParameterCommand(parseArgs(["node", "run"]), { applyBest: true })}`,
+			"  5. Compare the whole current workspace against the baseline worktree:",
+			`     ${buildMechanismCommand(parseArgs(["node", "run"]))}`,
+			"",
+			"Mechanism mode compares the current workspace against --baseline-ref using a git worktree.",
+			"Parameter mode compares candidate patches against the current tuning file baseline.",
+		].join("\n"),
+	);
 }
 
 function runMechanismMode(args) {
-	const { repoState, notes } = buildRepoNotes();
+	const { repoState, notes } = buildRepoNotes([`baselineRef=${args.baselineRef}`]);
 	const label = args.label || (args.dryRun ? "mechanism-dry-run" : "mechanism");
 
 	if (args.dryRun) {
-		return createDryRunRecord(
-			"mechanism",
-			label,
-			"benchmark skipped",
-			notes,
-		);
+		return createDryRunRecord("mechanism", label, "benchmark skipped", notes, args);
 	}
 
 	if (!repoState.available) {
@@ -245,6 +421,7 @@ function runMechanismMode(args) {
 			label,
 			"mechanism mode requires git/worktree subprocess access; run it in a normal local terminal",
 			notes,
+			args,
 		);
 		console.log(record.reason);
 		return record;
@@ -260,6 +437,7 @@ function runMechanismMode(args) {
 				label,
 				error.message,
 				notes,
+				args,
 			);
 			console.log(record.reason);
 			return record;
@@ -270,9 +448,10 @@ function runMechanismMode(args) {
 
 	let baselineRun;
 	try {
-		baselineRun = withHeadWorktree((worktreePath) =>
-			runBenchmark(worktreePath, args.benchmarkArgs),
-		);
+		baselineRun = withWorktreeAtRef(args.baselineRef, (worktreePath) => {
+			syncWorktreeBenchmarkAssets(worktreePath);
+			return runBenchmark(worktreePath, args.benchmarkArgs);
+		});
 	} catch (error) {
 		if (
 			error instanceof BenchmarkUnavailableError ||
@@ -283,6 +462,7 @@ function runMechanismMode(args) {
 				label,
 				error.message,
 				notes,
+				args,
 			);
 			console.log(record.reason);
 			return record;
@@ -292,17 +472,18 @@ function runMechanismMode(args) {
 	printBackend("baseline", baselineRun.backend);
 
 	const verdict = decideCandidate(baselineRun.backend, candidateRun.backend);
-	const record = buildRecord({
-		mode: "mechanism",
-		label,
-		baseline: baselineRun,
-		candidate: candidateRun,
-		decision: verdict.decision,
-		reason: verdict.reason,
-		notes,
-	});
-	appendJsonl(record);
-	writeLatestReport(record);
+	const record = createFinalRecord(
+		{
+			mode: "mechanism",
+			label,
+			baseline: baselineRun,
+			candidate: candidateRun,
+			decision: verdict.decision,
+			reason: verdict.reason,
+			notes,
+		},
+		args,
+	);
 	console.log(`decision=${verdict.decision} reason=${verdict.reason}`);
 	return record;
 }
@@ -329,6 +510,7 @@ function runParameterMode(args) {
 				? `would evaluate ${candidates.length} tuning candidates`
 				: "no candidate manifest provided; automation should generate candidates",
 			notes,
+			args,
 			candidates,
 		);
 	}
@@ -339,6 +521,7 @@ function runParameterMode(args) {
 			label,
 			"no candidate manifest provided; controller no longer owns a fixed parameter grid, so automation must supply candidate patches",
 			notes,
+			args,
 			baselineProfile,
 		);
 		console.log(record.reason);
@@ -355,6 +538,7 @@ function runParameterMode(args) {
 				label,
 				error.message,
 				notes,
+				args,
 				baselineProfile,
 			);
 			console.log(record.reason);
@@ -386,6 +570,7 @@ function runParameterMode(args) {
 					label,
 					error.message,
 					notes,
+					args,
 					candidate,
 				);
 				console.log(record.reason);
@@ -423,21 +608,22 @@ function runParameterMode(args) {
 		);
 	}
 
-	const record = buildRecord({
-		mode: "parameter",
-		label,
-		baseline: baselineRun,
-		candidate: best.run,
-		decision: best.decision === "baseline" ? "rollback" : best.decision,
-		reason:
-			best.decision === "baseline"
-				? "no candidate cleared keep threshold"
-				: best.reason,
-		notes,
-		candidateMeta: best.candidateMeta,
-	});
-	appendJsonl(record);
-	writeLatestReport(record);
+	const record = createFinalRecord(
+		{
+			mode: "parameter",
+			label,
+			baseline: baselineRun,
+			candidate: best.run,
+			decision: best.decision === "baseline" ? "rollback" : best.decision,
+			reason:
+				best.decision === "baseline"
+					? "no candidate cleared keep threshold"
+					: best.reason,
+			notes,
+			candidateMeta: best.candidateMeta,
+		},
+		args,
+	);
 	console.log(
 		`best=${JSON.stringify(best.candidateMeta)} decision=${record.decision} reason=${record.reason}`,
 	);
@@ -446,6 +632,10 @@ function runParameterMode(args) {
 
 function main() {
 	const args = parseArgs(process.argv);
+	if (args.help) {
+		printHelp();
+		return;
+	}
 	try {
 		if (args.mode === "mechanism") {
 			runMechanismMode(args);

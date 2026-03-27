@@ -1,5 +1,8 @@
 import { spawnSync } from "child_process";
+import path from "path";
 import { OBJECTIVE_WEIGHTS } from "./config.mjs";
+
+const HOST_WORKSPACE_ROOT = process.cwd();
 
 export class BenchmarkUnavailableError extends Error {
 	constructor(message, options = {}) {
@@ -57,7 +60,11 @@ function isPermissionError(error) {
 }
 
 function runNodeCommand(cwd, benchmarkArgs) {
-	const result = spawnSync(process.execPath, benchmarkArgs, {
+	const [entrypoint, ...restArgs] = benchmarkArgs;
+	const resolvedEntrypoint = path.isAbsolute(entrypoint)
+		? entrypoint
+		: path.resolve(HOST_WORKSPACE_ROOT, entrypoint);
+	const result = spawnSync(process.execPath, [resolvedEntrypoint, ...restArgs], {
 		cwd,
 		encoding: "utf8",
 		maxBuffer: 1024 * 1024 * 64,

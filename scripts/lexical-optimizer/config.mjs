@@ -47,6 +47,8 @@ export const DEFAULT_CANDIDATE_FILE = path.resolve(
 	".codex-bench/lexical-optimizer/candidates.json",
 );
 
+export const DEFAULT_BASELINE_REF = "HEAD";
+
 export const DEFAULT_WORKTREE_ROOT = path.join(
 	DEFAULT_RESULTS_DIR,
 	"worktrees",

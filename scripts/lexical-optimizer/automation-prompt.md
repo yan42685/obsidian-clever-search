@@ -29,6 +29,14 @@ Read `src/services/search/hybrid/automation-design.md` before every cycle.
 5. Keep only changes that satisfy the keep rules.
 6. Revert low-value complexity.
 
+## Local Loop Commands
+
+- inspect the built-in workflow help with `node scripts/lexical-optimizer/run.mjs --help`
+- preview a candidate set with `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json --dry-run`
+- evaluate candidates with `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json`
+- apply the current best candidate with `node scripts/lexical-optimizer/run.mjs --mode=parameter --candidate-file=.codex-bench/lexical-optimizer/candidates.json --apply-best`
+- compare the current workspace against the baseline worktree with `node scripts/lexical-optimizer/run.mjs --mode=mechanism --baseline-ref=HEAD`
+
 ## Benchmark Discipline
 
 - use the full benchmark mix, not one cherry-picked slice

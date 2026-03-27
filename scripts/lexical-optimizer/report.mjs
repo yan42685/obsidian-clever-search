@@ -79,5 +79,13 @@ export function writeLatestReport(record, outputFile = DEFAULT_LATEST_REPORT) {
 		lines.push("");
 	}
 
+	if (record.recommendedCommands?.length) {
+		lines.push("## Recommended Commands", "");
+		for (const command of record.recommendedCommands) {
+			lines.push(`- \`${command}\``);
+		}
+		lines.push("");
+	}
+
 	fs.writeFileSync(outputFile, `${lines.join("\n")}\n`, "utf8");
 }
