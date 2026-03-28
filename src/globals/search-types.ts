@@ -60,6 +60,7 @@ export type MatchedFile = {
 	matchedTerms: string[];
 	score?: number;
 	directSubItems?: FileSubItem[];
+	nativeSubItemsReady?: boolean;
 };
 
 export class SearchResult {
@@ -112,6 +113,7 @@ export class FileItem extends Item {
 	queryTerms: string[];
 	matchedTerms: string[];
 	subItems: FileSubItem[]; // for markdown viewType
+	nativeSubItemsReady: boolean;
 	// TODO: impl this
 	previewContent: any; // for non-markdown viewType
 	// TODO: store the view type rather than relying on obsidian api
@@ -135,6 +137,7 @@ export class FileItem extends Item {
 		matchedTerms: string[],
 		subItems: FileSubItem[],
 		previewContent: any,
+		nativeSubItemsReady = false,
 	) {
 		super();
 		this.engineType = engineType;
@@ -143,6 +146,7 @@ export class FileItem extends Item {
 		this.matchedTerms = matchedTerms;
 		this.subItems = subItems;
 		this.previewContent = previewContent;
+		this.nativeSubItemsReady = nativeSubItemsReady;
 	}
 }
 

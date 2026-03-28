@@ -591,6 +591,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			targetResults.map(async (result) => {
 				const document = this.documents.get(result.path);
 				const state = candidates.get(result.path);
+				result.nativeSubItemsReady = true;
 				if (!document || !state) {
 					result.directSubItems = [];
 					return;

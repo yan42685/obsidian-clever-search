@@ -136,6 +136,7 @@ export class SearchService {
 					matchedFile.matchedTerms,
 					matchedFile.directSubItems ?? [],
 					"nothing",
+					matchedFile.nativeSubItemsReady ?? false,
 				);
 			}),
 			null,

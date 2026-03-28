@@ -37,6 +37,7 @@ type CoverageSnippetPayload = {
 };
 
 const MAX_SNIPPET_WINDOW_CHARS = 220;
+const SNIPPET_LEADING_CONTEXT_CHARS = 24;
 const NEAR_DUPLICATE_OVERLAP_RATIO = 0.72;
 
 @singleton()
@@ -115,20 +116,32 @@ export class CoverageLexicalDirectSubItemBuilder {
 			families,
 			pairSignatures,
 		);
+		const remaining = rawSignals.map((signal, index) => toDisplayWindow(signal, index));
 		const selected: CoverageLexicalDisplayWindow[] = [];
-		for (const signal of rawSignals) {
-			const candidate = toDisplayWindow(signal, selected.length);
-			if (
-				selected.some((existing) =>
-					isNearDuplicateWindow(candidate, existing),
-				)
-			) {
-				continue;
+		while (remaining.length > 0 && selected.length < maxSubItemCount) {
+			let bestIndex = -1;
+			let bestScore = -Infinity;
+			for (let index = 0; index < remaining.length; index++) {
+				const candidate = remaining[index];
+				const adjusted = computeSelectionPriority(candidate, selected);
+				if (
+					adjusted > bestScore ||
+					(adjusted === bestScore &&
+						candidate.signal.score >
+							(remaining[bestIndex]?.signal.score ?? -Infinity))
+				) {
+					bestScore = adjusted;
+					bestIndex = index;
+				}
 			}
-			selected.push(candidate);
-			if (selected.length >= maxSubItemCount) {
+			if (bestIndex < 0 || bestScore === -Infinity) {
 				break;
 			}
+			const [best] = remaining.splice(bestIndex, 1);
+			if (selected.some((existing) => isNearDuplicateWindow(best, existing))) {
+				continue;
+			}
+			selected.push(best);
 		}
 		return selected;
 	}
@@ -235,12 +248,21 @@ export class CoverageLexicalDirectSubItemBuilder {
 			return null;
 		}
 		const rawRanges: CoverageLexicalHighlightRange[] = [];
+		const familyMap = new Map(families.map((family) => [family.index, family] as const));
 		for (
 			let tokenIndex = window.startTokenIndex;
 			tokenIndex <= window.endTokenIndex && tokenIndex < tokenOffsets.length;
 			tokenIndex++
 		) {
 			const offset = tokenOffsets[tokenIndex];
+			const token = bodyTokenSequence[tokenIndex];
+			const isMatched = window.matchedFamilyIndices.some((familyIndex) => {
+				const family = familyMap.get(familyIndex);
+				return family ? matchesTokenToFamily(token, family) : false;
+			});
+			if (!isMatched) {
+				continue;
+			}
 			rawRanges.push({
 				start: offset.start,
 				end: offset.end,
@@ -250,7 +272,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 		const snippetStart = Math.max(
 			0,
 			Math.min(
-				windowStartOffset - 36,
+				windowStartOffset - SNIPPET_LEADING_CONTEXT_CHARS,
 				Math.round((windowStartOffset + windowEndOffset) / 2) -
 					Math.floor(MAX_SNIPPET_WINDOW_CHARS / 2),
 			),
@@ -338,6 +360,36 @@ function isNearDuplicateWindow(
 	);
 }
 
+function computeSelectionPriority(
+	candidate: CoverageLexicalDisplayWindow,
+	selected: readonly CoverageLexicalDisplayWindow[],
+): number {
+	let score = candidate.signal.score;
+	for (const existing of selected) {
+		const overlap = computeWindowOverlapRatio(candidate, existing);
+		if (overlap >= NEAR_DUPLICATE_OVERLAP_RATIO) {
+			return -Infinity;
+		}
+		const familyOverlap = computeFamilyOverlapRatio(
+			candidate.matchedFamilyIndices,
+			existing.matchedFamilyIndices,
+		);
+		const tokenGap = computeTokenGap(candidate, existing);
+		if (familyOverlap >= 1 && tokenGap <= 48) {
+			score -= 18;
+			continue;
+		}
+		if (familyOverlap >= 0.75 && tokenGap <= 24) {
+			score -= 10;
+			continue;
+		}
+		if (familyOverlap >= 0.5 && tokenGap <= 12) {
+			score -= 4;
+		}
+	}
+	return score;
+}
+
 function computeWindowOverlapRatio(
 	left: CoverageLexicalDisplayWindow,
 	right: CoverageLexicalDisplayWindow,
@@ -356,6 +408,19 @@ function computeWindowOverlapRatio(
 		),
 	);
 	return overlap / base;
+}
+
+function computeTokenGap(
+	left: CoverageLexicalDisplayWindow,
+	right: CoverageLexicalDisplayWindow,
+): number {
+	if (left.endTokenIndex < right.startTokenIndex) {
+		return right.startTokenIndex - left.endTokenIndex;
+	}
+	if (right.endTokenIndex < left.startTokenIndex) {
+		return left.startTokenIndex - right.endTokenIndex;
+	}
+	return 0;
 }
 
 function findAnchorTokenIndex(
@@ -471,6 +536,16 @@ function intersectCount(left: readonly number[], right: readonly number[]): numb
 		}
 	}
 	return count;
+}
+
+function computeFamilyOverlapRatio(
+	left: readonly number[],
+	right: readonly number[],
+): number {
+	if (left.length === 0 || right.length === 0) {
+		return 0;
+	}
+	return intersectCount(left, right) / Math.max(1, Math.min(left.length, right.length));
 }
 
 function computeMaxFuzzyDistance(queryTerm: string): number {

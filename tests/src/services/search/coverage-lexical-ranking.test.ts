@@ -51,6 +51,47 @@ function createMockTokenizer() {
 		tokenizeSequence(text: string): string[] {
 			return tokenizeSegment(text);
 		},
+		tokenizeSequenceWithOffsets(text: string): Array<{
+			token: string;
+			start: number;
+			end: number;
+		}> {
+			const normalized = normalize(text);
+			const matches = normalized.matchAll(/[\p{Script=Han}]+|[a-z0-9_-]+/gu);
+			const seen = new Set<string>();
+			const out: Array<{ token: string; start: number; end: number }> = [];
+			for (const match of matches) {
+				const part = match[0];
+				const start = match.index ?? 0;
+				if (/^[a-z0-9_-]+$/u.test(part)) {
+					if (!seen.has(part)) {
+						out.push({ token: part, start, end: start + part.length });
+						seen.add(part);
+					}
+					continue;
+				}
+				if (!seen.has(part)) {
+					out.push({ token: part, start, end: start + part.length });
+					seen.add(part);
+				}
+				if (part.length <= 2) {
+					continue;
+				}
+				for (let index = 0; index < part.length - 1; index++) {
+					const token = part.slice(index, index + 2);
+					if (seen.has(token)) {
+						continue;
+					}
+					out.push({
+						token,
+						start: start + index,
+						end: start + index + 2,
+					});
+					seen.add(token);
+				}
+			}
+			return out;
+		},
 	};
 }
 
@@ -191,5 +232,67 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(results[0]?.path).toBe("pkm-en/projects/sdk/cache-restore-checklist.md");
+	});
+
+	test("builds native direct subitems with mixed-script row col anchors", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<
+					Array<{
+						path: string;
+						nativeSubItemsReady?: boolean;
+						directSubItems?: Array<{
+							row: number;
+							col: number;
+							text: string;
+							highlightRanges?: Array<{ start: number; end: number }>;
+						}>;
+					}>
+				>;
+			};
+		};
+
+		const content = [
+			"alpha outline line",
+			"第二行 mixed cache 恢复 note bridge",
+			"third trailing line",
+		].join("\n");
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-zh/mixed/cache-note.md",
+				basename: "cache-note.md",
+				folder: "pkm-zh/mixed",
+				headings: "Cache note",
+				content,
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "cache 恢复 note",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 3,
+			maxDirectSubItemResults: 3,
+			maxSubItemResults: 6,
+		});
+
+		expect(results[0]?.nativeSubItemsReady).toBe(true);
+		expect(results[0]?.directSubItems?.length ?? 0).toBeGreaterThan(0);
+		const firstSubItem = results[0]?.directSubItems?.[0];
+		expect(firstSubItem?.row).toBe(1);
+		expect(firstSubItem?.col).toBe("第二行 mixed ".length);
+		expect(firstSubItem?.highlightRanges?.length ?? 0).toBeGreaterThan(0);
+		expect(firstSubItem?.text.includes("cache")).toBe(true);
 	});
 });
