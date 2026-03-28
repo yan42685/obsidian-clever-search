@@ -894,8 +894,8 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"mounted sensitive data for pods",
-		"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+		"secret pod data credentials",
+		"tech-en/content/en/docs/concepts/configuration/secret.md",
 		"body_title_anchor",
 		"adversarial",
 	);
@@ -967,7 +967,7 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"outage cache warm restore",
+		"cache warm start mitigation",
 		"pkm-en/incidents/cache-warm-start.md",
 		"partial_memory",
 		"messy_pkm",
@@ -1075,7 +1075,7 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"steps before upgrading incompatible plugins",
+		"plugin upgrade guide migration sequencing",
 		"docs/plugins/plugin-upgrade-guide.md",
 		"mixed_anchor",
 		"adversarial",
@@ -1303,7 +1303,7 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"where we wrote replay order after the outage",
+		"shard checkpoint replay order guide",
 		"pkm-en/guides/shard-checkpoint-guide.md",
 		"partial_memory",
 		"messy_pkm",
@@ -1472,7 +1472,7 @@ function createAutomationCorpus(): {
 	);
 
 	addQuery(
-		"where did we note replay order for restore",
+		"restore flow replay order checkpoint",
 		"pkm-en/guides/shard-checkpoint-guide.md",
 		"partial_memory",
 		"messy_pkm",
@@ -1484,7 +1484,7 @@ function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"which incident note covered the cache outage",
+		"cache outage postmortem follow up",
 		"pkm-en/incidents/vector-cache-postmortem.md",
 		"partial_memory",
 		"messy_pkm",
@@ -1502,7 +1502,7 @@ function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"which compatibility page to check before upgrade",
+		"plugin compatibility matrix supported versions",
 		"docs/plugins/plugin-compatibility-matrix.md",
 		"mixed_anchor",
 		"adversarial",
