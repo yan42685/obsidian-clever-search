@@ -23,6 +23,15 @@ const TITLE_PATH_SEGMENT_REGEX =
 const FILLER_SEGMENT_REGEX =
 	/(?:callout|nested list|checklist table|frontmatter|table|heading|code block|wiki link|alias migration|where|which|written|mentioned|note|notes)/iu;
 const RAW_QUERY_SEGMENT_REGEX = /[\p{Script=Han}]+|[a-z0-9._/-]+/giu;
+const QUESTION_LEAD_TERM_REGEX = /^(?:which|what|where|how|who|when)$/u;
+const METADATA_CONTEXT_TERM_REGEX =
+	/^(?:page|pages|note|notes|file|files|doc|docs|guide|runbook|playbook|checklist|matrix|faq|roadmap|catalog|index)$/u;
+const BODY_GLUE_TERM_REGEX =
+	/^(?:which|what|where|how|who|when|to|for|in|on|with|about|before|after|still|through|check|checks|checking|step|steps|wrote|written|mentioned|mention)$/u;
+const MEMORY_WRAPPER_PHRASE_REGEX =
+	/^(?:where we wrote|where .* note|which .* page|which .* note|what .* page|what .* note|looking for|look for|find the note|find that note|remember .* note|i remember|我记得|想找|在哪个 note 里)/u;
+const METADATA_WRAPPER_PHRASE_REGEX =
+	/\b(?:page|note|file|doc|docs|guide|runbook|playbook|checklist|matrix|faq|roadmap|catalog|index)\b/u;
 
 type CoverageLexicalPlannerFamilyEvidence = {
 	familyIndex: number;
@@ -362,7 +371,13 @@ function selectDecisiveBodyFamilies(
 			: queryKind === "memory_relaxed"
 				? Math.max(1, Math.ceil(coreBodyFamilies.length / 2))
 				: Math.min(coreBodyFamilies.length, 2);
-	return sorted.slice(0, limit).sort((left, right) => left.index - right.index);
+	const nonGlueSorted = sorted.filter(
+		(family) => !isPlannerGlueBodyFamily(family, familyEvidence),
+	);
+	const candidatePool = nonGlueSorted.length > 0 ? nonGlueSorted : sorted;
+	return candidatePool
+		.slice(0, limit)
+		.sort((left, right) => left.index - right.index);
 }
 
 function selectBridgeFamilies(
@@ -515,8 +530,9 @@ function computeBodyPriority(
 	const evidence = familyEvidence.get(family.index);
 	const bodyBonus =
 		(evidence?.spanKinds.includes("body") ? 4 : 0) -
-		Math.min(3, evidence?.fillerScore ?? 0);
-	return computeTailWeight(family.index) + rarityBonus + bodyBonus;
+		Math.min(4, evidence?.fillerScore ?? 0);
+	const gluePenalty = isPlannerGlueBodyFamily(family, familyEvidence) ? 8 : 0;
+	return computeTailWeight(family.index) + rarityBonus + bodyBonus - gluePenalty;
 }
 
 function computeTailWeight(index: number): number {
@@ -591,19 +607,29 @@ function isPlannerAnchorCandidate(
 	if (!hasAnchorLikeSpan) {
 		return false;
 	}
+	let qualifies = false;
 	if (evidence.pathBasenameSignal > 0) {
-		return (
+		qualifies =
 			shortQueryOverlay ||
-			evidence.pathBasenameSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.5))
-		);
+			evidence.pathBasenameSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.5));
 	}
-	if (evidence.titleSignal > 0) {
-		return (
+	if (!qualifies && evidence.titleSignal > 0) {
+		qualifies =
 			shortQueryOverlay ||
-			evidence.titleSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.75))
-		);
+			evidence.titleSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.75));
 	}
-	return false;
+	if (
+		!qualifies &&
+		evidence.spanKinds.includes("metadata_intent") &&
+		!isPlannerGlueTerm(family.normalizedTerm) &&
+		(probe.metadataExactDocCount ?? 0) > 0
+	) {
+		qualifies =
+			shortQueryOverlay ||
+			(probe.metadataExactDocCount ?? 0) >=
+				Math.max(1, Math.floor((probe.bodyExactDocCount ?? 0) * 0.4));
+	}
+	return qualifies;
 }
 
 function extractCoverageLexicalQuerySpans(queryText: string): CoverageLexicalQuerySpan[] {
@@ -612,7 +638,9 @@ function extractCoverageLexicalQuerySpans(queryText: string): CoverageLexicalQue
 	const segments = roughSegments.length > 0
 		? roughSegments
 		: normalized.match(RAW_QUERY_SEGMENT_REGEX) ?? [];
-	return segments.map(classifyCoverageLexicalQuerySpan);
+	const baseSpans = segments.map(classifyCoverageLexicalQuerySpan);
+	const compressedPhraseSpans = extractCompressedPhraseSpans(segments);
+	return dedupePlannerSpans([...baseSpans, ...compressedPhraseSpans]);
 }
 
 function classifyCoverageLexicalQuerySpan(segment: string): CoverageLexicalQuerySpan {
@@ -654,6 +682,57 @@ function classifyCoverageLexicalQuerySpan(segment: string): CoverageLexicalQuery
 		kind: "body",
 		reason: "default body-content segment",
 	};
+}
+
+function extractCompressedPhraseSpans(
+	segments: readonly string[],
+): CoverageLexicalQuerySpan[] {
+	const spans: CoverageLexicalQuerySpan[] = [];
+	for (let start = 0; start < segments.length; start++) {
+		for (
+			let width = 2;
+			width <= 4 && start + width <= segments.length;
+			width++
+		) {
+			const phrase = segments.slice(start, start + width).join(" ");
+			const compressed = classifyCompressedQueryPhrase(phrase);
+			if (!compressed) {
+				continue;
+			}
+			spans.push(compressed);
+		}
+	}
+	return spans;
+}
+
+function classifyCompressedQueryPhrase(
+	phrase: string,
+): CoverageLexicalQuerySpan | null {
+	if (MEMORY_WRAPPER_PHRASE_REGEX.test(phrase)) {
+		return {
+			text: phrase,
+			kind: "filler",
+			reason: "compressed memory/question wrapper phrase",
+		};
+	}
+	if (
+		METADATA_WRAPPER_PHRASE_REGEX.test(phrase) &&
+		phrase.split(/\s+/u).some((term) => !isPlannerGlueTerm(term))
+	) {
+		return {
+			text: phrase,
+			kind: "metadata_intent",
+			reason: "compressed metadata-intent phrase",
+		};
+	}
+	if (TITLE_PATH_SEGMENT_REGEX.test(phrase)) {
+		return {
+			text: phrase,
+			kind: "title_path",
+			reason: "compressed title/path phrase",
+		};
+	}
+	return null;
 }
 
 function containsChineseMetadataCue(segment: string): boolean {
@@ -707,11 +786,51 @@ function buildCoverageLexicalPlannerFamilyEvidence(
 				titleSignal,
 			pathBasenameSignal,
 			titleSignal,
-			fillerScore: matchedSpans.filter((span) => span.kind === "filler").length,
+			fillerScore:
+				matchedSpans.filter((span) => span.kind === "filler").length +
+				(isPlannerGlueTerm(family.normalizedTerm) ? 1 : 0),
 			bodyScore: matchedSpans.filter((span) => span.kind === "body").length,
 		});
 	}
 	return evidenceByFamily;
+}
+
+function isPlannerGlueBodyFamily(
+	family: CoverageLexicalPlan["families"][number],
+	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
+): boolean {
+	const evidence = familyEvidence.get(family.index);
+	if (isPlannerGlueTerm(family.normalizedTerm)) {
+		return true;
+	}
+	return (
+		(evidence?.spanKinds.includes("metadata_intent") ?? false) &&
+		METADATA_CONTEXT_TERM_REGEX.test(family.normalizedTerm)
+	);
+}
+
+function isPlannerGlueTerm(term: string): boolean {
+	return (
+		QUESTION_LEAD_TERM_REGEX.test(term) ||
+		METADATA_CONTEXT_TERM_REGEX.test(term) ||
+		BODY_GLUE_TERM_REGEX.test(term)
+	);
+}
+
+function dedupePlannerSpans(
+	spans: readonly CoverageLexicalQuerySpan[],
+): CoverageLexicalQuerySpan[] {
+	const out: CoverageLexicalQuerySpan[] = [];
+	const seen = new Set<string>();
+	for (const span of spans) {
+		const key = `${span.kind}:${span.text}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		out.push(span);
+	}
+	return out;
 }
 
 function buildPlanExplain(
