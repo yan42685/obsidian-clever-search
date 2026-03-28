@@ -101,6 +101,154 @@ export class Tokenizer {
 		// discard lengthy token to avoid memory-overflow
 		return tokens.filter(token => token.length < 30);
 	}
+
+	tokenizeSequenceWithOffsets(
+		text: string,
+		mode: "index" | "search",
+	): Array<{ token: string; start: number; end: number }> {
+		const tokens: Array<{ token: string; start: number; end: number }> = [];
+		const segmentRegex = new RegExp(SEGMENT_REGEX.source, "gu");
+		let segmentStart = 0;
+		for (const separator of text.matchAll(segmentRegex)) {
+			const separatorStart = separator.index ?? segmentStart;
+			if (separatorStart > segmentStart) {
+				this.collectSegmentTokensWithOffsets(
+					text.slice(segmentStart, separatorStart),
+					segmentStart,
+					mode,
+					tokens,
+				);
+			}
+			segmentStart = separatorStart + separator[0].length;
+		}
+		if (segmentStart < text.length) {
+			this.collectSegmentTokensWithOffsets(
+				text.slice(segmentStart),
+				segmentStart,
+				mode,
+				tokens,
+			);
+		}
+		return tokens.filter((entry) => entry.token.length < 30);
+	}
+
+	private collectSegmentTokensWithOffsets(
+		segment: string,
+		segmentStart: number,
+		mode: "index" | "search",
+		output: Array<{ token: string; start: number; end: number }>,
+	): void {
+		if (!segment) {
+			return;
+		}
+		if (this.setting.enableChinesePatch && CHINESE_REGEX.test(segment)) {
+			this.collectChineseSegmentTokensWithOffsets(
+				segment,
+				segmentStart,
+				mode,
+				output,
+			);
+			return;
+		}
+		this.collectNonChineseSegmentTokensWithOffsets(
+			segment,
+			segmentStart,
+			mode,
+			output,
+		);
+	}
+
+	private collectChineseSegmentTokensWithOffsets(
+		segment: string,
+		segmentStart: number,
+		mode: "index" | "search",
+		output: Array<{ token: string; start: number; end: number }>,
+	): void {
+		const words = this.chsSegmenter.cut(segment, true);
+		let cursor = 0;
+		for (const word of words) {
+			const normalizedWord = sanitizeSegmentedToken(word);
+			if (!normalizedWord) {
+				continue;
+			}
+			if (
+				this.setting.enableStopWordsZh &&
+				this.stopWordsZh?.has(normalizedWord)
+			) {
+				if (mode === "search" && normalizedWord.length > 1) {
+					logger.debug(`excluded: ${normalizedWord}`);
+				}
+				continue;
+			}
+			const relativeStart = segment.indexOf(word, cursor);
+			if (relativeStart < 0) {
+				continue;
+			}
+			output.push({
+				token: normalizedWord,
+				start: segmentStart + relativeStart,
+				end: segmentStart + relativeStart + word.length,
+			});
+			cursor = relativeStart + word.length;
+		}
+	}
+
+	private collectNonChineseSegmentTokensWithOffsets(
+		segment: string,
+		segmentStart: number,
+		mode: "index" | "search",
+		output: Array<{ token: string; start: number; end: number }>,
+	): void {
+		const separatorRegex = new RegExp(SEPERATOR_REGEX.source, "gu");
+		let wordStart = 0;
+		for (const separator of segment.matchAll(separatorRegex)) {
+			const separatorStart = separator.index ?? wordStart;
+			if (separatorStart > wordStart) {
+				this.pushNonChineseWordTokens(
+					segment.slice(wordStart, separatorStart),
+					segmentStart + wordStart,
+					mode,
+					output,
+				);
+			}
+			wordStart = separatorStart + separator[0].length;
+		}
+		if (wordStart < segment.length) {
+			this.pushNonChineseWordTokens(
+				segment.slice(wordStart),
+				segmentStart + wordStart,
+				mode,
+				output,
+			);
+		}
+	}
+
+	private pushNonChineseWordTokens(
+		word: string,
+		wordStart: number,
+		mode: "index" | "search",
+		output: Array<{ token: string; start: number; end: number }>,
+	): void {
+		if (
+			word.length < 2 ||
+			(this.setting.enableStopWordsEn && this.stopWordsEn?.has(word))
+		) {
+			return;
+		}
+		output.push({
+			token: word,
+			start: wordStart,
+			end: wordStart + word.length,
+		});
+		if (word.length <= 3) {
+			return;
+		}
+		for (const subword of splitWordWithOffsets(word, wordStart)) {
+			if (subword.token.length > 1) {
+				output.push(subword);
+			}
+		}
+	}
 }
 
 function sanitizeSegmentedToken(token: string): string | null {
@@ -111,4 +259,50 @@ function sanitizeSegmentedToken(token: string): string | null {
 	return SEGMENTED_TOKEN_HAS_LEXICAL_CHAR_REGEX.test(normalized)
 		? normalized
 		: null;
+}
+
+function splitWordWithOffsets(
+	word: string,
+	wordStart: number,
+): Array<{ token: string; start: number; end: number }> {
+	const parts: Array<{ token: string; start: number; end: number }> = [];
+	let start = 0;
+	for (let index = 0; index < word.length; index++) {
+		const current = word[index];
+		const previous = index > 0 ? word[index - 1] : "";
+		const next = index + 1 < word.length ? word[index + 1] : "";
+		const shouldSplit =
+			current === "-" ||
+			current === "_" ||
+			(previous >= "a" &&
+				previous <= "z" &&
+				current >= "A" &&
+				current <= "Z") ||
+			(previous >= "A" &&
+				previous <= "Z" &&
+				current >= "A" &&
+				current <= "Z" &&
+				next >= "a" &&
+				next <= "z");
+		if (!shouldSplit) {
+			continue;
+		}
+		const partEnd = current === "-" || current === "_" ? index : index;
+		if (partEnd > start) {
+			parts.push({
+				token: word.slice(start, partEnd),
+				start: wordStart + start,
+				end: wordStart + partEnd,
+			});
+		}
+		start = current === "-" || current === "_" ? index + 1 : index;
+	}
+	if (start < word.length) {
+		parts.push({
+			token: word.slice(start),
+			start: wordStart + start,
+			end: wordStart + word.length,
+		});
+	}
+	return parts;
 }

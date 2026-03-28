@@ -29,6 +29,7 @@ import {
 	buildCoverageLexicalWindowFusionSignal,
 	createEmptyCoverageLexicalWindowFusionSignal,
 } from "./coverage-lexical-fusion";
+import { CoverageLexicalDirectSubItemBuilder } from "./coverage-lexical-direct-subitems";
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
@@ -50,6 +51,7 @@ type CoverageLexicalDocument = {
 	basenameTerms: Set<string>;
 	bodyTokenSequence: string[];
 	bodyPhraseTerms: Set<string>;
+	bodyText: string;
 	bodyTerms: Set<string>;
 	folderPhraseTerms: Set<string>;
 	folderTerms: Set<string>;
@@ -68,6 +70,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	readonly supportsSerialization = false;
 
 	private readonly tokenizer = getInstance(Tokenizer);
+	private readonly directSubItemBuilder = getInstance(
+		CoverageLexicalDirectSubItemBuilder,
+	);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
 	private readonly bodyPostings = new Map<string, Set<string>>();
 	private readonly bodyPhrasePostings = new Map<string, Set<string>>();
@@ -265,9 +270,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				.filter((result): result is CoverageLexicalRankableResult => result !== null),
 			plan,
 		);
-		return ranked
-			.slice(0, request.maxItemResults)
-			.map(({ coverageLexicalSignal: _coverageLexicalSignal, ...result }) => result);
+		const finalResults = ranked.slice(0, request.maxItemResults);
+		await this.attachDirectSubItems(
+			finalResults,
+			candidates,
+			plan,
+			pairSignatures,
+			request.maxDirectSubItemResults ?? request.maxItemResults,
+			request.maxSubItemResults ?? DEFAULT_MAX_SUBITEM_COUNT,
+		);
+		return finalResults.map(
+			({ coverageLexicalSignal: _coverageLexicalSignal, ...result }) => result,
+		);
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
@@ -381,6 +395,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			basenameTerms,
 			bodyTokenSequence,
 			bodyPhraseTerms,
+			bodyText: document.content ?? "",
 			bodyTerms,
 			folderPhraseTerms,
 			folderTerms,
@@ -558,6 +573,38 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			score: computeFallbackScore(signal),
 			coverageLexicalSignal: signal,
 		};
+	}
+
+	private async attachDirectSubItems(
+		rankedResults: readonly CoverageLexicalRankableResult[],
+		candidates: ReadonlyMap<string, CoverageLexicalCandidateState>,
+		plan: CoverageLexicalPlan,
+		pairSignatures: readonly CoverageLexicalPairSignature[],
+		maxDirectSubItemResults: number,
+		maxSubItemCount: number,
+	): Promise<void> {
+		const targetResults = rankedResults.slice(
+			0,
+			Math.max(0, maxDirectSubItemResults),
+		);
+		await Promise.all(
+			targetResults.map(async (result) => {
+				const document = this.documents.get(result.path);
+				const state = candidates.get(result.path);
+				if (!document || !state) {
+					result.directSubItems = [];
+					return;
+				}
+				result.directSubItems = await this.directSubItemBuilder.build({
+					path: result.path,
+					bodyTextFallback: document.bodyText,
+					bodyTokenSequence: document.bodyTokenSequence,
+					families: plan.families,
+					pairSignatures,
+					maxSubItemCount,
+				});
+			}),
+		);
 	}
 
 }
@@ -798,6 +845,8 @@ function getMetadataFieldWeight(field: CoverageLexicalMetadataField): number {
 			return 1;
 	}
 }
+
+const DEFAULT_MAX_SUBITEM_COUNT = 60;
 
 function computeFamilyTailWeight(index: number): number {
 	const position = index + 1;

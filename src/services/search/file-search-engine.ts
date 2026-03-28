@@ -29,6 +29,7 @@ export type FileSearchRequest = {
 	isFuzzy: boolean;
 	maxItemResults: number;
 	maxDirectSubItemResults?: number;
+	maxSubItemResults?: number;
 };
 
 export type SerializedFileSearchIndex =

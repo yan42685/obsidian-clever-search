@@ -9,8 +9,10 @@ import type {
 const MIN_WINDOW_SIZE = 8;
 const MAX_WINDOW_SIZE = 48;
 const MAX_LOCAL_WINDOW_CANDIDATES = 16;
+const MAX_DISPLAY_WINDOW_CANDIDATES = 96;
 const MAX_ADJACENT_PAIR_GAP = 3;
 const MAX_COVER_HIT_SPAN = 8;
+const MAX_DISPLAY_COVER_HIT_SPAN = 16;
 const MINIMAL_WINDOW_PADDING = 4;
 const EXPANDED_WINDOW_PADDING = 10;
 
@@ -23,6 +25,36 @@ export function buildCoverageLexicalLocalWindowSignals(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
+): CoverageLexicalLocalWindowSignal[] {
+	return buildCoverageLexicalWindowSignalsInternal(
+		tokens,
+		families,
+		pairSignatures,
+		MAX_LOCAL_WINDOW_CANDIDATES,
+		MAX_COVER_HIT_SPAN,
+	);
+}
+
+export function buildCoverageLexicalDisplayWindowSignals(
+	tokens: readonly string[],
+	families: readonly CoverageLexicalFamily[],
+	pairSignatures: readonly CoverageLexicalPairSignature[],
+): CoverageLexicalLocalWindowSignal[] {
+	return buildCoverageLexicalWindowSignalsInternal(
+		tokens,
+		families,
+		pairSignatures,
+		MAX_DISPLAY_WINDOW_CANDIDATES,
+		MAX_DISPLAY_COVER_HIT_SPAN,
+	);
+}
+
+function buildCoverageLexicalWindowSignalsInternal(
+	tokens: readonly string[],
+	families: readonly CoverageLexicalFamily[],
+	pairSignatures: readonly CoverageLexicalPairSignature[],
+	maxCandidates: number,
+	maxCoverHitSpan: number,
 ): CoverageLexicalLocalWindowSignal[] {
 	if (tokens.length === 0 || families.length === 0) {
 		return [];
@@ -66,7 +98,7 @@ export function buildCoverageLexicalLocalWindowSignals(
 		for (
 			let endHitIndex = startHitIndex;
 			endHitIndex < hitPositions.length &&
-			endHitIndex < startHitIndex + MAX_COVER_HIT_SPAN;
+			endHitIndex < startHitIndex + maxCoverHitSpan;
 			endHitIndex++
 		) {
 			const coverEnd = hitPositions[endHitIndex];
@@ -87,6 +119,7 @@ export function buildCoverageLexicalLocalWindowSignals(
 				matchesByPosition,
 				families,
 				pairSignatures,
+				maxCandidates,
 			);
 			if (coveredFamilies.size >= 2) {
 				pushWindowCandidate(
@@ -102,6 +135,7 @@ export function buildCoverageLexicalLocalWindowSignals(
 					matchesByPosition,
 					families,
 					pairSignatures,
+					maxCandidates,
 				);
 			}
 		}
@@ -117,6 +151,7 @@ export function buildCoverageLexicalLocalWindowSignals(
 				matchesByPosition,
 				families,
 				pairSignatures,
+				maxCandidates,
 			);
 		}
 	}
@@ -306,6 +341,7 @@ export function createEmptyCoverageLexicalLocalWindowSignal(): CoverageLexicalLo
 function insertCandidateSignal(
 	candidates: CoverageLexicalLocalWindowSignal[],
 	signal: CoverageLexicalLocalWindowSignal,
+	maxCandidates: number,
 ): void {
 	let insertAt = 0;
 	while (
@@ -314,11 +350,11 @@ function insertCandidateSignal(
 	) {
 		insertAt += 1;
 	}
-	if (insertAt >= MAX_LOCAL_WINDOW_CANDIDATES) {
+	if (insertAt >= maxCandidates) {
 		return;
 	}
 	candidates.splice(insertAt, 0, signal);
-	if (candidates.length > MAX_LOCAL_WINDOW_CANDIDATES) {
+	if (candidates.length > maxCandidates) {
 		candidates.pop();
 	}
 }
@@ -331,6 +367,7 @@ function pushWindowCandidate(
 	matchesByPosition: ReadonlyArray<ReadonlyArray<FamilyTokenMatch>>,
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
+	maxCandidates: number,
 ): void {
 	const key = `${window.start}:${window.end}`;
 	if (seenWindows.has(key)) {
@@ -347,6 +384,7 @@ function pushWindowCandidate(
 			families,
 			pairSignatures,
 		),
+		maxCandidates,
 	);
 }
 

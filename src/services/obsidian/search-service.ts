@@ -115,6 +115,7 @@ export class SearchService {
 			queryText,
 			this.getLexicalFileCandidateLimit(maxDisplayItems),
 			maxDisplayItems,
+			SearchService.LEXICAL_SUBITEM_MAX_LINES,
 		);
 		const rerankedMatches = await this.rerankLexicalMatchesByLineEvidence(
 			queryText,

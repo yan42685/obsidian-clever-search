@@ -134,6 +134,45 @@ export class ViewHelper {
     return "No matched content";
   }
 
+  getStructuredSnippetSegments(
+    subItem: FileSubItem,
+  ): Array<{ text: string; highlight: boolean }> | null {
+    const snippetText = subItem.snippetText;
+    const highlightRanges = subItem.highlightRanges;
+    if (
+      snippetText === undefined ||
+      !highlightRanges ||
+      highlightRanges.length === 0
+    ) {
+      return null;
+    }
+    const mergedRanges = mergeRanges(highlightRanges);
+    const segments: Array<{ text: string; highlight: boolean }> = [];
+    let cursor = 0;
+    for (const range of mergedRanges) {
+      if (range.start > cursor) {
+        segments.push({
+          text: snippetText.slice(cursor, range.start),
+          highlight: false,
+        });
+      }
+      if (range.end > range.start) {
+        segments.push({
+          text: snippetText.slice(range.start, range.end),
+          highlight: true,
+        });
+      }
+      cursor = range.end;
+    }
+    if (cursor < snippetText.length) {
+      segments.push({
+        text: snippetText.slice(cursor),
+        highlight: false,
+      });
+    }
+    return segments.length > 0 ? segments : [{ text: snippetText, highlight: false }];
+  }
+
   insertFileLinkToActiveMarkdown(path: string | undefined) {
     if (path) {
       const activeMarkdownView =
@@ -301,4 +340,24 @@ export class ViewHelper {
     }
     return false; // 超时
   }
+}
+
+function mergeRanges(
+  ranges: ReadonlyArray<{ start: number; end: number }>,
+): Array<{ start: number; end: number }> {
+  if (ranges.length <= 1) {
+    return [...ranges];
+  }
+  const ordered = [...ranges].sort((left, right) => left.start - right.start);
+  const merged = [{ start: ordered[0].start, end: ordered[0].end }];
+  for (let index = 1; index < ordered.length; index++) {
+    const current = ordered[index];
+    const previous = merged[merged.length - 1];
+    if (current.start <= previous.end) {
+      previous.end = Math.max(previous.end, current.end);
+      continue;
+    }
+    merged.push({ start: current.start, end: current.end });
+  }
+  return merged;
 }

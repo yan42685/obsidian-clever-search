@@ -151,6 +151,8 @@ export class FileSubItem extends Item {
 	row: number; // for precisely jumping to the original file location
 	col: number;
 	score?: number;
+	snippetText?: string;
+	highlightRanges?: Array<{ start: number; end: number }>;
 	private cachedSnippet?: string;
 	private snippetBuilder?: () => string;
 

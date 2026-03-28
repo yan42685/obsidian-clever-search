@@ -161,6 +161,7 @@ export class LexicalEngine {
 		queryText: string,
 		maxItemResults = this.outerSetting.ui.maxItemResults,
 		maxDirectSubItemResults = maxItemResults,
+		maxSubItemResults = 60,
 	): Promise<MatchedFile[]> {
 		// TODO: if queryText.length === 0, return empty,
 		//       else if (length === 1 && isn't Chinese char) only search filename
@@ -172,6 +173,7 @@ export class LexicalEngine {
 			isFuzzy: query.userOption.isFuzzy,
 			maxItemResults,
 			maxDirectSubItemResults,
+			maxSubItemResults,
 		});
 	}
 

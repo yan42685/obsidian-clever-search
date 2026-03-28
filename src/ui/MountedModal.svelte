@@ -284,6 +284,10 @@
 		return getMountedModalFileItemScore(item);
 	}
 
+	function getStructuredSnippetSegments(subItem: FileSubItem) {
+		return viewHelper.getStructuredSnippetSegments(subItem);
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		autoHybridFallback.clear();
@@ -443,9 +447,19 @@
 											>
 										{/if}
 										<span class="subitem-snippet">
-											{@html viewHelper.purifyHTML(
-												subItem.snippet ?? subItem.text,
-											)}
+											{#if getStructuredSnippetSegments(subItem)}
+												{#each getStructuredSnippetSegments(subItem) ?? [] as segment}
+													{#if segment.highlight}
+														<mark>{segment.text}</mark>
+													{:else}
+														{segment.text}
+													{/if}
+												{/each}
+											{:else}
+												{@html viewHelper.purifyHTML(
+													subItem.snippet ?? subItem.text,
+												)}
+											{/if}
 										</span>
 									</button>
 								{/each}

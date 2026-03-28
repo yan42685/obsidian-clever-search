@@ -192,6 +192,25 @@ export type CoverageLexicalWindowFusionSignal = {
 	corroboratedSoftCoverageCount: number;
 };
 
+export type CoverageLexicalDisplayWindowKind =
+	| "primary"
+	| "support"
+	| "supplemental";
+
+export type CoverageLexicalDisplayWindow = {
+	startTokenIndex: number;
+	endTokenIndex: number;
+	signal: CoverageLexicalLocalWindowSignal;
+	matchedFamilyIndices: number[];
+	kind: CoverageLexicalDisplayWindowKind;
+	rank: number;
+};
+
+export type CoverageLexicalHighlightRange = {
+	start: number;
+	end: number;
+};
+
 export type CoverageLexicalPassageAdmissionSignal = {
 	coreCoverageCount: number;
 	exactWeight: number;
