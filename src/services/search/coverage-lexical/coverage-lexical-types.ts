@@ -148,6 +148,16 @@ export type CoverageLexicalAreaSignal = {
 	fuzzyWeight: number;
 };
 
+export type CoverageLexicalMetadataIdentitySignal = {
+	phraseCoverageCount: number;
+	phraseWeight: number;
+	overall: CoverageLexicalAreaSignal;
+	alias: CoverageLexicalAreaSignal;
+	basename: CoverageLexicalAreaSignal;
+	heading: CoverageLexicalAreaSignal;
+	path: CoverageLexicalAreaSignal;
+};
+
 export type CoverageLexicalLocalWindowSignal = {
 	start: number;
 	end: number;
@@ -198,6 +208,7 @@ export type CoverageLexicalFamilySignal = {
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
+	metadataIdentity: CoverageLexicalMetadataIdentitySignal;
 	tailCoreWeight: number;
 	tailSoftWeight: number;
 	phraseBridgeCount: number;

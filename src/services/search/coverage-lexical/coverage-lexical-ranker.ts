@@ -1,6 +1,7 @@
 import type { MatchedFile } from "src/globals/search-types";
 import type {
 	CoverageLexicalFamilySignal,
+	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalPlan,
 } from "./coverage-lexical-types";
 import { compareCoverageLexicalWindowFusionSignals } from "./coverage-lexical-fusion";
@@ -47,6 +48,7 @@ function compareMetadataFirstStages(
 	right: CoverageLexicalFamilySignal,
 ): number {
 	return (
+		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
@@ -69,6 +71,7 @@ function compareBodyWithAnchorStages(
 		return (
 			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
@@ -82,6 +85,7 @@ function compareBodyWithAnchorStages(
 	return (
 		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
 			left.localEvidence,
@@ -120,6 +124,21 @@ function compareAreaSignals(
 		compareDescendingMetric(left.exactWeight, right.exactWeight) ||
 		compareDescendingMetric(left.prefixWeight, right.prefixWeight) ||
 		compareDescendingMetric(left.fuzzyWeight, right.fuzzyWeight)
+	);
+}
+
+function compareMetadataIdentitySignals(
+	left: CoverageLexicalMetadataIdentitySignal,
+	right: CoverageLexicalMetadataIdentitySignal,
+): number {
+	return (
+		compareDescendingMetric(left.phraseCoverageCount, right.phraseCoverageCount) ||
+		compareDescendingMetric(left.phraseWeight, right.phraseWeight) ||
+		compareAreaSignals(left.overall, right.overall) ||
+		compareAreaSignals(left.alias, right.alias) ||
+		compareAreaSignals(left.basename, right.basename) ||
+		compareAreaSignals(left.heading, right.heading) ||
+		compareAreaSignals(left.path, right.path)
 	);
 }
 

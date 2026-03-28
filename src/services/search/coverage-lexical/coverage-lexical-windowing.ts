@@ -7,9 +7,12 @@ import type {
 } from "./coverage-lexical-types";
 
 const MIN_WINDOW_SIZE = 8;
-const MAX_WINDOW_SIZE = 28;
-const MAX_LOCAL_WINDOW_CANDIDATES = 12;
+const MAX_WINDOW_SIZE = 48;
+const MAX_LOCAL_WINDOW_CANDIDATES = 16;
 const MAX_ADJACENT_PAIR_GAP = 3;
+const MAX_COVER_HIT_SPAN = 8;
+const MINIMAL_WINDOW_PADDING = 4;
+const EXPANDED_WINDOW_PADDING = 10;
 
 type FamilyTokenMatch = {
 	familyIndex: number;
@@ -34,7 +37,7 @@ export function buildCoverageLexicalLocalWindowSignals(
 		{ length: tokens.length },
 		() => [],
 	);
-	const candidateCenters: number[] = [];
+	const hitPositions: number[] = [];
 	for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
 		const token = tokens[tokenIndex];
 		for (const family of candidateFamilies) {
@@ -48,45 +51,73 @@ export function buildCoverageLexicalLocalWindowSignals(
 			});
 		}
 		if (matchesByPosition[tokenIndex].length > 0) {
-			candidateCenters.push(tokenIndex);
+			hitPositions.push(tokenIndex);
 		}
 	}
 
-	if (candidateCenters.length === 0) {
+	if (hitPositions.length === 0) {
 		return [];
 	}
 
-	const baseWindowSize = Math.min(
-		MAX_WINDOW_SIZE,
-		Math.max(MIN_WINDOW_SIZE, candidateFamilies.length * 5),
-	);
-	const candidateWindowSizes = Array.from(
-		new Set([
-			baseWindowSize,
-			Math.max(MIN_WINDOW_SIZE, Math.floor(baseWindowSize * 0.65)),
-		]),
-	);
-
 	const candidateSignals: CoverageLexicalLocalWindowSignal[] = [];
 	const seenWindows = new Set<string>();
-	for (const center of candidateCenters) {
-		for (const windowSize of candidateWindowSizes) {
-			const start = Math.max(0, Math.min(center - Math.floor(windowSize / 2), tokens.length - windowSize));
-			const end = Math.min(tokens.length - 1, start + windowSize - 1);
-			const key = `${start}:${end}`;
-			if (seenWindows.has(key)) {
-				continue;
+	for (let startHitIndex = 0; startHitIndex < hitPositions.length; startHitIndex++) {
+		const coveredFamilies = new Set<number>();
+		for (
+			let endHitIndex = startHitIndex;
+			endHitIndex < hitPositions.length &&
+			endHitIndex < startHitIndex + MAX_COVER_HIT_SPAN;
+			endHitIndex++
+		) {
+			const coverEnd = hitPositions[endHitIndex];
+			for (const match of matchesByPosition[coverEnd]) {
+				coveredFamilies.add(match.familyIndex);
 			}
-			seenWindows.add(key);
-			const signal = scoreWindow(
-				start,
-				end,
+			const coverStart = hitPositions[startHitIndex];
+			pushWindowCandidate(
+				candidateSignals,
+				seenWindows,
+				expandCoverWindow(
+					coverStart,
+					coverEnd,
+					tokens.length,
+					MINIMAL_WINDOW_PADDING,
+				),
 				tokens,
 				matchesByPosition,
 				families,
 				pairSignatures,
 			);
-			insertCandidateSignal(candidateSignals, signal);
+			if (coveredFamilies.size >= 2) {
+				pushWindowCandidate(
+					candidateSignals,
+					seenWindows,
+					expandCoverWindow(
+						coverStart,
+						coverEnd,
+						tokens.length,
+						EXPANDED_WINDOW_PADDING,
+					),
+					tokens,
+					matchesByPosition,
+					families,
+					pairSignatures,
+				);
+			}
+		}
+	}
+
+	if (candidateSignals.length === 0) {
+		for (const center of hitPositions) {
+			pushWindowCandidate(
+				candidateSignals,
+				seenWindows,
+				expandCoverWindow(center, center, tokens.length, EXPANDED_WINDOW_PADDING),
+				tokens,
+				matchesByPosition,
+				families,
+				pairSignatures,
+			);
 		}
 	}
 
@@ -290,6 +321,67 @@ function insertCandidateSignal(
 	if (candidates.length > MAX_LOCAL_WINDOW_CANDIDATES) {
 		candidates.pop();
 	}
+}
+
+function pushWindowCandidate(
+	candidates: CoverageLexicalLocalWindowSignal[],
+	seenWindows: Set<string>,
+	window: { start: number; end: number },
+	tokens: readonly string[],
+	matchesByPosition: ReadonlyArray<ReadonlyArray<FamilyTokenMatch>>,
+	families: readonly CoverageLexicalFamily[],
+	pairSignatures: readonly CoverageLexicalPairSignature[],
+): void {
+	const key = `${window.start}:${window.end}`;
+	if (seenWindows.has(key)) {
+		return;
+	}
+	seenWindows.add(key);
+	insertCandidateSignal(
+		candidates,
+		scoreWindow(
+			window.start,
+			window.end,
+			tokens,
+			matchesByPosition,
+			families,
+			pairSignatures,
+		),
+	);
+}
+
+function expandCoverWindow(
+	coverStart: number,
+	coverEnd: number,
+	tokenCount: number,
+	padding: number,
+): { start: number; end: number } {
+	let start = Math.max(0, coverStart - padding);
+	let end = Math.min(tokenCount - 1, coverEnd + padding);
+	if (end - start + 1 < MIN_WINDOW_SIZE) {
+		const deficit = MIN_WINDOW_SIZE - (end - start + 1);
+		const extendLeft = Math.floor(deficit / 2);
+		const extendRight = deficit - extendLeft;
+		start = Math.max(0, start - extendLeft);
+		end = Math.min(tokenCount - 1, end + extendRight);
+	}
+	if (end - start + 1 <= MAX_WINDOW_SIZE) {
+		return { start, end };
+	}
+	start = Math.max(0, Math.min(start, coverStart));
+	end = Math.min(tokenCount - 1, Math.max(end, coverEnd));
+	while (end - start + 1 > MAX_WINDOW_SIZE) {
+		if (start < coverStart) {
+			start += 1;
+			continue;
+		}
+		if (end > coverEnd) {
+			end -= 1;
+			continue;
+		}
+		break;
+	}
+	return { start, end };
 }
 
 function matchesPairSignature(

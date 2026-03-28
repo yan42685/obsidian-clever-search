@@ -18,6 +18,7 @@ export function buildCoverageLexicalWindowFusionSignal(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
+	maxWindows: number = MAX_FUSED_WINDOWS,
 ): CoverageLexicalWindowFusionSignal {
 	const candidates = buildCoverageLexicalLocalWindowSignals(
 		tokens,
@@ -34,7 +35,7 @@ export function buildCoverageLexicalWindowFusionSignal(
 			continue;
 		}
 		selected.push(candidate);
-		if (selected.length >= MAX_FUSED_WINDOWS) {
+		if (selected.length >= Math.max(1, maxWindows)) {
 			break;
 		}
 	}
