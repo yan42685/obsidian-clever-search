@@ -23,9 +23,9 @@
 		"benchmark:hybrid:regression": "node scripts/hybrid-search-benchmark.mjs --mode=regression",
 		"benchmark:hybrid:tune": "node scripts/hybrid-search-benchmark.mjs --mode=tune",
 		"benchmark:hybrid:tune:regression": "node scripts/hybrid-search-benchmark.mjs --mode=tune-regression",
-		"optimize:lexical": "node scripts/lexical-optimizer/run.mjs",
+		"optimize:lexical": "node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a",
 		"optimize:lexical:parameter": "node scripts/lexical-optimizer/run.mjs --mode=parameter",
-		"optimize:lexical:mechanism": "node scripts/lexical-optimizer/run.mjs --mode=mechanism",
+		"optimize:lexical:mechanism": "node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a",
 		"release": "node release-script.mjs"
 	},
 	"keywords": [],

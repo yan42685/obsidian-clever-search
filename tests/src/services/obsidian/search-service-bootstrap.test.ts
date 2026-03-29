@@ -103,6 +103,7 @@ describe("SearchService bootstrap gate", () => {
 		hybridEnabled?: boolean;
 		lexicalMatches?: any[];
 		hybridItems?: any[];
+		lexicalBackend?: "minisearch" | "custom-bm25" | "passage-bm25" | "coverage-lexical";
 	}) {
 		const { App } = require("obsidian");
 		const { OuterSetting } = require("src/globals/plugin-setting");
@@ -139,6 +140,9 @@ describe("SearchService bootstrap gate", () => {
 				.mockResolvedValue(options.lexicalMatches ?? []),
 			searchLinesByFileItem: jest.fn().mockResolvedValue([]),
 			matchLinesFuzzy: jest.fn().mockResolvedValue([]),
+			getActiveFileSearchBackend: jest
+				.fn()
+				.mockReturnValue(options.lexicalBackend ?? "minisearch"),
 		};
 		const lineHighlighter = {
 			parse: jest.fn((lines: any[], matchedLine: any, truncateOption: any, isParagraph: boolean) =>
@@ -225,9 +229,33 @@ describe("SearchService bootstrap gate", () => {
 
 		const result = await service.searchInVault("alpha");
 
-		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("alpha", 22, 10);
+		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("alpha", 22, 10, 60);
 		expect(result.items).toHaveLength(1);
 		expect(result.items[0]).toBeInstanceOf(FileItem);
+		expect((result.items[0] as any).path).toBe("notes/alpha.md");
+	});
+
+	test("does not rerank coverage lexical results through legacy line evidence", async () => {
+		const { service, lexicalEngine } = createHarness({
+			searchable: true,
+			lexicalBackend: "coverage-lexical",
+			lexicalMatches: [
+				{
+					path: "notes/alpha.md",
+					queryTerms: ["alpha"],
+					matchedTerms: ["alpha"],
+					score: 1,
+					nativeSubItemsReady: true,
+					directSubItems: [],
+				},
+			],
+		});
+
+		const result = await service.searchInVault("alpha");
+
+		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("alpha", 10, 10, 60);
+		expect(lexicalEngine.searchLinesByFileItem).not.toHaveBeenCalled();
+		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as any).path).toBe("notes/alpha.md");
 	});
 

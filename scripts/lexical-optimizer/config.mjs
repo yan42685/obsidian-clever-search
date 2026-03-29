@@ -19,7 +19,7 @@ export const DEFAULT_RESULTS_DIR = path.resolve(
 	".codex-bench/lexical-optimizer",
 );
 
-export const DEFAULT_LANE = "default";
+export const DEFAULT_LANE = "mechanism-a";
 
 export const DEFAULT_LANE_NAMES = [
 	"mechanism-a",
@@ -49,9 +49,9 @@ export const DEFAULT_BENCHMARK_ARGS = [
 	"--config",
 	"jest.file-search-web-benchmark.config.js",
 	"--runInBand",
-	"tests/src/services/search/file-search-web-benchmark.bench.ts",
 ];
 
+// Legacy parameter tuning remains opt-in only.
 export const DEFAULT_PARAMETER_TARGET_FILE = path.resolve(
 	process.cwd(),
 	"src/services/search/passage-lexical/passage-lexical-ranker.ts",

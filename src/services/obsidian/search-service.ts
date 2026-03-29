@@ -111,16 +111,24 @@ export class SearchService {
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
 		const maxDisplayItems = this.setting.ui.maxItemResults;
+		const activeBackend = this.lexicalEngine.getActiveFileSearchBackend();
+		const searchLimit =
+			activeBackend === "coverage-lexical"
+				? maxDisplayItems
+				: this.getLexicalFileCandidateLimit(maxDisplayItems);
 		const lexicalMatches = await this.lexicalEngine.searchFiles(
 			queryText,
-			this.getLexicalFileCandidateLimit(maxDisplayItems),
+			searchLimit,
 			maxDisplayItems,
 			SearchService.LEXICAL_SUBITEM_MAX_LINES,
 		);
-		const rerankedMatches = await this.rerankLexicalMatchesByLineEvidence(
-			queryText,
-			lexicalMatches,
-		);
+		const rerankedMatches =
+			activeBackend === "coverage-lexical"
+				? lexicalMatches
+				: await this.rerankLexicalMatchesByLineEvidence(
+					queryText,
+					lexicalMatches,
+				);
 		if (rerankedMatches.length === 0) {
 			logger.trace("lexical matched files count is 0");
 			return result;

@@ -33,6 +33,10 @@ export class LexicalEngine {
 		return this.fileSearchEngineFactory.getActiveEngine();
 	}
 
+	getActiveFileSearchBackend() {
+		return this.fileSearchEngine.backend;
+	}
+
 	supportsSerializedFileIndex(): boolean {
 		return this.fileSearchEngine.supportsSerialization;
 	}

@@ -28,7 +28,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
-	fileSearchBackend: "minisearch",
+	fileSearchBackend: "coverage-lexical",
 	isCaseSensitive: false,
 	isPrefixMatch: true,
 	isFuzzy: true,
