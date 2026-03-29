@@ -57,6 +57,7 @@ const MAX_SNIPPET_WINDOW_CHARS = 220;
 const SNIPPET_LEADING_CONTEXT_CHARS = 24;
 const SNIPPET_TRAILING_CONTEXT_CHARS = 32;
 const MATCH_SEARCH_CONTEXT_CHARS = 96;
+const MIN_SNIPPET_SCORE = 24;
 
 @singleton()
 export class CoverageLexicalDirectSubItemBuilder {
@@ -97,7 +98,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 		const lineOffsets = this.getLineOffsets(params.path, snapshotText);
 		const payloads: CoverageSnippetPayload[] = [];
 		for (const window of displayWindows) {
-			const snippet = this.buildSnippetPayload(
+			const snippets = this.buildSnippetPayloads(
 				snapshotText,
 				lineOffsets,
 				tokenOffsets,
@@ -107,10 +108,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 				params.charQueryTerms ?? [],
 				params.charQuerySegments ?? [],
 			);
-			if (!snippet) {
-				continue;
-			}
-			payloads.push(snippet);
+			payloads.push(...snippets);
 		}
 		const rankedPayloads = rankSnippetPayloads(payloads);
 		const selectedPayloads = selectDiverseSnippetPayloads(
@@ -206,7 +204,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 		return lineOffsets;
 	}
 
-	private buildSnippetPayload(
+	private buildSnippetPayloads(
 		text: string,
 		lineOffsets: number[],
 		tokenOffsets: readonly TokenOffset[],
@@ -215,9 +213,9 @@ export class CoverageLexicalDirectSubItemBuilder {
 		families: readonly CoverageLexicalFamily[],
 		charQueryTerms: readonly string[],
 		charQuerySegments: readonly string[],
-	): CoverageSnippetPayload | null {
+	): CoverageSnippetPayload[] {
 		if (window.startTokenIndex < 0 || window.endTokenIndex < window.startTokenIndex) {
-			return null;
+			return [];
 		}
 		const approximateWindow = resolveApproximateWindowRange(
 			text.length,
@@ -242,68 +240,30 @@ export class CoverageLexicalDirectSubItemBuilder {
 			charQueryTerms,
 			charQuerySegments,
 		);
-		const anchorOffset = pickAnchorOffset(
+		if (mergedRanges.length === 0) {
+			return [];
+		}
+		const clusters = rankEvidenceClusters(
 			text,
-			searchRegion,
 			mergedRanges,
-			approximateWindow,
 			matchedFamilies,
 			charQuerySegments,
 		);
-		const snippetRange = buildSnippetRange(
-			text.length,
-			mergedRanges,
-			anchorOffset,
-			approximateWindow,
-		);
-		const snippetText = text.slice(snippetRange.start, snippetRange.end);
-		const localRanges = mergedRanges
-			.filter((range) => range.end > snippetRange.start && range.start < snippetRange.end)
-			.map((range) => ({
-				start: Math.max(0, range.start - snippetRange.start),
-				end: Math.min(
-					snippetRange.end - snippetRange.start,
-					range.end - snippetRange.start,
+		return clusters
+			.map((cluster) =>
+				buildSnippetPayloadFromCluster(
+					text,
+					lineOffsets,
+					mergedRanges,
+					cluster,
+					approximateWindow,
+					matchedFamilies,
+					charQuerySegments,
+					window.signal.score,
 				),
-			}));
-		const prefixEllipsis = snippetRange.start > 0;
-		const suffixEllipsis = snippetRange.end < text.length;
-		const snippetTextWithEllipsis = `${prefixEllipsis ? "…" : ""}${snippetText}${
-			suffixEllipsis ? "…" : ""
-		}`;
-		const adjustedRanges = localRanges.map((range) => ({
-			start: range.start + (prefixEllipsis ? 1 : 0),
-			end: range.end + (prefixEllipsis ? 1 : 0),
-		}));
-		const row = offsetToLine(lineOffsets, anchorOffset);
-		const lineStartOffset = lineOffsets[row] ?? 0;
-		const col = Math.max(0, anchorOffset - lineStartOffset);
-		return {
-			text: snippetTextWithEllipsis,
-			html: renderHighlightedSnippet(snippetText, localRanges, {
-				prefixEllipsis,
-				suffixEllipsis,
-			}),
-			row,
-			col,
-			highlightRanges: adjustedRanges,
-			anchorOffset,
-			absoluteRange: snippetRange,
-			snippetScore: scoreSnippetPayload(
-				snippetText,
-				localRanges,
-				matchedFamilies,
-				charQuerySegments,
-				window.signal.score,
-			),
-			sourceWindowScore: window.signal.score,
-			evidenceType: classifySnippetEvidenceType(
-				snippetText,
-				matchedFamilies,
-				charQuerySegments,
-			),
-			regionKey: buildSnippetRegionKey(row, anchorOffset),
-		};
+			)
+			.filter((payload): payload is CoverageSnippetPayload => payload !== null)
+			.filter((payload) => payload.snippetScore >= MIN_SNIPPET_SCORE);
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -519,6 +479,31 @@ function filterCharRangesBySegmentCoverage(
 	return kept;
 }
 
+function collectExactSegmentRanges(
+	snippetText: string,
+	charQuerySegments: readonly string[],
+): CoverageLexicalHighlightRange[] {
+	const ranges: CoverageLexicalHighlightRange[] = [];
+	for (const segment of charQuerySegments) {
+		if (!segment) {
+			continue;
+		}
+		let fromIndex = 0;
+		while (fromIndex < snippetText.length) {
+			const foundAt = snippetText.indexOf(segment, fromIndex);
+			if (foundAt < 0) {
+				break;
+			}
+			ranges.push({
+				start: foundAt,
+				end: foundAt + segment.length,
+			});
+			fromIndex = foundAt + Math.max(1, segment.length);
+		}
+	}
+	return ranges;
+}
+
 function acceptsCharClusterCoverage(totalBigrams: number, matchedCount: number): boolean {
 	if (matchedCount <= 0 || totalBigrams <= 0) {
 		return false;
@@ -586,6 +571,107 @@ function pickBestEvidenceClusterAnchor(
 		}
 	}
 	return -1;
+}
+
+function rankEvidenceClusters(
+	text: string,
+	ranges: readonly CoverageLexicalHighlightRange[],
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
+): Array<CoverageLexicalHighlightRange & { score: number }> {
+	return buildEvidenceClusters(ranges)
+		.map((cluster) => ({
+			...cluster,
+			score: scoreEvidenceCluster(
+				text.slice(cluster.start, cluster.end),
+				families,
+				charQuerySegments,
+			),
+		}))
+		.sort((left, right) => {
+			if (right.score !== left.score) {
+				return right.score - left.score;
+			}
+			if (left.start !== right.start) {
+				return left.start - right.start;
+			}
+			return left.end - right.end;
+		});
+}
+
+function buildSnippetPayloadFromCluster(
+	text: string,
+	lineOffsets: readonly number[],
+	mergedRanges: readonly CoverageLexicalHighlightRange[],
+	cluster: CoverageLexicalHighlightRange & { score: number },
+	approximateWindow: CharRange,
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
+	sourceWindowScore: number,
+): CoverageSnippetPayload | null {
+	const anchorOffset = cluster.start;
+	const snippetRange = buildSnippetRange(
+		text.length,
+		[cluster],
+		anchorOffset,
+		approximateWindow,
+	);
+	const snippetText = text.slice(snippetRange.start, snippetRange.end);
+	const localRanges = mergedRanges
+		.filter((range) => range.end > snippetRange.start && range.start < snippetRange.end)
+		.map((range) => ({
+			start: Math.max(0, range.start - snippetRange.start),
+			end: Math.min(
+				snippetRange.end - snippetRange.start,
+				range.end - snippetRange.start,
+			),
+		}));
+	const exactSegmentRanges = collectExactSegmentRanges(
+		snippetText,
+		charQuerySegments,
+	);
+	const mergedLocalRanges = mergeRanges([...localRanges, ...exactSegmentRanges]);
+	if (mergedLocalRanges.length === 0) {
+		return null;
+	}
+	const prefixEllipsis = snippetRange.start > 0;
+	const suffixEllipsis = snippetRange.end < text.length;
+	const snippetTextWithEllipsis = `${prefixEllipsis ? "…" : ""}${snippetText}${
+		suffixEllipsis ? "…" : ""
+	}`;
+	const adjustedRanges = mergedLocalRanges.map((range) => ({
+		start: range.start + (prefixEllipsis ? 1 : 0),
+		end: range.end + (prefixEllipsis ? 1 : 0),
+	}));
+	const row = offsetToLine(lineOffsets, anchorOffset);
+	const lineStartOffset = lineOffsets[row] ?? 0;
+	const col = Math.max(0, anchorOffset - lineStartOffset);
+	return {
+		text: snippetTextWithEllipsis,
+		html: renderHighlightedSnippet(snippetText, mergedLocalRanges, {
+			prefixEllipsis,
+			suffixEllipsis,
+		}),
+		row,
+		col,
+		highlightRanges: adjustedRanges,
+		anchorOffset,
+		absoluteRange: snippetRange,
+		snippetScore: scoreSnippetPayload(
+			snippetText,
+			mergedLocalRanges,
+			families,
+			charQuerySegments,
+			sourceWindowScore,
+		),
+		sourceWindowScore,
+		evidenceType: classifySnippetEvidenceType(
+			snippetText,
+			families,
+			charQuerySegments,
+		),
+		regionKey: buildSnippetRegionKey(row, anchorOffset),
+	};
 }
 
 function buildEvidenceClusters(
@@ -669,13 +755,7 @@ function buildSnippetRange(
 	const focusStart = ranges.length > 0 ? ranges[0].start : anchorOffset;
 	const focusEnd = ranges.length > 0 ? ranges[ranges.length - 1].end : approximateWindow.end;
 	let start = Math.max(0, focusStart - SNIPPET_LEADING_CONTEXT_CHARS);
-	let end = Math.min(
-		textLength,
-		Math.max(
-			focusEnd + SNIPPET_TRAILING_CONTEXT_CHARS,
-			start + MAX_SNIPPET_WINDOW_CHARS,
-		),
-	);
+	let end = Math.min(textLength, focusEnd + SNIPPET_TRAILING_CONTEXT_CHARS);
 	if (end - start > MAX_SNIPPET_WINDOW_CHARS) {
 		start = Math.max(0, anchorOffset - Math.floor(MAX_SNIPPET_WINDOW_CHARS / 2));
 		end = Math.min(textLength, start + MAX_SNIPPET_WINDOW_CHARS);
@@ -786,6 +866,9 @@ function selectDiverseSnippetPayloads(
 	const selected: CoverageSnippetPayload[] = [];
 	const regionCounts = new Map<string, number>();
 	const evidenceCounts = new Map<CoverageSnippetPayload["evidenceType"], number>();
+	if (payloads.length === 0 || maxSubItemCount <= 0) {
+		return selected;
+	}
 	for (const payload of payloads) {
 		if (selected.length >= maxSubItemCount) {
 			break;
@@ -793,7 +876,15 @@ function selectDiverseSnippetPayloads(
 		if (selected.some((existing) => shouldDedupeSnippetPayload(existing, payload))) {
 			continue;
 		}
-		if (!passesSnippetBudget(selected, payload, maxSubItemCount, regionCounts, evidenceCounts)) {
+		if (
+			!passesSnippetBudget(
+				selected,
+				payload,
+				maxSubItemCount,
+				regionCounts,
+				evidenceCounts,
+			)
+		) {
 			continue;
 		}
 		selected.push(payload);
@@ -818,6 +909,13 @@ function passesSnippetBudget(
 		return false;
 	}
 	if (
+		selected.length === 1 &&
+		maxSubItemCount >= 2 &&
+		selected[0].regionKey !== candidate.regionKey
+	) {
+		return true;
+	}
+	if (
 		sameRegionCount >= 1 &&
 		evidenceCounts.get(candidate.evidenceType) !== undefined &&
 		candidate.evidenceType !== "full_segment"
@@ -840,13 +938,22 @@ function shouldDedupeSnippetPayload(
 	if (left.row === right.row) {
 		return true;
 	}
-	if (Math.abs(left.anchorOffset - right.anchorOffset) <= 32) {
+	if (
+		Math.abs(left.row - right.row) <= 1 &&
+		Math.abs(left.anchorOffset - right.anchorOffset) <= 32
+	) {
 		return true;
 	}
-	if (computeRangeOverlapRatio(left.absoluteRange, right.absoluteRange) >= 0.72) {
+	if (
+		left.regionKey === right.regionKey &&
+		computeRangeOverlapRatio(left.absoluteRange, right.absoluteRange) >= 0.72
+	) {
 		return true;
 	}
-	return computeSnippetTextOverlapRatio(left.text, right.text) >= 0.72;
+	return (
+		left.regionKey === right.regionKey &&
+		computeSnippetTextOverlapRatio(left.text, right.text) >= 0.82
+	);
 }
 
 function computeRangeOverlapRatio(left: CharRange, right: CharRange): number {
