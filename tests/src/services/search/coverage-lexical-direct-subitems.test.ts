@@ -349,6 +349,87 @@ describe("coverage lexical direct subitems", () => {
 		expect(highlighted).toContain("\u4e0a\u9762\u8fd9");
 	});
 
+	test("keeps char highlight when a Han query segment is matched across multiple local clusters in one snippet", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<
+					Array<{
+						text: string;
+						highlightRanges?: Array<{ start: number; end: number }>;
+					}>
+				>;
+			};
+		};
+
+		const text = "\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/split-segment-highlight.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: ["\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb"],
+			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u7b14\u8bb0")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9", "\u7b14\u8bb0"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9\u7b14\u8bb0"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		const first = subItems[0];
+		const highlighted = (first.highlightRanges ?? []).map((range) =>
+			first.text.slice(range.start, range.end),
+		);
+		expect(highlighted.some((segment) => segment.includes("\u4e0a\u9762\u8fd9"))).toBe(true);
+		expect(highlighted.some((segment) => segment.includes("\u7b14\u8bb0"))).toBe(true);
+	});
+
 	test("ranks the subitem containing the full Han query segment ahead of weaker windows", async () => {
 		const { CoverageLexicalDirectSubItemBuilder } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
@@ -565,6 +646,8 @@ describe("coverage lexical direct subitems", () => {
 		const text = [
 			"\u914d\u5408\u4e0a\u9762\u7684 banners\uff0c\u5feb\u901f\u63d2\u5165\u56fe\u7247\u3002",
 			"\u4e2d\u95f4\u7684\u5176\u4ed6\u8bb0\u5f55\u3002",
+			"\u4e2d\u95f4\u7684\u5176\u4ed6\u8bb0\u5f55\u4e8c\u3002",
+			"\u4e2d\u95f4\u7684\u5176\u4ed6\u8bb0\u5f55\u4e09\u3002",
 			"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\u3002",
 		].join("\n");
 		const builder = new CoverageLexicalDirectSubItemBuilder();
@@ -574,6 +657,8 @@ describe("coverage lexical direct subitems", () => {
 			bodyTokenSequence: [
 				"\u914d\u5408\u4e0a\u9762\u7684 banners \u5feb\u901f\u63d2\u5165\u56fe\u7247",
 				"\u4e2d\u95f4\u7684\u5176\u4ed6\u8bb0\u5f55",
+				"\u4e2d\u95f4\u7684\u5176\u4ed6\u8bb0\u5f55\u4e8c",
+				"\u4e2d\u95f4\u7684\u5176\u4ed6\u8bb0\u5f55\u4e09",
 				"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb",
 			],
 			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u7b14\u8bb0")],
@@ -601,11 +686,11 @@ describe("coverage lexical direct subitems", () => {
 					rank: 1,
 				},
 				{
-					startTokenIndex: 2,
-					endTokenIndex: 2,
+					startTokenIndex: 4,
+					endTokenIndex: 4,
 					signal: {
-						start: 2,
-						end: 2,
+						start: 4,
+						end: 4,
 						score: 2,
 						matchedExactCoreFamilyIndices: [0, 1],
 						matchedPrefixCoreFamilyIndices: [],
@@ -623,6 +708,81 @@ describe("coverage lexical direct subitems", () => {
 		expect(subItems.length).toBe(2);
 		expect(subItems[0].text).toContain("\u4e0a\u9762\u8fd9");
 		expect(subItems[1].text).toContain("\u4e0a\u9762\u7684 banners");
+	});
+
+	test("expands the snippet to include nearby missing query evidence within the token budget", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const text =
+			"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\uff0c\u611f\u89c9\u8fd8\u4e0d\u9519\uff0c\u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/query-aware-expansion.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: [
+				"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb \u611f\u89c9\u8fd8\u4e0d\u9519 \u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f",
+			],
+			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u5feb\u901f")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9", "\u5feb\u901f"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		expect(subItems[0].text).toContain("\u4e0a\u9762\u8fd9");
+		expect(subItems[0].text).toContain("\u5feb\u901f");
 	});
 
 	test("does not lose a third valid snippet candidate just because it comes from the same broad window", async () => {
@@ -704,10 +864,193 @@ describe("coverage lexical direct subitems", () => {
 			],
 		});
 
-		expect(subItems.length).toBe(3);
+		expect(subItems.length).toBe(2);
 		expect(subItems.some((item) => item.text.includes("\u4e0a\u9762\u7684 banners"))).toBe(true);
 		expect(subItems.some((item) => item.text.includes("\u4e0a\u9762\u8fd9\u4f4d"))).toBe(true);
 		expect(subItems.some((item) => item.text.includes("\u7b14\u8bb0\u95f4\u5173\u7cfb"))).toBe(true);
+	});
+
+	test("dedupes near-identical snippets created after query-aware expansion", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const text =
+			"\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\uff0c\u611f\u89c9\u8fd8\u4e0d\u9519\uff0c\u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/final-dedupe.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: [
+				"\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb \u611f\u89c9\u8fd8\u4e0d\u9519 \u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f",
+			],
+			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u5feb\u901f")],
+			pairSignatures: [],
+			maxSubItemCount: 3,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9", "\u5feb\u901f"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 0,
+				},
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 0.9,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 1,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		expect(subItems[0].text).toContain("\u4e0a\u9762\u8fd9");
+		expect(subItems[0].text).toContain("\u5feb\u901f");
+	});
+
+	test("dedupes display-equivalent snippets even when their rows differ", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const text =
+			"\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\uff0c\u611f\u89c9\u8fd8\u4e0d\u9519\uff0c\u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/equivalent-final-snippets.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: [
+				"\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb \u611f\u89c9\u8fd8\u4e0d\u9519 \u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f",
+			],
+			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u5feb\u901f")],
+			pairSignatures: [],
+			maxSubItemCount: 3,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9", "\u5feb\u901f"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 0,
+				},
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 1,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		expect(subItems[0].text).toContain("\u5feb\u901f");
 	});
 
 	test("does not fabricate one continuous Han highlight from separated words", async () => {
@@ -791,5 +1134,87 @@ describe("coverage lexical direct subitems", () => {
 		expect(highlighted).not.toContain("\u7b14\u8bb0\u95f4\u5173\u7cfb\u7684\u4e00\u6b3e\u63d2\u4ef6");
 		expect(highlighted.some((segment) => segment.includes("\u7b14\u8bb0"))).toBe(true);
 		expect(highlighted.some((segment) => segment.includes("\u63d2\u4ef6"))).toBe(true);
+	});
+
+	test("does not highlight unrelated evidence from the same snippet region", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<
+					Array<{
+						text: string;
+						highlightRanges?: Array<{ start: number; end: number }>;
+					}>
+				>;
+			};
+		};
+
+		const text =
+			"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/highlight-scope.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: ["\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb"],
+			families: [createFamily(0, "\u4e0a\u9762")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		const first = subItems[0];
+		const highlighted = (first.highlightRanges ?? []).map((range) =>
+			first.text.slice(range.start, range.end),
+		);
+		expect(highlighted.some((segment) => segment.includes("\u4e0a\u9762\u8fd9"))).toBe(true);
+		expect(highlighted.some((segment) => segment.includes("\u5173\u7cfb"))).toBe(false);
 	});
 });
