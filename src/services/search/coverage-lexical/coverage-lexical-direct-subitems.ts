@@ -1,5 +1,6 @@
 import { Vault } from "obsidian";
 import { FileSubItem } from "src/globals/search-types";
+import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import { buildLineOffsets, offsetToLine } from "../hybrid/chunker";
@@ -22,6 +23,8 @@ type CoverageDirectSubItemBuilderParams = {
 	pairSignatures: readonly CoverageLexicalPairSignature[];
 	maxSubItemCount: number;
 	charQueryTerms?: readonly string[];
+	charQuerySegments?: readonly string[];
+	debugQueryText?: string;
 	displayWindows?: readonly CoverageLexicalDisplayWindow[];
 };
 
@@ -37,6 +40,12 @@ type CoverageSnippetPayload = {
 	row: number;
 	col: number;
 	highlightRanges: CoverageLexicalHighlightRange[];
+	anchorOffset: number;
+	absoluteRange: CharRange;
+	snippetScore: number;
+	sourceWindowScore: number;
+	evidenceType: "full_segment" | "family_local" | "char_bridge";
+	regionKey: string;
 };
 
 type CharRange = {
@@ -86,7 +95,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 			return [];
 		}
 		const lineOffsets = this.getLineOffsets(params.path, snapshotText);
-		const subItems: FileSubItem[] = [];
+		const payloads: CoverageSnippetPayload[] = [];
 		for (const window of displayWindows) {
 			const snippet = this.buildSnippetPayload(
 				snapshotText,
@@ -96,23 +105,48 @@ export class CoverageLexicalDirectSubItemBuilder {
 				params.bodyTokenSequence,
 				params.families,
 				params.charQueryTerms ?? [],
+				params.charQuerySegments ?? [],
 			);
 			if (!snippet) {
 				continue;
 			}
+			payloads.push(snippet);
+		}
+		const rankedPayloads = rankSnippetPayloads(payloads);
+		const selectedPayloads = selectDiverseSnippetPayloads(
+			rankedPayloads,
+			maxSubItemCount,
+		);
+		const subItems = selectedPayloads.map((payload) => {
 			const subItem = new FileSubItem(
-				snippet.text,
-				snippet.row,
-				snippet.col,
-				window.signal.score,
-				snippet.html,
+				payload.text,
+				payload.row,
+				payload.col,
+				payload.snippetScore,
+				payload.html,
 			);
-			subItem.snippetText = snippet.text;
-			subItem.highlightRanges = snippet.highlightRanges.map((range) => ({
+			subItem.snippetText = payload.text;
+			subItem.highlightRanges = payload.highlightRanges.map((range) => ({
 				start: range.start,
 				end: range.end,
 			}));
-			subItems.push(subItem);
+			return subItem;
+		});
+		if (shouldLogCoverageLexicalHanSubitemDebug(params.debugQueryText)) {
+			logger.debug("[coverage-lexical][han-debug] subitems-final", {
+				queryText: params.debugQueryText,
+				path: params.path,
+				payloads: selectedPayloads.map((payload) => ({
+					row: payload.row,
+					col: payload.col,
+					anchorOffset: payload.anchorOffset,
+					absoluteRange: payload.absoluteRange,
+					snippetScore: payload.snippetScore,
+					sourceWindowScore: payload.sourceWindowScore,
+					text: payload.text,
+					highlightRanges: payload.highlightRanges,
+				})),
+			});
 		}
 		return subItems;
 	}
@@ -180,6 +214,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 		bodyTokenSequence: readonly string[],
 		families: readonly CoverageLexicalFamily[],
 		charQueryTerms: readonly string[],
+		charQuerySegments: readonly string[],
 	): CoverageSnippetPayload | null {
 		if (window.startTokenIndex < 0 || window.endTokenIndex < window.startTokenIndex) {
 			return null;
@@ -205,8 +240,16 @@ export class CoverageLexicalDirectSubItemBuilder {
 			searchRegion,
 			matchedFamilies,
 			charQueryTerms,
+			charQuerySegments,
 		);
-		const anchorOffset = pickAnchorOffset(mergedRanges, approximateWindow);
+		const anchorOffset = pickAnchorOffset(
+			text,
+			searchRegion,
+			mergedRanges,
+			approximateWindow,
+			matchedFamilies,
+			charQuerySegments,
+		);
 		const snippetRange = buildSnippetRange(
 			text.length,
 			mergedRanges,
@@ -244,6 +287,22 @@ export class CoverageLexicalDirectSubItemBuilder {
 			row,
 			col,
 			highlightRanges: adjustedRanges,
+			anchorOffset,
+			absoluteRange: snippetRange,
+			snippetScore: scoreSnippetPayload(
+				snippetText,
+				localRanges,
+				matchedFamilies,
+				charQuerySegments,
+				window.signal.score,
+			),
+			sourceWindowScore: window.signal.score,
+			evidenceType: classifySnippetEvidenceType(
+				snippetText,
+				matchedFamilies,
+				charQuerySegments,
+			),
+			regionKey: buildSnippetRegionKey(row, anchorOffset),
 		};
 	}
 
@@ -302,16 +361,20 @@ function collectMatchedRanges(
 	searchRegion: CharRange,
 	families: readonly CoverageLexicalFamily[],
 	charQueryTerms: readonly string[],
+	charQuerySegments: readonly string[],
 ): CoverageLexicalHighlightRange[] {
 	const tokenRanges = collectTokenMatchedRanges(tokenOffsets, searchRegion, families);
-	if (tokenRanges.length > 0) {
-		return mergeRanges(tokenRanges);
-	}
-	const substringRanges = collectSubstringMatchedRanges(text, searchRegion, families);
-	if (substringRanges.length > 0) {
-		return mergeRanges(substringRanges);
-	}
-	return mergeRanges(collectCharMatchedRanges(text, searchRegion, charQueryTerms));
+	const substringRanges =
+		tokenRanges.length > 0
+			? []
+			: collectSubstringMatchedRanges(text, searchRegion, families);
+	const charRanges = collectCharMatchedRanges(
+		text,
+		searchRegion,
+		charQueryTerms,
+		charQuerySegments,
+	);
+	return mergeRanges([...tokenRanges, ...substringRanges, ...charRanges]);
 }
 
 function collectTokenMatchedRanges(
@@ -399,12 +462,13 @@ function collectCharMatchedRanges(
 	text: string,
 	searchRegion: CharRange,
 	charQueryTerms: readonly string[],
+	charQuerySegments: readonly string[],
 ): CoverageLexicalHighlightRange[] {
-	if (charQueryTerms.length === 0) {
+	if (charQueryTerms.length === 0 || charQuerySegments.length === 0) {
 		return [];
 	}
 	const wanted = new Set(charQueryTerms);
-	return extractHanBigramsWithOffsets(text)
+	const matchedRanges = extractHanBigramsWithOffsets(text)
 		.filter(
 			(entry) =>
 				entry.end > searchRegion.start &&
@@ -415,16 +479,185 @@ function collectCharMatchedRanges(
 			start: entry.start,
 			end: entry.end,
 		}));
+	if (matchedRanges.length === 0) {
+		return [];
+	}
+	return filterCharRangesBySegmentCoverage(text, matchedRanges, charQuerySegments);
+}
+
+function filterCharRangesBySegmentCoverage(
+	text: string,
+	ranges: readonly CoverageLexicalHighlightRange[],
+	charQuerySegments: readonly string[],
+): CoverageLexicalHighlightRange[] {
+	const merged = mergeRanges(ranges);
+	const kept: CoverageLexicalHighlightRange[] = [];
+	for (const range of merged) {
+		const clusterText = text.slice(range.start, range.end);
+		for (const segment of charQuerySegments) {
+			if (!segment) {
+				continue;
+			}
+			if (clusterText.includes(segment)) {
+				kept.push(range);
+				break;
+			}
+			const segmentBigrams = extractHanBigramsWithOffsets(segment).map((entry) => entry.token);
+			if (segmentBigrams.length === 0) {
+				continue;
+			}
+			const clusterBigrams = new Set(
+				extractHanBigramsWithOffsets(clusterText).map((entry) => entry.token),
+			);
+			const matchedCount = segmentBigrams.filter((token) => clusterBigrams.has(token)).length;
+			if (acceptsCharClusterCoverage(segmentBigrams.length, matchedCount)) {
+				kept.push(range);
+				break;
+			}
+		}
+	}
+	return kept;
+}
+
+function acceptsCharClusterCoverage(totalBigrams: number, matchedCount: number): boolean {
+	if (matchedCount <= 0 || totalBigrams <= 0) {
+		return false;
+	}
+	if (totalBigrams <= 2) {
+		return matchedCount === totalBigrams;
+	}
+	return matchedCount / totalBigrams >= 0.7;
 }
 
 function pickAnchorOffset(
+	text: string,
+	searchRegion: CharRange,
 	ranges: readonly CoverageLexicalHighlightRange[],
 	approximateWindow: CharRange,
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
 ): number {
+	const clusterAnchor = pickBestEvidenceClusterAnchor(
+		text,
+		searchRegion,
+		ranges,
+		families,
+		charQuerySegments,
+	);
+	if (clusterAnchor >= 0) {
+		return clusterAnchor;
+	}
 	if (ranges.length === 0) {
 		return approximateWindow.start;
 	}
 	return ranges[0].start;
+}
+
+function pickBestEvidenceClusterAnchor(
+	text: string,
+	searchRegion: CharRange,
+	ranges: readonly CoverageLexicalHighlightRange[],
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
+): number {
+	if (ranges.length === 0) {
+		return -1;
+	}
+	const clusters = buildEvidenceClusters(ranges);
+	let bestCluster: { start: number; score: number } | null = null;
+	for (const cluster of clusters) {
+		const clusterText = text.slice(cluster.start, cluster.end);
+		const score = scoreEvidenceCluster(clusterText, families, charQuerySegments);
+		if (!bestCluster || score > bestCluster.score) {
+			bestCluster = { start: cluster.start, score };
+		}
+	}
+	if (bestCluster && bestCluster.score > 0) {
+		return bestCluster.start;
+	}
+	const haystack = text.slice(searchRegion.start, searchRegion.end);
+	for (const segment of charQuerySegments) {
+		if (!segment) {
+			continue;
+		}
+		const foundAt = haystack.indexOf(segment);
+		if (foundAt >= 0) {
+			return searchRegion.start + foundAt;
+		}
+	}
+	return -1;
+}
+
+function buildEvidenceClusters(
+	ranges: readonly CoverageLexicalHighlightRange[],
+): CoverageLexicalHighlightRange[] {
+	const ordered = mergeRanges(ranges);
+	if (ordered.length <= 1) {
+		return ordered;
+	}
+	const clusters: CoverageLexicalHighlightRange[] = [{ ...ordered[0] }];
+	for (let index = 1; index < ordered.length; index++) {
+		const current = ordered[index];
+		const previous = clusters[clusters.length - 1];
+		if (current.start - previous.end <= 16) {
+			previous.end = Math.max(previous.end, current.end);
+			continue;
+		}
+		clusters.push({ start: current.start, end: current.end });
+	}
+	return clusters;
+}
+
+function scoreEvidenceCluster(
+	clusterText: string,
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
+): number {
+	let familyHitCount = 0;
+	let fullSegmentCount = 0;
+	let bestSegmentCoverageRatio = 0;
+	let bestSegmentCoverageCount = 0;
+	for (const family of families) {
+		if (!family.normalizedTerm) {
+			continue;
+		}
+		if (clusterText.toLowerCase().includes(family.normalizedTerm)) {
+			familyHitCount += 1;
+		}
+	}
+	const clusterBigrams = new Set(
+		extractHanBigramsWithOffsets(clusterText).map((entry) => entry.token),
+	);
+	for (const segment of charQuerySegments) {
+		if (!segment) {
+			continue;
+		}
+		if (clusterText.includes(segment)) {
+			fullSegmentCount += 1;
+			bestSegmentCoverageRatio = 1;
+			bestSegmentCoverageCount = Math.max(
+				bestSegmentCoverageCount,
+				Math.max(segment.length - 1, 1),
+			);
+			continue;
+		}
+		const segmentBigrams = extractHanBigramsWithOffsets(segment).map((entry) => entry.token);
+		if (segmentBigrams.length === 0) {
+			continue;
+		}
+		const matchedCount = segmentBigrams.filter((token) => clusterBigrams.has(token)).length;
+		bestSegmentCoverageCount = Math.max(bestSegmentCoverageCount, matchedCount);
+		bestSegmentCoverageRatio = Math.max(
+			bestSegmentCoverageRatio,
+			matchedCount / segmentBigrams.length,
+		);
+	}
+	return (
+		fullSegmentCount * 1000 +
+		familyHitCount * 100 +
+		bestSegmentCoverageRatio * 10 +
+		bestSegmentCoverageCount
+	);
 }
 
 function buildSnippetRange(
@@ -449,6 +682,212 @@ function buildSnippetRange(
 		start = Math.max(0, end - MAX_SNIPPET_WINDOW_CHARS);
 	}
 	return { start, end };
+}
+
+function scoreSnippetPayload(
+	snippetText: string,
+	localRanges: readonly CoverageLexicalHighlightRange[],
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
+	sourceWindowScore: number,
+): number {
+	const localText = snippetText.toLowerCase();
+	let familyHitCount = 0;
+	for (const family of families) {
+		if (family.normalizedTerm && localText.includes(family.normalizedTerm)) {
+			familyHitCount += 1;
+		}
+	}
+	let fullSegmentCount = 0;
+	let bestSegmentCoverageRatio = 0;
+	let bestSegmentCoverageCount = 0;
+	const snippetBigrams = new Set(
+		extractHanBigramsWithOffsets(snippetText).map((entry) => entry.token),
+	);
+	for (const segment of charQuerySegments) {
+		if (!segment) {
+			continue;
+		}
+		if (snippetText.includes(segment)) {
+			fullSegmentCount += 1;
+			bestSegmentCoverageRatio = 1;
+			bestSegmentCoverageCount = Math.max(bestSegmentCoverageCount, segment.length - 1);
+			continue;
+		}
+		const segmentBigrams = extractHanBigramsWithOffsets(segment).map((entry) => entry.token);
+		if (segmentBigrams.length === 0) {
+			continue;
+		}
+		const matchedCount = segmentBigrams.filter((token) => snippetBigrams.has(token)).length;
+		bestSegmentCoverageRatio = Math.max(
+			bestSegmentCoverageRatio,
+			matchedCount / segmentBigrams.length,
+		);
+		bestSegmentCoverageCount = Math.max(bestSegmentCoverageCount, matchedCount);
+	}
+	const compactnessBonus =
+		localRanges.length > 0
+			? 1 / Math.max(1, localRanges[localRanges.length - 1].end - localRanges[0].start)
+			: 0;
+	return (
+		fullSegmentCount * 1000 +
+		familyHitCount * 120 +
+		bestSegmentCoverageRatio * 100 +
+		bestSegmentCoverageCount * 10 +
+		localRanges.length * 2 +
+		compactnessBonus +
+		sourceWindowScore * 0.01
+	);
+}
+
+function classifySnippetEvidenceType(
+	snippetText: string,
+	families: readonly CoverageLexicalFamily[],
+	charQuerySegments: readonly string[],
+): "full_segment" | "family_local" | "char_bridge" {
+	for (const segment of charQuerySegments) {
+		if (segment && snippetText.includes(segment)) {
+			return "full_segment";
+		}
+	}
+	for (const family of families) {
+		if (family.normalizedTerm && snippetText.toLowerCase().includes(family.normalizedTerm)) {
+			return "family_local";
+		}
+	}
+	return "char_bridge";
+}
+
+function buildSnippetRegionKey(row: number, anchorOffset: number): string {
+	return `${row}:${Math.floor(anchorOffset / 64)}`;
+}
+
+function rankSnippetPayloads(
+	payloads: readonly CoverageSnippetPayload[],
+): CoverageSnippetPayload[] {
+	return [...payloads].sort((left, right) => {
+		if (right.snippetScore !== left.snippetScore) {
+			return right.snippetScore - left.snippetScore;
+		}
+		if (right.sourceWindowScore !== left.sourceWindowScore) {
+			return right.sourceWindowScore - left.sourceWindowScore;
+		}
+		if (left.row !== right.row) {
+			return left.row - right.row;
+		}
+		return left.col - right.col;
+	});
+}
+
+function selectDiverseSnippetPayloads(
+	payloads: readonly CoverageSnippetPayload[],
+	maxSubItemCount: number,
+): CoverageSnippetPayload[] {
+	const selected: CoverageSnippetPayload[] = [];
+	const regionCounts = new Map<string, number>();
+	const evidenceCounts = new Map<CoverageSnippetPayload["evidenceType"], number>();
+	for (const payload of payloads) {
+		if (selected.length >= maxSubItemCount) {
+			break;
+		}
+		if (selected.some((existing) => shouldDedupeSnippetPayload(existing, payload))) {
+			continue;
+		}
+		if (!passesSnippetBudget(selected, payload, maxSubItemCount, regionCounts, evidenceCounts)) {
+			continue;
+		}
+		selected.push(payload);
+		regionCounts.set(payload.regionKey, (regionCounts.get(payload.regionKey) ?? 0) + 1);
+		evidenceCounts.set(
+			payload.evidenceType,
+			(evidenceCounts.get(payload.evidenceType) ?? 0) + 1,
+		);
+	}
+	return selected;
+}
+
+function passesSnippetBudget(
+	selected: readonly CoverageSnippetPayload[],
+	candidate: CoverageSnippetPayload,
+	maxSubItemCount: number,
+	regionCounts: ReadonlyMap<string, number>,
+	evidenceCounts: ReadonlyMap<CoverageSnippetPayload["evidenceType"], number>,
+): boolean {
+	const sameRegionCount = regionCounts.get(candidate.regionKey) ?? 0;
+	if (sameRegionCount >= 2) {
+		return false;
+	}
+	if (
+		sameRegionCount >= 1 &&
+		evidenceCounts.get(candidate.evidenceType) !== undefined &&
+		candidate.evidenceType !== "full_segment"
+	) {
+		return false;
+	}
+	if (
+		selected.length + 1 >= maxSubItemCount &&
+		selected.some((item) => item.regionKey !== candidate.regionKey)
+	) {
+		return true;
+	}
+	return true;
+}
+
+function shouldDedupeSnippetPayload(
+	left: CoverageSnippetPayload,
+	right: CoverageSnippetPayload,
+): boolean {
+	if (left.row === right.row) {
+		return true;
+	}
+	if (Math.abs(left.anchorOffset - right.anchorOffset) <= 32) {
+		return true;
+	}
+	if (computeRangeOverlapRatio(left.absoluteRange, right.absoluteRange) >= 0.72) {
+		return true;
+	}
+	return computeSnippetTextOverlapRatio(left.text, right.text) >= 0.72;
+}
+
+function computeRangeOverlapRatio(left: CharRange, right: CharRange): number {
+	const overlapStart = Math.max(left.start, right.start);
+	const overlapEnd = Math.min(left.end, right.end);
+	if (overlapEnd <= overlapStart) {
+		return 0;
+	}
+	const overlap = overlapEnd - overlapStart;
+	const base = Math.max(1, Math.min(left.end - left.start, right.end - right.start));
+	return overlap / base;
+}
+
+function computeSnippetTextOverlapRatio(left: string, right: string): number {
+	const leftShingles = buildTextShingles(left);
+	const rightShingles = buildTextShingles(right);
+	if (leftShingles.size === 0 || rightShingles.size === 0) {
+		return 0;
+	}
+	let overlap = 0;
+	for (const shingle of leftShingles) {
+		if (rightShingles.has(shingle)) {
+			overlap += 1;
+		}
+	}
+	return overlap / Math.max(1, Math.min(leftShingles.size, rightShingles.size));
+}
+
+function buildTextShingles(text: string): Set<string> {
+	const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
+	const shingles = new Set<string>();
+	if (normalized.length <= 6) {
+		if (normalized) {
+			shingles.add(normalized);
+		}
+		return shingles;
+	}
+	for (let index = 0; index <= normalized.length - 6; index++) {
+		shingles.add(normalized.slice(index, index + 6));
+	}
+	return shingles;
 }
 
 function renderHighlightedSnippet(
@@ -557,4 +996,10 @@ function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
 		}
 	}
 	return previous[b.length];
+}
+
+function shouldLogCoverageLexicalHanSubitemDebug(
+	queryText: string | undefined,
+): boolean {
+	return !!queryText && /[\u4e00-\u9fff]/.test(queryText) && queryText.trim().length <= 24;
 }

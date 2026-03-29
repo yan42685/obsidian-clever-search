@@ -95,6 +95,9 @@ function computeSelectionPriority(
 		if (overlap >= NEAR_DUPLICATE_OVERLAP_RATIO) {
 			return -Infinity;
 		}
+		if (isBroadShadowedWindow(candidate, existing)) {
+			return -Infinity;
+		}
 		const familyOverlap = computeFamilyOverlapRatio(
 			candidate.matchedFamilyIndices,
 			existing.matchedFamilyIndices,
@@ -113,6 +116,33 @@ function computeSelectionPriority(
 		}
 	}
 	return score;
+}
+
+function isBroadShadowedWindow(
+	candidate: CoverageLexicalDisplayWindow,
+	existing: CoverageLexicalDisplayWindow,
+): boolean {
+	const overlap = computeWindowOverlapRatio(candidate, existing);
+	if (overlap < 0.6) {
+		return false;
+	}
+	const candidateSpan = Math.max(1, candidate.endTokenIndex - candidate.startTokenIndex + 1);
+	const existingSpan = Math.max(1, existing.endTokenIndex - existing.startTokenIndex + 1);
+	if (candidateSpan < existingSpan * 2) {
+		return false;
+	}
+	const candidateCoverage =
+		candidate.signal.coreCoverageCount +
+		candidate.signal.anchorCoverageCount +
+		candidate.signal.softCoverageCount;
+	const existingCoverage =
+		existing.signal.coreCoverageCount +
+		existing.signal.anchorCoverageCount +
+		existing.signal.softCoverageCount;
+	if (candidateCoverage > existingCoverage) {
+		return false;
+	}
+	return candidate.signal.score <= existing.signal.score * 1.08;
 }
 
 function computeWindowOverlapRatio(

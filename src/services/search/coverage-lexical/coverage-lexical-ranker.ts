@@ -76,12 +76,12 @@ function compareBodyWithAnchorStages(
 	if (plan.hasPathShapeHint || plan.hasTitleShapeHint || plan.hasMixedScriptHint) {
 		return (
 			compareAreaSignals(left.coreBody, right.coreBody) ||
+			compareCharSignals(left.bodyChar, right.bodyChar) ||
+			compareCharSignals(left.metadataChar, right.metadataChar) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			compareTagSignals(left.tagSignal, right.tagSignal) ||
-			compareCharSignals(left.metadataChar, right.metadataChar) ||
-			compareCharSignals(left.bodyChar, right.bodyChar) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
@@ -93,6 +93,8 @@ function compareBodyWithAnchorStages(
 	}
 	return (
 		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
+		compareCharSignals(left.metadataChar, right.metadataChar) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		comparePhraseBridgeSignals(left, right) ||
@@ -112,6 +114,8 @@ function compareBodyFirstStages(
 ): number {
 	return (
 		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
+		compareCharSignals(left.metadataChar, right.metadataChar) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
@@ -121,8 +125,6 @@ function compareBodyFirstStages(
 		compareAreaSignals(left.softBody, right.softBody) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareTagSignals(left.tagSignal, right.tagSignal) ||
-		compareCharSignals(left.metadataChar, right.metadataChar) ||
-		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 	);
 }
@@ -173,6 +175,15 @@ function compareCharSignals(
 	right: CoverageLexicalCharSignal,
 ): number {
 	return (
+		compareDescendingMetric(left.fullSegmentCount, right.fullSegmentCount) ||
+		compareDescendingMetric(
+			left.bestSegmentCoverageRatio,
+			right.bestSegmentCoverageRatio,
+		) ||
+		compareDescendingMetric(
+			left.bestSegmentCoverageCount,
+			right.bestSegmentCoverageCount,
+		) ||
 		compareDescendingMetric(left.matchRatio, right.matchRatio) ||
 		compareDescendingMetric(left.matchCount, right.matchCount)
 	);

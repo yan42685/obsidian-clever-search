@@ -219,9 +219,6 @@ export default {
 	"Manage search history": "\u7ba1\u7406\u641c\u7d22\u5386\u53f2",
 	"Search history completion": "\u641c\u7d22\u5386\u53f2\u8865\u5168",
 	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",
-	"File search backend desc": "Coverage Lexical \u73b0\u5728\u662f\u9ed8\u8ba4\u8bcd\u6cd5\u5f15\u64ce\uff0c\u4e5f\u662f\u540e\u7eed\u4e3b\u8981\u4f18\u5316\u65b9\u5411\u3002MiniSearch \u4fdd\u7559\u4e3a\u4fdd\u5b88\u515c\u5e95\u65b9\u6848\uff0c\u8f83\u65e7\u7684 BM25 \u540e\u7aef\u5219\u4e3b\u8981\u7528\u4e8e\u517c\u5bb9\u4e0e\u5bf9\u6bd4\u3002",
-	"fileSearchBackend.minisearch": "MiniSearch\uff08\u515c\u5e95\uff09",
-	"fileSearchBackend.customBm25": "\u81ea\u5b9a\u4e49 BM25\uff08\u65e7\u7248\uff09",
-	"fileSearchBackend.passageBm25": "Passage BM25\uff08\u65e7\u7248\u5b9e\u9a8c\uff09",
-	"fileSearchBackend.coverageLexical": "Coverage Lexical\uff08\u9ed8\u8ba4\uff09",
+	"fileSearchBackend.passageBm25": "Passage BM25",
+	"fileSearchBackend.coverageLexical": "Coverage Lexical",
 };

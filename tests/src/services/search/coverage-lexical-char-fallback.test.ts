@@ -216,4 +216,46 @@ describe("coverage lexical char fallback", () => {
 		expect(results[0]?.path).toBe("notes/tag-joined.md");
 		expect(results.some((result) => result.path === "notes/tag-split.md")).toBe(false);
 	});
+
+	test("prefers the file that covers the full Han segment over one that only covers its prefix", async () => {
+		container.registerInstance(Tokenizer, createWholeHanTokenizer());
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/full-segment.md",
+				basename: "full-segment.md",
+				folder: "notes",
+				content: "这位作者上面这个例子讲得更清楚。",
+			},
+			{
+				path: "notes/prefix-only.md",
+				basename: "prefix-only.md",
+				folder: "notes",
+				content: "这里只提到了上面，没有后面的那个字。",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "上面这",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe("notes/full-segment.md");
+	});
 });

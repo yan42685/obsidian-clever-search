@@ -156,6 +156,9 @@ export type CoverageLexicalAreaSignal = {
 export type CoverageLexicalCharSignal = {
 	matchCount: number;
 	matchRatio: number;
+	fullSegmentCount: number;
+	bestSegmentCoverageCount: number;
+	bestSegmentCoverageRatio: number;
 };
 
 export type CoverageLexicalTagSignal = {
