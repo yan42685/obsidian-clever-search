@@ -5,7 +5,8 @@ import { container, singleton } from "tsyringe";
 import { buildLineOffsets, offsetToLine } from "../hybrid/chunker";
 import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
-import { buildCoverageLexicalDisplayWindowSignals } from "./coverage-lexical-windowing";
+import { extractHanBigramsWithOffsets } from "./coverage-lexical-cjk";
+import { selectCoverageLexicalDisplayWindows } from "./coverage-lexical-display-windows";
 import type {
 	CoverageLexicalDisplayWindow,
 	CoverageLexicalFamily,
@@ -20,6 +21,8 @@ type CoverageDirectSubItemBuilderParams = {
 	families: readonly CoverageLexicalFamily[];
 	pairSignatures: readonly CoverageLexicalPairSignature[];
 	maxSubItemCount: number;
+	charQueryTerms?: readonly string[];
+	displayWindows?: readonly CoverageLexicalDisplayWindow[];
 };
 
 type TokenOffset = {
@@ -36,9 +39,15 @@ type CoverageSnippetPayload = {
 	highlightRanges: CoverageLexicalHighlightRange[];
 };
 
+type CharRange = {
+	start: number;
+	end: number;
+};
+
 const MAX_SNIPPET_WINDOW_CHARS = 220;
 const SNIPPET_LEADING_CONTEXT_CHARS = 24;
-const NEAR_DUPLICATE_OVERLAP_RATIO = 0.72;
+const SNIPPET_TRAILING_CONTEXT_CHARS = 32;
+const MATCH_SEARCH_CONTEXT_CHARS = 96;
 
 @singleton()
 export class CoverageLexicalDirectSubItemBuilder {
@@ -54,12 +63,14 @@ export class CoverageLexicalDirectSubItemBuilder {
 		if (maxSubItemCount === 0 || params.bodyTokenSequence.length === 0) {
 			return [];
 		}
-		const displayWindows = this.selectDisplayWindows(
-			params.bodyTokenSequence,
-			params.families,
-			params.pairSignatures,
-			maxSubItemCount,
-		);
+		const displayWindows =
+			params.displayWindows?.slice(0, maxSubItemCount) ??
+			selectCoverageLexicalDisplayWindows(
+				params.bodyTokenSequence,
+				params.families,
+				params.pairSignatures,
+				maxSubItemCount,
+			);
 		if (displayWindows.length === 0) {
 			return [];
 		}
@@ -84,6 +95,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 				window,
 				params.bodyTokenSequence,
 				params.families,
+				params.charQueryTerms ?? [],
 			);
 			if (!snippet) {
 				continue;
@@ -103,47 +115,6 @@ export class CoverageLexicalDirectSubItemBuilder {
 			subItems.push(subItem);
 		}
 		return subItems;
-	}
-
-	private selectDisplayWindows(
-		bodyTokenSequence: readonly string[],
-		families: readonly CoverageLexicalFamily[],
-		pairSignatures: readonly CoverageLexicalPairSignature[],
-		maxSubItemCount: number,
-	): CoverageLexicalDisplayWindow[] {
-		const rawSignals = buildCoverageLexicalDisplayWindowSignals(
-			bodyTokenSequence,
-			families,
-			pairSignatures,
-		);
-		const remaining = rawSignals.map((signal, index) => toDisplayWindow(signal, index));
-		const selected: CoverageLexicalDisplayWindow[] = [];
-		while (remaining.length > 0 && selected.length < maxSubItemCount) {
-			let bestIndex = -1;
-			let bestScore = -Infinity;
-			for (let index = 0; index < remaining.length; index++) {
-				const candidate = remaining[index];
-				const adjusted = computeSelectionPriority(candidate, selected);
-				if (
-					adjusted > bestScore ||
-					(adjusted === bestScore &&
-						candidate.signal.score >
-							(remaining[bestIndex]?.signal.score ?? -Infinity))
-				) {
-					bestScore = adjusted;
-					bestIndex = index;
-				}
-			}
-			if (bestIndex < 0 || bestScore === -Infinity) {
-				break;
-			}
-			const [best] = remaining.splice(bestIndex, 1);
-			if (selected.some((existing) => isNearDuplicateWindow(best, existing))) {
-				continue;
-			}
-			selected.push(best);
-		}
-		return selected;
 	}
 
 	private async readSnapshotText(
@@ -196,24 +167,8 @@ export class CoverageLexicalDirectSubItemBuilder {
 		if (cached) {
 			return cached.lineOffsets;
 		}
-		const tokenizeWithOffsets = (
-			this.tokenizer as Tokenizer & {
-				tokenizeSequenceWithOffsets?: (
-					text: string,
-					mode: "index" | "search",
-				) => Array<{ token: string; start: number; end: number }>;
-			}
-		).tokenizeSequenceWithOffsets;
-		const tokenOffsets = tokenizeWithOffsets
-			? tokenizeWithOffsets.call(this.tokenizer, text, "index")
-			.map((entry) => ({
-				token: entry.token.toLowerCase(),
-				start: entry.start,
-				end: entry.end,
-			}))
-			: [];
 		const lineOffsets = buildLineOffsets(text);
-		this.offsetCache.set(cacheKey, { lineOffsets, tokenOffsets });
+		this.offsetCache.set(cacheKey, { lineOffsets, tokenOffsets: [] });
 		return lineOffsets;
 	}
 
@@ -224,80 +179,62 @@ export class CoverageLexicalDirectSubItemBuilder {
 		window: CoverageLexicalDisplayWindow,
 		bodyTokenSequence: readonly string[],
 		families: readonly CoverageLexicalFamily[],
+		charQueryTerms: readonly string[],
 	): CoverageSnippetPayload | null {
-		if (
-			window.startTokenIndex < 0 ||
-			window.endTokenIndex < window.startTokenIndex ||
-			window.endTokenIndex >= tokenOffsets.length
-		) {
+		if (window.startTokenIndex < 0 || window.endTokenIndex < window.startTokenIndex) {
 			return null;
 		}
-		const anchorTokenIndex = findAnchorTokenIndex(
-			bodyTokenSequence,
+		const approximateWindow = resolveApproximateWindowRange(
+			text.length,
+			tokenOffsets,
+			bodyTokenSequence.length,
 			window,
-			families,
 		);
-		const anchorOffset = tokenOffsets[anchorTokenIndex];
-		const windowStartOffset = tokenOffsets[window.startTokenIndex]?.start;
-		const windowEndOffset = tokenOffsets[window.endTokenIndex]?.end;
-		if (
-			windowStartOffset === undefined ||
-			windowEndOffset === undefined ||
-			anchorOffset === undefined
-		) {
-			return null;
-		}
-		const rawRanges: CoverageLexicalHighlightRange[] = [];
 		const familyMap = new Map(families.map((family) => [family.index, family] as const));
-		for (
-			let tokenIndex = window.startTokenIndex;
-			tokenIndex <= window.endTokenIndex && tokenIndex < tokenOffsets.length;
-			tokenIndex++
-		) {
-			const offset = tokenOffsets[tokenIndex];
-			const token = bodyTokenSequence[tokenIndex];
-			const isMatched = window.matchedFamilyIndices.some((familyIndex) => {
-				const family = familyMap.get(familyIndex);
-				return family ? matchesTokenToFamily(token, family) : false;
-			});
-			if (!isMatched) {
-				continue;
-			}
-			rawRanges.push({
-				start: offset.start,
-				end: offset.end,
-			});
-		}
-		const mergedRanges = mergeRanges(rawRanges);
-		const snippetStart = Math.max(
-			0,
-			Math.min(
-				windowStartOffset - SNIPPET_LEADING_CONTEXT_CHARS,
-				Math.round((windowStartOffset + windowEndOffset) / 2) -
-					Math.floor(MAX_SNIPPET_WINDOW_CHARS / 2),
-			),
+		const matchedFamilies = window.matchedFamilyIndices
+			.map((familyIndex) => familyMap.get(familyIndex))
+			.filter((family): family is CoverageLexicalFamily => family !== undefined);
+		const searchRegion = expandRange(
+			approximateWindow,
+			text.length,
+			MATCH_SEARCH_CONTEXT_CHARS,
 		);
-		const snippetEnd = Math.min(text.length, snippetStart + MAX_SNIPPET_WINDOW_CHARS);
-		const normalizedStart = Math.max(0, snippetEnd - MAX_SNIPPET_WINDOW_CHARS);
-		const snippetText = text.slice(normalizedStart, snippetEnd);
+		const mergedRanges = collectMatchedRanges(
+			text,
+			tokenOffsets,
+			searchRegion,
+			matchedFamilies,
+			charQueryTerms,
+		);
+		const anchorOffset = pickAnchorOffset(mergedRanges, approximateWindow);
+		const snippetRange = buildSnippetRange(
+			text.length,
+			mergedRanges,
+			anchorOffset,
+			approximateWindow,
+		);
+		const snippetText = text.slice(snippetRange.start, snippetRange.end);
 		const localRanges = mergedRanges
-			.filter((range) => range.end > normalizedStart && range.start < snippetEnd)
+			.filter((range) => range.end > snippetRange.start && range.start < snippetRange.end)
 			.map((range) => ({
-				start: Math.max(0, range.start - normalizedStart),
-				end: Math.min(snippetEnd - normalizedStart, range.end - normalizedStart),
+				start: Math.max(0, range.start - snippetRange.start),
+				end: Math.min(
+					snippetRange.end - snippetRange.start,
+					range.end - snippetRange.start,
+				),
 			}));
-		const prefixEllipsis = normalizedStart > 0;
-		const suffixEllipsis = snippetEnd < text.length;
-		const snippetTextWithEllipsis = `${
-			prefixEllipsis ? "…" : ""
-		}${snippetText}${suffixEllipsis ? "…" : ""}`;
+		const prefixEllipsis = snippetRange.start > 0;
+		const suffixEllipsis = snippetRange.end < text.length;
+		const snippetTextWithEllipsis = `${prefixEllipsis ? "…" : ""}${snippetText}${
+			suffixEllipsis ? "…" : ""
+		}`;
 		const adjustedRanges = localRanges.map((range) => ({
 			start: range.start + (prefixEllipsis ? 1 : 0),
 			end: range.end + (prefixEllipsis ? 1 : 0),
 		}));
-		const row = offsetToLine(lineOffsets, anchorOffset.start);
+		const row = offsetToLine(lineOffsets, anchorOffset);
 		const lineStartOffset = lineOffsets[row] ?? 0;
-		const col = Math.max(0, anchorOffset.start - lineStartOffset);
+		const col = Math.max(0, anchorOffset - lineStartOffset);
 		return {
 			text: snippetTextWithEllipsis,
 			html: renderHighlightedSnippet(snippetText, localRanges, {
@@ -323,150 +260,195 @@ export class CoverageLexicalDirectSubItemBuilder {
 	}
 }
 
-function toDisplayWindow(
-	signal: CoverageLexicalDisplayWindow["signal"],
-	rank: number,
-): CoverageLexicalDisplayWindow {
+function resolveApproximateWindowRange(
+	textLength: number,
+	tokenOffsets: readonly TokenOffset[],
+	bodyTokenCount: number,
+	window: CoverageLexicalDisplayWindow,
+): CharRange {
+	const exactStart = tokenOffsets[window.startTokenIndex]?.start;
+	const exactEnd = tokenOffsets[window.endTokenIndex]?.end;
+	if (exactStart !== undefined && exactEnd !== undefined) {
+		return {
+			start: exactStart,
+			end: Math.max(exactStart, exactEnd),
+		};
+	}
+	const tokenCount = Math.max(bodyTokenCount, tokenOffsets.length, 1);
+	const startRatio = clamp(window.startTokenIndex / tokenCount, 0, 1);
+	const endRatio = clamp((window.endTokenIndex + 1) / tokenCount, 0, 1);
+	const estimatedStart = Math.floor(textLength * startRatio);
+	const estimatedEnd = Math.ceil(textLength * Math.max(startRatio, endRatio));
 	return {
-		startTokenIndex: signal.start,
-		endTokenIndex: signal.end,
-		signal,
-		matchedFamilyIndices: uniqueSortedNumbers([
-			...signal.matchedExactCoreFamilyIndices,
-			...signal.matchedPrefixCoreFamilyIndices,
-			...signal.matchedFuzzyCoreFamilyIndices,
-			...signal.matchedAnchorFamilyIndices,
-			...signal.matchedSoftFamilyIndices,
-		]),
-		kind: rank === 0 ? "primary" : rank === 1 ? "support" : "supplemental",
-		rank,
+		start: estimatedStart,
+		end: Math.max(estimatedStart, Math.min(textLength, estimatedEnd)),
 	};
 }
 
-function isNearDuplicateWindow(
-	left: CoverageLexicalDisplayWindow,
-	right: CoverageLexicalDisplayWindow,
-): boolean {
-	const overlap = computeWindowOverlapRatio(left, right);
-	if (overlap < NEAR_DUPLICATE_OVERLAP_RATIO) {
-		return false;
-	}
-	const leftSpan = Math.max(1, left.endTokenIndex - left.startTokenIndex + 1);
-	const rightSpan = Math.max(1, right.endTokenIndex - right.startTokenIndex + 1);
-	return (
-		Math.abs(leftSpan - rightSpan) <= 3 &&
-		intersectCount(left.matchedFamilyIndices, right.matchedFamilyIndices) >=
-			Math.min(left.matchedFamilyIndices.length, right.matchedFamilyIndices.length)
-	);
+function expandRange(
+	range: CharRange,
+	maxLength: number,
+	padding: number,
+): CharRange {
+	return {
+		start: Math.max(0, range.start - padding),
+		end: Math.min(maxLength, range.end + padding),
+	};
 }
 
-function computeSelectionPriority(
-	candidate: CoverageLexicalDisplayWindow,
-	selected: readonly CoverageLexicalDisplayWindow[],
-): number {
-	let score = candidate.signal.score;
-	for (const existing of selected) {
-		const overlap = computeWindowOverlapRatio(candidate, existing);
-		if (overlap >= NEAR_DUPLICATE_OVERLAP_RATIO) {
-			return -Infinity;
-		}
-		const familyOverlap = computeFamilyOverlapRatio(
-			candidate.matchedFamilyIndices,
-			existing.matchedFamilyIndices,
-		);
-		const tokenGap = computeTokenGap(candidate, existing);
-		if (familyOverlap >= 1 && tokenGap <= 48) {
-			score -= 18;
-			continue;
-		}
-		if (familyOverlap >= 0.75 && tokenGap <= 24) {
-			score -= 10;
-			continue;
-		}
-		if (familyOverlap >= 0.5 && tokenGap <= 12) {
-			score -= 4;
-		}
-	}
-	return score;
-}
-
-function computeWindowOverlapRatio(
-	left: CoverageLexicalDisplayWindow,
-	right: CoverageLexicalDisplayWindow,
-): number {
-	const overlapStart = Math.max(left.startTokenIndex, right.startTokenIndex);
-	const overlapEnd = Math.min(left.endTokenIndex, right.endTokenIndex);
-	if (overlapEnd < overlapStart) {
-		return 0;
-	}
-	const overlap = overlapEnd - overlapStart + 1;
-	const base = Math.max(
-		1,
-		Math.min(
-			left.endTokenIndex - left.startTokenIndex + 1,
-			right.endTokenIndex - right.startTokenIndex + 1,
-		),
-	);
-	return overlap / base;
-}
-
-function computeTokenGap(
-	left: CoverageLexicalDisplayWindow,
-	right: CoverageLexicalDisplayWindow,
-): number {
-	if (left.endTokenIndex < right.startTokenIndex) {
-		return right.startTokenIndex - left.endTokenIndex;
-	}
-	if (right.endTokenIndex < left.startTokenIndex) {
-		return left.startTokenIndex - right.endTokenIndex;
-	}
-	return 0;
-}
-
-function findAnchorTokenIndex(
-	bodyTokenSequence: readonly string[],
-	window: CoverageLexicalDisplayWindow,
+function collectMatchedRanges(
+	text: string,
+	tokenOffsets: readonly TokenOffset[],
+	searchRegion: CharRange,
 	families: readonly CoverageLexicalFamily[],
-): number {
-	const familyMap = new Map(families.map((family) => [family.index, family] as const));
-	for (
-		let tokenIndex = window.startTokenIndex;
-		tokenIndex <= window.endTokenIndex && tokenIndex < bodyTokenSequence.length;
-		tokenIndex++
-	) {
-		const token = bodyTokenSequence[tokenIndex];
-		for (const familyIndex of window.matchedFamilyIndices) {
-			const family = familyMap.get(familyIndex);
-			if (!family) {
+	charQueryTerms: readonly string[],
+): CoverageLexicalHighlightRange[] {
+	const tokenRanges = collectTokenMatchedRanges(tokenOffsets, searchRegion, families);
+	if (tokenRanges.length > 0) {
+		return mergeRanges(tokenRanges);
+	}
+	const substringRanges = collectSubstringMatchedRanges(text, searchRegion, families);
+	if (substringRanges.length > 0) {
+		return mergeRanges(substringRanges);
+	}
+	return mergeRanges(collectCharMatchedRanges(text, searchRegion, charQueryTerms));
+}
+
+function collectTokenMatchedRanges(
+	tokenOffsets: readonly TokenOffset[],
+	searchRegion: CharRange,
+	families: readonly CoverageLexicalFamily[],
+): CoverageLexicalHighlightRange[] {
+	const ranges: CoverageLexicalHighlightRange[] = [];
+	for (const offset of tokenOffsets) {
+		if (offset.end <= searchRegion.start || offset.start >= searchRegion.end) {
+			continue;
+		}
+		for (const family of families) {
+			const range = resolveTokenMatchRange(offset, family);
+			if (!range) {
 				continue;
 			}
-			if (matchesTokenToFamily(token, family)) {
-				return tokenIndex;
-			}
+			ranges.push(range);
 		}
 	}
-	return window.startTokenIndex;
+	return ranges;
 }
 
-function matchesTokenToFamily(
-	token: string,
+function resolveTokenMatchRange(
+	offset: TokenOffset,
 	family: CoverageLexicalFamily,
-): boolean {
-	if (token === family.normalizedTerm) {
-		return true;
+): CoverageLexicalHighlightRange | null {
+	if (offset.token === family.normalizedTerm) {
+		return {
+			start: offset.start,
+			end: offset.start + family.normalizedTerm.length,
+		};
 	}
-	if (family.allowPrefix && token.startsWith(family.normalizedTerm)) {
-		return true;
+	if (family.allowPrefix && offset.token.startsWith(family.normalizedTerm)) {
+		return {
+			start: offset.start,
+			end: Math.min(offset.end, offset.start + family.normalizedTerm.length),
+		};
 	}
 	if (!family.allowFuzzy) {
-		return false;
+		return null;
 	}
 	const maxDistance = computeMaxFuzzyDistance(family.normalizedTerm);
-	return (
-		maxDistance > 0 &&
-		token[0] === family.normalizedTerm[0] &&
-		boundedLevenshtein(token, family.normalizedTerm, maxDistance) <= maxDistance
+	if (
+		maxDistance <= 0 ||
+		offset.token[0] !== family.normalizedTerm[0] ||
+		boundedLevenshtein(offset.token, family.normalizedTerm, maxDistance) > maxDistance
+	) {
+		return null;
+	}
+	return {
+		start: offset.start,
+		end: offset.end,
+	};
+}
+
+function collectSubstringMatchedRanges(
+	text: string,
+	searchRegion: CharRange,
+	families: readonly CoverageLexicalFamily[],
+): CoverageLexicalHighlightRange[] {
+	const haystack = text.slice(searchRegion.start, searchRegion.end).toLowerCase();
+	const ranges: CoverageLexicalHighlightRange[] = [];
+	for (const family of families) {
+		if (!family.normalizedTerm) {
+			continue;
+		}
+		let fromIndex = 0;
+		while (fromIndex < haystack.length) {
+			const foundAt = haystack.indexOf(family.normalizedTerm, fromIndex);
+			if (foundAt < 0) {
+				break;
+			}
+			ranges.push({
+				start: searchRegion.start + foundAt,
+				end: searchRegion.start + foundAt + family.normalizedTerm.length,
+			});
+			fromIndex = foundAt + Math.max(1, family.normalizedTerm.length);
+		}
+	}
+	return ranges;
+}
+
+function collectCharMatchedRanges(
+	text: string,
+	searchRegion: CharRange,
+	charQueryTerms: readonly string[],
+): CoverageLexicalHighlightRange[] {
+	if (charQueryTerms.length === 0) {
+		return [];
+	}
+	const wanted = new Set(charQueryTerms);
+	return extractHanBigramsWithOffsets(text)
+		.filter(
+			(entry) =>
+				entry.end > searchRegion.start &&
+				entry.start < searchRegion.end &&
+				wanted.has(entry.token),
+		)
+		.map((entry) => ({
+			start: entry.start,
+			end: entry.end,
+		}));
+}
+
+function pickAnchorOffset(
+	ranges: readonly CoverageLexicalHighlightRange[],
+	approximateWindow: CharRange,
+): number {
+	if (ranges.length === 0) {
+		return approximateWindow.start;
+	}
+	return ranges[0].start;
+}
+
+function buildSnippetRange(
+	textLength: number,
+	ranges: readonly CoverageLexicalHighlightRange[],
+	anchorOffset: number,
+	approximateWindow: CharRange,
+): CharRange {
+	const focusStart = ranges.length > 0 ? ranges[0].start : anchorOffset;
+	const focusEnd = ranges.length > 0 ? ranges[ranges.length - 1].end : approximateWindow.end;
+	let start = Math.max(0, focusStart - SNIPPET_LEADING_CONTEXT_CHARS);
+	let end = Math.min(
+		textLength,
+		Math.max(
+			focusEnd + SNIPPET_TRAILING_CONTEXT_CHARS,
+			start + MAX_SNIPPET_WINDOW_CHARS,
+		),
 	);
+	if (end - start > MAX_SNIPPET_WINDOW_CHARS) {
+		start = Math.max(0, anchorOffset - Math.floor(MAX_SNIPPET_WINDOW_CHARS / 2));
+		end = Math.min(textLength, start + MAX_SNIPPET_WINDOW_CHARS);
+		start = Math.max(0, end - MAX_SNIPPET_WINDOW_CHARS);
+	}
+	return { start, end };
 }
 
 function renderHighlightedSnippet(
@@ -519,33 +501,8 @@ function escapeHtml(text: string): string {
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
-		.replace(/\"/g, "&quot;")
+		.replace(/"/g, "&quot;")
 		.replace(/'/g, "&#39;");
-}
-
-function uniqueSortedNumbers(values: readonly number[]): number[] {
-	return Array.from(new Set(values)).sort((left, right) => left - right);
-}
-
-function intersectCount(left: readonly number[], right: readonly number[]): number {
-	const rightSet = new Set(right);
-	let count = 0;
-	for (const value of left) {
-		if (rightSet.has(value)) {
-			count += 1;
-		}
-	}
-	return count;
-}
-
-function computeFamilyOverlapRatio(
-	left: readonly number[],
-	right: readonly number[],
-): number {
-	if (left.length === 0 || right.length === 0) {
-		return 0;
-	}
-	return intersectCount(left, right) / Math.max(1, Math.min(left.length, right.length));
 }
 
 function computeMaxFuzzyDistance(queryTerm: string): number {
@@ -562,6 +519,10 @@ function buildOffsetCacheKey(path: string, text: string): string {
 		hash = Math.imul(hash, 16777619);
 	}
 	return `${path}::${text.length}::${hash >>> 0}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.max(min, Math.min(max, value));
 }
 
 function boundedLevenshtein(a: string, b: string, maxDistance: number): number {

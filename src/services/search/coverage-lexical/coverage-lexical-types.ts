@@ -40,21 +40,26 @@ export type CoverageLexicalMetadataField =
 
 export type CoverageLexicalCandidateState = {
 	bodyMatches: Map<number, CoverageFamilyMatchKind>;
+	bodyCharTerms: Set<string>;
 	metadataMatches: Map<number, CoverageFamilyMatchKind>;
+	metadataCharTerms: Set<string>;
 	metadataFieldMatches: Record<
 		CoverageLexicalMetadataField,
 		Map<number, CoverageFamilyMatchKind>
 	>;
 	phraseMatches: Set<number>;
+	tagCharTerms: Set<string>;
+	tagExactTerms: Set<string>;
 };
 
 export type CoverageLexicalRecallLaneDebug = {
 	laneName:
 		| "strict_metadata_lane"
-		| "strict_hybrid_lane"
-		| "relaxed_hybrid_lane"
-		| "local_body_lane"
-		| "bridge_lane";
+	| "strict_hybrid_lane"
+	| "relaxed_hybrid_lane"
+	| "local_body_lane"
+	| "bridge_lane"
+	| "char_fallback_lane";
 	candidateCount: number;
 	admittedCount: number;
 	admittedPaths: string[];
@@ -148,6 +153,17 @@ export type CoverageLexicalAreaSignal = {
 	fuzzyWeight: number;
 };
 
+export type CoverageLexicalCharSignal = {
+	matchCount: number;
+	matchRatio: number;
+};
+
+export type CoverageLexicalTagSignal = {
+	exactMatchCount: number;
+	charMatchCount: number;
+	charMatchRatio: number;
+};
+
 export type CoverageLexicalMetadataIdentitySignal = {
 	phraseCoverageCount: number;
 	phraseWeight: number;
@@ -228,6 +244,9 @@ export type CoverageLexicalFamilySignal = {
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
 	metadataIdentity: CoverageLexicalMetadataIdentitySignal;
+	bodyChar: CoverageLexicalCharSignal;
+	metadataChar: CoverageLexicalCharSignal;
+	tagSignal: CoverageLexicalTagSignal;
 	tailCoreWeight: number;
 	tailSoftWeight: number;
 	phraseBridgeCount: number;

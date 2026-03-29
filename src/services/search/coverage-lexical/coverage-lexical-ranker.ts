@@ -1,8 +1,11 @@
 import type { MatchedFile } from "src/globals/search-types";
 import type {
+	CoverageLexicalCharSignal,
+	CoverageLexicalDisplayWindow,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalPlan,
+	CoverageLexicalTagSignal,
 } from "./coverage-lexical-types";
 import { compareCoverageLexicalWindowFusionSignals } from "./coverage-lexical-fusion";
 
@@ -50,6 +53,9 @@ function compareMetadataFirstStages(
 	return (
 		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareTagSignals(left.tagSignal, right.tagSignal) ||
+		compareCharSignals(left.metadataChar, right.metadataChar) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePhraseBridgeSignals(left, right) ||
@@ -73,6 +79,9 @@ function compareBodyWithAnchorStages(
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+			compareTagSignals(left.tagSignal, right.tagSignal) ||
+			compareCharSignals(left.metadataChar, right.metadataChar) ||
+			compareCharSignals(left.bodyChar, right.bodyChar) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
@@ -111,6 +120,9 @@ function compareBodyFirstStages(
 		) ||
 		compareAreaSignals(left.softBody, right.softBody) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareTagSignals(left.tagSignal, right.tagSignal) ||
+		compareCharSignals(left.metadataChar, right.metadataChar) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 	);
 }
@@ -156,6 +168,28 @@ function comparePhraseBridgeSignals(
 	);
 }
 
+function compareCharSignals(
+	left: CoverageLexicalCharSignal,
+	right: CoverageLexicalCharSignal,
+): number {
+	return (
+		compareDescendingMetric(left.matchRatio, right.matchRatio) ||
+		compareDescendingMetric(left.matchCount, right.matchCount)
+	);
+}
+
+function compareTagSignals(
+	left: CoverageLexicalTagSignal,
+	right: CoverageLexicalTagSignal,
+): number {
+	return (
+		compareDescendingMetric(left.exactMatchCount, right.exactMatchCount) ||
+		compareDescendingMetric(left.charMatchRatio, right.charMatchRatio) ||
+		compareDescendingMetric(left.charMatchCount, right.charMatchCount)
+	);
+}
+
 export type CoverageLexicalRankableResult = MatchedFile & {
 	coverageLexicalSignal: CoverageLexicalFamilySignal;
+	coverageDisplayWindows?: CoverageLexicalDisplayWindow[];
 };

@@ -3,6 +3,11 @@ import {
 	buildCoverageLexicalPassageAdmissionSignal,
 	compareCoverageLexicalPassageAdmissionSignals,
 } from "./coverage-lexical-admission";
+import {
+	buildCoverageLexicalCharQuery,
+	evaluateCoverageLexicalTagFallback,
+	type CoverageLexicalCharQuery,
+} from "./coverage-lexical-cjk";
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalCandidateState,
@@ -15,21 +20,29 @@ import type {
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	bodyCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataAliasCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataAliasPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataAliasPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataBasenameCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataBasenamePhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataBasenamePostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataFolderCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataFolderPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataFolderPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataHeadingCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataHeadingPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataHeadingPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	bodyPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataTagCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	metadataTagFullPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataTagPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataTagPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	sortedLexicon: readonly string[];
 	documentBodyTokensByPath: ReadonlyMap<string, readonly string[]>;
+	documentTagValuesByPath: ReadonlyMap<string, readonly string[]>;
 };
 
 type CoverageLexicalCollectionScope = "all" | "body-only" | "metadata-only";
@@ -39,7 +52,8 @@ type CoverageLexicalLaneName =
 	| "strict_hybrid_lane"
 	| "relaxed_hybrid_lane"
 	| "local_body_lane"
-	| "bridge_lane";
+	| "bridge_lane"
+	| "char_fallback_lane";
 
 type CoverageLexicalRecallDebugAccumulator = {
 	lanes: Map<
@@ -69,6 +83,13 @@ type CoverageLexicalLaneEvaluation = {
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
 	bridgeSignal: CoverageLexicalGroupSignal;
+	bodyCharMatchCount: number;
+	bodyCharMatchRatio: number;
+	metadataCharMatchCount: number;
+	metadataCharMatchRatio: number;
+	tagExactMatchCount: number;
+	tagCharMatchCount: number;
+	tagCharMatchRatio: number;
 	phraseMatchCount: number;
 	phraseMatchWeight: number;
 	passageSignal: ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>;
@@ -105,12 +126,16 @@ export function collectCoverageLexicalCandidateStates(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery = buildCoverageLexicalCharQuery(
+		request.queryText,
+	),
 ): Map<string, CoverageLexicalCandidateState> {
 	return collectCoverageLexicalCandidateStatesInternal(
 		index,
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		null,
 	);
 }
@@ -120,6 +145,9 @@ export function collectCoverageLexicalCandidateStatesWithDebug(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery = buildCoverageLexicalCharQuery(
+		request.queryText,
+	),
 ): {
 	candidates: Map<string, CoverageLexicalCandidateState>;
 	debug: CoverageLexicalRecallDebug;
@@ -130,6 +158,7 @@ export function collectCoverageLexicalCandidateStatesWithDebug(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		debug,
 	);
 	return {
@@ -146,6 +175,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): Map<string, CoverageLexicalCandidateState> {
 	const aggregateCandidates = new Map<string, CoverageLexicalCandidateState>();
@@ -156,6 +186,17 @@ function collectCoverageLexicalCandidateStatesInternal(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
+		aggregateCandidates,
+		admittedPaths,
+		debug,
+	);
+	runCharFallbackLane(
+		index,
+		plan,
+		phraseSignatures,
+		request,
+		charQuery,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -165,6 +206,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -174,6 +216,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -183,6 +226,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -192,6 +236,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -212,6 +257,7 @@ function runStrictMetadataLane(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -247,6 +293,7 @@ function runStrictMetadataLane(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -259,6 +306,7 @@ function runStrictHybridLane(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -310,6 +358,7 @@ function runStrictHybridLane(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -322,6 +371,7 @@ function runRelaxedHybridLane(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -377,6 +427,7 @@ function runRelaxedHybridLane(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -389,6 +440,7 @@ function runLocalBodyLane(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -425,6 +477,7 @@ function runLocalBodyLane(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -437,6 +490,7 @@ function runBridgeLane(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -483,6 +537,51 @@ function runBridgeLane(
 		plan,
 		phraseSignatures,
 		request,
+		charQuery,
+		laneCandidates,
+		aggregateCandidates,
+		admittedPaths,
+		debug,
+	);
+}
+
+function runCharFallbackLane(
+	index: CoverageLexicalRecallIndex,
+	plan: CoverageLexicalPlan,
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
+	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
+	admittedPaths: Set<string>,
+	debug: CoverageLexicalRecallDebugAccumulator | null,
+): void {
+	if (charQuery.hanSegments.length === 0) {
+		return;
+	}
+	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	collectCharCandidates(index.bodyCharPostings, charQuery.terms, laneCandidates, "body");
+	for (const postings of [
+		index.metadataBasenameCharPostings,
+		index.metadataAliasCharPostings,
+		index.metadataFolderCharPostings,
+		index.metadataHeadingCharPostings,
+	]) {
+		collectCharCandidates(postings, charQuery.terms, laneCandidates, "metadata");
+	}
+	collectTagExactCandidates(index.metadataTagFullPostings, charQuery.hanSegments, laneCandidates);
+	collectCharCandidates(
+		index.metadataTagCharPostings,
+		charQuery.terms,
+		laneCandidates,
+		"tag",
+	);
+	admitLaneCandidates(
+		"char_fallback_lane",
+		index,
+		plan,
+		phraseSignatures,
+		request,
+		charQuery,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -496,6 +595,7 @@ function admitLaneCandidates(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery,
 	laneCandidates: Map<string, CoverageLexicalCandidateState>,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
@@ -511,10 +611,10 @@ function admitLaneCandidates(
 
 	const evaluations = Array.from(laneCandidates.entries())
 		.map(([path, state]) =>
-			buildLaneEvaluation(path, state, plan, phraseSignatures, index),
+			buildLaneEvaluation(path, state, plan, phraseSignatures, index, charQuery),
 		)
 		.filter((evaluation): evaluation is CoverageLexicalLaneEvaluation => evaluation !== null)
-		.filter((evaluation) => acceptsLaneCandidate(laneName, evaluation, plan))
+		.filter((evaluation) => acceptsLaneCandidate(laneName, evaluation, plan, charQuery))
 		.sort((left, right) => compareLaneEvaluations(laneName, left, right, plan));
 	const budget = computeLaneBudget(laneName, plan, request);
 	const admitted = evaluations.slice(0, budget);
@@ -543,7 +643,9 @@ function computeLaneBudget(
 					? 24
 					: laneName === "local_body_lane"
 						? 28
-						: 16;
+						: laneName === "char_fallback_lane"
+							? 18
+							: 16;
 	const queryBonus =
 		(laneName === "strict_metadata_lane" &&
 			plan.queryKind === "metadata_only_anchored") ||
@@ -566,6 +668,7 @@ function buildLaneEvaluation(
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	index: CoverageLexicalRecallIndex,
+	charQuery: CoverageLexicalCharQuery,
 ): CoverageLexicalLaneEvaluation | null {
 	const phraseMatchCount = state.phraseMatches.size;
 	const phraseMatchWeight = Array.from(state.phraseMatches).reduce(
@@ -574,6 +677,10 @@ function buildLaneEvaluation(
 		0,
 	);
 	const tokens = index.documentBodyTokensByPath.get(path) ?? [];
+	const tagFallback = evaluateCoverageLexicalTagFallback(
+		index.documentTagValuesByPath?.get(path) ?? [],
+		charQuery,
+	);
 	return {
 		path,
 		state,
@@ -597,6 +704,19 @@ function buildLaneEvaluation(
 			mergeMatchMaps(state.bodyMatches, state.metadataMatches),
 			plan.bridgeFamilies,
 		),
+		bodyCharMatchCount: state.bodyCharTerms.size,
+		bodyCharMatchRatio: computeCharMatchRatio(
+			state.bodyCharTerms.size,
+			charQuery.terms.length,
+		),
+		metadataCharMatchCount: state.metadataCharTerms.size,
+		metadataCharMatchRatio: computeCharMatchRatio(
+			state.metadataCharTerms.size,
+			charQuery.terms.length,
+		),
+		tagExactMatchCount: tagFallback.exactMatchCount,
+		tagCharMatchCount: tagFallback.charMatchCount,
+		tagCharMatchRatio: tagFallback.charMatchRatio,
 		phraseMatchCount,
 		phraseMatchWeight,
 		passageSignal: buildCoverageLexicalPassageAdmissionSignal(
@@ -612,6 +732,7 @@ function acceptsLaneCandidate(
 	laneName: CoverageLexicalLaneName,
 	evaluation: CoverageLexicalLaneEvaluation,
 	plan: CoverageLexicalPlan,
+	charQuery: CoverageLexicalCharQuery,
 ): boolean {
 	switch (laneName) {
 		case "strict_metadata_lane":
@@ -643,6 +764,25 @@ function acceptsLaneCandidate(
 			return (
 				evaluation.bridgeSignal.coverageCount >= 1 ||
 				evaluation.phraseMatchCount >= 1
+			);
+		case "char_fallback_lane":
+			return (
+				evaluation.tagExactMatchCount >= 1 ||
+				acceptsCharFallback(
+					evaluation.tagCharMatchCount,
+					evaluation.tagCharMatchRatio,
+					charQuery.terms.length,
+				) ||
+				acceptsCharFallback(
+					evaluation.metadataCharMatchCount,
+					evaluation.metadataCharMatchRatio,
+					charQuery.terms.length,
+				) ||
+				acceptsCharFallback(
+					evaluation.bodyCharMatchCount,
+					evaluation.bodyCharMatchRatio,
+					charQuery.terms.length,
+				)
 			);
 		default:
 			return false;
@@ -711,6 +851,21 @@ function compareLaneEvaluations(
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
+				compareCoverageLexicalPassageAdmissionSignals(
+					left.passageSignal,
+					right.passageSignal,
+				) ||
+				left.path.localeCompare(right.path)
+			);
+		case "char_fallback_lane":
+			return (
+				compareDescendingMetric(left.tagExactMatchCount, right.tagExactMatchCount) ||
+				compareDescendingMetric(left.tagCharMatchRatio, right.tagCharMatchRatio) ||
+				compareDescendingMetric(left.metadataCharMatchRatio, right.metadataCharMatchRatio) ||
+				compareDescendingMetric(left.bodyCharMatchRatio, right.bodyCharMatchRatio) ||
+				compareDescendingMetric(left.tagCharMatchCount, right.tagCharMatchCount) ||
+				compareDescendingMetric(left.metadataCharMatchCount, right.metadataCharMatchCount) ||
+				compareDescendingMetric(left.bodyCharMatchCount, right.bodyCharMatchCount) ||
 				compareCoverageLexicalPassageAdmissionSignals(
 					left.passageSignal,
 					right.passageSignal,
@@ -845,6 +1000,55 @@ function collectFamilySetCandidates(
 					options.scope,
 				);
 			}
+		}
+	}
+}
+
+function collectCharCandidates(
+	postingsByTerm: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+	queryTerms: readonly string[],
+	candidates: Map<string, CoverageLexicalCandidateState>,
+	target: "body" | "metadata" | "tag",
+): void {
+	if (!postingsByTerm) {
+		return;
+	}
+	for (const term of queryTerms) {
+		const matches = postingsByTerm.get(term);
+		if (!matches) {
+			continue;
+		}
+		for (const path of matches) {
+			const state = getOrCreateCandidateState(candidates, path);
+			if (target === "body") {
+				state.bodyCharTerms.add(term);
+				continue;
+			}
+			if (target === "metadata") {
+				state.metadataCharTerms.add(term);
+				continue;
+			}
+			state.tagCharTerms.add(term);
+		}
+	}
+}
+
+function collectTagExactCandidates(
+	postingsByTag: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+	querySegments: readonly string[],
+	candidates: Map<string, CoverageLexicalCandidateState>,
+): void {
+	if (!postingsByTag) {
+		return;
+	}
+	for (const term of querySegments) {
+		const matches = postingsByTag.get(term);
+		if (!matches) {
+			continue;
+		}
+		for (const path of matches) {
+			const state = getOrCreateCandidateState(candidates, path);
+			state.tagExactTerms.add(term);
 		}
 	}
 }
@@ -1039,14 +1243,30 @@ function mergeCandidateStateInto(
 	for (const phraseMatch of nextState.phraseMatches) {
 		target.phraseMatches.add(phraseMatch);
 	}
+	for (const term of nextState.bodyCharTerms) {
+		target.bodyCharTerms.add(term);
+	}
+	for (const term of nextState.metadataCharTerms) {
+		target.metadataCharTerms.add(term);
+	}
+	for (const term of nextState.tagExactTerms) {
+		target.tagExactTerms.add(term);
+	}
+	for (const term of nextState.tagCharTerms) {
+		target.tagCharTerms.add(term);
+	}
 }
 
 function createEmptyCandidateState(): CoverageLexicalCandidateState {
 	return {
 		bodyMatches: new Map(),
+		bodyCharTerms: new Set(),
 		metadataMatches: new Map(),
+		metadataCharTerms: new Set(),
 		metadataFieldMatches: createEmptyMetadataFieldMatches(),
 		phraseMatches: new Set(),
+		tagCharTerms: new Set(),
+		tagExactTerms: new Set(),
 	};
 }
 
@@ -1283,6 +1503,30 @@ function boundedLevenshtein(
 
 function compareDescendingMetric(left: number, right: number): number {
 	return right - left;
+}
+
+function computeCharMatchRatio(matchCount: number, totalTerms: number): number {
+	if (matchCount <= 0 || totalTerms <= 0) {
+		return 0;
+	}
+	return matchCount / totalTerms;
+}
+
+function acceptsCharFallback(
+	matchCount: number,
+	matchRatio: number,
+	totalTerms: number,
+): boolean {
+	if (matchCount <= 0 || totalTerms <= 0) {
+		return false;
+	}
+	if (totalTerms <= 2) {
+		return matchCount === totalTerms;
+	}
+	if (totalTerms <= 4) {
+		return matchCount >= 2 && matchRatio >= 0.75;
+	}
+	return matchCount >= 2 && matchRatio >= 0.6;
 }
 
 function computeTailWeight(index: number): number {
