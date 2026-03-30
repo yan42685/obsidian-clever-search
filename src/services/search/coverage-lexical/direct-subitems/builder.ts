@@ -116,11 +116,85 @@ function finalizeSpans(
 	candidateSpans: DirectSubitemsCandidateSpan[];
 	renderPayloads: DirectSubitemsRenderPayload[];
 } {
-	return {
+	const renderPayloads = renderDirectSubitemsCandidateSpans({
+		snapshotText,
+		spans: candidateSpans,
+	});
+	const selectedIndices = selectDisplayCandidateIndices(
 		candidateSpans,
-		renderPayloads: renderDirectSubitemsCandidateSpans({
-			snapshotText,
-			spans: candidateSpans,
-		}),
+		renderPayloads,
+	);
+	return {
+		candidateSpans: selectedIndices.map((index) => candidateSpans[index]),
+		renderPayloads: selectedIndices.map((index) => renderPayloads[index]),
 	};
+}
+
+const DISPLAY_OVERLAP_RATIO = 0.65;
+
+function selectDisplayCandidateIndices(
+	candidateSpans: readonly DirectSubitemsCandidateSpan[],
+	renderPayloads: readonly DirectSubitemsRenderPayload[],
+): number[] {
+	const selectedIndices: number[] = [];
+	for (let index = 0; index < candidateSpans.length; index++) {
+		const overlappingIndices = selectedIndices.filter(
+			(selectedIndex) =>
+				computeRangeOverlapRatio(
+					renderPayloads[selectedIndex],
+					renderPayloads[index],
+				) >= DISPLAY_OVERLAP_RATIO,
+		);
+		if (overlappingIndices.length === 0) {
+			selectedIndices.push(index);
+			continue;
+		}
+		if (
+			hasNovelExactEvidence(
+				candidateSpans[index],
+				overlappingIndices.map((selectedIndex) => candidateSpans[selectedIndex]),
+			)
+		) {
+			selectedIndices.push(index);
+		}
+	}
+	return selectedIndices;
+}
+
+function hasNovelExactEvidence(
+	candidateSpan: DirectSubitemsCandidateSpan,
+	existingSpans: readonly DirectSubitemsCandidateSpan[],
+): boolean {
+	const existingExactKeys = new Set(
+		existingSpans.flatMap((span) =>
+			span.occurrences
+				.filter((occurrence) => occurrence.tier === "exact")
+				.map(buildOccurrenceKey),
+		),
+	);
+	const candidateExactKeys = candidateSpan.occurrences
+		.filter((occurrence) => occurrence.tier === "exact")
+		.map(buildOccurrenceKey);
+	if (candidateExactKeys.length === 0) {
+		return false;
+	}
+	return candidateExactKeys.some((key) => !existingExactKeys.has(key));
+}
+
+function buildOccurrenceKey(occurrence: DirectSubitemsOccurrence): string {
+	return `${occurrence.termId}:${occurrence.start}:${occurrence.end}:${occurrence.tier}`;
+}
+
+function computeRangeOverlapRatio(
+	left: Pick<DirectSubitemsRenderPayload, "start" | "end">,
+	right: Pick<DirectSubitemsRenderPayload, "start" | "end">,
+): number {
+	const overlapStart = Math.max(left.start, right.start);
+	const overlapEnd = Math.min(left.end, right.end);
+	if (overlapEnd <= overlapStart) {
+		return 0;
+	}
+	const overlap = overlapEnd - overlapStart;
+	const base = Math.max(1, Math.min(left.end - left.start, right.end - right.start));
+	return overlap / base;
 }

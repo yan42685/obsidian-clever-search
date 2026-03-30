@@ -1,48 +1,42 @@
 import { buildLineOffsets, offsetToLine } from "../../hybrid/chunker";
+import { LangUtil } from "src/utils/lang-util";
 import type {
 	DirectSubitemsCandidateSpan,
 	DirectSubitemsRenderPayload,
 } from "./contracts";
 
-const ELLIPSIS = "\u2026";
+const DISPLAY_PRE_CHARS_WIDE = 60;
+const DISPLAY_POST_CHARS_WIDE = 80;
+const DISPLAY_PRE_CHARS_NARROW = 180;
+const DISPLAY_POST_CHARS_NARROW = 200;
 
 export function renderDirectSubitemsCandidateSpan(params: {
 	snapshotText: string;
 	span: DirectSubitemsCandidateSpan;
 }): DirectSubitemsRenderPayload {
 	const { snapshotText, span } = params;
-	const snippetText = snapshotText.slice(span.start, span.end);
-	const prefixEllipsis = span.start > 0;
-	const suffixEllipsis = span.end < snapshotText.length;
+	const displayWindow = expandDisplayWindow(snapshotText, span);
+	const snippetText = snapshotText.slice(displayWindow.start, displayWindow.end);
 	const lineOffsets = buildLineOffsets(snapshotText);
 	const row = offsetToLine(lineOffsets, span.anchorOffset);
 	const lineStartOffset = lineOffsets[row] ?? 0;
 	const col = Math.max(0, span.anchorOffset - lineStartOffset);
 	const baseHighlightRanges = mergeRanges(
 		span.occurrences.map((occurrence) => ({
-			start: occurrence.start - span.start,
-			end: occurrence.end - span.start,
+			start: occurrence.start - displayWindow.start,
+			end: occurrence.end - displayWindow.start,
 		})),
 	);
-	const leadingOffset = prefixEllipsis ? ELLIPSIS.length : 0;
-	const displayHighlightRanges = baseHighlightRanges.map((range) => ({
-		start: range.start + leadingOffset,
-		end: range.end + leadingOffset,
-	}));
-	const text = `${prefixEllipsis ? ELLIPSIS : ""}${snippetText}${suffixEllipsis ? ELLIPSIS : ""}`;
 	return {
-		text,
-		html: renderHighlightedSnippet(snippetText, baseHighlightRanges, {
-			prefixEllipsis,
-			suffixEllipsis,
-		}),
-		snippetText: text,
+		text: snippetText,
+		html: renderHighlightedSnippet(snippetText, baseHighlightRanges),
+		snippetText,
 		row,
 		col,
-		start: span.start,
-		end: span.end,
+		start: displayWindow.start,
+		end: displayWindow.end,
 		anchorOffset: span.anchorOffset,
-		highlightRanges: displayHighlightRanges,
+		highlightRanges: baseHighlightRanges,
 	};
 }
 
@@ -61,17 +55,11 @@ export function renderDirectSubitemsCandidateSpans(params: {
 function renderHighlightedSnippet(
 	snippetText: string,
 	ranges: ReadonlyArray<{ start: number; end: number }>,
-	options: {
-		prefixEllipsis: boolean;
-		suffixEllipsis: boolean;
-	},
 ): string {
 	if (ranges.length === 0) {
-		return `${options.prefixEllipsis ? "&hellip;" : ""}${escapeHtml(snippetText)}${
-			options.suffixEllipsis ? "&hellip;" : ""
-		}`;
+		return escapeHtml(snippetText);
 	}
-	let rendered = options.prefixEllipsis ? "&hellip;" : "";
+	let rendered = "";
 	let cursor = 0;
 	for (const range of mergeRanges(ranges)) {
 		rendered += escapeHtml(snippetText.slice(cursor, range.start));
@@ -79,10 +67,39 @@ function renderHighlightedSnippet(
 		cursor = range.end;
 	}
 	rendered += escapeHtml(snippetText.slice(cursor));
-	if (options.suffixEllipsis) {
-		rendered += "&hellip;";
-	}
 	return rendered;
+}
+
+function expandDisplayWindow(
+	snapshotText: string,
+	span: Pick<DirectSubitemsCandidateSpan, "start" | "end">,
+): { start: number; end: number } {
+	const coreText = snapshotText.slice(span.start, span.end);
+	const isWideCharContext = LangUtil.testWideChar(coreText);
+	const preChars = isWideCharContext
+		? DISPLAY_PRE_CHARS_WIDE
+		: DISPLAY_PRE_CHARS_NARROW;
+	const postChars = isWideCharContext
+		? DISPLAY_POST_CHARS_WIDE
+		: DISPLAY_POST_CHARS_NARROW;
+	const expandedStart = Math.max(0, span.start - preChars);
+	const expandedEnd = Math.min(snapshotText.length, span.end + postChars);
+	const lineStart = findLineStart(snapshotText, span.start);
+	const lineEnd = findLineEnd(snapshotText, Math.max(span.start, span.end - 1));
+	return {
+		start: Math.max(expandedStart, lineStart),
+		end: Math.min(expandedEnd, lineEnd),
+	};
+}
+
+function findLineStart(text: string, offset: number): number {
+	const index = text.lastIndexOf("\n", Math.max(0, offset - 1));
+	return index < 0 ? 0 : index + 1;
+}
+
+function findLineEnd(text: string, offset: number): number {
+	const index = text.indexOf("\n", Math.max(0, offset));
+	return index < 0 ? text.length : index;
 }
 
 function mergeRanges(

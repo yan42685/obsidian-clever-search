@@ -438,4 +438,51 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		);
 		expect(spansByStart[1].start - spansByStart[0].end).toBeGreaterThan(40);
 	});
+
+	test("renders wider display context than the scoring span", () => {
+		const snapshotText =
+			"prefix context before alpha beta suffix context after and a little more";
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText,
+			options: {
+				mergeGap: 4,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.candidateSpans[0].end - result.candidateSpans[0].start).toBe(
+			"alpha beta".length,
+		);
+		expect(result.renderPayloads[0].text.length).toBeGreaterThan(
+			result.candidateSpans[0].end - result.candidateSpans[0].start,
+		);
+		expect(result.renderPayloads[0].text).toContain("prefix context before");
+		expect(result.renderPayloads[0].text).toContain("suffix context after");
+	});
+
+	test("does not add prefix or suffix ellipsis in rendered snippets", () => {
+		const snapshotText = `start ${"x".repeat(240)} alpha beta ${"y".repeat(240)} end`;
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText,
+			options: {
+				mergeGap: 4,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(result.renderPayloads).toHaveLength(1);
+		expect(result.renderPayloads[0].text.startsWith("…")).toBe(false);
+		expect(result.renderPayloads[0].text.endsWith("…")).toBe(false);
+		expect(result.renderPayloads[0].snippetText.startsWith("…")).toBe(false);
+		expect(result.renderPayloads[0].snippetText.endsWith("…")).toBe(false);
+		expect(result.renderPayloads[0].html.startsWith("&hellip;")).toBe(false);
+		expect(result.renderPayloads[0].html.endsWith("&hellip;")).toBe(false);
+	});
 });
