@@ -9,10 +9,8 @@ import type {
 const MIN_WINDOW_SIZE = 8;
 const MAX_WINDOW_SIZE = 48;
 const MAX_LOCAL_WINDOW_CANDIDATES = 16;
-const MAX_DISPLAY_WINDOW_CANDIDATES = 96;
 const MAX_ADJACENT_PAIR_GAP = 3;
 const MAX_COVER_HIT_SPAN = 8;
-const MAX_DISPLAY_COVER_HIT_SPAN = 16;
 const MINIMAL_WINDOW_PADDING = 4;
 const EXPANDED_WINDOW_PADDING = 10;
 
@@ -32,20 +30,6 @@ export function buildCoverageLexicalLocalWindowSignals(
 		pairSignatures,
 		MAX_LOCAL_WINDOW_CANDIDATES,
 		MAX_COVER_HIT_SPAN,
-	);
-}
-
-export function buildCoverageLexicalDisplayWindowSignals(
-	tokens: readonly string[],
-	families: readonly CoverageLexicalFamily[],
-	pairSignatures: readonly CoverageLexicalPairSignature[],
-): CoverageLexicalLocalWindowSignal[] {
-	return buildCoverageLexicalWindowSignalsInternal(
-		tokens,
-		families,
-		pairSignatures,
-		MAX_DISPLAY_WINDOW_CANDIDATES,
-		MAX_DISPLAY_COVER_HIT_SPAN,
 	);
 }
 

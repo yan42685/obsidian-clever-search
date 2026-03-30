@@ -23,6 +23,20 @@ export type CoverageLexicalCharOffset = {
 	end: number;
 };
 
+export function extractHanSegments(text: string): string[] {
+	const segments: string[] = [];
+	const seen = new Set<string>();
+	for (const match of normalizeCoverageLexicalText(text).matchAll(HAN_SEQUENCE_REGEX)) {
+		const segment = match[0];
+		if (segment.length === 0 || seen.has(segment)) {
+			continue;
+		}
+		seen.add(segment);
+		segments.push(segment);
+	}
+	return segments;
+}
+
 export function buildCoverageLexicalCharQuery(
 	queryText: string,
 ): CoverageLexicalCharQuery {

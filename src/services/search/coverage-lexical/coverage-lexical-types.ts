@@ -41,8 +41,10 @@ export type CoverageLexicalMetadataField =
 export type CoverageLexicalCandidateState = {
 	bodyMatches: Map<number, CoverageFamilyMatchKind>;
 	bodyCharTerms: Set<string>;
+	bodyExactSegments: Set<string>;
 	metadataMatches: Map<number, CoverageFamilyMatchKind>;
 	metadataCharTerms: Set<string>;
+	metadataExactSegments: Set<string>;
 	metadataFieldMatches: Record<
 		CoverageLexicalMetadataField,
 		Map<number, CoverageFamilyMatchKind>
@@ -156,6 +158,7 @@ export type CoverageLexicalAreaSignal = {
 export type CoverageLexicalCharSignal = {
 	matchCount: number;
 	matchRatio: number;
+	exactSegmentCount: number;
 	fullSegmentCount: number;
 	bestSegmentCoverageCount: number;
 	bestSegmentCoverageRatio: number;
@@ -209,20 +212,6 @@ export type CoverageLexicalWindowFusionSignal = {
 	corroboratedFuzzyCoreWeight: number;
 	corroboratedAnchorCoverageCount: number;
 	corroboratedSoftCoverageCount: number;
-};
-
-export type CoverageLexicalDisplayWindowKind =
-	| "primary"
-	| "support"
-	| "supplemental";
-
-export type CoverageLexicalDisplayWindow = {
-	startTokenIndex: number;
-	endTokenIndex: number;
-	signal: CoverageLexicalLocalWindowSignal;
-	matchedFamilyIndices: number[];
-	kind: CoverageLexicalDisplayWindowKind;
-	rank: number;
 };
 
 export type CoverageLexicalHighlightRange = {

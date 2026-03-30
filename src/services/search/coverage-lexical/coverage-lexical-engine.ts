@@ -33,7 +33,6 @@ import {
 	rankCoverageLexicalResults,
 	type CoverageLexicalRankableResult,
 } from "./coverage-lexical-ranker";
-import { selectCoverageLexicalDisplayWindows } from "./coverage-lexical-display-windows";
 import {
 	buildCoverageLexicalWindowFusionSignal,
 	createEmptyCoverageLexicalWindowFusionSignal,
@@ -350,14 +349,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			plan,
 		);
 		const finalResults = ranked.slice(0, request.maxItemResults);
-		this.attachCoverageDisplayWindows(
-			finalResults,
-			plan.families,
-			pairSignatures,
-			charQuery,
-			request.queryText,
-			request.maxSubItemResults ?? DEFAULT_MAX_SUBITEM_COUNT,
-		);
 		await this.attachDirectSubItems(
 			finalResults,
 			candidates,
@@ -742,55 +733,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			matchedTerms: signal.matchedTerms,
 			score: computeFallbackScore(signal),
 			coverageLexicalSignal: signal,
-			coverageDisplayWindows: undefined,
 		};
-	}
-
-	private attachCoverageDisplayWindows(
-		rankedResults: readonly CoverageLexicalRankableResult[],
-		families: readonly CoverageLexicalFamily[],
-		pairSignatures: readonly CoverageLexicalPairSignature[],
-		charQuery: CoverageLexicalCharQuery,
-		queryText: string,
-		maxSubItemCount: number,
-	): void {
-		for (const result of rankedResults) {
-			const document = this.documents.get(result.path);
-			result.coverageDisplayWindows = document
-				? refineCoverageDisplayWindowsForHanSegments(
-					selectCoverageLexicalDisplayWindows(
-						document.bodyTokenSequence,
-						families,
-						pairSignatures,
-						maxSubItemCount,
-					),
-					document.bodyText,
-					this.getTokenOffsets(document.bodyText),
-					charQuery.hanSegments,
-				)
-				: [];
-			if (
-				document &&
-				shouldLogCoverageLexicalHanDebug(queryText, charQuery)
-			) {
-				logger.debug("[coverage-lexical][han-debug] windows", {
-					queryText,
-					path: result.path,
-					windows: (result.coverageDisplayWindows ?? []).map((window) => ({
-						startTokenIndex: window.startTokenIndex,
-						endTokenIndex: window.endTokenIndex,
-						score: window.signal.score,
-						matchedFamilyIndices: window.matchedFamilyIndices,
-						hanPriority: computeWindowHanSegmentPriority(
-							window,
-							document.bodyText,
-							this.getTokenOffsets(document.bodyText),
-							charQuery.hanSegments,
-						),
-					})),
-				});
-			}
-		}
 	}
 
 	private async attachDirectSubItems(
@@ -826,23 +769,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				}).slice(0, maxSubItemCount);
 			}),
 		);
-	}
-
-	private getTokenOffsets(
-		text: string,
-	): Array<{ token: string; start: number; end: number }> {
-		const tokenizeWithOffsets = (
-			this.tokenizer as Tokenizer & {
-				tokenizeSequenceWithOffsets?: (
-					text: string,
-					mode: "index" | "search",
-				) => Array<{ token: string; start: number; end: number }>;
-			}
-		).tokenizeSequenceWithOffsets;
-		if (!tokenizeWithOffsets) {
-			return [];
-		}
-		return tokenizeWithOffsets.call(this.tokenizer, text, "index");
 	}
 
 }
@@ -1202,125 +1128,6 @@ function shouldLogCoverageLexicalHanDebug(
 	charQuery: CoverageLexicalCharQuery,
 ): boolean {
 	return charQuery.hanSegments.length > 0 && queryText.trim().length <= 24;
-}
-
-function refineCoverageDisplayWindowsForHanSegments(
-	windows: CoverageLexicalRankableResult["coverageDisplayWindows"],
-	bodyText: string,
-	tokenOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-	hanSegments: readonly string[],
-): CoverageLexicalRankableResult["coverageDisplayWindows"] {
-	if (!windows || windows.length === 0 || hanSegments.length === 0) {
-		return windows;
-	}
-	const scored = windows.map((window, index) => ({
-		window,
-		index,
-		priority: computeWindowHanSegmentPriority(window, bodyText, tokenOffsets, hanSegments),
-	}));
-	scored.sort((left, right) => {
-		if (right.priority.fullMatchCount !== left.priority.fullMatchCount) {
-			return right.priority.fullMatchCount - left.priority.fullMatchCount;
-		}
-		if (right.priority.bestCoverageRatio !== left.priority.bestCoverageRatio) {
-			return right.priority.bestCoverageRatio - left.priority.bestCoverageRatio;
-		}
-		if (right.priority.bestCoverageCount !== left.priority.bestCoverageCount) {
-			return right.priority.bestCoverageCount - left.priority.bestCoverageCount;
-		}
-		if ((right.window?.signal.score ?? 0) !== (left.window?.signal.score ?? 0)) {
-			return (right.window?.signal.score ?? 0) - (left.window?.signal.score ?? 0);
-		}
-		return left.index - right.index;
-	});
-	if (scored[0]?.priority.fullMatchCount) {
-		const kept: typeof scored = [];
-		for (const entry of scored) {
-			const isShadowed = kept.some((existing) =>
-				existing.priority.fullMatchCount > entry.priority.fullMatchCount &&
-				computeDisplayWindowOverlapRatio(existing.window, entry.window) >= 0.6,
-			);
-			if (isShadowed) {
-				continue;
-			}
-			kept.push(entry);
-		}
-		return kept.map((entry) => entry.window);
-	}
-	return scored.map((entry) => entry.window);
-}
-
-function computeWindowHanSegmentPriority(
-	window: NonNullable<CoverageLexicalRankableResult["coverageDisplayWindows"]>[number],
-	bodyText: string,
-	tokenOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-	hanSegments: readonly string[],
-): {
-	fullMatchCount: number;
-	bestCoverageCount: number;
-	bestCoverageRatio: number;
-} {
-	const textSlice = extractWindowText(bodyText, tokenOffsets, window);
-	const sliceBigrams = new Set(extractHanBigrams(textSlice));
-	let fullMatchCount = 0;
-	let bestCoverageCount = 0;
-	let bestCoverageRatio = 0;
-	for (const segment of hanSegments) {
-		if (!segment) {
-			continue;
-		}
-		if (textSlice.includes(segment)) {
-			fullMatchCount += 1;
-			bestCoverageCount = Math.max(bestCoverageCount, Math.max(segment.length - 1, 1));
-			bestCoverageRatio = 1;
-			continue;
-		}
-		const bigrams = extractHanBigrams(segment);
-		if (bigrams.length === 0) {
-			continue;
-		}
-		const matchedCount = bigrams.filter((token) => sliceBigrams.has(token)).length;
-		bestCoverageCount = Math.max(bestCoverageCount, matchedCount);
-		bestCoverageRatio = Math.max(bestCoverageRatio, matchedCount / bigrams.length);
-	}
-	return {
-		fullMatchCount,
-		bestCoverageCount,
-		bestCoverageRatio,
-	};
-}
-
-function extractWindowText(
-	bodyText: string,
-	tokenOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-	window: NonNullable<CoverageLexicalRankableResult["coverageDisplayWindows"]>[number],
-): string {
-	const start = tokenOffsets[window.startTokenIndex]?.start;
-	const end = tokenOffsets[window.endTokenIndex]?.end;
-	if (start !== undefined && end !== undefined) {
-		return bodyText.slice(start, end);
-	}
-	return bodyText;
-}
-
-function computeDisplayWindowOverlapRatio(
-	left: NonNullable<CoverageLexicalRankableResult["coverageDisplayWindows"]>[number],
-	right: NonNullable<CoverageLexicalRankableResult["coverageDisplayWindows"]>[number],
-): number {
-	const overlapStart = Math.max(left.startTokenIndex, right.startTokenIndex);
-	const overlapEnd = Math.min(left.endTokenIndex, right.endTokenIndex);
-	if (overlapEnd < overlapStart) {
-		return 0;
-	}
-	const overlap = overlapEnd - overlapStart + 1;
-	const base = Math.max(
-		1,
-		Math.min(
-			left.endTokenIndex - left.startTokenIndex + 1,
-			right.endTokenIndex - right.startTokenIndex + 1,
-		),
-	);
-	return overlap / base;
 }
 
 

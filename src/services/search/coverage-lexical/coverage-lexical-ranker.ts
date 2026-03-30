@@ -1,7 +1,6 @@
 import type { MatchedFile } from "src/globals/search-types";
 import type {
 	CoverageLexicalCharSignal,
-	CoverageLexicalDisplayWindow,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalPlan,
@@ -202,5 +201,4 @@ function compareTagSignals(
 
 export type CoverageLexicalRankableResult = MatchedFile & {
 	coverageLexicalSignal: CoverageLexicalFamilySignal;
-	coverageDisplayWindows?: CoverageLexicalDisplayWindow[];
 };
