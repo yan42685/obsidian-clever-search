@@ -51,8 +51,6 @@ type CoverageSnippetPayload = {
 	finalBestSegmentCoverageRatio: number;
 	snippetScore: number;
 	sourceWindowScore: number;
-	evidenceType: "full_segment" | "family_local" | "char_bridge";
-	regionKey: string;
 };
 
 type CharRange = {
@@ -533,179 +531,6 @@ function expandRange(
 	};
 }
 
-function collectMatchedRanges(
-	text: string,
-	tokenOffsets: readonly TokenOffset[],
-	charOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-	searchRegion: CharRange,
-	families: readonly CoverageLexicalFamily[],
-	charQueryTerms: readonly string[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): CoverageLexicalHighlightRange[] {
-	const tokenRanges = collectTokenMatchedRanges(tokenOffsets, searchRegion, families);
-	const substringRanges =
-		tokenRanges.length > 0
-			? []
-			: collectSubstringMatchedRanges(text, searchRegion, families);
-	const charRanges = collectCharMatchedRanges(
-		charOffsets,
-		searchRegion,
-		charQueryTerms,
-		segmentDescriptors,
-	);
-	return mergeRanges([...tokenRanges, ...substringRanges, ...charRanges]);
-}
-
-function collectTokenMatchedRanges(
-	tokenOffsets: readonly TokenOffset[],
-	searchRegion: CharRange,
-	families: readonly CoverageLexicalFamily[],
-): CoverageLexicalHighlightRange[] {
-	const ranges: CoverageLexicalHighlightRange[] = [];
-	for (const offset of tokenOffsets) {
-		if (offset.end <= searchRegion.start || offset.start >= searchRegion.end) {
-			continue;
-		}
-		for (const family of families) {
-			const range = resolveTokenMatchRange(offset, family);
-			if (!range) {
-				continue;
-			}
-			ranges.push(range);
-		}
-	}
-	return ranges;
-}
-
-function resolveTokenMatchRange(
-	offset: TokenOffset,
-	family: CoverageLexicalFamily,
-): CoverageLexicalHighlightRange | null {
-	if (offset.token === family.normalizedTerm) {
-		return {
-			start: offset.start,
-			end: offset.start + family.normalizedTerm.length,
-		};
-	}
-	if (family.allowPrefix && offset.token.startsWith(family.normalizedTerm)) {
-		return {
-			start: offset.start,
-			end: Math.min(offset.end, offset.start + family.normalizedTerm.length),
-		};
-	}
-	if (!family.allowFuzzy) {
-		return null;
-	}
-	const maxDistance = computeMaxFuzzyDistance(family.normalizedTerm);
-	if (
-		maxDistance <= 0 ||
-		offset.token[0] !== family.normalizedTerm[0] ||
-		boundedLevenshtein(offset.token, family.normalizedTerm, maxDistance) > maxDistance
-	) {
-		return null;
-	}
-	return {
-		start: offset.start,
-		end: offset.end,
-	};
-}
-
-function collectSubstringMatchedRanges(
-	text: string,
-	searchRegion: CharRange,
-	families: readonly CoverageLexicalFamily[],
-): CoverageLexicalHighlightRange[] {
-	const haystack = text.slice(searchRegion.start, searchRegion.end).toLowerCase();
-	const ranges: CoverageLexicalHighlightRange[] = [];
-	for (const family of families) {
-		if (!family.normalizedTerm) {
-			continue;
-		}
-		let fromIndex = 0;
-		while (fromIndex < haystack.length) {
-			const foundAt = haystack.indexOf(family.normalizedTerm, fromIndex);
-			if (foundAt < 0) {
-				break;
-			}
-			ranges.push({
-				start: searchRegion.start + foundAt,
-				end: searchRegion.start + foundAt + family.normalizedTerm.length,
-			});
-			fromIndex = foundAt + Math.max(1, family.normalizedTerm.length);
-		}
-	}
-	return ranges;
-}
-
-function collectCharMatchedRanges(
-	charOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-	searchRegion: CharRange,
-	charQueryTerms: readonly string[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): CoverageLexicalHighlightRange[] {
-	if (charQueryTerms.length === 0 || segmentDescriptors.length === 0) {
-		return [];
-	}
-	const wanted = new Set(charQueryTerms);
-	const matchedOffsets = charOffsets
-		.filter(
-			(entry) =>
-				entry.end > searchRegion.start &&
-				entry.start < searchRegion.end &&
-				wanted.has(entry.token),
-		)
-	if (matchedOffsets.length === 0) {
-		return [];
-	}
-	return filterCharRangesBySegmentCoverage(matchedOffsets, segmentDescriptors);
-}
-
-function filterCharRangesBySegmentCoverage(
-	offsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): CoverageLexicalHighlightRange[] {
-	const merged = mergeRanges(
-		offsets.map((entry) => ({
-			start: entry.start,
-			end: entry.end,
-		})),
-	);
-	const kept: CoverageLexicalHighlightRange[] = [];
-	for (const range of merged) {
-		const clusterOffsets = offsets.filter(
-			(entry) => entry.start >= range.start && entry.end <= range.end,
-		);
-		for (const segment of segmentDescriptors) {
-			const matchedOffsets = clusterOffsets.filter((entry) =>
-				segment.bigrams.includes(entry.token),
-			);
-			const matchedTokenSet = new Set(matchedOffsets.map((entry) => entry.token));
-			const matchedCount = segment.bigrams.filter((token) =>
-				matchedTokenSet.has(token),
-			).length;
-			const bestRunLength = computeBestBigramRunLength(
-				segment.bigrams,
-				matchedTokenSet,
-			);
-			if (
-				acceptsCharClusterCoverage(
-					segment.bigrams.length,
-					matchedCount,
-					bestRunLength,
-				)
-			) {
-				kept.push(
-					...matchedOffsets.map((entry) => ({
-						start: entry.start,
-						end: entry.end,
-					})),
-				);
-				break;
-			}
-		}
-	}
-	return mergeRanges(kept);
-}
 
 function collectExactSegmentRanges(
 	snippetText: string,
@@ -940,87 +765,6 @@ function collectSnippetSegmentRunRanges(
 	return mergeRanges(ranges);
 }
 
-function pickAnchorOffset(
-	text: string,
-	searchRegion: CharRange,
-	ranges: readonly CoverageLexicalHighlightRange[],
-	approximateWindow: CharRange,
-	families: readonly CoverageLexicalFamily[],
-	charQuerySegments: readonly string[],
-): number {
-	const clusterAnchor = pickBestEvidenceClusterAnchor(
-		text,
-		searchRegion,
-		ranges,
-		families,
-		charQuerySegments,
-	);
-	if (clusterAnchor >= 0) {
-		return clusterAnchor;
-	}
-	if (ranges.length === 0) {
-		return approximateWindow.start;
-	}
-	return ranges[0].start;
-}
-
-function pickBestEvidenceClusterAnchor(
-	text: string,
-	searchRegion: CharRange,
-	ranges: readonly CoverageLexicalHighlightRange[],
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): number {
-	if (ranges.length === 0) {
-		return -1;
-	}
-	const clusters = buildEvidenceClusters(ranges);
-	let bestCluster: { start: number; score: number } | null = null;
-	for (const cluster of clusters) {
-		const clusterText = text.slice(cluster.start, cluster.end);
-		const score = scoreEvidenceCluster(clusterText, families, segmentDescriptors);
-		if (!bestCluster || score > bestCluster.score) {
-			bestCluster = { start: cluster.start, score };
-		}
-	}
-	if (bestCluster && bestCluster.score > 0) {
-		return bestCluster.start;
-	}
-	const haystack = text.slice(searchRegion.start, searchRegion.end);
-	for (const segment of segmentDescriptors) {
-		const foundAt = haystack.indexOf(segment.text);
-		if (foundAt >= 0) {
-			return searchRegion.start + foundAt;
-		}
-	}
-	return -1;
-}
-
-function rankEvidenceClusters(
-	text: string,
-	ranges: readonly CoverageLexicalHighlightRange[],
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): Array<CoverageLexicalHighlightRange & { score: number }> {
-	return buildEvidenceClusters(ranges)
-		.map((cluster) => ({
-			...cluster,
-			score: scoreEvidenceCluster(
-				text.slice(cluster.start, cluster.end),
-				families,
-				segmentDescriptors,
-			),
-		}))
-		.sort((left, right) => {
-			if (right.score !== left.score) {
-				return right.score - left.score;
-			}
-			if (left.start !== right.start) {
-				return left.start - right.start;
-			}
-			return left.end - right.end;
-		});
-}
 
 function collectSnippetMatchAtoms(
 	text: string,
@@ -1609,13 +1353,6 @@ function buildSnippetPayloadFromIsland(
 		finalBestSegmentCoverageRatio: finalMetrics.weightedCoverage,
 		snippetScore,
 		sourceWindowScore,
-		evidenceType:
-			finalMetrics.segmentKeyCount > 0
-				? "full_segment"
-				: finalMetrics.familyKeyCount > 0
-					? "family_local"
-					: "char_bridge",
-		regionKey: `anchor:${semanticSpan.anchorOffset}`,
 	};
 }
 
@@ -1633,110 +1370,6 @@ function compareSemanticEvaluations(
 		return left.range.start - right.range.start;
 	}
 	return left.range.end - right.range.end;
-}
-
-function computeSemanticCoverageMetrics(
-	textSlice: string,
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): {
-	familyHitCount: number;
-	familyTerms: string[];
-	fullSegmentCount: number;
-	fullSegments: string[];
-	bestSegmentCoverageRatio: number;
-	bestSegmentCoverageCount: number;
-	matchedBigramTerms: string[];
-} {
-	const lowerText = textSlice.toLowerCase();
-	const familyTerms = families
-		.filter((family) => family.normalizedTerm && lowerText.includes(family.normalizedTerm))
-		.map((family) => family.normalizedTerm);
-	const snippetBigrams = new Set(
-		extractHanBigramsWithOffsets(textSlice).map((entry) => entry.token),
-	);
-	const fullSegments: string[] = [];
-	let bestSegmentCoverageRatio = 0;
-	let bestSegmentCoverageCount = 0;
-	let matchedBigramTerms: string[] = [];
-	for (const segment of segmentDescriptors) {
-		if (textSlice.includes(segment.text)) {
-			fullSegments.push(segment.text);
-			bestSegmentCoverageRatio = 1;
-			bestSegmentCoverageCount = Math.max(
-				bestSegmentCoverageCount,
-				segment.bigrams.length,
-			);
-			matchedBigramTerms = segment.bigrams;
-			continue;
-		}
-		if (segment.bigrams.length === 0) {
-			continue;
-		}
-		const matched = segment.bigrams.filter((token) => snippetBigrams.has(token));
-		const ratio = matched.length / segment.bigrams.length;
-		if (
-			matched.length > bestSegmentCoverageCount ||
-			(matched.length === bestSegmentCoverageCount &&
-				ratio > bestSegmentCoverageRatio)
-		) {
-			bestSegmentCoverageCount = matched.length;
-			bestSegmentCoverageRatio = ratio;
-			matchedBigramTerms = matched;
-		}
-	}
-	return {
-		familyHitCount: familyTerms.length,
-		familyTerms,
-		fullSegmentCount: fullSegments.length,
-		fullSegments,
-		bestSegmentCoverageRatio,
-		bestSegmentCoverageCount,
-		matchedBigramTerms,
-	};
-}
-
-function buildSemanticSignature(metrics: {
-	familyTerms: readonly string[];
-	fullSegments: readonly string[];
-	matchedBigramTerms: readonly string[];
-}): string {
-	return JSON.stringify({
-		f: [...metrics.familyTerms].sort(),
-		s: [...metrics.fullSegments].sort(),
-		b: [...metrics.matchedBigramTerms].sort(),
-	});
-}
-
-function doesCoverageMetricsImprove(
-	current: {
-		familyTerms: readonly string[];
-		fullSegments: readonly string[];
-		matchedBigramTerms: readonly string[];
-		bestSegmentCoverageCount: number;
-		bestSegmentCoverageRatio: number;
-	},
-	candidate: {
-		familyTerms: readonly string[];
-		fullSegments: readonly string[];
-		matchedBigramTerms: readonly string[];
-		bestSegmentCoverageCount: number;
-		bestSegmentCoverageRatio: number;
-	},
-): boolean {
-	if (candidate.fullSegments.length > current.fullSegments.length) {
-		return true;
-	}
-	if (candidate.familyTerms.length > current.familyTerms.length) {
-		return true;
-	}
-	if (candidate.matchedBigramTerms.length > current.matchedBigramTerms.length) {
-		return true;
-	}
-	if (candidate.bestSegmentCoverageCount > current.bestSegmentCoverageCount) {
-		return true;
-	}
-	return candidate.bestSegmentCoverageRatio > current.bestSegmentCoverageRatio;
 }
 
 function pickSemanticAnchorOffset(
@@ -1762,26 +1395,6 @@ function pickSemanticAnchorOffset(
 	return best.start;
 }
 
-function buildEvidenceClusters(
-	ranges: readonly CoverageLexicalHighlightRange[],
-): CoverageLexicalHighlightRange[] {
-	const ordered = mergeRanges(ranges);
-	if (ordered.length <= 1) {
-		return ordered;
-	}
-	const clusters: CoverageLexicalHighlightRange[] = [{ ...ordered[0] }];
-	for (let index = 1; index < ordered.length; index++) {
-		const current = ordered[index];
-		const previous = clusters[clusters.length - 1];
-		if (current.start - previous.end <= 16) {
-			previous.end = Math.max(previous.end, current.end);
-			continue;
-		}
-		clusters.push({ start: current.start, end: current.end });
-	}
-	return clusters;
-}
-
 function buildHanSegmentDescriptors(
 	segments: readonly string[],
 ): HanSegmentDescriptor[] {
@@ -1793,144 +1406,6 @@ function buildHanSegmentDescriptors(
 		}));
 }
 
-function scoreEvidenceCluster(
-	clusterText: string,
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): number {
-	let familyHitCount = 0;
-	let fullSegmentCount = 0;
-	let bestSegmentCoverageRatio = 0;
-	let bestSegmentCoverageCount = 0;
-	for (const family of families) {
-		if (!family.normalizedTerm) {
-			continue;
-		}
-		if (clusterText.toLowerCase().includes(family.normalizedTerm)) {
-			familyHitCount += 1;
-		}
-	}
-	const clusterBigrams = new Set(
-		extractHanBigramsWithOffsets(clusterText).map((entry) => entry.token),
-	);
-	for (const segment of segmentDescriptors) {
-		if (clusterText.includes(segment.text)) {
-			fullSegmentCount += 1;
-			bestSegmentCoverageRatio = 1;
-			bestSegmentCoverageCount = Math.max(
-				bestSegmentCoverageCount,
-				segment.bigrams.length,
-			);
-			continue;
-		}
-		if (segment.bigrams.length === 0) {
-			continue;
-		}
-		const matchedCount = segment.bigrams.filter((token) => clusterBigrams.has(token)).length;
-		bestSegmentCoverageCount = Math.max(bestSegmentCoverageCount, matchedCount);
-		bestSegmentCoverageRatio = Math.max(
-			bestSegmentCoverageRatio,
-			matchedCount / segment.bigrams.length,
-		);
-	}
-	return (
-		familyHitCount * 260 +
-		fullSegmentCount * 180 +
-		bestSegmentCoverageRatio * 10 +
-		bestSegmentCoverageCount
-	);
-}
-
-function buildRenderSnippetRange(
-	text: string,
-	textLength: number,
-	semanticRange: CharRange,
-	anchorOffset: number,
-	approximateWindow: CharRange,
-	allRanges: readonly CoverageLexicalHighlightRange[],
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): CharRange {
-	const focusStart = semanticRange.start;
-	const focusEnd = semanticRange.end > semanticRange.start ? semanticRange.end : approximateWindow.end;
-	let start = Math.max(0, focusStart - SNIPPET_LEADING_CONTEXT_CHARS);
-	let end = Math.min(textLength, focusEnd + SNIPPET_TRAILING_CONTEXT_CHARS);
-	if (end - start > MAX_SNIPPET_WINDOW_CHARS) {
-		start = Math.max(0, anchorOffset - Math.floor(MAX_SNIPPET_WINDOW_CHARS / 2));
-		end = Math.min(textLength, start + MAX_SNIPPET_WINDOW_CHARS);
-		start = Math.max(0, end - MAX_SNIPPET_WINDOW_CHARS);
-	}
-	let renderRange = clampSnippetRangeToTokenBudget(text, { start, end }, anchorOffset);
-	renderRange = expandRenderRangeForSupportingEvidence(
-		text,
-		renderRange,
-		allRanges,
-		anchorOffset,
-		families,
-		segmentDescriptors,
-	);
-	return renderRange;
-}
-
-function expandRenderRangeForSupportingEvidence(
-	text: string,
-	range: CharRange,
-	allRanges: readonly CoverageLexicalHighlightRange[],
-	anchorOffset: number,
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): CharRange {
-	const units = buildEvidenceClusters(allRanges).filter(
-		(unit) => unit.end <= range.start || unit.start >= range.end,
-	);
-	let current = { ...range };
-	let currentMetrics = computeSemanticCoverageMetrics(
-		text.slice(current.start, current.end),
-		families,
-		segmentDescriptors,
-	);
-	for (const unit of units.sort((left, right) => {
-		const leftGap =
-			left.end <= current.start
-				? current.start - left.end
-				: left.start - current.end;
-		const rightGap =
-			right.end <= current.start
-				? current.start - right.end
-				: right.start - current.end;
-		return leftGap - rightGap;
-	})) {
-		const gap =
-			unit.end <= current.start
-				? current.start - unit.end
-				: unit.start - current.end;
-		if (gap > MAX_SNIPPET_EXPANSION_GAP_CHARS) {
-			continue;
-		}
-		const expanded = clampSnippetRangeToTokenBudget(
-			text,
-			{
-				start: Math.max(0, Math.min(current.start, unit.start)),
-				end: Math.min(text.length, Math.max(current.end, unit.end)),
-			},
-			anchorOffset,
-		);
-		if (expanded.start === current.start && expanded.end === current.end) {
-			continue;
-		}
-		const expandedMetrics = computeSemanticCoverageMetrics(
-			text.slice(expanded.start, expanded.end),
-			families,
-			segmentDescriptors,
-		);
-		if (!doesCoverageMetricsImprove(currentMetrics, expandedMetrics)) {
-			continue;
-		}
-		current = expanded;
-		currentMetrics = expandedMetrics;
-	}
-	return current;
-}
 
 function clampSnippetRangeToTokenBudget(
 	text: string,
@@ -1963,59 +1438,6 @@ function clampSnippetRangeToTokenBudget(
 		start += 1;
 	}
 	return { start, end };
-}
-
-function scoreSnippetPayload(
-	snippetText: string,
-	localRanges: readonly CoverageLexicalHighlightRange[],
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-	sourceWindowScore: number,
-	semanticScore: number,
-): number {
-	const metrics = computeSemanticCoverageMetrics(
-		snippetText,
-		families,
-		segmentDescriptors,
-	);
-	const compactnessBonus =
-		localRanges.length > 0
-			? 1 / Math.max(1, localRanges[localRanges.length - 1].end - localRanges[0].start)
-			: 0;
-	const finalCoveragePriority =
-		metrics.fullSegmentCount * 4000 +
-		metrics.bestSegmentCoverageCount * 900 +
-		metrics.familyHitCount * 400 +
-		metrics.bestSegmentCoverageRatio * 300;
-	return (
-		finalCoveragePriority +
-		semanticScore * 0.05 +
-		localRanges.length * 4 +
-		compactnessBonus +
-		sourceWindowScore * 0.01
-	);
-}
-
-function classifySnippetEvidenceType(
-	snippetText: string,
-	families: readonly CoverageLexicalFamily[],
-	charQuerySegments: readonly string[],
-): "full_segment" | "family_local" | "char_bridge" {
-	for (const segment of charQuerySegments) {
-		if (segment && snippetText.includes(segment)) {
-			return "full_segment";
-		}
-	}
-	for (const family of families) {
-		if (family.normalizedTerm && snippetText.toLowerCase().includes(family.normalizedTerm)) {
-			return "family_local";
-		}
-	}
-	return "char_bridge";
-}
-
-function buildSnippetRegionKey(row: number, anchorOffset: number): string {
-	return `anchor:${anchorOffset}`;
 }
 
 function rankSnippetPayloads(
@@ -2203,8 +1625,9 @@ function passesSnippetBudget(
 		return true;
 	}
 	if (
-		nearbySelected.some((item) => item.evidenceType === candidate.evidenceType) &&
-		candidate.evidenceType !== "full_segment"
+		nearbySelected.some(
+			(item) => item.semanticSignature === candidate.semanticSignature,
+		)
 	) {
 		return false;
 	}
