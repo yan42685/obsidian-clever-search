@@ -60,15 +60,15 @@ type HanSegmentDescriptor = {
 };
 
 const MAX_SNIPPET_WINDOW_CHARS = 220;
-const SNIPPET_LEADING_CONTEXT_CHARS = 24;
+const SNIPPET_LEADING_CONTEXT_CHARS = 12;
 const SNIPPET_TRAILING_CONTEXT_CHARS = 32;
 const MATCH_SEARCH_CONTEXT_CHARS = 96;
 const MIN_SNIPPET_SCORE = 24;
 const TARGET_SNIPPET_TOKEN_BUDGET = 40;
 const MAX_SNIPPET_EXPANSION_GAP_CHARS = 24;
-const SNIPPET_NEARBY_OFFSET_THRESHOLD = 96;
+const SNIPPET_NEARBY_OFFSET_THRESHOLD = 16;
 const FINAL_DUPLICATE_OFFSET_THRESHOLD = 72;
-const SNIPPET_REGION_BUCKET_CHARS = 128;
+const MAX_SNIPPET_DISTANCE_FROM_ANCHOR_CHARS = 48;
 
 @singleton()
 export class CoverageLexicalDirectSubItemBuilder {
@@ -82,38 +82,37 @@ export class CoverageLexicalDirectSubItemBuilder {
 		string,
 		Array<{ token: string; start: number; end: number }>
 	>();
-	private readonly charOffsetCache = new Map<
-		string,
-		Array<{ token: string; start: number; end: number }>
-	>();
 
 	async build(params: CoverageDirectSubItemBuilderParams): Promise<FileSubItem[]> {
 		const maxSubItemCount = Math.max(0, params.maxSubItemCount);
-		if (maxSubItemCount === 0 || params.bodyTokenSequence.length === 0) {
+		if (maxSubItemCount === 0) {
 			return [];
 		}
 		const displayWindows =
 			params.displayWindows?.slice(0, maxSubItemCount) ??
-			selectCoverageLexicalDisplayWindows(
-				params.bodyTokenSequence,
-				params.families,
-				params.pairSignatures,
-				maxSubItemCount,
-			);
-		if (displayWindows.length === 0) {
-			return [];
-		}
+			(params.bodyTokenSequence.length > 0
+				? selectCoverageLexicalDisplayWindows(
+						params.bodyTokenSequence,
+						params.families,
+						params.pairSignatures,
+						maxSubItemCount,
+				  )
+				: []);
 		const snapshotText = await this.readSnapshotText(
 			params.path,
 			params.bodyTextFallback,
 		);
 		if (!snapshotText) {
+			if (shouldLogCoverageLexicalHanSubitemDebug(params.debugQueryText)) {
+				logger.debug("[coverage-lexical][han-debug] subitems-empty", {
+					queryText: params.debugQueryText,
+					path: params.path,
+					stage: "snapshot-empty",
+				});
+			}
 			return [];
 		}
 		const tokenOffsets = this.getTokenOffsets(params.path, snapshotText);
-		if (tokenOffsets.length === 0) {
-			return [];
-		}
 		const charOffsets = this.getCharOffsets(params.path, snapshotText);
 		const lineOffsets = this.getLineOffsets(params.path, snapshotText);
 		const segmentDescriptors = buildHanSegmentDescriptors(
@@ -134,11 +133,53 @@ export class CoverageLexicalDirectSubItemBuilder {
 			);
 			payloads.push(...snippets);
 		}
+		const payloadCountBeforeCharFallback = payloads.length;
+		if (
+			payloads.length === 0 &&
+			((params.charQueryTerms?.length ?? 0) > 0 ||
+				(params.charQuerySegments?.length ?? 0) > 0)
+		) {
+			payloads.push(
+				...this.buildCharFallbackPayloads(
+					snapshotText,
+					lineOffsets,
+					tokenOffsets,
+					charOffsets,
+					params.charQueryTerms ?? [],
+					segmentDescriptors,
+					params.debugQueryText,
+					params.path,
+				),
+			);
+		}
 		const rankedPayloads = rankSnippetPayloads(payloads);
+		const diversePayloads = selectDiverseSnippetPayloads(
+			rankedPayloads,
+			maxSubItemCount * 3,
+		);
 		const selectedPayloads = dedupeFinalSnippetPayloads(
-			selectDiverseSnippetPayloads(rankedPayloads, maxSubItemCount * 3),
+			diversePayloads,
 			params.debugQueryText,
 		).slice(0, maxSubItemCount);
+		if (
+			selectedPayloads.length === 0 &&
+			shouldLogCoverageLexicalHanSubitemDebug(params.debugQueryText)
+		) {
+			logger.debug("[coverage-lexical][han-debug] subitems-empty", {
+				queryText: params.debugQueryText,
+				path: params.path,
+				stage: "no-selected-payloads",
+				displayWindowCount: displayWindows.length,
+				tokenOffsetCount: tokenOffsets.length,
+				charOffsetCount: charOffsets.length,
+				charQueryTermCount: params.charQueryTerms?.length ?? 0,
+				charQuerySegmentCount: params.charQuerySegments?.length ?? 0,
+				payloadCountBeforeCharFallback,
+				payloadCountAfterCharFallback: payloads.length,
+				rankedPayloadCount: rankedPayloads.length,
+				diversePayloadCount: diversePayloads.length,
+			});
+		}
 		const subItems = selectedPayloads.map((payload) => {
 			const subItem = new FileSubItem(
 				payload.text,
@@ -170,7 +211,100 @@ export class CoverageLexicalDirectSubItemBuilder {
 				})),
 			});
 		}
-		return subItems;
+			return subItems;
+	}
+
+	private buildCharFallbackPayloads(
+		text: string,
+		lineOffsets: readonly number[],
+		tokenOffsets: readonly TokenOffset[],
+		charOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
+		charQueryTerms: readonly string[],
+		segmentDescriptors: readonly HanSegmentDescriptor[],
+		debugQueryText?: string,
+		path?: string,
+	): CoverageSnippetPayload[] {
+		const searchRegion = { start: 0, end: text.length };
+		const matchedCharOffsets = charOffsets.filter((entry) =>
+			charQueryTerms.includes(entry.token),
+		);
+		const mergedRanges = collectMatchedRanges(
+			text,
+			tokenOffsets,
+			charOffsets,
+			searchRegion,
+			[],
+			charQueryTerms,
+			segmentDescriptors,
+		);
+		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
+			logger.debug("[coverage-lexical][han-debug] char-fallback", {
+				queryText: debugQueryText,
+				path,
+				stage:
+					mergedRanges.length === 0 ? "no-merged-ranges" : "merged-ranges",
+				matchedCharOffsetsCount: matchedCharOffsets.length,
+				matchedCharTokens: Array.from(
+					new Set(matchedCharOffsets.map((entry) => entry.token)),
+				),
+				mergedRanges,
+			});
+		}
+		if (mergedRanges.length === 0) {
+			return [];
+		}
+		const clusters = rankEvidenceClusters(
+			text,
+			mergedRanges,
+			[],
+			segmentDescriptors,
+		);
+		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
+			logger.debug("[coverage-lexical][han-debug] char-fallback", {
+				queryText: debugQueryText,
+				path,
+				stage: "clusters",
+				clusters: clusters.map((cluster) => ({
+					start: cluster.start,
+					end: cluster.end,
+					score: cluster.score,
+					text: text.slice(cluster.start, cluster.end),
+				})),
+			});
+		}
+		const payloads = clusters
+			.map((cluster) =>
+				buildSnippetPayloadFromCluster(
+					text,
+					lineOffsets,
+					mergedRanges,
+					cluster,
+					searchRegion,
+					[],
+					segmentDescriptors,
+					cluster.score,
+					debugQueryText,
+					path,
+				),
+			)
+			.filter((payload): payload is CoverageSnippetPayload => payload !== null)
+			.filter((payload) => payload.snippetScore >= MIN_SNIPPET_SCORE);
+		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
+			logger.debug("[coverage-lexical][han-debug] char-fallback", {
+				queryText: debugQueryText,
+				path,
+				stage: payloads.length === 0 ? "no-payloads" : "payloads",
+				payloads: payloads.map((payload) => ({
+					row: payload.row,
+					col: payload.col,
+					anchorOffset: payload.anchorOffset,
+					absoluteRange: payload.absoluteRange,
+					snippetScore: payload.snippetScore,
+					text: payload.text,
+				})),
+			});
+		}
+		return payloads;
 	}
 
 	private async readSnapshotText(
@@ -494,22 +628,39 @@ function filterCharRangesBySegmentCoverage(
 	);
 	const kept: CoverageLexicalHighlightRange[] = [];
 	for (const range of merged) {
-		const clusterBigramSet = new Set(
-			offsets
-				.filter((entry) => entry.start >= range.start && entry.end <= range.end)
-				.map((entry) => entry.token),
+		const clusterOffsets = offsets.filter(
+			(entry) => entry.start >= range.start && entry.end <= range.end,
 		);
 		for (const segment of segmentDescriptors) {
+			const matchedOffsets = clusterOffsets.filter((entry) =>
+				segment.bigrams.includes(entry.token),
+			);
+			const matchedTokenSet = new Set(matchedOffsets.map((entry) => entry.token));
 			const matchedCount = segment.bigrams.filter((token) =>
-				clusterBigramSet.has(token),
+				matchedTokenSet.has(token),
 			).length;
-			if (acceptsCharClusterCoverage(segment.bigrams.length, matchedCount)) {
-				kept.push(range);
+			const bestRunLength = computeBestBigramRunLength(
+				segment.bigrams,
+				matchedTokenSet,
+			);
+			if (
+				acceptsCharClusterCoverage(
+					segment.bigrams.length,
+					matchedCount,
+					bestRunLength,
+				)
+			) {
+				kept.push(
+					...matchedOffsets.map((entry) => ({
+						start: entry.start,
+						end: entry.end,
+					})),
+				);
 				break;
 			}
 		}
 	}
-	return kept;
+	return mergeRanges(kept);
 }
 
 function collectExactSegmentRanges(
@@ -579,7 +730,21 @@ function collectSnippetLevelSegmentRanges(
 		if (matchedOffsets.length === 0) {
 			continue;
 		}
-		if (!acceptsCharClusterCoverage(segment.bigrams.length, matchedOffsets.length)) {
+		const matchedTokenSet = new Set(matchedOffsets.map((entry) => entry.token));
+		const matchedCount = segment.bigrams.filter((token) =>
+			matchedTokenSet.has(token),
+		).length;
+		const bestRunLength = computeBestBigramRunLength(
+			segment.bigrams,
+			matchedTokenSet,
+		);
+		if (
+			!acceptsCharClusterCoverage(
+				segment.bigrams.length,
+				matchedCount,
+				bestRunLength,
+			)
+		) {
 			continue;
 		}
 		for (const entry of matchedOffsets) {
@@ -592,14 +757,35 @@ function collectSnippetLevelSegmentRanges(
 	return kept;
 }
 
-function acceptsCharClusterCoverage(totalBigrams: number, matchedCount: number): boolean {
+function acceptsCharClusterCoverage(
+	totalBigrams: number,
+	matchedCount: number,
+	bestRunLength: number,
+): boolean {
 	if (matchedCount <= 0 || totalBigrams <= 0) {
 		return false;
 	}
 	if (totalBigrams <= 2) {
 		return matchedCount === totalBigrams;
 	}
-	return matchedCount / totalBigrams >= 0.7;
+	return matchedCount / totalBigrams >= 0.7 || bestRunLength >= 2;
+}
+
+function computeBestBigramRunLength(
+	segmentBigrams: readonly string[],
+	matchedTokens: ReadonlySet<string>,
+): number {
+	let best = 0;
+	let current = 0;
+	for (const token of segmentBigrams) {
+		if (matchedTokens.has(token)) {
+			current += 1;
+			best = Math.max(best, current);
+			continue;
+		}
+		current = 0;
+	}
+	return best;
 }
 
 function pickAnchorOffset(
@@ -693,6 +879,8 @@ function buildSnippetPayloadFromCluster(
 	families: readonly CoverageLexicalFamily[],
 	segmentDescriptors: readonly HanSegmentDescriptor[],
 	sourceWindowScore: number,
+	debugQueryText?: string,
+	path?: string,
 ): CoverageSnippetPayload | null {
 	const anchorOffset = cluster.start;
 	const snippetRange = buildSnippetRange(
@@ -718,6 +906,32 @@ function buildSnippetPayloadFromCluster(
 		...snippetCharSegmentRanges,
 		...exactSegmentRanges,
 	]);
+	const snippetScore = scoreSnippetPayload(
+		snippetText,
+		mergedLocalRanges,
+		families,
+		segmentDescriptors,
+		sourceWindowScore,
+	);
+	if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
+		logger.debug("[coverage-lexical][han-debug] char-fallback-cluster", {
+			queryText: debugQueryText,
+			path,
+			cluster: {
+				start: cluster.start,
+				end: cluster.end,
+				score: cluster.score,
+				text: text.slice(cluster.start, cluster.end),
+			},
+			snippetRange,
+			snippetText,
+			familyRangeCount: familyRanges.length,
+			segmentRangeCount: snippetCharSegmentRanges.length,
+			exactSegmentRangeCount: exactSegmentRanges.length,
+			mergedLocalRangeCount: mergedLocalRanges.length,
+			snippetScore,
+		});
+	}
 	if (mergedLocalRanges.length === 0) {
 		return null;
 	}
@@ -744,13 +958,7 @@ function buildSnippetPayloadFromCluster(
 		highlightRanges: adjustedRanges,
 		anchorOffset,
 		absoluteRange: snippetRange,
-		snippetScore: scoreSnippetPayload(
-			snippetText,
-			mergedLocalRanges,
-			families,
-			segmentDescriptors,
-			sourceWindowScore,
-		),
+		snippetScore,
 		sourceWindowScore,
 		evidenceType: classifySnippetEvidenceType(
 			snippetText,
@@ -863,7 +1071,7 @@ function buildSnippetRange(
 		snippetRange,
 		allRanges,
 	);
-	return snippetRange;
+	return clampSnippetRangeToTokenBudget(text, snippetRange, anchorOffset);
 }
 
 function expandSnippetRangeForNearbyEvidence(
@@ -897,6 +1105,39 @@ function expandSnippetRangeForNearbyEvidence(
 		current = expanded;
 	}
 	return current;
+}
+
+function clampSnippetRangeToTokenBudget(
+	text: string,
+	range: CharRange,
+	anchorOffset: number,
+): CharRange {
+	let start = range.start;
+	let end = range.end;
+	const minStart = Math.max(0, anchorOffset - MAX_SNIPPET_DISTANCE_FROM_ANCHOR_CHARS);
+	const maxEnd = Math.min(
+		text.length,
+		anchorOffset + MAX_SNIPPET_DISTANCE_FROM_ANCHOR_CHARS,
+	);
+	if (start < minStart) {
+		start = minStart;
+	}
+	if (end > maxEnd) {
+		end = maxEnd;
+	}
+	while (
+		end - start > 1 &&
+		estimateTokenCount(text.slice(start, end)) > TARGET_SNIPPET_TOKEN_BUDGET
+	) {
+		const leftDistance = Math.max(0, anchorOffset - start);
+		const rightDistance = Math.max(0, end - anchorOffset);
+		if (rightDistance > leftDistance) {
+			end -= 1;
+			continue;
+		}
+		start += 1;
+	}
+	return { start, end };
 }
 
 function scoreSnippetPayload(
@@ -973,7 +1214,7 @@ function classifySnippetEvidenceType(
 }
 
 function buildSnippetRegionKey(row: number, anchorOffset: number): string {
-	return `bucket:${Math.floor(anchorOffset / SNIPPET_REGION_BUCKET_CHARS)}`;
+	return `anchor:${anchorOffset}`;
 }
 
 function rankSnippetPayloads(
@@ -998,8 +1239,6 @@ function selectDiverseSnippetPayloads(
 	maxSubItemCount: number,
 ): CoverageSnippetPayload[] {
 	const selected: CoverageSnippetPayload[] = [];
-	const regionCounts = new Map<string, number>();
-	const evidenceCounts = new Map<CoverageSnippetPayload["evidenceType"], number>();
 	if (payloads.length === 0 || maxSubItemCount <= 0) {
 		return selected;
 	}
@@ -1015,18 +1254,11 @@ function selectDiverseSnippetPayloads(
 				selected,
 				payload,
 				maxSubItemCount,
-				regionCounts,
-				evidenceCounts,
 			)
 		) {
 			continue;
 		}
 		selected.push(payload);
-		regionCounts.set(payload.regionKey, (regionCounts.get(payload.regionKey) ?? 0) + 1);
-		evidenceCounts.set(
-			payload.evidenceType,
-			(evidenceCounts.get(payload.evidenceType) ?? 0) + 1,
-		);
 	}
 	return selected;
 }
@@ -1073,28 +1305,34 @@ function shouldDedupeFinalSnippet(
 	left: CoverageSnippetPayload,
 	right: CoverageSnippetPayload,
 ): boolean {
-	if (computeRangeGap(left.absoluteRange, right.absoluteRange) <= 0) {
-		return true;
-	}
+	const rangeGap = computeRangeGap(left.absoluteRange, right.absoluteRange);
+	const rangeOverlap = computeRangeOverlapRatio(
+		left.absoluteRange,
+		right.absoluteRange,
+	);
 	const offsetsAreNear =
 		Math.abs(left.anchorOffset - right.anchorOffset) <= FINAL_DUPLICATE_OFFSET_THRESHOLD;
-	if (!offsetsAreNear && computeRangeGap(left.absoluteRange, right.absoluteRange) > 16) {
+	if (!offsetsAreNear && rangeGap > 16) {
 		return false;
+	}
+	if (rangeOverlap >= 0.9) {
+		return true;
 	}
 	if (
 		Math.abs((left.snippetScore ?? 0) - (right.snippetScore ?? 0)) <= 8 &&
-		areSnippetTextsEffectivelyContained(left.text, right.text)
+		areSnippetTextsEffectivelyContained(left.text, right.text) &&
+		(offsetsAreNear || rangeGap <= 8 || rangeOverlap >= 0.72)
 	) {
 		return true;
 	}
 	if (
-		(offsetsAreNear || computeRangeGap(left.absoluteRange, right.absoluteRange) <= 16) &&
-		computeRangeOverlapRatio(left.absoluteRange, right.absoluteRange) >= 0.82
+		(offsetsAreNear || rangeGap <= 8) &&
+		rangeOverlap >= 0.82
 	) {
 		return true;
 	}
 	if (
-		(offsetsAreNear || computeRangeGap(left.absoluteRange, right.absoluteRange) <= 16) &&
+		(offsetsAreNear || rangeGap <= 8 || rangeOverlap >= 0.72) &&
 		computeSnippetTextOverlapRatio(left.text, right.text) >= 0.72
 	) {
 		return true;
@@ -1118,11 +1356,11 @@ function passesSnippetBudget(
 	selected: readonly CoverageSnippetPayload[],
 	candidate: CoverageSnippetPayload,
 	maxSubItemCount: number,
-	regionCounts: ReadonlyMap<string, number>,
-	evidenceCounts: ReadonlyMap<CoverageSnippetPayload["evidenceType"], number>,
 ): boolean {
-	const sameRegionCount = regionCounts.get(candidate.regionKey) ?? 0;
-	if (sameRegionCount >= 2) {
+	const nearbySelected = selected.filter((item) =>
+		areSnippetPayloadsNearby(item, candidate),
+	);
+	if (nearbySelected.length >= 2) {
 		return false;
 	}
 	if (
@@ -1133,8 +1371,7 @@ function passesSnippetBudget(
 		return true;
 	}
 	if (
-		sameRegionCount >= 1 &&
-		evidenceCounts.get(candidate.evidenceType) !== undefined &&
+		nearbySelected.some((item) => item.evidenceType === candidate.evidenceType) &&
 		candidate.evidenceType !== "full_segment"
 	) {
 		return false;
@@ -1148,23 +1385,41 @@ function passesSnippetBudget(
 	return true;
 }
 
+function areSnippetPayloadsNearby(
+	left: CoverageSnippetPayload,
+	right: CoverageSnippetPayload,
+): boolean {
+	return (
+		computeRangeGap(left.absoluteRange, right.absoluteRange) <= 48 ||
+		Math.abs(left.anchorOffset - right.anchorOffset) <= SNIPPET_NEARBY_OFFSET_THRESHOLD
+	);
+}
+
 function shouldDedupeSnippetPayload(
 	left: CoverageSnippetPayload,
 	right: CoverageSnippetPayload,
 ): boolean {
-	if (computeRangeGap(left.absoluteRange, right.absoluteRange) <= 0) {
+	const rangeGap = computeRangeGap(left.absoluteRange, right.absoluteRange);
+	const rangeOverlap = computeRangeOverlapRatio(
+		left.absoluteRange,
+		right.absoluteRange,
+	);
+	if (rangeOverlap >= 0.9) {
 		return true;
 	}
 	if (
 		Math.abs(left.anchorOffset - right.anchorOffset) <= SNIPPET_NEARBY_OFFSET_THRESHOLD &&
-		computeRangeGap(left.absoluteRange, right.absoluteRange) <= 24
+		(rangeGap <= 24 || rangeOverlap >= 0.72)
 	) {
 		return true;
 	}
-	if (computeRangeOverlapRatio(left.absoluteRange, right.absoluteRange) >= 0.72) {
+	if (rangeOverlap >= 0.82 && rangeGap <= 8) {
 		return true;
 	}
-	return computeSnippetTextOverlapRatio(left.text, right.text) >= 0.82;
+	return (
+		computeSnippetTextOverlapRatio(left.text, right.text) >= 0.82 &&
+		(rangeGap <= 8 || Math.abs(left.anchorOffset - right.anchorOffset) <= 32)
+	);
 }
 
 function computeRangeOverlapRatio(left: CharRange, right: CharRange): number {

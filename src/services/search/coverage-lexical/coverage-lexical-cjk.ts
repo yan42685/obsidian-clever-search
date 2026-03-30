@@ -72,12 +72,15 @@ export function extractHanBigramsWithOffsets(
 	text: string,
 ): CoverageLexicalCharOffset[] {
 	const out: CoverageLexicalCharOffset[] = [];
-	for (const match of normalizeCoverageLexicalText(text).matchAll(HAN_SEQUENCE_REGEX)) {
-		const chars = Array.from(match[0]);
+	for (const match of text.matchAll(HAN_SEQUENCE_REGEX)) {
+		const rawChars = Array.from(match[0]);
 		const base = match.index ?? 0;
-		for (let index = 0; index < chars.length - 1; index++) {
+		for (let index = 0; index < rawChars.length - 1; index++) {
+			const token = normalizeCoverageLexicalText(
+				rawChars[index] + rawChars[index + 1],
+			);
 			out.push({
-				token: chars[index] + chars[index + 1],
+				token,
 				start: base + index,
 				end: base + index + 2,
 			});

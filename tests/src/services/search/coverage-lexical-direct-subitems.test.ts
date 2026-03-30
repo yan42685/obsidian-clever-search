@@ -349,6 +349,81 @@ describe("coverage lexical direct subitems", () => {
 		expect(highlighted).toContain("\u4e0a\u9762\u8fd9");
 	});
 
+	test("builds a char-only local subitem when no display windows are available", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: [];
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/char-only-subitem.md",
+			bodyTextFallback:
+				"\u8fd9\u91cc\u8bb0\u4e86\u4e00\u4e0b\u756a\u8304\u949f\u7684\u4f7f\u7528\u4f53\u9a8c\u3002",
+			bodyTokenSequence: [],
+			families: [],
+			pairSignatures: [],
+			maxSubItemCount: 2,
+			charQueryTerms: ["\u65f6\u95f4", "\u95f4\u756a", "\u756a\u8304", "\u8304\u949f"],
+			charQuerySegments: ["\u65f6\u95f4\u756a\u8304\u949f"],
+			displayWindows: [],
+		});
+
+		expect(subItems.length).toBeGreaterThan(0);
+		expect(subItems.some((item) => item.text.includes("\u756a\u8304\u949f"))).toBe(true);
+	});
+
+	test("keeps Han char fallback offsets aligned even when earlier text changes length under NFKC", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: [];
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/nfkc-offsets.md",
+			bodyTextFallback:
+				"\u2163\u2163\u2163 compatibility prefix\n\u8fd9\u91cc\u6709\u4e00\u6bb5\u756a\u8304\u949f\u8bb0\u5f55\u3002",
+			bodyTokenSequence: [],
+			families: [],
+			pairSignatures: [],
+			maxSubItemCount: 2,
+			charQueryTerms: ["\u65f6\u95f4", "\u95f4\u756a", "\u756a\u8304", "\u8304\u949f"],
+			charQuerySegments: ["\u65f6\u95f4\u756a\u8304\u949f"],
+			displayWindows: [],
+		});
+
+		expect(subItems.length).toBeGreaterThan(0);
+		expect(subItems.some((item) => item.text.includes("\u756a\u8304\u949f"))).toBe(true);
+		expect(subItems.some((item) => item.text.includes("compatibility prefix"))).toBe(false);
+	});
+
 	test("keeps char highlight when a Han query segment is matched across multiple local clusters in one snippet", async () => {
 		const { CoverageLexicalDirectSubItemBuilder } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
