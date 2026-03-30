@@ -1,10 +1,29 @@
 import {
 	buildDirectSubitemsExactCandidates,
+	buildDirectSubitemsExactCandidateSpans,
 	buildDirectSubitemsExactFileSubItems,
+	buildSupplementalCoverageSpans,
 	collectDirectSubitemsExactOccurrences,
 	compareDirectSubitemsScoreTuples,
+	dedupeDirectSubitemsCandidateSpans,
 	splitDirectSubitemsQueryTerms,
 } from "src/services/search/coverage-lexical/direct-subitems";
+
+function collectOccurrenceKeys(
+	occurrences: ReadonlyArray<{
+		termId: string;
+		start: number;
+		end: number;
+		tier: string;
+	}>,
+): Set<string> {
+	return new Set(
+		occurrences.map(
+			(occurrence) =>
+				`${occurrence.termId}:${occurrence.start}:${occurrence.end}:${occurrence.tier}`,
+		),
+	);
+}
 
 function collectCoveredOccurrenceKeys(
 	spans: ReturnType<typeof buildDirectSubitemsExactCandidates>["candidateSpans"],
@@ -319,5 +338,104 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		expect(result.renderPayloads[0].text.toLowerCase()).toContain("plugins");
 		expect(result.renderPayloads[1].text.toLowerCase()).toContain("plugin");
 		expect(result.renderPayloads[2].text.toLowerCase()).toContain("plugons");
+	});
+
+	test("coverage-complete fallback restores exact occurrences absent from the initial span set", () => {
+		const queryTerms = splitDirectSubitemsQueryTerms("alpha");
+		const snapshotText = `alpha${"x".repeat(96)}alpha`;
+		const exactOccurrences = collectDirectSubitemsExactOccurrences(
+			snapshotText,
+			queryTerms,
+		);
+		const initialSpans = buildDirectSubitemsExactCandidateSpans({
+			snapshotText,
+			queryTerms,
+			anchorOccurrences: [exactOccurrences[0]],
+			allOccurrences: exactOccurrences,
+			options: {
+				mergeGap: 8,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+		const deduped = dedupeDirectSubitemsCandidateSpans(initialSpans);
+		const supplemental = buildSupplementalCoverageSpans({
+			snapshotText,
+			queryTerms,
+			exactOccurrences,
+			existingSpans: deduped,
+			options: {
+				mergeGap: 8,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(exactOccurrences).toHaveLength(2);
+		expect(deduped).toHaveLength(1);
+		expect(supplemental).toHaveLength(1);
+		expect(collectCoveredOccurrenceKeys([...deduped, ...supplemental])).toEqual(
+			collectOccurrenceKeys(exactOccurrences),
+		);
+	});
+
+	test("keeps distant spans with the same realized term signature after dedupe", () => {
+		const snapshotText = ["alpha beta", "x".repeat(72), "alpha beta"].join("");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText,
+			options: {
+				mergeGap: 12,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+		const spansByStart = [...result.candidateSpans].sort(
+			(left, right) => left.start - right.start,
+		);
+
+		expect(result.candidateSpans).toHaveLength(2);
+		expect(spansByStart[0].termSignature).toEqual(
+			spansByStart[1].termSignature,
+		);
+		expect(new Set(spansByStart.map((span) => `${span.start}:${span.end}`)).size).toBe(
+			2,
+		);
+		expect(result.renderPayloads).toHaveLength(2);
+		expect(
+			result.renderPayloads.every((payload) => payload.text.includes("alpha beta")),
+		).toBe(true);
+	});
+
+	test("keeps dense repeated Han evidence local without candidate explosion or accidental merge", () => {
+		const queryText = "\u6062\u590d\u7f13\u5b58";
+		const snapshotText = [
+			"\u6062\u6062\u6062\u6062\u6062\u590d\u590d\u590d\u7f13\u7f13\u7f13\u5b58\u5b58\u5b58",
+			"x".repeat(72),
+			"\u6062\u6062\u590d\u7f13\u5b58",
+		].join("");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText,
+			snapshotText,
+			options: {
+				mergeGap: 12,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+		const spansByStart = [...result.candidateSpans].sort(
+			(left, right) => left.start - right.start,
+		);
+
+		expect(result.exactOccurrences.length).toBeGreaterThanOrEqual(12);
+		expect(result.candidateSpans).toHaveLength(2);
+		expect(result.candidateSpans.every((span) => span.score.coverageCount === 4)).toBe(
+			true,
+		);
+		expect(spansByStart[1].start - spansByStart[0].end).toBeGreaterThan(40);
 	});
 });
