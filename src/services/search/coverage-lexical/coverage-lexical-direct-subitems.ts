@@ -118,7 +118,6 @@ const SNIPPET_NEARBY_OFFSET_THRESHOLD = 16;
 const FINAL_DUPLICATE_OFFSET_THRESHOLD = 72;
 const MAX_SNIPPET_DISTANCE_FROM_ANCHOR_CHARS = 48;
 const MAX_SEMANTIC_ISLAND_GAP_CHARS = 24;
-const HIGHLIGHT_BOUNDARY_UNIGRAM_GAP_CHARS = 24;
 
 @singleton()
 export class CoverageLexicalDirectSubItemBuilder {
@@ -153,13 +152,10 @@ export class CoverageLexicalDirectSubItemBuilder {
 			params.bodyTextFallback,
 		);
 		if (!snapshotText) {
-			if (shouldLogCoverageLexicalHanSubitemDebug(params.debugQueryText)) {
-				logger.debug("[coverage-lexical][han-debug] subitems-empty", {
-					queryText: params.debugQueryText,
-					path: params.path,
-					stage: "snapshot-empty",
-				});
-			}
+			logHanSubitemDebug(params.debugQueryText, "subitems-empty", {
+				path: params.path,
+				stage: "snapshot-empty",
+			});
 			return [];
 		}
 		const tokenOffsets = this.getTokenOffsets(params.path, snapshotText);
@@ -215,8 +211,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 			selectedPayloads.length === 0 &&
 			shouldLogCoverageLexicalHanSubitemDebug(params.debugQueryText)
 		) {
-			logger.debug("[coverage-lexical][han-debug] subitems-empty", {
-				queryText: params.debugQueryText,
+			logHanSubitemDebug(params.debugQueryText, "subitems-empty", {
 				path: params.path,
 				stage: "no-selected-payloads",
 				displayWindowCount: displayWindows.length,
@@ -245,22 +240,19 @@ export class CoverageLexicalDirectSubItemBuilder {
 			}));
 			return subItem;
 		});
-		if (shouldLogCoverageLexicalHanSubitemDebug(params.debugQueryText)) {
-			logger.debug("[coverage-lexical][han-debug] subitems-final", {
-				queryText: params.debugQueryText,
-				path: params.path,
-				payloads: selectedPayloads.map((payload) => ({
-					row: payload.row,
-					col: payload.col,
-					anchorOffset: payload.anchorOffset,
-					absoluteRange: payload.absoluteRange,
-					snippetScore: payload.snippetScore,
-					sourceWindowScore: payload.sourceWindowScore,
-					text: payload.text,
-					highlightRanges: payload.highlightRanges,
-				})),
-			});
-		}
+		logHanSubitemDebug(params.debugQueryText, "subitems-final", {
+			path: params.path,
+			payloads: selectedPayloads.map((payload) => ({
+				row: payload.row,
+				col: payload.col,
+				anchorOffset: payload.anchorOffset,
+				absoluteRange: payload.absoluteRange,
+				snippetScore: payload.snippetScore,
+				sourceWindowScore: payload.sourceWindowScore,
+				text: payload.text,
+				highlightRanges: payload.highlightRanges,
+			})),
+		});
 			return subItems;
 	}
 
@@ -287,71 +279,88 @@ export class CoverageLexicalDirectSubItemBuilder {
 			charQueryTerms,
 			segmentDescriptors,
 		);
-		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
-			logger.debug("[coverage-lexical][han-debug] char-fallback", {
-				queryText: debugQueryText,
-				path,
-				stage:
-					atoms.length === 0 ? "no-merged-ranges" : "merged-ranges",
-				matchedCharOffsetsCount: matchedCharOffsets.length,
-				matchedCharTokens: Array.from(
-					new Set(matchedCharOffsets.map((entry) => entry.token)),
-				),
-				mergedRanges: mergeRanges(
-					atoms.map((atom) => ({ start: atom.start, end: atom.end })),
-				),
-			});
-		}
+		logHanSubitemDebug(debugQueryText, "char-fallback", {
+			path,
+			stage: atoms.length === 0 ? "no-merged-ranges" : "merged-ranges",
+			matchedCharOffsetsCount: matchedCharOffsets.length,
+			matchedCharTokens: Array.from(
+				new Set(matchedCharOffsets.map((entry) => entry.token)),
+			),
+			mergedRanges: mergeRanges(
+				atoms.map((atom) => ({ start: atom.start, end: atom.end })),
+			),
+		});
 		if (atoms.length === 0) {
 			return [];
 		}
 		const islands = rankSnippetSemanticIslands(atoms);
-		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
-			logger.debug("[coverage-lexical][han-debug] char-fallback", {
-				queryText: debugQueryText,
-				path,
-				stage: "clusters",
-				clusters: islands.map((island) => ({
-					start: island.start,
-					end: island.end,
-					score: island.score,
-					text: text.slice(island.start, island.end),
-				})),
-			});
-		}
-		const payloads = islands
+		logHanSubitemDebug(debugQueryText, "char-fallback", {
+			path,
+			stage: "clusters",
+			clusters: islands.map((island) => ({
+				start: island.start,
+				end: island.end,
+				score: island.score,
+				text: text.slice(island.start, island.end),
+			})),
+		});
+		const payloads = this.buildPayloadsFromAtoms(
+			text,
+			lineOffsets,
+			atoms,
+			searchRegion,
+			[],
+			segmentDescriptors,
+			0,
+			debugQueryText,
+			path,
+			islands,
+		);
+		logHanSubitemDebug(debugQueryText, "char-fallback", {
+			path,
+			stage: payloads.length === 0 ? "no-payloads" : "payloads",
+			payloads: payloads.map((payload) => ({
+				row: payload.row,
+				col: payload.col,
+				anchorOffset: payload.anchorOffset,
+				absoluteRange: payload.absoluteRange,
+				snippetScore: payload.snippetScore,
+				text: payload.text,
+			})),
+		});
+		return payloads;
+	}
+
+	private buildPayloadsFromAtoms(
+		text: string,
+		lineOffsets: readonly number[],
+		atoms: readonly SnippetMatchAtom[],
+		approximateWindow: CharRange,
+		families: readonly CoverageLexicalFamily[],
+		segmentDescriptors: readonly HanSegmentDescriptor[],
+		sourceWindowScore: number,
+		debugQueryText?: string,
+		path?: string,
+		precomputedIslands?: readonly SnippetSemanticIsland[],
+	): CoverageSnippetPayload[] {
+		const islands = precomputedIslands ?? rankSnippetSemanticIslands(atoms);
+		return islands
 			.map((island) =>
 				buildSnippetPayloadFromIsland(
 					text,
 					lineOffsets,
 					atoms,
 					island,
-					searchRegion,
-					[],
+					approximateWindow,
+					families,
 					segmentDescriptors,
-					island.score,
+					sourceWindowScore || island.score,
 					debugQueryText,
 					path,
 				),
 			)
 			.filter((payload): payload is CoverageSnippetPayload => payload !== null)
 			.filter((payload) => payload.snippetScore >= MIN_SNIPPET_SCORE);
-		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
-			logger.debug("[coverage-lexical][han-debug] char-fallback", {
-				queryText: debugQueryText,
-				path,
-				stage: payloads.length === 0 ? "no-payloads" : "payloads",
-				payloads: payloads.map((payload) => ({
-					row: payload.row,
-					col: payload.col,
-					anchorOffset: payload.anchorOffset,
-					absoluteRange: payload.absoluteRange,
-					snippetScore: payload.snippetScore,
-					text: payload.text,
-				})),
-			});
-		}
-		return payloads;
 	}
 
 	private async readSnapshotText(
@@ -464,22 +473,15 @@ export class CoverageLexicalDirectSubItemBuilder {
 		if (atoms.length === 0) {
 			return [];
 		}
-		const islands = rankSnippetSemanticIslands(atoms);
-		return islands
-			.map((island) =>
-				buildSnippetPayloadFromIsland(
-					text,
-					lineOffsets,
-					atoms,
-					island,
-					approximateWindow,
-					matchedFamilies,
-					segmentDescriptors,
-					window.signal.score,
-				),
-			)
-			.filter((payload): payload is CoverageSnippetPayload => payload !== null)
-			.filter((payload) => payload.snippetScore >= MIN_SNIPPET_SCORE);
+		return this.buildPayloadsFromAtoms(
+			text,
+			lineOffsets,
+			atoms,
+			approximateWindow,
+			matchedFamilies,
+			segmentDescriptors,
+			window.signal.score,
+		);
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -532,238 +534,6 @@ function expandRange(
 }
 
 
-function collectExactSegmentRanges(
-	snippetText: string,
-	charQuerySegments: readonly string[],
-): CoverageLexicalHighlightRange[] {
-	const ranges: CoverageLexicalHighlightRange[] = [];
-	for (const segment of charQuerySegments) {
-		if (!segment) {
-			continue;
-		}
-		ranges.push(...collectExactHanSubspanHighlightRanges(snippetText, segment));
-	}
-	return mergeRanges(ranges);
-}
-
-function collectExactHanSubspanHighlightRanges(
-	snippetText: string,
-	segment: string,
-): CoverageLexicalHighlightRange[] {
-	const out: CoverageLexicalHighlightRange[] = [];
-	const chars = Array.from(segment);
-	let bestFoundLength = 0;
-	const longerRanges: CoverageLexicalHighlightRange[] = [];
-	for (let length = chars.length; length >= 2; length--) {
-		for (let start = 0; start + length <= chars.length; start++) {
-			const subspan = chars.slice(start, start + length).join("");
-			let fromIndex = 0;
-			while (fromIndex < snippetText.length) {
-				const foundAt = snippetText.indexOf(subspan, fromIndex);
-				if (foundAt < 0) {
-					break;
-				}
-				longerRanges.push({
-					start: foundAt,
-					end: foundAt + subspan.length,
-				});
-				bestFoundLength = Math.max(bestFoundLength, subspan.length);
-				fromIndex = foundAt + Math.max(1, subspan.length);
-			}
-		}
-	}
-	out.push(
-		...mergeRanges(
-			longerRanges.filter((range) => range.end - range.start === bestFoundLength),
-		),
-	);
-	if (chars.length <= 3 && bestFoundLength >= 2) {
-		const boundaryChars = [chars[0], chars[chars.length - 1]].filter(
-			(char, index, arr) => arr.indexOf(char) === index,
-		);
-		for (const char of boundaryChars) {
-			let fromIndex = 0;
-			while (fromIndex < snippetText.length) {
-				const foundAt = snippetText.indexOf(char, fromIndex);
-				if (foundAt < 0) {
-					break;
-				}
-				const unigramRange = {
-					start: foundAt,
-					end: foundAt + char.length,
-				};
-				if (
-					out.some(
-						(existing) =>
-							computeRangeGap(existing, unigramRange) <=
-							HIGHLIGHT_BOUNDARY_UNIGRAM_GAP_CHARS,
-					)
-				) {
-					out.push(unigramRange);
-				}
-				fromIndex = foundAt + 1;
-			}
-		}
-	}
-	return mergeRanges(out);
-}
-
-function collectSnippetFamilyRanges(
-	snippetText: string,
-	families: readonly CoverageLexicalFamily[],
-): CoverageLexicalHighlightRange[] {
-	const ranges: CoverageLexicalHighlightRange[] = [];
-	const haystack = snippetText.toLowerCase();
-	for (const family of families) {
-		if (!family.normalizedTerm) {
-			continue;
-		}
-		let fromIndex = 0;
-		while (fromIndex < haystack.length) {
-			const foundAt = haystack.indexOf(family.normalizedTerm, fromIndex);
-			if (foundAt < 0) {
-				break;
-			}
-			ranges.push({
-				start: foundAt,
-				end: foundAt + family.normalizedTerm.length,
-			});
-			fromIndex = foundAt + Math.max(1, family.normalizedTerm.length);
-		}
-	}
-	return ranges;
-}
-
-function collectSnippetLevelSegmentRanges(
-	snippetText: string,
-	segmentDescriptors: readonly HanSegmentDescriptor[],
-): CoverageLexicalHighlightRange[] {
-	const kept: CoverageLexicalHighlightRange[] = [];
-	const snippetBigramOffsets = extractHanBigramsWithOffsets(snippetText);
-	for (const segment of segmentDescriptors) {
-		if (segment.bigrams.length === 0) {
-			continue;
-		}
-		const matchedOffsets = snippetBigramOffsets.filter((entry) =>
-			segment.bigrams.includes(entry.token),
-		);
-		if (matchedOffsets.length === 0) {
-			continue;
-		}
-		const matchedTokenSet = new Set(matchedOffsets.map((entry) => entry.token));
-		const matchedCount = segment.bigrams.filter((token) =>
-			matchedTokenSet.has(token),
-		).length;
-		const bestRunLength = computeBestBigramRunLength(
-			segment.bigrams,
-			matchedTokenSet,
-		);
-		const runRanges = collectSnippetSegmentRunRanges(
-			snippetText,
-			segment,
-			matchedTokenSet,
-		);
-		if (
-			acceptsCharClusterCoverage(
-				segment.bigrams.length,
-				matchedCount,
-				bestRunLength,
-			)
-		) {
-			if (runRanges.length > 0) {
-				kept.push(...runRanges);
-				continue;
-			}
-			for (const entry of matchedOffsets) {
-				kept.push({
-					start: entry.start,
-					end: entry.end,
-				});
-			}
-			continue;
-		}
-		kept.push(...runRanges);
-	}
-	return mergeRanges(kept);
-}
-
-function acceptsCharClusterCoverage(
-	totalBigrams: number,
-	matchedCount: number,
-	bestRunLength: number,
-): boolean {
-	if (matchedCount <= 0 || totalBigrams <= 0) {
-		return false;
-	}
-	if (totalBigrams <= 2) {
-		return matchedCount === totalBigrams;
-	}
-	return matchedCount / totalBigrams >= 0.7 || bestRunLength >= 2;
-}
-
-function computeBestBigramRunLength(
-	segmentBigrams: readonly string[],
-	matchedTokens: ReadonlySet<string>,
-): number {
-	let best = 0;
-	let current = 0;
-	for (const token of segmentBigrams) {
-		if (matchedTokens.has(token)) {
-			current += 1;
-			best = Math.max(best, current);
-			continue;
-		}
-		current = 0;
-	}
-	return best;
-}
-
-function collectSnippetSegmentRunRanges(
-	snippetText: string,
-	segment: HanSegmentDescriptor,
-	matchedTokens: ReadonlySet<string>,
-): CoverageLexicalHighlightRange[] {
-	const chars = Array.from(segment.text);
-	const runs: Array<{ startBigram: number; endBigram: number }> = [];
-	let runStart = -1;
-	for (let index = 0; index < segment.bigrams.length; index++) {
-		if (matchedTokens.has(segment.bigrams[index])) {
-			if (runStart < 0) {
-				runStart = index;
-			}
-			continue;
-		}
-		if (runStart >= 0) {
-			runs.push({ startBigram: runStart, endBigram: index - 1 });
-			runStart = -1;
-		}
-	}
-	if (runStart >= 0) {
-		runs.push({ startBigram: runStart, endBigram: segment.bigrams.length - 1 });
-	}
-	const ranges: CoverageLexicalHighlightRange[] = [];
-	for (const run of runs) {
-		const subspan = chars
-			.slice(run.startBigram, run.endBigram + 2)
-			.join("");
-		if (subspan.length < 2) {
-			continue;
-		}
-		let fromIndex = 0;
-		while (fromIndex < snippetText.length) {
-			const foundAt = snippetText.indexOf(subspan, fromIndex);
-			if (foundAt < 0) {
-				break;
-			}
-			ranges.push({
-				start: foundAt,
-				end: foundAt + subspan.length,
-			});
-			fromIndex = foundAt + Math.max(1, subspan.length);
-		}
-	}
-	return mergeRanges(ranges);
-}
 
 
 function collectSnippetMatchAtoms(
@@ -1295,29 +1065,26 @@ function buildSnippetPayloadFromIsland(
 		semanticSpan.semanticScore * 0.05 +
 		highlightRanges.length * 4 +
 		sourceWindowScore * 0.01;
-	if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
-		logger.debug("[coverage-lexical][han-debug] snippet-atom-span", {
-			queryText: debugQueryText,
-			path,
-			island: {
-				start: island.start,
-				end: island.end,
-				score: island.score,
-				signature: island.metrics.signature,
-			},
-			semanticSpan: {
-				range: semanticSpan.range,
-				semanticScore: semanticSpan.semanticScore,
-				coverageCount: semanticSpan.coverageCount,
-				signature: semanticSpan.signature,
-			},
-			snippetRange,
-			snippetText,
-			finalSignature: finalMetrics.signature,
-			highlightRangeCount: highlightRanges.length,
-			snippetScore,
-		});
-	}
+	logHanSubitemDebug(debugQueryText, "snippet-atom-span", {
+		path,
+		island: {
+			start: island.start,
+			end: island.end,
+			score: island.score,
+			signature: island.metrics.signature,
+		},
+		semanticSpan: {
+			range: semanticSpan.range,
+			semanticScore: semanticSpan.semanticScore,
+			coverageCount: semanticSpan.coverageCount,
+			signature: semanticSpan.signature,
+		},
+		snippetRange,
+		snippetText,
+		finalSignature: finalMetrics.signature,
+		highlightRangeCount: highlightRanges.length,
+		snippetScore,
+	});
 	if (highlightRanges.length === 0) {
 		return null;
 	}
@@ -1518,29 +1285,23 @@ function dedupeFinalSnippetPayloads(
 			shouldDedupeFinalSnippet(existing, payload),
 		);
 		if (duplicateOf) {
-			if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
-				logger.debug("[coverage-lexical][han-debug] final-dedupe-drop", {
-					queryText: debugQueryText,
-					dropped: summarizeSnippetPayload(payload),
-					kept: summarizeSnippetPayload(duplicateOf),
-					rangeOverlap: computeRangeOverlapRatio(
-						duplicateOf.absoluteRange,
-						payload.absoluteRange,
-					),
-					textOverlap: computeSnippetTextOverlapRatio(
-						duplicateOf.text,
-						payload.text,
-					),
-				});
-			}
+			logHanSubitemDebug(debugQueryText, "final-dedupe-drop", {
+				dropped: summarizeSnippetPayload(payload),
+				kept: summarizeSnippetPayload(duplicateOf),
+				rangeOverlap: computeRangeOverlapRatio(
+					duplicateOf.absoluteRange,
+					payload.absoluteRange,
+				),
+				textOverlap: computeSnippetTextOverlapRatio(
+					duplicateOf.text,
+					payload.text,
+				),
+			});
 			continue;
 		}
-		if (shouldLogCoverageLexicalHanSubitemDebug(debugQueryText)) {
-			logger.debug("[coverage-lexical][han-debug] final-dedupe-keep", {
-				queryText: debugQueryText,
-				payload: summarizeSnippetPayload(payload),
-			});
-		}
+		logHanSubitemDebug(debugQueryText, "final-dedupe-keep", {
+			payload: summarizeSnippetPayload(payload),
+		});
 		selected.push(payload);
 	}
 	return selected;
@@ -1871,4 +1632,18 @@ function shouldLogCoverageLexicalHanSubitemDebug(
 	queryText: string | undefined,
 ): boolean {
 	return !!queryText && /[\u4e00-\u9fff]/.test(queryText) && queryText.trim().length <= 24;
+}
+
+function logHanSubitemDebug(
+	queryText: string | undefined,
+	stage: string,
+	payload: Record<string, unknown>,
+): void {
+	if (!shouldLogCoverageLexicalHanSubitemDebug(queryText)) {
+		return;
+	}
+	logger.debug(`[coverage-lexical][han-debug] ${stage}`, {
+		queryText,
+		...payload,
+	});
 }
