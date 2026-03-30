@@ -878,6 +878,151 @@ describe("coverage lexical direct subitems", () => {
 		expect(subItems[0].text).toContain("\u4e0d\u7a33");
 	});
 
+	test("treats latin words as whole alignment units for highlight", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					debugQueryText?: string;
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string; highlightRanges?: Array<{ start: number; end: number }> }>>;
+			};
+		};
+
+		const text = "Image Inserter helps quickly insert images.";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/latin-unit.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: ["image", "inserter", "helps", "quickly", "insert", "images"],
+			families: [createFamily(0, "inserter")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			debugQueryText: "inserter",
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 1,
+					signal: {
+						start: 0,
+						end: 1,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		const highlighted = (subItems[0].highlightRanges ?? []).map((range) =>
+			subItems[0].text.slice(range.start, range.end).toLowerCase(),
+		);
+		expect(highlighted).toContain("inserter");
+		expect(highlighted.some((segment) => segment === "insert")).toBe(false);
+	});
+
+	test("treats mixed words as whole alignment units for highlight", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					debugQueryText?: string;
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string; highlightRanges?: Array<{ start: number; end: number }> }>>;
+			};
+		};
+
+		const text = "Use api-provider to configure the integration.";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/mixed-unit.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: ["use", "api-provider", "to", "configure", "the", "integration"],
+			families: [createFamily(0, "api-provider")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			debugQueryText: "api-provider",
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 1,
+					signal: {
+						start: 0,
+						end: 1,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		const highlighted = (subItems[0].highlightRanges ?? []).map((range) =>
+			subItems[0].text.slice(range.start, range.end).toLowerCase(),
+		);
+		expect(highlighted).toContain("api-provider");
+	});
+
 	test("builds a char-only local subitem when no display windows are available", async () => {
 		const { CoverageLexicalDirectSubItemBuilder } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",

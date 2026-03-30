@@ -9,8 +9,8 @@ import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
 import { extractHanBigramsWithOffsets } from "./coverage-lexical-cjk";
 import { selectCoverageLexicalDisplayWindows } from "./coverage-lexical-display-windows";
-import { alignSnippetToQueryChars } from "./coverage-lexical-snippet-aligner";
-import type { CoverageLexicalSnippetAlignerAtomInput } from "./coverage-lexical-snippet-aligner";
+import { alignSnippetToQueryUnits } from "./coverage-lexical-snippet-aligner";
+import { unitizeQueryText } from "./coverage-lexical-snippet-aligner";
 import type {
 	CoverageLexicalDisplayWindow,
 	CoverageLexicalFamily,
@@ -47,14 +47,14 @@ type CoverageSnippetPayload = {
 	semanticRange: CharRange;
 	semanticSignature: string;
 	absoluteRange: CharRange;
-	finalFamilyHitCount: number;
-	finalFullSegmentCount: number;
-	finalBestSegmentCoverageCount: number;
-	finalBestSegmentCoverageRatio: number;
-	exactFamilyHitCount: number;
-	prefixFamilyHitCount: number;
-	fuzzyFamilyHitCount: number;
-	substringFamilyHitCount: number;
+	finalUnitCoverageCount: number;
+	finalUnitCoverageRatio: number;
+	finalHanBigramCoverageCount: number;
+	finalHanBigramCoverageRatio: number;
+	finalExactWordHitCount: number;
+	finalPrefixWordHitCount: number;
+	finalFuzzyWordHitCount: number;
+	finalMaxConsecutiveUnitRun: number;
 	gapPenalty: number;
 	maxGap: number;
 	alignmentScore: number;
@@ -174,6 +174,11 @@ export class CoverageLexicalDirectSubItemBuilder {
 		const segmentDescriptors = buildHanSegmentDescriptors(
 			params.charQuerySegments ?? [],
 		);
+		const alignerQueryText = buildSnippetAlignerQueryText(
+			params.debugQueryText,
+			params.families,
+			segmentDescriptors,
+		);
 		const payloads: CoverageSnippetPayload[] = [];
 		for (const window of displayWindows) {
 			const snippets = this.buildSnippetPayloads(
@@ -184,8 +189,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 				window,
 				params.bodyTokenSequence,
 				params.families,
-				params.charQueryTerms ?? [],
-				segmentDescriptors,
+				alignerQueryText,
 			);
 			payloads.push(...snippets);
 		}
@@ -201,7 +205,8 @@ export class CoverageLexicalDirectSubItemBuilder {
 					lineOffsets,
 					tokenOffsets,
 					charOffsets,
-					params.charQueryTerms ?? [],
+					alignerQueryText,
+					params.families,
 					segmentDescriptors,
 					params.debugQueryText,
 					params.path,
@@ -263,31 +268,33 @@ export class CoverageLexicalDirectSubItemBuilder {
 				highlightRanges: payload.highlightRanges,
 			})),
 		});
-			return subItems;
+		return subItems;
 	}
 
 	private buildCharFallbackPayloads(
 		text: string,
-		lineOffsets: readonly number[],
+		lineOffsets: number[],
 		tokenOffsets: readonly TokenOffset[],
 		charOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
-		charQueryTerms: readonly string[],
+		queryText: string,
+		families: readonly CoverageLexicalFamily[],
 		segmentDescriptors: readonly HanSegmentDescriptor[],
 		debugQueryText?: string,
 		path?: string,
 	): CoverageSnippetPayload[] {
 		const searchRegion = { start: 0, end: text.length };
 		const matchedCharOffsets = charOffsets.filter((entry) =>
-			charQueryTerms.includes(entry.token),
+			unitizeQueryText(queryText)
+				.filter((unit) => unit.kind === "han_char")
+				.some((unit) => entry.token.includes(unit.normalized) || unit.normalized.includes(entry.token)),
 		);
 		const atoms = collectSnippetMatchAtoms(
 			text,
 			tokenOffsets,
 			charOffsets,
 			searchRegion,
-			[],
-			charQueryTerms,
-			segmentDescriptors,
+			queryText,
+			families,
 		);
 		logHanSubitemDebug(debugQueryText, "char-fallback", {
 			path,
@@ -319,8 +326,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 			lineOffsets,
 			atoms,
 			searchRegion,
-			[],
-			segmentDescriptors,
+			queryText,
 			0,
 			debugQueryText,
 			path,
@@ -343,11 +349,10 @@ export class CoverageLexicalDirectSubItemBuilder {
 
 	private buildPayloadsFromAtoms(
 		text: string,
-		lineOffsets: readonly number[],
+		lineOffsets: number[],
 		atoms: readonly SnippetMatchAtom[],
 		approximateWindow: CharRange,
-		families: readonly CoverageLexicalFamily[],
-		segmentDescriptors: readonly HanSegmentDescriptor[],
+		alignerQueryText: string,
 		sourceWindowScore: number,
 		debugQueryText?: string,
 		path?: string,
@@ -362,9 +367,8 @@ export class CoverageLexicalDirectSubItemBuilder {
 					atoms,
 					island,
 					approximateWindow,
-					families,
-					segmentDescriptors,
 					sourceWindowScore || island.score,
+					alignerQueryText,
 					debugQueryText,
 					path,
 				),
@@ -450,8 +454,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 		window: CoverageLexicalDisplayWindow,
 		bodyTokenSequence: readonly string[],
 		families: readonly CoverageLexicalFamily[],
-		charQueryTerms: readonly string[],
-		segmentDescriptors: readonly HanSegmentDescriptor[],
+		queryText: string,
 	): CoverageSnippetPayload[] {
 		if (window.startTokenIndex < 0 || window.endTokenIndex < window.startTokenIndex) {
 			return [];
@@ -476,9 +479,8 @@ export class CoverageLexicalDirectSubItemBuilder {
 			tokenOffsets,
 			charOffsets,
 			searchRegion,
+			queryText,
 			matchedFamilies,
-			charQueryTerms,
-			segmentDescriptors,
 		);
 		if (atoms.length === 0) {
 			return [];
@@ -488,8 +490,7 @@ export class CoverageLexicalDirectSubItemBuilder {
 			lineOffsets,
 			atoms,
 			approximateWindow,
-			matchedFamilies,
-			segmentDescriptors,
+			queryText,
 			window.signal.score,
 		);
 	}
@@ -551,105 +552,102 @@ function collectSnippetMatchAtoms(
 	tokenOffsets: readonly TokenOffset[],
 	charOffsets: ReadonlyArray<{ token: string; start: number; end: number }>,
 	searchRegion: CharRange,
+	queryText: string,
 	families: readonly CoverageLexicalFamily[],
-	charQueryTerms: readonly string[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
 ): SnippetMatchAtom[] {
 	const atoms: SnippetMatchAtom[] = [];
-	let familyAtomsAdded = 0;
+	const queryUnits = unitizeQueryText(queryText);
+	const queryWordUnits = queryUnits.filter((unit) => unit.kind !== "han_char");
+	const queryHanUnits = queryUnits.filter((unit) => unit.kind === "han_char");
 	for (const offset of tokenOffsets) {
 		if (offset.end <= searchRegion.start || offset.start >= searchRegion.end) {
 			continue;
 		}
-		for (const family of families) {
-			if (!family.normalizedTerm) {
-				continue;
-			}
-			if (offset.token === family.normalizedTerm) {
+		for (const queryUnit of queryWordUnits) {
+			if (offset.token === queryUnit.normalized) {
 				atoms.push({
 					start: offset.start,
-					end: offset.start + family.normalizedTerm.length,
-					queryKey: `family:${family.normalizedTerm}`,
+					end: offset.start + queryUnit.normalized.length,
+					queryKey: `unit:${queryUnit.normalized}`,
 					kind: "family_exact",
 					weight: 6,
 				});
-				familyAtomsAdded += 1;
 				continue;
 			}
-			if (family.allowPrefix && offset.token.startsWith(family.normalizedTerm)) {
+			if (
+				offset.token.startsWith(queryUnit.normalized) ||
+				queryUnit.normalized.startsWith(offset.token)
+			) {
 				atoms.push({
 					start: offset.start,
-					end: Math.min(offset.end, offset.start + family.normalizedTerm.length),
-					queryKey: `family:${family.normalizedTerm}`,
+					end: Math.min(offset.end, offset.start + queryUnit.normalized.length),
+					queryKey: `unit:${queryUnit.normalized}`,
 					kind: "family_prefix",
 					weight: 5,
 				});
-				familyAtomsAdded += 1;
 				continue;
 			}
-			if (!family.allowFuzzy) {
-				continue;
-			}
-			const maxDistance = computeMaxFuzzyDistance(family.normalizedTerm);
+			const maxDistance = computeMaxFuzzyDistance(queryUnit.normalized);
 			if (
 				maxDistance <= 0 ||
-				offset.token[0] !== family.normalizedTerm[0] ||
-				boundedLevenshtein(offset.token, family.normalizedTerm, maxDistance) >
-					maxDistance
+				offset.token[0] !== queryUnit.normalized[0] ||
+				boundedLevenshtein(offset.token, queryUnit.normalized, maxDistance) > maxDistance
 			) {
 				continue;
 			}
 			atoms.push({
 				start: offset.start,
 				end: offset.end,
-				queryKey: `family:${family.normalizedTerm}`,
+				queryKey: `unit:${queryUnit.normalized}`,
 				kind: "family_fuzzy",
 				weight: 3.5,
 			});
-			familyAtomsAdded += 1;
 		}
 	}
-	if (familyAtomsAdded === 0) {
-		const lowerSlice = text.slice(searchRegion.start, searchRegion.end).toLowerCase();
-		for (const family of families) {
-			if (!family.normalizedTerm) {
-				continue;
+	const lowerSlice = text.slice(searchRegion.start, searchRegion.end).toLowerCase();
+	for (const queryUnit of queryWordUnits) {
+		let fromIndex = 0;
+		while (fromIndex < lowerSlice.length) {
+			const foundAt = lowerSlice.indexOf(queryUnit.normalized, fromIndex);
+			if (foundAt < 0) {
+				break;
 			}
-			let fromIndex = 0;
-			while (fromIndex < lowerSlice.length) {
-				const foundAt = lowerSlice.indexOf(family.normalizedTerm, fromIndex);
-				if (foundAt < 0) {
-					break;
-				}
-				atoms.push({
-					start: searchRegion.start + foundAt,
-					end: searchRegion.start + foundAt + family.normalizedTerm.length,
-					queryKey: `family:${family.normalizedTerm}`,
-					kind: "family_substring",
-					weight: 2.5,
-				});
-				fromIndex = foundAt + Math.max(1, family.normalizedTerm.length);
-			}
+			atoms.push({
+				start: searchRegion.start + foundAt,
+				end: searchRegion.start + foundAt + queryUnit.normalized.length,
+				queryKey: `unit:${queryUnit.normalized}`,
+				kind: "family_substring",
+				weight: 2.5,
+			});
+			fromIndex = foundAt + Math.max(1, queryUnit.normalized.length);
 		}
 	}
-	for (const segment of segmentDescriptors) {
+	const queryHanChars = queryHanUnits.map((unit) => unit.normalized);
+	const queryHanRuns = Array.from(queryText.matchAll(/\p{Script=Han}+/gu)).map(
+		(match) => match[0],
+	);
+	for (let index = 0; index < queryHanChars.length; index++) {
+		const char = queryHanChars[index];
 		let fromIndex = searchRegion.start;
 		while (fromIndex < searchRegion.end) {
-			const foundAt = text.indexOf(segment.text, fromIndex);
+			const foundAt = text.indexOf(char, fromIndex);
 			if (foundAt < 0 || foundAt >= searchRegion.end) {
 				break;
 			}
 			atoms.push({
 				start: foundAt,
-				end: foundAt + segment.text.length,
-				queryKey: `segment:${segment.text}`,
-				kind: "segment_exact",
-				weight: 8,
+				end: foundAt + char.length,
+				queryKey: `unit:${char}:${index}`,
+				kind: "han_char",
+				weight: 1,
 			});
-			fromIndex = foundAt + Math.max(1, segment.text.length);
+			fromIndex = foundAt + 1;
 		}
 	}
-	const wantedBigrams = new Set(charQueryTerms);
+	const wantedBigrams = new Set<string>();
+	for (let index = 0; index < queryHanChars.length - 1; index++) {
+		wantedBigrams.add(queryHanChars[index] + queryHanChars[index + 1]);
+	}
 	for (const entry of charOffsets) {
 		if (
 			entry.end <= searchRegion.start ||
@@ -666,30 +664,24 @@ function collectSnippetMatchAtoms(
 			weight: 1.5,
 		});
 	}
-	for (const segment of segmentDescriptors) {
-		const chars = Array.from(segment.text);
-		if (chars.length > MAX_HAN_CHAR_ATOM_SEGMENT_LENGTH) {
+	for (const run of queryHanRuns) {
+		if (run.length < 2) {
 			continue;
 		}
-		const unigramChars = chars.filter(
-			(char, index, array) => !!char && array.indexOf(char) === index,
-		);
-		for (const char of unigramChars) {
-			let fromIndex = searchRegion.start;
-			while (fromIndex < searchRegion.end) {
-				const foundAt = text.indexOf(char, fromIndex);
-				if (foundAt < 0 || foundAt >= searchRegion.end) {
-					break;
-				}
-				atoms.push({
-					start: foundAt,
-					end: foundAt + char.length,
-					queryKey: `char:${char}`,
-					kind: "han_char",
-					weight: 0.5,
-				});
-				fromIndex = foundAt + 1;
+		let fromIndex = searchRegion.start;
+		while (fromIndex < searchRegion.end) {
+			const foundAt = text.indexOf(run, fromIndex);
+			if (foundAt < 0 || foundAt >= searchRegion.end) {
+				break;
 			}
+			atoms.push({
+				start: foundAt,
+				end: foundAt + run.length,
+				queryKey: `segment:${run}`,
+				kind: "segment_exact",
+				weight: 8,
+			});
+			fromIndex = foundAt + Math.max(1, run.length);
 		}
 	}
 	return dedupeSnippetMatchAtoms(atoms);
@@ -721,10 +713,13 @@ function buildSnippetSemanticIslands(
 	if (atoms.length === 0) {
 		return [];
 	}
+	const baseAtoms = atoms.some((atom) => atom.kind !== "han_char")
+		? atoms.filter((atom) => atom.kind !== "han_char")
+		: atoms;
 	const islands: SnippetSemanticIsland[] = [];
-	let currentAtoms: SnippetMatchAtom[] = [atoms[0]];
-	for (let index = 1; index < atoms.length; index++) {
-		const atom = atoms[index];
+	let currentAtoms: SnippetMatchAtom[] = [baseAtoms[0]];
+	for (let index = 1; index < baseAtoms.length; index++) {
+		const atom = baseAtoms[index];
 		const previous = currentAtoms[currentAtoms.length - 1];
 		if (atom.start - previous.end <= MAX_SEMANTIC_ISLAND_GAP_CHARS) {
 			currentAtoms.push(atom);
@@ -827,7 +822,10 @@ function buildBestSemanticSpanFromIslands(
 	);
 	let left = seedIndex;
 	let right = seedIndex;
-	let best = evaluateSemanticAtomSpan(islands.slice(left, right + 1));
+	let best = evaluateSemanticAtomSpan(
+		islands.slice(left, right + 1),
+		seedIsland,
+	);
 	while (true) {
 		let bestExpansion:
 			| {
@@ -840,7 +838,10 @@ function buildBestSemanticSpanFromIslands(
 			left > 0 &&
 			computeRangeGap(islands[left - 1], islands[left]) <= MAX_SEMANTIC_ISLAND_GAP_CHARS
 		) {
-			const evaluation = evaluateSemanticAtomSpan(islands.slice(left - 1, right + 1));
+			const evaluation = evaluateSemanticAtomSpan(
+				islands.slice(left - 1, right + 1),
+				seedIsland,
+			);
 			bestExpansion = { left: left - 1, right, evaluation };
 		}
 		if (
@@ -848,7 +849,10 @@ function buildBestSemanticSpanFromIslands(
 			computeRangeGap(islands[right], islands[right + 1]) <=
 				MAX_SEMANTIC_ISLAND_GAP_CHARS
 		) {
-			const evaluation = evaluateSemanticAtomSpan(islands.slice(left, right + 2));
+			const evaluation = evaluateSemanticAtomSpan(
+				islands.slice(left, right + 2),
+				seedIsland,
+			);
 			if (
 				!bestExpansion ||
 				compareSemanticEvaluations(evaluation, bestExpansion.evaluation) < 0
@@ -871,6 +875,7 @@ function buildBestSemanticSpanFromIslands(
 
 function evaluateSemanticAtomSpan(
 	islands: readonly SnippetSemanticIsland[],
+	seedIsland: SnippetSemanticIsland,
 ): SemanticSpanEvaluation {
 	const atoms = islands.flatMap((island) => island.atoms);
 	const metrics = computeAtomCoverageMetrics(atoms);
@@ -890,7 +895,11 @@ function evaluateSemanticAtomSpan(
 			metrics.familyKeyCount * 2 +
 			metrics.bigramKeyCount +
 			metrics.charKeyCount,
-		anchorOffset: pickSemanticAnchorOffset(start, end, atoms),
+		anchorOffset: pickSemanticAnchorOffset(
+			seedIsland.start,
+			seedIsland.end,
+			seedIsland.atoms,
+		),
 		signature: metrics.signature,
 	};
 }
@@ -1044,13 +1053,12 @@ function buildHighlightRangesFromAtoms(
 
 function buildSnippetPayloadFromIsland(
 	text: string,
-	lineOffsets: readonly number[],
+	lineOffsets: number[],
 	allAtoms: readonly SnippetMatchAtom[],
 	island: SnippetSemanticIsland,
 	approximateWindow: CharRange,
-	families: readonly CoverageLexicalFamily[],
-	segmentDescriptors: readonly HanSegmentDescriptor[],
 	sourceWindowScore: number,
+	alignerQueryText: string,
 	debugQueryText?: string,
 	path?: string,
 ): CoverageSnippetPayload | null {
@@ -1064,21 +1072,9 @@ function buildSnippetPayloadFromIsland(
 		allAtoms,
 	);
 	const snippetText = text.slice(snippetRange.start, snippetRange.end);
-	const alignment = alignSnippetToQueryChars({
+	const alignment = alignSnippetToQueryUnits({
+		queryText: alignerQueryText,
 		snippetText,
-		families,
-		hanSegments: segmentDescriptors.map((segment) => ({ text: segment.text })),
-		familyAtoms: allAtoms
-			.filter(
-				(atom) =>
-					atom.start >= snippetRange.start &&
-					atom.end <= snippetRange.end &&
-					atom.kind.startsWith("family_"),
-			)
-			.map((atom) => ({
-				kind: atom.kind as CoverageLexicalSnippetAlignerAtomInput["kind"],
-				queryKey: atom.queryKey,
-			})),
 	});
 	const highlightRanges = alignment.alignedRanges;
 	const snippetScore =
@@ -1134,15 +1130,14 @@ function buildSnippetPayloadFromIsland(
 		semanticRange: semanticSpan.range,
 		semanticSignature: semanticSpan.signature,
 		absoluteRange: snippetRange,
-		finalFamilyHitCount: alignment.familyHitCount,
-		finalFullSegmentCount: alignment.fullSegmentCount,
-		finalBestSegmentCoverageCount:
-			alignment.matchedBigramCount + alignment.matchedCharCount,
-		finalBestSegmentCoverageRatio: alignment.coverageRatio,
-		exactFamilyHitCount: alignment.exactFamilyHitCount,
-		prefixFamilyHitCount: alignment.prefixFamilyHitCount,
-		fuzzyFamilyHitCount: alignment.fuzzyFamilyHitCount,
-		substringFamilyHitCount: alignment.substringFamilyHitCount,
+		finalUnitCoverageCount: alignment.unitCoverageCount,
+		finalUnitCoverageRatio: alignment.unitCoverageRatio,
+		finalHanBigramCoverageCount: alignment.hanBigramCoverageCount,
+		finalHanBigramCoverageRatio: alignment.hanBigramCoverageRatio,
+		finalExactWordHitCount: alignment.exactWordHitCount,
+		finalPrefixWordHitCount: alignment.prefixWordHitCount,
+		finalFuzzyWordHitCount: alignment.fuzzyWordHitCount,
+		finalMaxConsecutiveUnitRun: alignment.maxConsecutiveUnitRun,
 		gapPenalty: alignment.gapPenalty,
 		maxGap: alignment.maxGap,
 		alignmentScore: alignment.alignmentScore,
@@ -1175,15 +1170,23 @@ function pickSemanticAnchorOffset(
 	if (units.length === 0) {
 		return start;
 	}
-	let best = units[0];
-	for (const unit of units) {
-		const bestWeight = "weight" in best ? best.weight : 0;
-		const unitWeight = "weight" in unit ? unit.weight : 0;
-		if (unitWeight > bestWeight) {
+	const anchorCandidates =
+		"kind" in units[0]
+			? (units as readonly SnippetMatchAtom[]).filter(
+					(unit) => unit.kind !== "han_char",
+			  )
+			: units;
+	const rankedCandidates =
+		anchorCandidates.length > 0 ? anchorCandidates : units;
+	let best = rankedCandidates[0];
+	for (const unit of rankedCandidates) {
+		if (unit.start < best.start) {
 			best = unit;
 			continue;
 		}
-		if (unitWeight === bestWeight && unit.start < best.start) {
+		const bestWeight = "weight" in best ? best.weight : 0;
+		const unitWeight = "weight" in unit ? unit.weight : 0;
+		if (unit.start === best.start && unitWeight > bestWeight) {
 			best = unit;
 		}
 	}
@@ -1199,6 +1202,21 @@ function buildHanSegmentDescriptors(
 			text: segment,
 			bigrams: extractHanBigramsWithOffsets(segment).map((entry) => entry.token),
 		}));
+}
+
+function buildSnippetAlignerQueryText(
+	debugQueryText: string | undefined,
+	families: readonly CoverageLexicalFamily[],
+	segmentDescriptors: readonly HanSegmentDescriptor[],
+): string {
+	if (debugQueryText && debugQueryText.trim().length > 0) {
+		return debugQueryText;
+	}
+	const parts = [
+		...families.map((family) => family.rawTerm ?? family.normalizedTerm).filter(Boolean),
+		...segmentDescriptors.map((segment) => segment.text),
+	];
+	return Array.from(new Set(parts)).join(" ");
 }
 
 
@@ -1239,35 +1257,44 @@ function rankSnippetPayloads(
 	payloads: readonly CoverageSnippetPayload[],
 ): CoverageSnippetPayload[] {
 	return [...payloads].sort((left, right) => {
-		if (right.finalFullSegmentCount !== left.finalFullSegmentCount) {
-			return right.finalFullSegmentCount - left.finalFullSegmentCount;
+		if (right.finalUnitCoverageRatio !== left.finalUnitCoverageRatio) {
+			return right.finalUnitCoverageRatio - left.finalUnitCoverageRatio;
 		}
-		if (right.finalBestSegmentCoverageRatio !== left.finalBestSegmentCoverageRatio) {
+		if (right.finalUnitCoverageCount !== left.finalUnitCoverageCount) {
+			return right.finalUnitCoverageCount - left.finalUnitCoverageCount;
+		}
+		if (
+			right.finalHanBigramCoverageRatio !== left.finalHanBigramCoverageRatio
+		) {
 			return (
-				right.finalBestSegmentCoverageRatio -
-				left.finalBestSegmentCoverageRatio
+				right.finalHanBigramCoverageRatio -
+				left.finalHanBigramCoverageRatio
 			);
 		}
-		if (right.finalBestSegmentCoverageCount !== left.finalBestSegmentCoverageCount) {
+		if (
+			right.finalHanBigramCoverageCount !== left.finalHanBigramCoverageCount
+		) {
 			return (
-				right.finalBestSegmentCoverageCount -
-				left.finalBestSegmentCoverageCount
+				right.finalHanBigramCoverageCount -
+				left.finalHanBigramCoverageCount
 			);
 		}
-		if (right.finalFamilyHitCount !== left.finalFamilyHitCount) {
-			return right.finalFamilyHitCount - left.finalFamilyHitCount;
+		if (right.finalExactWordHitCount !== left.finalExactWordHitCount) {
+			return right.finalExactWordHitCount - left.finalExactWordHitCount;
 		}
-		if (right.exactFamilyHitCount !== left.exactFamilyHitCount) {
-			return right.exactFamilyHitCount - left.exactFamilyHitCount;
+		if (right.finalPrefixWordHitCount !== left.finalPrefixWordHitCount) {
+			return right.finalPrefixWordHitCount - left.finalPrefixWordHitCount;
 		}
-		if (right.prefixFamilyHitCount !== left.prefixFamilyHitCount) {
-			return right.prefixFamilyHitCount - left.prefixFamilyHitCount;
+		if (right.finalFuzzyWordHitCount !== left.finalFuzzyWordHitCount) {
+			return right.finalFuzzyWordHitCount - left.finalFuzzyWordHitCount;
 		}
-		if (right.fuzzyFamilyHitCount !== left.fuzzyFamilyHitCount) {
-			return right.fuzzyFamilyHitCount - left.fuzzyFamilyHitCount;
-		}
-		if (right.substringFamilyHitCount !== left.substringFamilyHitCount) {
-			return right.substringFamilyHitCount - left.substringFamilyHitCount;
+		if (
+			right.finalMaxConsecutiveUnitRun !== left.finalMaxConsecutiveUnitRun
+		) {
+			return (
+				right.finalMaxConsecutiveUnitRun -
+				left.finalMaxConsecutiveUnitRun
+			);
 		}
 		if (left.gapPenalty !== right.gapPenalty) {
 			return left.gapPenalty - right.gapPenalty;

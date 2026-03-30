@@ -1,55 +1,65 @@
-import type {
-	CoverageLexicalFamily,
-	CoverageLexicalHighlightRange,
-} from "./coverage-lexical-types";
-
-type HanSegmentInput = {
-	text: string;
-};
-
-export type CoverageLexicalSnippetAlignerAtomInput = {
-	kind: "family_exact" | "family_prefix" | "family_fuzzy" | "family_substring";
-	queryKey: string;
-};
-
-type AlignmentState = {
-	score: number;
-	queryIndex: number;
-	snippetIndex: number;
-	matchedCharCount: number;
-	matchedBigramCount: number;
-	charRun: number;
-	maxCharRun: number;
-	bigramRun: number;
-	maxBigramRun: number;
-	gapPenalty: number;
-	maxGap: number;
-	matchedQueryIndices: number[];
-	matchedSnippetIndices: number[];
-};
-
-type CharUnit = {
-	char: string;
-	start: number;
-	end: number;
-};
+import type { CoverageLexicalHighlightRange } from "./coverage-lexical-types";
 
 export type CoverageLexicalSnippetAlignmentResult = {
 	alignmentScore: number;
 	alignedRanges: CoverageLexicalHighlightRange[];
-	familyHitCount: number;
-	fullSegmentCount: number;
-	matchedCharCount: number;
-	matchedBigramCount: number;
-	maxConsecutiveCharRun: number;
-	maxConsecutiveBigramRun: number;
-	exactFamilyHitCount: number;
-	prefixFamilyHitCount: number;
-	fuzzyFamilyHitCount: number;
-	substringFamilyHitCount: number;
+	unitCoverageCount: number;
+	unitCoverageRatio: number;
+	hanBigramCoverageCount: number;
+	hanBigramCoverageRatio: number;
+	exactWordHitCount: number;
+	prefixWordHitCount: number;
+	fuzzyWordHitCount: number;
+	maxConsecutiveUnitRun: number;
 	gapPenalty: number;
 	maxGap: number;
-	coverageRatio: number;
+	signature: string;
+};
+
+export type CoverageLexicalSnippetAlignmentUnitKind =
+	| "han_char"
+	| "latin_word"
+	| "mixed_word";
+
+export type CoverageLexicalSnippetAlignmentUnit = {
+	kind: CoverageLexicalSnippetAlignmentUnitKind;
+	text: string;
+	normalized: string;
+	start: number;
+	end: number;
+};
+
+type AlignmentUnit = CoverageLexicalSnippetAlignmentUnit;
+
+type HanAlignmentState = {
+	score: number;
+	queryIndex: number;
+	snippetIndex: number;
+	matchedQueryIndices: number[];
+	matchedSnippetIndices: number[];
+	matchedBigramCount: number;
+	charRun: number;
+	maxCharRun: number;
+	gapPenalty: number;
+	maxGap: number;
+};
+
+type HanAlignmentResult = {
+	score: number;
+	alignedRanges: CoverageLexicalHighlightRange[];
+	matchedCharCount: number;
+	matchedBigramCount: number;
+	maxConsecutiveUnitRun: number;
+	gapPenalty: number;
+	maxGap: number;
+	signature: string;
+};
+
+type WordAlignmentResult = {
+	exactWordHitCount: number;
+	prefixWordHitCount: number;
+	fuzzyWordHitCount: number;
+	alignedRanges: CoverageLexicalHighlightRange[];
 	signature: string;
 };
 
@@ -67,195 +77,161 @@ const WEAK_HAN_CHARS = new Set([
 	"吗",
 ]);
 
-export function alignSnippetToQueryChars(params: {
+const QUERY_UNIT_REGEX = /[\p{Script=Han}]|[a-z0-9]+(?:[-_./:+#][a-z0-9]+)*/giu;
+
+export function alignSnippetToQueryUnits(params: {
+	queryText: string;
 	snippetText: string;
-	families: readonly CoverageLexicalFamily[];
-	hanSegments: readonly HanSegmentInput[];
-	familyAtoms?: readonly CoverageLexicalSnippetAlignerAtomInput[];
 }): CoverageLexicalSnippetAlignmentResult {
-	const snippetUnits = splitTextToCharUnits(params.snippetText);
-	const familyRanges = collectFamilyRanges(params.snippetText, params.families);
-	const familySignals = collectFamilySignals(params.familyAtoms ?? []);
-	const segmentAlignments = params.hanSegments.map((segment) =>
-		alignHanSegment(segment.text, snippetUnits),
+	const queryUnits = unitizeQueryText(params.queryText);
+	const snippetUnits = unitizeSnippetText(params.snippetText);
+	const queryHanUnits = queryUnits.filter(
+		(unit): unit is AlignmentUnit & { kind: "han_char" } => unit.kind === "han_char",
 	);
+	const snippetHanUnits = snippetUnits.filter(
+		(unit): unit is AlignmentUnit & { kind: "han_char" } => unit.kind === "han_char",
+	);
+	const queryWordUnits = queryUnits.filter((unit) => unit.kind !== "han_char");
+	const snippetWordUnits = snippetUnits.filter((unit) => unit.kind !== "han_char");
+	const hanAlignment = alignHanUnits(queryHanUnits, snippetHanUnits);
+	const wordAlignment = alignWordUnits(queryWordUnits, snippetWordUnits);
 	const alignedRanges = mergeRanges([
-		...familyRanges,
-		...segmentAlignments.flatMap((alignment) => alignment.alignedRanges),
+		...hanAlignment.alignedRanges,
+		...wordAlignment.alignedRanges,
 	]);
-	const familyHitCount = familyRanges.length;
-	const fullSegmentCount = segmentAlignments.filter((alignment) => alignment.isFullMatch)
-		.length;
-	const matchedCharCount = segmentAlignments.reduce(
-		(total, alignment) => total + alignment.matchedCharCount,
-		0,
-	);
-	const matchedBigramCount = segmentAlignments.reduce(
-		(total, alignment) => total + alignment.matchedBigramCount,
-		0,
-	);
-	const maxConsecutiveCharRun = segmentAlignments.reduce(
-		(best, alignment) => Math.max(best, alignment.maxConsecutiveCharRun),
-		0,
-	);
-	const maxConsecutiveBigramRun = segmentAlignments.reduce(
-		(best, alignment) => Math.max(best, alignment.maxConsecutiveBigramRun),
-		0,
-	);
-	const gapPenalty = segmentAlignments.reduce(
-		(total, alignment) => total + alignment.gapPenalty,
-		0,
-	);
-	const maxGap = segmentAlignments.reduce(
-		(best, alignment) => Math.max(best, alignment.maxGap),
-		0,
-	);
-	const totalQueryChars = params.hanSegments.reduce(
-		(total, segment) => total + Array.from(segment.text).length,
-		0,
-	);
-	const coverageRatio =
-		totalQueryChars > 0 ? matchedCharCount / totalQueryChars : familyHitCount > 0 ? 1 : 0;
+	const totalUnitCount = queryUnits.length;
+	const unitCoverageCount =
+		hanAlignment.matchedCharCount +
+		wordAlignment.exactWordHitCount +
+		wordAlignment.prefixWordHitCount +
+		wordAlignment.fuzzyWordHitCount;
+	const unitCoverageRatio =
+		totalUnitCount > 0 ? unitCoverageCount / totalUnitCount : 0;
+	const totalHanBigrams = Math.max(queryHanUnits.length - 1, 0);
+	const hanBigramCoverageRatio =
+		totalHanBigrams > 0
+			? hanAlignment.matchedBigramCount / totalHanBigrams
+			: queryHanUnits.length > 0 && hanAlignment.matchedCharCount > 0
+				? 1
+				: 0;
 	const alignmentScore =
-		segmentAlignments.reduce((total, alignment) => total + alignment.score, 0) +
-		familyHitCount * 8 +
-		matchedBigramCount * 4 +
-		maxConsecutiveCharRun * 2 +
-		maxConsecutiveBigramRun * 3;
-	const signature = JSON.stringify({
-		f: familyRanges.length,
-		s: segmentAlignments.map((alignment) => alignment.signature),
-	});
+		unitCoverageCount * 100 +
+		hanAlignment.matchedBigramCount * 40 +
+		wordAlignment.exactWordHitCount * 60 +
+		wordAlignment.prefixWordHitCount * 35 +
+		wordAlignment.fuzzyWordHitCount * 20 +
+		hanAlignment.maxConsecutiveUnitRun * 10 -
+		hanAlignment.gapPenalty;
 	return {
 		alignmentScore,
 		alignedRanges,
-		familyHitCount,
-		fullSegmentCount,
-		matchedCharCount,
-		matchedBigramCount,
-		maxConsecutiveCharRun,
-		maxConsecutiveBigramRun,
-		exactFamilyHitCount: familySignals.exactFamilyHitCount,
-		prefixFamilyHitCount: familySignals.prefixFamilyHitCount,
-		fuzzyFamilyHitCount: familySignals.fuzzyFamilyHitCount,
-		substringFamilyHitCount: familySignals.substringFamilyHitCount,
-		gapPenalty,
-		maxGap,
-		coverageRatio,
-		signature,
+		unitCoverageCount,
+		unitCoverageRatio,
+		hanBigramCoverageCount: hanAlignment.matchedBigramCount,
+		hanBigramCoverageRatio,
+		exactWordHitCount: wordAlignment.exactWordHitCount,
+		prefixWordHitCount: wordAlignment.prefixWordHitCount,
+		fuzzyWordHitCount: wordAlignment.fuzzyWordHitCount,
+		maxConsecutiveUnitRun: hanAlignment.maxConsecutiveUnitRun,
+		gapPenalty: hanAlignment.gapPenalty,
+		maxGap: hanAlignment.maxGap,
+		signature: JSON.stringify({
+			q: queryUnits.map((unit) => unit.normalized),
+			h: hanAlignment.signature,
+			w: wordAlignment.signature,
+		}),
 	};
 }
 
-function collectFamilySignals(
-	atoms: readonly CoverageLexicalSnippetAlignerAtomInput[],
-): {
-	exactFamilyHitCount: number;
-	prefixFamilyHitCount: number;
-	fuzzyFamilyHitCount: number;
-	substringFamilyHitCount: number;
-} {
-	const exact = new Set<string>();
-	const prefix = new Set<string>();
-	const fuzzy = new Set<string>();
-	const substring = new Set<string>();
-	for (const atom of atoms) {
-		switch (atom.kind) {
-			case "family_exact":
-				exact.add(atom.queryKey);
-				break;
-			case "family_prefix":
-				prefix.add(atom.queryKey);
-				break;
-			case "family_fuzzy":
-				fuzzy.add(atom.queryKey);
-				break;
-			case "family_substring":
-				substring.add(atom.queryKey);
-				break;
-		}
-	}
-	return {
-		exactFamilyHitCount: exact.size,
-		prefixFamilyHitCount: prefix.size,
-		fuzzyFamilyHitCount: fuzzy.size,
-		substringFamilyHitCount: substring.size,
-	};
+export function unitizeQueryText(text: string): CoverageLexicalSnippetAlignmentUnit[] {
+	return unitizeText(text, false);
 }
 
-function collectFamilyRanges(
-	snippetText: string,
-	families: readonly CoverageLexicalFamily[],
-): CoverageLexicalHighlightRange[] {
-	const ranges: CoverageLexicalHighlightRange[] = [];
-	const haystack = snippetText.toLowerCase();
-	for (const family of families) {
-		if (!family.normalizedTerm) {
+export function unitizeSnippetText(
+	text: string,
+): CoverageLexicalSnippetAlignmentUnit[] {
+	return unitizeText(text, true);
+}
+
+function unitizeText(
+	text: string,
+	preserveOffsets: boolean,
+): CoverageLexicalSnippetAlignmentUnit[] {
+	const units: CoverageLexicalSnippetAlignmentUnit[] = [];
+	for (const match of text.matchAll(QUERY_UNIT_REGEX)) {
+		const raw = match[0];
+		const start = match.index ?? 0;
+		if (/^\p{Script=Han}$/u.test(raw)) {
+			units.push({
+				kind: "han_char",
+				text: raw,
+				normalized: raw,
+				start,
+				end: start + raw.length,
+			});
 			continue;
 		}
-		let fromIndex = 0;
-		while (fromIndex < haystack.length) {
-			const foundAt = haystack.indexOf(family.normalizedTerm, fromIndex);
-			if (foundAt < 0) {
-				break;
+		if (/^\p{Script=Han}+$/u.test(raw)) {
+			let offset = start;
+			for (const char of Array.from(raw)) {
+				units.push({
+					kind: "han_char",
+					text: char,
+					normalized: char,
+					start: offset,
+					end: offset + char.length,
+				});
+				offset += char.length;
 			}
-			ranges.push({
-				start: foundAt,
-				end: foundAt + family.normalizedTerm.length,
-			});
-			fromIndex = foundAt + Math.max(1, family.normalizedTerm.length);
+			continue;
 		}
+		const normalized = raw.toLowerCase();
+		units.push({
+			kind: /[a-z]/i.test(raw) && /[0-9_\-./:+#]/.test(raw) ? "mixed_word" : "latin_word",
+			text: raw,
+			normalized,
+			start: preserveOffsets ? start : units.length,
+			end: preserveOffsets ? start + raw.length : units.length + raw.length,
+		});
 	}
-	return ranges;
+	return units;
 }
 
-function alignHanSegment(
-	segmentText: string,
-	snippetUnits: readonly CharUnit[],
-): {
-	score: number;
-	alignedRanges: CoverageLexicalHighlightRange[];
-	matchedCharCount: number;
-	matchedBigramCount: number;
-	maxConsecutiveCharRun: number;
-	maxConsecutiveBigramRun: number;
-	isFullMatch: boolean;
-	signature: string;
-} {
-	const queryChars = Array.from(segmentText);
-	if (queryChars.length === 0 || snippetUnits.length === 0) {
+function alignHanUnits(
+	queryUnits: readonly (AlignmentUnit & { kind: "han_char" })[],
+	snippetUnits: readonly (AlignmentUnit & { kind: "han_char" })[],
+): HanAlignmentResult {
+	if (queryUnits.length === 0 || snippetUnits.length === 0) {
 		return {
 			score: 0,
 			alignedRanges: [],
 			matchedCharCount: 0,
 			matchedBigramCount: 0,
-			maxConsecutiveCharRun: 0,
-			maxConsecutiveBigramRun: 0,
-			isFullMatch: false,
+			maxConsecutiveUnitRun: 0,
+			gapPenalty: 0,
+			maxGap: 0,
 			signature: "",
 		};
 	}
-	let states: AlignmentState[] = [];
-	for (let queryIndex = 0; queryIndex < queryChars.length; queryIndex++) {
-		const queryChar = queryChars[queryIndex];
-		const next = new Map<string, AlignmentState>();
+	let states: HanAlignmentState[] = [];
+	for (let queryIndex = 0; queryIndex < queryUnits.length; queryIndex++) {
+		const queryChar = queryUnits[queryIndex].normalized;
+		const next = new Map<string, HanAlignmentState>();
 		for (let snippetIndex = 0; snippetIndex < snippetUnits.length; snippetIndex++) {
-			if (snippetUnits[snippetIndex].char !== queryChar) {
+			if (snippetUnits[snippetIndex].normalized !== queryChar) {
 				continue;
 			}
-			upsertAlignmentState(next, {
-				score: charWeight(queryChar),
+			upsertHanState(next, {
+				score: hanCharWeight(queryChar),
 				queryIndex,
 				snippetIndex,
-				matchedCharCount: 1,
+				matchedQueryIndices: [queryIndex],
+				matchedSnippetIndices: [snippetIndex],
 				matchedBigramCount: 0,
 				charRun: 1,
 				maxCharRun: 1,
-				bigramRun: 0,
-				maxBigramRun: 0,
 				gapPenalty: 0,
 				maxGap: 0,
-				matchedQueryIndices: [queryIndex],
-				matchedSnippetIndices: [snippetIndex],
 			});
 			for (const previous of states) {
 				if (previous.snippetIndex >= snippetIndex) {
@@ -266,119 +242,139 @@ function alignHanSegment(
 				const consecutiveSnippet = snippetIndex === previous.snippetIndex + 1;
 				let score =
 					previous.score +
-					charWeight(queryChar) -
+					hanCharWeight(queryChar) -
 					computeGapPenalty(gap);
 				let charRun = 1;
 				let maxCharRun = previous.maxCharRun;
 				let matchedBigramCount = previous.matchedBigramCount;
-				let bigramRun = 0;
-				let maxBigramRun = previous.maxBigramRun;
-				let gapPenalty = previous.gapPenalty + computeGapPenalty(gap);
-				let maxGap = Math.max(previous.maxGap, gap);
 				if (consecutiveQuery && consecutiveSnippet) {
-					score += 2;
 					charRun = previous.charRun + 1;
 					maxCharRun = Math.max(maxCharRun, charRun);
 					matchedBigramCount += 1;
-					bigramRun = previous.bigramRun + 1;
-					maxBigramRun = Math.max(maxBigramRun, bigramRun);
-					score += 3;
-				} else if (consecutiveQuery) {
-					score += 0.5;
-					maxCharRun = Math.max(maxCharRun, 1);
+					score += 5;
 				}
-				upsertAlignmentState(next, {
+				upsertHanState(next, {
 					score,
 					queryIndex,
 					snippetIndex,
-					matchedCharCount: previous.matchedCharCount + 1,
+					matchedQueryIndices: [...previous.matchedQueryIndices, queryIndex],
+					matchedSnippetIndices: [...previous.matchedSnippetIndices, snippetIndex],
 					matchedBigramCount,
 					charRun,
 					maxCharRun,
-					bigramRun,
-					maxBigramRun,
-					gapPenalty,
-					maxGap,
-					matchedQueryIndices: [
-						...previous.matchedQueryIndices,
-						queryIndex,
-					],
-					matchedSnippetIndices: [
-						...previous.matchedSnippetIndices,
-						snippetIndex,
-					],
+					gapPenalty: previous.gapPenalty + computeGapPenalty(gap),
+					maxGap: Math.max(previous.maxGap, gap),
 				});
 			}
 		}
-		states = pruneAlignmentStates([...states, ...next.values()]);
+		states = pruneHanStates([...states, ...next.values()]);
 	}
-	const best = pickBestAlignmentState(states);
+	const best = pickBestHanState(states);
 	if (!best) {
 		return {
 			score: 0,
 			alignedRanges: [],
 			matchedCharCount: 0,
 			matchedBigramCount: 0,
-			maxConsecutiveCharRun: 0,
-			maxConsecutiveBigramRun: 0,
+			maxConsecutiveUnitRun: 0,
 			gapPenalty: 0,
 			maxGap: 0,
-			isFullMatch: false,
 			signature: "",
 		};
 	}
-	const supplemental = collectSupplementalSegmentMatches(
-		queryChars,
+	const supplemental = collectSupplementalHanMatches(
+		queryUnits,
 		snippetUnits,
 		best.matchedQueryIndices,
 		best.matchedSnippetIndices,
 	);
-	const alignedSnippetIndices = [
+	const snippetIndices = [
 		...best.matchedSnippetIndices,
 		...supplemental.snippetIndices,
 	].sort((left, right) => left - right);
-	const alignedRanges = mergeRanges(
-		alignedSnippetIndices.map((snippetIndex) => ({
-			start: snippetUnits[snippetIndex].start,
-			end: snippetUnits[snippetIndex].end,
-		})),
-	);
 	return {
 		score: best.score + supplemental.score,
-		alignedRanges,
-		matchedCharCount: best.matchedCharCount + supplemental.queryIndices.length,
-		matchedBigramCount: best.matchedBigramCount,
-		maxConsecutiveCharRun: Math.max(
-			best.maxCharRun,
-			supplemental.maxSupplementalRun,
+		alignedRanges: mergeRanges(
+			snippetIndices.map((index) => ({
+				start: snippetUnits[index].start,
+				end: snippetUnits[index].end,
+			})),
 		),
-		maxConsecutiveBigramRun: best.maxBigramRun,
+		matchedCharCount: best.matchedQueryIndices.length + supplemental.queryIndices.length,
+		matchedBigramCount: best.matchedBigramCount,
+		maxConsecutiveUnitRun: Math.max(best.maxCharRun, supplemental.maxRun),
 		gapPenalty: best.gapPenalty,
 		maxGap: best.maxGap,
-		isFullMatch:
-			best.matchedCharCount + supplemental.queryIndices.length === queryChars.length,
 		signature: JSON.stringify({
 			q: [...best.matchedQueryIndices, ...supplemental.queryIndices].sort(
 				(left, right) => left - right,
 			),
-			s: alignedSnippetIndices,
+			s: snippetIndices,
 		}),
 	};
 }
 
-function upsertAlignmentState(
-	target: Map<string, AlignmentState>,
-	candidate: AlignmentState,
-): void {
-	const key = `${candidate.queryIndex}:${candidate.snippetIndex}`;
+function alignWordUnits(
+	queryUnits: readonly AlignmentUnit[],
+	snippetUnits: readonly AlignmentUnit[],
+): WordAlignmentResult {
+	const exact = new Set<string>();
+	const prefix = new Set<string>();
+	const fuzzy = new Set<string>();
+	const ranges: CoverageLexicalHighlightRange[] = [];
+	for (const queryUnit of queryUnits) {
+		for (const snippetUnit of snippetUnits) {
+			if (snippetUnit.normalized === queryUnit.normalized) {
+				exact.add(queryUnit.normalized);
+				ranges.push({ start: snippetUnit.start, end: snippetUnit.end });
+				break;
+			}
+			if (
+				snippetUnit.normalized.startsWith(queryUnit.normalized) ||
+				queryUnit.normalized.startsWith(snippetUnit.normalized)
+			) {
+				prefix.add(queryUnit.normalized);
+				ranges.push({ start: snippetUnit.start, end: snippetUnit.end });
+				break;
+			}
+			const maxDistance = computeMaxWordFuzzyDistance(queryUnit.normalized);
+			if (
+				maxDistance > 0 &&
+				boundedLevenshtein(
+					snippetUnit.normalized,
+					queryUnit.normalized,
+					maxDistance,
+				) <= maxDistance
+			) {
+				fuzzy.add(queryUnit.normalized);
+				ranges.push({ start: snippetUnit.start, end: snippetUnit.end });
+				break;
+			}
+		}
+	}
+	return {
+		exactWordHitCount: exact.size,
+		prefixWordHitCount: prefix.size,
+		fuzzyWordHitCount: fuzzy.size,
+		alignedRanges: mergeRanges(ranges),
+		signature: JSON.stringify({
+			e: [...exact].sort(),
+			p: [...prefix].sort(),
+			f: [...fuzzy].sort(),
+		}),
+	};
+}
+
+function upsertHanState(target: Map<string, HanAlignmentState>, state: HanAlignmentState): void {
+	const key = `${state.queryIndex}:${state.snippetIndex}`;
 	const existing = target.get(key);
-	if (!existing || candidate.score > existing.score) {
-		target.set(key, candidate);
+	if (!existing || state.score > existing.score) {
+		target.set(key, state);
 	}
 }
 
-function pruneAlignmentStates(states: AlignmentState[]): AlignmentState[] {
-	const deduped = new Map<string, AlignmentState>();
+function pruneHanStates(states: HanAlignmentState[]): HanAlignmentState[] {
+	const deduped = new Map<string, HanAlignmentState>();
 	for (const state of states) {
 		const key = `${state.queryIndex}:${state.snippetIndex}`;
 		const existing = deduped.get(key);
@@ -391,8 +387,8 @@ function pruneAlignmentStates(states: AlignmentState[]): AlignmentState[] {
 		.slice(0, 128);
 }
 
-function pickBestAlignmentState(states: readonly AlignmentState[]): AlignmentState | null {
-	let best: AlignmentState | null = null;
+function pickBestHanState(states: readonly HanAlignmentState[]): HanAlignmentState | null {
+	let best: HanAlignmentState | null = null;
 	for (const state of states) {
 		if (!best || state.score > best.score) {
 			best = state;
@@ -401,34 +397,35 @@ function pickBestAlignmentState(states: readonly AlignmentState[]): AlignmentSta
 	return best;
 }
 
-function charWeight(char: string): number {
+function hanCharWeight(char: string): number {
 	return WEAK_HAN_CHARS.has(char) ? 0.6 : 2;
 }
 
-function collectSupplementalSegmentMatches(
-	queryChars: readonly string[],
-	snippetUnits: readonly CharUnit[],
+function collectSupplementalHanMatches(
+	queryUnits: readonly AlignmentUnit[],
+	snippetUnits: readonly AlignmentUnit[],
 	matchedQueryIndices: readonly number[],
 	matchedSnippetIndices: readonly number[],
 ): {
 	queryIndices: number[];
 	snippetIndices: number[];
 	score: number;
-	maxSupplementalRun: number;
+	maxRun: number;
 } {
 	const usedQuery = new Set(matchedQueryIndices);
 	const usedSnippet = new Set(matchedSnippetIndices);
 	const queryIndices: number[] = [];
 	const snippetIndices: number[] = [];
 	let currentRun = 0;
-	let maxSupplementalRun = 0;
-	for (let queryIndex = 0; queryIndex < queryChars.length; queryIndex++) {
+	let maxRun = 0;
+	for (let queryIndex = 0; queryIndex < queryUnits.length; queryIndex++) {
 		if (usedQuery.has(queryIndex)) {
 			currentRun = 0;
 			continue;
 		}
 		const snippetIndex = snippetUnits.findIndex(
-			(unit, index) => !usedSnippet.has(index) && unit.char === queryChars[queryIndex],
+			(unit, index) =>
+				!usedSnippet.has(index) && unit.normalized === queryUnits[queryIndex].normalized,
 		);
 		if (snippetIndex < 0) {
 			currentRun = 0;
@@ -438,16 +435,16 @@ function collectSupplementalSegmentMatches(
 		snippetIndices.push(snippetIndex);
 		usedSnippet.add(snippetIndex);
 		currentRun += 1;
-		maxSupplementalRun = Math.max(maxSupplementalRun, currentRun);
+		maxRun = Math.max(maxRun, currentRun);
 	}
 	return {
 		queryIndices,
 		snippetIndices,
 		score: queryIndices.reduce(
-			(total, queryIndex) => total + charWeight(queryChars[queryIndex]) * 0.5,
+			(total, queryIndex) => total + hanCharWeight(queryUnits[queryIndex].normalized) * 0.5,
 			0,
 		),
-		maxSupplementalRun,
+		maxRun,
 	};
 }
 
@@ -458,18 +455,11 @@ function computeGapPenalty(gap: number): number {
 	return gap * 0.35 + (gap >= 3 ? gap * 0.4 : 0);
 }
 
-function splitTextToCharUnits(text: string): CharUnit[] {
-	const out: CharUnit[] = [];
-	let offset = 0;
-	for (const char of Array.from(text)) {
-		out.push({
-			char,
-			start: offset,
-			end: offset + char.length,
-		});
-		offset += char.length;
+function computeMaxWordFuzzyDistance(term: string): number {
+	if (term.length <= 4) {
+		return 0;
 	}
-	return out;
+	return Math.min(2, Math.max(1, Math.round(term.length * 0.2)));
 }
 
 function mergeRanges(
@@ -490,4 +480,38 @@ function mergeRanges(
 		merged.push({ start: current.start, end: current.end });
 	}
 	return merged;
+}
+
+function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
+	if (a === b) {
+		return 0;
+	}
+	if (Math.abs(a.length - b.length) > maxDistance) {
+		return maxDistance + 1;
+	}
+	const previous = new Array<number>(b.length + 1);
+	const current = new Array<number>(b.length + 1);
+	for (let index = 0; index <= b.length; index++) {
+		previous[index] = index;
+	}
+	for (let row = 1; row <= a.length; row++) {
+		current[0] = row;
+		let rowMin = current[0];
+		for (let column = 1; column <= b.length; column++) {
+			const cost = a[row - 1] === b[column - 1] ? 0 : 1;
+			current[column] = Math.min(
+				previous[column] + 1,
+				current[column - 1] + 1,
+				previous[column - 1] + cost,
+			);
+			rowMin = Math.min(rowMin, current[column]);
+		}
+		if (rowMin > maxDistance) {
+			return maxDistance + 1;
+		}
+		for (let index = 0; index <= b.length; index++) {
+			previous[index] = current[index];
+		}
+	}
+	return previous[b.length];
 }
