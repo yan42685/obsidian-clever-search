@@ -20,6 +20,7 @@ import {
 import {
 	buildCoverageLexicalCharQuery,
 	extractHanBigrams,
+	extractHanSegments,
 	evaluateCoverageLexicalTagFallback,
 	splitCoverageLexicalTagValues,
 	type CoverageLexicalCharQuery,
@@ -37,7 +38,7 @@ import {
 	buildCoverageLexicalWindowFusionSignal,
 	createEmptyCoverageLexicalWindowFusionSignal,
 } from "./coverage-lexical-fusion";
-import { CoverageLexicalDirectSubItemBuilder } from "./coverage-lexical-direct-subitems";
+import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
@@ -85,23 +86,25 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	readonly supportsSerialization = false;
 
 	private readonly tokenizer = getInstance(Tokenizer);
-	private readonly directSubItemBuilder = getInstance(
-		CoverageLexicalDirectSubItemBuilder,
-	);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
 	private readonly bodyPostings = new Map<string, Set<string>>();
 	private readonly bodyCharPostings = new Map<string, Set<string>>();
+	private readonly bodyHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly bodyPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataAliasCharPostings = new Map<string, Set<string>>();
+	private readonly metadataAliasHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataAliasPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataAliasPostings = new Map<string, Set<string>>();
 	private readonly metadataBasenameCharPostings = new Map<string, Set<string>>();
+	private readonly metadataBasenameHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataBasenamePhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataBasenamePostings = new Map<string, Set<string>>();
 	private readonly metadataFolderCharPostings = new Map<string, Set<string>>();
+	private readonly metadataFolderHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataFolderPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataFolderPostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingCharPostings = new Map<string, Set<string>>();
+	private readonly metadataHeadingHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPostings = new Map<string, Set<string>>();
 	private readonly metadataPostings = new Map<string, Set<string>>();
@@ -133,17 +136,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.clear();
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
+		this.bodyHanSegmentPostings.clear();
 		this.bodyPhrasePostings.clear();
 		this.metadataAliasCharPostings.clear();
+		this.metadataAliasHanSegmentPostings.clear();
 		this.metadataAliasPhrasePostings.clear();
 		this.metadataAliasPostings.clear();
 		this.metadataBasenameCharPostings.clear();
+		this.metadataBasenameHanSegmentPostings.clear();
 		this.metadataBasenamePhrasePostings.clear();
 		this.metadataBasenamePostings.clear();
 		this.metadataFolderCharPostings.clear();
+		this.metadataFolderHanSegmentPostings.clear();
 		this.metadataFolderPhrasePostings.clear();
 		this.metadataFolderPostings.clear();
 		this.metadataHeadingCharPostings.clear();
+		this.metadataHeadingHanSegmentPostings.clear();
 		this.metadataHeadingPhrasePostings.clear();
 		this.metadataHeadingPostings.clear();
 		this.metadataPostings.clear();
@@ -196,16 +204,21 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			{
 				bodyPostings: this.bodyPostings,
 				bodyCharPostings: this.bodyCharPostings,
+				bodyHanSegmentPostings: this.bodyHanSegmentPostings,
 				metadataAliasCharPostings: this.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: this.metadataAliasHanSegmentPostings,
 				metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
 				metadataAliasPostings: this.metadataAliasPostings,
 				metadataBasenameCharPostings: this.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings: this.metadataBasenameHanSegmentPostings,
 				metadataBasenamePhrasePostings: this.metadataBasenamePhrasePostings,
 				metadataBasenamePostings: this.metadataBasenamePostings,
 				metadataFolderCharPostings: this.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: this.metadataFolderHanSegmentPostings,
 				metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
 				metadataFolderPostings: this.metadataFolderPostings,
 				metadataHeadingCharPostings: this.metadataHeadingCharPostings,
+				metadataHeadingHanSegmentPostings: this.metadataHeadingHanSegmentPostings,
 				metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
 				metadataHeadingPostings: this.metadataHeadingPostings,
 				metadataPostings: this.metadataPostings,
@@ -348,9 +361,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		await this.attachDirectSubItems(
 			finalResults,
 			candidates,
-			plan,
-			pairSignatures,
-			charQuery,
 			request.queryText,
 			request.maxDirectSubItemResults ?? request.maxItemResults,
 			request.maxSubItemResults ?? DEFAULT_MAX_SUBITEM_COUNT,
@@ -426,24 +436,28 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			.map((term) => term.toLowerCase());
 		const bodyTerms = new Set(bodyTokenSequence);
 		const bodyCharTerms = new Set(extractHanBigrams(document.content ?? ""));
+		const bodyHanSegments = new Set(extractHanSegments(document.content ?? ""));
 		const basenameTerms = new Set(
 			this.tokenizer
 				.tokenizeSequence(document.basename ?? "", "index")
 				.map((term) => term.toLowerCase()),
 		);
 		const basenameCharTerms = new Set(extractHanBigrams(document.basename ?? ""));
+		const basenameHanSegments = new Set(extractHanSegments(document.basename ?? ""));
 		const folderTerms = new Set(
 			this.tokenizer
 				.tokenizeSequence(document.folder ?? "", "index")
 				.map((term) => term.toLowerCase()),
 		);
 		const folderCharTerms = new Set(extractHanBigrams(document.folder ?? ""));
+		const folderHanSegments = new Set(extractHanSegments(document.folder ?? ""));
 		const aliasTerms = new Set(
 			this.tokenizer
 				.tokenizeSequence(document.aliases ?? "", "index")
 				.map((term) => term.toLowerCase()),
 		);
 		const aliasCharTerms = new Set(extractHanBigrams(document.aliases ?? ""));
+		const aliasHanSegments = new Set(extractHanSegments(document.aliases ?? ""));
 		const tagTerms = new Set(
 			this.tokenizer
 				.tokenizeSequence(document.tags ?? "", "index")
@@ -459,6 +473,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				.map((term) => term.toLowerCase()),
 		);
 		const headingCharTerms = new Set(extractHanBigrams(document.headings ?? ""));
+		const headingHanSegments = new Set(extractHanSegments(document.headings ?? ""));
 		const metadataTokenSequence = [
 			...basenameTerms,
 			...folderTerms,
@@ -781,9 +796,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private async attachDirectSubItems(
 		rankedResults: readonly CoverageLexicalRankableResult[],
 		candidates: ReadonlyMap<string, CoverageLexicalCandidateState>,
-		plan: CoverageLexicalPlan,
-		pairSignatures: readonly CoverageLexicalPairSignature[],
-		charQuery: CoverageLexicalCharQuery,
 		queryText: string,
 		maxDirectSubItemResults: number,
 		maxSubItemCount: number,
@@ -801,18 +813,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					result.directSubItems = [];
 					return;
 				}
-				result.directSubItems = await this.directSubItemBuilder.build({
-					path: result.path,
-					bodyTextFallback: document.bodyText,
-					bodyTokenSequence: document.bodyTokenSequence,
-					families: plan.families,
-					pairSignatures,
-					maxSubItemCount,
-					charQueryTerms: charQuery.terms,
-					charQuerySegments: charQuery.hanSegments,
-					debugQueryText: queryText,
-					displayWindows: result.coverageDisplayWindows,
-				});
+				result.directSubItems = buildDirectSubitemsExactFileSubItems({
+					queryText,
+					snapshotText: document.bodyText,
+					options: {
+						maxChars: 220,
+						mergeGap: 32,
+						contextLeft: 24,
+						contextRight: 40,
+						boundaryLookaround: 24,
+					},
+				}).slice(0, maxSubItemCount);
 			}),
 		);
 	}

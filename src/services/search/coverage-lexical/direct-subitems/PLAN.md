@@ -16,15 +16,13 @@ That makes it hard to prove two requirements:
 
 The replacement should make recall and ranking explicit, inspectable, and testable.
 
-## Migration strategy
+## Integration strategy
 
-Run the new implementation in parallel under:
+The implementation lives under:
 
 - `src/services/search/coverage-lexical/direct-subitems/`
 
-Keep the legacy path active until the new builder passes the new test suite.
-
-The legacy entry file should eventually become an adapter that forwards to V2.
+and is wired directly into `coverage-lexical-engine`.
 
 ## Non-goals for the first pass
 
@@ -350,17 +348,17 @@ Exit criteria:
 - exact never loses to weaker tier under equal coverage
 - prefix never loses to fuzzy under equal stronger tiers
 
-## Phase 4: migration adapter
+## Phase 4: engine hardening
 
 Deliverables:
 
-- legacy direct-subitems file forwards into V2 builder
-- existing tests ported or wrapped
+- expand engine-level regression coverage
+- remove obsolete implementation files and tests
 
 Exit criteria:
 
-- old call sites remain unchanged
-- V2 becomes the default path
+- engine path is the only active direct-subitems implementation
+- regression suite protects exact/prefix/fuzzy ordering and source-text recall
 
 ## Test plan
 

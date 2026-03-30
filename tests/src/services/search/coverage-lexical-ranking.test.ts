@@ -295,4 +295,124 @@ describe("coverage lexical ranking", () => {
 		expect(firstSubItem?.highlightRanges?.length ?? 0).toBeGreaterThan(0);
 		expect(firstSubItem?.text.includes("cache")).toBe(true);
 	});
+
+	test("engine direct subitems rank exact ahead of prefix ahead of fuzzy", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<
+					Array<{
+						nativeSubItemsReady?: boolean;
+						directSubItems?: Array<{ text: string }>;
+					}>
+				>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-en/mixed/subitem-order.md",
+				basename: "subitem-order.md",
+				folder: "pkm-en/mixed",
+				headings: "Subitem order",
+				content: [
+					"plugins fast",
+					"filler filler filler filler filler filler filler filler filler",
+					"plugin fast",
+					"filler filler filler filler filler filler filler filler filler",
+					"plugons fast",
+				].join("\n"),
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "plugins fast",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 3,
+			maxDirectSubItemResults: 3,
+			maxSubItemResults: 6,
+		});
+
+		expect(results[0]?.nativeSubItemsReady).toBe(true);
+		expect(
+			results[0]?.directSubItems
+				?.slice(0, 3)
+				.map((item) => item.text.toLowerCase().replace(/…/g, "")),
+		).toEqual(["plugins fast", "plugin fast", "plugons fast"]);
+	});
+
+	test("engine direct subitems recall Han single chars and contiguous symbol runs from source text", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<
+					Array<{
+						nativeSubItemsReady?: boolean;
+						directSubItems?: Array<{
+							text: string;
+							highlightRanges?: Array<{ start: number; end: number }>;
+						}>;
+					}>
+				>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-zh/mixed/symbol-run.md",
+				basename: "symbol-run.md",
+				folder: "pkm-zh/mixed",
+				headings: "Symbol run",
+				content: [
+					"引言。",
+					"这里是上面 foo/bar@v1.2#tag 的真实原文片段。",
+					"尾声。",
+				].join("\n"),
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "上面 foo/bar@v1.2#tag",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 3,
+			maxDirectSubItemResults: 3,
+			maxSubItemResults: 6,
+		});
+
+		expect(results[0]?.nativeSubItemsReady).toBe(true);
+		expect(results[0]?.directSubItems?.length ?? 0).toBeGreaterThan(0);
+		const first = results[0]?.directSubItems?.[0];
+		expect(first?.text).toContain("上面");
+		expect(first?.text).toContain("foo/bar@v1.2#tag");
+		const highlighted = (first?.highlightRanges ?? []).map((range) =>
+			first?.text.slice(range.start, range.end),
+		);
+		expect(highlighted.some((segment) => segment.includes("上"))).toBe(true);
+		expect(highlighted.some((segment) => segment.includes("面"))).toBe(true);
+		expect(
+			highlighted.some((segment) => segment.includes("foo/bar@v1.2#tag")),
+		).toBe(true);
+	});
 });

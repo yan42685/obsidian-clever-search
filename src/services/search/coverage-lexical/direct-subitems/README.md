@@ -1,6 +1,6 @@
-# Direct Subitems V2
+# Direct Subitems
 
-This folder hosts the parallel replacement for native `directSubItems`.
+This folder hosts the native `coverage-lexical` direct subitem pipeline.
 
 ## Goal
 
@@ -14,21 +14,18 @@ This folder hosts the parallel replacement for native `directSubItems`.
 
 ## Status
 
-- Planning and contracts only.
-- No runtime integration yet.
-- Old implementation remains the active path.
+- Integrated into `coverage-lexical-engine`.
+- Uses direct source-text recall and strict tuple ranking.
 
-## Intended Modules
+## Modules
 
 - `contracts.ts`
   - shared runtime types and score tuple contract
 - `PLAN.md`
-  - phased migration plan
-- future modules
-  - `query-terms.ts`
-  - `raw-occurrences.ts`
-  - `candidate-spans.ts`
-  - `span-stats.ts`
-  - `span-ranker.ts`
-  - `snippet-renderer.ts`
-  - `builder.ts`
+  - design and migration notes
+- `query-terms.ts`
+- `raw-occurrences.ts`
+- `candidate-spans.ts`
+- `span-ranker.ts`
+- `snippet-renderer.ts`
+- `builder.ts`
