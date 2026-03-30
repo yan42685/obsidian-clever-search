@@ -71,8 +71,8 @@ Practical rule:
 - use `web-notes-v1` for quick technical regression checks
 - use `web-notes-v2` before promoting ranking or tokenization changes
 - use `big-vault-mixed-v1` when you want a closer approximation of a real medium / large mixed-language vault
-- use `benchmarks/file-search-web-baseline.md` as the current human-readable checkpoint for the experimental lexical benchmark
-- use `benchmarks/file-search-web-harvest.md` as the structured harvest package for milestone summary, weakness ranking, guardrails, and roadmap
+- use `benchmarks/passage-file-search-baseline.md` as the archival human-readable checkpoint for the passage-first lexical milestone
+- use `benchmarks/passage-file-search-harvest.md` as the structured harvest package for that milestone's summary, weakness ranking, guardrails, and roadmap
 
 ## Maintenance
 

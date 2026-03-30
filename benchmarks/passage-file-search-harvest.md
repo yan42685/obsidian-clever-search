@@ -1,4 +1,4 @@
-# File Search Web Harvest
+# Passage File Search Harvest
 
 Date: March 23, 2026
 
@@ -8,7 +8,7 @@ It exists to preserve the highest-value outcomes of this phase so future work ca
 
 Related files:
 
-- benchmark checkpoint: `benchmarks/file-search-web-baseline.md`
+- benchmark checkpoint: `benchmarks/passage-file-search-baseline.md`
 - architectural source of truth: `src/services/search/hybrid/DESIGN.md`
 - experimental backend: `src/services/search/passage-lexical/passage-file-search-engine.ts`
 

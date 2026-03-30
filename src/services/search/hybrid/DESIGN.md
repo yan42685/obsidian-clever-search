@@ -1683,7 +1683,7 @@ This checkpoint exists so future work does not dissolve the current gains back i
 Scope of this checkpoint:
 
 - only the experimental backend in `src/services/search/passage-lexical/`
-- current benchmark command: `node node_modules/jest/bin/jest.js --config jest.file-search-web-benchmark.config.js --runInBand tests/src/services/search/file-search-web-benchmark.bench.ts`
+- historical benchmark harness: retired during the old passage benchmark cleanup; the metrics below remain as an archival checkpoint
 - current corpus snapshot: `60` notes and `267` queries on `web-notes-v2` plus the synthetic adversarial / messy PKM set
 
 Current headline metrics:
@@ -1730,7 +1730,7 @@ Recommended interpretation:
 - this is the right moment to extract and preserve the current milestone
 - next work should aim at another mechanism jump such as query-conditioned local windows, a more decisive verifier, mixed-script bridge handling, or phrase-signature admission
 - do not go back to broad coefficient tuning unless it is attached to one of those stronger mechanisms
-- see `benchmarks/file-search-web-harvest.md` for the structured harvest package: milestone summary, weakness ranking, guardrails, and staged roadmap
+- see `benchmarks/passage-file-search-harvest.md` for the structured harvest package: milestone summary, weakness ranking, guardrails, and staged roadmap
 
 Current ceiling interpretation:
 

@@ -1,4 +1,4 @@
-# File Search Web Baseline
+# Passage File Search Baseline
 
 Date: March 23, 2026
 
@@ -6,7 +6,7 @@ This file records the current checkpoint for the experimental lexical backend so
 
 Scope:
 
-- benchmark command: `node node_modules/jest/bin/jest.js --config jest.file-search-web-benchmark.config.js --runInBand tests/src/services/search/file-search-web-benchmark.bench.ts`
+- benchmark harness at the time of capture: retired during later cleanup; keep this file as an archival checkpoint for the removed passage benchmark
 - corpus: `web-notes-v2` plus the synthetic adversarial / messy PKM cases
 - corpus size at this checkpoint: `60` notes
 - query count at this checkpoint: `267`

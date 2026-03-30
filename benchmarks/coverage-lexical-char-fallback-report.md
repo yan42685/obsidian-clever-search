@@ -7,7 +7,7 @@ char-aware direct-subitem highlighting path.
 ## Benchmark
 
 - command:
-  `node node_modules/jest/bin/jest.js --config jest.file-search-web-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
 - corpus:
   `73` docs, `176` queries
 - anchor date:

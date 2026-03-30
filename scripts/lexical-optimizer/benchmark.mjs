@@ -140,7 +140,7 @@ export function runBenchmark(cwd, benchmarkArgs, backendName = "CoverageLexical"
 
 	const summaryText = extractJsonAfterMarker(
 		result.stdout,
-		"[file-search-web-benchmark] summary",
+		"[coverage-lexical-automation-benchmark] summary",
 	);
 	if (!summaryText) {
 		throw new Error("Unable to parse benchmark summary from stdout");
