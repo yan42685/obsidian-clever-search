@@ -1,6 +1,7 @@
 import type { MatchedFile } from "src/globals/search-types";
 import type {
 	CoverageLexicalCharSignal,
+	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalPlan,
@@ -36,16 +37,112 @@ export function compareCoverageLexicalResultSignals(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
+	const countDecision = compareCoverageLexicalFamilyCountSummaries(
+		left.familyCountSummary,
+		right.familyCountSummary,
+		plan,
+	);
+	if (countDecision !== 0) {
+		return countDecision;
+	}
 	if (plan.route === "metadata-first") {
-		return compareMetadataFirstStages(left, right);
+		return compareMetadataFirstDetailStages(left, right);
 	}
 	if (plan.route === "body-with-anchor") {
-		return compareBodyWithAnchorStages(left, right, plan);
+		return compareBodyWithAnchorDetailStages(left, right, plan);
 	}
-	return compareBodyFirstStages(left, right);
+	return compareBodyFirstDetailStages(left, right);
 }
 
-function compareMetadataFirstStages(
+export function compareCoverageLexicalFamilyCountSummaries(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+	plan: CoverageLexicalPlan,
+): number {
+	return (
+		compareDescendingMetric(
+			left.totalMatchedFamilyCount,
+			right.totalMatchedFamilyCount,
+		) ||
+		(plan.route === "body-first"
+			? compareBodyFirstCountTieBreakers(left, right)
+			: compareMetadataFirstCountTieBreakers(left, right))
+	);
+}
+
+function compareMetadataFirstCountTieBreakers(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+): number {
+	return (
+		compareDescendingMetric(
+			left.metadataMatchedFamilyCount,
+			right.metadataMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.basenameMatchedFamilyCount,
+			right.basenameMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.aliasesMatchedFamilyCount,
+			right.aliasesMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.folderMatchedFamilyCount,
+			right.folderMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.headingsMatchedFamilyCount,
+			right.headingsMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.tagsMatchedFamilyCount,
+			right.tagsMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.bodyMatchedFamilyCount,
+			right.bodyMatchedFamilyCount,
+		)
+	);
+}
+
+function compareBodyFirstCountTieBreakers(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+): number {
+	return (
+		compareDescendingMetric(
+			left.bodyMatchedFamilyCount,
+			right.bodyMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.metadataMatchedFamilyCount,
+			right.metadataMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.basenameMatchedFamilyCount,
+			right.basenameMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.aliasesMatchedFamilyCount,
+			right.aliasesMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.folderMatchedFamilyCount,
+			right.folderMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.headingsMatchedFamilyCount,
+			right.headingsMatchedFamilyCount,
+		) ||
+		compareDescendingMetric(
+			left.tagsMatchedFamilyCount,
+			right.tagsMatchedFamilyCount,
+		)
+	);
+}
+
+function compareMetadataFirstDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 ): number {
@@ -67,7 +164,7 @@ function compareMetadataFirstStages(
 	);
 }
 
-function compareBodyWithAnchorStages(
+function compareBodyWithAnchorDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
@@ -107,7 +204,7 @@ function compareBodyWithAnchorStages(
 	);
 }
 
-function compareBodyFirstStages(
+function compareBodyFirstDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 ): number {
@@ -148,10 +245,10 @@ function compareMetadataIdentitySignals(
 		compareDescendingMetric(left.phraseCoverageCount, right.phraseCoverageCount) ||
 		compareDescendingMetric(left.phraseWeight, right.phraseWeight) ||
 		compareAreaSignals(left.overall, right.overall) ||
-		compareAreaSignals(left.alias, right.alias) ||
 		compareAreaSignals(left.basename, right.basename) ||
-		compareAreaSignals(left.heading, right.heading) ||
-		compareAreaSignals(left.path, right.path)
+		compareAreaSignals(left.alias, right.alias) ||
+		compareAreaSignals(left.path, right.path) ||
+		compareAreaSignals(left.heading, right.heading)
 	);
 }
 

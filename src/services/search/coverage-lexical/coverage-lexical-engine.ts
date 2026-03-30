@@ -47,6 +47,7 @@ import type {
 	CoverageLexicalAreaSignal,
 	CoverageLexicalCandidateState,
 	CoverageLexicalFamily,
+	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
@@ -778,6 +779,9 @@ function buildCoverageSignal(
 	const metadataIdentity = createEmptyMetadataIdentitySignal();
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
+	const totalMatchedFamilyIndices = new Set<number>();
+	const bodyMatchedFamilyIndices = new Set<number>();
+	const primaryMetadataFields = new Map<number, CoverageLexicalMetadataField>();
 	let tailCoreWeight = 0;
 	let tailSoftWeight = 0;
 	const matchedTerms = new Set<string>();
@@ -793,6 +797,19 @@ function buildCoverageSignal(
 		const bestKind = pickBetterMatchKind(bodyKind, metadataKind);
 		if (bestKind) {
 			matchedTerms.add(family.normalizedTerm);
+		}
+		totalMatchedFamilyIndices.add(family.index);
+		if (bodyKind) {
+			bodyMatchedFamilyIndices.add(family.index);
+		}
+		if (metadataKind) {
+			const primaryMetadataField = resolvePrimaryMetadataFieldForFamily(
+				state,
+				family.index,
+			);
+			if (primaryMetadataField) {
+				primaryMetadataFields.set(family.index, primaryMetadataField);
+			}
 		}
 		if (family.role === "body") {
 			if (bodyKind && family.strength === "core") {
@@ -858,6 +875,11 @@ function buildCoverageSignal(
 	}
 
 	return {
+		familyCountSummary: summarizeFamilyCountSignals(
+			totalMatchedFamilyIndices,
+			bodyMatchedFamilyIndices,
+			primaryMetadataFields,
+		),
 		coreBody,
 		softBody,
 		metadataAnchor,
@@ -910,6 +932,19 @@ function createEmptyAreaSignal(): CoverageLexicalAreaSignal {
 	};
 }
 
+function createEmptyFamilyCountSummary(): CoverageLexicalFamilyCountSummary {
+	return {
+		totalMatchedFamilyCount: 0,
+		metadataMatchedFamilyCount: 0,
+		bodyMatchedFamilyCount: 0,
+		basenameMatchedFamilyCount: 0,
+		aliasesMatchedFamilyCount: 0,
+		folderMatchedFamilyCount: 0,
+		headingsMatchedFamilyCount: 0,
+		tagsMatchedFamilyCount: 0,
+	};
+}
+
 function createEmptyCharSignal(): {
 	matchCount: number;
 	matchRatio: number;
@@ -936,6 +971,37 @@ function createEmptyMetadataIdentitySignal(): CoverageLexicalMetadataIdentitySig
 		heading: createEmptyAreaSignal(),
 		path: createEmptyAreaSignal(),
 	};
+}
+
+function summarizeFamilyCountSignals(
+	totalMatchedFamilyIndices: ReadonlySet<number>,
+	bodyMatchedFamilyIndices: ReadonlySet<number>,
+	primaryMetadataFields: ReadonlyMap<number, CoverageLexicalMetadataField>,
+): CoverageLexicalFamilyCountSummary {
+	const summary = createEmptyFamilyCountSummary();
+	summary.totalMatchedFamilyCount = totalMatchedFamilyIndices.size;
+	summary.bodyMatchedFamilyCount = bodyMatchedFamilyIndices.size;
+	summary.metadataMatchedFamilyCount = primaryMetadataFields.size;
+	for (const field of primaryMetadataFields.values()) {
+		if (field === "basename") {
+			summary.basenameMatchedFamilyCount += 1;
+			continue;
+		}
+		if (field === "aliases") {
+			summary.aliasesMatchedFamilyCount += 1;
+			continue;
+		}
+		if (field === "folder") {
+			summary.folderMatchedFamilyCount += 1;
+			continue;
+		}
+		if (field === "headings") {
+			summary.headingsMatchedFamilyCount += 1;
+			continue;
+		}
+		summary.tagsMatchedFamilyCount += 1;
+	}
+	return summary;
 }
 
 function applyMatch(
@@ -1006,6 +1072,24 @@ function getBestIdentityMatchKind(
 		>;
 	}
 	return bestKind;
+}
+
+function resolvePrimaryMetadataFieldForFamily(
+	state: CoverageLexicalCandidateState,
+	familyIndex: number,
+): CoverageLexicalMetadataField | null {
+	for (const field of [
+		"basename",
+		"aliases",
+		"folder",
+		"headings",
+		"tags",
+	] as const satisfies readonly CoverageLexicalMetadataField[]) {
+		if ((state.metadataFieldMatches[field].get(familyIndex) ?? null) !== null) {
+			return field;
+		}
+	}
+	return null;
 }
 
 function getMetadataFieldBoost(

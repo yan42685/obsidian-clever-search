@@ -231,7 +231,19 @@ export type CoverageLexicalPassageAdmissionSignal = {
 	compactnessScore: number;
 };
 
+export type CoverageLexicalFamilyCountSummary = {
+	totalMatchedFamilyCount: number;
+	metadataMatchedFamilyCount: number;
+	bodyMatchedFamilyCount: number;
+	basenameMatchedFamilyCount: number;
+	aliasesMatchedFamilyCount: number;
+	folderMatchedFamilyCount: number;
+	headingsMatchedFamilyCount: number;
+	tagsMatchedFamilyCount: number;
+};
+
 export type CoverageLexicalFamilySignal = {
+	familyCountSummary: CoverageLexicalFamilyCountSummary;
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;

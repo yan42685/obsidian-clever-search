@@ -1,3 +1,8 @@
+import type {
+	CoverageLexicalFamilyCountSummary,
+	CoverageLexicalFamilySignal,
+	CoverageLexicalPlan,
+} from "src/services/search/coverage-lexical/coverage-lexical-types";
 import { container } from "tsyringe";
 
 jest.mock("src/services/search/tokenizer", () => ({
@@ -95,6 +100,214 @@ function createMockTokenizer() {
 	};
 }
 
+function createComparatorPlan(
+	route: CoverageLexicalPlan["route"] = "body-with-anchor",
+): CoverageLexicalPlan {
+	return {
+		families: [],
+		queryKind: "anchor_body_hybrid",
+		shortQueryOverlay: false,
+		hasMetadataHint: false,
+		hasMixedScriptHint: false,
+		hasPathShapeHint: false,
+		hasTitleShapeHint: false,
+		route,
+		hardAnchorFamilies: [],
+		decisiveBodyFamilies: [],
+		supportBodyFamilies: [],
+		optionalFamilies: [],
+		noiseFamilies: [],
+		bridgeFamilies: [],
+		relaxedMinimumMatchCount: 0,
+		coreFamilyCount: 0,
+		anchorFamilyCount: 0,
+		bodyFamilyCount: 0,
+		explain: {
+			spans: [],
+			familyReasons: [],
+			queryKindReasons: [],
+		},
+	};
+}
+
+function createEmptyWindowFusionSignal(): CoverageLexicalFamilySignal["localEvidence"] {
+	return {
+		primary: {
+			start: -1,
+			end: -1,
+			coreCoverageCount: 0,
+			exactCoreWeight: 0,
+			prefixCoreWeight: 0,
+			fuzzyCoreWeight: 0,
+			anchorCoverageCount: 0,
+			softCoverageCount: 0,
+			adjacentCorePairCount: 0,
+			adjacentCorePairWeight: 0,
+			orderedPairCount: 0,
+			orderRatio: 0,
+			compactnessRatio: 0,
+			score: 0,
+			matchedExactCoreFamilyIndices: [],
+			matchedPrefixCoreFamilyIndices: [],
+			matchedFuzzyCoreFamilyIndices: [],
+			matchedAnchorFamilyIndices: [],
+			matchedSoftFamilyIndices: [],
+		},
+		support: {
+			start: -1,
+			end: -1,
+			coreCoverageCount: 0,
+			exactCoreWeight: 0,
+			prefixCoreWeight: 0,
+			fuzzyCoreWeight: 0,
+			anchorCoverageCount: 0,
+			softCoverageCount: 0,
+			adjacentCorePairCount: 0,
+			adjacentCorePairWeight: 0,
+			orderedPairCount: 0,
+			orderRatio: 0,
+			compactnessRatio: 0,
+			score: 0,
+			matchedExactCoreFamilyIndices: [],
+			matchedPrefixCoreFamilyIndices: [],
+			matchedFuzzyCoreFamilyIndices: [],
+			matchedAnchorFamilyIndices: [],
+			matchedSoftFamilyIndices: [],
+		},
+		supportWindowCount: 0,
+		corroboratedCoreCoverageCount: 0,
+		corroboratedExactCoreWeight: 0,
+		corroboratedPrefixCoreWeight: 0,
+		corroboratedFuzzyCoreWeight: 0,
+		corroboratedAnchorCoverageCount: 0,
+		corroboratedSoftCoverageCount: 0,
+	};
+}
+
+function compareSignals(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	const { compareCoverageLexicalResultSignals } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-ranker",
+	) as {
+		compareCoverageLexicalResultSignals(
+			left: CoverageLexicalFamilySignal,
+			right: CoverageLexicalFamilySignal,
+			plan: CoverageLexicalPlan,
+		): number;
+	};
+	return compareCoverageLexicalResultSignals(left, right, plan);
+}
+
+function createFamilyCountSummary(
+	overrides: Partial<CoverageLexicalFamilyCountSummary> = {},
+): CoverageLexicalFamilyCountSummary {
+	return {
+		totalMatchedFamilyCount: 0,
+		metadataMatchedFamilyCount: 0,
+		bodyMatchedFamilyCount: 0,
+		basenameMatchedFamilyCount: 0,
+		aliasesMatchedFamilyCount: 0,
+		folderMatchedFamilyCount: 0,
+		headingsMatchedFamilyCount: 0,
+		tagsMatchedFamilyCount: 0,
+		...overrides,
+	};
+}
+
+function createFamilySignal(
+	overrides: Partial<CoverageLexicalFamilySignal> & {
+		familyCountSummary?: Partial<CoverageLexicalFamilyCountSummary>;
+	} = {},
+): CoverageLexicalFamilySignal {
+	const { familyCountSummary, ...restOverrides } = overrides;
+	return {
+		familyCountSummary: createFamilyCountSummary(familyCountSummary ?? {}),
+		coreBody: {
+			coverageCount: 0,
+			exactWeight: 0,
+			prefixWeight: 0,
+			fuzzyWeight: 0,
+		},
+		softBody: {
+			coverageCount: 0,
+			exactWeight: 0,
+			prefixWeight: 0,
+			fuzzyWeight: 0,
+		},
+		metadataAnchor: {
+			coverageCount: 0,
+			exactWeight: 0,
+			prefixWeight: 0,
+			fuzzyWeight: 0,
+		},
+		metadataIdentity: {
+			phraseCoverageCount: 0,
+			phraseWeight: 0,
+			overall: {
+				coverageCount: 0,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			alias: {
+				coverageCount: 0,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			basename: {
+				coverageCount: 0,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			heading: {
+				coverageCount: 0,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			path: {
+				coverageCount: 0,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		},
+		bodyChar: {
+			matchCount: 0,
+			matchRatio: 0,
+			exactSegmentCount: 0,
+			fullSegmentCount: 0,
+			bestSegmentCoverageCount: 0,
+			bestSegmentCoverageRatio: 0,
+		},
+		metadataChar: {
+			matchCount: 0,
+			matchRatio: 0,
+			exactSegmentCount: 0,
+			fullSegmentCount: 0,
+			bestSegmentCoverageCount: 0,
+			bestSegmentCoverageRatio: 0,
+		},
+		tagSignal: {
+			exactMatchCount: 0,
+			charMatchCount: 0,
+			charMatchRatio: 0,
+		},
+		tailCoreWeight: 0,
+		tailSoftWeight: 0,
+		phraseBridgeCount: 0,
+		phraseBridgeWeight: 0,
+		localEvidence: createEmptyWindowFusionSignal(),
+		matchedTerms: [],
+		...restOverrides,
+	};
+}
+
 describe("coverage lexical ranking", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
@@ -119,6 +332,185 @@ describe("coverage lexical ranking", () => {
 		} else {
 			container.clearInstances();
 		}
+	});
+
+	test("anchor-oriented routes prefer metadata distribution before body detail", () => {
+		const plan = createComparatorPlan("body-with-anchor");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 2,
+				basenameMatchedFamilyCount: 1,
+				aliasesMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 2,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 3,
+			},
+			coreBody: {
+				coverageCount: 3,
+				exactWeight: 40,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			localEvidence: {
+					...createEmptyWindowFusionSignal(),
+				primary: {
+					...createEmptyWindowFusionSignal().primary,
+					coreCoverageCount: 3,
+					exactCoreWeight: 20,
+					score: 200,
+				},
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+	});
+
+	test("body-first routes keep body count ahead of metadata distribution after total-count ties", () => {
+		const plan = createComparatorPlan("body-first");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 2,
+				basenameMatchedFamilyCount: 1,
+				aliasesMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 1,
+			},
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 3,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
+	});
+
+	test("count-first comparator honors metadata field priority basename over aliases over folder over headings over tags", () => {
+		const plan = createComparatorPlan("body-with-anchor");
+		const basenameSignal = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+			},
+		});
+		const aliasesSignal = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				aliasesMatchedFamilyCount: 1,
+			},
+		});
+		const folderSignal = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				folderMatchedFamilyCount: 1,
+			},
+		});
+		const headingsSignal = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				headingsMatchedFamilyCount: 1,
+			},
+		});
+		const tagsSignal = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				tagsMatchedFamilyCount: 1,
+			},
+		});
+
+		expect(
+			compareSignals(basenameSignal, aliasesSignal, plan),
+		).toBeLessThan(0);
+		expect(
+			compareSignals(aliasesSignal, folderSignal, plan),
+		).toBeLessThan(0);
+		expect(
+			compareSignals(folderSignal, headingsSignal, plan),
+		).toBeLessThan(0);
+		expect(
+			compareSignals(headingsSignal, tagsSignal, plan),
+		).toBeLessThan(0);
+	});
+
+	test("body matched family count breaks ties only after metadata counts are exhausted", () => {
+		const plan = createComparatorPlan("body-first");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 2,
+			},
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 50,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+	});
+
+	test("detail signals only resolve ties after count summary is equal", () => {
+		const plan = createComparatorPlan("body-first");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 5,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 8,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
 	});
 
 	test("prefers stronger metadata identity evidence for mixed-anchor queries", async () => {
@@ -232,6 +624,96 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(results[0]?.path).toBe("pkm-en/projects/sdk/cache-restore-checklist.md");
+	});
+
+	test("prefers basename-heavy file lookup evidence over richer body wording", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-en/projects/sdk/cache-restore-checklist.md",
+				basename: "cache-restore-checklist.md",
+				folder: "pkm-en/projects/sdk",
+				headings: "Warmup drill note",
+				aliases: "cache restore checklist",
+				content:
+					"short note about restore checks after warmup and replay verification",
+			},
+			{
+				path: "pkm-en/inbox/warmup-restore-notes.md",
+				basename: "warmup-restore-notes.md",
+				folder: "pkm-en/inbox",
+				headings: "Cache restore checklist",
+				content:
+					"cache restore checklist after warmup with restore checklist reminders and many checklist references",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "cache restore checklist",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe("pkm-en/projects/sdk/cache-restore-checklist.md");
+	});
+
+	test("prefers folder-first file lookup evidence ahead of richer body wording when total family coverage ties", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-en/projects/sdk/runbook.md",
+				basename: "runbook.md",
+				folder: "pkm-en/projects/sdk",
+				headings: "Cache checklist",
+				content: "brief cache note",
+			},
+			{
+				path: "pkm-en/archive/cache-sdk-notes.md",
+				basename: "cache-sdk-notes.md",
+				folder: "pkm-en/archive",
+				headings: "Project cache notes",
+				content:
+					"sdk project cache runbook walkthrough with detailed cache and sdk recovery notes",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "projects sdk runbook",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe("pkm-en/projects/sdk/runbook.md");
 	});
 
 	test("builds native direct subitems with mixed-script row col anchors", async () => {
