@@ -9,6 +9,8 @@ import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
 import { extractHanBigramsWithOffsets } from "./coverage-lexical-cjk";
 import { selectCoverageLexicalDisplayWindows } from "./coverage-lexical-display-windows";
+import { alignSnippetToQueryChars } from "./coverage-lexical-snippet-aligner";
+import type { CoverageLexicalSnippetAlignerAtomInput } from "./coverage-lexical-snippet-aligner";
 import type {
 	CoverageLexicalDisplayWindow,
 	CoverageLexicalFamily,
@@ -49,6 +51,13 @@ type CoverageSnippetPayload = {
 	finalFullSegmentCount: number;
 	finalBestSegmentCoverageCount: number;
 	finalBestSegmentCoverageRatio: number;
+	exactFamilyHitCount: number;
+	prefixFamilyHitCount: number;
+	fuzzyFamilyHitCount: number;
+	substringFamilyHitCount: number;
+	gapPenalty: number;
+	maxGap: number;
+	alignmentScore: number;
 	snippetScore: number;
 	sourceWindowScore: number;
 };
@@ -118,6 +127,7 @@ const SNIPPET_NEARBY_OFFSET_THRESHOLD = 16;
 const FINAL_DUPLICATE_OFFSET_THRESHOLD = 72;
 const MAX_SNIPPET_DISTANCE_FROM_ANCHOR_CHARS = 48;
 const MAX_SEMANTIC_ISLAND_GAP_CHARS = 24;
+const MAX_HAN_CHAR_ATOM_SEGMENT_LENGTH = 6;
 
 @singleton()
 export class CoverageLexicalDirectSubItemBuilder {
@@ -658,13 +668,13 @@ function collectSnippetMatchAtoms(
 	}
 	for (const segment of segmentDescriptors) {
 		const chars = Array.from(segment.text);
-		if (chars.length > 4) {
+		if (chars.length > MAX_HAN_CHAR_ATOM_SEGMENT_LENGTH) {
 			continue;
 		}
-		const boundaryChars = [chars[0], chars[chars.length - 1]].filter(
+		const unigramChars = chars.filter(
 			(char, index, array) => !!char && array.indexOf(char) === index,
 		);
-		for (const char of boundaryChars) {
+		for (const char of unigramChars) {
 			let fromIndex = searchRegion.start;
 			while (fromIndex < searchRegion.end) {
 				const foundAt = text.indexOf(char, fromIndex);
@@ -1054,16 +1064,26 @@ function buildSnippetPayloadFromIsland(
 		allAtoms,
 	);
 	const snippetText = text.slice(snippetRange.start, snippetRange.end);
-	const highlightRanges = buildHighlightRangesFromAtoms(snippetRange, allAtoms);
-	const finalMetrics = computeAtomCoverageMetrics(
-		allAtoms.filter(
-			(atom) => atom.start >= snippetRange.start && atom.end <= snippetRange.end,
-		),
-	);
+	const alignment = alignSnippetToQueryChars({
+		snippetText,
+		families,
+		hanSegments: segmentDescriptors.map((segment) => ({ text: segment.text })),
+		familyAtoms: allAtoms
+			.filter(
+				(atom) =>
+					atom.start >= snippetRange.start &&
+					atom.end <= snippetRange.end &&
+					atom.kind.startsWith("family_"),
+			)
+			.map((atom) => ({
+				kind: atom.kind as CoverageLexicalSnippetAlignerAtomInput["kind"],
+				queryKey: atom.queryKey,
+			})),
+	});
+	const highlightRanges = alignment.alignedRanges;
 	const snippetScore =
-		finalMetrics.weightedCoverage * 1000 +
+		alignment.alignmentScore * 100 +
 		semanticSpan.semanticScore * 0.05 +
-		highlightRanges.length * 4 +
 		sourceWindowScore * 0.01;
 	logHanSubitemDebug(debugQueryText, "snippet-atom-span", {
 		path,
@@ -1081,8 +1101,9 @@ function buildSnippetPayloadFromIsland(
 		},
 		snippetRange,
 		snippetText,
-		finalSignature: finalMetrics.signature,
+		finalSignature: alignment.signature,
 		highlightRangeCount: highlightRanges.length,
+		alignmentScore: alignment.alignmentScore,
 		snippetScore,
 	});
 	if (highlightRanges.length === 0) {
@@ -1113,11 +1134,18 @@ function buildSnippetPayloadFromIsland(
 		semanticRange: semanticSpan.range,
 		semanticSignature: semanticSpan.signature,
 		absoluteRange: snippetRange,
-		finalFamilyHitCount: finalMetrics.familyKeyCount,
-		finalFullSegmentCount: finalMetrics.segmentKeyCount,
+		finalFamilyHitCount: alignment.familyHitCount,
+		finalFullSegmentCount: alignment.fullSegmentCount,
 		finalBestSegmentCoverageCount:
-			finalMetrics.bigramKeyCount + finalMetrics.charKeyCount,
-		finalBestSegmentCoverageRatio: finalMetrics.weightedCoverage,
+			alignment.matchedBigramCount + alignment.matchedCharCount,
+		finalBestSegmentCoverageRatio: alignment.coverageRatio,
+		exactFamilyHitCount: alignment.exactFamilyHitCount,
+		prefixFamilyHitCount: alignment.prefixFamilyHitCount,
+		fuzzyFamilyHitCount: alignment.fuzzyFamilyHitCount,
+		substringFamilyHitCount: alignment.substringFamilyHitCount,
+		gapPenalty: alignment.gapPenalty,
+		maxGap: alignment.maxGap,
+		alignmentScore: alignment.alignmentScore,
 		snippetScore,
 		sourceWindowScore,
 	};
@@ -1214,24 +1242,41 @@ function rankSnippetPayloads(
 		if (right.finalFullSegmentCount !== left.finalFullSegmentCount) {
 			return right.finalFullSegmentCount - left.finalFullSegmentCount;
 		}
-		if (
-			right.finalBestSegmentCoverageCount !== left.finalBestSegmentCoverageCount
-		) {
-			return (
-				right.finalBestSegmentCoverageCount -
-				left.finalBestSegmentCoverageCount
-			);
-		}
-		if (
-			right.finalBestSegmentCoverageRatio !== left.finalBestSegmentCoverageRatio
-		) {
+		if (right.finalBestSegmentCoverageRatio !== left.finalBestSegmentCoverageRatio) {
 			return (
 				right.finalBestSegmentCoverageRatio -
 				left.finalBestSegmentCoverageRatio
 			);
 		}
+		if (right.finalBestSegmentCoverageCount !== left.finalBestSegmentCoverageCount) {
+			return (
+				right.finalBestSegmentCoverageCount -
+				left.finalBestSegmentCoverageCount
+			);
+		}
 		if (right.finalFamilyHitCount !== left.finalFamilyHitCount) {
 			return right.finalFamilyHitCount - left.finalFamilyHitCount;
+		}
+		if (right.exactFamilyHitCount !== left.exactFamilyHitCount) {
+			return right.exactFamilyHitCount - left.exactFamilyHitCount;
+		}
+		if (right.prefixFamilyHitCount !== left.prefixFamilyHitCount) {
+			return right.prefixFamilyHitCount - left.prefixFamilyHitCount;
+		}
+		if (right.fuzzyFamilyHitCount !== left.fuzzyFamilyHitCount) {
+			return right.fuzzyFamilyHitCount - left.fuzzyFamilyHitCount;
+		}
+		if (right.substringFamilyHitCount !== left.substringFamilyHitCount) {
+			return right.substringFamilyHitCount - left.substringFamilyHitCount;
+		}
+		if (left.gapPenalty !== right.gapPenalty) {
+			return left.gapPenalty - right.gapPenalty;
+		}
+		if (left.maxGap !== right.maxGap) {
+			return left.maxGap - right.maxGap;
+		}
+		if (right.alignmentScore !== left.alignmentScore) {
+			return right.alignmentScore - left.alignmentScore;
 		}
 		if (right.snippetScore !== left.snippetScore) {
 			return right.snippetScore - left.snippetScore;
