@@ -349,6 +349,166 @@ describe("coverage lexical direct subitems", () => {
 		expect(highlighted).toContain("\u4e0a\u9762\u8fd9");
 	});
 
+	test("highlights a local Han subspan when the full Han query segment is not contiguous in the snippet", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<
+					Array<{
+						text: string;
+						highlightRanges?: Array<{ start: number; end: number }>;
+					}>
+				>;
+			};
+		};
+
+		const text = "\u4e8c\u5206\u6cd5\u6392\u67e5\u63d2\u4ef6\uff0c\u4f46\u597d\u50cf\u6709\u70b9\u4e0d\u7a33\u5b9a\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/local-han-subspan.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: ["\u4e8c\u5206\u6cd5\u6392\u67e5\u63d2\u4ef6 \u4f46\u597d\u50cf\u6709\u70b9\u4e0d\u7a33\u5b9a"],
+			families: [createFamily(0, "\u4e8c\u5206")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e8c\u5206", "\u5206\u4e0d", "\u4e0d\u7a33"],
+			charQuerySegments: ["\u4e8c\u5206\u4e0d\u7a33"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		const highlighted = (subItems[0].highlightRanges ?? []).map((range) =>
+			subItems[0].text.slice(range.start, range.end),
+		);
+		expect(highlighted).toContain("\u4e8c\u5206");
+		expect(highlighted).toContain("\u4e0d\u7a33");
+	});
+
+	test("highlights the boundary Han character when a short Han query only partially matches contiguously", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<
+					Array<{
+						text: string;
+						highlightRanges?: Array<{ start: number; end: number }>;
+					}>
+				>;
+			};
+		};
+
+		const text = "\u4e8c\u5206\u6cd5\u6392\u67e5\u63d2\u4ef6\uff0c\u4f46\u597d\u50cf\u6709\u70b9\u4e0d\u7a33\u5b9a\u3002";
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/local-han-boundary-char.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: ["\u4e8c\u5206\u6cd5\u6392\u67e5\u63d2\u4ef6 \u4f46\u597d\u50cf\u6709\u70b9\u4e0d\u7a33\u5b9a"],
+			families: [createFamily(0, "\u4e8c\u5206")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e8c\u5206", "\u5206\u4e0d"],
+			charQuerySegments: ["\u4e8c\u5206\u4e0d"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		const highlighted = (subItems[0].highlightRanges ?? []).map((range) =>
+			subItems[0].text.slice(range.start, range.end),
+		);
+		expect(highlighted).toContain("\u4e8c\u5206");
+		expect(highlighted).toContain("\u4e0d");
+	});
+
 	test("builds a char-only local subitem when no display windows are available", async () => {
 		const { CoverageLexicalDirectSubItemBuilder } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
