@@ -334,8 +334,8 @@ describe("coverage lexical ranking", () => {
 		}
 	});
 
-	test("anchor-oriented routes prefer metadata distribution before body detail", () => {
-		const plan = createComparatorPlan("body-with-anchor");
+	test("metadata-first routes prefer metadata distribution before ordinary body detail", () => {
+		const plan = createComparatorPlan("metadata-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
 				totalMatchedFamilyCount: 3,
@@ -364,17 +364,117 @@ describe("coverage lexical ranking", () => {
 				fuzzyWeight: 0,
 			},
 			localEvidence: {
-					...createEmptyWindowFusionSignal(),
+				...createEmptyWindowFusionSignal(),
 				primary: {
 					...createEmptyWindowFusionSignal().primary,
 					coreCoverageCount: 3,
-					exactCoreWeight: 20,
+					exactCoreWeight: 0,
 					score: 200,
 				},
 			},
 		});
 
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+	});
+
+	test("body-with-anchor routes let dominant body witness beat broad metadata pressure", () => {
+		const plan = createComparatorPlan("body-with-anchor");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 3,
+				folderMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 3,
+				exactWeight: 40,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			localEvidence: {
+				...createEmptyWindowFusionSignal(),
+				primary: {
+					...createEmptyWindowFusionSignal().primary,
+					coreCoverageCount: 3,
+					exactCoreWeight: 20,
+					orderedPairCount: 2,
+					orderRatio: 1,
+					compactnessRatio: 1,
+					score: 200,
+				},
+				corroboratedExactCoreWeight: 20,
+			},
+			phraseBridgeCount: 1,
+			phraseBridgeWeight: 10,
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 3,
+				bodyMatchedFamilyCount: 1,
+				folderMatchedFamilyCount: 1,
+				headingsMatchedFamilyCount: 1,
+				tagsMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 5,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+	});
+
+	test("metadata-first routes do not let body witness outrank strong basename and alias evidence", () => {
+		const plan = createComparatorPlan("metadata-first");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 0,
+				bodyMatchedFamilyCount: 3,
+			},
+			coreBody: {
+				coverageCount: 3,
+				exactWeight: 40,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			localEvidence: {
+				...createEmptyWindowFusionSignal(),
+				primary: {
+					...createEmptyWindowFusionSignal().primary,
+					coreCoverageCount: 3,
+					exactCoreWeight: 20,
+					orderedPairCount: 2,
+					orderRatio: 1,
+					compactnessRatio: 1,
+					score: 200,
+				},
+				corroboratedExactCoreWeight: 20,
+			},
+			phraseBridgeCount: 1,
+			phraseBridgeWeight: 10,
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 3,
+				metadataMatchedFamilyCount: 2,
+				bodyMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+				aliasesMatchedFamilyCount: 1,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 2,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
 	});
 
 	test("body-first routes keep body count ahead of metadata distribution after total-count ties", () => {
@@ -568,6 +668,69 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(results[0]?.path).toBe("pkm-en/notes/linking/aliases-deep-dive.md");
+	});
+
+	test("prefers exact body witness over broader metadata topic pages", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "adversarial/ranker-lab/en/exact-quality-witness.md",
+				basename: "exact-quality-witness.md",
+				folder: "adversarial/ranker-lab/en",
+				headings: "Exact quality witness",
+				content:
+					"config data rollout keeps exact family evidence together in one compact note",
+			},
+			{
+				path: "tech-en/content/en/docs/concepts/configuration/configmap.md",
+				basename: "configmap.md",
+				folder: "tech-en/content/en/docs/concepts/configuration",
+				headings: "ConfigMap Pod data",
+				content:
+					"configmap pod data guidance explains how pods read mounted configuration data safely",
+			},
+			{
+				path: "tech-en/content/en/docs/concepts/configuration/secret.md",
+				basename: "secret.md",
+				folder: "tech-en/content/en/docs/concepts/configuration",
+				headings: "Secret Pod data",
+				content:
+					"secret pod data guidance explains sensitive credentials and mounted secret files",
+			},
+			{
+				path: "tech-en/content/en/docs/concepts/storage/projected-volumes.md",
+				basename: "projected-volumes.md",
+				folder: "tech-en/content/en/docs/concepts/storage",
+				headings: "Projected volumes",
+				content:
+					"projected volumes combine service account token, configmap, and secret sources for pods",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "config data rollout",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe(
+			"adversarial/ranker-lab/en/exact-quality-witness.md",
+		);
 	});
 
 	test("uses best local explanation window for partial-memory ties", async () => {

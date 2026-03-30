@@ -37,7 +37,22 @@ export function compareCoverageLexicalResultSignals(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
-	const countDecision = compareCoverageLexicalFamilyCountSummaries(
+	const totalDecision = compareDescendingMetric(
+		left.familyCountSummary.totalMatchedFamilyCount,
+		right.familyCountSummary.totalMatchedFamilyCount,
+	);
+	if (totalDecision !== 0) {
+		return totalDecision;
+	}
+	const earlyGuardrailDecision = compareEarlyBodyQualityGuardrails(
+		left,
+		right,
+		plan,
+	);
+	if (earlyGuardrailDecision !== 0) {
+		return earlyGuardrailDecision;
+	}
+	const countDecision = compareCoverageLexicalCountTieBreakers(
 		left.familyCountSummary,
 		right.familyCountSummary,
 		plan,
@@ -64,10 +79,22 @@ export function compareCoverageLexicalFamilyCountSummaries(
 			left.totalMatchedFamilyCount,
 			right.totalMatchedFamilyCount,
 		) ||
-		(plan.route === "body-first"
-			? compareBodyFirstCountTieBreakers(left, right)
-			: compareMetadataFirstCountTieBreakers(left, right))
+		compareCoverageLexicalCountTieBreakers(left, right, plan)
 	);
+}
+
+function compareCoverageLexicalCountTieBreakers(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+	plan: CoverageLexicalPlan,
+): number {
+	if (plan.route === "body-first") {
+		return compareBodyFirstCountTieBreakers(left, right);
+	}
+	if (plan.route === "body-with-anchor") {
+		return compareBodyWithAnchorCountTieBreakers(left, right, plan);
+	}
+	return compareMetadataFirstCountTieBreakers(left, right);
 }
 
 function compareMetadataFirstCountTieBreakers(
@@ -75,34 +102,49 @@ function compareMetadataFirstCountTieBreakers(
 	right: CoverageLexicalFamilyCountSummary,
 ): number {
 	return (
+		compareStrongMetadataFamilyCounts(left, right) ||
 		compareDescendingMetric(
 			left.metadataMatchedFamilyCount,
 			right.metadataMatchedFamilyCount,
 		) ||
 		compareDescendingMetric(
-			left.basenameMatchedFamilyCount,
-			right.basenameMatchedFamilyCount,
+			left.bodyMatchedFamilyCount,
+			right.bodyMatchedFamilyCount,
 		) ||
-		compareDescendingMetric(
-			left.aliasesMatchedFamilyCount,
-			right.aliasesMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.folderMatchedFamilyCount,
-			right.folderMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.headingsMatchedFamilyCount,
-			right.headingsMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.tagsMatchedFamilyCount,
-			right.tagsMatchedFamilyCount,
-		) ||
+		compareBroadMetadataFamilyCounts(left, right)
+	);
+}
+
+function compareBodyWithAnchorCountTieBreakers(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+	plan: CoverageLexicalPlan,
+): number {
+	if (plan.hasPathShapeHint || plan.hasTitleShapeHint) {
+		return (
+			compareStrongMetadataFamilyCounts(left, right) ||
+			compareDescendingMetric(
+				left.metadataMatchedFamilyCount,
+				right.metadataMatchedFamilyCount,
+			) ||
+			compareBroadMetadataFamilyCounts(left, right) ||
+			compareDescendingMetric(
+				left.bodyMatchedFamilyCount,
+				right.bodyMatchedFamilyCount,
+			)
+		);
+	}
+	return (
+		compareStrongMetadataFamilyCounts(left, right) ||
 		compareDescendingMetric(
 			left.bodyMatchedFamilyCount,
 			right.bodyMatchedFamilyCount,
-		)
+		) ||
+		compareDescendingMetric(
+			left.metadataMatchedFamilyCount,
+			right.metadataMatchedFamilyCount,
+		) ||
+		compareBroadMetadataFamilyCounts(left, right)
 	);
 }
 
@@ -115,10 +157,20 @@ function compareBodyFirstCountTieBreakers(
 			left.bodyMatchedFamilyCount,
 			right.bodyMatchedFamilyCount,
 		) ||
+		compareStrongMetadataFamilyCounts(left, right) ||
 		compareDescendingMetric(
 			left.metadataMatchedFamilyCount,
 			right.metadataMatchedFamilyCount,
 		) ||
+		compareBroadMetadataFamilyCounts(left, right)
+	);
+}
+
+function compareStrongMetadataFamilyCounts(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+): number {
+	return (
 		compareDescendingMetric(
 			left.basenameMatchedFamilyCount,
 			right.basenameMatchedFamilyCount,
@@ -126,7 +178,15 @@ function compareBodyFirstCountTieBreakers(
 		compareDescendingMetric(
 			left.aliasesMatchedFamilyCount,
 			right.aliasesMatchedFamilyCount,
-		) ||
+		)
+	);
+}
+
+function compareBroadMetadataFamilyCounts(
+	left: CoverageLexicalFamilyCountSummary,
+	right: CoverageLexicalFamilyCountSummary,
+): number {
+	return (
 		compareDescendingMetric(
 			left.folderMatchedFamilyCount,
 			right.folderMatchedFamilyCount,
@@ -139,6 +199,138 @@ function compareBodyFirstCountTieBreakers(
 			left.tagsMatchedFamilyCount,
 			right.tagsMatchedFamilyCount,
 		)
+	);
+}
+
+function compareEarlyBodyQualityGuardrails(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	if (plan.route === "body-first") {
+		return 0;
+	}
+	if (
+		plan.route === "body-with-anchor" &&
+		(plan.hasPathShapeHint || plan.hasTitleShapeHint)
+	) {
+		return 0;
+	}
+	const bodyWitnessDecision = compareBodyWitnessSignals(left, right);
+	if (bodyWitnessDecision === 0) {
+		return 0;
+	}
+	if (bodyWitnessDecision < 0) {
+		return shouldPromoteBodyWitness(left, right, plan) ? -1 : 0;
+	}
+	return shouldPromoteBodyWitness(right, left, plan) ? 1 : 0;
+}
+
+function compareBodyWitnessSignals(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	return (
+		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
+		compareCoverageLexicalWindowFusionSignals(
+			left.localEvidence,
+			right.localEvidence,
+		) ||
+		comparePhraseBridgeSignals(left, right) ||
+		compareDescendingMetric(left.coreBody.coverageCount, right.coreBody.coverageCount) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight)
+	);
+}
+
+function shouldPromoteBodyWitness(
+	candidate: CoverageLexicalFamilySignal,
+	opponent: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (!hasPromotableBodyWitness(candidate, opponent)) {
+		return false;
+	}
+	if (!hasMetadataSuppressionPressure(candidate, opponent)) {
+		return false;
+	}
+	const strongMetadataLead =
+		getStrongMetadataFamilyCount(opponent.familyCountSummary) -
+		getStrongMetadataFamilyCount(candidate.familyCountSummary);
+	if (plan.route === "metadata-first") {
+		return strongMetadataLead <= 0;
+	}
+	return strongMetadataLead <= 1;
+}
+
+function hasPromotableBodyWitness(
+	candidate: CoverageLexicalFamilySignal,
+	opponent: CoverageLexicalFamilySignal,
+): boolean {
+	const candidateHasWitness =
+		candidate.coreBody.exactWeight > 0 &&
+		(
+			candidate.localEvidence.primary.exactCoreWeight > 0 ||
+			candidate.localEvidence.primary.orderedPairCount > 0 ||
+			candidate.localEvidence.corroboratedExactCoreWeight > 0 ||
+			candidate.phraseBridgeCount > 0
+		);
+	if (!candidateHasWitness) {
+		return false;
+	}
+	const exactLead =
+		candidate.coreBody.exactWeight > opponent.coreBody.exactWeight ||
+		candidate.localEvidence.primary.exactCoreWeight >
+			opponent.localEvidence.primary.exactCoreWeight ||
+		candidate.localEvidence.corroboratedExactCoreWeight >
+			opponent.localEvidence.corroboratedExactCoreWeight;
+	const localityLead =
+		candidate.localEvidence.primary.orderedPairCount >
+			opponent.localEvidence.primary.orderedPairCount ||
+		candidate.localEvidence.primary.orderRatio >
+			opponent.localEvidence.primary.orderRatio ||
+		candidate.localEvidence.primary.compactnessRatio >
+			opponent.localEvidence.primary.compactnessRatio ||
+		candidate.phraseBridgeCount > opponent.phraseBridgeCount ||
+		candidate.phraseBridgeWeight > opponent.phraseBridgeWeight;
+	return (
+		exactLead &&
+		(
+			localityLead ||
+			candidate.coreBody.coverageCount > opponent.coreBody.coverageCount
+		)
+	);
+}
+
+function hasMetadataSuppressionPressure(
+	candidate: CoverageLexicalFamilySignal,
+	opponent: CoverageLexicalFamilySignal,
+): boolean {
+	return (
+		opponent.familyCountSummary.metadataMatchedFamilyCount >
+			candidate.familyCountSummary.metadataMatchedFamilyCount ||
+		getStrongMetadataFamilyCount(opponent.familyCountSummary) >
+			getStrongMetadataFamilyCount(candidate.familyCountSummary) ||
+		getBroadMetadataFamilyCount(opponent.familyCountSummary) >
+			getBroadMetadataFamilyCount(candidate.familyCountSummary)
+	);
+}
+
+function getStrongMetadataFamilyCount(
+	summary: CoverageLexicalFamilyCountSummary,
+): number {
+	return (
+		summary.basenameMatchedFamilyCount +
+		summary.aliasesMatchedFamilyCount
+	);
+}
+
+function getBroadMetadataFamilyCount(
+	summary: CoverageLexicalFamilyCountSummary,
+): number {
+	return (
+		summary.folderMatchedFamilyCount +
+		summary.headingsMatchedFamilyCount +
+		summary.tagsMatchedFamilyCount
 	);
 }
 
