@@ -161,6 +161,15 @@ export class SearchService {
 		fileItem: FileItem,
 	): Promise<FileSubItem[]> {
 		const path = fileItem.path;
+		const nativeSubItems = this.lexicalEngine.getNativeFileSubItems(
+			queryText,
+			path,
+			SearchService.LEXICAL_SUBITEM_MAX_LINES,
+		);
+		if (nativeSubItems) {
+			fileItem.nativeSubItemsReady = true;
+			return nativeSubItems;
+		}
 
 		if (this.viewRegistry.viewTypeByPath(path) !== ViewType.MARKDOWN) {
 			logger.warn(
@@ -198,6 +207,7 @@ export class SearchService {
 				} as FileSubItem;
 			});
 
+		fileItem.nativeSubItemsReady = true;
 		return fileSubItems;
 	}
 

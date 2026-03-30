@@ -1,5 +1,6 @@
 import type {
 	FileItem,
+	FileSubItem,
 	IndexedDocument,
 	Line,
 	MatchedFile,
@@ -183,6 +184,20 @@ export class LexicalEngine {
 
 	serializeFileIndex(): SerializedFileSearchIndex | null {
 		return this.fileSearchEngine.serialize();
+	}
+
+	getNativeFileSubItems(
+		queryText: string,
+		path: string,
+		maxSubItemResults: number,
+	): FileSubItem[] | null {
+		return (
+			this.fileSearchEngine.getDirectSubItems?.(
+				queryText,
+				path,
+				maxSubItemResults,
+			) ?? null
+		);
 	}
 
 	// faster version of `searchLines`, but might be less accuracy, haven't test it

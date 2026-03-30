@@ -259,6 +259,16 @@ describe("coverage lexical ranking", () => {
 						}>;
 					}>
 				>;
+				getDirectSubItems(
+					queryText: string,
+					path: string,
+					maxSubItemCount: number,
+				): Array<{
+					row: number;
+					col: number;
+					text: string;
+					highlightRanges?: Array<{ start: number; end: number }>;
+				}> | null;
 			};
 		};
 
@@ -287,9 +297,15 @@ describe("coverage lexical ranking", () => {
 			maxSubItemResults: 6,
 		});
 
-		expect(results[0]?.nativeSubItemsReady).toBe(true);
-		expect(results[0]?.directSubItems?.length ?? 0).toBeGreaterThan(0);
-		const firstSubItem = results[0]?.directSubItems?.[0];
+		expect(results[0]?.nativeSubItemsReady).toBe(false);
+		expect(results[0]?.directSubItems ?? []).toHaveLength(0);
+		const directSubItems = engine.getDirectSubItems(
+			"cache 恢复 note",
+			"pkm-zh/mixed/cache-note.md",
+			6,
+		);
+		expect(directSubItems?.length ?? 0).toBeGreaterThan(0);
+		const firstSubItem = directSubItems?.[0];
 		expect(firstSubItem?.row).toBe(1);
 		expect(firstSubItem?.col).toBe("第二行 mixed ".length);
 		expect(firstSubItem?.highlightRanges?.length ?? 0).toBeGreaterThan(0);
@@ -315,6 +331,11 @@ describe("coverage lexical ranking", () => {
 						directSubItems?: Array<{ text: string }>;
 					}>
 				>;
+				getDirectSubItems(
+					queryText: string,
+					path: string,
+					maxSubItemCount: number,
+				): Array<{ text: string }> | null;
 			};
 		};
 
@@ -344,9 +365,14 @@ describe("coverage lexical ranking", () => {
 			maxSubItemResults: 6,
 		});
 
-		expect(results[0]?.nativeSubItemsReady).toBe(true);
+		expect(results[0]?.nativeSubItemsReady).toBe(false);
+		const directSubItems = engine.getDirectSubItems(
+			"plugins fast",
+			"pkm-en/mixed/subitem-order.md",
+			6,
+		);
 		expect(
-			results[0]?.directSubItems
+			directSubItems
 				?.slice(0, 3)
 				.map((item) => item.text.toLowerCase().replace(/…/g, "")),
 		).toEqual(["plugins fast", "plugin fast", "plugons fast"]);
@@ -374,6 +400,14 @@ describe("coverage lexical ranking", () => {
 						}>;
 					}>
 				>;
+				getDirectSubItems(
+					queryText: string,
+					path: string,
+					maxSubItemCount: number,
+				): Array<{
+					text: string;
+					highlightRanges?: Array<{ start: number; end: number }>;
+				}> | null;
 			};
 		};
 
@@ -401,9 +435,14 @@ describe("coverage lexical ranking", () => {
 			maxSubItemResults: 6,
 		});
 
-		expect(results[0]?.nativeSubItemsReady).toBe(true);
-		expect(results[0]?.directSubItems?.length ?? 0).toBeGreaterThan(0);
-		const first = results[0]?.directSubItems?.[0];
+		expect(results[0]?.nativeSubItemsReady).toBe(false);
+		const directSubItems = engine.getDirectSubItems(
+			"上面 foo/bar@v1.2#tag",
+			"pkm-zh/mixed/symbol-run.md",
+			6,
+		);
+		expect(directSubItems?.length ?? 0).toBeGreaterThan(0);
+		const first = directSubItems?.[0];
 		expect(first?.text).toContain("上面");
 		expect(first?.text).toContain("foo/bar@v1.2#tag");
 		const highlighted = (first?.highlightRanges ?? []).map((range) =>

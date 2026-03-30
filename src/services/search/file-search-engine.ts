@@ -3,6 +3,7 @@ import MiniSearch from "minisearch";
 import type {
 	DocumentFields,
 	DocumentWeight,
+	FileSubItem,
 	IndexedDocument,
 	LineFields,
 	MatchedFile,
@@ -56,6 +57,11 @@ export interface FileSearchEngine {
 	addDocuments(documents: IndexedDocument[]): Promise<void>;
 	deleteDocuments(paths: string[]): void;
 	searchFiles(request: FileSearchRequest): Promise<MatchedFile[]>;
+	getDirectSubItems?(
+		queryText: string,
+		path: string,
+		maxSubItemResults: number,
+	): FileSubItem[] | null;
 	serialize(): SerializedFileSearchIndex | null;
 	estimateIndexBytes?(): number | null;
 	getIndexBreakdown?(): Record<string, unknown> | null;

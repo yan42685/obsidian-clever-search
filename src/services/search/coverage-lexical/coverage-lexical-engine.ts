@@ -1,4 +1,8 @@
-import type { IndexedDocument, MatchedFile } from "src/globals/search-types";
+import type {
+	FileSubItem,
+	IndexedDocument,
+	MatchedFile,
+} from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -349,16 +353,35 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			plan,
 		);
 		const finalResults = ranked.slice(0, request.maxItemResults);
-		await this.attachDirectSubItems(
-			finalResults,
-			candidates,
-			request.queryText,
-			request.maxDirectSubItemResults ?? request.maxItemResults,
-			request.maxSubItemResults ?? DEFAULT_MAX_SUBITEM_COUNT,
-		);
 		return finalResults.map(
-			({ coverageLexicalSignal: _coverageLexicalSignal, ...result }) => result,
+			({ coverageLexicalSignal: _coverageLexicalSignal, ...result }) => ({
+				...result,
+				nativeSubItemsReady: false,
+				directSubItems: [],
+			}),
 		);
+	}
+
+	getDirectSubItems(
+		queryText: string,
+		path: string,
+		maxSubItemCount: number,
+	): FileSubItem[] | null {
+		const document = this.documents.get(path);
+		if (!document) {
+			return null;
+		}
+		return buildDirectSubitemsExactFileSubItems({
+			queryText,
+			snapshotText: document.bodyText,
+			options: {
+				maxChars: 220,
+				mergeGap: 32,
+				contextLeft: 24,
+				contextRight: 40,
+				boundaryLookaround: 24,
+			},
+		}).slice(0, maxSubItemCount);
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
@@ -734,41 +757,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			score: computeFallbackScore(signal),
 			coverageLexicalSignal: signal,
 		};
-	}
-
-	private async attachDirectSubItems(
-		rankedResults: readonly CoverageLexicalRankableResult[],
-		candidates: ReadonlyMap<string, CoverageLexicalCandidateState>,
-		queryText: string,
-		maxDirectSubItemResults: number,
-		maxSubItemCount: number,
-	): Promise<void> {
-		const targetResults = rankedResults.slice(
-			0,
-			Math.max(0, maxDirectSubItemResults),
-		);
-		await Promise.all(
-			targetResults.map(async (result) => {
-				const document = this.documents.get(result.path);
-				const state = candidates.get(result.path);
-				result.nativeSubItemsReady = true;
-				if (!document || !state) {
-					result.directSubItems = [];
-					return;
-				}
-				result.directSubItems = buildDirectSubitemsExactFileSubItems({
-					queryText,
-					snapshotText: document.bodyText,
-					options: {
-						maxChars: 220,
-						mergeGap: 32,
-						contextLeft: 24,
-						contextRight: 40,
-						boundaryLookaround: 24,
-					},
-				}).slice(0, maxSubItemCount);
-			}),
-		);
 	}
 
 }
