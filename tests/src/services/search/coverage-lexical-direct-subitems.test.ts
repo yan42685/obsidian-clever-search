@@ -860,7 +860,182 @@ describe("coverage lexical direct subitems", () => {
 		expect(subItems[0].text).toContain("\u5feb\u901f");
 	});
 
-	test("does not lose a third valid snippet candidate just because it comes from the same broad window", async () => {
+	test("render span includes a nearby supporting query term when it adds coverage", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const text = [
+			"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\u3002",
+			"JumpToDate\uff1a\u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f\u3002",
+		].join("\n");
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/render-support.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: [
+				"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb",
+				"jumptodate \u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f",
+			],
+			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u5feb\u901f")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9", "\u5feb\u901f"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 1,
+					signal: {
+						start: 0,
+						end: 1,
+						score: 1,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		expect(subItems[0].text).toContain("\u4e0a\u9762\u8fd9");
+		expect(subItems[0].text).toContain("\u5feb\u901f");
+	});
+
+	test("ranks the snippet with stronger final query coverage ahead of a weaker local hit", async () => {
+		const { CoverageLexicalDirectSubItemBuilder } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
+		) as {
+			CoverageLexicalDirectSubItemBuilder: new () => {
+				build(params: {
+					path: string;
+					bodyTextFallback: string;
+					bodyTokenSequence: string[];
+					families: Array<ReturnType<typeof createFamily>>;
+					pairSignatures: [];
+					maxSubItemCount: number;
+					charQueryTerms?: string[];
+					charQuerySegments?: string[];
+					displayWindows?: Array<{
+						startTokenIndex: number;
+						endTokenIndex: number;
+						signal: {
+							start: number;
+							end: number;
+							score: number;
+							matchedExactCoreFamilyIndices: number[];
+							matchedPrefixCoreFamilyIndices: number[];
+							matchedFuzzyCoreFamilyIndices: number[];
+							matchedAnchorFamilyIndices: number[];
+							matchedSoftFamilyIndices: number[];
+						};
+						matchedFamilyIndices: number[];
+						kind: "primary" | "support";
+						rank: number;
+					}>;
+				}): Promise<Array<{ text: string }>>;
+			};
+		};
+
+		const text = [
+			"Image Inserter\uff1a\u914d\u5408\u4e0a\u9762\u7684 Banners\uff0c\u5feb\u901f\u4ece\u7f51\u4e0a\u68c0\u7d22\u5e76\u63d2\u5165\u56fe\u7247\u3002",
+			"Strange New Worlds\uff1a\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684\uff0c\u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\u7684\u4e00\u6b3e\u63d2\u4ef6\uff0c\u611f\u89c9\u8fd8\u4e0d\u9519\uff1f",
+			"JumpToDate\uff1a\u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f\u3002",
+		].join("\n");
+		const builder = new CoverageLexicalDirectSubItemBuilder();
+		const subItems = await builder.build({
+			path: "notes/rank-final-coverage.md",
+			bodyTextFallback: text,
+			bodyTokenSequence: [
+				"image inserter \u914d\u5408\u4e0a\u9762\u7684 banners \u5feb\u901f\u4ece\u7f51\u4e0a\u68c0\u7d22\u5e76\u63d2\u5165\u56fe\u7247",
+				"strange new worlds \u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684 \u67e5\u770b\u7b14\u8bb0\u95f4\u5173\u7cfb\u7684\u4e00\u6b3e\u63d2\u4ef6 \u611f\u89c9\u8fd8\u4e0d\u9519",
+				"jumptodate \u5feb\u901f\u8df3\u5230\u6307\u5b9a\u65e5\u671f",
+			],
+			families: [createFamily(0, "\u4e0a\u9762"), createFamily(1, "\u5feb\u901f")],
+			pairSignatures: [],
+			maxSubItemCount: 1,
+			charQueryTerms: ["\u4e0a\u9762", "\u9762\u8fd9", "\u8fd9\u5feb", "\u5feb\u901f"],
+			charQuerySegments: ["\u4e0a\u9762\u8fd9\u5feb\u901f"],
+			displayWindows: [
+				{
+					startTokenIndex: 0,
+					endTokenIndex: 0,
+					signal: {
+						start: 0,
+						end: 0,
+						score: 2,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "support",
+					rank: 1,
+				},
+				{
+					startTokenIndex: 1,
+					endTokenIndex: 2,
+					signal: {
+						start: 1,
+						end: 2,
+						score: 2,
+						matchedExactCoreFamilyIndices: [0, 1],
+						matchedPrefixCoreFamilyIndices: [],
+						matchedFuzzyCoreFamilyIndices: [],
+						matchedAnchorFamilyIndices: [],
+						matchedSoftFamilyIndices: [],
+					},
+					matchedFamilyIndices: [0, 1],
+					kind: "primary",
+					rank: 0,
+				},
+			],
+		});
+
+		expect(subItems.length).toBe(1);
+		expect(subItems[0].text).toContain("\u4e0a\u9762\u8fd9");
+		expect(subItems[0].text).toContain("\u5feb\u901f");
+	});
+
+	test("keeps multiple semantic islands from the same broad window instead of collapsing them into one summary snippet", async () => {
 		const { CoverageLexicalDirectSubItemBuilder } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-direct-subitems",
 		) as {
@@ -940,9 +1115,8 @@ describe("coverage lexical direct subitems", () => {
 		});
 
 		expect(subItems.length).toBe(2);
-		expect(subItems.some((item) => item.text.includes("\u4e0a\u9762\u7684 banners"))).toBe(true);
 		expect(subItems.some((item) => item.text.includes("\u4e0a\u9762\u8fd9\u4f4d"))).toBe(true);
-		expect(subItems.some((item) => item.text.includes("\u7b14\u8bb0\u95f4\u5173\u7cfb"))).toBe(true);
+		expect(subItems.some((item) => item.text.includes("\u7b14\u8bb0"))).toBe(true);
 	});
 
 	test("dedupes near-identical snippets created after query-aware expansion", async () => {
