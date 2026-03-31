@@ -78,7 +78,8 @@ function buildCoverageLexicalWindowSignalsInternal(
 	const candidateSignals: CoverageLexicalLocalWindowSignal[] = [];
 	const seenWindows = new Set<string>();
 	for (let startHitIndex = 0; startHitIndex < hitPositions.length; startHitIndex++) {
-		const coveredFamilies = new Set<number>();
+		const coveredFamilyFlags: number[] = [];
+		let coveredFamilyCount = 0;
 		for (
 			let endHitIndex = startHitIndex;
 			endHitIndex < hitPositions.length &&
@@ -87,7 +88,11 @@ function buildCoverageLexicalWindowSignalsInternal(
 		) {
 			const coverEnd = hitPositions[endHitIndex];
 			for (const match of matchesByPosition[coverEnd]) {
-				coveredFamilies.add(match.familyIndex);
+				if (coveredFamilyFlags[match.familyIndex] === 1) {
+					continue;
+				}
+				coveredFamilyFlags[match.familyIndex] = 1;
+				coveredFamilyCount += 1;
 			}
 			const coverStart = hitPositions[startHitIndex];
 			pushWindowCandidate(
@@ -105,7 +110,7 @@ function buildCoverageLexicalWindowSignalsInternal(
 				pairSignatures,
 				maxCandidates,
 			);
-			if (coveredFamilies.size >= 2) {
+			if (coveredFamilyCount >= 2) {
 				pushWindowCandidate(
 					candidateSignals,
 					seenWindows,
@@ -151,20 +156,21 @@ function scoreWindow(
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 ): CoverageLexicalLocalWindowSignal {
-	const bestKindByFamily = new Map<number, Exclude<CoverageFamilyMatchKind, null>>();
-	const firstPositionByFamily = new Map<number, number>();
+	const bestKindCodeByFamily: number[] = [];
+	const firstPositionByFamily: number[] = [];
 	const tokenSet = new Set<string>();
 
 	for (let tokenIndex = start; tokenIndex <= end; tokenIndex++) {
 		tokenSet.add(tokens[tokenIndex]);
 		for (const match of matchesByPosition[tokenIndex]) {
-			const previous = bestKindByFamily.get(match.familyIndex) ?? null;
-			if (pickBetterMatchKind(previous, match.kind) !== match.kind) {
+			const previousCode = bestKindCodeByFamily[match.familyIndex] ?? 0;
+			const nextCode = encodeMatchKind(match.kind);
+			if (previousCode >= nextCode) {
 				continue;
 			}
-			bestKindByFamily.set(match.familyIndex, match.kind);
-			if (!firstPositionByFamily.has(match.familyIndex)) {
-				firstPositionByFamily.set(match.familyIndex, tokenIndex);
+			bestKindCodeByFamily[match.familyIndex] = nextCode;
+			if (firstPositionByFamily[match.familyIndex] === undefined) {
+				firstPositionByFamily[match.familyIndex] = tokenIndex;
 			}
 		}
 	}
@@ -185,7 +191,7 @@ function scoreWindow(
 	const matchedSoftFamilyIndices: number[] = [];
 
 	for (const family of families) {
-		const kind = bestKindByFamily.get(family.index) ?? null;
+		const kind = decodeMatchKind(bestKindCodeByFamily[family.index] ?? 0);
 		if (!kind) {
 			continue;
 		}
@@ -205,7 +211,7 @@ function scoreWindow(
 			}
 			matchedCorePositions.push({
 				index: family.index,
-				position: firstPositionByFamily.get(family.index) ?? start,
+				position: firstPositionByFamily[family.index] ?? start,
 			});
 			continue;
 		}
@@ -408,7 +414,7 @@ function expandCoverWindow(
 
 function matchesPairSignature(
 	pairSignature: CoverageLexicalPairSignature,
-	firstPositionByFamily: ReadonlyMap<number, number>,
+	firstPositionByFamily: readonly number[],
 	tokenSet: ReadonlySet<string>,
 ): boolean {
 	for (const variant of pairSignature.variants) {
@@ -416,8 +422,8 @@ function matchesPairSignature(
 			return true;
 		}
 	}
-	const leftPosition = firstPositionByFamily.get(pairSignature.leftFamilyIndex);
-	const rightPosition = firstPositionByFamily.get(pairSignature.rightFamilyIndex);
+	const leftPosition = firstPositionByFamily[pairSignature.leftFamilyIndex];
+	const rightPosition = firstPositionByFamily[pairSignature.rightFamilyIndex];
 	if (leftPosition === undefined || rightPosition === undefined) {
 		return false;
 	}
@@ -461,6 +467,31 @@ function pickBetterMatchKind(
 		null: 0,
 	} as const;
 	return rank[left ?? "null"] >= rank[right ?? "null"] ? left : right;
+}
+
+function encodeMatchKind(kind: Exclude<CoverageFamilyMatchKind, null>): number {
+	if (kind === "exact") {
+		return 3;
+	}
+	if (kind === "prefix") {
+		return 2;
+	}
+	return 1;
+}
+
+function decodeMatchKind(
+	code: number,
+): Exclude<CoverageFamilyMatchKind, null> | null {
+	if (code === 3) {
+		return "exact";
+	}
+	if (code === 2) {
+		return "prefix";
+	}
+	if (code === 1) {
+		return "fuzzy";
+	}
+	return null;
 }
 
 function computeFamilyTailWeight(index: number): number {

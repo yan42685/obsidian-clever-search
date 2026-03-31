@@ -44,28 +44,79 @@ export function buildCoverageLexicalWindowFusionSignal(
 		return createEmptyCoverageLexicalWindowFusionSignal();
 	}
 
-	const corroboratedCoreKinds = new Map<number, Exclude<CoverageFamilyMatchKind, null>>();
-	const corroboratedAnchorFamilies = new Set<number>();
-	const corroboratedSoftFamilies = new Set<number>();
+	const corroboratedCoreKindCodes: number[] = [];
+	const corroboratedAnchorFlags: number[] = [];
+	const corroboratedSoftFlags: number[] = [];
+	let corroboratedCoreCoverageCount = 0;
+	let corroboratedExactCoreWeight = 0;
+	let corroboratedPrefixCoreWeight = 0;
+	let corroboratedFuzzyCoreWeight = 0;
+	let corroboratedAnchorCoverageCount = 0;
+	let corroboratedSoftCoverageCount = 0;
 	for (const window of selected) {
-		markCoreFamilies(window.matchedExactCoreFamilyIndices, corroboratedCoreKinds, "exact");
-		markCoreFamilies(window.matchedPrefixCoreFamilyIndices, corroboratedCoreKinds, "prefix");
-		markCoreFamilies(window.matchedFuzzyCoreFamilyIndices, corroboratedCoreKinds, "fuzzy");
-		markMatchedFamilies(window.matchedAnchorFamilyIndices, corroboratedAnchorFamilies);
-		markMatchedFamilies(window.matchedSoftFamilyIndices, corroboratedSoftFamilies);
+		({
+			corroboratedCoreCoverageCount,
+			corroboratedExactCoreWeight,
+			corroboratedPrefixCoreWeight,
+			corroboratedFuzzyCoreWeight,
+		} = markCoreFamilies(
+			window.matchedExactCoreFamilyIndices,
+			corroboratedCoreKindCodes,
+			3,
+			corroboratedCoreCoverageCount,
+			corroboratedExactCoreWeight,
+			corroboratedPrefixCoreWeight,
+			corroboratedFuzzyCoreWeight,
+		));
+		({
+			corroboratedCoreCoverageCount,
+			corroboratedExactCoreWeight,
+			corroboratedPrefixCoreWeight,
+			corroboratedFuzzyCoreWeight,
+		} = markCoreFamilies(
+			window.matchedPrefixCoreFamilyIndices,
+			corroboratedCoreKindCodes,
+			2,
+			corroboratedCoreCoverageCount,
+			corroboratedExactCoreWeight,
+			corroboratedPrefixCoreWeight,
+			corroboratedFuzzyCoreWeight,
+		));
+		({
+			corroboratedCoreCoverageCount,
+			corroboratedExactCoreWeight,
+			corroboratedPrefixCoreWeight,
+			corroboratedFuzzyCoreWeight,
+		} = markCoreFamilies(
+			window.matchedFuzzyCoreFamilyIndices,
+			corroboratedCoreKindCodes,
+			1,
+			corroboratedCoreCoverageCount,
+			corroboratedExactCoreWeight,
+			corroboratedPrefixCoreWeight,
+			corroboratedFuzzyCoreWeight,
+		));
+		corroboratedAnchorCoverageCount = markMatchedFamilies(
+			window.matchedAnchorFamilyIndices,
+			corroboratedAnchorFlags,
+			corroboratedAnchorCoverageCount,
+		);
+		corroboratedSoftCoverageCount = markMatchedFamilies(
+			window.matchedSoftFamilyIndices,
+			corroboratedSoftFlags,
+			corroboratedSoftCoverageCount,
+		);
 	}
-
-	const corroboratedWeights = summarizeCorroboratedCoreKinds(corroboratedCoreKinds);
 	return {
 		primary: selected[0],
 		support: selected[1] ?? createEmptyCoverageLexicalLocalWindowSignal(),
 		supportWindowCount: Math.max(0, selected.length - 1),
-		corroboratedCoreCoverageCount: corroboratedCoreKinds.size,
-		corroboratedExactCoreWeight: corroboratedWeights.exactWeight,
-		corroboratedPrefixCoreWeight: corroboratedWeights.prefixWeight,
-		corroboratedFuzzyCoreWeight: corroboratedWeights.fuzzyWeight,
-		corroboratedAnchorCoverageCount: corroboratedAnchorFamilies.size,
-		corroboratedSoftCoverageCount: corroboratedSoftFamilies.size,
+		corroboratedCoreCoverageCount,
+		corroboratedExactCoreWeight,
+		corroboratedPrefixCoreWeight,
+		corroboratedFuzzyCoreWeight,
+		corroboratedAnchorCoverageCount,
+		corroboratedSoftCoverageCount,
 	};
 }
 
@@ -148,67 +199,63 @@ function computeOverlapRatio(
 
 function markMatchedFamilies(
 	familyIndices: readonly number[],
-	target: Set<number>,
-): void {
+	target: number[],
+	count: number,
+): number {
 	for (const familyIndex of familyIndices) {
-		target.add(familyIndex);
+		if (target[familyIndex] === 1) {
+			continue;
+		}
+		target[familyIndex] = 1;
+		count += 1;
 	}
+	return count;
 }
 
 function markCoreFamilies(
 	familyIndices: readonly number[],
-	target: Map<number, Exclude<CoverageFamilyMatchKind, null>>,
-	kind: Exclude<CoverageFamilyMatchKind, null>,
-): void {
-	for (const familyIndex of familyIndices) {
-		const previous = target.get(familyIndex) ?? null;
-		if (pickBetterMatchKind(previous, kind) === previous) {
-			continue;
-		}
-		target.set(familyIndex, kind);
-	}
-}
-
-function summarizeCorroboratedCoreKinds(
-	corroboratedCoreKinds: ReadonlyMap<number, Exclude<CoverageFamilyMatchKind, null>>,
+	target: number[],
+	kindCode: number,
+	corroboratedCoreCoverageCount: number,
+	corroboratedExactCoreWeight: number,
+	corroboratedPrefixCoreWeight: number,
+	corroboratedFuzzyCoreWeight: number,
 ): {
-	exactWeight: number;
-	prefixWeight: number;
-	fuzzyWeight: number;
+	corroboratedCoreCoverageCount: number;
+	corroboratedExactCoreWeight: number;
+	corroboratedPrefixCoreWeight: number;
+	corroboratedFuzzyCoreWeight: number;
 } {
-	let exactWeight = 0;
-	let prefixWeight = 0;
-	let fuzzyWeight = 0;
-	for (const [familyIndex, kind] of corroboratedCoreKinds.entries()) {
+	for (const familyIndex of familyIndices) {
+		const previousCode = target[familyIndex] ?? 0;
+		if (previousCode >= kindCode) {
+			continue;
+		}
 		const weight = computeFamilyTailWeight(familyIndex);
-		if (kind === "exact") {
-			exactWeight += weight;
-			continue;
+		if (previousCode === 0) {
+			corroboratedCoreCoverageCount += 1;
+		} else if (previousCode === 3) {
+			corroboratedExactCoreWeight -= weight;
+		} else if (previousCode === 2) {
+			corroboratedPrefixCoreWeight -= weight;
+		} else {
+			corroboratedFuzzyCoreWeight -= weight;
 		}
-		if (kind === "prefix") {
-			prefixWeight += weight;
-			continue;
+		target[familyIndex] = kindCode;
+		if (kindCode === 3) {
+			corroboratedExactCoreWeight += weight;
+		} else if (kindCode === 2) {
+			corroboratedPrefixCoreWeight += weight;
+		} else {
+			corroboratedFuzzyCoreWeight += weight;
 		}
-		fuzzyWeight += weight;
 	}
 	return {
-		exactWeight,
-		prefixWeight,
-		fuzzyWeight,
+		corroboratedCoreCoverageCount,
+		corroboratedExactCoreWeight,
+		corroboratedPrefixCoreWeight,
+		corroboratedFuzzyCoreWeight,
 	};
-}
-
-function pickBetterMatchKind(
-	left: CoverageFamilyMatchKind,
-	right: CoverageFamilyMatchKind,
-): CoverageFamilyMatchKind {
-	const rank = {
-		exact: 3,
-		prefix: 2,
-		fuzzy: 1,
-		null: 0,
-	} as const;
-	return rank[left ?? "null"] >= rank[right ?? "null"] ? left : right;
 }
 
 function compareDescendingMetric(left: number, right: number): number {

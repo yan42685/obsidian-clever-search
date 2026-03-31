@@ -136,14 +136,15 @@ function scoreWindow(
 	phraseMatchCount: number,
 	phraseMatchWeight: number,
 ): CoverageLexicalPassageAdmissionSignal {
-	const bestKindByFamily = new Map<number, Exclude<CoverageFamilyMatchKind, null>>();
+	const bestKindCodeByFamily: number[] = [];
 	for (let tokenIndex = start; tokenIndex <= end; tokenIndex++) {
 		for (const match of matchesByPosition[tokenIndex]) {
-			const previous = bestKindByFamily.get(match.familyIndex) ?? null;
-			if (pickBetterMatchKind(previous, match.kind) === previous) {
+			const previousCode = bestKindCodeByFamily[match.familyIndex] ?? 0;
+			const nextCode = encodeMatchKind(match.kind);
+			if (previousCode >= nextCode) {
 				continue;
 			}
-			bestKindByFamily.set(match.familyIndex, match.kind);
+			bestKindCodeByFamily[match.familyIndex] = nextCode;
 		}
 	}
 
@@ -155,7 +156,7 @@ function scoreWindow(
 	let softCoverageCount = 0;
 
 	for (const family of families) {
-		const kind = bestKindByFamily.get(family.index) ?? null;
+		const kind = decodeMatchKind(bestKindCodeByFamily[family.index] ?? 0);
 		if (!kind) {
 			continue;
 		}
@@ -252,6 +253,31 @@ function pickBetterMatchKind(
 		null: 0,
 	} as const;
 	return rank[left ?? "null"] >= rank[right ?? "null"] ? left : right;
+}
+
+function encodeMatchKind(kind: Exclude<CoverageFamilyMatchKind, null>): number {
+	if (kind === "exact") {
+		return 3;
+	}
+	if (kind === "prefix") {
+		return 2;
+	}
+	return 1;
+}
+
+function decodeMatchKind(
+	code: number,
+): Exclude<CoverageFamilyMatchKind, null> | null {
+	if (code === 3) {
+		return "exact";
+	}
+	if (code === 2) {
+		return "prefix";
+	}
+	if (code === 1) {
+		return "fuzzy";
+	}
+	return null;
 }
 
 function compareDescendingMetric(left: number, right: number): number {
