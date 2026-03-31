@@ -6,7 +6,9 @@ export type CoverageLexicalCharQuery = {
 	terms: string[];
 	rawSegments: string[];
 	hanSegments: string[];
+	uniqueHanSegments: string[];
 	segmentBigrams: Map<string, string[]>;
+	segmentTermIndices: Map<string, number[]>;
 };
 
 export type CoverageLexicalTagFallbackSignal = {
@@ -43,25 +45,42 @@ export function buildCoverageLexicalCharQuery(
 	const normalized = normalizeCoverageLexicalText(queryText);
 	const rawSegments = normalized.match(RAW_QUERY_SEGMENT_REGEX) ?? [];
 	const hanSegments = rawSegments.filter((segment) => /\p{Script=Han}/u.test(segment));
+	const uniqueHanSegments: string[] = [];
+	const seenSegments = new Set<string>();
 	const segmentBigrams = new Map<string, string[]>();
+	const segmentTermIndices = new Map<string, number[]>();
 	const terms: string[] = [];
 	const seen = new Set<string>();
 	for (const segment of hanSegments) {
+		if (seenSegments.has(segment)) {
+			continue;
+		}
+		seenSegments.add(segment);
+		uniqueHanSegments.push(segment);
+	}
+	for (const segment of uniqueHanSegments) {
 		const bigrams = extractHanBigrams(segment);
 		segmentBigrams.set(segment, bigrams);
+		const termIndices: number[] = [];
 		for (const bigram of bigrams) {
 			if (seen.has(bigram)) {
+				termIndices.push(terms.indexOf(bigram));
 				continue;
 			}
 			seen.add(bigram);
+			const termIndex = terms.length;
 			terms.push(bigram);
+			termIndices.push(termIndex);
 		}
+		segmentTermIndices.set(segment, termIndices);
 	}
 	return {
 		terms,
 		rawSegments,
 		hanSegments,
+		uniqueHanSegments,
 		segmentBigrams,
+		segmentTermIndices,
 	};
 }
 

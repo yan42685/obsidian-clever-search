@@ -40,17 +40,21 @@ export type CoverageLexicalMetadataField =
 
 export type CoverageLexicalCandidateState = {
 	bodyMatches: number[];
-	bodyCharTerms: Set<string>;
+	bodyCharMatchIndices: number[];
+	bodyCharMatchFlags: number[];
 	metadataMatches: number[];
-	metadataCharTerms: Set<string>;
+	metadataCharMatchIndices: number[];
+	metadataCharMatchFlags: number[];
 	metadataFieldMatches: Record<
 		CoverageLexicalMetadataField,
 		number[]
 	>;
 	phraseMatches: number[];
 	phraseMatchFlags: number[];
-	tagCharTerms: Set<string>;
-	tagExactTerms: Set<string>;
+	tagCharMatchIndices: number[];
+	tagCharMatchFlags: number[];
+	tagExactMatchIndices: number[];
+	tagExactMatchFlags: number[];
 };
 
 export type CoverageLexicalRecallLaneDebug = {

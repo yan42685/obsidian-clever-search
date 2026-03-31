@@ -1000,18 +1000,22 @@ function buildCoverageSignal(
 		metadataIdentity.phraseWeight += signature.tailWeight;
 	}
 
-	bodyChar.matchCount = state.bodyCharTerms.size;
+	bodyChar.matchCount = state.bodyCharMatchIndices.length;
 	bodyChar.matchRatio = computeCharMatchRatio(
-		state.bodyCharTerms.size,
+		state.bodyCharMatchIndices.length,
 		charQuery.terms.length,
 	);
-	applySegmentCoverageSignal(bodyChar, state.bodyCharTerms, charQuery);
-	metadataChar.matchCount = state.metadataCharTerms.size;
+	applySegmentCoverageSignal(bodyChar, state.bodyCharMatchFlags, charQuery);
+	metadataChar.matchCount = state.metadataCharMatchIndices.length;
 	metadataChar.matchRatio = computeCharMatchRatio(
-		state.metadataCharTerms.size,
+		state.metadataCharMatchIndices.length,
 		charQuery.terms.length,
 	);
-	applySegmentCoverageSignal(metadataChar, state.metadataCharTerms, charQuery);
+	applySegmentCoverageSignal(
+		metadataChar,
+		state.metadataCharMatchFlags,
+		charQuery,
+	);
 	const tagFallback = evaluateCoverageLexicalTagFallback(tagValues, charQuery);
 	for (const term of tagFallback.exactTerms) {
 		matchedTerms.add(term);
@@ -1334,16 +1338,21 @@ function applySegmentCoverageSignal(
 		bestSegmentCoverageCount: number;
 		bestSegmentCoverageRatio: number;
 	},
-	matchedTerms: ReadonlySet<string>,
+	matchedFlags: readonly number[],
 	charQuery: CoverageLexicalCharQuery,
 ): void {
 	for (const segment of charQuery.hanSegments) {
-		const bigrams = charQuery.segmentBigrams.get(segment) ?? [];
-		if (bigrams.length === 0) {
+		const termIndices = charQuery.segmentTermIndices.get(segment) ?? [];
+		if (termIndices.length === 0) {
 			continue;
 		}
-		const matchedCount = bigrams.filter((token) => matchedTerms.has(token)).length;
-		if (matchedCount === bigrams.length) {
+		let matchedCount = 0;
+		for (const termIndex of termIndices) {
+			if (matchedFlags[termIndex] === 1) {
+				matchedCount += 1;
+			}
+		}
+		if (matchedCount === termIndices.length) {
 			target.fullSegmentCount += 1;
 		}
 		target.bestSegmentCoverageCount = Math.max(
@@ -1352,7 +1361,7 @@ function applySegmentCoverageSignal(
 		);
 		target.bestSegmentCoverageRatio = Math.max(
 			target.bestSegmentCoverageRatio,
-			matchedCount / bigrams.length,
+			matchedCount / termIndices.length,
 		);
 	}
 }

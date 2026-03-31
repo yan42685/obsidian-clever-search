@@ -679,7 +679,7 @@ function runCharFallbackLane(
 	collectTagExactCandidates(
 		index,
 		index.metadataTagFullPostings,
-		charQuery.hanSegments,
+		charQuery.uniqueHanSegments,
 		laneCandidates,
 	);
 	collectCharCandidates(
@@ -958,10 +958,10 @@ function buildCheapLaneSignal(
 			plan.bridgeFamilies,
 		),
 		phraseMatchCount: state.phraseMatches.length,
-		tagExactCount: state.tagExactTerms.size,
-		tagCharCount: state.tagCharTerms.size,
-		metadataCharCount: state.metadataCharTerms.size,
-		bodyCharCount: state.bodyCharTerms.size,
+		tagExactCount: state.tagExactMatchIndices.length,
+		tagCharCount: state.tagCharMatchIndices.length,
+		metadataCharCount: state.metadataCharMatchIndices.length,
+		bodyCharCount: state.bodyCharMatchIndices.length,
 	};
 }
 
@@ -1052,14 +1052,14 @@ function buildLaneEvaluation(
 			mergeMatchMaps(state.bodyMatches, state.metadataMatches),
 			plan.bridgeFamilies,
 		),
-		bodyCharMatchCount: state.bodyCharTerms.size,
+		bodyCharMatchCount: state.bodyCharMatchIndices.length,
 		bodyCharMatchRatio: computeCharMatchRatio(
-			state.bodyCharTerms.size,
+			state.bodyCharMatchIndices.length,
 			charQuery.terms.length,
 		),
-		metadataCharMatchCount: state.metadataCharTerms.size,
+		metadataCharMatchCount: state.metadataCharMatchIndices.length,
 		metadataCharMatchRatio: computeCharMatchRatio(
-			state.metadataCharTerms.size,
+			state.metadataCharMatchIndices.length,
 			charQuery.terms.length,
 		),
 		tagExactMatchCount: tagFallback.exactMatchCount,
@@ -1379,7 +1379,8 @@ function collectCharCandidates(
 	if (!postingsByTerm) {
 		return;
 	}
-	for (const term of queryTerms) {
+	for (let termIndex = 0; termIndex < queryTerms.length; termIndex += 1) {
+		const term = queryTerms[termIndex];
 		const matches = postingsByTerm.get(term);
 		if (!matches) {
 			continue;
@@ -1387,14 +1388,26 @@ function collectCharCandidates(
 		forEachPostingCandidateKey(index, matches, (key) => {
 			const state = getOrCreateCandidateState(candidates, key);
 			if (target === "body") {
-				state.bodyCharTerms.add(term);
+				recordQueryTermMatch(
+					state.bodyCharMatchIndices,
+					state.bodyCharMatchFlags,
+					termIndex,
+				);
 				return;
 			}
 			if (target === "metadata") {
-				state.metadataCharTerms.add(term);
+				recordQueryTermMatch(
+					state.metadataCharMatchIndices,
+					state.metadataCharMatchFlags,
+					termIndex,
+				);
 				return;
 			}
-			state.tagCharTerms.add(term);
+			recordQueryTermMatch(
+				state.tagCharMatchIndices,
+				state.tagCharMatchFlags,
+				termIndex,
+			);
 		});
 	}
 }
@@ -1408,14 +1421,19 @@ function collectTagExactCandidates(
 	if (!postingsByTag) {
 		return;
 	}
-	for (const term of querySegments) {
+	for (let segmentIndex = 0; segmentIndex < querySegments.length; segmentIndex += 1) {
+		const term = querySegments[segmentIndex];
 		const matches = postingsByTag.get(term);
 		if (!matches) {
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
 			const state = getOrCreateCandidateState(candidates, key);
-			state.tagExactTerms.add(term);
+			recordQueryTermMatch(
+				state.tagExactMatchIndices,
+				state.tagExactMatchFlags,
+				segmentIndex,
+			);
 		});
 	}
 }
@@ -1606,17 +1624,33 @@ function mergeCandidateStateInto<TKey extends CoverageLexicalCandidateKey>(
 	for (const phraseMatch of nextState.phraseMatches) {
 		recordPhraseMatch(target, phraseMatch);
 	}
-	for (const term of nextState.bodyCharTerms) {
-		target.bodyCharTerms.add(term);
+	for (const termIndex of nextState.bodyCharMatchIndices) {
+		recordQueryTermMatch(
+			target.bodyCharMatchIndices,
+			target.bodyCharMatchFlags,
+			termIndex,
+		);
 	}
-	for (const term of nextState.metadataCharTerms) {
-		target.metadataCharTerms.add(term);
+	for (const termIndex of nextState.metadataCharMatchIndices) {
+		recordQueryTermMatch(
+			target.metadataCharMatchIndices,
+			target.metadataCharMatchFlags,
+			termIndex,
+		);
 	}
-	for (const term of nextState.tagExactTerms) {
-		target.tagExactTerms.add(term);
+	for (const termIndex of nextState.tagExactMatchIndices) {
+		recordQueryTermMatch(
+			target.tagExactMatchIndices,
+			target.tagExactMatchFlags,
+			termIndex,
+		);
 	}
-	for (const term of nextState.tagCharTerms) {
-		target.tagCharTerms.add(term);
+	for (const termIndex of nextState.tagCharMatchIndices) {
+		recordQueryTermMatch(
+			target.tagCharMatchIndices,
+			target.tagCharMatchFlags,
+			termIndex,
+		);
 	}
 }
 
@@ -1651,14 +1685,18 @@ function collectAnyMetadataPhraseMatches(
 function createEmptyCandidateState(): CoverageLexicalCandidateState {
 	return {
 		bodyMatches: [],
-		bodyCharTerms: new Set(),
+		bodyCharMatchIndices: [],
+		bodyCharMatchFlags: [],
 		metadataMatches: [],
-		metadataCharTerms: new Set(),
+		metadataCharMatchIndices: [],
+		metadataCharMatchFlags: [],
 		metadataFieldMatches: createEmptyMetadataFieldMatches(),
 		phraseMatches: [],
 		phraseMatchFlags: [],
-		tagCharTerms: new Set(),
-		tagExactTerms: new Set(),
+		tagCharMatchIndices: [],
+		tagCharMatchFlags: [],
+		tagExactMatchIndices: [],
+		tagExactMatchFlags: [],
 	};
 }
 
@@ -1852,6 +1890,18 @@ function recordPhraseMatch(
 	}
 	state.phraseMatchFlags[phraseIndex] = 1;
 	state.phraseMatches.push(phraseIndex);
+}
+
+function recordQueryTermMatch(
+	matches: number[],
+	flags: number[],
+	termIndex: number,
+): void {
+	if (flags[termIndex] === 1) {
+		return;
+	}
+	flags[termIndex] = 1;
+	matches.push(termIndex);
 }
 
 function getRecordedMatchKind(
