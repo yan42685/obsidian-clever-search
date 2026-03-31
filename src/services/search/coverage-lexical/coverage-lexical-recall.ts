@@ -17,6 +17,7 @@ import type {
 	CoverageLexicalCandidateState,
 	CoverageLexicalFamily,
 	CoverageLexicalMetadataField,
+	CoverageLexicalPassageAdmissionSignal,
 	CoverageLexicalPhraseSignature,
 	CoverageLexicalPlan,
 	CoverageLexicalRecallDebug,
@@ -179,6 +180,11 @@ type CoverageLexicalLaneEvaluation = {
 	phraseMatchCount: number;
 	phraseMatchWeight: number;
 	passageSignal: ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>;
+};
+
+type CoverageLexicalEvaluatedLaneCandidate = {
+	candidate: CoverageLexicalCheapLaneCandidate;
+	evaluation: CoverageLexicalLaneEvaluation;
 };
 
 const MAX_PREFIX_EXPANSIONS = 48;
@@ -929,26 +935,18 @@ function admitLaneCandidates(
 		benchmarkHooks,
 		"laneEvaluate",
 		() => {
-			const accepted: CoverageLexicalLaneEvaluation[] = [];
-			for (const candidate of preselected) {
-				const evaluation = buildLaneEvaluation(
-					candidate,
-					plan,
-					phraseSignatures,
-					index,
-					charQuery,
-					queryCache,
-					benchmarkHooks,
-				);
-				if (!evaluation) {
-					continue;
-				}
-				if (!acceptsLaneCandidate(laneName, evaluation, plan, charQuery)) {
-					continue;
-				}
-				accepted.push(evaluation);
-			}
-			return accepted;
+			return evaluateLaneCandidates(
+				laneName,
+				preselected,
+				plan,
+				phraseSignatures,
+				index,
+				charQuery,
+				queryCache,
+				benchmarkHooks,
+				request,
+				budget,
+			);
 		},
 		() => preselected.length,
 	);
@@ -1122,6 +1120,175 @@ function measureLaneEvaluateBenchmarkSubphase<T>(
 	}
 }
 
+function evaluateLaneCandidates(
+	laneName: CoverageLexicalLaneName,
+	preselected: readonly CoverageLexicalCheapLaneCandidate[],
+	plan: CoverageLexicalPlan,
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+	index: CoverageLexicalRecallIndex,
+	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	request: FileSearchRequest,
+	budget: number,
+): CoverageLexicalLaneEvaluation[] {
+	const lightEvaluations = evaluateLaneCandidatesLight(
+		laneName,
+		preselected,
+		plan,
+		phraseSignatures,
+		index,
+		charQuery,
+		queryCache,
+		benchmarkHooks,
+	);
+	if (laneName === "strict_metadata_lane") {
+		return lightEvaluations.map(({ evaluation }) => evaluation);
+	}
+	if (!shouldDeferFullLaneEvaluation(laneName)) {
+		return lightEvaluations.map(({ evaluation }) => evaluation);
+	}
+	const shortlisted = selectDeferredFullEvaluationCandidates(
+		laneName,
+		lightEvaluations,
+		plan,
+		request,
+		budget,
+	);
+	const accepted: CoverageLexicalLaneEvaluation[] = [];
+	for (const candidate of shortlisted) {
+		const evaluation = buildLaneEvaluation(
+			candidate,
+			laneName,
+			plan,
+			phraseSignatures,
+			index,
+			charQuery,
+			queryCache,
+			benchmarkHooks,
+			{
+				includePassageSignal: true,
+				includeTagFallback: laneName === "char_fallback_lane",
+			},
+		);
+		if (!evaluation) {
+			continue;
+		}
+		if (!acceptsLaneCandidate(laneName, evaluation, plan, charQuery)) {
+			continue;
+		}
+		accepted.push(evaluation);
+	}
+	return accepted;
+}
+
+function evaluateLaneCandidatesLight(
+	laneName: CoverageLexicalLaneName,
+	preselected: readonly CoverageLexicalCheapLaneCandidate[],
+	plan: CoverageLexicalPlan,
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+	index: CoverageLexicalRecallIndex,
+	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+): CoverageLexicalEvaluatedLaneCandidate[] {
+	const accepted: CoverageLexicalEvaluatedLaneCandidate[] = [];
+	for (const candidate of preselected) {
+		const evaluation = buildLaneEvaluation(
+			candidate,
+			laneName,
+			plan,
+			phraseSignatures,
+			index,
+			charQuery,
+			queryCache,
+			benchmarkHooks,
+			{
+				includePassageSignal: laneName === "local_body_lane",
+				includeTagFallback: laneName === "char_fallback_lane",
+			},
+		);
+		if (!evaluation) {
+			continue;
+		}
+		if (!acceptsLaneCandidate(laneName, evaluation, plan, charQuery)) {
+			continue;
+		}
+		accepted.push({
+			candidate,
+			evaluation,
+		});
+	}
+	accepted.sort((left, right) =>
+		compareLaneEvaluations(laneName, left.evaluation, right.evaluation, plan),
+	);
+	return accepted;
+}
+
+function shouldDeferFullLaneEvaluation(laneName: CoverageLexicalLaneName): boolean {
+	switch (laneName) {
+		case "strict_hybrid_lane":
+		case "relaxed_hybrid_lane":
+		case "bridge_lane":
+		case "char_fallback_lane":
+			return true;
+		default:
+			return false;
+	}
+}
+
+function selectDeferredFullEvaluationCandidates(
+	laneName: CoverageLexicalLaneName,
+	lightEvaluations: readonly CoverageLexicalEvaluatedLaneCandidate[],
+	plan: CoverageLexicalPlan,
+	request: FileSearchRequest,
+	budget: number,
+): CoverageLexicalCheapLaneCandidate[] {
+	if (lightEvaluations.length === 0) {
+		return [];
+	}
+	const fullEvalBudget = Math.min(
+		lightEvaluations.length,
+		Math.max(budget + 8, request.maxItemResults * 2, 16),
+	);
+	if (lightEvaluations.length <= fullEvalBudget) {
+		return lightEvaluations.map(({ candidate }) => candidate);
+	}
+	const selected: CoverageLexicalCheapLaneCandidate[] = lightEvaluations
+		.slice(0, fullEvalBudget)
+		.map(({ candidate }) => candidate);
+	const selectedKeys = new Set(selected.map(({ key }) => key));
+	const cutoff = lightEvaluations[fullEvalBudget - 1]?.evaluation ?? null;
+	if (cutoff) {
+		for (let index = fullEvalBudget; index < lightEvaluations.length; index += 1) {
+			const candidate = lightEvaluations[index];
+			if (
+				compareLaneEvaluations(laneName, cutoff, candidate.evaluation, plan) !== 0
+			) {
+				break;
+			}
+			selected.push(candidate.candidate);
+			selectedKeys.add(candidate.candidate.key);
+		}
+	}
+	if (
+		laneName === "strict_hybrid_lane" ||
+		laneName === "relaxed_hybrid_lane"
+	) {
+		for (const { candidate } of lightEvaluations) {
+			if (selectedKeys.has(candidate.key)) {
+				continue;
+			}
+			if (!shouldProtectCheapWitnessFloor(laneName, candidate.signal, plan)) {
+				continue;
+			}
+			selected.push(candidate);
+			selectedKeys.add(candidate.key);
+		}
+	}
+	return selected;
+}
+
 function compareCheapLaneCandidates(
 	laneName: CoverageLexicalLaneName,
 	left: CoverageLexicalCheapLaneCandidate,
@@ -1277,12 +1444,17 @@ function shouldProtectCheapWitnessFloor(
 
 function buildLaneEvaluation(
 	candidate: CoverageLexicalCheapLaneCandidate,
+	laneName: CoverageLexicalLaneName,
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	index: CoverageLexicalRecallIndex,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	options: {
+		includePassageSignal: boolean;
+		includeTagFallback: boolean;
+	},
 ): CoverageLexicalLaneEvaluation | null {
 	const { key, state, signal } = candidate;
 	const phraseMatchCount = signal.phraseMatchCount;
@@ -1298,39 +1470,44 @@ function buildLaneEvaluation(
 		() => state.phraseMatches.length,
 	);
 	const tokens = index.documentBodyTokensById[key] ?? [];
-	const tagFallback = measureLaneEvaluateBenchmarkSubphase(
-		benchmarkHooks,
-		"tagFallback",
-		() => getOrCreateTagFallback(key, index, charQuery, queryCache),
-	);
-	const bodyEvidenceTrace = measureLaneEvaluateBenchmarkSubphase(
-		benchmarkHooks,
-		"bodyEvidence",
-		() =>
-			getOrCreateBodyEvidenceTrace(
-				key,
-				tokens,
-				plan.families,
-				queryCache,
+	const tagFallback = options.includeTagFallback
+		? measureLaneEvaluateBenchmarkSubphase(
 				benchmarkHooks,
-			),
-	);
-	const passageSignal = measureLaneEvaluateBenchmarkSubphase(
-		benchmarkHooks,
-		"passageSignal",
-		() =>
-			getOrCreatePassageSignal(
-				key,
-				tokens,
-				plan.families,
-				state,
-				phraseSignatures,
-				phraseMatchCount,
-				phraseMatchWeight,
-				bodyEvidenceTrace,
-				queryCache,
-			),
-	);
+				"tagFallback",
+				() => getOrCreateTagFallback(key, index, charQuery, queryCache),
+			)
+		: createEmptyTagFallback();
+	const passageSignal = options.includePassageSignal
+		? measureLaneEvaluateBenchmarkSubphase(
+				benchmarkHooks,
+				"passageSignal",
+				() => {
+					const bodyEvidenceTrace = measureLaneEvaluateBenchmarkSubphase(
+						benchmarkHooks,
+						"bodyEvidence",
+						() =>
+							getOrCreateBodyEvidenceTrace(
+								key,
+								tokens,
+								plan.families,
+								queryCache,
+								benchmarkHooks,
+							),
+					);
+					return getOrCreatePassageSignal(
+						key,
+						tokens,
+						plan.families,
+						state,
+						phraseSignatures,
+						phraseMatchCount,
+						phraseMatchWeight,
+						bodyEvidenceTrace,
+						queryCache,
+					);
+				},
+			)
+		: createEmptyPassageAdmissionSignal(phraseMatchCount, phraseMatchWeight);
 	return {
 		key,
 		state,
@@ -1355,6 +1532,33 @@ function buildLaneEvaluation(
 		phraseMatchCount,
 		phraseMatchWeight,
 		passageSignal,
+	};
+}
+
+function createEmptyPassageAdmissionSignal(
+	phraseMatchCount: number,
+	phraseMatchWeight: number,
+): CoverageLexicalPassageAdmissionSignal {
+	return {
+		coreCoverageCount: 0,
+		exactWeight: 0,
+		prefixWeight: 0,
+		fuzzyWeight: 0,
+		anchorCoverageCount: 0,
+		softCoverageCount: 0,
+		phraseMatchCount,
+		phraseMatchWeight,
+		compactnessScore: 0,
+	};
+}
+
+function createEmptyTagFallback(): ReturnType<typeof evaluateCoverageLexicalTagFallback> {
+	return {
+		exactMatchCount: 0,
+		exactTerms: [],
+		charMatchCount: 0,
+		charMatchRatio: 0,
+		matchedCharTerms: [],
 	};
 }
 
@@ -1930,7 +2134,7 @@ function collectCandidatesForPhraseSignature(
 	}
 }
 
-function getOrCreateCandidateState<TKey extends CoverageLexicalCandidateKey>(
+function getOrCreateCandidateState<TKey extends string | CoverageLexicalCandidateKey>(
 	candidates: Map<TKey, CoverageLexicalCandidateState>,
 	key: TKey,
 ): CoverageLexicalCandidateState {
@@ -1942,7 +2146,7 @@ function getOrCreateCandidateState<TKey extends CoverageLexicalCandidateKey>(
 	return state;
 }
 
-function mergeCandidateStateInto<TKey extends CoverageLexicalCandidateKey>(
+function mergeCandidateStateInto<TKey extends string | CoverageLexicalCandidateKey>(
 	candidates: Map<TKey, CoverageLexicalCandidateState>,
 	key: TKey,
 	nextState: CoverageLexicalCandidateState,
