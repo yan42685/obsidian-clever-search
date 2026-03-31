@@ -42,7 +42,8 @@ Every retained change should be evaluated against the same four anchors:
 - `Phase 0` is complete:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
   - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-query-hotpath-flattening.md`
+  - the previous active latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-query-hotpath-flattening.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-recall-query-cache.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is the current active optimization slice:
   - maintained query-time document caches landed
@@ -55,12 +56,14 @@ Every retained change should be evaluated against the same four anchors:
   - shared body-evidence tracing now lets passage admission and local window evaluation reuse the same document scan:
     - one pass now builds both admission-side and window-side match traces
     - admission window dedupe is numeric rather than string-keyed
-  - latest interpretation for that step:
+  - recall-side query-local caching has now landed on top of that shared tracing:
+    - per-document body-evidence traces are cached for the duration of the query
+    - passage admission signals are cached per `docId` plus phrase-witness shape instead of being rebuilt across lanes
+  - latest interpretation for the current active anchor:
     - quality stayed clean
-    - absolute `CoverageLexical` query time moved down materially
-    - `CoverageLexical / MiniSearch` latency ratios were directionally promising but not stable enough across reruns to replace the current active anchor yet
-    - keep the code, but do not promote a new benchmark anchor from this step alone
-  - the current active anchor shows a material latency improvement while quality remains unchanged
+    - avg and p50 latency ratios improved materially and repeatably
+    - p100 is still somewhat noisier than avg and p50, but remains much better than the previous active anchor
+    - the main retained latency gain came from recall-side document evidence reuse rather than additional numeric posting migration
 - `Phase 2` has materially advanced:
   - aggregate metadata phrase storage was removed
   - canonical phrase storage landed
@@ -164,6 +167,10 @@ Executable checklist:
 1. query-time cache hardening
    - keep `documentBodyTokensByPath` and `documentTagValuesByPath` as maintained engine state
    - expand query-local memoization only for repeated expensive path-level work
+   - current checkpoint:
+     - tag fallback is memoized by `docId`
+     - body evidence tracing is memoized by `docId`
+     - passage admission signal is memoized by `docId` plus phrase-witness shape
    - avoid rebuilding document-derived maps inside search paths
    - done when no obvious per-query object-graph reconstruction remains in the hot path
 2. cheap-first, expensive-second lane flow

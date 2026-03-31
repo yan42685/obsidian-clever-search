@@ -4,6 +4,10 @@ import {
 	compareCoverageLexicalPassageAdmissionSignals,
 } from "./coverage-lexical-admission";
 import {
+	buildCoverageLexicalBodyEvidenceTrace,
+	type CoverageLexicalBodyEvidenceTrace,
+} from "./coverage-lexical-body-evidence";
+import {
 	buildCoverageLexicalCharQuery,
 	evaluateCoverageLexicalTagFallback,
 	type CoverageLexicalCharQuery,
@@ -76,6 +80,11 @@ type CoverageLexicalQueryCache = {
 		number,
 		ReturnType<typeof evaluateCoverageLexicalTagFallback>
 	>;
+	bodyEvidenceTraceByDocId: Map<number, CoverageLexicalBodyEvidenceTrace>;
+	passageSignalByDocAndPhraseKey: Map<
+		string,
+		ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>
+	>;
 };
 
 type CoverageLexicalGroupSignal = {
@@ -137,6 +146,8 @@ function createRecallDebugAccumulator(): CoverageLexicalRecallDebugAccumulator {
 function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 	return {
 		tagFallbackByDocId: new Map(),
+		bodyEvidenceTraceByDocId: new Map(),
+		passageSignalByDocAndPhraseKey: new Map(),
 	};
 }
 
@@ -1029,6 +1040,12 @@ function buildLaneEvaluation(
 	);
 	const tokens = index.documentBodyTokensById[key] ?? [];
 	const tagFallback = getOrCreateTagFallback(key, index, charQuery, queryCache);
+	const bodyEvidenceTrace = getOrCreateBodyEvidenceTrace(
+		key,
+		tokens,
+		plan.families,
+		queryCache,
+	);
 	return {
 		key,
 		state,
@@ -1067,13 +1084,62 @@ function buildLaneEvaluation(
 		tagCharMatchRatio: tagFallback.charMatchRatio,
 		phraseMatchCount,
 		phraseMatchWeight,
-		passageSignal: buildCoverageLexicalPassageAdmissionSignal(
+		passageSignal: getOrCreatePassageSignal(
+			key,
 			tokens,
 			plan.families,
 			state,
 			phraseSignatures,
+			bodyEvidenceTrace,
+			queryCache,
 		),
 	};
+}
+
+function getOrCreateBodyEvidenceTrace(
+	docId: number,
+	tokens: readonly string[],
+	families: readonly CoverageLexicalFamily[],
+	queryCache: CoverageLexicalQueryCache,
+): CoverageLexicalBodyEvidenceTrace {
+	const cached = queryCache.bodyEvidenceTraceByDocId.get(docId);
+	if (cached) {
+		return cached;
+	}
+	const created = buildCoverageLexicalBodyEvidenceTrace(tokens, families);
+	queryCache.bodyEvidenceTraceByDocId.set(docId, created);
+	return created;
+}
+
+function getOrCreatePassageSignal(
+	docId: number,
+	tokens: readonly string[],
+	families: readonly CoverageLexicalFamily[],
+	state: CoverageLexicalCandidateState,
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+	bodyEvidenceTrace: CoverageLexicalBodyEvidenceTrace,
+	queryCache: CoverageLexicalQueryCache,
+): ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal> {
+	const phraseMatchCount = state.phraseMatches.length;
+	const phraseMatchWeight = state.phraseMatches.reduce(
+		(total, signatureIndex) =>
+			total + (phraseSignatures[signatureIndex]?.tailWeight ?? 0),
+		0,
+	);
+	const cacheKey = `${docId}:${phraseMatchCount}:${phraseMatchWeight}`;
+	const cached = queryCache.passageSignalByDocAndPhraseKey.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const created = buildCoverageLexicalPassageAdmissionSignal(
+		tokens,
+		families,
+		state,
+		phraseSignatures,
+		bodyEvidenceTrace,
+	);
+	queryCache.passageSignalByDocAndPhraseKey.set(cacheKey, created);
+	return created;
 }
 
 function getOrCreateTagFallback(
