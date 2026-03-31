@@ -102,6 +102,7 @@ type CoverageLexicalDocRankableResult = {
 type CoverageLexicalEngineQueryCache = {
 	fuzzyProportion: number;
 	docCacheById: Map<number, CoverageLexicalEngineQueryDocCacheEntry>;
+	sharedBodyEvidenceTraceById: Map<number, CoverageLexicalBodyEvidenceTrace>;
 };
 
 type CoverageLexicalEngineQueryDocCacheEntry = {
@@ -153,6 +154,7 @@ function createCoverageLexicalEngineQueryCache(
 	return {
 		fuzzyProportion,
 		docCacheById: new Map(),
+		sharedBodyEvidenceTraceById: new Map(),
 	};
 }
 
@@ -440,6 +442,44 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			const queryCache = createCoverageLexicalEngineQueryCache(
 				innerSetting.search.fuzzyProportion,
 			);
+			const recallBenchmarkHooks = {
+				recordSubphaseTiming: (
+					_subphase: CoverageLexicalRecallBenchmarkSubphaseName,
+					_elapsedMs: number,
+					_unitCount: number = 1,
+				) => {
+					if (!this.benchmarkPhaseTiming) {
+						return;
+					}
+				},
+				bodyEvidenceWindowFuzzyProportion: queryCache.fuzzyProportion,
+				storeBodyEvidenceTrace: (docId: number, trace: CoverageLexicalBodyEvidenceTrace) =>
+					queryCache.sharedBodyEvidenceTraceById.set(docId, trace),
+				...(this.benchmarkPhaseTiming
+					? {
+							recordSubphaseTiming: (
+								subphase: CoverageLexicalRecallBenchmarkSubphaseName,
+								elapsedMs: number,
+								unitCount: number = 1,
+							) =>
+								this.recordBenchmarkRecallSubphaseTiming(
+									subphase,
+									elapsedMs,
+									unitCount,
+								),
+							recordLaneEvaluateSubphaseTiming: (
+								subphase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
+								elapsedMs: number,
+								unitCount: number = 1,
+							) =>
+								this.recordBenchmarkLaneEvaluateSubphaseTiming(
+									subphase,
+									elapsedMs,
+									unitCount,
+								),
+					  }
+					: {}),
+			};
 			const recallStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 			const candidates = collectCoverageLexicalCandidateStatesByDocId(
 				{
@@ -478,30 +518,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				phraseSignatures,
 				request,
 				charQuery,
-				this.benchmarkPhaseTiming
-					? {
-							recordSubphaseTiming: (
-								subphase,
-								elapsedMs,
-								unitCount = 1,
-							) =>
-								this.recordBenchmarkRecallSubphaseTiming(
-									subphase,
-									elapsedMs,
-									unitCount,
-								),
-							recordLaneEvaluateSubphaseTiming: (
-								subphase,
-								elapsedMs,
-								unitCount = 1,
-							) =>
-								this.recordBenchmarkLaneEvaluateSubphaseTiming(
-									subphase,
-									elapsedMs,
-									unitCount,
-								),
-					  }
-					: null,
+				recallBenchmarkHooks,
 			);
 			if (this.benchmarkPhaseTiming) {
 				this.recordBenchmarkPhaseTiming(
@@ -1268,18 +1285,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!document) {
 			return null;
 		}
-		const bodyEvidenceStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
-		const bodyEvidenceTrace = buildCoverageLexicalBodyEvidenceTrace(
-			document.bodyTokenSequence,
-			plan.families,
-			queryCache.fuzzyProportion,
-		);
-		if (this.benchmarkPhaseTiming) {
-			this.recordBenchmarkPhaseTiming(
-				"bodyEvidence",
-				performance.now() - bodyEvidenceStartedAt,
-				1,
+		const sharedBodyEvidenceTrace =
+			queryCache.sharedBodyEvidenceTraceById.get(docId) ?? null;
+		let bodyEvidenceTrace = sharedBodyEvidenceTrace;
+		if (!bodyEvidenceTrace) {
+			const bodyEvidenceStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+			bodyEvidenceTrace = buildCoverageLexicalBodyEvidenceTrace(
+				document.bodyTokenSequence,
+				plan.families,
+				queryCache.fuzzyProportion,
 			);
+			if (this.benchmarkPhaseTiming) {
+				this.recordBenchmarkPhaseTiming(
+					"bodyEvidence",
+					performance.now() - bodyEvidenceStartedAt,
+					1,
+				);
+			}
+			queryCache.sharedBodyEvidenceTraceById.set(docId, bodyEvidenceTrace);
 		}
 		const admissionStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const admissionSignal = buildCoverageLexicalPassageAdmissionSignal(

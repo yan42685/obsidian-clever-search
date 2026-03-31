@@ -95,6 +95,11 @@ export type CoverageLexicalRecallBenchmarkHooks = {
 		elapsedMs: number,
 		unitCount?: number,
 	) => void;
+	bodyEvidenceWindowFuzzyProportion?: number;
+	storeBodyEvidenceTrace?: (
+		docId: number,
+		trace: CoverageLexicalBodyEvidenceTrace,
+	) => void;
 	recordLaneEvaluateSubphaseTiming?: (
 		subphase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
 		elapsedMs: number,
@@ -1301,7 +1306,14 @@ function buildLaneEvaluation(
 	const bodyEvidenceTrace = measureLaneEvaluateBenchmarkSubphase(
 		benchmarkHooks,
 		"bodyEvidence",
-		() => getOrCreateBodyEvidenceTrace(key, tokens, plan.families, queryCache),
+		() =>
+			getOrCreateBodyEvidenceTrace(
+				key,
+				tokens,
+				plan.families,
+				queryCache,
+				benchmarkHooks,
+			),
 	);
 	const passageSignal = measureLaneEvaluateBenchmarkSubphase(
 		benchmarkHooks,
@@ -1351,13 +1363,19 @@ function getOrCreateBodyEvidenceTrace(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
 	queryCache: CoverageLexicalQueryCache,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): CoverageLexicalBodyEvidenceTrace {
 	const cached = queryCache.bodyEvidenceTraceByDocId.get(docId);
 	if (cached) {
 		return cached;
 	}
-	const created = buildCoverageLexicalBodyEvidenceTrace(tokens, families);
+	const created = buildCoverageLexicalBodyEvidenceTrace(
+		tokens,
+		families,
+		benchmarkHooks?.bodyEvidenceWindowFuzzyProportion,
+	);
 	queryCache.bodyEvidenceTraceByDocId.set(docId, created);
+	benchmarkHooks?.storeBodyEvidenceTrace?.(docId, created);
 	return created;
 }
 
