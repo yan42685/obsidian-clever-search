@@ -131,9 +131,7 @@ export function buildCoverageLexicalPhraseTerms(
 			if (!isEligibleBridgeWindow(windowTokens)) {
 				continue;
 			}
-			for (const variant of buildBridgeVariants(windowTokens)) {
-				out.add(variant);
-			}
+			out.add(buildCanonicalBridgePhrase(windowTokens));
 		}
 	}
 	return Array.from(out);
@@ -176,7 +174,7 @@ function isBridgeableToken(token: string): boolean {
 function buildBridgeVariants(tokens: readonly string[]): string[] {
 	const normalizedTokens = tokens.map((token) => token.toLowerCase());
 	const variants = new Set<string>();
-	variants.add(normalizedTokens.join(" "));
+	variants.add(buildCanonicalBridgePhrase(normalizedTokens));
 	if (normalizedTokens.every(isAsciiLikeBridgeToken)) {
 		variants.add(normalizedTokens.join("-"));
 		variants.add(normalizedTokens.join("_"));
@@ -184,6 +182,10 @@ function buildBridgeVariants(tokens: readonly string[]): string[] {
 		variants.add(normalizedTokens.join(""));
 	}
 	return Array.from(variants);
+}
+
+function buildCanonicalBridgePhrase(tokens: readonly string[]): string {
+	return tokens.map((token) => token.toLowerCase()).join(" ");
 }
 
 function isAsciiLikeBridgeToken(token: string): boolean {
