@@ -76,7 +76,7 @@ function buildCoverageLexicalWindowSignalsInternal(
 	}
 
 	const candidateSignals: CoverageLexicalLocalWindowSignal[] = [];
-	const seenWindows = new Set<string>();
+	const seenWindows = new Set<number>();
 	for (let startHitIndex = 0; startHitIndex < hitPositions.length; startHitIndex++) {
 		const coveredFamilyFlags: number[] = [];
 		let coveredFamilyCount = 0;
@@ -351,7 +351,7 @@ function insertCandidateSignal(
 
 function pushWindowCandidate(
 	candidates: CoverageLexicalLocalWindowSignal[],
-	seenWindows: Set<string>,
+	seenWindows: Set<number>,
 	window: { start: number; end: number },
 	tokens: readonly string[],
 	matchesByPosition: ReadonlyArray<ReadonlyArray<FamilyTokenMatch>>,
@@ -359,7 +359,7 @@ function pushWindowCandidate(
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 	maxCandidates: number,
 ): void {
-	const key = `${window.start}:${window.end}`;
+	const key = computeWindowKey(window.start, window.end, tokens.length);
 	if (seenWindows.has(key)) {
 		return;
 	}
@@ -410,6 +410,10 @@ function expandCoverWindow(
 		break;
 	}
 	return { start, end };
+}
+
+function computeWindowKey(start: number, end: number, tokenCount: number): number {
+	return start * tokenCount + end;
 }
 
 function matchesPairSignature(

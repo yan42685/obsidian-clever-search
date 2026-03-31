@@ -41,18 +41,23 @@ Every retained change should be evaluated against the same four anchors:
 
 - `Phase 0` is complete:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
-  - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step1.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
+  - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-query-hotpath-flattening.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
-- `Phase 1` is complete for the current plan slice:
+- `Phase 1` is the current active optimization slice:
   - maintained query-time document caches landed
   - coarse-result reuse landed
   - lane prefilter guardrail logging landed
+  - family and phrase candidate state was flattened
+  - char and tag candidate state was flattened
+  - signal accumulator construction was flattened
+  - local window scoring and candidate dedupe were flattened
+  - the current active anchor shows a material latency improvement while quality remains unchanged
 - `Phase 2` has materially advanced:
   - aggregate metadata phrase storage was removed
   - canonical phrase storage landed
   - quality stayed benchmark-clean while the size ratio moved much closer to `MiniSearch`
-- `Phase 3` has started with the identity foundation:
+- `Phase 3` has established the structural foundation:
   - stable `docId` ownership landed
   - same-path reindex now preserves identity while true delete releases ownership
   - size accounting now reports explicit `documentIdentity` bytes so future numeric-postings work can be judged honestly
@@ -68,11 +73,11 @@ Every retained change should be evaluated against the same four anchors:
     - char bigram postings
   - current benchmark interpretation:
     - quality is unchanged
-    - size is unchanged
-    - latency ratio is still not materially better than the Step 3 active anchor
-    - do not promote a new benchmark baseline until size or latency ratios move clearly, not just structurally
+    - size is still effectively unchanged
+    - the latest retained latency gains came from query-time hot-path flattening, not from additional numeric-first posting migration by itself
+    - continue numeric migration when it removes a measured hot-path bridge or clearly improves the binary-friendly live layout, not as a latency story by default
 - immediate rule:
-  - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
+  - continue from the active roadmap below and keep the benchmark anchor aligned with what actually moved latency or size, not just with structural ambition
 
 ## Validation Strategy
 
@@ -397,15 +402,17 @@ Revert or redesign when:
 
 - a change improves one synthetic family but regresses broader benchmark behavior
 - complexity grows while all primary anchors stay flat
+- a structural migration is being justified as a latency win even though the measured ratios stayed flat and the real gain came from a different hot path
 - a snapshot optimization depends on an inefficient live memory layout staying in place
 
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. treat the Phase 3 Step 3 anchor as the new comparison point for future work
-3. keep pushing only the remaining query-relevant path-heavy posting families toward doc-id-native storage before expecting a latency win from the canonical recall path
-4. build binary snapshot + startup self-heal on top of the Phase 3 layout
-5. only return to prefilter stress verification if a future lane-budget change needs stronger validation
+2. treat the query-hotpath-flattening anchor as the active comparison point for future work
+3. continue `Phase 1` by removing the remaining measured query-time waste in local window evaluation and verification before expecting more latency benefit from additional posting migration
+4. continue `Phase 3` when it directly removes a proven hot-path bridge or makes the live layout more compact and binary-friendly for snapshotting
+5. build binary snapshot + startup self-heal on top of the settled Phase 3 live layout
+6. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 
 ## Working Rule
 
