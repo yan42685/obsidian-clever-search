@@ -71,8 +71,24 @@ type CoverageLexicalLaneName =
 	| "bridge_lane"
 	| "char_fallback_lane";
 
+export type CoverageLexicalRecallBenchmarkSubphaseName =
+	| "laneCollect"
+	| "laneMerge"
+	| "lanePrefilter"
+	| "laneEvaluate"
+	| "laneRank"
+	| "finalUnion";
+
 type CoverageLexicalRecallDebugAccumulator = {
 	lanes: Map<CoverageLexicalLaneName, CoverageLexicalRecallLaneDebug>;
+};
+
+export type CoverageLexicalRecallBenchmarkHooks = {
+	recordSubphaseTiming: (
+		subphase: CoverageLexicalRecallBenchmarkSubphaseName,
+		elapsedMs: number,
+		unitCount?: number,
+	) => void;
 };
 
 type CoverageLexicalQueryCache = {
@@ -286,6 +302,7 @@ export function collectCoverageLexicalCandidateStatesByDocId(
 	charQuery: CoverageLexicalCharQuery = buildCoverageLexicalCharQuery(
 		request.queryText,
 	),
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null = null,
 ): Map<number, CoverageLexicalCandidateState> {
 	return collectCoverageLexicalCandidateStatesInternal(
 		index,
@@ -294,6 +311,7 @@ export function collectCoverageLexicalCandidateStatesByDocId(
 		request,
 		charQuery,
 		null,
+		benchmarkHooks,
 	);
 }
 
@@ -317,6 +335,7 @@ export function collectCoverageLexicalCandidateStatesWithDebug(
 		request,
 		charQuery,
 		debug,
+		null,
 	);
 	return {
 		candidates: projectCandidateStatesToPaths(index, candidatesByDocId),
@@ -334,6 +353,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): Map<number, CoverageLexicalCandidateState> {
 	const queryCache = createCoverageLexicalQueryCache();
 	const aggregateCandidates = new Map<
@@ -352,6 +372,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 	runCharFallbackLane(
 		index,
@@ -363,6 +384,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 	runStrictHybridLane(
 		index,
@@ -374,6 +396,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 	runRelaxedHybridLane(
 		index,
@@ -385,6 +408,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 	runLocalBodyLane(
 		index,
@@ -396,6 +420,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 	runBridgeLane(
 		index,
@@ -407,16 +432,24 @@ function collectCoverageLexicalCandidateStatesInternal(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 
 	const admittedCandidates = new Map<number, CoverageLexicalCandidateState>();
-	for (const key of admittedKeys) {
-		const state = aggregateCandidates.get(key);
-		if (!state) {
-			continue;
-		}
-		mergeCandidateStateInto(admittedCandidates, key, state);
-	}
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"finalUnion",
+		() => {
+			for (const key of admittedKeys) {
+				const state = aggregateCandidates.get(key);
+				if (!state) {
+					continue;
+				}
+				mergeCandidateStateInto(admittedCandidates, key, state);
+			}
+		},
+		() => admittedKeys.size,
+	);
 	return admittedCandidates;
 }
 
@@ -430,6 +463,7 @@ function runStrictMetadataLane(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	if (plan.hardAnchorFamilies.length === 0) {
 		return;
@@ -439,26 +473,33 @@ function runStrictMetadataLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	collectFamilySetCandidates(
-		index,
-		laneCandidates,
-		derivedPlan.strictMetadataFamilies,
-		{
-		scope: "metadata-only",
-		includePrefix: request.isPrefixMatch,
-		includeFuzzy: false,
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneCollect",
+		() => {
+			collectFamilySetCandidates(
+				index,
+				laneCandidates,
+				derivedPlan.strictMetadataFamilies,
+				{
+					scope: "metadata-only",
+					includePrefix: request.isPrefixMatch,
+					includeFuzzy: false,
+				},
+			);
+			collectPhraseCandidates(
+				index,
+				laneCandidates,
+				phraseSignatures,
+				derivedPlan.strictMetadataPhraseFamilyIndices,
+				"metadata-only",
+				{
+					structuredOnly: false,
+					allowPreferredFields: true,
+				},
+			);
 		},
-	);
-	collectPhraseCandidates(
-		index,
-		laneCandidates,
-		phraseSignatures,
-		derivedPlan.strictMetadataPhraseFamilyIndices,
-		"metadata-only",
-		{
-			structuredOnly: false,
-			allowPreferredFields: true,
-		},
+		() => laneCandidates.size,
 	);
 
 	admitLaneCandidates(
@@ -473,6 +514,7 @@ function runStrictMetadataLane(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 }
 
@@ -486,6 +528,7 @@ function runStrictHybridLane(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	if (
 		plan.hardAnchorFamilies.length === 0 ||
@@ -498,31 +541,38 @@ function runStrictHybridLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
-		scope: "metadata-only",
-		includePrefix: request.isPrefixMatch,
-		includeFuzzy: false,
-	});
-	collectFamilySetCandidates(
-		index,
-		laneCandidates,
-		derivedPlan.strictHybridBodyFamilies,
-		{
-			scope: "body-only",
-			includePrefix: request.isPrefixMatch,
-			includeFuzzy: request.isFuzzy,
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneCollect",
+		() => {
+			collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
+				scope: "metadata-only",
+				includePrefix: request.isPrefixMatch,
+				includeFuzzy: false,
+			});
+			collectFamilySetCandidates(
+				index,
+				laneCandidates,
+				derivedPlan.strictHybridBodyFamilies,
+				{
+					scope: "body-only",
+					includePrefix: request.isPrefixMatch,
+					includeFuzzy: request.isFuzzy,
+				},
+			);
+			collectPhraseCandidates(
+				index,
+				laneCandidates,
+				phraseSignatures,
+				derivedPlan.strictHybridPhraseFamilyIndices,
+				"all",
+				{
+					structuredOnly: false,
+					allowPreferredFields: true,
+				},
+			);
 		},
-	);
-	collectPhraseCandidates(
-		index,
-		laneCandidates,
-		phraseSignatures,
-		derivedPlan.strictHybridPhraseFamilyIndices,
-		"all",
-		{
-			structuredOnly: false,
-			allowPreferredFields: true,
-		},
+		() => laneCandidates.size,
 	);
 
 	admitLaneCandidates(
@@ -537,6 +587,7 @@ function runStrictHybridLane(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 }
 
@@ -550,6 +601,7 @@ function runRelaxedHybridLane(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	if (
 		plan.hardAnchorFamilies.length === 0 ||
@@ -562,31 +614,38 @@ function runRelaxedHybridLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
-		scope: "metadata-only",
-		includePrefix: request.isPrefixMatch,
-		includeFuzzy: false,
-	});
-	collectFamilySetCandidates(
-		index,
-		laneCandidates,
-		derivedPlan.relaxedBodyFamilies,
-		{
-			scope: "body-only",
-			includePrefix: request.isPrefixMatch,
-			includeFuzzy: request.isFuzzy,
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneCollect",
+		() => {
+			collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
+				scope: "metadata-only",
+				includePrefix: request.isPrefixMatch,
+				includeFuzzy: false,
+			});
+			collectFamilySetCandidates(
+				index,
+				laneCandidates,
+				derivedPlan.relaxedBodyFamilies,
+				{
+					scope: "body-only",
+					includePrefix: request.isPrefixMatch,
+					includeFuzzy: request.isFuzzy,
+				},
+			);
+			collectPhraseCandidates(
+				index,
+				laneCandidates,
+				phraseSignatures,
+				derivedPlan.relaxedHybridPhraseFamilyIndices,
+				"all",
+				{
+					structuredOnly: false,
+					allowPreferredFields: true,
+				},
+			);
 		},
-	);
-	collectPhraseCandidates(
-		index,
-		laneCandidates,
-		phraseSignatures,
-		derivedPlan.relaxedHybridPhraseFamilyIndices,
-		"all",
-		{
-			structuredOnly: false,
-			allowPreferredFields: true,
-		},
+		() => laneCandidates.size,
 	);
 
 	admitLaneCandidates(
@@ -601,6 +660,7 @@ function runRelaxedHybridLane(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 }
 
@@ -614,6 +674,7 @@ function runLocalBodyLane(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	const derivedPlan = getOrCreateDerivedPlan(plan);
 	const localBodyFamilies = derivedPlan.localBodyFamilies;
@@ -624,21 +685,28 @@ function runLocalBodyLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	collectFamilySetCandidates(index, laneCandidates, localBodyFamilies, {
-		scope: "body-only",
-		includePrefix: request.isPrefixMatch,
-		includeFuzzy: request.isFuzzy,
-	});
-	collectPhraseCandidates(
-		index,
-		laneCandidates,
-		phraseSignatures,
-		derivedPlan.localBodyPhraseFamilyIndices,
-		"body-only",
-		{
-			structuredOnly: false,
-			allowPreferredFields: false,
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneCollect",
+		() => {
+			collectFamilySetCandidates(index, laneCandidates, localBodyFamilies, {
+				scope: "body-only",
+				includePrefix: request.isPrefixMatch,
+				includeFuzzy: request.isFuzzy,
+			});
+			collectPhraseCandidates(
+				index,
+				laneCandidates,
+				phraseSignatures,
+				derivedPlan.localBodyPhraseFamilyIndices,
+				"body-only",
+				{
+					structuredOnly: false,
+					allowPreferredFields: false,
+				},
+			);
 		},
+		() => laneCandidates.size,
 	);
 
 	admitLaneCandidates(
@@ -653,6 +721,7 @@ function runLocalBodyLane(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 }
 
@@ -666,6 +735,7 @@ function runBridgeLane(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	if (plan.bridgeFamilies.length === 0) {
 		return;
@@ -675,26 +745,33 @@ function runBridgeLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	collectFamilySetCandidates(
-		index,
-		laneCandidates,
-		derivedPlan.bridgeCollectionFamilies,
-		{
-			scope: "all",
-			includePrefix: request.isPrefixMatch,
-			includeFuzzy: request.isFuzzy,
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneCollect",
+		() => {
+			collectFamilySetCandidates(
+				index,
+				laneCandidates,
+				derivedPlan.bridgeCollectionFamilies,
+				{
+					scope: "all",
+					includePrefix: request.isPrefixMatch,
+					includeFuzzy: request.isFuzzy,
+				},
+			);
+			collectPhraseCandidates(
+				index,
+				laneCandidates,
+				phraseSignatures,
+				derivedPlan.bridgePhraseFamilyIndices,
+				"all",
+				{
+					structuredOnly: false,
+					allowPreferredFields: true,
+				},
+			);
 		},
-	);
-	collectPhraseCandidates(
-		index,
-		laneCandidates,
-		phraseSignatures,
-		derivedPlan.bridgePhraseFamilyIndices,
-		"all",
-		{
-			structuredOnly: false,
-			allowPreferredFields: true,
-		},
+		() => laneCandidates.size,
 	);
 
 	admitLaneCandidates(
@@ -709,6 +786,7 @@ function runBridgeLane(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 }
 
@@ -722,6 +800,7 @@ function runCharFallbackLane(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	if (charQuery.hanSegments.length === 0) {
 		return;
@@ -730,33 +809,46 @@ function runCharFallbackLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	collectCharCandidates(
-		index,
-		index.bodyCharPostings,
-		charQuery.terms,
-		laneCandidates,
-		"body",
-	);
-	for (const postings of [
-		index.metadataBasenameCharPostings,
-		index.metadataAliasCharPostings,
-		index.metadataFolderCharPostings,
-		index.metadataHeadingCharPostings,
-	]) {
-		collectCharCandidates(index, postings, charQuery.terms, laneCandidates, "metadata");
-	}
-	collectTagExactCandidates(
-		index,
-		index.metadataTagFullPostings,
-		charQuery.uniqueHanSegments,
-		laneCandidates,
-	);
-	collectCharCandidates(
-		index,
-		index.metadataTagCharPostings,
-		charQuery.terms,
-		laneCandidates,
-		"tag",
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneCollect",
+		() => {
+			collectCharCandidates(
+				index,
+				index.bodyCharPostings,
+				charQuery.terms,
+				laneCandidates,
+				"body",
+			);
+			for (const postings of [
+				index.metadataBasenameCharPostings,
+				index.metadataAliasCharPostings,
+				index.metadataFolderCharPostings,
+				index.metadataHeadingCharPostings,
+			]) {
+				collectCharCandidates(
+					index,
+					postings,
+					charQuery.terms,
+					laneCandidates,
+					"metadata",
+				);
+			}
+			collectTagExactCandidates(
+				index,
+				index.metadataTagFullPostings,
+				charQuery.uniqueHanSegments,
+				laneCandidates,
+			);
+			collectCharCandidates(
+				index,
+				index.metadataTagCharPostings,
+				charQuery.terms,
+				laneCandidates,
+				"tag",
+			);
+		},
+		() => laneCandidates.size,
 	);
 	admitLaneCandidates(
 		"char_fallback_lane",
@@ -770,6 +862,7 @@ function runCharFallbackLane(
 		aggregateCandidates,
 		admittedKeys,
 		debug,
+		benchmarkHooks,
 	);
 }
 
@@ -785,41 +878,78 @@ function admitLaneCandidates(
 	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): void {
 	if (laneCandidates.size === 0) {
 		recordLaneDebug(debug, laneName, 0, [], [], []);
 		return;
 	}
-	for (const [key, state] of laneCandidates) {
-		mergeCandidateStateInto(aggregateCandidates, key, state);
-	}
+	measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneMerge",
+		() => {
+			for (const [key, state] of laneCandidates) {
+				mergeCandidateStateInto(aggregateCandidates, key, state);
+			}
+		},
+		() => laneCandidates.size,
+	);
 
 	const budget = computeLaneBudget(laneName, plan, request);
-	const preselected = preselectLaneCandidates(
-		laneName,
-		laneCandidates,
-		index,
-		plan,
-		request,
-	);
-	const evaluations = preselected
-		.map((candidate) =>
-			buildLaneEvaluation(
-				candidate,
-				plan,
-				phraseSignatures,
+	const preselected = measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"lanePrefilter",
+		() =>
+			preselectLaneCandidates(
+				laneName,
+				laneCandidates,
 				index,
-				charQuery,
-				queryCache,
+				plan,
+				request,
 			),
-		)
-		.filter((evaluation): evaluation is CoverageLexicalLaneEvaluation => evaluation !== null)
-		.filter((evaluation) => acceptsLaneCandidate(laneName, evaluation, plan, charQuery))
-		.sort((left, right) => compareLaneEvaluations(laneName, left, right, plan));
-	const admitted = evaluations.slice(0, budget);
-	for (const evaluation of admitted) {
-		admittedKeys.add(evaluation.key);
-	}
+		() => laneCandidates.size,
+	);
+	const evaluations = measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneEvaluate",
+		() => {
+			const accepted: CoverageLexicalLaneEvaluation[] = [];
+			for (const candidate of preselected) {
+				const evaluation = buildLaneEvaluation(
+					candidate,
+					plan,
+					phraseSignatures,
+					index,
+					charQuery,
+					queryCache,
+				);
+				if (!evaluation) {
+					continue;
+				}
+				if (!acceptsLaneCandidate(laneName, evaluation, plan, charQuery)) {
+					continue;
+				}
+				accepted.push(evaluation);
+			}
+			return accepted;
+		},
+		() => preselected.length,
+	);
+	const admitted = measureRecallBenchmarkSubphase(
+		benchmarkHooks,
+		"laneRank",
+		() => {
+			evaluations.sort((left, right) =>
+				compareLaneEvaluations(laneName, left, right, plan),
+			);
+			const selected = evaluations.slice(0, budget);
+			for (const evaluation of selected) {
+				admittedKeys.add(evaluation.key);
+			}
+			return selected;
+		},
+		() => evaluations.length,
+	);
 	recordLaneDebug(
 		debug,
 		laneName,
@@ -927,6 +1057,29 @@ function preselectLaneCandidates(
 		}
 	}
 	return selected;
+}
+
+function measureRecallBenchmarkSubphase<T>(
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	subphase: CoverageLexicalRecallBenchmarkSubphaseName,
+	execute: () => T,
+	unitCount: number | (() => number) = 1,
+): T {
+	if (!benchmarkHooks) {
+		return execute();
+	}
+	const startedAt = performance.now();
+	try {
+		return execute();
+	} finally {
+		const resolvedUnitCount =
+			typeof unitCount === "function" ? unitCount() : unitCount;
+		benchmarkHooks.recordSubphaseTiming(
+			subphase,
+			performance.now() - startedAt,
+			resolvedUnitCount,
+		);
+	}
 }
 
 function compareCheapLaneCandidates(

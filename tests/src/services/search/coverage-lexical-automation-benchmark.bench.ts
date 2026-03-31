@@ -94,6 +94,17 @@ type PhaseTimingSummary = {
 		shareOfMeasuredMs: number;
 		shareOfQueryTime: number;
 	}>;
+	recallSubphases?: Array<{
+		phase: string;
+		totalMs: number;
+		maxMs: number;
+		count: number;
+		unitCount: number;
+		avgMsPerCall: number;
+		avgMsPerUnit: number;
+		shareOfRecallMs: number;
+		shareOfQueryTime: number;
+	}>;
 };
 
 type QueryOutcome = {
@@ -2511,11 +2522,25 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 	const localWindow = phaseTiming.phases.find(
 		(phase) => phase.phase === "localWindow",
 	);
+	const topRecallSubphases = (phaseTiming.recallSubphases ?? [])
+		.slice(0, 6)
+		.map((phase) => ({
+			phase: phase.phase,
+			totalMs: round(phase.totalMs),
+			avgMsPerCall: round(phase.avgMsPerCall),
+			avgMsPerUnit: round(phase.avgMsPerUnit),
+			maxMs: round(phase.maxMs),
+			count: phase.count,
+			unitCount: phase.unitCount,
+			shareOfRecallMs: round(phase.shareOfRecallMs),
+			shareOfQueryTime: round(phase.shareOfQueryTime),
+		}));
 	return {
 		queryCount: phaseTiming.queryCount,
 		queryTotalMs: round(phaseTiming.queryTotalMs),
 		totalMeasuredMs: round(phaseTiming.totalMeasuredMs),
 		topHotPhases,
+		topRecallSubphases,
 		admissionVsLocalWindow: {
 			admissionTotalMs: round(admission?.totalMs ?? 0),
 			localWindowTotalMs: round(localWindow?.totalMs ?? 0),

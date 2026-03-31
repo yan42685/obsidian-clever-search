@@ -35,7 +35,10 @@ import {
 	type CoverageLexicalBodyEvidenceTrace,
 } from "./coverage-lexical-body-evidence";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
-import { collectCoverageLexicalCandidateStatesByDocId } from "./coverage-lexical-recall";
+import {
+	collectCoverageLexicalCandidateStatesByDocId,
+	type CoverageLexicalRecallBenchmarkSubphaseName,
+} from "./coverage-lexical-recall";
 import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
 import {
 	compareCoverageLexicalResultSignals,
@@ -131,6 +134,10 @@ type CoverageLexicalBenchmarkPhaseTimingState = {
 		CoverageLexicalBenchmarkPhaseName,
 		CoverageLexicalBenchmarkPhaseTimingAccumulator
 	>;
+	recallSubphases: Map<
+		CoverageLexicalRecallBenchmarkSubphaseName,
+		CoverageLexicalBenchmarkPhaseTimingAccumulator
+	>;
 };
 
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
@@ -149,6 +156,7 @@ function createCoverageLexicalBenchmarkPhaseTimingState(): CoverageLexicalBenchm
 		queryCount: 0,
 		queryTotalMs: 0,
 		phases: new Map(),
+		recallSubphases: new Map(),
 	};
 }
 
@@ -231,6 +239,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					shareOfMeasuredMs: number;
 					shareOfQueryTime: number;
 				}>;
+				recallSubphases: Array<{
+					phase: CoverageLexicalRecallBenchmarkSubphaseName;
+					totalMs: number;
+					maxMs: number;
+					count: number;
+					unitCount: number;
+					avgMsPerCall: number;
+					avgMsPerUnit: number;
+					shareOfRecallMs: number;
+					shareOfQueryTime: number;
+				}>;
 		  }
 		| null {
 		if (!this.benchmarkPhaseTiming) {
@@ -257,6 +276,28 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
 					shareOfMeasuredMs:
 						totalMeasuredMs > 0 ? timing.totalMs / totalMeasuredMs : 0,
+					shareOfQueryTime:
+						this.benchmarkPhaseTiming.queryTotalMs > 0
+							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
+					: 0,
+				}))
+				.sort((left, right) => right.totalMs - left.totalMs),
+			recallSubphases: Array.from(this.benchmarkPhaseTiming.recallSubphases.entries())
+				.map(([phase, timing]) => ({
+					phase,
+					totalMs: timing.totalMs,
+					maxMs: timing.maxMs,
+					count: timing.count,
+					unitCount: timing.unitCount,
+					avgMsPerCall:
+						timing.count > 0 ? timing.totalMs / timing.count : 0,
+					avgMsPerUnit:
+						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
+					shareOfRecallMs:
+						(this.benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0) > 0
+							? timing.totalMs /
+								(this.benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0)
+							: 0,
 					shareOfQueryTime:
 						this.benchmarkPhaseTiming.queryTotalMs > 0
 							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
@@ -394,6 +435,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				phraseSignatures,
 				request,
 				charQuery,
+				this.benchmarkPhaseTiming
+					? {
+							recordSubphaseTiming: (
+								subphase,
+								elapsedMs,
+								unitCount = 1,
+							) =>
+								this.recordBenchmarkRecallSubphaseTiming(
+									subphase,
+									elapsedMs,
+									unitCount,
+								),
+					  }
+					: null,
 			);
 			if (this.benchmarkPhaseTiming) {
 				this.recordBenchmarkPhaseTiming(
@@ -1031,6 +1086,30 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			return;
 		}
 		this.benchmarkPhaseTiming.phases.set(phase, {
+			totalMs: elapsedMs,
+			maxMs: elapsedMs,
+			count: 1,
+			unitCount,
+		});
+	}
+
+	private recordBenchmarkRecallSubphaseTiming(
+		phase: CoverageLexicalRecallBenchmarkSubphaseName,
+		elapsedMs: number,
+		unitCount: number = 1,
+	): void {
+		if (!this.benchmarkPhaseTiming || !Number.isFinite(elapsedMs)) {
+			return;
+		}
+		const existing = this.benchmarkPhaseTiming.recallSubphases.get(phase);
+		if (existing) {
+			existing.totalMs += elapsedMs;
+			existing.maxMs = Math.max(existing.maxMs, elapsedMs);
+			existing.count += 1;
+			existing.unitCount += unitCount;
+			return;
+		}
+		this.benchmarkPhaseTiming.recallSubphases.set(phase, {
 			totalMs: elapsedMs,
 			maxMs: elapsedMs,
 			count: 1,
