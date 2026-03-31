@@ -79,6 +79,12 @@ export type CoverageLexicalRecallBenchmarkSubphaseName =
 	| "laneRank"
 	| "finalUnion";
 
+export type CoverageLexicalLaneEvaluateBenchmarkSubphaseName =
+	| "phraseWeight"
+	| "tagFallback"
+	| "bodyEvidence"
+	| "passageSignal";
+
 type CoverageLexicalRecallDebugAccumulator = {
 	lanes: Map<CoverageLexicalLaneName, CoverageLexicalRecallLaneDebug>;
 };
@@ -86,6 +92,11 @@ type CoverageLexicalRecallDebugAccumulator = {
 export type CoverageLexicalRecallBenchmarkHooks = {
 	recordSubphaseTiming: (
 		subphase: CoverageLexicalRecallBenchmarkSubphaseName,
+		elapsedMs: number,
+		unitCount?: number,
+	) => void;
+	recordLaneEvaluateSubphaseTiming?: (
+		subphase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
 		elapsedMs: number,
 		unitCount?: number,
 	) => void;
@@ -922,6 +933,7 @@ function admitLaneCandidates(
 					index,
 					charQuery,
 					queryCache,
+					benchmarkHooks,
 				);
 				if (!evaluation) {
 					continue;
@@ -1075,6 +1087,29 @@ function measureRecallBenchmarkSubphase<T>(
 		const resolvedUnitCount =
 			typeof unitCount === "function" ? unitCount() : unitCount;
 		benchmarkHooks.recordSubphaseTiming(
+			subphase,
+			performance.now() - startedAt,
+			resolvedUnitCount,
+		);
+	}
+}
+
+function measureLaneEvaluateBenchmarkSubphase<T>(
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	subphase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
+	execute: () => T,
+	unitCount: number | (() => number) = 1,
+): T {
+	if (!benchmarkHooks?.recordLaneEvaluateSubphaseTiming) {
+		return execute();
+	}
+	const startedAt = performance.now();
+	try {
+		return execute();
+	} finally {
+		const resolvedUnitCount =
+			typeof unitCount === "function" ? unitCount() : unitCount;
+		benchmarkHooks.recordLaneEvaluateSubphaseTiming(
 			subphase,
 			performance.now() - startedAt,
 			resolvedUnitCount,
@@ -1242,21 +1277,47 @@ function buildLaneEvaluation(
 	index: CoverageLexicalRecallIndex,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
 ): CoverageLexicalLaneEvaluation | null {
 	const { key, state, signal } = candidate;
 	const phraseMatchCount = signal.phraseMatchCount;
-	const phraseMatchWeight = state.phraseMatches.reduce(
-		(total, signatureIndex) =>
-			total + (phraseSignatures[signatureIndex]?.tailWeight ?? 0),
-		0,
+	const phraseMatchWeight = measureLaneEvaluateBenchmarkSubphase(
+		benchmarkHooks,
+		"phraseWeight",
+		() =>
+			state.phraseMatches.reduce(
+				(total, signatureIndex) =>
+					total + (phraseSignatures[signatureIndex]?.tailWeight ?? 0),
+				0,
+			),
+		() => state.phraseMatches.length,
 	);
 	const tokens = index.documentBodyTokensById[key] ?? [];
-	const tagFallback = getOrCreateTagFallback(key, index, charQuery, queryCache);
-	const bodyEvidenceTrace = getOrCreateBodyEvidenceTrace(
-		key,
-		tokens,
-		plan.families,
-		queryCache,
+	const tagFallback = measureLaneEvaluateBenchmarkSubphase(
+		benchmarkHooks,
+		"tagFallback",
+		() => getOrCreateTagFallback(key, index, charQuery, queryCache),
+	);
+	const bodyEvidenceTrace = measureLaneEvaluateBenchmarkSubphase(
+		benchmarkHooks,
+		"bodyEvidence",
+		() => getOrCreateBodyEvidenceTrace(key, tokens, plan.families, queryCache),
+	);
+	const passageSignal = measureLaneEvaluateBenchmarkSubphase(
+		benchmarkHooks,
+		"passageSignal",
+		() =>
+			getOrCreatePassageSignal(
+				key,
+				tokens,
+				plan.families,
+				state,
+				phraseSignatures,
+				phraseMatchCount,
+				phraseMatchWeight,
+				bodyEvidenceTrace,
+				queryCache,
+			),
 	);
 	return {
 		key,
@@ -1281,15 +1342,7 @@ function buildLaneEvaluation(
 		tagCharMatchRatio: tagFallback.charMatchRatio,
 		phraseMatchCount,
 		phraseMatchWeight,
-		passageSignal: getOrCreatePassageSignal(
-			key,
-			tokens,
-			plan.families,
-			state,
-			phraseSignatures,
-			bodyEvidenceTrace,
-			queryCache,
-		),
+		passageSignal,
 	};
 }
 
@@ -1314,15 +1367,11 @@ function getOrCreatePassageSignal(
 	families: readonly CoverageLexicalFamily[],
 	state: CoverageLexicalCandidateState,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+	phraseMatchCount: number,
+	phraseMatchWeight: number,
 	bodyEvidenceTrace: CoverageLexicalBodyEvidenceTrace,
 	queryCache: CoverageLexicalQueryCache,
 ): ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal> {
-	const phraseMatchCount = state.phraseMatches.length;
-	const phraseMatchWeight = state.phraseMatches.reduce(
-		(total, signatureIndex) =>
-			total + (phraseSignatures[signatureIndex]?.tailWeight ?? 0),
-		0,
-	);
 	const cacheKey = `${docId}:${phraseMatchCount}:${phraseMatchWeight}`;
 	const cached = queryCache.passageSignalByDocAndPhraseKey.get(cacheKey);
 	if (cached) {

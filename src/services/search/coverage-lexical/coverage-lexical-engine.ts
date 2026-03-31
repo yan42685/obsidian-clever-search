@@ -37,6 +37,7 @@ import {
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
 import {
 	collectCoverageLexicalCandidateStatesByDocId,
+	type CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
 	type CoverageLexicalRecallBenchmarkSubphaseName,
 } from "./coverage-lexical-recall";
 import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
@@ -138,6 +139,10 @@ type CoverageLexicalBenchmarkPhaseTimingState = {
 		CoverageLexicalRecallBenchmarkSubphaseName,
 		CoverageLexicalBenchmarkPhaseTimingAccumulator
 	>;
+	laneEvaluateSubphases: Map<
+		CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
+		CoverageLexicalBenchmarkPhaseTimingAccumulator
+	>;
 };
 
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
@@ -157,6 +162,7 @@ function createCoverageLexicalBenchmarkPhaseTimingState(): CoverageLexicalBenchm
 		queryTotalMs: 0,
 		phases: new Map(),
 		recallSubphases: new Map(),
+		laneEvaluateSubphases: new Map(),
 	};
 }
 
@@ -250,6 +256,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					shareOfRecallMs: number;
 					shareOfQueryTime: number;
 				}>;
+				laneEvaluateSubphases: Array<{
+					phase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName;
+					totalMs: number;
+					maxMs: number;
+					count: number;
+					unitCount: number;
+					avgMsPerCall: number;
+					avgMsPerUnit: number;
+					shareOfLaneEvaluateMs: number;
+					shareOfQueryTime: number;
+				}>;
 		  }
 		| null {
 		if (!this.benchmarkPhaseTiming) {
@@ -297,6 +314,32 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						(this.benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0) > 0
 							? timing.totalMs /
 								(this.benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0)
+							: 0,
+					shareOfQueryTime:
+						this.benchmarkPhaseTiming.queryTotalMs > 0
+							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
+							: 0,
+				}))
+				.sort((left, right) => right.totalMs - left.totalMs),
+			laneEvaluateSubphases: Array.from(
+				this.benchmarkPhaseTiming.laneEvaluateSubphases.entries(),
+			)
+				.map(([phase, timing]) => ({
+					phase,
+					totalMs: timing.totalMs,
+					maxMs: timing.maxMs,
+					count: timing.count,
+					unitCount: timing.unitCount,
+					avgMsPerCall:
+						timing.count > 0 ? timing.totalMs / timing.count : 0,
+					avgMsPerUnit:
+						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
+					shareOfLaneEvaluateMs:
+						(this.benchmarkPhaseTiming.recallSubphases.get("laneEvaluate")
+							?.totalMs ?? 0) > 0
+							? timing.totalMs /
+								(this.benchmarkPhaseTiming.recallSubphases.get("laneEvaluate")
+									?.totalMs ?? 0)
 							: 0,
 					shareOfQueryTime:
 						this.benchmarkPhaseTiming.queryTotalMs > 0
@@ -443,6 +486,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								unitCount = 1,
 							) =>
 								this.recordBenchmarkRecallSubphaseTiming(
+									subphase,
+									elapsedMs,
+									unitCount,
+								),
+							recordLaneEvaluateSubphaseTiming: (
+								subphase,
+								elapsedMs,
+								unitCount = 1,
+							) =>
+								this.recordBenchmarkLaneEvaluateSubphaseTiming(
 									subphase,
 									elapsedMs,
 									unitCount,
@@ -1110,6 +1163,30 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			return;
 		}
 		this.benchmarkPhaseTiming.recallSubphases.set(phase, {
+			totalMs: elapsedMs,
+			maxMs: elapsedMs,
+			count: 1,
+			unitCount,
+		});
+	}
+
+	private recordBenchmarkLaneEvaluateSubphaseTiming(
+		phase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
+		elapsedMs: number,
+		unitCount: number = 1,
+	): void {
+		if (!this.benchmarkPhaseTiming || !Number.isFinite(elapsedMs)) {
+			return;
+		}
+		const existing = this.benchmarkPhaseTiming.laneEvaluateSubphases.get(phase);
+		if (existing) {
+			existing.totalMs += elapsedMs;
+			existing.maxMs = Math.max(existing.maxMs, elapsedMs);
+			existing.count += 1;
+			existing.unitCount += unitCount;
+			return;
+		}
+		this.benchmarkPhaseTiming.laneEvaluateSubphases.set(phase, {
 			totalMs: elapsedMs,
 			maxMs: elapsedMs,
 			count: 1,
