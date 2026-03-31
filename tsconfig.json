@@ -1,22 +1,3 @@
 {
-	"extends": "@tsconfig/svelte/tsconfig.json",
-	"compilerOptions": {
-		// suppress error due to the extends for svelte/tsconfig.json
-		// won't work on typescript 5.5 or above
-		// "ignoreDeprecations": "5.0",  
-		"experimentalDecorators": true,
-		"emitDecoratorMetadata": true,
-		"types": ["svelte", "node", "jest"],
-		"baseUrl": ".",
-		"module": "ESNext",
-		"target": "ES6",
-		"allowJs": true,
-		"noImplicitAny": true,
-		"moduleResolution": "node",
-		"importHelpers": true,
-		"isolatedModules": true,
-		"strictNullChecks": true,
-		"lib": ["DOM", "ES5", "ES6", "ES7"]
-	},
-	"include": ["**/*.ts", "src/search.service.ts", "tests/src/jest-setup.ts"]
+	"extends": "./tsconfig.test.json"
 }
