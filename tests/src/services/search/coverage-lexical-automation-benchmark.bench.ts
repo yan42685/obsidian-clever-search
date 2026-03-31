@@ -2067,28 +2067,29 @@ async function runBenchmark(
 function createCoverageRecallIndex(engine: any) {
 	return {
 		bodyPostings: engine.bodyPostings,
+		bodyCharPostings: engine.bodyCharPostings,
+		metadataAliasCharPostings: engine.metadataAliasCharPostings,
 		metadataAliasPhrasePostings: engine.metadataAliasPhrasePostings,
 		metadataAliasPostings: engine.metadataAliasPostings,
+		metadataBasenameCharPostings: engine.metadataBasenameCharPostings,
 		metadataBasenamePhrasePostings: engine.metadataBasenamePhrasePostings,
 		metadataBasenamePostings: engine.metadataBasenamePostings,
+		metadataFolderCharPostings: engine.metadataFolderCharPostings,
 		metadataFolderPhrasePostings: engine.metadataFolderPhrasePostings,
 		metadataFolderPostings: engine.metadataFolderPostings,
+		metadataHeadingCharPostings: engine.metadataHeadingCharPostings,
 		metadataHeadingPhrasePostings: engine.metadataHeadingPhrasePostings,
 		metadataHeadingPostings: engine.metadataHeadingPostings,
 		metadataPostings: engine.metadataPostings,
 		bodyPhrasePostings: engine.bodyPhrasePostings,
 		metadataPhrasePostings: engine.metadataPhrasePostings,
+		metadataTagCharPostings: engine.metadataTagCharPostings,
+		metadataTagFullPostings: engine.metadataTagFullPostings,
 		metadataTagPhrasePostings: engine.metadataTagPhrasePostings,
 		metadataTagPostings: engine.metadataTagPostings,
 		sortedLexicon: engine.sortedLexicon,
-		documentBodyTokensByPath: new Map(
-			Array.from(engine.documents.entries()).map(
-				([docPath, document]: [string, { bodyTokenSequence: string[] }]) => [
-					docPath,
-					document.bodyTokenSequence,
-				],
-			),
-		),
+		documentBodyTokensByPath: engine.documentBodyTokensByPath,
+		documentTagValuesByPath: engine.documentTagValuesByPath,
 	};
 }
 
@@ -2103,7 +2104,11 @@ async function runCoverageRecallContract(
 		RecallContractType,
 		{ unionHitRate: number; zeroRate: number; count: number }
 	>;
+	laneCandidateHitCounts: Record<string, number>;
 	laneHitCounts: Record<string, number>;
+	lanePrefilterHitCounts: Record<string, number>;
+	lanePrefilterDropCounts: Record<string, number>;
+	laneAdmitDropCounts: Record<string, number>;
 	misses: Array<{
 		query: string;
 		type: RecallContractType;
@@ -2111,7 +2116,15 @@ async function runCoverageRecallContract(
 		queryKind: string;
 		hardAnchors: string[];
 		decisiveBodies: string[];
-		lanes: Array<{ laneName: string; admittedCount: number }>;
+		lanes: Array<{
+			laneName: string;
+			candidateCount: number;
+			prefilterCount: number;
+			admittedCount: number;
+			relevantCandidate: boolean;
+			relevantInPrefilter: boolean;
+			relevantAdmitted: boolean;
+		}>;
 	}>;
 }> {
 	const { buildCoverageLexicalPlan } = require(
@@ -2127,7 +2140,11 @@ async function runCoverageRecallContract(
 
 	const index = createCoverageRecallIndex(engine);
 	let unionHits = 0;
+	const laneCandidateHitCounts: Record<string, number> = {};
 	const laneHitCounts: Record<string, number> = {};
+	const lanePrefilterHitCounts: Record<string, number> = {};
+	const lanePrefilterDropCounts: Record<string, number> = {};
+	const laneAdmitDropCounts: Record<string, number> = {};
 	const typeTotals = new Map<
 		RecallContractType,
 		{ unionHits: number; misses: number; count: number }
@@ -2139,7 +2156,15 @@ async function runCoverageRecallContract(
 		queryKind: string;
 		hardAnchors: string[];
 		decisiveBodies: string[];
-		lanes: Array<{ laneName: string; admittedCount: number }>;
+		lanes: Array<{
+			laneName: string;
+			candidateCount: number;
+			prefilterCount: number;
+			admittedCount: number;
+			relevantCandidate: boolean;
+			relevantInPrefilter: boolean;
+			relevantAdmitted: boolean;
+		}>;
 	}> = [];
 
 	for (const queryCase of queryCases) {
@@ -2171,8 +2196,29 @@ async function runCoverageRecallContract(
 			unionHits += 1;
 		}
 		for (const lane of debug.lanes) {
-			if (lane.admittedPaths.includes(queryCase.relevantPath)) {
+			const relevantCandidate = lane.candidatePaths.includes(queryCase.relevantPath);
+			const relevantInPrefilter = lane.prefilteredPaths.includes(
+				queryCase.relevantPath,
+			);
+			const relevantAdmitted = lane.admittedPaths.includes(queryCase.relevantPath);
+			if (relevantCandidate) {
+				laneCandidateHitCounts[lane.laneName] =
+					(laneCandidateHitCounts[lane.laneName] ?? 0) + 1;
+			}
+			if (relevantInPrefilter) {
+				lanePrefilterHitCounts[lane.laneName] =
+					(lanePrefilterHitCounts[lane.laneName] ?? 0) + 1;
+			}
+			if (relevantCandidate && !relevantInPrefilter) {
+				lanePrefilterDropCounts[lane.laneName] =
+					(lanePrefilterDropCounts[lane.laneName] ?? 0) + 1;
+			}
+			if (relevantAdmitted) {
 				laneHitCounts[lane.laneName] = (laneHitCounts[lane.laneName] ?? 0) + 1;
+			}
+			if (relevantInPrefilter && !relevantAdmitted) {
+				laneAdmitDropCounts[lane.laneName] =
+					(laneAdmitDropCounts[lane.laneName] ?? 0) + 1;
 			}
 		}
 		const total =
@@ -2189,9 +2235,28 @@ async function runCoverageRecallContract(
 				queryKind: plan.queryKind,
 				hardAnchors: plan.hardAnchorFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
 				decisiveBodies: plan.decisiveBodyFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
-				lanes: debug.lanes.map((lane: { laneName: string; admittedCount: number }) => ({
+				lanes: debug.lanes.map((lane: {
+					laneName: string;
+					candidateCount: number;
+					candidatePaths: string[];
+					prefilterCount: number;
+					admittedCount: number;
+					prefilteredPaths: string[];
+					admittedPaths: string[];
+				}) => ({
 					laneName: lane.laneName,
+					candidateCount: lane.candidateCount,
+					prefilterCount: lane.prefilterCount,
 					admittedCount: lane.admittedCount,
+					relevantCandidate: lane.candidatePaths.includes(
+						queryCase.relevantPath,
+					),
+					relevantInPrefilter: lane.prefilteredPaths.includes(
+						queryCase.relevantPath,
+					),
+					relevantAdmitted: lane.admittedPaths.includes(
+						queryCase.relevantPath,
+					),
 				})),
 			});
 		}
@@ -2218,9 +2283,58 @@ async function runCoverageRecallContract(
 		unionHitRate: unionHits / Math.max(1, queryCases.length),
 		zeroRate: 1 - unionHits / Math.max(1, queryCases.length),
 		byType,
+		laneCandidateHitCounts,
 		laneHitCounts,
+		lanePrefilterHitCounts,
+		lanePrefilterDropCounts,
+		laneAdmitDropCounts,
 		misses,
 	};
+}
+
+function summarizeLaneGuardrails(recallContract: {
+	laneCandidateHitCounts: Record<string, number>;
+	lanePrefilterHitCounts: Record<string, number>;
+	laneHitCounts: Record<string, number>;
+	lanePrefilterDropCounts: Record<string, number>;
+	laneAdmitDropCounts: Record<string, number>;
+}) {
+	const laneNames = new Set([
+		...Object.keys(recallContract.laneCandidateHitCounts),
+		...Object.keys(recallContract.lanePrefilterHitCounts),
+		...Object.keys(recallContract.laneHitCounts),
+		...Object.keys(recallContract.lanePrefilterDropCounts),
+		...Object.keys(recallContract.laneAdmitDropCounts),
+	]);
+	return Object.fromEntries(
+		Array.from(laneNames)
+			.sort((left, right) => left.localeCompare(right))
+			.map((laneName) => {
+				const candidateHits = recallContract.laneCandidateHitCounts[laneName] ?? 0;
+				const prefilterHits = recallContract.lanePrefilterHitCounts[laneName] ?? 0;
+				const admittedHits = recallContract.laneHitCounts[laneName] ?? 0;
+				const droppedBeforePrefilter =
+					recallContract.lanePrefilterDropCounts[laneName] ?? 0;
+				const droppedAfterPrefilter =
+					recallContract.laneAdmitDropCounts[laneName] ?? 0;
+				return [
+					laneName,
+					{
+						relevantCandidateHits: candidateHits,
+						relevantPrefilterHits: prefilterHits,
+						relevantAdmittedHits: admittedHits,
+						candidateToPrefilterSurvivalRate: round(
+							candidateHits === 0 ? 1 : prefilterHits / candidateHits,
+						),
+						prefilterToAdmitSurvivalRate: round(
+							prefilterHits === 0 ? 1 : admittedHits / prefilterHits,
+						),
+						droppedBeforePrefilter,
+						droppedAfterPrefilter,
+					},
+				] as const;
+			}),
+	);
 }
 
 function summarizeWins(
@@ -2594,6 +2708,23 @@ describe("coverage lexical automation benchmark", () => {
 							},
 						]),
 					),
+					laneGuardrails: summarizeLaneGuardrails(recallContract),
+					prefilterDropMisses: recallContract.misses
+						.filter((miss) =>
+							miss.lanes.some(
+								(lane) => lane.relevantCandidate && !lane.relevantInPrefilter,
+							),
+						)
+						.slice(0, 10),
+					postPrefilterDropMisses: recallContract.misses
+						.filter((miss) =>
+							miss.lanes.some(
+								(lane) => lane.relevantInPrefilter && !lane.relevantAdmitted,
+							),
+						)
+						.slice(0, 10),
+					laneCandidateHitCounts: recallContract.laneCandidateHitCounts,
+					lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
 					laneHitCounts: recallContract.laneHitCounts,
 					misses: recallContract.misses.slice(0, 10),
 				},

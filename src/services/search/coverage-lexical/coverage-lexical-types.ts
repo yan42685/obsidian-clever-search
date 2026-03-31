@@ -56,14 +56,17 @@ export type CoverageLexicalCandidateState = {
 
 export type CoverageLexicalRecallLaneDebug = {
 	laneName:
-		| "strict_metadata_lane"
+	| "strict_metadata_lane"
 	| "strict_hybrid_lane"
 	| "relaxed_hybrid_lane"
 	| "local_body_lane"
 	| "bridge_lane"
 	| "char_fallback_lane";
 	candidateCount: number;
+	candidatePaths: string[];
+	prefilterCount: number;
 	admittedCount: number;
+	prefilteredPaths: string[];
 	admittedPaths: string[];
 };
 

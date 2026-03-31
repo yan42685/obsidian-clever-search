@@ -91,6 +91,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
+	private readonly documentBodyTokensByPath = new Map<string, readonly string[]>();
+	private readonly documentTagValuesByPath = new Map<string, readonly string[]>();
 	private readonly bodyPostings = new Map<string, Set<string>>();
 	private readonly bodyCharPostings = new Map<string, Set<string>>();
 	private readonly bodyHanSegmentPostings = new Map<string, Set<string>>();
@@ -138,6 +140,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	clearIndex(): void {
 		this.documents.clear();
+		this.documentBodyTokensByPath.clear();
+		this.documentTagValuesByPath.clear();
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
 		this.bodyHanSegmentPostings.clear();
@@ -233,18 +237,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
 				metadataTagPostings: this.metadataTagPostings,
 				sortedLexicon: this.sortedLexicon,
-				documentBodyTokensByPath: new Map(
-					Array.from(this.documents.entries()).map(([path, document]) => [
-						path,
-						document.bodyTokenSequence,
-					]),
-				),
-				documentTagValuesByPath: new Map(
-					Array.from(this.documents.entries()).map(([path, document]) => [
-						path,
-						document.tagValues,
-					]),
-				),
+				documentBodyTokensByPath: this.documentBodyTokensByPath,
+				documentTagValuesByPath: this.documentTagValuesByPath,
 			},
 			plan,
 			phraseSignatures,
@@ -280,6 +274,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				),
 			)
 			.filter((result): result is CoverageLexicalRankableResult => result !== null);
+		const coarseResultByPath = new Map(
+			coarseResults.map((result) => [result.path, result] as const),
+		);
 		const admissionSignals = new Map(
 			coarseResults.map((result) => {
 				const document = this.documents.get(result.path);
@@ -336,23 +333,30 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			plan,
 			request.maxItemResults,
 		);
-		const ranked = rankCoverageLexicalResults(
-			Array.from(candidates.entries())
-				.map(([path, state]) =>
-					this.createRankableResult(
-						path,
-						queryTerms,
-						plan,
-						state,
-						localWindowPaths.has(path),
-						phraseSignatures,
-						pairSignatures,
-						charQuery,
-					),
-				)
-				.filter((result): result is CoverageLexicalRankableResult => result !== null),
-			plan,
-		);
+		const rerankedResults: CoverageLexicalRankableResult[] = [];
+		for (const [path, state] of candidates.entries()) {
+			if (!localWindowPaths.has(path)) {
+				const coarseResult = coarseResultByPath.get(path);
+				if (coarseResult) {
+					rerankedResults.push(coarseResult);
+				}
+				continue;
+			}
+			const rerankedResult = this.createRankableResult(
+				path,
+				queryTerms,
+				plan,
+				state,
+				true,
+				phraseSignatures,
+				pairSignatures,
+				charQuery,
+			);
+			if (rerankedResult) {
+				rerankedResults.push(rerankedResult);
+			}
+		}
+		const ranked = rankCoverageLexicalResults(rerankedResults, plan);
 		const finalResults = ranked.slice(0, request.maxItemResults);
 		return finalResults.map(
 			({ coverageLexicalSignal: _coverageLexicalSignal, ...result }) => ({
@@ -646,6 +650,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			tagCharTerms,
 			tagValues,
 		});
+		this.documentBodyTokensByPath.set(document.path, bodyTokenSequence);
+		this.documentTagValuesByPath.set(document.path, tagValues);
 
 		for (const term of bodyTerms) {
 			addPosting(this.bodyPostings, term, document.path);
@@ -790,6 +796,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removePosting(this.metadataTagPhrasePostings, term, path);
 		}
 		this.documents.delete(path);
+		this.documentBodyTokensByPath.delete(path);
+		this.documentTagValuesByPath.delete(path);
 		this.rebuildLexicon();
 	}
 

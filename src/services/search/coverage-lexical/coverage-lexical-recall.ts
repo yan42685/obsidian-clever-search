@@ -67,6 +67,13 @@ type CoverageLexicalRecallDebugAccumulator = {
 	>;
 };
 
+type CoverageLexicalQueryCache = {
+	tagFallbackByPath: Map<
+		string,
+		ReturnType<typeof evaluateCoverageLexicalTagFallback>
+	>;
+};
+
 type CoverageLexicalGroupSignal = {
 	coverageCount: number;
 	exactWeight: number;
@@ -104,10 +111,18 @@ function createRecallDebugAccumulator(): CoverageLexicalRecallDebugAccumulator {
 	};
 }
 
+function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
+	return {
+		tagFallbackByPath: new Map(),
+	};
+}
+
 function recordLaneDebug(
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 	laneName: CoverageLexicalLaneName,
 	candidateCount: number,
+	candidatePaths: string[],
+	prefilteredPaths: string[],
 	admittedPaths: string[],
 ): void {
 	if (!debug) {
@@ -116,7 +131,10 @@ function recordLaneDebug(
 	debug.lanes.set(laneName, {
 		laneName,
 		candidateCount,
+		candidatePaths,
+		prefilterCount: prefilteredPaths.length,
 		admittedCount: admittedPaths.length,
+		prefilteredPaths,
 		admittedPaths,
 	});
 }
@@ -178,6 +196,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 	charQuery: CoverageLexicalCharQuery,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): Map<string, CoverageLexicalCandidateState> {
+	const queryCache = createCoverageLexicalQueryCache();
 	const aggregateCandidates = new Map<string, CoverageLexicalCandidateState>();
 	const admittedPaths = new Set<string>();
 
@@ -187,6 +206,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -197,6 +217,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -207,6 +228,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -217,6 +239,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -227,6 +250,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -237,6 +261,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		aggregateCandidates,
 		admittedPaths,
 		debug,
@@ -258,6 +283,7 @@ function runStrictMetadataLane(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -294,6 +320,7 @@ function runStrictMetadataLane(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -307,6 +334,7 @@ function runStrictHybridLane(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -359,6 +387,7 @@ function runStrictHybridLane(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -372,6 +401,7 @@ function runRelaxedHybridLane(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -428,6 +458,7 @@ function runRelaxedHybridLane(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -441,6 +472,7 @@ function runLocalBodyLane(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -478,6 +510,7 @@ function runLocalBodyLane(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -491,6 +524,7 @@ function runBridgeLane(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -538,6 +572,7 @@ function runBridgeLane(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -551,6 +586,7 @@ function runCharFallbackLane(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
@@ -582,6 +618,7 @@ function runCharFallbackLane(
 		phraseSignatures,
 		request,
 		charQuery,
+		queryCache,
 		laneCandidates,
 		aggregateCandidates,
 		admittedPaths,
@@ -596,27 +633,42 @@ function admitLaneCandidates(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 	laneCandidates: Map<string, CoverageLexicalCandidateState>,
 	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
 	admittedPaths: Set<string>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (laneCandidates.size === 0) {
-		recordLaneDebug(debug, laneName, 0, []);
+		recordLaneDebug(debug, laneName, 0, [], [], []);
 		return;
 	}
 	for (const [path, state] of laneCandidates) {
 		mergeCandidateStateInto(aggregateCandidates, path, state);
 	}
 
-	const evaluations = Array.from(laneCandidates.entries())
+	const budget = computeLaneBudget(laneName, plan, request);
+	const preselected = preselectLaneCandidates(
+		laneName,
+		laneCandidates,
+		plan,
+		request,
+	);
+	const evaluations = preselected
 		.map(([path, state]) =>
-			buildLaneEvaluation(path, state, plan, phraseSignatures, index, charQuery),
+			buildLaneEvaluation(
+				path,
+				state,
+				plan,
+				phraseSignatures,
+				index,
+				charQuery,
+				queryCache,
+			),
 		)
 		.filter((evaluation): evaluation is CoverageLexicalLaneEvaluation => evaluation !== null)
 		.filter((evaluation) => acceptsLaneCandidate(laneName, evaluation, plan, charQuery))
 		.sort((left, right) => compareLaneEvaluations(laneName, left, right, plan));
-	const budget = computeLaneBudget(laneName, plan, request);
 	const admitted = evaluations.slice(0, budget);
 	for (const evaluation of admitted) {
 		admittedPaths.add(evaluation.path);
@@ -625,6 +677,8 @@ function admitLaneCandidates(
 		debug,
 		laneName,
 		laneCandidates.size,
+		Array.from(laneCandidates.keys()),
+		preselected.map(([path]) => path),
 		admitted.map((evaluation) => evaluation.path),
 	);
 }
@@ -662,6 +716,171 @@ function computeLaneBudget(
 	return Math.max(request.maxItemResults * 2, base + queryBonus);
 }
 
+function preselectLaneCandidates(
+	laneName: CoverageLexicalLaneName,
+	laneCandidates: Map<string, CoverageLexicalCandidateState>,
+	plan: CoverageLexicalPlan,
+	request: FileSearchRequest,
+): Array<[string, CoverageLexicalCandidateState]> {
+	const entries = Array.from(laneCandidates.entries());
+	const budget = computeLaneBudget(laneName, plan, request);
+	const prefilterBudget = Math.min(
+		entries.length,
+		Math.max(budget * 6, request.maxItemResults * 8, 48),
+	);
+	if (entries.length <= prefilterBudget) {
+		return entries;
+	}
+	return entries
+		.sort(([leftPath, leftState], [rightPath, rightState]) =>
+			compareCheapLaneCandidates(
+				laneName,
+				leftPath,
+				leftState,
+				rightPath,
+				rightState,
+				plan,
+			),
+		)
+		.slice(0, prefilterBudget);
+}
+
+function compareCheapLaneCandidates(
+	laneName: CoverageLexicalLaneName,
+	leftPath: string,
+	leftState: CoverageLexicalCandidateState,
+	rightPath: string,
+	rightState: CoverageLexicalCandidateState,
+	plan: CoverageLexicalPlan,
+): number {
+	const leftHardAnchor = buildGroupSignal(
+		leftState.metadataMatches,
+		plan.hardAnchorFamilies,
+	);
+	const rightHardAnchor = buildGroupSignal(
+		rightState.metadataMatches,
+		plan.hardAnchorFamilies,
+	);
+	const leftDecisiveBody = buildGroupSignal(
+		leftState.bodyMatches,
+		plan.decisiveBodyFamilies,
+	);
+	const rightDecisiveBody = buildGroupSignal(
+		rightState.bodyMatches,
+		plan.decisiveBodyFamilies,
+	);
+	const leftSupportBody = buildGroupSignal(
+		leftState.bodyMatches,
+		plan.supportBodyFamilies,
+	);
+	const rightSupportBody = buildGroupSignal(
+		rightState.bodyMatches,
+		plan.supportBodyFamilies,
+	);
+	const leftOptionalBody = buildGroupSignal(
+		leftState.bodyMatches,
+		plan.optionalFamilies.filter((family) => family.role === "body"),
+	);
+	const rightOptionalBody = buildGroupSignal(
+		rightState.bodyMatches,
+		plan.optionalFamilies.filter((family) => family.role === "body"),
+	);
+	const leftBridge = buildGroupSignal(
+		mergeMatchMaps(leftState.bodyMatches, leftState.metadataMatches),
+		plan.bridgeFamilies,
+	);
+	const rightBridge = buildGroupSignal(
+		mergeMatchMaps(rightState.bodyMatches, rightState.metadataMatches),
+		plan.bridgeFamilies,
+	);
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return (
+				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
+				compareDescendingMetric(
+					leftState.phraseMatches.size,
+					rightState.phraseMatches.size,
+				) ||
+				compareGroupSignals(leftBridge, rightBridge) ||
+				leftPath.localeCompare(rightPath)
+			);
+		case "strict_hybrid_lane":
+			return (
+				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
+				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
+				compareGroupSignals(leftSupportBody, rightSupportBody) ||
+				compareDescendingMetric(
+					leftState.phraseMatches.size,
+					rightState.phraseMatches.size,
+				) ||
+				leftPath.localeCompare(rightPath)
+			);
+		case "relaxed_hybrid_lane":
+			return (
+				compareDescendingMetric(
+					leftDecisiveBody.coverageCount +
+						leftSupportBody.coverageCount +
+						leftOptionalBody.coverageCount,
+					rightDecisiveBody.coverageCount +
+						rightSupportBody.coverageCount +
+						rightOptionalBody.coverageCount,
+				) ||
+				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
+				compareGroupSignals(leftSupportBody, rightSupportBody) ||
+				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
+				compareDescendingMetric(
+					leftState.phraseMatches.size,
+					rightState.phraseMatches.size,
+				) ||
+				leftPath.localeCompare(rightPath)
+			);
+		case "local_body_lane":
+			return (
+				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
+				compareGroupSignals(leftSupportBody, rightSupportBody) ||
+				compareGroupSignals(leftOptionalBody, rightOptionalBody) ||
+				compareDescendingMetric(
+					leftState.phraseMatches.size,
+					rightState.phraseMatches.size,
+				) ||
+				leftPath.localeCompare(rightPath)
+			);
+		case "bridge_lane":
+			return (
+				compareGroupSignals(leftBridge, rightBridge) ||
+				compareDescendingMetric(
+					leftState.phraseMatches.size,
+					rightState.phraseMatches.size,
+				) ||
+				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
+				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
+				leftPath.localeCompare(rightPath)
+			);
+		case "char_fallback_lane":
+			return (
+				compareDescendingMetric(
+					leftState.tagExactTerms.size,
+					rightState.tagExactTerms.size,
+				) ||
+				compareDescendingMetric(
+					leftState.tagCharTerms.size,
+					rightState.tagCharTerms.size,
+				) ||
+				compareDescendingMetric(
+					leftState.metadataCharTerms.size,
+					rightState.metadataCharTerms.size,
+				) ||
+				compareDescendingMetric(
+					leftState.bodyCharTerms.size,
+					rightState.bodyCharTerms.size,
+				) ||
+				leftPath.localeCompare(rightPath)
+			);
+		default:
+			return leftPath.localeCompare(rightPath);
+	}
+}
+
 function buildLaneEvaluation(
 	path: string,
 	state: CoverageLexicalCandidateState,
@@ -669,6 +888,7 @@ function buildLaneEvaluation(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	index: CoverageLexicalRecallIndex,
 	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
 ): CoverageLexicalLaneEvaluation | null {
 	const phraseMatchCount = state.phraseMatches.size;
 	const phraseMatchWeight = Array.from(state.phraseMatches).reduce(
@@ -677,10 +897,7 @@ function buildLaneEvaluation(
 		0,
 	);
 	const tokens = index.documentBodyTokensByPath.get(path) ?? [];
-	const tagFallback = evaluateCoverageLexicalTagFallback(
-		index.documentTagValuesByPath?.get(path) ?? [],
-		charQuery,
-	);
+	const tagFallback = getOrCreateTagFallback(path, index, charQuery, queryCache);
 	return {
 		path,
 		state,
@@ -726,6 +943,24 @@ function buildLaneEvaluation(
 			phraseSignatures,
 		),
 	};
+}
+
+function getOrCreateTagFallback(
+	path: string,
+	index: CoverageLexicalRecallIndex,
+	charQuery: CoverageLexicalCharQuery,
+	queryCache: CoverageLexicalQueryCache,
+): ReturnType<typeof evaluateCoverageLexicalTagFallback> {
+	const cached = queryCache.tagFallbackByPath.get(path);
+	if (cached) {
+		return cached;
+	}
+	const created = evaluateCoverageLexicalTagFallback(
+		index.documentTagValuesByPath?.get(path) ?? [],
+		charQuery,
+	);
+	queryCache.tagFallbackByPath.set(path, created);
+	return created;
 }
 
 function acceptsLaneCandidate(
