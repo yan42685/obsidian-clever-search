@@ -95,7 +95,28 @@ type CoverageLexicalDocRankableResult = {
 	admissionSignal: ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>;
 };
 
+type CoverageLexicalEngineQueryCache = {
+	fuzzyProportion: number;
+	docCacheById: Map<number, CoverageLexicalEngineQueryDocCacheEntry>;
+};
+
+type CoverageLexicalEngineQueryDocCacheEntry = {
+	bodyEvidenceTrace: CoverageLexicalBodyEvidenceTrace;
+	admissionSignal: ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>;
+	baseSignal: CoverageLexicalFamilySignal;
+	coarseResult: CoverageLexicalDocRankableResult | null;
+};
+
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
+
+function createCoverageLexicalEngineQueryCache(
+	fuzzyProportion: number,
+): CoverageLexicalEngineQueryCache {
+	return {
+		fuzzyProportion,
+		docCacheById: new Map(),
+	};
+}
 
 @singleton()
 export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
@@ -227,6 +248,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				plan.families,
 			),
 		];
+		const queryCache = createCoverageLexicalEngineQueryCache(
+			innerSetting.search.fuzzyProportion,
+		);
 		const candidates = collectCoverageLexicalCandidateStatesByDocId(
 			{
 				bodyPostings: this.bodyPostings,
@@ -291,6 +315,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					phraseSignatures,
 					pairSignatures,
 					charQuery,
+					queryCache,
 				),
 			)
 			.filter((result): result is CoverageLexicalDocRankableResult => result !== null);
@@ -338,6 +363,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				phraseSignatures,
 				pairSignatures,
 				charQuery,
+				queryCache,
 			);
 			if (rerankedResult) {
 				rerankedResults.push(rerankedResult);
@@ -862,7 +888,58 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 		pairSignatures: readonly CoverageLexicalPairSignature[],
 		charQuery: CoverageLexicalCharQuery,
+		queryCache: CoverageLexicalEngineQueryCache,
 	): CoverageLexicalDocRankableResult | null {
+		const cached = this.getOrCreateRankableDocCacheEntry(
+			docId,
+			queryTerms,
+			plan,
+			state,
+			phraseSignatures,
+			charQuery,
+			queryCache,
+		);
+		if (!cached?.coarseResult) {
+			return null;
+		}
+		if (!includeLocalWindow) {
+			return cached.coarseResult;
+		}
+		const document = this.documentById[docId];
+		if (!document) {
+			return null;
+		}
+		const signal = withCoverageLexicalLocalEvidence(
+			cached.baseSignal,
+			buildCoverageLexicalWindowFusionSignal(
+				document.bodyTokenSequence,
+				plan.families,
+				pairSignatures,
+				computePerFileLocalWindowLimit(plan, document.bodyTokenSequence.length),
+				cached.bodyEvidenceTrace,
+			),
+		);
+		return {
+			...cached.coarseResult,
+			matchedTerms: signal.matchedTerms,
+			score: computeFallbackScore(signal),
+			coverageLexicalSignal: signal,
+		};
+	}
+
+	private getOrCreateRankableDocCacheEntry(
+		docId: number,
+		queryTerms: readonly string[],
+		plan: CoverageLexicalPlan,
+		state: CoverageLexicalCandidateState,
+		phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+		charQuery: CoverageLexicalCharQuery,
+		queryCache: CoverageLexicalEngineQueryCache,
+	): CoverageLexicalEngineQueryDocCacheEntry | null {
+		const cached = queryCache.docCacheById.get(docId);
+		if (cached) {
+			return cached;
+		}
 		const document = this.documentById[docId];
 		if (!document) {
 			return null;
@@ -870,7 +947,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const bodyEvidenceTrace = buildCoverageLexicalBodyEvidenceTrace(
 			document.bodyTokenSequence,
 			plan.families,
-			innerSetting.search.fuzzyProportion,
+			queryCache.fuzzyProportion,
 		);
 		const admissionSignal = buildCoverageLexicalPassageAdmissionSignal(
 			document.bodyTokenSequence,
@@ -879,51 +956,45 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			phraseSignatures,
 			bodyEvidenceTrace,
 		);
-		const signal = buildCoverageSignal(
+		const tagFallback = evaluateCoverageLexicalTagFallback(
+			document.tagValues,
+			charQuery,
+		);
+		const baseSignal = buildCoverageSignalBase(
 			plan,
 			state,
-			document.bodyTokenSequence,
-			includeLocalWindow,
 			phraseSignatures,
-			pairSignatures,
 			charQuery,
-			bodyEvidenceTrace,
-			document.tagValues,
+			tagFallback,
 		);
-		if (
-			signal.coreBody.coverageCount === 0 &&
-			signal.softBody.coverageCount === 0 &&
-			signal.metadataAnchor.coverageCount === 0 &&
-			signal.bodyChar.matchCount === 0 &&
-			signal.metadataChar.matchCount === 0 &&
-			signal.tagSignal.exactMatchCount === 0 &&
-			signal.tagSignal.charMatchCount === 0
-		) {
-			return null;
-		}
-
-		return {
-			docId,
-			queryTerms: [...queryTerms],
-			matchedTerms: signal.matchedTerms,
-			score: computeFallbackScore(signal),
-			coverageLexicalSignal: signal,
+		const coarseResult = hasAnyCoverageLexicalSignal(baseSignal)
+			? {
+					docId,
+					queryTerms: [...queryTerms],
+					matchedTerms: baseSignal.matchedTerms,
+					score: computeFallbackScore(baseSignal),
+					coverageLexicalSignal: baseSignal,
+					admissionSignal,
+				}
+			: null;
+		const created = {
+			bodyEvidenceTrace,
 			admissionSignal,
+			baseSignal,
+			coarseResult,
 		};
+		queryCache.docCacheById.set(docId, created);
+		return created;
 	}
 
 }
 
-function buildCoverageSignal(
+function buildCoverageSignalBase(
 	plan: CoverageLexicalPlan,
 	state: CoverageLexicalCandidateState,
-	bodyTokenSequence: readonly string[],
-	includeLocalWindow: boolean,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
-	pairSignatures: readonly CoverageLexicalPairSignature[],
 	charQuery: CoverageLexicalCharQuery,
-	bodyEvidenceTrace: CoverageLexicalBodyEvidenceTrace,
-	tagValues: readonly string[],
+	tagFallback: ReturnType<typeof evaluateCoverageLexicalTagFallback>,
 ): CoverageLexicalFamilySignal {
 	const families = plan.families;
 	const coreBody = createEmptyAreaSignal();
@@ -936,31 +1007,45 @@ function buildCoverageSignal(
 	let tailCoreWeight = 0;
 	let tailSoftWeight = 0;
 	const matchedTerms: string[] = [];
+	const matchedTermSet = new Set<string>();
 
 	for (const family of families) {
-		const bodyKind = getRecordedMatchKind(state.bodyMatches, family.index);
-		const metadataKind = getRecordedMatchKind(
-			state.metadataMatches,
-			family.index,
-		);
-		if (family.role === "noise" || (!bodyKind && !metadataKind)) {
+		const familyIndex = family.index;
+		const bodyCode = state.bodyMatches[familyIndex] ?? 0;
+		const metadataCode = state.metadataMatches[familyIndex] ?? 0;
+		if (family.role === "noise" || (bodyCode === 0 && metadataCode === 0)) {
 			continue;
 		}
 
-		const weight = computeFamilyTailWeight(family.index);
-		const bestKind = pickBetterMatchKind(bodyKind, metadataKind);
-		if (bestKind && !matchedTerms.includes(family.normalizedTerm)) {
+		const aliasCode = state.metadataFieldMatches.aliases[familyIndex] ?? 0;
+		const basenameCode = state.metadataFieldMatches.basename[familyIndex] ?? 0;
+		const folderCode = state.metadataFieldMatches.folder[familyIndex] ?? 0;
+		const headingsCode = state.metadataFieldMatches.headings[familyIndex] ?? 0;
+		const tagsCode = state.metadataFieldMatches.tags[familyIndex] ?? 0;
+		const weight = computeFamilyTailWeight(familyIndex);
+
+		if (!matchedTermSet.has(family.normalizedTerm)) {
+			matchedTermSet.add(family.normalizedTerm);
 			matchedTerms.push(family.normalizedTerm);
 		}
+
 		familyCountSummary.totalMatchedFamilyCount += 1;
-		if (bodyKind) {
+		if (bodyCode > 0) {
 			familyCountSummary.bodyMatchedFamilyCount += 1;
 		}
-		if (metadataKind) {
-			const primaryMetadataField = resolvePrimaryMetadataFieldForFamily(
-				state,
-				family.index,
-			);
+		if (metadataCode > 0) {
+			const primaryMetadataField =
+				basenameCode > 0
+					? "basename"
+					: aliasCode > 0
+						? "aliases"
+						: folderCode > 0
+							? "folder"
+							: headingsCode > 0
+								? "headings"
+								: tagsCode > 0
+									? "tags"
+									: null;
 			if (primaryMetadataField) {
 				familyCountSummary.metadataMatchedFamilyCount += 1;
 				accumulateMetadataFieldCount(
@@ -969,38 +1054,70 @@ function buildCoverageSignal(
 				);
 			}
 		}
+
 		if (family.role === "body") {
-			if (bodyKind && family.strength === "core") {
-				applyMatch(coreBody, bodyKind, weight);
+			if (bodyCode > 0 && family.strength === "core") {
+				applyMatchCode(coreBody, bodyCode, weight);
 				tailCoreWeight += weight;
 				continue;
 			}
-			if (bodyKind) {
-				applyMatch(softBody, bodyKind, weight);
+			if (bodyCode > 0) {
+				applyMatchCode(softBody, bodyCode, weight);
 				tailSoftWeight += weight;
 				continue;
 			}
-			if (metadataKind) {
+			if (metadataCode > 0) {
 				const boostedWeight =
-					weight * getMetadataFieldBoost(state, family.index, metadataKind);
-				applyMatch(softBody, metadataKind, boostedWeight);
+					weight *
+					computeMetadataFieldBoostFromCodes(
+						metadataCode,
+						basenameCode,
+						aliasCode,
+						folderCode,
+						headingsCode,
+						tagsCode,
+					);
+				applyMatchCode(softBody, metadataCode, boostedWeight);
 				tailSoftWeight += boostedWeight;
-				applyIdentityMatch(metadataIdentity, state, family.index, weight);
+				applyIdentityMatchFromCodes(
+					metadataIdentity,
+					aliasCode,
+					basenameCode,
+					headingsCode,
+					folderCode,
+					weight,
+				);
 			}
 			continue;
 		}
+
 		if (family.role === "anchor") {
-			if (metadataKind) {
-				applyMatch(
+			if (metadataCode > 0) {
+				applyMatchCode(
 					metadataAnchor,
-					metadataKind,
-					weight * getMetadataFieldBoost(state, family.index, metadataKind),
+					metadataCode,
+					weight *
+						computeMetadataFieldBoostFromCodes(
+							metadataCode,
+							basenameCode,
+							aliasCode,
+							folderCode,
+							headingsCode,
+							tagsCode,
+						),
 				);
-				applyIdentityMatch(metadataIdentity, state, family.index, weight);
+				applyIdentityMatchFromCodes(
+					metadataIdentity,
+					aliasCode,
+					basenameCode,
+					headingsCode,
+					folderCode,
+					weight,
+				);
 				continue;
 			}
-			if (bodyKind) {
-				applyMatch(softBody, bodyKind, weight);
+			if (bodyCode > 0) {
+				applyMatchCode(softBody, bodyCode, weight);
 				tailSoftWeight += weight;
 			}
 		}
@@ -1031,9 +1148,9 @@ function buildCoverageSignal(
 		state.metadataCharMatchFlags,
 		charQuery,
 	);
-	const tagFallback = evaluateCoverageLexicalTagFallback(tagValues, charQuery);
 	for (const term of tagFallback.exactTerms) {
-		if (!matchedTerms.includes(term)) {
+		if (!matchedTermSet.has(term)) {
+			matchedTermSet.add(term);
 			matchedTerms.push(term);
 		}
 	}
@@ -1058,30 +1175,33 @@ function buildCoverageSignal(
 			(total, index) => total + (phraseSignatures[index]?.tailWeight ?? 0),
 			0,
 		),
-		localEvidence: includeLocalWindow
-			? buildCoverageLexicalWindowFusionSignal(
-				bodyTokenSequence,
-				families,
-				pairSignatures,
-				computePerFileLocalWindowLimit(plan, bodyTokenSequence.length),
-				bodyEvidenceTrace,
-			)
-			: createEmptyCoverageLexicalWindowFusionSignal(),
+		localEvidence: createEmptyCoverageLexicalWindowFusionSignal(),
 		matchedTerms,
 	};
 }
 
-function pickBetterMatchKind(
-	left: CoverageFamilyMatchKind,
-	right: CoverageFamilyMatchKind,
-): CoverageFamilyMatchKind {
-	const rank = {
-		exact: 3,
-		prefix: 2,
-		fuzzy: 1,
-		null: 0,
-	} as const;
-	return rank[left ?? "null"] >= rank[right ?? "null"] ? left : right;
+function withCoverageLexicalLocalEvidence(
+	baseSignal: CoverageLexicalFamilySignal,
+	localEvidence: CoverageLexicalFamilySignal["localEvidence"],
+): CoverageLexicalFamilySignal {
+	return {
+		...baseSignal,
+		localEvidence,
+	};
+}
+
+function hasAnyCoverageLexicalSignal(
+	signal: CoverageLexicalFamilySignal,
+): boolean {
+	return !(
+		signal.coreBody.coverageCount === 0 &&
+		signal.softBody.coverageCount === 0 &&
+		signal.metadataAnchor.coverageCount === 0 &&
+		signal.bodyChar.matchCount === 0 &&
+		signal.metadataChar.matchCount === 0 &&
+		signal.tagSignal.exactMatchCount === 0 &&
+		signal.tagSignal.charMatchCount === 0
+	);
 }
 
 function createEmptyAreaSignal(): CoverageLexicalAreaSignal {
@@ -1176,90 +1296,73 @@ function applyMatch(
 	area.fuzzyWeight += weight;
 }
 
-function applyIdentityMatch(
-	identity: CoverageLexicalMetadataIdentitySignal,
-	state: CoverageLexicalCandidateState,
-	familyIndex: number,
-	baseWeight: number,
-): void {
-	const bestKind = getBestIdentityMatchKind(state, familyIndex);
-	if (!bestKind) {
-		return;
-	}
-	applyMatch(identity.overall, bestKind, baseWeight);
-	applyIdentityFieldMatch(identity.alias, state.metadataFieldMatches.aliases, familyIndex, baseWeight);
-	applyIdentityFieldMatch(identity.basename, state.metadataFieldMatches.basename, familyIndex, baseWeight);
-	applyIdentityFieldMatch(identity.heading, state.metadataFieldMatches.headings, familyIndex, baseWeight);
-	applyIdentityFieldMatch(identity.path, state.metadataFieldMatches.folder, familyIndex, baseWeight);
-}
-
-function applyIdentityFieldMatch(
+function applyMatchCode(
 	area: CoverageLexicalAreaSignal,
-	matches: readonly number[],
-	familyIndex: number,
-	baseWeight: number,
+	code: number,
+	weight: number,
 ): void {
-	const kind = getRecordedMatchKind(matches, familyIndex);
-	if (!kind) {
+	if (code === 0) {
 		return;
 	}
-	applyMatch(area, kind, baseWeight);
-}
-
-function getBestIdentityMatchKind(
-	state: CoverageLexicalCandidateState,
-	familyIndex: number,
-): Exclude<CoverageFamilyMatchKind, null> | null {
-	let bestKind: Exclude<CoverageFamilyMatchKind, null> | null = null;
-	for (const matches of [
-		state.metadataFieldMatches.aliases,
-		state.metadataFieldMatches.basename,
-		state.metadataFieldMatches.headings,
-		state.metadataFieldMatches.folder,
-	]) {
-		const kind = getRecordedMatchKind(matches, familyIndex);
-		if (!kind) {
-			continue;
-		}
-		bestKind = pickBetterMatchKind(bestKind, kind) as Exclude<
-			CoverageFamilyMatchKind,
-			null
-		>;
+	area.coverageCount += 1;
+	if (code === 3) {
+		area.exactWeight += weight;
+		return;
 	}
-	return bestKind;
-}
-
-function resolvePrimaryMetadataFieldForFamily(
-	state: CoverageLexicalCandidateState,
-	familyIndex: number,
-): CoverageLexicalMetadataField | null {
-	for (const field of [
-		"basename",
-		"aliases",
-		"folder",
-		"headings",
-		"tags",
-	] as const satisfies readonly CoverageLexicalMetadataField[]) {
-		if (getRecordedMatchKind(state.metadataFieldMatches[field], familyIndex)) {
-			return field;
-		}
+	if (code === 2) {
+		area.prefixWeight += weight;
+		return;
 	}
-	return null;
+	area.fuzzyWeight += weight;
 }
 
-function getMetadataFieldBoost(
-	state: CoverageLexicalCandidateState,
-	familyIndex: number,
-	kind: Exclude<CoverageFamilyMatchKind, null>,
+function applyIdentityMatchFromCodes(
+	identity: CoverageLexicalMetadataIdentitySignal,
+	aliasCode: number,
+	basenameCode: number,
+	headingsCode: number,
+	folderCode: number,
+	baseWeight: number,
+): void {
+	const bestCode = Math.max(
+		aliasCode,
+		basenameCode,
+		headingsCode,
+		folderCode,
+	);
+	if (bestCode === 0) {
+		return;
+	}
+	applyMatchCode(identity.overall, bestCode, baseWeight);
+	applyMatchCode(identity.alias, aliasCode, baseWeight);
+	applyMatchCode(identity.basename, basenameCode, baseWeight);
+	applyMatchCode(identity.heading, headingsCode, baseWeight);
+	applyMatchCode(identity.path, folderCode, baseWeight);
+}
+
+function computeMetadataFieldBoostFromCodes(
+	metadataCode: number,
+	basenameCode: number,
+	aliasCode: number,
+	folderCode: number,
+	headingsCode: number,
+	tagsCode: number,
 ): number {
 	let bestBoost = 1;
-	for (const [field, matches] of Object.entries(
-		state.metadataFieldMatches,
-	) as Array<[CoverageLexicalMetadataField, number[]]>) {
-		if (getRecordedMatchKind(matches, familyIndex) !== kind) {
-			continue;
-		}
-		bestBoost = Math.max(bestBoost, getMetadataFieldWeight(field));
+	if (basenameCode === metadataCode) {
+		bestBoost = Math.max(bestBoost, getMetadataFieldWeight("basename"));
+	}
+	if (aliasCode === metadataCode) {
+		bestBoost = Math.max(bestBoost, getMetadataFieldWeight("aliases"));
+	}
+	if (folderCode === metadataCode) {
+		bestBoost = Math.max(bestBoost, getMetadataFieldWeight("folder"));
+	}
+	if (headingsCode === metadataCode) {
+		bestBoost = Math.max(bestBoost, getMetadataFieldWeight("headings"));
+	}
+	if (tagsCode === metadataCode) {
+		bestBoost = Math.max(bestBoost, getMetadataFieldWeight("tags"));
 	}
 	return bestBoost;
 }

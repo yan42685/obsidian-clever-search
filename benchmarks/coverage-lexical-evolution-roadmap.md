@@ -42,8 +42,8 @@ Every retained change should be evaluated against the same four anchors:
 - `Phase 0` is complete:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
   - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
-  - the previous active latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-query-hotpath-flattening.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-recall-query-cache.md`
+  - the previous active latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-recall-query-cache.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-engine-query-cache.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is the current active optimization slice:
   - maintained query-time document caches landed
@@ -59,11 +59,15 @@ Every retained change should be evaluated against the same four anchors:
   - recall-side query-local caching has now landed on top of that shared tracing:
     - per-document body-evidence traces are cached for the duration of the query
     - passage admission signals are cached per `docId` plus phrase-witness shape instead of being rebuilt across lanes
+  - engine-side query-local result reuse has now landed on top of the recall cache:
+    - coarse ranking caches per-document body evidence, admission, and base rank signals
+    - rerank reuses the cached base result and only adds local window evidence
+    - base signal construction no longer repeatedly rescans metadata field arrays for the same family
   - latest interpretation for the current active anchor:
     - quality stayed clean
-    - avg and p50 latency ratios improved materially and repeatably
-    - p100 is still somewhat noisier than avg and p50, but remains much better than the previous active anchor
-    - the main retained latency gain came from recall-side document evidence reuse rather than additional numeric posting migration
+    - avg, p50, and p100 latency ratios all improved materially
+    - confirmation rerun stayed in a clearly better band than the previous active anchor
+    - the current retained latency gain now comes from both recall-side and engine-side query-local reuse rather than from additional numeric posting migration
   - follow-up recall-side signal churn reduction has now been tried after the active anchor:
     - lane prefilter signals are reused directly by lane evaluation instead of being rebuilt
     - optional family subsets and common phrase-family index sets are derived once per query plan
@@ -180,6 +184,7 @@ Executable checklist:
      - tag fallback is memoized by `docId`
      - body evidence tracing is memoized by `docId`
      - passage admission signal is memoized by `docId` plus phrase-witness shape
+     - engine coarse results now memoize per-document body evidence, admission, and base ranking signal for the duration of the query
    - avoid rebuilding document-derived maps inside search paths
    - done when no obvious per-query object-graph reconstruction remains in the hot path
 2. cheap-first, expensive-second lane flow
