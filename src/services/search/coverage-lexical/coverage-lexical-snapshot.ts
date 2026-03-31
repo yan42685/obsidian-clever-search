@@ -2,26 +2,12 @@ type CoverageLexicalSnapshotDocumentState = {
 	docId: number;
 	path: string;
 	bodyText: string;
-	aliasPhraseTerms: readonly string[];
-	aliasTerms: readonly string[];
-	aliasCharTerms: readonly string[];
-	basenamePhraseTerms: readonly string[];
-	basenameTerms: readonly string[];
-	basenameCharTerms: readonly string[];
+	basenameText: string;
+	folderText: string;
+	aliasesText: string;
+	tagsText: string;
+	headingsText: string;
 	bodyTokenSequence: readonly string[];
-	bodyPhraseTerms: readonly string[];
-	bodyTerms: readonly string[];
-	bodyCharTerms: readonly string[];
-	folderPhraseTerms: readonly string[];
-	folderTerms: readonly string[];
-	folderCharTerms: readonly string[];
-	headingPhraseTerms: readonly string[];
-	headingTerms: readonly string[];
-	headingCharTerms: readonly string[];
-	metadataTerms: readonly string[];
-	tagPhraseTerms: readonly string[];
-	tagTerms: readonly string[];
-	tagCharTerms: readonly string[];
 	tagValues: readonly string[];
 };
 
@@ -61,30 +47,21 @@ const SNAPSHOT_VERSION = 1;
 const HEADER_BYTES = 12;
 const DIRECTORY_ENTRY_BYTES = 16;
 
+const DOCUMENT_STRING_FIELDS = [
+	"bodyText",
+	"basenameText",
+	"folderText",
+	"aliasesText",
+	"tagsText",
+	"headingsText",
+] as const satisfies readonly (keyof CoverageLexicalSnapshotDocumentState)[];
+
 const DOCUMENT_STRING_LIST_FIELDS = [
-	"aliasPhraseTerms",
-	"aliasTerms",
-	"aliasCharTerms",
-	"basenamePhraseTerms",
-	"basenameTerms",
-	"basenameCharTerms",
 	"bodyTokenSequence",
-	"bodyPhraseTerms",
-	"bodyTerms",
-	"bodyCharTerms",
-	"folderPhraseTerms",
-	"folderTerms",
-	"folderCharTerms",
-	"headingPhraseTerms",
-	"headingTerms",
-	"headingCharTerms",
-	"metadataTerms",
-	"tagPhraseTerms",
-	"tagTerms",
-	"tagCharTerms",
 	"tagValues",
 ] as const satisfies readonly (keyof CoverageLexicalSnapshotDocumentState)[];
 
+type DocumentStringField = (typeof DOCUMENT_STRING_FIELDS)[number];
 type DocumentStringListField = (typeof DOCUMENT_STRING_LIST_FIELDS)[number];
 
 const enum CoverageLexicalSnapshotSectionKind {
@@ -353,7 +330,9 @@ function registerSnapshotStrings(
 	}
 	for (const document of state.documents) {
 		stringPool.intern(document.path);
-		stringPool.intern(document.bodyText);
+		for (const field of DOCUMENT_STRING_FIELDS) {
+			stringPool.intern(document[field]);
+		}
 		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			for (const value of document[field]) {
 				stringPool.intern(value);
@@ -366,6 +345,7 @@ function registerSnapshotStrings(
 		}
 	}
 }
+
 
 function getPostingMaps(
 	state: CoverageLexicalSnapshotState,
@@ -449,7 +429,9 @@ function buildDocumentsSection(
 	for (const document of documents) {
 		writer.writeVarUint(document.docId - previousDocId);
 		writer.writeVarUint(stringPool.getId(document.path));
-		writer.writeVarUint(stringPool.getId(document.bodyText));
+		for (const field of DOCUMENT_STRING_FIELDS) {
+			writer.writeVarUint(stringPool.getId(document[field]));
+		}
 		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			writeStringIdList(writer, document[field], stringPool);
 		}
@@ -461,6 +443,7 @@ function buildDocumentsSection(
 		payload: writer.toUint8Array(),
 	};
 }
+
 
 function buildPostingSection(
 	kind: CoverageLexicalSnapshotSectionKind,
@@ -542,7 +525,10 @@ function decodeDocumentsSection(
 	for (let index = 0; index < section.count; index += 1) {
 		const docId = previousDocId + sectionReader.readVarUint();
 		const path = readStringId(sectionReader, strings);
-		const bodyText = readStringId(sectionReader, strings);
+		const fieldValues = new Map<DocumentStringField, string>();
+		for (const field of DOCUMENT_STRING_FIELDS) {
+			fieldValues.set(field, readStringId(sectionReader, strings));
+		}
 		const listValues = new Map<DocumentStringListField, readonly string[]>();
 		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			listValues.set(field, readStringIdList(sectionReader, strings));
@@ -550,33 +536,20 @@ function decodeDocumentsSection(
 		documents.push({
 			docId,
 			path,
-			bodyText,
-			aliasPhraseTerms: listValues.get("aliasPhraseTerms") ?? [],
-			aliasTerms: listValues.get("aliasTerms") ?? [],
-			aliasCharTerms: listValues.get("aliasCharTerms") ?? [],
-			basenamePhraseTerms: listValues.get("basenamePhraseTerms") ?? [],
-			basenameTerms: listValues.get("basenameTerms") ?? [],
-			basenameCharTerms: listValues.get("basenameCharTerms") ?? [],
+			bodyText: fieldValues.get("bodyText") ?? "",
+			basenameText: fieldValues.get("basenameText") ?? "",
+			folderText: fieldValues.get("folderText") ?? "",
+			aliasesText: fieldValues.get("aliasesText") ?? "",
+			tagsText: fieldValues.get("tagsText") ?? "",
+			headingsText: fieldValues.get("headingsText") ?? "",
 			bodyTokenSequence: listValues.get("bodyTokenSequence") ?? [],
-			bodyPhraseTerms: listValues.get("bodyPhraseTerms") ?? [],
-			bodyTerms: listValues.get("bodyTerms") ?? [],
-			bodyCharTerms: listValues.get("bodyCharTerms") ?? [],
-			folderPhraseTerms: listValues.get("folderPhraseTerms") ?? [],
-			folderTerms: listValues.get("folderTerms") ?? [],
-			folderCharTerms: listValues.get("folderCharTerms") ?? [],
-			headingPhraseTerms: listValues.get("headingPhraseTerms") ?? [],
-			headingTerms: listValues.get("headingTerms") ?? [],
-			headingCharTerms: listValues.get("headingCharTerms") ?? [],
-			metadataTerms: listValues.get("metadataTerms") ?? [],
-			tagPhraseTerms: listValues.get("tagPhraseTerms") ?? [],
-			tagTerms: listValues.get("tagTerms") ?? [],
-			tagCharTerms: listValues.get("tagCharTerms") ?? [],
 			tagValues: listValues.get("tagValues") ?? [],
 		});
 		previousDocId = docId;
 	}
 	return documents;
 }
+
 
 function decodePostingSection(
 	reader: SnapshotReader,

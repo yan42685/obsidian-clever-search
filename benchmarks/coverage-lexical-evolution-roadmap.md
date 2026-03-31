@@ -6,13 +6,14 @@ Date: 2026-03-31
 
 This roadmap fixes the execution order for `coverage-lexical` so work does not drift between unrelated tuning, premature serialization work, and benchmark churn.
 
-The program has three co-equal optimization targets:
+The program now has a fixed priority order:
 
-- search quality
-- query latency
-- index footprint and startup restore cost
+- search quality remains the keep-or-revert gate
+- live in-memory index footprint and search-ready startup restore cost are the primary optimization targets
+- query latency remains a protected optimization target
+- persisted snapshot bytes are a secondary structural metric, not a promotion goal by themselves
 
-Quality remains the keep-or-revert gate. Time and size are optimization objectives only when quality is preserved or improved.
+Quality remains the keep-or-revert gate. Time and size work is only retained when quality is preserved or improved.
 
 ## Global Metrics
 
@@ -29,12 +30,15 @@ Every retained change should be evaluated against the same four anchors:
   - absolute: avg / p50 / p100
   - primary anchor: `CoverageLexical / MiniSearch` avg, p50, and p100 ratios
 - size:
-  - absolute: `estimatedIndexBytes`
-  - primary anchor: `CoverageLexical / MiniSearch` estimated index size ratio
+  - primary live-memory anchor: `estimatedIndexBytes`
+  - primary live-memory ratio anchor: `CoverageLexical / MiniSearch` estimated index size ratio
+  - use the index breakdown to verify which live structures moved, not just the total
 - startup:
-  - snapshot bytes
   - hydrate ms
+  - ready-to-search ms
   - fallback rebuild ms
+  - hydrate / rebuild ratio
+  - snapshot bytes as a secondary diagnostic only
   - self-heal repair ms
 
 ## Current Status
@@ -105,6 +109,15 @@ Every retained change should be evaluated against the same four anchors:
     - size is still effectively unchanged
     - the latest retained latency gains came from query-time hot-path flattening, not from additional numeric-first posting migration by itself
     - continue numeric migration when it removes a measured hot-path bridge or clearly improves the binary-friendly live layout, not as a latency story by default
+  - the current active `Phase 3A` follow-up is now fixed:
+    - slim `CoverageLexicalDocument` first
+    - remove query-cold derived per-document sets that only exist to support delete or rebuild
+    - keep query-hot ownership in maintained doc-id arrays
+    - validate with:
+      - coverage benchmark
+      - startup snapshot benchmark
+      - index breakdown
+    - snapshot byte size may improve incidentally, but it is not the reason to keep the change
 - immediate rule:
   - continue from the active roadmap below and keep the benchmark anchor aligned with what actually moved latency or size, not just with structural ambition
   - when an optimization produces structurally cleaner code and lower absolute time but unstable ratio evidence, it may be retained without immediately replacing the active anchor
@@ -352,6 +365,10 @@ Phase 3 deliverables are now split into three concrete subphases:
 - `Phase 3A`: live-layout normalization
   - finish migrating hot postings and document identity ownership toward numeric-first storage
   - centralize repeated strings so future snapshotting can write shared ids instead of repeated text
+  - first active slice inside this phase:
+    - slim `CoverageLexicalDocument` down to raw source fields plus query-hot doc-id side arrays
+    - delete query-cold derived sets from the live document object
+    - rebuild those derived sets only on delete or reindex paths
   - acceptance:
     - no high-cardinality hot path still requires a string-keyed bridge as its main identity carrier
     - size breakdown shows repeated-string retention moving downward
@@ -378,11 +395,13 @@ Phase 3 deliverables are now split into three concrete subphases:
 
 Why this order is now fixed:
 
-- compressing today's live object graph first risks optimizing a layout we already know we do not want to persist long-term
-- freezing the minimum binary section contract first prevents double work:
-  - once for in-memory-only compression
-  - again for snapshot translation
-- some compression is still welcome before snapshotting, but only when it directly advances the binary-friendly live layout rather than making the legacy object graph denser
+- first compressing the live object graph is still correct when the change removes query-cold duplication from the future binary-friendly layout
+- that is different from compressing persisted snapshot bytes for their own sake
+- freeze the minimum binary section contract only after the live document shape stops carrying obviously redundant derived sets
+- some compression is still welcome before further snapshot work, but only when it directly advances:
+  - lower live-memory retention
+  - faster search-ready hydrate
+  - a cleaner binary-friendly layout
 
 Current working rule inside Phase 3:
 
@@ -541,10 +560,11 @@ Revert or redesign when:
    - string centralization
    - compact numeric postings
    - section-friendly arrays
+   - document-store slimming before further schema work
 5. land `Phase 3B` next:
    - minimum binary snapshot schema
    - read/write prototype
-   - no aggressive compression yet
+   - no aggressive persisted-byte compression yet
 6. only then continue `Phase 3C`:
    - compress the binary payload itself
    - avoid redoing the schema boundary work twice

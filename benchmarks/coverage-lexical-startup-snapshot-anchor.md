@@ -4,9 +4,13 @@ Date: 2026-04-01
 
 ## Purpose
 
-- freeze a dedicated startup and persisted-index anchor before the first binary snapshot implementation lands
+- freeze a dedicated startup and persisted-index anchor before more live-layout changes land
 - keep startup interpretation separate from the query benchmark so query-speed noise does not hide hydration or rebuild wins
-- define the exact benchmark contract now, before schema and self-heal work start diverging
+- define the exact benchmark contract now, while live-memory slimming and startup restore work proceed in parallel
+- current priority:
+  - reduce live in-memory index size
+  - reduce time from loading an old index to search-ready
+  - do not treat persisted snapshot bytes as a promotion target by themselves
 
 ## Relationship To The Active Query Anchor
 
@@ -15,7 +19,8 @@ Date: 2026-04-01
 - this file is not a replacement for the query anchor
 - use both anchors together:
   - query anchor for quality, query-time latency, and structural in-memory size
-  - startup anchor for snapshot bytes, hydrate time, rebuild time, and repair time
+  - startup anchor for hydrate time, ready-to-search time, rebuild time, and repair time
+  - snapshot bytes remain a diagnostic field only
 
 ## Current Pre-Snapshot State
 
@@ -51,7 +56,8 @@ Date: 2026-04-01
   - `postings.metadata`: 4,696 bytes
 - interpretation:
   - this is not the future snapshot size
-  - this is the last clean pre-snapshot structural reference for judging whether binary persistence is actually getting denser or just adding another layer
+  - this is the structural live-memory reference for judging whether document-store slimming and later startup work are removing real resident weight
+  - snapshot size may move, but live-memory and ready-to-search time are the decision anchors
 
 ## Startup Metrics Contract
 
@@ -70,17 +76,23 @@ Every future startup benchmark capture should record the same fields:
 Recommended reporting shape:
 
 - absolute measurements:
-  - write ms
   - hydrate ms
   - ready-to-search ms
   - rebuild ms
   - repair ms
+  - write ms
   - snapshot bytes
 - relative measurements:
   - `hydrate / rebuild`
   - `readyToSearch / rebuild`
   - `repair / rebuild`
   - `snapshotBytes / estimatedIndexBytes`
+
+Interpretation rule:
+
+- `hydrate / rebuild` and `readyToSearch / rebuild` are primary
+- `snapshotBytes / estimatedIndexBytes` is only a sanity check that persistence is not accidentally exploding
+- if live-memory drops and hydrate stays fast, we do not block on snapshot-byte micro-optimization
 
 ## Benchmark Modes
 
@@ -101,6 +113,7 @@ The startup benchmark should run three distinct modes once binary persistence ex
 - first binary snapshot milestone is only promoted if:
   - query quality remains anchored by the query benchmark
   - startup benchmark shows hydrate is materially faster than rebuild
+  - live-memory breakdown shows the intended resident structure actually shrank
   - snapshot bytes are not obviously larger than the equivalent structural estimate without a written reason
 - self-heal is only promoted if:
   - startup remains usable before full repair completes
@@ -108,8 +121,12 @@ The startup benchmark should run three distinct modes once binary persistence ex
 
 ## Immediate Next Step
 
-- implement a minimum binary schema and a benchmark harness that can record:
-  - rebuild-only startup
-  - snapshot write
-  - snapshot read
-- do not optimize encoding density aggressively before those three numbers exist
+- slim `CoverageLexicalDocument` first:
+  - keep only raw source fields needed for direct subitems and delete-time rebuild
+  - keep query-hot token and tag arrays in maintained doc-id side storage
+  - remove query-cold derived per-document sets from live resident memory
+- validate the first cut with:
+  - coverage benchmark
+  - startup snapshot benchmark
+  - index breakdown
+- do not optimize persisted encoding density aggressively before the live document layout settles

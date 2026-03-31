@@ -26,7 +26,6 @@ import {
 import {
 	buildCoverageLexicalCharQuery,
 	extractHanBigrams,
-	extractHanSegments,
 	evaluateCoverageLexicalTagFallback,
 	splitCoverageLexicalTagValues,
 	type CoverageLexicalCharQuery,
@@ -72,29 +71,136 @@ import type {
 
 type CoverageLexicalDocument = {
 	docId: number;
-	aliasPhraseTerms: Set<string>;
-	aliasTerms: Set<string>;
-	aliasCharTerms: Set<string>;
-	basenamePhraseTerms: Set<string>;
-	basenameTerms: Set<string>;
-	basenameCharTerms: Set<string>;
-	bodyTokenSequence: string[];
-	bodyPhraseTerms: Set<string>;
 	bodyText: string;
+	basenameText: string;
+	folderText: string;
+	aliasesText: string;
+	tagsText: string;
+	headingsText: string;
+};
+
+type CoverageLexicalDerivedDocumentIndexState = {
+	bodyTokenSequence: string[];
 	bodyTerms: Set<string>;
 	bodyCharTerms: Set<string>;
-	folderPhraseTerms: Set<string>;
+	bodyPhraseTerms: Set<string>;
+	aliasTerms: Set<string>;
+	aliasCharTerms: Set<string>;
+	aliasPhraseTerms: Set<string>;
+	basenameTerms: Set<string>;
+	basenameCharTerms: Set<string>;
+	basenamePhraseTerms: Set<string>;
 	folderTerms: Set<string>;
 	folderCharTerms: Set<string>;
-	headingPhraseTerms: Set<string>;
+	folderPhraseTerms: Set<string>;
 	headingTerms: Set<string>;
 	headingCharTerms: Set<string>;
+	headingPhraseTerms: Set<string>;
 	metadataTerms: Set<string>;
-	tagPhraseTerms: Set<string>;
 	tagTerms: Set<string>;
 	tagCharTerms: Set<string>;
+	tagPhraseTerms: Set<string>;
 	tagValues: string[];
 };
+
+function createCoverageLexicalDocument(
+	docId: number,
+	document: Pick<
+		IndexedDocument,
+		"content" | "basename" | "folder" | "aliases" | "tags" | "headings"
+	>,
+): CoverageLexicalDocument {
+	return {
+		docId,
+		bodyText: document.content ?? "",
+		basenameText: document.basename ?? "",
+		folderText: document.folder ?? "",
+		aliasesText: document.aliases ?? "",
+		tagsText: document.tags ?? "",
+		headingsText: document.headings ?? "",
+	};
+}
+
+function buildCoverageLexicalDerivedDocumentIndexState(
+	tokenizer: Tokenizer,
+	document: CoverageLexicalDocument,
+	existingBodyTokenSequence?: readonly string[],
+	existingTagValues?: readonly string[],
+): CoverageLexicalDerivedDocumentIndexState {
+	const bodyTokenSequence = existingBodyTokenSequence
+		? [...existingBodyTokenSequence]
+		: tokenizeCoverageLexicalDocumentText(tokenizer, document.bodyText);
+	const bodyTerms = new Set(bodyTokenSequence);
+	const bodyCharTerms = new Set(extractHanBigrams(document.bodyText));
+	const basenameTerms = new Set(
+		tokenizeCoverageLexicalDocumentText(tokenizer, document.basenameText),
+	);
+	const basenameCharTerms = new Set(extractHanBigrams(document.basenameText));
+	const folderTerms = new Set(
+		tokenizeCoverageLexicalDocumentText(tokenizer, document.folderText),
+	);
+	const folderCharTerms = new Set(extractHanBigrams(document.folderText));
+	const aliasTerms = new Set(
+		tokenizeCoverageLexicalDocumentText(tokenizer, document.aliasesText),
+	);
+	const aliasCharTerms = new Set(extractHanBigrams(document.aliasesText));
+	const tagTerms = new Set(
+		tokenizeCoverageLexicalDocumentText(tokenizer, document.tagsText),
+	);
+	const tagValues = existingTagValues
+		? [...existingTagValues]
+		: splitCoverageLexicalTagValues(document.tagsText);
+	const tagCharTerms = new Set(
+		tagValues.flatMap((tagValue) => extractHanBigrams(tagValue)),
+	);
+	const headingTerms = new Set(
+		tokenizeCoverageLexicalDocumentText(tokenizer, document.headingsText),
+	);
+	const headingCharTerms = new Set(extractHanBigrams(document.headingsText));
+	const metadataTerms = new Set([
+		...basenameTerms,
+		...folderTerms,
+		...aliasTerms,
+		...tagTerms,
+		...headingTerms,
+	]);
+	return {
+		bodyTokenSequence,
+		bodyTerms,
+		bodyCharTerms,
+		bodyPhraseTerms: buildCoverageLexicalPhraseTermSet(bodyTokenSequence),
+		aliasTerms,
+		aliasCharTerms,
+		aliasPhraseTerms: buildCoverageLexicalPhraseTermSet(aliasTerms),
+		basenameTerms,
+		basenameCharTerms,
+		basenamePhraseTerms: buildCoverageLexicalPhraseTermSet(basenameTerms),
+		folderTerms,
+		folderCharTerms,
+		folderPhraseTerms: buildCoverageLexicalPhraseTermSet(folderTerms),
+		headingTerms,
+		headingCharTerms,
+		headingPhraseTerms: buildCoverageLexicalPhraseTermSet(headingTerms),
+		metadataTerms,
+		tagTerms,
+		tagCharTerms,
+		tagPhraseTerms: buildCoverageLexicalPhraseTermSet(tagTerms),
+		tagValues,
+	};
+}
+
+function tokenizeCoverageLexicalDocumentText(
+	tokenizer: Tokenizer,
+	text: string,
+): string[] {
+	return tokenizer
+		.tokenizeSequence(text, "index")
+		.map((term) => term.toLowerCase());
+}
+
+function buildCoverageLexicalPhraseTermSet(terms: Iterable<string>): Set<string> {
+	return new Set(buildCoverageLexicalPhraseTerms(Array.from(terms)));
+}
 
 type CoverageLexicalDocRankableResult = {
 	docId: number;
@@ -846,170 +952,82 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private indexDocument(document: IndexedDocument): void {
 		this.removeDocument(document.path, false);
 		const docId = this.ensureDocumentId(document.path);
-
-		const bodyTokenSequence = this.tokenizer
-			.tokenizeSequence(document.content ?? "", "index")
-			.map((term) => term.toLowerCase());
-		const bodyTerms = new Set(bodyTokenSequence);
-		const bodyCharTerms = new Set(extractHanBigrams(document.content ?? ""));
-		const bodyHanSegments = new Set(extractHanSegments(document.content ?? ""));
-		const basenameTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(document.basename ?? "", "index")
-				.map((term) => term.toLowerCase()),
-		);
-		const basenameCharTerms = new Set(extractHanBigrams(document.basename ?? ""));
-		const basenameHanSegments = new Set(extractHanSegments(document.basename ?? ""));
-		const folderTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(document.folder ?? "", "index")
-				.map((term) => term.toLowerCase()),
-		);
-		const folderCharTerms = new Set(extractHanBigrams(document.folder ?? ""));
-		const folderHanSegments = new Set(extractHanSegments(document.folder ?? ""));
-		const aliasTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(document.aliases ?? "", "index")
-				.map((term) => term.toLowerCase()),
-		);
-		const aliasCharTerms = new Set(extractHanBigrams(document.aliases ?? ""));
-		const aliasHanSegments = new Set(extractHanSegments(document.aliases ?? ""));
-		const tagTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(document.tags ?? "", "index")
-				.map((term) => term.toLowerCase()),
-		);
-		const tagValues = splitCoverageLexicalTagValues(document.tags ?? "");
-		const tagCharTerms = new Set(
-			tagValues.flatMap((tagValue) => extractHanBigrams(tagValue)),
-		);
-		const headingTerms = new Set(
-			this.tokenizer
-				.tokenizeSequence(document.headings ?? "", "index")
-				.map((term) => term.toLowerCase()),
-		);
-		const headingCharTerms = new Set(extractHanBigrams(document.headings ?? ""));
-		const headingHanSegments = new Set(extractHanSegments(document.headings ?? ""));
-		const metadataTokenSequence = [
-			...basenameTerms,
-			...folderTerms,
-			...aliasTerms,
-			...tagTerms,
-			...headingTerms,
-		];
-		const metadataTerms = new Set(metadataTokenSequence);
-		const aliasPhraseTerms = new Set(buildCoverageLexicalPhraseTerms(Array.from(aliasTerms)));
-		const basenamePhraseTerms = new Set(
-			buildCoverageLexicalPhraseTerms(Array.from(basenameTerms)),
-		);
-		const bodyPhraseTerms = new Set(
-			buildCoverageLexicalPhraseTerms(bodyTokenSequence),
-		);
-		const folderPhraseTerms = new Set(
-			buildCoverageLexicalPhraseTerms(Array.from(folderTerms)),
-		);
-		const headingPhraseTerms = new Set(
-			buildCoverageLexicalPhraseTerms(Array.from(headingTerms)),
-		);
-		const tagPhraseTerms = new Set(
-			buildCoverageLexicalPhraseTerms(Array.from(tagTerms)),
+		const storedDocument = createCoverageLexicalDocument(docId, document);
+		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
+			this.tokenizer,
+			storedDocument,
 		);
 
-		const indexedDocument = {
-			docId,
-			aliasPhraseTerms,
-			aliasTerms,
-			aliasCharTerms,
-			basenamePhraseTerms,
-			basenameTerms,
-			basenameCharTerms,
-			bodyTokenSequence,
-			bodyPhraseTerms,
-			bodyText: document.content ?? "",
-			bodyTerms,
-			bodyCharTerms,
-			folderPhraseTerms,
-			folderTerms,
-			folderCharTerms,
-			headingPhraseTerms,
-			headingTerms,
-			headingCharTerms,
-			metadataTerms,
-			tagPhraseTerms,
-			tagTerms,
-			tagCharTerms,
-			tagValues,
-		};
-		this.documents.set(document.path, indexedDocument);
-		this.documentById[docId] = indexedDocument;
-		this.documentBodyTokensById[docId] = bodyTokenSequence;
-		this.documentTagValuesById[docId] = tagValues;
+		this.documents.set(document.path, storedDocument);
+		this.documentById[docId] = storedDocument;
+		this.documentBodyTokensById[docId] = derivedState.bodyTokenSequence;
+		this.documentTagValuesById[docId] = derivedState.tagValues;
 
-		for (const term of bodyTerms) {
+		for (const term of derivedState.bodyTerms) {
 			addNumericPosting(this.bodyPostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of bodyCharTerms) {
+		for (const term of derivedState.bodyCharTerms) {
 			addNumericPosting(this.bodyCharPostings, term, docId);
 		}
-		for (const term of bodyPhraseTerms) {
+		for (const term of derivedState.bodyPhraseTerms) {
 			addNumericPosting(this.bodyPhrasePostings, term, docId);
 		}
-		for (const term of aliasTerms) {
+		for (const term of derivedState.aliasTerms) {
 			addNumericPosting(this.metadataAliasPostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of aliasCharTerms) {
+		for (const term of derivedState.aliasCharTerms) {
 			addNumericPosting(this.metadataAliasCharPostings, term, docId);
 		}
-		for (const term of aliasPhraseTerms) {
+		for (const term of derivedState.aliasPhraseTerms) {
 			addNumericPosting(this.metadataAliasPhrasePostings, term, docId);
 		}
-		for (const term of basenameTerms) {
+		for (const term of derivedState.basenameTerms) {
 			addNumericPosting(this.metadataBasenamePostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of basenameCharTerms) {
+		for (const term of derivedState.basenameCharTerms) {
 			addNumericPosting(this.metadataBasenameCharPostings, term, docId);
 		}
-		for (const term of basenamePhraseTerms) {
+		for (const term of derivedState.basenamePhraseTerms) {
 			addNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
 		}
-		for (const term of folderTerms) {
+		for (const term of derivedState.folderTerms) {
 			addNumericPosting(this.metadataFolderPostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of folderCharTerms) {
+		for (const term of derivedState.folderCharTerms) {
 			addNumericPosting(this.metadataFolderCharPostings, term, docId);
 		}
-		for (const term of folderPhraseTerms) {
+		for (const term of derivedState.folderPhraseTerms) {
 			addNumericPosting(this.metadataFolderPhrasePostings, term, docId);
 		}
-		for (const term of headingTerms) {
+		for (const term of derivedState.headingTerms) {
 			addNumericPosting(this.metadataHeadingPostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of headingCharTerms) {
+		for (const term of derivedState.headingCharTerms) {
 			addNumericPosting(this.metadataHeadingCharPostings, term, docId);
 		}
-		for (const term of headingPhraseTerms) {
+		for (const term of derivedState.headingPhraseTerms) {
 			addNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
-		for (const term of metadataTerms) {
+		for (const term of derivedState.metadataTerms) {
 			addNumericPosting(this.metadataPostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of tagTerms) {
+		for (const term of derivedState.tagTerms) {
 			addNumericPosting(this.metadataTagPostings, term, docId);
 			this.lexicon.add(term);
 		}
-		for (const term of new Set(tagValues)) {
+		for (const term of new Set(derivedState.tagValues)) {
 			addNumericPosting(this.metadataTagFullPostings, term, docId);
 		}
-		for (const term of tagCharTerms) {
+		for (const term of derivedState.tagCharTerms) {
 			addNumericPosting(this.metadataTagCharPostings, term, docId);
 		}
-		for (const term of tagPhraseTerms) {
+		for (const term of derivedState.tagPhraseTerms) {
 			addNumericPosting(this.metadataTagPhrasePostings, term, docId);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
@@ -1025,64 +1043,70 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 
 		const docId = existing.docId;
-		for (const term of existing.bodyTerms) {
+		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
+			this.tokenizer,
+			existing,
+			this.documentBodyTokensById[docId],
+			this.documentTagValuesById[docId],
+		);
+		for (const term of derivedState.bodyTerms) {
 			removeNumericPosting(this.bodyPostings, term, docId);
 		}
-		for (const term of existing.bodyCharTerms) {
+		for (const term of derivedState.bodyCharTerms) {
 			removeNumericPosting(this.bodyCharPostings, term, docId);
 		}
-		for (const term of existing.bodyPhraseTerms) {
+		for (const term of derivedState.bodyPhraseTerms) {
 			removeNumericPosting(this.bodyPhrasePostings, term, docId);
 		}
-		for (const term of existing.aliasTerms) {
+		for (const term of derivedState.aliasTerms) {
 			removeNumericPosting(this.metadataAliasPostings, term, docId);
 		}
-		for (const term of existing.aliasCharTerms) {
+		for (const term of derivedState.aliasCharTerms) {
 			removeNumericPosting(this.metadataAliasCharPostings, term, docId);
 		}
-		for (const term of existing.aliasPhraseTerms) {
+		for (const term of derivedState.aliasPhraseTerms) {
 			removeNumericPosting(this.metadataAliasPhrasePostings, term, docId);
 		}
-		for (const term of existing.basenameTerms) {
+		for (const term of derivedState.basenameTerms) {
 			removeNumericPosting(this.metadataBasenamePostings, term, docId);
 		}
-		for (const term of existing.basenameCharTerms) {
+		for (const term of derivedState.basenameCharTerms) {
 			removeNumericPosting(this.metadataBasenameCharPostings, term, docId);
 		}
-		for (const term of existing.basenamePhraseTerms) {
+		for (const term of derivedState.basenamePhraseTerms) {
 			removeNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
 		}
-		for (const term of existing.folderTerms) {
+		for (const term of derivedState.folderTerms) {
 			removeNumericPosting(this.metadataFolderPostings, term, docId);
 		}
-		for (const term of existing.folderCharTerms) {
+		for (const term of derivedState.folderCharTerms) {
 			removeNumericPosting(this.metadataFolderCharPostings, term, docId);
 		}
-		for (const term of existing.folderPhraseTerms) {
+		for (const term of derivedState.folderPhraseTerms) {
 			removeNumericPosting(this.metadataFolderPhrasePostings, term, docId);
 		}
-		for (const term of existing.headingTerms) {
+		for (const term of derivedState.headingTerms) {
 			removeNumericPosting(this.metadataHeadingPostings, term, docId);
 		}
-		for (const term of existing.headingCharTerms) {
+		for (const term of derivedState.headingCharTerms) {
 			removeNumericPosting(this.metadataHeadingCharPostings, term, docId);
 		}
-		for (const term of existing.headingPhraseTerms) {
+		for (const term of derivedState.headingPhraseTerms) {
 			removeNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
-		for (const term of existing.metadataTerms) {
+		for (const term of derivedState.metadataTerms) {
 			removeNumericPosting(this.metadataPostings, term, docId);
 		}
-		for (const term of existing.tagTerms) {
+		for (const term of derivedState.tagTerms) {
 			removeNumericPosting(this.metadataTagPostings, term, docId);
 		}
-		for (const term of new Set(existing.tagValues)) {
+		for (const term of new Set(derivedState.tagValues)) {
 			removeNumericPosting(this.metadataTagFullPostings, term, docId);
 		}
-		for (const term of existing.tagCharTerms) {
+		for (const term of derivedState.tagCharTerms) {
 			removeNumericPosting(this.metadataTagCharPostings, term, docId);
 		}
-		for (const term of existing.tagPhraseTerms) {
+		for (const term of derivedState.tagPhraseTerms) {
 			removeNumericPosting(this.metadataTagPhrasePostings, term, docId);
 		}
 		this.documents.delete(path);
@@ -1142,27 +1166,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								docId: document.docId,
 								path: this.documentPathById[document.docId] ?? "",
 								bodyText: document.bodyText,
-								aliasPhraseTerms: sortedValues(document.aliasPhraseTerms),
-								aliasTerms: sortedValues(document.aliasTerms),
-								aliasCharTerms: sortedValues(document.aliasCharTerms),
-								basenamePhraseTerms: sortedValues(document.basenamePhraseTerms),
-								basenameTerms: sortedValues(document.basenameTerms),
-								basenameCharTerms: sortedValues(document.basenameCharTerms),
-								bodyTokenSequence: [...document.bodyTokenSequence],
-								bodyPhraseTerms: sortedValues(document.bodyPhraseTerms),
-								bodyTerms: sortedValues(document.bodyTerms),
-								bodyCharTerms: sortedValues(document.bodyCharTerms),
-								folderPhraseTerms: sortedValues(document.folderPhraseTerms),
-								folderTerms: sortedValues(document.folderTerms),
-								folderCharTerms: sortedValues(document.folderCharTerms),
-								headingPhraseTerms: sortedValues(document.headingPhraseTerms),
-								headingTerms: sortedValues(document.headingTerms),
-								headingCharTerms: sortedValues(document.headingCharTerms),
-								metadataTerms: sortedValues(document.metadataTerms),
-								tagPhraseTerms: sortedValues(document.tagPhraseTerms),
-								tagTerms: sortedValues(document.tagTerms),
-								tagCharTerms: sortedValues(document.tagCharTerms),
-								tagValues: [...document.tagValues],
+								basenameText: document.basenameText,
+								folderText: document.folderText,
+								aliasesText: document.aliasesText,
+								tagsText: document.tagsText,
+								headingsText: document.headingsText,
+								bodyTokenSequence: [
+									...(this.documentBodyTokensById[document.docId] ?? []),
+								],
+								tagValues: [
+									...(this.documentTagValuesById[document.docId] ?? []),
+								],
 							},
 					  ]
 					: [],
@@ -1246,37 +1260,21 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.lexicon.add(term);
 		}
 		for (const document of state.documents) {
-			const indexedDocument: CoverageLexicalDocument = {
+			const storedDocument: CoverageLexicalDocument = {
 				docId: document.docId,
-				aliasPhraseTerms: new Set(document.aliasPhraseTerms),
-				aliasTerms: new Set(document.aliasTerms),
-				aliasCharTerms: new Set(document.aliasCharTerms),
-				basenamePhraseTerms: new Set(document.basenamePhraseTerms),
-				basenameTerms: new Set(document.basenameTerms),
-				basenameCharTerms: new Set(document.basenameCharTerms),
-				bodyTokenSequence: [...document.bodyTokenSequence],
-				bodyPhraseTerms: new Set(document.bodyPhraseTerms),
 				bodyText: document.bodyText,
-				bodyTerms: new Set(document.bodyTerms),
-				bodyCharTerms: new Set(document.bodyCharTerms),
-				folderPhraseTerms: new Set(document.folderPhraseTerms),
-				folderTerms: new Set(document.folderTerms),
-				folderCharTerms: new Set(document.folderCharTerms),
-				headingPhraseTerms: new Set(document.headingPhraseTerms),
-				headingTerms: new Set(document.headingTerms),
-				headingCharTerms: new Set(document.headingCharTerms),
-				metadataTerms: new Set(document.metadataTerms),
-				tagPhraseTerms: new Set(document.tagPhraseTerms),
-				tagTerms: new Set(document.tagTerms),
-				tagCharTerms: new Set(document.tagCharTerms),
-				tagValues: [...document.tagValues],
+				basenameText: document.basenameText,
+				folderText: document.folderText,
+				aliasesText: document.aliasesText,
+				tagsText: document.tagsText,
+				headingsText: document.headingsText,
 			};
-			this.documents.set(document.path, indexedDocument);
-			this.documentById[document.docId] = indexedDocument;
+			this.documents.set(document.path, storedDocument);
+			this.documentById[document.docId] = storedDocument;
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
-			this.documentBodyTokensById[document.docId] = indexedDocument.bodyTokenSequence;
-			this.documentTagValuesById[document.docId] = indexedDocument.tagValues;
+			this.documentBodyTokensById[document.docId] = [...document.bodyTokenSequence];
+			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
 		restoreNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
@@ -1479,16 +1477,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!includeLocalWindow) {
 			return cached.coarseResult;
 		}
-		const document = this.documentById[docId];
-		if (!document) {
+		const bodyTokenSequence = this.documentBodyTokensById[docId];
+		if (!bodyTokenSequence) {
 			return null;
 		}
 		const localWindowStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const localEvidence = buildCoverageLexicalWindowFusionSignal(
-			document.bodyTokenSequence,
+			bodyTokenSequence,
 			plan.families,
 			pairSignatures,
-			computePerFileLocalWindowLimit(plan, document.bodyTokenSequence.length),
+			computePerFileLocalWindowLimit(plan, bodyTokenSequence.length),
 			cached.bodyEvidenceTrace,
 		);
 		if (this.benchmarkPhaseTiming) {
@@ -1523,17 +1521,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (cached) {
 			return cached;
 		}
-		const document = this.documentById[docId];
-		if (!document) {
+		const bodyTokenSequence = this.documentBodyTokensById[docId];
+		if (!bodyTokenSequence) {
 			return null;
 		}
+		const tagValues = this.documentTagValuesById[docId] ?? [];
 		const sharedBodyEvidenceTrace =
 			queryCache.sharedBodyEvidenceTraceById.get(docId) ?? null;
 		let bodyEvidenceTrace = sharedBodyEvidenceTrace;
 		if (!bodyEvidenceTrace) {
 			const bodyEvidenceStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 			bodyEvidenceTrace = buildCoverageLexicalBodyEvidenceTrace(
-				document.bodyTokenSequence,
+				bodyTokenSequence,
 				plan.families,
 				queryCache.fuzzyProportion,
 			);
@@ -1548,7 +1547,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		const admissionStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const admissionSignal = buildCoverageLexicalPassageAdmissionSignal(
-			document.bodyTokenSequence,
+			bodyTokenSequence,
 			plan.families,
 			state,
 			phraseSignatures,
@@ -1563,7 +1562,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		const coarseSignalStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const tagFallback = evaluateCoverageLexicalTagFallback(
-			document.tagValues,
+			tagValues,
 			charQuery,
 		);
 		const baseSignal = buildCoverageSignalBase(
@@ -2318,27 +2317,11 @@ function estimateDocumentStoreBytes(
 		docIds: { count: 0, referenceBytes: 0 },
 		paths: { count: 0, referenceBytes: 0 },
 		bodyText: { count: 0, referenceBytes: 0 },
-		bodyTokenSequence: { count: 0, referenceBytes: 0 },
-		bodyTerms: { count: 0, referenceBytes: 0 },
-		bodyCharTerms: { count: 0, referenceBytes: 0 },
-		bodyPhraseTerms: { count: 0, referenceBytes: 0 },
-		aliasTerms: { count: 0, referenceBytes: 0 },
-		aliasCharTerms: { count: 0, referenceBytes: 0 },
-		aliasPhraseTerms: { count: 0, referenceBytes: 0 },
-		basenameTerms: { count: 0, referenceBytes: 0 },
-		basenameCharTerms: { count: 0, referenceBytes: 0 },
-		basenamePhraseTerms: { count: 0, referenceBytes: 0 },
-		folderTerms: { count: 0, referenceBytes: 0 },
-		folderCharTerms: { count: 0, referenceBytes: 0 },
-		folderPhraseTerms: { count: 0, referenceBytes: 0 },
-		headingTerms: { count: 0, referenceBytes: 0 },
-		headingCharTerms: { count: 0, referenceBytes: 0 },
-		headingPhraseTerms: { count: 0, referenceBytes: 0 },
-		metadataTerms: { count: 0, referenceBytes: 0 },
-		tagTerms: { count: 0, referenceBytes: 0 },
-		tagCharTerms: { count: 0, referenceBytes: 0 },
-		tagPhraseTerms: { count: 0, referenceBytes: 0 },
-		tagValues: { count: 0, referenceBytes: 0 },
+		basenameText: { count: 0, referenceBytes: 0 },
+		folderText: { count: 0, referenceBytes: 0 },
+		aliasesText: { count: 0, referenceBytes: 0 },
+		tagsText: { count: 0, referenceBytes: 0 },
+		headingsText: { count: 0, referenceBytes: 0 },
 	};
 	for (const [path, document] of documents.entries()) {
 		sections.docIds.count += 1;
@@ -2352,90 +2335,25 @@ function estimateDocumentStoreBytes(
 		sections.bodyText.count += 1;
 		sections.bodyText.referenceBytes += INDEX_REFERENCE_BYTES;
 
-		accumulateSection(
-			sections.bodyTokenSequence,
-			estimateStringArrayBytes(document.bodyTokenSequence, accumulator),
-		);
-		accumulateSection(
-			sections.bodyTerms,
-			estimateStringSetBytes(document.bodyTerms, accumulator),
-		);
-		accumulateSection(
-			sections.bodyCharTerms,
-			estimateStringSetBytes(document.bodyCharTerms, accumulator),
-		);
-		accumulateSection(
-			sections.bodyPhraseTerms,
-			estimateStringSetBytes(document.bodyPhraseTerms, accumulator),
-		);
-		accumulateSection(
-			sections.aliasTerms,
-			estimateStringSetBytes(document.aliasTerms, accumulator),
-		);
-		accumulateSection(
-			sections.aliasCharTerms,
-			estimateStringSetBytes(document.aliasCharTerms, accumulator),
-		);
-		accumulateSection(
-			sections.aliasPhraseTerms,
-			estimateStringSetBytes(document.aliasPhraseTerms, accumulator),
-		);
-		accumulateSection(
-			sections.basenameTerms,
-			estimateStringSetBytes(document.basenameTerms, accumulator),
-		);
-		accumulateSection(
-			sections.basenameCharTerms,
-			estimateStringSetBytes(document.basenameCharTerms, accumulator),
-		);
-		accumulateSection(
-			sections.basenamePhraseTerms,
-			estimateStringSetBytes(document.basenamePhraseTerms, accumulator),
-		);
-		accumulateSection(
-			sections.folderTerms,
-			estimateStringSetBytes(document.folderTerms, accumulator),
-		);
-		accumulateSection(
-			sections.folderCharTerms,
-			estimateStringSetBytes(document.folderCharTerms, accumulator),
-		);
-		accumulateSection(
-			sections.folderPhraseTerms,
-			estimateStringSetBytes(document.folderPhraseTerms, accumulator),
-		);
-		accumulateSection(
-			sections.headingTerms,
-			estimateStringSetBytes(document.headingTerms, accumulator),
-		);
-		accumulateSection(
-			sections.headingCharTerms,
-			estimateStringSetBytes(document.headingCharTerms, accumulator),
-		);
-		accumulateSection(
-			sections.headingPhraseTerms,
-			estimateStringSetBytes(document.headingPhraseTerms, accumulator),
-		);
-		accumulateSection(
-			sections.metadataTerms,
-			estimateStringSetBytes(document.metadataTerms, accumulator),
-		);
-		accumulateSection(
-			sections.tagTerms,
-			estimateStringSetBytes(document.tagTerms, accumulator),
-		);
-		accumulateSection(
-			sections.tagCharTerms,
-			estimateStringSetBytes(document.tagCharTerms, accumulator),
-		);
-		accumulateSection(
-			sections.tagPhraseTerms,
-			estimateStringSetBytes(document.tagPhraseTerms, accumulator),
-		);
-		accumulateSection(
-			sections.tagValues,
-			estimateStringArrayBytes(document.tagValues, accumulator),
-		);
+		accountStringBytes(accumulator, document.basenameText);
+		sections.basenameText.count += 1;
+		sections.basenameText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.folderText);
+		sections.folderText.count += 1;
+		sections.folderText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.aliasesText);
+		sections.aliasesText.count += 1;
+		sections.aliasesText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.tagsText);
+		sections.tagsText.count += 1;
+		sections.tagsText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.headingsText);
+		sections.headingsText.count += 1;
+		sections.headingsText.referenceBytes += INDEX_REFERENCE_BYTES;
 	}
 
 	return {
@@ -2445,6 +2363,42 @@ function estimateDocumentStoreBytes(
 			sumSectionBytes(sections),
 		mapEntryBytes: documents.size * INDEX_MAP_ENTRY_BYTES,
 		...sections,
+	};
+}
+
+function estimateSparseStringArraySlotsBytes(
+	valuesById: readonly (readonly string[] | undefined)[],
+	accumulator: IndexSizeAccumulator,
+): {
+	total: number;
+	slotCount: number;
+	populatedCount: number;
+	slotReferenceBytes: number;
+	arrayCount: number;
+	arrayBytes: number;
+	valueCount: number;
+} {
+	let populatedCount = 0;
+	let valueCount = 0;
+	let arrayBytes = 0;
+	for (const values of valuesById) {
+		if (!values) {
+			continue;
+		}
+		populatedCount += 1;
+		const estimate = estimateStringArrayBytes(values, accumulator);
+		valueCount += estimate.count;
+		arrayBytes += estimate.total;
+	}
+	const slotReferenceBytes = valuesById.length * INDEX_REFERENCE_BYTES;
+	return {
+		total: INDEX_COLLECTION_HEADER_BYTES + slotReferenceBytes + arrayBytes,
+		slotCount: valuesById.length,
+		populatedCount,
+		slotReferenceBytes,
+		arrayCount: populatedCount,
+		arrayBytes,
+		valueCount,
 	};
 }
 
@@ -2470,6 +2424,11 @@ function estimateDocumentIdentityBytes(
 		pathToId.pathReferenceBytes += INDEX_REFERENCE_BYTES;
 		pathToId.numberBytes += INDEX_NUMBER_BYTES;
 	}
+	const pathToIdTotal =
+		INDEX_COLLECTION_HEADER_BYTES +
+		pathToId.mapEntryBytes +
+		pathToId.pathReferenceBytes +
+		pathToId.numberBytes;
 
 	const idToPath = {
 		slotCount: documentPathById.length,
@@ -2483,22 +2442,23 @@ function estimateDocumentIdentityBytes(
 		idToPath.populatedCount += 1;
 		accountStringBytes(accumulator, path);
 	}
+	const idToPathTotal = INDEX_COLLECTION_HEADER_BYTES + idToPath.referenceBytes;
 
 	const docStoreById = {
 		slotCount: documentById.length,
 		populatedCount: documentById.filter(Boolean).length,
 		referenceBytes: documentById.length * INDEX_REFERENCE_BYTES,
 	};
-	const bodyTokensById = {
-		slotCount: documentBodyTokensById.length,
-		populatedCount: documentBodyTokensById.filter(Boolean).length,
-		referenceBytes: documentBodyTokensById.length * INDEX_REFERENCE_BYTES,
-	};
-	const tagValuesById = {
-		slotCount: documentTagValuesById.length,
-		populatedCount: documentTagValuesById.filter(Boolean).length,
-		referenceBytes: documentTagValuesById.length * INDEX_REFERENCE_BYTES,
-	};
+	const docStoreByIdTotal =
+		INDEX_COLLECTION_HEADER_BYTES + docStoreById.referenceBytes;
+	const bodyTokensById = estimateSparseStringArraySlotsBytes(
+		documentBodyTokensById,
+		accumulator,
+	);
+	const tagValuesById = estimateSparseStringArraySlotsBytes(
+		documentTagValuesById,
+		accumulator,
+	);
 
 	const counter = {
 		count: 1,
@@ -2508,18 +2468,24 @@ function estimateDocumentIdentityBytes(
 
 	return {
 		total:
-			INDEX_COLLECTION_HEADER_BYTES * 2 +
-			pathToId.mapEntryBytes +
-			pathToId.pathReferenceBytes +
-			pathToId.numberBytes +
-			idToPath.referenceBytes +
-			docStoreById.referenceBytes +
-			bodyTokensById.referenceBytes +
-			tagValuesById.referenceBytes +
+			pathToIdTotal +
+			idToPathTotal +
+			docStoreByIdTotal +
+			bodyTokensById.total +
+			tagValuesById.total +
 			counter.numberBytes,
-		pathToId,
-		idToPath,
-		docStoreById,
+		pathToId: {
+			...pathToId,
+			total: pathToIdTotal,
+		},
+		idToPath: {
+			...idToPath,
+			total: idToPathTotal,
+		},
+		docStoreById: {
+			...docStoreById,
+			total: docStoreByIdTotal,
+		},
 		bodyTokensById,
 		tagValuesById,
 		counter,
