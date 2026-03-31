@@ -1903,6 +1903,17 @@ function estimateIndexBytes(engine: EngineLike): number {
 	}
 }
 
+function computeRelativeRatio(numerator: number, denominator: number): number | null {
+	if (
+		!Number.isFinite(numerator) ||
+		!Number.isFinite(denominator) ||
+		denominator <= 0
+	) {
+		return null;
+	}
+	return numerator / denominator;
+}
+
 function documentText(document: IndexedDocument): string {
 	return [
 		document.path,
@@ -2515,6 +2526,43 @@ describe("coverage lexical automation benchmark", () => {
 						]),
 					),
 				})),
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] relative-anchor",
+			JSON.stringify(
+				{
+					primaryNote:
+						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode.",
+					coverageVsMiniSearch: {
+						avgMsPerQueryRatio: round(
+							computeRelativeRatio(
+								coverageResult.summary.avgMsPerQuery,
+								miniResult.summary.avgMsPerQuery,
+							) ?? 0,
+						),
+						p50MsRatio: round(
+							computeRelativeRatio(
+								coverageResult.summary.p50Ms,
+								miniResult.summary.p50Ms,
+							) ?? 0,
+						),
+						p100MsRatio: round(
+							computeRelativeRatio(
+								coverageResult.summary.p100Ms,
+								miniResult.summary.p100Ms,
+							) ?? 0,
+						),
+						estimatedIndexBytesRatio: round(
+							computeRelativeRatio(
+								coverageResult.summary.estimatedIndexBytes,
+								miniResult.summary.estimatedIndexBytes,
+							) ?? 0,
+						),
+					},
+				},
 				null,
 				2,
 			),
