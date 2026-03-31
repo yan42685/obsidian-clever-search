@@ -19,55 +19,113 @@ export type CoverageLexicalBodyEvidenceTrace = {
 	windowHitPositions: number[];
 };
 
+type CoverageLexicalFamilyMatcher = {
+	familyIndex: number;
+	normalizedTerm: string;
+	normalizedTermLength: number;
+	firstChar: string;
+	allowPrefix: boolean;
+	admissionMaxDistance: number;
+	windowMaxDistance: number;
+	maxDistance: number;
+};
+
+type CoverageLexicalBodyEvidenceContext = {
+	activeFamilies: readonly CoverageLexicalFamily[];
+	matchers: readonly CoverageLexicalFamilyMatcher[];
+};
+
+const EMPTY_TOKEN_MATCHES: CoverageLexicalFamilyTokenMatch[] = [];
+
 export function buildCoverageLexicalBodyEvidenceTrace(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
 	windowFuzzyProportion: number = DEFAULT_WINDOW_FUZZY_PROPORTION,
 ): CoverageLexicalBodyEvidenceTrace {
-	const activeFamilies = families.filter((family) => family.role !== "noise");
-	const admissionMatchesByPosition: CoverageLexicalFamilyTokenMatch[][] = Array.from(
-		{ length: tokens.length },
-		() => [],
+	const context = createCoverageLexicalBodyEvidenceContext(
+		families,
+		windowFuzzyProportion,
 	);
-	const windowMatchesByPosition: CoverageLexicalFamilyTokenMatch[][] = Array.from(
-		{ length: tokens.length },
-		() => [],
-	);
+	const admissionMatchesByPosition: CoverageLexicalFamilyTokenMatch[][] =
+		new Array(tokens.length);
+	const windowMatchesByPosition: CoverageLexicalFamilyTokenMatch[][] =
+		new Array(tokens.length);
 	const admissionHitPositions: number[] = [];
 	const windowHitPositions: number[] = [];
 
 	for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
 		const token = tokens[tokenIndex];
-		for (const family of activeFamilies) {
-			const kinds = classifyTokenMatchKinds(
+		const tokenLength = token.length;
+		const tokenFirstChar = token[0] ?? "";
+		let admissionMatches: CoverageLexicalFamilyTokenMatch[] | null = null;
+		let windowMatches: CoverageLexicalFamilyTokenMatch[] | null = null;
+
+		for (const matcher of context.matchers) {
+			if (token === matcher.normalizedTerm) {
+				(admissionMatches ??= []).push({
+					familyIndex: matcher.familyIndex,
+					kind: "exact",
+				});
+				(windowMatches ??= []).push({
+					familyIndex: matcher.familyIndex,
+					kind: "exact",
+				});
+				continue;
+			}
+			if (matcher.allowPrefix && token.startsWith(matcher.normalizedTerm)) {
+				(admissionMatches ??= []).push({
+					familyIndex: matcher.familyIndex,
+					kind: "prefix",
+				});
+				(windowMatches ??= []).push({
+					familyIndex: matcher.familyIndex,
+					kind: "prefix",
+				});
+				continue;
+			}
+			if (
+				matcher.maxDistance <= 0 ||
+				tokenFirstChar !== matcher.firstChar ||
+				Math.abs(tokenLength - matcher.normalizedTermLength) > matcher.maxDistance
+			) {
+				continue;
+			}
+
+			const distance = boundedLevenshtein(
 				token,
-				family,
-				windowFuzzyProportion,
+				matcher.normalizedTerm,
+				matcher.maxDistance,
 			);
-			if (kinds.admissionKind) {
-				admissionMatchesByPosition[tokenIndex].push({
-					familyIndex: family.index,
-					kind: kinds.admissionKind,
+			if (
+				matcher.admissionMaxDistance > 0 &&
+				distance <= matcher.admissionMaxDistance
+			) {
+				(admissionMatches ??= []).push({
+					familyIndex: matcher.familyIndex,
+					kind: "fuzzy",
 				});
 			}
-			if (kinds.windowKind) {
-				windowMatchesByPosition[tokenIndex].push({
-					familyIndex: family.index,
-					kind: kinds.windowKind,
+			if (matcher.windowMaxDistance > 0 && distance <= matcher.windowMaxDistance) {
+				(windowMatches ??= []).push({
+					familyIndex: matcher.familyIndex,
+					kind: "fuzzy",
 				});
 			}
 		}
-		if (admissionMatchesByPosition[tokenIndex].length > 0) {
+
+		admissionMatchesByPosition[tokenIndex] = admissionMatches ?? EMPTY_TOKEN_MATCHES;
+		windowMatchesByPosition[tokenIndex] = windowMatches ?? EMPTY_TOKEN_MATCHES;
+		if (admissionMatches !== null) {
 			admissionHitPositions.push(tokenIndex);
 		}
-		if (windowMatchesByPosition[tokenIndex].length > 0) {
+		if (windowMatches !== null) {
 			windowHitPositions.push(tokenIndex);
 		}
 	}
 
 	return {
 		tokenCount: tokens.length,
-		activeFamilies,
+		activeFamilies: context.activeFamilies,
 		admissionMatchesByPosition,
 		admissionHitPositions,
 		windowMatchesByPosition,
@@ -75,42 +133,35 @@ export function buildCoverageLexicalBodyEvidenceTrace(
 	};
 }
 
-function classifyTokenMatchKinds(
-	token: string,
-	family: CoverageLexicalFamily,
+function createCoverageLexicalBodyEvidenceContext(
+	families: readonly CoverageLexicalFamily[],
 	windowFuzzyProportion: number,
-): {
-	admissionKind: Exclude<CoverageFamilyMatchKind, null> | null;
-	windowKind: Exclude<CoverageFamilyMatchKind, null> | null;
-} {
-	if (token === family.normalizedTerm) {
-		return { admissionKind: "exact", windowKind: "exact" };
-	}
-	if (family.allowPrefix && token.startsWith(family.normalizedTerm)) {
-		return { admissionKind: "prefix", windowKind: "prefix" };
-	}
-	if (!family.allowFuzzy || token[0] !== family.normalizedTerm[0]) {
-		return { admissionKind: null, windowKind: null };
-	}
-
-	const admissionMaxDistance = computeAdmissionMaxFuzzyDistance(
-		family.normalizedTerm,
-	);
-	const windowMaxDistance = computeWindowMaxFuzzyDistance(
-		family.normalizedTerm,
-		windowFuzzyProportion,
-	);
-	const maxDistance = Math.max(admissionMaxDistance, windowMaxDistance);
-	if (maxDistance <= 0) {
-		return { admissionKind: null, windowKind: null };
-	}
-
-	const distance = boundedLevenshtein(token, family.normalizedTerm, maxDistance);
+): CoverageLexicalBodyEvidenceContext {
+	const activeFamilies = families.filter((family) => family.role !== "noise");
+	const matchers: CoverageLexicalFamilyMatcher[] = activeFamilies.map((family) => {
+		const admissionMaxDistance = family.allowFuzzy
+			? computeAdmissionMaxFuzzyDistance(family.normalizedTerm)
+			: 0;
+		const windowMaxDistance = family.allowFuzzy
+			? computeWindowMaxFuzzyDistance(
+					family.normalizedTerm,
+					windowFuzzyProportion,
+				)
+			: 0;
+		return {
+			familyIndex: family.index,
+			normalizedTerm: family.normalizedTerm,
+			normalizedTermLength: family.normalizedTerm.length,
+			firstChar: family.normalizedTerm[0] ?? "",
+			allowPrefix: family.allowPrefix,
+			admissionMaxDistance,
+			windowMaxDistance,
+			maxDistance: Math.max(admissionMaxDistance, windowMaxDistance),
+		};
+	});
 	return {
-		admissionKind:
-			admissionMaxDistance > 0 && distance <= admissionMaxDistance ? "fuzzy" : null,
-		windowKind:
-			windowMaxDistance > 0 && distance <= windowMaxDistance ? "fuzzy" : null,
+		activeFamilies,
+		matchers,
 	};
 }
 

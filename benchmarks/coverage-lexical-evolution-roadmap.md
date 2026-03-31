@@ -43,7 +43,8 @@ Every retained change should be evaluated against the same four anchors:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
   - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
   - the previous active latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-recall-query-cache.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-engine-query-cache.md`
+  - the previous active engine-side latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-engine-query-cache.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is the current active optimization slice:
   - maintained query-time document caches landed
@@ -63,12 +64,16 @@ Every retained change should be evaluated against the same four anchors:
     - coarse ranking caches per-document body evidence, admission, and base rank signals
     - rerank reuses the cached base result and only adds local window evidence
     - base signal construction no longer repeatedly rescans metadata field arrays for the same family
+  - retained body-evidence matcher precompute has now landed on top of the engine cache:
+    - active family matcher metadata is precomputed once per trace build
+    - per-token matching reuses precomputed first-char, length, prefix, and fuzzy-threshold state
+    - the retained version keeps the flat scan shape and does not keep the more aggressive exact-bucket or per-token cache experiment because that benchmarked worse
   - latest interpretation for the current active anchor:
     - quality stayed clean
-    - avg, p50, and p100 latency ratios all improved materially
-    - confirmation rerun stayed in a clearly better band than the previous active anchor
-    - the current retained latency gain now comes from both recall-side and engine-side query-local reuse rather than from additional numeric posting migration
-  - follow-up recall-side signal churn reduction has now been tried after the active anchor:
+    - avg, p50, and p100 latency ratios improved overall across three reruns versus the previous active anchor
+    - size stayed flat
+    - the retained gain now comes from flattening repeated shared document-scan work, not from additional numeric posting migration or token bucketization
+  - follow-up recall-side signal churn reduction has now been tried after the recall-cache anchor:
     - lane prefilter signals are reused directly by lane evaluation instead of being rebuilt
     - optional family subsets and common phrase-family index sets are derived once per query plan
     - bridge signal no longer allocates merged match arrays just to score a family group
@@ -168,6 +173,8 @@ Files likely involved:
 - `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - `src/services/search/coverage-lexical/coverage-lexical-recall.ts`
 - `src/services/search/coverage-lexical/coverage-lexical-admission.ts`
+- `src/services/search/coverage-lexical/coverage-lexical-body-evidence.ts`
+- `src/services/search/coverage-lexical/coverage-lexical-windowing.ts`
 
 Acceptance:
 
@@ -187,7 +194,15 @@ Executable checklist:
      - engine coarse results now memoize per-document body evidence, admission, and base ranking signal for the duration of the query
    - avoid rebuilding document-derived maps inside search paths
    - done when no obvious per-query object-graph reconstruction remains in the hot path
-2. cheap-first, expensive-second lane flow
+2. flatten the shared document scan before adding more caches
+   - precompute reusable family matcher metadata once per shared body-evidence trace build
+   - avoid per-comparison threshold recomputation inside the token scan
+   - do not retain extra exact/prefix buckets or token-result caches unless benchmark evidence is clearly positive
+   - current checkpoint:
+     - family matcher metadata is precomputed once per active family in `coverage-lexical-body-evidence.ts`
+     - the simpler flat-scan version beat both the prior active anchor and the more aggressive bucketized experiment on retained benchmark evidence
+   - done when the shared document scan has no obvious repeated per-family derived work left
+3. cheap-first, expensive-second lane flow
    - preserve the current split between cheap prefiltering and expensive lane evaluation
    - keep debug visibility for:
      - candidate paths
@@ -195,16 +210,16 @@ Executable checklist:
      - admitted paths
    - do not reduce lane budgets aggressively in this subphase
    - done when every lane still exposes enough debug state to explain recall failures
-3. safe reuse of coarse ranking work
+4. safe reuse of coarse ranking work
    - reuse coarse results for candidates that do not require local window amplification
    - keep expensive re-evaluation only for paths that truly need higher-resolution scoring
    - done when the rerank path does not rebuild full signals for obviously coarse-stable candidates
-4. theory-only safety rules before parameter tightening
+5. theory-only safety rules before parameter tightening
    - treat `strict_metadata_lane` and `bridge_lane` as lower-risk lanes
    - treat `strict_hybrid_lane`, `relaxed_hybrid_lane`, and `local_body_lane` as higher-risk lanes
    - do not shrink budgets or widen cheap filtering until protective rules exist for high-risk lanes
    - done when future tuning has a written risk split by lane
-5. optional local-only stress verification
+6. optional local-only stress verification
    - only if future tuning changes budgets or cheap comparators materially
    - if needed, put the harness in a gitignored local directory
    - target lane fanout, not total vault size
