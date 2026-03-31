@@ -184,7 +184,7 @@ function buildTermSignature(termStats: readonly DirectSubitemsSpanTermStat[]): s
 	return termStats
 		.filter((termStat) => termStat.bestTier !== "miss")
 		.map((termStat) => `${termStat.termId}:${termStat.bestTier}`)
-		join("|");
+		.join("|");
 }
 
 function pickRepresentativeOccurrences(

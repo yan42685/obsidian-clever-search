@@ -274,15 +274,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!this.benchmarkPhaseTiming) {
 			return null;
 		}
-		const totalMeasuredMs = Array.from(this.benchmarkPhaseTiming.phases.values()).reduce(
+		const benchmarkPhaseTiming = this.benchmarkPhaseTiming;
+		const totalMeasuredMs = Array.from(benchmarkPhaseTiming.phases.values()).reduce(
 			(sum, phase) => sum + phase.totalMs,
 			0,
 		);
+		const queryTotalMs = benchmarkPhaseTiming.queryTotalMs;
+		const recallTotalMs = benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0;
+		const laneEvaluateTotalMs =
+			benchmarkPhaseTiming.recallSubphases.get("laneEvaluate")?.totalMs ?? 0;
 		return {
-			queryCount: this.benchmarkPhaseTiming.queryCount,
-			queryTotalMs: this.benchmarkPhaseTiming.queryTotalMs,
+			queryCount: benchmarkPhaseTiming.queryCount,
+			queryTotalMs,
 			totalMeasuredMs,
-			phases: Array.from(this.benchmarkPhaseTiming.phases.entries())
+			phases: Array.from(benchmarkPhaseTiming.phases.entries())
 				.map(([phase, timing]) => ({
 					phase,
 					totalMs: timing.totalMs,
@@ -295,13 +300,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
 					shareOfMeasuredMs:
 						totalMeasuredMs > 0 ? timing.totalMs / totalMeasuredMs : 0,
-					shareOfQueryTime:
-						this.benchmarkPhaseTiming.queryTotalMs > 0
-							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
-					: 0,
+					shareOfQueryTime: queryTotalMs > 0 ? timing.totalMs / queryTotalMs : 0,
 				}))
 				.sort((left, right) => right.totalMs - left.totalMs),
-			recallSubphases: Array.from(this.benchmarkPhaseTiming.recallSubphases.entries())
+			recallSubphases: Array.from(benchmarkPhaseTiming.recallSubphases.entries())
 				.map(([phase, timing]) => ({
 					phase,
 					totalMs: timing.totalMs,
@@ -312,19 +314,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						timing.count > 0 ? timing.totalMs / timing.count : 0,
 					avgMsPerUnit:
 						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
-					shareOfRecallMs:
-						(this.benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0) > 0
-							? timing.totalMs /
-								(this.benchmarkPhaseTiming.phases.get("recall")?.totalMs ?? 0)
-							: 0,
-					shareOfQueryTime:
-						this.benchmarkPhaseTiming.queryTotalMs > 0
-							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
-							: 0,
+					shareOfRecallMs: recallTotalMs > 0 ? timing.totalMs / recallTotalMs : 0,
+					shareOfQueryTime: queryTotalMs > 0 ? timing.totalMs / queryTotalMs : 0,
 				}))
 				.sort((left, right) => right.totalMs - left.totalMs),
 			laneEvaluateSubphases: Array.from(
-				this.benchmarkPhaseTiming.laneEvaluateSubphases.entries(),
+				benchmarkPhaseTiming.laneEvaluateSubphases.entries(),
 			)
 				.map(([phase, timing]) => ({
 					phase,
@@ -337,16 +332,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					avgMsPerUnit:
 						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
 					shareOfLaneEvaluateMs:
-						(this.benchmarkPhaseTiming.recallSubphases.get("laneEvaluate")
-							?.totalMs ?? 0) > 0
-							? timing.totalMs /
-								(this.benchmarkPhaseTiming.recallSubphases.get("laneEvaluate")
-									?.totalMs ?? 0)
-							: 0,
-					shareOfQueryTime:
-						this.benchmarkPhaseTiming.queryTotalMs > 0
-							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
-							: 0,
+						laneEvaluateTotalMs > 0 ? timing.totalMs / laneEvaluateTotalMs : 0,
+					shareOfQueryTime: queryTotalMs > 0 ? timing.totalMs / queryTotalMs : 0,
 				}))
 				.sort((left, right) => right.totalMs - left.totalMs),
 		};

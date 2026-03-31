@@ -218,7 +218,7 @@ function createFamilyCountSummary(
 }
 
 function createFamilySignal(
-	overrides: Partial<CoverageLexicalFamilySignal> & {
+	overrides: Omit<Partial<CoverageLexicalFamilySignal>, "familyCountSummary"> & {
 		familyCountSummary?: Partial<CoverageLexicalFamilyCountSummary>;
 	} = {},
 ): CoverageLexicalFamilySignal {
@@ -1088,10 +1088,11 @@ describe("coverage lexical ranking", () => {
 		);
 		expect(directSubItems?.length ?? 0).toBeGreaterThan(0);
 		const first = directSubItems?.[0];
+		const firstText = first?.text ?? "";
 		expect(first?.text).toContain("上面");
 		expect(first?.text).toContain("foo/bar@v1.2#tag");
 		const highlighted = (first?.highlightRanges ?? []).map((range) =>
-			first?.text.slice(range.start, range.end),
+			firstText.slice(range.start, range.end),
 		);
 		expect(highlighted.some((segment) => segment.includes("上"))).toBe(true);
 		expect(highlighted.some((segment) => segment.includes("面"))).toBe(true);

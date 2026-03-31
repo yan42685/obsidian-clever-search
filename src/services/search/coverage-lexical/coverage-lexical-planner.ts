@@ -579,14 +579,14 @@ function hasStructuredMetadataBridgeSignal(
 		(probe.folderExactDocCount ?? 0) * 2 +
 		(probe.headingExactDocCount ?? 0) +
 		(probe.aliasExactDocCount ?? 0);
-	return (
-		structuredSignal > 0 &&
-		(
-			evidence?.spanKinds.includes("raw_shape") ||
-			evidence?.spanKinds.includes("title_path") ||
-			evidence?.spanKinds.includes("metadata_intent")
-		)
-	);
+	const hasBridgeSpanKind =
+		evidence?.spanKinds.some(
+			(spanKind) =>
+				spanKind === "raw_shape" ||
+				spanKind === "title_path" ||
+				spanKind === "metadata_intent",
+		) ?? false;
+	return structuredSignal > 0 && hasBridgeSpanKind;
 }
 
 function isPlannerAnchorCandidate(

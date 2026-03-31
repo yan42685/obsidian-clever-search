@@ -51,7 +51,7 @@ function createMockTokenizer() {
 		tokenize(text: string): string[] {
 			return tokenizeSegment(text);
 		},
-		tokenizeSequence(text: string): string[] {
+		tokenizeSequence(text: string, _mode?: "index" | "search"): string[] {
 			return tokenizeSegment(text);
 		},
 	};
@@ -299,7 +299,9 @@ describe("coverage lexical recall suite", () => {
 			expect(candidates.has(queryCase.relevantPath)).toBe(true);
 			const matchedAcceptableLane = debug.lanes.some(
 				(lane) =>
-					queryCase.acceptableLanes.includes(lane.laneName as (typeof queryCase.acceptableLanes)[number]) &&
+					queryCase.acceptableLanes.some(
+						(acceptableLane) => acceptableLane === lane.laneName,
+					) &&
 					lane.admittedPaths.includes(queryCase.relevantPath),
 				);
 			expect(matchedAcceptableLane).toBe(true);

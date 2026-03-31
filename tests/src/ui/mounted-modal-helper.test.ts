@@ -1,3 +1,5 @@
+export {};
+
 describe("mounted modal helper", () => {
 	beforeEach(() => {
 		(global as any).window = {
