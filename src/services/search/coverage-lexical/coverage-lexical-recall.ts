@@ -118,6 +118,12 @@ type CoverageLexicalQueryCache = {
 		string,
 		ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>
 	>;
+	prefixExpansionsByTerm: Map<string, readonly string[]>;
+	fuzzyExpansionsByTerm: Map<string, readonly string[]>;
+	phraseSignatureBucketsByKey: Map<
+		string,
+		readonly CoverageLexicalPhraseSignature[]
+	>;
 };
 
 type CoverageLexicalGroupSignal = {
@@ -205,6 +211,9 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		tagFallbackByDocId: new Map(),
 		bodyEvidenceTraceByDocId: new Map(),
 		passageSignalByDocAndPhraseKey: new Map(),
+		prefixExpansionsByTerm: new Map(),
+		fuzzyExpansionsByTerm: new Map(),
+		phraseSignatureBucketsByKey: new Map(),
 	};
 }
 
@@ -501,6 +510,7 @@ function runStrictMetadataLane(
 		() => {
 			collectFamilySetCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				derivedPlan.strictMetadataFamilies,
 				{
@@ -511,6 +521,7 @@ function runStrictMetadataLane(
 			);
 			collectPhraseCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				phraseSignatures,
 				derivedPlan.strictMetadataPhraseFamilyIndices,
@@ -567,13 +578,14 @@ function runStrictHybridLane(
 		benchmarkHooks,
 		"laneCollect",
 		() => {
-			collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
+			collectFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
 				scope: "metadata-only",
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: false,
 			});
 			collectFamilySetCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				derivedPlan.strictHybridBodyFamilies,
 				{
@@ -584,6 +596,7 @@ function runStrictHybridLane(
 			);
 			collectPhraseCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				phraseSignatures,
 				derivedPlan.strictHybridPhraseFamilyIndices,
@@ -640,13 +653,14 @@ function runRelaxedHybridLane(
 		benchmarkHooks,
 		"laneCollect",
 		() => {
-			collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
+			collectFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
 				scope: "metadata-only",
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: false,
 			});
 			collectFamilySetCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				derivedPlan.relaxedBodyFamilies,
 				{
@@ -657,6 +671,7 @@ function runRelaxedHybridLane(
 			);
 			collectPhraseCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				phraseSignatures,
 				derivedPlan.relaxedHybridPhraseFamilyIndices,
@@ -711,13 +726,14 @@ function runLocalBodyLane(
 		benchmarkHooks,
 		"laneCollect",
 		() => {
-			collectFamilySetCandidates(index, laneCandidates, localBodyFamilies, {
+			collectFamilySetCandidates(index, queryCache, laneCandidates, localBodyFamilies, {
 				scope: "body-only",
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: request.isFuzzy,
 			});
 			collectPhraseCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				phraseSignatures,
 				derivedPlan.localBodyPhraseFamilyIndices,
@@ -773,6 +789,7 @@ function runBridgeLane(
 		() => {
 			collectFamilySetCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				derivedPlan.bridgeCollectionFamilies,
 				{
@@ -783,6 +800,7 @@ function runBridgeLane(
 			);
 			collectPhraseCandidates(
 				index,
+				queryCache,
 				laneCandidates,
 				phraseSignatures,
 				derivedPlan.bridgePhraseFamilyIndices,
@@ -1876,6 +1894,7 @@ function compareGroupSignals(
 
 function collectFamilySetCandidates(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	families: readonly CoverageLexicalFamily[],
 	options: {
@@ -1898,7 +1917,11 @@ function collectFamilySetCandidates(
 			options.scope,
 		);
 		if (options.includePrefix && family.allowPrefix) {
-			for (const term of expandPrefixTerms(index.sortedLexicon, family.normalizedTerm)) {
+			for (const term of getOrCreatePrefixExpansionTerms(
+				index.sortedLexicon,
+				family.normalizedTerm,
+				queryCache,
+			)) {
 				if (term === family.normalizedTerm) {
 					continue;
 				}
@@ -1913,7 +1936,11 @@ function collectFamilySetCandidates(
 			}
 		}
 		if (options.includeFuzzy && family.allowFuzzy) {
-			for (const term of expandFuzzyTerms(index.sortedLexicon, family.normalizedTerm)) {
+			for (const term of getOrCreateFuzzyExpansionTerms(
+				index.sortedLexicon,
+				family.normalizedTerm,
+				queryCache,
+			)) {
 				collectCandidatesForTerm(
 					index,
 					candidates,
@@ -1998,6 +2025,7 @@ function collectTagExactCandidates(
 
 function collectPhraseCandidates(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signatures: readonly CoverageLexicalPhraseSignature[],
 	targetFamilyIndices: ReadonlySet<number>,
@@ -2007,16 +2035,13 @@ function collectPhraseCandidates(
 		allowPreferredFields: boolean;
 	},
 ): void {
-	for (const signature of signatures) {
-		if (!overlapsTargetFamilies(signature, targetFamilyIndices)) {
-			continue;
-		}
-		if (options.structuredOnly && !signature.preferredFields?.length) {
-			continue;
-		}
-		if (!options.allowPreferredFields && signature.preferredFields?.length) {
-			continue;
-		}
+	for (const signature of getOrCreatePhraseSignatureBucket(
+		signatures,
+		targetFamilyIndices,
+		scope,
+		options,
+		queryCache,
+	)) {
 		collectCandidatesForPhraseSignature(
 			index,
 			candidates,
@@ -2132,6 +2157,70 @@ function collectCandidatesForPhraseSignature(
 			variant,
 		);
 	}
+}
+
+function getOrCreatePrefixExpansionTerms(
+	sortedLexicon: readonly string[],
+	prefix: string,
+	queryCache: CoverageLexicalQueryCache,
+): readonly string[] {
+	const cached = queryCache.prefixExpansionsByTerm.get(prefix);
+	if (cached) {
+		return cached;
+	}
+	const created = expandPrefixTerms(sortedLexicon, prefix);
+	queryCache.prefixExpansionsByTerm.set(prefix, created);
+	return created;
+}
+
+function getOrCreateFuzzyExpansionTerms(
+	sortedLexicon: readonly string[],
+	queryTerm: string,
+	queryCache: CoverageLexicalQueryCache,
+): readonly string[] {
+	const cached = queryCache.fuzzyExpansionsByTerm.get(queryTerm);
+	if (cached) {
+		return cached;
+	}
+	const created = expandFuzzyTerms(sortedLexicon, queryTerm);
+	queryCache.fuzzyExpansionsByTerm.set(queryTerm, created);
+	return created;
+}
+
+function getOrCreatePhraseSignatureBucket(
+	signatures: readonly CoverageLexicalPhraseSignature[],
+	targetFamilyIndices: ReadonlySet<number>,
+	scope: CoverageLexicalCollectionScope,
+	options: {
+		structuredOnly: boolean;
+		allowPreferredFields: boolean;
+	},
+	queryCache: CoverageLexicalQueryCache,
+): readonly CoverageLexicalPhraseSignature[] {
+	const bucketKey = [
+		scope,
+		options.structuredOnly ? "structured" : "all-forms",
+		options.allowPreferredFields ? "preferred" : "plain",
+		Array.from(targetFamilyIndices).join(","),
+	].join("|");
+	const cached = queryCache.phraseSignatureBucketsByKey.get(bucketKey);
+	if (cached) {
+		return cached;
+	}
+	const created = signatures.filter((signature) => {
+		if (!overlapsTargetFamilies(signature, targetFamilyIndices)) {
+			return false;
+		}
+		if (options.structuredOnly && !signature.preferredFields?.length) {
+			return false;
+		}
+		if (!options.allowPreferredFields && signature.preferredFields?.length) {
+			return false;
+		}
+		return true;
+	});
+	queryCache.phraseSignatureBucketsByKey.set(bucketKey, created);
+	return created;
 }
 
 function getOrCreateCandidateState<TKey extends string | CoverageLexicalCandidateKey>(
