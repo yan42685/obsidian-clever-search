@@ -55,7 +55,12 @@ import {
 	resolveHybridRecallBudget,
 	type RankedResult,
 } from './ranking';
-import { HybridReranker, SEARCH_EMBED_TOKEN_KEY, type RerankCandidate } from './reranker';
+import {
+	HybridRerankError,
+	HybridReranker,
+	SEARCH_EMBED_TOKEN_KEY,
+	type RerankCandidate,
+} from './reranker';
 import { EMBED_DIM } from './hybrid-types';
 import {
 	profileHybridStage,
@@ -365,6 +370,9 @@ export class HybridEngine {
 
 	async search(query: string, topK = this.defaultResultCount): Promise<FileItem[]> {
 		if (!this.isEnabled() || !this._ready || !query.trim()) return [];
+		let fallbackNoticeKey: LocaleKey | null = this._canSearch
+			? null
+			: 'hybridNotice.searchFallbackToBm25';
 
 		const bm25Probe = this.bm25.search(query, getHybridBm25ProbeLimit(), {
 			useProximity: HYBRID_BM25_USE_PROXIMITY,
@@ -391,22 +399,33 @@ export class HybridEngine {
 			}
 		} catch (error) {
 			logger.warn('hybrid query embedding failed; rerank will use BM25-only chunks.', error);
-			this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
+			fallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
 		}
 
 		const smallCandidates = await this.loadDedupedSmallChunkCandidates([bm25Small, denseSmall]);
+		const bm25CandidateIds = new Set(bm25Small.map((item) => item.id));
+		const bm25FallbackCandidates = smallCandidates.filter((candidate) =>
+			bm25CandidateIds.has(candidate.id),
+		);
 		if (smallCandidates.length === 0) {
+			this.lastSearchFallbackNoticeKey = fallbackNoticeKey;
 			return [];
 		}
 
 		try {
 			const items = await this.rerankAndBuildFileItems(query, smallCandidates, topK);
-			this.lastSearchFallbackNoticeKey = null;
+			this.lastSearchFallbackNoticeKey = fallbackNoticeKey;
 			return items;
 		} catch (error) {
-			logger.warn('hybrid rerank failed; falling back to source ordering.', error);
-			this.lastSearchFallbackNoticeKey = 'hybridNotice.searchFallbackToBm25';
-			return this.buildFileItemsFromSmallChunks(query, smallCandidates, topK);
+			const fallbackCandidates = bm25FallbackCandidates;
+			if (error instanceof HybridRerankError) {
+				logger.warn('hybrid rerank failed; falling back to BM25 ordering.', error);
+				this.lastSearchFallbackNoticeKey = 'hybridNotice.searchRerankFallbackToBm25';
+				return this.buildFileItemsFromSmallChunks(query, fallbackCandidates, topK);
+			}
+			logger.warn('hybrid search candidate ordering failed; falling back to BM25 ordering.', error);
+			this.lastSearchFallbackNoticeKey = fallbackNoticeKey ?? 'hybridNotice.searchFallbackToBm25';
+			return this.buildFileItemsFromSmallChunks(query, fallbackCandidates, topK);
 		}
 	}
 
@@ -841,7 +860,7 @@ export class HybridEngine {
 		batchChunks: PlannedChunk[],
 		buildEmbedInput: (chunk: RawChunk) => string,
 	): Promise<StoredVector[]> {
-		const vectors = new Array<StoredVector>(batchChunks.length);
+		const vectors: Array<StoredVector | undefined> = new Array(batchChunks.length);
 		const pendingIndexes: number[] = [];
 		const pendingInputs: string[] = [];
 		const fullInputs = new Array<string>(batchChunks.length);
@@ -868,8 +887,19 @@ export class HybridEngine {
 						filePath,
 					),
 			);
+			if (embedded.length !== pendingInputs.length) {
+				throw new Error(
+					`Hybrid embed batch size mismatch for ${filePath}: expected ${pendingInputs.length}, received ${embedded.length}`,
+				);
+			}
 			for (let i = 0; i < pendingIndexes.length; i++) {
-				vectors[pendingIndexes[i]] = embedded[i];
+				const vector = embedded[i];
+				if (vector === undefined) {
+					throw new Error(
+						`Hybrid embed batch returned an empty vector slot for ${filePath} at batch index ${i}`,
+					);
+				}
+				vectors[pendingIndexes[i]] = vector;
 			}
 		}
 
@@ -881,7 +911,13 @@ export class HybridEngine {
 			await recordEstimatedTokenSavings(savedEstimatedTokens);
 		}
 
-		return vectors;
+		for (let i = 0; i < vectors.length; i++) {
+			if (vectors[i] === undefined) {
+				throw new Error(`Hybrid vector resolution left a gap for ${filePath} at chunk index ${i}`);
+			}
+		}
+
+		return vectors as StoredVector[];
 	}
 
 	private async persistChunks(

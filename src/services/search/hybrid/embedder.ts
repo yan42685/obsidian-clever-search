@@ -53,6 +53,11 @@ export class HybridDisabledError extends Error {
 	}
 }
 
+type ProviderEmbeddingResponse = {
+	data?: Array<{ index?: number; embedding?: number[] }>;
+	usage?: { total_tokens?: number; input_tokens?: number };
+};
+
 export type WeeklyTokenReservation = {
 	release: () => void;
 };
@@ -207,52 +212,48 @@ export class Embedder {
 	private async fetchEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokensUsed: number }> {
 		return retryAsync(
 			async (attempt) => {
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-			try {
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+				try {
 					await Embedder.requestGate.wait();
-				const resp = await fetch(this.apiDomain, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						Authorization: `Bearer ${this.apiKey}`,
-					},
-					body: JSON.stringify({
-						model: EMBED_MODEL,
-						input: texts,
-						dimensions: EMBED_DIM,
-						encoding_format: 'float',
-					}),
-					signal: controller.signal,
-				});
+					const resp = await fetch(this.apiDomain, {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							Authorization: `Bearer ${this.apiKey}`,
+						},
+						body: JSON.stringify({
+							model: EMBED_MODEL,
+							input: texts,
+							dimensions: EMBED_DIM,
+							encoding_format: 'float',
+						}),
+						signal: controller.signal,
+					});
 
-				if (!resp.ok) {
-					const body = await resp.text();
-					logger.error(
-						`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
-					);
-					if (this.isRetryableStatus(resp.status)) {
-						const error = new Error(`Qwen embedding API error ${resp.status}: ${body}`);
-						(error as Error & { retryAfterHeader?: string | null }).retryAfterHeader =
-							resp.headers.get('retry-after');
-						throw error;
+					if (!resp.ok) {
+						const body = await resp.text();
+						logger.error(
+							`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
+						);
+						if (this.isRetryableStatus(resp.status)) {
+							const error = new Error(`Qwen embedding API error ${resp.status}: ${body}`);
+							(error as Error & { retryAfterHeader?: string | null }).retryAfterHeader =
+								resp.headers.get('retry-after');
+							throw error;
+						}
+						throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
 					}
-					throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
-				}
 
-				const json = await resp.json() as {
-					data?: Array<{ index: number; embedding: number[] }>;
-					usage?: { total_tokens?: number; input_tokens?: number };
-				};
-				const data: Array<{ index: number; embedding: number[] }> = Array.isArray(json.data)
-					? json.data
-					: [];
-				data.sort((a, b) => a.index - b.index);
-				const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
-				return { embeddings: data.map((item) => item.embedding), tokensUsed };
-			} finally {
-				clearTimeout(timeoutId);
-			}
+					const json = await resp.json() as ProviderEmbeddingResponse;
+					const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
+					return {
+						embeddings: this.validateEmbeddingResponse(texts, json),
+						tokensUsed,
+					};
+				} finally {
+					clearTimeout(timeoutId);
+				}
 			},
 			{
 				maxAttempts: REQUEST_MAX_RETRIES,
@@ -270,6 +271,65 @@ export class Embedder {
 				},
 			},
 		);
+	}
+
+	private validateEmbeddingResponse(
+		texts: string[],
+		json: ProviderEmbeddingResponse,
+	): number[][] {
+		if (!Array.isArray(json.data)) {
+			throw new Error('Qwen embedding response missing data array');
+		}
+		if (json.data.length !== texts.length) {
+			throw new Error(
+				`Qwen embedding response count mismatch: expected ${texts.length}, received ${json.data.length}`,
+			);
+		}
+
+		const embeddings = new Array<number[]>(texts.length);
+		const seenIndexes = new Set<number>();
+		for (const item of json.data) {
+			const rawIndex = item?.index;
+			if (
+				typeof rawIndex !== 'number' ||
+				!Number.isInteger(rawIndex) ||
+				rawIndex < 0 ||
+				rawIndex >= texts.length
+			) {
+				throw new Error(`Qwen embedding response index out of range: ${String(rawIndex)}`);
+			}
+			const index = rawIndex;
+			if (seenIndexes.has(index)) {
+				throw new Error(`Qwen embedding response repeated index: ${index}`);
+			}
+			seenIndexes.add(index);
+
+			const embedding = item?.embedding;
+			if (!Array.isArray(embedding)) {
+				throw new Error(`Qwen embedding response missing embedding array at index ${index}`);
+			}
+			if (embedding.length !== EMBED_DIM) {
+				throw new Error(
+					`Qwen embedding response dimension mismatch at index ${index}: expected ${EMBED_DIM}, received ${embedding.length}`,
+				);
+			}
+			for (let valueIndex = 0; valueIndex < embedding.length; valueIndex++) {
+				if (!Number.isFinite(embedding[valueIndex])) {
+					throw new Error(
+						`Qwen embedding response contains non-finite value at index ${index}, offset ${valueIndex}`,
+					);
+				}
+			}
+			embeddings[index] = embedding;
+		}
+
+		for (let index = 0; index < embeddings.length; index++) {
+			if (!embeddings[index]) {
+				throw new Error(`Qwen embedding response missing item for index ${index}`);
+			}
+		}
+
+		return embeddings;
 	}
 
 	private getRetryDelayMs(attempt: number, retryAfterHeader?: string | null): number {

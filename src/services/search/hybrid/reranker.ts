@@ -9,8 +9,26 @@ import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 
 const RERANK_MODEL = 'qwen3-rerank';
+const RERANK_TIMEOUT_MS = 2_800;
 export const SEARCH_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_EMBED_TOKEN_KEY = '[search] embedding';
+
+export class HybridRerankError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'HybridRerankError';
+	}
+}
+
+export class HybridRerankTimeoutError extends HybridRerankError {
+	readonly timeoutMs: number;
+
+	constructor(timeoutMs: number) {
+		super(`Qwen rerank request timed out after ${timeoutMs} ms`);
+		this.name = 'HybridRerankTimeoutError';
+		this.timeoutMs = timeoutMs;
+	}
+}
 
 export type RerankCandidate = {
 	id: number;
@@ -56,29 +74,15 @@ export class HybridReranker {
 			...documents,
 		]);
 		const reservation = await reserveWeeklyTokenBudget(estimatedTokens);
-		let ranked: RerankResult[] = [];
 		try {
-			const resp = await fetch(this.apiUrl, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: `Bearer ${this.apiKey}`,
-				},
-				body: JSON.stringify({
-					model: RERANK_MODEL,
-					query,
-					documents,
-					top_n: Math.min(candidates.length, topK),
-					instruct: "Retrieve semantically similar text.",
-				}),
-			});
+			const resp = await this.fetchRerankResponse(query, documents, topK);
 
 			if (!resp.ok) {
 				const body = await resp.text();
 				logger.error(
 					`Qwen rerank request failed: status=${resp.status}, url=${this.apiUrl}, body=${body}`,
 				);
-				throw new Error(`Qwen rerank API error ${resp.status}: ${body}`);
+				throw new HybridRerankError(`Qwen rerank API error ${resp.status}: ${body}`);
 			}
 
 			const json = await resp.json() as {
@@ -94,7 +98,7 @@ export class HybridReranker {
 				await recordTokenUsage(SEARCH_RERANK_TOKEN_KEY, tokensUsed);
 			}
 
-			ranked = this.extractRankedItems(json)
+			const ranked = this.extractRankedItems(json)
 				.map((item) => {
 					const candidate = candidates[item.index];
 					if (!candidate) {
@@ -106,19 +110,53 @@ export class HybridReranker {
 					} as RerankResult;
 				})
 				.filter((item): item is RerankResult => item !== null);
+
+			if (ranked.length === 0) {
+				logger.warn('Qwen rerank returned no ranked items.');
+				throw new HybridRerankError('Qwen rerank returned no ranked items');
+			}
+
+			return ranked.slice(0, topK);
 		} finally {
 			reservation.release();
 		}
+	}
 
-		if (ranked.length === 0) {
-			logger.warn('Qwen rerank returned no ranked items; falling back to recall ordering.');
-			return candidates.slice(0, topK).map((candidate) => ({
-				id: candidate.id,
-				score: candidate.recallScore,
-			}));
+	private async fetchRerankResponse(
+		query: string,
+		documents: string[],
+		topK: number,
+	): Promise<Response> {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), RERANK_TIMEOUT_MS);
+		try {
+			return await fetch(this.apiUrl, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${this.apiKey}`,
+				},
+				body: JSON.stringify({
+					model: RERANK_MODEL,
+					query,
+					documents,
+					top_n: Math.min(documents.length, topK),
+					instruct: "Retrieve semantically similar text.",
+				}),
+				signal: controller.signal,
+			});
+		} catch (error) {
+			if (this.isAbortError(error)) {
+				throw new HybridRerankTimeoutError(RERANK_TIMEOUT_MS);
+			}
+			throw new HybridRerankError(
+				error instanceof Error
+					? `Qwen rerank request failed: ${error.message}`
+					: 'Qwen rerank request failed',
+			);
+		} finally {
+			clearTimeout(timeoutId);
 		}
-
-		return ranked.slice(0, topK);
 	}
 
 	private extractRankedItems(json: {
@@ -143,5 +181,14 @@ export class HybridReranker {
 			}))
 			.filter((item) => Number.isFinite(item.index) && Number.isFinite(item.score))
 			.sort((a, b) => b.score - a.score);
+	}
+
+	private isAbortError(error: unknown): boolean {
+		return Boolean(
+			error &&
+			typeof error === 'object' &&
+			'name' in error &&
+			error.name === 'AbortError',
+		);
 	}
 }
