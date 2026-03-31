@@ -167,7 +167,7 @@ export class Database {
 	}
 
 	async setLexicalIndexedFileRefs(refs: BaseIndexedFileRef[]) {
-		this.db.transaction("rw", this.db.lexicalIndexedFileRefs, async () => {
+		await this.db.transaction("rw", this.db.lexicalIndexedFileRefs, async () => {
 			await this.db.lexicalIndexedFileRefs.clear();
 			await this.db.lexicalIndexedFileRefs.bulkAdd(refs);
 		});

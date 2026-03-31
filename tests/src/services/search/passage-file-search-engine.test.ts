@@ -21,6 +21,13 @@ let mockIndexedSnapshotEntries = new Map<
 	string,
 	{ text: string; generation?: number }
 >();
+const benchmarkCorpusRoot = path.join(
+	process.cwd(),
+	"benchmarks",
+	"corpora",
+	"web-notes-v2",
+);
+const benchmarkTest = fs.existsSync(benchmarkCorpusRoot) ? test : test.skip;
 
 function createMockTokenizer(): MockTokenizer {
 	return {
@@ -994,7 +1001,7 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("docs/exact-prefix-family.md");
 	});
 
-	test("uses a small prefix verifier lane to recover compact exact-family witnesses against benchmark competitors", async () => {
+	benchmarkTest("uses a small prefix verifier lane to recover compact exact-family witnesses against benchmark competitors", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument("tech-en/content/en/docs/concepts/configuration/secret.md"),
@@ -1303,7 +1310,7 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("docs/content/configmap.md");
 	});
 
-	test("prefers the richer configmap concept note over same-family stubs", async () => {
+	benchmarkTest("prefers the richer configmap concept note over same-family stubs", async () => {
 		const engine = createEngine();
 		const configmapContent = fs.readFileSync(
 			path.join(
@@ -1441,7 +1448,7 @@ describe("PassageFileSearchEngine", () => {
 		expect(results[0]?.path).toBe("tech-zh/configuration/configmap.md");
 	});
 
-	test("keeps secret first for the benchmark query data to secret", async () => {
+	benchmarkTest("keeps secret first for the benchmark query data to secret", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1473,7 +1480,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps ingress first for the benchmark query ingressclass to service", async () => {
+	benchmarkTest("keeps ingress first for the benchmark query ingressclass to service", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1502,7 +1509,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps ingress first for the benchmark query ingress service to", async () => {
+	benchmarkTest("keeps ingress first for the benchmark query ingress service to", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1534,7 +1541,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps namespaces first for the benchmark query namespace pod object", async () => {
+	benchmarkTest("keeps namespaces first for the benchmark query namespace pod object", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1566,7 +1573,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps configmap first for the benchmark query tech-zh pod data", async () => {
+	benchmarkTest("keeps configmap first for the benchmark query tech-zh pod data", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1598,7 +1605,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps configmap first for tech-zh pod data across the full concept set", async () => {
+	benchmarkTest("keeps configmap first for tech-zh pod data across the full concept set", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1649,7 +1656,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps configmap first for the body-title query configmap pod data", async () => {
+	benchmarkTest("keeps configmap first for the body-title query configmap pod data", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1681,7 +1688,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps secret first for secret pod data across the full concept set", async () => {
+	benchmarkTest("keeps secret first for secret pod data across the full concept set", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1722,7 +1729,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps service first for service pod traffic across the full concept set", async () => {
+	benchmarkTest("keeps service first for service pod traffic across the full concept set", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1763,7 +1770,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps deployment first for deployment pod rollout across the full concept set", async () => {
+	benchmarkTest("keeps deployment first for deployment pod rollout across the full concept set", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1804,7 +1811,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps ingress first for ingressclass service across the full concept set", async () => {
+	benchmarkTest("keeps ingress first for ingressclass service across the full concept set", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
@@ -1845,7 +1852,7 @@ describe("PassageFileSearchEngine", () => {
 		);
 	});
 
-	test("keeps zh ingress first for tech-zh ingress service to across the full concept set", async () => {
+	benchmarkTest("keeps zh ingress first for tech-zh ingress service to across the full concept set", async () => {
 		const engine = createEngine();
 		await engine.addDocuments([
 			loadBenchmarkDocument(
