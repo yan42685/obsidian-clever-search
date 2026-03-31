@@ -28,6 +28,7 @@ export type FileSnapshotStoreStatus = {
 
 @singleton()
 export class FileSnapshotStore {
+	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
 	private readonly vault = getInstance(Vault);
 	private readonly setting = getInstance(OuterSetting);
 	private readonly currentFileCache = new Map<string, CurrentFileCacheEntry>();
@@ -156,6 +157,37 @@ export class FileSnapshotStore {
 			return;
 		}
 		await this.database.db.fileSnapshots.bulkDelete(Array.from(filePaths));
+	}
+
+	async deleteIndexedSnapshotsNotIn(
+		validPaths: ReadonlySet<string>,
+	): Promise<void> {
+		let lastPath: string | null = null;
+		while (true) {
+			const rows: Array<{ filePath: string }> =
+				lastPath === null
+					? await this.database.db.fileSnapshots
+						.orderBy(":id")
+						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
+						.toArray()
+					: await this.database.db.fileSnapshots
+						.where(":id")
+						.above(lastPath)
+						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
+						.toArray();
+			if (rows.length === 0) {
+				return;
+			}
+
+			const stalePaths = rows
+				.map((row) => row.filePath)
+				.filter((path) => !validPaths.has(path));
+			if (stalePaths.length > 0) {
+				await this.deleteIndexedSnapshots(stalePaths);
+			}
+
+			lastPath = rows[rows.length - 1].filePath;
+		}
 	}
 
 	async getIndexedSnapshotTexts(

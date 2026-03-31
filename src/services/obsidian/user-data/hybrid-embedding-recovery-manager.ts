@@ -49,9 +49,7 @@ export function isAutoRetryHybridFailureKind(
 		kind === "network" ||
 		kind === "timeout" ||
 		kind === "provider_429" ||
-		kind === "provider_5xx" ||
-		kind === "auth_401" ||
-		kind === "auth_403"
+		kind === "provider_5xx"
 	);
 }
 

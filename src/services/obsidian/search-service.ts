@@ -74,10 +74,10 @@ export class SearchService {
 			return await this.searchInVaultLexical(queryText);
 		}
 
-		const dataManager = getInstance(DataManager);
-		if (dataManager.isHybridSearchUnavailable()) {
+		if (!this.hybridEngine.canServeQuery()) {
 			return await this.searchInVaultLexical(queryText);
 		}
+		const dataManager = getInstance(DataManager);
 		if (dataManager.hasHybridFailedEmbeddings()) {
 			return await this.searchInVaultLexical(queryText, {
 				hybridEmbeddingIncomplete: true,

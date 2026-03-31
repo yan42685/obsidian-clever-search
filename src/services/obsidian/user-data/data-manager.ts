@@ -22,7 +22,6 @@ import {
 	bm25ToBlob,
 	type ChunkRow,
 	type ChunkVectorShardRow,
-	type HybridFileSnapshotRow,
 	type HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import {
@@ -634,7 +633,7 @@ export class DataManager {
 			this.noticeHybridIndexFailures(failures);
 		}
 		this.setHybridSearchAvailability(
-			this.hybridEngine.canSearch() ? "available" : "blocked",
+			this.hybridEngine.canServeQuery() ? "available" : "blocked",
 		);
 	}
 
@@ -1228,7 +1227,14 @@ export class DataManager {
 				`hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
 			);
 			this.setHybridSearchAvailability(
-				this.hybridEngine.canSearch() ? "available" : "blocked",
+				this.hybridEngine.canServeQuery() ? "available" : "blocked",
+			);
+			this.enqueuePersistedHybridRecoveryRefs(
+				repairReport.previousIndexedFileRefs,
+				new Set<string>([
+					...docsToAdd.map((file) => file.path),
+					...docsToDelete,
+				]),
 			);
 			endHybridProfile({
 				failures: failures.length,
@@ -1246,6 +1252,7 @@ export class DataManager {
 	private async reindexLexicalEngineWithCurrFiles() {
 		logger.trace("Indexing the whole vault...");
 		const filesToIndex = this.dataProvider.allFilesToBeIndexed();
+		const indexedPaths = new Set<string>(filesToIndex.map((file) => file.path));
 		let size = 0;
 		for (const file of filesToIndex) size += file.stat.size;
 		size /= 1024;
@@ -1281,6 +1288,7 @@ export class DataManager {
 				generation: file.stat.mtime,
 			})),
 		);
+		await this.fileSnapshotStore.deleteIndexedSnapshotsNotIn(indexedPaths);
 		this.isLexicalEngineUpToDate = true;
 	}
 
@@ -1721,7 +1729,10 @@ export class DataManager {
 	}
 
 	isHybridSearchUnavailable(): boolean {
-		return this.hybridSearchAvailability === "blocked";
+		return (
+			this.hybridSearchAvailability === "blocked" ||
+			!this.hybridEngine.canServeQuery()
+		);
 	}
 
 	isSearchSearchable(): boolean {
@@ -2018,6 +2029,37 @@ export class DataManager {
 		eventBus.emit(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED);
 	}
 
+	private enqueuePersistedHybridRecoveryRefs(
+		previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>,
+		skipPaths: ReadonlySet<string>,
+	): void {
+		for (const ref of previousIndexedFileRefs.values()) {
+			if (
+				skipPaths.has(ref.path) ||
+				!this.canRetryHybridEmbeddingPath(ref.path)
+			) {
+				continue;
+			}
+			if (
+				ref.embeddingDeferred !== true &&
+				ref.state !== "bm25_only" &&
+				ref.state !== "failed"
+			) {
+				continue;
+			}
+
+			this.enqueueHybridRepair({
+				path: ref.path,
+				mode: ref.state === "failed" ? "full" : "incremental",
+				reason:
+					ref.embeddingDeferred === true
+						? "startup-resume-deferred-embedding"
+						: "startup-recover-persisted-state",
+				sourceGeneration: ref.generation ?? ref.updateTime,
+			});
+		}
+	}
+
 	private createHybridIndexProgressNotice(
 		docsToAdd: TFile[],
 		repairedPaths: number,
@@ -2107,32 +2149,6 @@ export class DataManager {
 			},
 		);
 
-		await this.scanRowsInBatches<HybridFileSnapshotRow, string>(
-			(lastPath, batchSize) => {
-				if (lastPath === null) {
-					return this.database.db.fileSnapshots
-						.orderBy(":id")
-						.limit(batchSize)
-						.toArray();
-				}
-				return this.database.db.fileSnapshots
-					.where(":id")
-					.above(lastPath)
-					.limit(batchSize)
-					.toArray();
-			},
-			(row) => row.filePath,
-			(rows) => {
-				for (const row of rows) {
-					const summary = this.getOrCreateHybridStoredPathSummary(
-						summaries,
-						row.filePath,
-					);
-					summary.snapshotGeneration = row.generation;
-				}
-			},
-		);
-
 		await this.scanRowsInBatches<ChunkVectorShardRow, string>(
 			(lastPath, batchSize) => {
 				if (lastPath === null) {
@@ -2190,6 +2206,30 @@ export class DataManager {
 				}
 			},
 		);
+
+		// Shared snapshots are not hybrid-owned; only inspect them for paths that
+		// already have hybrid-private rows or refs.
+		const summaryPaths = Array.from(summaries.keys());
+		for (
+			let start = 0;
+			start < summaryPaths.length;
+			start += DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE
+		) {
+			const batchPaths = summaryPaths.slice(
+				start,
+				start + DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+			);
+			const snapshotRows = await this.database.db.fileSnapshots.bulkGet(batchPaths);
+			for (const row of snapshotRows) {
+				if (!row) {
+					continue;
+				}
+				const summary = summaries.get(row.filePath);
+				if (summary) {
+					summary.snapshotGeneration = row.generation;
+				}
+			}
+		}
 
 		return summaries;
 	}

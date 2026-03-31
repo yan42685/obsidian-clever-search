@@ -18,8 +18,8 @@ export class FloatingWindowManager {
 	resetAllPositions() {
 		const uiSetting = getInstance(OuterSetting).ui;
 
-		uiSetting.inFileFloatingWindowLeft = "2.7em";
-		uiSetting.inFileFloatingWindowTop = "2.5em";
+		uiSetting.inFileFloatingWindowLeft = "2.5em";
+		uiSetting.inFileFloatingWindowTop = "2.7em";
 		getInstance(FloatingWindowManager).toggle("inFile");
 		getInstance(FloatingWindowManager).toggle("inFile");
 	}

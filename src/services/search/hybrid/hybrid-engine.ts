@@ -171,7 +171,6 @@ export class HybridEngine {
 
 		await Promise.all([
 			this.db.db.hybridChunks.clear(),
-			this.db.db.fileSnapshots.clear(),
 			this.db.db.hybridChunkVectors.clear(),
 			this.db.db.hybridBm25Index.clear(),
 			this.db.db.hybridHnswSmall.clear(),
@@ -185,6 +184,10 @@ export class HybridEngine {
 
 	isReady(): boolean { return this._ready; }
 	canSearch(): boolean { return this._canSearch; }
+	canServeQuery(): boolean {
+		// Hybrid should still answer through BM25 when dense vectors are unavailable.
+		return this._ready && (!this.isEmpty() || this._canSearch);
+	}
 	isEmpty(): boolean { return this.bm25.docCount === 0; }
 
 	getRuntimeMemoryEstimate(): HybridRuntimeMemoryEstimate {
@@ -264,7 +267,7 @@ export class HybridEngine {
 
 	async deleteFile(filePath: string, option: HybridWriteOption = {}): Promise<void> {
 		await this.withFileWriteLock(filePath, async () => {
-			await this.deleteStoredFileData(filePath, option);
+			await this.deleteStoredHybridPrivateData(filePath, option);
 		});
 	}
 
@@ -282,12 +285,10 @@ export class HybridEngine {
 				.where("filePath")
 				.equals(oldPath)
 				.toArray();
-			const snapshotRow = await this.db.db.fileSnapshots.get(oldPath);
 			const vectorRow = await this.db.db.hybridChunkVectors.get(oldPath);
 			const indexedFileRef = await this.db.db.hybridIndexedFileRefs.get(oldPath);
 			const hasStoredData =
 				chunkRows.length > 0 ||
-				snapshotRow !== undefined ||
 				vectorRow !== undefined ||
 				indexedFileRef !== undefined;
 			if (!hasStoredData) {
@@ -296,11 +297,10 @@ export class HybridEngine {
 
 			const hasTargetData =
 				(await this.db.db.hybridChunks.where("filePath").equals(newPath).count()) > 0 ||
-				(await this.db.db.fileSnapshots.get(newPath)) !== undefined ||
 				(await this.db.db.hybridChunkVectors.get(newPath)) !== undefined ||
 				(await this.db.db.hybridIndexedFileRefs.get(newPath)) !== undefined;
 			if (hasTargetData) {
-				await this.deleteStoredFileData(newPath, {
+				await this.deleteStoredHybridPrivateData(newPath, {
 					persistIndices: false,
 				});
 			}
@@ -312,14 +312,6 @@ export class HybridEngine {
 						filePath: newPath,
 					})),
 				);
-			}
-
-			if (snapshotRow) {
-				await this.db.db.fileSnapshots.put({
-					...snapshotRow,
-					filePath: newPath,
-				});
-				await this.db.db.fileSnapshots.delete(oldPath);
 			}
 
 			if (vectorRow) {
@@ -344,15 +336,15 @@ export class HybridEngine {
 		});
 	}
 
-	private async deleteStoredFileData(
+	private async deleteStoredHybridPrivateData(
 		filePath: string,
 		option: HybridWriteOption = {},
 	): Promise<void> {
+		// Shared fileSnapshots are owned by the lexical/file-snapshot layer.
 		const rows = await this.db.db.hybridChunks.where('filePath').equals(filePath).toArray();
 		const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
 		await this.db.db.hybridChunks.bulkDelete(ids);
-		await this.db.db.fileSnapshots.delete(filePath);
 		await this.db.db.hybridChunkVectors.delete(filePath);
 		if (option.deleteIndexedFileRef ?? true) {
 			await this.db.db.hybridIndexedFileRefs.delete(filePath);
@@ -449,7 +441,7 @@ export class HybridEngine {
 	): Promise<void> {
 		await this.withFileWriteLock(filePath, async () => {
 			if (!this.shouldIndexPath(filePath)) {
-				await this.deleteStoredFileData(filePath, option);
+				await this.deleteStoredHybridPrivateData(filePath, option);
 				return;
 			}
 
@@ -474,7 +466,10 @@ export class HybridEngine {
 				lastIncrementalEmbedAt: previousIndexedFileRef?.lastIncrementalEmbedAt,
 				embeddingDeferred: false,
 			});
-			await this.deleteStoredFileData(filePath, { ...option, deleteIndexedFileRef: false });
+			await this.deleteStoredHybridPrivateData(filePath, {
+				...option,
+				deleteIndexedFileRef: false,
+			});
 
 			const { chunks: rawChunks } = await profileHybridStage(
 				'index.chunk_file',
@@ -573,7 +568,7 @@ export class HybridEngine {
 				this._canSearch = true;
 				this.lastIndexingFallbackNoticeKey = null;
 			} catch (error) {
-				await this.deleteStoredFileData(filePath, {
+				await this.deleteStoredHybridPrivateData(filePath, {
 					persistIndices: false,
 					deleteIndexedFileRef: false,
 				});

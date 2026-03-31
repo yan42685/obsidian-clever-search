@@ -84,6 +84,7 @@ describe("SearchService bootstrap gate", () => {
 		mockNotices.length = 0;
 		mockHybridEngine = {
 			isEnabled: jest.fn().mockReturnValue(false),
+			canServeQuery: jest.fn().mockReturnValue(false),
 			search: jest.fn().mockResolvedValue([]),
 			consumeSearchFallbackNoticeKey: jest.fn().mockReturnValue(null),
 		};
@@ -101,6 +102,8 @@ describe("SearchService bootstrap gate", () => {
 	function createHarness(options: {
 		searchable: boolean;
 		hybridEnabled?: boolean;
+		hybridCanServeQuery?: boolean;
+		hybridUnavailable?: boolean;
 		lexicalMatches?: any[];
 		hybridItems?: any[];
 		lexicalBackend?: "minisearch" | "custom-bm25" | "passage-bm25" | "coverage-lexical";
@@ -163,11 +166,14 @@ describe("SearchService bootstrap gate", () => {
 			getSearchBootstrapNoticeKey: jest.fn(() =>
 				options.searchable ? null : "searchBootstrap.restoring",
 			),
-			isHybridSearchUnavailable: jest.fn(() => false),
+			isHybridSearchUnavailable: jest.fn(() => options.hybridUnavailable ?? false),
 			hasHybridFailedEmbeddings: jest.fn(() => false),
 		};
 
 		mockHybridEngine.isEnabled.mockReturnValue(options.hybridEnabled ?? false);
+		mockHybridEngine.canServeQuery.mockReturnValue(
+			options.hybridCanServeQuery ?? options.hybridEnabled ?? false,
+		);
 		mockHybridEngine.search.mockResolvedValue(options.hybridItems ?? []);
 		mockHybridEngine.consumeSearchFallbackNoticeKey.mockReturnValue(null);
 
@@ -263,6 +269,7 @@ describe("SearchService bootstrap gate", () => {
 		const { service, EngineType, FileItem } = createHarness({
 			searchable: true,
 			hybridEnabled: true,
+			hybridCanServeQuery: true,
 			hybridItems: [],
 		});
 		mockHybridEngine.search.mockResolvedValue([
@@ -281,5 +288,52 @@ describe("SearchService bootstrap gate", () => {
 		expect(mockHybridEngine.search).toHaveBeenCalledWith("hybrid");
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as any).path).toBe("notes/hybrid.md");
+	});
+
+	test("keeps hybrid search available when the engine can still serve BM25-only queries", async () => {
+		const { service, dataManager, EngineType, FileItem } = createHarness({
+			searchable: true,
+			hybridEnabled: true,
+			hybridCanServeQuery: true,
+			hybridUnavailable: true,
+		});
+		mockHybridEngine.search.mockResolvedValue([
+			new FileItem(
+				EngineType.SEMANTIC,
+				"notes/bm25-only.md",
+				["hybrid"],
+				["hybrid"],
+				[],
+				"nothing",
+			),
+		]);
+
+		const result = await service.searchInVaultHybrid("hybrid");
+
+		expect(dataManager.isHybridSearchUnavailable).not.toHaveBeenCalled();
+		expect(mockHybridEngine.search).toHaveBeenCalledWith("hybrid");
+		expect((result.items[0] as any).path).toBe("notes/bm25-only.md");
+	});
+
+	test("falls back to lexical when hybrid cannot serve any query yet", async () => {
+		const { service, lexicalEngine } = createHarness({
+			searchable: true,
+			hybridEnabled: true,
+			hybridCanServeQuery: false,
+			lexicalMatches: [
+				{
+					path: "notes/lexical-fallback.md",
+					queryTerms: ["hybrid"],
+					matchedTerms: ["hybrid"],
+					score: 1,
+				},
+			],
+		});
+
+		const result = await service.searchInVaultHybrid("hybrid");
+
+		expect(mockHybridEngine.search).not.toHaveBeenCalled();
+		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("hybrid", 22, 10, 60);
+		expect((result.items[0] as any).path).toBe("notes/lexical-fallback.md");
 	});
 });

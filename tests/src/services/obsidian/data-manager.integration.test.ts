@@ -146,6 +146,7 @@ import {
 } from "src/services/obsidian/user-data/data-manager";
 import { DataProvider } from "src/services/obsidian/user-data/data-provider";
 import {
+	DocDeleteOperation,
 	DocMoveOperation,
 	DocUpsertOperation,
 } from "src/services/obsidian/user-data/doc-operation-buffer";
@@ -235,6 +236,15 @@ function createMockFileSnapshotStore() {
 				persisted.delete(path);
 			}
 		}),
+		deleteIndexedSnapshotsNotIn: jest.fn(
+			async (validPaths: ReadonlySet<string>) => {
+				for (const path of Array.from(persisted.keys())) {
+					if (!validPaths.has(path)) {
+						persisted.delete(path);
+					}
+				}
+			},
+		),
 		getIndexedSnapshotTexts: jest.fn(
 			async (
 				paths: string[],
@@ -266,6 +276,7 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
 		moveFile: jest.fn(async () => true),
 		deleteFile: jest.fn(async () => {}),
 		canSearch: jest.fn(() => false),
+		canServeQuery: jest.fn(() => false),
 		getRuntimeMemoryEstimate: jest.fn(() => ({
 			vectorsBytes: 0,
 			graphBytes: 0,
@@ -642,6 +653,196 @@ describe("DataManager integration", () => {
 					bytes: 5120,
 				}),
 			]),
+		);
+	});
+
+	test("requeues persisted degraded hybrid refs after startup state restore", () => {
+		const setting = cloneSetting();
+		setting.hybrid.enabled = true;
+
+		const bm25File = createFile("docs/bm25.md", "bm25 body", 100);
+		const failedFile = createFile("docs/failed.md", "failed body", 110);
+		const deferredFile = createFile("docs/deferred.md", "deferred body", 120);
+		const skippedFile = createFile("docs/skipped.md", "skipped body", 130);
+		const files = new Map<string, TFile>([
+			[bm25File.path, bm25File],
+			[failedFile.path, failedFile],
+			[deferredFile.path, deferredFile],
+			[skippedFile.path, skippedFile],
+		]);
+		const texts = new Map<string, string>([
+			[bm25File.path, "bm25 body"],
+			[failedFile.path, "failed body"],
+			[deferredFile.path, "deferred body"],
+			[skippedFile.path, "skipped body"],
+		]);
+
+		const database = createMockDatabase();
+		const dataProvider = createMockDataProvider({ files, texts });
+		const lexicalEngine = createMockLexicalEngine();
+		const fileSnapshotStore = createMockFileSnapshotStore();
+		const hybridEngine = createMockHybridEngine();
+
+		registerDataManagerDeps({
+			setting,
+			pluginFiles: Array.from(files.values()),
+			database,
+			dataProvider,
+			lexicalEngine,
+			fileSnapshotStore,
+			hybridEngine,
+		});
+
+		const manager = container.resolve(DataManager);
+		const scheduleSpy = jest
+			.spyOn(manager as any, "scheduleHybridRepairFlush")
+			.mockImplementation(() => {});
+
+		(manager as any).enqueuePersistedHybridRecoveryRefs(
+			new Map([
+				[
+					bm25File.path,
+					{
+						path: bm25File.path,
+						updateTime: bm25File.stat.mtime,
+						state: "bm25_only",
+						lastErrorKind: "auth_403",
+					},
+				],
+				[
+					failedFile.path,
+					{
+						path: failedFile.path,
+						updateTime: failedFile.stat.mtime,
+						state: "failed",
+						lastErrorKind: "auth_401",
+					},
+				],
+				[
+					deferredFile.path,
+					{
+						path: deferredFile.path,
+						updateTime: deferredFile.stat.mtime,
+						state: "bm25_only",
+						embeddingDeferred: true,
+					},
+				],
+				[
+					skippedFile.path,
+					{
+						path: skippedFile.path,
+						updateTime: skippedFile.stat.mtime,
+						state: "bm25_only",
+					},
+				],
+			]),
+			new Set<string>([skippedFile.path]),
+		);
+
+		expect((manager as any).hybridRepairQueue.get(bm25File.path)).toMatchObject({
+			path: bm25File.path,
+			mode: "incremental",
+			reason: "startup-recover-persisted-state",
+			sourceGeneration: bm25File.stat.mtime,
+		});
+		expect((manager as any).hybridRepairQueue.get(failedFile.path)).toMatchObject({
+			path: failedFile.path,
+			mode: "full",
+			reason: "startup-recover-persisted-state",
+			sourceGeneration: failedFile.stat.mtime,
+		});
+		expect((manager as any).hybridRepairQueue.get(deferredFile.path)).toMatchObject({
+			path: deferredFile.path,
+			mode: "incremental",
+			reason: "startup-resume-deferred-embedding",
+			sourceGeneration: deferredFile.stat.mtime,
+		});
+		expect((manager as any).hybridRepairQueue.has(skippedFile.path)).toBe(false);
+		expect(scheduleSpy).toHaveBeenCalled();
+	});
+
+	test("real delete path still removes shared snapshots before dropping hybrid state", async () => {
+		const setting = cloneSetting();
+		setting.hybrid.enabled = true;
+
+		const file = createFile("docs/delete-me.md", "delete me", 200);
+		const files = new Map<string, TFile>();
+		const texts = new Map<string, string>();
+
+		const database = createMockDatabase();
+		const dataProvider = createMockDataProvider({ files, texts });
+		const lexicalEngine = createMockLexicalEngine();
+		const fileSnapshotStore = createMockFileSnapshotStore();
+		fileSnapshotStore.persisted.set(file.path, {
+			text: "delete me",
+			generation: file.stat.mtime,
+		});
+		const hybridEngine = createMockHybridEngine();
+
+		registerDataManagerDeps({
+			setting,
+			pluginFiles: [],
+			database,
+			dataProvider,
+			lexicalEngine,
+			fileSnapshotStore,
+			hybridEngine,
+		});
+
+		const manager = container.resolve(DataManager);
+		(manager as any).scheduleHybridRepairFlush = jest.fn();
+		manager.receiveDocOperation(new DocDeleteOperation(file.path));
+		await (manager as any).docOperationsBuffer.forceFlush();
+
+		expect(fileSnapshotStore.persisted.has(file.path)).toBe(false);
+		expect(fileSnapshotStore.deleteIndexedSnapshots).toHaveBeenCalledWith([file.path]);
+		expect(hybridEngine.deleteFile).toHaveBeenCalledWith(file.path);
+	});
+
+	test("full lexical reindex prunes stale shared snapshots after rewriting current ones", async () => {
+		const setting = cloneSetting();
+		setting.hybrid.enabled = false;
+
+		const liveFile = createFile("docs/live.md", "live body", 320);
+		const files = new Map<string, TFile>([[liveFile.path, liveFile]]);
+		const texts = new Map<string, string>([[liveFile.path, "live body"]]);
+
+		const database = createMockDatabase();
+		const dataProvider = createMockDataProvider({ files, texts });
+		const lexicalEngine = createMockLexicalEngine();
+		const fileSnapshotStore = createMockFileSnapshotStore();
+		fileSnapshotStore.current.set(liveFile.path, {
+			text: "live body",
+			generation: liveFile.stat.mtime,
+		});
+		fileSnapshotStore.persisted.set("docs/stale.md", {
+			text: "stale body",
+			generation: 100,
+		});
+		const hybridEngine = createMockHybridEngine({
+			isEnabled: jest.fn(() => false),
+		});
+
+		registerDataManagerDeps({
+			setting,
+			pluginFiles: [liveFile],
+			database,
+			dataProvider,
+			lexicalEngine,
+			fileSnapshotStore,
+			hybridEngine,
+		});
+
+		const manager = container.resolve(DataManager);
+		await (manager as any).reindexLexicalEngineWithCurrFiles();
+
+		expect(fileSnapshotStore.persisted.get(liveFile.path)).toEqual({
+			text: "live body",
+			generation: liveFile.stat.mtime,
+		});
+		expect(fileSnapshotStore.persisted.has("docs/stale.md")).toBe(false);
+		expect(fileSnapshotStore.deleteIndexedSnapshotsNotIn).toHaveBeenCalledWith(
+			new Set([liveFile.path]),
 		);
 	});
 });
