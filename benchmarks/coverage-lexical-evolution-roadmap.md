@@ -42,7 +42,7 @@ Every retained change should be evaluated against the same four anchors:
 - `Phase 0` is complete:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
   - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step1.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step2.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is complete for the current plan slice:
   - maintained query-time document caches landed
@@ -61,6 +61,11 @@ Every retained change should be evaluated against the same four anchors:
     - `bodyPhrasePostings`
     - `metadataPostings`
   - the reverse lookup for numeric postings is now array-backed rather than map-backed
+  - recall candidate collection now stays canonical-keyed internally and projects back to paths only at the API boundary
+  - current benchmark interpretation:
+    - quality is unchanged
+    - size is unchanged
+    - latency ratio regressed vs Step 2, which indicates the remaining path-keyed field/tag/char postings are still paying too much mixed-layout overhead
 - immediate rule:
   - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
 
@@ -265,11 +270,13 @@ Executable checklist:
      - `bodyPostings`
      - `bodyPhrasePostings`
      - `metadataPostings`
+   - landed next:
+     - recall-side canonical candidate merging for mixed posting shapes
    - still pending:
      - field-specific metadata postings
      - tag postings
      - char postings
-   - done when the hottest posting buckets are numeric-first rather than string-first
+   - done when the hottest posting buckets are numeric-first rather than string-first and recall no longer needs to bridge two high-cardinality identity representations in the hot path
 3. centralize strings
    - create a shared representation for path, basename, folder, tag, and term strings
    - avoid retaining the same strings in multiple high-cardinality structures
@@ -388,8 +395,8 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. treat the Phase 3 Step 2 anchor as the new comparison point for future work
-3. keep pushing the remaining hot recall structures toward doc-id-native storage before starting snapshot format work
+2. treat the Phase 3 Step 3 anchor as the new comparison point for future work
+3. keep pushing the remaining field-specific metadata, tag, and char postings toward doc-id-native storage before expecting a latency win from the canonical recall path
 4. build binary snapshot + startup self-heal on top of the Phase 3 layout
 5. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 

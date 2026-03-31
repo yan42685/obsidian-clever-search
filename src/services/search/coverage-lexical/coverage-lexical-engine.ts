@@ -240,6 +240,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
 				metadataTagPostings: this.metadataTagPostings,
 				sortedLexicon: this.sortedLexicon,
+				documentIdByPath: this.documentIdByPath,
 				documentPathById: this.documentPathById,
 				documentBodyTokensByPath: this.documentBodyTokensByPath,
 				documentTagValuesByPath: this.documentTagValuesByPath,

@@ -282,6 +282,7 @@ describe("coverage lexical recall suite", () => {
 					metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
 					metadataTagPostings: engineAny.metadataTagPostings,
 					sortedLexicon: engineAny.sortedLexicon,
+					documentIdByPath: engineAny.documentIdByPath,
 					documentPathById: engineAny.documentPathById,
 					documentBodyTokensByPath: engineAny.documentBodyTokensByPath,
 					documentTagValuesByPath: engineAny.documentTagValuesByPath,

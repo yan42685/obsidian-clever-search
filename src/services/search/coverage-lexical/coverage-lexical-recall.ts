@@ -21,6 +21,7 @@ import type {
 
 type CoverageLexicalPostingList = ReadonlySet<string> | readonly number[];
 type CoverageLexicalPostingMap = ReadonlyMap<string, CoverageLexicalPostingList>;
+type CoverageLexicalCandidateKey = string | number;
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: CoverageLexicalPostingMap;
@@ -50,6 +51,7 @@ type CoverageLexicalRecallIndex = {
 	metadataTagPhrasePostings: CoverageLexicalPostingMap;
 	metadataTagPostings: CoverageLexicalPostingMap;
 	sortedLexicon: readonly string[];
+	documentIdByPath?: ReadonlyMap<string, number>;
 	documentPathById?: readonly (string | undefined)[];
 	documentBodyTokensByPath: ReadonlyMap<string, readonly string[]>;
 	documentTagValuesByPath: ReadonlyMap<string, readonly string[]>;
@@ -98,12 +100,14 @@ type CoverageLexicalCheapLaneSignal = {
 };
 
 type CoverageLexicalCheapLaneCandidate = {
+	key: CoverageLexicalCandidateKey;
 	path: string;
 	state: CoverageLexicalCandidateState;
 	signal: CoverageLexicalCheapLaneSignal;
 };
 
 type CoverageLexicalLaneEvaluation = {
+	key: CoverageLexicalCandidateKey;
 	path: string;
 	state: CoverageLexicalCandidateState;
 	hardAnchorMetadata: CoverageLexicalGroupSignal;
@@ -218,8 +222,11 @@ function collectCoverageLexicalCandidateStatesInternal(
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): Map<string, CoverageLexicalCandidateState> {
 	const queryCache = createCoverageLexicalQueryCache();
-	const aggregateCandidates = new Map<string, CoverageLexicalCandidateState>();
-	const admittedPaths = new Set<string>();
+	const aggregateCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
+	const admittedKeys = new Set<CoverageLexicalCandidateKey>();
 
 	runStrictMetadataLane(
 		index,
@@ -229,7 +236,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		charQuery,
 		queryCache,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 	runCharFallbackLane(
@@ -240,7 +247,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		charQuery,
 		queryCache,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 	runStrictHybridLane(
@@ -251,7 +258,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		charQuery,
 		queryCache,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 	runRelaxedHybridLane(
@@ -262,7 +269,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		charQuery,
 		queryCache,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 	runLocalBodyLane(
@@ -273,7 +280,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 		charQuery,
 		queryCache,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 	runBridgeLane(
@@ -284,16 +291,18 @@ function collectCoverageLexicalCandidateStatesInternal(
 		charQuery,
 		queryCache,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 
 	const admittedCandidates = new Map<string, CoverageLexicalCandidateState>();
-	for (const path of admittedPaths) {
-		const state = aggregateCandidates.get(path);
-		if (state) {
-			admittedCandidates.set(path, state);
+	for (const key of admittedKeys) {
+		const state = aggregateCandidates.get(key);
+		const path = resolveCandidatePath(index, key);
+		if (!state || !path) {
+			continue;
 		}
+		mergeCandidateStateInto(admittedCandidates, path, state);
 	}
 	return admittedCandidates;
 }
@@ -305,14 +314,17 @@ function runStrictMetadataLane(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (plan.hardAnchorFamilies.length === 0) {
 		return;
 	}
-	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const laneCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
 	const anchorFamilies = [
 		...plan.hardAnchorFamilies,
 		...plan.optionalFamilies.filter((family) => family.role === "anchor"),
@@ -344,7 +356,7 @@ function runStrictMetadataLane(
 		queryCache,
 		laneCandidates,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 }
@@ -356,8 +368,8 @@ function runStrictHybridLane(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (
@@ -366,7 +378,10 @@ function runStrictHybridLane(
 	) {
 		return;
 	}
-	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const laneCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
 	collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
 		scope: "metadata-only",
 		includePrefix: request.isPrefixMatch,
@@ -411,7 +426,7 @@ function runStrictHybridLane(
 		queryCache,
 		laneCandidates,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 }
@@ -423,8 +438,8 @@ function runRelaxedHybridLane(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (
@@ -433,7 +448,10 @@ function runRelaxedHybridLane(
 	) {
 		return;
 	}
-	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const laneCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
 	collectFamilySetCandidates(index, laneCandidates, plan.hardAnchorFamilies, {
 		scope: "metadata-only",
 		includePrefix: request.isPrefixMatch,
@@ -482,7 +500,7 @@ function runRelaxedHybridLane(
 		queryCache,
 		laneCandidates,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 }
@@ -494,8 +512,8 @@ function runLocalBodyLane(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	const localBodyFamilies = [
@@ -506,7 +524,10 @@ function runLocalBodyLane(
 	if (localBodyFamilies.length === 0) {
 		return;
 	}
-	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const laneCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
 	collectFamilySetCandidates(index, laneCandidates, localBodyFamilies, {
 		scope: "body-only",
 		includePrefix: request.isPrefixMatch,
@@ -534,7 +555,7 @@ function runLocalBodyLane(
 		queryCache,
 		laneCandidates,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 }
@@ -546,14 +567,17 @@ function runBridgeLane(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (plan.bridgeFamilies.length === 0) {
 		return;
 	}
-	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const laneCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
 	collectFamilySetCandidates(
 		index,
 		laneCandidates,
@@ -596,7 +620,7 @@ function runBridgeLane(
 		queryCache,
 		laneCandidates,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 }
@@ -608,14 +632,17 @@ function runCharFallbackLane(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (charQuery.hanSegments.length === 0) {
 		return;
 	}
-	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const laneCandidates = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
 	collectCharCandidates(
 		index,
 		index.bodyCharPostings,
@@ -654,7 +681,7 @@ function runCharFallbackLane(
 		queryCache,
 		laneCandidates,
 		aggregateCandidates,
-		admittedPaths,
+		admittedKeys,
 		debug,
 	);
 }
@@ -667,30 +694,31 @@ function admitLaneCandidates(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
-	laneCandidates: Map<string, CoverageLexicalCandidateState>,
-	aggregateCandidates: Map<string, CoverageLexicalCandidateState>,
-	admittedPaths: Set<string>,
+	laneCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	aggregateCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
 	if (laneCandidates.size === 0) {
 		recordLaneDebug(debug, laneName, 0, [], [], []);
 		return;
 	}
-	for (const [path, state] of laneCandidates) {
-		mergeCandidateStateInto(aggregateCandidates, path, state);
+	for (const [key, state] of laneCandidates) {
+		mergeCandidateStateInto(aggregateCandidates, key, state);
 	}
 
 	const budget = computeLaneBudget(laneName, plan, request);
 	const preselected = preselectLaneCandidates(
 		laneName,
 		laneCandidates,
+		index,
 		plan,
 		request,
 	);
 	const evaluations = preselected
-		.map(([path, state]) =>
+		.map(([key, state]) =>
 			buildLaneEvaluation(
-				path,
+				key,
 				state,
 				plan,
 				phraseSignatures,
@@ -704,14 +732,16 @@ function admitLaneCandidates(
 		.sort((left, right) => compareLaneEvaluations(laneName, left, right, plan));
 	const admitted = evaluations.slice(0, budget);
 	for (const evaluation of admitted) {
-		admittedPaths.add(evaluation.path);
+		admittedKeys.add(evaluation.key);
 	}
 	recordLaneDebug(
 		debug,
 		laneName,
 		laneCandidates.size,
-		Array.from(laneCandidates.keys()),
-		preselected.map(([path]) => path),
+		mapCandidateKeysToPaths(index, laneCandidates.keys()),
+		preselected
+			.map(([key]) => resolveCandidatePath(index, key))
+			.filter(isNonEmptyString),
 		admitted.map((evaluation) => evaluation.path),
 	);
 }
@@ -751,13 +781,15 @@ function computeLaneBudget(
 
 function preselectLaneCandidates(
 	laneName: CoverageLexicalLaneName,
-	laneCandidates: Map<string, CoverageLexicalCandidateState>,
+	laneCandidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	index: CoverageLexicalRecallIndex,
 	plan: CoverageLexicalPlan,
 	request: FileSearchRequest,
-): Array<[string, CoverageLexicalCandidateState]> {
+): Array<[CoverageLexicalCandidateKey, CoverageLexicalCandidateState]> {
 	const entries = Array.from(laneCandidates.entries()).map(
-		([path, state]): CoverageLexicalCheapLaneCandidate => ({
-			path,
+		([key, state]): CoverageLexicalCheapLaneCandidate => ({
+			key,
+			path: resolveCandidatePath(index, key) ?? String(key),
 			state,
 			signal: buildCheapLaneSignal(state, plan),
 		}),
@@ -768,13 +800,13 @@ function preselectLaneCandidates(
 		Math.max(budget * 6, request.maxItemResults * 8, 48),
 	);
 	if (entries.length <= prefilterBudget) {
-		return entries.map(({ path, state }) => [path, state]);
+		return entries.map(({ key, state }) => [key, state]);
 	}
 	const sorted = entries.sort((left, right) =>
 		compareCheapLaneCandidates(laneName, left, right),
 	);
 	const selected = sorted.slice(0, prefilterBudget);
-	const selectedPaths = new Set(selected.map(({ path }) => path));
+	const selectedKeys = new Set(selected.map(({ key }) => key));
 	const cutoff = selected.length > 0 ? selected[selected.length - 1] : null;
 	if (cutoff) {
 		for (let index = prefilterBudget; index < sorted.length; index += 1) {
@@ -783,7 +815,7 @@ function preselectLaneCandidates(
 				break;
 			}
 			selected.push(candidate);
-			selectedPaths.add(candidate.path);
+			selectedKeys.add(candidate.key);
 		}
 	}
 	const witnessFloorAllowance = computeWitnessFloorAllowance(
@@ -793,21 +825,21 @@ function preselectLaneCandidates(
 	if (witnessFloorAllowance > 0) {
 		let added = 0;
 		for (const candidate of sorted) {
-			if (selectedPaths.has(candidate.path)) {
+			if (selectedKeys.has(candidate.key)) {
 				continue;
 			}
 			if (!shouldProtectCheapWitnessFloor(laneName, candidate.signal, plan)) {
 				continue;
 			}
 			selected.push(candidate);
-			selectedPaths.add(candidate.path);
+			selectedKeys.add(candidate.key);
 			added += 1;
 			if (added >= witnessFloorAllowance) {
 				break;
 			}
 		}
 	}
-	return selected.map(({ path, state }) => [path, state]);
+	return selected.map(({ key, state }) => [key, state]);
 }
 
 function compareCheapLaneCandidates(
@@ -962,7 +994,7 @@ function shouldProtectCheapWitnessFloor(
 }
 
 function buildLaneEvaluation(
-	path: string,
+	key: CoverageLexicalCandidateKey,
 	state: CoverageLexicalCandidateState,
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
@@ -970,6 +1002,10 @@ function buildLaneEvaluation(
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 ): CoverageLexicalLaneEvaluation | null {
+	const path = resolveCandidatePath(index, key);
+	if (!path) {
+		return null;
+	}
 	const phraseMatchCount = state.phraseMatches.size;
 	const phraseMatchWeight = Array.from(state.phraseMatches).reduce(
 		(total, signatureIndex) =>
@@ -979,6 +1015,7 @@ function buildLaneEvaluation(
 	const tokens = index.documentBodyTokensByPath.get(path) ?? [];
 	const tagFallback = getOrCreateTagFallback(path, index, charQuery, queryCache);
 	return {
+		key,
 		path,
 		state,
 		hardAnchorMetadata: buildGroupSignal(
@@ -1268,7 +1305,7 @@ function mergeMatchMaps(
 
 function collectFamilySetCandidates(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	families: readonly CoverageLexicalFamily[],
 	options: {
 		scope: CoverageLexicalCollectionScope;
@@ -1323,7 +1360,7 @@ function collectCharCandidates(
 	index: CoverageLexicalRecallIndex,
 	postingsByTerm: CoverageLexicalPostingMap | undefined,
 	queryTerms: readonly string[],
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	target: "body" | "metadata" | "tag",
 ): void {
 	if (!postingsByTerm) {
@@ -1334,8 +1371,8 @@ function collectCharCandidates(
 		if (!matches) {
 			continue;
 		}
-		forEachPostingPath(index, matches, (path) => {
-			const state = getOrCreateCandidateState(candidates, path);
+		forEachPostingCandidateKey(index, matches, (key) => {
+			const state = getOrCreateCandidateState(candidates, key);
 			if (target === "body") {
 				state.bodyCharTerms.add(term);
 				return;
@@ -1353,7 +1390,7 @@ function collectTagExactCandidates(
 	index: CoverageLexicalRecallIndex,
 	postingsByTag: CoverageLexicalPostingMap | undefined,
 	querySegments: readonly string[],
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 ): void {
 	if (!postingsByTag) {
 		return;
@@ -1363,8 +1400,8 @@ function collectTagExactCandidates(
 		if (!matches) {
 			continue;
 		}
-		forEachPostingPath(index, matches, (path) => {
-			const state = getOrCreateCandidateState(candidates, path);
+		forEachPostingCandidateKey(index, matches, (key) => {
+			const state = getOrCreateCandidateState(candidates, key);
 			state.tagExactTerms.add(term);
 		});
 	}
@@ -1372,7 +1409,7 @@ function collectTagExactCandidates(
 
 function collectPhraseCandidates(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signatures: readonly CoverageLexicalPhraseSignature[],
 	targetFamilyIndices: ReadonlySet<number>,
 	scope: CoverageLexicalCollectionScope,
@@ -1424,7 +1461,7 @@ function dedupeFamilies(
 
 function collectCandidatesForTerm(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	familyIndex: number,
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
@@ -1433,8 +1470,8 @@ function collectCandidatesForTerm(
 	if (scope !== "metadata-only") {
 		const bodyMatches = index.bodyPostings.get(term);
 		if (bodyMatches) {
-			forEachPostingPath(index, bodyMatches, (path) => {
-				const state = getOrCreateCandidateState(candidates, path);
+			forEachPostingCandidateKey(index, bodyMatches, (key) => {
+				const state = getOrCreateCandidateState(candidates, key);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
 			});
 		}
@@ -1452,7 +1489,7 @@ function collectCandidatesForTerm(
 
 function collectCandidatesForPhraseSignature(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 	scope: CoverageLexicalCollectionScope,
 ): void {
@@ -1460,8 +1497,8 @@ function collectCandidatesForPhraseSignature(
 		if (scope !== "metadata-only" && !signature.preferredFields?.length) {
 			const bodyTokenMatches = index.bodyPostings.get(variant);
 			if (bodyTokenMatches) {
-				forEachPostingPath(index, bodyTokenMatches, (path) => {
-					const state = getOrCreateCandidateState(candidates, path);
+				forEachPostingCandidateKey(index, bodyTokenMatches, (key) => {
+					const state = getOrCreateCandidateState(candidates, key);
 					state.phraseMatches.add(signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
@@ -1470,8 +1507,8 @@ function collectCandidatesForPhraseSignature(
 			}
 			const bodyPhraseMatches = index.bodyPhrasePostings.get(variant);
 			if (bodyPhraseMatches) {
-				forEachPostingPath(index, bodyPhraseMatches, (path) => {
-					const state = getOrCreateCandidateState(candidates, path);
+				forEachPostingCandidateKey(index, bodyPhraseMatches, (key) => {
+					const state = getOrCreateCandidateState(candidates, key);
 					state.phraseMatches.add(signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
@@ -1487,8 +1524,8 @@ function collectCandidatesForPhraseSignature(
 		if (!signature.preferredFields || signature.preferredFields.length === 0) {
 			const metadataTokenMatches = index.metadataPostings.get(variant);
 			if (metadataTokenMatches) {
-				forEachPostingPath(index, metadataTokenMatches, (path) => {
-					const state = getOrCreateCandidateState(candidates, path);
+				forEachPostingCandidateKey(index, metadataTokenMatches, (key) => {
+					const state = getOrCreateCandidateState(candidates, key);
 					state.phraseMatches.add(signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
@@ -1508,24 +1545,24 @@ function collectCandidatesForPhraseSignature(
 	}
 }
 
-function getOrCreateCandidateState(
-	candidates: Map<string, CoverageLexicalCandidateState>,
-	path: string,
+function getOrCreateCandidateState<TKey extends CoverageLexicalCandidateKey>(
+	candidates: Map<TKey, CoverageLexicalCandidateState>,
+	key: TKey,
 ): CoverageLexicalCandidateState {
-	let state = candidates.get(path);
+	let state = candidates.get(key);
 	if (!state) {
 		state = createEmptyCandidateState();
-		candidates.set(path, state);
+		candidates.set(key, state);
 	}
 	return state;
 }
 
-function mergeCandidateStateInto(
-	candidates: Map<string, CoverageLexicalCandidateState>,
-	path: string,
+function mergeCandidateStateInto<TKey extends CoverageLexicalCandidateKey>(
+	candidates: Map<TKey, CoverageLexicalCandidateState>,
+	key: TKey,
 	nextState: CoverageLexicalCandidateState,
 ): void {
-	const target = getOrCreateCandidateState(candidates, path);
+	const target = getOrCreateCandidateState(candidates, key);
 	for (const [familyIndex, kind] of nextState.bodyMatches) {
 		if (!kind) {
 			continue;
@@ -1567,7 +1604,7 @@ function mergeCandidateStateInto(
 
 function collectAnyMetadataPhraseMatches(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 	variant: string,
 ): void {
@@ -1583,8 +1620,8 @@ function collectAnyMetadataPhraseMatches(
 		if (!matches) {
 			continue;
 		}
-		forEachPostingPath(index, matches, (path) => {
-			const state = getOrCreateCandidateState(candidates, path);
+		forEachPostingCandidateKey(index, matches, (key) => {
+			const state = getOrCreateCandidateState(candidates, key);
 			state.phraseMatches.add(signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
@@ -1610,7 +1647,7 @@ function createEmptyCandidateState(): CoverageLexicalCandidateState {
 
 function collectMetadataFieldCandidatesForTerm(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	familyIndex: number,
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
@@ -1632,8 +1669,8 @@ function collectMetadataFieldCandidatesForTerm(
 		if (!matches) {
 			continue;
 		}
-		forEachPostingPath(index, matches, (path) => {
-			const state = getOrCreateCandidateState(candidates, path);
+		forEachPostingCandidateKey(index, matches, (key) => {
+			const state = getOrCreateCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
 		});
@@ -1642,15 +1679,15 @@ function collectMetadataFieldCandidatesForTerm(
 	if (!metadataMatches) {
 		return;
 	}
-	forEachPostingPath(index, metadataMatches, (path) => {
-		const state = getOrCreateCandidateState(candidates, path);
+	forEachPostingCandidateKey(index, metadataMatches, (key) => {
+		const state = getOrCreateCandidateState(candidates, key);
 		recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 	});
 }
 
 function collectPreferredMetadataPhraseMatches(
 	index: CoverageLexicalRecallIndex,
-	candidates: Map<string, CoverageLexicalCandidateState>,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 	variant: string,
 ): void {
@@ -1674,8 +1711,8 @@ function collectPreferredMetadataPhraseMatches(
 		if (!matches) {
 			continue;
 		}
-		forEachPostingPath(index, matches, (path) => {
-			const state = getOrCreateCandidateState(candidates, path);
+		forEachPostingCandidateKey(index, matches, (key) => {
+			const state = getOrCreateCandidateState(candidates, key);
 			state.phraseMatches.add(signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
@@ -1685,22 +1722,59 @@ function collectPreferredMetadataPhraseMatches(
 	}
 }
 
-function forEachPostingPath(
+function canonicalizeCandidateKey(
+	index: CoverageLexicalRecallIndex,
+	key: CoverageLexicalCandidateKey,
+): CoverageLexicalCandidateKey {
+	if (typeof key === "number") {
+		return key;
+	}
+	return index.documentIdByPath?.get(key) ?? key;
+}
+
+function resolveCandidatePath(
+	index: CoverageLexicalRecallIndex,
+	key: CoverageLexicalCandidateKey,
+): string | null {
+	if (typeof key === "number") {
+		return index.documentPathById?.[key] ?? null;
+	}
+	return key;
+}
+
+function mapCandidateKeysToPaths(
+	index: CoverageLexicalRecallIndex,
+	keys: Iterable<CoverageLexicalCandidateKey>,
+): string[] {
+	const out: string[] = [];
+	for (const key of keys) {
+		const path = resolveCandidatePath(index, key);
+		if (path) {
+			out.push(path);
+		}
+	}
+	return out;
+}
+
+function isNonEmptyString(value: string | null | undefined): value is string {
+	return typeof value === "string" && value.length > 0;
+}
+
+function forEachPostingCandidateKey(
 	index: CoverageLexicalRecallIndex,
 	postings: CoverageLexicalPostingList,
-	visitor: (path: string) => void,
+	visitor: (key: CoverageLexicalCandidateKey) => void,
 ): void {
 	if (Array.isArray(postings)) {
 		for (const docId of postings) {
-			const path = index.documentPathById?.[docId];
-			if (path) {
-				visitor(path);
+			if (index.documentPathById?.[docId]) {
+				visitor(docId);
 			}
 		}
 		return;
 	}
 	for (const path of postings as ReadonlySet<string>) {
-		visitor(path);
+		visitor(canonicalizeCandidateKey(index, path));
 	}
 }
 
