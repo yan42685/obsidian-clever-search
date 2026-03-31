@@ -40,12 +40,17 @@ Every retained change should be evaluated against the same four anchors:
 ## Current Status
 
 - `Phase 0` is complete:
-  - benchmark anchor is fixed in `benchmarks/coverage-lexical-size-latency-baseline.md`
+  - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase2.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
-- `Phase 1` has started:
+- `Phase 1` is complete for the current plan slice:
   - maintained query-time document caches landed
   - coarse-result reuse landed
   - lane prefilter guardrail logging landed
+- `Phase 2` has materially advanced:
+  - aggregate metadata phrase storage was removed
+  - canonical phrase storage landed
+  - quality stayed benchmark-clean while the size ratio moved much closer to `MiniSearch`
 - immediate rule:
   - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
 
@@ -78,7 +83,8 @@ Goal:
 
 Required work:
 
-- keep `benchmarks/coverage-lexical-size-latency-baseline.md` as the active anchor
+- keep a single explicitly named active anchor file
+- preserve older anchor files when major optimization waves finish
 - keep the automation benchmark command stable unless there is an explicit benchmark redesign
 - record timing ratios in benchmark output, not just absolute milliseconds
 - preserve benchmark corpus size and suite counts unless a benchmark-hardening change is intentional and documented
@@ -362,11 +368,10 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. finish Phase 1 with conservative lane rules before shrinking any prefilter budgets
-3. compress phrase-heavy storage in Phase 2 without weakening protected quality slices
-4. redesign the live index around doc-id and numeric-first storage in Phase 3
-5. build binary snapshot + startup self-heal on top of the Phase 3 layout
-6. only add a local gitignored stress harness if a future prefilter change needs stronger validation
+2. treat the Phase 2 anchor as the new comparison point for future work
+3. redesign the live index around doc-id and numeric-first storage in Phase 3
+4. build binary snapshot + startup self-heal on top of the Phase 3 layout
+5. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 
 ## Working Rule
 
