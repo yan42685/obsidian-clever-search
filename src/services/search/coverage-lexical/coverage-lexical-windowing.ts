@@ -5,6 +5,11 @@ import type {
 	CoverageLexicalLocalWindowSignal,
 	CoverageLexicalPairSignature,
 } from "./coverage-lexical-types";
+import {
+	buildCoverageLexicalBodyEvidenceTrace,
+	type CoverageLexicalBodyEvidenceTrace,
+	type CoverageLexicalFamilyTokenMatch,
+} from "./coverage-lexical-body-evidence";
 
 const MIN_WINDOW_SIZE = 8;
 const MAX_WINDOW_SIZE = 48;
@@ -14,15 +19,11 @@ const MAX_COVER_HIT_SPAN = 8;
 const MINIMAL_WINDOW_PADDING = 4;
 const EXPANDED_WINDOW_PADDING = 10;
 
-type FamilyTokenMatch = {
-	familyIndex: number;
-	kind: Exclude<CoverageFamilyMatchKind, null>;
-};
-
 export function buildCoverageLexicalLocalWindowSignals(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
+	bodyEvidenceTrace?: CoverageLexicalBodyEvidenceTrace,
 ): CoverageLexicalLocalWindowSignal[] {
 	return buildCoverageLexicalWindowSignalsInternal(
 		tokens,
@@ -30,6 +31,12 @@ export function buildCoverageLexicalLocalWindowSignals(
 		pairSignatures,
 		MAX_LOCAL_WINDOW_CANDIDATES,
 		MAX_COVER_HIT_SPAN,
+		bodyEvidenceTrace ??
+			buildCoverageLexicalBodyEvidenceTrace(
+				tokens,
+				families,
+				innerSetting.search.fuzzyProportion,
+			),
 	);
 }
 
@@ -39,38 +46,18 @@ function buildCoverageLexicalWindowSignalsInternal(
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 	maxCandidates: number,
 	maxCoverHitSpan: number,
+	bodyEvidenceTrace: CoverageLexicalBodyEvidenceTrace,
 ): CoverageLexicalLocalWindowSignal[] {
-	if (tokens.length === 0 || families.length === 0) {
+	if (
+		tokens.length === 0 ||
+		families.length === 0 ||
+		bodyEvidenceTrace.activeFamilies.length === 0
+	) {
 		return [];
 	}
 
-	const candidateFamilies = families.filter((family) => family.role !== "noise");
-	if (candidateFamilies.length === 0) {
-		return [];
-	}
-
-	const matchesByPosition: FamilyTokenMatch[][] = Array.from(
-		{ length: tokens.length },
-		() => [],
-	);
-	const hitPositions: number[] = [];
-	for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
-		const token = tokens[tokenIndex];
-		for (const family of candidateFamilies) {
-			const kind = matchTokenToFamily(token, family);
-			if (!kind) {
-				continue;
-			}
-			matchesByPosition[tokenIndex].push({
-				familyIndex: family.index,
-				kind,
-			});
-		}
-		if (matchesByPosition[tokenIndex].length > 0) {
-			hitPositions.push(tokenIndex);
-		}
-	}
-
+	const matchesByPosition = bodyEvidenceTrace.windowMatchesByPosition;
+	const hitPositions = bodyEvidenceTrace.windowHitPositions;
 	if (hitPositions.length === 0) {
 		return [];
 	}
@@ -152,7 +139,9 @@ function scoreWindow(
 	start: number,
 	end: number,
 	tokens: readonly string[],
-	matchesByPosition: ReadonlyArray<ReadonlyArray<FamilyTokenMatch>>,
+	matchesByPosition: ReadonlyArray<
+		ReadonlyArray<CoverageLexicalFamilyTokenMatch>
+	>,
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 ): CoverageLexicalLocalWindowSignal {
@@ -354,7 +343,9 @@ function pushWindowCandidate(
 	seenWindows: Set<number>,
 	window: { start: number; end: number },
 	tokens: readonly string[],
-	matchesByPosition: ReadonlyArray<ReadonlyArray<FamilyTokenMatch>>,
+	matchesByPosition: ReadonlyArray<
+		ReadonlyArray<CoverageLexicalFamilyTokenMatch>
+	>,
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 	maxCandidates: number,
@@ -437,42 +428,6 @@ function matchesPairSignature(
 	);
 }
 
-function matchTokenToFamily(
-	token: string,
-	family: CoverageLexicalFamily,
-): Exclude<CoverageFamilyMatchKind, null> | null {
-	if (token === family.normalizedTerm) {
-		return "exact";
-	}
-	if (family.allowPrefix && token.startsWith(family.normalizedTerm)) {
-		return "prefix";
-	}
-	if (family.allowFuzzy) {
-		const maxDistance = computeMaxFuzzyDistance(family.normalizedTerm);
-		if (
-			maxDistance > 0 &&
-			token[0] === family.normalizedTerm[0] &&
-			boundedLevenshtein(token, family.normalizedTerm, maxDistance) <= maxDistance
-		) {
-			return "fuzzy";
-		}
-	}
-	return null;
-}
-
-function pickBetterMatchKind(
-	left: CoverageFamilyMatchKind,
-	right: CoverageFamilyMatchKind,
-): CoverageFamilyMatchKind {
-	const rank = {
-		exact: 3,
-		prefix: 2,
-		fuzzy: 1,
-		null: 0,
-	} as const;
-	return rank[left ?? "null"] >= rank[right ?? "null"] ? left : right;
-}
-
 function encodeMatchKind(kind: Exclude<CoverageFamilyMatchKind, null>): number {
 	if (kind === "exact") {
 		return 3;
@@ -505,51 +460,4 @@ function computeFamilyTailWeight(index: number): number {
 
 function compareDescendingMetric(left: number, right: number): number {
 	return right - left;
-}
-
-function computeMaxFuzzyDistance(queryTerm: string): number {
-	if (queryTerm.length <= 4) {
-		return 0;
-	}
-	return Math.min(
-		2,
-		Math.max(1, Math.round(queryTerm.length * innerSetting.search.fuzzyProportion)),
-	);
-}
-
-function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
-	if (a === b) {
-		return 0;
-	}
-	if (Math.abs(a.length - b.length) > maxDistance) {
-		return maxDistance + 1;
-	}
-
-	const prev = new Array<number>(b.length + 1);
-	const curr = new Array<number>(b.length + 1);
-	for (let index = 0; index <= b.length; index++) {
-		prev[index] = index;
-	}
-
-	for (let row = 1; row <= a.length; row++) {
-		curr[0] = row;
-		let rowMin = curr[0];
-		for (let column = 1; column <= b.length; column++) {
-			const cost = a[row - 1] === b[column - 1] ? 0 : 1;
-			curr[column] = Math.min(
-				prev[column] + 1,
-				curr[column - 1] + 1,
-				prev[column - 1] + cost,
-			);
-			rowMin = Math.min(rowMin, curr[column]);
-		}
-		if (rowMin > maxDistance) {
-			return maxDistance + 1;
-		}
-		for (let index = 0; index <= b.length; index++) {
-			prev[index] = curr[index];
-		}
-	}
-
-	return prev[b.length];
 }

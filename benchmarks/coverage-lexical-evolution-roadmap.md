@@ -52,6 +52,14 @@ Every retained change should be evaluated against the same four anchors:
   - char and tag candidate state was flattened
   - signal accumulator construction was flattened
   - local window scoring and candidate dedupe were flattened
+  - shared body-evidence tracing now lets passage admission and local window evaluation reuse the same document scan:
+    - one pass now builds both admission-side and window-side match traces
+    - admission window dedupe is numeric rather than string-keyed
+  - latest interpretation for that step:
+    - quality stayed clean
+    - absolute `CoverageLexical` query time moved down materially
+    - `CoverageLexical / MiniSearch` latency ratios were directionally promising but not stable enough across reruns to replace the current active anchor yet
+    - keep the code, but do not promote a new benchmark anchor from this step alone
   - the current active anchor shows a material latency improvement while quality remains unchanged
 - `Phase 2` has materially advanced:
   - aggregate metadata phrase storage was removed
@@ -78,6 +86,7 @@ Every retained change should be evaluated against the same four anchors:
     - continue numeric migration when it removes a measured hot-path bridge or clearly improves the binary-friendly live layout, not as a latency story by default
 - immediate rule:
   - continue from the active roadmap below and keep the benchmark anchor aligned with what actually moved latency or size, not just with structural ambition
+  - when an optimization produces structurally cleaner code and lower absolute time but unstable ratio evidence, it may be retained without immediately replacing the active anchor
 
 ## Validation Strategy
 

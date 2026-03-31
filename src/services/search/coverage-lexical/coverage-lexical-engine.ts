@@ -1,3 +1,4 @@
+import { innerSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
 	IndexedDocument,
@@ -29,6 +30,10 @@ import {
 	splitCoverageLexicalTagValues,
 	type CoverageLexicalCharQuery,
 } from "./coverage-lexical-cjk";
+import {
+	buildCoverageLexicalBodyEvidenceTrace,
+	type CoverageLexicalBodyEvidenceTrace,
+} from "./coverage-lexical-body-evidence";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
 import { collectCoverageLexicalCandidateStatesByDocId } from "./coverage-lexical-recall";
 import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
@@ -862,11 +867,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!document) {
 			return null;
 		}
+		const bodyEvidenceTrace = buildCoverageLexicalBodyEvidenceTrace(
+			document.bodyTokenSequence,
+			plan.families,
+			innerSetting.search.fuzzyProportion,
+		);
 		const admissionSignal = buildCoverageLexicalPassageAdmissionSignal(
 			document.bodyTokenSequence,
 			plan.families,
 			state,
 			phraseSignatures,
+			bodyEvidenceTrace,
 		);
 		const signal = buildCoverageSignal(
 			plan,
@@ -876,6 +887,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			phraseSignatures,
 			pairSignatures,
 			charQuery,
+			bodyEvidenceTrace,
 			document.tagValues,
 		);
 		if (
@@ -910,6 +922,7 @@ function buildCoverageSignal(
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 	charQuery: CoverageLexicalCharQuery,
+	bodyEvidenceTrace: CoverageLexicalBodyEvidenceTrace,
 	tagValues: readonly string[],
 ): CoverageLexicalFamilySignal {
 	const families = plan.families;
@@ -1051,6 +1064,7 @@ function buildCoverageSignal(
 				families,
 				pairSignatures,
 				computePerFileLocalWindowLimit(plan, bodyTokenSequence.length),
+				bodyEvidenceTrace,
 			)
 			: createEmptyCoverageLexicalWindowFusionSignal(),
 		matchedTerms,

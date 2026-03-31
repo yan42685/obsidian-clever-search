@@ -5,6 +5,7 @@ import type {
 	CoverageLexicalPairSignature,
 	CoverageLexicalWindowFusionSignal,
 } from "./coverage-lexical-types";
+import type { CoverageLexicalBodyEvidenceTrace } from "./coverage-lexical-body-evidence";
 import {
 	buildCoverageLexicalLocalWindowSignals,
 	compareLocalWindowSignals,
@@ -19,11 +20,13 @@ export function buildCoverageLexicalWindowFusionSignal(
 	families: readonly CoverageLexicalFamily[],
 	pairSignatures: readonly CoverageLexicalPairSignature[],
 	maxWindows: number = MAX_FUSED_WINDOWS,
+	bodyEvidenceTrace?: CoverageLexicalBodyEvidenceTrace,
 ): CoverageLexicalWindowFusionSignal {
 	const candidates = buildCoverageLexicalLocalWindowSignals(
 		tokens,
 		families,
 		pairSignatures,
+		bodyEvidenceTrace,
 	);
 	if (candidates.length === 0) {
 		return createEmptyCoverageLexicalWindowFusionSignal();
