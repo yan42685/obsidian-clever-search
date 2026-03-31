@@ -37,6 +37,39 @@ Every retained change should be evaluated against the same four anchors:
   - fallback rebuild ms
   - self-heal repair ms
 
+## Current Status
+
+- `Phase 0` is complete:
+  - benchmark anchor is fixed in `benchmarks/coverage-lexical-size-latency-baseline.md`
+  - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
+- `Phase 1` has started:
+  - maintained query-time document caches landed
+  - coarse-result reuse landed
+  - lane prefilter guardrail logging landed
+- immediate rule:
+  - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
+
+## Validation Strategy
+
+Use three validation layers, not one oversized benchmark:
+
+1. repo benchmark:
+   - keep the existing automation benchmark as the primary quality and ratio anchor
+   - this must stay practical for routine development
+2. theory-first tuning:
+   - for lane budget and prefilter design, prefer theoretical review and conservative rules before adding new stress machinery
+   - do not introduce a large synthetic benchmark just to speculate about a future risk
+3. local stress verification:
+   - only add a large fanout stress harness when changing prefilter budgets, cheap comparators, or lane admission logic materially
+   - if such a harness is needed, keep it in a gitignored local directory rather than the main benchmark path
+
+Interpretation rule:
+
+- total vault size is not the primary risk axis
+- the primary risk axis is query-time lane fanout:
+  - how many similar candidates enter a lane
+  - whether the relevant document depends on expensive-only signals to survive
+
 ## Phase 0: Freeze The Benchmark Anchor
 
 Goal:
@@ -86,6 +119,40 @@ Acceptance:
 - benchmark total run time decreases
 - `CoverageLexical / MiniSearch` avg latency ratio improves materially
 
+Executable checklist:
+
+1. query-time cache hardening
+   - keep `documentBodyTokensByPath` and `documentTagValuesByPath` as maintained engine state
+   - expand query-local memoization only for repeated expensive path-level work
+   - avoid rebuilding document-derived maps inside search paths
+   - done when no obvious per-query object-graph reconstruction remains in the hot path
+2. cheap-first, expensive-second lane flow
+   - preserve the current split between cheap prefiltering and expensive lane evaluation
+   - keep debug visibility for:
+     - candidate paths
+     - prefiltered paths
+     - admitted paths
+   - do not reduce lane budgets aggressively in this subphase
+   - done when every lane still exposes enough debug state to explain recall failures
+3. safe reuse of coarse ranking work
+   - reuse coarse results for candidates that do not require local window amplification
+   - keep expensive re-evaluation only for paths that truly need higher-resolution scoring
+   - done when the rerank path does not rebuild full signals for obviously coarse-stable candidates
+4. theory-only safety rules before parameter tightening
+   - treat `strict_metadata_lane` and `bridge_lane` as lower-risk lanes
+   - treat `strict_hybrid_lane`, `relaxed_hybrid_lane`, and `local_body_lane` as higher-risk lanes
+   - do not shrink budgets or widen cheap filtering until protective rules exist for high-risk lanes
+   - done when future tuning has a written risk split by lane
+5. optional local-only stress verification
+   - only if future tuning changes budgets or cheap comparators materially
+   - if needed, put the harness in a gitignored local directory
+   - target lane fanout, not total vault size
+   - representative fanout checkpoints:
+     - first pressure point: 240 similar candidates
+     - medium pressure point: 700 similar candidates
+     - high pressure point: 2400 similar candidates
+   - done when a proposed budget change has local evidence that relevant paths are not systematically lost before expensive evaluation
+
 ## Phase 2: Compress Phrase-Heavy In-Memory Storage
 
 Goal:
@@ -116,6 +183,29 @@ Acceptance:
 - `CoverageLexical / MiniSearch` size ratio improves materially
 - quality remains benchmark-clean on mixed anchor, mixed-script, and partial-memory slices
 
+Executable checklist:
+
+1. remove duplicate phrase surface area before deleting signal classes
+   - canonicalize phrase keys and phrase-signature variants
+   - collapse semantically equivalent phrase storage where it does not protect ranking
+   - done when duplicate phrase inflation is reduced without changing recall intent
+2. shrink aggregate phrase buckets cautiously
+   - review aggregate `metadataPhrasePostings` first
+   - keep field-specific phrase buckets only when they clearly defend ranking quality
+   - done when aggregate phrase storage has a documented reason for each surviving bucket
+3. demote phrase storage from broad recall primitive to targeted verifier where possible
+   - prefer phrase logic as a strengthening or validation mechanism instead of a wide storage multiplier
+   - keep phrase-heavy structures only where benchmark slices show real quality protection
+   - done when phrase-heavy buckets have explicit owners and justification
+4. reduce document-side duplication
+   - review `bodyPhraseTerms`, `metadataPhraseTerms`, and repeated token-held references
+   - prefer shared or derived representations over storing equivalent per-document lists twice
+   - done when document-side duplication is no longer a top cost center without explanation
+5. preserve quality-first slices during compression
+   - treat mixed-anchor, mixed-script, and partial-memory behavior as protected slices
+   - revert compression that wins bytes but weakens those slices materially
+   - done when size wins come without erasing the current quality advantage
+
 ## Phase 3: Make The Index Binary-Friendly
 
 Goal:
@@ -143,6 +233,29 @@ Acceptance:
 - live index structure can be serialized without rebuilding semantic meaning from scratch
 - snapshot bytes and hydrate cost are projected to improve from structure alone
 - query behavior remains compatible with the benchmark contract
+
+Executable checklist:
+
+1. assign stable numeric ownership
+   - introduce stable `docId` identity for indexed files
+   - define the lifecycle for insertion, deletion, and reuse clearly before migrating postings
+   - done when postings no longer need path strings as their core identity
+2. move postings off `Set<string path>`
+   - migrate high-cardinality posting buckets toward doc-id arrays or typed-array-backed storage
+   - keep lookup semantics stable while changing representation
+   - done when the hottest posting buckets are numeric-first rather than string-first
+3. centralize strings
+   - create a shared representation for path, basename, folder, tag, and term strings
+   - avoid retaining the same strings in multiple high-cardinality structures
+   - done when string retention is visibly reduced in the size breakdown
+4. avoid dual-layout drift
+   - do not keep an old string-heavy graph and a new numeric graph in parallel longer than necessary
+   - migrate consumers lane by lane or structure by structure with clear cutovers
+   - done when serialization no longer depends on translating two competing layouts
+5. keep serialization as an outcome, not the driver
+   - structure the live index so it is naturally serializable
+   - do not design the snapshot format around today's `Map<string, Set<string>>` graph
+   - done when a compact persisted form becomes a direct extension of the live layout
 
 ## Phase 4: Snapshot, Hydration, And Startup Self-Heal
 
@@ -177,6 +290,60 @@ Acceptance:
 - snapshot restore is observably faster than rebuilding from source documents
 - self-heal can repair drift without breaking search readiness
 
+Executable checklist:
+
+1. define snapshot compatibility up front
+   - version the format
+   - define invalidation rules
+   - define what vault fingerprint is sufficient for trust vs repair
+   - done when startup code can reject incompatible snapshots deterministically
+2. prefer binary snapshotting
+   - persist the binary-friendly live layout directly
+   - avoid JSON as the primary long-term restore format
+   - done when restore avoids repeated parse and object inflation costs
+3. split startup into ready-path and repair-path
+   - if snapshot is valid, search becomes ready immediately
+   - if snapshot is slightly stale, search stays available while self-heal runs
+   - if snapshot is invalid, fall back safely to rebuild
+   - done when startup behavior is predictable in all three states
+4. make self-heal incremental
+   - repair only changed or suspect regions first
+   - keep full rebuild as fallback, not default
+   - done when common-case vault drift does not force a full rebuild
+5. measure startup independently from query benchmark
+   - snapshot bytes, hydrate ms, rebuild ms, and repair ms are separate anchors
+   - do not fold startup interpretation into the query benchmark alone
+   - done when startup performance has its own stable reporting path
+
+## Prefilter Design Rules
+
+These rules should guide all future prefilter tuning, even before local stress verification exists:
+
+1. optimize lane fanout, not total vault size
+   - the main risk is large sets of similar lane candidates, not raw file count
+2. keep cheap and expensive ranking directionally aligned
+   - cheap comparators should mostly rely on signals that the expensive scorer also respects:
+     - hard anchor coverage
+     - decisive body coverage
+     - phrase witness strength
+   - avoid over-weighting signals that the expensive scorer may overturn later
+3. treat high-risk lanes conservatively
+   - `strict_hybrid_lane`
+   - `relaxed_hybrid_lane`
+   - `local_body_lane`
+   - these lanes are the most likely to need wider prefilter buffers because expensive local evidence matters more
+4. add protection near the cutoff
+   - prefer tie expansion or similar protection when the prefilter cutoff sits inside a dense score band
+   - do not hard-cut a large same-score cluster without a safety reason
+5. keep strong witnesses above the floor
+   - documents with strong exact or near-exact hard-anchor evidence should not be easy victims of cheap truncation
+6. only tighten budgets after explicit justification
+   - a smaller prefilter budget is not a goal by itself
+   - tighten only when:
+     - latency benefit is real
+     - quality is preserved on the active anchor
+     - high-fanout risk has at least theoretical review and, when warranted, local stress verification
+
 ## Promotion Rules
 
 Keep a change only if at least one of these is true:
@@ -195,10 +362,11 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. complete Phase 1 query-time waste removal
-3. attack Phase 2 phrase-heavy storage inflation
-4. design and implement the Phase 3 binary-friendly live layout
-5. build Phase 4 snapshot + startup self-heal on top of that layout
+2. finish Phase 1 with conservative lane rules before shrinking any prefilter budgets
+3. compress phrase-heavy storage in Phase 2 without weakening protected quality slices
+4. redesign the live index around doc-id and numeric-first storage in Phase 3
+5. build binary snapshot + startup self-heal on top of the Phase 3 layout
+6. only add a local gitignored stress harness if a future prefilter change needs stronger validation
 
 ## Working Rule
 
