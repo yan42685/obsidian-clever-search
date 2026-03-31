@@ -36,6 +36,7 @@ export type FileSearchRequest = {
 export type SerializedFileSearchIndex =
 	| AsPlainObject
 	| SerializedBinaryCustomFileSearchIndex
+	| SerializedCoverageLexicalBinarySnapshot
 	| SerializedPassageFileSearchSnapshot;
 
 export type SerializedPassageIndexedDocument = Omit<IndexedDocument, "content"> & {
@@ -47,6 +48,13 @@ export type SerializedPassageFileSearchSnapshot = {
 	__version: 3;
 	__format: "structural-snapshot";
 	documents: SerializedPassageIndexedDocument[];
+};
+
+export type SerializedCoverageLexicalBinarySnapshot = {
+	__backend: "coverage-lexical";
+	__version: 1;
+	__encoding: "binary-snapshot-v1";
+	data: ArrayBuffer;
 };
 
 export interface FileSearchEngine {
@@ -1239,6 +1247,19 @@ function isSerializedPassageFileSearchSnapshot(
 	);
 }
 
+function isSerializedCoverageLexicalBinarySnapshot(
+	data: SerializedFileSearchIndex,
+): data is SerializedCoverageLexicalBinarySnapshot {
+	return (
+		typeof data === "object" &&
+		data !== null &&
+		(data as Record<string, unknown>).__backend === "coverage-lexical" &&
+		(data as Record<string, unknown>).__version === 1 &&
+		(data as Record<string, unknown>).__encoding === "binary-snapshot-v1" &&
+		(data as Record<string, unknown>).data instanceof ArrayBuffer
+	);
+}
+
 function isSerializedMiniSearchFileIndex(
 	data: SerializedFileSearchIndex,
 ): data is AsPlainObject {
@@ -1246,6 +1267,7 @@ function isSerializedMiniSearchFileIndex(
 		typeof data === "object" &&
 		data !== null &&
 		!isSerializedBinaryCustomFileSearchIndex(data) &&
+		!isSerializedCoverageLexicalBinarySnapshot(data) &&
 		!isSerializedPassageFileSearchSnapshot(data)
 	);
 }

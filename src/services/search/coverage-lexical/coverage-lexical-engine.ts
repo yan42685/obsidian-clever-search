@@ -10,6 +10,7 @@ import { singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
+	SerializedCoverageLexicalBinarySnapshot,
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
 import { Tokenizer } from "../tokenizer";
@@ -48,6 +49,11 @@ import {
 	buildCoverageLexicalWindowFusionSignal,
 	createEmptyCoverageLexicalWindowFusionSignal,
 } from "./coverage-lexical-fusion";
+import {
+	decodeCoverageLexicalSnapshotV1,
+	encodeCoverageLexicalSnapshotV1,
+	type CoverageLexicalSnapshotState,
+} from "./coverage-lexical-snapshot";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import type {
 	CoverageFamilyMatchKind,
@@ -171,7 +177,7 @@ function createCoverageLexicalBenchmarkPhaseTimingState(): CoverageLexicalBenchm
 @singleton()
 export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	readonly backend = "coverage-lexical" as const;
-	readonly supportsSerialization = false;
+	readonly supportsSerialization = true;
 
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
@@ -215,11 +221,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		data: IndexedDocument[] | SerializedFileSearchIndex,
 	): Promise<boolean> {
 		if (!Array.isArray(data)) {
-			logger.warn(
-				"coverage-lexical MVP currently supports rebuild from live documents only",
-			);
-			this.clearIndex();
-			return false;
+			try {
+				if (!isSerializedCoverageLexicalBinarySnapshot(data)) {
+					logger.warn(
+						"coverage-lexical currently supports live documents or its own binary snapshot only",
+					);
+					this.clearIndex();
+					return false;
+				}
+				this.clearIndex();
+				this.restoreBinarySnapshot(data);
+				return true;
+			} catch (error) {
+				logger.error(error);
+				this.clearIndex();
+				return false;
+			}
 		}
 
 		this.clearIndex();
@@ -646,7 +663,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
-		return null;
+		return {
+			__backend: "coverage-lexical",
+			__version: 1,
+			__encoding: "binary-snapshot-v1",
+			data: encodeCoverageLexicalSnapshotV1(this.buildBinarySnapshotState()),
+		};
 	}
 
 	estimateIndexBytes(): number | null {
@@ -1107,6 +1129,239 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.lexicon.add(term);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
+	}
+
+	private buildBinarySnapshotState(): CoverageLexicalSnapshotState {
+		return {
+			nextDocumentId: this.nextDocumentId,
+			sortedLexicon: [...this.sortedLexicon],
+			documents: this.documentById.flatMap((document) =>
+				document
+					? [
+							{
+								docId: document.docId,
+								path: this.documentPathById[document.docId] ?? "",
+								bodyText: document.bodyText,
+								aliasPhraseTerms: sortedValues(document.aliasPhraseTerms),
+								aliasTerms: sortedValues(document.aliasTerms),
+								aliasCharTerms: sortedValues(document.aliasCharTerms),
+								basenamePhraseTerms: sortedValues(document.basenamePhraseTerms),
+								basenameTerms: sortedValues(document.basenameTerms),
+								basenameCharTerms: sortedValues(document.basenameCharTerms),
+								bodyTokenSequence: [...document.bodyTokenSequence],
+								bodyPhraseTerms: sortedValues(document.bodyPhraseTerms),
+								bodyTerms: sortedValues(document.bodyTerms),
+								bodyCharTerms: sortedValues(document.bodyCharTerms),
+								folderPhraseTerms: sortedValues(document.folderPhraseTerms),
+								folderTerms: sortedValues(document.folderTerms),
+								folderCharTerms: sortedValues(document.folderCharTerms),
+								headingPhraseTerms: sortedValues(document.headingPhraseTerms),
+								headingTerms: sortedValues(document.headingTerms),
+								headingCharTerms: sortedValues(document.headingCharTerms),
+								metadataTerms: sortedValues(document.metadataTerms),
+								tagPhraseTerms: sortedValues(document.tagPhraseTerms),
+								tagTerms: sortedValues(document.tagTerms),
+								tagCharTerms: sortedValues(document.tagCharTerms),
+								tagValues: [...document.tagValues],
+							},
+					  ]
+					: [],
+			),
+			bodyPostings: cloneNumericPostingMap(this.bodyPostings),
+			bodyCharPostings: cloneNumericPostingMap(this.bodyCharPostings),
+			bodyHanSegmentPostings: convertPathPostingMapToDocIds(
+				this.bodyHanSegmentPostings,
+				this.documentIdByPath,
+			),
+			bodyPhrasePostings: cloneNumericPostingMap(this.bodyPhrasePostings),
+			metadataAliasCharPostings: cloneNumericPostingMap(
+				this.metadataAliasCharPostings,
+			),
+			metadataAliasHanSegmentPostings: convertPathPostingMapToDocIds(
+				this.metadataAliasHanSegmentPostings,
+				this.documentIdByPath,
+			),
+			metadataAliasPhrasePostings: cloneNumericPostingMap(
+				this.metadataAliasPhrasePostings,
+			),
+			metadataAliasPostings: cloneNumericPostingMap(this.metadataAliasPostings),
+			metadataBasenameCharPostings: cloneNumericPostingMap(
+				this.metadataBasenameCharPostings,
+			),
+			metadataBasenameHanSegmentPostings: convertPathPostingMapToDocIds(
+				this.metadataBasenameHanSegmentPostings,
+				this.documentIdByPath,
+			),
+			metadataBasenamePhrasePostings: cloneNumericPostingMap(
+				this.metadataBasenamePhrasePostings,
+			),
+			metadataBasenamePostings: cloneNumericPostingMap(
+				this.metadataBasenamePostings,
+			),
+			metadataFolderCharPostings: cloneNumericPostingMap(
+				this.metadataFolderCharPostings,
+			),
+			metadataFolderHanSegmentPostings: convertPathPostingMapToDocIds(
+				this.metadataFolderHanSegmentPostings,
+				this.documentIdByPath,
+			),
+			metadataFolderPhrasePostings: cloneNumericPostingMap(
+				this.metadataFolderPhrasePostings,
+			),
+			metadataFolderPostings: cloneNumericPostingMap(this.metadataFolderPostings),
+			metadataHeadingCharPostings: cloneNumericPostingMap(
+				this.metadataHeadingCharPostings,
+			),
+			metadataHeadingHanSegmentPostings: convertPathPostingMapToDocIds(
+				this.metadataHeadingHanSegmentPostings,
+				this.documentIdByPath,
+			),
+			metadataHeadingPhrasePostings: cloneNumericPostingMap(
+				this.metadataHeadingPhrasePostings,
+			),
+			metadataHeadingPostings: cloneNumericPostingMap(
+				this.metadataHeadingPostings,
+			),
+			metadataPostings: cloneNumericPostingMap(this.metadataPostings),
+			metadataTagCharPostings: cloneNumericPostingMap(
+				this.metadataTagCharPostings,
+			),
+			metadataTagFullPostings: cloneNumericPostingMap(
+				this.metadataTagFullPostings,
+			),
+			metadataTagPhrasePostings: cloneNumericPostingMap(
+				this.metadataTagPhrasePostings,
+			),
+			metadataTagPostings: cloneNumericPostingMap(this.metadataTagPostings),
+		};
+	}
+
+	private restoreBinarySnapshot(
+		snapshot: SerializedCoverageLexicalBinarySnapshot,
+	): void {
+		const state = decodeCoverageLexicalSnapshotV1(snapshot.data);
+		this.nextDocumentId = state.nextDocumentId;
+		this.sortedLexicon = [...state.sortedLexicon];
+		for (const term of this.sortedLexicon) {
+			this.lexicon.add(term);
+		}
+		for (const document of state.documents) {
+			const indexedDocument: CoverageLexicalDocument = {
+				docId: document.docId,
+				aliasPhraseTerms: new Set(document.aliasPhraseTerms),
+				aliasTerms: new Set(document.aliasTerms),
+				aliasCharTerms: new Set(document.aliasCharTerms),
+				basenamePhraseTerms: new Set(document.basenamePhraseTerms),
+				basenameTerms: new Set(document.basenameTerms),
+				basenameCharTerms: new Set(document.basenameCharTerms),
+				bodyTokenSequence: [...document.bodyTokenSequence],
+				bodyPhraseTerms: new Set(document.bodyPhraseTerms),
+				bodyText: document.bodyText,
+				bodyTerms: new Set(document.bodyTerms),
+				bodyCharTerms: new Set(document.bodyCharTerms),
+				folderPhraseTerms: new Set(document.folderPhraseTerms),
+				folderTerms: new Set(document.folderTerms),
+				folderCharTerms: new Set(document.folderCharTerms),
+				headingPhraseTerms: new Set(document.headingPhraseTerms),
+				headingTerms: new Set(document.headingTerms),
+				headingCharTerms: new Set(document.headingCharTerms),
+				metadataTerms: new Set(document.metadataTerms),
+				tagPhraseTerms: new Set(document.tagPhraseTerms),
+				tagTerms: new Set(document.tagTerms),
+				tagCharTerms: new Set(document.tagCharTerms),
+				tagValues: [...document.tagValues],
+			};
+			this.documents.set(document.path, indexedDocument);
+			this.documentById[document.docId] = indexedDocument;
+			this.documentIdByPath.set(document.path, document.docId);
+			this.documentPathById[document.docId] = document.path;
+			this.documentBodyTokensById[document.docId] = indexedDocument.bodyTokenSequence;
+			this.documentTagValuesById[document.docId] = indexedDocument.tagValues;
+		}
+		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
+		restoreNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
+		restorePathPostingMap(
+			this.bodyHanSegmentPostings,
+			state.bodyHanSegmentPostings,
+			this.documentPathById,
+		);
+		restoreNumericPostingMap(this.bodyPhrasePostings, state.bodyPhrasePostings);
+		restoreNumericPostingMap(
+			this.metadataAliasCharPostings,
+			state.metadataAliasCharPostings,
+		);
+		restorePathPostingMap(
+			this.metadataAliasHanSegmentPostings,
+			state.metadataAliasHanSegmentPostings,
+			this.documentPathById,
+		);
+		restoreNumericPostingMap(
+			this.metadataAliasPhrasePostings,
+			state.metadataAliasPhrasePostings,
+		);
+		restoreNumericPostingMap(this.metadataAliasPostings, state.metadataAliasPostings);
+		restoreNumericPostingMap(
+			this.metadataBasenameCharPostings,
+			state.metadataBasenameCharPostings,
+		);
+		restorePathPostingMap(
+			this.metadataBasenameHanSegmentPostings,
+			state.metadataBasenameHanSegmentPostings,
+			this.documentPathById,
+		);
+		restoreNumericPostingMap(
+			this.metadataBasenamePhrasePostings,
+			state.metadataBasenamePhrasePostings,
+		);
+		restoreNumericPostingMap(
+			this.metadataBasenamePostings,
+			state.metadataBasenamePostings,
+		);
+		restoreNumericPostingMap(
+			this.metadataFolderCharPostings,
+			state.metadataFolderCharPostings,
+		);
+		restorePathPostingMap(
+			this.metadataFolderHanSegmentPostings,
+			state.metadataFolderHanSegmentPostings,
+			this.documentPathById,
+		);
+		restoreNumericPostingMap(
+			this.metadataFolderPhrasePostings,
+			state.metadataFolderPhrasePostings,
+		);
+		restoreNumericPostingMap(this.metadataFolderPostings, state.metadataFolderPostings);
+		restoreNumericPostingMap(
+			this.metadataHeadingCharPostings,
+			state.metadataHeadingCharPostings,
+		);
+		restorePathPostingMap(
+			this.metadataHeadingHanSegmentPostings,
+			state.metadataHeadingHanSegmentPostings,
+			this.documentPathById,
+		);
+		restoreNumericPostingMap(
+			this.metadataHeadingPhrasePostings,
+			state.metadataHeadingPhrasePostings,
+		);
+		restoreNumericPostingMap(
+			this.metadataHeadingPostings,
+			state.metadataHeadingPostings,
+		);
+		restoreNumericPostingMap(this.metadataPostings, state.metadataPostings);
+		restoreNumericPostingMap(
+			this.metadataTagCharPostings,
+			state.metadataTagCharPostings,
+		);
+		restoreNumericPostingMap(
+			this.metadataTagFullPostings,
+			state.metadataTagFullPostings,
+		);
+		restoreNumericPostingMap(
+			this.metadataTagPhrasePostings,
+			state.metadataTagPhrasePostings,
+		);
+		restoreNumericPostingMap(this.metadataTagPostings, state.metadataTagPostings);
 	}
 
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
@@ -2340,6 +2595,63 @@ function addNumericPosting(
 	docs.push(docId);
 }
 
+function cloneNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[]>,
+): Map<string, readonly number[]> {
+	return new Map(
+		Array.from(postings.entries(), ([term, docIds]) => [
+			term,
+			[...docIds].sort((left, right) => left - right),
+		]),
+	);
+}
+
+function convertPathPostingMapToDocIds(
+	postings: ReadonlyMap<string, ReadonlySet<string>>,
+	documentIdByPath: ReadonlyMap<string, number>,
+): Map<string, readonly number[]> {
+	return new Map(
+		Array.from(postings.entries(), ([term, paths]) => [
+			term,
+			Array.from(paths, (path) => documentIdByPath.get(path))
+				.filter((docId): docId is number => docId !== undefined)
+				.sort((left, right) => left - right),
+		]),
+	);
+}
+
+function restoreNumericPostingMap(
+	target: Map<string, number[]>,
+	source: ReadonlyMap<string, readonly number[]>,
+): void {
+	target.clear();
+	for (const [term, docIds] of source) {
+		target.set(term, [...docIds]);
+	}
+}
+
+function restorePathPostingMap(
+	target: Map<string, Set<string>>,
+	source: ReadonlyMap<string, readonly number[]>,
+	documentPathById: readonly (string | undefined)[],
+): void {
+	target.clear();
+	for (const [term, docIds] of source) {
+		const paths = new Set<string>();
+		for (const docId of docIds) {
+			const path = documentPathById[docId];
+			if (path) {
+				paths.add(path);
+			}
+		}
+		target.set(term, paths);
+	}
+}
+
+function sortedValues(values: ReadonlySet<string>): string[] {
+	return Array.from(values).sort();
+}
+
 function removePosting(
 	postings: Map<string, Set<string>>,
 	term: string,
@@ -2372,4 +2684,17 @@ function removeNumericPosting(
 	if (docs.length === 0) {
 		postings.delete(term);
 	}
+}
+
+function isSerializedCoverageLexicalBinarySnapshot(
+	data: SerializedFileSearchIndex,
+): data is SerializedCoverageLexicalBinarySnapshot {
+	return (
+		typeof data === "object" &&
+		data !== null &&
+		(data as Record<string, unknown>).__backend === "coverage-lexical" &&
+		(data as Record<string, unknown>).__version === 1 &&
+		(data as Record<string, unknown>).__encoding === "binary-snapshot-v1" &&
+		(data as Record<string, unknown>).data instanceof ArrayBuffer
+	);
 }
