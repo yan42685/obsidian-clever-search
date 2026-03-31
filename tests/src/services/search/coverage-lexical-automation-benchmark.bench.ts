@@ -2087,8 +2087,10 @@ function createCoverageRecallIndex(engine: any) {
 		metadataTagPhrasePostings: engine.metadataTagPhrasePostings,
 		metadataTagPostings: engine.metadataTagPostings,
 		sortedLexicon: engine.sortedLexicon,
-		documentBodyTokensByPath: engine.documentBodyTokensByPath,
-		documentTagValuesByPath: engine.documentTagValuesByPath,
+		documentIdByPath: engine.documentIdByPath,
+		documentPathById: engine.documentPathById,
+		documentBodyTokensById: engine.documentBodyTokensById,
+		documentTagValuesById: engine.documentTagValuesById,
 	};
 }
 

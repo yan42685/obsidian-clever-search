@@ -39,17 +39,16 @@ export type CoverageLexicalMetadataField =
 	| "tags";
 
 export type CoverageLexicalCandidateState = {
-	bodyMatches: Map<number, CoverageFamilyMatchKind>;
+	bodyMatches: number[];
 	bodyCharTerms: Set<string>;
-	bodyExactSegments: Set<string>;
-	metadataMatches: Map<number, CoverageFamilyMatchKind>;
+	metadataMatches: number[];
 	metadataCharTerms: Set<string>;
-	metadataExactSegments: Set<string>;
 	metadataFieldMatches: Record<
 		CoverageLexicalMetadataField,
-		Map<number, CoverageFamilyMatchKind>
+		number[]
 	>;
-	phraseMatches: Set<number>;
+	phraseMatches: number[];
+	phraseMatchFlags: number[];
 	tagCharTerms: Set<string>;
 	tagExactTerms: Set<string>;
 };

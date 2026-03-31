@@ -30,12 +30,10 @@ import {
 	type CoverageLexicalCharQuery,
 } from "./coverage-lexical-cjk";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
-import { collectCoverageLexicalCandidateStates } from "./coverage-lexical-recall";
+import { collectCoverageLexicalCandidateStatesByDocId } from "./coverage-lexical-recall";
 import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
 import {
 	compareCoverageLexicalResultSignals,
-	rankCoverageLexicalResults,
-	type CoverageLexicalRankableResult,
 } from "./coverage-lexical-ranker";
 import {
 	buildCoverageLexicalWindowFusionSignal,
@@ -82,6 +80,16 @@ type CoverageLexicalDocument = {
 	tagCharTerms: Set<string>;
 	tagValues: string[];
 };
+
+type CoverageLexicalDocRankableResult = {
+	docId: number;
+	queryTerms: string[];
+	matchedTerms: string[];
+	score?: number;
+	coverageLexicalSignal: CoverageLexicalFamilySignal;
+	admissionSignal: ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>;
+};
+
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
 
 @singleton()
@@ -91,10 +99,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
+	private readonly documentById: Array<CoverageLexicalDocument | undefined> = [];
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly documentPathById: Array<string | undefined> = [];
-	private readonly documentBodyTokensByPath = new Map<string, readonly string[]>();
-	private readonly documentTagValuesByPath = new Map<string, readonly string[]>();
+	private readonly documentBodyTokensById: Array<readonly string[] | undefined> = [];
+	private readonly documentTagValuesById: Array<readonly string[] | undefined> = [];
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new Map<string, number[]>();
 	private readonly bodyCharPostings = new Map<string, number[]>();
@@ -102,24 +111,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly bodyPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasHanSegmentPostings = new Map<string, Set<string>>();
-	private readonly metadataAliasPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasPostings = new Map<string, number[]>();
 	private readonly metadataBasenameCharPostings = new Map<string, number[]>();
 	private readonly metadataBasenameHanSegmentPostings = new Map<string, Set<string>>();
-	private readonly metadataBasenamePhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataBasenamePhrasePostings = new Map<string, number[]>();
 	private readonly metadataBasenamePostings = new Map<string, number[]>();
 	private readonly metadataFolderCharPostings = new Map<string, number[]>();
 	private readonly metadataFolderHanSegmentPostings = new Map<string, Set<string>>();
-	private readonly metadataFolderPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataFolderPhrasePostings = new Map<string, number[]>();
 	private readonly metadataFolderPostings = new Map<string, number[]>();
 	private readonly metadataHeadingCharPostings = new Map<string, number[]>();
 	private readonly metadataHeadingHanSegmentPostings = new Map<string, Set<string>>();
-	private readonly metadataHeadingPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataHeadingPhrasePostings = new Map<string, number[]>();
 	private readonly metadataHeadingPostings = new Map<string, number[]>();
 	private readonly metadataPostings = new Map<string, number[]>();
 	private readonly metadataTagCharPostings = new Map<string, number[]>();
 	private readonly metadataTagFullPostings = new Map<string, number[]>();
-	private readonly metadataTagPhrasePostings = new Map<string, Set<string>>();
+	private readonly metadataTagPhrasePostings = new Map<string, number[]>();
 	private readonly metadataTagPostings = new Map<string, number[]>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexicon: string[] = [];
@@ -142,10 +151,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	clearIndex(): void {
 		this.documents.clear();
+		this.documentById.length = 0;
 		this.documentIdByPath.clear();
 		this.documentPathById.length = 0;
-		this.documentBodyTokensByPath.clear();
-		this.documentTagValuesByPath.clear();
+		this.documentBodyTokensById.length = 0;
+		this.documentTagValuesById.length = 0;
 		this.nextDocumentId = 0;
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
@@ -212,7 +222,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				plan.families,
 			),
 		];
-		const candidates = collectCoverageLexicalCandidateStates(
+		const candidates = collectCoverageLexicalCandidateStatesByDocId(
 			{
 				bodyPostings: this.bodyPostings,
 				bodyCharPostings: this.bodyCharPostings,
@@ -242,8 +252,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				sortedLexicon: this.sortedLexicon,
 				documentIdByPath: this.documentIdByPath,
 				documentPathById: this.documentPathById,
-				documentBodyTokensByPath: this.documentBodyTokensByPath,
-				documentTagValuesByPath: this.documentTagValuesByPath,
+				documentBodyTokensById: this.documentBodyTokensById,
+				documentTagValuesById: this.documentTagValuesById,
 			},
 			plan,
 			phraseSignatures,
@@ -266,9 +276,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 
 		const coarseResults = Array.from(candidates.entries())
-			.map(([path, state]) =>
+			.map(([docId, state]) =>
 				this.createRankableResult(
-					path,
+					docId,
 					queryTerms,
 					plan,
 					state,
@@ -278,40 +288,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					charQuery,
 				),
 			)
-			.filter((result): result is CoverageLexicalRankableResult => result !== null);
-		const coarseResultByPath = new Map(
-			coarseResults.map((result) => [result.path, result] as const),
-		);
-		const admissionSignals = new Map(
-			coarseResults.map((result) => {
-				const document = this.documents.get(result.path);
-				return [
-					result.path,
-					buildCoverageLexicalPassageAdmissionSignal(
-						document?.bodyTokenSequence ?? [],
-						plan.families,
-						candidates.get(result.path) ?? {
-							bodyMatches: new Map(),
-							bodyCharTerms: new Set(),
-							bodyExactSegments: new Set(),
-							metadataMatches: new Map(),
-							metadataCharTerms: new Set(),
-							metadataExactSegments: new Set(),
-							metadataFieldMatches: {
-								basename: new Map(),
-								aliases: new Map(),
-								folder: new Map(),
-								headings: new Map(),
-								tags: new Map(),
-							},
-							phraseMatches: new Set(),
-							tagCharTerms: new Set(),
-							tagExactTerms: new Set(),
-						},
-						phraseSignatures,
-					),
-				] as const;
-			}),
+			.filter((result): result is CoverageLexicalDocRankableResult => result !== null);
+		const coarseResultByDocId = new Map(
+			coarseResults.map((result) => [result.docId, result] as const),
 		);
 		const coarseRanked = [...coarseResults].sort((left, right) => {
 			const signalDecision = compareCoverageLexicalResultSignals(
@@ -323,34 +302,30 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				return signalDecision;
 			}
 			const admissionDecision = compareCoverageLexicalPassageAdmissionSignals(
-				admissionSignals.get(left.path)!,
-				admissionSignals.get(right.path)!,
+				left.admissionSignal,
+				right.admissionSignal,
 			);
 			if (admissionDecision !== 0) {
 				return admissionDecision;
 			}
-			return (
-				(right.score ?? 0) - (left.score ?? 0) ||
-				left.path.localeCompare(right.path)
-			);
+			return (right.score ?? 0) - (left.score ?? 0) || left.docId - right.docId;
 		});
-		const localWindowPaths = computeLocalWindowRerankPaths(
+		const localWindowDocIds = computeLocalWindowRerankDocIds(
 			coarseRanked,
-			admissionSignals,
 			plan,
 			request.maxItemResults,
 		);
-		const rerankedResults: CoverageLexicalRankableResult[] = [];
-		for (const [path, state] of candidates.entries()) {
-			if (!localWindowPaths.has(path)) {
-				const coarseResult = coarseResultByPath.get(path);
+		const rerankedResults: CoverageLexicalDocRankableResult[] = [];
+		for (const [docId, state] of candidates.entries()) {
+			if (!localWindowDocIds.has(docId)) {
+				const coarseResult = coarseResultByDocId.get(docId);
 				if (coarseResult) {
 					rerankedResults.push(coarseResult);
 				}
 				continue;
 			}
 			const rerankedResult = this.createRankableResult(
-				path,
+				docId,
 				queryTerms,
 				plan,
 				state,
@@ -363,14 +338,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				rerankedResults.push(rerankedResult);
 			}
 		}
-		const ranked = rankCoverageLexicalResults(rerankedResults, plan);
+		const ranked = rankCoverageLexicalDocResults(rerankedResults, plan);
 		const finalResults = ranked.slice(0, request.maxItemResults);
-		return finalResults.map(
-			({ coverageLexicalSignal: _coverageLexicalSignal, ...result }) => ({
-				...result,
-				nativeSubItemsReady: false,
-				directSubItems: [],
-			}),
+		return finalResults.map((result) =>
+			projectDocRankableResult(result, this.documentPathById),
 		);
 	}
 
@@ -448,6 +419,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const documentIdentity = estimateDocumentIdentityBytes(
 			this.documentIdByPath,
 			this.documentPathById,
+			this.documentById,
+			this.documentBodyTokensById,
+			this.documentTagValuesById,
 			this.nextDocumentId,
 			accumulator,
 		);
@@ -474,7 +448,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataAliasHanSegmentPostings,
 				accumulator,
 			),
-			metadataAliasPhrase: estimatePostingMapBytes(
+			metadataAliasPhrase: estimateNumericPostingMapBytes(
 				this.metadataAliasPhrasePostings,
 				accumulator,
 			),
@@ -490,7 +464,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataBasenameHanSegmentPostings,
 				accumulator,
 			),
-			metadataBasenamePhrase: estimatePostingMapBytes(
+			metadataBasenamePhrase: estimateNumericPostingMapBytes(
 				this.metadataBasenamePhrasePostings,
 				accumulator,
 			),
@@ -506,7 +480,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataFolderHanSegmentPostings,
 				accumulator,
 			),
-			metadataFolderPhrase: estimatePostingMapBytes(
+			metadataFolderPhrase: estimateNumericPostingMapBytes(
 				this.metadataFolderPhrasePostings,
 				accumulator,
 			),
@@ -522,7 +496,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataHeadingHanSegmentPostings,
 				accumulator,
 			),
-			metadataHeadingPhrase: estimatePostingMapBytes(
+			metadataHeadingPhrase: estimateNumericPostingMapBytes(
 				this.metadataHeadingPhrasePostings,
 				accumulator,
 			),
@@ -542,7 +516,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataTagFullPostings,
 				accumulator,
 			),
-			metadataTagPhrase: estimatePostingMapBytes(
+			metadataTagPhrase: estimateNumericPostingMapBytes(
 				this.metadataTagPhrasePostings,
 				accumulator,
 			),
@@ -641,7 +615,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			buildCoverageLexicalPhraseTerms(Array.from(tagTerms)),
 		);
 
-		this.documents.set(document.path, {
+		const indexedDocument = {
 			docId,
 			aliasPhraseTerms,
 			aliasTerms,
@@ -665,9 +639,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			tagTerms,
 			tagCharTerms,
 			tagValues,
-		});
-		this.documentBodyTokensByPath.set(document.path, bodyTokenSequence);
-		this.documentTagValuesByPath.set(document.path, tagValues);
+		};
+		this.documents.set(document.path, indexedDocument);
+		this.documentById[docId] = indexedDocument;
+		this.documentBodyTokensById[docId] = bodyTokenSequence;
+		this.documentTagValuesById[docId] = tagValues;
 
 		for (const term of bodyTerms) {
 			addNumericPosting(this.bodyPostings, term, docId);
@@ -687,7 +663,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataAliasCharPostings, term, docId);
 		}
 		for (const term of aliasPhraseTerms) {
-			addPosting(this.metadataAliasPhrasePostings, term, document.path);
+			addNumericPosting(this.metadataAliasPhrasePostings, term, docId);
 		}
 		for (const term of basenameTerms) {
 			addNumericPosting(this.metadataBasenamePostings, term, docId);
@@ -697,7 +673,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataBasenameCharPostings, term, docId);
 		}
 		for (const term of basenamePhraseTerms) {
-			addPosting(this.metadataBasenamePhrasePostings, term, document.path);
+			addNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
 		}
 		for (const term of folderTerms) {
 			addNumericPosting(this.metadataFolderPostings, term, docId);
@@ -707,7 +683,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataFolderCharPostings, term, docId);
 		}
 		for (const term of folderPhraseTerms) {
-			addPosting(this.metadataFolderPhrasePostings, term, document.path);
+			addNumericPosting(this.metadataFolderPhrasePostings, term, docId);
 		}
 		for (const term of headingTerms) {
 			addNumericPosting(this.metadataHeadingPostings, term, docId);
@@ -717,7 +693,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataHeadingCharPostings, term, docId);
 		}
 		for (const term of headingPhraseTerms) {
-			addPosting(this.metadataHeadingPhrasePostings, term, document.path);
+			addNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
 		for (const term of metadataTerms) {
 			addNumericPosting(this.metadataPostings, term, docId);
@@ -734,7 +710,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataTagCharPostings, term, docId);
 		}
 		for (const term of tagPhraseTerms) {
-			addPosting(this.metadataTagPhrasePostings, term, document.path);
+			addNumericPosting(this.metadataTagPhrasePostings, term, docId);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
 	}
@@ -765,7 +741,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataAliasCharPostings, term, docId);
 		}
 		for (const term of existing.aliasPhraseTerms) {
-			removePosting(this.metadataAliasPhrasePostings, term, path);
+			removeNumericPosting(this.metadataAliasPhrasePostings, term, docId);
 		}
 		for (const term of existing.basenameTerms) {
 			removeNumericPosting(this.metadataBasenamePostings, term, docId);
@@ -774,7 +750,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataBasenameCharPostings, term, docId);
 		}
 		for (const term of existing.basenamePhraseTerms) {
-			removePosting(this.metadataBasenamePhrasePostings, term, path);
+			removeNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
 		}
 		for (const term of existing.folderTerms) {
 			removeNumericPosting(this.metadataFolderPostings, term, docId);
@@ -783,7 +759,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataFolderCharPostings, term, docId);
 		}
 		for (const term of existing.folderPhraseTerms) {
-			removePosting(this.metadataFolderPhrasePostings, term, path);
+			removeNumericPosting(this.metadataFolderPhrasePostings, term, docId);
 		}
 		for (const term of existing.headingTerms) {
 			removeNumericPosting(this.metadataHeadingPostings, term, docId);
@@ -792,7 +768,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataHeadingCharPostings, term, docId);
 		}
 		for (const term of existing.headingPhraseTerms) {
-			removePosting(this.metadataHeadingPhrasePostings, term, path);
+			removeNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
 		for (const term of existing.metadataTerms) {
 			removeNumericPosting(this.metadataPostings, term, docId);
@@ -807,11 +783,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataTagCharPostings, term, docId);
 		}
 		for (const term of existing.tagPhraseTerms) {
-			removePosting(this.metadataTagPhrasePostings, term, path);
+			removeNumericPosting(this.metadataTagPhrasePostings, term, docId);
 		}
 		this.documents.delete(path);
-		this.documentBodyTokensByPath.delete(path);
-		this.documentTagValuesByPath.delete(path);
+		this.documentById[docId] = undefined;
+		this.documentBodyTokensById[docId] = undefined;
+		this.documentTagValuesById[docId] = undefined;
 		if (releaseDocumentIdentity) {
 			this.releaseDocumentIdentity(path);
 		}
@@ -872,7 +849,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private createRankableResult(
-		path: string,
+		docId: number,
 		queryTerms: readonly string[],
 		plan: CoverageLexicalPlan,
 		state: CoverageLexicalCandidateState,
@@ -880,11 +857,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 		pairSignatures: readonly CoverageLexicalPairSignature[],
 		charQuery: CoverageLexicalCharQuery,
-	): CoverageLexicalRankableResult | null {
-		const document = this.documents.get(path);
+	): CoverageLexicalDocRankableResult | null {
+		const document = this.documentById[docId];
 		if (!document) {
 			return null;
 		}
+		const admissionSignal = buildCoverageLexicalPassageAdmissionSignal(
+			document.bodyTokenSequence,
+			plan.families,
+			state,
+			phraseSignatures,
+		);
 		const signal = buildCoverageSignal(
 			plan,
 			state,
@@ -908,11 +891,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 
 		return {
-			path,
+			docId,
 			queryTerms: [...queryTerms],
 			matchedTerms: signal.matchedTerms,
 			score: computeFallbackScore(signal),
 			coverageLexicalSignal: signal,
+			admissionSignal,
 		};
 	}
 
@@ -943,8 +927,11 @@ function buildCoverageSignal(
 	const matchedTerms = new Set<string>();
 
 	for (const family of families) {
-		const bodyKind = state.bodyMatches.get(family.index) ?? null;
-		const metadataKind = state.metadataMatches.get(family.index) ?? null;
+		const bodyKind = getRecordedMatchKind(state.bodyMatches, family.index);
+		const metadataKind = getRecordedMatchKind(
+			state.metadataMatches,
+			family.index,
+		);
 		if (family.role === "noise" || (!bodyKind && !metadataKind)) {
 			continue;
 		}
@@ -1049,8 +1036,8 @@ function buildCoverageSignal(
 		},
 		tailCoreWeight,
 		tailSoftWeight,
-		phraseBridgeCount: state.phraseMatches.size,
-		phraseBridgeWeight: Array.from(state.phraseMatches).reduce(
+		phraseBridgeCount: state.phraseMatches.length,
+		phraseBridgeWeight: state.phraseMatches.reduce(
 			(total, index) => total + (phraseSignatures[index]?.tailWeight ?? 0),
 			0,
 		),
@@ -1198,11 +1185,11 @@ function applyIdentityMatch(
 
 function applyIdentityFieldMatch(
 	area: CoverageLexicalAreaSignal,
-	matches: ReadonlyMap<number, CoverageFamilyMatchKind>,
+	matches: readonly number[],
 	familyIndex: number,
 	baseWeight: number,
 ): void {
-	const kind = matches.get(familyIndex) ?? null;
+	const kind = getRecordedMatchKind(matches, familyIndex);
 	if (!kind) {
 		return;
 	}
@@ -1220,7 +1207,7 @@ function getBestIdentityMatchKind(
 		state.metadataFieldMatches.headings,
 		state.metadataFieldMatches.folder,
 	]) {
-		const kind = matches.get(familyIndex) ?? null;
+		const kind = getRecordedMatchKind(matches, familyIndex);
 		if (!kind) {
 			continue;
 		}
@@ -1243,7 +1230,7 @@ function resolvePrimaryMetadataFieldForFamily(
 		"headings",
 		"tags",
 	] as const satisfies readonly CoverageLexicalMetadataField[]) {
-		if ((state.metadataFieldMatches[field].get(familyIndex) ?? null) !== null) {
+		if (getRecordedMatchKind(state.metadataFieldMatches[field], familyIndex)) {
 			return field;
 		}
 	}
@@ -1258,8 +1245,8 @@ function getMetadataFieldBoost(
 	let bestBoost = 1;
 	for (const [field, matches] of Object.entries(
 		state.metadataFieldMatches,
-	) as Array<[CoverageLexicalMetadataField, Map<number, CoverageFamilyMatchKind>]>) {
-		if (matches.get(familyIndex) !== kind) {
+	) as Array<[CoverageLexicalMetadataField, number[]]>) {
+		if (getRecordedMatchKind(matches, familyIndex) !== kind) {
 			continue;
 		}
 		bestBoost = Math.max(bestBoost, getMetadataFieldWeight(field));
@@ -1282,6 +1269,23 @@ function getMetadataFieldWeight(field: CoverageLexicalMetadataField): number {
 		default:
 			return 1;
 	}
+}
+
+function getRecordedMatchKind(
+	matches: readonly number[],
+	familyIndex: number,
+): Exclude<CoverageFamilyMatchKind, null> | null {
+	const code = matches[familyIndex] ?? 0;
+	if (code === 3) {
+		return "exact";
+	}
+	if (code === 2) {
+		return "prefix";
+	}
+	if (code === 1) {
+		return "fuzzy";
+	}
+	return null;
 }
 
 const DEFAULT_MAX_SUBITEM_COUNT = 60;
@@ -1361,14 +1365,13 @@ function shouldLogCoverageLexicalHanDebug(
 }
 
 
-function computeLocalWindowRerankPaths(
-	coarseRanked: readonly CoverageLexicalRankableResult[],
-	admissionSignals: ReadonlyMap<string, ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>>,
+function computeLocalWindowRerankDocIds(
+	coarseRanked: readonly CoverageLexicalDocRankableResult[],
 	plan: CoverageLexicalPlan,
 	maxItemResults: number,
-): Set<string> {
+): Set<number> {
 	if (coarseRanked.length <= maxItemResults) {
-		return new Set(coarseRanked.map((result) => result.path));
+		return new Set(coarseRanked.map((result) => result.docId));
 	}
 	let budget = Math.min(
 		coarseRanked.length,
@@ -1383,17 +1386,15 @@ function computeLocalWindowRerankPaths(
 			plan,
 		);
 		const admissionDecision = compareCoverageLexicalPassageAdmissionSignals(
-			admissionSignals.get(left.path)!,
-			admissionSignals.get(right.path)!,
+			left.admissionSignal,
+			right.admissionSignal,
 		);
 		if (signalDecision !== 0 || admissionDecision !== 0) {
 			break;
 		}
 		budget += 1;
 	}
-	return new Set(
-		coarseRanked.slice(0, budget).map((result) => result.path),
-	);
+	return new Set(coarseRanked.slice(0, budget).map((result) => result.docId));
 }
 
 function computePerFileLocalWindowLimit(
@@ -1408,6 +1409,46 @@ function computePerFileLocalWindowLimit(
 		return 3;
 	}
 	return 2;
+}
+
+function rankCoverageLexicalDocResults(
+	results: readonly CoverageLexicalDocRankableResult[],
+	plan: CoverageLexicalPlan,
+): CoverageLexicalDocRankableResult[] {
+	if (results.length <= 1) {
+		return [...results];
+	}
+	return [...results].sort((left, right) => {
+		const signalDecision = compareCoverageLexicalResultSignals(
+			left.coverageLexicalSignal,
+			right.coverageLexicalSignal,
+			plan,
+		);
+		if (signalDecision !== 0) {
+			return signalDecision;
+		}
+		return (right.score ?? 0) - (left.score ?? 0) || left.docId - right.docId;
+	});
+}
+
+function projectDocRankableResult(
+	result: CoverageLexicalDocRankableResult,
+	documentPathById: readonly (string | undefined)[],
+): MatchedFile {
+	const path = documentPathById[result.docId];
+	if (!path) {
+		throw new Error(
+			`coverage-lexical invariant violated: missing path for docId ${result.docId}`,
+		);
+	}
+	return {
+		path,
+		queryTerms: result.queryTerms,
+		matchedTerms: result.matchedTerms,
+		score: result.score,
+		nativeSubItemsReady: false,
+		directSubItems: [],
+	};
 }
 
 type IndexSizeAccumulator = {
@@ -1679,6 +1720,9 @@ function estimateDocumentStoreBytes(
 function estimateDocumentIdentityBytes(
 	documentIdByPath: ReadonlyMap<string, number>,
 	documentPathById: readonly (string | undefined)[],
+	documentById: readonly (CoverageLexicalDocument | undefined)[],
+	documentBodyTokensById: readonly (readonly string[] | undefined)[],
+	documentTagValuesById: readonly (readonly string[] | undefined)[],
 	nextDocumentId: number,
 	accumulator: IndexSizeAccumulator,
 ): Record<string, unknown> & { total: number } {
@@ -1709,6 +1753,22 @@ function estimateDocumentIdentityBytes(
 		accountStringBytes(accumulator, path);
 	}
 
+	const docStoreById = {
+		slotCount: documentById.length,
+		populatedCount: documentById.filter(Boolean).length,
+		referenceBytes: documentById.length * INDEX_REFERENCE_BYTES,
+	};
+	const bodyTokensById = {
+		slotCount: documentBodyTokensById.length,
+		populatedCount: documentBodyTokensById.filter(Boolean).length,
+		referenceBytes: documentBodyTokensById.length * INDEX_REFERENCE_BYTES,
+	};
+	const tagValuesById = {
+		slotCount: documentTagValuesById.length,
+		populatedCount: documentTagValuesById.filter(Boolean).length,
+		referenceBytes: documentTagValuesById.length * INDEX_REFERENCE_BYTES,
+	};
+
 	const counter = {
 		count: 1,
 		value: nextDocumentId,
@@ -1722,9 +1782,15 @@ function estimateDocumentIdentityBytes(
 			pathToId.pathReferenceBytes +
 			pathToId.numberBytes +
 			idToPath.referenceBytes +
+			docStoreById.referenceBytes +
+			bodyTokensById.referenceBytes +
+			tagValuesById.referenceBytes +
 			counter.numberBytes,
 		pathToId,
 		idToPath,
+		docStoreById,
+		bodyTokensById,
+		tagValuesById,
 		counter,
 	};
 }

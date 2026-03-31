@@ -15,8 +15,8 @@ export function buildCoverageLexicalPassageAdmissionSignal(
 	state: CoverageLexicalCandidateState,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 ): CoverageLexicalPassageAdmissionSignal {
-	const phraseMatchCount = state.phraseMatches.size;
-	const phraseMatchWeight = Array.from(state.phraseMatches).reduce(
+	const phraseMatchCount = state.phraseMatches.length;
+	const phraseMatchWeight = state.phraseMatches.reduce(
 		(total, index) => total + (phraseSignatures[index]?.tailWeight ?? 0),
 		0,
 	);

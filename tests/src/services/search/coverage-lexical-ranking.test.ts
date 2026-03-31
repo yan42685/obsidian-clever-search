@@ -1130,6 +1130,9 @@ describe("coverage lexical ranking", () => {
 			true,
 		);
 		expect(Array.isArray(internalEngine.metadataAliasPostings.get("hot"))).toBe(true);
+		expect(Array.isArray(internalEngine.metadataAliasPhrasePostings.get("hot postings"))).toBe(
+			true,
+		);
 		expect(Array.isArray(internalEngine.metadataBasenamePostings.get("hot-postings"))).toBe(
 			true,
 		);
@@ -1139,18 +1142,34 @@ describe("coverage lexical ranking", () => {
 		expect(Array.isArray(internalEngine.metadataHeadingPostings.get("hot"))).toBe(
 			true,
 		);
+		expect(
+			Array.isArray(internalEngine.metadataHeadingPhrasePostings.get("hot postings")),
+		).toBe(true);
 		expect(Array.isArray(internalEngine.metadataPostings.get("phase3"))).toBe(true);
 		expect(Array.isArray(internalEngine.metadataTagPostings.get("phase3"))).toBe(true);
 		expect(Array.isArray(internalEngine.metadataTagFullPostings.get("phase3,cache"))).toBe(
 			true,
 		);
+		expect(Array.isArray(internalEngine.metadataTagPhrasePostings.get("phase3 cache"))).toBe(
+			true,
+		);
 		expect(internalEngine.bodyPostings.get("cache")).toContain(docId);
+		expect(internalEngine.bodyPhrasePostings.get("cache restore")).toContain(docId);
 		expect(internalEngine.metadataAliasPostings.get("hot")).toContain(docId);
+		expect(internalEngine.metadataAliasPhrasePostings.get("hot postings")).toContain(
+			docId,
+		);
 		expect(internalEngine.metadataBasenamePostings.get("hot-postings")).toContain(docId);
 		expect(internalEngine.metadataFolderPostings.get("phase3")).toContain(docId);
 		expect(internalEngine.metadataHeadingPostings.get("hot")).toContain(docId);
+		expect(internalEngine.metadataHeadingPhrasePostings.get("hot postings")).toContain(
+			docId,
+		);
 		expect(internalEngine.metadataTagPostings.get("phase3")).toContain(docId);
 		expect(internalEngine.metadataTagFullPostings.get("phase3,cache")).toContain(docId);
+		expect(internalEngine.metadataTagPhrasePostings.get("phase3 cache")).toContain(
+			docId,
+		);
 		expect(internalEngine.documentPathById[docId]).toBe(
 			"pkm-en/phase3/hot-postings.md",
 		);

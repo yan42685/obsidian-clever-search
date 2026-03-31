@@ -21,7 +21,7 @@ import type {
 
 type CoverageLexicalPostingList = ReadonlySet<string> | readonly number[];
 type CoverageLexicalPostingMap = ReadonlyMap<string, CoverageLexicalPostingList>;
-type CoverageLexicalCandidateKey = string | number;
+type CoverageLexicalCandidateKey = number;
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: CoverageLexicalPostingMap;
@@ -51,10 +51,10 @@ type CoverageLexicalRecallIndex = {
 	metadataTagPhrasePostings: CoverageLexicalPostingMap;
 	metadataTagPostings: CoverageLexicalPostingMap;
 	sortedLexicon: readonly string[];
-	documentIdByPath?: ReadonlyMap<string, number>;
-	documentPathById?: readonly (string | undefined)[];
-	documentBodyTokensByPath: ReadonlyMap<string, readonly string[]>;
-	documentTagValuesByPath: ReadonlyMap<string, readonly string[]>;
+	documentIdByPath: ReadonlyMap<string, number>;
+	documentPathById: readonly (string | undefined)[];
+	documentBodyTokensById: readonly (readonly string[] | undefined)[];
+	documentTagValuesById: readonly (readonly string[] | undefined)[];
 };
 
 type CoverageLexicalCollectionScope = "all" | "body-only" | "metadata-only";
@@ -72,8 +72,8 @@ type CoverageLexicalRecallDebugAccumulator = {
 };
 
 type CoverageLexicalQueryCache = {
-	tagFallbackByPath: Map<
-		string,
+	tagFallbackByDocId: Map<
+		number,
 		ReturnType<typeof evaluateCoverageLexicalTagFallback>
 	>;
 };
@@ -101,14 +101,12 @@ type CoverageLexicalCheapLaneSignal = {
 
 type CoverageLexicalCheapLaneCandidate = {
 	key: CoverageLexicalCandidateKey;
-	path: string;
 	state: CoverageLexicalCandidateState;
 	signal: CoverageLexicalCheapLaneSignal;
 };
 
 type CoverageLexicalLaneEvaluation = {
 	key: CoverageLexicalCandidateKey;
-	path: string;
 	state: CoverageLexicalCandidateState;
 	hardAnchorMetadata: CoverageLexicalGroupSignal;
 	decisiveBody: CoverageLexicalGroupSignal;
@@ -138,7 +136,7 @@ function createRecallDebugAccumulator(): CoverageLexicalRecallDebugAccumulator {
 
 function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 	return {
-		tagFallbackByPath: new Map(),
+		tagFallbackByDocId: new Map(),
 	};
 }
 
@@ -173,6 +171,27 @@ export function collectCoverageLexicalCandidateStates(
 		request.queryText,
 	),
 ): Map<string, CoverageLexicalCandidateState> {
+	return projectCandidateStatesToPaths(
+		index,
+		collectCoverageLexicalCandidateStatesByDocId(
+			index,
+			plan,
+			phraseSignatures,
+			request,
+			charQuery,
+		),
+	);
+}
+
+export function collectCoverageLexicalCandidateStatesByDocId(
+	index: CoverageLexicalRecallIndex,
+	plan: CoverageLexicalPlan,
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+	request: FileSearchRequest,
+	charQuery: CoverageLexicalCharQuery = buildCoverageLexicalCharQuery(
+		request.queryText,
+	),
+): Map<number, CoverageLexicalCandidateState> {
 	return collectCoverageLexicalCandidateStatesInternal(
 		index,
 		plan,
@@ -196,7 +215,7 @@ export function collectCoverageLexicalCandidateStatesWithDebug(
 	debug: CoverageLexicalRecallDebug;
 } {
 	const debug = createRecallDebugAccumulator();
-	const candidates = collectCoverageLexicalCandidateStatesInternal(
+	const candidatesByDocId = collectCoverageLexicalCandidateStatesInternal(
 		index,
 		plan,
 		phraseSignatures,
@@ -205,10 +224,10 @@ export function collectCoverageLexicalCandidateStatesWithDebug(
 		debug,
 	);
 	return {
-		candidates,
+		candidates: projectCandidateStatesToPaths(index, candidatesByDocId),
 		debug: {
 			lanes: Array.from(debug.lanes.values()),
-			unionSize: candidates.size,
+			unionSize: candidatesByDocId.size,
 		},
 	};
 }
@@ -220,7 +239,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 	request: FileSearchRequest,
 	charQuery: CoverageLexicalCharQuery,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
-): Map<string, CoverageLexicalCandidateState> {
+): Map<number, CoverageLexicalCandidateState> {
 	const queryCache = createCoverageLexicalQueryCache();
 	const aggregateCandidates = new Map<
 		CoverageLexicalCandidateKey,
@@ -295,14 +314,13 @@ function collectCoverageLexicalCandidateStatesInternal(
 		debug,
 	);
 
-	const admittedCandidates = new Map<string, CoverageLexicalCandidateState>();
+	const admittedCandidates = new Map<number, CoverageLexicalCandidateState>();
 	for (const key of admittedKeys) {
 		const state = aggregateCandidates.get(key);
-		const path = resolveCandidatePath(index, key);
-		if (!state || !path) {
+		if (!state) {
 			continue;
 		}
-		mergeCandidateStateInto(admittedCandidates, path, state);
+		mergeCandidateStateInto(admittedCandidates, key, state);
 	}
 	return admittedCandidates;
 }
@@ -742,7 +760,9 @@ function admitLaneCandidates(
 		preselected
 			.map(([key]) => resolveCandidatePath(index, key))
 			.filter(isNonEmptyString),
-		admitted.map((evaluation) => evaluation.path),
+		admitted
+			.map((evaluation) => resolveCandidatePath(index, evaluation.key))
+			.filter(isNonEmptyString),
 	);
 }
 
@@ -789,7 +809,6 @@ function preselectLaneCandidates(
 	const entries = Array.from(laneCandidates.entries()).map(
 		([key, state]): CoverageLexicalCheapLaneCandidate => ({
 			key,
-			path: resolveCandidatePath(index, key) ?? String(key),
 			state,
 			signal: buildCheapLaneSignal(state, plan),
 		}),
@@ -849,7 +868,7 @@ function compareCheapLaneCandidates(
 ): number {
 	return (
 		compareCheapLaneSignals(laneName, left.signal, right.signal) ||
-		left.path.localeCompare(right.path)
+		left.key - right.key
 	);
 }
 
@@ -938,7 +957,7 @@ function buildCheapLaneSignal(
 			mergeMatchMaps(state.bodyMatches, state.metadataMatches),
 			plan.bridgeFamilies,
 		),
-		phraseMatchCount: state.phraseMatches.size,
+		phraseMatchCount: state.phraseMatches.length,
 		tagExactCount: state.tagExactTerms.size,
 		tagCharCount: state.tagCharTerms.size,
 		metadataCharCount: state.metadataCharTerms.size,
@@ -1002,21 +1021,16 @@ function buildLaneEvaluation(
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 ): CoverageLexicalLaneEvaluation | null {
-	const path = resolveCandidatePath(index, key);
-	if (!path) {
-		return null;
-	}
-	const phraseMatchCount = state.phraseMatches.size;
-	const phraseMatchWeight = Array.from(state.phraseMatches).reduce(
+	const phraseMatchCount = state.phraseMatches.length;
+	const phraseMatchWeight = state.phraseMatches.reduce(
 		(total, signatureIndex) =>
 			total + (phraseSignatures[signatureIndex]?.tailWeight ?? 0),
 		0,
 	);
-	const tokens = index.documentBodyTokensByPath.get(path) ?? [];
-	const tagFallback = getOrCreateTagFallback(path, index, charQuery, queryCache);
+	const tokens = index.documentBodyTokensById[key] ?? [];
+	const tagFallback = getOrCreateTagFallback(key, index, charQuery, queryCache);
 	return {
 		key,
-		path,
 		state,
 		hardAnchorMetadata: buildGroupSignal(
 			state.metadataMatches,
@@ -1063,20 +1077,20 @@ function buildLaneEvaluation(
 }
 
 function getOrCreateTagFallback(
-	path: string,
+	docId: number,
 	index: CoverageLexicalRecallIndex,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 ): ReturnType<typeof evaluateCoverageLexicalTagFallback> {
-	const cached = queryCache.tagFallbackByPath.get(path);
+	const cached = queryCache.tagFallbackByDocId.get(docId);
 	if (cached) {
 		return cached;
 	}
 	const created = evaluateCoverageLexicalTagFallback(
-		index.documentTagValuesByPath?.get(path) ?? [],
+		index.documentTagValuesById[docId] ?? [],
 		charQuery,
 	);
-	queryCache.tagFallbackByPath.set(path, created);
+	queryCache.tagFallbackByDocId.set(docId, created);
 	return created;
 }
 
@@ -1154,7 +1168,7 @@ function compareLaneEvaluations(
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
-				left.path.localeCompare(right.path)
+				left.key - right.key
 			);
 		case "strict_hybrid_lane":
 			return (
@@ -1166,7 +1180,7 @@ function compareLaneEvaluations(
 					right.passageSignal,
 				) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
-				left.path.localeCompare(right.path)
+				left.key - right.key
 			);
 		case "relaxed_hybrid_lane":
 			return (
@@ -1182,7 +1196,7 @@ function compareLaneEvaluations(
 					right.passageSignal,
 				) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
-				left.path.localeCompare(right.path)
+				left.key - right.key
 			);
 		case "local_body_lane":
 			return (
@@ -1194,7 +1208,7 @@ function compareLaneEvaluations(
 				compareGroupSignals(left.supportBody, right.supportBody) ||
 				compareGroupSignals(left.optionalBody, right.optionalBody) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
-				left.path.localeCompare(right.path)
+				left.key - right.key
 			);
 		case "bridge_lane":
 			return (
@@ -1207,7 +1221,7 @@ function compareLaneEvaluations(
 					left.passageSignal,
 					right.passageSignal,
 				) ||
-				left.path.localeCompare(right.path)
+				left.key - right.key
 			);
 		case "char_fallback_lane":
 			return (
@@ -1222,7 +1236,7 @@ function compareLaneEvaluations(
 					left.passageSignal,
 					right.passageSignal,
 				) ||
-				left.path.localeCompare(right.path)
+				left.key - right.key
 			);
 		default:
 			return 0;
@@ -1238,7 +1252,7 @@ function getBodyCoverageCount(evaluation: CoverageLexicalLaneEvaluation): number
 }
 
 function buildGroupSignal(
-	matches: ReadonlyMap<number, CoverageFamilyMatchKind>,
+	matches: readonly number[],
 	families: readonly CoverageLexicalFamily[],
 ): CoverageLexicalGroupSignal {
 	let coverageCount = 0;
@@ -1247,7 +1261,7 @@ function buildGroupSignal(
 	let fuzzyWeight = 0;
 	let tailWeight = 0;
 	for (const family of families) {
-		const kind = matches.get(family.index) ?? null;
+		const kind = getRecordedMatchKind(matches, family.index);
 		if (!kind) {
 			continue;
 		}
@@ -1287,14 +1301,13 @@ function compareGroupSignals(
 }
 
 function mergeMatchMaps(
-	left: ReadonlyMap<number, CoverageFamilyMatchKind>,
-	right: ReadonlyMap<number, CoverageFamilyMatchKind>,
-): Map<number, CoverageFamilyMatchKind> {
-	const merged = new Map<number, CoverageFamilyMatchKind>();
-	for (const [familyIndex, kind] of left) {
-		merged.set(familyIndex, kind);
-	}
-	for (const [familyIndex, kind] of right) {
+	left: readonly number[],
+	right: readonly number[],
+): number[] {
+	const merged = left.slice();
+	const limit = Math.max(left.length, right.length);
+	for (let familyIndex = 0; familyIndex < limit; familyIndex += 1) {
+		const kind = getRecordedMatchKind(right, familyIndex);
 		if (!kind) {
 			continue;
 		}
@@ -1499,7 +1512,7 @@ function collectCandidatesForPhraseSignature(
 			if (bodyTokenMatches) {
 				forEachPostingCandidateKey(index, bodyTokenMatches, (key) => {
 					const state = getOrCreateCandidateState(candidates, key);
-					state.phraseMatches.add(signature.index);
+					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
 					}
@@ -1509,7 +1522,7 @@ function collectCandidatesForPhraseSignature(
 			if (bodyPhraseMatches) {
 				forEachPostingCandidateKey(index, bodyPhraseMatches, (key) => {
 					const state = getOrCreateCandidateState(candidates, key);
-					state.phraseMatches.add(signature.index);
+					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
 					}
@@ -1526,7 +1539,7 @@ function collectCandidatesForPhraseSignature(
 			if (metadataTokenMatches) {
 				forEachPostingCandidateKey(index, metadataTokenMatches, (key) => {
 					const state = getOrCreateCandidateState(candidates, key);
-					state.phraseMatches.add(signature.index);
+					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
 					}
@@ -1563,30 +1576,35 @@ function mergeCandidateStateInto<TKey extends CoverageLexicalCandidateKey>(
 	nextState: CoverageLexicalCandidateState,
 ): void {
 	const target = getOrCreateCandidateState(candidates, key);
-	for (const [familyIndex, kind] of nextState.bodyMatches) {
-		if (!kind) {
-			continue;
+	for (let familyIndex = 0; familyIndex < nextState.bodyMatches.length; familyIndex += 1) {
+		const kind = getRecordedMatchKind(nextState.bodyMatches, familyIndex);
+		if (kind) {
+			recordFamilyMatch(target.bodyMatches, familyIndex, kind);
 		}
-		recordFamilyMatch(target.bodyMatches, familyIndex, kind);
 	}
-	for (const [familyIndex, kind] of nextState.metadataMatches) {
-		if (!kind) {
-			continue;
+	for (
+		let familyIndex = 0;
+		familyIndex < nextState.metadataMatches.length;
+		familyIndex += 1
+	) {
+		const kind = getRecordedMatchKind(nextState.metadataMatches, familyIndex);
+		if (kind) {
+			recordFamilyMatch(target.metadataMatches, familyIndex, kind);
 		}
-		recordFamilyMatch(target.metadataMatches, familyIndex, kind);
 	}
 	for (const field of Object.keys(
 		nextState.metadataFieldMatches,
 	) as CoverageLexicalMetadataField[]) {
-		for (const [familyIndex, kind] of nextState.metadataFieldMatches[field]) {
-			if (!kind) {
-				continue;
+		const sourceMatches = nextState.metadataFieldMatches[field];
+		for (let familyIndex = 0; familyIndex < sourceMatches.length; familyIndex += 1) {
+			const kind = getRecordedMatchKind(sourceMatches, familyIndex);
+			if (kind) {
+				recordFamilyMatch(target.metadataFieldMatches[field], familyIndex, kind);
 			}
-			recordFamilyMatch(target.metadataFieldMatches[field], familyIndex, kind);
 		}
 	}
 	for (const phraseMatch of nextState.phraseMatches) {
-		target.phraseMatches.add(phraseMatch);
+		recordPhraseMatch(target, phraseMatch);
 	}
 	for (const term of nextState.bodyCharTerms) {
 		target.bodyCharTerms.add(term);
@@ -1622,7 +1640,7 @@ function collectAnyMetadataPhraseMatches(
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
 			const state = getOrCreateCandidateState(candidates, key);
-			state.phraseMatches.add(signature.index);
+			recordPhraseMatch(state, signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
 			}
@@ -1632,14 +1650,13 @@ function collectAnyMetadataPhraseMatches(
 
 function createEmptyCandidateState(): CoverageLexicalCandidateState {
 	return {
-		bodyMatches: new Map(),
+		bodyMatches: [],
 		bodyCharTerms: new Set(),
-		bodyExactSegments: new Set(),
-		metadataMatches: new Map(),
+		metadataMatches: [],
 		metadataCharTerms: new Set(),
-		metadataExactSegments: new Set(),
 		metadataFieldMatches: createEmptyMetadataFieldMatches(),
-		phraseMatches: new Set(),
+		phraseMatches: [],
+		phraseMatchFlags: [],
 		tagCharTerms: new Set(),
 		tagExactTerms: new Set(),
 	};
@@ -1713,7 +1730,7 @@ function collectPreferredMetadataPhraseMatches(
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
 			const state = getOrCreateCandidateState(candidates, key);
-			state.phraseMatches.add(signature.index);
+			recordPhraseMatch(state, signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
 				recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, "exact");
@@ -1724,22 +1741,16 @@ function collectPreferredMetadataPhraseMatches(
 
 function canonicalizeCandidateKey(
 	index: CoverageLexicalRecallIndex,
-	key: CoverageLexicalCandidateKey,
-): CoverageLexicalCandidateKey {
-	if (typeof key === "number") {
-		return key;
-	}
-	return index.documentIdByPath?.get(key) ?? key;
+	path: string,
+): CoverageLexicalCandidateKey | null {
+	return index.documentIdByPath.get(path) ?? null;
 }
 
 function resolveCandidatePath(
 	index: CoverageLexicalRecallIndex,
 	key: CoverageLexicalCandidateKey,
 ): string | null {
-	if (typeof key === "number") {
-		return index.documentPathById?.[key] ?? null;
-	}
-	return key;
+	return index.documentPathById[key] ?? null;
 }
 
 function mapCandidateKeysToPaths(
@@ -1767,27 +1778,46 @@ function forEachPostingCandidateKey(
 ): void {
 	if (Array.isArray(postings)) {
 		for (const docId of postings) {
-			if (index.documentPathById?.[docId]) {
+			if (index.documentPathById[docId]) {
 				visitor(docId);
 			}
 		}
 		return;
 	}
 	for (const path of postings as ReadonlySet<string>) {
-		visitor(canonicalizeCandidateKey(index, path));
+		const docId = canonicalizeCandidateKey(index, path);
+		if (docId !== null) {
+			visitor(docId);
+		}
 	}
 }
 
+function projectCandidateStatesToPaths(
+	index: CoverageLexicalRecallIndex,
+	candidates: ReadonlyMap<number, CoverageLexicalCandidateState>,
+): Map<string, CoverageLexicalCandidateState> {
+	const projected = new Map<string, CoverageLexicalCandidateState>();
+	for (const [docId, state] of candidates) {
+		const path = resolveCandidatePath(index, docId);
+		if (!path) {
+			continue;
+		}
+		mergeCandidateStateInto(projected, path, state);
+	}
+	return projected;
+}
+
 function recordFamilyMatch(
-	matches: Map<number, CoverageFamilyMatchKind>,
+	matches: number[],
 	familyIndex: number,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
 ): void {
-	const previous = matches.get(familyIndex) ?? null;
-	if (pickBetterMatchKind(previous, kind) === previous) {
+	const nextCode = encodeMatchKind(kind);
+	const previousCode = matches[familyIndex] ?? 0;
+	if (previousCode >= nextCode) {
 		return;
 	}
-	matches.set(familyIndex, kind);
+	matches[familyIndex] = nextCode;
 }
 
 function pickBetterMatchKind(
@@ -1805,12 +1835,52 @@ function pickBetterMatchKind(
 
 function createEmptyMetadataFieldMatches(): CoverageLexicalCandidateState["metadataFieldMatches"] {
 	return {
-		basename: new Map(),
-		aliases: new Map(),
-		folder: new Map(),
-		headings: new Map(),
-		tags: new Map(),
+		basename: [],
+		aliases: [],
+		folder: [],
+		headings: [],
+		tags: [],
 	};
+}
+
+function recordPhraseMatch(
+	state: CoverageLexicalCandidateState,
+	phraseIndex: number,
+): void {
+	if (state.phraseMatchFlags[phraseIndex] === 1) {
+		return;
+	}
+	state.phraseMatchFlags[phraseIndex] = 1;
+	state.phraseMatches.push(phraseIndex);
+}
+
+function getRecordedMatchKind(
+	matches: readonly number[],
+	familyIndex: number,
+): Exclude<CoverageFamilyMatchKind, null> | null {
+	const code = matches[familyIndex] ?? 0;
+	if (code === 3) {
+		return "exact";
+	}
+	if (code === 2) {
+		return "prefix";
+	}
+	if (code === 1) {
+		return "fuzzy";
+	}
+	return null;
+}
+
+function encodeMatchKind(
+	kind: Exclude<CoverageFamilyMatchKind, null>,
+): number {
+	if (kind === "exact") {
+		return 3;
+	}
+	if (kind === "prefix") {
+		return 2;
+	}
+	return 1;
 }
 
 function expandPrefixTerms(
