@@ -1099,4 +1099,114 @@ describe("coverage lexical ranking", () => {
 			highlighted.some((segment) => segment.includes("foo/bar@v1.2#tag")),
 		).toBe(true);
 	});
+
+	test("preserves stable doc ids across reindex and advances ids after true delete", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				deleteDocuments(paths: string[]): void;
+				clearIndex(): void;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		const internalEngine = engine as any;
+		await engine.addDocuments([
+			{
+				path: "pkm-en/phase3/stable-doc-id.md",
+				basename: "stable-doc-id.md",
+				folder: "pkm-en/phase3",
+				headings: "Stable doc id",
+				content: "first draft keeps the same logical document identity",
+			},
+		]);
+
+		const originalDocId = internalEngine.documents.get(
+			"pkm-en/phase3/stable-doc-id.md",
+		)?.docId;
+		expect(originalDocId).toBe(0);
+
+		await engine.addDocuments([
+			{
+				path: "pkm-en/phase3/stable-doc-id.md",
+				basename: "stable-doc-id.md",
+				folder: "pkm-en/phase3",
+				headings: "Stable doc id updated",
+				content: "second draft still belongs to the same logical document",
+			},
+		]);
+
+		expect(
+			internalEngine.documents.get("pkm-en/phase3/stable-doc-id.md")?.docId,
+		).toBe(originalDocId);
+
+		engine.deleteDocuments(["pkm-en/phase3/stable-doc-id.md"]);
+		expect(
+			internalEngine.documentIdByPath.has("pkm-en/phase3/stable-doc-id.md"),
+		).toBe(false);
+
+		await engine.addDocuments([
+			{
+				path: "pkm-en/phase3/new-logical-document.md",
+				basename: "new-logical-document.md",
+				folder: "pkm-en/phase3",
+				headings: "Fresh logical document",
+				content: "new ownership should consume a fresh doc id after delete",
+			},
+		]);
+
+		expect(
+			internalEngine.documents.get("pkm-en/phase3/new-logical-document.md")
+				?.docId,
+		).toBe(originalDocId + 1);
+
+		engine.clearIndex();
+		await engine.addDocuments([
+			{
+				path: "pkm-en/phase3/after-clear.md",
+				basename: "after-clear.md",
+				folder: "pkm-en/phase3",
+				headings: "After clear",
+				content: "clear index should reset doc id ownership from zero",
+			},
+		]);
+
+		expect(internalEngine.documents.get("pkm-en/phase3/after-clear.md")?.docId).toBe(
+			0,
+		);
+	});
+
+	test("reports document identity bytes in the index breakdown", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				getIndexBreakdown(): Record<string, any> | null;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-en/phase3/index-breakdown.md",
+				basename: "index-breakdown.md",
+				folder: "pkm-en/phase3",
+				headings: "Index breakdown",
+				content: "document identity bytes should be visible in the estimate",
+			},
+		]);
+
+		const breakdown = engine.getIndexBreakdown();
+		expect(breakdown?.documentIdentityCount).toBe(1);
+		expect(breakdown?.nextDocumentId).toBe(1);
+		expect(
+			((breakdown?.estimatedBytes as Record<string, any>)?.documentIdentity as Record<
+				string,
+				any
+			>)?.total,
+		).toBeGreaterThan(0);
+	});
 });

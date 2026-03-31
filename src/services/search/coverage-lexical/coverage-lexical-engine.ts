@@ -58,6 +58,7 @@ import type {
 } from "./coverage-lexical-types";
 
 type CoverageLexicalDocument = {
+	docId: number;
 	aliasPhraseTerms: Set<string>;
 	aliasTerms: Set<string>;
 	aliasCharTerms: Set<string>;
@@ -90,8 +91,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
+	private readonly documentIdByPath = new Map<string, number>();
+	private readonly documentPathById = new Map<number, string>();
 	private readonly documentBodyTokensByPath = new Map<string, readonly string[]>();
 	private readonly documentTagValuesByPath = new Map<string, readonly string[]>();
+	private nextDocumentId = 0;
 	private readonly bodyPostings = new Map<string, Set<string>>();
 	private readonly bodyCharPostings = new Map<string, Set<string>>();
 	private readonly bodyHanSegmentPostings = new Map<string, Set<string>>();
@@ -138,8 +142,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	clearIndex(): void {
 		this.documents.clear();
+		this.documentIdByPath.clear();
+		this.documentPathById.clear();
 		this.documentBodyTokensByPath.clear();
 		this.documentTagValuesByPath.clear();
+		this.nextDocumentId = 0;
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
 		this.bodyHanSegmentPostings.clear();
@@ -397,6 +404,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const sizeBreakdown = this.buildIndexSizeBreakdown();
 		return {
 			documentCount: this.documents.size,
+			documentIdentityCount: this.documentIdByPath.size,
+			nextDocumentId: this.nextDocumentId,
 			bodyTermCount: this.bodyPostings.size,
 			bodyCharTermCount: this.bodyCharPostings.size,
 			bodyHanSegmentTermCount: this.bodyHanSegmentPostings.size,
@@ -432,6 +441,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	} {
 		const accumulator = createIndexSizeAccumulator();
 		const documents = estimateDocumentStoreBytes(this.documents, accumulator);
+		const documentIdentity = estimateDocumentIdentityBytes(
+			this.documentIdByPath,
+			this.documentPathById,
+			this.nextDocumentId,
+			accumulator,
+		);
 		const postings = {
 			body: estimatePostingMapBytes(this.bodyPostings, accumulator),
 			bodyChar: estimatePostingMapBytes(this.bodyCharPostings, accumulator),
@@ -526,6 +541,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const total =
 			accumulator.stringPoolBytes +
 			documents.total +
+			documentIdentity.total +
 			sumNamedByteBreakdowns(postings) +
 			lexicon.total;
 		return {
@@ -536,6 +552,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					uniqueStrings: accumulator.seenStrings.size,
 				},
 				documents,
+				documentIdentity,
 				postings: toNamedByteBreakdown(postings),
 				lexicon,
 			},
@@ -543,7 +560,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private indexDocument(document: IndexedDocument): void {
-		this.removeDocument(document.path);
+		this.removeDocument(document.path, false);
+		const docId = this.ensureDocumentId(document.path);
 
 		const bodyTokenSequence = this.tokenizer
 			.tokenizeSequence(document.content ?? "", "index")
@@ -614,6 +632,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		);
 
 		this.documents.set(document.path, {
+			docId,
 			aliasPhraseTerms,
 			aliasTerms,
 			aliasCharTerms,
@@ -710,9 +729,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.sortedLexicon = Array.from(this.lexicon).sort();
 	}
 
-	private removeDocument(path: string): void {
+	private removeDocument(path: string, releaseDocumentIdentity = true): void {
 		const existing = this.documents.get(path);
 		if (!existing) {
+			if (releaseDocumentIdentity) {
+				this.releaseDocumentIdentity(path);
+			}
 			return;
 		}
 
@@ -779,7 +801,31 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.delete(path);
 		this.documentBodyTokensByPath.delete(path);
 		this.documentTagValuesByPath.delete(path);
+		if (releaseDocumentIdentity) {
+			this.releaseDocumentIdentity(path);
+		}
 		this.rebuildLexicon();
+	}
+
+	private ensureDocumentId(path: string): number {
+		const existingId = this.documentIdByPath.get(path);
+		if (existingId !== undefined) {
+			return existingId;
+		}
+		const docId = this.nextDocumentId;
+		this.nextDocumentId += 1;
+		this.documentIdByPath.set(path, docId);
+		this.documentPathById.set(docId, path);
+		return docId;
+	}
+
+	private releaseDocumentIdentity(path: string): void {
+		const existingId = this.documentIdByPath.get(path);
+		if (existingId === undefined) {
+			return;
+		}
+		this.documentIdByPath.delete(path);
+		this.documentPathById.delete(existingId);
 	}
 
 	private rebuildLexicon(): void {
@@ -1353,6 +1399,7 @@ type IndexSizeAccumulator = {
 const INDEX_COLLECTION_HEADER_BYTES = 4;
 const INDEX_REFERENCE_BYTES = 4;
 const INDEX_MAP_ENTRY_BYTES = 8;
+const INDEX_NUMBER_BYTES = 8;
 const UTF8_ENCODER = new TextEncoder();
 
 function createIndexSizeAccumulator(): IndexSizeAccumulator {
@@ -1441,6 +1488,7 @@ function estimateDocumentStoreBytes(
 	accumulator: IndexSizeAccumulator,
 ): Record<string, unknown> & { total: number } {
 	const sections = {
+		docIds: { count: 0, referenceBytes: 0 },
 		paths: { count: 0, referenceBytes: 0 },
 		bodyText: { count: 0, referenceBytes: 0 },
 		bodyTokenSequence: { count: 0, referenceBytes: 0 },
@@ -1466,6 +1514,9 @@ function estimateDocumentStoreBytes(
 		tagValues: { count: 0, referenceBytes: 0 },
 	};
 	for (const [path, document] of documents.entries()) {
+		sections.docIds.count += 1;
+		sections.docIds.referenceBytes += INDEX_NUMBER_BYTES;
+
 		accountStringBytes(accumulator, path);
 		sections.paths.count += 1;
 		sections.paths.referenceBytes += INDEX_REFERENCE_BYTES;
@@ -1567,6 +1618,62 @@ function estimateDocumentStoreBytes(
 			sumSectionBytes(sections),
 		mapEntryBytes: documents.size * INDEX_MAP_ENTRY_BYTES,
 		...sections,
+	};
+}
+
+function estimateDocumentIdentityBytes(
+	documentIdByPath: ReadonlyMap<string, number>,
+	documentPathById: ReadonlyMap<number, string>,
+	nextDocumentId: number,
+	accumulator: IndexSizeAccumulator,
+): Record<string, unknown> & { total: number } {
+	const pathToId = {
+		count: 0,
+		mapEntryBytes: 0,
+		pathReferenceBytes: 0,
+		numberBytes: 0,
+	};
+	for (const [path] of documentIdByPath.entries()) {
+		pathToId.count += 1;
+		accountStringBytes(accumulator, path);
+		pathToId.mapEntryBytes += INDEX_MAP_ENTRY_BYTES;
+		pathToId.pathReferenceBytes += INDEX_REFERENCE_BYTES;
+		pathToId.numberBytes += INDEX_NUMBER_BYTES;
+	}
+
+	const idToPath = {
+		count: 0,
+		mapEntryBytes: 0,
+		numberBytes: 0,
+		pathReferenceBytes: 0,
+	};
+	for (const [, path] of documentPathById.entries()) {
+		idToPath.count += 1;
+		accountStringBytes(accumulator, path);
+		idToPath.mapEntryBytes += INDEX_MAP_ENTRY_BYTES;
+		idToPath.numberBytes += INDEX_NUMBER_BYTES;
+		idToPath.pathReferenceBytes += INDEX_REFERENCE_BYTES;
+	}
+
+	const counter = {
+		count: 1,
+		value: nextDocumentId,
+		numberBytes: INDEX_NUMBER_BYTES,
+	};
+
+	return {
+		total:
+			INDEX_COLLECTION_HEADER_BYTES * 2 +
+			pathToId.mapEntryBytes +
+			pathToId.pathReferenceBytes +
+			pathToId.numberBytes +
+			idToPath.mapEntryBytes +
+			idToPath.numberBytes +
+			idToPath.pathReferenceBytes +
+			counter.numberBytes,
+		pathToId,
+		idToPath,
+		counter,
 	};
 }
 

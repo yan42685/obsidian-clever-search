@@ -41,7 +41,8 @@ Every retained change should be evaluated against the same four anchors:
 
 - `Phase 0` is complete:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase2.md`
+  - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase2.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step1.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is complete for the current plan slice:
   - maintained query-time document caches landed
@@ -51,6 +52,10 @@ Every retained change should be evaluated against the same four anchors:
   - aggregate metadata phrase storage was removed
   - canonical phrase storage landed
   - quality stayed benchmark-clean while the size ratio moved much closer to `MiniSearch`
+- `Phase 3` has started with the identity foundation:
+  - stable `docId` ownership landed
+  - same-path reindex now preserves identity while true delete releases ownership
+  - size accounting now reports explicit `documentIdentity` bytes so future numeric-postings work can be judged honestly
 - immediate rule:
   - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
 
@@ -245,7 +250,8 @@ Executable checklist:
 1. assign stable numeric ownership
    - introduce stable `docId` identity for indexed files
    - define the lifecycle for insertion, deletion, and reuse clearly before migrating postings
-   - done when postings no longer need path strings as their core identity
+   - status: complete for the ownership layer
+   - done when reindex, delete, and clear all have explicit identity semantics even if postings remain path-keyed temporarily
 2. move postings off `Set<string path>`
    - migrate high-cardinality posting buckets toward doc-id arrays or typed-array-backed storage
    - keep lookup semantics stable while changing representation
@@ -368,8 +374,8 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. treat the Phase 2 anchor as the new comparison point for future work
-3. redesign the live index around doc-id and numeric-first storage in Phase 3
+2. treat the Phase 3 Step 1 anchor as the new comparison point for future work
+3. redesign the live index around numeric-first postings in the remaining Phase 3 work
 4. build binary snapshot + startup self-heal on top of the Phase 3 layout
 5. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 
