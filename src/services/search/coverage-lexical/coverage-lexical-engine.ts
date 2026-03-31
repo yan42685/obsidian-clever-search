@@ -919,12 +919,10 @@ function buildCoverageSignal(
 	const metadataIdentity = createEmptyMetadataIdentitySignal();
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
-	const totalMatchedFamilyIndices = new Set<number>();
-	const bodyMatchedFamilyIndices = new Set<number>();
-	const primaryMetadataFields = new Map<number, CoverageLexicalMetadataField>();
+	const familyCountSummary = createEmptyFamilyCountSummary();
 	let tailCoreWeight = 0;
 	let tailSoftWeight = 0;
-	const matchedTerms = new Set<string>();
+	const matchedTerms: string[] = [];
 
 	for (const family of families) {
 		const bodyKind = getRecordedMatchKind(state.bodyMatches, family.index);
@@ -938,12 +936,12 @@ function buildCoverageSignal(
 
 		const weight = computeFamilyTailWeight(family.index);
 		const bestKind = pickBetterMatchKind(bodyKind, metadataKind);
-		if (bestKind) {
-			matchedTerms.add(family.normalizedTerm);
+		if (bestKind && !matchedTerms.includes(family.normalizedTerm)) {
+			matchedTerms.push(family.normalizedTerm);
 		}
-		totalMatchedFamilyIndices.add(family.index);
+		familyCountSummary.totalMatchedFamilyCount += 1;
 		if (bodyKind) {
-			bodyMatchedFamilyIndices.add(family.index);
+			familyCountSummary.bodyMatchedFamilyCount += 1;
 		}
 		if (metadataKind) {
 			const primaryMetadataField = resolvePrimaryMetadataFieldForFamily(
@@ -951,7 +949,11 @@ function buildCoverageSignal(
 				family.index,
 			);
 			if (primaryMetadataField) {
-				primaryMetadataFields.set(family.index, primaryMetadataField);
+				familyCountSummary.metadataMatchedFamilyCount += 1;
+				accumulateMetadataFieldCount(
+					familyCountSummary,
+					primaryMetadataField,
+				);
 			}
 		}
 		if (family.role === "body") {
@@ -1018,15 +1020,13 @@ function buildCoverageSignal(
 	);
 	const tagFallback = evaluateCoverageLexicalTagFallback(tagValues, charQuery);
 	for (const term of tagFallback.exactTerms) {
-		matchedTerms.add(term);
+		if (!matchedTerms.includes(term)) {
+			matchedTerms.push(term);
+		}
 	}
 
 	return {
-		familyCountSummary: summarizeFamilyCountSignals(
-			totalMatchedFamilyIndices,
-			bodyMatchedFamilyIndices,
-			primaryMetadataFields,
-		),
+		familyCountSummary,
 		coreBody,
 		softBody,
 		metadataAnchor,
@@ -1053,7 +1053,7 @@ function buildCoverageSignal(
 				computePerFileLocalWindowLimit(plan, bodyTokenSequence.length),
 			)
 			: createEmptyCoverageLexicalWindowFusionSignal(),
-		matchedTerms: Array.from(matchedTerms),
+		matchedTerms,
 	};
 }
 
@@ -1122,35 +1122,27 @@ function createEmptyMetadataIdentitySignal(): CoverageLexicalMetadataIdentitySig
 	};
 }
 
-function summarizeFamilyCountSignals(
-	totalMatchedFamilyIndices: ReadonlySet<number>,
-	bodyMatchedFamilyIndices: ReadonlySet<number>,
-	primaryMetadataFields: ReadonlyMap<number, CoverageLexicalMetadataField>,
-): CoverageLexicalFamilyCountSummary {
-	const summary = createEmptyFamilyCountSummary();
-	summary.totalMatchedFamilyCount = totalMatchedFamilyIndices.size;
-	summary.bodyMatchedFamilyCount = bodyMatchedFamilyIndices.size;
-	summary.metadataMatchedFamilyCount = primaryMetadataFields.size;
-	for (const field of primaryMetadataFields.values()) {
-		if (field === "basename") {
-			summary.basenameMatchedFamilyCount += 1;
-			continue;
-		}
-		if (field === "aliases") {
-			summary.aliasesMatchedFamilyCount += 1;
-			continue;
-		}
-		if (field === "folder") {
-			summary.folderMatchedFamilyCount += 1;
-			continue;
-		}
-		if (field === "headings") {
-			summary.headingsMatchedFamilyCount += 1;
-			continue;
-		}
-		summary.tagsMatchedFamilyCount += 1;
+function accumulateMetadataFieldCount(
+	summary: CoverageLexicalFamilyCountSummary,
+	field: CoverageLexicalMetadataField,
+): void {
+	if (field === "basename") {
+		summary.basenameMatchedFamilyCount += 1;
+		return;
 	}
-	return summary;
+	if (field === "aliases") {
+		summary.aliasesMatchedFamilyCount += 1;
+		return;
+	}
+	if (field === "folder") {
+		summary.folderMatchedFamilyCount += 1;
+		return;
+	}
+	if (field === "headings") {
+		summary.headingsMatchedFamilyCount += 1;
+		return;
+	}
+	summary.tagsMatchedFamilyCount += 1;
 }
 
 function applyMatch(
