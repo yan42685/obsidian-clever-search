@@ -188,7 +188,7 @@ const BENCHMARK_SUITES: readonly BenchmarkSuite[] = [
 	"messy_pkm",
 ];
 
-function createMockTokenizer(): MockTokenizer {
+export function createMockTokenizer(): MockTokenizer {
 	function normalize(text: string): string {
 		return text.toLowerCase().normalize("NFKC");
 	}
@@ -229,7 +229,7 @@ function createMockTokenizer(): MockTokenizer {
 	};
 }
 
-function createAutomationCorpus(): {
+export function createAutomationCorpus(): {
 	documents: IndexedDocument[];
 	queryCases: QueryCase[];
 } {
@@ -2583,6 +2583,7 @@ function round(value: number): number {
 	return Number(value.toFixed(3));
 }
 
+if (process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT !== "1") {
 describe("coverage lexical automation benchmark", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
@@ -2882,3 +2883,4 @@ describe("coverage lexical automation benchmark", () => {
 		expect(benchmarkElapsedMs).toBeLessThan(20000);
 	});
 });
+}
