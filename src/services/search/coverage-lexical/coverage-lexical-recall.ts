@@ -1244,15 +1244,7 @@ function evaluateLaneCandidatesLight(
 }
 
 function shouldDeferFullLaneEvaluation(laneName: CoverageLexicalLaneName): boolean {
-	switch (laneName) {
-		case "strict_hybrid_lane":
-		case "relaxed_hybrid_lane":
-		case "bridge_lane":
-		case "char_fallback_lane":
-			return true;
-		default:
-			return false;
-	}
+	return false;
 }
 
 function selectDeferredFullEvaluationCandidates(
@@ -2223,9 +2215,9 @@ function getOrCreatePhraseSignatureBucket(
 	return created;
 }
 
-function getOrCreateCandidateState<TKey extends string | CoverageLexicalCandidateKey>(
-	candidates: Map<TKey, CoverageLexicalCandidateState>,
-	key: TKey,
+function getOrCreateDocIdCandidateState(
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	key: CoverageLexicalCandidateKey,
 ): CoverageLexicalCandidateState {
 	let state = candidates.get(key);
 	if (!state) {
@@ -2235,12 +2227,40 @@ function getOrCreateCandidateState<TKey extends string | CoverageLexicalCandidat
 	return state;
 }
 
-function mergeCandidateStateInto<TKey extends string | CoverageLexicalCandidateKey>(
-	candidates: Map<TKey, CoverageLexicalCandidateState>,
-	key: TKey,
+function getOrCreateProjectedCandidateState(
+	candidates: Map<string, CoverageLexicalCandidateState>,
+	path: string,
+): CoverageLexicalCandidateState {
+	let state = candidates.get(path);
+	if (!state) {
+		state = createEmptyCandidateState();
+		candidates.set(path, state);
+	}
+	return state;
+}
+
+function mergeCandidateStateByDocId(
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	key: CoverageLexicalCandidateKey,
 	nextState: CoverageLexicalCandidateState,
 ): void {
-	const target = getOrCreateCandidateState(candidates, key);
+	const target = getOrCreateDocIdCandidateState(candidates, key);
+	mergeCandidateState(target, nextState);
+}
+
+function mergeProjectedCandidateStateByPath(
+	candidates: Map<string, CoverageLexicalCandidateState>,
+	path: string,
+	nextState: CoverageLexicalCandidateState,
+): void {
+	const target = getOrCreateProjectedCandidateState(candidates, path);
+	mergeCandidateState(target, nextState);
+}
+
+function mergeCandidateState(
+	target: CoverageLexicalCandidateState,
+	nextState: CoverageLexicalCandidateState,
+): void {
 	for (let familyIndex = 0; familyIndex < nextState.bodyMatches.length; familyIndex += 1) {
 		const kind = getRecordedMatchKind(nextState.bodyMatches, familyIndex);
 		if (kind) {
@@ -2320,7 +2340,7 @@ function collectAnyMetadataPhraseMatches(
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateCandidateState(candidates, key);
+			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordPhraseMatch(state, signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
@@ -2372,7 +2392,7 @@ function collectMetadataFieldCandidatesForTerm(
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateCandidateState(candidates, key);
+			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
 		});
@@ -2382,7 +2402,7 @@ function collectMetadataFieldCandidatesForTerm(
 		return;
 	}
 	forEachPostingCandidateKey(index, metadataMatches, (key) => {
-		const state = getOrCreateCandidateState(candidates, key);
+		const state = getOrCreateDocIdCandidateState(candidates, key);
 		recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 	});
 }
@@ -2414,7 +2434,7 @@ function collectPreferredMetadataPhraseMatches(
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateCandidateState(candidates, key);
+			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordPhraseMatch(state, signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
@@ -2487,7 +2507,7 @@ function projectCandidateStatesToPaths(
 		if (!path) {
 			continue;
 		}
-		mergeCandidateStateInto(projected, path, state);
+		mergeProjectedCandidateStateByPath(projected, path, state);
 	}
 	return projected;
 }
