@@ -95,6 +95,21 @@ type CoverageLexicalGroupSignal = {
 	tailWeight: number;
 };
 
+type CoverageLexicalDerivedPlan = {
+	optionalAnchorFamilies: readonly CoverageLexicalFamily[];
+	optionalBodyFamilies: readonly CoverageLexicalFamily[];
+	strictMetadataFamilies: readonly CoverageLexicalFamily[];
+	strictMetadataPhraseFamilyIndices: ReadonlySet<number>;
+	strictHybridBodyFamilies: readonly CoverageLexicalFamily[];
+	strictHybridPhraseFamilyIndices: ReadonlySet<number>;
+	relaxedBodyFamilies: readonly CoverageLexicalFamily[];
+	relaxedHybridPhraseFamilyIndices: ReadonlySet<number>;
+	localBodyFamilies: readonly CoverageLexicalFamily[];
+	localBodyPhraseFamilyIndices: ReadonlySet<number>;
+	bridgeCollectionFamilies: readonly CoverageLexicalFamily[];
+	bridgePhraseFamilyIndices: ReadonlySet<number>;
+};
+
 type CoverageLexicalCheapLaneSignal = {
 	hardAnchorMetadata: CoverageLexicalGroupSignal;
 	decisiveBody: CoverageLexicalGroupSignal;
@@ -136,6 +151,10 @@ type CoverageLexicalLaneEvaluation = {
 
 const MAX_PREFIX_EXPANSIONS = 48;
 const MAX_FUZZY_EXPANSIONS = 24;
+const coverageLexicalDerivedPlanCache = new WeakMap<
+	CoverageLexicalPlan,
+	CoverageLexicalDerivedPlan
+>();
 
 function createRecallDebugAccumulator(): CoverageLexicalRecallDebugAccumulator {
 	return {
@@ -149,6 +168,71 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		bodyEvidenceTraceByDocId: new Map(),
 		passageSignalByDocAndPhraseKey: new Map(),
 	};
+}
+
+function getOrCreateDerivedPlan(
+	plan: CoverageLexicalPlan,
+): CoverageLexicalDerivedPlan {
+	const cached = coverageLexicalDerivedPlanCache.get(plan);
+	if (cached) {
+		return cached;
+	}
+	const optionalAnchorFamilies = plan.optionalFamilies.filter(
+		(family) => family.role === "anchor",
+	);
+	const optionalBodyFamilies = plan.optionalFamilies.filter(
+		(family) => family.role === "body",
+	);
+	const strictMetadataFamilies = [
+		...plan.hardAnchorFamilies,
+		...optionalAnchorFamilies,
+	];
+	const strictHybridBodyFamilies = [
+		...plan.decisiveBodyFamilies,
+		...plan.supportBodyFamilies,
+	];
+	const relaxedBodyFamilies = [
+		...strictHybridBodyFamilies,
+		...optionalBodyFamilies,
+	];
+	const localBodyFamilies = relaxedBodyFamilies;
+	const bridgeCollectionFamilies = [
+		...plan.bridgeFamilies,
+		...plan.hardAnchorFamilies,
+		...plan.decisiveBodyFamilies,
+	];
+	const created = {
+		optionalAnchorFamilies,
+		optionalBodyFamilies,
+		strictMetadataFamilies,
+		strictMetadataPhraseFamilyIndices: createFamilyIndexSet(
+			strictMetadataFamilies,
+		),
+		strictHybridBodyFamilies,
+		strictHybridPhraseFamilyIndices: createFamilyIndexSet([
+			...plan.hardAnchorFamilies,
+			...strictHybridBodyFamilies,
+		]),
+		relaxedBodyFamilies,
+		relaxedHybridPhraseFamilyIndices: createFamilyIndexSet([
+			...plan.hardAnchorFamilies,
+			...plan.decisiveBodyFamilies,
+			...plan.supportBodyFamilies,
+			...plan.optionalFamilies,
+		]),
+		localBodyFamilies,
+		localBodyPhraseFamilyIndices: createFamilyIndexSet(localBodyFamilies),
+		bridgeCollectionFamilies,
+		bridgePhraseFamilyIndices: createFamilyIndexSet(bridgeCollectionFamilies),
+	};
+	coverageLexicalDerivedPlanCache.set(plan, created);
+	return created;
+}
+
+function createFamilyIndexSet(
+	families: readonly CoverageLexicalFamily[],
+): ReadonlySet<number> {
+	return new Set(families.map((family) => family.index));
 }
 
 function recordLaneDebug(
@@ -350,24 +434,26 @@ function runStrictMetadataLane(
 	if (plan.hardAnchorFamilies.length === 0) {
 		return;
 	}
+	const derivedPlan = getOrCreateDerivedPlan(plan);
 	const laneCandidates = new Map<
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	const anchorFamilies = [
-		...plan.hardAnchorFamilies,
-		...plan.optionalFamilies.filter((family) => family.role === "anchor"),
-	];
-	collectFamilySetCandidates(index, laneCandidates, anchorFamilies, {
+	collectFamilySetCandidates(
+		index,
+		laneCandidates,
+		derivedPlan.strictMetadataFamilies,
+		{
 		scope: "metadata-only",
 		includePrefix: request.isPrefixMatch,
 		includeFuzzy: false,
-	});
+		},
+	);
 	collectPhraseCandidates(
 		index,
 		laneCandidates,
 		phraseSignatures,
-		new Set(anchorFamilies.map((family) => family.index)),
+		derivedPlan.strictMetadataPhraseFamilyIndices,
 		"metadata-only",
 		{
 			structuredOnly: false,
@@ -407,6 +493,7 @@ function runStrictHybridLane(
 	) {
 		return;
 	}
+	const derivedPlan = getOrCreateDerivedPlan(plan);
 	const laneCandidates = new Map<
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
@@ -419,10 +506,7 @@ function runStrictHybridLane(
 	collectFamilySetCandidates(
 		index,
 		laneCandidates,
-		[
-			...plan.decisiveBodyFamilies,
-			...plan.supportBodyFamilies,
-		],
+		derivedPlan.strictHybridBodyFamilies,
 		{
 			scope: "body-only",
 			includePrefix: request.isPrefixMatch,
@@ -433,11 +517,7 @@ function runStrictHybridLane(
 		index,
 		laneCandidates,
 		phraseSignatures,
-		new Set(
-			[...plan.hardAnchorFamilies, ...plan.decisiveBodyFamilies, ...plan.supportBodyFamilies].map(
-				(family) => family.index,
-			),
-		),
+		derivedPlan.strictHybridPhraseFamilyIndices,
 		"all",
 		{
 			structuredOnly: false,
@@ -477,6 +557,7 @@ function runRelaxedHybridLane(
 	) {
 		return;
 	}
+	const derivedPlan = getOrCreateDerivedPlan(plan);
 	const laneCandidates = new Map<
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
@@ -489,11 +570,7 @@ function runRelaxedHybridLane(
 	collectFamilySetCandidates(
 		index,
 		laneCandidates,
-		[
-			...plan.decisiveBodyFamilies,
-			...plan.supportBodyFamilies,
-			...plan.optionalFamilies.filter((family) => family.role === "body"),
-		],
+		derivedPlan.relaxedBodyFamilies,
 		{
 			scope: "body-only",
 			includePrefix: request.isPrefixMatch,
@@ -504,14 +581,7 @@ function runRelaxedHybridLane(
 		index,
 		laneCandidates,
 		phraseSignatures,
-		new Set(
-			[
-				...plan.hardAnchorFamilies,
-				...plan.decisiveBodyFamilies,
-				...plan.supportBodyFamilies,
-				...plan.optionalFamilies,
-			].map((family) => family.index),
-		),
+		derivedPlan.relaxedHybridPhraseFamilyIndices,
 		"all",
 		{
 			structuredOnly: false,
@@ -545,11 +615,8 @@ function runLocalBodyLane(
 	admittedKeys: Set<CoverageLexicalCandidateKey>,
 	debug: CoverageLexicalRecallDebugAccumulator | null,
 ): void {
-	const localBodyFamilies = [
-		...plan.decisiveBodyFamilies,
-		...plan.supportBodyFamilies,
-		...plan.optionalFamilies.filter((family) => family.role === "body"),
-	];
+	const derivedPlan = getOrCreateDerivedPlan(plan);
+	const localBodyFamilies = derivedPlan.localBodyFamilies;
 	if (localBodyFamilies.length === 0) {
 		return;
 	}
@@ -566,7 +633,7 @@ function runLocalBodyLane(
 		index,
 		laneCandidates,
 		phraseSignatures,
-		new Set(localBodyFamilies.map((family) => family.index)),
+		derivedPlan.localBodyPhraseFamilyIndices,
 		"body-only",
 		{
 			structuredOnly: false,
@@ -603,6 +670,7 @@ function runBridgeLane(
 	if (plan.bridgeFamilies.length === 0) {
 		return;
 	}
+	const derivedPlan = getOrCreateDerivedPlan(plan);
 	const laneCandidates = new Map<
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
@@ -610,11 +678,7 @@ function runBridgeLane(
 	collectFamilySetCandidates(
 		index,
 		laneCandidates,
-		[
-			...plan.bridgeFamilies,
-			...plan.hardAnchorFamilies,
-			...plan.decisiveBodyFamilies,
-		],
+		derivedPlan.bridgeCollectionFamilies,
 		{
 			scope: "all",
 			includePrefix: request.isPrefixMatch,
@@ -625,13 +689,7 @@ function runBridgeLane(
 		index,
 		laneCandidates,
 		phraseSignatures,
-		new Set(
-			[
-				...plan.bridgeFamilies,
-				...plan.hardAnchorFamilies,
-				...plan.decisiveBodyFamilies,
-			].map((family) => family.index),
-		),
+		derivedPlan.bridgePhraseFamilyIndices,
 		"all",
 		{
 			structuredOnly: false,
@@ -745,10 +803,9 @@ function admitLaneCandidates(
 		request,
 	);
 	const evaluations = preselected
-		.map(([key, state]) =>
+		.map((candidate) =>
 			buildLaneEvaluation(
-				key,
-				state,
+				candidate,
 				plan,
 				phraseSignatures,
 				index,
@@ -769,7 +826,7 @@ function admitLaneCandidates(
 		laneCandidates.size,
 		mapCandidateKeysToPaths(index, laneCandidates.keys()),
 		preselected
-			.map(([key]) => resolveCandidatePath(index, key))
+			.map((candidate) => resolveCandidatePath(index, candidate.key))
 			.filter(isNonEmptyString),
 		admitted
 			.map((evaluation) => resolveCandidatePath(index, evaluation.key))
@@ -816,7 +873,7 @@ function preselectLaneCandidates(
 	index: CoverageLexicalRecallIndex,
 	plan: CoverageLexicalPlan,
 	request: FileSearchRequest,
-): Array<[CoverageLexicalCandidateKey, CoverageLexicalCandidateState]> {
+): CoverageLexicalCheapLaneCandidate[] {
 	const entries = Array.from(laneCandidates.entries()).map(
 		([key, state]): CoverageLexicalCheapLaneCandidate => ({
 			key,
@@ -830,7 +887,7 @@ function preselectLaneCandidates(
 		Math.max(budget * 6, request.maxItemResults * 8, 48),
 	);
 	if (entries.length <= prefilterBudget) {
-		return entries.map(({ key, state }) => [key, state]);
+		return entries;
 	}
 	const sorted = entries.sort((left, right) =>
 		compareCheapLaneCandidates(laneName, left, right),
@@ -869,7 +926,7 @@ function preselectLaneCandidates(
 			}
 		}
 	}
-	return selected.map(({ key, state }) => [key, state]);
+	return selected;
 }
 
 function compareCheapLaneCandidates(
@@ -947,6 +1004,7 @@ function buildCheapLaneSignal(
 	state: CoverageLexicalCandidateState,
 	plan: CoverageLexicalPlan,
 ): CoverageLexicalCheapLaneSignal {
+	const derivedPlan = getOrCreateDerivedPlan(plan);
 	return {
 		hardAnchorMetadata: buildGroupSignal(
 			state.metadataMatches,
@@ -962,10 +1020,11 @@ function buildCheapLaneSignal(
 		),
 		optionalBody: buildGroupSignal(
 			state.bodyMatches,
-			plan.optionalFamilies.filter((family) => family.role === "body"),
+			derivedPlan.optionalBodyFamilies,
 		),
-		bridgeSignal: buildGroupSignal(
-			mergeMatchMaps(state.bodyMatches, state.metadataMatches),
+		bridgeSignal: buildMergedGroupSignal(
+			state.bodyMatches,
+			state.metadataMatches,
 			plan.bridgeFamilies,
 		),
 		phraseMatchCount: state.phraseMatches.length,
@@ -1024,15 +1083,15 @@ function shouldProtectCheapWitnessFloor(
 }
 
 function buildLaneEvaluation(
-	key: CoverageLexicalCandidateKey,
-	state: CoverageLexicalCandidateState,
+	candidate: CoverageLexicalCheapLaneCandidate,
 	plan: CoverageLexicalPlan,
 	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
 	index: CoverageLexicalRecallIndex,
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 ): CoverageLexicalLaneEvaluation | null {
-	const phraseMatchCount = state.phraseMatches.length;
+	const { key, state, signal } = candidate;
+	const phraseMatchCount = signal.phraseMatchCount;
 	const phraseMatchWeight = state.phraseMatches.reduce(
 		(total, signatureIndex) =>
 			total + (phraseSignatures[signatureIndex]?.tailWeight ?? 0),
@@ -1049,26 +1108,11 @@ function buildLaneEvaluation(
 	return {
 		key,
 		state,
-		hardAnchorMetadata: buildGroupSignal(
-			state.metadataMatches,
-			plan.hardAnchorFamilies,
-		),
-		decisiveBody: buildGroupSignal(
-			state.bodyMatches,
-			plan.decisiveBodyFamilies,
-		),
-		supportBody: buildGroupSignal(
-			state.bodyMatches,
-			plan.supportBodyFamilies,
-		),
-		optionalBody: buildGroupSignal(
-			state.bodyMatches,
-			plan.optionalFamilies.filter((family) => family.role === "body"),
-		),
-		bridgeSignal: buildGroupSignal(
-			mergeMatchMaps(state.bodyMatches, state.metadataMatches),
-			plan.bridgeFamilies,
-		),
+		hardAnchorMetadata: signal.hardAnchorMetadata,
+		decisiveBody: signal.decisiveBody,
+		supportBody: signal.supportBody,
+		optionalBody: signal.optionalBody,
+		bridgeSignal: signal.bridgeSignal,
 		bodyCharMatchCount: state.bodyCharMatchIndices.length,
 		bodyCharMatchRatio: computeCharMatchRatio(
 			state.bodyCharMatchIndices.length,
@@ -1327,18 +1371,58 @@ function buildGroupSignal(
 	let fuzzyWeight = 0;
 	let tailWeight = 0;
 	for (const family of families) {
-		const kind = getRecordedMatchKind(matches, family.index);
-		if (!kind) {
+		const code = matches[family.index] ?? 0;
+		if (code === 0) {
 			continue;
 		}
 		const weight = computeTailWeight(family.index);
 		coverageCount += 1;
 		tailWeight += weight;
-		if (kind === "exact") {
+		if (code === 3) {
 			exactWeight += weight;
 			continue;
 		}
-		if (kind === "prefix") {
+		if (code === 2) {
+			prefixWeight += weight;
+			continue;
+		}
+		fuzzyWeight += weight;
+	}
+	return {
+		coverageCount,
+		exactWeight,
+		prefixWeight,
+		fuzzyWeight,
+		tailWeight,
+	};
+}
+
+function buildMergedGroupSignal(
+	left: readonly number[],
+	right: readonly number[],
+	families: readonly CoverageLexicalFamily[],
+): CoverageLexicalGroupSignal {
+	let coverageCount = 0;
+	let exactWeight = 0;
+	let prefixWeight = 0;
+	let fuzzyWeight = 0;
+	let tailWeight = 0;
+	for (const family of families) {
+		const code = Math.max(
+			left[family.index] ?? 0,
+			right[family.index] ?? 0,
+		);
+		if (code === 0) {
+			continue;
+		}
+		const weight = computeTailWeight(family.index);
+		coverageCount += 1;
+		tailWeight += weight;
+		if (code === 3) {
+			exactWeight += weight;
+			continue;
+		}
+		if (code === 2) {
 			prefixWeight += weight;
 			continue;
 		}
@@ -1364,22 +1448,6 @@ function compareGroupSignals(
 		compareDescendingMetric(left.fuzzyWeight, right.fuzzyWeight) ||
 		compareDescendingMetric(left.tailWeight, right.tailWeight)
 	);
-}
-
-function mergeMatchMaps(
-	left: readonly number[],
-	right: readonly number[],
-): number[] {
-	const merged = left.slice();
-	const limit = Math.max(left.length, right.length);
-	for (let familyIndex = 0; familyIndex < limit; familyIndex += 1) {
-		const kind = getRecordedMatchKind(right, familyIndex);
-		if (!kind) {
-			continue;
-		}
-		recordFamilyMatch(merged, familyIndex, kind);
-	}
-	return merged;
 }
 
 function collectFamilySetCandidates(

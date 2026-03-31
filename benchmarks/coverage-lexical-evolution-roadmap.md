@@ -64,6 +64,15 @@ Every retained change should be evaluated against the same four anchors:
     - avg and p50 latency ratios improved materially and repeatably
     - p100 is still somewhat noisier than avg and p50, but remains much better than the previous active anchor
     - the main retained latency gain came from recall-side document evidence reuse rather than additional numeric posting migration
+  - follow-up recall-side signal churn reduction has now been tried after the active anchor:
+    - lane prefilter signals are reused directly by lane evaluation instead of being rebuilt
+    - optional family subsets and common phrase-family index sets are derived once per query plan
+    - bridge signal no longer allocates merged match arrays just to score a family group
+  - latest interpretation for that follow-up step:
+    - quality stayed clean
+    - absolute `CoverageLexical` time moved down slightly
+    - `p100` ratio improved across reruns
+    - `avg` and `p50` ratios were mixed because `MiniSearch` moved around too, so keep the code but do not replace the active anchor from this step alone
 - `Phase 2` has materially advanced:
   - aggregate metadata phrase storage was removed
   - canonical phrase storage landed
