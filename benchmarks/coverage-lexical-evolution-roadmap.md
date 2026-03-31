@@ -62,10 +62,15 @@ Every retained change should be evaluated against the same four anchors:
     - `metadataPostings`
   - the reverse lookup for numeric postings is now array-backed rather than map-backed
   - recall candidate collection now stays canonical-keyed internally and projects back to paths only at the API boundary
+  - additional numeric-first posting migration has landed after the Step 3 anchor:
+    - field-specific metadata exact postings
+    - exact tag postings
+    - char bigram postings
   - current benchmark interpretation:
     - quality is unchanged
     - size is unchanged
-    - latency ratio regressed vs Step 2, which indicates the remaining path-keyed field/tag/char postings are still paying too much mixed-layout overhead
+    - latency ratio is still not materially better than the Step 3 active anchor
+    - do not promote a new benchmark baseline until size or latency ratios move clearly, not just structurally
 - immediate rule:
   - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
 
@@ -272,10 +277,12 @@ Executable checklist:
      - `metadataPostings`
    - landed next:
      - recall-side canonical candidate merging for mixed posting shapes
+     - field-specific metadata exact postings
+     - exact tag postings
+     - char bigram postings
    - still pending:
-     - field-specific metadata postings
-     - tag postings
-     - char postings
+     - han-segment postings if they become query-relevant
+     - phrase-heavy path-keyed buckets that still impose path-side overhead
    - done when the hottest posting buckets are numeric-first rather than string-first and recall no longer needs to bridge two high-cardinality identity representations in the hot path
 3. centralize strings
    - create a shared representation for path, basename, folder, tag, and term strings
@@ -396,7 +403,7 @@ Revert or redesign when:
 
 1. maintain the current baseline and keep future benchmark captures comparable
 2. treat the Phase 3 Step 3 anchor as the new comparison point for future work
-3. keep pushing the remaining field-specific metadata, tag, and char postings toward doc-id-native storage before expecting a latency win from the canonical recall path
+3. keep pushing only the remaining query-relevant path-heavy posting families toward doc-id-native storage before expecting a latency win from the canonical recall path
 4. build binary snapshot + startup self-heal on top of the Phase 3 layout
 5. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 

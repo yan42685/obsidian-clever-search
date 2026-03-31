@@ -1129,11 +1129,80 @@ describe("coverage lexical ranking", () => {
 		expect(Array.isArray(internalEngine.bodyPhrasePostings.get("cache restore"))).toBe(
 			true,
 		);
+		expect(Array.isArray(internalEngine.metadataAliasPostings.get("hot"))).toBe(true);
+		expect(Array.isArray(internalEngine.metadataBasenamePostings.get("hot-postings"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataFolderPostings.get("phase3"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataHeadingPostings.get("hot"))).toBe(
+			true,
+		);
 		expect(Array.isArray(internalEngine.metadataPostings.get("phase3"))).toBe(true);
+		expect(Array.isArray(internalEngine.metadataTagPostings.get("phase3"))).toBe(true);
+		expect(Array.isArray(internalEngine.metadataTagFullPostings.get("phase3,cache"))).toBe(
+			true,
+		);
 		expect(internalEngine.bodyPostings.get("cache")).toContain(docId);
+		expect(internalEngine.metadataAliasPostings.get("hot")).toContain(docId);
+		expect(internalEngine.metadataBasenamePostings.get("hot-postings")).toContain(docId);
+		expect(internalEngine.metadataFolderPostings.get("phase3")).toContain(docId);
+		expect(internalEngine.metadataHeadingPostings.get("hot")).toContain(docId);
+		expect(internalEngine.metadataTagPostings.get("phase3")).toContain(docId);
+		expect(internalEngine.metadataTagFullPostings.get("phase3,cache")).toContain(docId);
 		expect(internalEngine.documentPathById[docId]).toBe(
 			"pkm-en/phase3/hot-postings.md",
 		);
+	});
+
+	test("stores char postings buckets as doc id arrays", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		const internalEngine = engine as any;
+		await engine.addDocuments([
+			{
+				path: "pkm-zh/阶段三/缓存恢复.md",
+				basename: "缓存恢复.md",
+				folder: "pkm-zh/阶段三",
+				headings: "缓存恢复",
+				content: "缓存恢复记录",
+				aliases: "恢复记录",
+				tags: "恢复 标签",
+			},
+		]);
+
+		const docId = internalEngine.documents.get("pkm-zh/阶段三/缓存恢复.md")?.docId;
+		expect(typeof docId).toBe("number");
+		expect(Array.isArray(internalEngine.bodyCharPostings.get("缓存"))).toBe(true);
+		expect(Array.isArray(internalEngine.metadataAliasCharPostings.get("恢复"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataBasenameCharPostings.get("缓存"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataFolderCharPostings.get("阶段"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataHeadingCharPostings.get("缓存"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataTagCharPostings.get("标签"))).toBe(
+			true,
+		);
+		expect(internalEngine.bodyCharPostings.get("缓存")).toContain(docId);
+		expect(internalEngine.metadataAliasCharPostings.get("恢复")).toContain(docId);
+		expect(internalEngine.metadataBasenameCharPostings.get("缓存")).toContain(docId);
+		expect(internalEngine.metadataFolderCharPostings.get("阶段")).toContain(docId);
+		expect(internalEngine.metadataHeadingCharPostings.get("缓存")).toContain(docId);
+		expect(internalEngine.metadataTagCharPostings.get("标签")).toContain(docId);
 	});
 
 	test("preserves stable doc ids across reindex and advances ids after true delete", async () => {
