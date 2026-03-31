@@ -390,47 +390,31 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	estimateIndexBytes(): number | null {
-		const tokenCount =
-			sumPostingEntries(this.bodyPostings) +
-			sumPostingEntries(this.bodyCharPostings) +
-			sumPostingEntries(this.bodyPhrasePostings) +
-			sumPostingEntries(this.metadataAliasCharPostings) +
-			sumPostingEntries(this.metadataAliasPhrasePostings) +
-			sumPostingEntries(this.metadataAliasPostings) +
-			sumPostingEntries(this.metadataBasenameCharPostings) +
-			sumPostingEntries(this.metadataBasenamePhrasePostings) +
-			sumPostingEntries(this.metadataBasenamePostings) +
-			sumPostingEntries(this.metadataFolderCharPostings) +
-			sumPostingEntries(this.metadataFolderPhrasePostings) +
-			sumPostingEntries(this.metadataFolderPostings) +
-			sumPostingEntries(this.metadataHeadingCharPostings) +
-			sumPostingEntries(this.metadataHeadingPhrasePostings) +
-			sumPostingEntries(this.metadataHeadingPostings) +
-			sumPostingEntries(this.metadataPostings) +
-			sumPostingEntries(this.metadataPhrasePostings) +
-			sumPostingEntries(this.metadataTagCharPostings) +
-			sumPostingEntries(this.metadataTagFullPostings) +
-			sumPostingEntries(this.metadataTagPhrasePostings) +
-			sumPostingEntries(this.metadataTagPostings);
-		return tokenCount * 24;
+		return this.buildIndexSizeBreakdown().estimatedBytes.total;
 	}
 
 	getIndexBreakdown(): Record<string, unknown> | null {
+		const sizeBreakdown = this.buildIndexSizeBreakdown();
 		return {
 			documentCount: this.documents.size,
 			bodyTermCount: this.bodyPostings.size,
 			bodyCharTermCount: this.bodyCharPostings.size,
+			bodyHanSegmentTermCount: this.bodyHanSegmentPostings.size,
 			bodyPhraseTermCount: this.bodyPhrasePostings.size,
 			metadataAliasCharTermCount: this.metadataAliasCharPostings.size,
+			metadataAliasHanSegmentTermCount: this.metadataAliasHanSegmentPostings.size,
 			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
 			metadataBasenameCharTermCount: this.metadataBasenameCharPostings.size,
+			metadataBasenameHanSegmentTermCount: this.metadataBasenameHanSegmentPostings.size,
 			metadataBasenamePhraseTermCount: this.metadataBasenamePhrasePostings.size,
 			metadataBasenameTermCount: this.metadataBasenamePostings.size,
 			metadataFolderCharTermCount: this.metadataFolderCharPostings.size,
+			metadataFolderHanSegmentTermCount: this.metadataFolderHanSegmentPostings.size,
 			metadataFolderPhraseTermCount: this.metadataFolderPhrasePostings.size,
 			metadataFolderTermCount: this.metadataFolderPostings.size,
 			metadataHeadingCharTermCount: this.metadataHeadingCharPostings.size,
+			metadataHeadingHanSegmentTermCount: this.metadataHeadingHanSegmentPostings.size,
 			metadataHeadingPhraseTermCount: this.metadataHeadingPhrasePostings.size,
 			metadataHeadingTermCount: this.metadataHeadingPostings.size,
 			metadataTermCount: this.metadataPostings.size,
@@ -440,6 +424,126 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataTagPhraseTermCount: this.metadataTagPhrasePostings.size,
 			metadataTagTermCount: this.metadataTagPostings.size,
 			lexiconSize: this.sortedLexicon.length,
+			estimatedBytes: sizeBreakdown.estimatedBytes,
+		};
+	}
+
+	private buildIndexSizeBreakdown(): {
+		estimatedBytes: Record<string, unknown> & { total: number };
+	} {
+		const accumulator = createIndexSizeAccumulator();
+		const documents = estimateDocumentStoreBytes(this.documents, accumulator);
+		const postings = {
+			body: estimatePostingMapBytes(this.bodyPostings, accumulator),
+			bodyChar: estimatePostingMapBytes(this.bodyCharPostings, accumulator),
+			bodyHanSegments: estimatePostingMapBytes(
+				this.bodyHanSegmentPostings,
+				accumulator,
+			),
+			bodyPhrase: estimatePostingMapBytes(this.bodyPhrasePostings, accumulator),
+			metadataAlias: estimatePostingMapBytes(
+				this.metadataAliasPostings,
+				accumulator,
+			),
+			metadataAliasChar: estimatePostingMapBytes(
+				this.metadataAliasCharPostings,
+				accumulator,
+			),
+			metadataAliasHanSegments: estimatePostingMapBytes(
+				this.metadataAliasHanSegmentPostings,
+				accumulator,
+			),
+			metadataAliasPhrase: estimatePostingMapBytes(
+				this.metadataAliasPhrasePostings,
+				accumulator,
+			),
+			metadataBasename: estimatePostingMapBytes(
+				this.metadataBasenamePostings,
+				accumulator,
+			),
+			metadataBasenameChar: estimatePostingMapBytes(
+				this.metadataBasenameCharPostings,
+				accumulator,
+			),
+			metadataBasenameHanSegments: estimatePostingMapBytes(
+				this.metadataBasenameHanSegmentPostings,
+				accumulator,
+			),
+			metadataBasenamePhrase: estimatePostingMapBytes(
+				this.metadataBasenamePhrasePostings,
+				accumulator,
+			),
+			metadataFolder: estimatePostingMapBytes(
+				this.metadataFolderPostings,
+				accumulator,
+			),
+			metadataFolderChar: estimatePostingMapBytes(
+				this.metadataFolderCharPostings,
+				accumulator,
+			),
+			metadataFolderHanSegments: estimatePostingMapBytes(
+				this.metadataFolderHanSegmentPostings,
+				accumulator,
+			),
+			metadataFolderPhrase: estimatePostingMapBytes(
+				this.metadataFolderPhrasePostings,
+				accumulator,
+			),
+			metadataHeading: estimatePostingMapBytes(
+				this.metadataHeadingPostings,
+				accumulator,
+			),
+			metadataHeadingChar: estimatePostingMapBytes(
+				this.metadataHeadingCharPostings,
+				accumulator,
+			),
+			metadataHeadingHanSegments: estimatePostingMapBytes(
+				this.metadataHeadingHanSegmentPostings,
+				accumulator,
+			),
+			metadataHeadingPhrase: estimatePostingMapBytes(
+				this.metadataHeadingPhrasePostings,
+				accumulator,
+			),
+			metadata: estimatePostingMapBytes(this.metadataPostings, accumulator),
+			metadataPhrase: estimatePostingMapBytes(
+				this.metadataPhrasePostings,
+				accumulator,
+			),
+			metadataTag: estimatePostingMapBytes(
+				this.metadataTagPostings,
+				accumulator,
+			),
+			metadataTagChar: estimatePostingMapBytes(
+				this.metadataTagCharPostings,
+				accumulator,
+			),
+			metadataTagFull: estimatePostingMapBytes(
+				this.metadataTagFullPostings,
+				accumulator,
+			),
+			metadataTagPhrase: estimatePostingMapBytes(
+				this.metadataTagPhrasePostings,
+				accumulator,
+			),
+		};
+		const lexicon = estimateStringArrayBytes(this.sortedLexicon, accumulator);
+		const total =
+			accumulator.stringPoolBytes +
+			documents.total +
+			sumNamedByteBreakdowns(postings) +
+			lexicon.total;
+		return {
+			estimatedBytes: {
+				total,
+				stringPool: {
+					bytes: accumulator.stringPoolBytes,
+					uniqueStrings: accumulator.seenStrings.size,
+				},
+				documents,
+				postings: toNamedByteBreakdown(postings),
+				lexicon,
+			},
 		};
 	}
 
@@ -1252,12 +1356,266 @@ function computePerFileLocalWindowLimit(
 	return 2;
 }
 
-function sumPostingEntries(postings: ReadonlyMap<string, Set<string>>): number {
-	let total = 0;
-	for (const docs of postings.values()) {
-		total += docs.size;
+type IndexSizeAccumulator = {
+	seenStrings: Set<string>;
+	stringPoolBytes: number;
+};
+
+const INDEX_COLLECTION_HEADER_BYTES = 4;
+const INDEX_REFERENCE_BYTES = 4;
+const INDEX_MAP_ENTRY_BYTES = 8;
+const UTF8_ENCODER = new TextEncoder();
+
+function createIndexSizeAccumulator(): IndexSizeAccumulator {
+	return {
+		seenStrings: new Set(),
+		stringPoolBytes: 0,
+	};
+}
+
+function accountStringBytes(
+	accumulator: IndexSizeAccumulator,
+	value: string,
+): void {
+	if (accumulator.seenStrings.has(value)) {
+		return;
 	}
-	return total;
+	accumulator.seenStrings.add(value);
+	accumulator.stringPoolBytes += UTF8_ENCODER.encode(value).byteLength;
+}
+
+function estimateStringArrayBytes(
+	values: readonly string[],
+	accumulator: IndexSizeAccumulator,
+): {
+	total: number;
+	count: number;
+	referenceBytes: number;
+} {
+	let count = 0;
+	for (const value of values) {
+		count += 1;
+		accountStringBytes(accumulator, value);
+	}
+	return {
+		total: INDEX_COLLECTION_HEADER_BYTES + count * INDEX_REFERENCE_BYTES,
+		count,
+		referenceBytes: count * INDEX_REFERENCE_BYTES,
+	};
+}
+
+function estimateStringSetBytes(
+	values: ReadonlySet<string>,
+	accumulator: IndexSizeAccumulator,
+): {
+	total: number;
+	count: number;
+	referenceBytes: number;
+} {
+	return estimateStringArrayBytes(Array.from(values), accumulator);
+}
+
+function estimatePostingMapBytes(
+	postings: ReadonlyMap<string, ReadonlySet<string>>,
+	accumulator: IndexSizeAccumulator,
+): {
+	total: number;
+	termCount: number;
+	postingCount: number;
+	mapEntryBytes: number;
+	referenceBytes: number;
+} {
+	let termCount = 0;
+	let postingCount = 0;
+	for (const [term, paths] of postings.entries()) {
+		termCount += 1;
+		accountStringBytes(accumulator, term);
+		for (const path of paths) {
+			postingCount += 1;
+			accountStringBytes(accumulator, path);
+		}
+	}
+	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
+	const referenceBytes =
+		termCount * INDEX_REFERENCE_BYTES + postingCount * INDEX_REFERENCE_BYTES;
+	return {
+		total: INDEX_COLLECTION_HEADER_BYTES + mapEntryBytes + referenceBytes,
+		termCount,
+		postingCount,
+		mapEntryBytes,
+		referenceBytes,
+	};
+}
+
+function estimateDocumentStoreBytes(
+	documents: ReadonlyMap<string, CoverageLexicalDocument>,
+	accumulator: IndexSizeAccumulator,
+): Record<string, unknown> & { total: number } {
+	const sections = {
+		paths: { count: 0, referenceBytes: 0 },
+		bodyText: { count: 0, referenceBytes: 0 },
+		bodyTokenSequence: { count: 0, referenceBytes: 0 },
+		bodyTerms: { count: 0, referenceBytes: 0 },
+		bodyCharTerms: { count: 0, referenceBytes: 0 },
+		bodyPhraseTerms: { count: 0, referenceBytes: 0 },
+		aliasTerms: { count: 0, referenceBytes: 0 },
+		aliasCharTerms: { count: 0, referenceBytes: 0 },
+		aliasPhraseTerms: { count: 0, referenceBytes: 0 },
+		basenameTerms: { count: 0, referenceBytes: 0 },
+		basenameCharTerms: { count: 0, referenceBytes: 0 },
+		basenamePhraseTerms: { count: 0, referenceBytes: 0 },
+		folderTerms: { count: 0, referenceBytes: 0 },
+		folderCharTerms: { count: 0, referenceBytes: 0 },
+		folderPhraseTerms: { count: 0, referenceBytes: 0 },
+		headingTerms: { count: 0, referenceBytes: 0 },
+		headingCharTerms: { count: 0, referenceBytes: 0 },
+		headingPhraseTerms: { count: 0, referenceBytes: 0 },
+		metadataTerms: { count: 0, referenceBytes: 0 },
+		metadataPhraseTerms: { count: 0, referenceBytes: 0 },
+		tagTerms: { count: 0, referenceBytes: 0 },
+		tagCharTerms: { count: 0, referenceBytes: 0 },
+		tagPhraseTerms: { count: 0, referenceBytes: 0 },
+		tagValues: { count: 0, referenceBytes: 0 },
+	};
+	for (const [path, document] of documents.entries()) {
+		accountStringBytes(accumulator, path);
+		sections.paths.count += 1;
+		sections.paths.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.bodyText);
+		sections.bodyText.count += 1;
+		sections.bodyText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accumulateSection(
+			sections.bodyTokenSequence,
+			estimateStringArrayBytes(document.bodyTokenSequence, accumulator),
+		);
+		accumulateSection(
+			sections.bodyTerms,
+			estimateStringSetBytes(document.bodyTerms, accumulator),
+		);
+		accumulateSection(
+			sections.bodyCharTerms,
+			estimateStringSetBytes(document.bodyCharTerms, accumulator),
+		);
+		accumulateSection(
+			sections.bodyPhraseTerms,
+			estimateStringSetBytes(document.bodyPhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.aliasTerms,
+			estimateStringSetBytes(document.aliasTerms, accumulator),
+		);
+		accumulateSection(
+			sections.aliasCharTerms,
+			estimateStringSetBytes(document.aliasCharTerms, accumulator),
+		);
+		accumulateSection(
+			sections.aliasPhraseTerms,
+			estimateStringSetBytes(document.aliasPhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.basenameTerms,
+			estimateStringSetBytes(document.basenameTerms, accumulator),
+		);
+		accumulateSection(
+			sections.basenameCharTerms,
+			estimateStringSetBytes(document.basenameCharTerms, accumulator),
+		);
+		accumulateSection(
+			sections.basenamePhraseTerms,
+			estimateStringSetBytes(document.basenamePhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.folderTerms,
+			estimateStringSetBytes(document.folderTerms, accumulator),
+		);
+		accumulateSection(
+			sections.folderCharTerms,
+			estimateStringSetBytes(document.folderCharTerms, accumulator),
+		);
+		accumulateSection(
+			sections.folderPhraseTerms,
+			estimateStringSetBytes(document.folderPhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.headingTerms,
+			estimateStringSetBytes(document.headingTerms, accumulator),
+		);
+		accumulateSection(
+			sections.headingCharTerms,
+			estimateStringSetBytes(document.headingCharTerms, accumulator),
+		);
+		accumulateSection(
+			sections.headingPhraseTerms,
+			estimateStringSetBytes(document.headingPhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.metadataTerms,
+			estimateStringSetBytes(document.metadataTerms, accumulator),
+		);
+		accumulateSection(
+			sections.metadataPhraseTerms,
+			estimateStringSetBytes(document.metadataPhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.tagTerms,
+			estimateStringSetBytes(document.tagTerms, accumulator),
+		);
+		accumulateSection(
+			sections.tagCharTerms,
+			estimateStringSetBytes(document.tagCharTerms, accumulator),
+		);
+		accumulateSection(
+			sections.tagPhraseTerms,
+			estimateStringSetBytes(document.tagPhraseTerms, accumulator),
+		);
+		accumulateSection(
+			sections.tagValues,
+			estimateStringArrayBytes(document.tagValues, accumulator),
+		);
+	}
+
+	return {
+		total:
+			INDEX_COLLECTION_HEADER_BYTES +
+			documents.size * INDEX_MAP_ENTRY_BYTES +
+			sumSectionBytes(sections),
+		mapEntryBytes: documents.size * INDEX_MAP_ENTRY_BYTES,
+		...sections,
+	};
+}
+
+function accumulateSection(
+	target: { count: number; referenceBytes: number },
+	source: { count: number; referenceBytes: number },
+): void {
+	target.count += source.count;
+	target.referenceBytes += source.referenceBytes;
+}
+
+function sumSectionBytes(
+	sections: Record<string, { referenceBytes: number }>,
+): number {
+	return Object.values(sections).reduce(
+		(total, section) => total + section.referenceBytes,
+		0,
+	);
+}
+
+function sumNamedByteBreakdowns(
+	breakdowns: Record<string, { total: number }>,
+): number {
+	return Object.values(breakdowns).reduce(
+		(total, breakdown) => total + breakdown.total,
+		0,
+	);
+}
+
+function toNamedByteBreakdown<T extends Record<string, { total: number }>>(
+	breakdowns: T,
+): T {
+	return breakdowns;
 }
 
 function addPosting(
