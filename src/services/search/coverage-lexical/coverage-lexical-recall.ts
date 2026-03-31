@@ -82,6 +82,25 @@ type CoverageLexicalGroupSignal = {
 	tailWeight: number;
 };
 
+type CoverageLexicalCheapLaneSignal = {
+	hardAnchorMetadata: CoverageLexicalGroupSignal;
+	decisiveBody: CoverageLexicalGroupSignal;
+	supportBody: CoverageLexicalGroupSignal;
+	optionalBody: CoverageLexicalGroupSignal;
+	bridgeSignal: CoverageLexicalGroupSignal;
+	phraseMatchCount: number;
+	tagExactCount: number;
+	tagCharCount: number;
+	metadataCharCount: number;
+	bodyCharCount: number;
+};
+
+type CoverageLexicalCheapLaneCandidate = {
+	path: string;
+	state: CoverageLexicalCandidateState;
+	signal: CoverageLexicalCheapLaneSignal;
+};
+
 type CoverageLexicalLaneEvaluation = {
 	path: string;
 	state: CoverageLexicalCandidateState;
@@ -722,162 +741,209 @@ function preselectLaneCandidates(
 	plan: CoverageLexicalPlan,
 	request: FileSearchRequest,
 ): Array<[string, CoverageLexicalCandidateState]> {
-	const entries = Array.from(laneCandidates.entries());
+	const entries = Array.from(laneCandidates.entries()).map(
+		([path, state]): CoverageLexicalCheapLaneCandidate => ({
+			path,
+			state,
+			signal: buildCheapLaneSignal(state, plan),
+		}),
+	);
 	const budget = computeLaneBudget(laneName, plan, request);
 	const prefilterBudget = Math.min(
 		entries.length,
 		Math.max(budget * 6, request.maxItemResults * 8, 48),
 	);
 	if (entries.length <= prefilterBudget) {
-		return entries;
+		return entries.map(({ path, state }) => [path, state] as const);
 	}
-	return entries
-		.sort(([leftPath, leftState], [rightPath, rightState]) =>
-			compareCheapLaneCandidates(
-				laneName,
-				leftPath,
-				leftState,
-				rightPath,
-				rightState,
-				plan,
-			),
-		)
-		.slice(0, prefilterBudget);
+	const sorted = entries.sort((left, right) =>
+		compareCheapLaneCandidates(laneName, left, right),
+	);
+	const selected = sorted.slice(0, prefilterBudget);
+	const selectedPaths = new Set(selected.map(({ path }) => path));
+	const cutoff = selected.length > 0 ? selected[selected.length - 1] : null;
+	if (cutoff) {
+		for (let index = prefilterBudget; index < sorted.length; index += 1) {
+			const candidate = sorted[index];
+			if (!hasCheapLaneTie(laneName, cutoff.signal, candidate.signal)) {
+				break;
+			}
+			selected.push(candidate);
+			selectedPaths.add(candidate.path);
+		}
+	}
+	const witnessFloorAllowance = computeWitnessFloorAllowance(
+		laneName,
+		request.maxItemResults,
+	);
+	if (witnessFloorAllowance > 0) {
+		let added = 0;
+		for (const candidate of sorted) {
+			if (selectedPaths.has(candidate.path)) {
+				continue;
+			}
+			if (!shouldProtectCheapWitnessFloor(laneName, candidate.signal, plan)) {
+				continue;
+			}
+			selected.push(candidate);
+			selectedPaths.add(candidate.path);
+			added += 1;
+			if (added >= witnessFloorAllowance) {
+				break;
+			}
+		}
+	}
+	return selected.map(({ path, state }) => [path, state] as const);
 }
 
 function compareCheapLaneCandidates(
 	laneName: CoverageLexicalLaneName,
-	leftPath: string,
-	leftState: CoverageLexicalCandidateState,
-	rightPath: string,
-	rightState: CoverageLexicalCandidateState,
-	plan: CoverageLexicalPlan,
+	left: CoverageLexicalCheapLaneCandidate,
+	right: CoverageLexicalCheapLaneCandidate,
 ): number {
-	const leftHardAnchor = buildGroupSignal(
-		leftState.metadataMatches,
-		plan.hardAnchorFamilies,
+	return (
+		compareCheapLaneSignals(laneName, left.signal, right.signal) ||
+		left.path.localeCompare(right.path)
 	);
-	const rightHardAnchor = buildGroupSignal(
-		rightState.metadataMatches,
-		plan.hardAnchorFamilies,
-	);
-	const leftDecisiveBody = buildGroupSignal(
-		leftState.bodyMatches,
-		plan.decisiveBodyFamilies,
-	);
-	const rightDecisiveBody = buildGroupSignal(
-		rightState.bodyMatches,
-		plan.decisiveBodyFamilies,
-	);
-	const leftSupportBody = buildGroupSignal(
-		leftState.bodyMatches,
-		plan.supportBodyFamilies,
-	);
-	const rightSupportBody = buildGroupSignal(
-		rightState.bodyMatches,
-		plan.supportBodyFamilies,
-	);
-	const leftOptionalBody = buildGroupSignal(
-		leftState.bodyMatches,
-		plan.optionalFamilies.filter((family) => family.role === "body"),
-	);
-	const rightOptionalBody = buildGroupSignal(
-		rightState.bodyMatches,
-		plan.optionalFamilies.filter((family) => family.role === "body"),
-	);
-	const leftBridge = buildGroupSignal(
-		mergeMatchMaps(leftState.bodyMatches, leftState.metadataMatches),
-		plan.bridgeFamilies,
-	);
-	const rightBridge = buildGroupSignal(
-		mergeMatchMaps(rightState.bodyMatches, rightState.metadataMatches),
-		plan.bridgeFamilies,
-	);
+}
+
+function compareCheapLaneSignals(
+	laneName: CoverageLexicalLaneName,
+	left: CoverageLexicalCheapLaneSignal,
+	right: CoverageLexicalCheapLaneSignal,
+): number {
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
-				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
-				compareDescendingMetric(
-					leftState.phraseMatches.size,
-					rightState.phraseMatches.size,
-				) ||
-				compareGroupSignals(leftBridge, rightBridge) ||
-				leftPath.localeCompare(rightPath)
+				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
+				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
+				compareGroupSignals(left.bridgeSignal, right.bridgeSignal)
 			);
 		case "strict_hybrid_lane":
 			return (
-				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
-				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
-				compareGroupSignals(leftSupportBody, rightSupportBody) ||
-				compareDescendingMetric(
-					leftState.phraseMatches.size,
-					rightState.phraseMatches.size,
-				) ||
-				leftPath.localeCompare(rightPath)
+				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
+				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
+				compareGroupSignals(left.supportBody, right.supportBody) ||
+				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount)
 			);
 		case "relaxed_hybrid_lane":
 			return (
 				compareDescendingMetric(
-					leftDecisiveBody.coverageCount +
-						leftSupportBody.coverageCount +
-						leftOptionalBody.coverageCount,
-					rightDecisiveBody.coverageCount +
-						rightSupportBody.coverageCount +
-						rightOptionalBody.coverageCount,
+					left.decisiveBody.coverageCount +
+						left.supportBody.coverageCount +
+						left.optionalBody.coverageCount,
+					right.decisiveBody.coverageCount +
+						right.supportBody.coverageCount +
+						right.optionalBody.coverageCount,
 				) ||
-				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
-				compareGroupSignals(leftSupportBody, rightSupportBody) ||
-				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
-				compareDescendingMetric(
-					leftState.phraseMatches.size,
-					rightState.phraseMatches.size,
-				) ||
-				leftPath.localeCompare(rightPath)
+				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
+				compareGroupSignals(left.supportBody, right.supportBody) ||
+				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
+				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount)
 			);
 		case "local_body_lane":
 			return (
-				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
-				compareGroupSignals(leftSupportBody, rightSupportBody) ||
-				compareGroupSignals(leftOptionalBody, rightOptionalBody) ||
-				compareDescendingMetric(
-					leftState.phraseMatches.size,
-					rightState.phraseMatches.size,
-				) ||
-				leftPath.localeCompare(rightPath)
+				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
+				compareGroupSignals(left.supportBody, right.supportBody) ||
+				compareGroupSignals(left.optionalBody, right.optionalBody) ||
+				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount)
 			);
 		case "bridge_lane":
 			return (
-				compareGroupSignals(leftBridge, rightBridge) ||
-				compareDescendingMetric(
-					leftState.phraseMatches.size,
-					rightState.phraseMatches.size,
-				) ||
-				compareGroupSignals(leftHardAnchor, rightHardAnchor) ||
-				compareGroupSignals(leftDecisiveBody, rightDecisiveBody) ||
-				leftPath.localeCompare(rightPath)
+				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
+				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
+				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
+				compareGroupSignals(left.decisiveBody, right.decisiveBody)
 			);
 		case "char_fallback_lane":
 			return (
-				compareDescendingMetric(
-					leftState.tagExactTerms.size,
-					rightState.tagExactTerms.size,
-				) ||
-				compareDescendingMetric(
-					leftState.tagCharTerms.size,
-					rightState.tagCharTerms.size,
-				) ||
-				compareDescendingMetric(
-					leftState.metadataCharTerms.size,
-					rightState.metadataCharTerms.size,
-				) ||
-				compareDescendingMetric(
-					leftState.bodyCharTerms.size,
-					rightState.bodyCharTerms.size,
-				) ||
-				leftPath.localeCompare(rightPath)
+				compareDescendingMetric(left.tagExactCount, right.tagExactCount) ||
+				compareDescendingMetric(left.tagCharCount, right.tagCharCount) ||
+				compareDescendingMetric(left.metadataCharCount, right.metadataCharCount) ||
+				compareDescendingMetric(left.bodyCharCount, right.bodyCharCount)
 			);
 		default:
-			return leftPath.localeCompare(rightPath);
+			return 0;
+	}
+}
+
+function buildCheapLaneSignal(
+	state: CoverageLexicalCandidateState,
+	plan: CoverageLexicalPlan,
+): CoverageLexicalCheapLaneSignal {
+	return {
+		hardAnchorMetadata: buildGroupSignal(
+			state.metadataMatches,
+			plan.hardAnchorFamilies,
+		),
+		decisiveBody: buildGroupSignal(
+			state.bodyMatches,
+			plan.decisiveBodyFamilies,
+		),
+		supportBody: buildGroupSignal(
+			state.bodyMatches,
+			plan.supportBodyFamilies,
+		),
+		optionalBody: buildGroupSignal(
+			state.bodyMatches,
+			plan.optionalFamilies.filter((family) => family.role === "body"),
+		),
+		bridgeSignal: buildGroupSignal(
+			mergeMatchMaps(state.bodyMatches, state.metadataMatches),
+			plan.bridgeFamilies,
+		),
+		phraseMatchCount: state.phraseMatches.size,
+		tagExactCount: state.tagExactTerms.size,
+		tagCharCount: state.tagCharTerms.size,
+		metadataCharCount: state.metadataCharTerms.size,
+		bodyCharCount: state.bodyCharTerms.size,
+	};
+}
+
+function hasCheapLaneTie(
+	laneName: CoverageLexicalLaneName,
+	left: CoverageLexicalCheapLaneSignal,
+	right: CoverageLexicalCheapLaneSignal,
+): boolean {
+	return compareCheapLaneSignals(laneName, left, right) === 0;
+}
+
+function computeWitnessFloorAllowance(
+	laneName: CoverageLexicalLaneName,
+	maxItemResults: number,
+): number {
+	switch (laneName) {
+		case "strict_hybrid_lane":
+		case "relaxed_hybrid_lane":
+		case "local_body_lane":
+			return Math.max(maxItemResults, 8);
+		default:
+			return 0;
+	}
+}
+
+function shouldProtectCheapWitnessFloor(
+	laneName: CoverageLexicalLaneName,
+	signal: CoverageLexicalCheapLaneSignal,
+	plan: CoverageLexicalPlan,
+): boolean {
+	const fullHardAnchor =
+		plan.hardAnchorFamilies.length > 0 &&
+		signal.hardAnchorMetadata.coverageCount >= plan.hardAnchorFamilies.length;
+	const fullDecisiveBody =
+		plan.decisiveBodyFamilies.length > 0 &&
+		signal.decisiveBody.coverageCount >= plan.decisiveBodyFamilies.length;
+	const hasSupportingBody = signal.supportBody.coverageCount > 0;
+	const hasPhraseWitness = signal.phraseMatchCount > 0;
+	switch (laneName) {
+		case "strict_hybrid_lane":
+			return fullDecisiveBody && (fullHardAnchor || hasPhraseWitness);
+		case "relaxed_hybrid_lane":
+			return fullDecisiveBody && (fullHardAnchor || hasSupportingBody || hasPhraseWitness);
+		case "local_body_lane":
+			return fullDecisiveBody && (hasSupportingBody || hasPhraseWitness);
+		default:
+			return false;
 	}
 }
 
