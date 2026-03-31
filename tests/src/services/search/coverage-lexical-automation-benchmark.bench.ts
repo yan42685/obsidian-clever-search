@@ -79,6 +79,23 @@ type BenchmarkSummary = {
 	byType: Record<QueryType, BenchmarkMetric>;
 };
 
+type PhaseTimingSummary = {
+	queryCount: number;
+	queryTotalMs: number;
+	totalMeasuredMs: number;
+	phases: Array<{
+		phase: string;
+		totalMs: number;
+		maxMs: number;
+		count: number;
+		unitCount: number;
+		avgMsPerCall: number;
+		avgMsPerUnit: number;
+		shareOfMeasuredMs: number;
+		shareOfQueryTime: number;
+	}>;
+};
+
 type QueryOutcome = {
 	query: string;
 	relevantPath: string;
@@ -112,6 +129,8 @@ type EngineLike = {
 	serialize(): unknown;
 	estimateIndexBytes?(): number | null;
 	getIndexBreakdown?(): Record<string, unknown> | null;
+	resetBenchmarkPhaseTiming?(): void;
+	getBenchmarkPhaseTimingSummary?(): PhaseTimingSummary | null;
 };
 
 const QUERY_TYPES: readonly QueryType[] = [
@@ -1973,8 +1992,13 @@ async function runBenchmark(
 	engine: EngineLike,
 	documents: IndexedDocument[],
 	queryCases: QueryCase[],
-): Promise<{ summary: BenchmarkSummary; outcomes: QueryOutcome[] }> {
+): Promise<{
+	summary: BenchmarkSummary;
+	outcomes: QueryOutcome[];
+	phaseTiming: PhaseTimingSummary | null;
+}> {
 	await engine.addDocuments(documents);
+	engine.resetBenchmarkPhaseTiming?.();
 
 	const timings: number[] = [];
 	const outcomes: QueryOutcome[] = [];
@@ -2061,6 +2085,7 @@ async function runBenchmark(
 			byType: buildMetricRecord(QUERY_TYPES, typeTotals),
 		},
 		outcomes,
+		phaseTiming: engine.getBenchmarkPhaseTimingSummary?.() ?? null,
 	};
 }
 
@@ -2467,6 +2492,43 @@ function summarizeDisagreements(
 		.slice(0, limit);
 }
 
+function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
+	if (!phaseTiming) {
+		return null;
+	}
+	const topHotPhases = phaseTiming.phases.slice(0, 6).map((phase) => ({
+		phase: phase.phase,
+		totalMs: round(phase.totalMs),
+		avgMsPerCall: round(phase.avgMsPerCall),
+		avgMsPerUnit: round(phase.avgMsPerUnit),
+		maxMs: round(phase.maxMs),
+		count: phase.count,
+		unitCount: phase.unitCount,
+		shareOfMeasuredMs: round(phase.shareOfMeasuredMs),
+		shareOfQueryTime: round(phase.shareOfQueryTime),
+	}));
+	const admission = phaseTiming.phases.find((phase) => phase.phase === "admission");
+	const localWindow = phaseTiming.phases.find(
+		(phase) => phase.phase === "localWindow",
+	);
+	return {
+		queryCount: phaseTiming.queryCount,
+		queryTotalMs: round(phaseTiming.queryTotalMs),
+		totalMeasuredMs: round(phaseTiming.totalMeasuredMs),
+		topHotPhases,
+		admissionVsLocalWindow: {
+			admissionTotalMs: round(admission?.totalMs ?? 0),
+			localWindowTotalMs: round(localWindow?.totalMs ?? 0),
+			hotterPhase:
+				(admission?.totalMs ?? 0) > (localWindow?.totalMs ?? 0)
+					? "admission"
+					: (localWindow?.totalMs ?? 0) > (admission?.totalMs ?? 0)
+						? "localWindow"
+						: "tie",
+		},
+	};
+}
+
 function round(value: number): number {
 	return Number(value.toFixed(3));
 }
@@ -2692,6 +2754,10 @@ describe("coverage lexical automation benchmark", () => {
 				null,
 				2,
 			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] coverage-phase-timing",
+			JSON.stringify(summarizePhaseTiming(coverageResult.phaseTiming), null, 2),
 		);
 		console.log(
 			"[coverage-lexical-automation-benchmark] recall-contract",

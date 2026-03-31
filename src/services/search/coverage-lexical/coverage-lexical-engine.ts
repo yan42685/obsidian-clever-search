@@ -107,6 +107,32 @@ type CoverageLexicalEngineQueryDocCacheEntry = {
 	coarseResult: CoverageLexicalDocRankableResult | null;
 };
 
+type CoverageLexicalBenchmarkPhaseName =
+	| "planning"
+	| "recall"
+	| "bodyEvidence"
+	| "admission"
+	| "coarseSignal"
+	| "coarseSort"
+	| "localWindow"
+	| "finalRank";
+
+type CoverageLexicalBenchmarkPhaseTimingAccumulator = {
+	totalMs: number;
+	maxMs: number;
+	count: number;
+	unitCount: number;
+};
+
+type CoverageLexicalBenchmarkPhaseTimingState = {
+	queryCount: number;
+	queryTotalMs: number;
+	phases: Map<
+		CoverageLexicalBenchmarkPhaseName,
+		CoverageLexicalBenchmarkPhaseTimingAccumulator
+	>;
+};
+
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
 
 function createCoverageLexicalEngineQueryCache(
@@ -115,6 +141,14 @@ function createCoverageLexicalEngineQueryCache(
 	return {
 		fuzzyProportion,
 		docCacheById: new Map(),
+	};
+}
+
+function createCoverageLexicalBenchmarkPhaseTimingState(): CoverageLexicalBenchmarkPhaseTimingState {
+	return {
+		queryCount: 0,
+		queryTotalMs: 0,
+		phases: new Map(),
 	};
 }
 
@@ -158,6 +192,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly metadataTagPostings = new Map<string, number[]>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexicon: string[] = [];
+	private benchmarkPhaseTiming: CoverageLexicalBenchmarkPhaseTimingState | null =
+		null;
 
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
@@ -173,6 +209,61 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.clearIndex();
 		await this.addDocuments(data);
 		return true;
+	}
+
+	resetBenchmarkPhaseTiming(): void {
+		this.benchmarkPhaseTiming = createCoverageLexicalBenchmarkPhaseTimingState();
+	}
+
+	getBenchmarkPhaseTimingSummary():
+		| {
+				queryCount: number;
+				queryTotalMs: number;
+				totalMeasuredMs: number;
+				phases: Array<{
+					phase: CoverageLexicalBenchmarkPhaseName;
+					totalMs: number;
+					maxMs: number;
+					count: number;
+					unitCount: number;
+					avgMsPerCall: number;
+					avgMsPerUnit: number;
+					shareOfMeasuredMs: number;
+					shareOfQueryTime: number;
+				}>;
+		  }
+		| null {
+		if (!this.benchmarkPhaseTiming) {
+			return null;
+		}
+		const totalMeasuredMs = Array.from(this.benchmarkPhaseTiming.phases.values()).reduce(
+			(sum, phase) => sum + phase.totalMs,
+			0,
+		);
+		return {
+			queryCount: this.benchmarkPhaseTiming.queryCount,
+			queryTotalMs: this.benchmarkPhaseTiming.queryTotalMs,
+			totalMeasuredMs,
+			phases: Array.from(this.benchmarkPhaseTiming.phases.entries())
+				.map(([phase, timing]) => ({
+					phase,
+					totalMs: timing.totalMs,
+					maxMs: timing.maxMs,
+					count: timing.count,
+					unitCount: timing.unitCount,
+					avgMsPerCall:
+						timing.count > 0 ? timing.totalMs / timing.count : 0,
+					avgMsPerUnit:
+						timing.unitCount > 0 ? timing.totalMs / timing.unitCount : 0,
+					shareOfMeasuredMs:
+						totalMeasuredMs > 0 ? timing.totalMs / totalMeasuredMs : 0,
+					shareOfQueryTime:
+						this.benchmarkPhaseTiming.queryTotalMs > 0
+							? timing.totalMs / this.benchmarkPhaseTiming.queryTotalMs
+							: 0,
+				}))
+				.sort((left, right) => right.totalMs - left.totalMs),
+		};
 	}
 
 	clearIndex(): void {
@@ -225,155 +316,199 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
-		const queryTerms = this.tokenizer
-			.tokenizeSequence(request.queryText, "search")
-			.map((term) => term.toLowerCase());
-		const charQuery = buildCoverageLexicalCharQuery(request.queryText);
-		if (
-			this.documents.size === 0 ||
-			(queryTerms.length === 0 &&
-				charQuery.terms.length === 0 &&
-				charQuery.rawSegments.length === 0)
-		) {
-			return [];
-		}
+		const queryStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+		try {
+			const queryTerms = this.tokenizer
+				.tokenizeSequence(request.queryText, "search")
+				.map((term) => term.toLowerCase());
+			const charQuery = buildCoverageLexicalCharQuery(request.queryText);
+			if (
+				this.documents.size === 0 ||
+				(queryTerms.length === 0 &&
+					charQuery.terms.length === 0 &&
+					charQuery.rawSegments.length === 0)
+			) {
+				return [];
+			}
 
-		const familyProbes = this.buildFamilyProbes(queryTerms);
-		const plan = buildCoverageLexicalPlan(request.queryText, queryTerms, familyProbes);
-		const pairSignatures = buildCoverageLexicalPairSignatures(plan.families);
-		const phraseSignatures = [
-			...buildCoverageLexicalPhraseSignatures(plan.families),
-			...buildCoverageLexicalStructuredMetadataSignatures(
+			const planningStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+			const familyProbes = this.buildFamilyProbes(queryTerms);
+			const plan = buildCoverageLexicalPlan(
 				request.queryText,
-				plan.families,
-			),
-		];
-		const queryCache = createCoverageLexicalEngineQueryCache(
-			innerSetting.search.fuzzyProportion,
-		);
-		const candidates = collectCoverageLexicalCandidateStatesByDocId(
-			{
-				bodyPostings: this.bodyPostings,
-				bodyCharPostings: this.bodyCharPostings,
-				bodyHanSegmentPostings: this.bodyHanSegmentPostings,
-				metadataAliasCharPostings: this.metadataAliasCharPostings,
-				metadataAliasHanSegmentPostings: this.metadataAliasHanSegmentPostings,
-				metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
-				metadataAliasPostings: this.metadataAliasPostings,
-				metadataBasenameCharPostings: this.metadataBasenameCharPostings,
-				metadataBasenameHanSegmentPostings: this.metadataBasenameHanSegmentPostings,
-				metadataBasenamePhrasePostings: this.metadataBasenamePhrasePostings,
-				metadataBasenamePostings: this.metadataBasenamePostings,
-				metadataFolderCharPostings: this.metadataFolderCharPostings,
-				metadataFolderHanSegmentPostings: this.metadataFolderHanSegmentPostings,
-				metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
-				metadataFolderPostings: this.metadataFolderPostings,
-				metadataHeadingCharPostings: this.metadataHeadingCharPostings,
-				metadataHeadingHanSegmentPostings: this.metadataHeadingHanSegmentPostings,
-				metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
-				metadataHeadingPostings: this.metadataHeadingPostings,
-				metadataPostings: this.metadataPostings,
-				bodyPhrasePostings: this.bodyPhrasePostings,
-				metadataTagCharPostings: this.metadataTagCharPostings,
-				metadataTagFullPostings: this.metadataTagFullPostings,
-				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
-				metadataTagPostings: this.metadataTagPostings,
-				sortedLexicon: this.sortedLexicon,
-				documentIdByPath: this.documentIdByPath,
-				documentPathById: this.documentPathById,
-				documentBodyTokensById: this.documentBodyTokensById,
-				documentTagValuesById: this.documentTagValuesById,
-			},
-			plan,
-			phraseSignatures,
-			request,
-			charQuery,
-		);
-		if (shouldLogCoverageLexicalHanDebug(request.queryText, charQuery)) {
-			logger.debug("[coverage-lexical][han-debug] query", {
-				queryText: request.queryText,
 				queryTerms,
-				hanSegments: charQuery.hanSegments,
-				charTerms: charQuery.terms,
-				queryKind: plan.queryKind,
-				route: plan.route,
-				candidateCount: candidates.size,
-			});
-		}
-		if (candidates.size === 0) {
-			return [];
-		}
+				familyProbes,
+			);
+			const pairSignatures = buildCoverageLexicalPairSignatures(plan.families);
+			const phraseSignatures = [
+				...buildCoverageLexicalPhraseSignatures(plan.families),
+				...buildCoverageLexicalStructuredMetadataSignatures(
+					request.queryText,
+					plan.families,
+				),
+			];
+			if (this.benchmarkPhaseTiming) {
+				this.recordBenchmarkPhaseTiming(
+					"planning",
+					performance.now() - planningStartedAt,
+				);
+			}
 
-		const coarseResults = Array.from(candidates.entries())
-			.map(([docId, state]) =>
-				this.createRankableResult(
+			const queryCache = createCoverageLexicalEngineQueryCache(
+				innerSetting.search.fuzzyProportion,
+			);
+			const recallStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+			const candidates = collectCoverageLexicalCandidateStatesByDocId(
+				{
+					bodyPostings: this.bodyPostings,
+					bodyCharPostings: this.bodyCharPostings,
+					bodyHanSegmentPostings: this.bodyHanSegmentPostings,
+					metadataAliasCharPostings: this.metadataAliasCharPostings,
+					metadataAliasHanSegmentPostings: this.metadataAliasHanSegmentPostings,
+					metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
+					metadataAliasPostings: this.metadataAliasPostings,
+					metadataBasenameCharPostings: this.metadataBasenameCharPostings,
+					metadataBasenameHanSegmentPostings: this.metadataBasenameHanSegmentPostings,
+					metadataBasenamePhrasePostings: this.metadataBasenamePhrasePostings,
+					metadataBasenamePostings: this.metadataBasenamePostings,
+					metadataFolderCharPostings: this.metadataFolderCharPostings,
+					metadataFolderHanSegmentPostings: this.metadataFolderHanSegmentPostings,
+					metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
+					metadataFolderPostings: this.metadataFolderPostings,
+					metadataHeadingCharPostings: this.metadataHeadingCharPostings,
+					metadataHeadingHanSegmentPostings: this.metadataHeadingHanSegmentPostings,
+					metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
+					metadataHeadingPostings: this.metadataHeadingPostings,
+					metadataPostings: this.metadataPostings,
+					bodyPhrasePostings: this.bodyPhrasePostings,
+					metadataTagCharPostings: this.metadataTagCharPostings,
+					metadataTagFullPostings: this.metadataTagFullPostings,
+					metadataTagPhrasePostings: this.metadataTagPhrasePostings,
+					metadataTagPostings: this.metadataTagPostings,
+					sortedLexicon: this.sortedLexicon,
+					documentIdByPath: this.documentIdByPath,
+					documentPathById: this.documentPathById,
+					documentBodyTokensById: this.documentBodyTokensById,
+					documentTagValuesById: this.documentTagValuesById,
+				},
+				plan,
+				phraseSignatures,
+				request,
+				charQuery,
+			);
+			if (this.benchmarkPhaseTiming) {
+				this.recordBenchmarkPhaseTiming(
+					"recall",
+					performance.now() - recallStartedAt,
+					candidates.size,
+				);
+			}
+			if (shouldLogCoverageLexicalHanDebug(request.queryText, charQuery)) {
+				logger.debug("[coverage-lexical][han-debug] query", {
+					queryText: request.queryText,
+					queryTerms,
+					hanSegments: charQuery.hanSegments,
+					charTerms: charQuery.terms,
+					queryKind: plan.queryKind,
+					route: plan.route,
+					candidateCount: candidates.size,
+				});
+			}
+			if (candidates.size === 0) {
+				return [];
+			}
+
+			const coarseResults = Array.from(candidates.entries())
+				.map(([docId, state]) =>
+					this.createRankableResult(
+						docId,
+						queryTerms,
+						plan,
+						state,
+						false,
+						phraseSignatures,
+						pairSignatures,
+						charQuery,
+						queryCache,
+					),
+				)
+				.filter((result): result is CoverageLexicalDocRankableResult => result !== null);
+			const coarseResultByDocId = new Map(
+				coarseResults.map((result) => [result.docId, result] as const),
+			);
+			const coarseSortStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+			const coarseRanked = [...coarseResults].sort((left, right) => {
+				const signalDecision = compareCoverageLexicalResultSignals(
+					left.coverageLexicalSignal,
+					right.coverageLexicalSignal,
+					plan,
+				);
+				if (signalDecision !== 0) {
+					return signalDecision;
+				}
+				const admissionDecision = compareCoverageLexicalPassageAdmissionSignals(
+					left.admissionSignal,
+					right.admissionSignal,
+				);
+				if (admissionDecision !== 0) {
+					return admissionDecision;
+				}
+				return (right.score ?? 0) - (left.score ?? 0) || left.docId - right.docId;
+			});
+			if (this.benchmarkPhaseTiming) {
+				this.recordBenchmarkPhaseTiming(
+					"coarseSort",
+					performance.now() - coarseSortStartedAt,
+					coarseRanked.length,
+				);
+			}
+			const localWindowDocIds = computeLocalWindowRerankDocIds(
+				coarseRanked,
+				plan,
+				request.maxItemResults,
+			);
+			const rerankedResults: CoverageLexicalDocRankableResult[] = [];
+			for (const [docId, state] of candidates.entries()) {
+				if (!localWindowDocIds.has(docId)) {
+					const coarseResult = coarseResultByDocId.get(docId);
+					if (coarseResult) {
+						rerankedResults.push(coarseResult);
+					}
+					continue;
+				}
+				const rerankedResult = this.createRankableResult(
 					docId,
 					queryTerms,
 					plan,
 					state,
-					false,
+					true,
 					phraseSignatures,
 					pairSignatures,
 					charQuery,
 					queryCache,
-				),
-			)
-			.filter((result): result is CoverageLexicalDocRankableResult => result !== null);
-		const coarseResultByDocId = new Map(
-			coarseResults.map((result) => [result.docId, result] as const),
-		);
-		const coarseRanked = [...coarseResults].sort((left, right) => {
-			const signalDecision = compareCoverageLexicalResultSignals(
-				left.coverageLexicalSignal,
-				right.coverageLexicalSignal,
-				plan,
-			);
-			if (signalDecision !== 0) {
-				return signalDecision;
-			}
-			const admissionDecision = compareCoverageLexicalPassageAdmissionSignals(
-				left.admissionSignal,
-				right.admissionSignal,
-			);
-			if (admissionDecision !== 0) {
-				return admissionDecision;
-			}
-			return (right.score ?? 0) - (left.score ?? 0) || left.docId - right.docId;
-		});
-		const localWindowDocIds = computeLocalWindowRerankDocIds(
-			coarseRanked,
-			plan,
-			request.maxItemResults,
-		);
-		const rerankedResults: CoverageLexicalDocRankableResult[] = [];
-		for (const [docId, state] of candidates.entries()) {
-			if (!localWindowDocIds.has(docId)) {
-				const coarseResult = coarseResultByDocId.get(docId);
-				if (coarseResult) {
-					rerankedResults.push(coarseResult);
+				);
+				if (rerankedResult) {
+					rerankedResults.push(rerankedResult);
 				}
-				continue;
 			}
-			const rerankedResult = this.createRankableResult(
-				docId,
-				queryTerms,
-				plan,
-				state,
-				true,
-				phraseSignatures,
-				pairSignatures,
-				charQuery,
-				queryCache,
+			const finalRankStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+			const ranked = rankCoverageLexicalDocResults(rerankedResults, plan);
+			const finalResults = ranked.slice(0, request.maxItemResults);
+			if (this.benchmarkPhaseTiming) {
+				this.recordBenchmarkPhaseTiming(
+					"finalRank",
+					performance.now() - finalRankStartedAt,
+					rerankedResults.length,
+				);
+			}
+			return finalResults.map((result) =>
+				projectDocRankableResult(result, this.documentPathById),
 			);
-			if (rerankedResult) {
-				rerankedResults.push(rerankedResult);
+		} finally {
+			if (this.benchmarkPhaseTiming) {
+				this.benchmarkPhaseTiming.queryCount += 1;
+				this.benchmarkPhaseTiming.queryTotalMs += performance.now() - queryStartedAt;
 			}
 		}
-		const ranked = rankCoverageLexicalDocResults(rerankedResults, plan);
-		const finalResults = ranked.slice(0, request.maxItemResults);
-		return finalResults.map((result) =>
-			projectDocRankableResult(result, this.documentPathById),
-		);
 	}
 
 	getDirectSubItems(
@@ -879,6 +1014,30 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}));
 	}
 
+	private recordBenchmarkPhaseTiming(
+		phase: CoverageLexicalBenchmarkPhaseName,
+		elapsedMs: number,
+		unitCount: number = 1,
+	): void {
+		if (!this.benchmarkPhaseTiming || !Number.isFinite(elapsedMs)) {
+			return;
+		}
+		const existing = this.benchmarkPhaseTiming.phases.get(phase);
+		if (existing) {
+			existing.totalMs += elapsedMs;
+			existing.maxMs = Math.max(existing.maxMs, elapsedMs);
+			existing.count += 1;
+			existing.unitCount += unitCount;
+			return;
+		}
+		this.benchmarkPhaseTiming.phases.set(phase, {
+			totalMs: elapsedMs,
+			maxMs: elapsedMs,
+			count: 1,
+			unitCount,
+		});
+	}
+
 	private createRankableResult(
 		docId: number,
 		queryTerms: readonly string[],
@@ -909,15 +1068,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!document) {
 			return null;
 		}
+		const localWindowStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
+		const localEvidence = buildCoverageLexicalWindowFusionSignal(
+			document.bodyTokenSequence,
+			plan.families,
+			pairSignatures,
+			computePerFileLocalWindowLimit(plan, document.bodyTokenSequence.length),
+			cached.bodyEvidenceTrace,
+		);
+		if (this.benchmarkPhaseTiming) {
+			this.recordBenchmarkPhaseTiming(
+				"localWindow",
+				performance.now() - localWindowStartedAt,
+				1,
+			);
+		}
 		const signal = withCoverageLexicalLocalEvidence(
 			cached.baseSignal,
-			buildCoverageLexicalWindowFusionSignal(
-				document.bodyTokenSequence,
-				plan.families,
-				pairSignatures,
-				computePerFileLocalWindowLimit(plan, document.bodyTokenSequence.length),
-				cached.bodyEvidenceTrace,
-			),
+			localEvidence,
 		);
 		return {
 			...cached.coarseResult,
@@ -944,11 +1112,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!document) {
 			return null;
 		}
+		const bodyEvidenceStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const bodyEvidenceTrace = buildCoverageLexicalBodyEvidenceTrace(
 			document.bodyTokenSequence,
 			plan.families,
 			queryCache.fuzzyProportion,
 		);
+		if (this.benchmarkPhaseTiming) {
+			this.recordBenchmarkPhaseTiming(
+				"bodyEvidence",
+				performance.now() - bodyEvidenceStartedAt,
+				1,
+			);
+		}
+		const admissionStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const admissionSignal = buildCoverageLexicalPassageAdmissionSignal(
 			document.bodyTokenSequence,
 			plan.families,
@@ -956,6 +1133,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			phraseSignatures,
 			bodyEvidenceTrace,
 		);
+		if (this.benchmarkPhaseTiming) {
+			this.recordBenchmarkPhaseTiming(
+				"admission",
+				performance.now() - admissionStartedAt,
+				1,
+			);
+		}
+		const coarseSignalStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		const tagFallback = evaluateCoverageLexicalTagFallback(
 			document.tagValues,
 			charQuery,
@@ -975,8 +1160,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					score: computeFallbackScore(baseSignal),
 					coverageLexicalSignal: baseSignal,
 					admissionSignal,
-				}
+			  }
 			: null;
+		if (this.benchmarkPhaseTiming) {
+			this.recordBenchmarkPhaseTiming(
+				"coarseSignal",
+				performance.now() - coarseSignalStartedAt,
+				1,
+			);
+		}
 		const created = {
 			bodyEvidenceTrace,
 			admissionSignal,
