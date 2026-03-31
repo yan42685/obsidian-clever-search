@@ -92,14 +92,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
 	private readonly documentIdByPath = new Map<string, number>();
-	private readonly documentPathById = new Map<number, string>();
+	private readonly documentPathById: Array<string | undefined> = [];
 	private readonly documentBodyTokensByPath = new Map<string, readonly string[]>();
 	private readonly documentTagValuesByPath = new Map<string, readonly string[]>();
 	private nextDocumentId = 0;
-	private readonly bodyPostings = new Map<string, Set<string>>();
+	private readonly bodyPostings = new Map<string, number[]>();
 	private readonly bodyCharPostings = new Map<string, Set<string>>();
 	private readonly bodyHanSegmentPostings = new Map<string, Set<string>>();
-	private readonly bodyPhrasePostings = new Map<string, Set<string>>();
+	private readonly bodyPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasCharPostings = new Map<string, Set<string>>();
 	private readonly metadataAliasHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataAliasPhrasePostings = new Map<string, Set<string>>();
@@ -116,7 +116,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly metadataHeadingHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPostings = new Map<string, Set<string>>();
-	private readonly metadataPostings = new Map<string, Set<string>>();
+	private readonly metadataPostings = new Map<string, number[]>();
 	private readonly metadataTagCharPostings = new Map<string, Set<string>>();
 	private readonly metadataTagFullPostings = new Map<string, Set<string>>();
 	private readonly metadataTagPhrasePostings = new Map<string, Set<string>>();
@@ -143,7 +143,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	clearIndex(): void {
 		this.documents.clear();
 		this.documentIdByPath.clear();
-		this.documentPathById.clear();
+		this.documentPathById.length = 0;
 		this.documentBodyTokensByPath.clear();
 		this.documentTagValuesByPath.clear();
 		this.nextDocumentId = 0;
@@ -240,6 +240,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
 				metadataTagPostings: this.metadataTagPostings,
 				sortedLexicon: this.sortedLexicon,
+				documentPathById: this.documentPathById,
 				documentBodyTokensByPath: this.documentBodyTokensByPath,
 				documentTagValuesByPath: this.documentTagValuesByPath,
 			},
@@ -291,8 +292,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						candidates.get(result.path) ?? {
 							bodyMatches: new Map(),
 							bodyCharTerms: new Set(),
+							bodyExactSegments: new Set(),
 							metadataMatches: new Map(),
 							metadataCharTerms: new Set(),
+							metadataExactSegments: new Set(),
 							metadataFieldMatches: {
 								basename: new Map(),
 								aliases: new Map(),
@@ -448,13 +451,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			accumulator,
 		);
 		const postings = {
-			body: estimatePostingMapBytes(this.bodyPostings, accumulator),
+			body: estimateNumericPostingMapBytes(this.bodyPostings, accumulator),
 			bodyChar: estimatePostingMapBytes(this.bodyCharPostings, accumulator),
 			bodyHanSegments: estimatePostingMapBytes(
 				this.bodyHanSegmentPostings,
 				accumulator,
 			),
-			bodyPhrase: estimatePostingMapBytes(this.bodyPhrasePostings, accumulator),
+			bodyPhrase: estimateNumericPostingMapBytes(
+				this.bodyPhrasePostings,
+				accumulator,
+			),
 			metadataAlias: estimatePostingMapBytes(
 				this.metadataAliasPostings,
 				accumulator,
@@ -519,7 +525,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataHeadingPhrasePostings,
 				accumulator,
 			),
-			metadata: estimatePostingMapBytes(this.metadataPostings, accumulator),
+			metadata: estimateNumericPostingMapBytes(
+				this.metadataPostings,
+				accumulator,
+			),
 			metadataTag: estimatePostingMapBytes(
 				this.metadataTagPostings,
 				accumulator,
@@ -660,14 +669,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentTagValuesByPath.set(document.path, tagValues);
 
 		for (const term of bodyTerms) {
-			addPosting(this.bodyPostings, term, document.path);
+			addNumericPosting(this.bodyPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of bodyCharTerms) {
 			addPosting(this.bodyCharPostings, term, document.path);
 		}
 		for (const term of bodyPhraseTerms) {
-			addPosting(this.bodyPhrasePostings, term, document.path);
+			addNumericPosting(this.bodyPhrasePostings, term, docId);
 		}
 		for (const term of aliasTerms) {
 			addPosting(this.metadataAliasPostings, term, document.path);
@@ -710,7 +719,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addPosting(this.metadataHeadingPhrasePostings, term, document.path);
 		}
 		for (const term of metadataTerms) {
-			addPosting(this.metadataPostings, term, document.path);
+			addNumericPosting(this.metadataPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of tagTerms) {
@@ -738,14 +747,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			return;
 		}
 
+		const docId = existing.docId;
 		for (const term of existing.bodyTerms) {
-			removePosting(this.bodyPostings, term, path);
+			removeNumericPosting(this.bodyPostings, term, docId);
 		}
 		for (const term of existing.bodyCharTerms) {
 			removePosting(this.bodyCharPostings, term, path);
 		}
 		for (const term of existing.bodyPhraseTerms) {
-			removePosting(this.bodyPhrasePostings, term, path);
+			removeNumericPosting(this.bodyPhrasePostings, term, docId);
 		}
 		for (const term of existing.aliasTerms) {
 			removePosting(this.metadataAliasPostings, term, path);
@@ -784,7 +794,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removePosting(this.metadataHeadingPhrasePostings, term, path);
 		}
 		for (const term of existing.metadataTerms) {
-			removePosting(this.metadataPostings, term, path);
+			removeNumericPosting(this.metadataPostings, term, docId);
 		}
 		for (const term of existing.tagTerms) {
 			removePosting(this.metadataTagPostings, term, path);
@@ -815,7 +825,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const docId = this.nextDocumentId;
 		this.nextDocumentId += 1;
 		this.documentIdByPath.set(path, docId);
-		this.documentPathById.set(docId, path);
+		this.documentPathById[docId] = path;
 		return docId;
 	}
 
@@ -825,7 +835,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			return;
 		}
 		this.documentIdByPath.delete(path);
-		this.documentPathById.delete(existingId);
+		this.documentPathById[existingId] = undefined;
 	}
 
 	private rebuildLexicon(): void {
@@ -845,8 +855,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
 		return queryTerms.map((term) => ({
-			bodyExactDocCount: this.bodyPostings.get(term)?.size ?? 0,
-			metadataExactDocCount: this.metadataPostings.get(term)?.size ?? 0,
+			bodyExactDocCount: getPostingEntryCount(this.bodyPostings.get(term)),
+			metadataExactDocCount: getPostingEntryCount(this.metadataPostings.get(term)),
 			basenameExactDocCount: this.metadataBasenamePostings.get(term)?.size ?? 0,
 			folderExactDocCount: this.metadataFolderPostings.get(term)?.size ?? 0,
 			headingExactDocCount: this.metadataHeadingPostings.get(term)?.size ?? 0,
@@ -1087,6 +1097,7 @@ function createEmptyFamilyCountSummary(): CoverageLexicalFamilyCountSummary {
 function createEmptyCharSignal(): {
 	matchCount: number;
 	matchRatio: number;
+	exactSegmentCount: number;
 	fullSegmentCount: number;
 	bestSegmentCoverageCount: number;
 	bestSegmentCoverageRatio: number;
@@ -1094,6 +1105,7 @@ function createEmptyCharSignal(): {
 	return {
 		matchCount: 0,
 		matchRatio: 0,
+		exactSegmentCount: 0,
 		fullSegmentCount: 0,
 		bestSegmentCoverageCount: 0,
 		bestSegmentCoverageRatio: 0,
@@ -1400,6 +1412,7 @@ const INDEX_COLLECTION_HEADER_BYTES = 4;
 const INDEX_REFERENCE_BYTES = 4;
 const INDEX_MAP_ENTRY_BYTES = 8;
 const INDEX_NUMBER_BYTES = 8;
+const INDEX_POSTING_DOC_ID_BYTES = 4;
 const UTF8_ENCODER = new TextEncoder();
 
 function createIndexSizeAccumulator(): IndexSizeAccumulator {
@@ -1480,6 +1493,41 @@ function estimatePostingMapBytes(
 		postingCount,
 		mapEntryBytes,
 		referenceBytes,
+	};
+}
+
+function estimateNumericPostingMapBytes(
+	postings: ReadonlyMap<string, readonly number[]>,
+	accumulator: IndexSizeAccumulator,
+): {
+	total: number;
+	termCount: number;
+	postingCount: number;
+	mapEntryBytes: number;
+	termReferenceBytes: number;
+	postingNumberBytes: number;
+} {
+	let termCount = 0;
+	let postingCount = 0;
+	for (const [term, docIds] of postings.entries()) {
+		termCount += 1;
+		accountStringBytes(accumulator, term);
+		postingCount += docIds.length;
+	}
+	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
+	const termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
+	const postingNumberBytes = postingCount * INDEX_POSTING_DOC_ID_BYTES;
+	return {
+		total:
+			INDEX_COLLECTION_HEADER_BYTES +
+			mapEntryBytes +
+			termReferenceBytes +
+			postingNumberBytes,
+		termCount,
+		postingCount,
+		mapEntryBytes,
+		termReferenceBytes,
+		postingNumberBytes,
 	};
 }
 
@@ -1623,7 +1671,7 @@ function estimateDocumentStoreBytes(
 
 function estimateDocumentIdentityBytes(
 	documentIdByPath: ReadonlyMap<string, number>,
-	documentPathById: ReadonlyMap<number, string>,
+	documentPathById: readonly (string | undefined)[],
 	nextDocumentId: number,
 	accumulator: IndexSizeAccumulator,
 ): Record<string, unknown> & { total: number } {
@@ -1642,17 +1690,16 @@ function estimateDocumentIdentityBytes(
 	}
 
 	const idToPath = {
-		count: 0,
-		mapEntryBytes: 0,
-		numberBytes: 0,
-		pathReferenceBytes: 0,
+		slotCount: documentPathById.length,
+		populatedCount: 0,
+		referenceBytes: documentPathById.length * INDEX_REFERENCE_BYTES,
 	};
-	for (const [, path] of documentPathById.entries()) {
-		idToPath.count += 1;
+	for (const path of documentPathById) {
+		if (!path) {
+			continue;
+		}
+		idToPath.populatedCount += 1;
 		accountStringBytes(accumulator, path);
-		idToPath.mapEntryBytes += INDEX_MAP_ENTRY_BYTES;
-		idToPath.numberBytes += INDEX_NUMBER_BYTES;
-		idToPath.pathReferenceBytes += INDEX_REFERENCE_BYTES;
 	}
 
 	const counter = {
@@ -1667,9 +1714,7 @@ function estimateDocumentIdentityBytes(
 			pathToId.mapEntryBytes +
 			pathToId.pathReferenceBytes +
 			pathToId.numberBytes +
-			idToPath.mapEntryBytes +
-			idToPath.numberBytes +
-			idToPath.pathReferenceBytes +
+			idToPath.referenceBytes +
 			counter.numberBytes,
 		pathToId,
 		idToPath,
@@ -1709,6 +1754,17 @@ function toNamedByteBreakdown<T extends Record<string, { total: number }>>(
 	return breakdowns;
 }
 
+function getPostingEntryCount(
+	postings: ReadonlySet<string> | readonly number[] | undefined,
+): number {
+	if (!postings) {
+		return 0;
+	}
+	return Array.isArray(postings)
+		? postings.length
+		: (postings as ReadonlySet<string>).size;
+}
+
 function addPosting(
 	postings: Map<string, Set<string>>,
 	term: string,
@@ -1722,6 +1778,19 @@ function addPosting(
 	docs.add(path);
 }
 
+function addNumericPosting(
+	postings: Map<string, number[]>,
+	term: string,
+	docId: number,
+): void {
+	let docs = postings.get(term);
+	if (!docs) {
+		docs = [];
+		postings.set(term, docs);
+	}
+	docs.push(docId);
+}
+
 function removePosting(
 	postings: Map<string, Set<string>>,
 	term: string,
@@ -1733,6 +1802,25 @@ function removePosting(
 	}
 	docs.delete(path);
 	if (docs.size === 0) {
+		postings.delete(term);
+	}
+}
+
+function removeNumericPosting(
+	postings: Map<string, number[]>,
+	term: string,
+	docId: number,
+): void {
+	const docs = postings.get(term);
+	if (!docs) {
+		return;
+	}
+	const index = docs.indexOf(docId);
+	if (index === -1) {
+		return;
+	}
+	docs.splice(index, 1);
+	if (docs.length === 0) {
 		postings.delete(term);
 	}
 }

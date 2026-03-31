@@ -41,8 +41,8 @@ Every retained change should be evaluated against the same four anchors:
 
 - `Phase 0` is complete:
   - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
-  - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase2.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step1.md`
+  - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step1.md`
+  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step2.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is complete for the current plan slice:
   - maintained query-time document caches landed
@@ -56,6 +56,11 @@ Every retained change should be evaluated against the same four anchors:
   - stable `docId` ownership landed
   - same-path reindex now preserves identity while true delete releases ownership
   - size accounting now reports explicit `documentIdentity` bytes so future numeric-postings work can be judged honestly
+  - hottest recall buckets now store `docId[]` instead of `Set<string path>`:
+    - `bodyPostings`
+    - `bodyPhrasePostings`
+    - `metadataPostings`
+  - the reverse lookup for numeric postings is now array-backed rather than map-backed
 - immediate rule:
   - continue from the active roadmap below instead of adding side plans or ad hoc benchmark branches
 
@@ -255,6 +260,15 @@ Executable checklist:
 2. move postings off `Set<string path>`
    - migrate high-cardinality posting buckets toward doc-id arrays or typed-array-backed storage
    - keep lookup semantics stable while changing representation
+   - status: partially complete
+   - landed first:
+     - `bodyPostings`
+     - `bodyPhrasePostings`
+     - `metadataPostings`
+   - still pending:
+     - field-specific metadata postings
+     - tag postings
+     - char postings
    - done when the hottest posting buckets are numeric-first rather than string-first
 3. centralize strings
    - create a shared representation for path, basename, folder, tag, and term strings
@@ -374,8 +388,8 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. treat the Phase 3 Step 1 anchor as the new comparison point for future work
-3. redesign the live index around numeric-first postings in the remaining Phase 3 work
+2. treat the Phase 3 Step 2 anchor as the new comparison point for future work
+3. keep pushing the remaining hot recall structures toward doc-id-native storage before starting snapshot format work
 4. build binary snapshot + startup self-heal on top of the Phase 3 layout
 5. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 

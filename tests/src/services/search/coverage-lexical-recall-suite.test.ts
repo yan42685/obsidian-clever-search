@@ -240,13 +240,6 @@ describe("coverage lexical recall suite", () => {
 			finalRank: number;
 			top5: string[];
 		}> = [];
-		const documentBodyTokensByPath = new Map(
-			Array.from(engineAny.documents.entries()).map(([docPath, document]: [string, { bodyTokenSequence: string[] }]) => [
-				docPath,
-				document.bodyTokenSequence,
-			]),
-		);
-
 		for (const queryCase of queryCases) {
 			const queryTerms = tokenizer
 				.tokenizeSequence(queryCase.queryText, "search")
@@ -263,21 +256,35 @@ describe("coverage lexical recall suite", () => {
 			const { candidates, debug } = collectCoverageLexicalCandidateStatesWithDebug(
 				{
 					bodyPostings: engineAny.bodyPostings,
+					bodyCharPostings: engineAny.bodyCharPostings,
+					bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+					metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+					metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
 					metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
 					metadataAliasPostings: engineAny.metadataAliasPostings,
+					metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+					metadataBasenameHanSegmentPostings: engineAny.metadataBasenameHanSegmentPostings,
 					metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
 					metadataBasenamePostings: engineAny.metadataBasenamePostings,
+					metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+					metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
 					metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
 					metadataFolderPostings: engineAny.metadataFolderPostings,
+					metadataHeadingCharPostings: engineAny.metadataHeadingCharPostings,
+					metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 					metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: engineAny.metadataHeadingPostings,
 					metadataPostings: engineAny.metadataPostings,
 					bodyPhrasePostings: engineAny.bodyPhrasePostings,
 					metadataPhrasePostings: engineAny.metadataPhrasePostings,
+					metadataTagCharPostings: engineAny.metadataTagCharPostings,
+					metadataTagFullPostings: engineAny.metadataTagFullPostings,
 					metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
 					metadataTagPostings: engineAny.metadataTagPostings,
 					sortedLexicon: engineAny.sortedLexicon,
-					documentBodyTokensByPath,
+					documentPathById: engineAny.documentPathById,
+					documentBodyTokensByPath: engineAny.documentBodyTokensByPath,
+					documentTagValuesByPath: engineAny.documentTagValuesByPath,
 				},
 				plan,
 				phraseSignatures,

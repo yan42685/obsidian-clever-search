@@ -16,30 +16,41 @@ import type {
 	CoverageLexicalPhraseSignature,
 	CoverageLexicalPlan,
 	CoverageLexicalRecallDebug,
+	CoverageLexicalRecallLaneDebug,
 } from "./coverage-lexical-types";
 
+type CoverageLexicalPostingList = ReadonlySet<string> | readonly number[];
+type CoverageLexicalPostingMap = ReadonlyMap<string, CoverageLexicalPostingList>;
+
 type CoverageLexicalRecallIndex = {
-	bodyPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	bodyCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataAliasCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataAliasPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataAliasPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataBasenameCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataBasenamePhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataBasenamePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataFolderCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataFolderPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataFolderPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataHeadingCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataHeadingPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataHeadingPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	bodyPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataTagCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataTagFullPostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataTagPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataTagPostings: ReadonlyMap<string, ReadonlySet<string>>;
+	bodyPostings: CoverageLexicalPostingMap;
+	bodyCharPostings: CoverageLexicalPostingMap;
+	bodyHanSegmentPostings?: CoverageLexicalPostingMap;
+	metadataAliasCharPostings: CoverageLexicalPostingMap;
+	metadataAliasHanSegmentPostings?: CoverageLexicalPostingMap;
+	metadataAliasPhrasePostings: CoverageLexicalPostingMap;
+	metadataAliasPostings: CoverageLexicalPostingMap;
+	metadataBasenameCharPostings: CoverageLexicalPostingMap;
+	metadataBasenameHanSegmentPostings?: CoverageLexicalPostingMap;
+	metadataBasenamePhrasePostings: CoverageLexicalPostingMap;
+	metadataBasenamePostings: CoverageLexicalPostingMap;
+	metadataFolderCharPostings: CoverageLexicalPostingMap;
+	metadataFolderHanSegmentPostings?: CoverageLexicalPostingMap;
+	metadataFolderPhrasePostings: CoverageLexicalPostingMap;
+	metadataFolderPostings: CoverageLexicalPostingMap;
+	metadataHeadingCharPostings: CoverageLexicalPostingMap;
+	metadataHeadingHanSegmentPostings?: CoverageLexicalPostingMap;
+	metadataHeadingPhrasePostings: CoverageLexicalPostingMap;
+	metadataHeadingPostings: CoverageLexicalPostingMap;
+	metadataPhrasePostings?: CoverageLexicalPostingMap;
+	metadataPostings: CoverageLexicalPostingMap;
+	bodyPhrasePostings: CoverageLexicalPostingMap;
+	metadataTagCharPostings: CoverageLexicalPostingMap;
+	metadataTagFullPostings: CoverageLexicalPostingMap;
+	metadataTagPhrasePostings: CoverageLexicalPostingMap;
+	metadataTagPostings: CoverageLexicalPostingMap;
 	sortedLexicon: readonly string[];
+	documentPathById?: readonly (string | undefined)[];
 	documentBodyTokensByPath: ReadonlyMap<string, readonly string[]>;
 	documentTagValuesByPath: ReadonlyMap<string, readonly string[]>;
 };
@@ -55,15 +66,7 @@ type CoverageLexicalLaneName =
 	| "char_fallback_lane";
 
 type CoverageLexicalRecallDebugAccumulator = {
-	lanes: Map<
-		CoverageLexicalLaneName,
-		{
-			laneName: CoverageLexicalLaneName;
-			candidateCount: number;
-			admittedCount: number;
-			admittedPaths: string[];
-		}
-	>;
+	lanes: Map<CoverageLexicalLaneName, CoverageLexicalRecallLaneDebug>;
 };
 
 type CoverageLexicalQueryCache = {
@@ -613,17 +616,29 @@ function runCharFallbackLane(
 		return;
 	}
 	const laneCandidates = new Map<string, CoverageLexicalCandidateState>();
-	collectCharCandidates(index.bodyCharPostings, charQuery.terms, laneCandidates, "body");
+	collectCharCandidates(
+		index,
+		index.bodyCharPostings,
+		charQuery.terms,
+		laneCandidates,
+		"body",
+	);
 	for (const postings of [
 		index.metadataBasenameCharPostings,
 		index.metadataAliasCharPostings,
 		index.metadataFolderCharPostings,
 		index.metadataHeadingCharPostings,
 	]) {
-		collectCharCandidates(postings, charQuery.terms, laneCandidates, "metadata");
+		collectCharCandidates(index, postings, charQuery.terms, laneCandidates, "metadata");
 	}
-	collectTagExactCandidates(index.metadataTagFullPostings, charQuery.hanSegments, laneCandidates);
+	collectTagExactCandidates(
+		index,
+		index.metadataTagFullPostings,
+		charQuery.hanSegments,
+		laneCandidates,
+	);
 	collectCharCandidates(
+		index,
 		index.metadataTagCharPostings,
 		charQuery.terms,
 		laneCandidates,
@@ -753,7 +768,7 @@ function preselectLaneCandidates(
 		Math.max(budget * 6, request.maxItemResults * 8, 48),
 	);
 	if (entries.length <= prefilterBudget) {
-		return entries.map(({ path, state }) => [path, state] as const);
+		return entries.map(({ path, state }) => [path, state]);
 	}
 	const sorted = entries.sort((left, right) =>
 		compareCheapLaneCandidates(laneName, left, right),
@@ -792,7 +807,7 @@ function preselectLaneCandidates(
 			}
 		}
 	}
-	return selected.map(({ path, state }) => [path, state] as const);
+	return selected.map(({ path, state }) => [path, state]);
 }
 
 function compareCheapLaneCandidates(
@@ -1305,7 +1320,8 @@ function collectFamilySetCandidates(
 }
 
 function collectCharCandidates(
-	postingsByTerm: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+	index: CoverageLexicalRecallIndex,
+	postingsByTerm: CoverageLexicalPostingMap | undefined,
 	queryTerms: readonly string[],
 	candidates: Map<string, CoverageLexicalCandidateState>,
 	target: "body" | "metadata" | "tag",
@@ -1318,23 +1334,24 @@ function collectCharCandidates(
 		if (!matches) {
 			continue;
 		}
-		for (const path of matches) {
+		forEachPostingPath(index, matches, (path) => {
 			const state = getOrCreateCandidateState(candidates, path);
 			if (target === "body") {
 				state.bodyCharTerms.add(term);
-				continue;
+				return;
 			}
 			if (target === "metadata") {
 				state.metadataCharTerms.add(term);
-				continue;
+				return;
 			}
 			state.tagCharTerms.add(term);
-		}
+		});
 	}
 }
 
 function collectTagExactCandidates(
-	postingsByTag: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+	index: CoverageLexicalRecallIndex,
+	postingsByTag: CoverageLexicalPostingMap | undefined,
 	querySegments: readonly string[],
 	candidates: Map<string, CoverageLexicalCandidateState>,
 ): void {
@@ -1346,10 +1363,10 @@ function collectTagExactCandidates(
 		if (!matches) {
 			continue;
 		}
-		for (const path of matches) {
+		forEachPostingPath(index, matches, (path) => {
 			const state = getOrCreateCandidateState(candidates, path);
 			state.tagExactTerms.add(term);
-		}
+		});
 	}
 }
 
@@ -1416,10 +1433,10 @@ function collectCandidatesForTerm(
 	if (scope !== "metadata-only") {
 		const bodyMatches = index.bodyPostings.get(term);
 		if (bodyMatches) {
-			for (const path of bodyMatches) {
+			forEachPostingPath(index, bodyMatches, (path) => {
 				const state = getOrCreateCandidateState(candidates, path);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
-			}
+			});
 		}
 	}
 	if (scope !== "body-only") {
@@ -1443,23 +1460,23 @@ function collectCandidatesForPhraseSignature(
 		if (scope !== "metadata-only" && !signature.preferredFields?.length) {
 			const bodyTokenMatches = index.bodyPostings.get(variant);
 			if (bodyTokenMatches) {
-				for (const path of bodyTokenMatches) {
+				forEachPostingPath(index, bodyTokenMatches, (path) => {
 					const state = getOrCreateCandidateState(candidates, path);
 					state.phraseMatches.add(signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
 					}
-				}
+				});
 			}
 			const bodyPhraseMatches = index.bodyPhrasePostings.get(variant);
 			if (bodyPhraseMatches) {
-				for (const path of bodyPhraseMatches) {
+				forEachPostingPath(index, bodyPhraseMatches, (path) => {
 					const state = getOrCreateCandidateState(candidates, path);
 					state.phraseMatches.add(signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
 					}
-				}
+				});
 			}
 		}
 
@@ -1470,13 +1487,13 @@ function collectCandidatesForPhraseSignature(
 		if (!signature.preferredFields || signature.preferredFields.length === 0) {
 			const metadataTokenMatches = index.metadataPostings.get(variant);
 			if (metadataTokenMatches) {
-				for (const path of metadataTokenMatches) {
+				forEachPostingPath(index, metadataTokenMatches, (path) => {
 					const state = getOrCreateCandidateState(candidates, path);
 					state.phraseMatches.add(signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
 					}
-				}
+				});
 			}
 			collectAnyMetadataPhraseMatches(index, candidates, signature, variant);
 			continue;
@@ -1554,10 +1571,7 @@ function collectAnyMetadataPhraseMatches(
 	signature: CoverageLexicalPhraseSignature,
 	variant: string,
 ): void {
-	const fieldPhraseEntries: readonly ReadonlyMap<
-		string,
-		ReadonlySet<string>
-	>[] = [
+	const fieldPhraseEntries: readonly CoverageLexicalPostingMap[] = [
 		index.metadataBasenamePhrasePostings,
 		index.metadataAliasPhrasePostings,
 		index.metadataFolderPhrasePostings,
@@ -1569,13 +1583,13 @@ function collectAnyMetadataPhraseMatches(
 		if (!matches) {
 			continue;
 		}
-		for (const path of matches) {
+		forEachPostingPath(index, matches, (path) => {
 			const state = getOrCreateCandidateState(candidates, path);
 			state.phraseMatches.add(signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
 			}
-		}
+		});
 	}
 }
 
@@ -1583,8 +1597,10 @@ function createEmptyCandidateState(): CoverageLexicalCandidateState {
 	return {
 		bodyMatches: new Map(),
 		bodyCharTerms: new Set(),
+		bodyExactSegments: new Set(),
 		metadataMatches: new Map(),
 		metadataCharTerms: new Set(),
+		metadataExactSegments: new Set(),
 		metadataFieldMatches: createEmptyMetadataFieldMatches(),
 		phraseMatches: new Set(),
 		tagCharTerms: new Set(),
@@ -1602,7 +1618,7 @@ function collectMetadataFieldCandidatesForTerm(
 	const fieldEntries: Array<
 		[
 			CoverageLexicalMetadataField,
-			ReadonlyMap<string, ReadonlySet<string>>,
+			CoverageLexicalPostingMap,
 		]
 	> = [
 		["basename", index.metadataBasenamePostings],
@@ -1616,20 +1632,20 @@ function collectMetadataFieldCandidatesForTerm(
 		if (!matches) {
 			continue;
 		}
-		for (const path of matches) {
+		forEachPostingPath(index, matches, (path) => {
 			const state = getOrCreateCandidateState(candidates, path);
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
-		}
+		});
 	}
 	const metadataMatches = index.metadataPostings.get(term);
 	if (!metadataMatches) {
 		return;
 	}
-	for (const path of metadataMatches) {
+	forEachPostingPath(index, metadataMatches, (path) => {
 		const state = getOrCreateCandidateState(candidates, path);
 		recordFamilyMatch(state.metadataMatches, familyIndex, kind);
-	}
+	});
 }
 
 function collectPreferredMetadataPhraseMatches(
@@ -1641,7 +1657,7 @@ function collectPreferredMetadataPhraseMatches(
 	const fieldPhraseEntries: Array<
 		[
 			CoverageLexicalMetadataField,
-			ReadonlyMap<string, ReadonlySet<string>>,
+			CoverageLexicalPostingMap,
 		]
 	> = [
 		["basename", index.metadataBasenamePhrasePostings],
@@ -1658,14 +1674,33 @@ function collectPreferredMetadataPhraseMatches(
 		if (!matches) {
 			continue;
 		}
-		for (const path of matches) {
+		forEachPostingPath(index, matches, (path) => {
 			const state = getOrCreateCandidateState(candidates, path);
 			state.phraseMatches.add(signature.index);
 			for (const familyIndex of signature.familyIndices) {
 				recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
 				recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, "exact");
 			}
+		});
+	}
+}
+
+function forEachPostingPath(
+	index: CoverageLexicalRecallIndex,
+	postings: CoverageLexicalPostingList,
+	visitor: (path: string) => void,
+): void {
+	if (Array.isArray(postings)) {
+		for (const docId of postings) {
+			const path = index.documentPathById?.[docId];
+			if (path) {
+				visitor(path);
+			}
 		}
+		return;
+	}
+	for (const path of postings as ReadonlySet<string>) {
+		visitor(path);
 	}
 }
 

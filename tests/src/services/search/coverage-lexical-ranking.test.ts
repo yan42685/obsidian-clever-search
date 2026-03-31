@@ -1100,6 +1100,42 @@ describe("coverage lexical ranking", () => {
 		).toBe(true);
 	});
 
+	test("stores the hottest postings buckets as doc id arrays", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		const internalEngine = engine as any;
+		await engine.addDocuments([
+			{
+				path: "pkm-en/phase3/hot-postings.md",
+				basename: "hot-postings.md",
+				folder: "pkm-en/phase3",
+				headings: "Hot postings",
+				content: "cache restore cache replay",
+				aliases: "hot postings",
+				tags: "phase3,cache",
+			},
+		]);
+
+		const docId = internalEngine.documents.get("pkm-en/phase3/hot-postings.md")?.docId;
+		expect(typeof docId).toBe("number");
+		expect(Array.isArray(internalEngine.bodyPostings.get("cache"))).toBe(true);
+		expect(Array.isArray(internalEngine.bodyPhrasePostings.get("cache restore"))).toBe(
+			true,
+		);
+		expect(Array.isArray(internalEngine.metadataPostings.get("phase3"))).toBe(true);
+		expect(internalEngine.bodyPostings.get("cache")).toContain(docId);
+		expect(internalEngine.documentPathById[docId]).toBe(
+			"pkm-en/phase3/hot-postings.md",
+		);
+	});
+
 	test("preserves stable doc ids across reindex and advances ids after true delete", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
