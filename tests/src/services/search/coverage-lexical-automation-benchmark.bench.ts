@@ -2082,7 +2082,6 @@ function createCoverageRecallIndex(engine: any) {
 		metadataHeadingPostings: engine.metadataHeadingPostings,
 		metadataPostings: engine.metadataPostings,
 		bodyPhrasePostings: engine.bodyPhrasePostings,
-		metadataPhrasePostings: engine.metadataPhrasePostings,
 		metadataTagCharPostings: engine.metadataTagCharPostings,
 		metadataTagFullPostings: engine.metadataTagFullPostings,
 		metadataTagPhrasePostings: engine.metadataTagPhrasePostings,

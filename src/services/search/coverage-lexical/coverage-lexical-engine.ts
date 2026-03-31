@@ -75,7 +75,6 @@ type CoverageLexicalDocument = {
 	headingPhraseTerms: Set<string>;
 	headingTerms: Set<string>;
 	headingCharTerms: Set<string>;
-	metadataPhraseTerms: Set<string>;
 	metadataTerms: Set<string>;
 	tagPhraseTerms: Set<string>;
 	tagTerms: Set<string>;
@@ -114,7 +113,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly metadataHeadingPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPostings = new Map<string, Set<string>>();
 	private readonly metadataPostings = new Map<string, Set<string>>();
-	private readonly metadataPhrasePostings = new Map<string, Set<string>>();
 	private readonly metadataTagCharPostings = new Map<string, Set<string>>();
 	private readonly metadataTagFullPostings = new Map<string, Set<string>>();
 	private readonly metadataTagPhrasePostings = new Map<string, Set<string>>();
@@ -163,7 +161,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.metadataHeadingPhrasePostings.clear();
 		this.metadataHeadingPostings.clear();
 		this.metadataPostings.clear();
-		this.metadataPhrasePostings.clear();
 		this.metadataTagCharPostings.clear();
 		this.metadataTagFullPostings.clear();
 		this.metadataTagPhrasePostings.clear();
@@ -231,7 +228,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				metadataHeadingPostings: this.metadataHeadingPostings,
 				metadataPostings: this.metadataPostings,
 				bodyPhrasePostings: this.bodyPhrasePostings,
-				metadataPhrasePostings: this.metadataPhrasePostings,
 				metadataTagCharPostings: this.metadataTagCharPostings,
 				metadataTagFullPostings: this.metadataTagFullPostings,
 				metadataTagPhrasePostings: this.metadataTagPhrasePostings,
@@ -422,7 +418,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataHeadingPhraseTermCount: this.metadataHeadingPhrasePostings.size,
 			metadataHeadingTermCount: this.metadataHeadingPostings.size,
 			metadataTermCount: this.metadataPostings.size,
-			metadataPhraseTermCount: this.metadataPhrasePostings.size,
 			metadataTagCharTermCount: this.metadataTagCharPostings.size,
 			metadataTagFullTermCount: this.metadataTagFullPostings.size,
 			metadataTagPhraseTermCount: this.metadataTagPhrasePostings.size,
@@ -510,10 +505,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 			),
 			metadata: estimatePostingMapBytes(this.metadataPostings, accumulator),
-			metadataPhrase: estimatePostingMapBytes(
-				this.metadataPhrasePostings,
-				accumulator,
-			),
 			metadataTag: estimatePostingMapBytes(
 				this.metadataTagPostings,
 				accumulator,
@@ -618,9 +609,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const headingPhraseTerms = new Set(
 			buildCoverageLexicalPhraseTerms(Array.from(headingTerms)),
 		);
-		const metadataPhraseTerms = new Set(
-			buildCoverageLexicalPhraseTerms(metadataTokenSequence),
-		);
 		const tagPhraseTerms = new Set(
 			buildCoverageLexicalPhraseTerms(Array.from(tagTerms)),
 		);
@@ -643,7 +631,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			headingPhraseTerms,
 			headingTerms,
 			headingCharTerms,
-			metadataPhraseTerms,
 			metadataTerms,
 			tagPhraseTerms,
 			tagTerms,
@@ -706,9 +693,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of metadataTerms) {
 			addPosting(this.metadataPostings, term, document.path);
 			this.lexicon.add(term);
-		}
-		for (const term of metadataPhraseTerms) {
-			addPosting(this.metadataPhrasePostings, term, document.path);
 		}
 		for (const term of tagTerms) {
 			addPosting(this.metadataTagPostings, term, document.path);
@@ -779,9 +763,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		for (const term of existing.metadataTerms) {
 			removePosting(this.metadataPostings, term, path);
-		}
-		for (const term of existing.metadataPhraseTerms) {
-			removePosting(this.metadataPhrasePostings, term, path);
 		}
 		for (const term of existing.tagTerms) {
 			removePosting(this.metadataTagPostings, term, path);
@@ -1479,7 +1460,6 @@ function estimateDocumentStoreBytes(
 		headingCharTerms: { count: 0, referenceBytes: 0 },
 		headingPhraseTerms: { count: 0, referenceBytes: 0 },
 		metadataTerms: { count: 0, referenceBytes: 0 },
-		metadataPhraseTerms: { count: 0, referenceBytes: 0 },
 		tagTerms: { count: 0, referenceBytes: 0 },
 		tagCharTerms: { count: 0, referenceBytes: 0 },
 		tagPhraseTerms: { count: 0, referenceBytes: 0 },
@@ -1561,10 +1541,6 @@ function estimateDocumentStoreBytes(
 		accumulateSection(
 			sections.metadataTerms,
 			estimateStringSetBytes(document.metadataTerms, accumulator),
-		);
-		accumulateSection(
-			sections.metadataPhraseTerms,
-			estimateStringSetBytes(document.metadataPhraseTerms, accumulator),
 		);
 		accumulateSection(
 			sections.tagTerms,

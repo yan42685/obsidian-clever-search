@@ -35,7 +35,6 @@ type CoverageLexicalRecallIndex = {
 	metadataHeadingPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	bodyPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
-	metadataPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataTagCharPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataTagFullPostings: ReadonlyMap<string, ReadonlySet<string>>;
 	metadataTagPhrasePostings: ReadonlyMap<string, ReadonlySet<string>>;
@@ -1479,16 +1478,7 @@ function collectCandidatesForPhraseSignature(
 					}
 				}
 			}
-			const metadataPhraseMatches = index.metadataPhrasePostings.get(variant);
-			if (metadataPhraseMatches) {
-				for (const path of metadataPhraseMatches) {
-					const state = getOrCreateCandidateState(candidates, path);
-					state.phraseMatches.add(signature.index);
-					for (const familyIndex of signature.familyIndices) {
-						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
-					}
-				}
-			}
+			collectAnyMetadataPhraseMatches(index, candidates, signature, variant);
 			continue;
 		}
 
@@ -1555,6 +1545,37 @@ function mergeCandidateStateInto(
 	}
 	for (const term of nextState.tagCharTerms) {
 		target.tagCharTerms.add(term);
+	}
+}
+
+function collectAnyMetadataPhraseMatches(
+	index: CoverageLexicalRecallIndex,
+	candidates: Map<string, CoverageLexicalCandidateState>,
+	signature: CoverageLexicalPhraseSignature,
+	variant: string,
+): void {
+	const fieldPhraseEntries: readonly ReadonlyMap<
+		string,
+		ReadonlySet<string>
+	>[] = [
+		index.metadataBasenamePhrasePostings,
+		index.metadataAliasPhrasePostings,
+		index.metadataFolderPhrasePostings,
+		index.metadataHeadingPhrasePostings,
+		index.metadataTagPhrasePostings,
+	];
+	for (const postings of fieldPhraseEntries) {
+		const matches = postings.get(variant);
+		if (!matches) {
+			continue;
+		}
+		for (const path of matches) {
+			const state = getOrCreateCandidateState(candidates, path);
+			state.phraseMatches.add(signature.index);
+			for (const familyIndex of signature.familyIndices) {
+				recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
+			}
+		}
 	}
 }
 
