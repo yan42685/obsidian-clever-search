@@ -476,7 +476,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 				if (!state) {
 					continue;
 				}
-				mergeCandidateStateInto(admittedCandidates, key, state);
+				mergeCandidateStateByDocId(admittedCandidates, key, state);
 			}
 		},
 		() => admittedKeys.size,
@@ -929,7 +929,7 @@ function admitLaneCandidates(
 		"laneMerge",
 		() => {
 			for (const [key, state] of laneCandidates) {
-				mergeCandidateStateInto(aggregateCandidates, key, state);
+				mergeCandidateStateByDocId(aggregateCandidates, key, state);
 			}
 		},
 		() => laneCandidates.size,
@@ -1963,7 +1963,7 @@ function collectCharCandidates(
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateCandidateState(candidates, key);
+			const state = getOrCreateDocIdCandidateState(candidates, key);
 			if (target === "body") {
 				recordQueryTermMatch(
 					state.bodyCharMatchIndices,
@@ -2005,7 +2005,7 @@ function collectTagExactCandidates(
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateCandidateState(candidates, key);
+			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordQueryTermMatch(
 				state.tagExactMatchIndices,
 				state.tagExactMatchFlags,
@@ -2077,7 +2077,7 @@ function collectCandidatesForTerm(
 		const bodyMatches = index.bodyPostings.get(term);
 		if (bodyMatches) {
 			forEachPostingCandidateKey(index, bodyMatches, (key) => {
-				const state = getOrCreateCandidateState(candidates, key);
+				const state = getOrCreateDocIdCandidateState(candidates, key);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
 			});
 		}
@@ -2104,7 +2104,7 @@ function collectCandidatesForPhraseSignature(
 			const bodyTokenMatches = index.bodyPostings.get(variant);
 			if (bodyTokenMatches) {
 				forEachPostingCandidateKey(index, bodyTokenMatches, (key) => {
-					const state = getOrCreateCandidateState(candidates, key);
+					const state = getOrCreateDocIdCandidateState(candidates, key);
 					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
@@ -2114,7 +2114,7 @@ function collectCandidatesForPhraseSignature(
 			const bodyPhraseMatches = index.bodyPhrasePostings.get(variant);
 			if (bodyPhraseMatches) {
 				forEachPostingCandidateKey(index, bodyPhraseMatches, (key) => {
-					const state = getOrCreateCandidateState(candidates, key);
+					const state = getOrCreateDocIdCandidateState(candidates, key);
 					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
@@ -2131,7 +2131,7 @@ function collectCandidatesForPhraseSignature(
 			const metadataTokenMatches = index.metadataPostings.get(variant);
 			if (metadataTokenMatches) {
 				forEachPostingCandidateKey(index, metadataTokenMatches, (key) => {
-					const state = getOrCreateCandidateState(candidates, key);
+					const state = getOrCreateDocIdCandidateState(candidates, key);
 					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {
 						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
