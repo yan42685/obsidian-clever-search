@@ -347,6 +347,52 @@ Executable checklist:
    - do not design the snapshot format around today's `Map<string, Set<string>>` graph
    - done when a compact persisted form becomes a direct extension of the live layout
 
+Phase 3 deliverables are now split into three concrete subphases:
+
+- `Phase 3A`: live-layout normalization
+  - finish migrating hot postings and document identity ownership toward numeric-first storage
+  - centralize repeated strings so future snapshotting can write shared ids instead of repeated text
+  - acceptance:
+    - no high-cardinality hot path still requires a string-keyed bridge as its main identity carrier
+    - size breakdown shows repeated-string retention moving downward
+- `Phase 3B`: minimum binary snapshot schema contract
+  - freeze a minimal persisted section layout before broad storage compression work drifts further
+  - keep the schema intentionally small:
+    - header
+    - string pool
+    - doc table
+    - postings directory plus payload arena
+    - document token references needed for startup restore
+  - acceptance:
+    - one document can be written and read back losslessly without rebuilding semantic meaning from scratch
+    - the persisted shape matches the live numeric layout closely enough that no object-graph translation layer is needed
+- `Phase 3C`: binary-first storage compression
+  - once section boundaries are fixed, compress within the schema:
+    - delta-coded doc ids
+    - varint or compact integer encoding
+    - shared string ids
+    - compact section offsets
+  - acceptance:
+    - snapshot bytes improve materially without forcing a second schema redesign
+    - the binary schema remains readable incrementally for future self-heal work
+
+Why this order is now fixed:
+
+- compressing today's live object graph first risks optimizing a layout we already know we do not want to persist long-term
+- freezing the minimum binary section contract first prevents double work:
+  - once for in-memory-only compression
+  - again for snapshot translation
+- some compression is still welcome before snapshotting, but only when it directly advances the binary-friendly live layout rather than making the legacy object graph denser
+
+Current working rule inside Phase 3:
+
+- do not pursue "size-only" compression that increases translation complexity for the future binary snapshot path
+- do pursue:
+  - stable ids
+  - centralized strings
+  - compact numeric postings
+  - section-friendly arrays
+
 ## Phase 4: Snapshot, Hydration, And Startup Self-Heal
 
 Goal:
@@ -405,6 +451,39 @@ Executable checklist:
    - do not fold startup interpretation into the query benchmark alone
    - done when startup performance has its own stable reporting path
 
+Phase 4 execution order is now fixed:
+
+1. freeze a dedicated startup anchor before landing the first persisted snapshot
+   - record the current rebuild-only startup path as the pre-snapshot baseline
+   - define the exact metrics and harness contract before optimizing them
+2. land a read/write path for the minimum binary schema
+   - support full snapshot write after index build
+   - support full snapshot read before rebuild
+3. add trust and invalidation rules
+   - schema version
+   - plugin build compatibility
+   - cheap vault fingerprint
+4. add startup ready-path
+   - hydrate first
+   - only rebuild when snapshot trust fails
+5. add background self-heal
+   - if the snapshot is slightly stale, start usable and repair incrementally
+
+Startup benchmark anchor contract:
+
+- keep query benchmark separate from startup benchmark
+- the startup anchor should always record:
+  - snapshot bytes
+  - snapshot write ms
+  - hydrate ms
+  - ready-to-search ms
+  - fallback rebuild ms
+  - self-heal repair ms
+  - changed-doc count in the repair scenario
+- for machine drift, treat these as:
+  - absolute reference numbers
+  - plus relative ratios against the rebuild-only baseline where applicable
+
 ## Prefilter Design Rules
 
 These rules should guide all future prefilter tuning, even before local stress verification exists:
@@ -453,14 +532,36 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. treat the query-hotpath-flattening anchor as the active comparison point for future work
-3. continue `Phase 1` by removing the remaining measured query-time waste in local window evaluation and verification before expecting more latency benefit from additional posting migration
-4. continue `Phase 3` when it directly removes a proven hot-path bridge or makes the live layout more compact and binary-friendly for snapshotting
-5. build binary snapshot + startup self-heal on top of the settled Phase 3 live layout
-6. only return to prefilter stress verification if a future lane-budget change needs stronger validation
+2. treat `benchmarks/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md` as the active query anchor until a later retained query win clearly replaces it
+3. freeze a dedicated pre-snapshot startup anchor before landing persisted-index code:
+   - use a separate startup benchmark document
+   - keep query and startup interpretation independent
+4. continue `Phase 3A` only for binary-friendly live-layout work:
+   - stable ids
+   - string centralization
+   - compact numeric postings
+   - section-friendly arrays
+5. land `Phase 3B` next:
+   - minimum binary snapshot schema
+   - read/write prototype
+   - no aggressive compression yet
+6. only then continue `Phase 3C`:
+   - compress the binary payload itself
+   - avoid redoing the schema boundary work twice
+7. build `Phase 4` startup self-heal on top of the settled schema and startup anchor
+8. only return to prefilter stress verification if a future lane-budget change needs stronger validation
 
 ## Working Rule
 
 Do not treat serialization as a separate side project.
 
 The best serialization outcome will come from first making the live index layout compact, numeric, and stable. Once that is true, binary snapshotting becomes a natural extension of the engine instead of an additional translation layer.
+
+Refined rule after the latest query-latency work:
+
+- do not read "make live layout binary-friendly first" as "finish every possible size compression before defining any snapshot schema"
+- the right sequencing is:
+  - enough live-layout cleanup to avoid serializing the legacy string graph
+  - then freeze a small binary schema contract
+  - then compress inside that contract
+- otherwise we risk compressing the wrong shape first and paying migration cost twice
