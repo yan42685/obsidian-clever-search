@@ -1,3 +1,10 @@
+import {
+	COVERAGE_LEXICAL_POSTING_DESCRIPTORS,
+	CoverageLexicalSnapshotSectionKind,
+	type CoverageLexicalPostingOwnership,
+	type CoverageLexicalSnapshotPostingKey,
+} from "./coverage-lexical-posting-layout";
+
 type CoverageLexicalSnapshotDocumentState = {
 	docId: number;
 	path: string;
@@ -63,38 +70,6 @@ const DOCUMENT_STRING_LIST_FIELDS = [
 type DocumentStringField = (typeof DOCUMENT_STRING_FIELDS)[number];
 type DocumentStringListField = (typeof DOCUMENT_STRING_LIST_FIELDS)[number];
 
-const enum CoverageLexicalSnapshotSectionKind {
-	Metadata = 1,
-	StringPool = 2,
-	Lexicon = 3,
-	BodyTokenLexicon = 4,
-	Documents = 5,
-	BodyPostings = 10,
-	BodyCharPostings = 11,
-	BodyHanSegmentPostings = 12,
-	MetadataAliasCharPostings = 14,
-	MetadataAliasHanSegmentPostings = 15,
-	MetadataAliasPhrasePostings = 16,
-	MetadataAliasPostings = 17,
-	MetadataBasenameCharPostings = 18,
-	MetadataBasenameHanSegmentPostings = 19,
-	MetadataBasenamePhrasePostings = 20,
-	MetadataBasenamePostings = 21,
-	MetadataFolderCharPostings = 22,
-	MetadataFolderHanSegmentPostings = 23,
-	MetadataFolderPhrasePostings = 24,
-	MetadataFolderPostings = 25,
-	MetadataHeadingCharPostings = 26,
-	MetadataHeadingHanSegmentPostings = 27,
-	MetadataHeadingPhrasePostings = 28,
-	MetadataHeadingPostings = 29,
-	MetadataPostings = 30,
-	MetadataTagCharPostings = 31,
-	MetadataTagFullPostings = 32,
-	MetadataTagPhrasePostings = 33,
-	MetadataTagPostings = 34,
-}
-
 type CoverageLexicalSnapshotSection = {
 	kind: CoverageLexicalSnapshotSectionKind;
 	count: number;
@@ -120,125 +95,12 @@ export function encodeCoverageLexicalSnapshotV1(
 			stringPool,
 		),
 		buildDocumentsSection(state.documents, stringPool),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.BodyPostings,
-			state.bodyPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.BodyCharPostings,
-			state.bodyCharPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.BodyHanSegmentPostings,
-			state.bodyHanSegmentPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataAliasCharPostings,
-			state.metadataAliasCharPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataAliasHanSegmentPostings,
-			state.metadataAliasHanSegmentPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataAliasPhrasePostings,
-			state.metadataAliasPhrasePostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataAliasPostings,
-			state.metadataAliasPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataBasenameCharPostings,
-			state.metadataBasenameCharPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataBasenameHanSegmentPostings,
-			state.metadataBasenameHanSegmentPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataBasenamePhrasePostings,
-			state.metadataBasenamePhrasePostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataBasenamePostings,
-			state.metadataBasenamePostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataFolderCharPostings,
-			state.metadataFolderCharPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataFolderHanSegmentPostings,
-			state.metadataFolderHanSegmentPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataFolderPhrasePostings,
-			state.metadataFolderPhrasePostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataFolderPostings,
-			state.metadataFolderPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataHeadingCharPostings,
-			state.metadataHeadingCharPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataHeadingHanSegmentPostings,
-			state.metadataHeadingHanSegmentPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataHeadingPhrasePostings,
-			state.metadataHeadingPhrasePostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataHeadingPostings,
-			state.metadataHeadingPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataPostings,
-			state.metadataPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataTagCharPostings,
-			state.metadataTagCharPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataTagFullPostings,
-			state.metadataTagFullPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataTagPhrasePostings,
-			state.metadataTagPhrasePostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.MetadataTagPostings,
-			state.metadataTagPostings,
-			stringPool,
+		...COVERAGE_LEXICAL_POSTING_DESCRIPTORS.map((descriptor) =>
+			buildPostingSection(
+				descriptor.sectionKind,
+				state[descriptor.key],
+				stringPool,
+			),
 		),
 	];
 	const headerWriter = new SnapshotWriter();
@@ -287,6 +149,17 @@ export function decodeCoverageLexicalSnapshotV1(
 		reader,
 		requireSection(sections, CoverageLexicalSnapshotSectionKind.Metadata),
 	);
+	const postingState = Object.fromEntries(
+		COVERAGE_LEXICAL_POSTING_DESCRIPTORS.map((descriptor) => [
+			descriptor.key,
+			decodePostingSectionByOwnership(
+				reader,
+				requireSection(sections, descriptor.sectionKind),
+				strings,
+				descriptor.ownership,
+			),
+		]),
+	 ) as unknown as Pick<CoverageLexicalSnapshotState, CoverageLexicalSnapshotPostingKey>;
 	return {
 		nextDocumentId,
 		sortedLexicon: decodeLexiconSection(
@@ -304,30 +177,7 @@ export function decodeCoverageLexicalSnapshotV1(
 			requireSection(sections, CoverageLexicalSnapshotSectionKind.Documents),
 			strings,
 		),
-		bodyPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyPostings), strings),
-		bodyCharPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyCharPostings), strings),
-		bodyHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyHanSegmentPostings), strings),
-		metadataAliasCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasCharPostings), strings),
-		metadataAliasHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasHanSegmentPostings), strings),
-		metadataAliasPhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasPhrasePostings), strings),
-		metadataAliasPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasPostings), strings),
-		metadataBasenameCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataBasenameCharPostings), strings),
-		metadataBasenameHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataBasenameHanSegmentPostings), strings),
-		metadataBasenamePhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataBasenamePhrasePostings), strings),
-		metadataBasenamePostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataBasenamePostings), strings),
-		metadataFolderCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataFolderCharPostings), strings),
-		metadataFolderHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataFolderHanSegmentPostings), strings),
-		metadataFolderPhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataFolderPhrasePostings), strings),
-		metadataFolderPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataFolderPostings), strings),
-		metadataHeadingCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataHeadingCharPostings), strings),
-		metadataHeadingHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataHeadingHanSegmentPostings), strings),
-		metadataHeadingPhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataHeadingPhrasePostings), strings),
-		metadataHeadingPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataHeadingPostings), strings),
-		metadataPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataPostings), strings),
-		metadataTagCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataTagCharPostings), strings),
-		metadataTagFullPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataTagFullPostings), strings),
-		metadataTagPhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataTagPhrasePostings), strings),
-		metadataTagPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataTagPostings), strings),
+		...postingState,
 	};
 }
 
@@ -362,32 +212,9 @@ function registerSnapshotStrings(
 function getPostingMaps(
 	state: CoverageLexicalSnapshotState,
 ): ReadonlyArray<ReadonlyMap<string, readonly number[] | Uint32Array>> {
-	return [
-		state.bodyPostings,
-		state.bodyCharPostings,
-		state.bodyHanSegmentPostings,
-		state.metadataAliasCharPostings,
-		state.metadataAliasHanSegmentPostings,
-		state.metadataAliasPhrasePostings,
-		state.metadataAliasPostings,
-		state.metadataBasenameCharPostings,
-		state.metadataBasenameHanSegmentPostings,
-		state.metadataBasenamePhrasePostings,
-		state.metadataBasenamePostings,
-		state.metadataFolderCharPostings,
-		state.metadataFolderHanSegmentPostings,
-		state.metadataFolderPhrasePostings,
-		state.metadataFolderPostings,
-		state.metadataHeadingCharPostings,
-		state.metadataHeadingHanSegmentPostings,
-		state.metadataHeadingPhrasePostings,
-		state.metadataHeadingPostings,
-		state.metadataPostings,
-		state.metadataTagCharPostings,
-		state.metadataTagFullPostings,
-		state.metadataTagPhrasePostings,
-		state.metadataTagPostings,
-	];
+	return COVERAGE_LEXICAL_POSTING_DESCRIPTORS.map(
+		(descriptor) => state[descriptor.key],
+	);
 }
 
 function buildMetadataSection(
@@ -615,6 +442,17 @@ function decodePackedPostingSection(
 		postings.set(term, docIds);
 	}
 	return postings;
+}
+
+function decodePostingSectionByOwnership(
+	reader: SnapshotReader,
+	section: { offset: number; length: number; count: number },
+	strings: readonly string[],
+	ownership: CoverageLexicalPostingOwnership,
+): Map<string, readonly number[]> | Map<string, Uint32Array> {
+	return ownership === "packed"
+		? decodePackedPostingSection(reader, section, strings)
+		: decodePostingSection(reader, section, strings);
 }
 
 function readNumericList(reader: SnapshotReader): number[] {

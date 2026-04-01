@@ -56,6 +56,12 @@ import {
 	encodeCoverageLexicalSnapshotV1,
 	type CoverageLexicalSnapshotState,
 } from "./coverage-lexical-snapshot";
+import {
+	COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS,
+	COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTOR_BY_KEY,
+	type CoverageLexicalLivePostingKey,
+	type CoverageLexicalPostingOwnership,
+} from "./coverage-lexical-posting-layout";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import type {
 	CoverageFamilyMatchKind,
@@ -74,6 +80,9 @@ import type {
 
 type CoverageLexicalDocument = {
 	docId: number;
+	// These raw metadata strings are rebuild-only state today. Query hot paths
+	// read postings/docId structures instead, so future live-memory slimming can
+	// target this object without changing ranking behavior.
 	basenameText: string;
 	folderText: string;
 	aliasesText: string;
@@ -108,6 +117,81 @@ type CoverageLexicalDerivedDocumentIndexState = {
 	tagPhraseTerms: Set<string>;
 	tagValues: string[];
 };
+
+type CoverageLexicalDerivedTermKey =
+	| "bodyTerms"
+	| "bodyCharTerms"
+	| "aliasTerms"
+	| "aliasCharTerms"
+	| "aliasPhraseTerms"
+	| "basenameTerms"
+	| "basenameCharTerms"
+	| "basenamePhraseTerms"
+	| "folderTerms"
+	| "folderCharTerms"
+	| "folderPhraseTerms"
+	| "headingTerms"
+	| "headingCharTerms"
+	| "headingPhraseTerms"
+	| "tagTerms"
+	| "tagCharTerms"
+	| "tagPhraseTerms"
+	| "tagValues";
+
+type CoverageLexicalDerivedPostingBinding = {
+	termsKey: CoverageLexicalDerivedTermKey;
+	postingKey: CoverageLexicalLivePostingKey;
+	uniqueTerms?: boolean;
+};
+
+const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerivedPostingBinding[] =
+	[
+		{ termsKey: "bodyTerms", postingKey: "bodyPostings" },
+		{ termsKey: "bodyCharTerms", postingKey: "bodyCharPostings" },
+		{ termsKey: "aliasTerms", postingKey: "metadataAliasPostings" },
+		{ termsKey: "aliasCharTerms", postingKey: "metadataAliasCharPostings" },
+		{ termsKey: "aliasPhraseTerms", postingKey: "metadataAliasPhrasePostings" },
+		{ termsKey: "basenameTerms", postingKey: "metadataBasenamePostings" },
+		{
+			termsKey: "basenameCharTerms",
+			postingKey: "metadataBasenameCharPostings",
+		},
+		{
+			termsKey: "basenamePhraseTerms",
+			postingKey: "metadataBasenamePhrasePostings",
+		},
+		{ termsKey: "folderTerms", postingKey: "metadataFolderPostings" },
+		{ termsKey: "folderCharTerms", postingKey: "metadataFolderCharPostings" },
+		{
+			termsKey: "folderPhraseTerms",
+			postingKey: "metadataFolderPhrasePostings",
+		},
+		{ termsKey: "headingTerms", postingKey: "metadataHeadingPostings" },
+		{
+			termsKey: "headingCharTerms",
+			postingKey: "metadataHeadingCharPostings",
+		},
+		{
+			termsKey: "headingPhraseTerms",
+			postingKey: "metadataHeadingPhrasePostings",
+		},
+		{ termsKey: "tagTerms", postingKey: "metadataTagPostings" },
+		{
+			termsKey: "tagValues",
+			postingKey: "metadataTagFullPostings",
+			uniqueTerms: true,
+		},
+		{ termsKey: "tagCharTerms", postingKey: "metadataTagCharPostings" },
+		{
+			termsKey: "tagPhraseTerms",
+			postingKey: "metadataTagPhrasePostings",
+		},
+	];
+
+type CoverageLexicalMutableNumericPostingMap = Map<
+	string,
+	number[] | Uint32Array
+>;
 
 function createCoverageLexicalDocument(
 	docId: number,
@@ -502,24 +586,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentTagValuesById.length = 0;
 		this.fileSnapshotStore = undefined;
 		this.nextDocumentId = 0;
-		this.bodyPostings.clear();
-		this.bodyCharPostings.clear();
-		this.metadataAliasCharPostings.clear();
-		this.metadataAliasPhrasePostings.clear();
-		this.metadataAliasPostings.clear();
-		this.metadataBasenameCharPostings.clear();
-		this.metadataBasenamePhrasePostings.clear();
-		this.metadataBasenamePostings.clear();
-		this.metadataFolderCharPostings.clear();
-		this.metadataFolderPhrasePostings.clear();
-		this.metadataFolderPostings.clear();
-		this.metadataHeadingCharPostings.clear();
-		this.metadataHeadingPhrasePostings.clear();
-		this.metadataHeadingPostings.clear();
-		this.metadataTagCharPostings.clear();
-		this.metadataTagFullPostings.clear();
-		this.metadataTagPhrasePostings.clear();
-		this.metadataTagPostings.clear();
+		this.clearLivePostingMaps();
 		this.lexicon.clear();
 		this.sortedLexiconCache = [];
 		this.sortedLexiconDirty = false;
@@ -999,98 +1066,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.nextDocumentId,
 			accumulator,
 		);
-		const postings = {
-			body: estimatePackedNumericPostingMapBytes(
-				this.bodyPostings,
-				accumulator,
-				"postings.body.term",
-			),
-			bodyChar: estimatePackedNumericPostingMapBytes(
-				this.bodyCharPostings,
-				accumulator,
-				"postings.bodyChar.term",
-			),
-			metadataAlias: estimatePackedNumericPostingMapBytes(
-				this.metadataAliasPostings,
-				accumulator,
-				"postings.metadataAlias.term",
-			),
-			metadataAliasChar: estimateNumericPostingMapBytes(
-				this.metadataAliasCharPostings,
-				accumulator,
-				"postings.metadataAliasChar.term",
-			),
-			metadataAliasPhrase: estimateNumericPostingMapBytes(
-				this.metadataAliasPhrasePostings,
-				accumulator,
-				"postings.metadataAliasPhrase.term",
-			),
-			metadataBasename: estimatePackedNumericPostingMapBytes(
-				this.metadataBasenamePostings,
-				accumulator,
-				"postings.metadataBasename.term",
-			),
-			metadataBasenameChar: estimateNumericPostingMapBytes(
-				this.metadataBasenameCharPostings,
-				accumulator,
-				"postings.metadataBasenameChar.term",
-			),
-			metadataBasenamePhrase: estimateNumericPostingMapBytes(
-				this.metadataBasenamePhrasePostings,
-				accumulator,
-				"postings.metadataBasenamePhrase.term",
-			),
-			metadataFolder: estimatePackedNumericPostingMapBytes(
-				this.metadataFolderPostings,
-				accumulator,
-				"postings.metadataFolder.term",
-			),
-			metadataFolderChar: estimateNumericPostingMapBytes(
-				this.metadataFolderCharPostings,
-				accumulator,
-				"postings.metadataFolderChar.term",
-			),
-			metadataFolderPhrase: estimateNumericPostingMapBytes(
-				this.metadataFolderPhrasePostings,
-				accumulator,
-				"postings.metadataFolderPhrase.term",
-			),
-			metadataHeading: estimatePackedNumericPostingMapBytes(
-				this.metadataHeadingPostings,
-				accumulator,
-				"postings.metadataHeading.term",
-			),
-			metadataHeadingChar: estimateNumericPostingMapBytes(
-				this.metadataHeadingCharPostings,
-				accumulator,
-				"postings.metadataHeadingChar.term",
-			),
-			metadataHeadingPhrase: estimateNumericPostingMapBytes(
-				this.metadataHeadingPhrasePostings,
-				accumulator,
-				"postings.metadataHeadingPhrase.term",
-			),
-			metadataTag: estimatePackedNumericPostingMapBytes(
-				this.metadataTagPostings,
-				accumulator,
-				"postings.metadataTag.term",
-			),
-			metadataTagChar: estimateNumericPostingMapBytes(
-				this.metadataTagCharPostings,
-				accumulator,
-				"postings.metadataTagChar.term",
-			),
-			metadataTagFull: estimatePackedNumericPostingMapBytes(
-				this.metadataTagFullPostings,
-				accumulator,
-				"postings.metadataTagFull.term",
-			),
-			metadataTagPhrase: estimateNumericPostingMapBytes(
-				this.metadataTagPhrasePostings,
-				accumulator,
-				"postings.metadataTagPhrase.term",
-			),
-		};
+		const postings = Object.fromEntries(
+			COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS.map((descriptor) => [
+				descriptor.breakdownKey ?? descriptor.key,
+				estimateOwnedNumericPostingMapBytes(
+					this.getLivePostingMap(descriptor.key),
+					accumulator,
+					descriptor.source ?? `postings.${descriptor.key}.term`,
+					descriptor.ownership,
+				),
+			]),
+		);
 		const lexicon = estimateStringArrayBytes(
 			this.sortedLexicon,
 			accumulator,
@@ -1138,67 +1124,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.setDocumentBodyTokens(docId, derivedState.bodyTokenSequence);
 		this.documentBodyHanSegmentsById[docId] = derivedState.bodyHanSegments;
 		this.documentTagValuesById[docId] = derivedState.tagValues;
-
-		for (const term of derivedState.bodyTerms) {
-			addPackedNumericPosting(this.bodyPostings, term, docId);
-			this.lexicon.add(term);
-		}
-		for (const term of derivedState.bodyCharTerms) {
-			addPackedNumericPosting(this.bodyCharPostings, term, docId);
-		}
-		for (const term of derivedState.aliasTerms) {
-			addPackedNumericPosting(this.metadataAliasPostings, term, docId);
-			this.lexicon.add(term);
-		}
-		for (const term of derivedState.aliasCharTerms) {
-			addNumericPosting(this.metadataAliasCharPostings, term, docId);
-		}
-		for (const term of derivedState.aliasPhraseTerms) {
-			addNumericPosting(this.metadataAliasPhrasePostings, term, docId);
-		}
-		for (const term of derivedState.basenameTerms) {
-			addPackedNumericPosting(this.metadataBasenamePostings, term, docId);
-			this.lexicon.add(term);
-		}
-		for (const term of derivedState.basenameCharTerms) {
-			addNumericPosting(this.metadataBasenameCharPostings, term, docId);
-		}
-		for (const term of derivedState.basenamePhraseTerms) {
-			addNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
-		}
-		for (const term of derivedState.folderTerms) {
-			addPackedNumericPosting(this.metadataFolderPostings, term, docId);
-			this.lexicon.add(term);
-		}
-		for (const term of derivedState.folderCharTerms) {
-			addNumericPosting(this.metadataFolderCharPostings, term, docId);
-		}
-		for (const term of derivedState.folderPhraseTerms) {
-			addNumericPosting(this.metadataFolderPhrasePostings, term, docId);
-		}
-		for (const term of derivedState.headingTerms) {
-			addPackedNumericPosting(this.metadataHeadingPostings, term, docId);
-			this.lexicon.add(term);
-		}
-		for (const term of derivedState.headingCharTerms) {
-			addNumericPosting(this.metadataHeadingCharPostings, term, docId);
-		}
-		for (const term of derivedState.headingPhraseTerms) {
-			addNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
-		}
-		for (const term of derivedState.tagTerms) {
-			addPackedNumericPosting(this.metadataTagPostings, term, docId);
-			this.lexicon.add(term);
-		}
-		for (const term of new Set(derivedState.tagValues)) {
-			addPackedNumericPosting(this.metadataTagFullPostings, term, docId);
-		}
-		for (const term of derivedState.tagCharTerms) {
-			addNumericPosting(this.metadataTagCharPostings, term, docId);
-		}
-		for (const term of derivedState.tagPhraseTerms) {
-			addNumericPosting(this.metadataTagPhrasePostings, term, docId);
-		}
+		this.applyDerivedPostingTerms(docId, derivedState, "add");
 		this.markLexiconDirty();
 	}
 
@@ -1221,60 +1147,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				existingTagValues: this.documentTagValuesById[docId],
 			},
 		);
-		for (const term of derivedState.bodyTerms) {
-			removePackedNumericPosting(this.bodyPostings, term, docId);
-		}
-		for (const term of derivedState.bodyCharTerms) {
-			removePackedNumericPosting(this.bodyCharPostings, term, docId);
-		}
-		for (const term of derivedState.aliasTerms) {
-			removePackedNumericPosting(this.metadataAliasPostings, term, docId);
-		}
-		for (const term of derivedState.aliasCharTerms) {
-			removeNumericPosting(this.metadataAliasCharPostings, term, docId);
-		}
-		for (const term of derivedState.aliasPhraseTerms) {
-			removeNumericPosting(this.metadataAliasPhrasePostings, term, docId);
-		}
-		for (const term of derivedState.basenameTerms) {
-			removePackedNumericPosting(this.metadataBasenamePostings, term, docId);
-		}
-		for (const term of derivedState.basenameCharTerms) {
-			removeNumericPosting(this.metadataBasenameCharPostings, term, docId);
-		}
-		for (const term of derivedState.basenamePhraseTerms) {
-			removeNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
-		}
-		for (const term of derivedState.folderTerms) {
-			removePackedNumericPosting(this.metadataFolderPostings, term, docId);
-		}
-		for (const term of derivedState.folderCharTerms) {
-			removeNumericPosting(this.metadataFolderCharPostings, term, docId);
-		}
-		for (const term of derivedState.folderPhraseTerms) {
-			removeNumericPosting(this.metadataFolderPhrasePostings, term, docId);
-		}
-		for (const term of derivedState.headingTerms) {
-			removePackedNumericPosting(this.metadataHeadingPostings, term, docId);
-		}
-		for (const term of derivedState.headingCharTerms) {
-			removeNumericPosting(this.metadataHeadingCharPostings, term, docId);
-		}
-		for (const term of derivedState.headingPhraseTerms) {
-			removeNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
-		}
-		for (const term of derivedState.tagTerms) {
-			removePackedNumericPosting(this.metadataTagPostings, term, docId);
-		}
-		for (const term of new Set(derivedState.tagValues)) {
-			removePackedNumericPosting(this.metadataTagFullPostings, term, docId);
-		}
-		for (const term of derivedState.tagCharTerms) {
-			removeNumericPosting(this.metadataTagCharPostings, term, docId);
-		}
-		for (const term of derivedState.tagPhraseTerms) {
-			removeNumericPosting(this.metadataTagPhrasePostings, term, docId);
-		}
+		this.applyDerivedPostingTerms(docId, derivedState, "remove");
 		this.documents.delete(path);
 		this.documentById[docId] = undefined;
 		this.clearDocumentBodyTokens(docId);
@@ -1310,11 +1183,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private rebuildLexicon(): void {
 		const nextLexicon = new Set<string>();
-		for (const term of this.bodyPostings.keys()) {
-			nextLexicon.add(term);
-		}
-		for (const postings of this.getMetadataExactPostingMaps()) {
-			for (const term of postings.keys()) {
+		for (const descriptor of COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS) {
+			if (descriptor.contributesToLexicon !== true) {
+				continue;
+			}
+			for (const term of this.getLivePostingMap(descriptor.key).keys()) {
 				nextLexicon.add(term);
 			}
 		}
@@ -1395,56 +1268,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					  ]
 					: [],
 			),
-			bodyPostings: clonePackedNumericPostingMap(this.bodyPostings),
-			bodyCharPostings: clonePackedNumericPostingMap(this.bodyCharPostings),
+			...this.cloneLivePostingState(),
 			bodyHanSegmentPostings: new Map(),
-			metadataAliasCharPostings: cloneNumericPostingMap(
-				this.metadataAliasCharPostings,
-			),
 			metadataAliasHanSegmentPostings: new Map(),
-			metadataAliasPhrasePostings: cloneNumericPostingMap(
-				this.metadataAliasPhrasePostings,
-			),
-			metadataAliasPostings: clonePackedNumericPostingMap(this.metadataAliasPostings),
-			metadataBasenameCharPostings: cloneNumericPostingMap(
-				this.metadataBasenameCharPostings,
-			),
 			metadataBasenameHanSegmentPostings: new Map(),
-			metadataBasenamePhrasePostings: cloneNumericPostingMap(
-				this.metadataBasenamePhrasePostings,
-			),
-			metadataBasenamePostings: clonePackedNumericPostingMap(
-				this.metadataBasenamePostings,
-			),
-			metadataFolderCharPostings: cloneNumericPostingMap(
-				this.metadataFolderCharPostings,
-			),
 			metadataFolderHanSegmentPostings: new Map(),
-			metadataFolderPhrasePostings: cloneNumericPostingMap(
-				this.metadataFolderPhrasePostings,
-			),
-			metadataFolderPostings: clonePackedNumericPostingMap(this.metadataFolderPostings),
-			metadataHeadingCharPostings: cloneNumericPostingMap(
-				this.metadataHeadingCharPostings,
-			),
 			metadataHeadingHanSegmentPostings: new Map(),
-			metadataHeadingPhrasePostings: cloneNumericPostingMap(
-				this.metadataHeadingPhrasePostings,
-			),
-			metadataHeadingPostings: clonePackedNumericPostingMap(
-				this.metadataHeadingPostings,
-			),
 			metadataPostings: new Map(),
-			metadataTagCharPostings: cloneNumericPostingMap(
-				this.metadataTagCharPostings,
-			),
-			metadataTagFullPostings: clonePackedNumericPostingMap(
-				this.metadataTagFullPostings,
-			),
-			metadataTagPhrasePostings: cloneNumericPostingMap(
-				this.metadataTagPhrasePostings,
-			),
-			metadataTagPostings: clonePackedNumericPostingMap(this.metadataTagPostings),
 		};
 	}
 
@@ -1489,69 +1319,134 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
-		restorePackedNumericPostingMap(this.bodyPostings, state.bodyPostings);
-		restorePackedNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
-		restoreNumericPostingMap(
-			this.metadataAliasCharPostings,
-			state.metadataAliasCharPostings,
+		this.restoreLivePostingState(state);
+	}
+
+	private clearLivePostingMaps(): void {
+		for (const descriptor of COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS) {
+			this.getLivePostingMap(descriptor.key).clear();
+		}
+	}
+
+	private getLivePostingMap(
+		key: CoverageLexicalLivePostingKey,
+	): CoverageLexicalMutableNumericPostingMap {
+		switch (key) {
+			case "bodyPostings":
+				return this.bodyPostings;
+			case "bodyCharPostings":
+				return this.bodyCharPostings;
+			case "metadataAliasCharPostings":
+				return this.metadataAliasCharPostings;
+			case "metadataAliasPhrasePostings":
+				return this.metadataAliasPhrasePostings;
+			case "metadataAliasPostings":
+				return this.metadataAliasPostings;
+			case "metadataBasenameCharPostings":
+				return this.metadataBasenameCharPostings;
+			case "metadataBasenamePhrasePostings":
+				return this.metadataBasenamePhrasePostings;
+			case "metadataBasenamePostings":
+				return this.metadataBasenamePostings;
+			case "metadataFolderCharPostings":
+				return this.metadataFolderCharPostings;
+			case "metadataFolderPhrasePostings":
+				return this.metadataFolderPhrasePostings;
+			case "metadataFolderPostings":
+				return this.metadataFolderPostings;
+			case "metadataHeadingCharPostings":
+				return this.metadataHeadingCharPostings;
+			case "metadataHeadingPhrasePostings":
+				return this.metadataHeadingPhrasePostings;
+			case "metadataHeadingPostings":
+				return this.metadataHeadingPostings;
+			case "metadataTagCharPostings":
+				return this.metadataTagCharPostings;
+			case "metadataTagFullPostings":
+				return this.metadataTagFullPostings;
+			case "metadataTagPhrasePostings":
+				return this.metadataTagPhrasePostings;
+			case "metadataTagPostings":
+				return this.metadataTagPostings;
+		}
+		throw new Error(`Unsupported coverage lexical live posting key: ${key}`);
+	}
+
+	private applyDerivedPostingTerms(
+		docId: number,
+		derivedState: CoverageLexicalDerivedDocumentIndexState,
+		mode: "add" | "remove",
+	): void {
+		for (const binding of COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS) {
+			const rawTerms = derivedState[binding.termsKey] as
+				| readonly string[]
+				| ReadonlySet<string>;
+			const terms = binding.uniqueTerms ? new Set(rawTerms) : rawTerms;
+			const descriptor = COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTOR_BY_KEY.get(
+				binding.postingKey,
+			);
+			if (!descriptor) {
+				continue;
+			}
+			for (const term of terms) {
+				this.mutateLivePosting(descriptor.key, term, docId, mode);
+				if (mode === "add" && descriptor.contributesToLexicon === true) {
+					this.lexicon.add(term);
+				}
+			}
+		}
+	}
+
+	private mutateLivePosting(
+		key: CoverageLexicalLivePostingKey,
+		term: string,
+		docId: number,
+		mode: "add" | "remove",
+	): void {
+		const descriptor = COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTOR_BY_KEY.get(key);
+		if (!descriptor) {
+			return;
+		}
+		if (mode === "add") {
+			addOwnedNumericPosting(
+				this.getLivePostingMap(descriptor.key),
+				term,
+				docId,
+				descriptor.ownership,
+			);
+			return;
+		}
+		removeOwnedNumericPosting(
+			this.getLivePostingMap(descriptor.key),
+			term,
+			docId,
+			descriptor.ownership,
 		);
-		restoreNumericPostingMap(
-			this.metadataAliasPhrasePostings,
-			state.metadataAliasPhrasePostings,
-		);
-		restorePackedNumericPostingMap(
-			this.metadataAliasPostings,
-			state.metadataAliasPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataBasenameCharPostings,
-			state.metadataBasenameCharPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataBasenamePhrasePostings,
-			state.metadataBasenamePhrasePostings,
-		);
-		restorePackedNumericPostingMap(
-			this.metadataBasenamePostings,
-			state.metadataBasenamePostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataFolderCharPostings,
-			state.metadataFolderCharPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataFolderPhrasePostings,
-			state.metadataFolderPhrasePostings,
-		);
-		restorePackedNumericPostingMap(
-			this.metadataFolderPostings,
-			state.metadataFolderPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataHeadingCharPostings,
-			state.metadataHeadingCharPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataHeadingPhrasePostings,
-			state.metadataHeadingPhrasePostings,
-		);
-		restorePackedNumericPostingMap(
-			this.metadataHeadingPostings,
-			state.metadataHeadingPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataTagCharPostings,
-			state.metadataTagCharPostings,
-		);
-		restorePackedNumericPostingMap(
-			this.metadataTagFullPostings,
-			state.metadataTagFullPostings,
-		);
-		restoreNumericPostingMap(
-			this.metadataTagPhrasePostings,
-			state.metadataTagPhrasePostings,
-		);
-		restorePackedNumericPostingMap(this.metadataTagPostings, state.metadataTagPostings);
+	}
+
+	private cloneLivePostingState(): Pick<
+		CoverageLexicalSnapshotState,
+		CoverageLexicalLivePostingKey
+	> {
+		return Object.fromEntries(
+			COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS.map((descriptor) => [
+				descriptor.key,
+				cloneOwnedNumericPostingMap(
+					this.getLivePostingMap(descriptor.key),
+					descriptor.ownership,
+				),
+			]),
+		) as unknown as Pick<CoverageLexicalSnapshotState, CoverageLexicalLivePostingKey>;
+	}
+
+	private restoreLivePostingState(state: CoverageLexicalSnapshotState): void {
+		for (const descriptor of COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS) {
+			restoreOwnedNumericPostingMap(
+				this.getLivePostingMap(descriptor.key),
+				state[descriptor.key],
+				descriptor.ownership,
+			);
+		}
 	}
 
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
@@ -2467,10 +2362,11 @@ function estimateStringSetBytes(
 	return estimateStringArrayBytes(Array.from(values), accumulator, source);
 }
 
-function estimateNumericPostingMapBytes(
-	postings: ReadonlyMap<string, readonly number[]>,
+function estimateOwnedNumericPostingMapBytes(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
 	accumulator: IndexSizeAccumulator,
 	source: string,
+	ownership: CoverageLexicalPostingOwnership,
 ): {
 	total: number;
 	termCount: number;
@@ -2487,47 +2383,10 @@ function estimateNumericPostingMapBytes(
 		termCount += 1;
 		accountStringBytes(accumulator, term, source);
 		postingCount += docIds.length;
-		postingListBytes += estimateNumericArrayBytes(docIds.length);
-	}
-	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
-	const termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
-	const postingNumberBytes = postingCount * INDEX_POSTING_DOC_ID_BYTES;
-	return {
-		total:
-			INDEX_COLLECTION_HEADER_BYTES +
-			mapEntryBytes +
-			termReferenceBytes +
-			postingListBytes,
-		termCount,
-		postingCount,
-		mapEntryBytes,
-		termReferenceBytes,
-		postingNumberBytes,
-		postingListBytes,
-	};
-}
-
-function estimatePackedNumericPostingMapBytes(
-	postings: ReadonlyMap<string, Uint32Array>,
-	accumulator: IndexSizeAccumulator,
-	source: string,
-): {
-	total: number;
-	termCount: number;
-	postingCount: number;
-	mapEntryBytes: number;
-	termReferenceBytes: number;
-	postingNumberBytes: number;
-	postingListBytes: number;
-} {
-	let termCount = 0;
-	let postingCount = 0;
-	let postingListBytes = 0;
-	for (const [term, docIds] of postings.entries()) {
-		termCount += 1;
-		accountStringBytes(accumulator, term, source);
-		postingCount += docIds.length;
-		postingListBytes += estimatePackedUint32Bytes(docIds.length);
+		postingListBytes +=
+			ownership === "packed"
+				? estimatePackedUint32Bytes(docIds.length)
+				: estimateNumericArrayBytes(docIds.length);
 	}
 	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
 	const termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
@@ -2979,12 +2838,28 @@ function addPosting(
 	docs.add(path);
 }
 
-function addNumericPosting(
-	postings: Map<string, number[]>,
+function addOwnedNumericPosting(
+	postings: CoverageLexicalMutableNumericPostingMap,
 	term: string,
 	docId: number,
+	ownership: CoverageLexicalPostingOwnership,
 ): void {
-	let docs = postings.get(term);
+	if (ownership === "packed") {
+		// Single-layer packed postings minimize live-memory, but each incremental
+		// update rewrites the whole term bucket. If Obsidian occasionally stutters
+		// during indexing updates, this reallocation path is a likely cause.
+		const docs = postings.get(term) as Uint32Array | undefined;
+		if (!docs) {
+			postings.set(term, Uint32Array.of(docId));
+			return;
+		}
+		const next = new Uint32Array(docs.length + 1);
+		next.set(docs);
+		next[docs.length] = docId;
+		postings.set(term, next);
+		return;
+	}
+	let docs = postings.get(term) as number[] | undefined;
 	if (!docs) {
 		docs = [];
 		postings.set(term, docs);
@@ -2992,64 +2867,31 @@ function addNumericPosting(
 	docs.push(docId);
 }
 
-function cloneNumericPostingMap(
-	postings: ReadonlyMap<string, readonly number[]>,
-): Map<string, readonly number[]> {
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: CoverageLexicalPostingOwnership,
+): Map<string, number[] | Uint32Array> {
 	return new Map(
 		Array.from(postings.entries(), ([term, docIds]) => [
 			term,
-			[...docIds].sort((left, right) => left - right),
+			ownership === "packed"
+				? Uint32Array.from([...docIds].sort((left, right) => left - right))
+				: [...docIds].sort((left, right) => left - right),
 		]),
 	);
 }
 
-function restoreNumericPostingMap(
-	target: Map<string, number[]>,
-	source: ReadonlyMap<string, readonly number[]>,
+function restoreOwnedNumericPostingMap(
+	target: CoverageLexicalMutableNumericPostingMap,
+	source: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: CoverageLexicalPostingOwnership,
 ): void {
 	target.clear();
 	for (const [term, docIds] of source) {
-		target.set(term, [...docIds]);
-	}
-}
-
-function addPackedNumericPosting(
-	postings: Map<string, Uint32Array>,
-	term: string,
-	docId: number,
-): void {
-	// Single-layer packed postings minimize live-memory, but each incremental
-	// update rewrites the whole term bucket. If Obsidian occasionally stutters
-	// during indexing updates, this reallocation path is a likely cause.
-	const docs = postings.get(term);
-	if (!docs) {
-		postings.set(term, Uint32Array.of(docId));
-		return;
-	}
-	const next = new Uint32Array(docs.length + 1);
-	next.set(docs);
-	next[docs.length] = docId;
-	postings.set(term, next);
-}
-
-function clonePackedNumericPostingMap(
-	postings: ReadonlyMap<string, Uint32Array>,
-): Map<string, Uint32Array> {
-	return new Map(
-		Array.from(postings.entries(), ([term, docIds]) => [
+		target.set(
 			term,
-			Uint32Array.from([...docIds].sort((left, right) => left - right)),
-		]),
-	);
-}
-
-function restorePackedNumericPostingMap(
-	target: Map<string, Uint32Array>,
-	source: ReadonlyMap<string, Uint32Array>,
-): void {
-	target.clear();
-	for (const [term, docIds] of source) {
-		target.set(term, new Uint32Array(docIds));
+			ownership === "packed" ? new Uint32Array(docIds) : [...docIds],
+		);
 	}
 }
 
@@ -3072,10 +2914,11 @@ function removePosting(
 	}
 }
 
-function removeNumericPosting(
-	postings: Map<string, number[]>,
+function removeOwnedNumericPosting(
+	postings: CoverageLexicalMutableNumericPostingMap,
 	term: string,
 	docId: number,
+	ownership: CoverageLexicalPostingOwnership,
 ): void {
 	const docs = postings.get(term);
 	if (!docs) {
@@ -3085,33 +2928,22 @@ function removeNumericPosting(
 	if (index === -1) {
 		return;
 	}
-	docs.splice(index, 1);
+	if (ownership === "packed") {
+		if (docs.length === 1) {
+			postings.delete(term);
+			return;
+		}
+		const numericDocs = docs as Uint32Array;
+		const next = new Uint32Array(numericDocs.length - 1);
+		next.set(numericDocs.subarray(0, index), 0);
+		next.set(numericDocs.subarray(index + 1), index);
+		postings.set(term, next);
+		return;
+	}
+	(docs as number[]).splice(index, 1);
 	if (docs.length === 0) {
 		postings.delete(term);
 	}
-}
-
-function removePackedNumericPosting(
-	postings: Map<string, Uint32Array>,
-	term: string,
-	docId: number,
-): void {
-	const docs = postings.get(term);
-	if (!docs) {
-		return;
-	}
-	const index = docs.indexOf(docId);
-	if (index === -1) {
-		return;
-	}
-	if (docs.length === 1) {
-		postings.delete(term);
-		return;
-	}
-	const next = new Uint32Array(docs.length - 1);
-	next.set(docs.subarray(0, index), 0);
-	next.set(docs.subarray(index + 1), index);
-	postings.set(term, next);
 }
 
 function isSerializedCoverageLexicalBinarySnapshot(
