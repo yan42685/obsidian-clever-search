@@ -758,7 +758,7 @@ describe("DataManager integration", () => {
       rebuiltSnapshot,
     );
     expect(MyNotice.messages).toContain(
-      "Database has been updated, a reindex is required",
+      "Database has been updated. Automatically rebuilding the lexical index...",
     );
     expect(fileWatcher.start).toHaveBeenCalled();
 

@@ -1822,7 +1822,9 @@ export class DataManager {
     logger.trace("Previous lexical search snapshot is found.");
     const isSuccessful = await this.lexicalEngine.reIndexAll(prevData);
     if (!isSuccessful) {
-      new MyNotice(t("Database has been updated, a reindex is required"), 7000);
+      new MyNotice(
+        t("Database has been updated. Automatically rebuilding the lexical index..."),
+        7000,
       return {
         needsFullReindex: true,
         needsRefHeal: false,

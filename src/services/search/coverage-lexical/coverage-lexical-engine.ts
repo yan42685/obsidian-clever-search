@@ -2392,6 +2392,10 @@ const INDEX_MAP_ENTRY_BYTES = 8;
 const INDEX_NUMBER_BYTES = 8;
 const INDEX_UINT32_BYTES = 4;
 const INDEX_POSTING_DOC_ID_BYTES = 4;
+const INDEX_JS_ARRAY_HEADER_BYTES = 24;
+const INDEX_TYPED_ARRAY_VIEW_BYTES = 16;
+const INDEX_ARRAY_BUFFER_HEADER_BYTES = 16;
+const INDEX_TYPED_ARRAY_ALIGNMENT_BYTES = 8;
 const UTF8_ENCODER = new TextEncoder();
 
 function createIndexSizeAccumulator(): IndexSizeAccumulator {
@@ -2468,13 +2472,16 @@ function estimateNumericPostingMapBytes(
 	mapEntryBytes: number;
 	termReferenceBytes: number;
 	postingNumberBytes: number;
+	postingListBytes: number;
 } {
 	let termCount = 0;
 	let postingCount = 0;
+	let postingListBytes = 0;
 	for (const [term, docIds] of postings.entries()) {
 		termCount += 1;
 		accountStringBytes(accumulator, term, source);
 		postingCount += docIds.length;
+		postingListBytes += estimateNumericArrayBytes(docIds.length);
 	}
 	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
 	const termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
@@ -2484,12 +2491,13 @@ function estimateNumericPostingMapBytes(
 			INDEX_COLLECTION_HEADER_BYTES +
 			mapEntryBytes +
 			termReferenceBytes +
-			postingNumberBytes,
+			postingListBytes,
 		termCount,
 		postingCount,
 		mapEntryBytes,
 		termReferenceBytes,
 		postingNumberBytes,
+		postingListBytes,
 	};
 }
 
@@ -2504,13 +2512,16 @@ function estimatePackedNumericPostingMapBytes(
 	mapEntryBytes: number;
 	termReferenceBytes: number;
 	postingNumberBytes: number;
+	postingListBytes: number;
 } {
 	let termCount = 0;
 	let postingCount = 0;
+	let postingListBytes = 0;
 	for (const [term, docIds] of postings.entries()) {
 		termCount += 1;
 		accountStringBytes(accumulator, term, source);
 		postingCount += docIds.length;
+		postingListBytes += estimatePackedUint32Bytes(docIds.length);
 	}
 	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
 	const termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
@@ -2520,13 +2531,34 @@ function estimatePackedNumericPostingMapBytes(
 			INDEX_COLLECTION_HEADER_BYTES +
 			mapEntryBytes +
 			termReferenceBytes +
-			postingNumberBytes,
+			postingListBytes,
 		termCount,
 		postingCount,
 		mapEntryBytes,
 		termReferenceBytes,
 		postingNumberBytes,
+		postingListBytes,
 	};
+}
+
+function alignEstimateBytes(value: number, alignment: number): number {
+	if (alignment <= 1) {
+		return value;
+	}
+	const remainder = value % alignment;
+	return remainder === 0 ? value : value + (alignment - remainder);
+}
+
+function estimateNumericArrayBytes(length: number): number {
+	return INDEX_JS_ARRAY_HEADER_BYTES + length * INDEX_NUMBER_BYTES;
+}
+
+function estimatePackedUint32Bytes(length: number): number {
+	const payloadBytes = alignEstimateBytes(
+		length * INDEX_UINT32_BYTES,
+		INDEX_TYPED_ARRAY_ALIGNMENT_BYTES,
+	);
+	return INDEX_TYPED_ARRAY_VIEW_BYTES + INDEX_ARRAY_BUFFER_HEADER_BYTES + payloadBytes;
 }
 
 function estimateDocumentStoreBytes(
@@ -2613,9 +2645,11 @@ function estimateNumericTokenTapeSlotsBytes(
 	tokenCount: number;
 	tokenNumberBytes: number;
 	tapeArrayBytes: number;
+	tapeOwnershipBytes: number;
 } {
 	const populatedCount = rangesById.filter((range) => range !== undefined).length;
 	const tapeArrayBytes = INDEX_COLLECTION_HEADER_BYTES + tape.length * INDEX_UINT32_BYTES;
+	const tapeOwnershipBytes = estimatePackedUint32Bytes(tape.length);
 	const slotReferenceBytes = rangesById.length * INDEX_REFERENCE_BYTES;
 	const rangeNumberBytes = populatedCount * INDEX_NUMBER_BYTES * 2;
 	return {
@@ -2623,7 +2657,7 @@ function estimateNumericTokenTapeSlotsBytes(
 			INDEX_COLLECTION_HEADER_BYTES +
 			slotReferenceBytes +
 			rangeNumberBytes +
-			tapeArrayBytes,
+			tapeOwnershipBytes,
 		slotCount: rangesById.length,
 		populatedCount,
 		slotReferenceBytes,
@@ -2631,6 +2665,7 @@ function estimateNumericTokenTapeSlotsBytes(
 		tokenCount: tape.length,
 		tokenNumberBytes: tape.length * INDEX_UINT32_BYTES,
 		tapeArrayBytes,
+		tapeOwnershipBytes,
 	};
 }
 function estimateSparseStringArraySlotsBytes(
