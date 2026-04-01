@@ -18,11 +18,10 @@ import {
   profileHybridStage,
   setHybridProfileMeta,
 } from "src/services/search/hybrid/hybrid-profiler";
-import {
-  bm25ToBlob,
-  type ChunkRow,
-  type ChunkVectorShardRow,
-  type HybridIndexedFileRef,
+import type {
+  ChunkRow,
+  ChunkVectorShardRow,
+  HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import {
   analyzeHybridStoredFileConsistency,
@@ -59,15 +58,12 @@ import {
 } from "./doc-operation-buffer";
 import { FileWatcher } from "./file-watcher";
 import {
-  buildIndexRecoveryStateId,
-  deriveDeferredIndexRecoveryState,
-  deriveIndexRecoveryState,
   isAutoRetryHybridFailureKind,
-  type HybridEmbeddingFailureKind,
   type HybridRepairMode,
-  type IndexRecoveryStateRow,
 } from "./index-recovery-state";
 import { buildIndexArtifactStateId } from "./index-artifact-state";
+import { DirtyArtifactCoordinator } from "./dirty-artifact-coordinator";
+import { HybridRecoveryStateStore } from "./hybrid-recovery-state-store";
 import {
   HybridEmbeddingRecoveryManager,
   type HybridFailedEmbeddingSummary,
@@ -177,11 +173,6 @@ export type HybridDeferredEmbeddingSummary = {
   deferredCount: number;
   nextEligibleAt: number | null;
   totalFiles: number;
-};
-
-type LegacyHybridIndexedFileRef = HybridIndexedFileRef & {
-  lastErrorKind?: string | null;
-  embeddingDeferred?: boolean;
 };
 
 type HybridRepairTask = {
@@ -294,13 +285,21 @@ export class DataManager {
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
   private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
-  private readonly lexicalSnapshotDirtyPaths = new Map<string, number>();
-  private lexicalSnapshotDirtySince: number | null = null;
-  private lexicalSnapshotLastMutationAt: number | null = null;
-  private lexicalSnapshotDirtyPersisted = false;
-  private lexicalSnapshotFlushTimer: NodeJS.Timeout | null = null;
-  private lexicalSnapshotFlushWorker: Promise<void> | null = null;
-  private lexicalSnapshotMutationVersion = 0;
+  private readonly lexicalSnapshotCoordinator = new DirtyArtifactCoordinator({
+    engine: "lexical",
+    artifact: "snapshot",
+    reason: "runtime-lexical-dirty",
+    markerId: buildIndexArtifactStateId("lexical", "snapshot"),
+    stateTable: this.database.db.indexArtifactState,
+    supportsDirtyTracking: () => this.lexicalEngine.supportsSerializedFileIndex(),
+    estimatePathBytes: (path) =>
+      Math.max(0, this.dataProvider.getFileByPath(path)?.stat.size ?? 0),
+    persistArtifact: async () => await this.writeLexicalSearchSnapshotArtifact(),
+    debounceMs: DataManager.LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS,
+    maxAgeMs: DataManager.LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS,
+    pathThreshold: DataManager.LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD,
+    bytesThreshold: DataManager.LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD,
+  });
   private hybridSearchAvailability: HybridSearchAvailability = "blocked";
   private lexicalBootstrapState: SearchBootstrapState = "blocked";
   private hybridBootstrapState: SearchBootstrapState = "blocked";
@@ -319,6 +318,7 @@ export class DataManager {
   private readonly hybridEmbeddingRecovery = new HybridEmbeddingRecoveryManager(
     () => this.notifyHybridRuntimeStatusChanged(),
   );
+  private readonly hybridRecoveryStateStore = new HybridRecoveryStateStore();
 
   private get hybridEngine() {
     return getInstance(SearchService).hybridEngine;
@@ -379,288 +379,41 @@ export class DataManager {
   }
 
   private resetLexicalSnapshotTracking(): void {
-    this.clearLexicalSnapshotFlushTimer();
-    this.lexicalSnapshotDirtyPaths.clear();
-    this.lexicalSnapshotDirtySince = null;
-    this.lexicalSnapshotLastMutationAt = null;
-    this.lexicalSnapshotDirtyPersisted = false;
-    this.lexicalSnapshotFlushWorker = null;
-    this.lexicalSnapshotMutationVersion = 0;
-  }
-
-  private isLexicalSnapshotDirty(): boolean {
-    return this.lexicalSnapshotDirtyPersisted;
-  }
-
-  private getLexicalSnapshotDirtyBytes(): number {
-    let total = 0;
-    for (const bytes of this.lexicalSnapshotDirtyPaths.values()) {
-      total += bytes;
-    }
-    return total;
+    this.lexicalSnapshotCoordinator.reset();
   }
 
   private async hasLexicalSnapshotDirtyMarker(): Promise<boolean> {
-    return (
-      (await this.database.db.indexArtifactState.get(
-        buildIndexArtifactStateId("lexical", "snapshot"),
-      )) !== undefined
-    );
+    return await this.lexicalSnapshotCoordinator.hasPersistedDirtyMarker();
   }
 
   private async markLexicalSnapshotDirty(
     paths: readonly string[] = [],
   ): Promise<void> {
-    if (!this.lexicalEngine.supportsSerializedFileIndex()) {
-      return;
-    }
-
-    const now = Date.now();
-    if (this.lexicalSnapshotDirtySince === null) {
-      this.lexicalSnapshotDirtySince = now;
-    }
-    this.lexicalSnapshotLastMutationAt = now;
-    this.lexicalSnapshotMutationVersion += 1;
-
-    for (const path of paths) {
-      const file = this.dataProvider.getFileByPath(path);
-      this.lexicalSnapshotDirtyPaths.set(path, Math.max(0, file?.stat.size ?? 0));
-    }
-
-    if (!this.lexicalSnapshotDirtyPersisted) {
-      await this.database.db.indexArtifactState.put({
-        id: buildIndexArtifactStateId("lexical", "snapshot"),
-        engine: "lexical",
-        artifact: "snapshot",
-        dirtyAt: this.lexicalSnapshotDirtySince,
-        reason: "runtime-lexical-dirty",
-      });
-      this.lexicalSnapshotDirtyPersisted = true;
-    }
-
-    if (this.shouldFlushLexicalSnapshotNow(now)) {
-      void this.flushLexicalSnapshotIfDirty(true);
-      return;
-    }
-    this.scheduleLexicalSnapshotFlush();
-  }
-
-  private scheduleLexicalSnapshotFlush(): void {
-    if (
-      !this.isLexicalSnapshotDirty() ||
-      !this.lexicalEngine.supportsSerializedFileIndex()
-    ) {
-      return;
-    }
-    if (this.lexicalSnapshotFlushWorker) {
-      return;
-    }
-
-    const now = Date.now();
-    const debounceDueAt =
-      (this.lexicalSnapshotLastMutationAt ?? now) +
-      DataManager.LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS;
-    const maxAgeDueAt =
-      (this.lexicalSnapshotDirtySince ?? now) +
-      DataManager.LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS;
-    const delayMs = Math.max(0, Math.min(debounceDueAt, maxAgeDueAt) - now);
-
-    this.clearLexicalSnapshotFlushTimer();
-    this.lexicalSnapshotFlushTimer = setTimeout(() => {
-      this.lexicalSnapshotFlushTimer = null;
-      void this.flushLexicalSnapshotIfDirty();
-    }, delayMs);
-  }
-
-  private shouldFlushLexicalSnapshotNow(now = Date.now()): boolean {
-    if (!this.isLexicalSnapshotDirty()) {
-      return false;
-    }
-    if (
-      this.lexicalSnapshotDirtyPaths.size >=
-      DataManager.LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD
-    ) {
-      return true;
-    }
-    if (
-      this.getLexicalSnapshotDirtyBytes() >=
-      DataManager.LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD
-    ) {
-      return true;
-    }
-    if (
-      this.lexicalSnapshotDirtySince !== null &&
-      now - this.lexicalSnapshotDirtySince >=
-        DataManager.LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS
-    ) {
-      return true;
-    }
-    return (
-      this.lexicalSnapshotLastMutationAt !== null &&
-      now - this.lexicalSnapshotLastMutationAt >=
-        DataManager.LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS
-    );
+    await this.lexicalSnapshotCoordinator.markDirty(paths);
   }
 
   private clearLexicalSnapshotFlushTimer(): void {
-    if (this.lexicalSnapshotFlushTimer) {
-      clearTimeout(this.lexicalSnapshotFlushTimer);
-      this.lexicalSnapshotFlushTimer = null;
-    }
-  }
-
-  private async clearLexicalSnapshotDirtyState(): Promise<void> {
-    this.clearLexicalSnapshotFlushTimer();
-    this.lexicalSnapshotDirtyPaths.clear();
-    this.lexicalSnapshotDirtySince = null;
-    this.lexicalSnapshotLastMutationAt = null;
-    this.lexicalSnapshotDirtyPersisted = false;
-    await this.database.db.indexArtifactState.delete(
-      buildIndexArtifactStateId("lexical", "snapshot"),
-    );
+    this.lexicalSnapshotCoordinator.dispose();
   }
 
   private async flushLexicalSnapshotIfDirty(force = false): Promise<void> {
-    if (this.lexicalSnapshotFlushWorker) {
-      return await this.lexicalSnapshotFlushWorker;
-    }
-    if (!this.isLexicalSnapshotDirty()) {
-      return;
-    }
-    if (!force && !this.shouldFlushLexicalSnapshotNow()) {
-      this.scheduleLexicalSnapshotFlush();
-      return;
-    }
-
-    const expectedMutationVersion = this.lexicalSnapshotMutationVersion;
-    const worker = (async () => {
-      try {
-        await this.persistLexicalSearchSnapshotIfAvailable(expectedMutationVersion);
-      } finally {
-        this.lexicalSnapshotFlushWorker = null;
-        if (this.isLexicalSnapshotDirty()) {
-          this.scheduleLexicalSnapshotFlush();
-        }
-      }
-    })();
-    this.lexicalSnapshotFlushWorker = worker;
-    await worker;
-  }
-
-  private toHybridRecoveryStateRow(
-    entry: HybridRecoveryEntry,
-  ): IndexRecoveryStateRow {
-    if (entry.recoveryKind === "deferred_embedding") {
-      return {
-        id: buildIndexRecoveryStateId("hybrid", entry.path),
-        engine: "hybrid",
-        path: entry.path,
-        targetGeneration: entry.targetGeneration,
-        mode: entry.mode,
-        recoveryKind: "deferred_embedding",
-        state: deriveDeferredIndexRecoveryState(entry.nextRetryAt),
-        failureKind: null,
-        failureMessage: null,
-        attemptCount: 0,
-        lastFailedAt: null,
-        nextRetryAt: entry.nextRetryAt,
-        isBlocking: false,
-      };
-    }
-
-    return {
-      id: buildIndexRecoveryStateId("hybrid", entry.path),
-      engine: "hybrid",
-      path: entry.path,
-      targetGeneration: entry.targetGeneration,
-      mode: entry.mode,
-      recoveryKind: "failure",
-      state: deriveIndexRecoveryState(entry.errorKind, entry.nextRetryAt),
-      failureKind: entry.errorKind,
-      failureMessage: entry.reason,
-      attemptCount: entry.attemptCount,
-      lastFailedAt: entry.lastFailedAt,
-      nextRetryAt: entry.nextRetryAt,
-      isBlocking: !isAutoRetryHybridFailureKind(entry.errorKind),
-    };
-  }
-
-  private fromHybridRecoveryStateRow(
-    row: IndexRecoveryStateRow,
-  ): HybridRecoveryEntry | null {
-    const recoveryKind =
-      row.recoveryKind === "deferred_embedding"
-        ? "deferred_embedding"
-        : "failure";
-
-    if (recoveryKind === "deferred_embedding") {
-      return {
-        path: row.path,
-        targetGeneration: row.targetGeneration,
-        mode: row.mode,
-        recoveryKind,
-        errorKind: null,
-        reason: "deferred_embedding",
-        lastFailedAt: null,
-        nextRetryAt: row.nextRetryAt,
-        attemptCount: 0,
-      };
-    }
-    if (row.failureKind === null) {
-      return null;
-    }
-
-    return {
-      path: row.path,
-      targetGeneration: row.targetGeneration,
-      mode: row.mode,
-      recoveryKind,
-      errorKind: row.failureKind,
-      reason: row.failureMessage ?? "Recovered persisted hybrid failure state",
-      lastFailedAt: row.lastFailedAt ?? row.targetGeneration,
-      nextRetryAt: row.nextRetryAt,
-      attemptCount: Math.max(1, row.attemptCount),
-    };
+    await this.lexicalSnapshotCoordinator.flushIfDirty(force);
   }
 
   private async persistHybridRecoveryEntry(
     entry: HybridRecoveryEntry | null,
   ): Promise<void> {
-    if (!entry) {
-      return;
-    }
-    try {
-      await this.database.putIndexRecoveryState(
-        this.toHybridRecoveryStateRow(entry),
-      );
-    } catch (error) {
-      logger.warn(
-        `failed to persist hybrid recovery state for ${entry.path}:`,
-        error,
-      );
-    }
+    await this.hybridRecoveryStateStore.persistEntry(entry);
   }
 
   private async persistAllHybridRecoveryEntries(): Promise<void> {
-    const entries = this.hybridEmbeddingRecovery.listEntries();
-    if (entries.length === 0) {
-      return;
-    }
-    try {
-      await this.database.bulkPutIndexRecoveryStates(
-        entries.map((entry) => this.toHybridRecoveryStateRow(entry)),
-      );
-    } catch (error) {
-      logger.warn("failed to bulk persist hybrid recovery state:", error);
-    }
+    await this.hybridRecoveryStateStore.persistEntries(
+      this.hybridEmbeddingRecovery.listEntries(),
+    );
   }
 
   private async deleteHybridRecoveryEntry(path: string): Promise<void> {
-    try {
-      await this.database.deleteIndexRecoveryState("hybrid", path);
-    } catch (error) {
-      logger.warn(`failed to delete hybrid recovery state for ${path}:`, error);
-    }
+    await this.hybridRecoveryStateStore.deleteEntry(path);
   }
 
   private async markHybridRecoveryRetryQueued(path: string): Promise<void> {
@@ -671,264 +424,19 @@ export class DataManager {
     await this.persistHybridRecoveryEntry(entry);
   }
 
-  private shouldKeepPersistedHybridRecoveryRow(
-    row: IndexRecoveryStateRow,
-    currFiles: ReadonlyMap<string, TFile>,
-    previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>,
-  ): boolean {
-    if (!Number.isFinite(row.targetGeneration) || row.targetGeneration <= 0) {
-      return false;
-    }
-
-    const file = currFiles.get(row.path);
-    if (!file) {
-      return false;
-    }
-
-    const previousIndexedFileRef = previousIndexedFileRefs.get(row.path);
-    if (!previousIndexedFileRef) {
-      return file.stat.mtime <= row.targetGeneration;
-    }
-
-    if (previousIndexedFileRef.generation > row.targetGeneration) {
-      return false;
-    }
-
-    if (
-      previousIndexedFileRef.generation === row.targetGeneration &&
-      previousIndexedFileRef.state === "ready"
-    ) {
-      return false;
-    }
-
-    return file.stat.mtime <= row.targetGeneration;
-  }
-
-  private hasLegacyHybridRecoveryFields(
-    indexedFileRef: HybridIndexedFileRef,
-  ): boolean {
-    const legacyRef = indexedFileRef as LegacyHybridIndexedFileRef;
-    return (
-      Object.prototype.hasOwnProperty.call(legacyRef, "lastErrorKind") ||
-      Object.prototype.hasOwnProperty.call(legacyRef, "embeddingDeferred")
-    );
-  }
-
-  private stripLegacyHybridRecoveryFieldsFromRef(
-    indexedFileRef: HybridIndexedFileRef,
-  ): HybridIndexedFileRef {
-    const {
-      lastErrorKind: _lastErrorKind,
-      embeddingDeferred: _embeddingDeferred,
-      ...cleaned
-    } = indexedFileRef as LegacyHybridIndexedFileRef;
-    return cleaned;
-  }
-  private async stripLegacyHybridRecoveryFields(
-    refs: readonly HybridIndexedFileRef[],
-  ): Promise<void> {
-    if (refs.length === 0) {
-      return;
-    }
-    try {
-      await this.database.db.hybridIndexedFileRefs.bulkPut(refs);
-    } catch (error) {
-      logger.warn("failed to strip legacy hybrid recovery fields:", error);
-    }
-  }
-
-  private inferLegacyHybridRecoveryMode(
-    indexedFileRef: HybridIndexedFileRef,
-  ): HybridRepairMode {
-    if (indexedFileRef.state === "failed" || (indexedFileRef.chunkCount ?? 0) <= 0) {
-      return "full";
-    }
-    return "incremental";
-  }
-
-  private normalizeLegacyHybridFailureKind(
-    kind: string | null | undefined,
-  ): HybridEmbeddingFailureKind {
-    switch (kind) {
-      case "missing_api_key":
-      case "weekly_token_limit":
-      case "quota_exhausted":
-      case "auth_401":
-      case "auth_403":
-      case "provider_429":
-      case "timeout":
-      case "provider_5xx":
-      case "network":
-      case "unknown":
-        return kind;
-      default:
-        return "unknown";
-    }
-  }
-
-  private buildLegacyHybridRecoveryStateRow(
-    path: string,
-    indexedFileRef: HybridIndexedFileRef,
-    now: number,
-  ): IndexRecoveryStateRow | null {
-    const legacyRef = indexedFileRef as LegacyHybridIndexedFileRef;
-    if (legacyRef.embeddingDeferred === true) {
-      const nextRetryAt =
-        (indexedFileRef.lastIncrementalEmbedAt ?? 0) > 0
-          ? (indexedFileRef.lastIncrementalEmbedAt ?? 0) +
-            this.getMinIncrementalEmbedIntervalMs()
-          : now;
-      return {
-        id: buildIndexRecoveryStateId("hybrid", path),
-        engine: "hybrid",
-        path,
-        targetGeneration: indexedFileRef.generation,
-        mode: this.inferLegacyHybridRecoveryMode(indexedFileRef),
-        recoveryKind: "deferred_embedding",
-        state: deriveDeferredIndexRecoveryState(nextRetryAt, now),
-        failureKind: null,
-        failureMessage: null,
-        attemptCount: 0,
-        lastFailedAt: null,
-        nextRetryAt,
-        isBlocking: false,
-      };
-    }
-
-    if (
-      indexedFileRef.state !== "bm25_only" &&
-      indexedFileRef.state !== "failed"
-    ) {
-      return null;
-    }
-
-    const failureKind = this.normalizeLegacyHybridFailureKind(
-      legacyRef.lastErrorKind,
-    );
-    const nextRetryAt = isAutoRetryHybridFailureKind(failureKind) ? now : null;
-    return {
-      id: buildIndexRecoveryStateId("hybrid", path),
-      engine: "hybrid",
-      path,
-      targetGeneration: indexedFileRef.generation,
-      mode: this.inferLegacyHybridRecoveryMode(indexedFileRef),
-      recoveryKind: "failure",
-      state: deriveIndexRecoveryState(failureKind, nextRetryAt, now),
-      failureKind,
-      failureMessage:
-        indexedFileRef.state === "failed"
-          ? "Recovered legacy hybrid failed state"
-          : "Recovered legacy hybrid bm25_only state",
-      attemptCount: 1,
-      lastFailedAt: indexedFileRef.indexedAt ?? indexedFileRef.generation,
-      nextRetryAt,
-      isBlocking: !isAutoRetryHybridFailureKind(failureKind),
-    };
-  }
-
-  private collectLegacyHybridRecoveryBackfill(
-    currFiles: ReadonlyMap<string, TFile>,
-    previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>,
-    activePaths: Set<string>,
-  ): {
-    rows: IndexRecoveryStateRow[];
-    cleanedRefs: HybridIndexedFileRef[];
-  } {
-    const now = Date.now();
-    const rows: IndexRecoveryStateRow[] = [];
-    const cleanedRefs: HybridIndexedFileRef[] = [];
-
-    for (const [path, indexedFileRef] of previousIndexedFileRefs) {
-      if (this.hasLegacyHybridRecoveryFields(indexedFileRef)) {
-        cleanedRefs.push(this.stripLegacyHybridRecoveryFieldsFromRef(indexedFileRef));
-      }
-      if (activePaths.has(path)) {
-        continue;
-      }
-      const row = this.buildLegacyHybridRecoveryStateRow(path, indexedFileRef, now);
-      if (!row) {
-        continue;
-      }
-      if (
-        !this.shouldKeepPersistedHybridRecoveryRow(
-          row,
-          currFiles,
-          previousIndexedFileRefs,
-        )
-      ) {
-        continue;
-      }
-      rows.push(row);
-      activePaths.add(path);
-    }
-
-    return { rows, cleanedRefs };
-  }
   private async restorePersistedHybridRecoveryState(
     currFiles: ReadonlyMap<string, TFile>,
     previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>,
   ): Promise<void> {
-    let rows: IndexRecoveryStateRow[] = [];
-    try {
-      rows = await this.database.getIndexRecoveryStates("hybrid");
-    } catch (error) {
-      logger.warn("failed to load persisted hybrid recovery state:", error);
-      this.hybridEmbeddingRecovery.replaceAll([]);
-      this.scheduleFailedEmbeddingRetry();
-      return;
-    }
-
-    const activeEntries: HybridRecoveryEntry[] = [];
-    const activePaths = new Set<string>();
-    for (const row of rows) {
-      if (
-        !this.shouldKeepPersistedHybridRecoveryRow(
-          row,
-          currFiles,
-          previousIndexedFileRefs,
-        )
-      ) {
-        await this.deleteHybridRecoveryEntry(row.path);
-        continue;
-      }
-
-      const entry = this.fromHybridRecoveryStateRow(row);
-      if (!entry) {
-        await this.deleteHybridRecoveryEntry(row.path);
-        continue;
-      }
-      activeEntries.push(entry);
-      activePaths.add(row.path);
-    }
-
-    const legacyBackfill = this.collectLegacyHybridRecoveryBackfill(
+    const activeEntries = await this.hybridRecoveryStateStore.restoreEntries({
       currFiles,
       previousIndexedFileRefs,
-      activePaths,
-    );
-    let canStripLegacyFields = legacyBackfill.rows.length === 0;
-    if (legacyBackfill.rows.length > 0) {
-      try {
-        await this.database.bulkPutIndexRecoveryStates(legacyBackfill.rows);
-        canStripLegacyFields = true;
-        for (const row of legacyBackfill.rows) {
-          const entry = this.fromHybridRecoveryStateRow(row);
-          if (entry) {
-            activeEntries.push(entry);
-          }
-        }
-      } catch (error) {
-        logger.warn("failed to backfill legacy hybrid recovery state:", error);
-      }
-    }
-
-    if (canStripLegacyFields) {
-      await this.stripLegacyHybridRecoveryFields(legacyBackfill.cleanedRefs);
-    }
-
+      minIncrementalEmbedIntervalMs: this.getMinIncrementalEmbedIntervalMs(),
+    });
     this.hybridEmbeddingRecovery.replaceAll(activeEntries);
     this.scheduleFailedEmbeddingRetry();
   }
+
   async retryFailedEmbeddingsOnConfigChange(
     reason = "config-changed",
   ): Promise<void> {
@@ -1316,17 +824,16 @@ export class DataManager {
     await this.markLexicalSnapshotDirty(files.map((file) => file.path));
   }
 
-  private async persistLexicalSearchSnapshotIfAvailable(
-    expectedMutationVersion = this.lexicalSnapshotMutationVersion,
-  ): Promise<void> {
+  private async persistLexicalSearchSnapshotIfAvailable(): Promise<void> {
+    await this.lexicalSnapshotCoordinator.persistCurrentArtifact();
+  }
+
+  private async writeLexicalSearchSnapshotArtifact(): Promise<void> {
     const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
     if (lexicalIndexData) {
       await this.database.setLexicalSearchSnapshot(lexicalIndexData);
     } else {
       await this.database.deleteLexicalSearchSnapshot();
-    }
-    if (this.lexicalSnapshotMutationVersion === expectedMutationVersion) {
-      await this.clearLexicalSnapshotDirtyState();
     }
   }
 
@@ -1825,6 +1332,7 @@ export class DataManager {
       new MyNotice(
         t("Database has been updated. Automatically rebuilding the lexical index..."),
         7000,
+      );
       return {
         needsFullReindex: true,
         needsRefHeal: false,
@@ -2839,14 +2347,7 @@ export class DataManager {
   ): Promise<void> {
     this.hybridEmbeddingRecovery.movePath(oldPath, newPath);
     this.scheduleFailedEmbeddingRetry();
-    try {
-      await this.database.moveIndexRecoveryState("hybrid", oldPath, newPath);
-    } catch (error) {
-      logger.warn(
-        `failed to move hybrid recovery state from ${oldPath} to ${newPath}:`,
-        error,
-      );
-    }
+    await this.hybridRecoveryStateStore.moveEntry(oldPath, newPath);
   }
 
   private async registerFailedHybridEmbedding(
@@ -2897,6 +2398,7 @@ export class DataManager {
   private async enqueuePersistedHybridRecoveryStates(
     skipPaths: ReadonlySet<string>,
   ): Promise<void> {
+    const now = Date.now();
     for (const entry of this.hybridEmbeddingRecovery.listEntries()) {
       if (skipPaths.has(entry.path)) {
         continue;
@@ -2911,9 +2413,13 @@ export class DataManager {
           path: entry.path,
           mode: entry.mode,
           reason: "startup-resume-deferred-embedding",
-          eligibleAt: entry.nextRetryAt ?? Date.now(),
+          eligibleAt: entry.nextRetryAt ?? now,
           sourceGeneration: entry.targetGeneration,
         });
+        continue;
+      }
+
+      if (isAutoRetryHybridFailureKind(entry.errorKind)) {
         continue;
       }
 
@@ -2921,11 +2427,9 @@ export class DataManager {
         path: entry.path,
         mode: entry.mode,
         reason: "startup-recover-persisted-state",
+        eligibleAt: now,
         sourceGeneration: entry.targetGeneration,
       });
-      if (isAutoRetryHybridFailureKind(entry.errorKind)) {
-        await this.markHybridRecoveryRetryQueued(entry.path);
-      }
     }
   }
   private createHybridIndexProgressNotice(

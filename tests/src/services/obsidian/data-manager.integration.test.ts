@@ -149,6 +149,7 @@ import {
   DocUpsertOperation,
 } from "src/services/obsidian/user-data/doc-operation-buffer";
 import { FileWatcher } from "src/services/obsidian/user-data/file-watcher";
+import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 
@@ -289,9 +290,13 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
 
 function createMockDatabase(overrides: Record<string, unknown> = {}) {
   const lexicalIndexedFileRefs: Array<BaseIndexedFileRef> = [];
-  const hybridIndexedFileRefs: Array<Record<string, any>> = [];
+  const hybridIndexedFileRefs: Array<Record<string, any> & { path: string }> =
+    [];
   const indexRecoveryStates: Array<Record<string, any>> = [];
   const indexArtifactStates: Array<Record<string, any>> = [];
+  const state = {
+    lexicalSearchSnapshot: null as unknown,
+  };
 
   const upsertRow = <T extends { path: string }>(rows: T[], row: T) => {
     const index = rows.findIndex((item) => item.path === row.path);
@@ -313,9 +318,13 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
 
   return {
     deleteOldDatabases: jest.fn(async () => {}),
-    getLexicalSearchSnapshot: jest.fn(async () => null),
-    deleteLexicalSearchSnapshot: jest.fn(async () => {}),
-    setLexicalSearchSnapshot: jest.fn(async () => {}),
+    getLexicalSearchSnapshot: jest.fn(async () => state.lexicalSearchSnapshot),
+    deleteLexicalSearchSnapshot: jest.fn(async () => {
+      state.lexicalSearchSnapshot = null;
+    }),
+    setLexicalSearchSnapshot: jest.fn(async (snapshot: unknown) => {
+      state.lexicalSearchSnapshot = snapshot;
+    }),
     getLexicalIndexedFileRefs: jest.fn(async () => [...lexicalIndexedFileRefs]),
     setLexicalIndexedFileRefs: jest.fn(async (refs: BaseIndexedFileRef[]) => {
       lexicalIndexedFileRefs.splice(
@@ -391,6 +400,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
       totalBytes: 0,
       tables: [],
     })),
+    __state: state,
     __hybridIndexedFileRefs: hybridIndexedFileRefs,
     __indexRecoveryStates: indexRecoveryStates,
     __indexArtifactStates: indexArtifactStates,
@@ -403,10 +413,11 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
           const row = hybridIndexedFileRefs.find((item) => item.path === path);
           return row ? { ...row } : undefined;
         }),
-        put: jest.fn(async (row: Record<string, any>) => {
+        put: jest.fn(async (row: Record<string, any> & { path: string }) => {
           upsertRow(hybridIndexedFileRefs, row);
         }),
-        bulkPut: jest.fn(async (rows: Record<string, any>[]) => {
+        bulkPut: jest.fn(
+          async (rows: Array<Record<string, any> & { path: string }>) => {
           for (const row of rows) {
             upsertRow(hybridIndexedFileRefs, row);
           }
@@ -417,10 +428,11 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
           const row = indexArtifactStates.find((item) => item.id === id);
           return row ? { ...row } : undefined;
         }),
-        put: jest.fn(async (row: Record<string, any>) => {
+        put: jest.fn(async (row: Record<string, any> & { path: string }) => {
           upsertArtifactRow(row);
         }),
-        bulkPut: jest.fn(async (rows: Record<string, any>[]) => {
+        bulkPut: jest.fn(
+          async (rows: Array<Record<string, any> & { path: string }>) => {
           for (const row of rows) {
             upsertArtifactRow(row);
           }
@@ -827,6 +839,349 @@ describe("DataManager integration", () => {
     );
   });
 
+  test("dirty lexical artifact marker forces startup rebuild after runtime edits", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const file = createFile("docs/live.md", "latest body", 320);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "latest body"]]);
+    const rebuiltSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(24),
+    };
+    const database = createMockDatabase();
+    database.__state.lexicalSearchSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(8),
+    };
+    database.__indexArtifactStates.push({
+      id: buildIndexArtifactStateId("lexical", "snapshot"),
+      engine: "lexical",
+      artifact: "snapshot",
+      dirtyAt: 1_000,
+      reason: "runtime-lexical-dirty",
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine({
+      serializeFileIndex: jest.fn(() => rebuiltSnapshot),
+    });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = container.resolve(DataManager);
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(database.getLexicalSearchSnapshot).not.toHaveBeenCalled();
+    expect(database.deleteLexicalSearchSnapshot).toHaveBeenCalled();
+    expect(lexicalEngine.reIndexAll).not.toHaveBeenCalled();
+    expect(lexicalEngine.addDocuments).toHaveBeenCalledWith([
+      expect.objectContaining({
+        path: file.path,
+        content: "latest body",
+      }),
+    ]);
+    expect(database.setLexicalSearchSnapshot).toHaveBeenCalledWith(
+      rebuiltSnapshot,
+    );
+    expect(
+      await database.db.indexArtifactState.get(
+        buildIndexArtifactStateId("lexical", "snapshot"),
+      ),
+    ).toBeUndefined();
+
+    manager.onunload();
+  });
+
+  test("dirty lexical artifact marker prunes deleted files on startup rebuild", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const deletedPath = "docs/deleted.md";
+    const database = createMockDatabase();
+    database.__state.lexicalSearchSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(12),
+    };
+    database.__indexArtifactStates.push({
+      id: buildIndexArtifactStateId("lexical", "snapshot"),
+      engine: "lexical",
+      artifact: "snapshot",
+      dirtyAt: 2_000,
+      reason: "runtime-lexical-dirty",
+    });
+    await database.setLexicalIndexedFileRefs([
+      {
+        path: deletedPath,
+        generation: 200,
+        size: 9,
+      },
+    ]);
+    const dataProvider = createMockDataProvider({
+      files: new Map<string, TFile>(),
+      texts: new Map<string, string>(),
+    });
+    const lexicalEngine = createMockLexicalEngine({
+      serializeFileIndex: jest.fn(() => null),
+    });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    fileSnapshotStore.persisted.set(deletedPath, {
+      text: "deleted body",
+      generation: 200,
+    });
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = container.resolve(DataManager);
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(database.getLexicalSearchSnapshot).not.toHaveBeenCalled();
+    expect(lexicalEngine.reIndexAll).not.toHaveBeenCalled();
+    expect(lexicalEngine.addDocuments).not.toHaveBeenCalled();
+    expect(await database.getLexicalIndexedFileRefs()).toEqual([]);
+    expect(fileSnapshotStore.persisted.has(deletedPath)).toBe(false);
+    expect(fileSnapshotStore.deleteIndexedSnapshotsNotIn).toHaveBeenCalledWith(
+      new Set<string>(),
+    );
+    expect(
+      await database.db.indexArtifactState.get(
+        buildIndexArtifactStateId("lexical", "snapshot"),
+      ),
+    ).toBeUndefined();
+
+    manager.onunload();
+  });
+
+  test("runtime lexical edit survives restart by forcing dirty-artifact rebuild", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const file = createFile("docs/restart-live.md", "restart body", 410);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "restart body"]]);
+    const database = createMockDatabase();
+    database.__state.lexicalSearchSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(6),
+    };
+
+    const runtimeDataProvider = createMockDataProvider({ files, texts });
+    const runtimeLexicalEngine = createMockLexicalEngine();
+    const runtimeFileSnapshotStore = createMockFileSnapshotStore();
+    const runtimeHybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider: runtimeDataProvider,
+      lexicalEngine: runtimeLexicalEngine,
+      fileSnapshotStore: runtimeFileSnapshotStore,
+      hybridEngine: runtimeHybridEngine,
+    });
+
+    const runtimeManager = container.resolve(DataManager);
+    runtimeManager.receiveDocOperation(new DocUpsertOperation(file.path, file.stat.mtime));
+    await (runtimeManager as any).docOperationsBuffer.forceFlush();
+    (runtimeManager as any).clearLexicalSnapshotFlushTimer();
+
+    expect(
+      await database.db.indexArtifactState.get(
+        buildIndexArtifactStateId("lexical", "snapshot"),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        artifact: "snapshot",
+        engine: "lexical",
+      }),
+    );
+
+    if ("reset" in container && typeof container.reset === "function") {
+      container.reset();
+    } else {
+      container.clearInstances();
+    }
+
+    const restartLexicalSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(18),
+    };
+    const restartDataProvider = createMockDataProvider({ files, texts });
+    const restartLexicalEngine = createMockLexicalEngine({
+      serializeFileIndex: jest.fn(() => restartLexicalSnapshot),
+    });
+    const restartFileSnapshotStore = createMockFileSnapshotStore();
+    const restartHybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider: restartDataProvider,
+      lexicalEngine: restartLexicalEngine,
+      fileSnapshotStore: restartFileSnapshotStore,
+      hybridEngine: restartHybridEngine,
+    });
+
+    const restartManager = container.resolve(DataManager);
+    await restartManager.initAsync();
+    await (restartManager as any).searchBootstrapCommitTask;
+
+    expect(database.getLexicalSearchSnapshot).not.toHaveBeenCalled();
+    expect(restartLexicalEngine.reIndexAll).not.toHaveBeenCalled();
+    expect(restartLexicalEngine.addDocuments).toHaveBeenCalledWith([
+      expect.objectContaining({
+        path: file.path,
+        content: "restart body",
+      }),
+    ]);
+    expect(database.setLexicalSearchSnapshot).toHaveBeenCalledWith(
+      restartLexicalSnapshot,
+    );
+    expect(
+      await database.db.indexArtifactState.get(
+        buildIndexArtifactStateId("lexical", "snapshot"),
+      ),
+    ).toBeUndefined();
+
+    restartManager.onunload();
+  });
+
+  test("runtime lexical delete survives restart by pruning stale snapshot state", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const deletedPath = "docs/restart-deleted.md";
+    const database = createMockDatabase();
+    database.__state.lexicalSearchSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(10),
+    };
+    await database.setLexicalIndexedFileRefs([
+      {
+        path: deletedPath,
+        generation: 220,
+        size: 12,
+      },
+    ]);
+
+    const runtimeDataProvider = createMockDataProvider({
+      files: new Map<string, TFile>(),
+      texts: new Map<string, string>(),
+    });
+    const runtimeLexicalEngine = createMockLexicalEngine();
+    const runtimeFileSnapshotStore = createMockFileSnapshotStore();
+    runtimeFileSnapshotStore.persisted.set(deletedPath, {
+      text: "deleted body",
+      generation: 220,
+    });
+    const runtimeHybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [],
+      database,
+      dataProvider: runtimeDataProvider,
+      lexicalEngine: runtimeLexicalEngine,
+      fileSnapshotStore: runtimeFileSnapshotStore,
+      hybridEngine: runtimeHybridEngine,
+    });
+
+    const runtimeManager = container.resolve(DataManager);
+    runtimeManager.receiveDocOperation(new DocDeleteOperation(deletedPath));
+    await (runtimeManager as any).docOperationsBuffer.forceFlush();
+    (runtimeManager as any).clearLexicalSnapshotFlushTimer();
+
+    expect(await database.getLexicalIndexedFileRefs()).toEqual([]);
+    expect(runtimeFileSnapshotStore.persisted.has(deletedPath)).toBe(false);
+
+    if ("reset" in container && typeof container.reset === "function") {
+      container.reset();
+    } else {
+      container.clearInstances();
+    }
+
+    const restartDataProvider = createMockDataProvider({
+      files: new Map<string, TFile>(),
+      texts: new Map<string, string>(),
+    });
+    const restartLexicalEngine = createMockLexicalEngine({
+      serializeFileIndex: jest.fn(() => null),
+    });
+    const restartFileSnapshotStore = createMockFileSnapshotStore();
+    const restartHybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [],
+      database,
+      dataProvider: restartDataProvider,
+      lexicalEngine: restartLexicalEngine,
+      fileSnapshotStore: restartFileSnapshotStore,
+      hybridEngine: restartHybridEngine,
+    });
+
+    const restartManager = container.resolve(DataManager);
+    await restartManager.initAsync();
+    await (restartManager as any).searchBootstrapCommitTask;
+
+    expect(database.getLexicalSearchSnapshot).not.toHaveBeenCalled();
+    expect(restartLexicalEngine.addDocuments).not.toHaveBeenCalled();
+    expect(database.__state.lexicalSearchSnapshot).toBeNull();
+    expect(
+      await database.db.indexArtifactState.get(
+        buildIndexArtifactStateId("lexical", "snapshot"),
+      ),
+    ).toBeUndefined();
+
+    restartManager.onunload();
+  });
+
   test("hydrates persisted hybrid recovery rows and requeues durable startup repairs", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;
@@ -856,6 +1211,7 @@ describe("DataManager integration", () => {
         path: bm25File.path,
         targetGeneration: bm25File.stat.mtime,
         mode: "incremental",
+        recoveryKind: "failure",
         state: "blocking",
         failureKind: "auth_403",
         failureMessage: "Embedding API error 403",
@@ -870,6 +1226,7 @@ describe("DataManager integration", () => {
         path: failedFile.path,
         targetGeneration: failedFile.stat.mtime,
         mode: "full",
+        recoveryKind: "failure",
         state: "retryable_waiting",
         failureKind: "provider_429",
         failureMessage: "Embedding API error 429",
@@ -884,6 +1241,7 @@ describe("DataManager integration", () => {
         path: readyFile.path,
         targetGeneration: readyFile.stat.mtime,
         mode: "incremental",
+        recoveryKind: "failure",
         state: "blocking",
         failureKind: "auth_401",
         failureMessage: "Embedding API error 401",
@@ -898,6 +1256,7 @@ describe("DataManager integration", () => {
         path: skippedFile.path,
         targetGeneration: skippedFile.stat.mtime,
         mode: "incremental",
+        recoveryKind: "failure",
         state: "retryable_waiting",
         failureKind: "provider_5xx",
         failureMessage: "Embedding API error 500",
@@ -912,6 +1271,7 @@ describe("DataManager integration", () => {
         path: "docs/missing.md",
         targetGeneration: 90,
         mode: "incremental",
+        recoveryKind: "failure",
         state: "blocking",
         failureKind: "auth_403",
         failureMessage: "Embedding API error 403",
@@ -939,6 +1299,9 @@ describe("DataManager integration", () => {
     const manager = container.resolve(DataManager);
     const scheduleSpy = jest
       .spyOn(manager as any, "scheduleHybridRepairFlush")
+      .mockImplementation(() => {});
+    const retryScheduleSpy = jest
+      .spyOn(manager as any, "scheduleFailedEmbeddingRetry")
       .mockImplementation(() => {});
 
     await (manager as any).restorePersistedHybridRecoveryState(
@@ -972,24 +1335,22 @@ describe("DataManager integration", () => {
       reason: "startup-recover-persisted-state",
       sourceGeneration: bm25File.stat.mtime,
     });
-    expect((manager as any).hybridRepairQueue.get(failedFile.path)).toMatchObject({
-      path: failedFile.path,
-      mode: "full",
-      reason: "startup-recover-persisted-state",
-      sourceGeneration: failedFile.stat.mtime,
-    });
+    expect((manager as any).hybridRepairQueue.has(failedFile.path)).toBe(false);
     expect((manager as any).hybridRepairQueue.has(skippedFile.path)).toBe(
       false,
     );
-    expect(database.putIndexRecoveryState).toHaveBeenCalledWith(
+    expect(database.putIndexRecoveryState).not.toHaveBeenCalledWith(
       expect.objectContaining({
         path: failedFile.path,
-        targetGeneration: failedFile.stat.mtime,
-        failureKind: "provider_429",
-        nextRetryAt: expect.any(Number),
+      }),
+    );
+    expect(database.putIndexRecoveryState).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: bm25File.path,
       }),
     );
     expect(scheduleSpy).toHaveBeenCalled();
+    expect(retryScheduleSpy).toHaveBeenCalled();
     manager.onunload();
   });
 
@@ -1063,6 +1424,9 @@ describe("DataManager integration", () => {
     jest
       .spyOn(manager as any, "scheduleHybridRepairFlush")
       .mockImplementation(() => {});
+    const retryScheduleSpy = jest
+      .spyOn(manager as any, "scheduleFailedEmbeddingRetry")
+      .mockImplementation(() => {});
 
     const previousIndexedFileRefs = new Map(
       (database as any).__hybridIndexedFileRefs.map((row: Record<string, any>) => [
@@ -1101,13 +1465,12 @@ describe("DataManager integration", () => {
 
     await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
 
-    expect((manager as any).hybridRepairQueue.get(retryableFile.path)).toMatchObject({
-      path: retryableFile.path,
-      mode: "incremental",
-      reason: "startup-recover-persisted-state",
-      sourceGeneration: retryableFile.stat.mtime,
-    });
-    expect((manager as any).hybridRepairQueue.get(deferredFile.path)).toMatchObject({
+    expect((manager as any).hybridRepairQueue.has(retryableFile.path)).toBe(
+      false,
+    );
+    expect(
+      (manager as any).hybridRepairQueue.get(deferredFile.path),
+    ).toMatchObject({
       path: deferredFile.path,
       mode: "incremental",
       reason: "startup-resume-deferred-embedding",
@@ -1129,10 +1492,170 @@ describe("DataManager integration", () => {
     expect(strippedDeferred.embeddingDeferred).toBeUndefined();
     expect(strippedReady.lastErrorKind).toBeUndefined();
     expect(strippedReady.embeddingDeferred).toBeUndefined();
+    expect(retryScheduleSpy).toHaveBeenCalled();
 
     manager.onunload();
     nowSpy.mockRestore();
   });
+
+  test("retryable hybrid recovery preserves backoff across restart", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(100_000);
+
+    try {
+      const setting = cloneSetting();
+      setting.hybrid.enabled = true;
+
+      const file = createFile("docs/retry-later.md", "retry later body", 100);
+      const files = new Map<string, TFile>([[file.path, file]]);
+      const texts = new Map<string, string>([[file.path, "retry later body"]]);
+      const database = createMockDatabase();
+      database.__indexRecoveryStates.push({
+        id: `hybrid:${file.path}`,
+        engine: "hybrid",
+        path: file.path,
+        targetGeneration: file.stat.mtime,
+        mode: "incremental",
+        recoveryKind: "failure",
+        state: "retryable_waiting",
+        failureKind: "provider_429",
+        failureMessage: "Embedding API error 429",
+        attemptCount: 2,
+        lastFailedAt: 90_000,
+        nextRetryAt: 160_000,
+        isBlocking: false,
+      });
+      const dataProvider = createMockDataProvider({ files, texts });
+      const lexicalEngine = createMockLexicalEngine();
+      const fileSnapshotStore = createMockFileSnapshotStore();
+      const hybridEngine = createMockHybridEngine();
+
+      registerDataManagerDeps({
+        setting,
+        pluginFiles: [file],
+        database,
+        dataProvider,
+        lexicalEngine,
+        fileSnapshotStore,
+        hybridEngine,
+      });
+
+      const manager = container.resolve(DataManager);
+      jest
+        .spyOn(manager as any, "scheduleHybridRepairFlush")
+        .mockImplementation(() => {});
+
+      await (manager as any).restorePersistedHybridRecoveryState(
+        files,
+        new Map([
+          [
+            file.path,
+            {
+              path: file.path,
+              generation: file.stat.mtime,
+              state: "bm25_only",
+            },
+          ],
+        ]),
+      );
+      await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
+
+      expect((manager as any).hybridRepairQueue.has(file.path)).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(59_999);
+      expect((manager as any).hybridRepairQueue.has(file.path)).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(1);
+
+      expect((manager as any).hybridRepairQueue.get(file.path)).toMatchObject({
+        path: file.path,
+        mode: "incremental",
+        reason: "failed-embedding-auto-retry",
+        eligibleAt: 160_000,
+        sourceGeneration: file.stat.mtime,
+      });
+      expect(database.putIndexRecoveryState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: file.path,
+          failureKind: "provider_429",
+          nextRetryAt: 760_000,
+        }),
+      );
+
+      manager.onunload();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  test("hybrid exclusion changes clear stale persisted recovery metadata on startup", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/excluded.md", "excluded body", 160);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "excluded body"]]);
+    const database = createMockDatabase();
+    database.__indexRecoveryStates.push({
+      id: `hybrid:${file.path}`,
+      engine: "hybrid",
+      path: file.path,
+      targetGeneration: file.stat.mtime,
+      mode: "incremental",
+      recoveryKind: "failure",
+      state: "retryable_waiting",
+      failureKind: "provider_429",
+      failureMessage: "Embedding API error 429",
+      attemptCount: 1,
+      lastFailedAt: 8_000,
+      nextRetryAt: 9_000,
+      isBlocking: false,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      shouldIndexPath: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = container.resolve(DataManager);
+    jest
+      .spyOn(manager as any, "scheduleHybridRepairFlush")
+      .mockImplementation(() => {});
+
+    await (manager as any).restorePersistedHybridRecoveryState(
+      files,
+      new Map([
+        [
+          file.path,
+          {
+            path: file.path,
+            generation: file.stat.mtime,
+            state: "bm25_only",
+          },
+        ],
+      ]),
+    );
+    await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
+
+    expect(database.deleteIndexRecoveryState).toHaveBeenCalledWith(
+      "hybrid",
+      file.path,
+    );
+    expect((manager as any).hybridRepairQueue.has(file.path)).toBe(false);
+
+    manager.onunload();
+  });
+
   test("real delete path still removes shared snapshots before dropping hybrid state", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;

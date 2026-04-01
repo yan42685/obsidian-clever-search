@@ -1443,7 +1443,7 @@ export class HybridEngine {
     let lastFilePath: string | null = null;
 
     while (true) {
-      const rows =
+      const rows: ChunkVectorShardRow[] =
         lastFilePath === null
           ? await this.db.db.hybridChunkVectors
               .orderBy("filePath")

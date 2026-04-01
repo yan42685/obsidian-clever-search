@@ -328,9 +328,14 @@ describe("HybridEngine artifact state", () => {
 
     expect(fileSnapshotStore.getIndexedSnapshotTexts).toHaveBeenCalledTimes(1);
     const [paths, expectedGenerations] =
-      fileSnapshotStore.getIndexedSnapshotTexts.mock.calls[0];
+      fileSnapshotStore.getIndexedSnapshotTexts.mock.calls[0] as unknown as [
+        string[],
+        Map<string, number | undefined> | undefined,
+      ];
     expect(paths).toEqual(["notes/a.md"]);
-    expect(Array.from(expectedGenerations.entries())).toEqual([["notes/a.md", 100]]);
+    expect(Array.from((expectedGenerations ?? new Map()).entries())).toEqual([
+      ["notes/a.md", 100],
+    ]);
     expect(Array.from(snapshots.entries())).toEqual([["notes/a.md", "alpha"]]);
   });
 

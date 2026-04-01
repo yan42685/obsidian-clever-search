@@ -102,7 +102,6 @@ export default {
 	"File search backend desc":
 		"MiniSearch 更保守稳定；自定义 BM25 在前缀匹配和元数据感知方面更强。不同搜索习惯带来的命中率也会不同，推荐选一个更贴合自己习惯的作为日常主力；如果追求更高召回率，最终还是需要混合搜索兜底。",
 	"fileSearchBackend.minisearch": "MiniSearch（稳定）",
-	"fileSearchBackend.customBm25": "自定义 BM25",
 	"Manage hybrid search": "管理混合搜索",
 	"hybridModal.manageIntro":
 		"在这里可以集中管理 hybrid 搜索的接口配置、token 预算、排序策略和索引范围。",
@@ -251,7 +250,6 @@ export default {
     "quickSwitch.footer.keys": "Ctrl+J / Ctrl+K \u5207\u6362\u5019\u9009",
 	"Search history completion": "\u641c\u7d22\u5386\u53f2\u8865\u5168",
 	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",
-	"fileSearchBackend.passageBm25": "Passage BM25",
 	"fileSearchBackend.coverageLexical": "Coverage Lexical",
 	"hybridNotice.searchRerankFallbackToBm25": "\u8bed\u4e49 rerank \u6682\u4e0d\u53ef\u7528\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a BM25 \u6392\u5e8f\u3002",
 };
