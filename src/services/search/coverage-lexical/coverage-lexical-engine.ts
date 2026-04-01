@@ -1,3 +1,4 @@
+import { Vault } from "obsidian";
 import { innerSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
@@ -6,13 +7,14 @@ import type {
 } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
-import { singleton } from "tsyringe";
+import { container, singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
 	SerializedCoverageLexicalBinarySnapshot,
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
+import { FileSnapshotStore } from "../shared/file-snapshot-store";
 import { Tokenizer } from "../tokenizer";
 import {
 	buildCoverageLexicalPassageAdmissionSignal,
@@ -26,6 +28,7 @@ import {
 import {
 	buildCoverageLexicalCharQuery,
 	extractHanBigrams,
+	extractHanSegments,
 	evaluateCoverageLexicalTagFallback,
 	splitCoverageLexicalTagValues,
 	type CoverageLexicalCharQuery,
@@ -71,7 +74,6 @@ import type {
 
 type CoverageLexicalDocument = {
 	docId: number;
-	bodyText: string;
 	basenameText: string;
 	folderText: string;
 	aliasesText: string;
@@ -81,6 +83,7 @@ type CoverageLexicalDocument = {
 
 type CoverageLexicalDerivedDocumentIndexState = {
 	bodyTokenSequence: string[];
+	bodyHanSegments: string[];
 	bodyTerms: Set<string>;
 	bodyCharTerms: Set<string>;
 	bodyPhraseTerms: Set<string>;
@@ -107,12 +110,11 @@ function createCoverageLexicalDocument(
 	docId: number,
 	document: Pick<
 		IndexedDocument,
-		"content" | "basename" | "folder" | "aliases" | "tags" | "headings"
+		"basename" | "folder" | "aliases" | "tags" | "headings"
 	>,
 ): CoverageLexicalDocument {
 	return {
 		docId,
-		bodyText: document.content ?? "",
 		basenameText: document.basename ?? "",
 		folderText: document.folder ?? "",
 		aliasesText: document.aliases ?? "",
@@ -124,14 +126,23 @@ function createCoverageLexicalDocument(
 function buildCoverageLexicalDerivedDocumentIndexState(
 	tokenizer: Tokenizer,
 	document: CoverageLexicalDocument,
-	existingBodyTokenSequence?: readonly string[],
-	existingTagValues?: readonly string[],
+	options: {
+		bodyText?: string;
+		existingBodyTokenSequence?: readonly string[];
+		existingBodyHanSegments?: readonly string[];
+		existingTagValues?: readonly string[];
+	} = {},
 ): CoverageLexicalDerivedDocumentIndexState {
-	const bodyTokenSequence = existingBodyTokenSequence
-		? [...existingBodyTokenSequence]
-		: tokenizeCoverageLexicalDocumentText(tokenizer, document.bodyText);
+	const bodyTokenSequence = options.existingBodyTokenSequence
+		? [...options.existingBodyTokenSequence]
+		: tokenizeCoverageLexicalDocumentText(tokenizer, options.bodyText ?? "");
+	const bodyHanSegments = options.existingBodyHanSegments
+		? [...options.existingBodyHanSegments]
+		: extractHanSegments(options.bodyText ?? "");
 	const bodyTerms = new Set(bodyTokenSequence);
-	const bodyCharTerms = new Set(extractHanBigrams(document.bodyText));
+	const bodyCharTerms = new Set(
+		bodyHanSegments.flatMap((segment) => extractHanBigrams(segment)),
+	);
 	const basenameTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.basenameText),
 	);
@@ -147,8 +158,8 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 	const tagTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.tagsText),
 	);
-	const tagValues = existingTagValues
-		? [...existingTagValues]
+	const tagValues = options.existingTagValues
+		? [...options.existingTagValues]
 		: splitCoverageLexicalTagValues(document.tagsText);
 	const tagCharTerms = new Set(
 		tagValues.flatMap((tagValue) => extractHanBigrams(tagValue)),
@@ -166,6 +177,7 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 	]);
 	return {
 		bodyTokenSequence,
+		bodyHanSegments,
 		bodyTerms,
 		bodyCharTerms,
 		bodyPhraseTerms: buildCoverageLexicalPhraseTermSet(bodyTokenSequence),
@@ -291,7 +303,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly documentPathById: Array<string | undefined> = [];
 	private readonly documentBodyTokensById: Array<readonly string[] | undefined> = [];
+	private readonly documentBodyHanSegmentsById: Array<
+		readonly string[] | undefined
+	> = [];
 	private readonly documentTagValuesById: Array<readonly string[] | undefined> = [];
+	private fileSnapshotStore: FileSnapshotStore | null | undefined;
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new Map<string, number[]>();
 	private readonly bodyCharPostings = new Map<string, number[]>();
@@ -468,7 +484,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentIdByPath.clear();
 		this.documentPathById.length = 0;
 		this.documentBodyTokensById.length = 0;
+		this.documentBodyHanSegmentsById.length = 0;
 		this.documentTagValuesById.length = 0;
+		this.fileSnapshotStore = undefined;
 		this.nextDocumentId = 0;
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
@@ -746,18 +764,21 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 	}
 
-	getDirectSubItems(
+	async getDirectSubItems(
 		queryText: string,
 		path: string,
 		maxSubItemCount: number,
-	): FileSubItem[] | null {
-		const document = this.documents.get(path);
-		if (!document) {
+	): Promise<FileSubItem[] | null> {
+		if (!this.documents.has(path)) {
+			return null;
+		}
+		const snapshotText = await this.getDirectSubitemsSnapshotText(path);
+		if (snapshotText === null) {
 			return null;
 		}
 		return buildDirectSubitemsExactFileSubItems({
 			queryText,
-			snapshotText: document.bodyText,
+			snapshotText,
 			options: {
 				maxChars: 220,
 				mergeGap: 32,
@@ -771,8 +792,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	serialize(): SerializedFileSearchIndex | null {
 		return {
 			__backend: "coverage-lexical",
-			__version: 1,
-			__encoding: "binary-snapshot-v1",
+			__version: 2,
+			__encoding: "binary-snapshot-v2",
 			data: encodeCoverageLexicalSnapshotV1(this.buildBinarySnapshotState()),
 		};
 	}
@@ -827,6 +848,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentPathById,
 			this.documentById,
 			this.documentBodyTokensById,
+			this.documentBodyHanSegmentsById,
 			this.documentTagValuesById,
 			this.nextDocumentId,
 			accumulator,
@@ -953,14 +975,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.removeDocument(document.path, false);
 		const docId = this.ensureDocumentId(document.path);
 		const storedDocument = createCoverageLexicalDocument(docId, document);
+		const bodyText = document.content ?? "";
 		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
 			this.tokenizer,
 			storedDocument,
+			{ bodyText },
 		);
 
 		this.documents.set(document.path, storedDocument);
 		this.documentById[docId] = storedDocument;
 		this.documentBodyTokensById[docId] = derivedState.bodyTokenSequence;
+		this.documentBodyHanSegmentsById[docId] = derivedState.bodyHanSegments;
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 
 		for (const term of derivedState.bodyTerms) {
@@ -1046,8 +1071,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
 			this.tokenizer,
 			existing,
-			this.documentBodyTokensById[docId],
-			this.documentTagValuesById[docId],
+			{
+				existingBodyTokenSequence: this.documentBodyTokensById[docId],
+				existingBodyHanSegments: this.documentBodyHanSegmentsById[docId],
+				existingTagValues: this.documentTagValuesById[docId],
+			},
 		);
 		for (const term of derivedState.bodyTerms) {
 			removeNumericPosting(this.bodyPostings, term, docId);
@@ -1112,6 +1140,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.delete(path);
 		this.documentById[docId] = undefined;
 		this.documentBodyTokensById[docId] = undefined;
+		this.documentBodyHanSegmentsById[docId] = undefined;
 		this.documentTagValuesById[docId] = undefined;
 		if (releaseDocumentIdentity) {
 			this.releaseDocumentIdentity(path);
@@ -1155,6 +1184,39 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.sortedLexicon = Array.from(this.lexicon).sort();
 	}
 
+	private getFileSnapshotStore(): FileSnapshotStore | null {
+		if (this.fileSnapshotStore !== undefined) {
+			return this.fileSnapshotStore;
+		}
+		if (
+			!container.isRegistered(FileSnapshotStore, true) &&
+			!container.isRegistered(Vault, true)
+		) {
+			this.fileSnapshotStore = null;
+			return null;
+		}
+		this.fileSnapshotStore = getInstance(FileSnapshotStore);
+		return this.fileSnapshotStore;
+	}
+
+	private async getDirectSubitemsSnapshotText(path: string): Promise<string | null> {
+		const fileSnapshotStore = this.getFileSnapshotStore();
+		if (!fileSnapshotStore) {
+			return null;
+		}
+		const currentText = fileSnapshotStore.peekCurrentFileText(path);
+		if (currentText !== undefined) {
+			return currentText;
+		}
+		const indexedSnapshots = await fileSnapshotStore.getIndexedSnapshotTexts([path]);
+		const indexedSnapshotText = indexedSnapshots.get(path);
+		if (indexedSnapshotText !== undefined) {
+			fileSnapshotStore.setCurrentFileText(path, indexedSnapshotText);
+			return indexedSnapshotText;
+		}
+		return await fileSnapshotStore.readCurrentFileText(path);
+	}
+
 	private buildBinarySnapshotState(): CoverageLexicalSnapshotState {
 		return {
 			nextDocumentId: this.nextDocumentId,
@@ -1165,7 +1227,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 							{
 								docId: document.docId,
 								path: this.documentPathById[document.docId] ?? "",
-								bodyText: document.bodyText,
 								basenameText: document.basenameText,
 								folderText: document.folderText,
 								aliasesText: document.aliasesText,
@@ -1173,6 +1234,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								headingsText: document.headingsText,
 								bodyTokenSequence: [
 									...(this.documentBodyTokensById[document.docId] ?? []),
+								],
+								bodyHanSegments: [
+									...(this.documentBodyHanSegmentsById[document.docId] ?? []),
 								],
 								tagValues: [
 									...(this.documentTagValuesById[document.docId] ?? []),
@@ -1262,7 +1326,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const document of state.documents) {
 			const storedDocument: CoverageLexicalDocument = {
 				docId: document.docId,
-				bodyText: document.bodyText,
 				basenameText: document.basenameText,
 				folderText: document.folderText,
 				aliasesText: document.aliasesText,
@@ -1274,6 +1337,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
 			this.documentBodyTokensById[document.docId] = [...document.bodyTokenSequence];
+			this.documentBodyHanSegmentsById[document.docId] = [
+				...document.bodyHanSegments,
+			];
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
@@ -2316,7 +2382,6 @@ function estimateDocumentStoreBytes(
 	const sections = {
 		docIds: { count: 0, referenceBytes: 0 },
 		paths: { count: 0, referenceBytes: 0 },
-		bodyText: { count: 0, referenceBytes: 0 },
 		basenameText: { count: 0, referenceBytes: 0 },
 		folderText: { count: 0, referenceBytes: 0 },
 		aliasesText: { count: 0, referenceBytes: 0 },
@@ -2330,10 +2395,6 @@ function estimateDocumentStoreBytes(
 		accountStringBytes(accumulator, path);
 		sections.paths.count += 1;
 		sections.paths.referenceBytes += INDEX_REFERENCE_BYTES;
-
-		accountStringBytes(accumulator, document.bodyText);
-		sections.bodyText.count += 1;
-		sections.bodyText.referenceBytes += INDEX_REFERENCE_BYTES;
 
 		accountStringBytes(accumulator, document.basenameText);
 		sections.basenameText.count += 1;
@@ -2407,6 +2468,7 @@ function estimateDocumentIdentityBytes(
 	documentPathById: readonly (string | undefined)[],
 	documentById: readonly (CoverageLexicalDocument | undefined)[],
 	documentBodyTokensById: readonly (readonly string[] | undefined)[],
+	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[],
 	documentTagValuesById: readonly (readonly string[] | undefined)[],
 	nextDocumentId: number,
 	accumulator: IndexSizeAccumulator,
@@ -2455,6 +2517,10 @@ function estimateDocumentIdentityBytes(
 		documentBodyTokensById,
 		accumulator,
 	);
+	const bodyHanSegmentsById = estimateSparseStringArraySlotsBytes(
+		documentBodyHanSegmentsById,
+		accumulator,
+	);
 	const tagValuesById = estimateSparseStringArraySlotsBytes(
 		documentTagValuesById,
 		accumulator,
@@ -2472,6 +2538,7 @@ function estimateDocumentIdentityBytes(
 			idToPathTotal +
 			docStoreByIdTotal +
 			bodyTokensById.total +
+			bodyHanSegmentsById.total +
 			tagValuesById.total +
 			counter.numberBytes,
 		pathToId: {
@@ -2487,6 +2554,7 @@ function estimateDocumentIdentityBytes(
 			total: docStoreByIdTotal,
 		},
 		bodyTokensById,
+		bodyHanSegmentsById,
 		tagValuesById,
 		counter,
 	};
@@ -2659,8 +2727,10 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		typeof data === "object" &&
 		data !== null &&
 		(data as Record<string, unknown>).__backend === "coverage-lexical" &&
-		(data as Record<string, unknown>).__version === 1 &&
-		(data as Record<string, unknown>).__encoding === "binary-snapshot-v1" &&
+		((((data as Record<string, unknown>).__version === 1 &&
+			(data as Record<string, unknown>).__encoding === "binary-snapshot-v1") ||
+			((data as Record<string, unknown>).__version === 2 &&
+				(data as Record<string, unknown>).__encoding === "binary-snapshot-v2"))) &&
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }

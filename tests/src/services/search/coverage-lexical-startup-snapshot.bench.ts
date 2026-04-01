@@ -91,8 +91,8 @@ describe("coverage lexical startup snapshot benchmark", () => {
 		expect(snapshot).not.toBeNull();
 		expect(snapshot).toMatchObject({
 			__backend: "coverage-lexical",
-			__version: 1,
-			__encoding: "binary-snapshot-v1",
+			__version: 2,
+			__encoding: "binary-snapshot-v2",
 		});
 		expect(snapshot?.data).toBeInstanceOf(ArrayBuffer);
 		const snapshotBytes = (snapshot?.data as ArrayBuffer).byteLength;

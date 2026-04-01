@@ -161,7 +161,7 @@ export class SearchService {
 		fileItem: FileItem,
 	): Promise<FileSubItem[]> {
 		const path = fileItem.path;
-		const nativeSubItems = this.lexicalEngine.getNativeFileSubItems(
+		const nativeSubItems = await this.lexicalEngine.getNativeFileSubItems(
 			queryText,
 			path,
 			SearchService.LEXICAL_SUBITEM_MAX_LINES,

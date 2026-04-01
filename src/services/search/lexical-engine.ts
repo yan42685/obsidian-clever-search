@@ -186,17 +186,17 @@ export class LexicalEngine {
 		return this.fileSearchEngine.serialize();
 	}
 
-	getNativeFileSubItems(
+	async getNativeFileSubItems(
 		queryText: string,
 		path: string,
 		maxSubItemResults: number,
-	): FileSubItem[] | null {
+	): Promise<FileSubItem[] | null> {
 		return (
-			this.fileSearchEngine.getDirectSubItems?.(
+			(await this.fileSearchEngine.getDirectSubItems?.(
 				queryText,
 				path,
 				maxSubItemResults,
-			) ?? null
+			)) ?? null
 		);
 	}
 

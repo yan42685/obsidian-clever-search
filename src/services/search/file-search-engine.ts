@@ -52,8 +52,8 @@ export type SerializedPassageFileSearchSnapshot = {
 
 export type SerializedCoverageLexicalBinarySnapshot = {
 	__backend: "coverage-lexical";
-	__version: 1;
-	__encoding: "binary-snapshot-v1";
+	__version: 1 | 2;
+	__encoding: "binary-snapshot-v1" | "binary-snapshot-v2";
 	data: ArrayBuffer;
 };
 
@@ -69,7 +69,7 @@ export interface FileSearchEngine {
 		queryText: string,
 		path: string,
 		maxSubItemResults: number,
-	): FileSubItem[] | null;
+	): Promise<FileSubItem[] | null>;
 	serialize(): SerializedFileSearchIndex | null;
 	estimateIndexBytes?(): number | null;
 	getIndexBreakdown?(): Record<string, unknown> | null;
@@ -1254,8 +1254,10 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		typeof data === "object" &&
 		data !== null &&
 		(data as Record<string, unknown>).__backend === "coverage-lexical" &&
-		(data as Record<string, unknown>).__version === 1 &&
-		(data as Record<string, unknown>).__encoding === "binary-snapshot-v1" &&
+		((((data as Record<string, unknown>).__version === 1 &&
+			(data as Record<string, unknown>).__encoding === "binary-snapshot-v1") ||
+			((data as Record<string, unknown>).__version === 2 &&
+				(data as Record<string, unknown>).__encoding === "binary-snapshot-v2"))) &&
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }

@@ -1,4 +1,4 @@
-import type {
+﻿import type {
 	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalPlan,
@@ -22,6 +22,9 @@ type IndexedDocument = {
 	tags?: string;
 	headings?: string;
 };
+
+let mockFileSnapshotCurrentTexts: Map<string, string> | null = null;
+let mockFileSnapshotPersistedTexts: Map<string, string> | null = null;
 
 function createMockTokenizer() {
 	function normalize(text: string): string {
@@ -98,6 +101,55 @@ function createMockTokenizer() {
 			return out;
 		},
 	};
+}
+
+function registerMockFileSnapshotStore(
+	documents: readonly IndexedDocument[] = [],
+): void {
+	const { FileSnapshotStore } = require(
+		"src/services/search/shared/file-snapshot-store",
+	) as {
+		FileSnapshotStore: new () => unknown;
+	};
+	const currentTexts =
+		mockFileSnapshotCurrentTexts ?? new Map<string, string>();
+	const persistedTexts =
+		mockFileSnapshotPersistedTexts ?? new Map<string, string>();
+	for (const document of documents) {
+		const text = document.content ?? "";
+		if (!currentTexts.has(document.path)) {
+			currentTexts.set(document.path, text);
+		}
+		if (!persistedTexts.has(document.path)) {
+			persistedTexts.set(document.path, text);
+		}
+	}
+	mockFileSnapshotCurrentTexts = currentTexts;
+	mockFileSnapshotPersistedTexts = persistedTexts;
+	container.registerInstance(FileSnapshotStore, {
+		__currentTexts: currentTexts,
+		__persistedTexts: persistedTexts,
+		peekCurrentFileText: jest.fn((path: string) => currentTexts.get(path)),
+		setCurrentFileText: jest.fn((path: string, text: string) => {
+			currentTexts.set(path, text);
+			return text;
+		}),
+		getIndexedSnapshotTexts: jest.fn(async (paths: string[]) => {
+			const results = new Map<string, string>();
+			for (const path of paths) {
+				const persisted = persistedTexts.get(path);
+				if (persisted !== undefined) {
+					results.set(path, persisted);
+				}
+			}
+			return results;
+		}),
+		readCurrentFileText: jest.fn(async (path: string) => {
+			const text = currentTexts.get(path) ?? persistedTexts.get(path) ?? "";
+			currentTexts.set(path, text);
+			return text;
+		}),
+	} as any);
 }
 
 function createComparatorPlan(
@@ -315,6 +367,8 @@ describe("coverage lexical ranking", () => {
 		} else {
 			container.clearInstances();
 		}
+		mockFileSnapshotCurrentTexts = null;
+		mockFileSnapshotPersistedTexts = null;
 		(global as any).window = {
 			localStorage: {
 				getItem: jest.fn(() => "zh"),
@@ -323,10 +377,50 @@ describe("coverage lexical ranking", () => {
 			},
 		};
 		container.registerInstance(Tokenizer, createMockTokenizer());
+		const snapshotDocuments: IndexedDocument[] = [
+			{
+				path: "pkm-zh/mixed/cache-note.md",
+				basename: "cache-note.md",
+				folder: "pkm-zh/mixed",
+				headings: "Cache note",
+				content: [
+					"alpha outline line",
+					"\u7b2c\u4e8c\u884c mixed cache \u6062\u590d note bridge",
+					"third trailing line",
+				].join("\n"),
+			},
+			{
+				path: "pkm-en/mixed/subitem-order.md",
+				basename: "subitem-order.md",
+				folder: "pkm-en/mixed",
+				headings: "Subitem order",
+				content: [
+					"plugins fast",
+					"filler filler filler filler filler filler filler filler filler",
+					"plugin fast",
+					"filler filler filler filler filler filler filler filler filler",
+					"plugons fast",
+				].join("\n"),
+			},
+			{
+				path: "pkm-zh/mixed/symbol-run.md",
+				basename: "symbol-run.md",
+				folder: "pkm-zh/mixed",
+				headings: "Symbol run",
+				content: [
+					"intro line",
+					"\u8fd9\u91cc\u662f\u4e0a\u9762 foo/bar@v1.2#tag \u7684\u539f\u6587\u7247\u6bb5",
+					"tail line",
+				].join("\n"),
+			},
+		];
+		registerMockFileSnapshotStore(snapshotDocuments);
 	});
 
 	afterEach(() => {
 		delete (global as any).window;
+		mockFileSnapshotCurrentTexts = null;
+		mockFileSnapshotPersistedTexts = null;
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -656,7 +750,6 @@ describe("coverage lexical ranking", () => {
 					"index of old project names and archived references without alias guidance",
 			},
 		];
-
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments(documents);
 
@@ -908,20 +1001,29 @@ describe("coverage lexical ranking", () => {
 					queryText: string,
 					path: string,
 					maxSubItemCount: number,
-				): Array<{
+				): Promise<Array<{
 					row: number;
 					col: number;
 					text: string;
 					highlightRanges?: Array<{ start: number; end: number }>;
-				}> | null;
+				}> | null>;
 			};
 		};
 
 		const content = [
 			"alpha outline line",
-			"第二行 mixed cache 恢复 note bridge",
+			"\u7b2c\u4e8c\u884c mixed cache \u6062\u590d note bridge",
 			"third trailing line",
 		].join("\n");
+		registerMockFileSnapshotStore([
+			{
+				path: "pkm-zh/mixed/cache-note.md",
+				basename: "cache-note.md",
+				folder: "pkm-zh/mixed",
+				headings: "Cache note",
+				content,
+			},
+		]);
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
 			{
@@ -934,7 +1036,7 @@ describe("coverage lexical ranking", () => {
 		]);
 
 		const results = await engine.searchFiles({
-			queryText: "cache 恢复 note",
+			queryText: "cache \u6062\u590d note",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 3,
@@ -944,15 +1046,15 @@ describe("coverage lexical ranking", () => {
 
 		expect(results[0]?.nativeSubItemsReady).toBe(false);
 		expect(results[0]?.directSubItems ?? []).toHaveLength(0);
-		const directSubItems = engine.getDirectSubItems(
-			"cache 恢复 note",
+		const directSubItems = await engine.getDirectSubItems(
+			"cache \u6062\u590d note",
 			"pkm-zh/mixed/cache-note.md",
 			6,
 		);
 		expect(directSubItems?.length ?? 0).toBeGreaterThan(0);
 		const firstSubItem = directSubItems?.[0];
 		expect(firstSubItem?.row).toBe(1);
-		expect(firstSubItem?.col).toBe("第二行 mixed ".length);
+		expect(firstSubItem?.col).toBe("\u7b2c\u4e8c\u884c mixed ".length);
 		expect(firstSubItem?.highlightRanges?.length ?? 0).toBeGreaterThan(0);
 		expect(firstSubItem?.text.includes("cache")).toBe(true);
 	});
@@ -980,12 +1082,11 @@ describe("coverage lexical ranking", () => {
 					queryText: string,
 					path: string,
 					maxSubItemCount: number,
-				): Array<{ text: string }> | null;
+				): Promise<Array<{ text: string }> | null>;
 			};
 		};
 
-		const engine = new CoverageLexicalFileSearchEngine();
-		await engine.addDocuments([
+		const documents = [
 			{
 				path: "pkm-en/mixed/subitem-order.md",
 				basename: "subitem-order.md",
@@ -999,7 +1100,10 @@ describe("coverage lexical ranking", () => {
 					"plugons fast",
 				].join("\n"),
 			},
-		]);
+		];
+		registerMockFileSnapshotStore(documents);
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
 
 		const results = await engine.searchFiles({
 			queryText: "plugins fast",
@@ -1011,7 +1115,7 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(results[0]?.nativeSubItemsReady).toBe(false);
-		const directSubItems = engine.getDirectSubItems(
+		const directSubItems = await engine.getDirectSubItems(
 			"plugins fast",
 			"pkm-en/mixed/subitem-order.md",
 			6,
@@ -1019,7 +1123,7 @@ describe("coverage lexical ranking", () => {
 		expect(
 			directSubItems
 				?.slice(0, 3)
-				.map((item) => item.text.toLowerCase().replace(/…/g, "")),
+				.map((item) => item.text.toLowerCase()),
 		).toEqual(["plugins fast", "plugin fast", "plugons fast"]);
 	});
 
@@ -1049,13 +1153,27 @@ describe("coverage lexical ranking", () => {
 					queryText: string,
 					path: string,
 					maxSubItemCount: number,
-				): Array<{
+				): Promise<Array<{
 					text: string;
 					highlightRanges?: Array<{ start: number; end: number }>;
-				}> | null;
+				}> | null>;
 			};
 		};
 
+		const content = [
+			"intro line",
+			"\u8fd9\u91cc\u662f\u4e0a\u9762 foo/bar@v1.2#tag \u7684\u539f\u6587\u7247\u6bb5",
+			"tail line",
+		].join("\n");
+		registerMockFileSnapshotStore([
+			{
+				path: "pkm-zh/mixed/symbol-run.md",
+				basename: "symbol-run.md",
+				folder: "pkm-zh/mixed",
+				headings: "Symbol run",
+				content,
+			},
+		]);
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
 			{
@@ -1063,16 +1181,12 @@ describe("coverage lexical ranking", () => {
 				basename: "symbol-run.md",
 				folder: "pkm-zh/mixed",
 				headings: "Symbol run",
-				content: [
-					"引言。",
-					"这里是上面 foo/bar@v1.2#tag 的真实原文片段。",
-					"尾声。",
-				].join("\n"),
+				content,
 			},
 		]);
 
 		const results = await engine.searchFiles({
-			queryText: "上面 foo/bar@v1.2#tag",
+			queryText: "\u4e0a\u9762 foo/bar@v1.2#tag",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 3,
@@ -1081,21 +1195,21 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(results[0]?.nativeSubItemsReady).toBe(false);
-		const directSubItems = engine.getDirectSubItems(
-			"上面 foo/bar@v1.2#tag",
+		const directSubItems = await engine.getDirectSubItems(
+			"\u4e0a\u9762 foo/bar@v1.2#tag",
 			"pkm-zh/mixed/symbol-run.md",
 			6,
 		);
 		expect(directSubItems?.length ?? 0).toBeGreaterThan(0);
 		const first = directSubItems?.[0];
 		const firstText = first?.text ?? "";
-		expect(first?.text).toContain("上面");
+		expect(first?.text).toContain("\u4e0a\u9762");
 		expect(first?.text).toContain("foo/bar@v1.2#tag");
 		const highlighted = (first?.highlightRanges ?? []).map((range) =>
 			firstText.slice(range.start, range.end),
 		);
-		expect(highlighted.some((segment) => segment.includes("上"))).toBe(true);
-		expect(highlighted.some((segment) => segment.includes("面"))).toBe(true);
+		expect(highlighted.some((segment) => segment.includes("\u4e0a"))).toBe(true);
+		expect(highlighted.some((segment) => segment.includes("\u9762"))).toBe(true);
 		expect(
 			highlighted.some((segment) => segment.includes("foo/bar@v1.2#tag")),
 		).toBe(true);
@@ -1189,40 +1303,62 @@ describe("coverage lexical ranking", () => {
 		const internalEngine = engine as any;
 		await engine.addDocuments([
 			{
-				path: "pkm-zh/阶段三/缓存恢复.md",
-				basename: "缓存恢复.md",
-				folder: "pkm-zh/阶段三",
-				headings: "缓存恢复",
-				content: "缓存恢复记录",
-				aliases: "恢复记录",
-				tags: "恢复 标签",
+				path: "pkm-zh/\u9636\u6bb5\u4e09/\u7f13\u5b58\u6062\u590d.md",
+				basename: "\u7f13\u5b58\u6062\u590d.md",
+				folder: "pkm-zh/\u9636\u6bb5\u4e09",
+				headings: "\u7f13\u5b58\u6062\u590d",
+				content: "\u7f13\u5b58\u6062\u590d\u8bb0\u5f55",
+				aliases: "\u6062\u590d\u8bb0\u5f55",
+				tags: "\u6062\u590d \u6807\u7b7e",
 			},
 		]);
 
-		const docId = internalEngine.documents.get("pkm-zh/阶段三/缓存恢复.md")?.docId;
+		const docId = internalEngine.documents.get(
+			"pkm-zh/\u9636\u6bb5\u4e09/\u7f13\u5b58\u6062\u590d.md",
+		)?.docId;
 		expect(typeof docId).toBe("number");
-		expect(Array.isArray(internalEngine.bodyCharPostings.get("缓存"))).toBe(true);
-		expect(Array.isArray(internalEngine.metadataAliasCharPostings.get("恢复"))).toBe(
+		expect(Array.isArray(internalEngine.bodyCharPostings.get("\u7f13\u5b58"))).toBe(
 			true,
 		);
-		expect(Array.isArray(internalEngine.metadataBasenameCharPostings.get("缓存"))).toBe(
-			true,
+		expect(
+			Array.isArray(
+				internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
+			),
+		).toBe(true);
+		expect(
+			Array.isArray(
+				internalEngine.metadataBasenameCharPostings.get("\u7f13\u5b58"),
+			),
+		).toBe(true);
+		expect(
+			Array.isArray(
+				internalEngine.metadataFolderCharPostings.get("\u9636\u6bb5"),
+			),
+		).toBe(true);
+		expect(
+			Array.isArray(
+				internalEngine.metadataHeadingCharPostings.get("\u7f13\u5b58"),
+			),
+		).toBe(true);
+		expect(
+			Array.isArray(internalEngine.metadataTagCharPostings.get("\u6807\u7b7e")),
+		).toBe(true);
+		expect(internalEngine.bodyCharPostings.get("\u7f13\u5b58")).toContain(docId);
+		expect(
+			internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
+		).toContain(docId);
+		expect(
+			internalEngine.metadataBasenameCharPostings.get("\u7f13\u5b58"),
+		).toContain(docId);
+		expect(
+			internalEngine.metadataFolderCharPostings.get("\u9636\u6bb5"),
+		).toContain(docId);
+		expect(
+			internalEngine.metadataHeadingCharPostings.get("\u7f13\u5b58"),
+		).toContain(docId);
+		expect(internalEngine.metadataTagCharPostings.get("\u6807\u7b7e")).toContain(
+			docId,
 		);
-		expect(Array.isArray(internalEngine.metadataFolderCharPostings.get("阶段"))).toBe(
-			true,
-		);
-		expect(Array.isArray(internalEngine.metadataHeadingCharPostings.get("缓存"))).toBe(
-			true,
-		);
-		expect(Array.isArray(internalEngine.metadataTagCharPostings.get("标签"))).toBe(
-			true,
-		);
-		expect(internalEngine.bodyCharPostings.get("缓存")).toContain(docId);
-		expect(internalEngine.metadataAliasCharPostings.get("恢复")).toContain(docId);
-		expect(internalEngine.metadataBasenameCharPostings.get("缓存")).toContain(docId);
-		expect(internalEngine.metadataFolderCharPostings.get("阶段")).toContain(docId);
-		expect(internalEngine.metadataHeadingCharPostings.get("缓存")).toContain(docId);
-		expect(internalEngine.metadataTagCharPostings.get("标签")).toContain(docId);
 	});
 
 	test("preserves stable doc ids across reindex and advances ids after true delete", async () => {

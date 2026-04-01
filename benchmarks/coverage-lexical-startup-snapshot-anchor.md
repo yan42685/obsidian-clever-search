@@ -15,7 +15,7 @@ Date: 2026-04-01
 ## Relationship To The Active Query Anchor
 
 - active query anchor:
-  - `benchmarks/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md`
+  - `benchmarks/coverage-lexical-size-latency-baseline-live-memory-bodytext-offload.md`
 - this file is not a replacement for the query anchor
 - use both anchors together:
   - query anchor for quality, query-time latency, and structural in-memory size
@@ -46,11 +46,14 @@ Date: 2026-04-01
 ## Structural Baseline
 
 - current in-memory structural estimate:
-  - `CoverageLexical`: 286.625 KB
+  - `CoverageLexical`: 172.151 KB
 - current size ratio reference:
-  - `CoverageLexical / MiniSearch`: `4.94`
+  - `CoverageLexical / MiniSearch`: `2.967`
 - current relevant structure reference points:
-  - `documentIdentity.total`: 2,644 bytes
+  - `documentIdentity.total`: 23,868 bytes
+  - `bodyTokensById.total`: 19,816 bytes
+  - `bodyHanSegmentsById.total`: 1,060 bytes
+  - `tagValuesById.total`: 928 bytes
   - `postings.body`: 25,436 bytes
   - `postings.bodyPhrase`: 48,796 bytes
   - `postings.metadata`: 4,696 bytes
@@ -119,14 +122,28 @@ The startup benchmark should run three distinct modes once binary persistence ex
   - startup remains usable before full repair completes
   - the repair path is measurably cheaper than a full rebuild for small vault drift
 
+## Current Anchor State
+
+- first live-memory slimming cut is now landed:
+  - `CoverageLexicalDocument` no longer stores resident `bodyText`
+  - `getDirectSubItems()` reads body text on demand from `FileSnapshotStore`
+  - delete and rebuild keep using doc-id side ownership:
+    - `documentBodyTokensById`
+    - `documentBodyHanSegmentsById`
+    - `documentTagValuesById`
+- current startup anchor from three benchmark runs:
+  - snapshot bytes: `87,026`
+  - snapshot write ms center: `57.866`
+  - hydrate ms center: `11.034`
+  - rebuild ms center: `40.978`
+  - `hydrate / rebuild` center: `0.271`
+  - `readyToSearch / rebuild` center: `0.271`
+  - `snapshotBytes / estimatedIndexBytes`: `0.494`
+
 ## Immediate Next Step
 
-- slim `CoverageLexicalDocument` first:
-  - keep only raw source fields needed for direct subitems and delete-time rebuild
-  - keep query-hot token and tag arrays in maintained doc-id side storage
-  - remove query-cold derived per-document sets from live resident memory
-- validate the first cut with:
-  - coverage benchmark
-  - startup snapshot benchmark
-  - index breakdown
-- do not optimize persisted encoding density aggressively before the live document layout settles
+- continue slimming remaining query-cold resident metadata without regressing:
+  - coverage benchmark quality
+  - query-time ratio anchor
+  - startup hydrate ratio
+- keep persisted binary encoding work secondary until the live resident layout stabilizes again

@@ -106,14 +106,27 @@ Every retained change should be evaluated against the same four anchors:
     - char bigram postings
   - current benchmark interpretation:
     - quality is unchanged
-    - size is still effectively unchanged
-    - the latest retained latency gains came from query-time hot-path flattening, not from additional numeric-first posting migration by itself
+    - the latest retained gain came from live-memory slimming, not from more numeric migration by itself
+    - the active query anchor is now:
+      - `benchmarks/coverage-lexical-size-latency-baseline-live-memory-bodytext-offload.md`
+    - the active startup anchor remains:
+      - `benchmarks/coverage-lexical-startup-snapshot-anchor.md`
+    - current retained ratios:
+      - query ratio center:
+        - avg `2.840`
+        - p50 `2.482`
+        - p100 `3.242`
+      - size ratio:
+        - `CoverageLexical / MiniSearch = 2.967`
+      - startup `hydrate / rebuild` center:
+        - `0.271`
     - continue numeric migration when it removes a measured hot-path bridge or clearly improves the binary-friendly live layout, not as a latency story by default
   - the current active `Phase 3A` follow-up is now fixed:
-    - slim `CoverageLexicalDocument` first
-    - remove query-cold derived per-document sets that only exist to support delete or rebuild
-    - keep query-hot ownership in maintained doc-id arrays
-    - validate with:
+    - first slice landed:
+      - `CoverageLexicalDocument.bodyText` moved out of the resident live document
+      - direct subitems now fetch source body text on demand from `FileSnapshotStore`
+      - delete and rebuild use maintained doc-id side arrays for retained ownership
+    - continue validating with:
       - coverage benchmark
       - startup snapshot benchmark
       - index breakdown
@@ -366,9 +379,12 @@ Phase 3 deliverables are now split into three concrete subphases:
   - finish migrating hot postings and document identity ownership toward numeric-first storage
   - centralize repeated strings so future snapshotting can write shared ids instead of repeated text
   - first active slice inside this phase:
-    - slim `CoverageLexicalDocument` down to raw source fields plus query-hot doc-id side arrays
-    - delete query-cold derived sets from the live document object
-    - rebuild those derived sets only on delete or reindex paths
+    - landed:
+      - slim `CoverageLexicalDocument` by removing resident `bodyText`
+      - fetch direct-subitems body text from `FileSnapshotStore` on demand
+      - keep `bodyTokensById`, `bodyHanSegmentsById`, and `tagValuesById` as maintained doc-id side ownership
+    - next:
+      - evaluate whether remaining raw metadata text retention can shrink further without hurting query quality or startup readiness
   - acceptance:
     - no high-cardinality hot path still requires a string-keyed bridge as its main identity carrier
     - size breakdown shows repeated-string retention moving downward

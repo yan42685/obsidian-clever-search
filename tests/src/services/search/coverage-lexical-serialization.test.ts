@@ -53,6 +53,49 @@ function createMockTokenizer() {
 	};
 }
 
+function registerMockFileSnapshotStore(
+	documents: readonly IndexedDocument[] = [],
+): {
+	currentTexts: Map<string, string>;
+	persistedTexts: Map<string, string>;
+} {
+	const { FileSnapshotStore } = require(
+		"src/services/search/shared/file-snapshot-store",
+	) as {
+		FileSnapshotStore: new () => unknown;
+	};
+	const currentTexts = new Map<string, string>();
+	const persistedTexts = new Map<string, string>();
+	for (const document of documents) {
+		const text = document.content ?? "";
+		currentTexts.set(document.path, text);
+		persistedTexts.set(document.path, text);
+	}
+	container.registerInstance(FileSnapshotStore, {
+		peekCurrentFileText: jest.fn((path: string) => currentTexts.get(path)),
+		setCurrentFileText: jest.fn((path: string, text: string) => {
+			currentTexts.set(path, text);
+			return text;
+		}),
+		getIndexedSnapshotTexts: jest.fn(async (paths: string[]) => {
+			const results = new Map<string, string>();
+			for (const path of paths) {
+				const persisted = persistedTexts.get(path);
+				if (persisted !== undefined) {
+					results.set(path, persisted);
+				}
+			}
+			return results;
+		}),
+		readCurrentFileText: jest.fn(async (path: string) => {
+			const text = currentTexts.get(path) ?? persistedTexts.get(path) ?? "";
+			currentTexts.set(path, text);
+			return text;
+		}),
+	} as any);
+	return { currentTexts, persistedTexts };
+}
+
 describe("coverage lexical binary snapshot", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
@@ -93,7 +136,7 @@ describe("coverage lexical binary snapshot", () => {
 					queryText: string,
 					path: string,
 					maxSubItemCount: number,
-				): Array<{ text: string }> | null;
+				): Promise<Array<{ text: string }> | null>;
 				searchFiles(request: {
 					queryText: string;
 					isPrefixMatch: boolean;
@@ -110,9 +153,7 @@ describe("coverage lexical binary snapshot", () => {
 			maxItemResults: 10,
 		};
 		const targetPath = "notes/restore-target.md";
-		const engine = new CoverageLexicalFileSearchEngine();
-		expect(engine.supportsSerialization).toBe(true);
-		await engine.addDocuments([
+		const documents = [
 			{
 				path: targetPath,
 				basename: "restore target",
@@ -130,7 +171,11 @@ describe("coverage lexical binary snapshot", () => {
 				content:
 					"alpha appears here but beta and gamma are separated by unrelated filler text",
 			},
-		]);
+		];
+		const fileSnapshotStore = registerMockFileSnapshotStore(documents);
+		const engine = new CoverageLexicalFileSearchEngine();
+		expect(engine.supportsSerialization).toBe(true);
+		await engine.addDocuments(documents);
 
 		const beforeSnapshot = await engine.searchFiles(query);
 		expect(beforeSnapshot[0]?.path).toBe(targetPath);
@@ -139,8 +184,8 @@ describe("coverage lexical binary snapshot", () => {
 		expect(snapshot).not.toBeNull();
 		expect(snapshot).toMatchObject({
 			__backend: "coverage-lexical",
-			__version: 1,
-			__encoding: "binary-snapshot-v1",
+			__version: 2,
+			__encoding: "binary-snapshot-v2",
 		});
 		expect(snapshot?.data).toBeInstanceOf(ArrayBuffer);
 
@@ -154,7 +199,7 @@ describe("coverage lexical binary snapshot", () => {
 			expect.arrayContaining(["alpha", "beta", "gamma"]),
 		);
 
-		const subItems = restored.getDirectSubItems("gamma", targetPath, 2);
+		const subItems = await restored.getDirectSubItems("gamma", targetPath, 2);
 		expect(subItems).not.toBeNull();
 		expect(subItems?.length).toBeGreaterThan(0);
 
