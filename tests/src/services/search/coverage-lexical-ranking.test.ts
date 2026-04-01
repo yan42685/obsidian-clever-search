@@ -1260,7 +1260,6 @@ describe("coverage lexical ranking", () => {
 		expect(
 			Array.isArray(internalEngine.metadataHeadingPhrasePostings.get("hot postings")),
 		).toBe(true);
-		expect(Array.isArray(internalEngine.metadataPostings.get("phase3"))).toBe(true);
 		expect(Array.isArray(internalEngine.metadataTagPostings.get("phase3"))).toBe(true);
 		expect(Array.isArray(internalEngine.metadataTagFullPostings.get("phase3,cache"))).toBe(
 			true,

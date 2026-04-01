@@ -274,7 +274,6 @@ describe("coverage lexical recall suite", () => {
 					metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 					metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: engineAny.metadataHeadingPostings,
-					metadataPostings: engineAny.metadataPostings,
 					bodyPhrasePostings: engineAny.bodyPhrasePostings,
 					metadataPhrasePostings: engineAny.metadataPhrasePostings,
 					metadataTagCharPostings: engineAny.metadataTagCharPostings,

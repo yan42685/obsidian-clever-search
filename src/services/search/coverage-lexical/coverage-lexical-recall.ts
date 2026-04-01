@@ -49,7 +49,6 @@ type CoverageLexicalRecallIndex = {
 	metadataHeadingPhrasePostings: CoverageLexicalPostingMap;
 	metadataHeadingPostings: CoverageLexicalPostingMap;
 	metadataPhrasePostings?: CoverageLexicalPostingMap;
-	metadataPostings: CoverageLexicalPostingMap;
 	bodyPhrasePostings: CoverageLexicalPostingMap;
 	metadataTagCharPostings: CoverageLexicalPostingMap;
 	metadataTagFullPostings: CoverageLexicalPostingMap;
@@ -2128,16 +2127,13 @@ function collectCandidatesForPhraseSignature(
 		}
 
 		if (!signature.preferredFields || signature.preferredFields.length === 0) {
-			const metadataTokenMatches = index.metadataPostings.get(variant);
-			if (metadataTokenMatches) {
-				forEachPostingCandidateKey(index, metadataTokenMatches, (key) => {
-					const state = getOrCreateDocIdCandidateState(candidates, key);
-					recordPhraseMatch(state, signature.index);
-					for (const familyIndex of signature.familyIndices) {
-						recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
-					}
-				});
-			}
+			forEachAnyMetadataExactPostingCandidateKey(index, variant, (key) => {
+				const state = getOrCreateDocIdCandidateState(candidates, key);
+				recordPhraseMatch(state, signature.index);
+				for (const familyIndex of signature.familyIndices) {
+					recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
+				}
+			});
 			collectAnyMetadataPhraseMatches(index, candidates, signature, variant);
 			continue;
 		}
@@ -2397,14 +2393,6 @@ function collectMetadataFieldCandidatesForTerm(
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
 		});
 	}
-	const metadataMatches = index.metadataPostings.get(term);
-	if (!metadataMatches) {
-		return;
-	}
-	forEachPostingCandidateKey(index, metadataMatches, (key) => {
-		const state = getOrCreateDocIdCandidateState(candidates, key);
-		recordFamilyMatch(state.metadataMatches, familyIndex, kind);
-	});
 }
 
 function collectPreferredMetadataPhraseMatches(
@@ -2495,6 +2483,39 @@ function forEachPostingCandidateKey(
 			visitor(docId);
 		}
 	}
+}
+
+function forEachAnyMetadataExactPostingCandidateKey(
+	index: CoverageLexicalRecallIndex,
+	term: string,
+	visitor: (key: CoverageLexicalCandidateKey) => void,
+): void {
+	const seen = new Set<CoverageLexicalCandidateKey>();
+	for (const postings of getMetadataExactPostingMaps(index)) {
+		const matches = postings.get(term);
+		if (!matches) {
+			continue;
+		}
+		forEachPostingCandidateKey(index, matches, (key) => {
+			if (seen.has(key)) {
+				return;
+			}
+			seen.add(key);
+			visitor(key);
+		});
+	}
+}
+
+function getMetadataExactPostingMaps(
+	index: CoverageLexicalRecallIndex,
+): readonly CoverageLexicalPostingMap[] {
+	return [
+		index.metadataBasenamePostings,
+		index.metadataAliasPostings,
+		index.metadataFolderPostings,
+		index.metadataHeadingPostings,
+		index.metadataTagPostings,
+	];
 }
 
 function projectCandidateStatesToPaths(

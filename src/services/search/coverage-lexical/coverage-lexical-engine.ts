@@ -99,7 +99,6 @@ type CoverageLexicalDerivedDocumentIndexState = {
 	headingTerms: Set<string>;
 	headingCharTerms: Set<string>;
 	headingPhraseTerms: Set<string>;
-	metadataTerms: Set<string>;
 	tagTerms: Set<string>;
 	tagCharTerms: Set<string>;
 	tagPhraseTerms: Set<string>;
@@ -168,13 +167,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.headingsText),
 	);
 	const headingCharTerms = new Set(extractHanBigrams(document.headingsText));
-	const metadataTerms = new Set([
-		...basenameTerms,
-		...folderTerms,
-		...aliasTerms,
-		...tagTerms,
-		...headingTerms,
-	]);
 	return {
 		bodyTokenSequence,
 		bodyHanSegments,
@@ -193,7 +185,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		headingTerms,
 		headingCharTerms,
 		headingPhraseTerms: buildCoverageLexicalPhraseTermSet(headingTerms),
-		metadataTerms,
 		tagTerms,
 		tagCharTerms,
 		tagPhraseTerms: buildCoverageLexicalPhraseTermSet(tagTerms),
@@ -311,25 +302,19 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new Map<string, number[]>();
 	private readonly bodyCharPostings = new Map<string, number[]>();
-	private readonly bodyHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly bodyPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
-	private readonly metadataAliasHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasPostings = new Map<string, number[]>();
 	private readonly metadataBasenameCharPostings = new Map<string, number[]>();
-	private readonly metadataBasenameHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataBasenamePhrasePostings = new Map<string, number[]>();
 	private readonly metadataBasenamePostings = new Map<string, number[]>();
 	private readonly metadataFolderCharPostings = new Map<string, number[]>();
-	private readonly metadataFolderHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataFolderPhrasePostings = new Map<string, number[]>();
 	private readonly metadataFolderPostings = new Map<string, number[]>();
 	private readonly metadataHeadingCharPostings = new Map<string, number[]>();
-	private readonly metadataHeadingHanSegmentPostings = new Map<string, Set<string>>();
 	private readonly metadataHeadingPhrasePostings = new Map<string, number[]>();
 	private readonly metadataHeadingPostings = new Map<string, number[]>();
-	private readonly metadataPostings = new Map<string, number[]>();
 	private readonly metadataTagCharPostings = new Map<string, number[]>();
 	private readonly metadataTagFullPostings = new Map<string, number[]>();
 	private readonly metadataTagPhrasePostings = new Map<string, number[]>();
@@ -490,25 +475,19 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.nextDocumentId = 0;
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
-		this.bodyHanSegmentPostings.clear();
 		this.bodyPhrasePostings.clear();
 		this.metadataAliasCharPostings.clear();
-		this.metadataAliasHanSegmentPostings.clear();
 		this.metadataAliasPhrasePostings.clear();
 		this.metadataAliasPostings.clear();
 		this.metadataBasenameCharPostings.clear();
-		this.metadataBasenameHanSegmentPostings.clear();
 		this.metadataBasenamePhrasePostings.clear();
 		this.metadataBasenamePostings.clear();
 		this.metadataFolderCharPostings.clear();
-		this.metadataFolderHanSegmentPostings.clear();
 		this.metadataFolderPhrasePostings.clear();
 		this.metadataFolderPostings.clear();
 		this.metadataHeadingCharPostings.clear();
-		this.metadataHeadingHanSegmentPostings.clear();
 		this.metadataHeadingPhrasePostings.clear();
 		this.metadataHeadingPostings.clear();
-		this.metadataPostings.clear();
 		this.metadataTagCharPostings.clear();
 		this.metadataTagFullPostings.clear();
 		this.metadataTagPhrasePostings.clear();
@@ -613,24 +592,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				{
 					bodyPostings: this.bodyPostings,
 					bodyCharPostings: this.bodyCharPostings,
-					bodyHanSegmentPostings: this.bodyHanSegmentPostings,
 					metadataAliasCharPostings: this.metadataAliasCharPostings,
-					metadataAliasHanSegmentPostings: this.metadataAliasHanSegmentPostings,
 					metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
 					metadataAliasPostings: this.metadataAliasPostings,
 					metadataBasenameCharPostings: this.metadataBasenameCharPostings,
-					metadataBasenameHanSegmentPostings: this.metadataBasenameHanSegmentPostings,
 					metadataBasenamePhrasePostings: this.metadataBasenamePhrasePostings,
 					metadataBasenamePostings: this.metadataBasenamePostings,
 					metadataFolderCharPostings: this.metadataFolderCharPostings,
-					metadataFolderHanSegmentPostings: this.metadataFolderHanSegmentPostings,
 					metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
 					metadataFolderPostings: this.metadataFolderPostings,
 					metadataHeadingCharPostings: this.metadataHeadingCharPostings,
-					metadataHeadingHanSegmentPostings: this.metadataHeadingHanSegmentPostings,
 					metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: this.metadataHeadingPostings,
-					metadataPostings: this.metadataPostings,
 					bodyPhrasePostings: this.bodyPhrasePostings,
 					metadataTagCharPostings: this.metadataTagCharPostings,
 					metadataTagFullPostings: this.metadataTagFullPostings,
@@ -810,25 +783,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			nextDocumentId: this.nextDocumentId,
 			bodyTermCount: this.bodyPostings.size,
 			bodyCharTermCount: this.bodyCharPostings.size,
-			bodyHanSegmentTermCount: this.bodyHanSegmentPostings.size,
 			bodyPhraseTermCount: this.bodyPhrasePostings.size,
 			metadataAliasCharTermCount: this.metadataAliasCharPostings.size,
-			metadataAliasHanSegmentTermCount: this.metadataAliasHanSegmentPostings.size,
 			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
 			metadataBasenameCharTermCount: this.metadataBasenameCharPostings.size,
-			metadataBasenameHanSegmentTermCount: this.metadataBasenameHanSegmentPostings.size,
 			metadataBasenamePhraseTermCount: this.metadataBasenamePhrasePostings.size,
 			metadataBasenameTermCount: this.metadataBasenamePostings.size,
 			metadataFolderCharTermCount: this.metadataFolderCharPostings.size,
-			metadataFolderHanSegmentTermCount: this.metadataFolderHanSegmentPostings.size,
 			metadataFolderPhraseTermCount: this.metadataFolderPhrasePostings.size,
 			metadataFolderTermCount: this.metadataFolderPostings.size,
 			metadataHeadingCharTermCount: this.metadataHeadingCharPostings.size,
-			metadataHeadingHanSegmentTermCount: this.metadataHeadingHanSegmentPostings.size,
 			metadataHeadingPhraseTermCount: this.metadataHeadingPhrasePostings.size,
 			metadataHeadingTermCount: this.metadataHeadingPostings.size,
-			metadataTermCount: this.metadataPostings.size,
+			metadataTermCount: countPostingMapKeyUnion(
+				this.getMetadataExactPostingMaps(),
+			),
 			metadataTagCharTermCount: this.metadataTagCharPostings.size,
 			metadataTagFullTermCount: this.metadataTagFullPostings.size,
 			metadataTagPhraseTermCount: this.metadataTagPhrasePostings.size,
@@ -856,10 +826,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const postings = {
 			body: estimateNumericPostingMapBytes(this.bodyPostings, accumulator),
 			bodyChar: estimateNumericPostingMapBytes(this.bodyCharPostings, accumulator),
-			bodyHanSegments: estimatePostingMapBytes(
-				this.bodyHanSegmentPostings,
-				accumulator,
-			),
 			bodyPhrase: estimateNumericPostingMapBytes(
 				this.bodyPhrasePostings,
 				accumulator,
@@ -870,10 +836,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			),
 			metadataAliasChar: estimateNumericPostingMapBytes(
 				this.metadataAliasCharPostings,
-				accumulator,
-			),
-			metadataAliasHanSegments: estimatePostingMapBytes(
-				this.metadataAliasHanSegmentPostings,
 				accumulator,
 			),
 			metadataAliasPhrase: estimateNumericPostingMapBytes(
@@ -888,10 +850,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataBasenameCharPostings,
 				accumulator,
 			),
-			metadataBasenameHanSegments: estimatePostingMapBytes(
-				this.metadataBasenameHanSegmentPostings,
-				accumulator,
-			),
 			metadataBasenamePhrase: estimateNumericPostingMapBytes(
 				this.metadataBasenamePhrasePostings,
 				accumulator,
@@ -902,10 +860,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			),
 			metadataFolderChar: estimateNumericPostingMapBytes(
 				this.metadataFolderCharPostings,
-				accumulator,
-			),
-			metadataFolderHanSegments: estimatePostingMapBytes(
-				this.metadataFolderHanSegmentPostings,
 				accumulator,
 			),
 			metadataFolderPhrase: estimateNumericPostingMapBytes(
@@ -920,16 +874,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.metadataHeadingCharPostings,
 				accumulator,
 			),
-			metadataHeadingHanSegments: estimatePostingMapBytes(
-				this.metadataHeadingHanSegmentPostings,
-				accumulator,
-			),
 			metadataHeadingPhrase: estimateNumericPostingMapBytes(
 				this.metadataHeadingPhrasePostings,
-				accumulator,
-			),
-			metadata: estimateNumericPostingMapBytes(
-				this.metadataPostings,
 				accumulator,
 			),
 			metadataTag: estimateNumericPostingMapBytes(
@@ -1038,10 +984,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of derivedState.headingPhraseTerms) {
 			addNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
-		for (const term of derivedState.metadataTerms) {
-			addNumericPosting(this.metadataPostings, term, docId);
-			this.lexicon.add(term);
-		}
 		for (const term of derivedState.tagTerms) {
 			addNumericPosting(this.metadataTagPostings, term, docId);
 			this.lexicon.add(term);
@@ -1122,9 +1064,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of derivedState.headingPhraseTerms) {
 			removeNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
-		for (const term of derivedState.metadataTerms) {
-			removeNumericPosting(this.metadataPostings, term, docId);
-		}
 		for (const term of derivedState.tagTerms) {
 			removeNumericPosting(this.metadataTagPostings, term, docId);
 		}
@@ -1174,14 +1113,26 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of this.bodyPostings.keys()) {
 			nextLexicon.add(term);
 		}
-		for (const term of this.metadataPostings.keys()) {
-			nextLexicon.add(term);
+		for (const postings of this.getMetadataExactPostingMaps()) {
+			for (const term of postings.keys()) {
+				nextLexicon.add(term);
+			}
 		}
 		this.lexicon.clear();
 		for (const term of nextLexicon) {
 			this.lexicon.add(term);
 		}
 		this.sortedLexicon = Array.from(this.lexicon).sort();
+	}
+
+	private getMetadataExactPostingMaps(): readonly ReadonlyMap<string, readonly number[]>[] {
+		return [
+			this.metadataBasenamePostings,
+			this.metadataAliasPostings,
+			this.metadataFolderPostings,
+			this.metadataHeadingPostings,
+			this.metadataTagPostings,
+		];
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -1235,9 +1186,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								bodyTokenSequence: [
 									...(this.documentBodyTokensById[document.docId] ?? []),
 								],
-								bodyHanSegments: [
-									...(this.documentBodyHanSegmentsById[document.docId] ?? []),
-								],
+								bodyHanSegments: [],
 								tagValues: [
 									...(this.documentTagValuesById[document.docId] ?? []),
 								],
@@ -1247,18 +1196,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			),
 			bodyPostings: cloneNumericPostingMap(this.bodyPostings),
 			bodyCharPostings: cloneNumericPostingMap(this.bodyCharPostings),
-			bodyHanSegmentPostings: convertPathPostingMapToDocIds(
-				this.bodyHanSegmentPostings,
-				this.documentIdByPath,
-			),
+			bodyHanSegmentPostings: new Map(),
 			bodyPhrasePostings: cloneNumericPostingMap(this.bodyPhrasePostings),
 			metadataAliasCharPostings: cloneNumericPostingMap(
 				this.metadataAliasCharPostings,
 			),
-			metadataAliasHanSegmentPostings: convertPathPostingMapToDocIds(
-				this.metadataAliasHanSegmentPostings,
-				this.documentIdByPath,
-			),
+			metadataAliasHanSegmentPostings: new Map(),
 			metadataAliasPhrasePostings: cloneNumericPostingMap(
 				this.metadataAliasPhrasePostings,
 			),
@@ -1266,10 +1209,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataBasenameCharPostings: cloneNumericPostingMap(
 				this.metadataBasenameCharPostings,
 			),
-			metadataBasenameHanSegmentPostings: convertPathPostingMapToDocIds(
-				this.metadataBasenameHanSegmentPostings,
-				this.documentIdByPath,
-			),
+			metadataBasenameHanSegmentPostings: new Map(),
 			metadataBasenamePhrasePostings: cloneNumericPostingMap(
 				this.metadataBasenamePhrasePostings,
 			),
@@ -1279,10 +1219,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataFolderCharPostings: cloneNumericPostingMap(
 				this.metadataFolderCharPostings,
 			),
-			metadataFolderHanSegmentPostings: convertPathPostingMapToDocIds(
-				this.metadataFolderHanSegmentPostings,
-				this.documentIdByPath,
-			),
+			metadataFolderHanSegmentPostings: new Map(),
 			metadataFolderPhrasePostings: cloneNumericPostingMap(
 				this.metadataFolderPhrasePostings,
 			),
@@ -1290,17 +1227,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataHeadingCharPostings: cloneNumericPostingMap(
 				this.metadataHeadingCharPostings,
 			),
-			metadataHeadingHanSegmentPostings: convertPathPostingMapToDocIds(
-				this.metadataHeadingHanSegmentPostings,
-				this.documentIdByPath,
-			),
+			metadataHeadingHanSegmentPostings: new Map(),
 			metadataHeadingPhrasePostings: cloneNumericPostingMap(
 				this.metadataHeadingPhrasePostings,
 			),
 			metadataHeadingPostings: cloneNumericPostingMap(
 				this.metadataHeadingPostings,
 			),
-			metadataPostings: cloneNumericPostingMap(this.metadataPostings),
+			metadataPostings: new Map(),
 			metadataTagCharPostings: cloneNumericPostingMap(
 				this.metadataTagCharPostings,
 			),
@@ -1344,20 +1278,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
 		restoreNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
-		restorePathPostingMap(
-			this.bodyHanSegmentPostings,
-			state.bodyHanSegmentPostings,
-			this.documentPathById,
-		);
 		restoreNumericPostingMap(this.bodyPhrasePostings, state.bodyPhrasePostings);
 		restoreNumericPostingMap(
 			this.metadataAliasCharPostings,
 			state.metadataAliasCharPostings,
-		);
-		restorePathPostingMap(
-			this.metadataAliasHanSegmentPostings,
-			state.metadataAliasHanSegmentPostings,
-			this.documentPathById,
 		);
 		restoreNumericPostingMap(
 			this.metadataAliasPhrasePostings,
@@ -1367,11 +1291,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		restoreNumericPostingMap(
 			this.metadataBasenameCharPostings,
 			state.metadataBasenameCharPostings,
-		);
-		restorePathPostingMap(
-			this.metadataBasenameHanSegmentPostings,
-			state.metadataBasenameHanSegmentPostings,
-			this.documentPathById,
 		);
 		restoreNumericPostingMap(
 			this.metadataBasenamePhrasePostings,
@@ -1385,11 +1304,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataFolderCharPostings,
 			state.metadataFolderCharPostings,
 		);
-		restorePathPostingMap(
-			this.metadataFolderHanSegmentPostings,
-			state.metadataFolderHanSegmentPostings,
-			this.documentPathById,
-		);
 		restoreNumericPostingMap(
 			this.metadataFolderPhrasePostings,
 			state.metadataFolderPhrasePostings,
@@ -1399,11 +1313,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataHeadingCharPostings,
 			state.metadataHeadingCharPostings,
 		);
-		restorePathPostingMap(
-			this.metadataHeadingHanSegmentPostings,
-			state.metadataHeadingHanSegmentPostings,
-			this.documentPathById,
-		);
 		restoreNumericPostingMap(
 			this.metadataHeadingPhrasePostings,
 			state.metadataHeadingPhrasePostings,
@@ -1412,7 +1321,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataHeadingPostings,
 			state.metadataHeadingPostings,
 		);
-		restoreNumericPostingMap(this.metadataPostings, state.metadataPostings);
 		restoreNumericPostingMap(
 			this.metadataTagCharPostings,
 			state.metadataTagCharPostings,
@@ -1431,7 +1339,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
 		return queryTerms.map((term) => ({
 			bodyExactDocCount: getPostingEntryCount(this.bodyPostings.get(term)),
-			metadataExactDocCount: getPostingEntryCount(this.metadataPostings.get(term)),
+			metadataExactDocCount: getUnionPostingEntryCount([
+				this.metadataBasenamePostings.get(term),
+				this.metadataAliasPostings.get(term),
+				this.metadataFolderPostings.get(term),
+				this.metadataHeadingPostings.get(term),
+				this.metadataTagPostings.get(term),
+			]),
 			basenameExactDocCount: getPostingEntryCount(
 				this.metadataBasenamePostings.get(term),
 			),
@@ -2308,38 +2222,6 @@ function estimateStringSetBytes(
 	return estimateStringArrayBytes(Array.from(values), accumulator);
 }
 
-function estimatePostingMapBytes(
-	postings: ReadonlyMap<string, ReadonlySet<string>>,
-	accumulator: IndexSizeAccumulator,
-): {
-	total: number;
-	termCount: number;
-	postingCount: number;
-	mapEntryBytes: number;
-	referenceBytes: number;
-} {
-	let termCount = 0;
-	let postingCount = 0;
-	for (const [term, paths] of postings.entries()) {
-		termCount += 1;
-		accountStringBytes(accumulator, term);
-		for (const path of paths) {
-			postingCount += 1;
-			accountStringBytes(accumulator, path);
-		}
-	}
-	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
-	const referenceBytes =
-		termCount * INDEX_REFERENCE_BYTES + postingCount * INDEX_REFERENCE_BYTES;
-	return {
-		total: INDEX_COLLECTION_HEADER_BYTES + mapEntryBytes + referenceBytes,
-		termCount,
-		postingCount,
-		mapEntryBytes,
-		referenceBytes,
-	};
-}
-
 function estimateNumericPostingMapBytes(
 	postings: ReadonlyMap<string, readonly number[]>,
 	accumulator: IndexSizeAccumulator,
@@ -2603,6 +2485,33 @@ function getPostingEntryCount(
 		: (postings as ReadonlySet<string>).size;
 }
 
+function getUnionPostingEntryCount(
+	postingsLists: readonly (readonly number[] | undefined)[],
+): number {
+	const seen = new Set<number>();
+	for (const postings of postingsLists) {
+		if (!postings) {
+			continue;
+		}
+		for (const docId of postings) {
+			seen.add(docId);
+		}
+	}
+	return seen.size;
+}
+
+function countPostingMapKeyUnion(
+	postingMaps: readonly ReadonlyMap<string, readonly number[]>[],
+): number {
+	const terms = new Set<string>();
+	for (const postings of postingMaps) {
+		for (const term of postings.keys()) {
+			terms.add(term);
+		}
+	}
+	return terms.size;
+}
+
 function addPosting(
 	postings: Map<string, Set<string>>,
 	term: string,
@@ -2640,20 +2549,6 @@ function cloneNumericPostingMap(
 	);
 }
 
-function convertPathPostingMapToDocIds(
-	postings: ReadonlyMap<string, ReadonlySet<string>>,
-	documentIdByPath: ReadonlyMap<string, number>,
-): Map<string, readonly number[]> {
-	return new Map(
-		Array.from(postings.entries(), ([term, paths]) => [
-			term,
-			Array.from(paths, (path) => documentIdByPath.get(path))
-				.filter((docId): docId is number => docId !== undefined)
-				.sort((left, right) => left - right),
-		]),
-	);
-}
-
 function restoreNumericPostingMap(
 	target: Map<string, number[]>,
 	source: ReadonlyMap<string, readonly number[]>,
@@ -2661,24 +2556,6 @@ function restoreNumericPostingMap(
 	target.clear();
 	for (const [term, docIds] of source) {
 		target.set(term, [...docIds]);
-	}
-}
-
-function restorePathPostingMap(
-	target: Map<string, Set<string>>,
-	source: ReadonlyMap<string, readonly number[]>,
-	documentPathById: readonly (string | undefined)[],
-): void {
-	target.clear();
-	for (const [term, docIds] of source) {
-		const paths = new Set<string>();
-		for (const docId of docIds) {
-			const path = documentPathById[docId];
-			if (path) {
-				paths.add(path);
-			}
-		}
-		target.set(term, paths);
 	}
 }
 
