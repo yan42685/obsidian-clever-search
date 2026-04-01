@@ -19,6 +19,7 @@
 	export let placeholder = "";
 	export let variant: "default" | "omni" = "default";
 	export let showMatchCount = true;
+	export let completionMode: "history" | "plain" = "history";
 
 	type HighlightPart = {
 		text: string;
@@ -50,6 +51,10 @@
 	$: normalizedQueryText = editableQueryText.trim();
 	$: ghostSuffix = getGhostSuffix(ghostSuggestion, editableQueryText);
 	$: recentSuggestionQueries = getRecentSuggestionQueries(historySuggestions);
+	$: if (completionMode === "plain") {
+		ghostSuggestion = null;
+		closeHistorySuggestions();
+	}
 	$: if (searchInputEl) {
 		if (searchInputEl.textContent !== editableQueryText) {
 			searchInputEl.textContent = editableQueryText;
@@ -66,6 +71,10 @@
 		};
 	}
 
+	function isHistoryCompletionEnabled(): boolean {
+		return completionMode === "history" && searchHistoryService.isEnabled();
+	}
+
 	function updateSuggestionsState() {
 		const prevSelectedQuery = getSelectedSuggestion()?.queryText ?? null;
 		clearAutoSuppressionsIfNeeded();
@@ -73,6 +82,12 @@
 			ghostSuggestion = null;
 			closeHistorySuggestions();
 			suppressSuggestionsOnce = false;
+			return;
+		}
+
+		if (!isHistoryCompletionEnabled()) {
+			ghostSuggestion = null;
+			closeHistorySuggestions();
 			return;
 		}
 
@@ -223,6 +238,16 @@
 			return;
 		}
 
+		if (event.key === "Delete" && isHistoryDropdownOpen) {
+			const selectedHistory = getSelectedSuggestion();
+			if (selectedHistory) {
+				event.preventDefault();
+				event.stopPropagation();
+				void removeSuggestion(selectedHistory.queryText);
+				return;
+			}
+		}
+
 		if (event.key === "Enter") {
 			if (isHistoryDropdownOpen && historySuggestions.length > 0) {
 				const selectedHistory = getSelectedSuggestion();
@@ -237,7 +262,6 @@
 			event.preventDefault();
 			return;
 		}
-
 	}
 
 	function handleSelectionChange() {
@@ -444,7 +468,7 @@
 	}
 
 	export function toggleSuggestionsByHotkey(): boolean {
-		if (!searchHistoryService.isEnabled() || normalizedQueryText.length === 0) {
+		if (!isHistoryCompletionEnabled() || normalizedQueryText.length === 0) {
 			return false;
 		}
 
@@ -542,7 +566,7 @@
 			class="history-editable"
 			contenteditable={true}
 			role="textbox"
-			aria-autocomplete="both"
+			aria-autocomplete={completionMode === "history" ? "both" : "none"}
 			aria-multiline="false"
 			spellcheck="false"
 			tabindex="0"

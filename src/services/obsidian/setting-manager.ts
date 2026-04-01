@@ -193,6 +193,10 @@ export function openSearchHistoryModal(app: App) {
 	new SearchHistoryModal(app).open();
 }
 
+export function openQuickSwitchManageModal(app: App) {
+	new QuickSwitchManageModal(app).open();
+}
+
 @singleton()
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
@@ -257,6 +261,15 @@ class GeneralTab extends PluginSettingTab {
 			.addButton((button) =>
 				button.setButtonText(t("Manage")).onClick(() => {
 					openSearchHistoryModal(getInstance(App));
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("QuickSwitch"))
+			.setDesc(t("QuickSwitch desc"))
+			.addButton((button) =>
+				button.setButtonText(t("Manage")).onClick(() => {
+					openQuickSwitchManageModal(getInstance(App));
 				}),
 			);
 
@@ -524,21 +537,55 @@ class SearchHistoryModal extends Modal {
 					}),
 			);
 
-		new Setting(contentEl)
-			.setName(t("Autocomplete candidate sources"))
-			.setDesc(t("Autocomplete candidate sources desc"));
 
 		new Setting(contentEl)
-			.setName(t("Search history source history"))
-			.setDesc(t("Search history source history desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.searchHistory.sources.history)
+			.setName(t("Search history max items"))
+			.setDesc(t("Search history max items desc"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						20: "20",
+						50: "50",
+						100: "100",
+						1000: "1000",
+						3000: "3000",
+						5000: "5000",
+						10000: "10000",
+					})
+					.setValue(String(this.setting.searchHistory.maxItems))
 					.onChange(async (value) => {
-						this.setting.searchHistory.sources.history = value;
+						this.setting.searchHistory.maxItems =
+							Number(value) as SearchHistoryMaxItems;
 						await this.settingManager.saveSettings();
 					}),
 			);
+
+		new Setting(contentEl)
+			.setName(t("Clear search history"))
+			.setDesc(
+				`${t("Clear search history desc")} (${this.searchHistoryService.getEntryCount()})`,
+			)
+			.addButton((button) =>
+				button.setButtonText(t("Clear")).onClick(async () => {
+					await this.searchHistoryService.clearHistory();
+					this.onOpen();
+				}),
+			);
+	}
+}
+
+class QuickSwitchManageModal extends Modal {
+	private readonly settingManager = getInstance(SettingManager);
+	private readonly setting = getInstance(OuterSetting);
+
+	onOpen() {
+		this.modalEl.style.width = "42vw";
+		const { contentEl } = this;
+		contentEl.empty();
+
+		new Setting(contentEl)
+			.setName(t("Autocomplete candidate sources"))
+			.setDesc(t("Autocomplete candidate sources desc"));
 
 		new Setting(contentEl)
 			.setName(t("Search history source file"))
@@ -599,43 +646,8 @@ class SearchHistoryModal extends Modal {
 						await this.settingManager.saveSettings();
 					}),
 			);
-
-		new Setting(contentEl)
-			.setName(t("Search history max items"))
-			.setDesc(t("Search history max items desc"))
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						20: "20",
-						50: "50",
-						100: "100",
-						1000: "1000",
-						3000: "3000",
-						5000: "5000",
-						10000: "10000",
-					})
-					.setValue(String(this.setting.searchHistory.maxItems))
-					.onChange(async (value) => {
-						this.setting.searchHistory.maxItems =
-							Number(value) as SearchHistoryMaxItems;
-						await this.settingManager.saveSettings();
-					}),
-			);
-
-		new Setting(contentEl)
-			.setName(t("Clear search history"))
-			.setDesc(
-				`${t("Clear search history desc")} (${this.searchHistoryService.getEntryCount()})`,
-			)
-			.addButton((button) =>
-				button.setButtonText(t("Clear")).onClick(async () => {
-					await this.searchHistoryService.clearHistory();
-					this.onOpen();
-				}),
-			);
 	}
 }
-
 class HybridSearchModal extends Modal {
 	private settingManager = getInstance(SettingManager);
 	private setting = getInstance(OuterSetting);

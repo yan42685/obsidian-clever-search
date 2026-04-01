@@ -1,9 +1,12 @@
 export type PassageSearchHit = {
 	id?: string | number;
-	path: string;
 	title?: string;
+	path: string;
+	targetPath?: string;
 	heading?: string;
-	snippet: string;
+	snippet?: string;
+	secondaryText?: string;
+	badgeText?: string;
 	score?: number;
 	line?: number;
 	column?: number;
