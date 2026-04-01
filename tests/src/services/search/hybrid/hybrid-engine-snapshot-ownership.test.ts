@@ -160,8 +160,18 @@ function createKeyedTable<
     async put(row: Row) {
       rows.set(row[key], { ...row });
     },
+    async bulkPut(nextRows: Row[]) {
+      for (const row of nextRows) {
+        rows.set(row[key], { ...row });
+      }
+    },
     async delete(value: Row[Key]) {
       rows.delete(value);
+    },
+    async bulkDelete(values: Row[Key][]) {
+      for (const value of values) {
+        rows.delete(value);
+      }
     },
     async clear() {
       rows.clear();
@@ -182,6 +192,10 @@ function createEngineHarness() {
     "id",
   );
   const hnswTable = createKeyedTable<{ id: number; data?: Blob }, "id">("id");
+  const artifactStateTable = createKeyedTable<
+    { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
+    "id"
+  >("id");
 
   const database = {
     db: {
@@ -191,6 +205,7 @@ function createEngineHarness() {
       hybridIndexedFileRefs: indexedRefTable,
       hybridBm25Index: bm25IndexTable,
       hybridHnswSmall: hnswTable,
+      indexArtifactState: artifactStateTable,
     },
   };
   const setting = {
@@ -228,6 +243,7 @@ function createEngineHarness() {
     indexedRefTable,
     bm25IndexTable,
     hnswTable,
+    artifactStateTable,
   };
 }
 

@@ -291,6 +291,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
   const lexicalIndexedFileRefs: Array<BaseIndexedFileRef> = [];
   const hybridIndexedFileRefs: Array<Record<string, any>> = [];
   const indexRecoveryStates: Array<Record<string, any>> = [];
+  const indexArtifactStates: Array<Record<string, any>> = [];
 
   const upsertRow = <T extends { path: string }>(rows: T[], row: T) => {
     const index = rows.findIndex((item) => item.path === row.path);
@@ -299,6 +300,15 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
       return;
     }
     rows.push({ ...row });
+  };
+
+  const upsertArtifactRow = (row: Record<string, any>) => {
+    const index = indexArtifactStates.findIndex((item) => item.id === row.id);
+    if (index >= 0) {
+      indexArtifactStates[index] = { ...row };
+      return;
+    }
+    indexArtifactStates.push({ ...row });
   };
 
   return {
@@ -383,6 +393,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
     })),
     __hybridIndexedFileRefs: hybridIndexedFileRefs,
     __indexRecoveryStates: indexRecoveryStates,
+    __indexArtifactStates: indexArtifactStates,
     db: {
       hybridIndexedFileRefs: {
         toArray: jest.fn(async () =>
@@ -398,6 +409,41 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         bulkPut: jest.fn(async (rows: Record<string, any>[]) => {
           for (const row of rows) {
             upsertRow(hybridIndexedFileRefs, row);
+          }
+        }),
+      },
+      indexArtifactState: {
+        get: jest.fn(async (id: string) => {
+          const row = indexArtifactStates.find((item) => item.id === id);
+          return row ? { ...row } : undefined;
+        }),
+        put: jest.fn(async (row: Record<string, any>) => {
+          upsertArtifactRow(row);
+        }),
+        bulkPut: jest.fn(async (rows: Record<string, any>[]) => {
+          for (const row of rows) {
+            upsertArtifactRow(row);
+          }
+        }),
+        bulkGet: jest.fn(async (ids: readonly string[]) =>
+          ids.map((id) => {
+            const row = indexArtifactStates.find((item) => item.id === id);
+            return row ? { ...row } : undefined;
+          }),
+        ),
+        delete: jest.fn(async (id: string) => {
+          for (let index = indexArtifactStates.length - 1; index >= 0; index--) {
+            if (indexArtifactStates[index].id === id) {
+              indexArtifactStates.splice(index, 1);
+            }
+          }
+        }),
+        bulkDelete: jest.fn(async (ids: readonly string[]) => {
+          const idSet = new Set(ids);
+          for (let index = indexArtifactStates.length - 1; index >= 0; index--) {
+            if (idSet.has(indexArtifactStates[index].id)) {
+              indexArtifactStates.splice(index, 1);
+            }
           }
         }),
       },

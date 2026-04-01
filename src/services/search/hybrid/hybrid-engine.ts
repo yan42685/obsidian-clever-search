@@ -3,6 +3,7 @@ import { EngineType, FileItem, FileSubItem } from "src/globals/search-types";
 import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
 import { Database } from "src/services/database/database";
 import { DataProvider } from "src/services/obsidian/user-data/data-provider";
+import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import {
@@ -75,6 +76,9 @@ const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 50;
 const INDEX_CHUNK_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
+const HYBRID_DIRTY_ARTIFACTS = ["bm25", "hnsw"] as const;
+
+type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 
 type HybridWriteOption = {
   persistIndices?: boolean;
@@ -135,6 +139,7 @@ export class HybridEngine {
   private lastIndexingFallbackNoticeKey: LocaleKey | null = null;
   private lastSearchFallbackNoticeKey: LocaleKey | null = null;
   private readonly fileWriteLocks = new Map<string, Promise<void>>();
+  private readonly dirtyArtifacts = new Set<HybridArtifactName>();
 
   private get precision(): VectorPrecision {
     return this.setting.hybrid.vectorCompression === "float16"
@@ -154,15 +159,15 @@ export class HybridEngine {
   }
 
   async load(): Promise<void> {
-    this.hnswSmall.clear(this.precision);
+    const dirtyArtifacts = await this.hydrateDirtyArtifacts();
     await Promise.all([
       profileHybridStage(
         "startup.load_bm25",
-        async () => await this.loadBm25(),
+        async () => await this.loadBm25(dirtyArtifacts.has("bm25")),
       ),
       profileHybridStage(
         "startup.load_hnsw",
-        async () => await this.loadHnsw(),
+        async () => await this.loadHnsw(dirtyArtifacts.has("hnsw")),
       ),
     ]);
     this._ready = true;
@@ -175,6 +180,7 @@ export class HybridEngine {
     this._canSearch = false;
     this.lastIndexingFallbackNoticeKey = null;
     this.lastSearchFallbackNoticeKey = null;
+    this.dirtyArtifacts.clear();
 
     await Promise.all([
       this.db.db.hybridChunks.clear(),
@@ -182,6 +188,11 @@ export class HybridEngine {
       this.db.db.hybridBm25Index.clear(),
       this.db.db.hybridHnswSmall.clear(),
       this.db.db.hybridIndexedFileRefs.clear(),
+      this.db.db.indexArtifactState.bulkDelete(
+        HYBRID_DIRTY_ARTIFACTS.map((artifact) =>
+          buildIndexArtifactStateId("hybrid", artifact),
+        ),
+      ),
     ]);
   }
 
@@ -374,6 +385,10 @@ export class HybridEngine {
       .toArray();
     const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
+    if (ids.length > 0) {
+      await this.markHybridArtifactsDirty("runtime-delete-write");
+    }
+
     await this.db.db.hybridChunks.bulkDelete(ids);
     await this.db.db.hybridChunkVectors.delete(filePath);
     if (option.deleteIndexedFileRef ?? true) {
@@ -388,7 +403,7 @@ export class HybridEngine {
     if (this.hnswSmall.needsRebuild()) {
       this.hnswSmall.rebuild();
     }
-    if (option.persistIndices ?? true) {
+    if ((option.persistIndices ?? true) && ids.length > 0) {
       await this.persistIndices();
     }
   }
@@ -490,6 +505,10 @@ export class HybridEngine {
     await this.persistIndices();
   }
 
+  async rebuildBm25FromStore(): Promise<void> {
+    await this.rebuildBm25ArtifactFromStore();
+  }
+
   async migrateBm25StorageFormatIfNeeded(): Promise<boolean> {
     const record = await this.db.db.hybridBm25Index.get(0);
     if (!record) {
@@ -528,6 +547,7 @@ export class HybridEngine {
       const previousState = await this.loadStoredFileIndexState(filePath);
       const previousIndexedFileRef =
         await this.db.db.hybridIndexedFileRefs.get(filePath);
+      await this.markHybridArtifactsDirty("runtime-index-write");
       const reusableState = this.getReusableStoredFileIndexState(
         filePath,
         previousState,
@@ -1167,7 +1187,28 @@ export class HybridEngine {
   private async loadSnapshotTextByPaths(
     filePaths: string[],
   ): Promise<Map<string, string>> {
-    return await this.fileSnapshotStore.getIndexedSnapshotTexts(filePaths);
+    const uniquePaths = Array.from(new Set(filePaths));
+    if (uniquePaths.length === 0) {
+      return new Map<string, string>();
+    }
+
+    const indexedRefs = await this.db.db.hybridIndexedFileRefs.bulkGet(uniquePaths);
+    const expectedGenerations = new Map<string, number | undefined>();
+    const safePaths: string[] = [];
+
+    for (let index = 0; index < uniquePaths.length; index++) {
+      const indexedRef = indexedRefs[index];
+      if (!indexedRef) {
+        continue;
+      }
+      safePaths.push(uniquePaths[index]);
+      expectedGenerations.set(uniquePaths[index], indexedRef.generation);
+    }
+
+    return await this.fileSnapshotStore.getIndexedSnapshotTexts(
+      safePaths,
+      expectedGenerations,
+    );
   }
 
   private async rerankAndBuildFileItems(
@@ -1267,6 +1308,7 @@ export class HybridEngine {
       id: 0,
       data: bm25ToBlob(this.bm25.serialize()),
     });
+    await this.clearHybridArtifactDirtyState(["bm25"]);
   }
 
   private async persistHnsw(): Promise<void> {
@@ -1277,31 +1319,42 @@ export class HybridEngine {
       id: 0,
       data: hnswToBlob(this.hnswSmall.serialize()),
     });
+    await this.clearHybridArtifactDirtyState(["hnsw"]);
   }
 
-  private async loadBm25(): Promise<void> {
+  private async loadBm25(forceRebuild = false): Promise<void> {
     this.bm25.clear();
+    if (forceRebuild) {
+      await this.rebuildBm25ArtifactFromStore();
+      return;
+    }
+
     const record = await this.db.db.hybridBm25Index.get(0);
-    if (record) {
-      const blobVersion = await getBm25BlobVersion(record.data);
-      this.bm25.deserialize(await blobToBm25(record.data));
-      if (blobVersion !== 5 || this.bm25.optimizeStorage()) {
-        await this.persistBm25();
-      }
+    if (!record) {
+      return;
+    }
+
+    const blobVersion = await getBm25BlobVersion(record.data);
+    this.bm25.deserialize(await blobToBm25(record.data));
+    if (blobVersion !== 5 || this.bm25.optimizeStorage()) {
+      await this.persistBm25();
     }
   }
 
-  private async loadHnsw(): Promise<void> {
+  private async loadHnsw(forceRebuild = false): Promise<void> {
+    this.hnswSmall.clear(this.precision);
+    if (forceRebuild) {
+      await this.rebuildHnswFromStore();
+      this.updateSearchCapabilityFromDenseState();
+      return;
+    }
+
     const small = await this.db.db.hybridHnswSmall.get(0);
     if (small) {
       this.hnswSmall.deserialize(await blobToHnsw(small.data));
       await this.hydrateHnswVectors();
     }
-    this._canSearch =
-      this.hnswSmall.isNonEmpty() && this.hnswSmall.hasVectors();
-    if (!this._canSearch) {
-      this.lastSearchFallbackNoticeKey = "hybridNotice.searchFallbackToBm25";
-    }
+    this.updateSearchCapabilityFromDenseState();
   }
 
   private async hydrateHnswVectors(): Promise<void> {
@@ -1346,6 +1399,137 @@ export class HybridEngine {
         append = true;
       }
       lastFilePath = rows[rows.length - 1].filePath;
+    }
+  }
+
+  private async rebuildBm25ArtifactFromStore(): Promise<void> {
+    this.bm25.clear();
+    let offset = 0;
+
+    while (true) {
+      const snapshots = await this.db.db.fileSnapshots
+        .orderBy("filePath")
+        .offset(offset)
+        .limit(INDEX_CHUNK_BATCH_SIZE)
+        .toArray();
+      if (snapshots.length === 0) {
+        break;
+      }
+
+      for (const snapshot of snapshots) {
+        const rows = await this.db.db.hybridChunks
+          .where("filePath")
+          .equals(snapshot.filePath)
+          .sortBy("chunkIndex");
+        for (const row of rows) {
+          if (row.id === undefined) {
+            continue;
+          }
+          this.bm25.addDocument(
+            row.id,
+            snapshot.plainText.slice(row.startOffset, row.endOffset),
+          );
+        }
+      }
+
+      offset += snapshots.length;
+    }
+
+    await this.persistBm25();
+  }
+
+  private async rebuildHnswFromStore(): Promise<void> {
+    this.hnswSmall.clear(this.precision);
+    let lastFilePath: string | null = null;
+
+    while (true) {
+      const rows =
+        lastFilePath === null
+          ? await this.db.db.hybridChunkVectors
+              .orderBy("filePath")
+              .limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
+              .toArray()
+          : await this.db.db.hybridChunkVectors
+              .where("filePath")
+              .above(lastFilePath)
+              .limit(HNSW_HYDRATE_SHARD_BATCH_SIZE)
+              .toArray();
+      if (rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        if (row.precision !== this.precision) {
+          continue;
+        }
+        const records = await rowToChunkVectorRecords(row as ChunkVectorShardRow);
+        for (const record of records) {
+          this.hnswSmall.insert(record.id, record.vector);
+        }
+      }
+      lastFilePath = rows[rows.length - 1].filePath;
+    }
+
+    await this.persistHnsw();
+  }
+
+  private async hydrateDirtyArtifacts(): Promise<Set<HybridArtifactName>> {
+    const rows = await this.db.db.indexArtifactState.bulkGet(
+      HYBRID_DIRTY_ARTIFACTS.map((artifact) =>
+        buildIndexArtifactStateId("hybrid", artifact),
+      ),
+    );
+    this.dirtyArtifacts.clear();
+    for (const row of rows) {
+      if (row && (row.artifact === "bm25" || row.artifact === "hnsw")) {
+        this.dirtyArtifacts.add(row.artifact);
+      }
+    }
+    return new Set(this.dirtyArtifacts);
+  }
+
+  private async markHybridArtifactsDirty(reason: string): Promise<void> {
+    const missingArtifacts = HYBRID_DIRTY_ARTIFACTS.filter(
+      (artifact) => !this.dirtyArtifacts.has(artifact),
+    );
+    if (missingArtifacts.length === 0) {
+      return;
+    }
+
+    const dirtyAt = Date.now();
+    await this.db.db.indexArtifactState.bulkPut(
+      missingArtifacts.map((artifact) => ({
+        id: buildIndexArtifactStateId("hybrid", artifact),
+        engine: "hybrid",
+        artifact,
+        dirtyAt,
+        reason,
+      })),
+    );
+    for (const artifact of missingArtifacts) {
+      this.dirtyArtifacts.add(artifact);
+    }
+  }
+
+  private async clearHybridArtifactDirtyState(
+    artifacts: readonly HybridArtifactName[],
+  ): Promise<void> {
+    if (artifacts.length === 0) {
+      return;
+    }
+    await this.db.db.indexArtifactState.bulkDelete(
+      artifacts.map((artifact) => buildIndexArtifactStateId("hybrid", artifact)),
+    );
+    for (const artifact of artifacts) {
+      this.dirtyArtifacts.delete(artifact);
+    }
+  }
+
+  private updateSearchCapabilityFromDenseState(): void {
+    this._canSearch =
+      this.hnswSmall.isNonEmpty() && this.hnswSmall.hasVectors();
+    if (!this._canSearch) {
+      this.lastSearchFallbackNoticeKey = "hybridNotice.searchFallbackToBm25";
     }
   }
 

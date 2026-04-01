@@ -67,6 +67,7 @@ import {
   type HybridRepairMode,
   type IndexRecoveryStateRow,
 } from "./index-recovery-state";
+import { buildIndexArtifactStateId } from "./index-artifact-state";
 import {
   HybridEmbeddingRecoveryManager,
   type HybridFailedEmbeddingSummary,
@@ -279,6 +280,10 @@ export class DataManager {
   private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
   private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
   private static readonly HYBRID_BM25_REBUILD_BATCH_SIZE = 512;
+  private static readonly LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS = 10_000;
+  private static readonly LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS = 60_000;
+  private static readonly LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD = 24;
+  private static readonly LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD = 768 * 1024;
   private plugin: CleverSearch = getInstance(THIS_PLUGIN);
   private database = getInstance(Database);
   private dataProvider = getInstance(DataProvider);
@@ -289,6 +294,13 @@ export class DataManager {
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
   private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
+  private readonly lexicalSnapshotDirtyPaths = new Map<string, number>();
+  private lexicalSnapshotDirtySince: number | null = null;
+  private lexicalSnapshotLastMutationAt: number | null = null;
+  private lexicalSnapshotDirtyPersisted = false;
+  private lexicalSnapshotFlushTimer: NodeJS.Timeout | null = null;
+  private lexicalSnapshotFlushWorker: Promise<void> | null = null;
+  private lexicalSnapshotMutationVersion = 0;
   private hybridSearchAvailability: HybridSearchAvailability = "blocked";
   private lexicalBootstrapState: SearchBootstrapState = "blocked";
   private hybridBootstrapState: SearchBootstrapState = "blocked";
@@ -364,6 +376,175 @@ export class DataManager {
           this.dataProvider.isIndexable(file) &&
           this.hybridEngine.shouldIndexPath(file.path),
       ).length;
+  }
+
+  private resetLexicalSnapshotTracking(): void {
+    this.clearLexicalSnapshotFlushTimer();
+    this.lexicalSnapshotDirtyPaths.clear();
+    this.lexicalSnapshotDirtySince = null;
+    this.lexicalSnapshotLastMutationAt = null;
+    this.lexicalSnapshotDirtyPersisted = false;
+    this.lexicalSnapshotFlushWorker = null;
+    this.lexicalSnapshotMutationVersion = 0;
+  }
+
+  private isLexicalSnapshotDirty(): boolean {
+    return this.lexicalSnapshotDirtyPersisted;
+  }
+
+  private getLexicalSnapshotDirtyBytes(): number {
+    let total = 0;
+    for (const bytes of this.lexicalSnapshotDirtyPaths.values()) {
+      total += bytes;
+    }
+    return total;
+  }
+
+  private async hasLexicalSnapshotDirtyMarker(): Promise<boolean> {
+    return (
+      (await this.database.db.indexArtifactState.get(
+        buildIndexArtifactStateId("lexical", "snapshot"),
+      )) !== undefined
+    );
+  }
+
+  private async markLexicalSnapshotDirty(
+    paths: readonly string[] = [],
+  ): Promise<void> {
+    if (!this.lexicalEngine.supportsSerializedFileIndex()) {
+      return;
+    }
+
+    const now = Date.now();
+    if (this.lexicalSnapshotDirtySince === null) {
+      this.lexicalSnapshotDirtySince = now;
+    }
+    this.lexicalSnapshotLastMutationAt = now;
+    this.lexicalSnapshotMutationVersion += 1;
+
+    for (const path of paths) {
+      const file = this.dataProvider.getFileByPath(path);
+      this.lexicalSnapshotDirtyPaths.set(path, Math.max(0, file?.stat.size ?? 0));
+    }
+
+    if (!this.lexicalSnapshotDirtyPersisted) {
+      await this.database.db.indexArtifactState.put({
+        id: buildIndexArtifactStateId("lexical", "snapshot"),
+        engine: "lexical",
+        artifact: "snapshot",
+        dirtyAt: this.lexicalSnapshotDirtySince,
+        reason: "runtime-lexical-dirty",
+      });
+      this.lexicalSnapshotDirtyPersisted = true;
+    }
+
+    if (this.shouldFlushLexicalSnapshotNow(now)) {
+      void this.flushLexicalSnapshotIfDirty(true);
+      return;
+    }
+    this.scheduleLexicalSnapshotFlush();
+  }
+
+  private scheduleLexicalSnapshotFlush(): void {
+    if (
+      !this.isLexicalSnapshotDirty() ||
+      !this.lexicalEngine.supportsSerializedFileIndex()
+    ) {
+      return;
+    }
+    if (this.lexicalSnapshotFlushWorker) {
+      return;
+    }
+
+    const now = Date.now();
+    const debounceDueAt =
+      (this.lexicalSnapshotLastMutationAt ?? now) +
+      DataManager.LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS;
+    const maxAgeDueAt =
+      (this.lexicalSnapshotDirtySince ?? now) +
+      DataManager.LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS;
+    const delayMs = Math.max(0, Math.min(debounceDueAt, maxAgeDueAt) - now);
+
+    this.clearLexicalSnapshotFlushTimer();
+    this.lexicalSnapshotFlushTimer = setTimeout(() => {
+      this.lexicalSnapshotFlushTimer = null;
+      void this.flushLexicalSnapshotIfDirty();
+    }, delayMs);
+  }
+
+  private shouldFlushLexicalSnapshotNow(now = Date.now()): boolean {
+    if (!this.isLexicalSnapshotDirty()) {
+      return false;
+    }
+    if (
+      this.lexicalSnapshotDirtyPaths.size >=
+      DataManager.LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD
+    ) {
+      return true;
+    }
+    if (
+      this.getLexicalSnapshotDirtyBytes() >=
+      DataManager.LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD
+    ) {
+      return true;
+    }
+    if (
+      this.lexicalSnapshotDirtySince !== null &&
+      now - this.lexicalSnapshotDirtySince >=
+        DataManager.LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS
+    ) {
+      return true;
+    }
+    return (
+      this.lexicalSnapshotLastMutationAt !== null &&
+      now - this.lexicalSnapshotLastMutationAt >=
+        DataManager.LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS
+    );
+  }
+
+  private clearLexicalSnapshotFlushTimer(): void {
+    if (this.lexicalSnapshotFlushTimer) {
+      clearTimeout(this.lexicalSnapshotFlushTimer);
+      this.lexicalSnapshotFlushTimer = null;
+    }
+  }
+
+  private async clearLexicalSnapshotDirtyState(): Promise<void> {
+    this.clearLexicalSnapshotFlushTimer();
+    this.lexicalSnapshotDirtyPaths.clear();
+    this.lexicalSnapshotDirtySince = null;
+    this.lexicalSnapshotLastMutationAt = null;
+    this.lexicalSnapshotDirtyPersisted = false;
+    await this.database.db.indexArtifactState.delete(
+      buildIndexArtifactStateId("lexical", "snapshot"),
+    );
+  }
+
+  private async flushLexicalSnapshotIfDirty(force = false): Promise<void> {
+    if (this.lexicalSnapshotFlushWorker) {
+      return await this.lexicalSnapshotFlushWorker;
+    }
+    if (!this.isLexicalSnapshotDirty()) {
+      return;
+    }
+    if (!force && !this.shouldFlushLexicalSnapshotNow()) {
+      this.scheduleLexicalSnapshotFlush();
+      return;
+    }
+
+    const expectedMutationVersion = this.lexicalSnapshotMutationVersion;
+    const worker = (async () => {
+      try {
+        await this.persistLexicalSearchSnapshotIfAvailable(expectedMutationVersion);
+      } finally {
+        this.lexicalSnapshotFlushWorker = null;
+        if (this.isLexicalSnapshotDirty()) {
+          this.scheduleLexicalSnapshotFlush();
+        }
+      }
+    })();
+    this.lexicalSnapshotFlushWorker = worker;
+    await worker;
   }
 
   private toHybridRecoveryStateRow(
@@ -816,6 +997,7 @@ export class DataManager {
   @monitorDecorator
   async initAsync() {
     this.clearHybridFailedEmbeddingState();
+    this.resetLexicalSnapshotTracking();
     this.fileSnapshotStore.clearCurrentFiles();
     this.lexicalIndexedFileRefsLoaded = false;
     this.lexicalIndexedFileRefsByPath.clear();
@@ -836,6 +1018,8 @@ export class DataManager {
 
   onunload() {
     getInstance(FileWatcher).stop();
+    void this.flushLexicalSnapshotIfDirty(true);
+    this.clearLexicalSnapshotFlushTimer();
     this.clearHybridRepairScheduler();
     this.clearFailedEmbeddingRetryTimer();
     this.hybridEmbeddingRecovery.clearAll();
@@ -917,10 +1101,7 @@ export class DataManager {
     getInstance(FileWatcher).stop();
     try {
       await this.reindexLexicalEngineWithCurrFiles();
-      const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
-      if (lexicalIndexData) {
-        await this.database.setLexicalSearchSnapshot(lexicalIndexData);
-      }
+      await this.persistLexicalSearchSnapshotIfAvailable();
       if (isDevEnvironment) {
         await this.noticeDevStorageStats();
       }
@@ -1051,7 +1232,7 @@ export class DataManager {
     }
 
     if (options.rebuildBm25FromStore) {
-      await this.rebuildHybridBm25FromStore();
+      await this.hybridEngine.rebuildBm25FromStore();
     }
 
     if (failures.length > 0) {
@@ -1060,46 +1241,6 @@ export class DataManager {
     this.setHybridSearchAvailability(
       this.hybridEngine.canServeQuery() ? "available" : "blocked",
     );
-  }
-
-  private async rebuildHybridBm25FromStore(): Promise<void> {
-    const bm25 = new BM25Engine();
-    let offset = 0;
-
-    while (true) {
-      const snapshots = await this.database.db.fileSnapshots
-        .orderBy("filePath")
-        .offset(offset)
-        .limit(DataManager.HYBRID_BM25_REBUILD_BATCH_SIZE)
-        .toArray();
-      if (snapshots.length === 0) {
-        break;
-      }
-
-      for (const snapshot of snapshots) {
-        const rows = await this.database.db.hybridChunks
-          .where("filePath")
-          .equals(snapshot.filePath)
-          .sortBy("chunkIndex");
-        for (const row of rows) {
-          if (row.id === undefined) {
-            continue;
-          }
-          bm25.addDocument(
-            row.id,
-            snapshot.plainText.slice(row.startOffset, row.endOffset),
-          );
-        }
-      }
-
-      offset += snapshots.length;
-    }
-
-    await this.database.db.hybridBm25Index.put({
-      id: 0,
-      data: bm25ToBlob(bm25.serialize()),
-    });
-    await this.hybridEngine.load();
   }
 
   private async addDocuments(
@@ -1153,6 +1294,7 @@ export class DataManager {
       generation,
     );
     await this.upsertLexicalIndexedFileRef(file, generation);
+    await this.markLexicalSnapshotDirty([file.path]);
     return true;
   }
 
@@ -1171,12 +1313,20 @@ export class DataManager {
     for (const file of files) {
       await this.upsertLexicalIndexedFileRef(file, file.stat.mtime);
     }
+    await this.markLexicalSnapshotDirty(files.map((file) => file.path));
   }
 
-  private async persistLexicalSearchSnapshotIfAvailable(): Promise<void> {
+  private async persistLexicalSearchSnapshotIfAvailable(
+    expectedMutationVersion = this.lexicalSnapshotMutationVersion,
+  ): Promise<void> {
     const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
     if (lexicalIndexData) {
       await this.database.setLexicalSearchSnapshot(lexicalIndexData);
+    } else {
+      await this.database.deleteLexicalSearchSnapshot();
+    }
+    if (this.lexicalSnapshotMutationVersion === expectedMutationVersion) {
+      await this.clearLexicalSnapshotDirtyState();
     }
   }
 
@@ -1328,6 +1478,7 @@ export class DataManager {
     await this.deleteDocuments(Array.from(paths));
     await this.fileSnapshotStore.deleteIndexedSnapshots(paths);
     await this.deleteLexicalIndexedFileRefs(paths);
+    await this.markLexicalSnapshotDirty(paths);
   }
 
   private async handleDeleteOperation(path: string): Promise<void> {
@@ -1639,15 +1790,25 @@ export class DataManager {
 
   private async prepareLexicalBootstrapPlan(): Promise<LexicalBootstrapPlan> {
     logger.trace("Init lexical engine...");
+    const supportsSerializedIndex =
+      this.lexicalEngine.supportsSerializedFileIndex();
+    const lexicalSnapshotDirty = supportsSerializedIndex
+      ? await this.hasLexicalSnapshotDirtyMarker()
+      : false;
     let prevData: SerializedFileSearchIndex | null;
     if (
       !devOption.loadIndexFromDatabase ||
       this.shouldForceRefresh ||
-      !this.lexicalEngine.supportsSerializedFileIndex()
+      !supportsSerializedIndex ||
+      lexicalSnapshotDirty
     ) {
       prevData = null;
     } else {
       prevData = await this.database.getLexicalSearchSnapshot();
+    }
+
+    if (lexicalSnapshotDirty) {
+      await this.database.deleteLexicalSearchSnapshot();
     }
 
     if (!prevData) {
@@ -1689,10 +1850,7 @@ export class DataManager {
 
   private async commitLexicalBootstrapPlan(): Promise<void> {
     logger.trace("Lexical engine is ready");
-    const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
-    if (lexicalIndexData) {
-      await this.database.setLexicalSearchSnapshot(lexicalIndexData);
-    }
+    await this.persistLexicalSearchSnapshotIfAvailable();
   }
 
   private async initHybridEngine() {
@@ -1931,6 +2089,7 @@ export class DataManager {
       })),
     );
     await this.fileSnapshotStore.deleteIndexedSnapshotsNotIn(indexedPaths);
+    await this.markLexicalSnapshotDirty();
     this.clearLexicalIndexFailures(Array.from(indexedPaths));
     if (failures.length > 0) {
       this.addLexicalIndexFailures(failures);
@@ -1983,6 +2142,12 @@ export class DataManager {
         (file) => !failedPaths.has(file.path),
       ),
     );
+    if (docsToDelete.length > 0 || addResult.indexedFiles.length > 0) {
+      await this.markLexicalSnapshotDirty([
+        ...docsToDelete,
+        ...addResult.indexedFiles.map((file) => file.path),
+      ]);
+    }
     this.clearLexicalIndexFailures(docsToDelete);
     this.clearLexicalIndexFailures(
       addResult.indexedFiles.map((file) => file.path),
