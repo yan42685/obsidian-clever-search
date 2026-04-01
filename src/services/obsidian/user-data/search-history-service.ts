@@ -28,6 +28,7 @@ export type RecentNavigationSelection = {
 	path: string;
 	openLinkText: string;
 	primaryText: string;
+	secondaryText?: string;
 	kind: SearchHistoryNavigationKind;
 	timestamp: number;
 };
@@ -61,6 +62,7 @@ export class SearchHistoryService {
 	private static readonly CANDIDATE_MATCH_WEIGHT = 320;
 	private static readonly NAVIGATION_RECENT_DAY_LIMIT = 7;
 	private static readonly QUICK_SWITCH_QUERY_LIMIT = 20;
+	private static readonly QUICK_SWITCH_COMMAND_LIMIT = 1000;
 	private static readonly DAY_MS = 1000 * 60 * 60 * 24;
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly setting = getInstance(OuterSetting);
@@ -111,6 +113,7 @@ export class SearchHistoryService {
 		navigation: {
 			path: string;
 			primaryText: string;
+			secondaryText?: string;
 			kind: SearchHistoryNavigationKind;
 			openLinkText?: string;
 		},
@@ -121,6 +124,7 @@ export class SearchHistoryService {
 
 		const nextPath = navigation.path.trim();
 		const nextPrimaryText = navigation.primaryText.trim();
+		const nextSecondaryText = navigation.secondaryText?.trim() || undefined;
 		const nextOpenLinkText = navigation.openLinkText?.trim() || nextPath;
 		if (
 			nextPath.length === 0 ||
@@ -140,6 +144,7 @@ export class SearchHistoryService {
 			existingEntry = {
 				path: nextPath,
 				primaryText: nextPrimaryText,
+				secondaryText: nextSecondaryText,
 				kind: navigation.kind,
 				openLinkText: nextOpenLinkText,
 				timestamp: now,
@@ -151,6 +156,7 @@ export class SearchHistoryService {
 
 		existingEntry.path = nextPath;
 		existingEntry.primaryText = nextPrimaryText;
+		existingEntry.secondaryText = nextSecondaryText;
 		existingEntry.kind = navigation.kind;
 		existingEntry.openLinkText = nextOpenLinkText;
 		existingEntry.timestamp = now;
@@ -169,6 +175,7 @@ export class SearchHistoryService {
 				path: entry.path,
 				openLinkText: entry.openLinkText,
 				primaryText: entry.primaryText,
+				secondaryText: entry.secondaryText,
 				kind: entry.kind,
 				timestamp: entry.timestamp,
 			}));
@@ -452,6 +459,11 @@ export class SearchHistoryService {
 						typeof entry.primaryText === "string"
 							? entry.primaryText.trim()
 							: "",
+					secondaryText:
+						typeof entry.secondaryText === "string" &&
+						entry.secondaryText.trim().length > 0
+							? entry.secondaryText.trim()
+							: undefined,
 					kind: isSearchHistoryNavigationKind(entry.kind) ? entry.kind : "file",
 					openLinkText:
 						typeof entry.openLinkText === "string"
@@ -539,13 +551,16 @@ export class SearchHistoryService {
 			if (entry.timestamp >= prevTimestamp) {
 				prevEntry.path = entry.path;
 				prevEntry.primaryText = entry.primaryText;
+				prevEntry.secondaryText = entry.secondaryText;
 				prevEntry.kind = entry.kind;
 				prevEntry.openLinkText = entry.openLinkText;
 			}
 		}
 
 		const maxItems = this.getQuickSwitchHistorySetting().maxItems;
-		return [...dedupedEntries.values()]
+		const trimmedEntries: QuickSwitchHistoryEntry[] = [];
+		let commandCount = 0;
+		for (const entry of [...dedupedEntries.values()]
 			.sort((left, right) => {
 				if (left.timestamp !== right.timestamp) {
 					return right.timestamp - left.timestamp;
@@ -557,17 +572,32 @@ export class SearchHistoryService {
 					return countDiff;
 				}
 				return left.primaryText.localeCompare(right.primaryText);
-			})
-			.slice(0, maxItems)
-			.map((entry) => ({
-				...entry,
-				recentDateKeys:
-					entry.recentDateKeys && entry.recentDateKeys.length > 0
-						? entry.recentDateKeys
-						: undefined,
-				queries:
-					entry.queries && entry.queries.length > 0 ? entry.queries : undefined,
-			}));
+			})) {
+			if (trimmedEntries.length >= maxItems) {
+				break;
+			}
+			if (entry.kind === "command") {
+				if (commandCount >= SearchHistoryService.QUICK_SWITCH_COMMAND_LIMIT) {
+					continue;
+				}
+				commandCount += 1;
+			}
+			trimmedEntries.push(entry);
+		}
+
+		return trimmedEntries.map((entry) => ({
+			...entry,
+			recentDateKeys:
+				entry.recentDateKeys && entry.recentDateKeys.length > 0
+					? entry.recentDateKeys
+					: undefined,
+			secondaryText:
+				entry.secondaryText && entry.secondaryText.length > 0
+					? entry.secondaryText
+					: undefined,
+			queries:
+				entry.queries && entry.queries.length > 0 ? entry.queries : undefined,
+		}));
 	}
 
 	private trimQuickSwitchQueries(
@@ -933,6 +963,7 @@ const SEARCH_HISTORY_NAVIGATION_KINDS = new Set<SearchHistoryNavigationKind>([
 	"heading",
 	"path",
 	"recent",
+	"command",
 ]);
 
 function isSearchHistoryNavigationKind(

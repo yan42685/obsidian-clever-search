@@ -2,8 +2,10 @@
 	import { App } from "obsidian";
 	import { onMount, tick } from "svelte";
 	import { OuterSetting } from "src/globals/plugin-setting";
+	import { PrivateApi } from "src/services/obsidian/private-api";
 	import { t } from "src/services/obsidian/translations/locale-helper";
 	import {
+		type SearchAutocompleteMode,
 		SearchAutocompleteService,
 		type SearchAutocompleteCandidate,
 		type SearchAutocompleteSection,
@@ -16,10 +18,12 @@
 
 	const app = getInstance(App);
 	const setting = getInstance(OuterSetting);
+	const privateApi = getInstance(PrivateApi);
 	const searchHistoryService = getInstance(SearchHistoryService);
 	const autocompleteService = getInstance(SearchAutocompleteService);
 
 	export let requestClose: () => void = () => {};
+	export let mode: SearchAutocompleteMode = "navigation";
 	const PAGE_JUMP = 6;
 
 	let inputRef: SearchHistoryInput | null = null;
@@ -37,7 +41,10 @@
 	}
 
 	function refreshResults(resetIndex = false): void {
-		results = autocompleteService.getNavigationSuggestions(queryText, 24);
+		results =
+			mode === "command"
+				? autocompleteService.getCommandSuggestions(queryText, 24)
+				: autocompleteService.getNavigationSuggestions(queryText, 24);
 		resultButtons = [];
 		if (resetIndex) {
 			selectedResultIndex = results.length > 0 ? 0 : -1;
@@ -85,11 +92,24 @@
 		if (!candidate?.openLinkText) {
 			return;
 		}
+		if (mode === "command") {
+			await searchHistoryService.recordNavigationSelection(queryText, {
+				path: candidate.path,
+				primaryText: candidate.primaryText,
+				secondaryText: candidate.secondaryText,
+				kind: candidate.kind,
+				openLinkText: candidate.openLinkText,
+			});
+			privateApi.executeCommandById(candidate.openLinkText);
+			requestClose();
+			return;
+		}
 		if (queryText.trim().length > 0) {
 			await searchHistoryService.recordQuery(queryText);
 			await searchHistoryService.recordNavigationSelection(queryText, {
 				path: candidate.path,
 				primaryText: candidate.primaryText,
+				secondaryText: candidate.secondaryText,
 				kind: candidate.kind,
 				openLinkText: candidate.openLinkText,
 			});
@@ -174,6 +194,8 @@
 				return "autocompleteSource.path";
 			case "recent":
 				return "autocompleteSource.recent";
+			case "command":
+				return "autocompleteSource.command";
 		}
 	}
 
@@ -196,13 +218,34 @@
 	}
 
 	function shouldShowPath(entry: SearchAutocompleteCandidate): boolean {
-		return entry.path.length > 0 && entry.primaryText !== entry.path;
+		return (
+			entry.kind !== "command" &&
+			entry.path.length > 0 &&
+			entry.primaryText !== entry.path
+		);
 	}
 
 	function getEmptyStateText(): string {
+		if (mode === "command") {
+			return queryText.trim().length === 0
+				? t("quickSwitch.command.emptyState.idle")
+				: t("quickSwitch.command.emptyState.search");
+		}
 		return queryText.trim().length === 0
 			? t("quickSwitch.emptyState.idle")
 			: t("quickSwitch.emptyState.search");
+	}
+
+	function getPlaceholderText(): string {
+		return mode === "command"
+			? t("quickSwitch.placeholder.command")
+			: t("quickSwitch.placeholder.navigation");
+	}
+
+	function getFooterText(): string {
+		return mode === "command"
+			? t("quickSwitch.footer.command")
+			: t("quickSwitch.footer.navigation");
 	}
 	function getHighlightParts(
 		text: string,
@@ -261,7 +304,7 @@
 			completionMode="plain"
 			showMatchCount={results.length > 0}
 			matchCountText={results.length > 0 ? `${Math.max(0, selectedResultIndex) + 1} / ${results.length}` : ""}
-			placeholder="QuickSwitch..."
+			placeholder={getPlaceholderText()}
 			on:querychange={() => {
 				refreshResults(true);
 			}}
@@ -326,7 +369,7 @@
 	</div>
 
 	<div class="quickswitch-footer">
-		<span>{t("quickSwitch.footer.navigation")}</span>
+		<span>{getFooterText()}</span>
 		<span>{t("quickSwitch.footer.keys")}</span>
 	</div>
 </div>

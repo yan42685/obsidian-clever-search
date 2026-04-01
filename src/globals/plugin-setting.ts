@@ -123,7 +123,8 @@ export type SearchHistoryNavigationKind =
 	| "alias"
 	| "heading"
 	| "path"
-	| "recent";
+	| "recent"
+	| "command";
 
 export type SearchHistoryEntry = {
 	queryText: string;
@@ -161,6 +162,7 @@ export type QuickSwitchHistoryQueryEntry = {
 export type QuickSwitchHistoryEntry = {
 	path: string;
 	primaryText: string;
+	secondaryText?: string;
 	kind: SearchHistoryNavigationKind;
 	openLinkText: string;
 	timestamp: number;

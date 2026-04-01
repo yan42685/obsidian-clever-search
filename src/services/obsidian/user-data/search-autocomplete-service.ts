@@ -27,7 +27,10 @@ export type SearchAutocompleteSource =
 	| "alias"
 	| "heading"
 	| "path"
-	| "recent";
+	| "recent"
+	| "command";
+
+export type SearchAutocompleteMode = "navigation" | "command";
 
 export type SearchAutocompleteSection =
 	| "matches"
@@ -65,7 +68,7 @@ type ParsedNavigationQuery = {
 
 type IndexedAutocompleteEntry = {
 	id: string;
-	kind: Exclude<SearchAutocompleteSource, "recent">;
+	kind: Exclude<SearchAutocompleteSource, "recent" | "command">;
 	insertText: string;
 	primaryText: string;
 	secondaryText?: string;
@@ -77,11 +80,24 @@ type IndexedAutocompleteEntry = {
 	pathLength: number;
 };
 
+type IndexedCommandEntry = {
+	id: string;
+	kind: "command";
+	insertText: string;
+	primaryText: string;
+	secondaryText: string;
+	path: string;
+	openLinkText: string;
+	textIndex: ReturnType<typeof createLightweightFuzzyIndex>;
+	secondaryTextIndex: ReturnType<typeof createLightweightFuzzyIndex>;
+};
+
 @singleton()
 export class SearchAutocompleteService {
 	private static readonly MAX_CANDIDATE_COUNT = 12;
 	private static readonly RECENT_FILE_LIMIT = 10;
 	private static readonly RECENT_TARGET_LIMIT = 6;
+	private static readonly RECENT_COMMAND_LIMIT = 8;
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly app = getInstance(App);
 	private readonly vault = getInstance(Vault);
@@ -89,6 +105,7 @@ export class SearchAutocompleteService {
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly searchHistoryService = getInstance(SearchHistoryService);
 	private indexedEntriesCache: IndexedAutocompleteEntry[] | null = null;
+	private indexedCommandEntriesCache: IndexedCommandEntry[] | null = null;
 
 	constructor() {
 		this.registerInvalidationEvents();
@@ -148,6 +165,40 @@ export class SearchAutocompleteService {
 					navigationHabitSignals,
 				),
 			);
+		}
+
+		return this.sortAndTrimCandidates(candidates, limit);
+	}
+
+	getCommandSuggestions(
+		queryText: string,
+		limit = SearchAutocompleteService.MAX_CANDIDATE_COUNT,
+	): SearchAutocompleteCandidate[] {
+		const preparedQuery = prepareLightweightFuzzyQuery(queryText, "history");
+		const normalizedQuery = preparedQuery.normalizedQuery;
+		const navigationHabitSignals =
+			this.searchHistoryService.getNavigationHabitSignals(queryText);
+		if (normalizedQuery.length === 0) {
+			return this.sortAndTrimCandidates(
+				this.buildRecentCommandCandidates(
+					SearchAutocompleteService.RECENT_COMMAND_LIMIT,
+					navigationHabitSignals,
+				),
+				limit,
+			);
+		}
+
+		const candidates: SearchAutocompleteCandidate[] = [];
+		for (const entry of this.getIndexedCommandEntries()) {
+			const candidate = this.buildMatchedCommandCandidate(
+				entry,
+				preparedQuery,
+				normalizedQuery,
+				navigationHabitSignals.get(entry.openLinkText),
+			);
+			if (candidate) {
+				candidates.push(candidate);
+			}
 		}
 
 		return this.sortAndTrimCandidates(candidates, limit);
@@ -236,6 +287,45 @@ export class SearchAutocompleteService {
 		};
 	}
 
+	private buildMatchedCommandCandidate(
+		entry: IndexedCommandEntry,
+		preparedQuery: ReturnType<typeof prepareLightweightFuzzyQuery>,
+		normalizedQuery: string,
+		habitSignal?: NavigationHabitSignal,
+	): SearchAutocompleteCandidate | null {
+		const primaryMatch = matchLightweightFuzzy(preparedQuery, entry.textIndex);
+		const secondaryMatch = matchLightweightFuzzy(
+			preparedQuery,
+			entry.secondaryTextIndex,
+		);
+		if (!primaryMatch && !secondaryMatch) {
+			return null;
+		}
+
+		const score =
+			(primaryMatch
+				? primaryMatch.score
+				: Math.max(0, (secondaryMatch?.score ?? 0) - 140)) +
+			this.getSourceBoost("command", false) +
+			this.getCommandExactnessBoost(entry, normalizedQuery) +
+			this.getNavigationHabitBoost(habitSignal, normalizedQuery.length > 0);
+
+		return {
+			id: entry.id,
+			kind: "command",
+			section: "matches",
+			insertText: entry.insertText,
+			primaryText: entry.primaryText,
+			secondaryText: entry.secondaryText,
+			path: entry.path,
+			openLinkText: entry.openLinkText,
+			positions: primaryMatch?.positions ?? [],
+			pathPositions: [],
+			score,
+			confidence: this.getConfidenceLevel(entry, normalizedQuery),
+		};
+	}
+
 	private buildRecentNavigationCandidates(
 		limit: number,
 		navigationHabitSignals: Map<string, NavigationHabitSignal>,
@@ -302,6 +392,7 @@ export class SearchAutocompleteService {
 			section: "recent-targets",
 			insertText: selection.primaryText,
 			primaryText: selection.primaryText,
+			secondaryText: selection.secondaryText,
 			path: selection.path,
 			openLinkText: selection.openLinkText,
 			positions: [],
@@ -309,6 +400,44 @@ export class SearchAutocompleteService {
 			score,
 			confidence,
 		};
+	}
+
+	private buildRecentCommandCandidates(
+		limit: number,
+		navigationHabitSignals: Map<string, NavigationHabitSignal>,
+	): SearchAutocompleteCandidate[] {
+		const selections = this.searchHistoryService
+			.getRecentNavigationSelections(1000)
+			.filter((selection) => selection.kind === "command");
+
+		return selections.map((selection) => {
+			const habitSignal = navigationHabitSignals.get(selection.openLinkText);
+			return {
+				id: `recent-command:${selection.openLinkText}`,
+				kind: "command",
+				section: "recent-targets",
+				insertText: selection.primaryText,
+				primaryText: selection.primaryText,
+				secondaryText: selection.secondaryText,
+				path: selection.path,
+				openLinkText: selection.openLinkText,
+				positions: [],
+				pathPositions: [],
+				score:
+					this.getSourceBoost("command", false) +
+					this.getNavigationHabitBoost(habitSignal, false) +
+					this.getTimestampRecencyBoost(
+						selection.timestamp,
+						240,
+						1000 * 60 * 60 * 24 * 5,
+					),
+				confidence:
+					habitSignal &&
+					(habitSignal.dayStreak >= 3 || habitSignal.totalSelectionCount >= 4)
+						? "high"
+						: "medium",
+			};
+		});
 	}
 
 	private buildRecentFileCandidates(
@@ -430,6 +559,33 @@ export class SearchAutocompleteService {
 		return entries;
 	}
 
+	private getIndexedCommandEntries(): IndexedCommandEntry[] {
+		if (this.indexedCommandEntriesCache) {
+			return this.indexedCommandEntriesCache;
+		}
+
+		const registry = (this.app as App & {
+			commands?: {
+				commands?: Record<string, { id?: string; name?: string }>;
+			};
+		}).commands?.commands;
+		const entries: IndexedCommandEntry[] = [];
+		for (const [registryKey, command] of Object.entries(registry ?? {})) {
+			const commandId = command?.id?.trim() || registryKey.trim();
+			const commandName = command?.name?.trim() || "";
+			if (commandId.length === 0 || commandName.length === 0) {
+				continue;
+			}
+
+			entries.push(this.createIndexedCommandEntry(commandId, commandName));
+		}
+
+		this.indexedCommandEntriesCache = entries.sort((left, right) =>
+			left.primaryText.localeCompare(right.primaryText),
+		);
+		return this.indexedCommandEntriesCache;
+	}
+
 	private buildEntriesForFile(file: TFile): IndexedAutocompleteEntry[] {
 		const entries: IndexedAutocompleteEntry[] = [];
 		const metadata = this.app.metadataCache.getFileCache(file);
@@ -484,6 +640,24 @@ export class SearchAutocompleteService {
 		return entries;
 	}
 
+	private createIndexedCommandEntry(
+		commandId: string,
+		commandName: string,
+	): IndexedCommandEntry {
+		const secondaryText = this.getCommandOwnerText(commandId);
+		return {
+			id: `command:${normalizeKey(commandId)}`,
+			kind: "command",
+			insertText: commandName,
+			primaryText: commandName,
+			secondaryText,
+			path: commandId,
+			openLinkText: commandId,
+			textIndex: createLightweightFuzzyIndex(commandName),
+			secondaryTextIndex: createLightweightFuzzyIndex(secondaryText),
+		};
+	}
+
 	private sortAndTrimCandidates(
 		candidates: SearchAutocompleteCandidate[],
 		limit: number,
@@ -529,6 +703,8 @@ export class SearchAutocompleteService {
 
 	private isSelectionSourceEnabled(kind: SearchAutocompleteSource): boolean {
 		switch (kind) {
+			case "command":
+				return false;
 			case "recent":
 				return this.setting.searchHistory.sources.recentFile;
 			case "file":
@@ -557,6 +733,8 @@ export class SearchAutocompleteService {
 		queryLooksPathLike: boolean,
 	): number {
 		switch (kind) {
+			case "command":
+				return 320;
 			case "recent":
 				return 220;
 			case "file":
@@ -579,6 +757,8 @@ export class SearchAutocompleteService {
 				return 0;
 			case "heading":
 				switch (kind) {
+					case "command":
+						return 0;
 					case "heading":
 						return 220;
 					case "alias":
@@ -592,6 +772,8 @@ export class SearchAutocompleteService {
 				}
 			case "block":
 				switch (kind) {
+					case "command":
+						return 0;
 					case "heading":
 						return 190;
 					case "file":
@@ -605,6 +787,8 @@ export class SearchAutocompleteService {
 				}
 			case "path":
 				switch (kind) {
+					case "command":
+						return 0;
 					case "path":
 						return 260;
 					case "file":
@@ -618,6 +802,8 @@ export class SearchAutocompleteService {
 				}
 			case "breadcrumb":
 				switch (kind) {
+					case "command":
+						return 0;
 					case "heading":
 						return 210;
 					case "path":
@@ -686,6 +872,31 @@ export class SearchAutocompleteService {
 		return 0;
 	}
 
+	private getCommandExactnessBoost(
+		entry: IndexedCommandEntry,
+		normalizedQuery: string,
+	): number {
+		if (normalizedQuery.length === 0) {
+			return 0;
+		}
+
+		const normalizedInsert = normalizeKey(entry.insertText);
+		const normalizedSecondary = normalizeKey(entry.secondaryText);
+		if (normalizedInsert === normalizedQuery) {
+			return this.getExactMatchBoost("command");
+		}
+		if (normalizedInsert.startsWith(normalizedQuery)) {
+			return this.getPrefixMatchBoost("command");
+		}
+		if (normalizedSecondary === normalizedQuery) {
+			return 220;
+		}
+		if (normalizedSecondary.startsWith(normalizedQuery)) {
+			return 110;
+		}
+		return 0;
+	}
+
 	private getNavigationHabitBoost(
 		signal: NavigationHabitSignal | undefined,
 		preferQuerySignals: boolean,
@@ -730,6 +941,8 @@ export class SearchAutocompleteService {
 
 	private getExactMatchBoost(kind: Exclude<SearchAutocompleteSource, "recent">): number {
 		switch (kind) {
+			case "command":
+				return 640;
 			case "file":
 				return 620;
 			case "heading":
@@ -743,6 +956,8 @@ export class SearchAutocompleteService {
 
 	private getPrefixMatchBoost(kind: Exclude<SearchAutocompleteSource, "recent">): number {
 		switch (kind) {
+			case "command":
+				return 280;
 			case "file":
 				return 260;
 			case "heading":
@@ -756,6 +971,8 @@ export class SearchAutocompleteService {
 
 	private getKindPriority(kind: SearchAutocompleteSource): number {
 		switch (kind) {
+			case "command":
+				return 6;
 			case "file":
 				return 5;
 			case "heading":
@@ -782,6 +999,8 @@ export class SearchAutocompleteService {
 
 	private getDedupKey(candidate: SearchAutocompleteCandidate): string {
 		switch (candidate.kind) {
+			case "command":
+				return `command:${normalizeKey(candidate.openLinkText)}`;
 			case "recent":
 			case "file":
 				return `file:${candidate.path}`;
@@ -867,6 +1086,20 @@ export class SearchAutocompleteService {
 		};
 	}
 
+	private getCommandOwnerText(commandId: string): string {
+		const pluginId = commandId.split(":")[0]?.trim();
+		if (!pluginId) {
+			return "Obsidian";
+		}
+
+		const pluginManifest = (this.app as App & {
+			plugins?: {
+				plugins?: Record<string, { manifest?: { name?: string } }>;
+			};
+		}).plugins?.plugins?.[pluginId]?.manifest;
+		return pluginManifest?.name?.trim() || "Obsidian";
+	}
+
 	private extractAliases(
 		metadata: CachedMetadata | null,
 		basename: string,
@@ -893,6 +1126,7 @@ export class SearchAutocompleteService {
 
 	private invalidateCache(): void {
 		this.indexedEntriesCache = null;
+		this.indexedCommandEntriesCache = null;
 	}
 }
 

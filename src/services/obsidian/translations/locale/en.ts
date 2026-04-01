@@ -24,8 +24,8 @@ export default {
 	"Omnisearch isn't installed": "Omnisearch isn't installed",
 	"Omnisearch is installed but not enabled":
 		"Omnisearch is installed but not enabled",
-	"Database has been updated, a reindex is required":
-		"Database has been updated, a reindex is required",
+	"Database has been updated. Automatically rebuilding the lexical index...":
+		"Database has been updated. Automatically rebuilding the lexical index...",
 	"Semantic init time": "The local model indexes at a speed of approximately 100-500 words per second. During this time, please do not close Obsidian.",
 	"Semantic init finished": "Semantic engine is ready",
 
@@ -48,9 +48,14 @@ export default {
 	"QuickSwitch desc": "Manage the navigation-style candidate sources used by the QuickSwitch modal.",
 	"quickSwitch.emptyState.search": "No navigation results matched.",
 	"quickSwitch.emptyState.idle": "No recent files or QuickSwitch picks yet.",
+	"quickSwitch.command.emptyState.search": "No commands matched.",
+	"quickSwitch.command.emptyState.idle": "No recent commands yet.",
 	"quickSwitch.section.recentTargets": "Recent Picks",
 	"quickSwitch.section.recentFiles": "Recent Files",
+	"quickSwitch.placeholder.navigation": "QuickSwitch...",
+	"quickSwitch.placeholder.command": "Search commands...",
 	"quickSwitch.footer.navigation": "Navigation candidates for QuickSwitch",
+	"quickSwitch.footer.command": "Command candidates for QuickSwitch",
 	"quickSwitch.footer.keys": "Ctrl+J / Ctrl+K move results",
 	"Enable search history": "Enable search history",
 	"Enable search history desc": "Record and use only confirmed searches for history suggestions and ghost completion.",
@@ -89,6 +94,7 @@ export default {
 	"autocompleteSource.heading": "Heading",
 	"autocompleteSource.path": "Path",
 	"autocompleteSource.recent": "Recent",
+	"autocompleteSource.command": "Command",
 	Clear: "Clear",
 
 	"Case sensitive": "Case sensitive",

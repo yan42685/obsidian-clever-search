@@ -124,6 +124,13 @@ export class CommandRegistry {
 		});
 
 		this.addCommand({
+			id: "cs-search-commands",
+			name: "Search commands",
+			callback: () => new QuickSwitchModal(this.app, "command").open(),
+		});
+
+
+		this.addCommand({
 			id: "cs-toggle-privacy-mode",
 			name: "Toggle privacy mode",
 			callback: () => getInstance(AuxiliaryService).togglePrivacyMode(),
