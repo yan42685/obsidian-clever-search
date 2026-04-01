@@ -5,6 +5,11 @@ import type {
   OuterSetting,
 } from "src/globals/plugin-setting";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
+import {
+  buildIndexRecoveryStateId,
+  type IndexRecoveryEngine,
+  type IndexRecoveryStateRow,
+} from "src/services/obsidian/user-data/index-recovery-state";
 import type {
   Bm25BlobBreakdown,
   BlobRecord,
@@ -59,6 +64,7 @@ export class Database {
       { name: "hybridBm25Index", table: this.db.hybridBm25Index },
       { name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
       { name: "hybridIndexedFileRefs", table: this.db.hybridIndexedFileRefs },
+      { name: "indexRecoveryState", table: this.db.indexRecoveryState },
       { name: "hybridTokenStats", table: this.db.hybridTokenStats },
       { name: "hybridTokenSavings", table: this.db.hybridTokenSavings },
     ] as const;
@@ -254,6 +260,51 @@ export class Database {
     }
   }
 
+  async getIndexRecoveryStates(
+    engine?: IndexRecoveryEngine,
+  ): Promise<IndexRecoveryStateRow[]> {
+    if (!engine) {
+      return await this.db.indexRecoveryState.toArray();
+    }
+    return await this.db.indexRecoveryState.where("engine").equals(engine).toArray();
+  }
+
+  async putIndexRecoveryState(row: IndexRecoveryStateRow): Promise<void> {
+    await this.db.indexRecoveryState.put(row);
+  }
+
+  async bulkPutIndexRecoveryStates(rows: IndexRecoveryStateRow[]): Promise<void> {
+    if (rows.length === 0) {
+      return;
+    }
+    await this.db.indexRecoveryState.bulkPut(rows);
+  }
+
+  async deleteIndexRecoveryState(
+    engine: IndexRecoveryEngine,
+    path: string,
+  ): Promise<void> {
+    await this.db.indexRecoveryState.delete(buildIndexRecoveryStateId(engine, path));
+  }
+
+  async moveIndexRecoveryState(
+    engine: IndexRecoveryEngine,
+    oldPath: string,
+    newPath: string,
+  ): Promise<void> {
+    const oldId = buildIndexRecoveryStateId(engine, oldPath);
+    const existing = await this.db.indexRecoveryState.get(oldId);
+    if (!existing) {
+      return;
+    }
+    await this.db.indexRecoveryState.put({
+      ...existing,
+      id: buildIndexRecoveryStateId(engine, newPath),
+      path: newPath,
+    });
+    await this.db.indexRecoveryState.delete(oldId);
+  }
+
   private toLexicalIndexedFileRefRow(
     ref: BaseIndexedFileRef,
   ): LexicalIndexedFileRefRow {
@@ -295,7 +346,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 14;
+  private static readonly _dbVersion = 15;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -312,6 +363,7 @@ class DexieWrapper extends Dexie {
   hybridBm25Index!: Dexie.Table<BlobRecord, number>;
   hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
   hybridIndexedFileRefs!: Dexie.Table<HybridIndexedFileRefRow, string>;
+  indexRecoveryState!: Dexie.Table<IndexRecoveryStateRow, string>;
   hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
   hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
 
@@ -457,7 +509,7 @@ class DexieWrapper extends Dexie {
           await tx.table("fileSnapshots").bulkPut(fileSnapshots);
         }
       });
-    this.version(DexieWrapper._dbVersion)
+    this.version(14)
       .stores({
         pluginSetting: "++id",
         lexicalSearchSnapshots: "++id",
@@ -496,6 +548,20 @@ class DexieWrapper extends Dexie {
           );
         }
       });
+    this.version(DexieWrapper._dbVersion).stores({
+      pluginSetting: "++id",
+      lexicalSearchSnapshots: "++id",
+      lexicalIndexedFileRefs: "++id,&path",
+      hybridChunks: "++id, filePath",
+      fileSnapshots: "filePath",
+      hybridChunkVectors: "filePath",
+      hybridBm25Index: "id",
+      hybridHnswSmall: "id",
+      hybridIndexedFileRefs: "path",
+      indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+      hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+    });
   }
   get dbVersion() {
     return DexieWrapper._dbVersion;
@@ -571,3 +637,4 @@ function estimateValueBytes(
 
   return textEncoder.encode(String(value)).length;
 }
+

@@ -17,9 +17,7 @@ import { BM25Engine, type BM25RuntimeMemoryBreakdown } from "./bm25";
 import {
   Embedder,
   estimateTextsTokenUsage,
-  NoApiKeyError,
   recordEstimatedTokenSavings,
-  WeeklyTokenLimitExceededError,
 } from "./embedder";
 import { HnswIndex } from "./hnsw";
 import {
@@ -86,9 +84,7 @@ type HybridWriteOption = {
 type HybridIndexMode = "full" | "without-embedding";
 
 type Bm25OnlyIndexedFileRefMeta = {
-  lastErrorKind: string | null;
   lastIncrementalEmbedAt?: number;
-  embeddingDeferred?: boolean;
 };
 
 type SmallChunkCandidate = {
@@ -544,9 +540,7 @@ export class HybridEngine {
         chunkCount: 0,
         vectorPrecision: null,
         indexedAt: pendingIndexedAt,
-        lastErrorKind: null,
         lastIncrementalEmbedAt: previousIndexedFileRef?.lastIncrementalEmbedAt,
-        embeddingDeferred: false,
       });
       await this.deleteStoredHybridPrivateData(filePath, {
         ...option,
@@ -586,10 +580,8 @@ export class HybridEngine {
 
       if (mode === "without-embedding") {
         await this.indexBm25Only(filePath, plannedChunks, generation, option, {
-          lastErrorKind: null,
           lastIncrementalEmbedAt:
             previousIndexedFileRef?.lastIncrementalEmbedAt,
-          embeddingDeferred: true,
         });
         await this.persistSnapshot(filePath, plainText, generation);
         return;
@@ -661,10 +653,8 @@ export class HybridEngine {
             chunkCount: plannedChunks.length,
             vectorPrecision: null,
             indexedAt: fallbackIndexedAt,
-            lastErrorKind: this.classifyIndexErrorKind(error),
             lastIncrementalEmbedAt:
               previousIndexedFileRef?.lastIncrementalEmbedAt,
-            embeddingDeferred: false,
           });
           return;
         } catch (fallbackError) {
@@ -676,10 +666,8 @@ export class HybridEngine {
             chunkCount: 0,
             vectorPrecision: null,
             indexedAt: failedIndexedAt,
-            lastErrorKind: this.classifyIndexErrorKind(fallbackError),
             lastIncrementalEmbedAt:
               previousIndexedFileRef?.lastIncrementalEmbedAt,
-            embeddingDeferred: false,
           });
           throw fallbackError;
         }
@@ -696,9 +684,7 @@ export class HybridEngine {
         chunkCount: plannedChunks.length,
         vectorPrecision: this.precision,
         indexedAt,
-        lastErrorKind: null,
         lastIncrementalEmbedAt: indexedAt,
-        embeddingDeferred: false,
       });
     });
   }
@@ -1068,9 +1054,7 @@ export class HybridEngine {
       chunkCount: plannedChunks.length,
       vectorPrecision: null,
       indexedAt: Date.now(),
-      lastErrorKind: meta?.lastErrorKind ?? null,
       lastIncrementalEmbedAt: meta?.lastIncrementalEmbedAt,
-      embeddingDeferred: meta?.embeddingDeferred ?? false,
     });
   }
 
@@ -1080,49 +1064,6 @@ export class HybridEngine {
     await this.db.db.hybridIndexedFileRefs.put(ref);
   }
 
-  private classifyIndexErrorKind(error: unknown): string {
-    if (error instanceof NoApiKeyError) return "missing_api_key";
-    if (error instanceof WeeklyTokenLimitExceededError) {
-      return "weekly_token_limit";
-    }
-    if (!(error instanceof Error)) {
-      return "unknown";
-    }
-    const message = `${error.name}: ${error.message}`.toLowerCase();
-    if (message.includes("weekly token limit")) return "weekly_token_limit";
-    if (message.includes("api key")) return "missing_api_key";
-    if (
-      message.includes("insufficient_quota") ||
-      message.includes("quota exhausted") ||
-      message.includes("quota exceeded")
-    ) {
-      return "quota_exhausted";
-    }
-    const statusMatch = message.match(/embedding api error (\d{3})/);
-    if (statusMatch) {
-      const status = Number(statusMatch[1]);
-      if (status === 401) return "auth_401";
-      if (status === 403) return "auth_403";
-      if (status === 408) return "timeout";
-      if (status === 409 || status === 425 || status === 429) {
-        return "provider_429";
-      }
-      if (status >= 500) return "provider_5xx";
-    }
-    if (message.includes("timeout")) return "timeout";
-    if (
-      message.includes("500") ||
-      message.includes("502") ||
-      message.includes("503") ||
-      message.includes("504")
-    ) {
-      return "provider_5xx";
-    }
-    if (message.includes("network") || message.includes("failed to fetch")) {
-      return "network";
-    }
-    return "unknown";
-  }
 
   private async withFileWriteLock<T>(
     filePath: string,

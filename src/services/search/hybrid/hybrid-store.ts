@@ -75,9 +75,7 @@ export type HybridIndexedFileRef = BaseIndexedFileRef & {
   chunkCount?: number;
   vectorPrecision?: VectorPrecision | null;
   indexedAt?: number;
-  lastErrorKind?: string | null;
   lastIncrementalEmbedAt?: number;
-  embeddingDeferred?: boolean;
 };
 
 export type ChunkVectorRecord = {
