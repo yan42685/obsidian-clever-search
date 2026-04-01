@@ -40,11 +40,35 @@
 		void scrollSelectedIntoView();
 	}
 
+	function getRecentCommandFallbackResults(
+		limit: number,
+	): SearchAutocompleteCandidate[] {
+		return searchHistoryService.getRecentCommandSelections(limit).map((entry) => ({
+			id: "recent-command-fallback:" + entry.openLinkText,
+			kind: "command",
+			section: "recent-targets",
+			insertText: entry.primaryText,
+			primaryText: entry.primaryText,
+			secondaryText: entry.secondaryText,
+			path: entry.path,
+			openLinkText: entry.openLinkText,
+			positions: [],
+			pathPositions: [],
+			secondaryPositions: [],
+			score: entry.timestamp,
+			confidence: "medium",
+		}));
+	}
+
 	function refreshResults(resetIndex = false): void {
-		results =
-			mode === "command"
-				? autocompleteService.getCommandSuggestions(queryText, 24)
-				: autocompleteService.getNavigationSuggestions(queryText, 24);
+		if (mode === "command") {
+			results =
+				queryText.trim().length === 0
+					? getRecentCommandFallbackResults(24)
+					: autocompleteService.getCommandSuggestions(queryText, 24);
+		} else {
+			results = autocompleteService.getNavigationSuggestions(queryText, 24);
+		}
 		resultButtons = [];
 		if (resetIndex) {
 			selectedResultIndex = results.length > 0 ? 0 : -1;
@@ -52,7 +76,6 @@
 			selectedResultIndex = -1;
 		}
 	}
-
 	function moveSelectedResult(direction: "next" | "prev"): void {
 		if (results.length === 0) {
 			selectedResultIndex = -1;
@@ -106,14 +129,14 @@
 		}
 		if (queryText.trim().length > 0) {
 			await searchHistoryService.recordQuery(queryText);
-			await searchHistoryService.recordNavigationSelection(queryText, {
-				path: candidate.path,
-				primaryText: candidate.primaryText,
-				secondaryText: candidate.secondaryText,
-				kind: candidate.kind,
-				openLinkText: candidate.openLinkText,
-			});
 		}
+		await searchHistoryService.recordNavigationSelection(queryText, {
+			path: candidate.path,
+			primaryText: candidate.primaryText,
+			secondaryText: candidate.secondaryText,
+			kind: candidate.kind,
+			openLinkText: candidate.openLinkText,
+		});
 		await app.workspace.openLinkText(
 			candidate.openLinkText,
 			"",
@@ -247,6 +270,11 @@
 			? t("quickSwitch.footer.command")
 			: t("quickSwitch.footer.navigation");
 	}
+
+	function shouldShowKind(entry: SearchAutocompleteCandidate): boolean {
+		return !(mode === "command" && entry.kind === "command");
+	}
+
 	function getHighlightParts(
 		text: string,
 		positions: number[],
@@ -344,7 +372,9 @@
 											{/if}
 										{/each}
 									</span>
+									{#if shouldShowKind(entry)}
 									<span class="quickswitch-result-kind">{t(getSourceLabelKey(entry.kind))}</span>
+								{/if}
 								</div>
 								{#if shouldShowPath(entry)}
 									<span class="quickswitch-result-path">
@@ -358,7 +388,15 @@
 									</span>
 								{/if}
 								{#if entry.secondaryText}
-									<span class="quickswitch-result-secondary">{entry.secondaryText}</span>
+									<span class="quickswitch-result-secondary">
+										{#each getHighlightParts(entry.secondaryText, entry.secondaryPositions) as part}
+											{#if part.matched}
+												<strong class="quickswitch-match">{part.text}</strong>
+											{:else}
+												<span>{part.text}</span>
+											{/if}
+										{/each}
+									</span>
 								{/if}
 							</div>
 						</button>
@@ -375,11 +413,16 @@
 </div>
 <style>
 	:global(.cs-modal.cs-quickswitch-modal) {
-		width: min(72rem, 94vw);
-		max-width: 94vw;
+		width: min(50rem, 66vw);
+		max-width: 66vw;
 		height: min(78vh, 48rem);
 		padding: 1.05rem 0.95rem 0.85rem;
 		overflow: visible;
+	}
+
+	:global(.cs-modal.cs-quickswitch-modal.cs-command-switch-modal) {
+		width: min(50rem, 66vw);
+		max-width: 66vw;
 	}
 
 	.quickswitch-shell {
@@ -450,8 +493,8 @@
 		align-items: flex-start;
 		width: 100%;
 		min-width: 0;
-		min-height: 3.2rem;
-		padding: 0.78rem 0.85rem;
+		min-height: 3.52rem;
+		padding: 0.53rem 0.85rem 0.86rem;
 		box-sizing: border-box;
 		text-align: left;
 		color: inherit;
@@ -481,12 +524,10 @@
 	}
 
 	.quickswitch-match {
-		font-weight: 700;
-		color: var(--text-normal);
+		font-weight: 800;
+		color: var(--text-accent, var(--text-normal));
 		text-decoration: none;
-		border-bottom: 1.5px solid currentColor;
-		padding-bottom: 0.02em;
-}
+	}
 
 	.quickswitch-footer {
 		display: flex;
@@ -507,6 +548,7 @@
 		width: 100%;
 		min-width: 0;
 		overflow: visible;
+		transform: translateY(-1px);
 	}
 
 	.quickswitch-result-title-row {
@@ -523,7 +565,7 @@
 		white-space: normal;
 		line-height: 1.4;
 		font-size: 0.95rem;
-		font-weight: 600;
+		font-weight: 400;
 		overflow-wrap: anywhere;
 	}
 

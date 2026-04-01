@@ -67,7 +67,8 @@ export class SearchHistoryService {
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly setting = getInstance(OuterSetting);
 	private indexedEntriesCache: IndexedSearchHistoryEntry[] | null = null;
-	private quickSwitchEntriesCache: QuickSwitchHistoryEntry[] | null = null;
+	private quickSwitchNavigationEntriesCache: QuickSwitchHistoryEntry[] | null = null;
+	private quickSwitchCommandEntriesCache: QuickSwitchHistoryEntry[] | null = null;
 	private maxCombinedUsageCountCache: number | null = null;
 
 	isEnabled(): boolean {
@@ -79,7 +80,10 @@ export class SearchHistoryService {
 	}
 
 	getQuickSwitchEntryCount(): number {
-		return this.getQuickSwitchEntries().length;
+		return (
+			this.getQuickSwitchNavigationEntries().length +
+			this.getQuickSwitchCommandEntries().length
+		);
 	}
 
 	async recordSuggestionSelection(queryText: string): Promise<void> {
@@ -134,8 +138,11 @@ export class SearchHistoryService {
 			return;
 		}
 
+		const isCommand = navigation.kind === "command";
 		const now = Date.now();
-		const entries = [...this.getQuickSwitchEntries()];
+		const entries = isCommand
+			? [...this.getQuickSwitchCommandEntries()]
+			: [...this.getQuickSwitchNavigationEntries()];
 		const targetKey = this.normalizeQuickSwitchTargetKey(nextOpenLinkText);
 		let existingEntry = entries.find(
 			(entry) => this.normalizeQuickSwitchTargetKey(entry.openLinkText) === targetKey,
@@ -162,30 +169,52 @@ export class SearchHistoryService {
 		existingEntry.timestamp = now;
 		this.updateQuickSwitchHabitEntry(existingEntry, now);
 		this.updateQuickSwitchQueryEntry(existingEntry, queryText, now);
-		this.getQuickSwitchHistorySetting().entries = this.trimQuickSwitchEntries(entries);
+
+		const quickSwitchHistory = this.getQuickSwitchHistorySetting();
+		if (isCommand) {
+			quickSwitchHistory.commandEntries = this.trimQuickSwitchEntries(entries);
+		} else {
+			quickSwitchHistory.navigationEntries = this.trimQuickSwitchEntries(entries);
+		}
+
 		this.invalidateQuickSwitchEntriesCache();
 		await this.plugin.saveData(this.setting);
 	}
 
 	getRecentNavigationSelections(limit = 6): RecentNavigationSelection[] {
-		return this.getQuickSwitchEntries()
+		return this.getQuickSwitchNavigationEntries()
 			.slice(0, limit)
-			.map((entry) => ({
-				queryText: this.getLatestQuickSwitchQueryText(entry),
-				path: entry.path,
-				openLinkText: entry.openLinkText,
-				primaryText: entry.primaryText,
-				secondaryText: entry.secondaryText,
-				kind: entry.kind,
-				timestamp: entry.timestamp,
-			}));
+			.map((entry) => this.toRecentNavigationSelection(entry));
+	}
+
+	getRecentCommandSelections(limit = 8): RecentNavigationSelection[] {
+		return this.getQuickSwitchCommandEntries()
+			.slice(0, limit)
+			.map((entry) => this.toRecentNavigationSelection(entry));
 	}
 
 	getNavigationHabitSignals(queryText: string): Map<string, NavigationHabitSignal> {
+		return this.getQuickSwitchHabitSignals(
+			this.getQuickSwitchNavigationEntries(),
+			queryText,
+		);
+	}
+
+	getCommandHabitSignals(queryText: string): Map<string, NavigationHabitSignal> {
+		return this.getQuickSwitchHabitSignals(
+			this.getQuickSwitchCommandEntries(),
+			queryText,
+		);
+	}
+
+	private getQuickSwitchHabitSignals(
+		entries: QuickSwitchHistoryEntry[],
+		queryText: string,
+	): Map<string, NavigationHabitSignal> {
 		const normalizedQuery = this.normalizeNavigationQuery(queryText);
 		const signals = new Map<string, NavigationHabitSignal>();
 
-		for (const entry of this.getQuickSwitchEntries()) {
+		for (const entry of entries) {
 			const queryEntry =
 				normalizedQuery.length > 0
 					? this.getQuickSwitchQueryEntry(entry, normalizedQuery)
@@ -340,7 +369,9 @@ export class SearchHistoryService {
 	}
 
 	async clearQuickSwitchHistory(): Promise<void> {
-		this.getQuickSwitchHistorySetting().entries = [];
+		const quickSwitchHistory = this.getQuickSwitchHistorySetting();
+		quickSwitchHistory.navigationEntries = [];
+		quickSwitchHistory.commandEntries = [];
 		this.invalidateQuickSwitchEntriesCache();
 		await this.plugin.saveData(this.setting);
 	}
@@ -360,25 +391,73 @@ export class SearchHistoryService {
 		return this.indexedEntriesCache;
 	}
 
-	private getQuickSwitchEntries(): QuickSwitchHistoryEntry[] {
-		if (this.quickSwitchEntriesCache) {
-			return this.quickSwitchEntriesCache;
+	private getQuickSwitchNavigationEntries(): QuickSwitchHistoryEntry[] {
+		if (this.quickSwitchNavigationEntriesCache) {
+			return this.quickSwitchNavigationEntriesCache;
 		}
 
 		const quickSwitchSetting = this.getQuickSwitchHistorySetting();
-		const quickSwitchEntries = this.trimQuickSwitchEntries(
-			this.sanitizeQuickSwitchEntries(quickSwitchSetting.entries ?? []),
+		const navigationEntries = this.trimQuickSwitchEntries(
+			this.sanitizeQuickSwitchEntries(quickSwitchSetting.navigationEntries ?? []).filter(
+				(entry) => entry.kind !== "command",
+			),
 		);
-		quickSwitchSetting.entries = quickSwitchEntries;
-		this.quickSwitchEntriesCache = quickSwitchEntries;
-		return quickSwitchEntries;
+		quickSwitchSetting.navigationEntries = navigationEntries;
+		this.quickSwitchNavigationEntriesCache = navigationEntries;
+		return navigationEntries;
+	}
+
+	private getQuickSwitchCommandEntries(): QuickSwitchHistoryEntry[] {
+		if (this.quickSwitchCommandEntriesCache) {
+			return this.quickSwitchCommandEntriesCache;
+		}
+
+		const quickSwitchSetting = this.getQuickSwitchHistorySetting();
+		const commandEntries = this.trimQuickSwitchEntries(
+			this.sanitizeQuickSwitchEntries(quickSwitchSetting.commandEntries ?? []).filter(
+				(entry) => entry.kind === "command",
+			),
+		);
+		quickSwitchSetting.commandEntries = commandEntries;
+		this.quickSwitchCommandEntriesCache = commandEntries;
+		return commandEntries;
 	}
 
 	private getQuickSwitchHistorySetting() {
-		return (this.setting.quickSwitchHistory ??= {
+		const quickSwitchHistory = (this.setting.quickSwitchHistory ??= {
 			maxItems: 5000,
-			entries: [],
-		});
+			navigationEntries: [],
+			commandEntries: [],
+		}) as typeof this.setting.quickSwitchHistory & {
+			entries?: QuickSwitchHistoryEntry[];
+		};
+
+		const legacyEntries = Array.isArray(quickSwitchHistory.entries)
+			? quickSwitchHistory.entries
+			: [];
+		const navigationEntries = Array.isArray(quickSwitchHistory.navigationEntries)
+			? quickSwitchHistory.navigationEntries
+			: [];
+		const commandEntries = Array.isArray(quickSwitchHistory.commandEntries)
+			? quickSwitchHistory.commandEntries
+			: [];
+
+		if (legacyEntries.length > 0) {
+			quickSwitchHistory.navigationEntries = [
+				...navigationEntries,
+				...legacyEntries.filter((entry) => entry.kind !== "command"),
+			];
+			quickSwitchHistory.commandEntries = [
+				...commandEntries,
+				...legacyEntries.filter((entry) => entry.kind === "command"),
+			];
+			delete quickSwitchHistory.entries;
+		} else {
+			quickSwitchHistory.navigationEntries = navigationEntries;
+			quickSwitchHistory.commandEntries = commandEntries;
+		}
+
+		return quickSwitchHistory;
 	}
 
 	private sanitizeEntries(entries: SearchHistoryEntry[]): SearchHistoryEntry[] {
@@ -785,6 +864,20 @@ export class SearchHistoryService {
 		};
 	}
 
+	private toRecentNavigationSelection(
+		entry: QuickSwitchHistoryEntry,
+	): RecentNavigationSelection {
+		return {
+			queryText: this.getLatestQuickSwitchQueryText(entry),
+			path: entry.path,
+			openLinkText: entry.openLinkText,
+			primaryText: entry.primaryText,
+			secondaryText: entry.secondaryText,
+			kind: entry.kind,
+			timestamp: entry.timestamp,
+		};
+	}
+
 	private getNextNavigationDayStreak(
 		previousDateKey: string | null,
 		nextDateKey: string,
@@ -945,7 +1038,8 @@ export class SearchHistoryService {
 	}
 
 	private invalidateQuickSwitchEntriesCache(): void {
-		this.quickSwitchEntriesCache = null;
+		this.quickSwitchNavigationEntriesCache = null;
+		this.quickSwitchCommandEntriesCache = null;
 	}
 
 	private getLatestInteractionTimestamp(entry: SearchHistoryEntry): number {

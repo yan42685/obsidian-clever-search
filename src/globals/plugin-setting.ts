@@ -70,7 +70,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	},
 	quickSwitchHistory: {
 		maxItems: 5000,
-		entries: [],
+		navigationEntries: [],
+		commandEntries: [],
 	},
 	ui: {
 		openInNewPane: true,
@@ -175,7 +176,8 @@ export type QuickSwitchHistoryEntry = {
 
 export type QuickSwitchHistorySetting = {
 	maxItems: SearchHistoryMaxItems;
-	entries: QuickSwitchHistoryEntry[];
+	navigationEntries: QuickSwitchHistoryEntry[];
+	commandEntries: QuickSwitchHistoryEntry[];
 };
 
 /** One record per (filePath, dateKey) where dateKey = "YYYY-MM-DD" */

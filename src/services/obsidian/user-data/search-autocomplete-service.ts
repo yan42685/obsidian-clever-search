@@ -48,6 +48,7 @@ export type SearchAutocompleteCandidate = {
 	openLinkText: string;
 	positions: number[];
 	pathPositions: number[];
+	secondaryPositions: number[];
 	score: number;
 	confidence: "high" | "medium" | "low";
 };
@@ -177,7 +178,7 @@ export class SearchAutocompleteService {
 		const preparedQuery = prepareLightweightFuzzyQuery(queryText, "history");
 		const normalizedQuery = preparedQuery.normalizedQuery;
 		const navigationHabitSignals =
-			this.searchHistoryService.getNavigationHabitSignals(queryText);
+			this.searchHistoryService.getCommandHabitSignals(queryText);
 		if (normalizedQuery.length === 0) {
 			return this.sortAndTrimCandidates(
 				this.buildRecentCommandCandidates(
@@ -243,6 +244,12 @@ export class SearchAutocompleteService {
 		}
 
 		const primaryMatch = matchLightweightFuzzy(preparedQuery, entry.textIndex);
+		const secondaryMatch = entry.secondaryText
+			? matchLightweightFuzzy(
+				preparedQuery,
+				createLightweightFuzzyIndex(entry.secondaryText),
+			)
+			: null;
 		const pathMatch =
 			entry.kind === "path"
 				? primaryMatch
@@ -279,9 +286,26 @@ export class SearchAutocompleteService {
 			secondaryText: entry.secondaryText,
 			path: entry.path,
 			openLinkText: entry.openLinkText,
-			positions: primaryMatch?.positions ?? [],
+			positions: this.getFieldHighlightPositions(
+				entry.primaryText,
+				preparedQuery,
+				primaryMatch?.positions ?? [],
+			),
 			pathPositions:
-				entry.primaryText === entry.path ? [] : pathMatch?.positions ?? [],
+				entry.primaryText === entry.path
+					? []
+					: this.getFieldHighlightPositions(
+						entry.path,
+						preparedQuery,
+						pathMatch?.positions ?? [],
+					),
+			secondaryPositions: entry.secondaryText
+				? this.getFieldHighlightPositions(
+					entry.secondaryText,
+					preparedQuery,
+					secondaryMatch?.positions ?? [],
+				)
+				: [],
 			score,
 			confidence: this.getConfidenceLevel(entry, parsedQuery.normalizedQuery),
 		};
@@ -301,6 +325,12 @@ export class SearchAutocompleteService {
 		if (!primaryMatch && !secondaryMatch) {
 			return null;
 		}
+		const projectedPositions = this.projectCommandMatchPositions(
+			entry.insertText,
+			entry.primaryText,
+			entry.secondaryText,
+			primaryMatch?.positions ?? [],
+		);
 
 		const score =
 			(primaryMatch
@@ -319,8 +349,22 @@ export class SearchAutocompleteService {
 			secondaryText: entry.secondaryText,
 			path: entry.path,
 			openLinkText: entry.openLinkText,
-			positions: primaryMatch?.positions ?? [],
+			positions: mergeSortedPositions(
+				projectedPositions.primaryPositions,
+				this.getFieldHighlightPositions(entry.primaryText, preparedQuery),
+			),
 			pathPositions: [],
+			secondaryPositions: mergeSortedPositions(
+				mergeSortedPositions(
+					projectedPositions.secondaryPositions,
+					secondaryMatch?.positions ?? [],
+				),
+				this.getFieldHighlightPositions(
+					entry.secondaryText,
+					preparedQuery,
+					secondaryMatch?.positions ?? [],
+				),
+			),
 			score,
 			confidence: this.getConfidenceLevel(entry, normalizedQuery),
 		};
@@ -397,6 +441,7 @@ export class SearchAutocompleteService {
 			openLinkText: selection.openLinkText,
 			positions: [],
 			pathPositions: [],
+			secondaryPositions: [],
 			score,
 			confidence,
 		};
@@ -406,23 +451,29 @@ export class SearchAutocompleteService {
 		limit: number,
 		navigationHabitSignals: Map<string, NavigationHabitSignal>,
 	): SearchAutocompleteCandidate[] {
-		const selections = this.searchHistoryService
-			.getRecentNavigationSelections(1000)
-			.filter((selection) => selection.kind === "command");
+		const indexedCommands = new Map(
+			this.getIndexedCommandEntries().map((entry) => [entry.openLinkText, entry]),
+		);
+		const selections = this.searchHistoryService.getRecentCommandSelections(limit);
 
 		return selections.map((selection) => {
 			const habitSignal = navigationHabitSignals.get(selection.openLinkText);
+			const indexedEntry = indexedCommands.get(selection.openLinkText);
+			const primaryText = indexedEntry?.primaryText ?? selection.primaryText;
+			const secondaryText = indexedEntry?.secondaryText ?? selection.secondaryText;
+			const insertText = indexedEntry?.insertText ?? selection.primaryText;
 			return {
 				id: `recent-command:${selection.openLinkText}`,
 				kind: "command",
 				section: "recent-targets",
-				insertText: selection.primaryText,
-				primaryText: selection.primaryText,
-				secondaryText: selection.secondaryText,
+				insertText,
+				primaryText,
+				secondaryText,
 				path: selection.path,
 				openLinkText: selection.openLinkText,
 				positions: [],
 				pathPositions: [],
+				secondaryPositions: [],
 				score:
 					this.getSourceBoost("command", false) +
 					this.getNavigationHabitBoost(habitSignal, false) +
@@ -502,6 +553,7 @@ export class SearchAutocompleteService {
 					openLinkText: path,
 					positions: basenameMatch?.positions ?? [],
 					pathPositions: pathMatch?.positions ?? [],
+					secondaryPositions: [],
 					score,
 					confidence: this.getConfidenceLevel(
 						{
@@ -645,11 +697,12 @@ export class SearchAutocompleteService {
 		commandName: string,
 	): IndexedCommandEntry {
 		const secondaryText = this.getCommandOwnerText(commandId);
+		const displayName = this.getCommandDisplayName(commandName, secondaryText);
 		return {
 			id: `command:${normalizeKey(commandId)}`,
 			kind: "command",
 			insertText: commandName,
-			primaryText: commandName,
+			primaryText: displayName,
 			secondaryText,
 			path: commandId,
 			openLinkText: commandId,
@@ -1017,6 +1070,33 @@ export class SearchAutocompleteService {
 		return entry.pathDepth * 5 + Math.min(entry.pathLength, 120) * 0.22;
 	}
 
+	private getFieldHighlightPositions(
+		text: string,
+		preparedQuery: ReturnType<typeof prepareLightweightFuzzyQuery>,
+		fallbackPositions: number[] = [],
+	): number[] {
+		if (fallbackPositions.length > 0) {
+			return fallbackPositions;
+		}
+
+		const queryTerms = preparedQuery.queryTerms.filter((term) => term.length > 0);
+		if (queryTerms.length <= 1) {
+			return fallbackPositions;
+		}
+
+		const textIndex = createLightweightFuzzyIndex(text);
+		let positions: number[] = [];
+		for (const term of queryTerms) {
+			const termMatch = matchLightweightFuzzy(
+				prepareLightweightFuzzyQuery(term, preparedQuery.mode),
+				textIndex,
+			);
+			positions = mergeSortedPositions(positions, termMatch?.positions ?? []);
+		}
+
+		return positions;
+	}
+
 	private getConfidenceLevel(
 		entry: Pick<SearchAutocompleteCandidate, "insertText" | "primaryText" | "kind">,
 		normalizedQuery: string,
@@ -1100,6 +1180,94 @@ export class SearchAutocompleteService {
 		return pluginManifest?.name?.trim() || "Obsidian";
 	}
 
+	private getCommandDisplayName(commandName: string, ownerText: string): string {
+		return this.getCommandDisplayProjection(commandName, ownerText).displayName;
+	}
+
+	private getCommandDisplayProjection(
+		commandName: string,
+		ownerText: string,
+	): {
+		displayName: string;
+		displayOffset: number;
+		ownerLength: number;
+	} {
+		const trimmedCommandName = commandName.trim();
+		const trimmedOwnerText = ownerText.trim();
+		if (!trimmedCommandName || !trimmedOwnerText) {
+			return {
+				displayName: trimmedCommandName,
+				displayOffset: 0,
+				ownerLength: 0,
+			};
+		}
+
+		for (const separator of [":", "\uFF1A"]) {
+			const prefix = trimmedOwnerText + separator;
+			if (!trimmedCommandName.startsWith(prefix)) {
+				continue;
+			}
+			const remainder = trimmedCommandName.slice(prefix.length);
+			const strippedName = remainder.trim();
+			if (strippedName.length > 0) {
+				return {
+					displayName: strippedName,
+					displayOffset:
+						prefix.length + (remainder.length - remainder.trimStart().length),
+					ownerLength: trimmedOwnerText.length,
+				};
+			}
+		}
+
+		return {
+			displayName: trimmedCommandName,
+			displayOffset: 0,
+			ownerLength: 0,
+		};
+	}
+
+	private projectCommandMatchPositions(
+		commandName: string,
+		displayName: string,
+		ownerText: string,
+		positions: number[],
+	): {
+		primaryPositions: number[];
+		secondaryPositions: number[];
+	} {
+		if (positions.length === 0) {
+			return { primaryPositions: [], secondaryPositions: [] };
+		}
+
+		const projection = this.getCommandDisplayProjection(commandName, ownerText);
+		if (projection.displayOffset === 0) {
+			return {
+				primaryPositions: positions.filter(
+					(position) => position >= 0 && position < displayName.length,
+				),
+				secondaryPositions: [],
+			};
+		}
+
+		const primaryPositions: number[] = [];
+		const secondaryPositions: number[] = [];
+		for (const position of positions) {
+			if (position >= 0 && position < projection.ownerLength) {
+				secondaryPositions.push(position);
+				continue;
+			}
+			if (position < projection.displayOffset) {
+				continue;
+			}
+			const displayPosition = position - projection.displayOffset;
+			if (displayPosition >= 0 && displayPosition < displayName.length) {
+				primaryPositions.push(displayPosition);
+			}
+		}
+
+		return { primaryPositions, secondaryPositions };
+	}
+
 	private extractAliases(
 		metadata: CachedMetadata | null,
 		basename: string,
@@ -1146,4 +1314,14 @@ function dedupeTexts(values: string[]): string[] {
 
 function normalizeKey(text: string): string {
 	return text.trim().toLocaleLowerCase();
+}
+
+function mergeSortedPositions(left: number[], right: number[]): number[] {
+	if (left.length === 0) {
+		return right;
+	}
+	if (right.length === 0) {
+		return left;
+	}
+	return [...new Set([...left, ...right])].sort((a, b) => a - b);
 }
