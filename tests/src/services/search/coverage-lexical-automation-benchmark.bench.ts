@@ -2135,7 +2135,8 @@ function createCoverageRecallIndex(engine: any) {
 		sortedLexicon: engine.sortedLexicon,
 		documentIdByPath: engine.documentIdByPath,
 		documentPathById: engine.documentPathById,
-		documentBodyTokensById: engine.documentBodyTokensById,
+		getDocumentBodyTokens: (docId: number) =>
+			engine.getDocumentBodyTokens(docId) ?? [],
 		documentTagValuesById: engine.documentTagValuesById,
 	};
 }

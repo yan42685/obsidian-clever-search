@@ -81,6 +81,11 @@ type CoverageLexicalDocument = {
 	headingsText: string;
 };
 
+type CoverageLexicalTokenRange = {
+	start: number;
+	end: number;
+};
+
 type CoverageLexicalDerivedDocumentIndexState = {
 	bodyTokenSequence: string[];
 	bodyHanSegments: string[];
@@ -262,6 +267,7 @@ type CoverageLexicalBenchmarkPhaseTimingState = {
 };
 
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
+const ENABLE_BODY_PHRASE_POSTINGS = false;
 
 function createCoverageLexicalEngineQueryCache(
 	fuzzyProportion: number,
@@ -293,7 +299,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentById: Array<CoverageLexicalDocument | undefined> = [];
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly documentPathById: Array<string | undefined> = [];
-	private readonly documentBodyTokensById: Array<readonly string[] | undefined> = [];
+	private documentBodyTokenTape: string[] = [];
+	private readonly documentBodyTokenRangeById: Array<CoverageLexicalTokenRange | undefined> = [];
 	private readonly documentBodyHanSegmentsById: Array<
 		readonly string[] | undefined
 	> = [];
@@ -468,7 +475,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentById.length = 0;
 		this.documentIdByPath.clear();
 		this.documentPathById.length = 0;
-		this.documentBodyTokensById.length = 0;
+		this.documentBodyTokenTape.length = 0;
+		this.documentBodyTokenRangeById.length = 0;
 		this.documentBodyHanSegmentsById.length = 0;
 		this.documentTagValuesById.length = 0;
 		this.fileSnapshotStore = undefined;
@@ -494,6 +502,59 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.metadataTagPostings.clear();
 		this.lexicon.clear();
 		this.sortedLexicon = [];
+	}
+
+	private getDocumentBodyTokens(docId: number): readonly string[] | undefined {
+		return readCoverageLexicalTokenRange(
+			this.documentBodyTokenTape,
+			this.documentBodyTokenRangeById[docId],
+		);
+	}
+
+	private setDocumentBodyTokens(
+		docId: number,
+		tokens: readonly string[],
+	): void {
+		this.rebuildDocumentBodyTokenTape(new Map([[docId, [...tokens]]]));
+	}
+
+	private clearDocumentBodyTokens(docId: number): void {
+		this.rebuildDocumentBodyTokenTape(new Map([[docId, undefined]]));
+	}
+
+	private rebuildDocumentBodyTokenTape(
+		overrides: ReadonlyMap<number, readonly string[] | undefined> = new Map(),
+	): void {
+		const currentTape = this.documentBodyTokenTape;
+		const currentRanges = this.documentBodyTokenRangeById;
+		let maxDocId = Math.max(this.documentById.length, currentRanges.length);
+		for (const docId of overrides.keys()) {
+			maxDocId = Math.max(maxDocId, docId + 1);
+		}
+		const nextTape: string[] = [];
+		const nextRanges: Array<CoverageLexicalTokenRange | undefined> = new Array(
+			maxDocId,
+		);
+		for (let docId = 0; docId < maxDocId; docId += 1) {
+			const tokens = overrides.has(docId)
+				? overrides.get(docId)
+				: this.documentById[docId]
+					? readCoverageLexicalTokenRange(currentTape, currentRanges[docId])
+					: undefined;
+			if (!tokens || tokens.length === 0) {
+				nextRanges[docId] = undefined;
+				continue;
+			}
+			const start = nextTape.length;
+			nextTape.push(...tokens);
+			nextRanges[docId] = {
+				start,
+				end: nextTape.length,
+			};
+		}
+		this.documentBodyTokenTape = nextTape;
+		this.documentBodyTokenRangeById.length = 0;
+		this.documentBodyTokenRangeById.push(...nextRanges);
 	}
 
 	async addDocuments(documents: IndexedDocument[]): Promise<void> {
@@ -612,7 +673,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					sortedLexicon: this.sortedLexicon,
 					documentIdByPath: this.documentIdByPath,
 					documentPathById: this.documentPathById,
-					documentBodyTokensById: this.documentBodyTokensById,
+					getDocumentBodyTokens: (docId: number) =>
+						this.getDocumentBodyTokens(docId) ?? [],
 					documentTagValuesById: this.documentTagValuesById,
 				},
 				plan,
@@ -817,97 +879,132 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath,
 			this.documentPathById,
 			this.documentById,
-			this.documentBodyTokensById,
+			this.documentBodyTokenTape,
+			this.documentBodyTokenRangeById,
 			this.documentBodyHanSegmentsById,
 			this.documentTagValuesById,
 			this.nextDocumentId,
 			accumulator,
 		);
 		const postings = {
-			body: estimateNumericPostingMapBytes(this.bodyPostings, accumulator),
-			bodyChar: estimateNumericPostingMapBytes(this.bodyCharPostings, accumulator),
+			body: estimateNumericPostingMapBytes(
+				this.bodyPostings,
+				accumulator,
+				"postings.body.term",
+			),
+			bodyChar: estimateNumericPostingMapBytes(
+				this.bodyCharPostings,
+				accumulator,
+				"postings.bodyChar.term",
+			),
 			bodyPhrase: estimateNumericPostingMapBytes(
 				this.bodyPhrasePostings,
 				accumulator,
+				"postings.bodyPhrase.term",
 			),
 			metadataAlias: estimateNumericPostingMapBytes(
 				this.metadataAliasPostings,
 				accumulator,
+				"postings.metadataAlias.term",
 			),
 			metadataAliasChar: estimateNumericPostingMapBytes(
 				this.metadataAliasCharPostings,
 				accumulator,
+				"postings.metadataAliasChar.term",
 			),
 			metadataAliasPhrase: estimateNumericPostingMapBytes(
 				this.metadataAliasPhrasePostings,
 				accumulator,
+				"postings.metadataAliasPhrase.term",
 			),
 			metadataBasename: estimateNumericPostingMapBytes(
 				this.metadataBasenamePostings,
 				accumulator,
+				"postings.metadataBasename.term",
 			),
 			metadataBasenameChar: estimateNumericPostingMapBytes(
 				this.metadataBasenameCharPostings,
 				accumulator,
+				"postings.metadataBasenameChar.term",
 			),
 			metadataBasenamePhrase: estimateNumericPostingMapBytes(
 				this.metadataBasenamePhrasePostings,
 				accumulator,
+				"postings.metadataBasenamePhrase.term",
 			),
 			metadataFolder: estimateNumericPostingMapBytes(
 				this.metadataFolderPostings,
 				accumulator,
+				"postings.metadataFolder.term",
 			),
 			metadataFolderChar: estimateNumericPostingMapBytes(
 				this.metadataFolderCharPostings,
 				accumulator,
+				"postings.metadataFolderChar.term",
 			),
 			metadataFolderPhrase: estimateNumericPostingMapBytes(
 				this.metadataFolderPhrasePostings,
 				accumulator,
+				"postings.metadataFolderPhrase.term",
 			),
 			metadataHeading: estimateNumericPostingMapBytes(
 				this.metadataHeadingPostings,
 				accumulator,
+				"postings.metadataHeading.term",
 			),
 			metadataHeadingChar: estimateNumericPostingMapBytes(
 				this.metadataHeadingCharPostings,
 				accumulator,
+				"postings.metadataHeadingChar.term",
 			),
 			metadataHeadingPhrase: estimateNumericPostingMapBytes(
 				this.metadataHeadingPhrasePostings,
 				accumulator,
+				"postings.metadataHeadingPhrase.term",
 			),
 			metadataTag: estimateNumericPostingMapBytes(
 				this.metadataTagPostings,
 				accumulator,
+				"postings.metadataTag.term",
 			),
 			metadataTagChar: estimateNumericPostingMapBytes(
 				this.metadataTagCharPostings,
 				accumulator,
+				"postings.metadataTagChar.term",
 			),
 			metadataTagFull: estimateNumericPostingMapBytes(
 				this.metadataTagFullPostings,
 				accumulator,
+				"postings.metadataTagFull.term",
 			),
 			metadataTagPhrase: estimateNumericPostingMapBytes(
 				this.metadataTagPhrasePostings,
 				accumulator,
+				"postings.metadataTagPhrase.term",
 			),
 		};
-		const lexicon = estimateStringArrayBytes(this.sortedLexicon, accumulator);
+		const lexicon = estimateStringArrayBytes(
+			this.sortedLexicon,
+			accumulator,
+			"lexicon.term",
+		);
 		const total =
 			accumulator.stringPoolBytes +
 			documents.total +
 			documentIdentity.total +
 			sumNamedByteBreakdowns(postings) +
 			lexicon.total;
+		const stringPoolBySource = buildStringPoolAttributionBreakdown(
+			accumulator,
+		);
 		return {
 			estimatedBytes: {
 				total,
 				stringPool: {
 					bytes: accumulator.stringPoolBytes,
 					uniqueStrings: accumulator.seenStrings.size,
+					bySource: stringPoolBySource.bySource,
+					byGroup: stringPoolBySource.byGroup,
 				},
 				documents,
 				documentIdentity,
@@ -930,7 +1027,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 		this.documents.set(document.path, storedDocument);
 		this.documentById[docId] = storedDocument;
-		this.documentBodyTokensById[docId] = derivedState.bodyTokenSequence;
+		this.setDocumentBodyTokens(docId, derivedState.bodyTokenSequence);
 		this.documentBodyHanSegmentsById[docId] = derivedState.bodyHanSegments;
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 
@@ -941,8 +1038,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of derivedState.bodyCharTerms) {
 			addNumericPosting(this.bodyCharPostings, term, docId);
 		}
-		for (const term of derivedState.bodyPhraseTerms) {
-			addNumericPosting(this.bodyPhrasePostings, term, docId);
+		if (ENABLE_BODY_PHRASE_POSTINGS) {
+			for (const term of derivedState.bodyPhraseTerms) {
+				addNumericPosting(this.bodyPhrasePostings, term, docId);
+			}
 		}
 		for (const term of derivedState.aliasTerms) {
 			addNumericPosting(this.metadataAliasPostings, term, docId);
@@ -1014,7 +1113,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.tokenizer,
 			existing,
 			{
-				existingBodyTokenSequence: this.documentBodyTokensById[docId],
+				existingBodyTokenSequence: this.getDocumentBodyTokens(docId),
 				existingBodyHanSegments: this.documentBodyHanSegmentsById[docId],
 				existingTagValues: this.documentTagValuesById[docId],
 			},
@@ -1025,8 +1124,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of derivedState.bodyCharTerms) {
 			removeNumericPosting(this.bodyCharPostings, term, docId);
 		}
-		for (const term of derivedState.bodyPhraseTerms) {
-			removeNumericPosting(this.bodyPhrasePostings, term, docId);
+		if (ENABLE_BODY_PHRASE_POSTINGS) {
+			for (const term of derivedState.bodyPhraseTerms) {
+				removeNumericPosting(this.bodyPhrasePostings, term, docId);
+			}
 		}
 		for (const term of derivedState.aliasTerms) {
 			removeNumericPosting(this.metadataAliasPostings, term, docId);
@@ -1078,7 +1179,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		this.documents.delete(path);
 		this.documentById[docId] = undefined;
-		this.documentBodyTokensById[docId] = undefined;
+		this.clearDocumentBodyTokens(docId);
 		this.documentBodyHanSegmentsById[docId] = undefined;
 		this.documentTagValuesById[docId] = undefined;
 		if (releaseDocumentIdentity) {
@@ -1184,7 +1285,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								tagsText: document.tagsText,
 								headingsText: document.headingsText,
 								bodyTokenSequence: [
-									...(this.documentBodyTokensById[document.docId] ?? []),
+									...(this.getDocumentBodyTokens(document.docId) ?? []),
 								],
 								bodyHanSegments: [],
 								tagValues: [
@@ -1197,7 +1298,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			bodyPostings: cloneNumericPostingMap(this.bodyPostings),
 			bodyCharPostings: cloneNumericPostingMap(this.bodyCharPostings),
 			bodyHanSegmentPostings: new Map(),
-			bodyPhrasePostings: cloneNumericPostingMap(this.bodyPhrasePostings),
+			bodyPhrasePostings: ENABLE_BODY_PHRASE_POSTINGS ? cloneNumericPostingMap(this.bodyPhrasePostings) : new Map(),
 			metadataAliasCharPostings: cloneNumericPostingMap(
 				this.metadataAliasCharPostings,
 			),
@@ -1257,6 +1358,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of this.sortedLexicon) {
 			this.lexicon.add(term);
 		}
+		const bodyTokensById = new Map<number, readonly string[]>();
 		for (const document of state.documents) {
 			const storedDocument: CoverageLexicalDocument = {
 				docId: document.docId,
@@ -1270,15 +1372,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentById[document.docId] = storedDocument;
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
-			this.documentBodyTokensById[document.docId] = [...document.bodyTokenSequence];
+			bodyTokensById.set(document.docId, [...document.bodyTokenSequence]);
 			this.documentBodyHanSegmentsById[document.docId] = [
 				...document.bodyHanSegments,
 			];
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
+		this.rebuildDocumentBodyTokenTape(bodyTokensById);
 		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
 		restoreNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
-		restoreNumericPostingMap(this.bodyPhrasePostings, state.bodyPhrasePostings);
+				if (ENABLE_BODY_PHRASE_POSTINGS) {
+			restoreNumericPostingMap(this.bodyPhrasePostings, state.bodyPhrasePostings);
+		}
 		restoreNumericPostingMap(
 			this.metadataAliasCharPostings,
 			state.metadataAliasCharPostings,
@@ -1457,7 +1562,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!includeLocalWindow) {
 			return cached.coarseResult;
 		}
-		const bodyTokenSequence = this.documentBodyTokensById[docId];
+		const bodyTokenSequence = this.getDocumentBodyTokens(docId);
 		if (!bodyTokenSequence) {
 			return null;
 		}
@@ -1501,7 +1606,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (cached) {
 			return cached;
 		}
-		const bodyTokenSequence = this.documentBodyTokensById[docId];
+		const bodyTokenSequence = this.getDocumentBodyTokens(docId);
 		if (!bodyTokenSequence) {
 			return null;
 		}
@@ -2164,6 +2269,8 @@ function projectDocRankableResult(
 type IndexSizeAccumulator = {
 	seenStrings: Set<string>;
 	stringPoolBytes: number;
+	stringPoolBytesBySource: Map<string, number>;
+	stringPoolStringCountBySource: Map<string, number>;
 };
 
 const INDEX_COLLECTION_HEADER_BYTES = 4;
@@ -2177,23 +2284,36 @@ function createIndexSizeAccumulator(): IndexSizeAccumulator {
 	return {
 		seenStrings: new Set(),
 		stringPoolBytes: 0,
+		stringPoolBytesBySource: new Map(),
+		stringPoolStringCountBySource: new Map(),
 	};
 }
 
 function accountStringBytes(
 	accumulator: IndexSizeAccumulator,
 	value: string,
+	source: string,
 ): void {
 	if (accumulator.seenStrings.has(value)) {
 		return;
 	}
 	accumulator.seenStrings.add(value);
-	accumulator.stringPoolBytes += UTF8_ENCODER.encode(value).byteLength;
+	const bytes = UTF8_ENCODER.encode(value).byteLength;
+	accumulator.stringPoolBytes += bytes;
+	accumulator.stringPoolBytesBySource.set(
+		source,
+		(accumulator.stringPoolBytesBySource.get(source) ?? 0) + bytes,
+	);
+	accumulator.stringPoolStringCountBySource.set(
+		source,
+		(accumulator.stringPoolStringCountBySource.get(source) ?? 0) + 1,
+	);
 }
 
 function estimateStringArrayBytes(
 	values: readonly string[],
 	accumulator: IndexSizeAccumulator,
+	source: string,
 ): {
 	total: number;
 	count: number;
@@ -2202,7 +2322,7 @@ function estimateStringArrayBytes(
 	let count = 0;
 	for (const value of values) {
 		count += 1;
-		accountStringBytes(accumulator, value);
+		accountStringBytes(accumulator, value, source);
 	}
 	return {
 		total: INDEX_COLLECTION_HEADER_BYTES + count * INDEX_REFERENCE_BYTES,
@@ -2214,17 +2334,19 @@ function estimateStringArrayBytes(
 function estimateStringSetBytes(
 	values: ReadonlySet<string>,
 	accumulator: IndexSizeAccumulator,
+	source: string,
 ): {
 	total: number;
 	count: number;
 	referenceBytes: number;
 } {
-	return estimateStringArrayBytes(Array.from(values), accumulator);
+	return estimateStringArrayBytes(Array.from(values), accumulator, source);
 }
 
 function estimateNumericPostingMapBytes(
 	postings: ReadonlyMap<string, readonly number[]>,
 	accumulator: IndexSizeAccumulator,
+	source: string,
 ): {
 	total: number;
 	termCount: number;
@@ -2237,7 +2359,7 @@ function estimateNumericPostingMapBytes(
 	let postingCount = 0;
 	for (const [term, docIds] of postings.entries()) {
 		termCount += 1;
-		accountStringBytes(accumulator, term);
+		accountStringBytes(accumulator, term, source);
 		postingCount += docIds.length;
 	}
 	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
@@ -2274,27 +2396,27 @@ function estimateDocumentStoreBytes(
 		sections.docIds.count += 1;
 		sections.docIds.referenceBytes += INDEX_NUMBER_BYTES;
 
-		accountStringBytes(accumulator, path);
+		accountStringBytes(accumulator, path, "documents.path");
 		sections.paths.count += 1;
 		sections.paths.referenceBytes += INDEX_REFERENCE_BYTES;
 
-		accountStringBytes(accumulator, document.basenameText);
+		accountStringBytes(accumulator, document.basenameText, "documents.basenameText");
 		sections.basenameText.count += 1;
 		sections.basenameText.referenceBytes += INDEX_REFERENCE_BYTES;
 
-		accountStringBytes(accumulator, document.folderText);
+		accountStringBytes(accumulator, document.folderText, "documents.folderText");
 		sections.folderText.count += 1;
 		sections.folderText.referenceBytes += INDEX_REFERENCE_BYTES;
 
-		accountStringBytes(accumulator, document.aliasesText);
+		accountStringBytes(accumulator, document.aliasesText, "documents.aliasesText");
 		sections.aliasesText.count += 1;
 		sections.aliasesText.referenceBytes += INDEX_REFERENCE_BYTES;
 
-		accountStringBytes(accumulator, document.tagsText);
+		accountStringBytes(accumulator, document.tagsText, "documents.tagsText");
 		sections.tagsText.count += 1;
 		sections.tagsText.referenceBytes += INDEX_REFERENCE_BYTES;
 
-		accountStringBytes(accumulator, document.headingsText);
+		accountStringBytes(accumulator, document.headingsText, "documents.headingsText");
 		sections.headingsText.count += 1;
 		sections.headingsText.referenceBytes += INDEX_REFERENCE_BYTES;
 	}
@@ -2309,9 +2431,55 @@ function estimateDocumentStoreBytes(
 	};
 }
 
+function readCoverageLexicalTokenRange(
+	tape: readonly string[],
+	range: CoverageLexicalTokenRange | undefined,
+): readonly string[] | undefined {
+	if (!range) {
+		return undefined;
+	}
+	return tape.slice(range.start, range.end);
+}
+
+function estimateTokenTapeSlotsBytes(
+	tape: readonly string[],
+	rangesById: readonly (CoverageLexicalTokenRange | undefined)[],
+	accumulator: IndexSizeAccumulator,
+	source: string,
+): {
+	total: number;
+	slotCount: number;
+	populatedCount: number;
+	slotReferenceBytes: number;
+	rangeNumberBytes: number;
+	tokenCount: number;
+	tokenReferenceBytes: number;
+	tapeArrayBytes: number;
+} {
+	const populatedCount = rangesById.filter((range) => range !== undefined).length;
+	const tapeEstimate = estimateStringArrayBytes(tape, accumulator, source);
+	const slotReferenceBytes = rangesById.length * INDEX_REFERENCE_BYTES;
+	const rangeNumberBytes = populatedCount * INDEX_NUMBER_BYTES * 2;
+	return {
+		total:
+			INDEX_COLLECTION_HEADER_BYTES +
+			slotReferenceBytes +
+			rangeNumberBytes +
+			tapeEstimate.total,
+		slotCount: rangesById.length,
+		populatedCount,
+		slotReferenceBytes,
+		rangeNumberBytes,
+		tokenCount: tapeEstimate.count,
+		tokenReferenceBytes: tapeEstimate.referenceBytes,
+		tapeArrayBytes: tapeEstimate.total,
+	};
+}
+
 function estimateSparseStringArraySlotsBytes(
 	valuesById: readonly (readonly string[] | undefined)[],
 	accumulator: IndexSizeAccumulator,
+	source: string,
 ): {
 	total: number;
 	slotCount: number;
@@ -2329,7 +2497,7 @@ function estimateSparseStringArraySlotsBytes(
 			continue;
 		}
 		populatedCount += 1;
-		const estimate = estimateStringArrayBytes(values, accumulator);
+		const estimate = estimateStringArrayBytes(values, accumulator, source);
 		valueCount += estimate.count;
 		arrayBytes += estimate.total;
 	}
@@ -2349,7 +2517,8 @@ function estimateDocumentIdentityBytes(
 	documentIdByPath: ReadonlyMap<string, number>,
 	documentPathById: readonly (string | undefined)[],
 	documentById: readonly (CoverageLexicalDocument | undefined)[],
-	documentBodyTokensById: readonly (readonly string[] | undefined)[],
+	documentBodyTokenTape: readonly string[],
+	documentBodyTokenRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
 	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[],
 	documentTagValuesById: readonly (readonly string[] | undefined)[],
 	nextDocumentId: number,
@@ -2363,7 +2532,7 @@ function estimateDocumentIdentityBytes(
 	};
 	for (const [path] of documentIdByPath.entries()) {
 		pathToId.count += 1;
-		accountStringBytes(accumulator, path);
+		accountStringBytes(accumulator, path, "documentIdentity.pathToId.path");
 		pathToId.mapEntryBytes += INDEX_MAP_ENTRY_BYTES;
 		pathToId.pathReferenceBytes += INDEX_REFERENCE_BYTES;
 		pathToId.numberBytes += INDEX_NUMBER_BYTES;
@@ -2384,7 +2553,7 @@ function estimateDocumentIdentityBytes(
 			continue;
 		}
 		idToPath.populatedCount += 1;
-		accountStringBytes(accumulator, path);
+		accountStringBytes(accumulator, path, "documentIdentity.idToPath.path");
 	}
 	const idToPathTotal = INDEX_COLLECTION_HEADER_BYTES + idToPath.referenceBytes;
 
@@ -2395,17 +2564,21 @@ function estimateDocumentIdentityBytes(
 	};
 	const docStoreByIdTotal =
 		INDEX_COLLECTION_HEADER_BYTES + docStoreById.referenceBytes;
-	const bodyTokensById = estimateSparseStringArraySlotsBytes(
-		documentBodyTokensById,
+	const bodyTokensById = estimateTokenTapeSlotsBytes(
+		documentBodyTokenTape,
+		documentBodyTokenRangeById,
 		accumulator,
+		"documentIdentity.bodyTokens",
 	);
 	const bodyHanSegmentsById = estimateSparseStringArraySlotsBytes(
 		documentBodyHanSegmentsById,
 		accumulator,
+		"documentIdentity.bodyHanSegments",
 	);
 	const tagValuesById = estimateSparseStringArraySlotsBytes(
 		documentTagValuesById,
 		accumulator,
+		"documentIdentity.tagValues",
 	);
 
 	const counter = {
@@ -2468,10 +2641,90 @@ function sumNamedByteBreakdowns(
 	);
 }
 
-function toNamedByteBreakdown<T extends Record<string, { total: number }>>(
+function toNamedByteBreakdown<T extends Record<string, unknown>>(
 	breakdowns: T,
 ): T {
 	return breakdowns;
+}
+
+function buildStringPoolAttributionBreakdown(
+	accumulator: IndexSizeAccumulator,
+): {
+	bySource: Record<string, { bytes: number; uniqueStrings: number }>;
+	byGroup: Record<string, { bytes: number; uniqueStrings: number }>;
+} {
+	const bySourceEntries = Array.from(
+		accumulator.stringPoolBytesBySource.entries(),
+	)
+		.map(([source, bytes]) => [
+			source,
+			{
+				bytes,
+				uniqueStrings:
+					accumulator.stringPoolStringCountBySource.get(source) ?? 0,
+			},
+		] as const)
+		.sort((left, right) => right[1].bytes - left[1].bytes);
+	const bySource = Object.fromEntries(bySourceEntries);
+	const summarizeSources = (sources: readonly string[]) => {
+		let bytes = 0;
+		let uniqueStrings = 0;
+		for (const source of sources) {
+			bytes += accumulator.stringPoolBytesBySource.get(source) ?? 0;
+			uniqueStrings +=
+				accumulator.stringPoolStringCountBySource.get(source) ?? 0;
+		}
+		return { bytes, uniqueStrings };
+	};
+	const byGroup = {
+		bodyExactTerms: summarizeSources(["postings.body.term"]),
+		bodyPhraseTerms: summarizeSources(["postings.bodyPhrase.term"]),
+		metadataExactTerms: summarizeSources([
+			"postings.metadataAlias.term",
+			"postings.metadataBasename.term",
+			"postings.metadataFolder.term",
+			"postings.metadataHeading.term",
+			"postings.metadataTag.term",
+			"postings.metadataTagFull.term",
+		]),
+		metadataPhraseTerms: summarizeSources([
+			"postings.metadataAliasPhrase.term",
+			"postings.metadataBasenamePhrase.term",
+			"postings.metadataFolderPhrase.term",
+			"postings.metadataHeadingPhrase.term",
+			"postings.metadataTagPhrase.term",
+		]),
+		bodyCharTerms: summarizeSources(["postings.bodyChar.term"]),
+		metadataCharTerms: summarizeSources([
+			"postings.metadataAliasChar.term",
+			"postings.metadataBasenameChar.term",
+			"postings.metadataFolderChar.term",
+			"postings.metadataHeadingChar.term",
+			"postings.metadataTagChar.term",
+		]),
+		documentText: summarizeSources([
+			"documents.basenameText",
+			"documents.folderText",
+			"documents.aliasesText",
+			"documents.tagsText",
+			"documents.headingsText",
+		]),
+		documentPaths: summarizeSources([
+			"documents.path",
+			"documentIdentity.pathToId.path",
+			"documentIdentity.idToPath.path",
+		]),
+		documentDerivedTokens: summarizeSources([
+			"documentIdentity.bodyTokens",
+			"documentIdentity.bodyHanSegments",
+			"documentIdentity.tagValues",
+		]),
+		lexicon: summarizeSources(["lexicon.term"]),
+	};
+	return {
+		bySource,
+		byGroup,
+	};
 }
 
 function getPostingEntryCount(

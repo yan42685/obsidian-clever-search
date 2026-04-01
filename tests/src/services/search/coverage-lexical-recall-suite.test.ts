@@ -1,7 +1,10 @@
 import { container } from "tsyringe";
 import { buildCoverageLexicalStructuredMetadataSignatures, buildCoverageLexicalPhraseSignatures } from "src/services/search/coverage-lexical/coverage-lexical-bridge";
 import { buildCoverageLexicalPlan } from "src/services/search/coverage-lexical/coverage-lexical-planner";
-import { collectCoverageLexicalCandidateStatesWithDebug } from "src/services/search/coverage-lexical/coverage-lexical-recall";
+import {
+	collectCoverageLexicalCandidateStatesByDocId,
+	collectCoverageLexicalCandidateStatesWithDebug,
+} from "src/services/search/coverage-lexical/coverage-lexical-recall";
 
 jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
@@ -283,7 +286,8 @@ describe("coverage lexical recall suite", () => {
 					sortedLexicon: engineAny.sortedLexicon,
 					documentIdByPath: engineAny.documentIdByPath,
 					documentPathById: engineAny.documentPathById,
-					documentBodyTokensById: engineAny.documentBodyTokensById,
+					getDocumentBodyTokens: (docId: number) =>
+						engineAny.getDocumentBodyTokens(docId) ?? [],
 					documentTagValuesById: engineAny.documentTagValuesById,
 				},
 				plan,
@@ -328,4 +332,105 @@ describe("coverage lexical recall suite", () => {
 			JSON.stringify(rankingDiagnostics, null, 2),
 		);
 	});
+
+	test("body phrase witness still fires after clearing body phrase postings", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+			};
+		};
+
+		const documents: IndexedDocument[] = [
+			{
+				path: "adversarial/ranker-lab/en/exact-quality-witness.md",
+				basename: "exact-quality-witness.md",
+				folder: "adversarial/ranker-lab/en",
+				headings: "Exact quality witness",
+				content:
+					"config data rollout keeps exact family evidence together in one compact note",
+			},
+			{
+				path: "adversarial/ranker-lab/en/exact-quality-loose.md",
+				basename: "exact-quality-loose.md",
+				folder: "adversarial/ranker-lab/en",
+				headings: "Exact quality loose",
+				content:
+					"config guidance and data handoff happen before the rollout review in a broader note",
+			},
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		engineAny.bodyPhrasePostings.clear();
+
+		const tokenizer = createMockTokenizer();
+		const queryText = "config data rollout";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+
+		const candidates = collectCoverageLexicalCandidateStatesByDocId(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings: engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingCharPostings: engineAny.metadataHeadingCharPostings,
+				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				bodyPhrasePostings: engineAny.bodyPhrasePostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 5,
+			},
+		);
+
+		const witnessDocId = engineAny.documentIdByPath.get(
+			"adversarial/ranker-lab/en/exact-quality-witness.md",
+		);
+		expect(witnessDocId).toBeDefined();
+		const witnessState = candidates.get(witnessDocId);
+		expect(witnessState?.phraseMatches.length).toBeGreaterThan(0);
+	});
+
 });

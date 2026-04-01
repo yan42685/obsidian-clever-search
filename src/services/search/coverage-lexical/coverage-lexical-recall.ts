@@ -57,7 +57,7 @@ type CoverageLexicalRecallIndex = {
 	sortedLexicon: readonly string[];
 	documentIdByPath: ReadonlyMap<string, number>;
 	documentPathById: readonly (string | undefined)[];
-	documentBodyTokensById: readonly (readonly string[] | undefined)[];
+	getDocumentBodyTokens: (docId: number) => readonly string[];
 	documentTagValuesById: readonly (readonly string[] | undefined)[];
 };
 
@@ -122,6 +122,10 @@ type CoverageLexicalQueryCache = {
 	phraseSignatureBucketsByKey: Map<
 		string,
 		readonly CoverageLexicalPhraseSignature[]
+	>;
+	bodyPhraseWitnessCandidateKeysBySignatureKey: Map<
+		string,
+		readonly CoverageLexicalCandidateKey[]
 	>;
 };
 
@@ -213,6 +217,7 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		prefixExpansionsByTerm: new Map(),
 		fuzzyExpansionsByTerm: new Map(),
 		phraseSignatureBucketsByKey: new Map(),
+		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
 	};
 }
 
@@ -1478,7 +1483,7 @@ function buildLaneEvaluation(
 			),
 		() => state.phraseMatches.length,
 	);
-	const tokens = index.documentBodyTokensById[key] ?? [];
+	const tokens = index.getDocumentBodyTokens(key);
 	const tagFallback = options.includeTagFallback
 		? measureLaneEvaluateBenchmarkSubphase(
 				benchmarkHooks,
@@ -2035,6 +2040,7 @@ function collectPhraseCandidates(
 	)) {
 		collectCandidatesForPhraseSignature(
 			index,
+			queryCache,
 			candidates,
 			signature,
 			scope,
@@ -2094,6 +2100,7 @@ function collectCandidatesForTerm(
 
 function collectCandidatesForPhraseSignature(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 	scope: CoverageLexicalCollectionScope,
@@ -2120,6 +2127,7 @@ function collectCandidatesForPhraseSignature(
 					}
 				});
 			}
+			collectBodyPhraseWitnessMatches(index, queryCache, candidates, signature);
 		}
 
 		if (scope === "body-only") {
@@ -2145,6 +2153,128 @@ function collectCandidatesForPhraseSignature(
 			variant,
 		);
 	}
+}
+
+function collectBodyPhraseWitnessMatches(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	signature: CoverageLexicalPhraseSignature,
+): void {
+	for (const key of getOrCreateBodyPhraseWitnessCandidateKeys(
+		index,
+		signature,
+		queryCache,
+	)) {
+		const state = getOrCreateDocIdCandidateState(candidates, key);
+		recordPhraseMatch(state, signature.index);
+		for (const familyIndex of signature.familyIndices) {
+			recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
+		}
+	}
+}
+
+function getOrCreateBodyPhraseWitnessCandidateKeys(
+	index: CoverageLexicalRecallIndex,
+	signature: CoverageLexicalPhraseSignature,
+	queryCache: CoverageLexicalQueryCache,
+): readonly CoverageLexicalCandidateKey[] {
+	const cacheKey = buildPhraseWitnessSignatureCacheKey(signature);
+	const cached =
+		queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const canonicalTokens = getPhraseWitnessCanonicalTokens(signature);
+	if (canonicalTokens.length < 2) {
+		queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(cacheKey, []);
+		return [];
+	}
+	let anchorMatches: CoverageLexicalPostingList | undefined;
+	let anchorMatchCount = Number.POSITIVE_INFINITY;
+	for (const token of new Set(canonicalTokens)) {
+		const matches = index.bodyPostings.get(token);
+		if (!matches) {
+			queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(cacheKey, []);
+			return [];
+		}
+		const matchCount = getPostingCandidateCount(matches);
+		if (matchCount < anchorMatchCount) {
+			anchorMatches = matches;
+			anchorMatchCount = matchCount;
+		}
+	}
+	if (!anchorMatches) {
+		queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(cacheKey, []);
+		return [];
+	}
+	const matchedKeys: CoverageLexicalCandidateKey[] = [];
+	const seen = new Set<CoverageLexicalCandidateKey>();
+	forEachPostingCandidateKey(index, anchorMatches, (key) => {
+		if (seen.has(key)) {
+			return;
+		}
+		seen.add(key);
+		if (
+			hasContiguousPhraseWitness(
+				index.getDocumentBodyTokens(key),
+				canonicalTokens,
+			)
+		) {
+			matchedKeys.push(key);
+		}
+	});
+	queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(
+		cacheKey,
+		matchedKeys,
+	);
+	return matchedKeys;
+}
+
+function buildPhraseWitnessSignatureCacheKey(
+	signature: CoverageLexicalPhraseSignature,
+): string {
+	return `${signature.familyIndices.join(",")}::${signature.variants.join("|")}`;
+}
+
+function getPhraseWitnessCanonicalTokens(
+	signature: CoverageLexicalPhraseSignature,
+): readonly string[] {
+	const canonicalVariant =
+		signature.variants.find((variant) => variant.includes(" ")) ??
+		signature.variants[0] ??
+		"";
+	return canonicalVariant
+		.split(" ")
+		.map((token) => token.trim())
+		.filter((token) => token.length > 0);
+}
+
+function hasContiguousPhraseWitness(
+	tokens: readonly string[],
+	phraseTokens: readonly string[],
+): boolean {
+	if (phraseTokens.length === 0 || tokens.length < phraseTokens.length) {
+		return false;
+	}
+	const lastStart = tokens.length - phraseTokens.length;
+	for (let start = 0; start <= lastStart; start += 1) {
+		let matched = true;
+		for (let offset = 0; offset < phraseTokens.length; offset += 1) {
+			if (tokens[start + offset] !== phraseTokens[offset]) {
+				matched = false;
+				break;
+			}
+		}
+		if (matched) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function getPostingCandidateCount(postings: CoverageLexicalPostingList): number {
+	return Array.isArray(postings) ? postings.length : postings.size;
 }
 
 function getOrCreatePrefixExpansionTerms(
