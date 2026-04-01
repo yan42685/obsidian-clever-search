@@ -15,7 +15,7 @@
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { logger } from "src/utils/logger";
-	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance, isDevEnvironment } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import {
@@ -288,6 +288,10 @@
 		return viewHelper.getStructuredSnippetSegments(subItem);
 	}
 
+	function getSubItemScoreLabel(): string {
+		return isDevEnvironment ? "coverage score" : "score";
+	}
+
 	function getFileExtensionText(item: FileItem): string {
 		return item.extension === "md" ? "" : item.extension;
 	}
@@ -464,12 +468,13 @@
 									>
 										{#if subItem.score !== undefined}
 											<span class="subitem-score"
-												>score {formatScore(subItem.score)}</span
+												>{getSubItemScoreLabel()} {formatScore(subItem.score)}</span
 											>
 										{/if}
 										<span class="subitem-snippet">
-											{#if getStructuredSnippetSegments(subItem)}
-												{#each getStructuredSnippetSegments(subItem) ?? [] as segment}
+											{@const structuredSegments = getStructuredSnippetSegments(subItem)}
+										{#if structuredSegments}
+												{#each structuredSegments as segment}
 													{#if segment.highlight}
 														<mark>{segment.text}</mark>
 													{:else}
@@ -703,3 +708,4 @@
 		background-color: var(--cs-hint-char-color, #468eeb33);
 	}
 </style>
+

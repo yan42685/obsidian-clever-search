@@ -50,23 +50,16 @@ export function buildDirectSubitemsExactCandidates(params: {
 		allOccurrences: [...exactOccurrences, ...supportOccurrences],
 		options: params.options,
 	});
-	const deduped = dedupeDirectSubitemsCandidateSpans(initialSpans);
-	const supplemental =
-		exactOccurrences.length > 0
-			? buildSupplementalCoverageSpans({
-					snapshotText: params.snapshotText,
-					queryTerms,
-					exactOccurrences,
-					existingSpans: deduped,
-					options: params.options,
-			  })
-			: [];
-	const finalized = finalizeSpans(
+	const structuralCandidates = buildStructuralCandidates({
+		snapshotText: params.snapshotText,
+		queryTerms,
+		exactOccurrences,
+		initialSpans,
+		options: params.options,
+	});
+	const finalized = selectDisplayCandidates(
 		params.snapshotText,
-		rankDirectSubitemsCandidateSpans([
-			...deduped,
-			...supplemental,
-		]),
+		structuralCandidates,
 		params.options,
 	);
 	return {
@@ -110,9 +103,30 @@ export function buildDirectSubitemsExactFileSubItems(params: {
 	});
 }
 
-function finalizeSpans(
+function buildStructuralCandidates(params: {
+	snapshotText: string;
+	queryTerms: readonly DirectSubitemsQueryTerm[];
+	exactOccurrences: readonly DirectSubitemsOccurrence[];
+	initialSpans: readonly DirectSubitemsCandidateSpan[];
+	options?: DirectSubitemsSpanOptions;
+}): DirectSubitemsCandidateSpan[] {
+	const deduped = dedupeDirectSubitemsCandidateSpans(params.initialSpans);
+	const supplemental =
+		params.exactOccurrences.length > 0
+			? buildSupplementalCoverageSpans({
+					snapshotText: params.snapshotText,
+					queryTerms: params.queryTerms,
+					exactOccurrences: params.exactOccurrences,
+					existingSpans: deduped,
+					options: params.options,
+			  })
+			: [];
+	return rankDirectSubitemsCandidateSpans([...deduped, ...supplemental]);
+}
+
+function selectDisplayCandidates(
 	snapshotText: string,
-	candidateSpans: DirectSubitemsCandidateSpan[],
+	structuralCandidates: DirectSubitemsCandidateSpan[],
 	options?: DirectSubitemsSpanOptions,
 ): {
 	candidateSpans: DirectSubitemsCandidateSpan[];
@@ -120,38 +134,44 @@ function finalizeSpans(
 } {
 	const renderPayloads = renderDirectSubitemsCandidateSpans({
 		snapshotText,
-		spans: candidateSpans,
+		spans: structuralCandidates,
 		maxChars: options?.maxChars,
 	});
-	const selectedIndices = selectDisplayCandidateIndices(candidateSpans);
+	const selectedIndices = selectDisplayRepresentativeIndices(
+		structuralCandidates,
+		renderPayloads,
+	);
 	return {
-		candidateSpans: selectedIndices.map((index) => candidateSpans[index]),
+		candidateSpans: selectedIndices.map((index) => structuralCandidates[index]),
 		renderPayloads: selectedIndices.map((index) => renderPayloads[index]),
 	};
 }
 
 const DISPLAY_OVERLAP_RATIO = 0.65;
 
-function selectDisplayCandidateIndices(
-	candidateSpans: readonly DirectSubitemsCandidateSpan[],
+function selectDisplayRepresentativeIndices(
+	structuralCandidates: readonly DirectSubitemsCandidateSpan[],
+	renderPayloads: readonly DirectSubitemsRenderPayload[],
 ): number[] {
 	const selectedIndices: number[] = [];
-	for (let index = 0; index < candidateSpans.length; index++) {
+	for (let index = 0; index < structuralCandidates.length; index++) {
 		const overlappingIndices = selectedIndices.filter(
 			(selectedIndex) =>
-				computeRangeOverlapRatio(
-					candidateSpans[selectedIndex],
-					candidateSpans[index],
-				) >= DISPLAY_OVERLAP_RATIO,
+				shouldCompressDisplayCandidate(
+					structuralCandidates[selectedIndex],
+					renderPayloads[selectedIndex],
+					structuralCandidates[index],
+					renderPayloads[index],
+				),
 		);
 		if (overlappingIndices.length === 0) {
 			selectedIndices.push(index);
 			continue;
 		}
 		if (
-			hasNovelExactEvidence(
-				candidateSpans[index],
-				overlappingIndices.map((selectedIndex) => candidateSpans[selectedIndex]),
+			hasNovelDisplayEvidence(
+				structuralCandidates[index],
+				overlappingIndices.map((selectedIndex) => renderPayloads[selectedIndex]),
 			)
 		) {
 			selectedIndices.push(index);
@@ -160,28 +180,50 @@ function selectDisplayCandidateIndices(
 	return selectedIndices;
 }
 
-function hasNovelExactEvidence(
+function shouldCompressDisplayCandidate(
+	selectedSpan: DirectSubitemsCandidateSpan,
+	selectedPayload: DirectSubitemsRenderPayload,
 	candidateSpan: DirectSubitemsCandidateSpan,
-	existingSpans: readonly DirectSubitemsCandidateSpan[],
+	candidatePayload: DirectSubitemsRenderPayload,
 ): boolean {
-	const existingExactKeys = new Set(
-		existingSpans.flatMap((span) =>
-			span.occurrences
-				.filter((occurrence) => occurrence.tier === "exact")
-				.map(buildOccurrenceKey),
-		),
-	);
-	const candidateExactKeys = candidateSpan.occurrences
-		.filter((occurrence) => occurrence.tier === "exact")
-		.map(buildOccurrenceKey);
-	if (candidateExactKeys.length === 0) {
+	if (selectedSpan.termSignature !== candidateSpan.termSignature) {
 		return false;
 	}
-	return candidateExactKeys.some((key) => !existingExactKeys.has(key));
+	if (!selectedPayload.text.includes("\n") || !candidatePayload.text.includes("\n")) {
+		return false;
+	}
+	if (Math.abs(selectedPayload.row - candidatePayload.row) > 1) {
+		return false;
+	}
+	return (
+		computeRangeOverlapRatio(
+			{
+				start: selectedPayload.displayStart,
+				end: selectedPayload.displayEnd,
+			},
+			{
+				start: candidatePayload.displayStart,
+				end: candidatePayload.displayEnd,
+			},
+		) >= DISPLAY_OVERLAP_RATIO
+	);
 }
 
-function buildOccurrenceKey(occurrence: DirectSubitemsOccurrence): string {
-	return `${occurrence.termId}:${occurrence.start}:${occurrence.end}:${occurrence.tier}`;
+function hasNovelDisplayEvidence(
+	candidateSpan: DirectSubitemsCandidateSpan,
+	existingPayloads: readonly DirectSubitemsRenderPayload[],
+): boolean {
+	const exactOccurrences = candidateSpan.occurrences.filter(
+		(occurrence) => occurrence.tier === "exact",
+	);
+	const coverageOccurrences =
+		exactOccurrences.length > 0 ? exactOccurrences : candidateSpan.occurrences;
+	if (coverageOccurrences.length === 0) {
+		return false;
+	}
+	return coverageOccurrences.some(
+		(occurrence) => !isOccurrenceVisibleInPayloads(occurrence, existingPayloads),
+	);
 }
 
 function computeRangeOverlapRatio(
@@ -196,4 +238,14 @@ function computeRangeOverlapRatio(
 	const overlap = overlapEnd - overlapStart;
 	const base = Math.max(1, Math.min(left.end - left.start, right.end - right.start));
 	return overlap / base;
+}
+
+function isOccurrenceVisibleInPayloads(
+	occurrence: DirectSubitemsOccurrence,
+	payloads: readonly DirectSubitemsRenderPayload[],
+): boolean {
+	return payloads.some(
+		(payload) =>
+			occurrence.start >= payload.displayStart && occurrence.end <= payload.displayEnd,
+	);
 }

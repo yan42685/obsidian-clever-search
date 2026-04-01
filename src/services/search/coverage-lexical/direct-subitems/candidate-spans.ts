@@ -136,7 +136,8 @@ function buildCandidateSpanFromGroup(
 		.sort(compareOccurrences);
 	const termStats = buildSpanTermStats(queryTerms, renderOccurrences);
 	const rankedOccurrences = pickRepresentativeOccurrences(renderOccurrences);
-	const anchorOffset = rankedOccurrences[0]?.start ?? start;
+	const anchorOccurrence = pickAnchorOccurrence(renderOccurrences);
+	const anchorOffset = anchorOccurrence?.start ?? start;
 	return {
 		start,
 		end,
@@ -205,6 +206,41 @@ function pickRepresentativeOccurrences(
 		}
 	}
 	return [...bestByTerm.values()].sort(compareOccurrences);
+}
+
+function pickAnchorOccurrence(
+	occurrences: readonly DirectSubitemsOccurrence[],
+): DirectSubitemsOccurrence | null {
+	if (occurrences.length === 0) {
+		return null;
+	}
+	let best = occurrences[0];
+	for (const occurrence of occurrences.slice(1)) {
+		if (compareAnchorOccurrences(occurrence, best) < 0) {
+			best = occurrence;
+		}
+	}
+	return best;
+}
+
+function compareAnchorOccurrences(
+	left: DirectSubitemsOccurrence,
+	right: DirectSubitemsOccurrence,
+): number {
+	const tierDelta = compareMatchTier(left.tier, right.tier);
+	if (tierDelta !== 0) {
+		return tierDelta;
+	}
+	if (left.start !== right.start) {
+		return left.start - right.start;
+	}
+	if (left.distancePenalty !== right.distancePenalty) {
+		return left.distancePenalty - right.distancePenalty;
+	}
+	if (left.end !== right.end) {
+		return left.end - right.end;
+	}
+	return left.termId.localeCompare(right.termId);
 }
 
 function buildSpanScore(

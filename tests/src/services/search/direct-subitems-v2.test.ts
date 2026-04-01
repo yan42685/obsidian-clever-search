@@ -340,6 +340,25 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		expect(result.renderPayloads[2].text.toLowerCase()).toContain("plugons");
 	});
 
+	test("anchors grouped snippets on the first best-tier hit instead of an earlier weaker match", () => {
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "plugins fast",
+			snapshotText: "plugin fast",
+			options: {
+				mergeGap: 4,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.renderPayloads).toHaveLength(1);
+		expect(result.candidateSpans[0].anchorOffset).toBe("plugin ".length);
+		expect(result.renderPayloads[0].row).toBe(0);
+		expect(result.renderPayloads[0].col).toBe("plugin ".length);
+	});
+
 	test("coverage-complete fallback restores exact occurrences absent from the initial span set", () => {
 		const queryTerms = splitDirectSubitemsQueryTerms("alpha");
 		const snapshotText = `alpha${"x".repeat(96)}alpha`;
@@ -548,6 +567,33 @@ describe("direct subitems v2 exact-only pipeline", () => {
 					!payload.text.startsWith("\n") && !payload.text.endsWith("\n"),
 			),
 		).toBe(true);
+	});
+
+	test("compresses heavily overlapping display windows when earlier snippets already show the later exact hit", () => {
+		const snapshotText = [
+			"shared context top",
+			"shared context upper",
+			"alpha first hit",
+			"alpha second hit",
+			"shared context lower",
+			"shared context bottom",
+		].join("\n");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha",
+			snapshotText,
+			options: {
+				mergeGap: 0,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+				maxChars: 200,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.renderPayloads).toHaveLength(1);
+		expect(result.renderPayloads[0].text).toContain("alpha first hit");
+		expect(result.renderPayloads[0].text).toContain("alpha second hit");
 	});
 
 	test("keeps separate candidates even when expanded display windows overlap", () => {
