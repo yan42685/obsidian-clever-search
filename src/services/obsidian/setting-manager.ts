@@ -577,6 +577,7 @@ class SearchHistoryModal extends Modal {
 class QuickSwitchManageModal extends Modal {
 	private readonly settingManager = getInstance(SettingManager);
 	private readonly setting = getInstance(OuterSetting);
+	private readonly searchHistoryService = getInstance(SearchHistoryService);
 
 	onOpen() {
 		this.modalEl.style.width = "42vw";
@@ -645,6 +646,38 @@ class QuickSwitchManageModal extends Modal {
 						this.setting.searchHistory.sources.recentFile = value;
 						await this.settingManager.saveSettings();
 					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("QuickSwitch history max items"))
+			.setDesc(t("QuickSwitch history max items desc"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						20: "20",
+						50: "50",
+						100: "100",
+						1000: "1000",
+						3000: "3000",
+						5000: "5000",
+						10000: "10000",
+					})
+					.setValue(String(this.setting.quickSwitchHistory.maxItems))
+					.onChange(async (value) => {
+						this.setting.quickSwitchHistory.maxItems =
+							Number(value) as SearchHistoryMaxItems;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Clear QuickSwitch history"))
+			.setDesc(`${t("Clear QuickSwitch history desc")} (${this.searchHistoryService.getQuickSwitchEntryCount()})`)
+			.addButton((button) =>
+				button.setButtonText(t("Clear")).onClick(async () => {
+					await this.searchHistoryService.clearQuickSwitchHistory();
+					this.onOpen();
+				}),
 			);
 	}
 }

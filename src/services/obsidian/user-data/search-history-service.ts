@@ -1,4 +1,10 @@
-import { OuterSetting, type SearchHistoryEntry } from "src/globals/plugin-setting";
+import {
+	OuterSetting,
+	type QuickSwitchHistoryEntry,
+	type QuickSwitchHistoryQueryEntry,
+	type SearchHistoryEntry,
+	type SearchHistoryNavigationKind,
+} from "src/globals/plugin-setting";
 import { THIS_PLUGIN } from "src/globals/constants";
 import type CleverSearch from "src/main";
 import {
@@ -15,6 +21,24 @@ export type SearchHistorySuggestion = SearchHistoryEntry & {
 	fuzzyScore: number;
 	historyScore: number;
 	compositeScore: number;
+};
+
+export type RecentNavigationSelection = {
+	queryText: string;
+	path: string;
+	openLinkText: string;
+	primaryText: string;
+	kind: SearchHistoryNavigationKind;
+	timestamp: number;
+};
+
+export type NavigationHabitSignal = {
+	querySelectionCount: number;
+	totalSelectionCount: number;
+	recentDayCount: number;
+	dayStreak: number;
+	lastTimestamp: number;
+	queryLastTimestamp: number;
 };
 
 type HistoryScoreContext = {
@@ -35,9 +59,13 @@ export class SearchHistoryService {
 	private static readonly MAX_SUGGESTION_COUNT = 12;
 	private static readonly RECENCY_HALF_LIFE_MS = 1000 * 60 * 60 * 24 * 14;
 	private static readonly CANDIDATE_MATCH_WEIGHT = 320;
+	private static readonly NAVIGATION_RECENT_DAY_LIMIT = 7;
+	private static readonly QUICK_SWITCH_QUERY_LIMIT = 20;
+	private static readonly DAY_MS = 1000 * 60 * 60 * 24;
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly setting = getInstance(OuterSetting);
 	private indexedEntriesCache: IndexedSearchHistoryEntry[] | null = null;
+	private quickSwitchEntriesCache: QuickSwitchHistoryEntry[] | null = null;
 	private maxCombinedUsageCountCache: number | null = null;
 
 	isEnabled(): boolean {
@@ -46,6 +74,10 @@ export class SearchHistoryService {
 
 	getEntryCount(): number {
 		return this.getEntries().length;
+	}
+
+	getQuickSwitchEntryCount(): number {
+		return this.getQuickSwitchEntries().length;
 	}
 
 	async recordSuggestionSelection(queryText: string): Promise<void> {
@@ -70,8 +102,100 @@ export class SearchHistoryService {
 		this.setting.searchHistory.entries = this.trimEntries(
 			this.setting.searchHistory.entries ?? [],
 		);
-		this.invalidateEntriesCache();
+		this.invalidateQueryEntriesCache();
 		await this.plugin.saveData(this.setting);
+	}
+
+	async recordNavigationSelection(
+		queryText: string,
+		navigation: {
+			path: string;
+			primaryText: string;
+			kind: SearchHistoryNavigationKind;
+			openLinkText?: string;
+		},
+	): Promise<void> {
+		if (!this.isEnabled()) {
+			return;
+		}
+
+		const nextPath = navigation.path.trim();
+		const nextPrimaryText = navigation.primaryText.trim();
+		const nextOpenLinkText = navigation.openLinkText?.trim() || nextPath;
+		if (
+			nextPath.length === 0 ||
+			nextPrimaryText.length === 0 ||
+			nextOpenLinkText.length === 0
+		) {
+			return;
+		}
+
+		const now = Date.now();
+		const entries = [...this.getQuickSwitchEntries()];
+		const targetKey = this.normalizeQuickSwitchTargetKey(nextOpenLinkText);
+		let existingEntry = entries.find(
+			(entry) => this.normalizeQuickSwitchTargetKey(entry.openLinkText) === targetKey,
+		);
+		if (!existingEntry) {
+			existingEntry = {
+				path: nextPath,
+				primaryText: nextPrimaryText,
+				kind: navigation.kind,
+				openLinkText: nextOpenLinkText,
+				timestamp: now,
+				count: 0,
+				queries: [],
+			};
+			entries.push(existingEntry);
+		}
+
+		existingEntry.path = nextPath;
+		existingEntry.primaryText = nextPrimaryText;
+		existingEntry.kind = navigation.kind;
+		existingEntry.openLinkText = nextOpenLinkText;
+		existingEntry.timestamp = now;
+		this.updateQuickSwitchHabitEntry(existingEntry, now);
+		this.updateQuickSwitchQueryEntry(existingEntry, queryText, now);
+		this.getQuickSwitchHistorySetting().entries = this.trimQuickSwitchEntries(entries);
+		this.invalidateQuickSwitchEntriesCache();
+		await this.plugin.saveData(this.setting);
+	}
+
+	getRecentNavigationSelections(limit = 6): RecentNavigationSelection[] {
+		return this.getQuickSwitchEntries()
+			.slice(0, limit)
+			.map((entry) => ({
+				queryText: this.getLatestQuickSwitchQueryText(entry),
+				path: entry.path,
+				openLinkText: entry.openLinkText,
+				primaryText: entry.primaryText,
+				kind: entry.kind,
+				timestamp: entry.timestamp,
+			}));
+	}
+
+	getNavigationHabitSignals(queryText: string): Map<string, NavigationHabitSignal> {
+		const normalizedQuery = this.normalizeNavigationQuery(queryText);
+		const signals = new Map<string, NavigationHabitSignal>();
+
+		for (const entry of this.getQuickSwitchEntries()) {
+			const queryEntry =
+				normalizedQuery.length > 0
+					? this.getQuickSwitchQueryEntry(entry, normalizedQuery)
+					: null;
+			signals.set(entry.openLinkText, {
+				querySelectionCount: queryEntry ? this.getQuickSwitchQueryCount(queryEntry) : 0,
+				totalSelectionCount: this.getQuickSwitchSelectionCount(entry),
+				recentDayCount: this.getRecentNavigationDayCount(
+					this.getQuickSwitchRecentDateKeys(entry),
+				),
+				dayStreak: this.getQuickSwitchDayStreak(entry),
+				lastTimestamp: entry.timestamp,
+				queryLastTimestamp: queryEntry?.timestamp ?? 0,
+			});
+		}
+
+		return signals;
 	}
 
 	getGhostSuggestion(prefix: string): SearchHistoryEntry | null {
@@ -183,7 +307,7 @@ export class SearchHistoryService {
 		this.setting.searchHistory.entries = this.trimEntries(
 			this.setting.searchHistory.entries ?? [],
 		);
-		this.invalidateEntriesCache();
+		this.invalidateQueryEntriesCache();
 		await this.plugin.saveData(this.setting);
 	}
 
@@ -198,13 +322,19 @@ export class SearchHistoryService {
 			.filter(
 				(entry) => this.normalizeQuery(entry.queryText) !== normalizedQuery,
 			);
-		this.invalidateEntriesCache();
+		this.invalidateQueryEntriesCache();
 		await this.plugin.saveData(this.setting);
 	}
 
 	async clearHistory(): Promise<void> {
 		this.setting.searchHistory.entries = [];
-		this.invalidateEntriesCache();
+		this.invalidateQueryEntriesCache();
+		await this.plugin.saveData(this.setting);
+	}
+
+	async clearQuickSwitchHistory(): Promise<void> {
+		this.getQuickSwitchHistorySetting().entries = [];
+		this.invalidateQuickSwitchEntriesCache();
 		await this.plugin.saveData(this.setting);
 	}
 
@@ -223,6 +353,27 @@ export class SearchHistoryService {
 		return this.indexedEntriesCache;
 	}
 
+	private getQuickSwitchEntries(): QuickSwitchHistoryEntry[] {
+		if (this.quickSwitchEntriesCache) {
+			return this.quickSwitchEntriesCache;
+		}
+
+		const quickSwitchSetting = this.getQuickSwitchHistorySetting();
+		const quickSwitchEntries = this.trimQuickSwitchEntries(
+			this.sanitizeQuickSwitchEntries(quickSwitchSetting.entries ?? []),
+		);
+		quickSwitchSetting.entries = quickSwitchEntries;
+		this.quickSwitchEntriesCache = quickSwitchEntries;
+		return quickSwitchEntries;
+	}
+
+	private getQuickSwitchHistorySetting() {
+		return (this.setting.quickSwitchHistory ??= {
+			maxItems: 5000,
+			entries: [],
+		});
+	}
+
 	private sanitizeEntries(entries: SearchHistoryEntry[]): SearchHistoryEntry[] {
 		return entries
 			.filter((entry) => typeof entry?.queryText === "string")
@@ -232,11 +383,11 @@ export class SearchHistoryService {
 					typeof entry.timestamp === "number" ? entry.timestamp : Date.now(),
 				count:
 					typeof entry.count === "number" && entry.count > 0
-						? entry.count
+						? Math.floor(entry.count)
 						: 1,
 				selectionCount:
 					typeof entry.selectionCount === "number" && entry.selectionCount > 0
-						? entry.selectionCount
+						? Math.floor(entry.selectionCount)
 						: 0,
 				selectionTimestamp:
 					typeof entry.selectionTimestamp === "number"
@@ -248,7 +399,7 @@ export class SearchHistoryService {
 
 	private trimEntries(entries: SearchHistoryEntry[]): SearchHistoryEntry[] {
 		const dedupedEntries = new Map<string, SearchHistoryEntry>();
-		for (const entry of entries) {
+		for (const entry of this.sanitizeEntries(entries)) {
 			const normalizedQuery = this.normalizeQuery(entry.queryText);
 			if (normalizedQuery.length === 0) {
 				continue;
@@ -286,8 +437,391 @@ export class SearchHistoryService {
 			.slice(0, maxItems);
 	}
 
+	private sanitizeQuickSwitchEntries(
+		entries: QuickSwitchHistoryEntry[],
+	): QuickSwitchHistoryEntry[] {
+		return entries
+			.filter((entry) => typeof entry?.path === "string")
+			.map((entry) => {
+				const sanitizedQueries = this.trimQuickSwitchQueries(
+					this.sanitizeQuickSwitchQueryEntries(entry.queries ?? []),
+				);
+				return {
+					path: entry.path.trim(),
+					primaryText:
+						typeof entry.primaryText === "string"
+							? entry.primaryText.trim()
+							: "",
+					kind: isSearchHistoryNavigationKind(entry.kind) ? entry.kind : "file",
+					openLinkText:
+						typeof entry.openLinkText === "string"
+							? entry.openLinkText.trim()
+							: entry.path.trim(),
+					timestamp:
+						typeof entry.timestamp === "number" ? entry.timestamp : 0,
+					count: this.getSafePositiveInteger(
+						entry.count,
+						entry.timestamp > 0 ? 1 : 0,
+					),
+					lastDateKey: this.isDateKey(entry.lastDateKey)
+						? entry.lastDateKey
+						: undefined,
+					recentDateKeys: this.sanitizeNavigationRecentDateKeys(
+						entry.recentDateKeys,
+					),
+					dayStreak: this.getSafePositiveInteger(
+						entry.dayStreak,
+						entry.timestamp > 0 ? 1 : 0,
+					),
+					queries: sanitizedQueries.length > 0 ? sanitizedQueries : undefined,
+				};
+			})
+			.filter(
+				(entry) =>
+					entry.path.length > 0 &&
+					entry.primaryText.length > 0 &&
+					entry.openLinkText.length > 0,
+			);
+	}
+
+	private sanitizeQuickSwitchQueryEntries(
+		entries: QuickSwitchHistoryQueryEntry[],
+	): QuickSwitchHistoryQueryEntry[] {
+		return entries
+			.filter((entry) => typeof entry?.queryText === "string")
+			.map((entry) => ({
+				queryText: entry.queryText.trim(),
+				timestamp:
+					typeof entry.timestamp === "number" ? entry.timestamp : 0,
+				count: this.getSafePositiveInteger(entry.count, 1),
+			}))
+			.filter((entry) => entry.queryText.length > 0);
+	}
+
+	private trimQuickSwitchEntries(
+		entries: QuickSwitchHistoryEntry[],
+	): QuickSwitchHistoryEntry[] {
+		const dedupedEntries = new Map<string, QuickSwitchHistoryEntry>();
+		for (const entry of this.sanitizeQuickSwitchEntries(entries)) {
+			const targetKey = this.normalizeQuickSwitchTargetKey(entry.openLinkText);
+			if (!targetKey) {
+				continue;
+			}
+
+			const prevEntry = dedupedEntries.get(targetKey);
+			if (!prevEntry) {
+				dedupedEntries.set(targetKey, this.cloneQuickSwitchEntry(entry));
+				continue;
+			}
+
+			const prevTimestamp = prevEntry.timestamp;
+			prevEntry.count =
+				this.getQuickSwitchSelectionCount(prevEntry) +
+				this.getQuickSwitchSelectionCount(entry);
+			prevEntry.timestamp = Math.max(prevEntry.timestamp, entry.timestamp);
+			prevEntry.lastDateKey =
+				this.maxDateKey(
+					this.getQuickSwitchLastDateKey(prevEntry),
+					this.getQuickSwitchLastDateKey(entry),
+				) ?? undefined;
+			prevEntry.recentDateKeys = this.mergeNavigationRecentDateKeys(
+				this.getQuickSwitchRecentDateKeys(prevEntry),
+				this.getQuickSwitchRecentDateKeys(entry),
+			);
+			prevEntry.dayStreak = Math.max(
+				this.getQuickSwitchDayStreak(prevEntry),
+				this.getQuickSwitchDayStreak(entry),
+			);
+			prevEntry.queries = this.trimQuickSwitchQueries([
+				...(prevEntry.queries ?? []),
+				...(entry.queries ?? []),
+			]);
+			if (entry.timestamp >= prevTimestamp) {
+				prevEntry.path = entry.path;
+				prevEntry.primaryText = entry.primaryText;
+				prevEntry.kind = entry.kind;
+				prevEntry.openLinkText = entry.openLinkText;
+			}
+		}
+
+		const maxItems = this.getQuickSwitchHistorySetting().maxItems;
+		return [...dedupedEntries.values()]
+			.sort((left, right) => {
+				if (left.timestamp !== right.timestamp) {
+					return right.timestamp - left.timestamp;
+				}
+				const countDiff =
+					this.getQuickSwitchSelectionCount(right) -
+					this.getQuickSwitchSelectionCount(left);
+				if (countDiff !== 0) {
+					return countDiff;
+				}
+				return left.primaryText.localeCompare(right.primaryText);
+			})
+			.slice(0, maxItems)
+			.map((entry) => ({
+				...entry,
+				recentDateKeys:
+					entry.recentDateKeys && entry.recentDateKeys.length > 0
+						? entry.recentDateKeys
+						: undefined,
+				queries:
+					entry.queries && entry.queries.length > 0 ? entry.queries : undefined,
+			}));
+	}
+
+	private trimQuickSwitchQueries(
+		entries: QuickSwitchHistoryQueryEntry[],
+	): QuickSwitchHistoryQueryEntry[] {
+		const dedupedEntries = new Map<string, QuickSwitchHistoryQueryEntry>();
+		for (const entry of this.sanitizeQuickSwitchQueryEntries(entries)) {
+			const normalizedQuery = this.normalizeNavigationQuery(entry.queryText);
+			if (normalizedQuery.length === 0) {
+				continue;
+			}
+			const prevEntry = dedupedEntries.get(normalizedQuery);
+			if (!prevEntry) {
+				dedupedEntries.set(normalizedQuery, { ...entry });
+				continue;
+			}
+			prevEntry.queryText =
+				entry.timestamp >= prevEntry.timestamp
+					? entry.queryText
+					: prevEntry.queryText;
+			prevEntry.timestamp = Math.max(prevEntry.timestamp, entry.timestamp);
+			prevEntry.count =
+				this.getQuickSwitchQueryCount(prevEntry) +
+				this.getQuickSwitchQueryCount(entry);
+		}
+
+		return [...dedupedEntries.values()]
+			.sort((left, right) => {
+				if (left.timestamp !== right.timestamp) {
+					return right.timestamp - left.timestamp;
+				}
+				return (
+					this.getQuickSwitchQueryCount(right) -
+					this.getQuickSwitchQueryCount(left)
+				);
+			})
+			.slice(0, SearchHistoryService.QUICK_SWITCH_QUERY_LIMIT);
+	}
+
+	private updateQuickSwitchHabitEntry(
+		entry: QuickSwitchHistoryEntry,
+		timestamp: number,
+	): void {
+		const nextDateKey = this.toDateKey(timestamp);
+		const previousDateKey = this.getQuickSwitchLastDateKey(entry);
+		entry.count = this.getQuickSwitchSelectionCount(entry) + 1;
+		entry.lastDateKey = nextDateKey;
+		entry.recentDateKeys = this.mergeNavigationRecentDateKeys(
+			[nextDateKey],
+			this.getQuickSwitchRecentDateKeys(entry),
+		);
+		entry.dayStreak = this.getNextNavigationDayStreak(
+			previousDateKey,
+			nextDateKey,
+			this.getQuickSwitchDayStreak(entry),
+		);
+	}
+
+	private updateQuickSwitchQueryEntry(
+		entry: QuickSwitchHistoryEntry,
+		queryText: string,
+		timestamp: number,
+	): void {
+		const normalizedQuery = this.normalizeNavigationQuery(queryText);
+		if (normalizedQuery.length === 0) {
+			return;
+		}
+
+		const queries = [...(entry.queries ?? [])];
+		const existingQuery = queries.find(
+			(candidate) =>
+				this.normalizeNavigationQuery(candidate.queryText) === normalizedQuery,
+		);
+		if (existingQuery) {
+			existingQuery.queryText = queryText.trim();
+			existingQuery.timestamp = timestamp;
+			existingQuery.count = this.getQuickSwitchQueryCount(existingQuery) + 1;
+		} else {
+			queries.push({
+				queryText: queryText.trim(),
+				timestamp,
+				count: 1,
+			});
+		}
+		entry.queries = this.trimQuickSwitchQueries(queries);
+	}
+
+	private sanitizeNavigationRecentDateKeys(value: unknown): string[] {
+		if (!Array.isArray(value)) {
+			return [];
+		}
+		return this.mergeNavigationRecentDateKeys(
+			value.filter((item): item is string => typeof item === "string"),
+			[],
+		);
+	}
+
+	private mergeNavigationRecentDateKeys(left: string[], right: string[]): string[] {
+		const uniqueDateKeys = new Set<string>();
+		for (const dateKey of [...left, ...right]) {
+			if (this.isDateKey(dateKey)) {
+				uniqueDateKeys.add(dateKey);
+			}
+		}
+		return [...uniqueDateKeys]
+			.sort((a, b) => b.localeCompare(a))
+			.slice(0, SearchHistoryService.NAVIGATION_RECENT_DAY_LIMIT);
+	}
+
+	private getRecentNavigationDayCount(dateKeys: string[]): number {
+		const todayDateKey = this.toDateKey(Date.now());
+		let count = 0;
+		for (const dateKey of dateKeys) {
+			const dayDiff = this.getDateKeyDiffDays(dateKey, todayDateKey);
+			if (
+				Number.isFinite(dayDiff) &&
+				dayDiff >= 0 &&
+				dayDiff < SearchHistoryService.NAVIGATION_RECENT_DAY_LIMIT
+			) {
+				count += 1;
+			}
+		}
+		return count;
+	}
+
+	private getQuickSwitchSelectionCount(entry: QuickSwitchHistoryEntry): number {
+		return this.getSafePositiveInteger(entry.count, entry.timestamp > 0 ? 1 : 0);
+	}
+
+	private getQuickSwitchRecentDateKeys(entry: QuickSwitchHistoryEntry): string[] {
+		const sanitizedDateKeys = this.sanitizeNavigationRecentDateKeys(
+			entry.recentDateKeys,
+		);
+		if (sanitizedDateKeys.length > 0) {
+			return sanitizedDateKeys;
+		}
+		const fallbackDateKey = this.getQuickSwitchLastDateKey(entry);
+		return fallbackDateKey ? [fallbackDateKey] : [];
+	}
+
+	private getQuickSwitchLastDateKey(entry: QuickSwitchHistoryEntry): string | null {
+		if (this.isDateKey(entry.lastDateKey)) {
+			return entry.lastDateKey;
+		}
+		return entry.timestamp > 0 ? this.toDateKey(entry.timestamp) : null;
+	}
+
+	private getQuickSwitchDayStreak(entry: QuickSwitchHistoryEntry): number {
+		return this.getSafePositiveInteger(entry.dayStreak, entry.timestamp > 0 ? 1 : 0);
+	}
+
+	private getQuickSwitchQueryCount(entry: QuickSwitchHistoryQueryEntry): number {
+		return this.getSafePositiveInteger(entry.count, 1);
+	}
+
+	private getQuickSwitchQueryEntry(
+		entry: QuickSwitchHistoryEntry,
+		normalizedQuery: string,
+	): QuickSwitchHistoryQueryEntry | null {
+		for (const queryEntry of entry.queries ?? []) {
+			if (this.normalizeNavigationQuery(queryEntry.queryText) === normalizedQuery) {
+				return queryEntry;
+			}
+		}
+		return null;
+	}
+
+	private getLatestQuickSwitchQueryText(entry: QuickSwitchHistoryEntry): string {
+		let latestQueryEntry: QuickSwitchHistoryQueryEntry | null = null;
+		for (const queryEntry of entry.queries ?? []) {
+			if (!latestQueryEntry || queryEntry.timestamp > latestQueryEntry.timestamp) {
+				latestQueryEntry = queryEntry;
+			}
+		}
+		return latestQueryEntry?.queryText ?? "";
+	}
+
+	private cloneQuickSwitchEntry(
+		entry: QuickSwitchHistoryEntry,
+	): QuickSwitchHistoryEntry {
+		return {
+			...entry,
+			recentDateKeys: [...(entry.recentDateKeys ?? [])],
+			queries: (entry.queries ?? []).map((queryEntry) => ({ ...queryEntry })),
+		};
+	}
+
+	private getNextNavigationDayStreak(
+		previousDateKey: string | null,
+		nextDateKey: string,
+		previousStreak: number,
+	): number {
+		if (!previousDateKey) {
+			return 1;
+		}
+		if (previousDateKey === nextDateKey) {
+			return Math.max(1, previousStreak);
+		}
+		const dayDiff = this.getDateKeyDiffDays(previousDateKey, nextDateKey);
+		return dayDiff === 1 ? Math.max(1, previousStreak) + 1 : 1;
+	}
+
+	private getDateKeyDiffDays(previousDateKey: string, nextDateKey: string): number {
+		const previousUtc = Date.parse(`${previousDateKey}T00:00:00Z`);
+		const nextUtc = Date.parse(`${nextDateKey}T00:00:00Z`);
+		if (!Number.isFinite(previousUtc) || !Number.isFinite(nextUtc)) {
+			return Number.NaN;
+		}
+		return Math.round((nextUtc - previousUtc) / SearchHistoryService.DAY_MS);
+	}
+
+	private maxDateKey(left: string | null, right: string | null): string | null {
+		if (!left) {
+			return right;
+		}
+		if (!right) {
+			return left;
+		}
+		return left >= right ? left : right;
+	}
+
+	private isDateKey(value: unknown): value is string {
+		return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value);
+	}
+
+	private toDateKey(timestamp: number): string {
+		const date = new Date(timestamp);
+		const year = date.getFullYear();
+		const month = `${date.getMonth() + 1}`.padStart(2, "0");
+		const day = `${date.getDate()}`.padStart(2, "0");
+		return `${year}-${month}-${day}`;
+	}
+
+	private normalizeNavigationQuery(queryText: string): string {
+		const trimmedQuery = queryText.trimStart();
+		if (/^[#^/>]/u.test(trimmedQuery)) {
+			return this.normalizeQuery(trimmedQuery.slice(1));
+		}
+		return this.normalizeQuery(queryText);
+	}
+
+	private normalizeQuickSwitchTargetKey(openLinkText: string): string {
+		return openLinkText.trim().toLocaleLowerCase();
+	}
+
 	private normalizeQuery(queryText: string): string {
 		return queryText.trim().toLocaleLowerCase();
+	}
+
+	private getSafePositiveInteger(value: unknown, fallback: number): number {
+		if (typeof value === "number" && value > 0) {
+			return Math.floor(value);
+		}
+		return fallback;
 	}
 
 	private createIndexedEntry(entry: SearchHistoryEntry): IndexedSearchHistoryEntry {
@@ -333,8 +867,6 @@ export class SearchHistoryService {
 		queryText: ReturnType<typeof prepareLightweightFuzzyQuery>,
 		entry: IndexedSearchHistoryEntry,
 	) {
-		// The shared matcher only measures textual relevance.
-		// History-specific ranking stays in this service via recency/frequency scores.
 		return matchLightweightFuzzy(queryText, entry.textIndex);
 	}
 
@@ -377,9 +909,13 @@ export class SearchHistoryService {
 		return (left.count ?? 1) > (right.count ?? 1);
 	}
 
-	private invalidateEntriesCache() {
+	private invalidateQueryEntriesCache(): void {
 		this.indexedEntriesCache = null;
 		this.maxCombinedUsageCountCache = null;
+	}
+
+	private invalidateQuickSwitchEntriesCache(): void {
+		this.quickSwitchEntriesCache = null;
 	}
 
 	private getLatestInteractionTimestamp(entry: SearchHistoryEntry): number {
@@ -389,4 +925,21 @@ export class SearchHistoryService {
 	private getCombinedUsageCount(entry: SearchHistoryEntry): number {
 		return (entry.count ?? 1) + (entry.selectionCount ?? 0) * 1.25;
 	}
+}
+
+const SEARCH_HISTORY_NAVIGATION_KINDS = new Set<SearchHistoryNavigationKind>([
+	"file",
+	"alias",
+	"heading",
+	"path",
+	"recent",
+]);
+
+function isSearchHistoryNavigationKind(
+	value: unknown,
+): value is SearchHistoryNavigationKind {
+	return (
+		typeof value === "string" &&
+		SEARCH_HISTORY_NAVIGATION_KINDS.has(value as SearchHistoryNavigationKind)
+	);
 }

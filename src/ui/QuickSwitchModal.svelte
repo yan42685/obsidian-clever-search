@@ -6,11 +6,13 @@
 	import {
 		SearchAutocompleteService,
 		type SearchAutocompleteCandidate,
+		type SearchAutocompleteSection,
 		type SearchAutocompleteSource,
 	} from "src/services/obsidian/user-data/search-autocomplete-service";
 	import { SearchHistoryService } from "src/services/obsidian/user-data/search-history-service";
 	import { getInstance } from "src/utils/my-lib";
-	import SearchHistoryInput from "./SearchHistoryInput.svelte";
+	import type { SearchHistoryInput } from "./SearchHistoryInput.svelte";
+	import SearchHistoryInputView from "./SearchHistoryInput.svelte";
 
 	const app = getInstance(App);
 	const setting = getInstance(OuterSetting);
@@ -18,18 +20,25 @@
 	const autocompleteService = getInstance(SearchAutocompleteService);
 
 	export let requestClose: () => void = () => {};
+	const PAGE_JUMP = 6;
 
 	let inputRef: SearchHistoryInput | null = null;
 	let queryText = "";
 	let results: SearchAutocompleteCandidate[] = [];
 	let selectedResultIndex = -1;
+	let resultButtons: Array<HTMLButtonElement | null> = [];
 
 	$: if (selectedResultIndex >= results.length) {
 		selectedResultIndex = results.length > 0 ? 0 : -1;
 	}
 
+	$: if (selectedResultIndex >= 0) {
+		void scrollSelectedIntoView();
+	}
+
 	function refreshResults(resetIndex = false): void {
 		results = autocompleteService.getNavigationSuggestions(queryText, 24);
+		resultButtons = [];
 		if (resetIndex) {
 			selectedResultIndex = results.length > 0 ? 0 : -1;
 		} else if (results.length === 0) {
@@ -52,19 +61,51 @@
 				: (selectedResultIndex - 1 + results.length) % results.length;
 	}
 
+	function moveSelectedResultTo(index: number): void {
+		if (results.length === 0) {
+			selectedResultIndex = -1;
+			return;
+		}
+		selectedResultIndex = Math.min(Math.max(index, 0), results.length - 1);
+	}
+
+	function moveSelectedResultByPage(direction: "up" | "down"): void {
+		if (results.length === 0) {
+			selectedResultIndex = -1;
+			return;
+		}
+		const fallbackIndex = direction === "down" ? 0 : results.length - 1;
+		const baseIndex = selectedResultIndex >= 0 ? selectedResultIndex : fallbackIndex;
+		const delta = direction === "down" ? PAGE_JUMP : -PAGE_JUMP;
+		moveSelectedResultTo(baseIndex + delta);
+	}
+
 	async function openResult(index = selectedResultIndex): Promise<void> {
 		const candidate = results[index];
-		if (!candidate?.path) {
+		if (!candidate?.openLinkText) {
 			return;
 		}
 		if (queryText.trim().length > 0) {
 			await searchHistoryService.recordQuery(queryText);
+			await searchHistoryService.recordNavigationSelection(queryText, {
+				path: candidate.path,
+				primaryText: candidate.primaryText,
+				kind: candidate.kind,
+				openLinkText: candidate.openLinkText,
+			});
 		}
-		await app.workspace.openLinkText(candidate.path, "", setting.ui.openInNewPane);
+		await app.workspace.openLinkText(
+			candidate.openLinkText,
+			"",
+			setting.ui.openInNewPane,
+		);
 		requestClose();
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
+		if (event.isComposing) {
+			return;
+		}
 		const key = event.key.toLowerCase();
 		const isPrev =
 			event.key === "ArrowUp" ||
@@ -83,7 +124,41 @@
 		if (event.key === "Enter") {
 			event.preventDefault();
 			event.stopPropagation();
-			void openResult();
+			if (selectedResultIndex >= 0) {
+				void openResult();
+				return;
+			}
+			if (results.length === 1 && results[0]?.confidence === "high") {
+				void openResult(0);
+			}
+			return;
+		}
+
+		if (event.key === "Home") {
+			event.preventDefault();
+			event.stopPropagation();
+			moveSelectedResultTo(0);
+			return;
+		}
+
+		if (event.key === "End") {
+			event.preventDefault();
+			event.stopPropagation();
+			moveSelectedResultTo(results.length - 1);
+			return;
+		}
+
+		if (event.key === "PageUp") {
+			event.preventDefault();
+			event.stopPropagation();
+			moveSelectedResultByPage("up");
+			return;
+		}
+
+		if (event.key === "PageDown") {
+			event.preventDefault();
+			event.stopPropagation();
+			moveSelectedResultByPage("down");
 		}
 	}
 
@@ -102,6 +177,33 @@
 		}
 	}
 
+	function getSectionLabel(section: SearchAutocompleteSection): string {
+		switch (section) {
+			case "recent-targets":
+				return t("quickSwitch.section.recentTargets");
+			case "recent-files":
+				return t("quickSwitch.section.recentFiles");
+			case "matches":
+				return "";
+		}
+	}
+
+	function shouldShowSectionHeader(index: number): boolean {
+		return (
+			queryText.trim().length === 0 &&
+			(index === 0 || results[index - 1]?.section !== results[index]?.section)
+		);
+	}
+
+	function shouldShowPath(entry: SearchAutocompleteCandidate): boolean {
+		return entry.path.length > 0 && entry.primaryText !== entry.path;
+	}
+
+	function getEmptyStateText(): string {
+		return queryText.trim().length === 0
+			? t("quickSwitch.emptyState.idle")
+			: t("quickSwitch.emptyState.search");
+	}
 	function getHighlightParts(
 		text: string,
 		positions: number[],
@@ -138,6 +240,11 @@
 		return segments;
 	}
 
+	async function scrollSelectedIntoView(): Promise<void> {
+		await tick();
+		resultButtons[selectedResultIndex]?.scrollIntoView({ block: "nearest" });
+	}
+
 	onMount(async () => {
 		refreshResults(true);
 		await tick();
@@ -147,7 +254,7 @@
 
 <div class="quickswitch-shell" on:keydown={handleKeydown}>
 	<div class="quickswitch-header">
-		<SearchHistoryInput
+		<SearchHistoryInputView
 			bind:this={inputRef}
 			bind:queryText
 			variant="omni"
@@ -163,14 +270,18 @@
 
 	<div class="quickswitch-results">
 		{#if results.length === 0}
-			<div class="quickswitch-empty">No navigation results matched.</div>
+			<div class="quickswitch-empty">{getEmptyStateText()}</div>
 		{:else}
 			<ul class="quickswitch-result-list">
 				{#each results as entry, index}
+					{#if shouldShowSectionHeader(index)}
+						<li class="quickswitch-section">{getSectionLabel(entry.section)}</li>
+					{/if}
 					<li class:selected={index === selectedResultIndex} class="quickswitch-result-item">
 						<button
 							type="button"
 							class="quickswitch-result-button"
+							bind:this={resultButtons[index]}
 							on:click={() => {
 								selectedResultIndex = index;
 								void openResult(index);
@@ -192,8 +303,18 @@
 									</span>
 									<span class="quickswitch-result-kind">{t(getSourceLabelKey(entry.kind))}</span>
 								</div>
-								<span class="quickswitch-result-path">{entry.path}</span>
-								{#if entry.secondaryText && entry.secondaryText !== entry.path}
+								{#if shouldShowPath(entry)}
+									<span class="quickswitch-result-path">
+										{#each getHighlightParts(entry.path, entry.pathPositions) as part}
+											{#if part.matched}
+												<strong class="quickswitch-match">{part.text}</strong>
+											{:else}
+												<span>{part.text}</span>
+											{/if}
+										{/each}
+									</span>
+								{/if}
+								{#if entry.secondaryText}
 									<span class="quickswitch-result-secondary">{entry.secondaryText}</span>
 								{/if}
 							</div>
@@ -205,18 +326,17 @@
 	</div>
 
 	<div class="quickswitch-footer">
-		<span>Navigation candidates for QuickSwitch</span>
-		<span>Ctrl+J / Ctrl+K move results</span>
+		<span>{t("quickSwitch.footer.navigation")}</span>
+		<span>{t("quickSwitch.footer.keys")}</span>
 	</div>
 </div>
-
 <style>
 	:global(.cs-modal.cs-quickswitch-modal) {
-		width: min(58rem, 90vw);
-		max-width: 90vw;
+		width: min(72rem, 94vw);
+		max-width: 94vw;
 		height: min(78vh, 48rem);
 		padding: 1.05rem 0.95rem 0.85rem;
-		overflow: hidden;
+		overflow: visible;
 	}
 
 	.quickswitch-shell {
@@ -237,6 +357,7 @@
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
+		padding-right: 0.15rem;
 	}
 
 	.quickswitch-empty {
@@ -259,8 +380,22 @@
 		list-style: none;
 	}
 
+	.quickswitch-section {
+		margin: 0.75rem 0 0.35rem;
+		padding: 0 0.35rem;
+		font-size: 0.74rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: var(--text-muted);
+		text-transform: uppercase;
+	}
+
+	.quickswitch-section:first-child {
+		margin-top: 0;
+	}
+
 	.quickswitch-result-item {
-		margin: 0 0 0.26rem;
+		margin: 0 0 0.34rem;
 	}
 
 	.quickswitch-result-item:last-child {
@@ -269,14 +404,17 @@
 
 	.quickswitch-result-button {
 		display: flex;
+		align-items: flex-start;
 		width: 100%;
-		padding: 0.52rem 0.72rem;
+		min-width: 0;
+		min-height: 3.2rem;
+		padding: 0.78rem 0.85rem;
 		box-sizing: border-box;
 		text-align: left;
 		color: inherit;
 		background-color: var(--cs-pane-bgc, #20202066);
 		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
-		border-radius: 8px;
+		border-radius: 10px;
 		box-shadow: none;
 		cursor: pointer;
 	}
@@ -286,35 +424,10 @@
 		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
-	.quickswitch-result-copy {
-		display: flex;
-		flex-direction: column;
-		gap: 0.16rem;
-		width: 100%;
-		min-width: 0;
-	}
-
-	.quickswitch-result-title-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.65rem;
-		min-width: 0;
-	}
-
-	.quickswitch-result-title {
-		flex: 1 1 auto;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: 0.95rem;
-		font-weight: 600;
-	}
-
 	.quickswitch-result-kind {
 		flex: none;
-		padding: 0.06rem 0.34rem;
+		margin-top: 0.05rem;
+		padding: 0.08rem 0.38rem;
 		font-size: 0.62rem;
 		line-height: 1.2;
 		color: var(--cs-secondary-font-color, #a29c9c);
@@ -324,21 +437,13 @@
 		white-space: nowrap;
 	}
 
-	.quickswitch-result-path,
-	.quickswitch-result-secondary {
-		display: block;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: 0.78rem;
-		line-height: 1.25;
-		color: var(--cs-secondary-font-color, #a29c9c);
-	}
-
 	.quickswitch-match {
 		font-weight: 700;
-	}
+		color: var(--text-normal);
+		text-decoration: none;
+		border-bottom: 1.5px solid currentColor;
+		padding-bottom: 0.02em;
+}
 
 	.quickswitch-footer {
 		display: flex;
@@ -346,7 +451,47 @@
 		justify-content: space-between;
 		gap: 0.8rem;
 		min-width: 0;
+		flex-wrap: wrap;
 		font-size: 0.76rem;
 		color: var(--text-muted);
+	}
+
+
+	.quickswitch-result-copy {
+		display: flex;
+		flex-direction: column;
+		gap: 0.24rem;
+		width: 100%;
+		min-width: 0;
+		overflow: visible;
+	}
+
+	.quickswitch-result-title-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: start;
+		gap: 0.7rem;
+		min-width: 0;
+	}
+
+	.quickswitch-result-title {
+		flex: 1 1 auto;
+		min-width: 0;
+		white-space: normal;
+		line-height: 1.4;
+		font-size: 0.95rem;
+		font-weight: 600;
+		overflow-wrap: anywhere;
+	}
+
+	.quickswitch-result-path,
+	.quickswitch-result-secondary {
+		display: block;
+		white-space: normal;
+		font-size: 0.78rem;
+		line-height: 1.4;
+		color: var(--cs-secondary-font-color, #a29c9c);
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 </style>

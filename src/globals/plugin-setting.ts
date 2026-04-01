@@ -18,6 +18,7 @@ export class OuterSetting {
 	enableStopWordsZh: boolean;
 	hybrid: HybridSetting;
 	searchHistory: SearchHistorySetting;
+	quickSwitchHistory: QuickSwitchHistorySetting;
 	ui: UISetting;
 }
 
@@ -42,8 +43,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		enabled: false,
 		highPerformanceMaxMb: 60,
 		autoShowResultsWhenLexicalEmpty: true,
-		apiDomain: '',
-		apiKey: '',
+		apiDomain: "",
+		apiKey: "",
 		weeklyTokenLimit: 3000000,
 		maxResultCount: 10,
 		indexConcurrency: 3,
@@ -65,6 +66,10 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 			path: true,
 			recentFile: true,
 		},
+		entries: [],
+	},
+	quickSwitchHistory: {
+		maxItems: 5000,
 		entries: [],
 	},
 	ui: {
@@ -113,6 +118,13 @@ export type HybridSetting = {
 
 export type HybridVectorCompression = "int8" | "float16";
 
+export type SearchHistoryNavigationKind =
+	| "file"
+	| "alias"
+	| "heading"
+	| "path"
+	| "recent";
+
 export type SearchHistoryEntry = {
 	queryText: string;
 	timestamp: number;
@@ -138,6 +150,30 @@ export type SearchHistorySetting = {
 	enableGhostCompletion: boolean;
 	sources: SearchAutocompleteSourceSettings;
 	entries: SearchHistoryEntry[];
+};
+
+export type QuickSwitchHistoryQueryEntry = {
+	queryText: string;
+	timestamp: number;
+	count?: number;
+};
+
+export type QuickSwitchHistoryEntry = {
+	path: string;
+	primaryText: string;
+	kind: SearchHistoryNavigationKind;
+	openLinkText: string;
+	timestamp: number;
+	count?: number;
+	lastDateKey?: string;
+	recentDateKeys?: string[];
+	dayStreak?: number;
+	queries?: QuickSwitchHistoryQueryEntry[];
+};
+
+export type QuickSwitchHistorySetting = {
+	maxItems: SearchHistoryMaxItems;
+	entries: QuickSwitchHistoryEntry[];
 };
 
 /** One record per (filePath, dateKey) where dateKey = "YYYY-MM-DD" */
