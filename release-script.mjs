@@ -6,6 +6,7 @@ const DEFAULT_RELEASE_TYPE = "patch";
 const OPENAI_MODEL = "gpt-5.4";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_TIMEOUT_MS = 60_000;
+const MAX_CHANGELOG_CHARACTERS = 2000;
 const ENV_CANDIDATE_PATHS = [
 	".env.release.local",
 	".env.release",
@@ -21,16 +22,22 @@ async function main() {
 	console.log("Generating changelog with GPT-5.4 before release...");
 	const releaseNotesBody = await generateReleaseNotesBody();
 
-	console.log("Building plugin...");
-	runCommand("pnpm build", { stdio: "inherit" });
-
 	const manifestPath = "manifest.json";
-	const manifest = readJson(manifestPath);
+	const originalManifestText = readFileSync(manifestPath, "utf8");
+	const manifest = JSON.parse(originalManifestText);
 	const oldVersion = manifest.version;
 	const newVersion = bumpVersion(oldVersion, releaseType);
 	manifest.version = newVersion;
 	writeJson(manifestPath, manifest);
 	console.log(`Version bumped: ${oldVersion} -> ${newVersion}`);
+
+	console.log("Building plugin...");
+	try {
+		runCommand("pnpm build", { stdio: "inherit" });
+	} catch (error) {
+		writeFileSync(manifestPath, originalManifestText);
+		throw error;
+	}
 
 	const date = new Date().toISOString().split("T")[0];
 	const changelogEntry = buildChangelogEntry(
@@ -91,10 +98,13 @@ async function generateReleaseNotesBody() {
 		"Rules:",
 		"- Return only markdown bullet points.",
 		"- Each bullet must start with '- '.",
+		"- Do not include headings, numbering, explanations, or code fences.",
 		"- Group related commits when possible.",
 		"- Focus on user-visible features, fixes, stability, performance, and developer tooling.",
 		"- Omit raw hashes and internal noise when it is not useful.",
 		"- Keep it concise but complete.",
+		"- If the output is mainly Chinese, keep it within 1200 characters.",
+		"- If the output is mainly English, keep it within 1800 characters.",
 		"",
 		"Commits since the last release:",
 		commitBlock,
@@ -262,7 +272,7 @@ async function summarizeCommitsWithOpenAI(prompt, apiKey, apiBaseUrl) {
 			);
 		}
 
-		return normalizeBulletList(outputText);
+		return finalizeReleaseNotes(outputText);
 	} catch (error) {
 		if (error?.name === "AbortError") {
 			throw new Error(
@@ -302,26 +312,17 @@ function extractResponseText(payload) {
 	return parts.join("\n").trim();
 }
 
-function normalizeBulletList(text) {
-	const lines = text
-		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0);
+function finalizeReleaseNotes(text) {
+	const trimmed = stripMarkdownCodeFences(text).trim();
+	if (trimmed.length <= MAX_CHANGELOG_CHARACTERS) {
+		return trimmed;
+	}
 
-	const bullets = lines.map((line) => {
-		if (line.startsWith("- ")) {
-			return line;
-		}
-		if (/^\*\s+/.test(line)) {
-			return `- ${line.replace(/^\*\s+/, "")}`;
-		}
-		if (/^\d+\.\s+/.test(line)) {
-			return `- ${line.replace(/^\d+\.\s+/, "")}`;
-		}
-		return `- ${line}`;
-	});
+	return `${trimmed.slice(0, MAX_CHANGELOG_CHARACTERS - 3).trimEnd()}...`;
+}
 
-	return bullets.join("\n");
+function stripMarkdownCodeFences(text) {
+	return text.replace(/^```[^\n]*\n?|\n?```$/g, "");
 }
 
 function buildChangelogEntry(version, date, releaseNotesBody) {
