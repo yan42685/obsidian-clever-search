@@ -1241,7 +1241,6 @@ describe("coverage lexical ranking", () => {
 		const docId = internalEngine.documents.get("pkm-en/phase3/hot-postings.md")?.docId;
 		expect(typeof docId).toBe("number");
 		expect(Array.isArray(internalEngine.bodyPostings.get("cache"))).toBe(true);
-		expect(internalEngine.bodyPhrasePostings.get("cache restore")).toBeUndefined();
 		expect(Array.isArray(internalEngine.metadataAliasPostings.get("hot"))).toBe(true);
 		expect(Array.isArray(internalEngine.metadataAliasPhrasePostings.get("hot postings"))).toBe(
 			true,
@@ -1266,7 +1265,6 @@ describe("coverage lexical ranking", () => {
 			true,
 		);
 		expect(internalEngine.bodyPostings.get("cache")).toContain(docId);
-		expect(internalEngine.bodyPhrasePostings.size).toBe(0);
 		expect(internalEngine.metadataAliasPostings.get("hot")).toContain(docId);
 		expect(internalEngine.metadataAliasPhrasePostings.get("hot postings")).toContain(
 			docId,

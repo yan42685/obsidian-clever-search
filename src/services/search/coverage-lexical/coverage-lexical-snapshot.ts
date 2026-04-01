@@ -33,7 +33,6 @@ export type CoverageLexicalSnapshotState = {
 	bodyPostings: ReadonlyMap<string, readonly number[]>;
 	bodyCharPostings: ReadonlyMap<string, readonly number[]>;
 	bodyHanSegmentPostings: ReadonlyMap<string, readonly number[]>;
-	bodyPhrasePostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasCharPostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasHanSegmentPostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasPhrasePostings: ReadonlyMap<string, readonly number[]>;
@@ -58,7 +57,7 @@ export type CoverageLexicalSnapshotState = {
 };
 
 const SNAPSHOT_MAGIC = [0x43, 0x4c, 0x58, 0x53] as const;
-const SNAPSHOT_VERSION = 2;
+const SNAPSHOT_VERSION = 3;
 const HEADER_BYTES = 12;
 const DIRECTORY_ENTRY_BYTES = 16;
 
@@ -103,7 +102,6 @@ const enum CoverageLexicalSnapshotSectionKind {
 	BodyPostings = 10,
 	BodyCharPostings = 11,
 	BodyHanSegmentPostings = 12,
-	BodyPhrasePostings = 13,
 	MetadataAliasCharPostings = 14,
 	MetadataAliasHanSegmentPostings = 15,
 	MetadataAliasPhrasePostings = 16,
@@ -156,11 +154,6 @@ export function encodeCoverageLexicalSnapshotV1(
 		buildPostingSection(
 			CoverageLexicalSnapshotSectionKind.BodyHanSegmentPostings,
 			state.bodyHanSegmentPostings,
-			stringPool,
-		),
-		buildPostingSection(
-			CoverageLexicalSnapshotSectionKind.BodyPhrasePostings,
-			state.bodyPhrasePostings,
 			stringPool,
 		),
 		buildPostingSection(
@@ -294,7 +287,7 @@ export function decodeCoverageLexicalSnapshotV1(
 	const reader = new SnapshotReader(data);
 	reader.expectBytes(SNAPSHOT_MAGIC);
 	const version = reader.readUint32();
-	if (version !== 1 && version !== SNAPSHOT_VERSION) {
+	if (version !== SNAPSHOT_VERSION) {
 		throw new Error(`Unsupported coverage lexical snapshot version: ${version}`);
 	}
 	const sectionCount = reader.readUint32();
@@ -328,7 +321,6 @@ export function decodeCoverageLexicalSnapshotV1(
 		bodyPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyPostings), strings),
 		bodyCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyCharPostings), strings),
 		bodyHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyHanSegmentPostings), strings),
-		bodyPhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyPhrasePostings), strings),
 		metadataAliasCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasCharPostings), strings),
 		metadataAliasHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasHanSegmentPostings), strings),
 		metadataAliasPhrasePostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasPhrasePostings), strings),
@@ -386,7 +378,6 @@ function getPostingMaps(
 		state.bodyPostings,
 		state.bodyCharPostings,
 		state.bodyHanSegmentPostings,
-		state.bodyPhrasePostings,
 		state.metadataAliasCharPostings,
 		state.metadataAliasHanSegmentPostings,
 		state.metadataAliasPhrasePostings,

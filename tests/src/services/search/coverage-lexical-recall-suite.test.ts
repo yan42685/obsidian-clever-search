@@ -277,7 +277,6 @@ describe("coverage lexical recall suite", () => {
 					metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 					metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: engineAny.metadataHeadingPostings,
-					bodyPhrasePostings: engineAny.bodyPhrasePostings,
 					metadataPhrasePostings: engineAny.metadataPhrasePostings,
 					metadataTagCharPostings: engineAny.metadataTagCharPostings,
 					metadataTagFullPostings: engineAny.metadataTagFullPostings,
@@ -333,7 +332,7 @@ describe("coverage lexical recall suite", () => {
 		);
 	});
 
-	test("body phrase witness still fires after clearing body phrase postings", async () => {
+	test("body phrase witness still fires via token tape", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -364,8 +363,6 @@ describe("coverage lexical recall suite", () => {
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments(documents);
 		const engineAny = engine as any;
-		engineAny.bodyPhrasePostings.clear();
-
 		const tokenizer = createMockTokenizer();
 		const queryText = "config data rollout";
 		const queryTerms = tokenizer
@@ -402,7 +399,6 @@ describe("coverage lexical recall suite", () => {
 				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 				metadataHeadingPostings: engineAny.metadataHeadingPostings,
-				bodyPhrasePostings: engineAny.bodyPhrasePostings,
 				metadataPhrasePostings: engineAny.metadataPhrasePostings,
 				metadataTagCharPostings: engineAny.metadataTagCharPostings,
 				metadataTagFullPostings: engineAny.metadataTagFullPostings,

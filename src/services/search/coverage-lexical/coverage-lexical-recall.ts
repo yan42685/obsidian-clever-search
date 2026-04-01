@@ -49,7 +49,6 @@ type CoverageLexicalRecallIndex = {
 	metadataHeadingPhrasePostings: CoverageLexicalPostingMap;
 	metadataHeadingPostings: CoverageLexicalPostingMap;
 	metadataPhrasePostings?: CoverageLexicalPostingMap;
-	bodyPhrasePostings: CoverageLexicalPostingMap;
 	metadataTagCharPostings: CoverageLexicalPostingMap;
 	metadataTagFullPostings: CoverageLexicalPostingMap;
 	metadataTagPhrasePostings: CoverageLexicalPostingMap;
@@ -2110,16 +2109,6 @@ function collectCandidatesForPhraseSignature(
 			const bodyTokenMatches = index.bodyPostings.get(variant);
 			if (bodyTokenMatches) {
 				forEachPostingCandidateKey(index, bodyTokenMatches, (key) => {
-					const state = getOrCreateDocIdCandidateState(candidates, key);
-					recordPhraseMatch(state, signature.index);
-					for (const familyIndex of signature.familyIndices) {
-						recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
-					}
-				});
-			}
-			const bodyPhraseMatches = index.bodyPhrasePostings.get(variant);
-			if (bodyPhraseMatches) {
-				forEachPostingCandidateKey(index, bodyPhraseMatches, (key) => {
 					const state = getOrCreateDocIdCandidateState(candidates, key);
 					recordPhraseMatch(state, signature.index);
 					for (const familyIndex of signature.familyIndices) {

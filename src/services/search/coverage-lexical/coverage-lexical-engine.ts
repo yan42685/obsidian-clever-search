@@ -91,7 +91,6 @@ type CoverageLexicalDerivedDocumentIndexState = {
 	bodyHanSegments: string[];
 	bodyTerms: Set<string>;
 	bodyCharTerms: Set<string>;
-	bodyPhraseTerms: Set<string>;
 	aliasTerms: Set<string>;
 	aliasCharTerms: Set<string>;
 	aliasPhraseTerms: Set<string>;
@@ -177,7 +176,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		bodyHanSegments,
 		bodyTerms,
 		bodyCharTerms,
-		bodyPhraseTerms: buildCoverageLexicalPhraseTermSet(bodyTokenSequence),
 		aliasTerms,
 		aliasCharTerms,
 		aliasPhraseTerms: buildCoverageLexicalPhraseTermSet(aliasTerms),
@@ -267,7 +265,6 @@ type CoverageLexicalBenchmarkPhaseTimingState = {
 };
 
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
-const ENABLE_BODY_PHRASE_POSTINGS = false;
 
 function createCoverageLexicalEngineQueryCache(
 	fuzzyProportion: number,
@@ -309,7 +306,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new Map<string, number[]>();
 	private readonly bodyCharPostings = new Map<string, number[]>();
-	private readonly bodyPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasPostings = new Map<string, number[]>();
@@ -483,7 +479,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.nextDocumentId = 0;
 		this.bodyPostings.clear();
 		this.bodyCharPostings.clear();
-		this.bodyPhrasePostings.clear();
 		this.metadataAliasCharPostings.clear();
 		this.metadataAliasPhrasePostings.clear();
 		this.metadataAliasPostings.clear();
@@ -665,7 +660,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					metadataHeadingCharPostings: this.metadataHeadingCharPostings,
 					metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: this.metadataHeadingPostings,
-					bodyPhrasePostings: this.bodyPhrasePostings,
 					metadataTagCharPostings: this.metadataTagCharPostings,
 					metadataTagFullPostings: this.metadataTagFullPostings,
 					metadataTagPhrasePostings: this.metadataTagPhrasePostings,
@@ -845,7 +839,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			nextDocumentId: this.nextDocumentId,
 			bodyTermCount: this.bodyPostings.size,
 			bodyCharTermCount: this.bodyCharPostings.size,
-			bodyPhraseTermCount: this.bodyPhrasePostings.size,
 			metadataAliasCharTermCount: this.metadataAliasCharPostings.size,
 			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
@@ -896,11 +889,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.bodyCharPostings,
 				accumulator,
 				"postings.bodyChar.term",
-			),
-			bodyPhrase: estimateNumericPostingMapBytes(
-				this.bodyPhrasePostings,
-				accumulator,
-				"postings.bodyPhrase.term",
 			),
 			metadataAlias: estimateNumericPostingMapBytes(
 				this.metadataAliasPostings,
@@ -1038,11 +1026,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of derivedState.bodyCharTerms) {
 			addNumericPosting(this.bodyCharPostings, term, docId);
 		}
-		if (ENABLE_BODY_PHRASE_POSTINGS) {
-			for (const term of derivedState.bodyPhraseTerms) {
-				addNumericPosting(this.bodyPhrasePostings, term, docId);
-			}
-		}
 		for (const term of derivedState.aliasTerms) {
 			addNumericPosting(this.metadataAliasPostings, term, docId);
 			this.lexicon.add(term);
@@ -1123,11 +1106,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		for (const term of derivedState.bodyCharTerms) {
 			removeNumericPosting(this.bodyCharPostings, term, docId);
-		}
-		if (ENABLE_BODY_PHRASE_POSTINGS) {
-			for (const term of derivedState.bodyPhraseTerms) {
-				removeNumericPosting(this.bodyPhrasePostings, term, docId);
-			}
 		}
 		for (const term of derivedState.aliasTerms) {
 			removeNumericPosting(this.metadataAliasPostings, term, docId);
@@ -1298,7 +1276,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			bodyPostings: cloneNumericPostingMap(this.bodyPostings),
 			bodyCharPostings: cloneNumericPostingMap(this.bodyCharPostings),
 			bodyHanSegmentPostings: new Map(),
-			bodyPhrasePostings: ENABLE_BODY_PHRASE_POSTINGS ? cloneNumericPostingMap(this.bodyPhrasePostings) : new Map(),
 			metadataAliasCharPostings: cloneNumericPostingMap(
 				this.metadataAliasCharPostings,
 			),
@@ -1381,9 +1358,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.rebuildDocumentBodyTokenTape(bodyTokensById);
 		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
 		restoreNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
-				if (ENABLE_BODY_PHRASE_POSTINGS) {
-			restoreNumericPostingMap(this.bodyPhrasePostings, state.bodyPhrasePostings);
-		}
 		restoreNumericPostingMap(
 			this.metadataAliasCharPostings,
 			state.metadataAliasCharPostings,
@@ -2678,7 +2652,6 @@ function buildStringPoolAttributionBreakdown(
 	};
 	const byGroup = {
 		bodyExactTerms: summarizeSources(["postings.body.term"]),
-		bodyPhraseTerms: summarizeSources(["postings.bodyPhrase.term"]),
 		metadataExactTerms: summarizeSources([
 			"postings.metadataAlias.term",
 			"postings.metadataBasename.term",
