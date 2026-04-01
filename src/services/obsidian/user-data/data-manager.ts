@@ -57,18 +57,11 @@ import {
   DocOperationBuffer,
 } from "./doc-operation-buffer";
 import { FileWatcher } from "./file-watcher";
-import {
-  isAutoRetryHybridFailureKind,
-  type HybridRepairMode,
-} from "./index-recovery-state";
+import type { HybridRepairMode } from "./index-recovery-state";
 import { buildIndexArtifactStateId } from "./index-artifact-state";
 import { DirtyArtifactCoordinator } from "./dirty-artifact-coordinator";
-import { HybridRecoveryStateStore } from "./hybrid-recovery-state-store";
-import {
-  HybridEmbeddingRecoveryManager,
-  type HybridFailedEmbeddingSummary,
-  type HybridRecoveryEntry,
-} from "./hybrid-embedding-recovery-manager";
+import { HybridRecoveryCoordinator } from "./hybrid-recovery-coordinator";
+import type { HybridFailedEmbeddingSummary } from "./hybrid-embedding-recovery-manager";
 
 type HybridIndexFailure = {
   path: string;
@@ -142,6 +135,20 @@ type DevStorageBreakdownRow = {
   size: string;
   shareOfLexical: string;
   shareOfVault: string;
+};
+
+type JsHeapUsageSample = {
+  usedBytes: number;
+  totalBytes: number;
+  limitBytes: number;
+};
+
+type LexicalHeapDeltaSummary = {
+  beforeUsedBytes: number;
+  afterUsedBytes: number;
+  deltaBytes: number;
+  totalBytes: number;
+  limitBytes: number;
 };
 
 export type SearchBootstrapMetrics = {
@@ -308,28 +315,33 @@ export class DataManager {
   private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
-  private hybridFailedEmbeddingRetryTimer: NodeJS.Timeout | null = null;
   private lexicalIndexFailureNotice: Notice | null = null;
   private lexicalFailureRetryInFlight = false;
   private readonly lexicalIndexFailuresByPath = new Map<
     string,
     LexicalIndexFailure
   >();
-  private readonly hybridEmbeddingRecovery = new HybridEmbeddingRecoveryManager(
-    () => this.notifyHybridRuntimeStatusChanged(),
-  );
-  private readonly hybridRecoveryStateStore = new HybridRecoveryStateStore();
+  private latestLexicalHeapDelta: LexicalHeapDeltaSummary | null = null;
+  private readonly hybridRecoveryCoordinator = new HybridRecoveryCoordinator({
+    canRetryPath: (path) => this.canRetryHybridEmbeddingPath(path),
+    enqueueRepair: (task) => this.enqueueHybridRepair(task),
+    onChanged: () => this.notifyHybridRuntimeStatusChanged(),
+    getFailedEmbeddingRetryIntervalMs: () =>
+      this.getFailedEmbeddingRetryIntervalMs(),
+    getMinIncrementalEmbedIntervalMs: () =>
+      this.getMinIncrementalEmbedIntervalMs(),
+  });
 
   private get hybridEngine() {
     return getInstance(SearchService).hybridEngine;
   }
 
   hasHybridFailedEmbeddings(): boolean {
-    return this.hybridEmbeddingRecovery.hasFailures();
+    return this.hybridRecoveryCoordinator.hasFailures();
   }
 
   getHybridFailedEmbeddingSummary(): HybridFailedEmbeddingSummary {
-    return this.hybridEmbeddingRecovery.getSummary(
+    return this.hybridRecoveryCoordinator.getFailureSummary(
       this.countHybridTrackedFiles(),
     );
   }
@@ -344,25 +356,7 @@ export class DataManager {
       };
     }
 
-    const now = Date.now();
-    let deferredCount = 0;
-    let nextEligibleAt: number | null = null;
-    for (const entry of this.hybridEmbeddingRecovery.listDeferredEntries()) {
-      if (!this.canRetryHybridEmbeddingPath(entry.path)) {
-        continue;
-      }
-      deferredCount += 1;
-      const eligibleAt = entry.nextRetryAt ?? now;
-      if (nextEligibleAt === null || eligibleAt < nextEligibleAt) {
-        nextEligibleAt = eligibleAt;
-      }
-    }
-
-    return {
-      deferredCount,
-      nextEligibleAt,
-      totalFiles,
-    };
+    return this.hybridRecoveryCoordinator.getDeferredSummary(totalFiles);
   }
 
   private countHybridTrackedFiles(): number {
@@ -400,74 +394,25 @@ export class DataManager {
     await this.lexicalSnapshotCoordinator.flushIfDirty(force);
   }
 
-  private async persistHybridRecoveryEntry(
-    entry: HybridRecoveryEntry | null,
-  ): Promise<void> {
-    await this.hybridRecoveryStateStore.persistEntry(entry);
-  }
-
-  private async persistAllHybridRecoveryEntries(): Promise<void> {
-    await this.hybridRecoveryStateStore.persistEntries(
-      this.hybridEmbeddingRecovery.listEntries(),
-    );
-  }
-
-  private async deleteHybridRecoveryEntry(path: string): Promise<void> {
-    await this.hybridRecoveryStateStore.deleteEntry(path);
-  }
-
-  private async markHybridRecoveryRetryQueued(path: string): Promise<void> {
-    const entry = this.hybridEmbeddingRecovery.markRetryQueued(
-      path,
-      this.getFailedEmbeddingRetryIntervalMs(),
-    );
-    await this.persistHybridRecoveryEntry(entry);
-  }
-
   private async restorePersistedHybridRecoveryState(
     currFiles: ReadonlyMap<string, TFile>,
     previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>,
   ): Promise<void> {
-    const activeEntries = await this.hybridRecoveryStateStore.restoreEntries({
+    await this.hybridRecoveryCoordinator.restorePersistedState({
       currFiles,
       previousIndexedFileRefs,
-      minIncrementalEmbedIntervalMs: this.getMinIncrementalEmbedIntervalMs(),
     });
-    this.hybridEmbeddingRecovery.replaceAll(activeEntries);
-    this.scheduleFailedEmbeddingRetry();
   }
 
   async retryFailedEmbeddingsOnConfigChange(
     reason = "config-changed",
   ): Promise<void> {
-    for (const path of this.hybridEmbeddingRecovery.listTrackedPaths()) {
-      if (!this.canRetryHybridEmbeddingPath(path)) {
-        await this.clearFailedHybridEmbedding(path);
-      }
-    }
-    for (const entry of this.hybridEmbeddingRecovery.listFailureEntries()) {
-      this.enqueueHybridRepair({
-        path: entry.path,
-        mode: entry.mode,
-        reason,
-        eligibleAt: Date.now(),
-        sourceGeneration: entry.targetGeneration,
-      });
-      if (isAutoRetryHybridFailureKind(entry.errorKind)) {
-        await this.markHybridRecoveryRetryQueued(entry.path);
-      }
-    }
-    this.scheduleFailedEmbeddingRetry();
+    await this.hybridRecoveryCoordinator.retryFailuresOnConfigChange(reason);
   }
 
   refreshFailedEmbeddingRetrySchedule(): void {
-    this.hybridEmbeddingRecovery.refreshRetrySchedule(
-      this.getFailedEmbeddingRetryIntervalMs(),
-    );
-    void this.persistAllHybridRecoveryEntries();
-    this.scheduleFailedEmbeddingRetry();
+    this.hybridRecoveryCoordinator.refreshRetrySchedule();
   }
-
   private docOperationsHandler = async (
     operations: ReducedDocOperationBatch,
   ) => {
@@ -529,8 +474,7 @@ export class DataManager {
     void this.flushLexicalSnapshotIfDirty(true);
     this.clearLexicalSnapshotFlushTimer();
     this.clearHybridRepairScheduler();
-    this.clearFailedEmbeddingRetryTimer();
-    this.hybridEmbeddingRecovery.clearAll();
+    this.clearHybridFailedEmbeddingState();
     this.hideLexicalIndexFailureNotice();
     this.lexicalIndexFailuresByPath.clear();
     this.searchBootstrapCommitTask = null;
@@ -564,6 +508,10 @@ export class DataManager {
     }
 
     this.setLexicalBootstrapState("healing");
+    const heapBeforeLexicalRefresh = isDevEnvironment
+      ? this.sampleJsHeapUsage()
+      : null;
+    this.latestLexicalHeapDelta = null;
     this.markSearchBootstrapPhaseStarted("lexical", "heal");
     await this.healLexicalBootstrapPlan(lexicalPlan);
     this.markSearchBootstrapPhaseCompleted("lexical", "heal");
@@ -606,6 +554,10 @@ export class DataManager {
   async refreshLexicalStateAsync() {
     const prevNotice = new MyNotice(t("Reindexing..."));
     this.setLexicalBootstrapState("healing");
+    const heapBeforeLexicalRefresh = isDevEnvironment
+      ? this.sampleJsHeapUsage()
+      : null;
+    this.latestLexicalHeapDelta = null;
     getInstance(FileWatcher).stop();
     try {
       await this.reindexLexicalEngineWithCurrFiles();
@@ -1181,56 +1133,7 @@ export class DataManager {
   }
 
   private clearHybridFailedEmbeddingState(): void {
-    this.hybridEmbeddingRecovery.clearAll();
-    this.clearFailedEmbeddingRetryTimer();
-  }
-
-  private clearFailedEmbeddingRetryTimer(): void {
-    if (this.hybridFailedEmbeddingRetryTimer) {
-      clearTimeout(this.hybridFailedEmbeddingRetryTimer);
-      this.hybridFailedEmbeddingRetryTimer = null;
-    }
-  }
-
-  private scheduleFailedEmbeddingRetry(): void {
-    this.clearFailedEmbeddingRetryTimer();
-    const nextRetryAt = this.hybridEmbeddingRecovery.getNextRetryAt();
-    if (nextRetryAt === null) {
-      return;
-    }
-    this.hybridFailedEmbeddingRetryTimer = setTimeout(
-      () => {
-        this.hybridFailedEmbeddingRetryTimer = null;
-        void this.flushFailedEmbeddingRetryQueue();
-      },
-      Math.max(0, nextRetryAt - Date.now()),
-    );
-  }
-
-  private async flushFailedEmbeddingRetryQueue(): Promise<void> {
-    if (!this.hybridEmbeddingRecovery.hasFailures()) {
-      return;
-    }
-
-    for (const path of this.hybridEmbeddingRecovery.listPathsReadyForRetry()) {
-      if (!this.canRetryHybridEmbeddingPath(path)) {
-        await this.clearFailedHybridEmbedding(path);
-        continue;
-      }
-      const entry = this.hybridEmbeddingRecovery.getEntry(path);
-      if (!entry) {
-        continue;
-      }
-      this.enqueueHybridRepair({
-        path: entry.path,
-        mode: entry.mode,
-        reason: "failed-embedding-auto-retry",
-        eligibleAt: Date.now(),
-        sourceGeneration: entry.targetGeneration,
-      });
-      await this.markHybridRecoveryRetryQueued(entry.path);
-    }
-    this.scheduleFailedEmbeddingRetry();
+    this.hybridRecoveryCoordinator.resetRuntimeState();
   }
 
   private scheduleHybridRepairFlush(): void {
@@ -2336,18 +2239,14 @@ export class DataManager {
   }
 
   private async clearFailedHybridEmbedding(path: string): Promise<void> {
-    this.hybridEmbeddingRecovery.clearPath(path);
-    this.scheduleFailedEmbeddingRetry();
-    await this.deleteHybridRecoveryEntry(path);
+    await this.hybridRecoveryCoordinator.clearPath(path);
   }
 
   private async moveFailedHybridEmbedding(
     oldPath: string,
     newPath: string,
   ): Promise<void> {
-    this.hybridEmbeddingRecovery.movePath(oldPath, newPath);
-    this.scheduleFailedEmbeddingRetry();
-    await this.hybridRecoveryStateStore.moveEntry(oldPath, newPath);
+    await this.hybridRecoveryCoordinator.movePath(oldPath, newPath);
   }
 
   private async registerFailedHybridEmbedding(
@@ -2357,18 +2256,14 @@ export class DataManager {
     error: unknown,
     reason: string,
   ): Promise<void> {
-    const entry = this.hybridEmbeddingRecovery.recordFailure(
+    await this.hybridRecoveryCoordinator.registerFailure(
       path,
       targetGeneration,
       mode,
       error,
       reason,
-      this.getFailedEmbeddingRetryIntervalMs(),
     );
-    this.scheduleFailedEmbeddingRetry();
-    await this.persistHybridRecoveryEntry(entry);
   }
-
 
   private async registerDeferredHybridEmbedding(
     path: string,
@@ -2376,14 +2271,14 @@ export class DataManager {
     mode: HybridRepairMode,
     nextRetryAt: number | null,
   ): Promise<void> {
-    const entry = this.hybridEmbeddingRecovery.recordDeferredEmbedding(
+    await this.hybridRecoveryCoordinator.registerDeferred(
       path,
       targetGeneration,
       mode,
       nextRetryAt,
     );
-    await this.persistHybridRecoveryEntry(entry);
   }
+
   private async deleteHybridFileAndRefreshRuntimeStatus(
     path: string,
   ): Promise<void> {
@@ -2398,39 +2293,9 @@ export class DataManager {
   private async enqueuePersistedHybridRecoveryStates(
     skipPaths: ReadonlySet<string>,
   ): Promise<void> {
-    const now = Date.now();
-    for (const entry of this.hybridEmbeddingRecovery.listEntries()) {
-      if (skipPaths.has(entry.path)) {
-        continue;
-      }
-      if (!this.canRetryHybridEmbeddingPath(entry.path)) {
-        await this.clearFailedHybridEmbedding(entry.path);
-        continue;
-      }
-
-      if (entry.recoveryKind === "deferred_embedding") {
-        this.enqueueHybridRepair({
-          path: entry.path,
-          mode: entry.mode,
-          reason: "startup-resume-deferred-embedding",
-          eligibleAt: entry.nextRetryAt ?? now,
-          sourceGeneration: entry.targetGeneration,
-        });
-        continue;
-      }
-
-      if (isAutoRetryHybridFailureKind(entry.errorKind)) {
-        continue;
-      }
-
-      this.enqueueHybridRepair({
-        path: entry.path,
-        mode: entry.mode,
-        reason: "startup-recover-persisted-state",
-        eligibleAt: now,
-        sourceGeneration: entry.targetGeneration,
-      });
-    }
+    await this.hybridRecoveryCoordinator.enqueuePersistedStartupRepairs(
+      skipPaths,
+    );
   }
   private createHybridIndexProgressNotice(
     docsToAdd: TFile[],

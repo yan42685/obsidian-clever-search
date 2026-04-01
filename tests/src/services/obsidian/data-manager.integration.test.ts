@@ -272,10 +272,16 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
   return {
     isEnabled: jest.fn(() => true),
     shouldIndexPath: jest.fn(() => true),
+    load: jest.fn(async () => {}),
+    clearAll: jest.fn(async () => {}),
     moveFile: jest.fn(async () => true),
     deleteFile: jest.fn(async () => {}),
+    indexFileStrict: jest.fn(async () => {}),
+    indexFile: jest.fn(async () => {}),
+    rebuildBm25FromStore: jest.fn(async () => {}),
     canSearch: jest.fn(() => false),
     canServeQuery: jest.fn(() => false),
+    consumeIndexingFallbackNoticeKey: jest.fn(() => null),
     getRuntimeMemoryEstimate: jest.fn(() => ({
       vectorsBytes: 0,
       graphBytes: 0,
@@ -292,11 +298,38 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
   const lexicalIndexedFileRefs: Array<BaseIndexedFileRef> = [];
   const hybridIndexedFileRefs: Array<Record<string, any> & { path: string }> =
     [];
+  const hybridChunks: Array<Record<string, any> & { filePath: string }> = [];
+  const hybridChunkVectors: Array<
+    Record<string, any> & { filePath: string }
+  > = [];
+  const fileSnapshots: Array<Record<string, any> & { filePath: string }> = [];
   const indexRecoveryStates: Array<Record<string, any>> = [];
   const indexArtifactStates: Array<Record<string, any>> = [];
   const state = {
     lexicalSearchSnapshot: null as unknown,
   };
+
+  const compareKeys = (left: string | number, right: string | number) => {
+    if (typeof left === "number" && typeof right === "number") {
+      return left - right;
+    }
+    return String(left).localeCompare(String(right));
+  };
+
+  const toPagedRows = <T extends Record<string, any>>(
+    rows: readonly T[],
+    getKey: (row: T) => string | number,
+    lastKey: string | number | null,
+    batchSize: number,
+  ): T[] =>
+    rows
+      .slice()
+      .sort((left, right) => compareKeys(getKey(left), getKey(right)))
+      .filter((row) =>
+        lastKey === null ? true : compareKeys(getKey(row), lastKey) > 0,
+      )
+      .slice(0, batchSize)
+      .map((row) => ({ ...row }));
 
   const upsertRow = <T extends { path: string }>(rows: T[], row: T) => {
     const index = rows.findIndex((item) => item.path === row.path);
@@ -314,6 +347,15 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
       return;
     }
     indexArtifactStates.push({ ...row });
+  };
+
+  const upsertFilePathRow = <T extends { filePath: string }>(rows: T[], row: T) => {
+    const index = rows.findIndex((item) => item.filePath === row.filePath);
+    if (index >= 0) {
+      rows[index] = { ...row };
+      return;
+    }
+    rows.push({ ...row });
   };
 
   return {
@@ -402,13 +444,107 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
     })),
     __state: state,
     __hybridIndexedFileRefs: hybridIndexedFileRefs,
+    __hybridChunks: hybridChunks,
+    __hybridChunkVectors: hybridChunkVectors,
+    __fileSnapshots: fileSnapshots,
     __indexRecoveryStates: indexRecoveryStates,
     __indexArtifactStates: indexArtifactStates,
     db: {
+      hybridChunks: {
+        orderBy: jest.fn((_field: string) => ({
+          limit: (batchSize: number) => ({
+            toArray: async () =>
+              toPagedRows(
+                hybridChunks,
+                (row) => Number(row.id ?? 0),
+                null,
+                batchSize,
+              ),
+          }),
+        })),
+        where: jest.fn((_field: string) => ({
+          above: (lastId: number) => ({
+            limit: (batchSize: number) => ({
+              toArray: async () =>
+                toPagedRows(
+                  hybridChunks,
+                  (row) => Number(row.id ?? 0),
+                  lastId,
+                  batchSize,
+                ),
+            }),
+          }),
+        })),
+      },
+      hybridChunkVectors: {
+        orderBy: jest.fn((_field: string) => ({
+          limit: (batchSize: number) => ({
+            toArray: async () =>
+              toPagedRows(
+                hybridChunkVectors,
+                (row) => row.filePath,
+                null,
+                batchSize,
+              ),
+          }),
+        })),
+        where: jest.fn((_field: string) => ({
+          above: (lastPath: string) => ({
+            limit: (batchSize: number) => ({
+              toArray: async () =>
+                toPagedRows(
+                  hybridChunkVectors,
+                  (row) => row.filePath,
+                  lastPath,
+                  batchSize,
+                ),
+            }),
+          }),
+        })),
+        get: jest.fn(async (filePath: string) => {
+          const row = hybridChunkVectors.find((item) => item.filePath === filePath);
+          return row ? { ...row } : undefined;
+        }),
+        put: jest.fn(async (row: Record<string, any> & { filePath: string }) => {
+          upsertFilePathRow(hybridChunkVectors, row);
+        }),
+      },
+      fileSnapshots: {
+        bulkGet: jest.fn(async (paths: readonly string[]) =>
+          paths.map((path) => {
+            const row = fileSnapshots.find((item) => item.filePath === path);
+            return row ? { ...row } : undefined;
+          }),
+        ),
+      },
       hybridIndexedFileRefs: {
         toArray: jest.fn(async () =>
           hybridIndexedFileRefs.map((ref) => ({ ...ref })),
         ),
+        orderBy: jest.fn((_field: string) => ({
+          limit: (batchSize: number) => ({
+            toArray: async () =>
+              toPagedRows(
+                hybridIndexedFileRefs,
+                (row) => row.path,
+                null,
+                batchSize,
+              ),
+          }),
+        })),
+        where: jest.fn((_field: string) => ({
+          above: (lastPath: string) => ({
+            limit: (batchSize: number) => ({
+              toArray: async () =>
+                toPagedRows(
+                  hybridIndexedFileRefs,
+                  (row) => row.path,
+                  lastPath,
+                  batchSize,
+                ),
+            }),
+          }),
+        })),
         get: jest.fn(async (path: string) => {
           const row = hybridIndexedFileRefs.find((item) => item.path === path);
           return row ? { ...row } : undefined;
@@ -418,10 +554,11 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         }),
         bulkPut: jest.fn(
           async (rows: Array<Record<string, any> & { path: string }>) => {
-          for (const row of rows) {
-            upsertRow(hybridIndexedFileRefs, row);
-          }
-        }),
+            for (const row of rows) {
+              upsertRow(hybridIndexedFileRefs, row);
+            }
+          },
+        ),
       },
       indexArtifactState: {
         get: jest.fn(async (id: string) => {
@@ -433,10 +570,11 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         }),
         bulkPut: jest.fn(
           async (rows: Array<Record<string, any> & { path: string }>) => {
-          for (const row of rows) {
-            upsertArtifactRow(row);
-          }
-        }),
+            for (const row of rows) {
+              upsertArtifactRow(row);
+            }
+          },
+        ),
         bulkGet: jest.fn(async (ids: readonly string[]) =>
           ids.map((id) => {
             const row = indexArtifactStates.find((item) => item.id === id);
@@ -1183,321 +1321,325 @@ describe("DataManager integration", () => {
   });
 
   test("hydrates persisted hybrid recovery rows and requeues durable startup repairs", async () => {
-    const setting = cloneSetting();
-    setting.hybrid.enabled = true;
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000);
 
-    const bm25File = createFile("docs/bm25.md", "bm25 body", 100);
-    const failedFile = createFile("docs/failed.md", "failed body", 110);
-    const readyFile = createFile("docs/ready.md", "ready body", 120);
-    const skippedFile = createFile("docs/skipped.md", "skipped body", 130);
-    const files = new Map<string, TFile>([
-      [bm25File.path, bm25File],
-      [failedFile.path, failedFile],
-      [readyFile.path, readyFile],
-      [skippedFile.path, skippedFile],
-    ]);
-    const texts = new Map<string, string>([
-      [bm25File.path, "bm25 body"],
-      [failedFile.path, "failed body"],
-      [readyFile.path, "ready body"],
-      [skippedFile.path, "skipped body"],
-    ]);
+    try {
+      const setting = cloneSetting();
+      setting.hybrid.enabled = true;
 
-    const database = createMockDatabase();
-    (database as any).__indexRecoveryStates.push(
-      {
-        id: `hybrid:${bm25File.path}`,
-        engine: "hybrid",
-        path: bm25File.path,
-        targetGeneration: bm25File.stat.mtime,
-        mode: "incremental",
-        recoveryKind: "failure",
-        state: "blocking",
-        failureKind: "auth_403",
-        failureMessage: "Embedding API error 403",
-        attemptCount: 1,
-        lastFailedAt: 1000,
-        nextRetryAt: null,
-        isBlocking: true,
-      },
-      {
-        id: `hybrid:${failedFile.path}`,
-        engine: "hybrid",
-        path: failedFile.path,
-        targetGeneration: failedFile.stat.mtime,
-        mode: "full",
-        recoveryKind: "failure",
-        state: "retryable_waiting",
-        failureKind: "provider_429",
-        failureMessage: "Embedding API error 429",
-        attemptCount: 2,
-        lastFailedAt: 2000,
-        nextRetryAt: 5000,
-        isBlocking: false,
-      },
-      {
-        id: `hybrid:${readyFile.path}`,
-        engine: "hybrid",
-        path: readyFile.path,
-        targetGeneration: readyFile.stat.mtime,
-        mode: "incremental",
-        recoveryKind: "failure",
-        state: "blocking",
-        failureKind: "auth_401",
-        failureMessage: "Embedding API error 401",
-        attemptCount: 1,
-        lastFailedAt: 3000,
-        nextRetryAt: null,
-        isBlocking: true,
-      },
-      {
-        id: `hybrid:${skippedFile.path}`,
-        engine: "hybrid",
-        path: skippedFile.path,
-        targetGeneration: skippedFile.stat.mtime,
-        mode: "incremental",
-        recoveryKind: "failure",
-        state: "retryable_waiting",
-        failureKind: "provider_5xx",
-        failureMessage: "Embedding API error 500",
-        attemptCount: 1,
-        lastFailedAt: 4000,
-        nextRetryAt: 6000,
-        isBlocking: false,
-      },
-      {
-        id: "hybrid:docs/missing.md",
-        engine: "hybrid",
-        path: "docs/missing.md",
-        targetGeneration: 90,
-        mode: "incremental",
-        recoveryKind: "failure",
-        state: "blocking",
-        failureKind: "auth_403",
-        failureMessage: "Embedding API error 403",
-        attemptCount: 1,
-        lastFailedAt: 5000,
-        nextRetryAt: null,
-        isBlocking: true,
-      },
-    );
-    const dataProvider = createMockDataProvider({ files, texts });
-    const lexicalEngine = createMockLexicalEngine();
-    const fileSnapshotStore = createMockFileSnapshotStore();
-    const hybridEngine = createMockHybridEngine();
+      const bm25File = createFile("docs/bm25.md", "bm25 body", 100);
+      const failedFile = createFile("docs/failed.md", "failed body", 110);
+      const readyFile = createFile("docs/ready.md", "ready body", 120);
+      const skippedFile = createFile("docs/skipped.md", "skipped body", 130);
+      const files = new Map<string, TFile>([
+        [bm25File.path, bm25File],
+        [failedFile.path, failedFile],
+        [readyFile.path, readyFile],
+        [skippedFile.path, skippedFile],
+      ]);
+      const texts = new Map<string, string>([
+        [bm25File.path, "bm25 body"],
+        [failedFile.path, "failed body"],
+        [readyFile.path, "ready body"],
+        [skippedFile.path, "skipped body"],
+      ]);
 
-    registerDataManagerDeps({
-      setting,
-      pluginFiles: Array.from(files.values()),
-      database,
-      dataProvider,
-      lexicalEngine,
-      fileSnapshotStore,
-      hybridEngine,
-    });
-
-    const manager = container.resolve(DataManager);
-    const scheduleSpy = jest
-      .spyOn(manager as any, "scheduleHybridRepairFlush")
-      .mockImplementation(() => {});
-    const retryScheduleSpy = jest
-      .spyOn(manager as any, "scheduleFailedEmbeddingRetry")
-      .mockImplementation(() => {});
-
-    await (manager as any).restorePersistedHybridRecoveryState(
-      files,
-      new Map([
-        [
-          readyFile.path,
-          {
-            path: readyFile.path,
-            generation: readyFile.stat.mtime,
-            state: "ready",
-          },
-        ],
-      ]),
-    );
-    await (manager as any).enqueuePersistedHybridRecoveryStates(
-      new Set<string>([skippedFile.path]),
-    );
-
-    expect(database.deleteIndexRecoveryState).toHaveBeenCalledWith(
-      "hybrid",
-      readyFile.path,
-    );
-    expect(database.deleteIndexRecoveryState).toHaveBeenCalledWith(
-      "hybrid",
-      "docs/missing.md",
-    );
-    expect((manager as any).hybridRepairQueue.get(bm25File.path)).toMatchObject({
-      path: bm25File.path,
-      mode: "incremental",
-      reason: "startup-recover-persisted-state",
-      sourceGeneration: bm25File.stat.mtime,
-    });
-    expect((manager as any).hybridRepairQueue.has(failedFile.path)).toBe(false);
-    expect((manager as any).hybridRepairQueue.has(skippedFile.path)).toBe(
-      false,
-    );
-    expect(database.putIndexRecoveryState).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        path: failedFile.path,
-      }),
-    );
-    expect(database.putIndexRecoveryState).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        path: bm25File.path,
-      }),
-    );
-    expect(scheduleSpy).toHaveBeenCalled();
-    expect(retryScheduleSpy).toHaveBeenCalled();
-    manager.onunload();
-  });
-
-
-  test("backfills legacy hybrid recovery rows and strips legacy file-ref fields", async () => {
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(10_000);
-    const setting = cloneSetting();
-    setting.hybrid.enabled = true;
-
-    const retryableFile = createFile("docs/retryable.md", "retryable body", 100);
-    const deferredFile = createFile("docs/deferred.md", "deferred body", 110);
-    const readyFile = createFile("docs/ready.md", "ready body", 120);
-    const files = new Map<string, TFile>([
-      [retryableFile.path, retryableFile],
-      [deferredFile.path, deferredFile],
-      [readyFile.path, readyFile],
-    ]);
-    const texts = new Map<string, string>([
-      [retryableFile.path, "retryable body"],
-      [deferredFile.path, "deferred body"],
-      [readyFile.path, "ready body"],
-    ]);
-
-    const database = createMockDatabase();
-    (database as any).__hybridIndexedFileRefs.push(
-      {
-        path: retryableFile.path,
-        generation: retryableFile.stat.mtime,
-        state: "bm25_only",
-        chunkCount: 2,
-        lastErrorKind: "provider_429",
-        lastIncrementalEmbedAt: 4_000,
-        indexedAt: 7_000,
-      },
-      {
-        path: deferredFile.path,
-        generation: deferredFile.stat.mtime,
-        state: "bm25_only",
-        chunkCount: 3,
-        embeddingDeferred: true,
-        lastIncrementalEmbedAt: 5_000,
-        indexedAt: 8_000,
-      },
-      {
-        path: readyFile.path,
-        generation: readyFile.stat.mtime,
-        state: "ready",
-        chunkCount: 1,
-        lastErrorKind: null,
-        embeddingDeferred: false,
-        lastIncrementalEmbedAt: 9_000,
-        indexedAt: 9_000,
-      },
-    );
-    const dataProvider = createMockDataProvider({ files, texts });
-    const lexicalEngine = createMockLexicalEngine();
-    const fileSnapshotStore = createMockFileSnapshotStore();
-    const hybridEngine = createMockHybridEngine();
-
-    registerDataManagerDeps({
-      setting,
-      pluginFiles: Array.from(files.values()),
-      database,
-      dataProvider,
-      lexicalEngine,
-      fileSnapshotStore,
-      hybridEngine,
-    });
-
-    const manager = container.resolve(DataManager);
-    jest
-      .spyOn(manager as any, "scheduleHybridRepairFlush")
-      .mockImplementation(() => {});
-    const retryScheduleSpy = jest
-      .spyOn(manager as any, "scheduleFailedEmbeddingRetry")
-      .mockImplementation(() => {});
-
-    const previousIndexedFileRefs = new Map(
-      (database as any).__hybridIndexedFileRefs.map((row: Record<string, any>) => [
-        row.path,
-        row,
-      ]),
-    );
-
-    await (manager as any).restorePersistedHybridRecoveryState(
-      files,
-      previousIndexedFileRefs,
-    );
-
-    expect((database as any).__indexRecoveryStates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: retryableFile.path,
+      const database = createMockDatabase();
+      (database as any).__indexRecoveryStates.push(
+        {
+          id: `hybrid:${bm25File.path}`,
+          engine: "hybrid",
+          path: bm25File.path,
+          targetGeneration: bm25File.stat.mtime,
+          mode: "incremental",
           recoveryKind: "failure",
+          state: "blocking",
+          failureKind: "auth_403",
+          failureMessage: "Embedding API error 403",
+          attemptCount: 1,
+          lastFailedAt: 1_000,
+          nextRetryAt: null,
+          isBlocking: true,
+        },
+        {
+          id: `hybrid:${failedFile.path}`,
+          engine: "hybrid",
+          path: failedFile.path,
+          targetGeneration: failedFile.stat.mtime,
+          mode: "full",
+          recoveryKind: "failure",
+          state: "retryable_waiting",
           failureKind: "provider_429",
-        }),
+          failureMessage: "Embedding API error 429",
+          attemptCount: 2,
+          lastFailedAt: 2_000,
+          nextRetryAt: 5_000,
+          isBlocking: false,
+        },
+        {
+          id: `hybrid:${readyFile.path}`,
+          engine: "hybrid",
+          path: readyFile.path,
+          targetGeneration: readyFile.stat.mtime,
+          mode: "incremental",
+          recoveryKind: "failure",
+          state: "blocking",
+          failureKind: "auth_401",
+          failureMessage: "Embedding API error 401",
+          attemptCount: 1,
+          lastFailedAt: 3_000,
+          nextRetryAt: null,
+          isBlocking: true,
+        },
+        {
+          id: `hybrid:${skippedFile.path}`,
+          engine: "hybrid",
+          path: skippedFile.path,
+          targetGeneration: skippedFile.stat.mtime,
+          mode: "incremental",
+          recoveryKind: "failure",
+          state: "retryable_waiting",
+          failureKind: "provider_5xx",
+          failureMessage: "Embedding API error 500",
+          attemptCount: 1,
+          lastFailedAt: 4_000,
+          nextRetryAt: 6_000,
+          isBlocking: false,
+        },
+        {
+          id: "hybrid:docs/missing.md",
+          engine: "hybrid",
+          path: "docs/missing.md",
+          targetGeneration: 90,
+          mode: "incremental",
+          recoveryKind: "failure",
+          state: "blocking",
+          failureKind: "auth_403",
+          failureMessage: "Embedding API error 403",
+          attemptCount: 1,
+          lastFailedAt: 5_000,
+          nextRetryAt: null,
+          isBlocking: true,
+        },
+      );
+      const dataProvider = createMockDataProvider({ files, texts });
+      const lexicalEngine = createMockLexicalEngine();
+      const fileSnapshotStore = createMockFileSnapshotStore();
+      const hybridEngine = createMockHybridEngine();
+
+      registerDataManagerDeps({
+        setting,
+        pluginFiles: Array.from(files.values()),
+        database,
+        dataProvider,
+        lexicalEngine,
+        fileSnapshotStore,
+        hybridEngine,
+      });
+
+      const manager = container.resolve(DataManager);
+      const scheduleSpy = jest
+        .spyOn(manager as any, "scheduleHybridRepairFlush")
+        .mockImplementation(() => {});
+
+      await (manager as any).restorePersistedHybridRecoveryState(
+        files,
+        new Map([
+          [
+            readyFile.path,
+            {
+              path: readyFile.path,
+              generation: readyFile.stat.mtime,
+              state: "ready",
+            },
+          ],
+        ]),
+      );
+      await (manager as any).enqueuePersistedHybridRecoveryStates(
+        new Set<string>([skippedFile.path]),
+      );
+
+      expect(database.deleteIndexRecoveryState).toHaveBeenCalledWith(
+        "hybrid",
+        readyFile.path,
+      );
+      expect(database.deleteIndexRecoveryState).toHaveBeenCalledWith(
+        "hybrid",
+        "docs/missing.md",
+      );
+      expect((manager as any).hybridRepairQueue.get(bm25File.path)).toMatchObject({
+        path: bm25File.path,
+        mode: "incremental",
+        reason: "startup-recover-persisted-state",
+        sourceGeneration: bm25File.stat.mtime,
+      });
+      expect((manager as any).hybridRepairQueue.has(failedFile.path)).toBe(false);
+      expect((manager as any).hybridRepairQueue.has(skippedFile.path)).toBe(
+        false,
+      );
+      expect(database.putIndexRecoveryState).not.toHaveBeenCalledWith(
         expect.objectContaining({
-          path: deferredFile.path,
-          recoveryKind: "deferred_embedding",
-          failureKind: null,
-          nextRetryAt: 65_000,
+          path: failedFile.path,
         }),
-      ]),
-    );
+      );
+      expect(database.putIndexRecoveryState).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: bm25File.path,
+        }),
+      );
+      expect(scheduleSpy).toHaveBeenCalled();
 
-    const deferredSummary = await manager.getHybridDeferredEmbeddingSummary();
-    expect(deferredSummary).toEqual({
-      deferredCount: 1,
-      nextEligibleAt: 65_000,
-      totalFiles: 3,
-    });
-
-    await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
-
-    expect((manager as any).hybridRepairQueue.has(retryableFile.path)).toBe(
-      false,
-    );
-    expect(
-      (manager as any).hybridRepairQueue.get(deferredFile.path),
-    ).toMatchObject({
-      path: deferredFile.path,
-      mode: "incremental",
-      reason: "startup-resume-deferred-embedding",
-      eligibleAt: 65_000,
-      sourceGeneration: deferredFile.stat.mtime,
-    });
-
-    const strippedRetryable = (database as any).__hybridIndexedFileRefs.find(
-      (row: Record<string, any>) => row.path === retryableFile.path,
-    );
-    const strippedDeferred = (database as any).__hybridIndexedFileRefs.find(
-      (row: Record<string, any>) => row.path === deferredFile.path,
-    );
-    const strippedReady = (database as any).__hybridIndexedFileRefs.find(
-      (row: Record<string, any>) => row.path === readyFile.path,
-    );
-    expect(strippedRetryable.lastErrorKind).toBeUndefined();
-    expect(strippedRetryable.embeddingDeferred).toBeUndefined();
-    expect(strippedDeferred.embeddingDeferred).toBeUndefined();
-    expect(strippedReady.lastErrorKind).toBeUndefined();
-    expect(strippedReady.embeddingDeferred).toBeUndefined();
-    expect(retryScheduleSpy).toHaveBeenCalled();
-
-    manager.onunload();
-    nowSpy.mockRestore();
+      manager.onunload();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
+  test("backfills legacy hybrid recovery rows and strips legacy file-ref fields", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(10_000);
 
+    try {
+      const setting = cloneSetting();
+      setting.hybrid.enabled = true;
+
+      const retryableFile = createFile(
+        "docs/retryable.md",
+        "retryable body",
+        100,
+      );
+      const deferredFile = createFile("docs/deferred.md", "deferred body", 110);
+      const readyFile = createFile("docs/ready.md", "ready body", 120);
+      const files = new Map<string, TFile>([
+        [retryableFile.path, retryableFile],
+        [deferredFile.path, deferredFile],
+        [readyFile.path, readyFile],
+      ]);
+      const texts = new Map<string, string>([
+        [retryableFile.path, "retryable body"],
+        [deferredFile.path, "deferred body"],
+        [readyFile.path, "ready body"],
+      ]);
+
+      const database = createMockDatabase();
+      (database as any).__hybridIndexedFileRefs.push(
+        {
+          path: retryableFile.path,
+          generation: retryableFile.stat.mtime,
+          state: "bm25_only",
+          chunkCount: 2,
+          lastErrorKind: "provider_429",
+          lastIncrementalEmbedAt: 4_000,
+          indexedAt: 7_000,
+        },
+        {
+          path: deferredFile.path,
+          generation: deferredFile.stat.mtime,
+          state: "bm25_only",
+          chunkCount: 3,
+          embeddingDeferred: true,
+          lastIncrementalEmbedAt: 5_000,
+          indexedAt: 8_000,
+        },
+        {
+          path: readyFile.path,
+          generation: readyFile.stat.mtime,
+          state: "ready",
+          chunkCount: 1,
+          lastErrorKind: null,
+          embeddingDeferred: false,
+          lastIncrementalEmbedAt: 9_000,
+          indexedAt: 9_000,
+        },
+      );
+      const dataProvider = createMockDataProvider({ files, texts });
+      const lexicalEngine = createMockLexicalEngine();
+      const fileSnapshotStore = createMockFileSnapshotStore();
+      const hybridEngine = createMockHybridEngine();
+
+      registerDataManagerDeps({
+        setting,
+        pluginFiles: Array.from(files.values()),
+        database,
+        dataProvider,
+        lexicalEngine,
+        fileSnapshotStore,
+        hybridEngine,
+      });
+
+      const manager = container.resolve(DataManager);
+      jest
+        .spyOn(manager as any, "scheduleHybridRepairFlush")
+        .mockImplementation(() => {});
+
+      const previousIndexedFileRefs = new Map(
+        (database as any).__hybridIndexedFileRefs.map(
+          (row: Record<string, any>) => [row.path, row],
+        ),
+      );
+
+      await (manager as any).restorePersistedHybridRecoveryState(
+        files,
+        previousIndexedFileRefs,
+      );
+
+      expect((database as any).__indexRecoveryStates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: retryableFile.path,
+            recoveryKind: "failure",
+            failureKind: "provider_429",
+          }),
+          expect.objectContaining({
+            path: deferredFile.path,
+            recoveryKind: "deferred_embedding",
+            failureKind: null,
+            nextRetryAt: 65_000,
+          }),
+        ]),
+      );
+
+      const deferredSummary = await manager.getHybridDeferredEmbeddingSummary();
+      expect(deferredSummary).toEqual({
+        deferredCount: 1,
+        nextEligibleAt: 65_000,
+        totalFiles: 3,
+      });
+
+      await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
+
+      expect((manager as any).hybridRepairQueue.has(retryableFile.path)).toBe(
+        false,
+      );
+      expect(
+        (manager as any).hybridRepairQueue.get(deferredFile.path),
+      ).toMatchObject({
+        path: deferredFile.path,
+        mode: "incremental",
+        reason: "startup-resume-deferred-embedding",
+        eligibleAt: 65_000,
+        sourceGeneration: deferredFile.stat.mtime,
+      });
+
+      const strippedRetryable = (database as any).__hybridIndexedFileRefs.find(
+        (row: Record<string, any>) => row.path === retryableFile.path,
+      );
+      const strippedDeferred = (database as any).__hybridIndexedFileRefs.find(
+        (row: Record<string, any>) => row.path === deferredFile.path,
+      );
+      const strippedReady = (database as any).__hybridIndexedFileRefs.find(
+        (row: Record<string, any>) => row.path === readyFile.path,
+      );
+      expect(strippedRetryable.lastErrorKind).toBeUndefined();
+      expect(strippedRetryable.embeddingDeferred).toBeUndefined();
+      expect(strippedDeferred.embeddingDeferred).toBeUndefined();
+      expect(strippedReady.lastErrorKind).toBeUndefined();
+      expect(strippedReady.embeddingDeferred).toBeUndefined();
+
+      manager.onunload();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   test("retryable hybrid recovery preserves backoff across restart", async () => {
     jest.useFakeTimers();
     jest.setSystemTime(100_000);
@@ -1587,6 +1729,74 @@ describe("DataManager integration", () => {
       jest.useRealTimers();
     }
   });
+  test("blocking hybrid recovery does not spin retry timers after startup restore", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(100_000);
+
+    try {
+      const setting = cloneSetting();
+      setting.hybrid.enabled = true;
+
+      const file = createFile("docs/blocking.md", "blocking body", 100);
+      const files = new Map<string, TFile>([[file.path, file]]);
+      const texts = new Map<string, string>([[file.path, "blocking body"]]);
+      const database = createMockDatabase();
+      database.__indexRecoveryStates.push({
+        id: `hybrid:${file.path}`,
+        engine: "hybrid",
+        path: file.path,
+        targetGeneration: file.stat.mtime,
+        mode: "incremental",
+        recoveryKind: "failure",
+        state: "blocking",
+        failureKind: "auth_403",
+        failureMessage: "Embedding API error 403",
+        attemptCount: 1,
+        lastFailedAt: 90_000,
+        nextRetryAt: null,
+        isBlocking: true,
+      });
+      const dataProvider = createMockDataProvider({ files, texts });
+      const lexicalEngine = createMockLexicalEngine();
+      const fileSnapshotStore = createMockFileSnapshotStore();
+      const hybridEngine = createMockHybridEngine();
+
+      registerDataManagerDeps({
+        setting,
+        pluginFiles: [file],
+        database,
+        dataProvider,
+        lexicalEngine,
+        fileSnapshotStore,
+        hybridEngine,
+      });
+
+      const manager = container.resolve(DataManager);
+      const scheduleSpy = jest
+        .spyOn(manager as any, "scheduleHybridRepairFlush")
+        .mockImplementation(() => {});
+
+      await (manager as any).restorePersistedHybridRecoveryState(files, new Map());
+      await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
+
+      expect((manager as any).hybridRepairQueue.get(file.path)).toMatchObject({
+        path: file.path,
+        mode: "incremental",
+        reason: "startup-recover-persisted-state",
+        sourceGeneration: file.stat.mtime,
+      });
+      expect(scheduleSpy).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(30 * 60_000);
+
+      expect(scheduleSpy).toHaveBeenCalledTimes(1);
+      expect(database.putIndexRecoveryState).not.toHaveBeenCalled();
+
+      manager.onunload();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   test("hybrid exclusion changes clear stale persisted recovery metadata on startup", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;
@@ -1656,6 +1866,83 @@ describe("DataManager integration", () => {
     manager.onunload();
   });
 
+  test("startup self-heal rejects mixed-generation shared snapshot and reindexes the file", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/mixed-generation.md", "fresh body", 100);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "fresh body"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: file.stat.mtime,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: file.stat.mtime,
+    });
+    database.__hybridChunks.push({
+      id: 1,
+      filePath: file.path,
+      chunkIndex: 0,
+      startOffset: 0,
+      endOffset: 10,
+      startLine: 1,
+      startCol: 1,
+      endLine: 1,
+      embedKey: "chunk-0",
+    });
+    database.__hybridChunkVectors.push({
+      filePath: file.path,
+      precision: "int8",
+      dim: 2,
+      chunkCount: 1,
+      generation: file.stat.mtime,
+      chunkIds: new Blob([Uint32Array.from([1]).buffer]),
+      vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+    });
+    database.__fileSnapshots.push({
+      filePath: file.path,
+      plainText: "stale snapshot",
+      generation: file.stat.mtime - 1,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      canServeQuery: jest.fn(() => true),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = container.resolve(DataManager);
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(hybridEngine.deleteFile).toHaveBeenCalledWith(file.path, {
+      persistIndices: false,
+    });
+    expect(hybridEngine.indexFileStrict).toHaveBeenCalledWith(
+      file.path,
+      "fresh body",
+      file.stat.mtime,
+      { persistIndices: false },
+      [],
+    );
+    expect(hybridEngine.persistIndicesForBatch).toHaveBeenCalled();
+
+    manager.onunload();
+  });
   test("real delete path still removes shared snapshots before dropping hybrid state", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;

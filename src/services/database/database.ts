@@ -26,13 +26,9 @@ import { inject, singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
 import { analyzeBm25Blob } from "../search/hybrid/hybrid-store";
 
-type LexicalIndexedFileRefRow = BaseIndexedFileRef & {
-  updateTime?: number;
-};
+type LexicalIndexedFileRefRow = BaseIndexedFileRef;
 
-type HybridIndexedFileRefRow = HybridIndexedFileRef & {
-  updateTime?: number;
-};
+type HybridIndexedFileRefRow = HybridIndexedFileRef;
 
 @singleton()
 export class Database {
@@ -310,7 +306,7 @@ export class Database {
   ): BaseIndexedFileRef {
     return {
       path: row.path,
-      generation: row.generation ?? row.updateTime ?? 0,
+      generation: row.generation,
       size: row.size,
     };
   }
@@ -336,7 +332,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 17;
+  private static readonly _dbVersion = 18;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -452,7 +448,7 @@ class DexieWrapper extends Dexie {
       .upgrade(async (tx) => {
         const lexicalIndexedFileRefs = (await tx
           .table("lexicalDocRefs")
-          .toArray()) as LexicalIndexedFileRefRow[];
+          .toArray() ) as LexicalIndexedFileRefRow[];
         if (lexicalIndexedFileRefs.length > 0) {
           await tx
             .table("lexicalIndexedFileRefs")
@@ -461,7 +457,7 @@ class DexieWrapper extends Dexie {
 
         const hybridIndexedFileRefs = (await tx
           .table("hybridDocRefs")
-          .toArray()) as HybridIndexedFileRefRow[];
+          .toArray() ) as HybridIndexedFileRefRow[];
         if (hybridIndexedFileRefs.length > 0) {
           await tx
             .table("hybridIndexedFileRefs")
@@ -513,31 +509,6 @@ class DexieWrapper extends Dexie {
         hybridIndexedFileRefs: "path",
         hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
         hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      })
-      .upgrade(async (tx) => {
-        const lexicalRows = (await tx
-          .table("lexicalIndexedFileRefs")
-          .toArray()) as LexicalIndexedFileRefRow[];
-        if (lexicalRows.length > 0) {
-          await tx.table("lexicalIndexedFileRefs").bulkPut(
-            lexicalRows.map((row) => ({
-              ...row,
-              generation: row.generation ?? row.updateTime ?? 0,
-            })),
-          );
-        }
-
-        const hybridRows = (await tx
-          .table("hybridIndexedFileRefs")
-          .toArray()) as HybridIndexedFileRefRow[];
-        if (hybridRows.length > 0) {
-          await tx.table("hybridIndexedFileRefs").bulkPut(
-            hybridRows.map((row) => ({
-              ...row,
-              generation: row.generation ?? row.updateTime ?? 0,
-            })),
-          );
-        }
       });
     this.version(16)
       .stores({
@@ -553,20 +524,36 @@ class DexieWrapper extends Dexie {
         indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
         hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
         hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+      });
+    this.version(18)
+      .stores({
+        pluginSetting: "++id",
+        lexicalSearchSnapshots: "++id",
+        lexicalIndexedFileRefs: "path",
+        hybridChunks: "++id, filePath",
+        fileSnapshots: "filePath",
+        hybridChunkVectors: "filePath",
+        hybridBm25Index: "id",
+        hybridHnswSmall: "id",
+        hybridIndexedFileRefs: "path",
+        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
       })
       .upgrade(async (tx) => {
-        const lexicalRows = (await tx
-          .table("lexicalIndexedFileRefs")
-          .toArray()) as LexicalIndexedFileRefRow[];
-        if (lexicalRows.length > 0) {
-          await tx.table("lexicalIndexedFileRefs").bulkPut(
-            lexicalRows.map((row) => ({
-              path: row.path,
-              generation: row.generation ?? row.updateTime ?? 0,
-              size: row.size,
-            })),
-          );
-        }
+        await Promise.all([
+          tx.table("lexicalSearchSnapshots").clear(),
+          tx.table("lexicalIndexedFileRefs").clear(),
+          tx.table("hybridChunks").clear(),
+          tx.table("fileSnapshots").clear(),
+          tx.table("hybridChunkVectors").clear(),
+          tx.table("hybridBm25Index").clear(),
+          tx.table("hybridHnswSmall").clear(),
+          tx.table("hybridIndexedFileRefs").clear(),
+          tx.table("indexRecoveryState").clear(),
+          tx.table("indexArtifactState").clear(),
+        ]);
       });
     this.version(DexieWrapper._dbVersion).stores({
       pluginSetting: "++id",
