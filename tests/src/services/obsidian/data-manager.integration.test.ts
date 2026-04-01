@@ -970,8 +970,8 @@ describe("DataManager integration", () => {
           bytes: 24576,
         }),
         expect.objectContaining({
-          segment: "documentIdentity",
-          bytes: 20480,
+          segment: "doc.bodyTokens",
+          bytes: 11264,
         }),
       ]),
     );

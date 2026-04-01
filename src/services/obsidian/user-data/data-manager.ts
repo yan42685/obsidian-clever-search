@@ -563,6 +563,11 @@ export class DataManager {
       await this.reindexLexicalEngineWithCurrFiles();
       await this.persistLexicalSearchSnapshotIfAvailable();
       if (isDevEnvironment) {
+        await MyLib.sleep(0);
+        this.latestLexicalHeapDelta = this.summarizeLexicalHeapDelta(
+          heapBeforeLexicalRefresh,
+          this.sampleJsHeapUsage(),
+        );
         await this.noticeDevStorageStats();
       }
       await this.fileSnapshotStore.refreshHighPerformanceState(
@@ -2843,6 +2848,14 @@ export class DataManager {
       runtimeLexicalIndexBytes,
       indexableBytes,
     );
+    const lexicalHeapDeltaNoticeLines = this.buildLexicalHeapDeltaNoticeLines(
+      this.latestLexicalHeapDelta,
+      runtimeLexicalIndexBytes,
+    );
+    const lexicalHeapDeltaRows = this.buildLexicalHeapDeltaRows(
+      this.latestLexicalHeapDelta,
+      runtimeLexicalIndexBytes,
+    );
     const hybridRuntimeEstimate = this.hybridEngine.getRuntimeMemoryEstimate();
     const currentFileCacheBytes =
       this.fileSnapshotStore.estimateCurrentCacheBytes();
@@ -2930,7 +2943,10 @@ export class DataManager {
         persistedRows,
         runtimeRows,
         persistedUnlistedBytes,
-        lexicalRuntimeBreakdown.noticeLines,
+        [
+          ...lexicalRuntimeBreakdown.noticeLines,
+          ...lexicalHeapDeltaNoticeLines,
+        ],
       )}\n${localOnlyHint}`,
       15000,
     );
@@ -2954,13 +2970,22 @@ export class DataManager {
     if (lexicalRuntimeBreakdown.summaryLine) {
       console.log(`[clever-search] ${lexicalRuntimeBreakdown.summaryLine}`);
     }
+    lexicalHeapDeltaNoticeLines.forEach((line) => {
+      console.log(`[clever-search] ${line}`);
+    });
     console.log("[clever-search] Persisted storage");
     console.table(persistedRows);
     console.log("[clever-search] Runtime memory estimate");
     console.table(runtimeRows);
     if (lexicalRuntimeBreakdown.rows.length > 0) {
-      console.log("[clever-search] Lexical runtime breakdown");
+      console.log(
+        "[clever-search] Lexical runtime breakdown (exclusive segments)",
+      );
       console.table(lexicalRuntimeBreakdown.rows);
+    }
+    if (lexicalHeapDeltaRows.length > 0) {
+      console.log("[clever-search] Lexical heap delta");
+      console.table(lexicalHeapDeltaRows);
     }
     console.log(`[clever-search] ${localOnlyHint}`);
     if (storageUsage.hybridChunkBreakdown) {
@@ -3171,28 +3196,34 @@ export class DataManager {
       segments.push({ segment, bytes: numericBytes });
     };
 
+    const documents = this.asRecord(estimatedBytes.documents);
+    const documentIdentity = this.asRecord(estimatedBytes.documentIdentity);
+    const pathToId = this.asRecord(documentIdentity?.pathToId);
+    const idToPath = this.asRecord(documentIdentity?.idToPath);
+    const docStoreById = this.asRecord(documentIdentity?.docStoreById);
+    const bodyTokenLexicon = this.asRecord(documentIdentity?.bodyTokenLexicon);
+    const bodyTokensById = this.asRecord(documentIdentity?.bodyTokensById);
+    const bodyHanSegmentsById = this.asRecord(
+      documentIdentity?.bodyHanSegmentsById,
+    );
+    const tagValuesById = this.asRecord(documentIdentity?.tagValuesById);
+    const counter = this.asRecord(documentIdentity?.counter);
+    const documentIdentityCoreBytes =
+      (this.readNumber(pathToId?.total) ?? 0) +
+      (this.readNumber(idToPath?.total) ?? 0) +
+      (this.readNumber(docStoreById?.total) ?? 0) +
+      (this.readNumber(counter?.numberBytes) ?? 0);
+
     pushSegment("stringPool", this.asRecord(estimatedBytes.stringPool)?.bytes);
-    pushSegment("documents", this.asRecord(estimatedBytes.documents)?.total);
+    pushSegment("documents.store", documents?.total);
+    pushSegment("documentIdentity.core", documentIdentityCoreBytes);
     pushSegment(
-      "documentIdentity",
-      this.asRecord(estimatedBytes.documentIdentity)?.total,
+      "documentIdentity.bodyTokenLexicon",
+      bodyTokenLexicon?.total,
     );
-    pushSegment(
-      "doc.bodyTokens",
-      this.asRecord(this.asRecord(estimatedBytes.documentIdentity)?.bodyTokensById)
-        ?.total,
-    );
-    pushSegment(
-      "doc.bodyHanSegments",
-      this.asRecord(
-        this.asRecord(estimatedBytes.documentIdentity)?.bodyHanSegmentsById,
-      )?.total,
-    );
-    pushSegment(
-      "doc.tagValues",
-      this.asRecord(this.asRecord(estimatedBytes.documentIdentity)?.tagValuesById)
-        ?.total,
-    );
+    pushSegment("doc.bodyTokens", bodyTokensById?.total);
+    pushSegment("doc.bodyHanSegments", bodyHanSegmentsById?.total);
+    pushSegment("doc.tagValues", tagValuesById?.total);
     pushSegment("lexicon", this.asRecord(estimatedBytes.lexicon)?.total);
 
     const postings = this.asRecord(estimatedBytes.postings);
@@ -3202,10 +3233,15 @@ export class DataManager {
       }
     }
 
-    const topSegments = segments
-      .sort((left, right) => right.bytes - left.bytes)
-      .slice(0, 8);
-    const rows = topSegments.map((segment) => ({
+    let accountedBytes = segments.reduce((sum, segment) => sum + segment.bytes, 0);
+    const unattributedBytes = Math.max(0, totalBytes - accountedBytes);
+    if (unattributedBytes > 0) {
+      pushSegment("other", unattributedBytes);
+      accountedBytes += unattributedBytes;
+    }
+
+    const sortedSegments = segments.sort((left, right) => right.bytes - left.bytes);
+    const rows = sortedSegments.slice(0, 10).map((segment) => ({
       segment: segment.segment,
       bytes: segment.bytes,
       size: this.formatBytes(segment.bytes),
@@ -3213,7 +3249,7 @@ export class DataManager {
       shareOfVault: this.formatPercent(segment.bytes, indexableBytes),
     }));
 
-    if (topSegments.length === 0 || totalBytes <= 0) {
+    if (rows.length === 0 || totalBytes <= 0) {
       return {
         noticeLines: [],
         summaryLine: null,
@@ -3221,17 +3257,117 @@ export class DataManager {
       };
     }
 
-    const headline = `Coverage live index: ${this.formatBytes(totalBytes)} (${this.formatPercent(totalBytes, indexableBytes)} of vault)`;
-    const topLine = `Coverage top segments: ${topSegments
+    const headline = `Coverage live index (exclusive): ${this.formatBytes(totalBytes)} (${this.formatPercent(totalBytes, indexableBytes)} of vault)`;
+    const topLine = `Coverage top segments: ${sortedSegments
       .slice(0, 3)
       .map((segment) => `${segment.segment} ${this.formatBytes(segment.bytes)}`)
       .join(" | ")}`;
+    const accountingLine = `Coverage accounted segments: ${this.formatBytes(accountedBytes)} / ${this.formatBytes(totalBytes)}`;
 
     return {
-      noticeLines: [headline, topLine],
-      summaryLine: `${headline}; ${topLine}`,
+      noticeLines: [headline, topLine, accountingLine],
+      summaryLine: `${headline}; ${topLine}; ${accountingLine}`,
       rows,
     };
+  }
+
+  private sampleJsHeapUsage(): JsHeapUsageSample | null {
+    const memory = (
+      performance as typeof performance & {
+        memory?: {
+          usedJSHeapSize?: number;
+          totalJSHeapSize?: number;
+          jsHeapSizeLimit?: number;
+        };
+      }
+    ).memory;
+    if (!memory) {
+      return null;
+    }
+    const usedBytes = this.readNumber(memory.usedJSHeapSize);
+    const totalBytes = this.readNumber(memory.totalJSHeapSize);
+    const limitBytes = this.readNumber(memory.jsHeapSizeLimit);
+    if (usedBytes === null || totalBytes === null || limitBytes === null) {
+      return null;
+    }
+    return {
+      usedBytes,
+      totalBytes,
+      limitBytes,
+    };
+  }
+
+  private summarizeLexicalHeapDelta(
+    before: JsHeapUsageSample | null,
+    after: JsHeapUsageSample | null,
+  ): LexicalHeapDeltaSummary | null {
+    if (!before || !after) {
+      return null;
+    }
+    return {
+      beforeUsedBytes: before.usedBytes,
+      afterUsedBytes: after.usedBytes,
+      deltaBytes: after.usedBytes - before.usedBytes,
+      totalBytes: after.totalBytes,
+      limitBytes: after.limitBytes,
+    };
+  }
+
+  private buildLexicalHeapDeltaNoticeLines(
+    summary: LexicalHeapDeltaSummary | null,
+    runtimeLexicalIndexBytes: number,
+  ): string[] {
+    if (!summary) {
+      return [];
+    }
+    const deltaRelation =
+      summary.deltaBytes > 0 && runtimeLexicalIndexBytes > 0
+        ? ` (${this.formatPercent(summary.deltaBytes, runtimeLexicalIndexBytes)} of lexical runtime estimate)`
+        : "";
+    return [
+      `Lexical heap delta (latest refresh): ${this.formatSignedBytes(summary.deltaBytes)}${deltaRelation}`,
+      `JS heap used: ${this.formatBytes(summary.beforeUsedBytes)} -> ${this.formatBytes(summary.afterUsedBytes)} / ${this.formatBytes(summary.totalBytes)} (limit ${this.formatBytes(summary.limitBytes)})`,
+    ];
+  }
+
+  private buildLexicalHeapDeltaRows(
+    summary: LexicalHeapDeltaSummary | null,
+    runtimeLexicalIndexBytes: number,
+  ): Array<Record<string, string | number>> {
+    if (!summary) {
+      return [];
+    }
+    return [
+      {
+        metric: "heapUsedBeforeRefresh",
+        bytes: summary.beforeUsedBytes,
+        size: this.formatBytes(summary.beforeUsedBytes),
+      },
+      {
+        metric: "heapUsedAfterRefresh",
+        bytes: summary.afterUsedBytes,
+        size: this.formatBytes(summary.afterUsedBytes),
+      },
+      {
+        metric: "heapDeltaAfterRefresh",
+        bytes: summary.deltaBytes,
+        size: this.formatSignedBytes(summary.deltaBytes),
+        ratioVsLexicalEstimate:
+          summary.deltaBytes > 0 && runtimeLexicalIndexBytes > 0
+            ? this.formatPercent(summary.deltaBytes, runtimeLexicalIndexBytes)
+            : "n/a",
+      },
+      {
+        metric: "heapCapacityNow",
+        bytes: summary.totalBytes,
+        size: this.formatBytes(summary.totalBytes),
+      },
+      {
+        metric: "heapLimit",
+        bytes: summary.limitBytes,
+        size: this.formatBytes(summary.limitBytes),
+      },
+    ];
   }
 
   private formatDevStorageSummaryLine(rows: DevStorageSummaryRow[]): string {
@@ -3253,6 +3389,16 @@ export class DataManager {
       return "n/a";
     }
     return `${((part / whole) * 100).toFixed(1)}%`;
+  }
+
+  private formatSignedBytes(bytes: number): string {
+    if (bytes > 0) {
+      return `+${this.formatBytes(bytes)}`;
+    }
+    if (bytes < 0) {
+      return `-${this.formatBytes(Math.abs(bytes))}`;
+    }
+    return this.formatBytes(0);
   }
 
   private formatBytes(bytes: number): string {
