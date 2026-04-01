@@ -485,4 +485,97 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		expect(result.renderPayloads[0].html.startsWith("&hellip;")).toBe(false);
 		expect(result.renderPayloads[0].html.endsWith("&hellip;")).toBe(false);
 	});
+	test("expands direct subitem snippets across nearby lines within the char budget", () => {
+		const snapshotText = [
+			"context line above",
+			"alpha mention lives here",
+			"beta mention lives here",
+			"context line below",
+			"second line below",
+			"third line below should stay out",
+		].join("\n");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText,
+			options: {
+				mergeGap: 8,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+				maxChars: 120,
+			},
+		});
+
+		expect(result.renderPayloads.length).toBeGreaterThanOrEqual(1);
+		const payload = result.renderPayloads.find(
+			(candidate) =>
+				candidate.text.includes("alpha mention lives here") &&
+				candidate.text.includes("beta mention lives here"),
+		);
+		expect(payload).toBeDefined();
+		expect(payload?.text).toContain("context line above");
+		expect(payload?.text).toContain("context line below");
+		expect(payload?.text).not.toContain("third line below should stay out");
+		expect(payload?.displayStart ?? 0).toBeLessThan(payload?.coreStart ?? Number.MAX_SAFE_INTEGER);
+		expect(payload?.displayEnd ?? 0).toBeGreaterThan(payload?.coreEnd ?? 0);
+	});
+
+	test("trims leading and trailing blank lines after display expansion", () => {
+		const snapshotText = [
+			"",
+			"",
+			"alpha focus",
+			"beta focus",
+			"",
+			"",
+		].join("\n");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText,
+			options: {
+				mergeGap: 4,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+				maxChars: 80,
+			},
+		});
+
+		expect(result.renderPayloads.length).toBeGreaterThanOrEqual(1);
+		expect(
+			result.renderPayloads.some(
+				(payload) =>
+					!payload.text.startsWith("\n") && !payload.text.endsWith("\n"),
+			),
+		).toBe(true);
+	});
+
+	test("keeps separate candidates even when expanded display windows overlap", () => {
+		const snapshotText = [
+			"shared context top",
+			"shared context upper",
+			"alpha first hit",
+			"shared middle context that both snippets can include",
+			"alpha second hit",
+			"shared context lower",
+			"shared context bottom",
+		].join("\n");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha",
+			snapshotText,
+			options: {
+				mergeGap: 0,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+				maxChars: 200,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(2);
+		expect(result.renderPayloads).toHaveLength(2);
+		expect(result.renderPayloads[0].displayEnd).toBeGreaterThan(
+			result.renderPayloads[1].displayStart,
+		);
+	});
 });

@@ -56,8 +56,10 @@ export type DirectSubitemsRenderPayload = {
 	snippetText: string;
 	row: number;
 	col: number;
-	start: number;
-	end: number;
+	coreStart: number;
+	coreEnd: number;
+	displayStart: number;
+	displayEnd: number;
 	anchorOffset: number;
 	highlightRanges: Array<{ start: number; end: number }>;
 };

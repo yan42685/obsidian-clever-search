@@ -67,6 +67,7 @@ export function buildDirectSubitemsExactCandidates(params: {
 			...deduped,
 			...supplemental,
 		]),
+		params.options,
 	);
 	return {
 		queryTerms,
@@ -112,6 +113,7 @@ export function buildDirectSubitemsExactFileSubItems(params: {
 function finalizeSpans(
 	snapshotText: string,
 	candidateSpans: DirectSubitemsCandidateSpan[],
+	options?: DirectSubitemsSpanOptions,
 ): {
 	candidateSpans: DirectSubitemsCandidateSpan[];
 	renderPayloads: DirectSubitemsRenderPayload[];
@@ -119,11 +121,9 @@ function finalizeSpans(
 	const renderPayloads = renderDirectSubitemsCandidateSpans({
 		snapshotText,
 		spans: candidateSpans,
+		maxChars: options?.maxChars,
 	});
-	const selectedIndices = selectDisplayCandidateIndices(
-		candidateSpans,
-		renderPayloads,
-	);
+	const selectedIndices = selectDisplayCandidateIndices(candidateSpans);
 	return {
 		candidateSpans: selectedIndices.map((index) => candidateSpans[index]),
 		renderPayloads: selectedIndices.map((index) => renderPayloads[index]),
@@ -134,15 +134,14 @@ const DISPLAY_OVERLAP_RATIO = 0.65;
 
 function selectDisplayCandidateIndices(
 	candidateSpans: readonly DirectSubitemsCandidateSpan[],
-	renderPayloads: readonly DirectSubitemsRenderPayload[],
 ): number[] {
 	const selectedIndices: number[] = [];
 	for (let index = 0; index < candidateSpans.length; index++) {
 		const overlappingIndices = selectedIndices.filter(
 			(selectedIndex) =>
 				computeRangeOverlapRatio(
-					renderPayloads[selectedIndex],
-					renderPayloads[index],
+					candidateSpans[selectedIndex],
+					candidateSpans[index],
 				) >= DISPLAY_OVERLAP_RATIO,
 		);
 		if (overlappingIndices.length === 0) {
@@ -186,8 +185,8 @@ function buildOccurrenceKey(occurrence: DirectSubitemsOccurrence): string {
 }
 
 function computeRangeOverlapRatio(
-	left: Pick<DirectSubitemsRenderPayload, "start" | "end">,
-	right: Pick<DirectSubitemsRenderPayload, "start" | "end">,
+	left: Pick<DirectSubitemsCandidateSpan, "start" | "end">,
+	right: Pick<DirectSubitemsCandidateSpan, "start" | "end">,
 ): number {
 	const overlapStart = Math.max(left.start, right.start);
 	const overlapEnd = Math.min(left.end, right.end);
