@@ -106,7 +106,7 @@ describe("SearchService bootstrap gate", () => {
 		hybridUnavailable?: boolean;
 		lexicalMatches?: any[];
 		hybridItems?: any[];
-		lexicalBackend?: "minisearch" | "custom-bm25" | "passage-bm25" | "coverage-lexical";
+		lexicalBackend?: "minisearch" | "coverage-lexical";
 	}) {
 		const { App } = require("obsidian");
 		const { OuterSetting } = require("src/globals/plugin-setting");

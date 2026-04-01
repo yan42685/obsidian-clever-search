@@ -1,4 +1,4 @@
-# Lexical Optimizer Reusable Template
+﻿# Lexical Optimizer Reusable Template
 
 Use this template when you want to port the current automation loop to another lexical backend or repository.
 
@@ -9,12 +9,12 @@ Use this template when you want to port the current automation loop to another l
 - keep segmentation and ranker weights in one small file
 - let automation patch that file directly
 - avoid patching the full engine when only tuning is needed
-- if the goal is a replacement backend, keep its ranking logic code-wise independent from the legacy engine rather than evolving the old engine in place
+- if the goal is a replacement backend, keep its ranking logic code-wise independent from removed legacy engines instead of recreating them
 
 2. Provide one explicit implementation target file for mechanism work.
 
 - for this repository, that file is `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
-- keep new backend mechanism work there rather than inside the legacy engine
+- keep new backend mechanism work there rather than inside removed legacy engines
 - use the tuning surface only for smaller orchestration and numeric tuning
 
 3. Provide one benchmark entrypoint.
@@ -29,7 +29,7 @@ Use this template when you want to port the current automation loop to another l
 
 ## Default Files
 
-- tuning surface: `src/services/search/passage-lexical/passage-lexical-ranker.ts`
+- tuning surface: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - implementation target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - candidate manifest: `.codex-bench/lexical-optimizer/candidates.json`
 - example manifest: `scripts/lexical-optimizer/candidate-manifest.example.json`

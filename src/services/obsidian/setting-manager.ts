@@ -13,6 +13,7 @@ import {
 	type FileSearchBackend,
 	type LogLevelOptions,
 	type SearchHistoryMaxItems,
+	normalizeFileSearchBackend,
 } from "src/globals/plugin-setting";
 import { EventEnum } from "src/globals/enums";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
@@ -133,6 +134,9 @@ export class SettingManager {
 		this.setting = MyLib.mergeDeep(
 			DEFAULT_OUTER_SETTING,
 			await this.plugin.loadData(),
+		);
+		this.setting.fileSearchBackend = normalizeFileSearchBackend(
+			(this.setting as { fileSearchBackend?: unknown }).fileSearchBackend,
 		);
 		delete (this.setting.hybrid as Record<string, unknown>).searchStrategy;
 		delete (this.setting.hybrid as Record<string, unknown>).enableHighPerformanceMode;
@@ -286,8 +290,6 @@ class GeneralTab extends PluginSettingTab {
 					.addOptions({
 						"coverage-lexical": t("fileSearchBackend.coverageLexical"),
 						minisearch: t("fileSearchBackend.minisearch"),
-						"custom-bm25": t("fileSearchBackend.customBm25"),
-						"passage-bm25": t("fileSearchBackend.passageBm25"),
 					})
 					.setValue(this.setting.fileSearchBackend)
 					.onChange((value) => {
@@ -412,7 +414,7 @@ class GeneralTab extends PluginSettingTab {
 			collapseDevSettingByDefault ? ICON_COLLAPSE : ICON_EXPAND,
 		);
 
-		// 点击标题时切换设置组的显示状态，并更新伪元素的图标
+		// Toggle the development section and update the collapse icon.
 		devSettingTitle.onclick = () => {
 			const isCollapsed = devSettingContent.style.display === "none";
 			devSettingContent.style.display = isCollapsed ? "block" : "none";
@@ -444,7 +446,7 @@ class GeneralTab extends PluginSettingTab {
 						error: "error",
 						none: "none",
 					} as LogLevelOptions)
-					// 不能用大写的字符串作为key...
+					// Use lowercase values because the stored log level is normalized.
 					.setValue(this.setting.logLevel.toLowerCase())
 					.onChange(async (value) => {
 						const level = value as LogLevel;
@@ -518,6 +520,82 @@ class SearchHistoryModal extends Modal {
 					.setValue(this.setting.searchHistory.enableGhostCompletion)
 					.onChange(async (value) => {
 						this.setting.searchHistory.enableGhostCompletion = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Autocomplete candidate sources"))
+			.setDesc(t("Autocomplete candidate sources desc"));
+
+		new Setting(contentEl)
+			.setName(t("Search history source history"))
+			.setDesc(t("Search history source history desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.sources.history)
+					.onChange(async (value) => {
+						this.setting.searchHistory.sources.history = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history source file"))
+			.setDesc(t("Search history source file desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.sources.file)
+					.onChange(async (value) => {
+						this.setting.searchHistory.sources.file = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history source alias"))
+			.setDesc(t("Search history source alias desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.sources.alias)
+					.onChange(async (value) => {
+						this.setting.searchHistory.sources.alias = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history source heading"))
+			.setDesc(t("Search history source heading desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.sources.heading)
+					.onChange(async (value) => {
+						this.setting.searchHistory.sources.heading = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history source path"))
+			.setDesc(t("Search history source path desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.sources.path)
+					.onChange(async (value) => {
+						this.setting.searchHistory.sources.path = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Search history source recent"))
+			.setDesc(t("Search history source recent desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.searchHistory.sources.recentFile)
+					.onChange(async (value) => {
+						this.setting.searchHistory.sources.recentFile = value;
 						await this.settingManager.saveSettings();
 					}),
 			);
@@ -609,9 +687,9 @@ class HybridSearchModal extends Modal {
 		}, HYBRID_RUNTIME_STATUS_REFRESH_MS);
 		const contentEl = this.contentEl;
 
-		// ── Introduction ──────────────────────────────────────────────────────
+		// Introduction
 
-		// ── Enable ────────────────────────────────────────────────────────────
+		// 闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴?Enable 闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹?
 		new Setting(contentEl)
 			.setName(t("hybridModal.enableHybridSearch"))
 			.addToggle((toggle) =>
@@ -624,7 +702,7 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		// ── API Domain ────────────────────────────────────────────────────────
+		// API Domain
 		new Setting(contentEl)
 			.setName(t("hybridModal.autoShowMixedSearchResults"))
 			.setDesc(t("hybridModal.autoShowMixedSearchResults.desc"))
@@ -672,7 +750,7 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		// ── API Key ───────────────────────────────────────────────────────────
+		// API Key
 		new Setting(contentEl)
 			.setName(t("hybridModal.apiKey"))
 			.addText((text) => {
@@ -687,7 +765,7 @@ class HybridSearchModal extends Modal {
 					});
 			});
 
-		// ── Weekly token limit ────────────────────────────────────────────────
+		// 闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴?Weekly token limit 闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸闂備礁鍟块崢婊堝磻閹剧粯鐓冮柛蹇擃槸娴滈箖姊洪崘鎻掑辅闁稿鎹囬弻宥夊礂婢跺﹣澹曢梻浣稿暱閸樻粓宕戦幘缁樼厓闁稿繐顦禍楣冩⒑閸愭彃甯ㄩ柛瀣崌閺屽秹宕楁径濠佸
 		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
 		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
@@ -724,7 +802,7 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		// ── Excluded paths ────────────────────────────────────────────────────
+		// Excluded paths
 		new Setting(contentEl)
 			.setName(t("hybridModal.minIncrementalEmbedInterval"))
 			.setDesc(t("hybridModal.minIncrementalEmbedInterval.desc"))
@@ -827,7 +905,7 @@ class HybridSearchModal extends Modal {
 			(v) => { this.addPath(v); },
 		);
 
-		// ── Token usage stats ─────────────────────────────────────────────────
+		// Token usage stats
 		contentEl.createEl("h3", { text: t("hybridModal.tokenStats") });
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
@@ -863,7 +941,7 @@ class HybridSearchModal extends Modal {
 			row.style.cssText = "display:flex;justify-content:space-between;margin:0.5em 0;overflow:auto;";
 			const span = row.createSpan({ text: path });
 			span.style.cssText = "width:90%;overflow:auto;";
-			const del = row.createSpan({ text: "✕" });
+			const del = row.createSpan({ text: "x" });
 			del.style.cursor = "pointer";
 			del.onClickEvent(() => {
 				paths.splice(index, 1);
@@ -1316,7 +1394,7 @@ class ExcludePathModal extends Modal {
 			pathText.style.overflow = "auto";
 
 			const span = pathDiv.createSpan();
-			span.setText("✕");
+			span.setText("x");
 			span.style.cursor = "pointer";
 			span.onClickEvent(() => {
 				this.excludedPaths.splice(index, 1);

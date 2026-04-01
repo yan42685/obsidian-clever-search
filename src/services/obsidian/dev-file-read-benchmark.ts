@@ -630,7 +630,7 @@ export class DevFileReadBenchmark {
 			"notes",
 			[
 				"Full lexical rebuild / addDocuments reads source files via DataProvider -> FileSnapshotStore -> vault.cachedRead.",
-				"After indexing, passage-bm25 search usually slices passage text from in-memory current snapshots instead of re-reading vault files.",
+				"After indexing, lexical search usually reads indexed structures and shared snapshots instead of re-reading vault files for every query.",
 				"Runtime incremental updates normally read only changed files; search-time file IO is usually not the main bottleneck.",
 			],
 		);

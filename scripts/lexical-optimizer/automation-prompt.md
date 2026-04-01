@@ -1,4 +1,4 @@
-# Lexical Optimizer Automation Entry
+﻿# Lexical Optimizer Automation Entry
 
 Read these files before every cycle, in this order:
 
@@ -10,9 +10,8 @@ If this file conflicts with either of them, those files win.
 ## Targets
 
 - mechanism target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
-- legacy opt-in tuning surface: `src/services/search/passage-lexical/passage-lexical-ranker.ts`
-- do not optimize by modifying legacy `src/services/search/passage-lexical/passage-file-search-engine.ts`
-- do not copy old scorer / verifier / comparator logic into the new backend and relabel it as new
+- parameter target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
+- do not reintroduce removed legacy backends as hidden dependencies or comparison baselines
 
 ## Controller Contract
 
@@ -29,7 +28,7 @@ If this file conflicts with either of them, those files win.
 ## Workflow
 
 1. Form one primary hypothesis from the detailed rule files.
-2. Default to a mechanism-level cycle against `coverage-lexical`; use parameter mode only as explicit legacy maintenance.
+2. Default to a mechanism-level cycle against `coverage-lexical`; use parameter mode only for small numeric tuning on the same engine.
 3. Keep one main hypothesis per cycle and one lane per cycle.
 4. Generate candidates instead of relying on a fixed built-in grid.
 5. Evaluate candidates serially in the current workspace.
@@ -52,8 +51,8 @@ If this file conflicts with either of them, those files win.
 - help: `node scripts/lexical-optimizer/run.mjs --help`
 - compare current workspace against baseline: `node scripts/lexical-optimizer/run.mjs --mode=mechanism --lane=mechanism-a --baseline-ref=HEAD`
 - generate one lane: `node scripts/lexical-optimizer/candidate-generator.mjs --lane=mechanism-a`
-- dry-run one legacy parameter lane: `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
-- evaluate one legacy parameter lane without committing: `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --no-auto-commit`
-- evaluate one legacy parameter lane and auto-commit the retained winner: `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
+- dry-run one parameter lane: `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --dry-run`
+- evaluate one parameter lane without committing: `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a --no-auto-commit`
+- evaluate one parameter lane and auto-commit the retained winner: `node scripts/lexical-optimizer/run.mjs --mode=parameter --lane=mechanism-a`
 - orchestrate multiple lanes: `node scripts/lexical-optimizer/orchestrate.mjs --lanes=mechanism-a,mechanism-b,mechanism-c`
 - keep temporary scratch resources only when debugging: add `--no-cleanup`

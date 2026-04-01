@@ -13,8 +13,6 @@
 		"typecheck:build": "tsc -p tsconfig.build.json -noEmit -skipLibCheck",
 		"typecheck:test": "tsc -p tsconfig.test.json -noEmit -skipLibCheck",
 		"build": "npm run typecheck:build && node esbuild.config.mjs production",
-		"benchmark:file-search": "node scripts/file-search-benchmark.mjs",
-		"benchmark:file-search:regression": "node scripts/file-search-benchmark.mjs --mode=regression",
 		"benchmark:hybrid": "node scripts/hybrid-search-benchmark.mjs",
 		"benchmark:runtime-rebuild": "node node_modules/jest/bin/jest.js --config jest.runtime-rebuild.config.js --runInBand",
 		"benchmark:hybrid:real-ab": "node scripts/hybrid-real-ab-benchmark.mjs --dry-run",

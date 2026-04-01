@@ -23,17 +23,19 @@ export class OuterSetting {
 
 const isChineseUser = window.localStorage.getItem("language") === "zh";
 
+export const DEFAULT_FILE_SEARCH_BACKEND = "coverage-lexical" as const;
+
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	customExtensions: { plaintext: ["md"] },
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
-	fileSearchBackend: "coverage-lexical",
+	fileSearchBackend: DEFAULT_FILE_SEARCH_BACKEND,
 	isCaseSensitive: false,
 	isPrefixMatch: true,
 	isFuzzy: true,
 	enableStopWordsEn: true,
-	// TODO: 繁体中文
+	// TODO: traditional Chinese
 	enableChinesePatch: isChineseUser ? true : false,
 	enableStopWordsZh: isChineseUser ? true : false,
 	hybrid: {
@@ -55,6 +57,14 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		maxItems: 5000,
 		showSuggestions: true,
 		enableGhostCompletion: true,
+		sources: {
+			history: true,
+			file: true,
+			alias: true,
+			heading: true,
+			path: true,
+			recentFile: true,
+		},
 		entries: [],
 	},
 	ui: {
@@ -75,10 +85,17 @@ export type LogLevelOptions = {
 
 export type FileSearchBackend =
 	| "minisearch"
-	| "custom-bm25"
-	| "passage-bm25"
 	| "coverage-lexical";
 
+export function isFileSearchBackend(value: unknown): value is FileSearchBackend {
+	return value === "minisearch" || value === "coverage-lexical";
+}
+
+export function normalizeFileSearchBackend(
+	value: unknown,
+): FileSearchBackend {
+	return isFileSearchBackend(value) ? value : DEFAULT_FILE_SEARCH_BACKEND;
+}
 export type HybridSetting = {
 	enabled: boolean;
 	highPerformanceMaxMb: number;
@@ -105,12 +122,21 @@ export type SearchHistoryEntry = {
 };
 
 export type SearchHistoryMaxItems = 20 | 50 | 100 | 1000 | 3000 | 5000 | 10000;
+export type SearchAutocompleteSourceSettings = {
+	history: boolean;
+	file: boolean;
+	alias: boolean;
+	heading: boolean;
+	path: boolean;
+	recentFile: boolean;
+};
 
 export type SearchHistorySetting = {
 	enabled: boolean;
 	maxItems: SearchHistoryMaxItems;
 	showSuggestions: boolean;
 	enableGhostCompletion: boolean;
+	sources: SearchAutocompleteSourceSettings;
 	entries: SearchHistoryEntry[];
 };
 

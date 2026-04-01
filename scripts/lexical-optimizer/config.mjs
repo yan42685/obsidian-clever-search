@@ -1,4 +1,4 @@
-import path from "path";
+﻿import path from "path";
 
 export const OBJECTIVE_WEIGHTS = {
 	hits1: 0.55,
@@ -51,10 +51,9 @@ export const DEFAULT_BENCHMARK_ARGS = [
 	"--runInBand",
 ];
 
-// Legacy parameter tuning remains opt-in only.
 export const DEFAULT_PARAMETER_TARGET_FILE = path.resolve(
 	process.cwd(),
-	"src/services/search/passage-lexical/passage-lexical-ranker.ts",
+	"src/services/search/coverage-lexical/coverage-lexical-engine.ts",
 );
 
 export const DEFAULT_IMPLEMENTATION_TARGET_FILE = path.resolve(
