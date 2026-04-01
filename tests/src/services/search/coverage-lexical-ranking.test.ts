@@ -1312,9 +1312,9 @@ describe("coverage lexical ranking", () => {
 			"pkm-zh/\u9636\u6bb5\u4e09/\u7f13\u5b58\u6062\u590d.md",
 		)?.docId;
 		expect(typeof docId).toBe("number");
-		expect(Array.isArray(internalEngine.bodyCharPostings.get("\u7f13\u5b58"))).toBe(
-			true,
-		);
+		expect(
+			internalEngine.bodyCharPostings.get("缓存") instanceof Uint32Array,
+		).toBe(true);
 		expect(
 			Array.isArray(
 				internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),

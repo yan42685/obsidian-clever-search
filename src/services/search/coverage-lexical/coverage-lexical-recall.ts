@@ -24,7 +24,10 @@ import type {
 	CoverageLexicalRecallLaneDebug,
 } from "./coverage-lexical-types";
 
-type CoverageLexicalPostingList = ReadonlySet<string> | readonly number[];
+type CoverageLexicalPostingList =
+	| ReadonlySet<string>
+	| readonly number[]
+	| Uint32Array;
 type CoverageLexicalPostingMap = ReadonlyMap<string, CoverageLexicalPostingList>;
 type CoverageLexicalCandidateKey = number;
 
@@ -2263,7 +2266,9 @@ function hasContiguousPhraseWitness(
 }
 
 function getPostingCandidateCount(postings: CoverageLexicalPostingList): number {
-	return Array.isArray(postings) ? postings.length : postings.size;
+	return Array.isArray(postings) || postings instanceof Uint32Array
+		? postings.length
+		: (postings as ReadonlySet<string>).size;
 }
 
 function getOrCreatePrefixExpansionTerms(
@@ -2588,7 +2593,7 @@ function forEachPostingCandidateKey(
 	postings: CoverageLexicalPostingList,
 	visitor: (key: CoverageLexicalCandidateKey) => void,
 ): void {
-	if (Array.isArray(postings)) {
+	if (Array.isArray(postings) || postings instanceof Uint32Array) {
 		for (const docId of postings) {
 			if (index.documentPathById[docId]) {
 				visitor(docId);

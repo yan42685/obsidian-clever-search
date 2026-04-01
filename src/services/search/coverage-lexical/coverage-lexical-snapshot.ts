@@ -1,18 +1,3 @@
-import { extractHanSegments } from "./coverage-lexical-cjk";
-
-type CoverageLexicalSnapshotDocumentStateV1 = {
-	docId: number;
-	path: string;
-	bodyText: string;
-	basenameText: string;
-	folderText: string;
-	aliasesText: string;
-	tagsText: string;
-	headingsText: string;
-	bodyTokenSequence: readonly string[];
-	tagValues: readonly string[];
-};
-
 type CoverageLexicalSnapshotDocumentState = {
 	docId: number;
 	path: string;
@@ -21,7 +6,7 @@ type CoverageLexicalSnapshotDocumentState = {
 	aliasesText: string;
 	tagsText: string;
 	headingsText: string;
-	bodyTokenSequence: readonly string[];
+	bodyTokenIds: readonly number[];
 	bodyHanSegments: readonly string[];
 	tagValues: readonly string[];
 };
@@ -29,9 +14,10 @@ type CoverageLexicalSnapshotDocumentState = {
 export type CoverageLexicalSnapshotState = {
 	nextDocumentId: number;
 	sortedLexicon: readonly string[];
+	bodyTokenLexicon: readonly string[];
 	documents: readonly CoverageLexicalSnapshotDocumentState[];
 	bodyPostings: ReadonlyMap<string, readonly number[]>;
-	bodyCharPostings: ReadonlyMap<string, readonly number[]>;
+	bodyCharPostings: ReadonlyMap<string, Uint32Array>;
 	bodyHanSegmentPostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasCharPostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasHanSegmentPostings: ReadonlyMap<string, readonly number[]>;
@@ -57,20 +43,11 @@ export type CoverageLexicalSnapshotState = {
 };
 
 const SNAPSHOT_MAGIC = [0x43, 0x4c, 0x58, 0x53] as const;
-const SNAPSHOT_VERSION = 3;
+const SNAPSHOT_VERSION = 4;
 const HEADER_BYTES = 12;
 const DIRECTORY_ENTRY_BYTES = 16;
 
-const DOCUMENT_STRING_FIELDS_V1 = [
-	"bodyText",
-	"basenameText",
-	"folderText",
-	"aliasesText",
-	"tagsText",
-	"headingsText",
-] as const satisfies readonly (keyof CoverageLexicalSnapshotDocumentStateV1)[];
-
-const DOCUMENT_STRING_FIELDS_V2 = [
+const DOCUMENT_STRING_FIELDS = [
 	"basenameText",
 	"folderText",
 	"aliasesText",
@@ -78,27 +55,20 @@ const DOCUMENT_STRING_FIELDS_V2 = [
 	"headingsText",
 ] as const satisfies readonly (keyof CoverageLexicalSnapshotDocumentState)[];
 
-const DOCUMENT_STRING_LIST_FIELDS_V1 = [
-	"bodyTokenSequence",
-	"tagValues",
-] as const satisfies readonly (keyof CoverageLexicalSnapshotDocumentStateV1)[];
-
-const DOCUMENT_STRING_LIST_FIELDS_V2 = [
-	"bodyTokenSequence",
+const DOCUMENT_STRING_LIST_FIELDS = [
 	"bodyHanSegments",
 	"tagValues",
 ] as const satisfies readonly (keyof CoverageLexicalSnapshotDocumentState)[];
 
-type DocumentStringFieldV1 = (typeof DOCUMENT_STRING_FIELDS_V1)[number];
-type DocumentStringFieldV2 = (typeof DOCUMENT_STRING_FIELDS_V2)[number];
-type DocumentStringListFieldV1 = (typeof DOCUMENT_STRING_LIST_FIELDS_V1)[number];
-type DocumentStringListFieldV2 = (typeof DOCUMENT_STRING_LIST_FIELDS_V2)[number];
+type DocumentStringField = (typeof DOCUMENT_STRING_FIELDS)[number];
+type DocumentStringListField = (typeof DOCUMENT_STRING_LIST_FIELDS)[number];
 
 const enum CoverageLexicalSnapshotSectionKind {
 	Metadata = 1,
 	StringPool = 2,
 	Lexicon = 3,
-	Documents = 4,
+	BodyTokenLexicon = 4,
+	Documents = 5,
 	BodyPostings = 10,
 	BodyCharPostings = 11,
 	BodyHanSegmentPostings = 12,
@@ -139,7 +109,16 @@ export function encodeCoverageLexicalSnapshotV1(
 	const sections: CoverageLexicalSnapshotSection[] = [
 		buildMetadataSection(state),
 		buildStringPoolSection(stringPool),
-		buildLexiconSection(state.sortedLexicon, stringPool),
+		buildLexiconSection(
+			CoverageLexicalSnapshotSectionKind.Lexicon,
+			state.sortedLexicon,
+			stringPool,
+		),
+		buildLexiconSection(
+			CoverageLexicalSnapshotSectionKind.BodyTokenLexicon,
+			state.bodyTokenLexicon,
+			stringPool,
+		),
 		buildDocumentsSection(state.documents, stringPool),
 		buildPostingSection(
 			CoverageLexicalSnapshotSectionKind.BodyPostings,
@@ -300,7 +279,10 @@ export function decodeCoverageLexicalSnapshotV1(
 			count: reader.readUint32(),
 		});
 	}
-	const strings = decodeStringPool(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.StringPool));
+	const strings = decodeStringPool(
+		reader,
+		requireSection(sections, CoverageLexicalSnapshotSectionKind.StringPool),
+	);
 	const nextDocumentId = decodeMetadataSection(
 		reader,
 		requireSection(sections, CoverageLexicalSnapshotSectionKind.Metadata),
@@ -312,14 +294,18 @@ export function decodeCoverageLexicalSnapshotV1(
 			requireSection(sections, CoverageLexicalSnapshotSectionKind.Lexicon),
 			strings,
 		),
+		bodyTokenLexicon: decodeLexiconSection(
+			reader,
+			requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyTokenLexicon),
+			strings,
+		),
 		documents: decodeDocumentsSection(
 			reader,
 			requireSection(sections, CoverageLexicalSnapshotSectionKind.Documents),
 			strings,
-			version,
 		),
 		bodyPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyPostings), strings),
-		bodyCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyCharPostings), strings),
+		bodyCharPostings: decodePackedPostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyCharPostings), strings),
 		bodyHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.BodyHanSegmentPostings), strings),
 		metadataAliasCharPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasCharPostings), strings),
 		metadataAliasHanSegmentPostings: decodePostingSection(reader, requireSection(sections, CoverageLexicalSnapshotSectionKind.MetadataAliasHanSegmentPostings), strings),
@@ -352,12 +338,15 @@ function registerSnapshotStrings(
 	for (const term of state.sortedLexicon) {
 		stringPool.intern(term);
 	}
+	for (const term of state.bodyTokenLexicon) {
+		stringPool.intern(term);
+	}
 	for (const document of state.documents) {
 		stringPool.intern(document.path);
-		for (const field of DOCUMENT_STRING_FIELDS_V2) {
+		for (const field of DOCUMENT_STRING_FIELDS) {
 			stringPool.intern(document[field]);
 		}
-		for (const field of DOCUMENT_STRING_LIST_FIELDS_V2) {
+		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			for (const value of document[field]) {
 				stringPool.intern(value);
 			}
@@ -370,10 +359,9 @@ function registerSnapshotStrings(
 	}
 }
 
-
 function getPostingMaps(
 	state: CoverageLexicalSnapshotState,
-): ReadonlyArray<ReadonlyMap<string, readonly number[]>> {
+): ReadonlyArray<ReadonlyMap<string, readonly number[] | Uint32Array>> {
 	return [
 		state.bodyPostings,
 		state.bodyCharPostings,
@@ -429,16 +417,17 @@ function buildStringPoolSection(
 }
 
 function buildLexiconSection(
-	sortedLexicon: readonly string[],
+	kind: CoverageLexicalSnapshotSectionKind,
+	terms: readonly string[],
 	stringPool: SnapshotStringPoolBuilder,
 ): CoverageLexicalSnapshotSection {
 	const writer = new SnapshotWriter();
-	for (const term of sortedLexicon) {
+	for (const term of terms) {
 		writer.writeVarUint(stringPool.getId(term));
 	}
 	return {
-		kind: CoverageLexicalSnapshotSectionKind.Lexicon,
-		count: sortedLexicon.length,
+		kind,
+		count: terms.length,
 		payload: writer.toUint8Array(),
 	};
 }
@@ -452,10 +441,11 @@ function buildDocumentsSection(
 	for (const document of documents) {
 		writer.writeVarUint(document.docId - previousDocId);
 		writer.writeVarUint(stringPool.getId(document.path));
-		for (const field of DOCUMENT_STRING_FIELDS_V2) {
+		for (const field of DOCUMENT_STRING_FIELDS) {
 			writer.writeVarUint(stringPool.getId(document[field]));
 		}
-		for (const field of DOCUMENT_STRING_LIST_FIELDS_V2) {
+		writeNumericList(writer, document.bodyTokenIds);
+		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			writeStringIdList(writer, document[field], stringPool);
 		}
 		previousDocId = document.docId;
@@ -467,10 +457,9 @@ function buildDocumentsSection(
 	};
 }
 
-
 function buildPostingSection(
 	kind: CoverageLexicalSnapshotSectionKind,
-	postings: ReadonlyMap<string, readonly number[]>,
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
 	stringPool: SnapshotStringPoolBuilder,
 ): CoverageLexicalSnapshotSection {
 	const writer = new SnapshotWriter();
@@ -491,6 +480,16 @@ function buildPostingSection(
 		count: entries.length,
 		payload: writer.toUint8Array(),
 	};
+}
+
+function writeNumericList(
+	writer: SnapshotWriter,
+	values: readonly number[],
+): void {
+	writer.writeVarUint(values.length);
+	for (const value of values) {
+		writer.writeVarUint(value);
+	}
 }
 
 function writeStringIdList(
@@ -541,7 +540,6 @@ function decodeDocumentsSection(
 	reader: SnapshotReader,
 	section: { offset: number; length: number; count: number },
 	strings: readonly string[],
-	version: number,
 ): CoverageLexicalSnapshotDocumentState[] {
 	const sectionReader = reader.slice(section.offset, section.length);
 	const documents: CoverageLexicalSnapshotDocumentState[] = [];
@@ -549,37 +547,13 @@ function decodeDocumentsSection(
 	for (let index = 0; index < section.count; index += 1) {
 		const docId = previousDocId + sectionReader.readVarUint();
 		const path = readStringId(sectionReader, strings);
-		if (version === 1) {
-			const fieldValues = new Map<DocumentStringFieldV1, string>();
-			for (const field of DOCUMENT_STRING_FIELDS_V1) {
-				fieldValues.set(field, readStringId(sectionReader, strings));
-			}
-			const listValues = new Map<DocumentStringListFieldV1, readonly string[]>();
-			for (const field of DOCUMENT_STRING_LIST_FIELDS_V1) {
-				listValues.set(field, readStringIdList(sectionReader, strings));
-			}
-			const bodyText = fieldValues.get("bodyText") ?? "";
-			documents.push({
-				docId,
-				path,
-				basenameText: fieldValues.get("basenameText") ?? "",
-				folderText: fieldValues.get("folderText") ?? "",
-				aliasesText: fieldValues.get("aliasesText") ?? "",
-				tagsText: fieldValues.get("tagsText") ?? "",
-				headingsText: fieldValues.get("headingsText") ?? "",
-				bodyTokenSequence: listValues.get("bodyTokenSequence") ?? [],
-				bodyHanSegments: extractHanSegments(bodyText),
-				tagValues: listValues.get("tagValues") ?? [],
-			});
-			previousDocId = docId;
-			continue;
-		}
-		const fieldValues = new Map<DocumentStringFieldV2, string>();
-		for (const field of DOCUMENT_STRING_FIELDS_V2) {
+		const fieldValues = new Map<DocumentStringField, string>();
+		for (const field of DOCUMENT_STRING_FIELDS) {
 			fieldValues.set(field, readStringId(sectionReader, strings));
 		}
-		const listValues = new Map<DocumentStringListFieldV2, readonly string[]>();
-		for (const field of DOCUMENT_STRING_LIST_FIELDS_V2) {
+		const bodyTokenIds = readNumericList(sectionReader);
+		const listValues = new Map<DocumentStringListField, readonly string[]>();
+		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			listValues.set(field, readStringIdList(sectionReader, strings));
 		}
 		documents.push({
@@ -590,7 +564,7 @@ function decodeDocumentsSection(
 			aliasesText: fieldValues.get("aliasesText") ?? "",
 			tagsText: fieldValues.get("tagsText") ?? "",
 			headingsText: fieldValues.get("headingsText") ?? "",
-			bodyTokenSequence: listValues.get("bodyTokenSequence") ?? [],
+			bodyTokenIds,
 			bodyHanSegments: listValues.get("bodyHanSegments") ?? [],
 			tagValues: listValues.get("tagValues") ?? [],
 		});
@@ -598,7 +572,6 @@ function decodeDocumentsSection(
 	}
 	return documents;
 }
-
 
 function decodePostingSection(
 	reader: SnapshotReader,
@@ -620,6 +593,37 @@ function decodePostingSection(
 		postings.set(term, docIds);
 	}
 	return postings;
+}
+
+function decodePackedPostingSection(
+	reader: SnapshotReader,
+	section: { offset: number; length: number; count: number },
+	strings: readonly string[],
+): Map<string, Uint32Array> {
+	const sectionReader = reader.slice(section.offset, section.length);
+	const postings = new Map<string, Uint32Array>();
+	for (let index = 0; index < section.count; index += 1) {
+		const term = readStringId(sectionReader, strings);
+		const docCount = sectionReader.readVarUint();
+		const docIds = new Uint32Array(docCount);
+		let previousDocId = 0;
+		for (let docIndex = 0; docIndex < docCount; docIndex += 1) {
+			const docId = previousDocId + sectionReader.readVarUint();
+			docIds[docIndex] = docId;
+			previousDocId = docId;
+		}
+		postings.set(term, docIds);
+	}
+	return postings;
+}
+
+function readNumericList(reader: SnapshotReader): number[] {
+	const count = reader.readVarUint();
+	const values: number[] = [];
+	for (let index = 0; index < count; index += 1) {
+		values.push(reader.readVarUint());
+	}
+	return values;
 }
 
 function readStringIdList(
@@ -656,7 +660,6 @@ function requireSection(
 	}
 	return section;
 }
-
 class SnapshotStringPoolBuilder {
 	private readonly ids = new Map<string, number>();
 	readonly values: string[] = [];

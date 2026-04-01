@@ -221,6 +221,7 @@ type CoverageLexicalEngineQueryCache = {
 	fuzzyProportion: number;
 	docCacheById: Map<number, CoverageLexicalEngineQueryDocCacheEntry>;
 	sharedBodyEvidenceTraceById: Map<number, CoverageLexicalBodyEvidenceTrace>;
+	bodyTokensByDocId: Map<number, readonly string[]>;
 };
 
 type CoverageLexicalEngineQueryDocCacheEntry = {
@@ -273,6 +274,7 @@ function createCoverageLexicalEngineQueryCache(
 		fuzzyProportion,
 		docCacheById: new Map(),
 		sharedBodyEvidenceTraceById: new Map(),
+		bodyTokensByDocId: new Map(),
 	};
 }
 
@@ -296,7 +298,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentById: Array<CoverageLexicalDocument | undefined> = [];
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly documentPathById: Array<string | undefined> = [];
-	private documentBodyTokenTape: string[] = [];
+	private readonly documentBodyTokenLexicon: string[] = [];
+	private readonly documentBodyTokenIdByTerm = new Map<string, number>();
+	private documentBodyTokenIdTape = new Uint32Array(0);
 	private readonly documentBodyTokenRangeById: Array<CoverageLexicalTokenRange | undefined> = [];
 	private readonly documentBodyHanSegmentsById: Array<
 		readonly string[] | undefined
@@ -305,7 +309,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private fileSnapshotStore: FileSnapshotStore | null | undefined;
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new Map<string, number[]>();
-	private readonly bodyCharPostings = new Map<string, number[]>();
+	private readonly bodyCharPostings = new Map<string, Uint32Array>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasPostings = new Map<string, number[]>();
@@ -323,7 +327,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly metadataTagPhrasePostings = new Map<string, number[]>();
 	private readonly metadataTagPostings = new Map<string, number[]>();
 	private readonly lexicon = new Set<string>();
-	private sortedLexicon: string[] = [];
+	private sortedLexiconCache: string[] = [];
+	private sortedLexiconDirty = false;
+
+	get sortedLexicon(): readonly string[] {
+		return this.getSortedLexicon();
+	}
+
 	private benchmarkPhaseTiming: CoverageLexicalBenchmarkPhaseTimingState | null =
 		null;
 
@@ -352,6 +362,19 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.clearIndex();
 		await this.addDocuments(data);
 		return true;
+	}
+
+	private markLexiconDirty(): void {
+		this.sortedLexiconDirty = true;
+		this.sortedLexiconCache = [];
+	}
+
+	private getSortedLexicon(): readonly string[] {
+		if (this.sortedLexiconDirty || this.sortedLexiconCache.length === 0) {
+			this.sortedLexiconCache = Array.from(this.lexicon).sort();
+			this.sortedLexiconDirty = false;
+		}
+		return this.sortedLexiconCache;
 	}
 
 	resetBenchmarkPhaseTiming(): void {
@@ -471,7 +494,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentById.length = 0;
 		this.documentIdByPath.clear();
 		this.documentPathById.length = 0;
-		this.documentBodyTokenTape.length = 0;
+		this.documentBodyTokenLexicon.length = 0;
+		this.documentBodyTokenIdByTerm.clear();
+		this.documentBodyTokenIdTape = new Uint32Array(0);
 		this.documentBodyTokenRangeById.length = 0;
 		this.documentBodyHanSegmentsById.length = 0;
 		this.documentTagValuesById.length = 0;
@@ -496,37 +521,128 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.metadataTagPhrasePostings.clear();
 		this.metadataTagPostings.clear();
 		this.lexicon.clear();
-		this.sortedLexicon = [];
+		this.sortedLexiconCache = [];
+		this.sortedLexiconDirty = false;
 	}
 
-	private getDocumentBodyTokens(docId: number): readonly string[] | undefined {
-		return readCoverageLexicalTokenRange(
-			this.documentBodyTokenTape,
+	private getOrCreateDocumentBodyTokenId(token: string): number {
+		const existing = this.documentBodyTokenIdByTerm.get(token);
+		if (existing !== undefined) {
+			return existing;
+		}
+		const tokenId = this.documentBodyTokenLexicon.length;
+		this.documentBodyTokenLexicon.push(token);
+		this.documentBodyTokenIdByTerm.set(token, tokenId);
+		return tokenId;
+	}
+
+	private getDocumentBodyTokenIds(docId: number): Uint32Array | undefined {
+		return readCoverageLexicalNumericTokenRange(
+			this.documentBodyTokenIdTape,
 			this.documentBodyTokenRangeById[docId],
 		);
+	}
+
+	private getDocumentBodyTokens(
+		docId: number,
+		cache?: Map<number, readonly string[]>,
+	): readonly string[] | undefined {
+		const cached = cache?.get(docId);
+		if (cached) {
+			return cached;
+		}
+		const tokenIds = this.getDocumentBodyTokenIds(docId);
+		if (!tokenIds) {
+			return undefined;
+		}
+		const tokens = Array.from(tokenIds, (tokenId) => {
+			const token = this.documentBodyTokenLexicon[tokenId];
+			if (token === undefined) {
+				throw new Error(
+					`Missing coverage lexical body token for id ${tokenId}`,
+				);
+			}
+			return token;
+		});
+		cache?.set(docId, tokens);
+		return tokens;
+	}
+
+	private mapDocumentBodyTokensToIds(tokens: readonly string[]): number[] {
+		return tokens.map((token) => this.getOrCreateDocumentBodyTokenId(token));
 	}
 
 	private setDocumentBodyTokens(
 		docId: number,
 		tokens: readonly string[],
 	): void {
-		this.rebuildDocumentBodyTokenTape(new Map([[docId, [...tokens]]]));
+		this.rebuildDocumentBodyTokenTape(
+			new Map([[docId, this.mapDocumentBodyTokensToIds(tokens)]]),
+		);
 	}
 
 	private clearDocumentBodyTokens(docId: number): void {
 		this.rebuildDocumentBodyTokenTape(new Map([[docId, undefined]]));
 	}
 
+	private compactDocumentBodyTokenLexicon(): void {
+		if (
+			this.documentBodyTokenIdTape.length === 0 ||
+			this.documentBodyTokenLexicon.length === 0
+		) {
+			this.documentBodyTokenLexicon.length = 0;
+			this.documentBodyTokenIdByTerm.clear();
+			this.documentBodyTokenIdTape = new Uint32Array(0);
+			return;
+		}
+		const usedTokenIds = new Set(this.documentBodyTokenIdTape);
+		if (usedTokenIds.size === this.documentBodyTokenLexicon.length) {
+			return;
+		}
+		const nextLexicon: string[] = [];
+		const nextIdByTerm = new Map<string, number>();
+		const tokenIdRemap = new Map<number, number>();
+		for (
+			let tokenId = 0;
+			tokenId < this.documentBodyTokenLexicon.length;
+			tokenId += 1
+		) {
+			if (!usedTokenIds.has(tokenId)) {
+				continue;
+			}
+			const token = this.documentBodyTokenLexicon[tokenId];
+			const nextTokenId = nextLexicon.length;
+			nextLexicon.push(token);
+			nextIdByTerm.set(token, nextTokenId);
+			tokenIdRemap.set(tokenId, nextTokenId);
+		}
+		this.documentBodyTokenIdTape = Uint32Array.from(this.documentBodyTokenIdTape, (tokenId) => {
+			const nextTokenId = tokenIdRemap.get(tokenId);
+			if (nextTokenId === undefined) {
+				throw new Error(
+					`Missing compacted coverage lexical body token id for ${tokenId}`,
+				);
+			}
+			return nextTokenId;
+		});
+		this.documentBodyTokenLexicon.length = 0;
+		this.documentBodyTokenLexicon.push(...nextLexicon);
+		this.documentBodyTokenIdByTerm.clear();
+		for (const [token, tokenId] of nextIdByTerm.entries()) {
+			this.documentBodyTokenIdByTerm.set(token, tokenId);
+		}
+	}
+
 	private rebuildDocumentBodyTokenTape(
-		overrides: ReadonlyMap<number, readonly string[] | undefined> = new Map(),
+		overrides: ReadonlyMap<number, readonly number[] | undefined> = new Map(),
 	): void {
-		const currentTape = this.documentBodyTokenTape;
+		const currentTape = this.documentBodyTokenIdTape;
 		const currentRanges = this.documentBodyTokenRangeById;
 		let maxDocId = Math.max(this.documentById.length, currentRanges.length);
 		for (const docId of overrides.keys()) {
 			maxDocId = Math.max(maxDocId, docId + 1);
 		}
-		const nextTape: string[] = [];
+		const nextTape: number[] = [];
 		const nextRanges: Array<CoverageLexicalTokenRange | undefined> = new Array(
 			maxDocId,
 		);
@@ -534,7 +650,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			const tokens = overrides.has(docId)
 				? overrides.get(docId)
 				: this.documentById[docId]
-					? readCoverageLexicalTokenRange(currentTape, currentRanges[docId])
+					? readCoverageLexicalNumericTokenRange(currentTape, currentRanges[docId])
 					: undefined;
 			if (!tokens || tokens.length === 0) {
 				nextRanges[docId] = undefined;
@@ -547,11 +663,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				end: nextTape.length,
 			};
 		}
-		this.documentBodyTokenTape = nextTape;
+		this.documentBodyTokenIdTape = Uint32Array.from(nextTape);
 		this.documentBodyTokenRangeById.length = 0;
 		this.documentBodyTokenRangeById.push(...nextRanges);
 	}
-
 	async addDocuments(documents: IndexedDocument[]): Promise<void> {
 		for (const document of documents) {
 			this.indexDocument(document);
@@ -664,11 +779,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					metadataTagFullPostings: this.metadataTagFullPostings,
 					metadataTagPhrasePostings: this.metadataTagPhrasePostings,
 					metadataTagPostings: this.metadataTagPostings,
-					sortedLexicon: this.sortedLexicon,
+					sortedLexicon:
+					request.isPrefixMatch || request.isFuzzy
+						? this.getSortedLexicon()
+						: [],
 					documentIdByPath: this.documentIdByPath,
 					documentPathById: this.documentPathById,
 					getDocumentBodyTokens: (docId: number) =>
-						this.getDocumentBodyTokens(docId) ?? [],
+						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId) ??
+						[],
 					documentTagValuesById: this.documentTagValuesById,
 				},
 				plan,
@@ -858,7 +977,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataTagFullTermCount: this.metadataTagFullPostings.size,
 			metadataTagPhraseTermCount: this.metadataTagPhrasePostings.size,
 			metadataTagTermCount: this.metadataTagPostings.size,
-			lexiconSize: this.sortedLexicon.length,
+			lexiconSize: this.lexicon.size,
 			estimatedBytes: sizeBreakdown.estimatedBytes,
 		};
 	}
@@ -872,7 +991,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath,
 			this.documentPathById,
 			this.documentById,
-			this.documentBodyTokenTape,
+			this.documentBodyTokenLexicon,
+			this.documentBodyTokenIdTape,
 			this.documentBodyTokenRangeById,
 			this.documentBodyHanSegmentsById,
 			this.documentTagValuesById,
@@ -885,7 +1005,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.body.term",
 			),
-			bodyChar: estimateNumericPostingMapBytes(
+			bodyChar: estimatePackedNumericPostingMapBytes(
 				this.bodyCharPostings,
 				accumulator,
 				"postings.bodyChar.term",
@@ -1024,7 +1144,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.lexicon.add(term);
 		}
 		for (const term of derivedState.bodyCharTerms) {
-			addNumericPosting(this.bodyCharPostings, term, docId);
+			addPackedNumericPosting(this.bodyCharPostings, term, docId);
 		}
 		for (const term of derivedState.aliasTerms) {
 			addNumericPosting(this.metadataAliasPostings, term, docId);
@@ -1079,7 +1199,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of derivedState.tagPhraseTerms) {
 			addNumericPosting(this.metadataTagPhrasePostings, term, docId);
 		}
-		this.sortedLexicon = Array.from(this.lexicon).sort();
+		this.markLexiconDirty();
 	}
 
 	private removeDocument(path: string, releaseDocumentIdentity = true): void {
@@ -1105,7 +1225,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.bodyPostings, term, docId);
 		}
 		for (const term of derivedState.bodyCharTerms) {
-			removeNumericPosting(this.bodyCharPostings, term, docId);
+			removePackedNumericPosting(this.bodyCharPostings, term, docId);
 		}
 		for (const term of derivedState.aliasTerms) {
 			removeNumericPosting(this.metadataAliasPostings, term, docId);
@@ -1158,6 +1278,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.delete(path);
 		this.documentById[docId] = undefined;
 		this.clearDocumentBodyTokens(docId);
+		this.compactDocumentBodyTokenLexicon();
 		this.documentBodyHanSegmentsById[docId] = undefined;
 		this.documentTagValuesById[docId] = undefined;
 		if (releaseDocumentIdentity) {
@@ -1201,7 +1322,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of nextLexicon) {
 			this.lexicon.add(term);
 		}
-		this.sortedLexicon = Array.from(this.lexicon).sort();
+		this.markLexiconDirty();
 	}
 
 	private getMetadataExactPostingMaps(): readonly ReadonlyMap<string, readonly number[]>[] {
@@ -1250,7 +1371,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private buildBinarySnapshotState(): CoverageLexicalSnapshotState {
 		return {
 			nextDocumentId: this.nextDocumentId,
-			sortedLexicon: [...this.sortedLexicon],
+			sortedLexicon: [...this.getSortedLexicon()],
+			bodyTokenLexicon: [...this.documentBodyTokenLexicon],
 			documents: this.documentById.flatMap((document) =>
 				document
 					? [
@@ -1262,8 +1384,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								aliasesText: document.aliasesText,
 								tagsText: document.tagsText,
 								headingsText: document.headingsText,
-								bodyTokenSequence: [
-									...(this.getDocumentBodyTokens(document.docId) ?? []),
+								bodyTokenIds: [
+									...(this.getDocumentBodyTokenIds(document.docId) ?? []),
 								],
 								bodyHanSegments: [],
 								tagValues: [
@@ -1274,7 +1396,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					: [],
 			),
 			bodyPostings: cloneNumericPostingMap(this.bodyPostings),
-			bodyCharPostings: cloneNumericPostingMap(this.bodyCharPostings),
+			bodyCharPostings: clonePackedNumericPostingMap(this.bodyCharPostings),
 			bodyHanSegmentPostings: new Map(),
 			metadataAliasCharPostings: cloneNumericPostingMap(
 				this.metadataAliasCharPostings,
@@ -1331,11 +1453,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	): void {
 		const state = decodeCoverageLexicalSnapshotV1(snapshot.data);
 		this.nextDocumentId = state.nextDocumentId;
-		this.sortedLexicon = [...state.sortedLexicon];
-		for (const term of this.sortedLexicon) {
+		this.lexicon.clear();
+		this.sortedLexiconCache = [...state.sortedLexicon];
+		this.sortedLexiconDirty = false;
+		for (const term of this.sortedLexiconCache) {
 			this.lexicon.add(term);
 		}
-		const bodyTokensById = new Map<number, readonly string[]>();
+		this.documentBodyTokenLexicon.length = 0;
+		this.documentBodyTokenLexicon.push(...state.bodyTokenLexicon);
+		this.documentBodyTokenIdByTerm.clear();
+		for (let tokenId = 0; tokenId < this.documentBodyTokenLexicon.length; tokenId += 1) {
+			this.documentBodyTokenIdByTerm.set(
+				this.documentBodyTokenLexicon[tokenId],
+				tokenId,
+			);
+		}
+		const bodyTokenIdsById = new Map<number, readonly number[]>();
 		for (const document of state.documents) {
 			const storedDocument: CoverageLexicalDocument = {
 				docId: document.docId,
@@ -1349,15 +1482,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentById[document.docId] = storedDocument;
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
-			bodyTokensById.set(document.docId, [...document.bodyTokenSequence]);
+			bodyTokenIdsById.set(document.docId, [...document.bodyTokenIds]);
 			this.documentBodyHanSegmentsById[document.docId] = [
 				...document.bodyHanSegments,
 			];
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
-		this.rebuildDocumentBodyTokenTape(bodyTokensById);
+		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
 		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
-		restoreNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
+		restorePackedNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
 		restoreNumericPostingMap(
 			this.metadataAliasCharPostings,
 			state.metadataAliasCharPostings,
@@ -1536,7 +1669,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!includeLocalWindow) {
 			return cached.coarseResult;
 		}
-		const bodyTokenSequence = this.getDocumentBodyTokens(docId);
+		const bodyTokenSequence = this.getDocumentBodyTokens(
+			docId,
+			queryCache.bodyTokensByDocId,
+		);
 		if (!bodyTokenSequence) {
 			return null;
 		}
@@ -1580,7 +1716,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (cached) {
 			return cached;
 		}
-		const bodyTokenSequence = this.getDocumentBodyTokens(docId);
+		const bodyTokenSequence = this.getDocumentBodyTokens(
+			docId,
+			queryCache.bodyTokensByDocId,
+		);
 		if (!bodyTokenSequence) {
 			return null;
 		}
@@ -2251,6 +2390,7 @@ const INDEX_COLLECTION_HEADER_BYTES = 4;
 const INDEX_REFERENCE_BYTES = 4;
 const INDEX_MAP_ENTRY_BYTES = 8;
 const INDEX_NUMBER_BYTES = 8;
+const INDEX_UINT32_BYTES = 4;
 const INDEX_POSTING_DOC_ID_BYTES = 4;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -2353,6 +2493,42 @@ function estimateNumericPostingMapBytes(
 	};
 }
 
+function estimatePackedNumericPostingMapBytes(
+	postings: ReadonlyMap<string, Uint32Array>,
+	accumulator: IndexSizeAccumulator,
+	source: string,
+): {
+	total: number;
+	termCount: number;
+	postingCount: number;
+	mapEntryBytes: number;
+	termReferenceBytes: number;
+	postingNumberBytes: number;
+} {
+	let termCount = 0;
+	let postingCount = 0;
+	for (const [term, docIds] of postings.entries()) {
+		termCount += 1;
+		accountStringBytes(accumulator, term, source);
+		postingCount += docIds.length;
+	}
+	const mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
+	const termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
+	const postingNumberBytes = postingCount * INDEX_POSTING_DOC_ID_BYTES;
+	return {
+		total:
+			INDEX_COLLECTION_HEADER_BYTES +
+			mapEntryBytes +
+			termReferenceBytes +
+			postingNumberBytes,
+		termCount,
+		postingCount,
+		mapEntryBytes,
+		termReferenceBytes,
+		postingNumberBytes,
+	};
+}
+
 function estimateDocumentStoreBytes(
 	documents: ReadonlyMap<string, CoverageLexicalDocument>,
 	accumulator: IndexSizeAccumulator,
@@ -2415,11 +2591,19 @@ function readCoverageLexicalTokenRange(
 	return tape.slice(range.start, range.end);
 }
 
-function estimateTokenTapeSlotsBytes(
-	tape: readonly string[],
+function readCoverageLexicalNumericTokenRange(
+	tape: Uint32Array,
+	range: CoverageLexicalTokenRange | undefined,
+): Uint32Array | undefined {
+	if (!range) {
+		return undefined;
+	}
+	return tape.subarray(range.start, range.end);
+}
+
+function estimateNumericTokenTapeSlotsBytes(
+	tape: Uint32Array,
 	rangesById: readonly (CoverageLexicalTokenRange | undefined)[],
-	accumulator: IndexSizeAccumulator,
-	source: string,
 ): {
 	total: number;
 	slotCount: number;
@@ -2427,11 +2611,11 @@ function estimateTokenTapeSlotsBytes(
 	slotReferenceBytes: number;
 	rangeNumberBytes: number;
 	tokenCount: number;
-	tokenReferenceBytes: number;
+	tokenNumberBytes: number;
 	tapeArrayBytes: number;
 } {
 	const populatedCount = rangesById.filter((range) => range !== undefined).length;
-	const tapeEstimate = estimateStringArrayBytes(tape, accumulator, source);
+	const tapeArrayBytes = INDEX_COLLECTION_HEADER_BYTES + tape.length * INDEX_UINT32_BYTES;
 	const slotReferenceBytes = rangesById.length * INDEX_REFERENCE_BYTES;
 	const rangeNumberBytes = populatedCount * INDEX_NUMBER_BYTES * 2;
 	return {
@@ -2439,17 +2623,16 @@ function estimateTokenTapeSlotsBytes(
 			INDEX_COLLECTION_HEADER_BYTES +
 			slotReferenceBytes +
 			rangeNumberBytes +
-			tapeEstimate.total,
+			tapeArrayBytes,
 		slotCount: rangesById.length,
 		populatedCount,
 		slotReferenceBytes,
 		rangeNumberBytes,
-		tokenCount: tapeEstimate.count,
-		tokenReferenceBytes: tapeEstimate.referenceBytes,
-		tapeArrayBytes: tapeEstimate.total,
+		tokenCount: tape.length,
+		tokenNumberBytes: tape.length * INDEX_UINT32_BYTES,
+		tapeArrayBytes,
 	};
 }
-
 function estimateSparseStringArraySlotsBytes(
 	valuesById: readonly (readonly string[] | undefined)[],
 	accumulator: IndexSizeAccumulator,
@@ -2491,7 +2674,8 @@ function estimateDocumentIdentityBytes(
 	documentIdByPath: ReadonlyMap<string, number>,
 	documentPathById: readonly (string | undefined)[],
 	documentById: readonly (CoverageLexicalDocument | undefined)[],
-	documentBodyTokenTape: readonly string[],
+	documentBodyTokenLexicon: readonly string[],
+	documentBodyTokenIdTape: Uint32Array,
 	documentBodyTokenRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
 	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[],
 	documentTagValuesById: readonly (readonly string[] | undefined)[],
@@ -2538,11 +2722,14 @@ function estimateDocumentIdentityBytes(
 	};
 	const docStoreByIdTotal =
 		INDEX_COLLECTION_HEADER_BYTES + docStoreById.referenceBytes;
-	const bodyTokensById = estimateTokenTapeSlotsBytes(
-		documentBodyTokenTape,
-		documentBodyTokenRangeById,
+	const bodyTokenLexicon = estimateStringArrayBytes(
+		documentBodyTokenLexicon,
 		accumulator,
-		"documentIdentity.bodyTokens",
+		"documentIdentity.bodyTokenLexicon",
+	);
+	const bodyTokensById = estimateNumericTokenTapeSlotsBytes(
+		documentBodyTokenIdTape,
+		documentBodyTokenRangeById,
 	);
 	const bodyHanSegmentsById = estimateSparseStringArraySlotsBytes(
 		documentBodyHanSegmentsById,
@@ -2566,6 +2753,7 @@ function estimateDocumentIdentityBytes(
 			pathToIdTotal +
 			idToPathTotal +
 			docStoreByIdTotal +
+			bodyTokenLexicon.total +
 			bodyTokensById.total +
 			bodyHanSegmentsById.total +
 			tagValuesById.total +
@@ -2582,13 +2770,13 @@ function estimateDocumentIdentityBytes(
 			...docStoreById,
 			total: docStoreByIdTotal,
 		},
+		bodyTokenLexicon,
 		bodyTokensById,
 		bodyHanSegmentsById,
 		tagValuesById,
 		counter,
 	};
 }
-
 function accumulateSection(
 	target: { count: number; referenceBytes: number },
 	source: { count: number; referenceBytes: number },
@@ -2688,7 +2876,6 @@ function buildStringPoolAttributionBreakdown(
 			"documentIdentity.idToPath.path",
 		]),
 		documentDerivedTokens: summarizeSources([
-			"documentIdentity.bodyTokens",
 			"documentIdentity.bodyHanSegments",
 			"documentIdentity.tagValues",
 		]),
@@ -2701,12 +2888,12 @@ function buildStringPoolAttributionBreakdown(
 }
 
 function getPostingEntryCount(
-	postings: ReadonlySet<string> | readonly number[] | undefined,
+	postings: ReadonlySet<string> | readonly number[] | Uint32Array | undefined,
 ): number {
 	if (!postings) {
 		return 0;
 	}
-	return Array.isArray(postings)
+	return Array.isArray(postings) || postings instanceof Uint32Array
 		? postings.length
 		: (postings as ReadonlySet<string>).size;
 }
@@ -2785,6 +2972,43 @@ function restoreNumericPostingMap(
 	}
 }
 
+function addPackedNumericPosting(
+	postings: Map<string, Uint32Array>,
+	term: string,
+	docId: number,
+): void {
+	const docs = postings.get(term);
+	if (!docs) {
+		postings.set(term, Uint32Array.of(docId));
+		return;
+	}
+	const next = new Uint32Array(docs.length + 1);
+	next.set(docs);
+	next[docs.length] = docId;
+	postings.set(term, next);
+}
+
+function clonePackedNumericPostingMap(
+	postings: ReadonlyMap<string, Uint32Array>,
+): Map<string, Uint32Array> {
+	return new Map(
+		Array.from(postings.entries(), ([term, docIds]) => [
+			term,
+			Uint32Array.from([...docIds].sort((left, right) => left - right)),
+		]),
+	);
+}
+
+function restorePackedNumericPostingMap(
+	target: Map<string, Uint32Array>,
+	source: ReadonlyMap<string, Uint32Array>,
+): void {
+	target.clear();
+	for (const [term, docIds] of source) {
+		target.set(term, new Uint32Array(docIds));
+	}
+}
+
 function sortedValues(values: ReadonlySet<string>): string[] {
 	return Array.from(values).sort();
 }
@@ -2821,6 +3045,29 @@ function removeNumericPosting(
 	if (docs.length === 0) {
 		postings.delete(term);
 	}
+}
+
+function removePackedNumericPosting(
+	postings: Map<string, Uint32Array>,
+	term: string,
+	docId: number,
+): void {
+	const docs = postings.get(term);
+	if (!docs) {
+		return;
+	}
+	const index = docs.indexOf(docId);
+	if (index === -1) {
+		return;
+	}
+	if (docs.length === 1) {
+		postings.delete(term);
+		return;
+	}
+	const next = new Uint32Array(docs.length - 1);
+	next.set(docs.subarray(0, index), 0);
+	next.set(docs.subarray(index + 1), index);
+	postings.set(term, next);
 }
 
 function isSerializedCoverageLexicalBinarySnapshot(
