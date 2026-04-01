@@ -1,9 +1,9 @@
-import { TFile, type TAbstractFile } from "obsidian";
+﻿import { Notice, TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
-import type { BaseIndexedFileRef, IndexedDocument } from "src/globals/search-types";
+import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
 import {
@@ -43,7 +43,10 @@ import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
-import { DataProvider } from "./data-provider";
+import {
+	DataProvider,
+	type IndexedDocumentFailure,
+} from "./data-provider";
 import {
 	type DocOperation,
 	type ReducedDocOperationBatch,
@@ -61,6 +64,13 @@ type HybridIndexFailure = {
 	reason: string;
 	attempts: number;
 	bm25FallbackIndexed: boolean;
+};
+
+type LexicalIndexFailure = IndexedDocumentFailure;
+
+type LexicalAddDocumentsResult = {
+	indexedFiles: TFile[];
+	failures: LexicalIndexFailure[];
 };
 
 type HybridPreflightReport = {
@@ -261,6 +271,9 @@ export class DataManager {
 	private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
 	private hybridRepairWorker: Promise<void> | null = null;
 	private hybridFailedEmbeddingRetryTimer: NodeJS.Timeout | null = null;
+	private lexicalIndexFailureNotice: Notice | null = null;
+	private lexicalFailureRetryInFlight = false;
+	private readonly lexicalIndexFailuresByPath = new Map<string, LexicalIndexFailure>();
 	private readonly hybridEmbeddingRecovery =
 		new HybridEmbeddingRecoveryManager(() =>
 			this.notifyHybridRuntimeStatusChanged(),
@@ -423,6 +436,8 @@ export class DataManager {
 		this.clearHybridRepairScheduler();
 		this.clearFailedEmbeddingRetryTimer();
 		this.hybridEmbeddingRecovery.clearAll();
+		this.hideLexicalIndexFailureNotice();
+		this.lexicalIndexFailuresByPath.clear();
 		this.searchBootstrapCommitTask = null;
 		this.setLexicalBootstrapState("blocked");
 		this.setHybridBootstrapState("blocked");
@@ -677,17 +692,29 @@ export class DataManager {
 		await this.hybridEngine.load();
 	}
 
-	private async addDocuments(files: TAbstractFile[]) {
-		if (files.length > 0) {
-			const tFiles: TFile[] = [];
-			for (const f of files) {
-				if (f instanceof TFile) tFiles.push(f);
-			}
-			const documents = await this.dataProvider.generateAllIndexedDocuments(
+	private async addDocuments(files: TAbstractFile[]): Promise<LexicalAddDocumentsResult> {
+		if (files.length === 0) {
+			return {
+				indexedFiles: [],
+				failures: [],
+			};
+		}
+
+		const tFiles: TFile[] = [];
+		for (const f of files) {
+			if (f instanceof TFile) tFiles.push(f);
+		}
+		const { documents, indexedFiles, failures } =
+			await this.dataProvider.generateAllIndexedDocuments(
 				tFiles.filter((f) => this.dataProvider.isIndexable(f)),
 			);
+		if (documents.length > 0) {
 			await this.lexicalEngine.addDocuments(documents);
 		}
+		return {
+			indexedFiles,
+			failures,
+		};
 	}
 
 	private async deleteDocuments(paths: string[]) {
@@ -700,10 +727,171 @@ export class DataManager {
 	private async commitLexicalFileState(
 		file: TFile,
 		generation = file.stat.mtime,
-	): Promise<void> {
-		await this.addDocuments([file]);
+	): Promise<boolean> {
+		const result = await this.addDocuments([file]);
+		if (result.failures.length > 0) {
+			this.addLexicalIndexFailures(result.failures);
+			return false;
+		}
+		this.clearLexicalIndexFailures([file.path]);
 		await this.fileSnapshotStore.commitCurrentFileAsIndexed(file.path, generation);
 		await this.upsertLexicalIndexedFileRef(file, generation);
+		return true;
+	}
+
+	private async commitIndexedLexicalFiles(files: readonly TFile[]): Promise<void> {
+		if (files.length === 0) {
+			return;
+		}
+		await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+			files.map((file) => ({
+				path: file.path,
+				generation: file.stat.mtime,
+			})),
+		);
+		for (const file of files) {
+			await this.upsertLexicalIndexedFileRef(file, file.stat.mtime);
+		}
+	}
+
+	private async persistLexicalSearchSnapshotIfAvailable(): Promise<void> {
+		const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
+		if (lexicalIndexData) {
+			await this.database.setLexicalSearchSnapshot(lexicalIndexData);
+		}
+	}
+
+	private addLexicalIndexFailures(failures: readonly LexicalIndexFailure[]): void {
+		if (failures.length === 0) {
+			return;
+		}
+		for (const failure of failures) {
+			this.lexicalIndexFailuresByPath.set(failure.file.path, failure);
+		}
+		this.logLexicalIndexFailures(failures);
+		this.renderLexicalIndexFailureNotice();
+	}
+
+	private clearLexicalIndexFailures(paths: readonly string[]): void {
+		if (paths.length === 0 || this.lexicalIndexFailuresByPath.size === 0) {
+			return;
+		}
+		for (const path of paths) {
+			this.lexicalIndexFailuresByPath.delete(path);
+		}
+		this.renderLexicalIndexFailureNotice();
+	}
+
+	private logLexicalIndexFailures(failures: readonly LexicalIndexFailure[]): void {
+		console.groupCollapsed(
+			`[clever-search] Lexical indexing skipped ${failures.length} file(s)`,
+		);
+		failures.forEach((failure) => {
+			console.error(
+				`[clever-search] ${failure.file.path}\nReason: ${this.formatLexicalIndexError(failure.error)}`,
+				failure.error,
+			);
+		});
+		console.groupEnd();
+	}
+
+	private formatLexicalIndexError(error: unknown): string {
+		if (error instanceof Error) {
+			return `${error.name}: ${error.message}`;
+		}
+		return String(error);
+	}
+
+	private renderLexicalIndexFailureNotice(): void {
+		const failureCount = this.lexicalIndexFailuresByPath.size;
+		if (failureCount === 0) {
+			this.hideLexicalIndexFailureNotice();
+			return;
+		}
+		if (
+			!this.lexicalIndexFailureNotice ||
+			!this.lexicalIndexFailureNotice.noticeEl.isConnected
+		) {
+			this.lexicalIndexFailureNotice = new Notice("", 0);
+		}
+
+		const fragment = document.createDocumentFragment();
+		const messageEl = document.createElement("div");
+		messageEl.textContent = this.buildLexicalFailureNotice(failureCount);
+		fragment.appendChild(messageEl);
+
+		const actionRow = document.createElement("div");
+		actionRow.style.marginTop = "0.5em";
+		const retryButton = document.createElement("button");
+		retryButton.textContent = this.lexicalFailureRetryInFlight
+			? `Retrying failures... (${failureCount})`
+			: `Retry failures (${failureCount})`;
+		retryButton.disabled = this.lexicalFailureRetryInFlight;
+		retryButton.onclick = () => {
+			void this.retryLexicalIndexFailures();
+		};
+		actionRow.appendChild(retryButton);
+		fragment.appendChild(actionRow);
+
+		const footerEl = document.createElement("div");
+		footerEl.textContent = "(clever-search)";
+		footerEl.style.marginTop = "0.35em";
+		fragment.appendChild(footerEl);
+
+		this.lexicalIndexFailureNotice.setMessage(fragment);
+	}
+
+	private hideLexicalIndexFailureNotice(): void {
+		if (this.lexicalIndexFailureNotice) {
+			this.lexicalIndexFailureNotice.hide();
+			this.lexicalIndexFailureNotice = null;
+		}
+	}
+
+	private buildLexicalFailureNotice(failureCount: number): string {
+		return `${failureCount} file(s) were skipped during lexical indexing. Retry the remaining failures or open the console for details.`;
+	}
+
+	private async retryLexicalIndexFailures(): Promise<void> {
+		if (
+			this.lexicalFailureRetryInFlight ||
+			this.lexicalIndexFailuresByPath.size === 0
+		) {
+			return;
+		}
+		const failuresToRetry = Array.from(this.lexicalIndexFailuresByPath.values());
+		const attemptedPaths = new Set(
+			failuresToRetry.map((failure) => failure.file.path),
+		);
+		this.lexicalFailureRetryInFlight = true;
+		this.renderLexicalIndexFailureNotice();
+		try {
+			const result = await this.addDocuments(
+				failuresToRetry.map((failure) => failure.file),
+			);
+			if (result.indexedFiles.length > 0) {
+				await this.commitIndexedLexicalFiles(result.indexedFiles);
+				await this.persistLexicalSearchSnapshotIfAvailable();
+			}
+			for (const path of attemptedPaths) {
+				this.lexicalIndexFailuresByPath.delete(path);
+			}
+			for (const failure of result.failures) {
+				this.lexicalIndexFailuresByPath.set(failure.file.path, failure);
+			}
+			if (result.failures.length > 0) {
+				this.logLexicalIndexFailures(result.failures);
+			}
+		} catch (error) {
+			logger.error("lexical failure retry failed:", error);
+			new MyNotice(
+				"Retrying lexical failures failed. Check the console for details.",
+				7000,
+			);
+		} finally {
+			this.lexicalFailureRetryInFlight = false;
+			this.renderLexicalIndexFailureNotice();
+		}
 	}
 
 	private async deleteLexicalFileState(paths: readonly string[]): Promise<void> {
@@ -719,6 +907,7 @@ export class DataManager {
 		this.fileSnapshotStore.invalidateCurrentFile(path);
 		this.cancelHybridRepair(path);
 		this.clearFailedHybridEmbedding(path);
+		this.clearLexicalIndexFailures([path]);
 		await this.deleteLexicalFileState([path]);
 		if (this.hybridEngine.isEnabled()) {
 			await this.deleteHybridFileAndRefreshRuntimeStatus(path);
@@ -771,6 +960,7 @@ export class DataManager {
 		this.fileSnapshotStore.invalidateCurrentFile(newPath);
 		this.cancelHybridRepair(oldPath);
 		this.cancelHybridRepair(newPath);
+		this.clearLexicalIndexFailures([oldPath, newPath]);
 		await this.deleteLexicalFileState([oldPath, newPath]);
 
 		const file = this.dataProvider.getFileByPath(newPath);
@@ -1260,6 +1450,8 @@ export class DataManager {
 			const sizeText = (size / 1024).toFixed(2) + " MB";
 			new MyNotice(`${sizeText} ${t("files need to be indexed. Obsidian may freeze for a while")}`, 7000);
 		}
+		const successfulFiles: TFile[] = [];
+		const failures: LexicalIndexFailure[] = [];
 		this.lexicalEngine.beginBatchReindex();
 		try {
 			for (
@@ -1271,7 +1463,9 @@ export class DataManager {
 					start,
 					start + DataManager.LEXICAL_REINDEX_BATCH_SIZE,
 				);
-				await this.addDocuments(batchFiles);
+				const batchResult = await this.addDocuments(batchFiles);
+				successfulFiles.push(...batchResult.indexedFiles);
+				failures.push(...batchResult.failures);
 				if (start + DataManager.LEXICAL_REINDEX_BATCH_SIZE < filesToIndex.length) {
 					await MyLib.sleep(0);
 				}
@@ -1281,15 +1475,19 @@ export class DataManager {
 			this.lexicalEngine.abortBatchReindex();
 			throw error;
 		}
-		await this.saveLexicalIndexedFileRefs(filesToIndex);
+		await this.saveLexicalIndexedFileRefs(successfulFiles);
 		await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
-			filesToIndex.map((file) => ({
+			successfulFiles.map((file) => ({
 				path: file.path,
 				generation: file.stat.mtime,
 			})),
 		);
 		await this.fileSnapshotStore.deleteIndexedSnapshotsNotIn(indexedPaths);
-		this.isLexicalEngineUpToDate = true;
+		this.clearLexicalIndexFailures(Array.from(indexedPaths));
+		if (failures.length > 0) {
+			this.addLexicalIndexFailures(failures);
+		}
+		this.isLexicalEngineUpToDate = failures.length === 0;
 	}
 
 	private async updateLexicalIndexedFileRefsByMtime() {
@@ -1321,27 +1519,26 @@ export class DataManager {
 		logger.trace(`docs to add: ${docsToAdd.length}`);
 		await this.deleteDocuments(docsToDelete);
 		await this.fileSnapshotStore.deleteIndexedSnapshots(docsToDelete);
-		await this.addDocuments(docsToAdd);
+		const addResult = await this.addDocuments(docsToAdd);
 		await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
-			docsToAdd
-				.map((file) =>
-					file instanceof TFile
-						? {
-							path: file.path,
-							generation: file.stat.mtime,
-						}
-						: null,
-				)
-				.filter(
-					(
-						file,
-					): file is {
-						path: string;
-						generation: number;
-					} => file !== null,
-				),
+			addResult.indexedFiles.map((file) => ({
+				path: file.path,
+				generation: file.stat.mtime,
+			})),
 		);
-		await this.saveLexicalIndexedFileRefs(Array.from(currFiles.values()));
+		const failedPaths = new Set(
+			addResult.failures.map((failure) => failure.file.path),
+		);
+		await this.saveLexicalIndexedFileRefs(
+			Array.from(currFiles.values()).filter(
+				(file) => !failedPaths.has(file.path),
+			),
+		);
+		this.clearLexicalIndexFailures(docsToDelete);
+		this.clearLexicalIndexFailures(addResult.indexedFiles.map((file) => file.path));
+		if (addResult.failures.length > 0) {
+			this.addLexicalIndexFailures(addResult.failures);
+		}
 	}
 
 	private async saveLexicalIndexedFileRefs(files: TFile[]) {
@@ -2896,3 +3093,4 @@ export class DataManager {
 		return formatBytesLabel(bytes);
 	}
 }
+

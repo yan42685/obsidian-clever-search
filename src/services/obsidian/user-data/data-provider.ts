@@ -20,6 +20,17 @@ import { FileUtil } from "../../../utils/file-util";
 import { PrivateApi } from "../private-api";
 import { ViewRegistry, ViewType } from "../view-registry";
 
+export type IndexedDocumentFailure = {
+	file: TFile;
+	error: unknown;
+};
+
+export type GeneratedIndexedDocuments = {
+	documents: IndexedDocument[];
+	indexedFiles: TFile[];
+	failures: IndexedDocumentFailure[];
+};
+
 @singleton()
 export class DataProvider {
 	private readonly vault = getInstance(Vault);
@@ -49,36 +60,34 @@ export class DataProvider {
 
 	async generateAllIndexedDocuments(
 		files: TFile[],
-	): Promise<IndexedDocument[]> {
-		return Promise.all(
-			files.map(async (file) => {
-				if (this.isContentIndexable(file)) {
-					const metaData = this.app.metadataCache.getFileCache(file);
-					if (
-						this.viewRegistry.viewTypeByPath(file.path) ===
-						ViewType.MARKDOWN
-					) {
-						return {
-							path: file.path,
-							basename: file.basename,
-							folder: FileUtil.getFolderPath(file.path),
-							aliases: this.parseAliases(metaData),
-							tags: this.parseTags(metaData),
-							headings: this.parseHeadings(metaData),
-							content: await this.readPlainText(file),
-						} as IndexedDocument;
-					} else {
-						throw new Error(TO_BE_IMPL);
-					}
-				} else {
-					return {
-						path: file.path,
-						basename: file.basename,
-						folder: FileUtil.getFolderPath(file.path),
-					};
-				}
-			}),
+	): Promise<GeneratedIndexedDocuments> {
+		const settled = await Promise.allSettled(
+			files.map(async (file) => await this.buildIndexedDocument(file)),
 		);
+		const documents: IndexedDocument[] = [];
+		const indexedFiles: TFile[] = [];
+		const failures: IndexedDocumentFailure[] = [];
+
+		for (let index = 0; index < settled.length; index++) {
+			const result = settled[index];
+			const file = files[index];
+			if (result.status === "fulfilled") {
+				documents.push(result.value);
+				indexedFiles.push(file);
+				continue;
+			}
+
+			failures.push({
+				file,
+				error: result.reason,
+			});
+		}
+
+		return {
+			documents,
+			indexedFiles,
+			failures,
+		};
 	}
 
 	// @monitorDecorator
@@ -189,6 +198,33 @@ export class DataProvider {
 
 	private parseHeadings(metadata: CachedMetadata | null): string {
 		return metadata?.headings?.map((h) => h.heading).join(" ") || "";
+	}
+
+	private async buildIndexedDocument(file: TFile): Promise<IndexedDocument> {
+		if (this.isContentIndexable(file)) {
+			const metaData = this.app.metadataCache.getFileCache(file);
+			if (
+				this.viewRegistry.viewTypeByPath(file.path) ===
+				ViewType.MARKDOWN
+			) {
+				return {
+					path: file.path,
+					basename: file.basename,
+					folder: FileUtil.getFolderPath(file.path),
+					aliases: this.parseAliases(metaData),
+					tags: this.parseTags(metaData),
+					headings: this.parseHeadings(metaData),
+					content: await this.readPlainText(file),
+				} as IndexedDocument;
+			}
+			throw new Error(TO_BE_IMPL);
+		}
+
+		return {
+			path: file.path,
+			basename: file.basename,
+			folder: FileUtil.getFolderPath(file.path),
+		};
 	}
 
 	private parseHeadingOutline(

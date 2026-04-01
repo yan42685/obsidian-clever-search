@@ -288,6 +288,31 @@
 		return viewHelper.getStructuredSnippetSegments(subItem);
 	}
 
+	function getFileExtensionText(item: FileItem): string {
+		return item.extension === "md" ? "" : item.extension;
+	}
+
+	function escapeHtml(text: string): string {
+		return text
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;");
+	}
+
+	function getFileNameHtml(item: FileItem): string {
+		return viewHelper.purifyHTML(
+			escapeHtml(item.basename) +
+				HTML_4_SPACES +
+				escapeHtml(getFileExtensionText(item)),
+		);
+	}
+
+	function getFolderPathHtml(item: FileItem): string {
+		return viewHelper.purifyHTML(escapeHtml(item.folderPath));
+	}
+
 	// ===================================================
 	onDestroy(() => {
 		autoHybridFallback.clear();
@@ -367,14 +392,10 @@
 							{/if}
 							<span class="file-item">
 								<span class="filename"
-									>{@html item.basename +
-										HTML_4_SPACES +
-										(item.extension === "md"
-											? ""
-											: item.extension)}</span
+									>{@html getFileNameHtml(item)}</span
 								>
 								<span class="file-folder-path"
-									>{item.folderPath}</span
+									>{@html getFolderPathHtml(item)}</span
 								>
 							</span>
 						{/if}
