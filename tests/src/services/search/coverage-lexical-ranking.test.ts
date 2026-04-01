@@ -1240,27 +1240,19 @@ describe("coverage lexical ranking", () => {
 
 		const docId = internalEngine.documents.get("pkm-en/phase3/hot-postings.md")?.docId;
 		expect(typeof docId).toBe("number");
-		expect(Array.isArray(internalEngine.bodyPostings.get("cache"))).toBe(true);
-		expect(Array.isArray(internalEngine.metadataAliasPostings.get("hot"))).toBe(true);
+		expect(internalEngine.bodyPostings.get("cache") instanceof Uint32Array).toBe(true);
+		expect(internalEngine.metadataAliasPostings.get("hot") instanceof Uint32Array).toBe(true);
 		expect(Array.isArray(internalEngine.metadataAliasPhrasePostings.get("hot postings"))).toBe(
 			true,
 		);
-		expect(Array.isArray(internalEngine.metadataBasenamePostings.get("hot-postings"))).toBe(
-			true,
-		);
-		expect(Array.isArray(internalEngine.metadataFolderPostings.get("phase3"))).toBe(
-			true,
-		);
-		expect(Array.isArray(internalEngine.metadataHeadingPostings.get("hot"))).toBe(
-			true,
-		);
+		expect(internalEngine.metadataBasenamePostings.get("hot-postings") instanceof Uint32Array).toBe(true);
+		expect(internalEngine.metadataFolderPostings.get("phase3") instanceof Uint32Array).toBe(true);
+		expect(internalEngine.metadataHeadingPostings.get("hot") instanceof Uint32Array).toBe(true);
 		expect(
 			Array.isArray(internalEngine.metadataHeadingPhrasePostings.get("hot postings")),
 		).toBe(true);
-		expect(Array.isArray(internalEngine.metadataTagPostings.get("phase3"))).toBe(true);
-		expect(Array.isArray(internalEngine.metadataTagFullPostings.get("phase3,cache"))).toBe(
-			true,
-		);
+		expect(internalEngine.metadataTagPostings.get("phase3") instanceof Uint32Array).toBe(true);
+		expect(internalEngine.metadataTagFullPostings.get("phase3,cache") instanceof Uint32Array).toBe(true);
 		expect(Array.isArray(internalEngine.metadataTagPhrasePostings.get("phase3 cache"))).toBe(
 			true,
 		);

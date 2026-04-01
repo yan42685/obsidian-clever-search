@@ -308,24 +308,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentTagValuesById: Array<readonly string[] | undefined> = [];
 	private fileSnapshotStore: FileSnapshotStore | null | undefined;
 	private nextDocumentId = 0;
-	private readonly bodyPostings = new Map<string, number[]>();
+	private readonly bodyPostings = new Map<string, Uint32Array>();
 	private readonly bodyCharPostings = new Map<string, Uint32Array>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
-	private readonly metadataAliasPostings = new Map<string, number[]>();
+	private readonly metadataAliasPostings = new Map<string, Uint32Array>();
 	private readonly metadataBasenameCharPostings = new Map<string, number[]>();
 	private readonly metadataBasenamePhrasePostings = new Map<string, number[]>();
-	private readonly metadataBasenamePostings = new Map<string, number[]>();
+	private readonly metadataBasenamePostings = new Map<string, Uint32Array>();
 	private readonly metadataFolderCharPostings = new Map<string, number[]>();
 	private readonly metadataFolderPhrasePostings = new Map<string, number[]>();
-	private readonly metadataFolderPostings = new Map<string, number[]>();
+	private readonly metadataFolderPostings = new Map<string, Uint32Array>();
 	private readonly metadataHeadingCharPostings = new Map<string, number[]>();
 	private readonly metadataHeadingPhrasePostings = new Map<string, number[]>();
-	private readonly metadataHeadingPostings = new Map<string, number[]>();
+	private readonly metadataHeadingPostings = new Map<string, Uint32Array>();
 	private readonly metadataTagCharPostings = new Map<string, number[]>();
-	private readonly metadataTagFullPostings = new Map<string, number[]>();
+	private readonly metadataTagFullPostings = new Map<string, Uint32Array>();
 	private readonly metadataTagPhrasePostings = new Map<string, number[]>();
-	private readonly metadataTagPostings = new Map<string, number[]>();
+	private readonly metadataTagPostings = new Map<string, Uint32Array>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexiconCache: string[] = [];
 	private sortedLexiconDirty = false;
@@ -1000,7 +1000,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			accumulator,
 		);
 		const postings = {
-			body: estimateNumericPostingMapBytes(
+			body: estimatePackedNumericPostingMapBytes(
 				this.bodyPostings,
 				accumulator,
 				"postings.body.term",
@@ -1010,7 +1010,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.bodyChar.term",
 			),
-			metadataAlias: estimateNumericPostingMapBytes(
+			metadataAlias: estimatePackedNumericPostingMapBytes(
 				this.metadataAliasPostings,
 				accumulator,
 				"postings.metadataAlias.term",
@@ -1025,7 +1025,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.metadataAliasPhrase.term",
 			),
-			metadataBasename: estimateNumericPostingMapBytes(
+			metadataBasename: estimatePackedNumericPostingMapBytes(
 				this.metadataBasenamePostings,
 				accumulator,
 				"postings.metadataBasename.term",
@@ -1040,7 +1040,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.metadataBasenamePhrase.term",
 			),
-			metadataFolder: estimateNumericPostingMapBytes(
+			metadataFolder: estimatePackedNumericPostingMapBytes(
 				this.metadataFolderPostings,
 				accumulator,
 				"postings.metadataFolder.term",
@@ -1055,7 +1055,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.metadataFolderPhrase.term",
 			),
-			metadataHeading: estimateNumericPostingMapBytes(
+			metadataHeading: estimatePackedNumericPostingMapBytes(
 				this.metadataHeadingPostings,
 				accumulator,
 				"postings.metadataHeading.term",
@@ -1070,7 +1070,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.metadataHeadingPhrase.term",
 			),
-			metadataTag: estimateNumericPostingMapBytes(
+			metadataTag: estimatePackedNumericPostingMapBytes(
 				this.metadataTagPostings,
 				accumulator,
 				"postings.metadataTag.term",
@@ -1080,7 +1080,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				accumulator,
 				"postings.metadataTagChar.term",
 			),
-			metadataTagFull: estimateNumericPostingMapBytes(
+			metadataTagFull: estimatePackedNumericPostingMapBytes(
 				this.metadataTagFullPostings,
 				accumulator,
 				"postings.metadataTagFull.term",
@@ -1140,14 +1140,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 
 		for (const term of derivedState.bodyTerms) {
-			addNumericPosting(this.bodyPostings, term, docId);
+			addPackedNumericPosting(this.bodyPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of derivedState.bodyCharTerms) {
 			addPackedNumericPosting(this.bodyCharPostings, term, docId);
 		}
 		for (const term of derivedState.aliasTerms) {
-			addNumericPosting(this.metadataAliasPostings, term, docId);
+			addPackedNumericPosting(this.metadataAliasPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of derivedState.aliasCharTerms) {
@@ -1157,7 +1157,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataAliasPhrasePostings, term, docId);
 		}
 		for (const term of derivedState.basenameTerms) {
-			addNumericPosting(this.metadataBasenamePostings, term, docId);
+			addPackedNumericPosting(this.metadataBasenamePostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of derivedState.basenameCharTerms) {
@@ -1167,7 +1167,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
 		}
 		for (const term of derivedState.folderTerms) {
-			addNumericPosting(this.metadataFolderPostings, term, docId);
+			addPackedNumericPosting(this.metadataFolderPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of derivedState.folderCharTerms) {
@@ -1177,7 +1177,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataFolderPhrasePostings, term, docId);
 		}
 		for (const term of derivedState.headingTerms) {
-			addNumericPosting(this.metadataHeadingPostings, term, docId);
+			addPackedNumericPosting(this.metadataHeadingPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of derivedState.headingCharTerms) {
@@ -1187,11 +1187,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			addNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
 		for (const term of derivedState.tagTerms) {
-			addNumericPosting(this.metadataTagPostings, term, docId);
+			addPackedNumericPosting(this.metadataTagPostings, term, docId);
 			this.lexicon.add(term);
 		}
 		for (const term of new Set(derivedState.tagValues)) {
-			addNumericPosting(this.metadataTagFullPostings, term, docId);
+			addPackedNumericPosting(this.metadataTagFullPostings, term, docId);
 		}
 		for (const term of derivedState.tagCharTerms) {
 			addNumericPosting(this.metadataTagCharPostings, term, docId);
@@ -1222,13 +1222,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			},
 		);
 		for (const term of derivedState.bodyTerms) {
-			removeNumericPosting(this.bodyPostings, term, docId);
+			removePackedNumericPosting(this.bodyPostings, term, docId);
 		}
 		for (const term of derivedState.bodyCharTerms) {
 			removePackedNumericPosting(this.bodyCharPostings, term, docId);
 		}
 		for (const term of derivedState.aliasTerms) {
-			removeNumericPosting(this.metadataAliasPostings, term, docId);
+			removePackedNumericPosting(this.metadataAliasPostings, term, docId);
 		}
 		for (const term of derivedState.aliasCharTerms) {
 			removeNumericPosting(this.metadataAliasCharPostings, term, docId);
@@ -1237,7 +1237,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataAliasPhrasePostings, term, docId);
 		}
 		for (const term of derivedState.basenameTerms) {
-			removeNumericPosting(this.metadataBasenamePostings, term, docId);
+			removePackedNumericPosting(this.metadataBasenamePostings, term, docId);
 		}
 		for (const term of derivedState.basenameCharTerms) {
 			removeNumericPosting(this.metadataBasenameCharPostings, term, docId);
@@ -1246,7 +1246,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataBasenamePhrasePostings, term, docId);
 		}
 		for (const term of derivedState.folderTerms) {
-			removeNumericPosting(this.metadataFolderPostings, term, docId);
+			removePackedNumericPosting(this.metadataFolderPostings, term, docId);
 		}
 		for (const term of derivedState.folderCharTerms) {
 			removeNumericPosting(this.metadataFolderCharPostings, term, docId);
@@ -1255,7 +1255,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataFolderPhrasePostings, term, docId);
 		}
 		for (const term of derivedState.headingTerms) {
-			removeNumericPosting(this.metadataHeadingPostings, term, docId);
+			removePackedNumericPosting(this.metadataHeadingPostings, term, docId);
 		}
 		for (const term of derivedState.headingCharTerms) {
 			removeNumericPosting(this.metadataHeadingCharPostings, term, docId);
@@ -1264,10 +1264,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			removeNumericPosting(this.metadataHeadingPhrasePostings, term, docId);
 		}
 		for (const term of derivedState.tagTerms) {
-			removeNumericPosting(this.metadataTagPostings, term, docId);
+			removePackedNumericPosting(this.metadataTagPostings, term, docId);
 		}
 		for (const term of new Set(derivedState.tagValues)) {
-			removeNumericPosting(this.metadataTagFullPostings, term, docId);
+			removePackedNumericPosting(this.metadataTagFullPostings, term, docId);
 		}
 		for (const term of derivedState.tagCharTerms) {
 			removeNumericPosting(this.metadataTagCharPostings, term, docId);
@@ -1325,7 +1325,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.markLexiconDirty();
 	}
 
-	private getMetadataExactPostingMaps(): readonly ReadonlyMap<string, readonly number[]>[] {
+	private getMetadataExactPostingMaps(): readonly ReadonlyMap<string, readonly number[] | Uint32Array>[] {
 		return [
 			this.metadataBasenamePostings,
 			this.metadataAliasPostings,
@@ -1395,7 +1395,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					  ]
 					: [],
 			),
-			bodyPostings: cloneNumericPostingMap(this.bodyPostings),
+			bodyPostings: clonePackedNumericPostingMap(this.bodyPostings),
 			bodyCharPostings: clonePackedNumericPostingMap(this.bodyCharPostings),
 			bodyHanSegmentPostings: new Map(),
 			metadataAliasCharPostings: cloneNumericPostingMap(
@@ -1405,7 +1405,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataAliasPhrasePostings: cloneNumericPostingMap(
 				this.metadataAliasPhrasePostings,
 			),
-			metadataAliasPostings: cloneNumericPostingMap(this.metadataAliasPostings),
+			metadataAliasPostings: clonePackedNumericPostingMap(this.metadataAliasPostings),
 			metadataBasenameCharPostings: cloneNumericPostingMap(
 				this.metadataBasenameCharPostings,
 			),
@@ -1413,7 +1413,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataBasenamePhrasePostings: cloneNumericPostingMap(
 				this.metadataBasenamePhrasePostings,
 			),
-			metadataBasenamePostings: cloneNumericPostingMap(
+			metadataBasenamePostings: clonePackedNumericPostingMap(
 				this.metadataBasenamePostings,
 			),
 			metadataFolderCharPostings: cloneNumericPostingMap(
@@ -1423,7 +1423,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataFolderPhrasePostings: cloneNumericPostingMap(
 				this.metadataFolderPhrasePostings,
 			),
-			metadataFolderPostings: cloneNumericPostingMap(this.metadataFolderPostings),
+			metadataFolderPostings: clonePackedNumericPostingMap(this.metadataFolderPostings),
 			metadataHeadingCharPostings: cloneNumericPostingMap(
 				this.metadataHeadingCharPostings,
 			),
@@ -1431,20 +1431,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataHeadingPhrasePostings: cloneNumericPostingMap(
 				this.metadataHeadingPhrasePostings,
 			),
-			metadataHeadingPostings: cloneNumericPostingMap(
+			metadataHeadingPostings: clonePackedNumericPostingMap(
 				this.metadataHeadingPostings,
 			),
 			metadataPostings: new Map(),
 			metadataTagCharPostings: cloneNumericPostingMap(
 				this.metadataTagCharPostings,
 			),
-			metadataTagFullPostings: cloneNumericPostingMap(
+			metadataTagFullPostings: clonePackedNumericPostingMap(
 				this.metadataTagFullPostings,
 			),
 			metadataTagPhrasePostings: cloneNumericPostingMap(
 				this.metadataTagPhrasePostings,
 			),
-			metadataTagPostings: cloneNumericPostingMap(this.metadataTagPostings),
+			metadataTagPostings: clonePackedNumericPostingMap(this.metadataTagPostings),
 		};
 	}
 
@@ -1489,7 +1489,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
-		restoreNumericPostingMap(this.bodyPostings, state.bodyPostings);
+		restorePackedNumericPostingMap(this.bodyPostings, state.bodyPostings);
 		restorePackedNumericPostingMap(this.bodyCharPostings, state.bodyCharPostings);
 		restoreNumericPostingMap(
 			this.metadataAliasCharPostings,
@@ -1499,7 +1499,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataAliasPhrasePostings,
 			state.metadataAliasPhrasePostings,
 		);
-		restoreNumericPostingMap(this.metadataAliasPostings, state.metadataAliasPostings);
+		restorePackedNumericPostingMap(
+			this.metadataAliasPostings,
+			state.metadataAliasPostings,
+		);
 		restoreNumericPostingMap(
 			this.metadataBasenameCharPostings,
 			state.metadataBasenameCharPostings,
@@ -1508,7 +1511,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataBasenamePhrasePostings,
 			state.metadataBasenamePhrasePostings,
 		);
-		restoreNumericPostingMap(
+		restorePackedNumericPostingMap(
 			this.metadataBasenamePostings,
 			state.metadataBasenamePostings,
 		);
@@ -1520,7 +1523,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataFolderPhrasePostings,
 			state.metadataFolderPhrasePostings,
 		);
-		restoreNumericPostingMap(this.metadataFolderPostings, state.metadataFolderPostings);
+		restorePackedNumericPostingMap(
+			this.metadataFolderPostings,
+			state.metadataFolderPostings,
+		);
 		restoreNumericPostingMap(
 			this.metadataHeadingCharPostings,
 			state.metadataHeadingCharPostings,
@@ -1529,7 +1535,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataHeadingPhrasePostings,
 			state.metadataHeadingPhrasePostings,
 		);
-		restoreNumericPostingMap(
+		restorePackedNumericPostingMap(
 			this.metadataHeadingPostings,
 			state.metadataHeadingPostings,
 		);
@@ -1537,7 +1543,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataTagCharPostings,
 			state.metadataTagCharPostings,
 		);
-		restoreNumericPostingMap(
+		restorePackedNumericPostingMap(
 			this.metadataTagFullPostings,
 			state.metadataTagFullPostings,
 		);
@@ -1545,7 +1551,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.metadataTagPhrasePostings,
 			state.metadataTagPhrasePostings,
 		);
-		restoreNumericPostingMap(this.metadataTagPostings, state.metadataTagPostings);
+		restorePackedNumericPostingMap(this.metadataTagPostings, state.metadataTagPostings);
 	}
 
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
@@ -2934,7 +2940,7 @@ function getPostingEntryCount(
 }
 
 function getUnionPostingEntryCount(
-	postingsLists: readonly (readonly number[] | undefined)[],
+	postingsLists: readonly ((readonly number[] | Uint32Array) | undefined)[],
 ): number {
 	const seen = new Set<number>();
 	for (const postings of postingsLists) {
@@ -2949,7 +2955,7 @@ function getUnionPostingEntryCount(
 }
 
 function countPostingMapKeyUnion(
-	postingMaps: readonly ReadonlyMap<string, readonly number[]>[],
+	postingMaps: readonly ReadonlyMap<string, readonly number[] | Uint32Array>[],
 ): number {
 	const terms = new Set<string>();
 	for (const postings of postingMaps) {
@@ -3012,6 +3018,9 @@ function addPackedNumericPosting(
 	term: string,
 	docId: number,
 ): void {
+	// Single-layer packed postings minimize live-memory, but each incremental
+	// update rewrites the whole term bucket. If Obsidian occasionally stutters
+	// during indexing updates, this reallocation path is a likely cause.
 	const docs = postings.get(term);
 	if (!docs) {
 		postings.set(term, Uint32Array.of(docId));
