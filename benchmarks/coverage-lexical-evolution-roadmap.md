@@ -126,11 +126,16 @@ Every retained change should be evaluated against the same four anchors:
       - `CoverageLexicalDocument.bodyText` moved out of the resident live document
       - direct subitems now fetch source body text on demand from `FileSnapshotStore`
       - delete and rebuild use maintained doc-id side arrays for retained ownership
-    - continue validating with:
+    - the next resident-layout execution slices are now fixed before more binary work:
+      - `Phase 3A-B`: move body-side char fallback out of the always-resident graph while keeping metadata char fallback resident
+      - `Phase 3A-C`: move full-vault `doc.bodyTokens` toward candidate-time expansion plus a small hot cache
+      - `Phase 3A-D`: only after the resident split stabilizes, compress the remaining resident exact postings ownership if it is still a top cost center
+    - keep validating each retained slice with:
       - coverage benchmark
       - startup snapshot benchmark
       - index breakdown
     - snapshot byte size may improve incidentally, but it is not the reason to keep the change
+    - do not advance the binary schema contract until the resident-core versus on-demand boundary stops drifting
 - immediate rule:
   - continue from the active roadmap below and keep the benchmark anchor aligned with what actually moved latency or size, not just with structural ambition
   - when an optimization produces structurally cleaner code and lower absolute time but unstable ratio evidence, it may be retained without immediately replacing the active anchor
@@ -388,6 +393,73 @@ Phase 3 deliverables are now split into three concrete subphases:
   - acceptance:
     - no high-cardinality hot path still requires a string-keyed bridge as its main identity carrier
     - size breakdown shows repeated-string retention moving downward
+  - the next retained execution slices inside `Phase 3A` are now fixed:
+    - `Phase 3A-B`: downshift full-body char fallback from resident postings to hybrid or on-demand evidence
+      - keep metadata char postings resident:
+        - `basename`
+        - `folder`
+        - `heading`
+        - `tag`
+      - remove or sharply reduce always-resident `postings.bodyChar`
+      - preferred implementation shape:
+        - candidate-time body-char verification fed by resident-core recall
+      - acceptable fallback shape:
+        - a cheaper body-char gate plus candidate-time verification
+      - do not remove CJK fallback outright; move the expensive body-side evidence off the always-resident graph instead
+      - expected live-memory impact:
+        - target `LexicalRuntimeIndex` reduction: about `110 KB` to `160 KB`
+      - expected code delta:
+        - about `+180` to `+320` lines for candidate-time verification with minimal caching
+        - about `+260` to `+420` lines if a dedicated cheap body-char gate is also added
+      - expected risks:
+        - quality: low to medium if conservative rescue admission is kept
+        - latency: low for ordinary queries, medium for char-heavy queries
+      - acceptance:
+        - CJK and char-driven rescue queries remain benchmark-clean
+        - `postings.bodyChar` drops materially in the exclusive resident breakdown
+        - coverage-to-MiniSearch latency ratios do not worsen materially without a compensating memory win
+    - `Phase 3A-C`: downshift all-document token sequence evidence
+      - stop treating `doc.bodyTokens` as a permanently resident full-vault structure
+      - expand numeric token tape only for:
+        - top candidates
+        - active edits
+        - a small hot cache if needed
+      - keep enough resident metadata and snapshot access to reopen body-token evidence cheaply
+      - expected live-memory impact:
+        - target `LexicalRuntimeIndex` reduction: about `30 KB` to `45 KB`
+      - expected code delta:
+        - about `+120` to `+220` lines with a simple candidate-time expansion path
+        - about `+180` to `+300` lines if hot-cache management and invalidation are added
+      - expected risks:
+        - quality: low if reconstructed token tape is faithful
+        - latency: low to medium depending on cache hit rate and rerank demand
+      - acceptance:
+        - `doc.bodyTokens` is no longer a major always-resident segment
+        - phrase, witness, and local-window behavior remain benchmark-compatible
+        - startup restore still has a clean source of truth for reconstructing candidate-time token evidence
+    - `Phase 3A-D`: re-evaluate the remaining resident core only after the split is visible
+      - capture a fresh real-vault exclusive breakdown after `Phase 3A-B` and `Phase 3A-C`
+      - if `postings.body` still dominates:
+        - pursue packed or tape-based ownership for the remaining resident exact postings
+      - if memory is already near target:
+        - defer deeper storage rewrites and move on to the binary schema contract
+      - expected live-memory impact:
+        - target `LexicalRuntimeIndex` reduction: about `35 KB` to `65 KB`
+      - expected code delta:
+        - about `+220` to `+380` lines
+      - expected risks:
+        - quality: low if semantics stay unchanged
+        - latency: low, with a good chance of mild improvement
+      - acceptance:
+        - the remaining resident exact-posting ownership is measurably smaller
+        - the retained resident core is cleaner and closer to the future binary section layout
+  - projected result if `Phase 3A-B` and `Phase 3A-C` both land cleanly:
+    - likely `LexicalRuntimeIndex` moves from about `488 KB` toward roughly `285 KB` to `345 KB`
+    - this is the first path that plausibly gets live-memory much closer to the MiniSearch range without weakening exact body recall
+  - projected result if `Phase 3A-D` is also needed:
+    - likely `LexicalRuntimeIndex` can move further toward roughly `240 KB` to `310 KB`
+  - gating rule:
+    - do not advance `Phase 3B` until the resident-core versus on-demand boundary has stabilized across at least one retained `Phase 3A-B` or `Phase 3A-C` anchor
 - `Phase 3B`: minimum binary snapshot schema contract
   - freeze a minimal persisted section layout before broad storage compression work drifts further
   - keep the schema intentionally small:
