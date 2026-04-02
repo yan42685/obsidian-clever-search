@@ -452,6 +452,7 @@
 						{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
 							<ul>
 								{#each currFileSubItems as subItem, index}
+									{@const structuredSegments = getStructuredSnippetSegments(subItem)}
 									<button
 										on:click={() => handleSubItemClick(index)}
 										on:contextmenu={(e) => {
@@ -472,8 +473,7 @@
 											>
 										{/if}
 										<span class="subitem-snippet">
-											{@const structuredSegments = getStructuredSnippetSegments(subItem)}
-										{#if structuredSegments}
+											{#if structuredSegments}
 												{#each structuredSegments as segment}
 													{#if segment.highlight}
 														<mark>{segment.text}</mark>
