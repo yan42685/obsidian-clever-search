@@ -243,10 +243,10 @@
 	}
 
 	function shouldShowSectionHeader(index: number): boolean {
-		return (
-			queryText.trim().length === 0 &&
-			(index === 0 || results[index - 1]?.section !== results[index]?.section)
-		);
+		if (queryText.trim().length === 0) {
+			return false;
+		}
+		return index === 0 || results[index - 1]?.section !== results[index]?.section;
 	}
 
 	function shouldShowPath(entry: SearchAutocompleteCandidate): boolean {

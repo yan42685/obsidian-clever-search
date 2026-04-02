@@ -217,26 +217,24 @@ export class SearchAutocompleteService {
 		const emptyQuery = this.parseNavigationQuery("");
 		const navigationHabitSignals =
 			this.searchHistoryService.getNavigationHabitSignals("");
-		const recentTargets = this.buildRecentNavigationCandidates(
-			SearchAutocompleteService.RECENT_TARGET_LIMIT,
-			navigationHabitSignals,
+		candidates.push(
+			...this.buildRecentNavigationCandidates(
+				Math.max(limit, SearchAutocompleteService.RECENT_TARGET_LIMIT),
+				navigationHabitSignals,
+			),
 		);
-		const occupiedTargets = new Set(
-			recentTargets.map((candidate) => candidate.openLinkText),
-		);
-		candidates.push(...recentTargets);
 
 		if (this.setting.searchHistory.sources.recentFile) {
-			const remaining = Math.max(0, limit - candidates.length);
-			const recentFiles = this.buildRecentFileCandidates(
-				emptyQuery,
-				"recent-files",
-				navigationHabitSignals,
-			).filter((candidate) => !occupiedTargets.has(candidate.openLinkText));
-			candidates.push(...recentFiles.slice(0, remaining));
+			candidates.push(
+				...this.buildRecentFileCandidates(
+					emptyQuery,
+					"recent-targets",
+					navigationHabitSignals,
+				),
+			);
 		}
 
-		return candidates.slice(0, limit);
+		return this.sortAndTrimCandidates(candidates, limit);
 	}
 
 	private buildMatchedCandidate(
