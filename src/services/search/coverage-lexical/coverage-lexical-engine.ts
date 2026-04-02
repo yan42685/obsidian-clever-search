@@ -62,6 +62,9 @@ import {
 	type CoverageLexicalLivePostingKey,
 	type CoverageLexicalPostingOwnership,
 } from "./coverage-lexical-posting-layout";
+import {
+	CoverageLexicalSharedTokenIdPostingMap,
+} from "./coverage-lexical-live-posting-store";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import type {
 	CoverageFamilyMatchKind,
@@ -188,10 +191,14 @@ const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerived
 		},
 	];
 
-type CoverageLexicalMutableNumericPostingMap = Map<
+type CoverageLexicalMutableNumericPostingMap = ReadonlyMap<
 	string,
 	number[] | Uint32Array
->;
+> & {
+	set(term: string, docIds: number[] | Uint32Array): unknown;
+	delete(term: string): boolean;
+	clear(): void;
+};
 
 function createCoverageLexicalDocument(
 	docId: number,
@@ -392,7 +399,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentTagValuesById: Array<readonly string[] | undefined> = [];
 	private fileSnapshotStore: FileSnapshotStore | null | undefined;
 	private nextDocumentId = 0;
-	private readonly bodyPostings = new Map<string, Uint32Array>();
+	private readonly bodyPostings = new CoverageLexicalSharedTokenIdPostingMap(
+		(term) => this.documentBodyTokenIdByTerm.get(term),
+		(term) => this.getOrCreateDocumentBodyTokenId(term),
+		(tokenId) => this.documentBodyTokenLexicon[tokenId],
+	);
 	private readonly bodyCharPostings = new Map<string, Uint32Array>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
@@ -660,6 +671,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentBodyTokenLexicon.length = 0;
 			this.documentBodyTokenIdByTerm.clear();
 			this.documentBodyTokenIdTape = new Uint32Array(0);
+			this.bodyPostings.clear();
 			return;
 		}
 		const usedTokenIds = new Set(this.documentBodyTokenIdTape);
@@ -687,11 +699,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			const nextTokenId = tokenIdRemap.get(tokenId);
 			if (nextTokenId === undefined) {
 				throw new Error(
-					`Missing compacted coverage lexical body token id for ${tokenId}`,
+					"Missing compacted coverage lexical body token id for " + tokenId,
 				);
 			}
 			return nextTokenId;
 		});
+		this.bodyPostings.remapTokenIds(tokenIdRemap, nextLexicon.length);
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenLexicon.push(...nextLexicon);
 		this.documentBodyTokenIdByTerm.clear();
@@ -1069,12 +1082,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const postings = Object.fromEntries(
 			COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS.map((descriptor) => [
 				descriptor.breakdownKey ?? descriptor.key,
-				estimateOwnedNumericPostingMapBytes(
-					this.getLivePostingMap(descriptor.key),
-					accumulator,
-					descriptor.source ?? `postings.${descriptor.key}.term`,
-					descriptor.ownership,
-				),
+				descriptor.key === "bodyPostings"
+					? estimateSharedTokenIdPostingMapBytes(this.bodyPostings)
+					: estimateOwnedNumericPostingMapBytes(
+							this.getLivePostingMap(descriptor.key),
+							accumulator,
+							(descriptor.source ?? ("postings." + descriptor.key + ".term")),
+							descriptor.ownership,
+						),
 			]),
 		);
 		const lexicon = estimateStringArrayBytes(
@@ -2401,6 +2416,42 @@ function estimateOwnedNumericPostingMapBytes(
 		postingCount,
 		mapEntryBytes,
 		termReferenceBytes,
+		postingNumberBytes,
+		postingListBytes,
+	};
+}
+
+function estimateSharedTokenIdPostingMapBytes(
+	postings: CoverageLexicalSharedTokenIdPostingMap,
+): {
+	total: number;
+	termCount: number;
+	postingCount: number;
+	slotCount: number;
+	slotReferenceBytes: number;
+	postingNumberBytes: number;
+	postingListBytes: number;
+} {
+	let termCount = 0;
+	let postingCount = 0;
+	let postingListBytes = 0;
+	for (const [, docIds] of postings.getTokenIdEntries()) {
+		termCount += 1;
+		postingCount += docIds.length;
+		postingListBytes += estimatePackedUint32Bytes(docIds.length);
+	}
+	const slotCount = postings.slotCount;
+	const slotReferenceBytes = slotCount * INDEX_REFERENCE_BYTES;
+	const postingNumberBytes = postingCount * INDEX_POSTING_DOC_ID_BYTES;
+	return {
+		total:
+			INDEX_COLLECTION_HEADER_BYTES +
+			slotReferenceBytes +
+			postingListBytes,
+		termCount,
+		postingCount,
+		slotCount,
+		slotReferenceBytes,
 		postingNumberBytes,
 		postingListBytes,
 	};
