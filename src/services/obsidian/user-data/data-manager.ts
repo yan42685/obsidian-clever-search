@@ -2817,6 +2817,14 @@ export class DataManager {
       );
       console.table(lexicalRuntimeBreakdown.rows);
     }
+    if (lexicalRuntimeBreakdown.stringPoolGroupRows.length > 0) {
+      console.log("[clever-search] Lexical stringPool breakdown (groups)");
+      console.table(lexicalRuntimeBreakdown.stringPoolGroupRows);
+    }
+    if (lexicalRuntimeBreakdown.stringPoolSourceRows.length > 0) {
+      console.log("[clever-search] Lexical stringPool breakdown (sources)");
+      console.table(lexicalRuntimeBreakdown.stringPoolSourceRows);
+    }
     if (lexicalHeapDeltaRows.length > 0) {
       console.log("[clever-search] Lexical heap delta");
       console.table(lexicalHeapDeltaRows);
@@ -3001,12 +3009,16 @@ export class DataManager {
     noticeLines: string[];
     summaryLine: string | null;
     rows: DevStorageBreakdownRow[];
+    stringPoolGroupRows: DevStorageBreakdownRow[];
+    stringPoolSourceRows: DevStorageBreakdownRow[];
   } {
     if (!breakdown) {
       return {
         noticeLines: [],
         summaryLine: null,
         rows: [],
+        stringPoolGroupRows: [],
+        stringPoolSourceRows: [],
       };
     }
 
@@ -3016,6 +3028,8 @@ export class DataManager {
         noticeLines: [],
         summaryLine: null,
         rows: [],
+        stringPoolGroupRows: [],
+        stringPoolSourceRows: [],
       };
     }
 
@@ -3082,12 +3096,45 @@ export class DataManager {
       shareOfLexical: this.formatPercent(segment.bytes, totalBytes),
       shareOfVault: this.formatPercent(segment.bytes, indexableBytes),
     }));
+    const stringPool = this.asRecord(estimatedBytes.stringPool);
+    const buildStringPoolRows = (
+      entries: Record<string, unknown> | null | undefined,
+    ): DevStorageBreakdownRow[] => {
+      if (!entries || totalBytes <= 0) {
+        return [];
+      }
+      return Object.entries(entries)
+        .map(([segment, value]) => {
+          const record = this.asRecord(value);
+          const bytes = this.readNumber(record?.bytes);
+          if (bytes === null || bytes <= 0) {
+            return null;
+          }
+          return {
+            segment,
+            bytes,
+            size: this.formatBytes(bytes),
+            shareOfLexical: this.formatPercent(bytes, totalBytes),
+            shareOfVault: this.formatPercent(bytes, indexableBytes),
+          };
+        })
+        .filter((row): row is DevStorageBreakdownRow => row !== null)
+        .sort((left, right) => right.bytes - left.bytes);
+    };
+    const stringPoolGroupRows = buildStringPoolRows(
+      this.asRecord(stringPool?.byGroup),
+    );
+    const stringPoolSourceRows = buildStringPoolRows(
+      this.asRecord(stringPool?.bySource),
+    ).slice(0, 12);
 
     if (rows.length === 0 || totalBytes <= 0) {
       return {
         noticeLines: [],
         summaryLine: null,
         rows,
+        stringPoolGroupRows,
+        stringPoolSourceRows,
       };
     }
 
@@ -3102,6 +3149,8 @@ export class DataManager {
       noticeLines: [headline, topLine, accountingLine],
       summaryLine: `${headline}; ${topLine}; ${accountingLine}`,
       rows,
+      stringPoolGroupRows,
+      stringPoolSourceRows,
     };
   }
 
