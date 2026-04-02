@@ -214,15 +214,15 @@ export class MiniSearchFileEngine implements FileSearchEngine {
 
 @singleton()
 export class FileSearchEngineFactory {
-	private readonly setting = getInstance(OuterSetting);
 	private readonly miniSearch = getInstance(MiniSearchFileEngine);
 	private readonly coverageLexical = getInstance(CoverageLexicalFileSearchEngine);
 
 	getActiveEngine(): FileSearchEngine {
-		if (this.setting.fileSearchBackend === "coverage-lexical") {
-			return this.coverageLexical;
-		}
-		return this.miniSearch;
+		return this.coverageLexical;
+	}
+
+	getEngineForBenchmark(backend: FileSearchBackend): FileSearchEngine {
+		return backend === "minisearch" ? this.miniSearch : this.coverageLexical;
 	}
 }
 

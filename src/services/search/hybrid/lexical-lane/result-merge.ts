@@ -52,14 +52,20 @@ function shouldSuppressRankedBlockCandidate(
 	if (candidate.filePath !== existing.filePath) {
 		return false;
 	}
-	if (computeBlockOverlapRatio(candidate, existing) >= 0.82) {
+	const overlapRatio = computeBlockOverlapRatio(candidate, existing);
+	const noveltyRatio = computeRankedBlockNoveltyRatio(candidate, existing);
+	if (overlapRatio >= 0.9 && noveltyRatio < 0.2) {
+		return true;
+	}
+	if (overlapRatio >= 0.8 && noveltyRatio < 0.12) {
 		return true;
 	}
 	if (
 		candidate.headingChain.join("\u001f") ===
 			existing.headingChain.join("\u001f") &&
 		Math.abs(candidate.localSignals.anchorOffset - existing.localSignals.anchorOffset) <
-			120
+			96 &&
+		noveltyRatio < 0.28
 	) {
 		return true;
 	}
@@ -73,16 +79,61 @@ function shouldSuppressDisplayCandidate(
 	if (candidate.filePath !== existing.filePath) {
 		return false;
 	}
-	if (computeDisplayOverlapRatio(candidate, existing) >= 0.78) {
+	const overlapRatio = computeDisplayOverlapRatio(candidate, existing);
+	const noveltyRatio = computeDisplayNoveltyRatio(candidate, existing);
+	if (overlapRatio >= 0.9 && noveltyRatio < 0.2) {
 		return true;
 	}
 	if (
 		candidate.segmentText === existing.segmentText &&
-		Math.abs(candidate.anchorOffset - existing.anchorOffset) < 120
+		Math.abs(candidate.anchorOffset - existing.anchorOffset) < 96 &&
+		noveltyRatio < 0.24
 	) {
 		return true;
 	}
-	return false;
+	return overlapRatio >= 0.82 && noveltyRatio < 0.08;
+}
+
+function computeRankedBlockNoveltyRatio(
+	candidate: Pick<HybridLexicalLaneRankedBlockCandidate, "matchOccurrences">,
+	existing: Pick<HybridLexicalLaneRankedBlockCandidate, "matchOccurrences">,
+): number {
+	if (candidate.matchOccurrences.length === 0) {
+		return 0;
+	}
+	let novelCount = 0;
+	for (const occurrence of candidate.matchOccurrences) {
+		const overlapsExisting = existing.matchOccurrences.some(
+			(previous) =>
+				previous.termId === occurrence.termId &&
+				Math.min(previous.end, occurrence.end) >
+					Math.max(previous.start, occurrence.start),
+		);
+		if (!overlapsExisting) {
+			novelCount += 1;
+		}
+	}
+	return novelCount / candidate.matchOccurrences.length;
+}
+
+function computeDisplayNoveltyRatio(
+	candidate: Pick<HybridLexicalLaneDisplayCandidate, "highlightRanges">,
+	existing: Pick<HybridLexicalLaneDisplayCandidate, "highlightRanges">,
+): number {
+	if (candidate.highlightRanges.length === 0) {
+		return 0;
+	}
+	let novelCount = 0;
+	for (const range of candidate.highlightRanges) {
+		const overlapsExisting = existing.highlightRanges.some(
+			(previous) =>
+				Math.min(previous.end, range.end) > Math.max(previous.start, range.start),
+		);
+		if (!overlapsExisting) {
+			novelCount += 1;
+		}
+	}
+	return novelCount / candidate.highlightRanges.length;
 }
 
 function computeBlockOverlapRatio(

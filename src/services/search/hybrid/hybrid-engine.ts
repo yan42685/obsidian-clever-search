@@ -420,6 +420,13 @@ export class HybridEngine {
     query: string,
     topK = this.defaultResultCount,
   ): Promise<FileItem[]> {
+    return await this.searchWithLexicalLane(query, topK);
+  }
+
+  async searchWithBm25Baseline(
+    query: string,
+    topK = this.defaultResultCount,
+  ): Promise<FileItem[]> {
     if (!this.isEnabled() || !this._ready || !query.trim()) return [];
     let fallbackNoticeKey: LocaleKey | null = this._canSearch
       ? null
@@ -516,11 +523,13 @@ export class HybridEngine {
     if (!this.isEnabled() || !this._ready || !query.trim()) {
       return [];
     }
-    return await runHybridLexicalLaneSearch({
+    const items = await runHybridLexicalLaneSearch({
       queryText: query,
       displayTopK: topK,
       rerankTopK: Math.max(topK * 2, topK),
     });
+    this.lastSearchFallbackNoticeKey = null;
+    return items;
   }
 
   async persistIndicesForBatch(): Promise<void> {

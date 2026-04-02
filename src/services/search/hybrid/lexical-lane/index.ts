@@ -34,8 +34,8 @@ export function runHybridLexicalLaneCandidatePipeline(params: {
 	displayMaxChars?: number;
 	globalPoolMax?: number;
 }): HybridLexicalLaneDisplayCandidate[] {
-	const pool = params.blockCandidates.slice(
-		0,
+	const pool = preselectHybridLexicalLaneBlockCandidates(
+		params.blockCandidates,
 		params.globalPoolMax ?? HYBRID_LEXICAL_LANE_GLOBAL_POOL_MAX,
 	);
 	const ranked = rankHybridLexicalLaneBlockCandidates(pool);
@@ -98,4 +98,46 @@ export async function runHybridLexicalLaneSearch(params: {
 		displayMaxChars: params.displayMaxChars,
 		globalPoolMax: params.globalPoolMax,
 	});
+}
+
+function preselectHybridLexicalLaneBlockCandidates(
+	candidates: readonly HybridLexicalLaneBlockCandidate[],
+	limit: number,
+): HybridLexicalLaneBlockCandidate[] {
+	if (candidates.length <= limit) {
+		return [...candidates];
+	}
+	return [...candidates]
+		.sort((left, right) => {
+			const scoreDiff = computePoolPriorScore(right) - computePoolPriorScore(left);
+			if (scoreDiff !== 0) {
+				return scoreDiff;
+			}
+			if (left.parentFileRank !== right.parentFileRank) {
+				return left.parentFileRank - right.parentFileRank;
+			}
+			return left.startOffset - right.startOffset;
+		})
+		.slice(0, limit);
+}
+
+function computePoolPriorScore(candidate: HybridLexicalLaneBlockCandidate): number {
+	const metadata = candidate.parentMetadataSignals;
+	return (
+		candidate.localScore +
+		Math.log1p(Math.max(0, candidate.parentFileScore)) * 48 +
+		Math.max(0, 14 - candidate.parentFileRank) * 18 +
+		candidate.localSignals.coverageCount * 22 +
+		candidate.localSignals.exactCount * 18 +
+		candidate.localSignals.prefixCount * 10 -
+		candidate.localSignals.missCount * 20 -
+		candidate.localSignals.distancePenaltyTotal * 0.8 -
+		candidate.localSignals.spanLength * 0.06 +
+		(metadata.basenameExact ? 180 : 0) +
+		(metadata.basenamePrefix ? 96 : 0) +
+		(metadata.pathExact ? 54 : 0) +
+		(metadata.pathPrefix ? 22 : 0) +
+		(metadata.headingMetaHit ? 30 : 0) +
+		(metadata.aliasHit ? 24 : 0)
+	);
 }

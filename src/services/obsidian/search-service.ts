@@ -90,18 +90,8 @@ export class SearchService {
 			return await this.searchInVaultLexical(queryText);
 		}
 
-		if (
-			mode === "default"
-				? !this.hybridEngine.canServeQuery()
-				: !this.hybridEngine.isReady()
-		) {
+		if (!this.hybridEngine.isReady()) {
 			return await this.searchInVaultLexical(queryText);
-		}
-		const dataManager = getInstance(DataManager);
-		if (mode === "default" && dataManager.hasHybridFailedEmbeddings()) {
-			return await this.searchInVaultLexical(queryText, {
-				hybridEmbeddingIncomplete: true,
-			});
 		}
 		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
 		const items =

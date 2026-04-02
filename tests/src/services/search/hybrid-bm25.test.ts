@@ -1,3 +1,4 @@
+import { performance } from "perf_hooks";
 import { container } from "tsyringe";
 import { BM25Engine } from "src/services/search/hybrid/bm25";
 
@@ -12,6 +13,31 @@ const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 type MockTokenizer = {
 	tokenize(text: string, mode?: "index" | "search"): string[];
 	tokenizeSequence(text: string, mode?: "index" | "search"): string[];
+};
+
+type IndexedDocument = {
+	path: string;
+	basename: string;
+	folder: string;
+	content?: string;
+	aliases?: string;
+	tags?: string;
+	headings?: string;
+};
+
+type QueryCase = {
+	query: string;
+	relevantPath: string;
+	type: string;
+	suite: string;
+};
+
+type BenchmarkMetric = {
+	top1: number;
+	top3: number;
+	top5: number;
+	zeroRate: number;
+	count: number;
 };
 
 function createMockTokenizer(): MockTokenizer {
@@ -29,6 +55,223 @@ function createMockTokenizer(): MockTokenizer {
 				.filter((term) => term.length > 0);
 		},
 	};
+}
+
+function round(value: number): number {
+	return Number(value.toFixed(3));
+}
+
+function createEmptyMetric(): BenchmarkMetric {
+	return {
+		top1: 0,
+		top3: 0,
+		top5: 0,
+		zeroRate: 0,
+		count: 0,
+	};
+}
+
+function updateMetric(metric: BenchmarkMetric, rank: number): void {
+	metric.count += 1;
+	metric.top1 += rank === 1 ? 1 : 0;
+	metric.top3 += rank > 0 && rank <= 3 ? 1 : 0;
+	metric.top5 += rank > 0 && rank <= 5 ? 1 : 0;
+	metric.zeroRate += rank === 0 ? 1 : 0;
+}
+
+function finalizeMetric(metric: BenchmarkMetric): BenchmarkMetric {
+	if (metric.count === 0) {
+		return metric;
+	}
+	return {
+		count: metric.count,
+		top1: round(metric.top1 / metric.count),
+		top3: round(metric.top3 / metric.count),
+		top5: round(metric.top5 / metric.count),
+		zeroRate: round(metric.zeroRate / metric.count),
+	};
+}
+
+function documentText(document: IndexedDocument): string {
+	return [
+		document.path,
+		document.basename,
+		document.folder,
+		document.aliases ?? "",
+		document.tags ?? "",
+		document.headings ?? "",
+		document.content ?? "",
+	].join("\n");
+}
+
+function ensureBrowserLikeWindow(): void {
+	const globalScope = globalThis as Record<string, unknown>;
+	const existingWindow = globalScope.window as
+		| { localStorage?: Storage }
+		| undefined;
+	if (existingWindow?.localStorage) {
+		return;
+	}
+	const store = new Map<string, string>();
+	globalScope.window = {
+		localStorage: {
+			get length(): number {
+				return store.size;
+			},
+			getItem(key: string): string | null {
+				return store.has(key) ? store.get(key) ?? null : null;
+			},
+			setItem(key: string, value: string): void {
+				store.set(key, value);
+			},
+			removeItem(key: string): void {
+				store.delete(key);
+			},
+			clear(): void {
+				store.clear();
+			},
+			key(index: number): string | null {
+				return Array.from(store.keys())[index] ?? null;
+			},
+		},
+	} satisfies { localStorage: Storage };
+}
+
+function loadAutomationCorpus(): {
+	documents: IndexedDocument[];
+	queryCases: QueryCase[];
+} {
+	const globalScope = globalThis as Record<string, unknown>;
+	const hookNames = [
+		"describe",
+		"it",
+		"test",
+		"beforeEach",
+		"afterEach",
+		"beforeAll",
+		"afterAll",
+	];
+	const originals = new Map<string, unknown>();
+	const noop = () => undefined;
+	for (const hookName of hookNames) {
+		originals.set(hookName, globalScope[hookName]);
+		globalScope[hookName] = noop;
+	}
+	try {
+		const modulePath = require.resolve("./coverage-lexical-automation-benchmark.bench");
+		delete require.cache[modulePath];
+		const fixtureModule = require(modulePath) as {
+			createAutomationCorpus: () => {
+				documents: IndexedDocument[];
+				queryCases: QueryCase[];
+			};
+		};
+		return fixtureModule.createAutomationCorpus();
+	} finally {
+		for (const hookName of hookNames) {
+			globalScope[hookName] = originals.get(hookName);
+		}
+	}
+}
+
+async function evaluateLexicalLaneAgainstCorpus(params: {
+	documents: readonly IndexedDocument[];
+	queryCases: readonly QueryCase[];
+	tokenizer: MockTokenizer;
+}): Promise<BenchmarkMetric> {
+	ensureBrowserLikeWindow();
+	const { OuterSetting, DEFAULT_OUTER_SETTING } = require(
+		"src/globals/plugin-setting",
+	) as typeof import("src/globals/plugin-setting");
+	const { CoverageLexicalFileSearchEngine } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-engine",
+	) as typeof import("src/services/search/coverage-lexical/coverage-lexical-engine");
+	const { buildHybridLexicalLaneFileCandidates } = require(
+		"src/services/search/hybrid/lexical-lane/file-shortlist",
+	) as typeof import("src/services/search/hybrid/lexical-lane/file-shortlist");
+	const { buildHybridLexicalLaneBlockCandidatesForSnapshot } = require(
+		"src/services/search/hybrid/lexical-lane/local-block-recall",
+	) as typeof import("src/services/search/hybrid/lexical-lane/local-block-recall");
+	const { runHybridLexicalLaneFileItemPipeline } = require(
+		"src/services/search/hybrid/lexical-lane",
+	) as typeof import("src/services/search/hybrid/lexical-lane");
+
+	const setting = JSON.parse(JSON.stringify(DEFAULT_OUTER_SETTING));
+	setting.isCaseSensitive = false;
+	setting.isPrefixMatch = true;
+	setting.isFuzzy = true;
+	setting.enableChinesePatch = false;
+	setting.enableStopWordsEn = false;
+	setting.enableStopWordsZh = false;
+	container.register(OuterSetting, { useValue: setting });
+	container.register(Tokenizer, {
+		useValue: params.tokenizer,
+	});
+
+	const engine = new CoverageLexicalFileSearchEngine();
+	await engine.addDocuments([...params.documents]);
+
+	const docByPath = new Map(
+		params.documents.map((document) => [document.path, document] as const),
+	);
+	const metric = createEmptyMetric();
+	for (const queryCase of params.queryCases) {
+		const matchedFiles = await engine.searchFiles({
+			queryText: queryCase.query,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 24,
+		});
+		const fileCandidates = buildHybridLexicalLaneFileCandidates({
+			queryText: queryCase.query,
+			limit: 8,
+			matches: matchedFiles.map((match, index) => ({
+				path: match.path,
+				score: match.score ?? 0,
+				rank: index,
+			})),
+			resolveMetadata: (path) => {
+				const document = docByPath.get(path);
+				if (!document) {
+					return null;
+				}
+				return {
+					aliases: document.aliases
+						?.split(/\s+/)
+						.filter((value) => value.length > 0),
+					headings: document.headings
+						?.split(/\s+/)
+						.filter((value) => value.length > 0),
+				};
+			},
+		});
+
+		const snapshotTextByPath = new Map<string, string>();
+		const blockCandidates = fileCandidates.flatMap((fileCandidate) => {
+			const document = docByPath.get(fileCandidate.filePath);
+			const snapshotText = document?.content ?? "";
+			snapshotTextByPath.set(fileCandidate.filePath, snapshotText);
+			return buildHybridLexicalLaneBlockCandidatesForSnapshot({
+				queryText: queryCase.query,
+				file: fileCandidate,
+				snapshotText,
+				maxBlocksPerFile: 8,
+			});
+		});
+
+		const fileItems = runHybridLexicalLaneFileItemPipeline({
+			queryText: queryCase.query,
+			blockCandidates,
+			snapshotTextByPath,
+			rerankTopK: 16,
+			displayTopK: 8,
+		});
+		const rank =
+			fileItems.findIndex((item: { path: string }) => item.path === queryCase.relevantPath) +
+			1;
+		updateMetric(metric, rank);
+	}
+	return finalizeMetric(metric);
 }
 
 describe("hybrid BM25 query expansion", () => {
@@ -103,5 +346,71 @@ describe("hybrid BM25 query expansion", () => {
 		});
 
 		expect(results.map((item) => item.docId)).toEqual([1, 2]);
+	});
+
+	test("compares lexical lane against BM25 baseline on the automation corpus", async () => {
+		const { documents, queryCases } = loadAutomationCorpus();
+		const tokenizer = createMockTokenizer();
+		container.registerInstance(
+			Tokenizer,
+			tokenizer as InstanceType<typeof Tokenizer>,
+		);
+		const bm25 = new BM25Engine();
+		const docPathById = new Map<number, string>();
+
+		documents.forEach((document, index) => {
+			const docId = index + 1;
+			docPathById.set(docId, document.path);
+			bm25.addDocument(docId, documentText(document));
+		});
+
+		const baselineMetric = createEmptyMetric();
+		const baselineStartedAt = performance.now();
+		for (const queryCase of queryCases) {
+			const results = bm25.search(queryCase.query, 8, {
+				useProximity: false,
+				enableQueryExpansion: true,
+			});
+			const rank =
+				results
+					.map((result) => docPathById.get(result.docId) ?? null)
+					.filter((path): path is string => path !== null)
+					.findIndex((path) => path === queryCase.relevantPath) + 1;
+			updateMetric(baselineMetric, rank);
+		}
+		const baselineElapsedMs = performance.now() - baselineStartedAt;
+		const lexicalStartedAt = performance.now();
+		const lexicalMetric = await evaluateLexicalLaneAgainstCorpus({
+			documents,
+			queryCases,
+			tokenizer,
+		});
+		const lexicalElapsedMs = performance.now() - lexicalStartedAt;
+		const finalizedBaselineMetric = finalizeMetric(baselineMetric);
+
+		console.log("[hybrid-lexical-lane-benchmark] compare", {
+			corpus: {
+				documents: documents.length,
+				queries: queryCases.length,
+			},
+			bm25Baseline: {
+				...finalizedBaselineMetric,
+				avgMsPerQuery: round(baselineElapsedMs / Math.max(1, queryCases.length)),
+			},
+			lexicalLane: {
+				...lexicalMetric,
+				avgMsPerQuery: round(lexicalElapsedMs / Math.max(1, queryCases.length)),
+			},
+		});
+
+		expect(lexicalMetric.top3).toBeGreaterThanOrEqual(
+			Math.max(0.6, finalizedBaselineMetric.top3 - 0.1),
+		);
+		expect(lexicalMetric.top5).toBeGreaterThanOrEqual(
+			Math.max(0.75, finalizedBaselineMetric.top5 - 0.08),
+		);
+		expect(lexicalMetric.zeroRate).toBeLessThanOrEqual(
+			Math.min(0.2, finalizedBaselineMetric.zeroRate + 0.06),
+		);
 	});
 });

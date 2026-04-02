@@ -29,30 +29,78 @@ export async function buildHybridLexicalLaneFileShortlist(params: {
 		queryText,
 		isPrefixMatch: setting.isPrefixMatch,
 		isFuzzy: setting.isFuzzy,
-		maxItemResults: params.limit,
+		maxItemResults: Math.max(params.limit, params.limit * 3),
 	});
 
-	return matchedFiles.map((match, index) => {
-		const file = dataProvider.getFileByPath(match.path);
-		const metadata = file ? app.metadataCache.getFileCache(file) : null;
-		const aliases = parseFrontMatterAliases(metadata?.frontmatter) || [];
-		const headings = metadata?.headings?.map((heading) => heading.heading) || [];
-		return {
-			filePath: match.path,
-			fileScore: match.score ?? 0,
-			fileRank: index,
-			basename: FileUtil.getBasename(match.path),
-			metadataSignals: buildMetadataSignals({
-				queryText,
-				path: match.path,
-				aliases,
-				headings,
-			}),
-		};
+	return buildHybridLexicalLaneFileCandidates({
+		queryText,
+		limit: params.limit,
+		matches: matchedFiles.map((match, index) => ({
+			path: match.path,
+			score: match.score ?? 0,
+			rank: index,
+		})),
+		resolveMetadata: (path) => {
+			const file = dataProvider.getFileByPath(path);
+			const metadata = file ? app.metadataCache.getFileCache(file) : null;
+			return {
+				aliases: parseFrontMatterAliases(metadata?.frontmatter) || [],
+				headings: metadata?.headings?.map((heading) => heading.heading) || [],
+			};
+		},
 	});
 }
 
-function buildMetadataSignals(params: {
+export function buildHybridLexicalLaneFileCandidates(params: {
+	queryText: string;
+	limit?: number;
+	matches: ReadonlyArray<{
+		path: string;
+		score?: number;
+		rank?: number;
+	}>;
+	resolveMetadata?: (
+		path: string,
+	) => { aliases?: readonly string[]; headings?: readonly string[] } | null;
+}): HybridLexicalLaneFileCandidate[] {
+	const reranked = params.matches
+		.map((match, index) => {
+			const metadata = params.resolveMetadata?.(match.path) ?? null;
+			const aliases = metadata?.aliases ?? [];
+			const headings = metadata?.headings ?? [];
+			return {
+				filePath: match.path,
+				fileScore: match.score ?? 0,
+				fileRank: match.rank ?? index,
+				basename: FileUtil.getBasename(match.path),
+				metadataSignals: buildHybridLexicalLaneMetadataSignals({
+					queryText: params.queryText,
+					path: match.path,
+					aliases,
+					headings,
+				}),
+			};
+		})
+		.sort((left, right) => {
+			const scoreDiff =
+				computeHybridLexicalLaneFileCandidateScore(right) -
+				computeHybridLexicalLaneFileCandidateScore(left);
+			if (scoreDiff !== 0) {
+				return scoreDiff;
+			}
+			if (left.fileRank !== right.fileRank) {
+				return left.fileRank - right.fileRank;
+			}
+			return left.filePath.localeCompare(right.filePath);
+		})
+		.map((candidate, index) => ({
+			...candidate,
+			fileRank: index,
+		}));
+	return reranked.slice(0, params.limit ?? reranked.length);
+}
+
+export function buildHybridLexicalLaneMetadataSignals(params: {
 	queryText: string;
 	path: string;
 	aliases: readonly string[];
@@ -77,4 +125,19 @@ function buildMetadataSignals(params: {
 
 function normalizeKey(text: string): string {
 	return text.trim().toLocaleLowerCase();
+}
+
+function computeHybridLexicalLaneFileCandidateScore(
+	candidate: HybridLexicalLaneFileCandidate,
+): number {
+	const metadata = candidate.metadataSignals;
+	return (
+		Math.log1p(Math.max(0, candidate.fileScore)) * 44 +
+		(metadata.basenameExact ? 260 : 0) +
+		(metadata.basenamePrefix ? 132 : 0) +
+		(metadata.pathExact ? 72 : 0) +
+		(metadata.pathPrefix ? 28 : 0) +
+		(metadata.headingMetaHit ? 40 : 0) +
+		(metadata.aliasHit ? 34 : 0)
+	);
 }

@@ -1,4 +1,7 @@
 export type HybridLexicalLaneMatchTier = "exact" | "prefix" | "fuzzy";
+export type HybridLexicalLaneSpanTermTier =
+	| HybridLexicalLaneMatchTier
+	| "miss";
 
 export type HybridLexicalLaneMatchOccurrence = {
 	termId: string;
@@ -6,6 +9,12 @@ export type HybridLexicalLaneMatchOccurrence = {
 	start: number;
 	end: number;
 	distancePenalty: number;
+};
+
+export type HybridLexicalLaneTermStat = {
+	termId: string;
+	bestTier: HybridLexicalLaneSpanTermTier;
+	bestDistancePenalty: number;
 };
 
 export type HybridLexicalLaneMetadataSignals = {
@@ -30,6 +39,10 @@ export type HybridLexicalLaneLocalSignals = {
 	exactCount: number;
 	prefixCount: number;
 	fuzzyCount: number;
+	queryTermCount: number;
+	missCount: number;
+	occurrenceCount: number;
+	occurrenceSpread: number;
 	distancePenaltyTotal: number;
 	distancePenaltyMax: number;
 	spanLength: number;
@@ -49,8 +62,10 @@ export type HybridLexicalLaneBlockCandidate = {
 	headingChain: string[];
 	parentFileScore: number;
 	parentFileRank: number;
+	parentMetadataSignals: HybridLexicalLaneMetadataSignals;
 	localScore: number;
 	localSignals: HybridLexicalLaneLocalSignals;
+	termStats: HybridLexicalLaneTermStat[];
 	matchOccurrences: HybridLexicalLaneMatchOccurrence[];
 };
 
