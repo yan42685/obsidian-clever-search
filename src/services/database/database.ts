@@ -17,6 +17,7 @@ import type {
   ChunkRow,
   ChunkVectorShardRow,
   HybridFileSnapshotRow,
+  HybridDirtyShadowRow,
   HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
@@ -56,6 +57,7 @@ export class Database {
       { name: "lexicalIndexedFileRefs", table: this.db.lexicalIndexedFileRefs },
       { name: "hybridChunks", table: this.db.hybridChunks },
       { name: "fileSnapshots", table: this.db.fileSnapshots },
+      { name: "hybridDirtyShadows", table: this.db.hybridDirtyShadows },
       { name: "hybridChunkVectors", table: this.db.hybridChunkVectors },
       { name: "hybridBm25Index", table: this.db.hybridBm25Index },
       { name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
@@ -333,7 +335,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 18;
+  private static readonly _dbVersion = 19;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -346,6 +348,7 @@ class DexieWrapper extends Dexie {
   // Hybrid search tables
   hybridChunks!: Dexie.Table<ChunkRow, number>;
   fileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
+  hybridDirtyShadows!: Dexie.Table<HybridDirtyShadowRow, string>;
   hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
   hybridBm25Index!: Dexie.Table<BlobRecord, number>;
   hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
@@ -556,12 +559,29 @@ class DexieWrapper extends Dexie {
           tx.table("indexArtifactState").clear(),
         ]);
       });
+    this.version(19).stores({
+      pluginSetting: "++id",
+      lexicalSearchSnapshots: "++id",
+      lexicalIndexedFileRefs: "path",
+      hybridChunks: "++id, filePath",
+      fileSnapshots: "filePath",
+      hybridDirtyShadows: "filePath",
+      hybridChunkVectors: "filePath",
+      hybridBm25Index: "id",
+      hybridHnswSmall: "id",
+      hybridIndexedFileRefs: "path",
+      indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+      indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+      hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+    });
     this.version(DexieWrapper._dbVersion).stores({
       pluginSetting: "++id",
       lexicalSearchSnapshots: "++id",
       lexicalIndexedFileRefs: "path",
       hybridChunks: "++id, filePath",
       fileSnapshots: "filePath",
+      hybridDirtyShadows: "filePath",
       hybridChunkVectors: "filePath",
       hybridBm25Index: "id",
       hybridHnswSmall: "id",

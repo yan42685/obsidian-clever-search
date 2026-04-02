@@ -18,6 +18,7 @@ import {
 import type {
   ChunkRow,
   ChunkVectorShardRow,
+  HybridFileSnapshotRow,
   HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import {
@@ -96,7 +97,8 @@ type HybridStorageRepairReport = {
 
 type HybridStoredPathSummary = {
   chunkCount: number;
-  snapshotGeneration?: number;
+  currentSnapshotGeneration?: number;
+  shadowSnapshotGeneration?: number;
   vectorInfo?: HybridStoredVectorInfo;
   indexedFileRef?: HybridIndexedFileRef;
 };
@@ -223,6 +225,13 @@ type SearchBootstrapCompletionSummary = {
   lexicalRebuilt: boolean;
   hybridWorked: boolean;
   hybridFailed: boolean;
+};
+
+export type HybridFreshnessSummary = {
+  updatingFileCount: number;
+  repairFileCount: number;
+  totalTrackedFiles: number;
+  updatedAt: number;
 };
 
 class HybridIndexProgressNotice {
@@ -410,9 +419,54 @@ export class DataManager {
     return this.hybridRecoveryCoordinator.getDeferredSummary(totalFiles);
   }
 
+  async getHybridFreshnessSummary(): Promise<HybridFreshnessSummary> {
+    const trackedFiles = this.getHybridTrackedFiles();
+    if (!this.hybridEngine.isEnabled() || trackedFiles.length === 0) {
+      return {
+        updatingFileCount: 0,
+        repairFileCount: 0,
+        totalTrackedFiles: trackedFiles.length,
+        updatedAt: Date.now(),
+      };
+    }
+
+    const repairPaths = new Set(this.hybridRecoveryCoordinator.listFailurePaths());
+    const trackedRepairPaths = new Set(
+      trackedFiles
+        .map((file) => file.path)
+        .filter((path) => repairPaths.has(path)),
+    );
+    const indexedRefs = await this.database.db.hybridIndexedFileRefs.bulkGet(
+      trackedFiles.map((file) => file.path),
+    );
+
+    let updatingFileCount = 0;
+    for (let index = 0; index < trackedFiles.length; index++) {
+      const file = trackedFiles[index];
+      if (trackedRepairPaths.has(file.path)) {
+        continue;
+      }
+      const indexedRef = indexedRefs[index];
+      if (!indexedRef || file.stat.mtime > indexedRef.generation) {
+        updatingFileCount += 1;
+      }
+    }
+
+    return {
+      updatingFileCount,
+      repairFileCount: trackedRepairPaths.size,
+      totalTrackedFiles: trackedFiles.length,
+      updatedAt: Date.now(),
+    };
+  }
+
   private countHybridTrackedFiles(): number {
+    return this.getHybridTrackedFiles().length;
+  }
+
+  private getHybridTrackedFiles(): TFile[] {
     if (!this.hybridEngine.isEnabled()) {
-      return 0;
+      return [];
     }
     return this.plugin.app.vault
       .getFiles()
@@ -420,7 +474,7 @@ export class DataManager {
         (file) =>
           this.dataProvider.isIndexable(file) &&
           this.hybridEngine.shouldIndexPath(file.path),
-      ).length;
+      );
   }
 
   private resetLexicalSnapshotTracking(): void {
@@ -645,9 +699,6 @@ export class DataManager {
         );
         await this.noticeDevStorageStats();
       }
-      await this.fileSnapshotStore.refreshHighPerformanceState(
-        this.dataProvider.allFilesToBeIndexed(),
-      );
       new MyNotice(t("Indexing finished"), 5000);
       this.setLexicalBootstrapState("searchable");
     } catch (error) {
@@ -698,9 +749,6 @@ export class DataManager {
         new MyNotice(t("searchNotice.hybridIndexFinished"), 5000);
       }
     } finally {
-      await this.fileSnapshotStore.refreshHighPerformanceState(
-        this.dataProvider.allFilesToBeIndexed(),
-      );
       this.shouldForceRefresh = previousForceRefresh;
       this.notifyHybridRuntimeStatusChanged();
       getInstance(FileWatcher).start();
@@ -1088,9 +1136,6 @@ export class DataManager {
     if (this.hybridEngine.isEnabled()) {
       await this.deleteHybridFileAndRefreshRuntimeStatus(path);
     }
-    await this.fileSnapshotStore.refreshHighPerformanceState(
-      this.dataProvider.allFilesToBeIndexed(),
-    );
   }
 
   private async handleUpsertOperation(
@@ -1121,9 +1166,6 @@ export class DataManager {
     if (this.hybridEngine.isEnabled()) {
       await this.hybridEngine.deleteFile(path);
     }
-    await this.fileSnapshotStore.refreshHighPerformanceState(
-      this.dataProvider.allFilesToBeIndexed(),
-    );
   }
 
   private async handleMoveOperation(
@@ -1132,6 +1174,11 @@ export class DataManager {
     requiresReindex: boolean,
     sourceGeneration?: number,
   ): Promise<void> {
+    const canAttemptHybridMoveReuse =
+      !requiresReindex &&
+      this.hybridEngine.isEnabled() &&
+      (await this.canReuseMovedHybridState(oldPath));
+
     this.fileSnapshotStore.invalidateCurrentFile(oldPath);
     this.fileSnapshotStore.invalidateCurrentFile(newPath);
     this.cancelHybridRepair(oldPath);
@@ -1147,9 +1194,6 @@ export class DataManager {
       if (this.hybridEngine.isEnabled()) {
         await this.hybridEngine.deleteFile(oldPath);
       }
-      await this.fileSnapshotStore.refreshHighPerformanceState(
-        this.dataProvider.allFilesToBeIndexed(),
-      );
       return;
     }
 
@@ -1166,30 +1210,25 @@ export class DataManager {
         await this.hybridEngine.deleteFile(oldPath);
         await this.hybridEngine.deleteFile(newPath);
       }
-      await this.fileSnapshotStore.refreshHighPerformanceState(
-        this.dataProvider.allFilesToBeIndexed(),
-      );
       return;
     }
 
     const basenameChanged =
       FileUtil.getBasename(oldPath) !== FileUtil.getBasename(newPath);
-    const moved = await this.hybridEngine.moveFile(
-      oldPath,
-      newPath,
-      file.stat.mtime,
-    );
+    const moved =
+      canAttemptHybridMoveReuse && !basenameChanged
+        ? await this.hybridEngine.moveFile(oldPath, newPath, file.stat.mtime)
+        : false;
 
-    if (moved && !basenameChanged && !requiresReindex) {
+    if (moved) {
       await this.moveFailedHybridEmbedding(oldPath, newPath);
-      await this.fileSnapshotStore.refreshHighPerformanceState(
-        this.dataProvider.allFilesToBeIndexed(),
-      );
       return;
     }
 
     await this.clearFailedHybridEmbedding(oldPath);
     await this.clearFailedHybridEmbedding(newPath);
+    await this.hybridEngine.deleteFile(oldPath);
+    await this.hybridEngine.deleteFile(newPath);
 
     this.enqueueHybridRepair({
       path: file.path,
@@ -1199,9 +1238,25 @@ export class DataManager {
         : "runtime-incremental-edit",
       sourceGeneration: file.stat.mtime,
     });
-    await this.fileSnapshotStore.refreshHighPerformanceState(
-      this.dataProvider.allFilesToBeIndexed(),
-    );
+  }
+
+  private async canReuseMovedHybridState(path: string): Promise<boolean> {
+    const [indexedFileRef, snapshotRow, shadowRow] = await Promise.all([
+      this.database.db.hybridIndexedFileRefs.get(path),
+      this.database.db.fileSnapshots.get(path),
+      this.database.db.hybridDirtyShadows.get(path),
+    ]);
+
+    if (
+      !indexedFileRef ||
+      indexedFileRef.generation === undefined ||
+      snapshotRow?.generation === undefined ||
+      shadowRow !== undefined
+    ) {
+      return false;
+    }
+
+    return snapshotRow.generation === indexedFileRef.generation;
   }
 
   private async primeCurrentFileText(
@@ -2172,9 +2227,6 @@ export class DataManager {
     if (this.hybridEngine.isEnabled()) {
       await this.hybridEngine.persistIndicesForBatch();
     }
-    await this.fileSnapshotStore.refreshHighPerformanceState(
-      this.dataProvider.allFilesToBeIndexed(),
-    );
     if (isDevEnvironment) {
       await this.noticeDevStorageStats();
     }
@@ -2437,10 +2489,36 @@ export class DataManager {
         }
         const summary = summaries.get(row.filePath);
         if (summary) {
-          summary.snapshotGeneration = row.generation;
+          summary.currentSnapshotGeneration = row.generation;
         }
       }
     }
+    await this.scanRowsInBatches<HybridFileSnapshotRow, string>(
+      (lastPath, batchSize) => {
+        if (lastPath === null) {
+          return this.database.db.hybridDirtyShadows
+            .orderBy(":id")
+            .limit(batchSize)
+            .toArray();
+        }
+        return this.database.db.hybridDirtyShadows
+          .where(":id")
+          .above(lastPath)
+          .limit(batchSize)
+          .toArray();
+      },
+      (row) => row.filePath,
+      (rows) => {
+        for (const row of rows) {
+          const summary = this.getOrCreateHybridStoredPathSummary(
+            summaries,
+            row.filePath,
+          );
+          summary.shadowSnapshotGeneration = row.generation;
+        }
+      },
+    );
+
 
     return summaries;
   }
@@ -2466,8 +2544,12 @@ export class DataManager {
         hasChunks: summary.chunkCount > 0,
         chunkCount: summary.chunkCount,
         snapshot:
-          summary.snapshotGeneration !== undefined
-            ? { generation: summary.snapshotGeneration }
+          summary.currentSnapshotGeneration !== undefined
+            ? { generation: summary.currentSnapshotGeneration }
+            : undefined,
+        shadowSnapshot:
+          summary.shadowSnapshotGeneration !== undefined
+            ? { generation: summary.shadowSnapshotGeneration }
             : undefined,
         vectorInfo: summary.vectorInfo,
         indexedFileRef,
@@ -2500,7 +2582,10 @@ export class DataManager {
         path,
         inVault: currFiles.has(path),
         hasChunks: (summaries.get(path)?.chunkCount ?? 0) > 0,
-        hasSnapshot: summaries.get(path)?.snapshotGeneration !== undefined,
+        hasCurrentSnapshot:
+          summaries.get(path)?.currentSnapshotGeneration !== undefined,
+        hasShadowSnapshot:
+          summaries.get(path)?.shadowSnapshotGeneration !== undefined,
         hasVector: summaries.get(path)?.vectorInfo !== undefined,
         hasIndexedFileRef: summaries.get(path)?.indexedFileRef !== undefined,
         indexedFileState:
@@ -2723,7 +2808,8 @@ export class DataManager {
           item.name === "hybridChunkVectors" ||
           item.name === "hybridBm25Index" ||
           item.name === "hybridHnswSmall" ||
-          item.name === "hybridIndexedFileRefs",
+          item.name === "hybridIndexedFileRefs" ||
+          item.name === "hybridDirtyShadows",
       )
       .reduce((sum, item) => sum + item.bytes, 0);
 
@@ -2967,6 +3053,91 @@ export class DataManager {
     if (heapContextRows.length > 0) {
       console.log("[clever-search] Plugin runtime vs JS heap");
       console.table(heapContextRows);
+    }
+    if (hybridRuntimeEstimate.bm25Breakdown) {
+      console.log("[clever-search] Hybrid runtime BM25 breakdown");
+      console.table([
+        {
+          segment: "bm25-term-text",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.termTextBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.termTextBytes,
+          ),
+        },
+        {
+          segment: "bm25-term-offset",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.termOffsetBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.termOffsetBytes,
+          ),
+        },
+        {
+          segment: "bm25-term-df",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.termDfBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.termDfBytes,
+          ),
+        },
+        {
+          segment: "bm25-posting-start",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.postingStartBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.postingStartBytes,
+          ),
+        },
+        {
+          segment: "bm25-posting-length",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.postingLengthBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.postingLengthBytes,
+          ),
+        },
+        {
+          segment: "bm25-term-flag",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.termFlagBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.termFlagBytes,
+          ),
+        },
+        {
+          segment: "bm25-sorted-term-ids",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.sortedTermIdsBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.sortedTermIdsBytes,
+          ),
+        },
+        {
+          segment: "bm25-posting-doc-ids",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.postingDocIdsBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.postingDocIdsBytes,
+          ),
+        },
+        {
+          segment: "bm25-posting-tf-norm",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.postingTfNormBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.postingTfNormBytes,
+          ),
+        },
+        {
+          segment: "bm25-doc-lengths",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.docLengthsBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.docLengthsBytes,
+          ),
+        },
+        {
+          segment: "bm25-dirty-overrides",
+          bytes: hybridRuntimeEstimate.bm25Breakdown.postingContainerBytes,
+          size: this.formatBytes(
+            hybridRuntimeEstimate.bm25Breakdown.postingContainerBytes,
+          ),
+        },
+      ]);
+      console.log(
+        `[clever-search] Hybrid runtime BM25 details: terms=${hybridRuntimeEstimate.bm25Breakdown.termCount}, activeTerms=${hybridRuntimeEstimate.bm25Breakdown.activeTermCount}, expandableTerms=${hybridRuntimeEstimate.bm25Breakdown.expandableTermCount}, postings=${hybridRuntimeEstimate.bm25Breakdown.postingCount}, docs=${hybridRuntimeEstimate.bm25Breakdown.docCount}`,
+      );
     }
     if (lexicalRuntimeBreakdown.rows.length > 0) {
       console.log(
@@ -3226,17 +3397,17 @@ export class DataManager {
       (this.readNumber(docStoreById?.total) ?? 0) +
       (this.readNumber(counter?.numberBytes) ?? 0);
 
-    pushSegment("stringPool", this.asRecord(estimatedBytes.stringPool)?.bytes);
-    pushSegment("documents.store", documents?.total);
-    pushSegment("documentIdentity.core", documentIdentityCoreBytes);
+    pushSegment('stringPool', this.asRecord(estimatedBytes.stringPool)?.bytes);
+    pushSegment('documents.store', documents?.total);
+    pushSegment('documentIdentity.core', documentIdentityCoreBytes);
     pushSegment(
-      "documentIdentity.bodyTokenLexicon",
+      'documentIdentity.bodyTokenLexicon',
       bodyTokenLexicon?.total,
     );
-    pushSegment("doc.bodyTokens", bodyTokensById?.total);
-    pushSegment("doc.bodyHanSegments", bodyHanSegmentsById?.total);
-    pushSegment("doc.tagValues", tagValuesById?.total);
-    pushSegment("lexicon", this.asRecord(estimatedBytes.lexicon)?.total);
+    pushSegment('doc.bodyTokens', bodyTokensById?.total);
+    pushSegment('doc.bodyHanSegments', bodyHanSegmentsById?.total);
+    pushSegment('doc.tagValues', tagValuesById?.total);
+    pushSegment('lexicon', this.asRecord(estimatedBytes.lexicon)?.total);
 
     const postings = this.asRecord(estimatedBytes.postings);
     let postingsTotalBytes = 0;
@@ -3247,14 +3418,14 @@ export class DataManager {
           continue;
         }
         postingsTotalBytes += total;
-        pushSegment("postings." + key, total);
+        pushSegment('postings.' + key, total);
       }
     }
 
     let accountedBytes = segments.reduce((sum, segment) => sum + segment.bytes, 0);
     const unattributedBytes = Math.max(0, totalBytes - accountedBytes);
     if (unattributedBytes > 0) {
-      pushSegment("other", unattributedBytes);
+      pushSegment('other', unattributedBytes);
       accountedBytes += unattributedBytes;
     }
 
@@ -3315,53 +3486,53 @@ export class DataManager {
     }
 
     const headline =
-      "Coverage live index (exclusive): " +
+      'Coverage live index (exclusive): ' +
       this.formatBytes(totalBytes) +
-      " (" +
+      ' (' +
       this.formatPercent(totalBytes, indexableBytes) +
-      " of vault)";
+      ' of vault)';
     const majorGroupsLine =
-      "Coverage major groups: " +
+      'Coverage major groups: ' +
       ([
         [
-          "stringPool",
+          'stringPool',
           this.readNumber(this.asRecord(estimatedBytes.stringPool)?.bytes) ?? 0,
         ],
-        ["postings(total)", postingsTotalBytes],
+        ['postings(total)', postingsTotalBytes],
         [
-          "documentIdentity(total)",
+          'documentIdentity(total)',
           this.readNumber(documentIdentity?.total) ?? 0,
         ],
-        ["documents(total)", this.readNumber(documents?.total) ?? 0],
+        ['documents(total)', this.readNumber(documents?.total) ?? 0],
         [
-          "lexicon",
+          'lexicon',
           this.readNumber(this.asRecord(estimatedBytes.lexicon)?.total) ?? 0,
         ],
       ] as Array<[string, number]>)
         .filter(([, bytes]) => bytes > 0)
-        .map(([segment, bytes]) => segment + " " + this.formatBytes(bytes))
-        .join(" | ");
+        .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
+        .join(' | ');
     const topLine =
-      "Coverage top segments: " +
+      'Coverage top segments: ' +
       sortedSegments
         .slice(0, 6)
-        .map((segment) => segment.segment + " " + this.formatBytes(segment.bytes))
-        .join(" | ");
+        .map((segment) => segment.segment + ' ' + this.formatBytes(segment.bytes))
+        .join(' | ');
     const accountingLine =
-      "Coverage accounted segments: " +
+      'Coverage accounted segments: ' +
       this.formatBytes(accountedBytes) +
-      " / " +
+      ' / ' +
       this.formatBytes(totalBytes);
 
     return {
       noticeLines: [headline, majorGroupsLine, topLine, accountingLine],
       summaryLine:
         headline +
-        "; " +
+        '; ' +
         majorGroupsLine +
-        "; " +
+        '; ' +
         topLine +
-        "; " +
+        '; ' +
         accountingLine,
       rows,
       stringPoolGroupRows,
@@ -3395,37 +3566,37 @@ export class DataManager {
         shareOfPluginRuntime: this.formatPercent(row.bytes, runtimeTotalBytes),
         shareOfJsHeapUsed: jsHeapUsage
           ? this.formatPercent(row.bytes, jsHeapUsage.usedBytes)
-          : "n/a",
+          : 'n/a',
         shareOfVault: this.formatPercent(row.bytes, indexableBytes),
       }));
     const topSegments = rows
       .filter((row) => row.bytes > 0)
       .slice(0, 3)
-      .map((row) => row.segment + " " + row.size)
-      .join(" | ");
+      .map((row) => row.segment + ' ' + row.size)
+      .join(' | ');
     const noticeLines = topSegments.length
-      ? ["Plugin runtime split: " + topSegments]
+      ? ['Plugin runtime split: ' + topSegments]
       : [];
     const hybridRuntimeLine = [
-      ["vectors", rows.find((row) => row.segment === "HybridRuntimeVectors")?.size],
-      ["graph", rows.find((row) => row.segment === "HybridRuntimeGraph")?.size],
-      ["bm25", rows.find((row) => row.segment === "HybridRuntimeBm25")?.size],
+      ['vectors', rows.find((row) => row.segment === 'HybridRuntimeVectors')?.size],
+      ['graph', rows.find((row) => row.segment === 'HybridRuntimeGraph')?.size],
+      ['bm25', rows.find((row) => row.segment === 'HybridRuntimeBm25')?.size],
     ]
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .map(([segment, size]) => segment + " " + size)
-      .join(" | ");
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .map(([segment, size]) => segment + ' ' + size)
+      .join(' | ');
     if (hybridRuntimeLine.length > 0) {
-      noticeLines.push("Hybrid runtime: " + hybridRuntimeLine);
+      noticeLines.push('Hybrid runtime: ' + hybridRuntimeLine);
     }
     if (jsHeapUsage) {
       noticeLines.push(
-        "Plugin runtime vs JS heap used: " +
+        'Plugin runtime vs JS heap used: ' +
           this.formatBytes(runtimeTotalBytes) +
-          " / " +
+          ' / ' +
           this.formatBytes(jsHeapUsage.usedBytes) +
-          " (" +
+          ' (' +
           this.formatPercent(runtimeTotalBytes, jsHeapUsage.usedBytes) +
-          ")",
+          ')',
       );
     }
     return {

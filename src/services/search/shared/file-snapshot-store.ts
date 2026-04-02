@@ -1,5 +1,4 @@
 import { TFile, Vault, htmlToMarkdown } from "obsidian";
-import { OuterSetting } from "src/globals/plugin-setting";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
@@ -15,27 +14,20 @@ type PersistedFileSnapshotRow = {
 	generation?: number;
 };
 
+type PersistedFileShadowRow = {
+	filePath: string;
+	plainText: string;
+	generation?: number;
+};
+
 const textEncoder = new TextEncoder();
 
-export type FileSnapshotStoreStatus = {
-	enabled: boolean;
-	active: boolean;
-	thresholdMb: number;
-	totalIndexableBytes: number;
-	cachedFileCount: number;
-	preloading: boolean;
-};
 
 @singleton()
 export class FileSnapshotStore {
 	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
 	private readonly vault = getInstance(Vault);
-	private readonly setting = getInstance(OuterSetting);
 	private readonly currentFileCache = new Map<string, CurrentFileCacheEntry>();
-	private currentPreloadTask: Promise<void> | null = null;
-	private currentPreloadRunId = 0;
-	private lastIndexableBytes = 0;
-	private highPerformanceActive = false;
 
 	async readCurrentFileText(fileOrPath: TFile | string): Promise<string> {
 		const file =
@@ -104,33 +96,30 @@ export class FileSnapshotStore {
 		filePath: string,
 		text: string,
 		generation?: number,
+		options: { clearShadowIfAligned?: boolean } = {},
 	): Promise<void> {
 		await this.database.db.fileSnapshots.put({
 			filePath,
 			plainText: text,
 			generation,
 		});
+		if (options.clearShadowIfAligned) {
+			await this.clearIndexedShadowIfAligned(filePath, generation);
+		}
 	}
 
 	async commitCurrentFileAsIndexed(
 		filePath: string,
 		generation?: number,
 	): Promise<void> {
-		const cached = this.currentFileCache.get(filePath);
-		if (cached === undefined) {
-			return;
-		}
-		await this.persistIndexedSnapshot(
-			filePath,
-			cached.text,
-			generation ?? cached.generation,
-		);
+		await this.commitCurrentFilesAsIndexed([{ path: filePath, generation }]);
 	}
 
 	async commitCurrentFilesAsIndexed(
 		files: ReadonlyArray<{ path: string; generation?: number }>,
 	): Promise<void> {
 		const rows: PersistedFileSnapshotRow[] = [];
+		const persistedFiles: Array<{ path: string; generation?: number }> = [];
 		for (const file of files) {
 			const cached = this.currentFileCache.get(file.path);
 			if (!cached) {
@@ -141,56 +130,75 @@ export class FileSnapshotStore {
 				plainText: cached.text,
 				generation: file.generation ?? cached.generation,
 			});
+			persistedFiles.push({
+				path: file.path,
+				generation: file.generation ?? cached.generation,
+			});
 		}
 		if (rows.length === 0) {
 			return;
 		}
+		await this.preserveIndexedGenerationShadows(persistedFiles);
 		await this.database.db.fileSnapshots.bulkPut(rows);
 	}
 
 	async deleteIndexedSnapshot(filePath: string): Promise<void> {
-		await this.database.db.fileSnapshots.delete(filePath);
+		await this.deleteIndexedSnapshots([filePath]);
 	}
 
 	async deleteIndexedSnapshots(filePaths: readonly string[]): Promise<void> {
 		if (filePaths.length === 0) {
 			return;
 		}
-		await this.database.db.fileSnapshots.bulkDelete(Array.from(filePaths));
+		const uniquePaths = Array.from(new Set(filePaths));
+		await Promise.all([
+			this.database.db.fileSnapshots.bulkDelete(uniquePaths),
+			this.database.db.hybridDirtyShadows.bulkDelete(uniquePaths),
+		]);
+	}
+
+	async deleteIndexedShadow(filePath: string): Promise<void> {
+		await this.deleteIndexedShadows([filePath]);
+	}
+
+	async deleteIndexedShadows(filePaths: readonly string[]): Promise<void> {
+		if (filePaths.length === 0) {
+			return;
+		}
+		await this.database.db.hybridDirtyShadows.bulkDelete(Array.from(new Set(filePaths)));
 	}
 
 	async deleteIndexedSnapshotsNotIn(
 		validPaths: ReadonlySet<string>,
 	): Promise<void> {
-		let lastPath: string | null = null;
-		while (true) {
-			const rows: Array<{ filePath: string }> =
-				lastPath === null
-					? await this.database.db.fileSnapshots
-						.orderBy(":id")
-						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
-						.toArray()
-					: await this.database.db.fileSnapshots
-						.where(":id")
-						.above(lastPath)
-						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
-						.toArray();
-			if (rows.length === 0) {
-				return;
-			}
-
-			const stalePaths = rows
-				.map((row) => row.filePath)
-				.filter((path) => !validPaths.has(path));
-			if (stalePaths.length > 0) {
-				await this.deleteIndexedSnapshots(stalePaths);
-			}
-
-			lastPath = rows[rows.length - 1].filePath;
-		}
+		await this.deleteRowsNotIn(
+			() => this.database.db.fileSnapshots,
+			(paths) => this.database.db.fileSnapshots.bulkDelete(paths),
+			validPaths,
+		);
+		await this.deleteRowsNotIn(
+			() => this.database.db.hybridDirtyShadows,
+			(paths) => this.database.db.hybridDirtyShadows.bulkDelete(paths),
+			validPaths,
+		);
 	}
 
-	async getIndexedSnapshotTexts(
+	async readGenerationAlignedText(
+		filePath: string,
+		expectedGeneration?: number,
+	): Promise<string | undefined> {
+		const expectedGenerations =
+			expectedGeneration === undefined
+				? undefined
+				: new Map([[filePath, expectedGeneration]]);
+		const texts = await this.readGenerationAlignedTexts(
+			[filePath],
+			expectedGenerations,
+		);
+		return texts.get(filePath);
+	}
+
+	async readGenerationAlignedTexts(
 		filePaths: string[],
 		expectedGenerations?: ReadonlyMap<string, number | undefined>,
 	): Promise<Map<string, string>> {
@@ -201,11 +209,7 @@ export class FileSnapshotStore {
 		for (const filePath of uniquePaths) {
 			const expectedGeneration = expectedGenerations?.get(filePath);
 			const current = this.currentFileCache.get(filePath);
-			if (
-				expectedGeneration !== undefined &&
-				current?.generation !== undefined &&
-				current.generation === expectedGeneration
-			) {
+			if (current && this.isGenerationMatch(current.generation, expectedGeneration)) {
 				snapshots.set(filePath, current.text);
 				continue;
 			}
@@ -216,16 +220,31 @@ export class FileSnapshotStore {
 			return snapshots;
 		}
 
-		const rows = await this.database.db.fileSnapshots.bulkGet(missingPaths);
-		for (const row of rows) {
+		const persistedRows = await this.database.db.fileSnapshots.bulkGet(missingPaths);
+		const shadowMissingPaths: string[] = [];
+		for (let index = 0; index < missingPaths.length; index++) {
+			const row = persistedRows[index];
+			const filePath = missingPaths[index];
+			const expectedGeneration = expectedGenerations?.get(filePath);
+			if (row && this.isGenerationMatch(row.generation, expectedGeneration)) {
+				snapshots.set(filePath, row.plainText);
+				continue;
+			}
+			shadowMissingPaths.push(filePath);
+		}
+
+		if (!expectedGenerations || shadowMissingPaths.length === 0) {
+			return snapshots;
+		}
+
+		const shadowRows = await this.database.db.hybridDirtyShadows.bulkGet(shadowMissingPaths);
+		for (let index = 0; index < shadowMissingPaths.length; index++) {
+			const row = shadowRows[index];
 			if (!row) {
 				continue;
 			}
-			const expectedGeneration = expectedGenerations?.get(row.filePath);
-			if (
-				expectedGeneration !== undefined &&
-				row.generation !== expectedGeneration
-			) {
+			const expectedGeneration = expectedGenerations.get(shadowMissingPaths[index]);
+			if (!this.isGenerationMatch(row.generation, expectedGeneration)) {
 				continue;
 			}
 			snapshots.set(row.filePath, row.plainText);
@@ -234,79 +253,11 @@ export class FileSnapshotStore {
 		return snapshots;
 	}
 
-	async refreshHighPerformanceState(
-		indexableFiles: readonly TFile[] = this.vault.getFiles(),
-	): Promise<void> {
-		this.lastIndexableBytes = indexableFiles.reduce(
-			(sum, file) => sum + file.stat.size,
-			0,
-		);
-		const shouldActivate = this.isHighPerformanceActive();
-		if (!shouldActivate) {
-			this.cancelPreloads();
-			this.highPerformanceActive = false;
-			return;
-		}
-		this.highPerformanceActive = true;
-		void this.preloadCurrentFiles(indexableFiles);
-	}
-
-	getStatusSummary(
-		indexableFiles?: readonly TFile[],
-	): FileSnapshotStoreStatus {
-		const totalIndexableBytes =
-			indexableFiles?.reduce((sum, file) => sum + file.stat.size, 0) ??
-			this.lastIndexableBytes;
-		if (indexableFiles) {
-			this.lastIndexableBytes = totalIndexableBytes;
-		}
-		return {
-			enabled: this.getHighPerformanceThresholdBytes() > 0,
-			active:
-				this.getHighPerformanceThresholdBytes() > 0 &&
-				totalIndexableBytes <= this.getHighPerformanceThresholdBytes(),
-			thresholdMb: this.setting.hybrid.highPerformanceMaxMb ?? 60,
-			totalIndexableBytes,
-			cachedFileCount: this.currentFileCache.size,
-			preloading: this.currentPreloadTask !== null,
-		};
-	}
-
-	private isHighPerformanceActive(): boolean {
-		const thresholdBytes = this.getHighPerformanceThresholdBytes();
-		return thresholdBytes > 0 && this.lastIndexableBytes <= thresholdBytes;
-	}
-
-	private getHighPerformanceThresholdBytes(): number {
-		return Math.max(0, this.setting.hybrid.highPerformanceMaxMb ?? 60) * 1024 * 1024;
-	}
-
-	private cancelPreloads(): void {
-		this.currentPreloadRunId++;
-		this.currentPreloadTask = null;
-	}
-
-	private async preloadCurrentFiles(indexableFiles: readonly TFile[]): Promise<void> {
-		if (this.currentPreloadTask) {
-			return this.currentPreloadTask;
-		}
-		const runId = ++this.currentPreloadRunId;
-		this.currentPreloadTask = (async () => {
-			for (const file of indexableFiles) {
-				if (runId !== this.currentPreloadRunId || !this.isHighPerformanceActive()) {
-					return;
-				}
-				if (this.currentFileCache.has(file.path)) {
-					continue;
-				}
-				await this.readCurrentFileText(file);
-			}
-		})().finally(() => {
-			if (runId === this.currentPreloadRunId) {
-				this.currentPreloadTask = null;
-			}
-		});
-		return this.currentPreloadTask;
+	async getIndexedSnapshotTexts(
+		filePaths: string[],
+		expectedGenerations?: ReadonlyMap<string, number | undefined>,
+	): Promise<Map<string, string>> {
+		return await this.readGenerationAlignedTexts(filePaths, expectedGenerations);
 	}
 
 	private normalizeHtmlToText(htmlText: string): string {
@@ -327,6 +278,113 @@ export class FileSnapshotStore {
 			return false;
 		}
 		return nextGeneration >= existingGeneration;
+	}
+
+	private isGenerationMatch(
+		actualGeneration: number | undefined,
+		expectedGeneration: number | undefined,
+	): boolean {
+		if (expectedGeneration === undefined) {
+			return true;
+		}
+		return actualGeneration !== undefined && actualGeneration === expectedGeneration;
+	}
+
+	private async preserveIndexedGenerationShadows(
+		files: ReadonlyArray<{ path: string; generation?: number }>,
+	): Promise<void> {
+		const dedupedFiles: Array<{ path: string; generation?: number }> = [];
+		const seenPaths = new Set<string>();
+		for (const file of files) {
+			if (seenPaths.has(file.path)) {
+				continue;
+			}
+			seenPaths.add(file.path);
+			dedupedFiles.push(file);
+		}
+		if (dedupedFiles.length === 0) {
+			return;
+		}
+		const paths = dedupedFiles.map((file) => file.path);
+		const [indexedRefs, currentRows] = await Promise.all([
+			this.database.db.hybridIndexedFileRefs.bulkGet(paths),
+			this.database.db.fileSnapshots.bulkGet(paths),
+		]);
+		const shadowRows: PersistedFileShadowRow[] = [];
+		for (let index = 0; index < dedupedFiles.length; index++) {
+			const indexedRef = indexedRefs[index];
+			const currentRow = currentRows[index];
+			const nextGeneration = dedupedFiles[index].generation;
+			if (!indexedRef || !currentRow) {
+				continue;
+			}
+			if (
+				indexedRef.generation === undefined ||
+				currentRow.generation === undefined ||
+				indexedRef.generation !== currentRow.generation
+			) {
+				continue;
+			}
+			if (nextGeneration !== undefined && indexedRef.generation === nextGeneration) {
+				continue;
+			}
+			shadowRows.push({
+				filePath: currentRow.filePath,
+				plainText: currentRow.plainText,
+				generation: currentRow.generation,
+			});
+		}
+		if (shadowRows.length === 0) {
+			return;
+		}
+		await this.database.db.hybridDirtyShadows.bulkPut(shadowRows);
+	}
+
+	private async clearIndexedShadowIfAligned(
+		filePath: string,
+		generation?: number,
+	): Promise<void> {
+		if (generation === undefined) {
+			return;
+		}
+		const currentRow = await this.database.db.fileSnapshots.get(filePath);
+		if (currentRow?.generation !== generation) {
+			return;
+		}
+		await this.database.db.hybridDirtyShadows.delete(filePath);
+	}
+
+	private async deleteRowsNotIn(
+		getTable: () => { orderBy: (index: string) => any; where: (index: string) => any },
+		deleteRows: (paths: string[]) => Promise<void>,
+		validPaths: ReadonlySet<string>,
+	): Promise<void> {
+		let lastPath: string | null = null;
+		while (true) {
+			const rows: Array<{ filePath: string }> =
+				lastPath === null
+					? await getTable()
+						.orderBy(":id")
+						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
+						.toArray()
+					: await getTable()
+						.where(":id")
+						.above(lastPath)
+						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
+						.toArray();
+			if (rows.length === 0) {
+				return;
+			}
+
+			const stalePaths = rows
+				.map((row) => row.filePath)
+				.filter((path) => !validPaths.has(path));
+			if (stalePaths.length > 0) {
+				await deleteRows(stalePaths);
+			}
+
+			lastPath = rows[rows.length - 1].filePath;
+		}
 	}
 
 	private get database(): Database {

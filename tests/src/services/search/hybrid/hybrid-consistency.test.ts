@@ -84,12 +84,54 @@ describe("Hybrid stored file consistency", () => {
     expect(result.reuseBlockedReasons).toContain("vector_precision_mismatch");
   });
 
+  test("treats matching shadow snapshot as aligned indexed evidence", () => {
+    const result = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: true,
+      chunkCount: 2,
+      snapshot: { generation: 40 },
+      shadowSnapshot: { generation: 35 },
+      vectorInfo: { precision: "int8", chunkCount: 2, generation: 35 },
+      indexedFileRef: {
+        path: "shadow.md",
+        state: "ready",
+        chunkCount: 2,
+        generation: 35,
+      },
+      currentPrecision: "int8",
+    });
+
+    expect(result.hasShadowSnapshot).toBe(true);
+    expect(result.reuseBlockedReasons).not.toContain("snapshot_generation_mismatch");
+    expect(result.repairReasons).not.toContain("snapshot_generation_mismatch");
+  });
+
+  test("marks snapshot mismatch when neither current nor shadow aligns", () => {
+    const result = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: true,
+      chunkCount: 2,
+      snapshot: { generation: 41 },
+      shadowSnapshot: { generation: 42 },
+      vectorInfo: { precision: "int8", chunkCount: 2, generation: 40 },
+      indexedFileRef: {
+        path: "mismatch.md",
+        state: "ready",
+        chunkCount: 2,
+        generation: 40,
+      },
+      currentPrecision: "int8",
+    });
+
+    expect(result.reuseBlockedReasons).toContain("snapshot_generation_mismatch");
+  });
+
   test("marks missing vault file as stale cleanup", () => {
     const result = analyzeHybridStoredFileConsistency({
       existsInVault: false,
       hasChunks: false,
       chunkCount: 0,
-      snapshot: { generation: 40 },
+      snapshot: { generation: 50 },
       indexedFileRef: undefined,
       currentPrecision: "int8",
     });
@@ -102,12 +144,12 @@ describe("Hybrid stored file consistency", () => {
       existsInVault: true,
       hasChunks: true,
       chunkCount: 1,
-      snapshot: { generation: 50 },
+      snapshot: { generation: 60 },
       indexedFileRef: {
         path: "d.md",
         state: "pending",
         chunkCount: 1,
-        generation: 50,
+        generation: 60,
       },
       currentPrecision: "int8",
     });

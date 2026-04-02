@@ -74,6 +74,13 @@ export class HybridRecoveryCoordinator {
     };
   }
 
+  listFailurePaths(): string[] {
+    return this.recoveryManager
+      .listFailureEntries()
+      .filter((entry) => this.options.canRetryPath(entry.path))
+      .map((entry) => entry.path);
+  }
+
   resetRuntimeState(): void {
     this.clearRetryTimer();
     this.recoveryManager.clearAll();

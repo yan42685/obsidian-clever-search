@@ -16,6 +16,25 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => ({
   FileSnapshotStore: class FileSnapshotStore {},
 }));
 
+jest.mock("src/integrations/languages/chinese-patch", () => ({
+  ChinesePatch: class ChinesePatch {
+    initAsync() {}
+    cut(text: string) {
+      return [text];
+    }
+  },
+}));
+
+jest.mock("src/utils/web/assets-provider", () => ({
+  AssetsProvider: class AssetsProvider {
+    assets = {
+      stopWordsZh: null,
+      stopWordsEn: null,
+      jiebaBinary: Promise.resolve(null),
+    };
+  },
+}));
+
 jest.mock("src/services/search/hybrid/embedder", () => ({
   Embedder: class Embedder {},
   NoApiKeyError: class NoApiKeyError extends Error {},
@@ -184,6 +203,9 @@ function createEngineHarness() {
   const snapshotTable = createKeyedTable<HybridSnapshotRow, "filePath">(
     "filePath",
   );
+  const shadowTable = createKeyedTable<HybridSnapshotRow, "filePath">(
+    "filePath",
+  );
   const vectorTable = createKeyedTable<HybridVectorRow, "filePath">("filePath");
   const indexedRefTable = createKeyedTable<HybridIndexedFileRefRow, "path">(
     "path",
@@ -201,6 +223,7 @@ function createEngineHarness() {
     db: {
       hybridChunks: chunkTable,
       fileSnapshots: snapshotTable,
+      hybridDirtyShadows: shadowTable,
       hybridChunkVectors: vectorTable,
       hybridIndexedFileRefs: indexedRefTable,
       hybridBm25Index: bm25IndexTable,
@@ -217,10 +240,19 @@ function createEngineHarness() {
     },
   };
 
+  const fileSnapshotStore = {
+    deleteIndexedShadow: jest.fn(async (path: string) => {
+      await shadowTable.delete(path);
+    }),
+    readGenerationAlignedText: jest.fn(async () => undefined),
+    readGenerationAlignedTexts: jest.fn(async () => new Map<string, string>()),
+    persistIndexedSnapshot: jest.fn(async () => undefined),
+  };
+
   container.registerInstance(Database, database as any);
   container.registerInstance(OuterSetting, setting as any);
   container.registerInstance(DataProvider, {} as any);
-  container.registerInstance(FileSnapshotStore, {} as any);
+  container.registerInstance(FileSnapshotStore, fileSnapshotStore as any);
 
   const engine = new HybridEngine() as any;
   engine.bm25 = {
@@ -239,11 +271,13 @@ function createEngineHarness() {
     engine: engine as HybridEngine,
     chunkTable,
     snapshotTable,
+    shadowTable,
     vectorTable,
     indexedRefTable,
     bm25IndexTable,
     hnswTable,
     artifactStateTable,
+    fileSnapshotStore,
   };
 }
 
@@ -272,7 +306,7 @@ describe("HybridEngine shared snapshot ownership", () => {
   });
 
   test("deleteFile removes only hybrid-private state and preserves shared snapshots", async () => {
-    const { engine, chunkTable, snapshotTable, vectorTable, indexedRefTable } =
+    const { engine, chunkTable, snapshotTable, shadowTable, vectorTable, indexedRefTable, fileSnapshotStore } =
       createEngineHarness();
 
     chunkTable.rows.push(
@@ -308,6 +342,11 @@ describe("HybridEngine shared snapshot ownership", () => {
       precision: "int8",
       generation: 100,
     });
+    await shadowTable.put({
+      filePath: "docs/a.md",
+      plainText: "stale hybrid shadow",
+      generation: 90,
+    });
     await indexedRefTable.put({
       path: "docs/a.md",
       generation: 100,
@@ -321,6 +360,7 @@ describe("HybridEngine shared snapshot ownership", () => {
       plainText: "alpha beta",
       generation: 100,
     });
+    expect(await shadowTable.get("docs/a.md")).toBeUndefined();
     expect(chunkTable.rows).toEqual([]);
     expect(await vectorTable.get("docs/a.md")).toBeUndefined();
     expect(await indexedRefTable.get("docs/a.md")).toBeUndefined();
@@ -333,6 +373,7 @@ describe("HybridEngine shared snapshot ownership", () => {
       engine,
       chunkTable,
       snapshotTable,
+      shadowTable,
       vectorTable,
       indexedRefTable,
       bm25IndexTable,
@@ -360,6 +401,11 @@ describe("HybridEngine shared snapshot ownership", () => {
       precision: "int8",
       generation: 200,
     });
+    await shadowTable.put({
+      filePath: "docs/a.md",
+      plainText: "shadow snapshot",
+      generation: 190,
+    });
     await indexedRefTable.put({
       path: "docs/a.md",
       generation: 200,
@@ -375,7 +421,9 @@ describe("HybridEngine shared snapshot ownership", () => {
       plainText: "keep snapshot",
       generation: 200,
     });
+    expect(await shadowTable.get("docs/a.md")).toBeUndefined();
     expect(chunkTable.rows).toEqual([]);
+    expect(shadowTable.rows.size).toBe(0);
     expect(vectorTable.rows.size).toBe(0);
     expect(indexedRefTable.rows.size).toBe(0);
     expect(bm25IndexTable.rows.size).toBe(0);
@@ -385,7 +433,7 @@ describe("HybridEngine shared snapshot ownership", () => {
   });
 
   test("moveFile rewrites only hybrid-private rows and leaves shared snapshots untouched", async () => {
-    const { engine, chunkTable, snapshotTable, vectorTable, indexedRefTable } =
+    const { engine, chunkTable, snapshotTable, shadowTable, vectorTable, indexedRefTable, fileSnapshotStore } =
       createEngineHarness();
 
     chunkTable.rows.push(
@@ -419,6 +467,16 @@ describe("HybridEngine shared snapshot ownership", () => {
       filePath: "docs/new.md",
       plainText: "new lexical snapshot",
       generation: 301,
+    });
+    await shadowTable.put({
+      filePath: "docs/old.md",
+      plainText: "old hybrid shadow",
+      generation: 299,
+    });
+    await shadowTable.put({
+      filePath: "docs/new.md",
+      plainText: "new hybrid shadow",
+      generation: 298,
     });
     await vectorTable.put({
       filePath: "docs/old.md",
@@ -476,5 +534,11 @@ describe("HybridEngine shared snapshot ownership", () => {
       plainText: "new lexical snapshot",
       generation: 301,
     });
+    expect(await shadowTable.get("docs/old.md")).toBeUndefined();
+    expect(await shadowTable.get("docs/new.md")).toBeUndefined();
+    expect(fileSnapshotStore.deleteIndexedShadow).toHaveBeenCalledWith("docs/old.md");
+    expect(fileSnapshotStore.deleteIndexedShadow).toHaveBeenCalledWith("docs/new.md");
   });
 });
+
+

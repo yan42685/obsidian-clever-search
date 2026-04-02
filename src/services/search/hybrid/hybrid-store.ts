@@ -27,6 +27,12 @@ export type HybridFileSnapshotRow = {
   generation?: number;
 };
 
+export type HybridDirtyShadowRow = {
+  filePath: string;
+  plainText: string;
+  generation?: number;
+};
+
 export type ChunkVectorShardRow = {
   filePath: string;
   precision: string;

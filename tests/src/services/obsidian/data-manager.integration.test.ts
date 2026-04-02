@@ -88,7 +88,6 @@ jest.mock("src/globals/plugin-setting", () => {
         maxResultCount: 10,
         excludedPaths: [],
         indexConcurrency: 3,
-        highPerformanceMaxMb: 60,
         minIncrementalEmbedIntervalSec: 60,
         failedEmbeddingRetryIntervalMin: 10,
       },
@@ -181,10 +180,55 @@ function createFile(path: string, text: string, mtime: number): TFile {
 function createMockFileSnapshotStore() {
   const current = new Map<string, { text: string; generation?: number }>();
   const persisted = new Map<string, { text: string; generation?: number }>();
+  const shadow = new Map<string, { text: string; generation?: number }>();
+
+  const isGenerationMatch = (
+    actualGeneration: number | undefined,
+    expectedGeneration: number | undefined,
+  ) => expectedGeneration === undefined || actualGeneration === expectedGeneration;
+
+  const clearShadowIfAligned = (
+    path: string,
+    generation: number | undefined,
+  ) => {
+    const shadowEntry = shadow.get(path);
+    if (shadowEntry && shadowEntry.generation === generation) {
+      shadow.delete(path);
+    }
+  };
+
+  const readGenerationAlignedTexts = async (
+    paths: string[],
+    expectedGenerations?: ReadonlyMap<string, number | undefined>,
+  ) => {
+    const result = new Map<string, string>();
+    for (const path of Array.from(new Set(paths))) {
+      const expectedGeneration = expectedGenerations?.get(path);
+      const currentEntry = current.get(path);
+      if (currentEntry && isGenerationMatch(currentEntry.generation, expectedGeneration)) {
+        result.set(path, currentEntry.text);
+        continue;
+      }
+      const persistedEntry = persisted.get(path);
+      if (persistedEntry && isGenerationMatch(persistedEntry.generation, expectedGeneration)) {
+        result.set(path, persistedEntry.text);
+        continue;
+      }
+      if (!expectedGenerations) {
+        continue;
+      }
+      const shadowEntry = shadow.get(path);
+      if (shadowEntry && isGenerationMatch(shadowEntry.generation, expectedGeneration)) {
+        result.set(path, shadowEntry.text);
+      }
+    }
+    return result;
+  };
 
   return {
     current,
     persisted,
+    shadow,
     clearCurrentFiles: jest.fn(() => {
       current.clear();
     }),
@@ -207,10 +251,12 @@ function createMockFileSnapshotStore() {
         if (!currentEntry) {
           return;
         }
+        const nextGeneration = generation ?? currentEntry.generation;
         persisted.set(path, {
           text: currentEntry.text,
-          generation: generation ?? currentEntry.generation,
+          generation: nextGeneration,
         });
+        clearShadowIfAligned(path, nextGeneration);
       },
     ),
     commitCurrentFilesAsIndexed: jest.fn(
@@ -220,19 +266,44 @@ function createMockFileSnapshotStore() {
           if (!currentEntry) {
             continue;
           }
+          const nextGeneration = file.generation ?? currentEntry.generation;
           persisted.set(file.path, {
             text: currentEntry.text,
-            generation: file.generation ?? currentEntry.generation,
+            generation: nextGeneration,
           });
+          clearShadowIfAligned(file.path, nextGeneration);
+        }
+      },
+    ),
+    persistIndexedSnapshot: jest.fn(
+      async (
+        path: string,
+        text: string,
+        generation?: number,
+        options: { clearShadowIfAligned?: boolean } = {},
+      ) => {
+        persisted.set(path, { text, generation });
+        if (options.clearShadowIfAligned) {
+          clearShadowIfAligned(path, generation);
         }
       },
     ),
     deleteIndexedSnapshot: jest.fn(async (path: string) => {
       persisted.delete(path);
+      shadow.delete(path);
     }),
     deleteIndexedSnapshots: jest.fn(async (paths: readonly string[]) => {
       for (const path of paths) {
         persisted.delete(path);
+        shadow.delete(path);
+      }
+    }),
+    deleteIndexedShadow: jest.fn(async (path: string) => {
+      shadow.delete(path);
+    }),
+    deleteIndexedShadows: jest.fn(async (paths: readonly string[]) => {
+      for (const path of paths) {
+        shadow.delete(path);
       }
     }),
     deleteIndexedSnapshotsNotIn: jest.fn(
@@ -242,32 +313,27 @@ function createMockFileSnapshotStore() {
             persisted.delete(path);
           }
         }
-      },
-    ),
-    getIndexedSnapshotTexts: jest.fn(
-      async (
-        paths: string[],
-        expectedGenerations?: ReadonlyMap<string, number | undefined>,
-      ) => {
-        const result = new Map<string, string>();
-        for (const path of paths) {
-          const entry = persisted.get(path);
-          if (
-            entry &&
-            (expectedGenerations?.get(path) === undefined ||
-              entry.generation === expectedGenerations.get(path))
-          ) {
-            result.set(path, entry.text);
+        for (const path of Array.from(shadow.keys())) {
+          if (!validPaths.has(path)) {
+            shadow.delete(path);
           }
         }
-        return result;
       },
     ),
-    refreshHighPerformanceState: jest.fn(async () => {}),
+    readGenerationAlignedText: jest.fn(
+      async (path: string, expectedGeneration?: number) =>
+        (await readGenerationAlignedTexts(
+          [path],
+          expectedGeneration === undefined
+            ? undefined
+            : new Map([[path, expectedGeneration]]),
+        )).get(path),
+    ),
+    readGenerationAlignedTexts: jest.fn(readGenerationAlignedTexts),
+    getIndexedSnapshotTexts: jest.fn(readGenerationAlignedTexts),
     estimateCurrentCacheBytes: jest.fn(() => 0),
   };
 }
-
 function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
   return {
     isEnabled: jest.fn(() => true),
@@ -303,6 +369,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
     Record<string, any> & { filePath: string }
   > = [];
   const fileSnapshots: Array<Record<string, any> & { filePath: string }> = [];
+  const hybridDirtyShadows: Array<Record<string, any> & { filePath: string }> = [];
   const indexRecoveryStates: Array<Record<string, any>> = [];
   const indexArtifactStates: Array<Record<string, any>> = [];
   const state = {
@@ -447,6 +514,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
     __hybridChunks: hybridChunks,
     __hybridChunkVectors: hybridChunkVectors,
     __fileSnapshots: fileSnapshots,
+    __hybridDirtyShadows: hybridDirtyShadows,
     __indexRecoveryStates: indexRecoveryStates,
     __indexArtifactStates: indexArtifactStates,
     db: {
@@ -510,9 +578,49 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         }),
       },
       fileSnapshots: {
+        get: jest.fn(async (filePath: string) => {
+          const row = fileSnapshots.find((item) => item.filePath === filePath);
+          return row ? { ...row } : undefined;
+        }),
         bulkGet: jest.fn(async (paths: readonly string[]) =>
           paths.map((path) => {
             const row = fileSnapshots.find((item) => item.filePath === path);
+            return row ? { ...row } : undefined;
+          }),
+        ),
+      },
+      hybridDirtyShadows: {
+        orderBy: jest.fn((_field: string) => ({
+          limit: (batchSize: number) => ({
+            toArray: async () =>
+              toPagedRows(
+                hybridDirtyShadows,
+                (row) => row.filePath,
+                null,
+                batchSize,
+              ),
+          }),
+        })),
+        where: jest.fn((_field: string) => ({
+          above: (lastPath: string) => ({
+            limit: (batchSize: number) => ({
+              toArray: async () =>
+                toPagedRows(
+                  hybridDirtyShadows,
+                  (row) => row.filePath,
+                  lastPath,
+                  batchSize,
+                ),
+            }),
+          }),
+        })),
+        get: jest.fn(async (filePath: string) => {
+          const row = hybridDirtyShadows.find((item) => item.filePath === filePath);
+          return row ? { ...row } : undefined;
+        }),
+        bulkGet: jest.fn(async (paths: readonly string[]) =>
+          paths.map((path) => {
+            const row = hybridDirtyShadows.find((item) => item.filePath === path);
             return row ? { ...row } : undefined;
           }),
         ),
@@ -756,6 +864,19 @@ describe("DataManager integration", () => {
     const texts = new Map([[newPath, newText]]);
 
     const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: oldPath,
+      generation: 180,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: 180,
+    });
+    database.__fileSnapshots.push({
+      filePath: oldPath,
+      plainText: "old content",
+      generation: 180,
+    });
     const dataProvider = createMockDataProvider({ files, texts });
     const lexicalEngine = createMockLexicalEngine();
     const fileSnapshotStore = createMockFileSnapshotStore();
@@ -803,8 +924,9 @@ describe("DataManager integration", () => {
         size: newFile.stat.size,
       }),
     ]);
-    expect(hybridEngine.moveFile).toHaveBeenCalledWith(oldPath, newPath, 220);
-    expect(hybridEngine.deleteFile).not.toHaveBeenCalledWith(oldPath);
+    expect(hybridEngine.moveFile).not.toHaveBeenCalled();
+    expect(hybridEngine.deleteFile).toHaveBeenCalledWith(oldPath);
+    expect(hybridEngine.deleteFile).toHaveBeenCalledWith(newPath);
     const queuedRepair = (manager as any).hybridRepairQueue.get(newPath);
     expect(queuedRepair).toMatchObject({
       path: newPath,
@@ -1900,6 +2022,134 @@ describe("DataManager integration", () => {
       [],
     );
     expect(hybridEngine.persistIndicesForBatch).toHaveBeenCalled();
+
+    manager.onunload();
+  });
+  test("startup keeps shadow-aligned hybrid state out of corruption self-heal", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/shadow-aligned.md", "fresh body", 101);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "fresh body"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: file.stat.mtime - 1,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: file.stat.mtime - 1,
+    });
+    database.__hybridChunks.push({
+      id: 1,
+      filePath: file.path,
+      chunkIndex: 0,
+      startOffset: 0,
+      endOffset: 10,
+      startLine: 1,
+      startCol: 1,
+      endLine: 1,
+      embedKey: "chunk-0",
+    });
+    database.__hybridChunkVectors.push({
+      filePath: file.path,
+      precision: "int8",
+      dim: 2,
+      chunkCount: 1,
+      generation: file.stat.mtime - 1,
+      chunkIds: new Blob([Uint32Array.from([1]).buffer]),
+      vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+    });
+    database.__fileSnapshots.push({
+      filePath: file.path,
+      plainText: "fresh body",
+      generation: file.stat.mtime,
+    });
+    database.__hybridDirtyShadows.push({
+      filePath: file.path,
+      plainText: "indexed body",
+      generation: file.stat.mtime - 1,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      canServeQuery: jest.fn(() => true),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(hybridEngine.deleteFile).toHaveBeenCalledTimes(1);
+    expect(hybridEngine.indexFileStrict).toHaveBeenCalledWith(
+      file.path,
+      "fresh body",
+      file.stat.mtime,
+      { persistIndices: false },
+      [],
+    );
+
+    manager.onunload();
+  });
+
+  test("startup self-heal clears orphaned hybrid shadows before reindexing", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/orphan-shadow.md", "orphan body", 130);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "orphan body"]]);
+    const database = createMockDatabase();
+    database.__hybridDirtyShadows.push({
+      filePath: file.path,
+      plainText: "orphan body",
+      generation: file.stat.mtime - 1,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      canServeQuery: jest.fn(() => true),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(hybridEngine.deleteFile).toHaveBeenCalledWith(file.path, {
+      persistIndices: false,
+    });
+    expect(hybridEngine.indexFileStrict).toHaveBeenCalledWith(
+      file.path,
+      "orphan body",
+      file.stat.mtime,
+      { persistIndices: false },
+      [],
+    );
 
     manager.onunload();
   });

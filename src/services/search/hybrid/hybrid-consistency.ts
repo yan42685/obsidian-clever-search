@@ -16,6 +16,7 @@ export type HybridStoredFileConsistencyInput = {
 	hasChunks: boolean;
 	chunkCount: number;
 	snapshot?: HybridStoredSnapshotInfo;
+	shadowSnapshot?: HybridStoredSnapshotInfo;
 	vectorInfo?: HybridStoredVectorInfo;
 	indexedFileRef?: HybridIndexedFileRef;
 	currentPrecision: VectorPrecision;
@@ -24,6 +25,7 @@ export type HybridStoredFileConsistencyInput = {
 export type HybridStoredFileConsistency = {
 	indexedFileState: HybridDocState | null;
 	hasSnapshot: boolean;
+	hasShadowSnapshot: boolean;
 	hasVector: boolean;
 	hasIndexedFileRef: boolean;
 	reuseBlockedReasons: string[];
@@ -40,10 +42,26 @@ export function normalizeHybridIndexedFileState(
 	return ref.state;
 }
 
+function resolveAlignedSnapshotGeneration(
+	input: HybridStoredFileConsistencyInput,
+): number | undefined {
+	const indexedGeneration = input.indexedFileRef?.generation;
+	if (indexedGeneration !== undefined) {
+		if (input.snapshot?.generation === indexedGeneration) {
+			return input.snapshot.generation;
+		}
+		if (input.shadowSnapshot?.generation === indexedGeneration) {
+			return input.shadowSnapshot.generation;
+		}
+	}
+	return input.snapshot?.generation ?? input.shadowSnapshot?.generation;
+}
+
 export function analyzeHybridStoredFileConsistency(
 	input: HybridStoredFileConsistencyInput,
 ): HybridStoredFileConsistency {
-	const hasSnapshot = input.snapshot !== undefined;
+	const hasShadowSnapshot = input.shadowSnapshot !== undefined;
+	const hasSnapshot = input.snapshot !== undefined || hasShadowSnapshot;
 	const hasVector = input.vectorInfo !== undefined;
 	const hasIndexedFileRef = input.indexedFileRef !== undefined;
 	const indexedFileState = normalizeHybridIndexedFileState(
@@ -51,6 +69,7 @@ export function analyzeHybridStoredFileConsistency(
 		hasVector,
 	);
 	const reuseBlockedReasons: string[] = [];
+	const alignedSnapshotGeneration = resolveAlignedSnapshotGeneration(input);
 
 	const pushReuseReason = (reason: string) => {
 		if (!reuseBlockedReasons.includes(reason)) {
@@ -102,8 +121,8 @@ export function analyzeHybridStoredFileConsistency(
 	}
 	if (
 		input.indexedFileRef?.generation !== undefined &&
-		input.snapshot?.generation !== undefined &&
-		input.indexedFileRef.generation !== input.snapshot.generation
+		alignedSnapshotGeneration !== undefined &&
+		input.indexedFileRef.generation !== alignedSnapshotGeneration
 	) {
 		pushReuseReason("snapshot_generation_mismatch");
 	}
@@ -126,6 +145,7 @@ export function analyzeHybridStoredFileConsistency(
 	return {
 		indexedFileState,
 		hasSnapshot,
+		hasShadowSnapshot,
 		hasVector,
 		hasIndexedFileRef,
 		reuseBlockedReasons,

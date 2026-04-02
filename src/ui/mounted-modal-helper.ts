@@ -1,3 +1,4 @@
+import { EventEnum } from "src/globals/enums";
 import type { OuterSetting } from "src/globals/plugin-setting";
 import {
 	EngineType,
@@ -6,7 +7,19 @@ import {
 	SearchType,
 } from "src/globals/search-types";
 import type { SearchService } from "src/services/obsidian/search-service";
-import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
+import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
+import {
+	DataManager,
+	type HybridFreshnessSummary,
+} from "src/services/obsidian/user-data/data-manager";
+import { eventBus, type EventCallback } from "src/utils/event-bus";
+import { getInstance } from "src/utils/my-lib";
+
+export type HybridFreshnessNoticeState = {
+	visible: boolean;
+	title: string;
+	detail: string;
+};
 
 type AutoHybridFallbackControllerOptions = {
 	searchService: SearchService;
@@ -17,6 +30,12 @@ type AutoHybridFallbackControllerOptions = {
 	getCurrentQueryText: () => string;
 	onFailureNoticeChange: (key: LocaleKey | null) => void;
 	onResultApplied: (query: string, result: SearchResult) => Promise<void>;
+};
+
+type HybridFreshnessNoticeControllerOptions = {
+	getSearchType: () => SearchType;
+	getIsHybrid: () => boolean;
+	onNoticeChange: (state: HybridFreshnessNoticeState) => void;
 };
 
 export function usesDirectFileSubItems(item: FileItem): boolean {
@@ -31,6 +50,14 @@ export function getMountedModalFileItemScore(
 	item: FileItem,
 ): number | undefined {
 	return item.subItems[0]?.score;
+}
+
+export function createHiddenHybridFreshnessNoticeState(): HybridFreshnessNoticeState {
+	return {
+		visible: false,
+		title: "",
+		detail: "",
+	};
 }
 
 export class AutoHybridFallbackController {
@@ -125,5 +152,130 @@ export class AutoHybridFallbackController {
 				: null,
 		);
 		await this.onResultApplied(query, hybridResult);
+	}
+}
+
+export class HybridFreshnessNoticeController {
+	private static readonly REFRESH_INTERVAL_MS = 1000;
+
+	private readonly dataManager = getInstance(DataManager);
+	private readonly getSearchType: () => SearchType;
+	private readonly getIsHybrid: () => boolean;
+	private readonly onNoticeChange: (state: HybridFreshnessNoticeState) => void;
+	private readonly runtimeStatusCallback: EventCallback;
+	private timer: ReturnType<typeof setInterval> | null = null;
+	private refreshToken = 0;
+	private destroyed = false;
+
+	constructor(options: HybridFreshnessNoticeControllerOptions) {
+		this.getSearchType = options.getSearchType;
+		this.getIsHybrid = options.getIsHybrid;
+		this.onNoticeChange = options.onNoticeChange;
+		this.runtimeStatusCallback = () => {
+			if (!this.shouldTrack()) {
+				return;
+			}
+			void this.refreshNow();
+		};
+		eventBus.on(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED, this.runtimeStatusCallback);
+	}
+
+	clear(): void {
+		if (this.destroyed) {
+			return;
+		}
+		this.destroyed = true;
+		this.stopTicker();
+		eventBus.off(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED, this.runtimeStatusCallback);
+		this.onNoticeChange(createHiddenHybridFreshnessNoticeState());
+	}
+
+	syncFromResult(_result: SearchResult): void {
+		if (!this.shouldTrack()) {
+			this.stopTicker();
+			this.onNoticeChange(createHiddenHybridFreshnessNoticeState());
+			return;
+		}
+		this.startTicker();
+		void this.refreshNow();
+	}
+
+	private shouldTrack(): boolean {
+		return (
+			!this.destroyed &&
+			this.getSearchType() === SearchType.IN_VAULT &&
+			this.getIsHybrid()
+		);
+	}
+
+	private startTicker(): void {
+		if (this.timer) {
+			return;
+		}
+		this.timer = setInterval(() => {
+			if (!this.shouldTrack()) {
+				this.stopTicker();
+				this.onNoticeChange(createHiddenHybridFreshnessNoticeState());
+				return;
+			}
+			void this.refreshNow();
+		}, HybridFreshnessNoticeController.REFRESH_INTERVAL_MS);
+	}
+
+	private stopTicker(): void {
+		this.refreshToken += 1;
+		if (!this.timer) {
+			return;
+		}
+		clearInterval(this.timer);
+		this.timer = null;
+	}
+
+	private async refreshNow(): Promise<void> {
+		const token = ++this.refreshToken;
+		const summary = await this.dataManager.getHybridFreshnessSummary();
+		if (
+			this.destroyed ||
+			token !== this.refreshToken ||
+			!this.shouldTrack()
+		) {
+			return;
+		}
+		this.onNoticeChange(this.buildNoticeState(summary));
+	}
+
+	private buildNoticeState(
+		summary: HybridFreshnessSummary,
+	): HybridFreshnessNoticeState {
+		const clauses: string[] = [];
+		if (summary.updatingFileCount > 0) {
+			clauses.push(
+				`${t("hybridModal.freshnessNotice.updatingPrefix")}${summary.updatingFileCount}${t("hybridModal.freshnessNotice.updatingSuffix")}`,
+			);
+		}
+		if (summary.repairFileCount > 0) {
+			clauses.push(
+				`${t("hybridModal.freshnessNotice.repairPrefix")}${summary.repairFileCount}${t("hybridModal.freshnessNotice.repairSuffix")}`,
+			);
+		}
+		if (clauses.length === 0) {
+			return createHiddenHybridFreshnessNoticeState();
+		}
+
+		return {
+			visible: true,
+			title: this.buildTitle(summary),
+			detail: `${clauses.join(t("hybridModal.freshnessNotice.detailJoiner"))}${t("hybridModal.freshnessNotice.detailTail")}`,
+		};
+	}
+
+	private buildTitle(summary: HybridFreshnessSummary): string {
+		if (summary.updatingFileCount > 0 && summary.repairFileCount > 0) {
+			return t("hybridModal.freshnessNotice.titleUpdatingAndRepair");
+		}
+		if (summary.updatingFileCount > 0) {
+			return t("hybridModal.freshnessNotice.titleUpdating");
+		}
+		return t("hybridModal.freshnessNotice.titleRepair");
 	}
 }

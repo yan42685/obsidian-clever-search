@@ -18,6 +18,25 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => ({
   FileSnapshotStore: class FileSnapshotStore {},
 }));
 
+jest.mock("src/integrations/languages/chinese-patch", () => ({
+  ChinesePatch: class ChinesePatch {
+    initAsync() {}
+    cut(text: string) {
+      return [text];
+    }
+  },
+}));
+
+jest.mock("src/utils/web/assets-provider", () => ({
+  AssetsProvider: class AssetsProvider {
+    assets = {
+      stopWordsZh: null,
+      stopWordsEn: null,
+      jiebaBinary: Promise.resolve(null),
+    };
+  },
+}));
+
 jest.mock("src/services/search/hybrid/embedder", () => ({
   Embedder: class Embedder {},
   NoApiKeyError: class NoApiKeyError extends Error {},
@@ -294,7 +313,7 @@ describe("HybridEngine artifact state", () => {
       ),
     };
     const fileSnapshotStore = {
-      getIndexedSnapshotTexts: jest.fn(async () =>
+      readGenerationAlignedTexts: jest.fn(async () =>
         new Map<string, string>([["notes/a.md", "alpha"]]),
       ),
     };
@@ -326,9 +345,9 @@ describe("HybridEngine artifact state", () => {
       "notes/b.md",
     ]);
 
-    expect(fileSnapshotStore.getIndexedSnapshotTexts).toHaveBeenCalledTimes(1);
+    expect(fileSnapshotStore.readGenerationAlignedTexts).toHaveBeenCalledTimes(1);
     const [paths, expectedGenerations] =
-      fileSnapshotStore.getIndexedSnapshotTexts.mock.calls[0] as unknown as [
+      fileSnapshotStore.readGenerationAlignedTexts.mock.calls[0] as unknown as [
         string[],
         Map<string, number | undefined> | undefined,
       ];
@@ -418,7 +437,9 @@ describe("HybridEngine artifact state", () => {
     const hnswTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
 
     const fileSnapshotStore = {
-      getIndexedSnapshotTexts: jest.fn(async () => new Map<string, string>()),
+      readGenerationAlignedTexts: jest.fn(async () =>
+        new Map<string, string>([["notes/a.md", "alpha beta"]]),
+      ),
     };
 
     mockInstanceMap.set(require("src/services/database/database").Database, {
@@ -515,6 +536,10 @@ describe("HybridEngine artifact state", () => {
 
     await engine.load();
 
+    expect(fileSnapshotStore.readGenerationAlignedTexts).toHaveBeenCalledWith(
+      ["notes/a.md"],
+      new Map<string, number | undefined>([["notes/a.md", 100]]),
+    );
     expect(engine.bm25.addDocument).toHaveBeenCalledWith(11, "alpha");
     expect(engine.hnswSmall.insert).toHaveBeenCalledWith(
       11,
@@ -527,3 +552,4 @@ describe("HybridEngine artifact state", () => {
     expect(engine.canSearch()).toBe(true);
   });
 });
+
