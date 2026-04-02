@@ -11,7 +11,10 @@ import {
 	LineItem,
 	SearchResult,
 } from "../../globals/search-types";
-import type { MatchedFile } from "../../globals/search-types";
+import type {
+	HybridSearchMode,
+	MatchedFile,
+} from "../../globals/search-types";
 import { FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
 import { HybridEngine } from "../search/hybrid/hybrid-engine";
@@ -63,6 +66,19 @@ export class SearchService {
 	}
 
 	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
+		return await this.searchInVaultHybridByMode(queryText, "default");
+	}
+
+	async searchInVaultHybridLexicalLane(
+		queryText: string,
+	): Promise<SearchResult> {
+		return await this.searchInVaultHybridByMode(queryText, "lexical-lane");
+	}
+
+	private async searchInVaultHybridByMode(
+		queryText: string,
+		mode: HybridSearchMode,
+	): Promise<SearchResult> {
 		const blocked = this.getBlockedSearchResult(queryText);
 		if (blocked) {
 			return blocked;
@@ -74,17 +90,24 @@ export class SearchService {
 			return await this.searchInVaultLexical(queryText);
 		}
 
-		if (!this.hybridEngine.canServeQuery()) {
+		if (
+			mode === "default"
+				? !this.hybridEngine.canServeQuery()
+				: !this.hybridEngine.isReady()
+		) {
 			return await this.searchInVaultLexical(queryText);
 		}
 		const dataManager = getInstance(DataManager);
-		if (dataManager.hasHybridFailedEmbeddings()) {
+		if (mode === "default" && dataManager.hasHybridFailedEmbeddings()) {
 			return await this.searchInVaultLexical(queryText, {
 				hybridEmbeddingIncomplete: true,
 			});
 		}
 		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
-		const items = await this.hybridEngine.search(queryText);
+		const items =
+			mode === "lexical-lane"
+				? await this.hybridEngine.searchWithLexicalLane(queryText)
+				: await this.hybridEngine.search(queryText);
 		const fallbackNoticeKey =
 			this.hybridEngine.consumeSearchFallbackNoticeKey();
 		if (fallbackNoticeKey) {

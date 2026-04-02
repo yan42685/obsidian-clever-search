@@ -86,6 +86,8 @@ export enum SearchType {
   IN_VAULT,
 }
 
+export type HybridSearchMode = "default" | "lexical-lane";
+
 export enum EngineType {
   LEXICAL,
   SEMANTIC,

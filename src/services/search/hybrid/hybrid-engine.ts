@@ -54,6 +54,7 @@ import {
   resolveHybridRecallBudget,
   type RankedResult,
 } from "./ranking";
+import { runHybridLexicalLaneSearch } from "./lexical-lane";
 import {
   HybridRerankError,
   HybridReranker,
@@ -83,6 +84,7 @@ type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 type HybridWriteOption = {
   persistIndices?: boolean;
   deleteIndexedFileRef?: boolean;
+  deleteIndexedShadow?: boolean;
 };
 
 type HybridIndexMode = "full" | "without-embedding";
@@ -185,6 +187,7 @@ export class HybridEngine {
     await Promise.all([
       this.db.db.hybridChunks.clear(),
       this.db.db.hybridChunkVectors.clear(),
+      this.db.db.hybridDirtyShadows.clear(),
       this.db.db.hybridBm25Index.clear(),
       this.db.db.hybridHnswSmall.clear(),
       this.db.db.hybridIndexedFileRefs.clear(),
@@ -370,6 +373,8 @@ export class HybridEngine {
         await this.db.db.hybridIndexedFileRefs.delete(oldPath);
       }
 
+      await this.fileSnapshotStore.deleteIndexedShadow(oldPath);
+      await this.fileSnapshotStore.deleteIndexedShadow(newPath);
       return true;
     });
   }
@@ -393,6 +398,9 @@ export class HybridEngine {
     await this.db.db.hybridChunkVectors.delete(filePath);
     if (option.deleteIndexedFileRef ?? true) {
       await this.db.db.hybridIndexedFileRefs.delete(filePath);
+    }
+    if (option.deleteIndexedShadow ?? true) {
+      await this.fileSnapshotStore.deleteIndexedShadow(filePath);
     }
 
     for (const id of ids) {
@@ -501,6 +509,20 @@ export class HybridEngine {
     }
   }
 
+  async searchWithLexicalLane(
+    query: string,
+    topK = this.defaultResultCount,
+  ): Promise<FileItem[]> {
+    if (!this.isEnabled() || !this._ready || !query.trim()) {
+      return [];
+    }
+    return await runHybridLexicalLaneSearch({
+      queryText: query,
+      displayTopK: topK,
+      rerankTopK: Math.max(topK * 2, topK),
+    });
+  }
+
   async persistIndicesForBatch(): Promise<void> {
     await this.persistIndices();
   }
@@ -544,9 +566,12 @@ export class HybridEngine {
       }
 
       const pendingIndexedAt = Date.now();
-      const previousState = await this.loadStoredFileIndexState(filePath);
       const previousIndexedFileRef =
         await this.db.db.hybridIndexedFileRefs.get(filePath);
+      const previousState = await this.loadStoredFileIndexState(
+        filePath,
+        previousIndexedFileRef,
+      );
       await this.markHybridArtifactsDirty("runtime-index-write");
       const reusableState = this.getReusableStoredFileIndexState(
         filePath,
@@ -565,6 +590,7 @@ export class HybridEngine {
       await this.deleteStoredHybridPrivateData(filePath, {
         ...option,
         deleteIndexedFileRef: false,
+        deleteIndexedShadow: false,
       });
 
       const { chunks: rawChunks } = await profileHybridStage(
@@ -591,6 +617,7 @@ export class HybridEngine {
       );
       if (plannedChunks.length === 0) {
         await this.db.db.hybridIndexedFileRefs.delete(filePath);
+        await this.fileSnapshotStore.deleteIndexedShadow(filePath);
         if (option.persistIndices ?? true) {
           await this.persistIndices();
         }
@@ -658,6 +685,7 @@ export class HybridEngine {
         await this.deleteStoredHybridPrivateData(filePath, {
           persistIndices: false,
           deleteIndexedFileRef: false,
+          deleteIndexedShadow: false,
         });
         logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
         this._canSearch = false;
@@ -689,6 +717,7 @@ export class HybridEngine {
             lastIncrementalEmbedAt:
               previousIndexedFileRef?.lastIncrementalEmbedAt,
           });
+          await this.fileSnapshotStore.deleteIndexedShadow(filePath);
           throw fallbackError;
         }
       }
@@ -711,15 +740,27 @@ export class HybridEngine {
 
   private async loadStoredFileIndexState(
     filePath: string,
+    indexedFileRef?: HybridIndexedFileRef,
   ): Promise<StoredFileIndexState> {
-    const [snapshot, chunkRows, vectorRow] = await Promise.all([
-      this.db.db.fileSnapshots.get(filePath),
+    const [snapshotText, chunkRows, vectorRow] = await Promise.all([
+      this.fileSnapshotStore.readGenerationAlignedText(
+        filePath,
+        indexedFileRef?.generation,
+      ),
       this.db.db.hybridChunks
         .where("filePath")
         .equals(filePath)
         .sortBy("chunkIndex"),
       this.db.db.hybridChunkVectors.get(filePath),
     ]);
+    const snapshot =
+      snapshotText === undefined
+        ? undefined
+        : {
+            filePath,
+            plainText: snapshotText,
+            generation: indexedFileRef?.generation,
+          };
     const vectorsByChunkId = new Map<number, StoredVector>();
     if (vectorRow && vectorRow.precision === this.precision) {
       for (const record of await rowToChunkVectorRecords(vectorRow)) {
@@ -790,6 +831,7 @@ export class HybridEngine {
       filePath,
       plainText,
       generation,
+      { clearShadowIfAligned: true },
     );
   }
 
@@ -1205,7 +1247,7 @@ export class HybridEngine {
       expectedGenerations.set(uniquePaths[index], indexedRef.generation);
     }
 
-    return await this.fileSnapshotStore.getIndexedSnapshotTexts(
+    return await this.fileSnapshotStore.readGenerationAlignedTexts(
       safePaths,
       expectedGenerations,
     );
@@ -1404,22 +1446,40 @@ export class HybridEngine {
 
   private async rebuildBm25ArtifactFromStore(): Promise<void> {
     this.bm25.clear();
-    let offset = 0;
+    let lastFilePath: string | null = null;
 
     while (true) {
-      const snapshots = await this.db.db.fileSnapshots
-        .orderBy("filePath")
-        .offset(offset)
-        .limit(INDEX_CHUNK_BATCH_SIZE)
-        .toArray();
-      if (snapshots.length === 0) {
+      const indexedRefs: HybridIndexedFileRef[] =
+        lastFilePath === null
+          ? await this.db.db.hybridIndexedFileRefs
+              .orderBy("path")
+              .limit(INDEX_CHUNK_BATCH_SIZE)
+              .toArray()
+          : await this.db.db.hybridIndexedFileRefs
+              .where("path")
+              .above(lastFilePath)
+              .limit(INDEX_CHUNK_BATCH_SIZE)
+              .toArray();
+      if (indexedRefs.length === 0) {
         break;
       }
 
-      for (const snapshot of snapshots) {
+      const expectedGenerations = new Map<string, number | undefined>(
+        indexedRefs.map((ref) => [ref.path, ref.generation]),
+      );
+      const snapshotByPath = await this.fileSnapshotStore.readGenerationAlignedTexts(
+        indexedRefs.map((ref) => ref.path),
+        expectedGenerations,
+      );
+
+      for (const indexedRef of indexedRefs) {
+        const plainText = snapshotByPath.get(indexedRef.path);
+        if (plainText === undefined) {
+          continue;
+        }
         const rows = await this.db.db.hybridChunks
           .where("filePath")
-          .equals(snapshot.filePath)
+          .equals(indexedRef.path)
           .sortBy("chunkIndex");
         for (const row of rows) {
           if (row.id === undefined) {
@@ -1427,12 +1487,12 @@ export class HybridEngine {
           }
           this.bm25.addDocument(
             row.id,
-            snapshot.plainText.slice(row.startOffset, row.endOffset),
+            plainText.slice(row.startOffset, row.endOffset),
           );
         }
       }
 
-      offset += snapshots.length;
+      lastFilePath = indexedRefs[indexedRefs.length - 1].path;
     }
 
     await this.persistBm25();

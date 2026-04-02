@@ -1,12 +1,21 @@
 import { App, Modal } from "obsidian";
-import type { SearchType } from "src/globals/search-types";
+import type {
+	HybridSearchMode,
+	SearchType,
+} from "src/globals/search-types";
 import { ModalNavigationHotkeys } from "src/services/obsidian/command-registry";
 import MountedModal from "./MountedModal.svelte";
 
 // TODO: make it an abstract class
 export class SearchModal extends Modal {
 	mountedElement: any;
-	constructor(app: App, searchType: SearchType, isHybrid = false, query?: string) {
+	constructor(
+		app: App,
+		searchType: SearchType,
+		isHybrid = false,
+		query?: string,
+		hybridMode: HybridSearchMode = "default",
+	) {
 		super(app);
 
 		// get text selected by user
@@ -26,6 +35,7 @@ export class SearchModal extends Modal {
 				onConfirmExternal: () => this.close(),
 				searchType: searchType,
 				isHybrid: isHybrid,
+				hybridMode,
 				queryText: effectiveQuery || "",
 			},
 		});

@@ -3,6 +3,7 @@
 	import { EventEnum } from "src/globals/enums";
 	import { OuterSetting } from "src/globals/plugin-setting";
 	import {
+		type HybridSearchMode,
 	    FileItem,
 	    FileSubItem,
 	    LineItem,
@@ -35,6 +36,7 @@
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
 	export let isHybrid: boolean = false; // hybrid BM25+vector search
+	export let hybridMode: HybridSearchMode = "default";
 	export let queryText: string;
 
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
@@ -150,9 +152,12 @@
 			nextResult = await searchService.searchInFile(currentQueryText);
 		} else if (searchType === SearchType.IN_VAULT) {
 			if (isHybrid) {
-				nextResult = await searchService.searchInVaultHybrid(
-					currentQueryText,
-				);
+				nextResult =
+					hybridMode === "lexical-lane"
+						? await searchService.searchInVaultHybridLexicalLane(
+							currentQueryText,
+						)
+						: await searchService.searchInVaultHybrid(currentQueryText);
 			} else {
 				nextResult = await searchService.searchInVault(currentQueryText);
 			}

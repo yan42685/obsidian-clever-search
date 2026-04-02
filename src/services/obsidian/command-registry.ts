@@ -65,6 +65,21 @@ export class CommandRegistry {
 			});
 
 			this.addCommand({
+				id: "cs-hybrid-search-lexical-lane",
+				name: "Hybrid search (lexical lane) [dev]",
+				callback: () =>
+					this.runWhenSearchSearchable(() =>
+						new SearchModal(
+							this.app,
+							SearchType.IN_VAULT,
+							true,
+							undefined,
+							"lexical-lane",
+						).open(),
+					),
+			});
+
+			this.addCommand({
 				id: "cs-dev-file-read-benchmark",
 				name: "Benchmark file read paths [dev]",
 				callback: async () =>
