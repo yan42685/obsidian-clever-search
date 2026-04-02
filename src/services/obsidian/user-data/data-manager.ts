@@ -149,6 +149,34 @@ type LexicalHeapDeltaSummary = {
   limitBytes: number;
 };
 
+type DevRuntimePartitionRow = {
+  segment: string;
+  bytes: number;
+  size: string;
+  shareOfPluginRuntime: string;
+  shareOfJsHeapUsed: string;
+  shareOfVault: string;
+};
+
+type DevHeapContextRow = {
+  metric: string;
+  bytes: number;
+  size: string;
+  ratio: string;
+};
+
+type DevLexicalStringOwnershipRow = {
+  segment: string;
+  ownerBytes: number;
+  ownerSize: string;
+  uniqueStringBytes: number;
+  uniqueStringSize: string;
+  uniqueStrings: number;
+  shareOfLexical: string;
+  shareOfVault: string;
+  notes: string;
+};
+
 export type SearchBootstrapMetrics = {
   startedAt: number;
   searchableAt: number | null;
@@ -2693,6 +2721,7 @@ export class DataManager {
     const hybridRuntimeEstimate = this.hybridEngine.getRuntimeMemoryEstimate();
     const currentFileCacheBytes =
       this.fileSnapshotStore.estimateCurrentCacheBytes();
+    const jsHeapUsage = this.sampleJsHeapUsage();
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
 
@@ -2767,6 +2796,16 @@ export class DataManager {
       (sum, row) => sum + row.bytes,
       0,
     );
+    const runtimePartitionBreakdown = this.buildPluginRuntimeBreakdown(
+      runtimeRows,
+      runtimeTotalBytes,
+      indexableBytes,
+      jsHeapUsage,
+    );
+    const heapContextRows = this.buildPluginHeapContextRows(
+      runtimeTotalBytes,
+      jsHeapUsage,
+    );
 
     new MyNotice(
       `${this.buildDevStorageSummaryNotice(
@@ -2778,6 +2817,7 @@ export class DataManager {
         runtimeRows,
         persistedUnlistedBytes,
         [
+          ...runtimePartitionBreakdown.noticeLines,
           ...lexicalRuntimeBreakdown.noticeLines,
           ...lexicalHeapDeltaNoticeLines,
         ],
@@ -2801,6 +2841,9 @@ export class DataManager {
     console.log(
       `Runtime total (estimate): ${this.formatBytes(runtimeTotalBytes)}`,
     );
+    runtimePartitionBreakdown.noticeLines.forEach((line) => {
+      console.log("[clever-search] " + line);
+    });
     if (lexicalRuntimeBreakdown.summaryLine) {
       console.log(`[clever-search] ${lexicalRuntimeBreakdown.summaryLine}`);
     }
@@ -2811,6 +2854,14 @@ export class DataManager {
     console.table(persistedRows);
     console.log("[clever-search] Runtime memory estimate");
     console.table(runtimeRows);
+    if (runtimePartitionBreakdown.rows.length > 0) {
+      console.log("[clever-search] Plugin runtime breakdown");
+      console.table(runtimePartitionBreakdown.rows);
+    }
+    if (heapContextRows.length > 0) {
+      console.log("[clever-search] Plugin runtime vs JS heap");
+      console.table(heapContextRows);
+    }
     if (lexicalRuntimeBreakdown.rows.length > 0) {
       console.log(
         "[clever-search] Lexical runtime breakdown (exclusive segments)",
@@ -2824,6 +2875,10 @@ export class DataManager {
     if (lexicalRuntimeBreakdown.stringPoolSourceRows.length > 0) {
       console.log("[clever-search] Lexical stringPool breakdown (sources)");
       console.table(lexicalRuntimeBreakdown.stringPoolSourceRows);
+    }
+    if (lexicalRuntimeBreakdown.stringOwnershipRows.length > 0) {
+      console.log("[clever-search] Lexical string ownership hotspots");
+      console.table(lexicalRuntimeBreakdown.stringOwnershipRows);
     }
     if (lexicalHeapDeltaRows.length > 0) {
       console.log("[clever-search] Lexical heap delta");
@@ -3011,6 +3066,7 @@ export class DataManager {
     rows: DevStorageBreakdownRow[];
     stringPoolGroupRows: DevStorageBreakdownRow[];
     stringPoolSourceRows: DevStorageBreakdownRow[];
+    stringOwnershipRows: DevLexicalStringOwnershipRow[];
   } {
     if (!breakdown) {
       return {
@@ -3019,6 +3075,7 @@ export class DataManager {
         rows: [],
         stringPoolGroupRows: [],
         stringPoolSourceRows: [],
+        stringOwnershipRows: [],
       };
     }
 
@@ -3030,6 +3087,7 @@ export class DataManager {
         rows: [],
         stringPoolGroupRows: [],
         stringPoolSourceRows: [],
+        stringOwnershipRows: [],
       };
     }
 
@@ -3077,7 +3135,7 @@ export class DataManager {
     const postings = this.asRecord(estimatedBytes.postings);
     if (postings) {
       for (const [key, value] of Object.entries(postings)) {
-        pushSegment(`postings.${key}`, this.asRecord(value)?.total);
+        pushSegment("postings." + key, this.asRecord(value)?.total);
       }
     }
 
@@ -3127,6 +3185,11 @@ export class DataManager {
     const stringPoolSourceRows = buildStringPoolRows(
       this.asRecord(stringPool?.bySource),
     ).slice(0, 12);
+    const stringOwnershipRows = this.buildLexicalStringOwnershipRows(
+      estimatedBytes,
+      totalBytes,
+      indexableBytes,
+    );
 
     if (rows.length === 0 || totalBytes <= 0) {
       return {
@@ -3135,25 +3198,277 @@ export class DataManager {
         rows,
         stringPoolGroupRows,
         stringPoolSourceRows,
+        stringOwnershipRows,
       };
     }
 
-    const headline = `Coverage live index (exclusive): ${this.formatBytes(totalBytes)} (${this.formatPercent(totalBytes, indexableBytes)} of vault)`;
-    const topLine = `Coverage top segments: ${sortedSegments
-      .slice(0, 3)
-      .map((segment) => `${segment.segment} ${this.formatBytes(segment.bytes)}`)
-      .join(" | ")}`;
-    const accountingLine = `Coverage accounted segments: ${this.formatBytes(accountedBytes)} / ${this.formatBytes(totalBytes)}`;
+    const headline =
+      "Coverage live index (exclusive): " +
+      this.formatBytes(totalBytes) +
+      " (" +
+      this.formatPercent(totalBytes, indexableBytes) +
+      " of vault)";
+    const topLine =
+      "Coverage top segments: " +
+      sortedSegments
+        .slice(0, 3)
+        .map((segment) => segment.segment + " " + this.formatBytes(segment.bytes))
+        .join(" | ");
+    const accountingLine =
+      "Coverage accounted segments: " +
+      this.formatBytes(accountedBytes) +
+      " / " +
+      this.formatBytes(totalBytes);
 
     return {
       noticeLines: [headline, topLine, accountingLine],
-      summaryLine: `${headline}; ${topLine}; ${accountingLine}`,
+      summaryLine: headline + "; " + topLine + "; " + accountingLine,
       rows,
       stringPoolGroupRows,
       stringPoolSourceRows,
+      stringOwnershipRows,
     };
   }
 
+  private buildPluginRuntimeBreakdown(
+    runtimeRows: DevStorageSummaryRow[],
+    runtimeTotalBytes: number,
+    indexableBytes: number,
+    jsHeapUsage: JsHeapUsageSample | null,
+  ): {
+    noticeLines: string[];
+    rows: DevRuntimePartitionRow[];
+  } {
+    if (runtimeRows.length === 0) {
+      return {
+        noticeLines: [],
+        rows: [],
+      };
+    }
+
+    const rows = [...runtimeRows]
+      .sort((left, right) => right.bytes - left.bytes)
+      .map((row) => ({
+        segment: row.category,
+        bytes: row.bytes,
+        size: this.formatBytes(row.bytes),
+        shareOfPluginRuntime: this.formatPercent(row.bytes, runtimeTotalBytes),
+        shareOfJsHeapUsed: jsHeapUsage
+          ? this.formatPercent(row.bytes, jsHeapUsage.usedBytes)
+          : "n/a",
+        shareOfVault: this.formatPercent(row.bytes, indexableBytes),
+      }));
+    const topSegments = rows
+      .filter((row) => row.bytes > 0)
+      .slice(0, 3)
+      .map((row) => row.segment + " " + row.size)
+      .join(" | ");
+    const noticeLines = topSegments.length
+      ? ["Plugin runtime split: " + topSegments]
+      : [];
+    if (jsHeapUsage) {
+      noticeLines.push(
+        "Plugin runtime vs JS heap used: " +
+          this.formatBytes(runtimeTotalBytes) +
+          " / " +
+          this.formatBytes(jsHeapUsage.usedBytes) +
+          " (" +
+          this.formatPercent(runtimeTotalBytes, jsHeapUsage.usedBytes) +
+          ")",
+      );
+    }
+    return {
+      noticeLines,
+      rows,
+    };
+  }
+
+  private buildPluginHeapContextRows(
+    runtimeTotalBytes: number,
+    jsHeapUsage: JsHeapUsageSample | null,
+  ): DevHeapContextRow[] {
+    const rows: DevHeapContextRow[] = [
+      {
+        metric: "pluginRuntimeEstimate",
+        bytes: runtimeTotalBytes,
+        size: this.formatBytes(runtimeTotalBytes),
+        ratio: jsHeapUsage
+          ? this.formatPercent(runtimeTotalBytes, jsHeapUsage.usedBytes)
+          : "n/a",
+      },
+    ];
+    if (!jsHeapUsage) {
+      return rows;
+    }
+    const unattributedJsHeapUsed = Math.max(
+      0,
+      jsHeapUsage.usedBytes - runtimeTotalBytes,
+    );
+    rows.push(
+      {
+        metric: "jsHeapUsedNow",
+        bytes: jsHeapUsage.usedBytes,
+        size: this.formatBytes(jsHeapUsage.usedBytes),
+        ratio: "100.0%",
+      },
+      {
+        metric: "unattributedJsHeapUsed",
+        bytes: unattributedJsHeapUsed,
+        size: this.formatBytes(unattributedJsHeapUsed),
+        ratio: this.formatPercent(unattributedJsHeapUsed, jsHeapUsage.usedBytes),
+      },
+      {
+        metric: "jsHeapCommittedNow",
+        bytes: jsHeapUsage.totalBytes,
+        size: this.formatBytes(jsHeapUsage.totalBytes),
+        ratio: this.formatPercent(jsHeapUsage.usedBytes, jsHeapUsage.totalBytes),
+      },
+      {
+        metric: "jsHeapLimit",
+        bytes: jsHeapUsage.limitBytes,
+        size: this.formatBytes(jsHeapUsage.limitBytes),
+        ratio: this.formatPercent(jsHeapUsage.usedBytes, jsHeapUsage.limitBytes),
+      },
+    );
+    return rows;
+  }
+
+  private buildLexicalStringOwnershipRows(
+    estimatedBytes: Record<string, unknown>,
+    lexicalTotalBytes: number,
+    indexableBytes: number,
+  ): DevLexicalStringOwnershipRow[] {
+    const stringPool = this.asRecord(estimatedBytes.stringPool);
+    const stringPoolBySource = this.asRecord(stringPool?.bySource);
+    const stringPoolByGroup = this.asRecord(stringPool?.byGroup);
+    const documents = this.asRecord(estimatedBytes.documents);
+    const documentIdentity = this.asRecord(estimatedBytes.documentIdentity);
+    const postings = this.asRecord(estimatedBytes.postings);
+    const lexicon = this.asRecord(estimatedBytes.lexicon);
+
+    const readStringPoolEntry = (
+      entryType: "source" | "group",
+      key: string,
+    ): { bytes: number; uniqueStrings: number } => {
+      const entry = this.asRecord(
+        entryType === "source" ? stringPoolBySource?.[key] : stringPoolByGroup?.[key],
+      );
+      return {
+        bytes: this.readNumber(entry?.bytes) ?? 0,
+        uniqueStrings: this.readNumber(entry?.uniqueStrings) ?? 0,
+      };
+    };
+    const readOwnerBytes = (
+      record: Record<string, unknown> | null | undefined,
+      ...fields: string[]
+    ): number =>
+      fields.reduce((sum, field) => sum + (this.readNumber(record?.[field]) ?? 0), 0);
+    const sumPostingOwnerBytes = (keys: string[]): number =>
+      keys.reduce((sum, key) => {
+        const posting = this.asRecord(postings?.[key]);
+        return sum + (this.readNumber(posting?.termReferenceBytes) ?? 0);
+      }, 0);
+    const rows: DevLexicalStringOwnershipRow[] = [];
+    const pushRow = (
+      segment: string,
+      ownerBytes: number,
+      stringPoolEntry: { bytes: number; uniqueStrings: number },
+      notes: string,
+    ) => {
+      if (ownerBytes <= 0 && stringPoolEntry.bytes <= 0) {
+        return;
+      }
+      rows.push({
+        segment,
+        ownerBytes,
+        ownerSize: this.formatBytes(ownerBytes),
+        uniqueStringBytes: stringPoolEntry.bytes,
+        uniqueStringSize: this.formatBytes(stringPoolEntry.bytes),
+        uniqueStrings: stringPoolEntry.uniqueStrings,
+        shareOfLexical: this.formatPercent(
+          ownerBytes + stringPoolEntry.bytes,
+          lexicalTotalBytes,
+        ),
+        shareOfVault: this.formatPercent(
+          ownerBytes + stringPoolEntry.bytes,
+          indexableBytes,
+        ),
+        notes,
+      });
+    };
+
+    pushRow(
+      "documentIdentity.bodyTokenLexicon",
+      readOwnerBytes(this.asRecord(documentIdentity?.bodyTokenLexicon), "referenceBytes"),
+      readStringPoolEntry("source", "documentIdentity.bodyTokenLexicon"),
+      "canonical owner for body exact terms; body postings now keep token-id postings only",
+    );
+    pushRow(
+      "documentIdentity.bodyHanSegments",
+      readOwnerBytes(
+        this.asRecord(documentIdentity?.bodyHanSegmentsById),
+        "slotReferenceBytes",
+        "arrayBytes",
+      ),
+      readStringPoolEntry("source", "documentIdentity.bodyHanSegments"),
+      "derived Han-segment cache used by CJK / char fallback",
+    );
+    pushRow(
+      "documents.path",
+      readOwnerBytes(this.asRecord(documents?.paths), "referenceBytes") +
+        readOwnerBytes(this.asRecord(documentIdentity?.pathToId), "pathReferenceBytes") +
+        readOwnerBytes(this.asRecord(documentIdentity?.idToPath), "referenceBytes"),
+      readStringPoolEntry("group", "documentPaths"),
+      "the same path string is referenced by documents, pathToId, and idToPath",
+    );
+    pushRow(
+      "documents.metadataText",
+      readOwnerBytes(this.asRecord(documents?.basenameText), "referenceBytes") +
+        readOwnerBytes(this.asRecord(documents?.folderText), "referenceBytes") +
+        readOwnerBytes(this.asRecord(documents?.aliasesText), "referenceBytes") +
+        readOwnerBytes(this.asRecord(documents?.tagsText), "referenceBytes") +
+        readOwnerBytes(this.asRecord(documents?.headingsText), "referenceBytes"),
+      readStringPoolEntry("group", "documentText"),
+      "raw metadata text retained for basename, folder, aliases, tags, and headings",
+    );
+    pushRow(
+      "postings.metadataPhrase.term",
+      sumPostingOwnerBytes([
+        "metadataAliasPhrase",
+        "metadataBasenamePhrase",
+        "metadataFolderPhrase",
+        "metadataHeadingPhrase",
+        "metadataTagPhrase",
+      ]),
+      readStringPoolEntry("group", "metadataPhraseTerms"),
+      "term keys owned by metadata phrase postings",
+    );
+    pushRow(
+      "postings.metadataChar.term",
+      sumPostingOwnerBytes([
+        "metadataAliasChar",
+        "metadataBasenameChar",
+        "metadataFolderChar",
+        "metadataHeadingChar",
+        "metadataTagChar",
+      ]),
+      readStringPoolEntry("group", "metadataCharTerms"),
+      "term keys owned by metadata char postings",
+    );
+    pushRow(
+      "lexicon",
+      readOwnerBytes(lexicon, "referenceBytes"),
+      readStringPoolEntry("group", "lexicon"),
+      "sorted term lexicon used by prefix and fuzzy queries",
+    );
+
+    return rows.sort(
+      (left, right) =>
+        right.ownerBytes +
+        right.uniqueStringBytes -
+        (left.ownerBytes + left.uniqueStringBytes),
+    );
+  }
   private sampleJsHeapUsage(): JsHeapUsageSample | null {
     const memory = (
       performance as typeof performance & {
