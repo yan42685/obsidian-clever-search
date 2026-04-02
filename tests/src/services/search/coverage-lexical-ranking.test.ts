@@ -1290,7 +1290,7 @@ describe("coverage lexical ranking", () => {
 		);
 	});
 
-	test("stores char postings buckets as doc id arrays", async () => {
+	test("stores metadata char postings as doc id arrays and retains body Han segments", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -1318,7 +1318,7 @@ describe("coverage lexical ranking", () => {
 		)?.docId;
 		expect(typeof docId).toBe("number");
 		expect(
-			internalEngine.bodyCharPostings.get("\u7f13\u5b58") instanceof Uint32Array,
+			Array.isArray(internalEngine.documentBodyHanSegmentsById[docId]),
 		).toBe(true);
 		expect(
 			Array.isArray(
@@ -1343,7 +1343,7 @@ describe("coverage lexical ranking", () => {
 		expect(
 			Array.isArray(internalEngine.metadataTagCharPostings.get("\u6807\u7b7e")),
 		).toBe(true);
-		expect(internalEngine.bodyCharPostings.get("\u7f13\u5b58")).toContain(docId);
+		expect(internalEngine.documentBodyHanSegmentsById[docId]?.length ?? 0).toBeGreaterThan(0);
 		expect(
 			internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
 		).toContain(docId);

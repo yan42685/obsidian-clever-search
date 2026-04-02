@@ -102,7 +102,6 @@ type CoverageLexicalDerivedDocumentIndexState = {
 	bodyTokenSequence: string[];
 	bodyHanSegments: string[];
 	bodyTerms: Set<string>;
-	bodyCharTerms: Set<string>;
 	aliasTerms: Set<string>;
 	aliasCharTerms: Set<string>;
 	aliasPhraseTerms: Set<string>;
@@ -123,7 +122,6 @@ type CoverageLexicalDerivedDocumentIndexState = {
 
 type CoverageLexicalDerivedTermKey =
 	| "bodyTerms"
-	| "bodyCharTerms"
 	| "aliasTerms"
 	| "aliasCharTerms"
 	| "aliasPhraseTerms"
@@ -150,7 +148,6 @@ type CoverageLexicalDerivedPostingBinding = {
 const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerivedPostingBinding[] =
 	[
 		{ termsKey: "bodyTerms", postingKey: "bodyPostings" },
-		{ termsKey: "bodyCharTerms", postingKey: "bodyCharPostings" },
 		{ termsKey: "aliasTerms", postingKey: "metadataAliasPostings" },
 		{ termsKey: "aliasCharTerms", postingKey: "metadataAliasCharPostings" },
 		{ termsKey: "aliasPhraseTerms", postingKey: "metadataAliasPhrasePostings" },
@@ -234,9 +231,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		? [...options.existingBodyHanSegments]
 		: extractHanSegments(options.bodyText ?? "");
 	const bodyTerms = new Set(bodyTokenSequence);
-	const bodyCharTerms = new Set(
-		bodyHanSegments.flatMap((segment) => extractHanBigrams(segment)),
-	);
 	const basenameTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.basenameText),
 	);
@@ -266,7 +260,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		bodyTokenSequence,
 		bodyHanSegments,
 		bodyTerms,
-		bodyCharTerms,
 		aliasTerms,
 		aliasCharTerms,
 		aliasPhraseTerms: buildCoverageLexicalPhraseTermSet(aliasTerms),
@@ -404,7 +397,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		(term) => this.getOrCreateDocumentBodyTokenId(term),
 		(tokenId) => this.documentBodyTokenLexicon[tokenId],
 	);
-	private readonly bodyCharPostings = new Map<string, Uint32Array>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
 	private readonly metadataAliasPostings = new Map<string, Uint32Array>();
@@ -842,7 +834,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			const candidates = collectCoverageLexicalCandidateStatesByDocId(
 				{
 					bodyPostings: this.bodyPostings,
-					bodyCharPostings: this.bodyCharPostings,
+					documentBodyHanSegmentsById: this.documentBodyHanSegmentsById,
 					metadataAliasCharPostings: this.metadataAliasCharPostings,
 					metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
 					metadataAliasPostings: this.metadataAliasPostings,
@@ -1037,7 +1029,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			documentIdentityCount: this.documentIdByPath.size,
 			nextDocumentId: this.nextDocumentId,
 			bodyTermCount: this.bodyPostings.size,
-			bodyCharTermCount: this.bodyCharPostings.size,
 			metadataAliasCharTermCount: this.metadataAliasCharPostings.size,
 			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
@@ -1275,7 +1266,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								bodyTokenIds: [
 									...(this.getDocumentBodyTokenIds(document.docId) ?? []),
 								],
-								bodyHanSegments: [],
+								bodyHanSegments: [
+									...(this.documentBodyHanSegmentsById[document.docId] ?? []),
+								],
 								tagValues: [
 									...(this.documentTagValuesById[document.docId] ?? []),
 								],
@@ -1284,6 +1277,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					: [],
 			),
 			...this.cloneLivePostingState(),
+			bodyCharPostings: new Map(),
 			bodyHanSegmentPostings: new Map(),
 			metadataAliasHanSegmentPostings: new Map(),
 			metadataBasenameHanSegmentPostings: new Map(),
@@ -1349,8 +1343,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		switch (key) {
 			case "bodyPostings":
 				return this.bodyPostings;
-			case "bodyCharPostings":
-				return this.bodyCharPostings;
 			case "metadataAliasCharPostings":
 				return this.metadataAliasCharPostings;
 			case "metadataAliasPhrasePostings":

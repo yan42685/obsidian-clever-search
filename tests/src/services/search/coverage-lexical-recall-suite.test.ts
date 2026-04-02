@@ -286,7 +286,8 @@ describe("coverage lexical recall suite", () => {
 					documentIdByPath: engineAny.documentIdByPath,
 					documentPathById: engineAny.documentPathById,
 					getDocumentBodyTokens: (docId: number) =>
-						engineAny.getDocumentBodyTokens(docId) ?? [],
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+					documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
 					documentTagValuesById: engineAny.documentTagValuesById,
 				},
 				plan,
@@ -409,7 +410,8 @@ describe("coverage lexical recall suite", () => {
 				documentPathById: engineAny.documentPathById,
 				getDocumentBodyTokens: (docId: number) =>
 					engineAny.getDocumentBodyTokens(docId) ?? [],
-				documentTagValuesById: engineAny.documentTagValuesById,
+					documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+					documentTagValuesById: engineAny.documentTagValuesById,
 			},
 			plan,
 			phraseSignatures,

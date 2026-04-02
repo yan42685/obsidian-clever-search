@@ -9,7 +9,9 @@ import {
 } from "./coverage-lexical-body-evidence";
 import {
 	buildCoverageLexicalCharQuery,
+	evaluateCoverageLexicalBodyCharVerification,
 	evaluateCoverageLexicalTagFallback,
+	type CoverageLexicalBodyCharVerification,
 	type CoverageLexicalCharQuery,
 } from "./coverage-lexical-cjk";
 import type {
@@ -33,7 +35,7 @@ type CoverageLexicalCandidateKey = number;
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: CoverageLexicalPostingMap;
-	bodyCharPostings: CoverageLexicalPostingMap;
+	bodyCharPostings?: CoverageLexicalPostingMap;
 	bodyHanSegmentPostings?: CoverageLexicalPostingMap;
 	metadataAliasCharPostings: CoverageLexicalPostingMap;
 	metadataAliasHanSegmentPostings?: CoverageLexicalPostingMap;
@@ -60,6 +62,7 @@ type CoverageLexicalRecallIndex = {
 	documentIdByPath: ReadonlyMap<string, number>;
 	documentPathById: readonly (string | undefined)[];
 	getDocumentBodyTokens: (docId: number) => readonly string[];
+	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[];
 	documentTagValuesById: readonly (readonly string[] | undefined)[];
 };
 
@@ -859,13 +862,7 @@ function runCharFallbackLane(
 		benchmarkHooks,
 		"laneCollect",
 		() => {
-			collectCharCandidates(
-				index,
-				index.bodyCharPostings,
-				charQuery.terms,
-				laneCandidates,
-				"body",
-			);
+			collectBodyCharGateCandidates(index, charQuery, laneCandidates);
 			for (const postings of [
 				index.metadataBasenameCharPostings,
 				index.metadataAliasCharPostings,
@@ -1995,6 +1992,44 @@ function collectCharCandidates(
 	}
 }
 
+function collectBodyCharGateCandidates(
+	index: CoverageLexicalRecallIndex,
+	charQuery: CoverageLexicalCharQuery,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+): void {
+	if (charQuery.terms.length === 0) {
+		return;
+	}
+	for (
+		let docId = 0;
+		docId < index.documentBodyHanSegmentsById.length;
+		docId += 1
+	) {
+		if (index.documentPathById[docId] === undefined) {
+			continue;
+		}
+		const bodyHanSegments = index.documentBodyHanSegmentsById[docId];
+		if (!bodyHanSegments || bodyHanSegments.length === 0) {
+			continue;
+		}
+		const verification = evaluateCoverageLexicalBodyCharVerification(
+			bodyHanSegments,
+			charQuery,
+		);
+		if (
+			!acceptsCharFallback(
+				verification.matchCount,
+				verification.matchRatio,
+				charQuery.terms.length,
+			)
+		) {
+			continue;
+		}
+		const state = getOrCreateDocIdCandidateState(candidates, docId);
+		applyBodyCharVerification(state, verification);
+	}
+}
+
 function collectTagExactCandidates(
 	index: CoverageLexicalRecallIndex,
 	postingsByTag: CoverageLexicalPostingMap | undefined,
@@ -2702,6 +2737,19 @@ function recordPhraseMatch(
 	}
 	state.phraseMatchFlags[phraseIndex] = 1;
 	state.phraseMatches.push(phraseIndex);
+}
+
+function applyBodyCharVerification(
+	state: CoverageLexicalCandidateState,
+	verification: CoverageLexicalBodyCharVerification,
+): void {
+	for (const termIndex of verification.matchedTermIndices) {
+		recordQueryTermMatch(
+			state.bodyCharMatchIndices,
+			state.bodyCharMatchFlags,
+			termIndex,
+		);
+	}
 }
 
 function recordQueryTermMatch(

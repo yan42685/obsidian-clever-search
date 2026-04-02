@@ -60,7 +60,6 @@ export type CoverageLexicalSnapshotPostingKey =
 
 export type CoverageLexicalLivePostingKey =
 	| "bodyPostings"
-	| "bodyCharPostings"
 	| "metadataAliasCharPostings"
 	| "metadataAliasPhrasePostings"
 	| "metadataAliasPostings"
@@ -112,9 +111,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "bodyCharPostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.BodyCharPostings,
 		ownership: "packed",
-		live: true,
-		source: "postings.bodyChar.term",
-		breakdownKey: "bodyChar",
+		live: false,
 	},
 	{
 		key: "bodyHanSegmentPostings",

@@ -19,6 +19,13 @@ export type CoverageLexicalTagFallbackSignal = {
 	matchedCharTerms: string[];
 };
 
+export type CoverageLexicalBodyCharVerification = {
+	matchedTermIndices: number[];
+	matchFlags: number[];
+	matchCount: number;
+	matchRatio: number;
+};
+
 export type CoverageLexicalCharOffset = {
 	token: string;
 	start: number;
@@ -120,6 +127,43 @@ export function extractHanBigramsWithOffsets(
 		}
 	}
 	return out;
+}
+
+export function evaluateCoverageLexicalBodyCharVerification(
+	bodyHanSegments: readonly string[],
+	query: CoverageLexicalCharQuery,
+): CoverageLexicalBodyCharVerification {
+	if (query.terms.length === 0 || bodyHanSegments.length === 0) {
+		return {
+			matchedTermIndices: [],
+			matchFlags: [],
+			matchCount: 0,
+			matchRatio: 0,
+		};
+	}
+	const termIndexByBigram = new Map<string, number>();
+	for (let termIndex = 0; termIndex < query.terms.length; termIndex += 1) {
+		termIndexByBigram.set(query.terms[termIndex], termIndex);
+	}
+	const matchFlags: number[] = [];
+	const matchedTermIndices: number[] = [];
+	for (const segment of bodyHanSegments) {
+		for (const bigram of extractHanBigrams(segment)) {
+			const termIndex = termIndexByBigram.get(bigram);
+			if (termIndex === undefined || matchFlags[termIndex] === 1) {
+				continue;
+			}
+			matchFlags[termIndex] = 1;
+			matchedTermIndices.push(termIndex);
+		}
+	}
+	return {
+		matchedTermIndices,
+		matchFlags,
+		matchCount: matchedTermIndices.length,
+		matchRatio:
+			query.terms.length > 0 ? matchedTermIndices.length / query.terms.length : 0,
+	};
 }
 
 export function splitCoverageLexicalTagValues(tagsText: string): string[] {

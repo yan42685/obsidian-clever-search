@@ -2136,6 +2136,7 @@ function createCoverageRecallIndex(engine: any) {
 		documentPathById: engine.documentPathById,
 		getDocumentBodyTokens: (docId: number) =>
 			engine.getDocumentBodyTokens(docId) ?? [],
+		documentBodyHanSegmentsById: engine.documentBodyHanSegmentsById,
 		documentTagValuesById: engine.documentTagValuesById,
 	};
 }
