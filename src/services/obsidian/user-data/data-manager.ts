@@ -3239,9 +3239,15 @@ export class DataManager {
     pushSegment("lexicon", this.asRecord(estimatedBytes.lexicon)?.total);
 
     const postings = this.asRecord(estimatedBytes.postings);
+    let postingsTotalBytes = 0;
     if (postings) {
       for (const [key, value] of Object.entries(postings)) {
-        pushSegment("postings." + key, this.asRecord(value)?.total);
+        const total = this.readNumber(this.asRecord(value)?.total);
+        if (total === null || total <= 0) {
+          continue;
+        }
+        postingsTotalBytes += total;
+        pushSegment("postings." + key, total);
       }
     }
 
@@ -3314,10 +3320,31 @@ export class DataManager {
       " (" +
       this.formatPercent(totalBytes, indexableBytes) +
       " of vault)";
+    const majorGroupsLine =
+      "Coverage major groups: " +
+      ([
+        [
+          "stringPool",
+          this.readNumber(this.asRecord(estimatedBytes.stringPool)?.bytes) ?? 0,
+        ],
+        ["postings(total)", postingsTotalBytes],
+        [
+          "documentIdentity(total)",
+          this.readNumber(documentIdentity?.total) ?? 0,
+        ],
+        ["documents(total)", this.readNumber(documents?.total) ?? 0],
+        [
+          "lexicon",
+          this.readNumber(this.asRecord(estimatedBytes.lexicon)?.total) ?? 0,
+        ],
+      ] as Array<[string, number]>)
+        .filter(([, bytes]) => bytes > 0)
+        .map(([segment, bytes]) => segment + " " + this.formatBytes(bytes))
+        .join(" | ");
     const topLine =
       "Coverage top segments: " +
       sortedSegments
-        .slice(0, 3)
+        .slice(0, 6)
         .map((segment) => segment.segment + " " + this.formatBytes(segment.bytes))
         .join(" | ");
     const accountingLine =
@@ -3327,8 +3354,15 @@ export class DataManager {
       this.formatBytes(totalBytes);
 
     return {
-      noticeLines: [headline, topLine, accountingLine],
-      summaryLine: headline + "; " + topLine + "; " + accountingLine,
+      noticeLines: [headline, majorGroupsLine, topLine, accountingLine],
+      summaryLine:
+        headline +
+        "; " +
+        majorGroupsLine +
+        "; " +
+        topLine +
+        "; " +
+        accountingLine,
       rows,
       stringPoolGroupRows,
       stringPoolSourceRows,
@@ -3372,6 +3406,17 @@ export class DataManager {
     const noticeLines = topSegments.length
       ? ["Plugin runtime split: " + topSegments]
       : [];
+    const hybridRuntimeLine = [
+      ["vectors", rows.find((row) => row.segment === "HybridRuntimeVectors")?.size],
+      ["graph", rows.find((row) => row.segment === "HybridRuntimeGraph")?.size],
+      ["bm25", rows.find((row) => row.segment === "HybridRuntimeBm25")?.size],
+    ]
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([segment, size]) => segment + " " + size)
+      .join(" | ");
+    if (hybridRuntimeLine.length > 0) {
+      noticeLines.push("Hybrid runtime: " + hybridRuntimeLine);
+    }
     if (jsHeapUsage) {
       noticeLines.push(
         "Plugin runtime vs JS heap used: " +
