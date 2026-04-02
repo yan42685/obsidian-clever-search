@@ -1262,7 +1262,8 @@ describe("coverage lexical ranking", () => {
 		expect(internalEngine.metadataFolderPostings.get("phase3") instanceof Uint32Array).toBe(true);
 		expect(internalEngine.metadataHeadingPostings.get("hot") instanceof Uint32Array).toBe(true);
 		expect(
-			Array.isArray(internalEngine.metadataHeadingPhrasePostings.get("hot postings")),
+			internalEngine.metadataHeadingPhrasePostings.get("hot postings") instanceof
+				Uint32Array,
 		).toBe(true);
 		expect(internalEngine.metadataTagPostings.get("phase3") instanceof Uint32Array).toBe(true);
 		expect(internalEngine.metadataTagFullPostings.get("phase3,cache") instanceof Uint32Array).toBe(true);

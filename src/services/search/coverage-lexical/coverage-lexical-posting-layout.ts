@@ -229,7 +229,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 	{
 		key: "metadataHeadingPhrasePostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataHeadingPhrasePostings,
-		ownership: "plain",
+		ownership: "packed",
 		live: true,
 		source: "postings.metadataHeadingPhrase.term",
 		breakdownKey: "metadataHeadingPhrase",
