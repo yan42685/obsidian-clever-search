@@ -1075,14 +1075,26 @@ describe("coverage lexical ranking", () => {
 				}): Promise<
 					Array<{
 						nativeSubItemsReady?: boolean;
-						directSubItems?: Array<{ text: string }>;
+						directSubItems?: Array<{
+							row: number;
+							col: number;
+							text: string;
+							highlightRanges?: Array<{ start: number; end: number }>;
+						}>;
 					}>
 				>;
 				getDirectSubItems(
 					queryText: string,
 					path: string,
 					maxSubItemCount: number,
-				): Promise<Array<{ text: string }> | null>;
+				): Promise<
+					Array<{
+						row: number;
+						col: number;
+						text: string;
+						highlightRanges?: Array<{ start: number; end: number }>;
+					}> | null
+				>;
 			};
 		};
 
@@ -1120,11 +1132,12 @@ describe("coverage lexical ranking", () => {
 			"pkm-en/mixed/subitem-order.md",
 			6,
 		);
-		expect(
-			directSubItems
-				?.slice(0, 3)
-				.map((item) => item.text.toLowerCase()),
-		).toEqual(["plugins fast", "plugin fast", "plugons fast"]);
+		const topThree = directSubItems?.slice(0, 3) ?? [];
+		expect(topThree).toHaveLength(3);
+		expect(topThree.map((item) => item.row)).toEqual([0, 2, 4]);
+		expect(topThree[0].text.toLowerCase()).toContain("plugins fast");
+		expect(topThree[1].text.toLowerCase()).toContain("plugin fast");
+		expect(topThree[2].text.toLowerCase()).toContain("plugons fast");
 	});
 
 	test("engine direct subitems recall Han single chars and contiguous symbol runs from source text", async () => {
@@ -1305,7 +1318,7 @@ describe("coverage lexical ranking", () => {
 		)?.docId;
 		expect(typeof docId).toBe("number");
 		expect(
-			internalEngine.bodyCharPostings.get("缓存") instanceof Uint32Array,
+			internalEngine.bodyCharPostings.get("\u7f13\u5b58") instanceof Uint32Array,
 		).toBe(true);
 		expect(
 			Array.isArray(
