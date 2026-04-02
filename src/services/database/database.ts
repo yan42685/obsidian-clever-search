@@ -312,7 +312,7 @@ export class Database {
   }
 
   // copied from https://github.com/scambier/obsidian-omnisearch/blob/master/src/database.ts#L36
-  async deleteOldDatabases() {
+  async deleteOldDatabases(): Promise<number> {
     const toDelete = (await indexedDB.databases()).filter(
       (db) =>
         db.name === this.db.dbName &&
@@ -327,6 +327,7 @@ export class Database {
         }
       }
     }
+    return toDelete.length;
   }
 }
 

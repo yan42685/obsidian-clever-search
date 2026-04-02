@@ -33,6 +33,14 @@ export type HybridBootstrapPlan = {
   docsToDelete: string[];
 };
 
+export type HybridBootstrapSummary = {
+  docsToAdd: number;
+  docsToDelete: number;
+  repairedPaths: number;
+  failedFiles: number;
+  fallbackNoticeKey: LocaleKey | null;
+};
+
 export type HybridIndexProgress = {
   stage: "repair" | "index" | "done";
   totalBytes: number;
@@ -161,9 +169,11 @@ export class HybridBootstrapCoordinator {
     }
   }
 
-  async healPlan(plan: HybridBootstrapPlan | null): Promise<void> {
+  async healPlan(
+    plan: HybridBootstrapPlan | null,
+  ): Promise<HybridBootstrapSummary | null> {
     if (!plan) {
-      return;
+      return null;
     }
 
     const { currFiles, repairReport, docsToAdd, docsToDelete } = plan;
@@ -249,6 +259,13 @@ export class HybridBootstrapCoordinator {
         failures: failures.length,
         repairedPaths: repairReport.repairedPaths.length,
       });
+      return {
+        docsToAdd: docsToAdd.length,
+        docsToDelete: docsToDelete.length,
+        repairedPaths: repairReport.repairedPaths.length,
+        failedFiles: failures.length,
+        fallbackNoticeKey,
+      };
     } catch (error) {
       this.options.markSearchBlocked();
       endHybridProfile({

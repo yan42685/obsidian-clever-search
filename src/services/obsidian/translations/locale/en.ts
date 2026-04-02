@@ -13,6 +13,10 @@ export default {
 	// notification
 	"Reindexing...": "Reindexing...",
 	"Indexing finished": "Indexing finished",
+	"searchNotice.hybridIndexFinished": "Hybrid indexing finished",
+	"searchNotice.bootstrapFinishedHybridReady": "Search indexing finished. Lexical + hybrid ready.",
+	"searchNotice.databaseUpgradeFinished": "Search index rebuild finished after database upgrade.",
+	"searchNotice.databaseUpgradeFinishedHybridReady": "Search index rebuild finished after database upgrade. Lexical + hybrid ready.",
 	"hybridNotice.indexFallbackToBm25": "Indexing finished, but semantic indexing is unavailable. Results are currently downgraded to BM25.",
 	"hybridNotice.searchFallbackToBm25": "Semantic search is unavailable. Current results have been downgraded to BM25.",
 	"hybridNotice.searchRerankFallbackToBm25": "Semantic reranking is unavailable. Current results are using BM25 ordering.",

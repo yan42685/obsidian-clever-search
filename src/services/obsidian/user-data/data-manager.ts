@@ -64,6 +64,7 @@ import {
   type HybridIndexFailure,
   type HybridIndexProgress,
   type HybridProgressReporter,
+  type HybridBootstrapSummary,
 } from "./hybrid-bootstrap-coordinator";
 import { HybridRecoveryCoordinator } from "./hybrid-recovery-coordinator";
 import type { HybridFailedEmbeddingSummary } from "./hybrid-embedding-recovery-manager";
@@ -205,6 +206,23 @@ type HybridRefreshOptions = {
   forceRefresh?: boolean;
   syncFileSetWithoutEmbedding?: boolean;
   rebuildBm25FromStore?: boolean;
+};
+
+type DataManagerInitOptions = {
+  suppressCompletionNotice?: boolean;
+};
+
+type HybridRefreshResult = {
+  hadWork: boolean;
+  failedFiles: number;
+  fallbackNoticeKey: LocaleKey | null;
+};
+
+type SearchBootstrapCompletionSummary = {
+  databaseUpgradeDetected: boolean;
+  lexicalRebuilt: boolean;
+  hybridWorked: boolean;
+  hybridFailed: boolean;
 };
 
 class HybridIndexProgressNotice {
@@ -481,7 +499,7 @@ export class DataManager {
   );
 
   @monitorDecorator
-  async initAsync() {
+  async initAsync(options: DataManagerInitOptions = {}) {
     this.clearHybridFailedEmbeddingState();
     this.resetLexicalSnapshotTracking();
     this.fileSnapshotStore.clearCurrentFiles();
@@ -490,8 +508,11 @@ export class DataManager {
     this.setHybridSearchAvailability("blocked");
     this.beginSearchBootstrapRun();
     try {
-      await this.runSearchBootstrapPipeline();
+      const bootstrapSummary = await this.runSearchBootstrapPipeline();
       this.kickOffSearchBootstrapCommit();
+      if (!options.suppressCompletionNotice) {
+        this.noticeSearchBootstrapCompletion(bootstrapSummary);
+      }
     } catch (error) {
       this.setLexicalBootstrapState("failed");
       if (this.hybridEngine.isEnabled()) {
@@ -519,8 +540,9 @@ export class DataManager {
     this.docOperationsBuffer.add(operation);
   }
 
-  private async runSearchBootstrapPipeline(): Promise<void> {
-    await this.database.deleteOldDatabases();
+  private async runSearchBootstrapPipeline(): Promise<SearchBootstrapCompletionSummary> {
+    const databaseUpgradeDetected =
+      (await this.database.deleteOldDatabases()) > 0;
     this.setLexicalBootstrapState("restoring");
     this.markSearchBootstrapPhaseStarted("lexical", "restore");
     const lexicalPlan = await this.prepareLexicalBootstrapPlan();
@@ -552,20 +574,40 @@ export class DataManager {
     this.markSearchBootstrapSearchable();
 
     if (!hybridPlan) {
-      return;
+      return {
+        databaseUpgradeDetected,
+        lexicalRebuilt: lexicalPlan.needsFullReindex,
+        hybridWorked: false,
+        hybridFailed: false,
+      };
     }
 
+    let hybridSummary: HybridBootstrapSummary | null = null;
+    let hybridFailed = false;
     this.setHybridBootstrapState("healing");
     this.markSearchBootstrapPhaseStarted("hybrid", "heal");
-    await this.healHybridBootstrapPlan(hybridPlan).catch((e) => {
+    try {
+      hybridSummary = await this.healHybridBootstrapPlan(hybridPlan);
+    } catch (e) {
       logger.warn("hybrid engine init failed:", e);
+      hybridFailed = true;
       this.setHybridBootstrapState("failed");
       new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
-    });
+    }
     if (this.hybridBootstrapState === "healing") {
       this.markSearchBootstrapPhaseCompleted("hybrid", "heal");
       this.setHybridBootstrapState("searchable");
     }
+
+    return {
+      databaseUpgradeDetected,
+      lexicalRebuilt: lexicalPlan.needsFullReindex,
+      hybridWorked: this.didHybridBootstrapDoWork(hybridPlan),
+      hybridFailed:
+        hybridFailed ||
+        (hybridSummary?.failedFiles ?? 0) > 0 ||
+        (hybridSummary?.fallbackNoticeKey ?? null) !== null,
+    };
   }
 
   async refreshAllAsync() {
@@ -575,7 +617,7 @@ export class DataManager {
     this.setHybridSearchAvailability("blocked");
     getInstance(FileWatcher).stop();
     try {
-      await this.initAsync();
+      await this.initAsync({ suppressCompletionNotice: true });
       new MyNotice(t("Indexing finished"), 5000);
     } finally {
       prevNotice.hide();
@@ -621,28 +663,39 @@ export class DataManager {
     this.clearHybridFailedEmbeddingState();
     this.setHybridSearchAvailability("blocked");
     const previousForceRefresh = this.shouldForceRefresh;
+    let refreshResult: HybridRefreshResult | null = null;
     getInstance(FileWatcher).stop();
     try {
       if (options.forceRefresh) {
         this.shouldForceRefresh = true;
-        await this.initHybridEngine().catch((e) => {
+        refreshResult = await this.initHybridEngine().catch((e) => {
           logger.warn("hybrid engine init failed:", e);
           new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+          return null;
         });
       } else if (
         options.syncFileSetWithoutEmbedding ||
         options.rebuildBm25FromStore
       ) {
-        await this.refreshHybridStateLocally({
+        refreshResult = await this.refreshHybridStateLocally({
           syncFileSetWithoutEmbedding:
             options.syncFileSetWithoutEmbedding ?? false,
           rebuildBm25FromStore: options.rebuildBm25FromStore ?? false,
         });
       } else {
-        await this.initHybridEngine().catch((e) => {
+        refreshResult = await this.initHybridEngine().catch((e) => {
           logger.warn("hybrid engine init failed:", e);
           new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+          return null;
         });
+      }
+
+      if (
+        refreshResult?.hadWork &&
+        refreshResult.failedFiles === 0 &&
+        !refreshResult.fallbackNoticeKey
+      ) {
+        new MyNotice(t("searchNotice.hybridIndexFinished"), 5000);
       }
     } finally {
       await this.fileSnapshotStore.refreshHighPerformanceState(
@@ -657,14 +710,15 @@ export class DataManager {
   private async refreshHybridStateLocally(options: {
     syncFileSetWithoutEmbedding: boolean;
     rebuildBm25FromStore: boolean;
-  }): Promise<void> {
+  }): Promise<HybridRefreshResult> {
     if (!this.hybridEngine.isEnabled()) {
       this.setHybridSearchAvailability("blocked");
-      return;
+      return { hadWork: false, failedFiles: 0, fallbackNoticeKey: null };
     }
 
     await this.hybridEngine.load();
     const failures: HybridIndexFailure[] = [];
+    let hadWork = false;
 
     if (options.syncFileSetWithoutEmbedding) {
       const currFiles = new Map<string, TFile>(
@@ -697,6 +751,7 @@ export class DataManager {
         }
       }
 
+      hadWork = docsToAdd.length > 0 || docsToDelete.length > 0;
       logger.trace(
         `hybrid local refresh docs to delete: ${docsToDelete.length}`,
       );
@@ -730,6 +785,7 @@ export class DataManager {
     }
 
     if (options.rebuildBm25FromStore) {
+      hadWork = true;
       await this.hybridEngine.rebuildBm25FromStore();
     }
 
@@ -739,6 +795,51 @@ export class DataManager {
     this.setHybridSearchAvailability(
       this.hybridEngine.canServeQuery() ? "available" : "blocked",
     );
+    return { hadWork, failedFiles: failures.length, fallbackNoticeKey: null };
+  }
+
+  private didHybridBootstrapDoWork(plan: HybridBootstrapPlan | null): boolean {
+    if (!plan) {
+      return false;
+    }
+    return (
+      plan.docsToAdd.length > 0 ||
+      plan.docsToDelete.length > 0 ||
+      plan.repairReport.repairedPaths.length > 0
+    );
+  }
+
+  private noticeSearchBootstrapCompletion(
+    summary: SearchBootstrapCompletionSummary,
+  ): void {
+    const noticeKey = this.buildSearchBootstrapCompletionNoticeKey(summary);
+    if (!noticeKey) {
+      return;
+    }
+    new MyNotice(t(noticeKey), 5000);
+  }
+
+  private buildSearchBootstrapCompletionNoticeKey(
+    summary: SearchBootstrapCompletionSummary,
+  ): LocaleKey | null {
+    if (!summary.lexicalRebuilt && !summary.hybridWorked) {
+      return null;
+    }
+    if (summary.hybridFailed) {
+      return null;
+    }
+    if (summary.databaseUpgradeDetected) {
+      return summary.hybridWorked
+        ? "searchNotice.databaseUpgradeFinishedHybridReady"
+        : "searchNotice.databaseUpgradeFinished";
+    }
+    if (summary.lexicalRebuilt && summary.hybridWorked) {
+      return "searchNotice.bootstrapFinishedHybridReady";
+    }
+    if (summary.hybridWorked) {
+      return "searchNotice.hybridIndexFinished";
+    }
+    return "Indexing finished";
   }
 
   private async addDocuments(
@@ -1304,9 +1405,14 @@ export class DataManager {
     await this.persistLexicalSearchSnapshotIfAvailable();
   }
 
-  private async initHybridEngine() {
+  private async initHybridEngine(): Promise<HybridRefreshResult | null> {
     const plan = await this.hybridBootstrapCoordinator.preparePlan();
-    await this.hybridBootstrapCoordinator.healPlan(plan);
+    const summary = await this.hybridBootstrapCoordinator.healPlan(plan);
+    return {
+      hadWork: this.didHybridBootstrapDoWork(plan),
+      failedFiles: summary?.failedFiles ?? 0,
+      fallbackNoticeKey: summary?.fallbackNoticeKey ?? null,
+    };
   }
 
   private async prepareHybridBootstrapPlan(): Promise<HybridBootstrapPlan | null> {
@@ -1315,8 +1421,8 @@ export class DataManager {
 
   private async healHybridBootstrapPlan(
     plan: HybridBootstrapPlan | null,
-  ): Promise<void> {
-    await this.hybridBootstrapCoordinator.healPlan(plan);
+  ): Promise<HybridBootstrapSummary | null> {
+    return await this.hybridBootstrapCoordinator.healPlan(plan);
   }
 
   private async reindexLexicalEngineWithCurrFiles() {
@@ -3603,3 +3709,4 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
+
