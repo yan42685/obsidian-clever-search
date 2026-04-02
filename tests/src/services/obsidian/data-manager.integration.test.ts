@@ -660,6 +660,8 @@ function createMockDataProvider(params: {
   };
 }
 
+const dataManagersToCleanup = new Set<DataManager>();
+
 function registerDataManagerDeps(params: {
   setting: OuterSettingType;
   pluginFiles: TFile[];
@@ -700,6 +702,12 @@ function registerDataManagerDeps(params: {
   return { plugin, fileWatcher };
 }
 
+function resolveDataManager(): DataManager {
+  const manager = container.resolve(DataManager);
+  dataManagersToCleanup.add(manager);
+  return manager;
+}
+
 describe("DataManager integration", () => {
   beforeEach(() => {
     if (
@@ -719,6 +727,10 @@ describe("DataManager integration", () => {
   });
 
   afterEach(() => {
+    for (const manager of dataManagersToCleanup) {
+      manager.onunload();
+    }
+    dataManagersToCleanup.clear();
     delete (global as any).window;
     jest.restoreAllMocks();
     if (
@@ -763,7 +775,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     (manager as any).scheduleHybridRepairFlush = jest.fn();
     manager.receiveDocOperation(new DocMoveOperation(oldPath, newPath, 180));
     manager.receiveDocOperation(new DocUpsertOperation(newPath, 220));
@@ -889,7 +901,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     (manager as any).isLexicalEngineUpToDate = true;
 
     await manager.initAsync();
@@ -1023,7 +1035,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     await manager.initAsync();
     await (manager as any).searchBootstrapCommitTask;
 
@@ -1100,7 +1112,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     await manager.initAsync();
     await (manager as any).searchBootstrapCommitTask;
 
@@ -1153,7 +1165,7 @@ describe("DataManager integration", () => {
       hybridEngine: runtimeHybridEngine,
     });
 
-    const runtimeManager = container.resolve(DataManager);
+    const runtimeManager = resolveDataManager();
     runtimeManager.receiveDocOperation(new DocUpsertOperation(file.path, file.stat.mtime));
     await (runtimeManager as any).docOperationsBuffer.forceFlush();
     (runtimeManager as any).clearLexicalSnapshotFlushTimer();
@@ -1200,7 +1212,7 @@ describe("DataManager integration", () => {
       hybridEngine: restartHybridEngine,
     });
 
-    const restartManager = container.resolve(DataManager);
+    const restartManager = resolveDataManager();
     await restartManager.initAsync();
     await (restartManager as any).searchBootstrapCommitTask;
 
@@ -1268,7 +1280,7 @@ describe("DataManager integration", () => {
       hybridEngine: runtimeHybridEngine,
     });
 
-    const runtimeManager = container.resolve(DataManager);
+    const runtimeManager = resolveDataManager();
     runtimeManager.receiveDocOperation(new DocDeleteOperation(deletedPath));
     await (runtimeManager as any).docOperationsBuffer.forceFlush();
     (runtimeManager as any).clearLexicalSnapshotFlushTimer();
@@ -1304,7 +1316,7 @@ describe("DataManager integration", () => {
       hybridEngine: restartHybridEngine,
     });
 
-    const restartManager = container.resolve(DataManager);
+    const restartManager = resolveDataManager();
     await restartManager.initAsync();
     await (restartManager as any).searchBootstrapCommitTask;
 
@@ -1437,7 +1449,7 @@ describe("DataManager integration", () => {
         hybridEngine,
       });
 
-      const manager = container.resolve(DataManager);
+      const manager = resolveDataManager();
       const scheduleSpy = jest
         .spyOn(manager as any, "scheduleHybridRepairFlush")
         .mockImplementation(() => {});
@@ -1494,152 +1506,100 @@ describe("DataManager integration", () => {
       nowSpy.mockRestore();
     }
   });
-  test("backfills legacy hybrid recovery rows and strips legacy file-ref fields", async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(10_000);
+  test("ignores legacy hybrid recovery file-ref fields once indexRecoveryState is empty", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
 
-    try {
-      const setting = cloneSetting();
-      setting.hybrid.enabled = true;
+    const retryableFile = createFile(
+      "docs/retryable.md",
+      "retryable body",
+      100,
+    );
+    const deferredFile = createFile("docs/deferred.md", "deferred body", 110);
+    const files = new Map<string, TFile>([
+      [retryableFile.path, retryableFile],
+      [deferredFile.path, deferredFile],
+    ]);
+    const texts = new Map<string, string>([
+      [retryableFile.path, "retryable body"],
+      [deferredFile.path, "deferred body"],
+    ]);
 
-      const retryableFile = createFile(
-        "docs/retryable.md",
-        "retryable body",
-        100,
-      );
-      const deferredFile = createFile("docs/deferred.md", "deferred body", 110);
-      const readyFile = createFile("docs/ready.md", "ready body", 120);
-      const files = new Map<string, TFile>([
-        [retryableFile.path, retryableFile],
-        [deferredFile.path, deferredFile],
-        [readyFile.path, readyFile],
-      ]);
-      const texts = new Map<string, string>([
-        [retryableFile.path, "retryable body"],
-        [deferredFile.path, "deferred body"],
-        [readyFile.path, "ready body"],
-      ]);
-
-      const database = createMockDatabase();
-      (database as any).__hybridIndexedFileRefs.push(
-        {
-          path: retryableFile.path,
-          generation: retryableFile.stat.mtime,
-          state: "bm25_only",
-          chunkCount: 2,
-          lastErrorKind: "provider_429",
-          lastIncrementalEmbedAt: 4_000,
-          indexedAt: 7_000,
-        },
-        {
-          path: deferredFile.path,
-          generation: deferredFile.stat.mtime,
-          state: "bm25_only",
-          chunkCount: 3,
-          embeddingDeferred: true,
-          lastIncrementalEmbedAt: 5_000,
-          indexedAt: 8_000,
-        },
-        {
-          path: readyFile.path,
-          generation: readyFile.stat.mtime,
-          state: "ready",
-          chunkCount: 1,
-          lastErrorKind: null,
-          embeddingDeferred: false,
-          lastIncrementalEmbedAt: 9_000,
-          indexedAt: 9_000,
-        },
-      );
-      const dataProvider = createMockDataProvider({ files, texts });
-      const lexicalEngine = createMockLexicalEngine();
-      const fileSnapshotStore = createMockFileSnapshotStore();
-      const hybridEngine = createMockHybridEngine();
-
-      registerDataManagerDeps({
-        setting,
-        pluginFiles: Array.from(files.values()),
-        database,
-        dataProvider,
-        lexicalEngine,
-        fileSnapshotStore,
-        hybridEngine,
-      });
-
-      const manager = container.resolve(DataManager);
-      jest
-        .spyOn(manager as any, "scheduleHybridRepairFlush")
-        .mockImplementation(() => {});
-
-      const previousIndexedFileRefs = new Map(
-        (database as any).__hybridIndexedFileRefs.map(
-          (row: Record<string, any>) => [row.path, row],
-        ),
-      );
-
-      await (manager as any).restorePersistedHybridRecoveryState(
-        files,
-        previousIndexedFileRefs,
-      );
-
-      expect((database as any).__indexRecoveryStates).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: retryableFile.path,
-            recoveryKind: "failure",
-            failureKind: "provider_429",
-          }),
-          expect.objectContaining({
-            path: deferredFile.path,
-            recoveryKind: "deferred_embedding",
-            failureKind: null,
-            nextRetryAt: 65_000,
-          }),
-        ]),
-      );
-
-      const deferredSummary = await manager.getHybridDeferredEmbeddingSummary();
-      expect(deferredSummary).toEqual({
-        deferredCount: 1,
-        nextEligibleAt: 65_000,
-        totalFiles: 3,
-      });
-
-      await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
-
-      expect((manager as any).hybridRepairQueue.has(retryableFile.path)).toBe(
-        false,
-      );
-      expect(
-        (manager as any).hybridRepairQueue.get(deferredFile.path),
-      ).toMatchObject({
+    const database = createMockDatabase();
+    (database as any).__hybridIndexedFileRefs.push(
+      {
+        path: retryableFile.path,
+        generation: retryableFile.stat.mtime,
+        state: "bm25_only",
+        chunkCount: 2,
+        lastErrorKind: "provider_429",
+        lastIncrementalEmbedAt: 4_000,
+        indexedAt: 7_000,
+      },
+      {
         path: deferredFile.path,
-        mode: "incremental",
-        reason: "startup-resume-deferred-embedding",
-        eligibleAt: 65_000,
-        sourceGeneration: deferredFile.stat.mtime,
-      });
+        generation: deferredFile.stat.mtime,
+        state: "bm25_only",
+        chunkCount: 3,
+        embeddingDeferred: true,
+        lastIncrementalEmbedAt: 5_000,
+        indexedAt: 8_000,
+      },
+    );
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
 
-      const strippedRetryable = (database as any).__hybridIndexedFileRefs.find(
-        (row: Record<string, any>) => row.path === retryableFile.path,
-      );
-      const strippedDeferred = (database as any).__hybridIndexedFileRefs.find(
-        (row: Record<string, any>) => row.path === deferredFile.path,
-      );
-      const strippedReady = (database as any).__hybridIndexedFileRefs.find(
-        (row: Record<string, any>) => row.path === readyFile.path,
-      );
-      expect(strippedRetryable.lastErrorKind).toBeUndefined();
-      expect(strippedRetryable.embeddingDeferred).toBeUndefined();
-      expect(strippedDeferred.embeddingDeferred).toBeUndefined();
-      expect(strippedReady.lastErrorKind).toBeUndefined();
-      expect(strippedReady.embeddingDeferred).toBeUndefined();
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: Array.from(files.values()),
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
 
-      manager.onunload();
-    } finally {
-      jest.useRealTimers();
-    }
+    const manager = resolveDataManager();
+    jest
+      .spyOn(manager as any, "scheduleHybridRepairFlush")
+      .mockImplementation(() => {});
+
+    const previousIndexedFileRefs = new Map(
+      (database as any).__hybridIndexedFileRefs.map(
+        (row: Record<string, any>) => [row.path, row],
+      ),
+    );
+
+    await (manager as any).restorePersistedHybridRecoveryState(
+      files,
+      previousIndexedFileRefs,
+    );
+    await (manager as any).enqueuePersistedHybridRecoveryStates(new Set());
+
+    expect((database as any).__indexRecoveryStates).toEqual([]);
+    expect(database.putIndexRecoveryState).not.toHaveBeenCalled();
+    expect((manager as any).hybridRepairQueue.size).toBe(0);
+    expect(await manager.getHybridDeferredEmbeddingSummary()).toEqual({
+      deferredCount: 0,
+      nextEligibleAt: null,
+      totalFiles: 2,
+    });
+    expect((database as any).__hybridIndexedFileRefs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: retryableFile.path,
+          lastErrorKind: "provider_429",
+        }),
+        expect.objectContaining({
+          path: deferredFile.path,
+          embeddingDeferred: true,
+        }),
+      ]),
+    );
   });
+
   test("retryable hybrid recovery preserves backoff across restart", async () => {
     jest.useFakeTimers();
     jest.setSystemTime(100_000);
@@ -1682,7 +1642,7 @@ describe("DataManager integration", () => {
         hybridEngine,
       });
 
-      const manager = container.resolve(DataManager);
+      const manager = resolveDataManager();
       jest
         .spyOn(manager as any, "scheduleHybridRepairFlush")
         .mockImplementation(() => {});
@@ -1771,7 +1731,7 @@ describe("DataManager integration", () => {
         hybridEngine,
       });
 
-      const manager = container.resolve(DataManager);
+      const manager = resolveDataManager();
       const scheduleSpy = jest
         .spyOn(manager as any, "scheduleHybridRepairFlush")
         .mockImplementation(() => {});
@@ -1837,7 +1797,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     jest
       .spyOn(manager as any, "scheduleHybridRepairFlush")
       .mockImplementation(() => {});
@@ -1924,7 +1884,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
 
     await manager.initAsync();
     await (manager as any).searchBootstrapCommitTask;
@@ -1971,7 +1931,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     (manager as any).scheduleHybridRepairFlush = jest.fn();
     manager.receiveDocOperation(new DocDeleteOperation(file.path));
     await (manager as any).docOperationsBuffer.forceFlush();
@@ -2017,7 +1977,7 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const manager = container.resolve(DataManager);
+    const manager = resolveDataManager();
     await (manager as any).reindexLexicalEngineWithCurrFiles();
 
     expect(fileSnapshotStore.persisted.get(liveFile.path)).toEqual({
@@ -2030,4 +1990,3 @@ describe("DataManager integration", () => {
     );
   });
 });
-

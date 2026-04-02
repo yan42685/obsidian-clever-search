@@ -8,21 +8,14 @@ import {
   deriveDeferredIndexRecoveryState,
   deriveIndexRecoveryState,
   isAutoRetryHybridFailureKind,
-  type HybridEmbeddingFailureKind,
   type HybridRepairMode,
   type IndexRecoveryStateRow,
 } from "./index-recovery-state";
 import type { HybridRecoveryEntry } from "./hybrid-embedding-recovery-manager";
 
-type LegacyHybridIndexedFileRef = HybridIndexedFileRef & {
-  lastErrorKind?: string | null;
-  embeddingDeferred?: boolean;
-};
-
 type RestoreHybridRecoveryEntriesParams = {
   currFiles: ReadonlyMap<string, TFile>;
   previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>;
-  minIncrementalEmbedIntervalMs: number;
 };
 
 export class HybridRecoveryStateStore {
@@ -77,11 +70,7 @@ export class HybridRecoveryStateStore {
   async restoreEntries(
     params: RestoreHybridRecoveryEntriesParams,
   ): Promise<HybridRecoveryEntry[]> {
-    const {
-      currFiles,
-      previousIndexedFileRefs,
-      minIncrementalEmbedIntervalMs,
-    } = params;
+    const { currFiles, previousIndexedFileRefs } = params;
     let rows: IndexRecoveryStateRow[] = [];
     try {
       rows = await this.database.getIndexRecoveryStates("hybrid");
@@ -91,7 +80,6 @@ export class HybridRecoveryStateStore {
     }
 
     const activeEntries: HybridRecoveryEntry[] = [];
-    const activePaths = new Set<string>();
     for (const row of rows) {
       if (!this.shouldKeepPersistedRow(row, currFiles, previousIndexedFileRefs)) {
         await this.deleteEntry(row.path);
@@ -104,33 +92,6 @@ export class HybridRecoveryStateStore {
         continue;
       }
       activeEntries.push(entry);
-      activePaths.add(row.path);
-    }
-
-    const legacyBackfill = this.collectLegacyBackfill({
-      currFiles,
-      previousIndexedFileRefs,
-      activePaths,
-      minIncrementalEmbedIntervalMs,
-    });
-    let canStripLegacyFields = legacyBackfill.rows.length === 0;
-    if (legacyBackfill.rows.length > 0) {
-      try {
-        await this.database.bulkPutIndexRecoveryStates(legacyBackfill.rows);
-        canStripLegacyFields = true;
-        for (const row of legacyBackfill.rows) {
-          const entry = this.fromRow(row);
-          if (entry) {
-            activeEntries.push(entry);
-          }
-        }
-      } catch (error) {
-        logger.warn("failed to backfill legacy hybrid recovery state:", error);
-      }
-    }
-
-    if (canStripLegacyFields) {
-      await this.stripLegacyFields(legacyBackfill.cleanedRefs);
     }
 
     return activeEntries;
@@ -248,165 +209,5 @@ export class HybridRecoveryStateStore {
     }
 
     return file.stat.mtime <= row.targetGeneration;
-  }
-
-  private hasLegacyFields(indexedFileRef: HybridIndexedFileRef): boolean {
-    const legacyRef = indexedFileRef as LegacyHybridIndexedFileRef;
-    return (
-      Object.prototype.hasOwnProperty.call(legacyRef, "lastErrorKind") ||
-      Object.prototype.hasOwnProperty.call(legacyRef, "embeddingDeferred")
-    );
-  }
-
-  private stripLegacyFieldsFromRef(
-    indexedFileRef: HybridIndexedFileRef,
-  ): HybridIndexedFileRef {
-    const {
-      lastErrorKind: _lastErrorKind,
-      embeddingDeferred: _embeddingDeferred,
-      ...cleaned
-    } = indexedFileRef as LegacyHybridIndexedFileRef;
-    return cleaned;
-  }
-
-  private async stripLegacyFields(
-    refs: readonly HybridIndexedFileRef[],
-  ): Promise<void> {
-    if (refs.length === 0) {
-      return;
-    }
-    try {
-      await this.database.db.hybridIndexedFileRefs.bulkPut(refs);
-    } catch (error) {
-      logger.warn("failed to strip legacy hybrid recovery fields:", error);
-    }
-  }
-
-  private inferLegacyMode(indexedFileRef: HybridIndexedFileRef): HybridRepairMode {
-    if (indexedFileRef.state === "failed" || (indexedFileRef.chunkCount ?? 0) <= 0) {
-      return "full";
-    }
-    return "incremental";
-  }
-
-  private normalizeLegacyFailureKind(
-    kind: string | null | undefined,
-  ): HybridEmbeddingFailureKind {
-    switch (kind) {
-      case "missing_api_key":
-      case "weekly_token_limit":
-      case "quota_exhausted":
-      case "auth_401":
-      case "auth_403":
-      case "provider_429":
-      case "timeout":
-      case "provider_5xx":
-      case "network":
-      case "unknown":
-        return kind;
-      default:
-        return "unknown";
-    }
-  }
-
-  private buildLegacyStateRow(
-    path: string,
-    indexedFileRef: HybridIndexedFileRef,
-    now: number,
-    minIncrementalEmbedIntervalMs: number,
-  ): IndexRecoveryStateRow | null {
-    const legacyRef = indexedFileRef as LegacyHybridIndexedFileRef;
-    if (legacyRef.embeddingDeferred === true) {
-      const nextRetryAt =
-        (indexedFileRef.lastIncrementalEmbedAt ?? 0) > 0
-          ? (indexedFileRef.lastIncrementalEmbedAt ?? 0) +
-            minIncrementalEmbedIntervalMs
-          : now;
-      return {
-        id: buildIndexRecoveryStateId("hybrid", path),
-        engine: "hybrid",
-        path,
-        targetGeneration: indexedFileRef.generation,
-        mode: this.inferLegacyMode(indexedFileRef),
-        recoveryKind: "deferred_embedding",
-        state: deriveDeferredIndexRecoveryState(nextRetryAt, now),
-        failureKind: null,
-        failureMessage: null,
-        attemptCount: 0,
-        lastFailedAt: null,
-        nextRetryAt,
-        isBlocking: false,
-      };
-    }
-
-    if (indexedFileRef.state !== "bm25_only" && indexedFileRef.state !== "failed") {
-      return null;
-    }
-
-    const failureKind = this.normalizeLegacyFailureKind(legacyRef.lastErrorKind);
-    const nextRetryAt = isAutoRetryHybridFailureKind(failureKind) ? now : null;
-    return {
-      id: buildIndexRecoveryStateId("hybrid", path),
-      engine: "hybrid",
-      path,
-      targetGeneration: indexedFileRef.generation,
-      mode: this.inferLegacyMode(indexedFileRef),
-      recoveryKind: "failure",
-      state: deriveIndexRecoveryState(failureKind, nextRetryAt, now),
-      failureKind,
-      failureMessage:
-        indexedFileRef.state === "failed"
-          ? "Recovered legacy hybrid failed state"
-          : "Recovered legacy hybrid bm25_only state",
-      attemptCount: 1,
-      lastFailedAt: indexedFileRef.indexedAt ?? indexedFileRef.generation,
-      nextRetryAt,
-      isBlocking: !isAutoRetryHybridFailureKind(failureKind),
-    };
-  }
-
-  private collectLegacyBackfill(params: {
-    currFiles: ReadonlyMap<string, TFile>;
-    previousIndexedFileRefs: ReadonlyMap<string, HybridIndexedFileRef>;
-    activePaths: Set<string>;
-    minIncrementalEmbedIntervalMs: number;
-  }): {
-    rows: IndexRecoveryStateRow[];
-    cleanedRefs: HybridIndexedFileRef[];
-  } {
-    const {
-      currFiles,
-      previousIndexedFileRefs,
-      activePaths,
-      minIncrementalEmbedIntervalMs,
-    } = params;
-    const now = Date.now();
-    const rows: IndexRecoveryStateRow[] = [];
-    const cleanedRefs: HybridIndexedFileRef[] = [];
-
-    for (const [path, indexedFileRef] of previousIndexedFileRefs) {
-      if (this.hasLegacyFields(indexedFileRef)) {
-        cleanedRefs.push(this.stripLegacyFieldsFromRef(indexedFileRef));
-      }
-      if (activePaths.has(path)) {
-        continue;
-      }
-      const row = this.buildLegacyStateRow(
-        path,
-        indexedFileRef,
-        now,
-        minIncrementalEmbedIntervalMs,
-      );
-      if (!row) {
-        continue;
-      }
-      if (!this.shouldKeepPersistedRow(row, currFiles, previousIndexedFileRefs)) {
-        continue;
-      }
-      rows.push(row);
-      activePaths.add(path);
-    }
-
-    return { rows, cleanedRefs };
   }
 }

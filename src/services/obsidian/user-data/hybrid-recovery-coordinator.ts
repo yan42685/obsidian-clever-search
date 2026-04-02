@@ -23,7 +23,6 @@ type HybridRecoveryCoordinatorOptions = {
   enqueueRepair: (task: HybridRecoveryCoordinatorRepairTask) => void;
   onChanged: () => void;
   getFailedEmbeddingRetryIntervalMs: () => number;
-  getMinIncrementalEmbedIntervalMs: () => number;
 };
 
 type RestorePersistedHybridRecoveryStateParams = {
@@ -86,8 +85,6 @@ export class HybridRecoveryCoordinator {
     const activeEntries = await this.recoveryStateStore.restoreEntries({
       currFiles: params.currFiles,
       previousIndexedFileRefs: params.previousIndexedFileRefs,
-      minIncrementalEmbedIntervalMs:
-        this.options.getMinIncrementalEmbedIntervalMs(),
     });
     this.recoveryManager.replaceAll(activeEntries);
     this.scheduleRetry();
