@@ -629,6 +629,12 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         toArray: jest.fn(async () =>
           hybridIndexedFileRefs.map((ref) => ({ ...ref })),
         ),
+        bulkGet: jest.fn(async (paths: readonly string[]) =>
+          paths.map((path) => {
+            const row = hybridIndexedFileRefs.find((item) => item.path === path);
+            return row ? { ...row } : undefined;
+          }),
+        ),
         orderBy: jest.fn((_field: string) => ({
           limit: (batchSize: number) => ({
             toArray: async () =>
@@ -2025,6 +2031,177 @@ describe("DataManager integration", () => {
 
     manager.onunload();
   });
+
+  test("hybrid health summary reports shadow-aligned and shadow-mismatch counts", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const currentAlignedFile = createFile("docs/current-aligned.md", "alpha", 100);
+    const shadowAlignedFile = createFile("docs/shadow-aligned-health.md", "beta", 121);
+    const shadowMismatchFile = createFile("docs/shadow-mismatch-health.md", "gamma", 141);
+    const files = new Map<string, TFile>([
+      [currentAlignedFile.path, currentAlignedFile],
+      [shadowAlignedFile.path, shadowAlignedFile],
+      [shadowMismatchFile.path, shadowMismatchFile],
+    ]);
+    const texts = new Map<string, string>([
+      [currentAlignedFile.path, "alpha"],
+      [shadowAlignedFile.path, "beta"],
+      [shadowMismatchFile.path, "gamma"],
+    ]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push(
+      {
+        path: currentAlignedFile.path,
+        generation: 100,
+        state: "ready",
+        chunkCount: 1,
+        vectorPrecision: "int8",
+        indexedAt: 100,
+      },
+      {
+        path: shadowAlignedFile.path,
+        generation: 120,
+        state: "ready",
+        chunkCount: 1,
+        vectorPrecision: "int8",
+        indexedAt: 120,
+      },
+      {
+        path: shadowMismatchFile.path,
+        generation: 140,
+        state: "ready",
+        chunkCount: 1,
+        vectorPrecision: "int8",
+        indexedAt: 140,
+      },
+    );
+    database.__hybridChunks.push(
+      {
+        id: 1,
+        filePath: currentAlignedFile.path,
+        chunkIndex: 0,
+        startOffset: 0,
+        endOffset: 5,
+        startLine: 1,
+        startCol: 1,
+        endLine: 1,
+        embedKey: "chunk-0",
+      },
+      {
+        id: 2,
+        filePath: shadowAlignedFile.path,
+        chunkIndex: 0,
+        startOffset: 0,
+        endOffset: 4,
+        startLine: 1,
+        startCol: 1,
+        endLine: 1,
+        embedKey: "chunk-0",
+      },
+      {
+        id: 3,
+        filePath: shadowMismatchFile.path,
+        chunkIndex: 0,
+        startOffset: 0,
+        endOffset: 5,
+        startLine: 1,
+        startCol: 1,
+        endLine: 1,
+        embedKey: "chunk-0",
+      },
+    );
+    database.__hybridChunkVectors.push(
+      {
+        filePath: currentAlignedFile.path,
+        precision: "int8",
+        dim: 2,
+        chunkCount: 1,
+        generation: 100,
+        chunkIds: new Blob([Uint32Array.from([1]).buffer]),
+        vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+      },
+      {
+        filePath: shadowAlignedFile.path,
+        precision: "int8",
+        dim: 2,
+        chunkCount: 1,
+        generation: 120,
+        chunkIds: new Blob([Uint32Array.from([2]).buffer]),
+        vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+      },
+      {
+        filePath: shadowMismatchFile.path,
+        precision: "int8",
+        dim: 2,
+        chunkCount: 1,
+        generation: 140,
+        chunkIds: new Blob([Uint32Array.from([3]).buffer]),
+        vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+      },
+    );
+    database.__fileSnapshots.push(
+      {
+        filePath: currentAlignedFile.path,
+        plainText: "alpha",
+        generation: 100,
+      },
+      {
+        filePath: shadowAlignedFile.path,
+        plainText: "beta fresh",
+        generation: 121,
+      },
+      {
+        filePath: shadowMismatchFile.path,
+        plainText: "gamma fresh",
+        generation: 141,
+      },
+    );
+    database.__hybridDirtyShadows.push(
+      {
+        filePath: shadowAlignedFile.path,
+        plainText: "beta indexed",
+        generation: 120,
+      },
+      {
+        filePath: shadowMismatchFile.path,
+        plainText: "gamma stale",
+        generation: 139,
+      },
+    );
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: Array.from(files.values()),
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    const summary = await manager.getHybridHealthSummary();
+
+    expect(summary.state).toBe("partial");
+    expect(summary.trackedFileCount).toBe(3);
+    expect(summary.indexedFileRefCount).toBe(3);
+    expect(summary.currentAlignedSnapshotCount).toBe(1);
+    expect(summary.shadowAlignedSnapshotCount).toBe(1);
+    expect(summary.shadowMismatchCount).toBe(1);
+    expect(summary.shadowMismatchSamplePaths).toEqual([
+      shadowMismatchFile.path,
+    ]);
+    expect(summary.updatingFileCount).toBe(2);
+    expect(summary.repairFileCount).toBe(0);
+
+    manager.onunload();
+  });
   test("startup keeps shadow-aligned hybrid state out of corruption self-heal", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;
@@ -2094,6 +2271,88 @@ describe("DataManager integration", () => {
     await (manager as any).searchBootstrapCommitTask;
 
     expect(hybridEngine.deleteFile).toHaveBeenCalledTimes(1);
+    expect(hybridEngine.indexFileStrict).toHaveBeenCalledWith(
+      file.path,
+      "fresh body",
+      file.stat.mtime,
+      { persistIndices: false },
+      [],
+    );
+
+    manager.onunload();
+  });
+
+  test("startup self-heal reindexes when ref, current snapshot, and shadow disagree after a partial write crash", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/partial-write-crash.md", "fresh body", 141);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "fresh body"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: file.stat.mtime - 1,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: file.stat.mtime - 1,
+    });
+    database.__hybridChunks.push({
+      id: 1,
+      filePath: file.path,
+      chunkIndex: 0,
+      startOffset: 0,
+      endOffset: 10,
+      startLine: 1,
+      startCol: 1,
+      endLine: 1,
+      embedKey: "chunk-0",
+    });
+    database.__hybridChunkVectors.push({
+      filePath: file.path,
+      precision: "int8",
+      dim: 2,
+      chunkCount: 1,
+      generation: file.stat.mtime - 1,
+      chunkIds: new Blob([Uint32Array.from([1]).buffer]),
+      vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+    });
+    database.__fileSnapshots.push({
+      filePath: file.path,
+      plainText: "current body",
+      generation: file.stat.mtime,
+    });
+    database.__hybridDirtyShadows.push({
+      filePath: file.path,
+      plainText: "stale indexed body",
+      generation: file.stat.mtime - 2,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      canServeQuery: jest.fn(() => true),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(hybridEngine.deleteFile).toHaveBeenCalledWith(file.path, {
+      persistIndices: false,
+    });
     expect(hybridEngine.indexFileStrict).toHaveBeenCalledWith(
       file.path,
       "fresh body",

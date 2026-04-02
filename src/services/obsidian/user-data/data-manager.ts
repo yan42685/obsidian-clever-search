@@ -231,8 +231,51 @@ export type HybridFreshnessSummary = {
   updatingFileCount: number;
   repairFileCount: number;
   totalTrackedFiles: number;
+  updatingSamplePaths: string[];
+  repairSamplePaths: string[];
   updatedAt: number;
 };
+
+export type HybridHealthSummaryState =
+  | "disabled"
+  | "empty"
+  | "ready"
+  | "bm25_only"
+  | "degraded"
+  | "partial";
+
+export type HybridHealthSummary = {
+  state: HybridHealthSummaryState;
+  trackedFileCount: number;
+  storedPathCount: number;
+  indexedFileRefCount: number;
+  readyFileCount: number;
+  bm25OnlyFileCount: number;
+  unstableFileCount: number;
+  updatingFileCount: number;
+  repairFileCount: number;
+  currentAlignedSnapshotCount: number;
+  shadowAlignedSnapshotCount: number;
+  shadowMismatchCount: number;
+  shadowMismatchSamplePaths: string[];
+  failedEmbeddingCount: number;
+  deferredEmbeddingCount: number;
+  updatedAt: number;
+};
+
+const HYBRID_FRESHNESS_SAMPLE_LIMIT = 3;
+const HYBRID_HEALTH_SAMPLE_LIMIT = 5;
+
+function appendPathSample(
+  samples: string[],
+  path: string,
+  limit: number,
+): void {
+  if (samples.length >= limit || samples.includes(path)) {
+    return;
+  }
+  samples.push(path);
+}
 
 class HybridIndexProgressNotice {
   private readonly notice: MyNotice;
@@ -426,6 +469,8 @@ export class DataManager {
         updatingFileCount: 0,
         repairFileCount: 0,
         totalTrackedFiles: trackedFiles.length,
+        updatingSamplePaths: [],
+        repairSamplePaths: [],
         updatedAt: Date.now(),
       };
     }
@@ -441,14 +486,26 @@ export class DataManager {
     );
 
     let updatingFileCount = 0;
+    const updatingSamplePaths: string[] = [];
+    const repairSamplePaths: string[] = [];
     for (let index = 0; index < trackedFiles.length; index++) {
       const file = trackedFiles[index];
       if (trackedRepairPaths.has(file.path)) {
+        appendPathSample(
+          repairSamplePaths,
+          file.path,
+          HYBRID_FRESHNESS_SAMPLE_LIMIT,
+        );
         continue;
       }
       const indexedRef = indexedRefs[index];
       if (!indexedRef || file.stat.mtime > indexedRef.generation) {
         updatingFileCount += 1;
+        appendPathSample(
+          updatingSamplePaths,
+          file.path,
+          HYBRID_FRESHNESS_SAMPLE_LIMIT,
+        );
       }
     }
 
@@ -456,12 +513,145 @@ export class DataManager {
       updatingFileCount,
       repairFileCount: trackedRepairPaths.size,
       totalTrackedFiles: trackedFiles.length,
+      updatingSamplePaths,
+      repairSamplePaths,
+      updatedAt: Date.now(),
+    };
+  }
+
+  async getHybridHealthSummary(): Promise<HybridHealthSummary> {
+    const summaries = await this.collectHybridStoredPathSummaries();
+    const freshnessSummary = await this.getHybridFreshnessSummary();
+    const failedEmbeddingSummary = this.getHybridFailedEmbeddingSummary();
+    const deferredEmbeddingSummary = await this.getHybridDeferredEmbeddingSummary();
+
+    let indexedFileRefCount = 0;
+    let readyFileCount = 0;
+    let bm25OnlyFileCount = 0;
+    let unstableFileCount = 0;
+    let currentAlignedSnapshotCount = 0;
+    let shadowAlignedSnapshotCount = 0;
+    let shadowMismatchCount = 0;
+    const shadowMismatchSamplePaths: string[] = [];
+
+    for (const [path, summary] of summaries) {
+      const normalizedState =
+        normalizeHybridIndexedFileState(
+          summary.indexedFileRef,
+          summary.vectorInfo !== undefined,
+        ) ?? null;
+      if (summary.indexedFileRef) {
+        indexedFileRefCount += 1;
+      }
+      if (normalizedState === "ready") {
+        readyFileCount += 1;
+      } else if (normalizedState === "bm25_only") {
+        bm25OnlyFileCount += 1;
+      } else if (normalizedState === "pending" || normalizedState === "failed") {
+        unstableFileCount += 1;
+      }
+
+      const indexedGeneration = summary.indexedFileRef?.generation;
+      if (indexedGeneration !== undefined) {
+        if (summary.currentSnapshotGeneration === indexedGeneration) {
+          currentAlignedSnapshotCount += 1;
+        } else if (summary.shadowSnapshotGeneration === indexedGeneration) {
+          shadowAlignedSnapshotCount += 1;
+        }
+      }
+
+      if (
+        summary.shadowSnapshotGeneration !== undefined &&
+        indexedGeneration !== undefined &&
+        summary.shadowSnapshotGeneration !== indexedGeneration
+      ) {
+        shadowMismatchCount += 1;
+        appendPathSample(
+          shadowMismatchSamplePaths,
+          path,
+          HYBRID_HEALTH_SAMPLE_LIMIT,
+        );
+      }
+    }
+
+    const state = this.resolveHybridHealthSummaryState({
+      enabled: this.hybridEngine.isEnabled(),
+      trackedFileCount: freshnessSummary.totalTrackedFiles,
+      storedPathCount: summaries.size,
+      indexedFileRefCount,
+      readyFileCount,
+      bm25OnlyFileCount,
+      unstableFileCount,
+      updatingFileCount: freshnessSummary.updatingFileCount,
+      repairFileCount: freshnessSummary.repairFileCount,
+      shadowAlignedSnapshotCount,
+      shadowMismatchCount,
+    });
+
+    return {
+      state,
+      trackedFileCount: freshnessSummary.totalTrackedFiles,
+      storedPathCount: summaries.size,
+      indexedFileRefCount,
+      readyFileCount,
+      bm25OnlyFileCount,
+      unstableFileCount,
+      updatingFileCount: freshnessSummary.updatingFileCount,
+      repairFileCount: freshnessSummary.repairFileCount,
+      currentAlignedSnapshotCount,
+      shadowAlignedSnapshotCount,
+      shadowMismatchCount,
+      shadowMismatchSamplePaths,
+      failedEmbeddingCount: failedEmbeddingSummary.failedCount,
+      deferredEmbeddingCount: deferredEmbeddingSummary.deferredCount,
       updatedAt: Date.now(),
     };
   }
 
   private countHybridTrackedFiles(): number {
     return this.getHybridTrackedFiles().length;
+  }
+
+  private resolveHybridHealthSummaryState(input: {
+    enabled: boolean;
+    trackedFileCount: number;
+    storedPathCount: number;
+    indexedFileRefCount: number;
+    readyFileCount: number;
+    bm25OnlyFileCount: number;
+    unstableFileCount: number;
+    updatingFileCount: number;
+    repairFileCount: number;
+    shadowAlignedSnapshotCount: number;
+    shadowMismatchCount: number;
+  }): HybridHealthSummaryState {
+    if (!input.enabled) {
+      return "disabled";
+    }
+    if (input.storedPathCount === 0 && input.indexedFileRefCount === 0) {
+      return "empty";
+    }
+    if (input.repairFileCount > 0 || input.unstableFileCount > 0) {
+      return "degraded";
+    }
+    if (
+      input.readyFileCount === 0 &&
+      input.bm25OnlyFileCount > 0 &&
+      input.shadowMismatchCount === 0 &&
+      input.shadowAlignedSnapshotCount === 0 &&
+      input.updatingFileCount === 0
+    ) {
+      return "bm25_only";
+    }
+    if (
+      input.shadowMismatchCount > 0 ||
+      input.shadowAlignedSnapshotCount > 0 ||
+      input.updatingFileCount > 0 ||
+      input.indexedFileRefCount < input.trackedFileCount
+    ) {
+      return "partial";
+    }
+    return "ready";
   }
 
   private getHybridTrackedFiles(): TFile[] {

@@ -36,6 +36,7 @@ import { t } from "./translations/locale-helper";
 import {
 	DataManager,
 	type HybridDeferredEmbeddingSummary,
+	type HybridHealthSummary,
 } from "./user-data/data-manager";
 import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-recovery-manager";
 import { DataProvider } from "./user-data/data-provider";
@@ -673,11 +674,13 @@ class HybridSearchModal extends Modal {
 	private weeklyQuotaEl: HTMLElement;
 	private failedEmbeddingStatusEl: HTMLElement;
 	private deferredEmbeddingStatusEl: HTMLElement;
+	private healthSummaryEl: HTMLElement;
 	private statsEl: HTMLElement;
 	private openedApiDomain = "";
 	private openedApiKey = "";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
 	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
+	private currentHealthSummary: HybridHealthSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
 	private readonly failedEmbeddingStatusListener: EventCallback = () => {
 		void this.refreshHybridRuntimeStatusFromData();
@@ -849,6 +852,19 @@ class HybridSearchModal extends Modal {
 		this.deferredEmbeddingStatusEl.style.margin = "0 0 1em 0";
 		this.deferredEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
 
+		contentEl.createEl("h3", { text: t("hybridModal.healthSummary") });
+		contentEl.createEl("p", { text: t("hybridModal.healthSummary.localOnly") });
+		new Setting(contentEl).addButton((button) =>
+			button.setButtonText(t("hybridModal.healthSummary.check")).onClick(
+				async () => {
+					await this.refreshHybridHealthSummary();
+				},
+			),
+		);
+		this.healthSummaryEl = contentEl.createDiv();
+		this.healthSummaryEl.style.margin = "0.35em 0 1em 0";
+		this.healthSummaryEl.setText(t("hybridModal.healthSummary.loading"));
+
 		new Setting(contentEl)
 			.setName(t("hybridModal.vectorCompression"))
 			.setDesc(t("hybridModal.vectorCompression.desc"))
@@ -912,6 +928,7 @@ class HybridSearchModal extends Modal {
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
 		void this.refreshHybridRuntimeStatusFromData();
+		void this.refreshHybridHealthSummary();
 		void this.refreshTokenStats();
 	}
 
@@ -1001,6 +1018,12 @@ class HybridSearchModal extends Modal {
 		await this.loadTokenStats(this.statsEl);
 	}
 
+	private async refreshHybridHealthSummary() {
+		this.currentHealthSummary =
+			await getInstance(DataManager).getHybridHealthSummary();
+		this.renderHybridHealthSummary();
+	}
+
 	private async refreshHybridRuntimeStatusFromData() {
 		const dataManager = getInstance(DataManager);
 		[this.currentFailedEmbeddingSummary, this.currentDeferredEmbeddingSummary] =
@@ -1017,6 +1040,64 @@ class HybridSearchModal extends Modal {
 		}
 		if (this.currentDeferredEmbeddingSummary) {
 			this.renderDeferredEmbeddingStatus(this.currentDeferredEmbeddingSummary);
+		}
+	}
+
+	private renderHybridHealthSummary() {
+		if (!this.currentHealthSummary) {
+			this.healthSummaryEl.setText(t("hybridModal.healthSummary.loading"));
+			return;
+		}
+
+		const summary = this.currentHealthSummary;
+		this.healthSummaryEl.empty();
+		this.appendStatusLine(
+			this.healthSummaryEl,
+			t("hybridModal.healthSummary.status"),
+			t(`hybridModal.healthSummary.state.${summary.state}` as any),
+		);
+		this.appendStatusLine(
+			this.healthSummaryEl,
+			t("hybridModal.healthSummary.engine"),
+			[
+				`${t("hybridModal.healthSummary.metric.ready")} ${summary.readyFileCount}`,
+				`${t("hybridModal.healthSummary.metric.bm25Only")} ${summary.bm25OnlyFileCount}`,
+				`${t("hybridModal.healthSummary.metric.unstable")} ${summary.unstableFileCount}`,
+			].join(" | "),
+		);
+		this.appendStatusLine(
+			this.healthSummaryEl,
+			t("hybridModal.healthSummary.docs"),
+			[
+				`${t("hybridModal.healthSummary.metric.tracked")} ${summary.trackedFileCount}`,
+				`${t("hybridModal.healthSummary.metric.updating")} ${summary.updatingFileCount}`,
+				`${t("hybridModal.healthSummary.metric.repair")} ${summary.repairFileCount}`,
+			].join(" | "),
+		);
+		this.appendStatusLine(
+			this.healthSummaryEl,
+			t("hybridModal.healthSummary.storage"),
+			[
+				`${t("hybridModal.healthSummary.metric.refs")} ${summary.indexedFileRefCount}`,
+				`${t("hybridModal.healthSummary.metric.currentAligned")} ${summary.currentAlignedSnapshotCount}`,
+				`${t("hybridModal.healthSummary.metric.shadowAligned")} ${summary.shadowAlignedSnapshotCount}`,
+				`${t("hybridModal.healthSummary.metric.shadowMismatch")} ${summary.shadowMismatchCount}`,
+			].join(" | "),
+		);
+		this.appendStatusLine(
+			this.healthSummaryEl,
+			t("hybridModal.healthSummary.errors"),
+			[
+				`${t("hybridModal.healthSummary.metric.failed")} ${summary.failedEmbeddingCount}`,
+				`${t("hybridModal.healthSummary.metric.deferred")} ${summary.deferredEmbeddingCount}`,
+			].join(" | "),
+		);
+		if (summary.shadowMismatchSamplePaths.length > 0) {
+			this.appendStatusLine(
+				this.healthSummaryEl,
+				t("hybridModal.healthSummary.metric.samples"),
+				summary.shadowMismatchSamplePaths.join(" | "),
+			);
 		}
 	}
 

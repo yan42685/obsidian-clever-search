@@ -13,12 +13,14 @@ import {
 	type HybridFreshnessSummary,
 } from "src/services/obsidian/user-data/data-manager";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
-import { getInstance } from "src/utils/my-lib";
+import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 
 export type HybridFreshnessNoticeState = {
 	visible: boolean;
 	title: string;
 	detail: string;
+	updatingSamplePaths: string[];
+	repairSamplePaths: string[];
 };
 
 type AutoHybridFallbackControllerOptions = {
@@ -57,7 +59,23 @@ export function createHiddenHybridFreshnessNoticeState(): HybridFreshnessNoticeS
 		visible: false,
 		title: "",
 		detail: "",
+		updatingSamplePaths: [],
+		repairSamplePaths: [],
 	};
+}
+
+const HYBRID_FRESHNESS_DEBUG_PIN_STORAGE_KEY =
+	"clever-search:debug-pin-hybrid-freshness-banner";
+
+function shouldPinHybridFreshnessBannerForDebug(): boolean {
+	if (!isDevEnvironment) {
+		return false;
+	}
+	try {
+		return window.localStorage.getItem(HYBRID_FRESHNESS_DEBUG_PIN_STORAGE_KEY) !== "0";
+	} catch {
+		return true;
+	}
 }
 
 export class AutoHybridFallbackController {
@@ -247,6 +265,7 @@ export class HybridFreshnessNoticeController {
 	private buildNoticeState(
 		summary: HybridFreshnessSummary,
 	): HybridFreshnessNoticeState {
+		const isDebugPinned = shouldPinHybridFreshnessBannerForDebug();
 		const clauses: string[] = [];
 		if (summary.updatingFileCount > 0) {
 			clauses.push(
@@ -259,13 +278,24 @@ export class HybridFreshnessNoticeController {
 			);
 		}
 		if (clauses.length === 0) {
-			return createHiddenHybridFreshnessNoticeState();
+			if (!isDebugPinned) {
+				return createHiddenHybridFreshnessNoticeState();
+			}
+			return {
+				visible: true,
+				title: t("hybridModal.freshnessNotice.titleIdle"),
+				detail: t("hybridModal.freshnessNotice.detailIdle"),
+				updatingSamplePaths: [],
+				repairSamplePaths: [],
+			};
 		}
 
 		return {
 			visible: true,
 			title: this.buildTitle(summary),
 			detail: `${clauses.join(t("hybridModal.freshnessNotice.detailJoiner"))}${t("hybridModal.freshnessNotice.detailTail")}`,
+			updatingSamplePaths: summary.updatingSamplePaths,
+			repairSamplePaths: summary.repairSamplePaths,
 		};
 	}
 

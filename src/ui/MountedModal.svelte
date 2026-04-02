@@ -1,4 +1,5 @@
 	<script lang="ts">
+	import { App } from "obsidian";
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import { OuterSetting } from "src/globals/plugin-setting";
@@ -10,18 +11,22 @@
 	    SearchResult,
 	    SearchType,
 	} from "src/globals/search-types";
+	import { openHybridSearchModal } from "src/services/obsidian/setting-manager";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
 	import { SearchHistoryService } from "src/services/obsidian/user-data/search-history-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { logger } from "src/utils/logger";
-	import { TO_BE_IMPL, getInstance, isDevEnvironment } from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import {
 	    AutoHybridFallbackController,
+		createHiddenHybridFreshnessNoticeState,
 	    getMountedModalFileItemScore,
+		HybridFreshnessNoticeController,
+		type HybridFreshnessNoticeState,
 	    usesDirectFileSubItems,
 	} from "./mounted-modal-helper";
 	import SearchHistoryInput from "./SearchHistoryInput.svelte";
@@ -51,6 +56,8 @@
 	let latestSearchRequestId = 0;
 	let historyInputRef: any;
 	let autoHybridFallbackFailureNoticeKey: LocaleKey | null = null;
+	let hybridFreshnessNotice: HybridFreshnessNoticeState =
+		createHiddenHybridFreshnessNoticeState();
 
 	const autoHybridFallback = new AutoHybridFallbackController({
 		searchService,
@@ -66,6 +73,13 @@
 			searchResult = result;
 			cachedResult.set(query, result);
 			await updateItemAsync(0);
+		},
+	});
+	const hybridFreshnessNoticeController = new HybridFreshnessNoticeController({
+		getSearchType: () => searchType,
+		getIsHybrid: () => isHybrid,
+		onNoticeChange: (state) => {
+			hybridFreshnessNotice = state;
 		},
 	});
 
@@ -133,6 +147,7 @@
 			}
 			searchResult = cachedResult.get(currentQueryText) as SearchResult;
 			autoHybridFallback.syncFailureNoticeFromResult(searchResult);
+			hybridFreshnessNoticeController.syncFromResult(searchResult);
 			await updateItemAsync(0);
 			if (
 				searchType === SearchType.IN_VAULT &&
@@ -174,6 +189,7 @@
 
 		searchResult = nextResult;
 		autoHybridFallback.syncFailureNoticeFromResult(nextResult);
+		hybridFreshnessNoticeController.syncFromResult(nextResult);
 		cachedResult.set(currentQueryText, searchResult);
 		await updateItemAsync(0);
 
@@ -325,8 +341,13 @@
 	// ===================================================
 	onDestroy(() => {
 		autoHybridFallback.clear();
+		hybridFreshnessNoticeController.clear();
 		logger.trace("mounted element has been destroyed.");
 	});
+
+	function openHybridHealthModal() {
+		openHybridSearchModal(getInstance(App));
+	}
 
 	// NOTE: onMount() won't be triggered and I wonder why
 	function listenEvent(event: EventEnum, callback: EventCallback) {
@@ -426,6 +447,49 @@
 						</p>
 					{/if}
 				{:else if searchType === SearchType.IN_VAULT}
+					{#if hybridFreshnessNotice.visible}
+						<div class="hybrid-freshness-banner">
+							<div class="hybrid-freshness-banner-header">
+								<p class="hybrid-freshness-banner-title">
+									{hybridFreshnessNotice.title}
+								</p>
+								<button
+									type="button"
+									class="hybrid-freshness-banner-action"
+									on:click={openHybridHealthModal}
+								>
+									{t("hybridModal.freshnessNotice.openSettings")}
+								</button>
+							</div>
+							<p class="hybrid-freshness-banner-detail">
+								{hybridFreshnessNotice.detail}
+							</p>
+							{#if hybridFreshnessNotice.repairSamplePaths.length > 0}
+								<div class="hybrid-freshness-banner-samples">
+									<span class="hybrid-freshness-banner-samples-label">
+										{t("hybridModal.freshnessNotice.repairSamples")}
+									</span>
+									<div class="hybrid-freshness-banner-chip-row">
+										{#each hybridFreshnessNotice.repairSamplePaths as path}
+											<code>{path}</code>
+										{/each}
+									</div>
+								</div>
+							{/if}
+							{#if hybridFreshnessNotice.updatingSamplePaths.length > 0}
+								<div class="hybrid-freshness-banner-samples">
+									<span class="hybrid-freshness-banner-samples-label">
+										{t("hybridModal.freshnessNotice.updatingSamples")}
+									</span>
+									<div class="hybrid-freshness-banner-chip-row">
+										{#each hybridFreshnessNotice.updatingSamplePaths as path}
+											<code>{path}</code>
+										{/each}
+									</div>
+								</div>
+							{/if}
+						</div>
+					{/if}
 					{#if autoHybridFallbackFailureNoticeKey}
 						<div class="hybrid-fallback-failure">
 							<p class="hybrid-fallback-failure-title">
@@ -628,6 +692,63 @@
 		padding-right: 0.7em;
 		color: var(--text-normal);
 		margin-bottom: 0.75em;
+	}
+
+	.hybrid-freshness-banner {
+		padding: 0.8em 0.9em;
+		margin: 0 0.7em 0.85em 0;
+		border-radius: 8px;
+		background:
+			linear-gradient(135deg, rgba(186, 145, 62, 0.2), rgba(71, 110, 130, 0.16));
+		border: 1px solid rgba(186, 145, 62, 0.28);
+	}
+
+	.hybrid-freshness-banner-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.8em;
+		margin-bottom: 0.4em;
+	}
+
+	.hybrid-freshness-banner-title {
+		font-weight: 600;
+		margin: 0;
+	}
+
+	.hybrid-freshness-banner-action {
+		flex-shrink: 0;
+		font-size: 0.82em;
+		padding: 0.28em 0.7em;
+	}
+
+	.hybrid-freshness-banner-detail {
+		margin: 0;
+		color: var(--cs-secondary-font-color, #a29c9c);
+	}
+
+	.hybrid-freshness-banner-samples {
+		margin-top: 0.62em;
+	}
+
+	.hybrid-freshness-banner-samples-label {
+		display: block;
+		margin-bottom: 0.28em;
+		font-size: 0.82em;
+		color: var(--cs-secondary-font-color, #a29c9c);
+	}
+
+	.hybrid-freshness-banner-chip-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.38em;
+	}
+
+	.hybrid-freshness-banner-chip-row code {
+		padding: 0.12em 0.45em;
+		border-radius: 999px;
+		background-color: rgba(255, 255, 255, 0.08);
+		font-size: 0.82em;
 	}
 
 	.hybrid-fallback-failure-title {
