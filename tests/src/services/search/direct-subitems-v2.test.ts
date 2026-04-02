@@ -569,20 +569,19 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		).toBe(true);
 	});
 
-	test("compresses heavily overlapping display windows when earlier snippets already show the later exact hit", () => {
+	test("hides weak tail snippets when top1 is much stronger and no new exact term appears", () => {
 		const snapshotText = [
-			"shared context top",
-			"shared context upper",
-			"alpha first hit",
-			"alpha second hit",
-			"shared context lower",
-			"shared context bottom",
+			"alpha beta gamma delta",
+			"x".repeat(80),
+			"alpha",
+			"x".repeat(80),
+			"gamma",
 		].join("\n");
 		const result = buildDirectSubitemsExactCandidates({
-			queryText: "alpha",
+			queryText: "alpha beta gamma delta",
 			snapshotText,
 			options: {
-				mergeGap: 0,
+				mergeGap: 1,
 				contextLeft: 0,
 				contextRight: 0,
 				boundaryLookaround: 0,
@@ -590,10 +589,62 @@ describe("direct subitems v2 exact-only pipeline", () => {
 			},
 		});
 
+		expect(result.exactOccurrences.length).toBeGreaterThan(4);
 		expect(result.candidateSpans).toHaveLength(1);
 		expect(result.renderPayloads).toHaveLength(1);
-		expect(result.renderPayloads[0].text).toContain("alpha first hit");
-		expect(result.renderPayloads[0].text).toContain("alpha second hit");
+		expect(result.renderPayloads[0].text).toContain("alpha beta gamma delta");
+		expect(result.candidateSpans[0].score.coverageCount).toBe(4);
+	});
+
+	test("keeps weak snippets when they introduce a new exact term below the top1 threshold", () => {
+		const snapshotText = [
+			"plugin fast cache note",
+			"x".repeat(80),
+			"plugins",
+		].join("\n");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "plugins fast cache note",
+			snapshotText,
+			options: {
+				mergeGap: 1,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+				maxChars: 200,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(2);
+		expect(result.renderPayloads).toHaveLength(2);
+		expect(result.renderPayloads[0].text.toLowerCase()).toContain(
+			"plugin fast cache note",
+		);
+		expect(result.renderPayloads[1].text.toLowerCase()).toContain("plugins");
+	});
+
+	test("hides single-term tails for two-term queries at the half-coverage boundary", () => {
+		const snapshotText = [
+			"alpha beta",
+			"x".repeat(80),
+			"alpha",
+		].join("\n");
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText,
+			options: {
+				mergeGap: 1,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+				maxChars: 200,
+			},
+		});
+
+		expect(result.exactOccurrences.length).toBeGreaterThan(2);
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.renderPayloads).toHaveLength(1);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		expect(result.renderPayloads[0].text).toContain("alpha beta");
 	});
 
 	test("keeps separate candidates even when expanded display windows overlap", () => {

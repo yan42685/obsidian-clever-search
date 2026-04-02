@@ -139,7 +139,6 @@ function selectDisplayCandidates(
 	});
 	const selectedIndices = selectDisplayRepresentativeIndices(
 		structuralCandidates,
-		renderPayloads,
 	);
 	return {
 		candidateSpans: selectedIndices.map((index) => structuralCandidates[index]),
@@ -147,31 +146,17 @@ function selectDisplayCandidates(
 	};
 }
 
-const DISPLAY_OVERLAP_RATIO = 0.65;
-
 function selectDisplayRepresentativeIndices(
 	structuralCandidates: readonly DirectSubitemsCandidateSpan[],
-	renderPayloads: readonly DirectSubitemsRenderPayload[],
 ): number[] {
+	const topCoverageCount = structuralCandidates[0]?.score.coverageCount ?? 0;
 	const selectedIndices: number[] = [];
 	for (let index = 0; index < structuralCandidates.length; index++) {
-		const overlappingIndices = selectedIndices.filter(
-			(selectedIndex) =>
-				shouldCompressDisplayCandidate(
-					structuralCandidates[selectedIndex],
-					renderPayloads[selectedIndex],
-					structuralCandidates[index],
-					renderPayloads[index],
-				),
-		);
-		if (overlappingIndices.length === 0) {
-			selectedIndices.push(index);
-			continue;
-		}
 		if (
-			hasNovelDisplayEvidence(
+			!shouldHideWeakDisplayCandidate(
 				structuralCandidates[index],
-				overlappingIndices.map((selectedIndex) => renderPayloads[selectedIndex]),
+				selectedIndices.map((selectedIndex) => structuralCandidates[selectedIndex]),
+				topCoverageCount,
 			)
 		) {
 			selectedIndices.push(index);
@@ -180,72 +165,40 @@ function selectDisplayRepresentativeIndices(
 	return selectedIndices;
 }
 
-function shouldCompressDisplayCandidate(
-	selectedSpan: DirectSubitemsCandidateSpan,
-	selectedPayload: DirectSubitemsRenderPayload,
+function shouldHideWeakDisplayCandidate(
 	candidateSpan: DirectSubitemsCandidateSpan,
-	candidatePayload: DirectSubitemsRenderPayload,
+	selectedSpans: readonly DirectSubitemsCandidateSpan[],
+	topCoverageCount: number,
 ): boolean {
-	if (selectedSpan.termSignature !== candidateSpan.termSignature) {
+	if (selectedSpans.length === 0 || topCoverageCount <= 0) {
 		return false;
 	}
-	if (!selectedPayload.text.includes("\n") || !candidatePayload.text.includes("\n")) {
+	if (candidateSpan.score.coverageCount > topCoverageCount * 0.5) {
 		return false;
 	}
-	if (Math.abs(selectedPayload.row - candidatePayload.row) > 1) {
-		return false;
-	}
-	return (
-		computeRangeOverlapRatio(
-			{
-				start: selectedPayload.displayStart,
-				end: selectedPayload.displayEnd,
-			},
-			{
-				start: candidatePayload.displayStart,
-				end: candidatePayload.displayEnd,
-			},
-		) >= DISPLAY_OVERLAP_RATIO
-	);
+	return !hasNovelExactEvidence(candidateSpan, selectedSpans);
 }
 
-function hasNovelDisplayEvidence(
+function hasNovelExactEvidence(
 	candidateSpan: DirectSubitemsCandidateSpan,
-	existingPayloads: readonly DirectSubitemsRenderPayload[],
+	selectedSpans: readonly DirectSubitemsCandidateSpan[],
 ): boolean {
-	const exactOccurrences = candidateSpan.occurrences.filter(
-		(occurrence) => occurrence.tier === "exact",
+	const candidateExactTermIds = new Set(
+		candidateSpan.occurrences
+			.filter((occurrence) => occurrence.tier === "exact")
+			.map((occurrence) => occurrence.termId),
 	);
-	const coverageOccurrences =
-		exactOccurrences.length > 0 ? exactOccurrences : candidateSpan.occurrences;
-	if (coverageOccurrences.length === 0) {
+	if (candidateExactTermIds.size === 0) {
 		return false;
 	}
-	return coverageOccurrences.some(
-		(occurrence) => !isOccurrenceVisibleInPayloads(occurrence, existingPayloads),
+	const selectedExactTermIds = new Set(
+		selectedSpans.flatMap((span) =>
+			span.occurrences
+				.filter((occurrence) => occurrence.tier === "exact")
+				.map((occurrence) => occurrence.termId),
+		),
 	);
-}
-
-function computeRangeOverlapRatio(
-	left: Pick<DirectSubitemsCandidateSpan, "start" | "end">,
-	right: Pick<DirectSubitemsCandidateSpan, "start" | "end">,
-): number {
-	const overlapStart = Math.max(left.start, right.start);
-	const overlapEnd = Math.min(left.end, right.end);
-	if (overlapEnd <= overlapStart) {
-		return 0;
-	}
-	const overlap = overlapEnd - overlapStart;
-	const base = Math.max(1, Math.min(left.end - left.start, right.end - right.start));
-	return overlap / base;
-}
-
-function isOccurrenceVisibleInPayloads(
-	occurrence: DirectSubitemsOccurrence,
-	payloads: readonly DirectSubitemsRenderPayload[],
-): boolean {
-	return payloads.some(
-		(payload) =>
-			occurrence.start >= payload.displayStart && occurrence.end <= payload.displayEnd,
+	return [...candidateExactTermIds].some(
+		(termId) => !selectedExactTermIds.has(termId),
 	);
 }
