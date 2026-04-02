@@ -662,7 +662,7 @@
 		inset: 0;
 		isolation: isolate;
 		border-radius: 10px;
-		background-color: var(--cs-search-bar-bgc, #20202066);
+		background-color: var(--cs-search-bar-bgc, var(--modal-background, var(--background-primary, #20202066)));
 		box-shadow:
 			0 2px 4px rgba(0, 0, 0, 0.07),
 			0 2px 3px rgba(0, 0, 0, 0.1);
@@ -860,7 +860,7 @@
 
 	.search-bar.omni-variant .history-input-shell {
 		border-radius: 14px;
-		background-color: var(--background-primary, #1f1f1f);
+		background-color: var(--modal-background, var(--background-primary, #1f1f1f));
 		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
 		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
 	}
