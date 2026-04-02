@@ -1395,6 +1395,19 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			if (!descriptor) {
 				continue;
 			}
+			if (binding.postingKey === "bodyPostings") {
+				this.mutateBodyPostingTerms(
+					docId,
+					terms as readonly string[] | ReadonlySet<string>,
+					mode,
+				);
+				if (mode === "add" && descriptor.contributesToLexicon === true) {
+					for (const term of terms) {
+						this.lexicon.add(term);
+					}
+				}
+				continue;
+			}
 			for (const term of terms) {
 				this.mutateLivePosting(descriptor.key, term, docId, mode);
 				if (mode === "add" && descriptor.contributesToLexicon === true) {
@@ -1402,6 +1415,37 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				}
 			}
 		}
+	}
+
+	private mutateBodyPostingTerms(
+		docId: number,
+		terms: readonly string[] | ReadonlySet<string>,
+		mode: "add" | "remove",
+	): void {
+		const overrides = new Map<string, Uint32Array | undefined>();
+		for (const term of terms) {
+			const docs = this.bodyPostings.get(term) as Uint32Array | undefined;
+			if (mode === "add") {
+				if (!docs) {
+					overrides.set(term, Uint32Array.of(docId));
+					continue;
+				}
+				if (docs.indexOf(docId) !== -1) {
+					continue;
+				}
+				overrides.set(term, insertDocIdIntoSortedPosting(docs, docId));
+				continue;
+			}
+			if (!docs) {
+				continue;
+			}
+			const nextDocs = removeDocIdFromSortedPosting(docs, docId);
+			if (nextDocs === docs) {
+				continue;
+			}
+			overrides.set(term, nextDocs);
+		}
+		this.bodyPostings.updateMany(overrides);
 	}
 
 	private mutateLivePosting(
@@ -2420,32 +2464,31 @@ function estimateSharedTokenIdPostingMapBytes(
 	termCount: number;
 	postingCount: number;
 	slotCount: number;
-	slotReferenceBytes: number;
+	slotStartBytes: number;
+	slotLengthBytes: number;
 	postingNumberBytes: number;
-	postingListBytes: number;
+	postingTapeBytes: number;
 } {
-	let termCount = 0;
-	let postingCount = 0;
-	let postingListBytes = 0;
-	for (const [, docIds] of postings.getTokenIdEntries()) {
-		termCount += 1;
-		postingCount += docIds.length;
-		postingListBytes += estimatePackedUint32Bytes(docIds.length);
-	}
+	const termCount = postings.size;
+	const postingCount = postings.postingCount;
 	const slotCount = postings.slotCount;
-	const slotReferenceBytes = slotCount * INDEX_REFERENCE_BYTES;
+	const slotStartBytes = estimatePackedUint32Bytes(slotCount);
+	const slotLengthBytes = estimatePackedUint32Bytes(slotCount);
 	const postingNumberBytes = postingCount * INDEX_POSTING_DOC_ID_BYTES;
+	const postingTapeBytes = estimatePackedUint32Bytes(postingCount);
 	return {
 		total:
 			INDEX_COLLECTION_HEADER_BYTES +
-			slotReferenceBytes +
-			postingListBytes,
+			slotStartBytes +
+			slotLengthBytes +
+			postingTapeBytes,
 		termCount,
 		postingCount,
 		slotCount,
-		slotReferenceBytes,
+		slotStartBytes,
+		slotLengthBytes,
 		postingNumberBytes,
-		postingListBytes,
+		postingTapeBytes,
 	};
 }
 
@@ -2929,6 +2972,14 @@ function restoreOwnedNumericPostingMap(
 	source: ReadonlyMap<string, readonly number[] | Uint32Array>,
 	ownership: CoverageLexicalPostingOwnership,
 ): void {
+	if (
+		ownership === "packed" &&
+		target instanceof CoverageLexicalSharedTokenIdPostingMap
+	) {
+		target.clear();
+		target.replaceAll(source);
+		return;
+	}
 	target.clear();
 	for (const [term, docIds] of source) {
 		target.set(
@@ -2972,21 +3023,53 @@ function removeOwnedNumericPosting(
 		return;
 	}
 	if (ownership === "packed") {
-		if (docs.length === 1) {
+		const next = removeDocIdFromSortedPosting(docs as Uint32Array, docId);
+		if (!next) {
 			postings.delete(term);
 			return;
 		}
-		const numericDocs = docs as Uint32Array;
-		const next = new Uint32Array(numericDocs.length - 1);
-		next.set(numericDocs.subarray(0, index), 0);
-		next.set(numericDocs.subarray(index + 1), index);
-		postings.set(term, next);
+		if (next !== docs) {
+			postings.set(term, next);
+		}
 		return;
 	}
 	(docs as number[]).splice(index, 1);
 	if (docs.length === 0) {
 		postings.delete(term);
 	}
+}
+
+function insertDocIdIntoSortedPosting(docs: Uint32Array, docId: number): Uint32Array {
+	const next = new Uint32Array(docs.length + 1);
+	let inserted = false;
+	let readIndex = 0;
+	for (let writeIndex = 0; writeIndex < next.length; writeIndex += 1) {
+		if (!inserted && (readIndex >= docs.length || docId < docs[readIndex])) {
+			next[writeIndex] = docId;
+			inserted = true;
+			continue;
+		}
+		next[writeIndex] = docs[readIndex];
+		readIndex += 1;
+	}
+	return next;
+}
+
+function removeDocIdFromSortedPosting(
+	docs: Uint32Array,
+	docId: number,
+): Uint32Array | undefined {
+	const index = docs.indexOf(docId);
+	if (index === -1) {
+		return docs;
+	}
+	if (docs.length === 1) {
+		return undefined;
+	}
+	const next = new Uint32Array(docs.length - 1);
+	next.set(docs.subarray(0, index), 0);
+	next.set(docs.subarray(index + 1), index);
+	return next;
 }
 
 function isSerializedCoverageLexicalBinarySnapshot(
