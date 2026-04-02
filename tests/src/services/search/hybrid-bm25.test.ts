@@ -88,4 +88,20 @@ describe("hybrid BM25 query expansion", () => {
 
 		expect(results[0]?.docId).toBe(1);
 	});
+
+	test("keeps only the highest scoring topK matches without sorting the full tail", () => {
+		const bm25 = new BM25Engine();
+		bm25.addDocument(1, "alpha alpha alpha alpha");
+		bm25.addDocument(2, "alpha alpha alpha");
+		bm25.addDocument(3, "alpha alpha");
+		bm25.addDocument(4, "alpha");
+		bm25.addDocument(5, "beta");
+
+		const results = bm25.search("alpha", 2, {
+			useProximity: false,
+			enableQueryExpansion: false,
+		});
+
+		expect(results.map((item) => item.docId)).toEqual([1, 2]);
+	});
 });

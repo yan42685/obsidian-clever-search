@@ -42,6 +42,10 @@ const HYBRID_QUERY_PREFIX_EXPANSION_LIMIT = 6;
 const HYBRID_QUERY_FUZZY_MIN_LENGTH = 5;
 const HYBRID_QUERY_FUZZY_EXPANSION_LIMIT = 4;
 const HYBRID_QUERY_EXPANDABLE_TERM_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
+const HYBRID_PREFIX_BOOST_MIN = 0.58;
+const HYBRID_PREFIX_BOOST_MAX = 0.88;
+const HYBRID_FUZZY_DISTANCE_ONE_BOOST = 0.48;
+const HYBRID_FUZZY_DISTANCE_TWO_BOOST = 0.3;
 const BM25_MAX_TF_NORM = BM25_K1 + 1;
 const TERM_FLAG_ACTIVE = 1;
 const TERM_FLAG_EXPANDABLE = 2;
@@ -175,7 +179,7 @@ export class BM25Engine {
 			.tokenize(query, 'search')
 			.map((term) => this.normalizeQueryTerm(term))
 			.filter((term) => term.length > 0);
-		if (rawTerms.length === 0 || this._docCount === 0) return [];
+		if (topK <= 0 || rawTerms.length === 0 || this._docCount === 0) return [];
 
 		const enableQueryExpansion = options.enableQueryExpansion ?? false;
 		const resolvedTerms = rawTerms.map((term) =>
@@ -205,9 +209,7 @@ export class BM25Engine {
 			}
 		}
 
-		return Array.from(scores.entries())
-			.sort((a, b) => b[1] - a[1])
-			.slice(0, topK)
+		return selectTopKScoreEntries(scores, topK)
 			.map(([docId, score]) => ({ docId, score }));
 	}
 
@@ -852,13 +854,88 @@ function computeMaxFuzzyDistance(queryTerm: string): number {
 
 function computePrefixBoost(queryTerm: string, matchedTerm: string): number {
 	return Math.max(
-		0.72,
-		Math.min(0.96, queryTerm.length / Math.max(queryTerm.length, matchedTerm.length)),
+		HYBRID_PREFIX_BOOST_MIN,
+		Math.min(
+			HYBRID_PREFIX_BOOST_MAX,
+			queryTerm.length / Math.max(queryTerm.length, matchedTerm.length),
+		),
 	);
 }
 
 function computeFuzzyBoost(distance: number): number {
-	return Math.max(0.64, 1 - distance * 0.18);
+	if (distance <= 1) {
+		return HYBRID_FUZZY_DISTANCE_ONE_BOOST;
+	}
+	return HYBRID_FUZZY_DISTANCE_TWO_BOOST;
+}
+
+function selectTopKScoreEntries(
+	scores: Map<number, number>,
+	topK: number,
+): Array<[number, number]> {
+	const entries = Array.from(scores.entries());
+	if (entries.length <= topK) {
+		return entries.sort((a, b) => b[1] - a[1]);
+	}
+
+	const heap: Array<[number, number]> = [];
+	for (const entry of entries) {
+		if (heap.length < topK) {
+			pushMinScoreHeap(heap, entry);
+			continue;
+		}
+
+		if (entry[1] <= heap[0][1]) {
+			continue;
+		}
+
+		heap[0] = entry;
+		siftDownMinScoreHeap(heap, 0);
+	}
+
+	return heap.sort((a, b) => b[1] - a[1]);
+}
+
+function pushMinScoreHeap(
+	heap: Array<[number, number]>,
+	entry: [number, number],
+): void {
+	heap.push(entry);
+	siftUpMinScoreHeap(heap, heap.length - 1);
+}
+
+function siftUpMinScoreHeap(heap: Array<[number, number]>, index: number): void {
+	let current = index;
+	while (current > 0) {
+		const parent = (current - 1) >> 1;
+		if (heap[parent][1] <= heap[current][1]) {
+			return;
+		}
+		[heap[parent], heap[current]] = [heap[current], heap[parent]];
+		current = parent;
+	}
+}
+
+function siftDownMinScoreHeap(heap: Array<[number, number]>, index: number): void {
+	let current = index;
+	while (true) {
+		const left = current * 2 + 1;
+		const right = left + 1;
+		let smallest = current;
+
+		if (left < heap.length && heap[left][1] < heap[smallest][1]) {
+			smallest = left;
+		}
+		if (right < heap.length && heap[right][1] < heap[smallest][1]) {
+			smallest = right;
+		}
+		if (smallest === current) {
+			return;
+		}
+
+		[heap[current], heap[smallest]] = [heap[smallest], heap[current]];
+		current = smallest;
+	}
 }
 
 function quantizeRuntimeTfNorm(value: number): number {
