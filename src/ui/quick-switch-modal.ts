@@ -3,7 +3,9 @@ import type { SearchAutocompleteMode } from "src/services/obsidian/user-data/sea
 import QuickSwitchModalView from "./QuickSwitchModal.svelte";
 
 export class QuickSwitchModal extends Modal {
-	private mountedElement: QuickSwitchModalView;
+	private mountedElement: QuickSwitchModalView & {
+		activate?: () => Promise<void> | void;
+	};
 	private readonly mode: SearchAutocompleteMode;
 
 	constructor(app: App, mode: SearchAutocompleteMode = "navigation") {
@@ -23,7 +25,9 @@ export class QuickSwitchModal extends Modal {
 		});
 	}
 
-	onOpen() {}
+	onOpen() {
+		void this.mountedElement.activate?.();
+	}
 
 	onClose() {
 		this.modalEl.removeClass("cs-command-switch-modal");

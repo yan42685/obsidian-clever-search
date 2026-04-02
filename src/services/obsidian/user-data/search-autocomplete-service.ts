@@ -102,7 +102,10 @@ export class SearchAutocompleteService {
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly app = getInstance(App);
 	private readonly vault = getInstance(Vault);
-	private readonly setting = getInstance(OuterSetting);
+	private get setting(): OuterSetting {
+		return getInstance(OuterSetting);
+	}
+	private lastSettingRef: OuterSetting | null = null;
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly searchHistoryService = getInstance(SearchHistoryService);
 	private indexedEntriesCache: IndexedAutocompleteEntry[] | null = null;
@@ -113,6 +116,7 @@ export class SearchAutocompleteService {
 	}
 
 	isEnabled(): boolean {
+		this.ensureSettingFresh();
 		const sources = this.setting.searchHistory.sources;
 		return (
 			sources.file ||
@@ -127,6 +131,7 @@ export class SearchAutocompleteService {
 		queryText: string,
 		limit = SearchAutocompleteService.MAX_CANDIDATE_COUNT,
 	): SearchAutocompleteCandidate[] {
+		this.ensureSettingFresh();
 		if (!this.isEnabled()) {
 			return [];
 		}
@@ -175,6 +180,7 @@ export class SearchAutocompleteService {
 		queryText: string,
 		limit = SearchAutocompleteService.MAX_CANDIDATE_COUNT,
 	): SearchAutocompleteCandidate[] {
+		this.ensureSettingFresh();
 		const preparedQuery = prepareLightweightFuzzyQuery(queryText, "history");
 		const normalizedQuery = preparedQuery.normalizedQuery;
 		const navigationHabitSignals =
@@ -206,6 +212,7 @@ export class SearchAutocompleteService {
 	}
 
 	private buildEmptyStateCandidates(limit: number): SearchAutocompleteCandidate[] {
+		this.ensureSettingFresh();
 		const candidates: SearchAutocompleteCandidate[] = [];
 		const emptyQuery = this.parseNavigationQuery("");
 		const navigationHabitSignals =
@@ -596,6 +603,15 @@ export class SearchAutocompleteService {
 		this.plugin.registerEvent(
 			this.app.metadataCache.on("resolved", () => this.invalidateCache()),
 		);
+	}
+
+	private ensureSettingFresh(): void {
+		const currentSetting = this.setting;
+		if (this.lastSettingRef === currentSetting) {
+			return;
+		}
+		this.lastSettingRef = currentSetting;
+		this.invalidateCache();
 	}
 
 	private getIndexedEntries(): IndexedAutocompleteEntry[] {

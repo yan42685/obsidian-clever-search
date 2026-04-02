@@ -14,6 +14,7 @@ import { getInstance } from "./utils/my-lib";
 
 export default class CleverSearch extends Plugin {
 	async onload() {
+		container.clearInstances();
 		// can't register `this` as CleverSearch, because it is `export default` rather than `export`
 		container.register(THIS_PLUGIN, { useValue: this });
 		container.register(App, { useValue: this.app });
@@ -36,6 +37,7 @@ export default class CleverSearch extends Plugin {
 	onunload() {
 		document.body.classList.remove("cs-privacy-blur");
 		getInstance(PluginManager).onunload();
+		container.clearInstances();
 	}
 
 	exampleCode() {

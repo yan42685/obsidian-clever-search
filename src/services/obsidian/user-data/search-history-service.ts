@@ -65,7 +65,10 @@ export class SearchHistoryService {
 	private static readonly QUICK_SWITCH_COMMAND_LIMIT = 1000;
 	private static readonly DAY_MS = 1000 * 60 * 60 * 24;
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
-	private readonly setting = getInstance(OuterSetting);
+	private get setting(): OuterSetting {
+		return getInstance(OuterSetting);
+	}
+	private lastSettingRef: OuterSetting | null = null;
 	private indexedEntriesCache: IndexedSearchHistoryEntry[] | null = null;
 	private quickSwitchNavigationEntriesCache: QuickSwitchHistoryEntry[] | null = null;
 	private quickSwitchCommandEntriesCache: QuickSwitchHistoryEntry[] | null = null;
@@ -377,6 +380,7 @@ export class SearchHistoryService {
 	}
 
 	private getEntries(): IndexedSearchHistoryEntry[] {
+		this.ensureSettingFresh();
 		if (this.indexedEntriesCache) {
 			return this.indexedEntriesCache;
 		}
@@ -392,6 +396,7 @@ export class SearchHistoryService {
 	}
 
 	private getQuickSwitchNavigationEntries(): QuickSwitchHistoryEntry[] {
+		this.ensureSettingFresh();
 		if (this.quickSwitchNavigationEntriesCache) {
 			return this.quickSwitchNavigationEntriesCache;
 		}
@@ -408,6 +413,7 @@ export class SearchHistoryService {
 	}
 
 	private getQuickSwitchCommandEntries(): QuickSwitchHistoryEntry[] {
+		this.ensureSettingFresh();
 		if (this.quickSwitchCommandEntriesCache) {
 			return this.quickSwitchCommandEntriesCache;
 		}
@@ -424,6 +430,7 @@ export class SearchHistoryService {
 	}
 
 	private getQuickSwitchHistorySetting() {
+		this.ensureSettingFresh();
 		const quickSwitchHistory = (this.setting.quickSwitchHistory ??= {
 			maxItems: 5000,
 			navigationEntries: [],
@@ -458,6 +465,16 @@ export class SearchHistoryService {
 		}
 
 		return quickSwitchHistory;
+	}
+
+	private ensureSettingFresh(): void {
+		const currentSetting = this.setting;
+		if (this.lastSettingRef === currentSetting) {
+			return;
+		}
+		this.lastSettingRef = currentSetting;
+		this.invalidateQueryEntriesCache();
+		this.invalidateQuickSwitchEntriesCache();
 	}
 
 	private sanitizeEntries(entries: SearchHistoryEntry[]): SearchHistoryEntry[] {

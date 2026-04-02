@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { App } from "obsidian";
-	import { onMount, tick } from "svelte";
+	import { tick } from "svelte";
 	import { OuterSetting } from "src/globals/plugin-setting";
 	import { PrivateApi } from "src/services/obsidian/private-api";
 	import { t } from "src/services/obsidian/translations/locale-helper";
@@ -17,7 +17,6 @@
 	import SearchHistoryInputView from "./SearchHistoryInput.svelte";
 
 	const app = getInstance(App);
-	const setting = getInstance(OuterSetting);
 	const privateApi = getInstance(PrivateApi);
 	const searchHistoryService = getInstance(SearchHistoryService);
 	const autocompleteService = getInstance(SearchAutocompleteService);
@@ -31,6 +30,16 @@
 	let results: SearchAutocompleteCandidate[] = [];
 	let selectedResultIndex = -1;
 	let resultButtons: Array<HTMLButtonElement | null> = [];
+
+	function getSetting(): OuterSetting {
+		return getInstance(OuterSetting);
+	}
+
+	export async function activate(): Promise<void> {
+		refreshResults(true);
+		await tick();
+		inputRef?.focusInput?.();
+	}
 
 	$: if (selectedResultIndex >= results.length) {
 		selectedResultIndex = results.length > 0 ? 0 : -1;
@@ -140,7 +149,7 @@
 		await app.workspace.openLinkText(
 			candidate.openLinkText,
 			"",
-			setting.ui.openInNewPane,
+			getSetting().ui.openInNewPane,
 		);
 		requestClose();
 	}
@@ -316,11 +325,6 @@
 		resultButtons[selectedResultIndex]?.scrollIntoView({ block: "nearest" });
 	}
 
-	onMount(async () => {
-		refreshResults(true);
-		await tick();
-		inputRef?.focusInput?.();
-	});
 </script>
 
 <div class="quickswitch-shell" on:keydown={handleKeydown}>
