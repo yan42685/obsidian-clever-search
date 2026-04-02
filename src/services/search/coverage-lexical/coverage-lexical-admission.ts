@@ -13,6 +13,21 @@ import {
 
 const MIN_ADMISSION_WINDOW = 6;
 const MAX_ADMISSION_WINDOW = 18;
+const EXACT_MATCH_KIND_CODE = 3;
+const PREFIX_MATCH_KIND_CODE = 2;
+const FUZZY_MATCH_KIND_CODE = 1;
+
+type CoverageLexicalAdmissionFamilyMeta = {
+	isCoreBody: boolean;
+	isAnchor: boolean;
+	isSoftBody: boolean;
+	tailWeight: number;
+};
+
+const ADMISSION_FAMILY_META_CACHE = new WeakMap<
+	readonly CoverageLexicalFamily[],
+	ReadonlyArray<CoverageLexicalAdmissionFamilyMeta | undefined>
+>();
 
 export function buildCoverageLexicalPassageAdmissionSignal(
 	tokens: readonly string[],
@@ -55,6 +70,7 @@ export function buildCoverageLexicalPassageAdmissionSignal(
 	);
 	const candidateWindows =
 		tighterWindow === baseWindow ? [baseWindow] : [baseWindow, tighterWindow];
+	const familyMetaByIndex = getOrCreateAdmissionFamilyMeta(families);
 
 	let best = createEmptyCoverageLexicalPassageAdmissionSignal(
 		phraseMatchCount,
@@ -77,7 +93,7 @@ export function buildCoverageLexicalPassageAdmissionSignal(
 				start,
 				end,
 				trace.admissionMatchesByPosition,
-				families,
+				familyMetaByIndex,
 				phraseMatchCount,
 				phraseMatchWeight,
 			);
@@ -113,19 +129,24 @@ function scoreWindow(
 	matchesByPosition: ReadonlyArray<
 		ReadonlyArray<CoverageLexicalFamilyTokenMatch>
 	>,
-	families: readonly CoverageLexicalFamily[],
+	familyMetaByIndex: ReadonlyArray<CoverageLexicalAdmissionFamilyMeta | undefined>,
 	phraseMatchCount: number,
 	phraseMatchWeight: number,
 ): CoverageLexicalPassageAdmissionSignal {
 	const bestKindCodeByFamily: number[] = [];
+	const touchedFamilyIndices: number[] = [];
 	for (let tokenIndex = start; tokenIndex <= end; tokenIndex++) {
 		for (const match of matchesByPosition[tokenIndex]) {
-			const previousCode = bestKindCodeByFamily[match.familyIndex] ?? 0;
+			const familyIndex = match.familyIndex;
+			const previousCode = bestKindCodeByFamily[familyIndex] ?? 0;
 			const nextCode = encodeMatchKind(match.kind);
 			if (previousCode >= nextCode) {
 				continue;
 			}
-			bestKindCodeByFamily[match.familyIndex] = nextCode;
+			if (previousCode === 0) {
+				touchedFamilyIndices.push(familyIndex);
+			}
+			bestKindCodeByFamily[familyIndex] = nextCode;
 		}
 	}
 
@@ -136,28 +157,31 @@ function scoreWindow(
 	let anchorCoverageCount = 0;
 	let softCoverageCount = 0;
 
-	for (const family of families) {
-		const kind = decodeMatchKind(bestKindCodeByFamily[family.index] ?? 0);
-		if (!kind) {
+	for (const familyIndex of touchedFamilyIndices) {
+		const kindCode = bestKindCodeByFamily[familyIndex] ?? 0;
+		if (kindCode === 0) {
 			continue;
 		}
-		const weight = computeFamilyTailWeight(family.index);
-		if (family.role === "body" && family.strength === "core") {
+		const familyMeta = familyMetaByIndex[familyIndex];
+		if (!familyMeta) {
+			continue;
+		}
+		if (familyMeta.isCoreBody) {
 			coreCoverageCount += 1;
-			if (kind === "exact") {
-				exactWeight += weight;
-			} else if (kind === "prefix") {
-				prefixWeight += weight;
-			} else {
-				fuzzyWeight += weight;
+			if (kindCode === EXACT_MATCH_KIND_CODE) {
+				exactWeight += familyMeta.tailWeight;
+			} else if (kindCode === PREFIX_MATCH_KIND_CODE) {
+				prefixWeight += familyMeta.tailWeight;
+			} else if (kindCode === FUZZY_MATCH_KIND_CODE) {
+				fuzzyWeight += familyMeta.tailWeight;
 			}
 			continue;
 		}
-		if (family.role === "anchor") {
+		if (familyMeta.isAnchor) {
 			anchorCoverageCount += 1;
 			continue;
 		}
-		if (family.role === "body") {
+		if (familyMeta.isSoftBody) {
 			softCoverageCount += 1;
 		}
 	}
@@ -200,29 +224,34 @@ function createEmptyCoverageLexicalPassageAdmissionSignal(
 	};
 }
 
-function encodeMatchKind(kind: Exclude<CoverageFamilyMatchKind, null>): number {
-	if (kind === "exact") {
-		return 3;
+function getOrCreateAdmissionFamilyMeta(
+	families: readonly CoverageLexicalFamily[],
+): ReadonlyArray<CoverageLexicalAdmissionFamilyMeta | undefined> {
+	const cached = ADMISSION_FAMILY_META_CACHE.get(families);
+	if (cached) {
+		return cached;
 	}
-	if (kind === "prefix") {
-		return 2;
+	const created: Array<CoverageLexicalAdmissionFamilyMeta | undefined> = [];
+	for (const family of families) {
+		created[family.index] = {
+			isCoreBody: family.role === "body" && family.strength === "core",
+			isAnchor: family.role === "anchor",
+			isSoftBody: family.role === "body" && family.strength !== "core",
+			tailWeight: computeFamilyTailWeight(family.index),
+		};
 	}
-	return 1;
+	ADMISSION_FAMILY_META_CACHE.set(families, created);
+	return created;
 }
 
-function decodeMatchKind(
-	code: number,
-): Exclude<CoverageFamilyMatchKind, null> | null {
-	if (code === 3) {
-		return "exact";
+function encodeMatchKind(kind: Exclude<CoverageFamilyMatchKind, null>): number {
+	if (kind === "exact") {
+		return EXACT_MATCH_KIND_CODE;
 	}
-	if (code === 2) {
-		return "prefix";
+	if (kind === "prefix") {
+		return PREFIX_MATCH_KIND_CODE;
 	}
-	if (code === 1) {
-		return "fuzzy";
-	}
-	return null;
+	return FUZZY_MATCH_KIND_CODE;
 }
 
 function compareDescendingMetric(left: number, right: number): number {

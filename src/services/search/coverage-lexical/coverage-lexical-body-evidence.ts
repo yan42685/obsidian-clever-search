@@ -28,6 +28,9 @@ type CoverageLexicalFamilyMatcher = {
 	admissionMaxDistance: number;
 	windowMaxDistance: number;
 	maxDistance: number;
+	exactMatch: CoverageLexicalFamilyTokenMatch;
+	prefixMatch: CoverageLexicalFamilyTokenMatch;
+	fuzzyMatch: CoverageLexicalFamilyTokenMatch;
 };
 
 type CoverageLexicalBodyEvidenceContext = {
@@ -36,13 +39,17 @@ type CoverageLexicalBodyEvidenceContext = {
 };
 
 const EMPTY_TOKEN_MATCHES: CoverageLexicalFamilyTokenMatch[] = [];
+const BODY_EVIDENCE_CONTEXT_CACHE = new WeakMap<
+	readonly CoverageLexicalFamily[],
+	Map<number, CoverageLexicalBodyEvidenceContext>
+>();
 
 export function buildCoverageLexicalBodyEvidenceTrace(
 	tokens: readonly string[],
 	families: readonly CoverageLexicalFamily[],
 	windowFuzzyProportion: number = DEFAULT_WINDOW_FUZZY_PROPORTION,
 ): CoverageLexicalBodyEvidenceTrace {
-	const context = createCoverageLexicalBodyEvidenceContext(
+	const context = getOrCreateCoverageLexicalBodyEvidenceContext(
 		families,
 		windowFuzzyProportion,
 	);
@@ -62,25 +69,13 @@ export function buildCoverageLexicalBodyEvidenceTrace(
 
 		for (const matcher of context.matchers) {
 			if (token === matcher.normalizedTerm) {
-				(admissionMatches ??= []).push({
-					familyIndex: matcher.familyIndex,
-					kind: "exact",
-				});
-				(windowMatches ??= []).push({
-					familyIndex: matcher.familyIndex,
-					kind: "exact",
-				});
+				(admissionMatches ??= []).push(matcher.exactMatch);
+				(windowMatches ??= []).push(matcher.exactMatch);
 				continue;
 			}
 			if (matcher.allowPrefix && token.startsWith(matcher.normalizedTerm)) {
-				(admissionMatches ??= []).push({
-					familyIndex: matcher.familyIndex,
-					kind: "prefix",
-				});
-				(windowMatches ??= []).push({
-					familyIndex: matcher.familyIndex,
-					kind: "prefix",
-				});
+				(admissionMatches ??= []).push(matcher.prefixMatch);
+				(windowMatches ??= []).push(matcher.prefixMatch);
 				continue;
 			}
 			if (
@@ -100,16 +95,10 @@ export function buildCoverageLexicalBodyEvidenceTrace(
 				matcher.admissionMaxDistance > 0 &&
 				distance <= matcher.admissionMaxDistance
 			) {
-				(admissionMatches ??= []).push({
-					familyIndex: matcher.familyIndex,
-					kind: "fuzzy",
-				});
+				(admissionMatches ??= []).push(matcher.fuzzyMatch);
 			}
 			if (matcher.windowMaxDistance > 0 && distance <= matcher.windowMaxDistance) {
-				(windowMatches ??= []).push({
-					familyIndex: matcher.familyIndex,
-					kind: "fuzzy",
-				});
+				(windowMatches ??= []).push(matcher.fuzzyMatch);
 			}
 		}
 
@@ -131,6 +120,28 @@ export function buildCoverageLexicalBodyEvidenceTrace(
 		windowMatchesByPosition,
 		windowHitPositions,
 	};
+}
+
+function getOrCreateCoverageLexicalBodyEvidenceContext(
+	families: readonly CoverageLexicalFamily[],
+	windowFuzzyProportion: number,
+): CoverageLexicalBodyEvidenceContext {
+	const fuzzyKey = Math.round(windowFuzzyProportion * 1000);
+	let variants = BODY_EVIDENCE_CONTEXT_CACHE.get(families);
+	if (!variants) {
+		variants = new Map();
+		BODY_EVIDENCE_CONTEXT_CACHE.set(families, variants);
+	}
+	const cached = variants.get(fuzzyKey);
+	if (cached) {
+		return cached;
+	}
+	const created = createCoverageLexicalBodyEvidenceContext(
+		families,
+		windowFuzzyProportion,
+	);
+	variants.set(fuzzyKey, created);
+	return created;
 }
 
 function createCoverageLexicalBodyEvidenceContext(
@@ -157,6 +168,18 @@ function createCoverageLexicalBodyEvidenceContext(
 			admissionMaxDistance,
 			windowMaxDistance,
 			maxDistance: Math.max(admissionMaxDistance, windowMaxDistance),
+			exactMatch: {
+				familyIndex: family.index,
+				kind: "exact",
+			},
+			prefixMatch: {
+				familyIndex: family.index,
+				kind: "prefix",
+			},
+			fuzzyMatch: {
+				familyIndex: family.index,
+				kind: "fuzzy",
+			},
 		};
 	});
 	return {
