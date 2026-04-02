@@ -20,15 +20,39 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 	maxChars?: number;
 }): HybridLexicalLaneDisplayCandidate {
 	const { snapshotText, candidate } = params;
+	const score =
+		"scoreBreakdown" in candidate
+			? candidate.scoreBreakdown.totalScore
+			: candidate.localScore;
+	if (candidate.bridgePreviewText) {
+		const previewLength = candidate.bridgePreviewText.length;
+		return {
+			filePath: candidate.filePath,
+			basename: FileUtil.getBasename(candidate.filePath),
+			headingChain: [...candidate.headingChain],
+			segmentText:
+				candidate.bridgePreviewSegmentText ??
+				(candidate.headingChain.join(" > ") || "metadata"),
+			startLine: candidate.startLine,
+			startCol: candidate.startCol,
+			endLine: candidate.endLine,
+			endCol: candidate.endCol,
+			score,
+			snippetText: candidate.bridgePreviewText,
+			snippetHtml: candidate.bridgePreviewText,
+			highlightRanges: candidate.bridgePreviewRanges?.map((range) => ({ ...range })) ?? [],
+			coreStart: 0,
+			coreEnd: previewLength,
+			displayStart: 0,
+			displayEnd: previewLength,
+			anchorOffset: candidate.localSignals.anchorOffset,
+		};
+	}
 	const payload = renderDirectSubitemsCandidateSpan({
 		snapshotText,
 		span: toDirectSubitemsCandidateSpan(candidate),
 		maxChars: params.maxChars ?? HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
 	});
-	const score =
-		"scoreBreakdown" in candidate
-			? candidate.scoreBreakdown.totalScore
-			: candidate.localScore;
 	return {
 		filePath: candidate.filePath,
 		basename: FileUtil.getBasename(candidate.filePath),

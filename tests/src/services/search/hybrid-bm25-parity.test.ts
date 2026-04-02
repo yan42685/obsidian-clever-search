@@ -319,10 +319,10 @@ function createMiniSearchHarness(tokenizer: MockTokenizer): MiniSearchLike {
 		OuterSetting,
 		DEFAULT_OUTER_SETTING,
 	} = require("src/globals/plugin-setting") as typeof import("src/globals/plugin-setting");
-	const { MiniSearchFileEngine } = require(
-		"src/services/search/file-search-engine",
+	const { DevMiniSearchFileEngine } = require(
+		"./helpers/dev-minisearch-file-engine",
 	) as {
-		MiniSearchFileEngine: new () => MiniSearchLike;
+		DevMiniSearchFileEngine: new () => MiniSearchLike;
 	};
 	const setting = JSON.parse(JSON.stringify(DEFAULT_OUTER_SETTING));
 	setting.fileSearchBackend = "minisearch";
@@ -334,7 +334,7 @@ function createMiniSearchHarness(tokenizer: MockTokenizer): MiniSearchLike {
 	container.register(Tokenizer, {
 		useValue: tokenizer,
 	});
-	return new MiniSearchFileEngine();
+	return new DevMiniSearchFileEngine();
 }
 
 function summarizeTimings(timings: number[], elapsedMs: number): TimingSummary {

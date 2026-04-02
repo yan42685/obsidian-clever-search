@@ -2615,14 +2615,14 @@ describe("coverage lexical automation benchmark", () => {
 		const { documents, queryCases } = createAutomationCorpus();
 		const languageMix = computeLanguageMix(documents);
 		const queryLanguageMix = computeQueryLanguageMix(queryCases);
-		const { MiniSearchFileEngine } = require(
-			"src/services/search/file-search-engine",
+		const { DevMiniSearchFileEngine } = require(
+			"./helpers/dev-minisearch-file-engine",
 		);
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
 
-		const mini = createEngineHarness(MiniSearchFileEngine, tokenizer, "minisearch");
+		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
 		const miniResult = await runBenchmark("MiniSearch", mini, documents, queryCases);
 
 		if ("reset" in container && typeof (container as any).reset === "function") {

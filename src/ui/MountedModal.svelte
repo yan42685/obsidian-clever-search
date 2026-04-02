@@ -1,5 +1,4 @@
 	<script lang="ts">
-	import { App } from "obsidian";
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import { OuterSetting } from "src/globals/plugin-setting";
@@ -11,14 +10,13 @@
 	    SearchResult,
 	    SearchType,
 	} from "src/globals/search-types";
-	import { openHybridSearchModal } from "src/services/obsidian/setting-manager";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
 	import { SearchHistoryService } from "src/services/obsidian/user-data/search-history-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
 	import { logger } from "src/utils/logger";
-	import { TO_BE_IMPL, getInstance } from "src/utils/my-lib";
+	import { TO_BE_IMPL, getInstance, isDevEnvironment } from "src/utils/my-lib";
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import {
@@ -345,10 +343,6 @@
 		logger.trace("mounted element has been destroyed.");
 	});
 
-	function openHybridHealthModal() {
-		openHybridSearchModal(getInstance(App));
-	}
-
 	// NOTE: onMount() won't be triggered and I wonder why
 	function listenEvent(event: EventEnum, callback: EventCallback) {
 		eventBus.on(event, callback);
@@ -449,45 +443,9 @@
 				{:else if searchType === SearchType.IN_VAULT}
 					{#if hybridFreshnessNotice.visible}
 						<div class="hybrid-freshness-banner">
-							<div class="hybrid-freshness-banner-header">
-								<p class="hybrid-freshness-banner-title">
-									{hybridFreshnessNotice.title}
-								</p>
-								<button
-									type="button"
-									class="hybrid-freshness-banner-action"
-									on:click={openHybridHealthModal}
-								>
-									{t("hybridModal.freshnessNotice.openSettings")}
-								</button>
-							</div>
-							<p class="hybrid-freshness-banner-detail">
-								{hybridFreshnessNotice.detail}
+							<p class="hybrid-freshness-banner-message">
+								{hybridFreshnessNotice.message}
 							</p>
-							{#if hybridFreshnessNotice.repairSamplePaths.length > 0}
-								<div class="hybrid-freshness-banner-samples">
-									<span class="hybrid-freshness-banner-samples-label">
-										{t("hybridModal.freshnessNotice.repairSamples")}
-									</span>
-									<div class="hybrid-freshness-banner-chip-row">
-										{#each hybridFreshnessNotice.repairSamplePaths as path}
-											<code>{path}</code>
-										{/each}
-									</div>
-								</div>
-							{/if}
-							{#if hybridFreshnessNotice.updatingSamplePaths.length > 0}
-								<div class="hybrid-freshness-banner-samples">
-									<span class="hybrid-freshness-banner-samples-label">
-										{t("hybridModal.freshnessNotice.updatingSamples")}
-									</span>
-									<div class="hybrid-freshness-banner-chip-row">
-										{#each hybridFreshnessNotice.updatingSamplePaths as path}
-											<code>{path}</code>
-										{/each}
-									</div>
-								</div>
-							{/if}
 						</div>
 					{/if}
 					{#if autoHybridFallbackFailureNoticeKey}
@@ -703,52 +661,11 @@
 		border: 1px solid rgba(186, 145, 62, 0.28);
 	}
 
-	.hybrid-freshness-banner-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.8em;
-		margin-bottom: 0.4em;
-	}
-
-	.hybrid-freshness-banner-title {
-		font-weight: 600;
-		margin: 0;
-	}
-
-	.hybrid-freshness-banner-action {
-		flex-shrink: 0;
-		font-size: 0.82em;
-		padding: 0.28em 0.7em;
-	}
-
-	.hybrid-freshness-banner-detail {
+	.hybrid-freshness-banner-message {
 		margin: 0;
 		color: var(--cs-secondary-font-color, #a29c9c);
-	}
-
-	.hybrid-freshness-banner-samples {
-		margin-top: 0.62em;
-	}
-
-	.hybrid-freshness-banner-samples-label {
-		display: block;
-		margin-bottom: 0.28em;
-		font-size: 0.82em;
-		color: var(--cs-secondary-font-color, #a29c9c);
-	}
-
-	.hybrid-freshness-banner-chip-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.38em;
-	}
-
-	.hybrid-freshness-banner-chip-row code {
-		padding: 0.12em 0.45em;
-		border-radius: 999px;
-		background-color: rgba(255, 255, 255, 0.08);
-		font-size: 0.82em;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
 	}
 
 	.hybrid-fallback-failure-title {

@@ -197,6 +197,17 @@ export default {
 	"hybridModal.freshnessNotice.detailJoiner": "; ",
 	"hybridModal.freshnessNotice.detailIdle": "Snippets and jumps are using the latest local hybrid index.",
 	"hybridModal.freshnessNotice.detailTail": ". Snippets and jumps for those files may be inaccurate.",
+	"hybridModal.freshnessNotice.messageUpdatingOnlyPrefix":
+		"Hybrid engine background: ",
+	"hybridModal.freshnessNotice.messageRepairOnlyPrefix":
+		"Hybrid engine background: ",
+	"hybridModal.freshnessNotice.messageBothPrefix":
+		"Hybrid engine background: ",
+	"hybridModal.freshnessNotice.messageJoiner": ", ",
+	"hybridModal.freshnessNotice.updatingSegmentSuffix":
+		" file(s) still updating",
+	"hybridModal.freshnessNotice.repairSegmentSuffix":
+		" file(s) pending repair",
 	"hybridModal.healthSummary": "Hybrid health summary",
 	"hybridModal.healthSummary.loading": "Loading local health...",
 	"hybridModal.healthSummary.localOnly": "Local-only diagnosis. No embedding API, no rerank API, no token usage.",

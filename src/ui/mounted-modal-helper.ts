@@ -13,14 +13,11 @@ import {
 	type HybridFreshnessSummary,
 } from "src/services/obsidian/user-data/data-manager";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
-import { getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { getInstance } from "src/utils/my-lib";
 
 export type HybridFreshnessNoticeState = {
 	visible: boolean;
-	title: string;
-	detail: string;
-	updatingSamplePaths: string[];
-	repairSamplePaths: string[];
+	message: string;
 };
 
 type AutoHybridFallbackControllerOptions = {
@@ -57,25 +54,8 @@ export function getMountedModalFileItemScore(
 export function createHiddenHybridFreshnessNoticeState(): HybridFreshnessNoticeState {
 	return {
 		visible: false,
-		title: "",
-		detail: "",
-		updatingSamplePaths: [],
-		repairSamplePaths: [],
+		message: "",
 	};
-}
-
-const HYBRID_FRESHNESS_DEBUG_PIN_STORAGE_KEY =
-	"clever-search:debug-pin-hybrid-freshness-banner";
-
-function shouldPinHybridFreshnessBannerForDebug(): boolean {
-	if (!isDevEnvironment) {
-		return false;
-	}
-	try {
-		return window.localStorage.getItem(HYBRID_FRESHNESS_DEBUG_PIN_STORAGE_KEY) !== "0";
-	} catch {
-		return true;
-	}
 }
 
 export class AutoHybridFallbackController {
@@ -265,7 +245,6 @@ export class HybridFreshnessNoticeController {
 	private buildNoticeState(
 		summary: HybridFreshnessSummary,
 	): HybridFreshnessNoticeState {
-		const isDebugPinned = shouldPinHybridFreshnessBannerForDebug();
 		const clauses: string[] = [];
 		if (summary.updatingFileCount > 0) {
 			clauses.push(
@@ -278,34 +257,40 @@ export class HybridFreshnessNoticeController {
 			);
 		}
 		if (clauses.length === 0) {
-			if (!isDebugPinned) {
-				return createHiddenHybridFreshnessNoticeState();
-			}
-			return {
-				visible: true,
-				title: t("hybridModal.freshnessNotice.titleIdle"),
-				detail: t("hybridModal.freshnessNotice.detailIdle"),
-				updatingSamplePaths: [],
-				repairSamplePaths: [],
-			};
+			return createHiddenHybridFreshnessNoticeState();
 		}
 
 		return {
 			visible: true,
-			title: this.buildTitle(summary),
-			detail: `${clauses.join(t("hybridModal.freshnessNotice.detailJoiner"))}${t("hybridModal.freshnessNotice.detailTail")}`,
-			updatingSamplePaths: summary.updatingSamplePaths,
-			repairSamplePaths: summary.repairSamplePaths,
+			message: this.buildMessage(summary),
 		};
 	}
 
-	private buildTitle(summary: HybridFreshnessSummary): string {
+	private buildMessage(summary: HybridFreshnessSummary): string {
 		if (summary.updatingFileCount > 0 && summary.repairFileCount > 0) {
-			return t("hybridModal.freshnessNotice.titleUpdatingAndRepair");
+			return [
+				t("hybridModal.freshnessNotice.messageBothPrefix"),
+				String(summary.updatingFileCount),
+				t("hybridModal.freshnessNotice.updatingSegmentSuffix"),
+				t("hybridModal.freshnessNotice.messageJoiner"),
+				String(summary.repairFileCount),
+				t("hybridModal.freshnessNotice.repairSegmentSuffix"),
+				t("hybridModal.freshnessNotice.detailTail"),
+			].join("");
 		}
 		if (summary.updatingFileCount > 0) {
-			return t("hybridModal.freshnessNotice.titleUpdating");
+			return [
+				t("hybridModal.freshnessNotice.messageUpdatingOnlyPrefix"),
+				String(summary.updatingFileCount),
+				t("hybridModal.freshnessNotice.updatingSegmentSuffix"),
+				t("hybridModal.freshnessNotice.detailTail"),
+			].join("");
 		}
-		return t("hybridModal.freshnessNotice.titleRepair");
+		return [
+			t("hybridModal.freshnessNotice.messageRepairOnlyPrefix"),
+			String(summary.repairFileCount),
+			t("hybridModal.freshnessNotice.repairSegmentSuffix"),
+			t("hybridModal.freshnessNotice.detailTail"),
+		].join("");
 	}
 }

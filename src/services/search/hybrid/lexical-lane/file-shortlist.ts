@@ -79,6 +79,10 @@ export function buildHybridLexicalLaneFileCandidates(params: {
 					aliases,
 					headings,
 				}),
+				metadataValues: {
+					aliases: [...aliases],
+					headings: [...headings],
+				},
 			};
 		})
 		.sort((left, right) => {

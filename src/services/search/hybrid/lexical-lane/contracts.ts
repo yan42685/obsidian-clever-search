@@ -26,12 +26,18 @@ export type HybridLexicalLaneMetadataSignals = {
 	aliasHit: boolean;
 };
 
+export type HybridLexicalLaneMetadataValues = {
+	aliases: string[];
+	headings: string[];
+};
+
 export type HybridLexicalLaneFileCandidate = {
 	filePath: string;
 	fileScore: number;
 	fileRank: number;
 	basename: string;
 	metadataSignals: HybridLexicalLaneMetadataSignals;
+	metadataValues: HybridLexicalLaneMetadataValues;
 };
 
 export type HybridLexicalLaneLocalSignals = {
@@ -67,6 +73,9 @@ export type HybridLexicalLaneBlockCandidate = {
 	localSignals: HybridLexicalLaneLocalSignals;
 	termStats: HybridLexicalLaneTermStat[];
 	matchOccurrences: HybridLexicalLaneMatchOccurrence[];
+	bridgePreviewText?: string;
+	bridgePreviewRanges?: Array<{ start: number; end: number }>;
+	bridgePreviewSegmentText?: string;
 };
 
 export type HybridLexicalLaneScoreBreakdown = {

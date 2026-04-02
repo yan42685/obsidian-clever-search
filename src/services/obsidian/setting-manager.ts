@@ -27,7 +27,7 @@ import {
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
-import { MyLib, getInstance } from "src/utils/my-lib";
+import { MyLib, getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { container, inject, singleton } from "tsyringe";
@@ -183,6 +183,10 @@ export class SettingManager {
 
 export function openHybridSearchModal(app: App) {
 	new HybridSearchModal(app).open();
+}
+
+export function openHybridHealthSummaryModal(app: App) {
+	new HybridHealthSummaryModal(app).open();
 }
 
 export function openSearchHistoryModal(app: App) {
@@ -661,6 +665,116 @@ class QuickSwitchManageModal extends Modal {
 			);
 	}
 }
+
+function appendHybridStatusText(container: HTMLElement, text: string) {
+	container.createEl("p", { text });
+}
+
+function appendHybridStatusLine(
+	container: HTMLElement,
+	label: string,
+	value: string,
+) {
+	appendHybridStatusText(container, `${label}: ${value}`);
+}
+
+function renderHybridHealthSummary(
+	container: HTMLElement,
+	summary: HybridHealthSummary,
+) {
+	container.empty();
+	appendHybridStatusLine(
+		container,
+		t("hybridModal.healthSummary.status"),
+		t(`hybridModal.healthSummary.state.${summary.state}` as any),
+	);
+	appendHybridStatusLine(
+		container,
+		t("hybridModal.healthSummary.engine"),
+		[
+			`${t("hybridModal.healthSummary.metric.ready")} ${summary.readyFileCount}`,
+			`${t("hybridModal.healthSummary.metric.bm25Only")} ${summary.bm25OnlyFileCount}`,
+			`${t("hybridModal.healthSummary.metric.unstable")} ${summary.unstableFileCount}`,
+		].join(" | "),
+	);
+	appendHybridStatusLine(
+		container,
+		t("hybridModal.healthSummary.docs"),
+		[
+			`${t("hybridModal.healthSummary.metric.tracked")} ${summary.trackedFileCount}`,
+			`${t("hybridModal.healthSummary.metric.updating")} ${summary.updatingFileCount}`,
+			`${t("hybridModal.healthSummary.metric.repair")} ${summary.repairFileCount}`,
+		].join(" | "),
+	);
+	appendHybridStatusLine(
+		container,
+		t("hybridModal.healthSummary.storage"),
+		[
+			`${t("hybridModal.healthSummary.metric.refs")} ${summary.indexedFileRefCount}`,
+			`${t("hybridModal.healthSummary.metric.currentAligned")} ${summary.currentAlignedSnapshotCount}`,
+			`${t("hybridModal.healthSummary.metric.shadowAligned")} ${summary.shadowAlignedSnapshotCount}`,
+			`${t("hybridModal.healthSummary.metric.shadowMismatch")} ${summary.shadowMismatchCount}`,
+		].join(" | "),
+	);
+	appendHybridStatusLine(
+		container,
+		t("hybridModal.healthSummary.errors"),
+		[
+			`${t("hybridModal.healthSummary.metric.failed")} ${summary.failedEmbeddingCount}`,
+			`${t("hybridModal.healthSummary.metric.deferred")} ${summary.deferredEmbeddingCount}`,
+		].join(" | "),
+	);
+	if (summary.shadowMismatchSamplePaths.length > 0) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.healthSummary.metric.samples"),
+			summary.shadowMismatchSamplePaths.join(" | "),
+		);
+	}
+}
+
+function formatDevOnlySettingName(name: string): string {
+	return `${name}（Dev Only）`;
+}
+
+class HybridHealthSummaryModal extends Modal {
+	private summaryEl: HTMLElement;
+
+	onOpen() {
+		this.modalEl.style.width = "42vw";
+		const { contentEl } = this;
+		contentEl.empty();
+
+		contentEl.createEl("h3", {
+			text: formatDevOnlySettingName(t("hybridModal.healthSummary")),
+		});
+		contentEl.createEl("p", { text: t("hybridModal.healthSummary.localOnly") });
+		new Setting(contentEl).addButton((button) =>
+			button.setButtonText(t("hybridModal.healthSummary.check")).onClick(
+				() => {
+					void this.runHealthCheck();
+				},
+			),
+		);
+		this.summaryEl = contentEl.createDiv();
+		this.summaryEl.style.margin = "0.35em 0 0 0";
+		this.summaryEl.setText(t("hybridModal.healthSummary.loading"));
+		void this.runHealthCheck();
+	}
+
+	private async runHealthCheck() {
+		this.summaryEl.setText(t("hybridModal.healthSummary.loading"));
+		try {
+			const summary = await getInstance(DataManager).getHybridHealthSummary();
+			renderHybridHealthSummary(this.summaryEl, summary);
+		} catch (error) {
+			logger.error("failed to load hybrid health summary:", error);
+			this.summaryEl.setText("Failed to load local health summary.");
+			new MyNotice("Failed to load local health summary.", 5000);
+		}
+	}
+}
+
 class HybridSearchModal extends Modal {
 	private settingManager = getInstance(SettingManager);
 	private setting = getInstance(OuterSetting);
@@ -674,13 +788,11 @@ class HybridSearchModal extends Modal {
 	private weeklyQuotaEl: HTMLElement;
 	private failedEmbeddingStatusEl: HTMLElement;
 	private deferredEmbeddingStatusEl: HTMLElement;
-	private healthSummaryEl: HTMLElement;
 	private statsEl: HTMLElement;
 	private openedApiDomain = "";
 	private openedApiKey = "";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
 	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
-	private currentHealthSummary: HybridHealthSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
 	private readonly failedEmbeddingStatusListener: EventCallback = () => {
 		void this.refreshHybridRuntimeStatusFromData();
@@ -808,62 +920,76 @@ class HybridSearchModal extends Modal {
 			);
 
 		// Excluded paths
-		new Setting(contentEl)
-			.setName(t("hybridModal.minIncrementalEmbedInterval"))
-			.setDesc(t("hybridModal.minIncrementalEmbedInterval.desc"))
-			.addSlider((slider) =>
-				slider
-					.setLimits(1, 60, 1)
-					.setValue(
-						Math.max(
-							1,
-							Math.round(
-								(this.setting.hybrid.minIncrementalEmbedIntervalSec ??
-									180) / 60,
+		if (isDevEnvironment) {
+			new Setting(contentEl)
+				.setName(
+					formatDevOnlySettingName(
+						t("hybridModal.minIncrementalEmbedInterval"),
+					),
+				)
+				.setDesc(t("hybridModal.minIncrementalEmbedInterval.desc"))
+				.addSlider((slider) =>
+					slider
+						.setLimits(1, 60, 1)
+						.setValue(
+							Math.max(
+								1,
+								Math.round(
+									(this.setting.hybrid.minIncrementalEmbedIntervalSec ??
+										180) / 60,
+								),
 							),
-						),
-					)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.setting.hybrid.minIncrementalEmbedIntervalSec = value * 60;
-						await this.settingManager.saveSettings();
-					}),
-			);
+						)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.setting.hybrid.minIncrementalEmbedIntervalSec = value * 60;
+							await this.settingManager.saveSettings();
+						}),
+				);
 
-		new Setting(contentEl)
-			.setName(t("hybridModal.failedEmbeddingRetryInterval"))
-			.setDesc(t("hybridModal.failedEmbeddingRetryInterval.desc"))
-			.addSlider((slider) =>
-				slider
-					.setLimits(5, 60, 1)
-					.setValue(this.setting.hybrid.failedEmbeddingRetryIntervalMin ?? 10)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.setting.hybrid.failedEmbeddingRetryIntervalMin = value;
-						await this.settingManager.saveSettings();
-						getInstance(DataManager).refreshFailedEmbeddingRetrySchedule();
-						await this.refreshHybridRuntimeStatusFromData();
-					}),
-			);
-		this.failedEmbeddingStatusEl = contentEl.createDiv();
-		this.failedEmbeddingStatusEl.style.margin = "0.35em 0 1em 0";
-		this.failedEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
-		this.deferredEmbeddingStatusEl = contentEl.createDiv();
-		this.deferredEmbeddingStatusEl.style.margin = "0 0 1em 0";
-		this.deferredEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
+			new Setting(contentEl)
+				.setName(
+					formatDevOnlySettingName(
+						t("hybridModal.failedEmbeddingRetryInterval"),
+					),
+				)
+				.setDesc(t("hybridModal.failedEmbeddingRetryInterval.desc"))
+				.addSlider((slider) =>
+					slider
+						.setLimits(5, 60, 1)
+						.setValue(this.setting.hybrid.failedEmbeddingRetryIntervalMin ?? 10)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.setting.hybrid.failedEmbeddingRetryIntervalMin = value;
+							await this.settingManager.saveSettings();
+							getInstance(DataManager).refreshFailedEmbeddingRetrySchedule();
+							await this.refreshHybridRuntimeStatusFromData();
+						}),
+				);
+			this.failedEmbeddingStatusEl = contentEl.createDiv();
+			this.failedEmbeddingStatusEl.style.margin = "0.35em 0 1em 0";
+			this.failedEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
+			this.deferredEmbeddingStatusEl = contentEl.createDiv();
+			this.deferredEmbeddingStatusEl.style.margin = "0 0 1em 0";
+			this.deferredEmbeddingStatusEl.setText(t("hybridModal.tokenStats.loading"));
 
-		contentEl.createEl("h3", { text: t("hybridModal.healthSummary") });
-		contentEl.createEl("p", { text: t("hybridModal.healthSummary.localOnly") });
-		new Setting(contentEl).addButton((button) =>
-			button.setButtonText(t("hybridModal.healthSummary.check")).onClick(
-				async () => {
-					await this.refreshHybridHealthSummary();
-				},
-			),
-		);
-		this.healthSummaryEl = contentEl.createDiv();
-		this.healthSummaryEl.style.margin = "0.35em 0 1em 0";
-		this.healthSummaryEl.setText(t("hybridModal.healthSummary.loading"));
+			contentEl.createEl("h3", {
+				text: formatDevOnlySettingName(t("hybridModal.healthSummary")),
+			});
+			contentEl.createEl("p", { text: t("hybridModal.healthSummary.localOnly") });
+			new Setting(contentEl).addButton((button) =>
+				button.setButtonText(t("hybridModal.healthSummary.check")).onClick(
+					() => {
+						openHybridHealthSummaryModal(this.app);
+					},
+				),
+			);
+		} else {
+			this.failedEmbeddingStatusEl = contentEl.createDiv();
+			this.failedEmbeddingStatusEl.style.display = "none";
+			this.deferredEmbeddingStatusEl = contentEl.createDiv();
+			this.deferredEmbeddingStatusEl.style.display = "none";
+		}
 
 		new Setting(contentEl)
 			.setName(t("hybridModal.vectorCompression"))
@@ -928,7 +1054,6 @@ class HybridSearchModal extends Modal {
 		this.statsEl = contentEl.createDiv();
 		this.statsEl.setText(t("hybridModal.tokenStats.loading"));
 		void this.refreshHybridRuntimeStatusFromData();
-		void this.refreshHybridHealthSummary();
 		void this.refreshTokenStats();
 	}
 
@@ -1018,12 +1143,6 @@ class HybridSearchModal extends Modal {
 		await this.loadTokenStats(this.statsEl);
 	}
 
-	private async refreshHybridHealthSummary() {
-		this.currentHealthSummary =
-			await getInstance(DataManager).getHybridHealthSummary();
-		this.renderHybridHealthSummary();
-	}
-
 	private async refreshHybridRuntimeStatusFromData() {
 		const dataManager = getInstance(DataManager);
 		[this.currentFailedEmbeddingSummary, this.currentDeferredEmbeddingSummary] =
@@ -1040,64 +1159,6 @@ class HybridSearchModal extends Modal {
 		}
 		if (this.currentDeferredEmbeddingSummary) {
 			this.renderDeferredEmbeddingStatus(this.currentDeferredEmbeddingSummary);
-		}
-	}
-
-	private renderHybridHealthSummary() {
-		if (!this.currentHealthSummary) {
-			this.healthSummaryEl.setText(t("hybridModal.healthSummary.loading"));
-			return;
-		}
-
-		const summary = this.currentHealthSummary;
-		this.healthSummaryEl.empty();
-		this.appendStatusLine(
-			this.healthSummaryEl,
-			t("hybridModal.healthSummary.status"),
-			t(`hybridModal.healthSummary.state.${summary.state}` as any),
-		);
-		this.appendStatusLine(
-			this.healthSummaryEl,
-			t("hybridModal.healthSummary.engine"),
-			[
-				`${t("hybridModal.healthSummary.metric.ready")} ${summary.readyFileCount}`,
-				`${t("hybridModal.healthSummary.metric.bm25Only")} ${summary.bm25OnlyFileCount}`,
-				`${t("hybridModal.healthSummary.metric.unstable")} ${summary.unstableFileCount}`,
-			].join(" | "),
-		);
-		this.appendStatusLine(
-			this.healthSummaryEl,
-			t("hybridModal.healthSummary.docs"),
-			[
-				`${t("hybridModal.healthSummary.metric.tracked")} ${summary.trackedFileCount}`,
-				`${t("hybridModal.healthSummary.metric.updating")} ${summary.updatingFileCount}`,
-				`${t("hybridModal.healthSummary.metric.repair")} ${summary.repairFileCount}`,
-			].join(" | "),
-		);
-		this.appendStatusLine(
-			this.healthSummaryEl,
-			t("hybridModal.healthSummary.storage"),
-			[
-				`${t("hybridModal.healthSummary.metric.refs")} ${summary.indexedFileRefCount}`,
-				`${t("hybridModal.healthSummary.metric.currentAligned")} ${summary.currentAlignedSnapshotCount}`,
-				`${t("hybridModal.healthSummary.metric.shadowAligned")} ${summary.shadowAlignedSnapshotCount}`,
-				`${t("hybridModal.healthSummary.metric.shadowMismatch")} ${summary.shadowMismatchCount}`,
-			].join(" | "),
-		);
-		this.appendStatusLine(
-			this.healthSummaryEl,
-			t("hybridModal.healthSummary.errors"),
-			[
-				`${t("hybridModal.healthSummary.metric.failed")} ${summary.failedEmbeddingCount}`,
-				`${t("hybridModal.healthSummary.metric.deferred")} ${summary.deferredEmbeddingCount}`,
-			].join(" | "),
-		);
-		if (summary.shadowMismatchSamplePaths.length > 0) {
-			this.appendStatusLine(
-				this.healthSummaryEl,
-				t("hybridModal.healthSummary.metric.samples"),
-				summary.shadowMismatchSamplePaths.join(" | "),
-			);
 		}
 	}
 

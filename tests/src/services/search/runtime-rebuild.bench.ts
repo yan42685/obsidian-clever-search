@@ -110,8 +110,8 @@ describe("runtime rebuild benchmark", () => {
     container.register(OuterSetting, { useValue: setting });
 
     const {
-      MiniSearchFileEngine,
-    } = require("src/services/search/file-search-engine");
+      DevMiniSearchFileEngine,
+    } = require("./helpers/dev-minisearch-file-engine");
     const { BM25Engine } = require("src/services/search/hybrid/bm25");
     const {
       chunkFile,
@@ -136,7 +136,7 @@ describe("runtime rebuild benchmark", () => {
     const corpus = buildSyntheticCorpus(FILE_COUNT);
     const stages: StageMetric[] = [];
 
-    const mini = new MiniSearchFileEngine();
+    const mini = new DevMiniSearchFileEngine();
     await recordStage(
       stages,
       "lexical.rebuild.minisearch",

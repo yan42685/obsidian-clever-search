@@ -1,4 +1,3 @@
-import type { SearchResult as MiniResult } from "minisearch";
 import {
   ViewRegistry,
   type ViewType,
@@ -6,9 +5,6 @@ import {
 import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
-
-export type MiniSearchResult = MiniResult;
-
 export type IndexedDocument = {
   path: string;
   basename: string;

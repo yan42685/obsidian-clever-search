@@ -223,11 +223,11 @@ function createMetadataBridgeCandidate(params: {
 	if (params.queryTerms.length === 0) {
 		return null;
 	}
-	const metadataTexts = [
-		FileUtil.getBasename(params.file.filePath),
-		params.file.filePath,
-		...params.headingOutline.map((heading) => heading.title),
-	];
+	const metadataEntries = buildMetadataBridgeEntries(
+		params.file,
+		params.headingOutline,
+	);
+	const metadataTexts = metadataEntries.map((entry) => entry.text);
 	const termStats = params.queryTerms.map((term) => ({
 		termId: term.termId,
 		bestTier: classifyMetadataTermMatch(term, metadataTexts),
@@ -253,6 +253,13 @@ function createMetadataBridgeCandidate(params: {
 	) {
 		return null;
 	}
+	const metadataPreview = buildMetadataBridgePreview(
+		params.queryTerms,
+		metadataEntries,
+	);
+	if (metadataPreview === null) {
+		return null;
+	}
 
 	const anchorOffset = resolveMetadataAnchorOffset(
 		params.queryTerms,
@@ -273,9 +280,9 @@ function createMetadataBridgeCandidate(params: {
 	const endLineOffset = params.lineOffsets[endLine] ?? 0;
 	const matchOccurrences = collectBridgeMatchOccurrences({
 		queryTerms: params.queryTerms,
-		snapshotText: params.snapshotText,
-		startOffset: anchorOffset,
-		endOffset,
+		previewText: metadataPreview.text,
+		anchorOffset,
+		maxSpanLength: Math.max(1, endOffset - anchorOffset),
 	});
 	const missCount = termStats.length - coverageCount;
 
@@ -315,7 +322,99 @@ function createMetadataBridgeCandidate(params: {
 		},
 		termStats,
 		matchOccurrences,
+		bridgePreviewText: metadataPreview.text,
+		bridgePreviewRanges: metadataPreview.highlightRanges,
+		bridgePreviewSegmentText: metadataPreview.segmentText,
 	};
+}
+
+type MetadataBridgeEntry = {
+	kind: "basename" | "path" | "alias" | "heading";
+	text: string;
+};
+
+function buildMetadataBridgeEntries(
+	file: HybridLexicalLaneFileCandidate,
+	headingOutline: Array<{ line: number; level: number; title: string }>,
+): MetadataBridgeEntry[] {
+	const headingValues = new Set(
+		[...file.metadataValues.headings, ...headingOutline.map((heading) => heading.title)]
+			.map((value) => value.replace(/\s+/g, " ").trim())
+			.filter((value) => value.length > 0),
+	);
+	return [
+		{ kind: "basename", text: FileUtil.getBasename(file.filePath) },
+		{ kind: "path", text: file.filePath },
+		...file.metadataValues.aliases
+			.map((alias) => alias.replace(/\s+/g, " ").trim())
+			.filter((alias) => alias.length > 0)
+			.map((alias) => ({ kind: "alias", text: alias }) as const),
+		...[...headingValues].map(
+			(heading) => ({ kind: "heading", text: heading }) as const,
+		),
+	];
+}
+
+function buildMetadataBridgePreview(
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+	entries: readonly MetadataBridgeEntry[],
+):
+	| {
+			text: string;
+			highlightRanges: Array<{ start: number; end: number }>;
+			segmentText: string;
+	  }
+	| null {
+	const rankedEntries = entries
+		.map((entry) => ({
+			entry,
+			score: computeMetadataBridgeEntryScore(queryTerms, entry),
+		}))
+		.filter((item) => item.score > 0)
+		.sort((left, right) => right.score - left.score)
+		.slice(0, 3);
+	if (rankedEntries.length === 0) {
+		return null;
+	}
+	const text = rankedEntries
+		.map(({ entry }) => `${formatMetadataBridgeLabel(entry.kind)}: ${entry.text}`)
+		.join(" | ");
+	return {
+		text,
+		highlightRanges: buildMetadataPreviewHighlightRanges(queryTerms, text),
+		segmentText: rankedEntries
+			.map(({ entry }) => formatMetadataBridgeLabel(entry.kind))
+			.join(" > "),
+	};
+}
+
+function computeMetadataBridgeEntryScore(
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+	entry: MetadataBridgeEntry,
+): number {
+	return queryTerms.reduce((sum, term) => {
+		const tier = classifyMetadataTermMatch(term, [entry.text]);
+		if (tier === "exact") {
+			return sum + 8;
+		}
+		if (tier === "prefix") {
+			return sum + 4;
+		}
+		return sum;
+	}, 0);
+}
+
+function formatMetadataBridgeLabel(kind: MetadataBridgeEntry["kind"]): string {
+	if (kind === "basename") {
+		return "File";
+	}
+	if (kind === "path") {
+		return "Path";
+	}
+	if (kind === "alias") {
+		return "Alias";
+	}
+	return "Heading";
 }
 
 function classifyMetadataTermMatch(
@@ -373,19 +472,17 @@ function resolveMetadataAnchorOffset(
 
 function collectBridgeMatchOccurrences(params: {
 	queryTerms: readonly DirectSubitemsQueryTerm[];
-	snapshotText: string;
-	startOffset: number;
-	endOffset: number;
+	previewText: string;
+	anchorOffset: number;
+	maxSpanLength: number;
 }): Array<{
 	termId: string;
 	tier: "exact";
 	start: number;
 	end: number;
-	distancePenalty: number;
-}> {
-	const snippetText = params.snapshotText
-		.slice(params.startOffset, params.endOffset)
-		.toLocaleLowerCase();
+		distancePenalty: number;
+	}> {
+	const snippetText = params.previewText.toLocaleLowerCase();
 	const occurrences: Array<{
 		termId: string;
 		tier: "exact";
@@ -405,8 +502,15 @@ function collectBridgeMatchOccurrences(params: {
 		occurrences.push({
 			termId: term.termId,
 			tier: "exact",
-			start: params.startOffset + localOffset,
-			end: params.startOffset + localOffset + normalizedTerm.length,
+			start:
+				params.anchorOffset +
+				Math.min(localOffset, Math.max(0, params.maxSpanLength - 1)),
+			end:
+				params.anchorOffset +
+				Math.min(
+					localOffset + normalizedTerm.length,
+					Math.max(1, params.maxSpanLength),
+				),
 			distancePenalty: 0,
 		});
 	}
@@ -415,6 +519,33 @@ function collectBridgeMatchOccurrences(params: {
 
 function normalizeForMetadata(text: string): string {
 	return text.trim().toLocaleLowerCase();
+}
+
+function buildMetadataPreviewHighlightRanges(
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+	previewText: string,
+): Array<{ start: number; end: number }> {
+	const normalizedPreview = previewText.toLocaleLowerCase();
+	const ranges: Array<{ start: number; end: number }> = [];
+	for (const term of queryTerms) {
+		const normalizedTerm = term.normalizedText.toLocaleLowerCase();
+		if (normalizedTerm.length === 0) {
+			continue;
+		}
+		let fromIndex = 0;
+		while (fromIndex < normalizedPreview.length) {
+			const matchIndex = normalizedPreview.indexOf(normalizedTerm, fromIndex);
+			if (matchIndex < 0) {
+				break;
+			}
+			ranges.push({
+				start: matchIndex,
+				end: matchIndex + normalizedTerm.length,
+			});
+			fromIndex = matchIndex + normalizedTerm.length;
+		}
+	}
+	return ranges.sort((left, right) => left.start - right.start);
 }
 
 function buildHeadingChainsByLine(

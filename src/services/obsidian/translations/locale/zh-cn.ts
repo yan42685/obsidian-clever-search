@@ -238,6 +238,17 @@ export default {
 	"hybridModal.freshnessNotice.detailJoiner": "\uff1b",
 	"hybridModal.freshnessNotice.detailIdle": "\u7247\u6bb5\u4e0e\u8df3\u8f6c\u6b63\u5728\u4f7f\u7528\u6700\u65b0\u7684\u672c\u5730 Hybrid \u7d22\u5f15\u3002",
 	"hybridModal.freshnessNotice.detailTail": "\uff0c\u5bf9\u5e94\u6587\u4ef6\u7684\u7247\u6bb5\u4e0e\u8df3\u8f6c\u53ef\u80fd\u4e0d\u51c6\u3002",
+	"hybridModal.freshnessNotice.messageUpdatingOnlyPrefix":
+		"Hybrid \u5f15\u64ce\u540e\u53f0\u5269\u4f59 ",
+	"hybridModal.freshnessNotice.messageRepairOnlyPrefix":
+		"Hybrid \u5f15\u64ce\u540e\u53f0\u6709 ",
+	"hybridModal.freshnessNotice.messageBothPrefix":
+		"Hybrid \u5f15\u64ce\u540e\u53f0\u5269\u4f59 ",
+	"hybridModal.freshnessNotice.messageJoiner": "\uff0c",
+	"hybridModal.freshnessNotice.updatingSegmentSuffix":
+		" \u4e2a\u6587\u4ef6\u6b63\u5728\u66f4\u65b0",
+	"hybridModal.freshnessNotice.repairSegmentSuffix":
+		" \u4e2a\u6587\u4ef6\u5f85\u4fee\u590d",
 	"Manage search history": "\u7ba1\u7406\u641c\u7d22\u5386\u53f2",
 	"QuickSwitch": "QuickSwitch",
 	"QuickSwitch desc": "\u7ba1\u7406 QuickSwitch \u4f7f\u7528\u7684\u5bfc\u822a\u5019\u9009\u6765\u6e90\u3002",

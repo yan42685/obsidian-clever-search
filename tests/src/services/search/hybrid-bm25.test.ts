@@ -40,6 +40,19 @@ type BenchmarkMetric = {
 	count: number;
 };
 
+type QueryOutcome = {
+	query: string;
+	relevantPath: string;
+	type: string;
+	suite: string;
+	rank: number;
+};
+
+type BenchmarkEvaluation = {
+	metric: BenchmarkMetric;
+	outcomes: QueryOutcome[];
+};
+
 function createMockTokenizer(): MockTokenizer {
 	return {
 		tokenize(text: string): string[] {
@@ -90,6 +103,72 @@ function finalizeMetric(metric: BenchmarkMetric): BenchmarkMetric {
 		top5: round(metric.top5 / metric.count),
 		zeroRate: round(metric.zeroRate / metric.count),
 	};
+}
+
+function createOutcome(queryCase: QueryCase, rank: number): QueryOutcome {
+	return {
+		query: queryCase.query,
+		relevantPath: queryCase.relevantPath,
+		type: queryCase.type,
+		suite: queryCase.suite,
+		rank,
+	};
+}
+
+function summarizeOutcomeBuckets(
+	outcomes: readonly QueryOutcome[],
+	key: "type" | "suite",
+): Array<BenchmarkMetric & { bucket: string }> {
+	const byBucket = new Map<string, BenchmarkMetric>();
+	for (const outcome of outcomes) {
+		const bucket = outcome[key];
+		const metric = byBucket.get(bucket) ?? createEmptyMetric();
+		updateMetric(metric, outcome.rank);
+		if (!byBucket.has(bucket)) {
+			byBucket.set(bucket, metric);
+		}
+	}
+	return [...byBucket.entries()]
+		.map(([bucket, metric]) => ({
+			bucket,
+			...finalizeMetric(metric),
+		}))
+		.sort((left, right) => left.bucket.localeCompare(right.bucket));
+}
+
+function compareOutcomeBuckets(params: {
+	baseline: readonly QueryOutcome[];
+	lexicalLane: readonly QueryOutcome[];
+	key: "type" | "suite";
+}) {
+	const baselineBuckets = summarizeOutcomeBuckets(params.baseline, params.key);
+	const lexicalBuckets = summarizeOutcomeBuckets(params.lexicalLane, params.key);
+	const baselineByBucket = new Map(
+		baselineBuckets.map((bucket) => [bucket.bucket, bucket] as const),
+	);
+	return lexicalBuckets
+		.map((bucket) => {
+			const baseline = baselineByBucket.get(bucket.bucket);
+			return {
+				bucket: bucket.bucket,
+				count: bucket.count,
+				baselineTop1: baseline?.top1 ?? 0,
+				lexicalTop1: bucket.top1,
+				top1Delta: round(bucket.top1 - (baseline?.top1 ?? 0)),
+				baselineTop3: baseline?.top3 ?? 0,
+				lexicalTop3: bucket.top3,
+				top3Delta: round(bucket.top3 - (baseline?.top3 ?? 0)),
+				baselineZeroRate: baseline?.zeroRate ?? 0,
+				lexicalZeroRate: bucket.zeroRate,
+				zeroRateDelta: round(bucket.zeroRate - (baseline?.zeroRate ?? 0)),
+			};
+		})
+		.sort(
+			(left, right) =>
+				left.top1Delta - right.top1Delta ||
+				left.top3Delta - right.top3Delta ||
+				right.zeroRateDelta - left.zeroRateDelta,
+		);
 }
 
 function documentText(document: IndexedDocument): string {
@@ -178,7 +257,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	documents: readonly IndexedDocument[];
 	queryCases: readonly QueryCase[];
 	tokenizer: MockTokenizer;
-}): Promise<BenchmarkMetric> {
+}): Promise<BenchmarkEvaluation> {
 	ensureBrowserLikeWindow();
 	const { OuterSetting, DEFAULT_OUTER_SETTING } = require(
 		"src/globals/plugin-setting",
@@ -215,6 +294,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 		params.documents.map((document) => [document.path, document] as const),
 	);
 	const metric = createEmptyMetric();
+	const outcomes: QueryOutcome[] = [];
 	for (const queryCase of params.queryCases) {
 		const matchedFiles = await engine.searchFiles({
 			queryText: queryCase.query,
@@ -270,8 +350,12 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			fileItems.findIndex((item: { path: string }) => item.path === queryCase.relevantPath) +
 			1;
 		updateMetric(metric, rank);
+		outcomes.push(createOutcome(queryCase, rank));
 	}
-	return finalizeMetric(metric);
+	return {
+		metric: finalizeMetric(metric),
+		outcomes,
+	};
 }
 
 describe("hybrid BM25 query expansion", () => {
@@ -348,7 +432,7 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results.map((item) => item.docId)).toEqual([1, 2]);
 	});
 
-	test("compares lexical lane against BM25 baseline on the automation corpus", async () => {
+test("compares lexical lane against BM25 baseline on the automation corpus", async () => {
 		const { documents, queryCases } = loadAutomationCorpus();
 		const tokenizer = createMockTokenizer();
 		container.registerInstance(
@@ -365,6 +449,7 @@ describe("hybrid BM25 query expansion", () => {
 		});
 
 		const baselineMetric = createEmptyMetric();
+		const baselineOutcomes: QueryOutcome[] = [];
 		const baselineStartedAt = performance.now();
 		for (const queryCase of queryCases) {
 			const results = bm25.search(queryCase.query, 8, {
@@ -377,16 +462,27 @@ describe("hybrid BM25 query expansion", () => {
 					.filter((path): path is string => path !== null)
 					.findIndex((path) => path === queryCase.relevantPath) + 1;
 			updateMetric(baselineMetric, rank);
+			baselineOutcomes.push(createOutcome(queryCase, rank));
 		}
 		const baselineElapsedMs = performance.now() - baselineStartedAt;
 		const lexicalStartedAt = performance.now();
-		const lexicalMetric = await evaluateLexicalLaneAgainstCorpus({
+		const lexicalEvaluation = await evaluateLexicalLaneAgainstCorpus({
 			documents,
 			queryCases,
 			tokenizer,
 		});
 		const lexicalElapsedMs = performance.now() - lexicalStartedAt;
 		const finalizedBaselineMetric = finalizeMetric(baselineMetric);
+		const typeBreakdown = compareOutcomeBuckets({
+			baseline: baselineOutcomes,
+			lexicalLane: lexicalEvaluation.outcomes,
+			key: "type",
+		});
+		const suiteBreakdown = compareOutcomeBuckets({
+			baseline: baselineOutcomes,
+			lexicalLane: lexicalEvaluation.outcomes,
+			key: "suite",
+		});
 
 		console.log("[hybrid-lexical-lane-benchmark] compare", {
 			corpus: {
@@ -398,18 +494,20 @@ describe("hybrid BM25 query expansion", () => {
 				avgMsPerQuery: round(baselineElapsedMs / Math.max(1, queryCases.length)),
 			},
 			lexicalLane: {
-				...lexicalMetric,
+				...lexicalEvaluation.metric,
 				avgMsPerQuery: round(lexicalElapsedMs / Math.max(1, queryCases.length)),
 			},
+			worstTypes: typeBreakdown.slice(0, 6),
+			worstSuites: suiteBreakdown.slice(0, 6),
 		});
 
-		expect(lexicalMetric.top3).toBeGreaterThanOrEqual(
+		expect(lexicalEvaluation.metric.top3).toBeGreaterThanOrEqual(
 			Math.max(0.6, finalizedBaselineMetric.top3 - 0.1),
 		);
-		expect(lexicalMetric.top5).toBeGreaterThanOrEqual(
+		expect(lexicalEvaluation.metric.top5).toBeGreaterThanOrEqual(
 			Math.max(0.75, finalizedBaselineMetric.top5 - 0.08),
 		);
-		expect(lexicalMetric.zeroRate).toBeLessThanOrEqual(
+		expect(lexicalEvaluation.metric.zeroRate).toBeLessThanOrEqual(
 			Math.min(0.2, finalizedBaselineMetric.zeroRate + 0.06),
 		);
 	});
