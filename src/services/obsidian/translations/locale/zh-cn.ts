@@ -262,6 +262,7 @@ export default {
 	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",
 	"fileSearchBackend.coverageLexical": "Coverage Lexical",
 	"hybridNotice.searchRerankFallbackToBm25": "\u8bed\u4e49 rerank \u6682\u4e0d\u53ef\u7528\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a BM25 \u6392\u5e8f\u3002",
+"hybridNotice.searchRerankTimeoutFallbackToBm25": "\u8bed\u4e49 rerank \u5df2\u8d85\u65f6\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a BM25 \u6392\u5e8f\u3002",
 	"hybridModal.freshnessNotice.openSettings": "Hybrid \u8bbe\u7f6e",
 	"hybridModal.freshnessNotice.updatingSamples": "\u66f4\u65b0\u6837\u672c",
 	"hybridModal.freshnessNotice.repairSamples": "\u4fee\u590d\u6837\u672c",

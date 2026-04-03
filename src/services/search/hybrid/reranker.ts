@@ -45,6 +45,12 @@ export type RerankResult = {
 	score: number;
 };
 
+function createRerankAbortError(): Error {
+	const error = new Error('Hybrid rerank aborted');
+	error.name = 'AbortError';
+	return error;
+}
+
 export class HybridReranker {
 	private readonly setting = getInstance(OuterSetting);
 
@@ -60,6 +66,7 @@ export class HybridReranker {
 		query: string,
 		candidates: RerankCandidate[],
 		topK: number,
+		signal?: AbortSignal,
 	): Promise<RerankResult[]> {
 		if (!this.apiKey || candidates.length === 0 || topK <= 0) {
 			return candidates.slice(0, topK).map((candidate) => ({
@@ -75,7 +82,7 @@ export class HybridReranker {
 		]);
 		const reservation = await reserveWeeklyTokenBudget(estimatedTokens);
 		try {
-			const resp = await this.fetchRerankResponse(query, documents, topK);
+			const resp = await this.fetchRerankResponse(query, documents, topK, signal);
 
 			if (!resp.ok) {
 				const body = await resp.text();
@@ -126,8 +133,17 @@ export class HybridReranker {
 		query: string,
 		documents: string[],
 		topK: number,
+		externalSignal?: AbortSignal,
 	): Promise<Response> {
 		const controller = new AbortController();
+		const forwardAbort = () => controller.abort();
+		if (externalSignal) {
+			if (externalSignal.aborted) {
+				controller.abort();
+			} else {
+				externalSignal.addEventListener('abort', forwardAbort, { once: true });
+			}
+		}
 		const timeoutId = setTimeout(() => controller.abort(), RERANK_TIMEOUT_MS);
 		try {
 			return await fetch(this.apiUrl, {
@@ -141,12 +157,15 @@ export class HybridReranker {
 					query,
 					documents,
 					top_n: Math.min(documents.length, topK),
-					instruct: "Retrieve semantically similar text.",
+					instruct: 'Retrieve semantically similar text.',
 				}),
 				signal: controller.signal,
 			});
 		} catch (error) {
 			if (this.isAbortError(error)) {
+				if (externalSignal?.aborted) {
+					throw createRerankAbortError();
+				}
 				throw new HybridRerankTimeoutError(RERANK_TIMEOUT_MS);
 			}
 			throw new HybridRerankError(
@@ -156,6 +175,9 @@ export class HybridReranker {
 			);
 		} finally {
 			clearTimeout(timeoutId);
+			if (externalSignal) {
+				externalSignal.removeEventListener('abort', forwardAbort);
+			}
 		}
 	}
 

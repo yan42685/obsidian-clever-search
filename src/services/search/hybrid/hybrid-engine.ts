@@ -66,6 +66,7 @@ import {
 } from "./lexical-lane";
 import {
   HybridRerankError,
+  HybridRerankTimeoutError,
   HybridReranker,
   SEARCH_EMBED_TOKEN_KEY,
   type RerankCandidate,
@@ -563,7 +564,10 @@ export class HybridEngine {
       return {
         items: baseItems,
         fallbackNoticeKey:
-          prepared.fallbackNoticeKey ?? "hybridNotice.searchRerankFallbackToBm25",
+          prepared.fallbackNoticeKey ??
+          (error instanceof HybridRerankTimeoutError
+            ? "hybridNotice.searchRerankTimeoutFallbackToBm25"
+            : "hybridNotice.searchRerankFallbackToBm25"),
       };
     }
   }
@@ -1954,3 +1958,4 @@ function countLines(text: string): number {
   }
   return count;
 }
+

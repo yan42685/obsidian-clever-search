@@ -72,6 +72,12 @@ const noticeWeeklyLimitReached = throttle(
 	(text: string) => new MyNotice(text, 5000),
 );
 
+function createEmbedAbortError(): Error {
+	const error = new Error('Hybrid embedding request aborted');
+	error.name = 'AbortError';
+	return error;
+}
+
 function l2Normalize(v: number[]): void {
 	let norm = 0;
 	for (const x of v) norm += x * x;
@@ -135,11 +141,12 @@ export class Embedder {
 		text: string,
 		precision: VectorPrecision = 'int8',
 		filePath = '',
+		signal?: AbortSignal,
 	): Promise<StoredVector> {
 		const cached = this.getCache(text, precision);
 		if (cached) return cached;
 
-		const [result] = await this.embedBatch([text], precision, filePath);
+		const [result] = await this.embedBatch([text], precision, filePath, signal);
 		this.setCache(text, precision, result);
 		return result;
 	}
@@ -148,6 +155,7 @@ export class Embedder {
 		texts: string[],
 		precision: VectorPrecision = 'int8',
 		filePath = '',
+		signal?: AbortSignal,
 	): Promise<StoredVector[]> {
 		if (!this.setting.hybrid?.enabled) throw new HybridDisabledError();
 		if (!this.apiKey) throw new NoApiKeyError();
@@ -169,7 +177,7 @@ export class Embedder {
 			try {
 				const { embeddings: floats, tokensUsed } = await profileHybridStage(
 					'embed.fetch_embeddings',
-					async () => await this.fetchEmbeddings(batch),
+					async () => await this.fetchEmbeddings(batch, signal),
 				);
 				logger.debug(
 					`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
@@ -209,13 +217,30 @@ export class Embedder {
 		return results;
 	}
 
-	private async fetchEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokensUsed: number }> {
+	private async fetchEmbeddings(
+		texts: string[],
+		externalSignal?: AbortSignal,
+	): Promise<{ embeddings: number[][]; tokensUsed: number }> {
 		return retryAsync(
 			async (attempt) => {
 				const controller = new AbortController();
+				const forwardAbort = () => controller.abort();
+				if (externalSignal) {
+					if (externalSignal.aborted) {
+						controller.abort();
+					} else {
+						externalSignal.addEventListener('abort', forwardAbort, { once: true });
+					}
+				}
 				const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 				try {
+					if (externalSignal?.aborted) {
+						throw createEmbedAbortError();
+					}
 					await Embedder.requestGate.wait();
+					if (externalSignal?.aborted) {
+						throw createEmbedAbortError();
+					}
 					const resp = await fetch(this.apiDomain, {
 						method: 'POST',
 						headers: {
@@ -253,11 +278,14 @@ export class Embedder {
 					};
 				} finally {
 					clearTimeout(timeoutId);
+					if (externalSignal) {
+						externalSignal.removeEventListener('abort', forwardAbort);
+					}
 				}
 			},
 			{
 				maxAttempts: REQUEST_MAX_RETRIES,
-				shouldRetry: (error) => this.isRetryableError(error),
+				shouldRetry: (error) => !externalSignal?.aborted && this.isRetryableError(error),
 				getDelayMs: (error, attempt) =>
 					this.getRetryDelayMs(
 						attempt,
@@ -694,3 +722,4 @@ export async function ensureWeeklyTokenBudget(estimatedTokens: number): Promise<
 	const reservation = await reserveWeeklyTokenBudget(estimatedTokens);
 	reservation.release();
 }
+

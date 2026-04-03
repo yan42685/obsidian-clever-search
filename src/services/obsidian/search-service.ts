@@ -17,7 +17,10 @@ import type {
 } from "../../globals/search-types";
 import { FileUtil } from "../../utils/file-util";
 import { LineHighlighter } from "../search/highlighter";
-import { HybridEngine } from "../search/hybrid/hybrid-engine";
+import {
+	HybridEngine,
+	type PreparedHybridRecall,
+} from "../search/hybrid/hybrid-engine";
 import { LexicalEngine } from "../search/lexical-engine";
 import { TruncateOption } from "../search/truncate-option";
 import { throttle } from "throttle-debounce";
@@ -26,6 +29,11 @@ import { t } from "./translations/locale-helper";
 import { DataProvider } from "./user-data/data-provider";
 import { DataManager } from "./user-data/data-manager";
 import { ViewRegistry, ViewType } from "./view-registry";
+
+export type PreparedHybridSearchResult = {
+	prepared: PreparedHybridRecall | null;
+	result: SearchResult;
+};
 
 @singleton()
 export class SearchService {
@@ -55,6 +63,7 @@ export class SearchService {
 		2000,
 		(message: string) => new MyNotice(message, 2500),
 	);
+	private lastHybridFallbackNoticeKey: SearchResult["hybridFallbackNoticeKey"] = null;
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
@@ -75,35 +84,129 @@ export class SearchService {
 		return await this.searchInVaultHybridByMode(queryText, "lexical-lane");
 	}
 
+	notifyHybridFallback(result: SearchResult): void {
+		const noticeKey = this.resolveHybridFallbackNoticeKey(
+			result.hybridFallbackNoticeKey,
+		);
+		if (noticeKey === this.lastHybridFallbackNoticeKey) {
+			return;
+		}
+		this.lastHybridFallbackNoticeKey = noticeKey;
+		if (noticeKey) {
+			this.noticeHybridFallback(t(noticeKey));
+		}
+	}
+
+	private buildHybridSearchResult(
+		sourcePath: string,
+		items: SearchResult["items"],
+		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
+	): SearchResult {
+		return new SearchResult(
+			sourcePath,
+			items,
+			this.resolveHybridFallbackNoticeKey(...noticeKeys),
+			false,
+		);
+	}
+
+	private resolveHybridFallbackNoticeKey(
+		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
+	): SearchResult["hybridFallbackNoticeKey"] {
+		for (const noticeKey of noticeKeys) {
+			if (noticeKey) {
+				return noticeKey;
+			}
+		}
+		return null;
+	}
+
+	async prepareSearchInVaultHybrid(
+		queryText: string,
+		mode: HybridSearchMode = "default",
+		signal?: AbortSignal,
+	): Promise<PreparedHybridSearchResult> {
+		const blocked = this.getBlockedSearchResult(queryText);
+		if (blocked) {
+			return {
+				prepared: null,
+				result: blocked,
+			};
+		}
+		if (queryText.length === 0) {
+			return {
+				prepared: null,
+				result: new SearchResult("no result", []),
+			};
+		}
+		if (!this.hybridEngine.isEnabled() || !this.hybridEngine.isReady()) {
+			return {
+				prepared: null,
+				result: await this.searchInVaultLexical(queryText),
+			};
+		}
+
+		const topK = this.hybridEngine.getEffectiveResultCount();
+		const prepared = await this.hybridEngine.prepareRecall(
+			queryText,
+			topK,
+			signal,
+		);
+		const sourcePath =
+			this.app.workspace.getActiveFile()?.path || "no source path";
+		const earlyItems = this.hybridEngine.buildItemsFromPreparedRecall(
+			prepared,
+			topK,
+		);
+		return {
+			prepared,
+			result: this.buildHybridSearchResult(
+				sourcePath,
+				earlyItems,
+				prepared.fallbackNoticeKey,
+			),
+		};
+	}
+
+	async finalizePreparedSearchInVaultHybrid(
+		prepared: PreparedHybridRecall,
+		mode: HybridSearchMode = "default",
+		signal?: AbortSignal,
+	): Promise<SearchResult> {
+		const sourcePath =
+			this.app.workspace.getActiveFile()?.path || "no source path";
+		if (mode === "lexical-lane") {
+			return this.buildHybridSearchResult(
+				sourcePath,
+				this.hybridEngine.buildItemsFromPreparedRecall(prepared, prepared.topK),
+				prepared.fallbackNoticeKey,
+			);
+		}
+		const finalized = await this.hybridEngine.finalizePreparedRecall(
+			prepared,
+			prepared.topK,
+			signal,
+		);
+		return this.buildHybridSearchResult(
+			sourcePath,
+			finalized.items,
+			finalized.fallbackNoticeKey,
+		);
+	}
+
 	private async searchInVaultHybridByMode(
 		queryText: string,
 		mode: HybridSearchMode,
 	): Promise<SearchResult> {
-		const blocked = this.getBlockedSearchResult(queryText);
-		if (blocked) {
-			return blocked;
-		}
-		if (queryText.length === 0) {
-			return new SearchResult("no result", []);
-		}
-		if (!this.hybridEngine.isEnabled()) {
-			return await this.searchInVaultLexical(queryText);
-		}
-
-		if (!this.hybridEngine.isReady()) {
-			return await this.searchInVaultLexical(queryText);
-		}
-		const sourcePath = this.app.workspace.getActiveFile()?.path || "no source path";
-		const items =
-			mode === "lexical-lane"
-				? await this.hybridEngine.searchWithLexicalLane(queryText)
-				: await this.hybridEngine.search(queryText);
-		const fallbackNoticeKey =
-			this.hybridEngine.consumeSearchFallbackNoticeKey();
-		if (fallbackNoticeKey) {
-			this.noticeHybridFallback(t(fallbackNoticeKey));
-		}
-		return new SearchResult(sourcePath, items, fallbackNoticeKey, false);
+		const prepared = await this.prepareSearchInVaultHybrid(queryText, mode);
+		const result = prepared.prepared
+			? await this.finalizePreparedSearchInVaultHybrid(
+				prepared.prepared,
+				mode,
+			)
+			: prepared.result;
+		this.notifyHybridFallback(result);
+		return result;
 	}
 
 	private async searchInVaultLexical(
@@ -474,3 +577,4 @@ export class SearchService {
 		return new SearchResult("no result", []);
 	}
 }
+

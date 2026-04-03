@@ -26,6 +26,17 @@ jest.mock("src/services/search/hybrid/embedder", () => ({
 	recordEstimatedTokenSavings: jest.fn(),
 }));
 
+jest.mock("src/services/search/hybrid/lexical-lane", () => ({
+	buildHybridLexicalLaneFileItems: jest.fn((_query: string, candidates: Array<{ filePath: string }>) =>
+		candidates.map((candidate, index) => ({ id: `${candidate.filePath}:${index}` })),
+	),
+	buildHybridLexicalLaneFileCandidates: jest.fn(),
+	buildHybridLexicalLaneFileShortlist: jest.fn(),
+	HYBRID_LEXICAL_LANE_FILE_SHORTLIST: 24,
+	prepareHybridLexicalLaneSearch: jest.fn(async () => []),
+	resolveHybridLexicalLaneFileMetadata: jest.fn(),
+}));
+
 jest.mock("src/utils/my-lib", () => ({
 	getInstance: jest.fn((token: any) => {
 		if (!mockInstanceMap.has(token)) {
@@ -57,6 +68,11 @@ jest.mock("src/services/search/hybrid/bm25", () => ({
 		}
 		optimizeStorage() {
 			return false;
+		}
+		estimateRuntimeMemoryBreakdown() {
+			return {
+				totalBytes: 0,
+			};
 		}
 	},
 }));
@@ -113,97 +129,98 @@ describe("HybridEngine search fallback notices", () => {
 		mockInstanceMap.set(require("src/services/search/shared/file-snapshot-store").FileSnapshotStore, {});
 	});
 
-	function createCandidate(id: number, filePath: string, score: number) {
+	function createPreparedRecall(fallbackNoticeKey: string | null = null) {
 		return {
-			id,
-			filePath,
-			text: `${filePath}:${id}`,
-			rerankText: `${filePath}:${id}`,
-			row: 0,
-			col: 0,
-			score,
+			query: "alpha",
+			topK: 10,
+			displayCandidates: [
+				{
+					filePath: "notes/a.md",
+					queryTerms: ["alpha"],
+					matchedTerms: ["alpha"],
+					subItems: [],
+					previewContent: "a",
+					nativeSubItemsReady: true,
+					score: 10,
+				},
+				{
+					filePath: "notes/b.md",
+					queryTerms: ["alpha"],
+					matchedTerms: ["alpha"],
+					subItems: [],
+					previewContent: "b",
+					nativeSubItemsReady: true,
+					score: 8,
+				},
+			],
+			fallbackNoticeKey,
 		};
 	}
 
-	function createEngineHarness() {
+	test("search preserves the prepared fallback notice after staged finalize succeeds", async () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const engine = new HybridEngine() as any;
 		engine._ready = true;
-		engine._canSearch = true;
-		engine.bm25 = {
-			docCount: 2,
-			search: jest.fn(() => [
-				{ docId: 11, score: 11 },
-				{ docId: 22, score: 9 },
-			]),
-		};
-		engine.hnswSmall = {
-			search: jest.fn(() => [{ id: 33, score: 0.8 }]),
-		};
-		engine.embedder = {
-			embedQuery: jest.fn().mockResolvedValue({
-				precision: "int8",
-				vector: new Int8Array([1]),
-				scale: 1,
-			}),
-		};
-		engine.loadDedupedSmallChunkCandidates = jest.fn().mockResolvedValue([
-			createCandidate(11, "notes/a.md", 11),
-			createCandidate(22, "notes/b.md", 9),
-			createCandidate(33, "notes/c.md", 0.8),
-		]);
-		engine.buildFileItemsFromSmallChunks = jest
-			.fn()
-			.mockImplementation((_query: string, candidates: Array<{ id: number }>) =>
-				candidates.map((candidate) => ({ id: candidate.id })),
-			);
-		return engine;
-	}
-
-	test("preserves the BM25 fallback notice when dense search is unavailable from startup", async () => {
-		const engine = createEngineHarness();
-		engine._canSearch = false;
-		engine.rerankAndBuildFileItems = jest.fn().mockResolvedValue([{ id: 11 }]);
-
-		await engine.search("alpha", 10);
-
-		expect(engine.consumeSearchFallbackNoticeKey()).toBe("hybridNotice.searchFallbackToBm25");
-	});
-
-	test("keeps the embedding fallback notice when query embedding fails but rerank still succeeds", async () => {
-		const engine = createEngineHarness();
-		engine.embedder.embedQuery.mockRejectedValue(new Error("embedding failed"));
-		engine.loadDedupedSmallChunkCandidates.mockResolvedValue([
-			createCandidate(11, "notes/a.md", 11),
-			createCandidate(22, "notes/b.md", 9),
-		]);
-		engine.rerankAndBuildFileItems = jest.fn().mockResolvedValue([{ id: 11 }]);
-
-		await engine.search("alpha", 10);
-
-		expect(engine.consumeSearchFallbackNoticeKey()).toBe("hybridNotice.searchFallbackToBm25");
-	});
-
-	test("uses a rerank-specific notice and BM25-only fallback ordering when rerank fails", async () => {
-		const engine = createEngineHarness();
-		const { HybridRerankError } = require("src/services/search/hybrid/reranker");
-		engine.rerankAndBuildFileItems = jest
-			.fn()
-			.mockRejectedValue(new HybridRerankError("rerank failed"));
+		engine.prepareRecall = jest.fn().mockResolvedValue(createPreparedRecall("hybridNotice.searchFallbackToBm25"));
+		engine.finalizePreparedRecall = jest.fn().mockResolvedValue({
+			items: [{ id: 1 }],
+			fallbackNoticeKey: "hybridNotice.searchFallbackToBm25",
+		});
 
 		const results = await engine.search("alpha", 10);
 
-		expect(engine.buildFileItemsFromSmallChunks).toHaveBeenCalledWith(
-			"alpha",
-			[
-				expect.objectContaining({ id: 11 }),
-				expect.objectContaining({ id: 22 }),
-			],
+		expect(results).toEqual([{ id: 1 }]);
+		expect(engine.consumeSearchFallbackNoticeKey()).toBe("hybridNotice.searchFallbackToBm25");
+	});
+
+	test("finalizePreparedRecall uses a timeout-specific notice when rerank times out", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const { HybridRerankTimeoutError } = require("src/services/search/hybrid/reranker");
+		const engine = new HybridEngine() as any;
+		const baseItems = [{ id: "prepared-a" }, { id: "prepared-b" }];
+		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
+		engine.rerankDisplayCandidates = jest
+			.fn()
+			.mockRejectedValue(new HybridRerankTimeoutError(2800));
+
+		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
+
+		expect(finalized.items).toBe(baseItems);
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchRerankTimeoutFallbackToBm25");
+	});
+
+	test("finalizePreparedRecall keeps prepared ordering and uses a rerank-specific notice when rerank fails", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const { HybridRerankError } = require("src/services/search/hybrid/reranker");
+		const engine = new HybridEngine() as any;
+		const baseItems = [{ id: "prepared-a" }, { id: "prepared-b" }];
+		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
+		engine.rerankDisplayCandidates = jest
+			.fn()
+			.mockRejectedValue(new HybridRerankError("rerank failed"));
+
+		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
+
+		expect(finalized.items).toBe(baseItems);
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchRerankFallbackToBm25");
+	});
+
+	test("finalizePreparedRecall keeps the earlier fallback notice when rerank also fails", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const { HybridRerankTimeoutError } = require("src/services/search/hybrid/reranker");
+		const engine = new HybridEngine() as any;
+		const baseItems = [{ id: "prepared-a" }];
+		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
+		engine.rerankDisplayCandidates = jest
+			.fn()
+			.mockRejectedValue(new HybridRerankTimeoutError(2800));
+
+		const finalized = await engine.finalizePreparedRecall(
+			createPreparedRecall("hybridNotice.searchFallbackToBm25"),
 			10,
 		);
-		expect(results).toEqual([{ id: 11 }, { id: 22 }]);
-		expect(engine.consumeSearchFallbackNoticeKey()).toBe(
-			"hybridNotice.searchRerankFallbackToBm25",
-		);
+
+		expect(finalized.items).toBe(baseItems);
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToBm25");
 	});
 });

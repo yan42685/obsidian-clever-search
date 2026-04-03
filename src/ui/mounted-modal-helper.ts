@@ -5,6 +5,7 @@ import {
 	FileItem,
 	SearchResult,
 	SearchType,
+	type HybridSearchMode,
 } from "src/globals/search-types";
 import type { SearchService } from "src/services/obsidian/search-service";
 import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
@@ -37,6 +38,32 @@ type HybridFreshnessNoticeControllerOptions = {
 	onNoticeChange: (state: HybridFreshnessNoticeState) => void;
 };
 
+type HybridQuerySession = {
+	id: number;
+	query: string;
+	prepareTimer: ReturnType<typeof setTimeout> | null;
+	rerankGateTimer: ReturnType<typeof setTimeout> | null;
+	startedAt: number;
+	rerankEligibleAt: number;
+	abortPrepare: AbortController;
+	abortRerank: AbortController;
+	cancelled: boolean;
+	prepared:
+		| Awaited<ReturnType<SearchService["prepareSearchInVaultHybrid"]>>["prepared"]
+		| null;
+};
+
+type HybridQuerySessionControllerOptions = {
+	searchService: SearchService;
+	getSearchType: () => SearchType;
+	getIsHybrid: () => boolean;
+	getHybridMode: () => HybridSearchMode;
+	getCurrentQueryText: () => string;
+	getCachedResult: (query: string) => SearchResult | undefined;
+	setCachedResult: (query: string, result: SearchResult) => void;
+	onResultApplied: (query: string, result: SearchResult) => Promise<void>;
+};
+
 export function usesDirectFileSubItems(item: FileItem): boolean {
 	return (
 		item.engineType === EngineType.SEMANTIC ||
@@ -56,6 +83,10 @@ export function createHiddenHybridFreshnessNoticeState(): HybridFreshnessNoticeS
 		visible: false,
 		message: "",
 	};
+}
+
+function createAbortedSearchResult(): SearchResult {
+	return new SearchResult("no result", []);
 }
 
 export class AutoHybridFallbackController {
@@ -150,6 +181,198 @@ export class AutoHybridFallbackController {
 				: null,
 		);
 		await this.onResultApplied(query, hybridResult);
+	}
+}
+
+export class HybridQuerySessionController {
+	private static readonly PREPARE_DEBOUNCE_MS = 100;
+	private static readonly RERANK_GATE_MS = 400;
+
+	private readonly searchService: SearchService;
+	private readonly getSearchType: () => SearchType;
+	private readonly getIsHybrid: () => boolean;
+	private readonly getHybridMode: () => HybridSearchMode;
+	private readonly getCurrentQueryText: () => string;
+	private readonly getCachedResult: (query: string) => SearchResult | undefined;
+	private readonly setCachedResult: (query: string, result: SearchResult) => void;
+	private readonly onResultApplied: (
+		query: string,
+		result: SearchResult,
+	) => Promise<void>;
+
+	private currentSession: HybridQuerySession | null = null;
+	private nextSessionId = 0;
+
+	constructor(options: HybridQuerySessionControllerOptions) {
+		this.searchService = options.searchService;
+		this.getSearchType = options.getSearchType;
+		this.getIsHybrid = options.getIsHybrid;
+		this.getHybridMode = options.getHybridMode;
+		this.getCurrentQueryText = options.getCurrentQueryText;
+		this.getCachedResult = options.getCachedResult;
+		this.setCachedResult = options.setCachedResult;
+		this.onResultApplied = options.onResultApplied;
+	}
+
+	clear(): void {
+		this.cancelSession(this.currentSession);
+	}
+
+	handleInput(query: string): void {
+		if (!this.shouldHandle()) {
+			this.clear();
+			return;
+		}
+		const trimmedQuery = query.trim();
+		if (trimmedQuery.length === 0) {
+			this.clear();
+			void this.onResultApplied(query, createAbortedSearchResult());
+			return;
+		}
+		const cachedResult = this.getCachedResult(query);
+		if (cachedResult) {
+			this.clear();
+			void this.applyCachedResult(query, cachedResult);
+			return;
+		}
+
+		this.cancelSession(this.currentSession);
+		const session: HybridQuerySession = {
+			id: ++this.nextSessionId,
+			query,
+			prepareTimer: null,
+			rerankGateTimer: null,
+			startedAt: Date.now(),
+			rerankEligibleAt:
+				Date.now() + HybridQuerySessionController.RERANK_GATE_MS,
+			abortPrepare: new AbortController(),
+			abortRerank: new AbortController(),
+			cancelled: false,
+			prepared: null,
+		};
+		this.currentSession = session;
+		session.prepareTimer = setTimeout(() => {
+			session.prepareTimer = null;
+			void this.runPrepare(session);
+		}, HybridQuerySessionController.PREPARE_DEBOUNCE_MS);
+	}
+
+	private shouldHandle(): boolean {
+		return (
+			this.getSearchType() === SearchType.IN_VAULT &&
+			this.getIsHybrid()
+		);
+	}
+
+	private cancelSession(session: HybridQuerySession | null): void {
+		if (!session) {
+			return;
+		}
+		session.cancelled = true;
+		if (session.prepareTimer) {
+			clearTimeout(session.prepareTimer);
+			session.prepareTimer = null;
+		}
+		if (session.rerankGateTimer) {
+			clearTimeout(session.rerankGateTimer);
+			session.rerankGateTimer = null;
+		}
+		session.abortPrepare.abort();
+		session.abortRerank.abort();
+		if (this.currentSession?.id === session.id) {
+			this.currentSession = null;
+		}
+	}
+
+	private async applyCachedResult(
+		query: string,
+		result: SearchResult,
+	): Promise<void> {
+		if (query !== this.getCurrentQueryText()) {
+			return;
+		}
+		this.searchService.notifyHybridFallback(result);
+		await this.onResultApplied(query, result);
+	}
+
+	private isCurrentSession(session: HybridQuerySession): boolean {
+		return Boolean(
+			this.currentSession &&
+			this.currentSession.id === session.id &&
+			!session.cancelled &&
+			session.query === this.getCurrentQueryText(),
+		);
+	}
+
+	private async runPrepare(session: HybridQuerySession): Promise<void> {
+		if (!this.isCurrentSession(session)) {
+			return;
+		}
+		try {
+			const preparedResult = await this.searchService.prepareSearchInVaultHybrid(
+				session.query,
+				this.getHybridMode(),
+				session.abortPrepare.signal,
+			);
+			if (!this.isCurrentSession(session)) {
+				return;
+			}
+			session.prepared = preparedResult.prepared;
+			this.searchService.notifyHybridFallback(preparedResult.result);
+			await this.onResultApplied(session.query, preparedResult.result);
+			if (!preparedResult.prepared) {
+				this.setCachedResult(session.query, preparedResult.result);
+				return;
+			}
+			const remainingGateMs = session.rerankEligibleAt - Date.now();
+			if (remainingGateMs <= 0) {
+				void this.runFinalize(session);
+				return;
+			}
+			session.rerankGateTimer = setTimeout(() => {
+				session.rerankGateTimer = null;
+				void this.runFinalize(session);
+			}, remainingGateMs);
+		} catch (error) {
+			if (this.isAbortError(error)) {
+				return;
+			}
+			throw error;
+		}
+	}
+
+	private async runFinalize(session: HybridQuerySession): Promise<void> {
+		if (!this.isCurrentSession(session) || !session.prepared) {
+			return;
+		}
+		try {
+			const finalizedResult =
+				await this.searchService.finalizePreparedSearchInVaultHybrid(
+					session.prepared,
+					this.getHybridMode(),
+					session.abortRerank.signal,
+				);
+			if (!this.isCurrentSession(session)) {
+				return;
+			}
+			this.searchService.notifyHybridFallback(finalizedResult);
+			this.setCachedResult(session.query, finalizedResult);
+			await this.onResultApplied(session.query, finalizedResult);
+		} catch (error) {
+			if (this.isAbortError(error)) {
+				return;
+			}
+			throw error;
+		}
+	}
+
+	private isAbortError(error: unknown): boolean {
+		return Boolean(
+			error &&
+			typeof error === "object" &&
+			"name" in error &&
+			error.name === "AbortError",
+		);
 	}
 }
 

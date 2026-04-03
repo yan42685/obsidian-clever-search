@@ -24,6 +24,7 @@
 		createHiddenHybridFreshnessNoticeState,
 	    getMountedModalFileItemScore,
 		HybridFreshnessNoticeController,
+		HybridQuerySessionController,
 		type HybridFreshnessNoticeState,
 	    usesDirectFileSubItems,
 	} from "./mounted-modal-helper";
@@ -70,6 +71,7 @@
 		onResultApplied: async (query, result) => {
 			searchResult = result;
 			cachedResult.set(query, result);
+			hybridFreshnessNoticeController.syncFromResult(result);
 			await updateItemAsync(0);
 		},
 	});
@@ -78,6 +80,22 @@
 		getIsHybrid: () => isHybrid,
 		onNoticeChange: (state) => {
 			hybridFreshnessNotice = state;
+		},
+	});
+	const hybridQuerySessionController = new HybridQuerySessionController({
+		searchService,
+		getSearchType: () => searchType,
+		getIsHybrid: () => isHybrid,
+		getHybridMode: () => hybridMode,
+		getCurrentQueryText: () => queryText,
+		getCachedResult: (query) => cachedResult.get(query),
+		setCachedResult: (query, result) => {
+			cachedResult.set(query, result);
+		},
+		onResultApplied: async (_query, result) => {
+			searchResult = result;
+			hybridFreshnessNoticeController.syncFromResult(result);
+			await updateItemAsync(0);
 		},
 	});
 
@@ -130,7 +148,6 @@
 
 	// handle input changes
 	const handleInputDebounced = debounce(100, () => handleInputAsync());
-	const handleHybridInputDebounced = debounce(400, () => handleInputAsync());
 
 	async function handleInputAsync() {
 		const requestId = ++latestSearchRequestId;
@@ -205,9 +222,10 @@
 
 	function handleInput() {
 		if (searchType === SearchType.IN_VAULT && isHybrid) {
-			handleHybridInputDebounced();
+			hybridQuerySessionController.handleInput(queryText);
 			return;
 		}
+		hybridQuerySessionController.clear();
 		handleInputDebounced();
 	}
 
@@ -339,6 +357,7 @@
 	// ===================================================
 	onDestroy(() => {
 		autoHybridFallback.clear();
+		hybridQuerySessionController.clear();
 		hybridFreshnessNoticeController.clear();
 		logger.trace("mounted element has been destroyed.");
 	});
