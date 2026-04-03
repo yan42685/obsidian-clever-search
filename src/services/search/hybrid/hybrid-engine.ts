@@ -54,7 +54,16 @@ import {
   resolveHybridRecallBudget,
   type RankedResult,
 } from "./ranking";
-import { runHybridLexicalLaneSearch } from "./lexical-lane";
+import {
+  buildHybridLexicalLaneFileItems,
+  buildHybridLexicalLaneFileCandidates,
+  buildHybridLexicalLaneFileShortlist,
+  HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
+  prepareHybridLexicalLaneSearch,
+  type HybridLexicalLaneDisplayCandidate,
+  type HybridLexicalLaneFileCandidate,
+  resolveHybridLexicalLaneFileMetadata,
+} from "./lexical-lane";
 import {
   HybridRerankError,
   HybridReranker,
@@ -126,6 +135,30 @@ export type HybridRuntimeMemoryEstimate = {
   totalBytes: number;
 };
 
+export type PreparedHybridRecall = {
+  query: string;
+  topK: number;
+  displayCandidates: HybridLexicalLaneDisplayCandidate[];
+  fallbackNoticeKey: LocaleKey | null;
+};
+
+type FinalizedHybridRecall = {
+  items: FileItem[];
+  fallbackNoticeKey: LocaleKey | null;
+};
+
+function createHybridAbortError(): Error {
+  const error = new Error("Hybrid query aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfHybridQueryAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw createHybridAbortError();
+  }
+}
+
 export class HybridEngine {
   private readonly db = getInstance(Database);
   private readonly setting = getInstance(OuterSetting);
@@ -158,6 +191,10 @@ export class HybridEngine {
       MAX_FILE_RESULTS,
       Math.max(MIN_FILE_RESULTS, Math.round(configured)),
     );
+  }
+
+  getEffectiveResultCount(): number {
+    return this.defaultResultCount;
   }
 
   async load(): Promise<void> {
@@ -420,7 +457,115 @@ export class HybridEngine {
     query: string,
     topK = this.defaultResultCount,
   ): Promise<FileItem[]> {
-    return await this.searchWithLexicalLane(query, topK);
+    if (!this.isEnabled() || !this._ready || !query.trim()) {
+      return [];
+    }
+    const prepared = await this.prepareRecall(query, topK);
+    const finalized = await this.finalizePreparedRecall(prepared, topK);
+    this.lastSearchFallbackNoticeKey = finalized.fallbackNoticeKey;
+    return finalized.items;
+  }
+
+  async prepareRecall(
+    query: string,
+    topK = this.defaultResultCount,
+    signal?: AbortSignal,
+  ): Promise<PreparedHybridRecall> {
+    if (!this.isEnabled() || !this._ready || !query.trim()) {
+      return {
+        query,
+        topK,
+        displayCandidates: [],
+        fallbackNoticeKey: null,
+      };
+    }
+    throwIfHybridQueryAborted(signal);
+    const fileShortlistLimit = Math.max(
+      HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
+      topK,
+    );
+    const fileShortlist = await this.buildHybridLexicalLanePriorFileShortlist(
+      query,
+      fileShortlistLimit,
+    );
+    throwIfHybridQueryAborted(signal);
+    const displayCandidates = await prepareHybridLexicalLaneSearch({
+      queryText: query,
+      files: fileShortlist,
+      fileShortlist: fileShortlistLimit,
+      displayTopK: Math.max(topK * 2, topK),
+      rerankTopK: Math.max(topK * 2, topK),
+    });
+    throwIfHybridQueryAborted(signal);
+    return {
+      query,
+      topK,
+      displayCandidates,
+      fallbackNoticeKey: null,
+    };
+  }
+
+  buildItemsFromPreparedRecall(
+    prepared: PreparedHybridRecall,
+    topK = prepared.topK,
+  ): FileItem[] {
+    if (prepared.displayCandidates.length === 0 || topK <= 0) {
+      return [];
+    }
+    return buildHybridLexicalLaneFileItems(
+      prepared.query,
+      prepared.displayCandidates.slice(0, topK),
+    );
+  }
+
+  async finalizePreparedRecall(
+    prepared: PreparedHybridRecall,
+    topK = prepared.topK,
+    signal?: AbortSignal,
+  ): Promise<FinalizedHybridRecall> {
+    const baseItems = this.buildItemsFromPreparedRecall(prepared, topK);
+    if (prepared.displayCandidates.length <= 1 || topK <= 0) {
+      return {
+        items: baseItems,
+        fallbackNoticeKey: prepared.fallbackNoticeKey,
+      };
+    }
+
+    try {
+      throwIfHybridQueryAborted(signal);
+      const rerankedCandidates = await this.rerankDisplayCandidates(
+        prepared.query,
+        prepared.displayCandidates,
+        Math.max(topK * 2, topK),
+        signal,
+      );
+      throwIfHybridQueryAborted(signal);
+      return {
+        items: buildHybridLexicalLaneFileItems(
+          prepared.query,
+          rerankedCandidates.slice(0, topK),
+        ),
+        fallbackNoticeKey: prepared.fallbackNoticeKey,
+      };
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "name" in error &&
+        error.name === "AbortError"
+      ) {
+        throw error;
+      }
+      logger.warn(
+        "hybrid rerank failed; keeping coverage recall ordering.",
+        error,
+      );
+      return {
+        items: baseItems,
+        fallbackNoticeKey:
+          prepared.fallbackNoticeKey ?? "hybridNotice.searchRerankFallbackToBm25",
+      };
+    }
   }
 
   async searchWithBm25Baseline(
@@ -523,13 +668,177 @@ export class HybridEngine {
     if (!this.isEnabled() || !this._ready || !query.trim()) {
       return [];
     }
-    const items = await runHybridLexicalLaneSearch({
+    const prepared = await this.prepareRecall(query, topK);
+    this.lastSearchFallbackNoticeKey = prepared.fallbackNoticeKey;
+    return this.buildItemsFromPreparedRecall(prepared, topK);
+  }
+
+  private async rerankDisplayCandidates(
+    query: string,
+    candidates: readonly HybridLexicalLaneDisplayCandidate[],
+    topK: number,
+    signal?: AbortSignal,
+  ): Promise<HybridLexicalLaneDisplayCandidate[]> {
+    if (candidates.length <= 1 || topK <= 0) {
+      return [...candidates];
+    }
+    const rerankLimit = Math.min(candidates.length, topK);
+    const rerankCandidates: RerankCandidate[] = candidates
+      .slice(0, rerankLimit)
+      .map((candidate, index) => ({
+        id: index,
+        filePath: candidate.filePath,
+        text: candidate.snippetText,
+        startLine: candidate.startLine,
+        startCol: candidate.startCol,
+        endLine: candidate.endLine,
+        recallScore: candidate.score,
+      }));
+    const reranked = await this.reranker.rerank(
+      query,
+      rerankCandidates,
+      rerankLimit,
+    );
+    const rerankedHead = reranked
+      .map((result) => candidates[result.id])
+      .filter(
+        (candidate): candidate is HybridLexicalLaneDisplayCandidate =>
+          candidate !== undefined,
+      );
+    const usedIds = new Set(reranked.map((result) => result.id));
+    const remaining = candidates
+      .slice(0, rerankLimit)
+      .filter((_, index) => !usedIds.has(index));
+    return [
+      ...rerankedHead,
+      ...remaining,
+      ...candidates.slice(rerankLimit),
+    ];
+  }
+
+  private async buildHybridLexicalLanePriorFileShortlist(
+    query: string,
+    limit: number,
+  ): Promise<HybridLexicalLaneFileCandidate[]> {
+    const priorMatches = await this.buildHybridLexicalLanePriorFileMatches(
+      query,
+      limit,
+    );
+    const primary = buildHybridLexicalLaneFileCandidates({
       queryText: query,
-      displayTopK: topK,
-      rerankTopK: Math.max(topK * 2, topK),
+      limit,
+      matches: priorMatches,
+      resolveMetadata: resolveHybridLexicalLaneFileMetadata,
     });
-    this.lastSearchFallbackNoticeKey = null;
-    return items;
+    if (primary.length >= limit) {
+      return primary;
+    }
+    const fallback = await buildHybridLexicalLaneFileShortlist({
+      queryText: query,
+      limit: Math.max(limit * 2, HYBRID_LEXICAL_LANE_FILE_SHORTLIST),
+    });
+    return this.mergeHybridLexicalLaneFileShortlists(primary, fallback, limit);
+  }
+
+  private async buildHybridLexicalLanePriorFileMatches(
+    query: string,
+    limit: number,
+  ): Promise<Array<{ path: string; score: number; rank: number }>> {
+    const probeLimit = Math.max(
+      getHybridBm25ProbeLimit() * 6,
+      limit * 8,
+      48,
+    );
+    const probe = this.bm25.search(query, probeLimit, {
+      useProximity: HYBRID_BM25_USE_PROXIMITY,
+      enableQueryExpansion: HYBRID_BM25_ENABLE_QUERY_EXPANSION,
+    });
+    if (probe.length === 0) {
+      return [];
+    }
+
+    const rows = await this.db.db.hybridChunks.bulkGet(
+      probe.map((result) => result.docId),
+    );
+    const aggregateByPath = new Map<
+      string,
+      {
+        path: string;
+        bestScore: number;
+        scoreSum: number;
+        hitCount: number;
+        firstRank: number;
+      }
+    >();
+
+    for (let index = 0; index < probe.length; index++) {
+      const row = rows[index];
+      if (!row) {
+        continue;
+      }
+      const current = aggregateByPath.get(row.filePath) ?? {
+        path: row.filePath,
+        bestScore: 0,
+        scoreSum: 0,
+        hitCount: 0,
+        firstRank: index,
+      };
+      current.bestScore = Math.max(current.bestScore, probe[index].score);
+      current.scoreSum += probe[index].score;
+      current.hitCount += 1;
+      current.firstRank = Math.min(current.firstRank, index);
+      aggregateByPath.set(row.filePath, current);
+    }
+
+    return [...aggregateByPath.values()]
+      .map((entry) => ({
+        path: entry.path,
+        score:
+          entry.bestScore * 1.8 +
+          entry.scoreSum * 0.35 +
+          entry.hitCount * 6 +
+          Math.max(0, probeLimit - entry.firstRank) * 0.4,
+        rank: entry.firstRank,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          left.rank - right.rank ||
+          left.path.localeCompare(right.path),
+      )
+      .slice(0, Math.max(limit * 2, limit))
+      .map((entry, index) => ({
+        ...entry,
+        rank: index,
+      }));
+  }
+
+  private mergeHybridLexicalLaneFileShortlists(
+    primary: readonly HybridLexicalLaneFileCandidate[],
+    fallback: readonly HybridLexicalLaneFileCandidate[],
+    limit: number,
+  ): HybridLexicalLaneFileCandidate[] {
+    const merged = new Map<string, HybridLexicalLaneFileCandidate>();
+    for (const candidate of primary) {
+      if (!merged.has(candidate.filePath)) {
+        merged.set(candidate.filePath, candidate);
+      }
+    }
+    for (const candidate of fallback) {
+      if (merged.has(candidate.filePath)) {
+        continue;
+      }
+      merged.set(candidate.filePath, candidate);
+      if (merged.size >= limit) {
+        break;
+      }
+    }
+    return [...merged.values()]
+      .slice(0, limit)
+      .map((candidate, index) => ({
+        ...candidate,
+        fileRank: index,
+      }));
   }
 
   async persistIndicesForBatch(): Promise<void> {

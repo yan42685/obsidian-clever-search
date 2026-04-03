@@ -15,6 +15,7 @@ import { buildHybridLexicalLaneLocalBlockCandidates } from "./local-block-recall
 import type {
 	HybridLexicalLaneBlockCandidate,
 	HybridLexicalLaneDisplayCandidate,
+	HybridLexicalLaneFileCandidate,
 } from "./contracts";
 
 export * from "./contracts";
@@ -25,6 +26,40 @@ export * from "./block-ranker";
 export * from "./display-window";
 export * from "./result-merge";
 export * from "./result-mapper";
+
+export async function prepareHybridLexicalLaneSearch(params: {
+	queryText: string;
+	files?: readonly HybridLexicalLaneFileCandidate[];
+	fileShortlist?: number;
+	maxBlocksPerFile?: number;
+	rerankTopK?: number;
+	displayTopK?: number;
+	displayMaxChars?: number;
+	globalPoolMax?: number;
+}): Promise<HybridLexicalLaneDisplayCandidate[]> {
+	const files =
+		params.files !== undefined
+			? [...params.files]
+			: await buildHybridLexicalLaneFileShortlist({
+					queryText: params.queryText,
+					limit: params.fileShortlist ?? HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
+			  });
+	const { blockCandidates, snapshotTextByPath } =
+		await buildHybridLexicalLaneLocalBlockCandidates({
+			queryText: params.queryText,
+			files,
+			maxBlocksPerFile:
+				params.maxBlocksPerFile ?? HYBRID_LEXICAL_LANE_MAX_BLOCKS_PER_FILE,
+		});
+	return runHybridLexicalLaneCandidatePipeline({
+		blockCandidates,
+		snapshotTextByPath,
+		rerankTopK: params.rerankTopK,
+		displayTopK: params.displayTopK,
+		displayMaxChars: params.displayMaxChars,
+		globalPoolMax: params.globalPoolMax,
+	});
+}
 
 export function runHybridLexicalLaneCandidatePipeline(params: {
 	blockCandidates: readonly HybridLexicalLaneBlockCandidate[];
@@ -71,6 +106,7 @@ export function runHybridLexicalLaneFileItemPipeline(params: {
 
 export async function runHybridLexicalLaneSearch(params: {
 	queryText: string;
+	files?: readonly HybridLexicalLaneFileCandidate[];
 	fileShortlist?: number;
 	maxBlocksPerFile?: number;
 	rerankTopK?: number;
@@ -78,26 +114,10 @@ export async function runHybridLexicalLaneSearch(params: {
 	displayMaxChars?: number;
 	globalPoolMax?: number;
 }) {
-	const files = await buildHybridLexicalLaneFileShortlist({
-		queryText: params.queryText,
-		limit: params.fileShortlist ?? HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
-	});
-	const { blockCandidates, snapshotTextByPath } =
-		await buildHybridLexicalLaneLocalBlockCandidates({
-			queryText: params.queryText,
-			files,
-			maxBlocksPerFile:
-				params.maxBlocksPerFile ?? HYBRID_LEXICAL_LANE_MAX_BLOCKS_PER_FILE,
-		});
-	return runHybridLexicalLaneFileItemPipeline({
-		queryText: params.queryText,
-		blockCandidates,
-		snapshotTextByPath,
-		rerankTopK: params.rerankTopK,
-		displayTopK: params.displayTopK,
-		displayMaxChars: params.displayMaxChars,
-		globalPoolMax: params.globalPoolMax,
-	});
+	return buildHybridLexicalLaneFileItems(
+		params.queryText,
+		await prepareHybridLexicalLaneSearch(params),
+	);
 }
 
 function preselectHybridLexicalLaneBlockCandidates(
@@ -138,6 +158,10 @@ function computePoolPriorScore(candidate: HybridLexicalLaneBlockCandidate): numb
 		(metadata.pathExact ? 54 : 0) +
 		(metadata.pathPrefix ? 22 : 0) +
 		(metadata.headingMetaHit ? 30 : 0) +
-		(metadata.aliasHit ? 24 : 0)
+		metadata.headingExactCount * 84 +
+		metadata.headingPrefixCount * 32 +
+		(metadata.aliasHit ? 24 : 0) +
+		metadata.aliasExactCount * 68 +
+		metadata.aliasPrefixCount * 28
 	);
 }

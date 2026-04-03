@@ -83,7 +83,7 @@ function buildBaseScoreBreakdown(
 	const coverageRatio = (queryTermCount - missCount) / queryTermCount;
 	const filePriorScore =
 		(buildFilePriorScore(candidate) +
-			Math.max(0, 14 - candidate.parentFileRank) * 2.6) *
+			Math.max(0, 14 - candidate.parentFileRank) * 4.4) *
 		weights.filePrior;
 	const localCoverageScore =
 		(candidate.localScore +
@@ -122,7 +122,11 @@ function buildFilePriorScore(candidate: HybridLexicalLaneBlockCandidate): number
 		(metadata.pathExact ? 60 : 0) +
 		(metadata.pathPrefix ? 24 : 0) +
 		(metadata.headingMetaHit ? 42 : 0) +
-		(metadata.aliasHit ? 34 : 0)
+		metadata.headingExactCount * 132 +
+		metadata.headingPrefixCount * 48 +
+		(metadata.aliasHit ? 34 : 0) +
+		metadata.aliasExactCount * 104 +
+		metadata.aliasPrefixCount * 40
 	);
 }
 

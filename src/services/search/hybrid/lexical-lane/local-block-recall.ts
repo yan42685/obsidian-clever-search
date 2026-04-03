@@ -118,6 +118,16 @@ export function buildHybridLexicalLaneBlockCandidatesForSnapshot(params: {
 	if (metadataBridgeCandidate !== null) {
 		candidates.push(metadataBridgeCandidate);
 	}
+	const fileRecallBridgeCandidate = createFileRecallBridgeCandidate({
+		queryTerms,
+		file: params.file,
+		snapshotText: params.snapshotText,
+		lineOffsets,
+		headingChainByLine,
+	});
+	if (fileRecallBridgeCandidate !== null) {
+		candidates.push(fileRecallBridgeCandidate);
+	}
 	return candidates;
 }
 
@@ -304,7 +314,11 @@ function createMetadataBridgeCandidate(params: {
 			coverageCount * 54 +
 			exactCount * 32 +
 			prefixCount * 16 +
+			params.file.metadataSignals.headingExactCount * 44 +
+			params.file.metadataSignals.headingPrefixCount * 18 +
 			(params.file.metadataSignals.headingMetaHit ? 18 : 0) +
+			params.file.metadataSignals.aliasExactCount * 36 +
+			params.file.metadataSignals.aliasPrefixCount * 14 +
 			(params.file.metadataSignals.aliasHit ? 14 : 0),
 		localSignals: {
 			coverageCount,
@@ -326,6 +340,125 @@ function createMetadataBridgeCandidate(params: {
 		bridgePreviewRanges: metadataPreview.highlightRanges,
 		bridgePreviewSegmentText: metadataPreview.segmentText,
 	};
+}
+
+function createFileRecallBridgeCandidate(params: {
+	queryTerms: readonly DirectSubitemsQueryTerm[];
+	file: HybridLexicalLaneFileCandidate;
+	snapshotText: string;
+	lineOffsets: number[];
+	headingChainByLine: string[][];
+}): HybridLexicalLaneBlockCandidate | null {
+	if (params.queryTerms.length === 0) {
+		return null;
+	}
+
+	const normalizedSnapshot = params.snapshotText.toLocaleLowerCase();
+	const matchOccurrences: HybridLexicalLaneBlockCandidate["matchOccurrences"] = [];
+	const termStats = params.queryTerms.map((term) => {
+		const needle =
+			term.kind === "han_char" ? term.rawText : term.normalizedText;
+		const haystack =
+			term.kind === "han_char" ? params.snapshotText : normalizedSnapshot;
+		const start = haystack.indexOf(needle);
+		if (start < 0) {
+			return {
+				termId: term.termId,
+				bestTier: "miss" as const,
+				bestDistancePenalty: 0,
+			};
+		}
+		matchOccurrences.push({
+			termId: term.termId,
+			tier: "exact",
+			start,
+			end: start + term.rawText.length,
+			distancePenalty: 0,
+		});
+		return {
+			termId: term.termId,
+			bestTier: "exact" as const,
+			bestDistancePenalty: 0,
+		};
+	});
+
+	const coverageCount = termStats.filter((termStat) => termStat.bestTier !== "miss").length;
+	if (coverageCount === 0) {
+		return null;
+	}
+
+	const coverageRatio = coverageCount / Math.max(1, params.queryTerms.length);
+	if (
+		coverageRatio < 0.55 &&
+		params.file.fileRank > 2 &&
+		params.file.fileScore <= 0
+	) {
+		return null;
+	}
+
+	matchOccurrences.sort((left, right) => left.start - right.start);
+	const anchorOffset =
+		matchOccurrences[0]?.start ??
+		resolveFileRecallAnchorOffset(params.snapshotText);
+	const endOffset = Math.min(
+		params.snapshotText.length,
+		Math.max(anchorOffset + 1, anchorOffset + 220),
+	);
+	const startLine = offsetToLine(params.lineOffsets, anchorOffset);
+	const endLine = offsetToLine(
+		params.lineOffsets,
+		Math.max(anchorOffset, endOffset - 1),
+	);
+	const startLineOffset = params.lineOffsets[startLine] ?? 0;
+	const endLineOffset = params.lineOffsets[endLine] ?? 0;
+	const missCount = termStats.length - coverageCount;
+	return {
+		filePath: params.file.filePath,
+		blockId: `${params.file.filePath}#file-recall-bridge-${anchorOffset}-${endOffset}`,
+		startOffset: anchorOffset,
+		endOffset,
+		startLine,
+		startCol: Math.max(0, anchorOffset - startLineOffset),
+		endLine,
+		endCol: Math.max(0, endOffset - endLineOffset),
+		text: params.snapshotText.slice(anchorOffset, endOffset),
+		headingChain: [...(params.headingChainByLine[startLine] ?? [])],
+		parentFileScore: params.file.fileScore,
+		parentFileRank: params.file.fileRank,
+		parentMetadataSignals: { ...params.file.metadataSignals },
+		localScore:
+			coverageCount * 48 +
+			coverageRatio * 96 +
+			Math.max(0, 8 - params.file.fileRank) * 10,
+		localSignals: {
+			coverageCount,
+			exactCount: coverageCount,
+			prefixCount: 0,
+			fuzzyCount: 0,
+			queryTermCount: termStats.length,
+			missCount,
+			occurrenceCount: matchOccurrences.length,
+			occurrenceSpread:
+				matchOccurrences.length <= 1
+					? 0
+					: matchOccurrences[matchOccurrences.length - 1].end -
+						matchOccurrences[0].start,
+			distancePenaltyTotal: 0,
+			distancePenaltyMax: 0,
+			spanLength: Math.max(1, endOffset - anchorOffset),
+			anchorOffset,
+		},
+		termStats,
+		matchOccurrences,
+	};
+}
+
+function resolveFileRecallAnchorOffset(snapshotText: string): number {
+	const firstHeadingIndex = snapshotText.search(/^#{1,6}\s+/m);
+	if (firstHeadingIndex >= 0) {
+		return firstHeadingIndex;
+	}
+	return 0;
 }
 
 type MetadataBridgeEntry = {

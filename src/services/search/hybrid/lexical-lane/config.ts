@@ -14,8 +14,8 @@ export type HybridLexicalLaneRankerWeights = {
 
 export const DEFAULT_HYBRID_LEXICAL_LANE_WEIGHTS: HybridLexicalLaneRankerWeights =
 	{
-		filePrior: 0.22,
-		localCoverage: 0.5,
-		lexicalRefine: 0.18,
+		filePrior: 0.32,
+		localCoverage: 0.42,
+		lexicalRefine: 0.16,
 		structure: 0.1,
 	};

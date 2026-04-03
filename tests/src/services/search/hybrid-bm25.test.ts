@@ -46,11 +46,27 @@ type QueryOutcome = {
 	type: string;
 	suite: string;
 	rank: number;
+	fileMatchRank?: number;
+	shortlistRank?: number;
+	shortlistSize?: number;
 };
 
 type BenchmarkEvaluation = {
 	metric: BenchmarkMetric;
 	outcomes: QueryOutcome[];
+};
+
+type OutcomeRegression = {
+	query: string;
+	relevantPath: string;
+	type: string;
+	suite: string;
+	baselineRank: number;
+	lexicalRank: number;
+	rankDelta: number;
+	fileMatchRank: number;
+	shortlistRank: number;
+	shortlistSize: number;
 };
 
 function createMockTokenizer(): MockTokenizer {
@@ -105,13 +121,20 @@ function finalizeMetric(metric: BenchmarkMetric): BenchmarkMetric {
 	};
 }
 
-function createOutcome(queryCase: QueryCase, rank: number): QueryOutcome {
+function createOutcome(
+	queryCase: QueryCase,
+	rank: number,
+	diagnostics: Partial<
+		Pick<QueryOutcome, "fileMatchRank" | "shortlistRank" | "shortlistSize">
+	> = {},
+): QueryOutcome {
 	return {
 		query: queryCase.query,
 		relevantPath: queryCase.relevantPath,
 		type: queryCase.type,
 		suite: queryCase.suite,
 		rank,
+		...diagnostics,
 	};
 }
 
@@ -169,6 +192,53 @@ function compareOutcomeBuckets(params: {
 				left.top3Delta - right.top3Delta ||
 				right.zeroRateDelta - left.zeroRateDelta,
 		);
+}
+
+function findWorstOutcomeRegressions(params: {
+	baseline: readonly QueryOutcome[];
+	lexicalLane: readonly QueryOutcome[];
+	limit?: number;
+}): OutcomeRegression[] {
+	const lexicalByKey = new Map(
+		params.lexicalLane.map((outcome) => [
+			`${outcome.query}\u001f${outcome.relevantPath}`,
+			outcome,
+		]),
+	);
+	return params.baseline
+		.map((baselineOutcome) => {
+			const lexicalOutcome = lexicalByKey.get(
+				`${baselineOutcome.query}\u001f${baselineOutcome.relevantPath}`,
+			);
+			if (!lexicalOutcome) {
+				return null;
+			}
+			return {
+				query: baselineOutcome.query,
+				relevantPath: baselineOutcome.relevantPath,
+				type: baselineOutcome.type,
+				suite: baselineOutcome.suite,
+				baselineRank: baselineOutcome.rank,
+				lexicalRank: lexicalOutcome.rank,
+				rankDelta: lexicalOutcome.rank - baselineOutcome.rank,
+				fileMatchRank: lexicalOutcome.fileMatchRank ?? 0,
+				shortlistRank: lexicalOutcome.shortlistRank ?? 0,
+				shortlistSize: lexicalOutcome.shortlistSize ?? 0,
+			};
+		})
+		.filter((outcome): outcome is OutcomeRegression => outcome !== null)
+		.sort((left, right) => {
+			const leftMissPenalty = left.lexicalRank === 0 ? 100 : 0;
+			const rightMissPenalty = right.lexicalRank === 0 ? 100 : 0;
+			return (
+				right.rankDelta +
+				rightMissPenalty -
+				(left.rankDelta + leftMissPenalty) ||
+				left.baselineRank - right.baselineRank ||
+				left.query.localeCompare(right.query)
+			);
+		})
+		.slice(0, params.limit ?? 12);
 }
 
 function documentText(document: IndexedDocument): string {
@@ -346,11 +416,23 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			rerankTopK: 16,
 			displayTopK: 8,
 		});
+		const fileMatchRank =
+			matchedFiles.findIndex((match) => match.path === queryCase.relevantPath) + 1;
+		const shortlistRank =
+			fileCandidates.findIndex(
+				(fileCandidate) => fileCandidate.filePath === queryCase.relevantPath,
+			) + 1;
 		const rank =
 			fileItems.findIndex((item: { path: string }) => item.path === queryCase.relevantPath) +
 			1;
 		updateMetric(metric, rank);
-		outcomes.push(createOutcome(queryCase, rank));
+		outcomes.push(
+			createOutcome(queryCase, rank, {
+				fileMatchRank,
+				shortlistRank,
+				shortlistSize: fileCandidates.length,
+			}),
+		);
 	}
 	return {
 		metric: finalizeMetric(metric),
@@ -483,6 +565,11 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			lexicalLane: lexicalEvaluation.outcomes,
 			key: "suite",
 		});
+		const worstQueryRegressions = findWorstOutcomeRegressions({
+			baseline: baselineOutcomes,
+			lexicalLane: lexicalEvaluation.outcomes,
+			limit: 12,
+		});
 
 		console.log("[hybrid-lexical-lane-benchmark] compare", {
 			corpus: {
@@ -499,6 +586,7 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			},
 			worstTypes: typeBreakdown.slice(0, 6),
 			worstSuites: suiteBreakdown.slice(0, 6),
+			worstQueryRegressions,
 		});
 
 		expect(lexicalEvaluation.metric.top3).toBeGreaterThanOrEqual(

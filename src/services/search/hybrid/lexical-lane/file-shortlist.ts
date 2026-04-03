@@ -40,15 +40,29 @@ export async function buildHybridLexicalLaneFileShortlist(params: {
 			score: match.score ?? 0,
 			rank: index,
 		})),
-		resolveMetadata: (path) => {
-			const file = dataProvider.getFileByPath(path);
-			const metadata = file ? app.metadataCache.getFileCache(file) : null;
-			return {
-				aliases: parseFrontMatterAliases(metadata?.frontmatter) || [],
-				headings: metadata?.headings?.map((heading) => heading.heading) || [],
-			};
-		},
+		resolveMetadata: (path) =>
+			resolveHybridLexicalLaneFileMetadata(path, {
+				app,
+				dataProvider,
+			}),
 	});
+}
+
+export function resolveHybridLexicalLaneFileMetadata(
+	path: string,
+	deps: {
+		app?: App;
+		dataProvider?: DataProvider;
+	} = {},
+): { aliases: readonly string[]; headings: readonly string[] } {
+	const app = deps.app ?? getInstance(App);
+	const dataProvider = deps.dataProvider ?? getInstance(DataProvider);
+	const file = dataProvider.getFileByPath(path);
+	const metadata = file ? app.metadataCache.getFileCache(file) : null;
+	return {
+		aliases: parseFrontMatterAliases(metadata?.frontmatter) || [],
+		headings: metadata?.headings?.map((heading) => heading.heading) || [],
+	};
 }
 
 export function buildHybridLexicalLaneFileCandidates(params: {
@@ -113,17 +127,35 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 	const normalizedQuery = normalizeKey(params.queryText);
 	const basename = normalizeKey(FileUtil.getBasename(params.path));
 	const path = normalizeKey(params.path);
+	const normalizedHeadings = params.headings.map(normalizeKey);
+	const normalizedAliases = params.aliases.map(normalizeKey);
+	const headingExactCount = normalizedHeadings.filter(
+		(heading) => heading === normalizedQuery,
+	).length;
+	const headingPrefixCount = normalizedHeadings.filter(
+		(heading) => heading !== normalizedQuery && heading.startsWith(normalizedQuery),
+	).length;
+	const aliasExactCount = normalizedAliases.filter(
+		(alias) => alias === normalizedQuery,
+	).length;
+	const aliasPrefixCount = normalizedAliases.filter(
+		(alias) => alias !== normalizedQuery && alias.startsWith(normalizedQuery),
+	).length;
 	return {
 		basenameExact: basename === normalizedQuery,
 		basenamePrefix: basename.startsWith(normalizedQuery),
 		pathExact: path === normalizedQuery,
 		pathPrefix: path.startsWith(normalizedQuery),
-		headingMetaHit: params.headings.some((heading) =>
-			normalizeKey(heading).includes(normalizedQuery),
+		headingMetaHit: normalizedHeadings.some((heading) =>
+			heading.includes(normalizedQuery),
 		),
-		aliasHit: params.aliases.some((alias) =>
-			normalizeKey(alias).includes(normalizedQuery),
+		headingExactCount,
+		headingPrefixCount,
+		aliasHit: normalizedAliases.some((alias) =>
+			alias.includes(normalizedQuery),
 		),
+		aliasExactCount,
+		aliasPrefixCount,
 	};
 }
 
@@ -142,6 +174,10 @@ function computeHybridLexicalLaneFileCandidateScore(
 		(metadata.pathExact ? 72 : 0) +
 		(metadata.pathPrefix ? 28 : 0) +
 		(metadata.headingMetaHit ? 40 : 0) +
-		(metadata.aliasHit ? 34 : 0)
+		metadata.headingExactCount * 120 +
+		metadata.headingPrefixCount * 44 +
+		(metadata.aliasHit ? 34 : 0) +
+		metadata.aliasExactCount * 88 +
+		metadata.aliasPrefixCount * 36
 	);
 }
