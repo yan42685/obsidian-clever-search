@@ -21,12 +21,24 @@ type BM25ResolvedQueryTerm = {
 	matchedTerms: BM25MatchedTerm[];
 };
 export type BM25RuntimeMemoryBreakdown = {
+	termTextBytes: number;
+	termOffsetBytes: number;
+	termDfBytes: number;
+	postingStartBytes: number;
+	postingLengthBytes: number;
+	termFlagBytes: number;
+	sortedTermIdsBytes: number;
 	termDictBytes: number;
 	postingDocIdsBytes: number;
 	postingTfNormBytes: number;
 	postingContainerBytes: number;
 	expansionLexiconBytes: number;
 	docLengthsBytes: number;
+	termCount: number;
+	activeTermCount: number;
+	expandableTermCount: number;
+	postingCount: number;
+	docCount: number;
 	totalBytes: number;
 };
 type PackedPostingList = {
@@ -363,30 +375,59 @@ export class BM25Engine {
 			void docId;
 		}
 
+		let expandableTermCount = 0;
+		for (let termId = 0; termId < this.termFlags.length; termId++) {
+			if (this.isExpandableTermId(termId)) {
+				expandableTermCount += 1;
+			}
+		}
+
+		const termTextBytes = this.termBytes.byteLength;
+		const termOffsetBytes = this.termOffsets.byteLength;
+		const termDfBytes = this.termDfs.byteLength;
+		const postingStartBytes = this.postingStarts.byteLength;
+		const postingLengthBytes = this.postingLengths.byteLength;
+		const termFlagBytes = this.termFlags.byteLength;
+		const sortedTermIdsBytes = this.sortedActiveTermIds?.byteLength ?? 0;
 		const termDictBytes =
-			this.termBytes.byteLength +
-			this.termOffsets.byteLength +
-			this.termDfs.byteLength +
-			this.postingStarts.byteLength +
-			this.postingLengths.byteLength +
-			this.termFlags.byteLength +
-			(this.sortedActiveTermIds?.byteLength ?? 0);
+			termTextBytes +
+			termOffsetBytes +
+			termDfBytes +
+			postingStartBytes +
+			postingLengthBytes +
+			termFlagBytes +
+			sortedTermIdsBytes;
 
 		const postingContainerBytes = this.dirtyPostingOverrides.size * 24;
+		const postingDocIdsBytes = this.docIdsArena.byteLength;
+		const postingTfNormBytes = this.tfNormsArena.byteLength;
+		const totalBytes =
+			termDictBytes +
+			postingDocIdsBytes +
+			postingTfNormBytes +
+			postingContainerBytes +
+			docLengthsBytes;
 
 		return {
+			termTextBytes,
+			termOffsetBytes,
+			termDfBytes,
+			postingStartBytes,
+			postingLengthBytes,
+			termFlagBytes,
+			sortedTermIdsBytes,
 			termDictBytes,
-			postingDocIdsBytes: this.docIdsArena.byteLength,
-			postingTfNormBytes: this.tfNormsArena.byteLength,
+			postingDocIdsBytes,
+			postingTfNormBytes,
 			postingContainerBytes,
-			expansionLexiconBytes: 0,
+			expansionLexiconBytes: sortedTermIdsBytes,
 			docLengthsBytes,
-			totalBytes:
-				termDictBytes +
-				this.docIdsArena.byteLength +
-				this.tfNormsArena.byteLength +
-				postingContainerBytes +
-				docLengthsBytes,
+			termCount: this.termFlags.length,
+			activeTermCount: this.activeTermCount,
+			expandableTermCount,
+			postingCount: this.docIdsArena.length,
+			docCount: this.docLengths.size,
+			totalBytes,
 		};
 	}
 
