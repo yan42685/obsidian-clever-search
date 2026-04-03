@@ -5,6 +5,7 @@ import type {
 	IndexedDocument,
 	MatchedFile,
 } from "src/globals/search-types";
+import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
@@ -2321,14 +2322,77 @@ function projectDocRankableResult(
 			`coverage-lexical invariant violated: missing path for docId ${result.docId}`,
 		);
 	}
+	const basename = FileUtil.getBasename(path);
+	const folderPath = FileUtil.getFolderPath(path);
+	const highlightTerms =
+		result.queryTerms.length > 0 ? result.queryTerms : result.matchedTerms;
 	return {
 		path,
 		queryTerms: result.queryTerms,
 		matchedTerms: result.matchedTerms,
 		score: result.score,
+		basenameHighlightRanges: buildMetadataHighlightRanges(
+			basename,
+			highlightTerms,
+		),
+		folderHighlightRanges: buildMetadataHighlightRanges(
+			folderPath,
+			highlightTerms,
+		),
 		nativeSubItemsReady: false,
 		directSubItems: [],
 	};
+}
+
+function buildMetadataHighlightRanges(
+	text: string,
+	terms: readonly string[],
+): Array<{ start: number; end: number }> {
+	if (!text || terms.length === 0) {
+		return [];
+	}
+	const lowerText = text.toLocaleLowerCase();
+	const ranges: Array<{ start: number; end: number }> = [];
+	for (const rawTerm of terms) {
+		const term = rawTerm.trim();
+		if (!term) {
+			continue;
+		}
+		const lowerTerm = term.toLocaleLowerCase();
+		let cursor = 0;
+		while (cursor < lowerText.length) {
+			const matchIndex = lowerText.indexOf(lowerTerm, cursor);
+			if (matchIndex === -1) {
+				break;
+			}
+			ranges.push({
+				start: matchIndex,
+				end: matchIndex + lowerTerm.length,
+			});
+			cursor = matchIndex + Math.max(1, lowerTerm.length);
+		}
+	}
+	return mergeHighlightRanges(ranges);
+}
+
+function mergeHighlightRanges(
+	ranges: ReadonlyArray<{ start: number; end: number }>,
+): Array<{ start: number; end: number }> {
+	if (ranges.length <= 1) {
+		return [...ranges];
+	}
+	const ordered = [...ranges].sort((left, right) => left.start - right.start);
+	const merged = [{ start: ordered[0].start, end: ordered[0].end }];
+	for (let index = 1; index < ordered.length; index += 1) {
+		const current = ordered[index];
+		const previous = merged[merged.length - 1];
+		if (current.start <= previous.end) {
+			previous.end = Math.max(previous.end, current.end);
+			continue;
+		}
+		merged.push({ start: current.start, end: current.end });
+	}
+	return merged;
 }
 
 type IndexSizeAccumulator = {

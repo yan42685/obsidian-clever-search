@@ -15,6 +15,7 @@ import { ViewType } from "src/services/obsidian/view-registry";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
+import type { HighlightRange } from "src/globals/search-types";
 // TODO: When DOMPurify 3.1.8 is released, remove @types/dompurify due to an unreleased PR: https://github.com/cure53/DOMPurify/pull/1006
 import DOMPurify from "dompurify";
 
@@ -27,6 +28,36 @@ export class ViewHelper {
   // avoid XSS
   purifyHTML(rawHtml: string): string {
     return DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+  }
+
+  renderHighlightedText(
+    text: string,
+    ranges: ReadonlyArray<HighlightRange> = [],
+  ): string {
+    if (!text) {
+      return "";
+    }
+    if (ranges.length === 0) {
+      return escapeHtml(text);
+    }
+    const mergedRanges = mergeRanges(ranges);
+    let cursor = 0;
+    let rendered = "";
+    for (const range of mergedRanges) {
+      const start = Math.max(0, Math.min(text.length, range.start));
+      const end = Math.max(start, Math.min(text.length, range.end));
+      if (start > cursor) {
+        rendered += escapeHtml(text.slice(cursor, start));
+      }
+      if (end > start) {
+        rendered += `<mark>${escapeHtml(text.slice(start, end))}</mark>`;
+      }
+      cursor = end;
+    }
+    if (cursor < text.length) {
+      rendered += escapeHtml(text.slice(cursor));
+    }
+    return rendered;
   }
 
   updateSubItemIndex(
@@ -344,6 +375,15 @@ function mergeRanges(
     merged.push({ start: current.start, end: current.end });
   }
   return merged;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 

@@ -261,6 +261,8 @@ export class SearchService {
 					matchedFile.directSubItems ?? [],
 					"nothing",
 					matchedFile.nativeSubItemsReady ?? false,
+					matchedFile.basenameHighlightRanges,
+					matchedFile.folderHighlightRanges,
 				);
 			}),
 			null,

@@ -49,11 +49,18 @@ export type HighlightedContext = Line & { col: number };
 
 export type MatchedLine = Line & { positions: Set<number> }; // positions: columns of matched chars
 
+export type HighlightRange = {
+  start: number;
+  end: number;
+};
+
 export type MatchedFile = {
   path: string;
   queryTerms: string[];
   matchedTerms: string[];
   score?: number;
+  basenameHighlightRanges?: HighlightRange[];
+  folderHighlightRanges?: HighlightRange[];
   directSubItems?: FileSubItem[];
   nativeSubItemsReady?: boolean;
 };
@@ -109,6 +116,8 @@ export class FileItem extends Item {
   path: string;
   queryTerms: string[];
   matchedTerms: string[];
+  basenameHighlightRanges?: HighlightRange[];
+  folderHighlightRanges?: HighlightRange[];
   subItems: FileSubItem[]; // for markdown viewType
   nativeSubItemsReady: boolean;
   // TODO: impl this
@@ -135,6 +144,8 @@ export class FileItem extends Item {
     subItems: FileSubItem[],
     previewContent: any,
     nativeSubItemsReady = false,
+    basenameHighlightRanges?: HighlightRange[],
+    folderHighlightRanges?: HighlightRange[],
   ) {
     super();
     this.engineType = engineType;
@@ -144,6 +155,8 @@ export class FileItem extends Item {
     this.subItems = subItems;
     this.previewContent = previewContent;
     this.nativeSubItemsReady = nativeSubItemsReady;
+    this.basenameHighlightRanges = basenameHighlightRanges;
+    this.folderHighlightRanges = folderHighlightRanges;
   }
 }
 
@@ -153,7 +166,7 @@ export class FileSubItem extends Item {
   col: number;
   score?: number;
   snippetText?: string;
-  highlightRanges?: Array<{ start: number; end: number }>;
+  highlightRanges?: HighlightRange[];
   private cachedSnippet?: string;
   private snippetBuilder?: () => string;
 

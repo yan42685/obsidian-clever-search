@@ -344,14 +344,22 @@
 
 	function getFileNameHtml(item: FileItem): string {
 		return viewHelper.purifyHTML(
-			escapeHtml(item.basename) +
+			viewHelper.renderHighlightedText(
+				item.basename,
+				item.basenameHighlightRanges ?? [],
+			) +
 				HTML_4_SPACES +
 				escapeHtml(getFileExtensionText(item)),
 		);
 	}
 
 	function getFolderPathHtml(item: FileItem): string {
-		return viewHelper.purifyHTML(escapeHtml(item.folderPath));
+		return viewHelper.purifyHTML(
+			viewHelper.renderHighlightedText(
+				item.folderPath,
+				item.folderHighlightRanges ?? [],
+			),
+		);
 	}
 
 	// ===================================================
