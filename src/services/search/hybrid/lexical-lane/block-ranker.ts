@@ -121,6 +121,9 @@ function buildFilePriorScore(candidate: HybridLexicalLaneBlockCandidate): number
 		(metadata.basenamePrefix ? 110 : 0) +
 		(metadata.pathExact ? 60 : 0) +
 		(metadata.pathPrefix ? 24 : 0) +
+		metadata.folderHintCount * 26 +
+		(metadata.templateFolderHit ? 230 : 0) -
+		(metadata.archivePenaltyEligible ? 28 : 0) +
 		(metadata.headingMetaHit ? 42 : 0) +
 		metadata.headingExactCount * 132 +
 		metadata.headingPrefixCount * 48 +
@@ -169,6 +172,7 @@ function buildStructureScore(candidate: HybridLexicalLaneBlockCandidate): number
 		Math.max(0, 7 - slashDepth) * 3
 	);
 }
+
 
 function computeOverlapPenalty(
 	candidate: HybridLexicalLaneBlockCandidate,

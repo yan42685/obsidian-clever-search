@@ -56,6 +56,27 @@ type BenchmarkEvaluation = {
 	outcomes: QueryOutcome[];
 };
 
+type FocusDiagnostic = {
+	query: string;
+	relevantPath: string;
+	type: string;
+	suite: string;
+	fileMatchTop5: string[];
+	shortlistTop5: string[];
+	fileAggregatesTop5: Array<{
+		path: string;
+		aggregateScore: number;
+		bestScore: number;
+		subItemScores: number[];
+		subItemSnippets: string[];
+	}>;
+	displayTop5: Array<{
+		path: string;
+		score: number;
+		snippetText: string;
+	}>;
+};
+
 type OutcomeRegression = {
 	query: string;
 	relevantPath: string;
@@ -344,6 +365,9 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	const { runHybridLexicalLaneFileItemPipeline } = require(
 		"src/services/search/hybrid/lexical-lane",
 	) as typeof import("src/services/search/hybrid/lexical-lane");
+	const { runHybridLexicalLaneCandidatePipeline } = require(
+		"src/services/search/hybrid/lexical-lane",
+	) as typeof import("src/services/search/hybrid/lexical-lane");
 
 	const setting = JSON.parse(JSON.stringify(DEFAULT_OUTER_SETTING));
 	setting.isCaseSensitive = false;
@@ -365,6 +389,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	);
 	const metric = createEmptyMetric();
 	const outcomes: QueryOutcome[] = [];
+	const focusDiagnostics: FocusDiagnostic[] = [];
 	for (const queryCase of params.queryCases) {
 		const matchedFiles = await engine.searchFiles({
 			queryText: queryCase.query,
@@ -408,6 +433,12 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 				maxBlocksPerFile: 8,
 			});
 		});
+		const displayCandidates = runHybridLexicalLaneCandidatePipeline({
+			blockCandidates,
+			snapshotTextByPath,
+			rerankTopK: 16,
+			displayTopK: 8,
+		});
 
 		const fileItems = runHybridLexicalLaneFileItemPipeline({
 			queryText: queryCase.query,
@@ -433,11 +464,74 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 				shortlistSize: fileCandidates.length,
 			}),
 		);
+		if (
+			queryCase.type === "title_exact" ||
+			queryCase.type === "template_collision"
+		) {
+			focusDiagnostics.push({
+				query: queryCase.query,
+				relevantPath: queryCase.relevantPath,
+				type: queryCase.type,
+				suite: queryCase.suite,
+				fileMatchTop5: matchedFiles.slice(0, 5).map((match) => match.path),
+				shortlistTop5: fileCandidates.slice(0, 5).map((candidate) => candidate.filePath),
+				fileAggregatesTop5: summarizeFileAggregates(
+					fileItems as Array<{ path: string; subItems: Array<{ score?: number }> }>,
+				).slice(0, 5),
+				displayTop5: displayCandidates.slice(0, 5).map((candidate) => ({
+					path: candidate.filePath,
+					score: round(candidate.score),
+					snippetText: candidate.snippetText,
+				})),
+			});
+		}
 	}
+	console.log(
+		"[hybrid-lexical-lane-benchmark] focus-diagnostics",
+		JSON.stringify(focusDiagnostics, null, 2),
+	);
 	return {
 		metric: finalizeMetric(metric),
 		outcomes,
 	};
+}
+
+function summarizeFileAggregates(
+	fileItems: ReadonlyArray<{
+		path: string;
+		subItems: Array<{ score?: number; snippetText?: string; snippet?: string }>;
+	}>,
+): Array<{
+	path: string;
+	aggregateScore: number;
+	bestScore: number;
+	subItemScores: number[];
+	subItemSnippets: string[];
+}> {
+	return fileItems.map((item) => {
+		const subItemScores = item.subItems.map((subItem) => round(subItem.score ?? 0));
+		const bestScore = subItemScores[0] ?? 0;
+		const secondary = item.subItems.slice(1, 4).reduce((sum, subItem, index) => {
+			const weight = index === 0 ? 0.24 : index === 1 ? 0.12 : 0.06;
+			return sum + (subItem.score ?? 0) * weight;
+		}, 0);
+		return {
+			path: item.path,
+			aggregateScore: round(
+				bestScore + secondary + Math.min(6, Math.max(0, subItemScores.length - 1) * 1.5),
+			),
+			bestScore,
+			subItemScores,
+			subItemSnippets: item.subItems
+				.slice(0, 3)
+				.map((subItem) =>
+					(subItem.snippetText ?? subItem.snippet ?? "")
+						.replace(/\s+/g, " ")
+						.trim()
+						.slice(0, 140),
+				),
+		};
+	});
 }
 
 describe("hybrid BM25 query expansion", () => {

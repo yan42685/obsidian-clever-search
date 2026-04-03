@@ -22,6 +22,9 @@ export type HybridLexicalLaneMetadataSignals = {
 	basenamePrefix: boolean;
 	pathExact: boolean;
 	pathPrefix: boolean;
+	folderHintCount: number;
+	templateFolderHit: boolean;
+	archivePenaltyEligible: boolean;
 	headingMetaHit: boolean;
 	headingExactCount: number;
 	headingPrefixCount: number;

@@ -127,6 +127,11 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 	const normalizedQuery = normalizeKey(params.queryText);
 	const basename = normalizeKey(FileUtil.getBasename(params.path));
 	const path = normalizeKey(params.path);
+	const queryTokens = tokenizeNavigationTokens(params.queryText);
+	const folderTokens = params.path
+		.split("/")
+		.slice(0, -1)
+		.flatMap((segment) => tokenizeNavigationTokens(segment));
 	const normalizedHeadings = params.headings.map(normalizeKey);
 	const normalizedAliases = params.aliases.map(normalizeKey);
 	const headingExactCount = normalizedHeadings.filter(
@@ -146,6 +151,12 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 		basenamePrefix: basename.startsWith(normalizedQuery),
 		pathExact: path === normalizedQuery,
 		pathPrefix: path.startsWith(normalizedQuery),
+		folderHintCount: countNavigationTokenMatches(queryTokens, folderTokens),
+		templateFolderHit:
+			queryTokens.includes("template") && /(^|\/)templates?\//u.test(params.path),
+		archivePenaltyEligible:
+			path.includes("/archive/") &&
+			!queryTokens.some((token) => token === "archive"),
 		headingMetaHit: normalizedHeadings.some((heading) =>
 			heading.includes(normalizedQuery),
 		),
@@ -163,6 +174,43 @@ function normalizeKey(text: string): string {
 	return text.trim().toLocaleLowerCase();
 }
 
+function tokenizeNavigationTokens(text: string): string[] {
+	return normalizeKey(text)
+		.split(/[^a-z0-9\p{Script=Han}]+/u)
+		.map((token) => singularizeToken(token.trim()))
+		.filter((token) => token.length >= 4 || /^\p{Script=Han}$/u.test(token));
+}
+
+function singularizeToken(token: string): string {
+	if (token.endsWith("ies") && token.length > 3) {
+		return `${token.slice(0, -3)}y`;
+	}
+	if (token.endsWith("s") && token.length > 4) {
+		return token.slice(0, -1);
+	}
+	return token;
+}
+
+function countNavigationTokenMatches(
+	queryTokens: readonly string[],
+	candidateTokens: readonly string[],
+): number {
+	let count = 0;
+	for (const queryToken of queryTokens) {
+		if (
+			candidateTokens.some(
+				(candidateToken) =>
+					candidateToken === queryToken ||
+					candidateToken.startsWith(queryToken) ||
+					queryToken.startsWith(candidateToken),
+			)
+		) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
 function computeHybridLexicalLaneFileCandidateScore(
 	candidate: HybridLexicalLaneFileCandidate,
 ): number {
@@ -174,6 +222,9 @@ function computeHybridLexicalLaneFileCandidateScore(
 		(metadata.basenamePrefix ? 132 : 0) +
 		(metadata.pathExact ? 72 : 0) +
 		(metadata.pathPrefix ? 28 : 0) +
+		metadata.folderHintCount * 34 +
+		(metadata.templateFolderHit ? 220 : 0) -
+		(metadata.archivePenaltyEligible ? 36 : 0) +
 		(metadata.headingMetaHit ? 40 : 0) +
 		metadata.headingExactCount * 120 +
 		metadata.headingPrefixCount * 44 +

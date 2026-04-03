@@ -157,6 +157,9 @@ function computePoolPriorScore(candidate: HybridLexicalLaneBlockCandidate): numb
 		(metadata.basenamePrefix ? 96 : 0) +
 		(metadata.pathExact ? 54 : 0) +
 		(metadata.pathPrefix ? 22 : 0) +
+		metadata.folderHintCount * 20 +
+		(metadata.templateFolderHit ? 170 : 0) -
+		(metadata.archivePenaltyEligible ? 20 : 0) +
 		(metadata.headingMetaHit ? 30 : 0) +
 		metadata.headingExactCount * 84 +
 		metadata.headingPrefixCount * 32 +
