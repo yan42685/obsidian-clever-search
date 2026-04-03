@@ -484,38 +484,39 @@ function createFileRecallBridgeCandidate(params: {
 	}
 
 	const normalizedSnapshot = params.snapshotText.toLocaleLowerCase();
+	const wordOccurrences = buildAsciiWordOccurrences(params.snapshotText);
 	const matchOccurrences: HybridLexicalLaneBlockCandidate["matchOccurrences"] = [];
 	const termStats = params.queryTerms.map((term) => {
-		const needle =
-			term.kind === "han_char" ? term.rawText : term.normalizedText;
-		const haystack =
-			term.kind === "han_char" ? params.snapshotText : normalizedSnapshot;
-		const start = haystack.indexOf(needle);
-		if (start < 0) {
+		const matchedOccurrence = resolveFileRecallTermOccurrence({
+			term,
+			snapshotText: params.snapshotText,
+			normalizedSnapshot,
+			wordOccurrences,
+		});
+		if (matchedOccurrence === null) {
 			return {
 				termId: term.termId,
 				bestTier: "miss" as const,
 				bestDistancePenalty: 0,
 			};
 		}
-		matchOccurrences.push({
-			termId: term.termId,
-			tier: "exact",
-			start,
-			end: start + term.rawText.length,
-			distancePenalty: 0,
-		});
+		matchOccurrences.push(matchedOccurrence);
 		return {
 			termId: term.termId,
-			bestTier: "exact" as const,
+			bestTier: matchedOccurrence.tier,
 			bestDistancePenalty: 0,
 		};
 	});
-
 	const coverageCount = termStats.filter((termStat) => termStat.bestTier !== "miss").length;
 	if (coverageCount === 0) {
 		return null;
 	}
+	const exactCount = termStats.filter(
+		(termStat) => termStat.bestTier === "exact",
+	).length;
+	const prefixCount = termStats.filter(
+		(termStat) => termStat.bestTier === "prefix",
+	).length;
 
 	const coverageRatio = coverageCount / Math.max(1, params.queryTerms.length);
 	if (
@@ -525,7 +526,6 @@ function createFileRecallBridgeCandidate(params: {
 	) {
 		return null;
 	}
-
 	matchOccurrences.sort((left, right) => left.start - right.start);
 	const anchorOffset =
 		matchOccurrences[0]?.start ??
@@ -557,13 +557,15 @@ function createFileRecallBridgeCandidate(params: {
 		parentFileRank: params.file.fileRank,
 		parentMetadataSignals: { ...params.file.metadataSignals },
 		localScore:
-			coverageCount * 48 +
+			coverageCount * 24 +
+			exactCount * 22 +
+			prefixCount * 8 +
 			coverageRatio * 96 +
 			Math.max(0, 8 - params.file.fileRank) * 10,
 		localSignals: {
 			coverageCount,
-			exactCount: coverageCount,
-			prefixCount: 0,
+			exactCount,
+			prefixCount,
 			fuzzyCount: 0,
 			queryTermCount: termStats.length,
 			missCount,
@@ -589,6 +591,121 @@ function resolveFileRecallAnchorOffset(snapshotText: string): number {
 		return firstHeadingIndex;
 	}
 	return 0;
+}
+
+type FileRecallWordOccurrence = {
+	word: string;
+	start: number;
+	end: number;
+};
+
+function buildAsciiWordOccurrences(snapshotText: string): FileRecallWordOccurrence[] {
+	const matches = snapshotText.matchAll(/[A-Za-z0-9_-]+/g);
+	const occurrences: FileRecallWordOccurrence[] = [];
+	for (const match of matches) {
+		const word = match[0];
+		const start = match.index ?? 0;
+		occurrences.push({
+			word: word.toLocaleLowerCase(),
+			start,
+			end: start + word.length,
+		});
+	}
+	return occurrences;
+}
+
+function resolveFileRecallTermOccurrence(params: {
+	term: DirectSubitemsQueryTerm;
+	snapshotText: string;
+	normalizedSnapshot: string;
+	wordOccurrences: readonly FileRecallWordOccurrence[];
+}):
+	| {
+			termId: string;
+			tier: "exact" | "prefix";
+			start: number;
+			end: number;
+			distancePenalty: number;
+	  }
+	| null {
+	const { term, snapshotText, normalizedSnapshot, wordOccurrences } = params;
+	const needle = term.kind === "han_char" ? term.rawText : term.normalizedText;
+	const haystack = term.kind === "han_char" ? snapshotText : normalizedSnapshot;
+	const start = haystack.indexOf(needle);
+	if (start >= 0) {
+		return {
+			termId: term.termId,
+			tier: "exact",
+			start,
+			end: start + term.rawText.length,
+			distancePenalty: 0,
+		};
+	}
+	if (term.kind !== "non_han_run") {
+		return null;
+	}
+	const comparableQueryForms = buildComparableEnglishForms(term.normalizedText);
+	if (comparableQueryForms.length === 0) {
+		return null;
+	}
+	const matchedWord = wordOccurrences.find((occurrence) =>
+		buildComparableEnglishForms(occurrence.word).some((candidateForm) =>
+			comparableQueryForms.some(
+				(queryForm) =>
+					queryForm === candidateForm ||
+					queryForm.startsWith(candidateForm) ||
+					candidateForm.startsWith(queryForm),
+			),
+		),
+	);
+	if (!matchedWord) {
+		return null;
+	}
+	return {
+		termId: term.termId,
+		tier: "prefix",
+		start: matchedWord.start,
+		end: matchedWord.end,
+		distancePenalty: 0,
+	};
+}
+
+function buildComparableEnglishForms(token: string): string[] {
+	const normalized = token.trim().toLocaleLowerCase();
+	if (!/^[a-z][a-z0-9_-]{4,}$/u.test(normalized)) {
+		return [normalized].filter((value) => value.length > 0);
+	}
+	const forms = new Set<string>([normalizeEnglishToken(normalized)]);
+	if (normalized.endsWith("e") && normalized.length > 5) {
+		forms.add(normalized.slice(0, -1));
+	}
+	if (normalized.endsWith("ing") && normalized.length > 6) {
+		const stem = normalized.slice(0, -3);
+		forms.add(stem);
+		forms.add(`${stem}e`);
+	}
+	if (normalized.endsWith("ed") && normalized.length > 5) {
+		const stem = normalized.slice(0, -2);
+		forms.add(stem);
+		forms.add(`${stem}e`);
+	}
+	if (normalized.endsWith("tion") && normalized.length > 6) {
+		forms.add(normalized.slice(0, -3));
+	}
+	if (normalized.endsWith("ation") && normalized.length > 7) {
+		forms.add(`${normalized.slice(0, -5)}e`);
+	}
+	return [...forms].filter((value) => value.length > 0);
+}
+
+function normalizeEnglishToken(token: string): string {
+	if (token.endsWith("ies") && token.length > 5) {
+		return `${token.slice(0, -3)}y`;
+	}
+	if (token.endsWith("s") && token.length > 5) {
+		return token.slice(0, -1);
+	}
+	return token;
 }
 
 type MetadataBridgeEntry = {

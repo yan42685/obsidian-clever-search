@@ -128,6 +128,14 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 	const basename = normalizeKey(FileUtil.getBasename(params.path));
 	const path = normalizeKey(params.path);
 	const queryTokens = tokenizeNavigationTokens(params.queryText);
+	const queryAnchorTokens = extractStructuredAnchorTokens(params.queryText);
+	const basenameTokens = tokenizeNavigationTokens(FileUtil.getBasename(params.path));
+	const pathTokens = params.path
+		.split("/")
+		.flatMap((segment) => tokenizeNavigationTokens(segment));
+	const pathAnchorTokens = params.path
+		.split("/")
+		.flatMap((segment) => extractStructuredAnchorTokens(segment));
 	const folderTokens = params.path
 		.split("/")
 		.slice(0, -1)
@@ -140,17 +148,44 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 	const headingPrefixCount = normalizedHeadings.filter(
 		(heading) => heading !== normalizedQuery && heading.startsWith(normalizedQuery),
 	).length;
+	const headingContainedInQueryCount = normalizedHeadings.filter((heading) =>
+		isMeaningfullyContainedInQuery(normalizedQuery, heading),
+	).length;
 	const aliasExactCount = normalizedAliases.filter(
 		(alias) => alias === normalizedQuery,
 	).length;
 	const aliasPrefixCount = normalizedAliases.filter(
 		(alias) => alias !== normalizedQuery && alias.startsWith(normalizedQuery),
 	).length;
+	const aliasContainedInQueryCount = normalizedAliases.filter((alias) =>
+		isMeaningfullyContainedInQuery(normalizedQuery, alias),
+	).length;
+	const headingTokenCoverageCount = computeBestMetadataTokenCoverage(
+		queryTokens,
+		params.headings,
+	);
+	const aliasTokenCoverageCount = computeBestMetadataTokenCoverage(
+		queryTokens,
+		params.aliases,
+	);
 	return {
 		basenameExact: basename === normalizedQuery,
 		basenamePrefix: basename.startsWith(normalizedQuery),
+		basenameContainedInQuery: isMeaningfullyContainedInQuery(
+			normalizedQuery,
+			basename,
+		),
+		basenameTokenCoverageCount: countNavigationTokenMatches(
+			queryTokens,
+			basenameTokens,
+		),
 		pathExact: path === normalizedQuery,
 		pathPrefix: path.startsWith(normalizedQuery),
+		pathTokenCoverageCount: countNavigationTokenMatches(queryTokens, pathTokens),
+		pathAnchorCoverageCount: countNavigationTokenMatches(
+			queryAnchorTokens,
+			pathAnchorTokens,
+		),
 		folderHintCount: countNavigationTokenMatches(queryTokens, folderTokens),
 		templateFolderHit:
 			queryTokens.includes("template") && /(^|\/)templates?\//u.test(params.path),
@@ -162,11 +197,15 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 		),
 		headingExactCount,
 		headingPrefixCount,
+		headingContainedInQueryCount,
+		headingTokenCoverageCount,
 		aliasHit: normalizedAliases.some((alias) =>
 			alias.includes(normalizedQuery),
 		),
 		aliasExactCount,
 		aliasPrefixCount,
+		aliasContainedInQueryCount,
+		aliasTokenCoverageCount,
 	};
 }
 
@@ -175,10 +214,21 @@ function normalizeKey(text: string): string {
 }
 
 function tokenizeNavigationTokens(text: string): string[] {
-	return normalizeKey(text)
+	const normalized = normalizeKey(text);
+	const rawTokens = normalized
 		.split(/[^a-z0-9\p{Script=Han}]+/u)
-		.map((token) => singularizeToken(token.trim()))
+		.map((token) => token.trim())
+		.filter((token) => token.length > 0);
+	const tokens = rawTokens
+		.map((token) => singularizeToken(token))
 		.filter((token) => token.length >= 4 || /^\p{Script=Han}$/u.test(token));
+	return Array.from(new Set(tokens));
+}
+
+function extractStructuredAnchorTokens(text: string): string[] {
+	const normalized = normalizeKey(text);
+	const anchors = normalized.match(/[a-z0-9]{2,}(?:[-_][a-z0-9]{2,})+/gu) ?? [];
+	return Array.from(new Set(anchors));
 }
 
 function singularizeToken(token: string): string {
@@ -195,20 +245,89 @@ function countNavigationTokenMatches(
 	queryTokens: readonly string[],
 	candidateTokens: readonly string[],
 ): number {
+	const uniqueQueryTokens = Array.from(new Set(queryTokens));
 	let count = 0;
-	for (const queryToken of queryTokens) {
+	for (const queryToken of uniqueQueryTokens) {
 		if (
 			candidateTokens.some(
-				(candidateToken) =>
-					candidateToken === queryToken ||
-					candidateToken.startsWith(queryToken) ||
-					queryToken.startsWith(candidateToken),
+				(candidateToken) => navigationTokensMatch(queryToken, candidateToken),
 			)
 		) {
 			count += 1;
 		}
 	}
 	return count;
+}
+
+function computeBestMetadataTokenCoverage(
+	queryTokens: readonly string[],
+	values: readonly string[],
+): number {
+	let bestCoverage = 0;
+	for (const value of values) {
+		const coverage = countNavigationTokenMatches(
+			queryTokens,
+			tokenizeNavigationTokens(value),
+		);
+		if (coverage > bestCoverage) {
+			bestCoverage = coverage;
+		}
+	}
+	return bestCoverage;
+}
+
+function navigationTokensMatch(queryToken: string, candidateToken: string): boolean {
+	const queryForms = buildComparableTokenForms(queryToken);
+	const candidateForms = buildComparableTokenForms(candidateToken);
+	for (const left of queryForms) {
+		for (const right of candidateForms) {
+			if (
+				left === right ||
+				left.startsWith(right) ||
+				right.startsWith(left)
+			) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+function buildComparableTokenForms(token: string): string[] {
+	const forms = new Set<string>();
+	const normalized = singularizeToken(token.trim());
+	if (!normalized) {
+		return [];
+	}
+	forms.add(normalized);
+	if (normalized.endsWith("e") && normalized.length > 5) {
+		forms.add(normalized.slice(0, -1));
+	}
+	if (normalized.endsWith("ing") && normalized.length > 6) {
+		const stem = normalized.slice(0, -3);
+		forms.add(stem);
+		forms.add(`${stem}e`);
+	}
+	if (normalized.endsWith("ed") && normalized.length > 5) {
+		const stem = normalized.slice(0, -2);
+		forms.add(stem);
+		forms.add(`${stem}e`);
+	}
+	return [...forms].filter((form) => form.length > 0);
+}
+
+function isMeaningfullyContainedInQuery(
+	normalizedQuery: string,
+	normalizedValue: string,
+): boolean {
+	if (!normalizedValue || normalizedValue === normalizedQuery) {
+		return false;
+	}
+	const valueTokens = tokenizeNavigationTokens(normalizedValue);
+	if (valueTokens.length < 2 && normalizedValue.length < 10) {
+		return false;
+	}
+	return normalizedQuery.includes(normalizedValue);
 }
 
 function computeHybridLexicalLaneFileCandidateScore(
@@ -220,16 +339,24 @@ function computeHybridLexicalLaneFileCandidateScore(
 		Math.max(0, 8 - candidate.fileRank) * 18 +
 		(metadata.basenameExact ? 260 : 0) +
 		(metadata.basenamePrefix ? 132 : 0) +
+		(metadata.basenameContainedInQuery ? 44 : 0) +
+		metadata.basenameTokenCoverageCount * 18 +
 		(metadata.pathExact ? 72 : 0) +
 		(metadata.pathPrefix ? 28 : 0) +
+		metadata.pathTokenCoverageCount * 6 +
+		metadata.pathAnchorCoverageCount * 240 +
 		metadata.folderHintCount * 34 +
 		(metadata.templateFolderHit ? 220 : 0) -
 		(metadata.archivePenaltyEligible ? 36 : 0) +
 		(metadata.headingMetaHit ? 40 : 0) +
 		metadata.headingExactCount * 120 +
 		metadata.headingPrefixCount * 44 +
+		metadata.headingContainedInQueryCount * 52 +
+		metadata.headingTokenCoverageCount * 14 +
 		(metadata.aliasHit ? 34 : 0) +
 		metadata.aliasExactCount * 88 +
-		metadata.aliasPrefixCount * 36
+		metadata.aliasPrefixCount * 36 +
+		metadata.aliasContainedInQueryCount * 96 +
+		metadata.aliasTokenCoverageCount * 22
 	);
 }

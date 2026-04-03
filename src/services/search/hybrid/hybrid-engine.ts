@@ -141,6 +141,7 @@ export type PreparedHybridRecall = {
   topK: number;
   displayCandidates: HybridLexicalLaneDisplayCandidate[];
   fallbackNoticeKey: LocaleKey | null;
+  fallbackToLexicalSearch: boolean;
 };
 
 type FinalizedHybridRecall = {
@@ -478,6 +479,7 @@ export class HybridEngine {
         topK,
         displayCandidates: [],
         fallbackNoticeKey: null,
+        fallbackToLexicalSearch: false,
       };
     }
     throwIfHybridQueryAborted(signal);
@@ -485,11 +487,20 @@ export class HybridEngine {
       HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
       topK,
     );
-    const fileShortlist = await this.buildHybridLexicalLanePriorFileShortlist(
-      query,
-      fileShortlistLimit,
-    );
+    const fileShortlist = await buildHybridLexicalLaneFileShortlist({
+      queryText: query,
+      limit: fileShortlistLimit,
+    });
     throwIfHybridQueryAborted(signal);
+    if (fileShortlist.length === 0) {
+      return {
+        query,
+        topK,
+        displayCandidates: [],
+        fallbackNoticeKey: null,
+        fallbackToLexicalSearch: true,
+      };
+    }
     const displayCandidates = await prepareHybridLexicalLaneSearch({
       queryText: query,
       files: fileShortlist,
@@ -503,6 +514,7 @@ export class HybridEngine {
       topK,
       displayCandidates,
       fallbackNoticeKey: null,
+      fallbackToLexicalSearch: displayCandidates.length === 0,
     };
   }
 

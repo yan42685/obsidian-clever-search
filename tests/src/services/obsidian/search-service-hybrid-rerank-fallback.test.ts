@@ -153,6 +153,7 @@ describe("SearchService hybrid rerank fallback notices", () => {
 			topK: 10,
 			displayCandidates: [],
 			fallbackNoticeKey: null,
+			fallbackToLexicalSearch: false,
 		};
 		mockHybridEngine.prepareRecall.mockResolvedValue(prepared);
 		mockHybridEngine.buildItemsFromPreparedRecall.mockReturnValue([{ id: "prepared-item" }]);
@@ -191,6 +192,64 @@ describe("SearchService hybrid rerank fallback notices", () => {
 			"hybridNotice.searchRerankFallbackToBm25",
 		]);
 	});
+
+	test("falls back to the normal lexical search path when hybrid requests lexical fallback", async () => {
+		mockHybridEngine.prepareRecall.mockResolvedValue({
+			query: "alpha",
+			topK: 10,
+			displayCandidates: [],
+			fallbackNoticeKey: null,
+			fallbackToLexicalSearch: true,
+		});
+		const service = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/lexical.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 12,
+				directSubItems: [],
+				nativeSubItemsReady: true,
+			},
+		]);
+
+		const result = await service.searchInVaultHybrid("alpha");
+
+		expect(mockHybridEngine.prepareRecall).toHaveBeenCalledWith("alpha", 10, undefined);
+		expect(mockHybridEngine.buildItemsFromPreparedRecall).not.toHaveBeenCalled();
+		expect(mockHybridEngine.finalizePreparedRecall).not.toHaveBeenCalled();
+		expect(lexicalEngine.searchFiles).toHaveBeenCalled();
+		expect(result.items).toHaveLength(1);
+		expect((result.items[0] as { path: string }).path).toBe("notes/lexical.md");
+		expect(result.hybridFallbackNoticeKey).toBeNull();
+	});
+
+	test("falls back to the normal lexical search path when hybrid prepare throws", async () => {
+		mockHybridEngine.prepareRecall.mockRejectedValue(new Error("prepare failed"));
+		const service = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/recovery.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 7,
+				directSubItems: [],
+				nativeSubItemsReady: true,
+			},
+		]);
+
+		const result = await service.searchInVaultHybrid("alpha");
+
+		expect(mockHybridEngine.finalizePreparedRecall).not.toHaveBeenCalled();
+		expect(lexicalEngine.searchFiles).toHaveBeenCalled();
+		expect(result.items).toHaveLength(1);
+		expect((result.items[0] as { path: string }).path).toBe("notes/recovery.md");
+	});
+
 	test("dedupes identical fallback notices across staged updates", () => {
 		const service = createHarness();
 		const { SearchResult } = require("src/globals/search-types");

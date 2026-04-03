@@ -147,11 +147,29 @@ export class SearchService {
 		}
 
 		const topK = this.hybridEngine.getEffectiveResultCount();
-		const prepared = await this.hybridEngine.prepareRecall(
-			queryText,
-			topK,
-			signal,
-		);
+		let prepared: PreparedHybridRecall;
+		try {
+			prepared = await this.hybridEngine.prepareRecall(
+				queryText,
+				topK,
+				signal,
+			);
+		} catch (error) {
+			logger.warn(
+				"hybrid lexical-lane prepare failed; falling back to lexical search.",
+				error,
+			);
+			return {
+				prepared: null,
+				result: await this.searchInVaultLexical(queryText),
+			};
+		}
+		if (prepared.fallbackToLexicalSearch) {
+			return {
+				prepared: null,
+				result: await this.searchInVaultLexical(queryText),
+			};
+		}
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
 		const earlyItems = this.hybridEngine.buildItemsFromPreparedRecall(
@@ -175,6 +193,9 @@ export class SearchService {
 	): Promise<SearchResult> {
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
+		if (prepared.fallbackToLexicalSearch) {
+			return await this.searchInVaultLexical(prepared.query);
+		}
 		if (mode === "lexical-lane") {
 			return this.buildHybridSearchResult(
 				sourcePath,

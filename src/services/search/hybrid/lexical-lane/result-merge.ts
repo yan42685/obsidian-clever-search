@@ -79,8 +79,8 @@ function shouldSuppressDisplayCandidate(
 	if (candidate.filePath !== existing.filePath) {
 		return false;
 	}
-	const overlapRatio = computeDisplayOverlapRatio(candidate, existing);
-	const noveltyRatio = computeDisplayNoveltyRatio(candidate, existing);
+	const overlapRatio = computeDisplayBodyOverlapRatio(candidate, existing);
+	const noveltyRatio = computeDisplayBodyNoveltyRatio(candidate, existing);
 	if (overlapRatio >= 0.9 && noveltyRatio < 0.2) {
 		return true;
 	}
@@ -116,16 +116,16 @@ function computeRankedBlockNoveltyRatio(
 	return novelCount / candidate.matchOccurrences.length;
 }
 
-function computeDisplayNoveltyRatio(
-	candidate: Pick<HybridLexicalLaneDisplayCandidate, "highlightRanges">,
-	existing: Pick<HybridLexicalLaneDisplayCandidate, "highlightRanges">,
+function computeDisplayBodyNoveltyRatio(
+	candidate: Pick<HybridLexicalLaneDisplayCandidate, "bodyHighlightRanges">,
+	existing: Pick<HybridLexicalLaneDisplayCandidate, "bodyHighlightRanges">,
 ): number {
-	if (candidate.highlightRanges.length === 0) {
+	if (candidate.bodyHighlightRanges.length === 0) {
 		return 0;
 	}
 	let novelCount = 0;
-	for (const range of candidate.highlightRanges) {
-		const overlapsExisting = existing.highlightRanges.some(
+	for (const range of candidate.bodyHighlightRanges) {
+		const overlapsExisting = existing.bodyHighlightRanges.some(
 			(previous) =>
 				Math.min(previous.end, range.end) > Math.max(previous.start, range.start),
 		);
@@ -133,7 +133,7 @@ function computeDisplayNoveltyRatio(
 			novelCount += 1;
 		}
 	}
-	return novelCount / candidate.highlightRanges.length;
+	return novelCount / candidate.bodyHighlightRanges.length;
 }
 
 function computeBlockOverlapRatio(
@@ -148,15 +148,15 @@ function computeBlockOverlapRatio(
 	);
 }
 
-function computeDisplayOverlapRatio(
-	left: Pick<HybridLexicalLaneDisplayCandidate, "displayStart" | "displayEnd">,
-	right: Pick<HybridLexicalLaneDisplayCandidate, "displayStart" | "displayEnd">,
+function computeDisplayBodyOverlapRatio(
+	left: Pick<HybridLexicalLaneDisplayCandidate, "bodyStart" | "bodyEnd">,
+	right: Pick<HybridLexicalLaneDisplayCandidate, "bodyStart" | "bodyEnd">,
 ): number {
 	return computeOffsetOverlapRatio(
-		left.displayStart,
-		left.displayEnd,
-		right.displayStart,
-		right.displayEnd,
+		left.bodyStart,
+		left.bodyEnd,
+		right.bodyStart,
+		right.bodyEnd,
 	);
 }
 
@@ -172,6 +172,9 @@ function computeOffsetOverlapRatio(
 		return 0;
 	}
 	const overlap = overlapEnd - overlapStart;
-	const shorterLength = Math.max(1, Math.min(leftEnd - leftStart, rightEnd - rightStart));
+	const shorterLength = Math.max(
+		1,
+		Math.min(leftEnd - leftStart, rightEnd - rightStart),
+	);
 	return overlap / shorterLength;
 }

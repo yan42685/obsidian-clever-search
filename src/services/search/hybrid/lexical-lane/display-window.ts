@@ -1,18 +1,13 @@
 import { FileUtil } from "src/utils/file-util";
 import {
-	renderDirectSubitemsCandidateSpan,
-	type DirectSubitemsCandidateSpan,
-	type DirectSubitemsOccurrence,
-} from "../../coverage-lexical/direct-subitems";
-import {
 	HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
 } from "./config";
 import type {
 	HybridLexicalLaneBlockCandidate,
 	HybridLexicalLaneDisplayCandidate,
-	HybridLexicalLaneMatchOccurrence,
 	HybridLexicalLaneRankedBlockCandidate,
 } from "./contracts";
+import { buildHybridSharedSnippet } from "../shared-snippet/build-shared-snippet";
 
 export function buildHybridLexicalLaneDisplayCandidate(params: {
 	snapshotText: string;
@@ -25,7 +20,11 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 			? candidate.scoreBreakdown.totalScore
 			: candidate.localScore;
 	if (candidate.bridgePreviewText) {
-		const previewLength = candidate.bridgePreviewText.length;
+		const payload = buildHybridSharedSnippet({
+			snapshotText,
+			candidate,
+			maxChars: params.maxChars ?? HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
+		});
 		return {
 			filePath: candidate.filePath,
 			basename: FileUtil.getBasename(candidate.filePath),
@@ -38,19 +37,24 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 			endLine: candidate.endLine,
 			endCol: candidate.endCol,
 			score,
-			snippetText: candidate.bridgePreviewText,
-			snippetHtml: candidate.bridgePreviewText,
-			highlightRanges: candidate.bridgePreviewRanges?.map((range) => ({ ...range })) ?? [],
-			coreStart: 0,
-			coreEnd: previewLength,
-			displayStart: 0,
-			displayEnd: previewLength,
-			anchorOffset: candidate.localSignals.anchorOffset,
+			snippetText: payload.snippetText,
+			snippetHtml: payload.snippetHtml,
+			headerText: payload.headerText,
+			bodyText: payload.bodyText,
+			highlightRanges: payload.highlightRanges,
+			bodyHighlightRanges: payload.bodyHighlightRanges,
+			coreStart: payload.coreStart,
+			coreEnd: payload.coreEnd,
+			displayStart: payload.displayStart,
+			displayEnd: payload.displayEnd,
+			bodyStart: payload.bodyStart,
+			bodyEnd: payload.bodyEnd,
+			anchorOffset: payload.anchorOffset,
 		};
 	}
-	const payload = renderDirectSubitemsCandidateSpan({
+	const payload = buildHybridSharedSnippet({
 		snapshotText,
-		span: toDirectSubitemsCandidateSpan(candidate),
+		candidate,
 		maxChars: params.maxChars ?? HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
 	});
 	return {
@@ -64,12 +68,17 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 		endCol: candidate.endCol,
 		score,
 		snippetText: payload.snippetText,
-		snippetHtml: payload.html,
-		highlightRanges: payload.highlightRanges.map((range) => ({ ...range })),
+		snippetHtml: payload.snippetHtml,
+		headerText: payload.headerText,
+		bodyText: payload.bodyText,
+		highlightRanges: payload.highlightRanges,
+		bodyHighlightRanges: payload.bodyHighlightRanges,
 		coreStart: payload.coreStart,
 		coreEnd: payload.coreEnd,
 		displayStart: payload.displayStart,
 		displayEnd: payload.displayEnd,
+		bodyStart: payload.bodyStart,
+		bodyEnd: payload.bodyEnd,
 		anchorOffset: payload.anchorOffset,
 	};
 }
@@ -98,42 +107,4 @@ export function buildHybridLexicalLaneDisplayCandidates(params: {
 			(candidate): candidate is HybridLexicalLaneDisplayCandidate =>
 				candidate !== null,
 		);
-}
-
-function toDirectSubitemsCandidateSpan(
-	candidate: HybridLexicalLaneBlockCandidate | HybridLexicalLaneRankedBlockCandidate,
-): DirectSubitemsCandidateSpan {
-	return {
-		start: candidate.startOffset,
-		end: candidate.endOffset,
-		anchorOffset: candidate.localSignals.anchorOffset,
-		occurrences: candidate.matchOccurrences.map(toDirectSubitemsOccurrence),
-		termStats: [],
-		termSignature: candidate.matchOccurrences
-			.map((occurrence) => occurrence.termId)
-			.sort((left, right) => left.localeCompare(right))
-			.join("|"),
-		score: {
-			coverageCount: candidate.localSignals.coverageCount,
-			exactCount: candidate.localSignals.exactCount,
-			prefixCount: candidate.localSignals.prefixCount,
-			fuzzyCount: candidate.localSignals.fuzzyCount,
-			distancePenaltyTotal: candidate.localSignals.distancePenaltyTotal,
-			distancePenaltyMax: candidate.localSignals.distancePenaltyMax,
-			spanLength: candidate.localSignals.spanLength,
-			anchorOffset: candidate.localSignals.anchorOffset,
-		},
-	};
-}
-
-function toDirectSubitemsOccurrence(
-	occurrence: HybridLexicalLaneMatchOccurrence,
-): DirectSubitemsOccurrence {
-	return {
-		termId: occurrence.termId,
-		tier: occurrence.tier,
-		start: occurrence.start,
-		end: occurrence.end,
-		distancePenalty: occurrence.distancePenalty,
-	};
 }

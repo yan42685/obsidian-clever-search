@@ -20,17 +20,25 @@ export type HybridLexicalLaneTermStat = {
 export type HybridLexicalLaneMetadataSignals = {
 	basenameExact: boolean;
 	basenamePrefix: boolean;
+	basenameContainedInQuery: boolean;
+	basenameTokenCoverageCount: number;
 	pathExact: boolean;
 	pathPrefix: boolean;
+	pathTokenCoverageCount: number;
+	pathAnchorCoverageCount: number;
 	folderHintCount: number;
 	templateFolderHit: boolean;
 	archivePenaltyEligible: boolean;
 	headingMetaHit: boolean;
 	headingExactCount: number;
 	headingPrefixCount: number;
+	headingContainedInQueryCount: number;
+	headingTokenCoverageCount: number;
 	aliasHit: boolean;
 	aliasExactCount: number;
 	aliasPrefixCount: number;
+	aliasContainedInQueryCount: number;
+	aliasTokenCoverageCount: number;
 };
 
 export type HybridLexicalLaneMetadataValues = {
@@ -111,10 +119,15 @@ export type HybridLexicalLaneDisplayCandidate = {
 	score: number;
 	snippetText: string;
 	snippetHtml: string;
+	headerText: string;
+	bodyText: string;
 	highlightRanges: Array<{ start: number; end: number }>;
+	bodyHighlightRanges: Array<{ start: number; end: number }>;
 	coreStart: number;
 	coreEnd: number;
 	displayStart: number;
 	displayEnd: number;
+	bodyStart: number;
+	bodyEnd: number;
 	anchorOffset: number;
 };

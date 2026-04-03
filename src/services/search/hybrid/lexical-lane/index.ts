@@ -155,16 +155,24 @@ function computePoolPriorScore(candidate: HybridLexicalLaneBlockCandidate): numb
 		candidate.localSignals.spanLength * 0.06 +
 		(metadata.basenameExact ? 180 : 0) +
 		(metadata.basenamePrefix ? 96 : 0) +
+		(metadata.basenameContainedInQuery ? 28 : 0) +
+		metadata.basenameTokenCoverageCount * 12 +
 		(metadata.pathExact ? 54 : 0) +
 		(metadata.pathPrefix ? 22 : 0) +
+		metadata.pathTokenCoverageCount * 4 +
+		metadata.pathAnchorCoverageCount * 140 +
 		metadata.folderHintCount * 20 +
 		(metadata.templateFolderHit ? 170 : 0) -
 		(metadata.archivePenaltyEligible ? 20 : 0) +
 		(metadata.headingMetaHit ? 30 : 0) +
 		metadata.headingExactCount * 84 +
 		metadata.headingPrefixCount * 32 +
+		metadata.headingContainedInQueryCount * 34 +
+		metadata.headingTokenCoverageCount * 10 +
 		(metadata.aliasHit ? 24 : 0) +
 		metadata.aliasExactCount * 68 +
-		metadata.aliasPrefixCount * 28
+		metadata.aliasPrefixCount * 28 +
+		metadata.aliasContainedInQueryCount * 64 +
+		metadata.aliasTokenCoverageCount * 16
 	);
 }
