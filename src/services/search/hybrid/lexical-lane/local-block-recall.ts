@@ -118,6 +118,20 @@ export function buildHybridLexicalLaneBlockCandidatesForSnapshot(params: {
 	if (metadataBridgeCandidate !== null) {
 		candidates.push(metadataBridgeCandidate);
 	}
+	const focusedHeadingBridgeCandidate =
+		metadataBridgeCandidate === null
+			? createFocusedHeadingBridgeCandidate({
+					queryTerms,
+					file: params.file,
+					snapshotText: params.snapshotText,
+					lineOffsets,
+					headingOutline,
+					headingChainByLine,
+			  })
+			: null;
+	if (focusedHeadingBridgeCandidate !== null) {
+		candidates.push(focusedHeadingBridgeCandidate);
+	}
 	const fileRecallBridgeCandidate = createFileRecallBridgeCandidate({
 		queryTerms,
 		file: params.file,
@@ -342,6 +356,122 @@ function createMetadataBridgeCandidate(params: {
 	};
 }
 
+function createFocusedHeadingBridgeCandidate(params: {
+	queryTerms: readonly DirectSubitemsQueryTerm[];
+	file: HybridLexicalLaneFileCandidate;
+	snapshotText: string;
+	lineOffsets: number[];
+	headingOutline: Array<{ line: number; level: number; title: string }>;
+	headingChainByLine: string[][];
+}): HybridLexicalLaneBlockCandidate | null {
+	if (!params.queryTerms.some((term) => term.kind === "non_han_run" && term.rawText.includes("-"))) {
+		return null;
+	}
+	const headingEntries = buildMetadataBridgeEntries(
+		params.file,
+		params.headingOutline,
+	).filter((entry) => entry.kind === "heading");
+	const bestHeadingMatch = headingEntries
+		.map((entry) => ({
+			entry,
+			exactCount: params.queryTerms.filter(
+				(term) => classifyFocusedBridgeTermMatch(term, entry.text) === "exact",
+			).length,
+			prefixCount: params.queryTerms.filter(
+				(term) => classifyFocusedBridgeTermMatch(term, entry.text) === "prefix",
+			).length,
+		}))
+		.map((entryMatch) => ({
+			...entryMatch,
+			coverageCount: entryMatch.exactCount + entryMatch.prefixCount,
+			score: entryMatch.exactCount * 12 + entryMatch.prefixCount * 5,
+		}))
+		.filter((entryMatch) => entryMatch.exactCount >= 2 && entryMatch.coverageCount >= 2)
+		.sort(
+			(left, right) =>
+				right.score - left.score ||
+				right.coverageCount - left.coverageCount ||
+				right.exactCount - left.exactCount,
+		)[0];
+	if (!bestHeadingMatch) {
+		return null;
+	}
+	const basename = FileUtil.getBasename(params.file.filePath);
+	const previewText = `Heading: ${bestHeadingMatch.entry.text} | File: ${basename}`;
+	const anchorOffset = resolveFocusedHeadingAnchorOffset({
+		headingText: bestHeadingMatch.entry.text,
+		snapshotText: params.snapshotText,
+		headingOutline: params.headingOutline,
+		lineOffsets: params.lineOffsets,
+	});
+	const endOffset = Math.min(
+		params.snapshotText.length,
+		Math.max(anchorOffset + 1, anchorOffset + 220),
+	);
+	const startLine = offsetToLine(params.lineOffsets, anchorOffset);
+	const endLine = offsetToLine(
+		params.lineOffsets,
+		Math.max(anchorOffset, endOffset - 1),
+	);
+	const startLineOffset = params.lineOffsets[startLine] ?? 0;
+	const endLineOffset = params.lineOffsets[endLine] ?? 0;
+	const termStats = params.queryTerms.map((term) => ({
+		termId: term.termId,
+		bestTier: classifyFocusedBridgeTermMatch(term, previewText),
+		bestDistancePenalty: 0,
+	}));
+	const coverageCount = termStats.filter((termStat) => termStat.bestTier !== "miss").length;
+	const exactCount = termStats.filter((termStat) => termStat.bestTier === "exact").length;
+	const prefixCount = termStats.filter((termStat) => termStat.bestTier === "prefix").length;
+	const missCount = termStats.length - coverageCount;
+	const matchOccurrences = collectFocusedBridgeMatchOccurrences({
+		queryTerms: params.queryTerms,
+		previewText,
+		anchorOffset,
+		maxSpanLength: Math.max(1, endOffset - anchorOffset),
+	});
+	return {
+		filePath: params.file.filePath,
+		blockId: `${params.file.filePath}#focused-heading-bridge-${anchorOffset}-${endOffset}`,
+		startOffset: anchorOffset,
+		endOffset,
+		startLine,
+		startCol: Math.max(0, anchorOffset - startLineOffset),
+		endLine,
+		endCol: Math.max(0, endOffset - endLineOffset),
+		text: params.snapshotText.slice(anchorOffset, endOffset),
+		headingChain: [...(params.headingChainByLine[startLine] ?? [])],
+		parentFileScore: params.file.fileScore,
+		parentFileRank: params.file.fileRank,
+		parentMetadataSignals: { ...params.file.metadataSignals },
+		localScore:
+			coverageCount * 62 +
+			exactCount * 54 +
+			prefixCount * 18 +
+			bestHeadingMatch.exactCount * 44 +
+			bestHeadingMatch.coverageCount * 24,
+		localSignals: {
+			coverageCount,
+			exactCount,
+			prefixCount,
+			fuzzyCount: 0,
+			queryTermCount: termStats.length,
+			missCount,
+			occurrenceCount: matchOccurrences.length,
+			occurrenceSpread: computeOccurrenceSpread({ occurrences: matchOccurrences }),
+			distancePenaltyTotal: 0,
+			distancePenaltyMax: 0,
+			spanLength: Math.max(1, endOffset - anchorOffset),
+			anchorOffset,
+		},
+		termStats,
+		matchOccurrences,
+		bridgePreviewText: previewText,
+		bridgePreviewRanges: buildFocusedBridgeHighlightRanges(params.queryTerms, previewText),
+		bridgePreviewSegmentText: "Heading > File",
+	};
+}
+
 function createFileRecallBridgeCandidate(params: {
 	queryTerms: readonly DirectSubitemsQueryTerm[];
 	file: HybridLexicalLaneFileCandidate;
@@ -514,7 +644,10 @@ function buildMetadataBridgePreview(
 		.join(" | ");
 	return {
 		text,
-		highlightRanges: buildMetadataPreviewHighlightRanges(queryTerms, text),
+		highlightRanges: buildMetadataPreviewHighlightRanges(
+			queryTerms,
+			text,
+		),
 		segmentText: rankedEntries
 			.map(({ entry }) => formatMetadataBridgeLabel(entry.kind))
 			.join(" > "),
@@ -662,6 +795,131 @@ function buildMetadataPreviewHighlightRanges(
 	const ranges: Array<{ start: number; end: number }> = [];
 	for (const term of queryTerms) {
 		const normalizedTerm = term.normalizedText.toLocaleLowerCase();
+		if (normalizedTerm.length === 0) {
+			continue;
+		}
+		let fromIndex = 0;
+		while (fromIndex < normalizedPreview.length) {
+			const matchIndex = normalizedPreview.indexOf(normalizedTerm, fromIndex);
+			if (matchIndex < 0) {
+				break;
+			}
+			ranges.push({
+				start: matchIndex,
+				end: matchIndex + normalizedTerm.length,
+			});
+			fromIndex = matchIndex + normalizedTerm.length;
+		}
+	}
+	return ranges.sort((left, right) => left.start - right.start);
+}
+
+function classifyFocusedBridgeTermMatch(
+	term: DirectSubitemsQueryTerm,
+	text: string,
+): DirectSubitemsMatchTier {
+	const normalizedTerm = normalizeForFocusedBridge(term.normalizedText);
+	if (normalizedTerm.length === 0) {
+		return "miss";
+	}
+	const normalizedText = normalizeForFocusedBridge(text);
+	if (normalizedText.includes(normalizedTerm)) {
+		return "exact";
+	}
+	if (
+		normalizedText
+			.split(/[^0-9a-z\u4e00-\u9fff]+/u)
+			.some((part) => part.startsWith(normalizedTerm))
+	) {
+		return "prefix";
+	}
+	return "miss";
+}
+
+function normalizeForFocusedBridge(text: string): string {
+	return text
+		.trim()
+		.toLocaleLowerCase()
+		.replace(/[-_]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function resolveFocusedHeadingAnchorOffset(params: {
+	headingText: string;
+	snapshotText: string;
+	headingOutline: Array<{ line: number; level: number; title: string }>;
+	lineOffsets: number[];
+}): number {
+	const matchingHeading = params.headingOutline.find(
+		(heading) =>
+			normalizeForFocusedBridge(heading.title) ===
+			normalizeForFocusedBridge(params.headingText),
+	);
+	if (matchingHeading) {
+		return params.lineOffsets[matchingHeading.line] ?? 0;
+	}
+	const normalizedSnapshot = normalizeForFocusedBridge(params.snapshotText);
+	const normalizedHeading = normalizeForFocusedBridge(params.headingText);
+	const snapshotOffset = normalizedSnapshot.indexOf(normalizedHeading);
+	return snapshotOffset >= 0 ? snapshotOffset : 0;
+}
+
+function collectFocusedBridgeMatchOccurrences(params: {
+	queryTerms: readonly DirectSubitemsQueryTerm[];
+	previewText: string;
+	anchorOffset: number;
+	maxSpanLength: number;
+}): Array<{
+	termId: string;
+	tier: "exact";
+	start: number;
+	end: number;
+	distancePenalty: number;
+}> {
+	const normalizedPreview = normalizeForFocusedBridge(params.previewText);
+	const occurrences: Array<{
+		termId: string;
+		tier: "exact";
+		start: number;
+		end: number;
+		distancePenalty: number;
+	}> = [];
+	for (const term of params.queryTerms) {
+		const normalizedTerm = normalizeForFocusedBridge(term.normalizedText);
+		if (normalizedTerm.length === 0) {
+			continue;
+		}
+		const localOffset = normalizedPreview.indexOf(normalizedTerm);
+		if (localOffset < 0) {
+			continue;
+		}
+		occurrences.push({
+			termId: term.termId,
+			tier: "exact",
+			start:
+				params.anchorOffset +
+				Math.min(localOffset, Math.max(0, params.maxSpanLength - 1)),
+			end:
+				params.anchorOffset +
+				Math.min(
+					localOffset + normalizedTerm.length,
+					Math.max(1, params.maxSpanLength),
+				),
+			distancePenalty: 0,
+		});
+	}
+	return occurrences;
+}
+
+function buildFocusedBridgeHighlightRanges(
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+	previewText: string,
+): Array<{ start: number; end: number }> {
+	const normalizedPreview = normalizeForFocusedBridge(previewText);
+	const ranges: Array<{ start: number; end: number }> = [];
+	for (const term of queryTerms) {
+		const normalizedTerm = normalizeForFocusedBridge(term.normalizedText);
 		if (normalizedTerm.length === 0) {
 			continue;
 		}

@@ -405,21 +405,17 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 				score: match.score ?? 0,
 				rank: index,
 			})),
-			resolveMetadata: (path) => {
-				const document = docByPath.get(path);
-				if (!document) {
-					return null;
-				}
-				return {
-					aliases: document.aliases
-						?.split(/\s+/)
-						.filter((value) => value.length > 0),
-					headings: document.headings
-						?.split(/\s+/)
-						.filter((value) => value.length > 0),
-				};
-			},
-		});
+		resolveMetadata: (path) => {
+			const document = docByPath.get(path);
+			if (!document) {
+				return null;
+			}
+			return {
+				aliases: parseSyntheticMetadataList(document.aliases),
+				headings: parseSyntheticMetadataList(document.headings),
+			};
+		},
+	});
 
 		const snapshotTextByPath = new Map<string, string>();
 		const blockCandidates = fileCandidates.flatMap((fileCandidate) => {
@@ -494,6 +490,17 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 		metric: finalizeMetric(metric),
 		outcomes,
 	};
+}
+
+function parseSyntheticMetadataList(value: string | undefined): string[] {
+	if (!value) {
+		return [];
+	}
+	const normalized = value
+		.split(/\s*;\s*/u)
+		.map((item) => item.replace(/\s+/g, " ").trim())
+		.filter((item) => item.length > 0);
+	return normalized.length > 0 ? normalized : [];
 }
 
 function summarizeFileAggregates(
@@ -659,6 +666,11 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			lexicalLane: lexicalEvaluation.outcomes,
 			key: "suite",
 		});
+		const focusedWarmStartOutcome = lexicalEvaluation.outcomes.find(
+			(outcome) =>
+				outcome.query === "template incident warm-start recovery" &&
+				outcome.relevantPath === "pkm-en/incidents/incident-review.md",
+		);
 		const worstQueryRegressions = findWorstOutcomeRegressions({
 			baseline: baselineOutcomes,
 			lexicalLane: lexicalEvaluation.outcomes,
@@ -692,5 +704,7 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 		expect(lexicalEvaluation.metric.zeroRate).toBeLessThanOrEqual(
 			Math.min(0.2, finalizedBaselineMetric.zeroRate + 0.06),
 		);
+		expect(focusedWarmStartOutcome?.rank ?? 0).toBeGreaterThanOrEqual(1);
+		expect(focusedWarmStartOutcome?.rank ?? 99).toBeLessThanOrEqual(3);
 	});
 });
