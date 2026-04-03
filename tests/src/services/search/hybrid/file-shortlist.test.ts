@@ -114,6 +114,9 @@ describe("hybrid lexical lane file shortlist", () => {
 		expect(candidates[0]?.filePath).toBe(
 			"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/configure-service-account.md",
 		);
+		expect(candidates[0]?.metadataSignals.pathRootAnchorCoverageCount).toBeGreaterThan(
+			candidates[1]?.metadataSignals.pathRootAnchorCoverageCount ?? 0,
+		);
 		expect(candidates[0]?.metadataSignals.pathAnchorCoverageCount).toBeGreaterThan(
 			candidates[1]?.metadataSignals.pathAnchorCoverageCount ?? 0,
 		);

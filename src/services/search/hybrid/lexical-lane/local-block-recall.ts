@@ -44,7 +44,10 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
 				file,
 				snapshotText,
 				headingOutline,
-				maxBlocksPerFile: params.maxBlocksPerFile,
+				maxBlocksPerFile: resolvePerFileBlockLimit(
+					file.fileRank,
+					params.maxBlocksPerFile,
+				),
 			}),
 		);
 	}
@@ -53,6 +56,19 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
 		blockCandidates,
 		snapshotTextByPath,
 	};
+}
+
+function resolvePerFileBlockLimit(fileRank: number, baseLimit: number): number {
+	if (baseLimit <= 0) {
+		return 0;
+	}
+	if (fileRank <= 0) {
+		return baseLimit + 4;
+	}
+	if (fileRank === 1) {
+		return baseLimit + 2;
+	}
+	return baseLimit;
 }
 
 export function buildHybridLexicalLaneBlockCandidatesForSnapshot(params: {
@@ -526,6 +542,13 @@ function createFileRecallBridgeCandidate(params: {
 	) {
 		return null;
 	}
+	const bridgeMetadataBonus =
+		coverageRatio >= 0.7
+			? (params.file.metadataSignals.aliasHit ? 18 : 0) +
+				params.file.metadataSignals.aliasTokenCoverageCount * 8 +
+				params.file.metadataSignals.basenameTokenCoverageCount * 5 +
+				params.file.metadataSignals.headingTokenCoverageCount * 4
+			: 0;
 	matchOccurrences.sort((left, right) => left.start - right.start);
 	const anchorOffset =
 		matchOccurrences[0]?.start ??
@@ -561,6 +584,7 @@ function createFileRecallBridgeCandidate(params: {
 			exactCount * 22 +
 			prefixCount * 8 +
 			coverageRatio * 96 +
+			bridgeMetadataBonus +
 			Math.max(0, 8 - params.file.fileRank) * 10,
 		localSignals: {
 			coverageCount,

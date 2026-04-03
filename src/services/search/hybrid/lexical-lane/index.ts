@@ -154,6 +154,7 @@ function computePoolPriorScore(candidate: HybridLexicalLaneBlockCandidate): numb
 		(metadata.pathPrefix ? 22 : 0) +
 		metadata.pathTokenCoverageCount * 4 +
 		metadata.pathAnchorCoverageCount * 140 +
+		metadata.pathRootAnchorCoverageCount * 120 +
 		metadata.folderHintCount * 20 +
 		(metadata.templateFolderHit ? 170 : 0) -
 		(metadata.archivePenaltyEligible ? 20 : 0) +

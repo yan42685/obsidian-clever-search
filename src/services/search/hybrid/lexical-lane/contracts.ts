@@ -26,6 +26,7 @@ export type HybridLexicalLaneMetadataSignals = {
 	pathPrefix: boolean;
 	pathTokenCoverageCount: number;
 	pathAnchorCoverageCount: number;
+	pathRootAnchorCoverageCount: number;
 	folderHintCount: number;
 	templateFolderHit: boolean;
 	archivePenaltyEligible: boolean;

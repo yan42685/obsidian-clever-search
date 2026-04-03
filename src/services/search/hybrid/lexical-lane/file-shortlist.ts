@@ -130,14 +130,13 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 	const queryTokens = tokenizeNavigationTokens(params.queryText);
 	const queryAnchorTokens = extractStructuredAnchorTokens(params.queryText);
 	const basenameTokens = tokenizeNavigationTokens(FileUtil.getBasename(params.path));
-	const pathTokens = params.path
-		.split("/")
+	const pathSegments = params.path.split("/");
+	const pathTokens = pathSegments
 		.flatMap((segment) => tokenizeNavigationTokens(segment));
-	const pathAnchorTokens = params.path
-		.split("/")
+	const pathAnchorTokens = pathSegments
 		.flatMap((segment) => extractStructuredAnchorTokens(segment));
-	const folderTokens = params.path
-		.split("/")
+	const pathRootAnchorTokens = extractStructuredAnchorTokens(pathSegments[0] ?? "");
+	const folderTokens = pathSegments
 		.slice(0, -1)
 		.flatMap((segment) => tokenizeNavigationTokens(segment));
 	const normalizedHeadings = params.headings.map(normalizeKey);
@@ -185,6 +184,10 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 		pathAnchorCoverageCount: countNavigationTokenMatches(
 			queryAnchorTokens,
 			pathAnchorTokens,
+		),
+		pathRootAnchorCoverageCount: countNavigationTokenMatches(
+			queryAnchorTokens,
+			pathRootAnchorTokens,
 		),
 		folderHintCount: countNavigationTokenMatches(queryTokens, folderTokens),
 		templateFolderHit:
@@ -345,6 +348,7 @@ function computeHybridLexicalLaneFileCandidateScore(
 		(metadata.pathPrefix ? 28 : 0) +
 		metadata.pathTokenCoverageCount * 6 +
 		metadata.pathAnchorCoverageCount * 240 +
+		metadata.pathRootAnchorCoverageCount * 180 +
 		metadata.folderHintCount * 34 +
 		(metadata.templateFolderHit ? 220 : 0) -
 		(metadata.archivePenaltyEligible ? 36 : 0) +
