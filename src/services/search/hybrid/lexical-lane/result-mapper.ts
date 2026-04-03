@@ -79,8 +79,8 @@ function computeHybridLexicalLaneFileAggregateScore(
 	const secondary = subItems
 		.slice(1, 4)
 		.reduce((sum, subItem, index) => {
-			const weight = index === 0 ? 0.35 : index === 1 ? 0.18 : 0.1;
+			const weight = index === 0 ? 0.24 : index === 1 ? 0.12 : 0.06;
 			return sum + (subItem.score ?? 0) * weight;
 		}, 0);
-	return primary + secondary + Math.min(12, Math.max(0, subItems.length - 1) * 3);
+	return primary + secondary + Math.min(6, Math.max(0, subItems.length - 1) * 1.5);
 }

@@ -23,7 +23,11 @@ export type HybridLexicalLaneMetadataSignals = {
 	pathExact: boolean;
 	pathPrefix: boolean;
 	headingMetaHit: boolean;
+	headingExactCount: number;
+	headingPrefixCount: number;
 	aliasHit: boolean;
+	aliasExactCount: number;
+	aliasPrefixCount: number;
 };
 
 export type HybridLexicalLaneMetadataValues = {

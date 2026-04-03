@@ -169,6 +169,7 @@ function computeHybridLexicalLaneFileCandidateScore(
 	const metadata = candidate.metadataSignals;
 	return (
 		Math.log1p(Math.max(0, candidate.fileScore)) * 44 +
+		Math.max(0, 8 - candidate.fileRank) * 18 +
 		(metadata.basenameExact ? 260 : 0) +
 		(metadata.basenamePrefix ? 132 : 0) +
 		(metadata.pathExact ? 72 : 0) +
