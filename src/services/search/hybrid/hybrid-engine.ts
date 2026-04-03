@@ -1,8 +1,7 @@
 import { OuterSetting } from "src/globals/plugin-setting";
-import { EngineType, FileItem, FileSubItem } from "src/globals/search-types";
+import type { FileItem } from "src/globals/search-types";
 import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
 import { Database } from "src/services/database/database";
-import { DataProvider } from "src/services/obsidian/user-data/data-provider";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
@@ -11,7 +10,6 @@ import {
   buildRawChunkFromOffsets,
   chunkFile,
   chunkFileRange,
-  createChunkContextBuilderFromOutline,
   createChunkEmbeddingInputBuilder,
 } from "./chunker";
 import { BM25Engine, type BM25RuntimeMemoryBreakdown } from "./bm25";
@@ -38,35 +36,23 @@ import {
   chunkToRow,
   getBm25BlobVersion,
   hnswToBlob,
-  rowToChunk,
   rowToChunkVectorRecords,
 } from "./hybrid-store";
 import type {
-  Chunk,
   HeadingOutlineEntry,
   RawChunk,
   StoredVector,
   VectorPrecision,
 } from "./hybrid-types";
 import {
-  buildHybridQueryProfile,
-  getHybridBm25ProbeLimit,
-  resolveHybridRecallBudget,
-  type RankedResult,
-} from "./ranking";
-import {
   buildHybridLexicalLaneFileItems,
   buildHybridLexicalLaneFileShortlist,
   HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
   prepareHybridLexicalLaneSearch,
   type HybridLexicalLaneDisplayCandidate,
-  type HybridLexicalLaneFileCandidate,
 } from "./lexical-lane";
 import {
-  HybridRerankError,
-  HybridRerankTimeoutError,
   HybridReranker,
-  SEARCH_EMBED_TOKEN_KEY,
   type RerankCandidate,
 } from "./reranker";
 import { EMBED_DIM } from "./hybrid-types";
@@ -77,9 +63,6 @@ import {
 import { analyzeHybridStoredFileConsistency } from "./hybrid-consistency";
 import { FileSnapshotStore } from "../shared/file-snapshot-store";
 
-const SEARCH_EF = 80;
-const HYBRID_BM25_USE_PROXIMITY = false;
-const HYBRID_BM25_ENABLE_QUERY_EXPANSION = true;
 const DEFAULT_MAX_FILE_RESULTS = 10;
 const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 50;
@@ -99,16 +82,6 @@ type HybridIndexMode = "full" | "without-embedding";
 
 type Bm25OnlyIndexedFileRefMeta = {
   lastIncrementalEmbedAt?: number;
-};
-
-type SmallChunkCandidate = {
-  id: number;
-  filePath: string;
-  text: string;
-  rerankText: string;
-  row: number;
-  col: number;
-  score: number;
 };
 
 type StoredFileIndexState = {
@@ -163,7 +136,6 @@ function throwIfHybridQueryAborted(signal?: AbortSignal): void {
 export class HybridEngine {
   private readonly db = getInstance(Database);
   private readonly setting = getInstance(OuterSetting);
-  private readonly dataProvider = getInstance(DataProvider);
   private readonly embedder = new Embedder();
   private readonly reranker = new HybridReranker();
   private readonly bm25 = new BM25Engine();
@@ -580,111 +552,6 @@ export class HybridEngine {
         fallbackToLexicalSearch: true,
       };
     }
-  }
-
-  async searchWithBm25Baseline(
-    query: string,
-    topK = this.defaultResultCount,
-  ): Promise<FileItem[]> {
-    if (!this.isEnabled() || !this._ready || !query.trim()) return [];
-    let fallbackNoticeKey: LocaleKey | null = this._canSearch
-      ? null
-      : "hybridNotice.searchFallbackToBm25";
-
-    const bm25Probe = this.bm25
-      .search(query, getHybridBm25ProbeLimit(), {
-        useProximity: HYBRID_BM25_USE_PROXIMITY,
-        enableQueryExpansion: HYBRID_BM25_ENABLE_QUERY_EXPANSION,
-      })
-      .map((result) => ({
-        id: result.docId,
-        score: result.score,
-      }));
-    const queryProfile = buildHybridQueryProfile();
-    const recallBudget = resolveHybridRecallBudget();
-    const bm25Small = bm25Probe.slice(0, recallBudget.bm25RecallLimit);
-    const denseSearchEf = Math.max(SEARCH_EF, queryProfile.searchEf);
-
-    let denseSmall: RankedResult[] = [];
-    try {
-      if (this._canSearch) {
-        const embedded = await this.embedder.embedQuery(
-          query,
-          this.precision,
-          SEARCH_EMBED_TOKEN_KEY,
-        );
-        denseSmall = this.hnswSmall
-          .search(embedded, recallBudget.denseRecallLimit, denseSearchEf)
-          .map((result) => ({ id: result.id, score: result.score }));
-      }
-    } catch (error) {
-      logger.warn(
-        "hybrid query embedding failed; rerank will use BM25-only chunks.",
-        error,
-      );
-      fallbackNoticeKey = "hybridNotice.searchFallbackToBm25";
-    }
-
-    const smallCandidates = await this.loadDedupedSmallChunkCandidates([
-      bm25Small,
-      denseSmall,
-    ]);
-    const bm25CandidateIds = new Set(bm25Small.map((item) => item.id));
-    const bm25FallbackCandidates = smallCandidates.filter((candidate) =>
-      bm25CandidateIds.has(candidate.id),
-    );
-    if (smallCandidates.length === 0) {
-      this.lastSearchFallbackNoticeKey = fallbackNoticeKey;
-      return [];
-    }
-
-    try {
-      const items = await this.rerankAndBuildFileItems(
-        query,
-        smallCandidates,
-        topK,
-      );
-      this.lastSearchFallbackNoticeKey = fallbackNoticeKey;
-      return items;
-    } catch (error) {
-      const fallbackCandidates = bm25FallbackCandidates;
-      if (error instanceof HybridRerankError) {
-        logger.warn(
-          "hybrid rerank failed; falling back to BM25 ordering.",
-          error,
-        );
-        this.lastSearchFallbackNoticeKey =
-          "hybridNotice.searchRerankFallbackToBm25";
-        return this.buildFileItemsFromSmallChunks(
-          query,
-          fallbackCandidates,
-          topK,
-        );
-      }
-      logger.warn(
-        "hybrid search candidate ordering failed; falling back to BM25 ordering.",
-        error,
-      );
-      this.lastSearchFallbackNoticeKey =
-        fallbackNoticeKey ?? "hybridNotice.searchFallbackToBm25";
-      return this.buildFileItemsFromSmallChunks(
-        query,
-        fallbackCandidates,
-        topK,
-      );
-    }
-  }
-
-  async searchWithLexicalLane(
-    query: string,
-    topK = this.defaultResultCount,
-  ): Promise<FileItem[]> {
-    if (!this.isEnabled() || !this._ready || !query.trim()) {
-      return [];
-    }
-    const prepared = await this.prepareRecall(query, topK);
-    this.lastSearchFallbackNoticeKey = prepared.fallbackNoticeKey;
-    return this.buildItemsFromPreparedRecall(prepared, topK);
   }
 
   private async rerankDisplayCandidates(
@@ -1376,177 +1243,6 @@ export class HybridEngine {
     return await run(0);
   }
 
-  private async loadDedupedSmallChunkCandidates(
-    rankings: RankedResult[][],
-  ): Promise<SmallChunkCandidate[]> {
-    const merged: RankedResult[] = [];
-    const seenIds = new Set<number>();
-
-    for (const ranking of rankings) {
-      for (const item of ranking) {
-        if (seenIds.has(item.id)) continue;
-        seenIds.add(item.id);
-        merged.push(item);
-      }
-    }
-
-    return this.loadSmallChunkCandidates(merged);
-  }
-
-  private async loadSmallChunkCandidates(
-    ranking: RankedResult[],
-  ): Promise<SmallChunkCandidate[]> {
-    const rows = await this.db.db.hybridChunks.bulkGet(
-      ranking.map((item) => item.id),
-    );
-    const snapshotByPath = await this.loadSnapshotTextByPaths(
-      rows
-        .filter((row): row is ChunkRow => row !== undefined)
-        .map((row) => row.filePath),
-    );
-    const contextBuilderByPath =
-      this.buildRerankContextBuilderByPath(snapshotByPath);
-    const chunksById = new Map<number, Chunk>();
-    for (const row of rows) {
-      if (!row?.id) continue;
-      const plainText = snapshotByPath.get(row.filePath);
-      if (!plainText) continue;
-      chunksById.set(row.id, rowToChunk(row, plainText));
-    }
-
-    return ranking
-      .map((item) => {
-        const chunk = chunksById.get(item.id);
-        if (!chunk) return null;
-        const buildContext = contextBuilderByPath.get(chunk.filePath);
-        const context = buildContext?.(chunk.startLine) ?? "";
-        return {
-          id: chunk.id,
-          filePath: chunk.filePath,
-          text: chunk.text,
-          rerankText: context ? `${context}\n\n${chunk.text}` : chunk.text,
-          row: chunk.startLine,
-          col: chunk.startCol,
-          score: item.score,
-        } as SmallChunkCandidate;
-      })
-      .filter((item): item is SmallChunkCandidate => item !== null);
-  }
-
-  private async loadSnapshotTextByPaths(
-    filePaths: string[],
-  ): Promise<Map<string, string>> {
-    const uniquePaths = Array.from(new Set(filePaths));
-    if (uniquePaths.length === 0) {
-      return new Map<string, string>();
-    }
-
-    const indexedRefs = await this.db.db.hybridIndexedFileRefs.bulkGet(uniquePaths);
-    const expectedGenerations = new Map<string, number | undefined>();
-    const safePaths: string[] = [];
-
-    for (let index = 0; index < uniquePaths.length; index++) {
-      const indexedRef = indexedRefs[index];
-      if (!indexedRef) {
-        continue;
-      }
-      safePaths.push(uniquePaths[index]);
-      expectedGenerations.set(uniquePaths[index], indexedRef.generation);
-    }
-
-    return await this.fileSnapshotStore.readGenerationAlignedTexts(
-      safePaths,
-      expectedGenerations,
-    );
-  }
-
-  private async rerankAndBuildFileItems(
-    query: string,
-    smallCandidates: SmallChunkCandidate[],
-    topK: number,
-  ): Promise<FileItem[]> {
-    const rerankResults = await this.reranker.rerank(
-      query,
-      smallCandidates.map(
-        (candidate) =>
-          ({
-            id: candidate.id,
-            filePath: candidate.filePath,
-            text: candidate.rerankText,
-            startLine: candidate.row,
-            startCol: candidate.col,
-            endLine: candidate.row,
-            recallScore: candidate.score,
-          }) as RerankCandidate,
-      ),
-      topK,
-    );
-
-    const rerankScoreById = new Map(
-      rerankResults.map((item) => [item.id, item.score]),
-    );
-    const orderedSmallCandidates = smallCandidates
-      .filter((candidate) => rerankScoreById.has(candidate.id))
-      .map((candidate) => ({
-        ...candidate,
-        score: rerankScoreById.get(candidate.id) ?? candidate.score,
-      }))
-      .sort((a, b) => b.score - a.score);
-
-    return this.buildFileItemsFromSmallChunks(
-      query,
-      orderedSmallCandidates,
-      topK,
-    );
-  }
-
-  private buildFileItemsFromSmallChunks(
-    query: string,
-    orderedSmallCandidates: SmallChunkCandidate[],
-    topK: number,
-  ): FileItem[] {
-    const limitedCandidates = orderedSmallCandidates.slice(0, topK);
-    const byFile = new Map<
-      string,
-      { filePath: string; subItems: FileSubItem[]; bestScore: number }
-    >();
-
-    for (const candidate of limitedCandidates) {
-      const entry = byFile.get(candidate.filePath) ?? {
-        filePath: candidate.filePath,
-        subItems: [],
-        bestScore: candidate.score,
-      };
-      entry.bestScore = Math.max(entry.bestScore, candidate.score);
-      entry.subItems.push(
-        new FileSubItem(
-          candidate.text,
-          candidate.row,
-          candidate.col,
-          candidate.score,
-          candidate.text,
-        ),
-      );
-      if (!byFile.has(candidate.filePath)) {
-        byFile.set(candidate.filePath, entry);
-      }
-    }
-
-    return Array.from(byFile.values())
-      .sort((a, b) => b.bestScore - a.bestScore)
-      .map(
-        (entry) =>
-          new FileItem(
-            EngineType.SEMANTIC,
-            entry.filePath,
-            [query],
-            [],
-            entry.subItems,
-            null,
-          ),
-      );
-  }
-
   private async persistIndices(): Promise<void> {
     await Promise.all([this.persistBm25(), this.persistHnsw()]);
   }
@@ -1800,27 +1496,6 @@ export class HybridEngine {
     }
   }
 
-  private buildRerankContextBuilderByPath(
-    snapshotByPath: Map<string, string>,
-  ): Map<string, (startLine: number) => string> {
-    const builders = new Map<string, (startLine: number) => string>();
-    for (const [filePath, plainText] of snapshotByPath) {
-      const headingOutline = this.dataProvider.getHeadingOutlineForText(
-        filePath,
-        plainText,
-      );
-      builders.set(
-        filePath,
-        createChunkContextBuilderFromOutline(
-          filePath,
-          countLines(plainText),
-          headingOutline,
-        ),
-      );
-    }
-    return builders;
-  }
-
   private isExcludedPath(filePath: string): boolean {
     const excludedPaths = this.setting.hybrid.excludedPaths ?? [];
     return excludedPaths.some(
@@ -1828,19 +1503,5 @@ export class HybridEngine {
         filePath === excludedPath || filePath.startsWith(`${excludedPath}/`),
     );
   }
-}
-
-function countLines(text: string): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  let count = 1;
-  for (let index = 0; index < text.length; index++) {
-    if (text[index] === "\n") {
-      count++;
-    }
-  }
-  return count;
 }
 

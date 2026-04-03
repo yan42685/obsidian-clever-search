@@ -237,7 +237,7 @@ describe("mounted modal helper", () => {
 			},
 			result: new SearchResult("prepared-order", []),
 		};
-		const fallbackNoticeKey = "hybridNotice.searchRerankFallbackToBm25";
+		const fallbackNoticeKey = "hybridNotice.searchFallbackToBm25";
 		const finalResult = new SearchResult("prepared-order", [], fallbackNoticeKey, false);
 		const setCachedResult = jest.fn();
 		const searchService = {

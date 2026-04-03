@@ -19,6 +19,14 @@ import type {
 	HybridLexicalLaneFileCandidate,
 } from "./contracts";
 
+const HYBRID_LEXICAL_LANE_SEED_SPAN_OPTIONS = {
+	maxChars: 220,
+	mergeGap: 32,
+	contextLeft: 24,
+	contextRight: 40,
+	boundaryLookaround: 24,
+} as const;
+
 export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
 	queryText: string;
 	files: readonly HybridLexicalLaneFileCandidate[];
@@ -90,13 +98,9 @@ export function buildHybridLexicalLaneBlockCandidatesForSnapshot(params: {
 	const directSubitems = buildDirectSubitemsExactCandidates({
 		queryText: params.queryText,
 		snapshotText: params.snapshotText,
-		options: {
-			maxChars: 220,
-			mergeGap: 32,
-			contextLeft: 24,
-			contextRight: 40,
-			boundaryLookaround: 24,
-		},
+		// This only seeds local lexical spans; final display/rerank text comes from
+		// the shared snippet builder, not this character budget.
+		options: HYBRID_LEXICAL_LANE_SEED_SPAN_OPTIONS,
 	});
 	const lineOffsets = buildLineOffsets(params.snapshotText);
 	const limit = Math.max(0, params.maxBlocksPerFile);
