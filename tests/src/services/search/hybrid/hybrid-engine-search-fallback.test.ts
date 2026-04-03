@@ -154,6 +154,7 @@ describe("HybridEngine search fallback notices", () => {
 				},
 			],
 			fallbackNoticeKey,
+			fallbackToLexicalSearch: false,
 		};
 	}
 
@@ -165,6 +166,7 @@ describe("HybridEngine search fallback notices", () => {
 		engine.finalizePreparedRecall = jest.fn().mockResolvedValue({
 			items: [{ id: 1 }],
 			fallbackNoticeKey: "hybridNotice.searchFallbackToBm25",
+			fallbackToLexicalSearch: false,
 		});
 
 		const results = await engine.search("alpha", 10);
@@ -173,7 +175,7 @@ describe("HybridEngine search fallback notices", () => {
 		expect(engine.consumeSearchFallbackNoticeKey()).toBe("hybridNotice.searchFallbackToBm25");
 	});
 
-	test("finalizePreparedRecall uses a timeout-specific notice when rerank times out", async () => {
+	test("finalizePreparedRecall requests lexical fallback when rerank times out", async () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const { HybridRerankTimeoutError } = require("src/services/search/hybrid/reranker");
 		const engine = new HybridEngine() as any;
@@ -186,10 +188,11 @@ describe("HybridEngine search fallback notices", () => {
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
 		expect(finalized.items).toBe(baseItems);
-		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchRerankTimeoutFallbackToBm25");
+		expect(finalized.fallbackNoticeKey).toBeNull();
+		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
 
-	test("finalizePreparedRecall keeps prepared ordering and uses a rerank-specific notice when rerank fails", async () => {
+	test("finalizePreparedRecall keeps prepared ordering and requests lexical fallback when rerank fails", async () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const { HybridRerankError } = require("src/services/search/hybrid/reranker");
 		const engine = new HybridEngine() as any;
@@ -202,7 +205,8 @@ describe("HybridEngine search fallback notices", () => {
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
 		expect(finalized.items).toBe(baseItems);
-		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchRerankFallbackToBm25");
+		expect(finalized.fallbackNoticeKey).toBeNull();
+		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
 
 	test("finalizePreparedRecall keeps the earlier fallback notice when rerank also fails", async () => {
@@ -222,5 +226,6 @@ describe("HybridEngine search fallback notices", () => {
 
 		expect(finalized.items).toBe(baseItems);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToBm25");
+		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
 });

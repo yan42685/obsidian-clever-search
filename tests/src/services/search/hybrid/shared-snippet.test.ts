@@ -119,7 +119,6 @@ describe("buildHybridSharedSnippet", () => {
 		const payload = buildHybridSharedSnippet({
 			snapshotText: "ignored",
 			candidate,
-			maxChars: 220,
 		});
 
 		expect(payload.headerText).toBe("");
@@ -170,7 +169,6 @@ describe("buildHybridSharedSnippet", () => {
 		const payload = buildHybridSharedSnippet({
 			snapshotText,
 			candidate,
-			maxChars: 220,
 		});
 
 		expect(payload.headerText).toBe("File: incident-review\nSection: Notes");

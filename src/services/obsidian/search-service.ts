@@ -208,6 +208,9 @@ export class SearchService {
 			prepared.topK,
 			signal,
 		);
+		if (finalized.fallbackToLexicalSearch) {
+			return await this.searchInVaultLexical(prepared.query);
+		}
 		return this.buildHybridSearchResult(
 			sourcePath,
 			finalized.items,

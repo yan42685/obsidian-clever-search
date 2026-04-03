@@ -14,7 +14,6 @@ import { buildHybridSharedSnippetBodyWindow } from "./window-builder";
 export function buildHybridSharedSnippet(params: {
 	snapshotText: string;
 	candidate: HybridLexicalLaneBlockCandidate | HybridLexicalLaneRankedBlockCandidate;
-	maxChars: number;
 }): HybridSharedSnippetPayload {
 	const { snapshotText, candidate } = params;
 	if (candidate.bridgePreviewText) {

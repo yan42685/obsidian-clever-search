@@ -77,7 +77,7 @@ jest.mock("src/services/search/hybrid/hybrid-engine", () => ({
 	HybridEngine: jest.fn().mockImplementation(() => mockHybridEngine),
 }));
 
-describe("SearchService hybrid rerank fallback notices", () => {
+describe("SearchService hybrid rerank fallback behavior", () => {
 	beforeEach(() => {
 		jest.resetModules();
 		mockInstanceMap.clear();
@@ -147,7 +147,7 @@ describe("SearchService hybrid rerank fallback notices", () => {
 		return new SearchService();
 	}
 
-	function configurePreparedFlow(finalNoticeKey: string) {
+	function configurePreparedFlow(finalNoticeKey: string | null = null) {
 		const prepared = {
 			query: "alpha",
 			topK: 10,
@@ -160,11 +160,12 @@ describe("SearchService hybrid rerank fallback notices", () => {
 		mockHybridEngine.finalizePreparedRecall.mockResolvedValue({
 			items: [{ id: "final-item" }],
 			fallbackNoticeKey: finalNoticeKey,
+			fallbackToLexicalSearch: false,
 		});
 	}
 
-	test("surfaces a timeout-specific notice when rerank times out", async () => {
-		configurePreparedFlow("hybridNotice.searchRerankTimeoutFallbackToBm25");
+	test("keeps hybrid results and notice flow when finalize succeeds normally", async () => {
+		configurePreparedFlow("hybridNotice.searchFallbackToBm25");
 		const service = createHarness();
 
 		const result = await service.searchInVaultHybrid("alpha");
@@ -175,22 +176,45 @@ describe("SearchService hybrid rerank fallback notices", () => {
 			10,
 			undefined,
 		);
-		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchRerankTimeoutFallbackToBm25");
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToBm25");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchRerankTimeoutFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
 		]);
 	});
 
-	test("surfaces the generic rerank fallback notice for non-timeout rerank failures", async () => {
-		configurePreparedFlow("hybridNotice.searchRerankFallbackToBm25");
+	test("falls back to the normal lexical search path when finalize requests lexical fallback", async () => {
+		configurePreparedFlow();
 		const service = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/finalize-lexical.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 11,
+				directSubItems: [],
+				nativeSubItemsReady: true,
+			},
+		]);
+		mockHybridEngine.finalizePreparedRecall.mockResolvedValue({
+			items: [{ id: "stale-hybrid-item" }],
+			fallbackNoticeKey: "hybridNotice.searchFallbackToBm25",
+			fallbackToLexicalSearch: true,
+		});
 
 		const result = await service.searchInVaultHybrid("alpha");
 
-		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchRerankFallbackToBm25");
-		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchRerankFallbackToBm25",
-		]);
+		expect(mockHybridEngine.finalizePreparedRecall).toHaveBeenCalledWith(
+			expect.objectContaining({ query: "alpha" }),
+			10,
+			undefined,
+		);
+		expect(lexicalEngine.searchFiles).toHaveBeenCalled();
+		expect(result.items).toHaveLength(1);
+		expect((result.items[0] as { path: string }).path).toBe("notes/finalize-lexical.md");
+		expect(result.hybridFallbackNoticeKey).toBeNull();
+		expect(mockNotices).toEqual([]);
 	});
 
 	test("falls back to the normal lexical search path when hybrid requests lexical fallback", async () => {
@@ -256,13 +280,13 @@ describe("SearchService hybrid rerank fallback notices", () => {
 		const preparedResult = new SearchResult(
 			"notes/current.md",
 			[],
-			"hybridNotice.searchRerankFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
 			false,
 		);
 		const finalResult = new SearchResult(
 			"notes/current.md",
 			[],
-			"hybridNotice.searchRerankFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
 			false,
 		);
 
@@ -270,7 +294,7 @@ describe("SearchService hybrid rerank fallback notices", () => {
 		service.notifyHybridFallback(finalResult);
 
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchRerankFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
 		]);
 	});
 
@@ -280,7 +304,7 @@ describe("SearchService hybrid rerank fallback notices", () => {
 		const fallbackResult = new SearchResult(
 			"notes/current.md",
 			[],
-			"hybridNotice.searchRerankFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
 			false,
 		);
 		const cleanResult = new SearchResult("notes/current.md", [], null, false);
@@ -290,8 +314,8 @@ describe("SearchService hybrid rerank fallback notices", () => {
 		service.notifyHybridFallback(fallbackResult);
 
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchRerankFallbackToBm25",
-			"hybridNotice.searchRerankFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
+			"hybridNotice.searchFallbackToBm25",
 		]);
 	});
 

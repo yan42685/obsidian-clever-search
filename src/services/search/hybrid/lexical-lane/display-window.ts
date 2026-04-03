@@ -1,7 +1,4 @@
 import { FileUtil } from "src/utils/file-util";
-import {
-	HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
-} from "./config";
 import type {
 	HybridLexicalLaneBlockCandidate,
 	HybridLexicalLaneDisplayCandidate,
@@ -12,7 +9,6 @@ import { buildHybridSharedSnippet } from "../shared-snippet/build-shared-snippet
 export function buildHybridLexicalLaneDisplayCandidate(params: {
 	snapshotText: string;
 	candidate: HybridLexicalLaneBlockCandidate | HybridLexicalLaneRankedBlockCandidate;
-	maxChars?: number;
 }): HybridLexicalLaneDisplayCandidate {
 	const { snapshotText, candidate } = params;
 	const score =
@@ -23,7 +19,6 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 		const payload = buildHybridSharedSnippet({
 			snapshotText,
 			candidate,
-			maxChars: params.maxChars ?? HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
 		});
 		return {
 			filePath: candidate.filePath,
@@ -55,7 +50,6 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 	const payload = buildHybridSharedSnippet({
 		snapshotText,
 		candidate,
-		maxChars: params.maxChars ?? HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS,
 	});
 	return {
 		filePath: candidate.filePath,
@@ -89,7 +83,6 @@ export function buildHybridLexicalLaneDisplayCandidates(params: {
 		| HybridLexicalLaneRankedBlockCandidate
 	)[];
 	snapshotTextByPath: ReadonlyMap<string, string>;
-	maxChars?: number;
 }): HybridLexicalLaneDisplayCandidate[] {
 	return params.candidates
 		.map((candidate) => {
@@ -100,7 +93,6 @@ export function buildHybridLexicalLaneDisplayCandidates(params: {
 			return buildHybridLexicalLaneDisplayCandidate({
 				snapshotText,
 				candidate,
-				maxChars: params.maxChars,
 			});
 		})
 		.filter(

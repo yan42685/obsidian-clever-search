@@ -3,7 +3,6 @@ export const HYBRID_LEXICAL_LANE_MAX_BLOCKS_PER_FILE = 8;
 export const HYBRID_LEXICAL_LANE_GLOBAL_POOL_MAX = 48;
 export const HYBRID_LEXICAL_LANE_RERANK_TOP_K = 16;
 export const HYBRID_LEXICAL_LANE_DISPLAY_TOP_K = 8;
-export const HYBRID_LEXICAL_LANE_DISPLAY_MAX_CHARS = 220;
 
 export type HybridLexicalLaneRankerWeights = {
 	filePrior: number;
