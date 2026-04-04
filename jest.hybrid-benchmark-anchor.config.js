@@ -7,9 +7,9 @@ module.exports = {
 		"^obsidian$": "<rootDir>/tests/__mocks__/obsidian.js",
 	},
 	roots: ["<rootDir>/tests/src/services/search"],
-	setupFilesAfterEnv: ["<rootDir>/tests/src/jest-hybrid-bm25-setup.js"],
+	setupFilesAfterEnv: ["<rootDir>/tests/src/jest-hybrid-benchmark-anchor-setup.js"],
 	testEnvironment: "node",
-	testMatch: ["**/hybrid-bm25.test.ts"],
+	testMatch: ["**/hybrid-benchmark-anchor.test.ts"],
 	transform: {
 		"^.+\\.(js|ts)$": [
 			"babel-jest",

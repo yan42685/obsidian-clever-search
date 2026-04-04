@@ -8,7 +8,7 @@
 		"dev": "node esbuild.config.mjs development",
 		"test": "node node_modules/jest/bin/jest.js --config jest.config.js --runInBand",
 		"test:coverage": "node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --coverage",
-		"test:hybrid-bm25": "node node_modules/jest/bin/jest.js --config jest.hybrid-bm25.config.js --runInBand",
+		"test:hybrid-benchmark-anchor": "node node_modules/jest/bin/jest.js --config jest.hybrid-benchmark-anchor.config.js --runInBand",
 		"test:hnsw-recall": "node node_modules/jest/bin/jest.js --config jest.hnsw-recall.config.js --runInBand",
 		"typecheck:build": "tsc -p tsconfig.build.json -noEmit -skipLibCheck",
 		"typecheck:test": "tsc -p tsconfig.test.json -noEmit -skipLibCheck",

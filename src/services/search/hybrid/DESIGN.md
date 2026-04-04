@@ -48,7 +48,8 @@ Chunk BM25 remains in the repository only as an evaluation anchor.
 
 Current anchor test:
 
-- `tests/src/services/search/hybrid-bm25.test.ts`
+- `tests/src/services/search/hybrid-benchmark-anchor.test.ts`
+- `npm run test:hybrid-benchmark-anchor`
 
 This comparison exists to answer one question: whether lexical lane continues to
 replace the old chunk BM25 lane without regressing the agreed quality and latency
@@ -58,6 +59,26 @@ The benchmark output should be read as:
 
 - `bm25Baseline`: retired chunk BM25 anchor
 - `lexicalLane`: current runtime-equivalent lexical lane path
+
+Benchmark anchor should now be treated as frozen unless the team explicitly
+re-baselines it. The fixed evaluation fields are:
+
+- `top1`
+- `top3`
+- `top5`
+- `zeroRate`
+- `avgMsPerQuery`
+- `p100Ms`
+
+Current frozen anchor, measured on April 4, 2026 with
+`npm run test:hybrid-benchmark-anchor`:
+
+- `lexicalLane.top1 = 0.818`
+- `lexicalLane.top3 = 0.983`
+- `lexicalLane.top5 = 1`
+- `lexicalLane.zeroRate = 0`
+- `lexicalLane.avgMsPerQuery = 43.497`
+- `lexicalLane.p100Ms = 126.392`
 
 ## Metrics To Watch
 
@@ -89,4 +110,4 @@ For current behavior, the code is the source of truth:
 - `src/services/search/hybrid/hybrid-engine.ts`
 - `src/services/search/hybrid/lexical-lane/`
 - `src/services/search/coverage-lexical/`
-- `tests/src/services/search/hybrid-bm25.test.ts`
+- `tests/src/services/search/hybrid-benchmark-anchor.test.ts`
