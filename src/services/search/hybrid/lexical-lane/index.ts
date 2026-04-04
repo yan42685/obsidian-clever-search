@@ -34,6 +34,7 @@ export async function prepareHybridLexicalLaneSearch(params: {
 	rerankTopK?: number;
 	displayTopK?: number;
 	globalPoolMax?: number;
+	displayMergeMode?: import("./result-merge").HybridLexicalLaneDisplayMergeMode;
 }): Promise<HybridLexicalLaneDisplayCandidate[]> {
 	const files =
 		params.files !== undefined
@@ -55,6 +56,7 @@ export async function prepareHybridLexicalLaneSearch(params: {
 		rerankTopK: params.rerankTopK,
 		displayTopK: params.displayTopK,
 		globalPoolMax: params.globalPoolMax,
+		displayMergeMode: params.displayMergeMode,
 	});
 }
 
@@ -64,6 +66,7 @@ export function runHybridLexicalLaneCandidatePipeline(params: {
 	rerankTopK?: number;
 	displayTopK?: number;
 	globalPoolMax?: number;
+	displayMergeMode?: import("./result-merge").HybridLexicalLaneDisplayMergeMode;
 }): HybridLexicalLaneDisplayCandidate[] {
 	const pool = preselectHybridLexicalLaneBlockCandidates(
 		params.blockCandidates,
@@ -81,6 +84,7 @@ export function runHybridLexicalLaneCandidatePipeline(params: {
 	return mergeHybridLexicalLaneDisplayCandidates(
 		displayCandidates.sort((left, right) => right.score - left.score),
 		params.displayTopK ?? HYBRID_LEXICAL_LANE_DISPLAY_TOP_K,
+		{ mode: params.displayMergeMode },
 	);
 }
 
@@ -91,6 +95,7 @@ export function runHybridLexicalLaneFileItemPipeline(params: {
 	rerankTopK?: number;
 	displayTopK?: number;
 	globalPoolMax?: number;
+	displayMergeMode?: import("./result-merge").HybridLexicalLaneDisplayMergeMode;
 }) {
 	return buildHybridLexicalLaneFileItems(
 		params.queryText,
@@ -106,6 +111,7 @@ export async function runHybridLexicalLaneSearch(params: {
 	rerankTopK?: number;
 	displayTopK?: number;
 	globalPoolMax?: number;
+	displayMergeMode?: import("./result-merge").HybridLexicalLaneDisplayMergeMode;
 }) {
 	return buildHybridLexicalLaneFileItems(
 		params.queryText,

@@ -378,6 +378,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	documents: readonly IndexedDocument[];
 	queryCases: readonly QueryCase[];
 	tokenizer: MockTokenizer;
+	displayMergeMode?: "suppress" | "trim-overlap";
 }): Promise<BenchmarkEvaluation> {
 	ensureBrowserLikeWindow();
 	const { OuterSetting, DEFAULT_OUTER_SETTING } = require(
@@ -466,6 +467,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			snapshotTextByPath,
 			rerankTopK: 16,
 			displayTopK: 8,
+			displayMergeMode: params.displayMergeMode,
 		});
 
 		const fileItems = runHybridLexicalLaneFileItemPipeline({
@@ -474,6 +476,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			snapshotTextByPath,
 			rerankTopK: 16,
 			displayTopK: 8,
+			displayMergeMode: params.displayMergeMode,
 		});
 		const fileMatchRank =
 			matchedFiles.findIndex((match) => match.path === queryCase.relevantPath) + 1;
@@ -689,6 +692,12 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			queryCases,
 			tokenizer,
 		});
+		const trimOverlapEvaluation = await evaluateLexicalLaneAgainstCorpus({
+			documents,
+			queryCases,
+			tokenizer,
+			displayMergeMode: "trim-overlap",
+		});
 		const finalizedBaselineMetric = finalizeMetric(baselineMetric);
 		const typeBreakdown = compareOutcomeBuckets({
 			baseline: baselineOutcomes,
@@ -723,6 +732,27 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			lexicalLane: {
 				...lexicalEvaluation.metric,
 				...lexicalEvaluation.timing,
+			},
+			trimOverlapExperiment: {
+				...trimOverlapEvaluation.metric,
+				...trimOverlapEvaluation.timing,
+				deltaVsCurrent: {
+					top1: round(trimOverlapEvaluation.metric.top1 - lexicalEvaluation.metric.top1),
+					top3: round(trimOverlapEvaluation.metric.top3 - lexicalEvaluation.metric.top3),
+					top5: round(trimOverlapEvaluation.metric.top5 - lexicalEvaluation.metric.top5),
+					zeroRate: round(
+						trimOverlapEvaluation.metric.zeroRate -
+							lexicalEvaluation.metric.zeroRate,
+					),
+					avgMsPerQuery: round(
+						trimOverlapEvaluation.timing.avgMsPerQuery -
+							lexicalEvaluation.timing.avgMsPerQuery,
+					),
+					p100Ms: round(
+						trimOverlapEvaluation.timing.p100Ms -
+							lexicalEvaluation.timing.p100Ms,
+					),
+				},
 			},
 			worstTypes: typeBreakdown.slice(0, 6),
 			worstSuites: suiteBreakdown.slice(0, 6),
