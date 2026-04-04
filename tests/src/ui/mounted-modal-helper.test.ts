@@ -169,7 +169,7 @@ describe("mounted modal helper", () => {
 		const prepareSignals = new Map<string, AbortSignal>();
 		const searchService = {
 			prepareSearchInVaultHybrid: jest.fn(
-				(query: string, _mode: string, signal: AbortSignal) => {
+				(query: string, signal: AbortSignal) => {
 					prepareSignals.set(query, signal);
 					return new Promise((resolve) => {
 						prepareResolvers.set(query, resolve);

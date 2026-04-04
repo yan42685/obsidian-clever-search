@@ -144,6 +144,7 @@ export class HybridEngine {
 
   private _ready = false;
   private _canSearch = false;
+  private _hasStoredLexicalFallbackData = false;
   private lastIndexingFallbackNoticeKey: LocaleKey | null = null;
   private lastSearchFallbackNoticeKey: LocaleKey | null = null;
   private readonly fileWriteLocks = new Map<string, Promise<void>>();
@@ -182,6 +183,7 @@ export class HybridEngine {
         async () => await this.loadHnsw(dirtyArtifacts.has("hnsw")),
       ),
     ]);
+    await this.refreshStoredQueryCapabilityFromIndexedRefs();
     this._ready = true;
   }
 
@@ -190,6 +192,7 @@ export class HybridEngine {
     this.hnswSmall.clear(this.precision);
     this._ready = false;
     this._canSearch = false;
+    this._hasStoredLexicalFallbackData = false;
     this.lastIndexingFallbackNoticeKey = null;
     this.lastSearchFallbackNoticeKey = null;
     this.dirtyArtifacts.clear();
@@ -220,8 +223,7 @@ export class HybridEngine {
     return this._canSearch;
   }
   canServeQuery(): boolean {
-    // Hybrid should still answer through BM25 when dense vectors are unavailable.
-    return this._ready && (!this.isEmpty() || this._canSearch);
+    return this._ready && (this._canSearch || this._hasStoredLexicalFallbackData);
   }
   isEmpty(): boolean {
     return this.bm25.docCount === 0;
@@ -380,7 +382,7 @@ export class HybridEngine {
           path: newPath,
           generation,
         });
-        await this.db.db.hybridIndexedFileRefs.delete(oldPath);
+        await this.deleteHybridIndexedFileRef(oldPath);
       }
 
       await this.fileSnapshotStore.deleteIndexedShadow(oldPath);
@@ -407,7 +409,7 @@ export class HybridEngine {
     await this.db.db.hybridChunks.bulkDelete(ids);
     await this.db.db.hybridChunkVectors.delete(filePath);
     if (option.deleteIndexedFileRef ?? true) {
-      await this.db.db.hybridIndexedFileRefs.delete(filePath);
+      await this.deleteHybridIndexedFileRef(filePath);
     }
     if (option.deleteIndexedShadow ?? true) {
       await this.fileSnapshotStore.deleteIndexedShadow(filePath);
@@ -690,7 +692,7 @@ export class HybridEngine {
           ),
       );
       if (plannedChunks.length === 0) {
-        await this.db.db.hybridIndexedFileRefs.delete(filePath);
+        await this.deleteHybridIndexedFileRef(filePath);
         await this.fileSnapshotStore.deleteIndexedShadow(filePath);
         if (option.persistIndices ?? true) {
           await this.persistIndices();
@@ -1198,6 +1200,23 @@ export class HybridEngine {
     ref: HybridIndexedFileRef,
   ): Promise<void> {
     await this.db.db.hybridIndexedFileRefs.put(ref);
+    if (ref.state === "ready" || ref.state === "bm25_only") {
+      this._hasStoredLexicalFallbackData = true;
+      return;
+    }
+    await this.refreshStoredQueryCapabilityFromIndexedRefs();
+  }
+
+  private async deleteHybridIndexedFileRef(filePath: string): Promise<void> {
+    await this.db.db.hybridIndexedFileRefs.delete(filePath);
+    await this.refreshStoredQueryCapabilityFromIndexedRefs();
+  }
+
+  private async refreshStoredQueryCapabilityFromIndexedRefs(): Promise<void> {
+    const refs = await this.db.db.hybridIndexedFileRefs.toArray();
+    this._hasStoredLexicalFallbackData = refs.some(
+      (ref) => ref.state === "ready" || ref.state === "bm25_only",
+    );
   }
 
 

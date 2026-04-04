@@ -228,6 +228,9 @@ function createKeyedTable<Row extends Record<string, unknown>, Key extends keyof
 
   return {
     rows,
+    async toArray() {
+      return sortedRows();
+    },
     async get(value: Row[Key]) {
       return cloneRow(rows.get(value));
     },
@@ -302,16 +305,23 @@ describe("HybridEngine artifact state", () => {
     mockInstanceMap.clear();
   });
 
-  test("passes expected generations when loading shared snapshots for candidates", async () => {
-    const indexedRefTable = {
-      bulkGet: jest.fn(async (paths: string[]) =>
-        paths.map((path) =>
-          path === "notes/a.md"
-            ? { path, generation: 100, state: "ready" }
-            : undefined,
-        ),
-      ),
-    };
+  test("passes expected generations when rebuilding BM25 from stored snapshots", async () => {
+    const indexedRefTable = createKeyedTable<
+      { path: string; generation: number; state: string },
+      "path"
+    >("path", [
+      {
+        path: "notes/a.md",
+        generation: 100,
+        state: "ready",
+      },
+    ]);
+    const chunkTable = createChunkTable();
+    const bm25IndexTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
+    const artifactStateTable = createKeyedTable<
+      { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
+      "id"
+    >("id");
     const fileSnapshotStore = {
       readGenerationAlignedTexts: jest.fn(async () =>
         new Map<string, string>([["notes/a.md", "alpha"]]),
@@ -320,7 +330,10 @@ describe("HybridEngine artifact state", () => {
 
     mockInstanceMap.set(require("src/services/database/database").Database, {
       db: {
+        hybridChunks: chunkTable,
         hybridIndexedFileRefs: indexedRefTable,
+        hybridBm25Index: bm25IndexTable,
+        indexArtifactState: artifactStateTable,
       },
     });
     mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
@@ -339,11 +352,9 @@ describe("HybridEngine artifact state", () => {
 
     const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
     const engine = new HybridEngine() as any;
+    engine.persistBm25 = jest.fn();
 
-    const snapshots = await engine.loadSnapshotTextByPaths([
-      "notes/a.md",
-      "notes/b.md",
-    ]);
+    await engine.rebuildBm25ArtifactFromStore();
 
     expect(fileSnapshotStore.readGenerationAlignedTexts).toHaveBeenCalledTimes(1);
     const [paths, expectedGenerations] =
@@ -355,7 +366,6 @@ describe("HybridEngine artifact state", () => {
     expect(Array.from((expectedGenerations ?? new Map()).entries())).toEqual([
       ["notes/a.md", 100],
     ]);
-    expect(Array.from(snapshots.entries())).toEqual([["notes/a.md", "alpha"]]);
   });
 
   test("rebuilds dirty BM25 and HNSW artifacts from stored rows on load", async () => {
@@ -550,6 +560,57 @@ describe("HybridEngine artifact state", () => {
     expect(await artifactStateTable.get(buildIndexArtifactStateId("hybrid", "bm25"))).toBeUndefined();
     expect(await artifactStateTable.get(buildIndexArtifactStateId("hybrid", "hnsw"))).toBeUndefined();
     expect(engine.canSearch()).toBe(true);
+  });
+
+  test("canServeQuery stays available after load when stored lexical fallback refs exist", async () => {
+    const indexedRefTable = createKeyedTable<
+      { path: string; generation: number; state: string },
+      "path"
+    >("path", [
+      {
+        path: "notes/a.md",
+        generation: 100,
+        state: "ready",
+      },
+    ]);
+    const artifactStateTable = createKeyedTable<
+      { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
+      "id"
+    >("id");
+    const bm25IndexTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
+    const hnswTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
+
+    mockInstanceMap.set(require("src/services/database/database").Database, {
+      db: {
+        hybridIndexedFileRefs: indexedRefTable,
+        hybridBm25Index: bm25IndexTable,
+        hybridHnswSmall: hnswTable,
+        indexArtifactState: artifactStateTable,
+      },
+    });
+    mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+      hybrid: {
+        enabled: true,
+        vectorCompression: "int8",
+        maxResultCount: 10,
+        excludedPaths: [],
+      },
+    });
+    mockInstanceMap.set(require("src/services/obsidian/user-data/data-provider").DataProvider, {});
+    mockInstanceMap.set(
+      require("src/services/search/shared/file-snapshot-store").FileSnapshotStore,
+      {},
+    );
+
+    const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+    const engine = new HybridEngine() as any;
+
+    await engine.load();
+
+    expect(engine.isReady()).toBe(true);
+    expect(engine.canSearch()).toBe(false);
+    expect(engine.isEmpty()).toBe(true);
+    expect(engine.canServeQuery()).toBe(true);
   });
 });
 

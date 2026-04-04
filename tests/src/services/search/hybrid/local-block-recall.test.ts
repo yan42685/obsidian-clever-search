@@ -28,6 +28,7 @@ function createFileCandidate(
 			pathTokenCoverageCount: 0,
 			pathAnchorCoverageCount: 0,
 			pathRootAnchorCoverageCount: 0,
+			pathRootAnchorExact: false,
 			folderHintCount: 0,
 			templateFolderHit: false,
 			archivePenaltyEligible: false,

@@ -117,6 +117,8 @@ describe("hybrid lexical lane file shortlist", () => {
 		expect(candidates[0]?.metadataSignals.pathRootAnchorCoverageCount).toBeGreaterThan(
 			candidates[1]?.metadataSignals.pathRootAnchorCoverageCount ?? 0,
 		);
+		expect(candidates[0]?.metadataSignals.pathRootAnchorExact).toBe(true);
+		expect(candidates[1]?.metadataSignals.pathRootAnchorExact).toBe(false);
 		expect(candidates[0]?.metadataSignals.pathAnchorCoverageCount).toBeGreaterThan(
 			candidates[1]?.metadataSignals.pathAnchorCoverageCount ?? 0,
 		);

@@ -15,38 +15,6 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 		"scoreBreakdown" in candidate
 			? candidate.scoreBreakdown.totalScore
 			: candidate.localScore;
-	if (candidate.bridgePreviewText) {
-		const payload = buildHybridSharedSnippet({
-			snapshotText,
-			candidate,
-		});
-		return {
-			filePath: candidate.filePath,
-			basename: FileUtil.getBasename(candidate.filePath),
-			headingChain: [...candidate.headingChain],
-			segmentText:
-				candidate.bridgePreviewSegmentText ??
-				(candidate.headingChain.join(" > ") || "metadata"),
-			startLine: candidate.startLine,
-			startCol: candidate.startCol,
-			endLine: candidate.endLine,
-			endCol: candidate.endCol,
-			score,
-			snippetText: payload.snippetText,
-			snippetHtml: payload.snippetHtml,
-			headerText: payload.headerText,
-			bodyText: payload.bodyText,
-			highlightRanges: payload.highlightRanges,
-			bodyHighlightRanges: payload.bodyHighlightRanges,
-			coreStart: payload.coreStart,
-			coreEnd: payload.coreEnd,
-			displayStart: payload.displayStart,
-			displayEnd: payload.displayEnd,
-			bodyStart: payload.bodyStart,
-			bodyEnd: payload.bodyEnd,
-			anchorOffset: payload.anchorOffset,
-		};
-	}
 	const payload = buildHybridSharedSnippet({
 		snapshotText,
 		candidate,
@@ -55,7 +23,10 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 		filePath: candidate.filePath,
 		basename: FileUtil.getBasename(candidate.filePath),
 		headingChain: [...candidate.headingChain],
-		segmentText: candidate.headingChain.join(" > "),
+		segmentText: candidate.bridgePreviewText
+			? candidate.bridgePreviewSegmentText ??
+				(candidate.headingChain.join(" > ") || "metadata")
+			: candidate.headingChain.join(" > "),
 		startLine: candidate.startLine,
 		startCol: candidate.startCol,
 		endLine: candidate.endLine,

@@ -52,7 +52,7 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
 				snapshotText,
 				headingOutline,
 				maxBlocksPerFile: resolvePerFileBlockLimit(
-					file.fileRank,
+					file,
 					params.maxBlocksPerFile,
 				),
 			}),
@@ -65,15 +65,29 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
 	};
 }
 
-function resolvePerFileBlockLimit(fileRank: number, baseLimit: number): number {
+function resolvePerFileBlockLimit(
+	file: Pick<
+		HybridLexicalLaneFileCandidate,
+		"fileRank" | "metadataSignals"
+	>,
+	baseLimit: number,
+): number {
 	if (baseLimit <= 0) {
 		return 0;
 	}
-	if (fileRank <= 0) {
-		return baseLimit + 4;
+	const metadataBonusEligible =
+		file.metadataSignals.aliasTokenCoverageCount >= 2 ||
+		file.metadataSignals.aliasContainedInQueryCount > 0 ||
+		file.metadataSignals.basenameTokenCoverageCount >= 2 ||
+		file.metadataSignals.basenameContainedInQuery;
+	if (file.fileRank <= 0) {
+		return baseLimit + 4 + (metadataBonusEligible ? 2 : 0);
 	}
-	if (fileRank === 1) {
-		return baseLimit + 2;
+	if (file.fileRank === 1) {
+		return baseLimit + 2 + (metadataBonusEligible ? 2 : 0);
+	}
+	if (file.fileRank === 2 && metadataBonusEligible) {
+		return baseLimit + 1;
 	}
 	return baseLimit;
 }
@@ -547,10 +561,13 @@ function createFileRecallBridgeCandidate(params: {
 		return null;
 	}
 	const bridgeMetadataBonus =
-		coverageRatio >= 0.7
+		coverageRatio >= 0.55
 			? (params.file.metadataSignals.aliasHit ? 18 : 0) +
+				params.file.metadataSignals.aliasContainedInQueryCount * 18 +
 				params.file.metadataSignals.aliasTokenCoverageCount * 8 +
+				(params.file.metadataSignals.basenameContainedInQuery ? 12 : 0) +
 				params.file.metadataSignals.basenameTokenCoverageCount * 5 +
+				params.file.metadataSignals.headingContainedInQueryCount * 8 +
 				params.file.metadataSignals.headingTokenCoverageCount * 4
 			: 0;
 	matchOccurrences.sort((left, right) => left.start - right.start);

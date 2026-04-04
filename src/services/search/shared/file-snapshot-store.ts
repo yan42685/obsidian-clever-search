@@ -29,6 +29,39 @@ export class FileSnapshotStore {
 	private readonly vault = getInstance(Vault);
 	private readonly currentFileCache = new Map<string, CurrentFileCacheEntry>();
 
+	async readSearchableFileText(fileOrPath: TFile | string): Promise<string> {
+		const file =
+			typeof fileOrPath === "string"
+				? this.vault.getAbstractFileByPath(fileOrPath)
+				: fileOrPath;
+		if (!(file instanceof TFile)) {
+			return "";
+		}
+		const cached = this.currentFileCache.get(file.path);
+		if (
+			cached !== undefined &&
+			(cached.generation === undefined ||
+				file.stat.mtime === undefined ||
+				cached.generation >= file.stat.mtime)
+		) {
+			return cached.text;
+		}
+		const indexedSnapshot = await this.database.db.fileSnapshots.get(file.path);
+		if (
+			indexedSnapshot &&
+			(file.stat.mtime === undefined ||
+				indexedSnapshot.generation === undefined ||
+				indexedSnapshot.generation === file.stat.mtime)
+		) {
+			return this.setCurrentFileText(
+				file.path,
+				indexedSnapshot.plainText,
+				indexedSnapshot.generation ?? file.stat.mtime,
+			);
+		}
+		return await this.readCurrentFileText(file);
+	}
+
 	async readCurrentFileText(fileOrPath: TFile | string): Promise<string> {
 		const file =
 			typeof fileOrPath === "string"

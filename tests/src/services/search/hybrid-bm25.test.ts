@@ -56,6 +56,12 @@ type QueryOutcome = {
 	fileMatchRank?: number;
 	shortlistRank?: number;
 	shortlistSize?: number;
+	topPath?: string;
+	topAggregateScore?: number;
+	topSubItemCount?: number;
+	relevantAggregateScore?: number;
+	relevantBestScore?: number;
+	relevantSubItemCount?: number;
 };
 
 type BenchmarkEvaluation = {
@@ -93,6 +99,29 @@ type OutcomeRegression = {
 	baselineRank: number;
 	lexicalRank: number;
 	rankDelta: number;
+	fileMatchRank: number;
+	shortlistRank: number;
+	shortlistSize: number;
+};
+
+type OutcomeShift = {
+	query: string;
+	relevantPath: string;
+	type: string;
+	suite: string;
+	fromRank: number;
+	toRank: number;
+	rankDelta: number;
+	fromTopPath: string;
+	toTopPath: string;
+	fromTopAggregateScore: number;
+	toTopAggregateScore: number;
+	fromTopSubItemCount: number;
+	toTopSubItemCount: number;
+	fromRelevantAggregateScore: number;
+	toRelevantAggregateScore: number;
+	fromRelevantSubItemCount: number;
+	toRelevantSubItemCount: number;
 	fileMatchRank: number;
 	shortlistRank: number;
 	shortlistSize: number;
@@ -245,6 +274,41 @@ function compareOutcomeBuckets(params: {
 		);
 }
 
+function compareEvaluationBuckets(params: {
+	from: readonly QueryOutcome[];
+	to: readonly QueryOutcome[];
+	key: "type" | "suite";
+}) {
+	const fromBuckets = summarizeOutcomeBuckets(params.from, params.key);
+	const toBuckets = summarizeOutcomeBuckets(params.to, params.key);
+	const fromByBucket = new Map(
+		fromBuckets.map((bucket) => [bucket.bucket, bucket] as const),
+	);
+	return toBuckets
+		.map((bucket) => {
+			const from = fromByBucket.get(bucket.bucket);
+			return {
+				bucket: bucket.bucket,
+				count: bucket.count,
+				fromTop1: from?.top1 ?? 0,
+				toTop1: bucket.top1,
+				top1Delta: round(bucket.top1 - (from?.top1 ?? 0)),
+				fromTop3: from?.top3 ?? 0,
+				toTop3: bucket.top3,
+				top3Delta: round(bucket.top3 - (from?.top3 ?? 0)),
+				fromZeroRate: from?.zeroRate ?? 0,
+				toZeroRate: bucket.zeroRate,
+				zeroRateDelta: round(bucket.zeroRate - (from?.zeroRate ?? 0)),
+			};
+		})
+		.sort(
+			(left, right) =>
+				left.top1Delta - right.top1Delta ||
+				left.top3Delta - right.top3Delta ||
+				right.zeroRateDelta - left.zeroRateDelta,
+		);
+}
+
 function findWorstOutcomeRegressions(params: {
 	baseline: readonly QueryOutcome[];
 	lexicalLane: readonly QueryOutcome[];
@@ -286,6 +350,69 @@ function findWorstOutcomeRegressions(params: {
 				rightMissPenalty -
 				(left.rankDelta + leftMissPenalty) ||
 				left.baselineRank - right.baselineRank ||
+				left.query.localeCompare(right.query)
+			);
+		})
+		.slice(0, params.limit ?? 12);
+}
+
+function findOutcomeShifts(params: {
+	from: readonly QueryOutcome[];
+	to: readonly QueryOutcome[];
+	filter: (from: QueryOutcome, to: QueryOutcome) => boolean;
+	limit?: number;
+}): OutcomeShift[] {
+	const toByKey = new Map(
+		params.to.map((outcome) => [
+			`${outcome.query}\u001f${outcome.relevantPath}`,
+			outcome,
+		]),
+	);
+	return params.from
+		.map((fromOutcome) => {
+			const toOutcome = toByKey.get(
+				`${fromOutcome.query}\u001f${fromOutcome.relevantPath}`,
+			);
+			if (!toOutcome || !params.filter(fromOutcome, toOutcome)) {
+				return null;
+			}
+			return {
+				query: fromOutcome.query,
+				relevantPath: fromOutcome.relevantPath,
+				type: fromOutcome.type,
+				suite: fromOutcome.suite,
+				fromRank: fromOutcome.rank,
+				toRank: toOutcome.rank,
+				rankDelta: toOutcome.rank - fromOutcome.rank,
+				fromTopPath: fromOutcome.topPath ?? "",
+				toTopPath: toOutcome.topPath ?? "",
+				fromTopAggregateScore: fromOutcome.topAggregateScore ?? 0,
+				toTopAggregateScore: toOutcome.topAggregateScore ?? 0,
+				fromTopSubItemCount: fromOutcome.topSubItemCount ?? 0,
+				toTopSubItemCount: toOutcome.topSubItemCount ?? 0,
+				fromRelevantAggregateScore:
+					fromOutcome.relevantAggregateScore ?? 0,
+				toRelevantAggregateScore:
+					toOutcome.relevantAggregateScore ?? 0,
+				fromRelevantSubItemCount:
+					fromOutcome.relevantSubItemCount ?? 0,
+				toRelevantSubItemCount:
+					toOutcome.relevantSubItemCount ?? 0,
+				fileMatchRank: toOutcome.fileMatchRank ?? 0,
+				shortlistRank: toOutcome.shortlistRank ?? 0,
+				shortlistSize: toOutcome.shortlistSize ?? 0,
+			};
+		})
+		.filter((outcome): outcome is OutcomeShift => outcome !== null)
+		.sort((left, right) => {
+			const leftTop1Penalty = left.fromRank === 1 && left.toRank > 1 ? 100 : 0;
+			const rightTop1Penalty =
+				right.fromRank === 1 && right.toRank > 1 ? 100 : 0;
+			return (
+				right.rankDelta +
+				rightTop1Penalty -
+				(left.rankDelta + leftTop1Penalty) ||
+				left.fromRank - right.fromRank ||
 				left.query.localeCompare(right.query)
 			);
 		})
@@ -378,7 +505,6 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	documents: readonly IndexedDocument[];
 	queryCases: readonly QueryCase[];
 	tokenizer: MockTokenizer;
-	displayMergeMode?: "suppress" | "trim-overlap";
 }): Promise<BenchmarkEvaluation> {
 	ensureBrowserLikeWindow();
 	const { OuterSetting, DEFAULT_OUTER_SETTING } = require(
@@ -467,7 +593,6 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			snapshotTextByPath,
 			rerankTopK: 16,
 			displayTopK: 8,
-			displayMergeMode: params.displayMergeMode,
 		});
 
 		const fileItems = runHybridLexicalLaneFileItemPipeline({
@@ -476,7 +601,6 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			snapshotTextByPath,
 			rerankTopK: 16,
 			displayTopK: 8,
-			displayMergeMode: params.displayMergeMode,
 		});
 		const fileMatchRank =
 			matchedFiles.findIndex((match) => match.path === queryCase.relevantPath) + 1;
@@ -487,12 +611,28 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 		const rank =
 			fileItems.findIndex((item: { path: string }) => item.path === queryCase.relevantPath) +
 			1;
+		const fileAggregates = summarizeFileAggregates(
+			fileItems as Array<{
+				path: string;
+				subItems: Array<{ score?: number; snippetText?: string; snippet?: string }>;
+			}>,
+		);
+		const topAggregate = fileAggregates[0];
+		const relevantAggregate = fileAggregates.find(
+			(item) => item.path === queryCase.relevantPath,
+		);
 		updateMetric(metric, rank);
 		outcomes.push(
 			createOutcome(queryCase, rank, {
 				fileMatchRank,
 				shortlistRank,
 				shortlistSize: fileCandidates.length,
+				topPath: topAggregate?.path,
+				topAggregateScore: topAggregate?.aggregateScore,
+				topSubItemCount: topAggregate?.subItemScores.length,
+				relevantAggregateScore: relevantAggregate?.aggregateScore,
+				relevantBestScore: relevantAggregate?.bestScore,
+				relevantSubItemCount: relevantAggregate?.subItemScores.length,
 			}),
 		);
 		if (
@@ -692,12 +832,6 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			queryCases,
 			tokenizer,
 		});
-		const trimOverlapEvaluation = await evaluateLexicalLaneAgainstCorpus({
-			documents,
-			queryCases,
-			tokenizer,
-			displayMergeMode: "trim-overlap",
-		});
 		const finalizedBaselineMetric = finalizeMetric(baselineMetric);
 		const typeBreakdown = compareOutcomeBuckets({
 			baseline: baselineOutcomes,
@@ -732,27 +866,6 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			lexicalLane: {
 				...lexicalEvaluation.metric,
 				...lexicalEvaluation.timing,
-			},
-			trimOverlapExperiment: {
-				...trimOverlapEvaluation.metric,
-				...trimOverlapEvaluation.timing,
-				deltaVsCurrent: {
-					top1: round(trimOverlapEvaluation.metric.top1 - lexicalEvaluation.metric.top1),
-					top3: round(trimOverlapEvaluation.metric.top3 - lexicalEvaluation.metric.top3),
-					top5: round(trimOverlapEvaluation.metric.top5 - lexicalEvaluation.metric.top5),
-					zeroRate: round(
-						trimOverlapEvaluation.metric.zeroRate -
-							lexicalEvaluation.metric.zeroRate,
-					),
-					avgMsPerQuery: round(
-						trimOverlapEvaluation.timing.avgMsPerQuery -
-							lexicalEvaluation.timing.avgMsPerQuery,
-					),
-					p100Ms: round(
-						trimOverlapEvaluation.timing.p100Ms -
-							lexicalEvaluation.timing.p100Ms,
-					),
-				},
 			},
 			worstTypes: typeBreakdown.slice(0, 6),
 			worstSuites: suiteBreakdown.slice(0, 6),

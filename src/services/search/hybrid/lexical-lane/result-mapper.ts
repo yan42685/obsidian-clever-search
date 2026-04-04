@@ -59,7 +59,7 @@ export function buildHybridLexicalLaneFileItems(
 		})
 		.map(([filePath, entry]) =>
 			new FileItem(
-				EngineType.SEMANTIC,
+				EngineType.HYBRID,
 				filePath,
 				[queryText],
 				[],

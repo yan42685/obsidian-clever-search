@@ -1235,17 +1235,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!fileSnapshotStore) {
 			return null;
 		}
-		const currentText = fileSnapshotStore.peekCurrentFileText(path);
-		if (currentText !== undefined) {
-			return currentText;
-		}
-		const indexedSnapshots = await fileSnapshotStore.getIndexedSnapshotTexts([path]);
-		const indexedSnapshotText = indexedSnapshots.get(path);
-		if (indexedSnapshotText !== undefined) {
-			fileSnapshotStore.setCurrentFileText(path, indexedSnapshotText);
-			return indexedSnapshotText;
-		}
-		return await fileSnapshotStore.readCurrentFileText(path);
+		return await fileSnapshotStore.readSearchableFileText(path);
 	}
 
 	private buildBinarySnapshotState(): CoverageLexicalSnapshotState {

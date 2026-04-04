@@ -121,6 +121,9 @@ function buildFilePriorScore(candidate: HybridLexicalLaneBlockCandidate): number
 		(metadata.basenamePrefix ? 110 : 0) +
 		(metadata.pathExact ? 60 : 0) +
 		(metadata.pathPrefix ? 24 : 0) +
+		metadata.pathAnchorCoverageCount * 104 +
+		metadata.pathRootAnchorCoverageCount * 92 +
+		(metadata.pathRootAnchorExact ? 132 : 0) +
 		metadata.folderHintCount * 26 +
 		(metadata.templateFolderHit ? 230 : 0) -
 		(metadata.archivePenaltyEligible ? 28 : 0) +

@@ -136,6 +136,7 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 	const pathAnchorTokens = pathSegments
 		.flatMap((segment) => extractStructuredAnchorTokens(segment));
 	const pathRootAnchorTokens = extractStructuredAnchorTokens(pathSegments[0] ?? "");
+	const normalizedRootSegment = normalizeKey(pathSegments[0] ?? "");
 	const folderTokens = pathSegments
 		.slice(0, -1)
 		.flatMap((segment) => tokenizeNavigationTokens(segment));
@@ -188,6 +189,9 @@ export function buildHybridLexicalLaneMetadataSignals(params: {
 		pathRootAnchorCoverageCount: countNavigationTokenMatches(
 			queryAnchorTokens,
 			pathRootAnchorTokens,
+		),
+		pathRootAnchorExact: queryAnchorTokens.some(
+			(anchorToken) => anchorToken === normalizedRootSegment,
 		),
 		folderHintCount: countNavigationTokenMatches(queryTokens, folderTokens),
 		templateFolderHit:
@@ -349,6 +353,7 @@ function computeHybridLexicalLaneFileCandidateScore(
 		metadata.pathTokenCoverageCount * 6 +
 		metadata.pathAnchorCoverageCount * 240 +
 		metadata.pathRootAnchorCoverageCount * 180 +
+		(metadata.pathRootAnchorExact ? 220 : 0) +
 		metadata.folderHintCount * 34 +
 		(metadata.templateFolderHit ? 220 : 0) -
 		(metadata.archivePenaltyEligible ? 36 : 0) +

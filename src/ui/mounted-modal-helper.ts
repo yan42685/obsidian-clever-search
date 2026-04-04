@@ -66,7 +66,7 @@ type HybridQuerySessionControllerOptions = {
 
 export function usesDirectFileSubItems(item: FileItem): boolean {
 	return (
-		item.engineType === EngineType.SEMANTIC ||
+		item.engineType === EngineType.HYBRID ||
 		item.nativeSubItemsReady ||
 		item.subItems.length > 0
 	);
@@ -311,7 +311,6 @@ export class HybridQuerySessionController {
 		try {
 			const preparedResult = await this.searchService.prepareSearchInVaultHybrid(
 				session.query,
-				this.getHybridMode(),
 				session.abortPrepare.signal,
 			);
 			if (!this.isCurrentSession(session)) {

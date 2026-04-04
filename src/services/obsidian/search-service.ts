@@ -123,7 +123,6 @@ export class SearchService {
 
 	async prepareSearchInVaultHybrid(
 		queryText: string,
-		mode: HybridSearchMode = "default",
 		signal?: AbortSignal,
 	): Promise<PreparedHybridSearchResult> {
 		const blocked = this.getBlockedSearchResult(queryText);
@@ -222,7 +221,7 @@ export class SearchService {
 		queryText: string,
 		mode: HybridSearchMode,
 	): Promise<SearchResult> {
-		const prepared = await this.prepareSearchInVaultHybrid(queryText, mode);
+		const prepared = await this.prepareSearchInVaultHybrid(queryText);
 		const result = prepared.prepared
 			? await this.finalizePreparedSearchInVaultHybrid(
 				prepared.prepared,

@@ -93,7 +93,7 @@ export type HybridSearchMode = "default" | "lexical-lane";
 
 export enum EngineType {
   LEXICAL,
-  SEMANTIC,
+  HYBRID,
 }
 
 export abstract class Item {
