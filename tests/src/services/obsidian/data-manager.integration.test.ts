@@ -252,52 +252,25 @@ function createMockFileSnapshotStore() {
         return result;
       },
     ),
-    invalidateCurrentFile: jest.fn((path: string) => {
-      current.delete(path);
-    }),
-    setCurrentFileText: jest.fn(
-      (path: string, text: string, generation?: number) => {
-        current.set(path, { text, generation });
-        return text;
-      },
-    ),
     peekCurrentFileText: jest.fn((path: string) => current.get(path)?.text),
     peekCurrentFileGeneration: jest.fn(
       (path: string) => current.get(path)?.generation,
     ),
-    commitCurrentFileAsIndexed: jest.fn(
-      async (path: string, generation?: number) => {
-        const currentEntry = current.get(path);
-        if (!currentEntry) {
-          return;
-        }
-        const nextGeneration = generation ?? currentEntry.generation;
-        persisted.set(path, {
-          text: currentEntry.text,
-          generation: nextGeneration,
-        });
-        clearShadowIfAligned(path, nextGeneration);
-      },
-    ),
-    commitCurrentFilesAsIndexed: jest.fn(
-      async (files: ReadonlyArray<{ path: string; generation?: number }>) => {
-        for (const file of files) {
-          const currentEntry = current.get(file.path);
-          if (!currentEntry) {
-            continue;
-          }
-          const nextGeneration = file.generation ?? currentEntry.generation;
-          persisted.set(file.path, {
-            text: currentEntry.text,
-            generation: nextGeneration,
-          });
-          clearShadowIfAligned(file.path, nextGeneration);
-        }
-      },
-    ),
     publishIndexedTexts: jest.fn(
-      async (files: ReadonlyArray<{ path: string; generation?: number }>) => {
+      async (
+        files: ReadonlyArray<{
+          path: string;
+          generation?: number;
+          text?: string;
+        }>,
+      ) => {
         for (const file of files) {
+          if (file.text !== undefined) {
+            current.set(file.path, {
+              text: file.text,
+              generation: file.generation,
+            });
+          }
           const currentEntry = current.get(file.path);
           if (!currentEntry) {
             continue;
@@ -308,19 +281,6 @@ function createMockFileSnapshotStore() {
             generation: nextGeneration,
           });
           clearShadowIfAligned(file.path, nextGeneration);
-        }
-      },
-    ),
-    persistIndexedSnapshot: jest.fn(
-      async (
-        path: string,
-        text: string,
-        generation?: number,
-        options: { clearShadowIfAligned?: boolean } = {},
-      ) => {
-        persisted.set(path, { text, generation });
-        if (options.clearShadowIfAligned) {
-          clearShadowIfAligned(path, generation);
         }
       },
     ),
@@ -341,12 +301,21 @@ function createMockFileSnapshotStore() {
         shadow.delete(path);
       }
     }),
-    deleteIndexedShadow: jest.fn(async (path: string) => {
-      shadow.delete(path);
-    }),
-    deleteIndexedShadows: jest.fn(async (paths: readonly string[]) => {
-      for (const path of paths) {
-        shadow.delete(path);
+    reconcileHybridShadows: jest.fn(async (paths?: readonly string[]) => {
+      const candidatePaths =
+        paths !== undefined ? Array.from(new Set(paths)) : Array.from(shadow.keys());
+      for (const path of candidatePaths) {
+        const shadowEntry = shadow.get(path);
+        if (!shadowEntry) {
+          continue;
+        }
+        const persistedEntry = persisted.get(path);
+        const shouldKeep =
+          shadowEntry.generation !== undefined &&
+          persistedEntry?.generation !== shadowEntry.generation;
+        if (!shouldKeep) {
+          shadow.delete(path);
+        }
       }
     }),
     deleteIndexedSnapshotsNotIn: jest.fn(
@@ -363,16 +332,6 @@ function createMockFileSnapshotStore() {
         }
       },
     ),
-    readGenerationAlignedText: jest.fn(
-      async (path: string, expectedGeneration?: number) =>
-        (await readGenerationAlignedTexts(
-          [path],
-          expectedGeneration === undefined
-            ? undefined
-            : new Map([[path, expectedGeneration]]),
-        )).get(path),
-    ),
-    readGenerationAlignedTexts: jest.fn(readGenerationAlignedTexts),
     readIndexedTexts: jest.fn(
       async (
         requests: ReadonlyArray<{ path: string; generation?: number }>,
@@ -384,7 +343,6 @@ function createMockFileSnapshotStore() {
           ),
         ),
     ),
-    getIndexedSnapshotTexts: jest.fn(readGenerationAlignedTexts),
     estimateCurrentCacheBytes: jest.fn(() => 0),
   };
 }
@@ -864,11 +822,10 @@ function registerDataManagerDeps(params: {
           ? params.dataProvider.getFileByPath(path)
           : fileOrPath;
       if (file instanceof MockTFile) {
-        params.fileSnapshotStore.setCurrentFileText(
-          path,
+        params.fileSnapshotStore.current.set(path, {
           text,
-          file.stat.mtime,
-        );
+          generation: file.stat.mtime,
+        });
       }
       return text;
     },

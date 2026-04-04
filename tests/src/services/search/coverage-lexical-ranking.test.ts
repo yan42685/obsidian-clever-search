@@ -144,25 +144,6 @@ function registerMockFileSnapshotStore(
 			},
 		),
 		peekCurrentFileText: jest.fn((path: string) => currentTexts.get(path)),
-		setCurrentFileText: jest.fn((path: string, text: string) => {
-			currentTexts.set(path, text);
-			return text;
-		}),
-		getIndexedSnapshotTexts: jest.fn(async (paths: string[]) => {
-			const results = new Map<string, string>();
-			for (const path of paths) {
-				const persisted = persistedTexts.get(path);
-				if (persisted !== undefined) {
-					results.set(path, persisted);
-				}
-			}
-			return results;
-		}),
-		readCurrentFileText: jest.fn(async (path: string) => {
-			const text = currentTexts.get(path) ?? persistedTexts.get(path) ?? "";
-			currentTexts.set(path, text);
-			return text;
-		}),
 	} as any);
 }
 

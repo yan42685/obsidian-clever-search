@@ -244,8 +244,6 @@ function createEngineHarness() {
   };
 
   const fileSnapshotStore = {
-    readGenerationAlignedText: jest.fn(async () => undefined),
-    readGenerationAlignedTexts: jest.fn(async () => new Map<string, string>()),
     readIndexedTexts: jest.fn(async () => new Map<string, string>()),
     publishIndexedTexts: jest.fn(
       async (
