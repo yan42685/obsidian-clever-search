@@ -1697,7 +1697,7 @@ export class DataManager {
         generation: file.stat.mtime,
       })),
     );
-    await this.fileSnapshotStore.deleteIndexedSnapshotsNotIn(indexedPaths);
+    await this.fileSnapshotStore.retainOnlyFiles(indexedPaths);
     await this.markLexicalSnapshotDirty();
     this.clearLexicalIndexFailures(Array.from(indexedPaths));
     if (failures.length > 0) {

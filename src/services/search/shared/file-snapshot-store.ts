@@ -122,7 +122,25 @@ export class FileSnapshotStore {
 		for (const filePath of filePaths) {
 			this.deleteCurrentFile(filePath);
 		}
-		await this.deleteIndexedSnapshots(filePaths);
+		await this.deletePersistedFiles(filePaths);
+	}
+
+	async retainOnlyFiles(validPaths: ReadonlySet<string>): Promise<void> {
+		for (const path of Array.from(this.currentFileCache.keys())) {
+			if (!validPaths.has(path)) {
+				this.deleteCurrentFile(path);
+			}
+		}
+		await this.deleteRowsNotIn(
+			() => this.database.db.fileSnapshots,
+			(paths) => this.database.db.fileSnapshots.bulkDelete(paths),
+			validPaths,
+		);
+		await this.deleteRowsNotIn(
+			() => this.database.db.hybridDirtyShadows,
+			(paths) => this.database.db.hybridDirtyShadows.bulkDelete(paths),
+			validPaths,
+		);
 	}
 
 	private async readSearchableFileText(fileOrPath: TFile | string): Promise<string> {
@@ -243,11 +261,7 @@ export class FileSnapshotStore {
 		await this.database.db.fileSnapshots.bulkPut(rows);
 	}
 
-	async deleteIndexedSnapshot(filePath: string): Promise<void> {
-		await this.deleteIndexedSnapshots([filePath]);
-	}
-
-	async deleteIndexedSnapshots(filePaths: readonly string[]): Promise<void> {
+	private async deletePersistedFiles(filePaths: readonly string[]): Promise<void> {
 		if (filePaths.length === 0) {
 			return;
 		}
@@ -256,21 +270,6 @@ export class FileSnapshotStore {
 			this.database.db.fileSnapshots.bulkDelete(uniquePaths),
 			this.database.db.hybridDirtyShadows.bulkDelete(uniquePaths),
 		]);
-	}
-
-	async deleteIndexedSnapshotsNotIn(
-		validPaths: ReadonlySet<string>,
-	): Promise<void> {
-		await this.deleteRowsNotIn(
-			() => this.database.db.fileSnapshots,
-			(paths) => this.database.db.fileSnapshots.bulkDelete(paths),
-			validPaths,
-		);
-		await this.deleteRowsNotIn(
-			() => this.database.db.hybridDirtyShadows,
-			(paths) => this.database.db.hybridDirtyShadows.bulkDelete(paths),
-			validPaths,
-		);
 	}
 
 	private async readGenerationAlignedTexts(

@@ -304,8 +304,13 @@ function createMockFileSnapshotStore() {
         }
       }
     }),
-    deleteIndexedSnapshotsNotIn: jest.fn(
+    retainOnlyFiles: jest.fn(
       async (validPaths: ReadonlySet<string>) => {
+        for (const path of Array.from(current.keys())) {
+          if (!validPaths.has(path)) {
+            current.delete(path);
+          }
+        }
         for (const path of Array.from(persisted.keys())) {
           if (!validPaths.has(path)) {
             persisted.delete(path);
@@ -1258,7 +1263,7 @@ describe("DataManager integration", () => {
     expect(lexicalEngine.addDocuments).not.toHaveBeenCalled();
     expect(await database.getLexicalIndexedFileRefs()).toEqual([]);
     expect(fileSnapshotStore.persisted.has(deletedPath)).toBe(false);
-    expect(fileSnapshotStore.deleteIndexedSnapshotsNotIn).toHaveBeenCalledWith(
+    expect(fileSnapshotStore.retainOnlyFiles).toHaveBeenCalledWith(
       new Set<string>(),
     );
     expect(
@@ -2503,7 +2508,7 @@ describe("DataManager integration", () => {
       generation: liveFile.stat.mtime,
     });
     expect(fileSnapshotStore.persisted.has("docs/stale.md")).toBe(false);
-    expect(fileSnapshotStore.deleteIndexedSnapshotsNotIn).toHaveBeenCalledWith(
+    expect(fileSnapshotStore.retainOnlyFiles).toHaveBeenCalledWith(
       new Set([liveFile.path]),
     );
   });
