@@ -192,14 +192,13 @@ export class HybridEngine {
       this.db.db.hybridChunks.clear(),
       this.db.db.hybridChunkVectors.clear(),
       this.db.db.hybridHnswSmall.clear(),
-      this.db.db.hybridIndexedFileRefs.clear(),
+      this.fileSnapshotStore.clearHybridIndexedFileRefs(),
       this.db.db.indexArtifactState.bulkDelete(
         HYBRID_DIRTY_ARTIFACTS.map((artifact) =>
           buildIndexArtifactStateId("hybrid", artifact),
         ),
       ),
     ]);
-    await this.fileSnapshotStore.notifyHybridIndexedRefsChanged();
   }
 
   isEnabled(): boolean {
@@ -303,7 +302,6 @@ export class HybridEngine {
   ): Promise<void> {
     await this.withFileWriteLock(filePath, async () => {
       await this.deleteStoredHybridPrivateData(filePath, option);
-      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
     });
   }
 
@@ -323,7 +321,7 @@ export class HybridEngine {
         .toArray();
       const vectorRow = await this.db.db.hybridChunkVectors.get(oldPath);
       const indexedFileRef =
-        await this.db.db.hybridIndexedFileRefs.get(oldPath);
+        await this.fileSnapshotStore.getHybridIndexedFileRef(oldPath);
       const hasStoredData =
         chunkRows.length > 0 ||
         vectorRow !== undefined ||
@@ -338,7 +336,8 @@ export class HybridEngine {
           .equals(newPath)
           .count()) > 0 ||
         (await this.db.db.hybridChunkVectors.get(newPath)) !== undefined ||
-        (await this.db.db.hybridIndexedFileRefs.get(newPath)) !== undefined;
+        (await this.fileSnapshotStore.getHybridIndexedFileRef(newPath)) !==
+          undefined;
       if (hasTargetData) {
         await this.deleteStoredHybridPrivateData(newPath, {
           persistIndices: false,
@@ -372,10 +371,6 @@ export class HybridEngine {
         await this.deleteHybridIndexedFileRef(oldPath);
       }
 
-      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([
-        oldPath,
-        newPath,
-      ]);
       return true;
     });
   }
@@ -391,9 +386,9 @@ export class HybridEngine {
       .toArray();
     const vectorRow = await this.db.db.hybridChunkVectors.get(filePath);
     const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
-
     const mustRebuildHnsw =
       vectorRow !== undefined && vectorRow.chunkCount !== ids.length;
+
     if (ids.length > 0 || mustRebuildHnsw) {
       await this.markHybridArtifactsDirty("runtime-delete-write");
     }
@@ -403,12 +398,12 @@ export class HybridEngine {
     if (option.deleteIndexedFileRef ?? true) {
       await this.deleteHybridIndexedFileRef(filePath);
     }
+
     if (mustRebuildHnsw) {
       await this.rebuildHnswFromStore(option.persistIndices ?? true);
       this.updateSearchCapabilityFromDenseState();
       return;
     }
-
 
     for (const id of ids) {
       this.hnswSmall.delete(id);
@@ -417,6 +412,7 @@ export class HybridEngine {
     if (this.hnswSmall.needsRebuild()) {
       this.hnswSmall.rebuild();
     }
+    this.updateSearchCapabilityFromDenseState();
     if ((option.persistIndices ?? true) && ids.length > 0) {
       await this.persistIndices();
     }
@@ -609,13 +605,12 @@ export class HybridEngine {
     await this.withFileWriteLock(filePath, async () => {
       if (!this.shouldIndexPath(filePath)) {
         await this.deleteStoredHybridPrivateData(filePath, option);
-        await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
         return;
       }
 
       const pendingIndexedAt = Date.now();
       const previousIndexedFileRef =
-        await this.db.db.hybridIndexedFileRefs.get(filePath);
+        await this.fileSnapshotStore.getHybridIndexedFileRef(filePath);
       const previousState = await this.loadStoredFileIndexState(
         filePath,
         previousIndexedFileRef,
@@ -664,7 +659,6 @@ export class HybridEngine {
       );
       if (plannedChunks.length === 0) {
         await this.deleteHybridIndexedFileRef(filePath);
-        await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
         if (option.persistIndices ?? true) {
           await this.persistIndices();
         }
@@ -762,7 +756,6 @@ export class HybridEngine {
             lastIncrementalEmbedAt:
               previousIndexedFileRef?.lastIncrementalEmbedAt,
           });
-          await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
           throw fallbackError;
         }
       }
@@ -1162,10 +1155,7 @@ export class HybridEngine {
   private async putHybridIndexedFileRef(
     ref: HybridIndexedFileRef,
   ): Promise<void> {
-    await this.db.db.hybridIndexedFileRefs.put(ref);
-    if (ref.state !== "pending") {
-      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([ref.path]);
-    }
+    await this.fileSnapshotStore.putHybridIndexedFileRef(ref);
     if (isHybridLexicalFallbackState(ref.state)) {
       this._hasStoredLexicalFallbackData = true;
       return;
@@ -1174,12 +1164,12 @@ export class HybridEngine {
   }
 
   private async deleteHybridIndexedFileRef(filePath: string): Promise<void> {
-    await this.db.db.hybridIndexedFileRefs.delete(filePath);
+    await this.fileSnapshotStore.deleteHybridIndexedFileRef(filePath);
     await this.refreshStoredQueryCapabilityFromIndexedRefs();
   }
 
   private async refreshStoredQueryCapabilityFromIndexedRefs(): Promise<void> {
-    const refs = await this.db.db.hybridIndexedFileRefs.toArray();
+    const refs = await this.fileSnapshotStore.listHybridIndexedFileRefs();
     this._hasStoredLexicalFallbackData = refs.some(
       (ref) => isHybridLexicalFallbackState(ref.state),
     );

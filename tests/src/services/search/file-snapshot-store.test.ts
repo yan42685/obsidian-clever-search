@@ -375,4 +375,52 @@ describe("FileSnapshotStore", () => {
     });
     await expect(database.db.hybridIndexedFileRefs.get(stalePath)).resolves.toBeUndefined();
   });
+  test("getRuntimeMemoryEstimate reports resident breakdown and slot reuse", async () => {
+    const first = new TFile("docs/one.md", "alpha", 100);
+    const second = new TFile("docs/two.md", "beta beta", 200);
+    const third = new TFile("docs/three.md", "gamma", 300);
+    const { store } = createStoreHarness({
+      files: [first, second, third],
+      reads: {
+        [first.path]: "alpha",
+        [second.path]: "beta beta",
+        [third.path]: "gamma",
+      },
+    });
+
+    await store.readCurrentTexts([first, second]);
+    await store.removeFiles([first.path]);
+
+    const estimateAfterDelete = store.getRuntimeMemoryEstimate();
+    expect(estimateAfterDelete.fileCount).toBe(1);
+    expect(estimateAfterDelete.slotCount).toBe(2);
+    expect(estimateAfterDelete.freeSlotCount).toBe(1);
+    expect(estimateAfterDelete.largestEntries[0]).toEqual(
+      expect.objectContaining({
+        path: second.path,
+        textBytes: Buffer.byteLength("beta beta", "utf8"),
+      }),
+    );
+
+    await store.readCurrentTexts([third]);
+
+    const estimate = store.getRuntimeMemoryEstimate();
+    const expectedPathBytes =
+      Buffer.byteLength(second.path, "utf8") +
+      Buffer.byteLength(third.path, "utf8");
+    const expectedTextBytes =
+      Buffer.byteLength("beta beta", "utf8") +
+      Buffer.byteLength("gamma", "utf8");
+    expect(estimate.pathBytes).toBe(expectedPathBytes);
+    expect(estimate.currentTextBytes).toBe(expectedTextBytes);
+    expect(estimate.generationBytes).toBe(16);
+    expect(estimate.fileCount).toBe(2);
+    expect(estimate.slotCount).toBe(2);
+    expect(estimate.freeSlotCount).toBe(0);
+    expect(estimate.totalBytes).toBe(expectedPathBytes + expectedTextBytes + 16);
+    expect(estimate.largestEntries.map((entry) => entry.path)).toEqual([
+      second.path,
+      third.path,
+    ]);
+  });
 });

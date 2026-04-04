@@ -249,6 +249,28 @@ function createEngineHarness() {
         }
       },
     ),
+    getHybridIndexedFileRef: jest.fn(async (filePath: string) => {
+      return await indexedRefTable.get(filePath);
+    }),
+    listHybridIndexedFileRefs: jest.fn(async () => {
+      return await indexedRefTable.toArray();
+    }),
+    putHybridIndexedFileRef: jest.fn(
+      async (ref: { path: string; generation?: number; state?: string }) => {
+        await indexedRefTable.put(ref as any);
+        if (ref.state !== "pending") {
+          await fileSnapshotStore.notifyHybridIndexedRefsChanged([ref.path]);
+        }
+      },
+    ),
+    deleteHybridIndexedFileRef: jest.fn(async (filePath: string) => {
+      await indexedRefTable.delete(filePath);
+      await fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
+    }),
+    clearHybridIndexedFileRefs: jest.fn(async () => {
+      await indexedRefTable.clear();
+      await fileSnapshotStore.notifyHybridIndexedRefsChanged();
+    }),
     notifyHybridIndexedRefsChanged: jest.fn(async (filePaths?: readonly string[]) => {
       const paths =
         filePaths !== undefined
@@ -372,6 +394,7 @@ describe("HybridEngine shared snapshot ownership", () => {
       generation: 100,
       state: "ready",
     });
+    (engine as any)._canSearch = true;
 
     await engine.deleteFile("docs/a.md", { persistIndices: false });
 
@@ -384,10 +407,10 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(chunkTable.rows).toEqual([]);
     expect(await vectorTable.get("docs/a.md")).toBeUndefined();
     expect(await indexedRefTable.get("docs/a.md")).toBeUndefined();
+    expect(engine.canSearch()).toBe(false);
     expect((engine as any).hnswSmall.delete).toHaveBeenCalledWith(11);
     expect((engine as any).hnswSmall.delete).toHaveBeenCalledWith(12);
   });
-
 
   test("deleteFile rebuilds HNSW when vector state survives without chunk ids", async () => {
     const {
@@ -427,6 +450,7 @@ describe("HybridEngine shared snapshot ownership", () => {
       "docs/orphaned-vector.md",
     ]);
   });
+
   test("clearAll keeps shared snapshots while clearing hybrid-private tables", async () => {
     const {
       engine,
@@ -593,6 +617,8 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(await shadowTable.get("docs/new.md")).toBeUndefined();
     expect(fileSnapshotStore.notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([
       "docs/old.md",
+    ]);
+    expect(fileSnapshotStore.notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([
       "docs/new.md",
     ]);
   });

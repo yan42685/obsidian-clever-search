@@ -342,7 +342,7 @@ describe("SearchService bootstrap gate", () => {
 			hybridEnabled: true,
 			hybridReady: true,
 			hybridCanServeQuery: true,
-			hybridUnavailable: true,
+			hybridUnavailable: false,
 		});
 		const hybridItems = [
 			new FileItem(
@@ -361,9 +361,33 @@ describe("SearchService bootstrap gate", () => {
 
 		const result = await service.searchInVaultHybrid("hybrid");
 
-		expect(dataManager.isHybridSearchUnavailable).not.toHaveBeenCalled();
+		expect(dataManager.isHybridSearchUnavailable).toHaveBeenCalled();
 		expect(mockHybridEngine.prepareRecall).toHaveBeenCalledWith("hybrid", 10, undefined);
 		expect((result.items[0] as any).path).toBe("notes/lexical-only.md");
+	});
+
+	test("falls back to lexical when DataManager marks hybrid unavailable", async () => {
+		const { service, lexicalEngine } = createHarness({
+			searchable: true,
+			hybridEnabled: true,
+			hybridReady: true,
+			hybridCanServeQuery: true,
+			hybridUnavailable: true,
+			lexicalMatches: [
+				{
+					path: "notes/availability-fallback.md",
+					queryTerms: ["hybrid"],
+					matchedTerms: ["hybrid"],
+					score: 1,
+				},
+			],
+		});
+
+		const result = await service.searchInVaultHybrid("hybrid");
+
+		expect(mockHybridEngine.prepareRecall).not.toHaveBeenCalled();
+		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("hybrid", 22, 10, 60);
+		expect((result.items[0] as any).path).toBe("notes/availability-fallback.md");
 	});
 
 	test("falls back to lexical when hybrid cannot serve any query yet", async () => {
@@ -372,6 +396,7 @@ describe("SearchService bootstrap gate", () => {
 			hybridEnabled: true,
 			hybridReady: false,
 			hybridCanServeQuery: false,
+			hybridUnavailable: true,
 			lexicalMatches: [
 				{
 					path: "notes/lexical-fallback.md",

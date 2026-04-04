@@ -125,6 +125,7 @@ export class SearchService {
 		queryText: string,
 		signal?: AbortSignal,
 	): Promise<PreparedHybridSearchResult> {
+		const dataManager = getInstance(DataManager);
 		const blocked = this.getBlockedSearchResult(queryText);
 		if (blocked) {
 			return {
@@ -138,7 +139,7 @@ export class SearchService {
 				result: new SearchResult("no result", []),
 			};
 		}
-		if (!this.hybridEngine.isEnabled() || !this.hybridEngine.isReady()) {
+		if (dataManager.isHybridSearchUnavailable()) {
 			return {
 				prepared: null,
 				result: await this.searchInVaultLexical(queryText),

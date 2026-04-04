@@ -1,12 +1,8 @@
 import { TFile, Vault, htmlToMarkdown } from "obsidian";
+import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
-
-type CurrentFileCacheEntry = {
-	text: string;
-	generation?: number;
-};
 
 type PersistedFileSnapshotRow = {
 	filePath: string;
@@ -31,20 +27,41 @@ type IndexedTextPublishRequest = {
 	text?: string;
 };
 
+type CurrentFileEntry = {
+	path: string;
+	slot: number;
+	text: string;
+	generation?: number;
+};
+
 export type FileSnapshotRuntimeMemoryEstimate = {
+	pathBytes: number;
 	currentTextBytes: number;
+	generationBytes: number;
 	fileCount: number;
+	slotCount: number;
+	freeSlotCount: number;
 	totalBytes: number;
+	largestEntries: Array<{
+		path: string;
+		totalBytes: number;
+		pathBytes: number;
+		textBytes: number;
+		generationBytes: number;
+	}>;
 };
 
 const textEncoder = new TextEncoder();
 
-
 @singleton()
 export class FileSnapshotStore {
 	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
+	private static readonly RUNTIME_REPORT_TOP_ENTRY_LIMIT = 5;
 	private readonly vault = getInstance(Vault);
-	private readonly currentFileCache = new Map<string, CurrentFileCacheEntry>();
+	private readonly currentFilePathToSlot = new Map<string, number>();
+	private readonly currentSlotTexts: Array<string | undefined> = [];
+	private readonly currentSlotGenerations: Array<number | undefined> = [];
+	private readonly freeCurrentSlots: number[] = [];
 
 	async readCurrentTexts(
 		fileOrPaths: ReadonlyArray<TFile | string>,
@@ -126,6 +143,51 @@ export class FileSnapshotStore {
 		await this.database.db.hybridDirtyShadows.bulkDelete(stalePaths);
 	}
 
+	async putHybridIndexedFileRef(ref: HybridIndexedFileRef): Promise<void> {
+		await this.database.db.hybridIndexedFileRefs.put(ref);
+		if (ref.state !== "pending") {
+			await this.notifyHybridIndexedRefsChanged([ref.path]);
+		}
+	}
+
+	async getHybridIndexedFileRef(
+		filePath: string,
+	): Promise<HybridIndexedFileRef | undefined> {
+		return await this.database.db.hybridIndexedFileRefs.get(filePath);
+	}
+
+	async getHybridIndexedFileRefs(
+		filePaths: readonly string[],
+	): Promise<Map<string, HybridIndexedFileRef>> {
+		const uniquePaths = Array.from(new Set(filePaths));
+		if (uniquePaths.length === 0) {
+			return new Map<string, HybridIndexedFileRef>();
+		}
+		const rows = await this.database.db.hybridIndexedFileRefs.bulkGet(uniquePaths);
+		const refs = new Map<string, HybridIndexedFileRef>();
+		for (let index = 0; index < uniquePaths.length; index++) {
+			const row = rows[index];
+			if (row) {
+				refs.set(uniquePaths[index], row);
+			}
+		}
+		return refs;
+	}
+
+	async listHybridIndexedFileRefs(): Promise<HybridIndexedFileRef[]> {
+		return await this.database.db.hybridIndexedFileRefs.toArray();
+	}
+
+	async deleteHybridIndexedFileRef(filePath: string): Promise<void> {
+		await this.database.db.hybridIndexedFileRefs.delete(filePath);
+		await this.notifyHybridIndexedRefsChanged([filePath]);
+	}
+
+	async clearHybridIndexedFileRefs(): Promise<void> {
+		await this.database.db.hybridIndexedFileRefs.clear();
+		await this.notifyHybridIndexedRefsChanged();
+	}
+
 	async removeFiles(filePaths: readonly string[]): Promise<void> {
 		for (const filePath of filePaths) {
 			this.deleteCurrentFile(filePath);
@@ -134,7 +196,7 @@ export class FileSnapshotStore {
 	}
 
 	async retainOnlyFiles(validPaths: ReadonlySet<string>): Promise<void> {
-		for (const path of Array.from(this.currentFileCache.keys())) {
+		for (const path of Array.from(this.currentFilePathToSlot.keys())) {
 			if (!validPaths.has(path)) {
 				this.deleteCurrentFile(path);
 			}
@@ -164,14 +226,15 @@ export class FileSnapshotStore {
 		if (!(file instanceof TFile)) {
 			return "";
 		}
-		const cached = this.currentFileCache.get(file.path);
+		const cachedText = this.getCurrentFileText(file.path);
+		const cachedGeneration = this.getCurrentFileGeneration(file.path);
 		if (
-			cached !== undefined &&
-			(cached.generation === undefined ||
+			cachedText !== undefined &&
+			(cachedGeneration === undefined ||
 				file.stat.mtime === undefined ||
-				cached.generation >= file.stat.mtime)
+				cachedGeneration >= file.stat.mtime)
 		) {
-			return cached.text;
+			return cachedText;
 		}
 		const indexedSnapshot = await this.database.db.fileSnapshots.get(file.path);
 		if (
@@ -195,14 +258,15 @@ export class FileSnapshotStore {
 		if (!(file instanceof TFile)) {
 			return "";
 		}
-		const cached = this.currentFileCache.get(file.path);
+		const cachedText = this.getCurrentFileText(file.path);
+		const cachedGeneration = this.getCurrentFileGeneration(file.path);
 		if (
-			cached !== undefined &&
-			(cached.generation === undefined ||
+			cachedText !== undefined &&
+			(cachedGeneration === undefined ||
 				file.stat.mtime === undefined ||
-				cached.generation >= file.stat.mtime)
+				cachedGeneration >= file.stat.mtime)
 		) {
-			return cached.text;
+			return cachedText;
 		}
 		const plainText = await this.vault.cachedRead(file);
 		const normalized =
@@ -211,7 +275,10 @@ export class FileSnapshotStore {
 	}
 
 	resetRuntimeState(): void {
-		this.currentFileCache.clear();
+		this.currentFilePathToSlot.clear();
+		this.currentSlotTexts.length = 0;
+		this.currentSlotGenerations.length = 0;
+		this.freeCurrentSlots.length = 0;
 	}
 
 	private writeCurrentFileText(
@@ -219,34 +286,76 @@ export class FileSnapshotStore {
 		text: string,
 		generation?: number,
 	): string {
-		const existing = this.currentFileCache.get(path);
+		const existingText = this.getCurrentFileText(path);
+		const existingGeneration = this.getCurrentFileGeneration(path);
 		if (
-			existing &&
-			!this.shouldReplaceCurrentEntry(existing.generation, generation)
+			existingText !== undefined &&
+			!this.shouldReplaceCurrentEntry(existingGeneration, generation)
 		) {
-			return existing.text;
+			return existingText;
 		}
-		this.currentFileCache.set(path, { text, generation });
+		const slot = this.ensureCurrentSlot(path);
+		this.currentSlotTexts[slot] = text;
+		this.currentSlotGenerations[slot] = generation;
 		return text;
 	}
 
 	private deleteCurrentFile(path: string): void {
-		this.currentFileCache.delete(path);
+		const slot = this.currentFilePathToSlot.get(path);
+		if (slot === undefined) {
+			return;
+		}
+		this.currentFilePathToSlot.delete(path);
+		this.currentSlotTexts[slot] = undefined;
+		this.currentSlotGenerations[slot] = undefined;
+		if (slot === this.currentSlotTexts.length - 1) {
+			this.trimTrailingCurrentSlots();
+			return;
+		}
+		this.freeCurrentSlots.push(slot);
 	}
 
 	getRuntimeMemoryEstimate(): FileSnapshotRuntimeMemoryEstimate {
+		let pathBytes = 0;
 		let currentTextBytes = 0;
-		for (const [path, entry] of this.currentFileCache) {
-			currentTextBytes += textEncoder.encode(path).length;
-			currentTextBytes += textEncoder.encode(entry.text).length;
-			if (entry.generation !== undefined) {
-				currentTextBytes += 8;
+		let generationBytes = 0;
+		const largestEntries: FileSnapshotRuntimeMemoryEstimate["largestEntries"] = [];
+
+		for (const [path, slot] of this.currentFilePathToSlot) {
+			const text = this.currentSlotTexts[slot];
+			if (text === undefined) {
+				continue;
 			}
+			const entryPathBytes = textEncoder.encode(path).length;
+			const entryTextBytes = textEncoder.encode(text).length;
+			const entryGenerationBytes =
+				this.currentSlotGenerations[slot] !== undefined ? 8 : 0;
+			pathBytes += entryPathBytes;
+			currentTextBytes += entryTextBytes;
+			generationBytes += entryGenerationBytes;
+			largestEntries.push({
+				path,
+				totalBytes: entryPathBytes + entryTextBytes + entryGenerationBytes,
+				pathBytes: entryPathBytes,
+				textBytes: entryTextBytes,
+				generationBytes: entryGenerationBytes,
+			});
 		}
+
+		largestEntries.sort((left, right) => right.totalBytes - left.totalBytes);
+
 		return {
+			pathBytes,
 			currentTextBytes,
-			fileCount: this.currentFileCache.size,
-			totalBytes: currentTextBytes,
+			generationBytes,
+			fileCount: this.currentFilePathToSlot.size,
+			slotCount: this.currentSlotTexts.length,
+			freeSlotCount: this.freeCurrentSlots.length,
+			totalBytes: pathBytes + currentTextBytes + generationBytes,
+			largestEntries: largestEntries.slice(
+				0,
+				FileSnapshotStore.RUNTIME_REPORT_TOP_ENTRY_LIMIT,
+			),
 		};
 	}
 
@@ -257,21 +366,18 @@ export class FileSnapshotStore {
 		const rows: PersistedFileSnapshotRow[] = [];
 		const persistedFiles: Array<{ path: string; generation?: number }> = [];
 		for (const file of files) {
-			const cached = this.currentFileCache.get(file.path);
-			if (!this.isGenerationMatch(cached?.generation, file.generation)) {
-				continue;
-			}
-			if (!cached) {
+			const candidate = this.resolveIndexedPublishCandidate(file);
+			if (!candidate) {
 				continue;
 			}
 			rows.push({
 				filePath: file.path,
-				plainText: cached.text,
-				generation: file.generation ?? cached.generation,
+				plainText: candidate.text,
+				generation: candidate.generation,
 			});
 			persistedFiles.push({
 				path: file.path,
-				generation: file.generation ?? cached.generation,
+				generation: candidate.generation,
 			});
 		}
 		if (rows.length === 0) {
@@ -279,6 +385,27 @@ export class FileSnapshotStore {
 		}
 		await this.preserveIndexedGenerationShadows(persistedFiles);
 		await this.database.db.fileSnapshots.bulkPut(rows);
+	}
+
+	private resolveIndexedPublishCandidate(
+		file: IndexedTextPublishRequest,
+	): { text: string; generation?: number } | undefined {
+		if (file.text !== undefined) {
+			return {
+				text: file.text,
+				generation: file.generation ?? this.getCurrentFileGeneration(file.path),
+			};
+		}
+
+		const current = this.getCurrentFile(file.path);
+		if (!current || !this.isGenerationMatch(current.generation, file.generation)) {
+			return undefined;
+		}
+
+		return {
+			text: current.text,
+			generation: file.generation ?? current.generation,
+		};
 	}
 
 	private async deletePersistedFiles(filePaths: readonly string[]): Promise<void> {
@@ -302,7 +429,7 @@ export class FileSnapshotStore {
 
 		for (const filePath of uniquePaths) {
 			const expectedGeneration = expectedGenerations?.get(filePath);
-			const current = this.currentFileCache.get(filePath);
+			const current = this.getCurrentFile(filePath);
 			if (current && this.isGenerationMatch(current.generation, expectedGeneration)) {
 				snapshots.set(filePath, current.text);
 				continue;
@@ -405,8 +532,12 @@ export class FileSnapshotStore {
 				this.writeCurrentFileText(file.path, file.text, file.generation);
 				continue;
 			}
-			const cached = this.currentFileCache.get(file.path);
-			if (this.isGenerationMatch(cached?.generation, file.generation)) {
+			const currentText = this.getCurrentFileText(file.path);
+			const currentGeneration = this.getCurrentFileGeneration(file.path);
+			if (
+				currentText !== undefined &&
+				this.isGenerationMatch(currentGeneration, file.generation)
+			) {
 				continue;
 			}
 			await this.hydrateCurrentEntryForPublish(file.path, file.generation);
@@ -479,6 +610,63 @@ export class FileSnapshotStore {
 			return;
 		}
 		await this.database.db.hybridDirtyShadows.bulkPut(shadowRows);
+	}
+
+	private getCurrentFile(path: string): CurrentFileEntry | undefined {
+		const slot = this.currentFilePathToSlot.get(path);
+		if (slot === undefined) {
+			return undefined;
+		}
+		const text = this.currentSlotTexts[slot];
+		if (text === undefined) {
+			return undefined;
+		}
+		return {
+			path,
+			slot,
+			text,
+			generation: this.currentSlotGenerations[slot],
+		};
+	}
+
+	private getCurrentFileText(path: string): string | undefined {
+		return this.getCurrentFile(path)?.text;
+	}
+
+	private getCurrentFileGeneration(path: string): number | undefined {
+		return this.getCurrentFile(path)?.generation;
+	}
+
+	private ensureCurrentSlot(path: string): number {
+		const existingSlot = this.currentFilePathToSlot.get(path);
+		if (existingSlot !== undefined) {
+			return existingSlot;
+		}
+		const recycledSlot = this.freeCurrentSlots.pop();
+		if (recycledSlot !== undefined) {
+			this.currentFilePathToSlot.set(path, recycledSlot);
+			return recycledSlot;
+		}
+		const nextSlot = this.currentSlotTexts.length;
+		this.currentFilePathToSlot.set(path, nextSlot);
+		this.currentSlotTexts.push(undefined);
+		this.currentSlotGenerations.push(undefined);
+		return nextSlot;
+	}
+
+	private trimTrailingCurrentSlots(): void {
+		while (this.currentSlotTexts.length > 0) {
+			const lastSlot = this.currentSlotTexts.length - 1;
+			if (this.currentSlotTexts[lastSlot] !== undefined) {
+				return;
+			}
+			this.currentSlotTexts.pop();
+			this.currentSlotGenerations.pop();
+			const freeSlotIndex = this.freeCurrentSlots.lastIndexOf(lastSlot);
+			if (freeSlotIndex >= 0) {
+				this.freeCurrentSlots.splice(freeSlotIndex, 1);
+			}
+		}
 	}
 
 	private async deleteRowsNotIn(

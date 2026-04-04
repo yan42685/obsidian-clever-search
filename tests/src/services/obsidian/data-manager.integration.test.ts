@@ -171,6 +171,7 @@ function createMockFileSnapshotStore() {
   const current = new Map<string, { text: string; generation?: number }>();
   const persisted = new Map<string, { text: string; generation?: number }>();
   const shadow = new Map<string, { text: string; generation?: number }>();
+  const hybridIndexedRefs: Array<Record<string, any> & { path: string }> = [];
 
   const isGenerationMatch = (
     actualGeneration: number | undefined,
@@ -215,10 +216,11 @@ function createMockFileSnapshotStore() {
     return result;
   };
 
-  return {
+  const store = {
     current,
     persisted,
     shadow,
+    hybridIndexedRefs,
     resetRuntimeState: jest.fn(() => {
       current.clear();
     }),
@@ -287,7 +289,7 @@ function createMockFileSnapshotStore() {
         shadow.delete(path);
       }
     }),
-    reconcileHybridShadows: jest.fn(async (paths?: readonly string[]) => {
+    notifyHybridIndexedRefsChanged: jest.fn(async (paths?: readonly string[]) => {
       const candidatePaths =
         paths !== undefined ? Array.from(new Set(paths)) : Array.from(shadow.keys());
       for (const path of candidatePaths) {
@@ -321,6 +323,11 @@ function createMockFileSnapshotStore() {
             shadow.delete(path);
           }
         }
+        for (let index = hybridIndexedRefs.length - 1; index >= 0; index--) {
+          if (!validPaths.has(hybridIndexedRefs[index].path)) {
+            hybridIndexedRefs.splice(index, 1);
+          }
+        }
       },
     ),
     readIndexedTexts: jest.fn(
@@ -334,12 +341,36 @@ function createMockFileSnapshotStore() {
           ),
         ),
     ),
+    getHybridIndexedFileRef: jest.fn(async (path: string) =>
+      store.hybridIndexedRefs.find((ref) => ref.path === path)
+        ? { ...store.hybridIndexedRefs.find((ref) => ref.path === path)! }
+        : undefined,
+    ),
+    getHybridIndexedFileRefs: jest.fn(async (paths: readonly string[]) => {
+      const result = new Map<string, Record<string, any> & { path: string }>();
+      for (const path of Array.from(new Set(paths))) {
+        const ref = store.hybridIndexedRefs.find((item) => item.path === path);
+        if (ref) {
+          result.set(path, { ...ref });
+        }
+      }
+      return result;
+    }),
+    listHybridIndexedFileRefs: jest.fn(async () =>
+      store.hybridIndexedRefs.map((ref) => ({ ...ref })),
+    ),
     getRuntimeMemoryEstimate: jest.fn(() => ({
+      pathBytes: 0,
       currentTextBytes: 0,
+      generationBytes: 0,
       fileCount: 0,
+      slotCount: 0,
+      freeSlotCount: 0,
       totalBytes: 0,
+      largestEntries: [],
     })),
   };
+  return store;
 }
 function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
   return {
@@ -823,6 +854,9 @@ function registerDataManagerDeps(params: {
     },
   );
 
+  params.fileSnapshotStore.hybridIndexedRefs =
+    params.database.__hybridIndexedFileRefs;
+
   container.registerInstance(THIS_PLUGIN, plugin as any);
   container.registerInstance(OuterSetting, params.setting as any);
   container.registerInstance(Database, params.database as any);
@@ -1032,9 +1066,22 @@ describe("DataManager integration", () => {
     });
     const fileSnapshotStore = createMockFileSnapshotStore();
     fileSnapshotStore.getRuntimeMemoryEstimate.mockReturnValue({
+      pathBytes: 64,
       currentTextBytes: 5120,
+      generationBytes: 8,
       fileCount: 1,
-      totalBytes: 5120,
+      slotCount: 1,
+      freeSlotCount: 0,
+      totalBytes: 5192,
+      largestEntries: [
+        {
+          path: "docs/a.md",
+          totalBytes: 5192,
+          pathBytes: 64,
+          textBytes: 5120,
+          generationBytes: 8,
+        },
+      ],
     });
     const hybridEngine = createMockHybridEngine({
       isEnabled: jest.fn(() => false),
@@ -1093,6 +1140,7 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("CurrentTextRuntime");
     expect(latestNotice).toContain("Coverage live index");
     expect(latestNotice).toContain("Coverage top segments");
+    expect(latestNotice).toContain("Current text runtime split");
     expect(groupSpy).toHaveBeenCalled();
     expect(endSpy).toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalled();
@@ -1125,7 +1173,7 @@ describe("DataManager integration", () => {
         }),
         expect.objectContaining({
           category: "CurrentTextRuntime",
-          bytes: 5120,
+          bytes: 5192,
           rows: "1 file(s)",
         }),
         expect.objectContaining({
@@ -1135,6 +1183,14 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           segment: "doc.bodyTokens",
           bytes: 11264,
+        }),
+        expect.objectContaining({
+          segment: "texts",
+          bytes: 5120,
+        }),
+        expect.objectContaining({
+          segment: "paths",
+          bytes: 64,
         }),
       ]),
     );
@@ -2283,6 +2339,7 @@ describe("DataManager integration", () => {
 
     manager.onunload();
   });
+
   test("hybrid health summary treats ready refs with missing hybrid data as unstable", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;

@@ -33,7 +33,7 @@ import {
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
-import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { eventBus } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
@@ -158,6 +158,16 @@ type DevRuntimePartitionRow = {
   shareOfPluginRuntime: string;
   shareOfJsHeapUsed: string;
   shareOfVault: string;
+};
+
+type DevFileSnapshotRuntimeRow = {
+  segment: string;
+  bytes: number;
+  size: string;
+  shareOfCurrentTextRuntime: string;
+  shareOfPluginRuntime: string;
+  shareOfVault: string;
+  notes: string;
 };
 
 type DevHeapContextRow = {
@@ -409,11 +419,8 @@ export class DataManager {
     dataProvider: this.dataProvider,
     hybridEngine: this.hybridEngine,
     shouldForceRefresh: () => this.shouldForceRefresh,
-    markSearchBlocked: () => this.setHybridSearchAvailability("blocked"),
-    syncSearchAvailability: () =>
-      this.setHybridSearchAvailability(
-        this.hybridEngine.canServeQuery() ? "available" : "blocked",
-      ),
+    markSearchBlocked: () => this.markHybridSearchBlocked(),
+    syncSearchAvailability: () => this.syncHybridSearchAvailabilityFromEngine(),
     repairStoredState: (currFiles) => this.repairHybridStoredState(currFiles),
     restorePersistedRecoveryState: (currFiles, previousIndexedFileRefs) =>
       this.restorePersistedHybridRecoveryState(
@@ -488,7 +495,7 @@ export class DataManager {
         .map((file) => file.path)
         .filter((path) => repairPaths.has(path)),
     );
-    const indexedRefs = await this.database.db.hybridIndexedFileRefs.bulkGet(
+    const indexedRefs = await this.fileSnapshotStore.getHybridIndexedFileRefs(
       trackedFiles.map((file) => file.path),
     );
 
@@ -505,7 +512,7 @@ export class DataManager {
         );
         continue;
       }
-      const indexedRef = indexedRefs[index];
+      const indexedRef = indexedRefs.get(file.path);
       if (!indexedRef || file.stat.mtime > indexedRef.generation) {
         updatingFileCount += 1;
         appendPathSample(
@@ -979,7 +986,7 @@ export class DataManager {
     syncFileSetWithoutEmbedding: boolean;
   }): Promise<HybridRefreshResult> {
     if (!this.hybridEngine.isEnabled()) {
-      this.setHybridSearchAvailability("blocked");
+      this.markHybridSearchBlocked();
       return { hadWork: false, failedFiles: 0, fallbackNoticeKey: null };
     }
 
@@ -995,7 +1002,7 @@ export class DataManager {
           .map((file) => [file.path, file]),
       );
       const previousIndexedFileRefs = new Map<string, HybridIndexedFileRef>(
-        (await this.database.db.hybridIndexedFileRefs.toArray()).map((ref) => [
+        (await this.fileSnapshotStore.listHybridIndexedFileRefs()).map((ref) => [
           ref.path,
           ref,
         ]),
@@ -1054,9 +1061,7 @@ export class DataManager {
     if (failures.length > 0) {
       this.noticeHybridIndexFailures(failures);
     }
-    this.setHybridSearchAvailability(
-      this.hybridEngine.canServeQuery() ? "available" : "blocked",
-    );
+    this.syncHybridSearchAvailabilityFromEngine();
     return { hadWork, failedFiles: failures.length, fallbackNoticeKey: null };
   }
 
@@ -1455,7 +1460,7 @@ export class DataManager {
 
   private async canReuseMovedHybridState(path: string): Promise<boolean> {
     const [indexedFileRef, snapshotRow, shadowRow] = await Promise.all([
-      this.database.db.hybridIndexedFileRefs.get(path),
+      this.fileSnapshotStore.getHybridIndexedFileRef(path),
       this.database.db.fileSnapshots.get(path),
       this.database.db.hybridDirtyShadows.get(path),
     ]);
@@ -2178,7 +2183,7 @@ export class DataManager {
   private async getIncrementalEmbedEligibleAt(
     filePath: string,
   ): Promise<number> {
-    const ref = await this.database.db.hybridIndexedFileRefs.get(filePath);
+    const ref = await this.fileSnapshotStore.getHybridIndexedFileRef(filePath);
     const lastIncrementalEmbedAt = ref?.lastIncrementalEmbedAt ?? 0;
     if (lastIncrementalEmbedAt <= 0) {
       return 0;
@@ -2258,6 +2263,16 @@ export class DataManager {
     availability: HybridSearchAvailability,
   ): void {
     this.hybridSearchAvailability = availability;
+  }
+
+  private markHybridSearchBlocked(): void {
+    this.setHybridSearchAvailability("blocked");
+  }
+
+  private syncHybridSearchAvailabilityFromEngine(): void {
+    this.setHybridSearchAvailability(
+      this.hybridEngine.canServeQuery() ? "available" : "blocked",
+    );
   }
 
   private setLexicalBootstrapState(state: SearchBootstrapState): void {
@@ -3018,7 +3033,7 @@ export class DataManager {
       previousIndexedFileRefs !== undefined
         ? new Set(previousIndexedFileRefs.keys())
         : new Set(
-            (await this.database.db.hybridIndexedFileRefs.toArray()).map(
+            (await this.fileSnapshotStore.listHybridIndexedFileRefs()).map(
               (ref) => ref.path,
             ),
           );
@@ -3185,6 +3200,12 @@ export class DataManager {
       indexableBytes,
       jsHeapUsage,
     );
+    const fileSnapshotRuntimeBreakdown =
+      this.buildFileSnapshotRuntimeBreakdown(
+        fileSnapshotRuntimeEstimate,
+        runtimeTotalBytes,
+        indexableBytes,
+      );
     const heapContextRows = this.buildPluginHeapContextRows(
       runtimeTotalBytes,
       jsHeapUsage,
@@ -3201,6 +3222,7 @@ export class DataManager {
         persistedUnlistedBytes,
         [
           ...runtimePartitionBreakdown.noticeLines,
+          ...fileSnapshotRuntimeBreakdown.noticeLines,
           ...lexicalRuntimeBreakdown.noticeLines,
           ...lexicalHeapDeltaNoticeLines,
         ],
@@ -3227,6 +3249,9 @@ export class DataManager {
     runtimePartitionBreakdown.noticeLines.forEach((line) => {
       console.log("[clever-search] " + line);
     });
+    fileSnapshotRuntimeBreakdown.noticeLines.forEach((line) => {
+      console.log("[clever-search] " + line);
+    });
     if (lexicalRuntimeBreakdown.summaryLine) {
       console.log(`[clever-search] ${lexicalRuntimeBreakdown.summaryLine}`);
     }
@@ -3240,6 +3265,14 @@ export class DataManager {
     if (runtimePartitionBreakdown.rows.length > 0) {
       console.log("[clever-search] Plugin runtime breakdown");
       console.table(runtimePartitionBreakdown.rows);
+    }
+    if (fileSnapshotRuntimeBreakdown.rows.length > 0) {
+      console.log("[clever-search] Current text runtime breakdown");
+      console.table(fileSnapshotRuntimeBreakdown.rows);
+    }
+    if (fileSnapshotRuntimeBreakdown.largestEntryRows.length > 0) {
+      console.log("[clever-search] Current text largest resident entries");
+      console.table(fileSnapshotRuntimeBreakdown.largestEntryRows);
     }
     if (heapContextRows.length > 0) {
       console.log("[clever-search] Plugin runtime vs JS heap");
@@ -3575,6 +3608,100 @@ export class DataManager {
       stringPoolGroupRows,
       stringPoolSourceRows,
       stringOwnershipRows,
+    };
+  }
+
+  private buildFileSnapshotRuntimeBreakdown(
+    estimate: FileSnapshotRuntimeMemoryEstimate,
+    runtimeTotalBytes: number,
+    indexableBytes: number,
+  ): {
+    noticeLines: string[];
+    rows: DevFileSnapshotRuntimeRow[];
+    largestEntryRows: Array<Record<string, string | number>>;
+  } {
+    const rows = [
+      {
+        segment: "texts",
+        bytes: estimate.currentTextBytes,
+        notes: "resident normalized plain text owned by FileSnapshotStore",
+      },
+      {
+        segment: "paths",
+        bytes: estimate.pathBytes,
+        notes: "file path keys retained for resident-cache lookups",
+      },
+      {
+        segment: "generations",
+        bytes: estimate.generationBytes,
+        notes: "generation markers used by aligned reads and publish checks",
+      },
+    ]
+      .filter((row) => row.bytes > 0)
+      .sort((left, right) => right.bytes - left.bytes)
+      .map((row) => ({
+        segment: row.segment,
+        bytes: row.bytes,
+        size: this.formatBytes(row.bytes),
+        shareOfCurrentTextRuntime: this.formatPercent(
+          row.bytes,
+          estimate.totalBytes,
+        ),
+        shareOfPluginRuntime: this.formatPercent(row.bytes, runtimeTotalBytes),
+        shareOfVault: this.formatPercent(row.bytes, indexableBytes),
+        notes: row.notes,
+      }));
+
+    const noticeLines: string[] = [];
+    if (rows.length > 0) {
+      noticeLines.push(
+        "Current text runtime split: " +
+          rows
+            .slice(0, 3)
+            .map((row) => row.segment + " " + row.size)
+            .join(" | "),
+      );
+    }
+    if (estimate.slotCount > 0 || estimate.fileCount > 0) {
+      noticeLines.push(
+        "Current text cache slots: live " +
+          estimate.fileCount +
+          " | total " +
+          estimate.slotCount +
+          " | free " +
+          estimate.freeSlotCount,
+      );
+    }
+    if (estimate.largestEntries.length > 0) {
+      noticeLines.push(
+        "Current text largest entries: " +
+          estimate.largestEntries
+            .slice(0, 3)
+            .map((entry) => entry.path + " " + this.formatBytes(entry.totalBytes))
+            .join(" | "),
+      );
+    }
+
+    const largestEntryRows = estimate.largestEntries.map((entry) => ({
+      path: entry.path,
+      totalBytes: entry.totalBytes,
+      totalSize: this.formatBytes(entry.totalBytes),
+      textBytes: entry.textBytes,
+      textSize: this.formatBytes(entry.textBytes),
+      pathBytes: entry.pathBytes,
+      pathSize: this.formatBytes(entry.pathBytes),
+      generationBytes: entry.generationBytes,
+      generationSize: this.formatBytes(entry.generationBytes),
+      shareOfCurrentTextRuntime: this.formatPercent(
+        entry.totalBytes,
+        estimate.totalBytes,
+      ),
+    }));
+
+    return {
+      noticeLines,
+      rows,
+      largestEntryRows,
     };
   }
 

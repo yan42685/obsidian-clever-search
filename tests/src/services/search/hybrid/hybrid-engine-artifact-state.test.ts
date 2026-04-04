@@ -367,7 +367,9 @@ describe("HybridEngine artifact state", () => {
     });
     mockInstanceMap.set(
       require("src/services/search/shared/file-snapshot-store").FileSnapshotStore,
-      {},
+      {
+        listHybridIndexedFileRefs: jest.fn(async () => await indexedRefTable.toArray()),
+      },
     );
 
     const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
@@ -454,7 +456,9 @@ describe("HybridEngine artifact state", () => {
     mockInstanceMap.set(require("src/services/obsidian/user-data/data-provider").DataProvider, {});
     mockInstanceMap.set(
       require("src/services/search/shared/file-snapshot-store").FileSnapshotStore,
-      {},
+      {
+        listHybridIndexedFileRefs: jest.fn(async () => await indexedRefTable.toArray()),
+      },
     );
 
     const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
