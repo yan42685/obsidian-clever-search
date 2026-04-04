@@ -3072,8 +3072,8 @@ export class DataManager {
       runtimeLexicalIndexBytes,
     );
     const hybridRuntimeEstimate = this.hybridEngine.getRuntimeMemoryEstimate();
-    const currentFileCacheBytes =
-      this.fileSnapshotStore.estimateCurrentCacheBytes();
+    const fileSnapshotRuntimeEstimate =
+      this.fileSnapshotStore.getRuntimeMemoryEstimate();
     const jsHeapUsage = this.sampleJsHeapUsage();
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
@@ -3122,9 +3122,9 @@ export class DataManager {
         "estimate",
       ),
       this.createDevStorageSummaryRow(
-        "CurrentFileCache",
-        currentFileCacheBytes,
-        "estimate",
+        "CurrentTextRuntime",
+        fileSnapshotRuntimeEstimate.totalBytes,
+        `${fileSnapshotRuntimeEstimate.fileCount} file(s)`,
       ),
     ];
     const persistedListedBytes = persistedRows.reduce(

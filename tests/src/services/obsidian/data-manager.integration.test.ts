@@ -334,7 +334,11 @@ function createMockFileSnapshotStore() {
           ),
         ),
     ),
-    estimateCurrentCacheBytes: jest.fn(() => 0),
+    getRuntimeMemoryEstimate: jest.fn(() => ({
+      currentTextBytes: 0,
+      fileCount: 0,
+      totalBytes: 0,
+    })),
   };
 }
 function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
@@ -1027,7 +1031,11 @@ describe("DataManager integration", () => {
       })),
     });
     const fileSnapshotStore = createMockFileSnapshotStore();
-    fileSnapshotStore.estimateCurrentCacheBytes.mockReturnValue(5120);
+    fileSnapshotStore.getRuntimeMemoryEstimate.mockReturnValue({
+      currentTextBytes: 5120,
+      fileCount: 1,
+      totalBytes: 5120,
+    });
     const hybridEngine = createMockHybridEngine({
       isEnabled: jest.fn(() => false),
       getRuntimeMemoryEstimate: jest.fn(() => ({
@@ -1082,7 +1090,7 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("Persisted storage");
     expect(latestNotice).toContain("Runtime memory estimate");
     expect(latestNotice).toContain("LexicalSnapshot");
-    expect(latestNotice).toContain("CurrentFileCache");
+    expect(latestNotice).toContain("CurrentTextRuntime");
     expect(latestNotice).toContain("Coverage live index");
     expect(latestNotice).toContain("Coverage top segments");
     expect(groupSpy).toHaveBeenCalled();
@@ -1116,8 +1124,9 @@ describe("DataManager integration", () => {
           bytes: 8192,
         }),
         expect.objectContaining({
-          category: "CurrentFileCache",
+          category: "CurrentTextRuntime",
           bytes: 5120,
+          rows: "1 file(s)",
         }),
         expect.objectContaining({
           segment: "postings.bodyPhrase",

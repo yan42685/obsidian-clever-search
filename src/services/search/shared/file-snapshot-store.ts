@@ -31,6 +31,12 @@ type IndexedTextPublishRequest = {
 	text?: string;
 };
 
+export type FileSnapshotRuntimeMemoryEstimate = {
+	currentTextBytes: number;
+	fileCount: number;
+	totalBytes: number;
+};
+
 const textEncoder = new TextEncoder();
 
 
@@ -218,16 +224,20 @@ export class FileSnapshotStore {
 		this.currentFileCache.delete(path);
 	}
 
-	estimateCurrentCacheBytes(): number {
-		let total = 0;
+	getRuntimeMemoryEstimate(): FileSnapshotRuntimeMemoryEstimate {
+		let currentTextBytes = 0;
 		for (const [path, entry] of this.currentFileCache) {
-			total += textEncoder.encode(path).length;
-			total += textEncoder.encode(entry.text).length;
+			currentTextBytes += textEncoder.encode(path).length;
+			currentTextBytes += textEncoder.encode(entry.text).length;
 			if (entry.generation !== undefined) {
-				total += 8;
+				currentTextBytes += 8;
 			}
 		}
-		return total;
+		return {
+			currentTextBytes,
+			fileCount: this.currentFileCache.size,
+			totalBytes: currentTextBytes,
+		};
 	}
 
 	private async commitCurrentFilesAsIndexed(
