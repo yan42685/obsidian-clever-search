@@ -49,9 +49,10 @@ export class FileSnapshotStore {
 		const indexedSnapshot = await this.database.db.fileSnapshots.get(file.path);
 		if (
 			indexedSnapshot &&
-			(file.stat.mtime === undefined ||
-				indexedSnapshot.generation === undefined ||
-				indexedSnapshot.generation === file.stat.mtime)
+			this.isIndexedSnapshotAligned(
+				indexedSnapshot.generation,
+				file.stat.mtime,
+			)
 		) {
 			return this.setCurrentFileText(
 				file.path,
@@ -321,6 +322,18 @@ export class FileSnapshotStore {
 			return true;
 		}
 		return actualGeneration !== undefined && actualGeneration === expectedGeneration;
+	}
+
+	private isIndexedSnapshotAligned(
+		snapshotGeneration: number | undefined,
+		fileGeneration: number | undefined,
+	): boolean {
+		if (fileGeneration === undefined) {
+			return true;
+		}
+		return (
+			snapshotGeneration !== undefined && snapshotGeneration === fileGeneration
+		);
 	}
 
 	private async preserveIndexedGenerationShadows(
