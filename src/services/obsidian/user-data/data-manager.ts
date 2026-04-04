@@ -275,6 +275,16 @@ function appendPathSample(
   samples.push(path);
 }
 
+function hasStoredHybridPathData(summary: HybridStoredPathSummary): boolean {
+  return (
+    summary.chunkCount > 0 ||
+    summary.currentSnapshotGeneration !== undefined ||
+    summary.shadowSnapshotGeneration !== undefined ||
+    summary.vectorInfo !== undefined ||
+    summary.indexedFileRef !== undefined
+  );
+}
+
 class HybridIndexProgressNotice {
   private readonly notice: MyNotice;
   private lastRenderAt = 0;
@@ -532,19 +542,19 @@ export class DataManager {
     const shadowMismatchSamplePaths: string[] = [];
 
     for (const [path, summary] of summaries) {
-      const normalizedState =
-        normalizeHybridIndexedFileState(
-          summary.indexedFileRef,
-          summary.vectorInfo !== undefined,
-        ) ?? null;
       if (summary.indexedFileRef) {
         indexedFileRefCount += 1;
-      }
-      if (normalizedState === "ready") {
-        readyFileCount += 1;
-      } else if (normalizedState === "lexical_only") {
-        lexicalOnlyFileCount += 1;
-      } else if (normalizedState === "pending" || normalizedState === "failed") {
+        if (summary.indexedFileRef.state === "ready") {
+          readyFileCount += 1;
+        } else if (summary.indexedFileRef.state === "lexical_only") {
+          lexicalOnlyFileCount += 1;
+        } else if (
+          summary.indexedFileRef.state === "pending" ||
+          summary.indexedFileRef.state === "failed"
+        ) {
+          unstableFileCount += 1;
+        }
+      } else if (hasStoredHybridPathData(summary)) {
         unstableFileCount += 1;
       }
 
@@ -783,7 +793,7 @@ export class DataManager {
 
   private async runSearchBootstrapPipeline(): Promise<SearchBootstrapCompletionSummary> {
     const databaseUpgradeDetected =
-      (await this.database.deleteOldDatabases()) > 0;
+      await this.database.openAndConsumeSchemaUpgradeFlag();
     this.setLexicalBootstrapState("restoring");
     this.markSearchBootstrapPhaseStarted("lexical", "restore");
     const lexicalPlan = await this.prepareLexicalBootstrapPlan();

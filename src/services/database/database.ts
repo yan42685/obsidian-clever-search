@@ -33,6 +33,11 @@ type HybridIndexedFileRefRow = HybridIndexedFileRef;
 export class Database {
   readonly db = getInstance(DexieWrapper);
 
+  async openAndConsumeSchemaUpgradeFlag(): Promise<boolean> {
+    await this.db.open();
+    return this.db.consumeSchemaUpgradeDetected();
+  }
+
   async estimatePluginStorageUsage(): Promise<{
     totalBytes: number;
     tables: Array<{ name: string; rows: number; bytes: number }>;
@@ -301,24 +306,6 @@ export class Database {
     };
   }
 
-  // copied from https://github.com/scambier/obsidian-omnisearch/blob/master/src/database.ts#L36
-  async deleteOldDatabases(): Promise<number> {
-    const toDelete = (await indexedDB.databases()).filter(
-      (db) =>
-        db.name === this.db.dbName &&
-        // version multiplied by 10 https://github.com/dexie/Dexie.js/issues/59
-        db.version !== this.db.dbVersion * 10,
-    );
-    if (toDelete.length) {
-      logger.info("Old version databases will be deleted");
-      for (const db of toDelete) {
-        if (db.name) {
-          indexedDB.deleteDatabase(db.name);
-        }
-      }
-    }
-    return toDelete.length;
-  }
 }
 
 @singleton()
@@ -326,6 +313,7 @@ class DexieWrapper extends Dexie {
   private static readonly _dbVersion = 21;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
+  private schemaUpgradeDetected = false;
   pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
   lexicalSearchSnapshots!: Dexie.Table<
     { id?: number; data: SerializedFileSearchIndex },
@@ -363,6 +351,10 @@ class DexieWrapper extends Dexie {
       hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
       hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
     }).upgrade(async (tx) => {
+      this.schemaUpgradeDetected = true;
+      // Schema upgrades should preserve user-owned data and lexical rebuild
+      // artifacts where possible, but hard-reset hybrid runtime tables whose
+      // payload shape or ownership contract changed across versions.
       // This upgrade intentionally drops existing hybrid runtime state rather than
       // carrying forward removed BM25-era compatibility paths.
       await Promise.all([
@@ -379,6 +371,12 @@ class DexieWrapper extends Dexie {
   }
   get dbVersion() {
     return DexieWrapper._dbVersion;
+  }
+
+  consumeSchemaUpgradeDetected(): boolean {
+    const detected = this.schemaUpgradeDetected;
+    this.schemaUpgradeDetected = false;
+    return detected;
   }
   get dbName() {
     return DexieWrapper.dbNamePrefix + this.privateApi.getAppId();
