@@ -232,6 +232,26 @@ function createMockFileSnapshotStore() {
     clearCurrentFiles: jest.fn(() => {
       current.clear();
     }),
+    readCurrentTexts: jest.fn(
+      async (fileOrPaths: ReadonlyArray<string | { path: string }>) => {
+        const result = new Map<string, string>();
+        for (const fileOrPath of fileOrPaths) {
+          const path =
+            typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+          const currentEntry = current.get(path);
+          if (currentEntry) {
+            result.set(path, currentEntry.text);
+            continue;
+          }
+          const persistedEntry = persisted.get(path);
+          if (persistedEntry) {
+            current.set(path, persistedEntry);
+            result.set(path, persistedEntry.text);
+          }
+        }
+        return result;
+      },
+    ),
     invalidateCurrentFile: jest.fn((path: string) => {
       current.delete(path);
     }),
@@ -275,6 +295,22 @@ function createMockFileSnapshotStore() {
         }
       },
     ),
+    publishIndexedTexts: jest.fn(
+      async (files: ReadonlyArray<{ path: string; generation?: number }>) => {
+        for (const file of files) {
+          const currentEntry = current.get(file.path);
+          if (!currentEntry) {
+            continue;
+          }
+          const nextGeneration = file.generation ?? currentEntry.generation;
+          persisted.set(file.path, {
+            text: currentEntry.text,
+            generation: nextGeneration,
+          });
+          clearShadowIfAligned(file.path, nextGeneration);
+        }
+      },
+    ),
     persistIndexedSnapshot: jest.fn(
       async (
         path: string,
@@ -294,6 +330,13 @@ function createMockFileSnapshotStore() {
     }),
     deleteIndexedSnapshots: jest.fn(async (paths: readonly string[]) => {
       for (const path of paths) {
+        persisted.delete(path);
+        shadow.delete(path);
+      }
+    }),
+    removeFiles: jest.fn(async (paths: readonly string[]) => {
+      for (const path of paths) {
+        current.delete(path);
         persisted.delete(path);
         shadow.delete(path);
       }
@@ -330,6 +373,17 @@ function createMockFileSnapshotStore() {
         )).get(path),
     ),
     readGenerationAlignedTexts: jest.fn(readGenerationAlignedTexts),
+    readIndexedTexts: jest.fn(
+      async (
+        requests: ReadonlyArray<{ path: string; generation?: number }>,
+      ) =>
+        await readGenerationAlignedTexts(
+          requests.map((request) => request.path),
+          new Map(
+            requests.map((request) => [request.path, request.generation]),
+          ),
+        ),
+    ),
     getIndexedSnapshotTexts: jest.fn(readGenerationAlignedTexts),
     estimateCurrentCacheBytes: jest.fn(() => 0),
   };
@@ -798,6 +852,27 @@ function registerDataManagerDeps(params: {
   };
   const { OuterSetting } =
     require("src/globals/plugin-setting") as typeof import("src/globals/plugin-setting");
+
+  const baseReadPlainText = params.dataProvider.readPlainText.getMockImplementation();
+  params.dataProvider.readPlainText.mockImplementation(
+    async (fileOrPath: TFile | string) => {
+      const text = baseReadPlainText ? await baseReadPlainText(fileOrPath) : "";
+      const path =
+        typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+      const file =
+        typeof fileOrPath === "string"
+          ? params.dataProvider.getFileByPath(path)
+          : fileOrPath;
+      if (file instanceof MockTFile) {
+        params.fileSnapshotStore.setCurrentFileText(
+          path,
+          text,
+          file.stat.mtime,
+        );
+      }
+      return text;
+    },
+  );
 
   container.registerInstance(THIS_PLUGIN, plugin as any);
   container.registerInstance(OuterSetting, params.setting as any);
@@ -2446,7 +2521,7 @@ describe("DataManager integration", () => {
     await (manager as any).docOperationsBuffer.forceFlush();
 
     expect(fileSnapshotStore.persisted.has(file.path)).toBe(false);
-    expect(fileSnapshotStore.deleteIndexedSnapshots).toHaveBeenCalledWith([
+    expect(fileSnapshotStore.removeFiles).toHaveBeenCalledWith([
       file.path,
     ]);
     expect(hybridEngine.deleteFile).toHaveBeenCalledWith(file.path);

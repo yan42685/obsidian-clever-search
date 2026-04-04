@@ -72,6 +72,20 @@ function registerMockFileSnapshotStore(
 		persistedTexts.set(document.path, text);
 	}
 	container.registerInstance(FileSnapshotStore, {
+		readCurrentTexts: jest.fn(
+			async (fileOrPaths: ReadonlyArray<string | { path: string }>) => {
+				const result = new Map<string, string>();
+				for (const fileOrPath of fileOrPaths) {
+					const path =
+						typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+					const text = currentTexts.get(path) ?? persistedTexts.get(path);
+					if (text !== undefined) {
+						result.set(path, text);
+					}
+				}
+				return result;
+			},
+		),
 		peekCurrentFileText: jest.fn((path: string) => currentTexts.get(path)),
 		setCurrentFileText: jest.fn((path: string, text: string) => {
 			currentTexts.set(path, text);

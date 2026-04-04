@@ -126,7 +126,12 @@ describe("HybridEngine search fallback notices", () => {
 			},
 		});
 		mockInstanceMap.set(require("src/services/obsidian/user-data/data-provider").DataProvider, {});
-		mockInstanceMap.set(require("src/services/search/shared/file-snapshot-store").FileSnapshotStore, {});
+		mockInstanceMap.set(
+			require("src/services/search/shared/file-snapshot-store").FileSnapshotStore,
+			{
+				readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			},
+		);
 	});
 
 	function createPreparedRecall(fallbackNoticeKey: string | null = null) {

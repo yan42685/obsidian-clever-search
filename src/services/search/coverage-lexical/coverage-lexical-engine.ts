@@ -1235,7 +1235,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!fileSnapshotStore) {
 			return null;
 		}
-		return await fileSnapshotStore.readSearchableFileText(path);
+		return (await fileSnapshotStore.readCurrentTexts([path])).get(path) ?? null;
 	}
 
 	private buildBinarySnapshotState(): CoverageLexicalSnapshotState {

@@ -144,7 +144,10 @@ export class DataProvider {
 				this.viewRegistry.viewTypeByPath(file.path) ===
 				ViewType.MARKDOWN
 			) {
-				return await this.fileSnapshotStore.readSearchableFileText(file);
+				return (
+					(await this.fileSnapshotStore.readCurrentTexts([file])).get(file.path) ??
+					""
+				);
 			} else {
 				throw Error(
 					`unsupported file extension as plain text to read, path: ${file.path}`,

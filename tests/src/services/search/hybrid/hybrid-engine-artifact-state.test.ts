@@ -323,7 +323,7 @@ describe("HybridEngine artifact state", () => {
       "id"
     >("id");
     const fileSnapshotStore = {
-      readGenerationAlignedTexts: jest.fn(async () =>
+      readIndexedTexts: jest.fn(async () =>
         new Map<string, string>([["notes/a.md", "alpha"]]),
       ),
     };
@@ -356,16 +356,11 @@ describe("HybridEngine artifact state", () => {
 
     await engine.rebuildBm25ArtifactFromStore();
 
-    expect(fileSnapshotStore.readGenerationAlignedTexts).toHaveBeenCalledTimes(1);
-    const [paths, expectedGenerations] =
-      fileSnapshotStore.readGenerationAlignedTexts.mock.calls[0] as unknown as [
-        string[],
-        Map<string, number | undefined> | undefined,
-      ];
-    expect(paths).toEqual(["notes/a.md"]);
-    expect(Array.from((expectedGenerations ?? new Map()).entries())).toEqual([
-      ["notes/a.md", 100],
-    ]);
+    expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledTimes(1);
+    const [requests] = fileSnapshotStore.readIndexedTexts.mock.calls[0] as unknown as [
+      Array<{ path: string; generation?: number }>,
+    ];
+    expect(requests).toEqual([{ path: "notes/a.md", generation: 100 }]);
   });
 
   test("rebuilds dirty BM25 and HNSW artifacts from stored rows on load", async () => {
@@ -447,7 +442,7 @@ describe("HybridEngine artifact state", () => {
     const hnswTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
 
     const fileSnapshotStore = {
-      readGenerationAlignedTexts: jest.fn(async () =>
+      readIndexedTexts: jest.fn(async () =>
         new Map<string, string>([["notes/a.md", "alpha beta"]]),
       ),
     };
@@ -546,10 +541,9 @@ describe("HybridEngine artifact state", () => {
 
     await engine.load();
 
-    expect(fileSnapshotStore.readGenerationAlignedTexts).toHaveBeenCalledWith(
-      ["notes/a.md"],
-      new Map<string, number | undefined>([["notes/a.md", 100]]),
-    );
+    expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledWith([
+      { path: "notes/a.md", generation: 100 },
+    ]);
     expect(engine.bm25.addDocument).toHaveBeenCalledWith(11, "alpha");
     expect(engine.hnswSmall.insert).toHaveBeenCalledWith(
       11,

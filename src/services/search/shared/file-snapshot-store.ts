@@ -20,6 +20,17 @@ type PersistedFileShadowRow = {
 	generation?: number;
 };
 
+type IndexedTextRequest = {
+	path: string;
+	generation?: number;
+};
+
+type IndexedTextPublishRequest = {
+	path: string;
+	generation?: number;
+	text?: string;
+};
+
 const textEncoder = new TextEncoder();
 
 
@@ -29,11 +40,93 @@ export class FileSnapshotStore {
 	private readonly vault = getInstance(Vault);
 	private readonly currentFileCache = new Map<string, CurrentFileCacheEntry>();
 
-	async readSearchableFileText(fileOrPath: TFile | string): Promise<string> {
-		const file =
-			typeof fileOrPath === "string"
-				? this.vault.getAbstractFileByPath(fileOrPath)
-				: fileOrPath;
+	async readCurrentTexts(
+		fileOrPaths: ReadonlyArray<TFile | string>,
+	): Promise<Map<string, string>> {
+		const texts = new Map<string, string>();
+		for (const fileOrPath of fileOrPaths) {
+			const file = this.resolveFile(fileOrPath);
+			if (!(file instanceof TFile)) {
+				continue;
+			}
+			texts.set(file.path, await this.readSearchableFileText(file));
+		}
+		return texts;
+	}
+
+	async readIndexedTexts(
+		requests: ReadonlyArray<IndexedTextRequest>,
+	): Promise<Map<string, string>> {
+		const expectedGenerations = new Map<string, number | undefined>();
+		for (const request of requests) {
+			expectedGenerations.set(request.path, request.generation);
+		}
+		return await this.readGenerationAlignedTexts(
+			requests.map((request) => request.path),
+			expectedGenerations,
+		);
+	}
+
+	async publishIndexedTexts(
+		files: ReadonlyArray<IndexedTextPublishRequest>,
+	): Promise<void> {
+		await this.commitCurrentFilesAsIndexed(files);
+	}
+
+	async reconcileHybridShadows(filePaths?: readonly string[]): Promise<void> {
+		const paths =
+			filePaths !== undefined
+				? Array.from(new Set(filePaths))
+				: (
+						await this.database.db.hybridDirtyShadows
+							.orderBy(":id")
+							.toArray()
+					).map((row) => row.filePath);
+		if (paths.length === 0) {
+			return;
+		}
+
+		const [shadowRows, indexedRefs, snapshotRows] = await Promise.all([
+			this.database.db.hybridDirtyShadows.bulkGet(paths),
+			this.database.db.hybridIndexedFileRefs.bulkGet(paths),
+			this.database.db.fileSnapshots.bulkGet(paths),
+		]);
+
+		const stalePaths: string[] = [];
+		for (let index = 0; index < paths.length; index++) {
+			const shadowRow = shadowRows[index];
+			if (!shadowRow) {
+				continue;
+			}
+
+			const indexedGeneration = indexedRefs[index]?.generation;
+			const shadowGeneration = shadowRow.generation;
+			const snapshotGeneration = snapshotRows[index]?.generation;
+			const shouldKeep =
+				indexedGeneration !== undefined &&
+				shadowGeneration !== undefined &&
+				shadowGeneration === indexedGeneration &&
+				snapshotGeneration !== indexedGeneration;
+			if (!shouldKeep) {
+				stalePaths.push(paths[index]);
+			}
+		}
+
+		if (stalePaths.length === 0) {
+			return;
+		}
+		await this.database.db.hybridDirtyShadows.bulkDelete(stalePaths);
+	}
+
+	async removeFiles(filePaths: readonly string[]): Promise<void> {
+		for (const filePath of filePaths) {
+			this.invalidateCurrentFile(filePath);
+		}
+		await this.deleteIndexedSnapshots(filePaths);
+	}
+
+	private async readSearchableFileText(fileOrPath: TFile | string): Promise<string> {
+		const file = this.resolveFile(fileOrPath);
 		if (!(file instanceof TFile)) {
 			return "";
 		}
@@ -63,11 +156,8 @@ export class FileSnapshotStore {
 		return await this.readCurrentFileText(file);
 	}
 
-	async readCurrentFileText(fileOrPath: TFile | string): Promise<string> {
-		const file =
-			typeof fileOrPath === "string"
-				? this.vault.getAbstractFileByPath(fileOrPath)
-				: fileOrPath;
+	private async readCurrentFileText(fileOrPath: TFile | string): Promise<string> {
+		const file = this.resolveFile(fileOrPath);
 		if (!(file instanceof TFile)) {
 			return "";
 		}
@@ -126,36 +216,17 @@ export class FileSnapshotStore {
 		return total;
 	}
 
-	async persistIndexedSnapshot(
-		filePath: string,
-		text: string,
-		generation?: number,
-		options: { clearShadowIfAligned?: boolean } = {},
+	private async commitCurrentFilesAsIndexed(
+		files: ReadonlyArray<IndexedTextPublishRequest>,
 	): Promise<void> {
-		await this.database.db.fileSnapshots.put({
-			filePath,
-			plainText: text,
-			generation,
-		});
-		if (options.clearShadowIfAligned) {
-			await this.clearIndexedShadowIfAligned(filePath, generation);
-		}
-	}
-
-	async commitCurrentFileAsIndexed(
-		filePath: string,
-		generation?: number,
-	): Promise<void> {
-		await this.commitCurrentFilesAsIndexed([{ path: filePath, generation }]);
-	}
-
-	async commitCurrentFilesAsIndexed(
-		files: ReadonlyArray<{ path: string; generation?: number }>,
-	): Promise<void> {
+		await this.ensureCurrentEntriesForPublish(files);
 		const rows: PersistedFileSnapshotRow[] = [];
 		const persistedFiles: Array<{ path: string; generation?: number }> = [];
 		for (const file of files) {
 			const cached = this.currentFileCache.get(file.path);
+			if (!this.isGenerationMatch(cached?.generation, file.generation)) {
+				continue;
+			}
 			if (!cached) {
 				continue;
 			}
@@ -191,17 +262,6 @@ export class FileSnapshotStore {
 		]);
 	}
 
-	async deleteIndexedShadow(filePath: string): Promise<void> {
-		await this.deleteIndexedShadows([filePath]);
-	}
-
-	async deleteIndexedShadows(filePaths: readonly string[]): Promise<void> {
-		if (filePaths.length === 0) {
-			return;
-		}
-		await this.database.db.hybridDirtyShadows.bulkDelete(Array.from(new Set(filePaths)));
-	}
-
 	async deleteIndexedSnapshotsNotIn(
 		validPaths: ReadonlySet<string>,
 	): Promise<void> {
@@ -217,22 +277,7 @@ export class FileSnapshotStore {
 		);
 	}
 
-	async readGenerationAlignedText(
-		filePath: string,
-		expectedGeneration?: number,
-	): Promise<string | undefined> {
-		const expectedGenerations =
-			expectedGeneration === undefined
-				? undefined
-				: new Map([[filePath, expectedGeneration]]);
-		const texts = await this.readGenerationAlignedTexts(
-			[filePath],
-			expectedGenerations,
-		);
-		return texts.get(filePath);
-	}
-
-	async readGenerationAlignedTexts(
+	private async readGenerationAlignedTexts(
 		filePaths: string[],
 		expectedGenerations?: ReadonlyMap<string, number | undefined>,
 	): Promise<Map<string, string>> {
@@ -287,13 +332,6 @@ export class FileSnapshotStore {
 		return snapshots;
 	}
 
-	async getIndexedSnapshotTexts(
-		filePaths: string[],
-		expectedGenerations?: ReadonlyMap<string, number | undefined>,
-	): Promise<Map<string, string>> {
-		return await this.readGenerationAlignedTexts(filePaths, expectedGenerations);
-	}
-
 	private normalizeHtmlToText(htmlText: string): string {
 		return htmlToMarkdown(htmlText)
 			.replace(/\[([^[\]]+)\]\([^()]*\)/g, "$1")
@@ -334,6 +372,48 @@ export class FileSnapshotStore {
 		return (
 			snapshotGeneration !== undefined && snapshotGeneration === fileGeneration
 		);
+	}
+
+	private resolveFile(fileOrPath: TFile | string): TFile | null {
+		const file =
+			typeof fileOrPath === "string"
+				? this.vault.getAbstractFileByPath(fileOrPath)
+				: fileOrPath;
+		return file instanceof TFile ? file : null;
+	}
+
+	private async ensureCurrentEntriesForPublish(
+		files: ReadonlyArray<IndexedTextPublishRequest>,
+	): Promise<void> {
+		for (const file of files) {
+			if (file.text !== undefined) {
+				this.setCurrentFileText(file.path, file.text, file.generation);
+				continue;
+			}
+			const cached = this.currentFileCache.get(file.path);
+			if (this.isGenerationMatch(cached?.generation, file.generation)) {
+				continue;
+			}
+			await this.hydrateCurrentEntryForPublish(file.path, file.generation);
+		}
+	}
+
+	private async hydrateCurrentEntryForPublish(
+		path: string,
+		expectedGeneration?: number,
+	): Promise<void> {
+		const file = this.resolveFile(path);
+		if (!(file instanceof TFile)) {
+			return;
+		}
+		if (
+			expectedGeneration !== undefined &&
+			file.stat.mtime !== undefined &&
+			file.stat.mtime !== expectedGeneration
+		) {
+			return;
+		}
+		await this.readCurrentFileText(file);
 	}
 
 	private async preserveIndexedGenerationShadows(
@@ -384,20 +464,6 @@ export class FileSnapshotStore {
 			return;
 		}
 		await this.database.db.hybridDirtyShadows.bulkPut(shadowRows);
-	}
-
-	private async clearIndexedShadowIfAligned(
-		filePath: string,
-		generation?: number,
-	): Promise<void> {
-		if (generation === undefined) {
-			return;
-		}
-		const currentRow = await this.database.db.fileSnapshots.get(filePath);
-		if (currentRow?.generation !== generation) {
-			return;
-		}
-		await this.database.db.hybridDirtyShadows.delete(filePath);
 	}
 
 	private async deleteRowsNotIn(

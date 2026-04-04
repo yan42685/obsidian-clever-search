@@ -176,6 +176,9 @@ function createKeyedTable<
     async get(value: Row[Key]) {
       return rows.get(value);
     },
+    async toArray() {
+      return Array.from(rows.values());
+    },
     async put(row: Row) {
       rows.set(row[key], { ...row });
     },
@@ -241,12 +244,51 @@ function createEngineHarness() {
   };
 
   const fileSnapshotStore = {
-    deleteIndexedShadow: jest.fn(async (path: string) => {
-      await shadowTable.delete(path);
-    }),
     readGenerationAlignedText: jest.fn(async () => undefined),
     readGenerationAlignedTexts: jest.fn(async () => new Map<string, string>()),
-    persistIndexedSnapshot: jest.fn(async () => undefined),
+    readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+    publishIndexedTexts: jest.fn(
+      async (
+        files: ReadonlyArray<{
+          path: string;
+          generation?: number;
+          text?: string;
+        }>,
+      ) => {
+        for (const file of files) {
+          if (file.text === undefined) {
+            continue;
+          }
+          await snapshotTable.put({
+            filePath: file.path,
+            plainText: file.text,
+            generation: file.generation,
+          });
+        }
+      },
+    ),
+    reconcileHybridShadows: jest.fn(async (filePaths?: readonly string[]) => {
+      const paths =
+        filePaths !== undefined
+          ? Array.from(new Set(filePaths))
+          : Array.from(shadowTable.rows.keys());
+      for (const path of paths) {
+        const shadowRow = await shadowTable.get(path);
+        if (!shadowRow) {
+          continue;
+        }
+        const indexedRef = await indexedRefTable.get(path);
+        const snapshotRow = await snapshotTable.get(path);
+        const shouldKeep =
+          indexedRef?.generation !== undefined &&
+          shadowRow.generation !== undefined &&
+          shadowRow.generation === indexedRef.generation &&
+          snapshotRow?.generation !== indexedRef.generation;
+        if (!shouldKeep) {
+          await shadowTable.delete(path);
+        }
+      }
+    }),
   };
 
   container.registerInstance(Database, database as any);
@@ -536,8 +578,10 @@ describe("HybridEngine shared snapshot ownership", () => {
     });
     expect(await shadowTable.get("docs/old.md")).toBeUndefined();
     expect(await shadowTable.get("docs/new.md")).toBeUndefined();
-    expect(fileSnapshotStore.deleteIndexedShadow).toHaveBeenCalledWith("docs/old.md");
-    expect(fileSnapshotStore.deleteIndexedShadow).toHaveBeenCalledWith("docs/new.md");
+    expect(fileSnapshotStore.reconcileHybridShadows).toHaveBeenCalledWith([
+      "docs/old.md",
+      "docs/new.md",
+    ]);
   });
 });
 

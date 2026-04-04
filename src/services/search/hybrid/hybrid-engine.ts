@@ -75,7 +75,6 @@ type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 type HybridWriteOption = {
   persistIndices?: boolean;
   deleteIndexedFileRef?: boolean;
-  deleteIndexedShadow?: boolean;
 };
 
 type HybridIndexMode = "full" | "without-embedding";
@@ -200,7 +199,6 @@ export class HybridEngine {
     await Promise.all([
       this.db.db.hybridChunks.clear(),
       this.db.db.hybridChunkVectors.clear(),
-      this.db.db.hybridDirtyShadows.clear(),
       this.db.db.hybridBm25Index.clear(),
       this.db.db.hybridHnswSmall.clear(),
       this.db.db.hybridIndexedFileRefs.clear(),
@@ -210,6 +208,7 @@ export class HybridEngine {
         ),
       ),
     ]);
+    await this.fileSnapshotStore.reconcileHybridShadows();
   }
 
   isEnabled(): boolean {
@@ -317,6 +316,7 @@ export class HybridEngine {
   ): Promise<void> {
     await this.withFileWriteLock(filePath, async () => {
       await this.deleteStoredHybridPrivateData(filePath, option);
+      await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
     });
   }
 
@@ -385,8 +385,7 @@ export class HybridEngine {
         await this.deleteHybridIndexedFileRef(oldPath);
       }
 
-      await this.fileSnapshotStore.deleteIndexedShadow(oldPath);
-      await this.fileSnapshotStore.deleteIndexedShadow(newPath);
+      await this.fileSnapshotStore.reconcileHybridShadows([oldPath, newPath]);
       return true;
     });
   }
@@ -410,9 +409,6 @@ export class HybridEngine {
     await this.db.db.hybridChunkVectors.delete(filePath);
     if (option.deleteIndexedFileRef ?? true) {
       await this.deleteHybridIndexedFileRef(filePath);
-    }
-    if (option.deleteIndexedShadow ?? true) {
-      await this.fileSnapshotStore.deleteIndexedShadow(filePath);
     }
 
     for (const id of ids) {
@@ -638,6 +634,7 @@ export class HybridEngine {
     await this.withFileWriteLock(filePath, async () => {
       if (!this.shouldIndexPath(filePath)) {
         await this.deleteStoredHybridPrivateData(filePath, option);
+        await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
         return;
       }
 
@@ -666,7 +663,6 @@ export class HybridEngine {
       await this.deleteStoredHybridPrivateData(filePath, {
         ...option,
         deleteIndexedFileRef: false,
-        deleteIndexedShadow: false,
       });
 
       const { chunks: rawChunks } = await profileHybridStage(
@@ -693,7 +689,7 @@ export class HybridEngine {
       );
       if (plannedChunks.length === 0) {
         await this.deleteHybridIndexedFileRef(filePath);
-        await this.fileSnapshotStore.deleteIndexedShadow(filePath);
+        await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
         if (option.persistIndices ?? true) {
           await this.persistIndices();
         }
@@ -761,7 +757,6 @@ export class HybridEngine {
         await this.deleteStoredHybridPrivateData(filePath, {
           persistIndices: false,
           deleteIndexedFileRef: false,
-          deleteIndexedShadow: false,
         });
         logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
         this._canSearch = false;
@@ -793,7 +788,7 @@ export class HybridEngine {
             lastIncrementalEmbedAt:
               previousIndexedFileRef?.lastIncrementalEmbedAt,
           });
-          await this.fileSnapshotStore.deleteIndexedShadow(filePath);
+          await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
           throw fallbackError;
         }
       }
@@ -819,10 +814,11 @@ export class HybridEngine {
     indexedFileRef?: HybridIndexedFileRef,
   ): Promise<StoredFileIndexState> {
     const [snapshotText, chunkRows, vectorRow] = await Promise.all([
-      this.fileSnapshotStore.readGenerationAlignedText(
-        filePath,
-        indexedFileRef?.generation,
-      ),
+      this.fileSnapshotStore
+        .readIndexedTexts([
+          { path: filePath, generation: indexedFileRef?.generation },
+        ])
+        .then((texts) => texts.get(filePath)),
       this.db.db.hybridChunks
         .where("filePath")
         .equals(filePath)
@@ -903,12 +899,13 @@ export class HybridEngine {
     plainText: string,
     generation: number,
   ): Promise<void> {
-    await this.fileSnapshotStore.persistIndexedSnapshot(
-      filePath,
-      plainText,
-      generation,
-      { clearShadowIfAligned: true },
-    );
+    await this.fileSnapshotStore.publishIndexedTexts([
+      {
+        path: filePath,
+        generation,
+        text: plainText,
+      },
+    ]);
   }
 
   private async planIncrementalChunks(
@@ -1200,6 +1197,9 @@ export class HybridEngine {
     ref: HybridIndexedFileRef,
   ): Promise<void> {
     await this.db.db.hybridIndexedFileRefs.put(ref);
+    if (ref.state !== "pending") {
+      await this.fileSnapshotStore.reconcileHybridShadows([ref.path]);
+    }
     if (ref.state === "ready" || ref.state === "bm25_only") {
       this._hasStoredLexicalFallbackData = true;
       return;
@@ -1389,9 +1389,11 @@ export class HybridEngine {
       const expectedGenerations = new Map<string, number | undefined>(
         indexedRefs.map((ref) => [ref.path, ref.generation]),
       );
-      const snapshotByPath = await this.fileSnapshotStore.readGenerationAlignedTexts(
-        indexedRefs.map((ref) => ref.path),
-        expectedGenerations,
+      const snapshotByPath = await this.fileSnapshotStore.readIndexedTexts(
+        indexedRefs.map((ref) => ({
+          path: ref.path,
+          generation: expectedGenerations.get(ref.path),
+        })),
       );
 
       for (const indexedRef of indexedRefs) {

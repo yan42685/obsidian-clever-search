@@ -109,7 +109,7 @@ export class FileWatcher {
 
 	private async primeCurrentFileText(file: TFile): Promise<number> {
 		try {
-			await this.fileSnapshotStore.readCurrentFileText(file);
+			await this.fileSnapshotStore.readCurrentTexts([file]);
 		} catch (error) {
 			logger.warn(`failed to prime current file text for ${file.path}:`, error);
 		}

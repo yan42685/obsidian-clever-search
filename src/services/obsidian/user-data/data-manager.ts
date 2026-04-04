@@ -1126,10 +1126,12 @@ export class DataManager {
       return false;
     }
     this.clearLexicalIndexFailures([file.path]);
-    await this.fileSnapshotStore.commitCurrentFileAsIndexed(
-      file.path,
-      generation,
-    );
+    await this.fileSnapshotStore.publishIndexedTexts([
+      {
+        path: file.path,
+        generation,
+      },
+    ]);
     await this.upsertLexicalIndexedFileRef(file, generation);
     await this.markLexicalSnapshotDirty([file.path]);
     return true;
@@ -1141,7 +1143,7 @@ export class DataManager {
     if (files.length === 0) {
       return;
     }
-    await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+    await this.fileSnapshotStore.publishIndexedTexts(
       files.map((file) => ({
         path: file.path,
         generation: file.stat.mtime,
@@ -1312,13 +1314,12 @@ export class DataManager {
       return;
     }
     await this.deleteDocuments(Array.from(paths));
-    await this.fileSnapshotStore.deleteIndexedSnapshots(paths);
+    await this.fileSnapshotStore.removeFiles(paths);
     await this.deleteLexicalIndexedFileRefs(paths);
     await this.markLexicalSnapshotDirty(paths);
   }
 
   private async handleDeleteOperation(path: string): Promise<void> {
-    this.fileSnapshotStore.invalidateCurrentFile(path);
     this.cancelHybridRepair(path);
     await this.clearFailedHybridEmbedding(path);
     this.clearLexicalIndexFailures([path]);
@@ -1369,8 +1370,6 @@ export class DataManager {
       this.hybridEngine.isEnabled() &&
       (await this.canReuseMovedHybridState(oldPath));
 
-    this.fileSnapshotStore.invalidateCurrentFile(oldPath);
-    this.fileSnapshotStore.invalidateCurrentFile(newPath);
     this.cancelHybridRepair(oldPath);
     this.cancelHybridRepair(newPath);
     this.clearLexicalIndexFailures([oldPath, newPath]);
@@ -1451,14 +1450,9 @@ export class DataManager {
 
   private async primeCurrentFileText(
     file: TFile,
-    sourceGeneration?: number,
+    _sourceGeneration?: number,
   ): Promise<string> {
-    const text = await this.dataProvider.readPlainText(file);
-    return this.fileSnapshotStore.setCurrentFileText(
-      file.path,
-      text,
-      sourceGeneration ?? file.stat.mtime,
-    );
+    return await this.dataProvider.readPlainText(file);
   }
 
   private enqueueHybridRepair(
@@ -1713,7 +1707,7 @@ export class DataManager {
       throw error;
     }
     await this.saveLexicalIndexedFileRefs(successfulFiles);
-    await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+    await this.fileSnapshotStore.publishIndexedTexts(
       successfulFiles.map((file) => ({
         path: file.path,
         generation: file.stat.mtime,
@@ -1757,9 +1751,9 @@ export class DataManager {
     logger.trace(`docs to delete: ${docsToDelete.length}`);
     logger.trace(`docs to add: ${docsToAdd.length}`);
     await this.deleteDocuments(docsToDelete);
-    await this.fileSnapshotStore.deleteIndexedSnapshots(docsToDelete);
+    await this.fileSnapshotStore.removeFiles(docsToDelete);
     const addResult = await this.addDocuments(docsToAdd);
-    await this.fileSnapshotStore.commitCurrentFilesAsIndexed(
+    await this.fileSnapshotStore.publishIndexedTexts(
       addResult.indexedFiles.map((file) => ({
         path: file.path,
         generation: file.stat.mtime,
@@ -2048,7 +2042,6 @@ export class DataManager {
   ): Promise<HybridIndexFailure | null> {
     const fileIndexStart = Date.now();
     const text = await this.dataProvider.readPlainText(file.path);
-    this.fileSnapshotStore.setCurrentFileText(file.path, text, file.stat.mtime);
     const headingOutline = this.dataProvider.getHeadingOutlineForText(
       file,
       text,
@@ -2136,11 +2129,6 @@ export class DataManager {
   ): Promise<HybridIndexFailure | null> {
     try {
       const text = await this.dataProvider.readPlainText(file.path);
-      this.fileSnapshotStore.setCurrentFileText(
-        file.path,
-        text,
-        file.stat.mtime,
-      );
       const headingOutline = this.dataProvider.getHeadingOutlineForText(
         file,
         text,
