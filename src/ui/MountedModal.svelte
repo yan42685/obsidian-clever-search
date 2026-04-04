@@ -39,7 +39,7 @@
 	export let uiType: "modal" | "floatingWindow";
 	export let onConfirmExternal: () => void;
 	export let searchType: SearchType;
-	export let isHybrid: boolean = false; // hybrid BM25+vector search
+	export let isHybrid: boolean = false; // hybrid dense + lexical search
 	export let hybridMode: HybridSearchMode = "default";
 	export let queryText: string;
 

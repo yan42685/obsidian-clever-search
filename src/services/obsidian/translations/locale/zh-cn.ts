@@ -94,10 +94,10 @@ export default {
 	"hybridModal.estimatedSavings": "估算节省 Token",
 	"hybridModal.estimatedSavings.weekly": "由于增量 chunk embedding 技术，本周估算节省 ",
 	"hybridModal.estimatedSavings.total": "累计估算节省 ",
-	"hybridNotice.indexFallbackToBm25":
-		"语义索引当前不可用，已降级为 BM25 索引。",
-	"hybridNotice.searchFallbackToBm25":
-		"语义搜索当前不可用，本次结果已降级为 BM25。",
+	"hybridNotice.indexFallbackToLexical":
+		"稠密语义索引当前不可用，结果已切换为 lexical fallback。",
+	"hybridNotice.searchFallbackToLexical":
+		"稠密语义搜索当前不可用，本次结果已切换为 lexical fallback。",
 	"File search backend": "词法搜索引擎",
 	"File search backend desc":
 		"Coverage Lexical 是当前综合更好的词法搜索引擎，也是主要优化方向；MiniSearch 则作为旧版但稳定的备选方案保留。",
@@ -194,7 +194,7 @@ export default {
 	"hybridModal.healthSummary.state.disabled": "未启用",
 	"hybridModal.healthSummary.state.empty": "已启用，但当前没有本地 hybrid 索引数据",
 	"hybridModal.healthSummary.state.ready": "可用",
-	"hybridModal.healthSummary.state.bm25_only": "仅 BM25 回退",
+	"hybridModal.healthSummary.state.lexical_only": "仅 lexical fallback",
 	"hybridModal.healthSummary.state.degraded": "降级/异常",
 	"hybridModal.healthSummary.state.partial": "部分索引状态",
 	"hybridModal.healthSummary.check": "检查",
@@ -264,4 +264,5 @@ export default {
 	"hybridModal.freshnessNotice.openSettings": "Hybrid \u8bbe\u7f6e",
 	"hybridModal.freshnessNotice.updatingSamples": "\u66f4\u65b0\u6837\u672c",
 	"hybridModal.freshnessNotice.repairSamples": "\u4fee\u590d\u6837\u672c",
+	"hybridModal.healthSummary.metric.lexicalOnly": "lexical-only",
 };

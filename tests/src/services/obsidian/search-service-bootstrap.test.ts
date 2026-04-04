@@ -336,7 +336,7 @@ describe("SearchService bootstrap gate", () => {
 		expect((result.items[0] as any).path).toBe("notes/hybrid.md");
 	});
 
-	test("keeps hybrid search available when the engine can still serve BM25-only queries", async () => {
+	test("keeps hybrid search available when the engine can still serve lexical-only queries", async () => {
 		const { service, dataManager, EngineType, FileItem } = createHarness({
 			searchable: true,
 			hybridEnabled: true,
@@ -347,7 +347,7 @@ describe("SearchService bootstrap gate", () => {
 		const hybridItems = [
 			new FileItem(
 				EngineType.SEMANTIC,
-				"notes/bm25-only.md",
+				"notes/lexical-only.md",
 				["hybrid"],
 				["hybrid"],
 				[],
@@ -363,7 +363,7 @@ describe("SearchService bootstrap gate", () => {
 
 		expect(dataManager.isHybridSearchUnavailable).not.toHaveBeenCalled();
 		expect(mockHybridEngine.prepareRecall).toHaveBeenCalledWith("hybrid", 10, undefined);
-		expect((result.items[0] as any).path).toBe("notes/bm25-only.md");
+		expect((result.items[0] as any).path).toBe("notes/lexical-only.md");
 	});
 
 	test("falls back to lexical when hybrid cannot serve any query yet", async () => {

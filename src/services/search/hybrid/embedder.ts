@@ -27,7 +27,7 @@ let lastKnownCurrentWeekTokenUsage: { weekKey: string; tokens: number } | null =
 
 export class NoApiKeyError extends Error {
 	constructor() {
-		super('No Qwen API key configured; falling back to BM25-only search');
+		super('No Qwen API key configured; falling back to lexical-only search');
 		this.name = 'NoApiKeyError';
 	}
 }
