@@ -367,7 +367,7 @@ export class HybridEngine {
         await this.putHybridIndexedFileRef({
           ...indexedFileRef,
           path: newPath,
-          generation,
+          generation: indexedFileRef.generation ?? generation,
         });
         await this.deleteHybridIndexedFileRef(oldPath);
       }
@@ -389,9 +389,12 @@ export class HybridEngine {
       .where("filePath")
       .equals(filePath)
       .toArray();
+    const vectorRow = await this.db.db.hybridChunkVectors.get(filePath);
     const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
 
-    if (ids.length > 0) {
+    const mustRebuildHnsw =
+      vectorRow !== undefined && vectorRow.chunkCount !== ids.length;
+    if (ids.length > 0 || mustRebuildHnsw) {
       await this.markHybridArtifactsDirty("runtime-delete-write");
     }
 
@@ -400,6 +403,12 @@ export class HybridEngine {
     if (option.deleteIndexedFileRef ?? true) {
       await this.deleteHybridIndexedFileRef(filePath);
     }
+    if (mustRebuildHnsw) {
+      await this.rebuildHnswFromStore(option.persistIndices ?? true);
+      this.updateSearchCapabilityFromDenseState();
+      return;
+    }
+
 
     for (const id of ids) {
       this.hnswSmall.delete(id);
@@ -1295,7 +1304,7 @@ export class HybridEngine {
     }
   }
 
-  private async rebuildHnswFromStore(): Promise<void> {
+  private async rebuildHnswFromStore(persist = true): Promise<void> {
     this.hnswSmall.clear(this.precision);
     let lastFilePath: string | null = null;
 
@@ -1327,7 +1336,9 @@ export class HybridEngine {
       lastFilePath = rows[rows.length - 1].filePath;
     }
 
-    await this.persistHnsw();
+    if (persist) {
+      await this.persistHnsw();
+    }
   }
 
   private async hydrateDirtyArtifacts(): Promise<Set<HybridArtifactName>> {

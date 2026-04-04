@@ -282,6 +282,8 @@ function createEngineHarness() {
   engine.hnswSmall = {
     clear: jest.fn(),
     delete: jest.fn(),
+    isNonEmpty: jest.fn(() => false),
+    hasVectors: jest.fn(() => false),
     needsRebuild: jest.fn(() => false),
     rebuild: jest.fn(),
   };
@@ -386,6 +388,45 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect((engine as any).hnswSmall.delete).toHaveBeenCalledWith(12);
   });
 
+
+  test("deleteFile rebuilds HNSW when vector state survives without chunk ids", async () => {
+    const {
+      engine,
+      snapshotTable,
+      vectorTable,
+      indexedRefTable,
+      fileSnapshotStore,
+    } = createEngineHarness();
+    const rebuildHnswFromStoreSpy = jest
+      .spyOn(engine as any, "rebuildHnswFromStore")
+      .mockResolvedValue(undefined);
+
+    await snapshotTable.put({
+      filePath: "docs/orphaned-vector.md",
+      plainText: "orphaned vector snapshot",
+      generation: 250,
+    });
+    await vectorTable.put({
+      filePath: "docs/orphaned-vector.md",
+      chunkCount: 1,
+      precision: "int8",
+      generation: 250,
+    });
+    await indexedRefTable.put({
+      path: "docs/orphaned-vector.md",
+      generation: 250,
+      state: "ready",
+    });
+
+    await engine.deleteFile("docs/orphaned-vector.md", { persistIndices: false });
+
+    expect(rebuildHnswFromStoreSpy).toHaveBeenCalledWith(false);
+    expect(await vectorTable.get("docs/orphaned-vector.md")).toBeUndefined();
+    expect(await indexedRefTable.get("docs/orphaned-vector.md")).toBeUndefined();
+    expect(fileSnapshotStore.notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([
+      "docs/orphaned-vector.md",
+    ]);
+  });
   test("clearAll keeps shared snapshots while clearing hybrid-private tables", async () => {
     const {
       engine,
@@ -535,7 +576,7 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(await indexedRefTable.get("docs/new.md")).toEqual(
       expect.objectContaining({
         path: "docs/new.md",
-        generation: 400,
+        generation: 300,
       }),
     );
     expect(await snapshotTable.get("docs/old.md")).toEqual({
