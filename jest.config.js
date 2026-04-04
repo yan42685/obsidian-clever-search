@@ -85,7 +85,6 @@ module.exports = {
 
   // A map from regular expressions to module names or to arrays of module names that allow to stub out resources with a single module
   moduleNameMapper: {
-    "^franc-min$": "<rootDir>/tests/__mocks__/franc-min.js",
     "^jieba-wasm/pkg/web/jieba_rs_wasm$": "<rootDir>/tests/__mocks__/jieba-wasm-mock.js",
     "^obsidian$": "<rootDir>/tests/__mocks__/obsidian.js",
   },

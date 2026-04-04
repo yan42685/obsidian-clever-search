@@ -4,7 +4,6 @@ module.exports = {
 	moduleDirectories: ["node_modules", "<rootDir>"],
 	moduleFileExtensions: ["ts", "js"],
 	moduleNameMapper: {
-		"^franc-min$": "<rootDir>/tests/__mocks__/franc-min.js",
 		"^jieba-wasm/pkg/web/jieba_rs_wasm$": "<rootDir>/tests/__mocks__/jieba-wasm-mock.js",
 		"^obsidian$": "<rootDir>/tests/__mocks__/obsidian.js",
 	},

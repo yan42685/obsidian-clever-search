@@ -11,9 +11,6 @@ dependencies:
   dompurify:
     specifier: ^3.1.7
     version: 3.1.7
-  franc-min:
-    specifier: ^6.1.0
-    version: 6.1.0
   fzf:
     specifier: ^0.5.2
     version: 0.5.2
@@ -3100,12 +3097,6 @@ packages:
       combined-stream: 1.0.8
       mime-types: 2.1.35
     dev: true
-
-  /franc-min@6.1.0:
-    resolution: {integrity: sha512-ZGKRCVw//1KvlLjeRjNTYB27Py6bq1J+0smr3IalQ4l7ZYR9DeoeLxjGWQKQ0Hr8n2dIjkfOvCzr7nzejljeJg==}
-    dependencies:
-      trigram-utils: 2.0.1
-    dev: false
 
   /fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
