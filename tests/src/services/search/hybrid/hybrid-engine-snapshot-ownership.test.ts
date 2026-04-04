@@ -249,7 +249,7 @@ function createEngineHarness() {
         }
       },
     ),
-    reconcileHybridShadows: jest.fn(async (filePaths?: readonly string[]) => {
+    notifyHybridIndexedRefsChanged: jest.fn(async (filePaths?: readonly string[]) => {
       const paths =
         filePaths !== undefined
           ? Array.from(new Set(filePaths))
@@ -550,7 +550,7 @@ describe("HybridEngine shared snapshot ownership", () => {
     });
     expect(await shadowTable.get("docs/old.md")).toBeUndefined();
     expect(await shadowTable.get("docs/new.md")).toBeUndefined();
-    expect(fileSnapshotStore.reconcileHybridShadows).toHaveBeenCalledWith([
+    expect(fileSnapshotStore.notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([
       "docs/old.md",
       "docs/new.md",
     ]);

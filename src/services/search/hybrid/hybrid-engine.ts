@@ -199,7 +199,7 @@ export class HybridEngine {
         ),
       ),
     ]);
-    await this.fileSnapshotStore.reconcileHybridShadows();
+    await this.fileSnapshotStore.notifyHybridIndexedRefsChanged();
   }
 
   isEnabled(): boolean {
@@ -303,7 +303,7 @@ export class HybridEngine {
   ): Promise<void> {
     await this.withFileWriteLock(filePath, async () => {
       await this.deleteStoredHybridPrivateData(filePath, option);
-      await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
+      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
     });
   }
 
@@ -372,7 +372,10 @@ export class HybridEngine {
         await this.deleteHybridIndexedFileRef(oldPath);
       }
 
-      await this.fileSnapshotStore.reconcileHybridShadows([oldPath, newPath]);
+      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([
+        oldPath,
+        newPath,
+      ]);
       return true;
     });
   }
@@ -597,7 +600,7 @@ export class HybridEngine {
     await this.withFileWriteLock(filePath, async () => {
       if (!this.shouldIndexPath(filePath)) {
         await this.deleteStoredHybridPrivateData(filePath, option);
-        await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
+        await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
         return;
       }
 
@@ -652,7 +655,7 @@ export class HybridEngine {
       );
       if (plannedChunks.length === 0) {
         await this.deleteHybridIndexedFileRef(filePath);
-        await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
+        await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
         if (option.persistIndices ?? true) {
           await this.persistIndices();
         }
@@ -750,7 +753,7 @@ export class HybridEngine {
             lastIncrementalEmbedAt:
               previousIndexedFileRef?.lastIncrementalEmbedAt,
           });
-          await this.fileSnapshotStore.reconcileHybridShadows([filePath]);
+          await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
           throw fallbackError;
         }
       }
@@ -1152,7 +1155,7 @@ export class HybridEngine {
   ): Promise<void> {
     await this.db.db.hybridIndexedFileRefs.put(ref);
     if (ref.state !== "pending") {
-      await this.fileSnapshotStore.reconcileHybridShadows([ref.path]);
+      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([ref.path]);
     }
     if (isHybridLexicalFallbackState(ref.state)) {
       this._hasStoredLexicalFallbackData = true;

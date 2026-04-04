@@ -430,7 +430,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
   };
 
   return {
-    deleteOldDatabases: jest.fn(async () => {}),
+    openAndConsumeSchemaUpgradeFlag: jest.fn(async () => false),
     getLexicalSearchSnapshot: jest.fn(async () => state.lexicalSearchSnapshot),
     deleteLexicalSearchSnapshot: jest.fn(async () => {
       state.lexicalSearchSnapshot = null;
@@ -2222,6 +2222,64 @@ describe("DataManager integration", () => {
     ]);
     expect(summary.updatingFileCount).toBe(2);
     expect(summary.repairFileCount).toBe(0);
+
+    manager.onunload();
+  });
+
+  test("hybrid health summary does not treat stored data without indexed refs as healthy", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/orphaned-hybrid.md", "orphan body", 150);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "orphan body"]]);
+    const database = createMockDatabase();
+    database.__hybridChunks.push({
+      id: 1,
+      filePath: file.path,
+      chunkIndex: 0,
+      startOffset: 0,
+      endOffset: 11,
+      startLine: 0,
+      startCol: 0,
+      endLine: 0,
+      embedKey: "orphan-chunk",
+    });
+    database.__hybridChunkVectors.push({
+      filePath: file.path,
+      chunkCount: 1,
+      generation: file.stat.mtime,
+      precision: "int8",
+    });
+    database.__fileSnapshots.push({
+      filePath: file.path,
+      plainText: "orphan body",
+      generation: file.stat.mtime,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: Array.from(files.values()),
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    const summary = await manager.getHybridHealthSummary();
+
+    expect(summary.state).toBe("degraded");
+    expect(summary.indexedFileRefCount).toBe(0);
+    expect(summary.readyFileCount).toBe(0);
+    expect(summary.lexicalOnlyFileCount).toBe(0);
+    expect(summary.unstableFileCount).toBe(1);
 
     manager.onunload();
   });

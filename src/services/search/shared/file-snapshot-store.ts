@@ -79,7 +79,9 @@ export class FileSnapshotStore {
 		await this.commitCurrentFilesAsIndexed(files);
 	}
 
-	async reconcileHybridShadows(filePaths?: readonly string[]): Promise<void> {
+	async notifyHybridIndexedRefsChanged(
+		filePaths?: readonly string[],
+	): Promise<void> {
 		const paths =
 			filePaths !== undefined
 				? Array.from(new Set(filePaths))
