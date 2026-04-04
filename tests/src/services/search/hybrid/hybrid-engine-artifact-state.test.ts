@@ -68,27 +68,6 @@ jest.mock("src/utils/logger", () => ({
   },
 }));
 
-jest.mock("src/services/search/hybrid/bm25", () => ({
-  BM25Engine: class BM25Engine {
-    docCount = 0;
-    addDocument() {}
-    clear() {
-      this.docCount = 0;
-    }
-    removeDocument() {}
-    serialize() {
-      return {};
-    }
-    deserialize() {}
-    optimizeStorage() {
-      return false;
-    }
-    estimateRuntimeMemoryBreakdown() {
-      return { totalBytes: 0 };
-    }
-  },
-}));
-
 jest.mock("src/services/search/hybrid/hnsw", () => ({
   HnswIndex: class HnswIndex {
     clear() {}
@@ -305,65 +284,7 @@ describe("HybridEngine artifact state", () => {
     mockInstanceMap.clear();
   });
 
-  test("passes expected generations when rebuilding BM25 from stored snapshots", async () => {
-    const indexedRefTable = createKeyedTable<
-      { path: string; generation: number; state: string },
-      "path"
-    >("path", [
-      {
-        path: "notes/a.md",
-        generation: 100,
-        state: "ready",
-      },
-    ]);
-    const chunkTable = createChunkTable();
-    const bm25IndexTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
-    const artifactStateTable = createKeyedTable<
-      { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
-      "id"
-    >("id");
-    const fileSnapshotStore = {
-      readIndexedTexts: jest.fn(async () =>
-        new Map<string, string>([["notes/a.md", "alpha"]]),
-      ),
-    };
-
-    mockInstanceMap.set(require("src/services/database/database").Database, {
-      db: {
-        hybridChunks: chunkTable,
-        hybridIndexedFileRefs: indexedRefTable,
-        hybridBm25Index: bm25IndexTable,
-        indexArtifactState: artifactStateTable,
-      },
-    });
-    mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
-      hybrid: {
-        enabled: true,
-        vectorCompression: "int8",
-        maxResultCount: 10,
-        excludedPaths: [],
-      },
-    });
-    mockInstanceMap.set(require("src/services/obsidian/user-data/data-provider").DataProvider, {});
-    mockInstanceMap.set(
-      require("src/services/search/shared/file-snapshot-store").FileSnapshotStore,
-      fileSnapshotStore,
-    );
-
-    const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
-    const engine = new HybridEngine() as any;
-    engine.persistBm25 = jest.fn();
-
-    await engine.rebuildBm25ArtifactFromStore();
-
-    expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledTimes(1);
-    const [requests] = fileSnapshotStore.readIndexedTexts.mock.calls[0] as unknown as [
-      Array<{ path: string; generation?: number }>,
-    ];
-    expect(requests).toEqual([{ path: "notes/a.md", generation: 100 }]);
-  });
-
-  test("rebuilds dirty BM25 and HNSW artifacts from stored rows on load", async () => {
+  test("rebuilds dirty HNSW artifact from stored rows on load", async () => {
     const chunkTable = createChunkTable([
       {
         id: 11,
@@ -377,16 +298,6 @@ describe("HybridEngine artifact state", () => {
         embedKey: "embed-a",
       },
     ]);
-    const snapshotTable = createKeyedTable<{ filePath: string; plainText: string; generation?: number }, "filePath">(
-      "filePath",
-      [
-        {
-          filePath: "notes/a.md",
-          plainText: "alpha beta",
-          generation: 100,
-        },
-      ],
-    );
     const vectorTable = createKeyedTable<
       {
         filePath: string;
@@ -426,34 +337,19 @@ describe("HybridEngine artifact state", () => {
       "id"
     >("id", [
       {
-        id: buildIndexArtifactStateId("hybrid", "bm25"),
-        engine: "hybrid",
-        artifact: "bm25",
-        dirtyAt: 1,
-      },
-      {
         id: buildIndexArtifactStateId("hybrid", "hnsw"),
         engine: "hybrid",
         artifact: "hnsw",
         dirtyAt: 1,
       },
     ]);
-    const bm25IndexTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
     const hnswTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
-
-    const fileSnapshotStore = {
-      readIndexedTexts: jest.fn(async () =>
-        new Map<string, string>([["notes/a.md", "alpha beta"]]),
-      ),
-    };
 
     mockInstanceMap.set(require("src/services/database/database").Database, {
       db: {
         hybridChunks: chunkTable,
-        fileSnapshots: snapshotTable,
         hybridChunkVectors: vectorTable,
         hybridIndexedFileRefs: indexedRefTable,
-        hybridBm25Index: bm25IndexTable,
         hybridHnswSmall: hnswTable,
         indexArtifactState: artifactStateTable,
       },
@@ -471,38 +367,11 @@ describe("HybridEngine artifact state", () => {
     });
     mockInstanceMap.set(
       require("src/services/search/shared/file-snapshot-store").FileSnapshotStore,
-      fileSnapshotStore,
+      {},
     );
 
     const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
     const engine = new HybridEngine() as any;
-
-    const bm25Docs = new Map<number, string>();
-    engine.bm25 = {
-      docCount: 0,
-      clear: jest.fn(() => {
-        bm25Docs.clear();
-        engine.bm25.docCount = 0;
-      }),
-      addDocument: jest.fn((id: number, text: string) => {
-        bm25Docs.set(id, text);
-        engine.bm25.docCount = bm25Docs.size;
-      }),
-      removeDocument: jest.fn((id: number) => {
-        bm25Docs.delete(id);
-        engine.bm25.docCount = bm25Docs.size;
-      }),
-      serialize: jest.fn(() => ({
-        docCount: bm25Docs.size,
-        avgDocLen: 0,
-        termDict: {},
-        postings: [],
-        docLengths: {},
-      })),
-      deserialize: jest.fn(),
-      optimizeStorage: jest.fn(() => false),
-      estimateRuntimeMemoryBreakdown: jest.fn(() => ({ totalBytes: 0 })),
-    };
 
     const denseIds = new Set<number>();
     let hasVectors = false;
@@ -541,17 +410,11 @@ describe("HybridEngine artifact state", () => {
 
     await engine.load();
 
-    expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledWith([
-      { path: "notes/a.md", generation: 100 },
-    ]);
-    expect(engine.bm25.addDocument).toHaveBeenCalledWith(11, "alpha");
     expect(engine.hnswSmall.insert).toHaveBeenCalledWith(
       11,
       expect.objectContaining({ precision: "int8" }),
     );
-    expect(await bm25IndexTable.get(0)).toBeDefined();
     expect(await hnswTable.get(0)).toBeDefined();
-    expect(await artifactStateTable.get(buildIndexArtifactStateId("hybrid", "bm25"))).toBeUndefined();
     expect(await artifactStateTable.get(buildIndexArtifactStateId("hybrid", "hnsw"))).toBeUndefined();
     expect(engine.canSearch()).toBe(true);
   });
@@ -564,20 +427,18 @@ describe("HybridEngine artifact state", () => {
       {
         path: "notes/a.md",
         generation: 100,
-        state: "ready",
+        state: "lexical_only",
       },
     ]);
     const artifactStateTable = createKeyedTable<
       { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
       "id"
     >("id");
-    const bm25IndexTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
     const hnswTable = createKeyedTable<{ id: number; data: Blob }, "id">("id");
 
     mockInstanceMap.set(require("src/services/database/database").Database, {
       db: {
         hybridIndexedFileRefs: indexedRefTable,
-        hybridBm25Index: bm25IndexTable,
         hybridHnswSmall: hnswTable,
         indexArtifactState: artifactStateTable,
       },
@@ -603,8 +464,7 @@ describe("HybridEngine artifact state", () => {
 
     expect(engine.isReady()).toBe(true);
     expect(engine.canSearch()).toBe(false);
-    expect(engine.isEmpty()).toBe(true);
+    expect(engine.isEmpty()).toBe(false);
     expect(engine.canServeQuery()).toBe(true);
   });
 });
-

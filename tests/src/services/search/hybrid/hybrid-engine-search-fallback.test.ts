@@ -55,28 +55,6 @@ jest.mock("src/utils/logger", () => ({
 	},
 }));
 
-jest.mock("src/services/search/hybrid/bm25", () => ({
-	BM25Engine: class BM25Engine {
-		docCount = 0;
-		search() {
-			return [];
-		}
-		clear() {}
-		removeDocument() {}
-		serialize() {
-			return {};
-		}
-		optimizeStorage() {
-			return false;
-		}
-		estimateRuntimeMemoryBreakdown() {
-			return {
-				totalBytes: 0,
-			};
-		}
-	},
-}));
-
 jest.mock("src/services/search/hybrid/hnsw", () => ({
 	HnswIndex: class HnswIndex {
 		search() {
@@ -167,17 +145,17 @@ describe("HybridEngine search fallback notices", () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const engine = new HybridEngine() as any;
 		engine._ready = true;
-		engine.prepareRecall = jest.fn().mockResolvedValue(createPreparedRecall("hybridNotice.searchFallbackToBm25"));
+		engine.prepareRecall = jest.fn().mockResolvedValue(createPreparedRecall("hybridNotice.searchFallbackToLexical"));
 		engine.finalizePreparedRecall = jest.fn().mockResolvedValue({
 			items: [{ id: 1 }],
-			fallbackNoticeKey: "hybridNotice.searchFallbackToBm25",
+			fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
 			fallbackToLexicalSearch: false,
 		});
 
 		const results = await engine.search("alpha", 10);
 
 		expect(results).toEqual([{ id: 1 }]);
-		expect(engine.consumeSearchFallbackNoticeKey()).toBe("hybridNotice.searchFallbackToBm25");
+		expect(engine.consumeSearchFallbackNoticeKey()).toBe("hybridNotice.searchFallbackToLexical");
 	});
 
 	test("finalizePreparedRecall requests lexical fallback when rerank times out", async () => {
@@ -225,12 +203,12 @@ describe("HybridEngine search fallback notices", () => {
 			.mockRejectedValue(new HybridRerankTimeoutError(2800));
 
 		const finalized = await engine.finalizePreparedRecall(
-			createPreparedRecall("hybridNotice.searchFallbackToBm25"),
+			createPreparedRecall("hybridNotice.searchFallbackToLexical"),
 			10,
 		);
 
 		expect(finalized.items).toBe(baseItems);
-		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToBm25");
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
 });

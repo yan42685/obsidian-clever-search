@@ -12,7 +12,6 @@ import {
 } from "src/services/obsidian/user-data/index-recovery-state";
 import type { IndexArtifactStateRow } from "src/services/obsidian/user-data/index-artifact-state";
 import type {
-  Bm25BlobBreakdown,
   BlobRecord,
   ChunkRow,
   ChunkVectorShardRow,
@@ -25,7 +24,6 @@ import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { inject, singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
-import { analyzeBm25Blob } from "../search/hybrid/hybrid-store";
 
 type LexicalIndexedFileRefRow = BaseIndexedFileRef;
 
@@ -49,7 +47,6 @@ export class Database {
       scaleBytes: number;
       metadataBytes: number;
     };
-    hybridBm25Breakdown?: Bm25BlobBreakdown;
   }> {
     const tableEntries = [
       { name: "pluginSetting", table: this.db.pluginSetting },
@@ -59,7 +56,6 @@ export class Database {
       { name: "fileSnapshots", table: this.db.fileSnapshots },
       { name: "hybridDirtyShadows", table: this.db.hybridDirtyShadows },
       { name: "hybridChunkVectors", table: this.db.hybridChunkVectors },
-      { name: "hybridBm25Index", table: this.db.hybridBm25Index },
       { name: "hybridHnswSmall", table: this.db.hybridHnswSmall },
       { name: "hybridIndexedFileRefs", table: this.db.hybridIndexedFileRefs },
       { name: "indexRecoveryState", table: this.db.indexRecoveryState },
@@ -81,26 +77,18 @@ export class Database {
     const hybridChunkRows = await this.db.hybridChunks.toArray();
     const hybridSnapshotRows = await this.db.fileSnapshots.toArray();
     const hybridVectorRows = await this.db.hybridChunkVectors.toArray();
-    const hybridBm25Row = await this.db.hybridBm25Index.get(0);
     const hybridChunkBreakdown = this.estimateHybridChunkBreakdown(
       hybridChunkRows,
       hybridSnapshotRows,
     );
     const hybridVectorBreakdown =
       this.estimateHybridVectorBreakdown(hybridVectorRows);
-    const hybridBm25Breakdown = hybridBm25Row
-      ? await analyzeBm25Blob(hybridBm25Row.data).catch((error) => {
-          logger.warn("failed to analyze hybrid BM25 blob", error);
-          return undefined;
-        })
-      : undefined;
 
     return {
       totalBytes: tables.reduce((sum, item) => sum + item.bytes, 0),
       tables,
       hybridChunkBreakdown,
       hybridVectorBreakdown,
-      hybridBm25Breakdown,
     };
   }
 
@@ -335,7 +323,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 19;
+  private static readonly _dbVersion = 21;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -350,7 +338,6 @@ class DexieWrapper extends Dexie {
   fileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
   hybridDirtyShadows!: Dexie.Table<HybridDirtyShadowRow, string>;
   hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
-  hybridBm25Index!: Dexie.Table<BlobRecord, number>;
   hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
   hybridIndexedFileRefs!: Dexie.Table<HybridIndexedFileRefRow, string>;
   indexRecoveryState!: Dexie.Table<IndexRecoveryStateRow, string>;
@@ -361,220 +348,6 @@ class DexieWrapper extends Dexie {
   constructor(@inject(PrivateApi) privateApi: PrivateApi) {
     super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
     this.privateApi = privateApi;
-    this.version(2).stores({
-      pluginSetting: "++id",
-      minisearch: "++id",
-      lexicalDocRefs: "++id",
-      semanticDocRefs: "++id",
-    });
-    this.version(3).stores({
-      pluginSetting: "++id",
-      minisearch: "++id",
-      lexicalDocRefs: "++id",
-      semanticDocRefs: "++id",
-      hybridChunks: "++id, bigChunkId, filePath",
-      hybridBm25Index: "id",
-      hybridHnswSmall: "id",
-      hybridDocRefs: "path",
-    });
-    this.version(4).stores({
-      pluginSetting: "++id",
-      minisearch: "++id",
-      lexicalDocRefs: "++id",
-      semanticDocRefs: "++id",
-      hybridChunks: "++id, bigChunkId, filePath",
-      hybridBm25Index: "id",
-      hybridHnswSmall: "id",
-      hybridDocRefs: "path",
-      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-    });
-    this.version(6)
-      .stores({
-        pluginSetting: "++id",
-        minisearch: "++id",
-        lexicalDocRefs: "++id",
-        semanticDocRefs: "++id",
-        hybridChunks: "++id, filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridDocRefs: "path",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-      })
-      .upgrade(async (tx) => {
-        await Promise.all([
-          tx.table("hybridChunks").clear(),
-          tx.table("hybridBm25Index").clear(),
-          tx.table("hybridHnswSmall").clear(),
-          tx.table("hybridDocRefs").clear(),
-        ]);
-      });
-    this.version(11)
-      .stores({
-        pluginSetting: "++id",
-        minisearch: "++id",
-        lexicalDocRefs: "++id",
-        semanticDocRefs: "++id",
-        hybridChunks: "++id, filePath",
-        hybridFileSnapshots: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridDocRefs: "path",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      })
-      .upgrade(async (tx) => {
-        await Promise.all([
-          tx.table("minisearch").clear(),
-          tx.table("lexicalDocRefs").clear(),
-          tx.table("hybridChunks").clear(),
-          tx.table("hybridFileSnapshots").clear(),
-          tx.table("hybridChunkVectors").clear(),
-          tx.table("hybridBm25Index").clear(),
-          tx.table("hybridHnswSmall").clear(),
-          tx.table("hybridDocRefs").clear(),
-        ]);
-      });
-    this.version(12)
-      .stores({
-        pluginSetting: "++id",
-        minisearch: "++id",
-        lexicalIndexedFileRefs: "++id,&path",
-        hybridChunks: "++id, filePath",
-        hybridFileSnapshots: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      })
-      .upgrade(async (tx) => {
-        const lexicalIndexedFileRefs = (await tx
-          .table("lexicalDocRefs")
-          .toArray() ) as LexicalIndexedFileRefRow[];
-        if (lexicalIndexedFileRefs.length > 0) {
-          await tx
-            .table("lexicalIndexedFileRefs")
-            .bulkPut(lexicalIndexedFileRefs);
-        }
-
-        const hybridIndexedFileRefs = (await tx
-          .table("hybridDocRefs")
-          .toArray() ) as HybridIndexedFileRefRow[];
-        if (hybridIndexedFileRefs.length > 0) {
-          await tx
-            .table("hybridIndexedFileRefs")
-            .bulkPut(hybridIndexedFileRefs);
-        }
-      });
-    this.version(13)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "++id",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      })
-      .upgrade(async (tx) => {
-        const lexicalSnapshots = (await tx
-          .table("minisearch")
-          .toArray()) as Array<{
-          id?: number;
-          data: SerializedFileSearchIndex;
-        }>;
-        if (lexicalSnapshots.length > 0) {
-          await tx.table("lexicalSearchSnapshots").bulkPut(lexicalSnapshots);
-        }
-
-        const fileSnapshots = (await tx
-          .table("hybridFileSnapshots")
-          .toArray()) as HybridFileSnapshotRow[];
-        if (fileSnapshots.length > 0) {
-          await tx.table("fileSnapshots").bulkPut(fileSnapshots);
-        }
-      });
-    this.version(14)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "++id,&path",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      });
-    this.version(16)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "path",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      });
-    this.version(18)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "path",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridBm25Index: "id",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      })
-      .upgrade(async (tx) => {
-        await Promise.all([
-          tx.table("lexicalSearchSnapshots").clear(),
-          tx.table("lexicalIndexedFileRefs").clear(),
-          tx.table("hybridChunks").clear(),
-          tx.table("fileSnapshots").clear(),
-          tx.table("hybridChunkVectors").clear(),
-          tx.table("hybridBm25Index").clear(),
-          tx.table("hybridHnswSmall").clear(),
-          tx.table("hybridIndexedFileRefs").clear(),
-          tx.table("indexRecoveryState").clear(),
-          tx.table("indexArtifactState").clear(),
-        ]);
-      });
-    this.version(19).stores({
-      pluginSetting: "++id",
-      lexicalSearchSnapshots: "++id",
-      lexicalIndexedFileRefs: "path",
-      hybridChunks: "++id, filePath",
-      fileSnapshots: "filePath",
-      hybridDirtyShadows: "filePath",
-      hybridChunkVectors: "filePath",
-      hybridBm25Index: "id",
-      hybridHnswSmall: "id",
-      hybridIndexedFileRefs: "path",
-      indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-      indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
-      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-      hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-    });
     this.version(DexieWrapper._dbVersion).stores({
       pluginSetting: "++id",
       lexicalSearchSnapshots: "++id",
@@ -583,13 +356,25 @@ class DexieWrapper extends Dexie {
       fileSnapshots: "filePath",
       hybridDirtyShadows: "filePath",
       hybridChunkVectors: "filePath",
-      hybridBm25Index: "id",
       hybridHnswSmall: "id",
       hybridIndexedFileRefs: "path",
       indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
       indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
       hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
       hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+    }).upgrade(async (tx) => {
+      // This upgrade intentionally drops existing hybrid runtime state rather than
+      // carrying forward removed BM25-era compatibility paths.
+      await Promise.all([
+        tx.table("hybridChunks").clear(),
+        tx.table("fileSnapshots").clear(),
+        tx.table("hybridDirtyShadows").clear(),
+        tx.table("hybridChunkVectors").clear(),
+        tx.table("hybridHnswSmall").clear(),
+        tx.table("hybridIndexedFileRefs").clear(),
+        tx.table("indexRecoveryState").clear(),
+        tx.table("indexArtifactState").clear(),
+      ]);
     });
   }
   get dbVersion() {

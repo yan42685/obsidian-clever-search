@@ -125,16 +125,6 @@ jest.mock("src/services/obsidian/translations/locale-helper", () => ({
   },
 }));
 
-jest.mock("src/services/search/hybrid/bm25", () => ({
-  BM25Engine: class BM25Engine {
-    clear() {}
-    addDocument() {}
-    serialize() {
-      return {};
-    }
-  },
-}));
-
 import { THIS_PLUGIN } from "src/globals/constants";
 import type { TFile } from "obsidian";
 import type { OuterSetting as OuterSettingType } from "src/globals/plugin-setting";
@@ -229,7 +219,7 @@ function createMockFileSnapshotStore() {
     current,
     persisted,
     shadow,
-    clearCurrentFiles: jest.fn(() => {
+    resetRuntimeState: jest.fn(() => {
       current.clear();
     }),
     readCurrentTexts: jest.fn(
@@ -251,10 +241,6 @@ function createMockFileSnapshotStore() {
         }
         return result;
       },
-    ),
-    peekCurrentFileText: jest.fn((path: string) => current.get(path)?.text),
-    peekCurrentFileGeneration: jest.fn(
-      (path: string) => current.get(path)?.generation,
     ),
     publishIndexedTexts: jest.fn(
       async (
@@ -356,17 +342,14 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
     deleteFile: jest.fn(async () => {}),
     indexFileStrict: jest.fn(async () => {}),
     indexFile: jest.fn(async () => {}),
-    rebuildBm25FromStore: jest.fn(async () => {}),
     canSearch: jest.fn(() => false),
     canServeQuery: jest.fn(() => false),
     consumeIndexingFallbackNoticeKey: jest.fn(() => null),
     getRuntimeMemoryEstimate: jest.fn(() => ({
       vectorsBytes: 0,
       graphBytes: 0,
-      bm25Bytes: 0,
       totalBytes: 0,
     })),
-    migrateBm25StorageFormatIfNeeded: jest.fn(async () => false),
     persistIndicesForBatch: jest.fn(async () => {}),
     ...overrides,
   };
@@ -1007,7 +990,6 @@ describe("DataManager integration", () => {
           { name: "hybridIndexedFileRefs", rows: 9, bytes: 1804 },
           { name: "lexicalIndexedFileRefs", rows: 14, bytes: 1032 },
           { name: "pluginSetting", rows: 0, bytes: 0 },
-          { name: "hybridBm25Index", rows: 0, bytes: 0 },
           { name: "hybridHnswSmall", rows: 0, bytes: 0 },
           { name: "hybridTokenSavings", rows: 0, bytes: 0 },
         ],
@@ -1046,8 +1028,7 @@ describe("DataManager integration", () => {
       getRuntimeMemoryEstimate: jest.fn(() => ({
         vectorsBytes: 16384,
         graphBytes: 8192,
-        bm25Bytes: 4096,
-        totalBytes: 28672,
+        totalBytes: 24576,
       })),
     });
 
@@ -1128,10 +1109,6 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           category: "HybridRuntimeGraph",
           bytes: 8192,
-        }),
-        expect.objectContaining({
-          category: "HybridRuntimeBm25",
-          bytes: 4096,
         }),
         expect.objectContaining({
           category: "CurrentFileCache",
@@ -1690,7 +1667,7 @@ describe("DataManager integration", () => {
       {
         path: retryableFile.path,
         generation: retryableFile.stat.mtime,
-        state: "bm25_only",
+        state: "lexical_only",
         chunkCount: 2,
         lastErrorKind: "provider_429",
         lastIncrementalEmbedAt: 4_000,
@@ -1699,7 +1676,7 @@ describe("DataManager integration", () => {
       {
         path: deferredFile.path,
         generation: deferredFile.stat.mtime,
-        state: "bm25_only",
+        state: "lexical_only",
         chunkCount: 3,
         embeddingDeferred: true,
         lastIncrementalEmbedAt: 5_000,
@@ -1815,7 +1792,7 @@ describe("DataManager integration", () => {
             {
               path: file.path,
               generation: file.stat.mtime,
-              state: "bm25_only",
+              state: "lexical_only",
             },
           ],
         ]),
@@ -1970,7 +1947,7 @@ describe("DataManager integration", () => {
           {
             path: file.path,
             generation: file.stat.mtime,
-            state: "bm25_only",
+            state: "lexical_only",
           },
         ],
       ]),

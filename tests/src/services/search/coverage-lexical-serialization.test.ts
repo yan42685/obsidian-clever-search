@@ -86,7 +86,6 @@ function registerMockFileSnapshotStore(
 				return result;
 			},
 		),
-		peekCurrentFileText: jest.fn((path: string) => currentTexts.get(path)),
 	} as any);
 	return { currentTexts, persistedTexts };
 }

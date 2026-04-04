@@ -8,8 +8,8 @@ describe("Hybrid stored file consistency", () => {
     expect(normalizeHybridIndexedFileState(undefined, true)).toBe("ready");
   });
 
-  test("defaults missing state to bm25_only when vector is absent", () => {
-    expect(normalizeHybridIndexedFileState(undefined, false)).toBe("bm25_only");
+  test("defaults missing state to lexical_only when vector is absent", () => {
+    expect(normalizeHybridIndexedFileState(undefined, false)).toBe("lexical_only");
   });
 
   test("blocks reuse when stored data exists without indexed file ref", () => {
@@ -45,7 +45,7 @@ describe("Hybrid stored file consistency", () => {
     expect(result.reuseBlockedReasons).toContain("ready_missing_data");
   });
 
-  test("blocks reuse when bm25_only file still has vectors", () => {
+  test("blocks reuse when lexical_only file still has vectors", () => {
     const result = analyzeHybridStoredFileConsistency({
       existsInVault: true,
       hasChunks: true,
@@ -54,14 +54,14 @@ describe("Hybrid stored file consistency", () => {
       vectorInfo: { precision: "int8", chunkCount: 2, generation: 22 },
       indexedFileRef: {
         path: "b.md",
-        state: "bm25_only",
+        state: "lexical_only",
         chunkCount: 2,
         generation: 22,
       },
       currentPrecision: "int8",
     });
 
-    expect(result.reuseBlockedReasons).toContain("bm25_only_shape_mismatch");
+    expect(result.reuseBlockedReasons).toContain("lexical_only_shape_mismatch");
   });
 
   test("blocks reuse on generation and precision mismatch", () => {

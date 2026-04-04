@@ -17,7 +17,7 @@ export type HybridIndexFailure = {
   path: string;
   reason: string;
   attempts: number;
-  bm25FallbackIndexed: boolean;
+  fallbackIndexed: boolean;
 };
 
 type HybridStorageRepairReport = {

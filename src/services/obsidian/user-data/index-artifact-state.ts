@@ -1,6 +1,6 @@
 export type IndexArtifactEngine = "lexical" | "hybrid";
 
-export type IndexArtifactName = "snapshot" | "bm25" | "hnsw";
+export type IndexArtifactName = "snapshot" | "hnsw";
 
 export type IndexArtifactStateRow = {
   id: string;

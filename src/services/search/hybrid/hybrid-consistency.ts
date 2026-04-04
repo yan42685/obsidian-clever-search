@@ -36,10 +36,11 @@ export function normalizeHybridIndexedFileState(
 	ref: HybridIndexedFileRef | undefined,
 	hasVector: boolean,
 ): HybridDocState | null {
-	if (!ref?.state) {
-		return hasVector ? "ready" : "bm25_only";
+	const rawState = ref?.state;
+	if (!rawState) {
+		return hasVector ? "ready" : "lexical_only";
 	}
-	return ref.state;
+	return rawState;
 }
 
 function resolveAlignedSnapshotGeneration(
@@ -102,10 +103,10 @@ export function analyzeHybridStoredFileConsistency(
 		pushReuseReason("ready_missing_data");
 	}
 	if (
-		indexedFileState === "bm25_only" &&
+		indexedFileState === "lexical_only" &&
 		(!input.hasChunks || !hasSnapshot || hasVector || !hasIndexedFileRef)
 	) {
-		pushReuseReason("bm25_only_shape_mismatch");
+		pushReuseReason("lexical_only_shape_mismatch");
 	}
 	if (
 		input.indexedFileRef?.chunkCount !== undefined &&

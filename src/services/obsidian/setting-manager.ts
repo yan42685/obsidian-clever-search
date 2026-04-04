@@ -48,7 +48,6 @@ type PendingRefreshState = {
 	lexicalReindex: boolean;
 	hybridRuntimeRefresh: boolean;
 	hybridSyncFileSetWithoutEmbedding: boolean;
-	hybridRebuildBm25FromStore: boolean;
 	hybridFullReindex: boolean;
 };
 
@@ -58,7 +57,6 @@ function createPendingRefreshState(): PendingRefreshState {
 		lexicalReindex: false,
 		hybridRuntimeRefresh: false,
 		hybridSyncFileSetWithoutEmbedding: false,
-		hybridRebuildBm25FromStore: false,
 		hybridFullReindex: false,
 	};
 }
@@ -108,15 +106,10 @@ export class SettingManager {
 		if (pendingRefresh.hybridRuntimeRefresh) {
 			await dataManager.refreshHybridStateAsync();
 		}
-		if (
-			pendingRefresh.hybridSyncFileSetWithoutEmbedding ||
-			pendingRefresh.hybridRebuildBm25FromStore
-		) {
+		if (pendingRefresh.hybridSyncFileSetWithoutEmbedding) {
 			await dataManager.refreshHybridStateAsync({
 				syncFileSetWithoutEmbedding:
 					pendingRefresh.hybridSyncFileSetWithoutEmbedding,
-				rebuildBm25FromStore:
-					pendingRefresh.hybridRebuildBm25FromStore,
 			});
 		}
 	}
@@ -161,15 +154,11 @@ export class SettingManager {
 
 	requestHybridLocalRefresh(options: {
 		syncFileSetWithoutEmbedding?: boolean;
-		rebuildBm25FromStore?: boolean;
 		reloadAssets?: boolean;
 	} = {}): void {
 		this.pendingRefresh.hybridSyncFileSetWithoutEmbedding =
 			this.pendingRefresh.hybridSyncFileSetWithoutEmbedding ||
 			(options.syncFileSetWithoutEmbedding ?? false);
-		this.pendingRefresh.hybridRebuildBm25FromStore =
-			this.pendingRefresh.hybridRebuildBm25FromStore ||
-			(options.rebuildBm25FromStore ?? false);
 		this.pendingRefresh.reloadAssets =
 			this.pendingRefresh.reloadAssets || (options.reloadAssets ?? false);
 	}
@@ -304,9 +293,6 @@ class GeneralTab extends PluginSettingTab {
 					.onChange((value) => {
 						this.setting.enableStopWordsEn = value;
 						this.settingManager.requestLexicalReindex();
-						this.settingManager.requestHybridLocalRefresh({
-							rebuildBm25FromStore: true,
-						});
 					}),
 			);
 
@@ -326,10 +312,6 @@ class GeneralTab extends PluginSettingTab {
 						this.settingManager.requestLexicalReindex({
 							reloadAssets: true,
 						});
-						this.settingManager.requestHybridLocalRefresh({
-							rebuildBm25FromStore: true,
-							reloadAssets: true,
-						});
 					}),
 			);
 
@@ -342,10 +324,6 @@ class GeneralTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.setting.enableStopWordsZh = value;
 						this.settingManager.requestLexicalReindex({
-							reloadAssets: true,
-						});
-						this.settingManager.requestHybridLocalRefresh({
-							rebuildBm25FromStore: true,
 							reloadAssets: true,
 						});
 					}),
@@ -693,7 +671,7 @@ function renderHybridHealthSummary(
 		t("hybridModal.healthSummary.engine"),
 		[
 			`${t("hybridModal.healthSummary.metric.ready")} ${summary.readyFileCount}`,
-			`${t("hybridModal.healthSummary.metric.bm25Only")} ${summary.bm25OnlyFileCount}`,
+			`${t("hybridModal.healthSummary.metric.lexicalOnly")} ${summary.lexicalOnlyFileCount}`,
 			`${t("hybridModal.healthSummary.metric.unstable")} ${summary.unstableFileCount}`,
 		].join(" | "),
 	);

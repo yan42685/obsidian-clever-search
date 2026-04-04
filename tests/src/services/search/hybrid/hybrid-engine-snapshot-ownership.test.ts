@@ -48,18 +48,6 @@ jest.mock("src/services/search/hybrid/reranker", () => ({
   SEARCH_EMBED_TOKEN_KEY: "search_embed_tokens",
 }));
 
-jest.mock("src/services/search/hybrid/bm25", () => ({
-  BM25Engine: class BM25Engine {
-    docCount = 0;
-    clear() {}
-    removeDocument() {}
-    serialize() {
-      return {};
-    }
-    optimizeStorage() {}
-  },
-}));
-
 jest.mock("src/services/search/hybrid/hnsw", () => ({
   HnswIndex: class HnswIndex {
     clear() {}
@@ -213,9 +201,6 @@ function createEngineHarness() {
   const indexedRefTable = createKeyedTable<HybridIndexedFileRefRow, "path">(
     "path",
   );
-  const bm25IndexTable = createKeyedTable<{ id: number; data?: Blob }, "id">(
-    "id",
-  );
   const hnswTable = createKeyedTable<{ id: number; data?: Blob }, "id">("id");
   const artifactStateTable = createKeyedTable<
     { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
@@ -229,7 +214,6 @@ function createEngineHarness() {
       hybridDirtyShadows: shadowTable,
       hybridChunkVectors: vectorTable,
       hybridIndexedFileRefs: indexedRefTable,
-      hybridBm25Index: bm25IndexTable,
       hybridHnswSmall: hnswTable,
       indexArtifactState: artifactStateTable,
     },
@@ -295,11 +279,6 @@ function createEngineHarness() {
   container.registerInstance(FileSnapshotStore, fileSnapshotStore as any);
 
   const engine = new HybridEngine() as any;
-  engine.bm25 = {
-    docCount: 0,
-    clear: jest.fn(),
-    removeDocument: jest.fn(),
-  };
   engine.hnswSmall = {
     clear: jest.fn(),
     delete: jest.fn(),
@@ -314,7 +293,6 @@ function createEngineHarness() {
     shadowTable,
     vectorTable,
     indexedRefTable,
-    bm25IndexTable,
     hnswTable,
     artifactStateTable,
     fileSnapshotStore,
@@ -404,8 +382,8 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(chunkTable.rows).toEqual([]);
     expect(await vectorTable.get("docs/a.md")).toBeUndefined();
     expect(await indexedRefTable.get("docs/a.md")).toBeUndefined();
-    expect((engine as any).bm25.removeDocument).toHaveBeenCalledWith(11);
-    expect((engine as any).bm25.removeDocument).toHaveBeenCalledWith(12);
+    expect((engine as any).hnswSmall.delete).toHaveBeenCalledWith(11);
+    expect((engine as any).hnswSmall.delete).toHaveBeenCalledWith(12);
   });
 
   test("clearAll keeps shared snapshots while clearing hybrid-private tables", async () => {
@@ -416,7 +394,6 @@ describe("HybridEngine shared snapshot ownership", () => {
       shadowTable,
       vectorTable,
       indexedRefTable,
-      bm25IndexTable,
       hnswTable,
     } = createEngineHarness();
 
@@ -451,7 +428,6 @@ describe("HybridEngine shared snapshot ownership", () => {
       generation: 200,
       state: "ready",
     });
-    await bm25IndexTable.put({ id: 0 });
     await hnswTable.put({ id: 0 });
 
     await engine.clearAll();
@@ -466,9 +442,7 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(shadowTable.rows.size).toBe(0);
     expect(vectorTable.rows.size).toBe(0);
     expect(indexedRefTable.rows.size).toBe(0);
-    expect(bm25IndexTable.rows.size).toBe(0);
     expect(hnswTable.rows.size).toBe(0);
-    expect((engine as any).bm25.clear).toHaveBeenCalled();
     expect((engine as any).hnswSmall.clear).toHaveBeenCalledWith("int8");
   });
 

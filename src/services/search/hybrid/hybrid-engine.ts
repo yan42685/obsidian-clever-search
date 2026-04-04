@@ -12,7 +12,6 @@ import {
   chunkFileRange,
   createChunkEmbeddingInputBuilder,
 } from "./chunker";
-import { BM25Engine, type BM25RuntimeMemoryBreakdown } from "./bm25";
 import {
   Embedder,
   estimateTextsTokenUsage,
@@ -24,17 +23,14 @@ import {
   hashStableText,
 } from "./incremental-reuse";
 import {
-  blobToBm25,
   blobToHnsw,
   ChunkVectorShardBuilder,
-  bm25ToBlob,
   chunkVectorShardToRow,
   type HybridFileSnapshotRow,
   type HybridIndexedFileRef,
   type ChunkRow,
   type ChunkVectorShardRow,
   chunkToRow,
-  getBm25BlobVersion,
   hnswToBlob,
   rowToChunkVectorRecords,
 } from "./hybrid-store";
@@ -68,7 +64,7 @@ const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 50;
 const INDEX_CHUNK_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
-const HYBRID_DIRTY_ARTIFACTS = ["bm25", "hnsw"] as const;
+const HYBRID_DIRTY_ARTIFACTS = ["hnsw"] as const;
 
 type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 
@@ -79,9 +75,15 @@ type HybridWriteOption = {
 
 type HybridIndexMode = "full" | "without-embedding";
 
-type Bm25OnlyIndexedFileRefMeta = {
+type LexicalOnlyIndexedFileRefMeta = {
   lastIncrementalEmbedAt?: number;
 };
+
+function isHybridLexicalFallbackState(
+  state: HybridIndexedFileRef["state"] | undefined,
+): boolean {
+  return state === "ready" || state === "lexical_only";
+}
 
 type StoredFileIndexState = {
   snapshot?: HybridFileSnapshotRow;
@@ -101,8 +103,6 @@ type PlannedChunk = {
 export type HybridRuntimeMemoryEstimate = {
   vectorsBytes: number;
   graphBytes: number;
-  bm25Bytes: number;
-  bm25Breakdown: BM25RuntimeMemoryBreakdown;
   totalBytes: number;
 };
 
@@ -137,7 +137,6 @@ export class HybridEngine {
   private readonly setting = getInstance(OuterSetting);
   private readonly embedder = new Embedder();
   private readonly reranker = new HybridReranker();
-  private readonly bm25 = new BM25Engine();
   private readonly hnswSmall = new HnswIndex();
   private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 
@@ -172,22 +171,15 @@ export class HybridEngine {
 
   async load(): Promise<void> {
     const dirtyArtifacts = await this.hydrateDirtyArtifacts();
-    await Promise.all([
-      profileHybridStage(
-        "startup.load_bm25",
-        async () => await this.loadBm25(dirtyArtifacts.has("bm25")),
-      ),
-      profileHybridStage(
-        "startup.load_hnsw",
-        async () => await this.loadHnsw(dirtyArtifacts.has("hnsw")),
-      ),
-    ]);
+    await profileHybridStage(
+      "startup.load_hnsw",
+      async () => await this.loadHnsw(dirtyArtifacts.has("hnsw")),
+    );
     await this.refreshStoredQueryCapabilityFromIndexedRefs();
     this._ready = true;
   }
 
   async clearAll(): Promise<void> {
-    this.bm25.clear();
     this.hnswSmall.clear(this.precision);
     this._ready = false;
     this._canSearch = false;
@@ -199,7 +191,6 @@ export class HybridEngine {
     await Promise.all([
       this.db.db.hybridChunks.clear(),
       this.db.db.hybridChunkVectors.clear(),
-      this.db.db.hybridBm25Index.clear(),
       this.db.db.hybridHnswSmall.clear(),
       this.db.db.hybridIndexedFileRefs.clear(),
       this.db.db.indexArtifactState.bulkDelete(
@@ -225,19 +216,15 @@ export class HybridEngine {
     return this._ready && (this._canSearch || this._hasStoredLexicalFallbackData);
   }
   isEmpty(): boolean {
-    return this.bm25.docCount === 0;
+    return !this._canSearch && !this._hasStoredLexicalFallbackData;
   }
 
   getRuntimeMemoryEstimate(): HybridRuntimeMemoryEstimate {
     const hnswEstimate = this.hnswSmall.estimateRuntimeMemoryBytes();
-    const bm25Breakdown = this.bm25.estimateRuntimeMemoryBreakdown();
-    const bm25Bytes = bm25Breakdown.totalBytes;
     return {
       vectorsBytes: hnswEstimate.vectorBytes,
       graphBytes: hnswEstimate.graphBytes,
-      bm25Bytes,
-      bm25Breakdown,
-      totalBytes: hnswEstimate.totalBytes + bm25Bytes,
+      totalBytes: hnswEstimate.totalBytes,
     };
   }
 
@@ -412,7 +399,6 @@ export class HybridEngine {
     }
 
     for (const id of ids) {
-      this.bm25.removeDocument(id);
       this.hnswSmall.delete(id);
     }
 
@@ -599,29 +585,6 @@ export class HybridEngine {
     await this.persistIndices();
   }
 
-  async rebuildBm25FromStore(): Promise<void> {
-    await this.rebuildBm25ArtifactFromStore();
-  }
-
-  async migrateBm25StorageFormatIfNeeded(): Promise<boolean> {
-    const record = await this.db.db.hybridBm25Index.get(0);
-    if (!record) {
-      return false;
-    }
-    const blobVersion = await getBm25BlobVersion(record.data);
-    if (blobVersion === 5) {
-      return false;
-    }
-
-    const migrated = new BM25Engine();
-    migrated.deserialize(await blobToBm25(record.data));
-    await this.db.db.hybridBm25Index.put({
-      id: 0,
-      data: bm25ToBlob(migrated.serialize()),
-    });
-    return true;
-  }
-
   private async indexInternal(
     filePath: string,
     plainText: string,
@@ -698,7 +661,7 @@ export class HybridEngine {
       recordHybridProfileMetric("index.chunk_count", plannedChunks.length);
 
       if (mode === "without-embedding") {
-        await this.indexBm25Only(filePath, plannedChunks, generation, option, {
+        await this.indexLexicalOnly(filePath, plannedChunks, generation, option, {
           lastIncrementalEmbedAt:
             previousIndexedFileRef?.lastIncrementalEmbedAt,
         });
@@ -739,7 +702,6 @@ export class HybridEngine {
           await profileHybridStage("index.update_memory_indices", async () => {
             for (let i = 0; i < batchChunkIds.length; i++) {
               const chunkId = batchChunkIds[i];
-              this.bm25.addDocument(chunkId, batchChunks[i].rawChunk.text);
               this.hnswSmall.insert(chunkId, batchVectors[i]);
             }
           });
@@ -758,16 +720,16 @@ export class HybridEngine {
           persistIndices: false,
           deleteIndexedFileRef: false,
         });
-        logger.warn(`hybrid indexing fell back to BM25 for ${filePath}`, error);
+        logger.warn(`hybrid indexing fell back to lexical-only mode for ${filePath}`, error);
         this._canSearch = false;
-        this.lastIndexingFallbackNoticeKey = "hybridNotice.indexFallbackToBm25";
+        this.lastIndexingFallbackNoticeKey = "hybridNotice.indexFallbackToLexical";
         try {
-          await this.indexBm25Only(filePath, plannedChunks, generation, option);
+          await this.indexLexicalOnly(filePath, plannedChunks, generation, option);
           await this.persistSnapshot(filePath, plainText, generation);
           const fallbackIndexedAt = Date.now();
           await this.putHybridIndexedFileRef({
             path: filePath,
-            state: "bm25_only",
+            state: "lexical_only",
             generation,
             chunkCount: plannedChunks.length,
             vectorPrecision: null,
@@ -1148,12 +1110,12 @@ export class HybridEngine {
     await this.db.db.hybridChunkVectors.put(chunkVectorShardToRow(shard));
   }
 
-  private async indexBm25Only(
+  private async indexLexicalOnly(
     filePath: string,
     plannedChunks: PlannedChunk[],
     generation: number,
     option: HybridWriteOption,
-    meta?: Bm25OnlyIndexedFileRefMeta,
+    meta?: LexicalOnlyIndexedFileRefMeta,
   ): Promise<void> {
     for (
       let chunkStart = 0;
@@ -1164,18 +1126,10 @@ export class HybridEngine {
         chunkStart,
         chunkStart + INDEX_CHUNK_BATCH_SIZE,
       );
-      const ids = await profileHybridStage(
-        "index.persist_chunks_bm25_only",
+      await profileHybridStage(
+        "index.persist_chunks_lexical_only",
         async () =>
           await this.persistChunks(filePath, batchChunks, false, chunkStart),
-      );
-      await profileHybridStage(
-        "index.update_memory_indices_bm25_only",
-        async () => {
-          for (let i = 0; i < ids.length; i++) {
-            this.bm25.addDocument(ids[i], batchChunks[i].rawChunk.text);
-          }
-        },
       );
     }
 
@@ -1184,7 +1138,7 @@ export class HybridEngine {
     }
     await this.putHybridIndexedFileRef({
       path: filePath,
-      state: "bm25_only",
+      state: "lexical_only",
       generation,
       chunkCount: plannedChunks.length,
       vectorPrecision: null,
@@ -1200,7 +1154,7 @@ export class HybridEngine {
     if (ref.state !== "pending") {
       await this.fileSnapshotStore.reconcileHybridShadows([ref.path]);
     }
-    if (ref.state === "ready" || ref.state === "bm25_only") {
+    if (isHybridLexicalFallbackState(ref.state)) {
       this._hasStoredLexicalFallbackData = true;
       return;
     }
@@ -1215,7 +1169,7 @@ export class HybridEngine {
   private async refreshStoredQueryCapabilityFromIndexedRefs(): Promise<void> {
     const refs = await this.db.db.hybridIndexedFileRefs.toArray();
     this._hasStoredLexicalFallbackData = refs.some(
-      (ref) => ref.state === "ready" || ref.state === "bm25_only",
+      (ref) => isHybridLexicalFallbackState(ref.state),
     );
   }
 
@@ -1263,16 +1217,7 @@ export class HybridEngine {
   }
 
   private async persistIndices(): Promise<void> {
-    await Promise.all([this.persistBm25(), this.persistHnsw()]);
-  }
-
-  private async persistBm25(): Promise<void> {
-    this.bm25.optimizeStorage();
-    await this.db.db.hybridBm25Index.put({
-      id: 0,
-      data: bm25ToBlob(this.bm25.serialize()),
-    });
-    await this.clearHybridArtifactDirtyState(["bm25"]);
+    await this.persistHnsw();
   }
 
   private async persistHnsw(): Promise<void> {
@@ -1284,25 +1229,6 @@ export class HybridEngine {
       data: hnswToBlob(this.hnswSmall.serialize()),
     });
     await this.clearHybridArtifactDirtyState(["hnsw"]);
-  }
-
-  private async loadBm25(forceRebuild = false): Promise<void> {
-    this.bm25.clear();
-    if (forceRebuild) {
-      await this.rebuildBm25ArtifactFromStore();
-      return;
-    }
-
-    const record = await this.db.db.hybridBm25Index.get(0);
-    if (!record) {
-      return;
-    }
-
-    const blobVersion = await getBm25BlobVersion(record.data);
-    this.bm25.deserialize(await blobToBm25(record.data));
-    if (blobVersion !== 5 || this.bm25.optimizeStorage()) {
-      await this.persistBm25();
-    }
   }
 
   private async loadHnsw(forceRebuild = false): Promise<void> {
@@ -1366,62 +1292,6 @@ export class HybridEngine {
     }
   }
 
-  private async rebuildBm25ArtifactFromStore(): Promise<void> {
-    this.bm25.clear();
-    let lastFilePath: string | null = null;
-
-    while (true) {
-      const indexedRefs: HybridIndexedFileRef[] =
-        lastFilePath === null
-          ? await this.db.db.hybridIndexedFileRefs
-              .orderBy("path")
-              .limit(INDEX_CHUNK_BATCH_SIZE)
-              .toArray()
-          : await this.db.db.hybridIndexedFileRefs
-              .where("path")
-              .above(lastFilePath)
-              .limit(INDEX_CHUNK_BATCH_SIZE)
-              .toArray();
-      if (indexedRefs.length === 0) {
-        break;
-      }
-
-      const expectedGenerations = new Map<string, number | undefined>(
-        indexedRefs.map((ref) => [ref.path, ref.generation]),
-      );
-      const snapshotByPath = await this.fileSnapshotStore.readIndexedTexts(
-        indexedRefs.map((ref) => ({
-          path: ref.path,
-          generation: expectedGenerations.get(ref.path),
-        })),
-      );
-
-      for (const indexedRef of indexedRefs) {
-        const plainText = snapshotByPath.get(indexedRef.path);
-        if (plainText === undefined) {
-          continue;
-        }
-        const rows = await this.db.db.hybridChunks
-          .where("filePath")
-          .equals(indexedRef.path)
-          .sortBy("chunkIndex");
-        for (const row of rows) {
-          if (row.id === undefined) {
-            continue;
-          }
-          this.bm25.addDocument(
-            row.id,
-            plainText.slice(row.startOffset, row.endOffset),
-          );
-        }
-      }
-
-      lastFilePath = indexedRefs[indexedRefs.length - 1].path;
-    }
-
-    await this.persistBm25();
-  }
-
   private async rebuildHnswFromStore(): Promise<void> {
     this.hnswSmall.clear(this.precision);
     let lastFilePath: string | null = null;
@@ -1465,7 +1335,7 @@ export class HybridEngine {
     );
     this.dirtyArtifacts.clear();
     for (const row of rows) {
-      if (row && (row.artifact === "bm25" || row.artifact === "hnsw")) {
+      if (row && row.artifact === "hnsw") {
         this.dirtyArtifacts.add(row.artifact);
       }
     }
@@ -1513,7 +1383,7 @@ export class HybridEngine {
     this._canSearch =
       this.hnswSmall.isNonEmpty() && this.hnswSmall.hasVectors();
     if (!this._canSearch) {
-      this.lastSearchFallbackNoticeKey = "hybridNotice.searchFallbackToBm25";
+      this.lastSearchFallbackNoticeKey = "hybridNotice.searchFallbackToLexical";
     }
   }
 

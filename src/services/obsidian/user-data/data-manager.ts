@@ -31,7 +31,6 @@ import {
   runWeightedTasks,
 } from "src/services/search/hybrid/runtime-control";
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
-import { BM25Engine } from "src/services/search/hybrid/bm25";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
@@ -207,7 +206,6 @@ export type HybridDeferredEmbeddingSummary = {
 type HybridRefreshOptions = {
   forceRefresh?: boolean;
   syncFileSetWithoutEmbedding?: boolean;
-  rebuildBm25FromStore?: boolean;
 };
 
 type DataManagerInitOptions = {
@@ -240,7 +238,7 @@ export type HybridHealthSummaryState =
   | "disabled"
   | "empty"
   | "ready"
-  | "bm25_only"
+  | "lexical_only"
   | "degraded"
   | "partial";
 
@@ -250,7 +248,7 @@ export type HybridHealthSummary = {
   storedPathCount: number;
   indexedFileRefCount: number;
   readyFileCount: number;
-  bm25OnlyFileCount: number;
+  lexicalOnlyFileCount: number;
   unstableFileCount: number;
   updatingFileCount: number;
   repairFileCount: number;
@@ -346,7 +344,6 @@ export class DataManager {
   private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
   private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
   private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
-  private static readonly HYBRID_BM25_REBUILD_BATCH_SIZE = 512;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS = 10_000;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS = 60_000;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD = 24;
@@ -527,7 +524,7 @@ export class DataManager {
 
     let indexedFileRefCount = 0;
     let readyFileCount = 0;
-    let bm25OnlyFileCount = 0;
+    let lexicalOnlyFileCount = 0;
     let unstableFileCount = 0;
     let currentAlignedSnapshotCount = 0;
     let shadowAlignedSnapshotCount = 0;
@@ -545,8 +542,8 @@ export class DataManager {
       }
       if (normalizedState === "ready") {
         readyFileCount += 1;
-      } else if (normalizedState === "bm25_only") {
-        bm25OnlyFileCount += 1;
+      } else if (normalizedState === "lexical_only") {
+        lexicalOnlyFileCount += 1;
       } else if (normalizedState === "pending" || normalizedState === "failed") {
         unstableFileCount += 1;
       }
@@ -580,7 +577,7 @@ export class DataManager {
       storedPathCount: summaries.size,
       indexedFileRefCount,
       readyFileCount,
-      bm25OnlyFileCount,
+      lexicalOnlyFileCount,
       unstableFileCount,
       updatingFileCount: freshnessSummary.updatingFileCount,
       repairFileCount: freshnessSummary.repairFileCount,
@@ -594,7 +591,7 @@ export class DataManager {
       storedPathCount: summaries.size,
       indexedFileRefCount,
       readyFileCount,
-      bm25OnlyFileCount,
+      lexicalOnlyFileCount,
       unstableFileCount,
       updatingFileCount: freshnessSummary.updatingFileCount,
       repairFileCount: freshnessSummary.repairFileCount,
@@ -618,7 +615,7 @@ export class DataManager {
     storedPathCount: number;
     indexedFileRefCount: number;
     readyFileCount: number;
-    bm25OnlyFileCount: number;
+    lexicalOnlyFileCount: number;
     unstableFileCount: number;
     updatingFileCount: number;
     repairFileCount: number;
@@ -636,12 +633,12 @@ export class DataManager {
     }
     if (
       input.readyFileCount === 0 &&
-      input.bm25OnlyFileCount > 0 &&
+      input.lexicalOnlyFileCount > 0 &&
       input.shadowMismatchCount === 0 &&
       input.shadowAlignedSnapshotCount === 0 &&
       input.updatingFileCount === 0
     ) {
-      return "bm25_only";
+      return "lexical_only";
     }
     if (
       input.shadowMismatchCount > 0 ||
@@ -746,7 +743,7 @@ export class DataManager {
   async initAsync(options: DataManagerInitOptions = {}) {
     this.clearHybridFailedEmbeddingState();
     this.resetLexicalSnapshotTracking();
-    this.fileSnapshotStore.clearCurrentFiles();
+    this.fileSnapshotStore.resetRuntimeState();
     this.lexicalIndexedFileRefsLoaded = false;
     this.lexicalIndexedFileRefsByPath.clear();
     this.setHybridSearchAvailability("blocked");
@@ -794,9 +791,6 @@ export class DataManager {
 
     if (!this.hybridEngine.isEnabled()) {
       this.setHybridBootstrapState("blocked");
-      await this.hybridEngine.migrateBm25StorageFormatIfNeeded().catch((e) => {
-        logger.warn("hybrid BM25 storage migration failed:", e);
-      });
     } else {
       this.setHybridBootstrapState("restoring");
       this.markSearchBootstrapPhaseStarted("hybrid", "restore");
@@ -836,7 +830,7 @@ export class DataManager {
       logger.warn("hybrid engine init failed:", e);
       hybridFailed = true;
       this.setHybridBootstrapState("failed");
-      new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+      new MyNotice(t("hybridNotice.indexFallbackToLexical"), 7000);
     }
     if (this.hybridBootstrapState === "healing") {
       this.markSearchBootstrapPhaseCompleted("hybrid", "heal");
@@ -911,22 +905,18 @@ export class DataManager {
         this.shouldForceRefresh = true;
         refreshResult = await this.initHybridEngine().catch((e) => {
           logger.warn("hybrid engine init failed:", e);
-          new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+          new MyNotice(t("hybridNotice.indexFallbackToLexical"), 7000);
           return null;
         });
-      } else if (
-        options.syncFileSetWithoutEmbedding ||
-        options.rebuildBm25FromStore
-      ) {
+      } else if (options.syncFileSetWithoutEmbedding) {
         refreshResult = await this.refreshHybridStateLocally({
           syncFileSetWithoutEmbedding:
             options.syncFileSetWithoutEmbedding ?? false,
-          rebuildBm25FromStore: options.rebuildBm25FromStore ?? false,
         });
       } else {
         refreshResult = await this.initHybridEngine().catch((e) => {
           logger.warn("hybrid engine init failed:", e);
-          new MyNotice(t("hybridNotice.indexFallbackToBm25"), 7000);
+          new MyNotice(t("hybridNotice.indexFallbackToLexical"), 7000);
           return null;
         });
       }
@@ -947,7 +937,6 @@ export class DataManager {
 
   private async refreshHybridStateLocally(options: {
     syncFileSetWithoutEmbedding: boolean;
-    rebuildBm25FromStore: boolean;
   }): Promise<HybridRefreshResult> {
     if (!this.hybridEngine.isEnabled()) {
       this.setHybridSearchAvailability("blocked");
@@ -1020,11 +1009,6 @@ export class DataManager {
       }
 
       await this.hybridEngine.persistIndicesForBatch();
-    }
-
-    if (options.rebuildBm25FromStore) {
-      hadWork = true;
-      await this.hybridEngine.rebuildBm25FromStore();
     }
 
     if (failures.length > 0) {
@@ -2084,7 +2068,7 @@ export class DataManager {
       lastError = error;
     }
 
-    let bm25FallbackIndexed = false;
+    let fallbackIndexed = false;
     let fallbackError: unknown = null;
     try {
       await this.hybridEngine.indexFile(
@@ -2093,10 +2077,10 @@ export class DataManager {
         file.stat.mtime,
         headingOutline,
       );
-      bm25FallbackIndexed = true;
+      fallbackIndexed = true;
     } catch (caughtFallbackError) {
       logger.error(
-        `hybrid BM25 fallback indexing failed for ${file.path}:`,
+        `hybrid lexical fallback indexing failed for ${file.path}:`,
         caughtFallbackError,
       );
       fallbackError = caughtFallbackError;
@@ -2120,7 +2104,7 @@ export class DataManager {
       path: file.path,
       reason: failureReason,
       attempts,
-      bm25FallbackIndexed,
+      fallbackIndexed,
     };
   }
 
@@ -2146,7 +2130,7 @@ export class DataManager {
         path: file.path,
         reason: this.formatHybridIndexError(error),
         attempts: 1,
-        bm25FallbackIndexed: false,
+        fallbackIndexed: false,
       };
     }
   }
@@ -2858,9 +2842,9 @@ export class DataManager {
     if (fallbackError !== null && fallbackError !== undefined) {
       const fallbackReason = this.formatHybridIndexError(fallbackError);
       if (embeddingError !== null && embeddingError !== undefined) {
-        return `Embedding failed: ${this.formatHybridIndexError(embeddingError)} | BM25 fallback failed: ${fallbackReason}`;
+        return `Embedding failed: ${this.formatHybridIndexError(embeddingError)} | lexical fallback failed: ${fallbackReason}`;
       }
-      return `BM25 fallback failed: ${fallbackReason}`;
+      return `lexical fallback failed: ${fallbackReason}`;
     }
     return this.formatHybridIndexError(embeddingError);
   }
@@ -2870,12 +2854,12 @@ export class DataManager {
       return;
     }
 
-    const failedWithoutBm25 = failures.filter(
-      (item) => !item.bm25FallbackIndexed,
+    const failedWithoutFallback = failures.filter(
+      (item) => !item.fallbackIndexed,
     ).length;
     const message = this.buildHybridFailureNotice(
       failures.length,
-      failedWithoutBm25,
+      failedWithoutFallback,
     );
     new MyNotice(message, 12000);
 
@@ -2884,7 +2868,7 @@ export class DataManager {
     );
     failures.forEach((failure) => {
       console.error(
-        `[clever-search] ${failure.path}\nAttempts: ${failure.attempts}\nBM25 fallback indexed: ${failure.bm25FallbackIndexed}\nReason: ${failure.reason}`,
+        `[clever-search] ${failure.path}\nAttempts: ${failure.attempts}\nFallback indexed: ${failure.fallbackIndexed}\nReason: ${failure.reason}`,
       );
     });
     console.groupEnd();
@@ -2892,11 +2876,11 @@ export class DataManager {
 
   private buildHybridFailureNotice(
     failureCount: number,
-    failedWithoutBm25: number,
+    failedWithoutFallback: number,
   ): string {
     const fallbackText =
-      failedWithoutBm25 > 0
-        ? ` ${failedWithoutBm25} file(s) also failed BM25 fallback indexing.`
+      failedWithoutFallback > 0
+        ? ` ${failedWithoutFallback} file(s) also failed lexical fallback indexing.`
         : "";
     return `${failureCount} file(s) did not finish semantic embedding indexing after ${DataManager.HYBRID_INDEX_MAX_RETRIES} attempts due to network or quota/token issues.${fallbackText} Press Ctrl+Shift+I to view details in the console.`;
   }
@@ -2984,7 +2968,6 @@ export class DataManager {
         (item) =>
           item.name === "hybridChunks" ||
           item.name === "hybridChunkVectors" ||
-          item.name === "hybridBm25Index" ||
           item.name === "hybridHnswSmall" ||
           item.name === "hybridIndexedFileRefs" ||
           item.name === "hybridDirtyShadows",
@@ -3117,11 +3100,6 @@ export class DataManager {
         rowsByName.get("hybridChunkVectors") ?? 0,
       ),
       this.createDevStorageSummaryRow(
-        "HybridBM25",
-        bytesByName.get("hybridBm25Index") ?? 0,
-        rowsByName.get("hybridBm25Index") ?? 0,
-      ),
-      this.createDevStorageSummaryRow(
         "HybridHNSW",
         bytesByName.get("hybridHnswSmall") ?? 0,
         rowsByName.get("hybridHnswSmall") ?? 0,
@@ -3141,11 +3119,6 @@ export class DataManager {
       this.createDevStorageSummaryRow(
         "HybridRuntimeGraph",
         hybridRuntimeEstimate.graphBytes,
-        "estimate",
-      ),
-      this.createDevStorageSummaryRow(
-        "HybridRuntimeBm25",
-        hybridRuntimeEstimate.bm25Bytes,
         "estimate",
       ),
       this.createDevStorageSummaryRow(
@@ -3232,91 +3205,6 @@ export class DataManager {
       console.log("[clever-search] Plugin runtime vs JS heap");
       console.table(heapContextRows);
     }
-    if (hybridRuntimeEstimate.bm25Breakdown) {
-      console.log("[clever-search] Hybrid runtime BM25 breakdown");
-      console.table([
-        {
-          segment: "bm25-term-text",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.termTextBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.termTextBytes,
-          ),
-        },
-        {
-          segment: "bm25-term-offset",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.termOffsetBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.termOffsetBytes,
-          ),
-        },
-        {
-          segment: "bm25-term-df",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.termDfBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.termDfBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-start",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.postingStartBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.postingStartBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-length",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.postingLengthBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.postingLengthBytes,
-          ),
-        },
-        {
-          segment: "bm25-term-flag",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.termFlagBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.termFlagBytes,
-          ),
-        },
-        {
-          segment: "bm25-sorted-term-ids",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.sortedTermIdsBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.sortedTermIdsBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-doc-ids",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.postingDocIdsBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.postingDocIdsBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-tf-norm",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.postingTfNormBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.postingTfNormBytes,
-          ),
-        },
-        {
-          segment: "bm25-doc-lengths",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.docLengthsBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.docLengthsBytes,
-          ),
-        },
-        {
-          segment: "bm25-dirty-overrides",
-          bytes: hybridRuntimeEstimate.bm25Breakdown.postingContainerBytes,
-          size: this.formatBytes(
-            hybridRuntimeEstimate.bm25Breakdown.postingContainerBytes,
-          ),
-        },
-      ]);
-      console.log(
-        `[clever-search] Hybrid runtime BM25 details: terms=${hybridRuntimeEstimate.bm25Breakdown.termCount}, activeTerms=${hybridRuntimeEstimate.bm25Breakdown.activeTermCount}, expandableTerms=${hybridRuntimeEstimate.bm25Breakdown.expandableTermCount}, postings=${hybridRuntimeEstimate.bm25Breakdown.postingCount}, docs=${hybridRuntimeEstimate.bm25Breakdown.docCount}`,
-      );
-    }
     if (lexicalRuntimeBreakdown.rows.length > 0) {
       console.log(
         "[clever-search] Lexical runtime breakdown (exclusive segments)",
@@ -3394,75 +3282,6 @@ export class DataManager {
           ),
         },
       ]);
-    }
-    if (storageUsage.hybridBm25Breakdown) {
-      console.table([
-        {
-          segment: "bm25-header",
-          bytes: storageUsage.hybridBm25Breakdown.headerBytes,
-          size: this.formatBytes(storageUsage.hybridBm25Breakdown.headerBytes),
-        },
-        {
-          segment: "bm25-term-text",
-          bytes: storageUsage.hybridBm25Breakdown.termTextBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.termTextBytes,
-          ),
-        },
-        {
-          segment: "bm25-term-meta",
-          bytes: storageUsage.hybridBm25Breakdown.termMetaBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.termMetaBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-header",
-          bytes: storageUsage.hybridBm25Breakdown.postingHeaderBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.postingHeaderBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-doc-delta",
-          bytes: storageUsage.hybridBm25Breakdown.postingDocDeltaBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.postingDocDeltaBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-tfNorm",
-          bytes: storageUsage.hybridBm25Breakdown.postingTfNormBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.postingTfNormBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-pos-count",
-          bytes: storageUsage.hybridBm25Breakdown.postingPositionCountBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.postingPositionCountBytes,
-          ),
-        },
-        {
-          segment: "bm25-posting-pos-delta",
-          bytes: storageUsage.hybridBm25Breakdown.postingPositionDeltaBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.postingPositionDeltaBytes,
-          ),
-        },
-        {
-          segment: "bm25-doc-lengths",
-          bytes: storageUsage.hybridBm25Breakdown.docLengthsBytes,
-          size: this.formatBytes(
-            storageUsage.hybridBm25Breakdown.docLengthsBytes,
-          ),
-        },
-      ]);
-      console.log(
-        `[clever-search] HybridBM25 details: version=${storageUsage.hybridBm25Breakdown.version}, terms=${storageUsage.hybridBm25Breakdown.termCount}, postings=${storageUsage.hybridBm25Breakdown.postingCount}, postingsWithPositions=${storageUsage.hybridBm25Breakdown.postingsWithPositions}, termsWithPositions=${storageUsage.hybridBm25Breakdown.termsWithPositions}, positionValues=${storageUsage.hybridBm25Breakdown.positionValueCount}`,
-      );
-      console.table(storageUsage.hybridBm25Breakdown.topPositionHeavyTerms);
     }
     console.groupEnd();
   }
@@ -3758,7 +3577,6 @@ export class DataManager {
     const hybridRuntimeLine = [
       ['vectors', rows.find((row) => row.segment === 'HybridRuntimeVectors')?.size],
       ['graph', rows.find((row) => row.segment === 'HybridRuntimeGraph')?.size],
-      ['bm25', rows.find((row) => row.segment === 'HybridRuntimeBm25')?.size],
     ]
       .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
       .map(([segment, size]) => segment + ' ' + size)

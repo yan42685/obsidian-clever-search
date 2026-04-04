@@ -120,7 +120,7 @@ export class FileSnapshotStore {
 
 	async removeFiles(filePaths: readonly string[]): Promise<void> {
 		for (const filePath of filePaths) {
-			this.invalidateCurrentFile(filePath);
+			this.deleteCurrentFile(filePath);
 		}
 		await this.deleteIndexedSnapshots(filePaths);
 	}
@@ -147,7 +147,7 @@ export class FileSnapshotStore {
 				file.stat.mtime,
 			)
 		) {
-			return this.setCurrentFileText(
+			return this.writeCurrentFileText(
 				file.path,
 				indexedSnapshot.plainText,
 				indexedSnapshot.generation ?? file.stat.mtime,
@@ -173,10 +173,18 @@ export class FileSnapshotStore {
 		const plainText = await this.vault.cachedRead(file);
 		const normalized =
 			file.extension === "html" ? this.normalizeHtmlToText(plainText) : plainText;
-		return this.setCurrentFileText(file.path, normalized, file.stat.mtime);
+		return this.writeCurrentFileText(file.path, normalized, file.stat.mtime);
 	}
 
-	setCurrentFileText(path: string, text: string, generation?: number): string {
+	resetRuntimeState(): void {
+		this.currentFileCache.clear();
+	}
+
+	private writeCurrentFileText(
+		path: string,
+		text: string,
+		generation?: number,
+	): string {
 		const existing = this.currentFileCache.get(path);
 		if (
 			existing &&
@@ -188,19 +196,7 @@ export class FileSnapshotStore {
 		return text;
 	}
 
-	clearCurrentFiles(): void {
-		this.currentFileCache.clear();
-	}
-
-	peekCurrentFileText(path: string): string | undefined {
-		return this.currentFileCache.get(path)?.text;
-	}
-
-	peekCurrentFileGeneration(path: string): number | undefined {
-		return this.currentFileCache.get(path)?.generation;
-	}
-
-	invalidateCurrentFile(path: string): void {
+	private deleteCurrentFile(path: string): void {
 		this.currentFileCache.delete(path);
 	}
 
@@ -387,7 +383,7 @@ export class FileSnapshotStore {
 	): Promise<void> {
 		for (const file of files) {
 			if (file.text !== undefined) {
-				this.setCurrentFileText(file.path, file.text, file.generation);
+				this.writeCurrentFileText(file.path, file.text, file.generation);
 				continue;
 			}
 			const cached = this.currentFileCache.get(file.path);
