@@ -531,6 +531,11 @@ export class DataManager {
     const freshnessSummary = await this.getHybridFreshnessSummary();
     const failedEmbeddingSummary = this.getHybridFailedEmbeddingSummary();
     const deferredEmbeddingSummary = await this.getHybridDeferredEmbeddingSummary();
+    const trackedPaths = new Set(
+      this.getHybridTrackedFiles().map((file) => file.path),
+    );
+    const currentPrecision =
+      this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8";
 
     let indexedFileRefCount = 0;
     let readyFileCount = 0;
@@ -542,15 +547,40 @@ export class DataManager {
     const shadowMismatchSamplePaths: string[] = [];
 
     for (const [path, summary] of summaries) {
+      const consistency = analyzeHybridStoredFileConsistency({
+        existsInVault: trackedPaths.has(path),
+        hasChunks: summary.chunkCount > 0,
+        chunkCount: summary.chunkCount,
+        snapshot:
+          summary.currentSnapshotGeneration !== undefined
+            ? { generation: summary.currentSnapshotGeneration }
+            : undefined,
+        shadowSnapshot:
+          summary.shadowSnapshotGeneration !== undefined
+            ? { generation: summary.shadowSnapshotGeneration }
+            : undefined,
+        vectorInfo: summary.vectorInfo,
+        indexedFileRef: summary.indexedFileRef,
+        currentPrecision,
+      });
+      const healthBlockingReasons = consistency.reuseBlockedReasons.filter(
+        (reason) =>
+          reason !== "snapshot_generation_mismatch" &&
+          reason !== "vector_generation_mismatch",
+      );
+
       if (summary.indexedFileRef) {
         indexedFileRefCount += 1;
-        if (summary.indexedFileRef.state === "ready") {
+      }
+
+      if (healthBlockingReasons.length === 0) {
+        if (consistency.indexedFileState === "ready") {
           readyFileCount += 1;
-        } else if (summary.indexedFileRef.state === "lexical_only") {
+        } else if (consistency.indexedFileState === "lexical_only") {
           lexicalOnlyFileCount += 1;
         } else if (
-          summary.indexedFileRef.state === "pending" ||
-          summary.indexedFileRef.state === "failed"
+          consistency.indexedFileState === "pending" ||
+          consistency.indexedFileState === "failed"
         ) {
           unstableFileCount += 1;
         }

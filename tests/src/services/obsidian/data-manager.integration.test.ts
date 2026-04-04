@@ -2283,6 +2283,50 @@ describe("DataManager integration", () => {
 
     manager.onunload();
   });
+  test("hybrid health summary treats ready refs with missing hybrid data as unstable", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/broken-ready.md", "body", 160);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "body"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: file.stat.mtime,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: file.stat.mtime,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: Array.from(files.values()),
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    const summary = await manager.getHybridHealthSummary();
+
+    expect(summary.state).toBe("degraded");
+    expect(summary.indexedFileRefCount).toBe(1);
+    expect(summary.readyFileCount).toBe(0);
+    expect(summary.lexicalOnlyFileCount).toBe(0);
+    expect(summary.unstableFileCount).toBe(1);
+
+    manager.onunload();
+  });
+
   test("startup keeps shadow-aligned hybrid state out of corruption self-heal", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;

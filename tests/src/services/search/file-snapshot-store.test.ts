@@ -61,18 +61,32 @@ type SnapshotRow = {
   generation?: number;
 };
 
-function createKeyedTable(initialRows: SnapshotRow[] = []) {
+type HybridIndexedFileRefRow = {
+  path: string;
+  generation?: number;
+  state?: string;
+};
+
+function createFilePathTable(initialRows: SnapshotRow[] = []) {
   const rows = new Map<string, SnapshotRow>(
     initialRows.map((row) => [row.filePath, { ...row }]),
   );
+  const sortedRows = () =>
+    Array.from(rows.values())
+      .map((row) => ({ ...row }))
+      .sort((left, right) => left.filePath.localeCompare(right.filePath));
 
   return {
     rows,
     async get(path: string) {
-      return rows.get(path);
+      const row = rows.get(path);
+      return row ? { ...row } : undefined;
     },
     async bulkGet(paths: readonly string[]) {
-      return paths.map((path) => rows.get(path));
+      return paths.map((path) => {
+        const row = rows.get(path);
+        return row ? { ...row } : undefined;
+      });
     },
     async bulkPut(nextRows: SnapshotRow[]) {
       for (const row of nextRows) {
@@ -84,6 +98,102 @@ function createKeyedTable(initialRows: SnapshotRow[] = []) {
         rows.delete(path);
       }
     },
+    orderBy(field: string) {
+      if (field !== ":id") {
+        throw new Error(`Unsupported orderBy field: ${field}`);
+      }
+      return {
+        limit(limit: number) {
+          return {
+            toArray: async () => sortedRows().slice(0, limit),
+          };
+        },
+      };
+    },
+    where(field: string) {
+      if (field !== ":id") {
+        throw new Error(`Unsupported where field: ${field}`);
+      }
+      return {
+        above(lastPath: string) {
+          return {
+            limit(limit: number) {
+              return {
+                toArray: async () =>
+                  sortedRows()
+                    .filter((row) => row.filePath.localeCompare(lastPath) > 0)
+                    .slice(0, limit),
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+function createHybridIndexedRefTable(initialRows: HybridIndexedFileRefRow[] = []) {
+  const rows = new Map<string, HybridIndexedFileRefRow>(
+    initialRows.map((row) => [row.path, { ...row }]),
+  );
+  const sortedRows = () =>
+    Array.from(rows.values())
+      .map((row) => ({ ...row }))
+      .sort((left, right) => left.path.localeCompare(right.path));
+
+  return {
+    rows,
+    async get(path: string) {
+      const row = rows.get(path);
+      return row ? { ...row } : undefined;
+    },
+    async bulkGet(paths: readonly string[]) {
+      return paths.map((path) => {
+        const row = rows.get(path);
+        return row ? { ...row } : undefined;
+      });
+    },
+    async bulkPut(nextRows: HybridIndexedFileRefRow[]) {
+      for (const row of nextRows) {
+        rows.set(row.path, { ...row });
+      }
+    },
+    async bulkDelete(paths: readonly string[]) {
+      for (const path of paths) {
+        rows.delete(path);
+      }
+    },
+    orderBy(field: string) {
+      if (field !== ":id") {
+        throw new Error(`Unsupported orderBy field: ${field}`);
+      }
+      return {
+        limit(limit: number) {
+          return {
+            toArray: async () => sortedRows().slice(0, limit),
+          };
+        },
+      };
+    },
+    where(field: string) {
+      if (field !== ":id") {
+        throw new Error(`Unsupported where field: ${field}`);
+      }
+      return {
+        above(lastPath: string) {
+          return {
+            limit(limit: number) {
+              return {
+                toArray: async () =>
+                  sortedRows()
+                    .filter((row) => row.path.localeCompare(lastPath) > 0)
+                    .slice(0, limit),
+              };
+            },
+          };
+        },
+      };
+    },
   };
 }
 
@@ -91,13 +201,17 @@ function createStoreHarness(options?: {
   files?: TFile[];
   fileSnapshots?: SnapshotRow[];
   hybridDirtyShadows?: SnapshotRow[];
+  hybridIndexedFileRefs?: HybridIndexedFileRefRow[];
   reads?: Record<string, string>;
 }) {
   const files = new Map<string, TFile>(
     (options?.files ?? []).map((file) => [file.path, file]),
   );
-  const fileSnapshots = createKeyedTable(options?.fileSnapshots);
-  const hybridDirtyShadows = createKeyedTable(options?.hybridDirtyShadows);
+  const fileSnapshots = createFilePathTable(options?.fileSnapshots);
+  const hybridDirtyShadows = createFilePathTable(options?.hybridDirtyShadows);
+  const hybridIndexedFileRefs = createHybridIndexedRefTable(
+    options?.hybridIndexedFileRefs,
+  );
   const reads = options?.reads ?? {};
   const cachedRead = jest.fn(async (file: TFile) => reads[file.path] ?? "");
   const vault = {
@@ -108,15 +222,20 @@ function createStoreHarness(options?: {
     db: {
       fileSnapshots,
       hybridDirtyShadows,
+      hybridIndexedFileRefs,
     },
   };
 
   mockInstanceMap.clear();
   mockInstanceMap.set(Vault, vault);
   mockInstanceMap.set(Database, database);
+  const store = new FileSnapshotStore() as FileSnapshotStore & {
+    currentFileCache?: Map<string, { text: string; generation?: number }>;
+  };
+  store.currentFileCache ??= new Map();
 
   return {
-    store: new FileSnapshotStore(),
+    store,
     vault,
     database,
   };
@@ -203,5 +322,57 @@ describe("FileSnapshotStore", () => {
 
     expect(texts.get(file.path)).toBe("shadow body");
     expect(vault.cachedRead).not.toHaveBeenCalled();
+  });
+
+  test("retainOnlyFiles also removes stale hybrid indexed refs", async () => {
+    const keepPath = "docs/keep.md";
+    const stalePath = "docs/stale.md";
+    const { store, database } = createStoreHarness({
+      fileSnapshots: [
+        {
+          filePath: keepPath,
+          plainText: "keep",
+          generation: 100,
+        },
+        {
+          filePath: stalePath,
+          plainText: "stale",
+          generation: 90,
+        },
+      ],
+      hybridDirtyShadows: [
+        {
+          filePath: keepPath,
+          plainText: "keep shadow",
+          generation: 100,
+        },
+        {
+          filePath: stalePath,
+          plainText: "stale shadow",
+          generation: 90,
+        },
+      ],
+      hybridIndexedFileRefs: [
+        {
+          path: keepPath,
+          generation: 100,
+          state: "ready",
+        },
+        {
+          path: stalePath,
+          generation: 90,
+          state: "ready",
+        },
+      ],
+    });
+
+    await store.retainOnlyFiles(new Set([keepPath]));
+
+    await expect(database.db.hybridIndexedFileRefs.get(keepPath)).resolves.toEqual({
+      path: keepPath,
+      generation: 100,
+      state: "ready",
+    });
+    await expect(database.db.hybridIndexedFileRefs.get(stalePath)).resolves.toBeUndefined();
   });
 });

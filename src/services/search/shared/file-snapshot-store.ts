@@ -143,11 +143,19 @@ export class FileSnapshotStore {
 			() => this.database.db.fileSnapshots,
 			(paths) => this.database.db.fileSnapshots.bulkDelete(paths),
 			validPaths,
+			(row: { filePath: string }) => row.filePath,
+		);
+		await this.deleteRowsNotIn(
+			() => this.database.db.hybridIndexedFileRefs,
+			(paths) => this.database.db.hybridIndexedFileRefs.bulkDelete(paths),
+			validPaths,
+			(row: { path: string }) => row.path,
 		);
 		await this.deleteRowsNotIn(
 			() => this.database.db.hybridDirtyShadows,
 			(paths) => this.database.db.hybridDirtyShadows.bulkDelete(paths),
 			validPaths,
+			(row: { filePath: string }) => row.filePath,
 		);
 	}
 
@@ -477,10 +485,11 @@ export class FileSnapshotStore {
 		getTable: () => { orderBy: (index: string) => any; where: (index: string) => any },
 		deleteRows: (paths: string[]) => Promise<void>,
 		validPaths: ReadonlySet<string>,
+		getPath: (row: any) => string,
 	): Promise<void> {
 		let lastPath: string | null = null;
 		while (true) {
-			const rows: Array<{ filePath: string }> =
+			const rows: any[] =
 				lastPath === null
 					? await getTable()
 						.orderBy(":id")
@@ -496,13 +505,13 @@ export class FileSnapshotStore {
 			}
 
 			const stalePaths = rows
-				.map((row) => row.filePath)
+				.map((row) => getPath(row))
 				.filter((path) => !validPaths.has(path));
 			if (stalePaths.length > 0) {
 				await deleteRows(stalePaths);
 			}
 
-			lastPath = rows[rows.length - 1].filePath;
+			lastPath = getPath(rows[rows.length - 1]);
 		}
 	}
 
