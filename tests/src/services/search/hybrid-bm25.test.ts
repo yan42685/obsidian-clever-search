@@ -40,6 +40,13 @@ type BenchmarkMetric = {
 	count: number;
 };
 
+type BenchmarkTiming = {
+	totalMs: number;
+	avgMsPerQuery: number;
+	p50Ms: number;
+	p100Ms: number;
+};
+
 type QueryOutcome = {
 	query: string;
 	relevantPath: string;
@@ -54,6 +61,7 @@ type QueryOutcome = {
 type BenchmarkEvaluation = {
 	metric: BenchmarkMetric;
 	outcomes: QueryOutcome[];
+	timing: BenchmarkTiming;
 };
 
 type FocusDiagnostic = {
@@ -109,6 +117,28 @@ function createMockTokenizer(): MockTokenizer {
 
 function round(value: number): number {
 	return Number(value.toFixed(3));
+}
+
+function percentile(values: readonly number[], ratio: number): number {
+	if (values.length === 0) {
+		return 0;
+	}
+	const sorted = [...values].sort((left, right) => left - right);
+	const index = Math.min(
+		sorted.length - 1,
+		Math.max(0, Math.ceil(sorted.length * ratio) - 1),
+	);
+	return sorted[index] ?? 0;
+}
+
+function summarizeTimings(timings: readonly number[]): BenchmarkTiming {
+	const totalMs = timings.reduce((sum, value) => sum + value, 0);
+	return {
+		totalMs: round(totalMs),
+		avgMsPerQuery: round(totalMs / Math.max(1, timings.length)),
+		p50Ms: round(percentile(timings, 0.5)),
+		p100Ms: round(percentile(timings, 1)),
+	};
 }
 
 function createEmptyMetric(): BenchmarkMetric {
@@ -389,8 +419,10 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	);
 	const metric = createEmptyMetric();
 	const outcomes: QueryOutcome[] = [];
+	const timings: number[] = [];
 	const focusDiagnostics: FocusDiagnostic[] = [];
 	for (const queryCase of params.queryCases) {
+		const queryStartedAt = performance.now();
 		const matchedFiles = await engine.searchFiles({
 			queryText: queryCase.query,
 			isPrefixMatch: true,
@@ -481,6 +513,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 				})),
 			});
 		}
+		timings.push(performance.now() - queryStartedAt);
 	}
 	console.log(
 		"[hybrid-lexical-lane-benchmark] focus-diagnostics",
@@ -489,6 +522,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	return {
 		metric: finalizeMetric(metric),
 		outcomes,
+		timing: summarizeTimings(timings),
 	};
 }
 
@@ -633,8 +667,9 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 
 		const baselineMetric = createEmptyMetric();
 		const baselineOutcomes: QueryOutcome[] = [];
-		const baselineStartedAt = performance.now();
+		const baselineTimings: number[] = [];
 		for (const queryCase of queryCases) {
+			const queryStartedAt = performance.now();
 			const results = bm25.search(queryCase.query, 8, {
 				useProximity: false,
 				enableQueryExpansion: true,
@@ -646,15 +681,14 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 					.findIndex((path) => path === queryCase.relevantPath) + 1;
 			updateMetric(baselineMetric, rank);
 			baselineOutcomes.push(createOutcome(queryCase, rank));
+			baselineTimings.push(performance.now() - queryStartedAt);
 		}
-		const baselineElapsedMs = performance.now() - baselineStartedAt;
-		const lexicalStartedAt = performance.now();
+		const baselineTiming = summarizeTimings(baselineTimings);
 		const lexicalEvaluation = await evaluateLexicalLaneAgainstCorpus({
 			documents,
 			queryCases,
 			tokenizer,
 		});
-		const lexicalElapsedMs = performance.now() - lexicalStartedAt;
 		const finalizedBaselineMetric = finalizeMetric(baselineMetric);
 		const typeBreakdown = compareOutcomeBuckets({
 			baseline: baselineOutcomes,
@@ -684,11 +718,11 @@ test("compares lexical lane against BM25 baseline on the automation corpus", asy
 			},
 			bm25Baseline: {
 				...finalizedBaselineMetric,
-				avgMsPerQuery: round(baselineElapsedMs / Math.max(1, queryCases.length)),
+				...baselineTiming,
 			},
 			lexicalLane: {
 				...lexicalEvaluation.metric,
-				avgMsPerQuery: round(lexicalElapsedMs / Math.max(1, queryCases.length)),
+				...lexicalEvaluation.timing,
 			},
 			worstTypes: typeBreakdown.slice(0, 6),
 			worstSuites: suiteBreakdown.slice(0, 6),
