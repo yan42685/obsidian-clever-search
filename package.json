@@ -16,7 +16,6 @@
 		"benchmark:hybrid": "node scripts/hybrid-search-benchmark.mjs",
 		"benchmark:hybrid:real-ab": "node scripts/hybrid-real-ab-benchmark.mjs --dry-run",
 		"benchmark:hybrid:context-sweep": "node scripts/hybrid-real-ab-benchmark.mjs --mode=local-budget-sweep",
-		"benchmark:hybrid:bm25-size": "node scripts/hybrid-search-benchmark.mjs --mode=bm25-size",
 		"benchmark:hybrid:regression": "node scripts/hybrid-search-benchmark.mjs --mode=regression",
 		"benchmark:hybrid:tune": "node scripts/hybrid-search-benchmark.mjs --mode=tune",
 		"benchmark:hybrid:tune:regression": "node scripts/hybrid-search-benchmark.mjs --mode=tune-regression",

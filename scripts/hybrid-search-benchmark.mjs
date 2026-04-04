@@ -387,8 +387,7 @@ function parseArgs(argv) {
 		!hasExplicitTargetLibraryMb &&
 		(args.mode === "regression" ||
 			args.mode === "tune-regression" ||
-			args.mode === "rerank-source-overlap" ||
-			args.mode === "bm25-size")
+			args.mode === "rerank-source-overlap")
 	) {
 		args.targetLibraryMb = 40;
 	}
@@ -3107,20 +3106,6 @@ function printBm25SizeReport(args, payload) {
 	}
 }
 
-function runBm25SizeReport(args) {
-	const corpus = buildCorpus({
-		filesPerConcept: args.filesPerConcept,
-		seed: args.seed,
-		targetLibraryBytes: Math.round(args.targetLibraryMb * 1024 * 1024),
-	});
-	printBm25SizeReport(args, {
-		chunkById: corpus.chunkById,
-		fileCount: corpus.fileById.size,
-		chunkCount: corpus.chunkById.size,
-		logicalBytes: corpus.logicalBytes,
-	});
-}
-
 function printSummary(args, runs) {
 	const perRunFileOverall = runs.map((run) => {
 		const summary = new Map();
@@ -3721,10 +3706,6 @@ function runSizeSweep(args) {
 
 function main() {
 	const args = parseArgs(process.argv);
-	if (args.mode === "bm25-size") {
-		runBm25SizeReport(args);
-		return;
-	}
 	if (args.mode === "budget-compare") {
 		runBudgetCompare(args);
 		return;
