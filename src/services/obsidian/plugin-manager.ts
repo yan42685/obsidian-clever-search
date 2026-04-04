@@ -37,7 +37,7 @@ export class PluginManager {
 	async onLayoutReady() {
 		const commandRegistry = getInstance(CommandRegistry);
 		commandRegistry.addInVaultCommands();
-		commandRegistry.addDevCommands();
+		await commandRegistry.addDevCommands();
 		await getInstance(DataManager).initAsync();
 		await getInstance(OmnisearchIntegration).initAsync();
 	}

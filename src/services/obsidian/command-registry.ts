@@ -5,7 +5,6 @@ import {
 	type KeymapEventHandler,
 	type Modifier
 } from "obsidian";
-import { devTest } from "src/dev-test";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
@@ -16,18 +15,29 @@ import { FloatingWindowManager } from "src/ui/floating-window";
 import { QuickSwitchModal } from "src/ui/quick-switch-modal";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
-import { getInstance, isDevEnvironment } from "src/utils/my-lib";
+import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
-import { DevFileReadBenchmark } from "./dev-file-read-benchmark";
 import { openHybridSearchModal } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
 import { MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 
+declare const __DEV__: boolean;
+
 const CTRL: Modifier = "Ctrl";
 const ALT: Modifier = "Alt";
 const SHIFT: Modifier = "Shift";
+
+type DevCommandRegistryContext = {
+	app: App;
+	addCommand: (command: Command) => void;
+	runWhenSearchSearchable: (callback: () => void | Promise<void>) => void;
+};
+
+type DevCommandRegistryModule = {
+	registerDevCommands(context: DevCommandRegistryContext): Promise<void> | void;
+};
 
 @singleton()
 export class CommandRegistry {
@@ -40,83 +50,19 @@ export class CommandRegistry {
 	}
 
 	// only for developer
-	addDevCommands() {
-		if (isDevEnvironment) {
-			this.addCommand({
-				id: "cs-in-file-search-floating-window",
-				name: "In file search - floating window",
-				callback: () => getInstance(FloatingWindowManager).toggle("inFile"),
-			});
-
-			this.addCommand({
-				id: "clever-search-triggerTest",
-				name: "clever-search-triggerTest",
-				// hotkeys: [{modifiers: [currModifier], key: "5"}],
-				callback: async () => await devTest(),
-			});
-
-			this.addCommand({
-				id: "cs-hybrid-search",
-				name: "Hybrid search (BM25 + vector) [dev]",
-				callback: () =>
-					this.runWhenSearchSearchable(() =>
-						new SearchModal(this.app, SearchType.IN_VAULT, true).open(),
-					),
-			});
-
-			this.addCommand({
-				id: "cs-hybrid-search-lexical-lane",
-				name: "Hybrid search (lexical lane) [dev]",
-				callback: () =>
-					this.runWhenSearchSearchable(() =>
-						new SearchModal(
-							this.app,
-							SearchType.IN_VAULT,
-							true,
-							undefined,
-							"lexical-lane",
-						).open(),
-					),
-			});
-
-			this.addCommand({
-				id: "cs-dev-file-read-benchmark",
-				name: "Benchmark file read paths [dev]",
-				callback: async () =>
-					await getInstance(DevFileReadBenchmark).run(),
-			});
-
-			this.addCommand({
-				id: "cs-dev-big-corpus-file-read-benchmark",
-				name: "Benchmark big corpus read paths [dev]",
-				callback: async () =>
-					await getInstance(DevFileReadBenchmark).runBigCorpus(),
-			});
-
-			this.addCommand({
-				id: "cs-dev-search-bootstrap-summary",
-				name: "Show search bootstrap summary [dev]",
-				callback: () => {
-					const dataManager = getInstance(DataManager);
-					const metrics = dataManager.getSearchBootstrapMetrics();
-					if (!metrics) {
-						new MyNotice("Search bootstrap metrics are unavailable.", 4000);
-						return;
-					}
-					const summary =
-						`Search bootstrap: lexical ${dataManager.getLexicalBootstrapState()} ` +
-						`(restore ${metrics.lexical.restoreMs ?? 0} ms, heal ${metrics.lexical.healMs ?? 0} ms), ` +
-						`hybrid ${dataManager.getHybridBootstrapState()} ` +
-						`(restore ${metrics.hybrid.restoreMs ?? 0} ms, heal ${metrics.hybrid.healMs ?? 0} ms), ` +
-						`searchable ${metrics.searchableMs ?? 0} ms, ` +
-						`commit ${metrics.commitMs ?? 0} ms, ` +
-						`commitPending ${metrics.commitPending ? "yes" : "no"}, ` +
-						`commitFailed ${metrics.commitFailed ? "yes" : "no"}.`;
-					console.log("[clever-search]", summary, metrics);
-					new MyNotice(summary, 5000);
-				},
-			});
+	async addDevCommands(): Promise<void> {
+		if (!__DEV__) {
+			return;
 		}
+
+		const { registerDevCommands } =
+			(await import("./command-registry.dev")) as DevCommandRegistryModule;
+		await registerDevCommands({
+			app: this.app,
+			addCommand: (command) => this.addCommand(command),
+			runWhenSearchSearchable: (callback) =>
+				this.runWhenSearchSearchable(callback),
+		});
 	}
 
 	addCommandsWithoutDependency() {

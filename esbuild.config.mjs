@@ -84,6 +84,9 @@ async function printFilesSize(directory) {
 }
 
 const DIST_PATH = "dist";
+const DEV_COMMAND_REGISTRY_STUB_PATH = pathUtil.resolve(
+    "src/services/obsidian/command-registry.noop.ts",
+);
 // 根据环境决定输出位置：生产环境去 dist，开发环境留根目录
 const outDir = prod ? DIST_PATH : "./";
 
@@ -127,13 +130,22 @@ const esbuildConfig = {
     outdir: outDir, 
     define: {
         "process.env.NODE_ENV": prod ? '"production"' : '"development"',
+        __DEV__: prod ? "false" : "true",
     },
     plugins: [
+        prod && {
+            name: "alias-dev-command-registry",
+            setup(build) {
+                build.onResolve({ filter: /command-registry\.dev$/ }, () => {
+                    return { path: DEV_COMMAND_REGISTRY_STUB_PATH };
+                });
+            },
+        },
         esbuildSvelte({
             compilerOptions: { css: true },
             preprocess: sveltePreprocess(),
         }),
-    ],
+    ].filter(Boolean),
 };
 
 const context = await esbuild.context(esbuildConfig);
