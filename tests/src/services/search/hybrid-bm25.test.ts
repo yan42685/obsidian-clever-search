@@ -715,13 +715,13 @@ function summarizeFileAggregates(
 	});
 }
 
-describe("hybrid BM25 query expansion", () => {
+describe("retired chunk BM25 benchmark anchor invariants", () => {
 	beforeEach(() => {
 		container.clearInstances();
 		container.registerInstance(Tokenizer, createMockTokenizer() as InstanceType<typeof Tokenizer>);
 	});
 
-	test("matches case-folded query terms without requiring exact casing", () => {
+	test("benchmark anchor matches case-folded query terms without requiring exact casing", () => {
 		const bm25 = new BM25Engine();
 		bm25.addDocument(1, "calendar event schedule");
 		bm25.addDocument(2, "kanban lane cards");
@@ -734,7 +734,7 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results[0]?.docId).toBe(1);
 	});
 
-	test("exact search does not depend on building the expansion lexicon first", () => {
+	test("benchmark anchor exact search does not depend on building the expansion lexicon first", () => {
 		const bm25 = new BM25Engine();
 		bm25.addDocument(1, "markdown export flow");
 		bm25.addDocument(2, "kanban lane cards");
@@ -747,7 +747,7 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results[0]?.docId).toBe(1);
 	});
 
-	test("expands prefix queries for longer hybrid entity terms", () => {
+	test("benchmark anchor expands prefix queries for longer hybrid entity terms", () => {
 		const bm25 = new BM25Engine();
 		bm25.addDocument(1, "calendar event schedule");
 		bm25.addDocument(2, "kanban lane cards");
@@ -760,7 +760,7 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results[0]?.docId).toBe(1);
 	});
 
-	test("recovers a single-typo hybrid entity query with fuzzy expansion", () => {
+	test("benchmark anchor recovers a single-typo query with fuzzy expansion", () => {
 		const bm25 = new BM25Engine();
 		bm25.addDocument(1, "dataview inline fields metadata");
 		bm25.addDocument(2, "calendar event schedule");
@@ -773,7 +773,7 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results[0]?.docId).toBe(1);
 	});
 
-	test("keeps only the highest scoring topK matches without sorting the full tail", () => {
+	test("benchmark anchor keeps only the highest scoring topK matches without sorting the full tail", () => {
 		const bm25 = new BM25Engine();
 		bm25.addDocument(1, "alpha alpha alpha alpha");
 		bm25.addDocument(2, "alpha alpha alpha");
