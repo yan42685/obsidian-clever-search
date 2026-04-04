@@ -300,6 +300,36 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		expect(result.renderPayloads[0].text.toLowerCase()).toContain("plugons");
 	});
 
+	test("lexical-lane support shortcut skips support scans when exact covers all terms", () => {
+		const always = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText: "prefix alpha beta suffix",
+			supportStrategy: "always",
+		});
+		const optimized = buildDirectSubitemsExactCandidates({
+			queryText: "alpha beta",
+			snapshotText: "prefix alpha beta suffix",
+			supportStrategy: "skip_if_exact_term_coverage",
+		});
+
+		expect(optimized.exactOccurrences).toEqual(always.exactOccurrences);
+		expect(optimized.candidateSpans).toEqual(always.candidateSpans);
+		expect(optimized.renderPayloads).toEqual(always.renderPayloads);
+	});
+
+	test("lexical-lane support shortcut still keeps prefix rescue when exact misses a term", () => {
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "plugins fast",
+			snapshotText: "plugin fast",
+			supportStrategy: "skip_if_exact_term_coverage",
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		expect(result.candidateSpans[0].score.exactCount).toBe(1);
+		expect(result.candidateSpans[0].score.prefixCount).toBe(1);
+	});
+
 	test("ranks exact ahead of prefix ahead of fuzzy under equal coverage", () => {
 		const result = buildDirectSubitemsExactCandidates({
 			queryText: "plugins fast",

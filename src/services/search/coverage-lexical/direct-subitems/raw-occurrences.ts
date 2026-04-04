@@ -10,7 +10,12 @@ export function collectDirectSubitemsExactOccurrences(
 	snapshotText: string,
 	queryTerms: readonly DirectSubitemsQueryTerm[],
 ): DirectSubitemsOccurrence[] {
-	const lowerSnapshot = snapshotText.toLowerCase();
+	const needsLowerSnapshot = queryTerms.some(
+		(term) => term.kind === "non_han_run",
+	);
+	const lowerSnapshot = needsLowerSnapshot
+		? snapshotText.toLowerCase()
+		: undefined;
 	const occurrences: DirectSubitemsOccurrence[] = [];
 	for (const term of queryTerms) {
 		const needle = term.normalizedText;
@@ -18,7 +23,7 @@ export function collectDirectSubitemsExactOccurrences(
 			continue;
 		}
 		const haystack =
-			term.kind === "non_han_run" ? lowerSnapshot : snapshotText;
+			term.kind === "non_han_run" ? (lowerSnapshot ?? snapshotText) : snapshotText;
 		let fromIndex = 0;
 		while (fromIndex < haystack.length) {
 			const foundAt = haystack.indexOf(needle, fromIndex);
@@ -42,8 +47,14 @@ export function collectDirectSubitemsSupportOccurrences(
 	snapshotText: string,
 	queryTerms: readonly DirectSubitemsQueryTerm[],
 ): DirectSubitemsOccurrence[] {
+	if (!queryTerms.some((term) => term.kind === "non_han_run")) {
+		return [];
+	}
 	const supportOccurrences: DirectSubitemsOccurrence[] = [];
 	const snapshotRuns = collectSnapshotRuns(snapshotText);
+	if (snapshotRuns.length === 0) {
+		return [];
+	}
 	for (const term of queryTerms) {
 		if (term.kind !== "non_han_run") {
 			continue;

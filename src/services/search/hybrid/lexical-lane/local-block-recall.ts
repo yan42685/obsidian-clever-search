@@ -111,6 +111,7 @@ export function buildHybridLexicalLaneBlockCandidatesForSnapshot(params: {
 	const directSubitems = buildDirectSubitemsExactCandidates({
 		queryText: params.queryText,
 		snapshotText: params.snapshotText,
+		supportStrategy: "skip_if_exact_term_coverage",
 		// This only seeds local lexical spans; final display/rerank text comes from
 		// the shared snippet builder, so we no longer plumb the old 220-char display
 		// budget through this path.

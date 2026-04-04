@@ -27,20 +27,29 @@ export type DirectSubitemsExactBuildResult = {
 	renderPayloads: DirectSubitemsRenderPayload[];
 };
 
+export type DirectSubitemsSupportStrategy =
+	| "always"
+	| "skip_if_exact_term_coverage";
+
 export function buildDirectSubitemsExactCandidates(params: {
 	queryText: string;
 	snapshotText: string;
 	options?: DirectSubitemsSpanOptions;
+	supportStrategy?: DirectSubitemsSupportStrategy;
 }): DirectSubitemsExactBuildResult {
 	const queryTerms = splitDirectSubitemsQueryTerms(params.queryText);
 	const exactOccurrences = collectDirectSubitemsExactOccurrences(
 		params.snapshotText,
 		queryTerms,
 	);
-	const supportOccurrences = collectDirectSubitemsSupportOccurrences(
-		params.snapshotText,
+	const supportStrategy = params.supportStrategy ?? "always";
+	const supportOccurrences = shouldCollectSupportOccurrences(
 		queryTerms,
-	);
+		exactOccurrences,
+		supportStrategy,
+	)
+		? collectDirectSubitemsSupportOccurrences(params.snapshotText, queryTerms)
+		: [];
 	const anchorOccurrences =
 		exactOccurrences.length > 0 ? exactOccurrences : supportOccurrences;
 	const initialSpans = buildDirectSubitemsExactCandidateSpans({
@@ -68,6 +77,23 @@ export function buildDirectSubitemsExactCandidates(params: {
 		candidateSpans: finalized.candidateSpans,
 		renderPayloads: finalized.renderPayloads,
 	};
+}
+
+function shouldCollectSupportOccurrences(
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+	exactOccurrences: readonly DirectSubitemsOccurrence[],
+	supportStrategy: DirectSubitemsSupportStrategy,
+): boolean {
+	if (supportStrategy === "always") {
+		return true;
+	}
+	if (queryTerms.length === 0) {
+		return false;
+	}
+	const exactTermIds = new Set(
+		exactOccurrences.map((occurrence) => occurrence.termId),
+	);
+	return queryTerms.some((term) => !exactTermIds.has(term.termId));
 }
 
 export function buildDirectSubitemsExactFileSubItems(params: {

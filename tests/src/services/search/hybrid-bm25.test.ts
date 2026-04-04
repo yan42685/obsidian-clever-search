@@ -519,9 +519,9 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	const { buildHybridLexicalLaneBlockCandidatesForSnapshot } = require(
 		"src/services/search/hybrid/lexical-lane/local-block-recall",
 	) as typeof import("src/services/search/hybrid/lexical-lane/local-block-recall");
-	const { runHybridLexicalLaneFileItemPipeline } = require(
-		"src/services/search/hybrid/lexical-lane",
-	) as typeof import("src/services/search/hybrid/lexical-lane");
+	const { buildHybridLexicalLaneFileItems } = require(
+		"src/services/search/hybrid/lexical-lane/result-mapper",
+	) as typeof import("src/services/search/hybrid/lexical-lane/result-mapper");
 	const { runHybridLexicalLaneCandidatePipeline } = require(
 		"src/services/search/hybrid/lexical-lane",
 	) as typeof import("src/services/search/hybrid/lexical-lane");
@@ -595,13 +595,10 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 			displayTopK: 8,
 		});
 
-		const fileItems = runHybridLexicalLaneFileItemPipeline({
-			queryText: queryCase.query,
-			blockCandidates,
-			snapshotTextByPath,
-			rerankTopK: 16,
-			displayTopK: 8,
-		});
+		const fileItems = buildHybridLexicalLaneFileItems(
+			queryCase.query,
+			displayCandidates,
+		);
 		const fileMatchRank =
 			matchedFiles.findIndex((match) => match.path === queryCase.relevantPath) + 1;
 		const shortlistRank =
@@ -792,7 +789,7 @@ describe("hybrid BM25 query expansion", () => {
 		expect(results.map((item) => item.docId)).toEqual([1, 2]);
 	});
 
-test("compares lexical lane against BM25 baseline on the automation corpus", async () => {
+test("keeps lexical lane aligned against the retired chunk BM25 benchmark anchor", async () => {
 		const { documents, queryCases } = loadAutomationCorpus();
 		const tokenizer = createMockTokenizer();
 		container.registerInstance(

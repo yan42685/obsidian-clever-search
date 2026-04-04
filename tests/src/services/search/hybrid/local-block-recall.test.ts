@@ -99,4 +99,35 @@ describe("hybrid lexical lane local block recall", () => {
 			) ?? false,
 		).toBe(true);
 	});
+
+	test("local block recall still seeds prefix-supported spans when exact term coverage is incomplete", () => {
+		const {
+			buildHybridLexicalLaneBlockCandidatesForSnapshot,
+		} = require("src/services/search/hybrid/lexical-lane/local-block-recall") as typeof import("src/services/search/hybrid/lexical-lane/local-block-recall");
+
+		const candidates = buildHybridLexicalLaneBlockCandidatesForSnapshot({
+			queryText: "plugins fast",
+			file: createFileCandidate(),
+			snapshotText: "plugin fast rollout notes",
+			maxBlocksPerFile: 3,
+		});
+
+		const directCandidate = candidates.find(
+			(candidate) =>
+				!candidate.blockId.includes("#file-recall-bridge-") &&
+				!candidate.blockId.includes("#heading-bridge-") &&
+				!candidate.blockId.includes("#metadata-bridge-"),
+		);
+
+		expect(directCandidate).toBeDefined();
+		expect(directCandidate?.localSignals.coverageCount ?? 0).toBeGreaterThanOrEqual(2);
+		expect(directCandidate?.localSignals.prefixCount ?? 0).toBeGreaterThanOrEqual(1);
+		expect(
+			directCandidate?.termStats.some(
+				(termStat) =>
+					termStat.termId.includes(":non_han_run:plugins") &&
+					termStat.bestTier === "prefix",
+			) ?? false,
+		).toBe(true);
+	});
 });
