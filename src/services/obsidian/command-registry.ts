@@ -15,15 +15,15 @@ import { FloatingWindowManager } from "src/ui/floating-window";
 import { QuickSwitchModal } from "src/ui/quick-switch-modal";
 import { SearchModal } from "src/ui/search-modal";
 import { eventBus } from "src/utils/event-bus";
-import { getInstance } from "src/utils/my-lib";
+import { getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { AuxiliaryService } from "../auxiliary/auxiliary-service";
 import { openHybridSearchModal } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
 import { MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
+import { registerDevCommands } from "./command-registry.dev";
 
-declare const __DEV__: boolean;
 
 const CTRL: Modifier = "Ctrl";
 const ALT: Modifier = "Alt";
@@ -33,10 +33,6 @@ type DevCommandRegistryContext = {
 	app: App;
 	addCommand: (command: Command) => void;
 	runWhenSearchSearchable: (callback: () => void | Promise<void>) => void;
-};
-
-type DevCommandRegistryModule = {
-	registerDevCommands(context: DevCommandRegistryContext): Promise<void> | void;
 };
 
 @singleton()
@@ -51,12 +47,10 @@ export class CommandRegistry {
 
 	// only for developer
 	async addDevCommands(): Promise<void> {
-		if (!__DEV__) {
+		if (!isDevEnvironment) {
 			return;
 		}
 
-		const { registerDevCommands } =
-			(await import("./command-registry.dev")) as DevCommandRegistryModule;
 		await registerDevCommands({
 			app: this.app,
 			addCommand: (command) => this.addCommand(command),
