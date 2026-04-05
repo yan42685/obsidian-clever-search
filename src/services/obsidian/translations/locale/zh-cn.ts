@@ -258,17 +258,15 @@ export default {
 	"hybridModal.freshnessNotice.detailJoiner": "\uff1b",
 	"hybridModal.freshnessNotice.detailIdle": "\u7247\u6bb5\u4e0e\u8df3\u8f6c\u6b63\u5728\u4f7f\u7528\u6700\u65b0\u7684\u672c\u5730 Hybrid \u7d22\u5f15\u3002",
 	"hybridModal.freshnessNotice.detailTail": "\uff0c\u5bf9\u5e94\u6587\u4ef6\u7684\u7247\u6bb5\u4e0e\u8df3\u8f6c\u53ef\u80fd\u4e0d\u51c6\u3002",
-	"hybridModal.freshnessNotice.messageUpdatingOnlyPrefix":
-		"Hybrid \u5f15\u64ce\u540e\u53f0\u5269\u4f59 ",
-	"hybridModal.freshnessNotice.messageRepairOnlyPrefix":
-		"Hybrid \u5f15\u64ce\u540e\u53f0\u6709 ",
-	"hybridModal.freshnessNotice.messageBothPrefix":
-		"Hybrid \u5f15\u64ce\u540e\u53f0\u5269\u4f59 ",
+	"hybridModal.freshnessNotice.messageProcessingOnlyPrefix":
+		"Hybrid \u540e\u53f0\u6b63\u5728\u5904\u7406 ",
+	"hybridModal.freshnessNotice.messageStaleOnlyPrefix":
+		"Hybrid \u8b66\u544a\uff1a",
 	"hybridModal.freshnessNotice.messageJoiner": "\uff0c",
-	"hybridModal.freshnessNotice.updatingSegmentSuffix":
-		" \u4e2a\u6587\u4ef6\u6b63\u5728\u66f4\u65b0",
-	"hybridModal.freshnessNotice.repairSegmentSuffix":
-		" \u4e2a\u6587\u4ef6\u5f85\u4fee\u590d",
+	"hybridModal.freshnessNotice.processingSegmentSuffix":
+		" \u4e2a\u6587\u4ef6\u4ecd\u5728\u5904\u7406",
+	"hybridModal.freshnessNotice.staleSegmentSuffix":
+		" \u4e2a\u6587\u4ef6\u672a\u540c\u6b65\uff0c\u4e14\u672a\u8fdb\u5165\u4fee\u590d\u6d41\u7a0b",
 	"Manage search history": "\u7ba1\u7406\u641c\u7d22\u5386\u53f2",
 	"QuickSwitch": "QuickSwitch",
 	"QuickSwitch desc": "\u7ba1\u7406 QuickSwitch \u4f7f\u7528\u7684\u5bfc\u822a\u5019\u9009\u6765\u6e90\u3002",
@@ -282,7 +280,10 @@ export default {
 	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",
 	"fileSearchBackend.coverageLexical": "Coverage Lexical",
 	"hybridModal.freshnessNotice.openSettings": "Hybrid \u8bbe\u7f6e",
-	"hybridModal.freshnessNotice.updatingSamples": "\u66f4\u65b0\u6837\u672c",
+	"hybridModal.freshnessNotice.processingSamples": "\u5904\u7406\u4e2d\u6837\u672c",
+	"hybridModal.freshnessNotice.staleSamples": "\u672a\u540c\u6b65\u6837\u672c",
 	"hybridModal.freshnessNotice.repairSamples": "\u4fee\u590d\u6837\u672c",
 	"hybridModal.healthSummary.metric.lexicalOnly": "lexical-only",
+	"hybridModal.healthSummary.metric.processing": "\u5904\u7406\u4e2d",
+	"hybridModal.healthSummary.metric.stale": "\u672a\u540c\u6b65",
 };

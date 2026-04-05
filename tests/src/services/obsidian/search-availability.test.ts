@@ -140,25 +140,29 @@ describe("search availability derivation", () => {
 	test("derives hybrid freshness state from updating and repair counts", () => {
 		expect(
 			resolveHybridFreshnessState({
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 0,
 				repairFileCount: 0,
 			}),
 		).toBe("current");
 		expect(
 			resolveHybridFreshnessState({
-				updatingFileCount: 2,
+				processingFileCount: 2,
+				staleFileCount: 0,
 				repairFileCount: 0,
 			}),
-		).toBe("updating");
+		).toBe("processing");
 		expect(
 			resolveHybridFreshnessState({
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 1,
 				repairFileCount: 1,
 			}),
-		).toBe("repairing");
+		).toBe("stale");
 		expect(
 			resolveHybridFreshnessState({
-				updatingFileCount: 2,
+				processingFileCount: 2,
+				staleFileCount: 1,
 				repairFileCount: 1,
 			}),
 		).toBe("partial");
@@ -174,7 +178,8 @@ describe("search availability derivation", () => {
 				readyFileCount: 0,
 				lexicalOnlyFileCount: 0,
 				unstableFileCount: 0,
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 0,
 				repairFileCount: 0,
 				shadowAlignedSnapshotCount: 0,
 				shadowMismatchCount: 0,
@@ -189,7 +194,8 @@ describe("search availability derivation", () => {
 				readyFileCount: 0,
 				lexicalOnlyFileCount: 0,
 				unstableFileCount: 0,
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 0,
 				repairFileCount: 0,
 				shadowAlignedSnapshotCount: 0,
 				shadowMismatchCount: 0,
@@ -204,7 +210,8 @@ describe("search availability derivation", () => {
 				readyFileCount: 0,
 				lexicalOnlyFileCount: 3,
 				unstableFileCount: 0,
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 0,
 				repairFileCount: 0,
 				shadowAlignedSnapshotCount: 0,
 				shadowMismatchCount: 0,
@@ -219,7 +226,8 @@ describe("search availability derivation", () => {
 				readyFileCount: 2,
 				lexicalOnlyFileCount: 0,
 				unstableFileCount: 1,
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 0,
 				repairFileCount: 1,
 				shadowAlignedSnapshotCount: 0,
 				shadowMismatchCount: 0,
@@ -234,7 +242,8 @@ describe("search availability derivation", () => {
 				readyFileCount: 2,
 				lexicalOnlyFileCount: 0,
 				unstableFileCount: 0,
-				updatingFileCount: 1,
+				processingFileCount: 1,
+				staleFileCount: 0,
 				repairFileCount: 0,
 				shadowAlignedSnapshotCount: 0,
 				shadowMismatchCount: 0,
@@ -249,7 +258,8 @@ describe("search availability derivation", () => {
 				readyFileCount: 3,
 				lexicalOnlyFileCount: 0,
 				unstableFileCount: 0,
-				updatingFileCount: 0,
+				processingFileCount: 0,
+				staleFileCount: 0,
 				repairFileCount: 0,
 				shadowAlignedSnapshotCount: 0,
 				shadowMismatchCount: 0,

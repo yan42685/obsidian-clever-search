@@ -207,17 +207,15 @@ export default {
 	"hybridModal.freshnessNotice.detailJoiner": "; ",
 	"hybridModal.freshnessNotice.detailIdle": "Snippets and jumps are using the latest local hybrid index.",
 	"hybridModal.freshnessNotice.detailTail": ". Snippets and jumps for those files may be inaccurate.",
-	"hybridModal.freshnessNotice.messageUpdatingOnlyPrefix":
+	"hybridModal.freshnessNotice.messageProcessingOnlyPrefix":
 		"Hybrid engine background: ",
-	"hybridModal.freshnessNotice.messageRepairOnlyPrefix":
-		"Hybrid engine background: ",
-	"hybridModal.freshnessNotice.messageBothPrefix":
-		"Hybrid engine background: ",
+	"hybridModal.freshnessNotice.messageStaleOnlyPrefix":
+		"Hybrid warning: ",
 	"hybridModal.freshnessNotice.messageJoiner": ", ",
-	"hybridModal.freshnessNotice.updatingSegmentSuffix":
-		" file(s) still updating",
-	"hybridModal.freshnessNotice.repairSegmentSuffix":
-		" file(s) pending repair",
+	"hybridModal.freshnessNotice.processingSegmentSuffix":
+		" file(s) are still being processed",
+	"hybridModal.freshnessNotice.staleSegmentSuffix":
+		" file(s) are out of sync and not in the repair flow",
 	"hybridModal.healthSummary": "Hybrid health summary",
 	"hybridModal.healthSummary.loading": "Loading local health...",
 	"hybridModal.healthSummary.localOnly": "Local-only diagnosis. No embedding API, no rerank API, no token usage.",
@@ -286,13 +284,15 @@ export default {
 		"Enjoying this plugin? Show your support with a star on GitHub!",
 	"Visit GitHub": "Visit GitHub",
 	"hybridModal.freshnessNotice.openSettings": "Hybrid settings",
-	"hybridModal.freshnessNotice.updatingSamples": "Updating samples",
+	"hybridModal.freshnessNotice.processingSamples": "Processing samples",
+	"hybridModal.freshnessNotice.staleSamples": "Stale samples",
 	"hybridModal.freshnessNotice.repairSamples": "Repair samples",
 	"hybridModal.healthSummary.metric.ready": "ready",
 	"hybridModal.healthSummary.metric.lexicalOnly": "lexical-only",
 	"hybridModal.healthSummary.metric.unstable": "unstable",
 	"hybridModal.healthSummary.metric.tracked": "tracked",
-	"hybridModal.healthSummary.metric.updating": "updating",
+	"hybridModal.healthSummary.metric.processing": "processing",
+	"hybridModal.healthSummary.metric.stale": "stale",
 	"hybridModal.healthSummary.metric.repair": "repair",
 	"hybridModal.healthSummary.metric.refs": "refs",
 	"hybridModal.healthSummary.metric.currentAligned": "current-aligned",

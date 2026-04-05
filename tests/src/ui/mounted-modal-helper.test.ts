@@ -439,4 +439,52 @@ describe("mounted modal helper", () => {
 			emptyResult: true,
 		});
 	});
+
+	test("hybrid freshness notice polls at a low frequency", async () => {
+		const { container } = require("tsyringe");
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { DataManager } = require("src/services/obsidian/user-data/data-manager");
+		const { HybridFreshnessNoticeController } = require("src/ui/mounted-modal-helper");
+		const getHybridFreshnessSummary = jest.fn(async () => ({
+			processingFileCount: 1,
+			staleFileCount: 0,
+			repairFileCount: 0,
+			totalTrackedFiles: 1,
+			processingSamplePaths: ["docs/example.md"],
+			staleSamplePaths: [],
+			repairSamplePaths: [],
+			updatedAt: Date.now(),
+		}));
+		container.registerInstance(DataManager, {
+			getHybridFreshnessSummary,
+		});
+		const states: Array<{ visible: boolean; message: string }> = [];
+		const controller = new HybridFreshnessNoticeController({
+			getSearchType: () => SearchType.IN_VAULT,
+			getIsHybrid: () => true,
+			onNoticeChange: (state: typeof states[number]) => {
+				states.push(state);
+			},
+		});
+
+		controller.syncFromResult(new SearchResult("freshness", []));
+		await Promise.resolve();
+
+		expect(getHybridFreshnessSummary).toHaveBeenCalledTimes(1);
+		await jest.advanceTimersByTimeAsync(4999);
+		expect(getHybridFreshnessSummary).toHaveBeenCalledTimes(1);
+		await jest.advanceTimersByTimeAsync(1);
+		expect(getHybridFreshnessSummary).toHaveBeenCalledTimes(2);
+		expect(states.at(-1)?.visible).toBe(true);
+
+		controller.clear();
+		if (
+			"reset" in container &&
+			typeof (container as { reset?: () => void }).reset === "function"
+		) {
+			(container as { reset: () => void }).reset();
+		} else {
+			container.clearInstances();
+		}
+	});
 });

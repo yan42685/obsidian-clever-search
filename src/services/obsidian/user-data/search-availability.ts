@@ -15,8 +15,8 @@ export type HybridQueryAvailabilityState =
 
 export type HybridFreshnessState =
 	| "current"
-	| "updating"
-	| "repairing"
+	| "processing"
+	| "stale"
 	| "partial";
 
 export type HybridHealthSummaryState =
@@ -196,17 +196,18 @@ export function buildHybridAvailabilityState(input: {
 }
 
 export function resolveHybridFreshnessState(input: {
-	updatingFileCount: number;
+	processingFileCount: number;
+	staleFileCount: number;
 	repairFileCount: number;
 }): HybridFreshnessState {
-	if (input.updatingFileCount > 0 && input.repairFileCount > 0) {
+	if (input.staleFileCount > 0 && input.processingFileCount > 0) {
 		return "partial";
 	}
-	if (input.updatingFileCount > 0) {
-		return "updating";
+	if (input.staleFileCount > 0) {
+		return "stale";
 	}
-	if (input.repairFileCount > 0) {
-		return "repairing";
+	if (input.processingFileCount > 0 || input.repairFileCount > 0) {
+		return "processing";
 	}
 	return "current";
 }
@@ -219,7 +220,8 @@ export function resolveHybridHealthSummaryState(input: {
 	readyFileCount: number;
 	lexicalOnlyFileCount: number;
 	unstableFileCount: number;
-	updatingFileCount: number;
+	processingFileCount: number;
+	staleFileCount: number;
 	repairFileCount: number;
 	shadowAlignedSnapshotCount: number;
 	shadowMismatchCount: number;
@@ -238,14 +240,16 @@ export function resolveHybridHealthSummaryState(input: {
 		input.lexicalOnlyFileCount > 0 &&
 		input.shadowMismatchCount === 0 &&
 		input.shadowAlignedSnapshotCount === 0 &&
-		input.updatingFileCount === 0
+		input.processingFileCount === 0 &&
+		input.staleFileCount === 0
 	) {
 		return "lexical_only";
 	}
 	if (
 		input.shadowMismatchCount > 0 ||
 		input.shadowAlignedSnapshotCount > 0 ||
-		input.updatingFileCount > 0 ||
+		input.processingFileCount > 0 ||
+		input.staleFileCount > 0 ||
 		input.indexedFileRefCount < input.trackedFileCount
 	) {
 		return "partial";

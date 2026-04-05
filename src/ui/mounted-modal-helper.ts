@@ -407,7 +407,7 @@ export class HybridQuerySessionController {
 }
 
 export class HybridFreshnessNoticeController {
-	private static readonly REFRESH_INTERVAL_MS = 1000;
+	private static readonly REFRESH_INTERVAL_MS = 5000;
 
 	private readonly dataManager = getInstance(DataManager);
 	private readonly getSearchType: () => SearchType;
@@ -499,7 +499,8 @@ export class HybridFreshnessNoticeController {
 		summary: HybridFreshnessSummary,
 	): HybridFreshnessNoticeState {
 		const freshnessState = resolveHybridFreshnessState({
-			updatingFileCount: summary.updatingFileCount,
+			processingFileCount: summary.processingFileCount,
+			staleFileCount: summary.staleFileCount,
 			repairFileCount: summary.repairFileCount,
 		});
 		if (freshnessState === "current") {
@@ -518,27 +519,27 @@ export class HybridFreshnessNoticeController {
 	): string {
 		if (freshnessState === "partial") {
 			return [
-				t("hybridModal.freshnessNotice.messageBothPrefix"),
-				String(summary.updatingFileCount),
-				t("hybridModal.freshnessNotice.updatingSegmentSuffix"),
+				t("hybridModal.freshnessNotice.messageProcessingOnlyPrefix"),
+				String(summary.processingFileCount),
+				t("hybridModal.freshnessNotice.processingSegmentSuffix"),
 				t("hybridModal.freshnessNotice.messageJoiner"),
-				String(summary.repairFileCount),
-				t("hybridModal.freshnessNotice.repairSegmentSuffix"),
+				String(summary.staleFileCount),
+				t("hybridModal.freshnessNotice.staleSegmentSuffix"),
 				t("hybridModal.freshnessNotice.detailTail"),
 			].join("");
 		}
-		if (freshnessState === "updating") {
+		if (freshnessState === "processing") {
 			return [
-				t("hybridModal.freshnessNotice.messageUpdatingOnlyPrefix"),
-				String(summary.updatingFileCount),
-				t("hybridModal.freshnessNotice.updatingSegmentSuffix"),
+				t("hybridModal.freshnessNotice.messageProcessingOnlyPrefix"),
+				String(summary.processingFileCount),
+				t("hybridModal.freshnessNotice.processingSegmentSuffix"),
 				t("hybridModal.freshnessNotice.detailTail"),
 			].join("");
 		}
 		return [
-			t("hybridModal.freshnessNotice.messageRepairOnlyPrefix"),
-			String(summary.repairFileCount),
-			t("hybridModal.freshnessNotice.repairSegmentSuffix"),
+			t("hybridModal.freshnessNotice.messageStaleOnlyPrefix"),
+			String(summary.staleFileCount),
+			t("hybridModal.freshnessNotice.staleSegmentSuffix"),
 			t("hybridModal.freshnessNotice.detailTail"),
 		].join("");
 	}

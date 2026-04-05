@@ -247,10 +247,12 @@ type SearchBootstrapCompletionSummary = {
 };
 
 export type HybridFreshnessSummary = {
-  updatingFileCount: number;
+  processingFileCount: number;
+  staleFileCount: number;
   repairFileCount: number;
   totalTrackedFiles: number;
-  updatingSamplePaths: string[];
+  processingSamplePaths: string[];
+  staleSamplePaths: string[];
   repairSamplePaths: string[];
   updatedAt: number;
 };
@@ -263,8 +265,12 @@ export type HybridHealthSummary = {
   readyFileCount: number;
   lexicalOnlyFileCount: number;
   unstableFileCount: number;
-  updatingFileCount: number;
+  processingFileCount: number;
+  staleFileCount: number;
   repairFileCount: number;
+  processingSamplePaths: string[];
+  staleSamplePaths: string[];
+  repairSamplePaths: string[];
   currentAlignedSnapshotCount: number;
   shadowAlignedSnapshotCount: number;
   shadowMismatchCount: number;
@@ -402,8 +408,10 @@ export class DataManager {
   private searchBootstrapMetrics: SearchBootstrapMetrics | null = null;
   private searchBootstrapCommitTask: Promise<void> | null = null;
   private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
+  private readonly hybridRepairInFlightPaths = new Set<string>();
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
+  private lastHybridStaleWarnSignature: string | null = null;
   private lexicalIndexFailureNotice: Notice | null = null;
   private lexicalFailureRetryInFlight = false;
   private readonly lexicalIndexFailuresByPath = new Map<
@@ -493,57 +501,97 @@ export class DataManager {
     const trackedFiles = this.getHybridTrackedFiles();
     if (!this.hybridEngine.isEnabled() || trackedFiles.length === 0) {
       return {
-        updatingFileCount: 0,
+        processingFileCount: 0,
+        staleFileCount: 0,
         repairFileCount: 0,
         totalTrackedFiles: trackedFiles.length,
-        updatingSamplePaths: [],
+        processingSamplePaths: [],
+        staleSamplePaths: [],
         repairSamplePaths: [],
         updatedAt: Date.now(),
       };
     }
 
     const repairPaths = new Set(this.hybridRecoveryCoordinator.listFailurePaths());
-    const trackedRepairPaths = new Set(
-      trackedFiles
-        .map((file) => file.path)
-        .filter((path) => repairPaths.has(path)),
-    );
+    const deferredPaths = new Set(this.hybridRecoveryCoordinator.listDeferredPaths());
+    const processingPaths = new Set<string>([
+      ...this.hybridRepairQueue.keys(),
+      ...this.hybridRepairInFlightPaths,
+      ...deferredPaths,
+      ...repairPaths,
+    ]);
     const indexedRefs = await this.fileSnapshotStore.getHybridIndexedFileRefs(
       trackedFiles.map((file) => file.path),
     );
 
-    let updatingFileCount = 0;
-    const updatingSamplePaths: string[] = [];
+    let processingFileCount = 0;
+    let staleFileCount = 0;
+    const processingSamplePaths: string[] = [];
+    const staleSamplePaths: string[] = [];
     const repairSamplePaths: string[] = [];
     for (let index = 0; index < trackedFiles.length; index++) {
       const file = trackedFiles[index];
-      if (trackedRepairPaths.has(file.path)) {
+      const path = file.path;
+      if (repairPaths.has(path)) {
         appendPathSample(
           repairSamplePaths,
-          file.path,
+          path,
+          HYBRID_FRESHNESS_SAMPLE_LIMIT,
+        );
+      }
+      const indexedRef = indexedRefs.get(path);
+      const needsSync =
+        !indexedRef ||
+        indexedRef.generation === undefined ||
+        file.stat.mtime > indexedRef.generation;
+      if (!needsSync) {
+        continue;
+      }
+      if (processingPaths.has(path)) {
+        processingFileCount += 1;
+        appendPathSample(
+          processingSamplePaths,
+          path,
           HYBRID_FRESHNESS_SAMPLE_LIMIT,
         );
         continue;
       }
-      const indexedRef = indexedRefs.get(file.path);
-      if (!indexedRef || file.stat.mtime > indexedRef.generation) {
-        updatingFileCount += 1;
-        appendPathSample(
-          updatingSamplePaths,
-          file.path,
-          HYBRID_FRESHNESS_SAMPLE_LIMIT,
-        );
-      }
+      staleFileCount += 1;
+      appendPathSample(staleSamplePaths, path, HYBRID_FRESHNESS_SAMPLE_LIMIT);
     }
 
+    this.warnOnHybridStaleFiles(staleFileCount, staleSamplePaths);
+
     return {
-      updatingFileCount,
-      repairFileCount: trackedRepairPaths.size,
+      processingFileCount,
+      staleFileCount,
+      repairFileCount: repairPaths.size,
       totalTrackedFiles: trackedFiles.length,
-      updatingSamplePaths,
+      processingSamplePaths,
+      staleSamplePaths,
       repairSamplePaths,
       updatedAt: Date.now(),
     };
+  }
+
+  private warnOnHybridStaleFiles(
+    staleFileCount: number,
+    staleSamplePaths: readonly string[],
+  ): void {
+    if (staleFileCount === 0) {
+      this.lastHybridStaleWarnSignature = null;
+      return;
+    }
+
+    const signature = `${staleFileCount}:${staleSamplePaths.join("|")}`;
+    if (signature === this.lastHybridStaleWarnSignature) {
+      return;
+    }
+    this.lastHybridStaleWarnSignature = signature;
+    logger.warn("hybrid freshness detected stale files outside repair flow:", {
+      staleFileCount,
+      staleSamplePaths: [...staleSamplePaths],
+    });
   }
 
   async getHybridHealthSummary(): Promise<HybridHealthSummary> {
@@ -639,7 +687,8 @@ export class DataManager {
       readyFileCount,
       lexicalOnlyFileCount,
       unstableFileCount,
-      updatingFileCount: freshnessSummary.updatingFileCount,
+      processingFileCount: freshnessSummary.processingFileCount,
+      staleFileCount: freshnessSummary.staleFileCount,
       repairFileCount: freshnessSummary.repairFileCount,
       shadowAlignedSnapshotCount,
       shadowMismatchCount,
@@ -653,8 +702,12 @@ export class DataManager {
       readyFileCount,
       lexicalOnlyFileCount,
       unstableFileCount,
-      updatingFileCount: freshnessSummary.updatingFileCount,
+      processingFileCount: freshnessSummary.processingFileCount,
+      staleFileCount: freshnessSummary.staleFileCount,
       repairFileCount: freshnessSummary.repairFileCount,
+      processingSamplePaths: freshnessSummary.processingSamplePaths,
+      staleSamplePaths: freshnessSummary.staleSamplePaths,
+      repairSamplePaths: freshnessSummary.repairSamplePaths,
       currentAlignedSnapshotCount,
       shadowAlignedSnapshotCount,
       shadowMismatchCount,
@@ -1469,6 +1522,7 @@ export class DataManager {
     if (!existing) {
       this.hybridRepairQueue.set(task.path, nextTask);
       this.scheduleHybridRepairFlush();
+      this.notifyHybridRuntimeStatusChanged();
       return;
     }
 
@@ -1492,13 +1546,17 @@ export class DataManager {
             : Math.max(existing.sourceGeneration, nextTask.sourceGeneration),
     });
     this.scheduleHybridRepairFlush();
+    this.notifyHybridRuntimeStatusChanged();
   }
 
   private cancelHybridRepair(path: string): void {
-    this.hybridRepairQueue.delete(path);
+    const didDelete = this.hybridRepairQueue.delete(path);
     if (this.hybridRepairQueue.size === 0 && this.hybridRepairFlushTimer) {
       clearTimeout(this.hybridRepairFlushTimer);
       this.hybridRepairFlushTimer = null;
+    }
+    if (didDelete) {
+      this.notifyHybridRuntimeStatusChanged();
     }
   }
 
@@ -1508,6 +1566,8 @@ export class DataManager {
       this.hybridRepairFlushTimer = null;
     }
     this.hybridRepairQueue.clear();
+    this.hybridRepairInFlightPaths.clear();
+    this.notifyHybridRuntimeStatusChanged();
   }
 
   private clearHybridFailedEmbeddingState(): void {
@@ -1558,6 +1618,9 @@ export class DataManager {
     for (const task of readyTasks) {
       this.hybridRepairQueue.delete(task.path);
     }
+    if (readyTasks.length > 0) {
+      this.notifyHybridRuntimeStatusChanged();
+    }
 
     const failures: HybridIndexFailure[] = [];
     const worker = (async () => {
@@ -1567,6 +1630,7 @@ export class DataManager {
       } finally {
         this.hybridRepairWorker = null;
         this.scheduleHybridRepairFlush();
+        this.notifyHybridRuntimeStatusChanged();
       }
     })();
     this.hybridRepairWorker = worker;
@@ -1962,78 +2026,85 @@ export class DataManager {
     task: HybridRepairTask,
     file: TFile,
   ): Promise<HybridIndexFailure | null> {
+    this.hybridRepairInFlightPaths.add(task.path);
+    this.notifyHybridRuntimeStatusChanged();
     logger.debug(
       `hybrid repair task ${task.mode} for ${task.path} (${task.reason})`,
     );
-    if (
-      !this.dataProvider.isIndexable(file) ||
-      !this.hybridEngine.isEnabled() ||
-      !this.hybridEngine.shouldIndexPath(task.path)
-    ) {
-      await this.clearFailedHybridEmbedding(task.path);
-      await this.hybridEngine
-        .deleteFile(task.path)
-        .catch((error) =>
-          logger.warn(`hybrid repair delete failed for ${task.path}:`, error),
+    try {
+      if (
+        !this.dataProvider.isIndexable(file) ||
+        !this.hybridEngine.isEnabled() ||
+        !this.hybridEngine.shouldIndexPath(task.path)
+      ) {
+        await this.clearFailedHybridEmbedding(task.path);
+        await this.hybridEngine
+          .deleteFile(task.path)
+          .catch((error) =>
+            logger.warn(`hybrid repair delete failed for ${task.path}:`, error),
+          );
+        return null;
+      }
+
+      if (
+        task.sourceGeneration !== undefined &&
+        file.stat.mtime > task.sourceGeneration
+      ) {
+        logger.debug(
+          `skip stale hybrid repair task for ${task.path}: taskGeneration=${task.sourceGeneration}, currentGeneration=${file.stat.mtime}`,
         );
-      return null;
-    }
+        this.enqueueHybridRepair({
+          path: task.path,
+          mode: task.mode,
+          reason: "runtime-generation-advanced",
+          sourceGeneration: file.stat.mtime,
+        });
+        return null;
+      }
 
-    if (
-      task.sourceGeneration !== undefined &&
-      file.stat.mtime > task.sourceGeneration
-    ) {
-      logger.debug(
-        `skip stale hybrid repair task for ${task.path}: taskGeneration=${task.sourceGeneration}, currentGeneration=${file.stat.mtime}`,
-      );
-      this.enqueueHybridRepair({
-        path: task.path,
-        mode: task.mode,
-        reason: "runtime-generation-advanced",
-        sourceGeneration: file.stat.mtime,
-      });
-      return null;
-    }
+      if (task.mode === "full") {
+        const failure = await this.indexHybridFileWithRetry(file, "full");
+        if (failure === null) {
+          this.notifyHybridRuntimeStatusChanged();
+        }
+        return failure;
+      }
 
-    if (task.mode === "full") {
-      const failure = await this.indexHybridFileWithRetry(file, "full");
+      const eligibleAt = await this.getIncrementalEmbedEligibleAt(task.path);
+      if (eligibleAt > Date.now()) {
+        logger.debug(
+          `hybrid repair deferred embedding for ${task.path} until ${new Date(eligibleAt).toISOString()}`,
+        );
+        const failure = await this.indexHybridFileStructureOnly(file);
+        if (failure) {
+          return failure;
+        }
+        await this.registerDeferredHybridEmbedding(
+          task.path,
+          task.sourceGeneration ?? file.stat.mtime,
+          "incremental",
+          eligibleAt,
+        );
+        this.notifyHybridRuntimeStatusChanged();
+        this.enqueueHybridRepair({
+          path: task.path,
+          mode: "incremental",
+          reason: "resume-deferred-embedding",
+          eligibleAt,
+          sourceGeneration: task.sourceGeneration ?? file.stat.mtime,
+        });
+        return null;
+      }
+
+      const failure = await this.indexHybridFileWithRetry(file, "incremental");
       if (failure === null) {
         this.notifyHybridRuntimeStatusChanged();
       }
       return failure;
-    }
-
-    const eligibleAt = await this.getIncrementalEmbedEligibleAt(task.path);
-    if (eligibleAt > Date.now()) {
-      logger.debug(
-        `hybrid repair deferred embedding for ${task.path} until ${new Date(eligibleAt).toISOString()}`,
-      );
-      const failure = await this.indexHybridFileStructureOnly(file);
-      if (failure) {
-        return failure;
-      }
-      await this.registerDeferredHybridEmbedding(
-        task.path,
-        task.sourceGeneration ?? file.stat.mtime,
-        "incremental",
-        eligibleAt,
-      );
-      this.notifyHybridRuntimeStatusChanged();
-      this.enqueueHybridRepair({
-        path: task.path,
-        mode: "incremental",
-        reason: "resume-deferred-embedding",
-        eligibleAt,
-        sourceGeneration: task.sourceGeneration ?? file.stat.mtime,
-      });
-      return null;
-    }
-
-    const failure = await this.indexHybridFileWithRetry(file, "incremental");
-    if (failure === null) {
+    } finally {
+      this.hybridRepairInFlightPaths.delete(task.path);
       this.notifyHybridRuntimeStatusChanged();
     }
-    return failure;
   }
 
   private async indexHybridFileWithRetry(

@@ -727,7 +727,8 @@ function renderHybridHealthSummary(
 		t("hybridModal.healthSummary.docs"),
 		[
 			`${t("hybridModal.healthSummary.metric.tracked")} ${summary.trackedFileCount}`,
-			`${t("hybridModal.healthSummary.metric.updating")} ${summary.updatingFileCount}`,
+			`${t("hybridModal.healthSummary.metric.processing")} ${summary.processingFileCount}`,
+			`${t("hybridModal.healthSummary.metric.stale")} ${summary.staleFileCount}`,
 			`${t("hybridModal.healthSummary.metric.repair")} ${summary.repairFileCount}`,
 		].join(" | "),
 	);
@@ -781,6 +782,20 @@ function renderHybridHealthSummary(
 			container,
 			t("hybridModal.deferredEmbeddingStatus.nextResume"),
 			formatHybridRelativeTime(deferredEmbeddingSummary.nextEligibleAt),
+		);
+	}
+	if (summary.processingSamplePaths.length > 0) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.freshnessNotice.processingSamples"),
+			summary.processingSamplePaths.join(" | "),
+		);
+	}
+	if (summary.staleSamplePaths.length > 0) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.freshnessNotice.staleSamples"),
+			summary.staleSamplePaths.join(" | "),
 		);
 	}
 	if (summary.shadowMismatchSamplePaths.length > 0) {

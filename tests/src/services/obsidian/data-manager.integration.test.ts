@@ -2296,10 +2296,96 @@ describe("DataManager integration", () => {
     expect(summary.shadowMismatchSamplePaths).toEqual([
       shadowMismatchFile.path,
     ]);
-    expect(summary.updatingFileCount).toBe(2);
+    expect(summary.processingFileCount).toBe(0);
+    expect(summary.staleFileCount).toBe(2);
     expect(summary.repairFileCount).toBe(0);
+    expect(summary.staleSamplePaths).toEqual([
+      shadowAlignedFile.path,
+      shadowMismatchFile.path,
+    ]);
 
     manager.onunload();
+  });
+
+  test("hybrid freshness treats queued repairs as processing and dedupes stale warnings", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const processingFile = createFile("docs/processing.md", "processing", 220);
+    const staleFile = createFile("docs/stale.md", "stale", 330);
+    const files = new Map<string, TFile>([
+      [processingFile.path, processingFile],
+      [staleFile.path, staleFile],
+    ]);
+    const texts = new Map<string, string>([
+      [processingFile.path, "processing"],
+      [staleFile.path, "stale"],
+    ]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push(
+      {
+        path: processingFile.path,
+        generation: 200,
+        state: "ready",
+        chunkCount: 1,
+        vectorPrecision: "int8",
+        indexedAt: 200,
+      },
+      {
+        path: staleFile.path,
+        generation: 300,
+        state: "ready",
+        chunkCount: 1,
+        vectorPrecision: "int8",
+        indexedAt: 300,
+      },
+    );
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: Array.from(files.values()),
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    const { logger } =
+      require("src/utils/logger") as typeof import("src/utils/logger");
+    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    (manager as any).enqueueHybridRepair({
+      path: processingFile.path,
+      mode: "full",
+      reason: "test-processing",
+      sourceGeneration: processingFile.stat.mtime,
+    });
+
+    const firstSummary = await manager.getHybridFreshnessSummary();
+    const secondSummary = await manager.getHybridFreshnessSummary();
+
+    expect(firstSummary.processingFileCount).toBe(1);
+    expect(firstSummary.staleFileCount).toBe(1);
+    expect(firstSummary.processingSamplePaths).toEqual([processingFile.path]);
+    expect(firstSummary.staleSamplePaths).toEqual([staleFile.path]);
+    expect(secondSummary).toMatchObject({
+      processingFileCount: 1,
+      staleFileCount: 1,
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "hybrid freshness detected stale files outside repair flow:",
+      expect.objectContaining({
+        staleFileCount: 1,
+        staleSamplePaths: [staleFile.path],
+      }),
+    );
   });
 
   test("hybrid health summary does not treat stored data without indexed refs as healthy", async () => {
