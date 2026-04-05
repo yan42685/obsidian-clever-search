@@ -34,6 +34,7 @@ describe("search availability derivation", () => {
 			buildHybridAvailabilityState({
 				enabled: true,
 				bootstrap: "searchable",
+				runtimeGateOpen: true,
 				canServeQuery: true,
 				canSearch: false,
 				hasFailures: false,
@@ -56,6 +57,7 @@ describe("search availability derivation", () => {
 			buildHybridAvailabilityState({
 				enabled: true,
 				bootstrap: "searchable",
+				runtimeGateOpen: true,
 				canServeQuery: true,
 				canSearch: true,
 				hasFailures: true,
@@ -76,6 +78,7 @@ describe("search availability derivation", () => {
 			buildHybridAvailabilityState({
 				enabled: true,
 				bootstrap: "searchable",
+				runtimeGateOpen: true,
 				canServeQuery: true,
 				canSearch: true,
 				hasFailures: false,
@@ -84,6 +87,23 @@ describe("search availability derivation", () => {
 		).toMatchObject({
 			query: "degraded",
 			reasons: ["embedding_incomplete"],
+		});
+	});
+
+	test("distinguishes runtime gate blocking from engine query unavailability", () => {
+		expect(
+			buildHybridAvailabilityState({
+				enabled: true,
+				bootstrap: "searchable",
+				runtimeGateOpen: false,
+				canServeQuery: true,
+				canSearch: true,
+				hasFailures: false,
+				hasIncompleteEmbeddings: false,
+			}),
+		).toMatchObject({
+			query: "unavailable",
+			reasons: ["runtime_gate_blocked"],
 		});
 	});
 

@@ -113,7 +113,7 @@ type HybridStoredPathSummary = {
   indexedFileRef?: HybridIndexedFileRef;
 };
 
-type HybridSearchAvailability = "blocked" | "available";
+type HybridRuntimeQueryGateState = "blocked" | "open";
 export type {
   HybridAvailabilityState,
   HybridHealthSummaryState,
@@ -396,7 +396,7 @@ export class DataManager {
     pathThreshold: DataManager.LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD,
     bytesThreshold: DataManager.LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD,
   });
-  private hybridSearchAvailability: HybridSearchAvailability = "blocked";
+  private hybridRuntimeQueryGate: HybridRuntimeQueryGateState = "blocked";
   private lexicalBootstrapState: SearchBootstrapState = "blocked";
   private hybridBootstrapState: SearchBootstrapState = "blocked";
   private searchBootstrapMetrics: SearchBootstrapMetrics | null = null;
@@ -422,8 +422,8 @@ export class DataManager {
     dataProvider: this.dataProvider,
     hybridEngine: this.hybridEngine,
     shouldForceRefresh: () => this.shouldForceRefresh,
-    markSearchBlocked: () => this.markHybridSearchBlocked(),
-    syncSearchAvailability: () => this.syncHybridSearchAvailabilityFromEngine(),
+    markSearchBlocked: () => this.blockHybridRuntimeQueryGate(),
+    syncSearchAvailability: () => this.syncHybridRuntimeQueryGateFromEngine(),
     repairStoredState: (currFiles) => this.repairHybridStoredState(currFiles),
     restorePersistedRecoveryState: (currFiles, previousIndexedFileRefs) =>
       this.restorePersistedHybridRecoveryState(
@@ -764,7 +764,7 @@ export class DataManager {
     this.fileSnapshotStore.resetRuntimeState();
     this.lexicalIndexedFileRefsLoaded = false;
     this.lexicalIndexedFileRefsByPath.clear();
-    this.setHybridSearchAvailability("blocked");
+    this.setHybridRuntimeQueryGate("blocked");
     this.beginSearchBootstrapRun();
     try {
       const bootstrapSummary = await this.runSearchBootstrapPipeline();
@@ -870,7 +870,7 @@ export class DataManager {
     const prevNotice = new MyNotice(t("Reindexing..."));
     this.shouldForceRefresh = true;
     this.clearHybridFailedEmbeddingState();
-    this.setHybridSearchAvailability("blocked");
+    this.setHybridRuntimeQueryGate("blocked");
     getInstance(FileWatcher).stop();
     try {
       await this.initAsync({ suppressCompletionNotice: true });
@@ -914,7 +914,7 @@ export class DataManager {
 
   async refreshHybridStateAsync(options: HybridRefreshOptions = {}) {
     this.clearHybridFailedEmbeddingState();
-    this.setHybridSearchAvailability("blocked");
+    this.setHybridRuntimeQueryGate("blocked");
     const previousForceRefresh = this.shouldForceRefresh;
     let refreshResult: HybridRefreshResult | null = null;
     getInstance(FileWatcher).stop();
@@ -957,7 +957,7 @@ export class DataManager {
     syncFileSetWithoutEmbedding: boolean;
   }): Promise<HybridRefreshResult> {
     if (!this.hybridEngine.isEnabled()) {
-      this.markHybridSearchBlocked();
+      this.blockHybridRuntimeQueryGate();
       return { hadWork: false, failedFiles: 0, fallbackNoticeKey: null };
     }
 
@@ -1032,7 +1032,7 @@ export class DataManager {
     if (failures.length > 0) {
       this.noticeHybridIndexFailures(failures);
     }
-    this.syncHybridSearchAvailabilityFromEngine();
+    this.syncHybridRuntimeQueryGateFromEngine();
     return { hadWork, failedFiles: failures.length, fallbackNoticeKey: null };
   }
 
@@ -2210,28 +2210,27 @@ export class DataManager {
     return buildHybridAvailabilityState({
       enabled: this.hybridEngine.isEnabled(),
       bootstrap: this.hybridBootstrapState,
-      canServeQuery:
-        this.hybridSearchAvailability === "available" &&
-        this.hybridEngine.canServeQuery(),
+      runtimeGateOpen: this.hybridRuntimeQueryGate === "open",
+      canServeQuery: this.hybridEngine.canServeQuery(),
       canSearch: this.hybridEngine.canSearch(),
       hasFailures: this.hybridRecoveryCoordinator.hasFailures(),
       hasIncompleteEmbeddings: this.hasIncompleteHybridEmbeddings(),
     });
   }
 
-  private setHybridSearchAvailability(
-    availability: HybridSearchAvailability,
+  private setHybridRuntimeQueryGate(
+    state: HybridRuntimeQueryGateState,
   ): void {
-    this.hybridSearchAvailability = availability;
+    this.hybridRuntimeQueryGate = state;
   }
 
-  private markHybridSearchBlocked(): void {
-    this.setHybridSearchAvailability("blocked");
+  private blockHybridRuntimeQueryGate(): void {
+    this.setHybridRuntimeQueryGate("blocked");
   }
 
-  private syncHybridSearchAvailabilityFromEngine(): void {
-    this.setHybridSearchAvailability(
-      this.hybridEngine.canServeQuery() ? "available" : "blocked",
+  private syncHybridRuntimeQueryGateFromEngine(): void {
+    this.setHybridRuntimeQueryGate(
+      this.hybridEngine.canServeQuery() ? "open" : "blocked",
     );
   }
 

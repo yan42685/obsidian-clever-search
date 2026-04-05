@@ -30,6 +30,7 @@ export type HybridHealthSummaryState =
 export type HybridAvailabilityReason =
 	| "disabled"
 	| `bootstrap_${Exclude<SearchBootstrapState, "searchable">}`
+	| "runtime_gate_blocked"
 	| "query_unavailable"
 	| "dense_unavailable"
 	| "repair_pending"
@@ -87,6 +88,7 @@ export function buildLexicalAvailabilityState(
 export function resolveHybridQueryAvailabilityState(input: {
 	enabled: boolean;
 	bootstrap: SearchBootstrapState;
+	runtimeGateOpen: boolean;
 	canServeQuery: boolean;
 	canSearch: boolean;
 	hasFailures: boolean;
@@ -96,6 +98,9 @@ export function resolveHybridQueryAvailabilityState(input: {
 		return "unavailable";
 	}
 	if (input.bootstrap !== "searchable") {
+		return "unavailable";
+	}
+	if (!input.runtimeGateOpen) {
 		return "unavailable";
 	}
 	if (!input.canServeQuery) {
@@ -113,6 +118,7 @@ export function resolveHybridQueryAvailabilityState(input: {
 export function buildHybridAvailabilityState(input: {
 	enabled: boolean;
 	bootstrap: SearchBootstrapState;
+	runtimeGateOpen: boolean;
 	canServeQuery: boolean;
 	canSearch: boolean;
 	hasFailures: boolean;
@@ -125,6 +131,8 @@ export function buildHybridAvailabilityState(input: {
 		reasons.push("disabled");
 	} else if (input.bootstrap !== "searchable") {
 		reasons.push(`bootstrap_${input.bootstrap}`);
+	} else if (!input.runtimeGateOpen) {
+		reasons.push("runtime_gate_blocked");
 	} else if (!input.canServeQuery) {
 		reasons.push("query_unavailable");
 	} else if (!input.canSearch) {
