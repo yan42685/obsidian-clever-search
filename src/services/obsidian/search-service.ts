@@ -127,14 +127,11 @@ export class SearchService {
 		result: SearchResult,
 		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
 	): SearchResult {
-		return new SearchResult(
-			result.sourcePath,
-			result.items,
+		return result.withHybridFallbackNotice(
 			this.resolveHybridFallbackNoticeKey(
 				result.hybridFallbackNoticeKey,
 				...noticeKeys,
 			),
-			result.hybridAvailabilityReasons ?? [],
 		);
 	}
 

@@ -12,7 +12,6 @@
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
-	import { hasHybridAvailabilityReason } from "src/services/obsidian/user-data/search-availability";
 	import { SearchHistoryService } from "src/services/obsidian/user-data/search-history-service";
 	import { ViewType } from "src/services/obsidian/view-registry";
 	import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -103,10 +102,7 @@
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
 	function hasHybridEmbeddingIncomplete(result: SearchResult): boolean {
-		return hasHybridAvailabilityReason(
-			result.hybridAvailabilityReasons,
-			"embedding_incomplete",
-		);
+		return result.hasHybridAvailabilityReason("embedding_incomplete");
 	}
 
 	// TODO: use virtual list rather than rendering all buttons

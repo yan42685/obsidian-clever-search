@@ -82,6 +82,21 @@ export class SearchResult {
     this.hybridFallbackNoticeKey = hybridFallbackNoticeKey ?? null;
     this.hybridAvailabilityReasons = [...hybridAvailabilityReasons];
   }
+
+  hasHybridAvailabilityReason(reason: HybridAvailabilityReason): boolean {
+    return this.hybridAvailabilityReasons.includes(reason);
+  }
+
+  withHybridFallbackNotice(
+    hybridFallbackNoticeKey?: LocaleKey | null,
+  ): SearchResult {
+    return new SearchResult(
+      this.sourcePath,
+      this.items,
+      hybridFallbackNoticeKey,
+      this.hybridAvailabilityReasons,
+    );
+  }
 }
 
 export enum SearchType {
