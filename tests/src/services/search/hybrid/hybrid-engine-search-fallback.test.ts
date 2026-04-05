@@ -171,7 +171,7 @@ describe("HybridEngine search fallback notices", () => {
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
 		expect(finalized.items).toBe(baseItems);
-		expect(finalized.fallbackNoticeKey).toBeNull();
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
 
@@ -183,12 +183,14 @@ describe("HybridEngine search fallback notices", () => {
 		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
 		engine.rerankDisplayCandidates = jest
 			.fn()
-			.mockRejectedValue(new HybridRerankError("rerank failed"));
+			.mockRejectedValue(
+				new HybridRerankError("rerank failed", { kind: "auth_403" }),
+			);
 
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
 		expect(finalized.items).toBe(baseItems);
-		expect(finalized.fallbackNoticeKey).toBeNull();
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
 

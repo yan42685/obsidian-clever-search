@@ -540,7 +540,8 @@ export class HybridEngine {
       );
       return {
         items: baseItems,
-        fallbackNoticeKey: prepared.fallbackNoticeKey,
+        fallbackNoticeKey:
+          prepared.fallbackNoticeKey ?? "hybridNotice.searchFallbackToLexical",
         fallbackToLexicalSearch: true,
       };
     }

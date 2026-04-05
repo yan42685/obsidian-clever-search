@@ -286,6 +286,10 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(lexicalEngine.searchFiles).toHaveBeenCalled();
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as { path: string }).path).toBe("notes/recovery.md");
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridNotice.searchFallbackToLexical",
+		]);
 	});
 
 	test("dedupes identical fallback notices across staged updates", () => {

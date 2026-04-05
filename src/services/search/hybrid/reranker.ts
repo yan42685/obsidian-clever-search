@@ -7,16 +7,51 @@ import {
 } from './embedder';
 import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
+import {
+	buildHybridProviderErrorDetails,
+	type HybridProviderFailureKind,
+	isNetworkFailureMessage,
+	NoApiKeyError,
+	WeeklyTokenLimitExceededError,
+} from './provider-error';
 
 const RERANK_MODEL = 'qwen3-rerank';
 const RERANK_TIMEOUT_MS = 2_800;
 export const SEARCH_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_EMBED_TOKEN_KEY = '[search] embedding';
 
+export type HybridRerankFailureKind = HybridProviderFailureKind;
+
 export class HybridRerankError extends Error {
-	constructor(message: string) {
+	readonly kind: HybridRerankFailureKind;
+	readonly status?: number;
+	readonly providerCode?: string | null;
+	readonly providerType?: string | null;
+	readonly providerMessage?: string | null;
+	readonly requestId?: string | null;
+	readonly retryAfterHeader?: string | null;
+
+	constructor(
+		message: string,
+		options: {
+			kind?: HybridRerankFailureKind;
+			status?: number;
+			providerCode?: string | null;
+			providerType?: string | null;
+			providerMessage?: string | null;
+			requestId?: string | null;
+			retryAfterHeader?: string | null;
+		} = {},
+	) {
 		super(message);
 		this.name = 'HybridRerankError';
+		this.kind = options.kind ?? 'unknown';
+		this.status = options.status;
+		this.providerCode = options.providerCode;
+		this.providerType = options.providerType;
+		this.providerMessage = options.providerMessage;
+		this.requestId = options.requestId;
+		this.retryAfterHeader = options.retryAfterHeader;
 	}
 }
 
@@ -24,7 +59,9 @@ export class HybridRerankTimeoutError extends HybridRerankError {
 	readonly timeoutMs: number;
 
 	constructor(timeoutMs: number) {
-		super(`Qwen rerank request timed out after ${timeoutMs} ms`);
+		super(`Qwen rerank request timed out after ${timeoutMs} ms`, {
+			kind: 'timeout',
+		});
 		this.name = 'HybridRerankTimeoutError';
 		this.timeoutMs = timeoutMs;
 	}
@@ -68,11 +105,14 @@ export class HybridReranker {
 		topK: number,
 		signal?: AbortSignal,
 	): Promise<RerankResult[]> {
-		if (!this.apiKey || candidates.length === 0 || topK <= 0) {
+		if (candidates.length === 0 || topK <= 0) {
 			return candidates.slice(0, topK).map((candidate) => ({
 				id: candidate.id,
 				score: candidate.recallScore,
 			}));
+		}
+		if (!this.apiKey) {
+			throw new NoApiKeyError();
 		}
 
 		const documents = candidates.map((candidate) => candidate.text);
@@ -86,10 +126,15 @@ export class HybridReranker {
 
 			if (!resp.ok) {
 				const body = await resp.text();
-				logger.error(
-					`Qwen rerank request failed: status=${resp.status}, url=${this.apiUrl}, body=${body}`,
+				const error = this.buildHttpError(
+					resp.status,
+					body,
+					resp.headers.get('retry-after'),
 				);
-				throw new HybridRerankError(`Qwen rerank API error ${resp.status}: ${body}`);
+				logger.error(
+					`Qwen rerank request failed: status=${resp.status}, kind=${error.kind}, code=${error.providerCode ?? 'n/a'}, request_id=${error.requestId ?? 'n/a'}, url=${this.apiUrl}, body=${body}`,
+				);
+				throw error;
 			}
 
 			const json = await resp.json() as {
@@ -162,17 +207,16 @@ export class HybridReranker {
 				signal: controller.signal,
 			});
 		} catch (error) {
+			if (error instanceof WeeklyTokenLimitExceededError) {
+				throw error;
+			}
 			if (this.isAbortError(error)) {
 				if (externalSignal?.aborted) {
 					throw createRerankAbortError();
 				}
 				throw new HybridRerankTimeoutError(RERANK_TIMEOUT_MS);
 			}
-			throw new HybridRerankError(
-				error instanceof Error
-					? `Qwen rerank request failed: ${error.message}`
-					: 'Qwen rerank request failed',
-			);
+			throw this.buildTransportError(error);
 		} finally {
 			clearTimeout(timeoutId);
 			if (externalSignal) {
@@ -212,5 +256,53 @@ export class HybridReranker {
 			'name' in error &&
 			error.name === 'AbortError',
 		);
+	}
+
+	private buildHttpError(
+		status: number,
+		body: string,
+		retryAfterHeader?: string | null,
+	): HybridRerankError {
+		const details = buildHybridProviderErrorDetails(
+			status,
+			body,
+			retryAfterHeader,
+		);
+		const detail =
+			details.providerMessage || body.trim() || `status ${status}`;
+		const requestSuffix = details.requestId
+			? ` (request_id: ${details.requestId})`
+			: '';
+		return new HybridRerankError(
+			`Qwen rerank API error ${status}: ${detail}${requestSuffix}`,
+			details,
+		);
+	}
+
+	private buildTransportError(error: unknown): HybridRerankError {
+		if (error instanceof HybridRerankError) {
+			return error;
+		}
+		if (!(error instanceof Error)) {
+			return new HybridRerankError('Qwen rerank request failed', {
+				kind: 'unknown',
+			});
+		}
+
+		const message = `${error.name}: ${error.message}`.toLowerCase();
+		const kind = this.classifyTransportFailureKind(message);
+		return new HybridRerankError(`Qwen rerank request failed: ${error.message}`, {
+			kind,
+		});
+	}
+
+	private classifyTransportFailureKind(message: string): HybridRerankFailureKind {
+		if (isNetworkFailureMessage(message)) {
+			return 'network';
+		}
+		if (message.includes('timeout')) {
+			return 'timeout';
+		}
+		return 'unknown';
 	}
 }

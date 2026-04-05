@@ -7,6 +7,10 @@ import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type StoredVector, type VectorPrecision } from './hybrid-types';
 import {
+	NoApiKeyError,
+	WeeklyTokenLimitExceededError,
+} from './provider-error';
+import {
 	profileHybridStage,
 	recordHybridProfileMetric,
 } from './hybrid-profiler';
@@ -25,26 +29,7 @@ const TOKEN_SAVINGS_TOTAL_KEY = 'all';
 let inFlightEstimatedTokens = 0;
 let lastKnownCurrentWeekTokenUsage: { weekKey: string; tokens: number } | null = null;
 
-export class NoApiKeyError extends Error {
-	constructor() {
-		super('No Qwen API key configured; falling back to lexical-only search');
-		this.name = 'NoApiKeyError';
-	}
-}
-
-export class WeeklyTokenLimitExceededError extends Error {
-	readonly limit: number;
-	readonly used: number;
-	readonly estimated: number;
-
-	constructor(limit: number, used: number, estimated: number) {
-		super('Weekly token limit exceeded before sending provider request');
-		this.name = 'WeeklyTokenLimitExceededError';
-		this.limit = limit;
-		this.used = used;
-		this.estimated = estimated;
-	}
-}
+export { NoApiKeyError, WeeklyTokenLimitExceededError } from './provider-error';
 
 export class HybridDisabledError extends Error {
 	constructor() {

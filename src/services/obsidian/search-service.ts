@@ -183,11 +183,15 @@ export class SearchService {
 				"hybrid lexical-lane prepare failed; falling back to lexical search.",
 				error,
 			);
+			const lexicalResult = await this.searchInVaultLexical(queryText, {
+				hybridAvailabilityReasons: hybridAvailability.reasons,
+			});
 			return {
 				prepared: null,
-				result: await this.searchInVaultLexical(queryText, {
-					hybridAvailabilityReasons: hybridAvailability.reasons,
-				}),
+				result: this.attachHybridFallbackNotice(
+					lexicalResult,
+					"hybridNotice.searchFallbackToLexical",
+				),
 			};
 		}
 		if (prepared.fallbackToLexicalSearch) {
