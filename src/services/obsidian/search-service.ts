@@ -115,7 +115,7 @@ export class SearchService {
 	}
 
 	notifyHybridFallback(result: SearchResult): void {
-		const notice = this.resolveHybridFallbackNotice(result);
+		const notice = this.getHybridFallbackNotice(result);
 		const signature = notice.message ?? notice.key ?? null;
 		if (signature === this.lastHybridFallbackNoticeSignature) {
 			return;
@@ -130,7 +130,7 @@ export class SearchService {
 		}
 	}
 
-	private resolveHybridFallbackNotice(result: SearchResult): {
+	getHybridFallbackNotice(result: SearchResult): {
 		key: SearchResult["hybridFallbackNoticeKey"];
 		message: string | null;
 	} {
@@ -150,9 +150,27 @@ export class SearchService {
 			};
 		}
 
+		const explicitKey = this.resolveHybridFallbackNoticeKey(
+			result.hybridFallbackNoticeKey,
+		);
+		const explicitMessage = result.hybridFallbackNoticeMessage?.trim() || null;
+		if (explicitKey || explicitMessage) {
+			return {
+				key: explicitKey,
+				message: explicitMessage,
+			};
+		}
+
+		if (result.hasHybridAvailabilityReason("disabled")) {
+			return {
+				key: "hybridNotice.disabled",
+				message: null,
+			};
+		}
+
 		return {
-			key: this.resolveHybridFallbackNoticeKey(result.hybridFallbackNoticeKey),
-			message: result.hybridFallbackNoticeMessage?.trim() || null,
+			key: null,
+			message: null,
 		};
 	}
 

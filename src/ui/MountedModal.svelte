@@ -145,6 +145,20 @@
 		return result.hasHybridAvailabilityReason("embedding_incomplete");
 	}
 
+	function getHybridResultNoticeText(): string | null {
+		if (searchType !== SearchType.IN_VAULT || !isHybrid) {
+			return null;
+		}
+		const notice = searchService.getHybridFallbackNotice(searchResult);
+		if (notice.message) {
+			return notice.message;
+		}
+		if (notice.key) {
+			return t(notice.key);
+		}
+		return null;
+	}
+
 	function isAutoHybridFallbackNoResultsVisible(): boolean {
 		return (
 			searchType === SearchType.IN_VAULT &&
@@ -542,6 +556,13 @@
 							<p class="hybrid-freshness-banner-message">
 								{hybridFreshnessNotice.message}
 							</p>
+						</div>
+					{/if}
+					{#if getHybridResultNoticeText()}
+						<div class="hybrid-fallback-failure">
+							<span class="hybrid-fallback-failure-detail">
+								{getHybridResultNoticeText()}
+							</span>
 						</div>
 					{/if}
 					{#if isAutoHybridFallbackNoResultsVisible()}

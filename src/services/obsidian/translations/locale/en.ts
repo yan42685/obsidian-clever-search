@@ -19,6 +19,7 @@ export default {
 	"searchNotice.databaseUpgradeFinishedHybridReady": "Search index rebuild finished after database upgrade. Lexical + hybrid ready.",
 	"hybridNotice.indexFallbackToLexical": "Indexing finished, but dense semantic indexing is unavailable. Current results are using lexical fallback.",
 	"hybridNotice.searchFallbackToLexical": "Dense semantic search is unavailable. Current results are using lexical fallback.",
+	"hybridNotice.disabled": "Hybrid search is disabled. Current results are using lexical search.",
 	"hybridNotice.searchIssue.missingApiKey": "Qwen API key is not configured. Current results are using lexical fallback.",
 	"hybridNotice.searchIssue.weeklyTokenLimit": "Weekly token limit has been reached. Current results are using lexical fallback.",
 	"hybridNotice.searchIssue.quotaExhausted": "Qwen quota is exhausted or the free tier has been used up. Current results are using lexical fallback.",

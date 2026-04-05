@@ -162,6 +162,7 @@ export function buildHybridAvailabilityState(input: {
 }): HybridAvailabilityState {
 	const query = resolveHybridQueryAvailabilityState(input);
 	const reasons: HybridAvailabilityReason[] = [];
+	const bootstrapNoticeKey = resolveSearchBootstrapNoticeKey(input.bootstrap);
 
 	if (!input.enabled) {
 		reasons.push("disabled");
@@ -180,17 +181,28 @@ export function buildHybridAvailabilityState(input: {
 		reasons.push("embedding_incomplete");
 	}
 
+	let blockingNoticeKey: LocaleKey | null = null;
+	let fallbackNoticeKey: LocaleKey | null = null;
+	if (!input.enabled) {
+		blockingNoticeKey = "hybridNotice.disabled";
+		fallbackNoticeKey = "hybridNotice.disabled";
+	} else if (input.bootstrap !== "searchable") {
+		blockingNoticeKey = bootstrapNoticeKey;
+		fallbackNoticeKey = bootstrapNoticeKey;
+	} else if (query === "lexical_only") {
+		fallbackNoticeKey = "hybridNotice.searchFallbackToLexical";
+	} else if (query === "unavailable") {
+		fallbackNoticeKey = "hybridNotice.searchFallbackToLexical";
+	}
+
 	return {
 		enabled: input.enabled,
 		bootstrap: input.bootstrap,
 		query,
 		reasons,
 		prompt: {
-			blockingNoticeKey: resolveSearchBootstrapNoticeKey(input.bootstrap),
-			fallbackNoticeKey:
-				query === "lexical_only"
-					? "hybridNotice.searchFallbackToLexical"
-					: null,
+			blockingNoticeKey,
+			fallbackNoticeKey,
 		},
 	};
 }

@@ -286,4 +286,6 @@ export default {
 	"hybridModal.healthSummary.metric.lexicalOnly": "lexical-only",
 	"hybridModal.healthSummary.metric.processing": "\u5904\u7406\u4e2d",
 	"hybridModal.healthSummary.metric.stale": "\u672a\u540c\u6b65",
+	"hybridNotice.disabled":
+		"\u672a\u542f\u7528 Hybrid \u641c\u7d22\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical \u641c\u7d22\u3002",
 };

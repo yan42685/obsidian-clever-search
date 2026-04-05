@@ -354,6 +354,41 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
+	test("uses the disabled hybrid notice when hybrid search is turned off", async () => {
+		const { service, dataManager } = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/disabled.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 7,
+				directSubItems: [],
+				nativeSubItemsReady: true,
+			},
+		]);
+		dataManager.getHybridAvailabilityState.mockReturnValue({
+			enabled: false,
+			bootstrap: "searchable",
+			query: "unavailable",
+			reasons: ["disabled"],
+			prompt: {
+				blockingNoticeKey: "hybridNotice.disabled",
+				fallbackNoticeKey: "hybridNotice.disabled",
+			},
+		});
+
+		const result = await service.searchInVaultHybrid("alpha");
+
+		expect(mockHybridEngine.prepareRecall).not.toHaveBeenCalled();
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.disabled");
+		expect(result.hybridAvailabilityReasons).toEqual(["disabled"]);
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridNotice.disabled",
+		]);
+	});
+
 	test("keeps known issue kinds when finalize falls back to lexical results", async () => {
 		configurePreparedFlow();
 		const { service } = createHarness();

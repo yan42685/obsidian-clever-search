@@ -55,6 +55,29 @@ describe("search availability derivation", () => {
 		});
 	});
 
+	test("marks disabled hybrid with an explicit disabled notice", () => {
+		expect(
+			buildHybridAvailabilityState({
+				enabled: false,
+				bootstrap: "searchable",
+				runtimeGateOpen: false,
+				canServeQuery: false,
+				canSearch: false,
+				hasFailures: false,
+				hasIncompleteEmbeddings: false,
+			}),
+		).toEqual({
+			enabled: false,
+			bootstrap: "searchable",
+			query: "unavailable",
+			reasons: ["disabled"],
+			prompt: {
+				blockingNoticeKey: "hybridNotice.disabled",
+				fallbackNoticeKey: "hybridNotice.disabled",
+			},
+		});
+	});
+
 	test("marks hybrid as degraded when dense search works but repair is pending", () => {
 		expect(
 			buildHybridAvailabilityState({
