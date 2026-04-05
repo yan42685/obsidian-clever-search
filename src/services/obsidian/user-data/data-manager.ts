@@ -257,6 +257,14 @@ export type HybridFreshnessSummary = {
   updatedAt: number;
 };
 
+type HybridFreshnessSnapshot = {
+  trackedFiles: readonly TFile[];
+  processingPathSet: Set<string>;
+  stalePathSet: Set<string>;
+  repairPaths: Set<string>;
+  repairSamplePaths: string[];
+};
+
 export type HybridHealthSummary = {
   state: HybridHealthSummaryState;
   trackedFileCount: number;
@@ -413,6 +421,8 @@ export class DataManager {
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
   private lastHybridStaleWarnSignature: string | null = null;
+  private hybridFreshnessMaintenanceTask: Promise<void> | null = null;
+  private hybridFreshnessMaintenanceQueued = false;
   private inVaultSearchFlushCallback: EventCallback | null = null;
   private lexicalIndexFailureNotice: Notice | null = null;
   private lexicalFailureRetryInFlight = false;
@@ -501,18 +511,20 @@ export class DataManager {
   }
 
   async getHybridFreshnessSummary(): Promise<HybridFreshnessSummary> {
+    return this.buildHybridFreshnessSummary(
+      await this.collectHybridFreshnessSnapshot(),
+    );
+  }
+
+  private async collectHybridFreshnessSnapshot(): Promise<HybridFreshnessSnapshot> {
     const trackedFiles = this.getHybridTrackedFiles();
     if (!this.hybridEngine.isEnabled() || trackedFiles.length === 0) {
-      this.lastHybridStaleWarnSignature = null;
       return {
-        processingFileCount: 0,
-        staleFileCount: 0,
-        repairFileCount: 0,
-        totalTrackedFiles: trackedFiles.length,
-        processingSamplePaths: [],
-        staleSamplePaths: [],
+        trackedFiles,
+        processingPathSet: new Set<string>(),
+        stalePathSet: new Set<string>(),
+        repairPaths: new Set<string>(),
         repairSamplePaths: [],
-        updatedAt: Date.now(),
       };
     }
 
@@ -559,33 +571,31 @@ export class DataManager {
       stalePathSet.add(path);
     }
 
-    const stalePaths = Array.from(stalePathSet);
-    const staleSamplePaths = stalePaths.slice(0, HYBRID_FRESHNESS_SAMPLE_LIMIT);
-    this.warnOnHybridStaleFiles(stalePathSet.size, staleSamplePaths);
-    const reconciledPaths = this.reconcileHybridStalePaths(stalePaths, trackedFiles);
-    for (const path of reconciledPaths) {
-      stalePathSet.delete(path);
-      processingPathSet.add(path);
-    }
-    const processingPathsFinal = Array.from(processingPathSet);
-    const processingSamplePaths = processingPathsFinal.slice(
-      0,
-      HYBRID_FRESHNESS_SAMPLE_LIMIT,
-    );
-    const stalePathsFinal = Array.from(stalePathSet);
-    const staleSamplePathsFinal = stalePathsFinal.slice(
-      0,
-      HYBRID_FRESHNESS_SAMPLE_LIMIT,
-    );
-
     return {
-      processingFileCount: processingPathSet.size,
-      staleFileCount: stalePathSet.size,
-      repairFileCount: repairPaths.size,
-      totalTrackedFiles: trackedFiles.length,
-      processingSamplePaths,
-      staleSamplePaths: staleSamplePathsFinal,
+      trackedFiles,
+      processingPathSet,
+      stalePathSet,
+      repairPaths,
       repairSamplePaths,
+    };
+  }
+
+  private buildHybridFreshnessSummary(
+    snapshot: HybridFreshnessSnapshot,
+  ): HybridFreshnessSummary {
+    const processingPaths = Array.from(snapshot.processingPathSet);
+    const stalePaths = Array.from(snapshot.stalePathSet);
+    return {
+      processingFileCount: snapshot.processingPathSet.size,
+      staleFileCount: snapshot.stalePathSet.size,
+      repairFileCount: snapshot.repairPaths.size,
+      totalTrackedFiles: snapshot.trackedFiles.length,
+      processingSamplePaths: processingPaths.slice(
+        0,
+        HYBRID_FRESHNESS_SAMPLE_LIMIT,
+      ),
+      staleSamplePaths: stalePaths.slice(0, HYBRID_FRESHNESS_SAMPLE_LIMIT),
+      repairSamplePaths: snapshot.repairSamplePaths,
       updatedAt: Date.now(),
     };
   }
@@ -615,6 +625,39 @@ export class DataManager {
       return;
     }
     await this.docOperationsBuffer.forceFlush();
+  }
+
+  private async maintainHybridFreshness(): Promise<void> {
+    if (this.isUnloaded) {
+      return;
+    }
+    if (this.hybridFreshnessMaintenanceTask) {
+      this.hybridFreshnessMaintenanceQueued = true;
+      await this.hybridFreshnessMaintenanceTask;
+      return;
+    }
+
+    do {
+      this.hybridFreshnessMaintenanceQueued = false;
+      const task = this.runHybridFreshnessMaintenance();
+      this.hybridFreshnessMaintenanceTask = task;
+      try {
+        await task;
+      } finally {
+        this.hybridFreshnessMaintenanceTask = null;
+      }
+    } while (this.hybridFreshnessMaintenanceQueued && !this.isUnloaded);
+  }
+
+  private async runHybridFreshnessMaintenance(): Promise<void> {
+    const snapshot = await this.collectHybridFreshnessSnapshot();
+    const stalePaths = Array.from(snapshot.stalePathSet);
+    const staleSamplePaths = stalePaths.slice(0, HYBRID_FRESHNESS_SAMPLE_LIMIT);
+    this.warnOnHybridStaleFiles(stalePaths.length, staleSamplePaths);
+    if (stalePaths.length === 0) {
+      return;
+    }
+    this.reconcileHybridStalePaths(stalePaths, snapshot.trackedFiles);
   }
 
   private reconcileHybridStalePaths(
@@ -860,6 +903,8 @@ export class DataManager {
       }
       await this.handleDeleteOperation(op.path);
     }
+
+    await this.maintainHybridFreshness();
   };
 
   private docOperationsBuffer = new DocOperationBuffer(
@@ -901,6 +946,9 @@ export class DataManager {
     void this.flushLexicalSnapshotIfDirty(true);
     this.clearLexicalSnapshotFlushTimer();
     this.clearHybridRepairScheduler();
+    this.hybridFreshnessMaintenanceTask = null;
+    this.hybridFreshnessMaintenanceQueued = false;
+    this.lastHybridStaleWarnSignature = null;
     this.clearHybridFailedEmbeddingState();
     this.hideLexicalIndexFailureNotice();
     this.lexicalIndexFailuresByPath.clear();
@@ -958,6 +1006,7 @@ export class DataManager {
     this.markSearchBootstrapPhaseStarted("hybrid", "heal");
     try {
       hybridSummary = await this.healHybridBootstrapPlan(hybridPlan);
+      await this.maintainHybridFreshness();
     } catch (e) {
       logger.warn("hybrid engine init failed:", e);
       hybridFailed = true;
@@ -1059,6 +1108,9 @@ export class DataManager {
         !refreshResult.fallbackNoticeKey
       ) {
         new MyNotice(t("searchNotice.hybridIndexFinished"), 5000);
+      }
+      if (refreshResult !== null) {
+        await this.maintainHybridFreshness();
       }
     } finally {
       this.shouldForceRefresh = previousForceRefresh;
@@ -1701,6 +1753,7 @@ export class DataManager {
           this.hybridRepairPendingPersistPaths.delete(task.path);
         }
         this.hybridRepairWorker = null;
+        await this.maintainHybridFreshness();
         this.scheduleHybridRepairFlush();
         this.notifyHybridRuntimeStatusChanged();
       }

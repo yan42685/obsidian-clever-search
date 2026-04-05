@@ -2296,19 +2296,19 @@ describe("DataManager integration", () => {
     expect(summary.shadowMismatchSamplePaths).toEqual([
       shadowMismatchFile.path,
     ]);
-    expect(summary.processingFileCount).toBe(2);
-    expect(summary.staleFileCount).toBe(0);
+    expect(summary.processingFileCount).toBe(0);
+    expect(summary.staleFileCount).toBe(2);
     expect(summary.repairFileCount).toBe(0);
-    expect(summary.processingSamplePaths).toEqual([
+    expect(summary.processingSamplePaths).toEqual([]);
+    expect(summary.staleSamplePaths).toEqual([
       shadowAlignedFile.path,
       shadowMismatchFile.path,
     ]);
-    expect(summary.staleSamplePaths).toEqual([]);
 
     manager.onunload();
   });
 
-  test("hybrid freshness treats queued repairs as processing and dedupes stale warnings", async () => {
+  test("hybrid freshness summary is read-only and maintenance reconciles stale paths", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;
 
@@ -2369,19 +2369,25 @@ describe("DataManager integration", () => {
     });
 
     const firstSummary = await manager.getHybridFreshnessSummary();
-    const secondSummary = await manager.getHybridFreshnessSummary();
+    expect(firstSummary.processingFileCount).toBe(1);
+    expect(firstSummary.staleFileCount).toBe(1);
+    expect(firstSummary.processingSamplePaths).toEqual([processingFile.path]);
+    expect(firstSummary.staleSamplePaths).toEqual([staleFile.path]);
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect((manager as any).hybridRepairQueue.has(staleFile.path)).toBe(false);
 
-    expect(firstSummary.processingFileCount).toBe(2);
-    expect(firstSummary.staleFileCount).toBe(0);
-    expect(firstSummary.processingSamplePaths).toEqual([
-      processingFile.path,
-      staleFile.path,
-    ]);
-    expect(firstSummary.staleSamplePaths).toEqual([]);
+    await (manager as any).maintainHybridFreshness();
+
+    const secondSummary = await manager.getHybridFreshnessSummary();
     expect(secondSummary).toMatchObject({
       processingFileCount: 2,
       staleFileCount: 0,
     });
+    expect(secondSummary.processingSamplePaths).toEqual([
+      processingFile.path,
+      staleFile.path,
+    ]);
+    expect(secondSummary.staleSamplePaths).toEqual([]);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
       "hybrid freshness detected stale files outside repair flow:",
