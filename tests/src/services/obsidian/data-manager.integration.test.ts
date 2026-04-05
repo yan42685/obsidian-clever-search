@@ -565,19 +565,36 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
               ),
           }),
         })),
-        where: jest.fn((_field: string) => ({
-          above: (lastId: number) => ({
-            limit: (batchSize: number) => ({
-              toArray: async () =>
-                toPagedRows(
-                  hybridChunks,
-                  (row) => Number(row.id ?? 0),
-                  lastId,
-                  batchSize,
-                ),
-            }),
-          }),
-        })),
+        where: jest.fn((field: string) => {
+          if (field === ":id") {
+            return {
+              above: (lastId: number) => ({
+                limit: (batchSize: number) => ({
+                  toArray: async () =>
+                    toPagedRows(
+                      hybridChunks,
+                      (row) => Number(row.id ?? 0),
+                      lastId,
+                      batchSize,
+                    ),
+                }),
+              }),
+            };
+          }
+          if (field === "filePath") {
+            return {
+              anyOf: (paths: readonly string[]) => ({
+                toArray: async () => {
+                  const pathSet = new Set(paths);
+                  return hybridChunks
+                    .filter((row) => pathSet.has(row.filePath))
+                    .map((row) => ({ ...row }));
+                },
+              }),
+            };
+          }
+          throw new Error(`Unsupported hybridChunks.where field: ${field}`);
+        }),
       },
       hybridChunkVectors: {
         orderBy: jest.fn((_field: string) => ({
@@ -604,6 +621,12 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
             }),
           }),
         })),
+        bulkGet: jest.fn(async (paths: readonly string[]) =>
+          paths.map((path) => {
+            const row = hybridChunkVectors.find((item) => item.filePath === path);
+            return row ? { ...row } : undefined;
+          }),
+        ),
         get: jest.fn(async (filePath: string) => {
           const row = hybridChunkVectors.find((item) => item.filePath === filePath);
           return row ? { ...row } : undefined;
@@ -2483,6 +2506,130 @@ describe("DataManager integration", () => {
     expect(summary.processingFileCount).toBe(1);
     expect(summary.staleFileCount).toBe(0);
     expect(summary.processingSamplePaths).toEqual([file.path]);
+
+    manager.onunload();
+  });
+
+  test("runtime repair batch clears inconsistent local state before reindexing", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const corruptFile = createFile("docs/corrupt-runtime.md", "corrupt", 220);
+    const healthyFile = createFile("docs/healthy-runtime.md", "healthy", 221);
+    const files = new Map<string, TFile>([
+      [corruptFile.path, corruptFile],
+      [healthyFile.path, healthyFile],
+    ]);
+    const texts = new Map<string, string>([
+      [corruptFile.path, "corrupt"],
+      [healthyFile.path, "healthy"],
+    ]);
+    const database = createMockDatabase();
+    database.__hybridChunks.push(
+      {
+        id: 1,
+        filePath: corruptFile.path,
+        chunkIndex: 0,
+        startOffset: 0,
+        endOffset: 7,
+        startLine: 0,
+        startCol: 0,
+        endLine: 0,
+        embedKey: "corrupt-0",
+      },
+      {
+        id: 2,
+        filePath: healthyFile.path,
+        chunkIndex: 0,
+        startOffset: 0,
+        endOffset: 7,
+        startLine: 0,
+        startCol: 0,
+        endLine: 0,
+        embedKey: "healthy-0",
+      },
+    );
+    database.__fileSnapshots.push(
+      {
+        filePath: corruptFile.path,
+        plainText: "corrupt",
+        generation: corruptFile.stat.mtime,
+      },
+      {
+        filePath: healthyFile.path,
+        plainText: "healthy",
+        generation: healthyFile.stat.mtime,
+      },
+    );
+    database.__hybridChunkVectors.push({
+      filePath: healthyFile.path,
+      chunkCount: 1,
+      generation: healthyFile.stat.mtime,
+      precision: "int8",
+    });
+    database.__hybridIndexedFileRefs.push({
+      path: healthyFile.path,
+      generation: healthyFile.stat.mtime,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: healthyFile.stat.mtime,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: Array.from(files.values()),
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    const failures: Array<Record<string, unknown>> = [];
+
+    await (manager as any).runHybridRepairTasks(
+      [
+        {
+          path: corruptFile.path,
+          mode: "incremental",
+          reason: "freshness-reconcile-stale",
+          eligibleAt: Date.now(),
+          enqueuedAt: Date.now(),
+          sourceGeneration: corruptFile.stat.mtime,
+        },
+        {
+          path: healthyFile.path,
+          mode: "incremental",
+          reason: "freshness-reconcile-stale",
+          eligibleAt: Date.now(),
+          enqueuedAt: Date.now(),
+          sourceGeneration: healthyFile.stat.mtime,
+        },
+      ],
+      null,
+      0,
+      failures as any,
+    );
+
+    expect(database.db.hybridIndexedFileRefs.bulkGet).toHaveBeenCalledWith([
+      corruptFile.path,
+      healthyFile.path,
+    ]);
+    expect(hybridEngine.deleteFile).toHaveBeenCalledWith(corruptFile.path, {
+      persistIndices: false,
+    });
+    expect(hybridEngine.deleteFile).not.toHaveBeenCalledWith(healthyFile.path, {
+      persistIndices: false,
+    });
+    expect(
+      hybridEngine.deleteFile.mock.invocationCallOrder[0],
+    ).toBeLessThan(hybridEngine.indexFileStrict.mock.invocationCallOrder[0]);
 
     manager.onunload();
   });

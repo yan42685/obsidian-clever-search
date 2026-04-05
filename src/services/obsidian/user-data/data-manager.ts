@@ -113,6 +113,11 @@ type HybridStoredPathSummary = {
   indexedFileRef?: HybridIndexedFileRef;
 };
 
+type HybridStoredPathInspection = {
+  summary: HybridStoredPathSummary;
+  consistency: ReturnType<typeof analyzeHybridStoredFileConsistency>;
+};
+
 type HybridRuntimeQueryGateState = "blocked" | "open";
 export type {
   HybridAvailabilityState,
@@ -2072,6 +2077,27 @@ export class DataManager {
         (item): item is { task: HybridRepairTask; file: TFile } =>
           item !== null,
       );
+    const taskInspections = await this.inspectHybridStoredPaths(
+      files.map((item) => item.task.path),
+      new Set(files.map((item) => item.task.path)),
+    );
+    for (const item of files) {
+      const inspection = taskInspections.get(item.task.path);
+      if (!inspection || inspection.consistency.repairReasons.length === 0) {
+        continue;
+      }
+      logger.debug(
+        `hybrid repair clearing inconsistent local state for ${item.task.path}: ${inspection.consistency.repairReasons.join(", ")}`,
+      );
+      await this.hybridEngine
+        .deleteFile(item.task.path, { persistIndices: false })
+        .catch((error) =>
+          logger.warn(
+            `hybrid repair pre-clean failed for ${item.task.path}:`,
+            error,
+          ),
+        );
+    }
     const largeFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
     const normalFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
     for (const item of files) {
@@ -2766,6 +2792,123 @@ export class DataManager {
     return created;
   }
 
+  private buildHybridStoredPathInspection(
+    summary: HybridStoredPathSummary,
+    existsInVault: boolean,
+  ): HybridStoredPathInspection {
+    return {
+      summary,
+      consistency: analyzeHybridStoredFileConsistency({
+        existsInVault,
+        hasChunks: summary.chunkCount > 0,
+        chunkCount: summary.chunkCount,
+        snapshot:
+          summary.currentSnapshotGeneration !== undefined
+            ? { generation: summary.currentSnapshotGeneration }
+            : undefined,
+        shadowSnapshot:
+          summary.shadowSnapshotGeneration !== undefined
+            ? { generation: summary.shadowSnapshotGeneration }
+            : undefined,
+        vectorInfo: summary.vectorInfo,
+        indexedFileRef: summary.indexedFileRef,
+        currentPrecision:
+          this.setting.hybrid.vectorCompression === "float16"
+            ? "float16"
+            : "int8",
+      }),
+    };
+  }
+
+  private async collectHybridStoredPathSummariesForPaths(
+    paths: readonly string[],
+  ): Promise<Map<string, HybridStoredPathSummary>> {
+    const uniquePaths = Array.from(new Set(paths));
+    const summaries = new Map<string, HybridStoredPathSummary>();
+    if (uniquePaths.length === 0) {
+      return summaries;
+    }
+
+    for (const path of uniquePaths) {
+      summaries.set(path, { chunkCount: 0 });
+    }
+
+    for (
+      let start = 0;
+      start < uniquePaths.length;
+      start += DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE
+    ) {
+      const batchPaths = uniquePaths.slice(
+        start,
+        start + DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+      );
+      const [chunkRows, vectorRows, indexedFileRefs, snapshotRows, shadowRows] =
+        await Promise.all([
+          this.database.db.hybridChunks
+            .where("filePath")
+            .anyOf(batchPaths)
+            .toArray(),
+          this.database.db.hybridChunkVectors.bulkGet(batchPaths),
+          this.database.db.hybridIndexedFileRefs.bulkGet(batchPaths),
+          this.database.db.fileSnapshots.bulkGet(batchPaths),
+          this.database.db.hybridDirtyShadows.bulkGet(batchPaths),
+        ]);
+
+      for (const row of chunkRows) {
+        const summary = this.getOrCreateHybridStoredPathSummary(
+          summaries,
+          row.filePath,
+        );
+        summary.chunkCount += 1;
+      }
+
+      for (let index = 0; index < batchPaths.length; index++) {
+        const path = batchPaths[index];
+        const summary = this.getOrCreateHybridStoredPathSummary(summaries, path);
+        const vectorRow = vectorRows[index];
+        if (vectorRow) {
+          summary.vectorInfo = {
+            precision: (vectorRow.precision === "float16"
+              ? "float16"
+              : "int8") as VectorPrecision,
+            chunkCount: vectorRow.chunkCount,
+            generation: vectorRow.generation,
+          };
+        }
+        const indexedFileRef = indexedFileRefs[index];
+        if (indexedFileRef) {
+          summary.indexedFileRef = indexedFileRef;
+        }
+        const snapshotRow = snapshotRows[index];
+        if (snapshotRow) {
+          summary.currentSnapshotGeneration = snapshotRow.generation;
+        }
+        const shadowRow = shadowRows[index];
+        if (shadowRow) {
+          summary.shadowSnapshotGeneration = shadowRow.generation;
+        }
+      }
+    }
+
+    return summaries;
+  }
+
+  private async inspectHybridStoredPaths(
+    paths: readonly string[],
+    existingPaths: ReadonlySet<string>,
+  ): Promise<Map<string, HybridStoredPathInspection>> {
+    const summaries = await this.collectHybridStoredPathSummariesForPaths(paths);
+    const inspections = new Map<string, HybridStoredPathInspection>();
+    for (const path of Array.from(new Set(paths))) {
+      const summary = summaries.get(path) ?? { chunkCount: 0 };
+      inspections.set(
+        path,
+        this.buildHybridStoredPathInspection(summary, existingPaths.has(path)),
+      );
+    }
+    return inspections;
+  }
+
   private async collectHybridStoredPathSummaries(): Promise<
     Map<string, HybridStoredPathSummary>
   > {
@@ -2914,8 +3057,6 @@ export class DataManager {
   ): Promise<HybridStorageRepairReport> {
     const summaries = await this.collectHybridStoredPathSummaries();
     const previousIndexedFileRefs = new Map<string, HybridIndexedFileRef>();
-    const currentPrecision =
-      this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8";
     const repairedPaths = new Set<string>();
     const reindexedPaths = new Set<string>();
 
@@ -2925,22 +3066,10 @@ export class DataManager {
       if (indexedFileRef) {
         previousIndexedFileRefs.set(path, indexedFileRef);
       }
-      const consistency = analyzeHybridStoredFileConsistency({
-        existsInVault: existsNow,
-        hasChunks: summary.chunkCount > 0,
-        chunkCount: summary.chunkCount,
-        snapshot:
-          summary.currentSnapshotGeneration !== undefined
-            ? { generation: summary.currentSnapshotGeneration }
-            : undefined,
-        shadowSnapshot:
-          summary.shadowSnapshotGeneration !== undefined
-            ? { generation: summary.shadowSnapshotGeneration }
-            : undefined,
-        vectorInfo: summary.vectorInfo,
-        indexedFileRef,
-        currentPrecision,
-      });
+      const { consistency } = this.buildHybridStoredPathInspection(
+        summary,
+        existsNow,
+      );
       if (consistency.repairReasons.length === 0) {
         continue;
       }
