@@ -138,6 +138,28 @@ export class SearchService {
 		);
 	}
 
+	private getCurrentHybridAvailabilityReasons(): HybridAvailabilityReason[] {
+		return getInstance(DataManager).getHybridAvailabilityState().reasons;
+	}
+
+	private async buildLexicalFallbackResult(
+		queryText: string,
+		options: {
+			hybridAvailabilityReasons?: HybridAvailabilityReason[];
+			noticeKeys?: Array<SearchResult["hybridFallbackNoticeKey"]>;
+		} = {},
+	): Promise<SearchResult> {
+		const lexicalResult = await this.searchInVaultLexical(queryText, {
+			hybridAvailabilityReasons:
+				options.hybridAvailabilityReasons ??
+				this.getCurrentHybridAvailabilityReasons(),
+		});
+		return this.attachHybridFallbackNotice(
+			lexicalResult,
+			...(options.noticeKeys ?? []),
+		);
+	}
+
 	async prepareSearchInVaultHybrid(
 		queryText: string,
 		signal?: AbortSignal,
@@ -158,15 +180,12 @@ export class SearchService {
 			};
 		}
 		if (hybridAvailability.query === "unavailable") {
-			const lexicalResult = await this.searchInVaultLexical(queryText, {
-				hybridAvailabilityReasons: hybridAvailability.reasons,
-			});
 			return {
 				prepared: null,
-				result: this.attachHybridFallbackNotice(
-					lexicalResult,
-					hybridAvailability.prompt.fallbackNoticeKey,
-				),
+				result: await this.buildLexicalFallbackResult(queryText, {
+					hybridAvailabilityReasons: hybridAvailability.reasons,
+					noticeKeys: [hybridAvailability.prompt.fallbackNoticeKey],
+				}),
 			};
 		}
 
@@ -183,27 +202,21 @@ export class SearchService {
 				"hybrid lexical-lane prepare failed; falling back to lexical search.",
 				error,
 			);
-			const lexicalResult = await this.searchInVaultLexical(queryText, {
-				hybridAvailabilityReasons: hybridAvailability.reasons,
-			});
 			return {
 				prepared: null,
-				result: this.attachHybridFallbackNotice(
-					lexicalResult,
-					"hybridNotice.searchFallbackToLexical",
-				),
+				result: await this.buildLexicalFallbackResult(queryText, {
+					hybridAvailabilityReasons: hybridAvailability.reasons,
+					noticeKeys: ["hybridNotice.searchFallbackToLexical"],
+				}),
 			};
 		}
 		if (prepared.fallbackToLexicalSearch) {
-			const lexicalResult = await this.searchInVaultLexical(queryText, {
-				hybridAvailabilityReasons: hybridAvailability.reasons,
-			});
 			return {
 				prepared: null,
-				result: this.attachHybridFallbackNotice(
-					lexicalResult,
-					prepared.fallbackNoticeKey,
-				),
+				result: await this.buildLexicalFallbackResult(queryText, {
+					hybridAvailabilityReasons: hybridAvailability.reasons,
+					noticeKeys: [prepared.fallbackNoticeKey],
+				}),
 			};
 		}
 		const sourcePath =
@@ -230,14 +243,9 @@ export class SearchService {
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
 		if (prepared.fallbackToLexicalSearch) {
-			const lexicalResult = await this.searchInVaultLexical(prepared.query, {
-				hybridAvailabilityReasons:
-					getInstance(DataManager).getHybridAvailabilityState().reasons,
+			return await this.buildLexicalFallbackResult(prepared.query, {
+				noticeKeys: [prepared.fallbackNoticeKey],
 			});
-			return this.attachHybridFallbackNotice(
-				lexicalResult,
-				prepared.fallbackNoticeKey,
-			);
 		}
 		if (mode === "lexical-lane") {
 			return this.buildHybridSearchResult(
@@ -252,14 +260,9 @@ export class SearchService {
 			signal,
 		);
 		if (finalized.fallbackToLexicalSearch) {
-			const lexicalResult = await this.searchInVaultLexical(prepared.query, {
-				hybridAvailabilityReasons:
-					getInstance(DataManager).getHybridAvailabilityState().reasons,
+			return await this.buildLexicalFallbackResult(prepared.query, {
+				noticeKeys: [finalized.fallbackNoticeKey],
 			});
-			return this.attachHybridFallbackNotice(
-				lexicalResult,
-				finalized.fallbackNoticeKey,
-			);
 		}
 		return this.buildHybridSearchResult(
 			sourcePath,
