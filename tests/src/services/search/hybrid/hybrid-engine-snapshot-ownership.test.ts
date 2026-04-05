@@ -119,6 +119,21 @@ function createChunkTable(initialRows: HybridChunkRow[] = []) {
           return {
             toArray: async () =>
               rows.filter((row) => row.filePath === filePath),
+            sortBy: async (field: keyof HybridChunkRow) =>
+              rows
+                .filter((row) => row.filePath === filePath)
+                .slice()
+                .sort((left, right) => {
+                  const leftValue = left[field];
+                  const rightValue = right[field];
+                  if (
+                    typeof leftValue === "number" &&
+                    typeof rightValue === "number"
+                  ) {
+                    return leftValue - rightValue;
+                  }
+                  return String(leftValue).localeCompare(String(rightValue));
+                }),
             count: async () =>
               rows.filter((row) => row.filePath === filePath).length,
           };
@@ -304,6 +319,7 @@ function createEngineHarness() {
   engine.hnswSmall = {
     clear: jest.fn(),
     delete: jest.fn(),
+    hasDeletedNodes: jest.fn(() => false),
     isNonEmpty: jest.fn(() => false),
     hasVectors: jest.fn(() => false),
     needsRebuild: jest.fn(() => false),
@@ -509,6 +525,32 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(indexedRefTable.rows.size).toBe(0);
     expect(hnswTable.rows.size).toBe(0);
     expect((engine as any).hnswSmall.clear).toHaveBeenCalledWith("int8");
+  });
+
+  test("indexFileStrict persists a stable zero-chunk ref for empty files", async () => {
+    const { engine, chunkTable, snapshotTable, vectorTable, indexedRefTable } =
+      createEngineHarness();
+
+    await engine.indexFileStrict("docs/empty.md", "\n\n", 410, {
+      persistIndices: false,
+    });
+
+    expect(chunkTable.rows).toEqual([]);
+    expect(await vectorTable.get("docs/empty.md")).toBeUndefined();
+    expect(await snapshotTable.get("docs/empty.md")).toEqual({
+      filePath: "docs/empty.md",
+      plainText: "\n\n",
+      generation: 410,
+    });
+    expect(await indexedRefTable.get("docs/empty.md")).toEqual({
+      path: "docs/empty.md",
+      generation: 410,
+      state: "ready",
+      chunkCount: 0,
+      vectorPrecision: null,
+      indexedAt: expect.any(Number),
+      lastIncrementalEmbedAt: expect.any(Number),
+    });
   });
 
   test("moveFile rewrites only hybrid-private rows and leaves shared snapshots untouched", async () => {

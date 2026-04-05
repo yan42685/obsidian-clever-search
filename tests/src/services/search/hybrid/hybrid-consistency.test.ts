@@ -45,6 +45,25 @@ describe("Hybrid stored file consistency", () => {
     expect(result.reuseBlockedReasons).toContain("ready_missing_data");
   });
 
+  test("accepts explicit zero-chunk ready refs for empty files", () => {
+    const result = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: false,
+      chunkCount: 0,
+      snapshot: { generation: 15 },
+      indexedFileRef: {
+        path: "empty.md",
+        state: "ready",
+        chunkCount: 0,
+        generation: 15,
+      },
+      currentPrecision: "int8",
+    });
+
+    expect(result.reuseBlockedReasons).toEqual([]);
+    expect(result.repairReasons).toEqual([]);
+  });
+
   test("blocks reuse when lexical_only file still has vectors", () => {
     const result = analyzeHybridStoredFileConsistency({
       existsInVault: true,

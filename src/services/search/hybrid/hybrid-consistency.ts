@@ -65,6 +65,11 @@ export function analyzeHybridStoredFileConsistency(
 	const hasSnapshot = input.snapshot !== undefined || hasShadowSnapshot;
 	const hasVector = input.vectorInfo !== undefined;
 	const hasIndexedFileRef = input.indexedFileRef !== undefined;
+	const isExplicitZeroChunkRef =
+		hasIndexedFileRef &&
+		(input.indexedFileRef?.chunkCount ?? undefined) === 0 &&
+		!input.hasChunks &&
+		!hasVector;
 	const indexedFileState = normalizeHybridIndexedFileState(
 		input.indexedFileRef,
 		hasVector,
@@ -90,7 +95,7 @@ export function analyzeHybridStoredFileConsistency(
 	) {
 		pushReuseReason(`indexed_file_state_${indexedFileState}`);
 	}
-	if (hasIndexedFileRef && !input.hasChunks) {
+	if (hasIndexedFileRef && !input.hasChunks && !isExplicitZeroChunkRef) {
 		pushReuseReason("indexed_file_ref_missing_chunks");
 	}
 	if (hasIndexedFileRef && !hasSnapshot) {
@@ -98,7 +103,10 @@ export function analyzeHybridStoredFileConsistency(
 	}
 	if (
 		indexedFileState === "ready" &&
-		(!input.hasChunks || !hasSnapshot || !hasVector || !hasIndexedFileRef)
+		((!input.hasChunks && !isExplicitZeroChunkRef) ||
+			!hasSnapshot ||
+			(!hasVector && !isExplicitZeroChunkRef) ||
+			!hasIndexedFileRef)
 	) {
 		pushReuseReason("ready_missing_data");
 	}

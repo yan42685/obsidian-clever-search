@@ -692,7 +692,17 @@ export class HybridEngine {
           ),
       );
       if (plannedChunks.length === 0) {
-        await this.deleteHybridIndexedFileRef(filePath);
+        const indexedAt = Date.now();
+        await this.persistSnapshot(filePath, plainText, generation);
+        await this.putHybridIndexedFileRef({
+          path: filePath,
+          state: "ready",
+          generation,
+          chunkCount: 0,
+          vectorPrecision: null,
+          indexedAt,
+          lastIncrementalEmbedAt: indexedAt,
+        });
         if (option.persistIndices ?? true) {
           await this.persistIndices();
         }
