@@ -35,6 +35,7 @@ import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import {
 	DataManager,
+	type HybridAvailabilityState,
 	type HybridDeferredEmbeddingSummary,
 	type HybridHealthSummary,
 } from "./user-data/data-manager";
@@ -659,6 +660,7 @@ function appendHybridStatusLine(
 function renderHybridHealthSummary(
 	container: HTMLElement,
 	summary: HybridHealthSummary,
+	availabilityState: HybridAvailabilityState,
 ) {
 	container.empty();
 	appendHybridStatusLine(
@@ -666,6 +668,28 @@ function renderHybridHealthSummary(
 		t("hybridModal.healthSummary.status"),
 		t(`hybridModal.healthSummary.state.${summary.state}` as any),
 	);
+	appendHybridStatusLine(
+		container,
+		"Runtime",
+		[
+			`bootstrap ${availabilityState.bootstrap}`,
+			`query ${availabilityState.query}`,
+		].join(" | "),
+	);
+	if (availabilityState.reasons.length > 0) {
+		appendHybridStatusLine(
+			container,
+			"Reasons",
+			availabilityState.reasons.join(" | "),
+		);
+	}
+	if (availabilityState.prompt.blockingNoticeKey) {
+		appendHybridStatusLine(
+			container,
+			"Notice",
+			t(availabilityState.prompt.blockingNoticeKey),
+		);
+	}
 	appendHybridStatusLine(
 		container,
 		t("hybridModal.healthSummary.engine"),
@@ -743,8 +767,14 @@ class HybridHealthSummaryModal extends Modal {
 	private async runHealthCheck() {
 		this.summaryEl.setText(t("hybridModal.healthSummary.loading"));
 		try {
-			const summary = await getInstance(DataManager).getHybridHealthSummary();
-			renderHybridHealthSummary(this.summaryEl, summary);
+			const dataManager = getInstance(DataManager);
+			const summary = await dataManager.getHybridHealthSummary();
+			const availabilityState = dataManager.getHybridAvailabilityState();
+			renderHybridHealthSummary(
+				this.summaryEl,
+				summary,
+				availabilityState,
+			);
 		} catch (error) {
 			logger.error("failed to load hybrid health summary:", error);
 			this.summaryEl.setText("Failed to load local health summary.");

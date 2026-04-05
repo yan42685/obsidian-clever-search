@@ -101,6 +101,13 @@
 
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
+	function hasHybridEmbeddingIncomplete(result: SearchResult): boolean {
+		return (
+			result.hybridEmbeddingIncomplete === true ||
+			result.hybridAvailabilityReasons.includes("embedding_incomplete")
+		);
+	}
+
 	// TODO: use virtual list rather than rendering all buttons
 
 	// updates focused content and selected file index
@@ -168,7 +175,7 @@
 				searchType === SearchType.IN_VAULT &&
 				!isHybrid &&
 				searchResult.items.length === 0 &&
-				!searchResult.hybridEmbeddingIncomplete
+				!hasHybridEmbeddingIncomplete(searchResult)
 			) {
 				autoHybridFallback.schedule(currentQueryText, requestId);
 			} else {
@@ -212,7 +219,7 @@
 			searchType === SearchType.IN_VAULT &&
 			!isHybrid &&
 			nextResult.items.length === 0 &&
-			!nextResult.hybridEmbeddingIncomplete
+			!hasHybridEmbeddingIncomplete(nextResult)
 		) {
 			autoHybridFallback.schedule(currentQueryText, requestId);
 		} else {
@@ -493,7 +500,7 @@
 							</ul>
 						</div>
 					{:else}
-						{#if searchResult.hybridEmbeddingIncomplete}
+						{#if hasHybridEmbeddingIncomplete(searchResult)}
 							<div class="hybrid-fallback-failure">
 								<span class="hybrid-fallback-failure-detail">
 									{t("hybridModal.embeddingIncompleteFallback.title")}

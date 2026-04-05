@@ -102,11 +102,13 @@ export class SearchService {
 		items: SearchResult["items"],
 		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
 	): SearchResult {
+		const hybridAvailability = getInstance(DataManager).getHybridAvailabilityState();
 		return new SearchResult(
 			sourcePath,
 			items,
 			this.resolveHybridFallbackNoticeKey(...noticeKeys),
-			false,
+			undefined,
+			hybridAvailability.reasons,
 		);
 	}
 
@@ -126,6 +128,7 @@ export class SearchService {
 		signal?: AbortSignal,
 	): Promise<PreparedHybridSearchResult> {
 		const dataManager = getInstance(DataManager);
+		const hybridAvailability = dataManager.getHybridAvailabilityState();
 		const blocked = this.getBlockedSearchResult(queryText);
 		if (blocked) {
 			return {
@@ -139,10 +142,12 @@ export class SearchService {
 				result: new SearchResult("no result", []),
 			};
 		}
-		if (dataManager.isHybridSearchUnavailable()) {
+		if (hybridAvailability.query === "unavailable") {
 			return {
 				prepared: null,
-				result: await this.searchInVaultLexical(queryText),
+				result: await this.searchInVaultLexical(queryText, {
+					hybridAvailabilityReasons: hybridAvailability.reasons,
+				}),
 			};
 		}
 
@@ -161,13 +166,17 @@ export class SearchService {
 			);
 			return {
 				prepared: null,
-				result: await this.searchInVaultLexical(queryText),
+				result: await this.searchInVaultLexical(queryText, {
+					hybridAvailabilityReasons: hybridAvailability.reasons,
+				}),
 			};
 		}
 		if (prepared.fallbackToLexicalSearch) {
 			return {
 				prepared: null,
-				result: await this.searchInVaultLexical(queryText),
+				result: await this.searchInVaultLexical(queryText, {
+					hybridAvailabilityReasons: hybridAvailability.reasons,
+				}),
 			};
 		}
 		const sourcePath =
@@ -194,7 +203,10 @@ export class SearchService {
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
 		if (prepared.fallbackToLexicalSearch) {
-			return await this.searchInVaultLexical(prepared.query);
+			return await this.searchInVaultLexical(prepared.query, {
+				hybridAvailabilityReasons:
+					getInstance(DataManager).getHybridAvailabilityState().reasons,
+			});
 		}
 		if (mode === "lexical-lane") {
 			return this.buildHybridSearchResult(
@@ -209,7 +221,10 @@ export class SearchService {
 			signal,
 		);
 		if (finalized.fallbackToLexicalSearch) {
-			return await this.searchInVaultLexical(prepared.query);
+			return await this.searchInVaultLexical(prepared.query, {
+				hybridAvailabilityReasons:
+					getInstance(DataManager).getHybridAvailabilityState().reasons,
+			});
 		}
 		return this.buildHybridSearchResult(
 			sourcePath,
@@ -236,14 +251,15 @@ export class SearchService {
 	private async searchInVaultLexical(
 		queryText: string,
 		options: {
-			hybridEmbeddingIncomplete?: boolean;
+			hybridAvailabilityReasons?: string[];
 		} = {},
 	): Promise<SearchResult> {
 		const result = new SearchResult(
 			"no result",
 			[],
 			null,
-			options.hybridEmbeddingIncomplete ?? false,
+			undefined,
+			options.hybridAvailabilityReasons ?? [],
 		);
 		if (queryText.length === 0) {
 			return result;
@@ -290,7 +306,8 @@ export class SearchService {
 				);
 			}),
 			null,
-			options.hybridEmbeddingIncomplete ?? false,
+			undefined,
+			options.hybridAvailabilityReasons ?? [],
 		);
 	}
 
@@ -582,10 +599,7 @@ export class SearchService {
 			);
 			return new LineItem(highlightedLine, paragraphContext.text);
 		});
-		return {
-			sourcePath: activeFile.path,
-			items: lineItems,
-		} as SearchResult;
+		return new SearchResult(activeFile.path, lineItems);
 	}
 
 	private getBlockedSearchResult(queryText: string): SearchResult | null {
@@ -593,10 +607,11 @@ export class SearchService {
 			return null;
 		}
 		const dataManager = getInstance(DataManager);
-		if (dataManager.isSearchSearchable()) {
+		const lexicalAvailability = dataManager.getLexicalAvailabilityState();
+		if (lexicalAvailability.searchable) {
 			return null;
 		}
-		const noticeKey = dataManager.getSearchBootstrapNoticeKey();
+		const noticeKey = lexicalAvailability.blockingNoticeKey;
 		if (noticeKey) {
 			this.noticeSearchBootstrapBlocked(t(noticeKey));
 		}

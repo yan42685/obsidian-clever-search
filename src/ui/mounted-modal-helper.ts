@@ -13,6 +13,7 @@ import {
 	DataManager,
 	type HybridFreshnessSummary,
 } from "src/services/obsidian/user-data/data-manager";
+import { resolveHybridFreshnessState } from "src/services/obsidian/user-data/search-availability";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { getInstance } from "src/utils/my-lib";
 
@@ -467,29 +468,25 @@ export class HybridFreshnessNoticeController {
 	private buildNoticeState(
 		summary: HybridFreshnessSummary,
 	): HybridFreshnessNoticeState {
-		const clauses: string[] = [];
-		if (summary.updatingFileCount > 0) {
-			clauses.push(
-				`${t("hybridModal.freshnessNotice.updatingPrefix")}${summary.updatingFileCount}${t("hybridModal.freshnessNotice.updatingSuffix")}`,
-			);
-		}
-		if (summary.repairFileCount > 0) {
-			clauses.push(
-				`${t("hybridModal.freshnessNotice.repairPrefix")}${summary.repairFileCount}${t("hybridModal.freshnessNotice.repairSuffix")}`,
-			);
-		}
-		if (clauses.length === 0) {
+		const freshnessState = resolveHybridFreshnessState({
+			updatingFileCount: summary.updatingFileCount,
+			repairFileCount: summary.repairFileCount,
+		});
+		if (freshnessState === "current") {
 			return createHiddenHybridFreshnessNoticeState();
 		}
 
 		return {
 			visible: true,
-			message: this.buildMessage(summary),
+			message: this.buildMessage(summary, freshnessState),
 		};
 	}
 
-	private buildMessage(summary: HybridFreshnessSummary): string {
-		if (summary.updatingFileCount > 0 && summary.repairFileCount > 0) {
+	private buildMessage(
+		summary: HybridFreshnessSummary,
+		freshnessState: ReturnType<typeof resolveHybridFreshnessState>,
+	): string {
+		if (freshnessState === "partial") {
 			return [
 				t("hybridModal.freshnessNotice.messageBothPrefix"),
 				String(summary.updatingFileCount),
@@ -500,7 +497,7 @@ export class HybridFreshnessNoticeController {
 				t("hybridModal.freshnessNotice.detailTail"),
 			].join("");
 		}
-		if (summary.updatingFileCount > 0) {
+		if (freshnessState === "updating") {
 			return [
 				t("hybridModal.freshnessNotice.messageUpdatingOnlyPrefix"),
 				String(summary.updatingFileCount),

@@ -68,6 +68,17 @@ import {
 } from "./hybrid-bootstrap-coordinator";
 import { HybridRecoveryCoordinator } from "./hybrid-recovery-coordinator";
 import type { HybridFailedEmbeddingSummary } from "./hybrid-embedding-recovery-manager";
+import {
+  buildHybridAvailabilityState,
+  buildLexicalAvailabilityState,
+  resolveHybridHealthSummaryState,
+} from "./search-availability";
+import type {
+  HybridAvailabilityState,
+  HybridHealthSummaryState,
+  LexicalAvailabilityState,
+  SearchBootstrapState,
+} from "./search-availability";
 
 type LexicalIndexFailure = IndexedDocumentFailure;
 
@@ -103,12 +114,12 @@ type HybridStoredPathSummary = {
 };
 
 type HybridSearchAvailability = "blocked" | "available";
-export type SearchBootstrapState =
-  | "blocked"
-  | "restoring"
-  | "healing"
-  | "searchable"
-  | "failed";
+export type {
+  HybridAvailabilityState,
+  HybridHealthSummaryState,
+  LexicalAvailabilityState,
+  SearchBootstrapState,
+};
 
 type SearchBootstrapPhase = "restore" | "heal";
 type SearchBootstrapComponent = "lexical" | "hybrid";
@@ -243,14 +254,6 @@ export type HybridFreshnessSummary = {
   repairSamplePaths: string[];
   updatedAt: number;
 };
-
-export type HybridHealthSummaryState =
-  | "disabled"
-  | "empty"
-  | "ready"
-  | "lexical_only"
-  | "degraded"
-  | "partial";
 
 export type HybridHealthSummary = {
   state: HybridHealthSummaryState;
@@ -457,6 +460,20 @@ export class DataManager {
     return this.hybridRecoveryCoordinator.hasFailures();
   }
 
+  private hasIncompleteHybridEmbeddings(): boolean {
+    if (!this.hybridEngine.isEnabled()) {
+      return false;
+    }
+    if (this.hybridRecoveryCoordinator.hasFailures()) {
+      return true;
+    }
+    return (
+      this.hybridRecoveryCoordinator.getDeferredSummary(
+        this.countHybridTrackedFiles(),
+      ).deferredCount > 0
+    );
+  }
+
   getHybridFailedEmbeddingSummary(): HybridFailedEmbeddingSummary {
     return this.hybridRecoveryCoordinator.getFailureSummary(
       this.countHybridTrackedFiles(),
@@ -618,7 +635,7 @@ export class DataManager {
       }
     }
 
-    const state = this.resolveHybridHealthSummaryState({
+    const state = resolveHybridHealthSummaryState({
       enabled: this.hybridEngine.isEnabled(),
       trackedFileCount: freshnessSummary.totalTrackedFiles,
       storedPathCount: summaries.size,
@@ -654,48 +671,6 @@ export class DataManager {
 
   private countHybridTrackedFiles(): number {
     return this.getHybridTrackedFiles().length;
-  }
-
-  private resolveHybridHealthSummaryState(input: {
-    enabled: boolean;
-    trackedFileCount: number;
-    storedPathCount: number;
-    indexedFileRefCount: number;
-    readyFileCount: number;
-    lexicalOnlyFileCount: number;
-    unstableFileCount: number;
-    updatingFileCount: number;
-    repairFileCount: number;
-    shadowAlignedSnapshotCount: number;
-    shadowMismatchCount: number;
-  }): HybridHealthSummaryState {
-    if (!input.enabled) {
-      return "disabled";
-    }
-    if (input.storedPathCount === 0 && input.indexedFileRefCount === 0) {
-      return "empty";
-    }
-    if (input.repairFileCount > 0 || input.unstableFileCount > 0) {
-      return "degraded";
-    }
-    if (
-      input.readyFileCount === 0 &&
-      input.lexicalOnlyFileCount > 0 &&
-      input.shadowMismatchCount === 0 &&
-      input.shadowAlignedSnapshotCount === 0 &&
-      input.updatingFileCount === 0
-    ) {
-      return "lexical_only";
-    }
-    if (
-      input.shadowMismatchCount > 0 ||
-      input.shadowAlignedSnapshotCount > 0 ||
-      input.updatingFileCount > 0 ||
-      input.indexedFileRefCount < input.trackedFileCount
-    ) {
-      return "partial";
-    }
-    return "ready";
   }
 
   private getHybridTrackedFiles(): TFile[] {
@@ -2212,21 +2187,6 @@ export class DataManager {
     );
   }
 
-  isHybridSearchUnavailable(): boolean {
-    return (
-      this.hybridSearchAvailability === "blocked" ||
-      !this.hybridEngine.canServeQuery()
-    );
-  }
-
-  isSearchSearchable(): boolean {
-    return this.lexicalBootstrapState === "searchable";
-  }
-
-  getSearchBootstrapState(): SearchBootstrapState {
-    return this.lexicalBootstrapState;
-  }
-
   getLexicalBootstrapState(): SearchBootstrapState {
     return this.lexicalBootstrapState;
   }
@@ -2246,17 +2206,21 @@ export class DataManager {
     };
   }
 
-  getSearchBootstrapNoticeKey(): LocaleKey | null {
-    switch (this.lexicalBootstrapState) {
-      case "restoring":
-        return "searchBootstrap.restoring";
-      case "healing":
-        return "searchBootstrap.healing";
-      case "failed":
-        return "searchBootstrap.failed";
-      default:
-        return null;
-    }
+  getLexicalAvailabilityState(): LexicalAvailabilityState {
+    return buildLexicalAvailabilityState(this.lexicalBootstrapState);
+  }
+
+  getHybridAvailabilityState(): HybridAvailabilityState {
+    return buildHybridAvailabilityState({
+      enabled: this.hybridEngine.isEnabled(),
+      bootstrap: this.hybridBootstrapState,
+      canServeQuery:
+        this.hybridSearchAvailability === "available" &&
+        this.hybridEngine.canServeQuery(),
+      canSearch: this.hybridEngine.canSearch(),
+      hasFailures: this.hybridRecoveryCoordinator.hasFailures(),
+      hasIncompleteEmbeddings: this.hasIncompleteHybridEmbeddings(),
+    });
   }
 
   private setHybridSearchAvailability(

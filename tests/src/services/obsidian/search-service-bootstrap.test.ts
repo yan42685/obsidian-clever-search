@@ -114,6 +114,7 @@ describe("SearchService bootstrap gate", () => {
 		hybridCanServeQuery?: boolean;
 		hybridReady?: boolean;
 		hybridUnavailable?: boolean;
+		hybridAvailabilityReasons?: string[];
 		lexicalMatches?: any[];
 		hybridItems?: any[];
 		lexicalBackend?: "minisearch" | "coverage-lexical";
@@ -172,11 +173,28 @@ describe("SearchService bootstrap gate", () => {
 			viewTypeByPath: jest.fn(() => ViewType.MARKDOWN),
 		};
 		const dataManager = {
-			isSearchSearchable: jest.fn(() => options.searchable),
-			getSearchBootstrapNoticeKey: jest.fn(() =>
-				options.searchable ? null : "searchBootstrap.restoring",
-			),
-			isHybridSearchUnavailable: jest.fn(() => options.hybridUnavailable ?? false),
+			getLexicalAvailabilityState: jest.fn(() => ({
+				bootstrap: options.searchable ? "searchable" : "restoring",
+				searchable: options.searchable,
+				blockingNoticeKey: options.searchable
+					? null
+					: "searchBootstrap.restoring",
+			})),
+			getHybridAvailabilityState: jest.fn(() => ({
+				enabled: options.hybridEnabled ?? false,
+				bootstrap: options.searchable ? "searchable" : "restoring",
+				query:
+					options.hybridUnavailable ?? false
+						? "unavailable"
+						: "ready",
+				reasons: options.hybridAvailabilityReasons ?? [],
+				prompt: {
+					blockingNoticeKey: options.searchable
+						? null
+						: "searchBootstrap.restoring",
+					fallbackNoticeKey: null,
+				},
+			})),
 			hasHybridFailedEmbeddings: jest.fn(() => false),
 		};
 
@@ -361,7 +379,7 @@ describe("SearchService bootstrap gate", () => {
 
 		const result = await service.searchInVaultHybrid("hybrid");
 
-		expect(dataManager.isHybridSearchUnavailable).toHaveBeenCalled();
+		expect(dataManager.getHybridAvailabilityState).toHaveBeenCalled();
 		expect(mockHybridEngine.prepareRecall).toHaveBeenCalledWith("hybrid", 10, undefined);
 		expect((result.items[0] as any).path).toBe("notes/lexical-only.md");
 	});
@@ -373,6 +391,7 @@ describe("SearchService bootstrap gate", () => {
 			hybridReady: true,
 			hybridCanServeQuery: true,
 			hybridUnavailable: true,
+			hybridAvailabilityReasons: ["embedding_incomplete"],
 			lexicalMatches: [
 				{
 					path: "notes/availability-fallback.md",
@@ -387,6 +406,8 @@ describe("SearchService bootstrap gate", () => {
 
 		expect(mockHybridEngine.prepareRecall).not.toHaveBeenCalled();
 		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("hybrid", 22, 10, 60);
+		expect(result.hybridAvailabilityReasons).toEqual(["embedding_incomplete"]);
+		expect(result.hybridEmbeddingIncomplete).toBe(true);
 		expect((result.items[0] as any).path).toBe("notes/availability-fallback.md");
 	});
 

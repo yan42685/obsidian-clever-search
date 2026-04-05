@@ -70,16 +70,21 @@ export class SearchResult {
   items: Item[];
   hybridFallbackNoticeKey?: LocaleKey | null;
   hybridEmbeddingIncomplete?: boolean;
+  hybridAvailabilityReasons: string[];
   constructor(
     currPath: string,
     items: Item[],
     hybridFallbackNoticeKey?: LocaleKey | null,
-    hybridEmbeddingIncomplete?: boolean,
+    legacyHybridEmbeddingIncomplete?: boolean,
+    hybridAvailabilityReasons: string[] = [],
   ) {
     this.sourcePath = currPath;
     this.items = items;
     this.hybridFallbackNoticeKey = hybridFallbackNoticeKey ?? null;
-    this.hybridEmbeddingIncomplete = hybridEmbeddingIncomplete ?? false;
+    this.hybridAvailabilityReasons = [...hybridAvailabilityReasons];
+    this.hybridEmbeddingIncomplete =
+      legacyHybridEmbeddingIncomplete === true ||
+      this.hybridAvailabilityReasons.includes("embedding_incomplete");
   }
 }
 

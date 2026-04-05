@@ -138,9 +138,21 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			viewTypeByPath: jest.fn(() => "markdown"),
 		});
 		mockInstanceMap.set(DataManager, {
-			isSearchSearchable: jest.fn(() => true),
-			getSearchBootstrapNoticeKey: jest.fn(() => null),
-			isHybridSearchUnavailable: jest.fn(() => false),
+			getLexicalAvailabilityState: jest.fn(() => ({
+				bootstrap: "searchable",
+				searchable: true,
+				blockingNoticeKey: null,
+			})),
+			getHybridAvailabilityState: jest.fn(() => ({
+				enabled: true,
+				bootstrap: "searchable",
+				query: "ready",
+				reasons: [],
+				prompt: {
+					blockingNoticeKey: null,
+					fallbackNoticeKey: null,
+				},
+			})),
 			hasHybridFailedEmbeddings: jest.fn(() => false),
 		});
 

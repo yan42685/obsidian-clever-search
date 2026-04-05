@@ -133,11 +133,12 @@ export class CommandRegistry {
 
 	private runWhenSearchSearchable(callback: () => void | Promise<void>): void {
 		const dataManager = getInstance(DataManager);
-		if (dataManager.isSearchSearchable()) {
+		const lexicalAvailability = dataManager.getLexicalAvailabilityState();
+		if (lexicalAvailability.searchable) {
 			void callback();
 			return;
 		}
-		const noticeKey = dataManager.getSearchBootstrapNoticeKey();
+		const noticeKey = lexicalAvailability.blockingNoticeKey;
 		if (noticeKey) {
 			new MyNotice(t(noticeKey), 2500);
 		}
