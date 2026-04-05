@@ -422,8 +422,8 @@ export class DataManager {
     dataProvider: this.dataProvider,
     hybridEngine: this.hybridEngine,
     shouldForceRefresh: () => this.shouldForceRefresh,
-    markSearchBlocked: () => this.blockHybridRuntimeQueryGate(),
-    syncSearchAvailability: () => this.syncHybridRuntimeQueryGateFromEngine(),
+    blockRuntimeQueryGate: () => this.blockHybridRuntimeQueryGate(),
+    syncRuntimeQueryGate: () => this.syncHybridRuntimeQueryGateFromEngine(),
     repairStoredState: (currFiles) => this.repairHybridStoredState(currFiles),
     restorePersistedRecoveryState: (currFiles, previousIndexedFileRefs) =>
       this.restorePersistedHybridRecoveryState(

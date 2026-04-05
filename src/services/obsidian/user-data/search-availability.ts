@@ -60,6 +60,30 @@ export function hasHybridAvailabilityReason(
 	return reasons.includes(reason);
 }
 
+export function formatHybridAvailabilityReason(
+	reason: HybridAvailabilityReason,
+): string {
+	switch (reason) {
+		case "disabled":
+			return "hybrid disabled";
+		case "runtime_gate_blocked":
+			return "runtime query gate blocked";
+		case "query_unavailable":
+			return "engine cannot serve query";
+		case "dense_unavailable":
+			return "dense retrieval unavailable";
+		case "repair_pending":
+			return "repair pending";
+		case "embedding_incomplete":
+			return "embedding incomplete";
+		default:
+			if (reason.startsWith("bootstrap_")) {
+				return `bootstrap ${reason.slice("bootstrap_".length)}`;
+			}
+			return reason;
+	}
+}
+
 export function resolveSearchBootstrapNoticeKey(
 	bootstrap: SearchBootstrapState,
 ): LocaleKey | null {

@@ -39,6 +39,7 @@ import {
 	type HybridDeferredEmbeddingSummary,
 	type HybridHealthSummary,
 } from "./user-data/data-manager";
+import { formatHybridAvailabilityReason } from "./user-data/search-availability";
 import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-recovery-manager";
 import { DataProvider } from "./user-data/data-provider";
 import { SearchHistoryService } from "./user-data/search-history-service";
@@ -680,7 +681,9 @@ function renderHybridHealthSummary(
 		appendHybridStatusLine(
 			container,
 			"Reasons",
-			availabilityState.reasons.join(" | "),
+			availabilityState.reasons
+				.map((reason) => formatHybridAvailabilityReason(reason))
+				.join(" | "),
 		);
 	}
 	if (availabilityState.prompt.blockingNoticeKey) {

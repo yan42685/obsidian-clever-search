@@ -1,6 +1,7 @@
 import {
 	buildHybridAvailabilityState,
 	buildLexicalAvailabilityState,
+	formatHybridAvailabilityReason,
 	resolveHybridFreshnessState,
 	resolveHybridHealthSummaryState,
 } from "src/services/obsidian/user-data/search-availability";
@@ -105,6 +106,18 @@ describe("search availability derivation", () => {
 			query: "unavailable",
 			reasons: ["runtime_gate_blocked"],
 		});
+	});
+
+	test("formats hybrid availability reasons for developer-facing diagnostics", () => {
+		expect(formatHybridAvailabilityReason("runtime_gate_blocked")).toBe(
+			"runtime query gate blocked",
+		);
+		expect(formatHybridAvailabilityReason("embedding_incomplete")).toBe(
+			"embedding incomplete",
+		);
+		expect(formatHybridAvailabilityReason("bootstrap_restoring")).toBe(
+			"bootstrap restoring",
+		);
 	});
 
 	test("derives hybrid freshness state from updating and repair counts", () => {

@@ -82,8 +82,8 @@ type HybridBootstrapCoordinatorOptions = {
   dataProvider: DataProvider;
   hybridEngine: HybridBootstrapEngine;
   shouldForceRefresh: () => boolean;
-  markSearchBlocked: () => void;
-  syncSearchAvailability: () => void;
+  blockRuntimeQueryGate: () => void;
+  syncRuntimeQueryGate: () => void;
   repairStoredState: (
     currFiles: Map<string, TFile>,
   ) => Promise<HybridStorageRepairReport>;
@@ -117,7 +117,7 @@ export class HybridBootstrapCoordinator {
 
   async preparePlan(): Promise<HybridBootstrapPlan | null> {
     if (!this.options.hybridEngine.isEnabled()) {
-      this.options.markSearchBlocked();
+      this.options.blockRuntimeQueryGate();
       return null;
     }
     beginHybridProfile("hybrid-init", {
@@ -161,7 +161,7 @@ export class HybridBootstrapCoordinator {
         docsToDelete,
       };
     } catch (error) {
-      this.options.markSearchBlocked();
+      this.options.blockRuntimeQueryGate();
       endHybridProfile({
         error: error instanceof Error ? error.message : String(error),
       });
@@ -248,7 +248,7 @@ export class HybridBootstrapCoordinator {
       logger.debug(
         `hybrid batch finished in ${Date.now() - hybridIndexStart} ms, failures=${failures.length}, persisted=true, repaired=${repairReport.repairedPaths.length}`,
       );
-      this.options.syncSearchAvailability();
+      this.options.syncRuntimeQueryGate();
       await this.options.enqueuePersistedRecoveryStates(
         new Set<string>([
           ...docsToAdd.map((file) => file.path),
@@ -267,7 +267,7 @@ export class HybridBootstrapCoordinator {
         fallbackNoticeKey,
       };
     } catch (error) {
-      this.options.markSearchBlocked();
+      this.options.blockRuntimeQueryGate();
       endHybridProfile({
         error: error instanceof Error ? error.message : String(error),
       });
