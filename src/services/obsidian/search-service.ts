@@ -28,6 +28,7 @@ import { MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
 import { DataProvider } from "./user-data/data-provider";
 import { DataManager } from "./user-data/data-manager";
+import type { HybridAvailabilityReason } from "./user-data/search-availability";
 import { ViewRegistry, ViewType } from "./view-registry";
 
 export type PreparedHybridSearchResult = {
@@ -281,7 +282,7 @@ export class SearchService {
 	private async searchInVaultLexical(
 		queryText: string,
 		options: {
-			hybridAvailabilityReasons?: string[];
+			hybridAvailabilityReasons?: HybridAvailabilityReason[];
 		} = {},
 	): Promise<SearchResult> {
 		const result = new SearchResult(

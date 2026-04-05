@@ -456,10 +456,6 @@ export class DataManager {
     return getInstance(SearchService).hybridEngine;
   }
 
-  hasHybridFailedEmbeddings(): boolean {
-    return this.hybridRecoveryCoordinator.hasFailures();
-  }
-
   private hasIncompleteHybridEmbeddings(): boolean {
     if (!this.hybridEngine.isEnabled()) {
       return false;

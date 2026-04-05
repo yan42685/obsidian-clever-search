@@ -3,6 +3,7 @@ import {
   type ViewType,
 } from "src/services/obsidian/view-registry";
 import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
+import type { HybridAvailabilityReason } from "src/services/obsidian/user-data/search-availability";
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 export type IndexedDocument = {
@@ -69,12 +70,12 @@ export class SearchResult {
   sourcePath: string;
   items: Item[];
   hybridFallbackNoticeKey?: LocaleKey | null;
-  hybridAvailabilityReasons: string[];
+  hybridAvailabilityReasons: HybridAvailabilityReason[];
   constructor(
     currPath: string,
     items: Item[],
     hybridFallbackNoticeKey?: LocaleKey | null,
-    hybridAvailabilityReasons: string[] = [],
+    hybridAvailabilityReasons: HybridAvailabilityReason[] = [],
   ) {
     this.sourcePath = currPath;
     this.items = items;

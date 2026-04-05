@@ -27,6 +27,14 @@ export type HybridHealthSummaryState =
 	| "degraded"
 	| "partial";
 
+export type HybridAvailabilityReason =
+	| "disabled"
+	| `bootstrap_${Exclude<SearchBootstrapState, "searchable">}`
+	| "query_unavailable"
+	| "dense_unavailable"
+	| "repair_pending"
+	| "embedding_incomplete";
+
 export type LexicalAvailabilityState = {
 	bootstrap: SearchBootstrapState;
 	searchable: boolean;
@@ -37,12 +45,19 @@ export type HybridAvailabilityState = {
 	enabled: boolean;
 	bootstrap: SearchBootstrapState;
 	query: HybridQueryAvailabilityState;
-	reasons: string[];
+	reasons: HybridAvailabilityReason[];
 	prompt: {
 		blockingNoticeKey: LocaleKey | null;
 		fallbackNoticeKey: LocaleKey | null;
 	};
 };
+
+export function hasHybridAvailabilityReason(
+	reasons: readonly HybridAvailabilityReason[],
+	reason: HybridAvailabilityReason,
+): boolean {
+	return reasons.includes(reason);
+}
 
 export function resolveSearchBootstrapNoticeKey(
 	bootstrap: SearchBootstrapState,
@@ -104,7 +119,7 @@ export function buildHybridAvailabilityState(input: {
 	hasIncompleteEmbeddings: boolean;
 }): HybridAvailabilityState {
 	const query = resolveHybridQueryAvailabilityState(input);
-	const reasons: string[] = [];
+	const reasons: HybridAvailabilityReason[] = [];
 
 	if (!input.enabled) {
 		reasons.push("disabled");
