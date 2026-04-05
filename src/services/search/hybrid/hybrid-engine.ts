@@ -7,6 +7,7 @@ import type { LocaleKey } from "src/services/obsidian/translations/locale-helper
 import { Database } from "src/services/database/database";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { logger } from "src/utils/logger";
+import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 import {
   buildLineOffsets,
@@ -57,6 +58,7 @@ import {
 import {
   buildHybridSearchIssue,
 } from "./provider-error";
+import { buildHybridSharedSnippetHeader } from "./shared-snippet/context-header";
 import { EMBED_DIM } from "./hybrid-types";
 import {
   profileHybridStage,
@@ -71,6 +73,10 @@ const MAX_FILE_RESULTS = 50;
 const INDEX_CHUNK_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 const HYBRID_DIRTY_ARTIFACTS = ["hnsw"] as const;
+const HYBRID_RERANK_LEXICAL_CANDIDATE_LIMIT = 10;
+const HYBRID_RERANK_DENSE_CANDIDATE_LIMIT = 30;
+const HYBRID_DENSE_FETCH_MULTIPLIER = 3;
+const HYBRID_DENSE_DEDUPE_OVERLAP_RATIO = 0.7;
 
 type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 
@@ -142,6 +148,15 @@ function throwIfHybridQueryAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw createHybridAbortError();
   }
+}
+
+function escapeSnippetHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export class HybridEngine {
@@ -520,8 +535,65 @@ export class HybridEngine {
     topK = prepared.topK,
     signal?: AbortSignal,
   ): Promise<FinalizedHybridRecall> {
-    const baseItems = this.buildItemsFromPreparedRecall(prepared, topK);
-    if (prepared.displayCandidates.length <= 1 || topK <= 0) {
+    if (prepared.displayCandidates.length === 0 || topK <= 0) {
+      return {
+        items: [],
+        fallbackNoticeKey: prepared.fallbackNoticeKey,
+        fallbackNoticeMessage: prepared.fallbackNoticeMessage,
+        fallbackIssueKind: prepared.fallbackIssueKind,
+        fallbackIssueMessage: prepared.fallbackIssueMessage,
+        fallbackToLexicalSearch: false,
+      };
+    }
+
+    const lexicalCandidates = prepared.displayCandidates.slice(
+      0,
+      HYBRID_RERANK_LEXICAL_CANDIDATE_LIMIT,
+    );
+    let rerankCandidates = lexicalCandidates;
+
+    try {
+      throwIfHybridQueryAborted(signal);
+      const denseCandidates = await this.recallDenseDisplayCandidates(
+        prepared.query,
+        lexicalCandidates,
+        HYBRID_RERANK_DENSE_CANDIDATE_LIMIT,
+        signal,
+      );
+      throwIfHybridQueryAborted(signal);
+      rerankCandidates = [...lexicalCandidates, ...denseCandidates];
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "name" in error &&
+        error.name === "AbortError"
+      ) {
+        throw error;
+      }
+      logger.error(
+        "hybrid dense recall failed; falling back to lexical search.",
+        error,
+      );
+      const issue = buildHybridSearchIssue(error);
+      return {
+        items: buildHybridLexicalLaneFileItems(prepared.query, lexicalCandidates),
+        fallbackNoticeKey:
+          prepared.fallbackNoticeKey ?? "hybridNotice.searchFallbackToLexical",
+        fallbackNoticeMessage:
+          prepared.fallbackNoticeMessage ?? issue.message,
+        fallbackIssueKind: prepared.fallbackIssueKind ?? issue.kind,
+        fallbackIssueMessage:
+          prepared.fallbackIssueMessage ?? issue.message,
+        fallbackToLexicalSearch: true,
+      };
+    }
+
+    const baseItems = buildHybridLexicalLaneFileItems(
+      prepared.query,
+      rerankCandidates.slice(0, topK),
+    );
+    if (rerankCandidates.length <= 1) {
       return {
         items: baseItems,
         fallbackNoticeKey: prepared.fallbackNoticeKey,
@@ -536,8 +608,8 @@ export class HybridEngine {
       throwIfHybridQueryAborted(signal);
       const rerankedCandidates = await this.rerankDisplayCandidates(
         prepared.query,
-        prepared.displayCandidates,
-        Math.max(topK * 2, topK),
+        rerankCandidates,
+        rerankCandidates.length,
         signal,
       );
       throwIfHybridQueryAborted(signal);
@@ -562,7 +634,7 @@ export class HybridEngine {
         throw error;
       }
       logger.error(
-        "hybrid rerank failed; keeping coverage recall ordering.",
+        "hybrid rerank failed; falling back to lexical search.",
         error,
       );
       const issue = buildHybridSearchIssue(error);
@@ -621,6 +693,191 @@ export class HybridEngine {
       ...remaining,
       ...candidates.slice(rerankLimit),
     ];
+  }
+
+  private async recallDenseDisplayCandidates(
+    query: string,
+    lexicalCandidates: readonly HybridLexicalLaneDisplayCandidate[],
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<HybridLexicalLaneDisplayCandidate[]> {
+    if (limit <= 0 || !this._canSearch) {
+      return [];
+    }
+
+    const queryVector = await this.embedder.embedQuery(
+      query,
+      this.precision,
+      "<query>",
+      signal,
+    );
+    throwIfHybridQueryAborted(signal);
+
+    const denseHits = this.hnswSmall.search(
+      queryVector,
+      Math.max(limit, limit * HYBRID_DENSE_FETCH_MULTIPLIER),
+    );
+    if (denseHits.length === 0) {
+      return [];
+    }
+
+    const chunkRows = await this.db.db.hybridChunks.bulkGet(
+      denseHits.map((hit) => hit.id),
+    );
+    const denseRows = denseHits
+      .map((hit, index) => {
+        const row = chunkRows[index];
+        if (!row) {
+          return null;
+        }
+        return {
+          row,
+          score: hit.score,
+        };
+      })
+      .filter(
+        (
+          value,
+        ): value is {
+          row: ChunkRow;
+          score: number;
+        } => value !== null,
+      );
+    if (denseRows.length === 0) {
+      return [];
+    }
+
+    const refs = await this.fileSnapshotStore.getHybridIndexedFileRefs(
+      denseRows.map(({ row }) => row.filePath),
+    );
+    const snapshotTextsByPath = await this.fileSnapshotStore.readIndexedTexts(
+      denseRows.map(({ row }) => ({
+        path: row.filePath,
+        generation: refs.get(row.filePath)?.generation,
+      })),
+    );
+    const lineOffsetsByPath = new Map<string, number[]>();
+    const denseCandidates: HybridLexicalLaneDisplayCandidate[] = [];
+
+    for (const denseRow of denseRows) {
+      if (
+        this.isDenseCandidateCoveredByLexical(
+          denseRow.row,
+          lexicalCandidates,
+        )
+      ) {
+        continue;
+      }
+      const snapshotText = snapshotTextsByPath.get(denseRow.row.filePath);
+      if (!snapshotText) {
+        continue;
+      }
+      let lineOffsets = lineOffsetsByPath.get(denseRow.row.filePath);
+      if (!lineOffsets) {
+        lineOffsets = buildLineOffsets(snapshotText);
+        lineOffsetsByPath.set(denseRow.row.filePath, lineOffsets);
+      }
+      const candidate = this.buildDenseDisplayCandidate(
+        denseRow.row,
+        denseRow.score,
+        snapshotText,
+        lineOffsets,
+      );
+      if (!candidate) {
+        continue;
+      }
+      denseCandidates.push(candidate);
+      if (denseCandidates.length >= limit) {
+        break;
+      }
+    }
+
+    return denseCandidates;
+  }
+
+  private isDenseCandidateCoveredByLexical(
+    denseRow: Pick<ChunkRow, "filePath" | "startOffset" | "endOffset">,
+    lexicalCandidates: readonly Pick<
+      HybridLexicalLaneDisplayCandidate,
+      "filePath" | "coreStart" | "coreEnd"
+    >[],
+  ): boolean {
+    return lexicalCandidates.some((candidate) => {
+      if (candidate.filePath !== denseRow.filePath) {
+        return false;
+      }
+      const overlapStart = Math.max(candidate.coreStart, denseRow.startOffset);
+      const overlapEnd = Math.min(candidate.coreEnd, denseRow.endOffset);
+      if (overlapEnd <= overlapStart) {
+        return false;
+      }
+      const overlap = overlapEnd - overlapStart;
+      const lexicalLength = Math.max(1, candidate.coreEnd - candidate.coreStart);
+      return overlap / lexicalLength >= HYBRID_DENSE_DEDUPE_OVERLAP_RATIO;
+    });
+  }
+
+  private buildDenseDisplayCandidate(
+    row: ChunkRow,
+    score: number,
+    snapshotText: string,
+    lineOffsets: number[],
+  ): HybridLexicalLaneDisplayCandidate | null {
+    const rawChunk = buildRawChunkFromOffsets(
+      row.filePath,
+      snapshotText,
+      lineOffsets,
+      row.startOffset,
+      row.endOffset,
+    );
+    if (!rawChunk) {
+      return null;
+    }
+
+    const headerText = buildHybridSharedSnippetHeader({
+      filePath: row.filePath,
+      snapshotText,
+      startLine: rawChunk.startLine,
+    });
+    const bodyText = rawChunk.text;
+    const headerPrefix = headerText ? `${headerText}\n\n` : "";
+    const snippetText = headerPrefix ? `${headerPrefix}${bodyText}` : bodyText;
+    const sectionLine = headerText
+      .split("\n")
+      .find((line) => line.startsWith("Section: "));
+    const headingChain = sectionLine
+      ? sectionLine
+          .slice("Section: ".length)
+          .split(" > ")
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+      : [];
+    const endLineOffset = lineOffsets[rawChunk.endLine] ?? 0;
+
+    return {
+      filePath: row.filePath,
+      basename: FileUtil.getBasename(row.filePath),
+      headingChain,
+      segmentText: headingChain.join(" > "),
+      startLine: rawChunk.startLine,
+      startCol: rawChunk.startCol,
+      endLine: rawChunk.endLine,
+      endCol: Math.max(0, row.endOffset - endLineOffset),
+      score,
+      snippetText,
+      snippetHtml: `${escapeSnippetHtml(headerPrefix)}${escapeSnippetHtml(bodyText)}`,
+      headerText,
+      bodyText,
+      highlightRanges: [],
+      bodyHighlightRanges: [],
+      coreStart: row.startOffset,
+      coreEnd: row.endOffset,
+      displayStart: row.startOffset,
+      displayEnd: row.endOffset,
+      bodyStart: row.startOffset,
+      bodyEnd: row.endOffset,
+      anchorOffset: row.startOffset,
+    };
   }
 
   async persistIndicesForBatch(): Promise<void> {

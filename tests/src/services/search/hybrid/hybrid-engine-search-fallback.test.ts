@@ -162,15 +162,14 @@ describe("HybridEngine search fallback notices", () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const { HybridRerankTimeoutError } = require("src/services/search/hybrid/reranker");
 		const engine = new HybridEngine() as any;
-		const baseItems = [{ id: "prepared-a" }, { id: "prepared-b" }];
-		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
+		engine.recallDenseDisplayCandidates = jest.fn().mockResolvedValue([]);
 		engine.rerankDisplayCandidates = jest
 			.fn()
 			.mockRejectedValue(new HybridRerankTimeoutError(2800));
 
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
-		expect(finalized.items).toBe(baseItems);
+		expect(finalized.items).toEqual([{ id: "notes/a.md:0" }, { id: "notes/b.md:1" }]);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
@@ -179,8 +178,7 @@ describe("HybridEngine search fallback notices", () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const { HybridRerankError } = require("src/services/search/hybrid/reranker");
 		const engine = new HybridEngine() as any;
-		const baseItems = [{ id: "prepared-a" }, { id: "prepared-b" }];
-		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
+		engine.recallDenseDisplayCandidates = jest.fn().mockResolvedValue([]);
 		engine.rerankDisplayCandidates = jest
 			.fn()
 			.mockRejectedValue(
@@ -189,7 +187,7 @@ describe("HybridEngine search fallback notices", () => {
 
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
-		expect(finalized.items).toBe(baseItems);
+		expect(finalized.items).toEqual([{ id: "notes/a.md:0" }, { id: "notes/b.md:1" }]);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
@@ -198,8 +196,7 @@ describe("HybridEngine search fallback notices", () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const { HybridRerankTimeoutError } = require("src/services/search/hybrid/reranker");
 		const engine = new HybridEngine() as any;
-		const baseItems = [{ id: "prepared-a" }];
-		engine.buildItemsFromPreparedRecall = jest.fn().mockReturnValue(baseItems);
+		engine.recallDenseDisplayCandidates = jest.fn().mockResolvedValue([]);
 		engine.rerankDisplayCandidates = jest
 			.fn()
 			.mockRejectedValue(new HybridRerankTimeoutError(2800));
@@ -209,8 +206,59 @@ describe("HybridEngine search fallback notices", () => {
 			10,
 		);
 
-		expect(finalized.items).toBe(baseItems);
+		expect(finalized.items).toEqual([{ id: "notes/a.md:0" }, { id: "notes/b.md:1" }]);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
+	});
+
+	test("finalizePreparedRecall requests lexical fallback when query embedding fails", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const { NoApiKeyError } = require("src/services/search/hybrid/embedder");
+		const engine = new HybridEngine() as any;
+		engine.recallDenseDisplayCandidates = jest
+			.fn()
+			.mockRejectedValue(new NoApiKeyError());
+
+		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
+
+		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(finalized.fallbackToLexicalSearch).toBe(true);
+	});
+
+	test("drops dense candidate when positional overlap covers at least 70% of lexical span", () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const engine = new HybridEngine() as any;
+
+		const covered = engine.isDenseCandidateCoveredByLexical(
+			{
+				filePath: "notes/a.md",
+				startOffset: 20,
+				endOffset: 90,
+			},
+			[
+				{
+					filePath: "notes/a.md",
+					coreStart: 10,
+					coreEnd: 100,
+				},
+			],
+		);
+		const uncovered = engine.isDenseCandidateCoveredByLexical(
+			{
+				filePath: "notes/a.md",
+				startOffset: 120,
+				endOffset: 180,
+			},
+			[
+				{
+					filePath: "notes/a.md",
+					coreStart: 10,
+					coreEnd: 100,
+				},
+			],
+		);
+
+		expect(covered).toBe(true);
+		expect(uncovered).toBe(false);
 	});
 });
