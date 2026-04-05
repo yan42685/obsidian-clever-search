@@ -426,6 +426,10 @@ export class DataManager {
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
   private lastHybridStaleWarnSignature: string | null = null;
+  private readonly recentlyVerifiedHybridIndexedRefs = new Map<
+    string,
+    { generation: number; verifiedAt: number }
+  >();
   private hybridFreshnessMaintenanceTask: Promise<void> | null = null;
   private hybridFreshnessMaintenanceQueued = false;
   private inVaultSearchFlushCallback: EventCallback | null = null;
@@ -566,7 +570,24 @@ export class DataManager {
         !indexedRef ||
         indexedRef.generation === undefined ||
         file.stat.mtime > indexedRef.generation;
+      const recentlyVerified = this.recentlyVerifiedHybridIndexedRefs.get(path);
+      if (
+        !indexedRef &&
+        recentlyVerified &&
+        recentlyVerified.generation === file.stat.mtime &&
+        Date.now() - recentlyVerified.verifiedAt <= 5 * 60_000
+      ) {
+        logger.warn(
+          `hybrid indexed file ref disappeared after successful verification for ${path}: generation=${recentlyVerified.generation}, verifiedAt=${new Date(recentlyVerified.verifiedAt).toISOString()}`,
+        );
+      }
       if (!needsSync) {
+        if (
+          recentlyVerified &&
+          indexedRef?.generation === recentlyVerified.generation
+        ) {
+          this.recentlyVerifiedHybridIndexedRefs.delete(path);
+        }
         continue;
       }
       if (processingPaths.has(path)) {
@@ -2300,6 +2321,23 @@ export class DataManager {
       logger.debug(
         `hybrid indexed ${file.path} in ${Date.now() - fileIndexStart} ms after ${attempts} attempt(s)`,
       );
+      const indexedRef = await this.fileSnapshotStore.getHybridIndexedFileRef(
+        file.path,
+      );
+      if (
+        !indexedRef ||
+        indexedRef.generation === undefined ||
+        indexedRef.generation !== file.stat.mtime
+      ) {
+        logger.warn(
+          `hybrid indexed file ref verification failed immediately after index for ${file.path}: expectedGeneration=${file.stat.mtime}, actualGeneration=${indexedRef?.generation ?? "missing"}, state=${indexedRef?.state ?? "missing"}`,
+        );
+      } else {
+        this.recentlyVerifiedHybridIndexedRefs.set(file.path, {
+          generation: indexedRef.generation,
+          verifiedAt: Date.now(),
+        });
+      }
       await this.clearFailedHybridEmbedding(file.path);
       return null;
     } catch (error) {
@@ -2362,6 +2400,23 @@ export class DataManager {
         { persistIndices: false },
         headingOutline,
       );
+      const indexedRef = await this.fileSnapshotStore.getHybridIndexedFileRef(
+        file.path,
+      );
+      if (
+        !indexedRef ||
+        indexedRef.generation === undefined ||
+        indexedRef.generation !== file.stat.mtime
+      ) {
+        logger.warn(
+          `hybrid structure-only ref verification failed for ${file.path}: expectedGeneration=${file.stat.mtime}, actualGeneration=${indexedRef?.generation ?? "missing"}, state=${indexedRef?.state ?? "missing"}`,
+        );
+      } else {
+        this.recentlyVerifiedHybridIndexedRefs.set(file.path, {
+          generation: indexedRef.generation,
+          verifiedAt: Date.now(),
+        });
+      }
       return null;
     } catch (error) {
       return {
