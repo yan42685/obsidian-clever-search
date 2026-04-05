@@ -296,7 +296,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect((result.items[0] as { path: string }).path).toBe("notes/recovery.md");
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(result.hybridFallbackNoticeMessage).toBe("provider offline");
-		expect(result.hybridSearchOutcome).toBe("fallback_failed_with_results");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed");
 		expect(result.hybridSearchIssueKind).toBe("unknown");
 		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
@@ -304,7 +304,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
-	test("marks auto fallback failures with no lexical results as fallback_failed_no_results", async () => {
+	test("marks auto fallback failures with no lexical results as fallback_failed", async () => {
 		mockHybridEngine.prepareRecall.mockRejectedValue(
 			new Error("provider offline"),
 		);
@@ -315,7 +315,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.items).toHaveLength(0);
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(result.hybridFallbackNoticeMessage).toBe("provider offline");
-		expect(result.hybridSearchOutcome).toBe("fallback_failed_no_results");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed");
 		expect(result.hybridSearchIssueKind).toBe("unknown");
 		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
@@ -377,7 +377,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 
 		expect(result.hybridSearchIssueKind).toBe("missing_api_key");
 		expect(result.hybridSearchIssueMessage).toBeNull();
-		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
 			"hybridNotice.searchIssue.missingApiKey",
 		]);
@@ -392,7 +392,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			"hybridNotice.searchFallbackToLexical",
 			null,
 			[],
-			"fallback_failed_no_results",
+			"fallback_failed",
 			"missing_api_key",
 			"provider said something more specific",
 		);

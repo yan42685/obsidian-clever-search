@@ -229,17 +229,20 @@ export class SearchService {
 				options.hybridAvailabilityReasons ??
 				this.getCurrentHybridAvailabilityReasons(),
 		});
+		const hasSearchFailure = Boolean(
+			options.noticeMessage ||
+				options.issueKind ||
+				options.issueMessage,
+		);
 		return this.attachHybridFallbackNotice(
 			lexicalResult,
 			options.noticeMessage ?? null,
 			options.outcome ??
-				(options.noticeMessage
-					? lexicalResult.items.length > 0
-						? "fallback_failed_with_results"
-						: "fallback_failed_no_results"
+				(hasSearchFailure
+					? "fallback_failed"
 					: lexicalResult.items.length > 0
 						? "fallback_with_results"
-						: "fallback_no_results"),
+						: "success"),
 			options.issueKind ?? null,
 			options.issueMessage ?? options.noticeMessage ?? null,
 			...(options.noticeKeys ?? []),
@@ -321,8 +324,10 @@ export class SearchService {
 					sourcePath,
 					earlyItems,
 					prepared.fallbackNoticeMessage,
+					prepared.fallbackIssueKind ||
+					prepared.fallbackIssueMessage ||
 					prepared.fallbackNoticeMessage
-						? "fallback_failed_with_results"
+						? "fallback_failed"
 						: prepared.fallbackNoticeKey
 							? "fallback_with_results"
 							: "success",
@@ -353,8 +358,10 @@ export class SearchService {
 				sourcePath,
 				this.hybridEngine.buildItemsFromPreparedRecall(prepared, prepared.topK),
 				prepared.fallbackNoticeMessage,
+				prepared.fallbackIssueKind ||
+				prepared.fallbackIssueMessage ||
 				prepared.fallbackNoticeMessage
-					? "fallback_failed_with_results"
+					? "fallback_failed"
 					: prepared.fallbackNoticeKey
 						? "fallback_with_results"
 						: "success",
@@ -380,8 +387,10 @@ export class SearchService {
 			sourcePath,
 			finalized.items,
 			finalized.fallbackNoticeMessage,
+			finalized.fallbackIssueKind ||
+			finalized.fallbackIssueMessage ||
 			finalized.fallbackNoticeMessage
-				? "fallback_failed_with_results"
+				? "fallback_failed"
 				: finalized.fallbackNoticeKey
 					? "fallback_with_results"
 					: "success",

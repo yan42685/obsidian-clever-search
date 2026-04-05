@@ -298,7 +298,7 @@ describe("mounted modal helper", () => {
 			"hybridNotice.searchFallbackToLexical",
 			null,
 			[],
-			"fallback_failed_no_results",
+			"fallback_failed",
 			"missing_api_key",
 			null,
 		);
@@ -334,6 +334,7 @@ describe("mounted modal helper", () => {
 			hybridEngine: {
 				isEnabled: jest.fn(() => true),
 			},
+			notifyHybridFallback: jest.fn(),
 			searchInVaultHybrid: jest.fn(
 				async () =>
 					new SearchResult(
@@ -342,7 +343,7 @@ describe("mounted modal helper", () => {
 						null,
 						null,
 						[],
-						"fallback_no_results",
+						"success",
 					),
 			),
 		};
@@ -375,11 +376,67 @@ describe("mounted modal helper", () => {
 		await Promise.resolve();
 
 		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha");
+		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
 		expect(failureStates.at(-1)).toEqual({
 			key: null,
 			message: null,
 			emptyResult: true,
 		});
 		expect(applied).toEqual(["no result"]);
+	});
+
+	test("auto hybrid fallback keeps failure notice and empty-result state together", async () => {
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { AutoHybridFallbackController } = require("src/ui/mounted-modal-helper");
+		const searchService = {
+			hybridEngine: {
+				isEnabled: jest.fn(() => true),
+			},
+			notifyHybridFallback: jest.fn(),
+			searchInVaultHybrid: jest.fn(
+				async () =>
+					new SearchResult(
+						"no result",
+						[],
+						"hybridNotice.searchFallbackToLexical",
+						null,
+						[],
+						"fallback_failed",
+						"missing_api_key",
+						null,
+					),
+			),
+		};
+		const failureStates: Array<{
+			key: string | null;
+			message: string | null;
+			emptyResult: boolean;
+		}> = [];
+		const controller = new AutoHybridFallbackController({
+			searchService,
+			setting: {
+				hybrid: {
+					autoShowResultsWhenLexicalEmpty: true,
+				},
+			},
+			searchType: SearchType.IN_VAULT,
+			isHybrid: false,
+			getLatestRequestId: () => 1,
+			getCurrentQueryText: () => "alpha",
+			onFailureNoticeChange: (state: typeof failureStates[number]) => {
+				failureStates.push(state);
+			},
+			onResultApplied: async () => undefined,
+		});
+
+		controller.schedule("alpha", 1);
+		await Promise.resolve();
+
+		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
+		expect(failureStates.at(-1)).toEqual({
+			key: "hybridNotice.searchFallbackToLexical",
+			message: null,
+			emptyResult: true,
+		});
 	});
 });

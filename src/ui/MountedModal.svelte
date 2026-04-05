@@ -149,9 +149,7 @@
 		return (
 			searchType === SearchType.IN_VAULT &&
 			!isHybrid &&
-			(searchResult.hybridSearchOutcome === "fallback_no_results" ||
-				searchResult.hybridSearchOutcome === "fallback_failed_no_results" ||
-				autoHybridFallbackFailureNotice.emptyResult)
+			autoHybridFallbackFailureNotice.emptyResult
 		);
 	}
 

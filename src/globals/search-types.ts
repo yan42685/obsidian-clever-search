@@ -69,9 +69,7 @@ export type MatchedFile = {
 export type HybridSearchOutcome =
   | "success"
   | "fallback_with_results"
-  | "fallback_failed_with_results"
-  | "fallback_failed_no_results"
-  | "fallback_no_results";
+  | "fallback_failed";
 
 export type HybridSearchIssueKind =
   | "none"

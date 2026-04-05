@@ -180,6 +180,7 @@ export class AutoHybridFallbackController {
 			return;
 		}
 
+		this.searchService.notifyHybridFallback(hybridResult);
 		this.onFailureNoticeChange(this.buildFailureNoticeState(hybridResult, true));
 		await this.onResultApplied(query, hybridResult);
 	}
@@ -201,11 +202,7 @@ export class AutoHybridFallbackController {
 				result.hybridSearchIssueMessage ??
 				result.hybridFallbackNoticeMessage ??
 				null,
-			emptyResult:
-				allowEmptyResult &&
-				!result.hybridFallbackNoticeKey &&
-				!result.hybridSearchIssueMessage &&
-				!result.hybridFallbackNoticeMessage,
+			emptyResult: allowEmptyResult,
 		};
 	}
 }
