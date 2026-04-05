@@ -40,7 +40,7 @@
 	let suppressAutoSuggestions = false;
 	let suppressAutoGhostCompletion = false;
 	let lastAcceptedQuery = "";
-	let searchInputEl: HTMLDivElement;
+	let searchInputEl: HTMLInputElement;
 	let suggestionsEl: HTMLUListElement;
 	let editableQueryText = "";
 	let normalizedQueryText = "";
@@ -56,19 +56,9 @@
 		closeHistorySuggestions();
 	}
 	$: if (searchInputEl) {
-		if (searchInputEl.textContent !== editableQueryText) {
-			searchInputEl.textContent = editableQueryText;
+		if (searchInputEl.value !== editableQueryText) {
+			searchInputEl.value = editableQueryText;
 		}
-	}
-
-	function usePlaintextOnlyContenteditable(node: HTMLDivElement) {
-		node.setAttribute("contenteditable", "plaintext-only");
-
-		return {
-			destroy() {
-				node.removeAttribute("contenteditable");
-			},
-		};
 	}
 
 	function isHistoryCompletionEnabled(): boolean {
@@ -187,7 +177,7 @@
 	}
 
 	function handleInput() {
-		queryText = normalizeEditableText(searchInputEl?.textContent ?? "");
+		queryText = normalizeEditableText(searchInputEl?.value ?? "");
 		syncEditableText();
 		updateCaretState();
 		updateSuggestionsState();
@@ -269,34 +259,6 @@
 		updateSuggestionsState();
 	}
 
-	function handlePaste(event: ClipboardEvent) {
-		event.preventDefault();
-		const pastedText = normalizeEditableText(
-			event.clipboardData?.getData("text/plain") ?? "",
-		);
-		if (pastedText.length === 0) {
-			return;
-		}
-
-		const selection = window.getSelection();
-		if (!selection || selection.rangeCount === 0) {
-			searchInputEl?.appendChild(document.createTextNode(pastedText));
-			handleInput();
-			placeCaretAtEnd();
-			return;
-		}
-
-		const range = selection.getRangeAt(0);
-		range.deleteContents();
-		const textNode = document.createTextNode(pastedText);
-		range.insertNode(textNode);
-		range.setStartAfter(textNode);
-		range.collapse(true);
-		selection.removeAllRanges();
-		selection.addRange(range);
-		handleInput();
-	}
-
 	function handleCompositionStart() {
 		isComposing = true;
 		ghostSuggestion = null;
@@ -351,8 +313,8 @@
 		}
 
 		const normalizedText = normalizeEditableText(queryText);
-		if (searchInputEl.textContent !== normalizedText) {
-			searchInputEl.textContent = normalizedText;
+		if (searchInputEl.value !== normalizedText) {
+			searchInputEl.value = normalizedText;
 		}
 
 		if (moveCaretToEnd) {
@@ -364,40 +326,26 @@
 		if (!searchInputEl) {
 			return;
 		}
-
-		const selection = window.getSelection();
-		if (!selection) {
-			return;
-		}
-
-		const range = document.createRange();
-		range.selectNodeContents(searchInputEl);
-		range.collapse(false);
-		selection.removeAllRanges();
-		selection.addRange(range);
+		const end = searchInputEl.value.length;
+		searchInputEl.setSelectionRange(end, end);
 	}
 
-	function isCaretAtEndInElement(element: HTMLElement | undefined): boolean {
+	function isCaretAtEndInElement(element: HTMLInputElement | undefined): boolean {
 		if (!element) {
 			return false;
 		}
-
-		const selection = window.getSelection();
-		if (!selection || selection.rangeCount === 0) {
+		if (document.activeElement !== element) {
 			return false;
 		}
-
-		const range = selection.getRangeAt(0);
-		if (!range.collapsed || !element.contains(range.endContainer)) {
+		const selectionStart = element.selectionStart;
+		const selectionEnd = element.selectionEnd;
+		if (selectionStart === null || selectionEnd === null) {
 			return false;
 		}
-
-		const beforeCaretRange = range.cloneRange();
-		beforeCaretRange.selectNodeContents(element);
-		beforeCaretRange.setEnd(range.endContainer, range.endOffset);
-		const caretOffset = normalizeEditableText(beforeCaretRange.toString()).length;
-		const totalLength = normalizeEditableText(element.textContent ?? "").length;
-		return caretOffset >= totalLength;
+		if (selectionStart !== selectionEnd) {
+			return false;
+		}
+		return selectionEnd >= normalizeEditableText(element.value).length;
 	}
 
 	function prioritizeGhostSuggestion(
@@ -552,22 +500,23 @@
 		<div class="history-input-overlay" aria-hidden="true">
 			{#if !editableQueryText && !ghostSuffix && placeholder}
 				<span class="history-placeholder">{placeholder}</span>
-			{:else}
-				<span class="history-input-text">{editableQueryText}</span>
+			{:else if ghostSuffix}
+				<span class="history-input-spacer">{editableQueryText}</span>
 			{/if}
 			{#if ghostSuffix}
 				<span class="history-input-ghost">{ghostSuffix}</span>
 			{/if}
 		</div>
-		<div
+		<input
 			id="cs-search-input"
 			bind:this={searchInputEl}
-			use:usePlaintextOnlyContenteditable
 			class="history-editable"
-			contenteditable={true}
-			role="textbox"
+			type="text"
+			value={editableQueryText}
 			aria-autocomplete={completionMode === "history" ? "both" : "none"}
-			aria-multiline="false"
+			autocomplete="off"
+			autocapitalize="off"
+			autocorrect="off"
 			spellcheck="false"
 			tabindex="0"
 			on:blur={handleBlur}
@@ -577,8 +526,9 @@
 			on:input={handleInput}
 			on:keydown={handleKeydown}
 			on:keyup={handleSelectionChange}
+			on:click={handleSelectionChange}
 			on:mouseup={handleSelectionChange}
-			on:paste={handlePaste}
+			on:select={handleSelectionChange}
 		/>
 	</div>
 	{#if isHistoryDropdownOpen}
@@ -693,21 +643,25 @@
 		white-space: pre;
 	}
 
-	.history-input-text {
+	.history-input-spacer {
 		flex: none;
-		color: var(--text-normal);
+		visibility: hidden;
 		font: inherit;
 		line-height: inherit;
 		letter-spacing: inherit;
+		white-space: pre;
 	}
 
 	.history-editable {
 		position: absolute;
 		inset: 0;
 		z-index: 2;
+		width: 100%;
+		height: 100%;
 		padding: 8px 12px;
 		box-sizing: border-box;
-		color: transparent;
+		color: var(--text-normal);
+		-webkit-text-fill-color: var(--text-normal);
 		outline: none;
 		border: none;
 		background: transparent;
