@@ -149,14 +149,10 @@
 		if (searchType !== SearchType.IN_VAULT || !isHybrid) {
 			return null;
 		}
-		const notice = searchService.getHybridFallbackNotice(searchResult);
-		if (notice.message) {
-			return notice.message;
+		if (!searchResult.hasHybridAvailabilityReason("disabled")) {
+			return null;
 		}
-		if (notice.key) {
-			return t(notice.key);
-		}
-		return null;
+		return t("hybridNotice.disabled");
 	}
 
 	function isAutoHybridFallbackNoResultsVisible(): boolean {
