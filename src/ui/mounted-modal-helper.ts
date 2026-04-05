@@ -418,6 +418,7 @@ export class HybridFreshnessNoticeController {
 	private refreshToken = 0;
 	private refreshInFlight: Promise<void> | null = null;
 	private refreshQueued = false;
+	private runtimeStatusDirty = false;
 	private destroyed = false;
 
 	constructor(options: HybridFreshnessNoticeControllerOptions) {
@@ -428,7 +429,7 @@ export class HybridFreshnessNoticeController {
 			if (!this.shouldTrack()) {
 				return;
 			}
-			this.requestRefresh();
+			this.runtimeStatusDirty = true;
 		};
 		eventBus.on(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED, this.runtimeStatusCallback);
 	}
@@ -450,6 +451,7 @@ export class HybridFreshnessNoticeController {
 			return;
 		}
 		this.startTicker();
+		this.runtimeStatusDirty = false;
 		this.requestRefresh();
 	}
 
@@ -471,6 +473,7 @@ export class HybridFreshnessNoticeController {
 				this.onNoticeChange(createHiddenHybridFreshnessNoticeState());
 				return;
 			}
+			this.runtimeStatusDirty = false;
 			this.requestRefresh();
 		}, HybridFreshnessNoticeController.REFRESH_INTERVAL_MS);
 	}
@@ -478,6 +481,7 @@ export class HybridFreshnessNoticeController {
 	private stopTicker(): void {
 		this.refreshToken += 1;
 		this.refreshQueued = false;
+		this.runtimeStatusDirty = false;
 		if (!this.timer) {
 			return;
 		}

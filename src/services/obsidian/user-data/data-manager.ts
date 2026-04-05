@@ -409,6 +409,7 @@ export class DataManager {
   private searchBootstrapCommitTask: Promise<void> | null = null;
   private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
   private readonly hybridRepairInFlightPaths = new Set<string>();
+  private readonly hybridRepairPendingPersistPaths = new Set<string>();
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
   private lastHybridStaleWarnSignature: string | null = null;
@@ -523,6 +524,7 @@ export class DataManager {
     const processingPaths = new Set<string>([
       ...this.hybridRepairQueue.keys(),
       ...this.hybridRepairInFlightPaths,
+      ...this.hybridRepairPendingPersistPaths,
       ...deferredPaths,
       ...repairPaths,
       ...pendingDocOperations.dirtyPaths.map((operation) => operation.path),
@@ -1633,6 +1635,7 @@ export class DataManager {
     }
     this.hybridRepairQueue.clear();
     this.hybridRepairInFlightPaths.clear();
+    this.hybridRepairPendingPersistPaths.clear();
     this.notifyHybridRuntimeStatusChanged();
   }
 
@@ -1683,6 +1686,7 @@ export class DataManager {
 
     for (const task of readyTasks) {
       this.hybridRepairQueue.delete(task.path);
+      this.hybridRepairPendingPersistPaths.add(task.path);
     }
     if (readyTasks.length > 0) {
       this.notifyHybridRuntimeStatusChanged();
@@ -1694,6 +1698,9 @@ export class DataManager {
         await this.runHybridRepairTasks(readyTasks, null, 0, failures);
         await this.hybridEngine.persistIndicesForBatch();
       } finally {
+        for (const task of readyTasks) {
+          this.hybridRepairPendingPersistPaths.delete(task.path);
+        }
         this.hybridRepairWorker = null;
         this.scheduleHybridRepairFlush();
         this.notifyHybridRuntimeStatusChanged();

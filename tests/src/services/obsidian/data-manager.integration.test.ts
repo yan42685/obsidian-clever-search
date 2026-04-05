@@ -2434,6 +2434,49 @@ describe("DataManager integration", () => {
     manager.onunload();
   });
 
+  test("hybrid freshness counts pending-persist repair paths as processing", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/pending-persist.md", "pending", 220);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "pending"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: 180,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: 180,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    (manager as any).hybridRepairPendingPersistPaths.add(file.path);
+
+    const summary = await manager.getHybridFreshnessSummary();
+
+    expect(summary.processingFileCount).toBe(1);
+    expect(summary.staleFileCount).toBe(0);
+    expect(summary.processingSamplePaths).toEqual([file.path]);
+
+    manager.onunload();
+  });
+
   test("hybrid health summary does not treat stored data without indexed refs as healthy", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;
