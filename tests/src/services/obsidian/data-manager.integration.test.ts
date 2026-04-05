@@ -2296,13 +2296,14 @@ describe("DataManager integration", () => {
     expect(summary.shadowMismatchSamplePaths).toEqual([
       shadowMismatchFile.path,
     ]);
-    expect(summary.processingFileCount).toBe(0);
-    expect(summary.staleFileCount).toBe(2);
+    expect(summary.processingFileCount).toBe(2);
+    expect(summary.staleFileCount).toBe(0);
     expect(summary.repairFileCount).toBe(0);
-    expect(summary.staleSamplePaths).toEqual([
+    expect(summary.processingSamplePaths).toEqual([
       shadowAlignedFile.path,
       shadowMismatchFile.path,
     ]);
+    expect(summary.staleSamplePaths).toEqual([]);
 
     manager.onunload();
   });
@@ -2370,10 +2371,13 @@ describe("DataManager integration", () => {
     const firstSummary = await manager.getHybridFreshnessSummary();
     const secondSummary = await manager.getHybridFreshnessSummary();
 
-    expect(firstSummary.processingFileCount).toBe(1);
-    expect(firstSummary.staleFileCount).toBe(1);
-    expect(firstSummary.processingSamplePaths).toEqual([processingFile.path]);
-    expect(firstSummary.staleSamplePaths).toEqual([staleFile.path]);
+    expect(firstSummary.processingFileCount).toBe(2);
+    expect(firstSummary.staleFileCount).toBe(0);
+    expect(firstSummary.processingSamplePaths).toEqual([
+      processingFile.path,
+      staleFile.path,
+    ]);
+    expect(firstSummary.staleSamplePaths).toEqual([]);
     expect(secondSummary).toMatchObject({
       processingFileCount: 2,
       staleFileCount: 0,

@@ -413,7 +413,6 @@ export class DataManager {
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
   private lastHybridStaleWarnSignature: string | null = null;
-  private lastHybridStaleReconcileSignature: string | null = null;
   private inVaultSearchFlushCallback: EventCallback | null = null;
   private lexicalIndexFailureNotice: Notice | null = null;
   private lexicalFailureRetryInFlight = false;
@@ -505,7 +504,6 @@ export class DataManager {
     const trackedFiles = this.getHybridTrackedFiles();
     if (!this.hybridEngine.isEnabled() || trackedFiles.length === 0) {
       this.lastHybridStaleWarnSignature = null;
-      this.lastHybridStaleReconcileSignature = null;
       return {
         processingFileCount: 0,
         staleFileCount: 0,
@@ -533,12 +531,9 @@ export class DataManager {
       trackedFiles.map((file) => file.path),
     );
 
-    let processingFileCount = 0;
-    let staleFileCount = 0;
-    const processingSamplePaths: string[] = [];
-    const staleSamplePaths: string[] = [];
+    const processingPathSet = new Set<string>();
+    const stalePathSet = new Set<string>();
     const repairSamplePaths: string[] = [];
-    const stalePaths: string[] = [];
     for (let index = 0; index < trackedFiles.length; index++) {
       const file = trackedFiles[index];
       const path = file.path;
@@ -558,29 +553,38 @@ export class DataManager {
         continue;
       }
       if (processingPaths.has(path)) {
-        processingFileCount += 1;
-        appendPathSample(
-          processingSamplePaths,
-          path,
-          HYBRID_FRESHNESS_SAMPLE_LIMIT,
-        );
+        processingPathSet.add(path);
         continue;
       }
-      staleFileCount += 1;
-      appendPathSample(staleSamplePaths, path, HYBRID_FRESHNESS_SAMPLE_LIMIT);
-      stalePaths.push(path);
+      stalePathSet.add(path);
     }
 
-    this.warnOnHybridStaleFiles(staleFileCount, staleSamplePaths);
-    this.reconcileHybridStalePaths(stalePaths, trackedFiles);
+    const stalePaths = Array.from(stalePathSet);
+    const staleSamplePaths = stalePaths.slice(0, HYBRID_FRESHNESS_SAMPLE_LIMIT);
+    this.warnOnHybridStaleFiles(stalePathSet.size, staleSamplePaths);
+    const reconciledPaths = this.reconcileHybridStalePaths(stalePaths, trackedFiles);
+    for (const path of reconciledPaths) {
+      stalePathSet.delete(path);
+      processingPathSet.add(path);
+    }
+    const processingPathsFinal = Array.from(processingPathSet);
+    const processingSamplePaths = processingPathsFinal.slice(
+      0,
+      HYBRID_FRESHNESS_SAMPLE_LIMIT,
+    );
+    const stalePathsFinal = Array.from(stalePathSet);
+    const staleSamplePathsFinal = stalePathsFinal.slice(
+      0,
+      HYBRID_FRESHNESS_SAMPLE_LIMIT,
+    );
 
     return {
-      processingFileCount,
-      staleFileCount,
+      processingFileCount: processingPathSet.size,
+      staleFileCount: stalePathSet.size,
       repairFileCount: repairPaths.size,
       totalTrackedFiles: trackedFiles.length,
       processingSamplePaths,
-      staleSamplePaths,
+      staleSamplePaths: staleSamplePathsFinal,
       repairSamplePaths,
       updatedAt: Date.now(),
     };
@@ -616,19 +620,14 @@ export class DataManager {
   private reconcileHybridStalePaths(
     stalePaths: readonly string[],
     trackedFiles: readonly TFile[],
-  ): void {
+  ): string[] {
     if (stalePaths.length === 0) {
-      this.lastHybridStaleReconcileSignature = null;
-      return;
-    }
-    const reconcileSignature = stalePaths.join("|");
-    if (reconcileSignature === this.lastHybridStaleReconcileSignature) {
-      return;
+      return [];
     }
     const trackedFilesByPath = new Map(
       trackedFiles.map((file) => [file.path, file] as const),
     );
-    let enqueuedCount = 0;
+    const enqueuedPaths: string[] = [];
     for (const path of stalePaths) {
       const file = trackedFilesByPath.get(path);
       if (!file) {
@@ -641,12 +640,12 @@ export class DataManager {
         sourceGeneration: file.stat.mtime,
         notifyRuntimeStatusChanged: false,
       });
-      enqueuedCount += 1;
+      enqueuedPaths.push(path);
     }
-    this.lastHybridStaleReconcileSignature = reconcileSignature;
-    if (enqueuedCount > 0) {
+    if (enqueuedPaths.length > 0) {
       this.notifyHybridRuntimeStatusChanged();
     }
+    return enqueuedPaths;
   }
 
   async getHybridHealthSummary(): Promise<HybridHealthSummary> {
