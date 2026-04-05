@@ -102,10 +102,7 @@
 	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
 	function hasHybridEmbeddingIncomplete(result: SearchResult): boolean {
-		return (
-			result.hybridEmbeddingIncomplete === true ||
-			result.hybridAvailabilityReasons.includes("embedding_incomplete")
-		);
+		return result.hybridAvailabilityReasons.includes("embedding_incomplete");
 	}
 
 	// TODO: use virtual list rather than rendering all buttons

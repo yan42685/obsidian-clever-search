@@ -69,22 +69,17 @@ export class SearchResult {
   sourcePath: string;
   items: Item[];
   hybridFallbackNoticeKey?: LocaleKey | null;
-  hybridEmbeddingIncomplete?: boolean;
   hybridAvailabilityReasons: string[];
   constructor(
     currPath: string,
     items: Item[],
     hybridFallbackNoticeKey?: LocaleKey | null,
-    legacyHybridEmbeddingIncomplete?: boolean,
     hybridAvailabilityReasons: string[] = [],
   ) {
     this.sourcePath = currPath;
     this.items = items;
     this.hybridFallbackNoticeKey = hybridFallbackNoticeKey ?? null;
     this.hybridAvailabilityReasons = [...hybridAvailabilityReasons];
-    this.hybridEmbeddingIncomplete =
-      legacyHybridEmbeddingIncomplete === true ||
-      this.hybridAvailabilityReasons.includes("embedding_incomplete");
   }
 }
 

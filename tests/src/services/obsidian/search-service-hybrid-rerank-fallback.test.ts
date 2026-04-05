@@ -225,8 +225,10 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(lexicalEngine.searchFiles).toHaveBeenCalled();
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as { path: string }).path).toBe("notes/finalize-lexical.md");
-		expect(result.hybridFallbackNoticeKey).toBeNull();
-		expect(mockNotices).toEqual([]);
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridNotice.searchFallbackToLexical",
+		]);
 	});
 
 	test("falls back to the normal lexical search path when hybrid requests lexical fallback", async () => {
@@ -293,13 +295,11 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			"notes/current.md",
 			[],
 			"hybridNotice.searchFallbackToLexical",
-			false,
 		);
 		const finalResult = new SearchResult(
 			"notes/current.md",
 			[],
 			"hybridNotice.searchFallbackToLexical",
-			false,
 		);
 
 		service.notifyHybridFallback(preparedResult);
@@ -317,9 +317,8 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			"notes/current.md",
 			[],
 			"hybridNotice.searchFallbackToLexical",
-			false,
 		);
-		const cleanResult = new SearchResult("notes/current.md", [], null, false);
+		const cleanResult = new SearchResult("notes/current.md", [], null);
 
 		service.notifyHybridFallback(fallbackResult);
 		service.notifyHybridFallback(cleanResult);

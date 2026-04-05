@@ -407,7 +407,6 @@ describe("SearchService bootstrap gate", () => {
 		expect(mockHybridEngine.prepareRecall).not.toHaveBeenCalled();
 		expect(lexicalEngine.searchFiles).toHaveBeenCalledWith("hybrid", 22, 10, 60);
 		expect(result.hybridAvailabilityReasons).toEqual(["embedding_incomplete"]);
-		expect(result.hybridEmbeddingIncomplete).toBe(true);
 		expect((result.items[0] as any).path).toBe("notes/availability-fallback.md");
 	});
 

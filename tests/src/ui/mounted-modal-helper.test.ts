@@ -238,7 +238,7 @@ describe("mounted modal helper", () => {
 			result: new SearchResult("prepared-order", []),
 		};
 		const fallbackNoticeKey = "hybridNotice.searchFallbackToLexical";
-		const finalResult = new SearchResult("prepared-order", [], fallbackNoticeKey, false);
+		const finalResult = new SearchResult("prepared-order", [], fallbackNoticeKey);
 		const setCachedResult = jest.fn();
 		const searchService = {
 			prepareSearchInVaultHybrid: jest.fn(async () => prepareResult),
