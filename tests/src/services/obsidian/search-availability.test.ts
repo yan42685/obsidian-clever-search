@@ -2,6 +2,8 @@ import {
 	buildHybridAvailabilityState,
 	buildLexicalAvailabilityState,
 	formatHybridAvailabilityReason,
+	formatHybridAvailabilityReasons,
+	formatHybridAvailabilityRuntime,
 	resolveHybridFreshnessState,
 	resolveHybridHealthSummaryState,
 } from "src/services/obsidian/user-data/search-availability";
@@ -118,6 +120,21 @@ describe("search availability derivation", () => {
 		expect(formatHybridAvailabilityReason("bootstrap_restoring")).toBe(
 			"bootstrap restoring",
 		);
+	});
+
+	test("formats grouped hybrid availability diagnostics", () => {
+		expect(
+			formatHybridAvailabilityRuntime({
+				bootstrap: "searchable",
+				query: "degraded",
+			}),
+		).toBe("bootstrap searchable | query degraded");
+		expect(
+			formatHybridAvailabilityReasons([
+				"runtime_gate_blocked",
+				"embedding_incomplete",
+			]),
+		).toBe("runtime query gate blocked | embedding incomplete");
 	});
 
 	test("derives hybrid freshness state from updating and repair counts", () => {

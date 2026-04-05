@@ -84,6 +84,18 @@ export function formatHybridAvailabilityReason(
 	}
 }
 
+export function formatHybridAvailabilityReasons(
+	reasons: readonly HybridAvailabilityReason[],
+): string {
+	return reasons.map((reason) => formatHybridAvailabilityReason(reason)).join(" | ");
+}
+
+export function formatHybridAvailabilityRuntime(
+	state: Pick<HybridAvailabilityState, "bootstrap" | "query">,
+): string {
+	return [`bootstrap ${state.bootstrap}`, `query ${state.query}`].join(" | ");
+}
+
 export function resolveSearchBootstrapNoticeKey(
 	bootstrap: SearchBootstrapState,
 ): LocaleKey | null {
