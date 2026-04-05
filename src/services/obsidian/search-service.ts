@@ -41,6 +41,10 @@ export type PreparedHybridSearchResult = {
 	result: SearchResult;
 };
 
+type HybridSearchExecutionOptions = {
+	preserveHybridFailureResult?: boolean;
+};
+
 @singleton()
 export class SearchService {
 	private static readonly LEXICAL_FILE_CANDIDATE_CAP = 48;
@@ -104,14 +108,22 @@ export class SearchService {
 		return result;
 	}
 
-	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
-		return await this.searchInVaultHybridByMode(queryText, "default");
+	async searchInVaultHybrid(
+		queryText: string,
+		options: HybridSearchExecutionOptions = {},
+	): Promise<SearchResult> {
+		return await this.searchInVaultHybridByMode(queryText, "default", options);
 	}
 
 	async searchInVaultHybridLexicalLane(
 		queryText: string,
+		options: HybridSearchExecutionOptions = {},
 	): Promise<SearchResult> {
-		return await this.searchInVaultHybridByMode(queryText, "lexical-lane");
+		return await this.searchInVaultHybridByMode(
+			queryText,
+			"lexical-lane",
+			options,
+		);
 	}
 
 	notifyHybridFallback(result: SearchResult): void {
@@ -267,9 +279,36 @@ export class SearchService {
 		);
 	}
 
+	private buildHybridFailureResult(
+		queryText: string,
+		options: {
+			noticeKeys?: Array<SearchResult["hybridFallbackNoticeKey"]>;
+			noticeMessage?: string | null;
+			outcome?: HybridSearchOutcome;
+			issueKind?: HybridSearchIssueKind | null;
+			issueMessage?: string | null;
+		} = {},
+	): SearchResult {
+		const sourcePath =
+			this.app.workspace.getActiveFile()?.path || "no source path";
+		return this.buildHybridSearchResult(
+			sourcePath,
+			[],
+			options.noticeMessage ?? null,
+			options.outcome ??
+				(options.issueKind || options.issueMessage || options.noticeMessage
+					? "fallback_failed"
+					: "success"),
+			options.issueKind ?? null,
+			options.issueMessage ?? options.noticeMessage ?? null,
+			...(options.noticeKeys ?? []),
+		);
+	}
+
 	async prepareSearchInVaultHybrid(
 		queryText: string,
 		signal?: AbortSignal,
+		options: HybridSearchExecutionOptions = {},
 	): Promise<PreparedHybridSearchResult> {
 		const dataManager = getInstance(DataManager);
 		await dataManager.flushPendingDocOperations();
@@ -288,6 +327,14 @@ export class SearchService {
 			};
 		}
 		if (hybridAvailability.query === "unavailable") {
+			if (options.preserveHybridFailureResult) {
+				return {
+					prepared: null,
+					result: this.buildHybridFailureResult(queryText, {
+						noticeKeys: [hybridAvailability.prompt.fallbackNoticeKey],
+					}),
+				};
+			}
 			return {
 				prepared: null,
 				result: await this.buildLexicalFallbackResult(queryText, {
@@ -311,6 +358,17 @@ export class SearchService {
 				"hybrid lexical-lane prepare failed; falling back to lexical search.",
 				error,
 			);
+			if (options.preserveHybridFailureResult) {
+				return {
+					prepared: null,
+					result: this.buildHybridFailureResult(queryText, {
+						noticeKeys: ["hybridNotice.searchFallbackToLexical"],
+						noticeMessage: issue.message,
+						issueKind: issue.kind,
+						issueMessage: issue.message,
+					}),
+				};
+			}
 			return {
 				prepared: null,
 				result: await this.buildLexicalFallbackResult(queryText, {
@@ -323,6 +381,17 @@ export class SearchService {
 			};
 		}
 		if (prepared.fallbackToLexicalSearch) {
+			if (options.preserveHybridFailureResult) {
+				return {
+					prepared: null,
+					result: this.buildHybridFailureResult(queryText, {
+						noticeKeys: [prepared.fallbackNoticeKey],
+						noticeMessage: prepared.fallbackNoticeMessage,
+						issueKind: prepared.fallbackIssueKind,
+						issueMessage: prepared.fallbackIssueMessage,
+					}),
+				};
+			}
 			return {
 				prepared: null,
 				result: await this.buildLexicalFallbackResult(queryText, {
@@ -361,10 +430,19 @@ export class SearchService {
 		prepared: PreparedHybridRecall,
 		mode: HybridSearchMode = "default",
 		signal?: AbortSignal,
+		options: HybridSearchExecutionOptions = {},
 	): Promise<SearchResult> {
 		const sourcePath =
 			this.app.workspace.getActiveFile()?.path || "no source path";
 		if (prepared.fallbackToLexicalSearch) {
+			if (options.preserveHybridFailureResult) {
+				return this.buildHybridFailureResult(prepared.query, {
+					noticeKeys: [prepared.fallbackNoticeKey],
+					noticeMessage: prepared.fallbackNoticeMessage,
+					issueKind: prepared.fallbackIssueKind,
+					issueMessage: prepared.fallbackIssueMessage,
+				});
+			}
 			return await this.buildLexicalFallbackResult(prepared.query, {
 				noticeKeys: [prepared.fallbackNoticeKey],
 				noticeMessage: prepared.fallbackNoticeMessage,
@@ -395,6 +473,14 @@ export class SearchService {
 			signal,
 		);
 		if (finalized.fallbackToLexicalSearch) {
+			if (options.preserveHybridFailureResult) {
+				return this.buildHybridFailureResult(prepared.query, {
+					noticeKeys: [finalized.fallbackNoticeKey],
+					noticeMessage: finalized.fallbackNoticeMessage,
+					issueKind: finalized.fallbackIssueKind,
+					issueMessage: finalized.fallbackIssueMessage,
+				});
+			}
 			return await this.buildLexicalFallbackResult(prepared.query, {
 				noticeKeys: [finalized.fallbackNoticeKey],
 				noticeMessage: finalized.fallbackNoticeMessage,
@@ -422,12 +508,19 @@ export class SearchService {
 	private async searchInVaultHybridByMode(
 		queryText: string,
 		mode: HybridSearchMode,
+		options: HybridSearchExecutionOptions = {},
 	): Promise<SearchResult> {
-		const prepared = await this.prepareSearchInVaultHybrid(queryText);
+		const prepared = await this.prepareSearchInVaultHybrid(
+			queryText,
+			undefined,
+			options,
+		);
 		const result = prepared.prepared
 			? await this.finalizePreparedSearchInVaultHybrid(
 				prepared.prepared,
 				mode,
+				undefined,
+				options,
 			)
 			: prepared.result;
 		this.notifyHybridFallback(result);

@@ -172,7 +172,9 @@ export class AutoHybridFallbackController {
 	}
 
 	private async apply(query: string, requestId: number): Promise<void> {
-		const hybridResult = await this.searchService.searchInVaultHybrid(query);
+		const hybridResult = await this.searchService.searchInVaultHybrid(query, {
+			preserveHybridFailureResult: true,
+		});
 		if (
 			requestId !== this.getLatestRequestId() ||
 			query !== this.getCurrentQueryText()
@@ -189,20 +191,11 @@ export class AutoHybridFallbackController {
 		result: SearchResult,
 		allowEmptyResult = false,
 	): HybridFailureNoticeState {
-		if (result.items.length > 0) {
-			return {
-				key: null,
-				message: null,
-				emptyResult: false,
-			};
-		}
+		const notice = this.searchService.getHybridFallbackNotice(result);
 		return {
-			key: result.hybridFallbackNoticeKey ?? null,
-			message:
-				result.hybridSearchIssueMessage ??
-				result.hybridFallbackNoticeMessage ??
-				null,
-			emptyResult: allowEmptyResult,
+			key: notice.key ?? null,
+			message: notice.message,
+			emptyResult: allowEmptyResult && result.items.length === 0,
 		};
 	}
 }

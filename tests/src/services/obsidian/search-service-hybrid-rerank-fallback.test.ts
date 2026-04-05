@@ -240,6 +240,65 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
+	test("preserves hybrid failure result instead of falling back to lexical when requested", async () => {
+		configurePreparedFlow();
+		const { service } = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		mockHybridEngine.finalizePreparedRecall.mockResolvedValue({
+			items: [{ id: "stale-hybrid-item" }],
+			fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
+			fallbackNoticeMessage: "provider offline",
+			fallbackIssueKind: "unknown",
+			fallbackIssueMessage: "provider offline",
+			fallbackToLexicalSearch: true,
+		});
+
+		const result = await service.searchInVaultHybrid("alpha", {
+			preserveHybridFailureResult: true,
+		});
+
+		expect(lexicalEngine.searchFiles).not.toHaveBeenCalled();
+		expect(result.items).toHaveLength(0);
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(result.hybridFallbackNoticeMessage).toBe("provider offline");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed");
+		expect(result.hybridSearchIssueKind).toBe("unknown");
+		expect(result.hybridSearchIssueMessage).toBe("provider offline");
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"provider offline",
+		]);
+	});
+
+	test("preserves hybrid failure result for lexical-lane mode when requested", async () => {
+		mockHybridEngine.prepareRecall.mockResolvedValue({
+			query: "alpha",
+			topK: 10,
+			displayCandidates: [],
+			fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
+			fallbackNoticeMessage: "provider offline",
+			fallbackIssueKind: "unknown",
+			fallbackIssueMessage: "provider offline",
+			fallbackToLexicalSearch: true,
+		});
+		const { service } = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+
+		const result = await service.searchInVaultHybridLexicalLane("alpha", {
+			preserveHybridFailureResult: true,
+		});
+
+		expect(lexicalEngine.searchFiles).not.toHaveBeenCalled();
+		expect(mockHybridEngine.finalizePreparedRecall).not.toHaveBeenCalled();
+		expect(result.items).toHaveLength(0);
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(result.hybridFallbackNoticeMessage).toBe("provider offline");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed");
+		expect(result.hybridSearchIssueKind).toBe("unknown");
+		expect(result.hybridSearchIssueMessage).toBe("provider offline");
+	});
+
 	test("falls back to the normal lexical search path when hybrid requests lexical fallback", async () => {
 		mockHybridEngine.prepareRecall.mockResolvedValue({
 			query: "alpha",

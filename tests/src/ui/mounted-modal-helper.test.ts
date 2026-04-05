@@ -337,6 +337,10 @@ describe("mounted modal helper", () => {
 			hybridEngine: {
 				isEnabled: jest.fn(() => true),
 			},
+			getHybridFallbackNotice: jest.fn((result: InstanceType<typeof SearchResult>) => ({
+				key: result.hybridFallbackNoticeKey ?? null,
+				message: result.hybridSearchIssueMessage ?? result.hybridFallbackNoticeMessage ?? null,
+			})),
 			notifyHybridFallback: jest.fn(),
 			searchInVaultHybrid: jest.fn(
 				async () =>
@@ -378,7 +382,9 @@ describe("mounted modal helper", () => {
 		controller.schedule("alpha", 1);
 		await Promise.resolve();
 
-		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha");
+		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha", {
+			preserveHybridFailureResult: true,
+		});
 		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
 		expect(failureStates.at(-1)).toEqual({
 			key: null,
@@ -395,6 +401,10 @@ describe("mounted modal helper", () => {
 			hybridEngine: {
 				isEnabled: jest.fn(() => true),
 			},
+			getHybridFallbackNotice: jest.fn((_result: InstanceType<typeof SearchResult>) => ({
+				key: "hybridNotice.searchIssue.missingApiKey",
+				message: null,
+			})),
 			notifyHybridFallback: jest.fn(),
 			searchInVaultHybrid: jest.fn(
 				async () =>
@@ -436,11 +446,80 @@ describe("mounted modal helper", () => {
 		await Promise.resolve();
 
 		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
+		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha", {
+			preserveHybridFailureResult: true,
+		});
 		expect(failureStates.at(-1)).toEqual({
-			key: "hybridNotice.searchFallbackToLexical",
+			key: "hybridNotice.searchIssue.missingApiKey",
 			message: null,
 			emptyResult: true,
 		});
+	});
+
+	test("auto hybrid fallback preserves failure notice when hybrid recovers with results", async () => {
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { AutoHybridFallbackController } = require("src/ui/mounted-modal-helper");
+		const searchService = {
+			hybridEngine: {
+				isEnabled: jest.fn(() => true),
+			},
+			getHybridFallbackNotice: jest.fn((_result: InstanceType<typeof SearchResult>) => ({
+				key: "hybridNotice.searchIssue.provider429",
+				message: null,
+			})),
+			notifyHybridFallback: jest.fn(),
+			searchInVaultHybrid: jest.fn(
+				async () =>
+					new SearchResult(
+						"hybrid result",
+						[{ id: "file-1" }],
+						"hybridNotice.searchFallbackToLexical",
+						null,
+						[],
+						"fallback_failed",
+						"provider_429",
+						null,
+					),
+			),
+		};
+		const failureStates: Array<{
+			key: string | null;
+			message: string | null;
+			emptyResult: boolean;
+		}> = [];
+		const applied: string[] = [];
+		const controller = new AutoHybridFallbackController({
+			searchService,
+			setting: {
+				hybrid: {
+					autoShowResultsWhenLexicalEmpty: true,
+				},
+			},
+			searchType: SearchType.IN_VAULT,
+			isHybrid: false,
+			getLatestRequestId: () => 1,
+			getCurrentQueryText: () => "alpha",
+			onFailureNoticeChange: (state: typeof failureStates[number]) => {
+				failureStates.push(state);
+			},
+			onResultApplied: async (_query: string, result: InstanceType<typeof SearchResult>) => {
+				applied.push(result.sourcePath);
+			},
+		});
+
+		controller.schedule("alpha", 1);
+		await Promise.resolve();
+
+		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
+		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha", {
+			preserveHybridFailureResult: true,
+		});
+		expect(failureStates.at(-1)).toEqual({
+			key: "hybridNotice.searchIssue.provider429",
+			message: null,
+			emptyResult: false,
+		});
+		expect(applied).toEqual(["hybrid result"]);
 	});
 
 	test("hybrid freshness notice polls at a low frequency", async () => {

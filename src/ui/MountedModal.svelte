@@ -149,17 +149,36 @@
 		if (searchType !== SearchType.IN_VAULT || !isHybrid) {
 			return null;
 		}
-		if (!searchResult.hasHybridAvailabilityReason("disabled")) {
+		const notice = searchService.getHybridFallbackNotice(searchResult);
+		if (notice.message) {
+			return notice.message;
+		}
+		if (notice.key) {
+			return t(notice.key);
+		}
+		return null;
+	}
+
+	function getAutoHybridFallbackFailureText(): string | null {
+		if (searchType !== SearchType.IN_VAULT || isHybrid) {
 			return null;
 		}
-		return t("hybridNotice.disabled");
+		if (autoHybridFallbackFailureNotice.message) {
+			return autoHybridFallbackFailureNotice.message;
+		}
+		if (autoHybridFallbackFailureNotice.key) {
+			return t(autoHybridFallbackFailureNotice.key);
+		}
+		return null;
 	}
 
 	function isAutoHybridFallbackNoResultsVisible(): boolean {
 		return (
 			searchType === SearchType.IN_VAULT &&
 			!isHybrid &&
-			autoHybridFallbackFailureNotice.emptyResult
+			autoHybridFallbackFailureNotice.emptyResult &&
+			!autoHybridFallbackFailureNotice.key &&
+			!autoHybridFallbackFailureNotice.message
 		);
 	}
 
@@ -558,6 +577,13 @@
 						<div class="hybrid-fallback-failure">
 							<span class="hybrid-fallback-failure-detail">
 								{getHybridResultNoticeText()}
+							</span>
+						</div>
+					{/if}
+					{#if getAutoHybridFallbackFailureText()}
+						<div class="hybrid-fallback-failure">
+							<span class="hybrid-fallback-failure-detail">
+								{getAutoHybridFallbackFailureText()}
 							</span>
 						</div>
 					{/if}
