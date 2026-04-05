@@ -3210,6 +3210,10 @@ export class DataManager {
       runtimeTotalBytes,
       jsHeapUsage,
     );
+    const prominentJsHeapNoticeLines = this.buildProminentJsHeapNoticeLines(
+      runtimeTotalBytes,
+      jsHeapUsage,
+    );
 
     new MyNotice(
       `${this.buildDevStorageSummaryNotice(
@@ -3221,6 +3225,7 @@ export class DataManager {
         runtimeRows,
         persistedUnlistedBytes,
         [
+          ...prominentJsHeapNoticeLines,
           ...runtimePartitionBreakdown.noticeLines,
           ...fileSnapshotRuntimeBreakdown.noticeLines,
           ...lexicalRuntimeBreakdown.noticeLines,
@@ -3243,6 +3248,9 @@ export class DataManager {
         `Persisted total includes ${this.formatBytes(persistedUnlistedBytes)} from refs/settings tables not listed below.`,
       );
     }
+    prominentJsHeapNoticeLines.forEach((line) => {
+      console.log(`[clever-search] ${line}`);
+    });
     console.log(
       `Runtime total (estimate): ${this.formatBytes(runtimeTotalBytes)}`,
     );
@@ -3370,6 +3378,28 @@ export class DataManager {
       bytes,
       size: this.formatBytes(bytes),
     };
+  }
+
+  private buildProminentJsHeapNoticeLines(
+    runtimeTotalBytes: number,
+    jsHeapUsage: JsHeapUsageSample | null,
+  ): string[] {
+    if (!jsHeapUsage) {
+      return [];
+    }
+    const unattributedJsHeapUsed = Math.max(
+      0,
+      jsHeapUsage.usedBytes - runtimeTotalBytes,
+    );
+    return [
+      'JS heap used now: ' + this.formatBytes(jsHeapUsage.usedBytes),
+      'JS heap committed now: ' + this.formatBytes(jsHeapUsage.totalBytes),
+      'JS heap unattributed beyond plugin estimate: ' +
+        this.formatBytes(unattributedJsHeapUsed) +
+        ' (' +
+        this.formatPercent(unattributedJsHeapUsed, jsHeapUsage.usedBytes) +
+        ')',
+    ];
   }
 
   private buildDevStorageSummaryNotice(

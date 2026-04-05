@@ -1131,6 +1131,11 @@ describe("DataManager integration", () => {
       .spyOn(console, "groupCollapsed")
       .mockImplementation(() => {});
     const endSpy = jest.spyOn(console, "groupEnd").mockImplementation(() => {});
+    jest.spyOn(manager as any, "sampleJsHeapUsage").mockReturnValue({
+      usedBytes: 262144,
+      totalBytes: 524288,
+      limitBytes: 1048576,
+    });
     await (manager as any).noticeDevStorageStats();
 
     const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
@@ -1140,6 +1145,9 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("CurrentTextRuntime");
     expect(latestNotice).toContain("Coverage live index");
     expect(latestNotice).toContain("Coverage top segments");
+    expect(latestNotice).toContain("JS heap used now:");
+    expect(latestNotice).toContain("JS heap committed now:");
+    expect(latestNotice).toContain("JS heap unattributed beyond plugin estimate:");
     expect(latestNotice).toContain("Current text runtime split");
     expect(groupSpy).toHaveBeenCalled();
     expect(endSpy).toHaveBeenCalled();
@@ -1191,6 +1199,18 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           segment: "paths",
           bytes: 64,
+        }),
+        expect.objectContaining({
+          metric: "jsHeapUsedNow",
+          bytes: 262144,
+        }),
+        expect.objectContaining({
+          metric: "jsHeapCommittedNow",
+          bytes: 524288,
+        }),
+        expect.objectContaining({
+          metric: "unattributedJsHeapUsed",
+          bytes: 152118,
         }),
       ]),
     );
@@ -2681,3 +2701,4 @@ describe("DataManager integration", () => {
     );
   });
 });
+
