@@ -254,6 +254,7 @@ export class SearchService {
 		signal?: AbortSignal,
 	): Promise<PreparedHybridSearchResult> {
 		const dataManager = getInstance(DataManager);
+		await dataManager.flushPendingDocOperations();
 		const hybridAvailability = dataManager.getHybridAvailabilityState();
 		const blocked = this.getBlockedSearchResult(queryText);
 		if (blocked) {

@@ -173,6 +173,7 @@ describe("SearchService bootstrap gate", () => {
 			viewTypeByPath: jest.fn(() => ViewType.MARKDOWN),
 		};
 		const dataManager = {
+			flushPendingDocOperations: jest.fn(async () => undefined),
 			getLexicalAvailabilityState: jest.fn(() => ({
 				bootstrap: options.searchable ? "searchable" : "restoring",
 				searchable: options.searchable,

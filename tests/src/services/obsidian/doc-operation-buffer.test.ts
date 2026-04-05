@@ -1,4 +1,4 @@
-import {
+﻿import {
 	DocDeleteOperation,
 	DocMoveOperation,
 	DocOperationBuffer,
@@ -7,6 +7,14 @@ import {
 } from "src/services/obsidian/user-data/doc-operation-buffer";
 
 describe("DocOperationBuffer", () => {
+	beforeEach(() => {
+		jest.useFakeTimers();
+	});
+
+	afterEach(() => {
+		jest.useRealTimers();
+	});
+
 	test("reduceDocOperations keeps only the final same-path intent", () => {
 		const reduced = reduceDocOperations([
 			new DocUpsertOperation("note.md"),
@@ -183,6 +191,59 @@ describe("DocOperationBuffer", () => {
 					path: "c.md",
 				}),
 			],
+		});
+	});
+
+	test("peekReducedBatch exposes pending dirty paths before flush", () => {
+		const buffer = new DocOperationBuffer(async () => undefined, 99);
+
+		buffer.add(new DocUpsertOperation("note.md", 120));
+
+		expect(buffer.peekReducedBatch()).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "note.md",
+					sourceGeneration: 120,
+				}),
+			],
+			stalePaths: [],
+		});
+	});
+
+	test("auto flushes after the first operation delay even below the threshold", async () => {
+		const batches: any[] = [];
+		const buffer = new DocOperationBuffer(async (operations) => {
+			batches.push(operations);
+		}, 99, 2000);
+
+		buffer.add(new DocUpsertOperation("note.md"));
+		await jest.advanceTimersByTimeAsync(1999);
+		expect(batches).toHaveLength(0);
+
+		await jest.advanceTimersByTimeAsync(1);
+		expect(batches).toHaveLength(1);
+		expect(batches[0]).toEqual({
+			dirtyPaths: [
+				expect.objectContaining({
+					path: "note.md",
+				}),
+			],
+			stalePaths: [],
+		});
+	});
+
+	test("dispose cancels pending auto flushes", async () => {
+		const handler = jest.fn(async () => undefined);
+		const buffer = new DocOperationBuffer(handler, 99, 2000);
+
+		buffer.add(new DocUpsertOperation("note.md"));
+		buffer.dispose();
+		await jest.runOnlyPendingTimersAsync();
+
+		expect(handler).not.toHaveBeenCalled();
+		expect(buffer.peekReducedBatch()).toEqual({
+			dirtyPaths: [],
+			stalePaths: [],
 		});
 	});
 });

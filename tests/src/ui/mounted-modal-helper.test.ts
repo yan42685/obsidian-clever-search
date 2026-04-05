@@ -9,6 +9,9 @@ jest.mock("electron", () => ({
 
 jest.mock("src/services/obsidian/user-data/data-manager", () => ({
 	DataManager: class MockDataManager {
+		async flushPendingDocOperations() {
+			return undefined;
+		}
 		async getHybridFreshnessSummary() {
 			return null;
 		}
@@ -444,6 +447,8 @@ describe("mounted modal helper", () => {
 		const { container } = require("tsyringe");
 		const { SearchResult, SearchType } = require("src/globals/search-types");
 		const { DataManager } = require("src/services/obsidian/user-data/data-manager");
+		const { EventEnum } = require("src/globals/enums");
+		const { eventBus } = require("src/utils/event-bus");
 		const { HybridFreshnessNoticeController } = require("src/ui/mounted-modal-helper");
 		const getHybridFreshnessSummary = jest.fn(async () => ({
 			processingFileCount: 1,
@@ -456,6 +461,7 @@ describe("mounted modal helper", () => {
 			updatedAt: Date.now(),
 		}));
 		container.registerInstance(DataManager, {
+			flushPendingDocOperations: jest.fn(async () => undefined),
 			getHybridFreshnessSummary,
 		});
 		const states: Array<{ visible: boolean; message: string }> = [];
@@ -485,6 +491,76 @@ describe("mounted modal helper", () => {
 			(container as { reset: () => void }).reset();
 		} else {
 			container.clearInstances();
+		}
+	});
+
+	test("hybrid freshness notice coalesces runtime-status refresh bursts", async () => {
+		const { container } = require("tsyringe");
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { EventEnum } = require("src/globals/enums");
+		const { eventBus } = require("src/utils/event-bus");
+		const { DataManager } = require("src/services/obsidian/user-data/data-manager");
+		const { HybridFreshnessNoticeController } = require("src/ui/mounted-modal-helper");
+		const summary = {
+			processingFileCount: 1,
+			staleFileCount: 0,
+			repairFileCount: 0,
+			totalTrackedFiles: 1,
+			processingSamplePaths: ["docs/example.md"],
+			staleSamplePaths: [],
+			repairSamplePaths: [],
+			updatedAt: Date.now(),
+		};
+		let resolveFirstRefresh: ((value: typeof summary) => void) | null = null;
+		const getHybridFreshnessSummary = jest
+			.fn()
+			.mockImplementationOnce(
+				async () =>
+					await new Promise<typeof summary>((resolve) => {
+						resolveFirstRefresh = resolve;
+					}),
+			)
+			.mockImplementation(async () => summary);
+		container.registerInstance(DataManager, {
+			flushPendingDocOperations: jest.fn(async () => undefined),
+			getHybridFreshnessSummary,
+		});
+		const controller = new HybridFreshnessNoticeController({
+			getSearchType: () => SearchType.IN_VAULT,
+			getIsHybrid: () => true,
+			onNoticeChange: () => undefined,
+		});
+
+		controller.syncFromResult(new SearchResult("freshness", []));
+		await Promise.resolve();
+		expect(getHybridFreshnessSummary).toHaveBeenCalledTimes(1);
+
+		const runtimeStatusCallback = (eventBus.on as jest.Mock).mock.calls.find(
+			([event]: [string]) => event === EventEnum.HYBRID_RUNTIME_STATUS_CHANGED,
+		)?.[1];
+		expect(runtimeStatusCallback).toBeDefined();
+		runtimeStatusCallback();
+		runtimeStatusCallback();
+		runtimeStatusCallback();
+		expect(getHybridFreshnessSummary).toHaveBeenCalledTimes(1);
+
+		resolveFirstRefresh?.(summary);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(getHybridFreshnessSummary.mock.calls.length).toBeLessThanOrEqual(2);
+		expect(getHybridFreshnessSummary).toHaveBeenCalledTimes(1);
+
+		runtimeStatusCallback();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(getHybridFreshnessSummary.mock.calls.length).toBeLessThanOrEqual(2);
+
+		controller.clear();
+		if (
+			"reset" in container &&
+			typeof (container as { reset?: () => void }).reset === "function"
+		) {
+			(container as { reset: () => void }).reset();
 		}
 	});
 });

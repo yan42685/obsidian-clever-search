@@ -163,26 +163,54 @@ export class DocOperationBuffer {
 	private readonly flushThrottled = throttle(10000, () => {
 		void this.forceFlush();
 	});
+	private autoFlushTimer: ReturnType<typeof setTimeout> | null = null;
 	private flushQueue: Promise<void> = Promise.resolve();
+	private disposed = false;
 
 	constructor(
 		private readonly handler: (operations: ReducedDocOperationBatch) => Promise<void>,
 		private readonly autoFlushThreshold: number,
+		private readonly autoFlushDelayMs = 2000,
 	) {}
 
 	add(operation: DocOperation): void {
+		if (this.disposed) {
+			return;
+		}
 		this.operations.push(operation);
+		if (this.operations.length === 1) {
+			this.scheduleAutoFlush();
+		}
 
 		if (this.operations.length >= this.autoFlushThreshold) {
+			this.clearAutoFlushTimer();
 			this.flushThrottled();
 		}
 	}
 
+	peekReducedBatch(): ReducedDocOperationBatch {
+		if (this.disposed) {
+			return {
+				dirtyPaths: [],
+				stalePaths: [],
+			};
+		}
+		return reduceDocOperations(this.operations);
+	}
+
 	async forceFlush(): Promise<void> {
+		if (this.disposed) {
+			return;
+		}
+		this.clearAutoFlushTimer();
 		const previous = this.flushQueue;
 		const current = previous
 			.catch(() => undefined)
 			.then(async () => {
+				if (this.disposed) {
+					this.operations.length = 0;
+					return;
+				}
 				if (this.operations.length === 0) {
 					return;
 				}
@@ -198,5 +226,29 @@ export class DocOperationBuffer {
 			() => undefined,
 		);
 		await current;
+	}
+
+	dispose(): void {
+		this.disposed = true;
+		this.clearAutoFlushTimer();
+		this.operations.length = 0;
+	}
+
+	private scheduleAutoFlush(): void {
+		if (this.disposed || this.autoFlushTimer) {
+			return;
+		}
+		this.autoFlushTimer = setTimeout(() => {
+			this.autoFlushTimer = null;
+			void this.forceFlush();
+		}, this.autoFlushDelayMs);
+	}
+
+	private clearAutoFlushTimer(): void {
+		if (!this.autoFlushTimer) {
+			return;
+		}
+		clearTimeout(this.autoFlushTimer);
+		this.autoFlushTimer = null;
 	}
 }

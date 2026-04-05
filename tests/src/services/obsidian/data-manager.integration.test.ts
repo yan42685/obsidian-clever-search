@@ -1,4 +1,4 @@
-import { container } from "tsyringe";
+﻿import { container } from "tsyringe";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 
 jest.mock("obsidian", () => {
@@ -2375,8 +2375,8 @@ describe("DataManager integration", () => {
     expect(firstSummary.processingSamplePaths).toEqual([processingFile.path]);
     expect(firstSummary.staleSamplePaths).toEqual([staleFile.path]);
     expect(secondSummary).toMatchObject({
-      processingFileCount: 1,
-      staleFileCount: 1,
+      processingFileCount: 2,
+      staleFileCount: 0,
     });
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
@@ -2386,6 +2386,52 @@ describe("DataManager integration", () => {
         staleSamplePaths: [staleFile.path],
       }),
     );
+
+    warnSpy.mockRestore();
+    manager.onunload();
+  });
+
+  test("hybrid freshness counts pending doc-buffer dirty paths as processing", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/pending-buffer.md", "pending", 220);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "pending"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: 180,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+      indexedAt: 180,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    manager.receiveDocOperation(new DocUpsertOperation(file.path, file.stat.mtime));
+
+    const summary = await manager.getHybridFreshnessSummary();
+
+    expect(summary.processingFileCount).toBe(1);
+    expect(summary.staleFileCount).toBe(0);
+    expect(summary.processingSamplePaths).toEqual([file.path]);
+
+    manager.onunload();
   });
 
   test("hybrid health summary does not treat stored data without indexed refs as healthy", async () => {

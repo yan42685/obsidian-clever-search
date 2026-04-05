@@ -416,6 +416,8 @@ export class HybridFreshnessNoticeController {
 	private readonly runtimeStatusCallback: EventCallback;
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private refreshToken = 0;
+	private refreshInFlight: Promise<void> | null = null;
+	private refreshQueued = false;
 	private destroyed = false;
 
 	constructor(options: HybridFreshnessNoticeControllerOptions) {
@@ -426,7 +428,7 @@ export class HybridFreshnessNoticeController {
 			if (!this.shouldTrack()) {
 				return;
 			}
-			void this.refreshNow();
+			this.requestRefresh();
 		};
 		eventBus.on(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED, this.runtimeStatusCallback);
 	}
@@ -448,7 +450,7 @@ export class HybridFreshnessNoticeController {
 			return;
 		}
 		this.startTicker();
-		void this.refreshNow();
+		this.requestRefresh();
 	}
 
 	private shouldTrack(): boolean {
@@ -469,12 +471,13 @@ export class HybridFreshnessNoticeController {
 				this.onNoticeChange(createHiddenHybridFreshnessNoticeState());
 				return;
 			}
-			void this.refreshNow();
+			this.requestRefresh();
 		}, HybridFreshnessNoticeController.REFRESH_INTERVAL_MS);
 	}
 
 	private stopTicker(): void {
 		this.refreshToken += 1;
+		this.refreshQueued = false;
 		if (!this.timer) {
 			return;
 		}
@@ -482,8 +485,32 @@ export class HybridFreshnessNoticeController {
 		this.timer = null;
 	}
 
+	private requestRefresh(): void {
+		if (this.destroyed) {
+			return;
+		}
+		if (this.refreshInFlight) {
+			this.refreshQueued = true;
+			return;
+		}
+		const run = async () => {
+			try {
+				await this.refreshNow();
+			} finally {
+				this.refreshInFlight = null;
+				if (this.refreshQueued && !this.destroyed && this.shouldTrack()) {
+					this.refreshQueued = false;
+					this.requestRefresh();
+				}
+			}
+		};
+		this.refreshInFlight = run();
+		void this.refreshInFlight;
+	}
+
 	private async refreshNow(): Promise<void> {
 		const token = ++this.refreshToken;
+		await this.dataManager.flushPendingDocOperations();
 		const summary = await this.dataManager.getHybridFreshnessSummary();
 		if (
 			this.destroyed ||

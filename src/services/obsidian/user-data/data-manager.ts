@@ -1,4 +1,4 @@
-import { Notice, TFile, type TAbstractFile } from "obsidian";
+﻿import { Notice, TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
@@ -34,7 +34,7 @@ import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
-import { eventBus } from "src/utils/event-bus";
+import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
 import {
@@ -412,8 +412,11 @@ export class DataManager {
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
   private lastHybridStaleWarnSignature: string | null = null;
+  private lastHybridStaleReconcileSignature: string | null = null;
+  private inVaultSearchFlushCallback: EventCallback | null = null;
   private lexicalIndexFailureNotice: Notice | null = null;
   private lexicalFailureRetryInFlight = false;
+  private isUnloaded = false;
   private readonly lexicalIndexFailuresByPath = new Map<
     string,
     LexicalIndexFailure
@@ -500,6 +503,8 @@ export class DataManager {
   async getHybridFreshnessSummary(): Promise<HybridFreshnessSummary> {
     const trackedFiles = this.getHybridTrackedFiles();
     if (!this.hybridEngine.isEnabled() || trackedFiles.length === 0) {
+      this.lastHybridStaleWarnSignature = null;
+      this.lastHybridStaleReconcileSignature = null;
       return {
         processingFileCount: 0,
         staleFileCount: 0,
@@ -514,11 +519,13 @@ export class DataManager {
 
     const repairPaths = new Set(this.hybridRecoveryCoordinator.listFailurePaths());
     const deferredPaths = new Set(this.hybridRecoveryCoordinator.listDeferredPaths());
+    const pendingDocOperations = this.docOperationsBuffer.peekReducedBatch();
     const processingPaths = new Set<string>([
       ...this.hybridRepairQueue.keys(),
       ...this.hybridRepairInFlightPaths,
       ...deferredPaths,
       ...repairPaths,
+      ...pendingDocOperations.dirtyPaths.map((operation) => operation.path),
     ]);
     const indexedRefs = await this.fileSnapshotStore.getHybridIndexedFileRefs(
       trackedFiles.map((file) => file.path),
@@ -529,6 +536,7 @@ export class DataManager {
     const processingSamplePaths: string[] = [];
     const staleSamplePaths: string[] = [];
     const repairSamplePaths: string[] = [];
+    const stalePaths: string[] = [];
     for (let index = 0; index < trackedFiles.length; index++) {
       const file = trackedFiles[index];
       const path = file.path;
@@ -558,9 +566,11 @@ export class DataManager {
       }
       staleFileCount += 1;
       appendPathSample(staleSamplePaths, path, HYBRID_FRESHNESS_SAMPLE_LIMIT);
+      stalePaths.push(path);
     }
 
     this.warnOnHybridStaleFiles(staleFileCount, staleSamplePaths);
+    this.reconcileHybridStalePaths(stalePaths, trackedFiles);
 
     return {
       processingFileCount,
@@ -592,6 +602,49 @@ export class DataManager {
       staleFileCount,
       staleSamplePaths: [...staleSamplePaths],
     });
+  }
+
+  async flushPendingDocOperations(): Promise<void> {
+    if (this.isUnloaded) {
+      return;
+    }
+    await this.docOperationsBuffer.forceFlush();
+  }
+
+  private reconcileHybridStalePaths(
+    stalePaths: readonly string[],
+    trackedFiles: readonly TFile[],
+  ): void {
+    if (stalePaths.length === 0) {
+      this.lastHybridStaleReconcileSignature = null;
+      return;
+    }
+    const reconcileSignature = stalePaths.join("|");
+    if (reconcileSignature === this.lastHybridStaleReconcileSignature) {
+      return;
+    }
+    const trackedFilesByPath = new Map(
+      trackedFiles.map((file) => [file.path, file] as const),
+    );
+    let enqueuedCount = 0;
+    for (const path of stalePaths) {
+      const file = trackedFilesByPath.get(path);
+      if (!file) {
+        continue;
+      }
+      this.enqueueHybridRepair({
+        path,
+        mode: "incremental",
+        reason: "freshness-reconcile-stale",
+        sourceGeneration: file.stat.mtime,
+        notifyRuntimeStatusChanged: false,
+      });
+      enqueuedCount += 1;
+    }
+    this.lastHybridStaleReconcileSignature = reconcileSignature;
+    if (enqueuedCount > 0) {
+      this.notifyHybridRuntimeStatusChanged();
+    }
   }
 
   async getHybridHealthSummary(): Promise<HybridHealthSummary> {
@@ -779,6 +832,9 @@ export class DataManager {
   private docOperationsHandler = async (
     operations: ReducedDocOperationBatch,
   ) => {
+    if (this.isUnloaded) {
+      return;
+    }
     const consumedStalePaths = new Set<string>();
     // Apply surviving dirty paths first so rename fast-paths can reuse old-path data
     // before the stale cleanup pass removes it.
@@ -812,6 +868,7 @@ export class DataManager {
 
   @monitorDecorator
   async initAsync(options: DataManagerInitOptions = {}) {
+    this.isUnloaded = false;
     this.clearHybridFailedEmbeddingState();
     this.resetLexicalSnapshotTracking();
     this.fileSnapshotStore.resetRuntimeState();
@@ -836,7 +893,10 @@ export class DataManager {
   }
 
   onunload() {
+    this.isUnloaded = true;
     getInstance(FileWatcher).stop();
+    this.removeInVaultSearchFlushListener();
+    this.docOperationsBuffer.dispose();
     void this.flushLexicalSnapshotIfDirty(true);
     this.clearLexicalSnapshotFlushTimer();
     this.clearHybridRepairScheduler();
@@ -1511,8 +1571,10 @@ export class DataManager {
   private enqueueHybridRepair(
     task: Omit<HybridRepairTask, "eligibleAt" | "enqueuedAt"> & {
       eligibleAt?: number;
+      notifyRuntimeStatusChanged?: boolean;
     },
   ): void {
+    const shouldNotify = task.notifyRuntimeStatusChanged !== false;
     const nextTask: HybridRepairTask = {
       ...task,
       eligibleAt: task.eligibleAt ?? Date.now(),
@@ -1522,7 +1584,9 @@ export class DataManager {
     if (!existing) {
       this.hybridRepairQueue.set(task.path, nextTask);
       this.scheduleHybridRepairFlush();
-      this.notifyHybridRuntimeStatusChanged();
+      if (shouldNotify) {
+        this.notifyHybridRuntimeStatusChanged();
+      }
       return;
     }
 
@@ -1546,7 +1610,9 @@ export class DataManager {
             : Math.max(existing.sourceGeneration, nextTask.sourceGeneration),
     });
     this.scheduleHybridRepairFlush();
-    this.notifyHybridRuntimeStatusChanged();
+    if (shouldNotify) {
+      this.notifyHybridRuntimeStatusChanged();
+    }
   }
 
   private cancelHybridRepair(path: string): void {
@@ -2436,9 +2502,7 @@ export class DataManager {
     }
 
     if (!this.shouldForceRefresh) {
-      eventBus.on(EventEnum.IN_VAULT_SEARCH, () =>
-        this.docOperationsBuffer.forceFlush(),
-      );
+      this.ensureInVaultSearchFlushListener();
       getInstance(FileWatcher).start();
     }
 
@@ -2560,6 +2624,22 @@ export class DataManager {
 
   private notifyHybridRuntimeStatusChanged(): void {
     eventBus.emit(EventEnum.HYBRID_RUNTIME_STATUS_CHANGED);
+  }
+
+  private ensureInVaultSearchFlushListener(): void {
+    if (this.inVaultSearchFlushCallback) {
+      return;
+    }
+    this.inVaultSearchFlushCallback = () => this.docOperationsBuffer.forceFlush();
+    eventBus.on(EventEnum.IN_VAULT_SEARCH, this.inVaultSearchFlushCallback);
+  }
+
+  private removeInVaultSearchFlushListener(): void {
+    if (!this.inVaultSearchFlushCallback) {
+      return;
+    }
+    eventBus.off(EventEnum.IN_VAULT_SEARCH, this.inVaultSearchFlushCallback);
+    this.inVaultSearchFlushCallback = null;
   }
 
   private async enqueuePersistedHybridRecoveryStates(

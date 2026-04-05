@@ -137,7 +137,8 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		mockInstanceMap.set(ViewRegistry, {
 			viewTypeByPath: jest.fn(() => "markdown"),
 		});
-		mockInstanceMap.set(DataManager, {
+		const dataManager = {
+			flushPendingDocOperations: jest.fn(async () => undefined),
 			getLexicalAvailabilityState: jest.fn(() => ({
 				bootstrap: "searchable",
 				searchable: true,
@@ -154,9 +155,13 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 				},
 			})),
 			hasHybridFailedEmbeddings: jest.fn(() => false),
-		});
+		};
+		mockInstanceMap.set(DataManager, dataManager);
 
-		return new SearchService();
+		return {
+			service: new SearchService(),
+			dataManager,
+		};
 	}
 
 	function configurePreparedFlow(finalNoticeKey: string | null = null) {
@@ -180,7 +185,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 
 	test("keeps hybrid results and notice flow when finalize succeeds normally", async () => {
 		configurePreparedFlow("hybridNotice.searchFallbackToLexical");
-		const service = createHarness();
+		const { service } = createHarness();
 
 		const result = await service.searchInVaultHybrid("alpha");
 
@@ -199,7 +204,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 
 	test("falls back to the normal lexical search path when finalize requests lexical fallback", async () => {
 		configurePreparedFlow();
-		const service = createHarness();
+		const { service } = createHarness();
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
 		lexicalEngine.searchFiles.mockResolvedValue([
@@ -244,7 +249,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			fallbackNoticeMessage: null,
 			fallbackToLexicalSearch: true,
 		});
-		const service = createHarness();
+		const { service } = createHarness();
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
 		lexicalEngine.searchFiles.mockResolvedValue([
@@ -274,7 +279,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		mockHybridEngine.prepareRecall.mockRejectedValue(
 			new Error("provider offline"),
 		);
-		const service = createHarness();
+		const { service } = createHarness();
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
 		lexicalEngine.searchFiles.mockResolvedValue([
@@ -308,7 +313,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		mockHybridEngine.prepareRecall.mockRejectedValue(
 			new Error("provider offline"),
 		);
-		const service = createHarness();
+		const { service } = createHarness();
 
 		const result = await service.searchInVaultHybrid("alpha");
 
@@ -326,7 +331,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 	test("uses mapped notice text for known issue kinds without provider-specific messages", async () => {
 		const { NoApiKeyError } = require("src/services/search/hybrid/provider-error");
 		mockHybridEngine.prepareRecall.mockRejectedValue(new NoApiKeyError());
-		const service = createHarness();
+		const { service } = createHarness();
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
 		lexicalEngine.searchFiles.mockResolvedValue([
@@ -351,7 +356,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 
 	test("keeps known issue kinds when finalize falls back to lexical results", async () => {
 		configurePreparedFlow();
-		const service = createHarness();
+		const { service } = createHarness();
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
 		lexicalEngine.searchFiles.mockResolvedValue([
@@ -384,7 +389,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 	});
 
 	test("prefers explicit issue messages over mapped notice text", () => {
-		const service = createHarness();
+		const { service } = createHarness();
 		const { SearchResult } = require("src/globals/search-types");
 		const result = new SearchResult(
 			"notes/current.md",
@@ -405,7 +410,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 	});
 
 	test("dedupes identical fallback notices across staged updates", () => {
-		const service = createHarness();
+		const { service } = createHarness();
 		const { SearchResult } = require("src/globals/search-types");
 		const preparedResult = new SearchResult(
 			"notes/current.md",
@@ -427,7 +432,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 	});
 
 	test("re-emits a fallback notice after the aggregated state clears", () => {
-		const service = createHarness();
+		const { service } = createHarness();
 		const { SearchResult } = require("src/globals/search-types");
 		const fallbackResult = new SearchResult(
 			"notes/current.md",
@@ -444,6 +449,18 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			"hybridNotice.searchFallbackToLexical",
 			"hybridNotice.searchFallbackToLexical",
 		]);
+	});
+
+	test("flushes pending doc operations before hybrid prepare starts", async () => {
+		configurePreparedFlow();
+		const { service, dataManager } = createHarness();
+
+		await service.searchInVaultHybrid("alpha");
+
+		expect(dataManager.flushPendingDocOperations).toHaveBeenCalledTimes(1);
+		expect(dataManager.flushPendingDocOperations.mock.invocationCallOrder[0]).toBeLessThan(
+			mockHybridEngine.prepareRecall.mock.invocationCallOrder[0],
+		);
 	});
 
 });
