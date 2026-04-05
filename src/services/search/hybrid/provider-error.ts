@@ -20,6 +20,11 @@ export type HybridProviderErrorDetails = {
 	retryAfterHeader?: string | null;
 };
 
+export type HybridSearchIssue = {
+	kind: HybridProviderFailureKind | 'none';
+	message: string | null;
+};
+
 type DashScopeErrorEnvelope = {
 	code?: unknown;
 	message?: unknown;
@@ -189,6 +194,9 @@ export function isNetworkFailureMessage(message: string): boolean {
 
 export function isQuotaFailureMessage(message: string): boolean {
 	return (
+		message.includes('allocationquota.freetieronly') ||
+		message.includes('free tier') ||
+		message.includes('free-tier') ||
 		message.includes('insufficient_quota') ||
 		message.includes('quota exhausted') ||
 		message.includes('quota exceeded') ||
@@ -197,6 +205,100 @@ export function isQuotaFailureMessage(message: string): boolean {
 		message.includes('billing') ||
 		message.includes('free quota')
 	);
+}
+
+export function buildHybridFallbackNoticeMessage(error: unknown): string | null {
+	if (error instanceof NoApiKeyError) {
+		return 'Qwen API key is not configured.';
+	}
+	if (error instanceof WeeklyTokenLimitExceededError) {
+		return `Weekly token limit exceeded before sending provider request (limit: ${error.limit}, used: ${error.used}, estimated: ${error.estimated}).`;
+	}
+	if (!(error instanceof Error)) {
+		return null;
+	}
+
+	const providerMessage = readProviderString(
+		(error as { providerMessage?: unknown }).providerMessage,
+	);
+	const requestId = readProviderString(
+		(error as { requestId?: unknown }).requestId,
+	);
+	if (providerMessage) {
+		return requestId
+			? `${providerMessage} (request_id: ${requestId})`
+			: providerMessage;
+	}
+
+	const message = error.message.trim();
+	return message.length > 0 ? message : null;
+}
+
+export function buildHybridSearchIssue(error: unknown): HybridSearchIssue {
+	if (!error) {
+		return {
+			kind: 'none',
+			message: null,
+		};
+	}
+	if (error instanceof NoApiKeyError) {
+		return {
+			kind: 'missing_api_key',
+			message: null,
+		};
+	}
+	if (error instanceof WeeklyTokenLimitExceededError) {
+		return {
+			kind: 'weekly_token_limit',
+			message: null,
+		};
+	}
+	if (!(error instanceof Error)) {
+		return {
+			kind: 'unknown',
+			message: null,
+		};
+	}
+
+	const providerMessage = readProviderString(
+		(error as { providerMessage?: unknown }).providerMessage,
+	);
+	const providerCode = readProviderString(
+		(error as { providerCode?: unknown }).providerCode,
+	);
+	const providerType = readProviderString(
+		(error as { providerType?: unknown }).providerType,
+	);
+	const requestId = readProviderString(
+		(error as { requestId?: unknown }).requestId,
+	);
+	const enrichedDetail = [
+		providerMessage,
+		providerCode,
+		providerType,
+		error.message,
+	]
+		.filter((value): value is string => Boolean(value))
+		.join(' ')
+		.toLowerCase();
+	let kind = classifyHybridProviderFailure(error);
+	if (isQuotaFailureMessage(enrichedDetail)) {
+		kind = 'quota_exhausted';
+	}
+
+	if (providerMessage) {
+		return {
+			kind,
+			message: requestId
+				? `${providerMessage} (request_id: ${requestId})`
+				: providerMessage,
+		};
+	}
+
+	return {
+		kind,
+		message: kind === 'unknown' ? buildHybridFallbackNoticeMessage(error) : null,
+	};
 }
 
 function readProviderString(value: unknown): string | null {

@@ -67,6 +67,7 @@ describe("mounted modal helper", () => {
 				topK: 5,
 				displayCandidates: [],
 				fallbackNoticeKey: null,
+				fallbackNoticeMessage: null,
 			},
 			result: new SearchResult("prepare", []),
 		};
@@ -151,6 +152,7 @@ describe("mounted modal helper", () => {
 				topK: 5,
 				displayCandidates: [],
 				fallbackNoticeKey: null,
+				fallbackNoticeMessage: null,
 			},
 			result: new SearchResult("prepare-after-gate", []),
 		});
@@ -209,6 +211,7 @@ describe("mounted modal helper", () => {
 				topK: 5,
 				displayCandidates: [],
 				fallbackNoticeKey: null,
+				fallbackNoticeMessage: null,
 			},
 			result: new SearchResult("alpha-prepare", []),
 		});
@@ -234,11 +237,17 @@ describe("mounted modal helper", () => {
 				topK: 5,
 				displayCandidates: [],
 				fallbackNoticeKey: null,
+				fallbackNoticeMessage: null,
 			},
 			result: new SearchResult("prepared-order", []),
 		};
 		const fallbackNoticeKey = "hybridNotice.searchFallbackToLexical";
-		const finalResult = new SearchResult("prepared-order", [], fallbackNoticeKey);
+		const finalResult = new SearchResult(
+			"prepared-order",
+			[],
+			fallbackNoticeKey,
+			"provider offline",
+		);
 		const setCachedResult = jest.fn();
 		const searchService = {
 			prepareSearchInVaultHybrid: jest.fn(async () => prepareResult),
@@ -267,6 +276,110 @@ describe("mounted modal helper", () => {
 		expect(applied).toEqual(["prepared-order", "prepared-order"]);
 		expect(searchService.notifyHybridFallback).toHaveBeenNthCalledWith(1, prepareResult.result);
 		expect(searchService.notifyHybridFallback).toHaveBeenNthCalledWith(2, finalResult);
-		expect(setCachedResult).toHaveBeenCalledWith("alpha", finalResult);
+		expect(setCachedResult).not.toHaveBeenCalled();
+	});
+
+	test("hybrid query session does not cache known-kind fallback results without explicit messages", async () => {
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { HybridQuerySessionController } = require("src/ui/mounted-modal-helper");
+		const prepareResult = {
+			prepared: {
+				query: "alpha",
+				topK: 5,
+				displayCandidates: [],
+				fallbackNoticeKey: null,
+				fallbackNoticeMessage: null,
+			},
+			result: new SearchResult("prepared-order", []),
+		};
+		const finalResult = new SearchResult(
+			"prepared-order",
+			[],
+			"hybridNotice.searchFallbackToLexical",
+			null,
+			[],
+			"fallback_failed_no_results",
+			"missing_api_key",
+			null,
+		);
+		const setCachedResult = jest.fn();
+		const searchService = {
+			prepareSearchInVaultHybrid: jest.fn(async () => prepareResult),
+			finalizePreparedSearchInVaultHybrid: jest.fn(async () => finalResult),
+			notifyHybridFallback: jest.fn(),
+		};
+		let currentQuery = "alpha";
+		const controller = new HybridQuerySessionController({
+			searchService,
+			getSearchType: () => SearchType.IN_VAULT,
+			getIsHybrid: () => true,
+			getHybridMode: () => "default",
+			getCurrentQueryText: () => currentQuery,
+			getCachedResult: () => undefined,
+			setCachedResult,
+			onResultApplied: async () => undefined,
+		});
+
+		controller.handleInput("alpha");
+		await jest.advanceTimersByTimeAsync(100);
+		await jest.advanceTimersByTimeAsync(300);
+
+		expect(setCachedResult).not.toHaveBeenCalled();
+	});
+
+	test("auto hybrid fallback reports an empty-result state when lexical and hybrid are both 0", async () => {
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { AutoHybridFallbackController } = require("src/ui/mounted-modal-helper");
+		const searchService = {
+			hybridEngine: {
+				isEnabled: jest.fn(() => true),
+			},
+			searchInVaultHybrid: jest.fn(
+				async () =>
+					new SearchResult(
+						"no result",
+						[],
+						null,
+						null,
+						[],
+						"fallback_no_results",
+					),
+			),
+		};
+		const failureStates: Array<{
+			key: string | null;
+			message: string | null;
+			emptyResult: boolean;
+		}> = [];
+		const applied: string[] = [];
+		const controller = new AutoHybridFallbackController({
+			searchService,
+			setting: {
+				hybrid: {
+					autoShowResultsWhenLexicalEmpty: true,
+				},
+			},
+			searchType: SearchType.IN_VAULT,
+			isHybrid: false,
+			getLatestRequestId: () => 1,
+			getCurrentQueryText: () => "alpha",
+			onFailureNoticeChange: (state: typeof failureStates[number]) => {
+				failureStates.push(state);
+			},
+			onResultApplied: async (_query: string, result: InstanceType<typeof SearchResult>) => {
+				applied.push(result.sourcePath);
+			},
+		});
+
+		controller.schedule("alpha", 1);
+		await Promise.resolve();
+
+		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha");
+		expect(failureStates.at(-1)).toEqual({
+			key: null,
+			message: null,
+			emptyResult: true,
+		});
+		expect(applied).toEqual(["no result"]);
 	});
 });

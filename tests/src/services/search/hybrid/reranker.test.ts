@@ -143,9 +143,6 @@ describe("HybridReranker", () => {
 			providerCode: "AccessDenied",
 			requestId: "req-403",
 		});
-		expect(mockLogger.error).toHaveBeenCalledWith(
-			expect.stringContaining("kind=auth_403"),
-		);
 	});
 
 	test("classifies quota-style 429 responses as quota exhaustion", async () => {

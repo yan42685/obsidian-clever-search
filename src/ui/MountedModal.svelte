@@ -1,14 +1,14 @@
-	<script lang="ts">
+<script lang="ts">
 	import { HTML_4_SPACES, NULL_NUMBER } from "src/globals/constants";
 	import { EventEnum } from "src/globals/enums";
 	import { OuterSetting } from "src/globals/plugin-setting";
 	import {
 		type HybridSearchMode,
-	    FileItem,
-	    FileSubItem,
-	    LineItem,
-	    SearchResult,
-	    SearchType,
+		FileItem,
+		FileSubItem,
+		LineItem,
+		SearchResult,
+		SearchType,
 	} from "src/globals/search-types";
 	import { SearchService } from "src/services/obsidian/search-service";
 	import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
@@ -20,13 +20,14 @@
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import {
-	    AutoHybridFallbackController,
+		AutoHybridFallbackController,
 		createHiddenHybridFreshnessNoticeState,
-	    getMountedModalFileItemScore,
+		getMountedModalFileItemScore,
+		type HybridFailureNoticeState,
 		HybridFreshnessNoticeController,
 		HybridQuerySessionController,
 		type HybridFreshnessNoticeState,
-	    usesDirectFileSubItems,
+		usesDirectFileSubItems,
 	} from "./mounted-modal-helper";
 	import SearchHistoryInput from "./SearchHistoryInput.svelte";
 	import { ViewHelper } from "./view-helper";
@@ -44,6 +45,10 @@
 	export let queryText: string;
 
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
+	const cachedAutoHybridFallbackFailureNotice = new Map<
+		string,
+		HybridFailureNoticeState
+	>();
 	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
@@ -54,9 +59,17 @@
 	let currSubItemIndex = NULL_NUMBER;
 	let latestSearchRequestId = 0;
 	let historyInputRef: any;
-	let autoHybridFallbackFailureNoticeKey: LocaleKey | null = null;
+	let autoHybridFallbackFailureNotice: HybridFailureNoticeState = {
+		key: null,
+		message: null,
+		emptyResult: false,
+	};
 	let hybridFreshnessNotice: HybridFreshnessNoticeState =
 		createHiddenHybridFreshnessNoticeState();
+
+	function shouldCacheAutoHybridFallbackResult(result: SearchResult): boolean {
+		return result.hybridSearchOutcome === "success" && result.items.length > 0;
+	}
 
 	const autoHybridFallback = new AutoHybridFallbackController({
 		searchService,
@@ -65,16 +78,32 @@
 		isHybrid,
 		getLatestRequestId: () => latestSearchRequestId,
 		getCurrentQueryText: () => queryText,
-		onFailureNoticeChange: (key) => {
-			autoHybridFallbackFailureNoticeKey = key;
+		onFailureNoticeChange: (state) => {
+			autoHybridFallbackFailureNotice = state;
 		},
 		onResultApplied: async (query, result) => {
 			searchResult = result;
-			cachedResult.set(query, result);
+			if (shouldCacheAutoHybridFallbackResult(result)) {
+				cachedResult.set(query, result);
+			} else {
+				cachedResult.delete(query);
+			}
+			if (
+				autoHybridFallbackFailureNotice.key ||
+				autoHybridFallbackFailureNotice.message ||
+				autoHybridFallbackFailureNotice.emptyResult
+			) {
+				cachedAutoHybridFallbackFailureNotice.set(query, {
+					...autoHybridFallbackFailureNotice,
+				});
+			} else {
+				cachedAutoHybridFallbackFailureNotice.delete(query);
+			}
 			hybridFreshnessNoticeController.syncFromResult(result);
 			await updateItemAsync(0);
 		},
 	});
+
 	const hybridFreshnessNoticeController = new HybridFreshnessNoticeController({
 		getSearchType: () => searchType,
 		getIsHybrid: () => isHybrid,
@@ -99,10 +128,31 @@
 		},
 	});
 
-	$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
+		$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
+
+	function getAutoHybridFallbackNoResultsText(): string {
+		const locale =
+			typeof window !== "undefined"
+				? (window.localStorage?.getItem("language") ?? "").toLowerCase()
+				: "";
+		if (locale.startsWith("zh")) {
+			return "\u8bcd\u6cd5\u7ed3\u679c\u4e3a 0\uff0cfallback \u5230 hybrid \u7ed3\u679c\u4e5f\u4e3a 0\u3002";
+		}
+		return t("hybridModal.autoFallbackNoResults");
+	}
 
 	function hasHybridEmbeddingIncomplete(result: SearchResult): boolean {
 		return result.hasHybridAvailabilityReason("embedding_incomplete");
+	}
+
+	function isAutoHybridFallbackNoResultsVisible(): boolean {
+		return (
+			searchType === SearchType.IN_VAULT &&
+			!isHybrid &&
+			(searchResult.hybridSearchOutcome === "fallback_no_results" ||
+				searchResult.hybridSearchOutcome === "fallback_failed_no_results" ||
+				autoHybridFallbackFailureNotice.emptyResult)
+		);
 	}
 
 	// TODO: use virtual list rather than rendering all buttons
@@ -165,7 +215,17 @@
 				return;
 			}
 			searchResult = cachedResult.get(currentQueryText) as SearchResult;
-			autoHybridFallback.syncFailureNoticeFromResult(searchResult);
+			searchService.notifyHybridFallback(searchResult);
+			if (searchType === SearchType.IN_VAULT && !isHybrid) {
+				autoHybridFallbackFailureNotice =
+					cachedAutoHybridFallbackFailureNotice.get(currentQueryText) ?? {
+						key: null,
+						message: null,
+						emptyResult: false,
+					};
+			} else {
+				autoHybridFallback.syncFailureNoticeFromResult(searchResult);
+			}
 			hybridFreshnessNoticeController.syncFromResult(searchResult);
 			await updateItemAsync(0);
 			if (
@@ -208,6 +268,13 @@
 
 		searchResult = nextResult;
 		autoHybridFallback.syncFailureNoticeFromResult(nextResult);
+		if (searchType === SearchType.IN_VAULT && !isHybrid) {
+			cachedAutoHybridFallbackFailureNotice.set(currentQueryText, {
+				...autoHybridFallbackFailureNotice,
+			});
+		} else {
+			cachedAutoHybridFallbackFailureNotice.delete(currentQueryText);
+		}
 		hybridFreshnessNoticeController.syncFromResult(nextResult);
 		cachedResult.set(currentQueryText, searchResult);
 		await updateItemAsync(0);
@@ -479,22 +546,11 @@
 							</p>
 						</div>
 					{/if}
-					{#if autoHybridFallbackFailureNoticeKey}
+					{#if isAutoHybridFallbackNoResultsVisible()}
 						<div class="hybrid-fallback-failure">
-							<p class="hybrid-fallback-failure-title">
-								{t("hybridModal.autoFallbackFailed.title")}
-							</p>
 							<p class="hybrid-fallback-failure-detail">
-								{t(autoHybridFallbackFailureNoticeKey)}
+								{getAutoHybridFallbackNoResultsText()}
 							</p>
-							<p class="hybrid-fallback-failure-causes">
-								{t("hybridModal.autoFallbackFailed.possibleCauses")}
-							</p>
-							<ul>
-								<li>{t("hybridModal.autoFallbackFailed.cause.api")}</li>
-								<li>{t("hybridModal.autoFallbackFailed.cause.network")}</li>
-								<li>{t("hybridModal.autoFallbackFailed.cause.index")}</li>
-							</ul>
 						</div>
 					{:else}
 						{#if hasHybridEmbeddingIncomplete(searchResult)}
@@ -698,14 +754,7 @@
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 	}
-
-	.hybrid-fallback-failure-title {
-		font-weight: 600;
-		margin-bottom: 0.55em;
-	}
-
-	.hybrid-fallback-failure-detail,
-	.hybrid-fallback-failure-causes {
+	.hybrid-fallback-failure-detail {
 		color: var(--cs-secondary-font-color, #a29c9c);
 		margin-bottom: 0;
 	}
@@ -716,15 +765,6 @@
 
 	.hybrid-fallback-failure-detail-secondary {
 		margin-top: -0.73em;
-	}
-
-	.hybrid-fallback-failure ul {
-		padding-left: 1.2em;
-		margin: 0;
-	}
-
-	.hybrid-fallback-failure li {
-		margin-bottom: 0.4em;
 	}
 
 	.right-pane {
@@ -782,4 +822,3 @@
 		background-color: var(--cs-hint-char-color, #468eeb33);
 	}
 </style>
-

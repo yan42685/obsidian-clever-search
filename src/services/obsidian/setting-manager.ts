@@ -662,10 +662,31 @@ function appendHybridStatusLine(
 	appendHybridStatusText(container, `${label}: ${value}`);
 }
 
+function formatHybridFailureKindSummary(
+	items: Array<{ kind: string; count: number }>,
+): string {
+	return items
+		.map(
+			(item) =>
+				`${t(`hybridModal.failedEmbeddingReason.${item.kind}` as any)} x${item.count}`,
+		)
+		.join(" | ");
+}
+
+function formatHybridRelativeTime(targetAt: number): string {
+	const remainingMs = Math.max(0, targetAt - Date.now());
+	const totalSeconds = Math.ceil(remainingMs / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${minutes} min ${seconds} s`;
+}
+
 function renderHybridHealthSummary(
 	container: HTMLElement,
 	summary: HybridHealthSummary,
 	availabilityState: HybridAvailabilityState,
+	failedEmbeddingSummary: HybridFailedEmbeddingSummary,
+	deferredEmbeddingSummary: HybridDeferredEmbeddingSummary,
 ) {
 	container.empty();
 	appendHybridStatusLine(
@@ -728,6 +749,40 @@ function renderHybridHealthSummary(
 			`${t("hybridModal.healthSummary.metric.deferred")} ${summary.deferredEmbeddingCount}`,
 		].join(" | "),
 	);
+	if (failedEmbeddingSummary.blockingKinds.length > 0) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.failedEmbeddingStatus.blocked"),
+			formatHybridFailureKindSummary(failedEmbeddingSummary.blockingKinds),
+		);
+	}
+	if (failedEmbeddingSummary.retryableKinds.length > 0) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.failedEmbeddingStatus.retrying"),
+			formatHybridFailureKindSummary(failedEmbeddingSummary.retryableKinds),
+		);
+	}
+	if (
+		failedEmbeddingSummary.retryableCount > 0 &&
+		failedEmbeddingSummary.nextRetryAt !== null
+	) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.failedEmbeddingStatus.nextRetry"),
+			formatHybridRelativeTime(failedEmbeddingSummary.nextRetryAt),
+		);
+	}
+	if (
+		deferredEmbeddingSummary.deferredCount > 0 &&
+		deferredEmbeddingSummary.nextEligibleAt !== null
+	) {
+		appendHybridStatusLine(
+			container,
+			t("hybridModal.deferredEmbeddingStatus.nextResume"),
+			formatHybridRelativeTime(deferredEmbeddingSummary.nextEligibleAt),
+		);
+	}
 	if (summary.shadowMismatchSamplePaths.length > 0) {
 		appendHybridStatusLine(
 			container,
@@ -770,12 +825,19 @@ class HybridHealthSummaryModal extends Modal {
 		this.summaryEl.setText(t("hybridModal.healthSummary.loading"));
 		try {
 			const dataManager = getInstance(DataManager);
-			const summary = await dataManager.getHybridHealthSummary();
+			const [summary, failedEmbeddingSummary, deferredEmbeddingSummary] =
+				await Promise.all([
+					dataManager.getHybridHealthSummary(),
+					Promise.resolve(dataManager.getHybridFailedEmbeddingSummary()),
+					dataManager.getHybridDeferredEmbeddingSummary(),
+				]);
 			const availabilityState = dataManager.getHybridAvailabilityState();
 			renderHybridHealthSummary(
 				this.summaryEl,
 				summary,
 				availabilityState,
+				failedEmbeddingSummary,
+				deferredEmbeddingSummary,
 			);
 		} catch (error) {
 			logger.error("failed to load hybrid health summary:", error);

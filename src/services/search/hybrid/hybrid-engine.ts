@@ -1,5 +1,8 @@
 import { OuterSetting } from "src/globals/plugin-setting";
 import type { FileItem } from "src/globals/search-types";
+import type {
+  HybridSearchIssueKind,
+} from "src/globals/search-types";
 import type { LocaleKey } from "src/services/obsidian/translations/locale-helper";
 import { Database } from "src/services/database/database";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
@@ -51,6 +54,9 @@ import {
   HybridReranker,
   type RerankCandidate,
 } from "./reranker";
+import {
+  buildHybridSearchIssue,
+} from "./provider-error";
 import { EMBED_DIM } from "./hybrid-types";
 import {
   profileHybridStage,
@@ -111,12 +117,18 @@ export type PreparedHybridRecall = {
   topK: number;
   displayCandidates: HybridLexicalLaneDisplayCandidate[];
   fallbackNoticeKey: LocaleKey | null;
+  fallbackNoticeMessage: string | null;
+  fallbackIssueKind: HybridSearchIssueKind | null;
+  fallbackIssueMessage: string | null;
   fallbackToLexicalSearch: boolean;
 };
 
 type FinalizedHybridRecall = {
   items: FileItem[];
   fallbackNoticeKey: LocaleKey | null;
+  fallbackNoticeMessage: string | null;
+  fallbackIssueKind: HybridSearchIssueKind | null;
+  fallbackIssueMessage: string | null;
   fallbackToLexicalSearch: boolean;
 };
 
@@ -442,6 +454,9 @@ export class HybridEngine {
         topK,
         displayCandidates: [],
         fallbackNoticeKey: null,
+        fallbackNoticeMessage: null,
+        fallbackIssueKind: null,
+        fallbackIssueMessage: null,
         fallbackToLexicalSearch: false,
       };
     }
@@ -461,6 +476,9 @@ export class HybridEngine {
         topK,
         displayCandidates: [],
         fallbackNoticeKey: null,
+        fallbackNoticeMessage: null,
+        fallbackIssueKind: null,
+        fallbackIssueMessage: null,
         fallbackToLexicalSearch: true,
       };
     }
@@ -477,6 +495,9 @@ export class HybridEngine {
       topK,
       displayCandidates,
       fallbackNoticeKey: null,
+      fallbackNoticeMessage: null,
+      fallbackIssueKind: null,
+      fallbackIssueMessage: null,
       fallbackToLexicalSearch: displayCandidates.length === 0,
     };
   }
@@ -504,6 +525,9 @@ export class HybridEngine {
       return {
         items: baseItems,
         fallbackNoticeKey: prepared.fallbackNoticeKey,
+        fallbackNoticeMessage: prepared.fallbackNoticeMessage,
+        fallbackIssueKind: prepared.fallbackIssueKind,
+        fallbackIssueMessage: prepared.fallbackIssueMessage,
         fallbackToLexicalSearch: false,
       };
     }
@@ -523,6 +547,9 @@ export class HybridEngine {
           rerankedCandidates.slice(0, topK),
         ),
         fallbackNoticeKey: prepared.fallbackNoticeKey,
+        fallbackNoticeMessage: prepared.fallbackNoticeMessage,
+        fallbackIssueKind: prepared.fallbackIssueKind,
+        fallbackIssueMessage: prepared.fallbackIssueMessage,
         fallbackToLexicalSearch: false,
       };
     } catch (error) {
@@ -534,14 +561,20 @@ export class HybridEngine {
       ) {
         throw error;
       }
-      logger.warn(
+      logger.error(
         "hybrid rerank failed; keeping coverage recall ordering.",
         error,
       );
+      const issue = buildHybridSearchIssue(error);
       return {
         items: baseItems,
         fallbackNoticeKey:
           prepared.fallbackNoticeKey ?? "hybridNotice.searchFallbackToLexical",
+        fallbackNoticeMessage:
+          prepared.fallbackNoticeMessage ?? issue.message,
+        fallbackIssueKind: prepared.fallbackIssueKind ?? issue.kind,
+        fallbackIssueMessage:
+          prepared.fallbackIssueMessage ?? issue.message,
         fallbackToLexicalSearch: true,
       };
     }
@@ -1400,4 +1433,3 @@ export class HybridEngine {
     );
   }
 }
-

@@ -98,6 +98,26 @@ export default {
 		"稠密语义索引当前不可用，结果已切换为 lexical fallback。",
 	"hybridNotice.searchFallbackToLexical":
 		"稠密语义搜索当前不可用，本次结果已切换为 lexical fallback。",
+	"hybridNotice.searchIssue.missingApiKey":
+		"\u672a\u914d\u7f6e Qwen API Key\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.weeklyTokenLimit":
+		"\u5df2\u8fbe\u5230\u672c\u5468 token \u9650\u989d\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.quotaExhausted":
+		"Qwen \u4f59\u989d\u4e0d\u8db3\u6216\u514d\u8d39\u989d\u5ea6\u5df2\u7528\u5c3d\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.auth401":
+		"Qwen API Key \u65e0\u6548\u6216\u5df2\u8fc7\u671f\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.auth403":
+		"\u5f53\u524d Qwen API Key \u6ca1\u6709\u8bbf\u95ee\u8be5\u6a21\u578b\u7684\u6743\u9650\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.provider429":
+		"Qwen \u8bf7\u6c42\u8fc7\u4e8e\u9891\u7e41\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.timeout":
+		"Qwen \u8bf7\u6c42\u8d85\u65f6\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.provider5xx":
+		"Qwen \u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.network":
+		"\u65e0\u6cd5\u8fde\u63a5 Qwen \u670d\u52a1\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.searchIssue.unknown":
+		"Hybrid \u641c\u7d22\u5931\u8d25\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
 	"File search backend": "词法搜索引擎",
 	"File search backend desc":
 		"Coverage Lexical 是当前综合更好的词法搜索引擎，也是主要优化方向；MiniSearch 则作为旧版但稳定的备选方案保留。",

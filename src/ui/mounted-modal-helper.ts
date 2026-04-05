@@ -22,6 +22,12 @@ export type HybridFreshnessNoticeState = {
 	message: string;
 };
 
+export type HybridFailureNoticeState = {
+	key: LocaleKey | null;
+	message: string | null;
+	emptyResult: boolean;
+};
+
 type AutoHybridFallbackControllerOptions = {
 	searchService: SearchService;
 	setting: OuterSetting;
@@ -29,7 +35,7 @@ type AutoHybridFallbackControllerOptions = {
 	isHybrid: boolean;
 	getLatestRequestId: () => number;
 	getCurrentQueryText: () => string;
-	onFailureNoticeChange: (key: LocaleKey | null) => void;
+	onFailureNoticeChange: (state: HybridFailureNoticeState) => void;
 	onResultApplied: (query: string, result: SearchResult) => Promise<void>;
 };
 
@@ -99,7 +105,7 @@ export class AutoHybridFallbackController {
 	private readonly isHybrid: boolean;
 	private readonly getLatestRequestId: () => number;
 	private readonly getCurrentQueryText: () => string;
-	private readonly onFailureNoticeChange: (key: LocaleKey | null) => void;
+	private readonly onFailureNoticeChange: (state: HybridFailureNoticeState) => void;
 	private readonly onResultApplied: (
 		query: string,
 		result: SearchResult,
@@ -127,9 +133,7 @@ export class AutoHybridFallbackController {
 	}
 
 	syncFailureNoticeFromResult(result: SearchResult): void {
-		this.onFailureNoticeChange(
-			result.items.length === 0 ? result.hybridFallbackNoticeKey ?? null : null,
-		);
+		this.onFailureNoticeChange(this.buildFailureNoticeState(result));
 	}
 
 	schedule(query: string, requestId: number): void {
@@ -176,12 +180,33 @@ export class AutoHybridFallbackController {
 			return;
 		}
 
-		this.onFailureNoticeChange(
-			hybridResult.items.length === 0
-				? hybridResult.hybridFallbackNoticeKey ?? null
-				: null,
-		);
+		this.onFailureNoticeChange(this.buildFailureNoticeState(hybridResult, true));
 		await this.onResultApplied(query, hybridResult);
+	}
+
+	private buildFailureNoticeState(
+		result: SearchResult,
+		allowEmptyResult = false,
+	): HybridFailureNoticeState {
+		if (result.items.length > 0) {
+			return {
+				key: null,
+				message: null,
+				emptyResult: false,
+			};
+		}
+		return {
+			key: result.hybridFallbackNoticeKey ?? null,
+			message:
+				result.hybridSearchIssueMessage ??
+				result.hybridFallbackNoticeMessage ??
+				null,
+			emptyResult:
+				allowEmptyResult &&
+				!result.hybridFallbackNoticeKey &&
+				!result.hybridSearchIssueMessage &&
+				!result.hybridFallbackNoticeMessage,
+		};
 	}
 }
 
@@ -296,6 +321,10 @@ export class HybridQuerySessionController {
 		await this.onResultApplied(query, result);
 	}
 
+	private shouldCacheResult(result: SearchResult): boolean {
+		return result.hybridSearchOutcome === "success";
+	}
+
 	private isCurrentSession(session: HybridQuerySession): boolean {
 		return Boolean(
 			this.currentSession &&
@@ -321,7 +350,9 @@ export class HybridQuerySessionController {
 			this.searchService.notifyHybridFallback(preparedResult.result);
 			await this.onResultApplied(session.query, preparedResult.result);
 			if (!preparedResult.prepared) {
-				this.setCachedResult(session.query, preparedResult.result);
+				if (this.shouldCacheResult(preparedResult.result)) {
+					this.setCachedResult(session.query, preparedResult.result);
+				}
 				return;
 			}
 			const remainingGateMs = session.rerankEligibleAt - Date.now();
@@ -356,7 +387,9 @@ export class HybridQuerySessionController {
 				return;
 			}
 			this.searchService.notifyHybridFallback(finalizedResult);
-			this.setCachedResult(session.query, finalizedResult);
+			if (this.shouldCacheResult(finalizedResult)) {
+				this.setCachedResult(session.query, finalizedResult);
+			}
 			await this.onResultApplied(session.query, finalizedResult);
 		} catch (error) {
 			if (this.isAbortError(error)) {
@@ -513,3 +546,4 @@ export class HybridFreshnessNoticeController {
 		].join("");
 	}
 }
+

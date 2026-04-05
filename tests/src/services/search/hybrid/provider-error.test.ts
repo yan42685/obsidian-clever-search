@@ -1,5 +1,7 @@
 import {
+	buildHybridFallbackNoticeMessage,
 	buildHybridProviderErrorDetails,
+	buildHybridSearchIssue,
 	classifyHybridProviderFailure,
 	NoApiKeyError,
 	WeeklyTokenLimitExceededError,
@@ -42,6 +44,11 @@ describe("hybrid provider error helpers", () => {
 			),
 		).toBe("quota_exhausted");
 		expect(
+			classifyHybridProviderFailure(
+				new Error("Qwen rerank API error 403: AllocationQuota.FreeTierOnly"),
+			),
+		).toBe("quota_exhausted");
+		expect(
 			classifyHybridProviderFailure(new TypeError("Failed to fetch")),
 		).toBe("network");
 	});
@@ -62,6 +69,46 @@ describe("hybrid provider error helpers", () => {
 			providerCode: "AccessDenied",
 			providerMessage: "Model access denied.",
 			requestId: "req-403",
+		});
+	});
+
+	test("prefers provider message when building a fallback notice message", () => {
+		const error = new Error("Qwen rerank API error 403");
+		Object.assign(error, {
+			providerMessage: "The free tier of the model has been exhausted.",
+			requestId: "req-free-tier",
+		});
+		expect(
+			buildHybridFallbackNoticeMessage(error),
+		).toBe(
+			"The free tier of the model has been exhausted. (request_id: req-free-tier)",
+		);
+	});
+
+	test("builds a structured hybrid search issue from provider errors", () => {
+		const error = new Error("Qwen rerank API error 403");
+		Object.assign(error, {
+			providerMessage: "The free tier of the model has been exhausted.",
+			requestId: "req-free-tier",
+		});
+		expect(buildHybridSearchIssue(error)).toEqual({
+			kind: "quota_exhausted",
+			message:
+				"The free tier of the model has been exhausted. (request_id: req-free-tier)",
+		});
+	});
+
+	test("returns mapped known kinds without forcing generic messages", () => {
+		expect(buildHybridSearchIssue(new NoApiKeyError())).toEqual({
+			kind: "missing_api_key",
+			message: null,
+		});
+	});
+
+	test("keeps raw text for unknown structured issues", () => {
+		expect(buildHybridSearchIssue(new Error("provider offline"))).toEqual({
+			kind: "unknown",
+			message: "provider offline",
 		});
 	});
 });

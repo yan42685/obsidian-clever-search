@@ -66,20 +66,52 @@ export type MatchedFile = {
   nativeSubItemsReady?: boolean;
 };
 
+export type HybridSearchOutcome =
+  | "success"
+  | "fallback_with_results"
+  | "fallback_failed_with_results"
+  | "fallback_failed_no_results"
+  | "fallback_no_results";
+
+export type HybridSearchIssueKind =
+  | "none"
+  | "missing_api_key"
+  | "weekly_token_limit"
+  | "quota_exhausted"
+  | "auth_401"
+  | "auth_403"
+  | "provider_429"
+  | "timeout"
+  | "provider_5xx"
+  | "network"
+  | "unknown";
+
 export class SearchResult {
   sourcePath: string;
   items: Item[];
   hybridFallbackNoticeKey?: LocaleKey | null;
+  hybridFallbackNoticeMessage?: string | null;
+  hybridSearchOutcome?: HybridSearchOutcome | null;
+  hybridSearchIssueKind?: HybridSearchIssueKind | null;
+  hybridSearchIssueMessage?: string | null;
   hybridAvailabilityReasons: HybridAvailabilityReason[];
   constructor(
     currPath: string,
     items: Item[],
     hybridFallbackNoticeKey?: LocaleKey | null,
+    hybridFallbackNoticeMessage?: string | null,
     hybridAvailabilityReasons: HybridAvailabilityReason[] = [],
+    hybridSearchOutcome?: HybridSearchOutcome | null,
+    hybridSearchIssueKind?: HybridSearchIssueKind | null,
+    hybridSearchIssueMessage?: string | null,
   ) {
     this.sourcePath = currPath;
     this.items = items;
     this.hybridFallbackNoticeKey = hybridFallbackNoticeKey ?? null;
+    this.hybridFallbackNoticeMessage = hybridFallbackNoticeMessage ?? null;
+    this.hybridSearchOutcome = hybridSearchOutcome ?? null;
+    this.hybridSearchIssueKind = hybridSearchIssueKind ?? null;
+    this.hybridSearchIssueMessage = hybridSearchIssueMessage ?? null;
     this.hybridAvailabilityReasons = [...hybridAvailabilityReasons];
   }
 
@@ -89,12 +121,20 @@ export class SearchResult {
 
   withHybridFallbackNotice(
     hybridFallbackNoticeKey?: LocaleKey | null,
+    hybridFallbackNoticeMessage?: string | null,
+    hybridSearchOutcome?: HybridSearchOutcome | null,
+    hybridSearchIssueKind?: HybridSearchIssueKind | null,
+    hybridSearchIssueMessage?: string | null,
   ): SearchResult {
     return new SearchResult(
       this.sourcePath,
       this.items,
       hybridFallbackNoticeKey,
+      hybridFallbackNoticeMessage,
       this.hybridAvailabilityReasons,
+      hybridSearchOutcome,
+      hybridSearchIssueKind,
+      hybridSearchIssueMessage,
     );
   }
 }

@@ -5,7 +5,6 @@ import {
 	recordTokenUsage,
 	reserveWeeklyTokenBudget,
 } from './embedder';
-import { logger } from 'src/utils/logger';
 import { getInstance } from 'src/utils/my-lib';
 import {
 	buildHybridProviderErrorDetails,
@@ -131,9 +130,6 @@ export class HybridReranker {
 					body,
 					resp.headers.get('retry-after'),
 				);
-				logger.error(
-					`Qwen rerank request failed: status=${resp.status}, kind=${error.kind}, code=${error.providerCode ?? 'n/a'}, request_id=${error.requestId ?? 'n/a'}, url=${this.apiUrl}, body=${body}`,
-				);
 				throw error;
 			}
 
@@ -164,7 +160,6 @@ export class HybridReranker {
 				.filter((item): item is RerankResult => item !== null);
 
 			if (ranked.length === 0) {
-				logger.warn('Qwen rerank returned no ranked items.');
 				throw new HybridRerankError('Qwen rerank returned no ranked items');
 			}
 

@@ -165,6 +165,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			topK: 10,
 			displayCandidates: [],
 			fallbackNoticeKey: null,
+			fallbackNoticeMessage: null,
 			fallbackToLexicalSearch: false,
 		};
 		mockHybridEngine.prepareRecall.mockResolvedValue(prepared);
@@ -172,6 +173,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		mockHybridEngine.finalizePreparedRecall.mockResolvedValue({
 			items: [{ id: "final-item" }],
 			fallbackNoticeKey: finalNoticeKey,
+			fallbackNoticeMessage: null,
 			fallbackToLexicalSearch: false,
 		});
 	}
@@ -189,6 +191,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			undefined,
 		);
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
 			"hybridNotice.searchFallbackToLexical",
 		]);
@@ -226,6 +229,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as { path: string }).path).toBe("notes/finalize-lexical.md");
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
 			"hybridNotice.searchFallbackToLexical",
 		]);
@@ -237,6 +241,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			topK: 10,
 			displayCandidates: [],
 			fallbackNoticeKey: null,
+			fallbackNoticeMessage: null,
 			fallbackToLexicalSearch: true,
 		});
 		const service = createHarness();
@@ -262,10 +267,13 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as { path: string }).path).toBe("notes/lexical.md");
 		expect(result.hybridFallbackNoticeKey).toBeNull();
+		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
 	});
 
 	test("falls back to the normal lexical search path when hybrid prepare throws", async () => {
-		mockHybridEngine.prepareRecall.mockRejectedValue(new Error("prepare failed"));
+		mockHybridEngine.prepareRecall.mockRejectedValue(
+			new Error("provider offline"),
+		);
 		const service = createHarness();
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
@@ -287,8 +295,112 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as { path: string }).path).toBe("notes/recovery.md");
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(result.hybridFallbackNoticeMessage).toBe("provider offline");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed_with_results");
+		expect(result.hybridSearchIssueKind).toBe("unknown");
+		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"provider offline",
+		]);
+	});
+
+	test("marks auto fallback failures with no lexical results as fallback_failed_no_results", async () => {
+		mockHybridEngine.prepareRecall.mockRejectedValue(
+			new Error("provider offline"),
+		);
+		const service = createHarness();
+
+		const result = await service.searchInVaultHybrid("alpha");
+
+		expect(result.items).toHaveLength(0);
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
+		expect(result.hybridFallbackNoticeMessage).toBe("provider offline");
+		expect(result.hybridSearchOutcome).toBe("fallback_failed_no_results");
+		expect(result.hybridSearchIssueKind).toBe("unknown");
+		expect(result.hybridSearchIssueMessage).toBe("provider offline");
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"provider offline",
+		]);
+	});
+
+	test("uses mapped notice text for known issue kinds without provider-specific messages", async () => {
+		const { NoApiKeyError } = require("src/services/search/hybrid/provider-error");
+		mockHybridEngine.prepareRecall.mockRejectedValue(new NoApiKeyError());
+		const service = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/recovery.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 7,
+				directSubItems: [],
+				nativeSubItemsReady: true,
+			},
+		]);
+
+		const result = await service.searchInVaultHybrid("alpha");
+
+		expect(result.hybridSearchIssueKind).toBe("missing_api_key");
+		expect(result.hybridSearchIssueMessage).toBeNull();
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridNotice.searchIssue.missingApiKey",
+		]);
+	});
+
+	test("keeps known issue kinds when finalize falls back to lexical results", async () => {
+		configurePreparedFlow();
+		const service = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/finalize-known-kind.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 11,
+				directSubItems: [],
+				nativeSubItemsReady: true,
+			},
+		]);
+		mockHybridEngine.finalizePreparedRecall.mockResolvedValue({
+			items: [],
+			fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
+			fallbackNoticeMessage: null,
+			fallbackIssueKind: "missing_api_key",
+			fallbackIssueMessage: null,
+			fallbackToLexicalSearch: true,
+		});
+
+		const result = await service.searchInVaultHybrid("alpha");
+
+		expect(result.hybridSearchIssueKind).toBe("missing_api_key");
+		expect(result.hybridSearchIssueMessage).toBeNull();
+		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridNotice.searchIssue.missingApiKey",
+		]);
+	});
+
+	test("prefers explicit issue messages over mapped notice text", () => {
+		const service = createHarness();
+		const { SearchResult } = require("src/globals/search-types");
+		const result = new SearchResult(
+			"notes/current.md",
+			[],
 			"hybridNotice.searchFallbackToLexical",
+			null,
+			[],
+			"fallback_failed_no_results",
+			"missing_api_key",
+			"provider said something more specific",
+		);
+
+		service.notifyHybridFallback(result);
+
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"provider said something more specific",
 		]);
 	});
 
@@ -335,4 +447,3 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 	});
 
 });
-

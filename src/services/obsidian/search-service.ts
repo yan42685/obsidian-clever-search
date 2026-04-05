@@ -7,6 +7,8 @@ import {
 	EngineType,
 	FileItem,
 	FileSubItem,
+	type HybridSearchOutcome,
+	type HybridSearchIssueKind,
 	Line,
 	LineItem,
 	SearchResult,
@@ -30,6 +32,9 @@ import { DataProvider } from "./user-data/data-provider";
 import { DataManager } from "./user-data/data-manager";
 import type { HybridAvailabilityReason } from "./user-data/search-availability";
 import { ViewRegistry, ViewType } from "./view-registry";
+import {
+	buildHybridSearchIssue,
+} from "../search/hybrid/provider-error";
 
 export type PreparedHybridSearchResult = {
 	prepared: PreparedHybridRecall | null;
@@ -56,15 +61,37 @@ export class SearchService {
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 	private readonly viewRegistry = getInstance(ViewRegistry);
 	readonly hybridEngine = new HybridEngine();
-	private readonly noticeHybridFallback = throttle(
-		5000,
-		(message: string) => new MyNotice(message, 5000),
-	);
+	private readonly noticeHybridFallback = (message: string) =>
+		new MyNotice(message, 5000);
 	private readonly noticeSearchBootstrapBlocked = throttle(
 		2000,
 		(message: string) => new MyNotice(message, 2500),
 	);
-	private lastHybridFallbackNoticeKey: SearchResult["hybridFallbackNoticeKey"] = null;
+	private lastHybridFallbackNoticeSignature: string | null = null;
+	private readonly hybridIssueNoticeKeyByKind: Record<
+		Exclude<HybridSearchIssueKind, "none">,
+		"hybridNotice.searchIssue.missingApiKey" |
+		"hybridNotice.searchIssue.weeklyTokenLimit" |
+		"hybridNotice.searchIssue.quotaExhausted" |
+		"hybridNotice.searchIssue.auth401" |
+		"hybridNotice.searchIssue.auth403" |
+		"hybridNotice.searchIssue.provider429" |
+		"hybridNotice.searchIssue.timeout" |
+		"hybridNotice.searchIssue.provider5xx" |
+		"hybridNotice.searchIssue.network" |
+		"hybridNotice.searchIssue.unknown"
+	> = {
+		missing_api_key: "hybridNotice.searchIssue.missingApiKey",
+		weekly_token_limit: "hybridNotice.searchIssue.weeklyTokenLimit",
+		quota_exhausted: "hybridNotice.searchIssue.quotaExhausted",
+		auth_401: "hybridNotice.searchIssue.auth401",
+		auth_403: "hybridNotice.searchIssue.auth403",
+		provider_429: "hybridNotice.searchIssue.provider429",
+		timeout: "hybridNotice.searchIssue.timeout",
+		provider_5xx: "hybridNotice.searchIssue.provider5xx",
+		network: "hybridNotice.searchIssue.network",
+		unknown: "hybridNotice.searchIssue.unknown",
+	};
 
 	@monitorDecorator
 	async searchInVault(queryText: string): Promise<SearchResult> {
@@ -72,7 +99,9 @@ export class SearchService {
 		if (blocked) {
 			return blocked;
 		}
-		return await this.searchInVaultLexical(queryText);
+		const result = await this.searchInVaultLexical(queryText);
+		this.notifyHybridFallback(result);
+		return result;
 	}
 
 	async searchInVaultHybrid(queryText: string): Promise<SearchResult> {
@@ -86,21 +115,54 @@ export class SearchService {
 	}
 
 	notifyHybridFallback(result: SearchResult): void {
-		const noticeKey = this.resolveHybridFallbackNoticeKey(
-			result.hybridFallbackNoticeKey,
-		);
-		if (noticeKey === this.lastHybridFallbackNoticeKey) {
+		const notice = this.resolveHybridFallbackNotice(result);
+		const signature = notice.message ?? notice.key ?? null;
+		if (signature === this.lastHybridFallbackNoticeSignature) {
 			return;
 		}
-		this.lastHybridFallbackNoticeKey = noticeKey;
-		if (noticeKey) {
-			this.noticeHybridFallback(t(noticeKey));
+		this.lastHybridFallbackNoticeSignature = signature;
+		if (notice.message) {
+			this.noticeHybridFallback(notice.message);
+			return;
 		}
+		if (notice.key) {
+			this.noticeHybridFallback(t(notice.key));
+		}
+	}
+
+	private resolveHybridFallbackNotice(result: SearchResult): {
+		key: SearchResult["hybridFallbackNoticeKey"];
+		message: string | null;
+	} {
+		const issueMessage = result.hybridSearchIssueMessage?.trim() || null;
+		if (issueMessage) {
+			return {
+				key: null,
+				message: issueMessage,
+			};
+		}
+
+		const issueKind = result.hybridSearchIssueKind;
+		if (issueKind && issueKind !== "none") {
+			return {
+				key: this.hybridIssueNoticeKeyByKind[issueKind],
+				message: null,
+			};
+		}
+
+		return {
+			key: this.resolveHybridFallbackNoticeKey(result.hybridFallbackNoticeKey),
+			message: result.hybridFallbackNoticeMessage?.trim() || null,
+		};
 	}
 
 	private buildHybridSearchResult(
 		sourcePath: string,
 		items: SearchResult["items"],
+		noticeMessage: string | null = null,
+		outcome: HybridSearchOutcome = "success",
+		issueKind: HybridSearchIssueKind | null = null,
+		issueMessage: string | null = null,
 		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
 	): SearchResult {
 		const hybridAvailability = getInstance(DataManager).getHybridAvailabilityState();
@@ -108,7 +170,11 @@ export class SearchService {
 			sourcePath,
 			items,
 			this.resolveHybridFallbackNoticeKey(...noticeKeys),
+			noticeMessage,
 			hybridAvailability.reasons,
+			outcome,
+			issueKind,
+			issueMessage,
 		);
 	}
 
@@ -125,6 +191,10 @@ export class SearchService {
 
 	private attachHybridFallbackNotice(
 		result: SearchResult,
+		noticeMessage: string | null = null,
+		outcome?: HybridSearchOutcome | null,
+		issueKind?: HybridSearchIssueKind | null,
+		issueMessage?: string | null,
 		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
 	): SearchResult {
 		return result.withHybridFallbackNotice(
@@ -132,6 +202,10 @@ export class SearchService {
 				result.hybridFallbackNoticeKey,
 				...noticeKeys,
 			),
+			noticeMessage ?? result.hybridFallbackNoticeMessage,
+			outcome ?? result.hybridSearchOutcome,
+			issueKind ?? result.hybridSearchIssueKind,
+			issueMessage ?? result.hybridSearchIssueMessage,
 		);
 	}
 
@@ -144,6 +218,10 @@ export class SearchService {
 		options: {
 			hybridAvailabilityReasons?: HybridAvailabilityReason[];
 			noticeKeys?: Array<SearchResult["hybridFallbackNoticeKey"]>;
+			noticeMessage?: string | null;
+			outcome?: HybridSearchOutcome;
+			issueKind?: HybridSearchIssueKind | null;
+			issueMessage?: string | null;
 		} = {},
 	): Promise<SearchResult> {
 		const lexicalResult = await this.searchInVaultLexical(queryText, {
@@ -153,6 +231,17 @@ export class SearchService {
 		});
 		return this.attachHybridFallbackNotice(
 			lexicalResult,
+			options.noticeMessage ?? null,
+			options.outcome ??
+				(options.noticeMessage
+					? lexicalResult.items.length > 0
+						? "fallback_failed_with_results"
+						: "fallback_failed_no_results"
+					: lexicalResult.items.length > 0
+						? "fallback_with_results"
+						: "fallback_no_results"),
+			options.issueKind ?? null,
+			options.issueMessage ?? options.noticeMessage ?? null,
 			...(options.noticeKeys ?? []),
 		);
 	}
@@ -195,7 +284,8 @@ export class SearchService {
 				signal,
 			);
 		} catch (error) {
-			logger.warn(
+			const issue = buildHybridSearchIssue(error);
+			logger.error(
 				"hybrid lexical-lane prepare failed; falling back to lexical search.",
 				error,
 			);
@@ -204,6 +294,9 @@ export class SearchService {
 				result: await this.buildLexicalFallbackResult(queryText, {
 					hybridAvailabilityReasons: hybridAvailability.reasons,
 					noticeKeys: ["hybridNotice.searchFallbackToLexical"],
+					noticeMessage: issue.message,
+					issueKind: issue.kind,
+					issueMessage: issue.message,
 				}),
 			};
 		}
@@ -224,12 +317,20 @@ export class SearchService {
 		);
 		return {
 			prepared,
-			result: this.buildHybridSearchResult(
-				sourcePath,
-				earlyItems,
-				prepared.fallbackNoticeKey,
-			),
-		};
+				result: this.buildHybridSearchResult(
+					sourcePath,
+					earlyItems,
+					prepared.fallbackNoticeMessage,
+					prepared.fallbackNoticeMessage
+						? "fallback_failed_with_results"
+						: prepared.fallbackNoticeKey
+							? "fallback_with_results"
+							: "success",
+					prepared.fallbackIssueKind,
+					prepared.fallbackIssueMessage,
+					prepared.fallbackNoticeKey,
+				),
+			};
 	}
 
 	async finalizePreparedSearchInVaultHybrid(
@@ -242,12 +343,23 @@ export class SearchService {
 		if (prepared.fallbackToLexicalSearch) {
 			return await this.buildLexicalFallbackResult(prepared.query, {
 				noticeKeys: [prepared.fallbackNoticeKey],
+				noticeMessage: prepared.fallbackNoticeMessage,
+				issueKind: prepared.fallbackIssueKind,
+				issueMessage: prepared.fallbackIssueMessage,
 			});
 		}
 		if (mode === "lexical-lane") {
 			return this.buildHybridSearchResult(
 				sourcePath,
 				this.hybridEngine.buildItemsFromPreparedRecall(prepared, prepared.topK),
+				prepared.fallbackNoticeMessage,
+				prepared.fallbackNoticeMessage
+					? "fallback_failed_with_results"
+					: prepared.fallbackNoticeKey
+						? "fallback_with_results"
+						: "success",
+				prepared.fallbackIssueKind,
+				prepared.fallbackIssueMessage,
 				prepared.fallbackNoticeKey,
 			);
 		}
@@ -259,11 +371,22 @@ export class SearchService {
 		if (finalized.fallbackToLexicalSearch) {
 			return await this.buildLexicalFallbackResult(prepared.query, {
 				noticeKeys: [finalized.fallbackNoticeKey],
+				noticeMessage: finalized.fallbackNoticeMessage,
+				issueKind: finalized.fallbackIssueKind,
+				issueMessage: finalized.fallbackIssueMessage,
 			});
 		}
 		return this.buildHybridSearchResult(
 			sourcePath,
 			finalized.items,
+			finalized.fallbackNoticeMessage,
+			finalized.fallbackNoticeMessage
+				? "fallback_failed_with_results"
+				: finalized.fallbackNoticeKey
+					? "fallback_with_results"
+					: "success",
+			finalized.fallbackIssueKind,
+			finalized.fallbackIssueMessage,
 			finalized.fallbackNoticeKey,
 		);
 	}
@@ -293,7 +416,9 @@ export class SearchService {
 			"no result",
 			[],
 			null,
+			null,
 			options.hybridAvailabilityReasons ?? [],
+			"success",
 		);
 		if (queryText.length === 0) {
 			return result;
@@ -340,7 +465,9 @@ export class SearchService {
 				);
 			}),
 			null,
+			null,
 			options.hybridAvailabilityReasons ?? [],
+			"success",
 		);
 	}
 
@@ -651,4 +778,3 @@ export class SearchService {
 		return new SearchResult("no result", []);
 	}
 }
-
