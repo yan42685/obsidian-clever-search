@@ -64,7 +64,10 @@ import {
 	type CoverageLexicalPostingOwnership,
 } from "./coverage-lexical-posting-layout";
 import {
+	CoverageLexicalSharedStringPostingMap,
 	CoverageLexicalSharedTokenIdPostingMap,
+	isCoverageLexicalSharedPackedPostingMap,
+	type CoverageLexicalSharedPackedPostingMap,
 } from "./coverage-lexical-live-posting-store";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import type {
@@ -399,20 +402,25 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		(tokenId) => this.documentBodyTokenLexicon[tokenId],
 	);
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
-	private readonly metadataAliasPhrasePostings = new Map<string, number[]>();
+	private readonly metadataAliasPhrasePostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataAliasPostings = new Map<string, Uint32Array>();
 	private readonly metadataBasenameCharPostings = new Map<string, number[]>();
-	private readonly metadataBasenamePhrasePostings = new Map<string, number[]>();
+	private readonly metadataBasenamePhrasePostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataBasenamePostings = new Map<string, Uint32Array>();
 	private readonly metadataFolderCharPostings = new Map<string, number[]>();
-	private readonly metadataFolderPhrasePostings = new Map<string, number[]>();
+	private readonly metadataFolderPhrasePostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataFolderPostings = new Map<string, Uint32Array>();
 	private readonly metadataHeadingCharPostings = new Map<string, number[]>();
-	private readonly metadataHeadingPhrasePostings = new Map<string, Uint32Array>();
+	private readonly metadataHeadingPhrasePostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataHeadingPostings = new Map<string, Uint32Array>();
 	private readonly metadataTagCharPostings = new Map<string, number[]>();
 	private readonly metadataTagFullPostings = new Map<string, Uint32Array>();
-	private readonly metadataTagPhrasePostings = new Map<string, number[]>();
+	private readonly metadataTagPhrasePostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataTagPostings = new Map<string, Uint32Array>();
 	private readonly lexicon = new Set<string>();
 	private sortedLexiconCache: string[] = [];
@@ -1097,17 +1105,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			accumulator,
 		);
 		const postings = Object.fromEntries(
-			COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS.map((descriptor) => [
-				descriptor.breakdownKey ?? descriptor.key,
-				descriptor.key === "bodyPostings"
-					? estimateSharedTokenIdPostingMapBytes(this.bodyPostings)
-					: estimateOwnedNumericPostingMapBytes(
-							this.getLivePostingMap(descriptor.key),
-							accumulator,
-							(descriptor.source ?? ("postings." + descriptor.key + ".term")),
-							descriptor.ownership,
-						),
-			]),
+			COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS.map((descriptor) => {
+				const postingMap = this.getLivePostingMap(descriptor.key);
+				return [
+					descriptor.breakdownKey ?? descriptor.key,
+					isCoverageLexicalSharedPackedPostingMap(postingMap)
+						? estimateSharedPackedPostingMapBytes(
+								postingMap,
+								accumulator,
+								(descriptor.source ?? ("postings." + descriptor.key + ".term")),
+							)
+						: estimateOwnedNumericPostingMapBytes(
+								postingMap,
+								accumulator,
+								(descriptor.source ?? ("postings." + descriptor.key + ".term")),
+								descriptor.ownership,
+							),
+				] as const;
+			}),
 		);
 		const lexicon = estimateStringArrayBytes(
 			this.sortedLexicon,
@@ -2537,13 +2552,18 @@ function estimateOwnedNumericPostingMapBytes(
 	};
 }
 
-function estimateSharedTokenIdPostingMapBytes(
-	postings: CoverageLexicalSharedTokenIdPostingMap,
+function estimateSharedPackedPostingMapBytes(
+	postings: CoverageLexicalSharedPackedPostingMap,
+	accumulator: IndexSizeAccumulator,
+	source: string,
 ): {
 	total: number;
 	termCount: number;
 	postingCount: number;
 	slotCount: number;
+	mapEntryBytes: number;
+	termReferenceBytes: number;
+	slotTermReferenceBytes: number;
 	slotStartBytes: number;
 	slotLengthBytes: number;
 	postingNumberBytes: number;
@@ -2556,15 +2576,32 @@ function estimateSharedTokenIdPostingMapBytes(
 	const slotLengthBytes = estimatePackedUint32Bytes(slotCount);
 	const postingNumberBytes = postingCount * INDEX_POSTING_DOC_ID_BYTES;
 	const postingTapeBytes = estimatePackedUint32Bytes(postingCount);
+	let mapEntryBytes = 0;
+	let termReferenceBytes = 0;
+	let slotTermReferenceBytes = 0;
+	if (postings instanceof CoverageLexicalSharedStringPostingMap) {
+		for (const term of postings.keys()) {
+			accountStringBytes(accumulator, term, source);
+		}
+		mapEntryBytes = termCount * INDEX_MAP_ENTRY_BYTES;
+		termReferenceBytes = termCount * INDEX_REFERENCE_BYTES;
+		slotTermReferenceBytes = slotCount * INDEX_REFERENCE_BYTES;
+	}
 	return {
 		total:
 			INDEX_COLLECTION_HEADER_BYTES +
+			mapEntryBytes +
+			termReferenceBytes +
+			slotTermReferenceBytes +
 			slotStartBytes +
 			slotLengthBytes +
 			postingTapeBytes,
 		termCount,
 		postingCount,
 		slotCount,
+		mapEntryBytes,
+		termReferenceBytes,
+		slotTermReferenceBytes,
 		slotStartBytes,
 		slotLengthBytes,
 		postingNumberBytes,
@@ -3113,7 +3150,7 @@ function restoreOwnedNumericPostingMap(
 ): void {
 	if (
 		ownership === "packed" &&
-		target instanceof CoverageLexicalSharedTokenIdPostingMap
+		isCoverageLexicalSharedPackedPostingMap(target)
 	) {
 		target.clear();
 		target.replaceAll(source);
