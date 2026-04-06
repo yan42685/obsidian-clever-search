@@ -60,6 +60,7 @@ export class SearchService {
 	private static readonly LEXICAL_SUBITEM_MAX_LINES = 60;
 	private static readonly LEXICAL_LINE_EVIDENCE_WEIGHT = 0.4;
 	private static readonly LEXICAL_LINE_COUNT_WEIGHT = 0.12;
+	private static readonly HYBRID_FALLBACK_NOTICE_DURATION_MS = 10000;
 	private readonly app = getInstance(App);
 	private readonly setting = getInstance(OuterSetting);
 	private readonly dataProvider = getInstance(DataProvider);
@@ -67,13 +68,12 @@ export class SearchService {
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 	private readonly viewRegistry = getInstance(ViewRegistry);
 	readonly hybridEngine = new HybridEngine();
-	private readonly noticeHybridFallback = (message: string) =>
-		new MyNotice(message, 5000);
 	private readonly noticeSearchBootstrapBlocked = throttle(
 		2000,
 		(message: string) => new MyNotice(message, 2500),
 	);
-	private lastHybridFallbackNoticeSignature: string | null = null;
+	private hybridFallbackNotice: MyNotice | null = null;
+	private hybridFallbackNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly hybridIssueReasonKeyByKind: Record<
 		Exclude<HybridSearchIssueKind, "none">,
 		"hybridReason.missingApiKey" |
@@ -130,18 +130,31 @@ export class SearchService {
 
 	notifyHybridFallback(result: SearchResult): void {
 		const notice = this.getHybridFallbackNotice(result);
-		const signature = notice.message ?? notice.key ?? null;
-		if (signature === this.lastHybridFallbackNoticeSignature) {
+		const message = notice.message ?? (notice.key ? t(notice.key) : null);
+		if (message) {
+			this.showOrRefreshHybridFallbackNotice(message);
 			return;
 		}
-		this.lastHybridFallbackNoticeSignature = signature;
-		if (notice.message) {
-			this.noticeHybridFallback(notice.message);
-			return;
+		if (this.hybridFallbackNoticeTimer) {
+			clearTimeout(this.hybridFallbackNoticeTimer);
+			this.hybridFallbackNoticeTimer = null;
 		}
-		if (notice.key) {
-			this.noticeHybridFallback(t(notice.key));
+	}
+
+	private showOrRefreshHybridFallbackNotice(message: string): void {
+		if (this.hybridFallbackNotice) {
+			this.hybridFallbackNotice.setText(message);
+		} else {
+			this.hybridFallbackNotice = new MyNotice(message, 0);
 		}
+		if (this.hybridFallbackNoticeTimer) {
+			clearTimeout(this.hybridFallbackNoticeTimer);
+		}
+		this.hybridFallbackNoticeTimer = setTimeout(() => {
+			this.hybridFallbackNotice?.hide();
+			this.hybridFallbackNotice = null;
+			this.hybridFallbackNoticeTimer = null;
+		}, SearchService.HYBRID_FALLBACK_NOTICE_DURATION_MS);
 	}
 
 	getHybridFallbackNotice(result: SearchResult): {

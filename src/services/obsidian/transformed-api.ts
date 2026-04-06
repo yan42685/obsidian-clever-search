@@ -7,7 +7,7 @@ export class MyNotice extends Notice {
 		this.setText(text);
 	}
 
-	setText(text: string) {
+	setText(text: string): this {
 		this.setMessage(text + "\n(clever-search)");
 		return this;
 	}
