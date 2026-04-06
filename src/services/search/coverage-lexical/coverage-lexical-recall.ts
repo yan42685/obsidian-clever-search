@@ -32,6 +32,7 @@ type CoverageLexicalPostingList =
 	| Uint32Array;
 type CoverageLexicalPostingMap = ReadonlyMap<string, CoverageLexicalPostingList>;
 type CoverageLexicalCandidateKey = number;
+type CoverageLexicalPrefixTarget = "metadata" | "body" | "all";
 
 type CoverageLexicalRecallIndex = {
 	bodyPostings: CoverageLexicalPostingMap;
@@ -112,6 +113,25 @@ export type CoverageLexicalRecallBenchmarkHooks = {
 	) => void;
 };
 
+type CoverageLexicalPrefixExpansionCandidate = {
+	term: string;
+	bodyDocCount: number;
+	metadataDocCount: number;
+	totalDocCount: number;
+	targetDocCount: number;
+	score: number;
+};
+
+type CoverageLexicalPrefixExpansionProfile = {
+	cacheKey: string;
+	target: CoverageLexicalPrefixTarget;
+	minTermLength: number;
+	explorationCap: number;
+	termBudget: number;
+	docBudget: number;
+	stagnationLimit: number;
+};
+
 type CoverageLexicalQueryCache = {
 	tagFallbackByDocId: Map<
 		number,
@@ -122,7 +142,10 @@ type CoverageLexicalQueryCache = {
 		string,
 		ReturnType<typeof buildCoverageLexicalPassageAdmissionSignal>
 	>;
-	prefixExpansionsByTerm: Map<string, readonly string[]>;
+	prefixExpansionsByTerm: Map<
+		string,
+		readonly CoverageLexicalPrefixExpansionCandidate[]
+	>;
 	fuzzyExpansionsByTerm: Map<string, readonly string[]>;
 	phraseSignatureBucketsByKey: Map<
 		string,
@@ -201,8 +224,26 @@ type CoverageLexicalEvaluatedLaneCandidate = {
 	evaluation: CoverageLexicalLaneEvaluation;
 };
 
-const MAX_PREFIX_EXPANSIONS = 48;
 const MAX_FUZZY_EXPANSIONS = 24;
+const ASCII_PREFIX_TERM_REGEX = /^[a-z0-9_-]+$/u;
+const METADATA_PREFIX_MIN_TERM_LENGTH = 3;
+const BODY_PREFIX_MIN_TERM_LENGTH = 4;
+const METADATA_PREFIX_EXPLORATION_CAP = 128;
+const METADATA_PREFIX_TERM_BUDGET = 48;
+const METADATA_PREFIX_DOC_BUDGET = 400;
+const MIXED_PREFIX_EXPLORATION_CAP = 96;
+const MIXED_PREFIX_TERM_BUDGET = 24;
+const MIXED_PREFIX_DOC_BUDGET = 220;
+const BODY_PREFIX_SHORT_EXPLORATION_CAP = 48;
+const BODY_PREFIX_SHORT_TERM_BUDGET = 6;
+const BODY_PREFIX_SHORT_DOC_BUDGET = 96;
+const BODY_PREFIX_MEDIUM_EXPLORATION_CAP = 96;
+const BODY_PREFIX_MEDIUM_TERM_BUDGET = 12;
+const BODY_PREFIX_MEDIUM_DOC_BUDGET = 180;
+const BODY_PREFIX_LONG_EXPLORATION_CAP = 160;
+const BODY_PREFIX_LONG_TERM_BUDGET = 24;
+const BODY_PREFIX_LONG_DOC_BUDGET = 320;
+const PREFIX_ZERO_GAIN_STAGNATION_LIMIT = 4;
 const coverageLexicalDerivedPlanCache = new WeakMap<
 	CoverageLexicalPlan,
 	CoverageLexicalDerivedPlan
@@ -1911,24 +1952,14 @@ function collectFamilySetCandidates(
 			"exact",
 			options.scope,
 		);
-		if (options.includePrefix && family.allowPrefix) {
-			for (const term of getOrCreatePrefixExpansionTerms(
-				index.sortedLexicon,
-				family.normalizedTerm,
+		if (options.includePrefix) {
+			collectPrefixCandidatesForFamily(
+				index,
 				queryCache,
-			)) {
-				if (term === family.normalizedTerm) {
-					continue;
-				}
-				collectCandidatesForTerm(
-					index,
-					candidates,
-					family.index,
-					term,
-					"prefix",
-					options.scope,
-				);
-			}
+				candidates,
+				family,
+				options.scope,
+			);
 		}
 		if (options.includeFuzzy && family.allowFuzzy) {
 			for (const term of getOrCreateFuzzyExpansionTerms(
@@ -2114,18 +2145,22 @@ function collectCandidatesForTerm(
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
 	scope: CoverageLexicalCollectionScope,
-): void {
+): number {
+	let addedCount = 0;
 	if (scope !== "metadata-only") {
 		const bodyMatches = index.bodyPostings.get(term);
 		if (bodyMatches) {
 			forEachPostingCandidateKey(index, bodyMatches, (key) => {
+				if (!candidates.has(key)) {
+					addedCount += 1;
+				}
 				const state = getOrCreateDocIdCandidateState(candidates, key);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
 			});
 		}
 	}
 	if (scope !== "body-only") {
-		collectMetadataFieldCandidatesForTerm(
+		addedCount += collectMetadataFieldCandidatesForTerm(
 			index,
 			candidates,
 			familyIndex,
@@ -2133,6 +2168,7 @@ function collectCandidatesForTerm(
 			kind,
 		);
 	}
+	return addedCount;
 }
 
 function collectCandidatesForPhraseSignature(
@@ -2306,17 +2342,145 @@ function getPostingCandidateCount(postings: CoverageLexicalPostingList): number 
 		: (postings as ReadonlySet<string>).size;
 }
 
-function getOrCreatePrefixExpansionTerms(
-	sortedLexicon: readonly string[],
-	prefix: string,
+function collectPrefixCandidatesForFamily(
+	index: CoverageLexicalRecallIndex,
 	queryCache: CoverageLexicalQueryCache,
-): readonly string[] {
-	const cached = queryCache.prefixExpansionsByTerm.get(prefix);
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	family: CoverageLexicalFamily,
+	scope: CoverageLexicalCollectionScope,
+): void {
+	const profile = resolvePrefixExpansionProfile(family, scope);
+	if (!profile) {
+		return;
+	}
+	let termCount = 0;
+	let addedDocCount = 0;
+	let stagnantTermCount = 0;
+	for (const candidate of getOrCreatePrefixExpansionTerms(
+		index,
+		family.normalizedTerm,
+		profile,
+		queryCache,
+	)) {
+		const added = collectCandidatesForTerm(
+			index,
+			candidates,
+			family.index,
+			candidate.term,
+			"prefix",
+			scope,
+		);
+		termCount += 1;
+		if (added > 0) {
+			addedDocCount += added;
+			stagnantTermCount = 0;
+		} else {
+			stagnantTermCount += 1;
+		}
+		if (
+			termCount >= profile.termBudget ||
+			addedDocCount >= profile.docBudget ||
+			stagnantTermCount >= profile.stagnationLimit
+		) {
+			break;
+		}
+	}
+}
+
+function resolvePrefixExpansionProfile(
+	family: CoverageLexicalFamily,
+	scope: CoverageLexicalCollectionScope,
+): CoverageLexicalPrefixExpansionProfile | null {
+	const term = family.normalizedTerm;
+	if (!ASCII_PREFIX_TERM_REGEX.test(term)) {
+		return null;
+	}
+	if (scope === "metadata-only") {
+		if (term.length < METADATA_PREFIX_MIN_TERM_LENGTH) {
+			return null;
+		}
+		return {
+			cacheKey: "metadata",
+			target: "metadata",
+			minTermLength: METADATA_PREFIX_MIN_TERM_LENGTH,
+			explorationCap: METADATA_PREFIX_EXPLORATION_CAP,
+			termBudget: METADATA_PREFIX_TERM_BUDGET,
+			docBudget: METADATA_PREFIX_DOC_BUDGET,
+			stagnationLimit: PREFIX_ZERO_GAIN_STAGNATION_LIMIT,
+		};
+	}
+	if (scope === "body-only") {
+		return buildBodyPrefixExpansionProfile(term.length);
+	}
+	if (family.role === "anchor" || family.isMetadataCapable) {
+		if (term.length < METADATA_PREFIX_MIN_TERM_LENGTH) {
+			return null;
+		}
+		return {
+			cacheKey: "mixed-anchor",
+			target: "all",
+			minTermLength: METADATA_PREFIX_MIN_TERM_LENGTH,
+			explorationCap: MIXED_PREFIX_EXPLORATION_CAP,
+			termBudget: MIXED_PREFIX_TERM_BUDGET,
+			docBudget: MIXED_PREFIX_DOC_BUDGET,
+			stagnationLimit: PREFIX_ZERO_GAIN_STAGNATION_LIMIT,
+		};
+	}
+	return buildBodyPrefixExpansionProfile(term.length);
+}
+
+function buildBodyPrefixExpansionProfile(
+	termLength: number,
+): CoverageLexicalPrefixExpansionProfile | null {
+	if (termLength < BODY_PREFIX_MIN_TERM_LENGTH) {
+		return null;
+	}
+	if (termLength >= 7) {
+		return {
+			cacheKey: "body-long",
+			target: "body",
+			minTermLength: BODY_PREFIX_MIN_TERM_LENGTH,
+			explorationCap: BODY_PREFIX_LONG_EXPLORATION_CAP,
+			termBudget: BODY_PREFIX_LONG_TERM_BUDGET,
+			docBudget: BODY_PREFIX_LONG_DOC_BUDGET,
+			stagnationLimit: PREFIX_ZERO_GAIN_STAGNATION_LIMIT,
+		};
+	}
+	if (termLength >= 5) {
+		return {
+			cacheKey: "body-medium",
+			target: "body",
+			minTermLength: BODY_PREFIX_MIN_TERM_LENGTH,
+			explorationCap: BODY_PREFIX_MEDIUM_EXPLORATION_CAP,
+			termBudget: BODY_PREFIX_MEDIUM_TERM_BUDGET,
+			docBudget: BODY_PREFIX_MEDIUM_DOC_BUDGET,
+			stagnationLimit: PREFIX_ZERO_GAIN_STAGNATION_LIMIT,
+		};
+	}
+	return {
+		cacheKey: "body-short",
+		target: "body",
+		minTermLength: BODY_PREFIX_MIN_TERM_LENGTH,
+		explorationCap: BODY_PREFIX_SHORT_EXPLORATION_CAP,
+		termBudget: BODY_PREFIX_SHORT_TERM_BUDGET,
+		docBudget: BODY_PREFIX_SHORT_DOC_BUDGET,
+		stagnationLimit: PREFIX_ZERO_GAIN_STAGNATION_LIMIT,
+	};
+}
+
+function getOrCreatePrefixExpansionTerms(
+	index: CoverageLexicalRecallIndex,
+	prefix: string,
+	profile: CoverageLexicalPrefixExpansionProfile,
+	queryCache: CoverageLexicalQueryCache,
+): readonly CoverageLexicalPrefixExpansionCandidate[] {
+	const cacheKey = `${profile.cacheKey}:${prefix}`;
+	const cached = queryCache.prefixExpansionsByTerm.get(cacheKey);
 	if (cached) {
 		return cached;
 	}
-	const created = expandPrefixTerms(sortedLexicon, prefix);
-	queryCache.prefixExpansionsByTerm.set(prefix, created);
+	const created = expandPrefixTerms(index, prefix, profile);
+	queryCache.prefixExpansionsByTerm.set(cacheKey, created);
 	return created;
 }
 
@@ -2528,7 +2692,8 @@ function collectMetadataFieldCandidatesForTerm(
 	familyIndex: number,
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
-): void {
+): number {
+	let addedCount = 0;
 	const fieldEntries: Array<
 		[
 			CoverageLexicalMetadataField,
@@ -2547,11 +2712,15 @@ function collectMetadataFieldCandidatesForTerm(
 			continue;
 		}
 		forEachPostingCandidateKey(index, matches, (key) => {
+			if (!candidates.has(key)) {
+				addedCount += 1;
+			}
 			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
 		});
 	}
+	return addedCount;
 }
 
 function collectPreferredMetadataPhraseMatches(
@@ -2794,23 +2963,164 @@ function encodeMatchKind(
 }
 
 function expandPrefixTerms(
-	sortedLexicon: readonly string[],
+	index: CoverageLexicalRecallIndex,
 	prefix: string,
-): string[] {
-	const out: string[] = [];
-	let index = lowerBoundString(sortedLexicon, prefix);
-	while (index < sortedLexicon.length) {
-		const term = sortedLexicon[index];
+	profile: CoverageLexicalPrefixExpansionProfile,
+): CoverageLexicalPrefixExpansionCandidate[] {
+	const candidates: CoverageLexicalPrefixExpansionCandidate[] = [];
+	let explored = 0;
+	let termIndex = lowerBoundString(index.sortedLexicon, prefix);
+	while (termIndex < index.sortedLexicon.length) {
+		const term = index.sortedLexicon[termIndex];
 		if (!term.startsWith(prefix)) {
 			break;
 		}
-		out.push(term);
-		if (out.length >= MAX_PREFIX_EXPANSIONS) {
+		if (term !== prefix) {
+			const candidate = buildPrefixExpansionCandidate(index, term, prefix, profile);
+			if (candidate) {
+				candidates.push(candidate);
+			}
+		}
+		explored += 1;
+		if (explored >= profile.explorationCap) {
 			break;
 		}
-		index += 1;
+		termIndex += 1;
 	}
-	return out;
+	candidates.sort(comparePrefixExpansionCandidates);
+	return candidates;
+}
+
+function buildPrefixExpansionCandidate(
+	index: CoverageLexicalRecallIndex,
+	term: string,
+	prefix: string,
+	profile: CoverageLexicalPrefixExpansionProfile,
+): CoverageLexicalPrefixExpansionCandidate | null {
+	const bodyDocCount = getPostingCandidateCountOrZero(index.bodyPostings.get(term));
+	const metadataDocCount = getMetadataUnionPostingCandidateCount(index, term);
+	const totalDocCount = bodyDocCount + metadataDocCount;
+	const targetDocCount =
+		profile.target === "metadata"
+			? metadataDocCount
+			: profile.target === "body"
+				? bodyDocCount
+				: totalDocCount;
+	if (targetDocCount <= 0) {
+		return null;
+	}
+	return {
+		term,
+		bodyDocCount,
+		metadataDocCount,
+		totalDocCount,
+		targetDocCount,
+		score: computePrefixExpansionScore(
+			term,
+			prefix,
+			bodyDocCount,
+			metadataDocCount,
+			totalDocCount,
+			targetDocCount,
+			profile,
+		),
+	};
+}
+
+function computePrefixExpansionScore(
+	term: string,
+	prefix: string,
+	bodyDocCount: number,
+	metadataDocCount: number,
+	totalDocCount: number,
+	targetDocCount: number,
+	profile: CoverageLexicalPrefixExpansionProfile,
+): number {
+	const completionGain = Math.max(0, term.length - prefix.length);
+	const lengthScore = term.length * 24 + completionGain * 80;
+	const rarityScore = computePrefixRarityScore(targetDocCount);
+	const totalDocPenalty = Math.min(240, totalDocCount * 2);
+	const metadataPresenceBonus =
+		profile.target !== "body" && metadataDocCount > 0
+			? 80 + Math.min(80, metadataDocCount * 4)
+			: 0;
+	const mixedBoost =
+		profile.target === "all"
+			? Math.min(60, bodyDocCount * 2) + Math.min(40, metadataDocCount * 2)
+			: 0;
+	return (
+		lengthScore +
+		rarityScore +
+		metadataPresenceBonus +
+		mixedBoost -
+		totalDocPenalty
+	);
+}
+
+function computePrefixRarityScore(targetDocCount: number): number {
+	if (targetDocCount <= 1) {
+		return 520;
+	}
+	if (targetDocCount <= 2) {
+		return 460;
+	}
+	if (targetDocCount <= 4) {
+		return 380;
+	}
+	if (targetDocCount <= 8) {
+		return 280;
+	}
+	if (targetDocCount <= 16) {
+		return 180;
+	}
+	if (targetDocCount <= 32) {
+		return 90;
+	}
+	if (targetDocCount <= 64) {
+		return 20;
+	}
+	return -Math.min(220, targetDocCount);
+}
+
+function comparePrefixExpansionCandidates(
+	left: CoverageLexicalPrefixExpansionCandidate,
+	right: CoverageLexicalPrefixExpansionCandidate,
+): number {
+	return (
+		right.score - left.score ||
+		left.targetDocCount - right.targetDocCount ||
+		right.term.length - left.term.length ||
+		left.term.localeCompare(right.term)
+	);
+}
+
+function getPostingCandidateCountOrZero(
+	postings: CoverageLexicalPostingList | undefined,
+): number {
+	return postings ? getPostingCandidateCount(postings) : 0;
+}
+
+function getMetadataUnionPostingCandidateCount(
+	index: CoverageLexicalRecallIndex,
+	term: string,
+): number {
+	const seen = new Set<CoverageLexicalCandidateKey>();
+	for (const postings of [
+		index.metadataBasenamePostings,
+		index.metadataAliasPostings,
+		index.metadataFolderPostings,
+		index.metadataHeadingPostings,
+		index.metadataTagPostings,
+	] as const) {
+		const matches = postings.get(term);
+		if (!matches) {
+			continue;
+		}
+		forEachPostingCandidateKey(index, matches, (key) => {
+			seen.add(key);
+		});
+	}
+	return seen.size;
 }
 
 function expandFuzzyTerms(

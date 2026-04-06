@@ -431,4 +431,174 @@ describe("coverage lexical recall suite", () => {
 		expect(witnessState?.phraseMatches.length).toBeGreaterThan(0);
 	});
 
+	test("metadata prefix stays available for three-character ASCII prefixes", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/zephyr-cache.md",
+				basename: "zephyr-cache.md",
+				folder: "notes",
+				headings: "Zephyr cache",
+				aliases: "zephyr cache note",
+				content: "cache tuning notes for zephyr services",
+			},
+			{
+				path: "notes/alpha-note.md",
+				basename: "alpha-note.md",
+				folder: "notes",
+				headings: "Alpha note",
+				content: "ordinary note without the target prefix",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "notes/zep",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+		expect(results[0]?.path).toBe("notes/zephyr-cache.md");
+	});
+
+	test("body prefix stays disabled for three-character ASCII body queries", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/secret-guide.md",
+				basename: "secret-guide.md",
+				folder: "notes",
+				content: "password rotation policy lives only in body content",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "pas",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+		expect(results).toHaveLength(0);
+	});
+
+	test("ranked body prefix expansion can keep a useful longer completion under tight budgets", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+			};
+		};
+
+		const distractors: IndexedDocument[] = Array.from({ length: 16 }, (_, index) => ({
+			path: `noise/pass-${index}.md`,
+			basename: `noise-${index}.md`,
+			folder: "noise",
+			content: `pass${String(index).padStart(3, "0")} marker only`,
+		}));
+		const targetPath = "notes/password-target.md";
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			...distractors,
+			{
+				path: targetPath,
+				basename: "password-target.md",
+				folder: "notes",
+				content: "password rotation handbook",
+			},
+		]);
+
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "pass";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+
+		const candidates = collectCoverageLexicalCandidateStatesByDocId(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings: engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingCharPostings: engineAny.metadataHeadingCharPostings,
+				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: false,
+				maxItemResults: 5,
+			},
+		);
+
+		const targetDocId = engineAny.documentIdByPath.get(targetPath);
+		expect(targetDocId).toBeDefined();
+		expect(candidates.has(targetDocId)).toBe(true);
+		expect(candidates.size).toBeLessThanOrEqual(6);
+	});
+
 });
