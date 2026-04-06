@@ -198,7 +198,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchFallbackToLexical",
+			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
 		]);
 	});
 
@@ -236,7 +236,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchFallbackToLexical",
+			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
 		]);
 	});
 
@@ -266,7 +266,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridSearchIssueKind).toBe("unknown");
 		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"provider offline",
+			"provider offlinehybridNotice.lexicalFallbackSuffix",
 		]);
 	});
 
@@ -299,12 +299,12 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 	});
 
-	test("falls back to the normal lexical search path when hybrid requests lexical fallback", async () => {
+	test("falls back to the normal lexical search path with a generic notice when hybrid requests lexical fallback without details", async () => {
 		mockHybridEngine.prepareRecall.mockResolvedValue({
 			query: "alpha",
 			topK: 10,
 			displayCandidates: [],
-			fallbackNoticeKey: null,
+			fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
 			fallbackNoticeMessage: null,
 			fallbackToLexicalSearch: true,
 		});
@@ -330,8 +330,11 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(lexicalEngine.searchFiles).toHaveBeenCalled();
 		expect(result.items).toHaveLength(1);
 		expect((result.items[0] as { path: string }).path).toBe("notes/lexical.md");
-		expect(result.hybridFallbackNoticeKey).toBeNull();
+		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(result.hybridSearchOutcome).toBe("fallback_with_results");
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
+		]);
 	});
 
 	test("falls back to the normal lexical search path when hybrid prepare throws", async () => {
@@ -364,7 +367,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridSearchIssueKind).toBe("unknown");
 		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"provider offline",
+			"provider offlinehybridNotice.lexicalFallbackSuffix",
 		]);
 	});
 
@@ -383,7 +386,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridSearchIssueKind).toBe("unknown");
 		expect(result.hybridSearchIssueMessage).toBe("provider offline");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"provider offline",
+			"provider offlinehybridNotice.lexicalFallbackSuffix",
 		]);
 	});
 
@@ -409,7 +412,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridSearchIssueKind).toBe("missing_api_key");
 		expect(result.hybridSearchIssueMessage).toBeNull();
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchIssue.missingApiKey",
+			"hybridReason.missingApiKeyhybridNotice.lexicalFallbackSuffix",
 		]);
 	});
 
@@ -444,7 +447,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridFallbackNoticeKey).toBe("hybridNotice.disabled");
 		expect(result.hybridAvailabilityReasons).toEqual(["disabled"]);
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.disabled",
+			"hybridReason.disabledhybridNotice.lexicalSearchSuffix",
 		]);
 	});
 
@@ -478,7 +481,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(result.hybridSearchIssueMessage).toBeNull();
 		expect(result.hybridSearchOutcome).toBe("fallback_failed");
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchIssue.missingApiKey",
+			"hybridReason.missingApiKeyhybridNotice.lexicalFallbackSuffix",
 		]);
 	});
 
@@ -499,7 +502,29 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		service.notifyHybridFallback(result);
 
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"provider said something more specific",
+			"provider said something more specifichybridNotice.lexicalFallbackSuffix",
+		]);
+	});
+
+	test("composes an auto-hybrid failure notice from lexical-empty context and the underlying reason", () => {
+		const { service } = createHarness();
+		const { SearchResult } = require("src/globals/search-types");
+		const result = new SearchResult(
+			"notes/current.md",
+			[],
+			"hybridNotice.searchFallbackToLexical",
+			null,
+			[],
+			"fallback_failed",
+			"missing_api_key",
+			null,
+			"lexical_auto_fallback",
+		);
+
+		service.notifyHybridFallback(result);
+
+		expect(mockNotices.map((entry) => entry.message)).toEqual([
+			"hybridNotice.autoFallbackToHybridFailedPrefix hybridReason.missingApiKey",
 		]);
 	});
 
@@ -521,7 +546,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		service.notifyHybridFallback(finalResult);
 
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchFallbackToLexical",
+			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
 		]);
 	});
 
@@ -540,8 +565,8 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		service.notifyHybridFallback(fallbackResult);
 
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.searchFallbackToLexical",
-			"hybridNotice.searchFallbackToLexical",
+			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
+			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
 		]);
 	});
 

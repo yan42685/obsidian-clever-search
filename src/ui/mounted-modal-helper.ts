@@ -8,7 +8,7 @@ import {
 	type HybridSearchMode,
 } from "src/globals/search-types";
 import type { SearchService } from "src/services/obsidian/search-service";
-import { t, type LocaleKey } from "src/services/obsidian/translations/locale-helper";
+import { t } from "src/services/obsidian/translations/locale-helper";
 import {
 	DataManager,
 	type HybridFreshnessSummary,
@@ -22,12 +22,6 @@ export type HybridFreshnessNoticeState = {
 	message: string;
 };
 
-export type HybridFailureNoticeState = {
-	key: LocaleKey | null;
-	message: string | null;
-	emptyResult: boolean;
-};
-
 type AutoHybridFallbackControllerOptions = {
 	searchService: SearchService;
 	setting: OuterSetting;
@@ -35,7 +29,6 @@ type AutoHybridFallbackControllerOptions = {
 	isHybrid: boolean;
 	getLatestRequestId: () => number;
 	getCurrentQueryText: () => string;
-	onFailureNoticeChange: (state: HybridFailureNoticeState) => void;
 	onResultApplied: (query: string, result: SearchResult) => Promise<void>;
 };
 
@@ -105,7 +98,6 @@ export class AutoHybridFallbackController {
 	private readonly isHybrid: boolean;
 	private readonly getLatestRequestId: () => number;
 	private readonly getCurrentQueryText: () => string;
-	private readonly onFailureNoticeChange: (state: HybridFailureNoticeState) => void;
 	private readonly onResultApplied: (
 		query: string,
 		result: SearchResult,
@@ -121,7 +113,6 @@ export class AutoHybridFallbackController {
 		this.isHybrid = options.isHybrid;
 		this.getLatestRequestId = options.getLatestRequestId;
 		this.getCurrentQueryText = options.getCurrentQueryText;
-		this.onFailureNoticeChange = options.onFailureNoticeChange;
 		this.onResultApplied = options.onResultApplied;
 	}
 
@@ -130,10 +121,6 @@ export class AutoHybridFallbackController {
 			clearTimeout(this.timer);
 			this.timer = null;
 		}
-	}
-
-	syncFailureNoticeFromResult(result: SearchResult): void {
-		this.onFailureNoticeChange(this.buildFailureNoticeState(result));
 	}
 
 	schedule(query: string, requestId: number): void {
@@ -172,8 +159,9 @@ export class AutoHybridFallbackController {
 	}
 
 	private async apply(query: string, requestId: number): Promise<void> {
-		const hybridResult = await this.searchService.searchInVaultHybrid(query, {
+		let hybridResult = await this.searchService.searchInVaultHybrid(query, {
 			preserveHybridFailureResult: true,
+			noticeContext: "lexical_auto_fallback",
 		});
 		if (
 			requestId !== this.getLatestRequestId() ||
@@ -183,20 +171,7 @@ export class AutoHybridFallbackController {
 		}
 
 		this.searchService.notifyHybridFallback(hybridResult);
-		this.onFailureNoticeChange(this.buildFailureNoticeState(hybridResult, true));
 		await this.onResultApplied(query, hybridResult);
-	}
-
-	private buildFailureNoticeState(
-		result: SearchResult,
-		allowEmptyResult = false,
-	): HybridFailureNoticeState {
-		const notice = this.searchService.getHybridFallbackNotice(result);
-		return {
-			key: notice.key ?? null,
-			message: notice.message,
-			emptyResult: allowEmptyResult && result.items.length === 0,
-		};
 	}
 }
 

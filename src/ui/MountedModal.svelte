@@ -23,7 +23,6 @@
 		AutoHybridFallbackController,
 		createHiddenHybridFreshnessNoticeState,
 		getMountedModalFileItemScore,
-		type HybridFailureNoticeState,
 		HybridFreshnessNoticeController,
 		HybridQuerySessionController,
 		type HybridFreshnessNoticeState,
@@ -45,10 +44,6 @@
 	export let queryText: string;
 
 	const cachedResult = new Map<string, SearchResult>(); // remove the unnecessary latency when backspacing
-	const cachedAutoHybridFallbackFailureNotice = new Map<
-		string,
-		HybridFailureNoticeState
-	>();
 	let searchResult: SearchResult = new SearchResult("", []);
 	let currItemIndex = NULL_NUMBER;
 	let currContext = ""; // for previewing in-file search
@@ -59,11 +54,6 @@
 	let currSubItemIndex = NULL_NUMBER;
 	let latestSearchRequestId = 0;
 	let historyInputRef: any;
-	let autoHybridFallbackFailureNotice: HybridFailureNoticeState = {
-		key: null,
-		message: null,
-		emptyResult: false,
-	};
 	let hybridFreshnessNotice: HybridFreshnessNoticeState =
 		createHiddenHybridFreshnessNoticeState();
 
@@ -78,26 +68,12 @@
 		isHybrid,
 		getLatestRequestId: () => latestSearchRequestId,
 		getCurrentQueryText: () => queryText,
-		onFailureNoticeChange: (state) => {
-			autoHybridFallbackFailureNotice = state;
-		},
 		onResultApplied: async (query, result) => {
 			searchResult = result;
 			if (shouldCacheAutoHybridFallbackResult(result)) {
 				cachedResult.set(query, result);
 			} else {
 				cachedResult.delete(query);
-			}
-			if (
-				autoHybridFallbackFailureNotice.key ||
-				autoHybridFallbackFailureNotice.message ||
-				autoHybridFallbackFailureNotice.emptyResult
-			) {
-				cachedAutoHybridFallbackFailureNotice.set(query, {
-					...autoHybridFallbackFailureNotice,
-				});
-			} else {
-				cachedAutoHybridFallbackFailureNotice.delete(query);
 			}
 			hybridFreshnessNoticeController.syncFromResult(result);
 			await updateItemAsync(0);
@@ -130,23 +106,12 @@
 
 		$: matchCountText = `${currItemIndex + 1} / ${searchResult.items.length}`;
 
-	function getAutoHybridFallbackNoResultsText(): string {
-		const locale =
-			typeof window !== "undefined"
-				? (window.localStorage?.getItem("language") ?? "").toLowerCase()
-				: "";
-		if (locale.startsWith("zh")) {
-			return "\u8bcd\u6cd5\u7ed3\u679c\u4e3a 0\uff0cfallback \u5230 hybrid \u7ed3\u679c\u4e5f\u4e3a 0\u3002";
-		}
-		return t("hybridModal.autoFallbackNoResults");
-	}
-
 	function hasHybridEmbeddingIncomplete(result: SearchResult): boolean {
 		return result.hasHybridAvailabilityReason("embedding_incomplete");
 	}
 
-	function getHybridResultNoticeText(): string | null {
-		if (searchType !== SearchType.IN_VAULT || !isHybrid) {
+	function getInVaultResultNoticeText(): string | null {
+		if (searchType !== SearchType.IN_VAULT) {
 			return null;
 		}
 		const notice = searchService.getHybridFallbackNotice(searchResult);
@@ -157,29 +122,6 @@
 			return t(notice.key);
 		}
 		return null;
-	}
-
-	function getAutoHybridFallbackFailureText(): string | null {
-		if (searchType !== SearchType.IN_VAULT || isHybrid) {
-			return null;
-		}
-		if (autoHybridFallbackFailureNotice.message) {
-			return autoHybridFallbackFailureNotice.message;
-		}
-		if (autoHybridFallbackFailureNotice.key) {
-			return t(autoHybridFallbackFailureNotice.key);
-		}
-		return null;
-	}
-
-	function isAutoHybridFallbackNoResultsVisible(): boolean {
-		return (
-			searchType === SearchType.IN_VAULT &&
-			!isHybrid &&
-			autoHybridFallbackFailureNotice.emptyResult &&
-			!autoHybridFallbackFailureNotice.key &&
-			!autoHybridFallbackFailureNotice.message
-		);
 	}
 
 	// TODO: use virtual list rather than rendering all buttons
@@ -243,16 +185,6 @@
 			}
 			searchResult = cachedResult.get(currentQueryText) as SearchResult;
 			searchService.notifyHybridFallback(searchResult);
-			if (searchType === SearchType.IN_VAULT && !isHybrid) {
-				autoHybridFallbackFailureNotice =
-					cachedAutoHybridFallbackFailureNotice.get(currentQueryText) ?? {
-						key: null,
-						message: null,
-						emptyResult: false,
-					};
-			} else {
-				autoHybridFallback.syncFailureNoticeFromResult(searchResult);
-			}
 			hybridFreshnessNoticeController.syncFromResult(searchResult);
 			await updateItemAsync(0);
 			if (
@@ -294,14 +226,6 @@
 		}
 
 		searchResult = nextResult;
-		autoHybridFallback.syncFailureNoticeFromResult(nextResult);
-		if (searchType === SearchType.IN_VAULT && !isHybrid) {
-			cachedAutoHybridFallbackFailureNotice.set(currentQueryText, {
-				...autoHybridFallbackFailureNotice,
-			});
-		} else {
-			cachedAutoHybridFallbackFailureNotice.delete(currentQueryText);
-		}
 		hybridFreshnessNoticeController.syncFromResult(nextResult);
 		cachedResult.set(currentQueryText, searchResult);
 		await updateItemAsync(0);
@@ -573,28 +497,14 @@
 							</p>
 						</div>
 					{/if}
-					{#if getHybridResultNoticeText()}
+					{#if getInVaultResultNoticeText()}
 						<div class="hybrid-fallback-failure">
 							<span class="hybrid-fallback-failure-detail">
-								{getHybridResultNoticeText()}
+								{getInVaultResultNoticeText()}
 							</span>
 						</div>
 					{/if}
-					{#if getAutoHybridFallbackFailureText()}
-						<div class="hybrid-fallback-failure">
-							<span class="hybrid-fallback-failure-detail">
-								{getAutoHybridFallbackFailureText()}
-							</span>
-						</div>
-					{/if}
-					{#if isAutoHybridFallbackNoResultsVisible()}
-						<div class="hybrid-fallback-failure">
-							<p class="hybrid-fallback-failure-detail">
-								{getAutoHybridFallbackNoResultsText()}
-							</p>
-						</div>
-					{:else}
-						{#if hasHybridEmbeddingIncomplete(searchResult)}
+					{#if hasHybridEmbeddingIncomplete(searchResult)}
 							<div class="hybrid-fallback-failure">
 								<span class="hybrid-fallback-failure-detail">
 									{t("hybridModal.embeddingIncompleteFallback.title")}
@@ -603,53 +513,52 @@
 									{t("hybridModal.embeddingIncompleteFallback.desc")}
 								</span>
 							</div>
-						{/if}
-						{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
-							<ul>
-								{#each currFileSubItems as subItem, index}
-									{@const structuredSegments = getStructuredSnippetSegments(subItem)}
-									<button
-										on:click={() => handleSubItemClick(index)}
-										on:contextmenu={(e) => {
-											currSubItemIndex = index;
-											handleConfirm(e, e.ctrlKey);
-										}}
-										on:dblclick={(e) => {
-											currSubItemIndex = index;
-											handleConfirm(e, e.ctrlKey);
-										}}
-										bind:this={subItem.element}
-										class:selected={index === currSubItemIndex}
-										class="file-sub-item"
-									>
-										{#if subItem.score !== undefined}
-											<span class="subitem-score"
-												>{getSubItemScoreLabel()} {formatScore(subItem.score)}</span
-											>
+					{/if}
+					{#if currFileItem && currFileItem.viewType === ViewType.MARKDOWN}
+						<ul>
+							{#each currFileSubItems as subItem, index}
+								{@const structuredSegments = getStructuredSnippetSegments(subItem)}
+								<button
+									on:click={() => handleSubItemClick(index)}
+									on:contextmenu={(e) => {
+										currSubItemIndex = index;
+										handleConfirm(e, e.ctrlKey);
+									}}
+									on:dblclick={(e) => {
+										currSubItemIndex = index;
+										handleConfirm(e, e.ctrlKey);
+									}}
+									bind:this={subItem.element}
+									class:selected={index === currSubItemIndex}
+									class="file-sub-item"
+								>
+									{#if subItem.score !== undefined}
+										<span class="subitem-score"
+											>{getSubItemScoreLabel()} {formatScore(subItem.score)}</span
+										>
+									{/if}
+									<span class="subitem-snippet">
+										{#if structuredSegments}
+											{#each structuredSegments as segment}
+												{#if segment.highlight}
+													<mark>{segment.text}</mark>
+												{:else}
+													{segment.text}
+												{/if}
+											{/each}
+										{:else}
+											{@html viewHelper.purifyHTML(
+												subItem.snippet ?? subItem.text,
+											)}
 										{/if}
-										<span class="subitem-snippet">
-											{#if structuredSegments}
-												{#each structuredSegments as segment}
-													{#if segment.highlight}
-														<mark>{segment.text}</mark>
-													{:else}
-														{segment.text}
-													{/if}
-												{/each}
-											{:else}
-												{@html viewHelper.purifyHTML(
-													subItem.snippet ?? subItem.text,
-												)}
-											{/if}
-										</span>
-									</button>
-								{/each}
-							</ul>
-						{:else}
-							<span>
-								{viewHelper.showNoResult()}
-							</span>
-						{/if}
+									</span>
+								</button>
+							{/each}
+						</ul>
+					{:else}
+						<span>
+							{viewHelper.showNoResult()}
+						</span>
 					{/if}
 				{/if}
 			</div>

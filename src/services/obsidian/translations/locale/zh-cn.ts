@@ -97,7 +97,7 @@ export default {
 	"hybridNotice.indexFallbackToLexical":
 		"稠密语义索引当前不可用，结果已切换为 lexical fallback。",
 	"hybridNotice.searchFallbackToLexical":
-		"稠密语义搜索当前不可用，本次结果已切换为 lexical fallback。",
+		"Hybrid 搜索当前不可用，本次结果已切换为 lexical fallback。",
 	"hybridNotice.searchIssue.missingApiKey":
 		"\u672a\u914d\u7f6e Qwen API Key\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
 	"hybridNotice.searchIssue.weeklyTokenLimit":
@@ -288,4 +288,36 @@ export default {
 	"hybridModal.healthSummary.metric.stale": "\u672a\u540c\u6b65",
 	"hybridNotice.disabled":
 		"\u672a\u542f\u7528 Hybrid \u641c\u7d22\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical \u641c\u7d22\u3002",
+	"hybridNotice.autoFallbackToHybridFailedPrefix":
+		"Lexical \u65e0\u5339\u914d\uff0cfallback \u5230 Hybrid \u5931\u8d25\uff1a",
+	"hybridNotice.lexicalFallbackSuffix":
+		"\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
+	"hybridNotice.lexicalFallbackSwitchedSuffix":
+		"\uff0c\u672c\u6b21\u7ed3\u679c\u5df2\u5207\u6362\u4e3a lexical fallback\u3002",
+	"hybridNotice.lexicalSearchSuffix":
+		"\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical \u641c\u7d22\u3002",
+	"hybridReason.unavailable":
+		"Hybrid \u641c\u7d22\u5f53\u524d\u4e0d\u53ef\u7528",
+	"hybridReason.disabled":
+		"Hybrid \u641c\u7d22\u672a\u542f\u7528",
+	"hybridReason.missingApiKey":
+		"\u672a\u914d\u7f6e Qwen API Key",
+	"hybridReason.weeklyTokenLimit":
+		"\u5df2\u8fbe\u5230\u672c\u5468 token \u9650\u989d",
+	"hybridReason.quotaExhausted":
+		"Qwen \u4f59\u989d\u4e0d\u8db3\u6216\u514d\u8d39\u989d\u5ea6\u5df2\u7528\u5c3d",
+	"hybridReason.auth401":
+		"Qwen API Key \u65e0\u6548\u6216\u5df2\u8fc7\u671f",
+	"hybridReason.auth403":
+		"\u5f53\u524d Qwen API Key \u6ca1\u6709\u8bbf\u95ee\u8be5\u6a21\u578b\u7684\u6743\u9650",
+	"hybridReason.provider429":
+		"Qwen \u8bf7\u6c42\u8fc7\u4e8e\u9891\u7e41",
+	"hybridReason.timeout":
+		"Qwen \u8bf7\u6c42\u8d85\u65f6",
+	"hybridReason.provider5xx":
+		"Qwen \u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528",
+	"hybridReason.network":
+		"\u65e0\u6cd5\u8fde\u63a5 Qwen \u670d\u52a1",
+	"hybridReason.unknown":
+		"Hybrid \u641c\u7d22\u5931\u8d25",
 };

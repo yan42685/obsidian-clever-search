@@ -330,7 +330,7 @@ describe("mounted modal helper", () => {
 		expect(setCachedResult).not.toHaveBeenCalled();
 	});
 
-	test("auto hybrid fallback reports an empty-result state when lexical and hybrid are both 0", async () => {
+	test("auto hybrid fallback keeps pure lexical-and-hybrid-empty results without injecting fallback notice", async () => {
 		const { SearchResult, SearchType } = require("src/globals/search-types");
 		const { AutoHybridFallbackController } = require("src/ui/mounted-modal-helper");
 		const searchService = {
@@ -351,14 +351,10 @@ describe("mounted modal helper", () => {
 						null,
 						[],
 						"success",
-					),
+				),
 			),
 		};
-		const failureStates: Array<{
-			key: string | null;
-			message: string | null;
-			emptyResult: boolean;
-		}> = [];
+		const appliedResults: InstanceType<typeof SearchResult>[] = [];
 		const applied: string[] = [];
 		const controller = new AutoHybridFallbackController({
 			searchService,
@@ -371,10 +367,8 @@ describe("mounted modal helper", () => {
 			isHybrid: false,
 			getLatestRequestId: () => 1,
 			getCurrentQueryText: () => "alpha",
-			onFailureNoticeChange: (state: typeof failureStates[number]) => {
-				failureStates.push(state);
-			},
 			onResultApplied: async (_query: string, result: InstanceType<typeof SearchResult>) => {
+				appliedResults.push(result);
 				applied.push(result.sourcePath);
 			},
 		});
@@ -383,14 +377,12 @@ describe("mounted modal helper", () => {
 		await Promise.resolve();
 
 		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha", {
+			noticeContext: "lexical_auto_fallback",
 			preserveHybridFailureResult: true,
 		});
 		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
-		expect(failureStates.at(-1)).toEqual({
-			key: null,
-			message: null,
-			emptyResult: true,
-		});
+		expect(appliedResults.at(-1)?.hybridFallbackNoticeKey).toBeNull();
+		expect(appliedResults.at(-1)?.hybridSearchIssueKind).toBeNull();
 		expect(applied).toEqual(["no result"]);
 	});
 
@@ -417,14 +409,10 @@ describe("mounted modal helper", () => {
 						"fallback_failed",
 						"missing_api_key",
 						null,
-					),
+				),
 			),
 		};
-		const failureStates: Array<{
-			key: string | null;
-			message: string | null;
-			emptyResult: boolean;
-		}> = [];
+		const appliedResults: InstanceType<typeof SearchResult>[] = [];
 		const controller = new AutoHybridFallbackController({
 			searchService,
 			setting: {
@@ -436,10 +424,9 @@ describe("mounted modal helper", () => {
 			isHybrid: false,
 			getLatestRequestId: () => 1,
 			getCurrentQueryText: () => "alpha",
-			onFailureNoticeChange: (state: typeof failureStates[number]) => {
-				failureStates.push(state);
+			onResultApplied: async (_query: string, result: InstanceType<typeof SearchResult>) => {
+				appliedResults.push(result);
 			},
-			onResultApplied: async () => undefined,
 		});
 
 		controller.schedule("alpha", 1);
@@ -447,13 +434,13 @@ describe("mounted modal helper", () => {
 
 		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
 		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha", {
+			noticeContext: "lexical_auto_fallback",
 			preserveHybridFailureResult: true,
 		});
-		expect(failureStates.at(-1)).toEqual({
-			key: "hybridNotice.searchIssue.missingApiKey",
-			message: null,
-			emptyResult: true,
-		});
+		expect(appliedResults.at(-1)?.hybridSearchIssueKind).toBe("missing_api_key");
+		expect(appliedResults.at(-1)?.hybridFallbackNoticeKey).toBe(
+			"hybridNotice.searchFallbackToLexical",
+		);
 	});
 
 	test("auto hybrid fallback preserves failure notice when hybrid recovers with results", async () => {
@@ -479,14 +466,10 @@ describe("mounted modal helper", () => {
 						"fallback_failed",
 						"provider_429",
 						null,
-					),
+				),
 			),
 		};
-		const failureStates: Array<{
-			key: string | null;
-			message: string | null;
-			emptyResult: boolean;
-		}> = [];
+		const appliedResults: InstanceType<typeof SearchResult>[] = [];
 		const applied: string[] = [];
 		const controller = new AutoHybridFallbackController({
 			searchService,
@@ -499,10 +482,8 @@ describe("mounted modal helper", () => {
 			isHybrid: false,
 			getLatestRequestId: () => 1,
 			getCurrentQueryText: () => "alpha",
-			onFailureNoticeChange: (state: typeof failureStates[number]) => {
-				failureStates.push(state);
-			},
 			onResultApplied: async (_query: string, result: InstanceType<typeof SearchResult>) => {
+				appliedResults.push(result);
 				applied.push(result.sourcePath);
 			},
 		});
@@ -512,13 +493,10 @@ describe("mounted modal helper", () => {
 
 		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
 		expect(searchService.searchInVaultHybrid).toHaveBeenCalledWith("alpha", {
+			noticeContext: "lexical_auto_fallback",
 			preserveHybridFailureResult: true,
 		});
-		expect(failureStates.at(-1)).toEqual({
-			key: "hybridNotice.searchIssue.provider429",
-			message: null,
-			emptyResult: false,
-		});
+		expect(appliedResults.at(-1)?.hybridSearchIssueKind).toBe("provider_429");
 		expect(applied).toEqual(["hybrid result"]);
 	});
 

@@ -84,6 +84,10 @@ export type HybridSearchIssueKind =
   | "network"
   | "unknown";
 
+export type HybridNoticeContext =
+  | "default"
+  | "lexical_auto_fallback";
+
 export class SearchResult {
   sourcePath: string;
   items: Item[];
@@ -92,6 +96,7 @@ export class SearchResult {
   hybridSearchOutcome?: HybridSearchOutcome | null;
   hybridSearchIssueKind?: HybridSearchIssueKind | null;
   hybridSearchIssueMessage?: string | null;
+  hybridNoticeContext?: HybridNoticeContext | null;
   hybridAvailabilityReasons: HybridAvailabilityReason[];
   constructor(
     currPath: string,
@@ -102,6 +107,7 @@ export class SearchResult {
     hybridSearchOutcome?: HybridSearchOutcome | null,
     hybridSearchIssueKind?: HybridSearchIssueKind | null,
     hybridSearchIssueMessage?: string | null,
+    hybridNoticeContext?: HybridNoticeContext | null,
   ) {
     this.sourcePath = currPath;
     this.items = items;
@@ -110,6 +116,7 @@ export class SearchResult {
     this.hybridSearchOutcome = hybridSearchOutcome ?? null;
     this.hybridSearchIssueKind = hybridSearchIssueKind ?? null;
     this.hybridSearchIssueMessage = hybridSearchIssueMessage ?? null;
+    this.hybridNoticeContext = hybridNoticeContext ?? "default";
     this.hybridAvailabilityReasons = [...hybridAvailabilityReasons];
   }
 
@@ -123,6 +130,7 @@ export class SearchResult {
     hybridSearchOutcome?: HybridSearchOutcome | null,
     hybridSearchIssueKind?: HybridSearchIssueKind | null,
     hybridSearchIssueMessage?: string | null,
+    hybridNoticeContext?: HybridNoticeContext | null,
   ): SearchResult {
     return new SearchResult(
       this.sourcePath,
@@ -133,6 +141,7 @@ export class SearchResult {
       hybridSearchOutcome,
       hybridSearchIssueKind,
       hybridSearchIssueMessage,
+      hybridNoticeContext ?? this.hybridNoticeContext,
     );
   }
 }

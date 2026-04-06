@@ -138,6 +138,30 @@ type FinalizedHybridRecall = {
   fallbackToLexicalSearch: boolean;
 };
 
+function ensureHybridFallbackMetadata<T extends {
+  fallbackNoticeKey: LocaleKey | null;
+  fallbackNoticeMessage: string | null;
+  fallbackIssueKind: HybridSearchIssueKind | null;
+  fallbackIssueMessage: string | null;
+  fallbackToLexicalSearch: boolean;
+}>(result: T): T {
+  if (!result.fallbackToLexicalSearch) {
+    return result;
+  }
+  if (
+    result.fallbackNoticeKey ||
+    result.fallbackNoticeMessage ||
+    result.fallbackIssueKind ||
+    result.fallbackIssueMessage
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
+  };
+}
+
 function createHybridAbortError(): Error {
   const error = new Error("Hybrid query aborted");
   error.name = "AbortError";
@@ -486,7 +510,7 @@ export class HybridEngine {
     });
     throwIfHybridQueryAborted(signal);
     if (fileShortlist.length === 0) {
-      return {
+      return ensureHybridFallbackMetadata({
         query,
         topK,
         displayCandidates: [],
@@ -495,7 +519,7 @@ export class HybridEngine {
         fallbackIssueKind: null,
         fallbackIssueMessage: null,
         fallbackToLexicalSearch: true,
-      };
+      });
     }
     const displayCandidates = await prepareHybridLexicalLaneSearch({
       queryText: query,
@@ -505,7 +529,7 @@ export class HybridEngine {
       rerankTopK: Math.max(topK * 2, topK),
     });
     throwIfHybridQueryAborted(signal);
-    return {
+    return ensureHybridFallbackMetadata({
       query,
       topK,
       displayCandidates,
@@ -514,7 +538,7 @@ export class HybridEngine {
       fallbackIssueKind: null,
       fallbackIssueMessage: null,
       fallbackToLexicalSearch: displayCandidates.length === 0,
-    };
+    });
   }
 
   buildItemsFromPreparedRecall(
