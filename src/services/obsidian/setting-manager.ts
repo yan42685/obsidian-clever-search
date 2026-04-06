@@ -7,21 +7,21 @@ import {
 	Vault,
 } from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
+import { EventEnum } from "src/globals/enums";
 import {
-	DEFAULT_OUTER_SETTING,
 	DEFAULT_FILE_SEARCH_BACKEND,
+	DEFAULT_OUTER_SETTING,
 	OuterSetting,
 	type LogLevelOptions,
 	type SearchHistoryMaxItems,
 } from "src/globals/plugin-setting";
-import { EventEnum } from "src/globals/enums";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import {
 	buildDashScopeApiUrl,
-	getEstimatedTokenSavingsSummary,
 	getCurrentWeekDateRange,
 	getCurrentWeekTokenUsage,
+	getEstimatedTokenSavingsSummary,
 	getTopTokenFiles,
 	getTotalTokens,
 	resetCurrentWeekTokenUsage,
@@ -32,10 +32,10 @@ import {
 } from "src/services/search/hybrid/provider-error";
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
+import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { logger, type LogLevel } from "src/utils/logger";
 import { MyLib, getInstance, isDevEnvironment } from "src/utils/my-lib";
 import { AssetsProvider } from "src/utils/web/assets-provider";
-import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { container, inject, singleton } from "tsyringe";
 import { CommonSuggester, MyNotice } from "./transformed-api";
 import { t } from "./translations/locale-helper";
@@ -45,13 +45,12 @@ import {
 	type HybridDeferredEmbeddingSummary,
 	type HybridHealthSummary,
 } from "./user-data/data-manager";
-import {
-	formatHybridAvailabilityReason,
-	formatHybridAvailabilityReasons,
-	formatHybridAvailabilityRuntime,
-} from "./user-data/search-availability";
-import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-recovery-manager";
 import { DataProvider } from "./user-data/data-provider";
+import type { HybridFailedEmbeddingSummary } from "./user-data/hybrid-embedding-recovery-manager";
+import {
+	formatHybridAvailabilityReasons,
+	formatHybridAvailabilityRuntime
+} from "./user-data/search-availability";
 import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
 
@@ -901,7 +900,7 @@ class HybridSearchModal extends Modal {
 	}
 
 	onOpen() {
-		this.modalEl.style.width = "56vw";
+		this.modalEl.style.width = "52vw";
 		this.modalEl.style.marginBottom = "5em";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		this.openedApiDomain = this.setting.hybrid.apiDomain ?? "";
@@ -946,13 +945,12 @@ class HybridSearchModal extends Modal {
 			);
 
 		const defaultApiDomain = "dashscope.aliyuncs.com/compatible-mode";
-		const apiSetting = new Setting(contentEl)
+		new Setting(contentEl)
 			.setName(t("hybridModal.apiDomain"))
 			.setDesc(t("hybridModal.apiDomain.desc"))
 			.addText((text) => {
 				this.hybridApiDomainInputEl = text.inputEl;
-				text.inputEl.style.width = "220px";
-				text.inputEl.style.maxWidth = "220px";
+                text.inputEl.style.width = "24.62rem";
 				text
 					.setPlaceholder(defaultApiDomain)
 					.setValue(this.setting.hybrid.apiDomain || defaultApiDomain)
@@ -961,11 +959,14 @@ class HybridSearchModal extends Modal {
 							v.trim() === defaultApiDomain ? "" : v;
 						this.settingManager.saveSettings();
 					});
-			})
+			});
+
+		new Setting(contentEl)
+			.setName(t("hybridModal.apiKey"))
 			.addText((text) => {
 				this.hybridApiKeyInputEl = text.inputEl;
-				text.inputEl.style.width = "220px";
-				text.inputEl.style.maxWidth = "220px";
+				text.inputEl.type = "text";
+                text.inputEl.style.width = "21rem";
 				text
 					.setPlaceholder("sk-...")
 					.setValue(this.setting.hybrid.apiKey)
@@ -979,20 +980,6 @@ class HybridSearchModal extends Modal {
 					void this.checkHybridApiConnectivity();
 				}),
 			);
-		apiSetting.settingEl.style.display = "flex";
-		apiSetting.settingEl.style.alignItems = "center";
-		apiSetting.settingEl.style.justifyContent = "space-between";
-		apiSetting.settingEl.style.gap = "16px";
-		apiSetting.settingEl.style.flexWrap = "nowrap";
-		apiSetting.infoEl.style.flex = "1 1 auto";
-		apiSetting.infoEl.style.minWidth = "260px";
-		apiSetting.controlEl.style.display = "flex";
-		apiSetting.controlEl.style.alignItems = "center";
-		apiSetting.controlEl.style.justifyContent = "flex-end";
-		apiSetting.controlEl.style.gap = "8px";
-		apiSetting.controlEl.style.flexWrap = "nowrap";
-		apiSetting.controlEl.style.flex = "0 0 auto";
-
 		// 闂傚倸鍊风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛?Weekly token limit 闂傚倸鍊风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫?		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
 		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
@@ -1349,10 +1336,6 @@ class HybridSearchModal extends Modal {
 		);
 
 		if (summary.failedCount === 0) {
-			this.appendStatusText(
-				this.failedEmbeddingStatusEl,
-				t("hybridModal.failedEmbeddingStatus.none"),
-			);
 			return;
 		}
 
@@ -1391,10 +1374,6 @@ class HybridSearchModal extends Modal {
 			String(summary.deferredCount),
 		);
 		if (summary.deferredCount === 0) {
-			this.appendStatusText(
-				this.deferredEmbeddingStatusEl,
-				t("hybridModal.deferredEmbeddingStatus.none"),
-			);
 			return;
 		}
 
@@ -1569,7 +1548,7 @@ class HybridSearchModal extends Modal {
 		}>,
 	) {
 		const tabRow = parent.createDiv();
-		tabRow.style.cssText = "display:flex;gap:8px;margin:0.75em 0 0.5em 0;";
+		tabRow.style.cssText = "display:flex;gap:8px;margin:0.75em 0 0.5em 0;flex-wrap:wrap;";
 		const panelEl = parent.createDiv();
 		let activeIndex = 1;
 
@@ -1596,7 +1575,7 @@ class HybridSearchModal extends Modal {
 		tabs.forEach((tab, index) => {
 			const button = tabRow.createEl("button", { text: tab.title });
 			button.style.cssText =
-				"flex:1;padding:6px 10px;border:1px solid var(--background-modifier-border);border-radius:6px;cursor:pointer;";
+				"flex:0 0 auto;padding:6px 10px;border:1px solid var(--background-modifier-border);border-radius:6px;cursor:pointer;white-space:nowrap;";
 			button.onClickEvent(() => {
 				activeIndex = index;
 				renderActiveTab();
