@@ -385,7 +385,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentPathById: Array<string | undefined> = [];
 	private readonly documentBodyTokenLexicon: string[] = [];
 	private readonly documentBodyTokenIdByTerm = new Map<string, number>();
-	private documentBodyTokenIdTape = new Uint32Array(0);
+	private documentBodyTokenIdTape = new Uint8Array(0);
 	private readonly documentBodyTokenRangeById: Array<CoverageLexicalTokenRange | undefined> = [];
 	private readonly documentBodyHanSegmentsById: Array<
 		readonly string[] | undefined
@@ -584,7 +584,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentPathById.length = 0;
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenIdByTerm.clear();
-		this.documentBodyTokenIdTape = new Uint32Array(0);
+		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
 		this.documentBodyHanSegmentsById.length = 0;
 		this.documentTagValuesById.length = 0;
@@ -607,7 +607,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return tokenId;
 	}
 
-	private getDocumentBodyTokenIds(docId: number): Uint32Array | undefined {
+	private getDocumentBodyTokenIds(docId: number): readonly number[] | undefined {
 		return readCoverageLexicalNumericTokenRange(
 			this.documentBodyTokenIdTape,
 			this.documentBodyTokenRangeById[docId],
@@ -663,11 +663,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		) {
 			this.documentBodyTokenLexicon.length = 0;
 			this.documentBodyTokenIdByTerm.clear();
-			this.documentBodyTokenIdTape = new Uint32Array(0);
+			this.documentBodyTokenIdTape = new Uint8Array(0);
 			this.bodyPostings.clear();
 			return;
 		}
-		const usedTokenIds = new Set(this.documentBodyTokenIdTape);
+		const usedTokenIds = new Set<number>();
+		for (let docId = 0; docId < this.documentBodyTokenRangeById.length; docId += 1) {
+			const tokenIds = this.documentById[docId]
+				? this.getDocumentBodyTokenIds(docId)
+				: undefined;
+			if (!tokenIds) {
+				continue;
+			}
+			for (const tokenId of tokenIds) {
+				usedTokenIds.add(tokenId);
+			}
+		}
 		if (usedTokenIds.size === this.documentBodyTokenLexicon.length) {
 			return;
 		}
@@ -688,15 +699,27 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			nextIdByTerm.set(token, nextTokenId);
 			tokenIdRemap.set(tokenId, nextTokenId);
 		}
-		this.documentBodyTokenIdTape = Uint32Array.from(this.documentBodyTokenIdTape, (tokenId) => {
-			const nextTokenId = tokenIdRemap.get(tokenId);
-			if (nextTokenId === undefined) {
-				throw new Error(
-					"Missing compacted coverage lexical body token id for " + tokenId,
-				);
+		const remappedTokenIdsByDocId = new Map<number, readonly number[]>();
+		for (let docId = 0; docId < this.documentBodyTokenRangeById.length; docId += 1) {
+			const tokenIds = this.documentById[docId]
+				? this.getDocumentBodyTokenIds(docId)
+				: undefined;
+			if (!tokenIds) {
+				continue;
 			}
-			return nextTokenId;
-		});
+			remappedTokenIdsByDocId.set(
+				docId,
+				tokenIds.map((tokenId) => {
+					const nextTokenId = tokenIdRemap.get(tokenId);
+					if (nextTokenId === undefined) {
+						throw new Error(
+							"Missing compacted coverage lexical body token id for " + tokenId,
+						);
+					}
+					return nextTokenId;
+				}),
+			);
+		}
 		this.bodyPostings.remapTokenIds(tokenIdRemap, nextLexicon.length);
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenLexicon.push(...nextLexicon);
@@ -704,6 +727,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const [token, tokenId] of nextIdByTerm.entries()) {
 			this.documentBodyTokenIdByTerm.set(token, tokenId);
 		}
+		this.rebuildDocumentBodyTokenTape(remappedTokenIdsByDocId);
 	}
 
 	private rebuildDocumentBodyTokenTape(
@@ -729,14 +753,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				nextRanges[docId] = undefined;
 				continue;
 			}
+			const encodedTokens = encodeCoverageLexicalNumericTokenTape(tokens);
 			const start = nextTape.length;
-			nextTape.push(...tokens);
+			nextTape.push(...encodedTokens);
 			nextRanges[docId] = {
 				start,
 				end: nextTape.length,
 			};
 		}
-		this.documentBodyTokenIdTape = Uint32Array.from(nextTape);
+		this.documentBodyTokenIdTape = Uint8Array.from(nextTape);
 		this.documentBodyTokenRangeById.length = 0;
 		this.documentBodyTokenRangeById.push(...nextRanges);
 	}
@@ -2397,6 +2422,7 @@ const INDEX_REFERENCE_BYTES = 4;
 const INDEX_MAP_ENTRY_BYTES = 8;
 const INDEX_NUMBER_BYTES = 8;
 const INDEX_UINT32_BYTES = 4;
+const INDEX_UINT8_BYTES = 1;
 const INDEX_POSTING_DOC_ID_BYTES = 4;
 const INDEX_JS_ARRAY_HEADER_BYTES = 24;
 const INDEX_TYPED_ARRAY_VIEW_BYTES = 16;
@@ -2558,6 +2584,14 @@ function estimateNumericArrayBytes(length: number): number {
 	return INDEX_JS_ARRAY_HEADER_BYTES + length * INDEX_NUMBER_BYTES;
 }
 
+function estimatePackedUint8Bytes(length: number): number {
+	const payloadBytes = alignEstimateBytes(
+		length * INDEX_UINT8_BYTES,
+		INDEX_TYPED_ARRAY_ALIGNMENT_BYTES,
+	);
+	return INDEX_TYPED_ARRAY_VIEW_BYTES + INDEX_ARRAY_BUFFER_HEADER_BYTES + payloadBytes;
+}
+
 function estimatePackedUint32Bytes(length: number): number {
 	const payloadBytes = alignEstimateBytes(
 		length * INDEX_UINT32_BYTES,
@@ -2628,18 +2662,69 @@ function readCoverageLexicalTokenRange(
 	return tape.slice(range.start, range.end);
 }
 
+function encodeCoverageLexicalNumericTokenTape(
+	values: readonly number[],
+): Uint8Array {
+	const bytes: number[] = [];
+	for (const value of values) {
+		if (!Number.isInteger(value) || value < 0) {
+			throw new Error(`Invalid coverage lexical body token id: ${value}`);
+		}
+		let remaining = value >>> 0;
+		do {
+			let nextByte = remaining & 0x7f;
+			remaining >>>= 7;
+			if (remaining !== 0) {
+				nextByte |= 0x80;
+			}
+			bytes.push(nextByte);
+		} while (remaining !== 0);
+	}
+	return Uint8Array.from(bytes);
+}
+
 function readCoverageLexicalNumericTokenRange(
-	tape: Uint32Array,
+	tape: Uint8Array,
 	range: CoverageLexicalTokenRange | undefined,
-): Uint32Array | undefined {
+): number[] | undefined {
 	if (!range) {
 		return undefined;
 	}
-	return tape.subarray(range.start, range.end);
+	const values: number[] = [];
+	let value = 0;
+	let shift = 0;
+	for (let index = range.start; index < range.end; index += 1) {
+		const nextByte = tape[index];
+		value |= (nextByte & 0x7f) << shift;
+		if ((nextByte & 0x80) === 0) {
+			values.push(value >>> 0);
+			value = 0;
+			shift = 0;
+			continue;
+		}
+		shift += 7;
+		if (shift > 28) {
+			throw new Error("Coverage lexical body token tape varint overflow");
+		}
+	}
+	if (shift !== 0) {
+		throw new Error("Coverage lexical body token tape ended mid-varint");
+	}
+	return values;
+}
+
+function countCoverageLexicalEncodedTokenCount(tape: Uint8Array): number {
+	let count = 0;
+	for (const nextByte of tape) {
+		if ((nextByte & 0x80) === 0) {
+			count += 1;
+		}
+	}
+	return count;
 }
 
 function estimateNumericTokenTapeSlotsBytes(
-	tape: Uint32Array,
+	tape: Uint8Array,
 	rangesById: readonly (CoverageLexicalTokenRange | undefined)[],
 ): {
 	total: number;
@@ -2653,8 +2738,8 @@ function estimateNumericTokenTapeSlotsBytes(
 	tapeOwnershipBytes: number;
 } {
 	const populatedCount = rangesById.filter((range) => range !== undefined).length;
-	const tapeArrayBytes = INDEX_COLLECTION_HEADER_BYTES + tape.length * INDEX_UINT32_BYTES;
-	const tapeOwnershipBytes = estimatePackedUint32Bytes(tape.length);
+	const tapeArrayBytes = INDEX_COLLECTION_HEADER_BYTES + tape.length * INDEX_UINT8_BYTES;
+	const tapeOwnershipBytes = estimatePackedUint8Bytes(tape.length);
 	const slotReferenceBytes = rangesById.length * INDEX_REFERENCE_BYTES;
 	const rangeNumberBytes = populatedCount * INDEX_NUMBER_BYTES * 2;
 	return {
@@ -2667,8 +2752,8 @@ function estimateNumericTokenTapeSlotsBytes(
 		populatedCount,
 		slotReferenceBytes,
 		rangeNumberBytes,
-		tokenCount: tape.length,
-		tokenNumberBytes: tape.length * INDEX_UINT32_BYTES,
+		tokenCount: countCoverageLexicalEncodedTokenCount(tape),
+		tokenNumberBytes: tape.length,
 		tapeArrayBytes,
 		tapeOwnershipBytes,
 	};
@@ -2715,7 +2800,7 @@ function estimateDocumentIdentityBytes(
 	documentPathById: readonly (string | undefined)[],
 	documentById: readonly (CoverageLexicalDocument | undefined)[],
 	documentBodyTokenLexicon: readonly string[],
-	documentBodyTokenIdTape: Uint32Array,
+	documentBodyTokenIdTape: Uint8Array,
 	documentBodyTokenRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
 	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[],
 	documentTagValuesById: readonly (readonly string[] | undefined)[],
