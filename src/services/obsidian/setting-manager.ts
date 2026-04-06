@@ -18,6 +18,7 @@ import { EventEnum } from "src/globals/enums";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import {
+	buildDashScopeApiUrl,
 	getEstimatedTokenSavingsSummary,
 	getCurrentWeekDateRange,
 	getCurrentWeekTokenUsage,
@@ -25,6 +26,10 @@ import {
 	getTotalTokens,
 	resetCurrentWeekTokenUsage,
 } from "src/services/search/hybrid/embedder";
+import {
+	buildHybridProviderErrorDetails,
+	buildHybridSearchIssue,
+} from "src/services/search/hybrid/provider-error";
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { logger, type LogLevel } from "src/utils/logger";
@@ -252,6 +257,15 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName(t("Hybrid search"))
+			.setDesc(t("Hybrid search desc"))
+			.addButton((b) =>
+				b.setButtonText(t("Manage")).onClick(() => {
+					openHybridSearchModal(getInstance(App));
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName(t("Search history completion"))
 			.setDesc(t("Search history desc"))
 			.addButton((button) =>
@@ -335,19 +349,6 @@ class GeneralTab extends PluginSettingTab {
 						});
 					}),
 			);
-		new Setting(containerEl)
-			.setName(t("Advanced"))
-			.setDesc(t("Advanced.desc"));
-
-		new Setting(containerEl)
-			.setName(t("Hybrid search"))
-			.setDesc(t("Hybrid search desc"))
-			.addButton((b) =>
-				b.setButtonText(t("Manage")).onClick(() => {
-					openHybridSearchModal(getInstance(App));
-				}),
-			);
-
 		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
 			b.setButtonText(t("Manage")).onClick(() => {
 				new ExcludePathModal(getInstance(App)).open();
@@ -874,6 +875,8 @@ class HybridSearchModal extends Modal {
 	private suggester: CommonSuggester;
 	private weeklyLimitInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
+	private hybridApiDomainInputEl: HTMLInputElement;
+	private hybridApiKeyInputEl: HTMLInputElement;
 	private failedEmbeddingStatusEl: HTMLElement;
 	private deferredEmbeddingStatusEl: HTMLElement;
 	private statsEl: HTMLElement;
@@ -942,26 +945,27 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-
-		new Setting(contentEl)
+		const defaultApiDomain = "dashscope.aliyuncs.com/compatible-mode";
+		const apiSetting = new Setting(contentEl)
 			.setName(t("hybridModal.apiDomain"))
 			.setDesc(t("hybridModal.apiDomain.desc"))
-			.addText((text) =>
-				text
-					.setPlaceholder("dashscope.aliyuncs.com")
-					.setValue(this.setting.hybrid.apiDomain)
-					.onChange((v) => {
-						this.setting.hybrid.apiDomain = v;
-						this.settingManager.saveSettings();
-					}),
-			);
-
-		// API Key
-		new Setting(contentEl)
-			.setName(t("hybridModal.apiKey"))
 			.addText((text) => {
-				text.inputEl.type = "password";
-				text.inputEl.style.width = "100%";
+				this.hybridApiDomainInputEl = text.inputEl;
+				text.inputEl.style.width = "220px";
+				text.inputEl.style.maxWidth = "220px";
+				text
+					.setPlaceholder(defaultApiDomain)
+					.setValue(this.setting.hybrid.apiDomain || defaultApiDomain)
+					.onChange((v) => {
+						this.setting.hybrid.apiDomain =
+							v.trim() === defaultApiDomain ? "" : v;
+						this.settingManager.saveSettings();
+					});
+			})
+			.addText((text) => {
+				this.hybridApiKeyInputEl = text.inputEl;
+				text.inputEl.style.width = "220px";
+				text.inputEl.style.maxWidth = "220px";
 				text
 					.setPlaceholder("sk-...")
 					.setValue(this.setting.hybrid.apiKey)
@@ -969,7 +973,25 @@ class HybridSearchModal extends Modal {
 						this.setting.hybrid.apiKey = v;
 						this.settingManager.saveSettings();
 					});
-			});
+			})
+			.addButton((button) =>
+				button.setButtonText(t("hybridModal.testConnection")).onClick(() => {
+					void this.checkHybridApiConnectivity();
+				}),
+			);
+		apiSetting.settingEl.style.display = "flex";
+		apiSetting.settingEl.style.alignItems = "center";
+		apiSetting.settingEl.style.justifyContent = "space-between";
+		apiSetting.settingEl.style.gap = "16px";
+		apiSetting.settingEl.style.flexWrap = "nowrap";
+		apiSetting.infoEl.style.flex = "1 1 auto";
+		apiSetting.infoEl.style.minWidth = "260px";
+		apiSetting.controlEl.style.display = "flex";
+		apiSetting.controlEl.style.alignItems = "center";
+		apiSetting.controlEl.style.justifyContent = "flex-end";
+		apiSetting.controlEl.style.gap = "8px";
+		apiSetting.controlEl.style.flexWrap = "nowrap";
+		apiSetting.controlEl.style.flex = "0 0 auto";
 
 		// 闂傚倸鍊风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛?Weekly token limit 闂傚倸鍊风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫?		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
 		new Setting(contentEl)
@@ -1233,6 +1255,66 @@ class HybridSearchModal extends Modal {
 		await this.refreshTokenStats();
 	}
 
+	private async checkHybridApiConnectivity() {
+		const rawDomain =
+			this.hybridApiDomainInputEl?.value?.trim() ||
+			this.setting.hybrid.apiDomain ||
+			"dashscope.aliyuncs.com/compatible-mode";
+		const apiKey =
+			this.hybridApiKeyInputEl?.value?.trim() || this.setting.hybrid.apiKey;
+		if (!apiKey) {
+			new MyNotice(t("hybridModal.connectivityMissingApiKey"), 5000);
+			return;
+		}
+		const url = buildDashScopeApiUrl(rawDomain, "embedding");
+		try {
+			const response = await fetch(url, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${apiKey}`,
+				},
+				body: JSON.stringify({
+					model: "text-embedding-v4",
+					input: ["connectivity-check"],
+					dimensions: 1024,
+					encoding_format: "float",
+				}),
+			});
+			if (!response.ok) {
+				const body = await response.text();
+				const details = buildHybridProviderErrorDetails(
+					response.status,
+					body,
+					response.headers.get("Retry-After"),
+				);
+				const reason = details.providerMessage ?? `${response.status} ${body}`.trim();
+				new MyNotice(
+					`${t("hybridModal.connectivityFailed")}: ${
+						details.requestId
+							? `${reason} (request_id: ${details.requestId})`
+							: reason
+					}`.slice(
+						0,
+						240,
+					),
+					7000,
+				);
+				return;
+			}
+			new MyNotice(t("hybridModal.connectivityOk"), 4000);
+		} catch (error) {
+			const issue = buildHybridSearchIssue(error);
+			const message =
+				issue.message ||
+				(error instanceof Error ? error.message : String(error));
+			new MyNotice(
+				`${t("hybridModal.connectivityFailed")}: ${message}`.slice(0, 240),
+				7000,
+			);
+		}
+	}
+
 	private async refreshTokenStats() {
 		await this.loadTokenStats(this.statsEl);
 	}
@@ -1355,22 +1437,27 @@ class HybridSearchModal extends Modal {
 		const { fromDate: weeklyFrom, toDate: weeklyTo } =
 			getCurrentWeekDateRange(now);
 		const monthlyFrom = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+		const totalFrom = "0000-01-01";
 
 		const [
 			dailyTop,
 			weeklyTop,
 			monthlyTop,
+			totalTop,
 			dailyTotal,
 			weeklyTotal,
 			monthlyTotal,
+			totalUsed,
 			savingsSummary,
 		] = await Promise.all([
 			getTopTokenFiles(todayKey, todayKey, 20),
 			getTopTokenFiles(weeklyFrom, weeklyTo, 20),
 			getTopTokenFiles(monthlyFrom, todayKey, 20),
+			getTopTokenFiles(totalFrom, todayKey, 20),
 			getTotalTokens(todayKey, todayKey),
 			getTotalTokens(weeklyFrom, weeklyTo),
 			getTotalTokens(monthlyFrom, todayKey),
+			getTotalTokens(totalFrom, todayKey),
 			getEstimatedTokenSavingsSummary(),
 		]);
 
@@ -1380,7 +1467,8 @@ class HybridSearchModal extends Modal {
 			text:
 				`${t("hybridModal.todayUsed")}: ${this.formatTokenCompact(dailyTotal)}  |  ` +
 				`${t("hybridModal.thisWeekUsed")}: ${this.formatTokenCompact(weeklyTotal)}  |  ` +
-				`${t("hybridModal.thisMonthUsed")}: ${this.formatTokenCompact(monthlyTotal)}`,
+				`${t("hybridModal.thisMonthUsed")}: ${this.formatTokenCompact(monthlyTotal)}  |  ` +
+				`${t("hybridModal.totalUsed")}: ${this.formatTokenCompact(totalUsed)}`,
 		});
 		container.createEl("p", {
 			text:
@@ -1393,6 +1481,7 @@ class HybridSearchModal extends Modal {
 			{ title: t("hybridModal.dailyTop"), items: dailyTop },
 			{ title: t("hybridModal.weeklyTop"), items: weeklyTop },
 			{ title: t("hybridModal.monthlyTop"), items: monthlyTop },
+			{ title: t("hybridModal.totalTop"), items: totalTop },
 		]);
 	}
 

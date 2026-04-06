@@ -56,14 +56,18 @@ export default {
 		"混合搜索结合了词法搜索与千问语义检索。索引阶段使用 text-embedding-v4，搜索阶段使用 qwen3-rerank，接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",
 	"hybridModal.apiDomain.desc":
-		"留空默认使用 dashscope.aliyuncs.com。若使用代理，只需填写域名即可。",
+		"目前只支持 Qwen 的 API。",
 	"hybridModal.apiKey": "API Key",
+	"hybridModal.testConnection": "检测",
+	"hybridModal.connectivityOk": "连通性检测成功。",
+	"hybridModal.connectivityFailed": "连通性检测失败",
+	"hybridModal.connectivityMissingApiKey": "请先填写 API Key。",
 	"hybridModal.apiKeyNotice":
 		"这里显示的 token 以千问接口返回的 usage 为准。当前混合搜索会使用 text-embedding-v4 和 qwen3-rerank，请确认 API Key 已开通这两个模型。",
 	"hybridModal.autoShowResultsWhenLexicalEmpty": "词法无结果时自动展示 hybrid",
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc":
-		"每周（周一至周日）最多允许消耗的 token 数量，设为 0 表示不限制。",
+		"每周（周一至周日）最多允许消耗的 token 数量，设为 0 表示不限制。统计并非完全准确，以实际消耗为准。",
 	"hybridModal.maxResultCount": "混合搜索结果数量",
 	"hybridModal.maxResultCount.desc":
 		"每次混合搜索返回并展示的 rerank 结果数量。",
@@ -88,6 +92,7 @@ export default {
 	"hybridModal.dailyTop": "今日 Top 20 文件",
 	"hybridModal.weeklyTop": "本周 Top 20 文件",
 	"hybridModal.monthlyTop": "本月 Top 20 文件",
+	"hybridModal.totalTop": "总计 Top 20 文件",
 	"hybridModal.noData": "暂无数据",
 	"hybridModal.file": "文件",
 	"hybridModal.tokens": "Tokens",
@@ -129,6 +134,7 @@ export default {
 	"hybridModal.todayUsed": "本日",
 	"hybridModal.thisWeekUsed": "本周",
 	"hybridModal.thisMonthUsed": "本月",
+	"hybridModal.totalUsed": "总计",
 	"hybridModal.autoShowResultsWhenLexicalEmpty.desc":
 		"当开启 hybrid 搜索且服务可用时，在普通库内搜索中，如果词法搜索结果为 0，且查询长度至少为 3，则自动展示 hybrid 结果。",
 	"hybridModal.autoFallbackFailed.title":
