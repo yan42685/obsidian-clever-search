@@ -193,6 +193,12 @@ export type HybridTokenSavingRecord = {
 	tokens: number;
 };
 
+export type HybridTokenBudgetResetRecord = {
+	id?: number;
+	periodKey: string;
+	tokens: number;
+};
+
 export type UISetting = {
 	openInNewPane: boolean;
 	maxItemResults: number;

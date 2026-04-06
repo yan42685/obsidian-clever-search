@@ -1427,6 +1427,7 @@ class HybridSearchModal extends Modal {
 			weeklyTotal,
 			monthlyTotal,
 			totalUsed,
+			weeklyBudgetUsed,
 			savingsSummary,
 		] = await Promise.all([
 			getTopTokenFiles(todayKey, todayKey, 20),
@@ -1437,11 +1438,12 @@ class HybridSearchModal extends Modal {
 			getTotalTokens(weeklyFrom, weeklyTo),
 			getTotalTokens(monthlyFrom, todayKey),
 			getTotalTokens(totalFrom, todayKey),
+			getCurrentWeekTokenUsage(),
 			getEstimatedTokenSavingsSummary(),
 		]);
 
 		container.empty();
-		this.renderWeeklyQuotaSummary(weeklyTotal);
+		this.renderWeeklyQuotaSummary(weeklyBudgetUsed);
 		container.createEl("p", {
 			text:
 				`${t("hybridModal.todayUsed")}: ${this.formatTokenCompact(dailyTotal)}  |  ` +

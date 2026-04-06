@@ -455,14 +455,27 @@ export function getCurrentWeekDateRange(now = new Date()): { fromDate: string; t
 	};
 }
 
+async function getCurrentWeekTokenResetOffset(weekKey: string): Promise<number> {
+	const db = getInstance(Database).db;
+	const record = await db.hybridTokenBudgetResets
+		.where('periodKey')
+		.equals(weekKey)
+		.first();
+	return record?.tokens ?? 0;
+}
+
 async function readCurrentWeekTokenUsageStrict(): Promise<number> {
 	const { fromDate, toDate } = getCurrentWeekDateRange();
-	const tokens = await getTotalTokensStrict(fromDate, toDate);
+	const [tokens, resetOffset] = await Promise.all([
+		getTotalTokensStrict(fromDate, toDate),
+		getCurrentWeekTokenResetOffset(fromDate),
+	]);
+	const effectiveTokens = Math.max(0, tokens - resetOffset);
 	lastKnownCurrentWeekTokenUsage = {
 		weekKey: fromDate,
-		tokens,
+		tokens: effectiveTokens,
 	};
-	return tokens;
+	return effectiveTokens;
 }
 
 export async function getCurrentWeekTokenUsage(): Promise<number> {
@@ -481,13 +494,21 @@ export async function resetCurrentWeekTokenUsage(): Promise<void> {
 	const { fromDate, toDate } = getCurrentWeekDateRange();
 	try {
 		const db = getInstance(Database).db;
-		const ids = (await db.hybridTokenStats
-			.where('dateKey')
-			.between(fromDate, toDate, true, true)
-			.primaryKeys()) as number[];
-		if (ids.length > 0) {
-			await db.hybridTokenStats.bulkDelete(ids);
-		}
+		const tokens = await getTotalTokensStrict(fromDate, toDate);
+		await db.transaction('rw', db.hybridTokenBudgetResets, async () => {
+			const existing = await db.hybridTokenBudgetResets
+				.where('periodKey')
+				.equals(fromDate)
+				.first();
+			if (existing?.id !== undefined) {
+				await db.hybridTokenBudgetResets.update(existing.id, { tokens });
+				return;
+			}
+			await db.hybridTokenBudgetResets.add({
+				periodKey: fromDate,
+				tokens,
+			});
+		});
 		lastKnownCurrentWeekTokenUsage = {
 			weekKey: fromDate,
 			tokens: 0,

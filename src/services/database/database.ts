@@ -1,5 +1,6 @@
 import Dexie from "dexie";
 import type {
+  HybridTokenBudgetResetRecord,
   HybridTokenRecord,
   HybridTokenSavingRecord,
   OuterSetting,
@@ -67,6 +68,7 @@ export class Database {
       { name: "indexArtifactState", table: this.db.indexArtifactState },
       { name: "hybridTokenStats", table: this.db.hybridTokenStats },
       { name: "hybridTokenSavings", table: this.db.hybridTokenSavings },
+      { name: "hybridTokenBudgetResets", table: this.db.hybridTokenBudgetResets },
     ] as const;
 
     const tables = await Promise.all(
@@ -310,7 +312,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 21;
+  private static readonly _dbVersion = 22;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   private schemaUpgradeDetected = false;
@@ -332,10 +334,45 @@ class DexieWrapper extends Dexie {
   indexArtifactState!: Dexie.Table<IndexArtifactStateRow, string>;
   hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
   hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
+  hybridTokenBudgetResets!: Dexie.Table<HybridTokenBudgetResetRecord, number>;
 
   constructor(@inject(PrivateApi) privateApi: PrivateApi) {
     super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
     this.privateApi = privateApi;
+    this.version(21)
+      .stores({
+        pluginSetting: "++id",
+        lexicalSearchSnapshots: "++id",
+        lexicalIndexedFileRefs: "path",
+        hybridChunks: "++id, filePath",
+        fileSnapshots: "filePath",
+        hybridDirtyShadows: "filePath",
+        hybridChunkVectors: "filePath",
+        hybridHnswSmall: "id",
+        hybridIndexedFileRefs: "path",
+        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+      })
+      .upgrade(async (tx) => {
+        this.schemaUpgradeDetected = true;
+        // Schema upgrades should preserve user-owned data and lexical rebuild
+        // artifacts where possible, but hard-reset hybrid runtime tables whose
+        // payload shape or ownership contract changed across versions.
+        // This upgrade intentionally drops existing hybrid runtime state rather than
+        // carrying forward removed BM25-era compatibility paths.
+        await Promise.all([
+          tx.table("hybridChunks").clear(),
+          tx.table("fileSnapshots").clear(),
+          tx.table("hybridDirtyShadows").clear(),
+          tx.table("hybridChunkVectors").clear(),
+          tx.table("hybridHnswSmall").clear(),
+          tx.table("hybridIndexedFileRefs").clear(),
+          tx.table("indexRecoveryState").clear(),
+          tx.table("indexArtifactState").clear(),
+        ]);
+      });
     this.version(DexieWrapper._dbVersion).stores({
       pluginSetting: "++id",
       lexicalSearchSnapshots: "++id",
@@ -350,23 +387,7 @@ class DexieWrapper extends Dexie {
       indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
       hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
       hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-    }).upgrade(async (tx) => {
-      this.schemaUpgradeDetected = true;
-      // Schema upgrades should preserve user-owned data and lexical rebuild
-      // artifacts where possible, but hard-reset hybrid runtime tables whose
-      // payload shape or ownership contract changed across versions.
-      // This upgrade intentionally drops existing hybrid runtime state rather than
-      // carrying forward removed BM25-era compatibility paths.
-      await Promise.all([
-        tx.table("hybridChunks").clear(),
-        tx.table("fileSnapshots").clear(),
-        tx.table("hybridDirtyShadows").clear(),
-        tx.table("hybridChunkVectors").clear(),
-        tx.table("hybridHnswSmall").clear(),
-        tx.table("hybridIndexedFileRefs").clear(),
-        tx.table("indexRecoveryState").clear(),
-        tx.table("indexArtifactState").clear(),
-      ]);
+      hybridTokenBudgetResets: "++id, periodKey",
     });
   }
   get dbVersion() {
