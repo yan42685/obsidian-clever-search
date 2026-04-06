@@ -508,6 +508,46 @@ describe("coverage lexical recall suite", () => {
 		expect(results).toHaveLength(0);
 	});
 
+	test("three-character ASCII queries can surface basename metadata through assist prefix recall", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/password-guide.md",
+				basename: "password-guide.md",
+				folder: "notes",
+				content: "credential rotation checklist without the target token in body",
+			},
+			{
+				path: "notes/passing-thought.md",
+				basename: "passing-thought.md",
+				folder: "notes",
+				content: "a distracting note that should lose to the basename completion",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "pas",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+		expect(results[0]?.path).toBe("notes/password-guide.md");
+	});
+
 	test("ranked body prefix expansion can keep a useful longer completion under tight budgets", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",

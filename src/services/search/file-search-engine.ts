@@ -38,6 +38,7 @@ export interface FileSearchEngine {
 	addDocuments(documents: IndexedDocument[]): Promise<void>;
 	deleteDocuments(paths: string[]): void;
 	searchFiles(request: FileSearchRequest): Promise<MatchedFile[]>;
+	getIndexedDocumentCount?(): number | null;
 	getDirectSubItems?(
 		queryText: string,
 		path: string,
@@ -46,7 +47,6 @@ export interface FileSearchEngine {
 	serialize(): SerializedFileSearchIndex | null;
 	estimateIndexBytes?(): number | null;
 	getIndexBreakdown?(): Record<string, unknown> | null;
-	debugTermAvailability?(term: string): Record<string, unknown> | null;
 }
 
 @singleton()

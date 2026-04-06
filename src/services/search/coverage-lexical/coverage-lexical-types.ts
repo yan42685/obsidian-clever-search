@@ -43,6 +43,10 @@ export type CoverageLexicalCandidateState = {
 	bodyCharMatchIndices: number[];
 	bodyCharMatchFlags: number[];
 	metadataMatches: number[];
+	metadataAssistFieldMatches: Record<
+		CoverageLexicalMetadataField,
+		number[]
+	>;
 	metadataCharMatchIndices: number[];
 	metadataCharMatchFlags: number[];
 	metadataFieldMatches: Record<
@@ -184,6 +188,7 @@ export type CoverageLexicalMetadataIdentitySignal = {
 	basename: CoverageLexicalAreaSignal;
 	heading: CoverageLexicalAreaSignal;
 	path: CoverageLexicalAreaSignal;
+	tag: CoverageLexicalAreaSignal;
 };
 
 export type CoverageLexicalLocalWindowSignal = {

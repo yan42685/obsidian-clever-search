@@ -58,6 +58,10 @@ export class LexicalEngine {
 		return this.fileSearchEngine.getIndexBreakdown?.() ?? null;
 	}
 
+	getIndexedDocumentCount(): number | null {
+		return this.fileSearchEngine.getIndexedDocumentCount?.() ?? null;
+	}
+
 	@monitorDecorator
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
@@ -73,6 +77,11 @@ export class LexicalEngine {
 	beginBatchReindex(): void {
 		this._isReady = false;
 		this.fileSearchEngine.clearIndex();
+	}
+
+	clearIndex(): void {
+		this.fileSearchEngine.clearIndex();
+		this._isReady = false;
 	}
 
 	finishBatchReindex(): void {

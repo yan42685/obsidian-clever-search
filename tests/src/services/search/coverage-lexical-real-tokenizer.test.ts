@@ -1,0 +1,236 @@
+import { container } from "tsyringe";
+
+jest.mock("src/utils/web/assets-provider", () => ({
+	AssetsProvider: class MockAssetsProvider {},
+}));
+
+jest.mock("src/integrations/languages/chinese-patch", () => ({
+	ChinesePatch: class MockChinesePatch {},
+}));
+
+describe("coverage lexical with real tokenizer", () => {
+	beforeEach(() => {
+		if ("reset" in container && typeof (container as any).reset === "function") {
+			(container as any).reset();
+		} else {
+			container.clearInstances();
+		}
+		(global as any).window = {
+			localStorage: {
+				getItem: jest.fn(() => "zh"),
+				setItem: jest.fn(),
+				removeItem: jest.fn(),
+			},
+		};
+		const { DEFAULT_OUTER_SETTING, OuterSetting } = require(
+			"src/globals/plugin-setting",
+		) as typeof import("src/globals/plugin-setting");
+		const { AssetsProvider } = require(
+			"src/utils/web/assets-provider",
+		) as {
+			AssetsProvider: new () => unknown;
+		};
+		const { ChinesePatch } = require(
+			"src/integrations/languages/chinese-patch",
+		) as {
+			ChinesePatch: new () => unknown;
+		};
+		const setting: OuterSetting = {
+			...DEFAULT_OUTER_SETTING,
+			enableChinesePatch: false,
+			enableStopWordsZh: false,
+			enableStopWordsEn: true,
+		};
+		container.registerInstance(OuterSetting, setting);
+		container.registerInstance(AssetsProvider, {
+			assets: {
+				stopWordsZh: new Set<string>(),
+				stopWordsEn: new Set<string>(),
+				jiebaBinary: Promise.resolve(null),
+			},
+		} as unknown as AssetsProvider);
+		container.registerInstance(ChinesePatch, {
+			cut: () => [],
+		} as unknown as ChinesePatch);
+	});
+
+	afterEach(() => {
+		delete (global as any).window;
+		if ("reset" in container && typeof (container as any).reset === "function") {
+			(container as any).reset();
+		} else {
+			container.clearInstances();
+		}
+	});
+
+	test("three-character ASCII query can reach basename password through assist prefix", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: Array<Record<string, string>>): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+		const { Tokenizer } = require(
+			"src/services/search/tokenizer",
+		) as typeof import("src/services/search/tokenizer");
+
+		const tokenizer = container.resolve(Tokenizer);
+		expect(tokenizer.tokenizeSequence("pas", "search")).toEqual(["pas"]);
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "all_notes/test/unsorted/fix- cant push to github without password.md",
+				basename: "fix- cant push to github without password",
+				folder: "all_notes/test/unsorted",
+				content: "credentials and access troubleshooting notes",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "pas",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results.map((result) => result.path)).toContain(
+			"all_notes/test/unsorted/fix- cant push to github without password.md",
+		);
+	});
+
+	test("prefix expansion stays reachable in mixed lexicons with symbol and Han terms", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: Array<Record<string, string>>): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/阿.md",
+				basename: "阿",
+				folder: "notes",
+				content: "han token",
+			},
+			{
+				path: "notes/中.md",
+				basename: "中",
+				folder: "notes",
+				content: "han token",
+			},
+			{
+				path: "notes/文.md",
+				basename: "文",
+				folder: "notes",
+				content: "han token",
+			},
+			{
+				path: "notes/测.md",
+				basename: "测",
+				folder: "notes",
+				content: "han token",
+			},
+			{
+				path: "notes/~tilde.md",
+				basename: "~tilde",
+				folder: "notes",
+				content: "symbol token",
+			},
+			{
+				path: "notes/fix- cant push to github without password.md",
+				basename: "fix- cant push to github without password",
+				folder: "notes",
+				content: "credentials and access troubleshooting notes",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "pas",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results.map((result) => result.path)).toContain(
+			"notes/fix- cant push to github without password.md",
+		);
+	});
+
+	test("three-character ASCII query can reach folder headings and tags through metadata assist prefix", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: Array<Record<string, string>>): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/doc-folder.md",
+				basename: "doc-folder",
+				folder: "vault/secure-folder",
+				content: "alpha body",
+			},
+			{
+				path: "notes/doc-heading.md",
+				basename: "doc-heading",
+				folder: "vault/general",
+				headings: "security checklist",
+				content: "beta body",
+			},
+			{
+				path: "notes/doc-tag.md",
+				basename: "doc-tag",
+				folder: "vault/general",
+				tags: "securitytag",
+				content: "gamma body",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "sec",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results.map((result) => result.path)).toEqual(
+			expect.arrayContaining([
+				"notes/doc-folder.md",
+				"notes/doc-heading.md",
+				"notes/doc-tag.md",
+			]),
+		);
+	});
+});

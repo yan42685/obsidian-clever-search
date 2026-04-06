@@ -440,7 +440,8 @@ function compareMetadataIdentitySignals(
 		compareAreaSignals(left.basename, right.basename) ||
 		compareAreaSignals(left.alias, right.alias) ||
 		compareAreaSignals(left.path, right.path) ||
-		compareAreaSignals(left.heading, right.heading)
+		compareAreaSignals(left.heading, right.heading) ||
+		compareAreaSignals(left.tag, right.tag)
 	);
 }
 

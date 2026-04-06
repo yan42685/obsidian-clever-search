@@ -201,6 +201,16 @@ type CoverageLexicalMutableNumericPostingMap = ReadonlyMap<
 	clear(): void;
 };
 
+function compareCoverageLexicalTerms(left: string, right: string): number {
+	if (left < right) {
+		return -1;
+	}
+	if (left > right) {
+		return 1;
+	}
+	return 0;
+}
+
 function createCoverageLexicalDocument(
 	docId: number,
 	document: Pick<
@@ -354,6 +364,7 @@ type CoverageLexicalBenchmarkPhaseTimingState = {
 };
 
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
+const METADATA_ASSIST_IDENTITY_WEIGHT = 0.5;
 
 function createCoverageLexicalEngineQueryCache(
 	fuzzyProportion: number,
@@ -467,7 +478,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private getSortedLexicon(): readonly string[] {
 		if (this.sortedLexiconDirty || this.sortedLexiconCache.length === 0) {
-			this.sortedLexiconCache = Array.from(this.lexicon).sort();
+			this.sortedLexiconCache = Array.from(this.lexicon).sort(
+				compareCoverageLexicalTerms,
+			);
 			this.sortedLexiconDirty = false;
 		}
 		return this.sortedLexiconCache;
@@ -1041,6 +1054,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				boundaryLookaround: 24,
 			},
 		}).slice(0, maxSubItemCount);
+	}
+
+	getIndexedDocumentCount(): number {
+		return this.documents.size;
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
@@ -1806,7 +1823,27 @@ function buildCoverageSignalBase(
 		const familyIndex = family.index;
 		const bodyCode = state.bodyMatches[familyIndex] ?? 0;
 		const metadataCode = state.metadataMatches[familyIndex] ?? 0;
-		if (family.role === "noise" || (bodyCode === 0 && metadataCode === 0)) {
+		const aliasAssistCode =
+			state.metadataAssistFieldMatches.aliases[familyIndex] ?? 0;
+		const basenameAssistCode =
+			state.metadataAssistFieldMatches.basename[familyIndex] ?? 0;
+		const folderAssistCode =
+			state.metadataAssistFieldMatches.folder[familyIndex] ?? 0;
+		const headingsAssistCode =
+			state.metadataAssistFieldMatches.headings[familyIndex] ?? 0;
+		const tagsAssistCode =
+			state.metadataAssistFieldMatches.tags[familyIndex] ?? 0;
+		const assistCode = Math.max(
+			aliasAssistCode,
+			basenameAssistCode,
+			folderAssistCode,
+			headingsAssistCode,
+			tagsAssistCode,
+		);
+		if (
+			family.role === "noise" ||
+			(bodyCode === 0 && metadataCode === 0 && assistCode === 0)
+		) {
 			continue;
 		}
 
@@ -1878,7 +1915,20 @@ function buildCoverageSignalBase(
 					basenameCode,
 					headingsCode,
 					folderCode,
+					tagsCode,
 					weight,
+				);
+				continue;
+			}
+			if (assistCode > 0) {
+				applyIdentityMatchFromCodes(
+					metadataIdentity,
+					aliasAssistCode,
+					basenameAssistCode,
+					headingsAssistCode,
+					folderAssistCode,
+					tagsAssistCode,
+					weight * METADATA_ASSIST_IDENTITY_WEIGHT,
 				);
 			}
 			continue;
@@ -1905,6 +1955,7 @@ function buildCoverageSignalBase(
 					basenameCode,
 					headingsCode,
 					folderCode,
+					tagsCode,
 					weight,
 				);
 				continue;
@@ -1913,6 +1964,17 @@ function buildCoverageSignalBase(
 				applyMatchCode(softBody, bodyCode, weight);
 				tailSoftWeight += weight;
 			}
+		}
+		if (bodyCode === 0 && metadataCode === 0 && assistCode > 0) {
+			applyIdentityMatchFromCodes(
+				metadataIdentity,
+				aliasAssistCode,
+				basenameAssistCode,
+				headingsAssistCode,
+				folderAssistCode,
+				tagsAssistCode,
+				weight * METADATA_ASSIST_IDENTITY_WEIGHT,
+			);
 		}
 	}
 
@@ -1990,6 +2052,8 @@ function hasAnyCoverageLexicalSignal(
 		signal.coreBody.coverageCount === 0 &&
 		signal.softBody.coverageCount === 0 &&
 		signal.metadataAnchor.coverageCount === 0 &&
+		signal.metadataIdentity.phraseCoverageCount === 0 &&
+		signal.metadataIdentity.overall.coverageCount === 0 &&
 		signal.bodyChar.matchCount === 0 &&
 		signal.metadataChar.matchCount === 0 &&
 		signal.tagSignal.exactMatchCount === 0 &&
@@ -2046,6 +2110,7 @@ function createEmptyMetadataIdentitySignal(): CoverageLexicalMetadataIdentitySig
 		basename: createEmptyAreaSignal(),
 		heading: createEmptyAreaSignal(),
 		path: createEmptyAreaSignal(),
+		tag: createEmptyAreaSignal(),
 	};
 }
 
@@ -2115,6 +2180,7 @@ function applyIdentityMatchFromCodes(
 	basenameCode: number,
 	headingsCode: number,
 	folderCode: number,
+	tagsCode: number,
 	baseWeight: number,
 ): void {
 	const bestCode = Math.max(
@@ -2122,6 +2188,7 @@ function applyIdentityMatchFromCodes(
 		basenameCode,
 		headingsCode,
 		folderCode,
+		tagsCode,
 	);
 	if (bestCode === 0) {
 		return;
@@ -2131,6 +2198,7 @@ function applyIdentityMatchFromCodes(
 	applyMatchCode(identity.basename, basenameCode, baseWeight);
 	applyMatchCode(identity.heading, headingsCode, baseWeight);
 	applyMatchCode(identity.path, folderCode, baseWeight);
+	applyMatchCode(identity.tag, tagsCode, baseWeight);
 }
 
 function computeMetadataFieldBoostFromCodes(

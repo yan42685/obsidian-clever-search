@@ -182,6 +182,7 @@ type CoverageLexicalDerivedPlan = {
 
 type CoverageLexicalCheapLaneSignal = {
 	hardAnchorMetadata: CoverageLexicalGroupSignal;
+	metadataAssist: CoverageLexicalGroupSignal;
 	decisiveBody: CoverageLexicalGroupSignal;
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
@@ -193,6 +194,14 @@ type CoverageLexicalCheapLaneSignal = {
 	bodyCharCount: number;
 };
 
+const ALL_METADATA_FIELDS: readonly CoverageLexicalMetadataField[] = [
+	"basename",
+	"aliases",
+	"folder",
+	"headings",
+	"tags",
+];
+
 type CoverageLexicalCheapLaneCandidate = {
 	key: CoverageLexicalCandidateKey;
 	state: CoverageLexicalCandidateState;
@@ -203,6 +212,7 @@ type CoverageLexicalLaneEvaluation = {
 	key: CoverageLexicalCandidateKey;
 	state: CoverageLexicalCandidateState;
 	hardAnchorMetadata: CoverageLexicalGroupSignal;
+	metadataAssist: CoverageLexicalGroupSignal;
 	decisiveBody: CoverageLexicalGroupSignal;
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
@@ -231,6 +241,9 @@ const BODY_PREFIX_MIN_TERM_LENGTH = 4;
 const METADATA_PREFIX_EXPLORATION_CAP = 128;
 const METADATA_PREFIX_TERM_BUDGET = 48;
 const METADATA_PREFIX_DOC_BUDGET = 400;
+const METADATA_ASSIST_PREFIX_EXPLORATION_CAP = 48;
+const METADATA_ASSIST_PREFIX_TERM_BUDGET = 12;
+const METADATA_ASSIST_PREFIX_DOC_BUDGET = 80;
 const MIXED_PREFIX_EXPLORATION_CAP = 96;
 const MIXED_PREFIX_TERM_BUDGET = 24;
 const MIXED_PREFIX_DOC_BUDGET = 220;
@@ -1393,6 +1406,7 @@ function compareCheapLaneSignals(
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
 				compareGroupSignals(left.optionalBody, right.optionalBody) ||
+				compareGroupSignals(left.metadataAssist, right.metadataAssist) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount)
 			);
 		case "bridge_lane":
@@ -1400,6 +1414,7 @@ function compareCheapLaneSignals(
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
+				compareGroupSignals(left.metadataAssist, right.metadataAssist) ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody)
 			);
 		case "char_fallback_lane":
@@ -1423,6 +1438,10 @@ function buildCheapLaneSignal(
 		hardAnchorMetadata: buildGroupSignal(
 			state.metadataMatches,
 			plan.hardAnchorFamilies,
+		),
+		metadataAssist: buildMetadataFieldUnionSignal(
+			state.metadataAssistFieldMatches,
+			plan.families,
 		),
 		decisiveBody: buildGroupSignal(
 			state.bodyMatches,
@@ -1566,6 +1585,7 @@ function buildLaneEvaluation(
 		key,
 		state,
 		hardAnchorMetadata: signal.hardAnchorMetadata,
+		metadataAssist: signal.metadataAssist,
 		decisiveBody: signal.decisiveBody,
 		supportBody: signal.supportBody,
 		optionalBody: signal.optionalBody,
@@ -1712,12 +1732,14 @@ function acceptsLaneCandidate(
 				evaluation.passageSignal.coreCoverageCount >=
 					Math.max(1, Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1)) ||
 				getBodyCoverageCount(evaluation) >=
-					Math.max(1, plan.relaxedMinimumMatchCount || 1)
+					Math.max(1, plan.relaxedMinimumMatchCount || 1) ||
+				evaluation.metadataAssist.coverageCount >= 1
 			);
 		case "bridge_lane":
 			return (
 				evaluation.bridgeSignal.coverageCount >= 1 ||
-				evaluation.phraseMatchCount >= 1
+				evaluation.phraseMatchCount >= 1 ||
+				evaluation.metadataAssist.coverageCount >= 1
 			);
 		case "char_fallback_lane":
 			return (
@@ -1795,6 +1817,7 @@ function compareLaneEvaluations(
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
 				compareGroupSignals(left.optionalBody, right.optionalBody) ||
+				compareGroupSignals(left.metadataAssist, right.metadataAssist) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
 				left.key - right.key
 			);
@@ -1804,6 +1827,7 @@ function compareLaneEvaluations(
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
+				compareGroupSignals(left.metadataAssist, right.metadataAssist) ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareCoverageLexicalPassageAdmissionSignals(
 					left.passageSignal,
@@ -1915,6 +1939,45 @@ function buildMergedGroupSignal(
 	};
 }
 
+function buildMetadataFieldUnionSignal(
+	fieldMatches: CoverageLexicalCandidateState["metadataAssistFieldMatches"],
+	families: readonly CoverageLexicalFamily[],
+): CoverageLexicalGroupSignal {
+	let coverageCount = 0;
+	let exactWeight = 0;
+	let prefixWeight = 0;
+	let fuzzyWeight = 0;
+	let tailWeight = 0;
+	for (const family of families) {
+		let code = 0;
+		for (const field of ALL_METADATA_FIELDS) {
+			code = Math.max(code, fieldMatches[field][family.index] ?? 0);
+		}
+		if (code === 0) {
+			continue;
+		}
+		const weight = computeTailWeight(family.index);
+		coverageCount += 1;
+		tailWeight += weight;
+		if (code === 3) {
+			exactWeight += weight;
+			continue;
+		}
+		if (code === 2) {
+			prefixWeight += weight;
+			continue;
+		}
+		fuzzyWeight += weight;
+	}
+	return {
+		coverageCount,
+		exactWeight,
+		prefixWeight,
+		fuzzyWeight,
+		tailWeight,
+	};
+}
+
 function compareGroupSignals(
 	left: CoverageLexicalGroupSignal,
 	right: CoverageLexicalGroupSignal,
@@ -1960,6 +2023,14 @@ function collectFamilySetCandidates(
 				family,
 				options.scope,
 			);
+			if (options.scope !== "metadata-only") {
+				collectMetadataAssistPrefixCandidatesForFamily(
+					index,
+					queryCache,
+					candidates,
+					family,
+				);
+			}
 		}
 		if (options.includeFuzzy && family.allowFuzzy) {
 			for (const term of getOrCreateFuzzyExpansionTerms(
@@ -2387,6 +2458,70 @@ function collectPrefixCandidatesForFamily(
 	}
 }
 
+function collectMetadataAssistPrefixCandidatesForFamily(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	family: CoverageLexicalFamily,
+): void {
+	const profile = resolveMetadataAssistPrefixExpansionProfile(family);
+	if (!profile) {
+		return;
+	}
+	let termCount = 0;
+	let addedDocCount = 0;
+	let stagnantTermCount = 0;
+	for (const candidate of getOrCreateMetadataAssistExpansionTerms(
+		index,
+		family.normalizedTerm,
+		profile,
+		queryCache,
+	)) {
+		const added = collectMetadataAssistFieldCandidatesForTerm(
+			index,
+			candidates,
+			family.index,
+			candidate.term,
+			"prefix",
+		);
+		termCount += 1;
+		if (added > 0) {
+			addedDocCount += added;
+			stagnantTermCount = 0;
+		} else {
+			stagnantTermCount += 1;
+		}
+		if (
+			termCount >= profile.termBudget ||
+			addedDocCount >= profile.docBudget ||
+			stagnantTermCount >= profile.stagnationLimit
+		) {
+			break;
+		}
+	}
+}
+
+function resolveMetadataAssistPrefixExpansionProfile(
+	family: CoverageLexicalFamily,
+): CoverageLexicalPrefixExpansionProfile | null {
+	const term = family.normalizedTerm;
+	if (!ASCII_PREFIX_TERM_REGEX.test(term)) {
+		return null;
+	}
+	if (term.length < METADATA_PREFIX_MIN_TERM_LENGTH) {
+		return null;
+	}
+	return {
+		cacheKey: "metadata-assist",
+		target: "metadata",
+		minTermLength: METADATA_PREFIX_MIN_TERM_LENGTH,
+		explorationCap: METADATA_ASSIST_PREFIX_EXPLORATION_CAP,
+		termBudget: METADATA_ASSIST_PREFIX_TERM_BUDGET,
+		docBudget: METADATA_ASSIST_PREFIX_DOC_BUDGET,
+		stagnationLimit: 2,
+	};
+}
+
 function resolvePrefixExpansionProfile(
 	family: CoverageLexicalFamily,
 	scope: CoverageLexicalCollectionScope,
@@ -2480,6 +2615,22 @@ function getOrCreatePrefixExpansionTerms(
 		return cached;
 	}
 	const created = expandPrefixTerms(index, prefix, profile);
+	queryCache.prefixExpansionsByTerm.set(cacheKey, created);
+	return created;
+}
+
+function getOrCreateMetadataAssistExpansionTerms(
+	index: CoverageLexicalRecallIndex,
+	prefix: string,
+	profile: CoverageLexicalPrefixExpansionProfile,
+	queryCache: CoverageLexicalQueryCache,
+): readonly CoverageLexicalPrefixExpansionCandidate[] {
+	const cacheKey = `${profile.cacheKey}:${prefix}`;
+	const cached = queryCache.prefixExpansionsByTerm.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const created = expandMetadataAssistTerms(index, prefix, profile);
 	queryCache.prefixExpansionsByTerm.set(cacheKey, created);
 	return created;
 }
@@ -2607,6 +2758,21 @@ function mergeCandidateState(
 			}
 		}
 	}
+	for (const field of Object.keys(
+		nextState.metadataAssistFieldMatches,
+	) as CoverageLexicalMetadataField[]) {
+		const sourceMatches = nextState.metadataAssistFieldMatches[field];
+		for (let familyIndex = 0; familyIndex < sourceMatches.length; familyIndex += 1) {
+			const kind = getRecordedMatchKind(sourceMatches, familyIndex);
+			if (kind) {
+				recordFamilyMatch(
+					target.metadataAssistFieldMatches[field],
+					familyIndex,
+					kind,
+				);
+			}
+		}
+	}
 	for (const phraseMatch of nextState.phraseMatches) {
 		recordPhraseMatch(target, phraseMatch);
 	}
@@ -2674,6 +2840,7 @@ function createEmptyCandidateState(): CoverageLexicalCandidateState {
 		bodyCharMatchIndices: [],
 		bodyCharMatchFlags: [],
 		metadataMatches: [],
+		metadataAssistFieldMatches: createEmptyMetadataFieldMatches(),
 		metadataCharMatchIndices: [],
 		metadataCharMatchFlags: [],
 		metadataFieldMatches: createEmptyMetadataFieldMatches(),
@@ -2718,6 +2885,42 @@ function collectMetadataFieldCandidatesForTerm(
 			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
+		});
+	}
+	return addedCount;
+}
+
+function collectMetadataAssistFieldCandidatesForTerm(
+	index: CoverageLexicalRecallIndex,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	familyIndex: number,
+	term: string,
+	kind: Exclude<CoverageFamilyMatchKind, null>,
+): number {
+	let addedCount = 0;
+	const fieldEntries: Array<
+		[
+			CoverageLexicalMetadataField,
+			CoverageLexicalPostingMap,
+		]
+	> = [
+		["basename", index.metadataBasenamePostings],
+		["aliases", index.metadataAliasPostings],
+		["folder", index.metadataFolderPostings],
+		["headings", index.metadataHeadingPostings],
+		["tags", index.metadataTagPostings],
+	];
+	for (const [field, postings] of fieldEntries) {
+		const matches = postings.get(term);
+		if (!matches) {
+			continue;
+		}
+		forEachPostingCandidateKey(index, matches, (key) => {
+			if (!candidates.has(key)) {
+				addedCount += 1;
+			}
+			const state = getOrCreateDocIdCandidateState(candidates, key);
+			recordFamilyMatch(state.metadataAssistFieldMatches[field], familyIndex, kind);
 		});
 	}
 	return addedCount;
@@ -2991,6 +3194,40 @@ function expandPrefixTerms(
 	return candidates;
 }
 
+function expandMetadataAssistTerms(
+	index: CoverageLexicalRecallIndex,
+	prefix: string,
+	profile: CoverageLexicalPrefixExpansionProfile,
+): CoverageLexicalPrefixExpansionCandidate[] {
+	const candidates: CoverageLexicalPrefixExpansionCandidate[] = [];
+	let explored = 0;
+	let termIndex = lowerBoundString(index.sortedLexicon, prefix);
+	while (termIndex < index.sortedLexicon.length) {
+		const term = index.sortedLexicon[termIndex];
+		if (!term.startsWith(prefix)) {
+			break;
+		}
+		if (term !== prefix) {
+			const candidate = buildMetadataAssistPrefixExpansionCandidate(
+				index,
+				term,
+				prefix,
+				profile,
+			);
+			if (candidate) {
+				candidates.push(candidate);
+			}
+		}
+		explored += 1;
+		if (explored >= profile.explorationCap) {
+			break;
+		}
+		termIndex += 1;
+	}
+	candidates.sort(comparePrefixExpansionCandidates);
+	return candidates;
+}
+
 function buildPrefixExpansionCandidate(
 	index: CoverageLexicalRecallIndex,
 	term: string,
@@ -3022,6 +3259,34 @@ function buildPrefixExpansionCandidate(
 			metadataDocCount,
 			totalDocCount,
 			targetDocCount,
+			profile,
+		),
+	};
+}
+
+function buildMetadataAssistPrefixExpansionCandidate(
+	index: CoverageLexicalRecallIndex,
+	term: string,
+	prefix: string,
+	profile: CoverageLexicalPrefixExpansionProfile,
+): CoverageLexicalPrefixExpansionCandidate | null {
+	const metadataDocCount = getMetadataAssistUnionPostingCandidateCount(index, term);
+	if (metadataDocCount <= 0) {
+		return null;
+	}
+	return {
+		term,
+		bodyDocCount: 0,
+		metadataDocCount,
+		totalDocCount: metadataDocCount,
+		targetDocCount: metadataDocCount,
+		score: computePrefixExpansionScore(
+			term,
+			prefix,
+			0,
+			metadataDocCount,
+			metadataDocCount,
+			metadataDocCount,
 			profile,
 		),
 	};
@@ -3123,6 +3388,29 @@ function getMetadataUnionPostingCandidateCount(
 	return seen.size;
 }
 
+function getMetadataAssistUnionPostingCandidateCount(
+	index: CoverageLexicalRecallIndex,
+	term: string,
+): number {
+	const seen = new Set<CoverageLexicalCandidateKey>();
+	for (const postings of [
+		index.metadataBasenamePostings,
+		index.metadataAliasPostings,
+		index.metadataFolderPostings,
+		index.metadataHeadingPostings,
+		index.metadataTagPostings,
+	] as const) {
+		const matches = postings.get(term);
+		if (!matches) {
+			continue;
+		}
+		forEachPostingCandidateKey(index, matches, (key) => {
+			seen.add(key);
+		});
+	}
+	return seen.size;
+}
+
 function expandFuzzyTerms(
 	sortedLexicon: readonly string[],
 	queryTerm: string,
@@ -3162,7 +3450,8 @@ function lowerBoundString(values: readonly string[], target: string): number {
 	let hi = values.length;
 	while (lo < hi) {
 		const mid = Math.floor((lo + hi) / 2);
-		if (values[mid].localeCompare(target) < 0) {
+		// Keep binary-search order consistent with the lexicon's raw string sort.
+		if (values[mid] < target) {
 			lo = mid + 1;
 		} else {
 			hi = mid;

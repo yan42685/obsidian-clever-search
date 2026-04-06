@@ -1835,11 +1835,37 @@ export class DataManager {
       };
     }
     await this.reloadLexicalIndexedFileRefs();
+    if (this.shouldForceLexicalRebuildAfterSnapshotRestore()) {
+      logger.warn(
+        "Restored lexical snapshot is inconsistent with persisted lexical indexed refs. Rebuilding lexical index.",
+      );
+      new MyNotice("Lexical snapshot drift detected. Rebuilding the lexical index...", 5000);
+      this.lexicalEngine.clearIndex();
+      return {
+        needsFullReindex: true,
+        needsRefHeal: false,
+      };
+    }
 
     return {
       needsFullReindex: false,
       needsRefHeal: !this.isLexicalEngineUpToDate,
     };
+  }
+
+  private shouldForceLexicalRebuildAfterSnapshotRestore(): boolean {
+    const restoredDocCount = this.lexicalEngine.getIndexedDocumentCount();
+    if (restoredDocCount === null) {
+      return false;
+    }
+    const persistedRefCount = this.lexicalIndexedFileRefsByPath.size;
+    if (persistedRefCount > 0 && restoredDocCount !== persistedRefCount) {
+      return true;
+    }
+    if (restoredDocCount === 0) {
+      return this.dataProvider.allFilesToBeIndexed().length > 0;
+    }
+    return false;
   }
 
   private async healLexicalBootstrapPlan(
