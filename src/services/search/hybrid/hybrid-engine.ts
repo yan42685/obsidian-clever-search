@@ -509,18 +509,6 @@ export class HybridEngine {
       limit: fileShortlistLimit,
     });
     throwIfHybridQueryAborted(signal);
-    if (fileShortlist.length === 0) {
-      return ensureHybridFallbackMetadata({
-        query,
-        topK,
-        displayCandidates: [],
-        fallbackNoticeKey: null,
-        fallbackNoticeMessage: null,
-        fallbackIssueKind: null,
-        fallbackIssueMessage: null,
-        fallbackToLexicalSearch: true,
-      });
-    }
     const displayCandidates = await prepareHybridLexicalLaneSearch({
       queryText: query,
       files: fileShortlist,
@@ -529,6 +517,16 @@ export class HybridEngine {
       rerankTopK: Math.max(topK * 2, topK),
     });
     throwIfHybridQueryAborted(signal);
+    if (fileShortlist.length === 0 || displayCandidates.length === 0) {
+      logger.debug(
+        "hybrid lexical-lane prepare produced no lexical candidates; continuing with dense recall.",
+        {
+          query,
+          fileShortlistCount: fileShortlist.length,
+          displayCandidateCount: displayCandidates.length,
+        },
+      );
+    }
     return ensureHybridFallbackMetadata({
       query,
       topK,
@@ -537,7 +535,7 @@ export class HybridEngine {
       fallbackNoticeMessage: null,
       fallbackIssueKind: null,
       fallbackIssueMessage: null,
-      fallbackToLexicalSearch: displayCandidates.length === 0,
+      fallbackToLexicalSearch: false,
     });
   }
 
@@ -559,7 +557,7 @@ export class HybridEngine {
     topK = prepared.topK,
     signal?: AbortSignal,
   ): Promise<FinalizedHybridRecall> {
-    if (prepared.displayCandidates.length === 0 || topK <= 0) {
+    if (topK <= 0) {
       return {
         items: [],
         fallbackNoticeKey: prepared.fallbackNoticeKey,
@@ -617,6 +615,16 @@ export class HybridEngine {
       prepared.query,
       rerankCandidates.slice(0, topK),
     );
+    if (rerankCandidates.length === 0) {
+      return {
+        items: [],
+        fallbackNoticeKey: prepared.fallbackNoticeKey,
+        fallbackNoticeMessage: prepared.fallbackNoticeMessage,
+        fallbackIssueKind: prepared.fallbackIssueKind,
+        fallbackIssueMessage: prepared.fallbackIssueMessage,
+        fallbackToLexicalSearch: false,
+      };
+    }
     if (rerankCandidates.length <= 1) {
       return {
         items: baseItems,
@@ -1051,9 +1059,12 @@ export class HybridEngine {
           persistIndices: false,
           deleteIndexedFileRef: false,
         });
-        logger.warn(`hybrid indexing fell back to lexical-only mode for ${filePath}`, error);
+        logger.error(
+          `hybrid indexing embedding failed; falling back to lexical-only mode for ${filePath}`,
+          error,
+        );
         this._canSearch = false;
-        this.lastIndexingFallbackNoticeKey = "hybridNotice.indexFallbackToLexical";
+        this.lastIndexingFallbackNoticeKey = null;
         try {
           await this.indexLexicalOnly(filePath, plannedChunks, generation, option);
           await this.persistSnapshot(filePath, plainText, generation);

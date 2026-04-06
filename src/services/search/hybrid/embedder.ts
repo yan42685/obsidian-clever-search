@@ -29,6 +29,10 @@ const TOKEN_SAVINGS_TOTAL_KEY = 'all';
 let inFlightEstimatedTokens = 0;
 let lastKnownCurrentWeekTokenUsage: { weekKey: string; tokens: number } | null = null;
 
+type EmbedBatchOptions = {
+	maxAttempts?: number;
+};
+
 export { NoApiKeyError, WeeklyTokenLimitExceededError } from './provider-error';
 
 export class HybridDisabledError extends Error {
@@ -131,7 +135,13 @@ export class Embedder {
 		const cached = this.getCache(text, precision);
 		if (cached) return cached;
 
-		const [result] = await this.embedBatch([text], precision, filePath, signal);
+		const [result] = await this.embedBatch(
+			[text],
+			precision,
+			filePath,
+			signal,
+			{ maxAttempts: 1 },
+		);
 		this.setCache(text, precision, result);
 		return result;
 	}
@@ -141,6 +151,7 @@ export class Embedder {
 		precision: VectorPrecision = 'int8',
 		filePath = '',
 		signal?: AbortSignal,
+		options: EmbedBatchOptions = {},
 	): Promise<StoredVector[]> {
 		if (!this.setting.hybrid?.enabled) throw new HybridDisabledError();
 		if (!this.apiKey) throw new NoApiKeyError();
@@ -162,7 +173,10 @@ export class Embedder {
 			try {
 				const { embeddings: floats, tokensUsed } = await profileHybridStage(
 					'embed.fetch_embeddings',
-					async () => await this.fetchEmbeddings(batch, signal),
+					async () =>
+						await this.fetchEmbeddings(batch, signal, {
+							maxAttempts: options.maxAttempts,
+						}),
 				);
 				logger.debug(
 					`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
@@ -205,7 +219,9 @@ export class Embedder {
 	private async fetchEmbeddings(
 		texts: string[],
 		externalSignal?: AbortSignal,
+		options: EmbedBatchOptions = {},
 	): Promise<{ embeddings: number[][]; tokensUsed: number }> {
+		const maxAttempts = Math.max(1, options.maxAttempts ?? REQUEST_MAX_RETRIES);
 		return retryAsync(
 			async (attempt) => {
 				const controller = new AbortController();
@@ -269,8 +285,11 @@ export class Embedder {
 				}
 			},
 			{
-				maxAttempts: REQUEST_MAX_RETRIES,
-				shouldRetry: (error) => !externalSignal?.aborted && this.isRetryableError(error),
+				maxAttempts,
+				shouldRetry: (error) =>
+					maxAttempts > 1 &&
+					!externalSignal?.aborted &&
+					this.isRetryableError(error),
 				getDelayMs: (error, attempt) =>
 					this.getRetryDelayMs(
 						attempt,
@@ -278,7 +297,7 @@ export class Embedder {
 					),
 				onRetry: (error, attempt, delayMs) => {
 					logger.warn(
-						`Qwen embedding request retrying: attempt=${attempt}/${REQUEST_MAX_RETRIES}, delay=${delayMs} ms`,
+						`Qwen embedding request retrying: attempt=${attempt}/${maxAttempts}, delay=${delayMs} ms`,
 						error,
 					);
 				},
@@ -455,6 +474,27 @@ export async function getCurrentWeekTokenUsage(): Promise<number> {
 			return lastKnownCurrentWeekTokenUsage.tokens;
 		}
 		return 0;
+	}
+}
+
+export async function resetCurrentWeekTokenUsage(): Promise<void> {
+	const { fromDate, toDate } = getCurrentWeekDateRange();
+	try {
+		const db = getInstance(Database).db;
+		const ids = (await db.hybridTokenStats
+			.where('dateKey')
+			.between(fromDate, toDate, true, true)
+			.primaryKeys()) as number[];
+		if (ids.length > 0) {
+			await db.hybridTokenStats.bulkDelete(ids);
+		}
+		lastKnownCurrentWeekTokenUsage = {
+			weekKey: fromDate,
+			tokens: 0,
+		};
+	} catch (error) {
+		logger.error('Failed to reset current week token usage.', error);
+		throw error;
 	}
 }
 
@@ -707,4 +747,3 @@ export async function ensureWeeklyTokenBudget(estimatedTokens: number): Promise<
 	const reservation = await reserveWeeklyTokenBudget(estimatedTokens);
 	reservation.release();
 }
-

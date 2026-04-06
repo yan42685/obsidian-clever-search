@@ -250,6 +250,7 @@ export default {
 	"hybridModal.healthSummary.state.degraded": "Degraded",
 	"hybridModal.healthSummary.state.partial": "Partial index state",
 	"hybridModal.weeklyRemaining": "Remaining quota",
+	"hybridModal.resetQuota": "Reset quota",
 	"hybridModal.unlimited": "Unlimited",
 	"hybridModal.weeklyLimitExceededNotice": "This week's token usage already exceeds the limit. Remaining quota is 0.",
 	"hybridModal.excludedPaths": "Excluded paths (hybrid indexing)",

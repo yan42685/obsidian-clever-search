@@ -23,6 +23,7 @@ import {
 	getCurrentWeekTokenUsage,
 	getTopTokenFiles,
 	getTotalTokens,
+	resetCurrentWeekTokenUsage,
 } from "src/services/search/hybrid/embedder";
 import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
@@ -982,12 +983,10 @@ class HybridSearchModal extends Modal {
 				text.inputEl.type = "number";
 				text.inputEl.min = "0";
 				text.inputEl.step = "1";
-			})
-			.addButton((button) =>
-				button.setButtonText(t("Update")).onClick(async () => {
-					await this.updateWeeklyTokenLimit();
-				}),
-			);
+				text.inputEl.addEventListener("blur", () => {
+					void this.updateWeeklyTokenLimit();
+				});
+			});
 		this.weeklyQuotaEl = contentEl.createDiv();
 		this.weeklyQuotaEl.style.margin = "0.35em 0 1em 0";
 		this.weeklyQuotaEl.setText(t("hybridModal.tokenStats.loading"));
@@ -1145,6 +1144,7 @@ class HybridSearchModal extends Modal {
 	}
 
 	onClose() {
+		void this.updateWeeklyTokenLimit();
 		eventBus.off(
 			EventEnum.HYBRID_RUNTIME_STATUS_CHANGED,
 			this.failedEmbeddingStatusListener,
@@ -1205,16 +1205,23 @@ class HybridSearchModal extends Modal {
 
 
 	private async updateWeeklyTokenLimit() {
+		if (!this.weeklyLimitInputEl) {
+			return;
+		}
 		const parsed = parseInt(this.weeklyLimitInputEl.value, 10);
-		this.setting.hybrid.weeklyTokenLimit =
-			Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
-		this.weeklyLimitInputEl.value = String(this.setting.hybrid.weeklyTokenLimit);
+		const nextValue = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+		const prevValue = this.setting.hybrid.weeklyTokenLimit ?? 0;
+		this.setting.hybrid.weeklyTokenLimit = nextValue;
+		this.weeklyLimitInputEl.value = String(nextValue);
+		if (nextValue === prevValue) {
+			return;
+		}
 		await this.settingManager.saveSettings();
 
 		const used = await getCurrentWeekTokenUsage();
 		if (
-			this.setting.hybrid.weeklyTokenLimit > 0 &&
-			used >= this.setting.hybrid.weeklyTokenLimit
+			nextValue > 0 &&
+			used >= nextValue
 		) {
 			new MyNotice(t("hybridModal.weeklyLimitExceededNotice"), 5000);
 		}
@@ -1393,12 +1400,27 @@ class HybridSearchModal extends Modal {
 		this.weeklyQuotaEl.empty();
 		const limit = this.setting.hybrid.weeklyTokenLimit ?? 0;
 		const remaining = limit > 0 ? Math.max(0, limit - used) : Infinity;
-		this.weeklyQuotaEl.createEl("p", {
+		const row = this.weeklyQuotaEl.createDiv();
+		row.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+		row.createEl("span", {
 			text:
 				`${t("hybridModal.weeklyRemaining")}: ` +
 				(limit > 0
 					? this.formatTokenCompact(remaining)
 					: t("hybridModal.unlimited")),
+		});
+		const resetButton = row.createEl("button", {
+			text: t("hybridModal.resetQuota"),
+		});
+		resetButton.addEventListener("click", () => {
+			void (async () => {
+				await resetCurrentWeekTokenUsage();
+				await getInstance(DataManager).retryFailedEmbeddingsOnConfigChange(
+					"weekly-token-limit-updated",
+				);
+				await this.refreshHybridRuntimeStatusFromData();
+				await this.refreshTokenStats();
+			})();
 		});
 	}
 

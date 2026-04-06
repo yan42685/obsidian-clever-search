@@ -69,6 +69,7 @@ export default {
 		"每次混合搜索返回并展示的 rerank 结果数量。",
 	"hybridModal.weeklyUsed": "本周已使用",
 	"hybridModal.weeklyRemaining": "本周剩余额度",
+	"hybridModal.resetQuota": "重置额度",
 	"hybridModal.unlimited": "不限",
 	"hybridModal.weeklyLimitExceededNotice":
 		"本周 token 用量已超过限制，本周剩余额度为 0。",
