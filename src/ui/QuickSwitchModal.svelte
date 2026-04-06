@@ -485,6 +485,7 @@
 	}
 
 	.quickswitch-result-item {
+		display: block;
 		margin: 0 0 0.34rem;
 	}
 
@@ -494,9 +495,10 @@
 
 	.quickswitch-result-button {
 		display: flex;
-		align-items: flex-start;
+		align-items: stretch;
 		width: 100%;
 		min-width: 0;
+		height: auto;
 		min-height: 3.52rem;
 		padding: 0.53rem 0.85rem 0.86rem;
 		box-sizing: border-box;
@@ -547,24 +549,25 @@
 
 	.quickswitch-result-copy {
 		display: flex;
+		flex: 1 1 auto;
 		flex-direction: column;
+		justify-content: center;
 		gap: 0.24rem;
 		width: 100%;
 		min-width: 0;
 		overflow: visible;
-		transform: translateY(-1px);
 	}
 
 	.quickswitch-result-title-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		display: flex;
 		align-items: start;
 		gap: 0.7rem;
 		min-width: 0;
 	}
 
 	.quickswitch-result-title {
-		flex: 1 1 auto;
+		display: block;
+		flex: 1 1 0;
 		min-width: 0;
 		white-space: normal;
 		line-height: 1.4;
@@ -576,6 +579,7 @@
 	.quickswitch-result-path,
 	.quickswitch-result-secondary {
 		display: block;
+		width: 100%;
 		white-space: normal;
 		font-size: 0.78rem;
 		line-height: 1.4;
