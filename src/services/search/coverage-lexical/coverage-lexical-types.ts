@@ -42,7 +42,11 @@ export type CoverageLexicalPrefixWitness = {
 	channel: "body" | "metadata";
 	field: CoverageLexicalMetadataField | null;
 	term: string;
+	surfaceText: string | null;
 	completionGain: number;
+	surfaceCompletionGain: number;
+	boundaryQuality: number;
+	compoundPenalty: number;
 	shapePenalty: number;
 	targetDocCount: number;
 	totalDocCount: number;
@@ -270,6 +274,7 @@ export type CoverageLexicalFamilySignal = {
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
+	metadataPrefixAssist: CoverageLexicalAreaSignal;
 	metadataIdentity: CoverageLexicalMetadataIdentitySignal;
 	bodyPrefixWitness: CoverageLexicalPrefixWitness | null;
 	metadataPrefixWitness: CoverageLexicalPrefixWitness | null;

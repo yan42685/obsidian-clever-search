@@ -376,6 +376,7 @@ type CoverageLexicalBenchmarkPhaseTimingState = {
 
 const DEFAULT_LOCAL_WINDOW_RERANK_BUDGET = 24;
 const METADATA_ASSIST_IDENTITY_WEIGHT = 0.5;
+const METADATA_ASSIST_SIGNAL_WEIGHT = 0.9;
 
 function createCoverageLexicalEngineQueryCache(
 	fuzzyProportion: number,
@@ -918,6 +919,29 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					getDocumentBodyTokens: (docId: number) =>
 						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId) ??
 						[],
+					getDocumentMetadataFieldText: (
+						docId: number,
+						field: CoverageLexicalMetadataField,
+					) => {
+						const document = this.documentById[docId];
+						if (!document) {
+							return "";
+						}
+						switch (field) {
+							case "basename":
+								return document.basenameText;
+							case "aliases":
+								return document.aliasesText;
+							case "folder":
+								return document.folderText;
+							case "headings":
+								return document.headingsText;
+							case "tags":
+								return document.tagsText;
+							default:
+								return "";
+						}
+					},
 					documentTagValuesById: this.documentTagValuesById,
 				},
 				plan,
@@ -1825,6 +1849,7 @@ function buildCoverageSignalBase(
 	const coreBody = createEmptyAreaSignal();
 	const softBody = createEmptyAreaSignal();
 	const metadataAnchor = createEmptyAreaSignal();
+	const metadataPrefixAssist = createEmptyAreaSignal();
 	const metadataIdentity = createEmptyMetadataIdentitySignal();
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
@@ -1880,17 +1905,17 @@ function buildCoverageSignalBase(
 		if (bodyCode > 0) {
 			familyCountSummary.bodyMatchedFamilyCount += 1;
 		}
-		if (metadataCode > 0) {
+		if (metadataCode > 0 || assistCode > 0) {
 			const primaryMetadataField =
-				basenameCode > 0
+				basenameCode > 0 || basenameAssistCode > 0
 					? "basename"
-					: aliasCode > 0
+					: aliasCode > 0 || aliasAssistCode > 0
 						? "aliases"
-						: folderCode > 0
+						: folderCode > 0 || folderAssistCode > 0
 							? "folder"
-							: headingsCode > 0
+							: headingsCode > 0 || headingsAssistCode > 0
 								? "headings"
-								: tagsCode > 0
+								: tagsCode > 0 || tagsAssistCode > 0
 									? "tags"
 									: null;
 			if (primaryMetadataField) {
@@ -1938,6 +1963,20 @@ function buildCoverageSignalBase(
 				continue;
 			}
 			if (assistCode > 0) {
+				applyMatchCode(
+					metadataPrefixAssist,
+					assistCode,
+					weight *
+						METADATA_ASSIST_SIGNAL_WEIGHT *
+						computeMetadataFieldBoostFromCodes(
+							assistCode,
+							basenameAssistCode,
+							aliasAssistCode,
+							folderAssistCode,
+							headingsAssistCode,
+							tagsAssistCode,
+						),
+				);
 				applyIdentityMatchFromCodes(
 					metadataIdentity,
 					aliasAssistCode,
@@ -1983,6 +2022,20 @@ function buildCoverageSignalBase(
 			}
 		}
 		if (bodyCode === 0 && metadataCode === 0 && assistCode > 0) {
+			applyMatchCode(
+				metadataPrefixAssist,
+				assistCode,
+				weight *
+					METADATA_ASSIST_SIGNAL_WEIGHT *
+					computeMetadataFieldBoostFromCodes(
+						assistCode,
+						basenameAssistCode,
+						aliasAssistCode,
+						folderAssistCode,
+						headingsAssistCode,
+						tagsAssistCode,
+					),
+			);
 			applyIdentityMatchFromCodes(
 				metadataIdentity,
 				aliasAssistCode,
@@ -2035,6 +2088,7 @@ function buildCoverageSignalBase(
 		coreBody,
 		softBody,
 		metadataAnchor,
+		metadataPrefixAssist,
 		metadataIdentity,
 		bodyPrefixWitness,
 		metadataPrefixWitness,
@@ -2296,6 +2350,8 @@ function computeFallbackScore(signal: CoverageLexicalFamilySignal): number {
 		signal.coreBody.coverageCount * 100 +
 		signal.coreBody.exactWeight * 3 +
 		signal.coreBody.prefixWeight * 2 +
+		signal.metadataPrefixAssist.coverageCount * 28 +
+		signal.metadataPrefixAssist.prefixWeight * 4 +
 		signal.softBody.coverageCount * 20 +
 		signal.metadataIdentity.phraseCoverageCount * 12 +
 		signal.metadataIdentity.overall.coverageCount * 10 +

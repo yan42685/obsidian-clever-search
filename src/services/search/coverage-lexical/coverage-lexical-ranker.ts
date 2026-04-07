@@ -59,7 +59,14 @@ export function compareCoverageLexicalResultSignals(
 		plan,
 	);
 	if (countDecision !== 0) {
-		return countDecision;
+		const metadataAssistOverride = compareMetadataAssistCountOverride(
+			left,
+			right,
+			plan,
+		);
+		return metadataAssistOverride !== 0
+			? metadataAssistOverride
+			: countDecision;
 	}
 	if (plan.route === "metadata-first") {
 		return compareMetadataFirstDetailStages(left, right);
@@ -68,6 +75,37 @@ export function compareCoverageLexicalResultSignals(
 		return compareBodyWithAnchorDetailStages(left, right, plan);
 	}
 	return compareBodyFirstDetailStages(left, right);
+}
+
+function compareMetadataAssistCountOverride(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	if (plan.route !== "body-first") {
+		return 0;
+	}
+	if (compareExactTierSignals(left, right) !== 0) {
+		return 0;
+	}
+	if (comparePhraseBridgeSignals(left, right) !== 0) {
+		return 0;
+	}
+	if (
+		compareCoverageLexicalWindowFusionSignals(
+			left.localEvidence,
+			right.localEvidence,
+		) !== 0
+	) {
+		return 0;
+	}
+	if (
+		left.metadataPrefixAssist.prefixWeight <= 0 &&
+		right.metadataPrefixAssist.prefixWeight <= 0
+	) {
+		return 0;
+	}
+	return compareMetadataPrefixAssistSignals(left, right);
 }
 
 function comparePrefixTierPreference(
@@ -80,6 +118,26 @@ function comparePrefixTierPreference(
 	return comparePrefixWitnessPreference(
 		left.metadataPrefixWitness ?? left.bodyPrefixWitness,
 		right.metadataPrefixWitness ?? right.bodyPrefixWitness,
+	);
+}
+
+function compareMetadataPrefixAssistSignals(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	if (compareExactTierSignals(left, right) !== 0) {
+		return 0;
+	}
+	const assistDecision = compareAreaSignals(
+		left.metadataPrefixAssist,
+		right.metadataPrefixAssist,
+	);
+	if (assistDecision !== 0) {
+		return assistDecision;
+	}
+	return comparePrefixWitnessPreference(
+		left.metadataPrefixWitness,
+		right.metadataPrefixWitness,
 	);
 }
 
@@ -103,7 +161,7 @@ function compareCoverageLexicalCountTieBreakers(
 	plan: CoverageLexicalPlan,
 ): number {
 	if (plan.route === "body-first") {
-		return compareBodyFirstCountTieBreakers(left, right);
+		return compareBodyFirstCountTieBreakers(left, right, plan);
 	}
 	if (plan.route === "body-with-anchor") {
 		return compareBodyWithAnchorCountTieBreakers(left, right, plan);
@@ -165,13 +223,14 @@ function compareBodyWithAnchorCountTieBreakers(
 function compareBodyFirstCountTieBreakers(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
+	_plan: CoverageLexicalPlan,
 ): number {
 	return (
+		compareStrongMetadataFamilyCounts(left, right) ||
 		compareDescendingMetric(
 			left.bodyMatchedFamilyCount,
 			right.bodyMatchedFamilyCount,
 		) ||
-		compareStrongMetadataFamilyCounts(left, right) ||
 		compareDescendingMetric(
 			left.metadataMatchedFamilyCount,
 			right.metadataMatchedFamilyCount,
@@ -355,6 +414,7 @@ function compareMetadataFirstDetailStages(
 	return (
 		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareMetadataPrefixAssistSignals(left, right) ||
 		compareTagSignals(left.tagSignal, right.tagSignal) ||
 		compareCharSignals(left.metadataChar, right.metadataChar) ||
 		compareCharSignals(left.bodyChar, right.bodyChar) ||
@@ -377,17 +437,19 @@ function compareBodyWithAnchorDetailStages(
 ): number {
 	if (plan.hasPathShapeHint || plan.hasTitleShapeHint || plan.hasMixedScriptHint) {
 		return (
-			compareAreaSignals(left.coreBody, right.coreBody) ||
+			compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
 			compareCharSignals(left.bodyChar, right.bodyChar) ||
 			compareCharSignals(left.metadataChar, right.metadataChar) ||
-			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
 				right.localEvidence,
 			) ||
+			compareMetadataPrefixAssistSignals(left, right) ||
+			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 			comparePrefixTierPreference(left, right) ||
+			compareAreaSignals(left.coreBody, right.coreBody) ||
 			compareAreaSignals(left.softBody, right.softBody) ||
 			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 			compareTagSignals(left.tagSignal, right.tagSignal) ||
@@ -395,17 +457,19 @@ function compareBodyWithAnchorDetailStages(
 		);
 	}
 	return (
-		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
 		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareCharSignals(left.metadataChar, right.metadataChar) ||
-		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
 			left.localEvidence,
 			right.localEvidence,
 		) ||
+		compareMetadataPrefixAssistSignals(left, right) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePrefixTierPreference(left, right) ||
+		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareAreaSignals(left.softBody, right.softBody) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
@@ -417,16 +481,18 @@ function compareBodyFirstDetailStages(
 	right: CoverageLexicalFamilySignal,
 ): number {
 	return (
-		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
 		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareCharSignals(left.metadataChar, right.metadataChar) ||
-		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
 			left.localEvidence,
 			right.localEvidence,
 		) ||
+		compareMetadataPrefixAssistSignals(left, right) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePrefixTierPreference(left, right) ||
+		compareAreaSignals(left.coreBody, right.coreBody) ||
 		compareAreaSignals(left.softBody, right.softBody) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareTagSignals(left.tagSignal, right.tagSignal) ||
@@ -514,6 +580,27 @@ function compareConcretePrefixWitnesses(
 	);
 	if (fieldDecision !== 0) {
 		return fieldDecision;
+	}
+	const surfaceGainDecision = compareAscendingMetric(
+		left.surfaceCompletionGain,
+		right.surfaceCompletionGain,
+	);
+	if (surfaceGainDecision !== 0) {
+		return surfaceGainDecision;
+	}
+	const boundaryDecision = compareDescendingMetric(
+		left.boundaryQuality,
+		right.boundaryQuality,
+	);
+	if (boundaryDecision !== 0) {
+		return boundaryDecision;
+	}
+	const compoundDecision = compareAscendingMetric(
+		left.compoundPenalty,
+		right.compoundPenalty,
+	);
+	if (compoundDecision !== 0) {
+		return compoundDecision;
 	}
 	const completionDecision = compareAscendingMetric(
 		left.completionGain,

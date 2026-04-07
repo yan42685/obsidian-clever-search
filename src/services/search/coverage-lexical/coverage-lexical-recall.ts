@@ -64,6 +64,10 @@ type CoverageLexicalRecallIndex = {
 	documentIdByPath: ReadonlyMap<string, number>;
 	documentPathById: readonly (string | undefined)[];
 	getDocumentBodyTokens: (docId: number) => readonly string[];
+	getDocumentMetadataFieldText?: (
+		docId: number,
+		field: CoverageLexicalMetadataField,
+	) => string;
 	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[];
 	documentTagValuesById: readonly (readonly string[] | undefined)[];
 };
@@ -115,6 +119,7 @@ export type CoverageLexicalRecallBenchmarkHooks = {
 };
 
 type CoverageLexicalPrefixExpansionCandidate = {
+	prefix: string;
 	term: string;
 	bodyDocCount: number;
 	metadataDocCount: number;
@@ -236,9 +241,17 @@ function comparePrefixWitnesses(
 	if (fieldDecision !== 0) {
 		return fieldDecision;
 	}
-	const docDecision = right.targetDocCount - left.targetDocCount;
-	if (docDecision !== 0) {
-		return docDecision;
+	const boundaryDecision = left.boundaryQuality - right.boundaryQuality;
+	if (boundaryDecision !== 0) {
+		return boundaryDecision;
+	}
+	const compoundDecision = right.compoundPenalty - left.compoundPenalty;
+	if (compoundDecision !== 0) {
+		return compoundDecision;
+	}
+	const surfaceGainDecision = right.surfaceCompletionGain - left.surfaceCompletionGain;
+	if (surfaceGainDecision !== 0) {
+		return surfaceGainDecision;
 	}
 	const gainDecision = right.completionGain - left.completionGain;
 	if (gainDecision !== 0) {
@@ -247,6 +260,10 @@ function comparePrefixWitnesses(
 	const shapeDecision = right.shapePenalty - left.shapePenalty;
 	if (shapeDecision !== 0) {
 		return shapeDecision;
+	}
+	const docDecision = right.targetDocCount - left.targetDocCount;
+	if (docDecision !== 0) {
+		return docDecision;
 	}
 	const totalDocDecision = right.totalDocCount - left.totalDocCount;
 	if (totalDocDecision !== 0) {
@@ -259,12 +276,23 @@ function buildPrefixWitness(
 	channel: CoverageLexicalPrefixWitness["channel"],
 	field: CoverageLexicalMetadataField | null,
 	candidate: CoverageLexicalPrefixExpansionCandidate,
+	surfaceText: string | null = null,
 ): CoverageLexicalPrefixWitness {
+	const normalizedSurfaceText = surfaceText?.trim() || null;
+	const surfaceCompletionGain = normalizedSurfaceText
+		? Math.max(0, normalizedSurfaceText.length - candidate.prefix.length)
+		: candidate.completionGain;
+	const boundaryQuality = computePrefixBoundaryQuality(normalizedSurfaceText);
+	const compoundPenalty = computePrefixCompoundPenalty(normalizedSurfaceText);
 	return {
 		channel,
 		field,
 		term: candidate.term,
+		surfaceText: normalizedSurfaceText,
 		completionGain: candidate.completionGain,
+		surfaceCompletionGain,
+		boundaryQuality,
+		compoundPenalty,
 		shapePenalty: candidate.shapePenalty,
 		targetDocCount: candidate.targetDocCount,
 		totalDocCount: candidate.totalDocCount,
@@ -2990,9 +3018,19 @@ function collectMetadataFieldCandidatesForTerm(
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
 			if (kind === "prefix" && prefixWitnessCandidate) {
+				const surfaceText = findBestMetadataPrefixSurfaceText(
+					index.getDocumentMetadataFieldText?.(key, field) ?? term,
+					prefixWitnessCandidate.prefix,
+					prefixWitnessCandidate.term,
+				);
 				state.metadataPrefixWitness = maybeRecordBetterPrefixWitness(
 					state.metadataPrefixWitness,
-					buildPrefixWitness("metadata", field, prefixWitnessCandidate),
+					buildPrefixWitness(
+						"metadata",
+						field,
+						prefixWitnessCandidate,
+						surfaceText,
+					),
 				);
 			}
 		});
@@ -3033,9 +3071,19 @@ function collectMetadataAssistFieldCandidatesForTerm(
 			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataAssistFieldMatches[field], familyIndex, kind);
 			if (kind === "prefix" && prefixWitnessCandidate) {
+				const surfaceText = findBestMetadataPrefixSurfaceText(
+					index.getDocumentMetadataFieldText?.(key, field) ?? term,
+					prefixWitnessCandidate.prefix,
+					prefixWitnessCandidate.term,
+				);
 				state.metadataPrefixWitness = maybeRecordBetterPrefixWitness(
 					state.metadataPrefixWitness,
-					buildPrefixWitness("metadata", field, prefixWitnessCandidate),
+					buildPrefixWitness(
+						"metadata",
+						field,
+						prefixWitnessCandidate,
+						surfaceText,
+					),
 				);
 			}
 		});
@@ -3364,6 +3412,7 @@ function buildPrefixExpansionCandidate(
 		return null;
 	}
 	return {
+		prefix,
 		term,
 		bodyDocCount,
 		metadataDocCount,
@@ -3394,6 +3443,7 @@ function buildMetadataAssistPrefixExpansionCandidate(
 		return null;
 	}
 	return {
+		prefix,
 		term,
 		bodyDocCount: 0,
 		metadataDocCount,
@@ -3452,6 +3502,70 @@ function computePrefixShapePenalty(term: string): number {
 		penalty += 2;
 	}
 	return penalty;
+}
+
+function computePrefixBoundaryQuality(surfaceText: string | null): number {
+	if (!surfaceText) {
+		return 0;
+	}
+	return /^[a-z0-9]+$/iu.test(surfaceText) ? 2 : 1;
+}
+
+function computePrefixCompoundPenalty(surfaceText: string | null): number {
+	if (!surfaceText) {
+		return 0;
+	}
+	let penalty = 0;
+	const separatorMatches = surfaceText.match(/[._/\-]/g);
+	if (separatorMatches) {
+		penalty += separatorMatches.length;
+	}
+	if (/\d/.test(surfaceText)) {
+		penalty += 1;
+	}
+	return penalty;
+}
+
+function findBestMetadataPrefixSurfaceText(
+	fieldText: string,
+	prefix: string,
+	term: string,
+): string | null {
+	const loweredPrefix = prefix.toLowerCase();
+	const loweredTerm = term.toLowerCase();
+	const surfaceTokens = fieldText.match(/[A-Za-z0-9._/\-]+/g);
+	if (!surfaceTokens?.length) {
+		return null;
+	}
+	let bestToken: string | null = null;
+	let bestBoundaryQuality = -1;
+	let bestCompoundPenalty = Number.POSITIVE_INFINITY;
+	let bestCompletionGain = Number.POSITIVE_INFINITY;
+	for (const surfaceToken of surfaceTokens) {
+		const loweredToken = surfaceToken.toLowerCase();
+		if (
+			!loweredToken.startsWith(loweredPrefix) &&
+			!loweredToken.startsWith(loweredTerm)
+		) {
+			continue;
+		}
+		const boundaryQuality = computePrefixBoundaryQuality(surfaceToken);
+		const compoundPenalty = computePrefixCompoundPenalty(surfaceToken);
+		const completionGain = Math.max(0, surfaceToken.length - prefix.length);
+		if (
+			boundaryQuality > bestBoundaryQuality ||
+			(boundaryQuality === bestBoundaryQuality &&
+				(compoundPenalty < bestCompoundPenalty ||
+					(compoundPenalty === bestCompoundPenalty &&
+						completionGain < bestCompletionGain)))
+		) {
+			bestToken = surfaceToken;
+			bestBoundaryQuality = boundaryQuality;
+			bestCompoundPenalty = compoundPenalty;
+			bestCompletionGain = completionGain;
+		}
+	}
+	return bestToken;
 }
 
 function computePrefixRarityScore(targetDocCount: number): number {
