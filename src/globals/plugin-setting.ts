@@ -10,6 +10,7 @@ export class OuterSetting {
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
 	fileSearchBackend: FileSearchBackend;
+	hideWeaklyRelevantFiles: boolean;
 	isCaseSensitive: boolean;
 	isPrefixMatch: boolean;
 	isFuzzy: boolean;
@@ -32,6 +33,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
 	fileSearchBackend: DEFAULT_FILE_SEARCH_BACKEND,
+	hideWeaklyRelevantFiles: true,
 	isCaseSensitive: false,
 	isPrefixMatch: true,
 	isFuzzy: true,

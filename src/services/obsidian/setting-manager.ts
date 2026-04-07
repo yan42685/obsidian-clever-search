@@ -282,6 +282,14 @@ class GeneralTab extends PluginSettingTab {
 				}),
 			);
 
+		new Setting(containerEl)
+			.setName(t("Hide weakly relevant files"))
+			.addToggle((t) =>
+				t.setValue(this.setting.hideWeaklyRelevantFiles).onChange((v) => {
+					this.setting.hideWeaklyRelevantFiles = v;
+				}),
+			);
+
 		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>
 			t.setValue(this.setting.isCaseSensitive).onChange((v) => {
 				this.setting.isCaseSensitive = v;

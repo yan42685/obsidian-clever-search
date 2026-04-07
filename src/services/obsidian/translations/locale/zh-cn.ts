@@ -164,6 +164,7 @@ export default {
 	"Floating window for in-file search desc":
 		"再次执行“文件内搜索”命令会关闭已存在的浮动窗口。关闭此选项可改为使用经典模态框。",
 	"Case sensitive": "区分大小写",
+	"Hide weakly relevant files": "不展示弱相关文件",
 	"Prefix match": "前缀匹配",
 	"Character fuzzy allowed": "允许字符级模糊匹配",
 	"English word blacklist": "英文停用词",

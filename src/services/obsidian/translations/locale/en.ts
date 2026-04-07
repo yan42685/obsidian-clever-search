@@ -128,6 +128,7 @@ export default {
 	Clear: "Clear",
 
 	"Case sensitive": "Case sensitive",
+	"Hide weakly relevant files": "Hide weakly relevant files",
 	"Prefix match":"Prefix match",
 	"Character fuzzy allowed": "Character fuzzy allowed",
 

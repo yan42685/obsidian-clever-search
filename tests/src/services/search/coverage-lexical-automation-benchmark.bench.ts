@@ -1850,6 +1850,108 @@ function createEngineHarness(
 	return new EngineCtor();
 }
 
+type CoverageDisplayPruneExperimentConfig = {
+	enabled: boolean;
+	top2To4Ratio: number;
+	top5PlusRatio: number;
+	bodyCharWeight: number;
+	metadataCharWeight: number;
+	tagExactWeight: number;
+	tagCharWeight: number;
+};
+
+const COVERAGE_DISPLAY_PRUNE_ENV_KEYS = [
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_CHAR_WEIGHT",
+] as const;
+
+function readNumberEnv(name: string, fallback: number): number {
+	const raw = process.env[name]?.trim();
+	if (!raw) {
+		return fallback;
+	}
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExperimentConfig {
+	return {
+		enabled: true,
+		top2To4Ratio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
+			0.34,
+		),
+		top5PlusRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+			0.5,
+		),
+		bodyCharWeight: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
+			0.5,
+		),
+		metadataCharWeight: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
+			0.5,
+		),
+		tagExactWeight: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
+			0.75,
+		),
+		tagCharWeight: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_CHAR_WEIGHT",
+			0.5,
+		),
+	};
+}
+
+async function withCoverageDisplayPruneEnv<T>(
+	config: CoverageDisplayPruneExperimentConfig,
+	action: () => Promise<T>,
+): Promise<T> {
+	const previous = new Map<string, string | undefined>();
+	for (const key of COVERAGE_DISPLAY_PRUNE_ENV_KEYS) {
+		previous.set(key, process.env[key]);
+	}
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED = config.enabled
+		? "1"
+		: "0";
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO = String(
+		config.top2To4Ratio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO = String(
+		config.top5PlusRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT = String(
+		config.bodyCharWeight,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT = String(
+		config.metadataCharWeight,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT = String(
+		config.tagExactWeight,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_CHAR_WEIGHT = String(
+		config.tagCharWeight,
+	);
+	try {
+		return await action();
+	} finally {
+		for (const key of COVERAGE_DISPLAY_PRUNE_ENV_KEYS) {
+			const value = previous.get(key);
+			if (value === undefined) {
+				delete process.env[key];
+				continue;
+			}
+			process.env[key] = value;
+		}
+	}
+}
+
 function percentile(values: number[], p: number): number {
 	if (values.length === 0) {
 		return 0;
@@ -2621,6 +2723,7 @@ describe("coverage lexical automation benchmark", () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
+		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
 
 		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
 		const miniResult = await runBenchmark("MiniSearch", mini, documents, queryCases);
@@ -2638,31 +2741,99 @@ describe("coverage lexical automation benchmark", () => {
 			},
 		};
 
-		const coverageLexical = createEngineHarness(
-			CoverageLexicalFileSearchEngine,
-			tokenizer,
-			"coverage-lexical",
+		const coverageLexicalCore = await withCoverageDisplayPruneEnv(
+			{
+				enabled: false,
+				top2To4Ratio: displayPruneConfig.top2To4Ratio,
+				top5PlusRatio: displayPruneConfig.top5PlusRatio,
+				bodyCharWeight: displayPruneConfig.bodyCharWeight,
+				metadataCharWeight: displayPruneConfig.metadataCharWeight,
+				tagExactWeight: displayPruneConfig.tagExactWeight,
+				tagCharWeight: displayPruneConfig.tagCharWeight,
+			},
+			async () =>
+				createEngineHarness(
+					CoverageLexicalFileSearchEngine,
+					tokenizer,
+					"coverage-lexical",
+				),
 		);
-		const coverageResult = await runBenchmark(
-			"CoverageLexical",
-			coverageLexical,
-			documents,
-			queryCases,
+		const coverageCoreResult = await withCoverageDisplayPruneEnv(
+			{
+				enabled: false,
+				top2To4Ratio: displayPruneConfig.top2To4Ratio,
+				top5PlusRatio: displayPruneConfig.top5PlusRatio,
+				bodyCharWeight: displayPruneConfig.bodyCharWeight,
+				metadataCharWeight: displayPruneConfig.metadataCharWeight,
+				tagExactWeight: displayPruneConfig.tagExactWeight,
+				tagCharWeight: displayPruneConfig.tagCharWeight,
+			},
+			async () =>
+				runBenchmark(
+					"CoverageLexical(core)",
+					coverageLexicalCore,
+					documents,
+					queryCases,
+				),
 		);
 		const recallContract = await runCoverageRecallContract(
-			coverageLexical as any,
+			coverageLexicalCore as any,
 			tokenizer,
 			buildRecallContractCases(),
 		);
-		const coverageVsMini = summarizeWins(
-			coverageResult.outcomes,
+		const coverageCoreVsMini = summarizeWins(
+			coverageCoreResult.outcomes,
 			miniResult.outcomes,
 		);
-		const coverageMisses = summarizeMisses(coverageResult.outcomes);
-		const miniMisses = summarizeMisses(miniResult.outcomes);
-		const disagreementDigest = summarizeDisagreements(
-			coverageResult.outcomes,
+		const coverageCoreMisses = summarizeMisses(coverageCoreResult.outcomes);
+		if ("reset" in container && typeof (container as any).reset === "function") {
+			(container as any).reset();
+		} else {
+			container.clearInstances();
+		}
+		(global as any).window = {
+			localStorage: {
+				getItem: jest.fn(() => "zh"),
+				setItem: jest.fn(),
+				removeItem: jest.fn(),
+			},
+		};
+		const coverageLexicalDisplay = await withCoverageDisplayPruneEnv(
+			displayPruneConfig,
+			async () =>
+				createEngineHarness(
+					CoverageLexicalFileSearchEngine,
+					tokenizer,
+					"coverage-lexical",
+				),
+		);
+		const coverageDisplayResult = await withCoverageDisplayPruneEnv(
+			displayPruneConfig,
+			async () =>
+				runBenchmark(
+					"CoverageLexical(display)",
+					coverageLexicalDisplay,
+					documents,
+					queryCases,
+				),
+		);
+		const coverageDisplayVsMini = summarizeWins(
+			coverageDisplayResult.outcomes,
 			miniResult.outcomes,
+		);
+		const coverageDisplayVsCore = summarizeWins(
+			coverageDisplayResult.outcomes,
+			coverageCoreResult.outcomes,
+		);
+		const coverageDisplayMisses = summarizeMisses(coverageDisplayResult.outcomes);
+		const miniMisses = summarizeMisses(miniResult.outcomes);
+		const coreVsMiniDisagreementDigest = summarizeDisagreements(
+			coverageCoreResult.outcomes,
+			miniResult.outcomes,
+		);
+		const displayVsCoreDisagreementDigest = summarizeDisagreements(
+			coverageDisplayResult.outcomes,
+			coverageCoreResult.outcomes,
 		);
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
@@ -2715,9 +2886,17 @@ describe("coverage lexical automation benchmark", () => {
 		);
 
 		console.log(
+			"[coverage-lexical-automation-benchmark] display-prune-config",
+			JSON.stringify(displayPruneConfig, null, 2),
+		);
+		console.log(
 			"[coverage-lexical-automation-benchmark] summary",
 			JSON.stringify(
-				[miniResult.summary, coverageResult.summary].map((summary) => ({
+				[
+					miniResult.summary,
+					coverageCoreResult.summary,
+					coverageDisplayResult.summary,
+				].map((summary) => ({
 					name: summary.name,
 					objective: round(summary.objective),
 					top1: round(summary.top1),
@@ -2763,30 +2942,100 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				{
 					primaryNote:
-						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode.",
-					coverageVsMiniSearch: {
+						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Compare core-vs-display separately so display pruning does not masquerade as core recall loss.",
+					coreVsMiniSearch: {
 						avgMsPerQueryRatio: round(
 							computeRelativeRatio(
-								coverageResult.summary.avgMsPerQuery,
+								coverageCoreResult.summary.avgMsPerQuery,
 								miniResult.summary.avgMsPerQuery,
 							) ?? 0,
 						),
 						p50MsRatio: round(
 							computeRelativeRatio(
-								coverageResult.summary.p50Ms,
+								coverageCoreResult.summary.p50Ms,
 								miniResult.summary.p50Ms,
 							) ?? 0,
 						),
 						p100MsRatio: round(
 							computeRelativeRatio(
-								coverageResult.summary.p100Ms,
+								coverageCoreResult.summary.p100Ms,
 								miniResult.summary.p100Ms,
 							) ?? 0,
 						),
 						estimatedIndexBytesRatio: round(
 							computeRelativeRatio(
-								coverageResult.summary.estimatedIndexBytes,
+								coverageCoreResult.summary.estimatedIndexBytes,
 								miniResult.summary.estimatedIndexBytes,
+							) ?? 0,
+						),
+					},
+					displayVsMiniSearch: {
+						avgMsPerQueryRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.avgMsPerQuery,
+								miniResult.summary.avgMsPerQuery,
+							) ?? 0,
+						),
+						p50MsRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.p50Ms,
+								miniResult.summary.p50Ms,
+							) ?? 0,
+						),
+						p100MsRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.p100Ms,
+								miniResult.summary.p100Ms,
+							) ?? 0,
+						),
+						estimatedIndexBytesRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.estimatedIndexBytes,
+								miniResult.summary.estimatedIndexBytes,
+							) ?? 0,
+						),
+					},
+					displayVsCore: {
+						objectiveDelta: round(
+							coverageDisplayResult.summary.objective -
+								coverageCoreResult.summary.objective,
+						),
+						top1Delta: round(
+							coverageDisplayResult.summary.top1 -
+								coverageCoreResult.summary.top1,
+						),
+						top3Delta: round(
+							coverageDisplayResult.summary.top3 -
+								coverageCoreResult.summary.top3,
+						),
+						top5Delta: round(
+							coverageDisplayResult.summary.top5 -
+								coverageCoreResult.summary.top5,
+						),
+						zeroRateDelta: round(
+							coverageDisplayResult.summary.zeroRate -
+								coverageCoreResult.summary.zeroRate,
+						),
+						mrrDelta: round(
+							coverageDisplayResult.summary.mrr -
+								coverageCoreResult.summary.mrr,
+						),
+						avgMsPerQueryRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.avgMsPerQuery,
+								coverageCoreResult.summary.avgMsPerQuery,
+							) ?? 0,
+						),
+						p50MsRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.p50Ms,
+								coverageCoreResult.summary.p50Ms,
+							) ?? 0,
+						),
+						p100MsRatio: round(
+							computeRelativeRatio(
+								coverageDisplayResult.summary.p100Ms,
+								coverageCoreResult.summary.p100Ms,
 							) ?? 0,
 						),
 					},
@@ -2800,7 +3049,10 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				{
 					MiniSearch: mini.getIndexBreakdown?.() ?? null,
-					CoverageLexical: coverageLexical.getIndexBreakdown?.() ?? null,
+					CoverageLexicalCore:
+						coverageLexicalCore.getIndexBreakdown?.() ?? null,
+					CoverageLexicalDisplay:
+						coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
 				},
 				null,
 				2,
@@ -2808,7 +3060,14 @@ describe("coverage lexical automation benchmark", () => {
 		);
 		console.log(
 			"[coverage-lexical-automation-benchmark] coverage-phase-timing",
-			JSON.stringify(summarizePhaseTiming(coverageResult.phaseTiming), null, 2),
+			JSON.stringify(
+				{
+					core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
+					display: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
+				},
+				null,
+				2,
+			),
 		);
 		console.log(
 			"[coverage-lexical-automation-benchmark] recall-contract",
@@ -2851,16 +3110,32 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-vs-mini",
-			JSON.stringify(coverageVsMini, null, 2),
+			"[coverage-lexical-automation-benchmark] coverage-core-vs-mini",
+			JSON.stringify(coverageCoreVsMini, null, 2),
 		);
 		console.log(
-			"[coverage-lexical-automation-benchmark] disagreement-digest",
-			JSON.stringify(disagreementDigest, null, 2),
+			"[coverage-lexical-automation-benchmark] coverage-display-vs-mini",
+			JSON.stringify(coverageDisplayVsMini, null, 2),
 		);
 		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-misses",
-			JSON.stringify(coverageMisses, null, 2),
+			"[coverage-lexical-automation-benchmark] coverage-display-vs-core",
+			JSON.stringify(coverageDisplayVsCore, null, 2),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] disagreement-digest-core-vs-mini",
+			JSON.stringify(coreVsMiniDisagreementDigest, null, 2),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] disagreement-digest-display-vs-core",
+			JSON.stringify(displayVsCoreDisagreementDigest, null, 2),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] coverage-core-misses",
+			JSON.stringify(coverageCoreMisses, null, 2),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] coverage-display-misses",
+			JSON.stringify(coverageDisplayMisses, null, 2),
 		);
 		console.log(
 			"[coverage-lexical-automation-benchmark] mini-misses",

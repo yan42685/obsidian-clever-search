@@ -1,5 +1,5 @@
 import { Vault } from "obsidian";
-import { innerSetting } from "src/globals/plugin-setting";
+import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
 	IndexedDocument,
@@ -147,6 +147,16 @@ type CoverageLexicalDerivedPostingBinding = {
 	termsKey: CoverageLexicalDerivedTermKey;
 	postingKey: CoverageLexicalLivePostingKey;
 	uniqueTerms?: boolean;
+};
+
+type CoverageLexicalDisplayPruneConfig = {
+	enabled: boolean;
+	top2To4Ratio: number;
+	top5PlusRatio: number;
+	bodyCharWeight: number;
+	metadataCharWeight: number;
+	tagExactWeight: number;
+	tagCharWeight: number;
 };
 
 const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerivedPostingBinding[] =
@@ -1012,7 +1022,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			}
 			const finalRankStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 			const ranked = rankCoverageLexicalDocResults(rerankedResults, plan);
-			const finalResults = ranked.slice(0, request.maxItemResults);
+			const displayPruned = pruneWeakCoverageLexicalDisplayResults(
+				ranked,
+				resolveCoverageLexicalDisplayPruneConfig(),
+			);
+			const finalResults = displayPruned.slice(0, request.maxItemResults);
 			if (this.benchmarkPhaseTiming) {
 				this.recordBenchmarkPhaseTiming(
 					"finalRank",
@@ -2408,6 +2422,114 @@ function rankCoverageLexicalDocResults(
 		}
 		return (right.score ?? 0) - (left.score ?? 0) || left.docId - right.docId;
 	});
+}
+
+function pruneWeakCoverageLexicalDisplayResults(
+	results: readonly CoverageLexicalDocRankableResult[],
+	config: CoverageLexicalDisplayPruneConfig,
+): CoverageLexicalDocRankableResult[] {
+	if (!config.enabled || results.length <= 1) {
+		return [...results];
+	}
+	const topCoverage = computeCoverageLexicalDisplayCoverage(
+		results[0].coverageLexicalSignal,
+		config,
+	);
+	if (topCoverage <= 0) {
+		return [...results];
+	}
+	const kept: CoverageLexicalDocRankableResult[] = [results[0]];
+	for (let index = 1; index < results.length; index += 1) {
+		const result = results[index];
+		const candidateCoverage = computeCoverageLexicalDisplayCoverage(
+			result.coverageLexicalSignal,
+			config,
+		);
+		const thresholdRatio =
+			index <= 3 ? config.top2To4Ratio : config.top5PlusRatio;
+		if (candidateCoverage <= topCoverage * thresholdRatio) {
+			continue;
+		}
+		kept.push(result);
+	}
+	return kept;
+}
+
+function computeCoverageLexicalDisplayCoverage(
+	signal: CoverageLexicalFamilySignal,
+	config: CoverageLexicalDisplayPruneConfig,
+): number {
+	return (
+		signal.coreBody.coverageCount +
+		signal.softBody.coverageCount +
+		signal.metadataAnchor.coverageCount +
+		signal.metadataIdentity.overall.coverageCount +
+		signal.metadataIdentity.phraseCoverageCount +
+		signal.bodyChar.matchCount * config.bodyCharWeight +
+		signal.metadataChar.matchCount * config.metadataCharWeight +
+		signal.tagSignal.exactMatchCount * config.tagExactWeight +
+		signal.tagSignal.charMatchCount * config.tagCharWeight
+	);
+}
+
+function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPruneConfig {
+	const fallbackEnabled = getInstance(OuterSetting).hideWeaklyRelevantFiles;
+	return {
+		enabled: readCoverageLexicalBooleanEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
+			fallbackEnabled,
+		),
+		top2To4Ratio: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
+			0.34,
+		),
+		top5PlusRatio: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+			0.5,
+		),
+		bodyCharWeight: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
+			0.5,
+		),
+		metadataCharWeight: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
+			0.5,
+		),
+		tagExactWeight: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
+			0.75,
+		),
+		tagCharWeight: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_CHAR_WEIGHT",
+			0.5,
+		),
+	};
+}
+
+function readCoverageLexicalBooleanEnv(
+	name: string,
+	fallback: boolean,
+): boolean {
+	const raw = process.env[name]?.trim().toLowerCase();
+	if (!raw) {
+		return fallback;
+	}
+	if (raw === "1" || raw === "true" || raw === "yes" || raw === "on") {
+		return true;
+	}
+	if (raw === "0" || raw === "false" || raw === "no" || raw === "off") {
+		return false;
+	}
+	return fallback;
+}
+
+function readCoverageLexicalNumberEnv(name: string, fallback: number): number {
+	const raw = process.env[name]?.trim();
+	if (!raw) {
+		return fallback;
+	}
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function projectDocRankableResult(
