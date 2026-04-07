@@ -1,4 +1,4 @@
-﻿import { Notice, TFile, type TAbstractFile } from "obsidian";
+import { Notice, TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
@@ -650,6 +650,7 @@ export class DataManager {
     if (this.isUnloaded) {
       return;
     }
+    await getInstance(FileWatcher).flushPendingModifications();
     await this.docOperationsBuffer.forceFlush();
   }
 
@@ -2796,7 +2797,7 @@ export class DataManager {
     if (this.inVaultSearchFlushCallback) {
       return;
     }
-    this.inVaultSearchFlushCallback = () => this.docOperationsBuffer.forceFlush();
+    this.inVaultSearchFlushCallback = () => this.flushPendingDocOperations();
     eventBus.on(EventEnum.IN_VAULT_SEARCH, this.inVaultSearchFlushCallback);
   }
 
@@ -4497,4 +4498,3 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
-

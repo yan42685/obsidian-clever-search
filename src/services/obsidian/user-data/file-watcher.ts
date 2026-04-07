@@ -34,6 +34,24 @@ export class FileWatcher {
 		this.clearAllModifyTimers();
 	}
 
+	async flushPendingModifications(): Promise<void> {
+		const pendingPaths = Array.from(this.modifyTimers.keys());
+		if (pendingPaths.length === 0) {
+			return;
+		}
+
+		for (const path of pendingPaths) {
+			this.clearModifyTimer(path);
+		}
+
+		for (const path of pendingPaths) {
+			const currentFile = this.app.vault.getAbstractFileByPath(path);
+			if (currentFile instanceof TFile) {
+				await this.enqueuePrimedUpsert(currentFile);
+			}
+		}
+	}
+
 	// should define callbacks as arrow functions rather than methods,
 	// otherwise `this` will be changed when used as callbacks
 	private readonly onCreate = (file: TAbstractFile) => {

@@ -296,6 +296,27 @@ describe("SearchService bootstrap gate", () => {
 		expect((result.items[0] as any).path).toBe("notes/alpha.md");
 	});
 
+	test("flushes pending doc operations before lexical in-vault search", async () => {
+		const { service, dataManager, lexicalEngine } = createHarness({
+			searchable: true,
+			lexicalMatches: [
+				{
+					path: "notes/alpha.md",
+					queryTerms: ["alpha"],
+					matchedTerms: ["alpha"],
+					score: 1,
+				},
+			],
+		});
+
+		await service.searchInVault("alpha");
+
+		expect(dataManager.flushPendingDocOperations).toHaveBeenCalledTimes(1);
+		expect(
+			dataManager.flushPendingDocOperations.mock.invocationCallOrder[0],
+		).toBeLessThan(lexicalEngine.searchFiles.mock.invocationCallOrder[0]);
+	});
+
 	test("does not rerank coverage lexical results through legacy line evidence", async () => {
 		const { service, lexicalEngine } = createHarness({
 			searchable: true,

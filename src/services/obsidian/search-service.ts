@@ -105,6 +105,7 @@ export class SearchService {
 		if (blocked) {
 			return blocked;
 		}
+		void getInstance(DataManager).flushPendingDocOperations();
 		const result = await this.searchInVaultLexical(queryText);
 		this.notifyHybridFallback(result);
 		return result;
@@ -283,7 +284,7 @@ export class SearchService {
 		if (!text) {
 			return null;
 		}
-		const normalized = text.trim().replace(/[。.!！?？,\s]+$/u, "");
+		const normalized = text.trim().replace(/[\u3002.!\uFF01?\uFF1F,\s]+$/u, "");
 		return normalized.length > 0 ? normalized : null;
 	}
 

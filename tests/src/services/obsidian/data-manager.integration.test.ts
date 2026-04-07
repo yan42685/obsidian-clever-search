@@ -1,4 +1,4 @@
-﻿import { container } from "tsyringe";
+import { container } from "tsyringe";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 
 jest.mock("obsidian", () => {
@@ -853,6 +853,7 @@ function registerDataManagerDeps(params: {
   const fileWatcher = {
     start: jest.fn(),
     stop: jest.fn(),
+    flushPendingModifications: jest.fn(async () => undefined),
   };
   const { OuterSetting } =
     require("src/globals/plugin-setting") as typeof import("src/globals/plugin-setting");
@@ -937,6 +938,44 @@ describe("DataManager integration", () => {
       container.clearInstances();
     }
     MyNotice.clear();
+  });
+
+  
+  test("flushPendingDocOperations drains pending file watcher changes before flushing doc operations", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const file = createFile("docs/live.md", "live body", 320);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "live body"]]);
+    const database = createMockDatabase();
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    const { fileWatcher } = registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    const forceFlushSpy = jest.spyOn((manager as any).docOperationsBuffer, "forceFlush");
+
+    await manager.flushPendingDocOperations();
+
+    expect(fileWatcher.flushPendingModifications).toHaveBeenCalledTimes(1);
+    expect(forceFlushSpy).toHaveBeenCalledTimes(1);
+    expect(fileWatcher.flushPendingModifications.mock.invocationCallOrder[0]).toBeLessThan(
+      forceFlushSpy.mock.invocationCallOrder[0],
+    );
   });
 
   test("coalesces rename plus modify burst into the final new-path lexical and snapshot state", async () => {
@@ -3033,4 +3072,3 @@ describe("DataManager integration", () => {
     );
   });
 });
-
