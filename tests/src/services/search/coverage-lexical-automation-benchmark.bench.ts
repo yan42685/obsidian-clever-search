@@ -1850,6 +1850,55 @@ function createEngineHarness(
 	return new EngineCtor();
 }
 
+function registerBenchmarkFileSnapshotStore(
+	documents: readonly IndexedDocument[],
+): void {
+	const { FileSnapshotStore } = require(
+		"src/services/search/shared/file-snapshot-store",
+	) as {
+		FileSnapshotStore: new () => unknown;
+	};
+	const currentTexts = new Map<string, string>();
+	for (const document of documents) {
+		currentTexts.set(document.path, document.content ?? "");
+	}
+	container.registerInstance(FileSnapshotStore, {
+		readCurrentTexts: async (
+			fileOrPaths: ReadonlyArray<string | { path: string }>,
+		) => {
+			const result = new Map<string, string>();
+			for (const fileOrPath of fileOrPaths) {
+				const path =
+					typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+				const text = currentTexts.get(path);
+				if (text !== undefined) {
+					result.set(path, text);
+				}
+			}
+			return result;
+		},
+	} as any);
+}
+
+async function withCoverageBodyTokenOffloadEnv<T>(
+	enabled: boolean,
+	action: () => Promise<T>,
+): Promise<T> {
+	const previous = process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
+	process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = enabled
+		? "1"
+		: "0";
+	try {
+		return await action();
+	} finally {
+		if (previous === undefined) {
+			delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
+		} else {
+			process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = previous;
+		}
+	}
+}
+
 type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
 	top2To4Ratio: number;
@@ -2121,6 +2170,7 @@ async function runBenchmark(
 	outcomes: QueryOutcome[];
 	phaseTiming: PhaseTimingSummary | null;
 }> {
+	registerBenchmarkFileSnapshotStore(documents);
 	await engine.addDocuments(documents);
 	engine.resetBenchmarkPhaseTiming?.();
 
@@ -2741,45 +2791,57 @@ describe("coverage lexical automation benchmark", () => {
 			},
 		};
 
-		const coverageLexicalCore = await withCoverageDisplayPruneEnv(
-			{
-				enabled: false,
-				top2To4Ratio: displayPruneConfig.top2To4Ratio,
-				top5PlusRatio: displayPruneConfig.top5PlusRatio,
-				bodyCharWeight: displayPruneConfig.bodyCharWeight,
-				metadataCharWeight: displayPruneConfig.metadataCharWeight,
-				tagExactWeight: displayPruneConfig.tagExactWeight,
-				tagCharWeight: displayPruneConfig.tagCharWeight,
-			},
+		const coverageLexicalCore = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				createEngineHarness(
-					CoverageLexicalFileSearchEngine,
+				withCoverageDisplayPruneEnv(
+					{
+						enabled: false,
+						top2To4Ratio: displayPruneConfig.top2To4Ratio,
+						top5PlusRatio: displayPruneConfig.top5PlusRatio,
+						bodyCharWeight: displayPruneConfig.bodyCharWeight,
+						metadataCharWeight: displayPruneConfig.metadataCharWeight,
+						tagExactWeight: displayPruneConfig.tagExactWeight,
+						tagCharWeight: displayPruneConfig.tagCharWeight,
+					},
+					async () =>
+						createEngineHarness(
+							CoverageLexicalFileSearchEngine,
+							tokenizer,
+							"coverage-lexical",
+						),
+				),
+		);
+		const coverageCoreResult = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				withCoverageDisplayPruneEnv(
+					{
+						enabled: false,
+						top2To4Ratio: displayPruneConfig.top2To4Ratio,
+						top5PlusRatio: displayPruneConfig.top5PlusRatio,
+						bodyCharWeight: displayPruneConfig.bodyCharWeight,
+						metadataCharWeight: displayPruneConfig.metadataCharWeight,
+						tagExactWeight: displayPruneConfig.tagExactWeight,
+						tagCharWeight: displayPruneConfig.tagCharWeight,
+					},
+					async () =>
+						runBenchmark(
+							"CoverageLexical(core)",
+							coverageLexicalCore,
+							documents,
+							queryCases,
+						),
+				),
+		);
+		const recallContract = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				runCoverageRecallContract(
+					coverageLexicalCore as any,
 					tokenizer,
-					"coverage-lexical",
+					buildRecallContractCases(),
 				),
-		);
-		const coverageCoreResult = await withCoverageDisplayPruneEnv(
-			{
-				enabled: false,
-				top2To4Ratio: displayPruneConfig.top2To4Ratio,
-				top5PlusRatio: displayPruneConfig.top5PlusRatio,
-				bodyCharWeight: displayPruneConfig.bodyCharWeight,
-				metadataCharWeight: displayPruneConfig.metadataCharWeight,
-				tagExactWeight: displayPruneConfig.tagExactWeight,
-				tagCharWeight: displayPruneConfig.tagCharWeight,
-			},
-			async () =>
-				runBenchmark(
-					"CoverageLexical(core)",
-					coverageLexicalCore,
-					documents,
-					queryCases,
-				),
-		);
-		const recallContract = await runCoverageRecallContract(
-			coverageLexicalCore as any,
-			tokenizer,
-			buildRecallContractCases(),
 		);
 		const coverageCoreVsMini = summarizeWins(
 			coverageCoreResult.outcomes,
@@ -2798,23 +2860,31 @@ describe("coverage lexical automation benchmark", () => {
 				removeItem: jest.fn(),
 			},
 		};
-		const coverageLexicalDisplay = await withCoverageDisplayPruneEnv(
-			displayPruneConfig,
+		const coverageLexicalDisplay = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				createEngineHarness(
-					CoverageLexicalFileSearchEngine,
-					tokenizer,
-					"coverage-lexical",
+				withCoverageDisplayPruneEnv(
+					displayPruneConfig,
+					async () =>
+						createEngineHarness(
+							CoverageLexicalFileSearchEngine,
+							tokenizer,
+							"coverage-lexical",
+						),
 				),
 		);
-		const coverageDisplayResult = await withCoverageDisplayPruneEnv(
-			displayPruneConfig,
+		const coverageDisplayResult = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				runBenchmark(
-					"CoverageLexical(display)",
-					coverageLexicalDisplay,
-					documents,
-					queryCases,
+				withCoverageDisplayPruneEnv(
+					displayPruneConfig,
+					async () =>
+						runBenchmark(
+							"CoverageLexical(display)",
+							coverageLexicalDisplay,
+							documents,
+							queryCases,
+						),
 				),
 		);
 		const coverageDisplayVsMini = summarizeWins(

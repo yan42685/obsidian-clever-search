@@ -7,6 +7,7 @@ import {
 	buildCoverageLexicalBodyEvidenceTrace,
 	type CoverageLexicalBodyEvidenceTrace,
 } from "./coverage-lexical-body-evidence";
+import { buildCoverageLexicalPhraseTerms } from "./coverage-lexical-bridge";
 import {
 	buildCoverageLexicalCharQuery,
 	evaluateCoverageLexicalBodyCharVerification,
@@ -63,7 +64,8 @@ type CoverageLexicalRecallIndex = {
 	sortedLexicon: readonly string[];
 	documentIdByPath: ReadonlyMap<string, number>;
 	documentPathById: readonly (string | undefined)[];
-	getDocumentBodyTokens: (docId: number) => readonly string[];
+	getDocumentBodyTokens: (docId: number) => readonly string[] | undefined;
+	allowPassageSignalInRecall?: boolean;
 	getDocumentMetadataFieldText?: (
 		docId: number,
 		field: CoverageLexicalMetadataField,
@@ -161,8 +163,23 @@ type CoverageLexicalQueryCache = {
 	>;
 	bodyPhraseWitnessCandidateKeysBySignatureKey: Map<
 		string,
-		readonly CoverageLexicalCandidateKey[]
+		readonly CoverageLexicalBodyPhraseWitnessCandidate[]
 	>;
+	metadataPhraseSurfaceByDocAndField: Map<
+		string,
+		CoverageLexicalMetadataPhraseSurface | null
+	>;
+};
+
+type CoverageLexicalMetadataPhraseSurface = {
+	normalizedText: string;
+	tokens: readonly string[];
+	phraseTerms: ReadonlySet<string>;
+};
+
+type CoverageLexicalBodyPhraseWitnessCandidate = {
+	key: CoverageLexicalCandidateKey;
+	verified: boolean;
 };
 
 type CoverageLexicalGroupSignal = {
@@ -341,6 +358,8 @@ type CoverageLexicalEvaluatedLaneCandidate = {
 	evaluation: CoverageLexicalLaneEvaluation;
 };
 
+const EMPTY_BODY_TOKENS: readonly string[] = [];
+
 const MAX_FUZZY_EXPANSIONS = 24;
 const ASCII_PREFIX_TERM_REGEX = /^[a-z0-9_-]+$/u;
 const METADATA_PREFIX_MIN_TERM_LENGTH = 3;
@@ -364,6 +383,8 @@ const BODY_PREFIX_LONG_EXPLORATION_CAP = 160;
 const BODY_PREFIX_LONG_TERM_BUDGET = 24;
 const BODY_PREFIX_LONG_DOC_BUDGET = 320;
 const PREFIX_ZERO_GAIN_STAGNATION_LIMIT = 4;
+const METADATA_PHRASE_TOKEN_REGEX = /[\p{Script=Han}]+|[a-z0-9]+/gu;
+const METADATA_CAMEL_BOUNDARY_REGEX = /([a-z0-9])(?=[A-Z])/g;
 const coverageLexicalDerivedPlanCache = new WeakMap<
 	CoverageLexicalPlan,
 	CoverageLexicalDerivedPlan
@@ -384,6 +405,7 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		fuzzyExpansionsByTerm: new Map(),
 		phraseSignatureBucketsByKey: new Map(),
 		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
+		metadataPhraseSurfaceByDocAndField: new Map(),
 	};
 }
 
@@ -1346,13 +1368,15 @@ function evaluateLaneCandidates(
 			phraseSignatures,
 			index,
 			charQuery,
-			queryCache,
-			benchmarkHooks,
-			{
-				includePassageSignal: true,
-				includeTagFallback: laneName === "char_fallback_lane",
-			},
-		);
+				queryCache,
+				benchmarkHooks,
+				{
+					includePassageSignal:
+						(index.allowPassageSignalInRecall ?? true) &&
+						laneName === "local_body_lane",
+					includeTagFallback: laneName === "char_fallback_lane",
+				},
+			);
 		if (!evaluation) {
 			continue;
 		}
@@ -1386,7 +1410,9 @@ function evaluateLaneCandidatesLight(
 			queryCache,
 			benchmarkHooks,
 			{
-				includePassageSignal: laneName === "local_body_lane",
+				includePassageSignal:
+					(index.allowPassageSignalInRecall ?? true) &&
+					laneName === "local_body_lane",
 				includeTagFallback: laneName === "char_fallback_lane",
 			},
 		);
@@ -1649,7 +1675,9 @@ function buildLaneEvaluation(
 			),
 		() => state.phraseMatches.length,
 	);
-	const tokens = index.getDocumentBodyTokens(key);
+	const tokens = options.includePassageSignal
+		? (index.getDocumentBodyTokens(key) ?? EMPTY_BODY_TOKENS)
+		: EMPTY_BODY_TOKENS;
 	const tagFallback = options.includeTagFallback
 		? measureLaneEvaluateBenchmarkSubphase(
 				benchmarkHooks,
@@ -2336,8 +2364,9 @@ function collectCandidatesForTerm(
 				const state = getOrCreateDocIdCandidateState(candidates, key);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
 				if (kind === "prefix" && prefixWitnessCandidate) {
+					const bodyTokens = index.getDocumentBodyTokens(key);
 					const surfaceText = findBestBodyPrefixSurfaceText(
-						index.getDocumentBodyTokens(key),
+						bodyTokens ?? EMPTY_BODY_TOKENS,
 						prefixWitnessCandidate.prefix,
 						prefixWitnessCandidate.term,
 					);
@@ -2401,15 +2430,15 @@ function collectCandidatesForPhraseSignature(
 					recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
 				}
 			});
-			collectAnyMetadataPhraseMatches(index, candidates, signature, variant);
+			collectAnyMetadataPhraseMatches(index, queryCache, candidates, signature);
 			continue;
 		}
 
 		collectPreferredMetadataPhraseMatches(
 			index,
+			queryCache,
 			candidates,
 			signature,
-			variant,
 		);
 	}
 }
@@ -2420,12 +2449,15 @@ function collectBodyPhraseWitnessMatches(
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 ): void {
-	for (const key of getOrCreateBodyPhraseWitnessCandidateKeys(
+	for (const match of getOrCreateBodyPhraseWitnessCandidateKeys(
 		index,
 		signature,
 		queryCache,
 	)) {
-		const state = getOrCreateDocIdCandidateState(candidates, key);
+		const state = getOrCreateDocIdCandidateState(candidates, match.key);
+		if (!match.verified) {
+			continue;
+		}
 		recordPhraseMatch(state, signature.index);
 		for (const familyIndex of signature.familyIndices) {
 			recordFamilyMatch(state.bodyMatches, familyIndex, "prefix");
@@ -2437,7 +2469,7 @@ function getOrCreateBodyPhraseWitnessCandidateKeys(
 	index: CoverageLexicalRecallIndex,
 	signature: CoverageLexicalPhraseSignature,
 	queryCache: CoverageLexicalQueryCache,
-): readonly CoverageLexicalCandidateKey[] {
+): readonly CoverageLexicalBodyPhraseWitnessCandidate[] {
 	const cacheKey = buildPhraseWitnessSignatureCacheKey(signature);
 	const cached =
 		queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.get(cacheKey);
@@ -2467,20 +2499,26 @@ function getOrCreateBodyPhraseWitnessCandidateKeys(
 		queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(cacheKey, []);
 		return [];
 	}
-	const matchedKeys: CoverageLexicalCandidateKey[] = [];
+	const canonicalTokenPostings = Array.from(
+		new Set(canonicalTokens),
+		(token) => [token, index.bodyPostings.get(token)] as const,
+	);
+	const matchedKeys: CoverageLexicalBodyPhraseWitnessCandidate[] = [];
 	const seen = new Set<CoverageLexicalCandidateKey>();
 	forEachPostingCandidateKey(index, anchorMatches, (key) => {
 		if (seen.has(key)) {
 			return;
 		}
 		seen.add(key);
-		if (
-			hasContiguousPhraseWitness(
-				index.getDocumentBodyTokens(key),
-				canonicalTokens,
-			)
-		) {
-			matchedKeys.push(key);
+		const bodyTokens = index.getDocumentBodyTokens(key);
+		if (bodyTokens) {
+			if (hasContiguousPhraseWitness(bodyTokens, canonicalTokens)) {
+				matchedKeys.push({ key, verified: true });
+			}
+			return;
+		}
+		if (bodyPhraseWitnessHasAllCanonicalTokens(index, key, canonicalTokenPostings)) {
+			matchedKeys.push({ key, verified: false });
 		}
 	});
 	queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(
@@ -2494,6 +2532,21 @@ function buildPhraseWitnessSignatureCacheKey(
 	signature: CoverageLexicalPhraseSignature,
 ): string {
 	return `${signature.familyIndices.join(",")}::${signature.variants.join("|")}`;
+}
+
+function bodyPhraseWitnessHasAllCanonicalTokens(
+	index: CoverageLexicalRecallIndex,
+	key: CoverageLexicalCandidateKey,
+	tokenPostings: ReadonlyArray<
+		readonly [string, CoverageLexicalPostingList | undefined]
+	>,
+): boolean {
+	for (const [, postings] of tokenPostings) {
+		if (!postings || !postingHasCandidateKey(index, postings, key)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 function getPhraseWitnessCanonicalTokens(
@@ -2532,10 +2585,141 @@ function hasContiguousPhraseWitness(
 	return false;
 }
 
+function getMetadataPhraseSurfaceCacheKey(
+	docId: number,
+	field: CoverageLexicalMetadataField,
+): string {
+	return `${docId}:${field}`;
+}
+
+function tokenizeMetadataPhraseSurfaceText(text: string): string[] {
+	const normalized = text
+		.normalize("NFKC")
+		.replace(METADATA_CAMEL_BOUNDARY_REGEX, "$1 ")
+		.toLowerCase();
+	return normalized.match(METADATA_PHRASE_TOKEN_REGEX) ?? [];
+}
+
+function getOrCreateMetadataPhraseSurface(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	docId: number,
+	field: CoverageLexicalMetadataField,
+): CoverageLexicalMetadataPhraseSurface | null {
+	const cacheKey = getMetadataPhraseSurfaceCacheKey(docId, field);
+	const cached = queryCache.metadataPhraseSurfaceByDocAndField.get(cacheKey);
+	if (cached !== undefined) {
+		return cached;
+	}
+	const rawText = index.getDocumentMetadataFieldText?.(docId, field) ?? "";
+	if (rawText.length === 0) {
+		queryCache.metadataPhraseSurfaceByDocAndField.set(cacheKey, null);
+		return null;
+	}
+	const normalizedText = rawText.toLowerCase().normalize("NFKC");
+	const tokens = tokenizeMetadataPhraseSurfaceText(rawText);
+	const created: CoverageLexicalMetadataPhraseSurface = {
+		normalizedText,
+		tokens,
+		phraseTerms: new Set(buildCoverageLexicalPhraseTerms(tokens)),
+	};
+	queryCache.metadataPhraseSurfaceByDocAndField.set(cacheKey, created);
+	return created;
+}
+
+function matchesMetadataPhraseSignature(
+	surface: CoverageLexicalMetadataPhraseSurface,
+	signature: CoverageLexicalPhraseSignature,
+): boolean {
+	for (const variant of signature.variants) {
+		if (variant.length === 0) {
+			continue;
+		}
+		if (
+			surface.phraseTerms.has(variant) ||
+			surface.normalizedText.includes(variant)
+		) {
+			return true;
+		}
+	}
+	const canonicalTokens = getPhraseWitnessCanonicalTokens(signature);
+	return (
+		canonicalTokens.length >= 2 &&
+		hasContiguousPhraseWitness(surface.tokens, canonicalTokens)
+	);
+}
+
 function getPostingCandidateCount(postings: CoverageLexicalPostingList): number {
 	return Array.isArray(postings) || postings instanceof Uint32Array
 		? postings.length
 		: (postings as ReadonlySet<string>).size;
+}
+
+function postingHasCandidateKey(
+	index: CoverageLexicalRecallIndex,
+	postings: CoverageLexicalPostingList,
+	key: CoverageLexicalCandidateKey,
+): boolean {
+	if (Array.isArray(postings) || postings instanceof Uint32Array) {
+		return postings.indexOf(key) !== -1;
+	}
+	const path = index.documentPathById[key];
+	return path !== undefined && (postings as ReadonlySet<string>).has(path);
+}
+
+function getMetadataExactPostingMapsForField(
+	index: CoverageLexicalRecallIndex,
+	field: CoverageLexicalMetadataField,
+): readonly CoverageLexicalPostingMap[] {
+	switch (field) {
+		case "basename":
+			return [index.metadataBasenamePostings];
+		case "aliases":
+			return [index.metadataAliasPostings];
+		case "folder":
+			return [index.metadataFolderPostings];
+		case "headings":
+			return [index.metadataHeadingPostings];
+		case "tags":
+			return [index.metadataTagPostings, index.metadataTagFullPostings];
+	}
+}
+
+function collectMetadataPhraseVerificationCandidateKeys(
+	index: CoverageLexicalRecallIndex,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	signature: CoverageLexicalPhraseSignature,
+	fields: readonly CoverageLexicalMetadataField[],
+): Set<CoverageLexicalCandidateKey> {
+	const keys = new Set<CoverageLexicalCandidateKey>(candidates.keys());
+	const seedTokens = new Set<string>();
+	for (const variant of signature.variants) {
+		for (const token of variant.split(" ")) {
+			const normalized = token.trim();
+			if (normalized.length > 0) {
+				seedTokens.add(normalized);
+			}
+		}
+	}
+	for (const token of getPhraseWitnessCanonicalTokens(signature)) {
+		if (token.length > 0) {
+			seedTokens.add(token);
+		}
+	}
+	for (const field of fields) {
+		for (const postings of getMetadataExactPostingMapsForField(index, field)) {
+			for (const token of seedTokens) {
+				const matches = postings.get(token);
+				if (!matches) {
+					continue;
+				}
+				forEachPostingCandidateKey(index, matches, (key) => {
+					keys.add(key);
+				});
+			}
+		}
+	}
+	return keys;
 }
 
 function collectPrefixCandidatesForFamily(
@@ -2947,29 +3131,39 @@ function mergeCandidateState(
 
 function collectAnyMetadataPhraseMatches(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
-	variant: string,
 ): void {
-	const fieldPhraseEntries: readonly CoverageLexicalPostingMap[] = [
-		index.metadataBasenamePhrasePostings,
-		index.metadataAliasPhrasePostings,
-		index.metadataFolderPhrasePostings,
-		index.metadataHeadingPhrasePostings,
-		index.metadataTagPhrasePostings,
-	];
-	for (const postings of fieldPhraseEntries) {
-		const matches = postings.get(variant);
-		if (!matches) {
+	const candidateKeys = collectMetadataPhraseVerificationCandidateKeys(
+		index,
+		candidates,
+		signature,
+		ALL_METADATA_FIELDS,
+	);
+	for (const key of candidateKeys) {
+		let matched = false;
+		for (const field of ALL_METADATA_FIELDS) {
+			const surface = getOrCreateMetadataPhraseSurface(
+				index,
+				queryCache,
+				key,
+				field,
+			);
+			if (!surface || !matchesMetadataPhraseSignature(surface, signature)) {
+				continue;
+			}
+			matched = true;
+			break;
+		}
+		if (!matched) {
 			continue;
 		}
-		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateDocIdCandidateState(candidates, key);
-			recordPhraseMatch(state, signature.index);
-			for (const familyIndex of signature.familyIndices) {
-				recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
-			}
-		});
+		const state = getOrCreateDocIdCandidateState(candidates, key);
+		recordPhraseMatch(state, signature.index);
+		for (const familyIndex of signature.familyIndices) {
+			recordFamilyMatch(state.metadataMatches, familyIndex, "prefix");
+		}
 	}
 }
 
@@ -3103,38 +3297,45 @@ function collectMetadataAssistFieldCandidatesForTerm(
 
 function collectPreferredMetadataPhraseMatches(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
-	variant: string,
 ): void {
-	const fieldPhraseEntries: Array<
-		[
-			CoverageLexicalMetadataField,
-			CoverageLexicalPostingMap,
-		]
-	> = [
-		["basename", index.metadataBasenamePhrasePostings],
-		["aliases", index.metadataAliasPhrasePostings],
-		["folder", index.metadataFolderPhrasePostings],
-		["headings", index.metadataHeadingPhrasePostings],
-		["tags", index.metadataTagPhrasePostings],
-	];
-	for (const [field, postings] of fieldPhraseEntries) {
-		if (!signature.preferredFields?.includes(field)) {
-			continue;
-		}
-		const matches = postings.get(variant);
-		if (!matches) {
-			continue;
-		}
-		forEachPostingCandidateKey(index, matches, (key) => {
-			const state = getOrCreateDocIdCandidateState(candidates, key);
-			recordPhraseMatch(state, signature.index);
+	const preferredFields = signature.preferredFields ?? [];
+	if (preferredFields.length === 0) {
+		return;
+	}
+	const candidateKeys = collectMetadataPhraseVerificationCandidateKeys(
+		index,
+		candidates,
+		signature,
+		preferredFields,
+	);
+	for (const key of candidateKeys) {
+		const state = getOrCreateDocIdCandidateState(candidates, key);
+		let matchedAnyField = false;
+		for (const field of preferredFields) {
+			const surface = getOrCreateMetadataPhraseSurface(
+				index,
+				queryCache,
+				key,
+				field,
+			);
+			if (!surface || !matchesMetadataPhraseSignature(surface, signature)) {
+				continue;
+			}
+			matchedAnyField = true;
 			for (const familyIndex of signature.familyIndices) {
-				recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
 				recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, "exact");
 			}
-		});
+		}
+		if (!matchedAnyField) {
+			continue;
+		}
+		recordPhraseMatch(state, signature.index);
+		for (const familyIndex of signature.familyIndices) {
+			recordFamilyMatch(state.metadataMatches, familyIndex, "exact");
+		}
 	}
 }
 
