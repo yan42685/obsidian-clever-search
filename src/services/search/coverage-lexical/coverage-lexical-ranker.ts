@@ -53,10 +53,6 @@ export function compareCoverageLexicalResultSignals(
 	if (earlyGuardrailDecision !== 0) {
 		return earlyGuardrailDecision;
 	}
-	const prefixChannelDecision = comparePrefixTierPreference(left, right);
-	if (prefixChannelDecision !== 0) {
-		return prefixChannelDecision;
-	}
 	const countDecision = compareCoverageLexicalCountTieBreakers(
 		left.familyCountSummary,
 		right.familyCountSummary,
@@ -386,14 +382,15 @@ function compareBodyWithAnchorDetailStages(
 			compareCharSignals(left.metadataChar, right.metadataChar) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-			compareTagSignals(left.tagSignal, right.tagSignal) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
 				right.localEvidence,
 			) ||
+			comparePrefixTierPreference(left, right) ||
 			compareAreaSignals(left.softBody, right.softBody) ||
+			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+			compareTagSignals(left.tagSignal, right.tagSignal) ||
 			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 		);
 	}
@@ -408,8 +405,9 @@ function compareBodyWithAnchorDetailStages(
 			left.localEvidence,
 			right.localEvidence,
 		) ||
-		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		comparePrefixTierPreference(left, right) ||
 		compareAreaSignals(left.softBody, right.softBody) ||
+		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 	);
 }
@@ -428,6 +426,7 @@ function compareBodyFirstDetailStages(
 			left.localEvidence,
 			right.localEvidence,
 		) ||
+		comparePrefixTierPreference(left, right) ||
 		compareAreaSignals(left.softBody, right.softBody) ||
 		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
 		compareTagSignals(left.tagSignal, right.tagSignal) ||
@@ -489,14 +488,8 @@ function comparePrefixWitnessPreference(
 	left: CoverageLexicalPrefixWitness | null,
 	right: CoverageLexicalPrefixWitness | null,
 ): number {
-	if (!left && !right) {
+	if (!left || !right) {
 		return 0;
-	}
-	if (left && !right) {
-		return -1;
-	}
-	if (!left && right) {
-		return 1;
 	}
 	return compareConcretePrefixWitnesses(
 		left as CoverageLexicalPrefixWitness,

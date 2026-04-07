@@ -234,7 +234,7 @@ describe("coverage lexical with real tokenizer", () => {
 		);
 	});
 
-	test("metadata prefix outranks body prefix when coverage and exact tier are tied", async () => {
+	test("metadata prefix breaks ties after body prefix coverage is otherwise matched", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -257,7 +257,7 @@ describe("coverage lexical with real tokenizer", () => {
 				path: "notes/password-note.md",
 				basename: "Username Password Card Number",
 				folder: "notes",
-				content: "credentials reference",
+				content: "passing reference",
 			},
 			{
 				path: "notes/workspace.md",
