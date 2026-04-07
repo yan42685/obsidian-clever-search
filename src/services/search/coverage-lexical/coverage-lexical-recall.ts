@@ -52,7 +52,6 @@ type CoverageLexicalRecallIndex = {
 	metadataFolderHanSegmentPostings?: CoverageLexicalPostingMap;
 	metadataFolderPhrasePostings: CoverageLexicalPostingMap;
 	metadataFolderPostings: CoverageLexicalPostingMap;
-	metadataHeadingCharPostings: CoverageLexicalPostingMap;
 	metadataHeadingHanSegmentPostings?: CoverageLexicalPostingMap;
 	metadataHeadingPhrasePostings: CoverageLexicalPostingMap;
 	metadataHeadingPostings: CoverageLexicalPostingMap;
@@ -64,7 +63,12 @@ type CoverageLexicalRecallIndex = {
 	sortedLexicon: readonly string[];
 	documentIdByPath: ReadonlyMap<string, number>;
 	documentPathById: readonly (string | undefined)[];
-	getDocumentBodyTokens: (docId: number) => readonly string[] | undefined;
+	getDocumentBodyTokens: (
+		docId: number,
+		options?: {
+			allowColdLoad?: boolean;
+		},
+	) => readonly string[] | undefined;
 	allowPassageSignalInRecall?: boolean;
 	getDocumentMetadataFieldText?: (
 		docId: number,
@@ -164,6 +168,10 @@ type CoverageLexicalQueryCache = {
 	bodyPhraseWitnessCandidateKeysBySignatureKey: Map<
 		string,
 		readonly CoverageLexicalBodyPhraseWitnessCandidate[]
+	>;
+	bodyCharVerificationByDocId: Map<
+		number,
+		CoverageLexicalBodyCharVerification
 	>;
 	metadataPhraseSurfaceByDocAndField: Map<
 		string,
@@ -635,18 +643,20 @@ function collectCoverageLexicalCandidateStatesInternal(
 			benchmarkHooks,
 		);
 	}
-	runLocalBodyLane(
-		index,
-		plan,
-		phraseSignatures,
-		request,
-		charQuery,
-		queryCache,
-		aggregateCandidates,
-		admittedKeys,
-		debug,
-		benchmarkHooks,
-	);
+	if (shouldRunLocalBodyLane(plan, admittedKeys, aggregateCandidates)) {
+		runLocalBodyLane(
+			index,
+			plan,
+			phraseSignatures,
+			request,
+			charQuery,
+			queryCache,
+			aggregateCandidates,
+			admittedKeys,
+			debug,
+			benchmarkHooks,
+		);
+	}
 	runBridgeLane(
 		index,
 		plan,
@@ -693,6 +703,27 @@ function shouldRunRelaxedHybridLane(
 		return false;
 	}
 	return aggregateCandidates.size < 24;
+}
+
+function shouldRunLocalBodyLane(
+	plan: CoverageLexicalPlan,
+	admittedKeys: ReadonlySet<CoverageLexicalCandidateKey>,
+	aggregateCandidates: ReadonlyMap<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>,
+): boolean {
+	if (
+		plan.queryKind === "body_only_local" ||
+		plan.queryKind === "memory_relaxed" ||
+		plan.queryKind === "bridge_dependent"
+	) {
+		return true;
+	}
+	if (admittedKeys.size >= 16) {
+		return false;
+	}
+	return aggregateCandidates.size < 28;
 }
 
 function runStrictMetadataLane(

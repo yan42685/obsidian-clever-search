@@ -107,7 +107,7 @@ const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR = join(
 );
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
-	return process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV] === "1";
+	return process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV] !== "0";
 }
 
 type CoverageLexicalDocument = {
@@ -129,7 +129,6 @@ type CoverageLexicalTokenRange = {
 
 type CoverageLexicalDerivedDocumentIndexState = {
 	bodyTokenSequence: string[];
-	bodyHanSegments: string[];
 	bodyTerms: Set<string>;
 	aliasTerms: Set<string>;
 	aliasCharTerms: Set<string>;
@@ -138,7 +137,6 @@ type CoverageLexicalDerivedDocumentIndexState = {
 	folderTerms: Set<string>;
 	folderCharTerms: Set<string>;
 	headingTerms: Set<string>;
-	headingCharTerms: Set<string>;
 	tagTerms: Set<string>;
 	tagCharTerms: Set<string>;
 	tagValues: string[];
@@ -153,7 +151,6 @@ type CoverageLexicalDerivedTermKey =
 	| "folderTerms"
 	| "folderCharTerms"
 	| "headingTerms"
-	| "headingCharTerms"
 	| "tagTerms"
 	| "tagCharTerms"
 	| "tagValues";
@@ -187,10 +184,6 @@ const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerived
 		{ termsKey: "folderTerms", postingKey: "metadataFolderPostings" },
 		{ termsKey: "folderCharTerms", postingKey: "metadataFolderCharPostings" },
 		{ termsKey: "headingTerms", postingKey: "metadataHeadingPostings" },
-		{
-			termsKey: "headingCharTerms",
-			postingKey: "metadataHeadingCharPostings",
-		},
 		{ termsKey: "tagTerms", postingKey: "metadataTagPostings" },
 		{
 			termsKey: "tagValues",
@@ -242,16 +235,12 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 	options: {
 		bodyText?: string;
 		existingBodyTokenSequence?: readonly string[];
-		existingBodyHanSegments?: readonly string[];
 		existingTagValues?: readonly string[];
 	} = {},
 ): CoverageLexicalDerivedDocumentIndexState {
 	const bodyTokenSequence = options.existingBodyTokenSequence
 		? [...options.existingBodyTokenSequence]
 		: tokenizeCoverageLexicalDocumentText(tokenizer, options.bodyText ?? "");
-	const bodyHanSegments = options.existingBodyHanSegments
-		? [...options.existingBodyHanSegments]
-		: extractHanSegments(options.bodyText ?? "");
 	const bodyTerms = new Set(bodyTokenSequence);
 	const basenameTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.basenameText),
@@ -277,10 +266,8 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 	const headingTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.headingsText),
 	);
-	const headingCharTerms = new Set(extractHanBigrams(document.headingsText));
 	return {
 		bodyTokenSequence,
-		bodyHanSegments,
 		bodyTerms,
 		aliasTerms,
 		aliasCharTerms,
@@ -289,7 +276,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		folderTerms,
 		folderCharTerms,
 		headingTerms,
-		headingCharTerms,
 		tagTerms,
 		tagCharTerms,
 		tagValues,
@@ -948,6 +934,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentBodyTokenRangeById.length = 0;
 	}
 
+	private offloadResidentDocumentBodyHanSegments(): void {
+		if (!this.shouldExperimentallyOffloadResidentBodyTokens()) {
+			return;
+		}
+		this.documentBodyHanSegmentsById.length = 0;
+	}
+
 	private mapDocumentBodyTokensToIds(tokens: readonly string[]): number[] {
 		return tokens.map((token) => this.getOrCreateDocumentBodyTokenId(token));
 	}
@@ -1089,6 +1082,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.indexDocument(document);
 		}
 		this.offloadResidentDocumentBodyTokens();
+		this.offloadResidentDocumentBodyHanSegments();
 	}
 
 	deleteDocuments(paths: string[]): void {
@@ -1190,7 +1184,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					metadataFolderCharPostings: this.metadataFolderCharPostings,
 					metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
 					metadataFolderPostings: this.metadataFolderPostings,
-					metadataHeadingCharPostings: this.metadataHeadingCharPostings,
 					metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: this.metadataHeadingPostings,
 					metadataTagCharPostings: this.metadataTagCharPostings,
@@ -1203,9 +1196,14 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						: [],
 					documentIdByPath: this.documentIdByPath,
 					documentPathById: this.documentPathById,
-					getDocumentBodyTokens: (docId: number) =>
+					getDocumentBodyTokens: (
+						docId: number,
+						options?: {
+							allowColdLoad?: boolean;
+						},
+					) =>
 						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId, {
-							allowColdLoad: false,
+							allowColdLoad: options?.allowColdLoad ?? false,
 						}),
 					allowPassageSignalInRecall:
 						!this.shouldExperimentallyOffloadResidentBodyTokens(),
@@ -1565,7 +1563,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.set(document.path, storedDocument);
 		this.documentById[docId] = storedDocument;
 		this.setDocumentBodyTokens(docId, derivedState.bodyTokenSequence);
-		this.documentBodyHanSegmentsById[docId] = derivedState.bodyHanSegments;
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 		this.applyDerivedPostingTerms(docId, derivedState, "add");
 		this.markLexiconDirty();
@@ -1586,7 +1583,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			existing,
 			{
 				existingBodyTokenSequence: [],
-				existingBodyHanSegments: this.documentBodyHanSegmentsById[docId],
 				existingTagValues: this.documentTagValuesById[docId],
 			},
 		);
@@ -1703,15 +1699,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								aliasesText: document.aliasesText,
 								tagsText: document.tagsText,
 								headingsText: document.headingsText,
-								bodyTokenIds: [
-									...(this.getDocumentBodyTokenIds(document.docId) ?? []),
-								],
-								bodyHanSegments: [
-									...(this.documentBodyHanSegmentsById[document.docId] ?? []),
-								],
-								tagValues: [
-									...(this.documentTagValuesById[document.docId] ?? []),
-								],
+									bodyTokenIds: [
+										...(this.getDocumentBodyTokenIds(document.docId) ?? []),
+									],
+									bodyHanSegments: [],
+									tagValues: [
+										...(this.documentTagValuesById[document.docId] ?? []),
+									],
 							},
 					  ]
 					: [],
@@ -1767,14 +1761,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
 			bodyTokenIdsById.set(document.docId, [...document.bodyTokenIds]);
-			this.documentBodyHanSegmentsById[document.docId] = [
-				...document.bodyHanSegments,
-			];
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
 		this.restoreLivePostingState(state);
 		this.offloadResidentDocumentBodyTokens();
+		this.offloadResidentDocumentBodyHanSegments();
 	}
 
 	private clearLivePostingMaps(): void {

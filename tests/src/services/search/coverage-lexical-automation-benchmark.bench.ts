@@ -2309,6 +2309,8 @@ async function runCoverageRecallContract(
 	lanePrefilterHitCounts: Record<string, number>;
 	lanePrefilterDropCounts: Record<string, number>;
 	laneAdmitDropCounts: Record<string, number>;
+	queryKindCounts: Record<string, number>;
+	queryKindAverageLaneCount: Record<string, number>;
 	misses: Array<{
 		query: string;
 		type: RecallContractType;
@@ -2345,6 +2347,8 @@ async function runCoverageRecallContract(
 	const lanePrefilterHitCounts: Record<string, number> = {};
 	const lanePrefilterDropCounts: Record<string, number> = {};
 	const laneAdmitDropCounts: Record<string, number> = {};
+	const queryKindCounts: Record<string, number> = {};
+	const queryKindLaneTotals: Record<string, number> = {};
 	const typeTotals = new Map<
 		RecallContractType,
 		{ unionHits: number; misses: number; count: number }
@@ -2391,6 +2395,9 @@ async function runCoverageRecallContract(
 				maxItemResults: 10,
 			},
 		);
+		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
+		queryKindLaneTotals[plan.queryKind] =
+			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
 		const hit = candidates.has(queryCase.relevantPath);
 		if (hit) {
 			unionHits += 1;
@@ -2488,6 +2495,13 @@ async function runCoverageRecallContract(
 		lanePrefilterHitCounts,
 		lanePrefilterDropCounts,
 		laneAdmitDropCounts,
+		queryKindCounts,
+		queryKindAverageLaneCount: Object.fromEntries(
+			Object.entries(queryKindCounts).map(([queryKind, count]) => [
+				queryKind,
+				round((queryKindLaneTotals[queryKind] ?? 0) / Math.max(1, count)),
+			]),
+		),
 		misses,
 	};
 }
@@ -3145,6 +3159,8 @@ describe("coverage lexical automation benchmark", () => {
 				{
 					unionHitRate: round(recallContract.unionHitRate),
 					zeroRate: round(recallContract.zeroRate),
+					queryKindCounts: recallContract.queryKindCounts,
+					queryKindAverageLaneCount: recallContract.queryKindAverageLaneCount,
 					byType: Object.fromEntries(
 						Object.entries(recallContract.byType).map(([type, metric]) => [
 							type,
