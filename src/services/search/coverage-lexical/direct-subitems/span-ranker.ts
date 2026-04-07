@@ -14,6 +14,21 @@ export function compareDirectSubitemsScoreTuples(
 	if (left.exactCount !== right.exactCount) {
 		return right.exactCount - left.exactCount;
 	}
+	const leftRawPhraseExactCount = left.rawPhraseExactCount ?? 0;
+	const rightRawPhraseExactCount = right.rawPhraseExactCount ?? 0;
+	if (leftRawPhraseExactCount !== rightRawPhraseExactCount) {
+		return rightRawPhraseExactCount - leftRawPhraseExactCount;
+	}
+	const leftPhraseExactPairCount = left.phraseExactPairCount ?? 0;
+	const rightPhraseExactPairCount = right.phraseExactPairCount ?? 0;
+	if (leftPhraseExactPairCount !== rightPhraseExactPairCount) {
+		return rightPhraseExactPairCount - leftPhraseExactPairCount;
+	}
+	const leftOrderedExactPairCount = left.orderedExactPairCount ?? 0;
+	const rightOrderedExactPairCount = right.orderedExactPairCount ?? 0;
+	if (leftOrderedExactPairCount !== rightOrderedExactPairCount) {
+		return rightOrderedExactPairCount - leftOrderedExactPairCount;
+	}
 	if (left.prefixCount !== right.prefixCount) {
 		return right.prefixCount - left.prefixCount;
 	}

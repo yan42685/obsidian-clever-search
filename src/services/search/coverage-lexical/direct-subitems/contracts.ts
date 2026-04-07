@@ -32,6 +32,9 @@ export type DirectSubitemsSpanTermStat = {
 export type DirectSubitemsScoreTuple = {
 	coverageCount: number;
 	exactCount: number;
+	rawPhraseExactCount?: number;
+	phraseExactPairCount?: number;
+	orderedExactPairCount?: number;
 	prefixCount: number;
 	fuzzyCount: number;
 	distancePenaltyTotal: number;

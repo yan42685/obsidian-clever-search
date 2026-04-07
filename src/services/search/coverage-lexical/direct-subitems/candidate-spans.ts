@@ -318,7 +318,7 @@ function buildPhraseMatchStats(params: {
 	phraseExactPairCount: number;
 	orderedExactPairCount: number;
 } {
-	const trimmedQueryText = params.queryText.trim();
+	const trimmedQueryText = (params.queryText ?? "").trim();
 	if (trimmedQueryText.length === 0 || params.queryTerms.length < 2) {
 		return {
 			rawPhraseExactCount: 0,
@@ -349,7 +349,7 @@ function buildPhraseMatchStats(params: {
 			leftOccurrences,
 			rightOccurrences,
 			params.snapshotText,
-			params.queryText.slice(leftTerm.queryEnd, rightTerm.queryStart),
+			(params.queryText ?? "").slice(leftTerm.queryEnd, rightTerm.queryStart),
 		);
 		if (!bestPair) {
 			continue;
