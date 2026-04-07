@@ -100,6 +100,7 @@ export type HybridLexicalLaneScoreBreakdown = {
 	localCoverageScore: number;
 	lexicalRefineScore: number;
 	structureScore: number;
+	evidenceDiversityBonus: number;
 	overlapPenalty: number;
 	totalScore: number;
 };

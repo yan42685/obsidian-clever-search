@@ -53,6 +53,7 @@ export function buildDirectSubitemsExactCandidates(params: {
 	const anchorOccurrences =
 		exactOccurrences.length > 0 ? exactOccurrences : supportOccurrences;
 	const initialSpans = buildDirectSubitemsExactCandidateSpans({
+		queryText: params.queryText,
 		snapshotText: params.snapshotText,
 		queryTerms,
 		anchorOccurrences,
@@ -60,6 +61,7 @@ export function buildDirectSubitemsExactCandidates(params: {
 		options: params.options,
 	});
 	const structuralCandidates = buildStructuralCandidates({
+		queryText: params.queryText,
 		snapshotText: params.snapshotText,
 		queryTerms,
 		exactOccurrences,
@@ -130,6 +132,7 @@ export function buildDirectSubitemsExactFileSubItems(params: {
 }
 
 function buildStructuralCandidates(params: {
+	queryText: string;
 	snapshotText: string;
 	queryTerms: readonly DirectSubitemsQueryTerm[];
 	exactOccurrences: readonly DirectSubitemsOccurrence[];
@@ -140,6 +143,7 @@ function buildStructuralCandidates(params: {
 	const supplemental =
 		params.exactOccurrences.length > 0
 			? buildSupplementalCoverageSpans({
+					queryText: params.queryText,
 					snapshotText: params.snapshotText,
 					queryTerms: params.queryTerms,
 					exactOccurrences: params.exactOccurrences,

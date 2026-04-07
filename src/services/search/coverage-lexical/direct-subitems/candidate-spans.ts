@@ -21,6 +21,7 @@ const DEFAULT_CONTEXT_RIGHT = 40;
 const DEFAULT_BOUNDARY_LOOKAROUND = 24;
 
 export function buildDirectSubitemsExactCandidateSpans(params: {
+	queryText?: string;
 	snapshotText: string;
 	queryTerms: readonly DirectSubitemsQueryTerm[];
 	anchorOccurrences: readonly DirectSubitemsOccurrence[];
@@ -62,6 +63,7 @@ export function buildDirectSubitemsExactCandidateSpans(params: {
 		}
 		spans.push(
 			buildCandidateSpanFromGroup(
+				params.queryText ?? "",
 				params.snapshotText,
 				params.queryTerms,
 				group,
@@ -75,6 +77,7 @@ export function buildDirectSubitemsExactCandidateSpans(params: {
 }
 
 export function buildSupplementalCoverageSpans(params: {
+	queryText?: string;
 	snapshotText: string;
 	queryTerms: readonly DirectSubitemsQueryTerm[];
 	exactOccurrences: readonly DirectSubitemsOccurrence[];
@@ -92,6 +95,7 @@ export function buildSupplementalCoverageSpans(params: {
 		}
 		supplemental.push(
 			buildCandidateSpanFromGroup(
+				params.queryText ?? "",
 				params.snapshotText,
 				params.queryTerms,
 				[occurrence],
@@ -104,6 +108,7 @@ export function buildSupplementalCoverageSpans(params: {
 }
 
 function buildCandidateSpanFromGroup(
+	queryText: string,
 	snapshotText: string,
 	queryTerms: readonly DirectSubitemsQueryTerm[],
 	group: readonly DirectSubitemsOccurrence[],
@@ -145,7 +150,17 @@ function buildCandidateSpanFromGroup(
 		occurrences: renderOccurrences,
 		termStats,
 		termSignature: buildTermSignature(termStats),
-		score: buildSpanScore(start, end, anchorOffset, rankedOccurrences, termStats),
+		score: buildSpanScore(
+			start,
+			end,
+			anchorOffset,
+			rankedOccurrences,
+			renderOccurrences,
+			termStats,
+			queryText,
+			queryTerms,
+			snapshotText,
+		),
 	};
 }
 
@@ -247,23 +262,41 @@ function buildSpanScore(
 	start: number,
 	end: number,
 	anchorOffset: number,
-	occurrences: readonly DirectSubitemsOccurrence[],
+	representativeOccurrences: readonly DirectSubitemsOccurrence[],
+	renderOccurrences: readonly DirectSubitemsOccurrence[],
 	termStats: readonly DirectSubitemsSpanTermStat[],
+	queryText: string,
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+	snapshotText: string,
 ): DirectSubitemsCandidateSpan["score"] {
 	const exactCount = termStats.filter((termStat) => termStat.bestTier === "exact").length;
 	const prefixCount = termStats.filter((termStat) => termStat.bestTier === "prefix").length;
 	const fuzzyCount = termStats.filter((termStat) => termStat.bestTier === "fuzzy").length;
 	const coverageCount = exactCount + prefixCount + fuzzyCount;
+	const phraseMatchStats = buildPhraseMatchStats({
+		start,
+		end,
+		occurrences: renderOccurrences,
+		queryText,
+		queryTerms,
+		snapshotText,
+	});
 	let distancePenaltyTotal = 0;
 	let distancePenaltyMax = 0;
-	for (let index = 1; index < occurrences.length; index++) {
-		const gap = Math.max(0, occurrences[index].start - occurrences[index - 1].end);
+	for (let index = 1; index < representativeOccurrences.length; index++) {
+		const gap = Math.max(
+			0,
+			representativeOccurrences[index].start - representativeOccurrences[index - 1].end,
+		);
 		distancePenaltyTotal += gap;
 		distancePenaltyMax = Math.max(distancePenaltyMax, gap);
 	}
 	return {
 		coverageCount,
 		exactCount,
+		rawPhraseExactCount: phraseMatchStats.rawPhraseExactCount,
+		phraseExactPairCount: phraseMatchStats.phraseExactPairCount,
+		orderedExactPairCount: phraseMatchStats.orderedExactPairCount,
 		prefixCount,
 		fuzzyCount,
 		distancePenaltyTotal,
@@ -271,6 +304,153 @@ function buildSpanScore(
 		spanLength: Math.max(1, end - start),
 		anchorOffset,
 	};
+}
+
+function buildPhraseMatchStats(params: {
+	start: number;
+	end: number;
+	occurrences: readonly DirectSubitemsOccurrence[];
+	queryText?: string;
+	queryTerms: readonly DirectSubitemsQueryTerm[];
+	snapshotText: string;
+}): {
+	rawPhraseExactCount: number;
+	phraseExactPairCount: number;
+	orderedExactPairCount: number;
+} {
+	const trimmedQueryText = params.queryText.trim();
+	if (trimmedQueryText.length === 0 || params.queryTerms.length < 2) {
+		return {
+			rawPhraseExactCount: 0,
+			phraseExactPairCount: 0,
+			orderedExactPairCount: 0,
+		};
+	}
+	const exactOccurrencesByTerm = new Map<string, DirectSubitemsOccurrence[]>();
+	for (const occurrence of params.occurrences) {
+		if (occurrence.tier !== "exact") {
+			continue;
+		}
+		const existing = exactOccurrencesByTerm.get(occurrence.termId);
+		if (existing) {
+			existing.push(occurrence);
+			continue;
+		}
+		exactOccurrencesByTerm.set(occurrence.termId, [occurrence]);
+	}
+	let orderedExactPairCount = 0;
+	let phraseExactPairCount = 0;
+	for (let index = 0; index < params.queryTerms.length - 1; index++) {
+		const leftTerm = params.queryTerms[index];
+		const rightTerm = params.queryTerms[index + 1];
+		const leftOccurrences = exactOccurrencesByTerm.get(leftTerm.termId) ?? [];
+		const rightOccurrences = exactOccurrencesByTerm.get(rightTerm.termId) ?? [];
+		const bestPair = findBestOrderedPair(
+			leftOccurrences,
+			rightOccurrences,
+			params.snapshotText,
+			params.queryText.slice(leftTerm.queryEnd, rightTerm.queryStart),
+		);
+		if (!bestPair) {
+			continue;
+		}
+		orderedExactPairCount += 1;
+		if (bestPair.matchesExpectedGap) {
+			phraseExactPairCount += 1;
+		}
+	}
+	return {
+		rawPhraseExactCount: countRawPhraseMatches(
+			params.snapshotText.slice(params.start, params.end),
+			trimmedQueryText,
+			params.queryTerms,
+		),
+		phraseExactPairCount,
+		orderedExactPairCount,
+	};
+}
+
+function findBestOrderedPair(
+	leftOccurrences: readonly DirectSubitemsOccurrence[],
+	rightOccurrences: readonly DirectSubitemsOccurrence[],
+	snapshotText: string,
+	expectedGapText: string,
+):
+	| {
+			gapLength: number;
+			matchesExpectedGap: boolean;
+	  }
+	| null {
+	let bestPair:
+		| {
+				gapLength: number;
+				matchesExpectedGap: boolean;
+		  }
+		| null = null;
+	for (const leftOccurrence of leftOccurrences) {
+		for (const rightOccurrence of rightOccurrences) {
+			if (rightOccurrence.start < leftOccurrence.end) {
+				continue;
+			}
+			const actualGapText = snapshotText.slice(
+				leftOccurrence.end,
+				rightOccurrence.start,
+			);
+			const candidate = {
+				gapLength: Math.max(0, rightOccurrence.start - leftOccurrence.end),
+				matchesExpectedGap:
+					normalizePhraseMatchText(actualGapText) ===
+					normalizePhraseMatchText(expectedGapText),
+			};
+			if (!bestPair || comparePhrasePairEvidence(candidate, bestPair) < 0) {
+				bestPair = candidate;
+			}
+		}
+	}
+	return bestPair;
+}
+
+function comparePhrasePairEvidence(
+	left: { gapLength: number; matchesExpectedGap: boolean },
+	right: { gapLength: number; matchesExpectedGap: boolean },
+): number {
+	if (left.matchesExpectedGap !== right.matchesExpectedGap) {
+		return left.matchesExpectedGap ? -1 : 1;
+	}
+	return left.gapLength - right.gapLength;
+}
+
+function countRawPhraseMatches(
+	text: string,
+	queryText: string,
+	queryTerms: readonly DirectSubitemsQueryTerm[],
+): number {
+	const normalizedText = normalizePhraseMatchText(text, queryTerms);
+	const normalizedQuery = normalizePhraseMatchText(queryText, queryTerms);
+	if (normalizedQuery.length === 0) {
+		return 0;
+	}
+	let count = 0;
+	let nextIndex = 0;
+	while (nextIndex <= normalizedText.length - normalizedQuery.length) {
+		const matchIndex = normalizedText.indexOf(normalizedQuery, nextIndex);
+		if (matchIndex === -1) {
+			break;
+		}
+		count += 1;
+		nextIndex = matchIndex + 1;
+	}
+	return count;
+}
+
+function normalizePhraseMatchText(
+	text: string,
+	queryTerms?: readonly DirectSubitemsQueryTerm[],
+): string {
+	if (queryTerms?.some((term) => term.kind === "non_han_run")) {
+		return text.toLocaleLowerCase();
+	}
+	return text;
 }
 
 function trimLeftBoundary(
@@ -304,7 +484,10 @@ function trimRightBoundary(
 }
 
 function isSoftBoundary(char: string | undefined): boolean {
-	return !!char && /[\r\n\t .,;:!?()[\]{}<>|/\\，。；：！？（）【】《》、]/u.test(char);
+	return (
+		!!char &&
+		/[\r\n\t .,;:!?()\[\]{}<>|\/\\\uFF0C\u3002\uFF1B\uFF1A\uFF01\uFF1F\uFF08\uFF09\u3010\u3011\u300A\u300B\u3001]/u.test(char)
+	);
 }
 
 function resolveSpanOptions(

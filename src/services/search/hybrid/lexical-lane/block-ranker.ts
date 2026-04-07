@@ -41,13 +41,21 @@ export function rankHybridLexicalLaneBlockCandidates(
 
 	const selected: HybridLexicalLaneRankedBlockCandidate[] = [];
 	for (const candidate of baseRanked) {
+		const evidenceDiversityBonus = computeEvidenceDiversityBonus(
+			candidate,
+			selected,
+		);
 		const overlapPenalty = computeOverlapPenalty(candidate, selected);
 		selected.push({
 			...candidate,
 			scoreBreakdown: {
 				...candidate.scoreBreakdown,
+				evidenceDiversityBonus,
 				overlapPenalty,
-				totalScore: candidate.scoreBreakdown.totalScore - overlapPenalty,
+				totalScore:
+					candidate.scoreBreakdown.totalScore +
+					evidenceDiversityBonus -
+					overlapPenalty,
 			},
 		});
 	}
@@ -107,6 +115,7 @@ function buildBaseScoreBreakdown(
 		localCoverageScore,
 		lexicalRefineScore,
 		structureScore,
+		evidenceDiversityBonus: 0,
 		overlapPenalty: 0,
 		totalScore:
 			filePriorScore + localCoverageScore + lexicalRefineScore + structureScore,
@@ -206,6 +215,68 @@ function computeOverlapPenalty(
 		}
 	}
 	return penalty;
+}
+
+function computeEvidenceDiversityBonus(
+	candidate: HybridLexicalLaneBlockCandidate,
+	selected: readonly HybridLexicalLaneRankedBlockCandidate[],
+): number {
+	const previousSameFile = selected.filter(
+		(previous) => previous.filePath === candidate.filePath,
+	);
+	if (previousSameFile.length === 0) {
+		return 0;
+	}
+	const coveredExactTermIds = new Set<string>();
+	const coveredPrefixTermIds = new Set<string>();
+	for (const previous of previousSameFile) {
+		for (const termStat of previous.termStats) {
+			if (termStat.bestTier === "exact") {
+				coveredExactTermIds.add(termStat.termId);
+				coveredPrefixTermIds.add(termStat.termId);
+				continue;
+			}
+			if (termStat.bestTier === "prefix") {
+				coveredPrefixTermIds.add(termStat.termId);
+			}
+		}
+	}
+	let novelExactCount = 0;
+	let novelPrefixCount = 0;
+	for (const termStat of candidate.termStats) {
+		if (termStat.bestTier === "exact") {
+			if (!coveredExactTermIds.has(termStat.termId)) {
+				novelExactCount += 1;
+			}
+			continue;
+		}
+		if (
+			termStat.bestTier === "prefix" &&
+			!coveredExactTermIds.has(termStat.termId) &&
+			!coveredPrefixTermIds.has(termStat.termId)
+		) {
+			novelPrefixCount += 1;
+		}
+	}
+	if (novelExactCount === 0 && novelPrefixCount === 0) {
+		return 0;
+	}
+	const queryTermCount = Math.max(1, candidate.localSignals.queryTermCount);
+	const remainingTermCount = Math.max(
+		1,
+		queryTermCount - coveredExactTermIds.size,
+	);
+	const residualCompletionRatio =
+		(novelExactCount + novelPrefixCount) / remainingTermCount;
+	const exactCoverageRatio = coveredExactTermIds.size / queryTermCount;
+	const residualRescueBonus =
+		exactCoverageRatio >= 0.55 ? residualCompletionRatio * 120 : 0;
+	return (
+		novelExactCount * 112 +
+		novelPrefixCount * 40 +
+		residualCompletionRatio * 180 +
+		residualRescueBonus
+	);
 }
 
 function computeOccurrenceNoveltyRatio(
