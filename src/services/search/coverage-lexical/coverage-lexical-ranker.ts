@@ -4,6 +4,7 @@ import type {
 	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
+	CoverageLexicalPrefixWitness,
 	CoverageLexicalPlan,
 	CoverageLexicalTagSignal,
 } from "./coverage-lexical-types";
@@ -52,6 +53,10 @@ export function compareCoverageLexicalResultSignals(
 	if (earlyGuardrailDecision !== 0) {
 		return earlyGuardrailDecision;
 	}
+	const prefixChannelDecision = comparePrefixTierPreference(left, right);
+	if (prefixChannelDecision !== 0) {
+		return prefixChannelDecision;
+	}
 	const countDecision = compareCoverageLexicalCountTieBreakers(
 		left.familyCountSummary,
 		right.familyCountSummary,
@@ -67,6 +72,19 @@ export function compareCoverageLexicalResultSignals(
 		return compareBodyWithAnchorDetailStages(left, right, plan);
 	}
 	return compareBodyFirstDetailStages(left, right);
+}
+
+function comparePrefixTierPreference(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	if (compareExactTierSignals(left, right) !== 0) {
+		return 0;
+	}
+	return comparePrefixWitnessPreference(
+		left.metadataPrefixWitness ?? left.bodyPrefixWitness,
+		right.metadataPrefixWitness ?? right.bodyPrefixWitness,
+	);
 }
 
 export function compareCoverageLexicalFamilyCountSummaries(
@@ -445,8 +463,114 @@ function compareMetadataIdentitySignals(
 	);
 }
 
+function compareExactTierSignals(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	return (
+		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
+		compareDescendingMetric(left.softBody.exactWeight, right.softBody.exactWeight) ||
+		compareDescendingMetric(
+			left.metadataAnchor.exactWeight,
+			right.metadataAnchor.exactWeight,
+		) ||
+		compareDescendingMetric(
+			left.metadataIdentity.overall.exactWeight,
+			right.metadataIdentity.overall.exactWeight,
+		) ||
+		compareDescendingMetric(
+			left.tagSignal.exactMatchCount,
+			right.tagSignal.exactMatchCount,
+		)
+	);
+}
+
+function comparePrefixWitnessPreference(
+	left: CoverageLexicalPrefixWitness | null,
+	right: CoverageLexicalPrefixWitness | null,
+): number {
+	if (!left && !right) {
+		return 0;
+	}
+	if (left && !right) {
+		return -1;
+	}
+	if (!left && right) {
+		return 1;
+	}
+	return compareConcretePrefixWitnesses(
+		left as CoverageLexicalPrefixWitness,
+		right as CoverageLexicalPrefixWitness,
+	);
+}
+
+function compareConcretePrefixWitnesses(
+	left: CoverageLexicalPrefixWitness,
+	right: CoverageLexicalPrefixWitness,
+): number {
+	const channelDecision = compareDescendingMetric(
+		left.channel === "metadata" ? 1 : 0,
+		right.channel === "metadata" ? 1 : 0,
+	);
+	if (channelDecision !== 0) {
+		return channelDecision;
+	}
+	const fieldDecision = compareDescendingMetric(
+		getMetadataPrefixFieldPriority(left.field),
+		getMetadataPrefixFieldPriority(right.field),
+	);
+	if (fieldDecision !== 0) {
+		return fieldDecision;
+	}
+	const completionDecision = compareAscendingMetric(
+		left.completionGain,
+		right.completionGain,
+	);
+	if (completionDecision !== 0) {
+		return completionDecision;
+	}
+	const shapeDecision = compareAscendingMetric(
+		left.shapePenalty,
+		right.shapePenalty,
+	);
+	if (shapeDecision !== 0) {
+		return shapeDecision;
+	}
+	const fanoutDecision = compareAscendingMetric(
+		left.targetDocCount,
+		right.targetDocCount,
+	);
+	if (fanoutDecision !== 0) {
+		return fanoutDecision;
+	}
+	return compareAscendingMetric(left.totalDocCount, right.totalDocCount);
+}
+
+function getMetadataPrefixFieldPriority(
+	field: CoverageLexicalPrefixWitness["field"],
+): number {
+	switch (field) {
+		case "basename":
+			return 5;
+		case "aliases":
+			return 4;
+		case "headings":
+			return 3;
+		case "folder":
+			return 2;
+		case "tags":
+			return 1;
+		default:
+			return 0;
+	}
+}
+
 function compareDescendingMetric(left: number, right: number): number {
 	return right - left;
+}
+
+function compareAscendingMetric(left: number, right: number): number {
+	return left - right;
 }
 
 function comparePhraseBridgeSignals(

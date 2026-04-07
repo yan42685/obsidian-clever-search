@@ -80,6 +80,7 @@ import type {
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalMetadataField,
+	CoverageLexicalPrefixWitness,
 	CoverageLexicalPlan,
 	CoverageLexicalPairSignature,
 	CoverageLexicalPhraseSignature,
@@ -1828,6 +1829,8 @@ function buildCoverageSignalBase(
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
 	const familyCountSummary = createEmptyFamilyCountSummary();
+	let bodyPrefixWitness: CoverageLexicalPrefixWitness | null = null;
+	let metadataPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let tailCoreWeight = 0;
 	let tailSoftWeight = 0;
 	const matchedTerms: string[] = [];
@@ -1992,6 +1995,9 @@ function buildCoverageSignalBase(
 		}
 	}
 
+	bodyPrefixWitness = state.bodyPrefixWitness;
+	metadataPrefixWitness = state.metadataPrefixWitness;
+
 	for (const phraseIndex of state.phraseMatches) {
 		const signature = phraseSignatures[phraseIndex];
 		if (!signature?.preferredFields?.length) {
@@ -2030,6 +2036,8 @@ function buildCoverageSignalBase(
 		softBody,
 		metadataAnchor,
 		metadataIdentity,
+		bodyPrefixWitness,
+		metadataPrefixWitness,
 		bodyChar,
 		metadataChar,
 		tagSignal: {

@@ -38,10 +38,21 @@ export type CoverageLexicalMetadataField =
 	| "headings"
 	| "tags";
 
+export type CoverageLexicalPrefixWitness = {
+	channel: "body" | "metadata";
+	field: CoverageLexicalMetadataField | null;
+	term: string;
+	completionGain: number;
+	shapePenalty: number;
+	targetDocCount: number;
+	totalDocCount: number;
+};
+
 export type CoverageLexicalCandidateState = {
 	bodyMatches: number[];
 	bodyCharMatchIndices: number[];
 	bodyCharMatchFlags: number[];
+	bodyPrefixWitness: CoverageLexicalPrefixWitness | null;
 	metadataMatches: number[];
 	metadataAssistFieldMatches: Record<
 		CoverageLexicalMetadataField,
@@ -53,6 +64,7 @@ export type CoverageLexicalCandidateState = {
 		CoverageLexicalMetadataField,
 		number[]
 	>;
+	metadataPrefixWitness: CoverageLexicalPrefixWitness | null;
 	phraseMatches: number[];
 	phraseMatchFlags: number[];
 	tagCharMatchIndices: number[];
@@ -259,6 +271,8 @@ export type CoverageLexicalFamilySignal = {
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
 	metadataIdentity: CoverageLexicalMetadataIdentitySignal;
+	bodyPrefixWitness: CoverageLexicalPrefixWitness | null;
+	metadataPrefixWitness: CoverageLexicalPrefixWitness | null;
 	bodyChar: CoverageLexicalCharSignal;
 	metadataChar: CoverageLexicalCharSignal;
 	tagSignal: CoverageLexicalTagSignal;

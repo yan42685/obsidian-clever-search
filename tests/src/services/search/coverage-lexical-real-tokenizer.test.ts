@@ -233,4 +233,90 @@ describe("coverage lexical with real tokenizer", () => {
 			]),
 		);
 	});
+
+	test("metadata prefix outranks body prefix when coverage and exact tier are tied", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: Array<Record<string, string>>): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/password-note.md",
+				basename: "Username Password Card Number",
+				folder: "notes",
+				content: "credentials reference",
+			},
+			{
+				path: "notes/workspace.md",
+				basename: "Workspace",
+				folder: "notes",
+				content: "quickswitch passage first lexical engine branch notes",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "pass",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("notes/password-note.md");
+	});
+
+	test("metadata field priority prefers basename prefix over folder prefix", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: Array<Record<string, string>>): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/security-basename.md",
+				basename: "security handbook",
+				folder: "vault/general",
+				content: "reference",
+			},
+			{
+				path: "notes/security-folder.md",
+				basename: "workspace",
+				folder: "vault/security-folder",
+				content: "reference",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "sec",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("notes/security-basename.md");
+	});
 });

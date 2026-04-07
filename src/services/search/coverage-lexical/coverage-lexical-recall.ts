@@ -20,6 +20,7 @@ import type {
 	CoverageLexicalFamily,
 	CoverageLexicalMetadataField,
 	CoverageLexicalPassageAdmissionSignal,
+	CoverageLexicalPrefixWitness,
 	CoverageLexicalPhraseSignature,
 	CoverageLexicalPlan,
 	CoverageLexicalRecallDebug,
@@ -119,6 +120,8 @@ type CoverageLexicalPrefixExpansionCandidate = {
 	metadataDocCount: number;
 	totalDocCount: number;
 	targetDocCount: number;
+	completionGain: number;
+	shapePenalty: number;
 	score: number;
 };
 
@@ -201,6 +204,82 @@ const ALL_METADATA_FIELDS: readonly CoverageLexicalMetadataField[] = [
 	"headings",
 	"tags",
 ];
+
+function getMetadataFieldPriority(field: CoverageLexicalMetadataField | null): number {
+	switch (field) {
+		case "basename":
+			return 5;
+		case "aliases":
+			return 4;
+		case "headings":
+			return 3;
+		case "folder":
+			return 2;
+		case "tags":
+			return 1;
+		default:
+			return 0;
+	}
+}
+
+function comparePrefixWitnesses(
+	left: CoverageLexicalPrefixWitness,
+	right: CoverageLexicalPrefixWitness,
+): number {
+	const channelDecision =
+		(left.channel === "metadata" ? 1 : 0) - (right.channel === "metadata" ? 1 : 0);
+	if (channelDecision !== 0) {
+		return channelDecision;
+	}
+	const fieldDecision =
+		getMetadataFieldPriority(left.field) - getMetadataFieldPriority(right.field);
+	if (fieldDecision !== 0) {
+		return fieldDecision;
+	}
+	const docDecision = right.targetDocCount - left.targetDocCount;
+	if (docDecision !== 0) {
+		return docDecision;
+	}
+	const gainDecision = right.completionGain - left.completionGain;
+	if (gainDecision !== 0) {
+		return gainDecision;
+	}
+	const shapeDecision = right.shapePenalty - left.shapePenalty;
+	if (shapeDecision !== 0) {
+		return shapeDecision;
+	}
+	const totalDocDecision = right.totalDocCount - left.totalDocCount;
+	if (totalDocDecision !== 0) {
+		return totalDocDecision;
+	}
+	return right.term.localeCompare(left.term);
+}
+
+function buildPrefixWitness(
+	channel: CoverageLexicalPrefixWitness["channel"],
+	field: CoverageLexicalMetadataField | null,
+	candidate: CoverageLexicalPrefixExpansionCandidate,
+): CoverageLexicalPrefixWitness {
+	return {
+		channel,
+		field,
+		term: candidate.term,
+		completionGain: candidate.completionGain,
+		shapePenalty: candidate.shapePenalty,
+		targetDocCount: candidate.targetDocCount,
+		totalDocCount: candidate.totalDocCount,
+	};
+}
+
+function maybeRecordBetterPrefixWitness(
+	current: CoverageLexicalPrefixWitness | null,
+	next: CoverageLexicalPrefixWitness,
+): CoverageLexicalPrefixWitness {
+	if (!current) {
+		return next;
+	}
+	return comparePrefixWitnesses(next, current) > 0 ? next : current;
+}
 
 type CoverageLexicalCheapLaneCandidate = {
 	key: CoverageLexicalCandidateKey;
@@ -2216,6 +2295,7 @@ function collectCandidatesForTerm(
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
 	scope: CoverageLexicalCollectionScope,
+	prefixWitnessCandidate?: CoverageLexicalPrefixExpansionCandidate,
 ): number {
 	let addedCount = 0;
 	if (scope !== "metadata-only") {
@@ -2227,6 +2307,12 @@ function collectCandidatesForTerm(
 				}
 				const state = getOrCreateDocIdCandidateState(candidates, key);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
+				if (kind === "prefix" && prefixWitnessCandidate) {
+					state.bodyPrefixWitness = maybeRecordBetterPrefixWitness(
+						state.bodyPrefixWitness,
+						buildPrefixWitness("body", null, prefixWitnessCandidate),
+					);
+				}
 			});
 		}
 	}
@@ -2237,6 +2323,7 @@ function collectCandidatesForTerm(
 			familyIndex,
 			term,
 			kind,
+			prefixWitnessCandidate,
 		);
 	}
 	return addedCount;
@@ -2440,6 +2527,7 @@ function collectPrefixCandidatesForFamily(
 			candidate.term,
 			"prefix",
 			scope,
+			candidate,
 		);
 		termCount += 1;
 		if (added > 0) {
@@ -2483,6 +2571,7 @@ function collectMetadataAssistPrefixCandidatesForFamily(
 			family.index,
 			candidate.term,
 			"prefix",
+			candidate,
 		);
 		termCount += 1;
 		if (added > 0) {
@@ -2731,6 +2820,18 @@ function mergeCandidateState(
 	target: CoverageLexicalCandidateState,
 	nextState: CoverageLexicalCandidateState,
 ): void {
+	if (nextState.bodyPrefixWitness) {
+		target.bodyPrefixWitness = maybeRecordBetterPrefixWitness(
+			target.bodyPrefixWitness,
+			nextState.bodyPrefixWitness,
+		);
+	}
+	if (nextState.metadataPrefixWitness) {
+		target.metadataPrefixWitness = maybeRecordBetterPrefixWitness(
+			target.metadataPrefixWitness,
+			nextState.metadataPrefixWitness,
+		);
+	}
 	for (let familyIndex = 0; familyIndex < nextState.bodyMatches.length; familyIndex += 1) {
 		const kind = getRecordedMatchKind(nextState.bodyMatches, familyIndex);
 		if (kind) {
@@ -2839,11 +2940,13 @@ function createEmptyCandidateState(): CoverageLexicalCandidateState {
 		bodyMatches: [],
 		bodyCharMatchIndices: [],
 		bodyCharMatchFlags: [],
+		bodyPrefixWitness: null,
 		metadataMatches: [],
 		metadataAssistFieldMatches: createEmptyMetadataFieldMatches(),
 		metadataCharMatchIndices: [],
 		metadataCharMatchFlags: [],
 		metadataFieldMatches: createEmptyMetadataFieldMatches(),
+		metadataPrefixWitness: null,
 		phraseMatches: [],
 		phraseMatchFlags: [],
 		tagCharMatchIndices: [],
@@ -2859,6 +2962,7 @@ function collectMetadataFieldCandidatesForTerm(
 	familyIndex: number,
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
+	prefixWitnessCandidate?: CoverageLexicalPrefixExpansionCandidate,
 ): number {
 	let addedCount = 0;
 	const fieldEntries: Array<
@@ -2885,6 +2989,12 @@ function collectMetadataFieldCandidatesForTerm(
 			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataMatches, familyIndex, kind);
 			recordFamilyMatch(state.metadataFieldMatches[field], familyIndex, kind);
+			if (kind === "prefix" && prefixWitnessCandidate) {
+				state.metadataPrefixWitness = maybeRecordBetterPrefixWitness(
+					state.metadataPrefixWitness,
+					buildPrefixWitness("metadata", field, prefixWitnessCandidate),
+				);
+			}
 		});
 	}
 	return addedCount;
@@ -2896,6 +3006,7 @@ function collectMetadataAssistFieldCandidatesForTerm(
 	familyIndex: number,
 	term: string,
 	kind: Exclude<CoverageFamilyMatchKind, null>,
+	prefixWitnessCandidate?: CoverageLexicalPrefixExpansionCandidate,
 ): number {
 	let addedCount = 0;
 	const fieldEntries: Array<
@@ -2921,6 +3032,12 @@ function collectMetadataAssistFieldCandidatesForTerm(
 			}
 			const state = getOrCreateDocIdCandidateState(candidates, key);
 			recordFamilyMatch(state.metadataAssistFieldMatches[field], familyIndex, kind);
+			if (kind === "prefix" && prefixWitnessCandidate) {
+				state.metadataPrefixWitness = maybeRecordBetterPrefixWitness(
+					state.metadataPrefixWitness,
+					buildPrefixWitness("metadata", field, prefixWitnessCandidate),
+				);
+			}
 		});
 	}
 	return addedCount;
@@ -3252,6 +3369,8 @@ function buildPrefixExpansionCandidate(
 		metadataDocCount,
 		totalDocCount,
 		targetDocCount,
+		completionGain: Math.max(0, term.length - prefix.length),
+		shapePenalty: computePrefixShapePenalty(term),
 		score: computePrefixExpansionScore(
 			term,
 			prefix,
@@ -3280,6 +3399,8 @@ function buildMetadataAssistPrefixExpansionCandidate(
 		metadataDocCount,
 		totalDocCount: metadataDocCount,
 		targetDocCount: metadataDocCount,
+		completionGain: Math.max(0, term.length - prefix.length),
+		shapePenalty: computePrefixShapePenalty(term),
 		score: computePrefixExpansionScore(
 			term,
 			prefix,
@@ -3320,6 +3441,17 @@ function computePrefixExpansionScore(
 		mixedBoost -
 		totalDocPenalty
 	);
+}
+
+function computePrefixShapePenalty(term: string): number {
+	let penalty = 0;
+	if (/\d/.test(term)) {
+		penalty += 1;
+	}
+	if (/[._/\-]/.test(term)) {
+		penalty += 2;
+	}
+	return penalty;
 }
 
 function computePrefixRarityScore(targetDocCount: number): number {
