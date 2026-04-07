@@ -2336,9 +2336,19 @@ function collectCandidatesForTerm(
 				const state = getOrCreateDocIdCandidateState(candidates, key);
 				recordFamilyMatch(state.bodyMatches, familyIndex, kind);
 				if (kind === "prefix" && prefixWitnessCandidate) {
+					const surfaceText = findBestBodyPrefixSurfaceText(
+						index.getDocumentBodyTokens(key),
+						prefixWitnessCandidate.prefix,
+						prefixWitnessCandidate.term,
+					);
 					state.bodyPrefixWitness = maybeRecordBetterPrefixWitness(
 						state.bodyPrefixWitness,
-						buildPrefixWitness("body", null, prefixWitnessCandidate),
+						buildPrefixWitness(
+							"body",
+							null,
+							prefixWitnessCandidate,
+							surfaceText,
+						),
 					);
 				}
 			});
@@ -3560,6 +3570,43 @@ function findBestMetadataPrefixSurfaceText(
 						completionGain < bestCompletionGain)))
 		) {
 			bestToken = surfaceToken;
+			bestBoundaryQuality = boundaryQuality;
+			bestCompoundPenalty = compoundPenalty;
+			bestCompletionGain = completionGain;
+		}
+	}
+	return bestToken;
+}
+
+function findBestBodyPrefixSurfaceText(
+	bodyTokens: readonly string[],
+	prefix: string,
+	term: string,
+): string | null {
+	const loweredPrefix = prefix.toLowerCase();
+	const loweredTerm = term.toLowerCase();
+	let bestToken: string | null = null;
+	let bestBoundaryQuality = -1;
+	let bestCompoundPenalty = Number.POSITIVE_INFINITY;
+	let bestCompletionGain = Number.POSITIVE_INFINITY;
+	for (const bodyToken of bodyTokens) {
+		if (
+			!bodyToken.startsWith(loweredPrefix) &&
+			!bodyToken.startsWith(loweredTerm)
+		) {
+			continue;
+		}
+		const boundaryQuality = computePrefixBoundaryQuality(bodyToken);
+		const compoundPenalty = computePrefixCompoundPenalty(bodyToken);
+		const completionGain = Math.max(0, bodyToken.length - prefix.length);
+		if (
+			boundaryQuality > bestBoundaryQuality ||
+			(boundaryQuality === bestBoundaryQuality &&
+				(compoundPenalty < bestCompoundPenalty ||
+					(compoundPenalty === bestCompoundPenalty &&
+						completionGain < bestCompletionGain)))
+		) {
+			bestToken = bodyToken;
 			bestBoundaryQuality = boundaryQuality;
 			bestCompoundPenalty = compoundPenalty;
 			bestCompletionGain = completionGain;
