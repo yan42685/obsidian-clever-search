@@ -621,18 +621,20 @@ function collectCoverageLexicalCandidateStatesInternal(
 		debug,
 		benchmarkHooks,
 	);
-	runRelaxedHybridLane(
-		index,
-		plan,
-		phraseSignatures,
-		request,
-		charQuery,
-		queryCache,
-		aggregateCandidates,
-		admittedKeys,
-		debug,
-		benchmarkHooks,
-	);
+	if (shouldRunRelaxedHybridLane(plan, admittedKeys, aggregateCandidates)) {
+		runRelaxedHybridLane(
+			index,
+			plan,
+			phraseSignatures,
+			request,
+			charQuery,
+			queryCache,
+			aggregateCandidates,
+			admittedKeys,
+			debug,
+			benchmarkHooks,
+		);
+	}
 	runLocalBodyLane(
 		index,
 		plan,
@@ -674,6 +676,23 @@ function collectCoverageLexicalCandidateStatesInternal(
 		() => admittedKeys.size,
 	);
 	return admittedCandidates;
+}
+
+function shouldRunRelaxedHybridLane(
+	plan: CoverageLexicalPlan,
+	admittedKeys: ReadonlySet<CoverageLexicalCandidateKey>,
+	aggregateCandidates: ReadonlyMap<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>,
+): boolean {
+	if (plan.queryKind === "memory_relaxed") {
+		return true;
+	}
+	if (admittedKeys.size >= 12) {
+		return false;
+	}
+	return aggregateCandidates.size < 24;
 }
 
 function runStrictMetadataLane(
