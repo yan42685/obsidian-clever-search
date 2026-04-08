@@ -783,6 +783,12 @@ function shouldRunRelaxedHybridLane(
 	if (plan.queryKind === "memory_relaxed") {
 		return true;
 	}
+	if (hasMeaningfulHybridPotential(plan)) {
+		if (admittedKeys.size >= 18) {
+			return false;
+		}
+		return aggregateCandidates.size < 36;
+	}
 	if (admittedKeys.size >= 12) {
 		return false;
 	}
@@ -803,6 +809,12 @@ function shouldRunLocalBodyLane(
 		plan.queryKind === "bridge_dependent"
 	) {
 		return true;
+	}
+	if (hasMeaningfulBodyPotential(plan)) {
+		if (admittedKeys.size >= 20) {
+			return false;
+		}
+		return aggregateCandidates.size < 40;
 	}
 	if (admittedKeys.size >= 16) {
 		return false;
@@ -1370,20 +1382,128 @@ function computeLaneBudget(
 						: laneName === "char_fallback_lane"
 							? 18
 							: 16;
-	const queryBonus =
-		(laneName === "strict_metadata_lane" &&
-			plan.queryKind === "metadata_only_anchored") ||
-		(laneName === "strict_hybrid_lane" &&
-			plan.queryKind === "anchor_body_hybrid") ||
-		(laneName === "relaxed_hybrid_lane" &&
-			plan.queryKind === "memory_relaxed") ||
-		(laneName === "local_body_lane" &&
-			plan.queryKind === "body_only_local") ||
-		(laneName === "bridge_lane" &&
-			plan.queryKind === "bridge_dependent")
-			? 8
-			: 0;
+	const queryBonus = computeLaneSoftBias(laneName, plan);
 	return Math.max(request.maxItemResults * 2, base + queryBonus);
+}
+
+function computeLaneSoftBias(
+	laneName: CoverageLexicalLaneName,
+	plan: CoverageLexicalPlan,
+): number {
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveAnchorMass = getWeightedPlanMass(
+		plan.decisiveAnchorMass,
+		plan.hardAnchorFamilies.length,
+	);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	const hybridMass = Math.min(anchorMass, bodyMass);
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(3, decisiveAnchorMass * 3) +
+						Math.min(2, anchorMass) +
+						(plan.hardAnchorFamilies.length > 0 ? 1 : 0) +
+						(plan.queryKind === "metadata_only_anchored" ? 2 : 0) +
+						(plan.route === "metadata-first" ? 1 : 0),
+				),
+			);
+		case "strict_hybrid_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(3, hybridMass * 3) +
+						Math.min(2, decisiveBodyMass * 3) +
+						(plan.queryKind === "anchor_body_hybrid" ? 2 : 0) +
+						(plan.route === "body-with-anchor" ? 1 : 0),
+				),
+			);
+		case "relaxed_hybrid_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(2, hybridMass * 2.5) +
+						Math.min(3, bodyMass * 2) +
+						Math.min(1, supportBodyMass * 2) +
+						(plan.queryKind === "memory_relaxed" ? 2 : 0) +
+						(plan.queryKind === "anchor_body_hybrid" ? 1 : 0),
+				),
+			);
+		case "local_body_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(4, (decisiveBodyMass + supportBodyMass * 0.75) * 2) +
+						(plan.queryKind === "body_only_local" ? 2 : 0) +
+						(plan.queryKind === "memory_relaxed" ? 1 : 0) +
+						(plan.route === "body-first" ? 1 : 0),
+				),
+			);
+		case "bridge_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(3, plan.bridgeFamilies.length) +
+						(plan.queryKind === "bridge_dependent" ? 3 : 0) +
+						(plan.hasMixedScriptHint ? 1 : 0),
+				),
+			);
+		case "char_fallback_lane":
+			return clampLaneBias(
+				(plan.hasMixedScriptHint ? 1 : 0) +
+					(plan.shortQueryOverlay && plan.bodyFamilyCount === 0 ? 1 : 0),
+			);
+		default:
+			return 0;
+	}
+}
+
+function hasMeaningfulHybridPotential(plan: CoverageLexicalPlan): boolean {
+	if (plan.hardAnchorFamilies.length === 0 || plan.bodyFamilyCount === 0) {
+		return false;
+	}
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	return Math.min(anchorMass, bodyMass) >= 0.35 || decisiveBodyMass >= 0.45;
+}
+
+function hasMeaningfulBodyPotential(plan: CoverageLexicalPlan): boolean {
+	if (plan.bodyFamilyCount === 0) {
+		return false;
+	}
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	return (
+		bodyMass >= 0.45 ||
+		decisiveBodyMass >= 0.35 ||
+		supportBodyMass >= 0.45
+	);
+}
+
+function getWeightedPlanMass(
+	value: number | undefined,
+	fallback: number,
+): number {
+	return Number.isFinite(value) ? (value as number) : fallback;
+}
+
+function clampLaneBias(value: number): number {
+	return Math.max(0, Math.min(8, value));
 }
 
 function preselectLaneCandidates(

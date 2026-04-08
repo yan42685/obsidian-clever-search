@@ -1,4 +1,5 @@
 import { buildCoverageLexicalFamilies } from "./coverage-lexical-families";
+import { extractHanBigrams } from "./coverage-lexical-cjk";
 import type {
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalPlanExplain,
@@ -68,6 +69,10 @@ export function buildCoverageLexicalPlan(
 	const hasPathShapeHint = detectPathShapeHint(queryText, queryTerms);
 	const hasTitleShapeHint = detectTitleShapeHint(queryTerms);
 	const hasMixedScriptHint = detectMixedScriptHint(queryTerms);
+	const shortHanQueryShape = analyzeShortHanQueryShape(
+		queryText,
+		queryTerms,
+	);
 	const {
 		queryKind,
 		queryKindReasons,
@@ -84,6 +89,9 @@ export function buildCoverageLexicalPlan(
 		hasPathShapeHint,
 		hasTitleShapeHint,
 		hasMixedScriptHint,
+		hasPureHanMultiTermQuery: shortHanQueryShape.isPureHanMultiTerm,
+		hasShortHanFallbackBigramExpansion:
+			shortHanQueryShape.isFallbackBigramExpansion,
 		probes,
 	});
 	const hardAnchorFamilies = selectHardAnchorFamilies(
@@ -130,9 +138,13 @@ export function buildCoverageLexicalPlan(
 		supportBodyFamilies.length,
 	);
 	const route = selectRoute(
-		queryKind,
-		hardAnchorFamilies,
-		bodyFamilies,
+		{
+			queryKind,
+			hardAnchorFamilies,
+			bodyFamilies,
+			hasShortHanFallbackBigramExpansion:
+				shortHanQueryShape.isFallbackBigramExpansion,
+		},
 	);
 	const weightedAnchorMass = sumProbeFamilyWeight(anchorFamilies, probes);
 	const weightedBodyMass = sumProbeFamilyWeight(bodyFamilies, probes);
@@ -198,15 +210,23 @@ export function buildCoverageLexicalPlan(
 	};
 }
 
-function selectRoute(
-	queryKind: CoverageLexicalQueryKind,
-	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
-	bodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
-): CoverageLexicalPlan["route"] {
-	if (queryKind === "metadata_only_anchored") {
+function selectRoute(input: {
+	queryKind: CoverageLexicalQueryKind;
+	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>;
+	bodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>;
+	hasShortHanFallbackBigramExpansion: boolean;
+}): CoverageLexicalPlan["route"] {
+	if (input.queryKind === "metadata_only_anchored") {
 		return "metadata-first";
 	}
-	if (hardAnchorFamilies.length > 0 && bodyFamilies.length > 0) {
+	if (
+		input.hardAnchorFamilies.length > 0 &&
+		input.bodyFamilies.length > 0 &&
+		shouldPreferMetadataRouteForShortHanHybrid(input)
+	) {
+		return "metadata-first";
+	}
+	if (input.hardAnchorFamilies.length > 0 && input.bodyFamilies.length > 0) {
 		return "body-with-anchor";
 	}
 	return "body-first";
@@ -225,6 +245,8 @@ function selectQueryKind(input: {
 	hasPathShapeHint: boolean;
 	hasTitleShapeHint: boolean;
 	hasMixedScriptHint: boolean;
+	hasPureHanMultiTermQuery: boolean;
+	hasShortHanFallbackBigramExpansion: boolean;
 	probes: readonly CoverageLexicalFamilyProbe[];
 }): {
 	queryKind: CoverageLexicalQueryKind;
@@ -243,6 +265,8 @@ function selectQueryKind(input: {
 		hasPathShapeHint,
 		hasTitleShapeHint,
 		hasMixedScriptHint,
+		hasPureHanMultiTermQuery,
+		hasShortHanFallbackBigramExpansion,
 		probes,
 	} = input;
 	const reasons: string[] = [];
@@ -282,25 +306,38 @@ function selectQueryKind(input: {
 		activeFamilies.some((family) =>
 			familyEvidence.get(family.index)?.spanKinds.includes("metadata_intent"),
 		);
+	const suppressPureHanShortMetadataOnly =
+		shortQueryOverlay &&
+		hasPureHanMultiTermQuery &&
+		!hasShortHanFallbackBigramExpansion &&
+		bodyFamilies.length > 0 &&
+		!hasStrongMetadataIntent &&
+		!hasPathShapeHint &&
+		!hasTitleShapeHint &&
+		titlePathSpanCount === 0 &&
+		meaningfulBodyMass >= Math.min(0.45, meaningfulAnchorMass * 0.75);
 	const longQueryMetadataDominance =
 		!shortQueryOverlay &&
 		hasStrongMetadataIntent &&
 		meaningfulAnchorMass >= Math.max(0.9, meaningfulBodyMass * 1.15) &&
 		decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass);
+	const shortQueryMetadataDominance =
+		shortQueryOverlay &&
+		!suppressPureHanShortMetadataOnly &&
+		(hasTitleShapeHint ||
+			hasPathShapeHint ||
+			hasMetadataHint ||
+			structuredAnchorMass >= Math.max(0.45, meaningfulBodyMass * 0.9) ||
+			titlePathSpanCount > 0 ||
+			metadataIntentSpanCount > 0 ||
+			decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass) ||
+			metadataDominantAnchorMass >=
+				Math.max(0.45, meaningfulAnchorMass * 0.6));
 	const looksMetadataOnly =
 		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
 		(bodyFamilies.length === 0 ||
 			longQueryMetadataDominance ||
-			(shortQueryOverlay &&
-				(hasTitleShapeHint ||
-					hasPathShapeHint ||
-					hasMetadataHint ||
-					structuredAnchorMass >= Math.max(0.45, meaningfulBodyMass * 0.9) ||
-					titlePathSpanCount > 0 ||
-					metadataIntentSpanCount > 0 ||
-					decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass) ||
-					metadataDominantAnchorMass >=
-						Math.max(0.45, meaningfulAnchorMass * 0.6))));
+			shortQueryMetadataDominance);
 	if (hasMixedScriptHint && activeFamilies.some(isBridgeEligibleFamily)) {
 		reasons.push("mixed-script hint with bridge-eligible families");
 		return {
@@ -528,6 +565,59 @@ function detectMixedScriptHint(queryTerms: readonly string[]): boolean {
 	return hasHan && hasAscii;
 }
 
+function analyzeShortHanQueryShape(
+	queryText: string,
+	queryTerms: readonly string[],
+): {
+	isPureHanMultiTerm: boolean;
+	isFallbackBigramExpansion: boolean;
+} {
+	const normalized = queryText.trim().normalize("NFKC");
+	const compact = normalized.replace(/\s+/gu, "");
+	if (!/^[\p{Script=Han}]+$/u.test(compact)) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const hanCharCount = compact.match(/\p{Script=Han}/gu)?.length ?? 0;
+	if (hanCharCount < 2 || hanCharCount > 6) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const hanTerms = queryTerms
+		.map((term) => term.trim())
+		.filter((term) => term.length > 0);
+	if (hanTerms.length < 2) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	if (!hanTerms.every((term) => /^[\p{Script=Han}]+$/u.test(term))) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const fallbackBigrams = new Set(extractHanBigrams(compact));
+	if (fallbackBigrams.size === 0) {
+		return {
+			isPureHanMultiTerm: true,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const expandedTerms = hanTerms.filter((term) => term !== compact);
+	return {
+		isPureHanMultiTerm: true,
+		isFallbackBigramExpansion:
+			expandedTerms.length > 0 &&
+			expandedTerms.every((term) => fallbackBigrams.has(term)),
+	};
+}
+
 function computeAnchorPriority(
 	family: CoverageLexicalPlan["families"][number],
 	probes: readonly CoverageLexicalFamilyProbe[],
@@ -579,6 +669,21 @@ function computeAnchorPriority(
 		spanBonus +
 		shapeBonus
 	);
+}
+
+function shouldPreferMetadataRouteForShortHanHybrid(input: {
+	queryKind: CoverageLexicalQueryKind;
+	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>;
+	hasShortHanFallbackBigramExpansion: boolean;
+}): boolean {
+	if (
+		input.queryKind !== "anchor_body_hybrid" ||
+		!input.hasShortHanFallbackBigramExpansion ||
+		input.hardAnchorFamilies.length === 0
+	) {
+		return false;
+	}
+	return true;
 }
 
 function computeBodyPriority(

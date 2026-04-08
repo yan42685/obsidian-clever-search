@@ -1,4 +1,4 @@
-import { buildCoverageLexicalPlan } from "src/services/search/coverage-lexical/coverage-lexical-planner";
+﻿import { buildCoverageLexicalPlan } from "src/services/search/coverage-lexical/coverage-lexical-planner";
 import type { CoverageLexicalFamilyProbe } from "src/services/search/coverage-lexical/coverage-lexical-types";
 
 describe("coverage lexical planner", () => {
@@ -38,6 +38,7 @@ describe("coverage lexical planner", () => {
 		);
 
 		expect(plan.queryKind).toBe("anchor_body_hybrid");
+		expect(plan.route).toBe("body-with-anchor");
 		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toEqual(
 			expect.arrayContaining(["vector", "cache"]),
 		);
@@ -541,6 +542,141 @@ describe("coverage lexical planner", () => {
 		expect(plan.weightedAnchorMass).toBeGreaterThan(0);
 		expect(plan.explain.familyReasons.some((reason) => reason.term === "aliases")).toBe(
 			true,
+		);
+	});
+
+	test("prefers metadata-first route for short Han fallback-bigram hybrids with strong structured anchors", () => {
+		const queryTerms = [
+			"\u7535\u5b50\u6280",
+			"\u7535\u5b50",
+			"\u5b50\u6280",
+		];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 3,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.92,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.58,
+				familyTier: "support",
+			},
+			{
+				bodyExactDocCount: 4,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 4,
+				familyWeight: 0.34,
+				familyTier: "weak",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"\u7535\u5b50\u6280",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.queryKind).toBe("anchor_body_hybrid");
+		expect(plan.route).toBe("metadata-first");
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toContain(
+			"\u7535\u5b50\u6280",
+		);
+	});
+
+	test("does not treat jieba-style Han words as fallback bigram expansion", () => {
+		const queryTerms = [
+			"\u7535\u5b50\u6280\u672f",
+			"\u5165\u95e8",
+		];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 3,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.92,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.68,
+				familyTier: "support",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"\u7535\u5b50\u6280\u672f\u5165\u95e8",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.queryKind).toBe("anchor_body_hybrid");
+		expect(plan.route).toBe("body-with-anchor");
+	});
+
+	test("uses the same tier-based short-query anchor rule for latin support families", () => {
+		const queryTerms = ["checkpoint", "restore"];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 3,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.92,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.62,
+				familyTier: "support",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan("checkpoint restore", queryTerms, probes);
+
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toContain(
+			"checkpoint",
+		);
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).not.toContain(
+			"restore",
+		);
+		expect(plan.supportBodyFamilies.map((family) => family.normalizedTerm)).toContain(
+			"restore",
 		);
 	});
 });

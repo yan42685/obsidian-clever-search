@@ -99,9 +99,7 @@ function classifyFamilyRole(
 	const shortMetadataAnchor =
 		shortQueryOverlay &&
 		strength === "core" &&
-		(probe?.metadataExactDocCount ?? 0) > 0 &&
-		(probe?.metadataExactDocCount ?? 0) >=
-			Math.max(1, Math.floor((probe?.bodyExactDocCount ?? 0) / 2));
+		meetsShortMetadataAnchorThreshold(term, probe);
 	if (shortMetadataAnchor) {
 		return "anchor";
 	}
@@ -116,6 +114,39 @@ function classifyFamilyRole(
 		return "noise";
 	}
 	return "body";
+}
+
+function meetsShortMetadataAnchorThreshold(
+	term: string,
+	probe: CoverageLexicalFamilyProbe | undefined,
+): boolean {
+	const metadataExactDocCount = probe?.metadataExactDocCount ?? 0;
+	if (metadataExactDocCount <= 0) {
+		return false;
+	}
+	const bodyExactDocCount = probe?.bodyExactDocCount ?? 0;
+	const familyTier = inferShortMetadataAnchorTier(term, probe);
+	if (familyTier === "weak") {
+		return false;
+	}
+	const minimumMetadataDocCount =
+		familyTier === "decisive"
+			? Math.max(1, Math.floor(bodyExactDocCount / 2))
+			: Math.max(1, bodyExactDocCount);
+	return metadataExactDocCount >= minimumMetadataDocCount;
+}
+
+function inferShortMetadataAnchorTier(
+	term: string,
+	probe: CoverageLexicalFamilyProbe | undefined,
+): CoverageLexicalFamilyProbe["familyTier"] {
+	if (probe?.familyTier) {
+		return probe.familyTier;
+	}
+	if (isWeakToken(term)) {
+		return "weak";
+	}
+	return "decisive";
 }
 
 function isMetadataCapableFamily(term: string): boolean {
