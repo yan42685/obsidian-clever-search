@@ -1250,6 +1250,28 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		}
 		const unresolvedState = candidates.get(55);
 		expect(unresolvedState).toBeDefined();
+		coarseRanked[55].coverageLexicalSignal = {
+			...coarseRanked[55].coverageLexicalSignal,
+			evidenceMassSummary: {
+				decisiveCoveredMass: 0,
+				decisiveExactIdentityMass: 0,
+				decisiveExactBodyMass: 0,
+				decisivePrefixIdentityMass: 0,
+				decisivePrefixBodyMass: 0,
+				decisiveFuzzyIdentityMass: 0,
+				decisiveFuzzyBodyMass: 0,
+				supportCoveredMass: 0,
+				supportExactIdentityMass: 0,
+				supportExactBodyMass: 0,
+				supportPrefixIdentityMass: 0,
+				supportPrefixBodyMass: 0,
+				supportFuzzyIdentityMass: 0,
+				supportFuzzyBodyMass: 0,
+				witnessMass: 0,
+				weakBridgeMass: 0,
+				displayRawMass: 35,
+			},
+		};
 		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
 		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 2;
 		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 3;
@@ -1263,5 +1285,71 @@ describe("coverage lexical phase 1 memory experiments", () => {
 
 		expect(hydratedDocIds.has(55)).toBe(true);
 		expect(hydratedDocIds.size).toBeLessThan(40);
+	});
+
+	test("coarse hydration tail rescue skips unresolved evidence below the cutoff bound", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "metadata_only_anchored",
+			route: "metadata-first",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 60 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 60 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(60 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(55);
+		expect(unresolvedState).toBeDefined();
+		coarseRanked[55].coverageLexicalSignal = {
+			...coarseRanked[55].coverageLexicalSignal,
+			evidenceMassSummary: {
+				decisiveCoveredMass: 0,
+				decisiveExactIdentityMass: 0,
+				decisiveExactBodyMass: 0,
+				decisivePrefixIdentityMass: 0,
+				decisivePrefixBodyMass: 0,
+				decisiveFuzzyIdentityMass: 0,
+				decisiveFuzzyBodyMass: 0,
+				supportCoveredMass: 0,
+				supportExactIdentityMass: 0,
+				supportExactBodyMass: 0,
+				supportPrefixIdentityMass: 0,
+				supportPrefixBodyMass: 0,
+				supportFuzzyIdentityMass: 0,
+				supportFuzzyBodyMass: 0,
+				witnessMass: 0,
+				weakBridgeMass: 0,
+				displayRawMass: 35,
+			},
+		};
+		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 0.5;
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(55)).toBe(false);
 	});
 });

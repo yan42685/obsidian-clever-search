@@ -2542,6 +2542,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const unresolvedTailCandidates: Array<{
 			docId: number;
 			index: number;
+			potentialUpperBound: number;
 			unresolvedFamilyCount: number;
 			unresolvedWeightUpperBound: number;
 		}> = [];
@@ -2554,9 +2555,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			if (!state || !hasUnresolvedCoverageLexicalBodyUpgradePotential(state)) {
 				continue;
 			}
+			const potentialUpperBound = computeCoverageLexicalCoarseHydrationPotentialUpperBound(
+				candidate,
+				state,
+			);
+			if (potentialUpperBound < cutoffLowerBound) {
+				continue;
+			}
 			unresolvedTailCandidates.push({
 				docId: candidate.docId,
 				index,
+				potentialUpperBound,
 				unresolvedFamilyCount:
 					state.unresolvedBodyEvidence.unresolvedFamilyCount,
 				unresolvedWeightUpperBound:
@@ -2564,6 +2573,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			});
 		}
 		unresolvedTailCandidates.sort((left, right) => {
+			const potentialDecision =
+				right.potentialUpperBound - left.potentialUpperBound;
+			if (potentialDecision !== 0) {
+				return potentialDecision;
+			}
 			const weightDecision =
 				right.unresolvedWeightUpperBound - left.unresolvedWeightUpperBound;
 			if (weightDecision !== 0) {
