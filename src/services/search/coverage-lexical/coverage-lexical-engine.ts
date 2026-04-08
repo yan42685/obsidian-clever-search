@@ -169,6 +169,11 @@ type CoverageLexicalDisplayPruneConfig = {
 	enabled: boolean;
 	top2To4Ratio: number;
 	top5PlusRatio: number;
+	countPruneMinTopCount: number;
+	top2To4CountRatio: number;
+	top5PlusCountRatio: number;
+	top2To4CountSlack: number;
+	top5PlusCountSlack: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
@@ -502,7 +507,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	): Promise<boolean> {
 		if (!Array.isArray(data)) {
 			try {
-				await this.clearPersistedBodyTokenColdStore();
 				if (!isSerializedCoverageLexicalBinarySnapshot(data)) {
 					logger.warn(
 						"coverage-lexical currently supports live documents or its own binary snapshot only",
@@ -520,7 +524,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			}
 		}
 
-		await this.clearPersistedBodyTokenColdStore();
 		this.clearIndex();
 		await this.addDocuments(data);
 		return true;
@@ -1755,16 +1758,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (upserts.length > 0) {
 			await store.upsertDocuments(upserts);
 		}
-	}
-
-	private async clearPersistedBodyTokenColdStore(): Promise<void> {
-		this.pendingBodyTokenColdDeletes.clear();
-		this.pendingBodyTokenColdUpsertsByPath.clear();
-		const store = this.getBodyTokenColdStore();
-		if (!store) {
-			return;
-		}
-		await store.clearAll();
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -3274,7 +3267,7 @@ function rankCoverageLexicalDocResults(
 	});
 }
 
-function pruneWeakCoverageLexicalDisplayResults(
+export function pruneWeakCoverageLexicalDisplayResults(
 	results: readonly CoverageLexicalDocRankableResult[],
 	config: CoverageLexicalDisplayPruneConfig,
 ): CoverageLexicalDocRankableResult[] {
@@ -3285,24 +3278,89 @@ function pruneWeakCoverageLexicalDisplayResults(
 		results[0].coverageLexicalSignal,
 		config,
 	);
-	if (topCoverage <= 0) {
+	const topMatchedFamilyCount =
+		results[0].coverageLexicalSignal.familyCountSummary.totalMatchedFamilyCount;
+	const useCountPrune = topMatchedFamilyCount >= config.countPruneMinTopCount;
+	if (!useCountPrune && topCoverage <= 0) {
 		return [...results];
 	}
 	const kept: CoverageLexicalDocRankableResult[] = [results[0]];
 	for (let index = 1; index < results.length; index += 1) {
 		const result = results[index];
+		const candidateMatchedFamilyCount =
+			result.coverageLexicalSignal.familyCountSummary.totalMatchedFamilyCount;
 		const candidateCoverage = computeCoverageLexicalDisplayCoverage(
 			result.coverageLexicalSignal,
 			config,
 		);
 		const thresholdRatio =
 			index <= 3 ? config.top2To4Ratio : config.top5PlusRatio;
-		if (candidateCoverage <= topCoverage * thresholdRatio) {
+		if (useCountPrune) {
+			const countFloor = computeCoverageLexicalDisplayCountFloor(
+				topMatchedFamilyCount,
+				index,
+				config,
+			);
+			if (candidateMatchedFamilyCount >= countFloor) {
+				kept.push(result);
+				continue;
+			}
+			if (
+				shouldRescueCoverageLexicalDisplayResult(
+					result.coverageLexicalSignal,
+					candidateCoverage,
+					topCoverage,
+					thresholdRatio,
+				)
+			) {
+				kept.push(result);
+			}
 			continue;
 		}
-		kept.push(result);
+		if (candidateCoverage > topCoverage * thresholdRatio) {
+			kept.push(result);
+		}
 	}
 	return kept;
+}
+
+function computeCoverageLexicalDisplayCountFloor(
+	topMatchedFamilyCount: number,
+	index: number,
+	config: CoverageLexicalDisplayPruneConfig,
+): number {
+	const ratio =
+		index <= 3 ? config.top2To4CountRatio : config.top5PlusCountRatio;
+	const slack =
+		index <= 3 ? config.top2To4CountSlack : config.top5PlusCountSlack;
+	return Math.max(
+		1,
+		Math.min(
+			Math.max(1, topMatchedFamilyCount - slack),
+			Math.ceil(topMatchedFamilyCount * ratio),
+		),
+	);
+}
+
+function shouldRescueCoverageLexicalDisplayResult(
+	signal: CoverageLexicalFamilySignal,
+	candidateCoverage: number,
+	topCoverage: number,
+	thresholdRatio: number,
+): boolean {
+	if (topCoverage <= 0) {
+		return false;
+	}
+	const hasStrongWitness =
+		signal.coreBody.exactWeight > 0 ||
+		signal.metadataIdentity.phraseCoverageCount > 0 ||
+		signal.localEvidence.primary.exactCoreWeight > 0 ||
+		signal.localEvidence.primary.orderedPairCount > 0 ||
+		signal.phraseBridgeCount > 0;
+	if (!hasStrongWitness) {
+		return false;
+	}
+	return candidateCoverage > topCoverage * thresholdRatio;
 }
 
 function computeCoverageLexicalDisplayCoverage(
@@ -3336,6 +3394,26 @@ function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPrune
 		top5PlusRatio: readCoverageLexicalNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
 			0.5,
+		),
+		countPruneMinTopCount: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
+			3,
+		),
+		top2To4CountRatio: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
+			0.67,
+		),
+		top5PlusCountRatio: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
+			0.5,
+		),
+		top2To4CountSlack: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
+			1,
+		),
+		top5PlusCountSlack: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
+			2,
 		),
 		bodyCharWeight: readCoverageLexicalNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",

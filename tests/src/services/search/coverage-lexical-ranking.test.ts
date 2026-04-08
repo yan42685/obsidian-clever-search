@@ -247,6 +247,60 @@ function compareSignals(
 	return compareCoverageLexicalResultSignals(left, right, plan);
 }
 
+function createDisplayPruneConfig() {
+	return {
+		enabled: true,
+		top2To4Ratio: 0.34,
+		top5PlusRatio: 0.5,
+		countPruneMinTopCount: 3,
+		top2To4CountRatio: 0.67,
+		top5PlusCountRatio: 0.5,
+		top2To4CountSlack: 1,
+		top5PlusCountSlack: 2,
+		bodyCharWeight: 0.5,
+		metadataCharWeight: 0.5,
+		tagExactWeight: 0.75,
+		tagCharWeight: 0.5,
+	};
+}
+
+function createDocRankableResult(
+	docId: number,
+	signal: CoverageLexicalFamilySignal,
+): any {
+	return {
+		docId,
+		queryTerms: [],
+		matchedTerms: signal.matchedTerms,
+		score: 0,
+		coverageLexicalSignal: signal,
+		admissionSignal: {
+			coreCoverageCount: 0,
+			coreCoverageRatio: 0,
+			anchorCoverageCount: 0,
+			softCoverageCount: 0,
+			phraseMatchCount: 0,
+			phraseMatchWeight: 0,
+			compactnessScore: 0,
+		},
+	};
+}
+
+function pruneDisplayResults(results: readonly any[]): any[] {
+	const { pruneWeakCoverageLexicalDisplayResults } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-engine",
+	) as {
+		pruneWeakCoverageLexicalDisplayResults(
+			results: readonly any[],
+			config: ReturnType<typeof createDisplayPruneConfig>,
+		): any[];
+	};
+	return pruneWeakCoverageLexicalDisplayResults(
+		results,
+		createDisplayPruneConfig(),
+	);
+}
+
 function createFamilyCountSummary(
 	overrides: Partial<CoverageLexicalFamilyCountSummary> = {},
 ): CoverageLexicalFamilyCountSummary {
@@ -363,7 +417,7 @@ function createFamilySignal(
 		localEvidence: createEmptyWindowFusionSignal(),
 		matchedTerms: [],
 		...restOverrides,
-	};
+	} as CoverageLexicalFamilySignal;
 }
 
 describe("coverage lexical ranking", () => {
@@ -711,6 +765,124 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
+	});
+
+	test("display prune keeps later results whose family coverage stays near the top result", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 5,
+						bodyMatchedFamilyCount: 5,
+					},
+					coreBody: {
+						coverageCount: 5,
+						exactWeight: 5,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 0,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				3,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 4,
+						bodyMatchedFamilyCount: 4,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 0,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+			3,
+		]);
+	});
+
+	test("display prune rescues low-count results when strong witness and display coverage stay strong", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 5,
+						bodyMatchedFamilyCount: 5,
+					},
+					coreBody: {
+						coverageCount: 5,
+						exactWeight: 5,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coreBody: {
+						coverageCount: 2,
+						exactWeight: 1,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+					localEvidence: {
+						...createEmptyWindowFusionSignal(),
+						primary: {
+							...createEmptyWindowFusionSignal().primary,
+							exactCoreWeight: 1,
+							orderedPairCount: 1,
+						},
+					},
+				}),
+			),
+			createDocRankableResult(
+				3,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 0,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+			2,
+		]);
 	});
 
 	test("prefers stronger metadata identity evidence for mixed-anchor queries", async () => {
