@@ -316,6 +316,18 @@ function selectQueryKind(input: {
 		!hasTitleShapeHint &&
 		titlePathSpanCount === 0 &&
 		meaningfulBodyMass >= Math.min(0.45, meaningfulAnchorMass * 0.75);
+	const shortQueryMetadataEvidenceScore = shortQueryOverlay
+		? computeShortQueryMetadataEvidenceScore({
+				structuredAnchorMass,
+				decisiveAnchorMass,
+				metadataDominantAnchorMass,
+				hasMetadataHint,
+				hasPathShapeHint,
+				hasTitleShapeHint,
+				titlePathSpanCount,
+				metadataIntentSpanCount,
+			})
+		: 0;
 	const longQueryMetadataDominance =
 		!shortQueryOverlay &&
 		hasStrongMetadataIntent &&
@@ -324,15 +336,15 @@ function selectQueryKind(input: {
 	const shortQueryMetadataDominance =
 		shortQueryOverlay &&
 		!suppressPureHanShortMetadataOnly &&
-		(hasTitleShapeHint ||
-			hasPathShapeHint ||
-			hasMetadataHint ||
-			structuredAnchorMass >= Math.max(0.45, meaningfulBodyMass * 0.9) ||
-			titlePathSpanCount > 0 ||
-			metadataIntentSpanCount > 0 ||
-			decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass) ||
-			metadataDominantAnchorMass >=
-				Math.max(0.45, meaningfulAnchorMass * 0.6));
+		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
+		shortQueryMetadataEvidenceScore >=
+			Math.max(
+				1.05,
+				meaningfulBodyMass * 0.95 + decisiveBodyMass * 0.2,
+			) &&
+		(structuredAnchorMass >= Math.max(0.35, meaningfulBodyMass * 0.35) ||
+			decisiveAnchorMass >= Math.max(0.35, decisiveBodyMass) ||
+			metadataDominantAnchorMass >= Math.max(0.35, meaningfulAnchorMass * 0.45));
 	const looksMetadataOnly =
 		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
 		(bodyFamilies.length === 0 ||
@@ -356,12 +368,14 @@ function selectQueryKind(input: {
 		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
 		meaningfulBodyMass > 0 &&
 		(
-			hasMetadataHint ||
-			hasPathShapeHint ||
-			hasTitleShapeHint ||
-			structuredAnchorMass > 0 ||
-			titlePathSpanCount > 0 ||
-			metadataIntentSpanCount > 0
+			shortQueryOverlay
+				? shortQueryMetadataEvidenceScore >= 0.45
+				: hasMetadataHint ||
+					hasPathShapeHint ||
+					hasTitleShapeHint ||
+					structuredAnchorMass > 0 ||
+					titlePathSpanCount > 0 ||
+					metadataIntentSpanCount > 0
 		)
 	) {
 		reasons.push("structured anchor evidence coexists with body evidence");
@@ -833,13 +847,13 @@ function isPlannerAnchorCandidate(
 	let qualifies = false;
 	if (evidence.pathBasenameSignal > 0) {
 		qualifies =
-			shortQueryOverlay ||
-			evidence.pathBasenameSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.5));
+			evidence.pathBasenameSignal >=
+			computePlannerAnchorThreshold("path", probe, shortQueryOverlay);
 	}
 	if (!qualifies && evidence.titleSignal > 0) {
 		qualifies =
-			shortQueryOverlay ||
-			evidence.titleSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.75));
+			evidence.titleSignal >=
+			computePlannerAnchorThreshold("title", probe, shortQueryOverlay);
 	}
 	if (
 		!qualifies &&
@@ -848,11 +862,64 @@ function isPlannerAnchorCandidate(
 		(probe.metadataExactDocCount ?? 0) > 0
 	) {
 		qualifies =
-			shortQueryOverlay ||
 			(probe.metadataExactDocCount ?? 0) >=
-				Math.max(1, Math.floor((probe.bodyExactDocCount ?? 0) * 0.4));
+				computePlannerAnchorThreshold("metadata", probe, shortQueryOverlay);
 	}
 	return qualifies;
+}
+
+function computeShortQueryMetadataEvidenceScore(input: {
+	structuredAnchorMass: number;
+	decisiveAnchorMass: number;
+	metadataDominantAnchorMass: number;
+	hasMetadataHint: boolean;
+	hasPathShapeHint: boolean;
+	hasTitleShapeHint: boolean;
+	titlePathSpanCount: number;
+	metadataIntentSpanCount: number;
+}): number {
+	return (
+		Math.min(1.2, input.structuredAnchorMass * 0.7) +
+		Math.min(1.0, input.decisiveAnchorMass * 0.8) +
+		Math.min(0.8, input.metadataDominantAnchorMass * 0.7) +
+		(input.hasMetadataHint ? 0.55 : 0) +
+		(input.hasPathShapeHint ? 0.45 : 0) +
+		(input.hasTitleShapeHint ? 0.35 : 0) +
+		Math.min(0.5, input.titlePathSpanCount * 0.25) +
+		Math.min(0.7, input.metadataIntentSpanCount * 0.35)
+	);
+}
+
+function computePlannerAnchorThreshold(
+	channel: "path" | "title" | "metadata",
+	probe: CoverageLexicalFamilyProbe,
+	shortQueryOverlay: boolean,
+): number {
+	const bodyExactDocCount = probe.bodyExactDocCount ?? 0;
+	if (!shortQueryOverlay) {
+		return channel === "path"
+			? Math.max(1, Math.floor(bodyExactDocCount * 0.5))
+			: channel === "title"
+				? Math.max(1, Math.floor(bodyExactDocCount * 0.75))
+				: Math.max(1, Math.floor(bodyExactDocCount * 0.4));
+	}
+	switch (getProbeFamilyTier(probe)) {
+		case "decisive":
+			return channel === "path"
+				? Math.max(1, Math.floor(bodyExactDocCount * 0.35))
+				: channel === "title"
+					? Math.max(1, Math.floor(bodyExactDocCount * 0.5))
+					: Math.max(1, Math.floor(bodyExactDocCount * 0.3));
+		case "support":
+			return channel === "path"
+				? Math.max(1, Math.floor(bodyExactDocCount * 0.75))
+				: channel === "title"
+					? Math.max(1, Math.floor(bodyExactDocCount * 0.9))
+					: Math.max(1, bodyExactDocCount);
+		case "weak":
+		default:
+			return Number.POSITIVE_INFINITY;
+	}
 }
 
 function extractCoverageLexicalQuerySpans(queryText: string): CoverageLexicalQuerySpan[] {
