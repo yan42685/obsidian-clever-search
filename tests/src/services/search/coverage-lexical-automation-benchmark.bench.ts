@@ -140,6 +140,24 @@ type RecallContractCase = {
 	type: RecallContractType;
 };
 
+type RelaxedHybridByQueryKindMetric = {
+	queryCount: number;
+	laneRanCount: number;
+	relevantCandidateHits: number;
+	relevantPrefilterHits: number;
+	relevantAdmittedHits: number;
+	overlapCandidateWithStrictHybrid: number;
+	overlapCandidateWithLocalBody: number;
+	overlapAdmittedWithStrictHybrid: number;
+	overlapAdmittedWithLocalBody: number;
+	exclusiveCandidateHits: number;
+	exclusiveAdmittedHits: number;
+};
+
+type RelaxedHybridAnalysis = {
+	byQueryKind: Record<string, RelaxedHybridByQueryKindMetric>;
+};
+
 type EngineLike = {
 	addDocuments(documents: IndexedDocument[]): Promise<void>;
 	searchFiles(request: {
@@ -2310,6 +2328,7 @@ async function runCoverageRecallContract(
 	laneAdmitDropCounts: Record<string, number>;
 	queryKindCounts: Record<string, number>;
 	queryKindAverageLaneCount: Record<string, number>;
+	relaxedHybridAnalysis: RelaxedHybridAnalysis;
 	misses: Array<{
 		query: string;
 		type: RecallContractType;
@@ -2348,6 +2367,10 @@ async function runCoverageRecallContract(
 	const laneAdmitDropCounts: Record<string, number> = {};
 	const queryKindCounts: Record<string, number> = {};
 	const queryKindLaneTotals: Record<string, number> = {};
+	const relaxedHybridByQueryKind: Record<
+		string,
+		RelaxedHybridByQueryKindMetric
+	> = {};
 	const typeTotals = new Map<
 		RecallContractType,
 		{ unionHits: number; misses: number; count: number }
@@ -2397,6 +2420,75 @@ async function runCoverageRecallContract(
 		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
 		queryKindLaneTotals[plan.queryKind] =
 			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const relaxedStats =
+			relaxedHybridByQueryKind[plan.queryKind] ??
+			(relaxedHybridByQueryKind[plan.queryKind] = {
+				queryCount: 0,
+				laneRanCount: 0,
+				relevantCandidateHits: 0,
+				relevantPrefilterHits: 0,
+				relevantAdmittedHits: 0,
+				overlapCandidateWithStrictHybrid: 0,
+				overlapCandidateWithLocalBody: 0,
+				overlapAdmittedWithStrictHybrid: 0,
+				overlapAdmittedWithLocalBody: 0,
+				exclusiveCandidateHits: 0,
+				exclusiveAdmittedHits: 0,
+			});
+		relaxedStats.queryCount += 1;
+		const laneByName = new Map(
+			debug.lanes.map((lane) => [lane.laneName, lane] as const),
+		);
+		const relaxedLane = laneByName.get("relaxed_hybrid_lane");
+		const strictHybridLane = laneByName.get("strict_hybrid_lane");
+		const localBodyLane = laneByName.get("local_body_lane");
+		if (relaxedLane) {
+			relaxedStats.laneRanCount += 1;
+			const relaxedRelevantCandidate = relaxedLane.candidatePaths.includes(
+				queryCase.relevantPath,
+			);
+			const relaxedRelevantPrefilter = relaxedLane.prefilteredPaths.includes(
+				queryCase.relevantPath,
+			);
+			const relaxedRelevantAdmitted = relaxedLane.admittedPaths.includes(
+				queryCase.relevantPath,
+			);
+			const strictRelevantCandidate =
+				strictHybridLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+			const strictRelevantAdmitted =
+				strictHybridLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+			const localRelevantCandidate =
+				localBodyLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+			const localRelevantAdmitted =
+				localBodyLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+			if (relaxedRelevantCandidate) {
+				relaxedStats.relevantCandidateHits += 1;
+				if (strictRelevantCandidate) {
+					relaxedStats.overlapCandidateWithStrictHybrid += 1;
+				}
+				if (localRelevantCandidate) {
+					relaxedStats.overlapCandidateWithLocalBody += 1;
+				}
+				if (!strictRelevantCandidate && !localRelevantCandidate) {
+					relaxedStats.exclusiveCandidateHits += 1;
+				}
+			}
+			if (relaxedRelevantPrefilter) {
+				relaxedStats.relevantPrefilterHits += 1;
+			}
+			if (relaxedRelevantAdmitted) {
+				relaxedStats.relevantAdmittedHits += 1;
+				if (strictRelevantAdmitted) {
+					relaxedStats.overlapAdmittedWithStrictHybrid += 1;
+				}
+				if (localRelevantAdmitted) {
+					relaxedStats.overlapAdmittedWithLocalBody += 1;
+				}
+				if (!strictRelevantAdmitted && !localRelevantAdmitted) {
+					relaxedStats.exclusiveAdmittedHits += 1;
+				}
+			}
+		}
 		const hit = candidates.has(queryCase.relevantPath);
 		if (hit) {
 			unionHits += 1;
@@ -2501,7 +2593,151 @@ async function runCoverageRecallContract(
 				round((queryKindLaneTotals[queryKind] ?? 0) / Math.max(1, count)),
 			]),
 		),
+		relaxedHybridAnalysis: {
+			byQueryKind: relaxedHybridByQueryKind,
+		},
 		misses,
+	};
+}
+
+async function runCoverageLaneStudy(
+	engine: any,
+	tokenizer: MockTokenizer,
+	queryCases: QueryCase[],
+): Promise<{
+	queryKindCounts: Record<string, number>;
+	queryKindAverageLaneCount: Record<string, number>;
+	relaxedHybridAnalysis: RelaxedHybridAnalysis;
+}> {
+	const { buildCoverageLexicalPlan } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-planner",
+	);
+	const {
+		buildCoverageLexicalPhraseSignatures,
+		buildCoverageLexicalStructuredMetadataSignatures,
+	} = require("src/services/search/coverage-lexical/coverage-lexical-bridge");
+	const {
+		collectCoverageLexicalCandidateStatesWithDebug,
+	} = require("src/services/search/coverage-lexical/coverage-lexical-recall");
+
+	const index = createCoverageRecallIndex(engine);
+	const queryKindCounts: Record<string, number> = {};
+	const queryKindLaneTotals: Record<string, number> = {};
+	const relaxedHybridByQueryKind: Record<
+		string,
+		RelaxedHybridByQueryKindMetric
+	> = {};
+
+	for (const queryCase of queryCases) {
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryCase.query, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engine.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryCase.query, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryCase.query,
+				plan.families,
+			),
+		];
+		const { debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			index,
+			plan,
+			phraseSignatures,
+			{
+				queryText: queryCase.query,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 10,
+			},
+		);
+		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
+		queryKindLaneTotals[plan.queryKind] =
+			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const relaxedStats =
+			relaxedHybridByQueryKind[plan.queryKind] ??
+			(relaxedHybridByQueryKind[plan.queryKind] = {
+				queryCount: 0,
+				laneRanCount: 0,
+				relevantCandidateHits: 0,
+				relevantPrefilterHits: 0,
+				relevantAdmittedHits: 0,
+				overlapCandidateWithStrictHybrid: 0,
+				overlapCandidateWithLocalBody: 0,
+				overlapAdmittedWithStrictHybrid: 0,
+				overlapAdmittedWithLocalBody: 0,
+				exclusiveCandidateHits: 0,
+				exclusiveAdmittedHits: 0,
+			});
+		relaxedStats.queryCount += 1;
+		const laneByName = new Map(
+			debug.lanes.map((lane) => [lane.laneName, lane] as const),
+		);
+		const relaxedLane = laneByName.get("relaxed_hybrid_lane");
+		const strictHybridLane = laneByName.get("strict_hybrid_lane");
+		const localBodyLane = laneByName.get("local_body_lane");
+		if (!relaxedLane) {
+			continue;
+		}
+		relaxedStats.laneRanCount += 1;
+		const relaxedRelevantCandidate = relaxedLane.candidatePaths.includes(
+			queryCase.relevantPath,
+		);
+		const relaxedRelevantPrefilter = relaxedLane.prefilteredPaths.includes(
+			queryCase.relevantPath,
+		);
+		const relaxedRelevantAdmitted = relaxedLane.admittedPaths.includes(
+			queryCase.relevantPath,
+		);
+		const strictRelevantCandidate =
+			strictHybridLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+		const strictRelevantAdmitted =
+			strictHybridLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+		const localRelevantCandidate =
+			localBodyLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+		const localRelevantAdmitted =
+			localBodyLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+		if (relaxedRelevantCandidate) {
+			relaxedStats.relevantCandidateHits += 1;
+			if (strictRelevantCandidate) {
+				relaxedStats.overlapCandidateWithStrictHybrid += 1;
+			}
+			if (localRelevantCandidate) {
+				relaxedStats.overlapCandidateWithLocalBody += 1;
+			}
+			if (!strictRelevantCandidate && !localRelevantCandidate) {
+				relaxedStats.exclusiveCandidateHits += 1;
+			}
+		}
+		if (relaxedRelevantPrefilter) {
+			relaxedStats.relevantPrefilterHits += 1;
+		}
+		if (relaxedRelevantAdmitted) {
+			relaxedStats.relevantAdmittedHits += 1;
+			if (strictRelevantAdmitted) {
+				relaxedStats.overlapAdmittedWithStrictHybrid += 1;
+			}
+			if (localRelevantAdmitted) {
+				relaxedStats.overlapAdmittedWithLocalBody += 1;
+			}
+			if (!strictRelevantAdmitted && !localRelevantAdmitted) {
+				relaxedStats.exclusiveAdmittedHits += 1;
+			}
+		}
+	}
+
+	return {
+		queryKindCounts,
+		queryKindAverageLaneCount: Object.fromEntries(
+			Object.entries(queryKindCounts).map(([queryKind, count]) => [
+				queryKind,
+				round((queryKindLaneTotals[queryKind] ?? 0) / Math.max(1, count)),
+			]),
+		),
+		relaxedHybridAnalysis: {
+			byQueryKind: relaxedHybridByQueryKind,
+		},
 	};
 }
 
@@ -2547,6 +2783,60 @@ function summarizeLaneGuardrails(recallContract: {
 					},
 				] as const;
 			}),
+	);
+}
+
+function summarizeRelaxedHybridAnalysis(recallContract: {
+	relaxedHybridAnalysis: {
+		byQueryKind: Record<
+			string,
+			{
+				queryCount: number;
+				laneRanCount: number;
+				relevantCandidateHits: number;
+				relevantPrefilterHits: number;
+				relevantAdmittedHits: number;
+				overlapCandidateWithStrictHybrid: number;
+				overlapCandidateWithLocalBody: number;
+				overlapAdmittedWithStrictHybrid: number;
+				overlapAdmittedWithLocalBody: number;
+				exclusiveCandidateHits: number;
+				exclusiveAdmittedHits: number;
+			}
+		>;
+	};
+}) {
+	return Object.fromEntries(
+		Object.entries(recallContract.relaxedHybridAnalysis.byQueryKind)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([queryKind, metric]) => [
+				queryKind,
+				{
+					queryCount: metric.queryCount,
+					laneRanCount: metric.laneRanCount,
+					laneRunRate: round(
+						metric.laneRanCount / Math.max(1, metric.queryCount),
+					),
+					relevantCandidateHits: metric.relevantCandidateHits,
+					relevantPrefilterHits: metric.relevantPrefilterHits,
+					relevantAdmittedHits: metric.relevantAdmittedHits,
+					candidateHitRateWhenLaneRuns: round(
+						metric.relevantCandidateHits / Math.max(1, metric.laneRanCount),
+					),
+					admittedHitRateWhenLaneRuns: round(
+						metric.relevantAdmittedHits / Math.max(1, metric.laneRanCount),
+					),
+					overlapCandidateWithStrictHybrid:
+						metric.overlapCandidateWithStrictHybrid,
+					overlapCandidateWithLocalBody: metric.overlapCandidateWithLocalBody,
+					overlapAdmittedWithStrictHybrid:
+						metric.overlapAdmittedWithStrictHybrid,
+					overlapAdmittedWithLocalBody:
+						metric.overlapAdmittedWithLocalBody,
+					exclusiveCandidateHits: metric.exclusiveCandidateHits,
+					exclusiveAdmittedHits: metric.exclusiveAdmittedHits,
+				},
+			]),
 	);
 }
 
@@ -2711,6 +3001,24 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 			shareOfRecallMs: round(phase.shareOfRecallMs),
 			shareOfQueryTime: round(phase.shareOfQueryTime),
 		}));
+	const laneCollectTotal =
+		phaseTiming.recallSubphases?.find((phase) => phase.phase === "laneCollect")
+			?.totalMs ?? 0;
+	const laneCollectBreakdown = (phaseTiming.recallSubphases ?? [])
+		.filter((phase) => phase.phase.startsWith("laneCollect:"))
+		.slice(0, 8)
+		.map((phase) => ({
+			phase: phase.phase,
+			totalMs: round(phase.totalMs),
+			avgMsPerCall: round(phase.avgMsPerCall),
+			avgMsPerUnit: round(phase.avgMsPerUnit),
+			count: phase.count,
+			unitCount: phase.unitCount,
+			shareOfLaneCollectMs: round(
+				laneCollectTotal <= 0 ? 0 : phase.totalMs / laneCollectTotal,
+			),
+			shareOfRecallMs: round(phase.shareOfRecallMs),
+		}));
 	const topLaneEvaluateSubphases = (phaseTiming.laneEvaluateSubphases ?? [])
 		.slice(0, 6)
 		.map((phase) => ({
@@ -2730,6 +3038,7 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 		totalMeasuredMs: round(phaseTiming.totalMeasuredMs),
 		topHotPhases,
 		topRecallSubphases,
+		laneCollectBreakdown,
 		topLaneEvaluateSubphases,
 		admissionVsLocalWindow: {
 			admissionTotalMs: round(admission?.totalMs ?? 0),
@@ -2854,6 +3163,15 @@ describe("coverage lexical automation benchmark", () => {
 					coverageLexicalCore as any,
 					tokenizer,
 					buildRecallContractCases(),
+				),
+		);
+		const relaxedHybridStudy = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				runCoverageLaneStudy(
+					coverageLexicalCore as any,
+					tokenizer,
+					queryCases,
 				),
 		);
 		const coverageCoreVsMini = summarizeWins(
@@ -3171,6 +3489,9 @@ describe("coverage lexical automation benchmark", () => {
 						]),
 					),
 					laneGuardrails: summarizeLaneGuardrails(recallContract),
+					relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
+						recallContract,
+					),
 					prefilterDropMisses: recallContract.misses
 						.filter((miss) =>
 							miss.lanes.some(
@@ -3189,6 +3510,21 @@ describe("coverage lexical automation benchmark", () => {
 					lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
 					laneHitCounts: recallContract.laneHitCounts,
 					misses: recallContract.misses.slice(0, 10),
+				},
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] relaxed-hybrid-study",
+			JSON.stringify(
+				{
+					queryKindCounts: relaxedHybridStudy.queryKindCounts,
+					queryKindAverageLaneCount:
+						relaxedHybridStudy.queryKindAverageLaneCount,
+					relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
+						relaxedHybridStudy,
+					),
 				},
 				null,
 				2,

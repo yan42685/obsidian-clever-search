@@ -66,7 +66,6 @@ export type CoverageLexicalLivePostingKey =
 	| "metadataBasenamePostings"
 	| "metadataFolderCharPostings"
 	| "metadataFolderPostings"
-	| "metadataHeadingCharPostings"
 	| "metadataHeadingPostings"
 	| "metadataTagCharPostings"
 	| "metadataTagFullPostings"
@@ -205,9 +204,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataHeadingCharPostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataHeadingCharPostings,
 		ownership: "plain",
-		live: true,
-		source: "postings.metadataHeadingChar.term",
-		breakdownKey: "metadataHeadingChar",
+		live: false,
 	},
 	{
 		key: "metadataHeadingHanSegmentPostings",

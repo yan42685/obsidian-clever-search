@@ -613,6 +613,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.fileSnapshotStore = undefined;
 		this.nextDocumentId = 0;
 		this.clearLivePostingMaps();
+		this.metadataHeadingCharPostings.clear();
 		this.metadataAliasPhrasePostings.clear();
 		this.metadataBasenamePhrasePostings.clear();
 		this.metadataFolderPhrasePostings.clear();
@@ -1465,7 +1466,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataFolderCharTermCount: this.metadataFolderCharPostings.size,
 			metadataFolderPhraseTermCount: this.metadataFolderPhrasePostings.size,
 			metadataFolderTermCount: this.metadataFolderPostings.size,
-			metadataHeadingCharTermCount: this.metadataHeadingCharPostings.size,
+			metadataHeadingCharTermCount: 0,
 			metadataHeadingPhraseTermCount: this.metadataHeadingPhrasePostings.size,
 			metadataHeadingTermCount: this.metadataHeadingPostings.size,
 			metadataTermCount: countPostingMapKeyUnion(
@@ -1719,6 +1720,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataBasenamePhrasePostings: new Map(),
 			metadataFolderHanSegmentPostings: new Map(),
 			metadataFolderPhrasePostings: new Map(),
+			metadataHeadingCharPostings: new Map(),
 			metadataHeadingHanSegmentPostings: new Map(),
 			metadataHeadingPhrasePostings: new Map(),
 			metadataPostings: new Map(),
@@ -1765,6 +1767,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
 		this.restoreLivePostingState(state);
+		this.metadataHeadingCharPostings.clear();
 		this.offloadResidentDocumentBodyTokens();
 		this.offloadResidentDocumentBodyHanSegments();
 	}
@@ -1793,8 +1796,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				return this.metadataFolderCharPostings;
 			case "metadataFolderPostings":
 				return this.metadataFolderPostings;
-			case "metadataHeadingCharPostings":
-				return this.metadataHeadingCharPostings;
 			case "metadataHeadingPostings":
 				return this.metadataHeadingPostings;
 			case "metadataTagCharPostings":

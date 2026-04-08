@@ -50,7 +50,7 @@ export type CoverageLexicalSnapshotState = {
 };
 
 const SNAPSHOT_MAGIC = [0x43, 0x4c, 0x58, 0x53] as const;
-const SNAPSHOT_VERSION = 4;
+const SNAPSHOT_VERSION = 5;
 const HEADER_BYTES = 12;
 const DIRECTORY_ENTRY_BYTES = 16;
 

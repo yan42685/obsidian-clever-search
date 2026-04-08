@@ -90,6 +90,7 @@ type CoverageLexicalLaneName =
 
 export type CoverageLexicalRecallBenchmarkSubphaseName =
 	| "laneCollect"
+	| `laneCollect:${CoverageLexicalLaneName}`
 	| "laneMerge"
 	| "lanePrefilter"
 	| "laneEvaluate"
@@ -726,6 +727,30 @@ function shouldRunLocalBodyLane(
 	return aggregateCandidates.size < 28;
 }
 
+function measureLaneCollectBenchmarkSubphase<T>(
+	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	laneName: CoverageLexicalLaneName,
+	run: () => T,
+	getUnitCount?: () => number,
+): T {
+	if (!benchmarkHooks) {
+		return run();
+	}
+	const start = performance.now();
+	try {
+		return run();
+	} finally {
+		const elapsedMs = performance.now() - start;
+		const unitCount = getUnitCount?.() ?? 1;
+		benchmarkHooks.recordSubphaseTiming("laneCollect", elapsedMs, unitCount);
+		benchmarkHooks.recordSubphaseTiming(
+			`laneCollect:${laneName}`,
+			elapsedMs,
+			unitCount,
+		);
+	}
+}
+
 function runStrictMetadataLane(
 	index: CoverageLexicalRecallIndex,
 	plan: CoverageLexicalPlan,
@@ -746,9 +771,9 @@ function runStrictMetadataLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	measureRecallBenchmarkSubphase(
+	measureLaneCollectBenchmarkSubphase(
 		benchmarkHooks,
-		"laneCollect",
+		"strict_metadata_lane",
 		() => {
 			collectFamilySetCandidates(
 				index,
@@ -816,9 +841,9 @@ function runStrictHybridLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	measureRecallBenchmarkSubphase(
+	measureLaneCollectBenchmarkSubphase(
 		benchmarkHooks,
-		"laneCollect",
+		"strict_hybrid_lane",
 		() => {
 			collectFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
 				scope: "metadata-only",
@@ -891,9 +916,9 @@ function runRelaxedHybridLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	measureRecallBenchmarkSubphase(
+	measureLaneCollectBenchmarkSubphase(
 		benchmarkHooks,
-		"laneCollect",
+		"relaxed_hybrid_lane",
 		() => {
 			collectFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
 				scope: "metadata-only",
@@ -964,9 +989,9 @@ function runLocalBodyLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	measureRecallBenchmarkSubphase(
+	measureLaneCollectBenchmarkSubphase(
 		benchmarkHooks,
-		"laneCollect",
+		"local_body_lane",
 		() => {
 			collectFamilySetCandidates(index, queryCache, laneCandidates, localBodyFamilies, {
 				scope: "body-only",
@@ -1025,9 +1050,9 @@ function runBridgeLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	measureRecallBenchmarkSubphase(
+	measureLaneCollectBenchmarkSubphase(
 		benchmarkHooks,
-		"laneCollect",
+		"bridge_lane",
 		() => {
 			collectFamilySetCandidates(
 				index,
@@ -1091,16 +1116,15 @@ function runCharFallbackLane(
 		CoverageLexicalCandidateKey,
 		CoverageLexicalCandidateState
 	>();
-	measureRecallBenchmarkSubphase(
+	measureLaneCollectBenchmarkSubphase(
 		benchmarkHooks,
-		"laneCollect",
+		"char_fallback_lane",
 		() => {
 			collectBodyCharGateCandidates(index, charQuery, laneCandidates);
 			for (const postings of [
 				index.metadataBasenameCharPostings,
 				index.metadataAliasCharPostings,
 				index.metadataFolderCharPostings,
-				index.metadataHeadingCharPostings,
 			]) {
 				collectCharCandidates(
 					index,
