@@ -126,7 +126,8 @@ type CoverageLexicalBenchmarkDiagnostic =
 	| "offload"
 	| "wins"
 	| "disagreements"
-	| "misses";
+	| "misses"
+	| "prune";
 
 type CoverageLexicalBenchmarkOffloadDocDebug = {
 	docId: number;
@@ -3397,6 +3398,7 @@ const COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES: readonly CoverageLexicalBench
 		"wins",
 		"disagreements",
 		"misses",
+		"prune",
 	];
 
 function resolveCoverageLexicalBenchmarkDiagnostics(): ReadonlySet<CoverageLexicalBenchmarkDiagnostic> {
@@ -3472,6 +3474,8 @@ describe("coverage lexical automation benchmark", () => {
 		const diagnostics = resolveCoverageLexicalBenchmarkDiagnostics();
 		const includeOffloadDiagnostics =
 			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "offload");
+		const includePruneDiagnostics =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "prune");
 		const tokenizer = createMockTokenizer();
 		const { documents, queryCases } = createAutomationCorpus();
 		const languageMix = computeLanguageMix(documents);
@@ -3642,46 +3646,54 @@ describe("coverage lexical automation benchmark", () => {
 						),
 				),
 		);
-		if ("reset" in container && typeof (container as any).reset === "function") {
-			(container as any).reset();
-		} else {
-			container.clearInstances();
-		}
-		(global as any).window = {
-			localStorage: {
-				getItem: jest.fn(() => "zh"),
-				setItem: jest.fn(),
-				removeItem: jest.fn(),
-			},
-		};
-		const coverageLexicalDisplayLegacy = await withCoverageBodyTokenOffloadEnv(
-			true,
-			async () =>
-				withCoverageDisplayPruneEnv(
-					legacyDisplayPruneConfig,
-					async () =>
-						createEngineHarness(
-							CoverageLexicalFileSearchEngine,
-							tokenizer,
-							"coverage-lexical",
-						),
-				),
-		);
-		const coverageDisplayLegacyResult = await withCoverageBodyTokenOffloadEnv(
-			true,
-			async () =>
-				withCoverageDisplayPruneEnv(
-					legacyDisplayPruneConfig,
-					async () =>
-						runBenchmark(
-							"CoverageLexical(display-legacy)",
-							coverageLexicalDisplayLegacy,
-							documents,
-							queryCases,
-							{ includeOffloadDiagnostics: false },
-						),
-				),
-		);
+		const coverageDisplayLegacyResult = includePruneDiagnostics
+			? await (async () => {
+					if (
+						"reset" in container &&
+						typeof (container as any).reset === "function"
+					) {
+						(container as any).reset();
+					} else {
+						container.clearInstances();
+					}
+					(global as any).window = {
+						localStorage: {
+							getItem: jest.fn(() => "zh"),
+							setItem: jest.fn(),
+							removeItem: jest.fn(),
+						},
+					};
+					const coverageLexicalDisplayLegacy =
+						await withCoverageBodyTokenOffloadEnv(
+							true,
+							async () =>
+								withCoverageDisplayPruneEnv(
+									legacyDisplayPruneConfig,
+									async () =>
+										createEngineHarness(
+											CoverageLexicalFileSearchEngine,
+											tokenizer,
+											"coverage-lexical",
+										),
+								),
+						);
+					return withCoverageBodyTokenOffloadEnv(
+						true,
+						async () =>
+							withCoverageDisplayPruneEnv(
+								legacyDisplayPruneConfig,
+								async () =>
+									runBenchmark(
+										"CoverageLexical(display-legacy)",
+										coverageLexicalDisplayLegacy,
+										documents,
+										queryCases,
+										{ includeOffloadDiagnostics: false },
+									),
+							),
+					);
+			  })()
+			: null;
 		const coverageDisplayVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
 			diagnostics,
 			"wins",
@@ -3729,10 +3741,13 @@ describe("coverage lexical automation benchmark", () => {
 						coverageCoreResult.outcomes,
 				  )
 				: null;
-		const displayVsLegacyResultListDiff = summarizeResultListDifferences(
-			coverageDisplayResult.outcomes,
-			coverageDisplayLegacyResult.outcomes,
-		);
+		const displayVsLegacyResultListDiff =
+			includePruneDiagnostics && coverageDisplayLegacyResult
+				? summarizeResultListDifferences(
+						coverageDisplayResult.outcomes,
+						coverageDisplayLegacyResult.outcomes,
+				  )
+				: null;
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
 		console.log(
@@ -3783,44 +3798,50 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 
-		console.log(
-			"[coverage-lexical-automation-benchmark] display-prune-config",
-			JSON.stringify(
-				{
-					current: displayPruneConfig,
-					legacyBaseline: legacyDisplayPruneConfig,
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] display-prune-diff",
-			JSON.stringify(
-				{
-					changedQueryCount: displayVsLegacyResultListDiff.changedQueryCount,
-					rankChangedQueryCount:
-						displayVsLegacyResultListDiff.rankChangedQueryCount,
-					top1ChangedQueryCount:
-						displayVsLegacyResultListDiff.top1ChangedQueryCount,
-					onlyTailChangedQueryCount:
-						displayVsLegacyResultListDiff.onlyTailChangedQueryCount,
-					byType: displayVsLegacyResultListDiff.byType,
-					bySuite: displayVsLegacyResultListDiff.bySuite,
-					currentObjective: round(coverageDisplayResult.summary.objective),
-					legacyObjective: round(coverageDisplayLegacyResult.summary.objective),
-					currentTop1: round(coverageDisplayResult.summary.top1),
-					legacyTop1: round(coverageDisplayLegacyResult.summary.top1),
-					currentTop3: round(coverageDisplayResult.summary.top3),
-					legacyTop3: round(coverageDisplayLegacyResult.summary.top3),
-					currentTop5: round(coverageDisplayResult.summary.top5),
-					legacyTop5: round(coverageDisplayLegacyResult.summary.top5),
-					topChanges: displayVsLegacyResultListDiff.topChanges,
-				},
-				null,
-				2,
-			),
-		);
+		if (
+			includePruneDiagnostics &&
+			displayVsLegacyResultListDiff &&
+			coverageDisplayLegacyResult
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] display-prune-config",
+				JSON.stringify(
+					{
+						current: displayPruneConfig,
+						legacyBaseline: legacyDisplayPruneConfig,
+					},
+					null,
+					2,
+				),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] display-prune-diff",
+				JSON.stringify(
+					{
+						changedQueryCount: displayVsLegacyResultListDiff.changedQueryCount,
+						rankChangedQueryCount:
+							displayVsLegacyResultListDiff.rankChangedQueryCount,
+						top1ChangedQueryCount:
+							displayVsLegacyResultListDiff.top1ChangedQueryCount,
+						onlyTailChangedQueryCount:
+							displayVsLegacyResultListDiff.onlyTailChangedQueryCount,
+						byType: displayVsLegacyResultListDiff.byType,
+						bySuite: displayVsLegacyResultListDiff.bySuite,
+						currentObjective: round(coverageDisplayResult.summary.objective),
+						legacyObjective: round(coverageDisplayLegacyResult.summary.objective),
+						currentTop1: round(coverageDisplayResult.summary.top1),
+						legacyTop1: round(coverageDisplayLegacyResult.summary.top1),
+						currentTop3: round(coverageDisplayResult.summary.top3),
+						legacyTop3: round(coverageDisplayLegacyResult.summary.top3),
+						currentTop5: round(coverageDisplayResult.summary.top5),
+						legacyTop5: round(coverageDisplayLegacyResult.summary.top5),
+						topChanges: displayVsLegacyResultListDiff.topChanges,
+					},
+					null,
+					2,
+				),
+			);
+		}
 		console.log(
 			"[coverage-lexical-automation-benchmark] summary",
 			JSON.stringify(
