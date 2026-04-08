@@ -9,6 +9,10 @@ import type {
 	CoverageLexicalTagSignal,
 } from "./coverage-lexical-types";
 import { compareCoverageLexicalWindowFusionSignals } from "./coverage-lexical-fusion";
+import {
+	compareCoverageLexicalEvidenceMassSummaries,
+	getCoverageLexicalEvidenceMassSummary,
+} from "./coverage-lexical-evidence";
 
 export function rankCoverageLexicalResults(
 	results: readonly CoverageLexicalRankableResult[],
@@ -38,6 +42,13 @@ export function compareCoverageLexicalResultSignals(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
+	const weightedDecision = compareCoverageLexicalEvidenceMassSummaries(
+		getCoverageLexicalEvidenceMassSummary(left),
+		getCoverageLexicalEvidenceMassSummary(right),
+	);
+	if (weightedDecision !== 0) {
+		return weightedDecision;
+	}
 	const totalDecision = compareDescendingMetric(
 		left.familyCountSummary.totalMatchedFamilyCount,
 		right.familyCountSummary.totalMatchedFamilyCount,

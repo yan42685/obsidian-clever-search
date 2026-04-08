@@ -134,6 +134,28 @@ export function buildCoverageLexicalPlan(
 		hardAnchorFamilies,
 		bodyFamilies,
 	);
+	const weightedAnchorMass = sumProbeFamilyWeight(anchorFamilies, probes);
+	const weightedBodyMass = sumProbeFamilyWeight(bodyFamilies, probes);
+	const decisiveAnchorMass = sumProbeFamilyWeightByTier(
+		anchorFamilies,
+		probes,
+		"decisive",
+	);
+	const decisiveBodyMass = sumProbeFamilyWeightByTier(
+		bodyFamilies,
+		probes,
+		"decisive",
+	);
+	const supportAnchorMass = sumProbeFamilyWeightByTier(
+		anchorFamilies,
+		probes,
+		"support",
+	);
+	const supportBodyMass = sumProbeFamilyWeightByTier(
+		bodyFamilies,
+		probes,
+		"support",
+	);
 
 	return {
 		families,
@@ -154,6 +176,13 @@ export function buildCoverageLexicalPlan(
 		coreFamilyCount: coreFamilies.length,
 		anchorFamilyCount: anchorFamilies.length,
 		bodyFamilyCount: bodyFamilies.length,
+		probes,
+		weightedAnchorMass,
+		weightedBodyMass,
+		decisiveAnchorMass,
+		decisiveBodyMass,
+		supportAnchorMass,
+		supportBodyMass,
 		explain: buildPlanExplain(
 			spans,
 			families,
@@ -220,28 +249,46 @@ function selectQueryKind(input: {
 	const softOrNoiseCount =
 		activeFamilies.filter((family) => family.strength === "soft").length +
 		noiseFamilies.length;
-	const metadataDominantAnchorCount = anchorFamilies.filter((family) =>
-		isMetadataDominantAnchor(family, probes),
-	).length;
-	const structuredAnchorCount = activeFamilies.filter((family) =>
-		isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
-	).length;
+	const metadataDominantAnchorMass = sumProbeFamilyWeight(
+		anchorFamilies.filter((family) => isMetadataDominantAnchor(family, probes)),
+		probes,
+	);
+	const structuredAnchorMass = sumProbeFamilyWeight(
+		activeFamilies.filter((family) =>
+			isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
+		),
+		probes,
+	);
+	const meaningfulAnchorMass = sumMeaningfulProbeFamilyWeight(anchorFamilies, probes);
+	const meaningfulBodyMass = sumMeaningfulProbeFamilyWeight(bodyFamilies, probes);
+	const decisiveAnchorMass = sumProbeFamilyWeightByTier(
+		anchorFamilies,
+		probes,
+		"decisive",
+	);
+	const decisiveBodyMass = sumProbeFamilyWeightByTier(
+		bodyFamilies,
+		probes,
+		"decisive",
+	);
 	const titlePathSpanCount = spans.filter((span) => span.kind === "title_path").length;
 	const metadataIntentSpanCount = spans.filter(
 		(span) => span.kind === "metadata_intent",
 	).length;
 	const fillerSpanCount = spans.filter((span) => span.kind === "filler").length;
 	const looksMetadataOnly =
-		(anchorFamilies.length > 0 || structuredAnchorCount > 0) &&
+		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
 		(bodyFamilies.length === 0 ||
 			(shortQueryOverlay &&
 				(hasTitleShapeHint ||
 					hasPathShapeHint ||
 					hasMetadataHint ||
-					structuredAnchorCount > 0 ||
+					structuredAnchorMass >= Math.max(0.45, meaningfulBodyMass * 0.9) ||
 					titlePathSpanCount > 0 ||
 					metadataIntentSpanCount > 0 ||
-					metadataDominantAnchorCount >= Math.max(1, anchorFamilies.length))));
+					decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass) ||
+					metadataDominantAnchorMass >=
+						Math.max(0.45, meaningfulAnchorMass * 0.6))));
 	if (hasMixedScriptHint && activeFamilies.some(isBridgeEligibleFamily)) {
 		reasons.push("mixed-script hint with bridge-eligible families");
 		return {
@@ -257,13 +304,13 @@ function selectQueryKind(input: {
 		};
 	}
 	if (
-		(anchorFamilies.length > 0 || structuredAnchorCount > 0) &&
-		bodyFamilies.length > 0 &&
+		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
+		meaningfulBodyMass > 0 &&
 		(
 			hasMetadataHint ||
 			hasPathShapeHint ||
 			hasTitleShapeHint ||
-			structuredAnchorCount > 0 ||
+			structuredAnchorMass > 0 ||
 			titlePathSpanCount > 0 ||
 			metadataIntentSpanCount > 0
 		)
@@ -476,6 +523,7 @@ function computeAnchorPriority(
 ): number {
 	const probe = probes[family.index];
 	const evidence = familyEvidence.get(family.index);
+	const weightBonus = Math.round(getProbeFamilyWeight(probe) * 10);
 	const metadataBonus = Math.max(0, 8 - Math.min(8, probe?.metadataExactDocCount ?? 0));
 	const dominanceBonus = isMetadataDominantAnchor(family, probes) ? 8 : 0;
 	const basenameBonus = probe?.basenameExactDocCount
@@ -510,6 +558,7 @@ function computeAnchorPriority(
 				: 0;
 	return (
 		computeTailWeight(family.index) +
+		weightBonus +
 		metadataBonus +
 		dominanceBonus +
 		basenameBonus +
@@ -526,18 +575,72 @@ function computeBodyPriority(
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
 ): number {
 	const probe = probes[family.index];
+	const weightBonus = Math.round(getProbeFamilyWeight(probe) * 10);
 	const rarityBonus = Math.max(0, 8 - Math.min(8, probe?.bodyExactDocCount ?? 0));
 	const evidence = familyEvidence.get(family.index);
 	const bodyBonus =
 		(evidence?.spanKinds.includes("body") ? 4 : 0) -
 		Math.min(4, evidence?.fillerScore ?? 0);
 	const gluePenalty = isPlannerGlueBodyFamily(family, familyEvidence) ? 8 : 0;
-	return computeTailWeight(family.index) + rarityBonus + bodyBonus - gluePenalty;
+	return (
+		computeTailWeight(family.index) +
+		weightBonus +
+		rarityBonus +
+		bodyBonus -
+		gluePenalty
+	);
 }
 
 function computeTailWeight(index: number): number {
 	const position = index + 1;
 	return position * position;
+}
+
+function getProbeFamilyWeight(probe: CoverageLexicalFamilyProbe | undefined): number {
+	return probe?.familyWeight ?? 1;
+}
+
+function getProbeFamilyTier(
+	probe: CoverageLexicalFamilyProbe | undefined,
+): "decisive" | "support" | "weak" {
+	return probe?.familyTier ?? "support";
+}
+
+function sumProbeFamilyWeight(
+	families: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	probes: readonly CoverageLexicalFamilyProbe[],
+): number {
+	return families.reduce(
+		(total, family) => total + getProbeFamilyWeight(probes[family.index]),
+		0,
+	);
+}
+
+function sumMeaningfulProbeFamilyWeight(
+	families: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	probes: readonly CoverageLexicalFamilyProbe[],
+): number {
+	return families.reduce((total, family) => {
+		const probe = probes[family.index];
+		if (getProbeFamilyTier(probe) === "weak") {
+			return total;
+		}
+		return total + getProbeFamilyWeight(probe);
+	}, 0);
+}
+
+function sumProbeFamilyWeightByTier(
+	families: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	probes: readonly CoverageLexicalFamilyProbe[],
+	tier: "decisive" | "support",
+): number {
+	return families.reduce((total, family) => {
+		const probe = probes[family.index];
+		if (getProbeFamilyTier(probe) !== tier) {
+			return total;
+		}
+		return total + getProbeFamilyWeight(probe);
+	}, 0);
 }
 
 function isMetadataDominantAnchor(
@@ -598,6 +701,9 @@ function isPlannerAnchorCandidate(
 	const evidence = familyEvidence.get(family.index);
 	const probe = probes[family.index];
 	if (!evidence || !probe) {
+		return false;
+	}
+	if (getProbeFamilyTier(probe) === "weak") {
 		return false;
 	}
 	const hasAnchorLikeSpan =

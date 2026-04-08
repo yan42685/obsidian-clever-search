@@ -6,6 +6,7 @@ import type {
 const STRUCTURAL_TOKEN_REGEX = /^[._/\-]+$/u;
 const NUMBERISH_TOKEN_REGEX = /^(?:\d+|v?\d+(?:[.\-]\d+)+)$/u;
 const ASCII_ALPHA_NUMERIC_REGEX = /^[a-z0-9_-]+$/u;
+const HAN_ONLY_REGEX = /^\p{Script=Han}+$/u;
 const EXPLICIT_METADATA_TERM_REGEX =
 	/^(?:title|path|folder|tag|tags|alias|aliases|heading|headings|basename|name|file)$/u;
 
@@ -23,6 +24,7 @@ export function buildCoverageLexicalFamilies(
 			index,
 			queryTerms.length,
 			shortQueryOverlay,
+			probe,
 		);
 		const role = classifyFamilyRole(
 			normalizedTerm,
@@ -49,8 +51,12 @@ function classifyFamilyStrength(
 	index: number,
 	totalTerms: number,
 	shortQueryOverlay: boolean,
+	probe: CoverageLexicalFamilyProbe | undefined,
 ): CoverageLexicalFamily["strength"] {
 	if (isStructuralToken(term)) {
+		return "soft";
+	}
+	if (probe?.familyTier === "weak" && isWeakToken(term)) {
 		return "soft";
 	}
 	if (shortQueryOverlay) {
@@ -133,11 +139,13 @@ function isMetadataCapableFamily(term: string): boolean {
 }
 
 function isWeakToken(term: string): boolean {
+	if (HAN_ONLY_REGEX.test(term)) {
+		return term.length === 1;
+	}
 	return (
 		NUMBERISH_TOKEN_REGEX.test(term) ||
 		term.length <= 2 ||
 		/^[a-z]$/u.test(term) ||
-		/^\p{Script=Han}$/u.test(term) ||
 		term === "to" ||
 		term === "and" ||
 		term === "the" ||

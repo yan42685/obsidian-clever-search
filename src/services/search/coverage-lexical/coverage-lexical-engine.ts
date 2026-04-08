@@ -39,6 +39,10 @@ import {
 } from "./coverage-lexical-body-evidence";
 import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
 import {
+	COVERAGE_LEXICAL_IDENTITY_FIELD_CONFIDENCE,
+	createEmptyCoverageLexicalEvidenceMassSummary,
+} from "./coverage-lexical-evidence";
+import {
 	collectCoverageLexicalCandidateStatesByDocId,
 	resolveHydratedCoverageLexicalCandidateState,
 	type CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
@@ -81,10 +85,13 @@ import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
 	CoverageLexicalCandidateState,
+	CoverageLexicalEvidenceMassSummary,
 	CoverageLexicalFamily,
 	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilyProbe,
+	CoverageLexicalFamilyScriptClass,
 	CoverageLexicalFamilySignal,
+	CoverageLexicalFamilyTier,
 	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalMetadataField,
 	CoverageLexicalPrefixWitness,
@@ -2076,26 +2083,69 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
-		return queryTerms.map((term) => ({
-			bodyExactDocCount: getPostingEntryCount(this.bodyPostings.get(term)),
-			metadataExactDocCount: getUnionPostingEntryCount([
+		const documentCount = this.documentById.reduce(
+			(total, document) => total + (document ? 1 : 0),
+			0,
+		);
+		return queryTerms.map((term) => {
+			const bodyExactDocCount = getPostingEntryCount(this.bodyPostings.get(term));
+			const metadataExactDocCount = getUnionPostingEntryCount([
 				this.metadataBasenamePostings.get(term),
 				this.metadataAliasPostings.get(term),
 				this.metadataFolderPostings.get(term),
 				this.metadataHeadingPostings.get(term),
 				this.metadataTagPostings.get(term),
-			]),
-			basenameExactDocCount: getPostingEntryCount(
+			]);
+			const combinedExactDocCount = getUnionPostingEntryCount([
+				this.bodyPostings.get(term),
 				this.metadataBasenamePostings.get(term),
-			),
-			folderExactDocCount: getPostingEntryCount(
+				this.metadataAliasPostings.get(term),
 				this.metadataFolderPostings.get(term),
-			),
-			headingExactDocCount: getPostingEntryCount(
 				this.metadataHeadingPostings.get(term),
-			),
-			aliasExactDocCount: getPostingEntryCount(this.metadataAliasPostings.get(term)),
-		}));
+				this.metadataTagPostings.get(term),
+			]);
+			const scriptClass = classifyCoverageLexicalFamilyScriptClass(term);
+			const lengthWeight = computeCoverageLexicalFamilyLengthWeight(
+				term,
+				scriptClass,
+			);
+			const rarityWeight = computeCoverageLexicalFamilyRarityWeight(
+				documentCount,
+				combinedExactDocCount,
+			);
+			const weakTokenPenalty = computeCoverageLexicalWeakTokenPenalty(
+				term,
+				scriptClass,
+			);
+			const familyWeight = clampCoverageLexicalWeight(
+				lengthWeight * rarityWeight * weakTokenPenalty,
+				0.18,
+				1.35,
+			);
+			return {
+				bodyExactDocCount,
+				metadataExactDocCount,
+				basenameExactDocCount: getPostingEntryCount(
+					this.metadataBasenamePostings.get(term),
+				),
+				folderExactDocCount: getPostingEntryCount(
+					this.metadataFolderPostings.get(term),
+				),
+				headingExactDocCount: getPostingEntryCount(
+					this.metadataHeadingPostings.get(term),
+				),
+				aliasExactDocCount: getPostingEntryCount(
+					this.metadataAliasPostings.get(term),
+				),
+				combinedExactDocCount,
+				scriptClass,
+				lengthWeight,
+				rarityWeight,
+				weakTokenPenalty,
+				familyWeight,
+				familyTier: classifyCoverageLexicalFamilyTier(term, familyWeight),
+			};
+		});
 	}
 
 	private recordBenchmarkPhaseTiming(
@@ -2575,6 +2625,105 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 }
 
+function classifyCoverageLexicalFamilyScriptClass(
+	term: string,
+): CoverageLexicalFamilyScriptClass {
+	const hanCharCount = countCoverageLexicalHanChars(term);
+	const latinCharCount = countCoverageLexicalLatinChars(term);
+	if (hanCharCount > 0 && latinCharCount > 0) {
+		return "mixed";
+	}
+	if (hanCharCount > 0) {
+		return "han";
+	}
+	if (latinCharCount > 0) {
+		return "latin";
+	}
+	return "other";
+}
+
+function computeCoverageLexicalFamilyLengthWeight(
+	term: string,
+	scriptClass: CoverageLexicalFamilyScriptClass,
+): number {
+	const hanLenMass =
+		1 - Math.exp(-0.9 * Math.max(countCoverageLexicalHanChars(term) - 1, 0));
+	const latinLenMass =
+		1 - Math.exp(-0.28 * Math.max(countCoverageLexicalLatinChars(term) - 2, 0));
+	const lengthMass =
+		scriptClass === "han"
+			? hanLenMass
+			: scriptClass === "latin"
+				? latinLenMass
+				: Math.max(hanLenMass, latinLenMass);
+	return 0.35 + 0.65 * lengthMass;
+}
+
+function computeCoverageLexicalFamilyRarityWeight(
+	documentCount: number,
+	combinedExactDocCount: number,
+): number {
+	return clampCoverageLexicalWeight(
+		0.85 +
+			0.25 *
+				Math.log2(
+					(Math.max(1, documentCount) + 8) / (combinedExactDocCount + 8),
+				),
+		0.8,
+		1.25,
+	);
+}
+
+function computeCoverageLexicalWeakTokenPenalty(
+	term: string,
+	scriptClass: CoverageLexicalFamilyScriptClass,
+): number {
+	const hanCharCount = countCoverageLexicalHanChars(term);
+	const latinCharCount = countCoverageLexicalLatinChars(term);
+	if (scriptClass === "han" && hanCharCount === 1) {
+		return 0.35;
+	}
+	if (scriptClass === "latin" && latinCharCount <= 2) {
+		return 0.55;
+	}
+	if (/^(?:title|path|folder|tag|tags|alias|aliases|heading|headings|basename|name|file)$/u.test(term)) {
+		return 0.45;
+	}
+	return 1;
+}
+
+function classifyCoverageLexicalFamilyTier(
+	term: string,
+	familyWeight: number,
+): CoverageLexicalFamilyTier {
+	if (countCoverageLexicalHanChars(term) === 1 && term.length === 1) {
+		return "weak";
+	}
+	if (familyWeight >= 0.72) {
+		return "decisive";
+	}
+	if (familyWeight >= 0.45) {
+		return "support";
+	}
+	return "weak";
+}
+
+function countCoverageLexicalHanChars(term: string): number {
+	return term.match(/\p{Script=Han}/gu)?.length ?? 0;
+}
+
+function countCoverageLexicalLatinChars(term: string): number {
+	return term.match(/\p{Script=Latin}/gu)?.length ?? 0;
+}
+
+function clampCoverageLexicalWeight(
+	value: number,
+	min: number,
+	max: number,
+): number {
+	return Math.min(max, Math.max(min, value));
+}
+
 function hasUnresolvedCoverageLexicalBodyUpgradePotential(
 	state: CoverageLexicalCandidateState,
 ): boolean {
@@ -2679,6 +2828,7 @@ function buildCoverageSignalBase(
 	tagFallback: ReturnType<typeof evaluateCoverageLexicalTagFallback>,
 ): CoverageLexicalFamilySignal {
 	const families = plan.families;
+	const probes = plan.probes ?? [];
 	const coreBody = createEmptyAreaSignal();
 	const softBody = createEmptyAreaSignal();
 	const metadataAnchor = createEmptyAreaSignal();
@@ -2687,6 +2837,7 @@ function buildCoverageSignalBase(
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
 	const familyCountSummary = createEmptyFamilyCountSummary();
+	const evidenceMassSummary = createEmptyCoverageLexicalEvidenceMassSummary();
 	let bodyPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let metadataPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let tailCoreWeight = 0;
@@ -2696,6 +2847,10 @@ function buildCoverageSignalBase(
 
 	for (const family of families) {
 		const familyIndex = family.index;
+		const probe = probes[familyIndex];
+		const familyWeight = getCoverageLexicalProbeFamilyWeight(probe);
+		const familyTier = getCoverageLexicalProbeFamilyTier(probe);
+		const countsAsMeaningfulFamily = familyTier !== "weak";
 		const bodyCode = state.bodyMatches[familyIndex] ?? 0;
 		const metadataCode = state.metadataMatches[familyIndex] ?? 0;
 		const aliasAssistCode =
@@ -2734,31 +2889,39 @@ function buildCoverageSignalBase(
 			matchedTerms.push(family.normalizedTerm);
 		}
 
-		familyCountSummary.totalMatchedFamilyCount += 1;
-		if (bodyCode > 0) {
-			familyCountSummary.bodyMatchedFamilyCount += 1;
-		}
-		if (metadataCode > 0 || assistCode > 0) {
-			const primaryMetadataField =
-				basenameCode > 0 || basenameAssistCode > 0
-					? "basename"
-					: aliasCode > 0 || aliasAssistCode > 0
-						? "aliases"
-						: folderCode > 0 || folderAssistCode > 0
-							? "folder"
-							: headingsCode > 0 || headingsAssistCode > 0
-								? "headings"
-								: tagsCode > 0 || tagsAssistCode > 0
-									? "tags"
-									: null;
-			if (primaryMetadataField) {
+		const bestMetadataEvidence = selectBestCoverageLexicalMetadataEvidence({
+			metadataCode,
+			aliasCode,
+			basenameCode,
+			folderCode,
+			headingsCode,
+			tagsCode,
+			aliasAssistCode,
+			basenameAssistCode,
+			folderAssistCode,
+			headingsAssistCode,
+			tagsAssistCode,
+		});
+		if (countsAsMeaningfulFamily) {
+			familyCountSummary.totalMatchedFamilyCount += 1;
+			if (bodyCode > 0) {
+				familyCountSummary.bodyMatchedFamilyCount += 1;
+			}
+			if (bestMetadataEvidence?.field) {
 				familyCountSummary.metadataMatchedFamilyCount += 1;
 				accumulateMetadataFieldCount(
 					familyCountSummary,
-					primaryMetadataField,
+					bestMetadataEvidence.field,
 				);
 			}
 		}
+		accumulateCoverageLexicalFamilyEvidenceMass(
+			evidenceMassSummary,
+			familyTier,
+			familyWeight,
+			bodyCode,
+			bestMetadataEvidence,
+		);
 
 		if (family.role === "body") {
 			if (bodyCode > 0 && family.strength === "core") {
@@ -2915,9 +3078,9 @@ function buildCoverageSignalBase(
 			matchedTerms.push(term);
 		}
 	}
-
-	return {
+	return finalizeCoverageLexicalEvidenceMassSummary({
 		familyCountSummary,
+		evidenceMassSummary,
 		coreBody,
 		softBody,
 		metadataAnchor,
@@ -2941,17 +3104,17 @@ function buildCoverageSignalBase(
 		),
 		localEvidence: createEmptyCoverageLexicalWindowFusionSignal(),
 		matchedTerms,
-	};
+	});
 }
 
 function withCoverageLexicalLocalEvidence(
 	baseSignal: CoverageLexicalFamilySignal,
 	localEvidence: CoverageLexicalFamilySignal["localEvidence"],
 ): CoverageLexicalFamilySignal {
-	return {
+	return finalizeCoverageLexicalEvidenceMassSummary({
 		...baseSignal,
 		localEvidence,
-	};
+	});
 }
 
 function hasAnyCoverageLexicalSignal(
@@ -3021,6 +3184,293 @@ function createEmptyMetadataIdentitySignal(): CoverageLexicalMetadataIdentitySig
 		path: createEmptyAreaSignal(),
 		tag: createEmptyAreaSignal(),
 	};
+}
+
+function getCoverageLexicalProbeFamilyWeight(
+	probe: CoverageLexicalFamilyProbe | undefined,
+): number {
+	return probe?.familyWeight ?? 1;
+}
+
+function getCoverageLexicalProbeFamilyTier(
+	probe: CoverageLexicalFamilyProbe | undefined,
+): CoverageLexicalFamilyTier {
+	return probe?.familyTier ?? "support";
+}
+
+function selectBestCoverageLexicalMetadataEvidence(input: {
+	metadataCode: number;
+	aliasCode: number;
+	basenameCode: number;
+	folderCode: number;
+	headingsCode: number;
+	tagsCode: number;
+	aliasAssistCode: number;
+	basenameAssistCode: number;
+	folderAssistCode: number;
+	headingsAssistCode: number;
+	tagsAssistCode: number;
+}):
+	| {
+			code: number;
+			field: CoverageLexicalMetadataField | null;
+			fieldConfidence: number;
+	  }
+	| null {
+	const candidates: Array<{
+		code: number;
+		field: CoverageLexicalMetadataField | null;
+		fieldConfidence: number;
+	}> = [];
+	const pushCandidate = (
+		code: number,
+		field: CoverageLexicalMetadataField,
+	): void => {
+		if (code <= 0) {
+			return;
+		}
+		candidates.push({
+			code,
+			field,
+			fieldConfidence: COVERAGE_LEXICAL_IDENTITY_FIELD_CONFIDENCE[field],
+		});
+	};
+	pushCandidate(input.basenameCode, "basename");
+	pushCandidate(input.aliasCode, "aliases");
+	pushCandidate(input.headingsCode, "headings");
+	pushCandidate(input.folderCode, "folder");
+	pushCandidate(input.tagsCode, "tags");
+	pushCandidate(input.basenameAssistCode, "basename");
+	pushCandidate(input.aliasAssistCode, "aliases");
+	pushCandidate(input.headingsAssistCode, "headings");
+	pushCandidate(input.folderAssistCode, "folder");
+	pushCandidate(input.tagsAssistCode, "tags");
+	if (input.metadataCode > 0) {
+		candidates.push({
+			code: input.metadataCode,
+			field: null,
+			fieldConfidence: 0.76,
+		});
+	}
+	if (candidates.length === 0) {
+		return null;
+	}
+	candidates.sort(
+		(left, right) =>
+			right.code - left.code ||
+			right.fieldConfidence - left.fieldConfidence,
+	);
+	return candidates[0];
+}
+
+function accumulateCoverageLexicalFamilyEvidenceMass(
+	summary: CoverageLexicalEvidenceMassSummary,
+	familyTier: CoverageLexicalFamilyTier,
+	familyWeight: number,
+	bodyCode: number,
+	metadataEvidence:
+		| {
+				code: number;
+				field: CoverageLexicalMetadataField | null;
+				fieldConfidence: number;
+		  }
+		| null,
+): void {
+	if (familyTier === "weak") {
+		return;
+	}
+	const bodyKind = getCoverageLexicalFamilyMatchKindFromCode(bodyCode);
+	const metadataKind = getCoverageLexicalFamilyMatchKindFromCode(
+		metadataEvidence?.code ?? 0,
+	);
+	const bodyRank = getCoverageLexicalEvidencePreferenceRank(bodyKind, "body");
+	const metadataRank = getCoverageLexicalEvidencePreferenceRank(
+		metadataKind,
+		"identity",
+	);
+	const useMetadata =
+		metadataRank > bodyRank ||
+		(metadataRank === bodyRank &&
+			(metadataEvidence?.fieldConfidence ?? 0) > 1);
+	if (!bodyKind && !metadataKind) {
+		return;
+	}
+	if (familyTier === "decisive") {
+		summary.decisiveCoveredMass += familyWeight;
+	} else {
+		summary.supportCoveredMass += familyWeight;
+	}
+	if (useMetadata && metadataKind) {
+		accumulateCoverageLexicalEvidenceBucket(
+			summary,
+			familyTier,
+			"identity",
+			metadataKind,
+			familyWeight,
+			metadataEvidence?.fieldConfidence ?? 0.76,
+		);
+		return;
+	}
+	if (bodyKind) {
+		accumulateCoverageLexicalEvidenceBucket(
+			summary,
+			familyTier,
+			"body",
+			bodyKind,
+			familyWeight,
+			1,
+		);
+	}
+}
+
+function getCoverageLexicalFamilyMatchKindFromCode(
+	code: number,
+): Exclude<CoverageFamilyMatchKind, null> | null {
+	if (code === 3) {
+		return "exact";
+	}
+	if (code === 2) {
+		return "prefix";
+	}
+	if (code === 1) {
+		return "fuzzy";
+	}
+	return null;
+}
+
+function getCoverageLexicalEvidencePreferenceRank(
+	kind: Exclude<CoverageFamilyMatchKind, null> | null,
+	channel: "identity" | "body",
+): number {
+	if (!kind) {
+		return 0;
+	}
+	if (kind === "exact") {
+		return channel === "identity" ? 6 : 5;
+	}
+	if (kind === "prefix") {
+		return channel === "identity" ? 4 : 3;
+	}
+	return channel === "identity" ? 2 : 1;
+}
+
+function accumulateCoverageLexicalEvidenceBucket(
+	summary: CoverageLexicalEvidenceMassSummary,
+	familyTier: CoverageLexicalFamilyTier,
+	channel: "identity" | "body",
+	kind: Exclude<CoverageFamilyMatchKind, null>,
+	familyWeight: number,
+	fieldConfidence: number,
+): void {
+	const weightedMass = familyWeight * fieldConfidence;
+	if (familyTier === "decisive") {
+		if (kind === "exact") {
+			if (channel === "identity") {
+				summary.decisiveExactIdentityMass += weightedMass;
+			} else {
+				summary.decisiveExactBodyMass += weightedMass;
+			}
+			return;
+		}
+		if (kind === "prefix") {
+			if (channel === "identity") {
+				summary.decisivePrefixIdentityMass += weightedMass;
+			} else {
+				summary.decisivePrefixBodyMass += weightedMass;
+			}
+			return;
+		}
+		if (channel === "identity") {
+			summary.decisiveFuzzyIdentityMass += weightedMass;
+		} else {
+			summary.decisiveFuzzyBodyMass += weightedMass;
+		}
+		return;
+	}
+	if (kind === "exact") {
+		if (channel === "identity") {
+			summary.supportExactIdentityMass += weightedMass;
+		} else {
+			summary.supportExactBodyMass += weightedMass;
+		}
+		return;
+	}
+	if (kind === "prefix") {
+		if (channel === "identity") {
+			summary.supportPrefixIdentityMass += weightedMass;
+		} else {
+			summary.supportPrefixBodyMass += weightedMass;
+		}
+		return;
+	}
+	if (channel === "identity") {
+		summary.supportFuzzyIdentityMass += weightedMass;
+	} else {
+		summary.supportFuzzyBodyMass += weightedMass;
+	}
+}
+
+function finalizeCoverageLexicalEvidenceMassSummary(
+	signal: CoverageLexicalFamilySignal,
+): CoverageLexicalFamilySignal {
+	const summary = {
+		...(signal.evidenceMassSummary ??
+			createEmptyCoverageLexicalEvidenceMassSummary()),
+	};
+	summary.witnessMass = computeCoverageLexicalWitnessMass(signal);
+	summary.weakBridgeMass = computeCoverageLexicalWeakBridgeMass(signal);
+	summary.displayRawMass = computeCoverageLexicalEvidenceDisplayRawMass(summary);
+	return {
+		...signal,
+		evidenceMassSummary: summary,
+	};
+}
+
+function computeCoverageLexicalWitnessMass(
+	signal: CoverageLexicalFamilySignal,
+): number {
+	return (
+		signal.metadataIdentity.phraseWeight * 0.65 +
+		signal.phraseBridgeWeight * 0.7 +
+		signal.localEvidence.primary.exactCoreWeight * 0.6 +
+		signal.localEvidence.corroboratedExactCoreWeight * 0.75 +
+		signal.localEvidence.primary.orderedPairCount * 0.4 +
+		signal.localEvidence.primary.orderRatio * 0.25
+	);
+}
+
+function computeCoverageLexicalWeakBridgeMass(
+	signal: CoverageLexicalFamilySignal,
+): number {
+	return (
+		signal.metadataChar.bestSegmentCoverageRatio * 0.35 +
+		signal.metadataChar.matchRatio * 0.15 +
+		signal.bodyChar.bestSegmentCoverageRatio * 0.25 +
+		signal.bodyChar.matchRatio * 0.12 +
+		signal.tagSignal.charMatchRatio * 0.12 +
+		signal.tagSignal.exactMatchCount * 0.16
+	);
+}
+
+function computeCoverageLexicalEvidenceDisplayRawMass(
+	summary: CoverageLexicalEvidenceMassSummary,
+): number {
+	return (
+		summary.decisiveExactIdentityMass +
+		summary.decisiveExactBodyMass +
+		0.85 * summary.decisivePrefixIdentityMass +
+		0.82 * summary.decisivePrefixBodyMass +
+		0.55 * summary.decisiveFuzzyIdentityMass +
+		0.5 * summary.decisiveFuzzyBodyMass +
+		summary.supportExactIdentityMass +
+		summary.supportExactBodyMass +
+		0.8 * summary.supportPrefixIdentityMass +
+		0.76 * summary.supportPrefixBodyMass +
+		0.45 * summary.supportFuzzyIdentityMass +
+		0.4 * summary.supportFuzzyBodyMass +
+		0.35 * summary.witnessMass +
+		0.18 * summary.weakBridgeMass
+	);
 }
 
 function accumulateMetadataFieldCount(
@@ -3179,6 +3629,10 @@ function computeFamilyTailWeight(index: number): number {
 }
 
 function computeFallbackScore(signal: CoverageLexicalFamilySignal): number {
+	const weightedDisplayMass = signal.evidenceMassSummary?.displayRawMass ?? 0;
+	if (weightedDisplayMass > 0) {
+		return weightedDisplayMass;
+	}
 	return (
 		signal.coreBody.coverageCount * 100 +
 		signal.coreBody.exactWeight * 3 +
@@ -3421,6 +3875,10 @@ function computeCoverageLexicalDisplayCoverage(
 	signal: CoverageLexicalFamilySignal,
 	config: CoverageLexicalDisplayPruneConfig,
 ): number {
+	const weightedDisplayMass = signal.evidenceMassSummary?.displayRawMass ?? 0;
+	if (weightedDisplayMass > 0) {
+		return weightedDisplayMass;
+	}
 	return (
 		signal.coreBody.coverageCount +
 		signal.softBody.coverageCount +

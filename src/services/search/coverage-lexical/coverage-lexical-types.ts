@@ -121,6 +121,14 @@ export type CoverageLexicalQueryKind =
 	| "bridge_dependent"
 	| "memory_relaxed";
 
+export type CoverageLexicalFamilyScriptClass =
+	| "han"
+	| "latin"
+	| "mixed"
+	| "other";
+
+export type CoverageLexicalFamilyTier = "decisive" | "support" | "weak";
+
 export type CoverageLexicalFamilyProbe = {
 	bodyExactDocCount: number;
 	metadataExactDocCount: number;
@@ -128,6 +136,13 @@ export type CoverageLexicalFamilyProbe = {
 	folderExactDocCount: number;
 	headingExactDocCount: number;
 	aliasExactDocCount: number;
+	combinedExactDocCount?: number;
+	scriptClass?: CoverageLexicalFamilyScriptClass;
+	lengthWeight?: number;
+	rarityWeight?: number;
+	weakTokenPenalty?: number;
+	familyWeight?: number;
+	familyTier?: CoverageLexicalFamilyTier;
 };
 
 export type CoverageLexicalQuerySpanKind =
@@ -182,6 +197,13 @@ export type CoverageLexicalPlan = {
 	coreFamilyCount: number;
 	anchorFamilyCount: number;
 	bodyFamilyCount: number;
+	probes?: readonly CoverageLexicalFamilyProbe[];
+	weightedAnchorMass?: number;
+	weightedBodyMass?: number;
+	decisiveAnchorMass?: number;
+	decisiveBodyMass?: number;
+	supportAnchorMass?: number;
+	supportBodyMass?: number;
 	explain: CoverageLexicalPlanExplain;
 };
 
@@ -280,8 +302,29 @@ export type CoverageLexicalFamilyCountSummary = {
 	tagsMatchedFamilyCount: number;
 };
 
+export type CoverageLexicalEvidenceMassSummary = {
+	decisiveCoveredMass: number;
+	decisiveExactIdentityMass: number;
+	decisiveExactBodyMass: number;
+	decisivePrefixIdentityMass: number;
+	decisivePrefixBodyMass: number;
+	decisiveFuzzyIdentityMass: number;
+	decisiveFuzzyBodyMass: number;
+	supportCoveredMass: number;
+	supportExactIdentityMass: number;
+	supportExactBodyMass: number;
+	supportPrefixIdentityMass: number;
+	supportPrefixBodyMass: number;
+	supportFuzzyIdentityMass: number;
+	supportFuzzyBodyMass: number;
+	witnessMass: number;
+	weakBridgeMass: number;
+	displayRawMass: number;
+};
+
 export type CoverageLexicalFamilySignal = {
 	familyCountSummary: CoverageLexicalFamilyCountSummary;
+	evidenceMassSummary?: CoverageLexicalEvidenceMassSummary;
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;
