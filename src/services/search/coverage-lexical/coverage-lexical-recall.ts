@@ -2569,6 +2569,16 @@ function getOrCreatePhraseCandidateEntries(
 	CoverageLexicalCandidateState,
 ])[] {
 	const cacheScope = getPhraseCandidateCacheScope(signature, scope);
+	if (
+		cacheScope === "all" &&
+		(!signature.preferredFields || signature.preferredFields.length === 0)
+	) {
+		return getOrCreateMergedPhraseCandidateEntries(
+			index,
+			queryCache,
+			signature,
+		);
+	}
 	const cacheKey = `${cacheScope}|${signature.index}`;
 	const cached = queryCache.phraseCandidatesByKey.get(cacheKey);
 	if (cached) {
@@ -2587,6 +2597,47 @@ function getOrCreatePhraseCandidateEntries(
 	);
 	const created = Array.from(
 		collected.entries(),
+		([key, state]) => [key, cloneCandidateState(state)] as const,
+	);
+	queryCache.phraseCandidatesByKey.set(cacheKey, created);
+	return created;
+}
+
+function getOrCreateMergedPhraseCandidateEntries(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	signature: CoverageLexicalPhraseSignature,
+): readonly (readonly [
+	CoverageLexicalCandidateKey,
+	CoverageLexicalCandidateState,
+])[] {
+	const cacheKey = `all|${signature.index}`;
+	const cached = queryCache.phraseCandidatesByKey.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const merged = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
+	for (const [key, state] of getOrCreatePhraseCandidateEntries(
+		index,
+		queryCache,
+		signature,
+		"metadata-only",
+	)) {
+		mergeCandidateStateByDocId(merged, key, state);
+	}
+	for (const [key, state] of getOrCreatePhraseCandidateEntries(
+		index,
+		queryCache,
+		signature,
+		"body-only",
+	)) {
+		mergeCandidateStateByDocId(merged, key, state);
+	}
+	const created = Array.from(
+		merged.entries(),
 		([key, state]) => [key, cloneCandidateState(state)] as const,
 	);
 	queryCache.phraseCandidatesByKey.set(cacheKey, created);
