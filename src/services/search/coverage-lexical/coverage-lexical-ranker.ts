@@ -42,6 +42,7 @@ export function compareCoverageLexicalResultSignals(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
+	const mode = resolveCoverageLexicalDecisionMode(plan);
 	const weightedDecision = compareCoverageLexicalEvidenceMassSummaries(
 		getCoverageLexicalEvidenceMassSummary(left),
 		getCoverageLexicalEvidenceMassSummary(right),
@@ -68,21 +69,22 @@ export function compareCoverageLexicalResultSignals(
 		left.familyCountSummary,
 		right.familyCountSummary,
 		plan,
+		mode,
 	);
 	if (countDecision !== 0) {
 		const metadataAssistOverride = compareMetadataAssistCountOverride(
 			left,
 			right,
-			plan,
+			mode,
 		);
 		return metadataAssistOverride !== 0
 			? metadataAssistOverride
 			: countDecision;
 	}
-	if (plan.route === "metadata-first") {
+	if (mode === "metadata-first") {
 		return compareMetadataFirstDetailStages(left, right);
 	}
-	if (plan.route === "body-with-anchor") {
+	if (mode === "body-with-anchor") {
 		return compareBodyWithAnchorDetailStages(left, right, plan);
 	}
 	return compareBodyFirstDetailStages(left, right);
@@ -91,9 +93,9 @@ export function compareCoverageLexicalResultSignals(
 function compareMetadataAssistCountOverride(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
-	plan: CoverageLexicalPlan,
+	mode: CoverageLexicalRankerDecisionMode,
 ): number {
-	if (plan.route !== "body-first") {
+	if (mode !== "body-first") {
 		return 0;
 	}
 	if (compareExactTierSignals(left, right) !== 0) {
@@ -157,12 +159,13 @@ export function compareCoverageLexicalFamilyCountSummaries(
 	right: CoverageLexicalFamilyCountSummary,
 	plan: CoverageLexicalPlan,
 ): number {
+	const mode = resolveCoverageLexicalDecisionMode(plan);
 	return (
 		compareDescendingMetric(
 			left.totalMatchedFamilyCount,
 			right.totalMatchedFamilyCount,
 		) ||
-		compareCoverageLexicalCountTieBreakers(left, right, plan)
+		compareCoverageLexicalCountTieBreakers(left, right, plan, mode)
 	);
 }
 
@@ -170,11 +173,12 @@ function compareCoverageLexicalCountTieBreakers(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
 	plan: CoverageLexicalPlan,
+	mode: CoverageLexicalRankerDecisionMode,
 ): number {
-	if (plan.route === "body-first") {
+	if (mode === "body-first") {
 		return compareBodyFirstCountTieBreakers(left, right, plan);
 	}
-	if (plan.route === "body-with-anchor") {
+	if (mode === "body-with-anchor") {
 		return compareBodyWithAnchorCountTieBreakers(left, right, plan);
 	}
 	return compareMetadataFirstCountTieBreakers(left, right);
@@ -291,11 +295,12 @@ function compareEarlyBodyQualityGuardrails(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
-	if (plan.route === "body-first") {
+	const mode = resolveCoverageLexicalDecisionMode(plan);
+	if (mode === "body-first") {
 		return 0;
 	}
 	if (
-		plan.route === "body-with-anchor" &&
+		mode === "body-with-anchor" &&
 		(plan.hasPathShapeHint || plan.hasTitleShapeHint)
 	) {
 		return 0;
@@ -340,10 +345,49 @@ function shouldPromoteBodyWitness(
 	const strongMetadataLead =
 		getStrongMetadataFamilyCount(opponent.familyCountSummary) -
 		getStrongMetadataFamilyCount(candidate.familyCountSummary);
-	if (plan.route === "metadata-first") {
+	if (resolveCoverageLexicalDecisionMode(plan) === "metadata-first") {
 		return strongMetadataLead <= 0;
 	}
 	return strongMetadataLead <= 1;
+}
+
+type CoverageLexicalRankerDecisionMode =
+	| "metadata-first"
+	| "body-with-anchor"
+	| "body-first";
+
+function resolveCoverageLexicalDecisionMode(
+	plan: CoverageLexicalPlan,
+): CoverageLexicalRankerDecisionMode {
+	const metadataFirst =
+		plan.decisionPriors?.metadataFirst ??
+		(plan.decisiveAnchorMass ?? 0) +
+			(plan.supportAnchorMass ?? 0) * 0.35 +
+			(plan.hasMetadataHint ? 0.25 : 0) +
+			(plan.hasPathShapeHint ? 0.2 : 0) +
+			(plan.hasTitleShapeHint ? 0.15 : 0);
+	const bodyWithAnchor =
+		plan.decisionPriors?.bodyWithAnchor ??
+		(Math.min(plan.weightedAnchorMass ?? 0, plan.weightedBodyMass ?? 0) * 0.75 +
+			(plan.anchorFamilyCount > 0 && plan.bodyFamilyCount > 0 ? 0.35 : 0));
+	const bodyFirst =
+		plan.decisionPriors?.bodyFirst ??
+		(plan.decisiveBodyMass ?? 0) +
+			(plan.supportBodyMass ?? 0) * 0.4 +
+			(plan.bodyFamilyCount > 0 ? 0.25 : 0);
+	const hasHybridShape =
+		plan.anchorFamilyCount > 0 && plan.bodyFamilyCount > 0;
+	const metadataLead = metadataFirst - Math.max(bodyWithAnchor, bodyFirst);
+	if (!hasHybridShape && metadataFirst >= bodyFirst) {
+		return "metadata-first";
+	}
+	if (hasHybridShape && metadataLead >= 0.18) {
+		return "metadata-first";
+	}
+	if (hasHybridShape) {
+		return "body-with-anchor";
+	}
+	return "body-first";
 }
 
 function hasPromotableBodyWitness(

@@ -2674,34 +2674,33 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		candidateCount: number,
 	): number {
 		const requested = Math.max(1, maxItemResults);
-		let minBudget = 24;
-		let multiplier = 4;
-		let cap = 64;
-		switch (plan.queryKind) {
-			case "body_only_local":
-				minBudget = 48;
-				multiplier = 10;
-				cap = 128;
-				break;
-			case "anchor_body_hybrid":
-				minBudget = 36;
-				multiplier = 7;
-				cap = 96;
-				break;
-			case "bridge_dependent":
-				minBudget = 40;
-				multiplier = 8;
-				cap = 112;
-				break;
-			case "memory_relaxed":
-				minBudget = 56;
-				multiplier = 10;
-				cap = 144;
-				break;
-			case "metadata_only_anchored":
-			default:
-				break;
-		}
+		const bodyFirstPrior = plan.decisionPriors?.bodyFirst ?? 0;
+		const bodyWithAnchorPrior = plan.decisionPriors?.bodyWithAnchor ?? 0;
+		const relaxedMemoryPrior = plan.decisionPriors?.relaxedMemory ?? 0;
+		const bridgePrior = plan.decisionPriors?.bridgeDependent ?? 0;
+		const localBodyPrior = plan.decisionPriors?.localBody ?? 0;
+		const minBudget = Math.round(
+			24 +
+				Math.min(32, localBodyPrior * 14 + relaxedMemoryPrior * 16) +
+				Math.min(14, bodyWithAnchorPrior * 8) +
+				Math.min(12, bridgePrior * 8),
+		);
+		const multiplier = Math.max(
+			4,
+			Math.round(
+				4 +
+					bodyFirstPrior * 2.5 +
+					bodyWithAnchorPrior * 2 +
+					relaxedMemoryPrior * 2.5 +
+					bridgePrior * 1.5,
+			),
+		);
+		const cap = Math.round(
+			64 +
+				Math.min(56, localBodyPrior * 24 + relaxedMemoryPrior * 28) +
+				Math.min(24, bodyWithAnchorPrior * 16) +
+				Math.min(24, bridgePrior * 16),
+		);
 		return Math.min(
 			candidateCount,
 			Math.min(cap, Math.max(minBudget, requested * multiplier)),
@@ -3913,8 +3912,13 @@ function computePerFileLocalWindowLimit(
 	plan: CoverageLexicalPlan,
 	bodyTokenCount: number,
 ): number {
+	const bodyFirstPrior = plan.decisionPriors?.bodyFirst ?? 0;
+	const relaxedMemoryPrior = plan.decisionPriors?.relaxedMemory ?? 0;
+	const localBodyPrior = plan.decisionPriors?.localBody ?? 0;
 	if (
-		plan.queryKind === "memory_relaxed" ||
+		relaxedMemoryPrior >= 0.7 ||
+		localBodyPrior >= 0.8 ||
+		bodyFirstPrior >= 0.95 ||
 		plan.bodyFamilyCount >= 4 ||
 		bodyTokenCount >= 96
 	) {

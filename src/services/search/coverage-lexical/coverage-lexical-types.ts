@@ -178,6 +178,15 @@ export type CoverageLexicalPlanExplain = {
 	queryKindReasons: string[];
 };
 
+export type CoverageLexicalDecisionPriors = {
+	metadataFirst: number;
+	bodyWithAnchor: number;
+	bodyFirst: number;
+	relaxedMemory: number;
+	bridgeDependent: number;
+	localBody: number;
+};
+
 export type CoverageLexicalPlan = {
 	families: CoverageLexicalFamily[];
 	queryKind: CoverageLexicalQueryKind;
@@ -200,10 +209,12 @@ export type CoverageLexicalPlan = {
 	probes?: readonly CoverageLexicalFamilyProbe[];
 	weightedAnchorMass?: number;
 	weightedBodyMass?: number;
+	weightedOptionalMass?: number;
 	decisiveAnchorMass?: number;
 	decisiveBodyMass?: number;
 	supportAnchorMass?: number;
 	supportBodyMass?: number;
+	decisionPriors?: CoverageLexicalDecisionPriors;
 	explain: CoverageLexicalPlanExplain;
 };
 
