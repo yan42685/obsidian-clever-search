@@ -6,7 +6,7 @@ export type CoverageLexicalBodyTokenColdMetaRow = {
 	id: typeof COVERAGE_LEXICAL_BODY_TOKEN_COLD_META_ID;
 	epoch: number;
 	schemaVersion: number;
-	blockWriteMode: "single-doc";
+	blockWriteMode: "single-doc" | "multi-doc-v1";
 	updatedAt: number;
 };
 
