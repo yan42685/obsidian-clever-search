@@ -1553,58 +1553,70 @@ function computeLaneSoftBias(
 		plan.supportBodyMass,
 		plan.supportBodyFamilies.length,
 	);
+	const optionalBodyMass = getWeightedPlanMass(
+		plan.weightedOptionalMass,
+		plan.optionalFamilies.length,
+	);
+	const bridgeMass = Math.min(1.6, plan.bridgeFamilies.length * 0.28);
+	const hardAnchorPressure =
+		Math.min(1.4, plan.hardAnchorFamilies.length * 0.35) +
+		Math.min(0.8, decisiveAnchorMass * 0.6);
 	const hybridMass = Math.min(anchorMass, bodyMass);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return clampLaneBias(
 				Math.round(
-					Math.min(3, decisiveAnchorMass * 3) +
-						Math.min(2, anchorMass) +
-						(plan.hardAnchorFamilies.length > 0 ? 1 : 0) +
-						(plan.queryKind === "metadata_only_anchored" ? 1 : 0) +
-						(plan.route === "metadata-first" ? 1 : 0),
+					Math.min(4.2, decisiveAnchorMass * 3.1) +
+						Math.min(2.4, anchorMass * 1.6) +
+						hardAnchorPressure +
+						bridgeMass * 0.3,
 				),
 			);
 		case "strict_hybrid_lane":
 			return clampLaneBias(
 				Math.round(
-					Math.min(3, hybridMass * 3) +
-						Math.min(2, decisiveBodyMass * 3) +
-						(plan.queryKind === "anchor_body_hybrid" ? 1 : 0) +
-						(plan.route === "body-with-anchor" ? 1 : 0),
+					Math.min(3.8, hybridMass * 3.2) +
+						Math.min(3.2, decisiveBodyMass * 2.7) +
+						Math.min(1.2, supportBodyMass * 1.4) +
+						Math.min(1, hardAnchorPressure * 0.7),
 				),
 			);
 		case "relaxed_hybrid_lane":
 			return clampLaneBias(
 				Math.round(
-					Math.min(2, hybridMass * 2.5) +
-						Math.min(3, bodyMass * 2) +
-						Math.min(1, supportBodyMass * 2) +
-						(plan.queryKind === "memory_relaxed" ? 1 : 0) +
-						(plan.queryKind === "anchor_body_hybrid" ? 1 : 0),
+					Math.min(2.6, hybridMass * 2.4) +
+						Math.min(3.2, bodyMass * 2.1) +
+						Math.min(1.6, supportBodyMass * 1.9) +
+						Math.min(1.1, optionalBodyMass * 0.9) +
+						bridgeMass * 0.35,
 				),
 			);
 		case "local_body_lane":
 			return clampLaneBias(
 				Math.round(
-					Math.min(4, (decisiveBodyMass + supportBodyMass * 0.75) * 2) +
-						(plan.queryKind === "body_only_local" ? 1 : 0) +
-						(plan.queryKind === "memory_relaxed" ? 1 : 0) +
-						(plan.route === "body-first" ? 1 : 0),
+					Math.min(
+						4.6,
+						(decisiveBodyMass * 1.4 + supportBodyMass * 0.95) * 1.8,
+					) +
+						Math.min(1.4, bodyMass * 0.9) +
+						bridgeMass * 0.45 +
+						Math.min(0.8, optionalBodyMass * 0.55),
 				),
 			);
 		case "bridge_lane":
 			return clampLaneBias(
 				Math.round(
-					Math.min(3, plan.bridgeFamilies.length) +
-						(plan.queryKind === "bridge_dependent" ? 1 : 0) +
+					Math.min(3.4, bridgeMass * 2.1) +
+						Math.min(1.2, hybridMass * 1.1) +
+						Math.min(0.9, supportBodyMass * 0.9) +
 						(plan.hasMixedScriptHint ? 1 : 0),
 				),
 			);
 		case "char_fallback_lane":
 			return clampLaneBias(
 				(plan.hasMixedScriptHint ? 1 : 0) +
-					(plan.shortQueryOverlay && plan.bodyFamilyCount === 0 ? 1 : 0),
+					(plan.shortQueryOverlay && bodyMass <= 0.15 ? 1 : 0) +
+					(Math.min(1, bridgeMass * 0.4) >= 0.5 ? 1 : 0),
 			);
 		default:
 			return 0;
