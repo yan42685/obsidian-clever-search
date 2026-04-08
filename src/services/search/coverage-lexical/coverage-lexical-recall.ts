@@ -2399,6 +2399,14 @@ function getOrCreateFamilySetCandidateEntries(
 		CoverageLexicalCandidateState,
 	])[] {
 	const uniqueFamilies = dedupeFamilies(families);
+	if (options.scope === "all") {
+		return getOrCreateMergedFamilySetCandidateEntries(
+			index,
+			queryCache,
+			uniqueFamilies,
+			options,
+		);
+	}
 	const cacheKey = [
 		options.scope,
 		options.includePrefix ? "prefix" : "no-prefix",
@@ -2416,6 +2424,65 @@ function getOrCreateFamilySetCandidateEntries(
 	collectFamilySetCandidates(index, queryCache, collected, uniqueFamilies, options);
 	const created = Array.from(
 		collected.entries(),
+		([key, state]) => [key, cloneCandidateState(state)] as const,
+	);
+	queryCache.familySetCandidatesByKey.set(cacheKey, created);
+	return created;
+}
+
+function getOrCreateMergedFamilySetCandidateEntries(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	families: readonly CoverageLexicalFamily[],
+	options: {
+		scope: CoverageLexicalCollectionScope;
+		includePrefix: boolean;
+		includeFuzzy: boolean;
+	},
+): readonly (readonly [
+	CoverageLexicalCandidateKey,
+	CoverageLexicalCandidateState,
+])[] {
+	const cacheKey = [
+		"all",
+		options.includePrefix ? "prefix" : "no-prefix",
+		options.includeFuzzy ? "fuzzy" : "no-fuzzy",
+		families.map((family) => family.index).join(","),
+	].join("|");
+	const cached = queryCache.familySetCandidatesByKey.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const merged = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
+	for (const [key, state] of getOrCreateFamilySetCandidateEntries(
+		index,
+		queryCache,
+		families,
+		{
+			scope: "metadata-only",
+			includePrefix: options.includePrefix,
+			includeFuzzy: options.includeFuzzy,
+		},
+	)) {
+		mergeCandidateStateByDocId(merged, key, state);
+	}
+	for (const [key, state] of getOrCreateFamilySetCandidateEntries(
+		index,
+		queryCache,
+		families,
+		{
+			scope: "body-only",
+			includePrefix: options.includePrefix,
+			includeFuzzy: options.includeFuzzy,
+		},
+	)) {
+		mergeCandidateStateByDocId(merged, key, state);
+	}
+	const created = Array.from(
+		merged.entries(),
 		([key, state]) => [key, cloneCandidateState(state)] as const,
 	);
 	queryCache.familySetCandidatesByKey.set(cacheKey, created);
