@@ -483,7 +483,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly metadataHeadingCharPostings = new Map<string, number[]>();
 	private readonly metadataHeadingPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
-	private readonly metadataHeadingPostings = new Map<string, Uint32Array>();
+	private readonly metadataHeadingPostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataTagCharPostings = new Map<string, number[]>();
 	private readonly metadataTagFullPostings = new Map<string, Uint32Array>();
 	private readonly metadataTagPhrasePostings =
