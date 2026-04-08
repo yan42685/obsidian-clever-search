@@ -6,6 +6,7 @@ import { OuterSetting } from "src/globals/plugin-setting";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
+import { extractHanSegments } from "src/services/search/coverage-lexical/coverage-lexical-cjk";
 import {
   HybridDisabledError,
   NoApiKeyError,
@@ -34,8 +35,12 @@ import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
-import { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import {
+  COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+  type CoverageLexicalBodyTokenColdDocumentWrite,
+} from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import { Tokenizer } from "src/services/search/tokenizer";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
@@ -411,6 +416,7 @@ export class DataManager {
   private setting = getInstance(OuterSetting);
   private lexicalEngine = getInstance(LexicalEngine);
   private fileSnapshotStore = getInstance(FileSnapshotStore);
+  private tokenizer = getInstance(Tokenizer);
   private shouldForceRefresh = false;
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
@@ -1889,11 +1895,15 @@ export class DataManager {
   ): Promise<void> {
     if (plan.needsFullReindex) {
       await this.reindexLexicalEngineWithCurrFiles();
+      await this.syncLexicalBodyTokenColdStoreMetadata();
       return;
     }
     if (plan.needsRefHeal) {
       await this.updateLexicalIndexedFileRefsByMtime();
+    } else {
+      await this.ensureLexicalIndexedFileRefsLoaded();
     }
+    await this.healLexicalBodyTokenColdRows();
   }
 
   private async commitLexicalBootstrapPlan(): Promise<void> {
@@ -2047,6 +2057,7 @@ export class DataManager {
     }));
     await this.database.setLexicalIndexedFileRefs(updatedIndexedFileRefs);
     await this.reloadLexicalIndexedFileRefs();
+    await this.syncLexicalBodyTokenColdStoreMetadata();
     logger.trace(
       `${updatedIndexedFileRefs.length} lexical indexed file refs updated`,
     );
@@ -2079,6 +2090,7 @@ export class DataManager {
     };
     await this.database.putLexicalIndexedFileRef(nextRef);
     this.lexicalIndexedFileRefsByPath.set(file.path, nextRef);
+    await this.syncLexicalBodyTokenColdStoreMetadata();
   }
 
   private async deleteLexicalIndexedFileRefs(
@@ -2092,6 +2104,96 @@ export class DataManager {
     for (const path of paths) {
       this.lexicalIndexedFileRefsByPath.delete(path);
     }
+    await this.syncLexicalBodyTokenColdStoreMetadata();
+  }
+
+  private getLexicalBodyTokenColdStore(): CoverageLexicalBodyTokenColdStore | null {
+    if (!container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
+      return null;
+    }
+    try {
+      return getInstance(CoverageLexicalBodyTokenColdStore);
+    } catch {
+      return null;
+    }
+  }
+
+  private async syncLexicalBodyTokenColdStoreMetadata(): Promise<void> {
+    const coldStore = this.getLexicalBodyTokenColdStore();
+    if (!coldStore) {
+      return;
+    }
+    await this.ensureLexicalIndexedFileRefsLoaded();
+    await coldStore.updateIndexedRefsMetadata(
+      Array.from(this.lexicalIndexedFileRefsByPath.values()),
+    );
+  }
+
+  private async healLexicalBodyTokenColdRows(): Promise<void> {
+    const coldStore = this.getLexicalBodyTokenColdStore();
+    if (!coldStore) {
+      return;
+    }
+    const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
+    const consistency = await coldStore.inspectConsistency(indexedFileRefs);
+    if (!consistency.needsRepair) {
+      await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
+      return;
+    }
+
+    logger.trace("repairing lexical body token cold rows", {
+      reason: consistency.reason,
+      requiresReset: consistency.requiresReset,
+      missingOrStaleCount: consistency.missingOrStalePaths.length,
+      danglingCount: consistency.danglingPaths.length,
+    });
+
+    if (consistency.requiresReset) {
+      await coldStore.clearAll();
+    } else if (consistency.danglingPaths.length > 0) {
+      await coldStore.deleteDocuments(consistency.danglingPaths);
+    }
+
+    if (consistency.missingOrStalePaths.length > 0) {
+      const missingOrStaleFiles = consistency.missingOrStalePaths
+        .map((path) => this.dataProvider.getFileByPath(path))
+        .filter((file): file is TFile => file !== null);
+      for (
+        let start = 0;
+        start < missingOrStaleFiles.length;
+        start += DataManager.LEXICAL_REINDEX_BATCH_SIZE
+      ) {
+        const batchFiles = missingOrStaleFiles.slice(
+          start,
+          start + DataManager.LEXICAL_REINDEX_BATCH_SIZE,
+        );
+        const batchDocuments =
+          await this.buildLexicalBodyTokenColdDocuments(batchFiles);
+        await coldStore.upsertDocuments(batchDocuments);
+        if (start + DataManager.LEXICAL_REINDEX_BATCH_SIZE < missingOrStaleFiles.length) {
+          await MyLib.sleep(0);
+        }
+      }
+    }
+
+    await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
+  }
+
+  private async buildLexicalBodyTokenColdDocuments(
+    files: readonly TFile[],
+  ): Promise<CoverageLexicalBodyTokenColdDocumentWrite[]> {
+    const textsByPath = await this.fileSnapshotStore.readCurrentTexts(files);
+    return files.map((file) => {
+      const plainText = textsByPath.get(file.path) ?? "";
+      return {
+        path: file.path,
+        generation: file.stat.mtime,
+        bodyTokens: this.tokenizer
+          .tokenizeSequence(plainText, "index")
+          .map((token) => token.toLowerCase()),
+        hanSegments: extractHanSegments(plainText),
+      };
+    });
   }
 
   private hasIndexedFileRefChanged(

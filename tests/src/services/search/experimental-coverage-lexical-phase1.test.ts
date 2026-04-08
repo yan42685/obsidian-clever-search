@@ -95,11 +95,23 @@ function registerMockBodyTokenColdStore() {
 	const clearAll = jest.fn(async () => {
 		storedDocuments.clear();
 	});
+	const getMeta = jest.fn(async () => null);
+	const inspectConsistency = jest.fn(async () => ({
+		needsRepair: false,
+		requiresReset: false,
+		reason: "up-to-date",
+		missingOrStalePaths: [],
+		danglingPaths: [],
+	}));
+	const updateIndexedRefsMetadata = jest.fn(async () => {});
 
 	container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
 		upsertDocuments,
 		deleteDocuments,
+		getMeta,
+		inspectConsistency,
 		readDocuments,
+		updateIndexedRefsMetadata,
 		clearAll,
 	} as any);
 
@@ -107,7 +119,10 @@ function registerMockBodyTokenColdStore() {
 		storedDocuments,
 		upsertDocuments,
 		deleteDocuments,
+		getMeta,
+		inspectConsistency,
 		readDocuments,
+		updateIndexedRefsMetadata,
 		clearAll,
 	};
 }
@@ -941,6 +956,34 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			"notes/cold-store-target.md",
 		]);
 		expect(clearAll).not.toHaveBeenCalled();
+	});
+
+	test("restoring a lexical snapshot does not wipe persisted cold rows", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				reIndexAll(data: unknown): Promise<boolean>;
+				serialize(): unknown;
+			};
+		};
+		const coldStore = registerMockBodyTokenColdStore();
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/cold-store-snapshot-target.md",
+				basename: "cold-store-snapshot-target",
+				folder: "notes",
+				content: "alpha beta gamma stays cold-backed across snapshot restore",
+			},
+		]);
+
+		const snapshot = engine.serialize();
+		const restored = new CoverageLexicalFileSearchEngine();
+		expect(await restored.reIndexAll(snapshot)).toBe(true);
+		expect(coldStore.clearAll).not.toHaveBeenCalled();
 	});
 
 	test("hydrates offloaded body tokens from the Dexie-backed cold store without file snapshots", async () => {
