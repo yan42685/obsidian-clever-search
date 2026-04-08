@@ -262,6 +262,15 @@ type CoverageLexicalLaneUnionPressure = {
 	remainingActivationPressure: number;
 };
 
+type CoverageLexicalFinalUnionCandidate = {
+	key: CoverageLexicalCandidateKey;
+	state: CoverageLexicalCandidateState;
+	signal: CoverageLexicalCheapLaneSignal;
+	profile: CoverageLexicalCheapLaneEvidenceProfile;
+	lowerBound: number;
+	potentialUpperBound: number;
+};
+
 const ALL_METADATA_FIELDS: readonly CoverageLexicalMetadataField[] = [
 	"basename",
 	"aliases",
@@ -777,7 +786,13 @@ function collectCoverageLexicalCandidateStatesInternal(
 		benchmarkHooks,
 		"finalUnion",
 		() => {
-			for (const key of admittedKeys) {
+			const finalUnionKeys = selectFinalUnionCandidateKeys(
+				admittedKeys,
+				aggregateCandidates,
+				plan,
+				request,
+			);
+			for (const key of finalUnionKeys) {
 				const state = aggregateCandidates.get(key);
 				if (!state) {
 					continue;
@@ -785,7 +800,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 				mergeCandidateStateByDocId(admittedCandidates, key, state);
 			}
 		},
-		() => admittedKeys.size,
+		() => admittedCandidates.size || admittedKeys.size,
 	);
 	return admittedCandidates;
 }
@@ -831,6 +846,86 @@ function shouldRunRelaxedHybridLane(
 		return false;
 	}
 	return aggregateCandidates.size < 24;
+}
+
+function selectFinalUnionCandidateKeys(
+	admittedKeys: ReadonlySet<CoverageLexicalCandidateKey>,
+	aggregateCandidates: ReadonlyMap<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>,
+	plan: CoverageLexicalPlan,
+	request: FileSearchRequest,
+): CoverageLexicalCandidateKey[] {
+	if (admittedKeys.size === 0) {
+		return [];
+	}
+	const candidates: CoverageLexicalFinalUnionCandidate[] = [];
+	for (const key of admittedKeys) {
+		const state = aggregateCandidates.get(key);
+		if (!state) {
+			continue;
+		}
+		const signal = buildCheapLaneSignal(state, plan);
+		const profile = buildCheapLaneEvidenceProfile(signal);
+		const lowerBound = computeFinalUnionLowerBound(profile);
+		candidates.push({
+			key,
+			state,
+			signal,
+			profile,
+			lowerBound,
+			potentialUpperBound: computeFinalUnionPotentialUpperBound(
+				profile,
+				state,
+				lowerBound,
+			),
+		});
+	}
+	if (candidates.length === 0) {
+		return [];
+	}
+	const unionBudget = computeFinalUnionBudget(plan, request, candidates.length);
+	if (candidates.length <= unionBudget) {
+		return candidates.map(({ key }) => key);
+	}
+	candidates.sort(compareFinalUnionCandidates);
+	const selected = candidates.slice(0, unionBudget);
+	const selectedKeys = new Set(selected.map(({ key }) => key));
+	const cutoff = selected[selected.length - 1];
+	if (!cutoff) {
+		return selected.map(({ key }) => key);
+	}
+	for (let index = unionBudget; index < candidates.length; index += 1) {
+		const candidate = candidates[index];
+		if (candidate.potentialUpperBound + 0.05 < cutoff.potentialUpperBound) {
+			break;
+		}
+		selected.push(candidate);
+		selectedKeys.add(candidate.key);
+	}
+	const rescueAllowance = Math.min(
+		Math.max(request.maxItemResults, 6),
+		Math.max(0, candidates.length - selected.length),
+	);
+	if (rescueAllowance > 0) {
+		let rescued = 0;
+		for (const candidate of candidates) {
+			if (selectedKeys.has(candidate.key)) {
+				continue;
+			}
+			if (!shouldProtectFinalUnionCandidate(candidate, cutoff.potentialUpperBound)) {
+				continue;
+			}
+			selected.push(candidate);
+			selectedKeys.add(candidate.key);
+			rescued += 1;
+			if (rescued >= rescueAllowance) {
+				break;
+			}
+		}
+	}
+	return selected.map(({ key }) => key);
 }
 
 function shouldRunLocalBodyLane(
@@ -2557,6 +2652,103 @@ function computeLaneUnionPressure(
 			remainingTopUpperBound +
 			Math.min(0.35, remainingPotentialCount * 0.08),
 	};
+}
+
+function computeFinalUnionBudget(
+	plan: CoverageLexicalPlan,
+	request: FileSearchRequest,
+	admittedCount: number,
+): number {
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const bridgeMass = Math.min(1.2, plan.bridgeFamilies.length * 0.18);
+	const softExpansion = Math.round(
+		anchorMass * 4 + bodyMass * 5 + decisiveBodyMass * 3 + bridgeMass * 2,
+	);
+	const budget = Math.max(
+		request.maxItemResults * 8,
+		24 + softExpansion,
+	);
+	return Math.min(admittedCount, budget);
+}
+
+function computeFinalUnionLowerBound(
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+): number {
+	return Math.max(
+		profile.anchorPressure + profile.bridgePressure * 0.14,
+		profile.hybridPressure + profile.bodyPressure * 0.2,
+		profile.bodyPressure + profile.passagePressure * 0.18,
+		profile.bridgePressure + profile.metadataAssistPressure * 0.12,
+		profile.charPressure,
+	);
+}
+
+function computeFinalUnionPotentialUpperBound(
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+	state: CoverageLexicalCandidateState,
+	lowerBound: number,
+): number {
+	const unresolved = state.unresolvedBodyEvidence;
+	let potentialUpperBound = lowerBound + unresolved.unresolvedWeightUpperBound * 0.14;
+	if (unresolved.needsPassageSignal) {
+		potentialUpperBound += 0.35;
+	}
+	if (unresolved.hasUnverifiedPhraseWitness || state.phraseMatches.length > 0) {
+		potentialUpperBound += 0.24;
+	}
+	if (unresolved.hasUnresolvedPrefixSurface || state.bodyPrefixWitness !== null) {
+		potentialUpperBound += 0.16;
+	}
+	if (
+		unresolved.hasUnresolvedBodyCharVerification ||
+		state.bodyCharMatchIndices.length > 0
+	) {
+		potentialUpperBound += 0.08;
+	}
+	return Math.max(
+		potentialUpperBound,
+		profile.bodyUpperBound + profile.bridgePressure * 0.15,
+	);
+}
+
+function compareFinalUnionCandidates(
+	left: CoverageLexicalFinalUnionCandidate,
+	right: CoverageLexicalFinalUnionCandidate,
+): number {
+	return (
+		compareDescendingMetric(
+			left.potentialUpperBound,
+			right.potentialUpperBound,
+		) ||
+		compareDescendingMetric(left.lowerBound, right.lowerBound) ||
+		compareDescendingMetric(left.profile.hybridPressure, right.profile.hybridPressure) ||
+		compareDescendingMetric(left.profile.anchorPressure, right.profile.anchorPressure) ||
+		compareDescendingMetric(left.profile.bodyUpperBound, right.profile.bodyUpperBound) ||
+		compareDescendingMetric(left.profile.bridgePressure, right.profile.bridgePressure) ||
+		left.key - right.key
+	);
+}
+
+function shouldProtectFinalUnionCandidate(
+	candidate: CoverageLexicalFinalUnionCandidate,
+	cutoffUpperBound: number,
+): boolean {
+	const unresolved = candidate.state.unresolvedBodyEvidence;
+	const hasWitnessPotential =
+		candidate.signal.phraseMatchCount > 0 ||
+		candidate.signal.supportBody.coverageCount > 0 ||
+		candidate.signal.metadataAssist.coverageCount > 0 ||
+		unresolved.needsPassageSignal ||
+		unresolved.hasUnverifiedPhraseWitness;
+	if (!hasWitnessPotential) {
+		return false;
+	}
+	return candidate.potentialUpperBound + 0.08 >= cutoffUpperBound;
 }
 
 function computeGroupPressure(

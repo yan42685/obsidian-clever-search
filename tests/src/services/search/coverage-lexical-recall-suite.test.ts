@@ -463,6 +463,117 @@ describe("coverage lexical recall suite", () => {
 		).toBe(true);
 	});
 
+	test("final union trims weak admitted tail while keeping strong ambiguous candidate", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const distractors: IndexedDocument[] = Array.from({ length: 48 }, (_, index) => ({
+			path: `pkm-en/archive/alias-tail-${index + 1}.md`,
+			basename: `alias-tail-${index + 1}.md`,
+			folder: "pkm-en/archive",
+			headings: `Alias tail ${index + 1}`,
+			aliases: `legacy alias note ${index + 1};old alias archive ${index + 1}`,
+			content:
+				"archive note mentions aliases and old names without the project compatibility detail",
+			tags: "aliases archive",
+		}));
+		const documents: IndexedDocument[] = [
+			{
+				path: "pkm-en/notes/linking/aliases-deep-dive.md",
+				basename: "aliases-deep-dive.md",
+				folder: "pkm-en/notes/linking",
+				headings: "Alias migration note",
+				aliases: "legacy alias note;old project alias note",
+				content:
+					"old project names and alias compatibility details live in this migration note with redirect mapping",
+				tags: "aliases migration note",
+			},
+			...distractors,
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "legacy alias note for old project names";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+		const { candidates } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 3,
+			},
+		);
+		expect(candidates.has("pkm-en/notes/linking/aliases-deep-dive.md")).toBe(true);
+		expect(candidates.size).toBeLessThan(documents.length);
+		const ranked = await engine.searchFiles({
+			queryText,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(ranked[0]?.path).toBe("pkm-en/notes/linking/aliases-deep-dive.md");
+	});
+
 	test("body phrase witness still fires via token tape", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
