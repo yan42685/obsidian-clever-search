@@ -1816,10 +1816,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private buildBinarySnapshotState(): CoverageLexicalSnapshotState {
+		const bodyTokenLexicon = this.getDocumentBodyTokenLexiconSnapshotValues();
+		const livePostingState = this.cloneLivePostingState({
+			bodyPostings: cloneSharedTokenIdPostingMapForSnapshot(
+				this.bodyPostings,
+				bodyTokenLexicon,
+				"packed",
+			),
+		});
 		return {
 			nextDocumentId: this.nextDocumentId,
 			sortedLexicon: [...this.getSortedLexicon()],
-			bodyTokenLexicon: this.getDocumentBodyTokenLexiconSnapshotValues(),
+			bodyTokenLexicon,
 			documents: this.documentById.flatMap((document) =>
 				document
 					? [
@@ -1838,7 +1846,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					  ]
 					: [],
 			),
-			...this.cloneLivePostingState(),
+			...livePostingState,
 			bodyCharPostings: new Map(),
 			bodyHanSegmentPostings: new Map(),
 			metadataAliasHanSegmentPostings: new Map(),
@@ -2031,17 +2039,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		);
 	}
 
-	private cloneLivePostingState(): Pick<
+	private cloneLivePostingState(
+		overrides?: Partial<
+			Pick<CoverageLexicalSnapshotState, CoverageLexicalLivePostingKey>
+		>,
+	): Pick<
 		CoverageLexicalSnapshotState,
 		CoverageLexicalLivePostingKey
 	> {
 		return Object.fromEntries(
 			COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS.map((descriptor) => [
 				descriptor.key,
-				cloneOwnedNumericPostingMap(
-					this.getLivePostingMap(descriptor.key),
-					descriptor.ownership,
-				),
+				overrides?.[descriptor.key] ??
+					cloneOwnedNumericPostingMap(
+						this.getLivePostingMap(descriptor.key),
+						descriptor.ownership,
+					),
 			]),
 		) as unknown as Pick<CoverageLexicalSnapshotState, CoverageLexicalLivePostingKey>;
 	}
@@ -4316,6 +4329,27 @@ function cloneOwnedNumericPostingMap(
 				: [...docIds].sort((left, right) => left - right),
 		]),
 	);
+}
+
+function cloneSharedTokenIdPostingMapForSnapshot(
+	postings: CoverageLexicalSharedTokenIdPostingMap,
+	tokenLexicon: readonly string[],
+	ownership: CoverageLexicalPostingOwnership,
+): Map<string, number[] | Uint32Array> {
+	const cloned = new Map<string, number[] | Uint32Array>();
+	for (const [tokenId, docIds] of postings.getTokenIdEntries()) {
+		const term = tokenLexicon[tokenId];
+		if (term === undefined) {
+			continue;
+		}
+		cloned.set(
+			term,
+			ownership === "packed"
+				? Uint32Array.from([...docIds].sort((left, right) => left - right))
+				: [...docIds].sort((left, right) => left - right),
+		);
+	}
+	return cloned;
 }
 
 function restoreOwnedNumericPostingMap(

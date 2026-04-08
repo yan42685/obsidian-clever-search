@@ -761,6 +761,57 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		});
 	});
 
+	test("serializing a cold-backed index does not reheat the reverse body lexicon", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				serialize(): { data: Uint8Array | ArrayBuffer } | null;
+				getIndexBreakdown(): Record<string, unknown> | null;
+			};
+		};
+
+		const documents = [
+			{
+				path: "notes/serialize-offload-target.md",
+				basename: "serialize-offload-target",
+				folder: "notes",
+				content: "alpha beta gamma stays cold-backed during snapshot export",
+				headings: "serialize offload target",
+			},
+		];
+
+		await withExperimentalBodyTokenOffloadEnv(undefined, async () => {
+			registerMockBodyTokenColdStore();
+			const engine = new CoverageLexicalFileSearchEngine();
+			await engine.addDocuments(documents);
+
+			const beforeBreakdown = engine.getIndexBreakdown();
+			const beforeDocumentIdentity = (beforeBreakdown?.estimatedBytes as Record<
+				string,
+				unknown
+			>)?.documentIdentity as Record<string, unknown>;
+			const beforeBodyTokenLexicon = beforeDocumentIdentity?.bodyTokenLexicon as
+				| Record<string, unknown>
+				| undefined;
+			expect(beforeBodyTokenLexicon?.count).toBe(0);
+
+			const snapshot = engine.serialize();
+			expect(snapshot).not.toBeNull();
+
+			const afterBreakdown = engine.getIndexBreakdown();
+			const afterDocumentIdentity = (afterBreakdown?.estimatedBytes as Record<
+				string,
+				unknown
+			>)?.documentIdentity as Record<string, unknown>;
+			const afterBodyTokenLexicon = afterDocumentIdentity?.bodyTokenLexicon as
+				| Record<string, unknown>
+				| undefined;
+			expect(afterBodyTokenLexicon?.count).toBe(0);
+		});
+	});
+
 	test("keeps resident body token tape when no cold store is registered", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
