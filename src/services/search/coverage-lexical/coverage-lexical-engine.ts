@@ -439,7 +439,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentById: Array<CoverageLexicalDocument | undefined> = [];
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly documentPathById: Array<string | undefined> = [];
-	private readonly documentBodyTokenLexicon: string[] = [];
+	private documentBodyTokenLexicon: string[] = [];
+	private documentBodyTokenCount = 0;
 	private readonly documentBodyTokenIdByTerm = new Map<string, number>();
 	private documentBodyTokenIdTape = new Uint8Array(0);
 	private readonly documentBodyTokenRangeById: Array<CoverageLexicalTokenRange | undefined> = [];
@@ -667,7 +668,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentById.length = 0;
 		this.documentIdByPath.clear();
 		this.documentPathById.length = 0;
-		this.documentBodyTokenLexicon.length = 0;
+		this.documentBodyTokenLexicon = [];
+		this.documentBodyTokenCount = 0;
 		this.documentBodyTokenIdByTerm.clear();
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
@@ -696,8 +698,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (existing !== undefined) {
 			return existing;
 		}
-		const tokenId = this.documentBodyTokenLexicon.length;
-		this.documentBodyTokenLexicon.push(token);
+		const tokenId = this.documentBodyTokenCount;
+		this.documentBodyTokenCount += 1;
+		if (this.documentBodyTokenLexicon.length > 0 || tokenId === 0) {
+			this.documentBodyTokenLexicon[tokenId] = token;
+		}
 		this.documentBodyTokenIdByTerm.set(token, tokenId);
 		return tokenId;
 	}
@@ -747,11 +752,40 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private getDocumentBodyTokenById(tokenId: number): string | undefined {
-		return this.documentBodyTokenLexicon[tokenId];
+		if (tokenId < 0 || tokenId >= this.documentBodyTokenCount) {
+			return undefined;
+		}
+		return this.ensureDocumentBodyTokenLexiconLoaded()[tokenId];
 	}
 
-	private getDocumentBodyTokenLexiconValues(): string[] {
+	private getResidentDocumentBodyTokenLexiconValues(): string[] {
 		return [...this.documentBodyTokenLexicon];
+	}
+
+	private getDocumentBodyTokenLexiconSnapshotValues(): string[] {
+		return this.buildDocumentBodyTokenLexiconSnapshot();
+	}
+
+	private ensureDocumentBodyTokenLexiconLoaded(): string[] {
+		if (this.documentBodyTokenLexicon.length === this.documentBodyTokenCount) {
+			return this.documentBodyTokenLexicon;
+		}
+		this.documentBodyTokenLexicon = this.buildDocumentBodyTokenLexiconSnapshot();
+		return this.documentBodyTokenLexicon;
+	}
+
+	private buildDocumentBodyTokenLexiconSnapshot(): string[] {
+		if (this.documentBodyTokenCount === 0) {
+			return [];
+		}
+		if (this.documentBodyTokenLexicon.length === this.documentBodyTokenCount) {
+			return [...this.documentBodyTokenLexicon];
+		}
+		const lexicon = new Array<string>(this.documentBodyTokenCount);
+		for (const [token, tokenId] of this.documentBodyTokenIdByTerm.entries()) {
+			lexicon[tokenId] = token;
+		}
+		return lexicon;
 	}
 
 	private getDocumentBodyTokenIds(docId: number): readonly number[] | undefined {
@@ -971,6 +1005,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
+		this.documentBodyTokenLexicon = [];
 	}
 
 	private offloadResidentDocumentBodyHanSegments(): void {
@@ -998,8 +1033,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private compactDocumentBodyTokenLexicon(): void {
-		if (this.documentBodyTokenLexicon.length === 0) {
-			this.documentBodyTokenLexicon.length = 0;
+		if (this.documentBodyTokenCount === 0) {
+			this.documentBodyTokenLexicon = [];
+			this.documentBodyTokenCount = 0;
 			this.documentBodyTokenIdByTerm.clear();
 			this.documentBodyTokenIdTape = new Uint8Array(0);
 			return;
@@ -1020,32 +1056,28 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			usedTokenIds.add(tokenId);
 		}
 		if (usedTokenIds.size === 0) {
-			this.documentBodyTokenLexicon.length = 0;
+			this.documentBodyTokenLexicon = [];
+			this.documentBodyTokenCount = 0;
 			this.documentBodyTokenIdByTerm.clear();
 			this.documentBodyTokenIdTape = new Uint8Array(0);
 			this.documentBodyTokenRangeById.length = 0;
 			this.bodyPostings.clear();
 			return;
 		}
-		if (usedTokenIds.size === this.documentBodyTokenLexicon.length) {
+		if (usedTokenIds.size === this.documentBodyTokenCount) {
 			return;
 		}
+		const hadResidentLexicon =
+			this.documentBodyTokenLexicon.length === this.documentBodyTokenCount;
 		const nextLexicon: string[] = [];
 		const nextIdByTerm = new Map<string, number>();
 		const tokenIdRemap = new Map<number, number>();
-		for (
-			let tokenId = 0;
-			tokenId < this.documentBodyTokenLexicon.length;
-			tokenId += 1
-		) {
+		const tokensById = [...this.documentBodyTokenIdByTerm.entries()].sort(
+			(left, right) => left[1] - right[1],
+		);
+		for (const [token, tokenId] of tokensById) {
 			if (!usedTokenIds.has(tokenId)) {
 				continue;
-			}
-			const token = this.getDocumentBodyTokenById(tokenId);
-			if (token === undefined) {
-				throw new Error(
-					`Missing compacted coverage lexical body token for id ${tokenId}`,
-				);
 			}
 			const nextTokenId = nextLexicon.length;
 			nextLexicon.push(token);
@@ -1074,8 +1106,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			);
 		}
 		this.bodyPostings.remapTokenIds(tokenIdRemap, nextLexicon.length);
-		this.documentBodyTokenLexicon.length = 0;
-		this.documentBodyTokenLexicon.push(...nextLexicon);
+		this.documentBodyTokenLexicon = hadResidentLexicon ? nextLexicon : [];
+		this.documentBodyTokenCount = nextLexicon.length;
 		this.documentBodyTokenIdByTerm.clear();
 		for (const [token, tokenId] of nextIdByTerm.entries()) {
 			this.documentBodyTokenIdByTerm.set(token, tokenId);
@@ -1535,7 +1567,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath,
 			this.documentPathById,
 			this.documentById,
-			this.getDocumentBodyTokenLexiconValues(),
+			this.getResidentDocumentBodyTokenLexiconValues(),
 			this.documentBodyTokenIdTape,
 			this.documentBodyTokenRangeById,
 			this.documentBodyHanSegmentsById,
@@ -1693,14 +1725,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private removeBodyPostingsForDoc(docId: number): void {
-		const overrides = new Map<string, Uint32Array | undefined>();
-		for (const [term, docs] of this.bodyPostings.entries()) {
+		const overrides = new Map<number, Uint32Array | undefined>();
+		for (const [tokenId, docs] of this.bodyPostings.getTokenIdEntries()) {
 			if (docs.indexOf(docId) === -1) {
 				continue;
 			}
-			overrides.set(term, removeDocIdFromSortedPosting(docs, docId));
+			overrides.set(tokenId, removeDocIdFromSortedPosting(docs, docId));
 		}
-		this.bodyPostings.updateMany(overrides);
+		this.bodyPostings.updateManyByTokenId(
+			overrides,
+			this.documentBodyTokenCount,
+		);
 	}
 
 	private getMetadataExactPostingMaps(): readonly ReadonlyMap<string, readonly number[] | Uint32Array>[] {
@@ -1784,7 +1819,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return {
 			nextDocumentId: this.nextDocumentId,
 			sortedLexicon: [...this.getSortedLexicon()],
-			bodyTokenLexicon: this.getDocumentBodyTokenLexiconValues(),
+			bodyTokenLexicon: this.getDocumentBodyTokenLexiconSnapshotValues(),
 			documents: this.documentById.flatMap((document) =>
 				document
 					? [
@@ -1831,10 +1866,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of this.sortedLexiconCache) {
 			this.lexicon.add(term);
 		}
-		this.documentBodyTokenLexicon.length = 0;
-		this.documentBodyTokenLexicon.push(...state.bodyTokenLexicon);
+		this.documentBodyTokenLexicon = [...state.bodyTokenLexicon];
+		this.documentBodyTokenCount = state.bodyTokenLexicon.length;
 		this.documentBodyTokenIdByTerm.clear();
-		for (let tokenId = 0; tokenId < this.documentBodyTokenLexicon.length; tokenId += 1) {
+		for (let tokenId = 0; tokenId < this.documentBodyTokenCount; tokenId += 1) {
 			this.documentBodyTokenIdByTerm.set(
 				this.documentBodyTokenLexicon[tokenId],
 				tokenId,

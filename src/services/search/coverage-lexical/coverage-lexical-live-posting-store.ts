@@ -180,6 +180,29 @@ export class CoverageLexicalSharedTokenIdPostingMap
 		this.rebuildPostingTape(overrides, nextTokenCount);
 	}
 
+	updateManyByTokenId(
+		postings: ReadonlyMap<number, CoverageLexicalPackedPostingValue | undefined>,
+		nextTokenCount: number = this.postingStartsByTokenId.length,
+	): void {
+		if (postings.size === 0) {
+			return;
+		}
+		const overrides = new Map<number, Uint32Array | undefined>();
+		let resolvedNextTokenCount = nextTokenCount;
+		for (const [tokenId, docIds] of postings.entries()) {
+			resolvedNextTokenCount = Math.max(resolvedNextTokenCount, tokenId + 1);
+			overrides.set(
+				tokenId,
+				!docIds || docIds.length === 0
+					? undefined
+					: docIds instanceof Uint32Array
+						? docIds
+						: new Uint32Array(docIds),
+			);
+		}
+		this.rebuildPostingTape(overrides, resolvedNextTokenCount);
+	}
+
 	values(): IterableIterator<CoverageLexicalPackedPostingValue> {
 		return this.iterateValues();
 	}

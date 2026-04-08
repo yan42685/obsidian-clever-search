@@ -672,9 +672,13 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			const breakdown = engine.getIndexBreakdown();
 			const documentIdentity = (breakdown?.estimatedBytes as Record<string, unknown>)
 				?.documentIdentity as Record<string, unknown>;
+			const bodyTokenLexicon = documentIdentity?.bodyTokenLexicon as
+				| Record<string, unknown>
+				| undefined;
 			const bodyTokensById = documentIdentity?.bodyTokensById as
 				| Record<string, unknown>
 				| undefined;
+			expect(bodyTokenLexicon?.count).toBe(0);
 			expect(bodyTokensById?.populatedCount).toBe(0);
 
 			const results = await engine.searchFiles({
@@ -736,9 +740,13 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			const breakdown = engine.getIndexBreakdown();
 			const documentIdentity = (breakdown?.estimatedBytes as Record<string, unknown>)
 				?.documentIdentity as Record<string, unknown>;
+			const bodyTokenLexicon = documentIdentity?.bodyTokenLexicon as
+				| Record<string, unknown>
+				| undefined;
 			const bodyTokensById = documentIdentity?.bodyTokensById as
 				| Record<string, unknown>
 				| undefined;
+			expect(bodyTokenLexicon?.count).toBe(0);
 			expect(bodyTokensById?.populatedCount).toBe(0);
 
 			const results = await engine.searchFiles({
