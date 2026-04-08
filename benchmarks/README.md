@@ -93,6 +93,45 @@ Measure direct local read-path timings with:
 node scripts/benchmark-big-vault-read.mjs
 ```
 
+### `coverage-lexical-automation-v1`
+
+This is the exact synthetic corpus used by `npm run benchmark:coverage-lexical`.
+
+Materialize the benchmark corpus locally with:
+
+```bash
+npm run benchmark:coverage-lexical:materialize-corpus
+```
+
+The default output directory is:
+
+```text
+.codex-bench/corpora/coverage-lexical-automation-v1
+```
+
+That export contains:
+
+- `vault/`: one materialized markdown note per benchmark document path
+- `documents.json`: the exact document fields consumed by the benchmark harness
+- `query-cases.json`: the exact benchmark queries and target paths
+- `manifest.json`: corpus metadata, counts, and source-module provenance
+
+If you want a different output directory, run:
+
+```bash
+node scripts/materialize-coverage-lexical-corpus.mjs --output=.codex-bench/corpora/my-coverage-corpus
+```
+
+Run the benchmark itself with:
+
+```bash
+npm run benchmark:coverage-lexical
+```
+
+The materialized corpus and the benchmark both come from the same generator:
+
+- `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts#createAutomationCorpus`
+
 ## Design intent
 
 These corpora are not meant to be "the truth" for retrieval quality.
