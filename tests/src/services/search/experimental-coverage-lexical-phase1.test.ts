@@ -596,7 +596,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		});
 	});
 
-	test("packs document metadata text into an arena instead of stringPool-owned document text", async () => {
+	test("stores document metadata text directly on document records", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -639,18 +639,11 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const stringPoolByGroup =
 			(stringPool.byGroup as Record<string, Record<string, unknown>>) ?? {};
 		const documentTextGroup = stringPoolByGroup.documentText ?? {};
-		const documentsBreakdown =
-			(estimatedBytes.documents as Record<string, Record<string, unknown>>) ?? {};
-		const textArena = documentsBreakdown.textArena ?? {};
 
-		expect(documentTextGroup.bytes ?? 0).toBe(0);
-		expect((textArena.byteLength ?? 0) as number).toBeGreaterThan(0);
-		expect((engine as any).documentMetadataTextArena.length).toBeGreaterThan(0);
+		expect((documentTextGroup.bytes ?? 0) as number).toBeGreaterThan(0);
 		expect(
-			Object.prototype.hasOwnProperty.call(
-				((engine as any).documentById as Array<Record<string, unknown> | undefined>)[0] ?? {},
-				"headingsText",
-			),
-		).toBe(false);
+			(((engine as any).documentById as Array<Record<string, unknown> | undefined>)[0] ??
+				{}).headingsText,
+		).toBe("packed metadata heading");
 	});
 });

@@ -117,6 +117,11 @@ function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 
 type CoverageLexicalDocument = {
 	docId: number;
+	basenameText: string;
+	folderText: string;
+	aliasesText: string;
+	tagsText: string;
+	headingsText: string;
 };
 
 type CoverageLexicalDocumentTextFields = {
@@ -219,8 +224,12 @@ function compareCoverageLexicalTerms(left: string, right: string): number {
 
 function createCoverageLexicalDocument(
 	docId: number,
+	fields: CoverageLexicalDocumentTextFields,
 ): CoverageLexicalDocument {
-	return { docId };
+	return {
+		docId,
+		...fields,
+	};
 }
 
 function createCoverageLexicalDocumentTextFields(
@@ -394,22 +403,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly documentById: Array<CoverageLexicalDocument | undefined> = [];
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly documentPathById: Array<string | undefined> = [];
-	private documentMetadataTextArena = new Uint8Array(0);
-	private readonly documentBasenameTextRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
-	private readonly documentFolderTextRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
-	private readonly documentAliasesTextRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
-	private readonly documentTagsTextRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
-	private readonly documentHeadingsTextRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
 	private readonly documentBodyTokenLexicon: string[] = [];
 	private readonly documentBodyTokenIdByTerm = new Map<string, number>();
 	private documentBodyTokenIdTape = new Uint8Array(0);
@@ -627,12 +620,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentById.length = 0;
 		this.documentIdByPath.clear();
 		this.documentPathById.length = 0;
-		this.documentMetadataTextArena = new Uint8Array(0);
-		this.documentBasenameTextRangeById.length = 0;
-		this.documentFolderTextRangeById.length = 0;
-		this.documentAliasesTextRangeById.length = 0;
-		this.documentTagsTextRangeById.length = 0;
-		this.documentHeadingsTextRangeById.length = 0;
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenIdByTerm.clear();
 		this.documentBodyTokenIdTape = new Uint8Array(0);
@@ -666,123 +653,23 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return tokenId;
 	}
 
-	private getDocumentTextRangeByField(
-		docId: number,
-		field: keyof CoverageLexicalDocumentTextFields,
-	): CoverageLexicalTokenRange | undefined {
-		switch (field) {
-			case "basenameText":
-				return this.documentBasenameTextRangeById[docId];
-			case "folderText":
-				return this.documentFolderTextRangeById[docId];
-			case "aliasesText":
-				return this.documentAliasesTextRangeById[docId];
-			case "tagsText":
-				return this.documentTagsTextRangeById[docId];
-			case "headingsText":
-				return this.documentHeadingsTextRangeById[docId];
-			default:
-				return undefined;
-		}
-	}
-
-	private setDocumentTextRangeByField(
-		docId: number,
-		field: keyof CoverageLexicalDocumentTextFields,
-		range: CoverageLexicalTokenRange | undefined,
-	): void {
-		switch (field) {
-			case "basenameText":
-				this.documentBasenameTextRangeById[docId] = range;
-				return;
-			case "folderText":
-				this.documentFolderTextRangeById[docId] = range;
-				return;
-			case "aliasesText":
-				this.documentAliasesTextRangeById[docId] = range;
-				return;
-			case "tagsText":
-				this.documentTagsTextRangeById[docId] = range;
-				return;
-			case "headingsText":
-				this.documentHeadingsTextRangeById[docId] = range;
-				return;
-		}
-	}
-
-	private appendDocumentMetadataText(
-		value: string,
-	): CoverageLexicalTokenRange | undefined {
-		if (value.length === 0) {
-			return undefined;
-		}
-		const encoded = UTF8_ENCODER.encode(value);
-		const start = this.documentMetadataTextArena.length;
-		const nextArena = new Uint8Array(start + encoded.length);
-		nextArena.set(this.documentMetadataTextArena, 0);
-		nextArena.set(encoded, start);
-		this.documentMetadataTextArena = nextArena;
-		return {
-			start,
-			end: start + encoded.length,
-		};
-	}
-
-	private setDocumentTextFields(
-		docId: number,
-		fields: CoverageLexicalDocumentTextFields,
-	): void {
-		this.setDocumentTextRangeByField(
-			docId,
-			"basenameText",
-			this.appendDocumentMetadataText(fields.basenameText),
-		);
-		this.setDocumentTextRangeByField(
-			docId,
-			"folderText",
-			this.appendDocumentMetadataText(fields.folderText),
-		);
-		this.setDocumentTextRangeByField(
-			docId,
-			"aliasesText",
-			this.appendDocumentMetadataText(fields.aliasesText),
-		);
-		this.setDocumentTextRangeByField(
-			docId,
-			"tagsText",
-			this.appendDocumentMetadataText(fields.tagsText),
-		);
-		this.setDocumentTextRangeByField(
-			docId,
-			"headingsText",
-			this.appendDocumentMetadataText(fields.headingsText),
-		);
-	}
-
-	private readDocumentTextRange(
-		range: CoverageLexicalTokenRange | undefined,
-	): string {
-		if (!range || range.end <= range.start) {
-			return "";
-		}
-		return UTF8_DECODER.decode(
-			this.documentMetadataTextArena.subarray(range.start, range.end),
-		);
-	}
-
 	private getDocumentTextFields(docId: number): CoverageLexicalDocumentTextFields {
+		const document = this.documentById[docId];
+		if (!document) {
+			return {
+				basenameText: "",
+				folderText: "",
+				aliasesText: "",
+				tagsText: "",
+				headingsText: "",
+			};
+		}
 		return {
-			basenameText: this.readDocumentTextRange(
-				this.documentBasenameTextRangeById[docId],
-			),
-			folderText: this.readDocumentTextRange(this.documentFolderTextRangeById[docId]),
-			aliasesText: this.readDocumentTextRange(
-				this.documentAliasesTextRangeById[docId],
-			),
-			tagsText: this.readDocumentTextRange(this.documentTagsTextRangeById[docId]),
-			headingsText: this.readDocumentTextRange(
-				this.documentHeadingsTextRangeById[docId],
-			),
+			basenameText: document.basenameText,
+			folderText: document.folderText,
+			aliasesText: document.aliasesText,
+			tagsText: document.tagsText,
+			headingsText: document.headingsText,
 		};
 	}
 
@@ -790,80 +677,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		docId: number,
 		field: CoverageLexicalMetadataField,
 	): string {
+		const document = this.documentById[docId];
+		if (!document) {
+			return "";
+		}
 		switch (field) {
 			case "basename":
-				return this.readDocumentTextRange(this.documentBasenameTextRangeById[docId]);
+				return document.basenameText;
 			case "aliases":
-				return this.readDocumentTextRange(this.documentAliasesTextRangeById[docId]);
+				return document.aliasesText;
 			case "folder":
-				return this.readDocumentTextRange(this.documentFolderTextRangeById[docId]);
+				return document.folderText;
 			case "headings":
-				return this.readDocumentTextRange(this.documentHeadingsTextRangeById[docId]);
+				return document.headingsText;
 			case "tags":
-				return this.readDocumentTextRange(this.documentTagsTextRangeById[docId]);
+				return document.tagsText;
 			default:
 				return "";
 		}
-	}
-
-	private clearDocumentTextFields(docId: number): void {
-		this.documentBasenameTextRangeById[docId] = undefined;
-		this.documentFolderTextRangeById[docId] = undefined;
-		this.documentAliasesTextRangeById[docId] = undefined;
-		this.documentTagsTextRangeById[docId] = undefined;
-		this.documentHeadingsTextRangeById[docId] = undefined;
-	}
-
-	private compactDocumentMetadataTextArena(): void {
-		if (this.documents.size === 0) {
-			this.documentMetadataTextArena = new Uint8Array(0);
-			return;
-		}
-		const nextBasenameRanges: Array<CoverageLexicalTokenRange | undefined> = [];
-		const nextFolderRanges: Array<CoverageLexicalTokenRange | undefined> = [];
-		const nextAliasesRanges: Array<CoverageLexicalTokenRange | undefined> = [];
-		const nextTagsRanges: Array<CoverageLexicalTokenRange | undefined> = [];
-		const nextHeadingsRanges: Array<CoverageLexicalTokenRange | undefined> = [];
-		const chunks: Uint8Array[] = [];
-		let totalBytes = 0;
-		const append = (value: string): CoverageLexicalTokenRange | undefined => {
-			if (value.length === 0) {
-				return undefined;
-			}
-			const encoded = UTF8_ENCODER.encode(value);
-			const start = totalBytes;
-			totalBytes += encoded.length;
-			chunks.push(encoded);
-			return { start, end: totalBytes };
-		};
-		for (let docId = 0; docId < this.documentById.length; docId += 1) {
-			if (!this.documentById[docId]) {
-				continue;
-			}
-			const fields = this.getDocumentTextFields(docId);
-			nextBasenameRanges[docId] = append(fields.basenameText);
-			nextFolderRanges[docId] = append(fields.folderText);
-			nextAliasesRanges[docId] = append(fields.aliasesText);
-			nextTagsRanges[docId] = append(fields.tagsText);
-			nextHeadingsRanges[docId] = append(fields.headingsText);
-		}
-		const nextArena = new Uint8Array(totalBytes);
-		let cursor = 0;
-		for (const chunk of chunks) {
-			nextArena.set(chunk, cursor);
-			cursor += chunk.length;
-		}
-		this.documentMetadataTextArena = nextArena;
-		this.documentBasenameTextRangeById.length = 0;
-		this.documentBasenameTextRangeById.push(...nextBasenameRanges);
-		this.documentFolderTextRangeById.length = 0;
-		this.documentFolderTextRangeById.push(...nextFolderRanges);
-		this.documentAliasesTextRangeById.length = 0;
-		this.documentAliasesTextRangeById.push(...nextAliasesRanges);
-		this.documentTagsTextRangeById.length = 0;
-		this.documentTagsTextRangeById.push(...nextTagsRanges);
-		this.documentHeadingsTextRangeById.length = 0;
-		this.documentHeadingsTextRangeById.push(...nextHeadingsRanges);
 	}
 
 	private getDocumentBodyTokenById(tokenId: number): string | undefined {
@@ -1326,7 +1157,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const document of documents) {
 			this.indexDocument(document);
 		}
-		this.compactDocumentMetadataTextArena();
 		this.offloadResidentDocumentBodyTokens();
 		this.offloadResidentDocumentBodyHanSegments();
 	}
@@ -1335,7 +1165,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const path of paths) {
 			this.removeDocument(path);
 		}
-		this.compactDocumentMetadataTextArena();
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
@@ -1714,12 +1543,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const accumulator = createIndexSizeAccumulator();
 		const documents = estimateDocumentStoreBytes(
 			this.documents,
-			this.documentMetadataTextArena,
-			this.documentBasenameTextRangeById,
-			this.documentFolderTextRangeById,
-			this.documentAliasesTextRangeById,
-			this.documentTagsTextRangeById,
-			this.documentHeadingsTextRangeById,
 			accumulator,
 		);
 		const documentIdentity = estimateDocumentIdentityBytes(
@@ -1789,8 +1612,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.removeDocument(document.path, false);
 		const docId = this.ensureDocumentId(document.path);
 		this.clearHotCachedOffloadedBodyTokens(docId);
-		const storedDocument = createCoverageLexicalDocument(docId);
 		const documentTextFields = createCoverageLexicalDocumentTextFields(document);
+		const storedDocument = createCoverageLexicalDocument(docId, documentTextFields);
 		const bodyText = document.content ?? "";
 		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
 			this.tokenizer,
@@ -1800,7 +1623,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 		this.documents.set(document.path, storedDocument);
 		this.documentById[docId] = storedDocument;
-		this.setDocumentTextFields(docId, documentTextFields);
 		this.setDocumentBodyTokens(docId, derivedState.bodyTokenSequence);
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 		this.applyDerivedPostingTerms(docId, derivedState, "add");
@@ -1829,7 +1651,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.applyDerivedPostingTerms(docId, derivedState, "remove");
 		this.documents.delete(path);
 		this.documentById[docId] = undefined;
-		this.clearDocumentTextFields(docId);
 		this.clearHotCachedOffloadedBodyTokens(docId);
 		this.clearDocumentBodyTokens(docId);
 		this.compactDocumentBodyTokenLexicon();
@@ -1982,25 +1803,24 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		const bodyTokenIdsById = new Map<number, readonly number[]>();
 		for (const document of state.documents) {
-			const storedDocument: CoverageLexicalDocument = { docId: document.docId };
-			this.documents.set(document.path, storedDocument);
-			this.documentById[document.docId] = storedDocument;
-			this.documentIdByPath.set(document.path, document.docId);
-			this.documentPathById[document.docId] = document.path;
-			this.setDocumentTextFields(document.docId, {
+			const storedDocument: CoverageLexicalDocument = {
+				docId: document.docId,
 				basenameText: document.basenameText,
 				folderText: document.folderText,
 				aliasesText: document.aliasesText,
 				tagsText: document.tagsText,
 				headingsText: document.headingsText,
-			});
+			};
+			this.documents.set(document.path, storedDocument);
+			this.documentById[document.docId] = storedDocument;
+			this.documentIdByPath.set(document.path, document.docId);
+			this.documentPathById[document.docId] = document.path;
 			bodyTokenIdsById.set(document.docId, [...document.bodyTokenIds]);
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
 		this.restoreLivePostingState(state);
 		this.metadataHeadingCharPostings.clear();
-		this.compactDocumentMetadataTextArena();
 		this.offloadResidentDocumentBodyTokens();
 		this.offloadResidentDocumentBodyHanSegments();
 	}
@@ -3442,7 +3262,6 @@ const INDEX_TYPED_ARRAY_VIEW_BYTES = 16;
 const INDEX_ARRAY_BUFFER_HEADER_BYTES = 16;
 const INDEX_TYPED_ARRAY_ALIGNMENT_BYTES = 8;
 const UTF8_ENCODER = new TextEncoder();
-const UTF8_DECODER = new TextDecoder();
 
 function createIndexSizeAccumulator(): IndexSizeAccumulator {
 	return {
@@ -3638,12 +3457,6 @@ function estimatePackedUint32Bytes(length: number): number {
 
 function estimateDocumentStoreBytes(
 	documents: ReadonlyMap<string, CoverageLexicalDocument>,
-	documentMetadataTextArena: Uint8Array,
-	documentBasenameTextRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
-	documentFolderTextRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
-	documentAliasesTextRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
-	documentTagsTextRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
-	documentHeadingsTextRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
 	accumulator: IndexSizeAccumulator,
 ): Record<string, unknown> & { total: number } {
 	const sections = {
@@ -3662,48 +3475,34 @@ function estimateDocumentStoreBytes(
 		accountStringBytes(accumulator, path, "documents.path");
 		sections.paths.count += 1;
 		sections.paths.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.basenameText, "documents.basenameText");
 		sections.basenameText.count += 1;
-		sections.basenameText.referenceBytes +=
-			documentBasenameTextRangeById[document.docId] !== undefined
-				? INDEX_NUMBER_BYTES * 2
-				: 0;
+		sections.basenameText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.folderText, "documents.folderText");
 		sections.folderText.count += 1;
-		sections.folderText.referenceBytes +=
-			documentFolderTextRangeById[document.docId] !== undefined
-				? INDEX_NUMBER_BYTES * 2
-				: 0;
+		sections.folderText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.aliasesText, "documents.aliasesText");
 		sections.aliasesText.count += 1;
-		sections.aliasesText.referenceBytes +=
-			documentAliasesTextRangeById[document.docId] !== undefined
-				? INDEX_NUMBER_BYTES * 2
-				: 0;
+		sections.aliasesText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.tagsText, "documents.tagsText");
 		sections.tagsText.count += 1;
-		sections.tagsText.referenceBytes +=
-			documentTagsTextRangeById[document.docId] !== undefined
-				? INDEX_NUMBER_BYTES * 2
-				: 0;
+		sections.tagsText.referenceBytes += INDEX_REFERENCE_BYTES;
+
+		accountStringBytes(accumulator, document.headingsText, "documents.headingsText");
 		sections.headingsText.count += 1;
-		sections.headingsText.referenceBytes +=
-			documentHeadingsTextRangeById[document.docId] !== undefined
-				? INDEX_NUMBER_BYTES * 2
-				: 0;
+		sections.headingsText.referenceBytes += INDEX_REFERENCE_BYTES;
 	}
-	const textArena = {
-		byteLength: documentMetadataTextArena.length,
-		ownershipBytes:
-			documentMetadataTextArena.length > 0
-				? estimatePackedUint8Bytes(documentMetadataTextArena.length)
-				: 0,
-	};
 
 	return {
 		total:
 			INDEX_COLLECTION_HEADER_BYTES +
 			documents.size * INDEX_MAP_ENTRY_BYTES +
-			sumSectionBytes(sections) +
-			textArena.ownershipBytes,
+			sumSectionBytes(sections),
 		mapEntryBytes: documents.size * INDEX_MAP_ENTRY_BYTES,
-		textArena,
 		...sections,
 	};
 }
