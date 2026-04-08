@@ -326,10 +326,141 @@ describe("coverage lexical recall suite", () => {
 				});
 			}
 		}
-		console.log(
-			"[coverage-lexical-recall-suite] ranking-diagnostics",
-			JSON.stringify(rankingDiagnostics, null, 2),
+	console.log(
+		"[coverage-lexical-recall-suite] ranking-diagnostics",
+		JSON.stringify(rankingDiagnostics, null, 2),
+	);
+	});
+
+	test("ambiguous anchored queries can still enter later body lanes", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const documents: IndexedDocument[] = [
+			{
+				path: "pkm-en/notes/linking/aliases-deep-dive.md",
+				basename: "aliases-deep-dive.md",
+				folder: "pkm-en/notes/linking",
+				headings: "Alias migration note",
+				aliases: "legacy project names note;old project alias note",
+				content:
+					"old project names and rename history live in this note about alias compatibility and redirect mapping",
+				tags: "aliases migration note",
+			},
+			{
+				path: "pkm-en/glossary/aliases.md",
+				basename: "aliases.md",
+				folder: "pkm-en/glossary",
+				headings: "Aliases glossary",
+				content:
+					"glossary definition for aliases and alternate labels without the migration details",
+				tags: "aliases glossary",
+			},
+			{
+				path: "pkm-en/projects/renames.md",
+				basename: "renames.md",
+				folder: "pkm-en/projects",
+				headings: "Rename ledger",
+				content:
+					"project rename ledger tracks previous names but does not describe alias note compatibility",
+				tags: "rename history",
+			},
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "aliases note for old project names";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		expect(plan.queryKind).not.toBe("body_only_local");
+		expect(plan.route).not.toBe("body-first");
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+		const { candidates, debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 5,
+			},
 		);
+		expect(candidates.has("pkm-en/notes/linking/aliases-deep-dive.md")).toBe(true);
+		const rescuedByBodyLane = debug.lanes.some(
+			(lane) =>
+				(lane.laneName === "relaxed_hybrid_lane" ||
+					lane.laneName === "local_body_lane") &&
+				lane.admittedPaths.includes("pkm-en/notes/linking/aliases-deep-dive.md"),
+		);
+		expect(rescuedByBodyLane).toBe(true);
+		const ranked = await engine.searchFiles({
+			queryText,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(
+			ranked.some(
+				(result) =>
+					result.path === "pkm-en/notes/linking/aliases-deep-dive.md",
+			),
+		).toBe(true);
 	});
 
 	test("body phrase witness still fires via token tape", async () => {
@@ -842,4 +973,3 @@ describe("coverage lexical recall suite", () => {
 	});
 
 });
-

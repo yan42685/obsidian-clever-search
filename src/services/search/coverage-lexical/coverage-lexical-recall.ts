@@ -244,6 +244,24 @@ type CoverageLexicalCheapLaneSignal = {
 	bodyCharCount: number;
 };
 
+type CoverageLexicalCheapLaneEvidenceProfile = {
+	anchorPressure: number;
+	metadataAssistPressure: number;
+	bodyPressure: number;
+	bodyUpperBound: number;
+	bridgePressure: number;
+	hybridPressure: number;
+	passagePressure: number;
+	charPressure: number;
+};
+
+type CoverageLexicalLaneUnionPressure = {
+	admittedTopUpperBound: number;
+	remainingTopUpperBound: number;
+	remainingPotentialCount: number;
+	remainingActivationPressure: number;
+};
+
 const ALL_METADATA_FIELDS: readonly CoverageLexicalMetadataField[] = [
 	"basename",
 	"aliases",
@@ -780,7 +798,23 @@ function shouldRunRelaxedHybridLane(
 		CoverageLexicalCandidateState
 	>,
 ): boolean {
-	const activationPressure = computeRelaxedHybridActivationPressure(plan);
+	const unionPressure = computeLaneUnionPressure(
+		"relaxed_hybrid_lane",
+		aggregateCandidates,
+		admittedKeys,
+		plan,
+	);
+	const activationPressure = Math.max(
+		computeRelaxedHybridActivationPressure(plan),
+		unionPressure.remainingActivationPressure,
+	);
+	if (
+		admittedKeys.size >= 10 &&
+		unionPressure.remainingTopUpperBound + 0.12 <
+			unionPressure.admittedTopUpperBound
+	) {
+		return false;
+	}
 	if (activationPressure >= 0.95) {
 		if (admittedKeys.size >= 20) {
 			return false;
@@ -807,7 +841,23 @@ function shouldRunLocalBodyLane(
 		CoverageLexicalCandidateState
 	>,
 ): boolean {
-	const activationPressure = computeLocalBodyActivationPressure(plan);
+	const unionPressure = computeLaneUnionPressure(
+		"local_body_lane",
+		aggregateCandidates,
+		admittedKeys,
+		plan,
+	);
+	const activationPressure = Math.max(
+		computeLocalBodyActivationPressure(plan),
+		unionPressure.remainingActivationPressure,
+	);
+	if (
+		admittedKeys.size >= 12 &&
+		unionPressure.remainingTopUpperBound + 0.14 <
+			unionPressure.admittedTopUpperBound
+	) {
+		return false;
+	}
 	if (activationPressure >= 0.95) {
 		if (admittedKeys.size >= 22) {
 			return false;
@@ -1513,8 +1563,8 @@ function computeRelaxedHybridActivationPressure(plan: CoverageLexicalPlan): numb
 		Math.min(anchorMass, bodyMass) * 1.15 +
 		supportBodyMass * 0.7 +
 		Math.min(0.45, optionalBodyFamilyCount * 0.18) +
-		(plan.queryKind === "memory_relaxed" ? 0.25 : 0) +
-		(plan.queryKind === "anchor_body_hybrid" ? 0.1 : 0)
+		(plan.queryKind === "memory_relaxed" ? 0.14 : 0) +
+		(plan.queryKind === "anchor_body_hybrid" ? 0.06 : 0)
 	);
 }
 
@@ -1534,10 +1584,10 @@ function computeLocalBodyActivationPressure(plan: CoverageLexicalPlan): number {
 		decisiveBodyMass * 0.9 +
 		supportBodyMass * 0.55 +
 		bridgePressure +
-		(plan.queryKind === "body_only_local" ? 0.2 : 0) +
-		(plan.queryKind === "memory_relaxed" ? 0.15 : 0) +
-		(plan.queryKind === "bridge_dependent" ? 0.15 : 0) +
-		(plan.route === "body-first" ? 0.1 : 0)
+		(plan.queryKind === "body_only_local" ? 0.1 : 0) +
+		(plan.queryKind === "memory_relaxed" ? 0.08 : 0) +
+		(plan.queryKind === "bridge_dependent" ? 0.08 : 0) +
+		(plan.route === "body-first" ? 0.05 : 0)
 	);
 }
 
@@ -1672,6 +1722,7 @@ function evaluateLaneCandidates(
 	request: FileSearchRequest,
 	budget: number,
 ): CoverageLexicalLaneEvaluation[] {
+	const deferredFullEvaluation = shouldDeferFullLaneEvaluation(laneName);
 	const lightEvaluations = evaluateLaneCandidatesLight(
 		laneName,
 		preselected,
@@ -1681,11 +1732,12 @@ function evaluateLaneCandidates(
 		charQuery,
 		queryCache,
 		benchmarkHooks,
+		deferredFullEvaluation,
 	);
 	if (laneName === "strict_metadata_lane") {
 		return lightEvaluations.map(({ evaluation }) => evaluation);
 	}
-	if (!shouldDeferFullLaneEvaluation(laneName)) {
+	if (!deferredFullEvaluation) {
 		return lightEvaluations.map(({ evaluation }) => evaluation);
 	}
 	const shortlisted = selectDeferredFullEvaluationCandidates(
@@ -1733,6 +1785,7 @@ function evaluateLaneCandidatesLight(
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	deferredFullEvaluation: boolean,
 ): CoverageLexicalEvaluatedLaneCandidate[] {
 	const accepted: CoverageLexicalEvaluatedLaneCandidate[] = [];
 	for (const candidate of preselected) {
@@ -1748,7 +1801,8 @@ function evaluateLaneCandidatesLight(
 			{
 				includePassageSignal:
 					(index.allowPassageSignalInRecall ?? true) &&
-					laneName === "local_body_lane",
+					laneName === "local_body_lane" &&
+					!deferredFullEvaluation,
 				includeTagFallback: laneName === "char_fallback_lane",
 			},
 		);
@@ -1770,7 +1824,7 @@ function evaluateLaneCandidatesLight(
 }
 
 function shouldDeferFullLaneEvaluation(laneName: CoverageLexicalLaneName): boolean {
-	return false;
+	return laneName === "local_body_lane";
 }
 
 function selectDeferredFullEvaluationCandidates(
@@ -1795,11 +1849,25 @@ function selectDeferredFullEvaluationCandidates(
 		.map(({ candidate }) => candidate);
 	const selectedKeys = new Set(selected.map(({ key }) => key));
 	const cutoff = lightEvaluations[fullEvalBudget - 1]?.evaluation ?? null;
+	const cutoffUpperBound =
+		cutoff === null
+			? 0
+			: computeLaneEvidenceUpperBound(
+					laneName,
+					buildLaneEvidenceProfile(cutoff),
+				);
 	if (cutoff) {
 		for (let index = fullEvalBudget; index < lightEvaluations.length; index += 1) {
 			const candidate = lightEvaluations[index];
 			if (
-				compareLaneEvaluations(laneName, cutoff, candidate.evaluation, plan) !== 0
+				compareLaneEvaluations(laneName, cutoff, candidate.evaluation, plan) !==
+					0 &&
+				computeLaneEvidenceUpperBound(
+					laneName,
+					buildLaneEvidenceProfile(candidate.evaluation),
+				) +
+					0.06 <
+					cutoffUpperBound
 			) {
 				break;
 			}
@@ -1809,13 +1877,21 @@ function selectDeferredFullEvaluationCandidates(
 	}
 	if (
 		laneName === "strict_hybrid_lane" ||
-		laneName === "relaxed_hybrid_lane"
+		laneName === "relaxed_hybrid_lane" ||
+		laneName === "local_body_lane"
 	) {
 		for (const { candidate } of lightEvaluations) {
 			if (selectedKeys.has(candidate.key)) {
 				continue;
 			}
-			if (!shouldProtectCheapWitnessFloor(laneName, candidate.signal, plan)) {
+			if (
+				!shouldProtectCheapWitnessFloor(
+					laneName,
+					candidate.signal,
+					plan,
+					cutoffUpperBound,
+				)
+			) {
 				continue;
 			}
 			selected.push(candidate);
@@ -1963,25 +2039,19 @@ function shouldProtectCheapWitnessFloor(
 	laneName: CoverageLexicalLaneName,
 	signal: CoverageLexicalCheapLaneSignal,
 	plan: CoverageLexicalPlan,
+	cutoffUpperBound = 0,
 ): boolean {
-	const fullHardAnchor =
-		plan.hardAnchorFamilies.length > 0 &&
-		signal.hardAnchorMetadata.coverageCount >= plan.hardAnchorFamilies.length;
-	const fullDecisiveBody =
-		plan.decisiveBodyFamilies.length > 0 &&
-		signal.decisiveBody.coverageCount >= plan.decisiveBodyFamilies.length;
-	const hasSupportingBody = signal.supportBody.coverageCount > 0;
-	const hasPhraseWitness = signal.phraseMatchCount > 0;
-	switch (laneName) {
-		case "strict_hybrid_lane":
-			return fullDecisiveBody && (fullHardAnchor || hasPhraseWitness);
-		case "relaxed_hybrid_lane":
-			return fullDecisiveBody && (fullHardAnchor || hasSupportingBody || hasPhraseWitness);
-		case "local_body_lane":
-			return fullDecisiveBody && (hasSupportingBody || hasPhraseWitness);
-		default:
-			return false;
+	const profile = buildCheapLaneEvidenceProfile(signal);
+	const upperBound = computeCheapLaneUpperBound(laneName, profile);
+	const protectionFloor = computeLaneProtectionFloor(laneName, plan);
+	const hasWitness =
+		signal.phraseMatchCount > 0 ||
+		signal.supportBody.coverageCount > 0 ||
+		signal.metadataAssist.coverageCount > 0;
+	if (!hasWitness || upperBound < protectionFloor) {
+		return false;
 	}
+	return cutoffUpperBound <= 0 || upperBound + 0.08 >= cutoffUpperBound;
 }
 
 function buildLaneEvaluation(
@@ -2323,6 +2393,169 @@ function buildLaneEvidenceProfile(
 		hybridPressure,
 		passagePressure,
 		charPressure,
+	};
+}
+
+function buildCheapLaneEvidenceProfile(
+	signal: CoverageLexicalCheapLaneSignal,
+): CoverageLexicalCheapLaneEvidenceProfile {
+	const anchorPressure =
+		computeGroupPressure(signal.hardAnchorMetadata, 1.1) +
+		computeGroupPressure(signal.metadataAssist, 0.3);
+	const metadataAssistPressure = computeGroupPressure(signal.metadataAssist, 0.85);
+	const passagePressure =
+		signal.phraseMatchCount * 0.34 +
+		signal.decisiveBody.coverageCount * 0.18 +
+		signal.supportBody.coverageCount * 0.1;
+	const bodyPressure =
+		computeGroupPressure(signal.decisiveBody, 1.05) +
+		computeGroupPressure(signal.supportBody, 0.72) +
+		computeGroupPressure(signal.optionalBody, 0.45) +
+		passagePressure * 0.35;
+	const bodyUpperBound =
+		bodyPressure +
+		signal.phraseMatchCount * 0.18 +
+		(signal.decisiveBody.tailWeight +
+			signal.supportBody.tailWeight +
+			signal.optionalBody.tailWeight) *
+			0.06;
+	const bridgePressure =
+		computeGroupPressure(signal.bridgeSignal, 1) +
+		signal.phraseMatchCount * 0.3 +
+		metadataAssistPressure * 0.2;
+	const hybridPressure =
+		Math.min(anchorPressure, bodyUpperBound) +
+		Math.min(bridgePressure, 0.8) * 0.22 +
+		Math.min(passagePressure, 0.8) * 0.16;
+	const charPressure =
+		signal.tagExactCount * 1.1 +
+		signal.tagCharCount * 0.28 +
+		signal.metadataCharCount * 0.16 +
+		signal.bodyCharCount * 0.08;
+	return {
+		anchorPressure,
+		metadataAssistPressure,
+		bodyPressure,
+		bodyUpperBound,
+		bridgePressure,
+		hybridPressure,
+		passagePressure,
+		charPressure,
+	};
+}
+
+function computeLaneEvidenceUpperBound(
+	laneName: CoverageLexicalLaneName,
+	profile: CoverageLexicalLaneEvidenceProfile,
+): number {
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return profile.anchorPressure + profile.bridgePressure * 0.2;
+		case "strict_hybrid_lane":
+			return profile.hybridPressure + profile.bodyUpperBound * 0.15;
+		case "relaxed_hybrid_lane":
+			return (
+				profile.hybridPressure +
+				profile.bodyUpperBound * 0.32 +
+				profile.bridgePressure * 0.16
+			);
+		case "local_body_lane":
+			return (
+				profile.bodyUpperBound +
+				profile.passagePressure * 0.3 +
+				profile.metadataAssistPressure * 0.12
+			);
+		case "bridge_lane":
+			return profile.bridgePressure + profile.hybridPressure * 0.18;
+		case "char_fallback_lane":
+			return profile.charPressure + profile.bridgePressure * 0.1;
+		default:
+			return 0;
+	}
+}
+
+function computeCheapLaneUpperBound(
+	laneName: CoverageLexicalLaneName,
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+): number {
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return profile.anchorPressure + profile.bridgePressure * 0.2;
+		case "strict_hybrid_lane":
+			return profile.hybridPressure + profile.bodyUpperBound * 0.15;
+		case "relaxed_hybrid_lane":
+			return (
+				profile.hybridPressure +
+				profile.bodyUpperBound * 0.32 +
+				profile.bridgePressure * 0.16
+			);
+		case "local_body_lane":
+			return (
+				profile.bodyUpperBound +
+				profile.passagePressure * 0.3 +
+				profile.metadataAssistPressure * 0.12
+			);
+		case "bridge_lane":
+			return profile.bridgePressure + profile.hybridPressure * 0.18;
+		case "char_fallback_lane":
+			return profile.charPressure + profile.bridgePressure * 0.1;
+		default:
+			return 0;
+	}
+}
+
+function computeLaneProtectionFloor(
+	laneName: CoverageLexicalLaneName,
+	plan: CoverageLexicalPlan,
+): number {
+	switch (laneName) {
+		case "strict_hybrid_lane":
+			return Math.max(0.95, plan.relaxedMinimumMatchCount * 0.7);
+		case "relaxed_hybrid_lane":
+			return Math.max(0.7, plan.relaxedMinimumMatchCount * 0.55);
+		case "local_body_lane":
+			return Math.max(
+				0.82,
+				Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) * 0.72,
+			);
+		default:
+			return Number.POSITIVE_INFINITY;
+	}
+}
+
+function computeLaneUnionPressure(
+	laneName: CoverageLexicalLaneName,
+	aggregateCandidates: ReadonlyMap<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>,
+	admittedKeys: ReadonlySet<CoverageLexicalCandidateKey>,
+	plan: CoverageLexicalPlan,
+): CoverageLexicalLaneUnionPressure {
+	let admittedTopUpperBound = 0;
+	let remainingTopUpperBound = 0;
+	let remainingPotentialCount = 0;
+	const protectionFloor = computeLaneProtectionFloor(laneName, plan);
+	for (const [key, state] of aggregateCandidates) {
+		const signal = buildCheapLaneSignal(state, plan);
+		const profile = buildCheapLaneEvidenceProfile(signal);
+		const upperBound = computeCheapLaneUpperBound(laneName, profile);
+		if (admittedKeys.has(key)) {
+			admittedTopUpperBound = Math.max(admittedTopUpperBound, upperBound);
+			continue;
+		}
+		remainingTopUpperBound = Math.max(remainingTopUpperBound, upperBound);
+		if (upperBound >= protectionFloor) {
+			remainingPotentialCount += 1;
+		}
+	}
+	return {
+		admittedTopUpperBound,
+		remainingTopUpperBound,
+		remainingPotentialCount,
+		remainingActivationPressure:
+			remainingTopUpperBound +
+			Math.min(0.35, remainingPotentialCount * 0.08),
 	};
 }
 
