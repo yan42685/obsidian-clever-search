@@ -69,7 +69,7 @@ Date: 2026-03-31
 ## Phase 2 Delta Vs Original Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -120,3 +120,4 @@ Date: 2026-03-31
   - quality delta vs this Phase 2 anchor
   - latency ratio delta vs this Phase 2 anchor
   - estimated index size ratio delta vs this Phase 2 anchor
+

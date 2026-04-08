@@ -86,7 +86,7 @@ Date: 2026-03-31
 ## Delta Vs Phase 3 Step 3 Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-phase3-step3.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -101,3 +101,4 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - continue latency work by removing the remaining query-time string and container churn in local window evaluation before expecting more benefit from additional posting migration
+

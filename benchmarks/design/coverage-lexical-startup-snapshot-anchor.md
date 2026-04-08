@@ -15,7 +15,7 @@ Date: 2026-04-01
 ## Relationship To The Active Query Anchor
 
 - active query anchor:
-  - `benchmarks/coverage-lexical-size-latency-baseline-live-memory-bodytext-offload.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-live-memory-bodytext-offload.md`
 - this file is not a replacement for the query anchor
 - use both anchors together:
   - query anchor for quality, query-time latency, and structural in-memory size
@@ -147,3 +147,4 @@ The startup benchmark should run three distinct modes once binary persistence ex
   - query-time ratio anchor
   - startup hydrate ratio
 - keep persisted binary encoding work secondary until the live resident layout stabilizes again
+

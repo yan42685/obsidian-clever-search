@@ -1,6 +1,11 @@
 # Benchmark Corpora
 
-This directory stores small, fixed public corpora for repeatable local benchmarks.
+This directory stores benchmark corpus notes plus archived benchmark design docs for repeatable local runs.
+
+## Layout
+
+- `corpora/`: frozen benchmark corpora and local-only materialization targets
+- `design/`: benchmark design notes, baselines, roadmaps, and archival anchors
 
 ## Current corpora
 
@@ -44,6 +49,38 @@ Use `web-notes-v2` when you want a more general mixed-language corpus that bette
 
 Use `big-vault-mixed-v1` when you want a more realistic large-vault benchmark for file-read behavior, preload budgeting, and retrieval stress tests without committing tens of megabytes of source text into git.
 
+## Reproducing the corpora
+
+### `web-notes-v1`
+
+- treat this as a frozen small snapshot for quick regression checks
+- rebuild it by curating 36 markdown files from the same three source families:
+  - Obsidian help
+  - GitHub Actions docs
+  - Kubernetes docs
+- write the result to `benchmarks/corpora/web-notes-v1`
+- once published, do not mutate membership in place; cut a new `web-notes-vN` directory instead
+
+### `web-notes-v2`
+
+- treat this as a frozen mixed-language snapshot for ranking and tokenization checks
+- rebuild it by curating 32 markdown files into the same four buckets:
+  - `pkm-en`
+  - `tech-en`
+  - `general-zh`
+  - `tech-zh`
+- keep the bucket intent stable:
+  - English PKM / note-taking docs
+  - English engineering / infrastructure docs
+  - Chinese general writing / documentation notes
+  - Chinese engineering / infrastructure docs
+- write the result to `benchmarks/corpora/web-notes-v2`
+- once published, do not mutate membership in place; cut a new `web-notes-vN` directory instead
+
+### `big-vault-mixed-v1`
+
+This corpus has a scripted reproduction path.
+
 Materialize it locally with:
 
 ```bash
@@ -71,8 +108,7 @@ Practical rule:
 - use `web-notes-v1` for quick technical regression checks
 - use `web-notes-v2` before promoting ranking or tokenization changes
 - use `big-vault-mixed-v1` when you want a closer approximation of a real medium / large mixed-language vault
-- use `benchmarks/passage-file-search-baseline.md` as the archival human-readable checkpoint for the passage-first lexical milestone
-- use `benchmarks/passage-file-search-harvest.md` as the structured harvest package for that milestone's summary, weakness ranking, guardrails, and roadmap
+- use `benchmarks/design/` for the historical benchmark baselines, roadmaps, and design checkpoints that explain why a corpus or metric changed
 
 ## Maintenance
 
@@ -81,3 +117,4 @@ Practical rule:
 - store source repo + commit sha + original path in a manifest file when possible
 - prefer public markdown sources with clear provenance
 - keep large local corpora in `.codex-bench/` unless there is a strong reason to commit them
+
