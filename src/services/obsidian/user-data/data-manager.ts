@@ -37,6 +37,7 @@ import type { SerializedFileSearchIndex } from "src/services/search/file-search-
 import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
 import {
   COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+  type CoverageLexicalBodyTokenColdStoreApi,
   type CoverageLexicalBodyTokenColdDocumentWrite,
 } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
@@ -364,6 +365,31 @@ class HybridIndexProgressNotice {
   }
 }
 
+type LexicalIndexProgress = {
+  processedFiles: number;
+  totalFiles: number;
+};
+
+class LexicalIndexProgressNotice {
+  private readonly notice: MyNotice;
+
+  constructor(progress: LexicalIndexProgress) {
+    this.notice = new MyNotice(this.buildMessage(progress), 0);
+  }
+
+  update(progress: LexicalIndexProgress): void {
+    this.notice.setText(this.buildMessage(progress));
+  }
+
+  hide(): void {
+    this.notice.hide();
+  }
+
+  private buildMessage(progress: LexicalIndexProgress): string {
+    return `${t("searchNotice.lexicalIndexingProgressPrefix")}${progress.processedFiles} / ${progress.totalFiles}${t("searchNotice.lexicalIndexingProgressSuffix")}`;
+  }
+}
+
 function formatBytesLabel(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -397,6 +423,8 @@ export class DataManager {
   private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
   private static readonly HYBRID_TABLE_SCAN_BATCH_SIZE = 512;
   private static readonly LEXICAL_REINDEX_BATCH_SIZE = 64;
+  private static readonly LEXICAL_COLD_REPAIR_BATCH_SIZE = 32;
+  private static readonly LEXICAL_COLD_REPAIR_MAX_BYTES = 4 * 1024 * 1024;
   private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
   private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
   private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
@@ -1078,7 +1106,6 @@ export class DataManager {
   }
 
   async refreshAllAsync() {
-    const prevNotice = new MyNotice(t("Reindexing..."));
     this.shouldForceRefresh = true;
     this.clearHybridFailedEmbeddingState();
     this.setHybridRuntimeQueryGate("blocked");
@@ -1087,14 +1114,12 @@ export class DataManager {
       await this.initAsync({ suppressCompletionNotice: true });
       new MyNotice(t("Indexing finished"), 5000);
     } finally {
-      prevNotice.hide();
       this.shouldForceRefresh = false;
       getInstance(FileWatcher).start();
     }
   }
 
   async refreshLexicalStateAsync() {
-    const prevNotice = new MyNotice(t("Reindexing..."));
     this.setLexicalBootstrapState("healing");
     const heapBeforeLexicalRefresh = isDevEnvironment
       ? this.sampleJsHeapUsage()
@@ -1118,7 +1143,6 @@ export class DataManager {
       this.setLexicalBootstrapState("failed");
       throw error;
     } finally {
-      prevNotice.hide();
       getInstance(FileWatcher).start();
     }
   }
@@ -1935,6 +1959,10 @@ export class DataManager {
     logger.trace("Indexing the whole vault...");
     const filesToIndex = this.dataProvider.allFilesToBeIndexed();
     const indexedPaths = new Set<string>(filesToIndex.map((file) => file.path));
+    const progressNotice = new LexicalIndexProgressNotice({
+      processedFiles: 0,
+      totalFiles: filesToIndex.length,
+    });
     let size = 0;
     for (const file of filesToIndex) size += file.stat.size;
     size /= 1024;
@@ -1947,6 +1975,7 @@ export class DataManager {
     }
     const successfulFiles: TFile[] = [];
     const failures: LexicalIndexFailure[] = [];
+    let processedFiles = 0;
     this.lexicalEngine.beginBatchReindex();
     try {
       for (
@@ -1961,6 +1990,11 @@ export class DataManager {
         const batchResult = await this.addDocuments(batchFiles);
         successfulFiles.push(...batchResult.indexedFiles);
         failures.push(...batchResult.failures);
+        processedFiles += batchFiles.length;
+        progressNotice.update({
+          processedFiles,
+          totalFiles: filesToIndex.length,
+        });
         if (
           start + DataManager.LEXICAL_REINDEX_BATCH_SIZE <
           filesToIndex.length
@@ -1972,6 +2006,8 @@ export class DataManager {
     } catch (error) {
       this.lexicalEngine.abortBatchReindex();
       throw error;
+    } finally {
+      progressNotice.hide();
     }
     await this.saveLexicalIndexedFileRefs(successfulFiles);
     await this.fileSnapshotStore.publishIndexedTexts(
@@ -2107,12 +2143,14 @@ export class DataManager {
     await this.syncLexicalBodyTokenColdStoreMetadata();
   }
 
-  private getLexicalBodyTokenColdStore(): CoverageLexicalBodyTokenColdStore | null {
+  private getLexicalBodyTokenColdStore(): CoverageLexicalBodyTokenColdStoreApi | null {
     if (!container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
       return null;
     }
     try {
-      return getInstance(CoverageLexicalBodyTokenColdStore);
+      return container.resolve<CoverageLexicalBodyTokenColdStoreApi>(
+        COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+      );
     } catch {
       return null;
     }
@@ -2158,19 +2196,14 @@ export class DataManager {
       const missingOrStaleFiles = consistency.missingOrStalePaths
         .map((path) => this.dataProvider.getFileByPath(path))
         .filter((file): file is TFile => file !== null);
-      for (
-        let start = 0;
-        start < missingOrStaleFiles.length;
-        start += DataManager.LEXICAL_REINDEX_BATCH_SIZE
-      ) {
-        const batchFiles = missingOrStaleFiles.slice(
-          start,
-          start + DataManager.LEXICAL_REINDEX_BATCH_SIZE,
-        );
+      const repairBatches =
+        this.buildLexicalBodyTokenColdRepairBatches(missingOrStaleFiles);
+      for (let index = 0; index < repairBatches.length; index += 1) {
+        const batchFiles = repairBatches[index];
         const batchDocuments =
           await this.buildLexicalBodyTokenColdDocuments(batchFiles);
         await coldStore.upsertDocuments(batchDocuments);
-        if (start + DataManager.LEXICAL_REINDEX_BATCH_SIZE < missingOrStaleFiles.length) {
+        if (index + 1 < repairBatches.length) {
           await MyLib.sleep(0);
         }
       }
@@ -2194,6 +2227,49 @@ export class DataManager {
         hanSegments: extractHanSegments(plainText),
       };
     });
+  }
+
+  private buildLexicalBodyTokenColdRepairBatches(
+    files: readonly TFile[],
+  ): TFile[][] {
+    const batches: TFile[][] = [];
+    let currentBatch: TFile[] = [];
+    let currentBatchBytes = 0;
+
+    for (const file of files) {
+      const fileBytes = Math.max(0, file.stat.size ?? 0);
+      const wouldExceedFileLimit =
+        currentBatch.length >= DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE;
+      const wouldExceedByteLimit =
+        currentBatch.length > 0 &&
+        currentBatchBytes + fileBytes >
+          DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES;
+
+      if (wouldExceedFileLimit || wouldExceedByteLimit) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+
+      currentBatch.push(file);
+      currentBatchBytes += fileBytes;
+
+      if (
+        currentBatch.length >= DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE ||
+        (fileBytes > DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES &&
+          currentBatch.length === 1)
+      ) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+    }
+
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    return batches;
   }
 
   private hasIndexedFileRefChanged(
