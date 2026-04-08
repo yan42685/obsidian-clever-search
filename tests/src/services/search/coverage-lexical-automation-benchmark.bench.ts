@@ -1969,6 +1969,11 @@ type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
 	top2To4Ratio: number;
 	top5PlusRatio: number;
+	countPruneMinTopCount: number;
+	top2To4CountRatio: number;
+	top5PlusCountRatio: number;
+	top2To4CountSlack: number;
+	top5PlusCountSlack: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
@@ -1979,6 +1984,11 @@ const COVERAGE_DISPLAY_PRUNE_ENV_KEYS = [
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
@@ -2005,6 +2015,26 @@ function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExpe
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
 			0.5,
 		),
+		countPruneMinTopCount: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
+			3,
+		),
+		top2To4CountRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
+			0.67,
+		),
+		top5PlusCountRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
+			0.5,
+		),
+		top2To4CountSlack: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
+			1,
+		),
+		top5PlusCountSlack: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
+			2,
+		),
 		bodyCharWeight: readNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
 			0.5,
@@ -2024,6 +2054,19 @@ function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExpe
 	};
 }
 
+function createLegacyCoverageDisplayPruneExperimentConfig(
+	config: CoverageDisplayPruneExperimentConfig,
+): CoverageDisplayPruneExperimentConfig {
+	return {
+		...config,
+		countPruneMinTopCount: Number.MAX_SAFE_INTEGER,
+		top2To4CountRatio: 0,
+		top5PlusCountRatio: 0,
+		top2To4CountSlack: 0,
+		top5PlusCountSlack: 0,
+	};
+}
+
 async function withCoverageDisplayPruneEnv<T>(
 	config: CoverageDisplayPruneExperimentConfig,
 	action: () => Promise<T>,
@@ -2040,6 +2083,21 @@ async function withCoverageDisplayPruneEnv<T>(
 	);
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO = String(
 		config.top5PlusRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT = String(
+		config.countPruneMinTopCount,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO = String(
+		config.top2To4CountRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO = String(
+		config.top5PlusCountRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK = String(
+		config.top2To4CountSlack,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK = String(
+		config.top5PlusCountSlack,
 	);
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT = String(
 		config.bodyCharWeight,
@@ -3127,6 +3185,120 @@ function summarizeDisagreements(
 		.slice(0, limit);
 }
 
+function summarizeResultListDifferences(
+	leftOutcomes: QueryOutcome[],
+	rightOutcomes: QueryOutcome[],
+	limit = 12,
+): {
+	changedQueryCount: number;
+	rankChangedQueryCount: number;
+	top1ChangedQueryCount: number;
+	onlyTailChangedQueryCount: number;
+	byType: Partial<Record<QueryType, number>>;
+	bySuite: Partial<Record<BenchmarkSuite, number>>;
+	topChanges: Array<{
+		query: string;
+		type: QueryType;
+		suite: BenchmarkSuite;
+		relevantPath: string;
+		leftRank: number;
+		rightRank: number;
+		leftTop5: string[];
+		rightTop5: string[];
+	}>;
+} {
+	const changes: Array<{
+		query: string;
+		type: QueryType;
+		suite: BenchmarkSuite;
+		relevantPath: string;
+		leftRank: number;
+		rightRank: number;
+		leftTop5: string[];
+		rightTop5: string[];
+	}> = [];
+	const byType = new Map<QueryType, number>();
+	const bySuite = new Map<BenchmarkSuite, number>();
+	let rankChangedQueryCount = 0;
+	let top1ChangedQueryCount = 0;
+	let onlyTailChangedQueryCount = 0;
+
+	for (let index = 0; index < leftOutcomes.length; index += 1) {
+		const left = leftOutcomes[index];
+		const right = rightOutcomes[index];
+		if (
+			left.rank === right.rank &&
+			left.results.length === right.results.length &&
+			left.results.every((item, resultIndex) => item === right.results[resultIndex])
+		) {
+			continue;
+		}
+		changes.push({
+			query: left.query,
+			type: left.type,
+			suite: left.suite,
+			relevantPath: left.relevantPath,
+			leftRank: left.rank,
+			rightRank: right.rank,
+			leftTop5: left.results,
+			rightTop5: right.results,
+		});
+		byType.set(left.type, (byType.get(left.type) ?? 0) + 1);
+		bySuite.set(left.suite, (bySuite.get(left.suite) ?? 0) + 1);
+		if (left.rank !== right.rank) {
+			rankChangedQueryCount += 1;
+		}
+		if (left.hitTop1 !== right.hitTop1) {
+			top1ChangedQueryCount += 1;
+		}
+		if (left.rank === right.rank) {
+			onlyTailChangedQueryCount += 1;
+		}
+	}
+
+	return {
+		changedQueryCount: changes.length,
+		rankChangedQueryCount,
+		top1ChangedQueryCount,
+		onlyTailChangedQueryCount,
+		byType: Object.fromEntries(
+			[...byType.entries()].sort((left, right) =>
+				right[1] === left[1] ? left[0].localeCompare(right[0]) : right[1] - left[1],
+			),
+		),
+		bySuite: Object.fromEntries(
+			[...bySuite.entries()].sort((left, right) =>
+				right[1] === left[1] ? left[0].localeCompare(right[0]) : right[1] - left[1],
+			),
+		),
+		topChanges: changes
+			.sort((left, right) => {
+				const leftRankGap = Math.abs(left.leftRank - left.rightRank);
+				const rightRankGap = Math.abs(right.leftRank - right.rightRank);
+				if (rightRankGap !== leftRankGap) {
+					return rightRankGap - leftRankGap;
+				}
+				const leftTop5Gap = countTop5Differences(left.leftTop5, left.rightTop5);
+				const rightTop5Gap = countTop5Differences(right.leftTop5, right.rightTop5);
+				return rightTop5Gap === leftTop5Gap
+					? left.query.localeCompare(right.query)
+					: rightTop5Gap - leftTop5Gap;
+			})
+			.slice(0, limit),
+	};
+}
+
+function countTop5Differences(left: readonly string[], right: readonly string[]): number {
+	const maxLength = Math.max(left.length, right.length);
+	let differenceCount = 0;
+	for (let index = 0; index < maxLength; index += 1) {
+		if (left[index] !== right[index]) {
+			differenceCount += 1;
+		}
+	}
+	return differenceCount;
+}
+
 function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 	if (!phaseTiming) {
 		return null;
@@ -3311,6 +3483,8 @@ describe("coverage lexical automation benchmark", () => {
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
 		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
+		const legacyDisplayPruneConfig =
+			createLegacyCoverageDisplayPruneExperimentConfig(displayPruneConfig);
 
 		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
 		const miniResult = await runBenchmark(
@@ -3342,6 +3516,11 @@ describe("coverage lexical automation benchmark", () => {
 						enabled: false,
 						top2To4Ratio: displayPruneConfig.top2To4Ratio,
 						top5PlusRatio: displayPruneConfig.top5PlusRatio,
+						countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
+						top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
+						top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
+						top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
+						top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
 						bodyCharWeight: displayPruneConfig.bodyCharWeight,
 						metadataCharWeight: displayPruneConfig.metadataCharWeight,
 						tagExactWeight: displayPruneConfig.tagExactWeight,
@@ -3363,6 +3542,11 @@ describe("coverage lexical automation benchmark", () => {
 						enabled: false,
 						top2To4Ratio: displayPruneConfig.top2To4Ratio,
 						top5PlusRatio: displayPruneConfig.top5PlusRatio,
+						countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
+						top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
+						top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
+						top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
+						top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
 						bodyCharWeight: displayPruneConfig.bodyCharWeight,
 						metadataCharWeight: displayPruneConfig.metadataCharWeight,
 						tagExactWeight: displayPruneConfig.tagExactWeight,
@@ -3458,6 +3642,46 @@ describe("coverage lexical automation benchmark", () => {
 						),
 				),
 		);
+		if ("reset" in container && typeof (container as any).reset === "function") {
+			(container as any).reset();
+		} else {
+			container.clearInstances();
+		}
+		(global as any).window = {
+			localStorage: {
+				getItem: jest.fn(() => "zh"),
+				setItem: jest.fn(),
+				removeItem: jest.fn(),
+			},
+		};
+		const coverageLexicalDisplayLegacy = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				withCoverageDisplayPruneEnv(
+					legacyDisplayPruneConfig,
+					async () =>
+						createEngineHarness(
+							CoverageLexicalFileSearchEngine,
+							tokenizer,
+							"coverage-lexical",
+						),
+				),
+		);
+		const coverageDisplayLegacyResult = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				withCoverageDisplayPruneEnv(
+					legacyDisplayPruneConfig,
+					async () =>
+						runBenchmark(
+							"CoverageLexical(display-legacy)",
+							coverageLexicalDisplayLegacy,
+							documents,
+							queryCases,
+							{ includeOffloadDiagnostics: false },
+						),
+				),
+		);
 		const coverageDisplayVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
 			diagnostics,
 			"wins",
@@ -3505,6 +3729,10 @@ describe("coverage lexical automation benchmark", () => {
 						coverageCoreResult.outcomes,
 				  )
 				: null;
+		const displayVsLegacyResultListDiff = summarizeResultListDifferences(
+			coverageDisplayResult.outcomes,
+			coverageDisplayLegacyResult.outcomes,
+		);
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
 		console.log(
@@ -3557,7 +3785,41 @@ describe("coverage lexical automation benchmark", () => {
 
 		console.log(
 			"[coverage-lexical-automation-benchmark] display-prune-config",
-			JSON.stringify(displayPruneConfig, null, 2),
+			JSON.stringify(
+				{
+					current: displayPruneConfig,
+					legacyBaseline: legacyDisplayPruneConfig,
+				},
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] display-prune-diff",
+			JSON.stringify(
+				{
+					changedQueryCount: displayVsLegacyResultListDiff.changedQueryCount,
+					rankChangedQueryCount:
+						displayVsLegacyResultListDiff.rankChangedQueryCount,
+					top1ChangedQueryCount:
+						displayVsLegacyResultListDiff.top1ChangedQueryCount,
+					onlyTailChangedQueryCount:
+						displayVsLegacyResultListDiff.onlyTailChangedQueryCount,
+					byType: displayVsLegacyResultListDiff.byType,
+					bySuite: displayVsLegacyResultListDiff.bySuite,
+					currentObjective: round(coverageDisplayResult.summary.objective),
+					legacyObjective: round(coverageDisplayLegacyResult.summary.objective),
+					currentTop1: round(coverageDisplayResult.summary.top1),
+					legacyTop1: round(coverageDisplayLegacyResult.summary.top1),
+					currentTop3: round(coverageDisplayResult.summary.top3),
+					legacyTop3: round(coverageDisplayLegacyResult.summary.top3),
+					currentTop5: round(coverageDisplayResult.summary.top5),
+					legacyTop5: round(coverageDisplayLegacyResult.summary.top5),
+					topChanges: displayVsLegacyResultListDiff.topChanges,
+				},
+				null,
+				2,
+			),
 		);
 		console.log(
 			"[coverage-lexical-automation-benchmark] summary",
