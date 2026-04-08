@@ -1659,19 +1659,27 @@ function hasMeaningfulBodyPotential(plan: CoverageLexicalPlan): boolean {
 function computeRelaxedHybridActivationPressure(plan: CoverageLexicalPlan): number {
 	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
 	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
 	const supportBodyMass = getWeightedPlanMass(
 		plan.supportBodyMass,
 		plan.supportBodyFamilies.length,
 	);
-	const optionalBodyFamilyCount = plan.optionalFamilies.filter(
-		(family) => family.role === "body",
-	).length;
+	const optionalBodyMass = getWeightedPlanMass(
+		plan.weightedOptionalMass,
+		plan.optionalFamilies.filter((family) => family.role === "body").length,
+	);
+	const bridgePressure = Math.min(0.3, plan.bridgeFamilies.length * 0.1);
+	const anchorPressure = Math.min(0.28, plan.hardAnchorFamilies.length * 0.1);
 	return (
 		Math.min(anchorMass, bodyMass) * 1.15 +
+		decisiveBodyMass * 0.3 +
 		supportBodyMass * 0.7 +
-		Math.min(0.45, optionalBodyFamilyCount * 0.18) +
-		(plan.queryKind === "memory_relaxed" ? 0.14 : 0) +
-		(plan.queryKind === "anchor_body_hybrid" ? 0.06 : 0)
+		optionalBodyMass * 0.42 +
+		bridgePressure +
+		anchorPressure
 	);
 }
 
@@ -1685,16 +1693,17 @@ function computeLocalBodyActivationPressure(plan: CoverageLexicalPlan): number {
 		plan.supportBodyMass,
 		plan.supportBodyFamilies.length,
 	);
-	const bridgePressure = Math.min(0.35, plan.bridgeFamilies.length * 0.12);
+	const optionalBodyMass = getWeightedPlanMass(
+		plan.weightedOptionalMass,
+		plan.optionalFamilies.filter((family) => family.role === "body").length,
+	);
+	const bridgePressure = Math.min(0.4, plan.bridgeFamilies.length * 0.14);
 	return (
 		bodyMass * 0.9 +
 		decisiveBodyMass * 0.9 +
 		supportBodyMass * 0.55 +
-		bridgePressure +
-		(plan.queryKind === "body_only_local" ? 0.1 : 0) +
-		(plan.queryKind === "memory_relaxed" ? 0.08 : 0) +
-		(plan.queryKind === "bridge_dependent" ? 0.08 : 0) +
-		(plan.route === "body-first" ? 0.05 : 0)
+		optionalBodyMass * 0.35 +
+		bridgePressure
 	);
 }
 
