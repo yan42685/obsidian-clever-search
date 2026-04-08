@@ -1874,12 +1874,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const term of this.sortedLexiconCache) {
 			this.lexicon.add(term);
 		}
-		this.documentBodyTokenLexicon = [...state.bodyTokenLexicon];
 		this.documentBodyTokenCount = state.bodyTokenLexicon.length;
+		this.documentBodyTokenLexicon = [];
 		this.documentBodyTokenIdByTerm.clear();
 		for (let tokenId = 0; tokenId < this.documentBodyTokenCount; tokenId += 1) {
 			this.documentBodyTokenIdByTerm.set(
-				this.documentBodyTokenLexicon[tokenId],
+				state.bodyTokenLexicon[tokenId],
 				tokenId,
 			);
 		}

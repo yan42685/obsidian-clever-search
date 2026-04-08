@@ -1045,6 +1045,48 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		expect(coldStore.clearAll).not.toHaveBeenCalled();
 	});
 
+	test("restoring a cold-backed lexical snapshot keeps the reverse body lexicon cold", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				reIndexAll(snapshot: unknown): Promise<boolean>;
+				serialize(): unknown;
+				getIndexBreakdown(): Record<string, unknown> | null;
+			};
+		};
+
+		const coldStore = registerMockBodyTokenColdStore();
+		const documents = [
+			{
+				path: "notes/cold-restore-target.md",
+				basename: "cold-restore-target",
+				folder: "notes",
+				content: "alpha beta gamma remains cold-backed after restore",
+			},
+		];
+
+		await withExperimentalBodyTokenOffloadEnv(undefined, async () => {
+			const source = new CoverageLexicalFileSearchEngine();
+			await source.addDocuments(documents);
+			const snapshot = source.serialize();
+			expect(snapshot).toBeTruthy();
+
+			const restored = new CoverageLexicalFileSearchEngine();
+			await restored.reIndexAll(snapshot as never);
+
+			const breakdown = restored.getIndexBreakdown();
+			const documentIdentity = (breakdown?.estimatedBytes as Record<string, unknown>)
+				?.documentIdentity as Record<string, unknown>;
+			const bodyTokenLexicon = documentIdentity?.bodyTokenLexicon as
+				| Record<string, unknown>
+				| undefined;
+			expect(bodyTokenLexicon?.count).toBe(0);
+			expect(coldStore.clearAll).not.toHaveBeenCalled();
+		});
+	});
+
 	test("hydrates offloaded body tokens from the Dexie-backed cold store without file snapshots", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
