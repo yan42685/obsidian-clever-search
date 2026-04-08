@@ -123,18 +123,6 @@ export class CoverageLexicalBodyTokenColdStore
 				danglingPaths: await this.listStoredPaths(),
 			};
 		}
-		if (
-			meta.documentCount === indexedFileRefs.length &&
-			meta.indexedRefsFingerprint === currentFingerprint
-		) {
-			return {
-				needsRepair: false,
-				requiresReset: false,
-				reason: "up-to-date",
-				missingOrStalePaths: [],
-				danglingPaths: [],
-			};
-		}
 		const docRows = await this.database.db.lexicalBodyTokenColdDocs.bulkGet(
 			indexedFileRefs.map((ref) => ref.path),
 		);
@@ -146,12 +134,24 @@ export class CoverageLexicalBodyTokenColdStore
 				missingOrStalePaths.push(ref.path);
 			}
 		}
+		const metadataAligned =
+			meta.documentCount === indexedFileRefs.length &&
+			meta.indexedRefsFingerprint === currentFingerprint;
 		const danglingPaths =
-			meta.documentCount !== indexedFileRefs.length
+			!metadataAligned || missingOrStalePaths.length > 0
 				? (await this.listStoredPaths()).filter(
 						(path) => !indexedPathSet.has(path),
 				  )
 				: [];
+		if (metadataAligned && missingOrStalePaths.length === 0 && danglingPaths.length === 0) {
+			return {
+				needsRepair: false,
+				requiresReset: false,
+				reason: "up-to-date",
+				missingOrStalePaths: [],
+				danglingPaths: [],
+			};
+		}
 		return {
 			needsRepair:
 				missingOrStalePaths.length > 0 || danglingPaths.length > 0,
@@ -351,7 +351,7 @@ export class CoverageLexicalBodyTokenColdStore
 		replacedPaths: ReadonlySet<string>,
 	): Promise<CoverageLexicalBodyTokenColdDocumentWrite[]> {
 		const [blockRows, docRows] = await Promise.all([
-			this.database.db.lexicalBodyTokenColdBlocks.bulkGet(blockIds),
+			this.database.db.lexicalBodyTokenColdBlocks.bulkGet(Array.from(blockIds)),
 			this.database.db.lexicalBodyTokenColdDocs
 				.where("blockId")
 				.anyOf(Array.from(blockIds))

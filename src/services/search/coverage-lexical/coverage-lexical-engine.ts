@@ -122,6 +122,7 @@ function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 
 type CoverageLexicalDocument = {
 	docId: number;
+	generation?: number;
 	basenameText: string;
 	folderText: string;
 	aliasesText: string;
@@ -235,9 +236,11 @@ function compareCoverageLexicalTerms(left: string, right: string): number {
 function createCoverageLexicalDocument(
 	docId: number,
 	fields: CoverageLexicalDocumentTextFields,
+	generation?: number,
 ): CoverageLexicalDocument {
 	return {
 		docId,
+		generation,
 		...fields,
 	};
 }
@@ -473,6 +476,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		CoverageLexicalBodyTokenColdDocumentWrite
 	>();
 	private readonly pendingBodyTokenColdDeletes = new Set<string>();
+	private bodyTokenColdStoreWriteQueue: Promise<void> = Promise.resolve();
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new CoverageLexicalSharedTokenIdPostingMap(
 		(term) => this.documentBodyTokenIdByTerm.get(term),
@@ -744,6 +748,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		};
 	}
 
+	private getDocumentGeneration(docId: number): number | undefined {
+		return this.documentById[docId]?.generation;
+	}
+
 	private getDocumentMetadataFieldText(
 		docId: number,
 		field: CoverageLexicalMetadataField,
@@ -949,9 +957,31 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!fileSnapshotStore) {
 			return;
 		}
-		const textsByPath = await fileSnapshotStore.readCurrentTexts(unresolvedPaths);
+		const indexedRequests = unresolvedDocIds.flatMap((docId, index) => {
+			const generation = this.getDocumentGeneration(docId);
+			return generation === undefined
+				? []
+				: [{ path: unresolvedPaths[index], generation }];
+		});
+		const currentFallbackPaths = unresolvedDocIds.flatMap((docId, index) =>
+			this.getDocumentGeneration(docId) === undefined
+				? [unresolvedPaths[index]]
+				: [],
+		);
+		const [indexedTextsByPath, currentTextsByPath] = await Promise.all([
+			indexedRequests.length > 0
+				? fileSnapshotStore.readIndexedTexts(indexedRequests)
+				: Promise.resolve(new Map<string, string>()),
+			currentFallbackPaths.length > 0
+				? fileSnapshotStore.readCurrentTexts(currentFallbackPaths)
+				: Promise.resolve(new Map<string, string>()),
+		]);
 		for (let index = 0; index < unresolvedDocIds.length; index += 1) {
-			const bodyText = textsByPath.get(unresolvedPaths[index]);
+			const generation = this.getDocumentGeneration(unresolvedDocIds[index]);
+			const bodyText =
+				generation === undefined
+					? currentTextsByPath.get(unresolvedPaths[index])
+					: indexedTextsByPath.get(unresolvedPaths[index]);
 			if (bodyText === undefined) {
 				continue;
 			}
@@ -971,13 +1001,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private collectLikelyRecallBodyTokenDocIds(
 		queryTerms: readonly string[],
 	): readonly number[] {
-		const candidatePostings = Array.from(new Set(queryTerms))
-			.map((term) => this.bodyPostings.get(term))
-			.filter(
-				(postings): postings is readonly number[] | Uint32Array =>
-					postings !== undefined && postings.length > 0,
-			)
-			.sort((left, right) => left.length - right.length);
+		const candidatePostings: Array<number[] | Uint32Array> = [];
+		for (const term of new Set(queryTerms)) {
+			const postings = this.bodyPostings.get(term);
+			if (!postings || postings.length === 0) {
+				continue;
+			}
+			candidatePostings.push(postings);
+		}
+		candidatePostings.sort((left, right) => left.length - right.length);
 		const docIds: number[] = [];
 		const seen = new Set<number>();
 		for (const postings of candidatePostings) {
@@ -1026,10 +1058,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private offloadResidentDocumentBodyHanSegments(): void {
-		if (!this.shouldExperimentallyOffloadResidentBodyTokens()) {
-			return;
-		}
-		this.documentBodyHanSegmentsById.length = 0;
+		// Keep body Han segments resident so CJK body verification remains
+		// generation-aligned even when body token sequences are cold-loaded.
 	}
 
 	private mapDocumentBodyTokensToIds(tokens: readonly string[]): number[] {
@@ -1180,7 +1210,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const path of paths) {
 			this.removeDocument(path);
 		}
-		void this.flushPendingBodyTokenColdStoreWrites();
+		void this.flushPendingBodyTokenColdStoreWrites().catch((error) =>
+			logger.warn("coverage lexical cold-store delete flush failed:", error),
+		);
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
@@ -1648,8 +1680,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const docId = this.ensureDocumentId(document.path);
 		this.clearHotCachedOffloadedBodyTokens(docId);
 		const documentTextFields = createCoverageLexicalDocumentTextFields(document);
-		const storedDocument = createCoverageLexicalDocument(docId, documentTextFields);
+		const storedDocument = createCoverageLexicalDocument(
+			docId,
+			documentTextFields,
+			document.generation,
+		);
 		const bodyText = document.content ?? "";
+		const bodyHanSegments = extractHanSegments(bodyText);
 		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
 			this.tokenizer,
 			documentTextFields,
@@ -1659,12 +1696,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.set(document.path, storedDocument);
 		this.documentById[docId] = storedDocument;
 		this.setDocumentBodyTokens(docId, derivedState.bodyTokenSequence);
+		this.documentBodyHanSegmentsById[docId] = bodyHanSegments;
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 		this.stageBodyTokenColdUpsert({
 			path: document.path,
+			generation: document.generation,
 			bodyTokens: derivedState.bodyTokenSequence,
-			hanSegments: extractHanSegments(bodyText),
+			hanSegments: bodyHanSegments,
 		});
+		if (this.shouldExperimentallyOffloadResidentBodyTokens()) {
+			this.rememberHotCachedOffloadedBodyTokens(
+				docId,
+				derivedState.bodyTokenSequence,
+			);
+		}
 		this.applyDerivedPostingTerms(docId, derivedState, "add");
 		this.markLexiconDirty();
 	}
@@ -1800,16 +1845,25 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const upserts = [...this.pendingBodyTokenColdUpsertsByPath.values()];
 		this.pendingBodyTokenColdDeletes.clear();
 		this.pendingBodyTokenColdUpsertsByPath.clear();
-		const store = this.getBodyTokenColdStore();
-		if (!store) {
-			return;
+		if (deletes.length === 0 && upserts.length === 0) {
+			return await this.bodyTokenColdStoreWriteQueue.catch(() => undefined);
 		}
-		if (deletes.length > 0) {
-			await store.deleteDocuments(deletes);
-		}
-		if (upserts.length > 0) {
-			await store.upsertDocuments(upserts);
-		}
+		const queuedWrite = this.bodyTokenColdStoreWriteQueue
+			.catch(() => undefined)
+			.then(async () => {
+				const store = this.getBodyTokenColdStore();
+				if (!store) {
+					return;
+				}
+				if (deletes.length > 0) {
+					await store.deleteDocuments(deletes);
+				}
+				if (upserts.length > 0) {
+					await store.upsertDocuments(upserts);
+				}
+			});
+		this.bodyTokenColdStoreWriteQueue = queuedWrite;
+		await queuedWrite;
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -1828,6 +1882,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const fileSnapshotStore = this.getFileSnapshotStore();
 		if (!fileSnapshotStore) {
 			return null;
+		}
+		const generation = this.documents.get(path)?.generation;
+		if (generation !== undefined) {
+			return (
+				await fileSnapshotStore.readIndexedTexts([{ path, generation }])
+			).get(path) ?? null;
 		}
 		return (await fileSnapshotStore.readCurrentTexts([path])).get(path) ?? null;
 	}
@@ -1851,14 +1911,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 							{
 								docId: document.docId,
 								path: this.documentPathById[document.docId] ?? "",
+								generation: document.generation,
 								...this.getDocumentTextFields(document.docId),
-									bodyTokenIds: [
-										...(this.getDocumentBodyTokenIds(document.docId) ?? []),
-									],
-									bodyHanSegments: [],
-									tagValues: [
-										...(this.documentTagValuesById[document.docId] ?? []),
-									],
+								bodyTokenIds: [
+									...(this.getDocumentBodyTokenIds(document.docId) ?? []),
+								],
+								bodyHanSegments: [
+									...(this.documentBodyHanSegmentsById[document.docId] ?? []),
+								],
+								tagValues: [
+									...(this.documentTagValuesById[document.docId] ?? []),
+								],
 							},
 					  ]
 					: [],
@@ -1904,6 +1967,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const document of state.documents) {
 			const storedDocument: CoverageLexicalDocument = {
 				docId: document.docId,
+				generation: document.generation,
 				basenameText: document.basenameText,
 				folderText: document.folderText,
 				aliasesText: document.aliasesText,
@@ -1915,6 +1979,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
 			bodyTokenIdsById.set(document.docId, [...document.bodyTokenIds]);
+			this.documentBodyHanSegmentsById[document.docId] = [
+				...document.bodyHanSegments,
+			];
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
@@ -4887,6 +4954,18 @@ function addOwnedNumericPosting(
 
 function cloneOwnedNumericPostingMap(
 	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: "packed",
+): Map<string, Uint32Array>;
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: "plain",
+): Map<string, number[]>;
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: CoverageLexicalPostingOwnership,
+): Map<string, number[] | Uint32Array>;
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
 	ownership: CoverageLexicalPostingOwnership,
 ): Map<string, number[] | Uint32Array> {
 	return new Map(
@@ -4899,6 +4978,16 @@ function cloneOwnedNumericPostingMap(
 	);
 }
 
+function cloneSharedTokenIdPostingMapForSnapshot(
+	postings: CoverageLexicalSharedTokenIdPostingMap,
+	tokenLexicon: readonly string[],
+	ownership: "packed",
+): Map<string, Uint32Array>;
+function cloneSharedTokenIdPostingMapForSnapshot(
+	postings: CoverageLexicalSharedTokenIdPostingMap,
+	tokenLexicon: readonly string[],
+	ownership: "plain",
+): Map<string, number[]>;
 function cloneSharedTokenIdPostingMapForSnapshot(
 	postings: CoverageLexicalSharedTokenIdPostingMap,
 	tokenLexicon: readonly string[],

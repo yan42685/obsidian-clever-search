@@ -8,6 +8,7 @@ import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 export type IndexedDocument = {
   path: string;
+  generation?: number;
   basename: string;
   folder: string;
   content?: string;

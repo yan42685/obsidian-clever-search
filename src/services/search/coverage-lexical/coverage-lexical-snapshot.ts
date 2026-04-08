@@ -8,6 +8,7 @@ import {
 type CoverageLexicalSnapshotDocumentState = {
 	docId: number;
 	path: string;
+	generation?: number;
 	basenameText: string;
 	folderText: string;
 	aliasesText: string;
@@ -50,7 +51,8 @@ export type CoverageLexicalSnapshotState = {
 };
 
 const SNAPSHOT_MAGIC = [0x43, 0x4c, 0x58, 0x53] as const;
-const SNAPSHOT_VERSION = 5;
+const SNAPSHOT_VERSION = 6;
+const LEGACY_SNAPSHOT_VERSION = 5;
 const HEADER_BYTES = 12;
 const DIRECTORY_ENTRY_BYTES = 16;
 
@@ -128,7 +130,10 @@ export function decodeCoverageLexicalSnapshotV1(
 	const reader = new SnapshotReader(data);
 	reader.expectBytes(SNAPSHOT_MAGIC);
 	const version = reader.readUint32();
-	if (version !== SNAPSHOT_VERSION) {
+	if (
+		version !== SNAPSHOT_VERSION &&
+		version !== LEGACY_SNAPSHOT_VERSION
+	) {
 		throw new Error(`Unsupported coverage lexical snapshot version: ${version}`);
 	}
 	const sectionCount = reader.readUint32();
@@ -176,6 +181,7 @@ export function decodeCoverageLexicalSnapshotV1(
 			reader,
 			requireSection(sections, CoverageLexicalSnapshotSectionKind.Documents),
 			strings,
+			version,
 		),
 		...postingState,
 	};
@@ -271,6 +277,7 @@ function buildDocumentsSection(
 		for (const field of DOCUMENT_STRING_FIELDS) {
 			writer.writeVarUint(stringPool.getId(document[field]));
 		}
+		writer.writeFloat64(document.generation ?? Number.NaN);
 		writeNumericList(writer, document.bodyTokenIds);
 		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
 			writeStringIdList(writer, document[field], stringPool);
@@ -367,6 +374,7 @@ function decodeDocumentsSection(
 	reader: SnapshotReader,
 	section: { offset: number; length: number; count: number },
 	strings: readonly string[],
+	version: number,
 ): CoverageLexicalSnapshotDocumentState[] {
 	const sectionReader = reader.slice(section.offset, section.length);
 	const documents: CoverageLexicalSnapshotDocumentState[] = [];
@@ -378,6 +386,10 @@ function decodeDocumentsSection(
 		for (const field of DOCUMENT_STRING_FIELDS) {
 			fieldValues.set(field, readStringId(sectionReader, strings));
 		}
+		const generation =
+			version >= SNAPSHOT_VERSION
+				? readOptionalFloat64(sectionReader)
+				: undefined;
 		const bodyTokenIds = readNumericList(sectionReader);
 		const listValues = new Map<DocumentStringListField, readonly string[]>();
 		for (const field of DOCUMENT_STRING_LIST_FIELDS) {
@@ -386,6 +398,7 @@ function decodeDocumentsSection(
 		documents.push({
 			docId,
 			path,
+			generation,
 			basenameText: fieldValues.get("basenameText") ?? "",
 			folderText: fieldValues.get("folderText") ?? "",
 			aliasesText: fieldValues.get("aliasesText") ?? "",
@@ -485,6 +498,11 @@ function readStringId(reader: SnapshotReader, strings: readonly string[]): strin
 	return value;
 }
 
+function readOptionalFloat64(reader: SnapshotReader): number | undefined {
+	const value = reader.readFloat64();
+	return Number.isFinite(value) ? value : undefined;
+}
+
 function requireSection(
 	sections: ReadonlyMap<
 		CoverageLexicalSnapshotSectionKind,
@@ -537,6 +555,13 @@ class SnapshotWriter {
 		const chunk = new Uint8Array(4);
 		const view = new DataView(chunk.buffer);
 		view.setUint32(0, value, true);
+		this.writeBytes(chunk);
+	}
+
+	writeFloat64(value: number): void {
+		const chunk = new Uint8Array(8);
+		const view = new DataView(chunk.buffer);
+		view.setFloat64(0, value, true);
 		this.writeBytes(chunk);
 	}
 
@@ -595,6 +620,17 @@ class SnapshotReader {
 			4,
 		).getUint32(0, true);
 		this.offset += 4;
+		return value;
+	}
+
+	readFloat64(): number {
+		this.ensureAvailable(8);
+		const value = new DataView(
+			this.view.buffer,
+			this.view.byteOffset + this.offset,
+			8,
+		).getFloat64(0, true);
+		this.offset += 8;
 		return value;
 	}
 

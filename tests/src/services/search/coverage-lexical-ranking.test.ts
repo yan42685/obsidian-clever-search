@@ -15,6 +15,7 @@ const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 
 type IndexedDocument = {
 	path: string;
+	generation?: number;
 	basename: string;
 	folder: string;
 	content?: string;
@@ -138,6 +139,23 @@ function registerMockFileSnapshotStore(
 					const text = currentTexts.get(path) ?? persistedTexts.get(path);
 					if (text !== undefined) {
 						result.set(path, text);
+					}
+				}
+				return result;
+			},
+		),
+		readIndexedTexts: jest.fn(
+			async (
+				requests: ReadonlyArray<{
+					path: string;
+					generation?: number;
+				}>,
+			) => {
+				const result = new Map<string, string>();
+				for (const request of requests) {
+					const text = persistedTexts.get(request.path);
+					if (text !== undefined) {
+						result.set(request.path, text);
 					}
 				}
 				return result;
@@ -1237,6 +1255,45 @@ describe("coverage lexical ranking", () => {
 		expect(firstSubItem?.text.includes("cache")).toBe(true);
 	});
 
+	test("engine direct subitems read generation-aligned snapshot text before newer current text", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				getDirectSubItems(
+					queryText: string,
+					path: string,
+					maxSubItemCount: number,
+				): Promise<Array<{ text: string }> | null>;
+			};
+		};
+
+		const indexedDocument = {
+			path: "pkm-en/mixed/aligned-subitem.md",
+			generation: 77,
+			basename: "aligned-subitem.md",
+			folder: "pkm-en/mixed",
+			headings: "Aligned subitem",
+			content: "persisted aligned snippet",
+		};
+		registerMockFileSnapshotStore([indexedDocument]);
+		mockFileSnapshotCurrentTexts?.set(
+			indexedDocument.path,
+			"newer current text without the indexed phrase",
+		);
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([indexedDocument]);
+
+		const directSubItems = await engine.getDirectSubItems(
+			"aligned snippet",
+			indexedDocument.path,
+			4,
+		);
+		expect(directSubItems?.[0]?.text).toContain("persisted aligned snippet");
+	});
+
 	test("engine direct subitems rank exact ahead of prefix ahead of fuzzy", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1485,7 +1542,7 @@ describe("coverage lexical ranking", () => {
 		expect(typeof docId).toBe("number");
 		expect(
 			internalEngine.documentBodyHanSegmentsById[docId],
-		).toBeUndefined();
+		).toEqual(["\u7f13\u5b58\u6062\u590d\u8bb0\u5f55"]);
 		expect(
 			Array.isArray(
 				internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
@@ -1507,7 +1564,7 @@ describe("coverage lexical ranking", () => {
 		expect(
 			Array.isArray(internalEngine.metadataTagCharPostings.get("\u6807\u7b7e")),
 		).toBe(true);
-		expect(internalEngine.documentBodyHanSegmentsById[docId]?.length ?? 0).toBe(0);
+		expect(internalEngine.documentBodyHanSegmentsById[docId]?.length ?? 0).toBe(1);
 		expect(
 			internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
 		).toContain(docId);

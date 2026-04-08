@@ -37,6 +37,7 @@ import type { SerializedFileSearchIndex } from "src/services/search/file-search-
 import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
 import {
   COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+  type CoverageLexicalBodyTokenColdConsistencySummary,
   type CoverageLexicalBodyTokenColdStoreApi,
   type CoverageLexicalBodyTokenColdDocumentWrite,
 } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
@@ -2214,18 +2215,31 @@ export class DataManager {
 
   private async buildLexicalBodyTokenColdDocuments(
     files: readonly TFile[],
+    indexedFileRefsByPath: ReadonlyMap<string, BaseIndexedFileRef>,
   ): Promise<CoverageLexicalBodyTokenColdDocumentWrite[]> {
-    const textsByPath = await this.fileSnapshotStore.readCurrentTexts(files);
-    return files.map((file) => {
-      const plainText = textsByPath.get(file.path) ?? "";
-      return {
-        path: file.path,
-        generation: file.stat.mtime,
-        bodyTokens: this.tokenizer
-          .tokenizeSequence(plainText, "index")
-          .map((token) => token.toLowerCase()),
-        hanSegments: extractHanSegments(plainText),
-      };
+    const requests = files.flatMap((file) => {
+      const indexedRef = indexedFileRefsByPath.get(file.path);
+      return indexedRef
+        ? [{ path: file.path, generation: indexedRef.generation }]
+        : [];
+    });
+    const textsByPath = await this.fileSnapshotStore.readIndexedTexts(requests);
+    return files.flatMap((file) => {
+      const indexedRef = indexedFileRefsByPath.get(file.path);
+      const plainText = textsByPath.get(file.path);
+      if (!indexedRef || plainText === undefined) {
+        return [];
+      }
+      return [
+        {
+          path: file.path,
+          generation: indexedRef.generation,
+          bodyTokens: this.tokenizer
+            .tokenizeSequence(plainText, "index")
+            .map((token) => token.toLowerCase()),
+          hanSegments: extractHanSegments(plainText),
+        },
+      ];
     });
   }
 
@@ -2332,6 +2346,9 @@ export class DataManager {
     consistency: CoverageLexicalBodyTokenColdConsistencySummary,
     missingOrStaleFiles: readonly TFile[],
   ): Promise<void> {
+    const indexedFileRefsByPath = new Map(
+      indexedFileRefs.map((ref) => [ref.path, ref] as const),
+    );
     if (consistency.requiresReset) {
       await coldStore.clearAll();
     } else if (consistency.danglingPaths.length > 0) {
@@ -2347,7 +2364,10 @@ export class DataManager {
         }
         const batchFiles = repairBatches[index];
         const batchDocuments =
-          await this.buildLexicalBodyTokenColdDocuments(batchFiles);
+          await this.buildLexicalBodyTokenColdDocuments(
+            batchFiles,
+            indexedFileRefsByPath,
+          );
         await coldStore.upsertDocuments(batchDocuments);
         if (index + 1 < repairBatches.length) {
           await MyLib.sleep(0);

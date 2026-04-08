@@ -1,4 +1,5 @@
 import { container } from "tsyringe";
+import type { CoverageLexicalFamilySignal } from "src/services/search/coverage-lexical/coverage-lexical-types";
 
 jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
@@ -10,6 +11,7 @@ const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 
 type IndexedDocument = {
 	path: string;
+	generation?: number;
 	basename: string;
 	folder: string;
 	content?: string;
@@ -23,6 +25,7 @@ function registerMockFileSnapshotStore(
 ): {
 	currentTexts: Map<string, string>;
 	readCurrentTexts: jest.Mock;
+	readIndexedTexts: jest.Mock;
 } {
 	const { FileSnapshotStore } = require(
 		"src/services/search/shared/file-snapshot-store",
@@ -47,10 +50,28 @@ function registerMockFileSnapshotStore(
 			return result;
 		},
 	);
+	const readIndexedTexts = jest.fn(
+		async (
+			requests: ReadonlyArray<{
+				path: string;
+				generation?: number;
+			}>,
+		) => {
+			const result = new Map<string, string>();
+			for (const request of requests) {
+				const text = currentTexts.get(request.path);
+				if (text !== undefined) {
+					result.set(request.path, text);
+				}
+			}
+			return result;
+		},
+	);
 	container.registerInstance(FileSnapshotStore, {
 		readCurrentTexts,
+		readIndexedTexts,
 	} as any);
-	return { currentTexts, readCurrentTexts };
+	return { currentTexts, readCurrentTexts, readIndexedTexts };
 }
 
 function registerMockBodyTokenColdStore() {
@@ -195,18 +216,31 @@ function createEmptyExperimentalCharSignal() {
 
 function createEmptyExperimentalWindowSignal() {
 	return {
-		exactWeight: 0,
-		prefixWeight: 0,
-		fuzzyWeight: 0,
+		start: 0,
+		end: 0,
+		coreCoverageCount: 0,
+		exactCoreWeight: 0,
+		prefixCoreWeight: 0,
+		fuzzyCoreWeight: 0,
 		anchorCoverageCount: 0,
 		softCoverageCount: 0,
-		phraseMatchCount: 0,
-		phraseMatchWeight: 0,
-		compactnessScore: 0,
+		adjacentCorePairCount: 0,
+		adjacentCorePairWeight: 0,
+		orderedPairCount: 0,
+		orderRatio: 0,
+		compactnessRatio: 0,
+		score: 0,
+		matchedExactCoreFamilyIndices: [],
+		matchedPrefixCoreFamilyIndices: [],
+		matchedFuzzyCoreFamilyIndices: [],
+		matchedAnchorFamilyIndices: [],
+		matchedSoftFamilyIndices: [],
 	};
 }
 
-function createExperimentalCoverageSignal(totalMatchedFamilyCount: number) {
+function createExperimentalCoverageSignal(
+	totalMatchedFamilyCount: number,
+): CoverageLexicalFamilySignal {
 	return {
 		familyCountSummary: {
 			totalMatchedFamilyCount,
@@ -592,6 +626,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const documents = [
 			{
 				path: "notes/snapshot-fallback-target.md",
+				generation: 101,
 				basename: "snapshot-fallback-target",
 				folder: "notes",
 				content: "alpha beta gamma for snapshot fallback",
@@ -599,6 +634,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			},
 			{
 				path: "notes/snapshot-fallback-peer.md",
+				generation: 102,
 				basename: "snapshot-fallback-peer",
 				folder: "notes",
 				content: "neighbor note",
@@ -621,7 +657,13 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			maxItemResults: 5,
 		});
 
-		expect(fileSnapshotStore.readCurrentTexts).toHaveBeenCalled();
+		expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledWith([
+			{
+				path: "notes/snapshot-fallback-target.md",
+				generation: 101,
+			},
+		]);
+		expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
 		expect(results[0]?.path).toBe("notes/snapshot-fallback-target.md");
 	});
 
@@ -1017,6 +1059,99 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		expect(clearAll).not.toHaveBeenCalled();
 	});
 
+	test("serializes delete and re-add cold-store writes for the same path", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				deleteDocuments(paths: string[]): void;
+			};
+		};
+		const {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+		} = require(
+			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
+		) as {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
+		};
+		let releaseDelete: (() => void) | null = null;
+		const deleteGate = new Promise<void>((resolve) => {
+			releaseDelete = resolve;
+		});
+		const operationOrder: string[] = [];
+		const storedDocuments = new Map<string, string[]>();
+		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+			upsertDocuments: jest.fn(async (documents: any[]) => {
+				operationOrder.push("upsert");
+				for (const document of documents) {
+					storedDocuments.set(document.path, [...document.bodyTokens]);
+				}
+			}),
+			deleteDocuments: jest.fn(async (paths: string[]) => {
+				operationOrder.push("delete:start");
+				await deleteGate;
+				for (const path of paths) {
+					storedDocuments.delete(path);
+				}
+				operationOrder.push("delete:end");
+			}),
+			readDocuments: jest.fn(async () => new Map()),
+			getMeta: jest.fn(async () => null),
+			inspectConsistency: jest.fn(async () => ({
+				needsRepair: false,
+				requiresReset: false,
+				reason: "up-to-date",
+				missingOrStalePaths: [],
+				danglingPaths: [],
+			})),
+			updateIndexedRefsMetadata: jest.fn(async () => undefined),
+			clearAll: jest.fn(async () => undefined),
+		} as any);
+
+		await withExperimentalBodyTokenOffloadEnv(true, async () => {
+			const engine = new CoverageLexicalFileSearchEngine();
+			await engine.addDocuments([
+				{
+					path: "notes/race-target.md",
+					generation: 10,
+					basename: "race-target",
+					folder: "notes",
+					content: "old cold body",
+				},
+			]);
+			storedDocuments.clear();
+			operationOrder.length = 0;
+
+			engine.deleteDocuments(["notes/race-target.md"]);
+			const reAddPromise = engine.addDocuments([
+				{
+					path: "notes/race-target.md",
+					generation: 11,
+					basename: "race-target",
+					folder: "notes",
+					content: "fresh cold body",
+				},
+			]);
+
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(operationOrder).toEqual(["delete:start"]);
+
+			releaseDelete?.();
+			await reAddPromise;
+
+			expect(operationOrder).toEqual(["delete:start", "delete:end", "upsert"]);
+			expect(storedDocuments.get("notes/race-target.md")).toEqual([
+				"fresh",
+				"fresh",
+				"cold",
+				"cold",
+				"body",
+				"body",
+			]);
+		});
+	});
+
 	test("restoring a lexical snapshot does not wipe persisted cold rows", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1119,6 +1254,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			);
 			expect(docId).toBeDefined();
 			expect((engine as any).hasResidentDocumentBodyTokens(docId)).toBe(false);
+			(engine as any).clearHotCachedOffloadedBodyTokens(docId);
 
 			const results = await engine.searchFiles({
 				queryText: "alpha beta gamma",
