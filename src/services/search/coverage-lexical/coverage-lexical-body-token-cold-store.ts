@@ -78,6 +78,38 @@ export class CoverageLexicalBodyTokenColdStore
 		);
 	}
 
+	async readDocuments(
+		paths: readonly string[],
+	): Promise<Map<string, CoverageLexicalBodyTokenColdDocumentWrite>> {
+		const uniquePaths = Array.from(new Set(paths));
+		if (uniquePaths.length === 0) {
+			return new Map();
+		}
+		const docRows = (
+			await this.database.db.lexicalBodyTokenColdDocs.bulkGet(uniquePaths)
+		).filter((row): row is CoverageLexicalBodyTokenColdDocRow => row !== undefined);
+		if (docRows.length === 0) {
+			return new Map();
+		}
+		const blockIds = Array.from(new Set(docRows.map((row) => row.blockId)));
+		const blockRows = await this.database.db.lexicalBodyTokenColdBlocks.bulkGet(
+			blockIds,
+		);
+		const blockRowById = new Map(
+			blockRows.flatMap((row) => (row ? [[row.id, row] as const] : [])),
+		);
+		const documents = new Map<string, CoverageLexicalBodyTokenColdDocumentWrite>();
+		for (const docRow of docRows) {
+			const blockRow = blockRowById.get(docRow.blockId);
+			if (!blockRow) {
+				continue;
+			}
+			const decoded = decodeCoverageLexicalBodyTokenColdDocument(blockRow, docRow);
+			documents.set(decoded.path, decoded);
+		}
+		return documents;
+	}
+
 	async upsertDocuments(
 		documents: readonly CoverageLexicalBodyTokenColdDocumentWrite[],
 	): Promise<void> {

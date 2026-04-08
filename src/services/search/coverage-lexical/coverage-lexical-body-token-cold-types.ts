@@ -44,6 +44,9 @@ export type CoverageLexicalBodyTokenColdDocumentWrite = {
 export interface CoverageLexicalBodyTokenColdStoreApi {
 	clearAll(): Promise<void>;
 	deleteDocuments(paths: readonly string[]): Promise<void>;
+	readDocuments(
+		paths: readonly string[],
+	): Promise<Map<string, CoverageLexicalBodyTokenColdDocumentWrite>>;
 	upsertDocuments(
 		documents: readonly CoverageLexicalBodyTokenColdDocumentWrite[],
 	): Promise<void>;

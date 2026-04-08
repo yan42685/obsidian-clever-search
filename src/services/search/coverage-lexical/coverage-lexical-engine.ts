@@ -1006,26 +1006,61 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (missingPaths.length === 0) {
 			return;
 		}
+		const coldStore = this.getBodyTokenColdStore();
+		if (coldStore) {
+			const documentsByPath = await coldStore.readDocuments(missingPaths);
+			for (let index = 0; index < missingDocIds.length; index += 1) {
+				const decoded = documentsByPath.get(missingPaths[index]);
+				if (!decoded) {
+					continue;
+				}
+				queryCache.bodyTokensByDocId.set(
+					missingDocIds[index],
+					decoded.bodyTokens,
+				);
+				this.rememberHotCachedOffloadedBodyTokens(
+					missingDocIds[index],
+					decoded.bodyTokens,
+				);
+			}
+		}
+		const unresolvedDocIds: number[] = [];
+		const unresolvedPaths: string[] = [];
+		for (let index = 0; index < missingDocIds.length; index += 1) {
+			if (queryCache.bodyTokensByDocId.has(missingDocIds[index])) {
+				continue;
+			}
+			unresolvedDocIds.push(missingDocIds[index]);
+			unresolvedPaths.push(missingPaths[index]);
+		}
+		if (unresolvedPaths.length === 0) {
+			return;
+		}
 		const fileSnapshotStore = this.getFileSnapshotStore();
 		if (!fileSnapshotStore) {
 			return;
 		}
-		const textsByPath = await fileSnapshotStore.readCurrentTexts(missingPaths);
-		for (let index = 0; index < missingDocIds.length; index += 1) {
-			const bodyText = textsByPath.get(missingPaths[index]);
+		const textsByPath = await fileSnapshotStore.readCurrentTexts(unresolvedPaths);
+		for (let index = 0; index < unresolvedDocIds.length; index += 1) {
+			const bodyText = textsByPath.get(unresolvedPaths[index]);
 			if (bodyText === undefined) {
 				continue;
 			}
 			const tokens = tokenizeCoverageLexicalDocumentText(this.tokenizer, bodyText);
-			queryCache.bodyTokensByDocId.set(missingDocIds[index], tokens);
-			this.rememberHotCachedOffloadedBodyTokens(missingDocIds[index], tokens);
+			queryCache.bodyTokensByDocId.set(unresolvedDocIds[index], tokens);
+			this.rememberHotCachedOffloadedBodyTokens(unresolvedDocIds[index], tokens);
 		}
 	}
 
 	private shouldExperimentallyOffloadResidentBodyTokens(): boolean {
+		if (!isCoverageLexicalExperimentalBodyTokenOffloadEnabled()) {
+			return false;
+		}
+		if (this.getBodyTokenColdStore() !== null) {
+			return true;
+		}
 		return (
 			this.offloadedBodyTokenColdSourceAvailable &&
-			isCoverageLexicalExperimentalBodyTokenOffloadEnabled() &&
 			this.getFileSnapshotStore() !== null
 		);
 	}
@@ -1079,12 +1114,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (this.documentBodyTokenIdTape.length === 0) {
 			return;
 		}
-		const offloaded = this.writeOffloadedColdBodyTokenSource(
-			this.documentBodyTokenIdTape,
-			this.documentBodyTokenRangeById,
-		);
+		const offloadedToDexie = this.getBodyTokenColdStore() !== null;
+		const offloaded =
+			offloadedToDexie ||
+			this.writeOffloadedColdBodyTokenSource(
+				this.documentBodyTokenIdTape,
+				this.documentBodyTokenRangeById,
+			);
 		if (!offloaded) {
 			return;
+		}
+		if (offloadedToDexie) {
+			this.clearOffloadedColdBodyTokenSource();
 		}
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;

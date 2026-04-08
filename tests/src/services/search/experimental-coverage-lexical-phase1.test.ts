@@ -901,6 +901,84 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		expect(clearAll).not.toHaveBeenCalled();
 	});
 
+	test("hydrates offloaded body tokens from the Dexie-backed cold store without file snapshots", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+		const { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
+		) as {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
+		};
+		const storedDocuments = new Map<string, any>();
+		const upsertDocuments = jest.fn(async (documents: any[]) => {
+			for (const document of documents) {
+				storedDocuments.set(document.path, document);
+			}
+		});
+		const deleteDocuments = jest.fn(async (paths: string[]) => {
+			for (const path of paths) {
+				storedDocuments.delete(path);
+			}
+		});
+		const readDocuments = jest.fn(async (paths: string[]) => {
+			const next = new Map<string, any>();
+			for (const path of paths) {
+				const document = storedDocuments.get(path);
+				if (document) {
+					next.set(path, document);
+				}
+			}
+			return next;
+		});
+		const clearAll = jest.fn(async () => undefined);
+
+		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+			upsertDocuments,
+			deleteDocuments,
+			readDocuments,
+			clearAll,
+		} as any);
+
+		await withExperimentalBodyTokenOffloadEnv(true, async () => {
+			const engine = new CoverageLexicalFileSearchEngine();
+			await engine.addDocuments([
+				{
+					path: "notes/dexie-cold-read.md",
+					basename: "dexie-cold-read",
+					folder: "notes",
+					content: "alpha beta gamma from dexie cold rows",
+				},
+			]);
+
+			const docId = ((engine as any).documentIdByPath as Map<string, number>).get(
+				"notes/dexie-cold-read.md",
+			);
+			expect(docId).toBeDefined();
+			expect((engine as any).hasResidentDocumentBodyTokens(docId)).toBe(false);
+
+			const results = await engine.searchFiles({
+				queryText: "alpha beta gamma",
+				isPrefixMatch: true,
+				isFuzzy: false,
+				maxItemResults: 5,
+			});
+
+			expect(readDocuments).toHaveBeenCalled();
+			expect(results[0]?.path).toBe("notes/dexie-cold-read.md");
+		});
+	});
+
 	test("coarse hydration treats unresolved body evidence as upgrade potential", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
