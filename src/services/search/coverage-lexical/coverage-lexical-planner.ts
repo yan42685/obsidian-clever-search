@@ -276,9 +276,21 @@ function selectQueryKind(input: {
 		(span) => span.kind === "metadata_intent",
 	).length;
 	const fillerSpanCount = spans.filter((span) => span.kind === "filler").length;
+	const hasStrongMetadataIntent =
+		hasMetadataHint ||
+		metadataIntentSpanCount > 0 ||
+		activeFamilies.some((family) =>
+			familyEvidence.get(family.index)?.spanKinds.includes("metadata_intent"),
+		);
+	const longQueryMetadataDominance =
+		!shortQueryOverlay &&
+		hasStrongMetadataIntent &&
+		meaningfulAnchorMass >= Math.max(0.9, meaningfulBodyMass * 1.15) &&
+		decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass);
 	const looksMetadataOnly =
 		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
 		(bodyFamilies.length === 0 ||
+			longQueryMetadataDominance ||
 			(shortQueryOverlay &&
 				(hasTitleShapeHint ||
 					hasPathShapeHint ||

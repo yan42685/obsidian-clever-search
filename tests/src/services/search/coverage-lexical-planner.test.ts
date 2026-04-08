@@ -457,4 +457,90 @@ describe("coverage lexical planner", () => {
 			expect.arrayContaining(["status", "page"]),
 		);
 	});
+
+	test("keeps alias-intent families as hard anchors in long mixed queries", () => {
+		const queryTerms = ["old", "names", "still", "resolve", "through", "aliases"];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 2,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 2,
+				aliasExactDocCount: 1,
+				combinedExactDocCount: 3,
+				familyWeight: 0.43,
+				familyTier: "weak",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 2,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 1,
+				aliasExactDocCount: 1,
+				combinedExactDocCount: 3,
+				familyWeight: 0.61,
+				familyTier: "support",
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 0,
+				familyWeight: 0.69,
+				familyTier: "support",
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 0,
+				familyWeight: 0.81,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 0,
+				familyWeight: 0.81,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 1,
+				aliasExactDocCount: 1,
+				combinedExactDocCount: 1,
+				familyWeight: 0.77,
+				familyTier: "decisive",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"old names still resolve through aliases",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toEqual(
+			expect.arrayContaining(["names", "aliases"]),
+		);
+		expect(plan.weightedAnchorMass).toBeGreaterThan(0);
+		expect(plan.explain.familyReasons.some((reason) => reason.term === "aliases")).toBe(
+			true,
+		);
+	});
 });

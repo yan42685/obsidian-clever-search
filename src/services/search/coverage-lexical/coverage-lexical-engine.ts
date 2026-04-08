@@ -2686,7 +2686,7 @@ function computeCoverageLexicalWeakTokenPenalty(
 	if (scriptClass === "latin" && latinCharCount <= 2) {
 		return 0.55;
 	}
-	if (/^(?:title|path|folder|tag|tags|alias|aliases|heading|headings|basename|name|file)$/u.test(term)) {
+	if (/^(?:[_./\\-]+|v?\d+(?:[._-]\d+)+)$/u.test(term)) {
 		return 0.45;
 	}
 	return 1;
