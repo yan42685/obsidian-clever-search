@@ -107,6 +107,10 @@ const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_HOT_CACHE_LIMIT = 24;
 const COVERAGE_LEXICAL_OFFLOAD_HYDRATION_TIE_LOOKAHEAD = 24;
 const COVERAGE_LEXICAL_OFFLOAD_UNRESOLVED_HYDRATION_LOOKAHEAD = 48;
 const COVERAGE_LEXICAL_OFFLOAD_UNRESOLVED_HYDRATION_BUDGET = 12;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_PASSAGE_UPPER_BOUND = 0.9;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_PHRASE_UPPER_BOUND = 0.7;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_PREFIX_UPPER_BOUND = 0.55;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_CHAR_UPPER_BOUND = 0.25;
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -2492,6 +2496,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			hydratedDocIds.add(coarseRanked[index].docId);
 		}
 		const cutoff = coarseRanked[Math.max(0, budget - 1)];
+		const cutoffLowerBound = getCoverageLexicalCoarseHydrationLowerBound(cutoff);
 		const extensionLimit = Math.min(
 			rankedCount,
 			budget + COVERAGE_LEXICAL_OFFLOAD_HYDRATION_TIE_LOOKAHEAD,
@@ -2512,12 +2517,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					candidate.admissionSignal,
 					cutoff.admissionSignal,
 				) === 0;
-			const hasBodyUpgradePotential =
-				state.phraseMatches.length > 0 ||
-				state.bodyPrefixWitness !== null ||
-				state.bodyCharMatchIndices.length > 0 ||
-				hasUnresolvedCoverageLexicalBodyUpgradePotential(state);
-			if (tiesWithCutoff || hasBodyUpgradePotential) {
+			const potentialUpperBound = computeCoverageLexicalCoarseHydrationPotentialUpperBound(
+				candidate,
+				state,
+			);
+			if (tiesWithCutoff || potentialUpperBound >= cutoffLowerBound) {
 				hydratedDocIds.add(candidate.docId);
 			}
 		}
@@ -2736,6 +2740,51 @@ function hasUnresolvedCoverageLexicalBodyUpgradePotential(
 		unresolved.unresolvedFamilyCount > 0 ||
 		unresolved.unresolvedWeightUpperBound > 0
 	);
+}
+
+function getCoverageLexicalCoarseHydrationLowerBound(
+	result: CoverageLexicalDocRankableResult,
+): number {
+	return (
+		result.coverageLexicalSignal.evidenceMassSummary?.displayRawMass ??
+		result.score ??
+		0
+	);
+}
+
+function computeCoverageLexicalCoarseHydrationPotentialUpperBound(
+	result: CoverageLexicalDocRankableResult,
+	state: CoverageLexicalCandidateState,
+): number {
+	const unresolved = state.unresolvedBodyEvidence;
+	let potentialUpperBound = getCoverageLexicalCoarseHydrationLowerBound(result);
+	potentialUpperBound += unresolved.unresolvedWeightUpperBound;
+	if (unresolved.needsPassageSignal) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_PASSAGE_UPPER_BOUND;
+	}
+	if (
+		unresolved.hasUnverifiedPhraseWitness ||
+		state.phraseMatches.length > 0
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_PHRASE_UPPER_BOUND;
+	}
+	if (
+		unresolved.hasUnresolvedPrefixSurface ||
+		state.bodyPrefixWitness !== null
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_PREFIX_UPPER_BOUND;
+	}
+	if (
+		unresolved.hasUnresolvedBodyCharVerification ||
+		state.bodyCharMatchIndices.length > 0
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_CHAR_UPPER_BOUND;
+	}
+	return potentialUpperBound;
 }
 
 function buildCoverageLexicalBenchmarkOffloadSearchDebug(options: {

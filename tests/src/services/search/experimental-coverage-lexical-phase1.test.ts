@@ -1177,6 +1177,49 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		expect(hydratedDocIds.has(25)).toBe(false);
 	});
 
+	test("coarse hydration does not extend for unresolved evidence that cannot catch the cutoff", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "metadata_only_anchored",
+			route: "metadata-first",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 30 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 30 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(30 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(24);
+		expect(unresolvedState).toBeDefined();
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 0.5;
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(24)).toBe(false);
+	});
+
 	test("coarse hydration grants a bounded tail budget to unresolved body evidence", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
