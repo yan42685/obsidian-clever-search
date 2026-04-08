@@ -76,10 +76,11 @@ export class Tokenizer {
 
 				const words = segment.split(SEPERATOR_REGEX);
 				for (const word of words) {
+					const normalizedWord = word.toLowerCase();
 					if (
 						word.length < 2 || // don't index single char for small charset
 						(this.setting.enableStopWordsEn &&
-							this.stopWordsEn?.has(word))
+							this.stopWordsEn?.has(normalizedWord))
 					) {
 						continue;
 					}
@@ -229,9 +230,10 @@ export class Tokenizer {
 		mode: "index" | "search",
 		output: Array<{ token: string; start: number; end: number }>,
 	): void {
+		const normalizedWord = word.toLowerCase();
 		if (
 			word.length < 2 ||
-			(this.setting.enableStopWordsEn && this.stopWordsEn?.has(word))
+			(this.setting.enableStopWordsEn && this.stopWordsEn?.has(normalizedWord))
 		) {
 			return;
 		}

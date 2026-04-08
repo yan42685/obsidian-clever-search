@@ -4,6 +4,7 @@ import type {
 	DirectSubitemsQueryTerm,
 	DirectSubitemsSpanTermStat,
 } from "./contracts";
+import { shouldKeepOccurrenceByHanProximity } from "./occurrence-structure";
 import { compareOccurrences } from "./raw-occurrences";
 
 export type DirectSubitemsSpanOptions = {
@@ -538,6 +539,9 @@ function expandCoverWithSupportingOccurrences(
 		for (const occurrence of allOccurrences) {
 			const occurrenceKey = `${occurrence.termId}:${occurrence.start}:${occurrence.end}:${occurrence.tier}`;
 			if (occurrence.tier === "exact" && !groupKeys.has(occurrenceKey)) {
+				continue;
+			}
+			if (!shouldKeepOccurrenceByHanProximity(occurrence, allOccurrences)) {
 				continue;
 			}
 			if (occurrence.start >= coverStart && occurrence.end <= coverEnd) {

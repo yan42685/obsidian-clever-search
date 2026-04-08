@@ -124,9 +124,10 @@ export class AssetsProvider {
 
 	private async readLinesAsSet(path: string): Promise<Set<string>> {
 		return new Set(
-			(await fsUtil.promises.readFile(path, { encoding: "utf-8" })).split(
-				FileUtil.SPLIT_EOL,
-			),
+			(await fsUtil.promises.readFile(path, { encoding: "utf-8" }))
+				.split(FileUtil.SPLIT_EOL)
+				.map((line) => line.trim().toLowerCase())
+				.filter((line) => line.length > 0),
 		);
 	}
 
