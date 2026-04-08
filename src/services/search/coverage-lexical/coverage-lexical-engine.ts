@@ -8,6 +8,7 @@ import {
 	writeFileSync,
 } from "fs";
 import { Vault } from "obsidian";
+import { tmpdir } from "os";
 import { join } from "path";
 import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
@@ -97,30 +98,19 @@ import type {
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
 	"COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD";
-const COVERAGE_LEXICAL_PACK_BODY_TOKEN_LEXICON_ENV =
-	"COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON";
 const COVERAGE_LEXICAL_RECALL_BODY_TOKEN_PREFETCH_DOC_BUDGET = 96;
 const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_HOT_CACHE_LIMIT = 24;
-const COVERAGE_LEXICAL_PACKED_BODY_TOKEN_LEXICON_CACHE_LIMIT = 4096;
 const COVERAGE_LEXICAL_OFFLOAD_HYDRATION_TIE_LOOKAHEAD = 24;
 const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR = join(
-	process.cwd(),
-	".codex-bench",
-	"tmp",
+	tmpdir(),
+	"clever-search",
+	"coverage-lexical",
 );
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
 	if (!raw) {
 		return true;
-	}
-	return raw !== "0" && raw.toLowerCase() !== "false";
-}
-
-function isCoverageLexicalExperimentalPackedBodyTokenLexiconEnabled(): boolean {
-	const raw = process.env[COVERAGE_LEXICAL_PACK_BODY_TOKEN_LEXICON_ENV]?.trim();
-	if (!raw) {
-		return false;
 	}
 	return raw !== "0" && raw.toLowerCase() !== "false";
 }
@@ -422,11 +412,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	> = [];
 	private readonly documentBodyTokenLexicon: string[] = [];
 	private readonly documentBodyTokenIdByTerm = new Map<string, number>();
-	private documentBodyTokenLexiconPackedTape = new Uint8Array(0);
-	private readonly documentBodyTokenLexiconPackedRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
-	private readonly packedBodyTokenLexiconCacheById = new Map<number, string>();
 	private documentBodyTokenIdTape = new Uint8Array(0);
 	private readonly documentBodyTokenRangeById: Array<CoverageLexicalTokenRange | undefined> = [];
 	private readonly documentBodyHanSegmentsById: Array<
@@ -650,9 +635,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentHeadingsTextRangeById.length = 0;
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenIdByTerm.clear();
-		this.documentBodyTokenLexiconPackedTape = new Uint8Array(0);
-		this.documentBodyTokenLexiconPackedRangeById.length = 0;
-		this.packedBodyTokenLexiconCacheById.clear();
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
 		this.clearOffloadedColdBodyTokenSource();
@@ -674,7 +656,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private getOrCreateDocumentBodyTokenId(token: string): number {
-		this.restorePackedDocumentBodyTokenLexiconToResidentArray();
 		const existing = this.documentBodyTokenIdByTerm.get(token);
 		if (existing !== undefined) {
 			return existing;
@@ -885,120 +866,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentHeadingsTextRangeById.push(...nextHeadingsRanges);
 	}
 
-	private shouldExperimentallyPackBodyTokenLexicon(): boolean {
-		return isCoverageLexicalExperimentalPackedBodyTokenLexiconEnabled();
-	}
-
-	private getDocumentBodyTokenLexiconLength(): number {
-		if (this.documentBodyTokenLexicon.length > 0) {
-			return this.documentBodyTokenLexicon.length;
-		}
-		return this.documentBodyTokenLexiconPackedRangeById.length;
-	}
-
-	private getPackedBodyTokenLexiconCache(tokenId: number): string | undefined {
-		const cached = this.packedBodyTokenLexiconCacheById.get(tokenId);
-		if (cached === undefined) {
-			return undefined;
-		}
-		this.packedBodyTokenLexiconCacheById.delete(tokenId);
-		this.packedBodyTokenLexiconCacheById.set(tokenId, cached);
-		return cached;
-	}
-
-	private rememberPackedBodyTokenLexiconCache(tokenId: number, token: string): void {
-		this.packedBodyTokenLexiconCacheById.delete(tokenId);
-		this.packedBodyTokenLexiconCacheById.set(tokenId, token);
-		while (
-			this.packedBodyTokenLexiconCacheById.size >
-			COVERAGE_LEXICAL_PACKED_BODY_TOKEN_LEXICON_CACHE_LIMIT
-		) {
-			const oldestKey = this.packedBodyTokenLexiconCacheById.keys().next().value;
-			if (oldestKey === undefined) {
-				break;
-			}
-			this.packedBodyTokenLexiconCacheById.delete(oldestKey);
-		}
-	}
-
 	private getDocumentBodyTokenById(tokenId: number): string | undefined {
-		const resident = this.documentBodyTokenLexicon[tokenId];
-		if (resident !== undefined) {
-			return resident;
-		}
-		const cached = this.getPackedBodyTokenLexiconCache(tokenId);
-		if (cached !== undefined) {
-			return cached;
-		}
-		const range = this.documentBodyTokenLexiconPackedRangeById[tokenId];
-		if (!range) {
-			return undefined;
-		}
-		const token = readCoverageLexicalPackedStringRange(
-			this.documentBodyTokenLexiconPackedTape,
-			range,
-		);
-		this.rememberPackedBodyTokenLexiconCache(tokenId, token);
-		return token;
+		return this.documentBodyTokenLexicon[tokenId];
 	}
 
 	private getDocumentBodyTokenLexiconValues(): string[] {
-		const values: string[] = [];
-		for (let tokenId = 0; tokenId < this.getDocumentBodyTokenLexiconLength(); tokenId += 1) {
-			const token = this.getDocumentBodyTokenById(tokenId);
-			if (token === undefined) {
-				throw new Error(
-					`Missing coverage lexical body token lexicon entry for id ${tokenId}`,
-				);
-			}
-			values.push(token);
-		}
-		return values;
-	}
-
-	private restorePackedDocumentBodyTokenLexiconToResidentArray(): void {
-		if (
-			this.documentBodyTokenLexicon.length > 0 ||
-			this.documentBodyTokenLexiconPackedRangeById.length === 0
-		) {
-			return;
-		}
-		this.documentBodyTokenLexicon.push(...this.getDocumentBodyTokenLexiconValues());
-		this.documentBodyTokenLexiconPackedTape = new Uint8Array(0);
-		this.documentBodyTokenLexiconPackedRangeById.length = 0;
-		this.packedBodyTokenLexiconCacheById.clear();
-	}
-
-	private packResidentDocumentBodyTokenLexicon(): void {
-		if (!this.shouldExperimentallyPackBodyTokenLexicon()) {
-			return;
-		}
-		if (this.documentBodyTokenLexicon.length === 0) {
-			return;
-		}
-		const encodedEntries = this.documentBodyTokenLexicon.map((token) =>
-			UTF8_ENCODER.encode(token),
-		);
-		const totalBytes = encodedEntries.reduce(
-			(sum, encoded) => sum + encoded.length,
-			0,
-		);
-		const tape = new Uint8Array(totalBytes);
-		const ranges: Array<CoverageLexicalTokenRange | undefined> = [];
-		let cursor = 0;
-		for (const encoded of encodedEntries) {
-			tape.set(encoded, cursor);
-			ranges.push({
-				start: cursor,
-				end: cursor + encoded.length,
-			});
-			cursor += encoded.length;
-		}
-		this.documentBodyTokenLexiconPackedTape = tape;
-		this.documentBodyTokenLexiconPackedRangeById.length = 0;
-		this.documentBodyTokenLexiconPackedRangeById.push(...ranges);
-		this.documentBodyTokenLexicon.length = 0;
-		this.packedBodyTokenLexiconCacheById.clear();
+		return [...this.documentBodyTokenLexicon];
 	}
 
 	private getDocumentBodyTokenIds(docId: number): readonly number[] | undefined {
@@ -1329,7 +1202,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private compactDocumentBodyTokenLexicon(): void {
 		this.restoreOffloadedColdBodyTokenSourceToResidentTape();
-		this.restorePackedDocumentBodyTokenLexiconToResidentArray();
 		if (this.documentBodyTokenLexicon.length === 0) {
 			this.documentBodyTokenLexicon.length = 0;
 			this.documentBodyTokenIdByTerm.clear();
@@ -1354,16 +1226,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (usedTokenIds.size === 0) {
 			this.documentBodyTokenLexicon.length = 0;
 			this.documentBodyTokenIdByTerm.clear();
-			this.documentBodyTokenLexiconPackedTape = new Uint8Array(0);
-			this.documentBodyTokenLexiconPackedRangeById.length = 0;
-			this.packedBodyTokenLexiconCacheById.clear();
 			this.documentBodyTokenIdTape = new Uint8Array(0);
 			this.documentBodyTokenRangeById.length = 0;
 			this.bodyPostings.clear();
 			return;
 		}
 		if (usedTokenIds.size === this.documentBodyTokenLexicon.length) {
-			this.packResidentDocumentBodyTokenLexicon();
 			return;
 		}
 		const nextLexicon: string[] = [];
@@ -1412,15 +1280,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.bodyPostings.remapTokenIds(tokenIdRemap, nextLexicon.length);
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenLexicon.push(...nextLexicon);
-		this.documentBodyTokenLexiconPackedTape = new Uint8Array(0);
-		this.documentBodyTokenLexiconPackedRangeById.length = 0;
-		this.packedBodyTokenLexiconCacheById.clear();
 		this.documentBodyTokenIdByTerm.clear();
 		for (const [token, tokenId] of nextIdByTerm.entries()) {
 			this.documentBodyTokenIdByTerm.set(token, tokenId);
 		}
 		this.rebuildDocumentBodyTokenTape(remappedTokenIdsByDocId);
-		this.packResidentDocumentBodyTokenLexicon();
 	}
 
 	private rebuildDocumentBodyTokenTape(
@@ -1465,7 +1329,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.compactDocumentMetadataTextArena();
 		this.offloadResidentDocumentBodyTokens();
 		this.offloadResidentDocumentBodyHanSegments();
-		this.packResidentDocumentBodyTokenLexicon();
 	}
 
 	deleteDocuments(paths: string[]): void {
@@ -1473,7 +1336,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.removeDocument(path);
 		}
 		this.compactDocumentMetadataTextArena();
-		this.packResidentDocumentBodyTokenLexicon();
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
@@ -1865,8 +1727,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentPathById,
 			this.documentById,
 			this.getDocumentBodyTokenLexiconValues(),
-			this.documentBodyTokenLexiconPackedTape,
-			this.documentBodyTokenLexiconPackedRangeById,
 			this.documentBodyTokenIdTape,
 			this.documentBodyTokenRangeById,
 			this.documentBodyHanSegmentsById,
@@ -2113,9 +1973,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		this.documentBodyTokenLexicon.length = 0;
 		this.documentBodyTokenLexicon.push(...state.bodyTokenLexicon);
-		this.documentBodyTokenLexiconPackedTape = new Uint8Array(0);
-		this.documentBodyTokenLexiconPackedRangeById.length = 0;
-		this.packedBodyTokenLexiconCacheById.clear();
 		this.documentBodyTokenIdByTerm.clear();
 		for (let tokenId = 0; tokenId < this.documentBodyTokenLexicon.length; tokenId += 1) {
 			this.documentBodyTokenIdByTerm.set(
@@ -2146,7 +2003,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.compactDocumentMetadataTextArena();
 		this.offloadResidentDocumentBodyTokens();
 		this.offloadResidentDocumentBodyHanSegments();
-		this.packResidentDocumentBodyTokenLexicon();
 	}
 
 	private clearLivePostingMaps(): void {
@@ -3618,16 +3474,6 @@ function accountStringBytes(
 	);
 }
 
-function readCoverageLexicalPackedStringRange(
-	tape: Uint8Array,
-	range: CoverageLexicalTokenRange,
-): string {
-	if (range.end <= range.start) {
-		return "";
-	}
-	return UTF8_DECODER.decode(tape.subarray(range.start, range.end));
-}
-
 function estimateStringArrayBytes(
 	values: readonly string[],
 	accumulator: IndexSizeAccumulator,
@@ -3646,47 +3492,6 @@ function estimateStringArrayBytes(
 		total: INDEX_COLLECTION_HEADER_BYTES + count * INDEX_REFERENCE_BYTES,
 		count,
 		referenceBytes: count * INDEX_REFERENCE_BYTES,
-	};
-}
-
-function estimatePackedStringArrayBytes(
-	values: readonly string[],
-	packedTape: Uint8Array,
-	packedRanges: readonly (CoverageLexicalTokenRange | undefined)[],
-	accumulator: IndexSizeAccumulator,
-	source: string,
-): {
-	total: number;
-	count: number;
-	referenceBytes: number;
-	rangeNumberBytes: number;
-	packedTapeBytes: number;
-} {
-	let count = 0;
-	let populatedCount = 0;
-	for (const value of values) {
-		count += 1;
-		accountStringBytes(accumulator, value, source);
-	}
-	for (const range of packedRanges) {
-		if (range !== undefined) {
-			populatedCount += 1;
-		}
-	}
-	const referenceBytes = count * INDEX_REFERENCE_BYTES;
-	const rangeNumberBytes = populatedCount * INDEX_NUMBER_BYTES * 2;
-	const packedTapeBytes =
-		packedTape.length > 0 ? estimatePackedUint8Bytes(packedTape.length) : 0;
-	return {
-		total:
-			INDEX_COLLECTION_HEADER_BYTES +
-			referenceBytes +
-			rangeNumberBytes +
-			packedTapeBytes,
-		count,
-		referenceBytes,
-		rangeNumberBytes,
-		packedTapeBytes,
 	};
 }
 
@@ -4051,11 +3856,6 @@ function estimateDocumentIdentityBytes(
 	documentPathById: readonly (string | undefined)[],
 	documentById: readonly (CoverageLexicalDocument | undefined)[],
 	documentBodyTokenLexicon: readonly string[],
-	documentBodyTokenLexiconPackedTape: Uint8Array,
-	documentBodyTokenLexiconPackedRangeById: readonly (
-		| CoverageLexicalTokenRange
-		| undefined
-	)[],
 	documentBodyTokenIdTape: Uint8Array,
 	documentBodyTokenRangeById: readonly (CoverageLexicalTokenRange | undefined)[],
 	documentBodyHanSegmentsById: readonly (readonly string[] | undefined)[],
@@ -4103,21 +3903,11 @@ function estimateDocumentIdentityBytes(
 	};
 	const docStoreByIdTotal =
 		INDEX_COLLECTION_HEADER_BYTES + docStoreById.referenceBytes;
-	const bodyTokenLexicon =
-		documentBodyTokenLexiconPackedTape.length > 0 &&
-		documentBodyTokenLexicon.length > 0
-			? estimatePackedStringArrayBytes(
-					documentBodyTokenLexicon,
-					documentBodyTokenLexiconPackedTape,
-					documentBodyTokenLexiconPackedRangeById,
-					accumulator,
-					"documentIdentity.bodyTokenLexicon",
-			  )
-			: estimateStringArrayBytes(
-					documentBodyTokenLexicon,
-					accumulator,
-					"documentIdentity.bodyTokenLexicon",
-			  );
+	const bodyTokenLexicon = estimateStringArrayBytes(
+		documentBodyTokenLexicon,
+		accumulator,
+		"documentIdentity.bodyTokenLexicon",
+	);
 	const bodyTokensById = estimateNumericTokenTapeSlotsBytes(
 		documentBodyTokenIdTape,
 		documentBodyTokenRangeById,

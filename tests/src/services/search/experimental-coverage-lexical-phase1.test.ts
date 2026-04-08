@@ -80,31 +80,6 @@ async function withExperimentalBodyTokenOffloadEnv<T>(
 	}
 }
 
-async function withExperimentalPackedBodyTokenLexiconEnv<T>(
-	enabled: boolean | undefined,
-	action: () => Promise<T>,
-): Promise<T> {
-	const previous =
-		process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON;
-	if (enabled === undefined) {
-		delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON;
-	} else {
-		process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON = enabled
-			? "1"
-			: "0";
-	}
-	try {
-		return await action();
-	} finally {
-		if (previous === undefined) {
-			delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON;
-		} else {
-			process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON =
-				previous;
-		}
-	}
-}
-
 function createExperimentalTokenizer() {
 	return {
 		tokenize(text: string): string[] {
@@ -147,7 +122,6 @@ function createExperimentalTokenizer() {
 describe("coverage lexical phase 1 memory experiments", () => {
 	beforeEach(() => {
 		process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = "0";
-		process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON = "0";
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -165,7 +139,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 
 	afterEach(() => {
 		delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
-		delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_PACK_BODY_TOKEN_LEXICON;
 		delete (global as any).window;
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -679,55 +652,5 @@ describe("coverage lexical phase 1 memory experiments", () => {
 				"headingsText",
 			),
 		).toBe(false);
-	});
-
-	test("optionally packs body token lexicon behind an experimental switch", async () => {
-		const { CoverageLexicalFileSearchEngine } = require(
-			"src/services/search/coverage-lexical/coverage-lexical-engine",
-		) as {
-			CoverageLexicalFileSearchEngine: new () => {
-				addDocuments(documents: IndexedDocument[]): Promise<void>;
-				searchFiles(request: {
-					queryText: string;
-					isPrefixMatch: boolean;
-					isFuzzy: boolean;
-					maxItemResults: number;
-				}): Promise<Array<{ path: string }>>;
-				getIndexBreakdown(): Record<string, unknown> | null;
-			};
-		};
-
-		await withExperimentalPackedBodyTokenLexiconEnv(true, async () => {
-			const engine = new CoverageLexicalFileSearchEngine();
-			await engine.addDocuments([
-				{
-					path: "notes/packed-lexicon-target.md",
-					basename: "packed-lexicon-target",
-					folder: "notes",
-					content:
-						"alpha beta gamma delta epsilon zeta eta theta packed body token lexicon target",
-					headings: "packed body token lexicon",
-				},
-			]);
-
-			expect((engine as any).documentBodyTokenLexicon.length).toBe(0);
-			expect((engine as any).documentBodyTokenLexiconPackedTape.length).toBeGreaterThan(
-				0,
-			);
-
-			const results = await engine.searchFiles({
-				queryText: "packed body token lexicon",
-				isPrefixMatch: true,
-				isFuzzy: false,
-				maxItemResults: 5,
-			});
-			expect(results[0]?.path).toBe("notes/packed-lexicon-target.md");
-
-			const breakdown = engine.getIndexBreakdown();
-			const documentIdentity = ((breakdown?.estimatedBytes as Record<string, unknown>)
-				?.documentIdentity ?? {}) as Record<string, Record<string, unknown>>;
-			const bodyTokenLexicon = documentIdentity.bodyTokenLexicon ?? {};
-			expect((bodyTokenLexicon.total ?? 0) as number).toBeGreaterThan(0);
-		});
 	});
 });
