@@ -123,9 +123,44 @@ type CoverageLexicalBenchmarkDiagnostic =
 	| "timing"
 	| "recall"
 	| "lane-study"
+	| "offload"
 	| "wins"
 	| "disagreements"
 	| "misses";
+
+type CoverageLexicalBenchmarkOffloadDocDebug = {
+	docId: number;
+	path: string | null;
+	cheapCoarseRank: number | null;
+	finalRank: number | null;
+	hydratedAtCoarse: boolean;
+	selectedForLocalWindow: boolean;
+	hasResidentBodyTokens: boolean;
+	bodyMatchCount: number;
+	phraseMatchCount: number;
+	hasBodyPrefixWitness: boolean;
+	bodyCharMatchCount: number;
+	unresolvedBodyEvidence: {
+		needsPassageSignal: boolean;
+		hasUnverifiedPhraseWitness: boolean;
+		hasUnresolvedPrefixSurface: boolean;
+		hasUnresolvedBodyCharVerification: boolean;
+		unresolvedFamilyCount: number;
+		unresolvedWeightUpperBound: number;
+	};
+};
+
+type CoverageLexicalBenchmarkOffloadSearchDebug = {
+	queryText: string;
+	offloadEnabled: boolean;
+	stagedHydration: boolean;
+	candidateCount: number;
+	cheapCoarseTopDocIds: number[];
+	coarseHydrationDocIds: number[];
+	localWindowDocIds: number[];
+	finalTopDocIds: number[];
+	docs: CoverageLexicalBenchmarkOffloadDocDebug[];
+};
 
 type QueryOutcome = {
 	query: string;
@@ -136,6 +171,7 @@ type QueryOutcome = {
 	hitTop5: boolean;
 	rank: number;
 	results: string[];
+	offloadDebug?: CoverageLexicalBenchmarkOffloadSearchDebug | null;
 };
 
 type RecallContractType =
@@ -180,6 +216,9 @@ type EngineLike = {
 	getIndexBreakdown?(): Record<string, unknown> | null;
 	resetBenchmarkPhaseTiming?(): void;
 	getBenchmarkPhaseTimingSummary?(): PhaseTimingSummary | null;
+	getLastBenchmarkOffloadSearchDebug?():
+		| CoverageLexicalBenchmarkOffloadSearchDebug
+		| null;
 };
 
 const QUERY_TYPES: readonly QueryType[] = [
@@ -2192,6 +2231,9 @@ async function runBenchmark(
 	engine: EngineLike,
 	documents: IndexedDocument[],
 	queryCases: QueryCase[],
+	options: {
+		includeOffloadDiagnostics?: boolean;
+	} = {},
 ): Promise<{
 	summary: BenchmarkSummary;
 	outcomes: QueryOutcome[];
@@ -2261,6 +2303,9 @@ async function runBenchmark(
 			hitTop5,
 			rank,
 			results: paths.slice(0, 5),
+			offloadDebug: options.includeOffloadDiagnostics
+				? (engine.getLastBenchmarkOffloadSearchDebug?.() ?? null)
+				: undefined,
 		});
 	}
 
@@ -2924,6 +2969,110 @@ function summarizeMisses(outcomes: QueryOutcome[], limit = 10): Array<{
 		}));
 }
 
+function summarizeOffloadDiagnostics(
+	outcomes: QueryOutcome[],
+	limit = 12,
+): Array<{
+	query: string;
+	type: QueryType;
+	relevantPath: string;
+	rank: number;
+	top5: string[];
+	offload: {
+		candidateCount: number;
+		stagedHydration: boolean;
+		relevantDoc: CoverageLexicalBenchmarkOffloadDocDebug | null;
+		hydratedDocCount: number;
+		localWindowDocCount: number;
+		unresolvedDocCount: number;
+		cheapCoarseTopPaths: string[];
+		finalTopPaths: string[];
+	};
+}> {
+	return outcomes
+		.map((outcome) => {
+			const debug = outcome.offloadDebug;
+			if (!debug) {
+				return null;
+			}
+			const relevantDoc =
+				debug.docs.find((doc) => doc.path === outcome.relevantPath) ?? null;
+			const unresolvedDocCount = debug.docs.filter(
+				(doc) =>
+					doc.unresolvedBodyEvidence.needsPassageSignal ||
+					doc.unresolvedBodyEvidence.hasUnverifiedPhraseWitness ||
+					doc.unresolvedBodyEvidence.hasUnresolvedPrefixSurface ||
+					doc.unresolvedBodyEvidence.hasUnresolvedBodyCharVerification ||
+					doc.unresolvedBodyEvidence.unresolvedFamilyCount > 0 ||
+					doc.unresolvedBodyEvidence.unresolvedWeightUpperBound > 0,
+			).length;
+			const shouldInclude =
+				outcome.rank !== 1 ||
+				(relevantDoc !== null &&
+					(relevantDoc.unresolvedBodyEvidence.needsPassageSignal ||
+						relevantDoc.unresolvedBodyEvidence.hasUnverifiedPhraseWitness ||
+						relevantDoc.unresolvedBodyEvidence.hasUnresolvedPrefixSurface ||
+						relevantDoc.unresolvedBodyEvidence.hasUnresolvedBodyCharVerification ||
+						!relevantDoc.hydratedAtCoarse));
+			if (!shouldInclude) {
+				return null;
+			}
+			const docPathById = new Map(
+				debug.docs
+					.filter((doc) => doc.path !== null)
+					.map((doc) => [doc.docId, doc.path!] as const),
+			);
+			return {
+				query: outcome.query,
+				type: outcome.type,
+				relevantPath: outcome.relevantPath,
+				rank: outcome.rank,
+				top5: outcome.results,
+				offload: {
+					candidateCount: debug.candidateCount,
+					stagedHydration: debug.stagedHydration,
+					relevantDoc,
+					hydratedDocCount: debug.coarseHydrationDocIds.length,
+					localWindowDocCount: debug.localWindowDocIds.length,
+					unresolvedDocCount,
+					cheapCoarseTopPaths: debug.cheapCoarseTopDocIds
+						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
+						.slice(0, 5),
+					finalTopPaths: debug.finalTopDocIds
+						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
+						.slice(0, 5),
+				},
+			};
+		})
+		.filter(
+			(item): item is {
+				query: string;
+				type: QueryType;
+				relevantPath: string;
+				rank: number;
+				top5: string[];
+				offload: {
+					candidateCount: number;
+					stagedHydration: boolean;
+					relevantDoc: CoverageLexicalBenchmarkOffloadDocDebug | null;
+					hydratedDocCount: number;
+					localWindowDocCount: number;
+					unresolvedDocCount: number;
+					cheapCoarseTopPaths: string[];
+					finalTopPaths: string[];
+				};
+			} => item !== null,
+		)
+		.sort((left, right) => {
+			const leftRank = left.rank === 0 ? Number.POSITIVE_INFINITY : left.rank;
+			const rightRank = right.rank === 0 ? Number.POSITIVE_INFINITY : right.rank;
+			return rightRank === leftRank
+				? left.query.localeCompare(right.query)
+				: rightRank - leftRank;
+		})
+		.slice(0, limit);
+}
+
 function summarizeDisagreements(
 	leftOutcomes: QueryOutcome[],
 	rightOutcomes: QueryOutcome[],
@@ -3072,6 +3221,7 @@ const COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES: readonly CoverageLexicalBench
 		"timing",
 		"recall",
 		"lane-study",
+		"offload",
 		"wins",
 		"disagreements",
 		"misses",
@@ -3148,6 +3298,8 @@ describe("coverage lexical automation benchmark", () => {
 	test("compare coverage lexical against minisearch on automation corpus", async () => {
 		const benchmarkStartedAt = performance.now();
 		const diagnostics = resolveCoverageLexicalBenchmarkDiagnostics();
+		const includeOffloadDiagnostics =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "offload");
 		const tokenizer = createMockTokenizer();
 		const { documents, queryCases } = createAutomationCorpus();
 		const languageMix = computeLanguageMix(documents);
@@ -3161,7 +3313,13 @@ describe("coverage lexical automation benchmark", () => {
 		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
 
 		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
-		const miniResult = await runBenchmark("MiniSearch", mini, documents, queryCases);
+		const miniResult = await runBenchmark(
+			"MiniSearch",
+			mini,
+			documents,
+			queryCases,
+			{ includeOffloadDiagnostics: false },
+		);
 
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -3216,6 +3374,7 @@ describe("coverage lexical automation benchmark", () => {
 							coverageLexicalCore,
 							documents,
 							queryCases,
+							{ includeOffloadDiagnostics },
 						),
 				),
 		);
@@ -3295,6 +3454,7 @@ describe("coverage lexical automation benchmark", () => {
 							coverageLexicalDisplay,
 							documents,
 							queryCases,
+							{ includeOffloadDiagnostics },
 						),
 				),
 		);
@@ -3698,6 +3858,24 @@ describe("coverage lexical automation benchmark", () => {
 				JSON.stringify(miniMisses, null, 2),
 			);
 		}
+		if (includeOffloadDiagnostics) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] offload-diagnostics-core",
+				JSON.stringify(
+					summarizeOffloadDiagnostics(coverageCoreResult.outcomes),
+					null,
+					2,
+				),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] offload-diagnostics-display",
+				JSON.stringify(
+					summarizeOffloadDiagnostics(coverageDisplayResult.outcomes),
+					null,
+					2,
+				),
+			);
+		}
 
 		expect(documents.length).toBeGreaterThanOrEqual(70);
 		expect(queryCases.length).toBeGreaterThanOrEqual(145);
@@ -3716,4 +3894,3 @@ describe("coverage lexical automation benchmark", () => {
 	});
 });
 }
-

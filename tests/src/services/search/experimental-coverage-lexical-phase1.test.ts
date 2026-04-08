@@ -57,6 +57,149 @@ function normalize(text: string): string {
 	return text.toLowerCase().normalize("NFKC");
 }
 
+function createEmptyExperimentalCandidateState() {
+	return {
+		bodyMatches: [],
+		bodyCharMatchIndices: [],
+		bodyCharMatchFlags: [],
+		bodyPrefixWitness: null,
+		metadataMatches: [],
+		metadataAssistFieldMatches: {
+			aliases: [],
+			basename: [],
+			folder: [],
+			headings: [],
+			tags: [],
+		},
+		metadataCharMatchIndices: [],
+		metadataCharMatchFlags: [],
+		metadataFieldMatches: {
+			aliases: [],
+			basename: [],
+			folder: [],
+			headings: [],
+			tags: [],
+		},
+		metadataPrefixWitness: null,
+		phraseMatches: [],
+		phraseMatchFlags: [],
+		unresolvedBodyPhraseMatchIndices: [],
+		tagCharMatchIndices: [],
+		tagCharMatchFlags: [],
+		tagExactMatchIndices: [],
+		tagExactMatchFlags: [],
+		unresolvedBodyEvidence: {
+			needsPassageSignal: false,
+			hasUnverifiedPhraseWitness: false,
+			hasUnresolvedPrefixSurface: false,
+			hasUnresolvedBodyCharVerification: false,
+			unresolvedFamilyCount: 0,
+			unresolvedWeightUpperBound: 0,
+		},
+	};
+}
+
+function createEmptyExperimentalAreaSignal() {
+	return {
+		coverageCount: 0,
+		exactWeight: 0,
+		prefixWeight: 0,
+		fuzzyWeight: 0,
+	};
+}
+
+function createEmptyExperimentalCharSignal() {
+	return {
+		matchCount: 0,
+		matchRatio: 0,
+		exactSegmentCount: 0,
+		fullSegmentCount: 0,
+		bestSegmentCoverageCount: 0,
+		bestSegmentCoverageRatio: 0,
+	};
+}
+
+function createEmptyExperimentalWindowSignal() {
+	return {
+		exactWeight: 0,
+		prefixWeight: 0,
+		fuzzyWeight: 0,
+		anchorCoverageCount: 0,
+		softCoverageCount: 0,
+		phraseMatchCount: 0,
+		phraseMatchWeight: 0,
+		compactnessScore: 0,
+	};
+}
+
+function createExperimentalCoverageSignal(totalMatchedFamilyCount: number) {
+	return {
+		familyCountSummary: {
+			totalMatchedFamilyCount,
+			metadataMatchedFamilyCount: totalMatchedFamilyCount,
+			bodyMatchedFamilyCount: 0,
+			basenameMatchedFamilyCount: 0,
+			aliasesMatchedFamilyCount: 0,
+			folderMatchedFamilyCount: 0,
+			headingsMatchedFamilyCount: 0,
+			tagsMatchedFamilyCount: 0,
+		},
+		coreBody: createEmptyExperimentalAreaSignal(),
+		softBody: createEmptyExperimentalAreaSignal(),
+		metadataAnchor: createEmptyExperimentalAreaSignal(),
+		metadataPrefixAssist: createEmptyExperimentalAreaSignal(),
+		metadataIdentity: {
+			phraseCoverageCount: 0,
+			phraseWeight: 0,
+			overall: createEmptyExperimentalAreaSignal(),
+			alias: createEmptyExperimentalAreaSignal(),
+			basename: createEmptyExperimentalAreaSignal(),
+			heading: createEmptyExperimentalAreaSignal(),
+			path: createEmptyExperimentalAreaSignal(),
+			tag: createEmptyExperimentalAreaSignal(),
+		},
+		bodyPrefixWitness: null,
+		metadataPrefixWitness: null,
+		bodyChar: createEmptyExperimentalCharSignal(),
+		metadataChar: createEmptyExperimentalCharSignal(),
+		tagSignal: {
+			exactMatchCount: 0,
+			charMatchCount: 0,
+			charMatchRatio: 0,
+		},
+		tailCoreWeight: 0,
+		tailSoftWeight: 0,
+		phraseBridgeCount: 0,
+		phraseBridgeWeight: 0,
+		localEvidence: {
+			primary: createEmptyExperimentalWindowSignal(),
+			support: createEmptyExperimentalWindowSignal(),
+			supportWindowCount: 0,
+			corroboratedCoreCoverageCount: 0,
+			corroboratedExactCoreWeight: 0,
+			corroboratedPrefixCoreWeight: 0,
+			corroboratedFuzzyCoreWeight: 0,
+			corroboratedAnchorCoverageCount: 0,
+			corroboratedSoftCoverageCount: 0,
+		},
+		matchedTerms: [],
+	};
+}
+
+function createEmptyExperimentalAdmissionSignal() {
+	return {
+		coreCoverageCount: 0,
+		exactWeight: 0,
+		prefixWeight: 0,
+		fuzzyWeight: 0,
+		anchorCoverageCount: 0,
+		softCoverageCount: 0,
+		phraseMatchCount: 0,
+		phraseMatchWeight: 0,
+		compactnessScore: 0,
+	};
+}
+
 async function withExperimentalBodyTokenOffloadEnv<T>(
 	enabled: boolean | undefined,
 	action: () => Promise<T>,
@@ -692,5 +835,95 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			(((engine as any).documentById as Array<Record<string, unknown> | undefined>)[0] ??
 				{}).headingsText,
 		).toBe("packed metadata heading");
+	});
+
+	test("coarse hydration treats unresolved body evidence as upgrade potential", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "metadata_only_anchored",
+			route: "metadata-first",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 30 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 30 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(30 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(24);
+		expect(unresolvedState).toBeDefined();
+		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 2;
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(24)).toBe(true);
+		expect(hydratedDocIds.has(25)).toBe(false);
+	});
+
+	test("coarse hydration grants a bounded tail budget to unresolved body evidence", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "metadata_only_anchored",
+			route: "metadata-first",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 60 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 60 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(60 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(55);
+		expect(unresolvedState).toBeDefined();
+		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 2;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 3;
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(55)).toBe(true);
+		expect(hydratedDocIds.size).toBeLessThan(40);
 	});
 });

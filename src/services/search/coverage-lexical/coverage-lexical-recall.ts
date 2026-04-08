@@ -196,6 +196,8 @@ type CoverageLexicalMetadataPhraseSurface = {
 type CoverageLexicalBodyPhraseWitnessCandidate = {
 	key: CoverageLexicalCandidateKey;
 	verified: boolean;
+	unresolvedFamilyCount: number;
+	unresolvedWeightUpperBound: number;
 };
 
 type CoverageLexicalGroupSignal = {
@@ -340,6 +342,71 @@ function maybeRecordBetterPrefixWitness(
 		return next;
 	}
 	return comparePrefixWitnesses(next, current) > 0 ? next : current;
+}
+
+function createEmptyUnresolvedBodyEvidence(): CoverageLexicalCandidateState["unresolvedBodyEvidence"] {
+	return {
+		needsPassageSignal: false,
+		hasUnverifiedPhraseWitness: false,
+		hasUnresolvedPrefixSurface: false,
+		hasUnresolvedBodyCharVerification: false,
+		unresolvedFamilyCount: 0,
+		unresolvedWeightUpperBound: 0,
+	};
+}
+
+function recordUnresolvedBodyEvidence(
+	state: CoverageLexicalCandidateState,
+	options: {
+		needsPassageSignal?: boolean;
+		hasUnverifiedPhraseWitness?: boolean;
+		hasUnresolvedPrefixSurface?: boolean;
+		hasUnresolvedBodyCharVerification?: boolean;
+		unresolvedFamilyCount?: number;
+		unresolvedWeightUpperBound?: number;
+	},
+): void {
+	if (options.needsPassageSignal) {
+		state.unresolvedBodyEvidence.needsPassageSignal = true;
+	}
+	if (options.hasUnverifiedPhraseWitness) {
+		state.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
+	}
+	if (options.hasUnresolvedPrefixSurface) {
+		state.unresolvedBodyEvidence.hasUnresolvedPrefixSurface = true;
+	}
+	if (options.hasUnresolvedBodyCharVerification) {
+		state.unresolvedBodyEvidence.hasUnresolvedBodyCharVerification = true;
+	}
+	state.unresolvedBodyEvidence.unresolvedFamilyCount +=
+		options.unresolvedFamilyCount ?? 0;
+	state.unresolvedBodyEvidence.unresolvedWeightUpperBound = Math.max(
+		state.unresolvedBodyEvidence.unresolvedWeightUpperBound,
+		options.unresolvedWeightUpperBound ?? 0,
+	);
+}
+
+function mergeUnresolvedBodyEvidence(
+	target: CoverageLexicalCandidateState["unresolvedBodyEvidence"],
+	next: CoverageLexicalCandidateState["unresolvedBodyEvidence"],
+): void {
+	target.needsPassageSignal =
+		target.needsPassageSignal || next.needsPassageSignal;
+	target.hasUnverifiedPhraseWitness =
+		target.hasUnverifiedPhraseWitness || next.hasUnverifiedPhraseWitness;
+	target.hasUnresolvedPrefixSurface =
+		target.hasUnresolvedPrefixSurface || next.hasUnresolvedPrefixSurface;
+	target.hasUnresolvedBodyCharVerification =
+		target.hasUnresolvedBodyCharVerification ||
+		next.hasUnresolvedBodyCharVerification;
+	target.unresolvedFamilyCount = Math.max(
+		target.unresolvedFamilyCount,
+		next.unresolvedFamilyCount,
+	);
+	target.unresolvedWeightUpperBound = Math.max(
+		target.unresolvedWeightUpperBound,
+		next.unresolvedWeightUpperBound,
+	);
 }
 
 type CoverageLexicalCheapLaneCandidate = {
@@ -1798,6 +1865,27 @@ function buildLaneEvaluation(
 				},
 			)
 		: createEmptyPassageAdmissionSignal(phraseMatchCount, phraseMatchWeight);
+	if (
+		!options.includePassageSignal &&
+		(signal.decisiveBody.coverageCount > 0 ||
+			signal.supportBody.coverageCount > 0 ||
+			signal.optionalBody.coverageCount > 0 ||
+			phraseMatchCount > 0)
+	) {
+		recordUnresolvedBodyEvidence(state, {
+			needsPassageSignal: true,
+			unresolvedFamilyCount:
+				signal.decisiveBody.coverageCount +
+				signal.supportBody.coverageCount +
+				signal.optionalBody.coverageCount +
+				phraseMatchCount,
+			unresolvedWeightUpperBound:
+				signal.decisiveBody.tailWeight +
+				signal.supportBody.tailWeight +
+				signal.optionalBody.tailWeight +
+				phraseMatchWeight,
+		});
+	}
 	return {
 		key,
 		state,
@@ -2519,6 +2607,16 @@ function collectCandidatesForTerm(
 							surfaceText,
 						),
 					);
+					if (!bodyTokens) {
+						recordUnresolvedBodyEvidence(state, {
+							hasUnresolvedPrefixSurface: true,
+							unresolvedFamilyCount: 1,
+							unresolvedWeightUpperBound: Math.max(
+								prefixWitnessCandidate.score,
+								prefixWitnessCandidate.completionGain,
+							),
+						});
+					}
 				}
 			});
 		}
@@ -2596,6 +2694,14 @@ function collectBodyPhraseWitnessMatches(
 	)) {
 		const state = getOrCreateDocIdCandidateState(candidates, match.key);
 		if (!match.verified) {
+			if (!state.unresolvedBodyPhraseMatchIndices.includes(signature.index)) {
+				state.unresolvedBodyPhraseMatchIndices.push(signature.index);
+			}
+			recordUnresolvedBodyEvidence(state, {
+				hasUnverifiedPhraseWitness: true,
+				unresolvedFamilyCount: match.unresolvedFamilyCount,
+				unresolvedWeightUpperBound: match.unresolvedWeightUpperBound,
+			});
 			continue;
 		}
 		recordPhraseMatch(state, signature.index);
@@ -2653,12 +2759,22 @@ function getOrCreateBodyPhraseWitnessCandidateKeys(
 		const bodyTokens = index.getDocumentBodyTokens(key);
 		if (bodyTokens) {
 			if (hasContiguousPhraseWitness(bodyTokens, canonicalTokens)) {
-				matchedKeys.push({ key, verified: true });
+				matchedKeys.push({
+					key,
+					verified: true,
+					unresolvedFamilyCount: 0,
+					unresolvedWeightUpperBound: 0,
+				});
 			}
 			return;
 		}
 		if (bodyPhraseWitnessHasAllCanonicalTokens(index, key, canonicalTokenPostings)) {
-			matchedKeys.push({ key, verified: false });
+			matchedKeys.push({
+				key,
+				verified: false,
+				unresolvedFamilyCount: signature.familyIndices.length,
+				unresolvedWeightUpperBound: signature.tailWeight,
+			});
 		}
 	});
 	queryCache.bodyPhraseWitnessCandidateKeysBySignatureKey.set(
@@ -2689,7 +2805,7 @@ function bodyPhraseWitnessHasAllCanonicalTokens(
 	return true;
 }
 
-function getPhraseWitnessCanonicalTokens(
+export function getPhraseWitnessCanonicalTokens(
 	signature: CoverageLexicalPhraseSignature,
 ): readonly string[] {
 	const canonicalVariant =
@@ -2702,7 +2818,7 @@ function getPhraseWitnessCanonicalTokens(
 		.filter((token) => token.length > 0);
 }
 
-function hasContiguousPhraseWitness(
+export function hasContiguousPhraseWitness(
 	tokens: readonly string[],
 	phraseTokens: readonly string[],
 ): boolean {
@@ -3267,6 +3383,15 @@ function mergeCandidateState(
 			termIndex,
 		);
 	}
+	for (const phraseIndex of nextState.unresolvedBodyPhraseMatchIndices) {
+		if (!target.unresolvedBodyPhraseMatchIndices.includes(phraseIndex)) {
+			target.unresolvedBodyPhraseMatchIndices.push(phraseIndex);
+		}
+	}
+	mergeUnresolvedBodyEvidence(
+		target.unresolvedBodyEvidence,
+		nextState.unresolvedBodyEvidence,
+	);
 }
 
 function collectAnyMetadataPhraseMatches(
@@ -3321,10 +3446,12 @@ function createEmptyCandidateState(): CoverageLexicalCandidateState {
 		metadataPrefixWitness: null,
 		phraseMatches: [],
 		phraseMatchFlags: [],
+		unresolvedBodyPhraseMatchIndices: [],
 		tagCharMatchIndices: [],
 		tagCharMatchFlags: [],
 		tagExactMatchIndices: [],
 		tagExactMatchFlags: [],
+		unresolvedBodyEvidence: createEmptyUnresolvedBodyEvidence(),
 	};
 }
 
@@ -3350,10 +3477,16 @@ function cloneCandidateState(
 			: null,
 		phraseMatches: [...state.phraseMatches],
 		phraseMatchFlags: [...state.phraseMatchFlags],
+		unresolvedBodyPhraseMatchIndices: [
+			...state.unresolvedBodyPhraseMatchIndices,
+		],
 		tagCharMatchIndices: [...state.tagCharMatchIndices],
 		tagCharMatchFlags: [...state.tagCharMatchFlags],
 		tagExactMatchIndices: [...state.tagExactMatchIndices],
 		tagExactMatchFlags: [...state.tagExactMatchFlags],
+		unresolvedBodyEvidence: {
+			...state.unresolvedBodyEvidence,
+		},
 	};
 }
 
@@ -3960,7 +4093,7 @@ function findBestMetadataPrefixSurfaceText(
 	return bestToken;
 }
 
-function findBestBodyPrefixSurfaceText(
+export function findBestBodyPrefixSurfaceText(
 	bodyTokens: readonly string[],
 	prefix: string,
 	term: string,
@@ -3995,6 +4128,57 @@ function findBestBodyPrefixSurfaceText(
 		}
 	}
 	return bestToken;
+}
+
+export function resolveHydratedCoverageLexicalCandidateState(
+	state: CoverageLexicalCandidateState,
+	bodyTokens: readonly string[],
+	phraseSignatures: readonly CoverageLexicalPhraseSignature[],
+): CoverageLexicalCandidateState {
+	const resolved = cloneCandidateState(state);
+	if (
+		resolved.unresolvedBodyEvidence.hasUnresolvedPrefixSurface &&
+		resolved.bodyPrefixWitness
+	) {
+		const resolvedSurfaceText = findBestBodyPrefixSurfaceText(
+			bodyTokens,
+			resolved.bodyPrefixWitness.term,
+			resolved.bodyPrefixWitness.term,
+		);
+		if (resolvedSurfaceText) {
+			resolved.bodyPrefixWitness = {
+				...resolved.bodyPrefixWitness,
+				surfaceText: resolvedSurfaceText,
+			};
+			resolved.unresolvedBodyEvidence.hasUnresolvedPrefixSurface = false;
+		}
+	}
+	if (resolved.unresolvedBodyPhraseMatchIndices.length > 0) {
+		const remainingPhraseIndices: number[] = [];
+		for (const phraseIndex of resolved.unresolvedBodyPhraseMatchIndices) {
+			if (resolved.phraseMatches.includes(phraseIndex)) {
+				continue;
+			}
+			const signature = phraseSignatures[phraseIndex];
+			if (!signature) {
+				remainingPhraseIndices.push(phraseIndex);
+				continue;
+			}
+			const canonicalTokens = getPhraseWitnessCanonicalTokens(signature);
+			if (!hasContiguousPhraseWitness(bodyTokens, canonicalTokens)) {
+				remainingPhraseIndices.push(phraseIndex);
+				continue;
+			}
+			recordPhraseMatch(resolved, phraseIndex);
+			for (const familyIndex of signature.familyIndices) {
+				recordFamilyMatch(resolved.bodyMatches, familyIndex, "prefix");
+			}
+		}
+		resolved.unresolvedBodyPhraseMatchIndices = remainingPhraseIndices;
+		resolved.unresolvedBodyEvidence.hasUnverifiedPhraseWitness =
+			remainingPhraseIndices.length > 0;
+	}
+	return resolved;
 }
 
 function computePrefixRarityScore(targetDocCount: number): number {

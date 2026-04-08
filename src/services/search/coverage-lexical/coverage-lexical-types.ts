@@ -52,6 +52,15 @@ export type CoverageLexicalPrefixWitness = {
 	totalDocCount: number;
 };
 
+export type CoverageLexicalUnresolvedBodyEvidence = {
+	needsPassageSignal: boolean;
+	hasUnverifiedPhraseWitness: boolean;
+	hasUnresolvedPrefixSurface: boolean;
+	hasUnresolvedBodyCharVerification: boolean;
+	unresolvedFamilyCount: number;
+	unresolvedWeightUpperBound: number;
+};
+
 export type CoverageLexicalCandidateState = {
 	bodyMatches: number[];
 	bodyCharMatchIndices: number[];
@@ -71,10 +80,12 @@ export type CoverageLexicalCandidateState = {
 	metadataPrefixWitness: CoverageLexicalPrefixWitness | null;
 	phraseMatches: number[];
 	phraseMatchFlags: number[];
+	unresolvedBodyPhraseMatchIndices: number[];
 	tagCharMatchIndices: number[];
 	tagCharMatchFlags: number[];
 	tagExactMatchIndices: number[];
 	tagExactMatchFlags: number[];
+	unresolvedBodyEvidence: CoverageLexicalUnresolvedBodyEvidence;
 };
 
 export type CoverageLexicalRecallLaneDebug = {
