@@ -418,6 +418,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	>();
 	private readonly offloadedBodyTokenArenaId =
 		CoverageLexicalFileSearchEngine.nextOffloadedBodyTokenArenaId++;
+	private offloadedBodyTokenColdSourceAvailable = true;
 	private offloadedBodyTokenColdTapePath: string | null = null;
 	private offloadedBodyTokenColdTapeFd: number | null = null;
 	private readonly offloadedBodyTokenColdRangeById: Array<
@@ -628,6 +629,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentBodyHanSegmentsById.length = 0;
 		this.documentTagValuesById.length = 0;
 		this.offloadedBodyTokenHotCacheByDocId.clear();
+		this.offloadedBodyTokenColdSourceAvailable = true;
 		this.fileSnapshotStore = undefined;
 		this.nextDocumentId = 0;
 		this.clearLivePostingMaps();
@@ -828,10 +830,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.offloadedBodyTokenColdRangeById.push(...rangesById);
 			return true;
 		} catch (error) {
-			logger.warn(
-				`coverage-lexical body token offload disabled for this session because cold tape initialization failed at ${COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR}`,
-				error,
-			);
+			void error;
+			this.offloadedBodyTokenColdSourceAvailable = false;
 			this.clearOffloadedColdBodyTokenSource();
 			return false;
 		}
@@ -953,6 +953,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private shouldExperimentallyOffloadResidentBodyTokens(): boolean {
 		return (
+			this.offloadedBodyTokenColdSourceAvailable &&
 			isCoverageLexicalExperimentalBodyTokenOffloadEnabled() &&
 			this.getFileSnapshotStore() !== null
 		);
@@ -2365,7 +2366,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			const hasBodyUpgradePotential =
 				state.phraseMatches.length > 0 ||
 				state.bodyPrefixWitness !== null ||
-				state.bodyCharMatchIndices.length > 0;
+				state.bodyCharMatchIndices.length > 0 ||
+				hasUnresolvedCoverageLexicalBodyUpgradePotential(state);
 			if (tiesWithCutoff || hasBodyUpgradePotential) {
 				hydratedDocIds.add(candidate.docId);
 			}
@@ -2413,6 +2415,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		);
 	}
 
+}
+
+function hasUnresolvedCoverageLexicalBodyUpgradePotential(
+	state: CoverageLexicalCandidateState,
+): boolean {
+	const unresolved = state.unresolvedBodyEvidence;
+	return (
+		unresolved.needsPassageSignal ||
+		unresolved.hasUnverifiedPhraseWitness ||
+		unresolved.hasUnresolvedPrefixSurface ||
+		unresolved.hasUnresolvedBodyCharVerification ||
+		unresolved.unresolvedFamilyCount > 0 ||
+		unresolved.unresolvedWeightUpperBound > 0
+	);
 }
 
 function buildCoverageSignalBase(
