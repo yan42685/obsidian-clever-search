@@ -471,25 +471,30 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
-	private readonly metadataAliasPostings = new Map<string, Uint32Array>();
+	private readonly metadataAliasPostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataBasenameCharPostings = new Map<string, number[]>();
 	private readonly metadataBasenamePhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
-	private readonly metadataBasenamePostings = new Map<string, Uint32Array>();
+	private readonly metadataBasenamePostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataFolderCharPostings = new Map<string, number[]>();
 	private readonly metadataFolderPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
-	private readonly metadataFolderPostings = new Map<string, Uint32Array>();
+	private readonly metadataFolderPostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataHeadingCharPostings = new Map<string, number[]>();
 	private readonly metadataHeadingPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataHeadingPostings =
 		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataTagCharPostings = new Map<string, number[]>();
-	private readonly metadataTagFullPostings = new Map<string, Uint32Array>();
+	private readonly metadataTagFullPostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly metadataTagPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
-	private readonly metadataTagPostings = new Map<string, Uint32Array>();
+	private readonly metadataTagPostings =
+		new CoverageLexicalSharedStringPostingMap();
 	private readonly lexicon = new Set<string>();
 	private sortedLexiconCache: string[] = [];
 	private sortedLexiconDirty = false;
