@@ -244,7 +244,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 				metadataFolderCharPostings: (engine as any).metadataFolderCharPostings,
 				metadataFolderPhrasePostings: (engine as any).metadataFolderPhrasePostings,
 				metadataFolderPostings: (engine as any).metadataFolderPostings,
-				metadataHeadingCharPostings: (engine as any).metadataHeadingCharPostings,
 				metadataHeadingPhrasePostings: (engine as any).metadataHeadingPhrasePostings,
 				metadataHeadingPostings: (engine as any).metadataHeadingPostings,
 				metadataTagCharPostings: (engine as any).metadataTagCharPostings,

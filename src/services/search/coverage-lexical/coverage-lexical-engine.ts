@@ -107,7 +107,7 @@ const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR = join(
 );
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
-	return process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV] !== "0";
+	return process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV] === "1";
 }
 
 type CoverageLexicalDocument = {
