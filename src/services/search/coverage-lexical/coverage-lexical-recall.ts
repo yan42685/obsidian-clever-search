@@ -780,14 +780,18 @@ function shouldRunRelaxedHybridLane(
 		CoverageLexicalCandidateState
 	>,
 ): boolean {
-	if (plan.queryKind === "memory_relaxed") {
-		return true;
-	}
-	if (hasMeaningfulHybridPotential(plan)) {
-		if (admittedKeys.size >= 18) {
+	const activationPressure = computeRelaxedHybridActivationPressure(plan);
+	if (activationPressure >= 0.95) {
+		if (admittedKeys.size >= 20) {
 			return false;
 		}
-		return aggregateCandidates.size < 36;
+		return aggregateCandidates.size < 40;
+	}
+	if (activationPressure >= 0.55) {
+		if (admittedKeys.size >= 16) {
+			return false;
+		}
+		return aggregateCandidates.size < 32;
 	}
 	if (admittedKeys.size >= 12) {
 		return false;
@@ -803,18 +807,18 @@ function shouldRunLocalBodyLane(
 		CoverageLexicalCandidateState
 	>,
 ): boolean {
-	if (
-		plan.queryKind === "body_only_local" ||
-		plan.queryKind === "memory_relaxed" ||
-		plan.queryKind === "bridge_dependent"
-	) {
-		return true;
-	}
-	if (hasMeaningfulBodyPotential(plan)) {
-		if (admittedKeys.size >= 20) {
+	const activationPressure = computeLocalBodyActivationPressure(plan);
+	if (activationPressure >= 0.95) {
+		if (admittedKeys.size >= 22) {
 			return false;
 		}
-		return aggregateCandidates.size < 40;
+		return aggregateCandidates.size < 44;
+	}
+	if (activationPressure >= 0.55) {
+		if (admittedKeys.size >= 18) {
+			return false;
+		}
+		return aggregateCandidates.size < 36;
 	}
 	if (admittedKeys.size >= 16) {
 		return false;
@@ -1412,7 +1416,7 @@ function computeLaneSoftBias(
 					Math.min(3, decisiveAnchorMass * 3) +
 						Math.min(2, anchorMass) +
 						(plan.hardAnchorFamilies.length > 0 ? 1 : 0) +
-						(plan.queryKind === "metadata_only_anchored" ? 2 : 0) +
+						(plan.queryKind === "metadata_only_anchored" ? 1 : 0) +
 						(plan.route === "metadata-first" ? 1 : 0),
 				),
 			);
@@ -1421,7 +1425,7 @@ function computeLaneSoftBias(
 				Math.round(
 					Math.min(3, hybridMass * 3) +
 						Math.min(2, decisiveBodyMass * 3) +
-						(plan.queryKind === "anchor_body_hybrid" ? 2 : 0) +
+						(plan.queryKind === "anchor_body_hybrid" ? 1 : 0) +
 						(plan.route === "body-with-anchor" ? 1 : 0),
 				),
 			);
@@ -1431,7 +1435,7 @@ function computeLaneSoftBias(
 					Math.min(2, hybridMass * 2.5) +
 						Math.min(3, bodyMass * 2) +
 						Math.min(1, supportBodyMass * 2) +
-						(plan.queryKind === "memory_relaxed" ? 2 : 0) +
+						(plan.queryKind === "memory_relaxed" ? 1 : 0) +
 						(plan.queryKind === "anchor_body_hybrid" ? 1 : 0),
 				),
 			);
@@ -1439,7 +1443,7 @@ function computeLaneSoftBias(
 			return clampLaneBias(
 				Math.round(
 					Math.min(4, (decisiveBodyMass + supportBodyMass * 0.75) * 2) +
-						(plan.queryKind === "body_only_local" ? 2 : 0) +
+						(plan.queryKind === "body_only_local" ? 1 : 0) +
 						(plan.queryKind === "memory_relaxed" ? 1 : 0) +
 						(plan.route === "body-first" ? 1 : 0),
 				),
@@ -1448,7 +1452,7 @@ function computeLaneSoftBias(
 			return clampLaneBias(
 				Math.round(
 					Math.min(3, plan.bridgeFamilies.length) +
-						(plan.queryKind === "bridge_dependent" ? 3 : 0) +
+						(plan.queryKind === "bridge_dependent" ? 1 : 0) +
 						(plan.hasMixedScriptHint ? 1 : 0),
 				),
 			);
@@ -1492,6 +1496,48 @@ function hasMeaningfulBodyPotential(plan: CoverageLexicalPlan): boolean {
 		bodyMass >= 0.45 ||
 		decisiveBodyMass >= 0.35 ||
 		supportBodyMass >= 0.45
+	);
+}
+
+function computeRelaxedHybridActivationPressure(plan: CoverageLexicalPlan): number {
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	const optionalBodyFamilyCount = plan.optionalFamilies.filter(
+		(family) => family.role === "body",
+	).length;
+	return (
+		Math.min(anchorMass, bodyMass) * 1.15 +
+		supportBodyMass * 0.7 +
+		Math.min(0.45, optionalBodyFamilyCount * 0.18) +
+		(plan.queryKind === "memory_relaxed" ? 0.25 : 0) +
+		(plan.queryKind === "anchor_body_hybrid" ? 0.1 : 0)
+	);
+}
+
+function computeLocalBodyActivationPressure(plan: CoverageLexicalPlan): number {
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	const bridgePressure = Math.min(0.35, plan.bridgeFamilies.length * 0.12);
+	return (
+		bodyMass * 0.9 +
+		decisiveBodyMass * 0.9 +
+		supportBodyMass * 0.55 +
+		bridgePressure +
+		(plan.queryKind === "body_only_local" ? 0.2 : 0) +
+		(plan.queryKind === "memory_relaxed" ? 0.15 : 0) +
+		(plan.queryKind === "bridge_dependent" ? 0.15 : 0) +
+		(plan.route === "body-first" ? 0.1 : 0)
 	);
 }
 

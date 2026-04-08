@@ -48,6 +48,7 @@ type QueryType =
 	| "mixed_script_anchor"
 	| "zh_short_identity"
 	| "zh_short_body_vs_basename"
+	| "ambiguous_intent"
 	| "partial_memory";
 
 type QueryCase = {
@@ -242,6 +243,7 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"mixed_script_anchor",
 	"zh_short_identity",
 	"zh_short_body_vs_basename",
+	"ambiguous_intent",
 	"partial_memory",
 ];
 
@@ -983,6 +985,30 @@ export function createAutomationCorpus(): {
 		"pkm-zh/notes/别名迁移说明.md",
 		"zh_short_identity",
 		"messy_pkm",
+	);
+	addQuery(
+		"incident review warm start notes",
+		"pkm-en/incidents/incident-review.md",
+		"ambiguous_intent",
+		"adversarial",
+	);
+	addQuery(
+		"cache restore playbook note",
+		"pkm-en/projects/sdk/vector-cache.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"aliases note for old project names",
+		"pkm-en/notes/linking/aliases-deep-dive.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"\u7535\u5b50\u6280\u672f \u57fa\u7840\u7535\u8def \u7b14\u8bb0",
+		"pkm-zh/books/电子技术入门.md",
+		"ambiguous_intent",
+		"adversarial",
 	);
 
 	addQuery(
@@ -1824,6 +1850,7 @@ function queryDifficultyWeight(queryCase: QueryCase): number {
 		mixed_script_anchor: 80,
 		zh_short_identity: 82,
 		zh_short_body_vs_basename: 86,
+		ambiguous_intent: 88,
 		partial_memory: 90,
 	};
 	const suiteWeight: Record<BenchmarkSuite, number> = {
