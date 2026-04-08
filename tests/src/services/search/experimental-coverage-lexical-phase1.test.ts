@@ -534,6 +534,53 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		});
 	});
 
+	test("keeps resident body token tape when cold offload initialization fails", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const documents = [
+			{
+				path: "notes/offload-failure-target.md",
+				basename: "offload-failure-target",
+				folder: "notes",
+				content: "alpha beta gamma remains searchable after cold offload failure",
+			},
+		];
+
+		await withExperimentalBodyTokenOffloadEnv(undefined, async () => {
+			registerMockFileSnapshotStore(documents);
+			const engine = new CoverageLexicalFileSearchEngine();
+			(engine as any).writeOffloadedColdBodyTokenSource = jest.fn(() => false);
+
+			await engine.addDocuments(documents);
+
+			const docId = ((engine as any).documentIdByPath as Map<string, number>).get(
+				"notes/offload-failure-target.md",
+			);
+			expect(docId).toBeDefined();
+			expect((engine as any).hasResidentDocumentBodyTokens(docId)).toBe(true);
+
+			const results = await engine.searchFiles({
+				queryText: "alpha beta gamma",
+				isPrefixMatch: true,
+				isFuzzy: false,
+				maxItemResults: 5,
+			});
+			expect(results[0]?.path).toBe("notes/offload-failure-target.md");
+		});
+	});
+
 	test("offloaded coarse ranking hydrates only a bounded candidate subset", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",

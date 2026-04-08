@@ -808,23 +808,33 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private writeOffloadedColdBodyTokenSource(
 		tape: Uint8Array,
 		rangesById: readonly (CoverageLexicalTokenRange | undefined)[],
-	): void {
+	): boolean {
 		this.clearOffloadedColdBodyTokenSource();
 		if (tape.length === 0) {
-			return;
+			return true;
 		}
-		mkdirSync(COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR, {
-			recursive: true,
-		});
-		const coldTapePath = join(
-			COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR,
-			`coverage-lexical-body-token-cold-${process.pid}-${this.offloadedBodyTokenArenaId}.bin`,
-		);
-		writeFileSync(coldTapePath, tape);
-		this.offloadedBodyTokenColdTapeFd = openSync(coldTapePath, "r");
-		this.offloadedBodyTokenColdTapePath = coldTapePath;
-		this.offloadedBodyTokenColdRangeById.length = 0;
-		this.offloadedBodyTokenColdRangeById.push(...rangesById);
+		try {
+			mkdirSync(COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR, {
+				recursive: true,
+			});
+			const coldTapePath = join(
+				COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR,
+				`coverage-lexical-body-token-cold-${process.pid}-${this.offloadedBodyTokenArenaId}.bin`,
+			);
+			writeFileSync(coldTapePath, tape);
+			this.offloadedBodyTokenColdTapeFd = openSync(coldTapePath, "r");
+			this.offloadedBodyTokenColdTapePath = coldTapePath;
+			this.offloadedBodyTokenColdRangeById.length = 0;
+			this.offloadedBodyTokenColdRangeById.push(...rangesById);
+			return true;
+		} catch (error) {
+			logger.warn(
+				`coverage-lexical body token offload disabled for this session because cold tape initialization failed at ${COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR}`,
+				error,
+			);
+			this.clearOffloadedColdBodyTokenSource();
+			return false;
+		}
 	}
 
 	private restoreOffloadedColdBodyTokenSourceToResidentTape(): void {
@@ -997,10 +1007,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (this.documentBodyTokenIdTape.length === 0) {
 			return;
 		}
-		this.writeOffloadedColdBodyTokenSource(
+		const offloaded = this.writeOffloadedColdBodyTokenSource(
 			this.documentBodyTokenIdTape,
 			this.documentBodyTokenRangeById,
 		);
+		if (!offloaded) {
+			return;
+		}
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
 	}
