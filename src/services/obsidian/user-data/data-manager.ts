@@ -149,6 +149,7 @@ type DevStorageBreakdownRow = {
   segment: string;
   bytes: number;
   size: string;
+  shareOfStringPool?: string;
   shareOfLexical: string;
   shareOfVault: string;
 };
@@ -3921,26 +3922,40 @@ export class DataManager {
     const buildStringPoolRows = (
       entries: Record<string, unknown> | null | undefined,
     ): DevStorageBreakdownRow[] => {
-      if (!entries || totalBytes <= 0) {
+      const stringPoolBytes = this.readNumber(stringPool?.bytes) ?? 0;
+      if (!entries || totalBytes <= 0 || stringPoolBytes <= 0) {
         return [];
       }
-      return Object.entries(entries)
-        .map(([segment, value]) => {
-          const record = this.asRecord(value);
-          const bytes = this.readNumber(record?.bytes);
-          if (bytes === null || bytes <= 0) {
-            return null;
-          }
-          return {
-            segment,
-            bytes,
-            size: this.formatBytes(bytes),
-            shareOfLexical: this.formatPercent(bytes, totalBytes),
-            shareOfVault: this.formatPercent(bytes, indexableBytes),
-          };
-        })
-        .filter((row): row is DevStorageBreakdownRow => row !== null)
-        .sort((left, right) => right.bytes - left.bytes);
+      const rows: DevStorageBreakdownRow[] = [];
+      for (const [segment, value] of Object.entries(entries)) {
+        const record = this.asRecord(value);
+        const bytes = this.readNumber(record?.bytes);
+        if (bytes === null || bytes <= 0) {
+          continue;
+        }
+        rows.push({
+          segment,
+          bytes,
+          size: this.formatBytes(bytes),
+          shareOfStringPool: this.formatPercent(bytes, stringPoolBytes),
+          shareOfLexical: this.formatPercent(bytes, totalBytes),
+          shareOfVault: this.formatPercent(bytes, indexableBytes),
+        });
+      }
+      rows.sort((left, right) => right.bytes - left.bytes);
+      const accountedBytes = rows.reduce((sum, row) => sum + row.bytes, 0);
+      const remainderBytes = Math.max(0, stringPoolBytes - accountedBytes);
+      if (remainderBytes > 0) {
+        rows.push({
+          segment: "__unattributed__",
+          bytes: remainderBytes,
+          size: this.formatBytes(remainderBytes),
+          shareOfStringPool: this.formatPercent(remainderBytes, stringPoolBytes),
+          shareOfLexical: this.formatPercent(remainderBytes, totalBytes),
+          shareOfVault: this.formatPercent(remainderBytes, indexableBytes),
+        });
+      }
+      return rows.sort((left, right) => right.bytes - left.bytes);
     };
     const stringPoolGroupRows = buildStringPoolRows(
       this.asRecord(stringPool?.byGroup),

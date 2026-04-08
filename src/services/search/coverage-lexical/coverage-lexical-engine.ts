@@ -3766,48 +3766,70 @@ function buildStringPoolAttributionBreakdown(
 		}
 		return { bytes, uniqueStrings };
 	};
-	const byGroup = {
-		bodyExactTerms: summarizeSources(["postings.body.term"]),
-		metadataExactTerms: summarizeSources([
+	const groupedSources = {
+		documentBodyTokenLexicon: ["documentIdentity.bodyTokenLexicon"],
+		bodyExactTerms: ["postings.body.term"],
+		metadataExactTerms: [
 			"postings.metadataAlias.term",
 			"postings.metadataBasename.term",
 			"postings.metadataFolder.term",
 			"postings.metadataHeading.term",
 			"postings.metadataTag.term",
 			"postings.metadataTagFull.term",
-		]),
-		metadataPhraseTerms: summarizeSources([
+		],
+		metadataPhraseTerms: [
 			"postings.metadataAliasPhrase.term",
 			"postings.metadataBasenamePhrase.term",
 			"postings.metadataFolderPhrase.term",
 			"postings.metadataHeadingPhrase.term",
 			"postings.metadataTagPhrase.term",
-		]),
-		bodyCharTerms: summarizeSources(["postings.bodyChar.term"]),
-		metadataCharTerms: summarizeSources([
+		],
+		bodyCharTerms: ["postings.bodyChar.term"],
+		metadataCharTerms: [
 			"postings.metadataAliasChar.term",
 			"postings.metadataBasenameChar.term",
 			"postings.metadataFolderChar.term",
 			"postings.metadataHeadingChar.term",
 			"postings.metadataTagChar.term",
-		]),
-		documentText: summarizeSources([
+		],
+		documentText: [
 			"documents.basenameText",
 			"documents.folderText",
 			"documents.aliasesText",
 			"documents.tagsText",
 			"documents.headingsText",
-		]),
-		documentPaths: summarizeSources([
+		],
+		documentPaths: [
 			"documents.path",
 			"documentIdentity.pathToId.path",
 			"documentIdentity.idToPath.path",
-		]),
-		documentDerivedTokens: summarizeSources([
+		],
+		documentDerivedTokens: [
 			"documentIdentity.bodyHanSegments",
 			"documentIdentity.tagValues",
-		]),
-		lexicon: summarizeSources(["lexicon.term"]),
+		],
+		lexicon: ["lexicon.term"],
+	} satisfies Record<string, readonly string[]>;
+	const groupedSourceSet = new Set<string>(
+		Object.values(groupedSources).flatMap((sources) => [...sources]),
+	);
+	const otherSources = Array.from(accumulator.stringPoolBytesBySource.keys()).filter(
+		(source) => !groupedSourceSet.has(source),
+	);
+	const byGroup = {
+		documentBodyTokenLexicon: summarizeSources(
+			groupedSources.documentBodyTokenLexicon,
+		),
+		bodyExactTerms: summarizeSources(groupedSources.bodyExactTerms),
+		metadataExactTerms: summarizeSources(groupedSources.metadataExactTerms),
+		metadataPhraseTerms: summarizeSources(groupedSources.metadataPhraseTerms),
+		bodyCharTerms: summarizeSources(groupedSources.bodyCharTerms),
+		metadataCharTerms: summarizeSources(groupedSources.metadataCharTerms),
+		documentText: summarizeSources(groupedSources.documentText),
+		documentPaths: summarizeSources(groupedSources.documentPaths),
+		documentDerivedTokens: summarizeSources(groupedSources.documentDerivedTokens),
+		lexicon: summarizeSources(groupedSources.lexicon),
+		otherSources: summarizeSources(otherSources),
 	};
 	return {
 		bySource,
