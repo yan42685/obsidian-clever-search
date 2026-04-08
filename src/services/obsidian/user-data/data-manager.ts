@@ -2785,6 +2785,13 @@ export class DataManager {
     };
   }
 
+  async showDevStorageAndRuntimeStats(): Promise<void> {
+    if (!isDevEnvironment) {
+      return;
+    }
+    await this.noticeDevStorageStats();
+  }
+
   getLexicalAvailabilityState(): LexicalAvailabilityState {
     return buildLexicalAvailabilityState(this.lexicalBootstrapState);
   }

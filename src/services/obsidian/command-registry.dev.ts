@@ -73,6 +73,14 @@ export async function registerDevCommands(
 	});
 
 	context.addCommand({
+		id: "cs-dev-storage-runtime-stats",
+		name: "Show storage and runtime stats [dev]",
+		callback: async () => {
+			await getInstance(DataManager).showDevStorageAndRuntimeStats();
+		},
+	});
+
+	context.addCommand({
 		id: "cs-dev-search-bootstrap-summary",
 		name: "Show search bootstrap summary [dev]",
 		callback: () => {

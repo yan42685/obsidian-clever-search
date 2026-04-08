@@ -35,6 +35,7 @@ type CurrentFileEntry = {
 };
 
 export type FileSnapshotRuntimeMemoryEstimate = {
+	capacityBytes: number;
 	pathBytes: number;
 	currentTextBytes: number;
 	generationBytes: number;
@@ -57,11 +58,15 @@ const textEncoder = new TextEncoder();
 export class FileSnapshotStore {
 	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
 	private static readonly RUNTIME_REPORT_TOP_ENTRY_LIMIT = 5;
+	private static readonly CURRENT_TEXT_CACHE_CAPACITY_BYTES = 32 * 1024 * 1024;
 	private readonly vault = getInstance(Vault);
 	private readonly currentFilePathToSlot = new Map<string, number>();
+	private readonly currentFileLru = new Map<string, true>();
 	private readonly currentSlotTexts: Array<string | undefined> = [];
 	private readonly currentSlotGenerations: Array<number | undefined> = [];
+	private readonly currentSlotBytes: Array<number | undefined> = [];
 	private readonly freeCurrentSlots: number[] = [];
+	private currentRuntimeBytes = 0;
 
 	async readCurrentTexts(
 		fileOrPaths: ReadonlyArray<TFile | string>,
@@ -226,8 +231,9 @@ export class FileSnapshotStore {
 		if (!(file instanceof TFile)) {
 			return "";
 		}
-		const cachedText = this.getCurrentFileText(file.path);
-		const cachedGeneration = this.getCurrentFileGeneration(file.path);
+		const current = this.getCurrentFile(file.path);
+		const cachedText = current?.text;
+		const cachedGeneration = current?.generation;
 		if (
 			cachedText !== undefined &&
 			(cachedGeneration === undefined ||
@@ -258,8 +264,9 @@ export class FileSnapshotStore {
 		if (!(file instanceof TFile)) {
 			return "";
 		}
-		const cachedText = this.getCurrentFileText(file.path);
-		const cachedGeneration = this.getCurrentFileGeneration(file.path);
+		const current = this.getCurrentFile(file.path);
+		const cachedText = current?.text;
+		const cachedGeneration = current?.generation;
 		if (
 			cachedText !== undefined &&
 			(cachedGeneration === undefined ||
@@ -276,9 +283,12 @@ export class FileSnapshotStore {
 
 	resetRuntimeState(): void {
 		this.currentFilePathToSlot.clear();
+		this.currentFileLru.clear();
 		this.currentSlotTexts.length = 0;
 		this.currentSlotGenerations.length = 0;
+		this.currentSlotBytes.length = 0;
 		this.freeCurrentSlots.length = 0;
+		this.currentRuntimeBytes = 0;
 	}
 
 	private writeCurrentFileText(
@@ -286,17 +296,32 @@ export class FileSnapshotStore {
 		text: string,
 		generation?: number,
 	): string {
-		const existingText = this.getCurrentFileText(path);
-		const existingGeneration = this.getCurrentFileGeneration(path);
+		const existing = this.getCurrentFile(path, false);
+		const existingText = existing?.text;
+		const existingGeneration = existing?.generation;
 		if (
 			existingText !== undefined &&
 			!this.shouldReplaceCurrentEntry(existingGeneration, generation)
 		) {
+			this.touchCurrentFile(path);
 			return existingText;
 		}
+		const entryBytes = this.estimateCurrentEntryBytes(path, text, generation);
+		if (
+			entryBytes >
+			FileSnapshotStore.CURRENT_TEXT_CACHE_CAPACITY_BYTES
+		) {
+			this.deleteCurrentFile(path);
+			return text;
+		}
 		const slot = this.ensureCurrentSlot(path);
+		const previousBytes = this.currentSlotBytes[slot] ?? 0;
 		this.currentSlotTexts[slot] = text;
 		this.currentSlotGenerations[slot] = generation;
+		this.currentSlotBytes[slot] = entryBytes;
+		this.currentRuntimeBytes += entryBytes - previousBytes;
+		this.touchCurrentFile(path);
+		this.enforceCurrentTextCacheBudget();
 		return text;
 	}
 
@@ -306,8 +331,14 @@ export class FileSnapshotStore {
 			return;
 		}
 		this.currentFilePathToSlot.delete(path);
+		this.currentFileLru.delete(path);
+		this.currentRuntimeBytes = Math.max(
+			0,
+			this.currentRuntimeBytes - (this.currentSlotBytes[slot] ?? 0),
+		);
 		this.currentSlotTexts[slot] = undefined;
 		this.currentSlotGenerations[slot] = undefined;
+		this.currentSlotBytes[slot] = undefined;
 		if (slot === this.currentSlotTexts.length - 1) {
 			this.trimTrailingCurrentSlots();
 			return;
@@ -345,13 +376,14 @@ export class FileSnapshotStore {
 		largestEntries.sort((left, right) => right.totalBytes - left.totalBytes);
 
 		return {
+			capacityBytes: FileSnapshotStore.CURRENT_TEXT_CACHE_CAPACITY_BYTES,
 			pathBytes,
 			currentTextBytes,
 			generationBytes,
 			fileCount: this.currentFilePathToSlot.size,
 			slotCount: this.currentSlotTexts.length,
 			freeSlotCount: this.freeCurrentSlots.length,
-			totalBytes: pathBytes + currentTextBytes + generationBytes,
+			totalBytes: this.currentRuntimeBytes,
 			largestEntries: largestEntries.slice(
 				0,
 				FileSnapshotStore.RUNTIME_REPORT_TOP_ENTRY_LIMIT,
@@ -612,7 +644,10 @@ export class FileSnapshotStore {
 		await this.database.db.hybridDirtyShadows.bulkPut(shadowRows);
 	}
 
-	private getCurrentFile(path: string): CurrentFileEntry | undefined {
+	private getCurrentFile(
+		path: string,
+		touch = true,
+	): CurrentFileEntry | undefined {
 		const slot = this.currentFilePathToSlot.get(path);
 		if (slot === undefined) {
 			return undefined;
@@ -620,6 +655,9 @@ export class FileSnapshotStore {
 		const text = this.currentSlotTexts[slot];
 		if (text === undefined) {
 			return undefined;
+		}
+		if (touch) {
+			this.touchCurrentFile(path);
 		}
 		return {
 			path,
@@ -651,6 +689,7 @@ export class FileSnapshotStore {
 		this.currentFilePathToSlot.set(path, nextSlot);
 		this.currentSlotTexts.push(undefined);
 		this.currentSlotGenerations.push(undefined);
+		this.currentSlotBytes.push(undefined);
 		return nextSlot;
 	}
 
@@ -662,11 +701,45 @@ export class FileSnapshotStore {
 			}
 			this.currentSlotTexts.pop();
 			this.currentSlotGenerations.pop();
+			this.currentSlotBytes.pop();
 			const freeSlotIndex = this.freeCurrentSlots.lastIndexOf(lastSlot);
 			if (freeSlotIndex >= 0) {
 				this.freeCurrentSlots.splice(freeSlotIndex, 1);
 			}
 		}
+	}
+
+	private touchCurrentFile(path: string): void {
+		if (!this.currentFilePathToSlot.has(path)) {
+			return;
+		}
+		this.currentFileLru.delete(path);
+		this.currentFileLru.set(path, true);
+	}
+
+	private enforceCurrentTextCacheBudget(): void {
+		while (
+			this.currentRuntimeBytes >
+			FileSnapshotStore.CURRENT_TEXT_CACHE_CAPACITY_BYTES
+		) {
+			const oldestPath = this.currentFileLru.keys().next().value;
+			if (typeof oldestPath !== "string") {
+				return;
+			}
+			this.deleteCurrentFile(oldestPath);
+		}
+	}
+
+	private estimateCurrentEntryBytes(
+		path: string,
+		text: string,
+		generation?: number,
+	): number {
+		return (
+			textEncoder.encode(path).length +
+			textEncoder.encode(text).length +
+			(generation !== undefined ? 8 : 0)
+		);
 	}
 
 	private async deleteRowsNotIn(
