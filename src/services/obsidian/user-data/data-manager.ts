@@ -423,6 +423,7 @@ export class DataManager {
   private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
   private static readonly HYBRID_TABLE_SCAN_BATCH_SIZE = 512;
   private static readonly LEXICAL_REINDEX_BATCH_SIZE = 64;
+  private static readonly LEXICAL_REINDEX_MAX_BYTES = 8 * 1024 * 1024;
   private static readonly LEXICAL_COLD_REPAIR_BATCH_SIZE = 32;
   private static readonly LEXICAL_COLD_REPAIR_MAX_BYTES = 4 * 1024 * 1024;
   private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS = 128;
@@ -1980,17 +1981,11 @@ export class DataManager {
     const successfulFiles: TFile[] = [];
     const failures: LexicalIndexFailure[] = [];
     let processedFiles = 0;
+    const reindexBatches = this.buildLexicalReindexBatches(filesToIndex);
     this.lexicalEngine.beginBatchReindex();
     try {
-      for (
-        let start = 0;
-        start < filesToIndex.length;
-        start += DataManager.LEXICAL_REINDEX_BATCH_SIZE
-      ) {
-        const batchFiles = filesToIndex.slice(
-          start,
-          start + DataManager.LEXICAL_REINDEX_BATCH_SIZE,
-        );
+      for (let index = 0; index < reindexBatches.length; index += 1) {
+        const batchFiles = reindexBatches[index];
         const batchResult = await this.addDocuments(batchFiles);
         successfulFiles.push(...batchResult.indexedFiles);
         failures.push(...batchResult.failures);
@@ -1999,10 +1994,7 @@ export class DataManager {
           processedFiles,
           totalFiles: filesToIndex.length,
         });
-        if (
-          start + DataManager.LEXICAL_REINDEX_BATCH_SIZE <
-          filesToIndex.length
-        ) {
+        if (index + 1 < reindexBatches.length) {
           await MyLib.sleep(0);
         }
       }
@@ -2240,18 +2232,36 @@ export class DataManager {
   private buildLexicalBodyTokenColdRepairBatches(
     files: readonly TFile[],
   ): TFile[][] {
+    return this.buildFileBatches(
+      files,
+      DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE,
+      DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES,
+    );
+  }
+
+  private buildLexicalReindexBatches(files: readonly TFile[]): TFile[][] {
+    return this.buildFileBatches(
+      files,
+      DataManager.LEXICAL_REINDEX_BATCH_SIZE,
+      DataManager.LEXICAL_REINDEX_MAX_BYTES,
+    );
+  }
+
+  private buildFileBatches(
+    files: readonly TFile[],
+    maxFilesPerBatch: number,
+    maxBytesPerBatch: number,
+  ): TFile[][] {
     const batches: TFile[][] = [];
     let currentBatch: TFile[] = [];
     let currentBatchBytes = 0;
 
     for (const file of files) {
       const fileBytes = Math.max(0, file.stat.size ?? 0);
-      const wouldExceedFileLimit =
-        currentBatch.length >= DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE;
+      const wouldExceedFileLimit = currentBatch.length >= maxFilesPerBatch;
       const wouldExceedByteLimit =
         currentBatch.length > 0 &&
-        currentBatchBytes + fileBytes >
-          DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES;
+        currentBatchBytes + fileBytes > maxBytesPerBatch;
 
       if (wouldExceedFileLimit || wouldExceedByteLimit) {
         batches.push(currentBatch);
@@ -2263,9 +2273,8 @@ export class DataManager {
       currentBatchBytes += fileBytes;
 
       if (
-        currentBatch.length >= DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE ||
-        (fileBytes > DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES &&
-          currentBatch.length === 1)
+        currentBatch.length >= maxFilesPerBatch ||
+        (fileBytes > maxBytesPerBatch && currentBatch.length === 1)
       ) {
         batches.push(currentBatch);
         currentBatch = [];
