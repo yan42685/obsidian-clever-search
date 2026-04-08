@@ -1269,7 +1269,9 @@ describe("coverage lexical phase 1 memory experiments", () => {
 				supportFuzzyBodyMass: 0,
 				witnessMass: 0,
 				weakBridgeMass: 0,
+				displayIdealMass: 35,
 				displayRawMass: 35,
+				displayNormalizedMass: 1,
 			},
 		};
 		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
@@ -1336,7 +1338,9 @@ describe("coverage lexical phase 1 memory experiments", () => {
 				supportFuzzyBodyMass: 0,
 				witnessMass: 0,
 				weakBridgeMass: 0,
+				displayIdealMass: 35,
 				displayRawMass: 35,
+				displayNormalizedMass: 1,
 			},
 		};
 		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;

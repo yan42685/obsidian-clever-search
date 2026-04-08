@@ -2901,6 +2901,8 @@ function buildCoverageSignalBase(
 	const metadataChar = createEmptyCharSignal();
 	const familyCountSummary = createEmptyFamilyCountSummary();
 	const evidenceMassSummary = createEmptyCoverageLexicalEvidenceMassSummary();
+	evidenceMassSummary.displayIdealMass =
+		computeCoverageLexicalEvidenceIdealDisplayMass(probes, families);
 	let bodyPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let metadataPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let tailCoreWeight = 0;
@@ -3483,6 +3485,9 @@ function finalizeCoverageLexicalEvidenceMassSummary(
 	summary.witnessMass = computeCoverageLexicalWitnessMass(signal);
 	summary.weakBridgeMass = computeCoverageLexicalWeakBridgeMass(signal);
 	summary.displayRawMass = computeCoverageLexicalEvidenceDisplayRawMass(summary);
+	summary.displayNormalizedMass = computeCoverageLexicalEvidenceDisplayNormalizedMass(
+		summary,
+	);
 	return {
 		...signal,
 		evidenceMassSummary: summary,
@@ -3534,6 +3539,36 @@ function computeCoverageLexicalEvidenceDisplayRawMass(
 		0.35 * summary.witnessMass +
 		0.18 * summary.weakBridgeMass
 	);
+}
+
+function computeCoverageLexicalEvidenceDisplayNormalizedMass(
+	summary: CoverageLexicalEvidenceMassSummary,
+): number {
+	if (summary.displayRawMass <= 0) {
+		return 0;
+	}
+	if (summary.displayIdealMass <= 0) {
+		return summary.displayRawMass;
+	}
+	return clampCoverageLexicalWeight(
+		summary.displayRawMass / summary.displayIdealMass,
+		0,
+		1,
+	);
+}
+
+function computeCoverageLexicalEvidenceIdealDisplayMass(
+	probes: readonly (CoverageLexicalFamilyProbe | undefined)[],
+	families: readonly CoverageLexicalFamily[],
+): number {
+	let idealMass = 0;
+	for (const family of families) {
+		if (family.role === "noise") {
+			continue;
+		}
+		idealMass += getCoverageLexicalProbeFamilyWeight(probes[family.index]);
+	}
+	return Math.max(1, idealMass);
 }
 
 function accumulateMetadataFieldCount(
@@ -3692,7 +3727,10 @@ function computeFamilyTailWeight(index: number): number {
 }
 
 function computeFallbackScore(signal: CoverageLexicalFamilySignal): number {
-	const weightedDisplayMass = signal.evidenceMassSummary?.displayRawMass ?? 0;
+	const weightedDisplayMass =
+		signal.evidenceMassSummary?.displayNormalizedMass ??
+		signal.evidenceMassSummary?.displayRawMass ??
+		0;
 	if (weightedDisplayMass > 0) {
 		return weightedDisplayMass;
 	}
@@ -3938,7 +3976,10 @@ function computeCoverageLexicalDisplayCoverage(
 	signal: CoverageLexicalFamilySignal,
 	config: CoverageLexicalDisplayPruneConfig,
 ): number {
-	const weightedDisplayMass = signal.evidenceMassSummary?.displayRawMass ?? 0;
+	const weightedDisplayMass =
+		signal.evidenceMassSummary?.displayNormalizedMass ??
+		signal.evidenceMassSummary?.displayRawMass ??
+		0;
 	if (weightedDisplayMass > 0) {
 		return weightedDisplayMass;
 	}

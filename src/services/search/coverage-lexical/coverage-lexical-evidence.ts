@@ -33,7 +33,9 @@ export function createEmptyCoverageLexicalEvidenceMassSummary(): CoverageLexical
 		supportFuzzyBodyMass: 0,
 		witnessMass: 0,
 		weakBridgeMass: 0,
+		displayIdealMass: 0,
 		displayRawMass: 0,
+		displayNormalizedMass: 0,
 	};
 }
 

@@ -319,7 +319,9 @@ export type CoverageLexicalEvidenceMassSummary = {
 	supportFuzzyBodyMass: number;
 	witnessMass: number;
 	weakBridgeMass: number;
+	displayIdealMass: number;
 	displayRawMass: number;
+	displayNormalizedMass: number;
 };
 
 export type CoverageLexicalFamilySignal = {
