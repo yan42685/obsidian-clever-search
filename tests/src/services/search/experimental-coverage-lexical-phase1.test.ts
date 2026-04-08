@@ -53,6 +53,65 @@ function registerMockFileSnapshotStore(
 	return { currentTexts, readCurrentTexts };
 }
 
+function registerMockBodyTokenColdStore() {
+	const {
+		COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+	} = require(
+		"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
+	) as {
+		COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
+	};
+	const storedDocuments = new Map<string, any>();
+	const upsertDocuments = jest.fn(async (documents: any[]) => {
+		for (const document of documents) {
+			storedDocuments.set(document.path, {
+				path: document.path,
+				generation: document.generation,
+				bodyTokens: [...document.bodyTokens],
+				hanSegments: [...document.hanSegments],
+			});
+		}
+	});
+	const deleteDocuments = jest.fn(async (paths: string[]) => {
+		for (const path of paths) {
+			storedDocuments.delete(path);
+		}
+	});
+	const readDocuments = jest.fn(async (paths: string[]) => {
+		const next = new Map<string, any>();
+		for (const path of paths) {
+			const document = storedDocuments.get(path);
+			if (document) {
+				next.set(path, {
+					path: document.path,
+					generation: document.generation,
+					bodyTokens: [...document.bodyTokens],
+					hanSegments: [...document.hanSegments],
+				});
+			}
+		}
+		return next;
+	});
+	const clearAll = jest.fn(async () => {
+		storedDocuments.clear();
+	});
+
+	container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+		upsertDocuments,
+		deleteDocuments,
+		readDocuments,
+		clearAll,
+	} as any);
+
+	return {
+		storedDocuments,
+		upsertDocuments,
+		deleteDocuments,
+		readDocuments,
+		clearAll,
+	};
+}
+
 function normalize(text: string): string {
 	return text.toLowerCase().normalize("NFKC");
 }
@@ -584,6 +643,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		];
 
 		await withExperimentalBodyTokenOffloadEnv(true, async () => {
+			registerMockBodyTokenColdStore();
 			const fileSnapshotStore = registerMockFileSnapshotStore(documents);
 			const engine = new CoverageLexicalFileSearchEngine();
 			await engine.addDocuments(documents);
@@ -614,7 +674,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		});
 	});
 
-	test("defaults to offloading resident body token tape when file snapshots are available", async () => {
+	test("defaults to offloading resident body token tape when a cold store is registered", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -647,6 +707,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		];
 
 		await withExperimentalBodyTokenOffloadEnv(undefined, async () => {
+			registerMockBodyTokenColdStore();
 			const fileSnapshotStore = registerMockFileSnapshotStore(documents);
 			const engine = new CoverageLexicalFileSearchEngine();
 			await engine.addDocuments(documents);
@@ -677,7 +738,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		});
 	});
 
-	test("keeps resident body token tape when cold offload initialization fails", async () => {
+	test("keeps resident body token tape when no cold store is registered", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -704,7 +765,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		await withExperimentalBodyTokenOffloadEnv(undefined, async () => {
 			registerMockFileSnapshotStore(documents);
 			const engine = new CoverageLexicalFileSearchEngine();
-			(engine as any).writeOffloadedColdBodyTokenSource = jest.fn(() => false);
 
 			await engine.addDocuments(documents);
 
@@ -757,20 +817,10 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		];
 
 		await withExperimentalBodyTokenOffloadEnv(true, async () => {
+			const coldStore = registerMockBodyTokenColdStore();
 			const fileSnapshotStore = registerMockFileSnapshotStore(documents);
 			const engine = new CoverageLexicalFileSearchEngine();
 			await engine.addDocuments(documents);
-			const loadedFromColdSource = new Set<number>();
-			const originalGetOffloadedDocumentBodyTokenIds = (engine as any)
-				.getOffloadedDocumentBodyTokenIds
-				.bind(engine);
-			(engine as any).getOffloadedDocumentBodyTokenIds = (docId: number) => {
-				const tokenIds = originalGetOffloadedDocumentBodyTokenIds(docId);
-				if (tokenIds) {
-					loadedFromColdSource.add(docId);
-				}
-				return tokenIds;
-			};
 
 			const results = await engine.searchFiles({
 				queryText: "alpha beta gamma target",
@@ -780,8 +830,12 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			});
 
 			expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
-			expect(loadedFromColdSource.size).toBeGreaterThan(0);
-			expect(loadedFromColdSource.size).toBeLessThan(documents.length);
+			expect(coldStore.readDocuments).toHaveBeenCalled();
+			const requestedPaths = coldStore.readDocuments.mock.calls.flatMap(
+				(args: [string[]]) => args[0],
+			);
+			expect(new Set(requestedPaths).size).toBeGreaterThan(0);
+			expect(new Set(requestedPaths).size).toBeLessThan(documents.length);
 			expect(results[0]?.path).toBe("notes/staged-offload-target.md");
 		});
 	});
@@ -846,20 +900,8 @@ describe("coverage lexical phase 1 memory experiments", () => {
 				deleteDocuments(paths: string[]): void;
 			};
 		};
-		const { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } = require(
-			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
-		) as {
-			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
-		};
-		const upsertDocuments = jest.fn(async () => undefined);
-		const deleteDocuments = jest.fn(async () => undefined);
-		const clearAll = jest.fn(async () => undefined);
-
-		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
-			upsertDocuments,
-			deleteDocuments,
-			clearAll,
-		} as any);
+		const { upsertDocuments, deleteDocuments, clearAll } =
+			registerMockBodyTokenColdStore();
 
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
@@ -915,40 +957,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 				}): Promise<Array<{ path: string }>>;
 			};
 		};
-		const { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } = require(
-			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
-		) as {
-			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
-		};
-		const storedDocuments = new Map<string, any>();
-		const upsertDocuments = jest.fn(async (documents: any[]) => {
-			for (const document of documents) {
-				storedDocuments.set(document.path, document);
-			}
-		});
-		const deleteDocuments = jest.fn(async (paths: string[]) => {
-			for (const path of paths) {
-				storedDocuments.delete(path);
-			}
-		});
-		const readDocuments = jest.fn(async (paths: string[]) => {
-			const next = new Map<string, any>();
-			for (const path of paths) {
-				const document = storedDocuments.get(path);
-				if (document) {
-					next.set(path, document);
-				}
-			}
-			return next;
-		});
-		const clearAll = jest.fn(async () => undefined);
-
-		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
-			upsertDocuments,
-			deleteDocuments,
-			readDocuments,
-			clearAll,
-		} as any);
+		const { readDocuments } = registerMockBodyTokenColdStore();
 
 		await withExperimentalBodyTokenOffloadEnv(true, async () => {
 			const engine = new CoverageLexicalFileSearchEngine();

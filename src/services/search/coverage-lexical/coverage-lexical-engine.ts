@@ -1,15 +1,4 @@
-import {
-	closeSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	readSync,
-	unlinkSync,
-	writeFileSync,
-} from "fs";
 import { Vault } from "obsidian";
-import { tmpdir } from "os";
-import { join } from "path";
 import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
@@ -111,11 +100,6 @@ const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_HOT_CACHE_LIMIT = 24;
 const COVERAGE_LEXICAL_OFFLOAD_HYDRATION_TIE_LOOKAHEAD = 24;
 const COVERAGE_LEXICAL_OFFLOAD_UNRESOLVED_HYDRATION_LOOKAHEAD = 48;
 const COVERAGE_LEXICAL_OFFLOAD_UNRESOLVED_HYDRATION_BUDGET = 12;
-const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR = join(
-	tmpdir(),
-	"clever-search",
-	"coverage-lexical",
-);
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -444,7 +428,6 @@ function createCoverageLexicalBenchmarkPhaseTimingState(): CoverageLexicalBenchm
 export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	readonly backend = "coverage-lexical" as const;
 	readonly supportsSerialization = true;
-	private static nextOffloadedBodyTokenArenaId = 0;
 
 	private readonly tokenizer = getInstance(Tokenizer);
 	private readonly documents = new Map<string, CoverageLexicalDocument>();
@@ -473,14 +456,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		CoverageLexicalBodyTokenColdDocumentWrite
 	>();
 	private readonly pendingBodyTokenColdDeletes = new Set<string>();
-	private readonly offloadedBodyTokenArenaId =
-		CoverageLexicalFileSearchEngine.nextOffloadedBodyTokenArenaId++;
-	private offloadedBodyTokenColdSourceAvailable = true;
-	private offloadedBodyTokenColdTapePath: string | null = null;
-	private offloadedBodyTokenColdTapeFd: number | null = null;
-	private readonly offloadedBodyTokenColdRangeById: Array<
-		CoverageLexicalTokenRange | undefined
-	> = [];
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new CoverageLexicalSharedTokenIdPostingMap(
 		(term) => this.documentBodyTokenIdByTerm.get(term),
@@ -693,13 +668,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentBodyTokenIdByTerm.clear();
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
-		this.clearOffloadedColdBodyTokenSource();
 		this.documentBodyHanSegmentsById.length = 0;
 		this.documentTagValuesById.length = 0;
 		this.offloadedBodyTokenHotCacheByDocId.clear();
 		this.pendingBodyTokenColdUpsertsByPath.clear();
 		this.pendingBodyTokenColdDeletes.clear();
-		this.offloadedBodyTokenColdSourceAvailable = true;
 		this.coverageLexicalBodyTokenColdStore = undefined;
 		this.fileSnapshotStore = undefined;
 		this.nextDocumentId = 0;
@@ -785,40 +758,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		);
 	}
 
-	private getOffloadedDocumentBodyTokenIds(
-		docId: number,
-	): readonly number[] | undefined {
-		const fileDescriptor = this.offloadedBodyTokenColdTapeFd;
-		const range = this.offloadedBodyTokenColdRangeById[docId];
-		if (fileDescriptor === null || !range || range.end <= range.start) {
-			return undefined;
-		}
-		const byteLength = range.end - range.start;
-		const buffer = Buffer.allocUnsafe(byteLength);
-		const bytesRead = readSync(
-			fileDescriptor,
-			buffer,
-			0,
-			byteLength,
-			range.start,
-		);
-		if (bytesRead <= 0) {
-			return undefined;
-		}
-		if (bytesRead !== byteLength) {
-			throw new Error(
-				`Coverage lexical cold body token read truncated for doc ${docId}: ${bytesRead}/${byteLength}`,
-			);
-		}
-		return readCoverageLexicalNumericTokenRange(
-			new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead),
-			{
-				start: 0,
-				end: bytesRead,
-			},
-		);
-	}
-
 	private hasResidentDocumentBodyTokens(docId: number): boolean {
 		return this.documentBodyTokenRangeById[docId] !== undefined;
 	}
@@ -858,72 +797,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.offloadedBodyTokenHotCacheByDocId.delete(docId);
 	}
 
-	private clearOffloadedColdBodyTokenSource(): void {
-		if (this.offloadedBodyTokenColdTapeFd !== null) {
-			try {
-				closeSync(this.offloadedBodyTokenColdTapeFd);
-			} catch {
-				// Ignore best-effort cleanup failures for experimental cold storage.
-			}
-			this.offloadedBodyTokenColdTapeFd = null;
-		}
-		if (this.offloadedBodyTokenColdTapePath) {
-			try {
-				unlinkSync(this.offloadedBodyTokenColdTapePath);
-			} catch {
-				// Ignore missing/stale temp files.
-			}
-			this.offloadedBodyTokenColdTapePath = null;
-		}
-		this.offloadedBodyTokenColdRangeById.length = 0;
-	}
-
-	private writeOffloadedColdBodyTokenSource(
-		tape: Uint8Array,
-		rangesById: readonly (CoverageLexicalTokenRange | undefined)[],
-	): boolean {
-		this.clearOffloadedColdBodyTokenSource();
-		if (tape.length === 0) {
-			return true;
-		}
-		try {
-			mkdirSync(COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR, {
-				recursive: true,
-			});
-			const coldTapePath = join(
-				COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR,
-				`coverage-lexical-body-token-cold-${process.pid}-${this.offloadedBodyTokenArenaId}.bin`,
-			);
-			writeFileSync(coldTapePath, tape);
-			this.offloadedBodyTokenColdTapeFd = openSync(coldTapePath, "r");
-			this.offloadedBodyTokenColdTapePath = coldTapePath;
-			this.offloadedBodyTokenColdRangeById.length = 0;
-			this.offloadedBodyTokenColdRangeById.push(...rangesById);
-			return true;
-		} catch (error) {
-			void error;
-			this.offloadedBodyTokenColdSourceAvailable = false;
-			this.clearOffloadedColdBodyTokenSource();
-			return false;
-		}
-	}
-
-	private restoreOffloadedColdBodyTokenSourceToResidentTape(): void {
-		if (
-			this.documentBodyTokenIdTape.length > 0 ||
-			this.offloadedBodyTokenColdTapePath === null
-		) {
-			return;
-		}
-		const restoredRanges = [...this.offloadedBodyTokenColdRangeById];
-		const restoredTape = Uint8Array.from(
-			readFileSync(this.offloadedBodyTokenColdTapePath),
-		);
-		this.clearOffloadedColdBodyTokenSource();
-		this.documentBodyTokenIdTape = restoredTape;
-		this.documentBodyTokenRangeById.length = 0;
-		this.documentBodyTokenRangeById.push(...restoredRanges);
-	}
 
 	private getDocumentBodyTokens(
 		docId: number,
@@ -943,25 +816,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				cache?.set(docId, hotCached);
 				return hotCached;
 			}
-			if (options.allowColdLoad === false) {
-				return undefined;
-			}
-			const offloadedTokenIds = this.getOffloadedDocumentBodyTokenIds(docId);
-			if (!offloadedTokenIds) {
-				return undefined;
-			}
-			const coldTokens = Array.from(offloadedTokenIds, (tokenId) => {
-				const token = this.getDocumentBodyTokenById(tokenId);
-				if (token === undefined) {
-					throw new Error(
-						`Missing coverage lexical cold body token for id ${tokenId}`,
-					);
-				}
-				return token;
-			});
-			cache?.set(docId, coldTokens);
-			this.rememberHotCachedOffloadedBodyTokens(docId, coldTokens);
-			return coldTokens;
+			return undefined;
 		}
 		const tokens = Array.from(tokenIds, (tokenId) => {
 			const token = this.getDocumentBodyTokenById(tokenId);
@@ -1056,13 +911,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!isCoverageLexicalExperimentalBodyTokenOffloadEnabled()) {
 			return false;
 		}
-		if (this.getBodyTokenColdStore() !== null) {
-			return true;
-		}
-		return (
-			this.offloadedBodyTokenColdSourceAvailable &&
-			this.getFileSnapshotStore() !== null
-		);
+		return this.getBodyTokenColdStore() !== null;
 	}
 
 	private collectLikelyRecallBodyTokenDocIds(
@@ -1114,18 +963,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (this.documentBodyTokenIdTape.length === 0) {
 			return;
 		}
-		const offloadedToDexie = this.getBodyTokenColdStore() !== null;
-		const offloaded =
-			offloadedToDexie ||
-			this.writeOffloadedColdBodyTokenSource(
-				this.documentBodyTokenIdTape,
-				this.documentBodyTokenRangeById,
-			);
-		if (!offloaded) {
+		if (this.getBodyTokenColdStore() === null) {
 			return;
-		}
-		if (offloadedToDexie) {
-			this.clearOffloadedColdBodyTokenSource();
 		}
 		this.documentBodyTokenIdTape = new Uint8Array(0);
 		this.documentBodyTokenRangeById.length = 0;
@@ -1146,19 +985,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		docId: number,
 		tokens: readonly string[],
 	): void {
-		this.restoreOffloadedColdBodyTokenSourceToResidentTape();
 		this.rebuildDocumentBodyTokenTape(
 			new Map([[docId, this.mapDocumentBodyTokensToIds(tokens)]]),
 		);
 	}
 
 	private clearDocumentBodyTokens(docId: number): void {
-		this.restoreOffloadedColdBodyTokenSourceToResidentTape();
 		this.rebuildDocumentBodyTokenTape(new Map([[docId, undefined]]));
 	}
 
 	private compactDocumentBodyTokenLexicon(): void {
-		this.restoreOffloadedColdBodyTokenSourceToResidentTape();
 		if (this.documentBodyTokenLexicon.length === 0) {
 			this.documentBodyTokenLexicon.length = 0;
 			this.documentBodyTokenIdByTerm.clear();
