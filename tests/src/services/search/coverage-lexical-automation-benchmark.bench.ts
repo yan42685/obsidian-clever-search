@@ -46,6 +46,8 @@ type QueryType =
 	| "mixed_anchor"
 	| "template_collision"
 	| "mixed_script_anchor"
+	| "zh_short_identity"
+	| "zh_short_body_vs_basename"
 	| "partial_memory";
 
 type QueryCase = {
@@ -238,6 +240,8 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"mixed_anchor",
 	"template_collision",
 	"mixed_script_anchor",
+	"zh_short_identity",
+	"zh_short_body_vs_basename",
 	"partial_memory",
 ];
 
@@ -842,6 +846,34 @@ export function createAutomationCorpus(): {
   - mounted sources`,
 		{ aliases: "pod 凭证 projected token secret", tags: "projected volume checklist" },
 	);
+	addDocument(
+		"pkm-zh/books/电子技术入门.md",
+		"电子技术入门",
+		"电子技术入门",
+		"电子技术入门讲基础电路、常见元件、信号路径和实验安全，不是游戏设计技巧摘录。",
+		{ aliases: "电子技术 电路 入门", tags: "电子技术 电路 入门" },
+	);
+	addDocument(
+		"pkm-zh/books/游戏设计技巧摘录.md",
+		"游戏设计技巧摘录",
+		"游戏设计技巧",
+		"这页主要摘录电子游戏设计技巧、关卡技巧、玩家技能反馈和战斗技巧，不是电子技术教材。",
+		{ aliases: "游戏设计 技巧 摘录", tags: "游戏设计 技巧" },
+	);
+	addDocument(
+		"pkm-zh/notes/别名迁移说明.md",
+		"别名迁移说明",
+		"别名迁移说明",
+		"记录旧名兼容、别名映射、链接迁移和历史名称回收规则，专门回答旧名与别名如何兼容。",
+		{ aliases: "旧名 别名 兼容", tags: "别名 迁移 旧名" },
+	);
+	addDocument(
+		"pkm-zh/notes/旧项目整理.md",
+		"旧项目整理",
+		"旧项目整理",
+		"这页整理旧项目背景、历史命名和零散兼容备注，但不专门讲别名迁移规则。",
+		{ aliases: "旧项目 历史", tags: "旧项目 整理" },
+	);
 
 	addQuery(
 		"alphaone betatwo gammathree deltafour",
@@ -891,6 +923,18 @@ export function createAutomationCorpus(): {
 		"locality_guardrail",
 		"coverage_invariants",
 	);
+	addQuery(
+		"电子技",
+		"pkm-zh/books/电子技术入门.md",
+		"zh_short_body_vs_basename",
+		"coverage_invariants",
+	);
+	addQuery(
+		"旧名别名",
+		"pkm-zh/notes/别名迁移说明.md",
+		"zh_short_identity",
+		"coverage_invariants",
+	);
 
 	addQuery(
 		"guide for replay order after restore",
@@ -927,6 +971,18 @@ export function createAutomationCorpus(): {
 		"pkm-en/notes/linking/aliases-deep-dive.md",
 		"content_dense",
 		"core",
+	);
+	addQuery(
+		"电子技术入门",
+		"pkm-zh/books/电子技术入门.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"别名兼容说明",
+		"pkm-zh/notes/别名迁移说明.md",
+		"zh_short_identity",
+		"messy_pkm",
 	);
 
 	addQuery(
@@ -1766,6 +1822,8 @@ function queryDifficultyWeight(queryCase: QueryCase): number {
 		mixed_anchor: 78,
 		template_collision: 74,
 		mixed_script_anchor: 80,
+		zh_short_identity: 82,
+		zh_short_body_vs_basename: 86,
 		partial_memory: 90,
 	};
 	const suiteWeight: Record<BenchmarkSuite, number> = {
@@ -4166,10 +4224,11 @@ describe("coverage lexical automation benchmark", () => {
 		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.6);
 		expect(languageMix.mixedRatio).toBeGreaterThanOrEqual(0.4);
 		expect(queryLanguageMix.en).toBeGreaterThan(0);
+		expect(queryLanguageMix.zh).toBeGreaterThan(0);
 		expect(queryLanguageMix.mixed).toBeGreaterThan(0);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "coverage_invariants"),
-		).toHaveLength(8);
+		).toHaveLength(10);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "messy_pkm").length,
 		).toBeGreaterThanOrEqual(50);
