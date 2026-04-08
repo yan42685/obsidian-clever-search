@@ -107,7 +107,11 @@ const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_COLD_DIR = join(
 );
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
-	return process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV] === "1";
+	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
+	if (!raw) {
+		return true;
+	}
+	return raw !== "0" && raw.toLowerCase() !== "false";
 }
 
 type CoverageLexicalDocument = {
@@ -1665,10 +1669,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (this.fileSnapshotStore !== undefined) {
 			return this.fileSnapshotStore;
 		}
-		if (
-			!container.isRegistered(FileSnapshotStore, true) &&
-			!container.isRegistered(Vault, true)
-		) {
+		if (!container.isRegistered(FileSnapshotStore, true)) {
 			this.fileSnapshotStore = null;
 			return null;
 		}

@@ -58,13 +58,17 @@ function normalize(text: string): string {
 }
 
 async function withExperimentalBodyTokenOffloadEnv<T>(
-	enabled: boolean,
+	enabled: boolean | undefined,
 	action: () => Promise<T>,
 ): Promise<T> {
 	const previous = process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
-	process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = enabled
-		? "1"
-		: "0";
+	if (enabled === undefined) {
+		delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
+	} else {
+		process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = enabled
+			? "1"
+			: "0";
+	}
 	try {
 		return await action();
 	} finally {
@@ -117,6 +121,7 @@ function createExperimentalTokenizer() {
 
 describe("coverage lexical phase 1 memory experiments", () => {
 	beforeEach(() => {
+		process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = "0";
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -133,6 +138,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 	});
 
 	afterEach(() => {
+		delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
 		delete (global as any).window;
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -479,6 +485,69 @@ describe("coverage lexical phase 1 memory experiments", () => {
 
 			expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
 			expect(results[0]?.path).toBe("notes/body-token-offload-target.md");
+		});
+	});
+
+	test("defaults to offloading resident body token tape when file snapshots are available", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+				getIndexBreakdown(): Record<string, unknown> | null;
+			};
+		};
+
+		const documents = [
+			{
+				path: "notes/default-offload-target.md",
+				basename: "default-offload-target",
+				folder: "notes",
+				content: "alpha beta gamma stays contiguous in the body for default offload",
+				headings: "default offload target",
+			},
+			{
+				path: "notes/default-offload-peer.md",
+				basename: "default-offload-peer",
+				folder: "notes",
+				content: "alpha appears while beta and gamma are separated elsewhere",
+			},
+		];
+
+		await withExperimentalBodyTokenOffloadEnv(undefined, async () => {
+			const fileSnapshotStore = registerMockFileSnapshotStore(documents);
+			const engine = new CoverageLexicalFileSearchEngine();
+			await engine.addDocuments(documents);
+
+			const docId = ((engine as any).documentIdByPath as Map<string, number>).get(
+				"notes/default-offload-target.md",
+			);
+			expect(docId).toBeDefined();
+			expect((engine as any).hasResidentDocumentBodyTokens(docId)).toBe(false);
+
+			const breakdown = engine.getIndexBreakdown();
+			const documentIdentity = (breakdown?.estimatedBytes as Record<string, unknown>)
+				?.documentIdentity as Record<string, unknown>;
+			const bodyTokensById = documentIdentity?.bodyTokensById as
+				| Record<string, unknown>
+				| undefined;
+			expect(bodyTokensById?.populatedCount).toBe(0);
+
+			const results = await engine.searchFiles({
+				queryText: "alpha beta gamma",
+				isPrefixMatch: true,
+				isFuzzy: false,
+				maxItemResults: 5,
+			});
+
+			expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
+			expect(results[0]?.path).toBe("notes/default-offload-target.md");
 		});
 	});
 
