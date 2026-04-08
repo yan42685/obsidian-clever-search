@@ -178,6 +178,13 @@ type CoverageLexicalQueryCache = {
 		string,
 		CoverageLexicalMetadataPhraseSurface | null
 	>;
+	phraseCandidatesByKey: Map<
+		string,
+		readonly (readonly [
+			CoverageLexicalCandidateKey,
+			CoverageLexicalCandidateState,
+		])[]
+	>;
 	familySetCandidatesByKey: Map<
 		string,
 		readonly (readonly [
@@ -489,6 +496,7 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		phraseSignatureBucketsByKey: new Map(),
 		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
 		metadataPhraseSurfaceByDocAndField: new Map(),
+		phraseCandidatesByKey: new Map(),
 		familySetCandidatesByKey: new Map(),
 	};
 }
@@ -850,7 +858,7 @@ function runStrictMetadataLane(
 		benchmarkHooks,
 		"strict_metadata_lane",
 		() => {
-			collectFamilySetCandidates(
+			appendFamilySetCandidates(
 				index,
 				queryCache,
 				laneCandidates,
@@ -2540,14 +2548,63 @@ function collectPhraseCandidates(
 		options,
 		queryCache,
 	)) {
-		collectCandidatesForPhraseSignature(
+		for (const [key, state] of getOrCreatePhraseCandidateEntries(
 			index,
 			queryCache,
-			candidates,
 			signature,
 			scope,
-		);
+		)) {
+			mergeCandidateStateByDocId(candidates, key, state);
+		}
 	}
+}
+
+function getOrCreatePhraseCandidateEntries(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	signature: CoverageLexicalPhraseSignature,
+	scope: CoverageLexicalCollectionScope,
+): readonly (readonly [
+	CoverageLexicalCandidateKey,
+	CoverageLexicalCandidateState,
+])[] {
+	const cacheScope = getPhraseCandidateCacheScope(signature, scope);
+	const cacheKey = `${cacheScope}|${signature.index}`;
+	const cached = queryCache.phraseCandidatesByKey.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const collected = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
+	collectCandidatesForPhraseSignature(
+		index,
+		queryCache,
+		collected,
+		signature,
+		cacheScope,
+	);
+	const created = Array.from(
+		collected.entries(),
+		([key, state]) => [key, cloneCandidateState(state)] as const,
+	);
+	queryCache.phraseCandidatesByKey.set(cacheKey, created);
+	return created;
+}
+
+function getPhraseCandidateCacheScope(
+	signature: CoverageLexicalPhraseSignature,
+	scope: CoverageLexicalCollectionScope,
+): CoverageLexicalCollectionScope {
+	if (
+		scope !== "body-only" &&
+		signature.preferredFields &&
+		signature.preferredFields.length > 0
+	) {
+		return "metadata-only";
+	}
+	return scope;
 }
 
 function overlapsTargetFamilies(
