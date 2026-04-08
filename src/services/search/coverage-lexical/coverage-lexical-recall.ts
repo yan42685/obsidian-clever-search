@@ -862,13 +862,26 @@ function runStrictMetadataLane(
 				index,
 				queryCache,
 				laneCandidates,
-				derivedPlan.strictMetadataFamilies,
+				plan.hardAnchorFamilies,
 				{
 					scope: "metadata-only",
 					includePrefix: request.isPrefixMatch,
 					includeFuzzy: false,
 				},
 			);
+			if (derivedPlan.optionalAnchorFamilies.length > 0) {
+				appendFamilySetCandidates(
+					index,
+					queryCache,
+					laneCandidates,
+					derivedPlan.optionalAnchorFamilies,
+					{
+						scope: "metadata-only",
+						includePrefix: request.isPrefixMatch,
+						includeFuzzy: false,
+					},
+				);
+			}
 			collectPhraseCandidates(
 				index,
 				queryCache,
