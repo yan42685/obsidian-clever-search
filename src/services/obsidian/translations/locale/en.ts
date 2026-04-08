@@ -13,6 +13,8 @@ export default {
 	// notification
 	"Reindexing...": "Reindexing...",
 	"Indexing finished": "Indexing finished",
+	"searchNotice.lexicalIndexingProgressPrefix": "Indexed ",
+	"searchNotice.lexicalIndexingProgressSuffix": "",
 	"searchNotice.hybridIndexFinished": "Hybrid indexing finished",
 	"searchNotice.bootstrapFinishedHybridReady": "Search indexing finished. Lexical + hybrid ready.",
 	"searchNotice.databaseUpgradeFinished": "Search index rebuild finished after database upgrade.",

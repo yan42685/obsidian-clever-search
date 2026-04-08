@@ -111,6 +111,10 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => ({
   FileSnapshotStore: class FileSnapshotStore {},
 }));
 
+jest.mock("src/services/search/tokenizer", () => ({
+  Tokenizer: class Tokenizer {},
+}));
+
 jest.mock("src/services/obsidian/search-service", () => ({
   SearchService: class SearchService {},
 }));
@@ -140,7 +144,9 @@ import {
 import { FileWatcher } from "src/services/obsidian/user-data/file-watcher";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { LexicalEngine } from "src/services/search/lexical-engine";
+import { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import { Tokenizer } from "src/services/search/tokenizer";
 
 const { MyNotice } = jest.requireMock(
   "src/services/obsidian/transformed-api",
@@ -371,6 +377,18 @@ function createMockFileSnapshotStore() {
     })),
   };
   return store;
+}
+
+function createMockTokenizer() {
+  return {
+    tokenizeSequence(text: string) {
+      return (
+        text
+          .toLowerCase()
+          .match(/[\p{Script=Han}]+|[a-z0-9]+(?:[-_][a-z0-9]+)*/gu) ?? []
+      );
+    },
+  };
 }
 function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
   return {
@@ -890,6 +908,22 @@ function registerDataManagerDeps(params: {
     FileSnapshotStore,
     params.fileSnapshotStore as any,
   );
+  container.registerInstance(Tokenizer, createMockTokenizer() as any);
+  container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+    clearAll: jest.fn(async () => undefined),
+    deleteDocuments: jest.fn(async () => undefined),
+    getMeta: jest.fn(async () => null),
+    inspectConsistency: jest.fn(async () => ({
+      needsRepair: false,
+      requiresReset: false,
+      reason: "up-to-date",
+      missingOrStalePaths: [],
+      danglingPaths: [],
+    })),
+    readDocuments: jest.fn(async () => new Map()),
+    updateIndexedRefsMetadata: jest.fn(async () => undefined),
+    upsertDocuments: jest.fn(async () => undefined),
+  } as any);
   container.registerInstance(SearchService, {
     hybridEngine: params.hybridEngine,
   } as any);
@@ -3070,5 +3104,74 @@ describe("DataManager integration", () => {
     expect(fileSnapshotStore.retainOnlyFiles).toHaveBeenCalledWith(
       new Set([liveFile.path]),
     );
+  });
+
+  test("lexical cold repair batches honor file and byte limits while keeping oversized files alone", () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const smallA = createFile(
+      "docs/small-a.md",
+      "a".repeat(1024 * 1024),
+      100,
+    );
+    const smallB = createFile(
+      "docs/small-b.md",
+      "b".repeat(1024 * 1024),
+      101,
+    );
+    const smallC = createFile(
+      "docs/small-c.md",
+      "c".repeat(1024 * 1024),
+      102,
+    );
+    const large = createFile(
+      "docs/large.md",
+      "d".repeat(5 * 1024 * 1024),
+      103,
+    );
+    const trailing = createFile(
+      "docs/trailing.md",
+      "e".repeat(1024),
+      104,
+    );
+
+    const files = new Map<string, TFile>([
+      [smallA.path, smallA],
+      [smallB.path, smallB],
+      [smallC.path, smallC],
+      [large.path, large],
+      [trailing.path, trailing],
+    ]);
+    const texts = new Map<string, string>(
+      Array.from(files.values()).map((file) => [file.path, ""]),
+    );
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [],
+      database: createMockDatabase(),
+      dataProvider: createMockDataProvider({ files, texts }),
+      lexicalEngine: createMockLexicalEngine(),
+      fileSnapshotStore: createMockFileSnapshotStore(),
+      hybridEngine: createMockHybridEngine({
+        isEnabled: jest.fn(() => false),
+      }),
+    });
+
+    const manager = resolveDataManager() as any;
+    const batches = manager.buildLexicalBodyTokenColdRepairBatches([
+      smallA,
+      smallB,
+      smallC,
+      large,
+      trailing,
+    ]) as TFile[][];
+
+    expect(batches.map((batch) => batch.map((file) => file.path))).toEqual([
+      [smallA.path, smallB.path, smallC.path],
+      [large.path],
+      [trailing.path],
+    ]);
   });
 });

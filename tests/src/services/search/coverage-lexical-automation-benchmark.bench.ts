@@ -118,6 +118,51 @@ type PhaseTimingSummary = {
 	}>;
 };
 
+type CoverageLexicalBenchmarkDiagnostic =
+	| "index"
+	| "timing"
+	| "recall"
+	| "lane-study"
+	| "offload"
+	| "wins"
+	| "disagreements"
+	| "misses"
+	| "prune";
+
+type CoverageLexicalBenchmarkOffloadDocDebug = {
+	docId: number;
+	path: string | null;
+	cheapCoarseRank: number | null;
+	finalRank: number | null;
+	hydratedAtCoarse: boolean;
+	selectedForLocalWindow: boolean;
+	hasResidentBodyTokens: boolean;
+	bodyMatchCount: number;
+	phraseMatchCount: number;
+	hasBodyPrefixWitness: boolean;
+	bodyCharMatchCount: number;
+	unresolvedBodyEvidence: {
+		needsPassageSignal: boolean;
+		hasUnverifiedPhraseWitness: boolean;
+		hasUnresolvedPrefixSurface: boolean;
+		hasUnresolvedBodyCharVerification: boolean;
+		unresolvedFamilyCount: number;
+		unresolvedWeightUpperBound: number;
+	};
+};
+
+type CoverageLexicalBenchmarkOffloadSearchDebug = {
+	queryText: string;
+	offloadEnabled: boolean;
+	stagedHydration: boolean;
+	candidateCount: number;
+	cheapCoarseTopDocIds: number[];
+	coarseHydrationDocIds: number[];
+	localWindowDocIds: number[];
+	finalTopDocIds: number[];
+	docs: CoverageLexicalBenchmarkOffloadDocDebug[];
+};
+
 type QueryOutcome = {
 	query: string;
 	relevantPath: string;
@@ -127,6 +172,7 @@ type QueryOutcome = {
 	hitTop5: boolean;
 	rank: number;
 	results: string[];
+	offloadDebug?: CoverageLexicalBenchmarkOffloadSearchDebug | null;
 };
 
 type RecallContractType =
@@ -138,6 +184,24 @@ type RecallContractCase = {
 	query: string;
 	relevantPath: string;
 	type: RecallContractType;
+};
+
+type RelaxedHybridByQueryKindMetric = {
+	queryCount: number;
+	laneRanCount: number;
+	relevantCandidateHits: number;
+	relevantPrefilterHits: number;
+	relevantAdmittedHits: number;
+	overlapCandidateWithStrictHybrid: number;
+	overlapCandidateWithLocalBody: number;
+	overlapAdmittedWithStrictHybrid: number;
+	overlapAdmittedWithLocalBody: number;
+	exclusiveCandidateHits: number;
+	exclusiveAdmittedHits: number;
+};
+
+type RelaxedHybridAnalysis = {
+	byQueryKind: Record<string, RelaxedHybridByQueryKindMetric>;
 };
 
 type EngineLike = {
@@ -153,6 +217,9 @@ type EngineLike = {
 	getIndexBreakdown?(): Record<string, unknown> | null;
 	resetBenchmarkPhaseTiming?(): void;
 	getBenchmarkPhaseTimingSummary?(): PhaseTimingSummary | null;
+	getLastBenchmarkOffloadSearchDebug?():
+		| CoverageLexicalBenchmarkOffloadSearchDebug
+		| null;
 };
 
 const QUERY_TYPES: readonly QueryType[] = [
@@ -1850,10 +1917,64 @@ function createEngineHarness(
 	return new EngineCtor();
 }
 
+function registerBenchmarkFileSnapshotStore(
+	documents: readonly IndexedDocument[],
+): void {
+	const { FileSnapshotStore } = require(
+		"src/services/search/shared/file-snapshot-store",
+	) as {
+		FileSnapshotStore: new () => unknown;
+	};
+	const currentTexts = new Map<string, string>();
+	for (const document of documents) {
+		currentTexts.set(document.path, document.content ?? "");
+	}
+	container.registerInstance(FileSnapshotStore, {
+		readCurrentTexts: async (
+			fileOrPaths: ReadonlyArray<string | { path: string }>,
+		) => {
+			const result = new Map<string, string>();
+			for (const fileOrPath of fileOrPaths) {
+				const path =
+					typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+				const text = currentTexts.get(path);
+				if (text !== undefined) {
+					result.set(path, text);
+				}
+			}
+			return result;
+		},
+	} as any);
+}
+
+async function withCoverageBodyTokenOffloadEnv<T>(
+	enabled: boolean,
+	action: () => Promise<T>,
+): Promise<T> {
+	const previous = process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
+	process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = enabled
+		? "1"
+		: "0";
+	try {
+		return await action();
+	} finally {
+		if (previous === undefined) {
+			delete process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD;
+		} else {
+			process.env.COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD = previous;
+		}
+	}
+}
+
 type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
 	top2To4Ratio: number;
 	top5PlusRatio: number;
+	countPruneMinTopCount: number;
+	top2To4CountRatio: number;
+	top5PlusCountRatio: number;
+	top2To4CountSlack: number;
+	top5PlusCountSlack: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
@@ -1864,6 +1985,11 @@ const COVERAGE_DISPLAY_PRUNE_ENV_KEYS = [
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
@@ -1890,6 +2016,26 @@ function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExpe
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
 			0.5,
 		),
+		countPruneMinTopCount: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
+			3,
+		),
+		top2To4CountRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
+			0.67,
+		),
+		top5PlusCountRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
+			0.5,
+		),
+		top2To4CountSlack: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
+			1,
+		),
+		top5PlusCountSlack: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
+			2,
+		),
 		bodyCharWeight: readNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
 			0.5,
@@ -1909,6 +2055,19 @@ function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExpe
 	};
 }
 
+function createLegacyCoverageDisplayPruneExperimentConfig(
+	config: CoverageDisplayPruneExperimentConfig,
+): CoverageDisplayPruneExperimentConfig {
+	return {
+		...config,
+		countPruneMinTopCount: Number.MAX_SAFE_INTEGER,
+		top2To4CountRatio: 0,
+		top5PlusCountRatio: 0,
+		top2To4CountSlack: 0,
+		top5PlusCountSlack: 0,
+	};
+}
+
 async function withCoverageDisplayPruneEnv<T>(
 	config: CoverageDisplayPruneExperimentConfig,
 	action: () => Promise<T>,
@@ -1925,6 +2084,21 @@ async function withCoverageDisplayPruneEnv<T>(
 	);
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO = String(
 		config.top5PlusRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT = String(
+		config.countPruneMinTopCount,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO = String(
+		config.top2To4CountRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO = String(
+		config.top5PlusCountRatio,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK = String(
+		config.top2To4CountSlack,
+	);
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK = String(
+		config.top5PlusCountSlack,
 	);
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT = String(
 		config.bodyCharWeight,
@@ -2116,11 +2290,15 @@ async function runBenchmark(
 	engine: EngineLike,
 	documents: IndexedDocument[],
 	queryCases: QueryCase[],
+	options: {
+		includeOffloadDiagnostics?: boolean;
+	} = {},
 ): Promise<{
 	summary: BenchmarkSummary;
 	outcomes: QueryOutcome[];
 	phaseTiming: PhaseTimingSummary | null;
 }> {
+	registerBenchmarkFileSnapshotStore(documents);
 	await engine.addDocuments(documents);
 	engine.resetBenchmarkPhaseTiming?.();
 
@@ -2184,6 +2362,9 @@ async function runBenchmark(
 			hitTop5,
 			rank,
 			results: paths.slice(0, 5),
+			offloadDebug: options.includeOffloadDiagnostics
+				? (engine.getLastBenchmarkOffloadSearchDebug?.() ?? null)
+				: undefined,
 		});
 	}
 
@@ -2226,7 +2407,6 @@ function createCoverageRecallIndex(engine: any) {
 		metadataFolderCharPostings: engine.metadataFolderCharPostings,
 		metadataFolderPhrasePostings: engine.metadataFolderPhrasePostings,
 		metadataFolderPostings: engine.metadataFolderPostings,
-		metadataHeadingCharPostings: engine.metadataHeadingCharPostings,
 		metadataHeadingPhrasePostings: engine.metadataHeadingPhrasePostings,
 		metadataHeadingPostings: engine.metadataHeadingPostings,
 		metadataTagCharPostings: engine.metadataTagCharPostings,
@@ -2259,6 +2439,9 @@ async function runCoverageRecallContract(
 	lanePrefilterHitCounts: Record<string, number>;
 	lanePrefilterDropCounts: Record<string, number>;
 	laneAdmitDropCounts: Record<string, number>;
+	queryKindCounts: Record<string, number>;
+	queryKindAverageLaneCount: Record<string, number>;
+	relaxedHybridAnalysis: RelaxedHybridAnalysis;
 	misses: Array<{
 		query: string;
 		type: RecallContractType;
@@ -2295,6 +2478,12 @@ async function runCoverageRecallContract(
 	const lanePrefilterHitCounts: Record<string, number> = {};
 	const lanePrefilterDropCounts: Record<string, number> = {};
 	const laneAdmitDropCounts: Record<string, number> = {};
+	const queryKindCounts: Record<string, number> = {};
+	const queryKindLaneTotals: Record<string, number> = {};
+	const relaxedHybridByQueryKind: Record<
+		string,
+		RelaxedHybridByQueryKindMetric
+	> = {};
 	const typeTotals = new Map<
 		RecallContractType,
 		{ unionHits: number; misses: number; count: number }
@@ -2341,6 +2530,78 @@ async function runCoverageRecallContract(
 				maxItemResults: 10,
 			},
 		);
+		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
+		queryKindLaneTotals[plan.queryKind] =
+			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const relaxedStats =
+			relaxedHybridByQueryKind[plan.queryKind] ??
+			(relaxedHybridByQueryKind[plan.queryKind] = {
+				queryCount: 0,
+				laneRanCount: 0,
+				relevantCandidateHits: 0,
+				relevantPrefilterHits: 0,
+				relevantAdmittedHits: 0,
+				overlapCandidateWithStrictHybrid: 0,
+				overlapCandidateWithLocalBody: 0,
+				overlapAdmittedWithStrictHybrid: 0,
+				overlapAdmittedWithLocalBody: 0,
+				exclusiveCandidateHits: 0,
+				exclusiveAdmittedHits: 0,
+			});
+		relaxedStats.queryCount += 1;
+		const laneByName = new Map(
+			debug.lanes.map((lane) => [lane.laneName, lane] as const),
+		);
+		const relaxedLane = laneByName.get("relaxed_hybrid_lane");
+		const strictHybridLane = laneByName.get("strict_hybrid_lane");
+		const localBodyLane = laneByName.get("local_body_lane");
+		if (relaxedLane) {
+			relaxedStats.laneRanCount += 1;
+			const relaxedRelevantCandidate = relaxedLane.candidatePaths.includes(
+				queryCase.relevantPath,
+			);
+			const relaxedRelevantPrefilter = relaxedLane.prefilteredPaths.includes(
+				queryCase.relevantPath,
+			);
+			const relaxedRelevantAdmitted = relaxedLane.admittedPaths.includes(
+				queryCase.relevantPath,
+			);
+			const strictRelevantCandidate =
+				strictHybridLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+			const strictRelevantAdmitted =
+				strictHybridLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+			const localRelevantCandidate =
+				localBodyLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+			const localRelevantAdmitted =
+				localBodyLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+			if (relaxedRelevantCandidate) {
+				relaxedStats.relevantCandidateHits += 1;
+				if (strictRelevantCandidate) {
+					relaxedStats.overlapCandidateWithStrictHybrid += 1;
+				}
+				if (localRelevantCandidate) {
+					relaxedStats.overlapCandidateWithLocalBody += 1;
+				}
+				if (!strictRelevantCandidate && !localRelevantCandidate) {
+					relaxedStats.exclusiveCandidateHits += 1;
+				}
+			}
+			if (relaxedRelevantPrefilter) {
+				relaxedStats.relevantPrefilterHits += 1;
+			}
+			if (relaxedRelevantAdmitted) {
+				relaxedStats.relevantAdmittedHits += 1;
+				if (strictRelevantAdmitted) {
+					relaxedStats.overlapAdmittedWithStrictHybrid += 1;
+				}
+				if (localRelevantAdmitted) {
+					relaxedStats.overlapAdmittedWithLocalBody += 1;
+				}
+				if (!strictRelevantAdmitted && !localRelevantAdmitted) {
+					relaxedStats.exclusiveAdmittedHits += 1;
+				}
+			}
+		}
 		const hit = candidates.has(queryCase.relevantPath);
 		if (hit) {
 			unionHits += 1;
@@ -2438,7 +2699,158 @@ async function runCoverageRecallContract(
 		lanePrefilterHitCounts,
 		lanePrefilterDropCounts,
 		laneAdmitDropCounts,
+		queryKindCounts,
+		queryKindAverageLaneCount: Object.fromEntries(
+			Object.entries(queryKindCounts).map(([queryKind, count]) => [
+				queryKind,
+				round((queryKindLaneTotals[queryKind] ?? 0) / Math.max(1, count)),
+			]),
+		),
+		relaxedHybridAnalysis: {
+			byQueryKind: relaxedHybridByQueryKind,
+		},
 		misses,
+	};
+}
+
+async function runCoverageLaneStudy(
+	engine: any,
+	tokenizer: MockTokenizer,
+	queryCases: QueryCase[],
+): Promise<{
+	queryKindCounts: Record<string, number>;
+	queryKindAverageLaneCount: Record<string, number>;
+	relaxedHybridAnalysis: RelaxedHybridAnalysis;
+}> {
+	const { buildCoverageLexicalPlan } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-planner",
+	);
+	const {
+		buildCoverageLexicalPhraseSignatures,
+		buildCoverageLexicalStructuredMetadataSignatures,
+	} = require("src/services/search/coverage-lexical/coverage-lexical-bridge");
+	const {
+		collectCoverageLexicalCandidateStatesWithDebug,
+	} = require("src/services/search/coverage-lexical/coverage-lexical-recall");
+
+	const index = createCoverageRecallIndex(engine);
+	const queryKindCounts: Record<string, number> = {};
+	const queryKindLaneTotals: Record<string, number> = {};
+	const relaxedHybridByQueryKind: Record<
+		string,
+		RelaxedHybridByQueryKindMetric
+	> = {};
+
+	for (const queryCase of queryCases) {
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryCase.query, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engine.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryCase.query, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryCase.query,
+				plan.families,
+			),
+		];
+		const { debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			index,
+			plan,
+			phraseSignatures,
+			{
+				queryText: queryCase.query,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 10,
+			},
+		);
+		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
+		queryKindLaneTotals[plan.queryKind] =
+			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const relaxedStats =
+			relaxedHybridByQueryKind[plan.queryKind] ??
+			(relaxedHybridByQueryKind[plan.queryKind] = {
+				queryCount: 0,
+				laneRanCount: 0,
+				relevantCandidateHits: 0,
+				relevantPrefilterHits: 0,
+				relevantAdmittedHits: 0,
+				overlapCandidateWithStrictHybrid: 0,
+				overlapCandidateWithLocalBody: 0,
+				overlapAdmittedWithStrictHybrid: 0,
+				overlapAdmittedWithLocalBody: 0,
+				exclusiveCandidateHits: 0,
+				exclusiveAdmittedHits: 0,
+			});
+		relaxedStats.queryCount += 1;
+		const laneByName = new Map(
+			debug.lanes.map((lane) => [lane.laneName, lane] as const),
+		);
+		const relaxedLane = laneByName.get("relaxed_hybrid_lane");
+		const strictHybridLane = laneByName.get("strict_hybrid_lane");
+		const localBodyLane = laneByName.get("local_body_lane");
+		if (!relaxedLane) {
+			continue;
+		}
+		relaxedStats.laneRanCount += 1;
+		const relaxedRelevantCandidate = relaxedLane.candidatePaths.includes(
+			queryCase.relevantPath,
+		);
+		const relaxedRelevantPrefilter = relaxedLane.prefilteredPaths.includes(
+			queryCase.relevantPath,
+		);
+		const relaxedRelevantAdmitted = relaxedLane.admittedPaths.includes(
+			queryCase.relevantPath,
+		);
+		const strictRelevantCandidate =
+			strictHybridLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+		const strictRelevantAdmitted =
+			strictHybridLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+		const localRelevantCandidate =
+			localBodyLane?.candidatePaths.includes(queryCase.relevantPath) ?? false;
+		const localRelevantAdmitted =
+			localBodyLane?.admittedPaths.includes(queryCase.relevantPath) ?? false;
+		if (relaxedRelevantCandidate) {
+			relaxedStats.relevantCandidateHits += 1;
+			if (strictRelevantCandidate) {
+				relaxedStats.overlapCandidateWithStrictHybrid += 1;
+			}
+			if (localRelevantCandidate) {
+				relaxedStats.overlapCandidateWithLocalBody += 1;
+			}
+			if (!strictRelevantCandidate && !localRelevantCandidate) {
+				relaxedStats.exclusiveCandidateHits += 1;
+			}
+		}
+		if (relaxedRelevantPrefilter) {
+			relaxedStats.relevantPrefilterHits += 1;
+		}
+		if (relaxedRelevantAdmitted) {
+			relaxedStats.relevantAdmittedHits += 1;
+			if (strictRelevantAdmitted) {
+				relaxedStats.overlapAdmittedWithStrictHybrid += 1;
+			}
+			if (localRelevantAdmitted) {
+				relaxedStats.overlapAdmittedWithLocalBody += 1;
+			}
+			if (!strictRelevantAdmitted && !localRelevantAdmitted) {
+				relaxedStats.exclusiveAdmittedHits += 1;
+			}
+		}
+	}
+
+	return {
+		queryKindCounts,
+		queryKindAverageLaneCount: Object.fromEntries(
+			Object.entries(queryKindCounts).map(([queryKind, count]) => [
+				queryKind,
+				round((queryKindLaneTotals[queryKind] ?? 0) / Math.max(1, count)),
+			]),
+		),
+		relaxedHybridAnalysis: {
+			byQueryKind: relaxedHybridByQueryKind,
+		},
 	};
 }
 
@@ -2484,6 +2896,60 @@ function summarizeLaneGuardrails(recallContract: {
 					},
 				] as const;
 			}),
+	);
+}
+
+function summarizeRelaxedHybridAnalysis(recallContract: {
+	relaxedHybridAnalysis: {
+		byQueryKind: Record<
+			string,
+			{
+				queryCount: number;
+				laneRanCount: number;
+				relevantCandidateHits: number;
+				relevantPrefilterHits: number;
+				relevantAdmittedHits: number;
+				overlapCandidateWithStrictHybrid: number;
+				overlapCandidateWithLocalBody: number;
+				overlapAdmittedWithStrictHybrid: number;
+				overlapAdmittedWithLocalBody: number;
+				exclusiveCandidateHits: number;
+				exclusiveAdmittedHits: number;
+			}
+		>;
+	};
+}) {
+	return Object.fromEntries(
+		Object.entries(recallContract.relaxedHybridAnalysis.byQueryKind)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([queryKind, metric]) => [
+				queryKind,
+				{
+					queryCount: metric.queryCount,
+					laneRanCount: metric.laneRanCount,
+					laneRunRate: round(
+						metric.laneRanCount / Math.max(1, metric.queryCount),
+					),
+					relevantCandidateHits: metric.relevantCandidateHits,
+					relevantPrefilterHits: metric.relevantPrefilterHits,
+					relevantAdmittedHits: metric.relevantAdmittedHits,
+					candidateHitRateWhenLaneRuns: round(
+						metric.relevantCandidateHits / Math.max(1, metric.laneRanCount),
+					),
+					admittedHitRateWhenLaneRuns: round(
+						metric.relevantAdmittedHits / Math.max(1, metric.laneRanCount),
+					),
+					overlapCandidateWithStrictHybrid:
+						metric.overlapCandidateWithStrictHybrid,
+					overlapCandidateWithLocalBody: metric.overlapCandidateWithLocalBody,
+					overlapAdmittedWithStrictHybrid:
+						metric.overlapAdmittedWithStrictHybrid,
+					overlapAdmittedWithLocalBody:
+						metric.overlapAdmittedWithLocalBody,
+					exclusiveCandidateHits: metric.exclusiveCandidateHits,
+					exclusiveAdmittedHits: metric.exclusiveAdmittedHits,
+				},
+			]),
 	);
 }
 
@@ -2562,6 +3028,110 @@ function summarizeMisses(outcomes: QueryOutcome[], limit = 10): Array<{
 		}));
 }
 
+function summarizeOffloadDiagnostics(
+	outcomes: QueryOutcome[],
+	limit = 12,
+): Array<{
+	query: string;
+	type: QueryType;
+	relevantPath: string;
+	rank: number;
+	top5: string[];
+	offload: {
+		candidateCount: number;
+		stagedHydration: boolean;
+		relevantDoc: CoverageLexicalBenchmarkOffloadDocDebug | null;
+		hydratedDocCount: number;
+		localWindowDocCount: number;
+		unresolvedDocCount: number;
+		cheapCoarseTopPaths: string[];
+		finalTopPaths: string[];
+	};
+}> {
+	return outcomes
+		.map((outcome) => {
+			const debug = outcome.offloadDebug;
+			if (!debug) {
+				return null;
+			}
+			const relevantDoc =
+				debug.docs.find((doc) => doc.path === outcome.relevantPath) ?? null;
+			const unresolvedDocCount = debug.docs.filter(
+				(doc) =>
+					doc.unresolvedBodyEvidence.needsPassageSignal ||
+					doc.unresolvedBodyEvidence.hasUnverifiedPhraseWitness ||
+					doc.unresolvedBodyEvidence.hasUnresolvedPrefixSurface ||
+					doc.unresolvedBodyEvidence.hasUnresolvedBodyCharVerification ||
+					doc.unresolvedBodyEvidence.unresolvedFamilyCount > 0 ||
+					doc.unresolvedBodyEvidence.unresolvedWeightUpperBound > 0,
+			).length;
+			const shouldInclude =
+				outcome.rank !== 1 ||
+				(relevantDoc !== null &&
+					(relevantDoc.unresolvedBodyEvidence.needsPassageSignal ||
+						relevantDoc.unresolvedBodyEvidence.hasUnverifiedPhraseWitness ||
+						relevantDoc.unresolvedBodyEvidence.hasUnresolvedPrefixSurface ||
+						relevantDoc.unresolvedBodyEvidence.hasUnresolvedBodyCharVerification ||
+						!relevantDoc.hydratedAtCoarse));
+			if (!shouldInclude) {
+				return null;
+			}
+			const docPathById = new Map(
+				debug.docs
+					.filter((doc) => doc.path !== null)
+					.map((doc) => [doc.docId, doc.path!] as const),
+			);
+			return {
+				query: outcome.query,
+				type: outcome.type,
+				relevantPath: outcome.relevantPath,
+				rank: outcome.rank,
+				top5: outcome.results,
+				offload: {
+					candidateCount: debug.candidateCount,
+					stagedHydration: debug.stagedHydration,
+					relevantDoc,
+					hydratedDocCount: debug.coarseHydrationDocIds.length,
+					localWindowDocCount: debug.localWindowDocIds.length,
+					unresolvedDocCount,
+					cheapCoarseTopPaths: debug.cheapCoarseTopDocIds
+						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
+						.slice(0, 5),
+					finalTopPaths: debug.finalTopDocIds
+						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
+						.slice(0, 5),
+				},
+			};
+		})
+		.filter(
+			(item): item is {
+				query: string;
+				type: QueryType;
+				relevantPath: string;
+				rank: number;
+				top5: string[];
+				offload: {
+					candidateCount: number;
+					stagedHydration: boolean;
+					relevantDoc: CoverageLexicalBenchmarkOffloadDocDebug | null;
+					hydratedDocCount: number;
+					localWindowDocCount: number;
+					unresolvedDocCount: number;
+					cheapCoarseTopPaths: string[];
+					finalTopPaths: string[];
+				};
+			} => item !== null,
+		)
+		.sort((left, right) => {
+			const leftRank = left.rank === 0 ? Number.POSITIVE_INFINITY : left.rank;
+			const rightRank = right.rank === 0 ? Number.POSITIVE_INFINITY : right.rank;
+			return rightRank === leftRank
+				? left.query.localeCompare(right.query)
+				: rightRank - leftRank;
+		})
+		.slice(0, limit);
+}
+
 function summarizeDisagreements(
 	leftOutcomes: QueryOutcome[],
 	rightOutcomes: QueryOutcome[],
@@ -2616,6 +3186,120 @@ function summarizeDisagreements(
 		.slice(0, limit);
 }
 
+function summarizeResultListDifferences(
+	leftOutcomes: QueryOutcome[],
+	rightOutcomes: QueryOutcome[],
+	limit = 12,
+): {
+	changedQueryCount: number;
+	rankChangedQueryCount: number;
+	top1ChangedQueryCount: number;
+	onlyTailChangedQueryCount: number;
+	byType: Partial<Record<QueryType, number>>;
+	bySuite: Partial<Record<BenchmarkSuite, number>>;
+	topChanges: Array<{
+		query: string;
+		type: QueryType;
+		suite: BenchmarkSuite;
+		relevantPath: string;
+		leftRank: number;
+		rightRank: number;
+		leftTop5: string[];
+		rightTop5: string[];
+	}>;
+} {
+	const changes: Array<{
+		query: string;
+		type: QueryType;
+		suite: BenchmarkSuite;
+		relevantPath: string;
+		leftRank: number;
+		rightRank: number;
+		leftTop5: string[];
+		rightTop5: string[];
+	}> = [];
+	const byType = new Map<QueryType, number>();
+	const bySuite = new Map<BenchmarkSuite, number>();
+	let rankChangedQueryCount = 0;
+	let top1ChangedQueryCount = 0;
+	let onlyTailChangedQueryCount = 0;
+
+	for (let index = 0; index < leftOutcomes.length; index += 1) {
+		const left = leftOutcomes[index];
+		const right = rightOutcomes[index];
+		if (
+			left.rank === right.rank &&
+			left.results.length === right.results.length &&
+			left.results.every((item, resultIndex) => item === right.results[resultIndex])
+		) {
+			continue;
+		}
+		changes.push({
+			query: left.query,
+			type: left.type,
+			suite: left.suite,
+			relevantPath: left.relevantPath,
+			leftRank: left.rank,
+			rightRank: right.rank,
+			leftTop5: left.results,
+			rightTop5: right.results,
+		});
+		byType.set(left.type, (byType.get(left.type) ?? 0) + 1);
+		bySuite.set(left.suite, (bySuite.get(left.suite) ?? 0) + 1);
+		if (left.rank !== right.rank) {
+			rankChangedQueryCount += 1;
+		}
+		if (left.hitTop1 !== right.hitTop1) {
+			top1ChangedQueryCount += 1;
+		}
+		if (left.rank === right.rank) {
+			onlyTailChangedQueryCount += 1;
+		}
+	}
+
+	return {
+		changedQueryCount: changes.length,
+		rankChangedQueryCount,
+		top1ChangedQueryCount,
+		onlyTailChangedQueryCount,
+		byType: Object.fromEntries(
+			[...byType.entries()].sort((left, right) =>
+				right[1] === left[1] ? left[0].localeCompare(right[0]) : right[1] - left[1],
+			),
+		),
+		bySuite: Object.fromEntries(
+			[...bySuite.entries()].sort((left, right) =>
+				right[1] === left[1] ? left[0].localeCompare(right[0]) : right[1] - left[1],
+			),
+		),
+		topChanges: changes
+			.sort((left, right) => {
+				const leftRankGap = Math.abs(left.leftRank - left.rightRank);
+				const rightRankGap = Math.abs(right.leftRank - right.rightRank);
+				if (rightRankGap !== leftRankGap) {
+					return rightRankGap - leftRankGap;
+				}
+				const leftTop5Gap = countTop5Differences(left.leftTop5, left.rightTop5);
+				const rightTop5Gap = countTop5Differences(right.leftTop5, right.rightTop5);
+				return rightTop5Gap === leftTop5Gap
+					? left.query.localeCompare(right.query)
+					: rightTop5Gap - leftTop5Gap;
+			})
+			.slice(0, limit),
+	};
+}
+
+function countTop5Differences(left: readonly string[], right: readonly string[]): number {
+	const maxLength = Math.max(left.length, right.length);
+	let differenceCount = 0;
+	for (let index = 0; index < maxLength; index += 1) {
+		if (left[index] !== right[index]) {
+			differenceCount += 1;
+		}
+	}
+	return differenceCount;
+}
+
 function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 	if (!phaseTiming) {
 		return null;
@@ -2648,6 +3332,24 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 			shareOfRecallMs: round(phase.shareOfRecallMs),
 			shareOfQueryTime: round(phase.shareOfQueryTime),
 		}));
+	const laneCollectTotal =
+		phaseTiming.recallSubphases?.find((phase) => phase.phase === "laneCollect")
+			?.totalMs ?? 0;
+	const laneCollectBreakdown = (phaseTiming.recallSubphases ?? [])
+		.filter((phase) => phase.phase.startsWith("laneCollect:"))
+		.slice(0, 8)
+		.map((phase) => ({
+			phase: phase.phase,
+			totalMs: round(phase.totalMs),
+			avgMsPerCall: round(phase.avgMsPerCall),
+			avgMsPerUnit: round(phase.avgMsPerUnit),
+			count: phase.count,
+			unitCount: phase.unitCount,
+			shareOfLaneCollectMs: round(
+				laneCollectTotal <= 0 ? 0 : phase.totalMs / laneCollectTotal,
+			),
+			shareOfRecallMs: round(phase.shareOfRecallMs),
+		}));
 	const topLaneEvaluateSubphases = (phaseTiming.laneEvaluateSubphases ?? [])
 		.slice(0, 6)
 		.map((phase) => ({
@@ -2667,6 +3369,7 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 		totalMeasuredMs: round(phaseTiming.totalMeasuredMs),
 		topHotPhases,
 		topRecallSubphases,
+		laneCollectBreakdown,
 		topLaneEvaluateSubphases,
 		admissionVsLocalWindow: {
 			admissionTotalMs: round(admission?.totalMs ?? 0),
@@ -2683,6 +3386,61 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 
 function round(value: number): number {
 	return Number(value.toFixed(3));
+}
+
+const COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES: readonly CoverageLexicalBenchmarkDiagnostic[] =
+	[
+		"index",
+		"timing",
+		"recall",
+		"lane-study",
+		"offload",
+		"wins",
+		"disagreements",
+		"misses",
+		"prune",
+	];
+
+function resolveCoverageLexicalBenchmarkDiagnostics(): ReadonlySet<CoverageLexicalBenchmarkDiagnostic> {
+	const raw = process.env.COVERAGE_LEXICAL_BENCH_DIAGNOSTICS?.trim();
+	if (!raw || raw.length === 0) {
+		return new Set();
+	}
+	const parts = raw
+		.split(/[\s,]+/u)
+		.map((part) => part.trim().toLowerCase())
+		.filter((part) => part.length > 0);
+	const selected = new Set<CoverageLexicalBenchmarkDiagnostic>();
+	for (const part of parts) {
+		if (part === "default") {
+			continue;
+		}
+		if (part === "none") {
+			selected.clear();
+			continue;
+		}
+		if (part === "all") {
+			for (const name of COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES) {
+				selected.add(name);
+			}
+			continue;
+		}
+		if (
+			COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES.includes(
+				part as CoverageLexicalBenchmarkDiagnostic,
+			)
+		) {
+			selected.add(part as CoverageLexicalBenchmarkDiagnostic);
+		}
+	}
+	return selected;
+}
+
+function shouldPrintCoverageLexicalBenchmarkDiagnostic(
+	selected: ReadonlySet<CoverageLexicalBenchmarkDiagnostic>,
+	diagnostic: CoverageLexicalBenchmarkDiagnostic,
+): boolean {
+	return selected.has(diagnostic);
 }
 
 if (process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT !== "1") {
@@ -2713,6 +3471,11 @@ describe("coverage lexical automation benchmark", () => {
 
 	test("compare coverage lexical against minisearch on automation corpus", async () => {
 		const benchmarkStartedAt = performance.now();
+		const diagnostics = resolveCoverageLexicalBenchmarkDiagnostics();
+		const includeOffloadDiagnostics =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "offload");
+		const includePruneDiagnostics =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "prune");
 		const tokenizer = createMockTokenizer();
 		const { documents, queryCases } = createAutomationCorpus();
 		const languageMix = computeLanguageMix(documents);
@@ -2724,9 +3487,17 @@ describe("coverage lexical automation benchmark", () => {
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
 		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
+		const legacyDisplayPruneConfig =
+			createLegacyCoverageDisplayPruneExperimentConfig(displayPruneConfig);
 
 		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
-		const miniResult = await runBenchmark("MiniSearch", mini, documents, queryCases);
+		const miniResult = await runBenchmark(
+			"MiniSearch",
+			mini,
+			documents,
+			queryCases,
+			{ includeOffloadDiagnostics: false },
+		);
 
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -2741,51 +3512,100 @@ describe("coverage lexical automation benchmark", () => {
 			},
 		};
 
-		const coverageLexicalCore = await withCoverageDisplayPruneEnv(
-			{
-				enabled: false,
-				top2To4Ratio: displayPruneConfig.top2To4Ratio,
-				top5PlusRatio: displayPruneConfig.top5PlusRatio,
-				bodyCharWeight: displayPruneConfig.bodyCharWeight,
-				metadataCharWeight: displayPruneConfig.metadataCharWeight,
-				tagExactWeight: displayPruneConfig.tagExactWeight,
-				tagCharWeight: displayPruneConfig.tagCharWeight,
-			},
+		const coverageLexicalCore = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				createEngineHarness(
-					CoverageLexicalFileSearchEngine,
-					tokenizer,
-					"coverage-lexical",
+				withCoverageDisplayPruneEnv(
+					{
+						enabled: false,
+						top2To4Ratio: displayPruneConfig.top2To4Ratio,
+						top5PlusRatio: displayPruneConfig.top5PlusRatio,
+						countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
+						top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
+						top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
+						top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
+						top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
+						bodyCharWeight: displayPruneConfig.bodyCharWeight,
+						metadataCharWeight: displayPruneConfig.metadataCharWeight,
+						tagExactWeight: displayPruneConfig.tagExactWeight,
+						tagCharWeight: displayPruneConfig.tagCharWeight,
+					},
+					async () =>
+						createEngineHarness(
+							CoverageLexicalFileSearchEngine,
+							tokenizer,
+							"coverage-lexical",
+						),
 				),
 		);
-		const coverageCoreResult = await withCoverageDisplayPruneEnv(
-			{
-				enabled: false,
-				top2To4Ratio: displayPruneConfig.top2To4Ratio,
-				top5PlusRatio: displayPruneConfig.top5PlusRatio,
-				bodyCharWeight: displayPruneConfig.bodyCharWeight,
-				metadataCharWeight: displayPruneConfig.metadataCharWeight,
-				tagExactWeight: displayPruneConfig.tagExactWeight,
-				tagCharWeight: displayPruneConfig.tagCharWeight,
-			},
+		const coverageCoreResult = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				runBenchmark(
-					"CoverageLexical(core)",
-					coverageLexicalCore,
-					documents,
-					queryCases,
+				withCoverageDisplayPruneEnv(
+					{
+						enabled: false,
+						top2To4Ratio: displayPruneConfig.top2To4Ratio,
+						top5PlusRatio: displayPruneConfig.top5PlusRatio,
+						countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
+						top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
+						top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
+						top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
+						top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
+						bodyCharWeight: displayPruneConfig.bodyCharWeight,
+						metadataCharWeight: displayPruneConfig.metadataCharWeight,
+						tagExactWeight: displayPruneConfig.tagExactWeight,
+						tagCharWeight: displayPruneConfig.tagCharWeight,
+					},
+					async () =>
+						runBenchmark(
+							"CoverageLexical(core)",
+							coverageLexicalCore,
+							documents,
+							queryCases,
+							{ includeOffloadDiagnostics },
+						),
 				),
 		);
-		const recallContract = await runCoverageRecallContract(
-			coverageLexicalCore as any,
-			tokenizer,
-			buildRecallContractCases(),
-		);
-		const coverageCoreVsMini = summarizeWins(
-			coverageCoreResult.outcomes,
-			miniResult.outcomes,
-		);
-		const coverageCoreMisses = summarizeMisses(coverageCoreResult.outcomes);
+		const recallContract = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"recall",
+		)
+			? await withCoverageBodyTokenOffloadEnv(
+					true,
+					async () =>
+						runCoverageRecallContract(
+							coverageLexicalCore as any,
+							tokenizer,
+							buildRecallContractCases(),
+						),
+			  )
+			: null;
+		const relaxedHybridStudy = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"lane-study",
+		)
+			? await withCoverageBodyTokenOffloadEnv(
+					true,
+					async () =>
+						runCoverageLaneStudy(
+							coverageLexicalCore as any,
+							tokenizer,
+							queryCases,
+						),
+			  )
+			: null;
+		const coverageCoreVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(coverageCoreResult.outcomes, miniResult.outcomes)
+			: null;
+		const coverageCoreMisses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(coverageCoreResult.outcomes)
+			: null;
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -2798,43 +3618,136 @@ describe("coverage lexical automation benchmark", () => {
 				removeItem: jest.fn(),
 			},
 		};
-		const coverageLexicalDisplay = await withCoverageDisplayPruneEnv(
-			displayPruneConfig,
+		const coverageLexicalDisplay = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				createEngineHarness(
-					CoverageLexicalFileSearchEngine,
-					tokenizer,
-					"coverage-lexical",
+				withCoverageDisplayPruneEnv(
+					displayPruneConfig,
+					async () =>
+						createEngineHarness(
+							CoverageLexicalFileSearchEngine,
+							tokenizer,
+							"coverage-lexical",
+						),
 				),
 		);
-		const coverageDisplayResult = await withCoverageDisplayPruneEnv(
-			displayPruneConfig,
+		const coverageDisplayResult = await withCoverageBodyTokenOffloadEnv(
+			true,
 			async () =>
-				runBenchmark(
-					"CoverageLexical(display)",
-					coverageLexicalDisplay,
-					documents,
-					queryCases,
+				withCoverageDisplayPruneEnv(
+					displayPruneConfig,
+					async () =>
+						runBenchmark(
+							"CoverageLexical(display)",
+							coverageLexicalDisplay,
+							documents,
+							queryCases,
+							{ includeOffloadDiagnostics },
+						),
 				),
 		);
-		const coverageDisplayVsMini = summarizeWins(
-			coverageDisplayResult.outcomes,
-			miniResult.outcomes,
-		);
-		const coverageDisplayVsCore = summarizeWins(
-			coverageDisplayResult.outcomes,
-			coverageCoreResult.outcomes,
-		);
-		const coverageDisplayMisses = summarizeMisses(coverageDisplayResult.outcomes);
-		const miniMisses = summarizeMisses(miniResult.outcomes);
-		const coreVsMiniDisagreementDigest = summarizeDisagreements(
-			coverageCoreResult.outcomes,
-			miniResult.outcomes,
-		);
-		const displayVsCoreDisagreementDigest = summarizeDisagreements(
-			coverageDisplayResult.outcomes,
-			coverageCoreResult.outcomes,
-		);
+		const coverageDisplayLegacyResult = includePruneDiagnostics
+			? await (async () => {
+					if (
+						"reset" in container &&
+						typeof (container as any).reset === "function"
+					) {
+						(container as any).reset();
+					} else {
+						container.clearInstances();
+					}
+					(global as any).window = {
+						localStorage: {
+							getItem: jest.fn(() => "zh"),
+							setItem: jest.fn(),
+							removeItem: jest.fn(),
+						},
+					};
+					const coverageLexicalDisplayLegacy =
+						await withCoverageBodyTokenOffloadEnv(
+							true,
+							async () =>
+								withCoverageDisplayPruneEnv(
+									legacyDisplayPruneConfig,
+									async () =>
+										createEngineHarness(
+											CoverageLexicalFileSearchEngine,
+											tokenizer,
+											"coverage-lexical",
+										),
+								),
+						);
+					return withCoverageBodyTokenOffloadEnv(
+						true,
+						async () =>
+							withCoverageDisplayPruneEnv(
+								legacyDisplayPruneConfig,
+								async () =>
+									runBenchmark(
+										"CoverageLexical(display-legacy)",
+										coverageLexicalDisplayLegacy,
+										documents,
+										queryCases,
+										{ includeOffloadDiagnostics: false },
+									),
+							),
+					);
+			  })()
+			: null;
+		const coverageDisplayVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(coverageDisplayResult.outcomes, miniResult.outcomes)
+			: null;
+		const coverageDisplayVsCore = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(
+					coverageDisplayResult.outcomes,
+					coverageCoreResult.outcomes,
+			  )
+			: null;
+		const coverageDisplayMisses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(coverageDisplayResult.outcomes)
+			: null;
+		const miniMisses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(miniResult.outcomes)
+			: null;
+		const coreVsMiniDisagreementDigest =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+				? summarizeDisagreements(
+						coverageCoreResult.outcomes,
+						miniResult.outcomes,
+				  )
+				: null;
+		const displayVsCoreDisagreementDigest =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+				? summarizeDisagreements(
+						coverageDisplayResult.outcomes,
+						coverageCoreResult.outcomes,
+				  )
+				: null;
+		const displayVsLegacyResultListDiff =
+			includePruneDiagnostics && coverageDisplayLegacyResult
+				? summarizeResultListDifferences(
+						coverageDisplayResult.outcomes,
+						coverageDisplayLegacyResult.outcomes,
+				  )
+				: null;
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
 		console.log(
@@ -2885,10 +3798,50 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 
-		console.log(
-			"[coverage-lexical-automation-benchmark] display-prune-config",
-			JSON.stringify(displayPruneConfig, null, 2),
-		);
+		if (
+			includePruneDiagnostics &&
+			displayVsLegacyResultListDiff &&
+			coverageDisplayLegacyResult
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] display-prune-config",
+				JSON.stringify(
+					{
+						current: displayPruneConfig,
+						legacyBaseline: legacyDisplayPruneConfig,
+					},
+					null,
+					2,
+				),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] display-prune-diff",
+				JSON.stringify(
+					{
+						changedQueryCount: displayVsLegacyResultListDiff.changedQueryCount,
+						rankChangedQueryCount:
+							displayVsLegacyResultListDiff.rankChangedQueryCount,
+						top1ChangedQueryCount:
+							displayVsLegacyResultListDiff.top1ChangedQueryCount,
+						onlyTailChangedQueryCount:
+							displayVsLegacyResultListDiff.onlyTailChangedQueryCount,
+						byType: displayVsLegacyResultListDiff.byType,
+						bySuite: displayVsLegacyResultListDiff.bySuite,
+						currentObjective: round(coverageDisplayResult.summary.objective),
+						legacyObjective: round(coverageDisplayLegacyResult.summary.objective),
+						currentTop1: round(coverageDisplayResult.summary.top1),
+						legacyTop1: round(coverageDisplayLegacyResult.summary.top1),
+						currentTop3: round(coverageDisplayResult.summary.top3),
+						legacyTop3: round(coverageDisplayLegacyResult.summary.top3),
+						currentTop5: round(coverageDisplayResult.summary.top5),
+						legacyTop5: round(coverageDisplayLegacyResult.summary.top5),
+						topChanges: displayVsLegacyResultListDiff.topChanges,
+					},
+					null,
+					2,
+				),
+			);
+		}
 		console.log(
 			"[coverage-lexical-automation-benchmark] summary",
 			JSON.stringify(
@@ -3044,103 +3997,168 @@ describe("coverage lexical automation benchmark", () => {
 				2,
 			),
 		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] index-breakdown",
-			JSON.stringify(
-				{
-					MiniSearch: mini.getIndexBreakdown?.() ?? null,
-					CoverageLexicalCore:
-						coverageLexicalCore.getIndexBreakdown?.() ?? null,
-					CoverageLexicalDisplay:
-						coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-phase-timing",
-			JSON.stringify(
-				{
-					core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
-					display: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] recall-contract",
-			JSON.stringify(
-				{
-					unionHitRate: round(recallContract.unionHitRate),
-					zeroRate: round(recallContract.zeroRate),
-					byType: Object.fromEntries(
-						Object.entries(recallContract.byType).map(([type, metric]) => [
-							type,
-							{
-								unionHitRate: round(metric.unionHitRate),
-								zeroRate: round(metric.zeroRate),
-								count: metric.count,
-							},
-						]),
-					),
-					laneGuardrails: summarizeLaneGuardrails(recallContract),
-					prefilterDropMisses: recallContract.misses
-						.filter((miss) =>
-							miss.lanes.some(
-								(lane) => lane.relevantCandidate && !lane.relevantInPrefilter,
-							),
-						)
-						.slice(0, 10),
-					postPrefilterDropMisses: recallContract.misses
-						.filter((miss) =>
-							miss.lanes.some(
-								(lane) => lane.relevantInPrefilter && !lane.relevantAdmitted,
-							),
-						)
-						.slice(0, 10),
-					laneCandidateHitCounts: recallContract.laneCandidateHitCounts,
-					lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
-					laneHitCounts: recallContract.laneHitCounts,
-					misses: recallContract.misses.slice(0, 10),
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-core-vs-mini",
-			JSON.stringify(coverageCoreVsMini, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-display-vs-mini",
-			JSON.stringify(coverageDisplayVsMini, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-display-vs-core",
-			JSON.stringify(coverageDisplayVsCore, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] disagreement-digest-core-vs-mini",
-			JSON.stringify(coreVsMiniDisagreementDigest, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] disagreement-digest-display-vs-core",
-			JSON.stringify(displayVsCoreDisagreementDigest, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-core-misses",
-			JSON.stringify(coverageCoreMisses, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-display-misses",
-			JSON.stringify(coverageDisplayMisses, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] mini-misses",
-			JSON.stringify(miniMisses, null, 2),
-		);
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "index")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] index-breakdown",
+				JSON.stringify(
+					{
+						MiniSearch: mini.getIndexBreakdown?.() ?? null,
+						CoverageLexicalCore:
+							coverageLexicalCore.getIndexBreakdown?.() ?? null,
+						CoverageLexicalDisplay:
+							coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "timing")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-phase-timing",
+				JSON.stringify(
+					{
+						core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
+						display: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "recall") &&
+			recallContract
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] recall-contract",
+				JSON.stringify(
+					{
+						unionHitRate: round(recallContract.unionHitRate),
+						zeroRate: round(recallContract.zeroRate),
+						queryKindCounts: recallContract.queryKindCounts,
+						queryKindAverageLaneCount: recallContract.queryKindAverageLaneCount,
+						byType: Object.fromEntries(
+							Object.entries(recallContract.byType).map(([type, metric]) => [
+								type,
+								{
+									unionHitRate: round(metric.unionHitRate),
+									zeroRate: round(metric.zeroRate),
+									count: metric.count,
+								},
+							]),
+						),
+						laneGuardrails: summarizeLaneGuardrails(recallContract),
+						relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
+							recallContract,
+						),
+						prefilterDropMisses: recallContract.misses
+							.filter((miss) =>
+								miss.lanes.some(
+									(lane) =>
+										lane.relevantCandidate && !lane.relevantInPrefilter,
+								),
+							)
+							.slice(0, 10),
+						postPrefilterDropMisses: recallContract.misses
+							.filter((miss) =>
+								miss.lanes.some(
+									(lane) =>
+										lane.relevantInPrefilter && !lane.relevantAdmitted,
+								),
+							)
+							.slice(0, 10),
+						laneCandidateHitCounts: recallContract.laneCandidateHitCounts,
+						lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
+						laneHitCounts: recallContract.laneHitCounts,
+						misses: recallContract.misses.slice(0, 10),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "lane-study") &&
+			relaxedHybridStudy
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] relaxed-hybrid-study",
+				JSON.stringify(
+					{
+						queryKindCounts: relaxedHybridStudy.queryKindCounts,
+						queryKindAverageLaneCount:
+							relaxedHybridStudy.queryKindAverageLaneCount,
+						relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
+							relaxedHybridStudy,
+						),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "wins")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-core-vs-mini",
+				JSON.stringify(coverageCoreVsMini, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-display-vs-mini",
+				JSON.stringify(coverageDisplayVsMini, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-display-vs-core",
+				JSON.stringify(coverageDisplayVsCore, null, 2),
+			);
+		}
+		if (
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] disagreement-digest-core-vs-mini",
+				JSON.stringify(coreVsMiniDisagreementDigest, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] disagreement-digest-display-vs-core",
+				JSON.stringify(displayVsCoreDisagreementDigest, null, 2),
+			);
+		}
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "misses")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-core-misses",
+				JSON.stringify(coverageCoreMisses, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-display-misses",
+				JSON.stringify(coverageDisplayMisses, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] mini-misses",
+				JSON.stringify(miniMisses, null, 2),
+			);
+		}
+		if (includeOffloadDiagnostics) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] offload-diagnostics-core",
+				JSON.stringify(
+					summarizeOffloadDiagnostics(coverageCoreResult.outcomes),
+					null,
+					2,
+				),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] offload-diagnostics-display",
+				JSON.stringify(
+					summarizeOffloadDiagnostics(coverageDisplayResult.outcomes),
+					null,
+					2,
+				),
+			);
+		}
 
 		expect(documents.length).toBeGreaterThanOrEqual(70);
 		expect(queryCases.length).toBeGreaterThanOrEqual(145);

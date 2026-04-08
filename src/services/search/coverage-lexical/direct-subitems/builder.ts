@@ -14,6 +14,7 @@ import {
 	collectDirectSubitemsExactOccurrences,
 	collectDirectSubitemsSupportOccurrences,
 } from "./raw-occurrences";
+import { selectStructurallyRelevantExactOccurrences } from "./occurrence-structure";
 import { renderDirectSubitemsCandidateSpans } from "./snippet-renderer";
 import {
 	dedupeDirectSubitemsCandidateSpans,
@@ -42,6 +43,8 @@ export function buildDirectSubitemsExactCandidates(params: {
 		params.snapshotText,
 		queryTerms,
 	);
+	const structuralExactOccurrences =
+		selectStructurallyRelevantExactOccurrences(exactOccurrences);
 	const supportStrategy = params.supportStrategy ?? "always";
 	const supportOccurrences = shouldCollectSupportOccurrences(
 		queryTerms,
@@ -51,7 +54,9 @@ export function buildDirectSubitemsExactCandidates(params: {
 		? collectDirectSubitemsSupportOccurrences(params.snapshotText, queryTerms)
 		: [];
 	const anchorOccurrences =
-		exactOccurrences.length > 0 ? exactOccurrences : supportOccurrences;
+		structuralExactOccurrences.length > 0
+			? structuralExactOccurrences
+			: supportOccurrences;
 	const initialSpans = buildDirectSubitemsExactCandidateSpans({
 		queryText: params.queryText,
 		snapshotText: params.snapshotText,
@@ -64,7 +69,7 @@ export function buildDirectSubitemsExactCandidates(params: {
 		queryText: params.queryText,
 		snapshotText: params.snapshotText,
 		queryTerms,
-		exactOccurrences,
+		exactOccurrences: structuralExactOccurrences,
 		initialSpans,
 		options: params.options,
 	});

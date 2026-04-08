@@ -273,7 +273,6 @@ describe("coverage lexical recall suite", () => {
 					metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
 					metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
 					metadataFolderPostings: engineAny.metadataFolderPostings,
-					metadataHeadingCharPostings: engineAny.metadataHeadingCharPostings,
 					metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 					metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 					metadataHeadingPostings: engineAny.metadataHeadingPostings,
@@ -396,7 +395,6 @@ describe("coverage lexical recall suite", () => {
 				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
 				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
 				metadataFolderPostings: engineAny.metadataFolderPostings,
-				metadataHeadingCharPostings: engineAny.metadataHeadingCharPostings,
 				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 				metadataHeadingPostings: engineAny.metadataHeadingPostings,
@@ -429,6 +427,209 @@ describe("coverage lexical recall suite", () => {
 		expect(witnessDocId).toBeDefined();
 		const witnessState = candidates.get(witnessDocId);
 		expect(witnessState?.phraseMatches.length).toBeGreaterThan(0);
+	});
+
+	test("offloaded body phrase witness stays unresolved instead of silently weakening", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+			};
+		};
+
+		const documents: IndexedDocument[] = [
+			{
+				path: "adversarial/ranker-lab/en/exact-quality-witness.md",
+				basename: "exact-quality-witness.md",
+				folder: "adversarial/ranker-lab/en",
+				headings: "Exact quality witness",
+				content:
+					"config data rollout keeps exact family evidence together in one compact note",
+			},
+			{
+				path: "adversarial/ranker-lab/en/exact-quality-loose.md",
+				basename: "exact-quality-loose.md",
+				folder: "adversarial/ranker-lab/en",
+				headings: "Exact quality loose",
+				content:
+					"config guidance and data handoff happen before the rollout review in a broader note",
+			},
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "config data rollout";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+
+		const candidates = collectCoverageLexicalCandidateStatesByDocId(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings: engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: () => undefined,
+				allowPassageSignalInRecall: false,
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 5,
+			},
+		);
+
+		const witnessDocId = engineAny.documentIdByPath.get(
+			"adversarial/ranker-lab/en/exact-quality-witness.md",
+		);
+		expect(witnessDocId).toBeDefined();
+		const witnessState = candidates.get(witnessDocId);
+		expect(witnessState?.unresolvedBodyEvidence.hasUnverifiedPhraseWitness).toBe(
+			true,
+		);
+		expect(
+			witnessState?.unresolvedBodyEvidence.unresolvedFamilyCount ?? 0,
+		).toBeGreaterThan(0);
+		expect(
+			witnessState?.unresolvedBodyEvidence.unresolvedWeightUpperBound ?? 0,
+		).toBeGreaterThan(0);
+	});
+
+	test("offloaded body prefix witness records unresolved surface evidence", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "docs/body-target.md",
+				basename: "body-target.md",
+				folder: "docs",
+				headings: "Body target",
+				content:
+					"beta compatibility guidance lives in the body and should still be tracked as unresolved when tokens are cold",
+			},
+			{
+				path: "docs/noise.md",
+				basename: "noise.md",
+				folder: "docs",
+				headings: "Noise",
+				content: "better plugin compatibility notes that should remain a distractor",
+			},
+		]);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "beta comp";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+
+		const candidates = collectCoverageLexicalCandidateStatesByDocId(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings: engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: () => undefined,
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 5,
+			},
+		);
+
+		const targetDocId = engineAny.documentIdByPath.get("docs/body-target.md");
+		expect(targetDocId).toBeDefined();
+		const targetState = candidates.get(targetDocId);
+		expect(targetState).toBeDefined();
+		expect(targetState?.bodyPrefixWitness).not.toBeNull();
+		expect(
+			targetState?.unresolvedBodyEvidence.hasUnresolvedPrefixSurface,
+		).toBe(true);
+		expect(
+			targetState?.unresolvedBodyEvidence.unresolvedWeightUpperBound ?? 0,
+		).toBeGreaterThan(0);
 	});
 
 	test("metadata prefix stays available for three-character ASCII prefixes", async () => {
@@ -608,7 +809,6 @@ describe("coverage lexical recall suite", () => {
 				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
 				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
 				metadataFolderPostings: engineAny.metadataFolderPostings,
-				metadataHeadingCharPostings: engineAny.metadataHeadingCharPostings,
 				metadataHeadingHanSegmentPostings: engineAny.metadataHeadingHanSegmentPostings,
 				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
 				metadataHeadingPostings: engineAny.metadataHeadingPostings,
@@ -642,3 +842,4 @@ describe("coverage lexical recall suite", () => {
 	});
 
 });
+

@@ -247,6 +247,60 @@ function compareSignals(
 	return compareCoverageLexicalResultSignals(left, right, plan);
 }
 
+function createDisplayPruneConfig() {
+	return {
+		enabled: true,
+		top2To4Ratio: 0.34,
+		top5PlusRatio: 0.5,
+		countPruneMinTopCount: 3,
+		top2To4CountRatio: 0.67,
+		top5PlusCountRatio: 0.5,
+		top2To4CountSlack: 1,
+		top5PlusCountSlack: 2,
+		bodyCharWeight: 0.5,
+		metadataCharWeight: 0.5,
+		tagExactWeight: 0.75,
+		tagCharWeight: 0.5,
+	};
+}
+
+function createDocRankableResult(
+	docId: number,
+	signal: CoverageLexicalFamilySignal,
+): any {
+	return {
+		docId,
+		queryTerms: [],
+		matchedTerms: signal.matchedTerms,
+		score: 0,
+		coverageLexicalSignal: signal,
+		admissionSignal: {
+			coreCoverageCount: 0,
+			coreCoverageRatio: 0,
+			anchorCoverageCount: 0,
+			softCoverageCount: 0,
+			phraseMatchCount: 0,
+			phraseMatchWeight: 0,
+			compactnessScore: 0,
+		},
+	};
+}
+
+function pruneDisplayResults(results: readonly any[]): any[] {
+	const { pruneWeakCoverageLexicalDisplayResults } = require(
+		"src/services/search/coverage-lexical/coverage-lexical-engine",
+	) as {
+		pruneWeakCoverageLexicalDisplayResults(
+			results: readonly any[],
+			config: ReturnType<typeof createDisplayPruneConfig>,
+		): any[];
+	};
+	return pruneWeakCoverageLexicalDisplayResults(
+		results,
+		createDisplayPruneConfig(),
+	);
+}
+
 function createFamilyCountSummary(
 	overrides: Partial<CoverageLexicalFamilyCountSummary> = {},
 ): CoverageLexicalFamilyCountSummary {
@@ -289,6 +343,12 @@ function createFamilySignal(
 			prefixWeight: 0,
 			fuzzyWeight: 0,
 		},
+		metadataPrefixAssist: {
+			coverageCount: 0,
+			exactWeight: 0,
+			prefixWeight: 0,
+			fuzzyWeight: 0,
+		},
 		metadataIdentity: {
 			phraseCoverageCount: 0,
 			phraseWeight: 0,
@@ -317,6 +377,12 @@ function createFamilySignal(
 				fuzzyWeight: 0,
 			},
 			path: {
+				coverageCount: 0,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			tag: {
 				coverageCount: 0,
 				exactWeight: 0,
 				prefixWeight: 0,
@@ -351,7 +417,7 @@ function createFamilySignal(
 		localEvidence: createEmptyWindowFusionSignal(),
 		matchedTerms: [],
 		...restOverrides,
-	};
+	} as CoverageLexicalFamilySignal;
 }
 
 describe("coverage lexical ranking", () => {
@@ -584,7 +650,7 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 
-		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
+		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
 	test("count-first comparator honors metadata field priority basename over aliases over folder over headings over tags", () => {
@@ -699,6 +765,124 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
+	});
+
+	test("display prune keeps later results whose family coverage stays near the top result", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 5,
+						bodyMatchedFamilyCount: 5,
+					},
+					coreBody: {
+						coverageCount: 5,
+						exactWeight: 5,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 0,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				3,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 4,
+						bodyMatchedFamilyCount: 4,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 0,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+			3,
+		]);
+	});
+
+	test("display prune rescues low-count results when strong witness and display coverage stay strong", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 5,
+						bodyMatchedFamilyCount: 5,
+					},
+					coreBody: {
+						coverageCount: 5,
+						exactWeight: 5,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coreBody: {
+						coverageCount: 2,
+						exactWeight: 1,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+					localEvidence: {
+						...createEmptyWindowFusionSignal(),
+						primary: {
+							...createEmptyWindowFusionSignal().primary,
+							exactCoreWeight: 1,
+							orderedPairCount: 1,
+						},
+					},
+				}),
+			),
+			createDocRankableResult(
+				3,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 0,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+			2,
+		]);
 	});
 
 	test("prefers stronger metadata identity evidence for mixed-anchor queries", async () => {
@@ -1249,37 +1433,24 @@ describe("coverage lexical ranking", () => {
 		expect(typeof docId).toBe("number");
 		expect(internalEngine.bodyPostings.get("cache") instanceof Uint32Array).toBe(true);
 		expect(internalEngine.metadataAliasPostings.get("hot") instanceof Uint32Array).toBe(true);
-		expect(Array.isArray(internalEngine.metadataAliasPhrasePostings.get("hot postings"))).toBe(
-			true,
-		);
+		expect(internalEngine.metadataAliasPhrasePostings.get("hot postings")).toBeUndefined();
 		expect(internalEngine.metadataBasenamePostings.get("hot-postings") instanceof Uint32Array).toBe(true);
 		expect(internalEngine.metadataFolderPostings.get("phase3") instanceof Uint32Array).toBe(true);
 		expect(internalEngine.metadataHeadingPostings.get("hot") instanceof Uint32Array).toBe(true);
-		expect(
-			internalEngine.metadataHeadingPhrasePostings.get("hot postings") instanceof
-				Uint32Array,
-		).toBe(true);
+		expect(internalEngine.metadataHeadingPhrasePostings.get("hot postings")).toBeUndefined();
 		expect(internalEngine.metadataTagPostings.get("phase3") instanceof Uint32Array).toBe(true);
 		expect(internalEngine.metadataTagFullPostings.get("phase3,cache") instanceof Uint32Array).toBe(true);
-		expect(Array.isArray(internalEngine.metadataTagPhrasePostings.get("phase3 cache"))).toBe(
-			true,
-		);
+		expect(internalEngine.metadataTagPhrasePostings.get("phase3 cache")).toBeUndefined();
 		expect(internalEngine.bodyPostings.get("cache")).toContain(docId);
 		expect(internalEngine.metadataAliasPostings.get("hot")).toContain(docId);
-		expect(internalEngine.metadataAliasPhrasePostings.get("hot postings")).toContain(
-			docId,
-		);
+		expect(internalEngine.metadataAliasPhrasePostings.get("hot postings")).toBeUndefined();
 		expect(internalEngine.metadataBasenamePostings.get("hot-postings")).toContain(docId);
 		expect(internalEngine.metadataFolderPostings.get("phase3")).toContain(docId);
 		expect(internalEngine.metadataHeadingPostings.get("hot")).toContain(docId);
-		expect(internalEngine.metadataHeadingPhrasePostings.get("hot postings")).toContain(
-			docId,
-		);
+		expect(internalEngine.metadataHeadingPhrasePostings.get("hot postings")).toBeUndefined();
 		expect(internalEngine.metadataTagPostings.get("phase3")).toContain(docId);
 		expect(internalEngine.metadataTagFullPostings.get("phase3,cache")).toContain(docId);
-		expect(internalEngine.metadataTagPhrasePostings.get("phase3 cache")).toContain(
-			docId,
-		);
+		expect(internalEngine.metadataTagPhrasePostings.get("phase3 cache")).toBeUndefined();
 		expect(internalEngine.documentPathById[docId]).toBe(
 			"pkm-en/phase3/hot-postings.md",
 		);
@@ -1313,8 +1484,8 @@ describe("coverage lexical ranking", () => {
 		)?.docId;
 		expect(typeof docId).toBe("number");
 		expect(
-			Array.isArray(internalEngine.documentBodyHanSegmentsById[docId]),
-		).toBe(true);
+			internalEngine.documentBodyHanSegmentsById[docId],
+		).toBeUndefined();
 		expect(
 			Array.isArray(
 				internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
@@ -1331,14 +1502,12 @@ describe("coverage lexical ranking", () => {
 			),
 		).toBe(true);
 		expect(
-			Array.isArray(
-				internalEngine.metadataHeadingCharPostings.get("\u7f13\u5b58"),
-			),
-		).toBe(true);
+			internalEngine.metadataHeadingCharPostings.get("\u7f13\u5b58"),
+		).toBeUndefined();
 		expect(
 			Array.isArray(internalEngine.metadataTagCharPostings.get("\u6807\u7b7e")),
 		).toBe(true);
-		expect(internalEngine.documentBodyHanSegmentsById[docId]?.length ?? 0).toBeGreaterThan(0);
+		expect(internalEngine.documentBodyHanSegmentsById[docId]?.length ?? 0).toBe(0);
 		expect(
 			internalEngine.metadataAliasCharPostings.get("\u6062\u590d"),
 		).toContain(docId);
@@ -1350,7 +1519,7 @@ describe("coverage lexical ranking", () => {
 		).toContain(docId);
 		expect(
 			internalEngine.metadataHeadingCharPostings.get("\u7f13\u5b58"),
-		).toContain(docId);
+		).toBeUndefined();
 		expect(internalEngine.metadataTagCharPostings.get("\u6807\u7b7e")).toContain(
 			docId,
 		);

@@ -6,6 +6,7 @@ import { OuterSetting } from "src/globals/plugin-setting";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
+import { extractHanSegments } from "src/services/search/coverage-lexical/coverage-lexical-cjk";
 import {
   HybridDisabledError,
   NoApiKeyError,
@@ -33,7 +34,14 @@ import {
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
+import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
+import {
+  COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+  type CoverageLexicalBodyTokenColdStoreApi,
+  type CoverageLexicalBodyTokenColdDocumentWrite,
+} from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import { Tokenizer } from "src/services/search/tokenizer";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
 import { logger } from "src/utils/logger";
@@ -43,7 +51,7 @@ import {
   monitorDecorator,
   MyLib,
 } from "src/utils/my-lib";
-import { singleton } from "tsyringe";
+import { container, singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
@@ -149,6 +157,7 @@ type DevStorageBreakdownRow = {
   segment: string;
   bytes: number;
   size: string;
+  shareOfStringPool?: string;
   shareOfLexical: string;
   shareOfVault: string;
 };
@@ -356,6 +365,31 @@ class HybridIndexProgressNotice {
   }
 }
 
+type LexicalIndexProgress = {
+  processedFiles: number;
+  totalFiles: number;
+};
+
+class LexicalIndexProgressNotice {
+  private readonly notice: MyNotice;
+
+  constructor(progress: LexicalIndexProgress) {
+    this.notice = new MyNotice(this.buildMessage(progress), 0);
+  }
+
+  update(progress: LexicalIndexProgress): void {
+    this.notice.setText(this.buildMessage(progress));
+  }
+
+  hide(): void {
+    this.notice.hide();
+  }
+
+  private buildMessage(progress: LexicalIndexProgress): string {
+    return `${t("searchNotice.lexicalIndexingProgressPrefix")}${progress.processedFiles} / ${progress.totalFiles}${t("searchNotice.lexicalIndexingProgressSuffix")}`;
+  }
+}
+
 function formatBytesLabel(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -373,12 +407,27 @@ function formatBytesLabel(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
+function ensureCoverageLexicalBodyTokenColdStoreRegistered(): void {
+  if (container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
+    return;
+  }
+  container.registerSingleton(
+    COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+    CoverageLexicalBodyTokenColdStore,
+  );
+}
+
 @singleton()
 export class DataManager {
   private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
   private static readonly HYBRID_INDEX_RETRY_DELAY_MS = 1500;
   private static readonly HYBRID_TABLE_SCAN_BATCH_SIZE = 512;
   private static readonly LEXICAL_REINDEX_BATCH_SIZE = 64;
+  private static readonly LEXICAL_REINDEX_MAX_BYTES = 8 * 1024 * 1024;
+  private static readonly LEXICAL_COLD_REPAIR_BATCH_SIZE = 32;
+  private static readonly LEXICAL_COLD_REPAIR_MAX_BYTES = 4 * 1024 * 1024;
+  private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS = 128;
+  private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_BYTES = 8 * 1024 * 1024;
   private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
   private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
   private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
@@ -391,15 +440,19 @@ export class DataManager {
   private static readonly LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD = 24;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD = 768 * 1024;
   private plugin: CleverSearch = getInstance(THIS_PLUGIN);
+  private readonly lexicalBodyTokenColdStoreRegistration =
+    ensureCoverageLexicalBodyTokenColdStoreRegistered();
   private database = getInstance(Database);
   private dataProvider = getInstance(DataProvider);
   private setting = getInstance(OuterSetting);
   private lexicalEngine = getInstance(LexicalEngine);
   private fileSnapshotStore = getInstance(FileSnapshotStore);
+  private tokenizer = getInstance(Tokenizer);
   private shouldForceRefresh = false;
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
   private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
+  private lexicalColdRepairTask: Promise<void> | null = null;
   private readonly lexicalSnapshotCoordinator = new DirtyArtifactCoordinator({
     engine: "lexical",
     artifact: "snapshot",
@@ -979,6 +1032,7 @@ export class DataManager {
     this.clearHybridFailedEmbeddingState();
     this.hideLexicalIndexFailureNotice();
     this.lexicalIndexFailuresByPath.clear();
+    this.lexicalColdRepairTask = null;
     this.searchBootstrapCommitTask = null;
     this.setLexicalBootstrapState("blocked");
     this.setHybridBootstrapState("blocked");
@@ -1057,7 +1111,6 @@ export class DataManager {
   }
 
   async refreshAllAsync() {
-    const prevNotice = new MyNotice(t("Reindexing..."));
     this.shouldForceRefresh = true;
     this.clearHybridFailedEmbeddingState();
     this.setHybridRuntimeQueryGate("blocked");
@@ -1066,14 +1119,12 @@ export class DataManager {
       await this.initAsync({ suppressCompletionNotice: true });
       new MyNotice(t("Indexing finished"), 5000);
     } finally {
-      prevNotice.hide();
       this.shouldForceRefresh = false;
       getInstance(FileWatcher).start();
     }
   }
 
   async refreshLexicalStateAsync() {
-    const prevNotice = new MyNotice(t("Reindexing..."));
     this.setLexicalBootstrapState("healing");
     const heapBeforeLexicalRefresh = isDevEnvironment
       ? this.sampleJsHeapUsage()
@@ -1097,7 +1148,6 @@ export class DataManager {
       this.setLexicalBootstrapState("failed");
       throw error;
     } finally {
-      prevNotice.hide();
       getInstance(FileWatcher).start();
     }
   }
@@ -1874,11 +1924,15 @@ export class DataManager {
   ): Promise<void> {
     if (plan.needsFullReindex) {
       await this.reindexLexicalEngineWithCurrFiles();
+      await this.syncLexicalBodyTokenColdStoreMetadata();
       return;
     }
     if (plan.needsRefHeal) {
       await this.updateLexicalIndexedFileRefsByMtime();
+    } else {
+      await this.ensureLexicalIndexedFileRefsLoaded();
     }
+    await this.healLexicalBodyTokenColdRows();
   }
 
   private async commitLexicalBootstrapPlan(): Promise<void> {
@@ -1910,6 +1964,10 @@ export class DataManager {
     logger.trace("Indexing the whole vault...");
     const filesToIndex = this.dataProvider.allFilesToBeIndexed();
     const indexedPaths = new Set<string>(filesToIndex.map((file) => file.path));
+    const progressNotice = new LexicalIndexProgressNotice({
+      processedFiles: 0,
+      totalFiles: filesToIndex.length,
+    });
     let size = 0;
     for (const file of filesToIndex) size += file.stat.size;
     size /= 1024;
@@ -1922,24 +1980,21 @@ export class DataManager {
     }
     const successfulFiles: TFile[] = [];
     const failures: LexicalIndexFailure[] = [];
+    let processedFiles = 0;
+    const reindexBatches = this.buildLexicalReindexBatches(filesToIndex);
     this.lexicalEngine.beginBatchReindex();
     try {
-      for (
-        let start = 0;
-        start < filesToIndex.length;
-        start += DataManager.LEXICAL_REINDEX_BATCH_SIZE
-      ) {
-        const batchFiles = filesToIndex.slice(
-          start,
-          start + DataManager.LEXICAL_REINDEX_BATCH_SIZE,
-        );
+      for (let index = 0; index < reindexBatches.length; index += 1) {
+        const batchFiles = reindexBatches[index];
         const batchResult = await this.addDocuments(batchFiles);
         successfulFiles.push(...batchResult.indexedFiles);
         failures.push(...batchResult.failures);
-        if (
-          start + DataManager.LEXICAL_REINDEX_BATCH_SIZE <
-          filesToIndex.length
-        ) {
+        processedFiles += batchFiles.length;
+        progressNotice.update({
+          processedFiles,
+          totalFiles: filesToIndex.length,
+        });
+        if (index + 1 < reindexBatches.length) {
           await MyLib.sleep(0);
         }
       }
@@ -1947,6 +2002,8 @@ export class DataManager {
     } catch (error) {
       this.lexicalEngine.abortBatchReindex();
       throw error;
+    } finally {
+      progressNotice.hide();
     }
     await this.saveLexicalIndexedFileRefs(successfulFiles);
     await this.fileSnapshotStore.publishIndexedTexts(
@@ -2032,6 +2089,7 @@ export class DataManager {
     }));
     await this.database.setLexicalIndexedFileRefs(updatedIndexedFileRefs);
     await this.reloadLexicalIndexedFileRefs();
+    await this.syncLexicalBodyTokenColdStoreMetadata();
     logger.trace(
       `${updatedIndexedFileRefs.length} lexical indexed file refs updated`,
     );
@@ -2064,6 +2122,7 @@ export class DataManager {
     };
     await this.database.putLexicalIndexedFileRef(nextRef);
     this.lexicalIndexedFileRefsByPath.set(file.path, nextRef);
+    await this.syncLexicalBodyTokenColdStoreMetadata();
   }
 
   private async deleteLexicalIndexedFileRefs(
@@ -2077,6 +2136,226 @@ export class DataManager {
     for (const path of paths) {
       this.lexicalIndexedFileRefsByPath.delete(path);
     }
+    await this.syncLexicalBodyTokenColdStoreMetadata();
+  }
+
+  private getLexicalBodyTokenColdStore(): CoverageLexicalBodyTokenColdStoreApi | null {
+    if (!container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
+      return null;
+    }
+    try {
+      return container.resolve<CoverageLexicalBodyTokenColdStoreApi>(
+        COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private async syncLexicalBodyTokenColdStoreMetadata(): Promise<void> {
+    const coldStore = this.getLexicalBodyTokenColdStore();
+    if (!coldStore) {
+      return;
+    }
+    await this.ensureLexicalIndexedFileRefsLoaded();
+    await coldStore.updateIndexedRefsMetadata(
+      Array.from(this.lexicalIndexedFileRefsByPath.values()),
+    );
+  }
+
+  private async healLexicalBodyTokenColdRows(): Promise<void> {
+    const coldStore = this.getLexicalBodyTokenColdStore();
+    if (!coldStore) {
+      return;
+    }
+    const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
+    const consistency = await coldStore.inspectConsistency(indexedFileRefs);
+    if (!consistency.needsRepair) {
+      await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
+      return;
+    }
+
+    logger.trace("repairing lexical body token cold rows", {
+      reason: consistency.reason,
+      requiresReset: consistency.requiresReset,
+      missingOrStaleCount: consistency.missingOrStalePaths.length,
+      danglingCount: consistency.danglingPaths.length,
+    });
+    const missingOrStaleFiles = consistency.missingOrStalePaths
+      .map((path) => this.dataProvider.getFileByPath(path))
+      .filter((file): file is TFile => file !== null);
+    const estimatedRepairBytes = missingOrStaleFiles.reduce(
+      (sum, file) => sum + Math.max(0, file.stat.size ?? 0),
+      0,
+    );
+    const shouldRepairSynchronously =
+      consistency.missingOrStalePaths.length <=
+        DataManager.LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS &&
+      estimatedRepairBytes <= DataManager.LEXICAL_COLD_REPAIR_SYNC_MAX_BYTES;
+
+    if (shouldRepairSynchronously) {
+      await this.executeLexicalBodyTokenColdRepair(
+        coldStore,
+        indexedFileRefs,
+        consistency,
+        missingOrStaleFiles,
+      );
+      return;
+    }
+
+    logger.trace("queueing lexical body token cold repair in background", {
+      reason: consistency.reason,
+      missingOrStaleCount: consistency.missingOrStalePaths.length,
+      danglingCount: consistency.danglingPaths.length,
+      estimatedRepairBytes,
+    });
+    this.queueLexicalBodyTokenColdRepair();
+  }
+
+  private async buildLexicalBodyTokenColdDocuments(
+    files: readonly TFile[],
+  ): Promise<CoverageLexicalBodyTokenColdDocumentWrite[]> {
+    const textsByPath = await this.fileSnapshotStore.readCurrentTexts(files);
+    return files.map((file) => {
+      const plainText = textsByPath.get(file.path) ?? "";
+      return {
+        path: file.path,
+        generation: file.stat.mtime,
+        bodyTokens: this.tokenizer
+          .tokenizeSequence(plainText, "index")
+          .map((token) => token.toLowerCase()),
+        hanSegments: extractHanSegments(plainText),
+      };
+    });
+  }
+
+  private buildLexicalBodyTokenColdRepairBatches(
+    files: readonly TFile[],
+  ): TFile[][] {
+    return this.buildFileBatches(
+      files,
+      DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE,
+      DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES,
+    );
+  }
+
+  private buildLexicalReindexBatches(files: readonly TFile[]): TFile[][] {
+    return this.buildFileBatches(
+      files,
+      DataManager.LEXICAL_REINDEX_BATCH_SIZE,
+      DataManager.LEXICAL_REINDEX_MAX_BYTES,
+    );
+  }
+
+  private buildFileBatches(
+    files: readonly TFile[],
+    maxFilesPerBatch: number,
+    maxBytesPerBatch: number,
+  ): TFile[][] {
+    const batches: TFile[][] = [];
+    let currentBatch: TFile[] = [];
+    let currentBatchBytes = 0;
+
+    for (const file of files) {
+      const fileBytes = Math.max(0, file.stat.size ?? 0);
+      const wouldExceedFileLimit = currentBatch.length >= maxFilesPerBatch;
+      const wouldExceedByteLimit =
+        currentBatch.length > 0 &&
+        currentBatchBytes + fileBytes > maxBytesPerBatch;
+
+      if (wouldExceedFileLimit || wouldExceedByteLimit) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+
+      currentBatch.push(file);
+      currentBatchBytes += fileBytes;
+
+      if (
+        currentBatch.length >= maxFilesPerBatch ||
+        (fileBytes > maxBytesPerBatch && currentBatch.length === 1)
+      ) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+    }
+
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    return batches;
+  }
+
+  private queueLexicalBodyTokenColdRepair(): void {
+    if (this.lexicalColdRepairTask) {
+      return;
+    }
+    this.lexicalColdRepairTask = (async () => {
+      try {
+        if (this.isUnloaded) {
+          return;
+        }
+        const coldStore = this.getLexicalBodyTokenColdStore();
+        if (!coldStore) {
+          return;
+        }
+        await this.ensureLexicalIndexedFileRefsLoaded();
+        const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
+        const consistency = await coldStore.inspectConsistency(indexedFileRefs);
+        if (!consistency.needsRepair) {
+          await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
+          return;
+        }
+        const missingOrStaleFiles = consistency.missingOrStalePaths
+          .map((path) => this.dataProvider.getFileByPath(path))
+          .filter((file): file is TFile => file !== null);
+        await this.executeLexicalBodyTokenColdRepair(
+          coldStore,
+          indexedFileRefs,
+          consistency,
+          missingOrStaleFiles,
+        );
+      } catch (error) {
+        logger.warn("lexical body token cold repair failed:", error);
+      } finally {
+        this.lexicalColdRepairTask = null;
+      }
+    })();
+  }
+
+  private async executeLexicalBodyTokenColdRepair(
+    coldStore: CoverageLexicalBodyTokenColdStoreApi,
+    indexedFileRefs: readonly BaseIndexedFileRef[],
+    consistency: CoverageLexicalBodyTokenColdConsistencySummary,
+    missingOrStaleFiles: readonly TFile[],
+  ): Promise<void> {
+    if (consistency.requiresReset) {
+      await coldStore.clearAll();
+    } else if (consistency.danglingPaths.length > 0) {
+      await coldStore.deleteDocuments(consistency.danglingPaths);
+    }
+
+    if (missingOrStaleFiles.length > 0) {
+      const repairBatches =
+        this.buildLexicalBodyTokenColdRepairBatches(missingOrStaleFiles);
+      for (let index = 0; index < repairBatches.length; index += 1) {
+        if (this.isUnloaded) {
+          return;
+        }
+        const batchFiles = repairBatches[index];
+        const batchDocuments =
+          await this.buildLexicalBodyTokenColdDocuments(batchFiles);
+        await coldStore.upsertDocuments(batchDocuments);
+        if (index + 1 < repairBatches.length) {
+          await MyLib.sleep(0);
+        }
+      }
+    }
+
+    await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
   }
 
   private hasIndexedFileRefChanged(
@@ -2504,6 +2783,13 @@ export class DataManager {
       lexical: { ...this.searchBootstrapMetrics.lexical },
       hybrid: { ...this.searchBootstrapMetrics.hybrid },
     };
+  }
+
+  async showDevStorageAndRuntimeStats(): Promise<void> {
+    if (!isDevEnvironment) {
+      return;
+    }
+    await this.noticeDevStorageStats();
   }
 
   getLexicalAvailabilityState(): LexicalAvailabilityState {
@@ -3921,26 +4207,40 @@ export class DataManager {
     const buildStringPoolRows = (
       entries: Record<string, unknown> | null | undefined,
     ): DevStorageBreakdownRow[] => {
-      if (!entries || totalBytes <= 0) {
+      const stringPoolBytes = this.readNumber(stringPool?.bytes) ?? 0;
+      if (!entries || totalBytes <= 0 || stringPoolBytes <= 0) {
         return [];
       }
-      return Object.entries(entries)
-        .map(([segment, value]) => {
-          const record = this.asRecord(value);
-          const bytes = this.readNumber(record?.bytes);
-          if (bytes === null || bytes <= 0) {
-            return null;
-          }
-          return {
-            segment,
-            bytes,
-            size: this.formatBytes(bytes),
-            shareOfLexical: this.formatPercent(bytes, totalBytes),
-            shareOfVault: this.formatPercent(bytes, indexableBytes),
-          };
-        })
-        .filter((row): row is DevStorageBreakdownRow => row !== null)
-        .sort((left, right) => right.bytes - left.bytes);
+      const rows: DevStorageBreakdownRow[] = [];
+      for (const [segment, value] of Object.entries(entries)) {
+        const record = this.asRecord(value);
+        const bytes = this.readNumber(record?.bytes);
+        if (bytes === null || bytes <= 0) {
+          continue;
+        }
+        rows.push({
+          segment,
+          bytes,
+          size: this.formatBytes(bytes),
+          shareOfStringPool: this.formatPercent(bytes, stringPoolBytes),
+          shareOfLexical: this.formatPercent(bytes, totalBytes),
+          shareOfVault: this.formatPercent(bytes, indexableBytes),
+        });
+      }
+      rows.sort((left, right) => right.bytes - left.bytes);
+      const accountedBytes = rows.reduce((sum, row) => sum + row.bytes, 0);
+      const remainderBytes = Math.max(0, stringPoolBytes - accountedBytes);
+      if (remainderBytes > 0) {
+        rows.push({
+          segment: "__unattributed__",
+          bytes: remainderBytes,
+          size: this.formatBytes(remainderBytes),
+          shareOfStringPool: this.formatPercent(remainderBytes, stringPoolBytes),
+          shareOfLexical: this.formatPercent(remainderBytes, totalBytes),
+          shareOfVault: this.formatPercent(remainderBytes, indexableBytes),
+        });
+      }
+      return rows.sort((left, right) => right.bytes - left.bytes);
     };
     const stringPoolGroupRows = buildStringPoolRows(
       this.asRecord(stringPool?.byGroup),

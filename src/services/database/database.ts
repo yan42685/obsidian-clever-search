@@ -13,6 +13,11 @@ import {
 } from "src/services/obsidian/user-data/index-recovery-state";
 import type { IndexArtifactStateRow } from "src/services/obsidian/user-data/index-artifact-state";
 import type {
+  CoverageLexicalBodyTokenColdBlockRow,
+  CoverageLexicalBodyTokenColdDocRow,
+  CoverageLexicalBodyTokenColdMetaRow,
+} from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import type {
   BlobRecord,
   ChunkRow,
   ChunkVectorShardRow,
@@ -58,6 +63,9 @@ export class Database {
       { name: "pluginSetting", table: this.db.pluginSetting },
       { name: "lexicalSearchSnapshots", table: this.db.lexicalSearchSnapshots },
       { name: "lexicalIndexedFileRefs", table: this.db.lexicalIndexedFileRefs },
+      { name: "lexicalBodyTokenColdMeta", table: this.db.lexicalBodyTokenColdMeta },
+      { name: "lexicalBodyTokenColdBlocks", table: this.db.lexicalBodyTokenColdBlocks },
+      { name: "lexicalBodyTokenColdDocs", table: this.db.lexicalBodyTokenColdDocs },
       { name: "hybridChunks", table: this.db.hybridChunks },
       { name: "fileSnapshots", table: this.db.fileSnapshots },
       { name: "hybridDirtyShadows", table: this.db.hybridDirtyShadows },
@@ -312,7 +320,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 22;
+  private static readonly _dbVersion = 23;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   private schemaUpgradeDetected = false;
@@ -323,6 +331,18 @@ class DexieWrapper extends Dexie {
   >;
   // TODO: put data together because it takes lots of time for a database connection  (70ms) in my machine
   lexicalIndexedFileRefs!: Dexie.Table<LexicalIndexedFileRefRow, string>;
+  lexicalBodyTokenColdMeta!: Dexie.Table<
+    CoverageLexicalBodyTokenColdMetaRow,
+    string
+  >;
+  lexicalBodyTokenColdBlocks!: Dexie.Table<
+    CoverageLexicalBodyTokenColdBlockRow,
+    string
+  >;
+  lexicalBodyTokenColdDocs!: Dexie.Table<
+    CoverageLexicalBodyTokenColdDocRow,
+    string
+  >;
   // Hybrid search tables
   hybridChunks!: Dexie.Table<ChunkRow, number>;
   fileSnapshots!: Dexie.Table<HybridFileSnapshotRow, string>;
@@ -377,6 +397,9 @@ class DexieWrapper extends Dexie {
       pluginSetting: "++id",
       lexicalSearchSnapshots: "++id",
       lexicalIndexedFileRefs: "path",
+      lexicalBodyTokenColdMeta: "id",
+      lexicalBodyTokenColdBlocks: "id, epoch, updatedAt",
+      lexicalBodyTokenColdDocs: "path, epoch, blockId, updatedAt",
       hybridChunks: "++id, filePath",
       fileSnapshots: "filePath",
       hybridDirtyShadows: "filePath",

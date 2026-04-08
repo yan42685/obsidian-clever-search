@@ -61,20 +61,14 @@ export type CoverageLexicalSnapshotPostingKey =
 export type CoverageLexicalLivePostingKey =
 	| "bodyPostings"
 	| "metadataAliasCharPostings"
-	| "metadataAliasPhrasePostings"
 	| "metadataAliasPostings"
 	| "metadataBasenameCharPostings"
-	| "metadataBasenamePhrasePostings"
 	| "metadataBasenamePostings"
 	| "metadataFolderCharPostings"
-	| "metadataFolderPhrasePostings"
 	| "metadataFolderPostings"
-	| "metadataHeadingCharPostings"
-	| "metadataHeadingPhrasePostings"
 	| "metadataHeadingPostings"
 	| "metadataTagCharPostings"
 	| "metadataTagFullPostings"
-	| "metadataTagPhrasePostings"
 	| "metadataTagPostings";
 
 type CoverageLexicalPostingDescriptor = {
@@ -137,9 +131,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataAliasPhrasePostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataAliasPhrasePostings,
 		ownership: "packed",
-		live: true,
-		source: "postings.metadataAliasPhrase.term",
-		breakdownKey: "metadataAliasPhrase",
+		live: false,
 	},
 	{
 		key: "metadataAliasPostings",
@@ -168,9 +160,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataBasenamePhrasePostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataBasenamePhrasePostings,
 		ownership: "packed",
-		live: true,
-		source: "postings.metadataBasenamePhrase.term",
-		breakdownKey: "metadataBasenamePhrase",
+		live: false,
 	},
 	{
 		key: "metadataBasenamePostings",
@@ -199,9 +189,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataFolderPhrasePostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataFolderPhrasePostings,
 		ownership: "packed",
-		live: true,
-		source: "postings.metadataFolderPhrase.term",
-		breakdownKey: "metadataFolderPhrase",
+		live: false,
 	},
 	{
 		key: "metadataFolderPostings",
@@ -216,9 +204,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataHeadingCharPostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataHeadingCharPostings,
 		ownership: "plain",
-		live: true,
-		source: "postings.metadataHeadingChar.term",
-		breakdownKey: "metadataHeadingChar",
+		live: false,
 	},
 	{
 		key: "metadataHeadingHanSegmentPostings",
@@ -230,9 +216,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataHeadingPhrasePostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataHeadingPhrasePostings,
 		ownership: "packed",
-		live: true,
-		source: "postings.metadataHeadingPhrase.term",
-		breakdownKey: "metadataHeadingPhrase",
+		live: false,
 	},
 	{
 		key: "metadataHeadingPostings",
@@ -269,9 +253,7 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataTagPhrasePostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataTagPhrasePostings,
 		ownership: "packed",
-		live: true,
-		source: "postings.metadataTagPhrase.term",
-		breakdownKey: "metadataTagPhrase",
+		live: false,
 	},
 	{
 		key: "metadataTagPostings",

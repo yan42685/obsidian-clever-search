@@ -5,6 +5,7 @@ import type {
 	DirectSubitemsOccurrence,
 	DirectSubitemsRenderPayload,
 } from "./contracts";
+import { filterDisplayEligibleOccurrences } from "./occurrence-structure";
 
 const DISPLAY_PRE_CHARS_WIDE = 60;
 const DISPLAY_POST_CHARS_WIDE = 80;
@@ -40,10 +41,14 @@ export function renderDirectSubitemsCandidateSpan(params: {
 	const maxChars = Math.max(1, params.maxChars ?? DEFAULT_DISPLAY_MAX_CHARS);
 	const lineOffsets = buildLineOffsets(snapshotText);
 	const lineInfos = buildLineInfos(snapshotText, lineOffsets);
+	const displayOccurrences = filterDisplayEligibleOccurrences(span.occurrences);
 	const displayWindow = buildDisplayWindow({
 		snapshotText,
 		lineInfos,
-		span,
+		span: {
+			...span,
+			occurrences: displayOccurrences,
+		},
 		maxChars,
 	});
 	const snippetText = snapshotText.slice(displayWindow.start, displayWindow.end);
@@ -51,7 +56,7 @@ export function renderDirectSubitemsCandidateSpan(params: {
 	const lineStartOffset = lineOffsets[row] ?? 0;
 	const col = Math.max(0, span.anchorOffset - lineStartOffset);
 	const baseHighlightRanges = mergeRanges(
-		span.occurrences
+		displayOccurrences
 			.filter(
 				(occurrence) =>
 					occurrence.start >= displayWindow.start &&

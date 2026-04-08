@@ -705,4 +705,66 @@ describe("direct subitems v2 exact-only pipeline", () => {
 			result.renderPayloads[1].displayStart,
 		);
 	});
+	test("keeps nearby Han fallback evidence when it forms a tight local cluster", () => {
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "\u519b\u9600\u6253",
+			snapshotText: "\u519b\u9600\u6253\u4ed7",
+			options: {
+				mergeGap: 4,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(3);
+		const highlighted = result.renderPayloads[0].highlightRanges.map((range) =>
+			result.renderPayloads[0].text.slice(range.start, range.end),
+		);
+		expect(highlighted).toContain("\u519b\u9600\u6253");
+	});
+
+	test("does not let an isolated Han character extend the structural span or display highlight", () => {
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "\u7535\u5b50\u6280\u672f\u5165\u95e8",
+			snapshotText: "\u7535\u5b50\u8bbe\u5907abcdef\u5f15\u5165\u6848\u4f8b",
+			options: {
+				mergeGap: 32,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		const highlighted = result.renderPayloads[0].highlightRanges.map((range) =>
+			result.renderPayloads[0].text.slice(range.start, range.end),
+		);
+		expect(highlighted).toContain("\u7535\u5b50");
+		expect(highlighted.some((segment) => segment.includes("\u5165"))).toBe(false);
+	});
+
+	test("does not keep separated Han single characters when they are only near other single characters", () => {
+		const result = buildDirectSubitemsExactCandidates({
+			queryText: "\u7535\u5b50\u6280\u672f\u5165\u95e8",
+			snapshotText: "\u7535\u5b50xyz\u5165x\u95e8\u6848\u4f8b",
+			options: {
+				mergeGap: 32,
+				contextLeft: 0,
+				contextRight: 0,
+				boundaryLookaround: 0,
+			},
+		});
+
+		expect(result.candidateSpans).toHaveLength(1);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		const highlighted = result.renderPayloads[0].highlightRanges.map((range) =>
+			result.renderPayloads[0].text.slice(range.start, range.end),
+		);
+		expect(highlighted).toContain("\u7535\u5b50");
+		expect(highlighted.some((segment) => segment.includes("\u5165"))).toBe(false);
+		expect(highlighted.some((segment) => segment.includes("\u95e8"))).toBe(false);
+	});
 });
