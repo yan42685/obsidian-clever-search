@@ -425,6 +425,8 @@ export class DataManager {
   private static readonly LEXICAL_REINDEX_BATCH_SIZE = 64;
   private static readonly LEXICAL_COLD_REPAIR_BATCH_SIZE = 32;
   private static readonly LEXICAL_COLD_REPAIR_MAX_BYTES = 4 * 1024 * 1024;
+  private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS = 128;
+  private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_BYTES = 8 * 1024 * 1024;
   private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
   private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
   private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
@@ -449,6 +451,7 @@ export class DataManager {
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
   private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
+  private lexicalColdRepairTask: Promise<void> | null = null;
   private readonly lexicalSnapshotCoordinator = new DirtyArtifactCoordinator({
     engine: "lexical",
     artifact: "snapshot",
@@ -1028,6 +1031,7 @@ export class DataManager {
     this.clearHybridFailedEmbeddingState();
     this.hideLexicalIndexFailureNotice();
     this.lexicalIndexFailuresByPath.clear();
+    this.lexicalColdRepairTask = null;
     this.searchBootstrapCommitTask = null;
     this.setLexicalBootstrapState("blocked");
     this.setHybridBootstrapState("blocked");
@@ -2185,31 +2189,35 @@ export class DataManager {
       missingOrStaleCount: consistency.missingOrStalePaths.length,
       danglingCount: consistency.danglingPaths.length,
     });
+    const missingOrStaleFiles = consistency.missingOrStalePaths
+      .map((path) => this.dataProvider.getFileByPath(path))
+      .filter((file): file is TFile => file !== null);
+    const estimatedRepairBytes = missingOrStaleFiles.reduce(
+      (sum, file) => sum + Math.max(0, file.stat.size ?? 0),
+      0,
+    );
+    const shouldRepairSynchronously =
+      consistency.missingOrStalePaths.length <=
+        DataManager.LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS &&
+      estimatedRepairBytes <= DataManager.LEXICAL_COLD_REPAIR_SYNC_MAX_BYTES;
 
-    if (consistency.requiresReset) {
-      await coldStore.clearAll();
-    } else if (consistency.danglingPaths.length > 0) {
-      await coldStore.deleteDocuments(consistency.danglingPaths);
+    if (shouldRepairSynchronously) {
+      await this.executeLexicalBodyTokenColdRepair(
+        coldStore,
+        indexedFileRefs,
+        consistency,
+        missingOrStaleFiles,
+      );
+      return;
     }
 
-    if (consistency.missingOrStalePaths.length > 0) {
-      const missingOrStaleFiles = consistency.missingOrStalePaths
-        .map((path) => this.dataProvider.getFileByPath(path))
-        .filter((file): file is TFile => file !== null);
-      const repairBatches =
-        this.buildLexicalBodyTokenColdRepairBatches(missingOrStaleFiles);
-      for (let index = 0; index < repairBatches.length; index += 1) {
-        const batchFiles = repairBatches[index];
-        const batchDocuments =
-          await this.buildLexicalBodyTokenColdDocuments(batchFiles);
-        await coldStore.upsertDocuments(batchDocuments);
-        if (index + 1 < repairBatches.length) {
-          await MyLib.sleep(0);
-        }
-      }
-    }
-
-    await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
+    logger.trace("queueing lexical body token cold repair in background", {
+      reason: consistency.reason,
+      missingOrStaleCount: consistency.missingOrStalePaths.length,
+      danglingCount: consistency.danglingPaths.length,
+      estimatedRepairBytes,
+    });
+    this.queueLexicalBodyTokenColdRepair();
   }
 
   private async buildLexicalBodyTokenColdDocuments(
@@ -2270,6 +2278,75 @@ export class DataManager {
     }
 
     return batches;
+  }
+
+  private queueLexicalBodyTokenColdRepair(): void {
+    if (this.lexicalColdRepairTask) {
+      return;
+    }
+    this.lexicalColdRepairTask = (async () => {
+      try {
+        if (this.isUnloaded) {
+          return;
+        }
+        const coldStore = this.getLexicalBodyTokenColdStore();
+        if (!coldStore) {
+          return;
+        }
+        await this.ensureLexicalIndexedFileRefsLoaded();
+        const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
+        const consistency = await coldStore.inspectConsistency(indexedFileRefs);
+        if (!consistency.needsRepair) {
+          await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
+          return;
+        }
+        const missingOrStaleFiles = consistency.missingOrStalePaths
+          .map((path) => this.dataProvider.getFileByPath(path))
+          .filter((file): file is TFile => file !== null);
+        await this.executeLexicalBodyTokenColdRepair(
+          coldStore,
+          indexedFileRefs,
+          consistency,
+          missingOrStaleFiles,
+        );
+      } catch (error) {
+        logger.warn("lexical body token cold repair failed:", error);
+      } finally {
+        this.lexicalColdRepairTask = null;
+      }
+    })();
+  }
+
+  private async executeLexicalBodyTokenColdRepair(
+    coldStore: CoverageLexicalBodyTokenColdStoreApi,
+    indexedFileRefs: readonly BaseIndexedFileRef[],
+    consistency: CoverageLexicalBodyTokenColdConsistencySummary,
+    missingOrStaleFiles: readonly TFile[],
+  ): Promise<void> {
+    if (consistency.requiresReset) {
+      await coldStore.clearAll();
+    } else if (consistency.danglingPaths.length > 0) {
+      await coldStore.deleteDocuments(consistency.danglingPaths);
+    }
+
+    if (missingOrStaleFiles.length > 0) {
+      const repairBatches =
+        this.buildLexicalBodyTokenColdRepairBatches(missingOrStaleFiles);
+      for (let index = 0; index < repairBatches.length; index += 1) {
+        if (this.isUnloaded) {
+          return;
+        }
+        const batchFiles = repairBatches[index];
+        const batchDocuments =
+          await this.buildLexicalBodyTokenColdDocuments(batchFiles);
+        await coldStore.upsertDocuments(batchDocuments);
+        if (index + 1 < repairBatches.length) {
+          await MyLib.sleep(0);
+        }
+      }
+    }
+
+    await coldStore.updateIndexedRefsMetadata(indexedFileRefs);
   }
 
   private hasIndexedFileRefChanged(
