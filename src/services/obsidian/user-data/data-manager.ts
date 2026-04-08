@@ -33,6 +33,8 @@ import {
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
+import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
+import { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { FileUtil } from "src/utils/file-util";
@@ -43,7 +45,7 @@ import {
   monitorDecorator,
   MyLib,
 } from "src/utils/my-lib";
-import { singleton } from "tsyringe";
+import { container, singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
@@ -374,6 +376,16 @@ function formatBytesLabel(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
+function ensureCoverageLexicalBodyTokenColdStoreRegistered(): void {
+  if (container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
+    return;
+  }
+  container.registerSingleton(
+    COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+    CoverageLexicalBodyTokenColdStore,
+  );
+}
+
 @singleton()
 export class DataManager {
   private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
@@ -392,6 +404,8 @@ export class DataManager {
   private static readonly LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD = 24;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD = 768 * 1024;
   private plugin: CleverSearch = getInstance(THIS_PLUGIN);
+  private readonly lexicalBodyTokenColdStoreRegistration =
+    ensureCoverageLexicalBodyTokenColdStoreRegistered();
   private database = getInstance(Database);
   private dataProvider = getInstance(DataProvider);
   private setting = getInstance(OuterSetting);

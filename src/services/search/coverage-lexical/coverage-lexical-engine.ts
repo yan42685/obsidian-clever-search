@@ -63,10 +63,13 @@ import {
 	buildCoverageLexicalWindowFusionSignal,
 	createEmptyCoverageLexicalWindowFusionSignal,
 } from "./coverage-lexical-fusion";
+import type {
+	CoverageLexicalBodyTokenColdDocumentWrite,
+	CoverageLexicalBodyTokenColdStoreApi,
+} from "./coverage-lexical-body-token-cold-types";
 import {
-	CoverageLexicalBodyTokenColdStore,
-} from "./coverage-lexical-body-token-cold-store";
-import type { CoverageLexicalBodyTokenColdDocumentWrite } from "./coverage-lexical-body-token-cold-types";
+	COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+} from "./coverage-lexical-body-token-cold-types";
 import {
 	decodeCoverageLexicalSnapshotV1,
 	encodeCoverageLexicalSnapshotV1,
@@ -462,7 +465,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		readonly string[]
 	>();
 	private coverageLexicalBodyTokenColdStore:
-		| CoverageLexicalBodyTokenColdStore
+		| CoverageLexicalBodyTokenColdStoreApi
 		| null
 		| undefined;
 	private readonly pendingBodyTokenColdUpsertsByPath = new Map<
@@ -1830,18 +1833,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		];
 	}
 
-	private getBodyTokenColdStore(): CoverageLexicalBodyTokenColdStore | null {
+	private getBodyTokenColdStore(): CoverageLexicalBodyTokenColdStoreApi | null {
 		if (this.coverageLexicalBodyTokenColdStore !== undefined) {
 			return this.coverageLexicalBodyTokenColdStore;
 		}
-		if (!container.isRegistered(CoverageLexicalBodyTokenColdStore, true)) {
+		if (!container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
 			this.coverageLexicalBodyTokenColdStore = null;
 			return null;
 		}
 		try {
-			this.coverageLexicalBodyTokenColdStore = getInstance(
-				CoverageLexicalBodyTokenColdStore,
-			);
+			this.coverageLexicalBodyTokenColdStore = container.resolve(
+				COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+			) as CoverageLexicalBodyTokenColdStoreApi;
 		} catch {
 			this.coverageLexicalBodyTokenColdStore = null;
 		}

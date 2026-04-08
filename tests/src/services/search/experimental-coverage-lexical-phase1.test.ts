@@ -837,6 +837,70 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		).toBe("packed metadata heading");
 	});
 
+	test("publishes body token cold rows through the Dexie-backed cold store token", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				deleteDocuments(paths: string[]): void;
+			};
+		};
+		const { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
+		) as {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
+		};
+		const upsertDocuments = jest.fn(async () => undefined);
+		const deleteDocuments = jest.fn(async () => undefined);
+		const clearAll = jest.fn(async () => undefined);
+
+		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+			upsertDocuments,
+			deleteDocuments,
+			clearAll,
+		} as any);
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/cold-store-target.md",
+				basename: "cold-store-target",
+				folder: "notes",
+				content: "alpha alpha beta beta gamma gamma",
+			},
+		]);
+
+		expect(upsertDocuments).toHaveBeenCalledTimes(1);
+		expect(upsertDocuments).toHaveBeenCalledWith([
+			expect.objectContaining({
+				path: "notes/cold-store-target.md",
+				bodyTokens: [
+					"alpha",
+					"alpha",
+					"alpha",
+					"alpha",
+					"beta",
+					"beta",
+					"beta",
+					"beta",
+					"gamma",
+					"gamma",
+					"gamma",
+					"gamma",
+				],
+			}),
+		]);
+
+		engine.deleteDocuments(["notes/cold-store-target.md"]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(deleteDocuments).toHaveBeenCalledWith([
+			"notes/cold-store-target.md",
+		]);
+		expect(clearAll).not.toHaveBeenCalled();
+	});
+
 	test("coarse hydration treats unresolved body evidence as upgrade potential", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
