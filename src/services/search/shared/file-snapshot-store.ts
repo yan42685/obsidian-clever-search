@@ -52,13 +52,13 @@ export type FileSnapshotRuntimeMemoryEstimate = {
 	}>;
 };
 
-const textEncoder = new TextEncoder();
-
 @singleton()
 export class FileSnapshotStore {
 	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
 	private static readonly RUNTIME_REPORT_TOP_ENTRY_LIMIT = 5;
 	private static readonly CURRENT_TEXT_CACHE_CAPACITY_BYTES = 32 * 1024 * 1024;
+	private static readonly STRING_CODE_UNIT_BYTES = 2;
+	private static readonly GENERATION_BYTES = 8;
 	private readonly vault = getInstance(Vault);
 	private readonly currentFilePathToSlot = new Map<string, number>();
 	private readonly currentFileLru = new Map<string, true>();
@@ -357,10 +357,12 @@ export class FileSnapshotStore {
 			if (text === undefined) {
 				continue;
 			}
-			const entryPathBytes = textEncoder.encode(path).length;
-			const entryTextBytes = textEncoder.encode(text).length;
+			const entryPathBytes = this.estimateStringBytes(path);
+			const entryTextBytes = this.estimateStringBytes(text);
 			const entryGenerationBytes =
-				this.currentSlotGenerations[slot] !== undefined ? 8 : 0;
+				this.currentSlotGenerations[slot] !== undefined
+					? FileSnapshotStore.GENERATION_BYTES
+					: 0;
 			pathBytes += entryPathBytes;
 			currentTextBytes += entryTextBytes;
 			generationBytes += entryGenerationBytes;
@@ -736,10 +738,14 @@ export class FileSnapshotStore {
 		generation?: number,
 	): number {
 		return (
-			textEncoder.encode(path).length +
-			textEncoder.encode(text).length +
-			(generation !== undefined ? 8 : 0)
+			this.estimateStringBytes(path) +
+			this.estimateStringBytes(text) +
+			(generation !== undefined ? FileSnapshotStore.GENERATION_BYTES : 0)
 		);
+	}
+
+	private estimateStringBytes(value: string): number {
+		return value.length * FileSnapshotStore.STRING_CODE_UNIT_BYTES;
 	}
 
 	private async deleteRowsNotIn(
