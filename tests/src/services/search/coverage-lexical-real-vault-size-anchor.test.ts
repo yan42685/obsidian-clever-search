@@ -261,8 +261,14 @@ describe("coverage lexical real vault size anchor", () => {
 		};
 
 		container.registerInstance(Tokenizer, createMockTokenizer());
-		const baselineEngine = new CoverageLexicalFileSearchEngine();
-		await baselineEngine.addDocuments(documents);
+		const baselineEngine = await withExperimentalBodyTokenOffloadEnv(
+			false,
+			async () => {
+				const engine = new CoverageLexicalFileSearchEngine();
+				await engine.addDocuments(documents);
+				return engine;
+			},
+		);
 		const baselineBytes = baselineEngine.estimateIndexBytes?.() ?? 0;
 		const baselineBreakdown = baselineEngine.getIndexBreakdown?.() ?? null;
 		const baselineSnapshot = baselineEngine.serialize() as
