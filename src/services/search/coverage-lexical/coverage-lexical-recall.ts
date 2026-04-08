@@ -178,6 +178,13 @@ type CoverageLexicalQueryCache = {
 		string,
 		CoverageLexicalMetadataPhraseSurface | null
 	>;
+	familySetCandidatesByKey: Map<
+		string,
+		readonly (readonly [
+			CoverageLexicalCandidateKey,
+			CoverageLexicalCandidateState,
+		])[]
+	>;
 };
 
 type CoverageLexicalMetadataPhraseSurface = {
@@ -415,6 +422,7 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		phraseSignatureBucketsByKey: new Map(),
 		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
 		metadataPhraseSurfaceByDocAndField: new Map(),
+		familySetCandidatesByKey: new Map(),
 	};
 }
 
@@ -845,7 +853,7 @@ function runStrictHybridLane(
 		benchmarkHooks,
 		"strict_hybrid_lane",
 		() => {
-			collectFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
+			appendFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
 				scope: "metadata-only",
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: false,
@@ -920,12 +928,12 @@ function runRelaxedHybridLane(
 		benchmarkHooks,
 		"relaxed_hybrid_lane",
 		() => {
-			collectFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
+			appendFamilySetCandidates(index, queryCache, laneCandidates, plan.hardAnchorFamilies, {
 				scope: "metadata-only",
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: false,
 			});
-			collectFamilySetCandidates(
+			appendFamilySetCandidates(
 				index,
 				queryCache,
 				laneCandidates,
@@ -993,7 +1001,7 @@ function runLocalBodyLane(
 		benchmarkHooks,
 		"local_body_lane",
 		() => {
-			collectFamilySetCandidates(index, queryCache, laneCandidates, localBodyFamilies, {
+			appendFamilySetCandidates(index, queryCache, laneCandidates, localBodyFamilies, {
 				scope: "body-only",
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: request.isFuzzy,
@@ -2260,6 +2268,64 @@ function collectFamilySetCandidates(
 	}
 }
 
+function appendFamilySetCandidates(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
+	families: readonly CoverageLexicalFamily[],
+	options: {
+		scope: CoverageLexicalCollectionScope;
+		includePrefix: boolean;
+		includeFuzzy: boolean;
+	},
+): void {
+	for (const [key, state] of getOrCreateFamilySetCandidateEntries(
+		index,
+		queryCache,
+		families,
+		options,
+	)) {
+		mergeCandidateStateByDocId(candidates, key, state);
+	}
+}
+
+function getOrCreateFamilySetCandidateEntries(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	families: readonly CoverageLexicalFamily[],
+	options: {
+		scope: CoverageLexicalCollectionScope;
+		includePrefix: boolean;
+		includeFuzzy: boolean;
+	},
+): readonly (readonly [
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState,
+	])[] {
+	const uniqueFamilies = dedupeFamilies(families);
+	const cacheKey = [
+		options.scope,
+		options.includePrefix ? "prefix" : "no-prefix",
+		options.includeFuzzy ? "fuzzy" : "no-fuzzy",
+		uniqueFamilies.map((family) => family.index).join(","),
+	].join("|");
+	const cached = queryCache.familySetCandidatesByKey.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const collected = new Map<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>();
+	collectFamilySetCandidates(index, queryCache, collected, uniqueFamilies, options);
+	const created = Array.from(
+		collected.entries(),
+		([key, state]) => [key, cloneCandidateState(state)] as const,
+	);
+	queryCache.familySetCandidatesByKey.set(cacheKey, created);
+	return created;
+}
+
 function collectCharCandidates(
 	index: CoverageLexicalRecallIndex,
 	postingsByTerm: CoverageLexicalPostingMap | undefined,
@@ -3259,6 +3325,47 @@ function createEmptyCandidateState(): CoverageLexicalCandidateState {
 		tagCharMatchFlags: [],
 		tagExactMatchIndices: [],
 		tagExactMatchFlags: [],
+	};
+}
+
+function cloneCandidateState(
+	state: CoverageLexicalCandidateState,
+): CoverageLexicalCandidateState {
+	return {
+		bodyMatches: [...state.bodyMatches],
+		bodyCharMatchIndices: [...state.bodyCharMatchIndices],
+		bodyCharMatchFlags: [...state.bodyCharMatchFlags],
+		bodyPrefixWitness: state.bodyPrefixWitness
+			? { ...state.bodyPrefixWitness }
+			: null,
+		metadataMatches: [...state.metadataMatches],
+		metadataAssistFieldMatches: cloneMetadataFieldMatches(
+			state.metadataAssistFieldMatches,
+		),
+		metadataCharMatchIndices: [...state.metadataCharMatchIndices],
+		metadataCharMatchFlags: [...state.metadataCharMatchFlags],
+		metadataFieldMatches: cloneMetadataFieldMatches(state.metadataFieldMatches),
+		metadataPrefixWitness: state.metadataPrefixWitness
+			? { ...state.metadataPrefixWitness }
+			: null,
+		phraseMatches: [...state.phraseMatches],
+		phraseMatchFlags: [...state.phraseMatchFlags],
+		tagCharMatchIndices: [...state.tagCharMatchIndices],
+		tagCharMatchFlags: [...state.tagCharMatchFlags],
+		tagExactMatchIndices: [...state.tagExactMatchIndices],
+		tagExactMatchFlags: [...state.tagExactMatchFlags],
+	};
+}
+
+function cloneMetadataFieldMatches(
+	source: CoverageLexicalCandidateState["metadataFieldMatches"],
+): CoverageLexicalCandidateState["metadataFieldMatches"] {
+	return {
+		basename: [...source.basename],
+		aliases: [...source.aliases],
+		folder: [...source.folder],
+		headings: [...source.headings],
+		tags: [...source.tags],
 	};
 }
 

@@ -118,6 +118,15 @@ type PhaseTimingSummary = {
 	}>;
 };
 
+type CoverageLexicalBenchmarkDiagnostic =
+	| "index"
+	| "timing"
+	| "recall"
+	| "lane-study"
+	| "wins"
+	| "disagreements"
+	| "misses";
+
 type QueryOutcome = {
 	query: string;
 	relevantPath: string;
@@ -3057,6 +3066,59 @@ function round(value: number): number {
 	return Number(value.toFixed(3));
 }
 
+const COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES: readonly CoverageLexicalBenchmarkDiagnostic[] =
+	[
+		"index",
+		"timing",
+		"recall",
+		"lane-study",
+		"wins",
+		"disagreements",
+		"misses",
+	];
+
+function resolveCoverageLexicalBenchmarkDiagnostics(): ReadonlySet<CoverageLexicalBenchmarkDiagnostic> {
+	const raw = process.env.COVERAGE_LEXICAL_BENCH_DIAGNOSTICS?.trim();
+	if (!raw || raw.length === 0) {
+		return new Set();
+	}
+	const parts = raw
+		.split(/[\s,]+/u)
+		.map((part) => part.trim().toLowerCase())
+		.filter((part) => part.length > 0);
+	const selected = new Set<CoverageLexicalBenchmarkDiagnostic>();
+	for (const part of parts) {
+		if (part === "default") {
+			continue;
+		}
+		if (part === "none") {
+			selected.clear();
+			continue;
+		}
+		if (part === "all") {
+			for (const name of COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES) {
+				selected.add(name);
+			}
+			continue;
+		}
+		if (
+			COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES.includes(
+				part as CoverageLexicalBenchmarkDiagnostic,
+			)
+		) {
+			selected.add(part as CoverageLexicalBenchmarkDiagnostic);
+		}
+	}
+	return selected;
+}
+
+function shouldPrintCoverageLexicalBenchmarkDiagnostic(
+	selected: ReadonlySet<CoverageLexicalBenchmarkDiagnostic>,
+	diagnostic: CoverageLexicalBenchmarkDiagnostic,
+): boolean {
+	return selected.has(diagnostic);
+}
+
 if (process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT !== "1") {
 describe("coverage lexical automation benchmark", () => {
 	beforeEach(() => {
@@ -3085,6 +3147,7 @@ describe("coverage lexical automation benchmark", () => {
 
 	test("compare coverage lexical against minisearch on automation corpus", async () => {
 		const benchmarkStartedAt = performance.now();
+		const diagnostics = resolveCoverageLexicalBenchmarkDiagnostics();
 		const tokenizer = createMockTokenizer();
 		const { documents, queryCases } = createAutomationCorpus();
 		const languageMix = computeLanguageMix(documents);
@@ -3156,29 +3219,46 @@ describe("coverage lexical automation benchmark", () => {
 						),
 				),
 		);
-		const recallContract = await withCoverageBodyTokenOffloadEnv(
-			true,
-			async () =>
-				runCoverageRecallContract(
-					coverageLexicalCore as any,
-					tokenizer,
-					buildRecallContractCases(),
-				),
-		);
-		const relaxedHybridStudy = await withCoverageBodyTokenOffloadEnv(
-			true,
-			async () =>
-				runCoverageLaneStudy(
-					coverageLexicalCore as any,
-					tokenizer,
-					queryCases,
-				),
-		);
-		const coverageCoreVsMini = summarizeWins(
-			coverageCoreResult.outcomes,
-			miniResult.outcomes,
-		);
-		const coverageCoreMisses = summarizeMisses(coverageCoreResult.outcomes);
+		const recallContract = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"recall",
+		)
+			? await withCoverageBodyTokenOffloadEnv(
+					true,
+					async () =>
+						runCoverageRecallContract(
+							coverageLexicalCore as any,
+							tokenizer,
+							buildRecallContractCases(),
+						),
+			  )
+			: null;
+		const relaxedHybridStudy = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"lane-study",
+		)
+			? await withCoverageBodyTokenOffloadEnv(
+					true,
+					async () =>
+						runCoverageLaneStudy(
+							coverageLexicalCore as any,
+							tokenizer,
+							queryCases,
+						),
+			  )
+			: null;
+		const coverageCoreVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(coverageCoreResult.outcomes, miniResult.outcomes)
+			: null;
+		const coverageCoreMisses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(coverageCoreResult.outcomes)
+			: null;
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -3218,24 +3298,53 @@ describe("coverage lexical automation benchmark", () => {
 						),
 				),
 		);
-		const coverageDisplayVsMini = summarizeWins(
-			coverageDisplayResult.outcomes,
-			miniResult.outcomes,
-		);
-		const coverageDisplayVsCore = summarizeWins(
-			coverageDisplayResult.outcomes,
-			coverageCoreResult.outcomes,
-		);
-		const coverageDisplayMisses = summarizeMisses(coverageDisplayResult.outcomes);
-		const miniMisses = summarizeMisses(miniResult.outcomes);
-		const coreVsMiniDisagreementDigest = summarizeDisagreements(
-			coverageCoreResult.outcomes,
-			miniResult.outcomes,
-		);
-		const displayVsCoreDisagreementDigest = summarizeDisagreements(
-			coverageDisplayResult.outcomes,
-			coverageCoreResult.outcomes,
-		);
+		const coverageDisplayVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(coverageDisplayResult.outcomes, miniResult.outcomes)
+			: null;
+		const coverageDisplayVsCore = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(
+					coverageDisplayResult.outcomes,
+					coverageCoreResult.outcomes,
+			  )
+			: null;
+		const coverageDisplayMisses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(coverageDisplayResult.outcomes)
+			: null;
+		const miniMisses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(miniResult.outcomes)
+			: null;
+		const coreVsMiniDisagreementDigest =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+				? summarizeDisagreements(
+						coverageCoreResult.outcomes,
+						miniResult.outcomes,
+				  )
+				: null;
+		const displayVsCoreDisagreementDigest =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+				? summarizeDisagreements(
+						coverageDisplayResult.outcomes,
+						coverageCoreResult.outcomes,
+				  )
+				: null;
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
 		console.log(
@@ -3445,123 +3554,150 @@ describe("coverage lexical automation benchmark", () => {
 				2,
 			),
 		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] index-breakdown",
-			JSON.stringify(
-				{
-					MiniSearch: mini.getIndexBreakdown?.() ?? null,
-					CoverageLexicalCore:
-						coverageLexicalCore.getIndexBreakdown?.() ?? null,
-					CoverageLexicalDisplay:
-						coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-phase-timing",
-			JSON.stringify(
-				{
-					core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
-					display: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] recall-contract",
-			JSON.stringify(
-				{
-					unionHitRate: round(recallContract.unionHitRate),
-					zeroRate: round(recallContract.zeroRate),
-					queryKindCounts: recallContract.queryKindCounts,
-					queryKindAverageLaneCount: recallContract.queryKindAverageLaneCount,
-					byType: Object.fromEntries(
-						Object.entries(recallContract.byType).map(([type, metric]) => [
-							type,
-							{
-								unionHitRate: round(metric.unionHitRate),
-								zeroRate: round(metric.zeroRate),
-								count: metric.count,
-							},
-						]),
-					),
-					laneGuardrails: summarizeLaneGuardrails(recallContract),
-					relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
-						recallContract,
-					),
-					prefilterDropMisses: recallContract.misses
-						.filter((miss) =>
-							miss.lanes.some(
-								(lane) => lane.relevantCandidate && !lane.relevantInPrefilter,
-							),
-						)
-						.slice(0, 10),
-					postPrefilterDropMisses: recallContract.misses
-						.filter((miss) =>
-							miss.lanes.some(
-								(lane) => lane.relevantInPrefilter && !lane.relevantAdmitted,
-							),
-						)
-						.slice(0, 10),
-					laneCandidateHitCounts: recallContract.laneCandidateHitCounts,
-					lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
-					laneHitCounts: recallContract.laneHitCounts,
-					misses: recallContract.misses.slice(0, 10),
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] relaxed-hybrid-study",
-			JSON.stringify(
-				{
-					queryKindCounts: relaxedHybridStudy.queryKindCounts,
-					queryKindAverageLaneCount:
-						relaxedHybridStudy.queryKindAverageLaneCount,
-					relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
-						relaxedHybridStudy,
-					),
-				},
-				null,
-				2,
-			),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-core-vs-mini",
-			JSON.stringify(coverageCoreVsMini, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-display-vs-mini",
-			JSON.stringify(coverageDisplayVsMini, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-display-vs-core",
-			JSON.stringify(coverageDisplayVsCore, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] disagreement-digest-core-vs-mini",
-			JSON.stringify(coreVsMiniDisagreementDigest, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] disagreement-digest-display-vs-core",
-			JSON.stringify(displayVsCoreDisagreementDigest, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-core-misses",
-			JSON.stringify(coverageCoreMisses, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] coverage-display-misses",
-			JSON.stringify(coverageDisplayMisses, null, 2),
-		);
-		console.log(
-			"[coverage-lexical-automation-benchmark] mini-misses",
-			JSON.stringify(miniMisses, null, 2),
-		);
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "index")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] index-breakdown",
+				JSON.stringify(
+					{
+						MiniSearch: mini.getIndexBreakdown?.() ?? null,
+						CoverageLexicalCore:
+							coverageLexicalCore.getIndexBreakdown?.() ?? null,
+						CoverageLexicalDisplay:
+							coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "timing")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-phase-timing",
+				JSON.stringify(
+					{
+						core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
+						display: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "recall") &&
+			recallContract
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] recall-contract",
+				JSON.stringify(
+					{
+						unionHitRate: round(recallContract.unionHitRate),
+						zeroRate: round(recallContract.zeroRate),
+						queryKindCounts: recallContract.queryKindCounts,
+						queryKindAverageLaneCount: recallContract.queryKindAverageLaneCount,
+						byType: Object.fromEntries(
+							Object.entries(recallContract.byType).map(([type, metric]) => [
+								type,
+								{
+									unionHitRate: round(metric.unionHitRate),
+									zeroRate: round(metric.zeroRate),
+									count: metric.count,
+								},
+							]),
+						),
+						laneGuardrails: summarizeLaneGuardrails(recallContract),
+						relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
+							recallContract,
+						),
+						prefilterDropMisses: recallContract.misses
+							.filter((miss) =>
+								miss.lanes.some(
+									(lane) =>
+										lane.relevantCandidate && !lane.relevantInPrefilter,
+								),
+							)
+							.slice(0, 10),
+						postPrefilterDropMisses: recallContract.misses
+							.filter((miss) =>
+								miss.lanes.some(
+									(lane) =>
+										lane.relevantInPrefilter && !lane.relevantAdmitted,
+								),
+							)
+							.slice(0, 10),
+						laneCandidateHitCounts: recallContract.laneCandidateHitCounts,
+						lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
+						laneHitCounts: recallContract.laneHitCounts,
+						misses: recallContract.misses.slice(0, 10),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "lane-study") &&
+			relaxedHybridStudy
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] relaxed-hybrid-study",
+				JSON.stringify(
+					{
+						queryKindCounts: relaxedHybridStudy.queryKindCounts,
+						queryKindAverageLaneCount:
+							relaxedHybridStudy.queryKindAverageLaneCount,
+						relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
+							relaxedHybridStudy,
+						),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "wins")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-core-vs-mini",
+				JSON.stringify(coverageCoreVsMini, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-display-vs-mini",
+				JSON.stringify(coverageDisplayVsMini, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-display-vs-core",
+				JSON.stringify(coverageDisplayVsCore, null, 2),
+			);
+		}
+		if (
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+		) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] disagreement-digest-core-vs-mini",
+				JSON.stringify(coreVsMiniDisagreementDigest, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] disagreement-digest-display-vs-core",
+				JSON.stringify(displayVsCoreDisagreementDigest, null, 2),
+			);
+		}
+		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "misses")) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-core-misses",
+				JSON.stringify(coverageCoreMisses, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] coverage-display-misses",
+				JSON.stringify(coverageDisplayMisses, null, 2),
+			);
+			console.log(
+				"[coverage-lexical-automation-benchmark] mini-misses",
+				JSON.stringify(miniMisses, null, 2),
+			);
+		}
 
 		expect(documents.length).toBeGreaterThanOrEqual(70);
 		expect(queryCases.length).toBeGreaterThanOrEqual(145);
@@ -3580,3 +3716,4 @@ describe("coverage lexical automation benchmark", () => {
 	});
 });
 }
+
