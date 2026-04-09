@@ -337,9 +337,35 @@ export type CoverageLexicalEvidenceMassSummary = {
 	displayNormalizedMass: number;
 };
 
+export type CoverageLexicalCoverageProfile = {
+	meaningfulFamilyCount: number;
+	meaningfulCoveredFamilyCount: number;
+	meaningfulFamilyWeight: number;
+	meaningfulCoveredFamilyWeight: number;
+	requiredFamilyCount: number;
+	requiredCoveredFamilyCount: number;
+	requiredFamilyWeight: number;
+	requiredCoveredFamilyWeight: number;
+	decisiveFamilyCount: number;
+	decisiveCoveredFamilyCount: number;
+	decisiveFamilyWeight: number;
+	decisiveCoveredFamilyWeight: number;
+	supportFamilyCount: number;
+	supportCoveredFamilyCount: number;
+	supportFamilyWeight: number;
+	supportCoveredFamilyWeight: number;
+	requiredHanFamilyCount: number;
+	requiredHanCoveredFamilyCount: number;
+	requiredLatinFamilyCount: number;
+	requiredLatinCoveredFamilyCount: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+};
+
 export type CoverageLexicalFamilySignal = {
 	familyCountSummary: CoverageLexicalFamilyCountSummary;
 	evidenceMassSummary?: CoverageLexicalEvidenceMassSummary;
+	coverageProfile: CoverageLexicalCoverageProfile;
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;

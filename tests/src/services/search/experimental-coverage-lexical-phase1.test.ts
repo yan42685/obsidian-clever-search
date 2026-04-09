@@ -252,6 +252,30 @@ function createExperimentalCoverageSignal(
 			headingsMatchedFamilyCount: 0,
 			tagsMatchedFamilyCount: 0,
 		},
+		coverageProfile: {
+			meaningfulFamilyCount: totalMatchedFamilyCount,
+			meaningfulCoveredFamilyCount: totalMatchedFamilyCount,
+			meaningfulFamilyWeight: totalMatchedFamilyCount,
+			meaningfulCoveredFamilyWeight: totalMatchedFamilyCount,
+			requiredFamilyCount: totalMatchedFamilyCount,
+			requiredCoveredFamilyCount: totalMatchedFamilyCount,
+			requiredFamilyWeight: totalMatchedFamilyCount,
+			requiredCoveredFamilyWeight: totalMatchedFamilyCount,
+			decisiveFamilyCount: totalMatchedFamilyCount,
+			decisiveCoveredFamilyCount: totalMatchedFamilyCount,
+			decisiveFamilyWeight: totalMatchedFamilyCount,
+			decisiveCoveredFamilyWeight: totalMatchedFamilyCount,
+			supportFamilyCount: 0,
+			supportCoveredFamilyCount: 0,
+			supportFamilyWeight: 0,
+			supportCoveredFamilyWeight: 0,
+			requiredHanFamilyCount: 0,
+			requiredHanCoveredFamilyCount: 0,
+			requiredLatinFamilyCount: 0,
+			requiredLatinCoveredFamilyCount: 0,
+			crossScriptRequired: false,
+			crossScriptSatisfied: true,
+		},
 		coreBody: createEmptyExperimentalAreaSignal(),
 		softBody: createEmptyExperimentalAreaSignal(),
 		metadataAnchor: createEmptyExperimentalAreaSignal(),
@@ -1311,6 +1335,72 @@ describe("coverage lexical phase 1 memory experiments", () => {
 
 		expect(hydratedDocIds.has(24)).toBe(true);
 		expect(hydratedDocIds.has(25)).toBe(false);
+	});
+
+	test("coarse hydration treats unresolved mixed-script coverage gaps as upgrade potential", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "anchor_body_hybrid",
+			route: "body-with-anchor",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 30 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 30 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(30 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(24);
+		expect(unresolvedState).toBeDefined();
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		coarseRanked[24].coverageLexicalSignal = {
+			...coarseRanked[24].coverageLexicalSignal,
+			coverageProfile: {
+				...coarseRanked[24].coverageLexicalSignal.coverageProfile,
+				meaningfulFamilyCount: 2,
+				meaningfulCoveredFamilyCount: 1,
+				meaningfulFamilyWeight: 2,
+				meaningfulCoveredFamilyWeight: 1.1,
+				requiredFamilyCount: 2,
+				requiredCoveredFamilyCount: 1,
+				requiredFamilyWeight: 2,
+				requiredCoveredFamilyWeight: 1.1,
+				decisiveFamilyCount: 2,
+				decisiveCoveredFamilyCount: 1,
+				decisiveFamilyWeight: 2,
+				decisiveCoveredFamilyWeight: 1.1,
+				requiredHanFamilyCount: 1,
+				requiredHanCoveredFamilyCount: 0,
+				requiredLatinFamilyCount: 1,
+				requiredLatinCoveredFamilyCount: 1,
+				crossScriptRequired: true,
+				crossScriptSatisfied: false,
+			},
+		};
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(24)).toBe(true);
 	});
 
 	test("coarse hydration does not extend for unresolved evidence that cannot catch the cutoff", async () => {

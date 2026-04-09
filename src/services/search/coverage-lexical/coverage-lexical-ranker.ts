@@ -1,6 +1,7 @@
 import type { MatchedFile } from "src/globals/search-types";
 import type {
 	CoverageLexicalCharSignal,
+	CoverageLexicalCoverageProfile,
 	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
@@ -43,6 +44,14 @@ export function compareCoverageLexicalResultSignals(
 	plan: CoverageLexicalPlan,
 ): number {
 	const mode = resolveCoverageLexicalDecisionMode(plan);
+	const coverageDecision = compareCoverageLexicalCoverageProfiles(
+		left,
+		right,
+		plan,
+	);
+	if (coverageDecision !== 0) {
+		return coverageDecision;
+	}
 	const weightedDecision = compareCoverageLexicalEvidenceMassSummaries(
 		getCoverageLexicalEvidenceMassSummary(left),
 		getCoverageLexicalEvidenceMassSummary(right),
@@ -88,6 +97,177 @@ export function compareCoverageLexicalResultSignals(
 		return compareBodyWithAnchorDetailStages(left, right, plan);
 	}
 	return compareBodyFirstDetailStages(left, right);
+}
+
+function compareCoverageLexicalCoverageProfiles(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	const leftProfile = left.coverageProfile;
+	const rightProfile = right.coverageProfile;
+	const mixedScriptDecision = compareCrossScriptCoverage(
+		leftProfile,
+		rightProfile,
+		plan,
+	);
+	if (mixedScriptDecision !== 0) {
+		return mixedScriptDecision;
+	}
+	const decisiveGapDecision = compareAscendingMetric(
+		getEffectiveDecisiveGapCount(left, plan),
+		getEffectiveDecisiveGapCount(right, plan),
+	);
+	if (decisiveGapDecision !== 0) {
+		return decisiveGapDecision;
+	}
+	const adjustedRequiredRatioDecision = compareDescendingMetric(
+		getAdjustedRequiredCoverageRatio(left, plan),
+		getAdjustedRequiredCoverageRatio(right, plan),
+	);
+	if (adjustedRequiredRatioDecision !== 0) {
+		return adjustedRequiredRatioDecision;
+	}
+	const supportGapDecision = compareAscendingMetric(
+		getEffectiveSupportGapCount(left, plan),
+		getEffectiveSupportGapCount(right, plan),
+	);
+	if (supportGapDecision !== 0) {
+		return supportGapDecision;
+	}
+	if (plan.queryKind === "memory_relaxed") {
+		return 0;
+	}
+	const requiredRatioDecision = compareDescendingMetric(
+		getCoverageWeightRatio(
+			leftProfile.requiredCoveredFamilyWeight,
+			leftProfile.requiredFamilyWeight,
+		),
+		getCoverageWeightRatio(
+			rightProfile.requiredCoveredFamilyWeight,
+			rightProfile.requiredFamilyWeight,
+		),
+	);
+	if (requiredRatioDecision !== 0) {
+		return requiredRatioDecision;
+	}
+	const meaningfulRatioDecision = compareDescendingMetric(
+		getCoverageWeightRatio(
+			leftProfile.meaningfulCoveredFamilyWeight,
+			leftProfile.meaningfulFamilyWeight,
+		),
+		getCoverageWeightRatio(
+			rightProfile.meaningfulCoveredFamilyWeight,
+			rightProfile.meaningfulFamilyWeight,
+		),
+	);
+	if (meaningfulRatioDecision !== 0) {
+		return meaningfulRatioDecision;
+	}
+	return (
+		compareDescendingMetric(
+			leftProfile.requiredCoveredFamilyWeight,
+			rightProfile.requiredCoveredFamilyWeight,
+		) ||
+		compareDescendingMetric(
+			leftProfile.meaningfulCoveredFamilyWeight,
+			rightProfile.meaningfulCoveredFamilyWeight,
+		)
+	);
+}
+
+function compareCrossScriptCoverage(
+	left: CoverageLexicalCoverageProfile,
+	right: CoverageLexicalCoverageProfile,
+	plan: CoverageLexicalPlan,
+): number {
+	const requiresCrossScript =
+		plan.hasMixedScriptHint ||
+		left.crossScriptRequired ||
+		right.crossScriptRequired;
+	if (!requiresCrossScript) {
+		return 0;
+	}
+	return compareDescendingMetric(
+		left.crossScriptSatisfied ? 1 : 0,
+		right.crossScriptSatisfied ? 1 : 0,
+	);
+}
+
+function getEffectiveDecisiveGapCount(
+	signal: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	const rawGapCount =
+		signal.coverageProfile.decisiveFamilyCount -
+		signal.coverageProfile.decisiveCoveredFamilyCount;
+	const allowance = getCoverageGapRescueAllowance(signal, plan).decisive;
+	return Math.max(0, rawGapCount - allowance);
+}
+
+function getEffectiveSupportGapCount(
+	signal: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	const rawGapCount =
+		signal.coverageProfile.supportFamilyCount -
+		signal.coverageProfile.supportCoveredFamilyCount;
+	const allowance = getCoverageGapRescueAllowance(signal, plan).support;
+	return Math.max(0, rawGapCount - allowance);
+}
+
+function getCoverageGapRescueAllowance(
+	signal: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): { decisive: number; support: number } {
+	const strongWitness =
+		signal.metadataIdentity.phraseCoverageCount > 0 ||
+		signal.phraseBridgeCount > 0 ||
+		signal.localEvidence.primary.exactCoreWeight > 0 ||
+		signal.localEvidence.primary.orderedPairCount > 0 ||
+		signal.localEvidence.corroboratedExactCoreWeight > 0;
+	const bridgeCorroboration =
+		signal.bodyChar.fullSegmentCount > 0 ||
+		signal.metadataChar.fullSegmentCount > 0 ||
+		signal.bodyChar.bestSegmentCoverageRatio >= 0.85 ||
+		signal.metadataChar.bestSegmentCoverageRatio >= 0.85 ||
+		signal.tagSignal.exactMatchCount > 0;
+	let support = 0;
+	if (strongWitness) {
+		support += 1;
+	}
+	if (plan.queryKind === "memory_relaxed" && bridgeCorroboration) {
+		support += 1;
+	}
+	return {
+		decisive: plan.queryKind === "memory_relaxed" && strongWitness ? 1 : 0,
+		support,
+	};
+}
+
+function getCoverageWeightRatio(covered: number, total: number): number {
+	if (total <= 0) {
+		return 1;
+	}
+	return covered / total;
+}
+
+function getAdjustedRequiredCoverageRatio(
+	signal: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): number {
+	const total = signal.coverageProfile.requiredFamilyCount;
+	if (total <= 0) {
+		return 1;
+	}
+	const allowance = getCoverageGapRescueAllowance(signal, plan);
+	const adjustedCovered = Math.min(
+		total,
+		signal.coverageProfile.requiredCoveredFamilyCount +
+			allowance.decisive +
+			allowance.support,
+	);
+	return adjustedCovered / total;
 }
 
 function compareMetadataAssistCountOverride(

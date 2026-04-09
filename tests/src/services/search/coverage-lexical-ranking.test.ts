@@ -166,6 +166,7 @@ function registerMockFileSnapshotStore(
 
 function createComparatorPlan(
 	route: CoverageLexicalPlan["route"] = "body-with-anchor",
+	overrides: Partial<CoverageLexicalPlan> = {},
 ): CoverageLexicalPlan {
 	return {
 		families: [],
@@ -187,10 +188,13 @@ function createComparatorPlan(
 		anchorFamilyCount: 0,
 		bodyFamilyCount: 0,
 		explain: {
+			queryKind: overrides.queryKind ?? "anchor_body_hybrid",
+			route: overrides.route ?? route,
 			spans: [],
 			familyReasons: [],
 			queryKindReasons: [],
 		},
+		...overrides,
 	};
 }
 
@@ -335,14 +339,49 @@ function createFamilyCountSummary(
 	};
 }
 
+function createCoverageProfile(
+	overrides: Partial<CoverageLexicalFamilySignal["coverageProfile"]> = {},
+): CoverageLexicalFamilySignal["coverageProfile"] {
+	return {
+		meaningfulFamilyCount: 0,
+		meaningfulCoveredFamilyCount: 0,
+		meaningfulFamilyWeight: 0,
+		meaningfulCoveredFamilyWeight: 0,
+		requiredFamilyCount: 0,
+		requiredCoveredFamilyCount: 0,
+		requiredFamilyWeight: 0,
+		requiredCoveredFamilyWeight: 0,
+		decisiveFamilyCount: 0,
+		decisiveCoveredFamilyCount: 0,
+		decisiveFamilyWeight: 0,
+		decisiveCoveredFamilyWeight: 0,
+		supportFamilyCount: 0,
+		supportCoveredFamilyCount: 0,
+		supportFamilyWeight: 0,
+		supportCoveredFamilyWeight: 0,
+		requiredHanFamilyCount: 0,
+		requiredHanCoveredFamilyCount: 0,
+		requiredLatinFamilyCount: 0,
+		requiredLatinCoveredFamilyCount: 0,
+		crossScriptRequired: false,
+		crossScriptSatisfied: false,
+		...overrides,
+	};
+}
+
 function createFamilySignal(
-	overrides: Omit<Partial<CoverageLexicalFamilySignal>, "familyCountSummary"> & {
+	overrides: Omit<
+		Partial<CoverageLexicalFamilySignal>,
+		"familyCountSummary" | "coverageProfile"
+	> & {
 		familyCountSummary?: Partial<CoverageLexicalFamilyCountSummary>;
+		coverageProfile?: Partial<CoverageLexicalFamilySignal["coverageProfile"]>;
 	} = {},
 ): CoverageLexicalFamilySignal {
-	const { familyCountSummary, ...restOverrides } = overrides;
+	const { familyCountSummary, coverageProfile, ...restOverrides } = overrides;
 	return {
 		familyCountSummary: createFamilyCountSummary(familyCountSummary ?? {}),
+		coverageProfile: createCoverageProfile(coverageProfile ?? {}),
 		coreBody: {
 			coverageCount: 0,
 			exactWeight: 0,
@@ -506,7 +545,7 @@ describe("coverage lexical ranking", () => {
 		}
 	});
 
-	test("metadata-first routes prefer metadata distribution before ordinary body detail", () => {
+	test("legacy comparator compatibility keeps metadata-first distribution ahead of ordinary body detail", () => {
 		const plan = createComparatorPlan("metadata-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -552,7 +591,7 @@ describe("coverage lexical ranking", () => {
 	// The next comparator-shape tests document the current route/count worldview.
 	// They are useful migration regressions, but they should not be treated as
 	// permanent product-ranking truths once completeness-first ranking lands.
-	test("body-with-anchor routes let dominant body witness beat broad metadata pressure", () => {
+	test("legacy comparator compatibility lets body-with-anchor witness beat broad metadata pressure", () => {
 		const plan = createComparatorPlan("body-with-anchor");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -603,7 +642,7 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
-	test("metadata-first routes do not let body witness outrank strong basename and alias evidence", () => {
+	test("legacy comparator compatibility keeps strong basename and alias evidence ahead in metadata-first routes", () => {
 		const plan = createComparatorPlan("metadata-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -652,7 +691,7 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
 	});
 
-	test("body-first routes keep body count ahead of metadata distribution after total-count ties", () => {
+	test("legacy comparator compatibility keeps body count ahead after total-count ties in body-first routes", () => {
 		const plan = createComparatorPlan("body-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -674,7 +713,7 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
-	test("count-first comparator honors metadata field priority basename over aliases over folder over headings over tags", () => {
+	test("legacy comparator compatibility preserves metadata field priority basename over aliases over folder over headings over tags", () => {
 		const plan = createComparatorPlan("body-with-anchor");
 		const basenameSignal = createFamilySignal({
 			familyCountSummary: {
@@ -726,7 +765,7 @@ describe("coverage lexical ranking", () => {
 		).toBeLessThan(0);
 	});
 
-	test("body matched family count breaks ties only after metadata counts are exhausted", () => {
+	test("legacy comparator compatibility uses body matched family count only after metadata counts are exhausted", () => {
 		const plan = createComparatorPlan("body-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -754,7 +793,7 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
-	test("detail signals only resolve ties after count summary is equal", () => {
+	test("legacy comparator compatibility resolves detail signals only after count summary ties", () => {
 		const plan = createComparatorPlan("body-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -786,6 +825,157 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
+	});
+
+	test("coverage profile prefers balanced mixed-script coverage before one-sided evidence spikes", () => {
+		const plan = createComparatorPlan("body-with-anchor", {
+			hasMixedScriptHint: true,
+		});
+		const left = createFamilySignal({
+			coverageProfile: {
+				requiredFamilyCount: 2,
+				requiredCoveredFamilyCount: 2,
+				requiredFamilyWeight: 2,
+				requiredCoveredFamilyWeight: 2,
+				meaningfulFamilyCount: 2,
+				meaningfulCoveredFamilyCount: 2,
+				meaningfulFamilyWeight: 2,
+				meaningfulCoveredFamilyWeight: 2,
+				decisiveFamilyCount: 2,
+				decisiveCoveredFamilyCount: 2,
+				decisiveFamilyWeight: 2,
+				decisiveCoveredFamilyWeight: 2,
+				requiredHanFamilyCount: 1,
+				requiredHanCoveredFamilyCount: 1,
+				requiredLatinFamilyCount: 1,
+				requiredLatinCoveredFamilyCount: 1,
+				crossScriptRequired: true,
+				crossScriptSatisfied: true,
+			},
+			coreBody: {
+				coverageCount: 2,
+				exactWeight: 6,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+		const right = createFamilySignal({
+			coverageProfile: {
+				requiredFamilyCount: 2,
+				requiredCoveredFamilyCount: 1,
+				requiredFamilyWeight: 2,
+				requiredCoveredFamilyWeight: 1.2,
+				meaningfulFamilyCount: 2,
+				meaningfulCoveredFamilyCount: 1,
+				meaningfulFamilyWeight: 2,
+				meaningfulCoveredFamilyWeight: 1.2,
+				decisiveFamilyCount: 2,
+				decisiveCoveredFamilyCount: 1,
+				decisiveFamilyWeight: 2,
+				decisiveCoveredFamilyWeight: 1.2,
+				requiredHanFamilyCount: 1,
+				requiredHanCoveredFamilyCount: 0,
+				requiredLatinFamilyCount: 1,
+				requiredLatinCoveredFamilyCount: 1,
+				crossScriptRequired: true,
+				crossScriptSatisfied: false,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 12,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			localEvidence: {
+				...createEmptyWindowFusionSignal(),
+				primary: {
+					...createEmptyWindowFusionSignal().primary,
+					exactCoreWeight: 8,
+					orderedPairCount: 2,
+					score: 180,
+				},
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+	});
+
+	test("memory-relaxed coverage profile allows strong witness to rescue one support gap", () => {
+		const plan = createComparatorPlan("body-with-anchor", {
+			queryKind: "memory_relaxed",
+		});
+		const left = createFamilySignal({
+			coverageProfile: {
+				requiredFamilyCount: 4,
+				requiredCoveredFamilyCount: 3,
+				requiredFamilyWeight: 4,
+				requiredCoveredFamilyWeight: 3.15,
+				meaningfulFamilyCount: 4,
+				meaningfulCoveredFamilyCount: 3,
+				meaningfulFamilyWeight: 4,
+				meaningfulCoveredFamilyWeight: 3.15,
+				decisiveFamilyCount: 2,
+				decisiveCoveredFamilyCount: 2,
+				decisiveFamilyWeight: 2,
+				decisiveCoveredFamilyWeight: 2,
+				supportFamilyCount: 2,
+				supportCoveredFamilyCount: 1,
+				supportFamilyWeight: 2,
+				supportCoveredFamilyWeight: 1.15,
+			},
+			coreBody: {
+				coverageCount: 2,
+				exactWeight: 10,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			phraseBridgeCount: 1,
+			phraseBridgeWeight: 3,
+			localEvidence: {
+				...createEmptyWindowFusionSignal(),
+				primary: {
+					...createEmptyWindowFusionSignal().primary,
+					exactCoreWeight: 4,
+					orderedPairCount: 1,
+					score: 120,
+				},
+				corroboratedExactCoreWeight: 4,
+			},
+		});
+		const right = createFamilySignal({
+			coverageProfile: {
+				requiredFamilyCount: 4,
+				requiredCoveredFamilyCount: 4,
+				requiredFamilyWeight: 4,
+				requiredCoveredFamilyWeight: 4,
+				meaningfulFamilyCount: 4,
+				meaningfulCoveredFamilyCount: 4,
+				meaningfulFamilyWeight: 4,
+				meaningfulCoveredFamilyWeight: 4,
+				decisiveFamilyCount: 2,
+				decisiveCoveredFamilyCount: 2,
+				decisiveFamilyWeight: 2,
+				decisiveCoveredFamilyWeight: 2,
+				supportFamilyCount: 2,
+				supportCoveredFamilyCount: 2,
+				supportFamilyWeight: 2,
+				supportCoveredFamilyWeight: 2,
+			},
+			coreBody: {
+				coverageCount: 1,
+				exactWeight: 2,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+			softBody: {
+				coverageCount: 4,
+				exactWeight: 0,
+				prefixWeight: 0,
+				fuzzyWeight: 0,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
 	// Product-facing guardrails begin here. These cases should survive the
@@ -909,6 +1099,93 @@ describe("coverage lexical ranking", () => {
 		]);
 	});
 
+	test("display prune does not rescue one-sided mixed-script tails with strong witness only on one side", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 5,
+						bodyMatchedFamilyCount: 5,
+					},
+					coverageProfile: {
+						meaningfulFamilyCount: 4,
+						meaningfulCoveredFamilyCount: 4,
+						meaningfulFamilyWeight: 4,
+						meaningfulCoveredFamilyWeight: 4,
+						requiredFamilyCount: 2,
+						requiredCoveredFamilyCount: 2,
+						requiredFamilyWeight: 2,
+						requiredCoveredFamilyWeight: 2,
+						decisiveFamilyCount: 2,
+						decisiveCoveredFamilyCount: 2,
+						decisiveFamilyWeight: 2,
+						decisiveCoveredFamilyWeight: 2,
+						requiredHanFamilyCount: 1,
+						requiredHanCoveredFamilyCount: 1,
+						requiredLatinFamilyCount: 1,
+						requiredLatinCoveredFamilyCount: 1,
+						crossScriptRequired: true,
+						crossScriptSatisfied: true,
+					},
+					coreBody: {
+						coverageCount: 4,
+						exactWeight: 5,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					familyCountSummary: {
+						totalMatchedFamilyCount: 3,
+						bodyMatchedFamilyCount: 3,
+					},
+					coverageProfile: {
+						meaningfulFamilyCount: 4,
+						meaningfulCoveredFamilyCount: 1,
+						meaningfulFamilyWeight: 4,
+						meaningfulCoveredFamilyWeight: 1.1,
+						requiredFamilyCount: 2,
+						requiredCoveredFamilyCount: 1,
+						requiredFamilyWeight: 2,
+						requiredCoveredFamilyWeight: 1.1,
+						decisiveFamilyCount: 2,
+						decisiveCoveredFamilyCount: 1,
+						decisiveFamilyWeight: 2,
+						decisiveCoveredFamilyWeight: 1.1,
+						requiredHanFamilyCount: 1,
+						requiredHanCoveredFamilyCount: 0,
+						requiredLatinFamilyCount: 1,
+						requiredLatinCoveredFamilyCount: 1,
+						crossScriptRequired: true,
+						crossScriptSatisfied: false,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 1,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+					localEvidence: {
+						...createEmptyWindowFusionSignal(),
+						primary: {
+							...createEmptyWindowFusionSignal().primary,
+							exactCoreWeight: 1,
+							orderedPairCount: 1,
+						},
+					},
+				}),
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+		]);
+	});
+
 	test("prefers stronger metadata identity evidence for mixed-anchor queries", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1025,6 +1302,62 @@ describe("coverage lexical ranking", () => {
 
 		expect(results[0]?.path).toBe(
 			"adversarial/ranker-lab/en/exact-quality-witness.md",
+		);
+	});
+
+	test("prefers mixed-script files that cover both language sides of the query", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "pkm-mixed/runtime/projected-token-runtime-access.md",
+				basename: "projected-token-runtime-access.md",
+				folder: "pkm-mixed/runtime",
+				headings: "Projected token 运行时访问",
+				content:
+					"projected token runtime access note explains 运行时访问 constraints and token rotation",
+				aliases: "运行时 projected token access",
+			},
+			{
+				path: "tech-en/content/en/docs/concepts/security/projected-token.md",
+				basename: "projected-token.md",
+				folder: "tech-en/content/en/docs/concepts/security",
+				headings: "Projected token",
+				content:
+					"projected token projected token access guidance for service account credentials",
+			},
+			{
+				path: "pkm-zh/runtime/运行时访问记录.md",
+				basename: "运行时访问记录.md",
+				folder: "pkm-zh/runtime",
+				headings: "运行时访问记录",
+				content:
+					"运行时访问 运行时访问 访问记录 汇总，不讨论 projected token 身份文件",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "projected token 运行时访问",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe(
+			"pkm-mixed/runtime/projected-token-runtime-access.md",
 		);
 	});
 

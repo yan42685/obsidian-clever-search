@@ -333,6 +333,107 @@ Display prune may still:
 but it should consume the unified evidence outputs rather than invent its own
 ranking worldview.
 
+## Count And Route Deprecation Stance
+
+The intended end state is:
+
+- `route` is no longer a primary semantic ranking axis
+- `familyCountSummary` is no longer a primary semantic ranking axis
+
+However, this should be implemented as a staged deprecation rather than a
+single destructive removal.
+
+### What Should Be Removed Quickly
+
+These should stop defining user-visible ranking semantics as soon as the
+replacement mechanism is stable:
+
+- route-specific comparator prefixes
+- count-first comparator prefixes
+- route/count-shaped benchmark expectations that are not tied to human search
+  intuition
+
+In other words:
+
+- `route` should stop deciding which result is more relevant
+- raw family counts should stop deciding which result is more relevant
+
+The replacement should be the unified completeness-aware evidence model:
+
+- `coverageProfile`
+- identity/body exactness
+- local witness quality
+- controlled rescue for partial-memory and strong local witness cases
+
+### What May Remain Temporarily
+
+The following uses are still acceptable during migration:
+
+- `route` as planner/debug/explain output
+- `route` or `decisionPriors` as temporary resource and budget hints
+- `familyCountSummary` as telemetry
+- `familyCountSummary` as a cheap stability tie-break
+- `familyCountSummary` as a coarse fallback while display and hydration
+  alignment is still in progress
+
+These are migration aids, not long-term product semantics.
+
+### Long-Term Target Shape
+
+Planner should gradually move away from selecting a strong semantic `route`
+label and instead produce:
+
+- `queryKind`
+- `decisionPriors`
+- coverage requirements
+- rescue potential hints
+- resource hints
+
+This avoids forcing every query through a legacy route bucket before ranking
+and hydration begin. The system should not need to first label a query as
+`metadata-first`, `body-first`, or `body-with-anchor` and then inherit a
+route-shaped ranking worldview from that early classification.
+
+Under that model, `route` becomes either:
+
+- a diagnostic artifact
+- or a removable derived label
+
+Similarly, `familyCountSummary` should gradually move from:
+
+- ranking truth
+
+to:
+
+- debug/telemetry summary
+- deterministic tail tie-break only
+
+### Deletion Criteria
+
+Physical deletion of `route`- and count-based code should happen only after the
+following are true:
+
+1. no user-visible top-result ordering depends on route/count-first prefixes
+2. coarse ranking, hydration, and display pruning no longer rely on route/count
+   semantics as their main fallback worldview
+3. benchmark gates no longer treat route/count-shaped continuity as a product
+   goal
+
+Until those conditions are met, code may be downgraded and isolated, but should
+not be removed blindly.
+
+### Practical Guidance
+
+This document therefore recommends:
+
+1. remove `route` and count from the semantic ranking worldview first
+2. keep them temporarily as diagnostics, telemetry, and migration scaffolding
+3. delete the residual code only after the unified evidence model fully owns
+   ranking, hydration, and display behavior
+
+This is intentionally more aggressive at the semantic layer than at the code
+deletion layer.
+
 ## Benchmark And Test Plan
 
 ### 1. Keep The Current Benchmark, But Stop Treating It As The Only Target
@@ -625,6 +726,45 @@ Exit criteria:
 
 - benchmark reporting makes it clear whether a change hurt product intent,
   continuity, or only implementation-specific cases
+
+## Implementation Status Snapshot (2026-04-09)
+
+Current branch status:
+
+- Stage 1 is partially complete.
+  Test files now distinguish product guardrails from legacy comparator and
+  candidate-survival compatibility cases more explicitly, but benchmark gate
+  splitting is still pending.
+- Stage 2 is materially complete for the first migration slice.
+  `CoverageLexicalFamilySignal` now carries `coverageProfile`, and the engine
+  computes meaningful/required/decisive/support coverage plus mixed-script
+  satisfaction.
+- Stage 3 is partially complete.
+  The final comparator now checks `coverageProfile` before falling back to the
+  old evidence and count tie-breakers, including a guarded rescue path for
+  `memory_relaxed` queries.
+- Stage 4 is partially complete.
+  Coarse ordering already benefits from the new comparator, and coarse
+  hydration now blends old unresolved-evidence upper bounds with
+  `coverageProfile`-aware lower/upper bounds.
+- Stage 5 is partially complete.
+  Display pruning now derives more of its keep/rescue judgment from
+  `coverageProfile` instead of only raw matched-family counts, but it still
+  shares some historical heuristics with the legacy worldview.
+- Stage 6 has not started yet.
+
+Validated in this branch:
+
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-ranking.test.ts`
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-recall-suite.test.ts`
+- `npm test -- --runInBand tests/src/services/search/experimental-coverage-lexical-phase1.test.ts`
+
+Still intentionally deferred:
+
+- deleting legacy route/count comparator branches
+- recall/admission rewrites beyond coarse hydration bound alignment
+- benchmark case refresh and gate versioning
+- broad repo typecheck cleanup unrelated to `coverage-lexical`
 
 ## Suggested Work Breakdown By Pull Request
 
