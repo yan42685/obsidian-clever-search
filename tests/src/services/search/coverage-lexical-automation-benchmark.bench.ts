@@ -1251,12 +1251,6 @@ export function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"bet comp",
-		"docs/body-target.md",
-		"prefix_body",
-		"adversarial",
-	);
-	addQuery(
 		"beta compatibility rollout",
 		"docs/releases/beta-compatibility-rollout.md",
 		"prefix_body",

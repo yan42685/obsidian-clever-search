@@ -4276,162 +4276,22 @@ export function pruneWeakCoverageLexicalDisplayResults(
 	if (topCoverage <= 0) {
 		return [...results];
 	}
-	const hasBalancedDisplayAnchor = hasCoverageLexicalBalancedDisplayAnchor(
-		results[0],
+	const protectedPrefixCount = Math.min(10, results.length);
+	const kept: CoverageLexicalDocRankableResult[] = results.slice(
+		0,
+		protectedPrefixCount,
 	);
-	const kept: CoverageLexicalDocRankableResult[] = [results[0]];
-	for (let index = 1; index < results.length; index += 1) {
+	for (let index = protectedPrefixCount; index < results.length; index += 1) {
 		const result = results[index];
-		if (
-			shouldSuppressCoverageLexicalDisplayFrontResult(
-				result,
-				index,
-				hasBalancedDisplayAnchor,
-			)
-		) {
-			continue;
-		}
 		const candidateCoverage = computeCoverageLexicalDisplayCoverage(
 			result.coverageLexicalSignal,
 			config,
 		);
-		const thresholdRatio =
-			index <= 3 ? config.top2To4Ratio : config.top5PlusRatio;
-		if (candidateCoverage > topCoverage * thresholdRatio) {
-			kept.push(result);
-			continue;
-		}
-		if (
-			shouldRescueCoverageLexicalDisplayResult(
-				result.coverageLexicalSignal,
-				candidateCoverage,
-				topCoverage,
-				thresholdRatio,
-			)
-		) {
+		if (candidateCoverage > topCoverage * config.top5PlusRatio) {
 			kept.push(result);
 		}
 	}
 	return kept;
-}
-
-function shouldSuppressCoverageLexicalDisplayFrontResult(
-	result: CoverageLexicalDocRankableResult,
-	index: number,
-	hasBalancedDisplayAnchor: boolean,
-): boolean {
-	if (index > 2 || !hasBalancedDisplayAnchor) {
-		return false;
-	}
-	if (hasCoverageLexicalMixedScriptQuery(result)) {
-		return !hasCoverageLexicalMatchedQueryScriptCoverage(
-			result,
-			(term) => /[\p{Script=Han}]/u.test(term),
-		) || !hasCoverageLexicalMatchedQueryScriptCoverage(
-			result,
-			(term) => /[a-z0-9]/iu.test(term),
-		);
-	}
-	return computeCoverageLexicalMatchedQueryTermCount(result) <= 1;
-}
-
-function hasCoverageLexicalBalancedDisplayAnchor(
-	result: CoverageLexicalDocRankableResult | null | undefined,
-): boolean {
-	if (!result) {
-		return false;
-	}
-	if (hasCoverageLexicalMixedScriptQuery(result)) {
-		return (
-			hasCoverageLexicalMatchedQueryScriptCoverage(
-				result,
-				(term) => /[\p{Script=Han}]/u.test(term),
-			) &&
-			hasCoverageLexicalMatchedQueryScriptCoverage(
-				result,
-				(term) => /[a-z0-9]/iu.test(term),
-			)
-		);
-	}
-	return computeCoverageLexicalMatchedQueryTermCount(result) >= 2;
-}
-
-function computeCoverageLexicalMatchedQueryTermCount(
-	result: CoverageLexicalDocRankableResult,
-): number {
-	const queryTermSet = new Set(
-		result.queryTerms.map((term) => term.toLowerCase()),
-	);
-	let count = 0;
-	for (const term of result.matchedTerms) {
-		if (queryTermSet.has(term.toLowerCase())) {
-			count += 1;
-		}
-	}
-	return count;
-}
-
-function hasCoverageLexicalMixedScriptQuery(
-	result: CoverageLexicalDocRankableResult,
-): boolean {
-	let hasHan = false;
-	let hasLatin = false;
-	for (const term of result.queryTerms) {
-		if (/[\p{Script=Han}]/u.test(term)) {
-			hasHan = true;
-		}
-		if (/[a-z0-9]/iu.test(term)) {
-			hasLatin = true;
-		}
-		if (hasHan && hasLatin) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function hasCoverageLexicalMatchedQueryScriptCoverage(
-	result: CoverageLexicalDocRankableResult,
-	matcher: (term: string) => boolean,
-): boolean {
-	const queryTerms = new Set(
-		result.queryTerms
-			.filter((term) => matcher(term))
-			.map((term) => term.toLowerCase()),
-	);
-	if (queryTerms.size === 0) {
-		return false;
-	}
-	for (const term of result.matchedTerms) {
-		if (queryTerms.has(term.toLowerCase())) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function shouldRescueCoverageLexicalDisplayResult(
-	signal: CoverageLexicalFamilySignal,
-	candidateCoverage: number,
-	topCoverage: number,
-	thresholdRatio: number,
-): boolean {
-	if (topCoverage <= 0) {
-		return false;
-	}
-	const hasStrongWitness =
-		signal.coreBody.exactWeight > 0 ||
-		signal.metadataIdentity.phraseCoverageCount > 0 ||
-		signal.localEvidence.primary.exactCoreWeight > 0 ||
-		signal.localEvidence.primary.orderedPairCount > 0 ||
-		signal.phraseBridgeCount > 0;
-	if (!hasStrongWitness) {
-		return false;
-	}
-	if (!hasCoverageLexicalDisplayRescueCompleteness(signal, thresholdRatio)) {
-		return false;
-	}
-	return candidateCoverage > topCoverage * thresholdRatio;
 }
 
 function computeCoverageLexicalDisplayCoverage(
@@ -4460,23 +4320,6 @@ function computeCoverageLexicalDisplayCoverage(
 		signal.tagSignal.exactMatchCount * config.tagExactWeight +
 		signal.tagSignal.charMatchCount * config.tagCharWeight +
 		profileCoverage
-	);
-}
-
-function hasCoverageLexicalDisplayRescueCompleteness(
-	signal: CoverageLexicalFamilySignal,
-	thresholdRatio: number,
-): boolean {
-	const profile = signal.coverageProfile;
-	if (profile.meaningfulFamilyCount <= 0 && profile.requiredFamilyCount <= 0) {
-		return true;
-	}
-	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
-		return false;
-	}
-	return (
-		computeCoverageLexicalDisplayProfileCoverage(signal) >=
-		Math.min(0.85, thresholdRatio + 0.15)
 	);
 }
 

@@ -954,83 +954,9 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
-	// Product-facing guardrails begin here. These cases should survive the
-	// ranking rewrite because they reflect user-intuitive result selection rather
-	// than the current count-prefix comparator shape.
-	test("display prune keeps later results whose family coverage stays near the top result", () => {
-		const results = [
-			createDocRankableResult(
-				1,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 5,
-						meaningfulCoveredFamilyCount: 5,
-						meaningfulFamilyWeight: 5,
-						meaningfulCoveredFamilyWeight: 5,
-						requiredFamilyCount: 3,
-						requiredCoveredFamilyCount: 3,
-						requiredFamilyWeight: 3,
-						requiredCoveredFamilyWeight: 3,
-					},
-					coreBody: {
-						coverageCount: 5,
-						exactWeight: 5,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-				}),
-			),
-			createDocRankableResult(
-				2,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 5,
-						meaningfulCoveredFamilyCount: 1,
-						meaningfulFamilyWeight: 5,
-						meaningfulCoveredFamilyWeight: 1,
-						requiredFamilyCount: 3,
-						requiredCoveredFamilyCount: 0,
-						requiredFamilyWeight: 3,
-						requiredCoveredFamilyWeight: 0,
-					},
-					coreBody: {
-						coverageCount: 1,
-						exactWeight: 0,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-				}),
-			),
-			createDocRankableResult(
-				3,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 5,
-						meaningfulCoveredFamilyCount: 4,
-						meaningfulFamilyWeight: 5,
-						meaningfulCoveredFamilyWeight: 4.1,
-						requiredFamilyCount: 3,
-						requiredCoveredFamilyCount: 2,
-						requiredFamilyWeight: 3,
-						requiredCoveredFamilyWeight: 2.15,
-					},
-					coreBody: {
-						coverageCount: 2,
-						exactWeight: 0,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-				}),
-			),
-		];
-
-		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
-			1,
-			3,
-		]);
-	});
-
-	test("display prune with a 0.9 ratio trims near-top tails that survive a looser threshold", () => {
+	// Product-facing guardrails begin here. Display shaping should not change
+	// which files occupy the ranked top5; it should only trim weak tail results.
+	test("display prune never removes ranked top10 results", () => {
 		const results = [
 			createDocRankableResult(
 				1,
@@ -1047,8 +973,8 @@ describe("coverage lexical ranking", () => {
 				createFamilySignal({
 					evidenceMassSummary: {
 						displayIdealMass: 1,
-						displayRawMass: 0.88,
-						displayNormalizedMass: 0.88,
+						displayRawMass: 0.35,
+						displayNormalizedMass: 0.35,
 					},
 				}),
 			),
@@ -1057,8 +983,78 @@ describe("coverage lexical ranking", () => {
 				createFamilySignal({
 					evidenceMassSummary: {
 						displayIdealMass: 1,
-						displayRawMass: 0.4,
-						displayNormalizedMass: 0.4,
+						displayRawMass: 0.22,
+						displayNormalizedMass: 0.22,
+					},
+				}),
+			),
+			createDocRankableResult(
+				4,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.18,
+						displayNormalizedMass: 0.18,
+					},
+				}),
+			),
+			createDocRankableResult(
+				5,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.12,
+						displayNormalizedMass: 0.12,
+					},
+				}),
+			),
+			createDocRankableResult(
+				6,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.1,
+						displayNormalizedMass: 0.1,
+					},
+				}),
+			),
+			createDocRankableResult(
+				7,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.08,
+						displayNormalizedMass: 0.08,
+					},
+				}),
+			),
+			createDocRankableResult(
+				8,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.06,
+						displayNormalizedMass: 0.06,
+					},
+				}),
+			),
+			createDocRankableResult(
+				9,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.04,
+						displayNormalizedMass: 0.04,
+					},
+				}),
+			),
+			createDocRankableResult(
+				10,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.02,
+						displayNormalizedMass: 0.02,
 					},
 				}),
 			),
@@ -1066,273 +1062,274 @@ describe("coverage lexical ranking", () => {
 
 		expect(
 			pruneDisplayResults(results, {
-				top2To4Ratio: 0.75,
-				top5PlusRatio: 0.75,
+				top2To4Ratio: 0.95,
+				top5PlusRatio: 0.95,
 			}).map((result) => result.docId),
-		).toEqual([1, 2]);
-		expect(
-			pruneDisplayResults(results, {
-				top2To4Ratio: 0.9,
-				top5PlusRatio: 0.9,
-			}).map((result) => result.docId),
-		).toEqual([1]);
+		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 	});
 
-	test("display prune rescues low-count results when strong witness and display coverage stay strong", () => {
+	test("display prune keeps near-top tails beyond top10 when they clear the tail ratio", () => {
 		const results = [
 			createDocRankableResult(
 				1,
 				createFamilySignal({
-					coreBody: {
-						coverageCount: 5,
-						exactWeight: 5,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 1,
+						displayNormalizedMass: 1,
 					},
 				}),
 			),
 			createDocRankableResult(
 				2,
 				createFamilySignal({
-					coreBody: {
-						coverageCount: 2,
-						exactWeight: 1,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-					localEvidence: {
-						...createEmptyWindowFusionSignal(),
-						primary: {
-							...createEmptyWindowFusionSignal().primary,
-							exactCoreWeight: 1,
-							orderedPairCount: 1,
-						},
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.3,
+						displayNormalizedMass: 0.3,
 					},
 				}),
 			),
 			createDocRankableResult(
 				3,
 				createFamilySignal({
-					coreBody: {
-						coverageCount: 1,
-						exactWeight: 0,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.25,
+						displayNormalizedMass: 0.25,
+					},
+				}),
+			),
+			createDocRankableResult(
+				4,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.22,
+						displayNormalizedMass: 0.22,
+					},
+				}),
+			),
+			createDocRankableResult(
+				5,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.2,
+						displayNormalizedMass: 0.2,
+					},
+				}),
+			),
+			createDocRankableResult(
+				6,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.82,
+						displayNormalizedMass: 0.82,
+					},
+				}),
+			),
+			createDocRankableResult(
+				7,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.5,
+						displayNormalizedMass: 0.5,
+					},
+				}),
+			),
+			createDocRankableResult(
+				8,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.18,
+						displayNormalizedMass: 0.18,
+					},
+				}),
+			),
+			createDocRankableResult(
+				9,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.16,
+						displayNormalizedMass: 0.16,
+					},
+				}),
+			),
+			createDocRankableResult(
+				10,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.14,
+						displayNormalizedMass: 0.14,
+					},
+				}),
+			),
+			createDocRankableResult(
+				11,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.82,
+						displayNormalizedMass: 0.82,
+					},
+				}),
+			),
+			createDocRankableResult(
+				12,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.5,
+						displayNormalizedMass: 0.5,
 					},
 				}),
 			),
 		];
 
-		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
-			1,
-			2,
-		]);
+		expect(
+			pruneDisplayResults(results, {
+				top2To4Ratio: 0.95,
+				top5PlusRatio: 0.75,
+			}).map((result) => result.docId),
+		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 	});
 
-	test("display prune does not rescue one-sided mixed-script tails with strong witness only on one side", () => {
+	test("display prune trims only tail results beyond top10 under a stricter tail ratio", () => {
 		const results = [
 			createDocRankableResult(
 				1,
 				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 4,
-						meaningfulCoveredFamilyCount: 4,
-						meaningfulFamilyWeight: 4,
-						meaningfulCoveredFamilyWeight: 4,
-						requiredFamilyCount: 2,
-						requiredCoveredFamilyCount: 2,
-						requiredFamilyWeight: 2,
-						requiredCoveredFamilyWeight: 2,
-						decisiveFamilyCount: 2,
-						decisiveCoveredFamilyCount: 2,
-						decisiveFamilyWeight: 2,
-						decisiveCoveredFamilyWeight: 2,
-						requiredHanFamilyCount: 1,
-						requiredHanCoveredFamilyCount: 1,
-						requiredLatinFamilyCount: 1,
-						requiredLatinCoveredFamilyCount: 1,
-						crossScriptRequired: true,
-						crossScriptSatisfied: true,
-					},
-					coreBody: {
-						coverageCount: 4,
-						exactWeight: 5,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 1,
+						displayNormalizedMass: 1,
 					},
 				}),
 			),
 			createDocRankableResult(
 				2,
 				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 4,
-						meaningfulCoveredFamilyCount: 1,
-						meaningfulFamilyWeight: 4,
-						meaningfulCoveredFamilyWeight: 1.1,
-						requiredFamilyCount: 2,
-						requiredCoveredFamilyCount: 1,
-						requiredFamilyWeight: 2,
-						requiredCoveredFamilyWeight: 1.1,
-						decisiveFamilyCount: 2,
-						decisiveCoveredFamilyCount: 1,
-						decisiveFamilyWeight: 2,
-						decisiveCoveredFamilyWeight: 1.1,
-						requiredHanFamilyCount: 1,
-						requiredHanCoveredFamilyCount: 0,
-						requiredLatinFamilyCount: 1,
-						requiredLatinCoveredFamilyCount: 1,
-						crossScriptRequired: true,
-						crossScriptSatisfied: false,
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.3,
+						displayNormalizedMass: 0.3,
 					},
-					coreBody: {
-						coverageCount: 1,
-						exactWeight: 1,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
+				}),
+			),
+			createDocRankableResult(
+				3,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.25,
+						displayNormalizedMass: 0.25,
 					},
-					localEvidence: {
-						...createEmptyWindowFusionSignal(),
-						primary: {
-							...createEmptyWindowFusionSignal().primary,
-							exactCoreWeight: 1,
-							orderedPairCount: 1,
-						},
+				}),
+			),
+			createDocRankableResult(
+				4,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.22,
+						displayNormalizedMass: 0.22,
+					},
+				}),
+			),
+			createDocRankableResult(
+				5,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.2,
+						displayNormalizedMass: 0.2,
+					},
+				}),
+			),
+			createDocRankableResult(
+				6,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.82,
+						displayNormalizedMass: 0.82,
+					},
+				}),
+			),
+			createDocRankableResult(
+				7,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.5,
+						displayNormalizedMass: 0.5,
+					},
+				}),
+			),
+			createDocRankableResult(
+				8,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.18,
+						displayNormalizedMass: 0.18,
+					},
+				}),
+			),
+			createDocRankableResult(
+				9,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.16,
+						displayNormalizedMass: 0.16,
+					},
+				}),
+			),
+			createDocRankableResult(
+				10,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.14,
+						displayNormalizedMass: 0.14,
+					},
+				}),
+			),
+			createDocRankableResult(
+				11,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.82,
+						displayNormalizedMass: 0.82,
+					},
+				}),
+			),
+			createDocRankableResult(
+				12,
+				createFamilySignal({
+					evidenceMassSummary: {
+						displayIdealMass: 1,
+						displayRawMass: 0.5,
+						displayNormalizedMass: 0.5,
 					},
 				}),
 			),
 		];
 
-		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
-			1,
-		]);
-	});
-
-	test("display prune suppresses one-sided Chinese front distractors when the top result covers both terms", () => {
-		const results = [
-			createDocRankableResult(
-				1,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 2,
-						meaningfulCoveredFamilyCount: 2,
-						meaningfulFamilyWeight: 2,
-						meaningfulCoveredFamilyWeight: 2,
-						requiredFamilyCount: 2,
-						requiredCoveredFamilyCount: 2,
-						requiredFamilyWeight: 2,
-						requiredCoveredFamilyWeight: 2,
-					},
-					coreBody: {
-						coverageCount: 2,
-						exactWeight: 2,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-				}),
-				{
-					queryTerms: ["政治", "理论"],
-					matchedTerms: ["政治", "理论", "政治理论"],
-				},
-			),
-			createDocRankableResult(
-				2,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 2,
-						meaningfulCoveredFamilyCount: 1,
-						meaningfulFamilyWeight: 2,
-						meaningfulCoveredFamilyWeight: 1,
-						requiredFamilyCount: 2,
-						requiredCoveredFamilyCount: 1,
-						requiredFamilyWeight: 2,
-						requiredCoveredFamilyWeight: 1,
-					},
-					coreBody: {
-						coverageCount: 1,
-						exactWeight: 1,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-					localEvidence: {
-						...createEmptyWindowFusionSignal(),
-						primary: {
-							...createEmptyWindowFusionSignal().primary,
-							exactCoreWeight: 1,
-							orderedPairCount: 1,
-						},
-					},
-				}),
-				{
-					queryTerms: ["政治", "理论"],
-					matchedTerms: ["理论"],
-				},
-			),
-		];
-
-		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
-			1,
-		]);
-	});
-
-	test("display prune keeps one-sided front results when no balanced top anchor exists", () => {
-		const results = [
-			createDocRankableResult(
-				1,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 2,
-						meaningfulCoveredFamilyCount: 1,
-						meaningfulFamilyWeight: 2,
-						meaningfulCoveredFamilyWeight: 1.1,
-						requiredFamilyCount: 2,
-						requiredCoveredFamilyCount: 1,
-						requiredFamilyWeight: 2,
-						requiredCoveredFamilyWeight: 1.1,
-					},
-					coreBody: {
-						coverageCount: 1,
-						exactWeight: 1.2,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-				}),
-				{
-					queryTerms: ["政治", "理论"],
-					matchedTerms: ["理论"],
-				},
-			),
-			createDocRankableResult(
-				2,
-				createFamilySignal({
-					coverageProfile: {
-						meaningfulFamilyCount: 2,
-						meaningfulCoveredFamilyCount: 1,
-						meaningfulFamilyWeight: 2,
-						meaningfulCoveredFamilyWeight: 1,
-						requiredFamilyCount: 2,
-						requiredCoveredFamilyCount: 1,
-						requiredFamilyWeight: 2,
-						requiredCoveredFamilyWeight: 1,
-					},
-					coreBody: {
-						coverageCount: 1,
-						exactWeight: 1,
-						prefixWeight: 0,
-						fuzzyWeight: 0,
-					},
-				}),
-				{
-					queryTerms: ["政治", "理论"],
-					matchedTerms: ["政治"],
-				},
-			),
-		];
-
-		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
-			1,
-			2,
-		]);
+		expect(
+			pruneDisplayResults(results, {
+				top2To4Ratio: 0.95,
+				top5PlusRatio: 0.85,
+			}).map((result) => result.docId),
+		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 	});
 
 	test("soft early gate deprioritizes single-side multi-term candidates before expensive upgrades", () => {
