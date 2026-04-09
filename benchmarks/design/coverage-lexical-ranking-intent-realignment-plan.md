@@ -783,7 +783,11 @@ Current branch status:
   old evidence chain, includes a guarded rescue path for `memory_relaxed`
   queries, and no longer uses legacy count as the semantic final fallback.
   Legacy comparator-shape ranking tests have been removed from the main ranking
-  suite.
+  suite. Planner-facing `decisionPriors` have also been renamed to
+  `resourceHints` to better reflect their intended role as budget/resource
+  hints rather than semantic ranking classes, and engine-level metadata
+  tie-band selection no longer consumes these budget hints in final answer
+  ordering.
 - Stage 4 is partially complete.
   Coarse ordering already benefits from the new comparator, and coarse
   hydration now blends old unresolved-evidence upper bounds with

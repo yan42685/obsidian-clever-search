@@ -43,7 +43,7 @@ export function compareCoverageLexicalResultSignals(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
-	const mode = resolveCoverageLexicalDecisionMode(plan);
+	const mode = resolveCoverageLexicalComparisonProfile(plan);
 	const coverageDecision = compareCoverageLexicalCoverageProfiles(
 		left,
 		right,
@@ -77,57 +77,6 @@ export function compareCoverageLexicalResultSignals(
 		return weightedDecision;
 	}
 	return 0;
-}
-
-export type CoverageLexicalComparisonTraceStage = {
-	name: string;
-	decision: number;
-};
-
-export type CoverageLexicalComparisonTrace = {
-	mode: CoverageLexicalRankerDecisionMode;
-	coverageStages: CoverageLexicalComparisonTraceStage[];
-	earlyGuardrailStages: CoverageLexicalComparisonTraceStage[];
-	detailStages: CoverageLexicalComparisonTraceStage[];
-	weightedDecision: number;
-	finalDecision: number;
-	leftSummary: ReturnType<typeof summarizeCoverageLexicalSignalForTrace>;
-	rightSummary: ReturnType<typeof summarizeCoverageLexicalSignalForTrace>;
-};
-
-export function traceCoverageLexicalResultComparison(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-	plan: CoverageLexicalPlan,
-): CoverageLexicalComparisonTrace {
-	const mode = resolveCoverageLexicalDecisionMode(plan);
-	const coverageStages = traceCoverageComparisonStages(left, right, plan);
-	const coverageDecision =
-		coverageStages.find((stage) => stage.decision !== 0)?.decision ?? 0;
-	const earlyGuardrailStages = traceEarlyGuardrailStages(left, right, plan, mode);
-	const earlyGuardrailDecision =
-		earlyGuardrailStages.find((stage) => stage.decision !== 0)?.decision ?? 0;
-	const detailStages = traceDetailComparisonStages(left, right, plan, mode);
-	const detailDecision =
-		detailStages.find((stage) => stage.decision !== 0)?.decision ?? 0;
-	const weightedDecision = compareCoverageLexicalEvidenceMassSummaries(
-		getCoverageLexicalEvidenceMassSummary(left),
-		getCoverageLexicalEvidenceMassSummary(right),
-	);
-	return {
-		mode,
-		coverageStages,
-		earlyGuardrailStages,
-		detailStages,
-		weightedDecision,
-		finalDecision:
-			coverageDecision ||
-			earlyGuardrailDecision ||
-			detailDecision ||
-			weightedDecision,
-		leftSummary: summarizeCoverageLexicalSignalForTrace(left),
-		rightSummary: summarizeCoverageLexicalSignalForTrace(right),
-	};
 }
 
 function compareCoverageLexicalCoverageProfiles(
@@ -205,89 +154,6 @@ function compareCoverageLexicalCoverageProfiles(
 			rightProfile.meaningfulCoveredFamilyWeight,
 		)
 	);
-}
-
-function traceCoverageComparisonStages(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-	plan: CoverageLexicalPlan,
-): CoverageLexicalComparisonTraceStage[] {
-	const leftProfile = left.coverageProfile;
-	const rightProfile = right.coverageProfile;
-	const stages: CoverageLexicalComparisonTraceStage[] = [
-		{
-			name: "crossScriptCoverage",
-			decision: compareCrossScriptCoverage(leftProfile, rightProfile, plan),
-		},
-		{
-			name: "effectiveDecisiveGapCount",
-			decision: compareAscendingMetric(
-				getEffectiveDecisiveGapCount(left, plan),
-				getEffectiveDecisiveGapCount(right, plan),
-			),
-		},
-		{
-			name: "adjustedRequiredCoverageRatio",
-			decision: compareDescendingMetric(
-				getAdjustedRequiredCoverageRatio(left, plan),
-				getAdjustedRequiredCoverageRatio(right, plan),
-			),
-		},
-		{
-			name: "effectiveSupportGapCount",
-			decision: compareAscendingMetric(
-				getEffectiveSupportGapCount(left, plan),
-				getEffectiveSupportGapCount(right, plan),
-			),
-		},
-	];
-	if (plan.queryKind !== "memory_relaxed") {
-		stages.push(
-			{
-				name: "requiredCoverageRatio",
-				decision: compareDescendingMetric(
-					getCoverageWeightRatio(
-						leftProfile.requiredCoveredFamilyWeight,
-						leftProfile.requiredFamilyWeight,
-					),
-					getCoverageWeightRatio(
-						rightProfile.requiredCoveredFamilyWeight,
-						rightProfile.requiredFamilyWeight,
-					),
-				),
-			},
-			{
-				name: "meaningfulCoverageRatio",
-				decision: compareDescendingMetric(
-					getCoverageWeightRatio(
-						leftProfile.meaningfulCoveredFamilyWeight,
-						leftProfile.meaningfulFamilyWeight,
-					),
-					getCoverageWeightRatio(
-						rightProfile.meaningfulCoveredFamilyWeight,
-						rightProfile.meaningfulFamilyWeight,
-					),
-				),
-			},
-		);
-	}
-	stages.push(
-		{
-			name: "requiredCoveredFamilyWeight",
-			decision: compareDescendingMetric(
-				leftProfile.requiredCoveredFamilyWeight,
-				rightProfile.requiredCoveredFamilyWeight,
-			),
-		},
-		{
-			name: "meaningfulCoveredFamilyWeight",
-			decision: compareDescendingMetric(
-				leftProfile.meaningfulCoveredFamilyWeight,
-				rightProfile.meaningfulCoveredFamilyWeight,
-			),
-		},
-	);
-	return stages;
 }
 
 function compareCrossScriptCoverage(
@@ -387,9 +253,9 @@ function getAdjustedRequiredCoverageRatio(
 function compareMetadataAssistCountOverride(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
-	mode: CoverageLexicalRankerDecisionMode,
+	mode: CoverageLexicalRankerComparisonProfile,
 ): number {
-	if (mode !== "body-first") {
+	if (mode !== "body-led") {
 		return 0;
 	}
 	if (compareExactTierSignals(left, right) !== 0) {
@@ -452,15 +318,15 @@ function compareCoverageLexicalSemanticDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
-	mode: CoverageLexicalRankerDecisionMode,
+	mode: CoverageLexicalRankerComparisonProfile,
 ): number {
-	if (mode === "metadata-first") {
-		return compareMetadataFirstDetailStages(left, right);
+	if (mode === "metadata-led") {
+		return compareMetadataLedDetailStages(left, right);
 	}
-	if (mode === "body-with-anchor") {
-		return compareBodyWithAnchorDetailStages(left, right, plan);
+	if (mode === "hybrid-led") {
+		return compareHybridLedDetailStages(left, right, plan);
 	}
-	return compareBodyFirstDetailStages(left, right);
+	return compareBodyLedDetailStages(left, right);
 }
 
 export function compareCoverageLexicalFamilyCountSummaries(
@@ -468,7 +334,7 @@ export function compareCoverageLexicalFamilyCountSummaries(
 	right: CoverageLexicalFamilyCountSummary,
 	plan: CoverageLexicalPlan,
 ): number {
-	const mode = resolveCoverageLexicalDecisionMode(plan);
+	const mode = resolveCoverageLexicalComparisonProfile(plan);
 	return (
 		compareCoverageLexicalLegacyCountFallback(left, right, plan, mode) ||
 		compareDescendingMetric(
@@ -482,7 +348,7 @@ function compareCoverageLexicalLegacyCountFallback(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
 	plan: CoverageLexicalPlan,
-	mode: CoverageLexicalRankerDecisionMode,
+	mode: CoverageLexicalRankerComparisonProfile,
 ): number {
 	return (
 		compareCoverageLexicalCountTieBreakers(left, right, plan, mode) ||
@@ -497,18 +363,18 @@ function compareCoverageLexicalCountTieBreakers(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
 	plan: CoverageLexicalPlan,
-	mode: CoverageLexicalRankerDecisionMode,
+	mode: CoverageLexicalRankerComparisonProfile,
 ): number {
-	if (mode === "body-first") {
-		return compareBodyFirstCountTieBreakers(left, right, plan);
+	if (mode === "body-led") {
+		return compareBodyLedCountTieBreakers(left, right, plan);
 	}
-	if (mode === "body-with-anchor") {
-		return compareBodyWithAnchorCountTieBreakers(left, right, plan);
+	if (mode === "hybrid-led") {
+		return compareHybridLedCountTieBreakers(left, right, plan);
 	}
-	return compareMetadataFirstCountTieBreakers(left, right);
+	return compareMetadataLedCountTieBreakers(left, right);
 }
 
-function compareMetadataFirstCountTieBreakers(
+function compareMetadataLedCountTieBreakers(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
 ): number {
@@ -526,7 +392,7 @@ function compareMetadataFirstCountTieBreakers(
 	);
 }
 
-function compareBodyWithAnchorCountTieBreakers(
+function compareHybridLedCountTieBreakers(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
 	plan: CoverageLexicalPlan,
@@ -559,7 +425,7 @@ function compareBodyWithAnchorCountTieBreakers(
 	);
 }
 
-function compareBodyFirstCountTieBreakers(
+function compareBodyLedCountTieBreakers(
 	left: CoverageLexicalFamilyCountSummary,
 	right: CoverageLexicalFamilyCountSummary,
 	_plan: CoverageLexicalPlan,
@@ -619,15 +485,15 @@ function compareEarlyBodyQualityGuardrails(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
-	const mode = resolveCoverageLexicalDecisionMode(plan);
-	if (mode === "body-first") {
+	const mode = resolveCoverageLexicalComparisonProfile(plan);
+	if (mode === "body-led") {
 		return 0;
 	}
 	if (plan.hasMixedScriptHint) {
 		return 0;
 	}
 	if (
-		mode === "body-with-anchor" &&
+		mode === "hybrid-led" &&
 		(plan.hasPathShapeHint || plan.hasTitleShapeHint)
 	) {
 		return 0;
@@ -682,49 +548,49 @@ function shouldPromoteBodyWitness(
 	const strongMetadataLead =
 		getStrongMetadataFamilyCount(opponent.familyCountSummary) -
 		getStrongMetadataFamilyCount(candidate.familyCountSummary);
-	if (resolveCoverageLexicalDecisionMode(plan) === "metadata-first") {
+	if (resolveCoverageLexicalComparisonProfile(plan) === "metadata-led") {
 		return strongMetadataLead <= 0;
 	}
 	return strongMetadataLead <= 1;
 }
 
-type CoverageLexicalRankerDecisionMode =
-	| "metadata-first"
-	| "body-with-anchor"
-	| "body-first";
+type CoverageLexicalRankerComparisonProfile =
+	| "metadata-led"
+	| "hybrid-led"
+	| "body-led";
 
-function resolveCoverageLexicalDecisionMode(
+function resolveCoverageLexicalComparisonProfile(
 	plan: CoverageLexicalPlan,
-): CoverageLexicalRankerDecisionMode {
-	const metadataFirst =
-		plan.decisionPriors?.metadataFirst ??
+): CoverageLexicalRankerComparisonProfile {
+	const metadataBudget =
+		plan.resourceHints?.metadataBudget ??
 		(plan.decisiveAnchorMass ?? 0) +
 			(plan.supportAnchorMass ?? 0) * 0.35 +
 			(plan.hasMetadataHint ? 0.25 : 0) +
 			(plan.hasPathShapeHint ? 0.2 : 0) +
 			(plan.hasTitleShapeHint ? 0.15 : 0);
-	const bodyWithAnchor =
-		plan.decisionPriors?.bodyWithAnchor ??
+	const hybridBudget =
+		plan.resourceHints?.hybridBudget ??
 		(Math.min(plan.weightedAnchorMass ?? 0, plan.weightedBodyMass ?? 0) * 0.75 +
 			(plan.anchorFamilyCount > 0 && plan.bodyFamilyCount > 0 ? 0.35 : 0));
-	const bodyFirst =
-		plan.decisionPriors?.bodyFirst ??
+	const bodyBudget =
+		plan.resourceHints?.bodyBudget ??
 		(plan.decisiveBodyMass ?? 0) +
 			(plan.supportBodyMass ?? 0) * 0.4 +
 			(plan.bodyFamilyCount > 0 ? 0.25 : 0);
 	const hasHybridShape =
 		plan.anchorFamilyCount > 0 && plan.bodyFamilyCount > 0;
-	const metadataLead = metadataFirst - Math.max(bodyWithAnchor, bodyFirst);
-	if (!hasHybridShape && metadataFirst >= bodyFirst) {
-		return "metadata-first";
+	const metadataLead = metadataBudget - Math.max(hybridBudget, bodyBudget);
+	if (!hasHybridShape && metadataBudget >= bodyBudget) {
+		return "metadata-led";
 	}
 	if (hasHybridShape && metadataLead >= 0.18) {
-		return "metadata-first";
+		return "metadata-led";
 	}
 	if (hasHybridShape) {
-		return "body-with-anchor";
+		return "hybrid-led";
 	}
-	return "body-first";
+	return "body-led";
 }
 
 function hasPromotableBodyWitness(
@@ -799,7 +665,7 @@ function getBroadMetadataFamilyCount(
 	);
 }
 
-function compareMetadataFirstDetailStages(
+function compareMetadataLedDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 ): number {
@@ -822,7 +688,7 @@ function compareMetadataFirstDetailStages(
 	);
 }
 
-function compareBodyWithAnchorDetailStages(
+function compareHybridLedDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
@@ -889,7 +755,7 @@ function compareBodyWithAnchorDetailStages(
 	);
 }
 
-function compareBodyFirstDetailStages(
+function compareBodyLedDetailStages(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 ): number {

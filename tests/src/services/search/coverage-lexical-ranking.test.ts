@@ -1900,25 +1900,7 @@ $PlainPassword = $null`,
 		);
 	});
 
-	test("debug real unsorted steam password ordering", async () => {
-		const fs = require("node:fs/promises") as typeof import("node:fs/promises");
-		const path = require("node:path") as typeof import("node:path");
-		const realDir = "C:/Users/alex/Documents/Test-Vault/all_notes/test/unsorted";
-		const entries = await fs.readdir(realDir);
-		const documents: IndexedDocument[] = [];
-		for (const name of entries) {
-			if (!name.endsWith(".md")) {
-				continue;
-			}
-			const fullPath = path.join(realDir, name);
-			const content = await fs.readFile(fullPath, "utf8");
-			documents.push({
-				path: `all_notes/test/unsorted/${name}`,
-				basename: name,
-				folder: "all_notes/test/unsorted",
-				content,
-			});
-		}
+	test("prefers a metadata-plus-body hybrid over a body-only double hit when total coverage stays close", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -1929,28 +1911,39 @@ $PlainPassword = $null`,
 					isPrefixMatch: boolean;
 					isFuzzy: boolean;
 					maxItemResults: number;
-				}): Promise<Array<{ path: string; score?: number; matchedTerms?: string[] }>>;
+				}): Promise<Array<{ path: string }>>;
 			};
 		};
 
 		const engine = new CoverageLexicalFileSearchEngine();
-		await engine.addDocuments(documents);
+		await engine.addDocuments([
+			{
+				path: "vault/inbox/url-memo.md",
+				basename: "url-memo.md",
+				folder: "vault/inbox",
+				headings: "URL memo",
+				content:
+					"steam password archive with extra steam password reminders and launcher links",
+			},
+			{
+				path: "vault/accounts/Username, Password, Card Number.md",
+				basename: "Username, Password, Card Number.md",
+				folder: "vault/accounts",
+				headings: "Account note",
+				content: "steam account note with login details and region reminders",
+			},
+		]);
+
 		const results = await engine.searchFiles({
 			queryText: "steam password",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 5,
 		});
-		console.log(
-			"[debug-real-unsorted]",
-			results.map((result) => ({
-				path: result.path,
-				score: result.score,
-				matchedTerms: result.matchedTerms,
-			})),
-		);
 
-		expect(results.length).toBeGreaterThan(0);
+		expect(results[0]?.path).toBe(
+			"vault/accounts/Username, Password, Card Number.md",
+		);
 	});
 
 	test("prefers folder-first file lookup evidence ahead of richer body wording when total family coverage ties", async () => {
