@@ -532,6 +532,16 @@ function shouldPromoteBodyWitness(
 	if (!hasPromotableBodyWitness(candidate, opponent)) {
 		return false;
 	}
+	if (
+		getStrongMetadataFamilyCount(opponent.familyCountSummary) >
+			getStrongMetadataFamilyCount(candidate.familyCountSummary) ||
+		compareMetadataIdentitySignals(
+			candidate.metadataIdentity,
+			opponent.metadataIdentity,
+		) > 0
+	) {
+		return false;
+	}
 	if (!hasMetadataSuppressionPressure(candidate, opponent)) {
 		return false;
 	}
@@ -706,16 +716,16 @@ function compareBodyWithAnchorDetailStages(
 	}
 	if (plan.hasPathShapeHint || plan.hasTitleShapeHint) {
 		return (
-			compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-			compareCharSignals(left.bodyChar, right.bodyChar) ||
-			compareCharSignals(left.metadataChar, right.metadataChar) ||
 			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
+			compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
 			comparePhraseBridgeSignals(left, right) ||
 			compareCoverageLexicalWindowFusionSignals(
 				left.localEvidence,
 				right.localEvidence,
 			) ||
 			compareMetadataPrefixAssistSignals(left, right) ||
+			compareCharSignals(left.metadataChar, right.metadataChar) ||
+			compareCharSignals(left.bodyChar, right.bodyChar) ||
 			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 			comparePrefixTierPreference(left, right) ||
 			compareAreaSignals(left.coreBody, right.coreBody) ||
@@ -726,16 +736,16 @@ function compareBodyWithAnchorDetailStages(
 		);
 	}
 	return (
-		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-		compareCharSignals(left.bodyChar, right.bodyChar) ||
-		compareCharSignals(left.metadataChar, right.metadataChar) ||
 		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
+		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
 		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
 			left.localEvidence,
 			right.localEvidence,
 		) ||
 		compareMetadataPrefixAssistSignals(left, right) ||
+		compareCharSignals(left.metadataChar, right.metadataChar) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePrefixTierPreference(left, right) ||
 		compareAreaSignals(left.coreBody, right.coreBody) ||
@@ -750,15 +760,16 @@ function compareBodyFirstDetailStages(
 	right: CoverageLexicalFamilySignal,
 ): number {
 	return (
+		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
 		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-		compareCharSignals(left.bodyChar, right.bodyChar) ||
-		compareCharSignals(left.metadataChar, right.metadataChar) ||
 		comparePhraseBridgeSignals(left, right) ||
 		compareCoverageLexicalWindowFusionSignals(
 			left.localEvidence,
 			right.localEvidence,
 		) ||
 		compareMetadataPrefixAssistSignals(left, right) ||
+		compareCharSignals(left.metadataChar, right.metadataChar) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
 		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
 		comparePrefixTierPreference(left, right) ||
 		compareAreaSignals(left.coreBody, right.coreBody) ||

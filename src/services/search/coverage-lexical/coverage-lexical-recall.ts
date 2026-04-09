@@ -284,6 +284,8 @@ type CoverageLexicalFinalUnionCandidate = {
 	signal: CoverageLexicalCheapLaneSignal;
 	profile: CoverageLexicalCheapLaneEvidenceProfile;
 	lowerBound: number;
+	survivalCriticalUpperBound: number;
+	lateDetailUpperBound: number;
 	potentialUpperBound: number;
 };
 
@@ -541,6 +543,7 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		fuzzyExpansionsByTerm: new Map(),
 		phraseSignatureBucketsByKey: new Map(),
 		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
+		bodyCharVerificationByDocId: new Map(),
 		metadataPhraseSurfaceByDocAndField: new Map(),
 		metadataPhraseVerificationKeysBySignatureAndFields: new Map(),
 		metadataPhraseMatchByDocFieldAndSignature: new Map(),
@@ -898,7 +901,7 @@ function selectFinalUnionCandidateKeys(
 			signal,
 			profile,
 			lowerBound,
-			potentialUpperBound: computeFinalUnionPotentialUpperBound(
+			...computeFinalUnionUpperBounds(
 				profile,
 				state,
 				lowerBound,
@@ -2292,14 +2295,29 @@ function shouldProtectCheapWitnessFloor(
 	const profile = buildCheapLaneEvidenceProfile(signal);
 	const upperBound = computeCheapLaneUpperBound(laneName, profile);
 	const protectionFloor = computeLaneProtectionFloor(laneName, plan);
-	const hasWitness =
-		signal.phraseMatchCount > 0 ||
-		signal.supportBody.coverageCount > 0 ||
-		signal.metadataAssist.coverageCount > 0;
+	const hasWitness = hasCheapWitnessProtectionSignal(signal);
 	if (!hasWitness || upperBound < protectionFloor) {
 		return false;
 	}
 	return cutoffUpperBound <= 0 || upperBound + 0.08 >= cutoffUpperBound;
+}
+
+function hasCheapWitnessProtectionSignal(
+	signal: CoverageLexicalCheapLaneSignal,
+): boolean {
+	if (
+		signal.phraseMatchCount > 0 ||
+		signal.decisiveBody.coverageCount > 0 ||
+		signal.supportBody.coverageCount > 0
+	) {
+		return true;
+	}
+	return (
+		signal.metadataAssist.coverageCount > 0 &&
+		(signal.hardAnchorMetadata.coverageCount > 0 ||
+			signal.bridgeSignal.coverageCount > 0 ||
+			signal.optionalBody.coverageCount > 0)
+	);
 }
 
 function buildLaneEvaluation(
@@ -2559,7 +2577,10 @@ function acceptsLaneCandidate(
 			return (
 				evidenceProfile.bridgePressure >= 0.9 ||
 				evidenceProfile.hybridPressure >= 0.7 ||
-				evidenceProfile.metadataAssistPressure >= 0.8
+				acceptsBridgeLaneByConnectedMetadataAssist(
+					evaluation,
+					evidenceProfile,
+				)
 			);
 		case "char_fallback_lane":
 			return (
@@ -2584,6 +2605,22 @@ function acceptsLaneCandidate(
 		default:
 			return false;
 	}
+}
+
+function acceptsBridgeLaneByConnectedMetadataAssist(
+	evaluation: CoverageLexicalLaneEvaluation,
+	evidenceProfile: CoverageLexicalLaneEvidenceProfile,
+): boolean {
+	if (evidenceProfile.metadataAssistPressure < 0.8) {
+		return false;
+	}
+	return (
+		evaluation.hardAnchorMetadata.coverageCount >= 1 ||
+		evaluation.bridgeSignal.coverageCount >= 1 ||
+		evaluation.phraseMatchCount > 0 ||
+		evaluation.decisiveBody.coverageCount > 0 ||
+		evaluation.supportBody.coverageCount > 0
+	);
 }
 
 function acceptsLocalBodyLaneByPrimaryEvidence(
@@ -2895,35 +2932,45 @@ function computeFinalUnionLowerBound(
 	return lowerBound;
 }
 
-function computeFinalUnionPotentialUpperBound(
+function computeFinalUnionUpperBounds(
 	profile: CoverageLexicalCheapLaneEvidenceProfile,
 	state: CoverageLexicalCandidateState,
 	lowerBound: number,
-): number {
+): {
+	survivalCriticalUpperBound: number;
+	lateDetailUpperBound: number;
+	potentialUpperBound: number;
+} {
 	const unresolved = state.unresolvedBodyEvidence;
-	let potentialUpperBound = lowerBound + unresolved.unresolvedWeightUpperBound * 0.14;
+	let survivalCriticalUpperBound =
+		lowerBound + unresolved.unresolvedWeightUpperBound * 0.12;
 	if (unresolved.needsPassageSignal) {
-		potentialUpperBound += 0.35;
+		survivalCriticalUpperBound += 0.35;
 	}
 	if (unresolved.hasUnverifiedPhraseWitness || state.phraseMatches.length > 0) {
-		potentialUpperBound += 0.24;
+		survivalCriticalUpperBound += 0.24;
 	}
+	let lateDetailUpperBound = 0;
 	if (unresolved.hasUnresolvedPrefixSurface || state.bodyPrefixWitness !== null) {
-		potentialUpperBound += 0.16;
+		lateDetailUpperBound += 0.1;
 	}
 	if (
 		unresolved.hasUnresolvedBodyCharVerification ||
 		state.bodyCharMatchIndices.length > 0
 	) {
-		potentialUpperBound += 0.08;
+		lateDetailUpperBound += 0.04;
 	}
 	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
-		potentialUpperBound += 0.22;
+		survivalCriticalUpperBound += 0.22;
 	}
-	return Math.max(
-		potentialUpperBound,
-		profile.bodyUpperBound + profile.bridgePressure * 0.15,
-	);
+	return {
+		survivalCriticalUpperBound,
+		lateDetailUpperBound,
+		potentialUpperBound: Math.max(
+			survivalCriticalUpperBound + lateDetailUpperBound,
+			profile.bodyUpperBound + profile.bridgePressure * 0.15,
+		),
+	};
 }
 
 function compareFinalUnionCandidates(
@@ -2940,8 +2987,16 @@ function compareFinalUnionCandidates(
 			right.profile.requiredCoverageRatio,
 		) ||
 		compareDescendingMetric(
+			left.survivalCriticalUpperBound,
+			right.survivalCriticalUpperBound,
+		) ||
+		compareDescendingMetric(
 			left.potentialUpperBound,
 			right.potentialUpperBound,
+		) ||
+		compareDescendingMetric(
+			left.lateDetailUpperBound,
+			right.lateDetailUpperBound,
 		) ||
 		compareDescendingMetric(left.lowerBound, right.lowerBound) ||
 		compareDescendingMetric(left.profile.hybridPressure, right.profile.hybridPressure) ||
@@ -2957,13 +3012,16 @@ function shouldProtectFinalUnionCandidate(
 	cutoffUpperBound: number,
 ): boolean {
 	const unresolved = candidate.state.unresolvedBodyEvidence;
-	const hasWitnessPotential =
+	const hasSurvivalProof =
 		candidate.signal.phraseMatchCount > 0 ||
+		candidate.signal.decisiveBody.coverageCount > 0 ||
 		candidate.signal.supportBody.coverageCount > 0 ||
-		candidate.signal.metadataAssist.coverageCount > 0 ||
 		unresolved.needsPassageSignal ||
 		unresolved.hasUnverifiedPhraseWitness;
-	if (!hasWitnessPotential) {
+	const hasContextualLateDetail =
+		candidate.lateDetailUpperBound > 0 &&
+		hasCheapWitnessProtectionSignal(candidate.signal);
+	if (!hasSurvivalProof && !hasContextualLateDetail) {
 		return false;
 	}
 	if (
@@ -2973,7 +3031,13 @@ function shouldProtectFinalUnionCandidate(
 	) {
 		return false;
 	}
-	return candidate.potentialUpperBound + 0.08 >= cutoffUpperBound;
+	if (hasSurvivalProof) {
+		return candidate.survivalCriticalUpperBound + 0.06 >= cutoffUpperBound;
+	}
+	return (
+		candidate.lowerBound + 0.04 >= cutoffUpperBound ||
+		candidate.potentialUpperBound + 0.04 >= cutoffUpperBound
+	);
 }
 
 function computeGroupPressure(

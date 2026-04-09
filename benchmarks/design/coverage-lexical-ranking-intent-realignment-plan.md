@@ -3,6 +3,26 @@
 Date: 2026-04-09
 Status: Draft
 
+## Implementation Status
+
+- 2026-04-09: landed a first intent-realignment slice in code
+  - strengthened strong metadata identity precedence inside
+    `body-with-anchor` and `body-first` detail stages so basename/alias exact,
+    prefix, and fuzzy evidence no longer sits entirely behind
+    `coreBody.exactWeight`
+  - tightened early body-witness promotion so a candidate with stronger
+    metadata identity evidence is no longer demoted behind a body-only witness
+    during the pre-detail guardrail step
+  - raised the default display-prune tail threshold from `0.75` to `0.8` so
+    near-top partial tails need to stay closer to the lead result before
+    surviving hidden-tail pruning
+  - raised the coarse soft early gate ratio from `0.75` to `0.8` so
+    one-sided multi-term candidates get deprioritized earlier unless rescue
+    evidence suggests expensive upgrades can still flip them
+  - added ranking regressions covering:
+    - basename-exact hybrid results outranking a larger body-only exact lead
+    - stricter `0.9` display pruning removing tails that `0.75` would keep
+
 ## Why This Document Exists
 
 The current `coverage-lexical` ranking stack has accumulated two different kinds
@@ -468,6 +488,8 @@ These query types remain aligned with the new product target:
 
 - `coverage_guardrail`
 - `quality_guardrail`
+- `tail_guardrail`
+- `locality_guardrail`
 - `mixed_anchor`
 - `mixed_script_anchor`
 - `zh_short_identity`
@@ -502,6 +524,8 @@ Recommended gates:
 
 - `intent_guardrail_gate`
   - product-critical result-selection cases
+- `exception_aware_gate`
+  - explicitly preserved exception families such as `partial_memory`
 - `legacy_continuity_gate`
   - existing broad benchmark continuity
 
@@ -769,13 +793,53 @@ Current branch status:
   to crowd out balanced bilingual candidates before fine ranking. The
   `local_body_lane` admission path now treats passage-driven body detail as a
   survival-critical rescue instead of a generic early-detail acceptance path.
+  `bridge_lane` no longer treats strong `metadataAssist` alone as sufficient
+  recall proof; metadata assist now needs a real bridge or anchor connection
+  before it can act as an admission path. Final-union upper bounds have also
+  been split more explicitly into survival-critical proof and late-detail
+  potential so unresolved passage/phrase witnesses remain strongly protected
+  while prefix/char completion detail acts as weaker supplemental upside. This
+  stage also now applies a `0.8` soft early gate before expensive
+  coarse-hydration/local-window upgrades: clearly multi-term candidates that
+  cover only one required side are deprioritized out of the expensive queues by
+  default, while exact/phrase/passage rescue signals can still keep them
+  eligible when there is real upgrade potential. This keeps the policy out of
+  recall hard-kill territory while moving some display-layer suppression
+  earlier for better cost control.
+  Soft early gating reduces the need for display pruning, but does not replace
+  display-tail management or final strong-witness rescue.
+  migration slice has been verified against the ranking suite, recall suite,
+  and the current `coverage-lexical-automation-v1` benchmark without changing
+  the benchmark gate shape.
 - Stage 5 is partially complete.
   Display pruning now derives more of its keep/rescue judgment from
   `coverageProfile` instead of only raw matched-family counts, but it still
-  shares some historical heuristics with the legacy worldview.
-- Stage 6 has not started yet.
+  shares some historical heuristics with the legacy worldview. The
+  count-based keep/drop path has been removed from the main display-prune
+  decision, so display pruning now operates through profile/mass coverage
+  thresholds plus strong-witness rescue rather than legacy count floors.
+- Stage 6 is partially complete.
+  The benchmark harness now reports separate intent-gate summaries for
+  `product_guardrail_gate`, `exception_aware_gate`, and
+  `legacy_continuity_gate` while keeping the existing
+  `coverage-lexical-automation-v1` synthetic corpus as the continuity anchor.
+  The synthetic corpus has now also been refreshed with explicit
+  short-Chinese real-word coverage conflicts such as `政治理论` and `快乐定义`,
+  plus mixed-script one-sided distractors such as
+  `projected token 运行时访问` and `obsidian sync 问题`.
+  In addition, dedicated real-Chinese regression suites now exist for:
+  tokenizer-side segmentation behavior and engine-side short-Chinese /
+  mixed-script top-result behavior. Those suites now cover more realistic
+  natural-language and mixed-language queries including
+  `快乐定义适用范围`, `政治理论`, `projected token 运行时访问`, and
+  `obsidian sync 问题`. This stage still has not introduced a separate
+  versioned query manifest, a real-tokenizer benchmark summary gate, or a
+  larger real-vault regression corpus.
 
 Validated in this branch:
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-regression.test.ts`
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-engine-regression.test.ts`
+- `npm run benchmark:coverage-lexical`
 
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-ranking.test.ts`
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-recall-suite.test.ts`
@@ -786,7 +850,8 @@ Still intentionally deferred:
 - deleting legacy route/count comparator branches
 - recall/admission rewrites beyond cheap-lane and final-union coverage
   alignment
-- benchmark case refresh and gate versioning
+- benchmark gate versioning beyond the current split and a larger real-vault
+  real-tokenizer corpus
 - broad repo typecheck cleanup unrelated to `coverage-lexical`
 
 ## Suggested Work Breakdown By Pull Request
