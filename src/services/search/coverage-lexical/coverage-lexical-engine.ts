@@ -4204,8 +4204,11 @@ export function shouldSoftGateCoverageLexicalExpensiveUpgrade(
 	result: CoverageLexicalDocRankableResult,
 	state: CoverageLexicalCandidateState | null | undefined,
 	plan: CoverageLexicalPlan,
-	ratio = COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO,
+	ratio = resolveCoverageLexicalSoftEarlyGateRatio(),
 ): boolean {
+	if (!isCoverageLexicalSoftEarlyGateEnabled()) {
+		return false;
+	}
 	const hints = getCoverageLexicalResourceHints(plan);
 	if (
 		plan.queryKind === "memory_relaxed" ||
@@ -4555,6 +4558,20 @@ function computeCoverageLexicalDisplayProfileCoverage(
 		baseCoverage *= 0.5;
 	}
 	return Math.min(1, Math.max(0, baseCoverage));
+}
+
+function isCoverageLexicalSoftEarlyGateEnabled(): boolean {
+	return readCoverageLexicalBooleanEnv(
+		"COVERAGE_LEXICAL_SOFT_EARLY_GATE_ENABLED",
+		true,
+	);
+}
+
+function resolveCoverageLexicalSoftEarlyGateRatio(): number {
+	return readCoverageLexicalNumberEnv(
+		"COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO",
+		COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO,
+	);
 }
 
 function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPruneConfig {
