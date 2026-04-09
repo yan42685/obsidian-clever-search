@@ -817,7 +817,13 @@ Current branch status:
   shares some historical heuristics with the legacy worldview. The
   count-based keep/drop path has been removed from the main display-prune
   decision, so display pruning now operates through profile/mass coverage
-  thresholds plus strong-witness rescue rather than legacy count floors.
+  thresholds plus strong-witness rescue rather than legacy count floors. For
+  short Chinese and mixed-script display-front behavior, the active rule now
+  keys off matched query terms and script-side coverage instead of legacy
+  family count alone: once the top result already covers two or more real
+  query terms, or both sides of a mixed-script query, one-sided distractors
+  are removed from the display front instead of being rescued by local/detail
+  evidence.
 - Stage 6 is partially complete.
   The benchmark harness now reports separate intent-gate summaries for
   `product_guardrail_gate`, `exception_aware_gate`, and
@@ -835,10 +841,22 @@ Current branch status:
   `obsidian sync 问题`. This stage still has not introduced a separate
   versioned query manifest, a real-tokenizer benchmark summary gate, or a
   larger real-vault regression corpus.
+  Update (2026-04-09, later in the same workstream): Stage 6 now also has a
+  versioned real-tokenizer query manifest
+  (`coverage-lexical-real-tokenizer-manifest-v1.ts`) plus a dedicated
+  `real_tokenizer_top1_gate` / `real_tokenizer_display_front_gate` regression
+  summary. The real-Chinese cases are now spelled with corrected Han text in
+  the dedicated regression assets and explicitly cover `政治理论`,
+  `关于快乐的定义和适用范围`, `projected token 运行时访问`, and
+  `obsidian sync 问题`. Query-only content normalization is also part of the
+  active implementation now: the engine keeps the original natural-language
+  query text, derives extra Chinese content terms only on the query side, and
+  keeps phrase/local witness logic grounded in the original sentence evidence.
 
 Validated in this branch:
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-regression.test.ts`
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-engine-regression.test.ts`
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-tokenizer-gate.test.ts`
 - `npm run benchmark:coverage-lexical`
 
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-ranking.test.ts`

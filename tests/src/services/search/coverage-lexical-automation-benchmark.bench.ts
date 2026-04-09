@@ -80,6 +80,17 @@ type BenchmarkSummary = {
 	estimatedIndexBytes: number;
 	bySuite: Record<BenchmarkSuite, BenchmarkMetric>;
 	byType: Record<QueryType, BenchmarkMetric>;
+	byGate: Record<BenchmarkGate, BenchmarkGateMetric>;
+};
+
+type BenchmarkGate =
+	| "product_guardrail_gate"
+	| "exception_aware_gate"
+	| "legacy_continuity_gate";
+
+type BenchmarkGateMetric = BenchmarkMetric & {
+	objective: number;
+	types: QueryType[];
 };
 
 type PhaseTimingSummary = {
@@ -233,8 +244,8 @@ type EngineLike = {
  * - Remaining query types currently serve continuity, adversarial, or legacy
  *   implementation-shape coverage.
  *
- * This note is descriptive for the benchmark redesign plan only. It does not
- * yet split scoring or summary gates by intent class.
+ * Stage 6 now reports these groups as separate benchmark intent gates while
+ * keeping the same synthetic query corpus as the continuity anchor.
  */
 const QUERY_TYPES: readonly QueryType[] = [
 	"coverage_guardrail",
@@ -257,6 +268,37 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"ambiguous_intent",
 	"partial_memory",
 ];
+
+const PRODUCT_GUARDRAIL_QUERY_TYPES: readonly QueryType[] = [
+	"coverage_guardrail",
+	"quality_guardrail",
+	"tail_guardrail",
+	"locality_guardrail",
+	"mixed_anchor",
+	"mixed_script_anchor",
+	"zh_short_identity",
+	"zh_short_body_vs_basename",
+];
+
+const EXCEPTION_AWARE_QUERY_TYPES: readonly QueryType[] = ["partial_memory"];
+
+const LEGACY_CONTINUITY_QUERY_TYPES: readonly QueryType[] = QUERY_TYPES.filter(
+	(type) =>
+		!PRODUCT_GUARDRAIL_QUERY_TYPES.includes(type) &&
+		!EXCEPTION_AWARE_QUERY_TYPES.includes(type),
+);
+
+const BENCHMARK_GATES: readonly BenchmarkGate[] = [
+	"product_guardrail_gate",
+	"exception_aware_gate",
+	"legacy_continuity_gate",
+];
+
+const BENCHMARK_GATE_QUERY_TYPES: Record<BenchmarkGate, readonly QueryType[]> = {
+	product_guardrail_gate: PRODUCT_GUARDRAIL_QUERY_TYPES,
+	exception_aware_gate: EXCEPTION_AWARE_QUERY_TYPES,
+	legacy_continuity_gate: LEGACY_CONTINUITY_QUERY_TYPES,
+};
 
 /**
  * Lexical benchmark policy:
@@ -786,6 +828,90 @@ export function createAutomationCorpus(): {
 		{ aliases: "old project link aliases index", tags: "legacy aliases" },
 	);
 	addDocument(
+		"general-zh/notes/政治理论笔记.md",
+		"政治理论笔记",
+		"政治理论",
+		"政治理论 笔记 讨论 国家 制度 意识形态 与 政治 理论 的核心概念",
+		{ aliases: "政治理论 学习笔记", tags: "政治理论" },
+	);
+	addDocument(
+		"general-zh/notes/理论学习方法.md",
+		"理论学习方法",
+		"理论方法",
+		"理论 理论 学习 方法 侧重 抽象 理论 框架 与 复习 节奏",
+		{ aliases: "理论 学习 方法", tags: "理论 学习" },
+	);
+	addDocument(
+		"general-zh/notes/政治观察摘要.md",
+		"政治观察摘要",
+		"政治观察",
+		"政治 政治 观察 摘要 记录 现实 政治 事件 与 新闻 讨论",
+		{ aliases: "政治 观察 记录", tags: "政治 观察" },
+	);
+	addDocument(
+		"general-zh/notes/快乐定义笔记.md",
+		"快乐定义笔记",
+		"快乐定义",
+		"快乐 定义 讨论 概念 边界 心理学 语境 与 快乐 的适用范围",
+		{ aliases: "快乐定义 心理学笔记", tags: "快乐 定义" },
+	);
+	addDocument(
+		"general-zh/notes/快乐习惯清单.md",
+		"快乐习惯清单",
+		"快乐习惯",
+		"快乐 快乐 习惯 清单 记录 睡眠 运动 感恩 与 每日 练习",
+		{ aliases: "快乐 练习 清单", tags: "快乐 习惯" },
+	);
+	addDocument(
+		"general-zh/notes/定义适用范围说明.md",
+		"定义适用范围说明",
+		"定义范围",
+		"定义 适用范围 说明 讨论 抽象概念 的 使用边界 与 语义限定",
+		{ aliases: "定义 适用范围 说明", tags: "定义 适用范围" },
+	);
+	addDocument(
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"projected token runtime access note",
+		"运行时访问",
+		"projected token runtime access note explains pod credential reads and 运行时访问 flow",
+		{ aliases: "projected token 运行时访问", tags: "projected token 运行时访问" },
+	);
+	addDocument(
+		"mixed/notes/projected-token-overview.md",
+		"projected token overview",
+		"Projected token",
+		"projected token projected token projected token pod credential rotation overview",
+		{ aliases: "projected token pod credentials", tags: "projected token" },
+	);
+	addDocument(
+		"mixed/notes/运行时访问说明.md",
+		"运行时访问说明",
+		"运行时访问",
+		"运行时访问 说明 介绍 容器 凭证 读取 与 访问 流程",
+		{ aliases: "运行时访问 pod 凭证", tags: "运行时 访问" },
+	);
+	addDocument(
+		"mixed/notes/obsidian-sync-常见问题.md",
+		"obsidian sync 常见问题",
+		"obsidian sync 问题",
+		"obsidian sync 常见问题 说明 同步冲突 限额 报错 与 排查步骤",
+		{ aliases: "obsidian sync 问题", tags: "obsidian sync 问题" },
+	);
+	addDocument(
+		"mixed/notes/obsidian-sync-overview.md",
+		"obsidian sync overview",
+		"obsidian sync",
+		"obsidian sync overview introduces setup limits pricing and vault restore guidance",
+		{ aliases: "obsidian sync", tags: "obsidian sync" },
+	);
+	addDocument(
+		"mixed/notes/同步问题排查.md",
+		"同步问题排查",
+		"同步问题排查",
+		"同步 问题 排查 记录 常见报错 网络波动 与 重试步骤",
+		{ aliases: "问题 排查", tags: "同步 问题 排查" },
+	);
+	addDocument(
 		"pkm-zh/ops/缓存恢复清单.md",
 		"缓存恢复清单",
 		"恢复步骤",
@@ -913,28 +1039,52 @@ export function createAutomationCorpus(): {
 		"coverage_invariants",
 	);
 	addQuery(
-		"config data roll",
-		"adversarial/ranker-lab/en/exact-quality-witness.md",
-		"quality_guardrail",
+		"政治理论",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_body_vs_basename",
 		"coverage_invariants",
 	);
 	addQuery(
-		"connection policy timeout recovery",
-		"adversarial/ranker-lab/en/later-tail.md",
-		"tail_guardrail",
+		"政治理论 学习笔记",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"快乐定义",
+		"general-zh/notes/快乐定义笔记.md",
+		"zh_short_body_vs_basename",
 		"coverage_invariants",
 	);
 	addQuery(
-		"connection timeout recovery",
-		"adversarial/ranker-lab/en/later-tail.md",
-		"tail_guardrail",
+		"快乐定义 心理学笔记",
+		"general-zh/notes/快乐定义笔记.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"projected token 运行时访问",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
 		"coverage_invariants",
 	);
 	addQuery(
-		"stale mount restart window",
-		"adversarial/ranker-lab/en/locality-compact.md",
-		"locality_guardrail",
+		"projected token 运行时访问 pod",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
+		"adversarial",
+	);
+	addQuery(
+		"obsidian sync 问题",
+		"mixed/notes/obsidian-sync-常见问题.md",
+		"mixed_script_anchor",
 		"coverage_invariants",
+	);
+	addQuery(
+		"obsidian sync 问题 排查",
+		"mixed/notes/obsidian-sync-常见问题.md",
+		"mixed_script_anchor",
+		"adversarial",
 	);
 	addQuery(
 		"电子技",
@@ -954,6 +1104,30 @@ export function createAutomationCorpus(): {
 		"pkm-en/guides/shard-checkpoint-guide.md",
 		"title_exact",
 		"core",
+	);
+	addQuery(
+		"政治理论",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_body_vs_basename",
+		"coverage_invariants",
+	);
+	addQuery(
+		"政治理论 学习笔记",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"projected token 运行时访问",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
+		"coverage_invariants",
+	);
+	addQuery(
+		"projected token 运行时访问 pod",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
+		"adversarial",
 	);
 	addQuery(
 		"playbook for cache eviction restore",
@@ -2343,6 +2517,34 @@ function buildMetricRecord<T extends string>(
 	return result;
 }
 
+function buildBenchmarkGateRecord(
+	source: Map<QueryType, BenchmarkMetric>,
+): Record<BenchmarkGate, BenchmarkGateMetric> {
+	const result = {} as Record<BenchmarkGate, BenchmarkGateMetric>;
+	for (const gate of BENCHMARK_GATES) {
+		const aggregate = createEmptyMetric();
+		for (const type of BENCHMARK_GATE_QUERY_TYPES[gate]) {
+			const metric = source.get(type) ?? createEmptyMetric();
+			aggregate.top1 += metric.top1;
+			aggregate.top3 += metric.top3;
+			aggregate.top5 += metric.top5;
+			aggregate.zeroRate += metric.zeroRate;
+			aggregate.count += metric.count;
+		}
+		const finalized = finalizeMetric(aggregate);
+		result[gate] = {
+			...finalized,
+			objective: computePrimaryObjective(
+				finalized.top1,
+				finalized.top3,
+				finalized.top5,
+			),
+			types: [...BENCHMARK_GATE_QUERY_TYPES[gate]],
+		};
+	}
+	return result;
+}
+
 function estimateIndexBytes(engine: EngineLike): number {
 	if (typeof engine.estimateIndexBytes === "function") {
 		const estimated = engine.estimateIndexBytes();
@@ -2529,6 +2731,7 @@ async function runBenchmark(
 			estimatedIndexBytes: estimateIndexBytes(engine),
 			bySuite: buildMetricRecord(BENCHMARK_SUITES, suiteTotals),
 			byType: buildMetricRecord(QUERY_TYPES, typeTotals),
+			byGate: buildBenchmarkGateRecord(typeTotals),
 		},
 		outcomes,
 		phaseTiming: engine.getBenchmarkPhaseTimingSummary?.() ?? null,
@@ -4030,6 +4233,47 @@ describe("coverage lexical automation benchmark", () => {
 							},
 						]),
 					),
+					byGate: Object.fromEntries(
+						Object.entries(summary.byGate).map(([gate, stats]) => [
+							gate,
+							{
+								objective: round(stats.objective),
+								top1: round(stats.top1),
+								top3: round(stats.top3),
+								top5: round(stats.top5),
+								zeroRate: round(stats.zeroRate),
+								count: stats.count,
+								types: stats.types,
+							},
+						]),
+					),
+				})),
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] intent-gates",
+			JSON.stringify(
+				[
+					miniResult.summary,
+					coverageCoreResult.summary,
+					coverageDisplayResult.summary,
+				].map((summary) => ({
+					name: summary.name,
+					gates: Object.fromEntries(
+						Object.entries(summary.byGate).map(([gate, stats]) => [
+							gate,
+							{
+								objective: round(stats.objective),
+								top1: round(stats.top1),
+								top3: round(stats.top3),
+								top5: round(stats.top5),
+								zeroRate: round(stats.zeroRate),
+								count: stats.count,
+							},
+						]),
+					),
 				})),
 				null,
 				2,
@@ -4308,14 +4552,14 @@ describe("coverage lexical automation benchmark", () => {
 		expect(documents.length).toBeGreaterThanOrEqual(70);
 		expect(queryCases.length).toBeGreaterThanOrEqual(145);
 		expect(languageMix.hanRatio).toBeGreaterThanOrEqual(0.4);
-		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.6);
+		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.65);
 		expect(languageMix.mixedRatio).toBeGreaterThanOrEqual(0.4);
 		expect(queryLanguageMix.en).toBeGreaterThan(0);
 		expect(queryLanguageMix.zh).toBeGreaterThan(0);
 		expect(queryLanguageMix.mixed).toBeGreaterThan(0);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "coverage_invariants"),
-		).toHaveLength(11);
+		).toHaveLength(13);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "messy_pkm").length,
 		).toBeGreaterThanOrEqual(50);

@@ -128,6 +128,53 @@ Run the benchmark itself with:
 npm run benchmark:coverage-lexical
 ```
 
+The benchmark currently keeps `coverage-lexical-automation-v1` as the
+continuity anchor, but the report now also splits results into intent gates:
+
+- `product_guardrail_gate`
+- `exception_aware_gate`
+- `legacy_continuity_gate`
+
+That reporting split does not change the synthetic corpus version. It only
+makes it easier to tell whether a change hurt product-facing intent, exception
+handling, or broad legacy continuity.
+
+For coverage-lexical Chinese regression work, do not rely on this synthetic
+benchmark alone. There are also dedicated regression suites for:
+
+- tokenizer-side real-Chinese segmentation:
+  - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-regression.test.ts`
+- engine-side short-Chinese and mixed-script ranking checks:
+  - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-engine-regression.test.ts`
+- versioned real-tokenizer manifest gate:
+  - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-tokenizer-gate.test.ts`
+
+The dedicated real-tokenizer assets live in:
+
+- `tests/src/services/search/coverage-lexical-real-tokenizer-manifest-v1.ts`
+
+Those assets are the current place to protect realistic short-Chinese and
+mixed-script display-front behavior with corrected Han text, including:
+
+- `政治理论`
+- `关于快乐的定义和适用范围`
+- `projected token 运行时访问`
+- `obsidian sync 问题`
+
+That real-tokenizer gate is intentionally separate from the synthetic
+`coverage-lexical-automation-v1` benchmark. Use it to verify:
+
+- top1 correctness on realistic short Chinese / mixed-script queries
+- display-front suppression of one-sided distractors once a balanced top result exists
+
+Those dedicated regression suites are meant to cover realistic short Chinese
+and mixed-script query shapes such as:
+
+- `政治理论`
+- `关于快乐的定义和适用范围`
+- `projected token 运行时访问`
+- `obsidian sync 问题`
+
 The materialized corpus and the benchmark both come from the same generator:
 
 - `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts#createAutomationCorpus`

@@ -305,11 +305,15 @@ function createDisplayPruneConfig(
 function createDocRankableResult(
 	docId: number,
 	signal: CoverageLexicalFamilySignal,
+	options: {
+		queryTerms?: string[];
+		matchedTerms?: string[];
+	} = {},
 ): any {
 	return {
 		docId,
-		queryTerms: [],
-		matchedTerms: signal.matchedTerms,
+		queryTerms: options.queryTerms ?? [],
+		matchedTerms: options.matchedTerms ?? signal.matchedTerms,
 		score: 0,
 		coverageLexicalSignal: signal,
 		admissionSignal: {
@@ -1293,6 +1297,133 @@ describe("coverage lexical ranking", () => {
 		]);
 	});
 
+	test("display prune suppresses one-sided Chinese front distractors when the top result covers both terms", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					coverageProfile: {
+						meaningfulFamilyCount: 2,
+						meaningfulCoveredFamilyCount: 2,
+						meaningfulFamilyWeight: 2,
+						meaningfulCoveredFamilyWeight: 2,
+						requiredFamilyCount: 2,
+						requiredCoveredFamilyCount: 2,
+						requiredFamilyWeight: 2,
+						requiredCoveredFamilyWeight: 2,
+					},
+					coreBody: {
+						coverageCount: 2,
+						exactWeight: 2,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+				{
+					queryTerms: ["政治", "理论"],
+					matchedTerms: ["政治", "理论", "政治理论"],
+				},
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					coverageProfile: {
+						meaningfulFamilyCount: 2,
+						meaningfulCoveredFamilyCount: 1,
+						meaningfulFamilyWeight: 2,
+						meaningfulCoveredFamilyWeight: 1,
+						requiredFamilyCount: 2,
+						requiredCoveredFamilyCount: 1,
+						requiredFamilyWeight: 2,
+						requiredCoveredFamilyWeight: 1,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 1,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+					localEvidence: {
+						...createEmptyWindowFusionSignal(),
+						primary: {
+							...createEmptyWindowFusionSignal().primary,
+							exactCoreWeight: 1,
+							orderedPairCount: 1,
+						},
+					},
+				}),
+				{
+					queryTerms: ["政治", "理论"],
+					matchedTerms: ["理论"],
+				},
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+		]);
+	});
+
+	test("display prune keeps one-sided front results when no balanced top anchor exists", () => {
+		const results = [
+			createDocRankableResult(
+				1,
+				createFamilySignal({
+					coverageProfile: {
+						meaningfulFamilyCount: 2,
+						meaningfulCoveredFamilyCount: 1,
+						meaningfulFamilyWeight: 2,
+						meaningfulCoveredFamilyWeight: 1.1,
+						requiredFamilyCount: 2,
+						requiredCoveredFamilyCount: 1,
+						requiredFamilyWeight: 2,
+						requiredCoveredFamilyWeight: 1.1,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 1.2,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+				{
+					queryTerms: ["政治", "理论"],
+					matchedTerms: ["理论"],
+				},
+			),
+			createDocRankableResult(
+				2,
+				createFamilySignal({
+					coverageProfile: {
+						meaningfulFamilyCount: 2,
+						meaningfulCoveredFamilyCount: 1,
+						meaningfulFamilyWeight: 2,
+						meaningfulCoveredFamilyWeight: 1,
+						requiredFamilyCount: 2,
+						requiredCoveredFamilyCount: 1,
+						requiredFamilyWeight: 2,
+						requiredCoveredFamilyWeight: 1,
+					},
+					coreBody: {
+						coverageCount: 1,
+						exactWeight: 1,
+						prefixWeight: 0,
+						fuzzyWeight: 0,
+					},
+				}),
+				{
+					queryTerms: ["政治", "理论"],
+					matchedTerms: ["政治"],
+				},
+			),
+		];
+
+		expect(pruneDisplayResults(results).map((result) => result.docId)).toEqual([
+			1,
+			2,
+		]);
+	});
+
 	test("soft early gate deprioritizes single-side multi-term candidates before expensive upgrades", () => {
 		const { shouldSoftGateCoverageLexicalExpensiveUpgrade } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1698,6 +1829,128 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(results[0]?.path).toBe("vault/accounts/steam.md");
+	});
+
+	test("prefers metadata password plus body steam over url memo style body-only hits on steam password", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "all_notes/test/unsorted/URL Memo.md",
+				basename: "URL Memo.md",
+				folder: "all_notes/test/unsorted",
+				headings: "memo 常用",
+				content: `## 常用
+- Steam 国产游戏收录组
+https://store.steampowered.com/curator/43623007
+- steam游戏: https://www.xdgame.com/
+- 下载小说txt，比如希灵, txt排版非常好，[[Username, Password, Card Number#^bbs-DOT-g8p6-DOT-com |登录密码点此处]]`,
+			},
+			{
+				path: "all_notes/test/unsorted/Username, Password, Card Number.md",
+				basename: "Username, Password, Card Number.md",
+				folder: "all_notes/test/unsorted",
+				headings: "账号记录",
+				content: `- steam账号密码
+阿根廷：36eu6qnd ev385xxk
+- 租号steam:
+- Encription password (needed when sync data): Yan84064599!`,
+			},
+			{
+				path: "all_notes/test/unsorted/steam游戏制作.md",
+				basename: "steam游戏制作.md",
+				folder: "all_notes/test/unsorted",
+				headings: "project game",
+				content: "为了个人在steam创作游戏获利做前期调研，综合考虑品类、技术难度、成本、时间",
+			},
+			{
+				path: "all_notes/test/unsorted/Schedule tasks for scheduled_script.bat in the `Obsidian` and `SuperMemo` root directory.md",
+				basename:
+					"Schedule tasks for scheduled_script.bat in the `Obsidian` and `SuperMemo` root directory.md",
+				folder: "all_notes/test/unsorted",
+				headings: "scheduled task script",
+				content: `Please enter your password for currentUserName
+Register-ScheduledTask -Password $this.plainPassword
+$PlainPassword = $null`,
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "steam password",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe(
+			"all_notes/test/unsorted/Username, Password, Card Number.md",
+		);
+	});
+
+	test("debug real unsorted steam password ordering", async () => {
+		const fs = require("node:fs/promises") as typeof import("node:fs/promises");
+		const path = require("node:path") as typeof import("node:path");
+		const realDir = "C:/Users/alex/Documents/Test-Vault/all_notes/test/unsorted";
+		const entries = await fs.readdir(realDir);
+		const documents: IndexedDocument[] = [];
+		for (const name of entries) {
+			if (!name.endsWith(".md")) {
+				continue;
+			}
+			const fullPath = path.join(realDir, name);
+			const content = await fs.readFile(fullPath, "utf8");
+			documents.push({
+				path: `all_notes/test/unsorted/${name}`,
+				basename: name,
+				folder: "all_notes/test/unsorted",
+				content,
+			});
+		}
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; score?: number; matchedTerms?: string[] }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const results = await engine.searchFiles({
+			queryText: "steam password",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		console.log(
+			"[debug-real-unsorted]",
+			results.map((result) => ({
+				path: result.path,
+				score: result.score,
+				matchedTerms: result.matchedTerms,
+			})),
+		);
+
+		expect(results.length).toBeGreaterThan(0);
 	});
 
 	test("prefers folder-first file lookup evidence ahead of richer body wording when total family coverage ties", async () => {

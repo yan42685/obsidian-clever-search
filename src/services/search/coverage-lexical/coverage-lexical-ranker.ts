@@ -79,6 +79,57 @@ export function compareCoverageLexicalResultSignals(
 	return 0;
 }
 
+export type CoverageLexicalComparisonTraceStage = {
+	name: string;
+	decision: number;
+};
+
+export type CoverageLexicalComparisonTrace = {
+	mode: CoverageLexicalRankerDecisionMode;
+	coverageStages: CoverageLexicalComparisonTraceStage[];
+	earlyGuardrailStages: CoverageLexicalComparisonTraceStage[];
+	detailStages: CoverageLexicalComparisonTraceStage[];
+	weightedDecision: number;
+	finalDecision: number;
+	leftSummary: ReturnType<typeof summarizeCoverageLexicalSignalForTrace>;
+	rightSummary: ReturnType<typeof summarizeCoverageLexicalSignalForTrace>;
+};
+
+export function traceCoverageLexicalResultComparison(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): CoverageLexicalComparisonTrace {
+	const mode = resolveCoverageLexicalDecisionMode(plan);
+	const coverageStages = traceCoverageComparisonStages(left, right, plan);
+	const coverageDecision =
+		coverageStages.find((stage) => stage.decision !== 0)?.decision ?? 0;
+	const earlyGuardrailStages = traceEarlyGuardrailStages(left, right, plan, mode);
+	const earlyGuardrailDecision =
+		earlyGuardrailStages.find((stage) => stage.decision !== 0)?.decision ?? 0;
+	const detailStages = traceDetailComparisonStages(left, right, plan, mode);
+	const detailDecision =
+		detailStages.find((stage) => stage.decision !== 0)?.decision ?? 0;
+	const weightedDecision = compareCoverageLexicalEvidenceMassSummaries(
+		getCoverageLexicalEvidenceMassSummary(left),
+		getCoverageLexicalEvidenceMassSummary(right),
+	);
+	return {
+		mode,
+		coverageStages,
+		earlyGuardrailStages,
+		detailStages,
+		weightedDecision,
+		finalDecision:
+			coverageDecision ||
+			earlyGuardrailDecision ||
+			detailDecision ||
+			weightedDecision,
+		leftSummary: summarizeCoverageLexicalSignalForTrace(left),
+		rightSummary: summarizeCoverageLexicalSignalForTrace(right),
+	};
+}
+
 function compareCoverageLexicalCoverageProfiles(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
@@ -154,6 +205,89 @@ function compareCoverageLexicalCoverageProfiles(
 			rightProfile.meaningfulCoveredFamilyWeight,
 		)
 	);
+}
+
+function traceCoverageComparisonStages(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+	plan: CoverageLexicalPlan,
+): CoverageLexicalComparisonTraceStage[] {
+	const leftProfile = left.coverageProfile;
+	const rightProfile = right.coverageProfile;
+	const stages: CoverageLexicalComparisonTraceStage[] = [
+		{
+			name: "crossScriptCoverage",
+			decision: compareCrossScriptCoverage(leftProfile, rightProfile, plan),
+		},
+		{
+			name: "effectiveDecisiveGapCount",
+			decision: compareAscendingMetric(
+				getEffectiveDecisiveGapCount(left, plan),
+				getEffectiveDecisiveGapCount(right, plan),
+			),
+		},
+		{
+			name: "adjustedRequiredCoverageRatio",
+			decision: compareDescendingMetric(
+				getAdjustedRequiredCoverageRatio(left, plan),
+				getAdjustedRequiredCoverageRatio(right, plan),
+			),
+		},
+		{
+			name: "effectiveSupportGapCount",
+			decision: compareAscendingMetric(
+				getEffectiveSupportGapCount(left, plan),
+				getEffectiveSupportGapCount(right, plan),
+			),
+		},
+	];
+	if (plan.queryKind !== "memory_relaxed") {
+		stages.push(
+			{
+				name: "requiredCoverageRatio",
+				decision: compareDescendingMetric(
+					getCoverageWeightRatio(
+						leftProfile.requiredCoveredFamilyWeight,
+						leftProfile.requiredFamilyWeight,
+					),
+					getCoverageWeightRatio(
+						rightProfile.requiredCoveredFamilyWeight,
+						rightProfile.requiredFamilyWeight,
+					),
+				),
+			},
+			{
+				name: "meaningfulCoverageRatio",
+				decision: compareDescendingMetric(
+					getCoverageWeightRatio(
+						leftProfile.meaningfulCoveredFamilyWeight,
+						leftProfile.meaningfulFamilyWeight,
+					),
+					getCoverageWeightRatio(
+						rightProfile.meaningfulCoveredFamilyWeight,
+						rightProfile.meaningfulFamilyWeight,
+					),
+				),
+			},
+		);
+	}
+	stages.push(
+		{
+			name: "requiredCoveredFamilyWeight",
+			decision: compareDescendingMetric(
+				leftProfile.requiredCoveredFamilyWeight,
+				rightProfile.requiredCoveredFamilyWeight,
+			),
+		},
+		{
+			name: "meaningfulCoveredFamilyWeight",
+			decision: compareDescendingMetric(
+				leftProfile.meaningfulCoveredFamilyWeight,
+				rightProfile.meaningfulCoveredFamilyWeight,
+			),
+		},
+	);
+	return stages;
 }
 
 function compareCrossScriptCoverage(

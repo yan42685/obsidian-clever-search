@@ -701,6 +701,126 @@ describe("coverage lexical recall suite", () => {
 		expect(ranked[0]?.path).toBe(mixedPath);
 	});
 
+	test("bridge lane does not admit metadata-assist-only candidates without bridge connection", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const documents: IndexedDocument[] = [
+			{
+				path: "pkm-en/projects/sdk/vector-cache.md",
+				basename: "vector-cache.md",
+				folder: "pkm-en/projects/sdk",
+				headings: "Vector cache restore",
+				content:
+					"sdk cache restore checklist keeps the recovery steps together in one project note",
+				tags: "sdk cache restore",
+			},
+			{
+				path: "pkm-en/notes/ops-glossary.md",
+				basename: "ops-glossary.md",
+				folder: "pkm-en/notes",
+				headings: "Cache glossary",
+				aliases: "restore topic;cache topic",
+				content:
+					"glossary index for operational topics without the project recovery walkthrough",
+				tags: "cache glossary",
+			},
+			...Array.from({ length: 28 }, (_, index) => ({
+				path: `pkm-en/archive/cache-restore-tail-${index + 1}.md`,
+				basename: `cache-restore-tail-${index + 1}.md`,
+				folder: "pkm-en/archive",
+				headings: `Cache restore archive ${index + 1}`,
+				aliases: `cache restore archive ${index + 1}`,
+				content:
+					"archive note about cache topics that should not outrank the sdk recovery note",
+				tags: "cache archive",
+			})),
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "sdk cache restore";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+
+		const { candidates, debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 3,
+			},
+		);
+
+		const bridgeLane = debug.lanes.find((lane) => lane.laneName === "bridge_lane");
+		expect(bridgeLane?.admittedPaths).toContain(
+			"pkm-en/projects/sdk/vector-cache.md",
+		);
+		expect(bridgeLane?.admittedPaths).not.toContain(
+			"pkm-en/notes/ops-glossary.md",
+		);
+		expect(candidates.has("pkm-en/projects/sdk/vector-cache.md")).toBe(true);
+	});
+
 	test("body phrase witness still fires via token tape", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",

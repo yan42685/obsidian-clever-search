@@ -114,7 +114,9 @@ const COVERAGE_LEXICAL_COARSE_HYDRATION_CHAR_UPPER_BOUND = 0.25;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_REQUIRED_FAMILY_UPPER_BOUND = 0.8;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_SUPPORT_FAMILY_UPPER_BOUND = 0.35;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND = 0.45;
-const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.8;
+const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.75;
+const COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX =
+	/(?:关于|有关|对于|什么是|什么叫|如何|怎么|为什么|以及|及|与|和|的|地|得|并且|并|中|里|上|下|将|要|会|吗|呢)/gu;
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -319,6 +321,60 @@ function tokenizeCoverageLexicalDocumentText(
 	return tokenizer
 		.tokenizeSequence(text, "index")
 		.map((term) => term.toLowerCase());
+}
+
+function buildCoverageLexicalSearchQueryTerms(
+	tokenizer: Tokenizer,
+	queryText: string,
+): string[] {
+	const rawQueryTerms = tokenizer
+		.tokenizeSequence(queryText, "search")
+		.map((term) => term.toLowerCase());
+	const normalizedContentTerms = deriveCoverageLexicalQueryOnlyContentTerms(
+		queryText,
+		rawQueryTerms,
+	);
+	if (normalizedContentTerms.length === 0) {
+		return rawQueryTerms;
+	}
+	const merged = new Set<string>();
+	for (const term of [...normalizedContentTerms, ...rawQueryTerms]) {
+		if (term.length > 0) {
+			merged.add(term);
+		}
+	}
+	return [...merged];
+}
+
+function deriveCoverageLexicalQueryOnlyContentTerms(
+	queryText: string,
+	rawQueryTerms: readonly string[],
+): string[] {
+	const rawSet = new Set(rawQueryTerms.map((term) => term.toLowerCase()));
+	const rawHanTerms = rawQueryTerms.filter((term) => /[\p{Script=Han}]/u.test(term));
+	if (rawHanTerms.length >= 2) {
+		return [];
+	}
+	const derived: string[] = [];
+	for (const segment of extractHanSegments(queryText.normalize("NFKC"))) {
+		const normalizedSegment = segment.trim().toLowerCase();
+		if (normalizedSegment.length < 4) {
+			continue;
+		}
+		const reducedTerms = normalizedSegment
+			.replace(COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX, " ")
+			.split(/\s+/u)
+			.map((term) => term.trim())
+			.filter((term) => term.length >= 2 && !rawSet.has(term));
+		if (reducedTerms.length < 2) {
+			continue;
+		}
+		for (const term of reducedTerms) {
+			rawSet.add(term);
+			derived.push(term);
+		}
+	}
+	return derived;
 }
 
 type CoverageLexicalDocRankableResult = {
@@ -1218,9 +1274,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const queryStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		this.lastBenchmarkOffloadSearchDebug = null;
 		try {
-			const queryTerms = this.tokenizer
-				.tokenizeSequence(request.queryText, "search")
-				.map((term) => term.toLowerCase());
+			const queryTerms = buildCoverageLexicalSearchQueryTerms(
+				this.tokenizer,
+				request.queryText,
+			);
 			const charQuery = buildCoverageLexicalCharQuery(request.queryText);
 			if (
 				this.documents.size === 0 ||
@@ -4259,9 +4316,21 @@ export function pruneWeakCoverageLexicalDisplayResults(
 	if (topCoverage <= 0) {
 		return [...results];
 	}
+	const hasBalancedDisplayAnchor = hasCoverageLexicalBalancedDisplayAnchor(
+		results[0],
+	);
 	const kept: CoverageLexicalDocRankableResult[] = [results[0]];
 	for (let index = 1; index < results.length; index += 1) {
 		const result = results[index];
+		if (
+			shouldSuppressCoverageLexicalDisplayFrontResult(
+				result,
+				index,
+				hasBalancedDisplayAnchor,
+			)
+		) {
+			continue;
+		}
 		const candidateCoverage = computeCoverageLexicalDisplayCoverage(
 			result.coverageLexicalSignal,
 			config,
@@ -4284,6 +4353,101 @@ export function pruneWeakCoverageLexicalDisplayResults(
 		}
 	}
 	return kept;
+}
+
+function shouldSuppressCoverageLexicalDisplayFrontResult(
+	result: CoverageLexicalDocRankableResult,
+	index: number,
+	hasBalancedDisplayAnchor: boolean,
+): boolean {
+	if (index > 2 || !hasBalancedDisplayAnchor) {
+		return false;
+	}
+	if (hasCoverageLexicalMixedScriptQuery(result)) {
+		return !hasCoverageLexicalMatchedQueryScriptCoverage(
+			result,
+			(term) => /[\p{Script=Han}]/u.test(term),
+		) || !hasCoverageLexicalMatchedQueryScriptCoverage(
+			result,
+			(term) => /[a-z0-9]/iu.test(term),
+		);
+	}
+	return computeCoverageLexicalMatchedQueryTermCount(result) <= 1;
+}
+
+function hasCoverageLexicalBalancedDisplayAnchor(
+	result: CoverageLexicalDocRankableResult | null | undefined,
+): boolean {
+	if (!result) {
+		return false;
+	}
+	if (hasCoverageLexicalMixedScriptQuery(result)) {
+		return (
+			hasCoverageLexicalMatchedQueryScriptCoverage(
+				result,
+				(term) => /[\p{Script=Han}]/u.test(term),
+			) &&
+			hasCoverageLexicalMatchedQueryScriptCoverage(
+				result,
+				(term) => /[a-z0-9]/iu.test(term),
+			)
+		);
+	}
+	return computeCoverageLexicalMatchedQueryTermCount(result) >= 2;
+}
+
+function computeCoverageLexicalMatchedQueryTermCount(
+	result: CoverageLexicalDocRankableResult,
+): number {
+	const queryTermSet = new Set(
+		result.queryTerms.map((term) => term.toLowerCase()),
+	);
+	let count = 0;
+	for (const term of result.matchedTerms) {
+		if (queryTermSet.has(term.toLowerCase())) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
+function hasCoverageLexicalMixedScriptQuery(
+	result: CoverageLexicalDocRankableResult,
+): boolean {
+	let hasHan = false;
+	let hasLatin = false;
+	for (const term of result.queryTerms) {
+		if (/[\p{Script=Han}]/u.test(term)) {
+			hasHan = true;
+		}
+		if (/[a-z0-9]/iu.test(term)) {
+			hasLatin = true;
+		}
+		if (hasHan && hasLatin) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function hasCoverageLexicalMatchedQueryScriptCoverage(
+	result: CoverageLexicalDocRankableResult,
+	matcher: (term: string) => boolean,
+): boolean {
+	const queryTerms = new Set(
+		result.queryTerms
+			.filter((term) => matcher(term))
+			.map((term) => term.toLowerCase()),
+	);
+	if (queryTerms.size === 0) {
+		return false;
+	}
+	for (const term of result.matchedTerms) {
+		if (queryTerms.has(term.toLowerCase())) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function shouldRescueCoverageLexicalDisplayResult(
