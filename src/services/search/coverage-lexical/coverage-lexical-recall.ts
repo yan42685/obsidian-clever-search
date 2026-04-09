@@ -226,6 +226,8 @@ type CoverageLexicalDerivedPlan = {
 	strictMetadataFamilies: readonly CoverageLexicalFamily[];
 	strictMetadataPhraseFamilyIndices: ReadonlySet<number>;
 	strictHybridBodyFamilies: readonly CoverageLexicalFamily[];
+	strictHybridAnchorFamilyIndices: ReadonlySet<number>;
+	strictHybridBodyFamilyIndices: ReadonlySet<number>;
 	strictHybridPhraseFamilyIndices: ReadonlySet<number>;
 	relaxedBodyFamilies: readonly CoverageLexicalFamily[];
 	relaxedHybridPhraseFamilyIndices: ReadonlySet<number>;
@@ -574,6 +576,8 @@ function getOrCreateDerivedPlan(
 			strictMetadataFamilies,
 		),
 		strictHybridBodyFamilies,
+		strictHybridAnchorFamilyIndices: createFamilyIndexSet(plan.hardAnchorFamilies),
+		strictHybridBodyFamilyIndices: createFamilyIndexSet(strictHybridBodyFamilies),
 		strictHybridPhraseFamilyIndices: createFamilyIndexSet([
 			...plan.hardAnchorFamilies,
 			...strictHybridBodyFamilies,
@@ -1122,6 +1126,10 @@ function runStrictHybridLane(
 				{
 					structuredOnly: false,
 					allowPreferredFields: true,
+					requiredFamilyGroups: [
+						derivedPlan.strictHybridAnchorFamilyIndices,
+						derivedPlan.strictHybridBodyFamilyIndices,
+					],
 				},
 			);
 		},
@@ -3323,6 +3331,7 @@ function collectPhraseCandidates(
 	options: {
 		structuredOnly: boolean;
 		allowPreferredFields: boolean;
+		requiredFamilyGroups?: readonly ReadonlySet<number>[];
 	},
 ): void {
 	for (const signature of getOrCreatePhraseSignatureBucket(
@@ -3449,6 +3458,14 @@ function overlapsTargetFamilies(
 	return signature.familyIndices.some((familyIndex) => targetFamilyIndices.has(familyIndex));
 }
 
+function signatureSatisfiesRequiredFamilyGroups(
+	signature: CoverageLexicalPhraseSignature,
+	requiredFamilyGroups: readonly ReadonlySet<number>[],
+): boolean {
+	return requiredFamilyGroups.every((group) =>
+		signature.familyIndices.some((familyIndex) => group.has(familyIndex)),
+	);
+}
 function dedupeFamilies(
 	families: readonly CoverageLexicalFamily[],
 ): CoverageLexicalFamily[] {
@@ -4157,6 +4174,7 @@ function getOrCreatePhraseSignatureBucket(
 	options: {
 		structuredOnly: boolean;
 		allowPreferredFields: boolean;
+		requiredFamilyGroups?: readonly ReadonlySet<number>[];
 	},
 	queryCache: CoverageLexicalQueryCache,
 ): readonly CoverageLexicalPhraseSignature[] {
@@ -4164,6 +4182,11 @@ function getOrCreatePhraseSignatureBucket(
 		scope,
 		options.structuredOnly ? "structured" : "all-forms",
 		options.allowPreferredFields ? "preferred" : "plain",
+		options.requiredFamilyGroups
+			? options.requiredFamilyGroups
+				.map((group) => Array.from(group).join("."))
+				.join("::")
+			: "any-group",
 		Array.from(targetFamilyIndices).join(","),
 	].join("|");
 	const cached = queryCache.phraseSignatureBucketsByKey.get(bucketKey);
@@ -4178,6 +4201,15 @@ function getOrCreatePhraseSignatureBucket(
 			return false;
 		}
 		if (!options.allowPreferredFields && signature.preferredFields?.length) {
+			return false;
+		}
+		if (
+			options.requiredFamilyGroups &&
+			!signatureSatisfiesRequiredFamilyGroups(
+				signature,
+				options.requiredFamilyGroups,
+			)
+		) {
 			return false;
 		}
 		return true;
