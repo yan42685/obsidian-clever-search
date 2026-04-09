@@ -1900,6 +1900,75 @@ $PlainPassword = $null`,
 		);
 	});
 
+	test("prefers metadata password plus body steam over url memo style body-only hits on password steam", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "all_notes/test/unsorted/URL Memo.md",
+				basename: "URL Memo.md",
+				folder: "all_notes/test/unsorted",
+				headings: "memo 常用",
+				content: `## 常用
+- Steam 国产游戏收录组
+https://store.steampowered.com/curator/43623007
+- steam游戏: https://www.xdgame.com/
+- 下载小说txt，比如希灵, txt排版非常好，[[Username, Password, Card Number#^bbs-DOT-g8p6-DOT-com |登录密码点此处]]`,
+			},
+			{
+				path: "all_notes/test/unsorted/Username, Password, Card Number.md",
+				basename: "Username, Password, Card Number.md",
+				folder: "all_notes/test/unsorted",
+				headings: "账号记录",
+				content: `- steam账号密码
+阿根廷：36eu6qnd ev385xxk
+- 租号steam:
+- Encription password (needed when sync data): Yan84064599!`,
+			},
+			{
+				path: "all_notes/test/unsorted/steam游戏制作.md",
+				basename: "steam游戏制作.md",
+				folder: "all_notes/test/unsorted",
+				headings: "project game",
+				content: "为了个人在steam创作游戏获利做前期调研，综合考虑品类、技术难度、成本、时间",
+			},
+			{
+				path: "all_notes/test/unsorted/Schedule tasks for scheduled_script.bat in the `Obsidian` and `SuperMemo` root directory.md",
+				basename:
+					"Schedule tasks for scheduled_script.bat in the `Obsidian` and `SuperMemo` root directory.md",
+				folder: "all_notes/test/unsorted",
+				headings: "scheduled task script",
+				content: `Please enter your password for currentUserName
+Register-ScheduledTask -Password $this.plainPassword
+$PlainPassword = $null`,
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "password steam",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results[0]?.path).toBe(
+			"all_notes/test/unsorted/Username, Password, Card Number.md",
+		);
+	});
+
 	test("prefers a metadata-plus-body hybrid over a body-only double hit when total coverage stays close", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",

@@ -299,7 +299,51 @@ function compareCloseCoverageMetadataPriority(
 	}
 	return (
 		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-		compareCoverageLexicalMetadataEvidenceStages(left, right)
+		compareCoverageLexicalMetadataEvidenceStages(left, right) ||
+		compareCloseCoverageMetadataIdentityMass(left, right)
+	);
+}
+
+function compareCloseCoverageMetadataIdentityMass(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
+	const leftMass = getCoverageLexicalEvidenceMassSummary(left);
+	const rightMass = getCoverageLexicalEvidenceMassSummary(right);
+	return (
+		compareDescendingMetric(
+			leftMass.decisiveExactIdentityMass,
+			rightMass.decisiveExactIdentityMass,
+		) ||
+		compareDescendingMetric(
+			leftMass.supportExactIdentityMass,
+			rightMass.supportExactIdentityMass,
+		) ||
+		compareDescendingMetric(
+			leftMass.decisivePrefixIdentityMass,
+			rightMass.decisivePrefixIdentityMass,
+		) ||
+		compareDescendingMetric(
+			leftMass.supportPrefixIdentityMass,
+			rightMass.supportPrefixIdentityMass,
+		) ||
+		compareDescendingMetric(
+			computeCloseCoverageTotalIdentityMass(leftMass),
+			computeCloseCoverageTotalIdentityMass(rightMass),
+		)
+	);
+}
+
+function computeCloseCoverageTotalIdentityMass(
+	summary: ReturnType<typeof getCoverageLexicalEvidenceMassSummary>,
+): number {
+	return (
+		summary.decisiveExactIdentityMass +
+		summary.supportExactIdentityMass +
+		summary.decisivePrefixIdentityMass +
+		summary.supportPrefixIdentityMass +
+		summary.decisiveFuzzyIdentityMass +
+		summary.supportFuzzyIdentityMass
 	);
 }
 
