@@ -356,6 +356,7 @@
 						<button
 							type="button"
 							class="quickswitch-result-button"
+							class:selected={index === selectedResultIndex}
 							bind:this={resultButtons[index]}
 							on:click={() => {
 								selectedResultIndex = index;
@@ -420,7 +421,7 @@
 		width: min(50rem, 66vw);
 		max-width: 66vw;
 		height: min(78vh, 48rem);
-		padding: 1.05rem 0.95rem 0.85rem;
+		padding: 1rem 0.9rem 0.8rem;
 		overflow: visible;
 	}
 
@@ -447,7 +448,7 @@
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
-		padding-right: 0.15rem;
+		padding-right: 0.1rem;
 	}
 
 	.quickswitch-empty {
@@ -459,8 +460,7 @@
 		box-sizing: border-box;
 		color: var(--text-muted);
 		text-align: center;
-		border: 1px dashed var(--background-modifier-border, rgba(255, 255, 255, 0.08));
-		border-radius: 10px;
+		border-radius: 12px;
 		background: var(--background-secondary, rgba(255, 255, 255, 0.02));
 	}
 
@@ -486,7 +486,7 @@
 
 	.quickswitch-result-item {
 		display: block;
-		margin: 0 0 0.34rem;
+		margin: 0 0 0.12rem;
 	}
 
 	.quickswitch-result-item:last-child {
@@ -499,33 +499,35 @@
 		width: 100%;
 		min-width: 0;
 		height: auto;
-		min-height: 3.52rem;
-		padding: 0.53rem 0.85rem 0.86rem;
+		min-height: 3.35rem;
+		padding: 0.58rem 0.8rem 0.68rem;
 		box-sizing: border-box;
 		text-align: left;
 		color: inherit;
-		background-color: var(--cs-pane-bgc, #20202066);
-		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
-		border-radius: 10px;
+		background-color: transparent !important;
+		border: none;
+		border-radius: 12px;
 		box-shadow: none;
 		cursor: pointer;
+		transition: background-color 120ms ease;
 	}
 
 	.quickswitch-result-button:hover,
+	.quickswitch-result-button.selected,
 	.quickswitch-result-item.selected .quickswitch-result-button {
-		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
+		background-color: var(
+			--background-modifier-hover,
+			var(--cs-item-selected-color, rgba(85, 85, 85, 0.2))
+		) !important;
 	}
 
 	.quickswitch-result-kind {
 		flex: none;
-		margin-top: 0.05rem;
-		padding: 0.08rem 0.38rem;
-		font-size: 0.62rem;
-		line-height: 1.2;
+		margin-top: 0.1rem;
+		padding: 0;
+		font-size: 0.72rem;
+		line-height: 1.25;
 		color: var(--cs-secondary-font-color, #a29c9c);
-		background-color: rgba(255, 255, 255, 0.05);
-		border: 1px solid rgba(255, 255, 255, 0.06);
-		border-radius: 999px;
 		white-space: nowrap;
 	}
 
@@ -552,7 +554,7 @@
 		flex: 1 1 auto;
 		flex-direction: column;
 		justify-content: center;
-		gap: 0.24rem;
+		gap: 0.18rem;
 		width: 100%;
 		min-width: 0;
 		overflow: visible;
@@ -560,7 +562,7 @@
 
 	.quickswitch-result-title-row {
 		display: flex;
-		align-items: start;
+		align-items: flex-start;
 		gap: 0.7rem;
 		min-width: 0;
 	}
@@ -570,8 +572,8 @@
 		flex: 1 1 0;
 		min-width: 0;
 		white-space: normal;
-		line-height: 1.4;
-		font-size: 0.95rem;
+		line-height: 1.35;
+		font-size: 1rem;
 		font-weight: 400;
 		overflow-wrap: anywhere;
 	}
@@ -581,7 +583,7 @@
 		display: block;
 		width: 100%;
 		white-space: normal;
-		font-size: 0.78rem;
+		font-size: 0.79rem;
 		line-height: 1.4;
 		color: var(--cs-secondary-font-color, #a29c9c);
 		overflow-wrap: anywhere;
