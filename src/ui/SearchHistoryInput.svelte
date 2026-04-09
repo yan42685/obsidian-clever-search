@@ -5,6 +5,7 @@
 		type SearchHistorySuggestion,
 	} from "src/services/obsidian/user-data/search-history-service";
 	import { t } from "src/services/obsidian/translations/locale-helper";
+	import { shouldHideSingleRedundantSuggestion } from "src/ui/search-history-suggestion-visibility";
 	import { getInstance } from "src/utils/my-lib";
 	import { createEventDispatcher, tick } from "svelte";
 
@@ -103,6 +104,16 @@
 			nextGhostSuggestion,
 			normalizedQueryText,
 		);
+		if (
+			shouldHideSingleRedundantSuggestion(
+				historySuggestions,
+				nextGhostSuggestion,
+				manualSuggestionsOpen,
+			)
+		) {
+			closeHistorySuggestions();
+			return;
+		}
 		isHistoryDropdownOpen = historySuggestions.length > 0;
 		if (!isHistoryDropdownOpen) {
 			manualSuggestionsOpen = false;
