@@ -766,7 +766,9 @@ Current branch status:
   `coverageProfile`-aware lower/upper bounds. Cheap-lane ordering, full lane
   evaluation ordering, and final union candidate protection now also account
   for mixed-script required-side coverage so one-sided spikes are less likely
-  to crowd out balanced bilingual candidates before fine ranking.
+  to crowd out balanced bilingual candidates before fine ranking. The
+  `local_body_lane` admission path now treats passage-driven body detail as a
+  survival-critical rescue instead of a generic early-detail acceptance path.
 - Stage 5 is partially complete.
   Display pruning now derives more of its keep/rescue judgment from
   `coverageProfile` instead of only raw matched-family counts, but it still

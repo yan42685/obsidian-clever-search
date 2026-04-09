@@ -2548,13 +2548,12 @@ function acceptsLaneCandidate(
 			);
 		case "local_body_lane":
 			return (
-				evidenceProfile.bodyUpperBound >=
-					Math.max(
-						0.95,
-						Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) * 0.85,
-					) ||
-				evidenceProfile.passagePressure >= 0.75 ||
-				evidenceProfile.metadataAssistPressure >= 0.7
+				acceptsLocalBodyLaneByPrimaryEvidence(evidenceProfile, plan) ||
+				acceptsLocalBodyLaneBySurvivalCriticalPassageRescue(
+					evaluation,
+					evidenceProfile,
+					plan,
+				)
 			);
 		case "bridge_lane":
 			return (
@@ -2585,6 +2584,51 @@ function acceptsLaneCandidate(
 		default:
 			return false;
 	}
+}
+
+function acceptsLocalBodyLaneByPrimaryEvidence(
+	evidenceProfile: CoverageLexicalLaneEvidenceProfile,
+	plan: CoverageLexicalPlan,
+): boolean {
+	return (
+		evidenceProfile.bodyUpperBound >=
+			Math.max(
+				0.95,
+				Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) * 0.85,
+			) ||
+		evidenceProfile.metadataAssistPressure >= 0.7
+	);
+}
+
+function acceptsLocalBodyLaneBySurvivalCriticalPassageRescue(
+	evaluation: CoverageLexicalLaneEvaluation,
+	evidenceProfile: CoverageLexicalLaneEvidenceProfile,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (evidenceProfile.passagePressure < 0.75) {
+		return false;
+	}
+	const passage = evaluation.passageSignal;
+	const unresolved = evaluation.state.unresolvedBodyEvidence;
+	const requiredCoreCoverage = Math.min(
+		2,
+		Math.max(1, plan.coreFamilyCount || 1),
+	);
+	const hasStrongPassageWitness =
+		passage.exactWeight > 0 ||
+		(passage.phraseMatchCount > 0 && passage.coreCoverageCount >= 1) ||
+		(passage.coreCoverageCount >= requiredCoreCoverage &&
+			passage.compactnessScore >= 0.18);
+	if (!hasStrongPassageWitness) {
+		return false;
+	}
+	return (
+		unresolved.needsPassageSignal ||
+		unresolved.hasUnverifiedPhraseWitness ||
+		evaluation.decisiveBody.coverageCount > 0 ||
+		evaluation.supportBody.coverageCount > 0 ||
+		evaluation.optionalBody.coverageCount > 0
+	);
 }
 
 type CoverageLexicalLaneEvidenceProfile = {
