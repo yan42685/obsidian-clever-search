@@ -300,6 +300,11 @@ Coarse ranking should share the same worldview as fine ranking:
 Candidates should be hydrated if they can still beat the visible cutoff under
 the same unified evidence worldview.
 
+Design rule:
+
+- evidence mass is preferred for coarse screening and hydration potential,
+  while detail evidence outranks it in final answer selection
+
 ### Fine Ranking
 
 Fine ranking should compare a lexicographic tuple that starts with completeness
@@ -350,6 +355,7 @@ replacement mechanism is stable:
 
 - route-specific comparator prefixes
 - count-first comparator prefixes
+- legacy count-based semantic final fallbacks in the final comparator
 - route/count-shaped benchmark expectations that are not tied to human search
   intuition
 
@@ -357,6 +363,8 @@ In other words:
 
 - `route` should stop deciding which result is more relevant
 - raw family counts should stop deciding which result is more relevant
+- legacy count should not act as the semantic final fallback for answer
+  selection
 
 The replacement should be the unified completeness-aware evidence model:
 
@@ -373,10 +381,17 @@ The following uses are still acceptable during migration:
 - `route` or `decisionPriors` as temporary resource and budget hints
 - `familyCountSummary` as telemetry
 - `familyCountSummary` as a cheap stability tie-break
-- `familyCountSummary` as a coarse fallback while display and hydration
+- `familyCountSummary` as a coarse-only helper while display and hydration
   alignment is still in progress
 
 These are migration aids, not long-term product semantics.
+
+For the final comparator specifically:
+
+- legacy count is almost never the right semantic backstop
+- if `coverageProfile`, detail evidence, and evidence mass still fail to
+  separate two results, deterministic ordering should prefer neutral stability
+  tie-breaks over reviving count-first worldview
 
 ### Long-Term Target Shape
 
@@ -741,12 +756,17 @@ Current branch status:
   satisfaction.
 - Stage 3 is partially complete.
   The final comparator now checks `coverageProfile` before falling back to the
-  old evidence and count tie-breakers, including a guarded rescue path for
-  `memory_relaxed` queries.
+  old evidence chain, includes a guarded rescue path for `memory_relaxed`
+  queries, and no longer uses legacy count as the semantic final fallback.
+  Legacy comparator-shape ranking tests have been removed from the main ranking
+  suite.
 - Stage 4 is partially complete.
   Coarse ordering already benefits from the new comparator, and coarse
   hydration now blends old unresolved-evidence upper bounds with
-  `coverageProfile`-aware lower/upper bounds.
+  `coverageProfile`-aware lower/upper bounds. Cheap-lane ordering, full lane
+  evaluation ordering, and final union candidate protection now also account
+  for mixed-script required-side coverage so one-sided spikes are less likely
+  to crowd out balanced bilingual candidates before fine ranking.
 - Stage 5 is partially complete.
   Display pruning now derives more of its keep/rescue judgment from
   `coverageProfile` instead of only raw matched-family counts, but it still
@@ -762,7 +782,8 @@ Validated in this branch:
 Still intentionally deferred:
 
 - deleting legacy route/count comparator branches
-- recall/admission rewrites beyond coarse hydration bound alignment
+- recall/admission rewrites beyond cheap-lane and final-union coverage
+  alignment
 - benchmark case refresh and gate versioning
 - broad repo typecheck cleanup unrelated to `coverage-lexical`
 

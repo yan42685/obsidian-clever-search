@@ -244,6 +244,12 @@ type CoverageLexicalCheapLaneSignal = {
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
 	bridgeSignal: CoverageLexicalGroupSignal;
+	requiredHanFamilyCount: number;
+	requiredHanCoverageCount: number;
+	requiredLatinFamilyCount: number;
+	requiredLatinCoverageCount: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
 	phraseMatchCount: number;
 	tagExactCount: number;
 	tagCharCount: number;
@@ -260,6 +266,9 @@ type CoverageLexicalCheapLaneEvidenceProfile = {
 	hybridPressure: number;
 	passagePressure: number;
 	charPressure: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+	requiredCoverageRatio: number;
 };
 
 type CoverageLexicalLaneUnionPressure = {
@@ -465,6 +474,9 @@ type CoverageLexicalLaneEvaluation = {
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
 	bridgeSignal: CoverageLexicalGroupSignal;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+	requiredCoverageRatio: number;
 	bodyCharMatchCount: number;
 	bodyCharMatchRatio: number;
 	metadataCharMatchCount: number;
@@ -2044,6 +2056,7 @@ function compareCheapLaneSignals(
 			);
 		case "strict_hybrid_lane":
 			return (
+				compareCheapLaneCrossScriptCoverage(left, right) ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
@@ -2051,6 +2064,7 @@ function compareCheapLaneSignals(
 			);
 		case "relaxed_hybrid_lane":
 			return (
+				compareCheapLaneCrossScriptCoverage(left, right) ||
 				compareDescendingMetric(
 					left.decisiveBody.coverageCount +
 						left.supportBody.coverageCount +
@@ -2066,6 +2080,7 @@ function compareCheapLaneSignals(
 			);
 		case "local_body_lane":
 			return (
+				compareCheapLaneCrossScriptCoverage(left, right) ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
 				compareGroupSignals(left.optionalBody, right.optionalBody) ||
@@ -2074,6 +2089,7 @@ function compareCheapLaneSignals(
 			);
 		case "bridge_lane":
 			return (
+				compareCheapLaneCrossScriptCoverage(left, right) ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
@@ -2092,11 +2108,62 @@ function compareCheapLaneSignals(
 	}
 }
 
+function compareCheapLaneCrossScriptCoverage(
+	left: CoverageLexicalCheapLaneSignal,
+	right: CoverageLexicalCheapLaneSignal,
+): number {
+	const requiresCrossScript =
+		left.crossScriptRequired || right.crossScriptRequired;
+	if (!requiresCrossScript) {
+		return 0;
+	}
+	return (
+		compareDescendingMetric(
+			left.crossScriptSatisfied ? 1 : 0,
+			right.crossScriptSatisfied ? 1 : 0,
+		) ||
+		compareDescendingMetric(
+			computeCheapLaneRequiredCoverageRatio(left),
+			computeCheapLaneRequiredCoverageRatio(right),
+		)
+	);
+}
+
 function buildCheapLaneSignal(
 	state: CoverageLexicalCandidateState,
 	plan: CoverageLexicalPlan,
 ): CoverageLexicalCheapLaneSignal {
 	const derivedPlan = getOrCreateDerivedPlan(plan);
+	const requiredFamilyIndices = new Set<number>([
+		...plan.hardAnchorFamilies.map((family) => family.index),
+		...plan.decisiveBodyFamilies.map((family) => family.index),
+		...plan.supportBodyFamilies.map((family) => family.index),
+	]);
+	let requiredHanFamilyCount = 0;
+	let requiredHanCoverageCount = 0;
+	let requiredLatinFamilyCount = 0;
+	let requiredLatinCoverageCount = 0;
+	for (const family of plan.families) {
+		if (!requiredFamilyIndices.has(family.index)) {
+			continue;
+		}
+		const scriptClass = getCheapLaneFamilyScriptClass(plan, family.index);
+		const covered = hasCheapLaneRequiredFamilyCoverage(state, family.index);
+		if (scriptClass === "han" || scriptClass === "mixed") {
+			requiredHanFamilyCount += 1;
+			if (covered) {
+				requiredHanCoverageCount += 1;
+			}
+		}
+		if (scriptClass === "latin" || scriptClass === "mixed") {
+			requiredLatinFamilyCount += 1;
+			if (covered) {
+				requiredLatinCoverageCount += 1;
+			}
+		}
+	}
+	const crossScriptRequired =
+		requiredHanFamilyCount > 0 && requiredLatinFamilyCount > 0;
 	return {
 		hardAnchorMetadata: buildGroupSignal(
 			state.metadataMatches,
@@ -2123,12 +2190,75 @@ function buildCheapLaneSignal(
 			state.metadataMatches,
 			plan.bridgeFamilies,
 		),
+		requiredHanFamilyCount,
+		requiredHanCoverageCount,
+		requiredLatinFamilyCount,
+		requiredLatinCoverageCount,
+		crossScriptRequired,
+		crossScriptSatisfied:
+			!crossScriptRequired ||
+			(requiredHanCoverageCount > 0 && requiredLatinCoverageCount > 0),
 		phraseMatchCount: state.phraseMatches.length,
 		tagExactCount: state.tagExactMatchIndices.length,
 		tagCharCount: state.tagCharMatchIndices.length,
 		metadataCharCount: state.metadataCharMatchIndices.length,
 		bodyCharCount: state.bodyCharMatchIndices.length,
 	};
+}
+
+function getCheapLaneFamilyScriptClass(
+	plan: CoverageLexicalPlan,
+	familyIndex: number,
+): "han" | "latin" | "mixed" | "other" {
+	const probe = plan.probes?.[familyIndex];
+	if (probe?.scriptClass) {
+		return probe.scriptClass;
+	}
+	const term = plan.families[familyIndex]?.normalizedTerm ?? "";
+	const hanCharCount = term.match(/\p{Script=Han}/gu)?.length ?? 0;
+	const latinCharCount = term.match(/\p{Script=Latin}/gu)?.length ?? 0;
+	if (hanCharCount > 0 && latinCharCount > 0) {
+		return "mixed";
+	}
+	if (hanCharCount > 0) {
+		return "han";
+	}
+	if (latinCharCount > 0) {
+		return "latin";
+	}
+	return "other";
+}
+
+function hasCheapLaneRequiredFamilyCoverage(
+	state: CoverageLexicalCandidateState,
+	familyIndex: number,
+): boolean {
+	if (
+		(state.bodyMatches[familyIndex] ?? 0) > 0 ||
+		(state.metadataMatches[familyIndex] ?? 0) > 0
+	) {
+		return true;
+	}
+	for (const fieldMatches of Object.values(state.metadataAssistFieldMatches)) {
+		if ((fieldMatches[familyIndex] ?? 0) > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function computeCheapLaneRequiredCoverageRatio(
+	signal: CoverageLexicalCheapLaneSignal,
+): number {
+	const requiredFamilyCount =
+		signal.requiredHanFamilyCount + signal.requiredLatinFamilyCount;
+	if (requiredFamilyCount <= 0) {
+		return 1;
+	}
+	return (
+		(signal.requiredHanCoverageCount + signal.requiredLatinCoverageCount) /
+		requiredFamilyCount
+	);
 }
 
 function hasCheapLaneTie(
@@ -2270,6 +2400,9 @@ function buildLaneEvaluation(
 		supportBody: signal.supportBody,
 		optionalBody: signal.optionalBody,
 		bridgeSignal: signal.bridgeSignal,
+		crossScriptRequired: signal.crossScriptRequired,
+		crossScriptSatisfied: signal.crossScriptSatisfied,
+		requiredCoverageRatio: computeCheapLaneRequiredCoverageRatio(signal),
 		bodyCharMatchCount: state.bodyCharMatchIndices.length,
 		bodyCharMatchRatio: computeCharMatchRatio(
 			state.bodyCharMatchIndices.length,
@@ -2559,6 +2692,9 @@ function buildCheapLaneEvidenceProfile(
 		hybridPressure,
 		passagePressure,
 		charPressure,
+		crossScriptRequired: signal.crossScriptRequired,
+		crossScriptSatisfied: signal.crossScriptSatisfied,
+		requiredCoverageRatio: computeCheapLaneRequiredCoverageRatio(signal),
 	};
 }
 
@@ -2702,13 +2838,17 @@ function computeFinalUnionBudget(
 function computeFinalUnionLowerBound(
 	profile: CoverageLexicalCheapLaneEvidenceProfile,
 ): number {
-	return Math.max(
+	const lowerBound = Math.max(
 		profile.anchorPressure + profile.bridgePressure * 0.14,
 		profile.hybridPressure + profile.bodyPressure * 0.2,
 		profile.bodyPressure + profile.passagePressure * 0.18,
 		profile.bridgePressure + profile.metadataAssistPressure * 0.12,
 		profile.charPressure,
 	);
+	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
+		return lowerBound * 0.82;
+	}
+	return lowerBound;
 }
 
 function computeFinalUnionPotentialUpperBound(
@@ -2733,6 +2873,9 @@ function computeFinalUnionPotentialUpperBound(
 	) {
 		potentialUpperBound += 0.08;
 	}
+	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
+		potentialUpperBound += 0.22;
+	}
 	return Math.max(
 		potentialUpperBound,
 		profile.bodyUpperBound + profile.bridgePressure * 0.15,
@@ -2744,6 +2887,14 @@ function compareFinalUnionCandidates(
 	right: CoverageLexicalFinalUnionCandidate,
 ): number {
 	return (
+		compareDescendingMetric(
+			left.profile.crossScriptSatisfied ? 1 : 0,
+			right.profile.crossScriptSatisfied ? 1 : 0,
+		) ||
+		compareDescendingMetric(
+			left.profile.requiredCoverageRatio,
+			right.profile.requiredCoverageRatio,
+		) ||
 		compareDescendingMetric(
 			left.potentialUpperBound,
 			right.potentialUpperBound,
@@ -2769,6 +2920,13 @@ function shouldProtectFinalUnionCandidate(
 		unresolved.needsPassageSignal ||
 		unresolved.hasUnverifiedPhraseWitness;
 	if (!hasWitnessPotential) {
+		return false;
+	}
+	if (
+		candidate.profile.crossScriptRequired &&
+		!candidate.profile.crossScriptSatisfied &&
+		candidate.profile.requiredCoverageRatio < 0.5
+	) {
 		return false;
 	}
 	return candidate.potentialUpperBound + 0.08 >= cutoffUpperBound;
@@ -2820,6 +2978,7 @@ function compareLaneEvaluations(
 			);
 		case "strict_hybrid_lane":
 			return (
+				compareLaneCrossScriptCoverage(left, right) ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
@@ -2832,6 +2991,7 @@ function compareLaneEvaluations(
 			);
 		case "relaxed_hybrid_lane":
 			return (
+				compareLaneCrossScriptCoverage(left, right) ||
 				compareDescendingMetric(
 					getBodyCoverageCount(left),
 					getBodyCoverageCount(right),
@@ -2848,6 +3008,7 @@ function compareLaneEvaluations(
 			);
 		case "local_body_lane":
 			return (
+				compareLaneCrossScriptCoverage(left, right) ||
 				compareCoverageLexicalPassageAdmissionSignals(
 					left.passageSignal,
 					right.passageSignal,
@@ -2861,6 +3022,7 @@ function compareLaneEvaluations(
 			);
 		case "bridge_lane":
 			return (
+				compareLaneCrossScriptCoverage(left, right) ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
@@ -2891,6 +3053,27 @@ function compareLaneEvaluations(
 		default:
 			return 0;
 	}
+}
+
+function compareLaneCrossScriptCoverage(
+	left: CoverageLexicalLaneEvaluation,
+	right: CoverageLexicalLaneEvaluation,
+): number {
+	const requiresCrossScript =
+		left.crossScriptRequired || right.crossScriptRequired;
+	if (!requiresCrossScript) {
+		return 0;
+	}
+	return (
+		compareDescendingMetric(
+			left.crossScriptSatisfied ? 1 : 0,
+			right.crossScriptSatisfied ? 1 : 0,
+		) ||
+		compareDescendingMetric(
+			left.requiredCoverageRatio,
+			right.requiredCoverageRatio,
+		)
+	);
 }
 
 function getBodyCoverageCount(evaluation: CoverageLexicalLaneEvaluation): number {

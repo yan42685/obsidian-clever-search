@@ -1,4 +1,4 @@
-import type {
+﻿import type {
 	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalPlan,
@@ -545,7 +545,7 @@ describe("coverage lexical ranking", () => {
 		}
 	});
 
-	test("legacy comparator compatibility keeps metadata-first distribution ahead of ordinary body detail", () => {
+	test("top-level comparator lets semantic body detail outrank metadata distribution when coverage ties", () => {
 		const plan = createComparatorPlan("metadata-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -585,64 +585,10 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 
-		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
 	});
 
-	// The next comparator-shape tests document the current route/count worldview.
-	// They are useful migration regressions, but they should not be treated as
-	// permanent product-ranking truths once completeness-first ranking lands.
-	test("legacy comparator compatibility lets body-with-anchor witness beat broad metadata pressure", () => {
-		const plan = createComparatorPlan("body-with-anchor");
-		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 3,
-				folderMatchedFamilyCount: 1,
-			},
-			coreBody: {
-				coverageCount: 3,
-				exactWeight: 40,
-				prefixWeight: 0,
-				fuzzyWeight: 0,
-			},
-			localEvidence: {
-				...createEmptyWindowFusionSignal(),
-				primary: {
-					...createEmptyWindowFusionSignal().primary,
-					coreCoverageCount: 3,
-					exactCoreWeight: 20,
-					orderedPairCount: 2,
-					orderRatio: 1,
-					compactnessRatio: 1,
-					score: 200,
-				},
-				corroboratedExactCoreWeight: 20,
-			},
-			phraseBridgeCount: 1,
-			phraseBridgeWeight: 10,
-		});
-		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 3,
-				bodyMatchedFamilyCount: 1,
-				folderMatchedFamilyCount: 1,
-				headingsMatchedFamilyCount: 1,
-				tagsMatchedFamilyCount: 1,
-			},
-			coreBody: {
-				coverageCount: 1,
-				exactWeight: 5,
-				prefixWeight: 0,
-				fuzzyWeight: 0,
-			},
-		});
-
-		expect(compareSignals(left, right, plan)).toBeLessThan(0);
-	});
-
-	test("legacy comparator compatibility keeps strong basename and alias evidence ahead in metadata-first routes", () => {
+	test("top-level comparator no longer lets bare metadata family counts outrank semantic body witness", () => {
 		const plan = createComparatorPlan("metadata-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -688,112 +634,10 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 
-		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
-	});
-
-	test("legacy comparator compatibility keeps body count ahead after total-count ties in body-first routes", () => {
-		const plan = createComparatorPlan("body-first");
-		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 2,
-				basenameMatchedFamilyCount: 1,
-				aliasesMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
-		});
-		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 3,
-			},
-		});
-
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
-	test("legacy comparator compatibility preserves metadata field priority basename over aliases over folder over headings over tags", () => {
-		const plan = createComparatorPlan("body-with-anchor");
-		const basenameSignal = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-			},
-		});
-		const aliasesSignal = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				aliasesMatchedFamilyCount: 1,
-			},
-		});
-		const folderSignal = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				folderMatchedFamilyCount: 1,
-			},
-		});
-		const headingsSignal = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				headingsMatchedFamilyCount: 1,
-			},
-		});
-		const tagsSignal = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				tagsMatchedFamilyCount: 1,
-			},
-		});
-
-		expect(
-			compareSignals(basenameSignal, aliasesSignal, plan),
-		).toBeLessThan(0);
-		expect(
-			compareSignals(aliasesSignal, folderSignal, plan),
-		).toBeLessThan(0);
-		expect(
-			compareSignals(folderSignal, headingsSignal, plan),
-		).toBeLessThan(0);
-		expect(
-			compareSignals(headingsSignal, tagsSignal, plan),
-		).toBeLessThan(0);
-	});
-
-	test("legacy comparator compatibility uses body matched family count only after metadata counts are exhausted", () => {
-		const plan = createComparatorPlan("body-first");
-		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 2,
-			},
-		});
-		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
-			coreBody: {
-				coverageCount: 1,
-				exactWeight: 50,
-				prefixWeight: 0,
-				fuzzyWeight: 0,
-			},
-		});
-
-		expect(compareSignals(left, right, plan)).toBeLessThan(0);
-	});
-
-	test("legacy comparator compatibility resolves detail signals only after count summary ties", () => {
+	test("top-level comparator resolves detail signals before any legacy count helper", () => {
 		const plan = createComparatorPlan("body-first");
 		const left = createFamilySignal({
 			familyCountSummary: {
@@ -898,6 +742,27 @@ describe("coverage lexical ranking", () => {
 		});
 
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
+	});
+
+	test("top-level comparator no longer uses legacy count as a semantic final fallback", () => {
+		const plan = createComparatorPlan("body-first");
+		const left = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 4,
+				metadataMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 3,
+			},
+		});
+		const right = createFamilySignal({
+			familyCountSummary: {
+				totalMatchedFamilyCount: 2,
+				metadataMatchedFamilyCount: 1,
+				basenameMatchedFamilyCount: 1,
+				bodyMatchedFamilyCount: 1,
+			},
+		});
+
+		expect(compareSignals(left, right, plan)).toBe(0);
 	});
 
 	test("memory-relaxed coverage profile allows strong witness to rescue one support gap", () => {
@@ -1320,16 +1185,17 @@ describe("coverage lexical ranking", () => {
 			};
 		};
 
+		const runtimeAccess = "运行时访问";
+		const runtimeRecord = `${runtimeAccess}记录`;
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
 			{
 				path: "pkm-mixed/runtime/projected-token-runtime-access.md",
 				basename: "projected-token-runtime-access.md",
 				folder: "pkm-mixed/runtime",
-				headings: "Projected token 运行时访问",
-				content:
-					"projected token runtime access note explains 运行时访问 constraints and token rotation",
-				aliases: "运行时 projected token access",
+				headings: `Projected token ${runtimeAccess}`,
+				content: `projected token runtime access note explains ${runtimeAccess} constraints and token rotation`,
+				aliases: `${runtimeAccess} projected token access`,
 			},
 			{
 				path: "tech-en/content/en/docs/concepts/security/projected-token.md",
@@ -1340,17 +1206,16 @@ describe("coverage lexical ranking", () => {
 					"projected token projected token access guidance for service account credentials",
 			},
 			{
-				path: "pkm-zh/runtime/运行时访问记录.md",
-				basename: "运行时访问记录.md",
+				path: `pkm-zh/runtime/${runtimeRecord}.md`,
+				basename: `${runtimeRecord}.md`,
 				folder: "pkm-zh/runtime",
-				headings: "运行时访问记录",
-				content:
-					"运行时访问 运行时访问 访问记录 汇总，不讨论 projected token 身份文件",
+				headings: runtimeRecord,
+				content: `${runtimeAccess} ${runtimeAccess} 访问记录汇总，不讨论 projected token 身份文件`,
 			},
 		]);
 
 		const results = await engine.searchFiles({
-			queryText: "projected token 运行时访问",
+			queryText: `projected token ${runtimeAccess}`,
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 5,
@@ -2036,3 +1901,4 @@ describe("coverage lexical ranking", () => {
 		).toBeGreaterThan(0);
 	});
 });
+
