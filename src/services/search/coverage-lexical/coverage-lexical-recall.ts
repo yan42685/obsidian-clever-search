@@ -2050,16 +2050,21 @@ function compareCheapLaneSignals(
 	left: CoverageLexicalCheapLaneSignal,
 	right: CoverageLexicalCheapLaneSignal,
 ): number {
+	const sharedWorldviewDecision =
+		laneName === "char_fallback_lane"
+			? 0
+			: compareCheapLaneSharedWorldview(left, right);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal)
 			);
 		case "strict_hybrid_lane":
 			return (
-				compareCheapLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
@@ -2067,7 +2072,7 @@ function compareCheapLaneSignals(
 			);
 		case "relaxed_hybrid_lane":
 			return (
-				compareCheapLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareDescendingMetric(
 					left.decisiveBody.coverageCount +
 						left.supportBody.coverageCount +
@@ -2083,7 +2088,7 @@ function compareCheapLaneSignals(
 			);
 		case "local_body_lane":
 			return (
-				compareCheapLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
 				compareGroupSignals(left.optionalBody, right.optionalBody) ||
@@ -2092,7 +2097,7 @@ function compareCheapLaneSignals(
 			);
 		case "bridge_lane":
 			return (
-				compareCheapLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
@@ -2109,6 +2114,27 @@ function compareCheapLaneSignals(
 		default:
 			return 0;
 	}
+}
+
+function compareCheapLaneSharedWorldview(
+	left: CoverageLexicalCheapLaneSignal,
+	right: CoverageLexicalCheapLaneSignal,
+): number {
+	return (
+		compareCheapLaneCrossScriptCoverage(left, right) ||
+		compareDescendingMetric(
+			computeCheapLaneRequiredCoverageRatio(left),
+			computeCheapLaneRequiredCoverageRatio(right),
+		) ||
+		compareDescendingMetric(
+			computeCheapLaneUnifiedEvidenceStrength(left),
+			computeCheapLaneUnifiedEvidenceStrength(right),
+		) ||
+		compareDescendingMetric(
+			computeCheapLaneUnifiedCoverageCount(left),
+			computeCheapLaneUnifiedCoverageCount(right),
+		)
+	);
 }
 
 function compareCheapLaneCrossScriptCoverage(
@@ -2129,6 +2155,44 @@ function compareCheapLaneCrossScriptCoverage(
 			computeCheapLaneRequiredCoverageRatio(left),
 			computeCheapLaneRequiredCoverageRatio(right),
 		)
+	);
+}
+
+function computeCheapLaneUnifiedEvidenceStrength(
+	signal: CoverageLexicalCheapLaneSignal,
+): number {
+	return (
+		computeCheapLaneWeightedGroupStrength(signal.hardAnchorMetadata, 1.35) +
+		computeCheapLaneWeightedGroupStrength(signal.decisiveBody, 1.25) +
+		computeCheapLaneWeightedGroupStrength(signal.supportBody, 1) +
+		computeCheapLaneWeightedGroupStrength(signal.optionalBody, 0.55) +
+		computeCheapLaneWeightedGroupStrength(signal.bridgeSignal, 0.9) +
+		signal.phraseMatchCount * 0.35
+	);
+}
+
+function computeCheapLaneUnifiedCoverageCount(
+	signal: CoverageLexicalCheapLaneSignal,
+): number {
+	return (
+		signal.hardAnchorMetadata.coverageCount +
+		signal.decisiveBody.coverageCount +
+		signal.supportBody.coverageCount +
+		signal.optionalBody.coverageCount +
+		signal.bridgeSignal.coverageCount
+	);
+}
+
+function computeCheapLaneWeightedGroupStrength(
+	signal: CoverageLexicalGroupSignal,
+	weight: number,
+): number {
+	return (
+		(signal.exactWeight +
+			signal.prefixWeight * 0.65 +
+			signal.fuzzyWeight * 0.35 +
+			signal.tailWeight * 0.2) *
+		weight
 	);
 }
 

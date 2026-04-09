@@ -1,5 +1,4 @@
 ﻿import type {
-	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalPlan,
 } from "src/services/search/coverage-lexical/coverage-lexical-types";
@@ -165,7 +164,6 @@ function registerMockFileSnapshotStore(
 }
 
 function createComparatorPlan(
-	route: CoverageLexicalPlan["route"] = "body-with-anchor",
 	overrides: Partial<CoverageLexicalPlan> = {},
 ): CoverageLexicalPlan {
 	return {
@@ -176,7 +174,6 @@ function createComparatorPlan(
 		hasMixedScriptHint: false,
 		hasPathShapeHint: false,
 		hasTitleShapeHint: false,
-		route,
 		hardAnchorFamilies: [],
 		decisiveBodyFamilies: [],
 		supportBodyFamilies: [],
@@ -187,9 +184,33 @@ function createComparatorPlan(
 		coreFamilyCount: 0,
 		anchorFamilyCount: 0,
 		bodyFamilyCount: 0,
+		resourceHints: {
+			metadataBudget: 0.6,
+			hybridBudget: 0.8,
+			bodyBudget: 0.6,
+			memoryBudget: 0.2,
+			bridgeBudget: 0.2,
+			localWitnessBudget: 0.4,
+		},
+		coverageRequirements: {
+			requiredFamilyIndices: [],
+			decisiveFamilyIndices: [],
+			supportFamilyIndices: [],
+			optionalFamilyIndices: [],
+			bridgeFamilyIndices: [],
+			minimumMatchCount: 0,
+			requiresCrossScriptCoverage: false,
+			requiresBalancedMultiTermCoverage: false,
+		},
+		rescuePotential: {
+			metadataIdentityLikely: false,
+			phraseRescueLikely: false,
+			localWitnessLikely: false,
+			bridgeRescueLikely: false,
+			unresolvedBodyUpgradeLikely: false,
+		},
 		explain: {
 			queryKind: overrides.queryKind ?? "anchor_body_hybrid",
-			route: overrides.route ?? route,
 			spans: [],
 			familyReasons: [],
 			queryKindReasons: [],
@@ -349,22 +370,6 @@ function pruneDisplayResults(
 	);
 }
 
-function createFamilyCountSummary(
-	overrides: Partial<CoverageLexicalFamilyCountSummary> = {},
-): CoverageLexicalFamilyCountSummary {
-	return {
-		totalMatchedFamilyCount: 0,
-		metadataMatchedFamilyCount: 0,
-		bodyMatchedFamilyCount: 0,
-		basenameMatchedFamilyCount: 0,
-		aliasesMatchedFamilyCount: 0,
-		folderMatchedFamilyCount: 0,
-		headingsMatchedFamilyCount: 0,
-		tagsMatchedFamilyCount: 0,
-		...overrides,
-	};
-}
-
 function createCoverageProfile(
 	overrides: Partial<CoverageLexicalFamilySignal["coverageProfile"]> = {},
 ): CoverageLexicalFamilySignal["coverageProfile"] {
@@ -398,15 +403,13 @@ function createCoverageProfile(
 function createFamilySignal(
 	overrides: Omit<
 		Partial<CoverageLexicalFamilySignal>,
-		"familyCountSummary" | "coverageProfile"
+		"coverageProfile"
 	> & {
-		familyCountSummary?: Partial<CoverageLexicalFamilyCountSummary>;
 		coverageProfile?: Partial<CoverageLexicalFamilySignal["coverageProfile"]>;
 	} = {},
 ): CoverageLexicalFamilySignal {
-	const { familyCountSummary, coverageProfile, ...restOverrides } = overrides;
+	const { coverageProfile, ...restOverrides } = overrides;
 	return {
-		familyCountSummary: createFamilyCountSummary(familyCountSummary ?? {}),
 		coverageProfile: createCoverageProfile(coverageProfile ?? {}),
 		coreBody: {
 			coverageCount: 0,
@@ -572,15 +575,8 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("top-level comparator lets semantic body detail outrank metadata distribution when coverage ties", () => {
-		const plan = createComparatorPlan("metadata-first");
+		const plan = createComparatorPlan();
 		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 2,
-				basenameMatchedFamilyCount: 1,
-				aliasesMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 2,
@@ -589,11 +585,6 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 3,
-			},
 			coreBody: {
 				coverageCount: 3,
 				exactWeight: 40,
@@ -615,13 +606,8 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("top-level comparator no longer lets bare metadata family counts outrank semantic body witness", () => {
-		const plan = createComparatorPlan("metadata-first");
+		const plan = createComparatorPlan();
 		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 0,
-				bodyMatchedFamilyCount: 3,
-			},
 			coreBody: {
 				coverageCount: 3,
 				exactWeight: 40,
@@ -645,13 +631,6 @@ describe("coverage lexical ranking", () => {
 			phraseBridgeWeight: 10,
 		});
 		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 3,
-				metadataMatchedFamilyCount: 2,
-				bodyMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				aliasesMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 2,
@@ -664,14 +643,8 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("top-level comparator resolves detail signals before any legacy count helper", () => {
-		const plan = createComparatorPlan("body-first");
+		const plan = createComparatorPlan();
 		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 5,
@@ -680,12 +653,6 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 8,
@@ -698,7 +665,7 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("coverage profile prefers balanced mixed-script coverage before one-sided evidence spikes", () => {
-		const plan = createComparatorPlan("body-with-anchor", {
+		const plan = createComparatorPlan({
 			hasMixedScriptHint: true,
 		});
 		const left = createFamilySignal({
@@ -771,33 +738,16 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("top-level comparator no longer uses legacy count as a semantic final fallback", () => {
-		const plan = createComparatorPlan("body-first");
-		const left = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 4,
-				metadataMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 3,
-			},
-		});
-		const right = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
-		});
+		const plan = createComparatorPlan();
+		const left = createFamilySignal({});
+		const right = createFamilySignal({});
 
 		expect(compareSignals(left, right, plan)).toBe(0);
 	});
 
 	test("body-with-anchor comparator lets basename exact outrank a larger body-only exact lead", () => {
-		const plan = createComparatorPlan("body-with-anchor");
+		const plan = createComparatorPlan();
 		const bodyOnlyLead = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				bodyMatchedFamilyCount: 2,
-			},
 			coreBody: {
 				coverageCount: 2,
 				exactWeight: 40,
@@ -806,12 +756,6 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 		const basenameHybrid = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 20,
@@ -839,12 +783,8 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("early body witness guardrail does not override a stronger metadata-plus-body hybrid", () => {
-		const plan = createComparatorPlan("body-with-anchor");
+		const plan = createComparatorPlan();
 		const bodyOnlyLead = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				bodyMatchedFamilyCount: 2,
-			},
 			coreBody: {
 				coverageCount: 2,
 				exactWeight: 40,
@@ -866,12 +806,6 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 		const basenameHybrid = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 20,
@@ -899,14 +833,8 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("body-first comparator prefers the candidate with the larger metadata share when coverage stays tied", () => {
-		const plan = createComparatorPlan("body-first");
+		const plan = createComparatorPlan();
 		const metadataHeavyHybrid = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				metadataMatchedFamilyCount: 1,
-				basenameMatchedFamilyCount: 1,
-				bodyMatchedFamilyCount: 1,
-			},
 			coreBody: {
 				coverageCount: 1,
 				exactWeight: 12,
@@ -930,10 +858,6 @@ describe("coverage lexical ranking", () => {
 			},
 		});
 		const bodyHeavyAlternative = createFamilySignal({
-			familyCountSummary: {
-				totalMatchedFamilyCount: 2,
-				bodyMatchedFamilyCount: 2,
-			},
 			coreBody: {
 				coverageCount: 2,
 				exactWeight: 22,
@@ -946,8 +870,15 @@ describe("coverage lexical ranking", () => {
 	});
 
 	test("memory-relaxed coverage profile allows strong witness to rescue one support gap", () => {
-		const plan = createComparatorPlan("body-with-anchor", {
+		const plan = createComparatorPlan({
 			queryKind: "memory_relaxed",
+			rescuePotential: {
+				metadataIdentityLikely: false,
+				phraseRescueLikely: true,
+				localWitnessLikely: true,
+				bridgeRescueLikely: false,
+				unresolvedBodyUpgradeLikely: true,
+			},
 		});
 		const left = createFamilySignal({
 			coverageProfile: {
@@ -1152,10 +1083,6 @@ describe("coverage lexical ranking", () => {
 			createDocRankableResult(
 				1,
 				createFamilySignal({
-					familyCountSummary: {
-						totalMatchedFamilyCount: 5,
-						bodyMatchedFamilyCount: 5,
-					},
 					coreBody: {
 						coverageCount: 5,
 						exactWeight: 5,
@@ -1167,10 +1094,6 @@ describe("coverage lexical ranking", () => {
 			createDocRankableResult(
 				2,
 				createFamilySignal({
-					familyCountSummary: {
-						totalMatchedFamilyCount: 3,
-						bodyMatchedFamilyCount: 3,
-					},
 					coreBody: {
 						coverageCount: 2,
 						exactWeight: 1,
@@ -1190,10 +1113,6 @@ describe("coverage lexical ranking", () => {
 			createDocRankableResult(
 				3,
 				createFamilySignal({
-					familyCountSummary: {
-						totalMatchedFamilyCount: 3,
-						bodyMatchedFamilyCount: 3,
-					},
 					coreBody: {
 						coverageCount: 1,
 						exactWeight: 0,
@@ -1215,10 +1134,6 @@ describe("coverage lexical ranking", () => {
 			createDocRankableResult(
 				1,
 				createFamilySignal({
-					familyCountSummary: {
-						totalMatchedFamilyCount: 5,
-						bodyMatchedFamilyCount: 5,
-					},
 					coverageProfile: {
 						meaningfulFamilyCount: 4,
 						meaningfulCoveredFamilyCount: 4,
@@ -1250,10 +1165,6 @@ describe("coverage lexical ranking", () => {
 			createDocRankableResult(
 				2,
 				createFamilySignal({
-					familyCountSummary: {
-						totalMatchedFamilyCount: 3,
-						bodyMatchedFamilyCount: 3,
-					},
 					coverageProfile: {
 						meaningfulFamilyCount: 4,
 						meaningfulCoveredFamilyCount: 1,
@@ -1435,7 +1346,7 @@ describe("coverage lexical ranking", () => {
 				ratio?: number,
 			): boolean;
 		};
-		const plan = createComparatorPlan("body-with-anchor");
+		const plan = createComparatorPlan();
 		const candidate = createDocRankableResult(
 			1,
 			createFamilySignal({
@@ -1474,7 +1385,7 @@ describe("coverage lexical ranking", () => {
 				ratio?: number,
 			): boolean;
 		};
-		const plan = createComparatorPlan("body-with-anchor");
+		const plan = createComparatorPlan();
 		const candidate = createDocRankableResult(
 			1,
 			createFamilySignal({

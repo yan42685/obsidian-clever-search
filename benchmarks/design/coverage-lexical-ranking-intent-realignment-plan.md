@@ -801,7 +801,13 @@ Current branch status:
   to `resourceHints` to better reflect their intended role as budget/resource
   hints rather than semantic ranking classes, and close-coverage metadata
   priority is now expressed through result-evidence tie-band logic rather than
-  planner worldview classes.
+  planner worldview classes. The active planner payload no longer exposes a
+  `route` field: `CoverageLexicalRoute` has been removed from the runtime
+  types, planner output now carries explicit `coverageRequirements` and
+  `rescuePotential`, and planner explain/debug no longer treats route as a
+  first-class semantic concept. The legacy `familyCountSummary` payload has
+  also been removed from active signal construction so runtime coverage now
+  flows through `coverageProfile` and evidence mass only.
 - Stage 4 is partially complete.
   Coarse ordering already benefits from the new comparator, and coarse
   hydration now blends old unresolved-evidence upper bounds with
@@ -827,6 +833,13 @@ Current branch status:
   upgrade gating, and per-file local-window limits now also read only
   `resourceHints`; the active engine path no longer consumes
   `plan.decisionPriors`.
+  Cheap-lane comparator ordering now also begins from a shared evidence
+  worldview prefix instead of immediately branching into lane-specific ranking
+  philosophies: cross-script satisfaction, required-coverage ratio, unified
+  cheap evidence strength, and unified cheap coverage count now fire before the
+  lane-specific tie-breakers. This keeps the existing lane containers for
+  admission/budget purposes while reducing semantic divergence between recall
+  cheap ordering and the coarse/fine evidence model.
   Soft early gating reduces the need for display pruning, but does not replace
   display-tail management or final strong-witness rescue.
   migration slice has been verified against the ranking suite, recall suite,

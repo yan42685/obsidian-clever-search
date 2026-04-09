@@ -86,7 +86,6 @@ import type {
 	CoverageLexicalCoverageProfile,
 	CoverageLexicalEvidenceMassSummary,
 	CoverageLexicalFamily,
-	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalFamilyScriptClass,
 	CoverageLexicalFamilySignal,
@@ -1410,7 +1409,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					hanSegments: charQuery.hanSegments,
 					charTerms: charQuery.terms,
 					queryKind: plan.explain.queryKind,
-					route: plan.explain.route,
 					candidateCount: candidates.size,
 				});
 			}
@@ -3085,7 +3083,6 @@ function buildCoverageSignalBase(
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
 	const coverageProfile = createEmptyCoverageLexicalCoverageProfile();
-	const familyCountSummary = createEmptyFamilyCountSummary();
 	const evidenceMassSummary = createEmptyCoverageLexicalEvidenceMassSummary();
 	evidenceMassSummary.displayIdealMass =
 		computeCoverageLexicalEvidenceIdealDisplayMass(probes, families);
@@ -3174,19 +3171,6 @@ function buildCoverageSignalBase(
 			headingsAssistCode,
 			tagsAssistCode,
 		});
-		if (countsAsMeaningfulFamily) {
-			familyCountSummary.totalMatchedFamilyCount += 1;
-			if (bodyCode > 0) {
-				familyCountSummary.bodyMatchedFamilyCount += 1;
-			}
-			if (bestMetadataEvidence?.field) {
-				familyCountSummary.metadataMatchedFamilyCount += 1;
-				accumulateMetadataFieldCount(
-					familyCountSummary,
-					bestMetadataEvidence.field,
-				);
-			}
-		}
 		if (hasFamilyCoverage) {
 			accumulateCoverageLexicalCoverageProfileCovered(
 				coverageProfile,
@@ -3363,7 +3347,6 @@ function buildCoverageSignalBase(
 	finalizeCoverageLexicalCoverageProfile(coverageProfile);
 	return finalizeCoverageLexicalEvidenceMassSummary({
 		coverageProfile,
-		familyCountSummary,
 		evidenceMassSummary,
 		coreBody,
 		softBody,
@@ -3423,19 +3406,6 @@ function createEmptyAreaSignal(): CoverageLexicalAreaSignal {
 		exactWeight: 0,
 		prefixWeight: 0,
 		fuzzyWeight: 0,
-	};
-}
-
-function createEmptyFamilyCountSummary(): CoverageLexicalFamilyCountSummary {
-	return {
-		totalMatchedFamilyCount: 0,
-		metadataMatchedFamilyCount: 0,
-		bodyMatchedFamilyCount: 0,
-		basenameMatchedFamilyCount: 0,
-		aliasesMatchedFamilyCount: 0,
-		folderMatchedFamilyCount: 0,
-		headingsMatchedFamilyCount: 0,
-		tagsMatchedFamilyCount: 0,
 	};
 }
 
@@ -3901,29 +3871,6 @@ function computeCoverageLexicalEvidenceIdealDisplayMass(
 		idealMass += getCoverageLexicalProbeFamilyWeight(probes[family.index]);
 	}
 	return Math.max(1, idealMass);
-}
-
-function accumulateMetadataFieldCount(
-	summary: CoverageLexicalFamilyCountSummary,
-	field: CoverageLexicalMetadataField,
-): void {
-	if (field === "basename") {
-		summary.basenameMatchedFamilyCount += 1;
-		return;
-	}
-	if (field === "aliases") {
-		summary.aliasesMatchedFamilyCount += 1;
-		return;
-	}
-	if (field === "folder") {
-		summary.folderMatchedFamilyCount += 1;
-		return;
-	}
-	if (field === "headings") {
-		summary.headingsMatchedFamilyCount += 1;
-		return;
-	}
-	summary.tagsMatchedFamilyCount += 1;
 }
 
 function applyMatch(

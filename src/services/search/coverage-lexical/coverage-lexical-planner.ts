@@ -1,6 +1,7 @@
 import { buildCoverageLexicalFamilies } from "./coverage-lexical-families";
 import { extractHanBigrams } from "./coverage-lexical-cjk";
 import type {
+	CoverageLexicalCoverageRequirements,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalPlanExplain,
 	CoverageLexicalPlanFamilyReason,
@@ -9,6 +10,7 @@ import type {
 	CoverageLexicalQuerySpanKind,
 	CoverageLexicalPlan,
 	CoverageLexicalResourceHints,
+	CoverageLexicalRescuePotential,
 } from "./coverage-lexical-types";
 
 const METADATA_HINT_REGEX = /[\\/]|(?:^|\s)(?:tag|path|title|folder):/iu;
@@ -185,14 +187,23 @@ export function buildCoverageLexicalPlan(
 		decisiveBodyFamilies.length,
 		supportBodyFamilies.length,
 	);
-	const route = selectRoute(
-		{
-			resourceHints,
-			hardAnchorFamilies,
-			bodyFamilies,
-			hasShortHanFallbackBigramExpansion:
-				shortHanQueryShape.isFallbackBigramExpansion,
-		},
+	const coverageRequirements = buildCoverageRequirements(
+		queryTerms,
+		hardAnchorFamilies,
+		decisiveBodyFamilies,
+		supportBodyFamilies,
+		optionalFamilies,
+		bridgeFamilies,
+		relaxedMinimumMatchCount,
+		hasMixedScriptHint,
+	);
+	const rescuePotential = buildRescuePotential(
+		queryKind,
+		resourceHints,
+		hardAnchorFamilies,
+		bodyFamilies,
+		bridgeFamilies,
+		hasMixedScriptHint,
 	);
 
 	return {
@@ -203,7 +214,6 @@ export function buildCoverageLexicalPlan(
 		hasMixedScriptHint,
 		hasPathShapeHint,
 		hasTitleShapeHint,
-		route,
 		hardAnchorFamilies,
 		decisiveBodyFamilies,
 		supportBodyFamilies,
@@ -223,9 +233,10 @@ export function buildCoverageLexicalPlan(
 		supportAnchorMass,
 		supportBodyMass,
 		resourceHints,
+		coverageRequirements,
+		rescuePotential,
 		explain: buildPlanExplain(
 			queryKind,
-			route,
 			spans,
 			families,
 			hardAnchorFamilies,
@@ -240,47 +251,56 @@ export function buildCoverageLexicalPlan(
 	};
 }
 
-function selectRoute(input: {
-	resourceHints: CoverageLexicalResourceHints;
-	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>;
-	bodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>;
-	hasShortHanFallbackBigramExpansion: boolean;
-}): CoverageLexicalPlan["route"] {
-	const metadataBudget =
-		input.resourceHints.metadataBudget +
-		(input.hasShortHanFallbackBigramExpansion &&
-		input.hardAnchorFamilies.length > 0 &&
-		input.bodyFamilies.length > 0
-			? 0.1
-			: 0);
-	const hasHybridShape =
-		input.hardAnchorFamilies.length > 0 && input.bodyFamilies.length > 0;
-	const metadataLead =
-		metadataBudget -
-		Math.max(
-			input.resourceHints.hybridBudget,
-			input.resourceHints.bodyBudget,
-		);
-	const hybridMetadataLeadThreshold = input.hasShortHanFallbackBigramExpansion
-		? 0.18
-		: 0.3;
-	if (
-		hasHybridShape &&
-		!input.hasShortHanFallbackBigramExpansion &&
-		input.resourceHints.hybridBudget >= 0.7
-	) {
-		return "body-with-anchor";
-	}
-	if (!hasHybridShape && metadataBudget >= input.resourceHints.bodyBudget) {
-		return "metadata-first";
-	}
-	if (hasHybridShape && metadataLead >= hybridMetadataLeadThreshold) {
-		return "metadata-first";
-	}
-	if (hasHybridShape) {
-		return "body-with-anchor";
-	}
-	return "body-first";
+function buildCoverageRequirements(
+	queryTerms: readonly string[],
+	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	decisiveBodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	supportBodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	optionalFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	bridgeFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	relaxedMinimumMatchCount: number,
+	hasMixedScriptHint: boolean,
+): CoverageLexicalCoverageRequirements {
+	const uniqueQueryTerms = new Set(queryTerms);
+	return {
+		requiredFamilyIndices: [
+			...hardAnchorFamilies,
+			...decisiveBodyFamilies,
+		].map((family) => family.index),
+		decisiveFamilyIndices: decisiveBodyFamilies.map((family) => family.index),
+		supportFamilyIndices: supportBodyFamilies.map((family) => family.index),
+		optionalFamilyIndices: optionalFamilies.map((family) => family.index),
+		bridgeFamilyIndices: bridgeFamilies.map((family) => family.index),
+		minimumMatchCount: relaxedMinimumMatchCount,
+		requiresCrossScriptCoverage: hasMixedScriptHint,
+		requiresBalancedMultiTermCoverage: uniqueQueryTerms.size >= 2,
+	};
+}
+
+function buildRescuePotential(
+	queryKind: CoverageLexicalQueryKind,
+	resourceHints: CoverageLexicalResourceHints,
+	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	bodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	bridgeFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	hasMixedScriptHint: boolean,
+): CoverageLexicalRescuePotential {
+	return {
+		metadataIdentityLikely:
+			hardAnchorFamilies.length > 0 && resourceHints.metadataBudget >= 0.65,
+		phraseRescueLikely:
+			resourceHints.hybridBudget >= 0.7 ||
+			(queryKind === "memory_relaxed" && bodyFamilies.length > 0),
+		localWitnessLikely:
+			resourceHints.localWitnessBudget >=
+			Math.max(resourceHints.bodyBudget, resourceHints.hybridBudget),
+		bridgeRescueLikely:
+			bridgeFamilies.length > 0 &&
+			(hasMixedScriptHint || resourceHints.bridgeBudget >= 0.6),
+		unresolvedBodyUpgradeLikely:
+			bodyFamilies.length > 0 &&
+			(queryKind === "memory_relaxed" || resourceHints.bodyBudget >= 0.7),
+	};
 }
 
 function selectQueryKind(input: {
@@ -1379,7 +1399,6 @@ function dedupePlannerSpans(
 
 function buildPlanExplain(
 	queryKind: CoverageLexicalQueryKind,
-	route: CoverageLexicalPlan["route"],
 	spans: readonly CoverageLexicalQuerySpan[],
 	families: readonly CoverageLexicalPlan["families"][number][],
 	hardAnchorFamilies: readonly CoverageLexicalPlan["families"][number][],
@@ -1415,7 +1434,6 @@ function buildPlanExplain(
 	pushFamilyReasons("bridge", bridgeFamilies);
 	return {
 		queryKind,
-		route,
 		spans: [...spans],
 		familyReasons,
 		queryKindReasons: [...queryKindReasons],

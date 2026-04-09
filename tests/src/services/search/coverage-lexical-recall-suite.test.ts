@@ -388,7 +388,7 @@ describe("coverage lexical recall suite", () => {
 		const probes = engineAny.buildFamilyProbes(queryTerms);
 		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
 		expect(plan.queryKind).not.toBe("body_only_local");
-		expect(plan.route).not.toBe("body-first");
+		expect(plan.resourceHints?.metadataBudget).toBeGreaterThan(0);
 		const phraseSignatures = [
 			...buildCoverageLexicalPhraseSignatures(plan.families),
 			...buildCoverageLexicalStructuredMetadataSignatures(

@@ -38,7 +38,8 @@ describe("coverage lexical planner", () => {
 		);
 
 		expect(plan.queryKind).toBe("anchor_body_hybrid");
-		expect(plan.route).toBe("body-with-anchor");
+		expect(plan.rescuePotential.unresolvedBodyUpgradeLikely).toBe(true);
+		expect(plan.coverageRequirements.requiredFamilyIndices.length).toBeGreaterThan(0);
 		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toEqual(
 			expect.arrayContaining(["vector", "cache"]),
 		);
@@ -545,7 +546,7 @@ describe("coverage lexical planner", () => {
 		);
 	});
 
-	test("prefers metadata-first route for short Han fallback-bigram hybrids with strong structured anchors", () => {
+	test("assigns metadata-leading resource hints for short Han fallback-bigram hybrids with strong structured anchors", () => {
 		const queryTerms = [
 			"\u7535\u5b50\u6280",
 			"\u7535\u5b50",
@@ -594,7 +595,10 @@ describe("coverage lexical planner", () => {
 		);
 
 		expect(plan.queryKind).toBe("anchor_body_hybrid");
-		expect(plan.route).toBe("metadata-first");
+		expect(plan.resourceHints?.metadataBudget).toBeGreaterThan(
+			plan.resourceHints?.bodyBudget ?? 0,
+		);
+		expect(plan.rescuePotential.metadataIdentityLikely).toBe(true);
 		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toContain(
 			"\u7535\u5b50\u6280",
 		);
@@ -637,7 +641,7 @@ describe("coverage lexical planner", () => {
 		);
 
 		expect(plan.queryKind).toBe("anchor_body_hybrid");
-		expect(plan.route).toBe("body-with-anchor");
+		expect(plan.resourceHints?.hybridBudget).toBeGreaterThanOrEqual(0.7);
 	});
 
 	test("uses the same tier-based short-query anchor rule for latin support families", () => {

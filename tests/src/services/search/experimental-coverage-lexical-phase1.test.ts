@@ -240,16 +240,6 @@ function createExperimentalCoverageSignal(
 	totalMatchedFamilyCount: number,
 ): CoverageLexicalFamilySignal {
 	return {
-		familyCountSummary: {
-			totalMatchedFamilyCount,
-			metadataMatchedFamilyCount: totalMatchedFamilyCount,
-			bodyMatchedFamilyCount: 0,
-			basenameMatchedFamilyCount: 0,
-			aliasesMatchedFamilyCount: 0,
-			folderMatchedFamilyCount: 0,
-			headingsMatchedFamilyCount: 0,
-			tagsMatchedFamilyCount: 0,
-		},
 		coverageProfile: {
 			meaningfulFamilyCount: totalMatchedFamilyCount,
 			meaningfulCoveredFamilyCount: totalMatchedFamilyCount,
@@ -1300,7 +1290,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "metadata_only_anchored",
-			route: "metadata-first",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};
@@ -1345,7 +1334,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "anchor_body_hybrid",
-			route: "body-with-anchor",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};
@@ -1411,7 +1399,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "metadata_only_anchored",
-			route: "metadata-first",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};
@@ -1454,7 +1441,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "metadata_only_anchored",
-			route: "metadata-first",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};
@@ -1523,7 +1509,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "metadata_only_anchored",
-			route: "metadata-first",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};

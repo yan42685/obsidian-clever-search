@@ -109,11 +109,6 @@ export type CoverageLexicalRecallDebug = {
 	unionSize: number;
 };
 
-export type CoverageLexicalRoute =
-	| "body-first"
-	| "body-with-anchor"
-	| "metadata-first";
-
 export type CoverageLexicalQueryKind =
 	| "metadata_only_anchored"
 	| "body_only_local"
@@ -174,7 +169,6 @@ export type CoverageLexicalPlanFamilyReason = {
 
 export type CoverageLexicalPlanExplain = {
 	queryKind: CoverageLexicalQueryKind;
-	route: CoverageLexicalRoute;
 	spans: CoverageLexicalQuerySpan[];
 	familyReasons: CoverageLexicalPlanFamilyReason[];
 	queryKindReasons: string[];
@@ -189,6 +183,25 @@ export type CoverageLexicalResourceHints = {
 	localWitnessBudget: number;
 };
 
+export type CoverageLexicalCoverageRequirements = {
+	requiredFamilyIndices: number[];
+	decisiveFamilyIndices: number[];
+	supportFamilyIndices: number[];
+	optionalFamilyIndices: number[];
+	bridgeFamilyIndices: number[];
+	minimumMatchCount: number;
+	requiresCrossScriptCoverage: boolean;
+	requiresBalancedMultiTermCoverage: boolean;
+};
+
+export type CoverageLexicalRescuePotential = {
+	metadataIdentityLikely: boolean;
+	phraseRescueLikely: boolean;
+	localWitnessLikely: boolean;
+	bridgeRescueLikely: boolean;
+	unresolvedBodyUpgradeLikely: boolean;
+};
+
 export type CoverageLexicalPlan = {
 	families: CoverageLexicalFamily[];
 	queryKind: CoverageLexicalQueryKind;
@@ -197,7 +210,6 @@ export type CoverageLexicalPlan = {
 	hasMixedScriptHint: boolean;
 	hasPathShapeHint: boolean;
 	hasTitleShapeHint: boolean;
-	route: CoverageLexicalRoute;
 	hardAnchorFamilies: CoverageLexicalFamily[];
 	decisiveBodyFamilies: CoverageLexicalFamily[];
 	supportBodyFamilies: CoverageLexicalFamily[];
@@ -217,6 +229,8 @@ export type CoverageLexicalPlan = {
 	supportAnchorMass?: number;
 	supportBodyMass?: number;
 	resourceHints?: CoverageLexicalResourceHints;
+	coverageRequirements: CoverageLexicalCoverageRequirements;
+	rescuePotential: CoverageLexicalRescuePotential;
 	explain: CoverageLexicalPlanExplain;
 };
 
@@ -304,17 +318,6 @@ export type CoverageLexicalPassageAdmissionSignal = {
 	compactnessScore: number;
 };
 
-export type CoverageLexicalFamilyCountSummary = {
-	totalMatchedFamilyCount: number;
-	metadataMatchedFamilyCount: number;
-	bodyMatchedFamilyCount: number;
-	basenameMatchedFamilyCount: number;
-	aliasesMatchedFamilyCount: number;
-	folderMatchedFamilyCount: number;
-	headingsMatchedFamilyCount: number;
-	tagsMatchedFamilyCount: number;
-};
-
 export type CoverageLexicalEvidenceMassSummary = {
 	decisiveCoveredMass: number;
 	decisiveExactIdentityMass: number;
@@ -363,7 +366,6 @@ export type CoverageLexicalCoverageProfile = {
 };
 
 export type CoverageLexicalFamilySignal = {
-	familyCountSummary: CoverageLexicalFamilyCountSummary;
 	evidenceMassSummary?: CoverageLexicalEvidenceMassSummary;
 	coverageProfile: CoverageLexicalCoverageProfile;
 	coreBody: CoverageLexicalAreaSignal;
