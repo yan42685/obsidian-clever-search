@@ -837,9 +837,14 @@ Current branch status:
   worldview prefix instead of immediately branching into lane-specific ranking
   philosophies: cross-script satisfaction, required-coverage ratio, unified
   cheap evidence strength, and unified cheap coverage count now fire before the
-  lane-specific tie-breakers. This keeps the existing lane containers for
-  admission/budget purposes while reducing semantic divergence between recall
-  cheap ordering and the coarse/fine evidence model.
+  lane-specific tie-breakers. Full lane evaluation ordering now starts from the
+  same shared evidence prefix before falling through to lane-specific
+  tie-breakers. This keeps the existing lane containers for admission/budget
+  purposes while reducing semantic divergence between recall cheap/full
+  ordering and the coarse/fine evidence model. Recall witness-floor protection
+  has also started consuming the planner's explicit `coverageRequirements` and
+  `rescuePotential` payload instead of re-deriving the same worldview purely
+  from hard-anchor/body family buckets inside recall.
   Soft early gating reduces the need for display pruning, but does not replace
   display-tail management or final strong-witness rescue.
   migration slice has been verified against the ranking suite, recall suite,

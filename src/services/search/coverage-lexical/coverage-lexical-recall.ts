@@ -2201,11 +2201,9 @@ function buildCheapLaneSignal(
 	plan: CoverageLexicalPlan,
 ): CoverageLexicalCheapLaneSignal {
 	const derivedPlan = getOrCreateDerivedPlan(plan);
-	const requiredFamilyIndices = new Set<number>([
-		...plan.hardAnchorFamilies.map((family) => family.index),
-		...plan.decisiveBodyFamilies.map((family) => family.index),
-		...plan.supportBodyFamilies.map((family) => family.index),
-	]);
+	const requiredFamilyIndices = new Set<number>(
+		plan.coverageRequirements.requiredFamilyIndices,
+	);
 	let requiredHanFamilyCount = 0;
 	let requiredHanCoverageCount = 0;
 	let requiredLatinFamilyCount = 0;
@@ -2359,7 +2357,7 @@ function shouldProtectCheapWitnessFloor(
 	const profile = buildCheapLaneEvidenceProfile(signal);
 	const upperBound = computeCheapLaneUpperBound(laneName, profile);
 	const protectionFloor = computeLaneProtectionFloor(laneName, plan);
-	const hasWitness = hasCheapWitnessProtectionSignal(signal);
+	const hasWitness = hasCheapWitnessProtectionSignal(signal, plan);
 	if (!hasWitness || upperBound < protectionFloor) {
 		return false;
 	}
@@ -2367,6 +2365,42 @@ function shouldProtectCheapWitnessFloor(
 }
 
 function hasCheapWitnessProtectionSignal(
+	signal: CoverageLexicalCheapLaneSignal,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (hasCheapWitnessSignal(signal)) {
+		return true;
+	}
+	if (plan.rescuePotential.phraseRescueLikely && signal.phraseMatchCount > 0) {
+		return true;
+	}
+	if (
+		(plan.rescuePotential.localWitnessLikely ||
+			plan.rescuePotential.unresolvedBodyUpgradeLikely) &&
+		(signal.decisiveBody.coverageCount > 0 ||
+			signal.supportBody.coverageCount > 0)
+	) {
+		return true;
+	}
+	if (
+		plan.rescuePotential.metadataIdentityLikely &&
+		signal.hardAnchorMetadata.coverageCount > 0
+	) {
+		return true;
+	}
+	if (
+		plan.rescuePotential.bridgeRescueLikely &&
+		signal.bridgeSignal.coverageCount > 0
+	) {
+		return true;
+	}
+	return (
+		plan.coverageRequirements.requiresCrossScriptCoverage &&
+		signal.crossScriptSatisfied
+	);
+}
+
+function hasCheapWitnessSignal(
 	signal: CoverageLexicalCheapLaneSignal,
 ): boolean {
 	if (
@@ -3084,7 +3118,7 @@ function shouldProtectFinalUnionCandidate(
 		unresolved.hasUnverifiedPhraseWitness;
 	const hasContextualLateDetail =
 		candidate.lateDetailUpperBound > 0 &&
-		hasCheapWitnessProtectionSignal(candidate.signal);
+		hasCheapWitnessSignal(candidate.signal);
 	if (!hasSurvivalProof && !hasContextualLateDetail) {
 		return false;
 	}
@@ -3139,9 +3173,14 @@ function compareLaneEvaluations(
 	right: CoverageLexicalLaneEvaluation,
 	plan: CoverageLexicalPlan,
 ): number {
+	const sharedWorldviewDecision =
+		laneName === "char_fallback_lane"
+			? 0
+			: compareLaneSharedWorldview(left, right);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
@@ -3150,7 +3189,7 @@ function compareLaneEvaluations(
 			);
 		case "strict_hybrid_lane":
 			return (
-				compareLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
@@ -3163,7 +3202,7 @@ function compareLaneEvaluations(
 			);
 		case "relaxed_hybrid_lane":
 			return (
-				compareLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareDescendingMetric(
 					getBodyCoverageCount(left),
 					getBodyCoverageCount(right),
@@ -3180,7 +3219,7 @@ function compareLaneEvaluations(
 			);
 		case "local_body_lane":
 			return (
-				compareLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareCoverageLexicalPassageAdmissionSignals(
 					left.passageSignal,
 					right.passageSignal,
@@ -3194,7 +3233,7 @@ function compareLaneEvaluations(
 			);
 		case "bridge_lane":
 			return (
-				compareLaneCrossScriptCoverage(left, right) ||
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
@@ -3227,6 +3266,27 @@ function compareLaneEvaluations(
 	}
 }
 
+function compareLaneSharedWorldview(
+	left: CoverageLexicalLaneEvaluation,
+	right: CoverageLexicalLaneEvaluation,
+): number {
+	return (
+		compareLaneCrossScriptCoverage(left, right) ||
+		compareDescendingMetric(
+			left.requiredCoverageRatio,
+			right.requiredCoverageRatio,
+		) ||
+		compareDescendingMetric(
+			computeLaneUnifiedEvidenceStrength(left),
+			computeLaneUnifiedEvidenceStrength(right),
+		) ||
+		compareDescendingMetric(
+			computeLaneUnifiedCoverageCount(left),
+			computeLaneUnifiedCoverageCount(right),
+		)
+	);
+}
+
 function compareLaneCrossScriptCoverage(
 	left: CoverageLexicalLaneEvaluation,
 	right: CoverageLexicalLaneEvaluation,
@@ -3245,6 +3305,35 @@ function compareLaneCrossScriptCoverage(
 			left.requiredCoverageRatio,
 			right.requiredCoverageRatio,
 		)
+	);
+}
+
+function computeLaneUnifiedEvidenceStrength(
+	evaluation: CoverageLexicalLaneEvaluation,
+): number {
+	return (
+		computeCheapLaneWeightedGroupStrength(
+			evaluation.hardAnchorMetadata,
+			1.35,
+		) +
+		computeCheapLaneWeightedGroupStrength(evaluation.decisiveBody, 1.25) +
+		computeCheapLaneWeightedGroupStrength(evaluation.supportBody, 1) +
+		computeCheapLaneWeightedGroupStrength(evaluation.optionalBody, 0.55) +
+		computeCheapLaneWeightedGroupStrength(evaluation.bridgeSignal, 0.9) +
+		evaluation.phraseMatchWeight * 0.08 +
+		computePassagePressure(evaluation.passageSignal) * 0.3
+	);
+}
+
+function computeLaneUnifiedCoverageCount(
+	evaluation: CoverageLexicalLaneEvaluation,
+): number {
+	return (
+		evaluation.hardAnchorMetadata.coverageCount +
+		evaluation.decisiveBody.coverageCount +
+		evaluation.supportBody.coverageCount +
+		evaluation.optionalBody.coverageCount +
+		evaluation.bridgeSignal.coverageCount
 	);
 }
 
