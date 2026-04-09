@@ -117,6 +117,10 @@ describe("coverage lexical automation corpus export", () => {
 			fs.mkdirSync(path.dirname(notePath), { recursive: true });
 			fs.writeFileSync(notePath, buildMarkdownDocument(document), "utf8");
 		}
+		for (const queryCase of queryCases) {
+			const notePath = path.join(vaultRoot, ...queryCase.relevantPath.split("/"));
+			expect(fs.existsSync(notePath)).toBe(true);
+		}
 
 		const manifest = {
 			name: "coverage-lexical-automation-v1",

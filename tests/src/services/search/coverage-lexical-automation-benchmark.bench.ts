@@ -362,6 +362,8 @@ export function createAutomationCorpus(): {
 } {
 	const documents: IndexedDocument[] = [];
 	const queryCases: QueryCase[] = [];
+	const zhElectronicsIntroPath = "pkm-zh/books/电子技术入门.md";
+	const zhAliasMigrationNotePath = "pkm-zh/notes/别名迁移说明.md";
 	const addDocument = (
 		path: string,
 		basename: string,
@@ -1180,13 +1182,13 @@ export function createAutomationCorpus(): {
 	);
 	addQuery(
 		"\u65e7\u540d\u522b\u540d\u8fc1\u79fb",
-		"pkm-zh/notes/鍒悕杩佺Щ璇存槑.md",
+		zhAliasMigrationNotePath,
 		"zh_short_identity",
 		"coverage_invariants",
 	);
 	addQuery(
 		"\u7535\u5b50\u6280\u672f \u5165\u95e8 \u7535\u8def",
-		"pkm-zh/books/鐢靛瓙鎶€鏈叆闂?md",
+		zhElectronicsIntroPath,
 		"zh_short_identity",
 		"messy_pkm",
 	);
@@ -1235,13 +1237,13 @@ export function createAutomationCorpus(): {
 	);
 	addQuery(
 		"\u65e7\u540d\u522b\u540d \u8fc1\u79fb \u89c4\u5219",
-		"pkm-zh/notes/鍒悕杩佺Щ璇存槑.md",
+		zhAliasMigrationNotePath,
 		"ambiguous_intent",
 		"messy_pkm",
 	);
 	addQuery(
 		"\u7535\u5b50\u6280\u672f \u5165\u95e8 \u7535\u8def \u6280\u5de7",
-		"pkm-zh/books/鐢靛瓙鎶€鏈叆闂?md",
+		zhElectronicsIntroPath,
 		"ambiguous_intent",
 		"adversarial",
 	);
@@ -2032,11 +2034,55 @@ export function createAutomationCorpus(): {
 	}
 
 	const rebalancedQueryCases = buildAnchoredLexicalVariants(queryCases);
+	validateAutomationCorpusPaths(documents, rebalancedQueryCases);
 
 	return {
 		documents,
 		queryCases: rebalancedQueryCases,
 	};
+}
+
+function validateAutomationCorpusPaths(
+	documents: readonly IndexedDocument[],
+	queryCases: readonly QueryCase[],
+): void {
+	const documentPathCounts = new Map<string, number>();
+	for (const document of documents) {
+		documentPathCounts.set(
+			document.path,
+			(documentPathCounts.get(document.path) ?? 0) + 1,
+		);
+	}
+	const duplicateDocumentPaths = [...documentPathCounts.entries()]
+		.filter(([, count]) => count > 1)
+		.map(([path]) => path);
+	const knownDocumentPaths = new Set(documentPathCounts.keys());
+	const missingRelevantPaths = queryCases.filter(
+		(queryCase) => !knownDocumentPaths.has(queryCase.relevantPath),
+	);
+	if (
+		duplicateDocumentPaths.length === 0 &&
+		missingRelevantPaths.length === 0
+	) {
+		return;
+	}
+	const issues: string[] = [];
+	if (duplicateDocumentPaths.length > 0) {
+		issues.push(
+			`duplicate document paths: ${duplicateDocumentPaths.join(", ")}`,
+		);
+	}
+	if (missingRelevantPaths.length > 0) {
+		issues.push(
+			`query relevantPath values missing from documents: ${missingRelevantPaths
+				.map(
+					(queryCase) =>
+						`${queryCase.relevantPath} <- query "${queryCase.query}" (${queryCase.type}/${queryCase.suite})`,
+				)
+				.join("; ")}`,
+		);
+	}
+	throw new Error(`[coverage-lexical-automation-corpus] ${issues.join(" | ")}`);
 }
 
 type QueryLanguageBucket = "zh" | "mixed" | "en";
