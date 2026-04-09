@@ -1,4 +1,4 @@
-ï»¿import type {
+import type {
 	CoverageLexicalFamilySignal,
 	CoverageLexicalPlan,
 } from "src/services/search/coverage-lexical/coverage-lexical-types";
@@ -293,13 +293,7 @@ function compareSignals(
 function createDisplayPruneConfig(
 	overrides: Partial<{
 		enabled: boolean;
-		top2To4Ratio: number;
-		top5PlusRatio: number;
-		countPruneMinTopCount: number;
-		top2To4CountRatio: number;
-		top5PlusCountRatio: number;
-		top2To4CountSlack: number;
-		top5PlusCountSlack: number;
+		tailRatio: number;
 		bodyCharWeight: number;
 		metadataCharWeight: number;
 		tagExactWeight: number;
@@ -308,13 +302,7 @@ function createDisplayPruneConfig(
 ) {
 	return {
 		enabled: true,
-		top2To4Ratio: 0.34,
-		top5PlusRatio: 0.5,
-		countPruneMinTopCount: 3,
-		top2To4CountRatio: 0.67,
-		top5PlusCountRatio: 0.5,
-		top2To4CountSlack: 1,
-		top5PlusCountSlack: 2,
+		tailRatio: 0.5,
 		bodyCharWeight: 0.5,
 		metadataCharWeight: 0.5,
 		tagExactWeight: 0.75,
@@ -954,9 +942,10 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
-	// Product-facing guardrails begin here. Display shaping should not change
-	// which files occupy the ranked top5; it should only trim weak tail results.
-	test("display prune never removes ranked top10 results", () => {
+	// Product-facing display-prune checks begin here. These cases verify how a
+	// stricter display threshold trims weak results while preserving stronger
+	// non-top candidates.
+	test("display prune can trim weak front results when the tail ratio is strict", () => {
 		const results = [
 			createDocRankableResult(
 				1,
@@ -1062,13 +1051,12 @@ describe("coverage lexical ranking", () => {
 
 		expect(
 			pruneDisplayResults(results, {
-				top2To4Ratio: 0.95,
-				top5PlusRatio: 0.95,
+				tailRatio: 0.95,
 			}).map((result) => result.docId),
-		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+		).toEqual([1]);
 	});
 
-	test("display prune keeps near-top tails beyond top10 when they clear the tail ratio", () => {
+	test("display prune keeps strong non-top results when they clear the tail ratio", () => {
 		const results = [
 			createDocRankableResult(
 				1,
@@ -1194,13 +1182,12 @@ describe("coverage lexical ranking", () => {
 
 		expect(
 			pruneDisplayResults(results, {
-				top2To4Ratio: 0.95,
-				top5PlusRatio: 0.75,
+				tailRatio: 0.75,
 			}).map((result) => result.docId),
-		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+		).toEqual([1, 6, 11]);
 	});
 
-	test("display prune trims only tail results beyond top10 under a stricter tail ratio", () => {
+	test("display prune trims weak non-top results under a stricter tail ratio", () => {
 		const results = [
 			createDocRankableResult(
 				1,
@@ -1326,10 +1313,9 @@ describe("coverage lexical ranking", () => {
 
 		expect(
 			pruneDisplayResults(results, {
-				top2To4Ratio: 0.95,
-				top5PlusRatio: 0.85,
+				tailRatio: 0.85,
 			}).map((result) => result.docId),
-		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+		).toEqual([1]);
 	});
 
 	test("soft early gate deprioritizes single-side multi-term candidates before expensive upgrades", () => {
@@ -1547,8 +1533,8 @@ describe("coverage lexical ranking", () => {
 			};
 		};
 
-		const runtimeAccess = "è¿è¡Œæ—¶è®¿é—®";
-		const runtimeRecord = `${runtimeAccess}è®°å½•`;
+		const runtimeAccess = "ÔËĞĞÊ±·ÃÎÊ";
+		const runtimeRecord = `${runtimeAccess}¼ÇÂ¼`;
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
 			{
@@ -1572,7 +1558,7 @@ describe("coverage lexical ranking", () => {
 				basename: `${runtimeRecord}.md`,
 				folder: "pkm-zh/runtime",
 				headings: runtimeRecord,
-				content: `${runtimeAccess} ${runtimeAccess} è®¿é—®è®°å½•æ±‡æ€»ï¼Œä¸è®¨è®º projected token èº«ä»½æ–‡ä»¶`,
+				content: `${runtimeAccess} ${runtimeAccess} ·ÃÎÊ¼ÇÂ¼»ã×Ü£¬²»ÌÖÂÛ projected token Éí·İÎÄ¼ş`,
 			},
 		]);
 
@@ -1760,29 +1746,29 @@ describe("coverage lexical ranking", () => {
 				path: "all_notes/test/unsorted/URL Memo.md",
 				basename: "URL Memo.md",
 				folder: "all_notes/test/unsorted",
-				headings: "memo å¸¸ç”¨",
-				content: `## å¸¸ç”¨
-- Steam å›½äº§æ¸¸æˆæ”¶å½•ç»„
+				headings: "memo ³£ÓÃ",
+				content: `## ³£ÓÃ
+- Steam ¹ú²úÓÎÏ·ÊÕÂ¼×é
 https://store.steampowered.com/curator/43623007
-- steamæ¸¸æˆ: https://www.xdgame.com/
-- ä¸‹è½½å°è¯´txtï¼Œæ¯”å¦‚å¸Œçµ, txtæ’ç‰ˆéå¸¸å¥½ï¼Œ[[Username, Password, Card Number#^bbs-DOT-g8p6-DOT-com |ç™»å½•å¯†ç ç‚¹æ­¤å¤„]]`,
+- steamÓÎÏ·: https://www.xdgame.com/
+- ÏÂÔØĞ¡Ëµtxt£¬±ÈÈçÏ£Áé, txtÅÅ°æ·Ç³£ºÃ£¬[[Username, Password, Card Number#^bbs-DOT-g8p6-DOT-com |µÇÂ¼ÃÜÂëµã´Ë´¦]]`,
 			},
 			{
 				path: "all_notes/test/unsorted/Username, Password, Card Number.md",
 				basename: "Username, Password, Card Number.md",
 				folder: "all_notes/test/unsorted",
-				headings: "è´¦å·è®°å½•",
-				content: `- steamè´¦å·å¯†ç 
-é˜¿æ ¹å»·ï¼š36eu6qnd ev385xxk
-- ç§Ÿå·steam:
+				headings: "ÕËºÅ¼ÇÂ¼",
+				content: `- steamÕËºÅÃÜÂë
+°¢¸ùÍ¢£º36eu6qnd ev385xxk
+- ×âºÅsteam:
 - Encription password (needed when sync data): Yan84064599!`,
 			},
 			{
-				path: "all_notes/test/unsorted/steamæ¸¸æˆåˆ¶ä½œ.md",
-				basename: "steamæ¸¸æˆåˆ¶ä½œ.md",
+				path: "all_notes/test/unsorted/steamÓÎÏ·ÖÆ×÷.md",
+				basename: "steamÓÎÏ·ÖÆ×÷.md",
 				folder: "all_notes/test/unsorted",
 				headings: "project game",
-				content: "ä¸ºäº†ä¸ªäººåœ¨steamåˆ›ä½œæ¸¸æˆè·åˆ©åšå‰æœŸè°ƒç ”ï¼Œç»¼åˆè€ƒè™‘å“ç±»ã€æŠ€æœ¯éš¾åº¦ã€æˆæœ¬ã€æ—¶é—´",
+				content: "ÎªÁË¸öÈËÔÚsteam´´×÷ÓÎÏ·»ñÀû×öÇ°ÆÚµ÷ÑĞ£¬×ÛºÏ¿¼ÂÇÆ·Àà¡¢¼¼ÊõÄÑ¶È¡¢³É±¾¡¢Ê±¼ä",
 			},
 			{
 				path: "all_notes/test/unsorted/Schedule tasks for scheduled_script.bat in the `Obsidian` and `SuperMemo` root directory.md",
@@ -1829,29 +1815,29 @@ $PlainPassword = $null`,
 				path: "all_notes/test/unsorted/URL Memo.md",
 				basename: "URL Memo.md",
 				folder: "all_notes/test/unsorted",
-				headings: "memo å¸¸ç”¨",
-				content: `## å¸¸ç”¨
-- Steam å›½äº§æ¸¸æˆæ”¶å½•ç»„
+				headings: "memo ³£ÓÃ",
+				content: `## ³£ÓÃ
+- Steam ¹ú²úÓÎÏ·ÊÕÂ¼×é
 https://store.steampowered.com/curator/43623007
-- steamæ¸¸æˆ: https://www.xdgame.com/
-- ä¸‹è½½å°è¯´txtï¼Œæ¯”å¦‚å¸Œçµ, txtæ’ç‰ˆéå¸¸å¥½ï¼Œ[[Username, Password, Card Number#^bbs-DOT-g8p6-DOT-com |ç™»å½•å¯†ç ç‚¹æ­¤å¤„]]`,
+- steamÓÎÏ·: https://www.xdgame.com/
+- ÏÂÔØĞ¡Ëµtxt£¬±ÈÈçÏ£Áé, txtÅÅ°æ·Ç³£ºÃ£¬[[Username, Password, Card Number#^bbs-DOT-g8p6-DOT-com |µÇÂ¼ÃÜÂëµã´Ë´¦]]`,
 			},
 			{
 				path: "all_notes/test/unsorted/Username, Password, Card Number.md",
 				basename: "Username, Password, Card Number.md",
 				folder: "all_notes/test/unsorted",
-				headings: "è´¦å·è®°å½•",
-				content: `- steamè´¦å·å¯†ç 
-é˜¿æ ¹å»·ï¼š36eu6qnd ev385xxk
-- ç§Ÿå·steam:
+				headings: "ÕËºÅ¼ÇÂ¼",
+				content: `- steamÕËºÅÃÜÂë
+°¢¸ùÍ¢£º36eu6qnd ev385xxk
+- ×âºÅsteam:
 - Encription password (needed when sync data): Yan84064599!`,
 			},
 			{
-				path: "all_notes/test/unsorted/steamæ¸¸æˆåˆ¶ä½œ.md",
-				basename: "steamæ¸¸æˆåˆ¶ä½œ.md",
+				path: "all_notes/test/unsorted/steamÓÎÏ·ÖÆ×÷.md",
+				basename: "steamÓÎÏ·ÖÆ×÷.md",
 				folder: "all_notes/test/unsorted",
 				headings: "project game",
-				content: "ä¸ºäº†ä¸ªäººåœ¨steamåˆ›ä½œæ¸¸æˆè·åˆ©åšå‰æœŸè°ƒç ”ï¼Œç»¼åˆè€ƒè™‘å“ç±»ã€æŠ€æœ¯éš¾åº¦ã€æˆæœ¬ã€æ—¶é—´",
+				content: "ÎªÁË¸öÈËÔÚsteam´´×÷ÓÎÏ·»ñÀû×öÇ°ÆÚµ÷ÑĞ£¬×ÛºÏ¿¼ÂÇÆ·Àà¡¢¼¼ÊõÄÑ¶È¡¢³É±¾¡¢Ê±¼ä",
 			},
 			{
 				path: "all_notes/test/unsorted/Schedule tasks for scheduled_script.bat in the `Obsidian` and `SuperMemo` root directory.md",
@@ -2491,4 +2477,7 @@ $PlainPassword = $null`,
 		).toBeGreaterThan(0);
 	});
 });
+
+
+
 

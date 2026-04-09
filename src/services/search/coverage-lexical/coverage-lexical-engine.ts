@@ -1,4 +1,4 @@
-ï»¿import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
+import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
 	IndexedDocument,
@@ -116,7 +116,7 @@ const COVERAGE_LEXICAL_COARSE_HYDRATION_SUPPORT_FAMILY_UPPER_BOUND = 0.35;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND = 0.45;
 const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.75;
 const COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX =
-	/(?:å…³äºŽ|æœ‰å…³|å¯¹äºŽ|ä»€ä¹ˆæ˜¯|ä»€ä¹ˆå«|å¦‚ä½•|æ€Žä¹ˆ|ä¸ºä»€ä¹ˆ|ä»¥åŠ|åŠ|ä¸Ž|å’Œ|çš„|åœ°|å¾—|å¹¶ä¸”|å¹¶|ä¸­|é‡Œ|ä¸Š|ä¸‹|å°†|è¦|ä¼š|å—|å‘¢)/gu;
+	/(?:¹ØÓÚ|ÓÐ¹Ø|¶ÔÓÚ|Ê²Ã´ÊÇ|Ê²Ã´½Ð|ÈçºÎ|ÔõÃ´|ÎªÊ²Ã´|ÒÔ¼°|¼°|Óë|ºÍ|µÄ|µØ|µÃ|²¢ÇÒ|²¢|ÖÐ|Àï|ÉÏ|ÏÂ|½«|Òª|»á|Âð|ÄØ)/gu;
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -185,8 +185,7 @@ type CoverageLexicalDerivedPostingBinding = {
 
 type CoverageLexicalDisplayPruneConfig = {
 	enabled: boolean;
-	top2To4Ratio: number;
-	top5PlusRatio: number;
+	tailRatio: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
@@ -458,7 +457,8 @@ type CoverageLexicalBenchmarkOffloadSearchDebug = {
 	cheapCoarseTopDocIds: number[];
 	coarseHydrationDocIds: number[];
 	localWindowDocIds: number[];
-	finalTopDocIds: number[];
+	rankedTopDocIds: number[];
+	returnedTopDocIds: number[];
 	docs: CoverageLexicalBenchmarkOffloadDocDebug[];
 };
 
@@ -1558,6 +1558,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						coarseHydrationDocIds,
 						localWindowDocIds,
 						finalRanked: ranked,
+						returnedRanked: finalResults,
 						documentPathById: this.documentPathById,
 						hasResidentDocumentBodyTokens: (docId) =>
 							this.hasResidentDocumentBodyTokens(docId),
@@ -2993,6 +2994,7 @@ function buildCoverageLexicalBenchmarkOffloadSearchDebug(options: {
 	coarseHydrationDocIds: ReadonlySet<number>;
 	localWindowDocIds: ReadonlySet<number>;
 	finalRanked: readonly CoverageLexicalDocRankableResult[];
+	returnedRanked: readonly CoverageLexicalDocRankableResult[];
 	documentPathById: readonly (string | undefined)[];
 	hasResidentDocumentBodyTokens: (docId: number) => boolean;
 }): CoverageLexicalBenchmarkOffloadSearchDebug {
@@ -3061,7 +3063,10 @@ function buildCoverageLexicalBenchmarkOffloadSearchDebug(options: {
 			.map((result) => result.docId),
 		coarseHydrationDocIds: [...options.coarseHydrationDocIds],
 		localWindowDocIds: [...options.localWindowDocIds],
-		finalTopDocIds: options.finalRanked.slice(0, 10).map((result) => result.docId),
+		rankedTopDocIds: options.finalRanked.slice(0, 10).map((result) => result.docId),
+		returnedTopDocIds: options.returnedRanked
+			.slice(0, 10)
+			.map((result) => result.docId),
 		docs,
 	};
 }
@@ -4276,18 +4281,14 @@ export function pruneWeakCoverageLexicalDisplayResults(
 	if (topCoverage <= 0) {
 		return [...results];
 	}
-	const protectedPrefixCount = Math.min(10, results.length);
-	const kept: CoverageLexicalDocRankableResult[] = results.slice(
-		0,
-		protectedPrefixCount,
-	);
-	for (let index = protectedPrefixCount; index < results.length; index += 1) {
+	const kept: CoverageLexicalDocRankableResult[] = [results[0]];
+	for (let index = 1; index < results.length; index += 1) {
 		const result = results[index];
 		const candidateCoverage = computeCoverageLexicalDisplayCoverage(
 			result.coverageLexicalSignal,
 			config,
 		);
-		if (candidateCoverage > topCoverage * config.top5PlusRatio) {
+		if (candidateCoverage > topCoverage * config.tailRatio) {
 			kept.push(result);
 		}
 	}
@@ -4371,13 +4372,12 @@ function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPrune
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
 			fallbackEnabled,
 		),
-		top2To4Ratio: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
-			0.8,
-		),
-		top5PlusRatio: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
-			0.8,
+		tailRatio: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO",
+			readCoverageLexicalNumberEnv(
+				"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+				0.8,
+			),
 		),
 		bodyCharWeight: readCoverageLexicalNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
@@ -5409,3 +5409,4 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
+

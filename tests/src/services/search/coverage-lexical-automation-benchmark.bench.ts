@@ -173,7 +173,8 @@ type CoverageLexicalBenchmarkOffloadSearchDebug = {
 	cheapCoarseTopDocIds: number[];
 	coarseHydrationDocIds: number[];
 	localWindowDocIds: number[];
-	finalTopDocIds: number[];
+	rankedTopDocIds: number[];
+	returnedTopDocIds: number[];
 	docs: CoverageLexicalBenchmarkOffloadDocDebug[];
 };
 
@@ -2277,13 +2278,7 @@ async function withCoverageBodyTokenOffloadEnv<T>(
 
 type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
-	top2To4Ratio: number;
-	top5PlusRatio: number;
-	countPruneMinTopCount: number;
-	top2To4CountRatio: number;
-	top5PlusCountRatio: number;
-	top2To4CountSlack: number;
-	top5PlusCountSlack: number;
+	tailRatio: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
@@ -2302,13 +2297,7 @@ const COVERAGE_SOFT_EARLY_GATE_ENV_KEYS = [
 
 const COVERAGE_DISPLAY_PRUNE_ENV_KEYS = [
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
@@ -2327,33 +2316,12 @@ function readNumberEnv(name: string, fallback: number): number {
 function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExperimentConfig {
 	return {
 		enabled: true,
-		top2To4Ratio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
-			0.8,
-		),
-		top5PlusRatio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
-			0.8,
-		),
-		countPruneMinTopCount: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
-			3,
-		),
-		top2To4CountRatio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
-			0.67,
-		),
-		top5PlusCountRatio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
-			0.5,
-		),
-		top2To4CountSlack: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
-			1,
-		),
-		top5PlusCountSlack: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
-			2,
+		tailRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO",
+			readNumberEnv(
+				"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+				0.8,
+			),
 		),
 		bodyCharWeight: readNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
@@ -2378,19 +2346,6 @@ function resolveCoverageSoftEarlyGateExperimentConfig(): CoverageSoftEarlyGateEx
 	return {
 		enabled: true,
 		ratio: readNumberEnv("COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO", 0.8),
-	};
-}
-
-function createLegacyCoverageDisplayPruneExperimentConfig(
-	config: CoverageDisplayPruneExperimentConfig,
-): CoverageDisplayPruneExperimentConfig {
-	return {
-		...config,
-		countPruneMinTopCount: Number.MAX_SAFE_INTEGER,
-		top2To4CountRatio: 0,
-		top5PlusCountRatio: 0,
-		top2To4CountSlack: 0,
-		top5PlusCountSlack: 0,
 	};
 }
 
@@ -2431,26 +2386,8 @@ async function withCoverageDisplayPruneEnv<T>(
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED = config.enabled
 		? "1"
 		: "0";
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO = String(
-		config.top2To4Ratio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO = String(
-		config.top5PlusRatio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT = String(
-		config.countPruneMinTopCount,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO = String(
-		config.top2To4CountRatio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO = String(
-		config.top5PlusCountRatio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK = String(
-		config.top2To4CountSlack,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK = String(
-		config.top5PlusCountSlack,
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO = String(
+		config.tailRatio,
 	);
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT = String(
 		config.bodyCharWeight,
@@ -3482,7 +3419,10 @@ function summarizeOffloadDiagnostics(
 					cheapCoarseTopPaths: debug.cheapCoarseTopDocIds
 						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
 						.slice(0, 5),
-					finalTopPaths: debug.finalTopDocIds
+					rankedTopPaths: debug.rankedTopDocIds
+						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
+						.slice(0, 5),
+					returnedTopPaths: debug.returnedTopDocIds
 						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
 						.slice(0, 5),
 				},
@@ -3873,8 +3813,6 @@ describe("coverage lexical automation benchmark", () => {
 		);
 		const coarseSoftGateConfig = resolveCoverageSoftEarlyGateExperimentConfig();
 		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
-		const legacyDisplayPruneConfig =
-			createLegacyCoverageDisplayPruneExperimentConfig(displayPruneConfig);
 
 		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
 		const miniResult = await runBenchmark(
@@ -3910,13 +3848,7 @@ describe("coverage lexical automation benchmark", () => {
 						withCoverageDisplayPruneEnv(
 							{
 								enabled: false,
-								top2To4Ratio: displayPruneConfig.top2To4Ratio,
-								top5PlusRatio: displayPruneConfig.top5PlusRatio,
-								countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
-								top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
-								top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
-								top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
-								top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
+								tailRatio: displayPruneConfig.tailRatio,
 								bodyCharWeight: displayPruneConfig.bodyCharWeight,
 								metadataCharWeight: displayPruneConfig.metadataCharWeight,
 								tagExactWeight: displayPruneConfig.tagExactWeight,
@@ -3943,13 +3875,7 @@ describe("coverage lexical automation benchmark", () => {
 						withCoverageDisplayPruneEnv(
 							{
 								enabled: false,
-								top2To4Ratio: displayPruneConfig.top2To4Ratio,
-								top5PlusRatio: displayPruneConfig.top5PlusRatio,
-								countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
-								top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
-								top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
-								top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
-								top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
+								tailRatio: displayPruneConfig.tailRatio,
 								bodyCharWeight: displayPruneConfig.bodyCharWeight,
 								metadataCharWeight: displayPruneConfig.metadataCharWeight,
 								tagExactWeight: displayPruneConfig.tagExactWeight,
@@ -4054,62 +3980,6 @@ describe("coverage lexical automation benchmark", () => {
 						),
 				),
 		);
-		const coverageDisplayLegacyResult = includePruneDiagnostics
-			? await (async () => {
-					if (
-						"reset" in container &&
-						typeof (container as any).reset === "function"
-					) {
-						(container as any).reset();
-					} else {
-						container.clearInstances();
-					}
-					(global as any).window = {
-						localStorage: {
-							getItem: jest.fn(() => "zh"),
-							setItem: jest.fn(),
-							removeItem: jest.fn(),
-						},
-					};
-					const coverageLexicalDisplayLegacy =
-						await withCoverageBodyTokenOffloadEnv(
-							true,
-							async () =>
-								withCoverageSoftEarlyGateEnv(
-									coarseSoftGateConfig,
-									async () =>
-										withCoverageDisplayPruneEnv(
-											legacyDisplayPruneConfig,
-											async () =>
-												createEngineHarness(
-													CoverageLexicalFileSearchEngine,
-													tokenizer,
-													"coverage-lexical",
-												),
-										),
-								),
-						);
-					return withCoverageBodyTokenOffloadEnv(
-						true,
-						async () =>
-							withCoverageSoftEarlyGateEnv(
-								coarseSoftGateConfig,
-								async () =>
-									withCoverageDisplayPruneEnv(
-										legacyDisplayPruneConfig,
-										async () =>
-											runBenchmark(
-												"CoverageLexical(pruned-legacy-display)",
-												coverageLexicalDisplayLegacy,
-												documents,
-												queryCases,
-												{ includeOffloadDiagnostics: false },
-											),
-									),
-							),
-					);
-			  })()
-			: null;
 		const coverageDisplayVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
 			diagnostics,
 			"wins",
@@ -4155,13 +4025,6 @@ describe("coverage lexical automation benchmark", () => {
 				? summarizeDisagreements(
 						coverageDisplayResult.outcomes,
 						coverageCoreResult.outcomes,
-				  )
-				: null;
-		const displayVsLegacyResultListDiff =
-			includePruneDiagnostics && coverageDisplayLegacyResult
-				? summarizeResultListDifferences(
-						coverageDisplayResult.outcomes,
-						coverageDisplayLegacyResult.outcomes,
 				  )
 				: null;
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
@@ -4214,45 +4077,11 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 
-		if (
-			includePruneDiagnostics &&
-			displayVsLegacyResultListDiff &&
-			coverageDisplayLegacyResult
-		) {
+		if (includePruneDiagnostics) {
 			console.log(
 				"[coverage-lexical-automation-benchmark] display-prune-config",
 				JSON.stringify(
-					{
-						current: displayPruneConfig,
-						legacyBaseline: legacyDisplayPruneConfig,
-					},
-					null,
-					2,
-				),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] display-prune-diff",
-				JSON.stringify(
-					{
-						changedQueryCount: displayVsLegacyResultListDiff.changedQueryCount,
-						rankChangedQueryCount:
-							displayVsLegacyResultListDiff.rankChangedQueryCount,
-						top1ChangedQueryCount:
-							displayVsLegacyResultListDiff.top1ChangedQueryCount,
-						onlyTailChangedQueryCount:
-							displayVsLegacyResultListDiff.onlyTailChangedQueryCount,
-						byType: displayVsLegacyResultListDiff.byType,
-						bySuite: displayVsLegacyResultListDiff.bySuite,
-						currentObjective: round(coverageDisplayResult.summary.objective),
-						legacyObjective: round(coverageDisplayLegacyResult.summary.objective),
-						currentTop1: round(coverageDisplayResult.summary.top1),
-						legacyTop1: round(coverageDisplayLegacyResult.summary.top1),
-						currentTop3: round(coverageDisplayResult.summary.top3),
-						legacyTop3: round(coverageDisplayLegacyResult.summary.top3),
-						currentTop5: round(coverageDisplayResult.summary.top5),
-						legacyTop5: round(coverageDisplayLegacyResult.summary.top5),
-						topChanges: displayVsLegacyResultListDiff.topChanges,
-					},
+					displayPruneConfig,
 					null,
 					2,
 				),
