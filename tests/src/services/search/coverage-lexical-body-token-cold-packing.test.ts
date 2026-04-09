@@ -14,13 +14,11 @@ describe("coverage lexical body token cold packing", () => {
 					path: "notes/a.md",
 					generation: 1,
 					bodyTokens: ["alpha", "beta", "alpha"],
-					hanSegments: [],
 				},
 				{
 					path: "notes/b.md",
 					generation: 2,
 					bodyTokens: ["beta", "gamma"],
-					hanSegments: ["中文"],
 				},
 			],
 			123,
@@ -47,13 +45,11 @@ describe("coverage lexical body token cold packing", () => {
 			path: "notes/a.md",
 			generation: 1,
 			bodyTokens: ["alpha", "beta", "alpha"],
-			hanSegments: [],
 		});
 		expect(secondDecoded).toEqual({
 			path: "notes/b.md",
 			generation: 2,
 			bodyTokens: ["beta", "gamma"],
-			hanSegments: ["中文"],
 		});
 	});
 
@@ -64,7 +60,6 @@ describe("coverage lexical body token cold packing", () => {
 			(_, index) => ({
 				path: `notes/${index}.md`,
 				bodyTokens: [`token-${index}`],
-				hanSegments: [],
 			}),
 		);
 

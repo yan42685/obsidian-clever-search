@@ -89,7 +89,6 @@ function registerMockBodyTokenColdStore() {
 				path: document.path,
 				generation: document.generation,
 				bodyTokens: [...document.bodyTokens],
-				hanSegments: [...document.hanSegments],
 			});
 		}
 	});
@@ -107,7 +106,6 @@ function registerMockBodyTokenColdStore() {
 					path: document.path,
 					generation: document.generation,
 					bodyTokens: [...document.bodyTokens],
-					hanSegments: [...document.hanSegments],
 				});
 			}
 		}

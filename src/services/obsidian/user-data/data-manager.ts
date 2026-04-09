@@ -6,7 +6,7 @@ import { OuterSetting } from "src/globals/plugin-setting";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type CleverSearch from "src/main";
 import { Database } from "src/services/database/database";
-import { extractHanSegments } from "src/services/search/coverage-lexical/coverage-lexical-cjk";
+
 import {
   HybridDisabledError,
   NoApiKeyError,
@@ -2237,7 +2237,6 @@ export class DataManager {
           bodyTokens: this.tokenizer
             .tokenizeSequence(plainText, "index")
             .map((token) => token.toLowerCase()),
-          hanSegments: extractHanSegments(plainText),
         },
       ];
     });

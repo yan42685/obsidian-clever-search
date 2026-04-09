@@ -16,7 +16,7 @@ import {
 	packCoverageLexicalBodyTokenColdDocuments,
 } from "./coverage-lexical-body-token-cold-packing";
 
-const COVERAGE_LEXICAL_BODY_TOKEN_COLD_SCHEMA_VERSION = 1;
+const COVERAGE_LEXICAL_BODY_TOKEN_COLD_SCHEMA_VERSION = 2;
 
 @singleton()
 export class CoverageLexicalBodyTokenColdStore

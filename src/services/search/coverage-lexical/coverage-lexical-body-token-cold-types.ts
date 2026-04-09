@@ -34,7 +34,6 @@ export type CoverageLexicalBodyTokenColdDocRow = {
 	tokenStart: number;
 	tokenLength: number;
 	tokenCount: number;
-	hanSegments: string[];
 	updatedAt: number;
 };
 
@@ -42,7 +41,6 @@ export type CoverageLexicalBodyTokenColdDocumentWrite = {
 	path: string;
 	generation?: number;
 	bodyTokens: readonly string[];
-	hanSegments: readonly string[];
 };
 
 export interface CoverageLexicalBodyTokenColdStoreApi {
