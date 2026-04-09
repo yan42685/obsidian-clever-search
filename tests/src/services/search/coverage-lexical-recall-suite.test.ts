@@ -332,6 +332,9 @@ describe("coverage lexical recall suite", () => {
 	);
 	});
 
+	// Candidate-survival guardrails: the goal here is to keep intuitively
+	// relevant candidates alive through recall/union, not to freeze the exact
+	// lane provenance as a permanent product requirement.
 	test("ambiguous anchored queries can still enter later body lanes", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -463,6 +466,8 @@ describe("coverage lexical recall suite", () => {
 		).toBe(true);
 	});
 
+	// Candidate-survival and pruning behavior should remain testable even after
+	// the final ranking worldview changes.
 	test("final union trims weak admitted tail while keeping strong ambiguous candidate", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",

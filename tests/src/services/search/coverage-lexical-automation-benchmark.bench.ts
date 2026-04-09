@@ -225,6 +225,17 @@ type EngineLike = {
 		| null;
 };
 
+/**
+ * Stage 1 benchmark classification note:
+ * - Product guardrails: coverage_guardrail, quality_guardrail, mixed_anchor,
+ *   mixed_script_anchor, zh_short_identity, zh_short_body_vs_basename.
+ * - Exception-aware product queries: partial_memory.
+ * - Remaining query types currently serve continuity, adversarial, or legacy
+ *   implementation-shape coverage.
+ *
+ * This note is descriptive for the benchmark redesign plan only. It does not
+ * yet split scoring or summary gates by intent class.
+ */
 const QUERY_TYPES: readonly QueryType[] = [
 	"coverage_guardrail",
 	"quality_guardrail",
@@ -1908,6 +1919,9 @@ function buildAnchoredLexicalVariants(seedCases: QueryCase[]): QueryCase[] {
 	const invariants = seedCases.filter(
 		(queryCase) => queryCase.suite === "coverage_invariants",
 	);
+	// This variant generator still follows the legacy benchmark shape and should
+	// not be read as the final product-intent classification from the 2026-04-09
+	// redesign plan.
 	const others = seedCases.filter(
 		(queryCase) => queryCase.suite !== "coverage_invariants",
 	);

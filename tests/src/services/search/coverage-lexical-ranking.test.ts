@@ -549,6 +549,9 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeLessThan(0);
 	});
 
+	// The next comparator-shape tests document the current route/count worldview.
+	// They are useful migration regressions, but they should not be treated as
+	// permanent product-ranking truths once completeness-first ranking lands.
 	test("body-with-anchor routes let dominant body witness beat broad metadata pressure", () => {
 		const plan = createComparatorPlan("body-with-anchor");
 		const left = createFamilySignal({
@@ -785,6 +788,9 @@ describe("coverage lexical ranking", () => {
 		expect(compareSignals(left, right, plan)).toBeGreaterThan(0);
 	});
 
+	// Product-facing guardrails begin here. These cases should survive the
+	// ranking rewrite because they reflect user-intuitive result selection rather
+	// than the current count-prefix comparator shape.
 	test("display prune keeps later results whose family coverage stays near the top result", () => {
 		const results = [
 			createDocRankableResult(
@@ -1022,6 +1028,9 @@ describe("coverage lexical ranking", () => {
 		);
 	});
 
+	// Exception-aware product guardrails: these queries are intentionally memory-
+	// shaped and should remain solvable without requiring strict full coverage of
+	// every lexical family.
 	test("uses best local explanation window for partial-memory ties", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1078,6 +1087,8 @@ describe("coverage lexical ranking", () => {
 		expect(results[0]?.path).toBe("pkm-en/projects/sdk/cache-restore-checklist.md");
 	});
 
+	// File-lookup guardrails: identity-heavy matches should still win when the
+	// user intent is effectively to find a specific note or path-like target.
 	test("prefers basename-heavy file lookup evidence over richer body wording", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
