@@ -97,6 +97,7 @@ import type {
 	CoverageLexicalPhraseSignature,
 	CoverageLexicalPlan,
 	CoverageLexicalPrefixWitness,
+	CoverageLexicalResourceHints,
 } from "./coverage-lexical-types";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 
@@ -1112,10 +1113,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentBodyTokenLexicon = [];
 	}
 
-	private offloadResidentDocumentBodyHanSegments(): void {
-		// Keep body Han segments resident so CJK body verification remains
-		// generation-aligned even when body token sequences are cold-loaded.
-	}
 
 	private mapDocumentBodyTokensToIds(tokens: readonly string[]): number[] {
 		return tokens.map((token) => this.getOrCreateDocumentBodyTokenId(token));
@@ -1257,7 +1254,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.indexDocument(document);
 		}
 		this.offloadResidentDocumentBodyTokens();
-		this.offloadResidentDocumentBodyHanSegments();
 		await this.flushPendingBodyTokenColdStoreWrites();
 	}
 
@@ -1758,7 +1754,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			path: document.path,
 			generation: document.generation,
 			bodyTokens: derivedState.bodyTokenSequence,
-			hanSegments: bodyHanSegments,
 		});
 		if (this.shouldExperimentallyOffloadResidentBodyTokens()) {
 			this.rememberHotCachedOffloadedBodyTokens(
@@ -2044,7 +2039,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.restoreLivePostingState(state);
 		this.metadataHeadingCharPostings.clear();
 		this.offloadResidentDocumentBodyTokens();
-		this.offloadResidentDocumentBodyHanSegments();
 	}
 
 	private clearLivePostingMaps(): void {
@@ -2735,32 +2729,34 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		candidateCount: number,
 	): number {
 		const requested = Math.max(1, maxItemResults);
-		const bodyBudget = plan.resourceHints?.bodyBudget ?? 0;
-		const hybridBudget = plan.resourceHints?.hybridBudget ?? 0;
-		const memoryBudget = plan.resourceHints?.memoryBudget ?? 0;
-		const bridgeBudget = plan.resourceHints?.bridgeBudget ?? 0;
-		const localWitnessBudget = plan.resourceHints?.localWitnessBudget ?? 0;
+		const hints = getCoverageLexicalResourceHints(plan);
 		const minBudget = Math.round(
 			24 +
-				Math.min(32, localWitnessBudget * 14 + memoryBudget * 16) +
-				Math.min(14, hybridBudget * 8) +
-				Math.min(12, bridgeBudget * 8),
+				Math.min(
+					32,
+					hints.localWitnessBudget * 14 + hints.memoryBudget * 16,
+				) +
+				Math.min(14, hints.hybridBudget * 8) +
+				Math.min(12, hints.bridgeBudget * 8),
 		);
 		const multiplier = Math.max(
 			4,
 			Math.round(
 				4 +
-					bodyBudget * 2.5 +
-					hybridBudget * 2 +
-					memoryBudget * 2.5 +
-					bridgeBudget * 1.5,
+					hints.bodyBudget * 2.5 +
+					hints.hybridBudget * 2 +
+					hints.memoryBudget * 2.5 +
+					hints.bridgeBudget * 1.5,
 			),
 		);
 		const cap = Math.round(
 			64 +
-				Math.min(56, localWitnessBudget * 24 + memoryBudget * 28) +
-				Math.min(24, hybridBudget * 16) +
-				Math.min(24, bridgeBudget * 16),
+				Math.min(
+					56,
+					hints.localWitnessBudget * 24 + hints.memoryBudget * 28,
+				) +
+				Math.min(24, hints.hybridBudget * 16) +
+				Math.min(24, hints.bridgeBudget * 16),
 		);
 		return Math.min(
 			candidateCount,
@@ -4210,9 +4206,10 @@ export function shouldSoftGateCoverageLexicalExpensiveUpgrade(
 	plan: CoverageLexicalPlan,
 	ratio = COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO,
 ): boolean {
+	const hints = getCoverageLexicalResourceHints(plan);
 	if (
 		plan.queryKind === "memory_relaxed" ||
-		(plan.resourceHints?.memoryBudget ?? 0) >= 0.7
+		hints.memoryBudget >= Math.max(0.7, hints.localWitnessBudget)
 	) {
 		return false;
 	}
@@ -4267,19 +4264,32 @@ function computePerFileLocalWindowLimit(
 	plan: CoverageLexicalPlan,
 	bodyTokenCount: number,
 ): number {
-	const bodyBudget = plan.resourceHints?.bodyBudget ?? 0;
-	const memoryBudget = plan.resourceHints?.memoryBudget ?? 0;
-	const localWitnessBudget = plan.resourceHints?.localWitnessBudget ?? 0;
+	const hints = getCoverageLexicalResourceHints(plan);
 	if (
-		memoryBudget >= 0.7 ||
-		localWitnessBudget >= 0.8 ||
-		bodyBudget >= 0.95 ||
+		hints.memoryBudget >= 0.7 ||
+		hints.localWitnessBudget >= 0.8 ||
+		hints.bodyBudget >= 0.95 ||
 		plan.bodyFamilyCount >= 4 ||
 		bodyTokenCount >= 96
 	) {
 		return 3;
 	}
 	return 2;
+}
+
+function getCoverageLexicalResourceHints(
+	plan: CoverageLexicalPlan,
+): CoverageLexicalResourceHints {
+	return (
+		plan.resourceHints ?? {
+			metadataBudget: 0,
+			hybridBudget: 0,
+			bodyBudget: 0,
+			memoryBudget: 0,
+			bridgeBudget: 0,
+			localWitnessBudget: 0,
+		}
+	);
 }
 
 function rankCoverageLexicalDocResults(
@@ -4289,17 +4299,7 @@ function rankCoverageLexicalDocResults(
 	if (results.length <= 1) {
 		return [...results];
 	}
-	const displayConfig = resolveCoverageLexicalDisplayPruneConfig();
 	return [...results].sort((left, right) => {
-		const metadataTieBandDecision =
-			compareCoverageLexicalMetadataTieBandResults(
-				left.coverageLexicalSignal,
-				right.coverageLexicalSignal,
-				displayConfig,
-			);
-		if (metadataTieBandDecision !== 0) {
-			return metadataTieBandDecision;
-		}
 		const signalDecision = compareCoverageLexicalResultSignals(
 			left.coverageLexicalSignal,
 			right.coverageLexicalSignal,
@@ -4310,90 +4310,6 @@ function rankCoverageLexicalDocResults(
 		}
 		return (right.score ?? 0) - (left.score ?? 0) || left.docId - right.docId;
 	});
-}
-
-const COVERAGE_LEXICAL_METADATA_TIE_BAND_RATIO = 0.8;
-
-function compareCoverageLexicalMetadataTieBandResults(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-	config: CoverageLexicalDisplayPruneConfig,
-): number {
-	const leftBodyWitness = computeCoverageLexicalBodyWitnessTieBandScore(left);
-	const rightBodyWitness = computeCoverageLexicalBodyWitnessTieBandScore(right);
-	if (Math.abs(leftBodyWitness - rightBodyWitness) >= 8) {
-		return 0;
-	}
-	const leftCoverage = computeCoverageLexicalDisplayCoverage(left, config);
-	const rightCoverage = computeCoverageLexicalDisplayCoverage(right, config);
-	const maxCoverage = Math.max(leftCoverage, rightCoverage);
-	const minCoverage = Math.min(leftCoverage, rightCoverage);
-	if (
-		maxCoverage <= 0 ||
-		minCoverage / maxCoverage < COVERAGE_LEXICAL_METADATA_TIE_BAND_RATIO
-	) {
-		return 0;
-	}
-	const leftMetadataScore = computeCoverageLexicalMetadataTieBandScore(left);
-	const rightMetadataScore = computeCoverageLexicalMetadataTieBandScore(right);
-	if (Math.abs(leftMetadataScore - rightMetadataScore) <= 1e-6) {
-		return 0;
-	}
-	return rightMetadataScore - leftMetadataScore;
-}
-
-function computeCoverageLexicalBodyWitnessTieBandScore(
-	signal: CoverageLexicalFamilySignal,
-): number {
-	return (
-		signal.coreBody.exactWeight * 8 +
-		signal.coreBody.prefixWeight * 2 +
-		signal.localEvidence.primary.exactCoreWeight * 10 +
-		signal.localEvidence.primary.orderedPairCount * 4 +
-		signal.localEvidence.primary.coreCoverageCount * 2 +
-		signal.phraseBridgeCount * 3
-	);
-}
-
-function computeCoverageLexicalMetadataTieBandScore(
-	signal: CoverageLexicalFamilySignal,
-): number {
-	const identity = signal.metadataIdentity;
-	return (
-		computeCoverageLexicalWeightedMetadataAreaScore(identity.basename, 4) +
-		computeCoverageLexicalWeightedMetadataAreaScore(identity.alias, 3) +
-		computeCoverageLexicalWeightedMetadataAreaScore(identity.heading, 3) +
-		computeCoverageLexicalWeightedMetadataAreaScore(identity.path, 2) +
-		computeCoverageLexicalWeightedMetadataAreaScore(identity.tag, 2) +
-		computeCoverageLexicalWeightedMetadataAreaScore(identity.overall, 1.5) +
-		identity.phraseCoverageCount * 36 +
-		identity.phraseWeight * 6 +
-		computeCoverageLexicalWeightedMetadataAreaScore(
-			signal.metadataAnchor,
-			1.75,
-		) +
-		computeCoverageLexicalWeightedMetadataAreaScore(
-			signal.metadataPrefixAssist,
-			1.25,
-		) +
-		signal.tagSignal.exactMatchCount * 6 +
-		signal.tagSignal.charMatchCount * 2 +
-		signal.metadataChar.fullSegmentCount * 2 +
-		signal.metadataChar.bestSegmentCoverageRatio
-	);
-}
-
-function computeCoverageLexicalWeightedMetadataAreaScore(
-	area: CoverageLexicalAreaSignal,
-	fieldWeight: number,
-): number {
-	return (
-		fieldWeight *
-		(area.coverageCount * 6 +
-			area.exactWeight * 4 +
-			area.prefixWeight * 1.5 +
-			area.fuzzyWeight * 0.35)
-	);
 }
 
 export function pruneWeakCoverageLexicalDisplayResults(

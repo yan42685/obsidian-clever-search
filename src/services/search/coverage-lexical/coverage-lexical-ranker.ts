@@ -2,7 +2,6 @@ import type { MatchedFile } from "src/globals/search-types";
 import type {
 	CoverageLexicalCharSignal,
 	CoverageLexicalCoverageProfile,
-	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilySignal,
 	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalPrefixWitness,
@@ -43,7 +42,6 @@ export function compareCoverageLexicalResultSignals(
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
 ): number {
-	const mode = resolveCoverageLexicalComparisonProfile(plan);
 	const coverageDecision = compareCoverageLexicalCoverageProfiles(
 		left,
 		right,
@@ -52,20 +50,22 @@ export function compareCoverageLexicalResultSignals(
 	if (coverageDecision !== 0) {
 		return coverageDecision;
 	}
-	const earlyGuardrailDecision = compareEarlyBodyQualityGuardrails(
+	const metadataTieBandDecision = compareCloseCoverageMetadataPriority(
 		left,
 		right,
 		plan,
+	);
+	if (metadataTieBandDecision !== 0) {
+		return metadataTieBandDecision;
+	}
+	const earlyGuardrailDecision = compareEarlyBodyQualityGuardrails(
+		left,
+		right,
 	);
 	if (earlyGuardrailDecision !== 0) {
 		return earlyGuardrailDecision;
 	}
-	const detailDecision = compareCoverageLexicalSemanticDetailStages(
-		left,
-		right,
-		plan,
-		mode,
-	);
+	const detailDecision = compareCoverageLexicalSemanticDetailStages(left, right);
 	if (detailDecision !== 0) {
 		return detailDecision;
 	}
@@ -250,37 +250,6 @@ function getAdjustedRequiredCoverageRatio(
 	return adjustedCovered / total;
 }
 
-function compareMetadataAssistCountOverride(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-	mode: CoverageLexicalRankerComparisonProfile,
-): number {
-	if (mode !== "body-led") {
-		return 0;
-	}
-	if (compareExactTierSignals(left, right) !== 0) {
-		return 0;
-	}
-	if (comparePhraseBridgeSignals(left, right) !== 0) {
-		return 0;
-	}
-	if (
-		compareCoverageLexicalWindowFusionSignals(
-			left.localEvidence,
-			right.localEvidence,
-		) !== 0
-	) {
-		return 0;
-	}
-	if (
-		left.metadataPrefixAssist.prefixWeight <= 0 &&
-		right.metadataPrefixAssist.prefixWeight <= 0
-	) {
-		return 0;
-	}
-	return compareMetadataPrefixAssistSignals(left, right);
-}
-
 function comparePrefixTierPreference(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
@@ -314,198 +283,111 @@ function compareMetadataPrefixAssistSignals(
 	);
 }
 
-function compareCoverageLexicalSemanticDetailStages(
+function compareCloseCoverageMetadataPriority(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
-	mode: CoverageLexicalRankerComparisonProfile,
 ): number {
-	if (mode === "metadata-led") {
-		return compareMetadataLedDetailStages(left, right);
+	if (!isWithinCoverageLexicalMetadataTieBand(left, right, plan)) {
+		return 0;
 	}
-	if (mode === "hybrid-led") {
-		return compareHybridLedDetailStages(left, right, plan);
+	if (
+		hasDominantBodyWitnessAdvantage(left, right) ||
+		hasDominantBodyWitnessAdvantage(right, left)
+	) {
+		return 0;
 	}
-	return compareBodyLedDetailStages(left, right);
+	return (
+		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
+		compareCoverageLexicalMetadataEvidenceStages(left, right)
+	);
 }
 
-export function compareCoverageLexicalFamilyCountSummaries(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
+function isWithinCoverageLexicalMetadataTieBand(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
 	plan: CoverageLexicalPlan,
-): number {
-	const mode = resolveCoverageLexicalComparisonProfile(plan);
-	return (
-		compareCoverageLexicalLegacyCountFallback(left, right, plan, mode) ||
-		compareDescendingMetric(
-			left.totalMatchedFamilyCount,
-			right.totalMatchedFamilyCount,
-		)
+): boolean {
+	const decisiveGapDelta = Math.abs(
+		getEffectiveDecisiveGapCount(left, plan) -
+			getEffectiveDecisiveGapCount(right, plan),
 	);
-}
-
-function compareCoverageLexicalLegacyCountFallback(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-	plan: CoverageLexicalPlan,
-	mode: CoverageLexicalRankerComparisonProfile,
-): number {
-	return (
-		compareCoverageLexicalCountTieBreakers(left, right, plan, mode) ||
-		compareDescendingMetric(
-			left.totalMatchedFamilyCount,
-			right.totalMatchedFamilyCount,
-		)
-	);
-}
-
-function compareCoverageLexicalCountTieBreakers(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-	plan: CoverageLexicalPlan,
-	mode: CoverageLexicalRankerComparisonProfile,
-): number {
-	if (mode === "body-led") {
-		return compareBodyLedCountTieBreakers(left, right, plan);
+	if (decisiveGapDelta > 0) {
+		return false;
 	}
-	if (mode === "hybrid-led") {
-		return compareHybridLedCountTieBreakers(left, right, plan);
+	const supportGapDelta = Math.abs(
+		getEffectiveSupportGapCount(left, plan) -
+			getEffectiveSupportGapCount(right, plan),
+	);
+	if (supportGapDelta > 0) {
+		return false;
 	}
-	return compareMetadataLedCountTieBreakers(left, right);
-}
-
-function compareMetadataLedCountTieBreakers(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-): number {
-	return (
-		compareStrongMetadataFamilyCounts(left, right) ||
-		compareDescendingMetric(
-			left.metadataMatchedFamilyCount,
-			right.metadataMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.bodyMatchedFamilyCount,
-			right.bodyMatchedFamilyCount,
-		) ||
-		compareBroadMetadataFamilyCounts(left, right)
+	const adjustedRequiredRatioDelta = Math.abs(
+		getAdjustedRequiredCoverageRatio(left, plan) -
+			getAdjustedRequiredCoverageRatio(right, plan),
 	);
-}
-
-function compareHybridLedCountTieBreakers(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-	plan: CoverageLexicalPlan,
-): number {
-	if (plan.hasPathShapeHint || plan.hasTitleShapeHint) {
-		return (
-			compareStrongMetadataFamilyCounts(left, right) ||
-			compareDescendingMetric(
-				left.metadataMatchedFamilyCount,
-				right.metadataMatchedFamilyCount,
-			) ||
-			compareBroadMetadataFamilyCounts(left, right) ||
-			compareDescendingMetric(
-				left.bodyMatchedFamilyCount,
-				right.bodyMatchedFamilyCount,
-			)
-		);
+	if (adjustedRequiredRatioDelta > 0.25) {
+		return false;
 	}
+	const meaningfulRatioDelta = Math.abs(
+		getCoverageWeightRatio(
+			left.coverageProfile.meaningfulCoveredFamilyWeight,
+			left.coverageProfile.meaningfulFamilyWeight,
+		) -
+			getCoverageWeightRatio(
+				right.coverageProfile.meaningfulCoveredFamilyWeight,
+				right.coverageProfile.meaningfulFamilyWeight,
+			),
+	);
+	return meaningfulRatioDelta <= 0.28;
+}
+
+function compareCoverageLexicalSemanticDetailStages(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
+): number {
 	return (
-		compareStrongMetadataFamilyCounts(left, right) ||
-		compareDescendingMetric(
-			left.bodyMatchedFamilyCount,
-			right.bodyMatchedFamilyCount,
+		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
+		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
+		compareCoverageLexicalWindowFusionSignals(
+			left.localEvidence,
+			right.localEvidence,
 		) ||
-		compareDescendingMetric(
-			left.metadataMatchedFamilyCount,
-			right.metadataMatchedFamilyCount,
-		) ||
-		compareBroadMetadataFamilyCounts(left, right)
+		comparePhraseBridgeSignals(left, right) ||
+		compareCoverageLexicalMetadataEvidenceStages(left, right) ||
+		compareCharSignals(left.bodyChar, right.bodyChar) ||
+		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
+		comparePrefixTierPreference(left, right) ||
+		compareAreaSignals(left.coreBody, right.coreBody) ||
+		compareAreaSignals(left.softBody, right.softBody) ||
+		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 	);
 }
 
-function compareBodyLedCountTieBreakers(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-	_plan: CoverageLexicalPlan,
+function compareCoverageLexicalMetadataEvidenceStages(
+	left: CoverageLexicalFamilySignal,
+	right: CoverageLexicalFamilySignal,
 ): number {
 	return (
-		compareStrongMetadataFamilyCounts(left, right) ||
-		compareDescendingMetric(
-			left.bodyMatchedFamilyCount,
-			right.bodyMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.metadataMatchedFamilyCount,
-			right.metadataMatchedFamilyCount,
-		) ||
-		compareBroadMetadataFamilyCounts(left, right)
-	);
-}
-
-function compareStrongMetadataFamilyCounts(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-): number {
-	return (
-		compareDescendingMetric(
-			left.basenameMatchedFamilyCount,
-			right.basenameMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.aliasesMatchedFamilyCount,
-			right.aliasesMatchedFamilyCount,
-		)
-	);
-}
-
-function compareBroadMetadataFamilyCounts(
-	left: CoverageLexicalFamilyCountSummary,
-	right: CoverageLexicalFamilyCountSummary,
-): number {
-	return (
-		compareDescendingMetric(
-			left.folderMatchedFamilyCount,
-			right.folderMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.headingsMatchedFamilyCount,
-			right.headingsMatchedFamilyCount,
-		) ||
-		compareDescendingMetric(
-			left.tagsMatchedFamilyCount,
-			right.tagsMatchedFamilyCount,
-		)
+		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
+		compareMetadataPrefixAssistSignals(left, right) ||
+		compareTagSignals(left.tagSignal, right.tagSignal) ||
+		compareCharSignals(left.metadataChar, right.metadataChar)
 	);
 }
 
 function compareEarlyBodyQualityGuardrails(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,
-	plan: CoverageLexicalPlan,
 ): number {
-	const mode = resolveCoverageLexicalComparisonProfile(plan);
-	if (mode === "body-led") {
-		return 0;
-	}
-	if (plan.hasMixedScriptHint) {
-		return 0;
-	}
-	if (
-		mode === "hybrid-led" &&
-		(plan.hasPathShapeHint || plan.hasTitleShapeHint)
-	) {
-		return 0;
-	}
 	const bodyWitnessDecision = compareBodyWitnessSignals(left, right);
 	if (bodyWitnessDecision === 0) {
 		return 0;
 	}
 	if (bodyWitnessDecision < 0) {
-		return shouldPromoteBodyWitness(left, right, plan) ? -1 : 0;
+		return hasPromotableBodyWitness(left, right) ? -1 : 0;
 	}
-	return shouldPromoteBodyWitness(right, left, plan) ? 1 : 0;
+	return hasPromotableBodyWitness(right, left) ? 1 : 0;
 }
 
 function compareBodyWitnessSignals(
@@ -527,14 +409,14 @@ function compareBodyWitnessSignals(
 function shouldPromoteBodyWitness(
 	candidate: CoverageLexicalFamilySignal,
 	opponent: CoverageLexicalFamilySignal,
-	plan: CoverageLexicalPlan,
 ): boolean {
 	if (!hasPromotableBodyWitness(candidate, opponent)) {
 		return false;
 	}
+	if (hasStrongMetadataIdentity(opponent)) {
+		return false;
+	}
 	if (
-		getStrongMetadataFamilyCount(opponent.familyCountSummary) >
-			getStrongMetadataFamilyCount(candidate.familyCountSummary) ||
 		compareMetadataIdentitySignals(
 			candidate.metadataIdentity,
 			opponent.metadataIdentity,
@@ -542,55 +424,26 @@ function shouldPromoteBodyWitness(
 	) {
 		return false;
 	}
-	if (!hasMetadataSuppressionPressure(candidate, opponent)) {
-		return false;
-	}
-	const strongMetadataLead =
-		getStrongMetadataFamilyCount(opponent.familyCountSummary) -
-		getStrongMetadataFamilyCount(candidate.familyCountSummary);
-	if (resolveCoverageLexicalComparisonProfile(plan) === "metadata-led") {
-		return strongMetadataLead <= 0;
-	}
-	return strongMetadataLead <= 1;
+	return compareCoverageLexicalMetadataEvidenceStages(opponent, candidate) < 0;
 }
 
-type CoverageLexicalRankerComparisonProfile =
-	| "metadata-led"
-	| "hybrid-led"
-	| "body-led";
+function hasDominantBodyWitnessAdvantage(
+	candidate: CoverageLexicalFamilySignal,
+	opponent: CoverageLexicalFamilySignal,
+): boolean {
+	if (hasStrongMetadataIdentity(opponent)) {
+		return false;
+	}
+	return hasPromotableBodyWitness(candidate, opponent);
+}
 
-function resolveCoverageLexicalComparisonProfile(
-	plan: CoverageLexicalPlan,
-): CoverageLexicalRankerComparisonProfile {
-	const metadataBudget =
-		plan.resourceHints?.metadataBudget ??
-		(plan.decisiveAnchorMass ?? 0) +
-			(plan.supportAnchorMass ?? 0) * 0.35 +
-			(plan.hasMetadataHint ? 0.25 : 0) +
-			(plan.hasPathShapeHint ? 0.2 : 0) +
-			(plan.hasTitleShapeHint ? 0.15 : 0);
-	const hybridBudget =
-		plan.resourceHints?.hybridBudget ??
-		(Math.min(plan.weightedAnchorMass ?? 0, plan.weightedBodyMass ?? 0) * 0.75 +
-			(plan.anchorFamilyCount > 0 && plan.bodyFamilyCount > 0 ? 0.35 : 0));
-	const bodyBudget =
-		plan.resourceHints?.bodyBudget ??
-		(plan.decisiveBodyMass ?? 0) +
-			(plan.supportBodyMass ?? 0) * 0.4 +
-			(plan.bodyFamilyCount > 0 ? 0.25 : 0);
-	const hasHybridShape =
-		plan.anchorFamilyCount > 0 && plan.bodyFamilyCount > 0;
-	const metadataLead = metadataBudget - Math.max(hybridBudget, bodyBudget);
-	if (!hasHybridShape && metadataBudget >= bodyBudget) {
-		return "metadata-led";
-	}
-	if (hasHybridShape && metadataLead >= 0.18) {
-		return "metadata-led";
-	}
-	if (hasHybridShape) {
-		return "hybrid-led";
-	}
-	return "body-led";
+function hasStrongMetadataIdentity(
+	signal: CoverageLexicalFamilySignal,
+): boolean {
+	return (
+		signal.metadataIdentity.phraseCoverageCount > 0 ||
+		signal.metadataIdentity.overall.coverageCount > 0
+	);
 }
 
 function hasPromotableBodyWitness(
@@ -629,154 +482,6 @@ function hasPromotableBodyWitness(
 			localityLead ||
 			candidate.coreBody.coverageCount > opponent.coreBody.coverageCount
 		)
-	);
-}
-
-function hasMetadataSuppressionPressure(
-	candidate: CoverageLexicalFamilySignal,
-	opponent: CoverageLexicalFamilySignal,
-): boolean {
-	return (
-		opponent.familyCountSummary.metadataMatchedFamilyCount >
-			candidate.familyCountSummary.metadataMatchedFamilyCount ||
-		getStrongMetadataFamilyCount(opponent.familyCountSummary) >
-			getStrongMetadataFamilyCount(candidate.familyCountSummary) ||
-		getBroadMetadataFamilyCount(opponent.familyCountSummary) >
-			getBroadMetadataFamilyCount(candidate.familyCountSummary)
-	);
-}
-
-function getStrongMetadataFamilyCount(
-	summary: CoverageLexicalFamilyCountSummary,
-): number {
-	return (
-		summary.basenameMatchedFamilyCount +
-		summary.aliasesMatchedFamilyCount
-	);
-}
-
-function getBroadMetadataFamilyCount(
-	summary: CoverageLexicalFamilyCountSummary,
-): number {
-	return (
-		summary.folderMatchedFamilyCount +
-		summary.headingsMatchedFamilyCount +
-		summary.tagsMatchedFamilyCount
-	);
-}
-
-function compareMetadataLedDetailStages(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-): number {
-	return (
-		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-		compareMetadataPrefixAssistSignals(left, right) ||
-		compareTagSignals(left.tagSignal, right.tagSignal) ||
-		compareCharSignals(left.metadataChar, right.metadataChar) ||
-		compareCharSignals(left.bodyChar, right.bodyChar) ||
-		compareAreaSignals(left.coreBody, right.coreBody) ||
-		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-		comparePhraseBridgeSignals(left, right) ||
-		compareCoverageLexicalWindowFusionSignals(
-			left.localEvidence,
-			right.localEvidence,
-		) ||
-		compareAreaSignals(left.softBody, right.softBody) ||
-		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
-	);
-}
-
-function compareHybridLedDetailStages(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-	plan: CoverageLexicalPlan,
-): number {
-	if (plan.hasMixedScriptHint) {
-		return (
-			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-			compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-			compareCoverageLexicalWindowFusionSignals(
-				left.localEvidence,
-				right.localEvidence,
-			) ||
-			comparePhraseBridgeSignals(left, right) ||
-			compareMetadataPrefixAssistSignals(left, right) ||
-			compareCharSignals(left.bodyChar, right.bodyChar) ||
-			compareCharSignals(left.metadataChar, right.metadataChar) ||
-			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-			comparePrefixTierPreference(left, right) ||
-			compareAreaSignals(left.coreBody, right.coreBody) ||
-			compareAreaSignals(left.softBody, right.softBody) ||
-			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-			compareTagSignals(left.tagSignal, right.tagSignal) ||
-			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
-		);
-	}
-	if (plan.hasPathShapeHint || plan.hasTitleShapeHint) {
-		return (
-			compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-			compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-			comparePhraseBridgeSignals(left, right) ||
-			compareCoverageLexicalWindowFusionSignals(
-				left.localEvidence,
-				right.localEvidence,
-			) ||
-			compareMetadataPrefixAssistSignals(left, right) ||
-			compareCharSignals(left.metadataChar, right.metadataChar) ||
-			compareCharSignals(left.bodyChar, right.bodyChar) ||
-			compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-			comparePrefixTierPreference(left, right) ||
-			compareAreaSignals(left.coreBody, right.coreBody) ||
-			compareAreaSignals(left.softBody, right.softBody) ||
-			compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-			compareTagSignals(left.tagSignal, right.tagSignal) ||
-			compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
-		);
-	}
-	return (
-		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-		comparePhraseBridgeSignals(left, right) ||
-		compareCoverageLexicalWindowFusionSignals(
-			left.localEvidence,
-			right.localEvidence,
-		) ||
-		compareMetadataPrefixAssistSignals(left, right) ||
-		compareCharSignals(left.metadataChar, right.metadataChar) ||
-		compareCharSignals(left.bodyChar, right.bodyChar) ||
-		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-		comparePrefixTierPreference(left, right) ||
-		compareAreaSignals(left.coreBody, right.coreBody) ||
-		compareAreaSignals(left.softBody, right.softBody) ||
-		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
-	);
-}
-
-function compareBodyLedDetailStages(
-	left: CoverageLexicalFamilySignal,
-	right: CoverageLexicalFamilySignal,
-): number {
-	return (
-		compareMetadataIdentitySignals(left.metadataIdentity, right.metadataIdentity) ||
-		compareDescendingMetric(left.coreBody.exactWeight, right.coreBody.exactWeight) ||
-		comparePhraseBridgeSignals(left, right) ||
-		compareCoverageLexicalWindowFusionSignals(
-			left.localEvidence,
-			right.localEvidence,
-		) ||
-		compareMetadataPrefixAssistSignals(left, right) ||
-		compareCharSignals(left.metadataChar, right.metadataChar) ||
-		compareCharSignals(left.bodyChar, right.bodyChar) ||
-		compareDescendingMetric(left.tailCoreWeight, right.tailCoreWeight) ||
-		comparePrefixTierPreference(left, right) ||
-		compareAreaSignals(left.coreBody, right.coreBody) ||
-		compareAreaSignals(left.softBody, right.softBody) ||
-		compareAreaSignals(left.metadataAnchor, right.metadataAnchor) ||
-		compareTagSignals(left.tagSignal, right.tagSignal) ||
-		compareDescendingMetric(left.tailSoftWeight, right.tailSoftWeight)
 	);
 }
 

@@ -5,6 +5,19 @@ Status: Draft
 
 ## Implementation Status
 
+- 2026-04-09: removed the remaining final-comparator old worldview slices from
+  the active `coverage-lexical` engine/ranker path
+  - `coverage-lexical-engine.ts` no longer reads `plan.decisionPriors` for
+    coarse hydration budgets, soft expensive-upgrade gating, or per-file local
+    window limits; those budget decisions now read only `resourceHints`
+  - `coverage-lexical-ranker.ts` no longer switches final semantic detail
+    ordering through `metadata-led` / `hybrid-led` / `body-led` comparison
+    profiles
+  - legacy count-based semantic comparator helpers were removed from the active
+    ranker path, leaving final answer selection driven by `coverageProfile`,
+    metadata/body/detail evidence, and evidence mass
+  - close-coverage metadata priority is now expressed directly through
+    result-evidence tie-band logic instead of planner worldview classes
 - 2026-04-09: landed a first intent-realignment slice in code
   - strengthened strong metadata identity precedence inside
     `body-with-anchor` and `body-first` detail stages so basename/alias exact,
@@ -778,16 +791,17 @@ Current branch status:
   `CoverageLexicalFamilySignal` now carries `coverageProfile`, and the engine
   computes meaningful/required/decisive/support coverage plus mixed-script
   satisfaction.
-- Stage 3 is partially complete.
-  The final comparator now checks `coverageProfile` before falling back to the
-  old evidence chain, includes a guarded rescue path for `memory_relaxed`
-  queries, and no longer uses legacy count as the semantic final fallback.
-  Legacy comparator-shape ranking tests have been removed from the main ranking
-  suite. Planner-facing `decisionPriors` have also been renamed to
-  `resourceHints` to better reflect their intended role as budget/resource
-  hints rather than semantic ranking classes, and engine-level metadata
-  tie-band selection no longer consumes these budget hints in final answer
-  ordering.
+- Stage 3 is materially complete.
+  The final comparator now checks `coverageProfile` before falling back to
+  detail evidence and evidence mass, no longer uses legacy count as the
+  semantic final fallback, and no longer switches final semantic detail
+  ordering through `metadata-led` / `hybrid-led` / `body-led` planner
+  worldviews. Legacy comparator-shape ranking tests have been removed from the
+  main ranking suite. Planner-facing `decisionPriors` have also been renamed
+  to `resourceHints` to better reflect their intended role as budget/resource
+  hints rather than semantic ranking classes, and close-coverage metadata
+  priority is now expressed through result-evidence tie-band logic rather than
+  planner worldview classes.
 - Stage 4 is partially complete.
   Coarse ordering already benefits from the new comparator, and coarse
   hydration now blends old unresolved-evidence upper bounds with
@@ -809,7 +823,10 @@ Current branch status:
   default, while exact/phrase/passage rescue signals can still keep them
   eligible when there is real upgrade potential. This keeps the policy out of
   recall hard-kill territory while moving some display-layer suppression
-  earlier for better cost control.
+  earlier for better cost control. Coarse hydration budgets, soft expensive
+  upgrade gating, and per-file local-window limits now also read only
+  `resourceHints`; the active engine path no longer consumes
+  `plan.decisionPriors`.
   Soft early gating reduces the need for display pruning, but does not replace
   display-tail management or final strong-witness rescue.
   migration slice has been verified against the ranking suite, recall suite,
