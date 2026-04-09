@@ -173,6 +173,8 @@ export type CoverageLexicalPlanFamilyReason = {
 };
 
 export type CoverageLexicalPlanExplain = {
+	queryKind: CoverageLexicalQueryKind;
+	route: CoverageLexicalRoute;
 	spans: CoverageLexicalQuerySpan[];
 	familyReasons: CoverageLexicalPlanFamilyReason[];
 	queryKindReasons: string[];

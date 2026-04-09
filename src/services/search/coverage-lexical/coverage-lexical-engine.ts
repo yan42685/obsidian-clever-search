@@ -1357,8 +1357,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					queryTerms,
 					hanSegments: charQuery.hanSegments,
 					charTerms: charQuery.terms,
-					queryKind: plan.queryKind,
-					route: plan.route,
+					queryKind: plan.explain.queryKind,
+					route: plan.explain.route,
 					candidateCount: candidates.size,
 				});
 			}

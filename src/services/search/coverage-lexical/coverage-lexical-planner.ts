@@ -224,6 +224,8 @@ export function buildCoverageLexicalPlan(
 		supportBodyMass,
 		decisionPriors,
 		explain: buildPlanExplain(
+			queryKind,
+			route,
 			spans,
 			families,
 			hardAnchorFamilies,
@@ -1379,6 +1381,8 @@ function dedupePlannerSpans(
 }
 
 function buildPlanExplain(
+	queryKind: CoverageLexicalQueryKind,
+	route: CoverageLexicalPlan["route"],
 	spans: readonly CoverageLexicalQuerySpan[],
 	families: readonly CoverageLexicalPlan["families"][number][],
 	hardAnchorFamilies: readonly CoverageLexicalPlan["families"][number][],
@@ -1413,6 +1417,8 @@ function buildPlanExplain(
 	pushFamilyReasons("noise", noiseFamilies);
 	pushFamilyReasons("bridge", bridgeFamilies);
 	return {
+		queryKind,
+		route,
 		spans: [...spans],
 		familyReasons,
 		queryKindReasons: [...queryKindReasons],

@@ -993,6 +993,18 @@ export function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
+		"\u65e7\u540d\u522b\u540d\u8fc1\u79fb",
+		"pkm-zh/notes/鍒悕杩佺Щ璇存槑.md",
+		"zh_short_identity",
+		"coverage_invariants",
+	);
+	addQuery(
+		"\u7535\u5b50\u6280\u672f \u5165\u95e8 \u7535\u8def",
+		"pkm-zh/books/鐢靛瓙鎶€鏈叆闂?md",
+		"zh_short_identity",
+		"messy_pkm",
+	);
+	addQuery(
 		"cache restore playbook note",
 		"pkm-en/projects/sdk/vector-cache.md",
 		"ambiguous_intent",
@@ -1015,6 +1027,36 @@ export function createAutomationCorpus(): {
 		"better plu",
 		"docs/plugins/better-plugins-page.md",
 		"prefix_metadata",
+		"adversarial",
+	);
+	addQuery(
+		"projected token runtime access guide",
+		"tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
+		"ambiguous_intent",
+		"adversarial",
+	);
+	addQuery(
+		"plugin compatibility migration guide",
+		"docs/plugins/plugin-upgrade-guide.md",
+		"ambiguous_intent",
+		"adversarial",
+	);
+	addQuery(
+		"old project aliases map",
+		"pkm-en/notes/linking/project-rename-map.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"\u65e7\u540d\u522b\u540d \u8fc1\u79fb \u89c4\u5219",
+		"pkm-zh/notes/鍒悕杩佺Щ璇存槑.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"\u7535\u5b50\u6280\u672f \u5165\u95e8 \u7535\u8def \u6280\u5de7",
+		"pkm-zh/books/鐢靛瓙鎶€鏈叆闂?md",
+		"ambiguous_intent",
 		"adversarial",
 	);
 	addQuery(
@@ -2615,12 +2657,14 @@ async function runCoverageRecallContract(
 				maxItemResults: 10,
 			},
 		);
-		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
-		queryKindLaneTotals[plan.queryKind] =
-			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const explainedQueryKind = plan.explain.queryKind;
+		queryKindCounts[explainedQueryKind] =
+			(queryKindCounts[explainedQueryKind] ?? 0) + 1;
+		queryKindLaneTotals[explainedQueryKind] =
+			(queryKindLaneTotals[explainedQueryKind] ?? 0) + debug.lanes.length;
 		const relaxedStats =
-			relaxedHybridByQueryKind[plan.queryKind] ??
-			(relaxedHybridByQueryKind[plan.queryKind] = {
+			relaxedHybridByQueryKind[explainedQueryKind] ??
+			(relaxedHybridByQueryKind[explainedQueryKind] = {
 				queryCount: 0,
 				laneRanCount: 0,
 				relevantCandidateHits: 0,
@@ -2728,7 +2772,7 @@ async function runCoverageRecallContract(
 				query: queryCase.query,
 				type: queryCase.type,
 				relevantPath: queryCase.relevantPath,
-				queryKind: plan.queryKind,
+				queryKind: plan.explain.queryKind,
 				hardAnchors: plan.hardAnchorFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
 				decisiveBodies: plan.decisiveBodyFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
 				lanes: debug.lanes.map((lane: {
@@ -2850,12 +2894,14 @@ async function runCoverageLaneStudy(
 				maxItemResults: 10,
 			},
 		);
-		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
-		queryKindLaneTotals[plan.queryKind] =
-			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const explainedQueryKind = plan.explain.queryKind;
+		queryKindCounts[explainedQueryKind] =
+			(queryKindCounts[explainedQueryKind] ?? 0) + 1;
+		queryKindLaneTotals[explainedQueryKind] =
+			(queryKindLaneTotals[explainedQueryKind] ?? 0) + debug.lanes.length;
 		const relaxedStats =
-			relaxedHybridByQueryKind[plan.queryKind] ??
-			(relaxedHybridByQueryKind[plan.queryKind] = {
+			relaxedHybridByQueryKind[explainedQueryKind] ??
+			(relaxedHybridByQueryKind[explainedQueryKind] = {
 				queryCount: 0,
 				laneRanCount: 0,
 				relevantCandidateHits: 0,
@@ -4255,7 +4301,7 @@ describe("coverage lexical automation benchmark", () => {
 		expect(queryLanguageMix.mixed).toBeGreaterThan(0);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "coverage_invariants"),
-		).toHaveLength(10);
+		).toHaveLength(11);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "messy_pkm").length,
 		).toBeGreaterThanOrEqual(50);
