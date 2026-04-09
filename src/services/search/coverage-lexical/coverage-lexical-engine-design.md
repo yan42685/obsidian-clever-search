@@ -1,9 +1,10 @@
 # Coverage Lexical Engine Design
 
-This file has been merged into:
+This file is kept only as a short redirect stub for older links.
+
+Canonical design:
 
 - [`coverage-lexical-design.md`](./coverage-lexical-design.md)
 
-`coverage-lexical-design.md` is now the primary and canonical design document.
-
-This file remains only as a compatibility entrypoint for older references.
+Use [`coverage-lexical-design.md`](./coverage-lexical-design.md) for all
+current implementation and architecture decisions.

@@ -26,12 +26,6 @@ export type CoverageLexicalBodyCharVerification = {
 	matchRatio: number;
 };
 
-export type CoverageLexicalCharOffset = {
-	token: string;
-	start: number;
-	end: number;
-};
-
 export function extractHanSegments(text: string): string[] {
 	const segments: string[] = [];
 	const seen = new Set<string>();
@@ -106,27 +100,6 @@ export function extractHanBigrams(text: string): string[] {
 		}
 	}
 	return bigrams;
-}
-
-export function extractHanBigramsWithOffsets(
-	text: string,
-): CoverageLexicalCharOffset[] {
-	const out: CoverageLexicalCharOffset[] = [];
-	for (const match of text.matchAll(HAN_SEQUENCE_REGEX)) {
-		const rawChars = Array.from(match[0]);
-		const base = match.index ?? 0;
-		for (let index = 0; index < rawChars.length - 1; index++) {
-			const token = normalizeCoverageLexicalText(
-				rawChars[index] + rawChars[index + 1],
-			);
-			out.push({
-				token,
-				start: base + index,
-				end: base + index + 2,
-			});
-		}
-	}
-	return out;
 }
 
 export function evaluateCoverageLexicalBodyCharVerification(

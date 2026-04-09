@@ -14,29 +14,6 @@ import {
 	getCoverageLexicalEvidenceMassSummary,
 } from "./coverage-lexical-evidence";
 
-export function rankCoverageLexicalResults(
-	results: readonly CoverageLexicalRankableResult[],
-	plan: CoverageLexicalPlan,
-): CoverageLexicalRankableResult[] {
-	if (results.length <= 1) {
-		return [...results];
-	}
-	return [...results].sort((left, right) => {
-		const signalDecision = compareCoverageLexicalResultSignals(
-			left.coverageLexicalSignal,
-			right.coverageLexicalSignal,
-			plan,
-		);
-		if (signalDecision !== 0) {
-			return signalDecision;
-		}
-		return (
-			(right.score ?? 0) - (left.score ?? 0) ||
-			left.path.localeCompare(right.path)
-		);
-	});
-}
-
 export function compareCoverageLexicalResultSignals(
 	left: CoverageLexicalFamilySignal,
 	right: CoverageLexicalFamilySignal,

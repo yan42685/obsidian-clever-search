@@ -301,11 +301,6 @@ export type CoverageLexicalWindowFusionSignal = {
 	corroboratedSoftCoverageCount: number;
 };
 
-export type CoverageLexicalHighlightRange = {
-	start: number;
-	end: number;
-};
-
 export type CoverageLexicalPassageAdmissionSignal = {
 	coreCoverageCount: number;
 	exactWeight: number;
