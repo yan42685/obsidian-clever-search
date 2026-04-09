@@ -178,6 +178,11 @@ type CoverageLexicalQueryCache = {
 		string,
 		CoverageLexicalMetadataPhraseSurface | null
 	>;
+	metadataPhraseVerificationKeysBySignatureAndFields: Map<
+		string,
+		readonly CoverageLexicalCandidateKey[]
+	>;
+	metadataPhraseMatchByDocFieldAndSignature: Map<string, boolean>;
 	phraseCandidatesByKey: Map<
 		string,
 		readonly (readonly [
@@ -523,6 +528,8 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		phraseSignatureBucketsByKey: new Map(),
 		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
 		metadataPhraseSurfaceByDocAndField: new Map(),
+		metadataPhraseVerificationKeysBySignatureAndFields: new Map(),
+		metadataPhraseMatchByDocFieldAndSignature: new Map(),
 		phraseCandidatesByKey: new Map(),
 		familySetCandidatesByKey: new Map(),
 	};
@@ -3768,6 +3775,32 @@ function getOrCreateMetadataPhraseSurface(
 	return created;
 }
 
+function getMetadataPhraseVerificationCacheKey(
+	signature: CoverageLexicalPhraseSignature,
+	fields: readonly CoverageLexicalMetadataField[],
+): string {
+	return `${signature.index}|${fields.join(",")}`;
+}
+
+function metadataPhraseMatchesSignatureOnField(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	docId: number,
+	field: CoverageLexicalMetadataField,
+	signature: CoverageLexicalPhraseSignature,
+): boolean {
+	const cacheKey = `${docId}|${field}|${signature.index}`;
+	const cached = queryCache.metadataPhraseMatchByDocFieldAndSignature.get(cacheKey);
+	if (cached !== undefined) {
+		return cached;
+	}
+	const surface = getOrCreateMetadataPhraseSurface(index, queryCache, docId, field);
+	const matched =
+		surface !== null && matchesMetadataPhraseSignature(surface, signature);
+	queryCache.metadataPhraseMatchByDocFieldAndSignature.set(cacheKey, matched);
+	return matched;
+}
+
 function matchesMetadataPhraseSignature(
 	surface: CoverageLexicalMetadataPhraseSurface,
 	signature: CoverageLexicalPhraseSignature,
@@ -3828,11 +3861,21 @@ function getMetadataExactPostingMapsForField(
 
 function collectMetadataPhraseVerificationCandidateKeys(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 	fields: readonly CoverageLexicalMetadataField[],
 ): Set<CoverageLexicalCandidateKey> {
 	const keys = new Set<CoverageLexicalCandidateKey>(candidates.keys());
+	const cacheKey = getMetadataPhraseVerificationCacheKey(signature, fields);
+	const cached =
+		queryCache.metadataPhraseVerificationKeysBySignatureAndFields.get(cacheKey);
+	if (cached) {
+		for (const key of cached) {
+			keys.add(key);
+		}
+		return keys;
+	}
 	const seedTokens = new Set<string>();
 	for (const variant of signature.variants) {
 		for (const token of variant.split(" ")) {
@@ -3847,6 +3890,7 @@ function collectMetadataPhraseVerificationCandidateKeys(
 			seedTokens.add(token);
 		}
 	}
+	const postingDerivedKeys = new Set<CoverageLexicalCandidateKey>();
 	for (const field of fields) {
 		for (const postings of getMetadataExactPostingMapsForField(index, field)) {
 			for (const token of seedTokens) {
@@ -3855,11 +3899,16 @@ function collectMetadataPhraseVerificationCandidateKeys(
 					continue;
 				}
 				forEachPostingCandidateKey(index, matches, (key) => {
+					postingDerivedKeys.add(key);
 					keys.add(key);
 				});
 			}
 		}
 	}
+	queryCache.metadataPhraseVerificationKeysBySignatureAndFields.set(
+		cacheKey,
+		Array.from(postingDerivedKeys),
+	);
 	return keys;
 }
 
@@ -4287,6 +4336,7 @@ function collectAnyMetadataPhraseMatches(
 ): void {
 	const candidateKeys = collectMetadataPhraseVerificationCandidateKeys(
 		index,
+		queryCache,
 		candidates,
 		signature,
 		ALL_METADATA_FIELDS,
@@ -4294,13 +4344,7 @@ function collectAnyMetadataPhraseMatches(
 	for (const key of candidateKeys) {
 		let matched = false;
 		for (const field of ALL_METADATA_FIELDS) {
-			const surface = getOrCreateMetadataPhraseSurface(
-				index,
-				queryCache,
-				key,
-				field,
-			);
-			if (!surface || !matchesMetadataPhraseSignature(surface, signature)) {
+			if (!metadataPhraseMatchesSignatureOnField(index, queryCache, key, field, signature)) {
 				continue;
 			}
 			matched = true;
@@ -4506,6 +4550,7 @@ function collectPreferredMetadataPhraseMatches(
 	}
 	const candidateKeys = collectMetadataPhraseVerificationCandidateKeys(
 		index,
+		queryCache,
 		candidates,
 		signature,
 		preferredFields,
@@ -4514,13 +4559,7 @@ function collectPreferredMetadataPhraseMatches(
 		const state = getOrCreateDocIdCandidateState(candidates, key);
 		let matchedAnyField = false;
 		for (const field of preferredFields) {
-			const surface = getOrCreateMetadataPhraseSurface(
-				index,
-				queryCache,
-				key,
-				field,
-			);
-			if (!surface || !matchesMetadataPhraseSignature(surface, signature)) {
+			if (!metadataPhraseMatchesSignatureOnField(index, queryCache, key, field, signature)) {
 				continue;
 			}
 			matchedAnyField = true;
