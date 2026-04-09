@@ -1023,26 +1023,13 @@ function runStrictMetadataLane(
 				index,
 				queryCache,
 				laneCandidates,
-				plan.hardAnchorFamilies,
+				derivedPlan.strictMetadataFamilies,
 				{
 					scope: "metadata-only",
 					includePrefix: request.isPrefixMatch,
 					includeFuzzy: false,
 				},
 			);
-			if (derivedPlan.optionalAnchorFamilies.length > 0) {
-				appendFamilySetCandidates(
-					index,
-					queryCache,
-					laneCandidates,
-					derivedPlan.optionalAnchorFamilies,
-					{
-						scope: "metadata-only",
-						includePrefix: request.isPrefixMatch,
-						includeFuzzy: false,
-					},
-				);
-			}
 			collectPhraseCandidates(
 				index,
 				queryCache,
@@ -1107,7 +1094,7 @@ function runStrictHybridLane(
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: false,
 			});
-			collectFamilySetCandidates(
+			appendFamilySetCandidates(
 				index,
 				queryCache,
 				laneCandidates,
@@ -1311,7 +1298,7 @@ function runBridgeLane(
 		benchmarkHooks,
 		"bridge_lane",
 		() => {
-			collectFamilySetCandidates(
+			appendFamilySetCandidates(
 				index,
 				queryCache,
 				laneCandidates,
@@ -5300,3 +5287,4 @@ function computeTailWeight(index: number): number {
 	const position = index + 1;
 	return position * position;
 }
+
