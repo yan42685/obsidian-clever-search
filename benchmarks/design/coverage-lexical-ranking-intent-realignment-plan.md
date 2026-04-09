@@ -844,7 +844,16 @@ Current branch status:
   ordering and the coarse/fine evidence model. Recall witness-floor protection
   has also started consuming the planner's explicit `coverageRequirements` and
   `rescuePotential` payload instead of re-deriving the same worldview purely
-  from hard-anchor/body family buckets inside recall.
+  from hard-anchor/body family buckets inside recall. Lane admission, shared
+  upper-bound estimation, and lane protection floors now also start from
+  shared evidence helpers before any lane-specific structure checks fire:
+  shared lane admission now consults cross-script satisfaction,
+  required-coverage ratio, and shared evidence pressure first; cheap/full
+  lane upper bounds now expose shared evidence upside alongside the older
+  lane-local estimates; and lane protection floors now derive from planner-side
+  `coverageRequirements` and `rescuePotential` before lane-specific caps are
+  applied. This narrows recall's remaining semantic divergence without
+  collapsing the current lane container structure.
   Soft early gating reduces the need for display pruning, but does not replace
   display-tail management or final strong-witness rescue.
   migration slice has been verified against the ranking suite, recall suite,

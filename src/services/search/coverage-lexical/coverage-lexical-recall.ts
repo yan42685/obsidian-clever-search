@@ -2638,9 +2638,16 @@ function acceptsLaneCandidate(
 	charQuery: CoverageLexicalCharQuery,
 ): boolean {
 	const evidenceProfile = buildLaneEvidenceProfile(evaluation);
+	const sharedAdmission = acceptsLaneBySharedEvidence(
+		laneName,
+		evaluation,
+		evidenceProfile,
+		plan,
+	);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
+				sharedAdmission ||
 				evidenceProfile.anchorPressure >=
 					Math.max(1.05, plan.hardAnchorFamilies.length * 0.95) ||
 				(evaluation.hardAnchorMetadata.coverageCount >= 1 &&
@@ -2649,12 +2656,14 @@ function acceptsLaneCandidate(
 			);
 		case "strict_hybrid_lane":
 			return (
+				sharedAdmission ||
 				evidenceProfile.hybridPressure >=
 					Math.max(0.95, plan.relaxedMinimumMatchCount * 0.7) &&
 				evidenceProfile.bodyUpperBound >= 1
 			);
 		case "relaxed_hybrid_lane":
 			return (
+				sharedAdmission ||
 				evidenceProfile.hybridPressure >=
 					Math.max(0.7, plan.relaxedMinimumMatchCount * 0.55) ||
 				(evidenceProfile.bodyUpperBound >=
@@ -2664,6 +2673,7 @@ function acceptsLaneCandidate(
 			);
 		case "local_body_lane":
 			return (
+				sharedAdmission ||
 				acceptsLocalBodyLaneByPrimaryEvidence(evidenceProfile, plan) ||
 				acceptsLocalBodyLaneBySurvivalCriticalPassageRescue(
 					evaluation,
@@ -2673,6 +2683,7 @@ function acceptsLaneCandidate(
 			);
 		case "bridge_lane":
 			return (
+				sharedAdmission ||
 				evidenceProfile.bridgePressure >= 0.9 ||
 				evidenceProfile.hybridPressure >= 0.7 ||
 				acceptsBridgeLaneByConnectedMetadataAssist(
@@ -2699,6 +2710,62 @@ function acceptsLaneCandidate(
 					charQuery.terms.length,
 				) ||
 				evidenceProfile.charPressure >= 1.05
+			);
+		default:
+			return false;
+	}
+}
+
+function acceptsLaneBySharedEvidence(
+	laneName: CoverageLexicalLaneName,
+	evaluation: CoverageLexicalLaneEvaluation,
+	profile: CoverageLexicalLaneEvidenceProfile,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (laneName === "char_fallback_lane") {
+		return false;
+	}
+	if (
+		profile.crossScriptRequired &&
+		!profile.crossScriptSatisfied &&
+		profile.requiredCoverageRatio < 0.45
+	) {
+		return false;
+	}
+	const sharedPressure = computeSharedLaneUpperBound(profile);
+	const sharedFloor = computeSharedLaneAdmissionFloor(laneName, plan);
+	if (sharedPressure < sharedFloor) {
+		return false;
+	}
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return (
+				evaluation.hardAnchorMetadata.coverageCount > 0 ||
+				evaluation.bridgeSignal.coverageCount > 0
+			);
+		case "strict_hybrid_lane":
+			return (
+				evaluation.hardAnchorMetadata.coverageCount > 0 &&
+				(evaluation.decisiveBody.coverageCount > 0 ||
+					evaluation.supportBody.coverageCount > 0)
+			);
+		case "relaxed_hybrid_lane":
+			return (
+				evaluation.decisiveBody.coverageCount > 0 ||
+				evaluation.supportBody.coverageCount > 0 ||
+				evaluation.hardAnchorMetadata.coverageCount > 0
+			);
+		case "local_body_lane":
+			return (
+				evaluation.decisiveBody.coverageCount > 0 ||
+				evaluation.supportBody.coverageCount > 0 ||
+				computePassagePressure(evaluation.passageSignal) > 0.45
+			);
+		case "bridge_lane":
+			return (
+				evaluation.bridgeSignal.coverageCount > 0 ||
+				evaluation.phraseMatchCount > 0 ||
+				acceptsBridgeLaneByConnectedMetadataAssist(evaluation, profile)
 			);
 		default:
 			return false;
@@ -2775,6 +2842,9 @@ type CoverageLexicalLaneEvidenceProfile = {
 	hybridPressure: number;
 	passagePressure: number;
 	charPressure: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+	requiredCoverageRatio: number;
 };
 
 function buildLaneEvidenceProfile(
@@ -2823,6 +2893,9 @@ function buildLaneEvidenceProfile(
 		hybridPressure,
 		passagePressure,
 		charPressure,
+		crossScriptRequired: evaluation.crossScriptRequired,
+		crossScriptSatisfied: evaluation.crossScriptSatisfied,
+		requiredCoverageRatio: evaluation.requiredCoverageRatio,
 	};
 }
 
@@ -2877,29 +2950,148 @@ function buildCheapLaneEvidenceProfile(
 	};
 }
 
+function computeSharedLaneUpperBound(
+	profile: CoverageLexicalLaneEvidenceProfile,
+): number {
+	const crossScriptBonus = profile.crossScriptRequired
+		? profile.crossScriptSatisfied
+			? 0.22
+			: 0
+		: 0;
+	return (
+		profile.requiredCoverageRatio * 1.05 +
+		crossScriptBonus +
+		Math.min(profile.anchorPressure, 1.2) * 0.28 +
+		Math.min(profile.bodyUpperBound, 1.5) * 0.42 +
+		Math.min(profile.bridgePressure, 1) * 0.2 +
+		Math.min(profile.passagePressure, 1) * 0.12
+	);
+}
+
+function computeSharedCheapLaneUpperBound(
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+): number {
+	const crossScriptBonus = profile.crossScriptRequired
+		? profile.crossScriptSatisfied
+			? 0.18
+			: 0
+		: 0;
+	return (
+		profile.requiredCoverageRatio * 1 +
+		crossScriptBonus +
+		Math.min(profile.anchorPressure, 1.1) * 0.26 +
+		Math.min(profile.bodyUpperBound, 1.35) * 0.38 +
+		Math.min(profile.bridgePressure, 0.95) * 0.18 +
+		Math.min(profile.passagePressure, 0.8) * 0.1
+	);
+}
+
+function computeSharedLaneAdmissionFloor(
+	laneName: CoverageLexicalLaneName,
+	plan: CoverageLexicalPlan,
+): number {
+	let floor: number;
+	switch (laneName) {
+		case "strict_metadata_lane":
+			floor = 0.9;
+			break;
+		case "strict_hybrid_lane":
+			floor = 0.96;
+			break;
+		case "relaxed_hybrid_lane":
+			floor = 0.72;
+			break;
+		case "local_body_lane":
+			floor = 0.78;
+			break;
+		case "bridge_lane":
+			floor = 0.74;
+			break;
+		case "char_fallback_lane":
+			return Number.POSITIVE_INFINITY;
+		default:
+			floor = 0.8;
+			break;
+	}
+	if (plan.coverageRequirements.requiresCrossScriptCoverage) {
+		floor += 0.04;
+	}
+	if (
+		plan.rescuePotential.phraseRescueLikely ||
+		plan.rescuePotential.localWitnessLikely ||
+		plan.rescuePotential.unresolvedBodyUpgradeLikely
+	) {
+		floor -= 0.04;
+	}
+	if (laneName === "strict_metadata_lane" && plan.rescuePotential.metadataIdentityLikely) {
+		floor -= 0.02;
+	}
+	if (laneName === "bridge_lane" && plan.rescuePotential.bridgeRescueLikely) {
+		floor -= 0.03;
+	}
+	return Math.max(0.58, floor);
+}
+
+function computeSharedLaneProtectionFloor(
+	plan: CoverageLexicalPlan,
+): number {
+	let floor = Math.max(
+		0.62,
+		Math.min(
+			0.82,
+			plan.coverageRequirements.minimumMatchCount * 0.42,
+		),
+	);
+	if (plan.coverageRequirements.requiresCrossScriptCoverage) {
+		floor += 0.05;
+	}
+	if (
+		plan.rescuePotential.localWitnessLikely ||
+		plan.rescuePotential.unresolvedBodyUpgradeLikely
+	) {
+		floor -= 0.05;
+	}
+	if (plan.rescuePotential.phraseRescueLikely) {
+		floor -= 0.03;
+	}
+	return Math.max(0.5, floor);
+}
+
 function computeLaneEvidenceUpperBound(
 	laneName: CoverageLexicalLaneName,
 	profile: CoverageLexicalLaneEvidenceProfile,
 ): number {
+	const sharedUpperBound = computeSharedLaneUpperBound(profile);
 	switch (laneName) {
 		case "strict_metadata_lane":
-			return profile.anchorPressure + profile.bridgePressure * 0.2;
+			return Math.max(
+				sharedUpperBound,
+				profile.anchorPressure + profile.bridgePressure * 0.2,
+			);
 		case "strict_hybrid_lane":
-			return profile.hybridPressure + profile.bodyUpperBound * 0.15;
+			return Math.max(
+				sharedUpperBound,
+				profile.hybridPressure + profile.bodyUpperBound * 0.15,
+			);
 		case "relaxed_hybrid_lane":
-			return (
+			return Math.max(
+				sharedUpperBound,
 				profile.hybridPressure +
 				profile.bodyUpperBound * 0.32 +
 				profile.bridgePressure * 0.16
 			);
 		case "local_body_lane":
-			return (
+			return Math.max(
+				sharedUpperBound,
 				profile.bodyUpperBound +
 				profile.passagePressure * 0.3 +
 				profile.metadataAssistPressure * 0.12
 			);
 		case "bridge_lane":
-			return profile.bridgePressure + profile.hybridPressure * 0.18;
+			return Math.max(
+				sharedUpperBound,
+				profile.bridgePressure + profile.hybridPressure * 0.18,
+			);
 		case "char_fallback_lane":
 			return profile.charPressure + profile.bridgePressure * 0.1;
 		default:
@@ -2911,25 +3103,37 @@ function computeCheapLaneUpperBound(
 	laneName: CoverageLexicalLaneName,
 	profile: CoverageLexicalCheapLaneEvidenceProfile,
 ): number {
+	const sharedUpperBound = computeSharedCheapLaneUpperBound(profile);
 	switch (laneName) {
 		case "strict_metadata_lane":
-			return profile.anchorPressure + profile.bridgePressure * 0.2;
+			return Math.max(
+				sharedUpperBound,
+				profile.anchorPressure + profile.bridgePressure * 0.2,
+			);
 		case "strict_hybrid_lane":
-			return profile.hybridPressure + profile.bodyUpperBound * 0.15;
+			return Math.max(
+				sharedUpperBound,
+				profile.hybridPressure + profile.bodyUpperBound * 0.15,
+			);
 		case "relaxed_hybrid_lane":
-			return (
+			return Math.max(
+				sharedUpperBound,
 				profile.hybridPressure +
 				profile.bodyUpperBound * 0.32 +
 				profile.bridgePressure * 0.16
 			);
 		case "local_body_lane":
-			return (
+			return Math.max(
+				sharedUpperBound,
 				profile.bodyUpperBound +
 				profile.passagePressure * 0.3 +
 				profile.metadataAssistPressure * 0.12
 			);
 		case "bridge_lane":
-			return profile.bridgePressure + profile.hybridPressure * 0.18;
+			return Math.max(
+				sharedUpperBound,
+				profile.bridgePressure + profile.hybridPressure * 0.18,
+			);
 		case "char_fallback_lane":
 			return profile.charPressure + profile.bridgePressure * 0.1;
 		default:
@@ -2941,15 +3145,26 @@ function computeLaneProtectionFloor(
 	laneName: CoverageLexicalLaneName,
 	plan: CoverageLexicalPlan,
 ): number {
+	const sharedFloor = computeSharedLaneProtectionFloor(plan);
 	switch (laneName) {
 		case "strict_hybrid_lane":
-			return Math.max(0.95, plan.relaxedMinimumMatchCount * 0.7);
+			return Math.min(
+				Math.max(0.95, plan.relaxedMinimumMatchCount * 0.7),
+				sharedFloor + 0.18,
+			);
 		case "relaxed_hybrid_lane":
-			return Math.max(0.7, plan.relaxedMinimumMatchCount * 0.55);
+			return Math.min(
+				Math.max(0.7, plan.relaxedMinimumMatchCount * 0.55),
+				sharedFloor + 0.08,
+			);
 		case "local_body_lane":
-			return Math.max(
-				0.82,
-				Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) * 0.72,
+			return Math.min(
+				Math.max(
+					0.82,
+					Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) *
+						0.72,
+				),
+				sharedFloor + 0.12,
 			);
 		default:
 			return Number.POSITIVE_INFINITY;
