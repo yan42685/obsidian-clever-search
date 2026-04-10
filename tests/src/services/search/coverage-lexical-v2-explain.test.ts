@@ -1,10 +1,10 @@
-﻿import {
-	buildCoverageLexicalV2QueryAnalysis,
-} from "src/services/search/coverage-lexical-v2/query-units";
 import {
-	buildCoverageLexicalV2RankingCandidate,
+	buildCoverageLexicalV2QueryAnalysis,
+} from "src/services/search/coverage-lexical-v2/query";
+import {
+	buildCoverageLexicalV2CheapComparatorCandidate,
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical-v2/ranking";
+} from "src/services/search/coverage-lexical-v2/comparator";
 import {
 	buildCoverageLexicalV2ExplainPayload,
 } from "src/services/search/coverage-lexical-v2/explain";
@@ -56,13 +56,13 @@ describe("coverage lexical v2 explain payload", () => {
 			],
 			bestWindow: null,
 		};
-		const leftCandidate = buildCoverageLexicalV2RankingCandidate(queryAnalysis, leftEvidence);
-		const rightCandidate = buildCoverageLexicalV2RankingCandidate(queryAnalysis, rightEvidence);
+		const leftCandidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, leftEvidence);
+		const rightCandidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, rightEvidence);
 		const explain = buildCoverageLexicalV2ExplainPayload(
 			queryAnalysis,
 			[
-				{ evidence: leftEvidence, rankingCandidate: leftCandidate },
-				{ evidence: rightEvidence, rankingCandidate: rightCandidate },
+				{ evidence: leftEvidence, comparatorCandidate: leftCandidate },
+				{ evidence: rightEvidence, comparatorCandidate: rightCandidate },
 			],
 			{ left: leftCandidate, right: rightCandidate },
 		);

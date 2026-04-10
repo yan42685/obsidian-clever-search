@@ -1,30 +1,30 @@
 import {
-	buildCoverageLexicalV2RuntimeBestWindowForDocument,
-	buildCoverageLexicalV2RuntimeMatchedPrimaryUnits,
-	type CoverageLexicalV2RuntimeDocumentLexicalState,
-	type CoverageLexicalV2RuntimePrimaryUnitDefinition,
-} from "src/services/search/coverage-lexical-v2/runtime";
+	buildCoverageLexicalV2CandidateCascadeBestWindowForDocument,
+	buildCoverageLexicalV2CandidateCascadeMatchedPrimaryUnits,
+	type CoverageLexicalV2CandidateCascadeDocumentLexicalState,
+	type CoverageLexicalV2CandidateCascadePrimaryUnitDefinition,
+} from "src/services/search/coverage-lexical-v2/candidate-cascade";
 
-describe("coverage lexical v2 runtime evidence helpers", () => {
-	test("builds matched primary units from query-unit-aware field evidence", () => {
-		const primaryUnits: CoverageLexicalV2RuntimePrimaryUnitDefinition[] = [
+describe("coverage lexical v2 candidate evidence helpers", () => {
+	test("builds matched primary units from query-aware field evidence", () => {
+		const primaryUnits: CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[] = [
 			{
 				normalizedText: "ai",
 				surfaceGroupIndex: 0,
 				surfaceKind: "latin",
 			},
 			{
-				normalizedText: "省考",
+				normalizedText: "\u7701\u8003",
 				surfaceGroupIndex: 1,
 				surfaceKind: "han",
 			},
 		];
 
-		const matchedPrimaryUnits = buildCoverageLexicalV2RuntimeMatchedPrimaryUnits(
+		const matchedPrimaryUnits = buildCoverageLexicalV2CandidateCascadeMatchedPrimaryUnits(
 			primaryUnits,
 			{
 				basenameTerms: ["ai"],
-				bodyTerms: ["ai", "省考"],
+				bodyTerms: ["ai", "\u7701\u8003"],
 			},
 			{
 				includePrefix: true,
@@ -43,7 +43,7 @@ describe("coverage lexical v2 runtime evidence helpers", () => {
 				matchQuality: "exact",
 			},
 			{
-				normalizedText: "省考",
+				normalizedText: "\u7701\u8003",
 				surfaceGroupIndex: 1,
 				surfaceKind: "han",
 				strongestField: "body",
@@ -54,16 +54,16 @@ describe("coverage lexical v2 runtime evidence helpers", () => {
 	});
 
 	test("derives best window only from exact local evidence", () => {
-		const document: CoverageLexicalV2RuntimeDocumentLexicalState = {
+		const document: CoverageLexicalV2CandidateCascadeDocumentLexicalState = {
 			docId: "doc-1",
-			path: "notes/ai-省考.md",
+			path: "notes/ai-shengkao.md",
 			fieldTerms: {
-				basenameTerms: ["ai", "省考"],
+				basenameTerms: ["ai", "\u7701\u8003"],
 			},
-			basenameTokenSequence: ["ai", "省考"],
+			basenameTokenSequence: ["ai", "\u7701\u8003"],
 		};
 
-		const bestWindow = buildCoverageLexicalV2RuntimeBestWindowForDocument(
+		const bestWindow = buildCoverageLexicalV2CandidateCascadeBestWindowForDocument(
 			[
 				{
 					normalizedText: "ai",
@@ -73,7 +73,7 @@ describe("coverage lexical v2 runtime evidence helpers", () => {
 					matchQuality: "exact",
 				},
 				{
-					normalizedText: "省考",
+					normalizedText: "\u7701\u8003",
 					surfaceGroupIndex: 1,
 					surfaceKind: "han",
 					strongestField: "basename",
@@ -85,7 +85,7 @@ describe("coverage lexical v2 runtime evidence helpers", () => {
 
 		expect(bestWindow).toEqual({
 			field: "basename",
-			matchedUnitKeys: ["0:ai", "1:省考"],
+			matchedUnitKeys: ["0:ai", "1:\u7701\u8003"],
 			windowWidth: 2,
 			averageDistance: 1,
 			preservesSurfaceOrder: true,

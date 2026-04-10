@@ -1,14 +1,14 @@
-﻿import type { CoverageLexicalV2QueryAnalysis } from "../query-units";
+import type { CoverageLexicalV2QueryAnalysis } from "../query";
 import type {
 	CoverageLexicalV2BestWindowEvidence,
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
 	CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
 	CoverageLexicalV2PrimaryUnitMatchQuality,
 	CoverageLexicalV2PrimaryUnitProximityScore,
-	CoverageLexicalV2RankingCandidate,
-	CoverageLexicalV2RankingEvidence,
+	CoverageLexicalV2ComparatorCandidate,
+	CoverageLexicalV2ComparatorEvidence,
 	CoverageLexicalV2SurfaceCoverageShape,
-} from "./coverage-lexical-ranking-types";
+} from "./coverage-lexical-comparator-types";
 
 const CORROBORATION_BONUS = 0.1;
 const FIELD_PRIORITY: ReadonlyArray<keyof CoverageLexicalV2MatchedPrimaryUnitFieldProfile> = [
@@ -20,10 +20,10 @@ const FIELD_PRIORITY: ReadonlyArray<keyof CoverageLexicalV2MatchedPrimaryUnitFie
 	"bodyScore",
 ];
 
-export function buildCoverageLexicalV2RankingCandidate(
+export function buildCoverageLexicalV2CheapComparatorCandidate(
 	queryAnalysis: CoverageLexicalV2QueryAnalysis,
-	evidence: CoverageLexicalV2RankingEvidence,
-): CoverageLexicalV2RankingCandidate {
+	evidence: CoverageLexicalV2ComparatorEvidence,
+): CoverageLexicalV2ComparatorCandidate {
 	const primaryUnitKeys = new Set(
 		queryAnalysis.primaryUnits.map((unit) => createPrimaryUnitKey(unit.surfaceGroupIndex, unit.normalizedText)),
 	);
@@ -36,8 +36,20 @@ export function buildCoverageLexicalV2RankingCandidate(
 		surfaceCoverageShape: buildSurfaceCoverageShape(queryAnalysis, matchedPrimaryUnits),
 		matchedPrimaryUnitFieldProfile: buildFieldProfile(matchedPrimaryUnits),
 		primaryUnitMatchQuality: buildPrimaryUnitMatchQuality(matchedPrimaryUnits),
-		primaryUnitProximityScore: buildPrimaryUnitProximityScore(matchedPrimaryUnits, evidence.bestWindow ?? null),
 		stableDeterministicKey: evidence.stableDeterministicKey,
+	};
+}
+
+export function patchCoverageLexicalV2ComparatorCandidateWithProximity(
+	comparatorCandidate: CoverageLexicalV2ComparatorCandidate,
+	evidence: CoverageLexicalV2ComparatorEvidence,
+): CoverageLexicalV2ComparatorCandidate {
+	return {
+		...comparatorCandidate,
+		primaryUnitProximityScore: buildPrimaryUnitProximityScore(
+			evidence.matchedPrimaryUnits,
+			evidence.bestWindow ?? null,
+		),
 	};
 }
 

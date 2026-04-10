@@ -1,9 +1,9 @@
 import {
 	searchCoverageLexicalV2Engine,
-	type CoverageLexicalV2RuntimeStorageReader,
+	type CoverageLexicalV2CandidateCascadeStorageReader,
 } from "src/services/search/coverage-lexical-v2";
 
-function createStorageReader(): CoverageLexicalV2RuntimeStorageReader {
+function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 	const documents = new Map([
 		[1, {
 			path: "notes/ai-design.md",

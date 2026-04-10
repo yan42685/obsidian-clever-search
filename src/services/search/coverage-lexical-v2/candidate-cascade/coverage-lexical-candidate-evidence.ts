@@ -3,14 +3,14 @@ import type {
 	CoverageLexicalV2MatchField,
 	CoverageLexicalV2MatchQualityKind,
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
-} from "../ranking";
+} from "../comparator";
 import {
 	compareCoverageLexicalV2MatchQuality,
-	getCoverageLexicalV2RuntimeMatchQuality,
-	type CoverageLexicalV2RuntimeMatchOptions,
-} from "./coverage-lexical-runtime-match";
+	getCoverageLexicalV2CandidateCascadeMatchQuality,
+	type CoverageLexicalV2CandidateCascadeMatchOptions,
+} from "./coverage-lexical-candidate-match";
 
-export type CoverageLexicalV2RuntimeFieldTerms = {
+export type CoverageLexicalV2CandidateCascadeFieldTerms = {
 	basenameTerms?: readonly string[];
 	aliasTerms?: readonly string[];
 	headingsTerms?: readonly string[];
@@ -19,50 +19,50 @@ export type CoverageLexicalV2RuntimeFieldTerms = {
 	bodyTerms?: readonly string[];
 };
 
-export type CoverageLexicalV2RuntimeDocumentLexicalState = {
+export type CoverageLexicalV2CandidateCascadeDocumentLexicalState = {
 	docId: string | number;
 	path: string;
 	stableDeterministicKey?: string;
-	fieldTerms: CoverageLexicalV2RuntimeFieldTerms;
+	fieldTerms: CoverageLexicalV2CandidateCascadeFieldTerms;
 	basenameTokenSequence?: readonly string[];
 	aliasTokenSequence?: readonly string[];
 	headingsTokenSequence?: readonly string[];
 	bodyTokenSequence?: readonly string[];
 };
 
-export type CoverageLexicalV2RuntimePrimaryUnitDefinition = {
+export type CoverageLexicalV2CandidateCascadePrimaryUnitDefinition = {
 	normalizedText: string;
 	surfaceGroupIndex: number;
 	surfaceKind: "latin" | "han" | "mixed";
 };
 
-type CoverageLexicalV2RuntimeLocalWindowField = Extract<
+type CoverageLexicalV2CandidateCascadeLocalWindowField = Extract<
 	CoverageLexicalV2MatchField,
 	"basename" | "aliases" | "headings" | "body"
 >;
 
-type CoverageLexicalV2RuntimeResolvedBestWindow = {
-	field: CoverageLexicalV2RuntimeLocalWindowField;
+type CoverageLexicalV2CandidateCascadeResolvedBestWindow = {
+	field: CoverageLexicalV2CandidateCascadeLocalWindowField;
 	matchedUnitKeys: string[];
 	windowWidth: number;
 	averageDistance: number;
 	preservesSurfaceOrder: boolean;
 };
 
-type CoverageLexicalV2RuntimeFieldMatch = {
+type CoverageLexicalV2CandidateCascadeFieldMatch = {
 	field: CoverageLexicalV2MatchField;
 	quality: CoverageLexicalV2MatchQualityKind;
 };
 
-const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS: readonly CoverageLexicalV2RuntimeLocalWindowField[] = [
+const COVERAGE_LEXICAL_V2_CANDIDATE_CASCADE_LOCAL_WINDOW_FIELDS: readonly CoverageLexicalV2CandidateCascadeLocalWindowField[] = [
 	"basename",
 	"aliases",
 	"headings",
 	"body",
 ];
 
-const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY: Record<
-	CoverageLexicalV2RuntimeLocalWindowField,
+const COVERAGE_LEXICAL_V2_CANDIDATE_CASCADE_LOCAL_WINDOW_FIELD_PRIORITY: Record<
+	CoverageLexicalV2CandidateCascadeLocalWindowField,
 	number
 > = {
 	basename: 0,
@@ -71,10 +71,10 @@ const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY: Record<
 	body: 3,
 };
 
-export function buildCoverageLexicalV2RuntimeMatchedPrimaryUnits(
-	primaryUnits: readonly CoverageLexicalV2RuntimePrimaryUnitDefinition[],
-	fieldTerms: CoverageLexicalV2RuntimeFieldTerms,
-	options: CoverageLexicalV2RuntimeMatchOptions,
+export function buildCoverageLexicalV2CandidateCascadeMatchedPrimaryUnits(
+	primaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[],
+	fieldTerms: CoverageLexicalV2CandidateCascadeFieldTerms,
+	options: CoverageLexicalV2CandidateCascadeMatchOptions,
 ): CoverageLexicalV2MatchedPrimaryUnitEvidence[] {
 	const normalizedFieldTerms = {
 		basenameTerms: normalizeTerms(fieldTerms.basenameTerms),
@@ -102,20 +102,20 @@ export function buildCoverageLexicalV2RuntimeMatchedPrimaryUnits(
 	return units;
 }
 
-export function buildCoverageLexicalV2RuntimeBestWindowForDocument(
+export function buildCoverageLexicalV2CandidateCascadeBestWindowForDocument(
 	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
-	document: CoverageLexicalV2RuntimeDocumentLexicalState,
+	document: CoverageLexicalV2CandidateCascadeDocumentLexicalState,
 ): CoverageLexicalV2BestWindowEvidence | null {
-	let bestWindow: CoverageLexicalV2RuntimeResolvedBestWindow | null = null;
-	for (const field of COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS) {
-		const candidateWindow = buildCoverageLexicalV2RuntimeFieldBestWindow(
+	let bestWindow: CoverageLexicalV2CandidateCascadeResolvedBestWindow | null = null;
+	for (const field of COVERAGE_LEXICAL_V2_CANDIDATE_CASCADE_LOCAL_WINDOW_FIELDS) {
+		const candidateWindow = buildCoverageLexicalV2CandidateCascadeFieldBestWindow(
 			matchedPrimaryUnits,
 			field,
-			getCoverageLexicalV2RuntimeFieldTokenSequence(document, field),
+			getCoverageLexicalV2CandidateCascadeFieldTokenSequence(document, field),
 		);
 		if (
 			candidateWindow != null &&
-			(bestWindow == null || isBetterCoverageLexicalV2RuntimeBestWindow(candidateWindow, bestWindow))
+			(bestWindow == null || isBetterCoverageLexicalV2CandidateCascadeBestWindow(candidateWindow, bestWindow))
 		) {
 			bestWindow = candidateWindow;
 		}
@@ -123,11 +123,11 @@ export function buildCoverageLexicalV2RuntimeBestWindowForDocument(
 	return bestWindow;
 }
 
-function buildCoverageLexicalV2RuntimeFieldBestWindow(
+function buildCoverageLexicalV2CandidateCascadeFieldBestWindow(
 	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
-	field: CoverageLexicalV2RuntimeLocalWindowField,
+	field: CoverageLexicalV2CandidateCascadeLocalWindowField,
 	tokenSequence: readonly string[] | undefined,
-): CoverageLexicalV2RuntimeResolvedBestWindow | null {
+): CoverageLexicalV2CandidateCascadeResolvedBestWindow | null {
 	if (!tokenSequence || tokenSequence.length === 0) {
 		return null;
 	}
@@ -152,7 +152,7 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 				continue;
 			}
 			occurrences.push({
-				unitKey: createCoverageLexicalV2RuntimeUnitKey(
+				unitKey: createCoverageLexicalV2CandidateCascadeUnitKey(
 					relevantUnit.surfaceGroupIndex,
 					relevantUnit.normalizedText,
 				),
@@ -166,7 +166,7 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 	}
 	const requiredUnitKeys = new Set(
 		relevantUnits.map((unit) =>
-			createCoverageLexicalV2RuntimeUnitKey(unit.surfaceGroupIndex, unit.normalizedText),
+			createCoverageLexicalV2CandidateCascadeUnitKey(unit.surfaceGroupIndex, unit.normalizedText),
 		),
 	);
 	let bestWindow:
@@ -192,12 +192,12 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 			const candidateWindow = {
 				start: startOccurrence.position,
 				end: endOccurrence.position,
-				matchedUnitKeys: dedupeCoverageLexicalV2RuntimeWindowUnitKeys(occurrences, start, end),
+				matchedUnitKeys: dedupeCoverageLexicalV2CandidateCascadeWindowUnitKeys(occurrences, start, end),
 				groupIndices: occurrences.slice(start, end + 1).map((occurrence) => occurrence.groupIndex),
 			};
 			if (
 				bestWindow == null ||
-				isBetterCoverageLexicalV2RuntimeWindowShape(candidateWindow, bestWindow)
+				isBetterCoverageLexicalV2CandidateCascadeWindowShape(candidateWindow, bestWindow)
 			) {
 				bestWindow = candidateWindow;
 			}
@@ -225,17 +225,17 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 		field,
 		matchedUnitKeys: bestWindow.matchedUnitKeys,
 		windowWidth: bestWindow.end - bestWindow.start + 1,
-		averageDistance: computeCoverageLexicalV2RuntimeAverageDistance(
+		averageDistance: computeCoverageLexicalV2CandidateCascadeAverageDistance(
 			bestWindow.groupIndices.length,
 			bestWindow.end - bestWindow.start,
 		),
-		preservesSurfaceOrder: preservesCoverageLexicalV2RuntimeSurfaceOrder(bestWindow.groupIndices),
+		preservesSurfaceOrder: preservesCoverageLexicalV2CandidateCascadeSurfaceOrder(bestWindow.groupIndices),
 	};
 }
 
-function getCoverageLexicalV2RuntimeFieldTokenSequence(
-	document: CoverageLexicalV2RuntimeDocumentLexicalState,
-	field: CoverageLexicalV2RuntimeLocalWindowField,
+function getCoverageLexicalV2CandidateCascadeFieldTokenSequence(
+	document: CoverageLexicalV2CandidateCascadeDocumentLexicalState,
+	field: CoverageLexicalV2CandidateCascadeLocalWindowField,
 ): readonly string[] | undefined {
 	switch (field) {
 		case "basename":
@@ -259,24 +259,24 @@ function collectMatchedFields(
 		tagTerms: readonly string[];
 		bodyTerms: readonly string[];
 	},
-	options: CoverageLexicalV2RuntimeMatchOptions,
-): CoverageLexicalV2RuntimeFieldMatch[] {
-	const fieldMatches: CoverageLexicalV2RuntimeFieldMatch[] = [];
-	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "basename", term, terms.basenameTerms, options);
-	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "aliases", term, terms.aliasTerms, options);
-	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "headings", term, terms.headingsTerms, options);
-	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "folder", term, terms.folderTerms, options);
-	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "tag", term, terms.tagTerms, options);
-	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "body", term, terms.bodyTerms, options);
+	options: CoverageLexicalV2CandidateCascadeMatchOptions,
+): CoverageLexicalV2CandidateCascadeFieldMatch[] {
+	const fieldMatches: CoverageLexicalV2CandidateCascadeFieldMatch[] = [];
+	pushCoverageLexicalV2CandidateCascadeFieldMatch(fieldMatches, "basename", term, terms.basenameTerms, options);
+	pushCoverageLexicalV2CandidateCascadeFieldMatch(fieldMatches, "aliases", term, terms.aliasTerms, options);
+	pushCoverageLexicalV2CandidateCascadeFieldMatch(fieldMatches, "headings", term, terms.headingsTerms, options);
+	pushCoverageLexicalV2CandidateCascadeFieldMatch(fieldMatches, "folder", term, terms.folderTerms, options);
+	pushCoverageLexicalV2CandidateCascadeFieldMatch(fieldMatches, "tag", term, terms.tagTerms, options);
+	pushCoverageLexicalV2CandidateCascadeFieldMatch(fieldMatches, "body", term, terms.bodyTerms, options);
 	return fieldMatches;
 }
 
-function pushCoverageLexicalV2RuntimeFieldMatch(
-	fieldMatches: CoverageLexicalV2RuntimeFieldMatch[],
+function pushCoverageLexicalV2CandidateCascadeFieldMatch(
+	fieldMatches: CoverageLexicalV2CandidateCascadeFieldMatch[],
 	field: CoverageLexicalV2MatchField,
 	queryTerm: string,
 	fieldTerms: readonly string[],
-	options: CoverageLexicalV2RuntimeMatchOptions,
+	options: CoverageLexicalV2CandidateCascadeMatchOptions,
 ): void {
 	const bestMatchQuality = findBestFieldMatchQuality(queryTerm, fieldTerms, options);
 	if (bestMatchQuality == null) {
@@ -291,11 +291,11 @@ function pushCoverageLexicalV2RuntimeFieldMatch(
 function findBestFieldMatchQuality(
 	queryTerm: string,
 	fieldTerms: readonly string[],
-	options: CoverageLexicalV2RuntimeMatchOptions,
+	options: CoverageLexicalV2CandidateCascadeMatchOptions,
 ): CoverageLexicalV2MatchQualityKind | null {
 	let bestMatchQuality: CoverageLexicalV2MatchQualityKind | null = null;
 	for (const fieldTerm of fieldTerms) {
-		const matchQuality = getCoverageLexicalV2RuntimeMatchQuality(queryTerm, fieldTerm, options);
+		const matchQuality = getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, fieldTerm, options);
 		if (matchQuality == null) {
 			continue;
 		}
@@ -310,7 +310,7 @@ function findBestFieldMatchQuality(
 }
 
 function selectBestMatchQuality(
-	fieldMatches: readonly CoverageLexicalV2RuntimeFieldMatch[],
+	fieldMatches: readonly CoverageLexicalV2CandidateCascadeFieldMatch[],
 ): CoverageLexicalV2MatchQualityKind {
 	let bestMatchQuality = fieldMatches[0].quality;
 	for (let index = 1; index < fieldMatches.length; index += 1) {
@@ -325,9 +325,9 @@ function normalizeTerms(terms: readonly string[] | undefined): string[] {
 	return (terms ?? []).map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0);
 }
 
-function isBetterCoverageLexicalV2RuntimeBestWindow(
-	left: CoverageLexicalV2RuntimeResolvedBestWindow,
-	right: CoverageLexicalV2RuntimeResolvedBestWindow,
+function isBetterCoverageLexicalV2CandidateCascadeBestWindow(
+	left: CoverageLexicalV2CandidateCascadeResolvedBestWindow,
+	right: CoverageLexicalV2CandidateCascadeResolvedBestWindow,
 ): boolean {
 	if (left.matchedUnitKeys.length !== right.matchedUnitKeys.length) {
 		return left.matchedUnitKeys.length > right.matchedUnitKeys.length;
@@ -341,15 +341,15 @@ function isBetterCoverageLexicalV2RuntimeBestWindow(
 	if (left.averageDistance !== right.averageDistance) {
 		return left.averageDistance < right.averageDistance;
 	}
-	const leftPriority = COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY[left.field];
-	const rightPriority = COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY[right.field];
+	const leftPriority = COVERAGE_LEXICAL_V2_CANDIDATE_CASCADE_LOCAL_WINDOW_FIELD_PRIORITY[left.field];
+	const rightPriority = COVERAGE_LEXICAL_V2_CANDIDATE_CASCADE_LOCAL_WINDOW_FIELD_PRIORITY[right.field];
 	if (leftPriority !== rightPriority) {
 		return leftPriority < rightPriority;
 	}
 	return false;
 }
 
-function isBetterCoverageLexicalV2RuntimeWindowShape(
+function isBetterCoverageLexicalV2CandidateCascadeWindowShape(
 	left: {
 		start: number;
 		end: number;
@@ -366,8 +366,8 @@ function isBetterCoverageLexicalV2RuntimeWindowShape(
 	if (left.matchedUnitKeys.length !== right.matchedUnitKeys.length) {
 		return left.matchedUnitKeys.length > right.matchedUnitKeys.length;
 	}
-	const leftPreservesOrder = preservesCoverageLexicalV2RuntimeSurfaceOrder(left.groupIndices);
-	const rightPreservesOrder = preservesCoverageLexicalV2RuntimeSurfaceOrder(right.groupIndices);
+	const leftPreservesOrder = preservesCoverageLexicalV2CandidateCascadeSurfaceOrder(left.groupIndices);
+	const rightPreservesOrder = preservesCoverageLexicalV2CandidateCascadeSurfaceOrder(right.groupIndices);
 	if (leftPreservesOrder !== rightPreservesOrder) {
 		return leftPreservesOrder;
 	}
@@ -376,11 +376,11 @@ function isBetterCoverageLexicalV2RuntimeWindowShape(
 	if (leftWindowWidth !== rightWindowWidth) {
 		return leftWindowWidth < rightWindowWidth;
 	}
-	const leftAverageDistance = computeCoverageLexicalV2RuntimeAverageDistance(
+	const leftAverageDistance = computeCoverageLexicalV2CandidateCascadeAverageDistance(
 		left.groupIndices.length,
 		left.end - left.start,
 	);
-	const rightAverageDistance = computeCoverageLexicalV2RuntimeAverageDistance(
+	const rightAverageDistance = computeCoverageLexicalV2CandidateCascadeAverageDistance(
 		right.groupIndices.length,
 		right.end - right.start,
 	);
@@ -390,7 +390,7 @@ function isBetterCoverageLexicalV2RuntimeWindowShape(
 	return left.start < right.start;
 }
 
-function dedupeCoverageLexicalV2RuntimeWindowUnitKeys(
+function dedupeCoverageLexicalV2CandidateCascadeWindowUnitKeys(
 	occurrences: ReadonlyArray<{ unitKey: string }>,
 	start: number,
 	end: number,
@@ -408,7 +408,7 @@ function dedupeCoverageLexicalV2RuntimeWindowUnitKeys(
 	return out;
 }
 
-function preservesCoverageLexicalV2RuntimeSurfaceOrder(groupIndices: readonly number[]): boolean {
+function preservesCoverageLexicalV2CandidateCascadeSurfaceOrder(groupIndices: readonly number[]): boolean {
 	for (let index = 1; index < groupIndices.length; index += 1) {
 		if (groupIndices[index] < groupIndices[index - 1]) {
 			return false;
@@ -417,7 +417,7 @@ function preservesCoverageLexicalV2RuntimeSurfaceOrder(groupIndices: readonly nu
 	return true;
 }
 
-function computeCoverageLexicalV2RuntimeAverageDistance(
+function computeCoverageLexicalV2CandidateCascadeAverageDistance(
 	groupCount: number,
 	span: number,
 ): number {
@@ -427,7 +427,7 @@ function computeCoverageLexicalV2RuntimeAverageDistance(
 	return span / (groupCount - 1);
 }
 
-function createCoverageLexicalV2RuntimeUnitKey(
+function createCoverageLexicalV2CandidateCascadeUnitKey(
 	surfaceGroupIndex: number,
 	normalizedText: string,
 ): string {

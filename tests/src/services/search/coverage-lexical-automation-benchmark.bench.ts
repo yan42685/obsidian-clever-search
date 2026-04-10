@@ -4280,7 +4280,7 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				{
 					primaryNote:
-						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Default V2 comparisons should anchor on MiniSearch vs the independent V2 runtime.",
+						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Default V2 comparisons should anchor on MiniSearch vs the independent V2 lexical engine.",
 					v2VsMiniSearch: {
 						avgMsPerQueryRatio: round(
 							computeRelativeRatio(

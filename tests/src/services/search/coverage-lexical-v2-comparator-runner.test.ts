@@ -1,11 +1,11 @@
-﻿import {
-	runCoverageLexicalV2Ranking,
+import {
+	runCoverageLexicalV2Comparator,
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical-v2/ranking";
+} from "src/services/search/coverage-lexical-v2/comparator";
 
 describe("coverage lexical v2 ranking runner", () => {
 	test("runs the independent V2 chain end-to-end for AI \u7701\u8003", () => {
-		const result = runCoverageLexicalV2Ranking("AI \u7701\u8003", ["ai", "\u7701\u8003"], [
+		const result = runCoverageLexicalV2Comparator("AI \u7701\u8003", ["ai", "\u7701\u8003"], [
 			{
 				candidateId: "metadata-plus-body",
 				stableDeterministicKey: "a",
@@ -98,7 +98,7 @@ describe("coverage lexical v2 ranking runner", () => {
 	});
 
 	test("keeps near order-neutral behavior for steam password and password steam", () => {
-		const forward = runCoverageLexicalV2Ranking("steam password", ["steam", "password"], [
+		const forward = runCoverageLexicalV2Comparator("steam password", ["steam", "password"], [
 			{
 				candidateId: "two-unit-body",
 				stableDeterministicKey: "a",
@@ -143,7 +143,7 @@ describe("coverage lexical v2 ranking runner", () => {
 				bestWindow: null,
 			},
 		]);
-		const reversed = runCoverageLexicalV2Ranking("password steam", ["password", "steam"], [
+		const reversed = runCoverageLexicalV2Comparator("password steam", ["password", "steam"], [
 			{
 				candidateId: "two-unit-body",
 				stableDeterministicKey: "a",

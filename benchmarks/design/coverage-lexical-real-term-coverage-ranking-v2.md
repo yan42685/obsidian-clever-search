@@ -1,4 +1,4 @@
-﻿
+
 # Coverage Lexical Query-Unit Ranking V2
 
 Date: 2026-04-10
@@ -62,12 +62,11 @@ long-lived dual maintenance.
 
 The intended internal structure is:
 
-- `coverage-lexical-v2/query-units/`
-- `coverage-lexical-v2/ranking/`
-- `coverage-lexical-v2/coarse/`
+- `coverage-lexical-v2/query/`
+- `coverage-lexical-v2/comparator/`
 - `coverage-lexical-v2/display/`
 - `coverage-lexical-v2/explain/`
-- `coverage-lexical-v2/runtime/`
+- `coverage-lexical-v2/candidate-cascade/`
 
 During migration, the existing large files remain as orchestration shells:
 
@@ -381,8 +380,8 @@ Decision: `A`
 
 Decision: `B`
 
-- `AI 省考`
-- `政治理论`
+- `AI 省锟斤拷`
+- `锟斤拷锟斤拷锟斤拷锟斤拷`
 - mixed-script two-sided queries
 - tokenizer-boundary-mismatch queries
 - `steam password`
@@ -640,11 +639,11 @@ This is the hardest lexical priority.
 
 Examples:
 
-- a result matching both `AI` and `省考` should outrank one matching only `省考`
-- a result matching both `政治` and `理论` should outrank one matching only one
+- a result matching both `AI` and `省锟斤拷` should outrank one matching only `省锟斤拷`
+- a result matching both `锟斤拷锟斤拷` and `锟斤拷锟斤拷` should outrank one matching only one
   of them
 - a result matching both the Latin and Han sides of
-  `projected token 运行时访问` should outrank a one-sided result
+  `projected token 锟斤拷锟斤拷时锟斤拷锟斤拷` should outrank a one-sided result
 
 ### 2. `surfaceCoverageShape`
 
@@ -655,11 +654,11 @@ surface-completeness layer built from **query surface grouping**.
 
 Examples:
 
-- `AI 省考`
+- `AI 省锟斤拷`
   both visible groups should be covered
-- `政治理论`
+- `锟斤拷锟斤拷锟斤拷锟斤拷`
   both visible groups should be covered
-- `projected token 运行时访问`
+- `projected token 锟斤拷锟斤拷时锟斤拷锟斤拷`
   both visible script sides should be covered
 
 This layer exists because two candidates may sometimes have similar raw unit
@@ -715,7 +714,7 @@ Locked V2 decision:
 
 Examples:
 
-- matching `AI` in basename and `省考` in body should outrank matching both only
+- matching `AI` in basename and `省锟斤拷` in body should outrank matching both only
   in body
 - matching the same units in metadata identity should outrank matching them
   only through weaker metadata support
@@ -955,23 +954,23 @@ is likely drifting away from its intended design.
 
 ## Examples
 
-### `AI 省考`
+### `AI 省锟斤拷`
 
 Preferred lexical order:
 
-1. result matching `AI` in metadata identity and `省考` in body
-2. result matching both `AI` and `省考` in body
-3. result matching only `省考`
+1. result matching `AI` in metadata identity and `省锟斤拷` in body
+2. result matching both `AI` and `省锟斤拷` in body
+3. result matching only `省锟斤拷`
 
-### `政治理论`
+### `锟斤拷锟斤拷锟斤拷锟斤拷`
 
 Preferred lexical order:
 
-1. result matching both `政治` and `理论`
+1. result matching both `锟斤拷锟斤拷` and `锟斤拷锟斤拷`
 2. weaker results still matching both units
 3. results matching only one unit
 
-### `projected token 运行时访问`
+### `projected token 锟斤拷锟斤拷时锟斤拷锟斤拷`
 
 Preferred lexical order:
 
@@ -982,11 +981,11 @@ Preferred lexical order:
 ## Implementation Status
 
 - Phase 1. Query Analysis And Query Unit Model: completed
-  - independent `v2/query-units/` modules now build primary, fallback, and derived query-unit outputs
+  - independent `v2/query/` modules now build primary, fallback, and derived query-unit outputs
   - query analysis now exposes visible surface groups plus `surfaceCoverageShape`
   - standalone tests now cover Latin-only, Han-only/short-Han, mixed-script, and tokenizer-boundary-mismatch query shapes
 - Phase 2. Ranking Signal Model: completed
-  - independent `v2/ranking/` signal types now encode:
+  - independent `v2/comparator/` signal types now encode:
     - `distinctMatchedPrimaryQueryUnitCount`
     - `surfaceCoverageShape`
     - `matchedPrimaryUnitFieldProfile`
@@ -997,19 +996,25 @@ Preferred lexical order:
   - standalone regression tests now cover representative mixed queries, field-profile ordering, and top tie-band proximity behavior
 - Phase 3. Final Comparator Rewrite: completed
   - the independent V2 comparator module exists and is tested
-  - an independent V2 ranking-signal builder now converts query analysis plus matched-unit evidence into comparator-ready candidate signals
-  - an independent V2 ranking runner now executes query analysis, signal building, comparator ordering, top tie-band selection, and structured explain output end to end
-  - the independent runtime V2 engine now projects exact metadata-phrase, heading-local, and body-local best-window evidence into `primaryUnitProximityScore` without changing the earlier lexical layers
-  - the V2 runtime path now independently derives Latin `exact > prefix > fuzzy` evidence for `primaryUnitMatchQuality`, while Han remains exact-only
+  - an independent V2 comparator-signal builder now converts query analysis plus matched-unit evidence into comparator-ready candidate signals
+  - an independent V2 comparator runner now executes query analysis, signal building, comparator ordering, top tie-band selection, and structured explain output end to end
+  - the independent V2 lexical engine now projects exact metadata-phrase, heading-local, and body-local best-window evidence into `primaryUnitProximityScore` without changing the earlier lexical layers
+  - the V2 candidate-cascade path now independently derives Latin `exact > prefix > fuzzy` evidence for `primaryUnitMatchQuality`, while Han remains exact-only
   - the independent `coverage-lexical-v2/` engine now owns query-side analysis from raw query text instead of depending on legacy query-term helpers
-  - runtime regression coverage now explicitly guards `exact > prefix > fuzzy` ordering on tied lexical coverage through the independent V2 engine path
+  - pipeline regression coverage now explicitly guards `exact > prefix > fuzzy` ordering on tied lexical coverage through the independent V2 engine path
 - Phase 4. Coarse/Hydration Alignment: completed
-  - the independent `coverage-lexical-v2/` runtime now owns candidate collection and coarse budgeting behind a thin storage adapter boundary
+  - the independent `coverage-lexical-v2/` candidate-cascade now owns candidate collection and verification budgeting behind a thin storage adapter boundary
   - fuller visible-coverage candidates continue to receive expensive verification priority while incomplete candidates are downgraded without reintroducing deferred-verification ranking semantics
-  - the active runtime no longer depends on migration-path flags to choose between coarse worldviews
+  - the active candidate-cascade no longer depends on migration-path flags to choose between coarse worldviews
 - Phase 5. Display Simplification: completed
   - the active V2 display policy is now pure top-slice presentation with no rescue or protected-minimum keep behavior
-  - active runtime display behavior is exercised only through the independent V2 engine/runtime path
+  - active display behavior is exercised only through the independent V2 engine/candidate-cascade path
+- Phase 6. Candidate Sourcing Consolidation: completed
+  - the active V2 candidate-cascade now uses a strict layered cascade:
+    candidate sourcing -> layer-1 frontier planning -> layer-2/3/4 complete-bucket narrowing -> highest-unresolved-bucket verification -> top-bucket proximity resolution -> display
+  - cheap comparator signals are now cached once per candidate and reused through layer-2/3/4 narrowing; verification only patches proximity on the resolved top bucket
+  - bounded fallback remains discovery-only in normal ranking, while a narrow Han salvage path is available only when normal layer-1 coverage and fuzzy salvage are both globally absent
+  - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
 
 ### Locked Decision Implementation Snapshot (2026-04-10)
 
@@ -1033,40 +1038,37 @@ Implemented with important caveats:
   layers tie, but the score is still computed more broadly than the strict
   "top two only" target wording
 - item 19 (recall target shape):
-  the active independent V2 runtime now uses a layered source-based cascade
+  the active independent V2 lexical engine now uses a layered source-based cascade
   rather than a legacy lane-shaped recall path; the remaining gap is to keep
   tightening candidate-sourcing budgets, fallback boundaries, and V2-only test
   contracts around that cascade
 - item 26 (old-code deletion discipline):
-  active runtime flags and old active comparator/display paths have been
+  active candidate-cascade flags and old active comparator/display paths have been
   removed, but legacy V1 reference code is intentionally retained for ongoing
   comparison and debugging while V2 continues to stabilize
 
 Still not fully realized:
 
-- item 18 (fallback ceilings):
-  the active V2 runtime now enforces bounded fallback discovery and stage
-  separation, but the full four-ceiling policy still needs more explicit
-  per-document and explain/debug surfacing
-- Phase 6 layered narrowing:
-  the active runtime now has layer-1 frontier planning plus late verification,
-  but finer unresolved-bucket re-entry across every cheap layer is still draft
-  territory rather than a fully closed implementation
+- future verification budgeting:
+  the active candidate-cascade now uses a strict count-only overflow guard for proximity,
+  but a future dual-threshold model would still need a cheap
+  `estimatedBodyTokenCount`-style candidate-cascade signal before token-budget gating can
+  be added safely
 
 Current validation snapshot:
 
 - automation benchmark continues to compare `MiniSearch` vs
   `CoverageLexical(V2)` by default
 - latest benchmark run keeps V2 ahead on quality:
-  - objective: `0.863` vs `0.468`
-  - top1: `0.778` vs `0.444`
+  - objective: `0.885` vs `0.468`
+  - top1: `0.818` vs `0.444`
   - top3: `0.939` vs `0.495`
   - top5: `1.000` vs `0.500`
   - zeroRate: `0.000` vs `0.500`
-- latest relative anchor remains in the expected range:
-  - avg query latency ratio: `2.648x`
-  - p50 ratio: `2.562x`
-  - p100 ratio: `2.718x`
+- latest relative anchor remains ratio-first against `MiniSearch`:
+  - avg query latency ratio: `1.842x`
+  - p50 ratio: `1.811x`
+  - p100 ratio: `1.966x`
   - estimated index bytes ratio: `1.265x`
 
 ## Implementation Plan
@@ -1167,8 +1169,8 @@ Acceptance criteria:
   - `primaryUnitMatchQuality`
   - `primaryUnitProximityScore`
 - known counterexamples have explicit regression coverage, including:
-  - `AI 省考`
-  - `政治理论`
+  - `AI 省锟斤拷`
+  - `锟斤拷锟斤拷锟斤拷锟斤拷`
   - mixed-script one-sided distractors
 
 ### Phase 3. Final Comparator Rewrite
@@ -1195,8 +1197,8 @@ Constraints:
 Acceptance criteria:
 
 - ranking tests are updated or added for:
-  - `AI 省考`
-  - `政治理论`
+  - `AI 省锟斤拷`
+  - `锟斤拷锟斤拷锟斤拷锟斤拷`
   - mixed-script single-side distractors
   - metadata-identity-plus-body outranking body-only
   - near order-neutral behavior for `steam password` and `password steam`
@@ -1260,7 +1262,7 @@ Acceptance criteria:
 
 Goal:
 
-- let the independent V2 runtime own lexical candidate sourcing directly
+- let the independent V2 lexical engine own lexical candidate sourcing directly
 - stop treating legacy V1 recall/lane identity as the target architecture
 - keep V1 available only as reference material while V2 candidate sourcing is
   still being tightened
@@ -1268,7 +1270,7 @@ Goal:
 Expected work:
 
 - consolidate active candidate collection inside the independent
-  `coverage-lexical-v2/` runtime path
+  `coverage-lexical-v2/` candidate-cascade path
 - define explicit source responsibilities for:
   - metadata exact candidate sourcing
   - bounded Latin prefix/fuzzy expansion
@@ -1297,25 +1299,26 @@ Acceptance criteria:
 - exception-aware and partial-memory cases do not regress materially
 - display rescue is not reintroduced to compensate for recall/coarse defects
 
-Layered Lexical Cascade draft:
+  Layered Lexical Cascade implementation:
 
-- active V2 should prefer a **layered lexical cascade** instead of reviving
-  separate recall/coarse worldviews
-- the active runtime shape is now:
-  - candidate sourcing
-  - layer-1 frontier planning
-  - cheap survivor ranking over layers 2-4
-  - late verification for a small body/proximity frontier
-  - final ordering among survivors
-- this is an execution model only; it does not replace the locked V2 ranking
-  worldview
+  - active V2 uses a **layered lexical cascade** instead of reviving separate
+    recall/coarse worldviews
+  - the active pipeline shape is now:
+    - candidate sourcing
+    - layer-1 frontier planning
+    - layer-2/3/4 complete-bucket narrowing with defer-first re-entry
+    - highest-unresolved-bucket verification for body/proximity
+    - top-bucket proximity resolution
+    - display
+  - this is an execution model only; it does not replace the locked V2 ranking
+    worldview
 
 Mixed completeness mode:
 
 - `exact` source is the only source class that V2 currently treats as
   exhaustive / completeness-bearing
 - bounded `prefix`, `fuzzy`, and `fallback` sources are active in the V2
-  runtime path, but they are best-effort and must not be described as `100%`
+  candidate-cascade path, but they are best-effort and must not be described as `100%`
   recall
 - benchmark and tests may therefore claim exact-candidate completeness, but not
   global completeness for prefix/fuzzy/fallback admission
@@ -1332,51 +1335,70 @@ Layer 1 semantics:
 Fuzzy salvage:
 
 - when the best normal `potentialPrimaryCoverageCount` is `0` and
-  `isFuzzy=true`, the active runtime may switch to a one-shot
+  `isFuzzy=true`, the active pipeline may switch to a one-shot
   `fuzzySalvageCoverageCount`
 - this keeps typo-only Latin queries from dying before ranking
 - any candidate with positive normal layer-1 coverage still has absolute
   priority over pure fuzzy-salvage candidates
 
-Defer-first frontier policy:
+  Defer-first frontier policy:
 
-- layer-1 frontier planning is bucket-based; the active frontier is filled from
-  highest layer-1 buckets downward until the configured frontier target is
-  covered
-- lower buckets are deferred first, not hard-dropped immediately
-- higher-quality buckets should absorb the normal verification budget before
-  weaker buckets are reconsidered
+  - layer-1 frontier planning is bucket-based; the active frontier is filled from
+    highest layer-1 buckets downward until the configured frontier target is
+    covered
+  - lower buckets are deferred first, not hard-dropped immediately
+  - layers 2-4 also retain complete prefix-vector buckets only; if retained
+    buckets do not yet cover the return target, the next deferred bucket is
+    pulled back in full before the next layer continues
 
-Fallback role in the cascade:
+  Fallback role in the cascade:
 
-- fallback is a bounded discovery source only
-- fallback may introduce documents into the candidate pool when exact/prefix
-  sourcing is too thin
-- fallback does not directly contribute layer-1 through layer-4 primary
-  ranking signal
-- a pure fallback-hit document that never acquires primary evidence must not
-  survive the active frontier as a lexical winner
+  - fallback is a bounded discovery source only
+  - fallback may introduce documents into the candidate pool when exact/prefix
+    sourcing is too thin
+  - fallback does not directly contribute layer-1 through layer-4 primary
+    ranking signal
+  - a pure fallback-hit document that never acquires primary evidence must not
+    survive the active frontier as a lexical winner
+  - the only exception is narrow Han salvage:
+    if the query has Han groups and both normal layer-1 coverage and fuzzy
+    salvage are globally zero, fallback-hit surface groups may be used as a
+    weak last-resort ordering key
+  - Han salvage is grouped by distinct touched surface groups; multiple fallback
+    hits inside the same surface group do not stack
 
-Late verification:
+  Late verification:
 
-- body-token prefetch and body-window/proximity work should happen only for the
-  small late verification frontier
-- early sourcing may record body exact presence, but it should not eagerly
-  hydrate all body token sequences
+  - body-token prefetch and body-window/proximity work should happen only for
+    the highest unresolved post-layer-4 bucket
+  - early sourcing may record body exact presence, but it should not eagerly
+    hydrate all body token sequences
+  - `verificationTarget` is no longer the active driver of late verification
+  - the active overflow rule is
+    `proximityOverflowCap = min(20, max(12, returnTarget + 2))`
+  - if the highest unresolved bucket exceeds that cap, proximity is skipped for
+    the whole bucket and stable deterministic fallback resolves the remaining
+    ties
 
-Current implementation note:
+  Current implementation note:
 
-- the active V2 runtime now uses a cascade candidate-state path under
-  `coverage-lexical-v2/runtime/`
-- the previous V2 one-shot runtime/prototype/coarse path has been removed from
-  the active V2 tree; shared runtime evidence helpers now live in active
-  runtime-oriented modules rather than legacy orchestration files
-- exact candidate sourcing is exhaustive
-- layer-1 currently uses Latin `exact/prefix`, Han `exact`, plus fuzzy salvage
-  when normal coverage is zero
-- late verification is active for the body/proximity frontier
-- this should be treated as the current Phase 6 draft baseline, not as the
-  fully finished end state
+- the active V2 candidate-cascade now uses a cascade candidate-state path under
+  `coverage-lexical-v2/candidate-cascade/`
+  - the previous V2 one-shot runtime/prototype/coarse path has been removed from
+    the active V2 tree; shared candidate evidence helpers now live in active
+    candidate-cascade-oriented modules rather than legacy orchestration files
+  - exact candidate sourcing is exhaustive
+  - layer-1 currently uses Latin `exact/prefix`, Han `exact`, plus fuzzy salvage
+    when normal coverage is zero
+  - cheap comparator signals are cached once per candidate and reused through
+    layer-2/3/4 complete-bucket narrowing
+  - late verification is active only for the highest unresolved bucket, with an
+    explicit overflow skip path
+  - proximity is patched only onto the resolved top bucket; there is no longer
+    a separate global rerank stage in the active architecture
+  - internal candidate-cascade trace now records layer mode, retained/deferred buckets,
+    verification bucket membership, resolved top-bucket membership,
+    verification skip reason, and salvage usage
 
 ### Phase 7. Old-Code Removal And Shell Shrinkage
 
@@ -1399,7 +1421,7 @@ Phase-order note:
 
 - Phase 7 should trail V2 stabilization work rather than compete with it
 - while V2 is still being refined, V1 may remain in-tree as reference material
-  even if it is no longer the active runtime path
+  even if it is no longer the active candidate-cascade path
 - the priority order is:
   - keep the active path on independent V2
   - improve V2 against recall suites, real-query regressions, and benchmarks
@@ -1425,7 +1447,7 @@ Required scenario coverage:
 
 - short Han queries with two visible units
 - mixed-script two-sided queries
-- `AI 省考` style short ASCII + Han queries
+- `AI 省锟斤拷` style short ASCII + Han queries
 - order-swapped query pairs
 - tokenizer-boundary-mismatch queries that require fallback involvement
 - metadata identity vs body-only competition
@@ -1442,8 +1464,8 @@ Benchmark policy:
 
 Real-query gates that must remain active:
 
-- `AI 省考`
-- `政治理论`
+- `AI 省锟斤拷`
+- `锟斤拷锟斤拷锟斤拷锟斤拷`
 - mixed-script two-sided cases
 - tokenizer-boundary-mismatch queries
 - `steam password`
@@ -1533,7 +1555,7 @@ Implementation priority right now:
 
 - keep V1 in-tree as a reference baseline for comparison, debugging, and
   regression investigation
-- continue improving the independent V2 runtime and candidate-sourcing cascade first
+- continue improving the independent V2 lexical engine and candidate-sourcing cascade first
 - delay broad V1 deletion until V2 quality and stability are clearly settled
 
 
@@ -1602,7 +1624,7 @@ V2 should be benchmarked directly.
 Default benchmark comparison policy:
 
 - compare `MiniSearch` and V2 by default
-- the automation benchmark now reports `MiniSearch` and `CoverageLexical(V2)` as the default comparison pair, using the independent V2 runtime directly
+- the automation benchmark now reports `MiniSearch` and `CoverageLexical(V2)` as the default comparison pair, using the independent V2 lexical engine directly
 - do not keep V1 lexical ranking as the default benchmark peer once V2
   benchmarking is in place
 - V1 may still be used as a temporary migration reference when investigating

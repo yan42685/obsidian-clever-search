@@ -1,18 +1,18 @@
-﻿import type {
+import type {
 	CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
 	CoverageLexicalV2PrimaryUnitMatchQuality,
 	CoverageLexicalV2PrimaryUnitProximityScore,
-	CoverageLexicalV2RankingCandidate,
-	CoverageLexicalV2RankingDecision,
-	CoverageLexicalV2RankingLayer,
+	CoverageLexicalV2ComparatorCandidate,
+	CoverageLexicalV2ComparatorDecision,
+	CoverageLexicalV2ComparatorLayer,
 	CoverageLexicalV2SurfaceCoverageShape,
-} from "./coverage-lexical-ranking-types";
+} from "./coverage-lexical-comparator-types";
 
-export function compareCoverageLexicalV2RankingCandidates(
-	left: CoverageLexicalV2RankingCandidate,
-	right: CoverageLexicalV2RankingCandidate,
+export function compareCoverageLexicalV2ComparatorCandidates(
+	left: CoverageLexicalV2ComparatorCandidate,
+	right: CoverageLexicalV2ComparatorCandidate,
 ): number {
-	const decision = explainCoverageLexicalV2RankingDecision(left, right);
+	const decision = explainCoverageLexicalV2ComparatorDecision(left, right);
 	if (decision.winnerCandidateId === left.candidateId) {
 		return -1;
 	}
@@ -22,12 +22,12 @@ export function compareCoverageLexicalV2RankingCandidates(
 	return 0;
 }
 
-export function explainCoverageLexicalV2RankingDecision(
-	left: CoverageLexicalV2RankingCandidate,
-	right: CoverageLexicalV2RankingCandidate,
-): CoverageLexicalV2RankingDecision {
+export function explainCoverageLexicalV2ComparatorDecision(
+	left: CoverageLexicalV2ComparatorCandidate,
+	right: CoverageLexicalV2ComparatorCandidate,
+): CoverageLexicalV2ComparatorDecision {
 	const layeredComparisons: Array<{
-		layer: CoverageLexicalV2RankingLayer;
+		layer: CoverageLexicalV2ComparatorLayer;
 		comparison: number;
 		reason: string;
 	}> = [
@@ -41,12 +41,15 @@ export function explainCoverageLexicalV2RankingDecision(
 		},
 		{
 			layer: "surfaceCoverageShape",
-			comparison: compareSurfaceCoverageShapes(left.surfaceCoverageShape, right.surfaceCoverageShape),
+			comparison: compareCoverageLexicalV2SurfaceCoverageShapes(
+				left.surfaceCoverageShape,
+				right.surfaceCoverageShape,
+			),
 			reason: "better visible surface-group coverage wins",
 		},
 		{
 			layer: "matchedPrimaryUnitFieldProfile",
-			comparison: compareFieldProfiles(
+			comparison: compareCoverageLexicalV2FieldProfiles(
 				left.matchedPrimaryUnitFieldProfile,
 				right.matchedPrimaryUnitFieldProfile,
 			),
@@ -54,12 +57,15 @@ export function explainCoverageLexicalV2RankingDecision(
 		},
 		{
 			layer: "primaryUnitMatchQuality",
-			comparison: compareMatchQuality(left.primaryUnitMatchQuality, right.primaryUnitMatchQuality),
+			comparison: compareCoverageLexicalV2PrimaryUnitMatchQuality(
+				left.primaryUnitMatchQuality,
+				right.primaryUnitMatchQuality,
+			),
 			reason: "stronger primary-unit lexical match quality wins",
 		},
 		{
 			layer: "primaryUnitProximityScore",
-			comparison: compareOptionalProximity(
+			comparison: compareCoverageLexicalV2OptionalPrimaryUnitProximity(
 				left.primaryUnitProximityScore ?? null,
 				right.primaryUnitProximityScore ?? null,
 			),
@@ -96,16 +102,16 @@ export function explainCoverageLexicalV2RankingDecision(
 	};
 }
 
-export function selectCoverageLexicalV2TopTieBand(
-	candidates: readonly CoverageLexicalV2RankingCandidate[],
+export function selectCoverageLexicalV2ComparatorTopTieBand(
+	candidates: readonly CoverageLexicalV2ComparatorCandidate[],
 	maxSize = 2,
-): CoverageLexicalV2RankingCandidate[] {
-	const sorted = [...candidates].sort(compareCoverageLexicalV2RankingCandidates);
+): CoverageLexicalV2ComparatorCandidate[] {
+	const sorted = [...candidates].sort(compareCoverageLexicalV2ComparatorCandidates);
 	if (sorted.length === 0) {
 		return [];
 	}
 	const leader = sorted[0];
-	const out: CoverageLexicalV2RankingCandidate[] = [leader];
+	const out: CoverageLexicalV2ComparatorCandidate[] = [leader];
 	for (let index = 1; index < sorted.length && out.length < maxSize; index += 1) {
 		const candidate = sorted[index];
 		if (compareWithoutProximityOrFallback(leader, candidate) !== 0) {
@@ -117,18 +123,27 @@ export function selectCoverageLexicalV2TopTieBand(
 }
 
 function compareWithoutProximityOrFallback(
-	left: CoverageLexicalV2RankingCandidate,
-	right: CoverageLexicalV2RankingCandidate,
+	left: CoverageLexicalV2ComparatorCandidate,
+	right: CoverageLexicalV2ComparatorCandidate,
 ): number {
 	return firstNonZero([
 		compareNumbersDescending(left.distinctMatchedPrimaryQueryUnitCount, right.distinctMatchedPrimaryQueryUnitCount),
-		compareSurfaceCoverageShapes(left.surfaceCoverageShape, right.surfaceCoverageShape),
-		compareFieldProfiles(left.matchedPrimaryUnitFieldProfile, right.matchedPrimaryUnitFieldProfile),
-		compareMatchQuality(left.primaryUnitMatchQuality, right.primaryUnitMatchQuality),
+		compareCoverageLexicalV2SurfaceCoverageShapes(
+			left.surfaceCoverageShape,
+			right.surfaceCoverageShape,
+		),
+		compareCoverageLexicalV2FieldProfiles(
+			left.matchedPrimaryUnitFieldProfile,
+			right.matchedPrimaryUnitFieldProfile,
+		),
+		compareCoverageLexicalV2PrimaryUnitMatchQuality(
+			left.primaryUnitMatchQuality,
+			right.primaryUnitMatchQuality,
+		),
 	]);
 }
 
-function compareSurfaceCoverageShapes(
+export function compareCoverageLexicalV2SurfaceCoverageShapes(
 	left: CoverageLexicalV2SurfaceCoverageShape,
 	right: CoverageLexicalV2SurfaceCoverageShape,
 ): number {
@@ -140,7 +155,7 @@ function compareSurfaceCoverageShapes(
 	]);
 }
 
-function compareFieldProfiles(
+export function compareCoverageLexicalV2FieldProfiles(
 	left: CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
 	right: CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
 ): number {
@@ -154,7 +169,7 @@ function compareFieldProfiles(
 	]);
 }
 
-function compareMatchQuality(
+export function compareCoverageLexicalV2PrimaryUnitMatchQuality(
 	left: CoverageLexicalV2PrimaryUnitMatchQuality,
 	right: CoverageLexicalV2PrimaryUnitMatchQuality,
 ): number {
@@ -166,7 +181,7 @@ function compareMatchQuality(
 	]);
 }
 
-function compareOptionalProximity(
+export function compareCoverageLexicalV2OptionalPrimaryUnitProximity(
 	left: CoverageLexicalV2PrimaryUnitProximityScore | null,
 	right: CoverageLexicalV2PrimaryUnitProximityScore | null,
 ): number {
@@ -179,10 +194,10 @@ function compareOptionalProximity(
 	if (left == null && right != null) {
 		return 1;
 	}
-	return compareProximity(left!, right!);
+	return compareCoverageLexicalV2PrimaryUnitProximity(left!, right!);
 }
 
-function compareProximity(
+export function compareCoverageLexicalV2PrimaryUnitProximity(
 	left: CoverageLexicalV2PrimaryUnitProximityScore,
 	right: CoverageLexicalV2PrimaryUnitProximityScore,
 ): number {

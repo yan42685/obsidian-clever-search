@@ -1,13 +1,13 @@
-﻿import {
-	compareCoverageLexicalV2RankingCandidates,
-	explainCoverageLexicalV2RankingDecision,
-	selectCoverageLexicalV2TopTieBand,
-	type CoverageLexicalV2RankingCandidate,
-} from "src/services/search/coverage-lexical-v2/ranking";
+import {
+	compareCoverageLexicalV2ComparatorCandidates,
+	explainCoverageLexicalV2ComparatorDecision,
+	selectCoverageLexicalV2ComparatorTopTieBand,
+	type CoverageLexicalV2ComparatorCandidate,
+} from "src/services/search/coverage-lexical-v2/comparator";
 
 function createCandidate(
-	overrides: Partial<CoverageLexicalV2RankingCandidate>,
-): CoverageLexicalV2RankingCandidate {
+	overrides: Partial<CoverageLexicalV2ComparatorCandidate>,
+): CoverageLexicalV2ComparatorCandidate {
 	return {
 		candidateId: "candidate",
 		distinctMatchedPrimaryQueryUnitCount: 1,
@@ -49,8 +49,8 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "b",
 		});
 
-		expect(compareCoverageLexicalV2RankingCandidates(fuller, partial)).toBeLessThan(0);
-		expect(explainCoverageLexicalV2RankingDecision(fuller, partial)).toMatchObject({
+		expect(compareCoverageLexicalV2ComparatorCandidates(fuller, partial)).toBeLessThan(0);
+		expect(explainCoverageLexicalV2ComparatorDecision(fuller, partial)).toMatchObject({
 			layer: "distinctMatchedPrimaryQueryUnitCount",
 			winnerCandidateId: "fuller",
 		});
@@ -80,14 +80,14 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "b",
 		});
 
-		expect(compareCoverageLexicalV2RankingCandidates(twoSided, oneSided)).toBeLessThan(0);
-		expect(explainCoverageLexicalV2RankingDecision(twoSided, oneSided)).toMatchObject({
+		expect(compareCoverageLexicalV2ComparatorCandidates(twoSided, oneSided)).toBeLessThan(0);
+		expect(explainCoverageLexicalV2ComparatorDecision(twoSided, oneSided)).toMatchObject({
 			layer: "surfaceCoverageShape",
 			winnerCandidateId: "two-sided",
 		});
 	});
 
-	test("AI 省考 prefers metadata identity plus body over body only and partial body", () => {
+	test("AI 省�?prefers metadata identity plus body over body only and partial body", () => {
 		const metadataPlusBody = createCandidate({
 			candidateId: "ai-metadata-plus-body",
 			distinctMatchedPrimaryQueryUnitCount: 2,
@@ -158,8 +158,8 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "c",
 		});
 
-		expect(compareCoverageLexicalV2RankingCandidates(metadataPlusBody, bodyOnlyTwoUnit)).toBeLessThan(0);
-		expect(compareCoverageLexicalV2RankingCandidates(bodyOnlyTwoUnit, partialBody)).toBeLessThan(0);
+		expect(compareCoverageLexicalV2ComparatorCandidates(metadataPlusBody, bodyOnlyTwoUnit)).toBeLessThan(0);
+		expect(compareCoverageLexicalV2ComparatorCandidates(bodyOnlyTwoUnit, partialBody)).toBeLessThan(0);
 	});
 
 	test("prefers stronger field placement with weak corroboration over body only", () => {
@@ -188,8 +188,8 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "b",
 		});
 
-		expect(compareCoverageLexicalV2RankingCandidates(metadataPlusBody, bodyOnly)).toBeLessThan(0);
-		expect(explainCoverageLexicalV2RankingDecision(metadataPlusBody, bodyOnly)).toMatchObject({
+		expect(compareCoverageLexicalV2ComparatorCandidates(metadataPlusBody, bodyOnly)).toBeLessThan(0);
+		expect(explainCoverageLexicalV2ComparatorDecision(metadataPlusBody, bodyOnly)).toMatchObject({
 			layer: "matchedPrimaryUnitFieldProfile",
 			winnerCandidateId: "metadata-plus-body",
 		});
@@ -224,8 +224,8 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "b",
 		});
 
-		expect(compareCoverageLexicalV2RankingCandidates(fuller, partial)).toBeLessThan(0);
-		expect(explainCoverageLexicalV2RankingDecision(fuller, partial)).toMatchObject({
+		expect(compareCoverageLexicalV2ComparatorCandidates(fuller, partial)).toBeLessThan(0);
+		expect(explainCoverageLexicalV2ComparatorDecision(fuller, partial)).toMatchObject({
 			layer: "distinctMatchedPrimaryQueryUnitCount",
 			winnerCandidateId: "fuller-political-theory",
 		});
@@ -263,8 +263,8 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "c",
 		});
 
-		expect(compareCoverageLexicalV2RankingCandidates(exact, prefix)).toBeLessThan(0);
-		expect(compareCoverageLexicalV2RankingCandidates(prefix, fuzzy)).toBeLessThan(0);
+		expect(compareCoverageLexicalV2ComparatorCandidates(exact, prefix)).toBeLessThan(0);
+		expect(compareCoverageLexicalV2ComparatorCandidates(prefix, fuzzy)).toBeLessThan(0);
 	});
 
 	test("uses proximity only for the very small top tie-band", () => {
@@ -308,12 +308,12 @@ describe("coverage lexical v2 ranking comparator", () => {
 			stableDeterministicKey: "c",
 		});
 
-		expect(selectCoverageLexicalV2TopTieBand([outsider, rival, leader])).toEqual([
+		expect(selectCoverageLexicalV2ComparatorTopTieBand([outsider, rival, leader])).toEqual([
 			leader,
 			rival,
 		]);
-		expect(compareCoverageLexicalV2RankingCandidates(leader, rival)).toBeLessThan(0);
-		expect(explainCoverageLexicalV2RankingDecision(leader, rival)).toMatchObject({
+		expect(compareCoverageLexicalV2ComparatorCandidates(leader, rival)).toBeLessThan(0);
+		expect(explainCoverageLexicalV2ComparatorDecision(leader, rival)).toMatchObject({
 			layer: "primaryUnitProximityScore",
 			winnerCandidateId: "leader",
 		});

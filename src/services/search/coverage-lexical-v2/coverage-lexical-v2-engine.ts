@@ -3,12 +3,12 @@ import type {
 } from "src/globals/search-types";
 import {
 	buildCoverageLexicalV2QueryAnalysis,
-} from "./query-units";
+} from "./query";
 import {
-	searchCoverageLexicalV2RuntimeCascade,
-	type CoverageLexicalV2RuntimeMatchOptions,
-	type CoverageLexicalV2RuntimeStorageReader,
-} from "./runtime";
+	searchCoverageLexicalV2CandidateCascade,
+	type CoverageLexicalV2CandidateCascadeMatchOptions,
+	type CoverageLexicalV2CandidateCascadeStorageReader,
+} from "./candidate-cascade";
 
 export type CoverageLexicalV2EngineSearchRequest = {
 	queryText: string;
@@ -17,7 +17,7 @@ export type CoverageLexicalV2EngineSearchRequest = {
 	maxItemResults: number;
 	fuzzyProportion: number;
 	tokenizeQueryText(queryText: string): readonly string[];
-	storageReader: CoverageLexicalV2RuntimeStorageReader;
+	storageReader: CoverageLexicalV2CandidateCascadeStorageReader;
 };
 
 export type CoverageLexicalV2EngineSearchResult = {
@@ -58,18 +58,18 @@ export async function searchCoverageLexicalV2Engine(
 			matchedFiles: [],
 		};
 	}
-	const runtimeMatchOptions: CoverageLexicalV2RuntimeMatchOptions = {
+	const cascadeMatchOptions: CoverageLexicalV2CandidateCascadeMatchOptions = {
 		includePrefix: request.isPrefixMatch,
 		includeFuzzy: request.isFuzzy,
 		fuzzyProportion: request.fuzzyProportion,
 	};
-	const cascade = await searchCoverageLexicalV2RuntimeCascade({
+	const cascade = await searchCoverageLexicalV2CandidateCascade({
 		queryText: request.queryText,
 		queryTerms,
 		queryAnalysis,
 		maxItemResults: request.maxItemResults,
 		storageReader: request.storageReader,
-		matchOptions: runtimeMatchOptions,
+		matchOptions: cascadeMatchOptions,
 	});
 	return {
 		queryTerms,

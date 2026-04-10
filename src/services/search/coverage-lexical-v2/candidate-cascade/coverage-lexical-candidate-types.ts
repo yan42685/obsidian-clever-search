@@ -1,4 +1,4 @@
-export type CoverageLexicalV2RuntimePostingField =
+export type CoverageLexicalV2CandidateCascadePostingField =
 	| "basename"
 	| "aliases"
 	| "headings"
@@ -6,7 +6,7 @@ export type CoverageLexicalV2RuntimePostingField =
 	| "tag"
 	| "body";
 
-export type CoverageLexicalV2RuntimeDocumentRecord = {
+export type CoverageLexicalV2CandidateCascadeDocumentRecord = {
 	path: string;
 	stableDeterministicKey?: string;
 	basenameText: string;
@@ -14,10 +14,10 @@ export type CoverageLexicalV2RuntimeDocumentRecord = {
 	headingsText: string;
 };
 
-export type CoverageLexicalV2RuntimeStorageReader = {
-	getDocumentRecord(docId: number): CoverageLexicalV2RuntimeDocumentRecord | null;
+export type CoverageLexicalV2CandidateCascadeStorageReader = {
+	getDocumentRecord(docId: number): CoverageLexicalV2CandidateCascadeDocumentRecord | null;
 	getPostingMatches(
-		field: CoverageLexicalV2RuntimePostingField,
+		field: CoverageLexicalV2CandidateCascadePostingField,
 		term: string,
 	): readonly number[] | Uint32Array | undefined;
 	getSortedLexicon(): readonly string[];

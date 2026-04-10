@@ -1,11 +1,11 @@
-import type { CoverageLexicalV2RankingRunCandidate } from "../ranking";
+import type { CoverageLexicalV2ComparatorRunCandidate } from "../comparator";
 import type {
 	CoverageLexicalV2DisplayOptions,
 	CoverageLexicalV2DisplayResult,
 } from "./coverage-lexical-display-types";
 
 export function applyCoverageLexicalV2DisplayPolicy(
-	rankedCandidates: readonly CoverageLexicalV2RankingRunCandidate[],
+	rankedCandidates: readonly CoverageLexicalV2ComparatorRunCandidate[],
 	options: CoverageLexicalV2DisplayOptions = {},
 ): CoverageLexicalV2DisplayResult {
 	const keepCount = resolveKeepCount(

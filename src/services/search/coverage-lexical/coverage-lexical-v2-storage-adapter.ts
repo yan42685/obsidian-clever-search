@@ -6,17 +6,17 @@ import type {
 } from "../file-search-engine";
 import {
 	searchCoverageLexicalV2Engine,
-	type CoverageLexicalV2RuntimeDocumentRecord,
-	type CoverageLexicalV2RuntimePostingField,
-	type CoverageLexicalV2RuntimeStorageReader,
+	type CoverageLexicalV2CandidateCascadeDocumentRecord,
+	type CoverageLexicalV2CandidateCascadePostingField,
+	type CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../coverage-lexical-v2";
 
 export type CoverageLexicalV2StorageAdapterBindings = {
 	getDocumentRecord(
 		docId: number,
-	): CoverageLexicalV2RuntimeDocumentRecord | null;
+	): CoverageLexicalV2CandidateCascadeDocumentRecord | null;
 	getPostingMatches(
-		field: CoverageLexicalV2RuntimePostingField,
+		field: CoverageLexicalV2CandidateCascadePostingField,
 		term: string,
 	): readonly number[] | Uint32Array | undefined;
 	getSortedLexicon(): readonly string[];
@@ -34,16 +34,16 @@ export type CoverageLexicalV2StorageAdapterSearchOptions = {
 
 export function buildCoverageLexicalV2StorageReader(
 	bindings: CoverageLexicalV2StorageAdapterBindings,
-): CoverageLexicalV2RuntimeStorageReader {
+): CoverageLexicalV2CandidateCascadeStorageReader {
 	return {
-		getDocumentRecord: (docId) => bindings.getDocumentRecord(docId),
-		getPostingMatches: (field, term) =>
+		getDocumentRecord: (docId: number) => bindings.getDocumentRecord(docId),
+		getPostingMatches: (field: CoverageLexicalV2CandidateCascadePostingField, term: string) =>
 			bindings.getPostingMatches(field, term),
 		getSortedLexicon: () => bindings.getSortedLexicon(),
-		getBodyTokenSequence: (docId) => bindings.getBodyTokenSequence(docId),
-		prefetchBodyTokenSequences: (docIds) =>
+		getBodyTokenSequence: (docId: number) => bindings.getBodyTokenSequence(docId),
+		prefetchBodyTokenSequences: (docIds: readonly number[]) =>
 			bindings.prefetchBodyTokenSequences(docIds),
-		tokenizeText: (text) => bindings.tokenizeText(text),
+		tokenizeText: (text: string) => bindings.tokenizeText(text),
 	};
 }
 

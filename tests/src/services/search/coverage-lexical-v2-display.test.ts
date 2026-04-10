@@ -1,11 +1,11 @@
-﻿import {
+import {
 	applyCoverageLexicalV2DisplayPolicy,
 } from "src/services/search/coverage-lexical-v2/display";
 import type {
-	CoverageLexicalV2RankingRunCandidate,
-} from "src/services/search/coverage-lexical-v2/ranking";
+	CoverageLexicalV2ComparatorRunCandidate,
+} from "src/services/search/coverage-lexical-v2/comparator";
 
-function createCandidate(candidateId: string): CoverageLexicalV2RankingRunCandidate {
+function createCandidate(candidateId: string): CoverageLexicalV2ComparatorRunCandidate {
 	return {
 		evidence: {
 			candidateId,
@@ -13,7 +13,7 @@ function createCandidate(candidateId: string): CoverageLexicalV2RankingRunCandid
 			matchedPrimaryUnits: [],
 			bestWindow: null,
 		},
-		rankingCandidate: {
+		comparatorCandidate: {
 			candidateId,
 			distinctMatchedPrimaryQueryUnitCount: 0,
 			surfaceCoverageShape: {

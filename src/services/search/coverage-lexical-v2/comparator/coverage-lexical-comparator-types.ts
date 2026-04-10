@@ -1,4 +1,4 @@
-﻿export type CoverageLexicalV2RankingLayer =
+export type CoverageLexicalV2ComparatorLayer =
 	| "distinctMatchedPrimaryQueryUnitCount"
 	| "surfaceCoverageShape"
 	| "matchedPrimaryUnitFieldProfile"
@@ -63,14 +63,14 @@ export type CoverageLexicalV2BestWindowEvidence = {
 	preservesSurfaceOrder: boolean;
 };
 
-export type CoverageLexicalV2RankingEvidence = {
+export type CoverageLexicalV2ComparatorEvidence = {
 	candidateId: string;
 	stableDeterministicKey: string;
 	matchedPrimaryUnits: CoverageLexicalV2MatchedPrimaryUnitEvidence[];
 	bestWindow?: CoverageLexicalV2BestWindowEvidence | null;
 };
 
-export type CoverageLexicalV2RankingCandidate = {
+export type CoverageLexicalV2ComparatorCandidate = {
 	candidateId: string;
 	distinctMatchedPrimaryQueryUnitCount: number;
 	surfaceCoverageShape: CoverageLexicalV2SurfaceCoverageShape;
@@ -80,8 +80,8 @@ export type CoverageLexicalV2RankingCandidate = {
 	stableDeterministicKey: string;
 };
 
-export type CoverageLexicalV2RankingDecision = {
-	layer: CoverageLexicalV2RankingLayer;
+export type CoverageLexicalV2ComparatorDecision = {
+	layer: CoverageLexicalV2ComparatorLayer;
 	winnerCandidateId: string | null;
 	reason: string;
 };

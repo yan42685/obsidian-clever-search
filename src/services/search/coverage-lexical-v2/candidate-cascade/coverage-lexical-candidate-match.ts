@@ -1,8 +1,8 @@
 import type {
 	CoverageLexicalV2MatchQualityKind,
-} from "../ranking";
+} from "../comparator";
 
-export type CoverageLexicalV2RuntimeMatchOptions = {
+export type CoverageLexicalV2CandidateCascadeMatchOptions = {
 	includePrefix?: boolean;
 	includeFuzzy?: boolean;
 	fuzzyProportion?: number;
@@ -12,21 +12,21 @@ const COVERAGE_LEXICAL_V2_LATIN_QUERY_TERM_REGEX = /^[a-z0-9_-]+$/i;
 const COVERAGE_LEXICAL_V2_MIN_LATIN_PREFIX_LENGTH = 3;
 const COVERAGE_LEXICAL_V2_MIN_LATIN_FUZZY_LENGTH = 5;
 
-export function normalizeCoverageLexicalV2RuntimeTerm(term: string): string {
+export function normalizeCoverageLexicalV2CandidateCascadeTerm(term: string): string {
 	return term.trim().toLowerCase();
 }
 
-export function isCoverageLexicalV2LatinRuntimeTerm(term: string): boolean {
+export function isCoverageLexicalV2LatinCandidateCascadeTerm(term: string): boolean {
 	return COVERAGE_LEXICAL_V2_LATIN_QUERY_TERM_REGEX.test(term);
 }
 
-export function getCoverageLexicalV2RuntimeMatchQuality(
+export function getCoverageLexicalV2CandidateCascadeMatchQuality(
 	queryTerm: string,
 	candidateTerm: string,
-	options: CoverageLexicalV2RuntimeMatchOptions = {},
+	options: CoverageLexicalV2CandidateCascadeMatchOptions = {},
 ): CoverageLexicalV2MatchQualityKind | null {
-	const normalizedQueryTerm = normalizeCoverageLexicalV2RuntimeTerm(queryTerm);
-	const normalizedCandidateTerm = normalizeCoverageLexicalV2RuntimeTerm(candidateTerm);
+	const normalizedQueryTerm = normalizeCoverageLexicalV2CandidateCascadeTerm(queryTerm);
+	const normalizedCandidateTerm = normalizeCoverageLexicalV2CandidateCascadeTerm(candidateTerm);
 	if (normalizedQueryTerm.length === 0 || normalizedCandidateTerm.length === 0) {
 		return null;
 	}
@@ -34,8 +34,8 @@ export function getCoverageLexicalV2RuntimeMatchQuality(
 		return "exact";
 	}
 	if (
-		!isCoverageLexicalV2LatinRuntimeTerm(normalizedQueryTerm) ||
-		!isCoverageLexicalV2LatinRuntimeTerm(normalizedCandidateTerm)
+		!isCoverageLexicalV2LatinCandidateCascadeTerm(normalizedQueryTerm) ||
+		!isCoverageLexicalV2LatinCandidateCascadeTerm(normalizedCandidateTerm)
 	) {
 		return null;
 	}
@@ -72,7 +72,7 @@ export function compareCoverageLexicalV2MatchQuality(
 	left: CoverageLexicalV2MatchQualityKind,
 	right: CoverageLexicalV2MatchQualityKind,
 ): number {
-	return coverageLexicalV2RuntimeMatchQualityRank(left) - coverageLexicalV2RuntimeMatchQualityRank(right);
+	return coverageLexicalV2CandidateCascadeMatchQualityRank(left) - coverageLexicalV2CandidateCascadeMatchQualityRank(right);
 }
 
 function canUseCoverageLexicalV2LatinPrefix(term: string): boolean {
@@ -90,7 +90,7 @@ function computeCoverageLexicalV2LatinFuzzyMaxDistance(
 	return Math.max(1, Math.ceil(term.length * Math.max(0, fuzzyProportion)));
 }
 
-function coverageLexicalV2RuntimeMatchQualityRank(
+function coverageLexicalV2CandidateCascadeMatchQualityRank(
 	kind: CoverageLexicalV2MatchQualityKind,
 ): number {
 	switch (kind) {

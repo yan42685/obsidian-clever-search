@@ -1,8 +1,8 @@
-﻿import type { CoverageLexicalV2QueryAnalysis } from "../query-units";
+import type { CoverageLexicalV2QueryAnalysis } from "../query";
 import {
-	explainCoverageLexicalV2RankingDecision,
-	type CoverageLexicalV2RankingCandidate,
-} from "../ranking";
+	explainCoverageLexicalV2ComparatorDecision,
+	type CoverageLexicalV2ComparatorCandidate,
+} from "../comparator";
 import type {
 	CoverageLexicalV2ExplainCandidateInput,
 	CoverageLexicalV2ExplainPayload,
@@ -12,8 +12,8 @@ export function buildCoverageLexicalV2ExplainPayload(
 	queryAnalysis: CoverageLexicalV2QueryAnalysis,
 	candidates: readonly CoverageLexicalV2ExplainCandidateInput[],
 	pairwiseCandidates?: {
-		left: CoverageLexicalV2RankingCandidate;
-		right: CoverageLexicalV2RankingCandidate;
+		left: CoverageLexicalV2ComparatorCandidate;
+		right: CoverageLexicalV2ComparatorCandidate;
 	} | null,
 ): CoverageLexicalV2ExplainPayload {
 	return {
@@ -26,14 +26,14 @@ export function buildCoverageLexicalV2ExplainPayload(
 		candidates: candidates.map((candidate) => ({
 			candidateId: candidate.evidence.candidateId,
 			stableDeterministicKey: candidate.evidence.stableDeterministicKey,
-			rankingCandidate: candidate.rankingCandidate,
+			comparatorCandidate: candidate.comparatorCandidate,
 			matchedPrimaryUnits: [...candidate.evidence.matchedPrimaryUnits],
 		})),
 		pairwiseDecision: pairwiseCandidates
 			? {
 				leftCandidateId: pairwiseCandidates.left.candidateId,
 				rightCandidateId: pairwiseCandidates.right.candidateId,
-				decision: explainCoverageLexicalV2RankingDecision(pairwiseCandidates.left, pairwiseCandidates.right),
+				decision: explainCoverageLexicalV2ComparatorDecision(pairwiseCandidates.left, pairwiseCandidates.right),
 			}
 			: null,
 	};

@@ -1,10 +1,10 @@
-﻿import type { CoverageLexicalV2QueryAnalysis, CoverageLexicalV2QueryUnit } from "../query-units";
+import type { CoverageLexicalV2QueryAnalysis, CoverageLexicalV2QueryUnit } from "../query";
 import type {
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
-	CoverageLexicalV2RankingCandidate,
-	CoverageLexicalV2RankingDecision,
-	CoverageLexicalV2RankingEvidence,
-} from "../ranking";
+	CoverageLexicalV2ComparatorCandidate,
+	CoverageLexicalV2ComparatorDecision,
+	CoverageLexicalV2ComparatorEvidence,
+} from "../comparator";
 
 export type CoverageLexicalV2ExplainPrimaryUnit = Pick<
 	CoverageLexicalV2QueryUnit,
@@ -16,14 +16,14 @@ export type CoverageLexicalV2ExplainMatchedPrimaryUnit = CoverageLexicalV2Matche
 export type CoverageLexicalV2CandidateExplain = {
 	candidateId: string;
 	stableDeterministicKey: string;
-	rankingCandidate: CoverageLexicalV2RankingCandidate;
+	comparatorCandidate: CoverageLexicalV2ComparatorCandidate;
 	matchedPrimaryUnits: CoverageLexicalV2ExplainMatchedPrimaryUnit[];
 };
 
 export type CoverageLexicalV2PairwiseExplain = {
 	leftCandidateId: string;
 	rightCandidateId: string;
-	decision: CoverageLexicalV2RankingDecision;
+	decision: CoverageLexicalV2ComparatorDecision;
 };
 
 export type CoverageLexicalV2ExplainPayload = {
@@ -38,6 +38,6 @@ export type CoverageLexicalV2ExplainPayload = {
 };
 
 export type CoverageLexicalV2ExplainCandidateInput = {
-	evidence: CoverageLexicalV2RankingEvidence;
-	rankingCandidate: CoverageLexicalV2RankingCandidate;
+	evidence: CoverageLexicalV2ComparatorEvidence;
+	comparatorCandidate: CoverageLexicalV2ComparatorCandidate;
 };

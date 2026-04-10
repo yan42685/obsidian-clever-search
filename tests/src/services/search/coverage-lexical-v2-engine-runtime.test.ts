@@ -46,7 +46,7 @@ function createSimpleCoverageTokenizer() {
 	};
 }
 
-describe("coverage lexical v2 engine runtime path", () => {
+describe("coverage lexical v2 engine candidate-cascade path", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -72,7 +72,7 @@ describe("coverage lexical v2 engine runtime path", () => {
 		}
 	});
 
-test("searchFiles routes through the independent V2 runtime", async () => {
+test("searchFiles routes through the independent V2 lexical engine", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -121,7 +121,7 @@ test("searchFiles routes through the independent V2 runtime", async () => {
 		expect(results.length).toBeGreaterThanOrEqual(1);
 	});
 
-	test("experimental v2 runtime path keeps latin exact above prefix above fuzzy on tied coverage", async () => {
+	test("experimental v2 candidate-cascade path keeps latin exact above prefix above fuzzy on tied coverage", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -172,7 +172,7 @@ test("searchFiles routes through the independent V2 runtime", async () => {
 		]);
 	});
 
-test("searchFiles keeps using the independent v2 runtime path without configuration switches", async () => {
+test("searchFiles keeps using the independent v2 candidate-cascade path without configuration switches", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {

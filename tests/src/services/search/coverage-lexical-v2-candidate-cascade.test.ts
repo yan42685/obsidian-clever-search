@@ -1,13 +1,13 @@
 import {
 	buildCoverageLexicalV2QueryAnalysis,
-} from "src/services/search/coverage-lexical-v2/query-units";
+} from "src/services/search/coverage-lexical-v2/query";
 import {
-	planCoverageLexicalV2RuntimeCascadeLayer1Frontier,
-	resolveCoverageLexicalV2RuntimeCascadePolicy,
-	searchCoverageLexicalV2RuntimeCascade,
+	planCoverageLexicalV2CandidateCascadeLayer1Frontier,
+	resolveCoverageLexicalV2CandidateCascadePolicy,
+	searchCoverageLexicalV2CandidateCascade,
 	type CoverageLexicalV2CascadeCandidateState,
-	type CoverageLexicalV2RuntimeStorageReader,
-} from "src/services/search/coverage-lexical-v2/runtime";
+	type CoverageLexicalV2CandidateCascadeStorageReader,
+} from "src/services/search/coverage-lexical-v2/candidate-cascade";
 
 type TestDocument = {
 	docId: number;
@@ -31,7 +31,7 @@ function createStorageReader(config: {
 	postings: Readonly<Record<string, readonly number[]>>;
 	lexicon: readonly string[];
 }): {
-	reader: CoverageLexicalV2RuntimeStorageReader;
+	reader: CoverageLexicalV2CandidateCascadeStorageReader;
 	prefetchBodyTokenSequences: jest.Mock<Promise<void>, [readonly number[]]>;
 	getBodyTokenSequence: jest.Mock<readonly string[] | undefined, [number]>;
 } {
@@ -150,7 +150,7 @@ describe("coverage lexical v2 cascade", () => {
 		const queryText = "alpha beta";
 		const queryTerms = ["alpha", "beta"];
 
-		const result = await searchCoverageLexicalV2RuntimeCascade({
+		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
@@ -188,7 +188,7 @@ describe("coverage lexical v2 cascade", () => {
 		const queryText = "cache";
 		const queryTerms = ["cache"];
 
-		const result = await searchCoverageLexicalV2RuntimeCascade({
+		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
@@ -232,7 +232,7 @@ describe("coverage lexical v2 cascade", () => {
 		const queryText = "cahce";
 		const queryTerms = ["cahce"];
 
-		const result = await searchCoverageLexicalV2RuntimeCascade({
+		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
@@ -260,8 +260,8 @@ describe("coverage lexical v2 cascade", () => {
 			createSyntheticCandidateState(5, 1),
 		];
 
-		const plan = planCoverageLexicalV2RuntimeCascadeLayer1Frontier(candidates, false, {
-			...resolveCoverageLexicalV2RuntimeCascadePolicy(1),
+		const plan = planCoverageLexicalV2CandidateCascadeLayer1Frontier(candidates, false, false, {
+			...resolveCoverageLexicalV2CandidateCascadePolicy(1),
 			frontierTarget: 2,
 		});
 
@@ -271,6 +271,86 @@ describe("coverage lexical v2 cascade", () => {
 			4,
 			5,
 		]);
+	});
+
+	test("keeps complete layer3 buckets and re-enters deferred buckets when returnTarget needs them", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/basename-1.md", basenameText: "cache" },
+				{ docId: 2, path: "notes/basename-2.md", basenameText: "cache" },
+				{ docId: 3, path: "notes/aliases-1.md", basenameText: "misc", aliasesText: "cache" },
+				{ docId: 4, path: "notes/aliases-2.md", basenameText: "misc", aliasesText: "cache" },
+				{ docId: 5, path: "notes/headings-1.md", basenameText: "misc", headingsText: "cache" },
+				{ docId: 6, path: "notes/body-1.md", basenameText: "misc", bodyText: "cache" },
+				{ docId: 7, path: "notes/body-2.md", basenameText: "misc", bodyText: "cache" },
+			],
+			postings: {
+				"basename:cache": [1, 2],
+				"aliases:cache": [3, 4],
+				"headings:cache": [5],
+				"body:cache": [6, 7],
+			},
+			lexicon: ["cache"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "cache",
+			queryTerms: ["cache"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("cache", ["cache"]),
+			maxItemResults: 2,
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.trace.retainedCandidateIdsByLayer.layer3).toEqual([
+			"1",
+			"2",
+			"3",
+			"4",
+			"5",
+			"6",
+			"7",
+		]);
+		expect(result.trace.deferredCandidateIdsByLayer.layer3).toEqual([]);
+	});
+
+	test("keeps complete layer4 buckets instead of cutting prefix ties in half", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/exact-1.md", basenameText: "cache" },
+				{ docId: 2, path: "notes/exact-2.md", basenameText: "cache" },
+				{ docId: 3, path: "notes/prefix-1.md", basenameText: "cached" },
+				{ docId: 4, path: "notes/prefix-2.md", basenameText: "cached" },
+				{ docId: 5, path: "notes/prefix-3.md", basenameText: "cached" },
+				{ docId: 6, path: "notes/prefix-4.md", basenameText: "cached" },
+			],
+			postings: {
+				"basename:cache": [1, 2],
+				"basename:cached": [3, 4, 5, 6],
+			},
+			lexicon: ["cache", "cached"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "cache",
+			queryTerms: ["cache"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("cache", ["cache"]),
+			maxItemResults: 1,
+			storageReader: reader,
+			matchOptions: {
+				includePrefix: true,
+			},
+		});
+
+		expect(result.trace.retainedCandidateIdsByLayer.layer4).toEqual([
+			"1",
+			"2",
+			"3",
+			"4",
+			"5",
+			"6",
+		]);
+		expect(result.trace.deferredCandidateIdsByLayer.layer4).toEqual([]);
 	});
 
 	test("allows fallback discovery to source documents without letting fallback-only docs survive as primary winners", async () => {
@@ -288,7 +368,7 @@ describe("coverage lexical v2 cascade", () => {
 		const queryText = "政治理论";
 		const queryTerms = ["政治理论"];
 
-		const result = await searchCoverageLexicalV2RuntimeCascade({
+		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
@@ -310,6 +390,47 @@ describe("coverage lexical v2 cascade", () => {
 		]);
 	});
 
+	test("uses narrow Han salvage only when primary and fuzzy salvage are both absent", async () => {
+		const hanQuery = "\u653f\u6cbb\u7406\u8bba";
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/han-fallback-1.md", basenameText: "politics theory fallback" },
+				{ docId: 2, path: "notes/han-fallback-2.md", basenameText: "theory only fallback" },
+			],
+			postings: {
+				"basename:\u653f\u6cbb": [1],
+				"basename:\u7406\u8bba": [1, 2],
+			},
+			lexicon: ["\u653f\u6cbb", "\u7406\u8bba"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: hanQuery,
+			queryTerms: [hanQuery],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(hanQuery, [hanQuery]),
+			maxItemResults: 5,
+			storageReader: reader,
+			matchOptions: {
+				includeFuzzy: true,
+			},
+		});
+
+		expect(result.usedHanFallbackSalvage).toBe(true);
+		expect(result.trace.layerMode).toBe("han_fallback_salvage");
+		expect(result.trace.verificationBucketCandidateIds).toEqual([]);
+		expect(result.candidateStates.map((candidateState) => ({
+			path: candidateState.path,
+			hanFallbackGroups: candidateState.hanFallbackSalvageGroupCount,
+		}))).toEqual([
+			{ path: "notes/han-fallback-1.md", hanFallbackGroups: 1 },
+			{ path: "notes/han-fallback-2.md", hanFallbackGroups: 1 },
+		]);
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/han-fallback-1.md",
+			"notes/han-fallback-2.md",
+		]);
+	});
+
 	test("hydrates body tokens only for the late verification frontier", async () => {
 		const documents = Array.from({ length: 8 }, (_, index) => ({
 			docId: index + 1,
@@ -328,7 +449,7 @@ describe("coverage lexical v2 cascade", () => {
 		const queryText = "alpha beta";
 		const queryTerms = ["alpha", "beta"];
 
-		const result = await searchCoverageLexicalV2RuntimeCascade({
+		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
@@ -337,9 +458,41 @@ describe("coverage lexical v2 cascade", () => {
 			matchOptions: {},
 		});
 
-		expect(result.verificationCandidateIds).toHaveLength(6);
+		expect(result.verificationCandidateIds).toHaveLength(8);
+		expect(result.trace.verificationSkippedReason).toBe("none");
 		expect(prefetchBodyTokenSequences).toHaveBeenCalledTimes(1);
-		expect(prefetchBodyTokenSequences).toHaveBeenCalledWith([1, 2, 3, 4, 5, 6]);
-		expect(getBodyTokenSequence).toHaveBeenCalledTimes(6);
+		expect(prefetchBodyTokenSequences).toHaveBeenCalledWith([1, 2, 3, 4, 5, 6, 7, 8]);
+		expect(getBodyTokenSequence).toHaveBeenCalledTimes(8);
+	});
+
+	test("skips late verification when the highest unresolved bucket exceeds the overflow cap", async () => {
+		const documents = Array.from({ length: 13 }, (_, index) => ({
+			docId: index + 1,
+			path: `notes/overflow-${index + 1}.md`,
+			basenameText: `overflow-${index + 1}`,
+			bodyText: "alpha beta",
+		}));
+		const { reader, prefetchBodyTokenSequences, getBodyTokenSequence } = createStorageReader({
+			documents,
+			postings: {
+				"body:alpha": documents.map((document) => document.docId),
+				"body:beta": documents.map((document) => document.docId),
+			},
+			lexicon: ["alpha", "beta"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "alpha beta",
+			queryTerms: ["alpha", "beta"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("alpha beta", ["alpha", "beta"]),
+			maxItemResults: 1,
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.verificationCandidateIds).toHaveLength(13);
+		expect(result.trace.verificationSkippedReason).toBe("overflow");
+		expect(prefetchBodyTokenSequences).not.toHaveBeenCalled();
+		expect(getBodyTokenSequence).not.toHaveBeenCalled();
 	});
 });

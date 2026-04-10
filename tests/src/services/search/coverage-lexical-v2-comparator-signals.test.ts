@@ -1,15 +1,16 @@
-﻿import {
-	buildCoverageLexicalV2QueryAnalysis,
-} from "src/services/search/coverage-lexical-v2/query-units";
 import {
-	buildCoverageLexicalV2RankingCandidate,
+	buildCoverageLexicalV2QueryAnalysis,
+} from "src/services/search/coverage-lexical-v2/query";
+import {
+	buildCoverageLexicalV2CheapComparatorCandidate,
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical-v2/ranking";
+	patchCoverageLexicalV2ComparatorCandidateWithProximity,
+} from "src/services/search/coverage-lexical-v2/comparator";
 
-describe("coverage lexical v2 ranking signal builder", () => {
-	test("builds field profile and surface shape from matched primary units", () => {
+describe("coverage lexical v2 comparator signals", () => {
+	test("builds cheap comparator signals and lets proximity be patched later", () => {
 		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("AI \u7701\u8003", ["ai", "\u7701\u8003"]);
-		const candidate = buildCoverageLexicalV2RankingCandidate(queryAnalysis, {
+		const evidence = {
 			candidateId: "doc-ai-shengkao",
 			stableDeterministicKey: "a",
 			matchedPrimaryUnits: [
@@ -38,7 +39,8 @@ describe("coverage lexical v2 ranking signal builder", () => {
 				averageDistance: 2,
 				preservesSurfaceOrder: true,
 			},
-		});
+		};
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, evidence);
 
 		expect(candidate.distinctMatchedPrimaryQueryUnitCount).toBe(2);
 		expect(candidate.surfaceCoverageShape).toEqual({
@@ -61,7 +63,10 @@ describe("coverage lexical v2 ranking signal builder", () => {
 			latinFuzzyCount: 0,
 			hanExactCount: 1,
 		});
-		expect(candidate.primaryUnitProximityScore).toEqual({
+		expect(candidate.primaryUnitProximityScore).toBeUndefined();
+		expect(
+			patchCoverageLexicalV2ComparatorCandidateWithProximity(candidate, evidence).primaryUnitProximityScore,
+		).toEqual({
 			matchedUnitCount: 2,
 			windowWidth: 9,
 			averageDistance: 2,
@@ -71,7 +76,7 @@ describe("coverage lexical v2 ranking signal builder", () => {
 
 	test("does not let fallback-only evidence count as primary coverage", () => {
 		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("\u8d62\u5b8b", ["\u8d62\u5b8b"]);
-		const candidate = buildCoverageLexicalV2RankingCandidate(queryAnalysis, {
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
 			candidateId: "doc-yingsong",
 			stableDeterministicKey: "a",
 			matchedPrimaryUnits: [
@@ -89,12 +94,12 @@ describe("coverage lexical v2 ranking signal builder", () => {
 		expect(candidate.surfaceCoverageShape.matchedGroupCount).toBe(0);
 		expect(candidate.matchedPrimaryUnitFieldProfile.bodyScore).toBe(0);
 		expect(candidate.primaryUnitMatchQuality.hanExactCount).toBe(0);
-		expect(candidate.primaryUnitProximityScore).toBeNull();
+		expect(candidate.primaryUnitProximityScore).toBeUndefined();
 	});
 
 	test("preserves partial visible grouping when only one query surface group matches", () => {
 		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("steam password", ["steam", "password"]);
-		const candidate = buildCoverageLexicalV2RankingCandidate(queryAnalysis, {
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
 			candidateId: "doc-steam-only",
 			stableDeterministicKey: "a",
 			matchedPrimaryUnits: [
