@@ -1362,3 +1362,66 @@ In particular:
 - remove evidence mass from lexical final ranking
 - replace all rescue language with deferred verification
 - keep lexical pure, explicit, and explainable
+
+
+## Additional Migration Boundary Notes
+
+### V2 Index And Storage Boundary
+
+V2 does not need to inherit the V1 ranking worldview, comparator structure, or
+ranking logic.
+
+However, index-storage interaction should remain as consistent as reasonably
+possible with the existing optimized storage boundary.
+
+Guidance:
+
+- V2 may replace V1 ranking philosophy completely
+- V2 should try to preserve compatible or near-compatible index/storage
+  interaction patterns where practical
+- the existing optimized index structures are a performance asset and should
+  not be casually discarded
+- V2 index-facing code should be implemented inside V2 modules directly rather
+  than by depending on V1 ranking modules
+- V2 should avoid new hard dependencies on V1 index code that would make later
+  V1 removal difficult
+
+In short:
+
+- worldview may diverge
+- storage interaction should stay disciplined
+- V2 index code should live in V2, not as wrappers around V1 ranking logic
+
+### V1 Retention Policy
+
+V1 code should not be deleted merely because V2 exists.
+
+During migration:
+
+- keep V1 code available while V2 is still being implemented and stabilized
+- use V1 as a reference point for behavior comparison, debugging, and migration
+  validation
+- only consider deleting V1 code after V2 stability is proven and the
+  comparison value has materially dropped
+- once deletion starts, remove V1 in a disciplined way rather than allowing
+  indefinite dual active paths
+
+This means:
+
+- do not keep old and new active logic for the same responsibility indefinitely
+- but do keep V1 code available as reference material until V2 stability is
+  proven
+
+### Benchmark Default Comparison Policy
+
+V2 should be benchmarked directly.
+
+Default benchmark comparison policy:
+
+- compare `MiniSearch` and V2 by default
+- do not keep V1 lexical ranking as the default benchmark peer once V2
+  benchmarking is in place
+- V1 may still be used as a temporary migration reference when investigating
+  regressions or validating continuity during rollout
+- benchmark continuity is important, but it must not be used as a reason to
+  preserve old worldview logic
