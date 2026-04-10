@@ -1,4 +1,5 @@
-﻿import type {
+import type {
+	CoverageLexicalV2MatchField,
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
 } from '../ranking';
 import type {
@@ -19,14 +20,49 @@ export type CoverageLexicalV2RuntimeDocumentLexicalState = {
 	path: string;
 	stableDeterministicKey?: string;
 	fieldTerms: CoverageLexicalV2RuntimeFieldTerms;
+	basenameTokenSequence?: readonly string[];
+	aliasTokenSequence?: readonly string[];
+	headingsTokenSequence?: readonly string[];
 	bodyTokenSequence?: readonly string[];
+};
+
+type CoverageLexicalV2RuntimeLocalWindowField = Extract<
+	CoverageLexicalV2MatchField,
+	'basename' | 'aliases' | 'headings' | 'body'
+>;
+
+type CoverageLexicalV2RuntimeResolvedBestWindow = {
+	field: CoverageLexicalV2RuntimeLocalWindowField;
+	matchedUnitKeys: string[];
+	windowWidth: number;
+	averageDistance: number;
+	preservesSurfaceOrder: boolean;
+};
+
+const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS: readonly CoverageLexicalV2RuntimeLocalWindowField[] = [
+	'basename',
+	'aliases',
+	'headings',
+	'body',
+];
+
+const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY: Record<
+	CoverageLexicalV2RuntimeLocalWindowField,
+	number
+> = {
+	basename: 0,
+	aliases: 1,
+	headings: 2,
+	body: 3,
 };
 
 export function buildCoverageLexicalV2RuntimeSourceEntries(
 	queryTerms: readonly string[],
 	documents: readonly CoverageLexicalV2RuntimeDocumentLexicalState[],
 ): CoverageLexicalV2RuntimeSourceEntry[] {
-	const normalizedQueryTerms = queryTerms.map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0);
+	const normalizedQueryTerms = queryTerms
+		.map((term) => term.trim().toLowerCase())
+		.filter((term) => term.length > 0);
 	const sourceEntries: CoverageLexicalV2RuntimeSourceEntry[] = [];
 	for (const document of documents) {
 		const matchedPrimaryUnits = buildMatchedPrimaryUnits(normalizedQueryTerms, document.fieldTerms);
@@ -42,7 +78,7 @@ export function buildCoverageLexicalV2RuntimeSourceEntries(
 			bestWindow: buildCoverageLexicalV2RuntimeBestWindow(
 				normalizedQueryTerms,
 				matchedPrimaryUnits,
-				document.bodyTokenSequence,
+				document,
 			),
 		});
 	}
@@ -88,13 +124,37 @@ function buildMatchedPrimaryUnits(
 function buildCoverageLexicalV2RuntimeBestWindow(
 	queryTerms: readonly string[],
 	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
-	bodyTokenSequence: readonly string[] | undefined,
+	document: CoverageLexicalV2RuntimeDocumentLexicalState,
 ): CoverageLexicalV2RuntimeSourceEntry['bestWindow'] {
-	if (!bodyTokenSequence || bodyTokenSequence.length === 0) {
+	let bestWindow: CoverageLexicalV2RuntimeResolvedBestWindow | null = null;
+	for (const field of COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS) {
+		const candidateWindow = buildCoverageLexicalV2RuntimeFieldBestWindow(
+			queryTerms,
+			matchedPrimaryUnits,
+			field,
+			getCoverageLexicalV2RuntimeFieldTokenSequence(document, field),
+		);
+		if (
+			candidateWindow != null &&
+			(bestWindow == null || isBetterCoverageLexicalV2RuntimeBestWindow(candidateWindow, bestWindow))
+		) {
+			bestWindow = candidateWindow;
+		}
+	}
+	return bestWindow;
+}
+
+function buildCoverageLexicalV2RuntimeFieldBestWindow(
+	queryTerms: readonly string[],
+	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
+	field: CoverageLexicalV2RuntimeLocalWindowField,
+	tokenSequence: readonly string[] | undefined,
+): CoverageLexicalV2RuntimeResolvedBestWindow | null {
+	if (!tokenSequence || tokenSequence.length === 0) {
 		return null;
 	}
 	const relevantUnits = matchedPrimaryUnits.filter(
-		(unit) => unit.strongestField === 'body' || (unit.corroboratedFields ?? []).includes('body'),
+		(unit) => unit.strongestField === field || (unit.corroboratedFields ?? []).includes(field),
 	);
 	if (relevantUnits.length === 0) {
 		return null;
@@ -103,14 +163,14 @@ function buildCoverageLexicalV2RuntimeBestWindow(
 	for (const unit of relevantUnits) {
 		relevantUnitByKey.set(createCoverageLexicalV2RuntimeUnitKey(unit.surfaceGroupIndex, unit.normalizedText), unit);
 	}
-	const normalizedBodyTokens = normalizeTerms(bodyTokenSequence);
+	const normalizedTokens = normalizeTerms(tokenSequence);
 	const occurrences: Array<{
 		unitKey: string;
 		groupIndex: number;
 		position: number;
 	}> = [];
-	for (let position = 0; position < normalizedBodyTokens.length; position += 1) {
-		const token = normalizedBodyTokens[position];
+	for (let position = 0; position < normalizedTokens.length; position += 1) {
+		const token = normalizedTokens[position];
 		for (let index = 0; index < queryTerms.length; index += 1) {
 			if (token !== queryTerms[index]) {
 				continue;
@@ -159,7 +219,7 @@ function buildCoverageLexicalV2RuntimeBestWindow(
 			};
 			if (
 				bestWindow == null ||
-				isBetterCoverageLexicalV2RuntimeBestWindow(candidateWindow, bestWindow)
+				isBetterCoverageLexicalV2RuntimeWindowShape(candidateWindow, bestWindow)
 			) {
 				bestWindow = candidateWindow;
 			}
@@ -176,6 +236,7 @@ function buildCoverageLexicalV2RuntimeBestWindow(
 	if (bestWindow == null) {
 		const single = occurrences[0];
 		return {
+			field,
 			matchedUnitKeys: [single.unitKey],
 			windowWidth: 1,
 			averageDistance: 0,
@@ -183,6 +244,7 @@ function buildCoverageLexicalV2RuntimeBestWindow(
 		};
 	}
 	return {
+		field,
 		matchedUnitKeys: bestWindow.matchedUnitKeys,
 		windowWidth: bestWindow.end - bestWindow.start + 1,
 		averageDistance: computeCoverageLexicalV2RuntimeAverageDistance(
@@ -191,6 +253,22 @@ function buildCoverageLexicalV2RuntimeBestWindow(
 		),
 		preservesSurfaceOrder: preservesCoverageLexicalV2RuntimeSurfaceOrder(bestWindow.groupIndices),
 	};
+}
+
+function getCoverageLexicalV2RuntimeFieldTokenSequence(
+	document: CoverageLexicalV2RuntimeDocumentLexicalState,
+	field: CoverageLexicalV2RuntimeLocalWindowField,
+): readonly string[] | undefined {
+	switch (field) {
+		case 'basename':
+			return document.basenameTokenSequence;
+		case 'aliases':
+			return document.aliasTokenSequence;
+		case 'headings':
+			return document.headingsTokenSequence;
+		case 'body':
+			return document.bodyTokenSequence;
+	}
 }
 
 function collectMatchedFields(
@@ -231,6 +309,30 @@ function normalizeTerms(terms: readonly string[] | undefined): string[] {
 }
 
 function isBetterCoverageLexicalV2RuntimeBestWindow(
+	left: CoverageLexicalV2RuntimeResolvedBestWindow,
+	right: CoverageLexicalV2RuntimeResolvedBestWindow,
+): boolean {
+	if (left.matchedUnitKeys.length !== right.matchedUnitKeys.length) {
+		return left.matchedUnitKeys.length > right.matchedUnitKeys.length;
+	}
+	if (left.preservesSurfaceOrder !== right.preservesSurfaceOrder) {
+		return left.preservesSurfaceOrder;
+	}
+	if (left.windowWidth !== right.windowWidth) {
+		return left.windowWidth < right.windowWidth;
+	}
+	if (left.averageDistance !== right.averageDistance) {
+		return left.averageDistance < right.averageDistance;
+	}
+	const leftPriority = COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY[left.field];
+	const rightPriority = COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY[right.field];
+	if (leftPriority !== rightPriority) {
+		return leftPriority < rightPriority;
+	}
+	return false;
+}
+
+function isBetterCoverageLexicalV2RuntimeWindowShape(
 	left: {
 		start: number;
 		end: number;
@@ -326,4 +428,3 @@ function classifySurfaceKind(term: string): 'latin' | 'han' | 'mixed' {
 	}
 	return 'latin';
 }
-

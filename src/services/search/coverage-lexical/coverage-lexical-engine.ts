@@ -122,6 +122,8 @@ const COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND = 0.45;
 const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.75;
 const COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL_ENV =
 	"COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL";
+const COVERAGE_LEXICAL_RUNTIME_PATH_ENV =
+	"COVERAGE_LEXICAL_RUNTIME_PATH";
 const COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX =
 	/(?:关于|有关|对于|什么是|什么叫|如何|怎么|为什么|以及|及|与|和|的|地|得|并且|并|中|里|上|下|将|要|会|吗|呢)/gu;
 
@@ -198,6 +200,8 @@ type CoverageLexicalDisplayPruneConfig = {
 	tagExactWeight: number;
 	tagCharWeight: number;
 };
+
+type CoverageLexicalRuntimePath = "v1" | "v2";
 
 const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerivedPostingBinding[] =
 	[
@@ -1310,7 +1314,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			}
 
 			if (
-				isCoverageLexicalExperimentalV2RuntimeEnabled() &&
+				resolveCoverageLexicalRuntimePath() === "v2" &&
 				queryTerms.length > 0
 			) {
 				return await this.searchFilesWithCoverageLexicalV2Runtime(
@@ -1678,22 +1682,40 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				if (!path) {
 					return null;
 				}
-				const bodyTokenSequence = this.getDocumentBodyTokens(
-					docId,
-					queryCache.bodyTokensByDocId,
-				);
+				const document = this.documentById[docId];
+				const basenameTerms = this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataBasenamePostings.get(term));
+				const aliasTerms = this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataAliasPostings.get(term));
+				const headingsTerms = this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataHeadingPostings.get(term));
+				const folderTerms = this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataFolderPostings.get(term));
+				const tagTerms = this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataTagPostings.get(term));
+				const bodyTerms = this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.bodyPostings.get(term));
+				const bodyTokenSequence = bodyTerms.length > 0
+					? this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId)
+					: undefined;
 				return {
 					docId,
 					path,
 					stableDeterministicKey: path,
 					fieldTerms: {
-						basenameTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataBasenamePostings.get(term)),
-						aliasTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataAliasPostings.get(term)),
-						headingsTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataHeadingPostings.get(term)),
-						folderTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataFolderPostings.get(term)),
-						tagTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataTagPostings.get(term)),
-						bodyTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.bodyPostings.get(term)),
+						basenameTerms,
+						aliasTerms,
+						headingsTerms,
+						folderTerms,
+						tagTerms,
+						bodyTerms,
 					},
+					basenameTokenSequence:
+						basenameTerms.length > 0
+							? this.buildCoverageLexicalV2RuntimeTokenSequence(document?.basenameText ?? "")
+							: undefined,
+					aliasTokenSequence:
+						aliasTerms.length > 0
+							? this.buildCoverageLexicalV2RuntimeTokenSequence(document?.aliasesText ?? "")
+							: undefined,
+					headingsTokenSequence:
+						headingsTerms.length > 0
+							? this.buildCoverageLexicalV2RuntimeTokenSequence(document?.headingsText ?? "")
+							: undefined,
 					bodyTokenSequence: bodyTokenSequence ? [...bodyTokenSequence] : undefined,
 				};
 			});
@@ -1708,6 +1730,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return queryTerms.filter((term) =>
 			coverageLexicalPostingHasDocId(resolvePosting(term), docId),
 		);
+	}
+
+	private buildCoverageLexicalV2RuntimeTokenSequence(
+		text: string,
+	): string[] | undefined {
+		const tokenSequence = tokenizeCoverageLexicalDocumentText(this.tokenizer, text);
+		return tokenSequence.length > 0 ? tokenSequence : undefined;
 	}
 
 	async getDirectSubItems(
@@ -4531,6 +4560,14 @@ function isCoverageLexicalExperimentalV2RuntimeEnabled(): boolean {
 		COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL_ENV,
 		false,
 	);
+}
+
+function resolveCoverageLexicalRuntimePath(): CoverageLexicalRuntimePath {
+	const raw = process.env[COVERAGE_LEXICAL_RUNTIME_PATH_ENV]?.trim().toLowerCase();
+	if (raw === "v1" || raw === "v2") {
+		return raw;
+	}
+	return isCoverageLexicalExperimentalV2RuntimeEnabled() ? "v2" : "v1";
 }
 
 function readCoverageLexicalBooleanEnv(

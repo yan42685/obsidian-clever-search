@@ -991,13 +991,19 @@ Preferred lexical order:
     - `primaryUnitProximityScore`
   - independent ranking explain output now attributes pairwise decisions to explicit V2 layers
   - a standalone `v2/explain` payload builder now exposes query analysis, candidate evidence, ranking signals, and pairwise decisions in one structured explain object
-  - standalone regression tests now cover `AI 省考`, `政治理论`, field-profile ordering, and top tie-band proximity behavior
+  - standalone regression tests now cover representative mixed queries, field-profile ordering, and top tie-band proximity behavior
 - Phase 3. Final Comparator Rewrite: in progress
   - the independent V2 comparator module exists and is tested
   - an independent V2 ranking-signal builder now converts query analysis plus matched-unit evidence into comparator-ready candidate signals
   - an independent V2 ranking runner now executes query analysis, signal building, comparator ordering, top tie-band selection, and structured explain output end to end
-  - the experimental runtime V2 path now projects exact body-local best-window evidence into `primaryUnitProximityScore` without changing the earlier lexical layers
+  - the experimental runtime V2 path now projects exact metadata-phrase, heading-local, and body-local best-window evidence into `primaryUnitProximityScore` without changing the earlier lexical layers
+  - runtime path selection can now be pinned explicitly with `COVERAGE_LEXICAL_RUNTIME_PATH=v1|v2`, while the older experimental boolean remains a backward-compatible alias
   - runtime `coverage-lexical` search flow has not yet delegated all default winner selection to the V2 comparator
+- Phase 4. Coarse/Hydration Alignment: in progress
+  - independent source-adapter and coarse modules now back the runtime-shaped V2 prototype chain and the experimental engine path
+  - incomplete candidates continue to be downgraded upstream without reintroducing a deferred-verification ranking concept
+- Phase 5. Display Simplification: in progress
+  - independent `v2/display` stays tail-trimming-only and is now exercised by the experimental engine/runtime path
 
 ## Implementation Plan
 
@@ -1414,7 +1420,7 @@ V2 should be benchmarked directly.
 Default benchmark comparison policy:
 
 - compare `MiniSearch` and V2 by default
-- the automation benchmark now reports `MiniSearch` and `CoverageLexical(V2)` as the default comparison pair
+- the automation benchmark now reports `MiniSearch` and `CoverageLexical(V2)` as the default comparison pair, using the explicit `COVERAGE_LEXICAL_RUNTIME_PATH=v2` runtime switch
 - do not keep V1 lexical ranking as the default benchmark peer once V2
   benchmarking is in place
 - V1 may still be used as a temporary migration reference when investigating

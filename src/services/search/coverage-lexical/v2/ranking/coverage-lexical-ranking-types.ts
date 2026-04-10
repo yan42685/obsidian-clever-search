@@ -56,6 +56,7 @@ export type CoverageLexicalV2MatchedPrimaryUnitEvidence = {
 };
 
 export type CoverageLexicalV2BestWindowEvidence = {
+	field?: CoverageLexicalV2MatchField;
 	matchedUnitKeys: string[];
 	windowWidth: number;
 	averageDistance: number;

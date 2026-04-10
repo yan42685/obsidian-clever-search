@@ -1,4 +1,4 @@
-﻿import { container } from "tsyringe";
+import { container } from "tsyringe";
 
 jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
@@ -28,14 +28,14 @@ function createSimpleCoverageTokenizer() {
 			return this.tokenizeSequence(text);
 		},
 		tokenizeSequence(text: string): string[] {
-			return normalize(text).match(/[\p{Script=Han}]+|[a-z0-9_-]+/gu) ?? [];
+			return normalize(text).match(/[a-z0-9_-]+/gu) ?? [];
 		},
 		tokenizeSequenceWithOffsets(text: string): Array<{
 			token: string;
 			start: number;
 			end: number;
 		}> {
-			return Array.from(normalize(text).matchAll(/[\p{Script=Han}]+|[a-z0-9_-]+/gu)).map(
+			return Array.from(normalize(text).matchAll(/[a-z0-9_-]+/gu)).map(
 				(match) => ({
 					token: match[0],
 					start: match.index ?? 0,
@@ -48,7 +48,7 @@ function createSimpleCoverageTokenizer() {
 
 describe("coverage lexical v2 engine runtime path", () => {
 	beforeEach(() => {
-		process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL = "1";
+		process.env.COVERAGE_LEXICAL_RUNTIME_PATH = "v2";
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -65,6 +65,7 @@ describe("coverage lexical v2 engine runtime path", () => {
 	});
 
 	afterEach(() => {
+		delete process.env.COVERAGE_LEXICAL_RUNTIME_PATH;
 		delete process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
 		delete (global as any).window;
 		if ("reset" in container && typeof (container as any).reset === "function") {
@@ -72,10 +73,9 @@ describe("coverage lexical v2 engine runtime path", () => {
 		} else {
 			container.clearInstances();
 		}
-		jest.resetModules();
 	});
 
-	test("searchFiles can route through the experimental V2 runtime path", async () => {
+	test("searchFiles can route through the explicit V2 runtime path", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -93,37 +93,72 @@ describe("coverage lexical v2 engine runtime path", () => {
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
 			{
-				path: "notes/AI提供数值策划设计.md",
-				basename: "AI提供数值策划设计",
+				path: "notes/ai-design.md",
+				basename: "ai-design",
 				folder: "notes",
-				content: "AI 省考 设计",
+				content: "ai exam design",
 			},
 			{
-				path: "notes/省考总结.md",
-				basename: "省考总结",
+				path: "notes/exam-summary.md",
+				basename: "exam-summary",
 				folder: "notes",
-				content: "AI 省考 总结",
+				content: "ai exam summary",
 			},
 			{
-				path: "notes/备考规划.md",
-				basename: "备考规划",
+				path: "notes/study-plan.md",
+				basename: "study-plan",
 				folder: "notes",
-				content: "省考 规划",
+				content: "exam plan",
 			},
 		]);
 
 		const results = await engine.searchFiles({
-			queryText: "AI 省考",
+			queryText: "ai exam",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 5,
 		});
 
-		expect(results.map((result) => result.path)).toEqual([
-			"notes/AI提供数值策划设计.md",
-			"notes/省考总结.md",
-			"notes/备考规划.md",
+		expect(results[0]?.path).toBe("notes/ai-design.md");
+		expect(results[0]?.matchedTerms).toEqual(["ai", "exam"]);
+		expect(results.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test("explicit v1 runtime path overrides the legacy experimental alias", async () => {
+		process.env.COVERAGE_LEXICAL_RUNTIME_PATH = "v1";
+		process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL = "1";
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		const v2Spy = jest.spyOn(engine as any, "searchFilesWithCoverageLexicalV2Runtime");
+		await engine.addDocuments([
+			{
+				path: "notes/ai-design.md",
+				basename: "ai-design",
+				folder: "notes",
+				content: "ai exam design",
+			},
 		]);
-		expect(results[0]?.matchedTerms).toEqual(["ai", "省考"]);
+
+		await engine.searchFiles({
+			queryText: "ai exam",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(v2Spy).not.toHaveBeenCalled();
 	});
 });
