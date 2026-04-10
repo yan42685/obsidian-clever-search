@@ -998,6 +998,7 @@ Preferred lexical order:
   - an independent V2 ranking runner now executes query analysis, signal building, comparator ordering, top tie-band selection, and structured explain output end to end
   - the experimental runtime V2 path now projects exact metadata-phrase, heading-local, and body-local best-window evidence into `primaryUnitProximityScore` without changing the earlier lexical layers
   - runtime path selection can now be pinned explicitly with `COVERAGE_LEXICAL_RUNTIME_PATH=v1|v2`, while the older experimental boolean remains a backward-compatible alias
+  - the V2 runtime path now owns query-side analysis from raw query text instead of depending on the legacy query-term helper
   - runtime `coverage-lexical` search flow has not yet delegated all default winner selection to the V2 comparator
 - Phase 4. Coarse/Hydration Alignment: in progress
   - independent source-adapter and coarse modules now back the runtime-shaped V2 prototype chain and the experimental engine path

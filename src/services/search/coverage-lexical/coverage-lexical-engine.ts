@@ -100,6 +100,10 @@ import type {
 } from "./coverage-lexical-types";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import {
+	buildCoverageLexicalV2QueryAnalysis,
+	type CoverageLexicalV2QueryAnalysis,
+} from "./v2/query-units";
+import {
 	buildCoverageLexicalV2RuntimeSourceEntries,
 	projectCoverageLexicalV2RuntimeMatchedFiles,
 	type CoverageLexicalV2RuntimeDocumentLexicalState,
@@ -349,6 +353,15 @@ function tokenizeCoverageLexicalDocumentText(
 ): string[] {
 	return tokenizer
 		.tokenizeSequence(text, "index")
+		.map((term) => term.toLowerCase());
+}
+
+function tokenizeCoverageLexicalV2QueryText(
+	tokenizer: Tokenizer,
+	queryText: string,
+): string[] {
+	return tokenizer
+		.tokenizeSequence(queryText, "search")
 		.map((term) => term.toLowerCase());
 }
 
@@ -1299,28 +1312,40 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const queryStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		this.lastBenchmarkOffloadSearchDebug = null;
 		try {
+			if (this.documents.size === 0) {
+				return [];
+			}
+
+			if (resolveCoverageLexicalRuntimePath() === "v2") {
+				const v2QueryTerms = tokenizeCoverageLexicalV2QueryText(
+					this.tokenizer,
+					request.queryText,
+				);
+				const v2QueryAnalysis = buildCoverageLexicalV2QueryAnalysis(
+					request.queryText,
+					v2QueryTerms,
+				);
+				if (v2QueryAnalysis.primaryUnits.length === 0) {
+					return [];
+				}
+				return await this.searchFilesWithCoverageLexicalV2Runtime(
+					request,
+					v2QueryAnalysis,
+					v2QueryTerms,
+				);
+			}
+
 			const queryTerms = buildCoverageLexicalSearchQueryTerms(
 				this.tokenizer,
 				request.queryText,
 			);
 			const charQuery = buildCoverageLexicalCharQuery(request.queryText);
 			if (
-				this.documents.size === 0 ||
-				(queryTerms.length === 0 &&
-					charQuery.terms.length === 0 &&
-					charQuery.rawSegments.length === 0)
+				queryTerms.length === 0 &&
+				charQuery.terms.length === 0 &&
+				charQuery.rawSegments.length === 0
 			) {
 				return [];
-			}
-
-			if (
-				resolveCoverageLexicalRuntimePath() === "v2" &&
-				queryTerms.length > 0
-			) {
-				return await this.searchFilesWithCoverageLexicalV2Runtime(
-					request,
-					queryTerms,
-				);
 			}
 
 			const planningStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
@@ -1624,13 +1649,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 
 	private async searchFilesWithCoverageLexicalV2Runtime(
 		request: FileSearchRequest,
+		queryAnalysis: CoverageLexicalV2QueryAnalysis,
 		queryTerms: readonly string[],
 	): Promise<MatchedFile[]> {
+		const primaryQueryTerms = [...new Set(
+			queryAnalysis.primaryUnits
+				.map((unit) => unit.normalizedText.trim())
+				.filter((term) => term.length > 0),
+		)];
+		if (primaryQueryTerms.length === 0) {
+			return [];
+		}
 		const queryCache = createCoverageLexicalEngineQueryCache(
 			innerSetting.search.fuzzyProportion,
 		);
 		const runtimeDocuments = await this.buildCoverageLexicalV2RuntimeDocumentLexicalStates(
-			queryTerms,
+			primaryQueryTerms,
 			queryCache,
 		);
 		if (runtimeDocuments.length === 0) {
