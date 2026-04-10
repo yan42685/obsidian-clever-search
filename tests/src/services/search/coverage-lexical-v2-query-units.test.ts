@@ -1,6 +1,6 @@
 ﻿import {
 	buildCoverageLexicalV2QueryAnalysis,
-} from "src/services/search/coverage-lexical/v2/query-units";
+} from "src/services/search/coverage-lexical-v2/query-units";
 
 describe("coverage lexical v2 query units", () => {
 	test("preserves short Han surface segments as primary and bigrams as fallback", () => {

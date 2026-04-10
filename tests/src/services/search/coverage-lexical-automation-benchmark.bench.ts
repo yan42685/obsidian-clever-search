@@ -2322,37 +2322,6 @@ async function withCoverageBodyTokenOffloadEnv<T>(
 	}
 }
 
-async function withCoverageLexicalRuntimePathEnv<T>(
-	runtimePath: "v1" | "v2",
-	action: () => Promise<T>,
-): Promise<T> {
-	const previousRuntimePath = process.env.COVERAGE_LEXICAL_RUNTIME_PATH;
-	const previousExperimental = process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
-	process.env.COVERAGE_LEXICAL_RUNTIME_PATH = runtimePath;
-	delete process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
-	try {
-		return await action();
-	} finally {
-		if (previousRuntimePath === undefined) {
-			delete process.env.COVERAGE_LEXICAL_RUNTIME_PATH;
-		} else {
-			process.env.COVERAGE_LEXICAL_RUNTIME_PATH = previousRuntimePath;
-		}
-		if (previousExperimental === undefined) {
-			delete process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
-		} else {
-			process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL = previousExperimental;
-		}
-	}
-}
-
-async function withCoverageLexicalV2RuntimeExperimentalEnv<T>(
-	enabled: boolean,
-	action: () => Promise<T>,
-): Promise<T> {
-	return withCoverageLexicalRuntimePathEnv(enabled ? "v2" : "v1", action);
-}
-
 type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
 	tailRatio: number;
@@ -3915,29 +3884,21 @@ describe("coverage lexical automation benchmark", () => {
 		const coverageLexicalV2 = await withCoverageBodyTokenOffloadEnv(
 			true,
 			async () =>
-				withCoverageLexicalRuntimePathEnv(
-					"v2",
-					async () =>
-						createEngineHarness(
-							CoverageLexicalFileSearchEngine,
-							tokenizer,
-							"coverage-lexical-v2",
-						),
+				createEngineHarness(
+					CoverageLexicalFileSearchEngine,
+					tokenizer,
+					"coverage-lexical-v2",
 				),
 		);
 		const coverageV2Result = await withCoverageBodyTokenOffloadEnv(
 			true,
 			async () =>
-				withCoverageLexicalRuntimePathEnv(
-					"v2",
-					async () =>
-						runBenchmark(
-							"CoverageLexical(V2)",
-							coverageLexicalV2,
-							documents,
-							queryCases,
-							{ includeOffloadDiagnostics },
-						),
+				runBenchmark(
+					"CoverageLexical(V2)",
+					coverageLexicalV2,
+					documents,
+					queryCases,
+					{ includeOffloadDiagnostics },
 				),
 		);
 		const coverageV2VsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
@@ -4319,7 +4280,7 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				{
 					primaryNote:
-						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Default V2 comparisons should anchor on MiniSearch vs the explicit V2 runtime path.",
+						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Default V2 comparisons should anchor on MiniSearch vs the independent V2 runtime.",
 					v2VsMiniSearch: {
 						avgMsPerQueryRatio: round(
 							computeRelativeRatio(

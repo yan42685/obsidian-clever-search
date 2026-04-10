@@ -3,7 +3,7 @@
 	explainCoverageLexicalV2RankingDecision,
 	selectCoverageLexicalV2TopTieBand,
 	type CoverageLexicalV2RankingCandidate,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 function createCandidate(
 	overrides: Partial<CoverageLexicalV2RankingCandidate>,

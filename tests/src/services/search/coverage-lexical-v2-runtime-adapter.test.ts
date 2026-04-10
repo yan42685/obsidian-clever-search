@@ -1,10 +1,10 @@
 ﻿import {
 	projectCoverageLexicalV2RuntimeMatchedFiles,
 	runCoverageLexicalV2RuntimePrototypeSearch,
-} from "src/services/search/coverage-lexical/v2/runtime";
+} from "src/services/search/coverage-lexical-v2/runtime";
 import {
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 describe("coverage lexical v2 runtime adapter", () => {
 	test("adapts runtime-shaped source entries into the V2 prototype chain", () => {
@@ -70,7 +70,6 @@ describe("coverage lexical v2 runtime adapter", () => {
 		expect(result.finalRanking.rankedCandidates[0].evidence.candidateId).toBe("7");
 		expect(result.display.visibleCandidates.map((candidate) => candidate.evidence.candidateId)).toEqual([
 			"7",
-			"8",
 		]);
 		expect(result.finalRanking.explain.pairwiseDecision?.decision.layer).toBe("distinctMatchedPrimaryQueryUnitCount");
 	});

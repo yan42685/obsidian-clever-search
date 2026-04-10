@@ -1,10 +1,16 @@
 import type {
 	CoverageLexicalV2MatchField,
+	CoverageLexicalV2MatchQualityKind,
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
-} from '../ranking';
+} from "../ranking";
 import type {
 	CoverageLexicalV2RuntimeSourceEntry,
-} from './coverage-lexical-runtime-adapter';
+} from "./coverage-lexical-runtime-adapter";
+import {
+	compareCoverageLexicalV2MatchQuality,
+	getCoverageLexicalV2RuntimeMatchQuality,
+	type CoverageLexicalV2RuntimeMatchOptions,
+} from "./coverage-lexical-runtime-match";
 
 export type CoverageLexicalV2RuntimeFieldTerms = {
 	basenameTerms?: readonly string[];
@@ -28,7 +34,7 @@ export type CoverageLexicalV2RuntimeDocumentLexicalState = {
 
 type CoverageLexicalV2RuntimeLocalWindowField = Extract<
 	CoverageLexicalV2MatchField,
-	'basename' | 'aliases' | 'headings' | 'body'
+	"basename" | "aliases" | "headings" | "body"
 >;
 
 type CoverageLexicalV2RuntimeResolvedBestWindow = {
@@ -39,11 +45,16 @@ type CoverageLexicalV2RuntimeResolvedBestWindow = {
 	preservesSurfaceOrder: boolean;
 };
 
+type CoverageLexicalV2RuntimeFieldMatch = {
+	field: CoverageLexicalV2MatchField;
+	quality: CoverageLexicalV2MatchQualityKind;
+};
+
 const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS: readonly CoverageLexicalV2RuntimeLocalWindowField[] = [
-	'basename',
-	'aliases',
-	'headings',
-	'body',
+	"basename",
+	"aliases",
+	"headings",
+	"body",
 ];
 
 const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY: Record<
@@ -59,13 +70,18 @@ const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY: Record<
 export function buildCoverageLexicalV2RuntimeSourceEntries(
 	queryTerms: readonly string[],
 	documents: readonly CoverageLexicalV2RuntimeDocumentLexicalState[],
+	options: CoverageLexicalV2RuntimeMatchOptions = {},
 ): CoverageLexicalV2RuntimeSourceEntry[] {
 	const normalizedQueryTerms = queryTerms
 		.map((term) => term.trim().toLowerCase())
 		.filter((term) => term.length > 0);
 	const sourceEntries: CoverageLexicalV2RuntimeSourceEntry[] = [];
 	for (const document of documents) {
-		const matchedPrimaryUnits = buildMatchedPrimaryUnits(normalizedQueryTerms, document.fieldTerms);
+		const matchedPrimaryUnits = buildMatchedPrimaryUnits(
+			normalizedQueryTerms,
+			document.fieldTerms,
+			options,
+		);
 		if (matchedPrimaryUnits.length === 0) {
 			continue;
 		}
@@ -73,7 +89,7 @@ export function buildCoverageLexicalV2RuntimeSourceEntries(
 			docId: document.docId,
 			path: document.path,
 			stableDeterministicKey: document.stableDeterministicKey ?? document.path,
-			sourceKind: matchedPrimaryUnits.some((unit) => unit.strongestField !== 'body') ? 'metadata' : 'body',
+			sourceKind: matchedPrimaryUnits.some((unit) => unit.strongestField !== "body") ? "metadata" : "body",
 			matchedPrimaryUnits,
 			bestWindow: buildCoverageLexicalV2RuntimeBestWindow(
 				normalizedQueryTerms,
@@ -88,34 +104,30 @@ export function buildCoverageLexicalV2RuntimeSourceEntries(
 function buildMatchedPrimaryUnits(
 	queryTerms: readonly string[],
 	fieldTerms: CoverageLexicalV2RuntimeFieldTerms,
+	options: CoverageLexicalV2RuntimeMatchOptions,
 ): CoverageLexicalV2MatchedPrimaryUnitEvidence[] {
-	const basenameTerms = new Set(normalizeTerms(fieldTerms.basenameTerms));
-	const aliasTerms = new Set(normalizeTerms(fieldTerms.aliasTerms));
-	const headingsTerms = new Set(normalizeTerms(fieldTerms.headingsTerms));
-	const folderTerms = new Set(normalizeTerms(fieldTerms.folderTerms));
-	const tagTerms = new Set(normalizeTerms(fieldTerms.tagTerms));
-	const bodyTerms = new Set(normalizeTerms(fieldTerms.bodyTerms));
+	const normalizedFieldTerms = {
+		basenameTerms: normalizeTerms(fieldTerms.basenameTerms),
+		aliasTerms: normalizeTerms(fieldTerms.aliasTerms),
+		headingsTerms: normalizeTerms(fieldTerms.headingsTerms),
+		folderTerms: normalizeTerms(fieldTerms.folderTerms),
+		tagTerms: normalizeTerms(fieldTerms.tagTerms),
+		bodyTerms: normalizeTerms(fieldTerms.bodyTerms),
+	};
 	const units: CoverageLexicalV2MatchedPrimaryUnitEvidence[] = [];
 	for (let index = 0; index < queryTerms.length; index += 1) {
 		const term = queryTerms[index];
-		const matchedFields = collectMatchedFields(term, {
-			basenameTerms,
-			aliasTerms,
-			headingsTerms,
-			folderTerms,
-			tagTerms,
-			bodyTerms,
-		});
-		if (matchedFields.length === 0) {
+		const fieldMatches = collectMatchedFields(term, normalizedFieldTerms, options);
+		if (fieldMatches.length === 0) {
 			continue;
 		}
 		units.push({
 			normalizedText: term,
 			surfaceGroupIndex: index,
 			surfaceKind: classifySurfaceKind(term),
-			strongestField: matchedFields[0],
-			corroboratedFields: matchedFields.slice(1),
-			matchQuality: 'exact',
+			strongestField: fieldMatches[0].field,
+			corroboratedFields: fieldMatches.slice(1).map((fieldMatch) => fieldMatch.field),
+			matchQuality: selectBestMatchQuality(fieldMatches),
 		});
 	}
 	return units;
@@ -125,7 +137,7 @@ function buildCoverageLexicalV2RuntimeBestWindow(
 	queryTerms: readonly string[],
 	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
 	document: CoverageLexicalV2RuntimeDocumentLexicalState,
-): CoverageLexicalV2RuntimeSourceEntry['bestWindow'] {
+): CoverageLexicalV2RuntimeSourceEntry["bestWindow"] {
 	let bestWindow: CoverageLexicalV2RuntimeResolvedBestWindow | null = null;
 	for (const field of COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS) {
 		const candidateWindow = buildCoverageLexicalV2RuntimeFieldBestWindow(
@@ -154,7 +166,9 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 		return null;
 	}
 	const relevantUnits = matchedPrimaryUnits.filter(
-		(unit) => unit.strongestField === field || (unit.corroboratedFields ?? []).includes(field),
+		(unit) =>
+			unit.matchQuality === "exact" &&
+			(unit.strongestField === field || (unit.corroboratedFields ?? []).includes(field)),
 	);
 	if (relevantUnits.length === 0) {
 		return null;
@@ -197,7 +211,7 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 				end: number;
 				matchedUnitKeys: string[];
 				groupIndices: number[];
-		  }
+			  }
 		| null = null;
 	const windowCounts = new Map<string, number>();
 	let distinctUnitCount = 0;
@@ -260,13 +274,13 @@ function getCoverageLexicalV2RuntimeFieldTokenSequence(
 	field: CoverageLexicalV2RuntimeLocalWindowField,
 ): readonly string[] | undefined {
 	switch (field) {
-		case 'basename':
+		case "basename":
 			return document.basenameTokenSequence;
-		case 'aliases':
+		case "aliases":
 			return document.aliasTokenSequence;
-		case 'headings':
+		case "headings":
 			return document.headingsTokenSequence;
-		case 'body':
+		case "body":
 			return document.bodyTokenSequence;
 	}
 }
@@ -274,34 +288,73 @@ function getCoverageLexicalV2RuntimeFieldTokenSequence(
 function collectMatchedFields(
 	term: string,
 	terms: {
-		basenameTerms: ReadonlySet<string>;
-		aliasTerms: ReadonlySet<string>;
-		headingsTerms: ReadonlySet<string>;
-		folderTerms: ReadonlySet<string>;
-		tagTerms: ReadonlySet<string>;
-		bodyTerms: ReadonlySet<string>;
+		basenameTerms: readonly string[];
+		aliasTerms: readonly string[];
+		headingsTerms: readonly string[];
+		folderTerms: readonly string[];
+		tagTerms: readonly string[];
+		bodyTerms: readonly string[];
 	},
-): Array<'basename' | 'aliases' | 'headings' | 'folder' | 'tag' | 'body'> {
-	const fields: Array<'basename' | 'aliases' | 'headings' | 'folder' | 'tag' | 'body'> = [];
-	if (terms.basenameTerms.has(term)) {
-		fields.push('basename');
+	options: CoverageLexicalV2RuntimeMatchOptions,
+): CoverageLexicalV2RuntimeFieldMatch[] {
+	const fieldMatches: CoverageLexicalV2RuntimeFieldMatch[] = [];
+	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "basename", term, terms.basenameTerms, options);
+	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "aliases", term, terms.aliasTerms, options);
+	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "headings", term, terms.headingsTerms, options);
+	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "folder", term, terms.folderTerms, options);
+	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "tag", term, terms.tagTerms, options);
+	pushCoverageLexicalV2RuntimeFieldMatch(fieldMatches, "body", term, terms.bodyTerms, options);
+	return fieldMatches;
+}
+
+function pushCoverageLexicalV2RuntimeFieldMatch(
+	fieldMatches: CoverageLexicalV2RuntimeFieldMatch[],
+	field: CoverageLexicalV2MatchField,
+	queryTerm: string,
+	fieldTerms: readonly string[],
+	options: CoverageLexicalV2RuntimeMatchOptions,
+): void {
+	const bestMatchQuality = findBestFieldMatchQuality(queryTerm, fieldTerms, options);
+	if (bestMatchQuality == null) {
+		return;
 	}
-	if (terms.aliasTerms.has(term)) {
-		fields.push('aliases');
+	fieldMatches.push({
+		field,
+		quality: bestMatchQuality,
+	});
+}
+
+function findBestFieldMatchQuality(
+	queryTerm: string,
+	fieldTerms: readonly string[],
+	options: CoverageLexicalV2RuntimeMatchOptions,
+): CoverageLexicalV2MatchQualityKind | null {
+	let bestMatchQuality: CoverageLexicalV2MatchQualityKind | null = null;
+	for (const fieldTerm of fieldTerms) {
+		const matchQuality = getCoverageLexicalV2RuntimeMatchQuality(queryTerm, fieldTerm, options);
+		if (matchQuality == null) {
+			continue;
+		}
+		if (bestMatchQuality == null || compareCoverageLexicalV2MatchQuality(matchQuality, bestMatchQuality) < 0) {
+			bestMatchQuality = matchQuality;
+		}
+		if (bestMatchQuality === "exact") {
+			return bestMatchQuality;
+		}
 	}
-	if (terms.headingsTerms.has(term)) {
-		fields.push('headings');
+	return bestMatchQuality;
+}
+
+function selectBestMatchQuality(
+	fieldMatches: readonly CoverageLexicalV2RuntimeFieldMatch[],
+): CoverageLexicalV2MatchQualityKind {
+	let bestMatchQuality = fieldMatches[0].quality;
+	for (let index = 1; index < fieldMatches.length; index += 1) {
+		if (compareCoverageLexicalV2MatchQuality(fieldMatches[index].quality, bestMatchQuality) < 0) {
+			bestMatchQuality = fieldMatches[index].quality;
+		}
 	}
-	if (terms.folderTerms.has(term)) {
-		fields.push('folder');
-	}
-	if (terms.tagTerms.has(term)) {
-		fields.push('tag');
-	}
-	if (terms.bodyTerms.has(term)) {
-		fields.push('body');
-	}
-	return fields;
+	return bestMatchQuality;
 }
 
 function normalizeTerms(terms: readonly string[] | undefined): string[] {
@@ -414,17 +467,17 @@ function createCoverageLexicalV2RuntimeUnitKey(
 	surfaceGroupIndex: number,
 	normalizedText: string,
 ): string {
-	return String(surfaceGroupIndex) + ':' + normalizedText;
+	return String(surfaceGroupIndex) + ":" + normalizedText;
 }
 
-function classifySurfaceKind(term: string): 'latin' | 'han' | 'mixed' {
+function classifySurfaceKind(term: string): "latin" | "han" | "mixed" {
 	const hasLatin = /[a-z0-9]/i.test(term);
 	const hasHan = /\p{Script=Han}/u.test(term);
 	if (hasLatin && hasHan) {
-		return 'mixed';
+		return "mixed";
 	}
 	if (hasHan) {
-		return 'han';
+		return "han";
 	}
-	return 'latin';
+	return "latin";
 }

@@ -1,6 +1,6 @@
 ﻿import {
 	planCoverageLexicalV2Coarse,
-} from "src/services/search/coverage-lexical/v2/coarse";
+} from "src/services/search/coverage-lexical-v2/coarse";
 
 describe("coverage lexical v2 coarse", () => {
 	test("prioritizes fuller coverage candidates for expensive verification", () => {

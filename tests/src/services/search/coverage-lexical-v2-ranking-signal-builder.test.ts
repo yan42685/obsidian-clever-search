@@ -1,10 +1,10 @@
 ﻿import {
 	buildCoverageLexicalV2QueryAnalysis,
-} from "src/services/search/coverage-lexical/v2/query-units";
+} from "src/services/search/coverage-lexical-v2/query-units";
 import {
 	buildCoverageLexicalV2RankingCandidate,
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 describe("coverage lexical v2 ranking signal builder", () => {
 	test("builds field profile and surface shape from matched primary units", () => {

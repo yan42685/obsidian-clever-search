@@ -1,6 +1,6 @@
 ﻿import {
 	mergeCoverageLexicalV2SourceCandidates,
-} from "src/services/search/coverage-lexical/v2/coarse";
+} from "src/services/search/coverage-lexical-v2/coarse";
 
 describe("coverage lexical v2 source adapter", () => {
 	test("merges source-based evidence into one doc-level candidate state", () => {

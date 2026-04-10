@@ -1,9 +1,9 @@
 ﻿import {
 	runCoverageLexicalV2CoarseRanking,
-} from "src/services/search/coverage-lexical/v2/coarse";
+} from "src/services/search/coverage-lexical-v2/coarse";
 import {
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 describe("coverage lexical v2 coarse runner", () => {
 	test("runs the independent V2 coarse chain end-to-end for AI 省考", () => {

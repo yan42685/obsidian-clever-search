@@ -1,9 +1,9 @@
 ﻿import {
 	runCoverageLexicalV2PrototypeSearch,
-} from "src/services/search/coverage-lexical/v2";
+} from "src/services/search/coverage-lexical-v2";
 import {
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 describe("coverage lexical v2 prototype engine", () => {
 	test("runs source candidates through coarse, final ranking, and display without V1 coupling", () => {
@@ -105,7 +105,6 @@ describe("coverage lexical v2 prototype engine", () => {
 		expect(result.display.visibleCandidates.map((candidate) => candidate.evidence.candidateId)).toEqual([
 			"metadata-plus-body",
 			"body-only-two-unit",
-			"partial-body",
 		]);
 		expect(result.finalRanking.explain.pairwiseDecision).toMatchObject({
 			leftCandidateId: "metadata-plus-body",

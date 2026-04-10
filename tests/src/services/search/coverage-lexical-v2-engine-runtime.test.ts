@@ -48,7 +48,6 @@ function createSimpleCoverageTokenizer() {
 
 describe("coverage lexical v2 engine runtime path", () => {
 	beforeEach(() => {
-		process.env.COVERAGE_LEXICAL_RUNTIME_PATH = "v2";
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
 		} else {
@@ -65,8 +64,6 @@ describe("coverage lexical v2 engine runtime path", () => {
 	});
 
 	afterEach(() => {
-		delete process.env.COVERAGE_LEXICAL_RUNTIME_PATH;
-		delete process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
 		delete (global as any).window;
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -75,7 +72,7 @@ describe("coverage lexical v2 engine runtime path", () => {
 		}
 	});
 
-	test("searchFiles can route through the explicit V2 runtime path", async () => {
+test("searchFiles routes through the independent V2 runtime", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -94,7 +91,7 @@ describe("coverage lexical v2 engine runtime path", () => {
 		await engine.addDocuments([
 			{
 				path: "notes/ai-design.md",
-				basename: "ai-design",
+				basename: "ai",
 				folder: "notes",
 				content: "ai exam design",
 			},
@@ -124,9 +121,58 @@ describe("coverage lexical v2 engine runtime path", () => {
 		expect(results.length).toBeGreaterThanOrEqual(1);
 	});
 
-	test("explicit v1 runtime path overrides the legacy experimental alias", async () => {
-		process.env.COVERAGE_LEXICAL_RUNTIME_PATH = "v1";
-		process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL = "1";
+	test("experimental v2 runtime path keeps latin exact above prefix above fuzzy on tied coverage", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/cache-reset.md",
+				basename: "cache-reset",
+				folder: "notes",
+				content: "cache reset",
+			},
+			{
+				path: "notes/cached-reset.md",
+				basename: "cached-reset",
+				folder: "notes",
+				content: "cached reset",
+			},
+			{
+				path: "notes/cace-reset.md",
+				basename: "cace-reset",
+				folder: "notes",
+				content: "cace reset",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "cache reset",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results.slice(0, 3).map((result) => result.path)).toEqual([
+			"notes/cache-reset.md",
+			"notes/cached-reset.md",
+			"notes/cace-reset.md",
+		]);
+	});
+
+test("searchFiles keeps using the independent v2 runtime path without configuration switches", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		) as {
@@ -159,6 +205,6 @@ describe("coverage lexical v2 engine runtime path", () => {
 			maxItemResults: 5,
 		});
 
-		expect(v2Spy).not.toHaveBeenCalled();
+		expect(v2Spy).toHaveBeenCalledTimes(1);
 	});
 });

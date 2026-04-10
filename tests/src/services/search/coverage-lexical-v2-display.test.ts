@@ -1,9 +1,9 @@
 ﻿import {
 	applyCoverageLexicalV2DisplayPolicy,
-} from "src/services/search/coverage-lexical/v2/display";
+} from "src/services/search/coverage-lexical-v2/display";
 import type {
 	CoverageLexicalV2RankingRunCandidate,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 function createCandidate(candidateId: string): CoverageLexicalV2RankingRunCandidate {
 	return {
@@ -51,15 +51,13 @@ describe("coverage lexical v2 display", () => {
 			createCandidate("d"),
 		], {
 			maxDisplayCandidates: 2,
-			minDisplayCandidates: 3,
 		});
 
 		expect(result.visibleCandidates.map((candidate) => candidate.evidence.candidateId)).toEqual([
 			"a",
 			"b",
-			"c",
 		]);
-		expect(result.droppedCandidateIds).toEqual(["d"]);
+		expect(result.droppedCandidateIds).toEqual(["c", "d"]);
 		expect(result.tailTrimmed).toBe(true);
 	});
 });

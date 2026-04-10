@@ -1,13 +1,13 @@
 ﻿import {
 	buildCoverageLexicalV2QueryAnalysis,
-} from "src/services/search/coverage-lexical/v2/query-units";
+} from "src/services/search/coverage-lexical-v2/query-units";
 import {
 	buildCoverageLexicalV2RankingCandidate,
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 import {
 	buildCoverageLexicalV2ExplainPayload,
-} from "src/services/search/coverage-lexical/v2/explain";
+} from "src/services/search/coverage-lexical-v2/explain";
 
 describe("coverage lexical v2 explain payload", () => {
 	test("builds structured explain output from query analysis and ranking candidates", () => {

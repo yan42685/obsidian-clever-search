@@ -1,7 +1,7 @@
 ﻿import {
 	runCoverageLexicalV2Ranking,
 	createPrimaryUnitKey,
-} from "src/services/search/coverage-lexical/v2/ranking";
+} from "src/services/search/coverage-lexical-v2/ranking";
 
 describe("coverage lexical v2 ranking runner", () => {
 	test("runs the independent V2 chain end-to-end for AI \u7701\u8003", () => {
