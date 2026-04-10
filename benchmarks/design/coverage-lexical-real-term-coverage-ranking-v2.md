@@ -40,7 +40,8 @@ Key decisions:
 
 - keep `coverage-lexical` as the sole public/runtime backend
 - do not introduce a parallel replacement backend
-- introduce an explicit internal `v2/` subtree under `coverage-lexical/`
+- introduce an explicit independent internal `coverage-lexical-v2/` subtree
+  behind the existing `coverage-lexical` backend boundary
 - migrate layer by layer
 - after each migrated layer is proven, delete or hard-deprecate the
   corresponding old active logic
@@ -61,11 +62,12 @@ long-lived dual maintenance.
 
 The intended internal structure is:
 
-- `v2/query-units/`
-- `v2/ranking/`
-- `v2/coarse/`
-- `v2/display/`
-- `v2/explain/`
+- `coverage-lexical-v2/query-units/`
+- `coverage-lexical-v2/ranking/`
+- `coverage-lexical-v2/coarse/`
+- `coverage-lexical-v2/display/`
+- `coverage-lexical-v2/explain/`
+- `coverage-lexical-v2/runtime/`
 
 During migration, the existing large files remain as orchestration shells:
 
@@ -79,7 +81,8 @@ V2 modules.
 ### Migration Defaults
 
 - migration style: layered replacement
-- module organization: explicit `coverage-lexical/v2/` subtree
+- module organization: explicit `coverage-lexical-v2/` subtree plus thin
+  adapters from `coverage-lexical/`
 - no new backend name
 - no second engine class
 - no change to the external backend selection contract
@@ -1007,6 +1010,58 @@ Preferred lexical order:
 - Phase 5. Display Simplification: completed
   - the active V2 display policy is now pure top-slice presentation with no rescue or protected-minimum keep behavior
   - active runtime display behavior is exercised only through the independent V2 engine/runtime path
+
+### Locked Decision Implementation Snapshot (2026-04-10)
+
+Implemented in the active independent V2 path:
+
+- items 1-10:
+  short-Han primary handling, mixed-script primary handling, intact Han
+  preservation, thin query analysis, `surfaceCoverageShape`, bounded field
+  corroboration, locked metadata field order, and Latin/Han match-quality
+  policies are all implemented inside `coverage-lexical-v2/`
+- items 12-17 and 20-25:
+  minimal proximity formula, near-order-neutral lexical ranking, incomplete
+  candidate downgrading, no fallback promotion, baseline no-unigram final path,
+  pure tail trimming, explain/debug availability, explicit normalization, and
+  the minimum real-query gate set are all represented in code and tests
+
+Implemented with important caveats:
+
+- item 11 (`primaryUnitProximityScore` trigger):
+  the active comparator only consults proximity after the first four lexical
+  layers tie, but the score is still computed more broadly than the strict
+  "top two only" target wording
+- item 19 (recall target shape):
+  the active independent V2 runtime already uses source-based candidate
+  collection, but the legacy lane-oriented recall module still remains in-tree
+  as reference material and Phase 6 cleanup is not complete
+- item 26 (old-code deletion discipline):
+  active runtime flags and old active comparator/display paths have been
+  removed, but legacy V1 reference code is intentionally retained for ongoing
+  comparison and debugging while V2 continues to stabilize
+
+Still not fully realized:
+
+- item 18 (fallback ceilings):
+  the active V2 runtime avoids fallback-driven final ranking, but the full
+  four-ceiling fallback policy is not yet expressed as a dedicated,
+  end-to-end fallback subsystem in the active path
+
+Current validation snapshot:
+
+- automation benchmark continues to compare `MiniSearch` vs
+  `CoverageLexical(V2)` by default
+- latest benchmark run keeps V2 ahead on quality:
+  - objective: `0.785` vs `0.468`
+  - top1: `0.697` vs `0.444`
+  - top3: `0.864` vs `0.495`
+  - zeroRate: `0.056` vs `0.500`
+- latest relative anchor remains in the expected range:
+  - avg query latency ratio: `2.528x`
+  - p50 ratio: `2.448x`
+  - p100 ratio: `2.846x`
+  - estimated index bytes ratio: `1.265x`
 
 ## Implementation Plan
 
