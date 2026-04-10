@@ -1,4 +1,3 @@
-import { Vault } from "obsidian";
 import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
@@ -22,36 +21,9 @@ import {
 	compareCoverageLexicalPassageAdmissionSignals,
 } from "./coverage-lexical-admission";
 import {
-	buildCoverageLexicalPhraseSignatures,
-	buildCoverageLexicalStructuredMetadataSignatures,
-} from "./coverage-lexical-bridge";
-import {
-	buildCoverageLexicalCharQuery,
-	extractHanBigrams,
-	extractHanSegments,
-	evaluateCoverageLexicalTagFallback,
-	splitCoverageLexicalTagValues,
-	type CoverageLexicalCharQuery,
-} from "./coverage-lexical-cjk";
-import {
 	buildCoverageLexicalBodyEvidenceTrace,
 	type CoverageLexicalBodyEvidenceTrace,
 } from "./coverage-lexical-body-evidence";
-import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
-import {
-	collectCoverageLexicalCandidateStatesByDocId,
-	resolveHydratedCoverageLexicalCandidateState,
-	type CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
-	type CoverageLexicalRecallBenchmarkSubphaseName,
-} from "./coverage-lexical-recall";
-import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
-import {
-	compareCoverageLexicalResultSignals,
-} from "./coverage-lexical-ranker";
-import {
-	buildCoverageLexicalWindowFusionSignal,
-	createEmptyCoverageLexicalWindowFusionSignal,
-} from "./coverage-lexical-fusion";
 import type {
 	CoverageLexicalBodyTokenColdDocumentWrite,
 	CoverageLexicalBodyTokenColdStoreApi,
@@ -60,38 +32,73 @@ import {
 	COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
 } from "./coverage-lexical-body-token-cold-types";
 import {
-	decodeCoverageLexicalSnapshotV1,
-	encodeCoverageLexicalSnapshotV1,
-	type CoverageLexicalSnapshotState,
-} from "./coverage-lexical-snapshot";
+	buildCoverageLexicalPhraseSignatures,
+	buildCoverageLexicalStructuredMetadataSignatures,
+} from "./coverage-lexical-bridge";
 import {
-	COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS,
-	COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTOR_BY_KEY,
-	type CoverageLexicalLivePostingKey,
-	type CoverageLexicalPostingOwnership,
-} from "./coverage-lexical-posting-layout";
+	buildCoverageLexicalCharQuery,
+	evaluateCoverageLexicalTagFallback,
+	extractHanBigrams,
+	extractHanSegments,
+	splitCoverageLexicalTagValues,
+	type CoverageLexicalCharQuery,
+} from "./coverage-lexical-cjk";
+import {
+	COVERAGE_LEXICAL_IDENTITY_FIELD_CONFIDENCE,
+	createEmptyCoverageLexicalEvidenceMassSummary,
+} from "./coverage-lexical-evidence";
+import {
+	buildCoverageLexicalWindowFusionSignal,
+	createEmptyCoverageLexicalWindowFusionSignal,
+} from "./coverage-lexical-fusion";
 import {
 	CoverageLexicalSharedStringPostingMap,
 	CoverageLexicalSharedTokenIdPostingMap,
 	isCoverageLexicalSharedPackedPostingMap,
 	type CoverageLexicalSharedPackedPostingMap,
 } from "./coverage-lexical-live-posting-store";
-import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
+import { buildCoverageLexicalPlan } from "./coverage-lexical-planner";
+import {
+	COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTOR_BY_KEY,
+	COVERAGE_LEXICAL_LIVE_POSTING_DESCRIPTORS,
+	type CoverageLexicalLivePostingKey,
+	type CoverageLexicalPostingOwnership,
+} from "./coverage-lexical-posting-layout";
+import {
+	compareCoverageLexicalResultSignals,
+} from "./coverage-lexical-ranker";
+import {
+	collectCoverageLexicalCandidateStatesByDocId,
+	resolveHydratedCoverageLexicalCandidateState,
+	type CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
+	type CoverageLexicalRecallBenchmarkSubphaseName,
+} from "./coverage-lexical-recall";
+import { buildCoverageLexicalPairSignatures } from "./coverage-lexical-signatures";
+import {
+	decodeCoverageLexicalSnapshotV1,
+	encodeCoverageLexicalSnapshotV1,
+	type CoverageLexicalSnapshotState,
+} from "./coverage-lexical-snapshot";
 import type {
 	CoverageFamilyMatchKind,
 	CoverageLexicalAreaSignal,
 	CoverageLexicalCandidateState,
+	CoverageLexicalCoverageProfile,
+	CoverageLexicalEvidenceMassSummary,
 	CoverageLexicalFamily,
-	CoverageLexicalFamilyCountSummary,
 	CoverageLexicalFamilyProbe,
+	CoverageLexicalFamilyScriptClass,
 	CoverageLexicalFamilySignal,
-	CoverageLexicalMetadataIdentitySignal,
+	CoverageLexicalFamilyTier,
 	CoverageLexicalMetadataField,
-	CoverageLexicalPrefixWitness,
-	CoverageLexicalPlan,
+	CoverageLexicalMetadataIdentitySignal,
 	CoverageLexicalPairSignature,
 	CoverageLexicalPhraseSignature,
+	CoverageLexicalPlan,
+	CoverageLexicalPrefixWitness,
+	CoverageLexicalResourceHints,
 } from "./coverage-lexical-types";
+import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
 	"COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD";
@@ -100,6 +107,16 @@ const COVERAGE_LEXICAL_OFFLOADED_BODY_TOKEN_HOT_CACHE_LIMIT = 24;
 const COVERAGE_LEXICAL_OFFLOAD_HYDRATION_TIE_LOOKAHEAD = 24;
 const COVERAGE_LEXICAL_OFFLOAD_UNRESOLVED_HYDRATION_LOOKAHEAD = 48;
 const COVERAGE_LEXICAL_OFFLOAD_UNRESOLVED_HYDRATION_BUDGET = 12;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_PASSAGE_UPPER_BOUND = 0.9;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_PHRASE_UPPER_BOUND = 0.7;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_PREFIX_UPPER_BOUND = 0.55;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_CHAR_UPPER_BOUND = 0.25;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_REQUIRED_FAMILY_UPPER_BOUND = 0.8;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_SUPPORT_FAMILY_UPPER_BOUND = 0.35;
+const COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND = 0.45;
+const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.75;
+const COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX =
+	/(?:关于|有关|对于|什么是|什么叫|如何|怎么|为什么|以及|及|与|和|的|地|得|并且|并|中|里|上|下|将|要|会|吗|呢)/gu;
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -111,6 +128,7 @@ function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 
 type CoverageLexicalDocument = {
 	docId: number;
+	generation?: number;
 	basenameText: string;
 	folderText: string;
 	aliasesText: string;
@@ -167,13 +185,7 @@ type CoverageLexicalDerivedPostingBinding = {
 
 type CoverageLexicalDisplayPruneConfig = {
 	enabled: boolean;
-	top2To4Ratio: number;
-	top5PlusRatio: number;
-	countPruneMinTopCount: number;
-	top2To4CountRatio: number;
-	top5PlusCountRatio: number;
-	top2To4CountSlack: number;
-	top5PlusCountSlack: number;
+	tailRatio: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
@@ -224,9 +236,11 @@ function compareCoverageLexicalTerms(left: string, right: string): number {
 function createCoverageLexicalDocument(
 	docId: number,
 	fields: CoverageLexicalDocumentTextFields,
+	generation?: number,
 ): CoverageLexicalDocument {
 	return {
 		docId,
+		generation,
 		...fields,
 	};
 }
@@ -306,6 +320,60 @@ function tokenizeCoverageLexicalDocumentText(
 	return tokenizer
 		.tokenizeSequence(text, "index")
 		.map((term) => term.toLowerCase());
+}
+
+function buildCoverageLexicalSearchQueryTerms(
+	tokenizer: Tokenizer,
+	queryText: string,
+): string[] {
+	const rawQueryTerms = tokenizer
+		.tokenizeSequence(queryText, "search")
+		.map((term) => term.toLowerCase());
+	const normalizedContentTerms = deriveCoverageLexicalQueryOnlyContentTerms(
+		queryText,
+		rawQueryTerms,
+	);
+	if (normalizedContentTerms.length === 0) {
+		return rawQueryTerms;
+	}
+	const merged = new Set<string>();
+	for (const term of [...normalizedContentTerms, ...rawQueryTerms]) {
+		if (term.length > 0) {
+			merged.add(term);
+		}
+	}
+	return [...merged];
+}
+
+function deriveCoverageLexicalQueryOnlyContentTerms(
+	queryText: string,
+	rawQueryTerms: readonly string[],
+): string[] {
+	const rawSet = new Set(rawQueryTerms.map((term) => term.toLowerCase()));
+	const rawHanTerms = rawQueryTerms.filter((term) => /[\p{Script=Han}]/u.test(term));
+	if (rawHanTerms.length >= 2) {
+		return [];
+	}
+	const derived: string[] = [];
+	for (const segment of extractHanSegments(queryText.normalize("NFKC"))) {
+		const normalizedSegment = segment.trim().toLowerCase();
+		if (normalizedSegment.length < 4) {
+			continue;
+		}
+		const reducedTerms = normalizedSegment
+			.replace(COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX, " ")
+			.split(/\s+/u)
+			.map((term) => term.trim())
+			.filter((term) => term.length >= 2 && !rawSet.has(term));
+		if (reducedTerms.length < 2) {
+			continue;
+		}
+		for (const term of reducedTerms) {
+			rawSet.add(term);
+			derived.push(term);
+		}
+	}
+	return derived;
 }
 
 type CoverageLexicalDocRankableResult = {
@@ -389,7 +457,8 @@ type CoverageLexicalBenchmarkOffloadSearchDebug = {
 	cheapCoarseTopDocIds: number[];
 	coarseHydrationDocIds: number[];
 	localWindowDocIds: number[];
-	finalTopDocIds: number[];
+	rankedTopDocIds: number[];
+	returnedTopDocIds: number[];
 	docs: CoverageLexicalBenchmarkOffloadDocDebug[];
 };
 
@@ -462,6 +531,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		CoverageLexicalBodyTokenColdDocumentWrite
 	>();
 	private readonly pendingBodyTokenColdDeletes = new Set<string>();
+	private bodyTokenColdStoreWriteQueue: Promise<void> = Promise.resolve();
 	private nextDocumentId = 0;
 	private readonly bodyPostings = new CoverageLexicalSharedTokenIdPostingMap(
 		(term) => this.documentBodyTokenIdByTerm.get(term),
@@ -733,6 +803,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		};
 	}
 
+	private getDocumentGeneration(docId: number): number | undefined {
+		return this.documentById[docId]?.generation;
+	}
+
 	private getDocumentMetadataFieldText(
 		docId: number,
 		field: CoverageLexicalMetadataField,
@@ -938,9 +1012,31 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		if (!fileSnapshotStore) {
 			return;
 		}
-		const textsByPath = await fileSnapshotStore.readCurrentTexts(unresolvedPaths);
+		const indexedRequests = unresolvedDocIds.flatMap((docId, index) => {
+			const generation = this.getDocumentGeneration(docId);
+			return generation === undefined
+				? []
+				: [{ path: unresolvedPaths[index], generation }];
+		});
+		const currentFallbackPaths = unresolvedDocIds.flatMap((docId, index) =>
+			this.getDocumentGeneration(docId) === undefined
+				? [unresolvedPaths[index]]
+				: [],
+		);
+		const [indexedTextsByPath, currentTextsByPath] = await Promise.all([
+			indexedRequests.length > 0
+				? fileSnapshotStore.readIndexedTexts(indexedRequests)
+				: Promise.resolve(new Map<string, string>()),
+			currentFallbackPaths.length > 0
+				? fileSnapshotStore.readCurrentTexts(currentFallbackPaths)
+				: Promise.resolve(new Map<string, string>()),
+		]);
 		for (let index = 0; index < unresolvedDocIds.length; index += 1) {
-			const bodyText = textsByPath.get(unresolvedPaths[index]);
+			const generation = this.getDocumentGeneration(unresolvedDocIds[index]);
+			const bodyText =
+				generation === undefined
+					? currentTextsByPath.get(unresolvedPaths[index])
+					: indexedTextsByPath.get(unresolvedPaths[index]);
 			if (bodyText === undefined) {
 				continue;
 			}
@@ -960,13 +1056,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	private collectLikelyRecallBodyTokenDocIds(
 		queryTerms: readonly string[],
 	): readonly number[] {
-		const candidatePostings = Array.from(new Set(queryTerms))
-			.map((term) => this.bodyPostings.get(term))
-			.filter(
-				(postings): postings is readonly number[] | Uint32Array =>
-					postings !== undefined && postings.length > 0,
-			)
-			.sort((left, right) => left.length - right.length);
+		const candidatePostings: Array<number[] | Uint32Array> = [];
+		for (const term of new Set(queryTerms)) {
+			const postings = this.bodyPostings.get(term);
+			if (!postings || postings.length === 0) {
+				continue;
+			}
+			candidatePostings.push(postings);
+		}
+		candidatePostings.sort((left, right) => left.length - right.length);
 		const docIds: number[] = [];
 		const seen = new Set<number>();
 		for (const postings of candidatePostings) {
@@ -1014,12 +1112,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documentBodyTokenLexicon = [];
 	}
 
-	private offloadResidentDocumentBodyHanSegments(): void {
-		if (!this.shouldExperimentallyOffloadResidentBodyTokens()) {
-			return;
-		}
-		this.documentBodyHanSegmentsById.length = 0;
-	}
 
 	private mapDocumentBodyTokensToIds(tokens: readonly string[]): number[] {
 		return tokens.map((token) => this.getOrCreateDocumentBodyTokenId(token));
@@ -1161,7 +1253,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.indexDocument(document);
 		}
 		this.offloadResidentDocumentBodyTokens();
-		this.offloadResidentDocumentBodyHanSegments();
 		await this.flushPendingBodyTokenColdStoreWrites();
 	}
 
@@ -1169,16 +1260,19 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const path of paths) {
 			this.removeDocument(path);
 		}
-		void this.flushPendingBodyTokenColdStoreWrites();
+		void this.flushPendingBodyTokenColdStoreWrites().catch((error) =>
+			logger.warn("coverage lexical cold-store delete flush failed:", error),
+		);
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
 		const queryStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		this.lastBenchmarkOffloadSearchDebug = null;
 		try {
-			const queryTerms = this.tokenizer
-				.tokenizeSequence(request.queryText, "search")
-				.map((term) => term.toLowerCase());
+			const queryTerms = buildCoverageLexicalSearchQueryTerms(
+				this.tokenizer,
+				request.queryText,
+			);
 			const charQuery = buildCoverageLexicalCharQuery(request.queryText);
 			if (
 				this.documents.size === 0 ||
@@ -1314,8 +1408,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					queryTerms,
 					hanSegments: charQuery.hanSegments,
 					charTerms: charQuery.terms,
-					queryKind: plan.queryKind,
-					route: plan.route,
+					queryKind: plan.explain.queryKind,
 					candidateCount: candidates.size,
 				});
 			}
@@ -1465,6 +1558,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						coarseHydrationDocIds,
 						localWindowDocIds,
 						finalRanked: ranked,
+						returnedRanked: finalResults,
 						documentPathById: this.documentPathById,
 						hasResidentDocumentBodyTokens: (docId) =>
 							this.hasResidentDocumentBodyTokens(docId),
@@ -1637,8 +1731,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const docId = this.ensureDocumentId(document.path);
 		this.clearHotCachedOffloadedBodyTokens(docId);
 		const documentTextFields = createCoverageLexicalDocumentTextFields(document);
-		const storedDocument = createCoverageLexicalDocument(docId, documentTextFields);
+		const storedDocument = createCoverageLexicalDocument(
+			docId,
+			documentTextFields,
+			document.generation,
+		);
 		const bodyText = document.content ?? "";
+		const bodyHanSegments = extractHanSegments(bodyText);
 		const derivedState = buildCoverageLexicalDerivedDocumentIndexState(
 			this.tokenizer,
 			documentTextFields,
@@ -1648,12 +1747,19 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		this.documents.set(document.path, storedDocument);
 		this.documentById[docId] = storedDocument;
 		this.setDocumentBodyTokens(docId, derivedState.bodyTokenSequence);
+		this.documentBodyHanSegmentsById[docId] = bodyHanSegments;
 		this.documentTagValuesById[docId] = derivedState.tagValues;
 		this.stageBodyTokenColdUpsert({
 			path: document.path,
+			generation: document.generation,
 			bodyTokens: derivedState.bodyTokenSequence,
-			hanSegments: extractHanSegments(bodyText),
 		});
+		if (this.shouldExperimentallyOffloadResidentBodyTokens()) {
+			this.rememberHotCachedOffloadedBodyTokens(
+				docId,
+				derivedState.bodyTokenSequence,
+			);
+		}
 		this.applyDerivedPostingTerms(docId, derivedState, "add");
 		this.markLexiconDirty();
 	}
@@ -1789,16 +1895,25 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const upserts = [...this.pendingBodyTokenColdUpsertsByPath.values()];
 		this.pendingBodyTokenColdDeletes.clear();
 		this.pendingBodyTokenColdUpsertsByPath.clear();
-		const store = this.getBodyTokenColdStore();
-		if (!store) {
-			return;
+		if (deletes.length === 0 && upserts.length === 0) {
+			return await this.bodyTokenColdStoreWriteQueue.catch(() => undefined);
 		}
-		if (deletes.length > 0) {
-			await store.deleteDocuments(deletes);
-		}
-		if (upserts.length > 0) {
-			await store.upsertDocuments(upserts);
-		}
+		const queuedWrite = this.bodyTokenColdStoreWriteQueue
+			.catch(() => undefined)
+			.then(async () => {
+				const store = this.getBodyTokenColdStore();
+				if (!store) {
+					return;
+				}
+				if (deletes.length > 0) {
+					await store.deleteDocuments(deletes);
+				}
+				if (upserts.length > 0) {
+					await store.upsertDocuments(upserts);
+				}
+			});
+		this.bodyTokenColdStoreWriteQueue = queuedWrite;
+		await queuedWrite;
 	}
 
 	private getFileSnapshotStore(): FileSnapshotStore | null {
@@ -1817,6 +1932,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const fileSnapshotStore = this.getFileSnapshotStore();
 		if (!fileSnapshotStore) {
 			return null;
+		}
+		const generation = this.documents.get(path)?.generation;
+		if (generation !== undefined) {
+			return (
+				await fileSnapshotStore.readIndexedTexts([{ path, generation }])
+			).get(path) ?? null;
 		}
 		return (await fileSnapshotStore.readCurrentTexts([path])).get(path) ?? null;
 	}
@@ -1840,14 +1961,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 							{
 								docId: document.docId,
 								path: this.documentPathById[document.docId] ?? "",
+								generation: document.generation,
 								...this.getDocumentTextFields(document.docId),
-									bodyTokenIds: [
-										...(this.getDocumentBodyTokenIds(document.docId) ?? []),
-									],
-									bodyHanSegments: [],
-									tagValues: [
-										...(this.documentTagValuesById[document.docId] ?? []),
-									],
+								bodyTokenIds: [
+									...(this.getDocumentBodyTokenIds(document.docId) ?? []),
+								],
+								bodyHanSegments: [
+									...(this.documentBodyHanSegmentsById[document.docId] ?? []),
+								],
+								tagValues: [
+									...(this.documentTagValuesById[document.docId] ?? []),
+								],
 							},
 					  ]
 					: [],
@@ -1893,6 +2017,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		for (const document of state.documents) {
 			const storedDocument: CoverageLexicalDocument = {
 				docId: document.docId,
+				generation: document.generation,
 				basenameText: document.basenameText,
 				folderText: document.folderText,
 				aliasesText: document.aliasesText,
@@ -1904,13 +2029,15 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.documentIdByPath.set(document.path, document.docId);
 			this.documentPathById[document.docId] = document.path;
 			bodyTokenIdsById.set(document.docId, [...document.bodyTokenIds]);
+			this.documentBodyHanSegmentsById[document.docId] = [
+				...document.bodyHanSegments,
+			];
 			this.documentTagValuesById[document.docId] = [...document.tagValues];
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
 		this.restoreLivePostingState(state);
 		this.metadataHeadingCharPostings.clear();
 		this.offloadResidentDocumentBodyTokens();
-		this.offloadResidentDocumentBodyHanSegments();
 	}
 
 	private clearLivePostingMaps(): void {
@@ -2076,26 +2203,69 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	}
 
 	private buildFamilyProbes(queryTerms: readonly string[]): CoverageLexicalFamilyProbe[] {
-		return queryTerms.map((term) => ({
-			bodyExactDocCount: getPostingEntryCount(this.bodyPostings.get(term)),
-			metadataExactDocCount: getUnionPostingEntryCount([
+		const documentCount = this.documentById.reduce(
+			(total, document) => total + (document ? 1 : 0),
+			0,
+		);
+		return queryTerms.map((term) => {
+			const bodyExactDocCount = getPostingEntryCount(this.bodyPostings.get(term));
+			const metadataExactDocCount = getUnionPostingEntryCount([
 				this.metadataBasenamePostings.get(term),
 				this.metadataAliasPostings.get(term),
 				this.metadataFolderPostings.get(term),
 				this.metadataHeadingPostings.get(term),
 				this.metadataTagPostings.get(term),
-			]),
-			basenameExactDocCount: getPostingEntryCount(
+			]);
+			const combinedExactDocCount = getUnionPostingEntryCount([
+				this.bodyPostings.get(term),
 				this.metadataBasenamePostings.get(term),
-			),
-			folderExactDocCount: getPostingEntryCount(
+				this.metadataAliasPostings.get(term),
 				this.metadataFolderPostings.get(term),
-			),
-			headingExactDocCount: getPostingEntryCount(
 				this.metadataHeadingPostings.get(term),
-			),
-			aliasExactDocCount: getPostingEntryCount(this.metadataAliasPostings.get(term)),
-		}));
+				this.metadataTagPostings.get(term),
+			]);
+			const scriptClass = classifyCoverageLexicalFamilyScriptClass(term);
+			const lengthWeight = computeCoverageLexicalFamilyLengthWeight(
+				term,
+				scriptClass,
+			);
+			const rarityWeight = computeCoverageLexicalFamilyRarityWeight(
+				documentCount,
+				combinedExactDocCount,
+			);
+			const weakTokenPenalty = computeCoverageLexicalWeakTokenPenalty(
+				term,
+				scriptClass,
+			);
+			const familyWeight = clampCoverageLexicalWeight(
+				lengthWeight * rarityWeight * weakTokenPenalty,
+				0.18,
+				1.35,
+			);
+			return {
+				bodyExactDocCount,
+				metadataExactDocCount,
+				basenameExactDocCount: getPostingEntryCount(
+					this.metadataBasenamePostings.get(term),
+				),
+				folderExactDocCount: getPostingEntryCount(
+					this.metadataFolderPostings.get(term),
+				),
+				headingExactDocCount: getPostingEntryCount(
+					this.metadataHeadingPostings.get(term),
+				),
+				aliasExactDocCount: getPostingEntryCount(
+					this.metadataAliasPostings.get(term),
+				),
+				combinedExactDocCount,
+				scriptClass,
+				lengthWeight,
+				rarityWeight,
+				weakTokenPenalty,
+				familyWeight,
+				familyTier: classifyCoverageLexicalFamilyTier(term, familyWeight),
+			};
+		});
 	}
 
 	private recordBenchmarkPhaseTiming(
@@ -2425,7 +2595,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		plan: CoverageLexicalPlan,
 		maxItemResults: number,
 	): ReadonlySet<number> {
-		const rankedCount = coarseRanked.length;
+		const prioritizedRanked = reprioritizeCoverageLexicalExpensiveUpgradeCandidates(
+			coarseRanked,
+			candidates,
+			plan,
+		);
+		const rankedCount = prioritizedRanked.length;
 		if (rankedCount === 0) {
 			return new Set<number>();
 		}
@@ -2435,19 +2610,20 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			rankedCount,
 		);
 		if (rankedCount <= budget) {
-			return new Set(coarseRanked.map((result) => result.docId));
+			return new Set(prioritizedRanked.map((result) => result.docId));
 		}
 		const hydratedDocIds = new Set<number>();
 		for (let index = 0; index < budget; index += 1) {
-			hydratedDocIds.add(coarseRanked[index].docId);
+			hydratedDocIds.add(prioritizedRanked[index].docId);
 		}
-		const cutoff = coarseRanked[Math.max(0, budget - 1)];
+		const cutoff = prioritizedRanked[Math.max(0, budget - 1)];
+		const cutoffLowerBound = getCoverageLexicalCoarseHydrationLowerBound(cutoff);
 		const extensionLimit = Math.min(
 			rankedCount,
 			budget + COVERAGE_LEXICAL_OFFLOAD_HYDRATION_TIE_LOOKAHEAD,
 		);
 		for (let index = budget; index < extensionLimit; index += 1) {
-			const candidate = coarseRanked[index];
+			const candidate = prioritizedRanked[index];
 			const state = candidates.get(candidate.docId);
 			if (!state) {
 				continue;
@@ -2462,12 +2638,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					candidate.admissionSignal,
 					cutoff.admissionSignal,
 				) === 0;
-			const hasBodyUpgradePotential =
-				state.phraseMatches.length > 0 ||
-				state.bodyPrefixWitness !== null ||
-				state.bodyCharMatchIndices.length > 0 ||
-				hasUnresolvedCoverageLexicalBodyUpgradePotential(state);
-			if (tiesWithCutoff || hasBodyUpgradePotential) {
+			const potentialUpperBound = computeCoverageLexicalCoarseHydrationPotentialUpperBound(
+				candidate,
+				state,
+			);
+			if (tiesWithCutoff || potentialUpperBound >= cutoffLowerBound) {
 				hydratedDocIds.add(candidate.docId);
 			}
 		}
@@ -2488,11 +2663,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		const unresolvedTailCandidates: Array<{
 			docId: number;
 			index: number;
+			potentialUpperBound: number;
 			unresolvedFamilyCount: number;
 			unresolvedWeightUpperBound: number;
 		}> = [];
 		for (let index = extensionLimit; index < unresolvedTailLimit; index += 1) {
-			const candidate = coarseRanked[index];
+			const candidate = prioritizedRanked[index];
 			if (hydratedDocIds.has(candidate.docId)) {
 				continue;
 			}
@@ -2500,9 +2676,17 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			if (!state || !hasUnresolvedCoverageLexicalBodyUpgradePotential(state)) {
 				continue;
 			}
+			const potentialUpperBound = computeCoverageLexicalCoarseHydrationPotentialUpperBound(
+				candidate,
+				state,
+			);
+			if (potentialUpperBound < cutoffLowerBound) {
+				continue;
+			}
 			unresolvedTailCandidates.push({
 				docId: candidate.docId,
 				index,
+				potentialUpperBound,
 				unresolvedFamilyCount:
 					state.unresolvedBodyEvidence.unresolvedFamilyCount,
 				unresolvedWeightUpperBound:
@@ -2510,6 +2694,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			});
 		}
 		unresolvedTailCandidates.sort((left, right) => {
+			const potentialDecision =
+				right.potentialUpperBound - left.potentialUpperBound;
+			if (potentialDecision !== 0) {
+				return potentialDecision;
+			}
 			const weightDecision =
 				right.unresolvedWeightUpperBound - left.unresolvedWeightUpperBound;
 			if (weightDecision !== 0) {
@@ -2539,40 +2728,140 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		candidateCount: number,
 	): number {
 		const requested = Math.max(1, maxItemResults);
-		let minBudget = 24;
-		let multiplier = 4;
-		let cap = 64;
-		switch (plan.queryKind) {
-			case "body_only_local":
-				minBudget = 48;
-				multiplier = 10;
-				cap = 128;
-				break;
-			case "anchor_body_hybrid":
-				minBudget = 36;
-				multiplier = 7;
-				cap = 96;
-				break;
-			case "bridge_dependent":
-				minBudget = 40;
-				multiplier = 8;
-				cap = 112;
-				break;
-			case "memory_relaxed":
-				minBudget = 56;
-				multiplier = 10;
-				cap = 144;
-				break;
-			case "metadata_only_anchored":
-			default:
-				break;
-		}
+		const hints = getCoverageLexicalResourceHints(plan);
+		const minBudget = Math.round(
+			24 +
+				Math.min(
+					32,
+					hints.localWitnessBudget * 14 + hints.memoryBudget * 16,
+				) +
+				Math.min(14, hints.hybridBudget * 8) +
+				Math.min(12, hints.bridgeBudget * 8),
+		);
+		const multiplier = Math.max(
+			4,
+			Math.round(
+				4 +
+					hints.bodyBudget * 2.5 +
+					hints.hybridBudget * 2 +
+					hints.memoryBudget * 2.5 +
+					hints.bridgeBudget * 1.5,
+			),
+		);
+		const cap = Math.round(
+			64 +
+				Math.min(
+					56,
+					hints.localWitnessBudget * 24 + hints.memoryBudget * 28,
+				) +
+				Math.min(24, hints.hybridBudget * 16) +
+				Math.min(24, hints.bridgeBudget * 16),
+		);
 		return Math.min(
 			candidateCount,
 			Math.min(cap, Math.max(minBudget, requested * multiplier)),
 		);
 	}
 
+}
+
+function classifyCoverageLexicalFamilyScriptClass(
+	term: string,
+): CoverageLexicalFamilyScriptClass {
+	const hanCharCount = countCoverageLexicalHanChars(term);
+	const latinCharCount = countCoverageLexicalLatinChars(term);
+	if (hanCharCount > 0 && latinCharCount > 0) {
+		return "mixed";
+	}
+	if (hanCharCount > 0) {
+		return "han";
+	}
+	if (latinCharCount > 0) {
+		return "latin";
+	}
+	return "other";
+}
+
+function computeCoverageLexicalFamilyLengthWeight(
+	term: string,
+	scriptClass: CoverageLexicalFamilyScriptClass,
+): number {
+	const hanLenMass =
+		1 - Math.exp(-0.9 * Math.max(countCoverageLexicalHanChars(term) - 1, 0));
+	const latinLenMass =
+		1 - Math.exp(-0.28 * Math.max(countCoverageLexicalLatinChars(term) - 2, 0));
+	const lengthMass =
+		scriptClass === "han"
+			? hanLenMass
+			: scriptClass === "latin"
+				? latinLenMass
+				: Math.max(hanLenMass, latinLenMass);
+	return 0.35 + 0.65 * lengthMass;
+}
+
+function computeCoverageLexicalFamilyRarityWeight(
+	documentCount: number,
+	combinedExactDocCount: number,
+): number {
+	return clampCoverageLexicalWeight(
+		0.85 +
+			0.25 *
+				Math.log2(
+					(Math.max(1, documentCount) + 8) / (combinedExactDocCount + 8),
+				),
+		0.8,
+		1.25,
+	);
+}
+
+function computeCoverageLexicalWeakTokenPenalty(
+	term: string,
+	scriptClass: CoverageLexicalFamilyScriptClass,
+): number {
+	const hanCharCount = countCoverageLexicalHanChars(term);
+	const latinCharCount = countCoverageLexicalLatinChars(term);
+	if (scriptClass === "han" && hanCharCount === 1) {
+		return 0.35;
+	}
+	if (scriptClass === "latin" && latinCharCount <= 2) {
+		return 0.55;
+	}
+	if (/^(?:[_./\\-]+|v?\d+(?:[._-]\d+)+)$/u.test(term)) {
+		return 0.45;
+	}
+	return 1;
+}
+
+function classifyCoverageLexicalFamilyTier(
+	term: string,
+	familyWeight: number,
+): CoverageLexicalFamilyTier {
+	if (countCoverageLexicalHanChars(term) === 1 && term.length === 1) {
+		return "weak";
+	}
+	if (familyWeight >= 0.72) {
+		return "decisive";
+	}
+	if (familyWeight >= 0.45) {
+		return "support";
+	}
+	return "weak";
+}
+
+function countCoverageLexicalHanChars(term: string): number {
+	return term.match(/\p{Script=Han}/gu)?.length ?? 0;
+}
+
+function countCoverageLexicalLatinChars(term: string): number {
+	return term.match(/\p{Script=Latin}/gu)?.length ?? 0;
+}
+
+function clampCoverageLexicalWeight(
+	value: number,
+	min: number,
+	max: number,
+): number {
+	return Math.min(max, Math.max(min, value));
 }
 
 function hasUnresolvedCoverageLexicalBodyUpgradePotential(
@@ -2589,6 +2878,113 @@ function hasUnresolvedCoverageLexicalBodyUpgradePotential(
 	);
 }
 
+function getCoverageLexicalCoarseHydrationLowerBound(
+	result: CoverageLexicalDocRankableResult,
+): number {
+	return Math.max(
+		result.coverageLexicalSignal.evidenceMassSummary?.displayRawMass ??
+			result.score ??
+			0,
+		computeCoverageLexicalCoarseHydrationProfileLowerBound(
+			result.coverageLexicalSignal,
+		),
+	);
+}
+
+function computeCoverageLexicalCoarseHydrationPotentialUpperBound(
+	result: CoverageLexicalDocRankableResult,
+	state: CoverageLexicalCandidateState,
+): number {
+	const unresolved = state.unresolvedBodyEvidence;
+	let potentialUpperBound = getCoverageLexicalCoarseHydrationLowerBound(result);
+	potentialUpperBound += unresolved.unresolvedWeightUpperBound;
+	if (unresolved.needsPassageSignal) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_PASSAGE_UPPER_BOUND;
+	}
+	if (
+		unresolved.hasUnverifiedPhraseWitness ||
+		state.phraseMatches.length > 0
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_PHRASE_UPPER_BOUND;
+	}
+	if (
+		unresolved.hasUnresolvedPrefixSurface ||
+		state.bodyPrefixWitness !== null
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_PREFIX_UPPER_BOUND;
+	}
+	if (
+		unresolved.hasUnresolvedBodyCharVerification ||
+		state.bodyCharMatchIndices.length > 0
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_CHAR_UPPER_BOUND;
+	}
+	potentialUpperBound += computeCoverageLexicalCoarseHydrationProfilePotentialUpperBound(
+		result.coverageLexicalSignal,
+		unresolved,
+	);
+	return potentialUpperBound;
+}
+
+function computeCoverageLexicalCoarseHydrationProfileLowerBound(
+	signal: CoverageLexicalFamilySignal,
+): number {
+	const profile = signal.coverageProfile;
+	if (profile.requiredFamilyWeight > 0) {
+		return profile.requiredCoveredFamilyWeight / profile.requiredFamilyWeight;
+	}
+	if (profile.meaningfulFamilyWeight > 0) {
+		return (
+			profile.meaningfulCoveredFamilyWeight / profile.meaningfulFamilyWeight
+		);
+	}
+	return 0;
+}
+
+function computeCoverageLexicalCoarseHydrationProfilePotentialUpperBound(
+	signal: CoverageLexicalFamilySignal,
+	unresolved: CoverageLexicalCandidateState["unresolvedBodyEvidence"],
+): number {
+	if (unresolved.unresolvedFamilyCount <= 0) {
+		return 0;
+	}
+	const profile = signal.coverageProfile;
+	const missingRequiredFamilyCount = Math.max(
+		0,
+		profile.requiredFamilyCount - profile.requiredCoveredFamilyCount,
+	);
+	const missingSupportFamilyCount = Math.max(
+		0,
+		profile.supportFamilyCount - profile.supportCoveredFamilyCount,
+	);
+	const recoverableRequiredFamilyCount = Math.min(
+		unresolved.unresolvedFamilyCount,
+		missingRequiredFamilyCount,
+	);
+	const recoverableSupportFamilyCount = Math.min(
+		Math.max(0, unresolved.unresolvedFamilyCount - recoverableRequiredFamilyCount),
+		missingSupportFamilyCount,
+	);
+	let potentialUpperBound =
+		recoverableRequiredFamilyCount *
+			COVERAGE_LEXICAL_COARSE_HYDRATION_REQUIRED_FAMILY_UPPER_BOUND +
+		recoverableSupportFamilyCount *
+			COVERAGE_LEXICAL_COARSE_HYDRATION_SUPPORT_FAMILY_UPPER_BOUND;
+	if (
+		profile.crossScriptRequired &&
+		!profile.crossScriptSatisfied &&
+		unresolved.unresolvedFamilyCount > 0
+	) {
+		potentialUpperBound +=
+			COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND;
+	}
+	return potentialUpperBound;
+}
+
 function buildCoverageLexicalBenchmarkOffloadSearchDebug(options: {
 	queryText: string;
 	offloadEnabled: boolean;
@@ -2598,6 +2994,7 @@ function buildCoverageLexicalBenchmarkOffloadSearchDebug(options: {
 	coarseHydrationDocIds: ReadonlySet<number>;
 	localWindowDocIds: ReadonlySet<number>;
 	finalRanked: readonly CoverageLexicalDocRankableResult[];
+	returnedRanked: readonly CoverageLexicalDocRankableResult[];
 	documentPathById: readonly (string | undefined)[];
 	hasResidentDocumentBodyTokens: (docId: number) => boolean;
 }): CoverageLexicalBenchmarkOffloadSearchDebug {
@@ -2666,7 +3063,10 @@ function buildCoverageLexicalBenchmarkOffloadSearchDebug(options: {
 			.map((result) => result.docId),
 		coarseHydrationDocIds: [...options.coarseHydrationDocIds],
 		localWindowDocIds: [...options.localWindowDocIds],
-		finalTopDocIds: options.finalRanked.slice(0, 10).map((result) => result.docId),
+		rankedTopDocIds: options.finalRanked.slice(0, 10).map((result) => result.docId),
+		returnedTopDocIds: options.returnedRanked
+			.slice(0, 10)
+			.map((result) => result.docId),
 		docs,
 	};
 }
@@ -2679,6 +3079,7 @@ function buildCoverageSignalBase(
 	tagFallback: ReturnType<typeof evaluateCoverageLexicalTagFallback>,
 ): CoverageLexicalFamilySignal {
 	const families = plan.families;
+	const probes = plan.probes ?? [];
 	const coreBody = createEmptyAreaSignal();
 	const softBody = createEmptyAreaSignal();
 	const metadataAnchor = createEmptyAreaSignal();
@@ -2686,16 +3087,33 @@ function buildCoverageSignalBase(
 	const metadataIdentity = createEmptyMetadataIdentitySignal();
 	const bodyChar = createEmptyCharSignal();
 	const metadataChar = createEmptyCharSignal();
-	const familyCountSummary = createEmptyFamilyCountSummary();
+	const coverageProfile = createEmptyCoverageLexicalCoverageProfile();
+	const evidenceMassSummary = createEmptyCoverageLexicalEvidenceMassSummary();
+	evidenceMassSummary.displayIdealMass =
+		computeCoverageLexicalEvidenceIdealDisplayMass(probes, families);
 	let bodyPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let metadataPrefixWitness: CoverageLexicalPrefixWitness | null = null;
 	let tailCoreWeight = 0;
 	let tailSoftWeight = 0;
 	const matchedTerms: string[] = [];
 	const matchedTermSet = new Set<string>();
+	const requiredFamilyIndices = new Set<number>([
+		...plan.hardAnchorFamilies.map((family) => family.index),
+		...plan.decisiveBodyFamilies.map((family) => family.index),
+		...plan.supportBodyFamilies.map((family) => family.index),
+	]);
 
 	for (const family of families) {
 		const familyIndex = family.index;
+		const probe = probes[familyIndex];
+		const familyWeight = getCoverageLexicalProbeFamilyWeight(probe);
+		const familyTier = getCoverageLexicalProbeFamilyTier(probe);
+		const familyScriptClass = getCoverageLexicalProbeScriptClass(
+			probe,
+			family.normalizedTerm,
+		);
+		const countsAsMeaningfulFamily = familyTier !== "weak";
+		const countsAsRequiredFamily = requiredFamilyIndices.has(familyIndex);
 		const bodyCode = state.bodyMatches[familyIndex] ?? 0;
 		const metadataCode = state.metadataMatches[familyIndex] ?? 0;
 		const aliasAssistCode =
@@ -2715,6 +3133,16 @@ function buildCoverageSignalBase(
 			headingsAssistCode,
 			tagsAssistCode,
 		);
+		if (family.role !== "noise") {
+			accumulateCoverageLexicalCoverageProfileTotals(
+				coverageProfile,
+				familyTier,
+				familyScriptClass,
+				familyWeight,
+				countsAsMeaningfulFamily,
+				countsAsRequiredFamily,
+			);
+		}
 		if (
 			family.role === "noise" ||
 			(bodyCode === 0 && metadataCode === 0 && assistCode === 0)
@@ -2728,37 +3156,43 @@ function buildCoverageSignalBase(
 		const headingsCode = state.metadataFieldMatches.headings[familyIndex] ?? 0;
 		const tagsCode = state.metadataFieldMatches.tags[familyIndex] ?? 0;
 		const weight = computeFamilyTailWeight(familyIndex);
+		const hasFamilyCoverage = bodyCode > 0 || metadataCode > 0 || assistCode > 0;
 
 		if (!matchedTermSet.has(family.normalizedTerm)) {
 			matchedTermSet.add(family.normalizedTerm);
 			matchedTerms.push(family.normalizedTerm);
 		}
 
-		familyCountSummary.totalMatchedFamilyCount += 1;
-		if (bodyCode > 0) {
-			familyCountSummary.bodyMatchedFamilyCount += 1;
+		const bestMetadataEvidence = selectBestCoverageLexicalMetadataEvidence({
+			metadataCode,
+			aliasCode,
+			basenameCode,
+			folderCode,
+			headingsCode,
+			tagsCode,
+			aliasAssistCode,
+			basenameAssistCode,
+			folderAssistCode,
+			headingsAssistCode,
+			tagsAssistCode,
+		});
+		if (hasFamilyCoverage) {
+			accumulateCoverageLexicalCoverageProfileCovered(
+				coverageProfile,
+				familyTier,
+				familyScriptClass,
+				familyWeight,
+				countsAsMeaningfulFamily,
+				countsAsRequiredFamily,
+			);
 		}
-		if (metadataCode > 0 || assistCode > 0) {
-			const primaryMetadataField =
-				basenameCode > 0 || basenameAssistCode > 0
-					? "basename"
-					: aliasCode > 0 || aliasAssistCode > 0
-						? "aliases"
-						: folderCode > 0 || folderAssistCode > 0
-							? "folder"
-							: headingsCode > 0 || headingsAssistCode > 0
-								? "headings"
-								: tagsCode > 0 || tagsAssistCode > 0
-									? "tags"
-									: null;
-			if (primaryMetadataField) {
-				familyCountSummary.metadataMatchedFamilyCount += 1;
-				accumulateMetadataFieldCount(
-					familyCountSummary,
-					primaryMetadataField,
-				);
-			}
-		}
+		accumulateCoverageLexicalFamilyEvidenceMass(
+			evidenceMassSummary,
+			familyTier,
+			familyWeight,
+			bodyCode,
+			bestMetadataEvidence,
+		);
 
 		if (family.role === "body") {
 			if (bodyCode > 0 && family.strength === "core") {
@@ -2915,9 +3349,10 @@ function buildCoverageSignalBase(
 			matchedTerms.push(term);
 		}
 	}
-
-	return {
-		familyCountSummary,
+	finalizeCoverageLexicalCoverageProfile(coverageProfile);
+	return finalizeCoverageLexicalEvidenceMassSummary({
+		coverageProfile,
+		evidenceMassSummary,
 		coreBody,
 		softBody,
 		metadataAnchor,
@@ -2941,17 +3376,17 @@ function buildCoverageSignalBase(
 		),
 		localEvidence: createEmptyCoverageLexicalWindowFusionSignal(),
 		matchedTerms,
-	};
+	});
 }
 
 function withCoverageLexicalLocalEvidence(
 	baseSignal: CoverageLexicalFamilySignal,
 	localEvidence: CoverageLexicalFamilySignal["localEvidence"],
 ): CoverageLexicalFamilySignal {
-	return {
+	return finalizeCoverageLexicalEvidenceMassSummary({
 		...baseSignal,
 		localEvidence,
-	};
+	});
 }
 
 function hasAnyCoverageLexicalSignal(
@@ -2979,16 +3414,30 @@ function createEmptyAreaSignal(): CoverageLexicalAreaSignal {
 	};
 }
 
-function createEmptyFamilyCountSummary(): CoverageLexicalFamilyCountSummary {
+function createEmptyCoverageLexicalCoverageProfile(): CoverageLexicalCoverageProfile {
 	return {
-		totalMatchedFamilyCount: 0,
-		metadataMatchedFamilyCount: 0,
-		bodyMatchedFamilyCount: 0,
-		basenameMatchedFamilyCount: 0,
-		aliasesMatchedFamilyCount: 0,
-		folderMatchedFamilyCount: 0,
-		headingsMatchedFamilyCount: 0,
-		tagsMatchedFamilyCount: 0,
+		meaningfulFamilyCount: 0,
+		meaningfulCoveredFamilyCount: 0,
+		meaningfulFamilyWeight: 0,
+		meaningfulCoveredFamilyWeight: 0,
+		requiredFamilyCount: 0,
+		requiredCoveredFamilyCount: 0,
+		requiredFamilyWeight: 0,
+		requiredCoveredFamilyWeight: 0,
+		decisiveFamilyCount: 0,
+		decisiveCoveredFamilyCount: 0,
+		decisiveFamilyWeight: 0,
+		decisiveCoveredFamilyWeight: 0,
+		supportFamilyCount: 0,
+		supportCoveredFamilyCount: 0,
+		supportFamilyWeight: 0,
+		supportCoveredFamilyWeight: 0,
+		requiredHanFamilyCount: 0,
+		requiredHanCoveredFamilyCount: 0,
+		requiredLatinFamilyCount: 0,
+		requiredLatinCoveredFamilyCount: 0,
+		crossScriptRequired: false,
+		crossScriptSatisfied: false,
 	};
 }
 
@@ -3023,27 +3472,410 @@ function createEmptyMetadataIdentitySignal(): CoverageLexicalMetadataIdentitySig
 	};
 }
 
-function accumulateMetadataFieldCount(
-	summary: CoverageLexicalFamilyCountSummary,
-	field: CoverageLexicalMetadataField,
+function getCoverageLexicalProbeFamilyWeight(
+	probe: CoverageLexicalFamilyProbe | undefined,
+): number {
+	return probe?.familyWeight ?? 1;
+}
+
+function getCoverageLexicalProbeFamilyTier(
+	probe: CoverageLexicalFamilyProbe | undefined,
+): CoverageLexicalFamilyTier {
+	return probe?.familyTier ?? "support";
+}
+
+function getCoverageLexicalProbeScriptClass(
+	probe: CoverageLexicalFamilyProbe | undefined,
+	term: string,
+): CoverageLexicalFamilyScriptClass {
+	return probe?.scriptClass ?? classifyCoverageLexicalFamilyScriptClass(term);
+}
+
+function accumulateCoverageLexicalCoverageProfileTotals(
+	profile: CoverageLexicalCoverageProfile,
+	familyTier: CoverageLexicalFamilyTier,
+	scriptClass: CoverageLexicalFamilyScriptClass,
+	familyWeight: number,
+	countsAsMeaningfulFamily: boolean,
+	countsAsRequiredFamily: boolean,
 ): void {
-	if (field === "basename") {
-		summary.basenameMatchedFamilyCount += 1;
+	if (countsAsMeaningfulFamily) {
+		profile.meaningfulFamilyCount += 1;
+		profile.meaningfulFamilyWeight += familyWeight;
+	}
+	if (countsAsRequiredFamily) {
+		profile.requiredFamilyCount += 1;
+		profile.requiredFamilyWeight += familyWeight;
+		if (scriptClass === "han") {
+			profile.requiredHanFamilyCount += 1;
+		}
+		if (scriptClass === "latin") {
+			profile.requiredLatinFamilyCount += 1;
+		}
+	}
+	if (familyTier === "decisive") {
+		profile.decisiveFamilyCount += 1;
+		profile.decisiveFamilyWeight += familyWeight;
 		return;
 	}
-	if (field === "aliases") {
-		summary.aliasesMatchedFamilyCount += 1;
+	if (familyTier === "support") {
+		profile.supportFamilyCount += 1;
+		profile.supportFamilyWeight += familyWeight;
+	}
+}
+
+function accumulateCoverageLexicalCoverageProfileCovered(
+	profile: CoverageLexicalCoverageProfile,
+	familyTier: CoverageLexicalFamilyTier,
+	scriptClass: CoverageLexicalFamilyScriptClass,
+	familyWeight: number,
+	countsAsMeaningfulFamily: boolean,
+	countsAsRequiredFamily: boolean,
+): void {
+	if (countsAsMeaningfulFamily) {
+		profile.meaningfulCoveredFamilyCount += 1;
+		profile.meaningfulCoveredFamilyWeight += familyWeight;
+	}
+	if (countsAsRequiredFamily) {
+		profile.requiredCoveredFamilyCount += 1;
+		profile.requiredCoveredFamilyWeight += familyWeight;
+		if (scriptClass === "han") {
+			profile.requiredHanCoveredFamilyCount += 1;
+		}
+		if (scriptClass === "latin") {
+			profile.requiredLatinCoveredFamilyCount += 1;
+		}
+	}
+	if (familyTier === "decisive") {
+		profile.decisiveCoveredFamilyCount += 1;
+		profile.decisiveCoveredFamilyWeight += familyWeight;
 		return;
 	}
-	if (field === "folder") {
-		summary.folderMatchedFamilyCount += 1;
+	if (familyTier === "support") {
+		profile.supportCoveredFamilyCount += 1;
+		profile.supportCoveredFamilyWeight += familyWeight;
+	}
+}
+
+function finalizeCoverageLexicalCoverageProfile(
+	profile: CoverageLexicalCoverageProfile,
+): void {
+	profile.crossScriptRequired =
+		profile.requiredHanFamilyCount > 0 && profile.requiredLatinFamilyCount > 0;
+	profile.crossScriptSatisfied =
+		!profile.crossScriptRequired ||
+		(
+			profile.requiredHanCoveredFamilyCount > 0 &&
+			profile.requiredLatinCoveredFamilyCount > 0
+		);
+}
+
+function selectBestCoverageLexicalMetadataEvidence(input: {
+	metadataCode: number;
+	aliasCode: number;
+	basenameCode: number;
+	folderCode: number;
+	headingsCode: number;
+	tagsCode: number;
+	aliasAssistCode: number;
+	basenameAssistCode: number;
+	folderAssistCode: number;
+	headingsAssistCode: number;
+	tagsAssistCode: number;
+}):
+	| {
+			code: number;
+			field: CoverageLexicalMetadataField | null;
+			fieldConfidence: number;
+	  }
+	| null {
+	const candidates: Array<{
+		code: number;
+		field: CoverageLexicalMetadataField | null;
+		fieldConfidence: number;
+	}> = [];
+	const pushCandidate = (
+		code: number,
+		field: CoverageLexicalMetadataField,
+	): void => {
+		if (code <= 0) {
+			return;
+		}
+		candidates.push({
+			code,
+			field,
+			fieldConfidence: COVERAGE_LEXICAL_IDENTITY_FIELD_CONFIDENCE[field],
+		});
+	};
+	pushCandidate(input.basenameCode, "basename");
+	pushCandidate(input.aliasCode, "aliases");
+	pushCandidate(input.headingsCode, "headings");
+	pushCandidate(input.folderCode, "folder");
+	pushCandidate(input.tagsCode, "tags");
+	pushCandidate(input.basenameAssistCode, "basename");
+	pushCandidate(input.aliasAssistCode, "aliases");
+	pushCandidate(input.headingsAssistCode, "headings");
+	pushCandidate(input.folderAssistCode, "folder");
+	pushCandidate(input.tagsAssistCode, "tags");
+	if (input.metadataCode > 0) {
+		candidates.push({
+			code: input.metadataCode,
+			field: null,
+			fieldConfidence: 0.76,
+		});
+	}
+	if (candidates.length === 0) {
+		return null;
+	}
+	candidates.sort(
+		(left, right) =>
+			right.code - left.code ||
+			right.fieldConfidence - left.fieldConfidence,
+	);
+	return candidates[0];
+}
+
+function accumulateCoverageLexicalFamilyEvidenceMass(
+	summary: CoverageLexicalEvidenceMassSummary,
+	familyTier: CoverageLexicalFamilyTier,
+	familyWeight: number,
+	bodyCode: number,
+	metadataEvidence:
+		| {
+				code: number;
+				field: CoverageLexicalMetadataField | null;
+				fieldConfidence: number;
+		  }
+		| null,
+): void {
+	if (familyTier === "weak") {
 		return;
 	}
-	if (field === "headings") {
-		summary.headingsMatchedFamilyCount += 1;
+	const bodyKind = getCoverageLexicalFamilyMatchKindFromCode(bodyCode);
+	const metadataKind = getCoverageLexicalFamilyMatchKindFromCode(
+		metadataEvidence?.code ?? 0,
+	);
+	const bodyRank = getCoverageLexicalEvidencePreferenceRank(bodyKind, "body");
+	const metadataRank = getCoverageLexicalEvidencePreferenceRank(
+		metadataKind,
+		"identity",
+	);
+	const useMetadata =
+		metadataRank > bodyRank ||
+		(metadataRank === bodyRank &&
+			(metadataEvidence?.fieldConfidence ?? 0) > 1);
+	if (!bodyKind && !metadataKind) {
 		return;
 	}
-	summary.tagsMatchedFamilyCount += 1;
+	if (familyTier === "decisive") {
+		summary.decisiveCoveredMass += familyWeight;
+	} else {
+		summary.supportCoveredMass += familyWeight;
+	}
+	if (useMetadata && metadataKind) {
+		accumulateCoverageLexicalEvidenceBucket(
+			summary,
+			familyTier,
+			"identity",
+			metadataKind,
+			familyWeight,
+			metadataEvidence?.fieldConfidence ?? 0.76,
+		);
+		return;
+	}
+	if (bodyKind) {
+		accumulateCoverageLexicalEvidenceBucket(
+			summary,
+			familyTier,
+			"body",
+			bodyKind,
+			familyWeight,
+			1,
+		);
+	}
+}
+
+function getCoverageLexicalFamilyMatchKindFromCode(
+	code: number,
+): Exclude<CoverageFamilyMatchKind, null> | null {
+	if (code === 3) {
+		return "exact";
+	}
+	if (code === 2) {
+		return "prefix";
+	}
+	if (code === 1) {
+		return "fuzzy";
+	}
+	return null;
+}
+
+function getCoverageLexicalEvidencePreferenceRank(
+	kind: Exclude<CoverageFamilyMatchKind, null> | null,
+	channel: "identity" | "body",
+): number {
+	if (!kind) {
+		return 0;
+	}
+	if (kind === "exact") {
+		return channel === "identity" ? 6 : 5;
+	}
+	if (kind === "prefix") {
+		return channel === "identity" ? 4 : 3;
+	}
+	return channel === "identity" ? 2 : 1;
+}
+
+function accumulateCoverageLexicalEvidenceBucket(
+	summary: CoverageLexicalEvidenceMassSummary,
+	familyTier: CoverageLexicalFamilyTier,
+	channel: "identity" | "body",
+	kind: Exclude<CoverageFamilyMatchKind, null>,
+	familyWeight: number,
+	fieldConfidence: number,
+): void {
+	const weightedMass = familyWeight * fieldConfidence;
+	if (familyTier === "decisive") {
+		if (kind === "exact") {
+			if (channel === "identity") {
+				summary.decisiveExactIdentityMass += weightedMass;
+			} else {
+				summary.decisiveExactBodyMass += weightedMass;
+			}
+			return;
+		}
+		if (kind === "prefix") {
+			if (channel === "identity") {
+				summary.decisivePrefixIdentityMass += weightedMass;
+			} else {
+				summary.decisivePrefixBodyMass += weightedMass;
+			}
+			return;
+		}
+		if (channel === "identity") {
+			summary.decisiveFuzzyIdentityMass += weightedMass;
+		} else {
+			summary.decisiveFuzzyBodyMass += weightedMass;
+		}
+		return;
+	}
+	if (kind === "exact") {
+		if (channel === "identity") {
+			summary.supportExactIdentityMass += weightedMass;
+		} else {
+			summary.supportExactBodyMass += weightedMass;
+		}
+		return;
+	}
+	if (kind === "prefix") {
+		if (channel === "identity") {
+			summary.supportPrefixIdentityMass += weightedMass;
+		} else {
+			summary.supportPrefixBodyMass += weightedMass;
+		}
+		return;
+	}
+	if (channel === "identity") {
+		summary.supportFuzzyIdentityMass += weightedMass;
+	} else {
+		summary.supportFuzzyBodyMass += weightedMass;
+	}
+}
+
+function finalizeCoverageLexicalEvidenceMassSummary(
+	signal: CoverageLexicalFamilySignal,
+): CoverageLexicalFamilySignal {
+	const summary = {
+		...(signal.evidenceMassSummary ??
+			createEmptyCoverageLexicalEvidenceMassSummary()),
+	};
+	summary.witnessMass = computeCoverageLexicalWitnessMass(signal);
+	summary.weakBridgeMass = computeCoverageLexicalWeakBridgeMass(signal);
+	summary.displayRawMass = computeCoverageLexicalEvidenceDisplayRawMass(summary);
+	summary.displayNormalizedMass = computeCoverageLexicalEvidenceDisplayNormalizedMass(
+		summary,
+	);
+	return {
+		...signal,
+		evidenceMassSummary: summary,
+	};
+}
+
+function computeCoverageLexicalWitnessMass(
+	signal: CoverageLexicalFamilySignal,
+): number {
+	return (
+		signal.metadataIdentity.phraseWeight * 0.65 +
+		signal.phraseBridgeWeight * 0.7 +
+		signal.localEvidence.primary.exactCoreWeight * 0.6 +
+		signal.localEvidence.corroboratedExactCoreWeight * 0.75 +
+		signal.localEvidence.primary.orderedPairCount * 0.4 +
+		signal.localEvidence.primary.orderRatio * 0.25
+	);
+}
+
+function computeCoverageLexicalWeakBridgeMass(
+	signal: CoverageLexicalFamilySignal,
+): number {
+	return (
+		signal.metadataChar.bestSegmentCoverageRatio * 0.35 +
+		signal.metadataChar.matchRatio * 0.15 +
+		signal.bodyChar.bestSegmentCoverageRatio * 0.25 +
+		signal.bodyChar.matchRatio * 0.12 +
+		signal.tagSignal.charMatchRatio * 0.12 +
+		signal.tagSignal.exactMatchCount * 0.16
+	);
+}
+
+function computeCoverageLexicalEvidenceDisplayRawMass(
+	summary: CoverageLexicalEvidenceMassSummary,
+): number {
+	return (
+		summary.decisiveExactIdentityMass +
+		summary.decisiveExactBodyMass +
+		0.85 * summary.decisivePrefixIdentityMass +
+		0.82 * summary.decisivePrefixBodyMass +
+		0.55 * summary.decisiveFuzzyIdentityMass +
+		0.5 * summary.decisiveFuzzyBodyMass +
+		summary.supportExactIdentityMass +
+		summary.supportExactBodyMass +
+		0.8 * summary.supportPrefixIdentityMass +
+		0.76 * summary.supportPrefixBodyMass +
+		0.45 * summary.supportFuzzyIdentityMass +
+		0.4 * summary.supportFuzzyBodyMass +
+		0.35 * summary.witnessMass +
+		0.18 * summary.weakBridgeMass
+	);
+}
+
+function computeCoverageLexicalEvidenceDisplayNormalizedMass(
+	summary: CoverageLexicalEvidenceMassSummary,
+): number {
+	if (summary.displayRawMass <= 0) {
+		return 0;
+	}
+	if (summary.displayIdealMass <= 0) {
+		return summary.displayRawMass;
+	}
+	return clampCoverageLexicalWeight(
+		summary.displayRawMass / summary.displayIdealMass,
+		0,
+		1,
+	);
+}
+
+function computeCoverageLexicalEvidenceIdealDisplayMass(
+	probes: readonly (CoverageLexicalFamilyProbe | undefined)[],
+	families: readonly CoverageLexicalFamily[],
+): number {
+	let idealMass = 0;
+	for (const family of families) {
+		if (family.role === "noise") {
+			continue;
+		}
+		idealMass += getCoverageLexicalProbeFamilyWeight(probes[family.index]);
+	}
+	return Math.max(1, idealMass);
 }
 
 function applyMatch(
@@ -3179,6 +4011,13 @@ function computeFamilyTailWeight(index: number): number {
 }
 
 function computeFallbackScore(signal: CoverageLexicalFamilySignal): number {
+	const weightedDisplayMass =
+		signal.evidenceMassSummary?.displayNormalizedMass ??
+		signal.evidenceMassSummary?.displayRawMass ??
+		0;
+	if (weightedDisplayMass > 0) {
+		return weightedDisplayMass;
+	}
 	return (
 		signal.coreBody.coverageCount * 100 +
 		signal.coreBody.exactWeight * 3 +
@@ -3260,16 +4099,21 @@ function computeLocalWindowRerankDocIds(
 	plan: CoverageLexicalPlan,
 	maxItemResults: number,
 ): Set<number> {
-	if (coarseRanked.length <= maxItemResults) {
-		return new Set(coarseRanked.map((result) => result.docId));
+	const prioritizedRanked = reprioritizeCoverageLexicalExpensiveUpgradeCandidates(
+		coarseRanked,
+		null,
+		plan,
+	);
+	if (prioritizedRanked.length <= maxItemResults) {
+		return new Set(prioritizedRanked.map((result) => result.docId));
 	}
 	let budget = Math.min(
-		coarseRanked.length,
+		prioritizedRanked.length,
 		Math.max(DEFAULT_LOCAL_WINDOW_RERANK_BUDGET, maxItemResults * 3),
 	);
-	while (budget < coarseRanked.length) {
-		const left = coarseRanked[budget - 1];
-		const right = coarseRanked[budget];
+	while (budget < prioritizedRanked.length) {
+		const left = prioritizedRanked[budget - 1];
+		const right = prioritizedRanked[budget];
 		const signalDecision = compareCoverageLexicalResultSignals(
 			left.coverageLexicalSignal,
 			right.coverageLexicalSignal,
@@ -3284,21 +4128,123 @@ function computeLocalWindowRerankDocIds(
 		}
 		budget += 1;
 	}
-	return new Set(coarseRanked.slice(0, budget).map((result) => result.docId));
+	return new Set(prioritizedRanked.slice(0, budget).map((result) => result.docId));
+}
+
+function reprioritizeCoverageLexicalExpensiveUpgradeCandidates(
+	results: readonly CoverageLexicalDocRankableResult[],
+	candidates: ReadonlyMap<number, CoverageLexicalCandidateState> | null,
+	plan: CoverageLexicalPlan,
+): readonly CoverageLexicalDocRankableResult[] {
+	const prioritized: CoverageLexicalDocRankableResult[] = [];
+	const deferred: CoverageLexicalDocRankableResult[] = [];
+	for (const result of results) {
+		const state = candidates?.get(result.docId);
+		if (shouldSoftGateCoverageLexicalExpensiveUpgrade(result, state, plan)) {
+			deferred.push(result);
+			continue;
+		}
+		prioritized.push(result);
+	}
+	if (deferred.length === 0) {
+		return results;
+	}
+	return [...prioritized, ...deferred];
+}
+
+export function shouldSoftGateCoverageLexicalExpensiveUpgrade(
+	result: CoverageLexicalDocRankableResult,
+	state: CoverageLexicalCandidateState | null | undefined,
+	plan: CoverageLexicalPlan,
+	ratio = resolveCoverageLexicalSoftEarlyGateRatio(),
+): boolean {
+	if (!isCoverageLexicalSoftEarlyGateEnabled()) {
+		return false;
+	}
+	const hints = getCoverageLexicalResourceHints(plan);
+	if (
+		plan.queryKind === "memory_relaxed" ||
+		hints.memoryBudget >= Math.max(0.7, hints.localWitnessBudget)
+	) {
+		return false;
+	}
+	const profile = result.coverageLexicalSignal.coverageProfile;
+	const requiredFamilyCount =
+		profile.requiredFamilyCount > 0
+			? profile.requiredFamilyCount
+			: profile.meaningfulFamilyCount;
+	const requiredCoveredFamilyCount =
+		profile.requiredFamilyCount > 0
+			? profile.requiredCoveredFamilyCount
+			: profile.meaningfulCoveredFamilyCount;
+	if (requiredFamilyCount < 2 || requiredCoveredFamilyCount > 1) {
+		return false;
+	}
+	const coverageRatio = computeCoverageLexicalCoarseHydrationProfileLowerBound(
+		result.coverageLexicalSignal,
+	);
+	if (coverageRatio >= ratio) {
+		return false;
+	}
+	if (hasCoverageLexicalExpensiveUpgradeRescue(result, state)) {
+		return false;
+	}
+	return true;
+}
+
+function hasCoverageLexicalExpensiveUpgradeRescue(
+	result: CoverageLexicalDocRankableResult,
+	state: CoverageLexicalCandidateState | null | undefined,
+): boolean {
+	if (
+		result.coverageLexicalSignal.coreBody.exactWeight > 0 ||
+		result.coverageLexicalSignal.metadataIdentity.phraseCoverageCount > 0 ||
+		result.coverageLexicalSignal.phraseBridgeCount > 0 ||
+		result.admissionSignal.exactWeight > 0 ||
+		result.admissionSignal.phraseMatchCount > 0 ||
+		result.admissionSignal.compactnessScore >= 0.18
+	) {
+		return true;
+	}
+	if (!state) {
+		return false;
+	}
+	return (
+		state.unresolvedBodyEvidence.needsPassageSignal ||
+		state.unresolvedBodyEvidence.hasUnverifiedPhraseWitness
+	);
 }
 
 function computePerFileLocalWindowLimit(
 	plan: CoverageLexicalPlan,
 	bodyTokenCount: number,
 ): number {
+	const hints = getCoverageLexicalResourceHints(plan);
 	if (
-		plan.queryKind === "memory_relaxed" ||
+		hints.memoryBudget >= 0.7 ||
+		hints.localWitnessBudget >= 0.8 ||
+		hints.bodyBudget >= 0.95 ||
 		plan.bodyFamilyCount >= 4 ||
 		bodyTokenCount >= 96
 	) {
 		return 3;
 	}
 	return 2;
+}
+
+function getCoverageLexicalResourceHints(
+	plan: CoverageLexicalPlan,
+): CoverageLexicalResourceHints {
+	return (
+		plan.resourceHints ?? {
+			metadataBudget: 0,
+			hybridBudget: 0,
+			bodyBudget: 0,
+			memoryBudget: 0,
+			bridgeBudget: 0,
+			localWitnessBudget: 0,
+		}
+	);
 }
 
 function rankCoverageLexicalDocResults(
@@ -3332,95 +4278,38 @@ export function pruneWeakCoverageLexicalDisplayResults(
 		results[0].coverageLexicalSignal,
 		config,
 	);
-	const topMatchedFamilyCount =
-		results[0].coverageLexicalSignal.familyCountSummary.totalMatchedFamilyCount;
-	const useCountPrune = topMatchedFamilyCount >= config.countPruneMinTopCount;
-	if (!useCountPrune && topCoverage <= 0) {
+	if (topCoverage <= 0) {
 		return [...results];
 	}
 	const kept: CoverageLexicalDocRankableResult[] = [results[0]];
 	for (let index = 1; index < results.length; index += 1) {
 		const result = results[index];
-		const candidateMatchedFamilyCount =
-			result.coverageLexicalSignal.familyCountSummary.totalMatchedFamilyCount;
 		const candidateCoverage = computeCoverageLexicalDisplayCoverage(
 			result.coverageLexicalSignal,
 			config,
 		);
-		const thresholdRatio =
-			index <= 3 ? config.top2To4Ratio : config.top5PlusRatio;
-		if (useCountPrune) {
-			const countFloor = computeCoverageLexicalDisplayCountFloor(
-				topMatchedFamilyCount,
-				index,
-				config,
-			);
-			if (candidateMatchedFamilyCount >= countFloor) {
-				kept.push(result);
-				continue;
-			}
-			if (
-				shouldRescueCoverageLexicalDisplayResult(
-					result.coverageLexicalSignal,
-					candidateCoverage,
-					topCoverage,
-					thresholdRatio,
-				)
-			) {
-				kept.push(result);
-			}
-			continue;
-		}
-		if (candidateCoverage > topCoverage * thresholdRatio) {
+		if (candidateCoverage > topCoverage * config.tailRatio) {
 			kept.push(result);
 		}
 	}
 	return kept;
 }
 
-function computeCoverageLexicalDisplayCountFloor(
-	topMatchedFamilyCount: number,
-	index: number,
-	config: CoverageLexicalDisplayPruneConfig,
-): number {
-	const ratio =
-		index <= 3 ? config.top2To4CountRatio : config.top5PlusCountRatio;
-	const slack =
-		index <= 3 ? config.top2To4CountSlack : config.top5PlusCountSlack;
-	return Math.max(
-		1,
-		Math.min(
-			Math.max(1, topMatchedFamilyCount - slack),
-			Math.ceil(topMatchedFamilyCount * ratio),
-		),
-	);
-}
-
-function shouldRescueCoverageLexicalDisplayResult(
-	signal: CoverageLexicalFamilySignal,
-	candidateCoverage: number,
-	topCoverage: number,
-	thresholdRatio: number,
-): boolean {
-	if (topCoverage <= 0) {
-		return false;
-	}
-	const hasStrongWitness =
-		signal.coreBody.exactWeight > 0 ||
-		signal.metadataIdentity.phraseCoverageCount > 0 ||
-		signal.localEvidence.primary.exactCoreWeight > 0 ||
-		signal.localEvidence.primary.orderedPairCount > 0 ||
-		signal.phraseBridgeCount > 0;
-	if (!hasStrongWitness) {
-		return false;
-	}
-	return candidateCoverage > topCoverage * thresholdRatio;
-}
-
 function computeCoverageLexicalDisplayCoverage(
 	signal: CoverageLexicalFamilySignal,
 	config: CoverageLexicalDisplayPruneConfig,
 ): number {
+	const weightedDisplayMass =
+		signal.evidenceMassSummary?.displayNormalizedMass ??
+		signal.evidenceMassSummary?.displayRawMass ??
+		0;
+	const profileCoverage = computeCoverageLexicalDisplayProfileCoverage(signal);
+	if (weightedDisplayMass > 0) {
+		if (profileCoverage <= 0) {
+			return weightedDisplayMass;
+		}
+		return (weightedDisplayMass + profileCoverage) / 2;
+	}
 	return (
 		signal.coreBody.coverageCount +
 		signal.softBody.coverageCount +
@@ -3430,7 +4319,49 @@ function computeCoverageLexicalDisplayCoverage(
 		signal.bodyChar.matchCount * config.bodyCharWeight +
 		signal.metadataChar.matchCount * config.metadataCharWeight +
 		signal.tagSignal.exactMatchCount * config.tagExactWeight +
-		signal.tagSignal.charMatchCount * config.tagCharWeight
+		signal.tagSignal.charMatchCount * config.tagCharWeight +
+		profileCoverage
+	);
+}
+
+function computeCoverageLexicalDisplayProfileCoverage(
+	signal: CoverageLexicalFamilySignal,
+): number {
+	const profile = signal.coverageProfile;
+	let baseCoverage = 0;
+	if (profile.requiredFamilyWeight > 0) {
+		baseCoverage =
+			profile.requiredCoveredFamilyWeight / profile.requiredFamilyWeight;
+	} else if (profile.meaningfulFamilyWeight > 0) {
+		baseCoverage =
+			profile.meaningfulCoveredFamilyWeight / profile.meaningfulFamilyWeight;
+	} else if (profile.requiredFamilyCount > 0) {
+		baseCoverage =
+			profile.requiredCoveredFamilyCount / profile.requiredFamilyCount;
+	} else if (profile.meaningfulFamilyCount > 0) {
+		baseCoverage =
+			profile.meaningfulCoveredFamilyCount / profile.meaningfulFamilyCount;
+	}
+	if (baseCoverage <= 0) {
+		return 0;
+	}
+	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
+		baseCoverage *= 0.5;
+	}
+	return Math.min(1, Math.max(0, baseCoverage));
+}
+
+function isCoverageLexicalSoftEarlyGateEnabled(): boolean {
+	return readCoverageLexicalBooleanEnv(
+		"COVERAGE_LEXICAL_SOFT_EARLY_GATE_ENABLED",
+		true,
+	);
+}
+
+function resolveCoverageLexicalSoftEarlyGateRatio(): number {
+	return readCoverageLexicalNumberEnv(
+		"COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO",
+		COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO,
 	);
 }
 
@@ -3441,33 +4372,12 @@ function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPrune
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
 			fallbackEnabled,
 		),
-		top2To4Ratio: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
-			0.34,
-		),
-		top5PlusRatio: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
-			0.5,
-		),
-		countPruneMinTopCount: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
-			3,
-		),
-		top2To4CountRatio: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
-			0.67,
-		),
-		top5PlusCountRatio: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
-			0.5,
-		),
-		top2To4CountSlack: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
-			1,
-		),
-		top5PlusCountSlack: readCoverageLexicalNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
-			2,
+		tailRatio: readCoverageLexicalNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO",
+			readCoverageLexicalNumberEnv(
+				"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+				0.8,
+			),
 		),
 		bodyCharWeight: readCoverageLexicalNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
@@ -4325,6 +5235,18 @@ function addOwnedNumericPosting(
 
 function cloneOwnedNumericPostingMap(
 	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: "packed",
+): Map<string, Uint32Array>;
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: "plain",
+): Map<string, number[]>;
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
+	ownership: CoverageLexicalPostingOwnership,
+): Map<string, number[] | Uint32Array>;
+function cloneOwnedNumericPostingMap(
+	postings: ReadonlyMap<string, readonly number[] | Uint32Array>,
 	ownership: CoverageLexicalPostingOwnership,
 ): Map<string, number[] | Uint32Array> {
 	return new Map(
@@ -4337,6 +5259,16 @@ function cloneOwnedNumericPostingMap(
 	);
 }
 
+function cloneSharedTokenIdPostingMapForSnapshot(
+	postings: CoverageLexicalSharedTokenIdPostingMap,
+	tokenLexicon: readonly string[],
+	ownership: "packed",
+): Map<string, Uint32Array>;
+function cloneSharedTokenIdPostingMapForSnapshot(
+	postings: CoverageLexicalSharedTokenIdPostingMap,
+	tokenLexicon: readonly string[],
+	ownership: "plain",
+): Map<string, number[]>;
 function cloneSharedTokenIdPostingMapForSnapshot(
 	postings: CoverageLexicalSharedTokenIdPostingMap,
 	tokenLexicon: readonly string[],
@@ -4477,3 +5409,4 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
+

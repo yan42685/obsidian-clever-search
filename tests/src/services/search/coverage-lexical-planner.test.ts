@@ -1,4 +1,4 @@
-import { buildCoverageLexicalPlan } from "src/services/search/coverage-lexical/coverage-lexical-planner";
+﻿import { buildCoverageLexicalPlan } from "src/services/search/coverage-lexical/coverage-lexical-planner";
 import type { CoverageLexicalFamilyProbe } from "src/services/search/coverage-lexical/coverage-lexical-types";
 
 describe("coverage lexical planner", () => {
@@ -38,6 +38,8 @@ describe("coverage lexical planner", () => {
 		);
 
 		expect(plan.queryKind).toBe("anchor_body_hybrid");
+		expect(plan.rescuePotential.unresolvedBodyUpgradeLikely).toBe(true);
+		expect(plan.coverageRequirements.requiredFamilyIndices.length).toBeGreaterThan(0);
 		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toEqual(
 			expect.arrayContaining(["vector", "cache"]),
 		);
@@ -455,6 +457,230 @@ describe("coverage lexical planner", () => {
 		expect(plan.queryKind).toBe("metadata_only_anchored");
 		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toEqual(
 			expect.arrayContaining(["status", "page"]),
+		);
+	});
+
+	test("keeps alias-intent families as hard anchors in long mixed queries", () => {
+		const queryTerms = ["old", "names", "still", "resolve", "through", "aliases"];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 2,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 2,
+				aliasExactDocCount: 1,
+				combinedExactDocCount: 3,
+				familyWeight: 0.43,
+				familyTier: "weak",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 2,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 1,
+				aliasExactDocCount: 1,
+				combinedExactDocCount: 3,
+				familyWeight: 0.61,
+				familyTier: "support",
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 0,
+				familyWeight: 0.69,
+				familyTier: "support",
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 0,
+				familyWeight: 0.81,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 0,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 0,
+				familyWeight: 0.81,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 1,
+				aliasExactDocCount: 1,
+				combinedExactDocCount: 1,
+				familyWeight: 0.77,
+				familyTier: "decisive",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"old names still resolve through aliases",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toEqual(
+			expect.arrayContaining(["names", "aliases"]),
+		);
+		expect(plan.weightedAnchorMass).toBeGreaterThan(0);
+		expect(plan.explain.familyReasons.some((reason) => reason.term === "aliases")).toBe(
+			true,
+		);
+	});
+
+	test("assigns metadata-leading resource hints for short Han fallback-bigram hybrids with strong structured anchors", () => {
+		const queryTerms = [
+			"\u7535\u5b50\u6280",
+			"\u7535\u5b50",
+			"\u5b50\u6280",
+		];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 3,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.92,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.58,
+				familyTier: "support",
+			},
+			{
+				bodyExactDocCount: 4,
+				metadataExactDocCount: 0,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 4,
+				familyWeight: 0.34,
+				familyTier: "weak",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"\u7535\u5b50\u6280",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.queryKind).toBe("anchor_body_hybrid");
+		expect(plan.resourceHints?.metadataBudget).toBeGreaterThan(
+			plan.resourceHints?.bodyBudget ?? 0,
+		);
+		expect(plan.rescuePotential.metadataIdentityLikely).toBe(true);
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toContain(
+			"\u7535\u5b50\u6280",
+		);
+	});
+
+	test("does not treat jieba-style Han words as fallback bigram expansion", () => {
+		const queryTerms = [
+			"\u7535\u5b50\u6280\u672f",
+			"\u5165\u95e8",
+		];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 3,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.92,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.68,
+				familyTier: "support",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan(
+			"\u7535\u5b50\u6280\u672f\u5165\u95e8",
+			queryTerms,
+			probes,
+		);
+
+		expect(plan.queryKind).toBe("anchor_body_hybrid");
+		expect(plan.resourceHints?.hybridBudget).toBeGreaterThanOrEqual(0.7);
+	});
+
+	test("uses the same tier-based short-query anchor rule for latin support families", () => {
+		const queryTerms = ["checkpoint", "restore"];
+		const probes: CoverageLexicalFamilyProbe[] = [
+			{
+				bodyExactDocCount: 1,
+				metadataExactDocCount: 3,
+				basenameExactDocCount: 2,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.92,
+				familyTier: "decisive",
+			},
+			{
+				bodyExactDocCount: 3,
+				metadataExactDocCount: 1,
+				basenameExactDocCount: 0,
+				folderExactDocCount: 0,
+				headingExactDocCount: 0,
+				aliasExactDocCount: 0,
+				combinedExactDocCount: 3,
+				familyWeight: 0.62,
+				familyTier: "support",
+			},
+		];
+
+		const plan = buildCoverageLexicalPlan("checkpoint restore", queryTerms, probes);
+
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).toContain(
+			"checkpoint",
+		);
+		expect(plan.hardAnchorFamilies.map((family) => family.normalizedTerm)).not.toContain(
+			"restore",
+		);
+		expect(plan.supportBodyFamilies.map((family) => family.normalizedTerm)).toContain(
+			"restore",
 		);
 	});
 });

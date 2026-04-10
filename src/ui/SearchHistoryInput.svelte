@@ -5,6 +5,7 @@
 		type SearchHistorySuggestion,
 	} from "src/services/obsidian/user-data/search-history-service";
 	import { t } from "src/services/obsidian/translations/locale-helper";
+	import { shouldHideSingleRedundantSuggestion } from "src/ui/search-history-suggestion-visibility";
 	import { getInstance } from "src/utils/my-lib";
 	import { createEventDispatcher, tick } from "svelte";
 
@@ -103,6 +104,16 @@
 			nextGhostSuggestion,
 			normalizedQueryText,
 		);
+		if (
+			shouldHideSingleRedundantSuggestion(
+				historySuggestions,
+				nextGhostSuggestion,
+				manualSuggestionsOpen,
+			)
+		) {
+			closeHistorySuggestions();
+			return;
+		}
 		isHistoryDropdownOpen = historySuggestions.length > 0;
 		if (!isHistoryDropdownOpen) {
 			manualSuggestionsOpen = false;
@@ -493,8 +504,7 @@
 <div
 	class="search-bar"
 	class:omni-variant={variant === "omni"}
-	class:hide-match-count={!showMatchCount || !matchCountText}
-	data-match-count={showMatchCount ? matchCountText : ""}
+	class:has-match-count={showMatchCount && !!matchCountText}
 >
 	<div class="history-input-shell">
 		<div class="history-input-overlay" aria-hidden="true">
@@ -530,6 +540,11 @@
 			on:mouseup={handleSelectionChange}
 			on:select={handleSelectionChange}
 		/>
+		{#if showMatchCount && matchCountText}
+			<span class="history-match-count-badge" aria-hidden="true">
+				{matchCountText}
+			</span>
+		{/if}
 	</div>
 	{#if isHistoryDropdownOpen}
 		<div class="history-suggestions-anchor">
@@ -585,6 +600,7 @@
 		--cs-history-row-height: 1.58em;
 		--cs-history-row-gap: 0.02em;
 		--cs-history-dropdown-offset: 0.04em;
+		--cs-history-right-slot: 0px;
 		position: sticky;
 		top: -0.2em;
 		left: 0;
@@ -593,18 +609,8 @@
 		height: 30px;
 	}
 
-	.search-bar::after {
-		content: attr(data-match-count);
-		position: absolute;
-		right: 0.6em;
-		top: 1.4em;
-		font-size: 0.8em;
-		transform: translateY(-50%);
-		color: var(--cs-hint-char-color, grey);
-	}
-
-	.search-bar.hide-match-count::after {
-		content: none;
+	.search-bar.has-match-count {
+		--cs-history-right-slot: 3.8rem;
 	}
 
 	.history-input-shell {
@@ -624,7 +630,7 @@
 		z-index: 1;
 		display: flex;
 		align-items: center;
-		padding: 8px 12px;
+		padding: 8px calc(12px + var(--cs-history-right-slot)) 8px 12px;
 		box-sizing: border-box;
 		overflow: hidden;
 		pointer-events: none;
@@ -658,13 +664,17 @@
 		z-index: 2;
 		width: 100%;
 		height: 100%;
-		padding: 8px 12px;
+		padding: 8px calc(12px + var(--cs-history-right-slot)) 8px 12px;
 		box-sizing: border-box;
 		color: var(--text-normal);
 		-webkit-text-fill-color: var(--text-normal);
+		-webkit-appearance: none;
+		appearance: none;
 		outline: none;
 		border: none;
 		background: transparent;
+		background-image: none;
+		box-shadow: none;
 		white-space: pre;
 		overflow: hidden;
 		text-overflow: clip;
@@ -672,6 +682,22 @@
 		line-height: inherit;
 		letter-spacing: inherit;
 		caret-color: var(--text-normal);
+		cursor: text;
+	}
+
+	.history-match-count-badge {
+		position: absolute;
+		top: 50%;
+		right: 12px;
+		z-index: 3;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		line-height: 1;
+		font-size: 0.8em;
+		color: var(--cs-hint-char-color, grey);
+		transform: translateY(-50%);
+		pointer-events: none;
 	}
 
 	.history-input-ghost {
@@ -812,16 +838,41 @@
 		height: 2.75rem;
 	}
 
+	.search-bar.omni-variant.has-match-count {
+		--cs-history-right-slot: 4.4rem;
+	}
+
 	.search-bar.omni-variant .history-input-shell {
-		border-radius: 14px;
-		background-color: var(--modal-background, var(--background-primary, #1f1f1f));
-		border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.08));
-		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+		border-radius: 10px;
+		background-color: var(--cs-search-bar-bgc, var(--modal-background, var(--background-primary, #1f1f1f)));
+		border: 1px solid var(--background-modifier-border, rgba(0, 0, 0, 0.12));
+		box-shadow: none !important;
+		outline: none;
+		background-image: none;
+		overflow: hidden;
+	}
+
+	.search-bar.omni-variant .history-input-shell:focus-within {
+		border-color: var(--background-modifier-border, rgba(0, 0, 0, 0.12));
+		box-shadow: none !important;
+		outline: none;
 	}
 
 	.search-bar.omni-variant .history-input-overlay,
 	.search-bar.omni-variant .history-editable {
-		padding: 0.8rem 0.95rem;
+		padding: 0.8rem calc(0.95rem + var(--cs-history-right-slot)) 0.8rem 0.95rem;
+	}
+
+	.search-bar.omni-variant .history-editable {
+		border: none !important;
+		outline: none !important;
+		box-shadow: none !important;
+		background: transparent !important;
+	}
+
+	.search-bar.omni-variant .history-match-count-badge {
+		right: 0.95rem;
+		font-size: 0.88rem;
 	}
 
 	.search-bar.omni-variant .history-suggestions-anchor {

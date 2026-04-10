@@ -109,17 +109,20 @@ export type CoverageLexicalRecallDebug = {
 	unionSize: number;
 };
 
-export type CoverageLexicalRoute =
-	| "body-first"
-	| "body-with-anchor"
-	| "metadata-first";
-
 export type CoverageLexicalQueryKind =
 	| "metadata_only_anchored"
 	| "body_only_local"
 	| "anchor_body_hybrid"
 	| "bridge_dependent"
 	| "memory_relaxed";
+
+export type CoverageLexicalFamilyScriptClass =
+	| "han"
+	| "latin"
+	| "mixed"
+	| "other";
+
+export type CoverageLexicalFamilyTier = "decisive" | "support" | "weak";
 
 export type CoverageLexicalFamilyProbe = {
 	bodyExactDocCount: number;
@@ -128,6 +131,13 @@ export type CoverageLexicalFamilyProbe = {
 	folderExactDocCount: number;
 	headingExactDocCount: number;
 	aliasExactDocCount: number;
+	combinedExactDocCount?: number;
+	scriptClass?: CoverageLexicalFamilyScriptClass;
+	lengthWeight?: number;
+	rarityWeight?: number;
+	weakTokenPenalty?: number;
+	familyWeight?: number;
+	familyTier?: CoverageLexicalFamilyTier;
 };
 
 export type CoverageLexicalQuerySpanKind =
@@ -158,9 +168,38 @@ export type CoverageLexicalPlanFamilyReason = {
 };
 
 export type CoverageLexicalPlanExplain = {
+	queryKind: CoverageLexicalQueryKind;
 	spans: CoverageLexicalQuerySpan[];
 	familyReasons: CoverageLexicalPlanFamilyReason[];
 	queryKindReasons: string[];
+};
+
+export type CoverageLexicalResourceHints = {
+	metadataBudget: number;
+	hybridBudget: number;
+	bodyBudget: number;
+	memoryBudget: number;
+	bridgeBudget: number;
+	localWitnessBudget: number;
+};
+
+export type CoverageLexicalCoverageRequirements = {
+	requiredFamilyIndices: number[];
+	decisiveFamilyIndices: number[];
+	supportFamilyIndices: number[];
+	optionalFamilyIndices: number[];
+	bridgeFamilyIndices: number[];
+	minimumMatchCount: number;
+	requiresCrossScriptCoverage: boolean;
+	requiresBalancedMultiTermCoverage: boolean;
+};
+
+export type CoverageLexicalRescuePotential = {
+	metadataIdentityLikely: boolean;
+	phraseRescueLikely: boolean;
+	localWitnessLikely: boolean;
+	bridgeRescueLikely: boolean;
+	unresolvedBodyUpgradeLikely: boolean;
 };
 
 export type CoverageLexicalPlan = {
@@ -171,7 +210,6 @@ export type CoverageLexicalPlan = {
 	hasMixedScriptHint: boolean;
 	hasPathShapeHint: boolean;
 	hasTitleShapeHint: boolean;
-	route: CoverageLexicalRoute;
 	hardAnchorFamilies: CoverageLexicalFamily[];
 	decisiveBodyFamilies: CoverageLexicalFamily[];
 	supportBodyFamilies: CoverageLexicalFamily[];
@@ -182,6 +220,17 @@ export type CoverageLexicalPlan = {
 	coreFamilyCount: number;
 	anchorFamilyCount: number;
 	bodyFamilyCount: number;
+	probes?: readonly CoverageLexicalFamilyProbe[];
+	weightedAnchorMass?: number;
+	weightedBodyMass?: number;
+	weightedOptionalMass?: number;
+	decisiveAnchorMass?: number;
+	decisiveBodyMass?: number;
+	supportAnchorMass?: number;
+	supportBodyMass?: number;
+	resourceHints?: CoverageLexicalResourceHints;
+	coverageRequirements: CoverageLexicalCoverageRequirements;
+	rescuePotential: CoverageLexicalRescuePotential;
 	explain: CoverageLexicalPlanExplain;
 };
 
@@ -252,11 +301,6 @@ export type CoverageLexicalWindowFusionSignal = {
 	corroboratedSoftCoverageCount: number;
 };
 
-export type CoverageLexicalHighlightRange = {
-	start: number;
-	end: number;
-};
-
 export type CoverageLexicalPassageAdmissionSignal = {
 	coreCoverageCount: number;
 	exactWeight: number;
@@ -269,19 +313,56 @@ export type CoverageLexicalPassageAdmissionSignal = {
 	compactnessScore: number;
 };
 
-export type CoverageLexicalFamilyCountSummary = {
-	totalMatchedFamilyCount: number;
-	metadataMatchedFamilyCount: number;
-	bodyMatchedFamilyCount: number;
-	basenameMatchedFamilyCount: number;
-	aliasesMatchedFamilyCount: number;
-	folderMatchedFamilyCount: number;
-	headingsMatchedFamilyCount: number;
-	tagsMatchedFamilyCount: number;
+export type CoverageLexicalEvidenceMassSummary = {
+	decisiveCoveredMass: number;
+	decisiveExactIdentityMass: number;
+	decisiveExactBodyMass: number;
+	decisivePrefixIdentityMass: number;
+	decisivePrefixBodyMass: number;
+	decisiveFuzzyIdentityMass: number;
+	decisiveFuzzyBodyMass: number;
+	supportCoveredMass: number;
+	supportExactIdentityMass: number;
+	supportExactBodyMass: number;
+	supportPrefixIdentityMass: number;
+	supportPrefixBodyMass: number;
+	supportFuzzyIdentityMass: number;
+	supportFuzzyBodyMass: number;
+	witnessMass: number;
+	weakBridgeMass: number;
+	displayIdealMass: number;
+	displayRawMass: number;
+	displayNormalizedMass: number;
+};
+
+export type CoverageLexicalCoverageProfile = {
+	meaningfulFamilyCount: number;
+	meaningfulCoveredFamilyCount: number;
+	meaningfulFamilyWeight: number;
+	meaningfulCoveredFamilyWeight: number;
+	requiredFamilyCount: number;
+	requiredCoveredFamilyCount: number;
+	requiredFamilyWeight: number;
+	requiredCoveredFamilyWeight: number;
+	decisiveFamilyCount: number;
+	decisiveCoveredFamilyCount: number;
+	decisiveFamilyWeight: number;
+	decisiveCoveredFamilyWeight: number;
+	supportFamilyCount: number;
+	supportCoveredFamilyCount: number;
+	supportFamilyWeight: number;
+	supportCoveredFamilyWeight: number;
+	requiredHanFamilyCount: number;
+	requiredHanCoveredFamilyCount: number;
+	requiredLatinFamilyCount: number;
+	requiredLatinCoveredFamilyCount: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
 };
 
 export type CoverageLexicalFamilySignal = {
-	familyCountSummary: CoverageLexicalFamilyCountSummary;
+	evidenceMassSummary?: CoverageLexicalEvidenceMassSummary;
+	coverageProfile: CoverageLexicalCoverageProfile;
 	coreBody: CoverageLexicalAreaSignal;
 	softBody: CoverageLexicalAreaSignal;
 	metadataAnchor: CoverageLexicalAreaSignal;

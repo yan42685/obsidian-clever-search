@@ -15,6 +15,7 @@
 		"build": "npm run typecheck:build && node esbuild.config.mjs production",
 		"benchmark:hybrid": "node scripts/hybrid-search-benchmark.mjs",
 		"benchmark:coverage-lexical": "node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand",
+		"benchmark:coverage-lexical:materialize-corpus": "node scripts/materialize-coverage-lexical-corpus.mjs",
 		"benchmark:hybrid:real-ab": "node scripts/hybrid-real-ab-benchmark.mjs --dry-run",
 		"benchmark:hybrid:context-sweep": "node scripts/hybrid-real-ab-benchmark.mjs --mode=local-budget-sweep",
 		"benchmark:hybrid:regression": "node scripts/hybrid-search-benchmark.mjs --mode=regression",

@@ -21,7 +21,7 @@ It exists so automation work does not drift back into `passage-file-search-engin
 
 - `coverage-lexical-engine.ts`: orchestrates recall + plan + rank
 - `coverage-lexical-families.ts`: family decomposition and core/soft classification
-- `coverage-lexical-planner.ts`: route selection and query-shape flags
+- `coverage-lexical-planner.ts`: query kind, resource hints, coverage requirements, and rescue potential
 - `coverage-lexical-ranker.ts`: family-first comparator only
 - `coverage-lexical-windowing.ts`: query-conditioned passage / local-window evidence
 - `coverage-lexical-fusion.ts`: file-level fusion of family-first and local evidence
@@ -40,7 +40,7 @@ The comparator should implement this order directly:
 1. core body family coverage
 2. family match quality (`exact > prefix > fuzzy`)
 3. tail-weighted core quality
-4. route-specific metadata anchor support
+4. close-coverage metadata anchor support
 
 The MVP should include lightweight local-window evidence from the start.
 
@@ -64,7 +64,7 @@ Benchmark work should serve `coverage-lexical` directly.
 - coverage beats repeated noise
 - exact beats prefix beats fuzzy on tied coverage
 - tail decides only after coverage and quality tie
-- metadata helps only when route says it should
+- metadata helps when close-coverage object identification is stronger, not only when body detail spikes
 8. Keep existing broad corpus coverage, but do not let legacy expectations dictate the new comparator.
 
 ## Exploration Order

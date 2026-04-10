@@ -46,6 +46,9 @@ type QueryType =
 	| "mixed_anchor"
 	| "template_collision"
 	| "mixed_script_anchor"
+	| "zh_short_identity"
+	| "zh_short_body_vs_basename"
+	| "ambiguous_intent"
 	| "partial_memory";
 
 type QueryCase = {
@@ -77,6 +80,17 @@ type BenchmarkSummary = {
 	estimatedIndexBytes: number;
 	bySuite: Record<BenchmarkSuite, BenchmarkMetric>;
 	byType: Record<QueryType, BenchmarkMetric>;
+	byGate: Record<BenchmarkGate, BenchmarkGateMetric>;
+};
+
+type BenchmarkGate =
+	| "product_guardrail_gate"
+	| "exception_aware_gate"
+	| "legacy_continuity_gate";
+
+type BenchmarkGateMetric = BenchmarkMetric & {
+	objective: number;
+	types: QueryType[];
 };
 
 type PhaseTimingSummary = {
@@ -159,7 +173,8 @@ type CoverageLexicalBenchmarkOffloadSearchDebug = {
 	cheapCoarseTopDocIds: number[];
 	coarseHydrationDocIds: number[];
 	localWindowDocIds: number[];
-	finalTopDocIds: number[];
+	rankedTopDocIds: number[];
+	returnedTopDocIds: number[];
 	docs: CoverageLexicalBenchmarkOffloadDocDebug[];
 };
 
@@ -222,6 +237,17 @@ type EngineLike = {
 		| null;
 };
 
+/**
+ * Stage 1 benchmark classification note:
+ * - Product guardrails: coverage_guardrail, quality_guardrail, mixed_anchor,
+ *   mixed_script_anchor, zh_short_identity, zh_short_body_vs_basename.
+ * - Exception-aware product queries: partial_memory.
+ * - Remaining query types currently serve continuity, adversarial, or legacy
+ *   implementation-shape coverage.
+ *
+ * Stage 6 now reports these groups as separate benchmark intent gates while
+ * keeping the same synthetic query corpus as the continuity anchor.
+ */
 const QUERY_TYPES: readonly QueryType[] = [
 	"coverage_guardrail",
 	"quality_guardrail",
@@ -238,8 +264,42 @@ const QUERY_TYPES: readonly QueryType[] = [
 	"mixed_anchor",
 	"template_collision",
 	"mixed_script_anchor",
+	"zh_short_identity",
+	"zh_short_body_vs_basename",
+	"ambiguous_intent",
 	"partial_memory",
 ];
+
+const PRODUCT_GUARDRAIL_QUERY_TYPES: readonly QueryType[] = [
+	"coverage_guardrail",
+	"quality_guardrail",
+	"tail_guardrail",
+	"locality_guardrail",
+	"mixed_anchor",
+	"mixed_script_anchor",
+	"zh_short_identity",
+	"zh_short_body_vs_basename",
+];
+
+const EXCEPTION_AWARE_QUERY_TYPES: readonly QueryType[] = ["partial_memory"];
+
+const LEGACY_CONTINUITY_QUERY_TYPES: readonly QueryType[] = QUERY_TYPES.filter(
+	(type) =>
+		!PRODUCT_GUARDRAIL_QUERY_TYPES.includes(type) &&
+		!EXCEPTION_AWARE_QUERY_TYPES.includes(type),
+);
+
+const BENCHMARK_GATES: readonly BenchmarkGate[] = [
+	"product_guardrail_gate",
+	"exception_aware_gate",
+	"legacy_continuity_gate",
+];
+
+const BENCHMARK_GATE_QUERY_TYPES: Record<BenchmarkGate, readonly QueryType[]> = {
+	product_guardrail_gate: PRODUCT_GUARDRAIL_QUERY_TYPES,
+	exception_aware_gate: EXCEPTION_AWARE_QUERY_TYPES,
+	legacy_continuity_gate: LEGACY_CONTINUITY_QUERY_TYPES,
+};
 
 /**
  * Lexical benchmark policy:
@@ -302,6 +362,8 @@ export function createAutomationCorpus(): {
 } {
 	const documents: IndexedDocument[] = [];
 	const queryCases: QueryCase[] = [];
+	const zhElectronicsIntroPath = "pkm-zh/books/电子技术入门.md";
+	const zhAliasMigrationNotePath = "pkm-zh/notes/别名迁移说明.md";
 	const addDocument = (
 		path: string,
 		basename: string,
@@ -769,6 +831,90 @@ export function createAutomationCorpus(): {
 		{ aliases: "old project link aliases index", tags: "legacy aliases" },
 	);
 	addDocument(
+		"general-zh/notes/政治理论笔记.md",
+		"政治理论笔记",
+		"政治理论",
+		"政治理论 笔记 讨论 国家 制度 意识形态 与 政治 理论 的核心概念",
+		{ aliases: "政治理论 学习笔记", tags: "政治理论" },
+	);
+	addDocument(
+		"general-zh/notes/理论学习方法.md",
+		"理论学习方法",
+		"理论方法",
+		"理论 理论 学习 方法 侧重 抽象 理论 框架 与 复习 节奏",
+		{ aliases: "理论 学习 方法", tags: "理论 学习" },
+	);
+	addDocument(
+		"general-zh/notes/政治观察摘要.md",
+		"政治观察摘要",
+		"政治观察",
+		"政治 政治 观察 摘要 记录 现实 政治 事件 与 新闻 讨论",
+		{ aliases: "政治 观察 记录", tags: "政治 观察" },
+	);
+	addDocument(
+		"general-zh/notes/快乐定义笔记.md",
+		"快乐定义笔记",
+		"快乐定义",
+		"快乐 定义 讨论 概念 边界 心理学 语境 与 快乐 的适用范围",
+		{ aliases: "快乐定义 心理学笔记", tags: "快乐 定义" },
+	);
+	addDocument(
+		"general-zh/notes/快乐习惯清单.md",
+		"快乐习惯清单",
+		"快乐习惯",
+		"快乐 快乐 习惯 清单 记录 睡眠 运动 感恩 与 每日 练习",
+		{ aliases: "快乐 练习 清单", tags: "快乐 习惯" },
+	);
+	addDocument(
+		"general-zh/notes/定义适用范围说明.md",
+		"定义适用范围说明",
+		"定义范围",
+		"定义 适用范围 说明 讨论 抽象概念 的 使用边界 与 语义限定",
+		{ aliases: "定义 适用范围 说明", tags: "定义 适用范围" },
+	);
+	addDocument(
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"projected token runtime access note",
+		"运行时访问",
+		"projected token runtime access note explains pod credential reads and 运行时访问 flow",
+		{ aliases: "projected token 运行时访问", tags: "projected token 运行时访问" },
+	);
+	addDocument(
+		"mixed/notes/projected-token-overview.md",
+		"projected token overview",
+		"Projected token",
+		"projected token projected token projected token pod credential rotation overview",
+		{ aliases: "projected token pod credentials", tags: "projected token" },
+	);
+	addDocument(
+		"mixed/notes/运行时访问说明.md",
+		"运行时访问说明",
+		"运行时访问",
+		"运行时访问 说明 介绍 容器 凭证 读取 与 访问 流程",
+		{ aliases: "运行时访问 pod 凭证", tags: "运行时 访问" },
+	);
+	addDocument(
+		"mixed/notes/obsidian-sync-常见问题.md",
+		"obsidian sync 常见问题",
+		"obsidian sync 问题",
+		"obsidian sync 常见问题 说明 同步冲突 限额 报错 与 排查步骤",
+		{ aliases: "obsidian sync 问题", tags: "obsidian sync 问题" },
+	);
+	addDocument(
+		"mixed/notes/obsidian-sync-overview.md",
+		"obsidian sync overview",
+		"obsidian sync",
+		"obsidian sync overview introduces setup limits pricing and vault restore guidance",
+		{ aliases: "obsidian sync", tags: "obsidian sync" },
+	);
+	addDocument(
+		"mixed/notes/同步问题排查.md",
+		"同步问题排查",
+		"同步问题排查",
+		"同步 问题 排查 记录 常见报错 网络波动 与 重试步骤",
+		{ aliases: "问题 排查", tags: "同步 问题 排查" },
+	);
+	addDocument(
 		"pkm-zh/ops/缓存恢复清单.md",
 		"缓存恢复清单",
 		"恢复步骤",
@@ -842,6 +988,34 @@ export function createAutomationCorpus(): {
   - mounted sources`,
 		{ aliases: "pod 凭证 projected token secret", tags: "projected volume checklist" },
 	);
+	addDocument(
+		"pkm-zh/books/电子技术入门.md",
+		"电子技术入门",
+		"电子技术入门",
+		"电子技术入门讲基础电路、常见元件、信号路径和实验安全，不是游戏设计技巧摘录。",
+		{ aliases: "电子技术 电路 入门", tags: "电子技术 电路 入门" },
+	);
+	addDocument(
+		"pkm-zh/books/游戏设计技巧摘录.md",
+		"游戏设计技巧摘录",
+		"游戏设计技巧",
+		"这页主要摘录电子游戏设计技巧、关卡技巧、玩家技能反馈和战斗技巧，不是电子技术教材。",
+		{ aliases: "游戏设计 技巧 摘录", tags: "游戏设计 技巧" },
+	);
+	addDocument(
+		"pkm-zh/notes/别名迁移说明.md",
+		"别名迁移说明",
+		"别名迁移说明",
+		"记录旧名兼容、别名映射、链接迁移和历史名称回收规则，专门回答旧名与别名如何兼容。",
+		{ aliases: "旧名 别名 兼容", tags: "别名 迁移 旧名" },
+	);
+	addDocument(
+		"pkm-zh/notes/旧项目整理.md",
+		"旧项目整理",
+		"旧项目整理",
+		"这页整理旧项目背景、历史命名和零散兼容备注，但不专门讲别名迁移规则。",
+		{ aliases: "旧项目 历史", tags: "旧项目 整理" },
+	);
 
 	addQuery(
 		"alphaone betatwo gammathree deltafour",
@@ -868,27 +1042,63 @@ export function createAutomationCorpus(): {
 		"coverage_invariants",
 	);
 	addQuery(
-		"config data roll",
-		"adversarial/ranker-lab/en/exact-quality-witness.md",
-		"quality_guardrail",
+		"政治理论",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_body_vs_basename",
 		"coverage_invariants",
 	);
 	addQuery(
-		"connection policy timeout recovery",
-		"adversarial/ranker-lab/en/later-tail.md",
-		"tail_guardrail",
+		"政治理论 学习笔记",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"快乐定义",
+		"general-zh/notes/快乐定义笔记.md",
+		"zh_short_body_vs_basename",
 		"coverage_invariants",
 	);
 	addQuery(
-		"connection timeout recovery",
-		"adversarial/ranker-lab/en/later-tail.md",
-		"tail_guardrail",
+		"快乐定义 心理学笔记",
+		"general-zh/notes/快乐定义笔记.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"projected token 运行时访问",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
 		"coverage_invariants",
 	);
 	addQuery(
-		"stale mount restart window",
-		"adversarial/ranker-lab/en/locality-compact.md",
-		"locality_guardrail",
+		"projected token 运行时访问 pod",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
+		"adversarial",
+	);
+	addQuery(
+		"obsidian sync 问题",
+		"mixed/notes/obsidian-sync-常见问题.md",
+		"mixed_script_anchor",
+		"coverage_invariants",
+	);
+	addQuery(
+		"obsidian sync 问题 排查",
+		"mixed/notes/obsidian-sync-常见问题.md",
+		"mixed_script_anchor",
+		"adversarial",
+	);
+	addQuery(
+		"电子技",
+		"pkm-zh/books/电子技术入门.md",
+		"zh_short_body_vs_basename",
+		"coverage_invariants",
+	);
+	addQuery(
+		"旧名别名",
+		"pkm-zh/notes/别名迁移说明.md",
+		"zh_short_identity",
 		"coverage_invariants",
 	);
 
@@ -897,6 +1107,30 @@ export function createAutomationCorpus(): {
 		"pkm-en/guides/shard-checkpoint-guide.md",
 		"title_exact",
 		"core",
+	);
+	addQuery(
+		"政治理论",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_body_vs_basename",
+		"coverage_invariants",
+	);
+	addQuery(
+		"政治理论 学习笔记",
+		"general-zh/notes/政治理论笔记.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"projected token 运行时访问",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
+		"coverage_invariants",
+	);
+	addQuery(
+		"projected token 运行时访问 pod",
+		"mixed/notes/projected-token-runtime-access-note.md",
+		"mixed_script_anchor",
+		"adversarial",
 	);
 	addQuery(
 		"playbook for cache eviction restore",
@@ -928,6 +1162,54 @@ export function createAutomationCorpus(): {
 		"content_dense",
 		"core",
 	);
+	addQuery(
+		"电子技术入门",
+		"pkm-zh/books/电子技术入门.md",
+		"zh_short_identity",
+		"adversarial",
+	);
+	addQuery(
+		"别名兼容说明",
+		"pkm-zh/notes/别名迁移说明.md",
+		"zh_short_identity",
+		"messy_pkm",
+	);
+	addQuery(
+		"incident review warm start notes",
+		"pkm-en/incidents/incident-review.md",
+		"ambiguous_intent",
+		"adversarial",
+	);
+	addQuery(
+		"\u65e7\u540d\u522b\u540d\u8fc1\u79fb",
+		zhAliasMigrationNotePath,
+		"zh_short_identity",
+		"coverage_invariants",
+	);
+	addQuery(
+		"\u7535\u5b50\u6280\u672f \u5165\u95e8 \u7535\u8def",
+		zhElectronicsIntroPath,
+		"zh_short_identity",
+		"messy_pkm",
+	);
+	addQuery(
+		"cache restore playbook note",
+		"pkm-en/projects/sdk/vector-cache.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"aliases note for old project names",
+		"pkm-en/notes/linking/aliases-deep-dive.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"\u7535\u5b50\u6280\u672f \u57fa\u7840\u7535\u8def \u7b14\u8bb0",
+		"pkm-zh/books/电子技术入门.md",
+		"ambiguous_intent",
+		"adversarial",
+	);
 
 	addQuery(
 		"better plu",
@@ -936,15 +1218,39 @@ export function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"better plugin road",
-		"docs/plugins/better-plugins-roadmap.md",
-		"prefix_metadata",
+		"projected token runtime access guide",
+		"tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
+		"ambiguous_intent",
 		"adversarial",
 	);
 	addQuery(
-		"bet comp",
-		"docs/body-target.md",
-		"prefix_body",
+		"plugin compatibility migration guide",
+		"docs/plugins/plugin-upgrade-guide.md",
+		"ambiguous_intent",
+		"adversarial",
+	);
+	addQuery(
+		"old project aliases map",
+		"pkm-en/notes/linking/project-rename-map.md",
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"\u65e7\u540d\u522b\u540d \u8fc1\u79fb \u89c4\u5219",
+		zhAliasMigrationNotePath,
+		"ambiguous_intent",
+		"messy_pkm",
+	);
+	addQuery(
+		"\u7535\u5b50\u6280\u672f \u5165\u95e8 \u7535\u8def \u6280\u5de7",
+		zhElectronicsIntroPath,
+		"ambiguous_intent",
+		"adversarial",
+	);
+	addQuery(
+		"better plugin road",
+		"docs/plugins/better-plugins-roadmap.md",
+		"prefix_metadata",
 		"adversarial",
 	);
 	addQuery(
@@ -1728,11 +2034,55 @@ export function createAutomationCorpus(): {
 	}
 
 	const rebalancedQueryCases = buildAnchoredLexicalVariants(queryCases);
+	validateAutomationCorpusPaths(documents, rebalancedQueryCases);
 
 	return {
 		documents,
 		queryCases: rebalancedQueryCases,
 	};
+}
+
+function validateAutomationCorpusPaths(
+	documents: readonly IndexedDocument[],
+	queryCases: readonly QueryCase[],
+): void {
+	const documentPathCounts = new Map<string, number>();
+	for (const document of documents) {
+		documentPathCounts.set(
+			document.path,
+			(documentPathCounts.get(document.path) ?? 0) + 1,
+		);
+	}
+	const duplicateDocumentPaths = [...documentPathCounts.entries()]
+		.filter(([, count]) => count > 1)
+		.map(([path]) => path);
+	const knownDocumentPaths = new Set(documentPathCounts.keys());
+	const missingRelevantPaths = queryCases.filter(
+		(queryCase) => !knownDocumentPaths.has(queryCase.relevantPath),
+	);
+	if (
+		duplicateDocumentPaths.length === 0 &&
+		missingRelevantPaths.length === 0
+	) {
+		return;
+	}
+	const issues: string[] = [];
+	if (duplicateDocumentPaths.length > 0) {
+		issues.push(
+			`duplicate document paths: ${duplicateDocumentPaths.join(", ")}`,
+		);
+	}
+	if (missingRelevantPaths.length > 0) {
+		issues.push(
+			`query relevantPath values missing from documents: ${missingRelevantPaths
+				.map(
+					(queryCase) =>
+						`${queryCase.relevantPath} <- query "${queryCase.query}" (${queryCase.type}/${queryCase.suite})`,
+				)
+				.join("; ")}`,
+		);
+	}
+	throw new Error(`[coverage-lexical-automation-corpus] ${issues.join(" | ")}`);
 }
 
 type QueryLanguageBucket = "zh" | "mixed" | "en";
@@ -1766,6 +2116,9 @@ function queryDifficultyWeight(queryCase: QueryCase): number {
 		mixed_anchor: 78,
 		template_collision: 74,
 		mixed_script_anchor: 80,
+		zh_short_identity: 82,
+		zh_short_body_vs_basename: 86,
+		ambiguous_intent: 88,
 		partial_memory: 90,
 	};
 	const suiteWeight: Record<BenchmarkSuite, number> = {
@@ -1781,6 +2134,9 @@ function buildAnchoredLexicalVariants(seedCases: QueryCase[]): QueryCase[] {
 	const invariants = seedCases.filter(
 		(queryCase) => queryCase.suite === "coverage_invariants",
 	);
+	// This variant generator still follows the legacy benchmark shape and should
+	// not be read as the final product-intent classification from the 2026-04-09
+	// redesign plan.
 	const others = seedCases.filter(
 		(queryCase) => queryCase.suite !== "coverage_invariants",
 	);
@@ -1968,28 +2324,26 @@ async function withCoverageBodyTokenOffloadEnv<T>(
 
 type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
-	top2To4Ratio: number;
-	top5PlusRatio: number;
-	countPruneMinTopCount: number;
-	top2To4CountRatio: number;
-	top5PlusCountRatio: number;
-	top2To4CountSlack: number;
-	top5PlusCountSlack: number;
+	tailRatio: number;
 	bodyCharWeight: number;
 	metadataCharWeight: number;
 	tagExactWeight: number;
 	tagCharWeight: number;
 };
 
+type CoverageSoftEarlyGateExperimentConfig = {
+	enabled: boolean;
+	ratio: number;
+};
+
+const COVERAGE_SOFT_EARLY_GATE_ENV_KEYS = [
+	"COVERAGE_LEXICAL_SOFT_EARLY_GATE_ENABLED",
+	"COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO",
+] as const;
+
 const COVERAGE_DISPLAY_PRUNE_ENV_KEYS = [
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
-	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
+	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_METADATA_CHAR_WEIGHT",
 	"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAG_EXACT_WEIGHT",
@@ -2008,33 +2362,12 @@ function readNumberEnv(name: string, fallback: number): number {
 function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExperimentConfig {
 	return {
 		enabled: true,
-		top2To4Ratio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO",
-			0.34,
-		),
-		top5PlusRatio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
-			0.5,
-		),
-		countPruneMinTopCount: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT",
-			3,
-		),
-		top2To4CountRatio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO",
-			0.67,
-		),
-		top5PlusCountRatio: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO",
-			0.5,
-		),
-		top2To4CountSlack: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK",
-			1,
-		),
-		top5PlusCountSlack: readNumberEnv(
-			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK",
-			2,
+		tailRatio: readNumberEnv(
+			"COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO",
+			readNumberEnv(
+				"COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO",
+				0.8,
+			),
 		),
 		bodyCharWeight: readNumberEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT",
@@ -2055,17 +2388,37 @@ function resolveCoverageDisplayPruneExperimentConfig(): CoverageDisplayPruneExpe
 	};
 }
 
-function createLegacyCoverageDisplayPruneExperimentConfig(
-	config: CoverageDisplayPruneExperimentConfig,
-): CoverageDisplayPruneExperimentConfig {
+function resolveCoverageSoftEarlyGateExperimentConfig(): CoverageSoftEarlyGateExperimentConfig {
 	return {
-		...config,
-		countPruneMinTopCount: Number.MAX_SAFE_INTEGER,
-		top2To4CountRatio: 0,
-		top5PlusCountRatio: 0,
-		top2To4CountSlack: 0,
-		top5PlusCountSlack: 0,
+		enabled: true,
+		ratio: readNumberEnv("COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO", 0.8),
 	};
+}
+
+async function withCoverageSoftEarlyGateEnv<T>(
+	config: CoverageSoftEarlyGateExperimentConfig,
+	action: () => Promise<T>,
+): Promise<T> {
+	const previous = new Map<string, string | undefined>();
+	for (const key of COVERAGE_SOFT_EARLY_GATE_ENV_KEYS) {
+		previous.set(key, process.env[key]);
+	}
+	process.env.COVERAGE_LEXICAL_SOFT_EARLY_GATE_ENABLED = config.enabled
+		? "1"
+		: "0";
+	process.env.COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = String(config.ratio);
+	try {
+		return await action();
+	} finally {
+		for (const key of COVERAGE_SOFT_EARLY_GATE_ENV_KEYS) {
+			const value = previous.get(key);
+			if (value === undefined) {
+				delete process.env[key];
+				continue;
+			}
+			process.env[key] = value;
+		}
+	}
 }
 
 async function withCoverageDisplayPruneEnv<T>(
@@ -2079,26 +2432,8 @@ async function withCoverageDisplayPruneEnv<T>(
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED = config.enabled
 		? "1"
 		: "0";
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_RATIO = String(
-		config.top2To4Ratio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_RATIO = String(
-		config.top5PlusRatio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_COUNT_MIN_TOP_COUNT = String(
-		config.countPruneMinTopCount,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_RATIO = String(
-		config.top2To4CountRatio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_RATIO = String(
-		config.top5PlusCountRatio,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP2_TO4_COUNT_SLACK = String(
-		config.top2To4CountSlack,
-	);
-	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TOP5_PLUS_COUNT_SLACK = String(
-		config.top5PlusCountSlack,
+	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_TAIL_RATIO = String(
+		config.tailRatio,
 	);
 	process.env.COVERAGE_LEXICAL_DISPLAY_PRUNE_BODY_CHAR_WEIGHT = String(
 		config.bodyCharWeight,
@@ -2198,6 +2533,34 @@ function buildMetricRecord<T extends string>(
 	const result = {} as Record<T, BenchmarkMetric>;
 	for (const key of keys) {
 		result[key] = finalizeMetric(source.get(key) ?? createEmptyMetric());
+	}
+	return result;
+}
+
+function buildBenchmarkGateRecord(
+	source: Map<QueryType, BenchmarkMetric>,
+): Record<BenchmarkGate, BenchmarkGateMetric> {
+	const result = {} as Record<BenchmarkGate, BenchmarkGateMetric>;
+	for (const gate of BENCHMARK_GATES) {
+		const aggregate = createEmptyMetric();
+		for (const type of BENCHMARK_GATE_QUERY_TYPES[gate]) {
+			const metric = source.get(type) ?? createEmptyMetric();
+			aggregate.top1 += metric.top1;
+			aggregate.top3 += metric.top3;
+			aggregate.top5 += metric.top5;
+			aggregate.zeroRate += metric.zeroRate;
+			aggregate.count += metric.count;
+		}
+		const finalized = finalizeMetric(aggregate);
+		result[gate] = {
+			...finalized,
+			objective: computePrimaryObjective(
+				finalized.top1,
+				finalized.top3,
+				finalized.top5,
+			),
+			types: [...BENCHMARK_GATE_QUERY_TYPES[gate]],
+		};
 	}
 	return result;
 }
@@ -2388,6 +2751,7 @@ async function runBenchmark(
 			estimatedIndexBytes: estimateIndexBytes(engine),
 			bySuite: buildMetricRecord(BENCHMARK_SUITES, suiteTotals),
 			byType: buildMetricRecord(QUERY_TYPES, typeTotals),
+			byGate: buildBenchmarkGateRecord(typeTotals),
 		},
 		outcomes,
 		phaseTiming: engine.getBenchmarkPhaseTimingSummary?.() ?? null,
@@ -2530,12 +2894,14 @@ async function runCoverageRecallContract(
 				maxItemResults: 10,
 			},
 		);
-		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
-		queryKindLaneTotals[plan.queryKind] =
-			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const explainedQueryKind = plan.explain.queryKind;
+		queryKindCounts[explainedQueryKind] =
+			(queryKindCounts[explainedQueryKind] ?? 0) + 1;
+		queryKindLaneTotals[explainedQueryKind] =
+			(queryKindLaneTotals[explainedQueryKind] ?? 0) + debug.lanes.length;
 		const relaxedStats =
-			relaxedHybridByQueryKind[plan.queryKind] ??
-			(relaxedHybridByQueryKind[plan.queryKind] = {
+			relaxedHybridByQueryKind[explainedQueryKind] ??
+			(relaxedHybridByQueryKind[explainedQueryKind] = {
 				queryCount: 0,
 				laneRanCount: 0,
 				relevantCandidateHits: 0,
@@ -2643,7 +3009,7 @@ async function runCoverageRecallContract(
 				query: queryCase.query,
 				type: queryCase.type,
 				relevantPath: queryCase.relevantPath,
-				queryKind: plan.queryKind,
+				queryKind: plan.explain.queryKind,
 				hardAnchors: plan.hardAnchorFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
 				decisiveBodies: plan.decisiveBodyFamilies.map((family: { normalizedTerm: string }) => family.normalizedTerm),
 				lanes: debug.lanes.map((lane: {
@@ -2765,12 +3131,14 @@ async function runCoverageLaneStudy(
 				maxItemResults: 10,
 			},
 		);
-		queryKindCounts[plan.queryKind] = (queryKindCounts[plan.queryKind] ?? 0) + 1;
-		queryKindLaneTotals[plan.queryKind] =
-			(queryKindLaneTotals[plan.queryKind] ?? 0) + debug.lanes.length;
+		const explainedQueryKind = plan.explain.queryKind;
+		queryKindCounts[explainedQueryKind] =
+			(queryKindCounts[explainedQueryKind] ?? 0) + 1;
+		queryKindLaneTotals[explainedQueryKind] =
+			(queryKindLaneTotals[explainedQueryKind] ?? 0) + debug.lanes.length;
 		const relaxedStats =
-			relaxedHybridByQueryKind[plan.queryKind] ??
-			(relaxedHybridByQueryKind[plan.queryKind] = {
+			relaxedHybridByQueryKind[explainedQueryKind] ??
+			(relaxedHybridByQueryKind[explainedQueryKind] = {
 				queryCount: 0,
 				laneRanCount: 0,
 				relevantCandidateHits: 0,
@@ -3097,7 +3465,10 @@ function summarizeOffloadDiagnostics(
 					cheapCoarseTopPaths: debug.cheapCoarseTopDocIds
 						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
 						.slice(0, 5),
-					finalTopPaths: debug.finalTopDocIds
+					rankedTopPaths: debug.rankedTopDocIds
+						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
+						.slice(0, 5),
+					returnedTopPaths: debug.returnedTopDocIds
 						.map((docId) => docPathById.get(docId) ?? `#${docId}`)
 						.slice(0, 5),
 				},
@@ -3486,9 +3857,8 @@ describe("coverage lexical automation benchmark", () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
+		const coarseSoftGateConfig = resolveCoverageSoftEarlyGateExperimentConfig();
 		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
-		const legacyDisplayPruneConfig =
-			createLegacyCoverageDisplayPruneExperimentConfig(displayPruneConfig);
 
 		const mini = createEngineHarness(DevMiniSearchFileEngine, tokenizer, "minisearch");
 		const miniResult = await runBenchmark(
@@ -3515,54 +3885,56 @@ describe("coverage lexical automation benchmark", () => {
 		const coverageLexicalCore = await withCoverageBodyTokenOffloadEnv(
 			true,
 			async () =>
-				withCoverageDisplayPruneEnv(
+				withCoverageSoftEarlyGateEnv(
 					{
 						enabled: false,
-						top2To4Ratio: displayPruneConfig.top2To4Ratio,
-						top5PlusRatio: displayPruneConfig.top5PlusRatio,
-						countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
-						top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
-						top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
-						top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
-						top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
-						bodyCharWeight: displayPruneConfig.bodyCharWeight,
-						metadataCharWeight: displayPruneConfig.metadataCharWeight,
-						tagExactWeight: displayPruneConfig.tagExactWeight,
-						tagCharWeight: displayPruneConfig.tagCharWeight,
+						ratio: coarseSoftGateConfig.ratio,
 					},
 					async () =>
-						createEngineHarness(
-							CoverageLexicalFileSearchEngine,
-							tokenizer,
-							"coverage-lexical",
+						withCoverageDisplayPruneEnv(
+							{
+								enabled: false,
+								tailRatio: displayPruneConfig.tailRatio,
+								bodyCharWeight: displayPruneConfig.bodyCharWeight,
+								metadataCharWeight: displayPruneConfig.metadataCharWeight,
+								tagExactWeight: displayPruneConfig.tagExactWeight,
+								tagCharWeight: displayPruneConfig.tagCharWeight,
+							},
+							async () =>
+								createEngineHarness(
+									CoverageLexicalFileSearchEngine,
+									tokenizer,
+									"coverage-lexical",
+								),
 						),
 				),
 		);
 		const coverageCoreResult = await withCoverageBodyTokenOffloadEnv(
 			true,
 			async () =>
-				withCoverageDisplayPruneEnv(
+				withCoverageSoftEarlyGateEnv(
 					{
 						enabled: false,
-						top2To4Ratio: displayPruneConfig.top2To4Ratio,
-						top5PlusRatio: displayPruneConfig.top5PlusRatio,
-						countPruneMinTopCount: displayPruneConfig.countPruneMinTopCount,
-						top2To4CountRatio: displayPruneConfig.top2To4CountRatio,
-						top5PlusCountRatio: displayPruneConfig.top5PlusCountRatio,
-						top2To4CountSlack: displayPruneConfig.top2To4CountSlack,
-						top5PlusCountSlack: displayPruneConfig.top5PlusCountSlack,
-						bodyCharWeight: displayPruneConfig.bodyCharWeight,
-						metadataCharWeight: displayPruneConfig.metadataCharWeight,
-						tagExactWeight: displayPruneConfig.tagExactWeight,
-						tagCharWeight: displayPruneConfig.tagCharWeight,
+						ratio: coarseSoftGateConfig.ratio,
 					},
 					async () =>
-						runBenchmark(
-							"CoverageLexical(core)",
-							coverageLexicalCore,
-							documents,
-							queryCases,
-							{ includeOffloadDiagnostics },
+						withCoverageDisplayPruneEnv(
+							{
+								enabled: false,
+								tailRatio: displayPruneConfig.tailRatio,
+								bodyCharWeight: displayPruneConfig.bodyCharWeight,
+								metadataCharWeight: displayPruneConfig.metadataCharWeight,
+								tagExactWeight: displayPruneConfig.tagExactWeight,
+								tagCharWeight: displayPruneConfig.tagCharWeight,
+							},
+							async () =>
+								runBenchmark(
+									"CoverageLexical(core)",
+									coverageLexicalCore,
+									documents,
+									queryCases,
+									{ includeOffloadDiagnostics },
+								),
 						),
 				),
 		);
@@ -3621,79 +3993,39 @@ describe("coverage lexical automation benchmark", () => {
 		const coverageLexicalDisplay = await withCoverageBodyTokenOffloadEnv(
 			true,
 			async () =>
-				withCoverageDisplayPruneEnv(
-					displayPruneConfig,
+				withCoverageSoftEarlyGateEnv(
+					coarseSoftGateConfig,
 					async () =>
-						createEngineHarness(
-							CoverageLexicalFileSearchEngine,
-							tokenizer,
-							"coverage-lexical",
+						withCoverageDisplayPruneEnv(
+							displayPruneConfig,
+							async () =>
+								createEngineHarness(
+									CoverageLexicalFileSearchEngine,
+									tokenizer,
+									"coverage-lexical",
+								),
 						),
 				),
 		);
 		const coverageDisplayResult = await withCoverageBodyTokenOffloadEnv(
 			true,
 			async () =>
-				withCoverageDisplayPruneEnv(
-					displayPruneConfig,
+				withCoverageSoftEarlyGateEnv(
+					coarseSoftGateConfig,
 					async () =>
-						runBenchmark(
-							"CoverageLexical(display)",
-							coverageLexicalDisplay,
-							documents,
-							queryCases,
-							{ includeOffloadDiagnostics },
+						withCoverageDisplayPruneEnv(
+							displayPruneConfig,
+							async () =>
+								runBenchmark(
+									"CoverageLexical(pruned)",
+									coverageLexicalDisplay,
+									documents,
+									queryCases,
+									{ includeOffloadDiagnostics },
+								),
 						),
 				),
 		);
-		const coverageDisplayLegacyResult = includePruneDiagnostics
-			? await (async () => {
-					if (
-						"reset" in container &&
-						typeof (container as any).reset === "function"
-					) {
-						(container as any).reset();
-					} else {
-						container.clearInstances();
-					}
-					(global as any).window = {
-						localStorage: {
-							getItem: jest.fn(() => "zh"),
-							setItem: jest.fn(),
-							removeItem: jest.fn(),
-						},
-					};
-					const coverageLexicalDisplayLegacy =
-						await withCoverageBodyTokenOffloadEnv(
-							true,
-							async () =>
-								withCoverageDisplayPruneEnv(
-									legacyDisplayPruneConfig,
-									async () =>
-										createEngineHarness(
-											CoverageLexicalFileSearchEngine,
-											tokenizer,
-											"coverage-lexical",
-										),
-								),
-						);
-					return withCoverageBodyTokenOffloadEnv(
-						true,
-						async () =>
-							withCoverageDisplayPruneEnv(
-								legacyDisplayPruneConfig,
-								async () =>
-									runBenchmark(
-										"CoverageLexical(display-legacy)",
-										coverageLexicalDisplayLegacy,
-										documents,
-										queryCases,
-										{ includeOffloadDiagnostics: false },
-									),
-							),
-					);
-			  })()
-			: null;
 		const coverageDisplayVsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
 			diagnostics,
 			"wins",
@@ -3739,13 +4071,6 @@ describe("coverage lexical automation benchmark", () => {
 				? summarizeDisagreements(
 						coverageDisplayResult.outcomes,
 						coverageCoreResult.outcomes,
-				  )
-				: null;
-		const displayVsLegacyResultListDiff =
-			includePruneDiagnostics && coverageDisplayLegacyResult
-				? summarizeResultListDifferences(
-						coverageDisplayResult.outcomes,
-						coverageDisplayLegacyResult.outcomes,
 				  )
 				: null;
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
@@ -3798,45 +4123,11 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 
-		if (
-			includePruneDiagnostics &&
-			displayVsLegacyResultListDiff &&
-			coverageDisplayLegacyResult
-		) {
+		if (includePruneDiagnostics) {
 			console.log(
 				"[coverage-lexical-automation-benchmark] display-prune-config",
 				JSON.stringify(
-					{
-						current: displayPruneConfig,
-						legacyBaseline: legacyDisplayPruneConfig,
-					},
-					null,
-					2,
-				),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] display-prune-diff",
-				JSON.stringify(
-					{
-						changedQueryCount: displayVsLegacyResultListDiff.changedQueryCount,
-						rankChangedQueryCount:
-							displayVsLegacyResultListDiff.rankChangedQueryCount,
-						top1ChangedQueryCount:
-							displayVsLegacyResultListDiff.top1ChangedQueryCount,
-						onlyTailChangedQueryCount:
-							displayVsLegacyResultListDiff.onlyTailChangedQueryCount,
-						byType: displayVsLegacyResultListDiff.byType,
-						bySuite: displayVsLegacyResultListDiff.bySuite,
-						currentObjective: round(coverageDisplayResult.summary.objective),
-						legacyObjective: round(coverageDisplayLegacyResult.summary.objective),
-						currentTop1: round(coverageDisplayResult.summary.top1),
-						legacyTop1: round(coverageDisplayLegacyResult.summary.top1),
-						currentTop3: round(coverageDisplayResult.summary.top3),
-						legacyTop3: round(coverageDisplayLegacyResult.summary.top3),
-						currentTop5: round(coverageDisplayResult.summary.top5),
-						legacyTop5: round(coverageDisplayLegacyResult.summary.top5),
-						topChanges: displayVsLegacyResultListDiff.topChanges,
-					},
+					displayPruneConfig,
 					null,
 					2,
 				),
@@ -3885,6 +4176,47 @@ describe("coverage lexical automation benchmark", () => {
 							},
 						]),
 					),
+					byGate: Object.fromEntries(
+						Object.entries(summary.byGate).map(([gate, stats]) => [
+							gate,
+							{
+								objective: round(stats.objective),
+								top1: round(stats.top1),
+								top3: round(stats.top3),
+								top5: round(stats.top5),
+								zeroRate: round(stats.zeroRate),
+								count: stats.count,
+								types: stats.types,
+							},
+						]),
+					),
+				})),
+				null,
+				2,
+			),
+		);
+		console.log(
+			"[coverage-lexical-automation-benchmark] intent-gates",
+			JSON.stringify(
+				[
+					miniResult.summary,
+					coverageCoreResult.summary,
+					coverageDisplayResult.summary,
+				].map((summary) => ({
+					name: summary.name,
+					gates: Object.fromEntries(
+						Object.entries(summary.byGate).map(([gate, stats]) => [
+							gate,
+							{
+								objective: round(stats.objective),
+								top1: round(stats.top1),
+								top3: round(stats.top3),
+								top5: round(stats.top5),
+								zeroRate: round(stats.zeroRate),
+								count: stats.count,
+							},
+						]),
+					),
 				})),
 				null,
 				2,
@@ -3895,7 +4227,7 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				{
 					primaryNote:
-						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Compare core-vs-display separately so display pruning does not masquerade as core recall loss.",
+						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Compare core-vs-pruned separately so coarse soft-gating plus display pruning does not masquerade as core recall loss.",
 					coreVsMiniSearch: {
 						avgMsPerQueryRatio: round(
 							computeRelativeRatio(
@@ -3922,7 +4254,7 @@ describe("coverage lexical automation benchmark", () => {
 							) ?? 0,
 						),
 					},
-					displayVsMiniSearch: {
+					prunedVsMiniSearch: {
 						avgMsPerQueryRatio: round(
 							computeRelativeRatio(
 								coverageDisplayResult.summary.avgMsPerQuery,
@@ -3948,7 +4280,7 @@ describe("coverage lexical automation benchmark", () => {
 							) ?? 0,
 						),
 					},
-					displayVsCore: {
+					prunedVsCore: {
 						objectiveDelta: round(
 							coverageDisplayResult.summary.objective -
 								coverageCoreResult.summary.objective,
@@ -4005,7 +4337,7 @@ describe("coverage lexical automation benchmark", () => {
 						MiniSearch: mini.getIndexBreakdown?.() ?? null,
 						CoverageLexicalCore:
 							coverageLexicalCore.getIndexBreakdown?.() ?? null,
-						CoverageLexicalDisplay:
+						CoverageLexicalPruned:
 							coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
 					},
 					null,
@@ -4019,7 +4351,7 @@ describe("coverage lexical automation benchmark", () => {
 				JSON.stringify(
 					{
 						core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
-						display: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
+						pruned: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
 					},
 					null,
 					2,
@@ -4163,13 +4495,14 @@ describe("coverage lexical automation benchmark", () => {
 		expect(documents.length).toBeGreaterThanOrEqual(70);
 		expect(queryCases.length).toBeGreaterThanOrEqual(145);
 		expect(languageMix.hanRatio).toBeGreaterThanOrEqual(0.4);
-		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.6);
+		expect(languageMix.hanRatio).toBeLessThanOrEqual(0.65);
 		expect(languageMix.mixedRatio).toBeGreaterThanOrEqual(0.4);
 		expect(queryLanguageMix.en).toBeGreaterThan(0);
+		expect(queryLanguageMix.zh).toBeGreaterThan(0);
 		expect(queryLanguageMix.mixed).toBeGreaterThan(0);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "coverage_invariants"),
-		).toHaveLength(8);
+		).toHaveLength(13);
 		expect(
 			queryCases.filter((queryCase) => queryCase.suite === "messy_pkm").length,
 		).toBeGreaterThanOrEqual(50);

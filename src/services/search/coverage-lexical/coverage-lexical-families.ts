@@ -6,6 +6,7 @@ import type {
 const STRUCTURAL_TOKEN_REGEX = /^[._/\-]+$/u;
 const NUMBERISH_TOKEN_REGEX = /^(?:\d+|v?\d+(?:[.\-]\d+)+)$/u;
 const ASCII_ALPHA_NUMERIC_REGEX = /^[a-z0-9_-]+$/u;
+const HAN_ONLY_REGEX = /^\p{Script=Han}+$/u;
 const EXPLICIT_METADATA_TERM_REGEX =
 	/^(?:title|path|folder|tag|tags|alias|aliases|heading|headings|basename|name|file)$/u;
 
@@ -23,6 +24,7 @@ export function buildCoverageLexicalFamilies(
 			index,
 			queryTerms.length,
 			shortQueryOverlay,
+			probe,
 		);
 		const role = classifyFamilyRole(
 			normalizedTerm,
@@ -49,8 +51,12 @@ function classifyFamilyStrength(
 	index: number,
 	totalTerms: number,
 	shortQueryOverlay: boolean,
+	probe: CoverageLexicalFamilyProbe | undefined,
 ): CoverageLexicalFamily["strength"] {
 	if (isStructuralToken(term)) {
+		return "soft";
+	}
+	if (probe?.familyTier === "weak" && isWeakToken(term)) {
 		return "soft";
 	}
 	if (shortQueryOverlay) {
@@ -93,9 +99,7 @@ function classifyFamilyRole(
 	const shortMetadataAnchor =
 		shortQueryOverlay &&
 		strength === "core" &&
-		(probe?.metadataExactDocCount ?? 0) > 0 &&
-		(probe?.metadataExactDocCount ?? 0) >=
-			Math.max(1, Math.floor((probe?.bodyExactDocCount ?? 0) / 2));
+		meetsShortMetadataAnchorThreshold(term, probe);
 	if (shortMetadataAnchor) {
 		return "anchor";
 	}
@@ -110,6 +114,39 @@ function classifyFamilyRole(
 		return "noise";
 	}
 	return "body";
+}
+
+function meetsShortMetadataAnchorThreshold(
+	term: string,
+	probe: CoverageLexicalFamilyProbe | undefined,
+): boolean {
+	const metadataExactDocCount = probe?.metadataExactDocCount ?? 0;
+	if (metadataExactDocCount <= 0) {
+		return false;
+	}
+	const bodyExactDocCount = probe?.bodyExactDocCount ?? 0;
+	const familyTier = inferShortMetadataAnchorTier(term, probe);
+	if (familyTier === "weak") {
+		return false;
+	}
+	const minimumMetadataDocCount =
+		familyTier === "decisive"
+			? Math.max(1, Math.floor(bodyExactDocCount / 2))
+			: Math.max(1, bodyExactDocCount);
+	return metadataExactDocCount >= minimumMetadataDocCount;
+}
+
+function inferShortMetadataAnchorTier(
+	term: string,
+	probe: CoverageLexicalFamilyProbe | undefined,
+): CoverageLexicalFamilyProbe["familyTier"] {
+	if (probe?.familyTier) {
+		return probe.familyTier;
+	}
+	if (isWeakToken(term)) {
+		return "weak";
+	}
+	return "decisive";
 }
 
 function isMetadataCapableFamily(term: string): boolean {
@@ -133,11 +170,13 @@ function isMetadataCapableFamily(term: string): boolean {
 }
 
 function isWeakToken(term: string): boolean {
+	if (HAN_ONLY_REGEX.test(term)) {
+		return term.length === 1;
+	}
 	return (
 		NUMBERISH_TOKEN_REGEX.test(term) ||
 		term.length <= 2 ||
 		/^[a-z]$/u.test(term) ||
-		/^\p{Script=Han}$/u.test(term) ||
 		term === "to" ||
 		term === "and" ||
 		term === "the" ||

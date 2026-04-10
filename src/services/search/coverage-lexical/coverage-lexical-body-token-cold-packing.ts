@@ -11,7 +11,6 @@ type CoverageLexicalBodyTokenColdDecodedDocument = {
 	path: string;
 	generation?: number;
 	bodyTokens: string[];
-	hanSegments: string[];
 };
 
 export function packCoverageLexicalBodyTokenColdDocuments(
@@ -78,7 +77,6 @@ export function decodeCoverageLexicalBodyTokenColdDocument(
 		path: docRow.path,
 		generation: docRow.generation,
 		bodyTokens: Array.from(tokenIds, (tokenId) => blockRow.dictionaryTerms[tokenId]),
-		hanSegments: [...docRow.hanSegments],
 	};
 }
 
@@ -116,7 +114,6 @@ function buildCoverageLexicalBodyTokenColdBlock(
 			tokenStart,
 			tokenLength: document.bodyTokens.length,
 			tokenCount: document.bodyTokens.length,
-			hanSegments: [...document.hanSegments],
 			updatedAt: now,
 		});
 	});

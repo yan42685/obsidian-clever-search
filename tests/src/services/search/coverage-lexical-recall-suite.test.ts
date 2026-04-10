@@ -326,10 +326,499 @@ describe("coverage lexical recall suite", () => {
 				});
 			}
 		}
-		console.log(
-			"[coverage-lexical-recall-suite] ranking-diagnostics",
-			JSON.stringify(rankingDiagnostics, null, 2),
+	});
+
+	// Candidate-survival guardrails: the goal here is to keep intuitively
+	// relevant candidates alive through recall/union, not to freeze the exact
+	// lane provenance as a permanent product requirement.
+	test("candidate-survival compatibility keeps ambiguous anchored queries eligible for later body lanes", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const documents: IndexedDocument[] = [
+			{
+				path: "pkm-en/notes/linking/aliases-deep-dive.md",
+				basename: "aliases-deep-dive.md",
+				folder: "pkm-en/notes/linking",
+				headings: "Alias migration note",
+				aliases: "legacy project names note;old project alias note",
+				content:
+					"old project names and rename history live in this note about alias compatibility and redirect mapping",
+				tags: "aliases migration note",
+			},
+			{
+				path: "pkm-en/glossary/aliases.md",
+				basename: "aliases.md",
+				folder: "pkm-en/glossary",
+				headings: "Aliases glossary",
+				content:
+					"glossary definition for aliases and alternate labels without the migration details",
+				tags: "aliases glossary",
+			},
+			{
+				path: "pkm-en/projects/renames.md",
+				basename: "renames.md",
+				folder: "pkm-en/projects",
+				headings: "Rename ledger",
+				content:
+					"project rename ledger tracks previous names but does not describe alias note compatibility",
+				tags: "rename history",
+			},
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "aliases note for old project names";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		expect(plan.queryKind).not.toBe("body_only_local");
+		expect(plan.resourceHints?.metadataBudget).toBeGreaterThan(0);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+		const { candidates, debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 5,
+			},
 		);
+		expect(candidates.has("pkm-en/notes/linking/aliases-deep-dive.md")).toBe(true);
+		const rescuedByBodyLane = debug.lanes.some(
+			(lane) =>
+				(lane.laneName === "relaxed_hybrid_lane" ||
+					lane.laneName === "local_body_lane") &&
+				lane.admittedPaths.includes("pkm-en/notes/linking/aliases-deep-dive.md"),
+		);
+		expect(rescuedByBodyLane).toBe(true);
+		const ranked = await engine.searchFiles({
+			queryText,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(
+			ranked.some(
+				(result) =>
+					result.path === "pkm-en/notes/linking/aliases-deep-dive.md",
+			),
+		).toBe(true);
+	});
+
+	// Candidate-survival and pruning behavior should remain testable even after
+	// the final ranking worldview changes.
+	test("candidate-survival compatibility trims weak admitted tail while keeping strong ambiguous candidate", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const distractors: IndexedDocument[] = Array.from({ length: 48 }, (_, index) => ({
+			path: `pkm-en/archive/alias-tail-${index + 1}.md`,
+			basename: `alias-tail-${index + 1}.md`,
+			folder: "pkm-en/archive",
+			headings: `Alias tail ${index + 1}`,
+			aliases: `legacy alias note ${index + 1};old alias archive ${index + 1}`,
+			content:
+				"archive note mentions aliases and old names without the project compatibility detail",
+			tags: "aliases archive",
+		}));
+		const documents: IndexedDocument[] = [
+			{
+				path: "pkm-en/notes/linking/aliases-deep-dive.md",
+				basename: "aliases-deep-dive.md",
+				folder: "pkm-en/notes/linking",
+				headings: "Alias migration note",
+				aliases: "legacy alias note;old project alias note",
+				content:
+					"old project names and alias compatibility details live in this migration note with redirect mapping",
+				tags: "aliases migration note",
+			},
+			...distractors,
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "legacy alias note for old project names";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+		const { candidates } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 3,
+			},
+		);
+		expect(candidates.has("pkm-en/notes/linking/aliases-deep-dive.md")).toBe(true);
+		expect(candidates.size).toBeLessThan(documents.length);
+		const ranked = await engine.searchFiles({
+			queryText,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(ranked[0]?.path).toBe("pkm-en/notes/linking/aliases-deep-dive.md");
+	});
+
+	test("candidate-survival compatibility keeps balanced mixed-script candidates through final union", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const runtimeAccess = "运行时访问";
+		const mixedPath = "pkm-mixed/runtime/projected-token-runtime-access.md";
+		const englishDistractors: IndexedDocument[] = Array.from(
+			{ length: 24 },
+			(_, index) => ({
+				path: `tech-en/archive/projected-token-tail-${index + 1}.md`,
+				basename: `projected-token-tail-${index + 1}.md`,
+				folder: "tech-en/archive",
+				headings: `Projected token tail ${index + 1}`,
+				aliases: `projected token access ${index + 1}`,
+				content:
+					"projected token projected token access guidance for service account credentials and rotation",
+			}),
+		);
+		const chineseDistractors: IndexedDocument[] = Array.from(
+			{ length: 24 },
+			(_, index) => ({
+				path: `pkm-zh/runtime/${runtimeAccess}-记录-${index + 1}.md`,
+				basename: `${runtimeAccess}-记录-${index + 1}.md`,
+				folder: "pkm-zh/runtime",
+				headings: `${runtimeAccess}记录 ${index + 1}`,
+				aliases: `${runtimeAccess} 访问记录 ${index + 1}`,
+				content: `${runtimeAccess} ${runtimeAccess} 访问记录汇总，只讨论运行指标，不讨论 projected token 身份文件`,
+			}),
+		);
+		const documents: IndexedDocument[] = [
+			{
+				path: mixedPath,
+				basename: "projected-token-runtime-access.md",
+				folder: "pkm-mixed/runtime",
+				headings: `Projected token ${runtimeAccess}`,
+				aliases: `${runtimeAccess} projected token access`,
+				content: `projected token runtime access note explains ${runtimeAccess} constraints and token rotation`,
+			},
+			...englishDistractors,
+			...chineseDistractors,
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = `projected token ${runtimeAccess}`;
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+		const { candidates } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 3,
+			},
+		);
+		expect(candidates.has(mixedPath)).toBe(true);
+		expect(candidates.size).toBeLessThan(documents.length);
+
+		const ranked = await engine.searchFiles({
+			queryText,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(ranked[0]?.path).toBe(mixedPath);
+	});
+
+	test("bridge lane does not admit metadata-assist-only candidates without bridge connection", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+
+		const documents: IndexedDocument[] = [
+			{
+				path: "pkm-en/projects/sdk/vector-cache.md",
+				basename: "vector-cache.md",
+				folder: "pkm-en/projects/sdk",
+				headings: "Vector cache restore",
+				content:
+					"sdk cache restore checklist keeps the recovery steps together in one project note",
+				tags: "sdk cache restore",
+			},
+			{
+				path: "pkm-en/notes/ops-glossary.md",
+				basename: "ops-glossary.md",
+				folder: "pkm-en/notes",
+				headings: "Cache glossary",
+				aliases: "restore topic;cache topic",
+				content:
+					"glossary index for operational topics without the project recovery walkthrough",
+				tags: "cache glossary",
+			},
+			...Array.from({ length: 28 }, (_, index) => ({
+				path: `pkm-en/archive/cache-restore-tail-${index + 1}.md`,
+				basename: `cache-restore-tail-${index + 1}.md`,
+				folder: "pkm-en/archive",
+				headings: `Cache restore archive ${index + 1}`,
+				aliases: `cache restore archive ${index + 1}`,
+				content:
+					"archive note about cache topics that should not outrank the sdk recovery note",
+				tags: "cache archive",
+			})),
+		];
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments(documents);
+		const engineAny = engine as any;
+		const tokenizer = createMockTokenizer();
+		const queryText = "sdk cache restore";
+		const queryTerms = tokenizer
+			.tokenizeSequence(queryText, "search")
+			.map((term) => term.toLowerCase());
+		const probes = engineAny.buildFamilyProbes(queryTerms);
+		const plan = buildCoverageLexicalPlan(queryText, queryTerms, probes);
+		const phraseSignatures = [
+			...buildCoverageLexicalPhraseSignatures(plan.families),
+			...buildCoverageLexicalStructuredMetadataSignatures(
+				queryText,
+				plan.families,
+			),
+		];
+
+		const { candidates, debug } = collectCoverageLexicalCandidateStatesWithDebug(
+			{
+				bodyPostings: engineAny.bodyPostings,
+				bodyCharPostings: engineAny.bodyCharPostings,
+				bodyHanSegmentPostings: engineAny.bodyHanSegmentPostings,
+				metadataAliasCharPostings: engineAny.metadataAliasCharPostings,
+				metadataAliasHanSegmentPostings: engineAny.metadataAliasHanSegmentPostings,
+				metadataAliasPhrasePostings: engineAny.metadataAliasPhrasePostings,
+				metadataAliasPostings: engineAny.metadataAliasPostings,
+				metadataBasenameCharPostings: engineAny.metadataBasenameCharPostings,
+				metadataBasenameHanSegmentPostings:
+					engineAny.metadataBasenameHanSegmentPostings,
+				metadataBasenamePhrasePostings: engineAny.metadataBasenamePhrasePostings,
+				metadataBasenamePostings: engineAny.metadataBasenamePostings,
+				metadataFolderCharPostings: engineAny.metadataFolderCharPostings,
+				metadataFolderHanSegmentPostings: engineAny.metadataFolderHanSegmentPostings,
+				metadataFolderPhrasePostings: engineAny.metadataFolderPhrasePostings,
+				metadataFolderPostings: engineAny.metadataFolderPostings,
+				metadataHeadingHanSegmentPostings:
+					engineAny.metadataHeadingHanSegmentPostings,
+				metadataHeadingPhrasePostings: engineAny.metadataHeadingPhrasePostings,
+				metadataHeadingPostings: engineAny.metadataHeadingPostings,
+				metadataPhrasePostings: engineAny.metadataPhrasePostings,
+				metadataTagCharPostings: engineAny.metadataTagCharPostings,
+				metadataTagFullPostings: engineAny.metadataTagFullPostings,
+				metadataTagPhrasePostings: engineAny.metadataTagPhrasePostings,
+				metadataTagPostings: engineAny.metadataTagPostings,
+				sortedLexicon: engineAny.sortedLexicon,
+				documentIdByPath: engineAny.documentIdByPath,
+				documentPathById: engineAny.documentPathById,
+				getDocumentBodyTokens: (docId: number) =>
+					engineAny.getDocumentBodyTokens(docId) ?? [],
+				documentBodyHanSegmentsById: engineAny.documentBodyHanSegmentsById,
+				documentTagValuesById: engineAny.documentTagValuesById,
+			},
+			plan,
+			phraseSignatures,
+			{
+				queryText,
+				isPrefixMatch: true,
+				isFuzzy: true,
+				maxItemResults: 3,
+			},
+		);
+
+		const bridgeLane = debug.lanes.find((lane) => lane.laneName === "bridge_lane");
+		expect(bridgeLane?.admittedPaths).toContain(
+			"pkm-en/projects/sdk/vector-cache.md",
+		);
+		expect(bridgeLane?.admittedPaths).not.toContain(
+			"pkm-en/notes/ops-glossary.md",
+		);
+		expect(candidates.has("pkm-en/projects/sdk/vector-cache.md")).toBe(true);
 	});
 
 	test("body phrase witness still fires via token tape", async () => {
@@ -842,4 +1331,3 @@ describe("coverage lexical recall suite", () => {
 	});
 
 });
-

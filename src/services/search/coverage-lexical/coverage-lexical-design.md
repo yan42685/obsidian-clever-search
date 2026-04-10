@@ -307,7 +307,7 @@ These statistics should drive:
 - anchor selection
 - optional term selection
 - query kind promotion
-- route selection
+- planner-side resource and rescue policy
 
 ## Position Theory
 
@@ -447,7 +447,7 @@ This is the cleanest way to satisfy the invariants exactly.
 5. tail-weighted core quality
 6. best local body explanation
 7. soft body support
-8. route-specific metadata anchor support
+8. close-coverage metadata anchor support
 
 This means:
 
@@ -524,9 +524,10 @@ Recommended modules:
 - `coverage-lexical-families.ts`
   - family building and derived statistics helpers
 - `coverage-lexical-planner.ts`
-  - query kind, term role decomposition, route contract
+  - query kind, term role decomposition, resource hints, coverage requirements,
+    and rescue potential
 - `coverage-lexical-recall.ts`
-  - lane-specific admission and candidate union
+  - lane admission, candidate union, and survival-oriented budget control
 - `coverage-lexical-windowing.ts`
   - local explanation generation
 - `coverage-lexical-fusion.ts`
@@ -538,7 +539,7 @@ Recommended modules:
 
 This split is preferred over:
 
-- embedding route theory inside the engine
+- embedding planner resource/worldview policy directly inside the engine
 - embedding recall lane behavior inside the ranker
 - using phrase signatures as a substitute for proper metadata lanes
 
@@ -547,6 +548,9 @@ This split is preferred over:
 The planner output should eventually include at least:
 
 - `queryKind`
+- `resourceHints`
+- `coverageRequirements`
+- `rescuePotential`
 - `hardAnchorFamilies`
 - `decisiveBodyFamilies`
 - `supportBodyFamilies`
@@ -554,7 +558,6 @@ The planner output should eventually include at least:
 - `optionalFamilies`
 - `noiseFamilies`
 - `relaxedMinimumMatchCount`
-- `route`
 
 The current weaker contract is not enough if the goal is near-zero `zeroRate`.
 

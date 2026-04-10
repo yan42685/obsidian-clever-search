@@ -1,4 +1,5 @@
 import { container } from "tsyringe";
+import type { CoverageLexicalFamilySignal } from "src/services/search/coverage-lexical/coverage-lexical-types";
 
 jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
@@ -10,6 +11,7 @@ const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 
 type IndexedDocument = {
 	path: string;
+	generation?: number;
 	basename: string;
 	folder: string;
 	content?: string;
@@ -23,6 +25,7 @@ function registerMockFileSnapshotStore(
 ): {
 	currentTexts: Map<string, string>;
 	readCurrentTexts: jest.Mock;
+	readIndexedTexts: jest.Mock;
 } {
 	const { FileSnapshotStore } = require(
 		"src/services/search/shared/file-snapshot-store",
@@ -47,10 +50,28 @@ function registerMockFileSnapshotStore(
 			return result;
 		},
 	);
+	const readIndexedTexts = jest.fn(
+		async (
+			requests: ReadonlyArray<{
+				path: string;
+				generation?: number;
+			}>,
+		) => {
+			const result = new Map<string, string>();
+			for (const request of requests) {
+				const text = currentTexts.get(request.path);
+				if (text !== undefined) {
+					result.set(request.path, text);
+				}
+			}
+			return result;
+		},
+	);
 	container.registerInstance(FileSnapshotStore, {
 		readCurrentTexts,
+		readIndexedTexts,
 	} as any);
-	return { currentTexts, readCurrentTexts };
+	return { currentTexts, readCurrentTexts, readIndexedTexts };
 }
 
 function registerMockBodyTokenColdStore() {
@@ -68,7 +89,6 @@ function registerMockBodyTokenColdStore() {
 				path: document.path,
 				generation: document.generation,
 				bodyTokens: [...document.bodyTokens],
-				hanSegments: [...document.hanSegments],
 			});
 		}
 	});
@@ -86,7 +106,6 @@ function registerMockBodyTokenColdStore() {
 					path: document.path,
 					generation: document.generation,
 					bodyTokens: [...document.bodyTokens],
-					hanSegments: [...document.hanSegments],
 				});
 			}
 		}
@@ -195,28 +214,55 @@ function createEmptyExperimentalCharSignal() {
 
 function createEmptyExperimentalWindowSignal() {
 	return {
-		exactWeight: 0,
-		prefixWeight: 0,
-		fuzzyWeight: 0,
+		start: 0,
+		end: 0,
+		coreCoverageCount: 0,
+		exactCoreWeight: 0,
+		prefixCoreWeight: 0,
+		fuzzyCoreWeight: 0,
 		anchorCoverageCount: 0,
 		softCoverageCount: 0,
-		phraseMatchCount: 0,
-		phraseMatchWeight: 0,
-		compactnessScore: 0,
+		adjacentCorePairCount: 0,
+		adjacentCorePairWeight: 0,
+		orderedPairCount: 0,
+		orderRatio: 0,
+		compactnessRatio: 0,
+		score: 0,
+		matchedExactCoreFamilyIndices: [],
+		matchedPrefixCoreFamilyIndices: [],
+		matchedFuzzyCoreFamilyIndices: [],
+		matchedAnchorFamilyIndices: [],
+		matchedSoftFamilyIndices: [],
 	};
 }
 
-function createExperimentalCoverageSignal(totalMatchedFamilyCount: number) {
+function createExperimentalCoverageSignal(
+	totalMatchedFamilyCount: number,
+): CoverageLexicalFamilySignal {
 	return {
-		familyCountSummary: {
-			totalMatchedFamilyCount,
-			metadataMatchedFamilyCount: totalMatchedFamilyCount,
-			bodyMatchedFamilyCount: 0,
-			basenameMatchedFamilyCount: 0,
-			aliasesMatchedFamilyCount: 0,
-			folderMatchedFamilyCount: 0,
-			headingsMatchedFamilyCount: 0,
-			tagsMatchedFamilyCount: 0,
+		coverageProfile: {
+			meaningfulFamilyCount: totalMatchedFamilyCount,
+			meaningfulCoveredFamilyCount: totalMatchedFamilyCount,
+			meaningfulFamilyWeight: totalMatchedFamilyCount,
+			meaningfulCoveredFamilyWeight: totalMatchedFamilyCount,
+			requiredFamilyCount: totalMatchedFamilyCount,
+			requiredCoveredFamilyCount: totalMatchedFamilyCount,
+			requiredFamilyWeight: totalMatchedFamilyCount,
+			requiredCoveredFamilyWeight: totalMatchedFamilyCount,
+			decisiveFamilyCount: totalMatchedFamilyCount,
+			decisiveCoveredFamilyCount: totalMatchedFamilyCount,
+			decisiveFamilyWeight: totalMatchedFamilyCount,
+			decisiveCoveredFamilyWeight: totalMatchedFamilyCount,
+			supportFamilyCount: 0,
+			supportCoveredFamilyCount: 0,
+			supportFamilyWeight: 0,
+			supportCoveredFamilyWeight: 0,
+			requiredHanFamilyCount: 0,
+			requiredHanCoveredFamilyCount: 0,
+			requiredLatinFamilyCount: 0,
+			requiredLatinCoveredFamilyCount: 0,
+			crossScriptRequired: false,
+			crossScriptSatisfied: true,
 		},
 		coreBody: createEmptyExperimentalAreaSignal(),
 		softBody: createEmptyExperimentalAreaSignal(),
@@ -592,6 +638,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const documents = [
 			{
 				path: "notes/snapshot-fallback-target.md",
+				generation: 101,
 				basename: "snapshot-fallback-target",
 				folder: "notes",
 				content: "alpha beta gamma for snapshot fallback",
@@ -599,6 +646,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			},
 			{
 				path: "notes/snapshot-fallback-peer.md",
+				generation: 102,
 				basename: "snapshot-fallback-peer",
 				folder: "notes",
 				content: "neighbor note",
@@ -621,7 +669,13 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			maxItemResults: 5,
 		});
 
-		expect(fileSnapshotStore.readCurrentTexts).toHaveBeenCalled();
+		expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledWith([
+			{
+				path: "notes/snapshot-fallback-target.md",
+				generation: 101,
+			},
+		]);
+		expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
 		expect(results[0]?.path).toBe("notes/snapshot-fallback-target.md");
 	});
 
@@ -1017,6 +1071,99 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		expect(clearAll).not.toHaveBeenCalled();
 	});
 
+	test("serializes delete and re-add cold-store writes for the same path", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				deleteDocuments(paths: string[]): void;
+			};
+		};
+		const {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+		} = require(
+			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
+		) as {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
+		};
+		let releaseDelete: (() => void) | null = null;
+		const deleteGate = new Promise<void>((resolve) => {
+			releaseDelete = resolve;
+		});
+		const operationOrder: string[] = [];
+		const storedDocuments = new Map<string, string[]>();
+		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+			upsertDocuments: jest.fn(async (documents: any[]) => {
+				operationOrder.push("upsert");
+				for (const document of documents) {
+					storedDocuments.set(document.path, [...document.bodyTokens]);
+				}
+			}),
+			deleteDocuments: jest.fn(async (paths: string[]) => {
+				operationOrder.push("delete:start");
+				await deleteGate;
+				for (const path of paths) {
+					storedDocuments.delete(path);
+				}
+				operationOrder.push("delete:end");
+			}),
+			readDocuments: jest.fn(async () => new Map()),
+			getMeta: jest.fn(async () => null),
+			inspectConsistency: jest.fn(async () => ({
+				needsRepair: false,
+				requiresReset: false,
+				reason: "up-to-date",
+				missingOrStalePaths: [],
+				danglingPaths: [],
+			})),
+			updateIndexedRefsMetadata: jest.fn(async () => undefined),
+			clearAll: jest.fn(async () => undefined),
+		} as any);
+
+		await withExperimentalBodyTokenOffloadEnv(true, async () => {
+			const engine = new CoverageLexicalFileSearchEngine();
+			await engine.addDocuments([
+				{
+					path: "notes/race-target.md",
+					generation: 10,
+					basename: "race-target",
+					folder: "notes",
+					content: "old cold body",
+				},
+			]);
+			storedDocuments.clear();
+			operationOrder.length = 0;
+
+			engine.deleteDocuments(["notes/race-target.md"]);
+			const reAddPromise = engine.addDocuments([
+				{
+					path: "notes/race-target.md",
+					generation: 11,
+					basename: "race-target",
+					folder: "notes",
+					content: "fresh cold body",
+				},
+			]);
+
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(operationOrder).toEqual(["delete:start"]);
+
+			releaseDelete?.();
+			await reAddPromise;
+
+			expect(operationOrder).toEqual(["delete:start", "delete:end", "upsert"]);
+			expect(storedDocuments.get("notes/race-target.md")).toEqual([
+				"fresh",
+				"fresh",
+				"cold",
+				"cold",
+				"body",
+				"body",
+			]);
+		});
+	});
+
 	test("restoring a lexical snapshot does not wipe persisted cold rows", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1119,6 +1266,7 @@ describe("coverage lexical phase 1 memory experiments", () => {
 			);
 			expect(docId).toBeDefined();
 			expect((engine as any).hasResidentDocumentBodyTokens(docId)).toBe(false);
+			(engine as any).clearHotCachedOffloadedBodyTokens(docId);
 
 			const results = await engine.searchFiles({
 				queryText: "alpha beta gamma",
@@ -1142,7 +1290,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "metadata_only_anchored",
-			route: "metadata-first",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};
@@ -1177,6 +1324,113 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		expect(hydratedDocIds.has(25)).toBe(false);
 	});
 
+	test("coarse hydration treats unresolved mixed-script coverage gaps as upgrade potential", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "anchor_body_hybrid",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 30 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 30 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(30 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(24);
+		expect(unresolvedState).toBeDefined();
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		coarseRanked[24].coverageLexicalSignal = {
+			...coarseRanked[24].coverageLexicalSignal,
+			coverageProfile: {
+				...coarseRanked[24].coverageLexicalSignal.coverageProfile,
+				meaningfulFamilyCount: 2,
+				meaningfulCoveredFamilyCount: 1,
+				meaningfulFamilyWeight: 2,
+				meaningfulCoveredFamilyWeight: 1.1,
+				requiredFamilyCount: 2,
+				requiredCoveredFamilyCount: 1,
+				requiredFamilyWeight: 2,
+				requiredCoveredFamilyWeight: 1.1,
+				decisiveFamilyCount: 2,
+				decisiveCoveredFamilyCount: 1,
+				decisiveFamilyWeight: 2,
+				decisiveCoveredFamilyWeight: 1.1,
+				requiredHanFamilyCount: 1,
+				requiredHanCoveredFamilyCount: 0,
+				requiredLatinFamilyCount: 1,
+				requiredLatinCoveredFamilyCount: 1,
+				crossScriptRequired: true,
+				crossScriptSatisfied: false,
+			},
+		};
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(24)).toBe(true);
+	});
+
+	test("coarse hydration does not extend for unresolved evidence that cannot catch the cutoff", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "metadata_only_anchored",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 30 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 30 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(30 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(24);
+		expect(unresolvedState).toBeDefined();
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 0.5;
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(24)).toBe(false);
+	});
+
 	test("coarse hydration grants a bounded tail budget to unresolved body evidence", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
@@ -1187,7 +1441,6 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		const engine = new CoverageLexicalFileSearchEngine() as any;
 		const plan = {
 			queryKind: "metadata_only_anchored",
-			route: "metadata-first",
 			hasPathShapeHint: false,
 			hasTitleShapeHint: false,
 		};
@@ -1207,6 +1460,30 @@ describe("coverage lexical phase 1 memory experiments", () => {
 		}
 		const unresolvedState = candidates.get(55);
 		expect(unresolvedState).toBeDefined();
+		coarseRanked[55].coverageLexicalSignal = {
+			...coarseRanked[55].coverageLexicalSignal,
+			evidenceMassSummary: {
+				decisiveCoveredMass: 0,
+				decisiveExactIdentityMass: 0,
+				decisiveExactBodyMass: 0,
+				decisivePrefixIdentityMass: 0,
+				decisivePrefixBodyMass: 0,
+				decisiveFuzzyIdentityMass: 0,
+				decisiveFuzzyBodyMass: 0,
+				supportCoveredMass: 0,
+				supportExactIdentityMass: 0,
+				supportExactBodyMass: 0,
+				supportPrefixIdentityMass: 0,
+				supportPrefixBodyMass: 0,
+				supportFuzzyIdentityMass: 0,
+				supportFuzzyBodyMass: 0,
+				witnessMass: 0,
+				weakBridgeMass: 0,
+				displayIdealMass: 35,
+				displayRawMass: 35,
+				displayNormalizedMass: 1,
+			},
+		};
 		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
 		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 2;
 		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 3;
@@ -1220,5 +1497,72 @@ describe("coverage lexical phase 1 memory experiments", () => {
 
 		expect(hydratedDocIds.has(55)).toBe(true);
 		expect(hydratedDocIds.size).toBeLessThan(40);
+	});
+
+	test("coarse hydration tail rescue skips unresolved evidence below the cutoff bound", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => unknown;
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine() as any;
+		const plan = {
+			queryKind: "metadata_only_anchored",
+			hasPathShapeHint: false,
+			hasTitleShapeHint: false,
+		};
+		const coarseRanked = Array.from({ length: 60 }, (_, index) => ({
+			docId: index,
+			queryTerms: ["alpha"],
+			matchedTerms: ["alpha"],
+			score: 60 - index,
+			coverageLexicalSignal: createExperimentalCoverageSignal(60 - index),
+			admissionSignal: createEmptyExperimentalAdmissionSignal(),
+		}));
+		const candidates = new Map<number, ReturnType<
+			typeof createEmptyExperimentalCandidateState
+		>>();
+		for (const result of coarseRanked) {
+			candidates.set(result.docId, createEmptyExperimentalCandidateState());
+		}
+		const unresolvedState = candidates.get(55);
+		expect(unresolvedState).toBeDefined();
+		coarseRanked[55].coverageLexicalSignal = {
+			...coarseRanked[55].coverageLexicalSignal,
+			evidenceMassSummary: {
+				decisiveCoveredMass: 0,
+				decisiveExactIdentityMass: 0,
+				decisiveExactBodyMass: 0,
+				decisivePrefixIdentityMass: 0,
+				decisivePrefixBodyMass: 0,
+				decisiveFuzzyIdentityMass: 0,
+				decisiveFuzzyBodyMass: 0,
+				supportCoveredMass: 0,
+				supportExactIdentityMass: 0,
+				supportExactBodyMass: 0,
+				supportPrefixIdentityMass: 0,
+				supportPrefixBodyMass: 0,
+				supportFuzzyIdentityMass: 0,
+				supportFuzzyBodyMass: 0,
+				witnessMass: 0,
+				weakBridgeMass: 0,
+				displayIdealMass: 35,
+				displayRawMass: 35,
+				displayNormalizedMass: 1,
+			},
+		};
+		unresolvedState!.unresolvedBodyEvidence.hasUnverifiedPhraseWitness = true;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedFamilyCount = 1;
+		unresolvedState!.unresolvedBodyEvidence.unresolvedWeightUpperBound = 0.5;
+
+		const hydratedDocIds = engine.computeCoarseHydrationDocIds(
+			coarseRanked,
+			candidates,
+			plan,
+			5,
+		) as ReadonlySet<number>;
+
+		expect(hydratedDocIds.has(55)).toBe(false);
 	});
 });

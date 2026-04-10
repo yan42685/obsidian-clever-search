@@ -33,9 +33,8 @@ dist/
 cs-search-worker.js
 .codex-bench/
 
-benchmarks/
-!benchmarks/
-benchmarks/corpora/
+benchmarks/*
 !benchmarks/README.md
-!benchmarks/file-search-web-baseline.md
-!benchmarks/file-search-web-harvest.md
+!benchmarks/design/
+!benchmarks/design/*.md
+benchmarks/corpora/

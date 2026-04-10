@@ -102,7 +102,7 @@ Date: 2026-03-31
 ## Delta Vs Engine Query Cache Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-engine-query-cache.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-engine-query-cache.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -125,3 +125,4 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - next latency work should keep targeting shared downstream consumers of body-evidence and other repeated per-family scans, not broad token-bucket caching unless a benchmark clearly proves it
+

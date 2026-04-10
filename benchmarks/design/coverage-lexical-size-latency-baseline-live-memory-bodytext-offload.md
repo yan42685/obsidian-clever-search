@@ -95,7 +95,7 @@ Date: 2026-04-01
 ## Delta Vs Previous Active Query Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md`
 - quality:
   - unchanged on the automation corpus
 - timing:
@@ -113,3 +113,4 @@ Date: 2026-04-01
 - execution takeaway:
   - promote this file as the new active query anchor for the live-memory slimming track
   - next work should keep targeting resident document weight and binary-friendly ownership layout, not speculative persisted-byte compression
+

@@ -93,7 +93,7 @@ Date: 2026-03-31
 ## Delta Vs Recall Query Cache Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-recall-query-cache.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-recall-query-cache.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -108,3 +108,4 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - next latency work should keep targeting duplicated query-time document work or per-candidate full-family scans, not additional numeric migration by itself
+

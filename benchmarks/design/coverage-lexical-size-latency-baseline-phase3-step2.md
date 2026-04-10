@@ -87,7 +87,7 @@ Date: 2026-03-31
 ## Delta Vs Phase 3 Step 1 Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-phase3-step1.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-phase3-step1.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -99,3 +99,4 @@ Date: 2026-03-31
   - estimated bytes moved from `293,796` to `292,628`
   - estimated index size ratio moved from `4.945` to `4.926`
   - the byte win is modest, which is expected before field-specific postings and document-side strings are also migrated
+

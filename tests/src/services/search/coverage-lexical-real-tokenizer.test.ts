@@ -368,4 +368,48 @@ describe("coverage lexical with real tokenizer", () => {
 
 		expect(results[0]?.path).toBe("notes/security-basename.md");
 	});
+
+	test("short Han basename identity outranks body single-character noise", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: Array<Record<string, string>>): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+					maxDirectSubItemResults?: number;
+					maxSubItemResults?: number;
+				}): Promise<Array<{ path: string }>>;
+			};
+		};
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/电子技术入门.md",
+				basename: "电子技术入门",
+				folder: "notes",
+				headings: "电子技术入门",
+				content: "基础电路与元件入门",
+			},
+			{
+				path: "notes/读书笔记-游戏设计类.md",
+				basename: "读书笔记-游戏设计类",
+				folder: "notes",
+				content:
+					"电子游戏设计技巧和技能总结，包含多个技字相关片段与电子媒介讨论。",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "电子技",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 10,
+		});
+
+		expect(results[0]?.path).toBe("notes/电子技术入门.md");
+	});
 });

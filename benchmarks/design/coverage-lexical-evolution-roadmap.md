@@ -44,11 +44,11 @@ Every retained change should be evaluated against the same four anchors:
 ## Current Status
 
 - `Phase 0` is complete:
-  - the original pre-compression anchor remains preserved in `benchmarks/coverage-lexical-size-latency-baseline.md`
-  - the previous active anchor is `benchmarks/coverage-lexical-size-latency-baseline-phase3-step3.md`
-  - the previous active latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-recall-query-cache.md`
-  - the previous active engine-side latency anchor is `benchmarks/coverage-lexical-size-latency-baseline-engine-query-cache.md`
-  - the current active anchor is `benchmarks/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md`
+  - the original pre-compression anchor remains preserved in `benchmarks/design/coverage-lexical-size-latency-baseline.md`
+  - the previous active anchor is `benchmarks/design/coverage-lexical-size-latency-baseline-phase3-step3.md`
+  - the previous active latency anchor is `benchmarks/design/coverage-lexical-size-latency-baseline-recall-query-cache.md`
+  - the previous active engine-side latency anchor is `benchmarks/design/coverage-lexical-size-latency-baseline-engine-query-cache.md`
+  - the current active anchor is `benchmarks/design/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md`
   - benchmark logs now report `CoverageLexical / MiniSearch` latency and size ratios directly
 - `Phase 1` is the current active optimization slice:
   - maintained query-time document caches landed
@@ -108,9 +108,9 @@ Every retained change should be evaluated against the same four anchors:
     - quality is unchanged
     - the latest retained gain came from live-memory slimming, not from more numeric migration by itself
     - the active query anchor is now:
-      - `benchmarks/coverage-lexical-size-latency-baseline-live-memory-bodytext-offload.md`
+      - `benchmarks/design/coverage-lexical-size-latency-baseline-live-memory-bodytext-offload.md`
     - the active startup anchor remains:
-      - `benchmarks/coverage-lexical-startup-snapshot-anchor.md`
+      - `benchmarks/design/coverage-lexical-startup-snapshot-anchor.md`
     - current retained ratios:
       - query ratio center:
         - avg `2.840`
@@ -639,7 +639,7 @@ Revert or redesign when:
 ## Immediate Execution Order
 
 1. maintain the current baseline and keep future benchmark captures comparable
-2. treat `benchmarks/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md` as the active query anchor until a later retained query win clearly replaces it
+2. treat `benchmarks/design/coverage-lexical-size-latency-baseline-body-evidence-matcher-precompute.md` as the active query anchor until a later retained query win clearly replaces it
 3. freeze a dedicated pre-snapshot startup anchor before landing persisted-index code:
    - use a separate startup benchmark document
    - keep query and startup interpretation independent
@@ -673,3 +673,4 @@ Refined rule after the latest query-latency work:
   - then freeze a small binary schema contract
   - then compress inside that contract
 - otherwise we risk compressing the wrong shape first and paying migration cost twice
+

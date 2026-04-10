@@ -85,7 +85,7 @@ Date: 2026-03-31
 ## Delta Vs Query Hot-Path Flattening Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-query-hotpath-flattening.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-query-hotpath-flattening.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -100,3 +100,4 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - next latency work should focus on recall-side signal construction churn, especially repeated group-signal assembly and bridge/body merge work inside lane prefiltering and evaluation
+

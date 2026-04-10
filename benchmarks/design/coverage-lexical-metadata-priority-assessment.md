@@ -4,8 +4,8 @@ Date: 2026-03-30
 
 ## What Changed
 
-- added a detailed staged execution plan in `benchmarks/coverage-lexical-metadata-priority-plan.md`
-- added a pre-change benchmark anchor in `benchmarks/coverage-lexical-metadata-priority-baseline.md`
+- added a detailed staged execution plan in `benchmarks/design/coverage-lexical-metadata-priority-plan.md`
+- added a pre-change benchmark anchor in `benchmarks/design/coverage-lexical-metadata-priority-baseline.md`
 - introduced a `familyCountSummary` layer on `CoverageLexicalFamilySignal`
 - added metadata ownership resolution with field priority:
   - `basename > aliases > folder > headings > tags`
@@ -18,8 +18,8 @@ Date: 2026-03-30
 - `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
 - `src/services/search/coverage-lexical/coverage-lexical-ranker.ts`
 - `tests/src/services/search/coverage-lexical-ranking.test.ts`
-- `benchmarks/coverage-lexical-metadata-priority-plan.md`
-- `benchmarks/coverage-lexical-metadata-priority-baseline.md`
+- `benchmarks/design/coverage-lexical-metadata-priority-plan.md`
+- `benchmarks/design/coverage-lexical-metadata-priority-baseline.md`
 
 ## Regression Status
 
@@ -107,3 +107,4 @@ Why:
 ## Current Conclusion
 
 The staged execution plan has been implemented through ranking/test/benchmark validation, but the new ranking behavior is not yet benchmark-clean enough to call finished. The structural groundwork is in place; the next step should be a refinement pass rather than a rollback to ad hoc tuning.
+

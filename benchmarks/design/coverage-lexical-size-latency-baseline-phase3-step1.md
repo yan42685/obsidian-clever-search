@@ -81,7 +81,7 @@ Date: 2026-03-31
 ## Delta Vs Phase 2 Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-phase2.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-phase2.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -93,3 +93,4 @@ Date: 2026-03-31
   - estimated bytes moved from `290,276` to `293,796`
   - estimated index size ratio moved from `4.886` to `4.945`
   - this is the expected temporary tax for introducing explicit document identity before numeric postings compression lands
+

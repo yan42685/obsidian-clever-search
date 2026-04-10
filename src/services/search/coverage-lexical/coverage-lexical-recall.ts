@@ -178,6 +178,11 @@ type CoverageLexicalQueryCache = {
 		string,
 		CoverageLexicalMetadataPhraseSurface | null
 	>;
+	metadataPhraseVerificationKeysBySignatureAndFields: Map<
+		string,
+		readonly CoverageLexicalCandidateKey[]
+	>;
+	metadataPhraseMatchByDocFieldAndSignature: Map<string, boolean>;
 	phraseCandidatesByKey: Map<
 		string,
 		readonly (readonly [
@@ -221,6 +226,8 @@ type CoverageLexicalDerivedPlan = {
 	strictMetadataFamilies: readonly CoverageLexicalFamily[];
 	strictMetadataPhraseFamilyIndices: ReadonlySet<number>;
 	strictHybridBodyFamilies: readonly CoverageLexicalFamily[];
+	strictHybridAnchorFamilyIndices: ReadonlySet<number>;
+	strictHybridBodyFamilyIndices: ReadonlySet<number>;
 	strictHybridPhraseFamilyIndices: ReadonlySet<number>;
 	relaxedBodyFamilies: readonly CoverageLexicalFamily[];
 	relaxedHybridPhraseFamilyIndices: ReadonlySet<number>;
@@ -237,11 +244,49 @@ type CoverageLexicalCheapLaneSignal = {
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
 	bridgeSignal: CoverageLexicalGroupSignal;
+	requiredHanFamilyCount: number;
+	requiredHanCoverageCount: number;
+	requiredLatinFamilyCount: number;
+	requiredLatinCoverageCount: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
 	phraseMatchCount: number;
 	tagExactCount: number;
 	tagCharCount: number;
 	metadataCharCount: number;
 	bodyCharCount: number;
+};
+
+type CoverageLexicalCheapLaneEvidenceProfile = {
+	anchorPressure: number;
+	metadataAssistPressure: number;
+	bodyPressure: number;
+	bodyUpperBound: number;
+	bridgePressure: number;
+	hybridPressure: number;
+	passagePressure: number;
+	charPressure: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+	requiredCoverageRatio: number;
+};
+
+type CoverageLexicalLaneUnionPressure = {
+	admittedTopUpperBound: number;
+	remainingTopUpperBound: number;
+	remainingPotentialCount: number;
+	remainingActivationPressure: number;
+};
+
+type CoverageLexicalFinalUnionCandidate = {
+	key: CoverageLexicalCandidateKey;
+	state: CoverageLexicalCandidateState;
+	signal: CoverageLexicalCheapLaneSignal;
+	profile: CoverageLexicalCheapLaneEvidenceProfile;
+	lowerBound: number;
+	survivalCriticalUpperBound: number;
+	lateDetailUpperBound: number;
+	potentialUpperBound: number;
 };
 
 const ALL_METADATA_FIELDS: readonly CoverageLexicalMetadataField[] = [
@@ -431,6 +476,9 @@ type CoverageLexicalLaneEvaluation = {
 	supportBody: CoverageLexicalGroupSignal;
 	optionalBody: CoverageLexicalGroupSignal;
 	bridgeSignal: CoverageLexicalGroupSignal;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+	requiredCoverageRatio: number;
 	bodyCharMatchCount: number;
 	bodyCharMatchRatio: number;
 	metadataCharMatchCount: number;
@@ -495,7 +543,10 @@ function createCoverageLexicalQueryCache(): CoverageLexicalQueryCache {
 		fuzzyExpansionsByTerm: new Map(),
 		phraseSignatureBucketsByKey: new Map(),
 		bodyPhraseWitnessCandidateKeysBySignatureKey: new Map(),
+		bodyCharVerificationByDocId: new Map(),
 		metadataPhraseSurfaceByDocAndField: new Map(),
+		metadataPhraseVerificationKeysBySignatureAndFields: new Map(),
+		metadataPhraseMatchByDocFieldAndSignature: new Map(),
 		phraseCandidatesByKey: new Map(),
 		familySetCandidatesByKey: new Map(),
 	};
@@ -540,6 +591,8 @@ function getOrCreateDerivedPlan(
 			strictMetadataFamilies,
 		),
 		strictHybridBodyFamilies,
+		strictHybridAnchorFamilyIndices: createFamilyIndexSet(plan.hardAnchorFamilies),
+		strictHybridBodyFamilyIndices: createFamilyIndexSet(strictHybridBodyFamilies),
 		strictHybridPhraseFamilyIndices: createFamilyIndexSet([
 			...plan.hardAnchorFamilies,
 			...strictHybridBodyFamilies,
@@ -759,7 +812,13 @@ function collectCoverageLexicalCandidateStatesInternal(
 		benchmarkHooks,
 		"finalUnion",
 		() => {
-			for (const key of admittedKeys) {
+			const finalUnionKeys = selectFinalUnionCandidateKeys(
+				admittedKeys,
+				aggregateCandidates,
+				plan,
+				request,
+			);
+			for (const key of finalUnionKeys) {
 				const state = aggregateCandidates.get(key);
 				if (!state) {
 					continue;
@@ -767,7 +826,7 @@ function collectCoverageLexicalCandidateStatesInternal(
 				mergeCandidateStateByDocId(admittedCandidates, key, state);
 			}
 		},
-		() => admittedKeys.size,
+		() => admittedCandidates.size || admittedKeys.size,
 	);
 	return admittedCandidates;
 }
@@ -780,13 +839,119 @@ function shouldRunRelaxedHybridLane(
 		CoverageLexicalCandidateState
 	>,
 ): boolean {
-	if (plan.queryKind === "memory_relaxed") {
-		return true;
+	const unionPressure = computeLaneUnionPressure(
+		"relaxed_hybrid_lane",
+		aggregateCandidates,
+		admittedKeys,
+		plan,
+	);
+	const activationPressure = Math.max(
+		computeRelaxedHybridActivationPressure(plan),
+		unionPressure.remainingActivationPressure,
+	);
+	if (
+		admittedKeys.size >= 10 &&
+		unionPressure.remainingTopUpperBound + 0.12 <
+			unionPressure.admittedTopUpperBound
+	) {
+		return false;
+	}
+	if (activationPressure >= 0.95) {
+		if (admittedKeys.size >= 20) {
+			return false;
+		}
+		return aggregateCandidates.size < 40;
+	}
+	if (activationPressure >= 0.55) {
+		if (admittedKeys.size >= 16) {
+			return false;
+		}
+		return aggregateCandidates.size < 32;
 	}
 	if (admittedKeys.size >= 12) {
 		return false;
 	}
 	return aggregateCandidates.size < 24;
+}
+
+function selectFinalUnionCandidateKeys(
+	admittedKeys: ReadonlySet<CoverageLexicalCandidateKey>,
+	aggregateCandidates: ReadonlyMap<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>,
+	plan: CoverageLexicalPlan,
+	request: FileSearchRequest,
+): CoverageLexicalCandidateKey[] {
+	if (admittedKeys.size === 0) {
+		return [];
+	}
+	const candidates: CoverageLexicalFinalUnionCandidate[] = [];
+	for (const key of admittedKeys) {
+		const state = aggregateCandidates.get(key);
+		if (!state) {
+			continue;
+		}
+		const signal = buildCheapLaneSignal(state, plan);
+		const profile = buildCheapLaneEvidenceProfile(signal);
+		const lowerBound = computeFinalUnionLowerBound(profile);
+		candidates.push({
+			key,
+			state,
+			signal,
+			profile,
+			lowerBound,
+			...computeFinalUnionUpperBounds(
+				profile,
+				state,
+				lowerBound,
+			),
+		});
+	}
+	if (candidates.length === 0) {
+		return [];
+	}
+	const unionBudget = computeFinalUnionBudget(plan, request, candidates.length);
+	if (candidates.length <= unionBudget) {
+		return candidates.map(({ key }) => key);
+	}
+	candidates.sort(compareFinalUnionCandidates);
+	const selected = candidates.slice(0, unionBudget);
+	const selectedKeys = new Set(selected.map(({ key }) => key));
+	const cutoff = selected[selected.length - 1];
+	if (!cutoff) {
+		return selected.map(({ key }) => key);
+	}
+	for (let index = unionBudget; index < candidates.length; index += 1) {
+		const candidate = candidates[index];
+		if (candidate.potentialUpperBound + 0.05 < cutoff.potentialUpperBound) {
+			break;
+		}
+		selected.push(candidate);
+		selectedKeys.add(candidate.key);
+	}
+	const rescueAllowance = Math.min(
+		Math.max(request.maxItemResults, 6),
+		Math.max(0, candidates.length - selected.length),
+	);
+	if (rescueAllowance > 0) {
+		let rescued = 0;
+		for (const candidate of candidates) {
+			if (selectedKeys.has(candidate.key)) {
+				continue;
+			}
+			if (!shouldProtectFinalUnionCandidate(candidate, cutoff.potentialUpperBound)) {
+				continue;
+			}
+			selected.push(candidate);
+			selectedKeys.add(candidate.key);
+			rescued += 1;
+			if (rescued >= rescueAllowance) {
+				break;
+			}
+		}
+	}
+	return selected.map(({ key }) => key);
 }
 
 function shouldRunLocalBodyLane(
@@ -797,12 +962,34 @@ function shouldRunLocalBodyLane(
 		CoverageLexicalCandidateState
 	>,
 ): boolean {
+	const unionPressure = computeLaneUnionPressure(
+		"local_body_lane",
+		aggregateCandidates,
+		admittedKeys,
+		plan,
+	);
+	const activationPressure = Math.max(
+		computeLocalBodyActivationPressure(plan),
+		unionPressure.remainingActivationPressure,
+	);
 	if (
-		plan.queryKind === "body_only_local" ||
-		plan.queryKind === "memory_relaxed" ||
-		plan.queryKind === "bridge_dependent"
+		admittedKeys.size >= 12 &&
+		unionPressure.remainingTopUpperBound + 0.14 <
+			unionPressure.admittedTopUpperBound
 	) {
-		return true;
+		return false;
+	}
+	if (activationPressure >= 0.95) {
+		if (admittedKeys.size >= 22) {
+			return false;
+		}
+		return aggregateCandidates.size < 44;
+	}
+	if (activationPressure >= 0.55) {
+		if (admittedKeys.size >= 18) {
+			return false;
+		}
+		return aggregateCandidates.size < 36;
 	}
 	if (admittedKeys.size >= 16) {
 		return false;
@@ -862,26 +1049,13 @@ function runStrictMetadataLane(
 				index,
 				queryCache,
 				laneCandidates,
-				plan.hardAnchorFamilies,
+				derivedPlan.strictMetadataFamilies,
 				{
 					scope: "metadata-only",
 					includePrefix: request.isPrefixMatch,
 					includeFuzzy: false,
 				},
 			);
-			if (derivedPlan.optionalAnchorFamilies.length > 0) {
-				appendFamilySetCandidates(
-					index,
-					queryCache,
-					laneCandidates,
-					derivedPlan.optionalAnchorFamilies,
-					{
-						scope: "metadata-only",
-						includePrefix: request.isPrefixMatch,
-						includeFuzzy: false,
-					},
-				);
-			}
 			collectPhraseCandidates(
 				index,
 				queryCache,
@@ -946,7 +1120,7 @@ function runStrictHybridLane(
 				includePrefix: request.isPrefixMatch,
 				includeFuzzy: false,
 			});
-			collectFamilySetCandidates(
+			appendFamilySetCandidates(
 				index,
 				queryCache,
 				laneCandidates,
@@ -967,6 +1141,10 @@ function runStrictHybridLane(
 				{
 					structuredOnly: false,
 					allowPreferredFields: true,
+					requiredFamilyGroups: [
+						derivedPlan.strictHybridAnchorFamilyIndices,
+						derivedPlan.strictHybridBodyFamilyIndices,
+					],
 				},
 			);
 		},
@@ -1150,7 +1328,7 @@ function runBridgeLane(
 		benchmarkHooks,
 		"bridge_lane",
 		() => {
-			collectFamilySetCandidates(
+			appendFamilySetCandidates(
 				index,
 				queryCache,
 				laneCandidates,
@@ -1370,20 +1548,191 @@ function computeLaneBudget(
 						: laneName === "char_fallback_lane"
 							? 18
 							: 16;
-	const queryBonus =
-		(laneName === "strict_metadata_lane" &&
-			plan.queryKind === "metadata_only_anchored") ||
-		(laneName === "strict_hybrid_lane" &&
-			plan.queryKind === "anchor_body_hybrid") ||
-		(laneName === "relaxed_hybrid_lane" &&
-			plan.queryKind === "memory_relaxed") ||
-		(laneName === "local_body_lane" &&
-			plan.queryKind === "body_only_local") ||
-		(laneName === "bridge_lane" &&
-			plan.queryKind === "bridge_dependent")
-			? 8
-			: 0;
+	const queryBonus = computeLaneSoftBias(laneName, plan);
 	return Math.max(request.maxItemResults * 2, base + queryBonus);
+}
+
+function computeLaneSoftBias(
+	laneName: CoverageLexicalLaneName,
+	plan: CoverageLexicalPlan,
+): number {
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveAnchorMass = getWeightedPlanMass(
+		plan.decisiveAnchorMass,
+		plan.hardAnchorFamilies.length,
+	);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	const optionalBodyMass = getWeightedPlanMass(
+		plan.weightedOptionalMass,
+		plan.optionalFamilies.length,
+	);
+	const bridgeMass = Math.min(1.6, plan.bridgeFamilies.length * 0.28);
+	const hardAnchorPressure =
+		Math.min(1.4, plan.hardAnchorFamilies.length * 0.35) +
+		Math.min(0.8, decisiveAnchorMass * 0.6);
+	const hybridMass = Math.min(anchorMass, bodyMass);
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(4.2, decisiveAnchorMass * 3.1) +
+						Math.min(2.4, anchorMass * 1.6) +
+						hardAnchorPressure +
+						bridgeMass * 0.3,
+				),
+			);
+		case "strict_hybrid_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(3.8, hybridMass * 3.2) +
+						Math.min(3.2, decisiveBodyMass * 2.7) +
+						Math.min(1.2, supportBodyMass * 1.4) +
+						Math.min(1, hardAnchorPressure * 0.7),
+				),
+			);
+		case "relaxed_hybrid_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(2.6, hybridMass * 2.4) +
+						Math.min(3.2, bodyMass * 2.1) +
+						Math.min(1.6, supportBodyMass * 1.9) +
+						Math.min(1.1, optionalBodyMass * 0.9) +
+						bridgeMass * 0.35,
+				),
+			);
+		case "local_body_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(
+						4.6,
+						(decisiveBodyMass * 1.4 + supportBodyMass * 0.95) * 1.8,
+					) +
+						Math.min(1.4, bodyMass * 0.9) +
+						bridgeMass * 0.45 +
+						Math.min(0.8, optionalBodyMass * 0.55),
+				),
+			);
+		case "bridge_lane":
+			return clampLaneBias(
+				Math.round(
+					Math.min(3.4, bridgeMass * 2.1) +
+						Math.min(1.2, hybridMass * 1.1) +
+						Math.min(0.9, supportBodyMass * 0.9) +
+						(plan.hasMixedScriptHint ? 1 : 0),
+				),
+			);
+		case "char_fallback_lane":
+			return clampLaneBias(
+				(plan.hasMixedScriptHint ? 1 : 0) +
+					(plan.shortQueryOverlay && bodyMass <= 0.15 ? 1 : 0) +
+					(Math.min(1, bridgeMass * 0.4) >= 0.5 ? 1 : 0),
+			);
+		default:
+			return 0;
+	}
+}
+
+function hasMeaningfulHybridPotential(plan: CoverageLexicalPlan): boolean {
+	if (plan.hardAnchorFamilies.length === 0 || plan.bodyFamilyCount === 0) {
+		return false;
+	}
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	return Math.min(anchorMass, bodyMass) >= 0.35 || decisiveBodyMass >= 0.45;
+}
+
+function hasMeaningfulBodyPotential(plan: CoverageLexicalPlan): boolean {
+	if (plan.bodyFamilyCount === 0) {
+		return false;
+	}
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	return (
+		bodyMass >= 0.45 ||
+		decisiveBodyMass >= 0.35 ||
+		supportBodyMass >= 0.45
+	);
+}
+
+function computeRelaxedHybridActivationPressure(plan: CoverageLexicalPlan): number {
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	const optionalBodyMass = getWeightedPlanMass(
+		plan.weightedOptionalMass,
+		plan.optionalFamilies.filter((family) => family.role === "body").length,
+	);
+	const bridgePressure = Math.min(0.3, plan.bridgeFamilies.length * 0.1);
+	const anchorPressure = Math.min(0.28, plan.hardAnchorFamilies.length * 0.1);
+	return (
+		Math.min(anchorMass, bodyMass) * 1.15 +
+		decisiveBodyMass * 0.3 +
+		supportBodyMass * 0.7 +
+		optionalBodyMass * 0.42 +
+		bridgePressure +
+		anchorPressure
+	);
+}
+
+function computeLocalBodyActivationPressure(plan: CoverageLexicalPlan): number {
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const supportBodyMass = getWeightedPlanMass(
+		plan.supportBodyMass,
+		plan.supportBodyFamilies.length,
+	);
+	const optionalBodyMass = getWeightedPlanMass(
+		plan.weightedOptionalMass,
+		plan.optionalFamilies.filter((family) => family.role === "body").length,
+	);
+	const bridgePressure = Math.min(0.4, plan.bridgeFamilies.length * 0.14);
+	return (
+		bodyMass * 0.9 +
+		decisiveBodyMass * 0.9 +
+		supportBodyMass * 0.55 +
+		optionalBodyMass * 0.35 +
+		bridgePressure
+	);
+}
+
+function getWeightedPlanMass(
+	value: number | undefined,
+	fallback: number,
+): number {
+	return Number.isFinite(value) ? (value as number) : fallback;
+}
+
+function clampLaneBias(value: number): number {
+	return Math.max(0, Math.min(8, value));
 }
 
 function preselectLaneCandidates(
@@ -1506,6 +1855,7 @@ function evaluateLaneCandidates(
 	request: FileSearchRequest,
 	budget: number,
 ): CoverageLexicalLaneEvaluation[] {
+	const deferredFullEvaluation = shouldDeferFullLaneEvaluation(laneName);
 	const lightEvaluations = evaluateLaneCandidatesLight(
 		laneName,
 		preselected,
@@ -1515,11 +1865,12 @@ function evaluateLaneCandidates(
 		charQuery,
 		queryCache,
 		benchmarkHooks,
+		deferredFullEvaluation,
 	);
 	if (laneName === "strict_metadata_lane") {
 		return lightEvaluations.map(({ evaluation }) => evaluation);
 	}
-	if (!shouldDeferFullLaneEvaluation(laneName)) {
+	if (!deferredFullEvaluation) {
 		return lightEvaluations.map(({ evaluation }) => evaluation);
 	}
 	const shortlisted = selectDeferredFullEvaluationCandidates(
@@ -1567,6 +1918,7 @@ function evaluateLaneCandidatesLight(
 	charQuery: CoverageLexicalCharQuery,
 	queryCache: CoverageLexicalQueryCache,
 	benchmarkHooks: CoverageLexicalRecallBenchmarkHooks | null,
+	deferredFullEvaluation: boolean,
 ): CoverageLexicalEvaluatedLaneCandidate[] {
 	const accepted: CoverageLexicalEvaluatedLaneCandidate[] = [];
 	for (const candidate of preselected) {
@@ -1582,7 +1934,8 @@ function evaluateLaneCandidatesLight(
 			{
 				includePassageSignal:
 					(index.allowPassageSignalInRecall ?? true) &&
-					laneName === "local_body_lane",
+					laneName === "local_body_lane" &&
+					!deferredFullEvaluation,
 				includeTagFallback: laneName === "char_fallback_lane",
 			},
 		);
@@ -1604,7 +1957,7 @@ function evaluateLaneCandidatesLight(
 }
 
 function shouldDeferFullLaneEvaluation(laneName: CoverageLexicalLaneName): boolean {
-	return false;
+	return laneName === "local_body_lane";
 }
 
 function selectDeferredFullEvaluationCandidates(
@@ -1629,11 +1982,25 @@ function selectDeferredFullEvaluationCandidates(
 		.map(({ candidate }) => candidate);
 	const selectedKeys = new Set(selected.map(({ key }) => key));
 	const cutoff = lightEvaluations[fullEvalBudget - 1]?.evaluation ?? null;
+	const cutoffUpperBound =
+		cutoff === null
+			? 0
+			: computeLaneEvidenceUpperBound(
+					laneName,
+					buildLaneEvidenceProfile(cutoff),
+				);
 	if (cutoff) {
 		for (let index = fullEvalBudget; index < lightEvaluations.length; index += 1) {
 			const candidate = lightEvaluations[index];
 			if (
-				compareLaneEvaluations(laneName, cutoff, candidate.evaluation, plan) !== 0
+				compareLaneEvaluations(laneName, cutoff, candidate.evaluation, plan) !==
+					0 &&
+				computeLaneEvidenceUpperBound(
+					laneName,
+					buildLaneEvidenceProfile(candidate.evaluation),
+				) +
+					0.06 <
+					cutoffUpperBound
 			) {
 				break;
 			}
@@ -1643,13 +2010,21 @@ function selectDeferredFullEvaluationCandidates(
 	}
 	if (
 		laneName === "strict_hybrid_lane" ||
-		laneName === "relaxed_hybrid_lane"
+		laneName === "relaxed_hybrid_lane" ||
+		laneName === "local_body_lane"
 	) {
 		for (const { candidate } of lightEvaluations) {
 			if (selectedKeys.has(candidate.key)) {
 				continue;
 			}
-			if (!shouldProtectCheapWitnessFloor(laneName, candidate.signal, plan)) {
+			if (
+				!shouldProtectCheapWitnessFloor(
+					laneName,
+					candidate.signal,
+					plan,
+					cutoffUpperBound,
+				)
+			) {
 				continue;
 			}
 			selected.push(candidate);
@@ -1675,15 +2050,21 @@ function compareCheapLaneSignals(
 	left: CoverageLexicalCheapLaneSignal,
 	right: CoverageLexicalCheapLaneSignal,
 ): number {
+	const sharedWorldviewDecision =
+		laneName === "char_fallback_lane"
+			? 0
+			: compareCheapLaneSharedWorldview(left, right);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal)
 			);
 		case "strict_hybrid_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
@@ -1691,6 +2072,7 @@ function compareCheapLaneSignals(
 			);
 		case "relaxed_hybrid_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareDescendingMetric(
 					left.decisiveBody.coverageCount +
 						left.supportBody.coverageCount +
@@ -1706,6 +2088,7 @@ function compareCheapLaneSignals(
 			);
 		case "local_body_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
 				compareGroupSignals(left.optionalBody, right.optionalBody) ||
@@ -1714,6 +2097,7 @@ function compareCheapLaneSignals(
 			);
 		case "bridge_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
@@ -1732,11 +2116,119 @@ function compareCheapLaneSignals(
 	}
 }
 
+function compareCheapLaneSharedWorldview(
+	left: CoverageLexicalCheapLaneSignal,
+	right: CoverageLexicalCheapLaneSignal,
+): number {
+	return (
+		compareCheapLaneCrossScriptCoverage(left, right) ||
+		compareDescendingMetric(
+			computeCheapLaneRequiredCoverageRatio(left),
+			computeCheapLaneRequiredCoverageRatio(right),
+		) ||
+		compareDescendingMetric(
+			computeCheapLaneUnifiedEvidenceStrength(left),
+			computeCheapLaneUnifiedEvidenceStrength(right),
+		) ||
+		compareDescendingMetric(
+			computeCheapLaneUnifiedCoverageCount(left),
+			computeCheapLaneUnifiedCoverageCount(right),
+		)
+	);
+}
+
+function compareCheapLaneCrossScriptCoverage(
+	left: CoverageLexicalCheapLaneSignal,
+	right: CoverageLexicalCheapLaneSignal,
+): number {
+	const requiresCrossScript =
+		left.crossScriptRequired || right.crossScriptRequired;
+	if (!requiresCrossScript) {
+		return 0;
+	}
+	return (
+		compareDescendingMetric(
+			left.crossScriptSatisfied ? 1 : 0,
+			right.crossScriptSatisfied ? 1 : 0,
+		) ||
+		compareDescendingMetric(
+			computeCheapLaneRequiredCoverageRatio(left),
+			computeCheapLaneRequiredCoverageRatio(right),
+		)
+	);
+}
+
+function computeCheapLaneUnifiedEvidenceStrength(
+	signal: CoverageLexicalCheapLaneSignal,
+): number {
+	return (
+		computeCheapLaneWeightedGroupStrength(signal.hardAnchorMetadata, 1.35) +
+		computeCheapLaneWeightedGroupStrength(signal.decisiveBody, 1.25) +
+		computeCheapLaneWeightedGroupStrength(signal.supportBody, 1) +
+		computeCheapLaneWeightedGroupStrength(signal.optionalBody, 0.55) +
+		computeCheapLaneWeightedGroupStrength(signal.bridgeSignal, 0.9) +
+		signal.phraseMatchCount * 0.35
+	);
+}
+
+function computeCheapLaneUnifiedCoverageCount(
+	signal: CoverageLexicalCheapLaneSignal,
+): number {
+	return (
+		signal.hardAnchorMetadata.coverageCount +
+		signal.decisiveBody.coverageCount +
+		signal.supportBody.coverageCount +
+		signal.optionalBody.coverageCount +
+		signal.bridgeSignal.coverageCount
+	);
+}
+
+function computeCheapLaneWeightedGroupStrength(
+	signal: CoverageLexicalGroupSignal,
+	weight: number,
+): number {
+	return (
+		(signal.exactWeight +
+			signal.prefixWeight * 0.65 +
+			signal.fuzzyWeight * 0.35 +
+			signal.tailWeight * 0.2) *
+		weight
+	);
+}
+
 function buildCheapLaneSignal(
 	state: CoverageLexicalCandidateState,
 	plan: CoverageLexicalPlan,
 ): CoverageLexicalCheapLaneSignal {
 	const derivedPlan = getOrCreateDerivedPlan(plan);
+	const requiredFamilyIndices = new Set<number>(
+		plan.coverageRequirements.requiredFamilyIndices,
+	);
+	let requiredHanFamilyCount = 0;
+	let requiredHanCoverageCount = 0;
+	let requiredLatinFamilyCount = 0;
+	let requiredLatinCoverageCount = 0;
+	for (const family of plan.families) {
+		if (!requiredFamilyIndices.has(family.index)) {
+			continue;
+		}
+		const scriptClass = getCheapLaneFamilyScriptClass(plan, family.index);
+		const covered = hasCheapLaneRequiredFamilyCoverage(state, family.index);
+		if (scriptClass === "han" || scriptClass === "mixed") {
+			requiredHanFamilyCount += 1;
+			if (covered) {
+				requiredHanCoverageCount += 1;
+			}
+		}
+		if (scriptClass === "latin" || scriptClass === "mixed") {
+			requiredLatinFamilyCount += 1;
+			if (covered) {
+				requiredLatinCoverageCount += 1;
+			}
+		}
+	}
+	const crossScriptRequired =
+		requiredHanFamilyCount > 0 && requiredLatinFamilyCount > 0;
 	return {
 		hardAnchorMetadata: buildGroupSignal(
 			state.metadataMatches,
@@ -1763,12 +2255,75 @@ function buildCheapLaneSignal(
 			state.metadataMatches,
 			plan.bridgeFamilies,
 		),
+		requiredHanFamilyCount,
+		requiredHanCoverageCount,
+		requiredLatinFamilyCount,
+		requiredLatinCoverageCount,
+		crossScriptRequired,
+		crossScriptSatisfied:
+			!crossScriptRequired ||
+			(requiredHanCoverageCount > 0 && requiredLatinCoverageCount > 0),
 		phraseMatchCount: state.phraseMatches.length,
 		tagExactCount: state.tagExactMatchIndices.length,
 		tagCharCount: state.tagCharMatchIndices.length,
 		metadataCharCount: state.metadataCharMatchIndices.length,
 		bodyCharCount: state.bodyCharMatchIndices.length,
 	};
+}
+
+function getCheapLaneFamilyScriptClass(
+	plan: CoverageLexicalPlan,
+	familyIndex: number,
+): "han" | "latin" | "mixed" | "other" {
+	const probe = plan.probes?.[familyIndex];
+	if (probe?.scriptClass) {
+		return probe.scriptClass;
+	}
+	const term = plan.families[familyIndex]?.normalizedTerm ?? "";
+	const hanCharCount = term.match(/\p{Script=Han}/gu)?.length ?? 0;
+	const latinCharCount = term.match(/\p{Script=Latin}/gu)?.length ?? 0;
+	if (hanCharCount > 0 && latinCharCount > 0) {
+		return "mixed";
+	}
+	if (hanCharCount > 0) {
+		return "han";
+	}
+	if (latinCharCount > 0) {
+		return "latin";
+	}
+	return "other";
+}
+
+function hasCheapLaneRequiredFamilyCoverage(
+	state: CoverageLexicalCandidateState,
+	familyIndex: number,
+): boolean {
+	if (
+		(state.bodyMatches[familyIndex] ?? 0) > 0 ||
+		(state.metadataMatches[familyIndex] ?? 0) > 0
+	) {
+		return true;
+	}
+	for (const fieldMatches of Object.values(state.metadataAssistFieldMatches)) {
+		if ((fieldMatches[familyIndex] ?? 0) > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function computeCheapLaneRequiredCoverageRatio(
+	signal: CoverageLexicalCheapLaneSignal,
+): number {
+	const requiredFamilyCount =
+		signal.requiredHanFamilyCount + signal.requiredLatinFamilyCount;
+	if (requiredFamilyCount <= 0) {
+		return 1;
+	}
+	return (
+		(signal.requiredHanCoverageCount + signal.requiredLatinCoverageCount) /
+		requiredFamilyCount
+	);
 }
 
 function hasCheapLaneTie(
@@ -1797,25 +2352,70 @@ function shouldProtectCheapWitnessFloor(
 	laneName: CoverageLexicalLaneName,
 	signal: CoverageLexicalCheapLaneSignal,
 	plan: CoverageLexicalPlan,
+	cutoffUpperBound = 0,
 ): boolean {
-	const fullHardAnchor =
-		plan.hardAnchorFamilies.length > 0 &&
-		signal.hardAnchorMetadata.coverageCount >= plan.hardAnchorFamilies.length;
-	const fullDecisiveBody =
-		plan.decisiveBodyFamilies.length > 0 &&
-		signal.decisiveBody.coverageCount >= plan.decisiveBodyFamilies.length;
-	const hasSupportingBody = signal.supportBody.coverageCount > 0;
-	const hasPhraseWitness = signal.phraseMatchCount > 0;
-	switch (laneName) {
-		case "strict_hybrid_lane":
-			return fullDecisiveBody && (fullHardAnchor || hasPhraseWitness);
-		case "relaxed_hybrid_lane":
-			return fullDecisiveBody && (fullHardAnchor || hasSupportingBody || hasPhraseWitness);
-		case "local_body_lane":
-			return fullDecisiveBody && (hasSupportingBody || hasPhraseWitness);
-		default:
-			return false;
+	const profile = buildCheapLaneEvidenceProfile(signal);
+	const upperBound = computeCheapLaneUpperBound(laneName, profile);
+	const protectionFloor = computeLaneProtectionFloor(laneName, plan);
+	const hasWitness = hasCheapWitnessProtectionSignal(signal, plan);
+	if (!hasWitness || upperBound < protectionFloor) {
+		return false;
 	}
+	return cutoffUpperBound <= 0 || upperBound + 0.08 >= cutoffUpperBound;
+}
+
+function hasCheapWitnessProtectionSignal(
+	signal: CoverageLexicalCheapLaneSignal,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (hasCheapWitnessSignal(signal)) {
+		return true;
+	}
+	if (plan.rescuePotential.phraseRescueLikely && signal.phraseMatchCount > 0) {
+		return true;
+	}
+	if (
+		(plan.rescuePotential.localWitnessLikely ||
+			plan.rescuePotential.unresolvedBodyUpgradeLikely) &&
+		(signal.decisiveBody.coverageCount > 0 ||
+			signal.supportBody.coverageCount > 0)
+	) {
+		return true;
+	}
+	if (
+		plan.rescuePotential.metadataIdentityLikely &&
+		signal.hardAnchorMetadata.coverageCount > 0
+	) {
+		return true;
+	}
+	if (
+		plan.rescuePotential.bridgeRescueLikely &&
+		signal.bridgeSignal.coverageCount > 0
+	) {
+		return true;
+	}
+	return (
+		plan.coverageRequirements.requiresCrossScriptCoverage &&
+		signal.crossScriptSatisfied
+	);
+}
+
+function hasCheapWitnessSignal(
+	signal: CoverageLexicalCheapLaneSignal,
+): boolean {
+	if (
+		signal.phraseMatchCount > 0 ||
+		signal.decisiveBody.coverageCount > 0 ||
+		signal.supportBody.coverageCount > 0
+	) {
+		return true;
+	}
+	return (
+		signal.metadataAssist.coverageCount > 0 &&
+		(signal.hardAnchorMetadata.coverageCount > 0 ||
+			signal.bridgeSignal.coverageCount > 0 ||
+			signal.optionalBody.coverageCount > 0)
+	);
 }
 
 function buildLaneEvaluation(
@@ -1916,6 +2516,9 @@ function buildLaneEvaluation(
 		supportBody: signal.supportBody,
 		optionalBody: signal.optionalBody,
 		bridgeSignal: signal.bridgeSignal,
+		crossScriptRequired: signal.crossScriptRequired,
+		crossScriptSatisfied: signal.crossScriptSatisfied,
+		requiredCoverageRatio: computeCheapLaneRequiredCoverageRatio(signal),
 		bodyCharMatchCount: state.bodyCharMatchIndices.length,
 		bodyCharMatchRatio: computeCharMatchRatio(
 			state.bodyCharMatchIndices.length,
@@ -2034,38 +2637,59 @@ function acceptsLaneCandidate(
 	plan: CoverageLexicalPlan,
 	charQuery: CoverageLexicalCharQuery,
 ): boolean {
+	const evidenceProfile = buildLaneEvidenceProfile(evaluation);
+	const sharedAdmission = acceptsLaneBySharedEvidence(
+		laneName,
+		evaluation,
+		evidenceProfile,
+		plan,
+	);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
-				evaluation.hardAnchorMetadata.coverageCount >=
-				Math.max(1, plan.hardAnchorFamilies.length)
+				sharedAdmission ||
+				evidenceProfile.anchorPressure >=
+					Math.max(1.05, plan.hardAnchorFamilies.length * 0.95) ||
+				(evaluation.hardAnchorMetadata.coverageCount >= 1 &&
+					evidenceProfile.hybridPressure >= 0.9) ||
+				evidenceProfile.bridgePressure >= 1.15
 			);
 		case "strict_hybrid_lane":
 			return (
-				evaluation.hardAnchorMetadata.coverageCount >=
-					Math.max(1, plan.hardAnchorFamilies.length) &&
-				evaluation.decisiveBody.coverageCount >= 1
+				sharedAdmission ||
+				evidenceProfile.hybridPressure >=
+					Math.max(0.95, plan.relaxedMinimumMatchCount * 0.7) &&
+				evidenceProfile.bodyUpperBound >= 1
 			);
 		case "relaxed_hybrid_lane":
 			return (
-				evaluation.hardAnchorMetadata.coverageCount >=
-					Math.max(1, plan.hardAnchorFamilies.length) &&
-				getBodyCoverageCount(evaluation) >=
-					Math.max(1, plan.relaxedMinimumMatchCount)
+				sharedAdmission ||
+				evidenceProfile.hybridPressure >=
+					Math.max(0.7, plan.relaxedMinimumMatchCount * 0.55) ||
+				(evidenceProfile.bodyUpperBound >=
+					Math.max(1.1, plan.relaxedMinimumMatchCount * 0.9) &&
+					(evidenceProfile.anchorPressure >= 0.5 ||
+						evidenceProfile.bridgePressure >= 0.8))
 			);
 		case "local_body_lane":
 			return (
-				evaluation.passageSignal.coreCoverageCount >=
-					Math.max(1, Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1)) ||
-				getBodyCoverageCount(evaluation) >=
-					Math.max(1, plan.relaxedMinimumMatchCount || 1) ||
-				evaluation.metadataAssist.coverageCount >= 1
+				sharedAdmission ||
+				acceptsLocalBodyLaneByPrimaryEvidence(evidenceProfile, plan) ||
+				acceptsLocalBodyLaneBySurvivalCriticalPassageRescue(
+					evaluation,
+					evidenceProfile,
+					plan,
+				)
 			);
 		case "bridge_lane":
 			return (
-				evaluation.bridgeSignal.coverageCount >= 1 ||
-				evaluation.phraseMatchCount >= 1 ||
-				evaluation.metadataAssist.coverageCount >= 1
+				sharedAdmission ||
+				evidenceProfile.bridgePressure >= 0.9 ||
+				evidenceProfile.hybridPressure >= 0.7 ||
+				acceptsBridgeLaneByConnectedMetadataAssist(
+					evaluation,
+					evidenceProfile,
+				)
 			);
 		case "char_fallback_lane":
 			return (
@@ -2084,11 +2708,678 @@ function acceptsLaneCandidate(
 					evaluation.bodyCharMatchCount,
 					evaluation.bodyCharMatchRatio,
 					charQuery.terms.length,
-				)
+				) ||
+				evidenceProfile.charPressure >= 1.05
 			);
 		default:
 			return false;
 	}
+}
+
+function acceptsLaneBySharedEvidence(
+	laneName: CoverageLexicalLaneName,
+	evaluation: CoverageLexicalLaneEvaluation,
+	profile: CoverageLexicalLaneEvidenceProfile,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (laneName === "char_fallback_lane") {
+		return false;
+	}
+	if (
+		profile.crossScriptRequired &&
+		!profile.crossScriptSatisfied &&
+		profile.requiredCoverageRatio < 0.45
+	) {
+		return false;
+	}
+	const sharedPressure = computeSharedLaneUpperBound(profile);
+	const sharedFloor = computeSharedLaneAdmissionFloor(laneName, plan);
+	if (sharedPressure < sharedFloor) {
+		return false;
+	}
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return (
+				evaluation.hardAnchorMetadata.coverageCount > 0 ||
+				evaluation.bridgeSignal.coverageCount > 0
+			);
+		case "strict_hybrid_lane":
+			return (
+				evaluation.hardAnchorMetadata.coverageCount > 0 &&
+				(evaluation.decisiveBody.coverageCount > 0 ||
+					evaluation.supportBody.coverageCount > 0)
+			);
+		case "relaxed_hybrid_lane":
+			return (
+				evaluation.decisiveBody.coverageCount > 0 ||
+				evaluation.supportBody.coverageCount > 0 ||
+				evaluation.hardAnchorMetadata.coverageCount > 0
+			);
+		case "local_body_lane":
+			return (
+				evaluation.decisiveBody.coverageCount > 0 ||
+				evaluation.supportBody.coverageCount > 0 ||
+				computePassagePressure(evaluation.passageSignal) > 0.45
+			);
+		case "bridge_lane":
+			return (
+				evaluation.bridgeSignal.coverageCount > 0 ||
+				evaluation.phraseMatchCount > 0 ||
+				acceptsBridgeLaneByConnectedMetadataAssist(evaluation, profile)
+			);
+		default:
+			return false;
+	}
+}
+
+function acceptsBridgeLaneByConnectedMetadataAssist(
+	evaluation: CoverageLexicalLaneEvaluation,
+	evidenceProfile: CoverageLexicalLaneEvidenceProfile,
+): boolean {
+	if (evidenceProfile.metadataAssistPressure < 0.8) {
+		return false;
+	}
+	return (
+		evaluation.hardAnchorMetadata.coverageCount >= 1 ||
+		evaluation.bridgeSignal.coverageCount >= 1 ||
+		evaluation.phraseMatchCount > 0 ||
+		evaluation.decisiveBody.coverageCount > 0 ||
+		evaluation.supportBody.coverageCount > 0
+	);
+}
+
+function acceptsLocalBodyLaneByPrimaryEvidence(
+	evidenceProfile: CoverageLexicalLaneEvidenceProfile,
+	plan: CoverageLexicalPlan,
+): boolean {
+	return (
+		evidenceProfile.bodyUpperBound >=
+			Math.max(
+				0.95,
+				Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) * 0.85,
+			) ||
+		evidenceProfile.metadataAssistPressure >= 0.7
+	);
+}
+
+function acceptsLocalBodyLaneBySurvivalCriticalPassageRescue(
+	evaluation: CoverageLexicalLaneEvaluation,
+	evidenceProfile: CoverageLexicalLaneEvidenceProfile,
+	plan: CoverageLexicalPlan,
+): boolean {
+	if (evidenceProfile.passagePressure < 0.75) {
+		return false;
+	}
+	const passage = evaluation.passageSignal;
+	const unresolved = evaluation.state.unresolvedBodyEvidence;
+	const requiredCoreCoverage = Math.min(
+		2,
+		Math.max(1, plan.coreFamilyCount || 1),
+	);
+	const hasStrongPassageWitness =
+		passage.exactWeight > 0 ||
+		(passage.phraseMatchCount > 0 && passage.coreCoverageCount >= 1) ||
+		(passage.coreCoverageCount >= requiredCoreCoverage &&
+			passage.compactnessScore >= 0.18);
+	if (!hasStrongPassageWitness) {
+		return false;
+	}
+	return (
+		unresolved.needsPassageSignal ||
+		unresolved.hasUnverifiedPhraseWitness ||
+		evaluation.decisiveBody.coverageCount > 0 ||
+		evaluation.supportBody.coverageCount > 0 ||
+		evaluation.optionalBody.coverageCount > 0
+	);
+}
+
+type CoverageLexicalLaneEvidenceProfile = {
+	anchorPressure: number;
+	metadataAssistPressure: number;
+	bodyPressure: number;
+	bodyUpperBound: number;
+	bridgePressure: number;
+	hybridPressure: number;
+	passagePressure: number;
+	charPressure: number;
+	crossScriptRequired: boolean;
+	crossScriptSatisfied: boolean;
+	requiredCoverageRatio: number;
+};
+
+function buildLaneEvidenceProfile(
+	evaluation: CoverageLexicalLaneEvaluation,
+): CoverageLexicalLaneEvidenceProfile {
+	const anchorPressure =
+		computeGroupPressure(evaluation.hardAnchorMetadata, 1.15) +
+		computeGroupPressure(evaluation.metadataAssist, 0.35);
+	const metadataAssistPressure = computeGroupPressure(
+		evaluation.metadataAssist,
+		0.9,
+	);
+	const passagePressure = computePassagePressure(evaluation.passageSignal);
+	const bodyPressure =
+		computeGroupPressure(evaluation.decisiveBody, 1.1) +
+		computeGroupPressure(evaluation.supportBody, 0.75) +
+		computeGroupPressure(evaluation.optionalBody, 0.45) +
+		passagePressure * 0.45;
+	const unresolvedPressure =
+		evaluation.state.unresolvedBodyEvidence.unresolvedWeightUpperBound * 0.3 +
+		evaluation.state.unresolvedBodyEvidence.unresolvedFamilyCount * 0.18;
+	const bodyUpperBound = bodyPressure + unresolvedPressure;
+	const bridgePressure =
+		computeGroupPressure(evaluation.bridgeSignal, 1) +
+		evaluation.phraseMatchCount * 0.35 +
+		evaluation.phraseMatchWeight * 0.08 +
+		metadataAssistPressure * 0.2;
+	const hybridPressure =
+		Math.min(anchorPressure, bodyUpperBound) +
+		Math.min(bridgePressure, 0.8) * 0.25 +
+		Math.min(passagePressure, 0.9) * 0.2;
+	const charPressure =
+		evaluation.tagExactMatchCount * 1.1 +
+		evaluation.tagCharMatchRatio * 0.9 +
+		evaluation.metadataCharMatchRatio * 0.85 +
+		evaluation.bodyCharMatchRatio * 0.6 +
+		evaluation.tagCharMatchCount * 0.08 +
+		evaluation.metadataCharMatchCount * 0.06 +
+		evaluation.bodyCharMatchCount * 0.04;
+	return {
+		anchorPressure,
+		metadataAssistPressure,
+		bodyPressure,
+		bodyUpperBound,
+		bridgePressure,
+		hybridPressure,
+		passagePressure,
+		charPressure,
+		crossScriptRequired: evaluation.crossScriptRequired,
+		crossScriptSatisfied: evaluation.crossScriptSatisfied,
+		requiredCoverageRatio: evaluation.requiredCoverageRatio,
+	};
+}
+
+function buildCheapLaneEvidenceProfile(
+	signal: CoverageLexicalCheapLaneSignal,
+): CoverageLexicalCheapLaneEvidenceProfile {
+	const anchorPressure =
+		computeGroupPressure(signal.hardAnchorMetadata, 1.1) +
+		computeGroupPressure(signal.metadataAssist, 0.3);
+	const metadataAssistPressure = computeGroupPressure(signal.metadataAssist, 0.85);
+	const passagePressure =
+		signal.phraseMatchCount * 0.34 +
+		signal.decisiveBody.coverageCount * 0.18 +
+		signal.supportBody.coverageCount * 0.1;
+	const bodyPressure =
+		computeGroupPressure(signal.decisiveBody, 1.05) +
+		computeGroupPressure(signal.supportBody, 0.72) +
+		computeGroupPressure(signal.optionalBody, 0.45) +
+		passagePressure * 0.35;
+	const bodyUpperBound =
+		bodyPressure +
+		signal.phraseMatchCount * 0.18 +
+		(signal.decisiveBody.tailWeight +
+			signal.supportBody.tailWeight +
+			signal.optionalBody.tailWeight) *
+			0.06;
+	const bridgePressure =
+		computeGroupPressure(signal.bridgeSignal, 1) +
+		signal.phraseMatchCount * 0.3 +
+		metadataAssistPressure * 0.2;
+	const hybridPressure =
+		Math.min(anchorPressure, bodyUpperBound) +
+		Math.min(bridgePressure, 0.8) * 0.22 +
+		Math.min(passagePressure, 0.8) * 0.16;
+	const charPressure =
+		signal.tagExactCount * 1.1 +
+		signal.tagCharCount * 0.28 +
+		signal.metadataCharCount * 0.16 +
+		signal.bodyCharCount * 0.08;
+	return {
+		anchorPressure,
+		metadataAssistPressure,
+		bodyPressure,
+		bodyUpperBound,
+		bridgePressure,
+		hybridPressure,
+		passagePressure,
+		charPressure,
+		crossScriptRequired: signal.crossScriptRequired,
+		crossScriptSatisfied: signal.crossScriptSatisfied,
+		requiredCoverageRatio: computeCheapLaneRequiredCoverageRatio(signal),
+	};
+}
+
+function computeSharedLaneUpperBound(
+	profile: CoverageLexicalLaneEvidenceProfile,
+): number {
+	const crossScriptBonus = profile.crossScriptRequired
+		? profile.crossScriptSatisfied
+			? 0.22
+			: 0
+		: 0;
+	return (
+		profile.requiredCoverageRatio * 1.05 +
+		crossScriptBonus +
+		Math.min(profile.anchorPressure, 1.2) * 0.28 +
+		Math.min(profile.bodyUpperBound, 1.5) * 0.42 +
+		Math.min(profile.bridgePressure, 1) * 0.2 +
+		Math.min(profile.passagePressure, 1) * 0.12
+	);
+}
+
+function computeSharedCheapLaneUpperBound(
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+): number {
+	const crossScriptBonus = profile.crossScriptRequired
+		? profile.crossScriptSatisfied
+			? 0.18
+			: 0
+		: 0;
+	return (
+		profile.requiredCoverageRatio * 1 +
+		crossScriptBonus +
+		Math.min(profile.anchorPressure, 1.1) * 0.26 +
+		Math.min(profile.bodyUpperBound, 1.35) * 0.38 +
+		Math.min(profile.bridgePressure, 0.95) * 0.18 +
+		Math.min(profile.passagePressure, 0.8) * 0.1
+	);
+}
+
+function computeSharedLaneAdmissionFloor(
+	laneName: CoverageLexicalLaneName,
+	plan: CoverageLexicalPlan,
+): number {
+	let floor: number;
+	switch (laneName) {
+		case "strict_metadata_lane":
+			floor = 0.9;
+			break;
+		case "strict_hybrid_lane":
+			floor = 0.96;
+			break;
+		case "relaxed_hybrid_lane":
+			floor = 0.72;
+			break;
+		case "local_body_lane":
+			floor = 0.78;
+			break;
+		case "bridge_lane":
+			floor = 0.74;
+			break;
+		case "char_fallback_lane":
+			return Number.POSITIVE_INFINITY;
+		default:
+			floor = 0.8;
+			break;
+	}
+	if (plan.coverageRequirements.requiresCrossScriptCoverage) {
+		floor += 0.04;
+	}
+	if (
+		plan.rescuePotential.phraseRescueLikely ||
+		plan.rescuePotential.localWitnessLikely ||
+		plan.rescuePotential.unresolvedBodyUpgradeLikely
+	) {
+		floor -= 0.04;
+	}
+	if (laneName === "strict_metadata_lane" && plan.rescuePotential.metadataIdentityLikely) {
+		floor -= 0.02;
+	}
+	if (laneName === "bridge_lane" && plan.rescuePotential.bridgeRescueLikely) {
+		floor -= 0.03;
+	}
+	return Math.max(0.58, floor);
+}
+
+function computeSharedLaneProtectionFloor(
+	plan: CoverageLexicalPlan,
+): number {
+	let floor = Math.max(
+		0.62,
+		Math.min(
+			0.82,
+			plan.coverageRequirements.minimumMatchCount * 0.42,
+		),
+	);
+	if (plan.coverageRequirements.requiresCrossScriptCoverage) {
+		floor += 0.05;
+	}
+	if (
+		plan.rescuePotential.localWitnessLikely ||
+		plan.rescuePotential.unresolvedBodyUpgradeLikely
+	) {
+		floor -= 0.05;
+	}
+	if (plan.rescuePotential.phraseRescueLikely) {
+		floor -= 0.03;
+	}
+	return Math.max(0.5, floor);
+}
+
+function computeLaneEvidenceUpperBound(
+	laneName: CoverageLexicalLaneName,
+	profile: CoverageLexicalLaneEvidenceProfile,
+): number {
+	const sharedUpperBound = computeSharedLaneUpperBound(profile);
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.anchorPressure + profile.bridgePressure * 0.2,
+			);
+		case "strict_hybrid_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.hybridPressure + profile.bodyUpperBound * 0.15,
+			);
+		case "relaxed_hybrid_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.hybridPressure +
+				profile.bodyUpperBound * 0.32 +
+				profile.bridgePressure * 0.16
+			);
+		case "local_body_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.bodyUpperBound +
+				profile.passagePressure * 0.3 +
+				profile.metadataAssistPressure * 0.12
+			);
+		case "bridge_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.bridgePressure + profile.hybridPressure * 0.18,
+			);
+		case "char_fallback_lane":
+			return profile.charPressure + profile.bridgePressure * 0.1;
+		default:
+			return 0;
+	}
+}
+
+function computeCheapLaneUpperBound(
+	laneName: CoverageLexicalLaneName,
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+): number {
+	const sharedUpperBound = computeSharedCheapLaneUpperBound(profile);
+	switch (laneName) {
+		case "strict_metadata_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.anchorPressure + profile.bridgePressure * 0.2,
+			);
+		case "strict_hybrid_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.hybridPressure + profile.bodyUpperBound * 0.15,
+			);
+		case "relaxed_hybrid_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.hybridPressure +
+				profile.bodyUpperBound * 0.32 +
+				profile.bridgePressure * 0.16
+			);
+		case "local_body_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.bodyUpperBound +
+				profile.passagePressure * 0.3 +
+				profile.metadataAssistPressure * 0.12
+			);
+		case "bridge_lane":
+			return Math.max(
+				sharedUpperBound,
+				profile.bridgePressure + profile.hybridPressure * 0.18,
+			);
+		case "char_fallback_lane":
+			return profile.charPressure + profile.bridgePressure * 0.1;
+		default:
+			return 0;
+	}
+}
+
+function computeLaneProtectionFloor(
+	laneName: CoverageLexicalLaneName,
+	plan: CoverageLexicalPlan,
+): number {
+	const sharedFloor = computeSharedLaneProtectionFloor(plan);
+	switch (laneName) {
+		case "strict_hybrid_lane":
+			return Math.min(
+				Math.max(0.95, plan.relaxedMinimumMatchCount * 0.7),
+				sharedFloor + 0.18,
+			);
+		case "relaxed_hybrid_lane":
+			return Math.min(
+				Math.max(0.7, plan.relaxedMinimumMatchCount * 0.55),
+				sharedFloor + 0.08,
+			);
+		case "local_body_lane":
+			return Math.min(
+				Math.max(
+					0.82,
+					Math.min(plan.coreFamilyCount, plan.relaxedMinimumMatchCount || 1) *
+						0.72,
+				),
+				sharedFloor + 0.12,
+			);
+		default:
+			return Number.POSITIVE_INFINITY;
+	}
+}
+
+function computeLaneUnionPressure(
+	laneName: CoverageLexicalLaneName,
+	aggregateCandidates: ReadonlyMap<
+		CoverageLexicalCandidateKey,
+		CoverageLexicalCandidateState
+	>,
+	admittedKeys: ReadonlySet<CoverageLexicalCandidateKey>,
+	plan: CoverageLexicalPlan,
+): CoverageLexicalLaneUnionPressure {
+	let admittedTopUpperBound = 0;
+	let remainingTopUpperBound = 0;
+	let remainingPotentialCount = 0;
+	const protectionFloor = computeLaneProtectionFloor(laneName, plan);
+	for (const [key, state] of aggregateCandidates) {
+		const signal = buildCheapLaneSignal(state, plan);
+		const profile = buildCheapLaneEvidenceProfile(signal);
+		const upperBound = computeCheapLaneUpperBound(laneName, profile);
+		if (admittedKeys.has(key)) {
+			admittedTopUpperBound = Math.max(admittedTopUpperBound, upperBound);
+			continue;
+		}
+		remainingTopUpperBound = Math.max(remainingTopUpperBound, upperBound);
+		if (upperBound >= protectionFloor) {
+			remainingPotentialCount += 1;
+		}
+	}
+	return {
+		admittedTopUpperBound,
+		remainingTopUpperBound,
+		remainingPotentialCount,
+		remainingActivationPressure:
+			remainingTopUpperBound +
+			Math.min(0.35, remainingPotentialCount * 0.08),
+	};
+}
+
+function computeFinalUnionBudget(
+	plan: CoverageLexicalPlan,
+	request: FileSearchRequest,
+	admittedCount: number,
+): number {
+	const anchorMass = getWeightedPlanMass(plan.weightedAnchorMass, plan.anchorFamilyCount);
+	const bodyMass = getWeightedPlanMass(plan.weightedBodyMass, plan.bodyFamilyCount);
+	const decisiveBodyMass = getWeightedPlanMass(
+		plan.decisiveBodyMass,
+		plan.decisiveBodyFamilies.length,
+	);
+	const bridgeMass = Math.min(1.2, plan.bridgeFamilies.length * 0.18);
+	const softExpansion = Math.round(
+		anchorMass * 4 + bodyMass * 5 + decisiveBodyMass * 3 + bridgeMass * 2,
+	);
+	const budget = Math.max(
+		request.maxItemResults * 8,
+		24 + softExpansion,
+	);
+	return Math.min(admittedCount, budget);
+}
+
+function computeFinalUnionLowerBound(
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+): number {
+	const lowerBound = Math.max(
+		profile.anchorPressure + profile.bridgePressure * 0.14,
+		profile.hybridPressure + profile.bodyPressure * 0.2,
+		profile.bodyPressure + profile.passagePressure * 0.18,
+		profile.bridgePressure + profile.metadataAssistPressure * 0.12,
+		profile.charPressure,
+	);
+	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
+		return lowerBound * 0.82;
+	}
+	return lowerBound;
+}
+
+function computeFinalUnionUpperBounds(
+	profile: CoverageLexicalCheapLaneEvidenceProfile,
+	state: CoverageLexicalCandidateState,
+	lowerBound: number,
+): {
+	survivalCriticalUpperBound: number;
+	lateDetailUpperBound: number;
+	potentialUpperBound: number;
+} {
+	const unresolved = state.unresolvedBodyEvidence;
+	let survivalCriticalUpperBound =
+		lowerBound + unresolved.unresolvedWeightUpperBound * 0.12;
+	if (unresolved.needsPassageSignal) {
+		survivalCriticalUpperBound += 0.35;
+	}
+	if (unresolved.hasUnverifiedPhraseWitness || state.phraseMatches.length > 0) {
+		survivalCriticalUpperBound += 0.24;
+	}
+	let lateDetailUpperBound = 0;
+	if (unresolved.hasUnresolvedPrefixSurface || state.bodyPrefixWitness !== null) {
+		lateDetailUpperBound += 0.1;
+	}
+	if (
+		unresolved.hasUnresolvedBodyCharVerification ||
+		state.bodyCharMatchIndices.length > 0
+	) {
+		lateDetailUpperBound += 0.04;
+	}
+	if (profile.crossScriptRequired && !profile.crossScriptSatisfied) {
+		survivalCriticalUpperBound += 0.22;
+	}
+	return {
+		survivalCriticalUpperBound,
+		lateDetailUpperBound,
+		potentialUpperBound: Math.max(
+			survivalCriticalUpperBound + lateDetailUpperBound,
+			profile.bodyUpperBound + profile.bridgePressure * 0.15,
+		),
+	};
+}
+
+function compareFinalUnionCandidates(
+	left: CoverageLexicalFinalUnionCandidate,
+	right: CoverageLexicalFinalUnionCandidate,
+): number {
+	return (
+		compareDescendingMetric(
+			left.profile.crossScriptSatisfied ? 1 : 0,
+			right.profile.crossScriptSatisfied ? 1 : 0,
+		) ||
+		compareDescendingMetric(
+			left.profile.requiredCoverageRatio,
+			right.profile.requiredCoverageRatio,
+		) ||
+		compareDescendingMetric(
+			left.survivalCriticalUpperBound,
+			right.survivalCriticalUpperBound,
+		) ||
+		compareDescendingMetric(
+			left.potentialUpperBound,
+			right.potentialUpperBound,
+		) ||
+		compareDescendingMetric(
+			left.lateDetailUpperBound,
+			right.lateDetailUpperBound,
+		) ||
+		compareDescendingMetric(left.lowerBound, right.lowerBound) ||
+		compareDescendingMetric(left.profile.hybridPressure, right.profile.hybridPressure) ||
+		compareDescendingMetric(left.profile.anchorPressure, right.profile.anchorPressure) ||
+		compareDescendingMetric(left.profile.bodyUpperBound, right.profile.bodyUpperBound) ||
+		compareDescendingMetric(left.profile.bridgePressure, right.profile.bridgePressure) ||
+		left.key - right.key
+	);
+}
+
+function shouldProtectFinalUnionCandidate(
+	candidate: CoverageLexicalFinalUnionCandidate,
+	cutoffUpperBound: number,
+): boolean {
+	const unresolved = candidate.state.unresolvedBodyEvidence;
+	const hasSurvivalProof =
+		candidate.signal.phraseMatchCount > 0 ||
+		candidate.signal.decisiveBody.coverageCount > 0 ||
+		candidate.signal.supportBody.coverageCount > 0 ||
+		unresolved.needsPassageSignal ||
+		unresolved.hasUnverifiedPhraseWitness;
+	const hasContextualLateDetail =
+		candidate.lateDetailUpperBound > 0 &&
+		hasCheapWitnessSignal(candidate.signal);
+	if (!hasSurvivalProof && !hasContextualLateDetail) {
+		return false;
+	}
+	if (
+		candidate.profile.crossScriptRequired &&
+		!candidate.profile.crossScriptSatisfied &&
+		candidate.profile.requiredCoverageRatio < 0.5
+	) {
+		return false;
+	}
+	if (hasSurvivalProof) {
+		return candidate.survivalCriticalUpperBound + 0.06 >= cutoffUpperBound;
+	}
+	return (
+		candidate.lowerBound + 0.04 >= cutoffUpperBound ||
+		candidate.potentialUpperBound + 0.04 >= cutoffUpperBound
+	);
+}
+
+function computeGroupPressure(
+	signal: CoverageLexicalGroupSignal,
+	weightMultiplier = 1,
+): number {
+	return (
+		(signal.exactWeight +
+			signal.prefixWeight * 0.72 +
+			signal.fuzzyWeight * 0.4 +
+			signal.coverageCount * 0.28 +
+			signal.tailWeight * 0.04) *
+		weightMultiplier
+	);
+}
+
+function computePassagePressure(
+	signal: CoverageLexicalPassageAdmissionSignal,
+): number {
+	return (
+		signal.exactWeight +
+		signal.prefixWeight * 0.72 +
+		signal.fuzzyWeight * 0.42 +
+		signal.coreCoverageCount * 0.38 +
+		signal.anchorCoverageCount * 0.2 +
+		signal.softCoverageCount * 0.1 +
+		signal.phraseMatchWeight * 0.08 +
+		signal.compactnessScore * 0.2
+	);
 }
 
 function compareLaneEvaluations(
@@ -2097,9 +3388,14 @@ function compareLaneEvaluations(
 	right: CoverageLexicalLaneEvaluation,
 	plan: CoverageLexicalPlan,
 ): number {
+	const sharedWorldviewDecision =
+		laneName === "char_fallback_lane"
+			? 0
+			: compareLaneSharedWorldview(left, right);
 	switch (laneName) {
 		case "strict_metadata_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
@@ -2108,6 +3404,7 @@ function compareLaneEvaluations(
 			);
 		case "strict_hybrid_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.decisiveBody, right.decisiveBody) ||
 				compareGroupSignals(left.hardAnchorMetadata, right.hardAnchorMetadata) ||
 				compareGroupSignals(left.supportBody, right.supportBody) ||
@@ -2120,6 +3417,7 @@ function compareLaneEvaluations(
 			);
 		case "relaxed_hybrid_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareDescendingMetric(
 					getBodyCoverageCount(left),
 					getBodyCoverageCount(right),
@@ -2136,6 +3434,7 @@ function compareLaneEvaluations(
 			);
 		case "local_body_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareCoverageLexicalPassageAdmissionSignals(
 					left.passageSignal,
 					right.passageSignal,
@@ -2149,6 +3448,7 @@ function compareLaneEvaluations(
 			);
 		case "bridge_lane":
 			return (
+				sharedWorldviewDecision ||
 				compareGroupSignals(left.bridgeSignal, right.bridgeSignal) ||
 				compareDescendingMetric(left.phraseMatchCount, right.phraseMatchCount) ||
 				compareDescendingMetric(left.phraseMatchWeight, right.phraseMatchWeight) ||
@@ -2179,6 +3479,77 @@ function compareLaneEvaluations(
 		default:
 			return 0;
 	}
+}
+
+function compareLaneSharedWorldview(
+	left: CoverageLexicalLaneEvaluation,
+	right: CoverageLexicalLaneEvaluation,
+): number {
+	return (
+		compareLaneCrossScriptCoverage(left, right) ||
+		compareDescendingMetric(
+			left.requiredCoverageRatio,
+			right.requiredCoverageRatio,
+		) ||
+		compareDescendingMetric(
+			computeLaneUnifiedEvidenceStrength(left),
+			computeLaneUnifiedEvidenceStrength(right),
+		) ||
+		compareDescendingMetric(
+			computeLaneUnifiedCoverageCount(left),
+			computeLaneUnifiedCoverageCount(right),
+		)
+	);
+}
+
+function compareLaneCrossScriptCoverage(
+	left: CoverageLexicalLaneEvaluation,
+	right: CoverageLexicalLaneEvaluation,
+): number {
+	const requiresCrossScript =
+		left.crossScriptRequired || right.crossScriptRequired;
+	if (!requiresCrossScript) {
+		return 0;
+	}
+	return (
+		compareDescendingMetric(
+			left.crossScriptSatisfied ? 1 : 0,
+			right.crossScriptSatisfied ? 1 : 0,
+		) ||
+		compareDescendingMetric(
+			left.requiredCoverageRatio,
+			right.requiredCoverageRatio,
+		)
+	);
+}
+
+function computeLaneUnifiedEvidenceStrength(
+	evaluation: CoverageLexicalLaneEvaluation,
+): number {
+	return (
+		computeCheapLaneWeightedGroupStrength(
+			evaluation.hardAnchorMetadata,
+			1.35,
+		) +
+		computeCheapLaneWeightedGroupStrength(evaluation.decisiveBody, 1.25) +
+		computeCheapLaneWeightedGroupStrength(evaluation.supportBody, 1) +
+		computeCheapLaneWeightedGroupStrength(evaluation.optionalBody, 0.55) +
+		computeCheapLaneWeightedGroupStrength(evaluation.bridgeSignal, 0.9) +
+		evaluation.phraseMatchWeight * 0.08 +
+		computePassagePressure(evaluation.passageSignal) * 0.3
+	);
+}
+
+function computeLaneUnifiedCoverageCount(
+	evaluation: CoverageLexicalLaneEvaluation,
+): number {
+	return (
+		evaluation.hardAnchorMetadata.coverageCount +
+		evaluation.decisiveBody.coverageCount +
+		evaluation.supportBody.coverageCount +
+		evaluation.optionalBody.coverageCount +
+		evaluation.bridgeSignal.coverageCount
+	);
 }
 
 function getBodyCoverageCount(evaluation: CoverageLexicalLaneEvaluation): number {
@@ -2619,6 +3990,7 @@ function collectPhraseCandidates(
 	options: {
 		structuredOnly: boolean;
 		allowPreferredFields: boolean;
+		requiredFamilyGroups?: readonly ReadonlySet<number>[];
 	},
 ): void {
 	for (const signature of getOrCreatePhraseSignatureBucket(
@@ -2745,6 +4117,14 @@ function overlapsTargetFamilies(
 	return signature.familyIndices.some((familyIndex) => targetFamilyIndices.has(familyIndex));
 }
 
+function signatureSatisfiesRequiredFamilyGroups(
+	signature: CoverageLexicalPhraseSignature,
+	requiredFamilyGroups: readonly ReadonlySet<number>[],
+): boolean {
+	return requiredFamilyGroups.every((group) =>
+		signature.familyIndices.some((familyIndex) => group.has(familyIndex)),
+	);
+}
 function dedupeFamilies(
 	families: readonly CoverageLexicalFamily[],
 ): CoverageLexicalFamily[] {
@@ -3071,6 +4451,32 @@ function getOrCreateMetadataPhraseSurface(
 	return created;
 }
 
+function getMetadataPhraseVerificationCacheKey(
+	signature: CoverageLexicalPhraseSignature,
+	fields: readonly CoverageLexicalMetadataField[],
+): string {
+	return `${signature.index}|${fields.join(",")}`;
+}
+
+function metadataPhraseMatchesSignatureOnField(
+	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
+	docId: number,
+	field: CoverageLexicalMetadataField,
+	signature: CoverageLexicalPhraseSignature,
+): boolean {
+	const cacheKey = `${docId}|${field}|${signature.index}`;
+	const cached = queryCache.metadataPhraseMatchByDocFieldAndSignature.get(cacheKey);
+	if (cached !== undefined) {
+		return cached;
+	}
+	const surface = getOrCreateMetadataPhraseSurface(index, queryCache, docId, field);
+	const matched =
+		surface !== null && matchesMetadataPhraseSignature(surface, signature);
+	queryCache.metadataPhraseMatchByDocFieldAndSignature.set(cacheKey, matched);
+	return matched;
+}
+
 function matchesMetadataPhraseSignature(
 	surface: CoverageLexicalMetadataPhraseSurface,
 	signature: CoverageLexicalPhraseSignature,
@@ -3131,11 +4537,21 @@ function getMetadataExactPostingMapsForField(
 
 function collectMetadataPhraseVerificationCandidateKeys(
 	index: CoverageLexicalRecallIndex,
+	queryCache: CoverageLexicalQueryCache,
 	candidates: Map<CoverageLexicalCandidateKey, CoverageLexicalCandidateState>,
 	signature: CoverageLexicalPhraseSignature,
 	fields: readonly CoverageLexicalMetadataField[],
 ): Set<CoverageLexicalCandidateKey> {
 	const keys = new Set<CoverageLexicalCandidateKey>(candidates.keys());
+	const cacheKey = getMetadataPhraseVerificationCacheKey(signature, fields);
+	const cached =
+		queryCache.metadataPhraseVerificationKeysBySignatureAndFields.get(cacheKey);
+	if (cached) {
+		for (const key of cached) {
+			keys.add(key);
+		}
+		return keys;
+	}
 	const seedTokens = new Set<string>();
 	for (const variant of signature.variants) {
 		for (const token of variant.split(" ")) {
@@ -3150,6 +4566,7 @@ function collectMetadataPhraseVerificationCandidateKeys(
 			seedTokens.add(token);
 		}
 	}
+	const postingDerivedKeys = new Set<CoverageLexicalCandidateKey>();
 	for (const field of fields) {
 		for (const postings of getMetadataExactPostingMapsForField(index, field)) {
 			for (const token of seedTokens) {
@@ -3158,11 +4575,16 @@ function collectMetadataPhraseVerificationCandidateKeys(
 					continue;
 				}
 				forEachPostingCandidateKey(index, matches, (key) => {
+					postingDerivedKeys.add(key);
 					keys.add(key);
 				});
 			}
 		}
 	}
+	queryCache.metadataPhraseVerificationKeysBySignatureAndFields.set(
+		cacheKey,
+		Array.from(postingDerivedKeys),
+	);
 	return keys;
 }
 
@@ -3411,6 +4833,7 @@ function getOrCreatePhraseSignatureBucket(
 	options: {
 		structuredOnly: boolean;
 		allowPreferredFields: boolean;
+		requiredFamilyGroups?: readonly ReadonlySet<number>[];
 	},
 	queryCache: CoverageLexicalQueryCache,
 ): readonly CoverageLexicalPhraseSignature[] {
@@ -3418,6 +4841,11 @@ function getOrCreatePhraseSignatureBucket(
 		scope,
 		options.structuredOnly ? "structured" : "all-forms",
 		options.allowPreferredFields ? "preferred" : "plain",
+		options.requiredFamilyGroups
+			? options.requiredFamilyGroups
+				.map((group) => Array.from(group).join("."))
+				.join("::")
+			: "any-group",
 		Array.from(targetFamilyIndices).join(","),
 	].join("|");
 	const cached = queryCache.phraseSignatureBucketsByKey.get(bucketKey);
@@ -3432,6 +4860,15 @@ function getOrCreatePhraseSignatureBucket(
 			return false;
 		}
 		if (!options.allowPreferredFields && signature.preferredFields?.length) {
+			return false;
+		}
+		if (
+			options.requiredFamilyGroups &&
+			!signatureSatisfiesRequiredFamilyGroups(
+				signature,
+				options.requiredFamilyGroups,
+			)
+		) {
 			return false;
 		}
 		return true;
@@ -3590,6 +5027,7 @@ function collectAnyMetadataPhraseMatches(
 ): void {
 	const candidateKeys = collectMetadataPhraseVerificationCandidateKeys(
 		index,
+		queryCache,
 		candidates,
 		signature,
 		ALL_METADATA_FIELDS,
@@ -3597,13 +5035,7 @@ function collectAnyMetadataPhraseMatches(
 	for (const key of candidateKeys) {
 		let matched = false;
 		for (const field of ALL_METADATA_FIELDS) {
-			const surface = getOrCreateMetadataPhraseSurface(
-				index,
-				queryCache,
-				key,
-				field,
-			);
-			if (!surface || !matchesMetadataPhraseSignature(surface, signature)) {
+			if (!metadataPhraseMatchesSignatureOnField(index, queryCache, key, field, signature)) {
 				continue;
 			}
 			matched = true;
@@ -3809,6 +5241,7 @@ function collectPreferredMetadataPhraseMatches(
 	}
 	const candidateKeys = collectMetadataPhraseVerificationCandidateKeys(
 		index,
+		queryCache,
 		candidates,
 		signature,
 		preferredFields,
@@ -3817,13 +5250,7 @@ function collectPreferredMetadataPhraseMatches(
 		const state = getOrCreateDocIdCandidateState(candidates, key);
 		let matchedAnyField = false;
 		for (const field of preferredFields) {
-			const surface = getOrCreateMetadataPhraseSurface(
-				index,
-				queryCache,
-				key,
-				field,
-			);
-			if (!surface || !matchesMetadataPhraseSignature(surface, signature)) {
+			if (!metadataPhraseMatchesSignatureOnField(index, queryCache, key, field, signature)) {
 				continue;
 			}
 			matchedAnyField = true;
@@ -4590,3 +6017,4 @@ function computeTailWeight(index: number): number {
 	const position = index + 1;
 	return position * position;
 }
+

@@ -91,7 +91,7 @@ Date: 2026-03-31
 ## Delta Vs Phase 3 Step 2 Anchor
 
 - baseline reference file:
-  - `benchmarks/coverage-lexical-size-latency-baseline-phase3-step2.md`
+  - `benchmarks/design/coverage-lexical-size-latency-baseline-phase3-step2.md`
 - quality:
   - unchanged on the active corpus
 - timing:
@@ -104,3 +104,4 @@ Date: 2026-03-31
   - estimated index size ratio stayed at `4.926`
 - execution takeaway:
   - Phase 3 should continue by migrating the remaining field-specific metadata, tag, and char postings off path sets before evaluating whether canonical-key recall can deliver its intended latency win
+

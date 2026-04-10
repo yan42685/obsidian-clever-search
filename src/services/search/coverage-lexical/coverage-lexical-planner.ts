@@ -1,5 +1,7 @@
 import { buildCoverageLexicalFamilies } from "./coverage-lexical-families";
+import { extractHanBigrams } from "./coverage-lexical-cjk";
 import type {
+	CoverageLexicalCoverageRequirements,
 	CoverageLexicalFamilyProbe,
 	CoverageLexicalPlanExplain,
 	CoverageLexicalPlanFamilyReason,
@@ -7,6 +9,8 @@ import type {
 	CoverageLexicalQuerySpan,
 	CoverageLexicalQuerySpanKind,
 	CoverageLexicalPlan,
+	CoverageLexicalResourceHints,
+	CoverageLexicalRescuePotential,
 } from "./coverage-lexical-types";
 
 const METADATA_HINT_REGEX = /[\\/]|(?:^|\s)(?:tag|path|title|folder):/iu;
@@ -68,6 +72,56 @@ export function buildCoverageLexicalPlan(
 	const hasPathShapeHint = detectPathShapeHint(queryText, queryTerms);
 	const hasTitleShapeHint = detectTitleShapeHint(queryTerms);
 	const hasMixedScriptHint = detectMixedScriptHint(queryTerms);
+	const shortHanQueryShape = analyzeShortHanQueryShape(
+		queryText,
+		queryTerms,
+	);
+	const weightedAnchorMass = sumProbeFamilyWeight(anchorFamilies, probes);
+	const weightedBodyMass = sumProbeFamilyWeight(bodyFamilies, probes);
+	const decisiveAnchorMass = sumProbeFamilyWeightByTier(
+		anchorFamilies,
+		probes,
+		"decisive",
+	);
+	const decisiveBodyMass = sumProbeFamilyWeightByTier(
+		bodyFamilies,
+		probes,
+		"decisive",
+	);
+	const supportAnchorMass = sumProbeFamilyWeightByTier(
+		anchorFamilies,
+		probes,
+		"support",
+	);
+	const supportBodyMass = sumProbeFamilyWeightByTier(
+		bodyFamilies,
+		probes,
+		"support",
+	);
+	const resourceHints = computeCoverageLexicalResourceHints({
+		activeFamilies,
+		anchorFamilies,
+		bodyFamilies,
+		coreBodyFamilies,
+		noiseFamilies,
+		familyEvidence,
+		spans,
+		shortQueryOverlay,
+		hasMetadataHint,
+		hasPathShapeHint,
+		hasTitleShapeHint,
+		hasMixedScriptHint,
+		hasPureHanMultiTermQuery: shortHanQueryShape.isPureHanMultiTerm,
+		hasShortHanFallbackBigramExpansion:
+			shortHanQueryShape.isFallbackBigramExpansion,
+		probes,
+		weightedAnchorMass,
+		weightedBodyMass,
+		decisiveAnchorMass,
+		decisiveBodyMass,
+		supportAnchorMass,
+		supportBodyMass,
+	});
 	const {
 		queryKind,
 		queryKindReasons,
@@ -84,17 +138,20 @@ export function buildCoverageLexicalPlan(
 		hasPathShapeHint,
 		hasTitleShapeHint,
 		hasMixedScriptHint,
+		hasPureHanMultiTermQuery: shortHanQueryShape.isPureHanMultiTerm,
+		hasShortHanFallbackBigramExpansion:
+			shortHanQueryShape.isFallbackBigramExpansion,
 		probes,
 	});
 	const hardAnchorFamilies = selectHardAnchorFamilies(
-		queryKind,
+		resourceHints,
 		activeFamilies,
 		familyEvidence,
 		probes,
 		shortQueryOverlay,
 	);
 	const decisiveBodyFamilies = selectDecisiveBodyFamilies(
-		queryKind,
+		resourceHints,
 		coreBodyFamilies,
 		hardAnchorFamilies,
 		familyEvidence,
@@ -124,15 +181,29 @@ export function buildCoverageLexicalPlan(
 		familyEvidence,
 		probes,
 	);
+	const weightedOptionalMass = sumProbeFamilyWeight(optionalFamilies, probes);
 	const relaxedMinimumMatchCount = computeRelaxedMinimumMatchCount(
-		queryKind,
+		resourceHints,
 		decisiveBodyFamilies.length,
 		supportBodyFamilies.length,
 	);
-	const route = selectRoute(
+	const coverageRequirements = buildCoverageRequirements(
+		queryTerms,
+		hardAnchorFamilies,
+		decisiveBodyFamilies,
+		supportBodyFamilies,
+		optionalFamilies,
+		bridgeFamilies,
+		relaxedMinimumMatchCount,
+		hasMixedScriptHint,
+	);
+	const rescuePotential = buildRescuePotential(
 		queryKind,
+		resourceHints,
 		hardAnchorFamilies,
 		bodyFamilies,
+		bridgeFamilies,
+		hasMixedScriptHint,
 	);
 
 	return {
@@ -143,7 +214,6 @@ export function buildCoverageLexicalPlan(
 		hasMixedScriptHint,
 		hasPathShapeHint,
 		hasTitleShapeHint,
-		route,
 		hardAnchorFamilies,
 		decisiveBodyFamilies,
 		supportBodyFamilies,
@@ -154,7 +224,19 @@ export function buildCoverageLexicalPlan(
 		coreFamilyCount: coreFamilies.length,
 		anchorFamilyCount: anchorFamilies.length,
 		bodyFamilyCount: bodyFamilies.length,
+		probes,
+		weightedAnchorMass,
+		weightedBodyMass,
+		weightedOptionalMass,
+		decisiveAnchorMass,
+		decisiveBodyMass,
+		supportAnchorMass,
+		supportBodyMass,
+		resourceHints,
+		coverageRequirements,
+		rescuePotential,
 		explain: buildPlanExplain(
+			queryKind,
 			spans,
 			families,
 			hardAnchorFamilies,
@@ -169,18 +251,56 @@ export function buildCoverageLexicalPlan(
 	};
 }
 
-function selectRoute(
+function buildCoverageRequirements(
+	queryTerms: readonly string[],
+	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	decisiveBodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	supportBodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	optionalFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	bridgeFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	relaxedMinimumMatchCount: number,
+	hasMixedScriptHint: boolean,
+): CoverageLexicalCoverageRequirements {
+	const uniqueQueryTerms = new Set(queryTerms);
+	return {
+		requiredFamilyIndices: [
+			...hardAnchorFamilies,
+			...decisiveBodyFamilies,
+		].map((family) => family.index),
+		decisiveFamilyIndices: decisiveBodyFamilies.map((family) => family.index),
+		supportFamilyIndices: supportBodyFamilies.map((family) => family.index),
+		optionalFamilyIndices: optionalFamilies.map((family) => family.index),
+		bridgeFamilyIndices: bridgeFamilies.map((family) => family.index),
+		minimumMatchCount: relaxedMinimumMatchCount,
+		requiresCrossScriptCoverage: hasMixedScriptHint,
+		requiresBalancedMultiTermCoverage: uniqueQueryTerms.size >= 2,
+	};
+}
+
+function buildRescuePotential(
 	queryKind: CoverageLexicalQueryKind,
+	resourceHints: CoverageLexicalResourceHints,
 	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
 	bodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
-): CoverageLexicalPlan["route"] {
-	if (queryKind === "metadata_only_anchored") {
-		return "metadata-first";
-	}
-	if (hardAnchorFamilies.length > 0 && bodyFamilies.length > 0) {
-		return "body-with-anchor";
-	}
-	return "body-first";
+	bridgeFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	hasMixedScriptHint: boolean,
+): CoverageLexicalRescuePotential {
+	return {
+		metadataIdentityLikely:
+			hardAnchorFamilies.length > 0 && resourceHints.metadataBudget >= 0.65,
+		phraseRescueLikely:
+			resourceHints.hybridBudget >= 0.7 ||
+			(queryKind === "memory_relaxed" && bodyFamilies.length > 0),
+		localWitnessLikely:
+			resourceHints.localWitnessBudget >=
+			Math.max(resourceHints.bodyBudget, resourceHints.hybridBudget),
+		bridgeRescueLikely:
+			bridgeFamilies.length > 0 &&
+			(hasMixedScriptHint || resourceHints.bridgeBudget >= 0.6),
+		unresolvedBodyUpgradeLikely:
+			bodyFamilies.length > 0 &&
+			(queryKind === "memory_relaxed" || resourceHints.bodyBudget >= 0.7),
+	};
 }
 
 function selectQueryKind(input: {
@@ -196,6 +316,8 @@ function selectQueryKind(input: {
 	hasPathShapeHint: boolean;
 	hasTitleShapeHint: boolean;
 	hasMixedScriptHint: boolean;
+	hasPureHanMultiTermQuery: boolean;
+	hasShortHanFallbackBigramExpansion: boolean;
 	probes: readonly CoverageLexicalFamilyProbe[];
 }): {
 	queryKind: CoverageLexicalQueryKind;
@@ -214,34 +336,91 @@ function selectQueryKind(input: {
 		hasPathShapeHint,
 		hasTitleShapeHint,
 		hasMixedScriptHint,
+		hasPureHanMultiTermQuery,
+		hasShortHanFallbackBigramExpansion,
 		probes,
 	} = input;
 	const reasons: string[] = [];
 	const softOrNoiseCount =
 		activeFamilies.filter((family) => family.strength === "soft").length +
 		noiseFamilies.length;
-	const metadataDominantAnchorCount = anchorFamilies.filter((family) =>
-		isMetadataDominantAnchor(family, probes),
-	).length;
-	const structuredAnchorCount = activeFamilies.filter((family) =>
-		isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
-	).length;
+	const metadataDominantAnchorMass = sumProbeFamilyWeight(
+		anchorFamilies.filter((family) => isMetadataDominantAnchor(family, probes)),
+		probes,
+	);
+	const structuredAnchorMass = sumProbeFamilyWeight(
+		activeFamilies.filter((family) =>
+			isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
+		),
+		probes,
+	);
+	const meaningfulAnchorMass = sumMeaningfulProbeFamilyWeight(anchorFamilies, probes);
+	const meaningfulBodyMass = sumMeaningfulProbeFamilyWeight(bodyFamilies, probes);
+	const decisiveAnchorMass = sumProbeFamilyWeightByTier(
+		anchorFamilies,
+		probes,
+		"decisive",
+	);
+	const decisiveBodyMass = sumProbeFamilyWeightByTier(
+		bodyFamilies,
+		probes,
+		"decisive",
+	);
 	const titlePathSpanCount = spans.filter((span) => span.kind === "title_path").length;
 	const metadataIntentSpanCount = spans.filter(
 		(span) => span.kind === "metadata_intent",
 	).length;
 	const fillerSpanCount = spans.filter((span) => span.kind === "filler").length;
+	const hasStrongMetadataIntent =
+		hasMetadataHint ||
+		metadataIntentSpanCount > 0 ||
+		activeFamilies.some((family) =>
+			familyEvidence.get(family.index)?.spanKinds.includes("metadata_intent"),
+		);
+	const suppressPureHanShortMetadataOnly =
+		shortQueryOverlay &&
+		hasPureHanMultiTermQuery &&
+		!hasShortHanFallbackBigramExpansion &&
+		bodyFamilies.length > 0 &&
+		!hasStrongMetadataIntent &&
+		!hasPathShapeHint &&
+		!hasTitleShapeHint &&
+		titlePathSpanCount === 0 &&
+		meaningfulBodyMass >= Math.min(0.45, meaningfulAnchorMass * 0.75);
+	const shortQueryMetadataEvidenceScore = shortQueryOverlay
+		? computeShortQueryMetadataEvidenceScore({
+				structuredAnchorMass,
+				decisiveAnchorMass,
+				metadataDominantAnchorMass,
+				hasMetadataHint,
+				hasPathShapeHint,
+				hasTitleShapeHint,
+				titlePathSpanCount,
+				metadataIntentSpanCount,
+			})
+		: 0;
+	const longQueryMetadataDominance =
+		!shortQueryOverlay &&
+		hasStrongMetadataIntent &&
+		meaningfulAnchorMass >= Math.max(0.9, meaningfulBodyMass * 1.15) &&
+		decisiveAnchorMass >= Math.max(0.45, decisiveBodyMass);
+	const shortQueryMetadataDominance =
+		shortQueryOverlay &&
+		!suppressPureHanShortMetadataOnly &&
+		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
+		shortQueryMetadataEvidenceScore >=
+			Math.max(
+				1.05,
+				meaningfulBodyMass * 0.95 + decisiveBodyMass * 0.2,
+			) &&
+		(structuredAnchorMass >= Math.max(0.35, meaningfulBodyMass * 0.35) ||
+			decisiveAnchorMass >= Math.max(0.35, decisiveBodyMass) ||
+			metadataDominantAnchorMass >= Math.max(0.35, meaningfulAnchorMass * 0.45));
 	const looksMetadataOnly =
-		(anchorFamilies.length > 0 || structuredAnchorCount > 0) &&
+		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
 		(bodyFamilies.length === 0 ||
-			(shortQueryOverlay &&
-				(hasTitleShapeHint ||
-					hasPathShapeHint ||
-					hasMetadataHint ||
-					structuredAnchorCount > 0 ||
-					titlePathSpanCount > 0 ||
-					metadataIntentSpanCount > 0 ||
-					metadataDominantAnchorCount >= Math.max(1, anchorFamilies.length))));
+			longQueryMetadataDominance ||
+			shortQueryMetadataDominance);
 	if (hasMixedScriptHint && activeFamilies.some(isBridgeEligibleFamily)) {
 		reasons.push("mixed-script hint with bridge-eligible families");
 		return {
@@ -257,15 +436,17 @@ function selectQueryKind(input: {
 		};
 	}
 	if (
-		(anchorFamilies.length > 0 || structuredAnchorCount > 0) &&
-		bodyFamilies.length > 0 &&
+		(meaningfulAnchorMass > 0 || structuredAnchorMass > 0) &&
+		meaningfulBodyMass > 0 &&
 		(
-			hasMetadataHint ||
-			hasPathShapeHint ||
-			hasTitleShapeHint ||
-			structuredAnchorCount > 0 ||
-			titlePathSpanCount > 0 ||
-			metadataIntentSpanCount > 0
+			shortQueryOverlay
+				? shortQueryMetadataEvidenceScore >= 0.45
+				: hasMetadataHint ||
+					hasPathShapeHint ||
+					hasTitleShapeHint ||
+					structuredAnchorMass > 0 ||
+					titlePathSpanCount > 0 ||
+					metadataIntentSpanCount > 0
 		)
 	) {
 		reasons.push("structured anchor evidence coexists with body evidence");
@@ -300,15 +481,15 @@ function selectQueryKind(input: {
 }
 
 function selectHardAnchorFamilies(
-	queryKind: CoverageLexicalQueryKind,
+	resourceHints: CoverageLexicalResourceHints,
 	activeFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
 	probes: readonly CoverageLexicalFamilyProbe[],
 	shortQueryOverlay: boolean,
 ): CoverageLexicalPlan["hardAnchorFamilies"] {
 	if (
-		queryKind === "body_only_local" ||
-		activeFamilies.length === 0
+		activeFamilies.length === 0 ||
+		(resourceHints.metadataBudget <= 0 && resourceHints.hybridBudget <= 0)
 	) {
 		return [];
 	}
@@ -329,26 +510,48 @@ function selectHardAnchorFamilies(
 		}
 		return right.index - left.index;
 	});
+	const preserveHybridAnchors =
+		resourceHints.hybridBudget >=
+			Math.max(0.45, resourceHints.bodyBudget * 0.55) ||
+		resourceHints.metadataBudget >= 0.75;
 	const limit =
-		queryKind === "metadata_only_anchored"
+		resourceHints.metadataBudget >=
+			Math.max(
+				0.7,
+				resourceHints.hybridBudget - 0.05,
+				resourceHints.bodyBudget,
+			)
 			? shortQueryOverlay
 				? anchorFamilies.length
 				: Math.min(anchorFamilies.length, 3)
-			: queryKind === "memory_relaxed"
+			: !preserveHybridAnchors &&
+				  anchorFamilies.length > 2 &&
+				  resourceHints.memoryBudget >=
+						Math.max(
+							resourceHints.metadataBudget,
+							resourceHints.hybridBudget,
+						)
 				? 1
 				: Math.min(anchorFamilies.length, 2);
 	return sorted.slice(0, Math.max(1, limit)).sort((left, right) => left.index - right.index);
 }
 
 function selectDecisiveBodyFamilies(
-	queryKind: CoverageLexicalQueryKind,
+	resourceHints: CoverageLexicalResourceHints,
 	coreBodyFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
 	hardAnchorFamilies: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
 	probes: readonly CoverageLexicalFamilyProbe[],
 ): CoverageLexicalPlan["decisiveBodyFamilies"] {
+	const suppressDecisiveBody =
+		resourceHints.hybridBudget < 0.8 &&
+		resourceHints.metadataBudget >=
+			Math.max(
+				resourceHints.hybridBudget + 0.45,
+				resourceHints.bodyBudget + 0.3,
+			);
 	if (
-		queryKind === "metadata_only_anchored" ||
+		suppressDecisiveBody ||
 		coreBodyFamilies.length === 0
 	) {
 		return [];
@@ -366,15 +569,39 @@ function selectDecisiveBodyFamilies(
 		return right.index - left.index;
 	});
 	const limit =
-		queryKind === "body_only_local"
+		resourceHints.localWitnessBudget >=
+		Math.max(resourceHints.memoryBudget, resourceHints.hybridBudget)
 			? coreBodyFamilies.length
-			: queryKind === "memory_relaxed"
+			: resourceHints.memoryBudget >
+				  Math.max(resourceHints.metadataBudget, resourceHints.hybridBudget)
 				? Math.max(1, Math.ceil(coreBodyFamilies.length / 2))
 				: Math.min(coreBodyFamilies.length, 2);
 	const nonGlueSorted = sorted.filter(
 		(family) => !isPlannerGlueBodyFamily(family, familyEvidence),
 	);
-	const candidatePool = nonGlueSorted.length > 0 ? nonGlueSorted : sorted;
+	const decisiveTierSorted = sorted.filter(
+		(family) => getProbeFamilyTier(probes[family.index]) === "decisive",
+	);
+	const nonGlueDecisiveSorted = decisiveTierSorted.filter(
+		(family) => !isPlannerGlueBodyFamily(family, familyEvidence),
+	);
+	const shouldPromoteSupportBody =
+		resourceHints.localWitnessBudget >= 1.1 ||
+		resourceHints.memoryBudget >= 1.05 ||
+		(
+			resourceHints.hybridBudget >= 1 &&
+			hardAnchorFamilies.length > 0
+		);
+	const candidatePool =
+		nonGlueDecisiveSorted.length > 0
+			? nonGlueDecisiveSorted
+			: decisiveTierSorted.length > 0
+				? decisiveTierSorted
+				: shouldPromoteSupportBody
+					? nonGlueSorted.length > 0
+						? nonGlueSorted
+						: sorted
+					: [];
 	return candidatePool
 		.slice(0, limit)
 		.sort((left, right) => left.index - right.index);
@@ -418,21 +645,27 @@ function selectBridgeFamilies(
 }
 
 function computeRelaxedMinimumMatchCount(
-	queryKind: CoverageLexicalQueryKind,
+	resourceHints: CoverageLexicalResourceHints,
 	decisiveBodyCount: number,
 	supportBodyCount: number,
 ): number {
-	if (queryKind === "metadata_only_anchored") {
+	if (
+		resourceHints.metadataBudget >=
+		Math.max(resourceHints.hybridBudget + 0.2, resourceHints.bodyBudget + 0.2)
+	) {
 		return 0;
 	}
 	const totalBodyFamilies = decisiveBodyCount + supportBodyCount;
 	if (totalBodyFamilies === 0) {
 		return 0;
 	}
-	if (queryKind === "anchor_body_hybrid" || queryKind === "bridge_dependent") {
+	if (
+		resourceHints.hybridBudget >= resourceHints.bodyBudget ||
+		resourceHints.bridgeBudget >= resourceHints.bodyBudget
+	) {
 		return 1;
 	}
-	if (queryKind === "memory_relaxed") {
+	if (resourceHints.memoryBudget >= resourceHints.localWitnessBudget) {
 		return Math.max(1, Math.min(totalBodyFamilies, Math.ceil(totalBodyFamilies * 0.5)));
 	}
 	return Math.max(1, Math.min(totalBodyFamilies, Math.ceil(decisiveBodyCount * 0.6)));
@@ -469,6 +702,59 @@ function detectMixedScriptHint(queryTerms: readonly string[]): boolean {
 	return hasHan && hasAscii;
 }
 
+function analyzeShortHanQueryShape(
+	queryText: string,
+	queryTerms: readonly string[],
+): {
+	isPureHanMultiTerm: boolean;
+	isFallbackBigramExpansion: boolean;
+} {
+	const normalized = queryText.trim().normalize("NFKC");
+	const compact = normalized.replace(/\s+/gu, "");
+	if (!/^[\p{Script=Han}]+$/u.test(compact)) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const hanCharCount = compact.match(/\p{Script=Han}/gu)?.length ?? 0;
+	if (hanCharCount < 2 || hanCharCount > 6) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const hanTerms = queryTerms
+		.map((term) => term.trim())
+		.filter((term) => term.length > 0);
+	if (hanTerms.length < 2) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	if (!hanTerms.every((term) => /^[\p{Script=Han}]+$/u.test(term))) {
+		return {
+			isPureHanMultiTerm: false,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const fallbackBigrams = new Set(extractHanBigrams(compact));
+	if (fallbackBigrams.size === 0) {
+		return {
+			isPureHanMultiTerm: true,
+			isFallbackBigramExpansion: false,
+		};
+	}
+	const expandedTerms = hanTerms.filter((term) => term !== compact);
+	return {
+		isPureHanMultiTerm: true,
+		isFallbackBigramExpansion:
+			expandedTerms.length > 0 &&
+			expandedTerms.every((term) => fallbackBigrams.has(term)),
+	};
+}
+
 function computeAnchorPriority(
 	family: CoverageLexicalPlan["families"][number],
 	probes: readonly CoverageLexicalFamilyProbe[],
@@ -476,6 +762,7 @@ function computeAnchorPriority(
 ): number {
 	const probe = probes[family.index];
 	const evidence = familyEvidence.get(family.index);
+	const weightBonus = Math.round(getProbeFamilyWeight(probe) * 10);
 	const metadataBonus = Math.max(0, 8 - Math.min(8, probe?.metadataExactDocCount ?? 0));
 	const dominanceBonus = isMetadataDominantAnchor(family, probes) ? 8 : 0;
 	const basenameBonus = probe?.basenameExactDocCount
@@ -510,6 +797,7 @@ function computeAnchorPriority(
 				: 0;
 	return (
 		computeTailWeight(family.index) +
+		weightBonus +
 		metadataBonus +
 		dominanceBonus +
 		basenameBonus +
@@ -526,18 +814,72 @@ function computeBodyPriority(
 	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>,
 ): number {
 	const probe = probes[family.index];
+	const weightBonus = Math.round(getProbeFamilyWeight(probe) * 10);
 	const rarityBonus = Math.max(0, 8 - Math.min(8, probe?.bodyExactDocCount ?? 0));
 	const evidence = familyEvidence.get(family.index);
 	const bodyBonus =
 		(evidence?.spanKinds.includes("body") ? 4 : 0) -
 		Math.min(4, evidence?.fillerScore ?? 0);
 	const gluePenalty = isPlannerGlueBodyFamily(family, familyEvidence) ? 8 : 0;
-	return computeTailWeight(family.index) + rarityBonus + bodyBonus - gluePenalty;
+	return (
+		computeTailWeight(family.index) +
+		weightBonus +
+		rarityBonus +
+		bodyBonus -
+		gluePenalty
+	);
 }
 
 function computeTailWeight(index: number): number {
 	const position = index + 1;
 	return position * position;
+}
+
+function getProbeFamilyWeight(probe: CoverageLexicalFamilyProbe | undefined): number {
+	return probe?.familyWeight ?? 1;
+}
+
+function getProbeFamilyTier(
+	probe: CoverageLexicalFamilyProbe | undefined,
+): "decisive" | "support" | "weak" {
+	return probe?.familyTier ?? "support";
+}
+
+function sumProbeFamilyWeight(
+	families: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	probes: readonly CoverageLexicalFamilyProbe[],
+): number {
+	return families.reduce(
+		(total, family) => total + getProbeFamilyWeight(probes[family.index]),
+		0,
+	);
+}
+
+function sumMeaningfulProbeFamilyWeight(
+	families: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	probes: readonly CoverageLexicalFamilyProbe[],
+): number {
+	return families.reduce((total, family) => {
+		const probe = probes[family.index];
+		if (getProbeFamilyTier(probe) === "weak") {
+			return total;
+		}
+		return total + getProbeFamilyWeight(probe);
+	}, 0);
+}
+
+function sumProbeFamilyWeightByTier(
+	families: ReadonlyArray<CoverageLexicalPlan["families"][number]>,
+	probes: readonly CoverageLexicalFamilyProbe[],
+	tier: "decisive" | "support",
+): number {
+	return families.reduce((total, family) => {
+		const probe = probes[family.index];
+		if (getProbeFamilyTier(probe) !== tier) {
+			return total;
+		}
+		return total + getProbeFamilyWeight(probe);
+	}, 0);
 }
 
 function isMetadataDominantAnchor(
@@ -600,6 +942,9 @@ function isPlannerAnchorCandidate(
 	if (!evidence || !probe) {
 		return false;
 	}
+	if (getProbeFamilyTier(probe) === "weak") {
+		return false;
+	}
 	const hasAnchorLikeSpan =
 		evidence.spanKinds.includes("raw_shape") ||
 		evidence.spanKinds.includes("title_path") ||
@@ -610,13 +955,13 @@ function isPlannerAnchorCandidate(
 	let qualifies = false;
 	if (evidence.pathBasenameSignal > 0) {
 		qualifies =
-			shortQueryOverlay ||
-			evidence.pathBasenameSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.5));
+			evidence.pathBasenameSignal >=
+			computePlannerAnchorThreshold("path", probe, shortQueryOverlay);
 	}
 	if (!qualifies && evidence.titleSignal > 0) {
 		qualifies =
-			shortQueryOverlay ||
-			evidence.titleSignal >= Math.max(1, Math.floor(probe.bodyExactDocCount * 0.75));
+			evidence.titleSignal >=
+			computePlannerAnchorThreshold("title", probe, shortQueryOverlay);
 	}
 	if (
 		!qualifies &&
@@ -625,11 +970,230 @@ function isPlannerAnchorCandidate(
 		(probe.metadataExactDocCount ?? 0) > 0
 	) {
 		qualifies =
-			shortQueryOverlay ||
 			(probe.metadataExactDocCount ?? 0) >=
-				Math.max(1, Math.floor((probe.bodyExactDocCount ?? 0) * 0.4));
+				computePlannerAnchorThreshold("metadata", probe, shortQueryOverlay);
 	}
 	return qualifies;
+}
+
+function computeShortQueryMetadataEvidenceScore(input: {
+	structuredAnchorMass: number;
+	decisiveAnchorMass: number;
+	metadataDominantAnchorMass: number;
+	hasMetadataHint: boolean;
+	hasPathShapeHint: boolean;
+	hasTitleShapeHint: boolean;
+	titlePathSpanCount: number;
+	metadataIntentSpanCount: number;
+}): number {
+	return (
+		Math.min(1.2, input.structuredAnchorMass * 0.7) +
+		Math.min(1.0, input.decisiveAnchorMass * 0.8) +
+		Math.min(0.8, input.metadataDominantAnchorMass * 0.7) +
+		(input.hasMetadataHint ? 0.55 : 0) +
+		(input.hasPathShapeHint ? 0.45 : 0) +
+		(input.hasTitleShapeHint ? 0.35 : 0) +
+		Math.min(0.5, input.titlePathSpanCount * 0.25) +
+		Math.min(0.7, input.metadataIntentSpanCount * 0.35)
+	);
+}
+
+function computeCoverageLexicalResourceHints(input: {
+	activeFamilies: CoverageLexicalPlan["families"];
+	anchorFamilies: CoverageLexicalPlan["families"];
+	bodyFamilies: CoverageLexicalPlan["families"];
+	coreBodyFamilies: CoverageLexicalPlan["families"];
+	noiseFamilies: CoverageLexicalPlan["families"];
+	familyEvidence: Map<number, CoverageLexicalPlannerFamilyEvidence>;
+	spans: CoverageLexicalQuerySpan[];
+	shortQueryOverlay: boolean;
+	hasMetadataHint: boolean;
+	hasPathShapeHint: boolean;
+	hasTitleShapeHint: boolean;
+	hasMixedScriptHint: boolean;
+	hasPureHanMultiTermQuery: boolean;
+	hasShortHanFallbackBigramExpansion: boolean;
+	probes: readonly CoverageLexicalFamilyProbe[];
+	weightedAnchorMass: number;
+	weightedBodyMass: number;
+	decisiveAnchorMass: number;
+	decisiveBodyMass: number;
+	supportAnchorMass: number;
+	supportBodyMass: number;
+}): CoverageLexicalResourceHints {
+	const {
+		activeFamilies,
+		anchorFamilies,
+		bodyFamilies,
+		coreBodyFamilies,
+		noiseFamilies,
+		familyEvidence,
+		spans,
+		shortQueryOverlay,
+		hasMetadataHint,
+		hasPathShapeHint,
+		hasTitleShapeHint,
+		hasMixedScriptHint,
+		hasPureHanMultiTermQuery,
+		hasShortHanFallbackBigramExpansion,
+		probes,
+		weightedAnchorMass,
+		weightedBodyMass,
+		decisiveAnchorMass,
+		decisiveBodyMass,
+		supportAnchorMass,
+		supportBodyMass,
+	} = input;
+	const softOrNoiseCount =
+		activeFamilies.filter((family) => family.strength === "soft").length +
+		noiseFamilies.length;
+	const metadataDominantAnchorMass = sumProbeFamilyWeight(
+		anchorFamilies.filter((family) => isMetadataDominantAnchor(family, probes)),
+		probes,
+	);
+	const structuredAnchorMass = sumProbeFamilyWeight(
+		activeFamilies.filter((family) =>
+			isPlannerAnchorCandidate(family, familyEvidence, probes, shortQueryOverlay),
+		),
+		probes,
+	);
+	const meaningfulAnchorMass = sumMeaningfulProbeFamilyWeight(anchorFamilies, probes);
+	const meaningfulBodyMass = sumMeaningfulProbeFamilyWeight(bodyFamilies, probes);
+	const titlePathSpanCount = spans.filter((span) => span.kind === "title_path").length;
+	const metadataIntentSpanCount = spans.filter(
+		(span) => span.kind === "metadata_intent",
+	).length;
+	const fillerSpanCount = spans.filter((span) => span.kind === "filler").length;
+	const hasStrongMetadataIntent =
+		hasMetadataHint ||
+		metadataIntentSpanCount > 0 ||
+		activeFamilies.some((family) =>
+			familyEvidence.get(family.index)?.spanKinds.includes("metadata_intent"),
+		);
+	const suppressPureHanShortMetadataOnly =
+		shortQueryOverlay &&
+		hasPureHanMultiTermQuery &&
+		!hasShortHanFallbackBigramExpansion &&
+		bodyFamilies.length > 0 &&
+		!hasStrongMetadataIntent &&
+		!hasPathShapeHint &&
+		!hasTitleShapeHint &&
+		titlePathSpanCount === 0 &&
+		meaningfulBodyMass >= Math.min(0.45, meaningfulAnchorMass * 0.75);
+	const shortQueryMetadataEvidenceScore = shortQueryOverlay
+		? computeShortQueryMetadataEvidenceScore({
+				structuredAnchorMass,
+				decisiveAnchorMass,
+				metadataDominantAnchorMass,
+				hasMetadataHint,
+				hasPathShapeHint,
+				hasTitleShapeHint,
+				titlePathSpanCount,
+				metadataIntentSpanCount,
+			})
+		: 0;
+	const metadataBudget = clampPlannerPrior(
+		Math.min(1.3, shortQueryMetadataEvidenceScore * 0.55) +
+			Math.min(0.45, weightedAnchorMass * 0.16) +
+			Math.min(0.95, structuredAnchorMass * 0.45) +
+			Math.min(0.9, decisiveAnchorMass * 0.55) +
+			Math.min(0.55, supportAnchorMass * 0.25) +
+			Math.min(0.75, metadataDominantAnchorMass * 0.6) +
+			(hasMetadataHint ? 0.24 : 0) +
+			(hasPathShapeHint ? 0.2 : 0) +
+			(hasTitleShapeHint ? 0.14 : 0) +
+			Math.min(0.24, titlePathSpanCount * 0.12) +
+			Math.min(0.3, metadataIntentSpanCount * 0.15) -
+			Math.min(0.8, meaningfulBodyMass * 0.22) -
+			(suppressPureHanShortMetadataOnly ? 0.42 : 0),
+	);
+	const bridgeBudget = clampPlannerPrior(
+		(hasMixedScriptHint ? 0.85 : 0) +
+			Math.min(
+				0.65,
+				sumProbeFamilyWeight(
+					activeFamilies.filter(isBridgeEligibleFamily),
+					probes,
+				) * 0.32,
+			) +
+			Math.min(0.35, structuredAnchorMass * 0.18),
+	);
+	const hybridBudget = clampPlannerPrior(
+		(bodyFamilies.length > 0 && anchorFamilies.length > 0 ? 0.45 : 0) +
+			Math.min(0.35, weightedAnchorMass * 0.12) +
+			Math.min(0.7, Math.min(meaningfulAnchorMass, meaningfulBodyMass) * 0.5) +
+			Math.min(0.35, structuredAnchorMass * 0.18) +
+			Math.min(0.24, decisiveBodyMass * 0.12) -
+			Math.min(0.25, Math.max(0, metadataBudget - 0.9) * 0.25),
+	);
+	const memoryBudget = clampPlannerPrior(
+		(coreBodyFamilies.length >= 2 ? 0.45 : 0) +
+			Math.min(0.7, decisiveBodyMass * 0.28) +
+			Math.min(0.55, supportBodyMass * 0.22) +
+			Math.min(0.4, fillerSpanCount * 0.15) +
+			Math.min(0.45, softOrNoiseCount * 0.12) -
+			Math.min(0.28, meaningfulAnchorMass * 0.12),
+	);
+	const localWitnessBudget = clampPlannerPrior(
+		Math.min(0.95, weightedBodyMass * 0.32) +
+			Math.min(0.9, decisiveBodyMass * 0.4) +
+			Math.min(0.45, supportBodyMass * 0.2) +
+			(meaningfulAnchorMass <= 0 ? 0.28 : 0) +
+			(!hasStrongMetadataIntent ? 0.12 : 0) -
+			Math.min(0.45, structuredAnchorMass * 0.18),
+	);
+	const bodyBudget = clampPlannerPrior(
+		Math.max(localWitnessBudget, memoryBudget * 0.9) +
+			Math.min(0.18, weightedBodyMass * 0.06) -
+			Math.min(0.24, metadataBudget * 0.12),
+	);
+	return {
+		metadataBudget,
+		hybridBudget,
+		bodyBudget,
+		memoryBudget,
+		bridgeBudget,
+		localWitnessBudget,
+	};
+}
+
+function clampPlannerPrior(value: number): number {
+	if (!Number.isFinite(value)) {
+		return 0;
+	}
+	return Math.max(0, Math.min(1.75, value));
+}
+
+function computePlannerAnchorThreshold(
+	channel: "path" | "title" | "metadata",
+	probe: CoverageLexicalFamilyProbe,
+	shortQueryOverlay: boolean,
+): number {
+	const bodyExactDocCount = probe.bodyExactDocCount ?? 0;
+	if (!shortQueryOverlay) {
+		return channel === "path"
+			? Math.max(1, Math.floor(bodyExactDocCount * 0.5))
+			: channel === "title"
+				? Math.max(1, Math.floor(bodyExactDocCount * 0.75))
+				: Math.max(1, Math.floor(bodyExactDocCount * 0.4));
+	}
+	switch (getProbeFamilyTier(probe)) {
+		case "decisive":
+			return channel === "path"
+				? Math.max(1, Math.floor(bodyExactDocCount * 0.35))
+				: channel === "title"
+					? Math.max(1, Math.floor(bodyExactDocCount * 0.5))
+					: Math.max(1, Math.floor(bodyExactDocCount * 0.3));
+		case "support":
+			return channel === "path"
+				? Math.max(1, Math.floor(bodyExactDocCount * 0.75))
+				: channel === "title"
+					? Math.max(1, Math.floor(bodyExactDocCount * 0.9))
+					: Math.max(1, bodyExactDocCount);
+		case "weak":
+		default:
+			return Number.POSITIVE_INFINITY;
+	}
 }
 
 function extractCoverageLexicalQuerySpans(queryText: string): CoverageLexicalQuerySpan[] {
@@ -834,6 +1398,7 @@ function dedupePlannerSpans(
 }
 
 function buildPlanExplain(
+	queryKind: CoverageLexicalQueryKind,
 	spans: readonly CoverageLexicalQuerySpan[],
 	families: readonly CoverageLexicalPlan["families"][number][],
 	hardAnchorFamilies: readonly CoverageLexicalPlan["families"][number][],
@@ -868,6 +1433,7 @@ function buildPlanExplain(
 	pushFamilyReasons("noise", noiseFamilies);
 	pushFamilyReasons("bridge", bridgeFamilies);
 	return {
+		queryKind,
 		spans: [...spans],
 		familyReasons,
 		queryKindReasons: [...queryKindReasons],
