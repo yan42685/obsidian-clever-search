@@ -1622,7 +1622,13 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		request: FileSearchRequest,
 		queryTerms: readonly string[],
 	): Promise<MatchedFile[]> {
-		const runtimeDocuments = this.buildCoverageLexicalV2RuntimeDocumentLexicalStates(queryTerms);
+		const queryCache = createCoverageLexicalEngineQueryCache(
+			innerSetting.search.fuzzyProportion,
+		);
+		const runtimeDocuments = await this.buildCoverageLexicalV2RuntimeDocumentLexicalStates(
+			queryTerms,
+			queryCache,
+		);
 		if (runtimeDocuments.length === 0) {
 			return [];
 		}
@@ -1646,9 +1652,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		return projection.matchedFiles.slice(0, request.maxItemResults);
 	}
 
-	private buildCoverageLexicalV2RuntimeDocumentLexicalStates(
+	private async buildCoverageLexicalV2RuntimeDocumentLexicalStates(
 		queryTerms: readonly string[],
-	): CoverageLexicalV2RuntimeDocumentLexicalState[] {
+		queryCache: CoverageLexicalEngineQueryCache,
+	): Promise<CoverageLexicalV2RuntimeDocumentLexicalState[]> {
 		const uniqueQueryTerms = [...new Set(queryTerms.map((term) => term.trim()).filter((term) => term.length > 0))];
 		const candidateDocIds = new Set<number>();
 		for (const term of uniqueQueryTerms) {
@@ -1659,10 +1666,11 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataFolderPostings.get(term));
 			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataTagPostings.get(term));
 		}
+		await this.prefetchMissingQueryBodyTokens(candidateDocIds, queryCache);
 		const runtimeDocuments = [...candidateDocIds]
 			.sort((left, right) => {
-				const leftPath = this.documentPathById[left] ?? "";
-				const rightPath = this.documentPathById[right] ?? "";
+				const leftPath = this.documentPathById[left] ?? '';
+				const rightPath = this.documentPathById[right] ?? '';
 				return compareCoverageLexicalTerms(leftPath, rightPath) || left - right;
 			})
 			.map<CoverageLexicalV2RuntimeDocumentLexicalState | null>((docId) => {
@@ -1670,6 +1678,10 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				if (!path) {
 					return null;
 				}
+				const bodyTokenSequence = this.getDocumentBodyTokens(
+					docId,
+					queryCache.bodyTokensByDocId,
+				);
 				return {
 					docId,
 					path,
@@ -1682,6 +1694,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						tagTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataTagPostings.get(term)),
 						bodyTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.bodyPostings.get(term)),
 					},
+					bodyTokenSequence: bodyTokenSequence ? [...bodyTokenSequence] : undefined,
 				};
 			});
 		return runtimeDocuments.filter((document): document is CoverageLexicalV2RuntimeDocumentLexicalState => document !== null);
@@ -5531,6 +5544,7 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
+
 
 
 

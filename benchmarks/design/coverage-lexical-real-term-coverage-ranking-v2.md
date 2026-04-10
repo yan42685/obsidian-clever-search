@@ -996,7 +996,8 @@ Preferred lexical order:
   - the independent V2 comparator module exists and is tested
   - an independent V2 ranking-signal builder now converts query analysis plus matched-unit evidence into comparator-ready candidate signals
   - an independent V2 ranking runner now executes query analysis, signal building, comparator ordering, top tie-band selection, and structured explain output end to end
-  - runtime `coverage-lexical` search flow has not yet delegated winner selection to the V2 comparator
+  - the experimental runtime V2 path now projects exact body-local best-window evidence into `primaryUnitProximityScore` without changing the earlier lexical layers
+  - runtime `coverage-lexical` search flow has not yet delegated all default winner selection to the V2 comparator
 
 ## Implementation Plan
 
@@ -1413,6 +1414,7 @@ V2 should be benchmarked directly.
 Default benchmark comparison policy:
 
 - compare `MiniSearch` and V2 by default
+- the automation benchmark now reports `MiniSearch` and `CoverageLexical(V2)` as the default comparison pair
 - do not keep V1 lexical ranking as the default benchmark peer once V2
   benchmarking is in place
 - V1 may still be used as a temporary migration reference when investigating

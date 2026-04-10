@@ -2322,6 +2322,25 @@ async function withCoverageBodyTokenOffloadEnv<T>(
 	}
 }
 
+async function withCoverageLexicalV2RuntimeExperimentalEnv<T>(
+	enabled: boolean,
+	action: () => Promise<T>,
+): Promise<T> {
+	const previous = process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
+	process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL = enabled
+		? "1"
+		: "0";
+	try {
+		return await action();
+	} finally {
+		if (previous === undefined) {
+			delete process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL;
+		} else {
+			process.env.COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL = previous;
+		}
+	}
+}
+
 type CoverageDisplayPruneExperimentConfig = {
 	enabled: boolean;
 	tailRatio: number;
@@ -3881,6 +3900,69 @@ describe("coverage lexical automation benchmark", () => {
 				removeItem: jest.fn(),
 			},
 		};
+		const coverageLexicalV2 = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				withCoverageLexicalV2RuntimeExperimentalEnv(
+					true,
+					async () =>
+						createEngineHarness(
+							CoverageLexicalFileSearchEngine,
+							tokenizer,
+							"coverage-lexical-v2",
+						),
+				),
+		);
+		const coverageV2Result = await withCoverageBodyTokenOffloadEnv(
+			true,
+			async () =>
+				withCoverageLexicalV2RuntimeExperimentalEnv(
+					true,
+					async () =>
+						runBenchmark(
+							"CoverageLexical(V2)",
+							coverageLexicalV2,
+							documents,
+							queryCases,
+							{ includeOffloadDiagnostics },
+						),
+				),
+		);
+		const coverageV2VsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"wins",
+		)
+			? summarizeWins(coverageV2Result.outcomes, miniResult.outcomes)
+			: null;
+		const coverageV2Misses = shouldPrintCoverageLexicalBenchmarkDiagnostic(
+			diagnostics,
+			"misses",
+		)
+			? summarizeMisses(coverageV2Result.outcomes)
+			: null;
+		const v2VsMiniDisagreementDigest =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(
+				diagnostics,
+				"disagreements",
+			)
+				? summarizeDisagreements(
+						coverageV2Result.outcomes,
+						miniResult.outcomes,
+				  )
+				: null;
+
+		if ("reset" in container && typeof (container as any).reset === "function") {
+			(container as any).reset();
+		} else {
+			container.clearInstances();
+		}
+		(global as any).window = {
+			localStorage: {
+				getItem: jest.fn(() => "zh"),
+				setItem: jest.fn(),
+				removeItem: jest.fn(),
+			},
+		};
 
 		const coverageLexicalCore = await withCoverageBodyTokenOffloadEnv(
 			true,
@@ -4138,8 +4220,7 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				[
 					miniResult.summary,
-					coverageCoreResult.summary,
-					coverageDisplayResult.summary,
+					coverageV2Result.summary,
 				].map((summary) => ({
 					name: summary.name,
 					objective: round(summary.objective),
@@ -4200,8 +4281,7 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				[
 					miniResult.summary,
-					coverageCoreResult.summary,
-					coverageDisplayResult.summary,
+					coverageV2Result.summary,
 				].map((summary) => ({
 					name: summary.name,
 					gates: Object.fromEntries(
@@ -4227,100 +4307,30 @@ describe("coverage lexical automation benchmark", () => {
 			JSON.stringify(
 				{
 					primaryNote:
-						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Compare core-vs-pruned separately so coarse soft-gating plus display pruning does not masquerade as core recall loss.",
-					coreVsMiniSearch: {
+						"Use relative ratios as the timing anchor because absolute milliseconds vary with battery and power mode. Default V2 comparisons should anchor on MiniSearch vs the experimental V2 runtime path.",
+					v2VsMiniSearch: {
 						avgMsPerQueryRatio: round(
 							computeRelativeRatio(
-								coverageCoreResult.summary.avgMsPerQuery,
+								coverageV2Result.summary.avgMsPerQuery,
 								miniResult.summary.avgMsPerQuery,
 							) ?? 0,
 						),
 						p50MsRatio: round(
 							computeRelativeRatio(
-								coverageCoreResult.summary.p50Ms,
+								coverageV2Result.summary.p50Ms,
 								miniResult.summary.p50Ms,
 							) ?? 0,
 						),
 						p100MsRatio: round(
 							computeRelativeRatio(
-								coverageCoreResult.summary.p100Ms,
+								coverageV2Result.summary.p100Ms,
 								miniResult.summary.p100Ms,
 							) ?? 0,
 						),
 						estimatedIndexBytesRatio: round(
 							computeRelativeRatio(
-								coverageCoreResult.summary.estimatedIndexBytes,
+								coverageV2Result.summary.estimatedIndexBytes,
 								miniResult.summary.estimatedIndexBytes,
-							) ?? 0,
-						),
-					},
-					prunedVsMiniSearch: {
-						avgMsPerQueryRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.avgMsPerQuery,
-								miniResult.summary.avgMsPerQuery,
-							) ?? 0,
-						),
-						p50MsRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.p50Ms,
-								miniResult.summary.p50Ms,
-							) ?? 0,
-						),
-						p100MsRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.p100Ms,
-								miniResult.summary.p100Ms,
-							) ?? 0,
-						),
-						estimatedIndexBytesRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.estimatedIndexBytes,
-								miniResult.summary.estimatedIndexBytes,
-							) ?? 0,
-						),
-					},
-					prunedVsCore: {
-						objectiveDelta: round(
-							coverageDisplayResult.summary.objective -
-								coverageCoreResult.summary.objective,
-						),
-						top1Delta: round(
-							coverageDisplayResult.summary.top1 -
-								coverageCoreResult.summary.top1,
-						),
-						top3Delta: round(
-							coverageDisplayResult.summary.top3 -
-								coverageCoreResult.summary.top3,
-						),
-						top5Delta: round(
-							coverageDisplayResult.summary.top5 -
-								coverageCoreResult.summary.top5,
-						),
-						zeroRateDelta: round(
-							coverageDisplayResult.summary.zeroRate -
-								coverageCoreResult.summary.zeroRate,
-						),
-						mrrDelta: round(
-							coverageDisplayResult.summary.mrr -
-								coverageCoreResult.summary.mrr,
-						),
-						avgMsPerQueryRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.avgMsPerQuery,
-								coverageCoreResult.summary.avgMsPerQuery,
-							) ?? 0,
-						),
-						p50MsRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.p50Ms,
-								coverageCoreResult.summary.p50Ms,
-							) ?? 0,
-						),
-						p100MsRatio: round(
-							computeRelativeRatio(
-								coverageDisplayResult.summary.p100Ms,
-								coverageCoreResult.summary.p100Ms,
 							) ?? 0,
 						),
 					},
@@ -4335,10 +4345,8 @@ describe("coverage lexical automation benchmark", () => {
 				JSON.stringify(
 					{
 						MiniSearch: mini.getIndexBreakdown?.() ?? null,
-						CoverageLexicalCore:
-							coverageLexicalCore.getIndexBreakdown?.() ?? null,
-						CoverageLexicalPruned:
-							coverageLexicalDisplay.getIndexBreakdown?.() ?? null,
+						CoverageLexicalV2:
+							coverageLexicalV2.getIndexBreakdown?.() ?? null,
 					},
 					null,
 					2,
@@ -4350,80 +4358,7 @@ describe("coverage lexical automation benchmark", () => {
 				"[coverage-lexical-automation-benchmark] coverage-phase-timing",
 				JSON.stringify(
 					{
-						core: summarizePhaseTiming(coverageCoreResult.phaseTiming),
-						pruned: summarizePhaseTiming(coverageDisplayResult.phaseTiming),
-					},
-					null,
-					2,
-				),
-			);
-		}
-		if (
-			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "recall") &&
-			recallContract
-		) {
-			console.log(
-				"[coverage-lexical-automation-benchmark] recall-contract",
-				JSON.stringify(
-					{
-						unionHitRate: round(recallContract.unionHitRate),
-						zeroRate: round(recallContract.zeroRate),
-						queryKindCounts: recallContract.queryKindCounts,
-						queryKindAverageLaneCount: recallContract.queryKindAverageLaneCount,
-						byType: Object.fromEntries(
-							Object.entries(recallContract.byType).map(([type, metric]) => [
-								type,
-								{
-									unionHitRate: round(metric.unionHitRate),
-									zeroRate: round(metric.zeroRate),
-									count: metric.count,
-								},
-							]),
-						),
-						laneGuardrails: summarizeLaneGuardrails(recallContract),
-						relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
-							recallContract,
-						),
-						prefilterDropMisses: recallContract.misses
-							.filter((miss) =>
-								miss.lanes.some(
-									(lane) =>
-										lane.relevantCandidate && !lane.relevantInPrefilter,
-								),
-							)
-							.slice(0, 10),
-						postPrefilterDropMisses: recallContract.misses
-							.filter((miss) =>
-								miss.lanes.some(
-									(lane) =>
-										lane.relevantInPrefilter && !lane.relevantAdmitted,
-								),
-							)
-							.slice(0, 10),
-						laneCandidateHitCounts: recallContract.laneCandidateHitCounts,
-						lanePrefilterHitCounts: recallContract.lanePrefilterHitCounts,
-						laneHitCounts: recallContract.laneHitCounts,
-						misses: recallContract.misses.slice(0, 10),
-					},
-					null,
-					2,
-				),
-			);
-		}
-		if (
-			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "lane-study") &&
-			relaxedHybridStudy
-		) {
-			console.log(
-				"[coverage-lexical-automation-benchmark] relaxed-hybrid-study",
-				JSON.stringify(
-					{
-						queryKindCounts: relaxedHybridStudy.queryKindCounts,
-						queryKindAverageLaneCount:
-							relaxedHybridStudy.queryKindAverageLaneCount,
-						relaxedHybridAnalysis: summarizeRelaxedHybridAnalysis(
-							relaxedHybridStudy,
-						),
+						v2: summarizePhaseTiming(coverageV2Result.phaseTiming),
 					},
 					null,
 					2,
@@ -4432,16 +4367,8 @@ describe("coverage lexical automation benchmark", () => {
 		}
 		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "wins")) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-core-vs-mini",
-				JSON.stringify(coverageCoreVsMini, null, 2),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-display-vs-mini",
-				JSON.stringify(coverageDisplayVsMini, null, 2),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-display-vs-core",
-				JSON.stringify(coverageDisplayVsCore, null, 2),
+				"[coverage-lexical-automation-benchmark] coverage-v2-vs-mini",
+				JSON.stringify(coverageV2VsMini, null, 2),
 			);
 		}
 		if (
@@ -4451,22 +4378,14 @@ describe("coverage lexical automation benchmark", () => {
 			)
 		) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] disagreement-digest-core-vs-mini",
-				JSON.stringify(coreVsMiniDisagreementDigest, null, 2),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] disagreement-digest-display-vs-core",
-				JSON.stringify(displayVsCoreDisagreementDigest, null, 2),
+				"[coverage-lexical-automation-benchmark] disagreement-digest-v2-vs-mini",
+				JSON.stringify(v2VsMiniDisagreementDigest, null, 2),
 			);
 		}
 		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "misses")) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-core-misses",
-				JSON.stringify(coverageCoreMisses, null, 2),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-display-misses",
-				JSON.stringify(coverageDisplayMisses, null, 2),
+				"[coverage-lexical-automation-benchmark] coverage-v2-misses",
+				JSON.stringify(coverageV2Misses, null, 2),
 			);
 			console.log(
 				"[coverage-lexical-automation-benchmark] mini-misses",
@@ -4475,17 +4394,9 @@ describe("coverage lexical automation benchmark", () => {
 		}
 		if (includeOffloadDiagnostics) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] offload-diagnostics-core",
+				"[coverage-lexical-automation-benchmark] offload-diagnostics-v2",
 				JSON.stringify(
-					summarizeOffloadDiagnostics(coverageCoreResult.outcomes),
-					null,
-					2,
-				),
-			);
-			console.log(
-				"[coverage-lexical-automation-benchmark] offload-diagnostics-display",
-				JSON.stringify(
-					summarizeOffloadDiagnostics(coverageDisplayResult.outcomes),
+					summarizeOffloadDiagnostics(coverageV2Result.outcomes),
 					null,
 					2,
 				),
