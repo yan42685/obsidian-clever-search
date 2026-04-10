@@ -2,7 +2,7 @@
 # Coverage Lexical Query-Unit Ranking V2
 
 Date: 2026-04-10
-Status: Draft
+Status: In Progress
 Supersedes: `legacy-coverage-lexical-ranking-intent-realignment-plan.md`
 
 ## Purpose
@@ -1011,6 +1011,26 @@ Preferred lexical order:
 2. weaker two-sided results
 3. one-sided distractors
 
+## Implementation Status
+
+- Phase 1. Query Analysis And Query Unit Model: completed
+  - independent `v2/query-units/` modules now build primary, fallback, and derived query-unit outputs
+  - query analysis now exposes visible surface groups plus `surfaceCoverageShape`
+  - standalone tests now cover Latin-only, Han-only/short-Han, mixed-script, and tokenizer-boundary-mismatch query shapes
+- Phase 2. Ranking Signal Model: completed
+  - independent `v2/ranking/` signal types now encode:
+    - `distinctMatchedPrimaryQueryUnitCount`
+    - `surfaceCoverageShape`
+    - `matchedPrimaryUnitFieldProfile`
+    - `primaryUnitMatchQuality`
+    - `primaryUnitProximityScore`
+  - independent ranking explain output now attributes pairwise decisions to explicit V2 layers
+  - standalone regression tests now cover `AI 省考`, `政治理论`, field-profile ordering, and top tie-band proximity behavior
+- Phase 3. Final Comparator Rewrite: in progress
+  - the independent V2 comparator module exists and is tested
+  - an independent V2 ranking-signal builder now converts query analysis plus matched-unit evidence into comparator-ready candidate signals
+  - runtime `coverage-lexical` search flow has not yet delegated winner selection to the V2 comparator
+
 ## Implementation Plan
 
 ### Public Interfaces And Type-Level Changes
@@ -1385,6 +1405,12 @@ Guidance:
   than by depending on V1 ranking modules
 - V2 should avoid new hard dependencies on V1 index code that would make later
   V1 removal difficult
+- V2 should be implemented as an independent codepath even when it reuses the
+  same storage boundary or storage interaction shape
+- V2 may study or reference V1 index-interaction code as migration material,
+  but the preferred outcome is a V2-owned implementation rather than a V1
+  wrapper
+- reference is allowed; new runtime coupling is not
 
 In short:
 
@@ -1425,3 +1451,7 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
+
+
+
+
