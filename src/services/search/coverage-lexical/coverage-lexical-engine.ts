@@ -1,4 +1,4 @@
-import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
+Ôªøimport { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
 	IndexedDocument,
@@ -99,6 +99,11 @@ import type {
 	CoverageLexicalResourceHints,
 } from "./coverage-lexical-types";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
+import {
+	buildCoverageLexicalV2RuntimeSourceEntries,
+	projectCoverageLexicalV2RuntimeMatchedFiles,
+	type CoverageLexicalV2RuntimeDocumentLexicalState,
+} from "./v2/runtime";
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
 	"COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD";
@@ -115,8 +120,10 @@ const COVERAGE_LEXICAL_COARSE_HYDRATION_REQUIRED_FAMILY_UPPER_BOUND = 0.8;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_SUPPORT_FAMILY_UPPER_BOUND = 0.35;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND = 0.45;
 const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.75;
+const COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL_ENV =
+	"COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL";
 const COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX =
-	/(?:πÿ”⁄|”–πÿ|∂‘”⁄| ≤√¥ «| ≤√¥Ω–|»Á∫Œ|‘ı√¥|Œ™ ≤√¥|“‘º∞|º∞|”Î|∫Õ|µƒ|µÿ|µ√|≤¢«“|≤¢|÷–|¿Ô|…œ|œ¬|Ω´|“™|ª·|¬|ƒÿ)/gu;
+	/(?:ÂÖ≥‰∫é|ÊúâÂÖ≥|ÂØπ‰∫é|‰ªÄ‰πàÊòØ|‰ªÄ‰πàÂè´|Â¶Ç‰Ωï|ÊÄé‰πà|‰∏∫‰ªÄ‰πà|‰ª•Âèä|Âèä|‰∏é|Âíå|ÁöÑ|Âú∞|Âæó|Âπ∂‰∏î|Âπ∂|‰∏≠|Èáå|‰∏ä|‰∏ã|Â∞Ü|Ë¶Å|‰ºö|Âêó|Âë¢)/gu;
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -231,6 +238,25 @@ function compareCoverageLexicalTerms(left: string, right: string): number {
 		return 1;
 	}
 	return 0;
+}
+
+function coverageLexicalPostingHasDocId(
+	posting: readonly number[] | Uint32Array | undefined,
+	docId: number,
+): boolean {
+	return posting?.indexOf(docId) !== -1;
+}
+
+function collectCoverageLexicalPostingDocIds(
+	target: Set<number>,
+	posting: readonly number[] | Uint32Array | undefined,
+): void {
+	if (!posting) {
+		return;
+	}
+	for (const docId of posting) {
+		target.add(docId);
+	}
 }
 
 function createCoverageLexicalDocument(
@@ -1283,6 +1309,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				return [];
 			}
 
+			if (
+				isCoverageLexicalExperimentalV2RuntimeEnabled() &&
+				queryTerms.length > 0
+			) {
+				return await this.searchFilesWithCoverageLexicalV2Runtime(
+					request,
+					queryTerms,
+				);
+			}
+
 			const planningStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 			const familyProbes = this.buildFamilyProbes(queryTerms);
 			const plan = buildCoverageLexicalPlan(
@@ -1580,6 +1616,85 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				this.benchmarkPhaseTiming.queryTotalMs += performance.now() - queryStartedAt;
 			}
 		}
+	}
+
+	private async searchFilesWithCoverageLexicalV2Runtime(
+		request: FileSearchRequest,
+		queryTerms: readonly string[],
+	): Promise<MatchedFile[]> {
+		const runtimeDocuments = this.buildCoverageLexicalV2RuntimeDocumentLexicalStates(queryTerms);
+		if (runtimeDocuments.length === 0) {
+			return [];
+		}
+		const runtimeEntries = buildCoverageLexicalV2RuntimeSourceEntries(
+			queryTerms,
+			runtimeDocuments,
+		);
+		if (runtimeEntries.length === 0) {
+			return [];
+		}
+		const projection = projectCoverageLexicalV2RuntimeMatchedFiles(
+			request.queryText,
+			queryTerms,
+			runtimeEntries,
+			{
+				maxExpensiveCandidates: request.maxItemResults,
+				maxDisplayCandidates: request.maxItemResults,
+				minDisplayCandidates: request.maxItemResults,
+			},
+		);
+		return projection.matchedFiles.slice(0, request.maxItemResults);
+	}
+
+	private buildCoverageLexicalV2RuntimeDocumentLexicalStates(
+		queryTerms: readonly string[],
+	): CoverageLexicalV2RuntimeDocumentLexicalState[] {
+		const uniqueQueryTerms = [...new Set(queryTerms.map((term) => term.trim()).filter((term) => term.length > 0))];
+		const candidateDocIds = new Set<number>();
+		for (const term of uniqueQueryTerms) {
+			collectCoverageLexicalPostingDocIds(candidateDocIds, this.bodyPostings.get(term));
+			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataBasenamePostings.get(term));
+			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataAliasPostings.get(term));
+			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataHeadingPostings.get(term));
+			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataFolderPostings.get(term));
+			collectCoverageLexicalPostingDocIds(candidateDocIds, this.metadataTagPostings.get(term));
+		}
+		const runtimeDocuments = [...candidateDocIds]
+			.sort((left, right) => {
+				const leftPath = this.documentPathById[left] ?? "";
+				const rightPath = this.documentPathById[right] ?? "";
+				return compareCoverageLexicalTerms(leftPath, rightPath) || left - right;
+			})
+			.map<CoverageLexicalV2RuntimeDocumentLexicalState | null>((docId) => {
+				const path = this.documentPathById[docId];
+				if (!path) {
+					return null;
+				}
+				return {
+					docId,
+					path,
+					stableDeterministicKey: path,
+					fieldTerms: {
+						basenameTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataBasenamePostings.get(term)),
+						aliasTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataAliasPostings.get(term)),
+						headingsTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataHeadingPostings.get(term)),
+						folderTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataFolderPostings.get(term)),
+						tagTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.metadataTagPostings.get(term)),
+						bodyTerms: this.collectCoverageLexicalV2RuntimeMatchedQueryTerms(docId, uniqueQueryTerms, (term) => this.bodyPostings.get(term)),
+					},
+				};
+			});
+		return runtimeDocuments.filter((document): document is CoverageLexicalV2RuntimeDocumentLexicalState => document !== null);
+	}
+
+	private collectCoverageLexicalV2RuntimeMatchedQueryTerms(
+		docId: number,
+		queryTerms: readonly string[],
+		resolvePosting: (term: string) => readonly number[] | Uint32Array | undefined,
+	): string[] {
+		return queryTerms.filter((term) =>
+			coverageLexicalPostingHasDocId(resolvePosting(term), docId),
+		);
 	}
 
 	async getDirectSubItems(
@@ -4398,6 +4513,13 @@ function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPrune
 	};
 }
 
+function isCoverageLexicalExperimentalV2RuntimeEnabled(): boolean {
+	return readCoverageLexicalBooleanEnv(
+		COVERAGE_LEXICAL_V2_RUNTIME_EXPERIMENTAL_ENV,
+		false,
+	);
+}
+
 function readCoverageLexicalBooleanEnv(
 	name: string,
 	fallback: boolean,
@@ -5409,4 +5531,6 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
+
+
 
