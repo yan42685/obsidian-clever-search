@@ -271,14 +271,14 @@ Decision: `A`
 - query order is not a core lexical ranking rule
 - it may only weakly influence the tiny tie-band proximity resolver
 
-### Deferred Verification And Fallback
+### Fallback
 
-#### 14. `deferred verification` exit condition
+#### 14. Incomplete-candidate coarse behavior
 
 Decision: `A`
 
-- once primary coverage is confirmed insufficient, the candidate immediately
-  loses deferred-verification eligibility
+- once primary coverage is confirmed insufficient, the candidate is immediately
+  downgraded
 
 #### 15. Bigram fallback role
 
@@ -336,7 +336,7 @@ Decision: locked custom policy
 Decision: `A`
 
 - once fuller primary coverage candidates exist, incomplete candidates are
-  downgraded and can continue only through deferred verification
+  downgraded and no longer receive normal expensive-work priority
 
 #### 21. Display front suppression
 
@@ -393,6 +393,7 @@ Decision: `A`
   old active logic
 - do not wait until all of V2 is complete
 - do not rely on long-lived flag-based coexistence
+
 ## Core Object: Query Units
 
 V2 no longer treats tokenizer output as the ground truth of lexical intent.
@@ -437,7 +438,7 @@ Examples:
 Fallback units may support:
 
 - recall admission
-- coarse-stage deferred verification
+- bounded coarse/source expansion
 - weak lexical coverage hints
 
 Fallback units must **not** be treated as equal to primary units in final
@@ -456,7 +457,6 @@ Examples:
 
 Derived units may support:
 
-- deferred verification
 - late lexical detail checks
 - very small tie-band refinement
 
@@ -475,7 +475,6 @@ alternative main ranking layer.
 Fallback units may be used only for:
 
 - candidate discovery
-- deferred verification
 - weak lexical support when primary segmentation is uncertain
 
 Fallback units must not be used to:
@@ -497,8 +496,8 @@ They are appropriate when:
 Bigram fallback may help:
 
 - recall candidate discovery
-- coarse-stage deferred verification
-- weak support for unresolved coverage
+- bounded coarse candidate expansion
+- weak support for incomplete cheap coverage
 
 But it must not become equivalent to primary units in final lexical ranking.
 
@@ -564,7 +563,7 @@ Fallback sources should therefore have:
 
 - a bounded candidate count
 - a bounded share of union slots
-- a bounded share of deferred-verification slots
+- a bounded share of expensive-verification slots
 
 #### 3. Per-Document Contribution Ceiling
 
@@ -583,7 +582,7 @@ Fallback influence must shrink as the pipeline progresses.
 Intended stage policy:
 
 - recall: fallback may help candidate discovery
-- coarse/hydration: fallback may justify deferred verification
+- coarse/hydration: fallback may influence bounded candidate expansion only
 - final ranking: fallback is not a primary ranking feature
 - display: fallback has no independent justification role
 
@@ -591,12 +590,12 @@ Intended stage policy:
 
 The governing rule is:
 
-> fallback may help discover or verify primary-like coverage, but it must not
-> replace primary coverage in final lexical ranking
+> fallback may help discover primary-like coverage, but it must not replace
+> primary coverage in final lexical ranking
 
 This means:
 
-- fallback can support "keep looking"
+- fallback can support broader candidate discovery
 - fallback cannot justify "this is the lexical winner"
 
 ### Operational Consequence
@@ -605,7 +604,7 @@ If a query-surface unit is not stably represented by tokenizer output, the
 system should:
 
 - preserve a primary-oriented surface interpretation when possible
-- use fallback units to support discovery and deferred verification
+- use fallback units only to support discovery and bounded upstream expansion
 - avoid letting fallback become a second main comparator
 
 This keeps lexical robust without sacrificing purity of final ranking.
@@ -833,53 +832,19 @@ But it must not decide lexical final winner order.
 
 The term `rescue` should be removed from lexical ranking language.
 
-Use:
+V2 also does not preserve a named lexical replacement concept for keeping weak
+or incomplete candidates alive.
 
-- `deferred verification`
-
-instead.
-
-Meaning:
-
-- the candidate is not yet fully verified under current cheap evidence
-- more expensive verification may still clarify whether it truly satisfies the
-  lexical worldview
-
-This is an engineering allowance, not a semantic promotion rule.
+If an implementation later schedules more expensive checks, that should be
+modeled as plain execution scheduling, not as a ranking or worldview concept.
 
 ### No Semantic Required-Term Inference In Lexical Final Ranking
-
 Lexical should not try to infer hidden semantic importance among query units.
 
 If the system needs to decide that one surface unit is conceptually "the real
 intent" and another is not, that decision belongs in hybrid search or another
 semantic layer.
 
-## Deferred Verification
-
-`deferred verification` is the only remaining upstream allowance that replaces
-older rescue language.
-
-It is valid only when the system cannot yet reliably tell whether the candidate
-will satisfy lexical expectations after more expensive verification.
-
-Valid examples:
-
-- unresolved body-window confirmation
-- unresolved phrase confirmation
-- unresolved mixed-script side completion
-- unresolved fallback-supported verification where primary-like surface
-  confirmation is still unclear
-
-Invalid examples:
-
-- promoting a candidate already known to match too few primary query units
-- letting a single strong body hit outrank fuller unit coverage
-- display-layer logic "saving" a result that upstream lexical ranking did not
-  justify
-
-`deferred verification` exists only in recall and coarse stages. It must not
-enter final lexical ranking.
 ## Pipeline Guidance
 
 ### Recall
@@ -893,14 +858,13 @@ Guidance:
 - long-term recall should move to a **source-based** model:
   - candidate sources produce doc-local lexical evidence
   - candidates are merged into doc states
-  - unified deferred-verification logic decides who survives
+  - source and budget policy decide which candidates remain active
 - recall admission should increasingly reason in terms of:
   - primary query-unit coverage
   - surface coverage shape
   - field-aware cheap evidence
-  - deferred verification potential
-- fallback units may help candidate survival
-- derived units may help deferred verification
+- fallback units may help candidate discovery
+- derived units may help late lexical detail checks
 - neither fallback nor derived units should act like final lexical winners
 - lane identity must not remain a semantic ranking concept once migration is
   complete
@@ -913,11 +877,12 @@ Guidance:
 
 - prioritize expensive work for candidates that already satisfy the primary
   lexical worldview
-- incomplete candidates may survive only through deferred verification
+- incomplete candidates should be downgraded once fuller coverage candidates
+  exist
 - strong one-unit spikes should not consume upgrade budget ahead of fuller
   primary-unit coverage
-- fallback units may justify verification work, but not direct final lexical
-  promotion
+- fallback units may broaden upstream candidate discovery, but not direct final
+  lexical promotion
 
 ### Final Ranking
 
@@ -1025,10 +990,12 @@ Preferred lexical order:
     - `primaryUnitMatchQuality`
     - `primaryUnitProximityScore`
   - independent ranking explain output now attributes pairwise decisions to explicit V2 layers
+  - a standalone `v2/explain` payload builder now exposes query analysis, candidate evidence, ranking signals, and pairwise decisions in one structured explain object
   - standalone regression tests now cover `AI 省考`, `政治理论`, field-profile ordering, and top tie-band proximity behavior
 - Phase 3. Final Comparator Rewrite: in progress
   - the independent V2 comparator module exists and is tested
   - an independent V2 ranking-signal builder now converts query analysis plus matched-unit evidence into comparator-ready candidate signals
+  - an independent V2 ranking runner now executes query analysis, signal building, comparator ordering, top tie-band selection, and structured explain output end to end
   - runtime `coverage-lexical` search flow has not yet delegated winner selection to the V2 comparator
 
 ## Implementation Plan
@@ -1078,8 +1045,8 @@ Expected work:
 Constraints:
 
 - primary-unit selection must remain conservative, stable, and explainable
-- fallback units may support discovery and deferred verification, but must not
-  behave like final ranking units
+- fallback units may support discovery and bounded upstream expansion, but must
+  not behave like final ranking units
 - derived units must not count toward core lexical coverage
 - query-side logic should be query-time first; avoid schema/index migration
   unless later measurement proves it necessary
@@ -1175,15 +1142,16 @@ Goal:
 Expected work:
 
 - prioritize fuller primary-unit coverage
-- limit deferred verification to unresolved cases
+- downgrade incomplete candidates once fuller visible coverage candidates exist
 - prevent one-unit spikes from dominating budget
 - make coarse gating consume thin query analysis output rather than planner
   worldview objects
 
 Constraints:
 
-- incomplete coverage can continue only through unresolved verification state
-- fallback units may justify deferred verification, but not direct lexical
+- incomplete coverage must not receive normal expensive-work priority once
+  fuller visible coverage candidates exist
+- fallback units may influence bounded source expansion, but not direct lexical
   promotion
 - fallback budget must obey query/source/doc/stage ceilings
 
@@ -1193,7 +1161,7 @@ Acceptance criteria:
 - benchmark latency does not regress materially
 - tests show:
   - fuller primary-unit coverage gets upgrade priority
-  - incomplete candidates survive only through unresolved state
+  - incomplete candidates are downgraded behind fuller candidates
   - one-unit spikes do not steal budget from fuller candidates
 ### Phase 5. Display Simplification
 
@@ -1228,8 +1196,8 @@ Expected work:
 
 - use temporary source adapters as needed
 - move toward source-based candidate collection plus merged doc-state
-  verification
-- increasingly reason in terms of query units and deferred verification
+  comparison
+- increasingly reason in terms of query units and explicit source evidence
 - avoid semantic promotion for weak coverage
 - remove lane identity as a semantic concept from final recall design
 
@@ -1380,7 +1348,7 @@ In particular:
 - trust primary units in final ranking
 - keep fallback and derived units upstream and subordinate
 - remove evidence mass from lexical final ranking
-- replace all rescue language with deferred verification
+- remove rescue language entirely from lexical ranking and execution design
 - keep lexical pure, explicit, and explainable
 
 
@@ -1451,6 +1419,18 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
