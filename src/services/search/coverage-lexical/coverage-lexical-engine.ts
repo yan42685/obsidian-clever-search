@@ -100,8 +100,8 @@ import type {
 } from "./coverage-lexical-types";
 import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import {
-	searchCoverageLexicalV2Engine,
-} from "../coverage-lexical-v2";
+	searchCoverageLexicalV2WithStorageAdapter,
+} from "./coverage-lexical-v2-storage-adapter";
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
 	"COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD";
@@ -1304,383 +1304,61 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				return [];
 			}
 
-			return await this.searchFilesWithCoverageLexicalV2Runtime(request);
-
-			const queryTerms = buildCoverageLexicalSearchQueryTerms(
-				this.tokenizer,
-				request.queryText,
-			);
-			const charQuery = buildCoverageLexicalCharQuery(request.queryText);
-			if (
-				queryTerms.length === 0 &&
-				charQuery.terms.length === 0 &&
-				charQuery.rawSegments.length === 0
-			) {
-				return [];
-			}
-
-			const planningStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
-			const familyProbes = this.buildFamilyProbes(queryTerms);
-			const plan = buildCoverageLexicalPlan(
-				request.queryText,
-				queryTerms,
-				familyProbes,
-			);
-			const pairSignatures = buildCoverageLexicalPairSignatures(plan.families);
-			const phraseSignatures = [
-				...buildCoverageLexicalPhraseSignatures(plan.families),
-				...buildCoverageLexicalStructuredMetadataSignatures(
-					request.queryText,
-					plan.families,
-				),
-			];
-			if (this.benchmarkPhaseTiming) {
-				this.recordBenchmarkPhaseTiming(
-					"planning",
-					performance.now() - planningStartedAt,
-				);
-			}
-
 			const queryCache = createCoverageLexicalEngineQueryCache(
 				innerSetting.search.fuzzyProportion,
 			);
-			const recallBenchmarkHooks = {
-				recordSubphaseTiming: (
-					_subphase: CoverageLexicalRecallBenchmarkSubphaseName,
-					_elapsedMs: number,
-					_unitCount: number = 1,
-				) => {
-					if (!this.benchmarkPhaseTiming) {
-						return;
-					}
-				},
-				bodyEvidenceWindowFuzzyProportion: queryCache.fuzzyProportion,
-				storeBodyEvidenceTrace: (docId: number, trace: CoverageLexicalBodyEvidenceTrace) =>
-					queryCache.sharedBodyEvidenceTraceById.set(docId, trace),
-				...(this.benchmarkPhaseTiming
-					? {
-							recordSubphaseTiming: (
-								subphase: CoverageLexicalRecallBenchmarkSubphaseName,
-								elapsedMs: number,
-								unitCount: number = 1,
-							) =>
-								this.recordBenchmarkRecallSubphaseTiming(
-									subphase,
-									elapsedMs,
-									unitCount,
-								),
-							recordLaneEvaluateSubphaseTiming: (
-								subphase: CoverageLexicalLaneEvaluateBenchmarkSubphaseName,
-								elapsedMs: number,
-								unitCount: number = 1,
-							) =>
-								this.recordBenchmarkLaneEvaluateSubphaseTiming(
-									subphase,
-									elapsedMs,
-									unitCount,
-								),
-					  }
-					: {}),
-			};
-			const recallStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
-			const candidates = collectCoverageLexicalCandidateStatesByDocId(
-				{
-					bodyPostings: this.bodyPostings,
-					documentBodyHanSegmentsById: this.documentBodyHanSegmentsById,
-					metadataAliasCharPostings: this.metadataAliasCharPostings,
-					metadataAliasPhrasePostings: this.metadataAliasPhrasePostings,
-					metadataAliasPostings: this.metadataAliasPostings,
-					metadataBasenameCharPostings: this.metadataBasenameCharPostings,
-					metadataBasenamePhrasePostings: this.metadataBasenamePhrasePostings,
-					metadataBasenamePostings: this.metadataBasenamePostings,
-					metadataFolderCharPostings: this.metadataFolderCharPostings,
-					metadataFolderPhrasePostings: this.metadataFolderPhrasePostings,
-					metadataFolderPostings: this.metadataFolderPostings,
-					metadataHeadingPhrasePostings: this.metadataHeadingPhrasePostings,
-					metadataHeadingPostings: this.metadataHeadingPostings,
-					metadataTagCharPostings: this.metadataTagCharPostings,
-					metadataTagFullPostings: this.metadataTagFullPostings,
-					metadataTagPhrasePostings: this.metadataTagPhrasePostings,
-					metadataTagPostings: this.metadataTagPostings,
-					sortedLexicon:
-					request.isPrefixMatch || request.isFuzzy
-						? this.getSortedLexicon()
-						: [],
-					documentIdByPath: this.documentIdByPath,
-					documentPathById: this.documentPathById,
-					getDocumentBodyTokens: (
-						docId: number,
-						options?: {
-							allowColdLoad?: boolean;
-						},
-					) =>
-						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId, {
-							allowColdLoad: options?.allowColdLoad ?? false,
-						}),
-					allowPassageSignalInRecall:
-						!this.shouldExperimentallyOffloadResidentBodyTokens(),
-					getDocumentMetadataFieldText: (
-						docId: number,
-						field: CoverageLexicalMetadataField,
-					) => this.getDocumentMetadataFieldText(docId, field),
-					documentTagValuesById: this.documentTagValuesById,
-				},
-				plan,
-				phraseSignatures,
+			return await searchCoverageLexicalV2WithStorageAdapter({
 				request,
-				charQuery,
-				recallBenchmarkHooks,
-			);
-			if (this.benchmarkPhaseTiming) {
-				this.recordBenchmarkPhaseTiming(
-					"recall",
-					performance.now() - recallStartedAt,
-					candidates.size,
-				);
-			}
-			if (shouldLogCoverageLexicalHanDebug(request.queryText, charQuery)) {
-				logger.debug("[coverage-lexical][han-debug] query", {
-					queryText: request.queryText,
-					queryTerms,
-					hanSegments: charQuery.hanSegments,
-					charTerms: charQuery.terms,
-					queryKind: plan.explain.queryKind,
-					candidateCount: candidates.size,
-				});
-			}
-			if (candidates.size === 0) {
-				return [];
-			}
-			const shouldStageOffloadedBodyTokenHydration =
-				this.shouldExperimentallyOffloadResidentBodyTokens();
-			let cheapCoarseRanked: CoverageLexicalDocRankableResult[] = [];
-			let coarseHydrationDocIds: ReadonlySet<number> = new Set<number>();
-			let coarseResults: CoverageLexicalDocRankableResult[];
-			if (shouldStageOffloadedBodyTokenHydration) {
-				const cheapCoarseResults = Array.from(candidates.entries())
-					.map(([docId, state]) =>
-						this.createRankableResult(
-							docId,
-							queryTerms,
-							plan,
-							state,
-							false,
-							phraseSignatures,
-							pairSignatures,
-							charQuery,
-							queryCache,
-							"cheap",
-						),
-					)
-					.filter(
-						(result): result is CoverageLexicalDocRankableResult =>
-							result !== null,
-					);
-				cheapCoarseRanked = this.sortCoarseResults(
-					cheapCoarseResults,
-					plan,
-				);
-				coarseHydrationDocIds = this.computeCoarseHydrationDocIds(
-					cheapCoarseRanked,
-					candidates,
-					plan,
-					request.maxItemResults,
-				);
-				await this.prefetchMissingQueryBodyTokens(
-					coarseHydrationDocIds,
-					queryCache,
-				);
-				coarseResults = Array.from(candidates.entries())
-					.map(([docId, state]) =>
-						this.createRankableResult(
-							docId,
-							queryTerms,
-							plan,
-							state,
-							false,
-							phraseSignatures,
-							pairSignatures,
-							charQuery,
-							queryCache,
-							coarseHydrationDocIds.has(docId) ? "full" : "cheap",
-						),
-					)
-					.filter(
-						(result): result is CoverageLexicalDocRankableResult =>
-							result !== null,
-					);
-			} else {
-				await this.prefetchMissingQueryBodyTokens(candidates.keys(), queryCache);
-				coarseResults = Array.from(candidates.entries())
-					.map(([docId, state]) =>
-						this.createRankableResult(
-							docId,
-							queryTerms,
-							plan,
-							state,
-							false,
-							phraseSignatures,
-							pairSignatures,
-							charQuery,
-							queryCache,
-							"full",
-						),
-					)
-					.filter(
-						(result): result is CoverageLexicalDocRankableResult =>
-							result !== null,
-					);
-			}
-			const coarseResultByDocId = new Map(
-				coarseResults.map((result) => [result.docId, result] as const),
-			);
-			const coarseSortStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
-			const coarseRanked = this.sortCoarseResults(coarseResults, plan);
-			if (this.benchmarkPhaseTiming) {
-				this.recordBenchmarkPhaseTiming(
-					"coarseSort",
-					performance.now() - coarseSortStartedAt,
-					coarseRanked.length,
-				);
-			}
-			const localWindowDocIds = computeLocalWindowRerankDocIds(
-				coarseRanked,
-				plan,
-				request.maxItemResults,
-			);
-			if (shouldStageOffloadedBodyTokenHydration) {
-				await this.prefetchMissingQueryBodyTokens(localWindowDocIds, queryCache);
-			}
-			const rerankedResults: CoverageLexicalDocRankableResult[] = [];
-			for (const [docId, state] of candidates.entries()) {
-				if (!localWindowDocIds.has(docId)) {
-					const coarseResult = coarseResultByDocId.get(docId);
-					if (coarseResult != null) {
-						const ensuredCoarseResult: CoverageLexicalDocRankableResult =
-							coarseResult!;
-						rerankedResults.push(ensuredCoarseResult);
-					}
-					continue;
-				}
-				const rerankedResult = this.createRankableResult(
-					docId,
-					queryTerms,
-					plan,
-					state,
-					true,
-						phraseSignatures,
-						pairSignatures,
-						charQuery,
-						queryCache,
-						"full",
-					);
-				if (rerankedResult != null) {
-					const ensuredRerankedResult: CoverageLexicalDocRankableResult =
-						rerankedResult!;
-					rerankedResults.push(ensuredRerankedResult);
-				}
-			}
-			const finalRankStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
-			const ranked = rankCoverageLexicalDocResults(rerankedResults, plan);
-			const displayPruned = pruneWeakCoverageLexicalDisplayResults(
-				ranked,
-				resolveCoverageLexicalDisplayPruneConfig(),
-			);
-			const finalResults = displayPruned.slice(0, request.maxItemResults);
-			if (shouldCaptureCoverageLexicalBenchmarkOffloadDiagnostics()) {
-				this.lastBenchmarkOffloadSearchDebug =
-					buildCoverageLexicalBenchmarkOffloadSearchDebug({
-						queryText: request.queryText,
-						offloadEnabled: isCoverageLexicalExperimentalBodyTokenOffloadEnabled(),
-						stagedHydration: shouldStageOffloadedBodyTokenHydration,
-						candidates,
-						cheapCoarseRanked,
-						coarseHydrationDocIds,
-						localWindowDocIds,
-						finalRanked: ranked,
-						returnedRanked: finalResults,
-						documentPathById: this.documentPathById,
-						hasResidentDocumentBodyTokens: (docId) =>
-							this.hasResidentDocumentBodyTokens(docId),
-					});
-			}
-			if (this.benchmarkPhaseTiming) {
-				this.recordBenchmarkPhaseTiming(
-					"finalRank",
-					performance.now() - finalRankStartedAt,
-					rerankedResults.length,
-				);
-			}
-			return finalResults.map((result) =>
-				projectDocRankableResult(result, this.documentPathById),
-			);
+				fuzzyProportion: queryCache.fuzzyProportion,
+				tokenizeQueryText: (queryText) =>
+					tokenizeCoverageLexicalV2QueryText(this.tokenizer, queryText),
+				storageBindings: {
+					getDocumentRecord: (docId) => {
+						const path = this.documentPathById[docId];
+						const document = this.documentById[docId];
+						if (!path || !document) {
+							return null;
+						}
+						return {
+							path,
+							stableDeterministicKey: path,
+							basenameText: document.basenameText,
+							aliasesText: document.aliasesText,
+							headingsText: document.headingsText,
+						};
+					},
+					getPostingMatches: (field, term) => {
+						switch (field) {
+							case "body":
+								return this.bodyPostings.get(term);
+							case "basename":
+								return this.metadataBasenamePostings.get(term);
+							case "aliases":
+								return this.metadataAliasPostings.get(term);
+							case "headings":
+								return this.metadataHeadingPostings.get(term);
+							case "folder":
+								return this.metadataFolderPostings.get(term);
+							case "tag":
+								return this.metadataTagPostings.get(term);
+						}
+					},
+					getSortedLexicon: () => this.getSortedLexicon(),
+					getBodyTokenSequence: (docId) =>
+						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId),
+					prefetchBodyTokenSequences: async (docIds) => {
+						await this.prefetchMissingQueryBodyTokens(docIds, queryCache);
+					},
+					tokenizeText: (text) =>
+						tokenizeCoverageLexicalDocumentText(this.tokenizer, text),
+				},
+			});
 		} finally {
 			if (this.benchmarkPhaseTiming) {
 				this.benchmarkPhaseTiming.queryCount += 1;
 				this.benchmarkPhaseTiming.queryTotalMs += performance.now() - queryStartedAt;
 			}
 		}
-	}
-
-	private async searchFilesWithCoverageLexicalV2Runtime(
-		request: FileSearchRequest,
-	): Promise<MatchedFile[]> {
-		const queryCache = createCoverageLexicalEngineQueryCache(
-			innerSetting.search.fuzzyProportion,
-		);
-		const result = await searchCoverageLexicalV2Engine({
-			queryText: request.queryText,
-			isPrefixMatch: request.isPrefixMatch,
-			isFuzzy: request.isFuzzy,
-			maxItemResults: request.maxItemResults,
-			fuzzyProportion: queryCache.fuzzyProportion,
-			tokenizeQueryText: (queryText) =>
-				tokenizeCoverageLexicalV2QueryText(this.tokenizer, queryText),
-			storageReader: {
-				getDocumentRecord: (docId) => {
-					const path = this.documentPathById[docId];
-					const document = this.documentById[docId];
-					if (!path || !document) {
-						return null;
-					}
-					return {
-						path,
-						stableDeterministicKey: path,
-						basenameText: document.basenameText,
-						aliasesText: document.aliasesText,
-						headingsText: document.headingsText,
-					};
-				},
-				getPostingMatches: (field, term) => {
-					switch (field) {
-						case "body":
-							return this.bodyPostings.get(term);
-						case "basename":
-							return this.metadataBasenamePostings.get(term);
-						case "aliases":
-							return this.metadataAliasPostings.get(term);
-						case "headings":
-							return this.metadataHeadingPostings.get(term);
-						case "folder":
-							return this.metadataFolderPostings.get(term);
-						case "tag":
-							return this.metadataTagPostings.get(term);
-					}
-				},
-				getSortedLexicon: () => this.getSortedLexicon(),
-				getBodyTokenSequence: (docId) =>
-					this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId),
-				prefetchBodyTokenSequences: async (docIds) => {
-					await this.prefetchMissingQueryBodyTokens(docIds, queryCache);
-				},
-				tokenizeText: (text) =>
-					tokenizeCoverageLexicalDocumentText(this.tokenizer, text),
-			},
-		});
-		if (result.matchedFiles.length === 0) {
-			return [];
-		}
-		return result.matchedFiles.slice(0, request.maxItemResults);
 	}
 
 	async getDirectSubItems(

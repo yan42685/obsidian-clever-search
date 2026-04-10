@@ -1200,6 +1200,8 @@ Acceptance criteria:
 Goal:
 
 - make recall compatible with V2 without a big-bang rewrite
+- keep V1 available as a comparison/debug reference while V2 recall behavior is
+  still being tightened
 
 Expected work:
 
@@ -1209,11 +1211,15 @@ Expected work:
 - increasingly reason in terms of query units and explicit source evidence
 - avoid semantic promotion for weak coverage
 - remove lane identity as a semantic concept from final recall design
+- prefer improving V2 correctness and real-query behavior over deleting old
+  reference code early
 
 Non-goals for this phase:
 
 - no full lane-model rewrite up front
 - no architecture-purity work that increases code volume without visible gain
+- no premature deletion of V1 reference code while V2 still needs comparison
+  and stabilization help
 
 Acceptance criteria:
 
@@ -1226,6 +1232,8 @@ Acceptance criteria:
 Goal:
 
 - prevent permanent dual-worldview coexistence
+- start old-code removal only after V2 behavior is stable enough that V1 no
+  longer adds meaningful comparison value
 
 Expected work:
 
@@ -1235,6 +1243,16 @@ Expected work:
 - remove stale helpers once no active call path remains
 - update active design-doc progress/state immediately when a phase is truly
   completed
+
+Phase-order note:
+
+- Phase 7 should trail V2 stabilization work rather than compete with it
+- while V2 is still being refined, V1 may remain in-tree as reference material
+  even if it is no longer the active runtime path
+- the priority order is:
+  - keep the active path on independent V2
+  - improve V2 against recall suites, real-query regressions, and benchmarks
+  - remove V1 code only after the comparison value has materially dropped
 
 Explicitly disallowed leftovers:
 
@@ -1360,6 +1378,13 @@ In particular:
 - remove rescue language entirely from lexical ranking and execution design
 - keep lexical pure, explicit, and explainable
 
+Implementation priority right now:
+
+- keep V1 in-tree as a reference baseline for comparison, debugging, and
+  regression investigation
+- continue improving the independent V2 runtime and recall path first
+- delay broad V1 deletion until V2 quality and stability are clearly settled
+
 
 ## Additional Migration Boundary Notes
 
@@ -1414,6 +1439,10 @@ This means:
 - do not keep old and new active logic for the same responsibility indefinitely
 - but do keep V1 code available as reference material until V2 stability is
   proven
+- when there is a tradeoff between early cleanup and faster V2 iteration,
+  prefer keeping V1 as reference and advancing V2
+- Phase 7 cleanup should begin only after V2 has enough real-query and
+  benchmark stability that V1 is no longer pulling its weight as a reference
 
 ### Benchmark Default Comparison Policy
 

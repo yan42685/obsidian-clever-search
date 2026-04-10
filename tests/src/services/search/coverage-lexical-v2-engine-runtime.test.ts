@@ -188,7 +188,6 @@ test("searchFiles keeps using the independent v2 runtime path without configurat
 		};
 
 		const engine = new CoverageLexicalFileSearchEngine();
-		const v2Spy = jest.spyOn(engine as any, "searchFilesWithCoverageLexicalV2Runtime");
 		await engine.addDocuments([
 			{
 				path: "notes/ai-design.md",
@@ -198,13 +197,16 @@ test("searchFiles keeps using the independent v2 runtime path without configurat
 			},
 		]);
 
-		await engine.searchFiles({
+		const results = await engine.searchFiles({
 			queryText: "ai exam",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 5,
 		});
 
-		expect(v2Spy).toHaveBeenCalledTimes(1);
+		expect(results.map((result) => result.path)).toEqual([
+			"notes/ai-design.md",
+		]);
+		expect(results[0]?.matchedTerms).toEqual(["ai", "exam"]);
 	});
 });
