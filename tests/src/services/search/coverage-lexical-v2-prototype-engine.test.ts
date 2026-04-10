@@ -6,7 +6,7 @@ import {
 } from "src/services/search/coverage-lexical/v2/ranking";
 
 describe("coverage lexical v2 prototype engine", () => {
-	test("runs source candidates through coarse and final ranking without V1 coupling", () => {
+	test("runs source candidates through coarse, final ranking, and display without V1 coupling", () => {
 		const result = runCoverageLexicalV2PrototypeSearch("AI 省考", ["ai", "省考"], [
 			{
 				candidateId: "metadata-plus-body",
@@ -90,7 +90,7 @@ describe("coverage lexical v2 prototype engine", () => {
 					},
 				],
 			},
-		], { maxExpensiveCandidates: 2 });
+		], { maxExpensiveCandidates: 2, maxDisplayCandidates: 2 });
 
 		expect(result.coarse.rankedCandidates.map((candidate) => candidate.mergedCandidate.candidateId)).toEqual([
 			"metadata-plus-body",
@@ -98,6 +98,11 @@ describe("coverage lexical v2 prototype engine", () => {
 			"partial-body",
 		]);
 		expect(result.finalRanking.rankedCandidates.map((candidate) => candidate.evidence.candidateId)).toEqual([
+			"metadata-plus-body",
+			"body-only-two-unit",
+			"partial-body",
+		]);
+		expect(result.display.visibleCandidates.map((candidate) => candidate.evidence.candidateId)).toEqual([
 			"metadata-plus-body",
 			"body-only-two-unit",
 			"partial-body",
