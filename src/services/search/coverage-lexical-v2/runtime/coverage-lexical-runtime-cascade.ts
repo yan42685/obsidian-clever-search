@@ -22,14 +22,14 @@ import type {
 	CoverageLexicalV2RuntimeDocumentRecord,
 	CoverageLexicalV2RuntimePostingField,
 	CoverageLexicalV2RuntimeStorageReader,
-} from "./coverage-lexical-runtime-document-builder";
+} from "./coverage-lexical-runtime-types";
 import {
 	buildCoverageLexicalV2RuntimeBestWindowForDocument,
 	buildCoverageLexicalV2RuntimeMatchedPrimaryUnits,
 	type CoverageLexicalV2RuntimeDocumentLexicalState,
 	type CoverageLexicalV2RuntimeFieldTerms,
 	type CoverageLexicalV2RuntimePrimaryUnitDefinition,
-} from "./coverage-lexical-runtime-source-builder";
+} from "./coverage-lexical-runtime-evidence";
 import {
 	compareCoverageLexicalV2MatchQuality,
 	getCoverageLexicalV2RuntimeMatchQuality,

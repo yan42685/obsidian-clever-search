@@ -1,11 +1,9 @@
 import type {
+	CoverageLexicalV2BestWindowEvidence,
 	CoverageLexicalV2MatchField,
 	CoverageLexicalV2MatchQualityKind,
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
 } from "../ranking";
-import type {
-	CoverageLexicalV2RuntimeSourceEntry,
-} from "./coverage-lexical-runtime-adapter";
 import {
 	compareCoverageLexicalV2MatchQuality,
 	getCoverageLexicalV2RuntimeMatchQuality,
@@ -73,53 +71,6 @@ const COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELD_PRIORITY: Record<
 	body: 3,
 };
 
-export function buildCoverageLexicalV2RuntimeSourceEntries(
-	queryTerms: readonly string[],
-	documents: readonly CoverageLexicalV2RuntimeDocumentLexicalState[],
-	options: CoverageLexicalV2RuntimeMatchOptions = {},
-): CoverageLexicalV2RuntimeSourceEntry[] {
-	const primaryUnits = queryTerms
-		.map((term) => term.trim().toLowerCase())
-		.filter((term) => term.length > 0)
-		.map<CoverageLexicalV2RuntimePrimaryUnitDefinition>((term, index) => ({
-			normalizedText: term,
-			surfaceGroupIndex: index,
-			surfaceKind: classifySurfaceKind(term),
-		}));
-	return buildCoverageLexicalV2RuntimeSourceEntriesForPrimaryUnits(
-		primaryUnits,
-		documents,
-		options,
-	);
-}
-
-export function buildCoverageLexicalV2RuntimeSourceEntriesForPrimaryUnits(
-	primaryUnits: readonly CoverageLexicalV2RuntimePrimaryUnitDefinition[],
-	documents: readonly CoverageLexicalV2RuntimeDocumentLexicalState[],
-	options: CoverageLexicalV2RuntimeMatchOptions = {},
-): CoverageLexicalV2RuntimeSourceEntry[] {
-	const sourceEntries: CoverageLexicalV2RuntimeSourceEntry[] = [];
-	for (const document of documents) {
-		const matchedPrimaryUnits = buildCoverageLexicalV2RuntimeMatchedPrimaryUnits(
-			primaryUnits,
-			document.fieldTerms,
-			options,
-		);
-		if (matchedPrimaryUnits.length === 0) {
-			continue;
-		}
-		sourceEntries.push({
-			docId: document.docId,
-			path: document.path,
-			stableDeterministicKey: document.stableDeterministicKey ?? document.path,
-			sourceKind: matchedPrimaryUnits.some((unit) => unit.strongestField !== "body") ? "metadata" : "body",
-			matchedPrimaryUnits,
-			bestWindow: buildCoverageLexicalV2RuntimeBestWindowForDocument(matchedPrimaryUnits, document),
-		});
-	}
-	return sourceEntries;
-}
-
 export function buildCoverageLexicalV2RuntimeMatchedPrimaryUnits(
 	primaryUnits: readonly CoverageLexicalV2RuntimePrimaryUnitDefinition[],
 	fieldTerms: CoverageLexicalV2RuntimeFieldTerms,
@@ -154,7 +105,7 @@ export function buildCoverageLexicalV2RuntimeMatchedPrimaryUnits(
 export function buildCoverageLexicalV2RuntimeBestWindowForDocument(
 	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
 	document: CoverageLexicalV2RuntimeDocumentLexicalState,
-): CoverageLexicalV2RuntimeSourceEntry["bestWindow"] {
+): CoverageLexicalV2BestWindowEvidence | null {
 	let bestWindow: CoverageLexicalV2RuntimeResolvedBestWindow | null = null;
 	for (const field of COVERAGE_LEXICAL_V2_RUNTIME_LOCAL_WINDOW_FIELDS) {
 		const candidateWindow = buildCoverageLexicalV2RuntimeFieldBestWindow(
@@ -188,10 +139,6 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 	if (relevantUnits.length === 0) {
 		return null;
 	}
-	const relevantUnitByKey = new Map<string, CoverageLexicalV2MatchedPrimaryUnitEvidence>();
-	for (const unit of relevantUnits) {
-		relevantUnitByKey.set(createCoverageLexicalV2RuntimeUnitKey(unit.surfaceGroupIndex, unit.normalizedText), unit);
-	}
 	const normalizedTokens = normalizeTerms(tokenSequence);
 	const occurrences: Array<{
 		unitKey: string;
@@ -204,12 +151,11 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 			if (token !== relevantUnit.normalizedText) {
 				continue;
 			}
-			const unitKey = createCoverageLexicalV2RuntimeUnitKey(
-				relevantUnit.surfaceGroupIndex,
-				relevantUnit.normalizedText,
-			);
 			occurrences.push({
-				unitKey,
+				unitKey: createCoverageLexicalV2RuntimeUnitKey(
+					relevantUnit.surfaceGroupIndex,
+					relevantUnit.normalizedText,
+				),
 				groupIndex: relevantUnit.surfaceGroupIndex,
 				position,
 			});
@@ -218,14 +164,18 @@ function buildCoverageLexicalV2RuntimeFieldBestWindow(
 	if (occurrences.length === 0) {
 		return null;
 	}
-	const requiredUnitKeys = new Set(relevantUnitByKey.keys());
+	const requiredUnitKeys = new Set(
+		relevantUnits.map((unit) =>
+			createCoverageLexicalV2RuntimeUnitKey(unit.surfaceGroupIndex, unit.normalizedText),
+		),
+	);
 	let bestWindow:
 		| {
 				start: number;
 				end: number;
 				matchedUnitKeys: string[];
 				groupIndices: number[];
-			  }
+		  }
 		| null = null;
 	const windowCounts = new Map<string, number>();
 	let distinctUnitCount = 0;
@@ -482,16 +432,4 @@ function createCoverageLexicalV2RuntimeUnitKey(
 	normalizedText: string,
 ): string {
 	return String(surfaceGroupIndex) + ":" + normalizedText;
-}
-
-function classifySurfaceKind(term: string): "latin" | "han" | "mixed" {
-	const hasLatin = /[a-z0-9]/i.test(term);
-	const hasHan = /\p{Script=Han}/u.test(term);
-	if (hasLatin && hasHan) {
-		return "mixed";
-	}
-	if (hasHan) {
-		return "han";
-	}
-	return "latin";
 }

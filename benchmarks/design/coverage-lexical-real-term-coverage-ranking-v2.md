@@ -1064,9 +1064,9 @@ Current validation snapshot:
   - top5: `1.000` vs `0.500`
   - zeroRate: `0.000` vs `0.500`
 - latest relative anchor remains in the expected range:
-  - avg query latency ratio: `2.603x`
-  - p50 ratio: `2.580x`
-  - p100 ratio: `2.265x`
+  - avg query latency ratio: `2.648x`
+  - p50 ratio: `2.562x`
+  - p100 ratio: `2.718x`
   - estimated index bytes ratio: `1.265x`
 
 ## Implementation Plan
@@ -1368,6 +1368,9 @@ Current implementation note:
 
 - the active V2 runtime now uses a cascade candidate-state path under
   `coverage-lexical-v2/runtime/`
+- the previous V2 one-shot runtime/prototype/coarse path has been removed from
+  the active V2 tree; shared runtime evidence helpers now live in active
+  runtime-oriented modules rather than legacy orchestration files
 - exact candidate sourcing is exhaustive
 - layer-1 currently uses Latin `exact/prefix`, Han `exact`, plus fuzzy salvage
   when normal coverage is zero
