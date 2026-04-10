@@ -1033,9 +1033,10 @@ Implemented with important caveats:
   layers tie, but the score is still computed more broadly than the strict
   "top two only" target wording
 - item 19 (recall target shape):
-  the active independent V2 runtime already uses source-based candidate
-  collection, but the legacy lane-oriented recall module still remains in-tree
-  as reference material and Phase 6 cleanup is not complete
+  the active independent V2 runtime now uses a layered source-based cascade
+  rather than a legacy lane-shaped recall path; the remaining gap is to keep
+  tightening candidate-sourcing budgets, fallback boundaries, and V2-only test
+  contracts around that cascade
 - item 26 (old-code deletion discipline):
   active runtime flags and old active comparator/display paths have been
   removed, but legacy V1 reference code is intentionally retained for ongoing
@@ -1044,23 +1045,28 @@ Implemented with important caveats:
 Still not fully realized:
 
 - item 18 (fallback ceilings):
-  the active V2 runtime avoids fallback-driven final ranking, but the full
-  four-ceiling fallback policy is not yet expressed as a dedicated,
-  end-to-end fallback subsystem in the active path
+  the active V2 runtime now enforces bounded fallback discovery and stage
+  separation, but the full four-ceiling policy still needs more explicit
+  per-document and explain/debug surfacing
+- Phase 6 layered narrowing:
+  the active runtime now has layer-1 frontier planning plus late verification,
+  but finer unresolved-bucket re-entry across every cheap layer is still draft
+  territory rather than a fully closed implementation
 
 Current validation snapshot:
 
 - automation benchmark continues to compare `MiniSearch` vs
   `CoverageLexical(V2)` by default
 - latest benchmark run keeps V2 ahead on quality:
-  - objective: `0.785` vs `0.468`
-  - top1: `0.697` vs `0.444`
-  - top3: `0.864` vs `0.495`
-  - zeroRate: `0.056` vs `0.500`
+  - objective: `0.863` vs `0.468`
+  - top1: `0.778` vs `0.444`
+  - top3: `0.939` vs `0.495`
+  - top5: `1.000` vs `0.500`
+  - zeroRate: `0.000` vs `0.500`
 - latest relative anchor remains in the expected range:
-  - avg query latency ratio: `2.528x`
-  - p50 ratio: `2.448x`
-  - p100 ratio: `2.846x`
+  - avg query latency ratio: `2.603x`
+  - p50 ratio: `2.580x`
+  - p100 ratio: `2.265x`
   - estimated index bytes ratio: `1.265x`
 
 ## Implementation Plan
@@ -1250,37 +1256,124 @@ Acceptance criteria:
   - absence of rescue behavior
   - top-front results fully explainable from ranking output alone
 
-### Phase 6. Recall Narrowing And Lane Retirement
+### Phase 6. Candidate Sourcing Consolidation
 
 Goal:
 
-- make recall compatible with V2 without a big-bang rewrite
-- keep V1 available as a comparison/debug reference while V2 recall behavior is
+- let the independent V2 runtime own lexical candidate sourcing directly
+- stop treating legacy V1 recall/lane identity as the target architecture
+- keep V1 available only as reference material while V2 candidate sourcing is
   still being tightened
 
 Expected work:
 
-- use temporary source adapters as needed
-- move toward source-based candidate collection plus merged doc-state
-  comparison
+- consolidate active candidate collection inside the independent
+  `coverage-lexical-v2/` runtime path
+- define explicit source responsibilities for:
+  - metadata exact candidate sourcing
+  - bounded Latin prefix/fuzzy expansion
+  - body-token hydration only where needed
+  - bounded fallback support only when it materially helps lexical discovery
 - increasingly reason in terms of query units and explicit source evidence
+  rather than lane identity
 - avoid semantic promotion for weak coverage
-- remove lane identity as a semantic concept from final recall design
 - prefer improving V2 correctness and real-query behavior over deleting old
   reference code early
 
 Non-goals for this phase:
 
-- no full lane-model rewrite up front
+- no porting of V1 lane worldview into V2 as a target design
+- no full rewrite of legacy V1 recall internals merely to preserve old
+  terminology
 - no architecture-purity work that increases code volume without visible gain
 - no premature deletion of V1 reference code while V2 still needs comparison
   and stabilization help
 
 Acceptance criteria:
 
-- recall suite continues to pass
+- active V2 runtime candidate sourcing is explainable without relying on lane
+  identity as architecture
+- real-query and benchmark gates do not regress materially
 - exception-aware and partial-memory cases do not regress materially
 - display rescue is not reintroduced to compensate for recall/coarse defects
+
+Layered Lexical Cascade draft:
+
+- active V2 should prefer a **layered lexical cascade** instead of reviving
+  separate recall/coarse worldviews
+- the active runtime shape is now:
+  - candidate sourcing
+  - layer-1 frontier planning
+  - cheap survivor ranking over layers 2-4
+  - late verification for a small body/proximity frontier
+  - final ordering among survivors
+- this is an execution model only; it does not replace the locked V2 ranking
+  worldview
+
+Mixed completeness mode:
+
+- `exact` source is the only source class that V2 currently treats as
+  exhaustive / completeness-bearing
+- bounded `prefix`, `fuzzy`, and `fallback` sources are active in the V2
+  runtime path, but they are best-effort and must not be described as `100%`
+  recall
+- benchmark and tests may therefore claim exact-candidate completeness, but not
+  global completeness for prefix/fuzzy/fallback admission
+
+Layer 1 semantics:
+
+- layer 1 is `potentialPrimaryCoverageCount`
+- Latin `exact` and Latin `prefix` count toward normal layer-1 primary
+  coverage
+- Latin `fuzzy` does **not** count toward normal layer-1 primary coverage
+- Han remains `exact` only
+- each primary unit contributes at most one unit of layer-1 coverage
+
+Fuzzy salvage:
+
+- when the best normal `potentialPrimaryCoverageCount` is `0` and
+  `isFuzzy=true`, the active runtime may switch to a one-shot
+  `fuzzySalvageCoverageCount`
+- this keeps typo-only Latin queries from dying before ranking
+- any candidate with positive normal layer-1 coverage still has absolute
+  priority over pure fuzzy-salvage candidates
+
+Defer-first frontier policy:
+
+- layer-1 frontier planning is bucket-based; the active frontier is filled from
+  highest layer-1 buckets downward until the configured frontier target is
+  covered
+- lower buckets are deferred first, not hard-dropped immediately
+- higher-quality buckets should absorb the normal verification budget before
+  weaker buckets are reconsidered
+
+Fallback role in the cascade:
+
+- fallback is a bounded discovery source only
+- fallback may introduce documents into the candidate pool when exact/prefix
+  sourcing is too thin
+- fallback does not directly contribute layer-1 through layer-4 primary
+  ranking signal
+- a pure fallback-hit document that never acquires primary evidence must not
+  survive the active frontier as a lexical winner
+
+Late verification:
+
+- body-token prefetch and body-window/proximity work should happen only for the
+  small late verification frontier
+- early sourcing may record body exact presence, but it should not eagerly
+  hydrate all body token sequences
+
+Current implementation note:
+
+- the active V2 runtime now uses a cascade candidate-state path under
+  `coverage-lexical-v2/runtime/`
+- exact candidate sourcing is exhaustive
+- layer-1 currently uses Latin `exact/prefix`, Han `exact`, plus fuzzy salvage
+  when normal coverage is zero
+- late verification is active for the body/proximity frontier
+- this should be treated as the current Phase 6 draft baseline, not as the
+  fully finished end state
 
 ### Phase 7. Old-Code Removal And Shell Shrinkage
 
@@ -1437,7 +1530,7 @@ Implementation priority right now:
 
 - keep V1 in-tree as a reference baseline for comparison, debugging, and
   regression investigation
-- continue improving the independent V2 runtime and recall path first
+- continue improving the independent V2 runtime and candidate-sourcing cascade first
 - delay broad V1 deletion until V2 quality and stability are clearly settled
 
 

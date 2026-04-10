@@ -5,9 +5,7 @@ import {
 	buildCoverageLexicalV2QueryAnalysis,
 } from "./query-units";
 import {
-	buildCoverageLexicalV2RuntimeDocumentLexicalStates,
-	buildCoverageLexicalV2RuntimeSourceEntries,
-	projectCoverageLexicalV2RuntimeMatchedFiles,
+	searchCoverageLexicalV2RuntimeCascade,
 	type CoverageLexicalV2RuntimeMatchOptions,
 	type CoverageLexicalV2RuntimeStorageReader,
 } from "./runtime";
@@ -26,9 +24,6 @@ export type CoverageLexicalV2EngineSearchResult = {
 	queryTerms: string[];
 	matchedFiles: MatchedFile[];
 };
-
-const COVERAGE_LEXICAL_V2_ENGINE_MIN_EXPENSIVE_CANDIDATES = 4;
-const COVERAGE_LEXICAL_V2_ENGINE_MAX_EXPENSIVE_CANDIDATES = 12;
 
 export async function searchCoverageLexicalV2Engine(
 	request: CoverageLexicalV2EngineSearchRequest,
@@ -68,61 +63,16 @@ export async function searchCoverageLexicalV2Engine(
 		includeFuzzy: request.isFuzzy,
 		fuzzyProportion: request.fuzzyProportion,
 	};
-	const runtimeDocuments = await buildCoverageLexicalV2RuntimeDocumentLexicalStates(
-		primaryQueryTerms,
-		request.storageReader,
-		runtimeMatchOptions,
-	);
-	if (runtimeDocuments.length === 0) {
-		return {
-			queryTerms,
-			matchedFiles: [],
-		};
-	}
-	const runtimeEntries = buildCoverageLexicalV2RuntimeSourceEntries(
+	const cascade = await searchCoverageLexicalV2RuntimeCascade({
+		queryText: request.queryText,
 		queryTerms,
-		runtimeDocuments,
-		runtimeMatchOptions,
-	);
-	if (runtimeEntries.length === 0) {
-		return {
-			queryTerms,
-			matchedFiles: [],
-		};
-	}
-	const projection = projectCoverageLexicalV2RuntimeMatchedFiles(
-		request.queryText,
-		queryTerms,
-		runtimeEntries,
-		{
-			maxExpensiveCandidates: resolveCoverageLexicalV2EngineCoarseBudget(
-				request.maxItemResults,
-			),
-			maxDisplayCandidates: resolveCoverageLexicalV2EngineDisplayBudget(
-				request.maxItemResults,
-			),
-		},
-	);
+		queryAnalysis,
+		maxItemResults: request.maxItemResults,
+		storageReader: request.storageReader,
+		matchOptions: runtimeMatchOptions,
+	});
 	return {
 		queryTerms,
-		matchedFiles: projection.matchedFiles.slice(0, request.maxItemResults),
+		matchedFiles: cascade.matchedFiles.slice(0, request.maxItemResults),
 	};
-}
-
-function resolveCoverageLexicalV2EngineCoarseBudget(
-	maxItemResults: number,
-): number {
-	return Math.min(
-		COVERAGE_LEXICAL_V2_ENGINE_MAX_EXPENSIVE_CANDIDATES,
-		Math.max(
-			COVERAGE_LEXICAL_V2_ENGINE_MIN_EXPENSIVE_CANDIDATES,
-			Math.max(0, maxItemResults),
-		),
-	);
-}
-
-function resolveCoverageLexicalV2EngineDisplayBudget(
-	maxItemResults: number,
-): number {
-	return Math.max(0, maxItemResults);
 }
