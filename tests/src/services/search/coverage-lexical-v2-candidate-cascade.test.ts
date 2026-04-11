@@ -2,6 +2,7 @@ import {
 	buildCoverageLexicalV2QueryAnalysis,
 } from "src/services/search/coverage-lexical-v2/query";
 import {
+	getCoverageLexicalV2CandidateCascadeMatchQuality,
 	planCoverageLexicalV2CandidateCascadeLayer1Frontier,
 	resolveCoverageLexicalV2CandidateCascadePolicy,
 	searchCoverageLexicalV2CandidateCascade,
@@ -47,6 +48,56 @@ function extractHanBigrams(text: string): string[] {
 		}
 	}
 	return bigrams;
+}
+
+function collectCanonicalLatinPrefixTerms(
+	lexicon: readonly string[],
+	queryTerm: string,
+	cap: number,
+): readonly string[] {
+	if (cap <= 0) {
+		return [];
+	}
+	const matches: string[] = [];
+	for (const candidateTerm of lexicon) {
+		if (matches.length >= cap) {
+			break;
+		}
+		if (
+			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
+				includePrefix: true,
+			}) === "prefix"
+		) {
+			matches.push(candidateTerm);
+		}
+	}
+	return matches;
+}
+
+function collectCanonicalLatinFuzzyTerms(
+	lexicon: readonly string[],
+	queryTerm: string,
+	cap: number,
+	fuzzyProportion: number,
+): readonly string[] {
+	if (cap <= 0) {
+		return [];
+	}
+	const matches: string[] = [];
+	for (const candidateTerm of lexicon) {
+		if (matches.length >= cap) {
+			break;
+		}
+		if (
+			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
+				includeFuzzy: true,
+				fuzzyProportion,
+			}) === "fuzzy"
+		) {
+			matches.push(candidateTerm);
+		}
+	}
+	return matches;
 }
 
 function createStorageReader(config: {
@@ -129,18 +180,15 @@ function createStorageReader(config: {
 				return bodyHanSegments.get(docId);
 			},
 			collectLatinPrefixTerms(queryTerm, cap) {
-				return config.lexicon
-					.filter((term) => term.startsWith(queryTerm) && term !== queryTerm)
-					.slice(0, cap);
+				return collectCanonicalLatinPrefixTerms(config.lexicon, queryTerm, cap);
 			},
-			collectLatinFuzzyTerms(queryTerm, cap, _fuzzyProportion) {
-				return config.lexicon
-					.filter((term) =>
-						term !== queryTerm &&
-						term.length >= queryTerm.length &&
-						term.slice(1) === queryTerm.slice(1),
-					)
-					.slice(0, cap);
+			collectLatinFuzzyTerms(queryTerm, cap, fuzzyProportion) {
+				return collectCanonicalLatinFuzzyTerms(
+					config.lexicon,
+					queryTerm,
+					cap,
+					fuzzyProportion,
+				);
 			},
 			getBodyTokenSequence,
 			prefetchBodyTokenSequences,

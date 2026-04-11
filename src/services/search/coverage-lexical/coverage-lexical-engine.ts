@@ -102,10 +102,12 @@ import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import {
 	searchCoverageLexicalV2WithStorageAdapter,
 } from "./coverage-lexical-v2-storage-adapter";
+import {
+	getCoverageLexicalV2CandidateCascadeMatchQuality,
+} from "../coverage-lexical-v2";
 import type {
 	CoverageLexicalV2CandidateCascadeTrace,
 	CoverageLexicalV2CandidateCascadeMatchOptions,
-	getCoverageLexicalV2CandidateCascadeMatchQuality,
 } from "../coverage-lexical-v2";
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
@@ -242,6 +244,56 @@ function compareCoverageLexicalTerms(left: string, right: string): number {
 		return 1;
 	}
 	return 0;
+}
+
+function collectCoverageLexicalCanonicalLatinPrefixTerms(
+	terms: readonly string[],
+	queryTerm: string,
+	cap: number,
+): readonly string[] {
+	if (cap <= 0) {
+		return [];
+	}
+	const matches: string[] = [];
+	for (const candidateTerm of terms) {
+		if (matches.length >= cap) {
+			break;
+		}
+		if (
+			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
+				includePrefix: true,
+			}) === "prefix"
+		) {
+			matches.push(candidateTerm);
+		}
+	}
+	return matches;
+}
+
+function collectCoverageLexicalCanonicalLatinFuzzyTerms(
+	terms: readonly string[],
+	queryTerm: string,
+	cap: number,
+	fuzzyProportion: number,
+): readonly string[] {
+	if (cap <= 0) {
+		return [];
+	}
+	const matches: string[] = [];
+	for (const candidateTerm of terms) {
+		if (matches.length >= cap) {
+			break;
+		}
+		if (
+			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
+				includeFuzzy: true,
+				fuzzyProportion,
+			}) === "fuzzy"
+		) {
+			matches.push(candidateTerm);
+		}
+	}
+	return matches;
 }
 
 function coverageLexicalPostingHasDocId(
@@ -1385,20 +1437,18 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					},
 					getBodyHanSegments: (docId) => this.documentBodyHanSegmentsById[docId],
 					collectLatinPrefixTerms: (queryTerm, cap) =>
-						this.getSortedLexicon()
-							.filter(
-								(term) => term !== queryTerm && term.startsWith(queryTerm),
-							)
-							.slice(0, cap),
-					collectLatinFuzzyTerms: (queryTerm, cap, _fuzzyProportion) =>
-						this.getSortedLexicon()
-							.filter(
-								(term) =>
-									term !== queryTerm &&
-									term.length >= queryTerm.length &&
-									term[0] === queryTerm[0],
-							)
-							.slice(0, cap),
+						collectCoverageLexicalCanonicalLatinPrefixTerms(
+							this.getSortedLexicon(),
+							queryTerm,
+							cap,
+						),
+					collectLatinFuzzyTerms: (queryTerm, cap, fuzzyProportion) =>
+						collectCoverageLexicalCanonicalLatinFuzzyTerms(
+							this.getSortedLexicon(),
+							queryTerm,
+							cap,
+							fuzzyProportion,
+						),
 					getBodyTokenSequence: (docId) =>
 						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId),
 					prefetchBodyTokenSequences: async (docIds) => {

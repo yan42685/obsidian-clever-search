@@ -1,7 +1,58 @@
 import {
 	searchCoverageLexicalV2Engine,
+	getCoverageLexicalV2CandidateCascadeMatchQuality,
 	type CoverageLexicalV2CandidateCascadeStorageReader,
 } from "src/services/search/coverage-lexical-v2";
+
+const TEST_LEXICON = ["ai", "exam", "plan", "summary"] as const;
+
+function collectCanonicalLatinPrefixTerms(
+	queryTerm: string,
+	cap: number,
+): readonly string[] {
+	if (cap <= 0) {
+		return [];
+	}
+	const matches: string[] = [];
+	for (const candidateTerm of TEST_LEXICON) {
+		if (matches.length >= cap) {
+			break;
+		}
+		if (
+			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
+				includePrefix: true,
+			}) === "prefix"
+		) {
+			matches.push(candidateTerm);
+		}
+	}
+	return matches;
+}
+
+function collectCanonicalLatinFuzzyTerms(
+	queryTerm: string,
+	cap: number,
+	fuzzyProportion: number,
+): readonly string[] {
+	if (cap <= 0) {
+		return [];
+	}
+	const matches: string[] = [];
+	for (const candidateTerm of TEST_LEXICON) {
+		if (matches.length >= cap) {
+			break;
+		}
+		if (
+			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
+				includeFuzzy: true,
+				fuzzyProportion,
+			}) === "fuzzy"
+		) {
+			matches.push(candidateTerm);
+		}
+	}
+	return matches;
+}
 
 function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 	const documents = new Map([
@@ -64,14 +115,14 @@ function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 			return bodyHanSegments.get(docId);
 		},
 		collectLatinPrefixTerms(queryTerm, cap) {
-			return ["ai", "exam", "plan", "summary"]
-				.filter((term) => term.startsWith(queryTerm) && term !== queryTerm)
-				.slice(0, cap);
+			return collectCanonicalLatinPrefixTerms(queryTerm, cap);
 		},
-		collectLatinFuzzyTerms(queryTerm, cap, _fuzzyProportion) {
-			return ["ai", "exam", "plan", "summary"]
-				.filter((term) => term !== queryTerm && term.length >= queryTerm.length)
-				.slice(0, cap);
+		collectLatinFuzzyTerms(queryTerm, cap, fuzzyProportion) {
+			return collectCanonicalLatinFuzzyTerms(
+				queryTerm,
+				cap,
+				fuzzyProportion,
+			);
 		},
 		getBodyTokenSequence(docId) {
 			return bodyTokenSequences.get(docId);
