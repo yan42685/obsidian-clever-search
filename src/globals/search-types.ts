@@ -9,6 +9,7 @@ import { getInstance } from "src/utils/my-lib";
 export type IndexedDocument = {
   path: string;
   generation?: number;
+  size?: number;
   basename: string;
   folder: string;
   content?: string;

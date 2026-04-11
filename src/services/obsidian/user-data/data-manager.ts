@@ -33,7 +33,10 @@ import {
 } from "src/services/search/hybrid/runtime-control";
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
-import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
+import type {
+  PersistentFileIndexRecoveryPlan,
+  SerializedFileSearchIndex,
+} from "src/services/search/file-search-engine";
 import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
 import {
   COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
@@ -231,6 +234,7 @@ export type SearchBootstrapMetrics = {
 type LexicalBootstrapPlan = {
   needsFullReindex: boolean;
   needsRefHeal: boolean;
+  persistentRecoveryPlan?: PersistentFileIndexRecoveryPlan | null;
 };
 
 export type HybridDeferredEmbeddingSummary = {
@@ -1381,6 +1385,43 @@ export class DataManager {
     return true;
   }
 
+  private async commitMovedLexicalFileState(
+    oldPath: string,
+    file: TFile,
+    generation = file.stat.mtime,
+  ): Promise<boolean> {
+    const { documents, indexedFiles, failures } =
+      await this.dataProvider.generateAllIndexedDocuments([file]);
+    if (
+      failures.length > 0 ||
+      documents.length === 0 ||
+      indexedFiles.length === 0
+    ) {
+      if (failures.length > 0) {
+        this.addLexicalIndexFailures(failures);
+      }
+      return false;
+    }
+
+    const moved = await this.lexicalEngine.moveDocument(oldPath, documents[0]);
+    if (!moved) {
+      return false;
+    }
+
+    this.clearLexicalIndexFailures([oldPath, file.path]);
+    await this.fileSnapshotStore.removeFiles([oldPath]);
+    await this.fileSnapshotStore.publishIndexedTexts([
+      {
+        path: file.path,
+        generation,
+      },
+    ]);
+    await this.deleteLexicalIndexedFileRefs([oldPath]);
+    await this.upsertLexicalIndexedFileRef(file, generation);
+    await this.markLexicalSnapshotDirty([oldPath, file.path]);
+    return true;
+  }
+
   private async commitIndexedLexicalFiles(
     files: readonly TFile[],
   ): Promise<void> {
@@ -1404,12 +1445,16 @@ export class DataManager {
   }
 
   private async writeLexicalSearchSnapshotArtifact(): Promise<void> {
+    if (this.lexicalEngine.supportsPersistentFileIndex()) {
+      await this.lexicalEngine.persistFileIndexArtifact();
+      return;
+    }
     const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
     if (lexicalIndexData) {
       await this.database.setLexicalSearchSnapshot(lexicalIndexData);
-    } else {
-      await this.database.deleteLexicalSearchSnapshot();
+      return;
     }
+    await this.database.deleteLexicalSearchSnapshot();
   }
 
   private addLexicalIndexFailures(
@@ -1617,10 +1662,10 @@ export class DataManager {
     this.cancelHybridRepair(oldPath);
     this.cancelHybridRepair(newPath);
     this.clearLexicalIndexFailures([oldPath, newPath]);
-    await this.deleteLexicalFileState([oldPath, newPath]);
 
     const file = this.dataProvider.getFileByPath(newPath);
     if (!file || !this.dataProvider.isIndexable(file)) {
+      await this.deleteLexicalFileState([oldPath, newPath]);
       await this.clearFailedHybridEmbedding(oldPath);
       await this.clearFailedHybridEmbedding(newPath);
       await this.handleDeleteOperation(newPath);
@@ -1631,7 +1676,15 @@ export class DataManager {
     }
 
     await this.primeCurrentFileText(file, sourceGeneration);
-    await this.commitLexicalFileState(file);
+    const movedLexical = await this.commitMovedLexicalFileState(
+      oldPath,
+      file,
+      sourceGeneration ?? file.stat.mtime,
+    );
+    if (!movedLexical) {
+      await this.deleteLexicalFileState([oldPath, newPath]);
+      await this.commitLexicalFileState(file);
+    }
 
     if (
       !this.hybridEngine.isEnabled() ||
@@ -1847,9 +1900,48 @@ export class DataManager {
     logger.trace("Init lexical engine...");
     const supportsSerializedIndex =
       this.lexicalEngine.supportsSerializedFileIndex();
-    const lexicalSnapshotDirty = supportsSerializedIndex
+    const supportsPersistentIndex =
+      this.lexicalEngine.supportsPersistentFileIndex();
+    const lexicalSnapshotDirty = supportsSerializedIndex && !supportsPersistentIndex
       ? await this.hasLexicalSnapshotDirtyMarker()
       : false;
+    const canRestorePersistedIndex =
+      devOption.loadIndexFromDatabase &&
+      !this.shouldForceRefresh &&
+      (supportsPersistentIndex || supportsSerializedIndex);
+    if (supportsPersistentIndex && canRestorePersistedIndex) {
+      const restored = await this.lexicalEngine.restorePersistedFileIndex();
+      if (!restored) {
+        return {
+          needsFullReindex: true,
+          needsRefHeal: false,
+          persistentRecoveryPlan: null,
+        };
+      }
+      const persistentRecoveryPlan = await this.lexicalEngine.planPersistentRecovery(
+        this.buildCurrentLexicalIndexedFileRefs(),
+      );
+      await this.reloadLexicalIndexedFileRefs();
+      if (persistentRecoveryPlan?.status === "needs_full_rebuild") {
+        logger.warn(
+          `Persisted lexical recovery requires full rebuild: ${persistentRecoveryPlan.reason}`,
+        );
+        this.lexicalEngine.clearIndex();
+        return {
+          needsFullReindex: true,
+          needsRefHeal: false,
+          persistentRecoveryPlan,
+        };
+      }
+      return {
+        needsFullReindex: false,
+        needsRefHeal:
+          persistentRecoveryPlan === null
+            ? !this.isLexicalEngineUpToDate
+            : persistentRecoveryPlan.status === "needs_heal",
+        persistentRecoveryPlan,
+      };
+    }
     let prevData: SerializedFileSearchIndex | null;
     if (
       !devOption.loadIndexFromDatabase ||
@@ -1870,6 +1962,7 @@ export class DataManager {
       return {
         needsFullReindex: true,
         needsRefHeal: false,
+        persistentRecoveryPlan: null,
       };
     }
 
@@ -1884,6 +1977,7 @@ export class DataManager {
       return {
         needsFullReindex: true,
         needsRefHeal: false,
+        persistentRecoveryPlan: null,
       };
     }
     await this.reloadLexicalIndexedFileRefs();
@@ -1896,12 +1990,14 @@ export class DataManager {
       return {
         needsFullReindex: true,
         needsRefHeal: false,
+        persistentRecoveryPlan: null,
       };
     }
 
     return {
       needsFullReindex: false,
       needsRefHeal: !this.isLexicalEngineUpToDate,
+      persistentRecoveryPlan: null,
     };
   }
 
@@ -1928,7 +2024,12 @@ export class DataManager {
       await this.syncLexicalBodyTokenColdStoreMetadata();
       return;
     }
-    if (plan.needsRefHeal) {
+    if (
+      plan.persistentRecoveryPlan &&
+      plan.persistentRecoveryPlan.status === "needs_heal"
+    ) {
+      await this.applyLexicalPersistentRecoveryPlan(plan.persistentRecoveryPlan);
+    } else if (plan.needsRefHeal) {
       await this.updateLexicalIndexedFileRefsByMtime();
     } else {
       await this.ensureLexicalIndexedFileRefsLoaded();
@@ -2020,6 +2121,92 @@ export class DataManager {
       this.addLexicalIndexFailures(failures);
     }
     this.isLexicalEngineUpToDate = failures.length === 0;
+  }
+
+  private buildCurrentLexicalIndexedFileRefs(): BaseIndexedFileRef[] {
+    return this.dataProvider.allFilesToBeIndexed().map((file) => ({
+      path: file.path,
+      generation: file.stat.mtime,
+      size: file.stat.size,
+    }));
+  }
+
+  private async applyLexicalPersistentRecoveryPlan(
+    plan: PersistentFileIndexRecoveryPlan,
+  ): Promise<void> {
+    const currentFiles = new Map<string, TFile>(
+      this.dataProvider.allFilesToBeIndexed().map((file) => [file.path, file]),
+    );
+    const dirtyPaths = new Set<string>();
+    const deletePaths = new Set<string>(plan.docsToDelete);
+    const upsertPaths = new Set<string>([
+      ...plan.docsToAdd,
+      ...plan.docsToUpdate,
+    ]);
+
+    for (const move of plan.docsToMove) {
+      const file = currentFiles.get(move.newPath);
+      dirtyPaths.add(move.oldPath);
+      dirtyPaths.add(move.newPath);
+      if (!file) {
+        deletePaths.add(move.oldPath);
+        continue;
+      }
+      const moved = await this.commitMovedLexicalFileState(
+        move.oldPath,
+        file,
+        file.stat.mtime,
+      );
+      if (!moved) {
+        deletePaths.add(move.oldPath);
+        upsertPaths.add(move.newPath);
+      }
+    }
+
+    const deleteList = [...deletePaths];
+    if (deleteList.length > 0) {
+      logger.trace(`lexical recovery docs to delete: ${deleteList.length}`);
+      await this.deleteDocuments(deleteList);
+      await this.fileSnapshotStore.removeFiles(deleteList);
+      await this.deleteLexicalIndexedFileRefs(deleteList);
+      this.clearLexicalIndexFailures(deleteList);
+      for (const path of deleteList) {
+        dirtyPaths.add(path);
+      }
+    }
+
+    const upsertFiles = [...upsertPaths].flatMap((path) => {
+      const file = currentFiles.get(path);
+      return file ? [file] : [];
+    });
+    logger.trace(`lexical recovery docs to upsert: ${upsertFiles.length}`);
+    const addResult = await this.addDocuments(upsertFiles);
+    await this.fileSnapshotStore.publishIndexedTexts(
+      addResult.indexedFiles.map((file) => ({
+        path: file.path,
+        generation: file.stat.mtime,
+      })),
+    );
+    const failedPaths = new Set(
+      addResult.failures.map((failure) => failure.file.path),
+    );
+    await this.saveLexicalIndexedFileRefs(
+      Array.from(currentFiles.values()).filter(
+        (file) => !failedPaths.has(file.path),
+      ),
+    );
+    this.clearLexicalIndexFailures(
+      addResult.indexedFiles.map((file) => file.path),
+    );
+    if (addResult.failures.length > 0) {
+      this.addLexicalIndexFailures(addResult.failures);
+    }
+    if (deleteList.length > 0 || addResult.indexedFiles.length > 0 || dirtyPaths.size > 0) {
+      await this.markLexicalSnapshotDirty([
+        ...dirtyPaths,
+        ...addResult.indexedFiles.map((file) => file.path),
+      ]);
+    }
   }
 
   private async updateLexicalIndexedFileRefsByMtime() {

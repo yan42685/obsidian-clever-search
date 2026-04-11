@@ -1,4 +1,5 @@
 import type {
+	BaseIndexedFileRef,
 	FileItem,
 	FileSubItem,
 	IndexedDocument,
@@ -13,6 +14,7 @@ import { singleton } from "tsyringe";
 import { OuterSetting } from "../../globals/plugin-setting";
 import {
 	FileSearchEngineFactory,
+	type PersistentFileIndexRecoveryPlan,
 	type SerializedFileSearchIndex,
 } from "./file-search-engine";
 import {
@@ -38,9 +40,13 @@ export class LexicalEngine {
 		return this.fileSearchEngine.backend;
 	}
 
-	supportsSerializedFileIndex(): boolean {
-		return this.fileSearchEngine.supportsSerialization;
-	}
+  supportsSerializedFileIndex(): boolean {
+    return this.fileSearchEngine.supportsSerialization;
+  }
+
+  supportsPersistentFileIndex(): boolean {
+    return this.fileSearchEngine.supportsPersistentFileIndex?.() ?? false;
+  }
 
 	estimateFileIndexBytes(fallbackBytes = 0): number {
 		const estimatedBytes = this.fileSearchEngine.estimateIndexBytes?.();
@@ -74,24 +80,27 @@ export class LexicalEngine {
 		return true;
 	}
 
-	beginBatchReindex(): void {
+  beginBatchReindex(): void {
 		this._isReady = false;
+		this.fileSearchEngine.beginBatchReindex?.();
 		this.fileSearchEngine.clearIndex();
-	}
+  }
 
 	clearIndex(): void {
 		this.fileSearchEngine.clearIndex();
 		this._isReady = false;
 	}
 
-	finishBatchReindex(): void {
+  finishBatchReindex(): void {
+		void this.fileSearchEngine.finishBatchReindex?.();
 		this._isReady = true;
-	}
+  }
 
-	abortBatchReindex(): void {
+  abortBatchReindex(): void {
+		void this.fileSearchEngine.abortBatchReindex?.();
 		this.fileSearchEngine.clearIndex();
 		this._isReady = false;
-	}
+  }
 
 	// NOTE: need be checked before opening a search-in-vault modal to avoid error when search during indexing
 	get isReady(): boolean {
@@ -100,6 +109,10 @@ export class LexicalEngine {
 
 	async addDocuments(documents: IndexedDocument[]) {
 		await this.fileSearchEngine.addDocuments(documents);
+	}
+
+	async moveDocument(oldPath: string, document: IndexedDocument): Promise<boolean> {
+		return (await this.fileSearchEngine.moveDocument?.(oldPath, document)) ?? false;
 	}
 
 	deleteDocuments(paths: string[]) {
@@ -191,9 +204,30 @@ export class LexicalEngine {
 		});
 	}
 
-	serializeFileIndex(): SerializedFileSearchIndex | null {
+  serializeFileIndex(): SerializedFileSearchIndex | null {
 		return this.fileSearchEngine.serialize();
+  }
+
+  async restorePersistedFileIndex(): Promise<boolean> {
+    return (await this.fileSearchEngine.restorePersistedFileIndex?.()) ?? false;
+  }
+
+	async planPersistentRecovery(
+		currentIndexedRefs: readonly BaseIndexedFileRef[],
+	): Promise<PersistentFileIndexRecoveryPlan | null> {
+		if (!this.fileSearchEngine.planPersistentRecovery) {
+			return null;
+		}
+		return await this.fileSearchEngine.planPersistentRecovery(currentIndexedRefs);
 	}
+
+  async persistFileIndexArtifact(): Promise<void> {
+    await this.fileSearchEngine.persistFileIndexArtifact?.();
+  }
+
+  async clearPersistedFileIndexArtifact(): Promise<void> {
+    await this.fileSearchEngine.clearPersistedFileIndexArtifact?.();
+  }
 
 	async getNativeFileSubItems(
 		queryText: string,

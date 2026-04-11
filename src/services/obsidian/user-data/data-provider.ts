@@ -213,6 +213,7 @@ export class DataProvider {
 				return {
 					path: file.path,
 					generation: file.stat.mtime,
+					size: file.stat.size,
 					basename: file.basename,
 					folder: FileUtil.getFolderPath(file.path),
 					aliases: this.parseAliases(metaData),
@@ -226,6 +227,8 @@ export class DataProvider {
 
 		return {
 			path: file.path,
+			generation: file.stat.mtime,
+			size: file.stat.size,
 			basename: file.basename,
 			folder: FileUtil.getFolderPath(file.path),
 		};

@@ -17,6 +17,21 @@ import type {
   CoverageLexicalBodyTokenColdDocRow,
   CoverageLexicalBodyTokenColdMetaRow,
 } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import {
+  decodeCoverageLexicalV2IndexStoreJournalEntry,
+  decodeCoverageLexicalV2IndexStoreSnapshot,
+  encodeCoverageLexicalV2IndexStoreJournalEntry,
+  encodeCoverageLexicalV2IndexStoreSnapshot,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store-snapshot";
+import {
+  COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+  COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION,
+  type CoverageLexicalV2IndexStoreJournalEntry,
+  type CoverageLexicalV2IndexStoreJournalRow,
+  type CoverageLexicalV2IndexStoreMetaRow,
+  type CoverageLexicalV2IndexStoreSnapshotChunkRow,
+  type CoverageLexicalV2IndexStoreSnapshotState,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store-types";
 import type {
   BlobRecord,
   ChunkRow,
@@ -66,6 +81,12 @@ export class Database {
       { name: "lexicalBodyTokenColdMeta", table: this.db.lexicalBodyTokenColdMeta },
       { name: "lexicalBodyTokenColdBlocks", table: this.db.lexicalBodyTokenColdBlocks },
       { name: "lexicalBodyTokenColdDocs", table: this.db.lexicalBodyTokenColdDocs },
+      { name: "lexicalV2IndexStoreMeta", table: this.db.lexicalV2IndexStoreMeta },
+      {
+        name: "lexicalV2IndexStoreSnapshotChunks",
+        table: this.db.lexicalV2IndexStoreSnapshotChunks,
+      },
+      { name: "lexicalV2IndexStoreJournal", table: this.db.lexicalV2IndexStoreJournal },
       { name: "hybridChunks", table: this.db.hybridChunks },
       { name: "fileSnapshots", table: this.db.fileSnapshots },
       { name: "hybridDirtyShadows", table: this.db.hybridDirtyShadows },
@@ -188,6 +209,192 @@ export class Database {
   @monitorDecorator
   async getLexicalSearchSnapshot(): Promise<SerializedFileSearchIndex | null> {
     return (await this.db.lexicalSearchSnapshots.toArray())[0]?.data || null;
+  }
+
+  async readCoverageLexicalV2IndexStoreSnapshot(): Promise<CoverageLexicalV2IndexStoreSnapshotState | null> {
+    const meta = await this.db.lexicalV2IndexStoreMeta.get(
+      COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+    );
+    if (!meta?.activeSnapshotId) {
+      return null;
+    }
+    const chunks = await this.db.lexicalV2IndexStoreSnapshotChunks
+      .where("snapshotId")
+      .equals(meta.activeSnapshotId)
+      .sortBy("order");
+    if (chunks.length === 0) {
+      return null;
+    }
+    const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.data.byteLength, 0);
+    const merged = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(new Uint8Array(chunk.data), offset);
+      offset += chunk.data.byteLength;
+    }
+    return decodeCoverageLexicalV2IndexStoreSnapshot(merged.buffer);
+  }
+
+  async writeCoverageLexicalV2IndexStoreSnapshot(
+    snapshot: CoverageLexicalV2IndexStoreSnapshotState,
+    meta: Pick<CoverageLexicalV2IndexStoreMetaRow, "snapshotDocumentCount" | "updatedAt">,
+  ): Promise<void> {
+    const encoded = encodeCoverageLexicalV2IndexStoreSnapshot(snapshot);
+    const snapshotId = `snapshot:${meta.updatedAt}:${snapshot.nextDocumentId}`;
+    await this.db.transaction(
+      "rw",
+      this.db.lexicalV2IndexStoreMeta,
+      this.db.lexicalV2IndexStoreSnapshotChunks,
+      this.db.lexicalV2IndexStoreJournal,
+      async () => {
+        const existingMeta = await this.db.lexicalV2IndexStoreMeta.get(
+          COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+        );
+        const previousSnapshotId = existingMeta?.activeSnapshotId ?? null;
+        const journalSequence = existingMeta?.journalSequence ?? 0;
+        await this.db.lexicalV2IndexStoreJournal.clear();
+        await this.db.lexicalV2IndexStoreSnapshotChunks.put({
+          id: `${snapshotId}:0`,
+          snapshotId,
+          order: 0,
+          updatedAt: meta.updatedAt,
+          data: encoded,
+        });
+        await this.db.lexicalV2IndexStoreMeta.put({
+          id: COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+          schemaVersion: COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION,
+          activeSnapshotId: snapshotId,
+          snapshotDocumentCount: meta.snapshotDocumentCount,
+          journalSequence,
+          checkpointedJournalSequence: journalSequence,
+          updatedAt: meta.updatedAt,
+        });
+        if (previousSnapshotId && previousSnapshotId !== snapshotId) {
+          const previousChunkIds = (
+            await this.db.lexicalV2IndexStoreSnapshotChunks
+              .where("snapshotId")
+              .equals(previousSnapshotId)
+              .primaryKeys()
+          ) as string[];
+          if (previousChunkIds.length > 0) {
+            await this.db.lexicalV2IndexStoreSnapshotChunks.bulkDelete(previousChunkIds);
+          }
+        }
+      },
+    );
+  }
+
+  async readCoverageLexicalV2IndexStoreJournalEntries(): Promise<
+    readonly CoverageLexicalV2IndexStoreJournalEntry[]
+  > {
+    const rows = await this.db.lexicalV2IndexStoreJournal
+      .orderBy("sequence")
+      .toArray();
+    return rows.map((row) => {
+      if (!row.payloadJson) {
+        return {
+          kind: "delete",
+          path: row.path,
+          updatedAt: row.updatedAt,
+          transaction: {
+            transactionId: row.id,
+            commitSequence: row.sequence,
+          },
+        };
+      }
+      const decoded = decodeCoverageLexicalV2IndexStoreJournalEntry(row.payloadJson);
+      return {
+        ...decoded,
+        transaction: {
+          ...decoded.transaction,
+          commitSequence: decoded.transaction.commitSequence ?? row.sequence,
+        },
+      };
+    });
+  }
+
+  async appendCoverageLexicalV2IndexStoreJournalEntries(
+    entries: readonly CoverageLexicalV2IndexStoreJournalEntry[],
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+    await this.db.transaction(
+      "rw",
+      this.db.lexicalV2IndexStoreMeta,
+      this.db.lexicalV2IndexStoreJournal,
+      async () => {
+        const existingMeta = await this.db.lexicalV2IndexStoreMeta.get(
+          COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+        );
+        let nextSequence = existingMeta?.journalSequence ?? 0;
+        const rows: CoverageLexicalV2IndexStoreJournalRow[] = entries.map((entry) => {
+          nextSequence += 1;
+          const committedEntry: CoverageLexicalV2IndexStoreJournalEntry = {
+            ...entry,
+            transaction: {
+              ...entry.transaction,
+              commitSequence: nextSequence,
+            },
+          };
+          return {
+            id: String(nextSequence),
+            sequence: nextSequence,
+            kind: entry.kind,
+            path: entry.path,
+            payloadJson: encodeCoverageLexicalV2IndexStoreJournalEntry(committedEntry),
+            updatedAt: entry.updatedAt,
+          };
+        });
+        await this.db.lexicalV2IndexStoreJournal.bulkPut(rows);
+        await this.db.lexicalV2IndexStoreMeta.put({
+          id: COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+          schemaVersion:
+            existingMeta?.schemaVersion ??
+            COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION,
+          activeSnapshotId: existingMeta?.activeSnapshotId ?? null,
+          snapshotDocumentCount: existingMeta?.snapshotDocumentCount ?? 0,
+          journalSequence: nextSequence,
+          checkpointedJournalSequence:
+            existingMeta?.checkpointedJournalSequence ?? 0,
+          updatedAt: rows[rows.length - 1].updatedAt,
+        });
+      },
+    );
+  }
+
+  async clearCoverageLexicalV2IndexStoreJournal(): Promise<void> {
+    await this.db.transaction(
+      "rw",
+      this.db.lexicalV2IndexStoreMeta,
+      this.db.lexicalV2IndexStoreJournal,
+      async () => {
+        const existingMeta = await this.db.lexicalV2IndexStoreMeta.get(
+          COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
+        );
+        await this.db.lexicalV2IndexStoreJournal.clear();
+        if (existingMeta) {
+          await this.db.lexicalV2IndexStoreMeta.put({
+            ...existingMeta,
+            checkpointedJournalSequence: existingMeta.journalSequence,
+          });
+        }
+      },
+    );
+  }
+
+  async clearCoverageLexicalV2IndexStorePersistence(): Promise<void> {
+    await this.db.transaction(
+      "rw",
+      this.db.lexicalV2IndexStoreMeta,
+      this.db.lexicalV2IndexStoreSnapshotChunks,
+      this.db.lexicalV2IndexStoreJournal,
+      async () => {
+        await this.db.lexicalV2IndexStoreMeta.clear();
+        await this.db.lexicalV2IndexStoreSnapshotChunks.clear();
+        await this.db.lexicalV2IndexStoreJournal.clear();
+      },
+    );
   }
 
   async setLexicalIndexedFileRefs(refs: BaseIndexedFileRef[]) {
@@ -320,7 +527,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 23;
+  private static readonly _dbVersion = 25;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   private schemaUpgradeDetected = false;
@@ -341,6 +548,15 @@ class DexieWrapper extends Dexie {
   >;
   lexicalBodyTokenColdDocs!: Dexie.Table<
     CoverageLexicalBodyTokenColdDocRow,
+    string
+  >;
+  lexicalV2IndexStoreMeta!: Dexie.Table<CoverageLexicalV2IndexStoreMetaRow, string>;
+  lexicalV2IndexStoreSnapshotChunks!: Dexie.Table<
+    CoverageLexicalV2IndexStoreSnapshotChunkRow,
+    string
+  >;
+  lexicalV2IndexStoreJournal!: Dexie.Table<
+    CoverageLexicalV2IndexStoreJournalRow,
     string
   >;
   // Hybrid search tables
@@ -400,6 +616,9 @@ class DexieWrapper extends Dexie {
       lexicalBodyTokenColdMeta: "id",
       lexicalBodyTokenColdBlocks: "id, epoch, updatedAt",
       lexicalBodyTokenColdDocs: "path, epoch, blockId, updatedAt",
+      lexicalV2IndexStoreMeta: "id",
+      lexicalV2IndexStoreSnapshotChunks: "id, snapshotId, order, updatedAt",
+      lexicalV2IndexStoreJournal: "id, sequence, path, updatedAt",
       hybridChunks: "++id, filePath",
       fileSnapshots: "filePath",
       hybridDirtyShadows: "filePath",
@@ -493,4 +712,3 @@ function estimateValueBytes(
 
   return textEncoder.encode(String(value)).length;
 }
-

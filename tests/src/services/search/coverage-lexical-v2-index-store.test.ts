@@ -1,0 +1,231 @@
+import {
+	CoverageLexicalV2IndexStore,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store";
+import {
+	planCoverageLexicalV2PersistentRecovery,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store-recovery";
+import type {
+	CoverageLexicalV2PreparedDocument,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store-types";
+
+function createPreparedDocument(options: {
+	path: string;
+	generation: number;
+	size?: number;
+	basenameTerms?: readonly string[];
+	aliasesTerms?: readonly string[];
+	headingsTerms?: readonly string[];
+	folderTerms?: readonly string[];
+	tagTerms?: readonly string[];
+	bodyTerms?: readonly string[];
+	metadataHanBigramsByField?: Partial<
+		CoverageLexicalV2PreparedDocument["metadataHanBigramsByField"]
+	>;
+	bodyHanSegments?: readonly string[];
+	bodyTokens?: readonly string[];
+}): CoverageLexicalV2PreparedDocument {
+	return {
+		path: options.path,
+		generation: options.generation,
+		indexedRef: {
+			path: options.path,
+			generation: options.generation,
+			size: options.size ?? 128,
+		},
+		record: {
+			path: options.path,
+			stableDeterministicKey: options.path,
+			basenameText: (options.basenameTerms ?? []).join(" "),
+			aliasesText: (options.aliasesTerms ?? []).join(" "),
+			headingsText: (options.headingsTerms ?? []).join(" "),
+			folderText: (options.folderTerms ?? []).join(" "),
+			tagsText: (options.tagTerms ?? []).join(" "),
+		},
+		exactTermsByField: {
+			basename: [...(options.basenameTerms ?? [])],
+			aliases: [...(options.aliasesTerms ?? [])],
+			headings: [...(options.headingsTerms ?? [])],
+			folder: [...(options.folderTerms ?? [])],
+			tag: [...(options.tagTerms ?? [])],
+			body: [...(options.bodyTerms ?? [])],
+		},
+		metadataHanBigramsByField: {
+			basename: [...(options.metadataHanBigramsByField?.basename ?? [])],
+			aliases: [...(options.metadataHanBigramsByField?.aliases ?? [])],
+			headings: [...(options.metadataHanBigramsByField?.headings ?? [])],
+			folder: [...(options.metadataHanBigramsByField?.folder ?? [])],
+			tag: [...(options.metadataHanBigramsByField?.tag ?? [])],
+		},
+		bodyHanSegments: [...(options.bodyHanSegments ?? [])],
+		bodyTokens: [...(options.bodyTokens ?? options.bodyTerms ?? [])],
+	};
+}
+
+function createReader(store: CoverageLexicalV2IndexStore) {
+	return store.createStorageReader({
+		getBodyTokenSequence: () => undefined,
+		prefetchBodyTokenSequences: async () => {},
+		tokenizeText: (text) => text.split(/\s+/u).filter(Boolean),
+	});
+}
+
+describe("CoverageLexicalV2IndexStore", () => {
+	test("replace, update, move, and delete preserve doc ids and postings", () => {
+		const store = new CoverageLexicalV2IndexStore();
+		const firstDoc = createPreparedDocument({
+			path: "notes/alpha.md",
+			generation: 1,
+			basenameTerms: ["alpha"],
+			folderTerms: ["notes"],
+			tagTerms: ["ship"],
+			bodyTerms: ["body", "alpha"],
+			bodyHanSegments: ["中文段落"],
+			bodyTokens: ["body", "alpha"],
+		});
+
+		const firstDocId = store.replaceDocument(firstDoc);
+		expect(firstDocId).toBe(0);
+		expect(store.getDocumentId("notes/alpha.md")).toBe(0);
+
+		const reader = createReader(store);
+		expect(reader.getPostingMatches("basename", "alpha")).toEqual([0]);
+		expect(reader.getPostingMatches("body", "alpha")).toEqual([0]);
+		expect(reader.getBodyHanSegmentDocIds()).toEqual([0]);
+
+		const updatedDoc = createPreparedDocument({
+			path: "notes/alpha.md",
+			generation: 2,
+			basenameTerms: ["beta"],
+			folderTerms: ["notes"],
+			tagTerms: ["ship"],
+			bodyTerms: ["body", "beta"],
+			bodyTokens: ["body", "beta"],
+		});
+		const updatedDocId = store.replaceDocument(updatedDoc);
+		expect(updatedDocId).toBe(firstDocId);
+		expect(reader.getPostingMatches("basename", "alpha")).toBeUndefined();
+		expect(reader.getPostingMatches("basename", "beta")).toEqual([0]);
+
+		const movedDoc = createPreparedDocument({
+			path: "notes/renamed.md",
+			generation: 3,
+			basenameTerms: ["beta"],
+			folderTerms: ["notes"],
+			bodyTerms: ["body", "beta"],
+			bodyTokens: ["body", "beta"],
+		});
+		const movedDocId = store.replaceDocument(movedDoc, "notes/alpha.md");
+		expect(movedDocId).toBe(firstDocId);
+		expect(store.getDocumentId("notes/alpha.md")).toBeUndefined();
+		expect(store.getDocumentId("notes/renamed.md")).toBe(firstDocId);
+
+		store.deleteDocument("notes/renamed.md");
+		expect(store.getIndexedDocumentCount()).toBe(0);
+		expect(reader.getPostingMatches("basename", "beta")).toBeUndefined();
+		expect(reader.getBodyHanSegmentDocIds()).toEqual([]);
+	});
+
+	test("snapshot roundtrip preserves resident state and reports cold-sidecar bytes", () => {
+		const store = new CoverageLexicalV2IndexStore();
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/han.md",
+				generation: 11,
+				basenameTerms: ["han"],
+				folderTerms: ["notes"],
+				bodyTerms: ["han", "body"],
+				bodyHanSegments: ["测试正文"],
+				bodyTokens: ["han", "body", "tokens"],
+				metadataHanBigramsByField: {
+					basename: ["测试"],
+				},
+			}),
+		);
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/latin.md",
+				generation: 12,
+				basenameTerms: ["latin"],
+				folderTerms: ["notes"],
+				bodyTerms: ["latin", "search"],
+				bodyTokens: ["latin", "search", "tokens"],
+			}),
+		);
+		store.compactOverlayIntoSegment(true);
+
+		const snapshot = store.buildSnapshotState();
+		const restored = new CoverageLexicalV2IndexStore();
+		restored.restoreSnapshot(snapshot);
+		const reader = createReader(restored);
+
+		expect(reader.getPostingMatches("basename", "han")).toEqual([0]);
+		expect(reader.getPostingMatches("basename", "latin")).toEqual([1]);
+		expect(reader.getMetadataHanBigramPostingMatches("basename", "测试")).toEqual([0]);
+		expect(reader.getBodyHanSegmentDocIds()).toEqual([0]);
+		expect(reader.getBodyHanSegments(0)).toEqual(["测试正文"]);
+
+		const breakdown = restored.buildIndexBreakdown();
+		expect(breakdown.segmentCount).toBeGreaterThan(0);
+		expect(breakdown.latinExpansionTermCount).toBeGreaterThan(0);
+		expect(breakdown.estimatedBytes.bodyTokenSidecar).toBeGreaterThan(0);
+		expect(breakdown.estimatedBytes.documentView).toBeGreaterThan(0);
+	});
+});
+
+describe("planCoverageLexicalV2PersistentRecovery", () => {
+	test("classifies drift and cold-sidecar repair without forcing rebuild", () => {
+		const plan = planCoverageLexicalV2PersistentRecovery({
+			currentIndexedRefs: [
+				{ path: "notes/a.md", generation: 2, size: 20 },
+				{ path: "notes/b.md", generation: 1, size: 10 },
+			],
+			persistedIndexedRefs: [
+				{ path: "notes/a.md", generation: 1, size: 20 },
+				{ path: "notes/c.md", generation: 1, size: 15 },
+			],
+			storeIndexedRefs: [
+				{ path: "notes/a.md", generation: 1, size: 20 },
+				{ path: "notes/c.md", generation: 1, size: 15 },
+			],
+			coldConsistency: {
+				needsRepair: true,
+				requiresReset: false,
+				reason: "fingerprint-mismatch",
+				missingOrStalePaths: ["notes/b.md"],
+				danglingPaths: ["notes/c.md"],
+			},
+		});
+
+		expect(plan.status).toBe("needs_heal");
+		expect(plan.reason).toBe("cold_sidecar_drift");
+		expect(plan.docsToDelete).toEqual(["notes/c.md"]);
+		expect(plan.docsToAdd).toEqual(["notes/b.md"]);
+		expect(plan.docsToUpdate).toEqual(["notes/a.md", "notes/b.md"]);
+	});
+
+	test("forces rebuild when store refs diverge from persisted refs", () => {
+		const plan = planCoverageLexicalV2PersistentRecovery({
+			currentIndexedRefs: [{ path: "notes/a.md", generation: 1, size: 10 }],
+			persistedIndexedRefs: [{ path: "notes/a.md", generation: 1, size: 10 }],
+			storeIndexedRefs: [{ path: "notes/a.md", generation: 9, size: 10 }],
+		});
+
+		expect(plan.status).toBe("needs_full_rebuild");
+		expect(plan.reason).toBe("persisted_ref_mismatch");
+	});
+
+	test("infers simple move plans from matching generation and size", () => {
+		const plan = planCoverageLexicalV2PersistentRecovery({
+			currentIndexedRefs: [{ path: "notes/renamed.md", generation: 7, size: 33 }],
+			persistedIndexedRefs: [{ path: "notes/original.md", generation: 7, size: 33 }],
+			storeIndexedRefs: [{ path: "notes/original.md", generation: 7, size: 33 }],
+		});
+
+		expect(plan.status).toBe("needs_heal");
+		expect(plan.docsToAdd).toEqual([]);
+		expect(plan.docsToDelete).toEqual([]);
+		expect(plan.docsToMove).toEqual([
+			{ oldPath: "notes/original.md", newPath: "notes/renamed.md" },
+		]);
+	});
+});
