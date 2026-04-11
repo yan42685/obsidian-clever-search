@@ -32,7 +32,6 @@ import type {
 } from "../comparator";
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
-	CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "./coverage-lexical-candidate-types";
@@ -1180,7 +1179,6 @@ function sourceCoverageLexicalV2CascadeCandidates(
 	policy: CoverageLexicalV2CandidateCascadePolicy,
 ): CoverageLexicalV2HanBackstopSourceResult {
 	const candidateStateByDocId = new Map<number, CoverageLexicalV2CascadeCandidateState>();
-	const sortedLexicon = reader.getSortedLexicon();
 	const prefixDocIds = new Set<number>();
 	const fuzzyDocIds = new Set<number>();
 	const hanBackstopDocIds = new Set<number>();
@@ -1208,10 +1206,8 @@ function sourceCoverageLexicalV2CascadeCandidates(
 		if (!matchOptions.includePrefix || !isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)) {
 			return;
 		}
-		const prefixTerms = collectCoverageLexicalV2CascadePrefixTerms(
+		const prefixTerms = reader.collectLatinPrefixTerms(
 			primaryUnit.normalizedText,
-			sortedLexicon,
-			matchOptions,
 			policy.prefixTermCapPerUnit,
 		);
 		for (const prefixTerm of prefixTerms) {
@@ -1243,11 +1239,10 @@ function sourceCoverageLexicalV2CascadeCandidates(
 		if (!matchOptions.includeFuzzy || !isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)) {
 			return;
 		}
-		const fuzzyTerms = collectCoverageLexicalV2CascadeFuzzyTerms(
+		const fuzzyTerms = reader.collectLatinFuzzyTerms(
 			primaryUnit.normalizedText,
-			sortedLexicon,
-			matchOptions,
 			policy.fuzzyTermCapPerUnit,
+			matchOptions.fuzzyProportion ?? 0,
 		);
 		for (const fuzzyTerm of fuzzyTerms) {
 			collectCoverageLexicalV2CascadeExpandedMatches(
@@ -1997,7 +1992,7 @@ function verifyCoverageLexicalV2HanBackstopMetadataCandidate(
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 ): CoverageLexicalV2MatchField[] {
 	const verifiedFields: CoverageLexicalV2MatchField[] = [];
-	const metadataTexts = reader.getMetadataVerificationTexts(docId);
+	const metadataTexts = reader.getDocumentRecord(docId);
 	if (metadataTexts) {
 		appendCoverageLexicalV2VerifiedMetadataFields(
 			verifiedFields,
@@ -2077,7 +2072,7 @@ function createCoverageLexicalV2PendingHanCandidateKey(
 
 function appendCoverageLexicalV2VerifiedMetadataFields(
 	target: CoverageLexicalV2MatchField[],
-	metadataTexts: CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
+	metadataTexts: CoverageLexicalV2CandidateCascadeDocumentRecord,
 	normalizedText: string,
 ): void {
 	if (doesCoverageLexicalV2NormalizedTextContainHanSegment(metadataTexts.basenameText, normalizedText)) {
@@ -2326,59 +2321,6 @@ function getOrCreateCoverageLexicalV2CascadeCandidateState(
 	return created;
 }
 
-function collectCoverageLexicalV2CascadePrefixTerms(
-	queryTerm: string,
-	sortedLexicon: readonly string[],
-	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions,
-	termCap: number,
-): string[] {
-	if (termCap <= 0) {
-		return [];
-	}
-	const expansions: string[] = [];
-	let termIndex = lowerBoundCoverageLexicalV2CascadeString(sortedLexicon, queryTerm);
-	while (termIndex < sortedLexicon.length && expansions.length < termCap) {
-		const candidateTerm = sortedLexicon[termIndex];
-		if (!candidateTerm.startsWith(queryTerm)) {
-			break;
-		}
-		if (
-			candidateTerm !== queryTerm &&
-			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, matchOptions) === "prefix"
-		) {
-			expansions.push(candidateTerm);
-		}
-		termIndex += 1;
-	}
-	return expansions;
-}
-
-function collectCoverageLexicalV2CascadeFuzzyTerms(
-	queryTerm: string,
-	sortedLexicon: readonly string[],
-	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions,
-	termCap: number,
-): string[] {
-	if (termCap <= 0) {
-		return [];
-	}
-	const expansions: string[] = [];
-	for (const candidateTerm of sortedLexicon) {
-		if (expansions.length >= termCap) {
-			break;
-		}
-		if (candidateTerm === queryTerm) {
-			continue;
-		}
-		if (
-			getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, matchOptions) === "fuzzy"
-		) {
-			expansions.push(candidateTerm);
-		}
-	}
-	return expansions;
-}
-
 function countCoverageLexicalV2CascadePotentialCandidates(
 	candidateStateByDocId: ReadonlyMap<number, CoverageLexicalV2CascadeCandidateState>,
 ): number {
@@ -2534,31 +2476,4 @@ function createCoverageLexicalV2CascadePrimaryUnitKey(
 	normalizedText: string,
 ): string {
 	return String(surfaceGroupIndex) + ":" + normalizedText;
-}
-
-function lowerBoundCoverageLexicalV2CascadeString(
-	values: readonly string[],
-	target: string,
-): number {
-	let low = 0;
-	let high = values.length;
-	while (low < high) {
-		const middle = (low + high) >>> 1;
-		if (compareCoverageLexicalV2CascadeStrings(values[middle], target) < 0) {
-			low = middle + 1;
-			continue;
-		}
-		high = middle;
-	}
-	return low;
-}
-
-function compareCoverageLexicalV2CascadeStrings(left: string, right: string): number {
-	if (left < right) {
-		return -1;
-	}
-	if (left > right) {
-		return 1;
-	}
-	return 0;
 }

@@ -1014,6 +1014,13 @@ Preferred lexical order:
     candidate sourcing -> layer-1 frontier planning -> layer-2/3/4 complete-bucket narrowing -> highest-unresolved-bucket verification -> top-bucket proximity resolution -> display
   - cheap comparator signals are now cached once per candidate and reused through layer-2/3/4 narrowing; verification only patches proximity on the resolved top bucket
   - bounded fallback remains discovery-only in normal ranking, while a narrow Han salvage path is available only when normal layer-1 coverage and fuzzy salvage are both globally absent
+- Independent V2 index-store / persistence completion pass: in progress
+  - active runtime now uses the standalone `coverage-lexical-v2/index-store/` path for resident store, journal/snapshot persistence, and body-token cold sidecar ownership
+  - the resident store now exposes a V2-only reader boundary over `document_view`, exact postings, metadata Han gate postings, resident `bodyHanSegments`, and cold body-token fetch/prefetch
+  - live updates now run through manifest-backed replace semantics, and lexical move events can reuse the same docId through a V2 move fast-path instead of always degrading to delete+add
+  - startup restore now has a V2-owned persistent recovery planner that compares current vault refs, persisted refs, store refs, and cold-sidecar consistency before choosing heal vs full rebuild
+  - remaining completion gate:
+    benchmark/acceptance proof for resident-vs-cold layout plus broader regression coverage still needs to be closed before this workstream can be marked completed
 - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
 - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
   real-token lanes first, then residual/fragile Han bigram gating, then exact `includes(...)` verification before synthetic Han exact evidence is admitted
@@ -1082,6 +1089,17 @@ Current validation snapshot:
   - p50 ratio: `2.482x`
   - p100 ratio: `2.152x`
   - estimated index bytes ratio: `1.464x`
+- direct automation-corpus resident-minimal measurement for the independent
+  `index-store` now records:
+  - resident bytes: `82,874`
+  - cold sidecar bytes: `105,760`
+  - total resident+cold bytes: `188,634`
+  - recent legacy-coupled live-bytes baseline on the same automation corpus:
+    `101,451`
+  - this is enough to keep resident bytes below the old live in-memory
+    baseline, but broader benchmark acceptance and real-vault validation are
+    still open before the persistence/index-store workstream can be marked
+    completed
 - latest candidate-cascade diagnostics on the automation corpus confirm that
   verification remains tightly bounded:
   - `198 / 198` queries completed without verification overflow
@@ -1423,6 +1441,17 @@ Fuzzy salvage:
     verification bucket membership, resolved top-bucket membership,
     verification skip reason, salvage usage, pending-Han frontier size,
     Han promotion counts, and body narrow-scan workload
+  - the active runtime now also routes through an independent V2 `index-store/`
+    implementation that owns resident postings/doc view state, body-token cold
+    sidecar ownership, Dexie snapshot+journal persistence, move-aware journal
+    replay, and engine-owned persistent recovery planning
+  - current store layout uses tiered resident segments plus a mutable overlay,
+    with tiny-inline / delta-varint resident segment encoding and rich per-doc
+    manifests for rollback without reconstructing old raw text
+  - current validation covers build typecheck plus focused index-store tests for
+    replace/update/delete/move semantics, snapshot roundtrip, and recovery-plan
+    classification; broader benchmark acceptance and remaining repo-wide test
+    cleanup are still open, so this persistence pass is not yet marked completed
 
 ### Phase 7. Old-Code Removal And Shell Shrinkage
 
@@ -1655,9 +1684,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
-
-
 
 
 

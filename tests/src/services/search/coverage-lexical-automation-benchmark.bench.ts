@@ -1,4 +1,7 @@
 import { performance } from "perf_hooks";
+import type {
+	CoverageLexicalV2CandidateCascadeTrace,
+} from "src/services/search/coverage-lexical-v2";
 import { container } from "tsyringe";
 
 jest.mock("src/services/search/tokenizer", () => ({
@@ -138,6 +141,7 @@ type CoverageLexicalBenchmarkDiagnostic =
 	| "recall"
 	| "lane-study"
 	| "offload"
+	| "cascade"
 	| "wins"
 	| "disagreements"
 	| "misses"
@@ -188,6 +192,7 @@ type QueryOutcome = {
 	rank: number;
 	results: string[];
 	offloadDebug?: CoverageLexicalBenchmarkOffloadSearchDebug | null;
+	candidateCascadeDebug?: CoverageLexicalV2CandidateCascadeTrace | null;
 };
 
 type RecallContractType =
@@ -234,6 +239,9 @@ type EngineLike = {
 	getBenchmarkPhaseTimingSummary?(): PhaseTimingSummary | null;
 	getLastBenchmarkOffloadSearchDebug?():
 		| CoverageLexicalBenchmarkOffloadSearchDebug
+		| null;
+	getLastBenchmarkV2CandidateCascadeDebug?():
+		| CoverageLexicalV2CandidateCascadeTrace
 		| null;
 };
 
@@ -2655,6 +2663,7 @@ async function runBenchmark(
 	queryCases: QueryCase[],
 	options: {
 		includeOffloadDiagnostics?: boolean;
+		includeCandidateCascadeDiagnostics?: boolean;
 	} = {},
 ): Promise<{
 	summary: BenchmarkSummary;
@@ -2727,6 +2736,9 @@ async function runBenchmark(
 			results: paths.slice(0, 5),
 			offloadDebug: options.includeOffloadDiagnostics
 				? (engine.getLastBenchmarkOffloadSearchDebug?.() ?? null)
+				: undefined,
+			candidateCascadeDebug: options.includeCandidateCascadeDiagnostics
+				? (engine.getLastBenchmarkV2CandidateCascadeDebug?.() ?? null)
 				: undefined,
 		});
 	}
@@ -3766,11 +3778,116 @@ const COVERAGE_LEXICAL_BENCHMARK_DIAGNOSTIC_NAMES: readonly CoverageLexicalBench
 		"recall",
 		"lane-study",
 		"offload",
+		"cascade",
 		"wins",
 		"disagreements",
 		"misses",
 		"prune",
 	];
+
+function summarizeCoverageLexicalCandidateCascadeDiagnostics(outcomes: QueryOutcome[]): {
+	queryCount: number;
+	usedFuzzySalvageCount: number;
+	usedHanFallbackSalvageCount: number;
+	verificationSkippedReasonCounts: Record<string, number>;
+	verificationBucketDocCount: { avg: number; p50: number; p100: number; max: number };
+	verificationBodyDocCount: { avg: number; p50: number; p100: number; max: number };
+	verificationEstimatedBodyTokenSum: { avg: number; p50: number; p100: number; max: number };
+	verificationBodyAvailabilityTotals: {
+		resident: number;
+		hotCache: number;
+		coldOrSnapshot: number;
+		missing: number;
+	};
+	topQueriesByEstimatedBodyTokenSum: Array<{
+		query: string;
+		type: QueryType;
+		rank: number;
+		verificationBucketDocCount: number;
+		verificationBodyDocCount: number;
+		verificationEstimatedBodyTokenSum: number;
+		verificationSkippedReason: string;
+	}>;
+} {
+	const entries = outcomes
+		.map((outcome) => {
+			const debug = outcome.candidateCascadeDebug;
+			if (!debug) {
+				return null;
+			}
+			return {
+				query: outcome.query,
+				type: outcome.type,
+				rank: outcome.rank,
+				usedFuzzySalvage: debug.usedFuzzySalvage,
+				usedHanFallbackSalvage: debug.usedHanFallbackSalvage,
+				verificationSkippedReason: debug.verificationSkippedReason,
+				verificationBucketDocCount: debug.verificationBucketDocCount,
+				verificationBodyDocCount: debug.verificationBodyDocCount,
+				verificationEstimatedBodyTokenSum:
+					debug.verificationEstimatedBodyTokenSum,
+				verificationBodyAvailability: debug.verificationBodyAvailability,
+			};
+		})
+		.filter(
+			(entry): entry is NonNullable<typeof entry> => entry !== null,
+		);
+	const summarizeNumericSeries = (values: readonly number[]) => ({
+		avg:
+			values.length > 0
+				? values.reduce((sum, value) => sum + value, 0) / values.length
+				: 0,
+		p50: values.length > 0 ? percentile([...values], 0.5) : 0,
+		p100: values.length > 0 ? Math.max(...values) : 0,
+		max: values.length > 0 ? Math.max(...values) : 0,
+	});
+	return {
+		queryCount: entries.length,
+		usedFuzzySalvageCount: entries.filter((entry) => entry.usedFuzzySalvage).length,
+		usedHanFallbackSalvageCount: entries.filter((entry) => entry.usedHanFallbackSalvage).length,
+		verificationSkippedReasonCounts: entries.reduce<Record<string, number>>((counts, entry) => {
+			counts[entry.verificationSkippedReason] =
+				(counts[entry.verificationSkippedReason] ?? 0) + 1;
+			return counts;
+		}, {}),
+		verificationBucketDocCount: summarizeNumericSeries(
+			entries.map((entry) => entry.verificationBucketDocCount),
+		),
+		verificationBodyDocCount: summarizeNumericSeries(
+			entries.map((entry) => entry.verificationBodyDocCount),
+		),
+		verificationEstimatedBodyTokenSum: summarizeNumericSeries(
+			entries.map((entry) => entry.verificationEstimatedBodyTokenSum),
+		),
+		verificationBodyAvailabilityTotals: entries.reduce(
+			(summary, entry) => {
+				summary.resident += entry.verificationBodyAvailability.resident;
+				summary.hotCache += entry.verificationBodyAvailability.hotCache;
+				summary.coldOrSnapshot += entry.verificationBodyAvailability.coldOrSnapshot;
+				summary.missing += entry.verificationBodyAvailability.missing;
+				return summary;
+			},
+			{ resident: 0, hotCache: 0, coldOrSnapshot: 0, missing: 0 },
+		),
+		topQueriesByEstimatedBodyTokenSum: [...entries]
+			.sort(
+				(left, right) =>
+					right.verificationEstimatedBodyTokenSum - left.verificationEstimatedBodyTokenSum ||
+					right.verificationBodyDocCount - left.verificationBodyDocCount ||
+					left.query.localeCompare(right.query),
+			)
+			.slice(0, 10)
+			.map((entry) => ({
+				query: entry.query,
+				type: entry.type,
+				rank: entry.rank,
+				verificationBucketDocCount: entry.verificationBucketDocCount,
+				verificationBodyDocCount: entry.verificationBodyDocCount,
+				verificationEstimatedBodyTokenSum: entry.verificationEstimatedBodyTokenSum,
+				verificationSkippedReason: entry.verificationSkippedReason,
+			})),
+	};
+}
 
 function resolveCoverageLexicalBenchmarkDiagnostics(): ReadonlySet<CoverageLexicalBenchmarkDiagnostic> {
 	const raw = process.env.COVERAGE_LEXICAL_BENCH_DIAGNOSTICS?.trim();
@@ -3845,6 +3962,8 @@ describe("coverage lexical automation benchmark", () => {
 		const diagnostics = resolveCoverageLexicalBenchmarkDiagnostics();
 		const includeOffloadDiagnostics =
 			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "offload");
+		const includeCandidateCascadeDiagnostics =
+			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "cascade");
 		const includePruneDiagnostics =
 			shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "prune");
 		const tokenizer = createMockTokenizer();
@@ -3898,7 +4017,10 @@ describe("coverage lexical automation benchmark", () => {
 					coverageLexicalV2,
 					documents,
 					queryCases,
-					{ includeOffloadDiagnostics },
+					{
+						includeOffloadDiagnostics,
+						includeCandidateCascadeDiagnostics,
+					},
 				),
 		);
 		const coverageV2VsMini = shouldPrintCoverageLexicalBenchmarkDiagnostic(
@@ -4318,6 +4440,8 @@ describe("coverage lexical automation benchmark", () => {
 				JSON.stringify(
 					{
 						MiniSearch: mini.getIndexBreakdown?.() ?? null,
+						CoverageLexicalCore:
+							coverageLexicalCore.getIndexBreakdown?.() ?? null,
 						CoverageLexicalV2:
 							coverageLexicalV2.getIndexBreakdown?.() ?? null,
 					},
@@ -4370,6 +4494,18 @@ describe("coverage lexical automation benchmark", () => {
 				"[coverage-lexical-automation-benchmark] offload-diagnostics-v2",
 				JSON.stringify(
 					summarizeOffloadDiagnostics(coverageV2Result.outcomes),
+					null,
+					2,
+				),
+			);
+		}
+		if (includeCandidateCascadeDiagnostics) {
+			console.log(
+				"[coverage-lexical-automation-benchmark] candidate-cascade-diagnostics-v2",
+				JSON.stringify(
+					summarizeCoverageLexicalCandidateCascadeDiagnostics(
+						coverageV2Result.outcomes,
+					),
 					null,
 					2,
 				),

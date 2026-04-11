@@ -104,6 +104,8 @@ import {
 } from "./coverage-lexical-v2-storage-adapter";
 import type {
 	CoverageLexicalV2CandidateCascadeTrace,
+	CoverageLexicalV2CandidateCascadeMatchOptions,
+	getCoverageLexicalV2CandidateCascadeMatchQuality,
 } from "../coverage-lexical-v2";
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
@@ -1343,6 +1345,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 							basenameText: document.basenameText,
 							aliasesText: document.aliasesText,
 							headingsText: document.headingsText,
+							folderText: document.folderText,
+							tagsText: document.tagsText,
 						};
 					},
 					getPostingMatches: (field, term) => {
@@ -1380,20 +1384,21 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						}
 					},
 					getBodyHanSegments: (docId) => this.documentBodyHanSegmentsById[docId],
-					getMetadataVerificationTexts: (docId) => {
-						const document = this.documentById[docId];
-						if (!document) {
-							return null;
-						}
-						return {
-							basenameText: document.basenameText,
-							aliasesText: document.aliasesText,
-							headingsText: document.headingsText,
-							folderText: document.folderText,
-							tagsText: document.tagsText,
-						};
-					},
-					getSortedLexicon: () => this.getSortedLexicon(),
+					collectLatinPrefixTerms: (queryTerm, cap) =>
+						this.getSortedLexicon()
+							.filter(
+								(term) => term !== queryTerm && term.startsWith(queryTerm),
+							)
+							.slice(0, cap),
+					collectLatinFuzzyTerms: (queryTerm, cap, _fuzzyProportion) =>
+						this.getSortedLexicon()
+							.filter(
+								(term) =>
+									term !== queryTerm &&
+									term.length >= queryTerm.length &&
+									term[0] === queryTerm[0],
+							)
+							.slice(0, cap),
 					getBodyTokenSequence: (docId) =>
 						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId),
 					prefetchBodyTokenSequences: async (docIds) => {

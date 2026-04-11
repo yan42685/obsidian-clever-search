@@ -63,21 +63,15 @@ function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 		getBodyHanSegments(docId) {
 			return bodyHanSegments.get(docId);
 		},
-		getMetadataVerificationTexts(docId) {
-			const document = documents.get(docId);
-			if (!document) {
-				return null;
-			}
-			return {
-				basenameText: document.basenameText,
-				aliasesText: document.aliasesText,
-				headingsText: document.headingsText,
-				folderText: document.folderText,
-				tagsText: document.tagsText,
-			};
+		collectLatinPrefixTerms(queryTerm, cap) {
+			return ["ai", "exam", "plan", "summary"]
+				.filter((term) => term.startsWith(queryTerm) && term !== queryTerm)
+				.slice(0, cap);
 		},
-		getSortedLexicon() {
-			return ["ai", "exam", "plan", "summary"];
+		collectLatinFuzzyTerms(queryTerm, cap, _fuzzyProportion) {
+			return ["ai", "exam", "plan", "summary"]
+				.filter((term) => term !== queryTerm && term.length >= queryTerm.length)
+				.slice(0, cap);
 		},
 		getBodyTokenSequence(docId) {
 			return bodyTokenSequences.get(docId);

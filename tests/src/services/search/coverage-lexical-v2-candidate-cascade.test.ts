@@ -110,6 +110,8 @@ function createStorageReader(config: {
 					basenameText: document.basenameText,
 					aliasesText: document.aliasesText ?? "",
 					headingsText: document.headingsText ?? "",
+					folderText: document.folderText ?? "",
+					tagsText: document.tagsText ?? "",
 				};
 			},
 			getBodyHanSegmentDocIds() {
@@ -126,21 +128,19 @@ function createStorageReader(config: {
 			getBodyHanSegments(docId) {
 				return bodyHanSegments.get(docId);
 			},
-			getMetadataVerificationTexts(docId) {
-				const document = documentMap.get(docId);
-				if (!document) {
-					return null;
-				}
-				return {
-					basenameText: document.basenameText,
-					aliasesText: document.aliasesText ?? "",
-					headingsText: document.headingsText ?? "",
-					folderText: document.folderText ?? "",
-					tagsText: document.tagsText ?? "",
-				};
+			collectLatinPrefixTerms(queryTerm, cap) {
+				return config.lexicon
+					.filter((term) => term.startsWith(queryTerm) && term !== queryTerm)
+					.slice(0, cap);
 			},
-			getSortedLexicon() {
-				return [...config.lexicon];
+			collectLatinFuzzyTerms(queryTerm, cap, _fuzzyProportion) {
+				return config.lexicon
+					.filter((term) =>
+						term !== queryTerm &&
+						term.length >= queryTerm.length &&
+						term.slice(1) === queryTerm.slice(1),
+					)
+					.slice(0, cap);
 			},
 			getBodyTokenSequence,
 			prefetchBodyTokenSequences,
@@ -167,6 +167,8 @@ function createSyntheticCandidateState(
 			basenameText: `${docId}`,
 			aliasesText: "",
 			headingsText: "",
+			folderText: "",
+			tagsText: "",
 		},
 		fieldTerms: {
 			basenameTerms: new Set<string>(),

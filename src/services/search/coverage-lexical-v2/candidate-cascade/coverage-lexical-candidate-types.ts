@@ -12,12 +12,6 @@ export type CoverageLexicalV2CandidateCascadeDocumentRecord = {
 	basenameText: string;
 	aliasesText: string;
 	headingsText: string;
-};
-
-export type CoverageLexicalV2CandidateCascadeMetadataVerificationTexts = {
-	basenameText: string;
-	aliasesText: string;
-	headingsText: string;
 	folderText: string;
 	tagsText: string;
 };
@@ -34,10 +28,12 @@ export type CoverageLexicalV2CandidateCascadeStorageReader = {
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;
 	getBodyHanSegments(docId: number): readonly string[] | undefined;
-	getMetadataVerificationTexts(
-		docId: number,
-	): CoverageLexicalV2CandidateCascadeMetadataVerificationTexts | null;
-	getSortedLexicon(): readonly string[];
+	collectLatinPrefixTerms(queryTerm: string, cap: number): readonly string[];
+	collectLatinFuzzyTerms(
+		queryTerm: string,
+		cap: number,
+		fuzzyProportion: number,
+	): readonly string[];
 	getBodyTokenSequence(docId: number): readonly string[] | undefined;
 	prefetchBodyTokenSequences(docIds: readonly number[]): Promise<void>;
 	tokenizeText(text: string): readonly string[];

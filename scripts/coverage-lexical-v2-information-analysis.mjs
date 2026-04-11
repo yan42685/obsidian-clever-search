@@ -29,6 +29,13 @@ function main() {
 	const rawIndexedTextBytes = corpus.rawIndexedTextBytes;
 	const rawMetadataTextBytes = corpus.rawMetadataTextBytes;
 	const rawBodyTextBytes = corpus.rawBodyTextBytes;
+	const residentFloorCodecBytes =
+		codecFloorEstimates.combined.partitionedEliasFanoBytes +
+		informationFloor.documentView.totalBytes +
+		informationFloor.bodyVerificationView.totalBytes +
+		informationFloor.latinExpansionLexicon.totalBytes;
+	const actualResidentBytes = extractCurrentResidentBytes(currentBreakdown);
+	const actualColdBytes = extractCurrentColdBytes(currentBreakdown);
 
 	const output = {
 		input: {
@@ -50,42 +57,67 @@ function main() {
 		requiredInformationPrimitives: {
 			exact_doc_incidence: informationFloor.exactDocIncidence,
 			metadata_han_gate_incidence: informationFloor.metadataHanGateIncidence,
-			body_verification_view: informationFloor.bodyVerificationView,
+			document_view: informationFloor.documentView,
+			latin_expansion_lexicon: informationFloor.latinExpansionLexicon,
+			body_han_verification_view: informationFloor.bodyVerificationView,
+			body_token_sidecar: informationFloor.bodyTokenSidecar,
 			body_pending_scan_work: replay.bodyPendingScanWork,
-			proximity_sequence_view: informationFloor.proximitySequenceView,
 		},
-		information_floor: {
-			totalBytes: informationFloor.totalBytes,
+		resident_information_floor: {
+			exact_doc_incidence: informationFloor.exactDocIncidence,
+			metadata_han_gate_incidence: informationFloor.metadataHanGateIncidence,
+			document_view: informationFloor.documentView,
+			latin_expansion_lexicon: informationFloor.latinExpansionLexicon,
+			body_han_verification_view: informationFloor.bodyVerificationView,
+			totalBytes: informationFloor.residentTotalBytes,
 			requiredInfoBytesPerRawIndexedTextByte: safeRatio(
-				informationFloor.totalBytes,
+				informationFloor.residentTotalBytes,
 				rawIndexedTextBytes,
 			),
 		},
-		codec_floor_estimates: {
+		cold_sidecar_floor: {
+			body_token_sidecar: informationFloor.bodyTokenSidecar,
+			totalBytes: informationFloor.coldTotalBytes,
+		},
+		codec_floor_estimate: {
 			exact_doc_incidence: codecFloorEstimates.exactDocIncidence,
 			metadata_han_gate_incidence: codecFloorEstimates.metadataHanGateIncidence,
+			document_view: informationFloor.documentView,
+			latin_expansion_lexicon: informationFloor.latinExpansionLexicon,
+			body_han_verification_view: informationFloor.bodyVerificationView,
+			body_token_sidecar: informationFloor.bodyTokenSidecar,
 			combined: codecFloorEstimates.combined,
 			codecFloorBytesPerRawIndexedTextByte: safeRatio(
-				codecFloorEstimates.combined.partitionedEliasFanoBytes +
-					informationFloor.bodyVerificationView.totalBytes +
-					informationFloor.proximitySequenceView.totalBytes,
+				residentFloorCodecBytes + informationFloor.bodyTokenSidecar.totalBytes,
 				rawIndexedTextBytes,
 			),
 		},
 		current_js_hot_cost: currentBreakdown,
+		actual_v2_layout: currentBreakdown
+			? {
+					residentBytes: actualResidentBytes,
+					coldBytes: actualColdBytes,
+					totalBytes:
+						actualResidentBytes == null || actualColdBytes == null
+							? null
+							: actualResidentBytes + actualColdBytes,
+			  }
+			: null,
 		ratios: {
 			required_info_bytes_over_raw_indexed_text_bytes: safeRatio(
-				informationFloor.totalBytes,
+				informationFloor.residentTotalBytes,
 				rawIndexedTextBytes,
 			),
 			codec_floor_bytes_over_raw_indexed_text_bytes: safeRatio(
-				codecFloorEstimates.combined.partitionedEliasFanoBytes +
-					informationFloor.bodyVerificationView.totalBytes +
-					informationFloor.proximitySequenceView.totalBytes,
+				residentFloorCodecBytes + informationFloor.bodyTokenSidecar.totalBytes,
 				rawIndexedTextBytes,
 			),
-			current_hot_live_bytes_over_raw_indexed_text_bytes: safeRatio(
-				extractCurrentHotBytes(currentBreakdown),
+			actual_v2_resident_bytes_over_raw_indexed_text_bytes: safeRatio(
+				actualResidentBytes,
+				rawIndexedTextBytes,
+			),
+			actual_v2_cold_bytes_over_raw_indexed_text_bytes: safeRatio(
+				actualColdBytes,
 				rawIndexedTextBytes,
 			),
 			body_verification_view_bytes_over_raw_body_text_bytes: safeRatio(
@@ -102,12 +134,11 @@ function main() {
 		appendix: {
 			current_breakdown_comparison: currentBreakdown
 				? {
-						currentHotBytes: extractCurrentHotBytes(currentBreakdown),
-						requiredInfoBytes: informationFloor.totalBytes,
-						codecFloorBytes:
-							codecFloorEstimates.combined.partitionedEliasFanoBytes +
-							informationFloor.bodyVerificationView.totalBytes +
-							informationFloor.proximitySequenceView.totalBytes,
+						actualResidentBytes,
+						actualColdBytes,
+						requiredResidentInfoBytes: informationFloor.residentTotalBytes,
+						coldSidecarFloorBytes: informationFloor.coldTotalBytes,
+						residentCodecFloorBytes: residentFloorCodecBytes,
 				  }
 				: null,
 		},
@@ -265,18 +296,27 @@ function buildCorpus(documents) {
 function buildInformationFloor(corpus) {
 	const exactDocIncidence = buildIncidencePrimitive(corpus.exactIncidence);
 	const metadataHanGateIncidence = buildIncidencePrimitive(corpus.metadataHanGateIncidence);
+	const documentView = buildDocumentView(corpus.documents);
+	const latinExpansionLexicon = buildLatinExpansionLexicon(corpus.exactIncidence);
 	const bodyVerificationView = buildBodyVerificationView(corpus.bodyVerificationView);
-	const proximitySequenceView = buildProximitySequenceView(corpus.proximityTokenSequences);
+	const bodyTokenSidecar = buildBodyTokenSidecar(corpus.proximityTokenSequences);
+	const residentTotalBytes =
+		exactDocIncidence.totalBytes +
+		metadataHanGateIncidence.totalBytes +
+		documentView.totalBytes +
+		latinExpansionLexicon.totalBytes +
+		bodyVerificationView.totalBytes;
+	const coldTotalBytes = bodyTokenSidecar.totalBytes;
 	return {
 		exactDocIncidence,
 		metadataHanGateIncidence,
+		documentView,
+		latinExpansionLexicon,
 		bodyVerificationView,
-		proximitySequenceView,
-		totalBytes:
-			exactDocIncidence.totalBytes +
-			metadataHanGateIncidence.totalBytes +
-			bodyVerificationView.totalBytes +
-			proximitySequenceView.totalBytes,
+		bodyTokenSidecar,
+		residentTotalBytes,
+		coldTotalBytes,
+		totalBytes: residentTotalBytes + coldTotalBytes,
 	};
 }
 
@@ -538,27 +578,58 @@ function buildBodyVerificationView(bodyVerificationView) {
 	};
 }
 
-function buildProximitySequenceView(proximityTokenSequences) {
+function buildDocumentView(documents) {
+	let pathBytes = 0;
+	let stableKeyBytes = 0;
+	let metadataTextBytes = 0;
+	for (const document of documents) {
+		pathBytes += utf8Bytes(document.path);
+		stableKeyBytes += utf8Bytes(document.path);
+		metadataTextBytes += utf8Bytes(document.basename);
+		metadataTextBytes += utf8Bytes(document.aliases);
+		metadataTextBytes += utf8Bytes(document.headings);
+		metadataTextBytes += utf8Bytes(document.folder);
+		metadataTextBytes += utf8Bytes(document.tags);
+	}
+	return {
+		documentCount: documents.length,
+		pathBytes,
+		stableKeyBytes,
+		metadataTextBytes,
+		totalBytes: pathBytes + stableKeyBytes + metadataTextBytes,
+	};
+}
+
+function buildLatinExpansionLexicon(exactIncidence) {
+	const latinTerms = new Set();
+	for (const key of exactIncidence.keys()) {
+		const term = key.slice(key.indexOf(":") + 1);
+		if (/^[a-z0-9_-]+$/u.test(term)) {
+			latinTerms.add(term);
+		}
+	}
+	return {
+		termCount: latinTerms.size,
+		utf8Bytes: sumUtf8Bytes(latinTerms),
+		totalBytes: sumUtf8Bytes(latinTerms),
+	};
+}
+
+function buildBodyTokenSidecar(proximityTokenSequences) {
 	const lexicon = new Set();
 	let bodyTokenCount = 0;
-	let metadataTokenCount = 0;
 	for (const sequences of proximityTokenSequences.values()) {
 		for (const token of sequences.body) {
 			lexicon.add(token);
 			bodyTokenCount += 1;
 		}
-		for (const token of sequences.metadata) {
-			lexicon.add(token);
-			metadataTokenCount += 1;
-		}
 	}
 	const lexiconUtf8Bytes = sumUtf8Bytes(lexicon);
-	const tokenIdBytes = (bodyTokenCount + metadataTokenCount) * 4;
+	const tokenIdBytes = bodyTokenCount * 4;
 	return {
 		uniqueTokenCount: lexicon.size,
 		lexiconUtf8Bytes,
 		bodyTokenCount,
-		metadataTokenCount,
 		tokenIdBytes,
 		totalBytes: lexiconUtf8Bytes + tokenIdBytes,
 	};
@@ -798,11 +869,29 @@ function safeRatio(numerator, denominator) {
 	return numerator / denominator;
 }
 
-function extractCurrentHotBytes(breakdown) {
+function extractCurrentResidentBytes(breakdown) {
 	if (!breakdown || typeof breakdown !== "object") {
 		return null;
 	}
-	return breakdown.estimatedBytes?.total ?? null;
+	if (typeof breakdown.residentBytes === "number") {
+		return breakdown.residentBytes;
+	}
+	const totalBytes = breakdown.estimatedBytes?.total;
+	const coldBytes = breakdown.estimatedBytes?.bodyTokenSidecar ?? 0;
+	if (typeof totalBytes !== "number") {
+		return null;
+	}
+	return Math.max(0, totalBytes - coldBytes);
+}
+
+function extractCurrentColdBytes(breakdown) {
+	if (!breakdown || typeof breakdown !== "object") {
+		return null;
+	}
+	if (typeof breakdown.coldBytes === "number") {
+		return breakdown.coldBytes;
+	}
+	return breakdown.estimatedBytes?.bodyTokenSidecar ?? null;
 }
 
 main();

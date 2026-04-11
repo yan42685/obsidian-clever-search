@@ -7,11 +7,12 @@ import type {
 import {
 	searchCoverageLexicalV2Engine,
 	type CoverageLexicalV2EngineSearchResult,
-	type CoverageLexicalV2CandidateCascadeDocumentRecord,
-	type CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
-	type CoverageLexicalV2CandidateCascadePostingField,
-	type CoverageLexicalV2CandidateCascadeStorageReader,
-} from "../coverage-lexical-v2";
+} from "../coverage-lexical-v2/coverage-lexical-v2-engine";
+import type {
+	CoverageLexicalV2CandidateCascadeDocumentRecord,
+	CoverageLexicalV2CandidateCascadePostingField,
+	CoverageLexicalV2CandidateCascadeStorageReader,
+} from "../coverage-lexical-v2/candidate-cascade";
 
 export type CoverageLexicalV2StorageAdapterBindings = {
 	getDocumentRecord(
@@ -27,10 +28,12 @@ export type CoverageLexicalV2StorageAdapterBindings = {
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;
 	getBodyHanSegments(docId: number): readonly string[] | undefined;
-	getMetadataVerificationTexts(
-		docId: number,
-	): CoverageLexicalV2CandidateCascadeMetadataVerificationTexts | null;
-	getSortedLexicon(): readonly string[];
+	collectLatinPrefixTerms(queryTerm: string, cap: number): readonly string[];
+	collectLatinFuzzyTerms(
+		queryTerm: string,
+		cap: number,
+		fuzzyProportion: number,
+	): readonly string[];
 	getBodyTokenSequence(docId: number): readonly string[] | undefined;
 	prefetchBodyTokenSequences(docIds: readonly number[]): Promise<void>;
 	tokenizeText(text: string): readonly string[];
@@ -56,9 +59,13 @@ export function buildCoverageLexicalV2StorageReader(
 			bigram: string,
 		) => bindings.getMetadataHanBigramPostingMatches(field, bigram),
 		getBodyHanSegments: (docId: number) => bindings.getBodyHanSegments(docId),
-		getMetadataVerificationTexts: (docId: number) =>
-			bindings.getMetadataVerificationTexts(docId),
-		getSortedLexicon: () => bindings.getSortedLexicon(),
+		collectLatinPrefixTerms: (queryTerm: string, cap: number) =>
+			bindings.collectLatinPrefixTerms(queryTerm, cap),
+		collectLatinFuzzyTerms: (
+			queryTerm: string,
+			cap: number,
+			fuzzyProportion: number,
+		) => bindings.collectLatinFuzzyTerms(queryTerm, cap, fuzzyProportion),
 		getBodyTokenSequence: (docId: number) => bindings.getBodyTokenSequence(docId),
 		prefetchBodyTokenSequences: (docIds: readonly number[]) =>
 			bindings.prefetchBodyTokenSequences(docIds),
