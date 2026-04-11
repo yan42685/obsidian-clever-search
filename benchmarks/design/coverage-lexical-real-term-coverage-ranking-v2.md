@@ -1014,11 +1014,18 @@ Preferred lexical order:
     candidate sourcing -> layer-1 frontier planning -> layer-2/3/4 complete-bucket narrowing -> highest-unresolved-bucket verification -> top-bucket proximity resolution -> display
   - cheap comparator signals are now cached once per candidate and reused through layer-2/3/4 narrowing; verification only patches proximity on the resolved top bucket
   - bounded fallback remains discovery-only in normal ranking, while a narrow Han salvage path is available only when normal layer-1 coverage and fuzzy salvage are both globally absent
-  - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
-  - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
-    real-token lanes first, then residual/fragile Han bigram gating, then exact `includes(...)` verification before synthetic Han exact evidence is admitted
-  - `metadata` and `body` now share the same Han backstop trigger and verification semantics; field priority differences remain only in the final comparator
-  - `bodyHanSegments` remain as a per-document verification/proximity view, while hot `bodyHanSegmentPostings` are no longer populated or consulted by the active V2 runtime path
+- `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
+- the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
+  real-token lanes first, then residual/fragile Han bigram gating, then exact `includes(...)` verification before synthetic Han exact evidence is admitted
+- `metadata` and `body` now share the same Han backstop trigger and verification semantics; field priority differences remain only in the final comparator
+- `bodyHanSegments` remain as a per-document verification/proximity view, while hot `bodyHanSegmentPostings` are no longer populated or consulted by the active V2 runtime path
+- Memory-First Phase 2 is now implemented in the active path:
+  - metadata Han recovery now enters a `pending Han frontier` and must pass a pre-layer-1 promotion batch before it can contribute synthetic exact Han evidence
+  - body Han recovery no longer uses hot `bodyChar` postings; it now runs a resident `bodyHanSegments` narrow scan and promotes only verified matches
+  - unpromoted Han pending candidates do not enter layer 1, matched-field accounting, or display ranking
+  - active live-index accounting no longer includes `postings.bodyChar`; on the automation corpus the active V2 benchmark now reports `estimatedIndexKB ~= 99.1` with the same `objective 0.885 / top1 0.818 / top3 0.939 / zeroRate 0` quality gate
+  - active trace/debug now records pending-frontier volume, Han promotions, metadata verification promotions, and body narrow-scan workload
+  - architecture-neutral analysis tooling for required V2 information primitives now lives at `scripts/coverage-lexical-v2-information-analysis.mjs`
 
 ### Locked Decision Implementation Snapshot (2026-04-11)
 
@@ -1403,6 +1410,9 @@ Fuzzy salvage:
   - exact candidate sourcing is exhaustive
   - layer-1 currently uses Latin `exact/prefix`, Han `exact`, plus fuzzy salvage
     when normal coverage is zero
+  - Han backstop candidate sourcing is now memory-first:
+    metadata uses hot Han bigram gate -> pending frontier -> pre-layer-1 promotion,
+    while body uses resident `bodyHanSegments` narrow scan -> verified promotion
   - cheap comparator signals are cached once per candidate and reused through
     layer-2/3/4 complete-bucket narrowing
   - late verification is active only for the highest unresolved bucket, with an
@@ -1411,7 +1421,8 @@ Fuzzy salvage:
     a separate global rerank stage in the active architecture
   - internal candidate-cascade trace now records layer mode, retained/deferred buckets,
     verification bucket membership, resolved top-bucket membership,
-    verification skip reason, and salvage usage
+    verification skip reason, salvage usage, pending-Han frontier size,
+    Han promotion counts, and body narrow-scan workload
 
 ### Phase 7. Old-Code Removal And Shell Shrinkage
 
@@ -1644,7 +1655,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
 
 
 

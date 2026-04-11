@@ -54,6 +54,13 @@ function createCoverageLexicalV2EmptyTrace(): CoverageLexicalV2CandidateCascadeT
 			missing: 0,
 		},
 		verificationSkippedReason: "no_verification_candidates",
+		pendingHanFrontierCount: 0,
+		hanPromotedCount: 0,
+		hanPromotionVerifiedCount: 0,
+		bodyHanScanDocCount: 0,
+		bodyHanScanSegmentCount: 0,
+		bodyHanScanMatchedDocCount: 0,
+		hanPromotionSkippedReason: "no_pending_candidates",
 		usedFuzzySalvage: false,
 		usedHanFallbackSalvage: false,
 	};

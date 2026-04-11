@@ -49,10 +49,15 @@ function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 		getDocumentRecord(docId) {
 			return documents.get(docId) ?? null;
 		},
+		getBodyHanSegmentDocIds() {
+			return [...bodyHanSegments.entries()]
+				.filter(([, segments]) => segments.length > 0)
+				.map(([docId]) => docId);
+		},
 		getPostingMatches(field, term) {
 			return postings.get(`${field}:${term}`);
 		},
-		getHanBigramPostingMatches(_scope, field, bigram) {
+		getMetadataHanBigramPostingMatches(field, bigram) {
 			return postings.get(`${field}:${bigram}`);
 		},
 		getBodyHanSegments(docId) {

@@ -112,10 +112,15 @@ function createStorageReader(config: {
 					headingsText: document.headingsText ?? "",
 				};
 			},
+			getBodyHanSegmentDocIds() {
+				return [...bodyHanSegments.entries()]
+					.filter(([, segments]) => segments.length > 0)
+					.map(([docId]) => docId);
+			},
 			getPostingMatches(field, term) {
 				return config.postings[`${field}:${term}`];
 			},
-			getHanBigramPostingMatches(_scope, field, bigram) {
+			getMetadataHanBigramPostingMatches(field, bigram) {
 				return hanBigramPostings.get(`${field}:${bigram}`);
 			},
 			getBodyHanSegments(docId) {
@@ -197,10 +202,13 @@ function createSyntheticCandidateState(
 		},
 		needsVerification: false,
 		hydrationStatus: "not_requested",
+		prefetchedBodyTokenSequence: undefined,
 		potentialPrimaryCoverageCount,
 		fuzzySalvageCoverageCount: 0,
+		hanFallbackSalvageGroupCount: 0,
 		matchedFieldsByPrimaryUnit: new Map(),
 		bestQualityByPrimaryUnit: new Map(),
+		fallbackMatchedSurfaceGroups: new Set<number>(),
 	};
 }
 
@@ -440,8 +448,8 @@ describe("coverage lexical v2 cascade", () => {
 
 		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
-			queryTerms: [queryText],
-			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
+			queryTerms: [],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, []),
 			maxItemResults: 5,
 			storageReader: reader,
 			matchOptions: {},
@@ -518,6 +526,50 @@ describe("coverage lexical v2 cascade", () => {
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/real-life-force.md",
 		]);
+	});
+
+	test("tracks Han promotion trace and only lets promoted Han exact evidence reach layer1", async () => {
+		const queryText = "\u59d4\u5458\u957f";
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/chairperson.md",
+					basenameText: "misc",
+					bodyText: "\u59d4\u5458\u957f\u5927",
+				},
+				{
+					docId: 2,
+					path: "notes/member.md",
+					basenameText: "misc",
+					bodyText: "\u59d4\u5458\u4f1a\u8bb0\u5f55",
+				},
+			],
+			postings: {},
+			lexicon: [],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms: [queryText],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
+			maxItemResults: 5,
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.candidateStates.map((candidateState) => ({
+			path: candidateState.path,
+			potential: candidateState.potentialPrimaryCoverageCount,
+		}))).toEqual([
+			{ path: "notes/chairperson.md", potential: 1 },
+		]);
+		expect(result.trace.pendingHanFrontierCount).toBe(1);
+		expect(result.trace.hanPromotedCount).toBe(1);
+		expect(result.trace.hanPromotionVerifiedCount).toBe(0);
+		expect(result.trace.bodyHanScanDocCount).toBe(2);
+		expect(result.trace.bodyHanScanMatchedDocCount).toBe(1);
+		expect(result.trace.hanPromotionSkippedReason).toBe("none");
 	});
 
 	test("hydrates body tokens only for the late verification frontier", async () => {

@@ -25,7 +25,6 @@ export type CoverageLexicalSnapshotState = {
 	bodyTokenLexicon: readonly string[];
 	documents: readonly CoverageLexicalSnapshotDocumentState[];
 	bodyPostings: ReadonlyMap<string, Uint32Array>;
-	bodyCharPostings: ReadonlyMap<string, Uint32Array>;
 	bodyHanSegmentPostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasCharPostings: ReadonlyMap<string, readonly number[]>;
 	metadataAliasHanSegmentPostings: ReadonlyMap<string, readonly number[]>;

@@ -158,7 +158,6 @@ type CoverageLexicalTokenRange = {
 type CoverageLexicalDerivedDocumentIndexState = {
 	bodyTokenSequence: string[];
 	bodyTerms: Set<string>;
-	bodyCharTerms: Set<string>;
 	aliasTerms: Set<string>;
 	aliasCharTerms: Set<string>;
 	basenameTerms: Set<string>;
@@ -174,7 +173,6 @@ type CoverageLexicalDerivedDocumentIndexState = {
 
 type CoverageLexicalDerivedTermKey =
 	| "bodyTerms"
-	| "bodyCharTerms"
 	| "aliasTerms"
 	| "aliasCharTerms"
 	| "basenameTerms"
@@ -205,7 +203,6 @@ type CoverageLexicalDisplayPruneConfig = {
 const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerivedPostingBinding[] =
 	[
 		{ termsKey: "bodyTerms", postingKey: "bodyPostings" },
-		{ termsKey: "bodyCharTerms", postingKey: "bodyCharPostings" },
 		{ termsKey: "aliasTerms", postingKey: "metadataAliasPostings" },
 		{ termsKey: "aliasCharTerms", postingKey: "metadataAliasCharPostings" },
 		{ termsKey: "basenameTerms", postingKey: "metadataBasenamePostings" },
@@ -304,7 +301,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		? [...options.existingBodyTokenSequence]
 		: tokenizeCoverageLexicalDocumentText(tokenizer, options.bodyText ?? "");
 	const bodyTerms = new Set(bodyTokenSequence);
-	const bodyCharTerms = new Set(extractHanBigrams(options.bodyText ?? ""));
 	const basenameTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.basenameText),
 	);
@@ -333,7 +329,6 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 	return {
 		bodyTokenSequence,
 		bodyTerms,
-		bodyCharTerms,
 		aliasTerms,
 		aliasCharTerms,
 		basenameTerms,
@@ -582,7 +577,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		(term) => this.getOrCreateDocumentBodyTokenId(term),
 		(tokenId) => this.getDocumentBodyTokenById(tokenId),
 	);
-	private readonly bodyCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
@@ -1367,10 +1361,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								return this.metadataTagPostings.get(term);
 						}
 					},
-					getHanBigramPostingMatches: (_scope, field, bigram) => {
+					getBodyHanSegmentDocIds: () =>
+						this.documentBodyHanSegmentsById.flatMap((segments, docId) =>
+							segments && segments.length > 0 ? [docId] : [],
+						),
+					getMetadataHanBigramPostingMatches: (field, bigram) => {
 						switch (field) {
-							case "body":
-								return this.bodyCharPostings.get(bigram);
 							case "basename":
 								return this.metadataBasenameCharPostings.get(bigram);
 							case "aliases":
@@ -1466,7 +1462,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			documentIdentityCount: this.documentIdByPath.size,
 			nextDocumentId: this.nextDocumentId,
 			bodyTermCount: this.bodyPostings.size,
-			bodyCharTermCount: this.bodyCharPostings.size,
 			metadataAliasCharTermCount: this.metadataAliasCharPostings.size,
 			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
@@ -1886,8 +1881,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		switch (key) {
 			case "bodyPostings":
 				return this.bodyPostings;
-			case "bodyCharPostings":
-				return this.bodyCharPostings;
 			case "metadataAliasCharPostings":
 				return this.metadataAliasCharPostings;
 			case "metadataAliasPostings":
@@ -4938,7 +4931,6 @@ function buildStringPoolAttributionBreakdown(
 			"postings.metadataHeadingPhrase.term",
 			"postings.metadataTagPhrase.term",
 		],
-		bodyCharTerms: ["postings.bodyChar.term"],
 		metadataCharTerms: [
 			"postings.metadataAliasChar.term",
 			"postings.metadataBasenameChar.term",
@@ -4977,7 +4969,6 @@ function buildStringPoolAttributionBreakdown(
 		bodyExactTerms: summarizeSources(groupedSources.bodyExactTerms),
 		metadataExactTerms: summarizeSources(groupedSources.metadataExactTerms),
 		metadataPhraseTerms: summarizeSources(groupedSources.metadataPhraseTerms),
-		bodyCharTerms: summarizeSources(groupedSources.bodyCharTerms),
 		metadataCharTerms: summarizeSources(groupedSources.metadataCharTerms),
 		documentText: summarizeSources(groupedSources.documentText),
 		documentPaths: summarizeSources(groupedSources.documentPaths),

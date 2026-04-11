@@ -22,18 +22,14 @@ export type CoverageLexicalV2CandidateCascadeMetadataVerificationTexts = {
 	tagsText: string;
 };
 
-export type CoverageLexicalV2CandidateCascadeHanBigramScope =
-	| "metadata"
-	| "body";
-
 export type CoverageLexicalV2CandidateCascadeStorageReader = {
 	getDocumentRecord(docId: number): CoverageLexicalV2CandidateCascadeDocumentRecord | null;
+	getBodyHanSegmentDocIds(): readonly number[];
 	getPostingMatches(
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		term: string,
 	): readonly number[] | Uint32Array | undefined;
-	getHanBigramPostingMatches(
-		scope: CoverageLexicalV2CandidateCascadeHanBigramScope,
+	getMetadataHanBigramPostingMatches(
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;

@@ -5,7 +5,6 @@ export const enum CoverageLexicalSnapshotSectionKind {
 	BodyTokenLexicon = 4,
 	Documents = 5,
 	BodyPostings = 10,
-	BodyCharPostings = 11,
 	BodyHanSegmentPostings = 12,
 	MetadataAliasCharPostings = 14,
 	MetadataAliasHanSegmentPostings = 15,
@@ -34,7 +33,6 @@ export type CoverageLexicalPostingOwnership = "plain" | "packed";
 
 export type CoverageLexicalSnapshotPostingKey =
 	| "bodyPostings"
-	| "bodyCharPostings"
 	| "bodyHanSegmentPostings"
 	| "metadataAliasCharPostings"
 	| "metadataAliasHanSegmentPostings"
@@ -60,7 +58,6 @@ export type CoverageLexicalSnapshotPostingKey =
 
 export type CoverageLexicalLivePostingKey =
 	| "bodyPostings"
-	| "bodyCharPostings"
 	| "metadataAliasCharPostings"
 	| "metadataAliasPostings"
 	| "metadataBasenameCharPostings"
@@ -102,15 +99,6 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		source: "postings.body.term",
 		breakdownKey: "body",
 		contributesToLexicon: true,
-	},
-	{
-		key: "bodyCharPostings",
-		sectionKind: CoverageLexicalSnapshotSectionKind.BodyCharPostings,
-		ownership: "packed",
-		live: true,
-		source: "postings.bodyChar.term",
-		breakdownKey: "bodyChar",
-		contributesToLexicon: false,
 	},
 	{
 		key: "bodyHanSegmentPostings",

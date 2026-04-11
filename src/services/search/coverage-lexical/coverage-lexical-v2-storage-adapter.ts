@@ -8,7 +8,6 @@ import {
 	searchCoverageLexicalV2Engine,
 	type CoverageLexicalV2EngineSearchResult,
 	type CoverageLexicalV2CandidateCascadeDocumentRecord,
-	type CoverageLexicalV2CandidateCascadeHanBigramScope,
 	type CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
 	type CoverageLexicalV2CandidateCascadePostingField,
 	type CoverageLexicalV2CandidateCascadeStorageReader,
@@ -18,12 +17,12 @@ export type CoverageLexicalV2StorageAdapterBindings = {
 	getDocumentRecord(
 		docId: number,
 	): CoverageLexicalV2CandidateCascadeDocumentRecord | null;
+	getBodyHanSegmentDocIds(): readonly number[];
 	getPostingMatches(
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		term: string,
 	): readonly number[] | Uint32Array | undefined;
-	getHanBigramPostingMatches(
-		scope: CoverageLexicalV2CandidateCascadeHanBigramScope,
+	getMetadataHanBigramPostingMatches(
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;
@@ -49,13 +48,13 @@ export function buildCoverageLexicalV2StorageReader(
 ): CoverageLexicalV2CandidateCascadeStorageReader {
 	return {
 		getDocumentRecord: (docId: number) => bindings.getDocumentRecord(docId),
+		getBodyHanSegmentDocIds: () => bindings.getBodyHanSegmentDocIds(),
 		getPostingMatches: (field: CoverageLexicalV2CandidateCascadePostingField, term: string) =>
 			bindings.getPostingMatches(field, term),
-		getHanBigramPostingMatches: (
-			scope: CoverageLexicalV2CandidateCascadeHanBigramScope,
+		getMetadataHanBigramPostingMatches: (
 			field: CoverageLexicalV2CandidateCascadePostingField,
 			bigram: string,
-		) => bindings.getHanBigramPostingMatches(scope, field, bigram),
+		) => bindings.getMetadataHanBigramPostingMatches(field, bigram),
 		getBodyHanSegments: (docId: number) => bindings.getBodyHanSegments(docId),
 		getMetadataVerificationTexts: (docId: number) =>
 			bindings.getMetadataVerificationTexts(docId),

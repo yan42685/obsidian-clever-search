@@ -278,6 +278,39 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 		]);
 	});
 
+	test("live index breakdown removes bodyChar postings while keeping bodyHanSegments resident", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				getIndexBreakdown(): Record<string, unknown> | null;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/win-song-body.md",
+				basename: "misc",
+				folder: "notes",
+				content: "\u8fd9\u91cc\u63d0\u5230\u4e86\u8d62\u5b8b\u8fd9\u4e24\u4e2a\u5b57",
+			},
+			{
+				path: "notes/win-song-metadata.md",
+				basename: "\u5173\u4e8e\u8d62\u5b8b\u7684\u7b14\u8bb0",
+				folder: "notes",
+				content: "latin filler",
+			},
+		]);
+
+		const breakdown = engine.getIndexBreakdown();
+		expect(breakdown).not.toBeNull();
+		expect("bodyCharTermCount" in (breakdown ?? {})).toBe(false);
+		expect((breakdown as any).estimatedBytes.postings.bodyChar).toBeUndefined();
+		expect((breakdown as any).estimatedBytes.documentIdentity.bodyHanSegmentsById.total).toBeGreaterThan(0);
+	});
+
 test("searchFiles keeps using the independent v2 candidate-cascade path without configuration switches", async () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
