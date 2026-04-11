@@ -21,6 +21,19 @@ export type CoverageLexicalV2QuerySurfaceGroup = {
 	kind: CoverageLexicalV2QueryUnitSurfaceKind;
 };
 
+export type CoverageLexicalV2HanBackstopTriggerKind =
+	| "residual"
+	| "fragile_covered";
+
+export type CoverageLexicalV2HanBackstopGroup = {
+	surfaceGroupIndex: number;
+	normalizedText: string;
+	bigrams: string[];
+	charLength: number;
+	triggerKind: CoverageLexicalV2HanBackstopTriggerKind;
+	primaryUnitIndices: number[];
+};
+
 export type CoverageLexicalV2QueryUnit = {
 	text: string;
 	normalizedText: string;
@@ -51,6 +64,7 @@ export type CoverageLexicalV2QueryAnalysis = {
 	primaryUnits: CoverageLexicalV2QueryUnit[];
 	fallbackUnits: CoverageLexicalV2QueryUnit[];
 	derivedUnits: CoverageLexicalV2QueryUnit[];
+	hanBackstopGroups: CoverageLexicalV2HanBackstopGroup[];
 	hasMixedScriptGroups: boolean;
 	hasHanGroups: boolean;
 	hasLatinGroups: boolean;

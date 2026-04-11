@@ -1015,8 +1015,12 @@ Preferred lexical order:
   - cheap comparator signals are now cached once per candidate and reused through layer-2/3/4 narrowing; verification only patches proximity on the resolved top bucket
   - bounded fallback remains discovery-only in normal ranking, while a narrow Han salvage path is available only when normal layer-1 coverage and fuzzy salvage are both globally absent
   - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
+  - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
+    real-token lanes first, then residual/fragile Han bigram gating, then exact `includes(...)` verification before synthetic Han exact evidence is admitted
+  - `metadata` and `body` now share the same Han backstop trigger and verification semantics; field priority differences remain only in the final comparator
+  - `bodyHanSegments` remain as a per-document verification/proximity view, while hot `bodyHanSegmentPostings` are no longer populated or consulted by the active V2 runtime path
 
-### Locked Decision Implementation Snapshot (2026-04-10)
+### Locked Decision Implementation Snapshot (2026-04-11)
 
 Implemented in the active independent V2 path:
 
@@ -1041,7 +1045,8 @@ Implemented with important caveats:
   the active independent V2 lexical engine now uses a layered source-based cascade
   rather than a legacy lane-shaped recall path; the remaining gap is to keep
   tightening candidate-sourcing budgets, fallback boundaries, and V2-only test
-  contracts around that cascade
+  contracts around that cascade; the active Han recall path is now the
+  residual/fragile Han backstop rather than the earlier witness experiment
 - item 26 (old-code deletion discipline):
   active candidate-cascade flags and old active comparator/display paths have been
   removed, but legacy V1 reference code is intentionally retained for ongoing
@@ -1066,10 +1071,18 @@ Current validation snapshot:
   - top5: `1.000` vs `0.500`
   - zeroRate: `0.000` vs `0.500`
 - latest relative anchor remains ratio-first against `MiniSearch`:
-  - avg query latency ratio: `1.842x`
-  - p50 ratio: `1.811x`
-  - p100 ratio: `1.966x`
-  - estimated index bytes ratio: `1.265x`
+  - avg query latency ratio: `2.466x`
+  - p50 ratio: `2.482x`
+  - p100 ratio: `2.152x`
+  - estimated index bytes ratio: `1.464x`
+- latest candidate-cascade diagnostics on the automation corpus confirm that
+  verification remains tightly bounded:
+  - `198 / 198` queries completed without verification overflow
+  - verification bucket size: avg `1.07`, p50 `1`, max `4`
+  - verification estimated body token sum: avg `70.9`, p50 `67`, max `276`
+- latest Han-heavy candidate-cascade stress sweep keeps overflow at zero across
+  hot/cold verification profiles, `12/16/20`-doc buckets, and target token
+  sums from `1024` through `81920`
 
 ## Implementation Plan
 
@@ -1631,8 +1644,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
-
 
 
 

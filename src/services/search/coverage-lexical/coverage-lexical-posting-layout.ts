@@ -60,12 +60,14 @@ export type CoverageLexicalSnapshotPostingKey =
 
 export type CoverageLexicalLivePostingKey =
 	| "bodyPostings"
+	| "bodyCharPostings"
 	| "metadataAliasCharPostings"
 	| "metadataAliasPostings"
 	| "metadataBasenameCharPostings"
 	| "metadataBasenamePostings"
 	| "metadataFolderCharPostings"
 	| "metadataFolderPostings"
+	| "metadataHeadingCharPostings"
 	| "metadataHeadingPostings"
 	| "metadataTagCharPostings"
 	| "metadataTagFullPostings"
@@ -105,7 +107,10 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "bodyCharPostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.BodyCharPostings,
 		ownership: "packed",
-		live: false,
+		live: true,
+		source: "postings.bodyChar.term",
+		breakdownKey: "bodyChar",
+		contributesToLexicon: false,
 	},
 	{
 		key: "bodyHanSegmentPostings",
@@ -204,7 +209,10 @@ export const COVERAGE_LEXICAL_POSTING_DESCRIPTORS = [
 		key: "metadataHeadingCharPostings",
 		sectionKind: CoverageLexicalSnapshotSectionKind.MetadataHeadingCharPostings,
 		ownership: "plain",
-		live: false,
+		live: true,
+		source: "postings.metadataHeadingChar.term",
+		breakdownKey: "metadataHeadingChar",
+		contributesToLexicon: false,
 	},
 	{
 		key: "metadataHeadingHanSegmentPostings",

@@ -46,6 +46,30 @@ function createSimpleCoverageTokenizer() {
 	};
 }
 
+function createWholeHanCoverageTokenizer() {
+	return {
+		tokenize(text: string): string[] {
+			return this.tokenizeSequence(text);
+		},
+		tokenizeSequence(text: string): string[] {
+			return normalize(text).match(/[\p{Script=Han}]+|[a-z0-9_-]+/gu) ?? [];
+		},
+		tokenizeSequenceWithOffsets(text: string): Array<{
+			token: string;
+			start: number;
+			end: number;
+		}> {
+			return Array.from(normalize(text).matchAll(/[\p{Script=Han}]+|[a-z0-9_-]+/gu)).map(
+				(match) => ({
+					token: match[0],
+					start: match.index ?? 0,
+					end: (match.index ?? 0) + match[0].length,
+				}),
+			);
+		},
+	};
+}
+
 describe("coverage lexical v2 engine candidate-cascade path", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
@@ -169,6 +193,88 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 			"notes/cache-reset.md",
 			"notes/cached-reset.md",
 			"notes/cace-reset.md",
+		]);
+	});
+
+	test("searchFiles recovers metadata and body Han hits even when the tokenizer drops Han query terms", async () => {
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/win-song-metadata.md",
+				basename: "关于赢宋的笔记",
+				folder: "notes",
+				content: "latin filler",
+			},
+			{
+				path: "notes/win-song-body.md",
+				basename: "misc",
+				folder: "notes",
+				content: "这里提到了赢宋这两个字",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "赢宋",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results.map((result) => result.path)).toEqual([
+			"notes/win-song-metadata.md",
+			"notes/win-song-body.md",
+		]);
+	});
+
+	test("searchFiles recovers fragile-covered Han body hits when tokenizer keeps the whole Han query opaque", async () => {
+		container.registerInstance(Tokenizer, createWholeHanCoverageTokenizer());
+		const { CoverageLexicalFileSearchEngine } = require(
+			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		) as {
+			CoverageLexicalFileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalFileSearchEngine();
+		await engine.addDocuments([
+			{
+				path: "notes/chairperson.md",
+				basename: "misc",
+				folder: "notes",
+				content: "委员长大之后继续发言",
+			},
+		]);
+
+		const results = await engine.searchFiles({
+			queryText: "委员长",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results.map((result) => result.path)).toEqual([
+			"notes/chairperson.md",
 		]);
 	});
 

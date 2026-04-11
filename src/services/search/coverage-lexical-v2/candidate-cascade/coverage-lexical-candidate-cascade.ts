@@ -5,9 +5,11 @@ import {
 	applyCoverageLexicalV2DisplayPolicy,
 } from "../display";
 import type {
+	CoverageLexicalV2HanBackstopGroup,
 	CoverageLexicalV2QueryAnalysis,
 	CoverageLexicalV2QueryUnit,
 } from "../query";
+import { normalizeCoverageLexicalV2Text } from "../query";
 import {
 	buildCoverageLexicalV2CheapComparatorCandidate,
 	compareCoverageLexicalV2FieldProfiles,
@@ -30,6 +32,7 @@ import type {
 } from "../comparator";
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
+	CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "./coverage-lexical-candidate-types";
@@ -47,6 +50,7 @@ import {
 	normalizeCoverageLexicalV2CandidateCascadeTerm,
 	type CoverageLexicalV2CandidateCascadeMatchOptions,
 } from "./coverage-lexical-candidate-match";
+import { extractHanSegments } from "../../coverage-lexical/coverage-lexical-cjk";
 
 type CoverageLexicalV2CascadeCandidateFieldTermSets = {
 	basenameTerms: Set<string>;
@@ -69,6 +73,7 @@ type CoverageLexicalV2CascadeCandidateSourceFlags = {
 	hasPrefix: boolean;
 	hasFuzzy: boolean;
 	hasFallback: boolean;
+	hasHanBackstop: boolean;
 	hasMetadata: boolean;
 	hasBody: boolean;
 	hasBodyExact: boolean;
@@ -96,6 +101,7 @@ export type CoverageLexicalV2CascadeCandidateState = {
 	sourceFlags: CoverageLexicalV2CascadeCandidateSourceFlags;
 	needsVerification: boolean;
 	hydrationStatus: CoverageLexicalV2CascadeHydrationStatus;
+	prefetchedBodyTokenSequence?: readonly string[];
 	potentialPrimaryCoverageCount: number;
 	fuzzySalvageCoverageCount: number;
 	hanFallbackSalvageGroupCount: number;
@@ -122,8 +128,8 @@ export type CoverageLexicalV2CandidateCascadePolicy = {
 	prefixDocCapPerQuery: number;
 	fuzzyTermCapPerUnit: number;
 	fuzzyDocCapPerQuery: number;
-	fallbackUnitCapPerHanGroup: number;
-	fallbackDocCapPerQuery: number;
+	hanBackstopDocCapPerGroup: number;
+	hanBackstopDocCapPerQuery: number;
 };
 
 export type CoverageLexicalV2CandidateCascadeRequest = {
@@ -151,6 +157,15 @@ export type CoverageLexicalV2CandidateCascadeTrace = {
 	};
 	verificationBucketCandidateIds: string[];
 	resolvedTopBucketCandidateIds: string[];
+	verificationBucketDocCount: number;
+	verificationBodyDocCount: number;
+	verificationEstimatedBodyTokenSum: number;
+	verificationBodyAvailability: {
+		resident: number;
+		hotCache: number;
+		coldOrSnapshot: number;
+		missing: number;
+	};
 	verificationSkippedReason: CoverageLexicalV2CandidateCascadeVerificationSkippedReason;
 	usedFuzzySalvage: boolean;
 	usedHanFallbackSalvage: boolean;
@@ -193,6 +208,18 @@ type CoverageLexicalV2CascadeLayerOutcome = {
 	orderedBuckets: CoverageLexicalV2CascadeCandidateState[][];
 };
 
+type CoverageLexicalV2HanBackstopGateStats = {
+	longestContiguousBigramChain: number;
+	matchedBigramCount: number;
+	bigramCoverageRatio: number;
+};
+
+type CoverageLexicalV2HanBackstopRankedCandidate = {
+	docId: number;
+	stableDeterministicKey: string;
+	stats: CoverageLexicalV2HanBackstopGateStats;
+};
+
 const FIELD_PRIORITY: Record<CoverageLexicalV2MatchField, number> = {
 	basename: 0,
 	aliases: 1,
@@ -211,6 +238,14 @@ const SOURCE_FIELDS: readonly CoverageLexicalV2CandidateCascadePostingField[] = 
 	"body",
 ];
 
+const METADATA_FIELDS: readonly CoverageLexicalV2CandidateCascadePostingField[] = [
+	"basename",
+	"aliases",
+	"headings",
+	"folder",
+	"tag",
+];
+
 export function resolveCoverageLexicalV2CandidateCascadePolicy(
 	maxItemResults: number,
 ): CoverageLexicalV2CandidateCascadePolicy {
@@ -225,8 +260,8 @@ export function resolveCoverageLexicalV2CandidateCascadePolicy(
 		prefixDocCapPerQuery: frontierTarget * 8,
 		fuzzyTermCapPerUnit: 16,
 		fuzzyDocCapPerQuery: frontierTarget * 4,
-		fallbackUnitCapPerHanGroup: 8,
-		fallbackDocCapPerQuery: frontierTarget * 2,
+		hanBackstopDocCapPerGroup: Math.min(frontierTarget, Math.max(returnTarget, 8)),
+		hanBackstopDocCapPerQuery: frontierTarget,
 	};
 }
 
@@ -234,11 +269,19 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	request: CoverageLexicalV2CandidateCascadeRequest,
 ): Promise<CoverageLexicalV2CandidateCascadeResult> {
 	const policy = resolveCoverageLexicalV2CandidateCascadePolicy(request.maxItemResults);
-	const candidateCascadePrimaryUnits = request.queryAnalysis.primaryUnits.map(
-		(primaryUnit) => toCoverageLexicalV2CandidateCascadePrimaryUnitDefinition(primaryUnit),
+	const comparatorQueryAnalysis = buildCoverageLexicalV2ComparatorQueryAnalysis(
+		request.queryAnalysis,
+	);
+	const lexicalPrimaryUnits = request.queryAnalysis.primaryUnits.map((primaryUnit) =>
+		toCoverageLexicalV2CandidateCascadePrimaryUnitDefinition(primaryUnit),
+	);
+	const candidateCascadePrimaryUnits = buildCoverageLexicalV2CandidateCascadePrimaryUnits(
+		request.queryAnalysis,
+		lexicalPrimaryUnits,
 	);
 	const candidateStates = sourceCoverageLexicalV2CascadeCandidates(
 		request.queryAnalysis,
+		lexicalPrimaryUnits,
 		candidateCascadePrimaryUnits,
 		request.storageReader,
 		request.matchOptions,
@@ -330,7 +373,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		inputCandidates: frontierPlan.activeFrontier,
 		deferredBuckets: frontierPlan.deferredBuckets,
 		layerMode: frontierPlan.layerMode,
-		queryAnalysis: request.queryAnalysis,
+		queryAnalysis: comparatorQueryAnalysis,
 		candidateCascadePrimaryUnits,
 		reader: request.storageReader,
 		matchOptions: request.matchOptions,
@@ -350,7 +393,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		inputCandidates: layer2Outcome.retained,
 		deferredBuckets: layer2Outcome.deferredBuckets,
 		layerMode: frontierPlan.layerMode,
-		queryAnalysis: request.queryAnalysis,
+		queryAnalysis: comparatorQueryAnalysis,
 		candidateCascadePrimaryUnits,
 		reader: request.storageReader,
 		matchOptions: request.matchOptions,
@@ -370,7 +413,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		inputCandidates: layer3Outcome.retained,
 		deferredBuckets: layer3Outcome.deferredBuckets,
 		layerMode: frontierPlan.layerMode,
-		queryAnalysis: request.queryAnalysis,
+		queryAnalysis: comparatorQueryAnalysis,
 		candidateCascadePrimaryUnits,
 		reader: request.storageReader,
 		matchOptions: request.matchOptions,
@@ -389,8 +432,16 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	trace.verificationBucketCandidateIds = verificationBucket.map((candidateState) =>
 		String(candidateState.docId),
 	);
+	trace.verificationBucketDocCount = verificationBucket.length;
 	const verificationStates = verificationBucket.filter((candidateState) => candidateState.needsVerification);
 	let verificationSkippedReason: CoverageLexicalV2CandidateCascadeVerificationSkippedReason = "none";
+	let verificationEstimatedBodyTokenSum = 0;
+	let verificationBodyAvailability = {
+		resident: 0,
+		hotCache: 0,
+		coldOrSnapshot: 0,
+		missing: 0,
+	};
 	if (verificationBucket.length === 0 || verificationStates.length === 0) {
 		verificationSkippedReason = "no_verification_candidates";
 	} else if (verificationBucket.length > policy.proximityOverflowCap) {
@@ -409,7 +460,19 @@ export async function searchCoverageLexicalV2CandidateCascade(
 			request.matchOptions,
 			true,
 		);
+		for (const candidateState of verificationStates) {
+			const bodyTokens = candidateState.prefetchedBodyTokenSequence;
+			if (bodyTokens) {
+				verificationBodyAvailability.coldOrSnapshot += 1;
+				verificationEstimatedBodyTokenSum += bodyTokens.length;
+			} else {
+				verificationBodyAvailability.missing += 1;
+			}
+		}
 	}
+	trace.verificationBodyDocCount = verificationStates.length;
+	trace.verificationEstimatedBodyTokenSum = verificationEstimatedBodyTokenSum;
+	trace.verificationBodyAvailability = verificationBodyAvailability;
 	trace.verificationSkippedReason = verificationSkippedReason;
 
 	const resolvedTopBucket = buildCoverageLexicalV2ResolvedTopBucketCandidates(
@@ -563,6 +626,15 @@ function createCoverageLexicalV2CandidateCascadeTrace(
 		},
 		verificationBucketCandidateIds: [],
 		resolvedTopBucketCandidateIds: [],
+		verificationBucketDocCount: 0,
+		verificationBodyDocCount: 0,
+		verificationEstimatedBodyTokenSum: 0,
+		verificationBodyAvailability: {
+			resident: 0,
+			hotCache: 0,
+			coldOrSnapshot: 0,
+			missing: 0,
+		},
 		verificationSkippedReason: "none",
 		usedFuzzySalvage: false,
 		usedHanFallbackSalvage: false,
@@ -934,8 +1006,82 @@ function collectCoverageLexicalV2CascadeHanTopTieBandCandidateIds(
 		.map((candidateState) => String(candidateState.docId));
 }
 
+function buildCoverageLexicalV2CandidateCascadePrimaryUnits(
+	queryAnalysis: CoverageLexicalV2QueryAnalysis,
+	lexicalPrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[],
+): CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[] {
+	const candidateCascadePrimaryUnits = [...lexicalPrimaryUnits];
+	const seenUnitKeys = new Set(
+		candidateCascadePrimaryUnits.map((primaryUnit) =>
+			createCoverageLexicalV2CascadePrimaryUnitKey(
+				primaryUnit.surfaceGroupIndex,
+				primaryUnit.normalizedText,
+			),
+		),
+	);
+	for (const hanBackstopGroup of queryAnalysis.hanBackstopGroups) {
+		const unitKey = createCoverageLexicalV2CascadePrimaryUnitKey(
+			hanBackstopGroup.surfaceGroupIndex,
+			hanBackstopGroup.normalizedText,
+		);
+		if (seenUnitKeys.has(unitKey)) {
+			continue;
+		}
+		candidateCascadePrimaryUnits.push({
+			normalizedText: hanBackstopGroup.normalizedText,
+			surfaceGroupIndex: hanBackstopGroup.surfaceGroupIndex,
+			surfaceKind: "han",
+		});
+		seenUnitKeys.add(unitKey);
+	}
+	return candidateCascadePrimaryUnits;
+}
+
+function buildCoverageLexicalV2ComparatorQueryAnalysis(
+	queryAnalysis: CoverageLexicalV2QueryAnalysis,
+): CoverageLexicalV2QueryAnalysis {
+	if (queryAnalysis.hanBackstopGroups.length === 0) {
+		return queryAnalysis;
+	}
+	const existingUnitKeys = new Set(
+		queryAnalysis.primaryUnits.map((primaryUnit) =>
+			createCoverageLexicalV2CascadePrimaryUnitKey(
+				primaryUnit.surfaceGroupIndex,
+				primaryUnit.normalizedText,
+			),
+		),
+	);
+	const syntheticPrimaryUnits: CoverageLexicalV2QueryUnit[] = [];
+	for (const hanBackstopGroup of queryAnalysis.hanBackstopGroups) {
+		const unitKey = createCoverageLexicalV2CascadePrimaryUnitKey(
+			hanBackstopGroup.surfaceGroupIndex,
+			hanBackstopGroup.normalizedText,
+		);
+		if (existingUnitKeys.has(unitKey)) {
+			continue;
+		}
+		syntheticPrimaryUnits.push({
+			text: hanBackstopGroup.normalizedText,
+			normalizedText: hanBackstopGroup.normalizedText,
+			tier: "primary",
+			source: "derived",
+			surfaceGroupIndex: hanBackstopGroup.surfaceGroupIndex,
+			surfaceKind: "han",
+		});
+		existingUnitKeys.add(unitKey);
+	}
+	if (syntheticPrimaryUnits.length === 0) {
+		return queryAnalysis;
+	}
+	return {
+		...queryAnalysis,
+		primaryUnits: [...queryAnalysis.primaryUnits, ...syntheticPrimaryUnits],
+	};
+}
+
 function sourceCoverageLexicalV2CascadeCandidates(
 	queryAnalysis: CoverageLexicalV2QueryAnalysis,
+	lexicalPrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[],
 	candidateCascadePrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[],
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions,
@@ -945,9 +1091,18 @@ function sourceCoverageLexicalV2CascadeCandidates(
 	const sortedLexicon = reader.getSortedLexicon();
 	const prefixDocIds = new Set<number>();
 	const fuzzyDocIds = new Set<number>();
-	const fallbackDocIds = new Set<number>();
+	const hanBackstopDocIds = new Set<number>();
+	const primaryUnitIndexByKey = new Map<string, number>(
+		candidateCascadePrimaryUnits.map((primaryUnit, primaryUnitIndex) => [
+			createCoverageLexicalV2CascadePrimaryUnitKey(
+				primaryUnit.surfaceGroupIndex,
+				primaryUnit.normalizedText,
+			),
+			primaryUnitIndex,
+		] as const),
+	);
 
-	candidateCascadePrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
+	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
 		collectCoverageLexicalV2CascadeExactMatches(
 			candidateStateByDocId,
 			primaryUnit,
@@ -956,7 +1111,7 @@ function sourceCoverageLexicalV2CascadeCandidates(
 		);
 	});
 
-	candidateCascadePrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
+	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
 		if (!matchOptions.includePrefix || !isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)) {
 			return;
 		}
@@ -980,19 +1135,17 @@ function sourceCoverageLexicalV2CascadeCandidates(
 		}
 	});
 
-	const exactAndPrefixCandidateCount = countCoverageLexicalV2CascadePotentialCandidates(candidateStateByDocId);
-	if (exactAndPrefixCandidateCount < policy.returnTarget) {
-		collectCoverageLexicalV2CascadeFallbackMatches(
-			candidateStateByDocId,
-			queryAnalysis,
-			reader,
-			fallbackDocIds,
-			policy.fallbackUnitCapPerHanGroup,
-			policy.fallbackDocCapPerQuery,
-		);
-	}
+	collectCoverageLexicalV2CascadeHanBackstopMatches(
+		candidateStateByDocId,
+		queryAnalysis,
+		candidateCascadePrimaryUnits,
+		primaryUnitIndexByKey,
+		reader,
+		hanBackstopDocIds,
+		policy,
+	);
 
-	candidateCascadePrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
+	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
 		if (!matchOptions.includeFuzzy || !isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)) {
 			return;
 		}
@@ -1074,6 +1227,8 @@ async function hydrateCoverageLexicalV2CascadeVerificationStates(
 	}
 	await reader.prefetchBodyTokenSequences(docIds);
 	for (const candidateState of verificationStates) {
+		candidateState.prefetchedBodyTokenSequence =
+			reader.getBodyTokenSequence(candidateState.docId);
 		candidateState.hydrationStatus = "prefetched";
 	}
 }
@@ -1134,7 +1289,9 @@ function buildCoverageLexicalV2CandidateCascadeDocumentState(
 		bodyTokenSequence:
 			includeBodyTokenSequences &&
 			candidateState.exactQueryTerms.bodyExactQueryTerms.size > 0
-				? [...(reader.getBodyTokenSequence(candidateState.docId) ?? [])]
+				? [...(candidateState.prefetchedBodyTokenSequence ??
+						reader.getBodyTokenSequence(candidateState.docId) ??
+						[])]
 				: undefined,
 	};
 }
@@ -1242,6 +1399,331 @@ function collectCoverageLexicalV2CascadeFallbackMatches(
 	}
 }
 
+function collectCoverageLexicalV2CascadeHanBackstopMatches(
+	target: Map<number, CoverageLexicalV2CascadeCandidateState>,
+	queryAnalysis: CoverageLexicalV2QueryAnalysis,
+	candidateCascadePrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[],
+	primaryUnitIndexByKey: ReadonlyMap<string, number>,
+	reader: CoverageLexicalV2CandidateCascadeStorageReader,
+	hanBackstopDocIds: Set<number>,
+	policy: CoverageLexicalV2CandidateCascadePolicy,
+): void {
+	for (const hanBackstopGroup of queryAnalysis.hanBackstopGroups) {
+		if (
+			!shouldActivateCoverageLexicalV2HanBackstopGroup(
+				hanBackstopGroup,
+				target,
+			)
+		) {
+			continue;
+		}
+		const primaryUnitIndex = primaryUnitIndexByKey.get(
+			createCoverageLexicalV2CascadePrimaryUnitKey(
+				hanBackstopGroup.surfaceGroupIndex,
+				hanBackstopGroup.normalizedText,
+			),
+		);
+		if (primaryUnitIndex == null) {
+			continue;
+		}
+		const primaryUnit = candidateCascadePrimaryUnits[primaryUnitIndex];
+		if (!primaryUnit) {
+			continue;
+		}
+		const rankedCandidates = rankCoverageLexicalV2HanBackstopCandidates(
+			hanBackstopGroup,
+			reader,
+		).slice(0, policy.hanBackstopDocCapPerGroup);
+		for (const rankedCandidate of rankedCandidates) {
+			const verifiedFields = verifyCoverageLexicalV2HanBackstopCandidate(
+				rankedCandidate.docId,
+				hanBackstopGroup,
+				reader,
+			);
+			if (verifiedFields.length === 0) {
+				continue;
+			}
+			const candidateState = getOrCreateCoverageLexicalV2CascadeCandidateState(
+				target,
+				rankedCandidate.docId,
+				reader,
+				hanBackstopDocIds,
+				policy.hanBackstopDocCapPerQuery,
+			);
+			if (!candidateState) {
+				continue;
+			}
+			for (const field of verifiedFields) {
+				updateCoverageLexicalV2CascadeVerifiedHanBackstopEvidence(
+					candidateState,
+					field,
+					hanBackstopGroup.normalizedText,
+					primaryUnit,
+					primaryUnitIndex,
+				);
+			}
+		}
+	}
+}
+
+function shouldActivateCoverageLexicalV2HanBackstopGroup(
+	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
+	target: ReadonlyMap<number, CoverageLexicalV2CascadeCandidateState>,
+): boolean {
+	if (hanBackstopGroup.triggerKind === "residual") {
+		return true;
+	}
+	if (hanBackstopGroup.primaryUnitIndices.length === 0) {
+		return true;
+	}
+	for (const candidateState of target.values()) {
+		for (const primaryUnitIndex of hanBackstopGroup.primaryUnitIndices) {
+			if (
+				candidateState.exactPrimaryMask.has(primaryUnitIndex) ||
+				candidateState.prefixPrimaryMask.has(primaryUnitIndex)
+			) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+function rankCoverageLexicalV2HanBackstopCandidates(
+	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
+	reader: CoverageLexicalV2CandidateCascadeStorageReader,
+): CoverageLexicalV2HanBackstopRankedCandidate[] {
+	const matchedBigramIndicesByDoc = new Map<
+		number,
+		Map<CoverageLexicalV2CandidateCascadePostingField, Set<number>>
+	>();
+	for (let bigramIndex = 0; bigramIndex < hanBackstopGroup.bigrams.length; bigramIndex += 1) {
+		const bigram = hanBackstopGroup.bigrams[bigramIndex];
+		for (const field of METADATA_FIELDS) {
+			collectCoverageLexicalV2HanBackstopPostingMatches(
+				matchedBigramIndicesByDoc,
+				reader.getHanBigramPostingMatches("metadata", field, bigram),
+				field,
+				bigramIndex,
+			);
+		}
+		collectCoverageLexicalV2HanBackstopPostingMatches(
+			matchedBigramIndicesByDoc,
+			reader.getHanBigramPostingMatches("body", "body", bigram),
+			"body",
+			bigramIndex,
+		);
+	}
+	const rankedCandidates: CoverageLexicalV2HanBackstopRankedCandidate[] = [];
+	for (const [docId, matchedBigramIndicesByField] of matchedBigramIndicesByDoc.entries()) {
+		const record = reader.getDocumentRecord(docId);
+		if (!record) {
+			continue;
+		}
+		const stats = buildCoverageLexicalV2HanBackstopGateStats(
+			hanBackstopGroup.bigrams.length,
+			matchedBigramIndicesByField,
+		);
+		if (!passesCoverageLexicalV2HanBackstopGate(hanBackstopGroup.bigrams.length, stats)) {
+			continue;
+		}
+		rankedCandidates.push({
+			docId,
+			stableDeterministicKey: record.stableDeterministicKey ?? record.path,
+			stats,
+		});
+	}
+	return rankedCandidates.sort((left, right) => {
+		if (left.stats.longestContiguousBigramChain !== right.stats.longestContiguousBigramChain) {
+			return right.stats.longestContiguousBigramChain - left.stats.longestContiguousBigramChain;
+		}
+		if (left.stats.matchedBigramCount !== right.stats.matchedBigramCount) {
+			return right.stats.matchedBigramCount - left.stats.matchedBigramCount;
+		}
+		if (left.stats.bigramCoverageRatio !== right.stats.bigramCoverageRatio) {
+			return right.stats.bigramCoverageRatio - left.stats.bigramCoverageRatio;
+		}
+		return left.stableDeterministicKey.localeCompare(right.stableDeterministicKey);
+	});
+}
+
+function collectCoverageLexicalV2HanBackstopPostingMatches(
+	target: Map<number, Map<CoverageLexicalV2CandidateCascadePostingField, Set<number>>>,
+	postings: readonly number[] | Uint32Array | undefined,
+	field: CoverageLexicalV2CandidateCascadePostingField,
+	bigramIndex: number,
+): void {
+	if (!postings) {
+		return;
+	}
+	for (const docIdValue of postings) {
+		const docId = Number(docIdValue);
+		const matchedBigramIndicesByField = target.get(docId) ?? new Map();
+		const matchedBigramIndices = matchedBigramIndicesByField.get(field) ?? new Set<number>();
+		matchedBigramIndices.add(bigramIndex);
+		matchedBigramIndicesByField.set(field, matchedBigramIndices);
+		target.set(docId, matchedBigramIndicesByField);
+	}
+}
+
+function buildCoverageLexicalV2HanBackstopGateStats(
+	totalBigramCount: number,
+	matchedBigramIndicesByField: ReadonlyMap<
+		CoverageLexicalV2CandidateCascadePostingField,
+		ReadonlySet<number>
+	>,
+): CoverageLexicalV2HanBackstopGateStats {
+	let bestStats: CoverageLexicalV2HanBackstopGateStats = {
+		longestContiguousBigramChain: 0,
+		matchedBigramCount: 0,
+		bigramCoverageRatio: 0,
+	};
+	for (const matchedBigramIndices of matchedBigramIndicesByField.values()) {
+		const stats = {
+			longestContiguousBigramChain: computeCoverageLexicalV2HanBackstopLongestChain(
+				matchedBigramIndices,
+			),
+			matchedBigramCount: matchedBigramIndices.size,
+			bigramCoverageRatio:
+				totalBigramCount > 0 ? matchedBigramIndices.size / totalBigramCount : 0,
+		};
+		if (
+			stats.longestContiguousBigramChain > bestStats.longestContiguousBigramChain ||
+			(
+				stats.longestContiguousBigramChain === bestStats.longestContiguousBigramChain &&
+				stats.matchedBigramCount > bestStats.matchedBigramCount
+			) ||
+			(
+				stats.longestContiguousBigramChain === bestStats.longestContiguousBigramChain &&
+				stats.matchedBigramCount === bestStats.matchedBigramCount &&
+				stats.bigramCoverageRatio > bestStats.bigramCoverageRatio
+			)
+		) {
+			bestStats = stats;
+		}
+	}
+	return bestStats;
+}
+
+function computeCoverageLexicalV2HanBackstopLongestChain(
+	matchedBigramIndices: ReadonlySet<number>,
+): number {
+	const sorted = [...matchedBigramIndices].sort((left, right) => left - right);
+	let longest = 0;
+	let current = 0;
+	let previous = Number.NaN;
+	for (const bigramIndex of sorted) {
+		if (!Number.isFinite(previous) || bigramIndex === previous + 1) {
+			current += 1;
+		} else {
+			current = 1;
+		}
+		if (current > longest) {
+			longest = current;
+		}
+		previous = bigramIndex;
+	}
+	return longest;
+}
+
+function passesCoverageLexicalV2HanBackstopGate(
+	totalBigramCount: number,
+	stats: CoverageLexicalV2HanBackstopGateStats,
+): boolean {
+	if (totalBigramCount <= 1) {
+		return stats.matchedBigramCount === totalBigramCount;
+	}
+	if (totalBigramCount === 2) {
+		return stats.matchedBigramCount === totalBigramCount;
+	}
+	return stats.matchedBigramCount >= 2 && stats.longestContiguousBigramChain >= 2;
+}
+
+function verifyCoverageLexicalV2HanBackstopCandidate(
+	docId: number,
+	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
+	reader: CoverageLexicalV2CandidateCascadeStorageReader,
+): CoverageLexicalV2MatchField[] {
+	const verifiedFields: CoverageLexicalV2MatchField[] = [];
+	const metadataTexts = reader.getMetadataVerificationTexts(docId);
+	if (metadataTexts) {
+		appendCoverageLexicalV2VerifiedMetadataFields(
+			verifiedFields,
+			metadataTexts,
+			hanBackstopGroup.normalizedText,
+		);
+	}
+	if (
+		doesCoverageLexicalV2BodyHanSegmentsContain(
+			reader.getBodyHanSegments(docId),
+			hanBackstopGroup.normalizedText,
+		)
+	) {
+		verifiedFields.push("body");
+	}
+	return dedupeCoverageLexicalV2VerifiedFields(verifiedFields);
+}
+
+function appendCoverageLexicalV2VerifiedMetadataFields(
+	target: CoverageLexicalV2MatchField[],
+	metadataTexts: CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
+	normalizedText: string,
+): void {
+	if (doesCoverageLexicalV2NormalizedTextContainHanSegment(metadataTexts.basenameText, normalizedText)) {
+		target.push("basename");
+	}
+	if (doesCoverageLexicalV2NormalizedTextContainHanSegment(metadataTexts.aliasesText, normalizedText)) {
+		target.push("aliases");
+	}
+	if (doesCoverageLexicalV2NormalizedTextContainHanSegment(metadataTexts.headingsText, normalizedText)) {
+		target.push("headings");
+	}
+	if (doesCoverageLexicalV2NormalizedTextContainHanSegment(metadataTexts.folderText, normalizedText)) {
+		target.push("folder");
+	}
+	if (doesCoverageLexicalV2NormalizedTextContainHanSegment(metadataTexts.tagsText, normalizedText)) {
+		target.push("tag");
+	}
+}
+
+function doesCoverageLexicalV2BodyHanSegmentsContain(
+	bodyHanSegments: readonly string[] | undefined,
+	normalizedText: string,
+): boolean {
+	if (!bodyHanSegments || bodyHanSegments.length === 0) {
+		return false;
+	}
+	for (const bodyHanSegment of bodyHanSegments) {
+		const normalizedSegment = normalizeCoverageLexicalV2Text(bodyHanSegment);
+		if (normalizedSegment.includes(normalizedText)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function doesCoverageLexicalV2NormalizedTextContainHanSegment(
+	text: string,
+	normalizedText: string,
+): boolean {
+	const normalizedFieldText = normalizeCoverageLexicalV2Text(text);
+	if (normalizedFieldText.length === 0) {
+		return false;
+	}
+	for (const hanSegment of extractHanSegments(normalizedFieldText)) {
+		if (hanSegment.includes(normalizedText)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function dedupeCoverageLexicalV2VerifiedFields(
+	fields: readonly CoverageLexicalV2MatchField[],
+): CoverageLexicalV2MatchField[] {
+	return [...new Set(fields)];
+}
+
 function collectCoverageLexicalV2CascadePostingMatches(
 	target: Map<number, CoverageLexicalV2CascadeCandidateState>,
 	postings: readonly number[] | Uint32Array | undefined,
@@ -1341,6 +1823,38 @@ function updateCoverageLexicalV2CascadePrimaryEvidence(
 	}
 }
 
+function updateCoverageLexicalV2CascadeVerifiedHanBackstopEvidence(
+	candidateState: CoverageLexicalV2CascadeCandidateState,
+	field: CoverageLexicalV2CandidateCascadePostingField,
+	matchedTerm: string,
+	primaryUnit: CoverageLexicalV2CandidateCascadePrimaryUnitDefinition,
+	primaryUnitIndex: number,
+): void {
+	addCoverageLexicalV2CascadeFieldTerm(candidateState.fieldTerms, field, matchedTerm);
+	candidateState.exactPrimaryMask.add(primaryUnitIndex);
+	candidateState.sourceFlags.hasExact = true;
+	candidateState.sourceFlags.hasHanBackstop = true;
+	candidateState.matchedGroupMask.add(primaryUnit.surfaceGroupIndex);
+	candidateState.matchedHanGroupMask.add(primaryUnit.surfaceGroupIndex);
+	const matchedFields =
+		candidateState.matchedFieldsByPrimaryUnit.get(primaryUnitIndex) ??
+		new Set<CoverageLexicalV2MatchField>();
+	matchedFields.add(field);
+	candidateState.matchedFieldsByPrimaryUnit.set(primaryUnitIndex, matchedFields);
+	const currentBestQuality = candidateState.bestQualityByPrimaryUnit.get(primaryUnitIndex);
+	if (
+		currentBestQuality == null ||
+		compareCoverageLexicalV2MatchQuality("exact", currentBestQuality) < 0
+	) {
+		candidateState.bestQualityByPrimaryUnit.set(primaryUnitIndex, "exact");
+	}
+	if (field === "body") {
+		candidateState.sourceFlags.hasBody = true;
+		return;
+	}
+	candidateState.sourceFlags.hasMetadata = true;
+}
+
 function updateCoverageLexicalV2CascadeFallbackEvidence(
 	candidateState: CoverageLexicalV2CascadeCandidateState,
 	field: CoverageLexicalV2CandidateCascadePostingField,
@@ -1398,12 +1912,14 @@ function getOrCreateCoverageLexicalV2CascadeCandidateState(
 			hasPrefix: false,
 			hasFuzzy: false,
 			hasFallback: false,
+			hasHanBackstop: false,
 			hasMetadata: false,
 			hasBody: false,
 			hasBodyExact: false,
 		},
 		needsVerification: false,
 		hydrationStatus: "not_requested",
+		prefetchedBodyTokenSequence: undefined,
 		potentialPrimaryCoverageCount: 0,
 		fuzzySalvageCoverageCount: 0,
 		hanFallbackSalvageGroupCount: 0,
@@ -1616,6 +2132,13 @@ function countCoverageLexicalV2CascadeMaskUnion(
 		values.add(value);
 	}
 	return values.size;
+}
+
+function createCoverageLexicalV2CascadePrimaryUnitKey(
+	surfaceGroupIndex: number,
+	normalizedText: string,
+): string {
+	return String(surfaceGroupIndex) + ":" + normalizedText;
 }
 
 function lowerBoundCoverageLexicalV2CascadeString(

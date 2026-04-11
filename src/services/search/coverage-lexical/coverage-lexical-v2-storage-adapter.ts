@@ -6,7 +6,10 @@ import type {
 } from "../file-search-engine";
 import {
 	searchCoverageLexicalV2Engine,
+	type CoverageLexicalV2EngineSearchResult,
 	type CoverageLexicalV2CandidateCascadeDocumentRecord,
+	type CoverageLexicalV2CandidateCascadeHanBigramScope,
+	type CoverageLexicalV2CandidateCascadeMetadataVerificationTexts,
 	type CoverageLexicalV2CandidateCascadePostingField,
 	type CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../coverage-lexical-v2";
@@ -19,6 +22,15 @@ export type CoverageLexicalV2StorageAdapterBindings = {
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		term: string,
 	): readonly number[] | Uint32Array | undefined;
+	getHanBigramPostingMatches(
+		scope: CoverageLexicalV2CandidateCascadeHanBigramScope,
+		field: CoverageLexicalV2CandidateCascadePostingField,
+		bigram: string,
+	): readonly number[] | Uint32Array | undefined;
+	getBodyHanSegments(docId: number): readonly string[] | undefined;
+	getMetadataVerificationTexts(
+		docId: number,
+	): CoverageLexicalV2CandidateCascadeMetadataVerificationTexts | null;
 	getSortedLexicon(): readonly string[];
 	getBodyTokenSequence(docId: number): readonly string[] | undefined;
 	prefetchBodyTokenSequences(docIds: readonly number[]): Promise<void>;
@@ -39,6 +51,14 @@ export function buildCoverageLexicalV2StorageReader(
 		getDocumentRecord: (docId: number) => bindings.getDocumentRecord(docId),
 		getPostingMatches: (field: CoverageLexicalV2CandidateCascadePostingField, term: string) =>
 			bindings.getPostingMatches(field, term),
+		getHanBigramPostingMatches: (
+			scope: CoverageLexicalV2CandidateCascadeHanBigramScope,
+			field: CoverageLexicalV2CandidateCascadePostingField,
+			bigram: string,
+		) => bindings.getHanBigramPostingMatches(scope, field, bigram),
+		getBodyHanSegments: (docId: number) => bindings.getBodyHanSegments(docId),
+		getMetadataVerificationTexts: (docId: number) =>
+			bindings.getMetadataVerificationTexts(docId),
 		getSortedLexicon: () => bindings.getSortedLexicon(),
 		getBodyTokenSequence: (docId: number) => bindings.getBodyTokenSequence(docId),
 		prefetchBodyTokenSequences: (docIds: readonly number[]) =>
@@ -49,8 +69,8 @@ export function buildCoverageLexicalV2StorageReader(
 
 export async function searchCoverageLexicalV2WithStorageAdapter(
 	options: CoverageLexicalV2StorageAdapterSearchOptions,
-): Promise<MatchedFile[]> {
-	const result = await searchCoverageLexicalV2Engine({
+): Promise<CoverageLexicalV2EngineSearchResult> {
+	return await searchCoverageLexicalV2Engine({
 		queryText: options.request.queryText,
 		isPrefixMatch: options.request.isPrefixMatch,
 		isFuzzy: options.request.isFuzzy,
@@ -61,5 +81,4 @@ export async function searchCoverageLexicalV2WithStorageAdapter(
 			options.storageBindings,
 		),
 	});
-	return result.matchedFiles.slice(0, options.request.maxItemResults);
 }

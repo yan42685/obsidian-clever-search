@@ -57,4 +57,24 @@ describe("coverage lexical v2 query units", () => {
 			expect.arrayContaining(["\u8d62\u5b8b"]),
 		);
 	});
+
+	test("marks fully covered Han groups as fragile backstop groups", () => {
+		const analysis = buildCoverageLexicalV2QueryAnalysis("委员长", ["委员长"]);
+
+		expect(analysis.hanBackstopGroups).toEqual([
+			expect.objectContaining({
+				normalizedText: "委员长",
+				triggerKind: "fragile_covered",
+			}),
+		]);
+	});
+
+	test("reduces long opaque Han queries into residual backstop groups", () => {
+		const analysis = buildCoverageLexicalV2QueryAnalysis("关于快乐的定义和适用范围", ["关于快乐的定义和适用范围"]);
+
+		expect(analysis.hanBackstopGroups.map((group) => group.normalizedText)).toEqual(
+			expect.arrayContaining(["快乐", "定义", "适用范围"]),
+		);
+		expect(analysis.hanBackstopGroups.some((group) => group.normalizedText === "关于快乐的定义和适用范围")).toBe(false);
+	});
 });

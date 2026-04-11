@@ -15,6 +15,8 @@ type TestDocument = {
 	basenameText: string;
 	aliasesText?: string;
 	headingsText?: string;
+	folderText?: string;
+	tagsText?: string;
 	bodyText?: string;
 };
 
@@ -24,6 +26,27 @@ function normalize(text: string): string {
 
 function tokenize(text: string): string[] {
 	return normalize(text).match(/[\p{Script=Han}]+|[a-z0-9_-]+/gu) ?? [];
+}
+
+function extractHanSegments(text: string): string[] {
+	return normalize(text).match(/[\p{Script=Han}]+/gu) ?? [];
+}
+
+function extractHanBigrams(text: string): string[] {
+	const bigrams: string[] = [];
+	const seen = new Set<string>();
+	for (const segment of extractHanSegments(text)) {
+		const chars = Array.from(segment);
+		for (let index = 0; index < chars.length - 1; index += 1) {
+			const bigram = chars[index] + chars[index + 1];
+			if (seen.has(bigram)) {
+				continue;
+			}
+			seen.add(bigram);
+			bigrams.push(bigram);
+		}
+	}
+	return bigrams;
 }
 
 function createStorageReader(config: {
@@ -41,6 +64,37 @@ function createStorageReader(config: {
 	const bodyTokenSequences = new Map(
 		config.documents.map((document) => [document.docId, tokenize(document.bodyText ?? "")] as const),
 	);
+	const bodyHanSegments = new Map(
+		config.documents.map((document) => [document.docId, extractHanSegments(document.bodyText ?? "")] as const),
+	);
+	const hanBigramPostings = new Map<string, number[]>();
+	for (const document of config.documents) {
+		const metadataFields = [
+			["basename", document.basenameText],
+			["aliases", document.aliasesText ?? ""],
+			["headings", document.headingsText ?? ""],
+			["folder", document.folderText ?? ""],
+			["tag", document.tagsText ?? ""],
+		] as const;
+		for (const [field, text] of metadataFields) {
+			for (const bigram of extractHanBigrams(text)) {
+				const key = `${field}:${bigram}`;
+				const docIds = hanBigramPostings.get(key) ?? [];
+				if (!docIds.includes(document.docId)) {
+					docIds.push(document.docId);
+				}
+				hanBigramPostings.set(key, docIds);
+			}
+		}
+		for (const bigram of extractHanBigrams(document.bodyText ?? "")) {
+			const key = `body:${bigram}`;
+			const docIds = hanBigramPostings.get(key) ?? [];
+			if (!docIds.includes(document.docId)) {
+				docIds.push(document.docId);
+			}
+			hanBigramPostings.set(key, docIds);
+		}
+	}
 	const prefetchBodyTokenSequences = jest.fn(async (_docIds: readonly number[]) => {});
 	const getBodyTokenSequence = jest.fn((docId: number) => bodyTokenSequences.get(docId));
 	return {
@@ -60,6 +114,25 @@ function createStorageReader(config: {
 			},
 			getPostingMatches(field, term) {
 				return config.postings[`${field}:${term}`];
+			},
+			getHanBigramPostingMatches(_scope, field, bigram) {
+				return hanBigramPostings.get(`${field}:${bigram}`);
+			},
+			getBodyHanSegments(docId) {
+				return bodyHanSegments.get(docId);
+			},
+			getMetadataVerificationTexts(docId) {
+				const document = documentMap.get(docId);
+				if (!document) {
+					return null;
+				}
+				return {
+					basenameText: document.basenameText,
+					aliasesText: document.aliasesText ?? "",
+					headingsText: document.headingsText ?? "",
+					folderText: document.folderText ?? "",
+					tagsText: document.tagsText ?? "",
+				};
 			},
 			getSortedLexicon() {
 				return [...config.lexicon];
@@ -117,6 +190,7 @@ function createSyntheticCandidateState(
 			hasPrefix: false,
 			hasFuzzy: false,
 			hasFallback: false,
+			hasHanBackstop: false,
 			hasMetadata: false,
 			hasBody: false,
 			hasBodyExact: false,
@@ -353,25 +427,21 @@ describe("coverage lexical v2 cascade", () => {
 		expect(result.trace.deferredCandidateIdsByLayer.layer4).toEqual([]);
 	});
 
-	test("allows fallback discovery to source documents without letting fallback-only docs survive as primary winners", async () => {
+	test("uses the Han backstop to admit a verified metadata hit without promoting one-sided metadata noise", async () => {
+		const queryText = "赢宋";
 		const { reader } = createStorageReader({
 			documents: [
-				{ docId: 1, path: "notes/politics-theory.md", basenameText: "政治理论" },
-				{ docId: 2, path: "notes/politics-only.md", basenameText: "政治" },
+				{ docId: 1, path: "notes/win-song.md", basenameText: "关于赢宋的笔记" },
+				{ docId: 2, path: "notes/win-only.md", basenameText: "赢学条目" },
 			],
-			postings: {
-				"basename:政治理论": [1],
-				"basename:政治": [2],
-			},
-			lexicon: ["政治", "政治理论"],
+			postings: {},
+			lexicon: [],
 		});
-		const queryText = "政治理论";
-		const queryTerms = ["政治理论"];
 
 		const result = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
-			queryTerms,
-			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			queryTerms: [queryText],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
 			maxItemResults: 5,
 			storageReader: reader,
 			matchOptions: {},
@@ -379,55 +449,74 @@ describe("coverage lexical v2 cascade", () => {
 
 		expect(result.candidateStates.map((candidateState) => ({
 			path: candidateState.path,
-			hasFallback: candidateState.sourceFlags.hasFallback,
+			hasHanBackstop: candidateState.sourceFlags.hasHanBackstop,
 			potential: candidateState.potentialPrimaryCoverageCount,
 		}))).toEqual([
-			{ path: "notes/politics-only.md", hasFallback: true, potential: 0 },
-			{ path: "notes/politics-theory.md", hasFallback: false, potential: 1 },
+			{ path: "notes/win-song.md", hasHanBackstop: true, potential: 1 },
 		]);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
-			"notes/politics-theory.md",
+			"notes/win-song.md",
 		]);
 	});
 
-	test("uses narrow Han salvage only when primary and fuzzy salvage are both absent", async () => {
-		const hanQuery = "\u653f\u6cbb\u7406\u8bba";
+	test("uses the Han backstop to recover a fragile-covered body hit when tokenizer exact recall is empty", async () => {
+		const queryText = "委员长";
 		const { reader } = createStorageReader({
 			documents: [
-				{ docId: 1, path: "notes/han-fallback-1.md", basenameText: "politics theory fallback" },
-				{ docId: 2, path: "notes/han-fallback-2.md", basenameText: "theory only fallback" },
+				{ docId: 1, path: "notes/chairperson.md", basenameText: "misc", bodyText: "委员长大" },
+				{ docId: 2, path: "notes/member.md", basenameText: "misc", bodyText: "委员会记录" },
 			],
-			postings: {
-				"basename:\u653f\u6cbb": [1],
-				"basename:\u7406\u8bba": [1, 2],
-			},
-			lexicon: ["\u653f\u6cbb", "\u7406\u8bba"],
+			postings: {},
+			lexicon: [],
 		});
 
 		const result = await searchCoverageLexicalV2CandidateCascade({
-			queryText: hanQuery,
-			queryTerms: [hanQuery],
-			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(hanQuery, [hanQuery]),
+			queryText,
+			queryTerms: [queryText],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
 			maxItemResults: 5,
 			storageReader: reader,
-			matchOptions: {
-				includeFuzzy: true,
-			},
+			matchOptions: {},
 		});
 
-		expect(result.usedHanFallbackSalvage).toBe(true);
-		expect(result.trace.layerMode).toBe("han_fallback_salvage");
-		expect(result.trace.verificationBucketCandidateIds).toEqual([]);
 		expect(result.candidateStates.map((candidateState) => ({
 			path: candidateState.path,
-			hanFallbackGroups: candidateState.hanFallbackSalvageGroupCount,
+			hasHanBackstop: candidateState.sourceFlags.hasHanBackstop,
+			hasBody: candidateState.sourceFlags.hasBody,
+			potential: candidateState.potentialPrimaryCoverageCount,
 		}))).toEqual([
-			{ path: "notes/han-fallback-1.md", hanFallbackGroups: 1 },
-			{ path: "notes/han-fallback-2.md", hanFallbackGroups: 1 },
+			{ path: "notes/chairperson.md", hasHanBackstop: true, hasBody: true, potential: 1 },
 		]);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
-			"notes/han-fallback-1.md",
-			"notes/han-fallback-2.md",
+			"notes/chairperson.md",
+		]);
+	});
+
+	test("filters bigram-only false positives unless one normalized field or Han segment contains the full query", async () => {
+		const queryText = "生命力";
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/fake-life-force.md", basenameText: "生命和命力" },
+				{ docId: 2, path: "notes/real-life-force.md", basenameText: "生命力" },
+			],
+			postings: {},
+			lexicon: [],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms: [queryText],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
+			maxItemResults: 5,
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.candidateStates.map((candidateState) => candidateState.path)).toEqual([
+			"notes/real-life-force.md",
+		]);
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/real-life-force.md",
 		]);
 	});
 

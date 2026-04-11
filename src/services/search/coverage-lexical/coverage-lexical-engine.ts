@@ -102,6 +102,9 @@ import { buildDirectSubitemsExactFileSubItems } from "./direct-subitems";
 import {
 	searchCoverageLexicalV2WithStorageAdapter,
 } from "./coverage-lexical-v2-storage-adapter";
+import type {
+	CoverageLexicalV2CandidateCascadeTrace,
+} from "../coverage-lexical-v2";
 
 const COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV =
 	"COVERAGE_LEXICAL_EXPERIMENTAL_BODY_TOKEN_OFFLOAD";
@@ -155,6 +158,7 @@ type CoverageLexicalTokenRange = {
 type CoverageLexicalDerivedDocumentIndexState = {
 	bodyTokenSequence: string[];
 	bodyTerms: Set<string>;
+	bodyCharTerms: Set<string>;
 	aliasTerms: Set<string>;
 	aliasCharTerms: Set<string>;
 	basenameTerms: Set<string>;
@@ -162,6 +166,7 @@ type CoverageLexicalDerivedDocumentIndexState = {
 	folderTerms: Set<string>;
 	folderCharTerms: Set<string>;
 	headingTerms: Set<string>;
+	headingCharTerms: Set<string>;
 	tagTerms: Set<string>;
 	tagCharTerms: Set<string>;
 	tagValues: string[];
@@ -169,6 +174,7 @@ type CoverageLexicalDerivedDocumentIndexState = {
 
 type CoverageLexicalDerivedTermKey =
 	| "bodyTerms"
+	| "bodyCharTerms"
 	| "aliasTerms"
 	| "aliasCharTerms"
 	| "basenameTerms"
@@ -176,6 +182,7 @@ type CoverageLexicalDerivedTermKey =
 	| "folderTerms"
 	| "folderCharTerms"
 	| "headingTerms"
+	| "headingCharTerms"
 	| "tagTerms"
 	| "tagCharTerms"
 	| "tagValues";
@@ -198,6 +205,7 @@ type CoverageLexicalDisplayPruneConfig = {
 const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerivedPostingBinding[] =
 	[
 		{ termsKey: "bodyTerms", postingKey: "bodyPostings" },
+		{ termsKey: "bodyCharTerms", postingKey: "bodyCharPostings" },
 		{ termsKey: "aliasTerms", postingKey: "metadataAliasPostings" },
 		{ termsKey: "aliasCharTerms", postingKey: "metadataAliasCharPostings" },
 		{ termsKey: "basenameTerms", postingKey: "metadataBasenamePostings" },
@@ -208,6 +216,7 @@ const COVERAGE_LEXICAL_DERIVED_POSTING_BINDINGS: readonly CoverageLexicalDerived
 		{ termsKey: "folderTerms", postingKey: "metadataFolderPostings" },
 		{ termsKey: "folderCharTerms", postingKey: "metadataFolderCharPostings" },
 		{ termsKey: "headingTerms", postingKey: "metadataHeadingPostings" },
+		{ termsKey: "headingCharTerms", postingKey: "metadataHeadingCharPostings" },
 		{ termsKey: "tagTerms", postingKey: "metadataTagPostings" },
 		{
 			termsKey: "tagValues",
@@ -295,6 +304,7 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		? [...options.existingBodyTokenSequence]
 		: tokenizeCoverageLexicalDocumentText(tokenizer, options.bodyText ?? "");
 	const bodyTerms = new Set(bodyTokenSequence);
+	const bodyCharTerms = new Set(extractHanBigrams(options.bodyText ?? ""));
 	const basenameTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.basenameText),
 	);
@@ -319,9 +329,11 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 	const headingTerms = new Set(
 		tokenizeCoverageLexicalDocumentText(tokenizer, document.headingsText),
 	);
+	const headingCharTerms = new Set(extractHanBigrams(document.headingsText));
 	return {
 		bodyTokenSequence,
 		bodyTerms,
+		bodyCharTerms,
 		aliasTerms,
 		aliasCharTerms,
 		basenameTerms,
@@ -329,6 +341,7 @@ function buildCoverageLexicalDerivedDocumentIndexState(
 		folderTerms,
 		folderCharTerms,
 		headingTerms,
+		headingCharTerms,
 		tagTerms,
 		tagCharTerms,
 		tagValues,
@@ -569,6 +582,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		(term) => this.getOrCreateDocumentBodyTokenId(term),
 		(tokenId) => this.getDocumentBodyTokenById(tokenId),
 	);
+	private readonly bodyCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasCharPostings = new Map<string, number[]>();
 	private readonly metadataAliasPhrasePostings =
 		new CoverageLexicalSharedStringPostingMap();
@@ -608,6 +622,9 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		null;
 	private lastBenchmarkOffloadSearchDebug:
 		| CoverageLexicalBenchmarkOffloadSearchDebug
+		| null = null;
+	private lastBenchmarkV2CandidateCascadeDebug:
+		| CoverageLexicalV2CandidateCascadeTrace
 		| null = null;
 
 	async reIndexAll(
@@ -660,6 +677,12 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		| CoverageLexicalBenchmarkOffloadSearchDebug
 		| null {
 		return this.lastBenchmarkOffloadSearchDebug;
+	}
+
+	getLastBenchmarkV2CandidateCascadeDebug():
+		| CoverageLexicalV2CandidateCascadeTrace
+		| null {
+		return this.lastBenchmarkV2CandidateCascadeDebug;
 	}
 
 	getBenchmarkPhaseTimingSummary():
@@ -1299,6 +1322,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
 		const queryStartedAt = this.benchmarkPhaseTiming ? performance.now() : 0;
 		this.lastBenchmarkOffloadSearchDebug = null;
+		this.lastBenchmarkV2CandidateCascadeDebug = null;
 		try {
 			if (this.documents.size === 0) {
 				return [];
@@ -1307,7 +1331,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			const queryCache = createCoverageLexicalEngineQueryCache(
 				innerSetting.search.fuzzyProportion,
 			);
-			return await searchCoverageLexicalV2WithStorageAdapter({
+			const searchResult = await searchCoverageLexicalV2WithStorageAdapter({
 				request,
 				fuzzyProportion: queryCache.fuzzyProportion,
 				tokenizeQueryText: (queryText) =>
@@ -1343,6 +1367,36 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								return this.metadataTagPostings.get(term);
 						}
 					},
+					getHanBigramPostingMatches: (_scope, field, bigram) => {
+						switch (field) {
+							case "body":
+								return this.bodyCharPostings.get(bigram);
+							case "basename":
+								return this.metadataBasenameCharPostings.get(bigram);
+							case "aliases":
+								return this.metadataAliasCharPostings.get(bigram);
+							case "headings":
+								return this.metadataHeadingCharPostings.get(bigram);
+							case "folder":
+								return this.metadataFolderCharPostings.get(bigram);
+							case "tag":
+								return this.metadataTagCharPostings.get(bigram);
+						}
+					},
+					getBodyHanSegments: (docId) => this.documentBodyHanSegmentsById[docId],
+					getMetadataVerificationTexts: (docId) => {
+						const document = this.documentById[docId];
+						if (!document) {
+							return null;
+						}
+						return {
+							basenameText: document.basenameText,
+							aliasesText: document.aliasesText,
+							headingsText: document.headingsText,
+							folderText: document.folderText,
+							tagsText: document.tagsText,
+						};
+					},
 					getSortedLexicon: () => this.getSortedLexicon(),
 					getBodyTokenSequence: (docId) =>
 						this.getDocumentBodyTokens(docId, queryCache.bodyTokensByDocId),
@@ -1353,6 +1407,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 						tokenizeCoverageLexicalDocumentText(this.tokenizer, text),
 				},
 			});
+			this.lastBenchmarkV2CandidateCascadeDebug = searchResult.trace;
+			return searchResult.matchedFiles;
 		} finally {
 			if (this.benchmarkPhaseTiming) {
 				this.benchmarkPhaseTiming.queryCount += 1;
@@ -1410,6 +1466,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			documentIdentityCount: this.documentIdByPath.size,
 			nextDocumentId: this.nextDocumentId,
 			bodyTermCount: this.bodyPostings.size,
+			bodyCharTermCount: this.bodyCharPostings.size,
 			metadataAliasCharTermCount: this.metadataAliasCharPostings.size,
 			metadataAliasPhraseTermCount: this.metadataAliasPhrasePostings.size,
 			metadataAliasTermCount: this.metadataAliasPostings.size,
@@ -1419,7 +1476,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataFolderCharTermCount: this.metadataFolderCharPostings.size,
 			metadataFolderPhraseTermCount: this.metadataFolderPhrasePostings.size,
 			metadataFolderTermCount: this.metadataFolderPostings.size,
-			metadataHeadingCharTermCount: 0,
+			metadataHeadingCharTermCount: this.metadataHeadingCharPostings.size,
 			metadataHeadingPhraseTermCount: this.metadataHeadingPhrasePostings.size,
 			metadataHeadingTermCount: this.metadataHeadingPostings.size,
 			metadataTermCount: countPostingMapKeyUnion(
@@ -1557,6 +1614,7 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			this.tokenizer,
 			this.getDocumentTextFields(docId),
 			{
+				bodyText: (this.documentBodyHanSegmentsById[docId] ?? []).join(" "),
 				existingBodyTokenSequence: [],
 				existingTagValues: this.documentTagValuesById[docId],
 			},
@@ -1756,7 +1814,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 					: [],
 			),
 			...livePostingState,
-			bodyCharPostings: new Map(),
 			bodyHanSegmentPostings: new Map(),
 			metadataAliasHanSegmentPostings: new Map(),
 			metadataAliasPhrasePostings: new Map(),
@@ -1764,7 +1821,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 			metadataBasenamePhrasePostings: new Map(),
 			metadataFolderHanSegmentPostings: new Map(),
 			metadataFolderPhrasePostings: new Map(),
-			metadataHeadingCharPostings: new Map(),
 			metadataHeadingHanSegmentPostings: new Map(),
 			metadataHeadingPhrasePostings: new Map(),
 			metadataPostings: new Map(),
@@ -1815,7 +1871,6 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		}
 		this.rebuildDocumentBodyTokenTape(bodyTokenIdsById);
 		this.restoreLivePostingState(state);
-		this.metadataHeadingCharPostings.clear();
 		this.offloadResidentDocumentBodyTokens();
 	}
 
@@ -1831,6 +1886,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 		switch (key) {
 			case "bodyPostings":
 				return this.bodyPostings;
+			case "bodyCharPostings":
+				return this.bodyCharPostings;
 			case "metadataAliasCharPostings":
 				return this.metadataAliasCharPostings;
 			case "metadataAliasPostings":
@@ -1843,6 +1900,8 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 				return this.metadataFolderCharPostings;
 			case "metadataFolderPostings":
 				return this.metadataFolderPostings;
+			case "metadataHeadingCharPostings":
+				return this.metadataHeadingCharPostings;
 			case "metadataHeadingPostings":
 				return this.metadataHeadingPostings;
 			case "metadataTagCharPostings":
@@ -5188,7 +5247,3 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
-
-
-
-

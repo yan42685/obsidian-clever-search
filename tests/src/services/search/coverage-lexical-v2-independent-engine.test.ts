@@ -10,18 +10,24 @@ function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 			basenameText: "ai",
 			aliasesText: "",
 			headingsText: "",
+			folderText: "notes",
+			tagsText: "",
 		}],
 		[2, {
 			path: "notes/exam-summary.md",
 			basenameText: "exam-summary",
 			aliasesText: "",
 			headingsText: "",
+			folderText: "notes",
+			tagsText: "",
 		}],
 		[3, {
 			path: "notes/study-plan.md",
 			basenameText: "study-plan",
 			aliasesText: "",
 			headingsText: "",
+			folderText: "notes",
+			tagsText: "",
 		}],
 	]);
 	const postings = new Map<string, readonly number[]>([
@@ -34,12 +40,36 @@ function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 		[2, ["ai", "exam", "summary"]],
 		[3, ["exam", "plan"]],
 	]);
+	const bodyHanSegments = new Map<number, readonly string[]>([
+		[1, []],
+		[2, []],
+		[3, []],
+	]);
 	return {
 		getDocumentRecord(docId) {
 			return documents.get(docId) ?? null;
 		},
 		getPostingMatches(field, term) {
 			return postings.get(`${field}:${term}`);
+		},
+		getHanBigramPostingMatches(_scope, field, bigram) {
+			return postings.get(`${field}:${bigram}`);
+		},
+		getBodyHanSegments(docId) {
+			return bodyHanSegments.get(docId);
+		},
+		getMetadataVerificationTexts(docId) {
+			const document = documents.get(docId);
+			if (!document) {
+				return null;
+			}
+			return {
+				basenameText: document.basenameText,
+				aliasesText: document.aliasesText,
+				headingsText: document.headingsText,
+				folderText: document.folderText,
+				tagsText: document.tagsText,
+			};
 		},
 		getSortedLexicon() {
 			return ["ai", "exam", "plan", "summary"];
