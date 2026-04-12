@@ -429,6 +429,7 @@ export class CoverageLexicalV2FileSearchEngine
 					this.bodyTokenCacheByDocId.delete(docId);
 				}
 			}
+			this.store.compactOverlayIntoSegment(true);
 			return true;
 		} catch {
 			this.clearIndex();

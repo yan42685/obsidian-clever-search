@@ -803,10 +803,13 @@ function createMockLexicalEngine(overrides: Record<string, unknown> = {}) {
     supportsPersistentFileIndex: jest.fn(() => false),
     reIndexAll: jest.fn(async () => true),
     serializeFileIndex: jest.fn(() => null),
+    restorePersistedFileIndex: jest.fn(async () => false),
+    planPersistentRecovery: jest.fn(async () => null),
     persistFileIndexArtifact: jest.fn(async () => {}),
     clearPersistedFileIndexArtifact: jest.fn(async () => {}),
     estimateFileIndexBytes: jest.fn(() => 0),
     getFileIndexBreakdown: jest.fn(() => null),
+    clearIndex: jest.fn(() => {}),
   };
   const moveDocument = jest.fn(async (oldPath: string, document: any) => {
     mock.deleteDocuments([oldPath, document.path]);
@@ -1340,6 +1343,9 @@ describe("DataManager integration", () => {
     database.estimatePluginStorageUsage = jest.fn(async () => ({
       tables: [
         { name: "lexicalSearchSnapshots", rows: 1, bytes: 3559 },
+        { name: "lexicalV2IndexStoreMeta", rows: 1, bytes: 64 },
+        { name: "lexicalV2IndexStoreSnapshotChunks", rows: 1, bytes: 2048 },
+        { name: "lexicalV2IndexStoreJournal", rows: 1, bytes: 512 },
         { name: "fileSnapshots", rows: 1, bytes: 71257 },
         { name: "hybridChunks", rows: 0, bytes: 0 },
         { name: "hybridChunkVectors", rows: 0, bytes: 0 },
@@ -1348,6 +1354,7 @@ describe("DataManager integration", () => {
     }));
     const dataProvider = createMockDataProvider({ files, texts });
     const lexicalEngine = createMockLexicalEngine({
+      supportsPersistentFileIndex: jest.fn(() => true),
       reIndexAll: jest.fn(async () => false),
       serializeFileIndex: jest.fn(() => rebuiltSnapshot),
       estimateFileIndexBytes: jest.fn(() => 3872),
@@ -1435,6 +1442,7 @@ describe("DataManager integration", () => {
 
     const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
     expect(latestNotice).toContain("Lexical memory report");
+    expect(latestNotice).toContain("Persisted lexical snapshot: 2.56 KB");
     expect(latestNotice).toContain("Coverage resident hot");
     expect(latestNotice).toContain("Coverage cold owned");
     expect(latestNotice).toContain("Coverage resident major groups");
@@ -1494,6 +1502,45 @@ describe("DataManager integration", () => {
         }),
       ]),
     );
+  });
+
+  test("onunload does not persist lexical snapshot artifacts", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+    const file = createFile("docs/unload.md", "alpha body", 320);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "alpha body"]]);
+    const database = createMockDatabase();
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine({
+      supportsPersistentFileIndex: jest.fn(() => true),
+    });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    (manager as any).isLexicalEngineUpToDate = true;
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    (lexicalEngine.persistFileIndexArtifact as jest.Mock).mockClear();
+
+    manager.onunload();
+
+    expect(lexicalEngine.persistFileIndexArtifact).not.toHaveBeenCalled();
   });
 
   test("dirty lexical artifact marker forces startup rebuild after runtime edits", async () => {

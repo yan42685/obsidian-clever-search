@@ -530,4 +530,75 @@ test("searchFiles keeps using the independent v2 candidate-cascade path without 
 		]);
 		expect(results[0]?.matchedTerms).toEqual(["ai", "exam"]);
 	});
+
+	test("restorePersistedFileIndex compacts journal replay back into resident segments", async () => {
+		let storedSnapshot: unknown = null;
+		let storedJournalEntries: any[] = [];
+
+		const databaseMock = {
+			appendCoverageLexicalV2IndexStoreJournalEntries: jest.fn(
+				async (entries: readonly any[]) => {
+					storedJournalEntries.push(...entries);
+				},
+			),
+			readCoverageLexicalV2IndexStoreSnapshot: jest.fn(async () => storedSnapshot),
+			readCoverageLexicalV2IndexStoreJournalEntries: jest.fn(
+				async () => storedJournalEntries,
+			),
+			writeCoverageLexicalV2IndexStoreSnapshot: jest.fn(async (snapshot: unknown) => {
+				storedSnapshot = snapshot;
+				storedJournalEntries = [];
+			}),
+		};
+		container.registerInstance(Database, databaseMock as any);
+		container.registerInstance(FileSnapshotStore, {
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+		} as any);
+
+		const { CoverageLexicalV2FileSearchEngine } = require(
+			"src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine",
+		) as {
+			CoverageLexicalV2FileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				persistFileIndexArtifact(): Promise<void>;
+				restorePersistedFileIndex(): Promise<boolean>;
+				getIndexBreakdown(): Record<string, unknown> | null;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const seedEngine = new CoverageLexicalV2FileSearchEngine();
+		await seedEngine.addDocuments([
+			{
+				path: "notes/base.md",
+				basename: "base",
+				folder: "notes",
+				content: "base alpha",
+			},
+		]);
+		await seedEngine.persistFileIndexArtifact();
+		await seedEngine.addDocuments([
+			{
+				path: "notes/journal.md",
+				basename: "journal",
+				folder: "notes",
+				content: "journal beta",
+			},
+		]);
+
+		const restoredEngine = new CoverageLexicalV2FileSearchEngine();
+		await expect(restoredEngine.restorePersistedFileIndex()).resolves.toBe(true);
+
+		const breakdown = restoredEngine.getIndexBreakdown() as any;
+		expect(breakdown.documentCount).toBe(2);
+		expect(breakdown.segmentCount).toBe(1);
+		expect(breakdown.estimatedBytes.residentHot.postings.exactIncidence).toBeLessThan(
+			120,
+		);
+	});
 });

@@ -1046,7 +1046,6 @@ export class DataManager {
     getInstance(FileWatcher).stop();
     this.removeInVaultSearchFlushListener();
     this.docOperationsBuffer.dispose();
-    void this.flushLexicalSnapshotIfDirty(true);
     this.clearLexicalSnapshotFlushTimer();
     this.clearHybridRepairScheduler();
     this.hybridFreshnessMaintenanceTask = null;
@@ -3990,15 +3989,18 @@ export class DataManager {
       (sum, file) => sum + file.stat.size,
       0,
     );
-    const storageUsage = await this.database.estimatePluginStorageUsage();
-    const bytesByName = new Map(
-      storageUsage.tables.map((item) => [item.name, item.bytes]),
-    );
-    const persistedLexicalSnapshotBytes =
-      bytesByName.get("lexicalSearchSnapshots") ?? 0;
-    const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
-      persistedLexicalSnapshotBytes,
-    );
+      const storageUsage = await this.database.estimatePluginStorageUsage();
+      const bytesByName = new Map(
+        storageUsage.tables.map((item) => [item.name, item.bytes]),
+      );
+      const persistedLexicalSnapshotBytes = this.lexicalEngine.supportsPersistentFileIndex()
+        ? (bytesByName.get("lexicalV2IndexStoreMeta") ?? 0) +
+          (bytesByName.get("lexicalV2IndexStoreSnapshotChunks") ?? 0) +
+          (bytesByName.get("lexicalV2IndexStoreJournal") ?? 0)
+        : (bytesByName.get("lexicalSearchSnapshots") ?? 0);
+      const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
+        persistedLexicalSnapshotBytes,
+      );
     const lexicalIndexBreakdown = this.lexicalEngine.getFileIndexBreakdown();
     const lexicalRuntimeBreakdown = this.buildLexicalRuntimeBreakdown(
       lexicalIndexBreakdown,
@@ -4008,10 +4010,15 @@ export class DataManager {
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
 
-    new MyNotice(
-      `${["Lexical memory report", ...lexicalRuntimeBreakdown.noticeLines, localOnlyHint].join("\n")}`,
-      15000,
-    );
+      new MyNotice(
+        `${[
+          "Lexical memory report",
+          `Persisted lexical snapshot: ${this.formatBytes(persistedLexicalSnapshotBytes)}`,
+          ...lexicalRuntimeBreakdown.noticeLines,
+          localOnlyHint,
+        ].join("\n")}`,
+        15000,
+      );
 
     console.groupCollapsed("[clever-search] lexical memory report");
     console.log(`Indexable vault size: ${this.formatBytes(indexableBytes)}`);

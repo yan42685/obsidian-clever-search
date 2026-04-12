@@ -1468,6 +1468,17 @@ Fuzzy salvage:
     resident-vs-cold size acceptance, cold-sidecar packing coverage, and the
     automation benchmark sanity run; this persistence pass is now marked
     completed
+  - a resident-hot follow-up is also now active in the runtime:
+    document-view strings are pooled across documents instead of being re-owned
+    per document view, so repeated folder/tag/heading/alias/path-adjacent view
+    text no longer pays duplicate resident ownership
+  - on the automation-corpus size gate, that document-view pooling pass reduces
+    `documentViewBytes` to `15,171` and `residentBytes` to `40,207` while
+    keeping `exactIncidenceBytes = 9,296`
+  - the persistent restore path now force-compacts snapshot+journal replay back
+    into resident segments before declaring restore complete, preventing large
+    replayed journals from leaving the live runtime in a much fatter
+    overlay-heavy exact/metadata posting shape
 
 ### Phase 7. Old-Code Removal And Shell Shrinkage
 
@@ -1700,7 +1711,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
 
 
 

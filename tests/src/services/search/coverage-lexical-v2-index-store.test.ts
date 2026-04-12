@@ -8,6 +8,8 @@ import type {
 	CoverageLexicalV2PreparedDocument,
 } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store-types";
 
+const textEncoder = new TextEncoder();
+
 function createPreparedDocument(options: {
 	path: string;
 	generation: number;
@@ -78,6 +80,31 @@ function createReader(store: CoverageLexicalV2IndexStore) {
 	});
 }
 
+function estimateDocumentViewBytesForTest(documentState: any): number {
+	const ownedStrings = new Set<string>();
+	const addOwnedStringBytes = (value: string): number => {
+		if (value.length === 0 || ownedStrings.has(value)) {
+			return 0;
+		}
+		ownedStrings.add(value);
+		return textEncoder.encode(value).length;
+	};
+	return (
+		addOwnedStringBytes(documentState.path) +
+		addOwnedStringBytes(documentState.indexedRef.path) +
+		addOwnedStringBytes(documentState.record.path) +
+		addOwnedStringBytes(
+			documentState.record.stableDeterministicKey ?? documentState.path,
+		) +
+		addOwnedStringBytes(documentState.record.basenameText) +
+		addOwnedStringBytes(documentState.record.aliasesText) +
+		addOwnedStringBytes(documentState.record.headingsText) +
+		addOwnedStringBytes(documentState.record.folderText) +
+		addOwnedStringBytes(documentState.record.tagsText) +
+		64
+	);
+}
+
 describe("CoverageLexicalV2IndexStore", () => {
 	test("replace, update, move, and delete preserve doc ids and postings", () => {
 		const store = new CoverageLexicalV2IndexStore();
@@ -132,6 +159,59 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(store.getIndexedDocumentCount()).toBe(0);
 		expect(reader.getPostingMatches("basename", "beta")).toBeUndefined();
 		expect(reader.getBodyHanSegmentDocIds()).toEqual([]);
+	});
+
+	test("force compaction rebuilds resident segments from document truth and clears tombstones", () => {
+		const store = new CoverageLexicalV2IndexStore();
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/rolling.md",
+				generation: 1,
+				basenameTerms: ["alpha"],
+				bodyTerms: ["alpha", "body"],
+				bodyTokens: ["alpha", "body"],
+			}),
+		);
+		store.compactOverlayIntoSegment(true);
+		const baselineExactIncidence =
+			store.buildIndexBreakdown().estimatedBytes.residentHot.postings.exactIncidence;
+
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/rolling.md",
+				generation: 2,
+				basenameTerms: ["beta"],
+				bodyTerms: ["beta", "body"],
+				bodyTokens: ["beta", "body"],
+			}),
+		);
+		store.compactOverlayIntoSegment();
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/rolling.md",
+				generation: 3,
+				basenameTerms: ["gamma"],
+				bodyTerms: ["gamma", "body"],
+				bodyTokens: ["gamma", "body"],
+			}),
+		);
+		store.compactOverlayIntoSegment();
+
+		const inflatedExactIncidence =
+			store.buildIndexBreakdown().estimatedBytes.residentHot.postings.exactIncidence;
+		expect(inflatedExactIncidence).toBeGreaterThan(baselineExactIncidence);
+
+		store.compactOverlayIntoSegment(true);
+
+		const compactedBreakdown = store.buildIndexBreakdown();
+		expect(
+			compactedBreakdown.estimatedBytes.residentHot.postings.exactIncidence,
+		).toBeLessThan(inflatedExactIncidence);
+		const reader = createReader(store);
+		expect(reader.getPostingMatches("basename", "alpha")).toBeUndefined();
+		expect(reader.getPostingMatches("basename", "beta")).toBeUndefined();
+		expect(reader.getPostingMatches("basename", "gamma")).toEqual([0]);
+		expect(compactedBreakdown.segmentCount).toBe(1);
 	});
 
 	test("snapshot roundtrip preserves resident state and reports cold-sidecar bytes", () => {
@@ -243,6 +323,56 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(firstDocument.manifest.bodyHanGateBloomWords).toBe(
 			secondDocument.manifest.bodyHanGateBloomWords,
 		);
+	});
+
+	test("shares repeated document-view strings across documents and releases them on delete", () => {
+		const store = new CoverageLexicalV2IndexStore();
+		const first = createPreparedDocument({
+			path: "shared/one.md",
+			generation: 1,
+			basenameTerms: ["one"],
+			aliasesTerms: ["shared alias"],
+			headingsTerms: ["shared heading"],
+			folderTerms: ["shared-folder"],
+			tagTerms: ["shared-tag"],
+			bodyTerms: ["one"],
+		});
+		first.record.stableDeterministicKey = "shared-key";
+		const second = createPreparedDocument({
+			path: "shared/two.md",
+			generation: 2,
+			basenameTerms: ["two"],
+			aliasesTerms: ["shared alias"],
+			headingsTerms: ["shared heading"],
+			folderTerms: ["shared-folder"],
+			tagTerms: ["shared-tag"],
+			bodyTerms: ["two"],
+		});
+		second.record.stableDeterministicKey = "shared-key";
+
+		store.replaceDocument(first);
+		store.replaceDocument(second);
+
+		const firstDocument = (store as any).documentById[0];
+		const secondDocument = (store as any).documentById[1];
+		const naiveDuplicatedBytes =
+			estimateDocumentViewBytesForTest(firstDocument) +
+			estimateDocumentViewBytesForTest(secondDocument);
+		const pooledBreakdown = store.buildIndexBreakdown();
+		expect(pooledBreakdown.estimatedBytes.residentHot.documents.view).toBeLessThan(
+			naiveDuplicatedBytes,
+		);
+		expect((store as any).documentViewSharedStringBytes).toBeGreaterThan(0);
+
+		store.deleteDocument("shared/two.md");
+		const afterDeleteBreakdown = store.buildIndexBreakdown();
+		expect(afterDeleteBreakdown.estimatedBytes.residentHot.documents.view).toBe(
+			estimateDocumentViewBytesForTest((store as any).documentById[0]),
+		);
+
+		store.deleteDocument("shared/one.md");
+		expect((store as any).documentViewSharedStringBytes).toBe(0);
+		expect(store.buildIndexBreakdown().estimatedBytes.residentHot.documents.view).toBe(0);
 	});
 });
 

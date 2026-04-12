@@ -101,6 +101,11 @@ type CoverageLexicalV2RuntimeMemoryBreakdownOptions = {
 	bodyTokensHotVsSidecarBytes?: number;
 };
 
+type CoverageLexicalV2SharedStringPoolEntry = {
+	refCount: number;
+	estimatedBytes: number;
+};
+
 const COVERAGE_LEXICAL_V2_POSTING_FIELDS = [
 	"basename",
 	"aliases",
@@ -167,6 +172,7 @@ const COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_HASH_COUNT = 3;
 const EMPTY_COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORDS = Object.freeze(
 	new Array<number>(COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT).fill(0),
 ) as readonly CoverageLexicalV2HanGateBloomWord[];
+const COVERAGE_LEXICAL_V2_DOCUMENT_VIEW_BASE_BYTES = 64;
 
 export class CoverageLexicalV2IndexStore {
 	private nextDocumentId = 0;
@@ -183,6 +189,11 @@ export class CoverageLexicalV2IndexStore {
 		createCoverageLexicalV2CanonicalTermPool();
 	private readonly hanSymbolPool: CoverageLexicalV2HanSymbolPool =
 		createCoverageLexicalV2HanSymbolPool();
+	private readonly documentViewStringPool = new Map<
+		string,
+		CoverageLexicalV2SharedStringPoolEntry
+	>();
+	private documentViewSharedStringBytes = 0;
 	private latinExpansionTermIdsCache: CoverageLexicalV2CanonicalTermId[] = [];
 	private latinExpansionTermsDirty = true;
 	private overlayMutationCount = 0;
@@ -209,6 +220,8 @@ export class CoverageLexicalV2IndexStore {
 		clearCoverageLexicalV2MutableOverlayState(this.overlay);
 		clearCoverageLexicalV2CanonicalTermPool(this.canonicalTermPool);
 		clearCoverageLexicalV2HanSymbolPool(this.hanSymbolPool);
+		this.documentViewStringPool.clear();
+		this.documentViewSharedStringBytes = 0;
 		this.latinExpansionTermIdsCache = [];
 		this.latinExpansionTermsDirty = true;
 		this.overlayMutationCount = 0;
@@ -420,6 +433,10 @@ export class CoverageLexicalV2IndexStore {
 	}
 
 	compactOverlayIntoSegment(force = false): boolean {
+		if (force) {
+			return this.rebuildResidentSegmentsFromDocumentTruth();
+		}
+
 		const exactPostings = createCoverageLexicalV2MutableExactPostingMaps();
 		const metadataPostings = createCoverageLexicalV2MutableMetadataPostingMaps();
 
@@ -463,6 +480,54 @@ export class CoverageLexicalV2IndexStore {
 		this.overlayMutationCount = countCoverageLexicalV2MutableOverlayMutationCount(
 			this.overlay,
 		);
+		return docCount > 0;
+	}
+
+	private rebuildResidentSegmentsFromDocumentTruth(): boolean {
+		const exactPostings = createCoverageLexicalV2MutableExactPostingMaps();
+		const metadataPostings = createCoverageLexicalV2MutableMetadataPostingMaps();
+
+		for (const documentState of this.documentById) {
+			if (!documentState) {
+				continue;
+			}
+			for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
+				for (const termId of documentState.manifest.exactTermIdsByField[field]) {
+					const docIds = exactPostings[field].get(termId) ?? [];
+					docIds.push(documentState.docId);
+					exactPostings[field].set(termId, docIds);
+				}
+			}
+			for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
+				for (const bigram of this.decodeOverlayMetadataBigramIdList(
+					documentState.manifest.metadataHanBigramIdsByField[field],
+				)) {
+					const docIds = metadataPostings[field].get(bigram) ?? [];
+					docIds.push(documentState.docId);
+					metadataPostings[field].set(bigram, docIds);
+				}
+			}
+		}
+
+		const docCount = countCoverageLexicalV2PostingMapsDocumentCount(
+			exactPostings,
+			metadataPostings,
+		);
+		this.residentSegments.length = 0;
+		if (docCount > 0) {
+			this.residentSegments.push(
+				buildCoverageLexicalV2ResidentSegment({
+					id: `segment:${Date.now()}:0`,
+					createdAt: Date.now(),
+					docCount,
+					exactByField: exactPostings,
+					metadataHanByField: metadataPostings,
+					getCanonicalTermId: (term) => this.findCanonicalTermId(term),
+				}),
+			);
+		}
+		clearCoverageLexicalV2MutableOverlayState(this.overlay);
+		this.overlayMutationCount = 0;
 		return docCount > 0;
 	}
 
@@ -583,7 +648,9 @@ export class CoverageLexicalV2IndexStore {
 	): CoverageLexicalV2RuntimeMemoryBreakdown {
 		let exactIncidence = 0;
 		let metadataHanGate = 0;
-		let documentView = 0;
+		const documentView =
+			this.getIndexedDocumentCount() * COVERAGE_LEXICAL_V2_DOCUMENT_VIEW_BASE_BYTES +
+			this.documentViewSharedStringBytes;
 		let bodyHanSegments = this.bodyHanSegmentDocIds.length * 4;
 		let pathMirrors = 0;
 		let manifestMirrors = 0;
@@ -613,7 +680,6 @@ export class CoverageLexicalV2IndexStore {
 			if (!documentState) {
 				continue;
 			}
-			documentView += estimateCoverageLexicalV2DocumentViewBytes(documentState);
 			bodyHanSegments +=
 				documentState.manifest.bodyHanGateBloomWords.length * 4;
 			pathMirrors += estimateCoverageLexicalV2DocumentPathMirrorBytes(
@@ -911,7 +977,7 @@ export class CoverageLexicalV2IndexStore {
 			path: document.path,
 			generation: document.indexedRef.generation ?? document.generation,
 		};
-		return {
+		const documentState: CoverageLexicalV2InternalDocumentState = {
 			docId,
 			path: document.path,
 			generation: document.generation,
@@ -952,6 +1018,8 @@ export class CoverageLexicalV2IndexStore {
 				},
 			},
 		};
+		this.internDocumentViewStrings(documentState);
+		return documentState;
 	}
 
 	private buildInternalDocumentStateFromPersistedJournal(
@@ -960,7 +1028,7 @@ export class CoverageLexicalV2IndexStore {
 	): CoverageLexicalV2InternalDocumentState {
 		const stableDeterministicKey =
 			document.record.stableDeterministicKey ?? document.path;
-		return {
+		const documentState: CoverageLexicalV2InternalDocumentState = {
 			docId,
 			path: document.path,
 			generation: document.generation,
@@ -1001,12 +1069,14 @@ export class CoverageLexicalV2IndexStore {
 				},
 			},
 		};
+		this.internDocumentViewStrings(documentState);
+		return documentState;
 	}
 
 	private buildInternalDocumentStateFromSnapshotDocument(
 		document: CoverageLexicalV2IndexStoreSnapshotDocument,
 	): CoverageLexicalV2InternalDocumentState {
-		return {
+		const documentState: CoverageLexicalV2InternalDocumentState = {
 			docId: document.docId,
 			path: document.path,
 			generation: document.generation,
@@ -1014,6 +1084,8 @@ export class CoverageLexicalV2IndexStore {
 			record: { ...document.record },
 			manifest: normalizeCoverageLexicalV2PersistedDocManifest(document.manifest),
 		};
+		this.internDocumentViewStrings(documentState);
+		return documentState;
 	}
 
 	private ensureCanonicalTermIds(fieldTerms: CoverageLexicalV2FieldTermLists): void {
@@ -1235,6 +1307,7 @@ export class CoverageLexicalV2IndexStore {
 		if (!existing) {
 			return;
 		}
+		this.releaseDocumentViewStrings(existing);
 		this.applyDocumentRemoval(existing);
 		this.syncBodyHanSegmentDocId(docId, false);
 		this.bodyTokenSidecarEstimatedBytes = Math.max(
@@ -1319,6 +1392,48 @@ export class CoverageLexicalV2IndexStore {
 				);
 				this.overlayMutationCount += 1;
 			}
+		}
+	}
+
+	private internDocumentViewStrings(
+		documentState: CoverageLexicalV2InternalDocumentState,
+	): void {
+		for (const value of collectCoverageLexicalV2DocumentViewOwnedStrings(
+			documentState,
+		)) {
+			const existing = this.documentViewStringPool.get(value);
+			if (existing) {
+				existing.refCount += 1;
+				continue;
+			}
+			const estimatedBytes = estimateCoverageLexicalV2StringBytes(value);
+			this.documentViewStringPool.set(value, {
+				refCount: 1,
+				estimatedBytes,
+			});
+			this.documentViewSharedStringBytes += estimatedBytes;
+		}
+	}
+
+	private releaseDocumentViewStrings(
+		documentState: CoverageLexicalV2InternalDocumentState,
+	): void {
+		for (const value of collectCoverageLexicalV2DocumentViewOwnedStrings(
+			documentState,
+		)) {
+			const existing = this.documentViewStringPool.get(value);
+			if (!existing) {
+				continue;
+			}
+			if (existing.refCount <= 1) {
+				this.documentViewStringPool.delete(value);
+				this.documentViewSharedStringBytes = Math.max(
+					0,
+					this.documentViewSharedStringBytes - existing.estimatedBytes,
+				);
+				continue;
+			}
+			existing.refCount -= 1;
 		}
 	}
 
@@ -2131,31 +2246,26 @@ function estimateCoverageLexicalV2MutableStringPostingDeltaBytes<Field extends s
 	return total;
 }
 
-function estimateCoverageLexicalV2DocumentViewBytes(
+function collectCoverageLexicalV2DocumentViewOwnedStrings(
 	documentState: CoverageLexicalV2InternalDocumentState,
-): number {
+): readonly string[] {
 	const ownedStrings = new Set<string>();
-	const addOwnedStringBytes = (value: string): number => {
+	const addOwnedString = (value: string): void => {
 		if (value.length === 0 || ownedStrings.has(value)) {
-			return 0;
+			return;
 		}
 		ownedStrings.add(value);
-		return estimateCoverageLexicalV2StringBytes(value);
 	};
-	return (
-		addOwnedStringBytes(documentState.path) +
-		addOwnedStringBytes(documentState.indexedRef.path) +
-		addOwnedStringBytes(documentState.record.path) +
-		addOwnedStringBytes(
-			documentState.record.stableDeterministicKey ?? documentState.path,
-		) +
-		addOwnedStringBytes(documentState.record.basenameText) +
-		addOwnedStringBytes(documentState.record.aliasesText) +
-		addOwnedStringBytes(documentState.record.headingsText) +
-		addOwnedStringBytes(documentState.record.folderText) +
-		addOwnedStringBytes(documentState.record.tagsText) +
-		64
-	);
+	addOwnedString(documentState.path);
+	addOwnedString(documentState.indexedRef.path);
+	addOwnedString(documentState.record.path);
+	addOwnedString(documentState.record.stableDeterministicKey ?? documentState.path);
+	addOwnedString(documentState.record.basenameText);
+	addOwnedString(documentState.record.aliasesText);
+	addOwnedString(documentState.record.headingsText);
+	addOwnedString(documentState.record.folderText);
+	addOwnedString(documentState.record.tagsText);
+	return [...ownedStrings];
 }
 
 function estimateCoverageLexicalV2DocumentPathMirrorBytes(
