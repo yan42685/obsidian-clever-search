@@ -106,21 +106,25 @@ describe("coverage lexical v2 size acceptance", () => {
 		store.compactOverlayIntoSegment(true);
 
 		const breakdown = store.buildIndexBreakdown();
-		const residentBytes =
-			breakdown.estimatedBytes.total - breakdown.estimatedBytes.bodyTokenSidecar;
+		const residentBytes = breakdown.estimatedBytes.residentHot.total;
 		const summary = {
 			documentCount: breakdown.documentCount,
 			segmentCount: breakdown.segmentCount,
 			residentBytes,
-			coldBytes: breakdown.estimatedBytes.bodyTokenSidecar,
-			totalBytes: breakdown.estimatedBytes.total,
-			documentViewBytes: breakdown.estimatedBytes.documentView,
+			coldBytes: breakdown.estimatedBytes.coldOwned.bodyTokensSidecar,
+			totalBytes: breakdown.estimatedBytes.combinedOwnedTotal,
+			documentViewBytes: breakdown.estimatedBytes.residentHot.documents.view,
 			latinExpansionLexiconBytes:
-				breakdown.estimatedBytes.latinExpansionLexicon,
-			exactIncidenceBytes: breakdown.estimatedBytes.exactIncidence,
-			metadataHanGateBytes: breakdown.estimatedBytes.metadataHanGate,
+				breakdown.estimatedBytes.residentHot.lexicon.latinExpansion,
+			exactIncidenceBytes:
+				breakdown.estimatedBytes.residentHot.postings.exactIncidence,
+			metadataHanGateBytes:
+				breakdown.estimatedBytes.residentHot.postings.metadataHanGate,
 			bodyHanVerificationViewBytes:
-				breakdown.estimatedBytes.bodyHanVerificationView,
+				breakdown.estimatedBytes.residentHot.verification.bodyHanSegments,
+			bodyTokensHotBytes:
+				breakdown.estimatedBytes.residentHot.caches.bodyTokensHot,
+			overlapBytes: breakdown.estimatedBytes.overlapDiagnostics.total,
 			legacyCoupledLiveBytesBaseline:
 				LEGACY_COUPLED_AUTOMATION_LIVE_BYTES_BASELINE,
 		};
@@ -140,7 +144,7 @@ describe("coverage lexical v2 size acceptance", () => {
 		);
 
 		expect(breakdown.documentCount).toBeGreaterThanOrEqual(80);
-		expect(breakdown.estimatedBytes.bodyTokenSidecar).toBeGreaterThan(0);
+		expect(breakdown.estimatedBytes.coldOwned.bodyTokensSidecar).toBeGreaterThan(0);
 		expect(residentBytes).toBeLessThan(LEGACY_COUPLED_AUTOMATION_LIVE_BYTES_BASELINE);
 	});
 });

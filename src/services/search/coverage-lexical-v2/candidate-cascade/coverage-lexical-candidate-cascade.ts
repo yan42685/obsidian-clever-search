@@ -32,6 +32,7 @@ import type {
 } from "../comparator";
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
+	CoverageLexicalV2CandidateCascadeHanBackstopStats,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "./coverage-lexical-candidate-types";
@@ -50,7 +51,6 @@ import {
 	type CoverageLexicalV2CandidateCascadeMatchOptions,
 } from "./coverage-lexical-candidate-match";
 import { extractHanSegments } from "../../coverage-lexical/coverage-lexical-cjk";
-
 type CoverageLexicalV2CascadeCandidateFieldTermSets = {
 	basenameTerms: Set<string>;
 	aliasTerms: Set<string>;
@@ -219,16 +219,10 @@ type CoverageLexicalV2CascadeLayerOutcome = {
 	orderedBuckets: CoverageLexicalV2CascadeCandidateState[][];
 };
 
-type CoverageLexicalV2HanBackstopGateStats = {
-	longestContiguousBigramChain: number;
-	matchedBigramCount: number;
-	bigramCoverageRatio: number;
-};
-
 type CoverageLexicalV2HanBackstopRankedCandidate = {
 	docId: number;
 	stableDeterministicKey: string;
-	stats: CoverageLexicalV2HanBackstopGateStats;
+	stats: CoverageLexicalV2CandidateCascadeHanBackstopStats;
 };
 
 type CoverageLexicalV2PendingHanCandidateVerificationState =
@@ -241,7 +235,7 @@ export type CoverageLexicalV2PendingHanCandidate = {
 	surfaceGroupIndex: number;
 	normalizedText: string;
 	stableDeterministicKey: string;
-	stats: CoverageLexicalV2HanBackstopGateStats;
+	stats: CoverageLexicalV2CandidateCascadeHanBackstopStats;
 	verificationState: CoverageLexicalV2PendingHanCandidateVerificationState;
 	verifiedFields: Set<CoverageLexicalV2MatchField>;
 };
@@ -1760,10 +1754,10 @@ function collectCoverageLexicalV2BodyHanBackstopMatches(
 	const matchedCandidates: CoverageLexicalV2PendingHanCandidate[] = [];
 	for (const docId of reader.getBodyHanSegmentDocIds()) {
 		metrics.bodyHanScanDocCount += 1;
-		const bodyHanSegments = reader.getBodyHanSegments(docId);
 		const stats = evaluateCoverageLexicalV2BodyHanBackstopMatch(
-			bodyHanSegments,
+			docId,
 			hanBackstopGroup,
+			reader,
 			metrics,
 		);
 		if (!stats) {
@@ -1797,60 +1791,16 @@ function collectCoverageLexicalV2BodyHanBackstopMatches(
 }
 
 function evaluateCoverageLexicalV2BodyHanBackstopMatch(
-	bodyHanSegments: readonly string[] | undefined,
+	docId: number,
 	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
+	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
-): CoverageLexicalV2HanBackstopGateStats | null {
-	if (!bodyHanSegments || bodyHanSegments.length === 0) {
-		return null;
-	}
-	for (const bodyHanSegment of bodyHanSegments) {
-		metrics.bodyHanScanSegmentCount += 1;
-		const normalizedSegment = normalizeCoverageLexicalV2Text(bodyHanSegment);
-		if (normalizedSegment.length === 0) {
-			continue;
-		}
-		const stats = buildCoverageLexicalV2HanBackstopSegmentStats(
-			hanBackstopGroup,
-			normalizedSegment,
-		);
-		if (stats && !passesCoverageLexicalV2HanBackstopGate(hanBackstopGroup.bigrams.length, stats)) {
-			continue;
-		}
-		if (normalizedSegment.includes(hanBackstopGroup.normalizedText)) {
-			return {
-				longestContiguousBigramChain: hanBackstopGroup.bigrams.length,
-				matchedBigramCount: hanBackstopGroup.bigrams.length,
-				bigramCoverageRatio: hanBackstopGroup.bigrams.length > 0 ? 1 : 0,
-			};
-		}
-	}
-	return null;
-}
-
-function buildCoverageLexicalV2HanBackstopSegmentStats(
-	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
-	normalizedSegment: string,
-): CoverageLexicalV2HanBackstopGateStats | null {
-	if (hanBackstopGroup.bigrams.length === 0) {
-		return null;
-	}
-	const matchedBigramIndices = new Set<number>();
-	for (let bigramIndex = 0; bigramIndex < hanBackstopGroup.bigrams.length; bigramIndex += 1) {
-		if (normalizedSegment.includes(hanBackstopGroup.bigrams[bigramIndex])) {
-			matchedBigramIndices.add(bigramIndex);
-		}
-	}
-	if (matchedBigramIndices.size === 0) {
-		return null;
-	}
-	return {
-		longestContiguousBigramChain: computeCoverageLexicalV2HanBackstopLongestChain(
-			matchedBigramIndices,
-		),
-		matchedBigramCount: matchedBigramIndices.size,
-		bigramCoverageRatio: matchedBigramIndices.size / hanBackstopGroup.bigrams.length,
-	};
+): CoverageLexicalV2CandidateCascadeHanBackstopStats | null {
+	return reader.getBodyHanBackstopStats(
+		docId,
+		hanBackstopGroup.normalizedText,
+		hanBackstopGroup.bigrams,
+	);
 }
 
 function rankCoverageLexicalV2MetadataHanBackstopCandidates(
@@ -1919,8 +1869,8 @@ function buildCoverageLexicalV2HanBackstopGateStats(
 		CoverageLexicalV2CandidateCascadePostingField,
 		ReadonlySet<number>
 	>,
-): CoverageLexicalV2HanBackstopGateStats {
-	let bestStats: CoverageLexicalV2HanBackstopGateStats = {
+): CoverageLexicalV2CandidateCascadeHanBackstopStats {
+	let bestStats: CoverageLexicalV2CandidateCascadeHanBackstopStats = {
 		longestContiguousBigramChain: 0,
 		matchedBigramCount: 0,
 		bigramCoverageRatio: 0,
@@ -1975,7 +1925,7 @@ function computeCoverageLexicalV2HanBackstopLongestChain(
 
 function passesCoverageLexicalV2HanBackstopGate(
 	totalBigramCount: number,
-	stats: CoverageLexicalV2HanBackstopGateStats,
+	stats: CoverageLexicalV2CandidateCascadeHanBackstopStats,
 ): boolean {
 	if (totalBigramCount <= 1) {
 		return stats.matchedBigramCount === totalBigramCount;
@@ -2038,8 +1988,8 @@ function compareCoverageLexicalV2HanBackstopRankedCandidates(
 }
 
 function compareCoverageLexicalV2HanBackstopStats(
-	left: CoverageLexicalV2HanBackstopGateStats,
-	right: CoverageLexicalV2HanBackstopGateStats,
+	left: CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	right: CoverageLexicalV2CandidateCascadeHanBackstopStats,
 ): number {
 	if (left.longestContiguousBigramChain !== right.longestContiguousBigramChain) {
 		return right.longestContiguousBigramChain - left.longestContiguousBigramChain;
@@ -2054,9 +2004,9 @@ function compareCoverageLexicalV2HanBackstopStats(
 }
 
 function selectCoverageLexicalV2BetterHanBackstopStats(
-	left: CoverageLexicalV2HanBackstopGateStats | null,
-	right: CoverageLexicalV2HanBackstopGateStats,
-): CoverageLexicalV2HanBackstopGateStats {
+	left: CoverageLexicalV2CandidateCascadeHanBackstopStats | null,
+	right: CoverageLexicalV2CandidateCascadeHanBackstopStats,
+): CoverageLexicalV2CandidateCascadeHanBackstopStats {
 	if (!left) {
 		return right;
 	}

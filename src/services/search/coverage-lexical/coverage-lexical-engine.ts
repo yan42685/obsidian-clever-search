@@ -1435,7 +1435,16 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								return this.metadataTagCharPostings.get(bigram);
 						}
 					},
-					getBodyHanSegments: (docId) => this.documentBodyHanSegmentsById[docId],
+					getBodyHanBackstopStats: (
+						docId: number,
+						normalizedText: string,
+						bigrams: readonly string[],
+					) =>
+						evaluateCoverageLexicalV2StorageAdapterHanBackstopStats(
+							this.documentBodyHanSegmentsById[docId],
+							normalizedText,
+							bigrams,
+						),
 					collectLatinPrefixTerms: (queryTerm, cap) =>
 						collectCoverageLexicalCanonicalLatinPrefixTerms(
 							this.getSortedLexicon(),
@@ -5277,6 +5286,97 @@ function removeDocIdFromSortedPosting(
 	next.set(docs.subarray(0, index), 0);
 	next.set(docs.subarray(index + 1), index);
 	return next;
+}
+
+function evaluateCoverageLexicalV2StorageAdapterHanBackstopStats(
+	bodyHanSegments: readonly string[] | undefined,
+	normalizedText: string,
+	bigrams: readonly string[],
+): {
+	longestContiguousBigramChain: number;
+	matchedBigramCount: number;
+	bigramCoverageRatio: number;
+} | null {
+	if (!bodyHanSegments || bodyHanSegments.length === 0) {
+		return null;
+	}
+	for (const segment of bodyHanSegments) {
+		if (segment.includes(normalizedText)) {
+			return {
+				longestContiguousBigramChain: bigrams.length,
+				matchedBigramCount: bigrams.length,
+				bigramCoverageRatio: bigrams.length > 0 ? 1 : 0,
+			};
+		}
+	}
+	if (bigrams.length === 0) {
+		return null;
+	}
+	let best:
+		| {
+				longestContiguousBigramChain: number;
+				matchedBigramCount: number;
+				bigramCoverageRatio: number;
+		  }
+		| null = null;
+	for (const segment of bodyHanSegments) {
+		const matchedBigramIndices = new Set<number>();
+		for (let bigramIndex = 0; bigramIndex < bigrams.length; bigramIndex += 1) {
+			if (segment.includes(bigrams[bigramIndex])) {
+				matchedBigramIndices.add(bigramIndex);
+			}
+		}
+		if (matchedBigramIndices.size === 0) {
+			continue;
+		}
+		const stats = {
+			longestContiguousBigramChain:
+				computeCoverageLexicalV2StorageAdapterHanLongestChain(
+					matchedBigramIndices,
+				),
+			matchedBigramCount: matchedBigramIndices.size,
+			bigramCoverageRatio: matchedBigramIndices.size / bigrams.length,
+		};
+		if (
+			!best ||
+			stats.longestContiguousBigramChain > best.longestContiguousBigramChain ||
+			(
+				stats.longestContiguousBigramChain ===
+					best.longestContiguousBigramChain &&
+				stats.matchedBigramCount > best.matchedBigramCount
+			) ||
+			(
+				stats.longestContiguousBigramChain ===
+					best.longestContiguousBigramChain &&
+				stats.matchedBigramCount === best.matchedBigramCount &&
+				stats.bigramCoverageRatio > best.bigramCoverageRatio
+			)
+		) {
+			best = stats;
+		}
+	}
+	return best;
+}
+
+function computeCoverageLexicalV2StorageAdapterHanLongestChain(
+	matchedBigramIndices: ReadonlySet<number>,
+): number {
+	const sorted = [...matchedBigramIndices].sort((left, right) => left - right);
+	let longest = 0;
+	let current = 0;
+	let previous = Number.NaN;
+	for (const bigramIndex of sorted) {
+		if (!Number.isFinite(previous) || bigramIndex === previous + 1) {
+			current += 1;
+		} else {
+			current = 1;
+		}
+		if (current > longest) {
+			longest = current;
+		}
+		previous = bigramIndex;
+	}
+	return longest;
 }
 
 function isSerializedCoverageLexicalBinarySnapshot(

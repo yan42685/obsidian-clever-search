@@ -17,6 +17,11 @@ import type {
   CoverageLexicalBodyTokenColdDocRow,
   CoverageLexicalBodyTokenColdMetaRow,
 } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import type {
+  CoverageLexicalV2BodyTokenColdBlockRow,
+  CoverageLexicalV2BodyTokenColdDocRow,
+  CoverageLexicalV2BodyTokenColdMetaRow,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-body-token-cold-types";
 import {
   decodeCoverageLexicalV2IndexStoreJournalEntry,
   decodeCoverageLexicalV2IndexStoreSnapshot,
@@ -81,6 +86,9 @@ export class Database {
       { name: "lexicalBodyTokenColdMeta", table: this.db.lexicalBodyTokenColdMeta },
       { name: "lexicalBodyTokenColdBlocks", table: this.db.lexicalBodyTokenColdBlocks },
       { name: "lexicalBodyTokenColdDocs", table: this.db.lexicalBodyTokenColdDocs },
+      { name: "lexicalV2BodyTokenColdMeta", table: this.db.lexicalV2BodyTokenColdMeta },
+      { name: "lexicalV2BodyTokenColdBlocks", table: this.db.lexicalV2BodyTokenColdBlocks },
+      { name: "lexicalV2BodyTokenColdDocs", table: this.db.lexicalV2BodyTokenColdDocs },
       { name: "lexicalV2IndexStoreMeta", table: this.db.lexicalV2IndexStoreMeta },
       {
         name: "lexicalV2IndexStoreSnapshotChunks",
@@ -527,7 +535,7 @@ export class Database {
 
 @singleton()
 class DexieWrapper extends Dexie {
-  private static readonly _dbVersion = 25;
+  private static readonly _dbVersion = 26;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   private schemaUpgradeDetected = false;
@@ -548,6 +556,18 @@ class DexieWrapper extends Dexie {
   >;
   lexicalBodyTokenColdDocs!: Dexie.Table<
     CoverageLexicalBodyTokenColdDocRow,
+    string
+  >;
+  lexicalV2BodyTokenColdMeta!: Dexie.Table<
+    CoverageLexicalV2BodyTokenColdMetaRow,
+    string
+  >;
+  lexicalV2BodyTokenColdBlocks!: Dexie.Table<
+    CoverageLexicalV2BodyTokenColdBlockRow,
+    string
+  >;
+  lexicalV2BodyTokenColdDocs!: Dexie.Table<
+    CoverageLexicalV2BodyTokenColdDocRow,
     string
   >;
   lexicalV2IndexStoreMeta!: Dexie.Table<CoverageLexicalV2IndexStoreMetaRow, string>;
@@ -616,6 +636,9 @@ class DexieWrapper extends Dexie {
       lexicalBodyTokenColdMeta: "id",
       lexicalBodyTokenColdBlocks: "id, epoch, updatedAt",
       lexicalBodyTokenColdDocs: "path, epoch, blockId, updatedAt",
+      lexicalV2BodyTokenColdMeta: "id",
+      lexicalV2BodyTokenColdBlocks: "id, epoch, updatedAt",
+      lexicalV2BodyTokenColdDocs: "path, epoch, blockId, updatedAt",
       lexicalV2IndexStoreMeta: "id",
       lexicalV2IndexStoreSnapshotChunks: "id, snapshotId, order, updatedAt",
       lexicalV2IndexStoreJournal: "id, sequence, path, updatedAt",

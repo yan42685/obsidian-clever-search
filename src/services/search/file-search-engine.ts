@@ -8,6 +8,7 @@ import type { FileSearchBackend } from "src/globals/plugin-setting";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { CoverageLexicalV2FileSearchEngine } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine";
+import type { CoverageLexicalV2BodyTokenColdDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-body-token-cold-types";
 
 export type FileSearchRequest = {
 	queryText: string;
@@ -81,11 +82,16 @@ export interface FileSearchEngine {
 	planPersistentRecovery?(
 		currentIndexedRefs: readonly BaseIndexedFileRef[],
 	): Promise<PersistentFileIndexRecoveryPlan>;
-	persistFileIndexArtifact?(): Promise<void>;
-	clearPersistedFileIndexArtifact?(): Promise<void>;
-	beginBatchReindex?(): void;
-	finishBatchReindex?(): void | Promise<void>;
-	abortBatchReindex?(): void | Promise<void>;
+  persistFileIndexArtifact?(): Promise<void>;
+  clearPersistedFileIndexArtifact?(): Promise<void>;
+  buildBodyTokenColdDocument?(
+    path: string,
+    generation: number | undefined,
+    bodyText: string,
+  ): CoverageLexicalV2BodyTokenColdDocumentWrite | null;
+  beginBatchReindex?(): void;
+  finishBatchReindex?(): void | Promise<void>;
+  abortBatchReindex?(): void | Promise<void>;
 }
 
 @singleton()

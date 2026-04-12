@@ -1,4 +1,4 @@
-import { container } from "tsyringe";
+﻿import { container } from "tsyringe";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 
 jest.mock("obsidian", () => {
@@ -793,17 +793,29 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
 }
 
 function createMockLexicalEngine(overrides: Record<string, unknown> = {}) {
-  return {
+  const mock = {
     addDocuments: jest.fn(async () => {}),
     deleteDocuments: jest.fn(() => {}),
     beginBatchReindex: jest.fn(() => {}),
     finishBatchReindex: jest.fn(() => {}),
     abortBatchReindex: jest.fn(() => {}),
     supportsSerializedFileIndex: jest.fn(() => true),
+    supportsPersistentFileIndex: jest.fn(() => false),
     reIndexAll: jest.fn(async () => true),
     serializeFileIndex: jest.fn(() => null),
+    persistFileIndexArtifact: jest.fn(async () => {}),
+    clearPersistedFileIndexArtifact: jest.fn(async () => {}),
     estimateFileIndexBytes: jest.fn(() => 0),
     getFileIndexBreakdown: jest.fn(() => null),
+  };
+  const moveDocument = jest.fn(async (oldPath: string, document: any) => {
+    mock.deleteDocuments([oldPath, document.path]);
+    await mock.addDocuments([document]);
+    return true;
+  });
+  return {
+    ...mock,
+    moveDocument,
     ...overrides,
   };
 }
@@ -1141,22 +1153,36 @@ describe("DataManager integration", () => {
       estimateFileIndexBytes: jest.fn(() => 80258),
       getFileIndexBreakdown: jest.fn(() => ({
         estimatedBytes: {
-          total: 80258,
-          stringPool: { bytes: 14336 },
-          documents: { total: 9216 },
-          documentIdentity: {
-            total: 20480,
-            bodyTokensById: { total: 11264 },
-            bodyHanSegmentsById: { total: 1024 },
-            tagValuesById: { total: 512 },
+          residentHot: {
+            total: 80258,
+            postings: {
+              exactIncidence: 32768,
+              metadataHanGate: 3072,
+            },
+            documents: {
+              view: 18432,
+            },
+            verification: {
+              bodyHanSegments: 4096,
+            },
+            lexicon: {
+              latinExpansion: 4096,
+            },
+            caches: {
+              bodyTokensHot: 17794,
+            },
           },
-          postings: {
-            bodyPhrase: { total: 24576 },
-            body: { total: 16384 },
-            bodyChar: { total: 2048 },
-            metadataAlias: { total: 3072 },
+          coldOwned: {
+            total: 11264,
+            bodyTokensSidecar: 11264,
           },
-          lexicon: { total: 4096 },
+          overlapDiagnostics: {
+            total: 13312,
+            bodyTokensHotVsSidecar: 8192,
+            pathMirrors: 4096,
+            manifestMirrors: 1024,
+          },
+          combinedOwnedTotal: 91522,
         },
       })),
     });
@@ -1239,11 +1265,15 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("Runtime memory estimate");
     expect(latestNotice).toContain("LexicalSnapshot");
     expect(latestNotice).toContain("CurrentTextRuntime");
-    expect(latestNotice).toContain("Coverage live index");
-    expect(latestNotice).toContain("Coverage top segments");
+    expect(latestNotice).toContain("Coverage resident hot");
+    expect(latestNotice).toContain("Coverage cold owned");
+    expect(latestNotice).toContain("Coverage combined owned");
+    expect(latestNotice).toContain("Coverage top resident segments");
     expect(latestNotice).toContain("JS heap used now:");
     expect(latestNotice).toContain("JS heap committed now:");
-    expect(latestNotice).toContain("JS heap unattributed beyond plugin estimate:");
+    expect(latestNotice).toContain(
+      "JS heap unattributed beyond lexical resident-hot estimate:",
+    );
     expect(latestNotice).toContain("Current text runtime split");
     expect(groupSpy).toHaveBeenCalled();
     expect(endSpy).toHaveBeenCalled();
@@ -1281,11 +1311,19 @@ describe("DataManager integration", () => {
           rows: "1 file(s)",
         }),
         expect.objectContaining({
-          segment: "postings.bodyPhrase",
-          bytes: 24576,
+          segment: "postings.exactIncidence",
+          bytes: 32768,
         }),
         expect.objectContaining({
-          segment: "doc.bodyTokens",
+          segment: "documents.view",
+          bytes: 18432,
+        }),
+        expect.objectContaining({
+          segment: "doc.bodyTokens(hot)",
+          bytes: 17794,
+        }),
+        expect.objectContaining({
+          segment: "doc.bodyTokens(sidecar)",
           bytes: 11264,
         }),
         expect.objectContaining({
@@ -1307,6 +1345,170 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           metric: "unattributedJsHeapUsed",
           bytes: 152118,
+        }),
+      ]),
+    );
+  });
+
+  test("noticeDevStorageStats attributes v2 lexical breakdown without collapsing into other", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+    const file = createFile("docs/a.md", "alpha body", 320);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "alpha body"]]);
+    const rebuiltSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(24),
+    };
+    const database = createMockDatabase();
+    database.__state.lexicalSearchSnapshot = {
+      __backend: "coverage-lexical" as const,
+      __version: 2 as const,
+      __encoding: "binary-snapshot-v2" as const,
+      data: new ArrayBuffer(24),
+    };
+    database.estimatePluginStorageUsage = jest.fn(async () => ({
+      tables: [
+        { name: "lexicalSearchSnapshots", rows: 1, bytes: 3559 },
+        { name: "fileSnapshots", rows: 1, bytes: 71257 },
+        { name: "hybridChunks", rows: 0, bytes: 0 },
+        { name: "hybridChunkVectors", rows: 0, bytes: 0 },
+        { name: "lexicalIndexedFileRefs", rows: 1, bytes: 128 },
+      ],
+    }));
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine({
+      reIndexAll: jest.fn(async () => false),
+      serializeFileIndex: jest.fn(() => rebuiltSnapshot),
+      estimateFileIndexBytes: jest.fn(() => 3872),
+      getFileIndexBreakdown: jest.fn(() => ({
+        estimatedBytes: {
+          residentHot: {
+            total: 3872,
+            postings: {
+              exactIncidence: 1536,
+              metadataHanGate: 256,
+            },
+            documents: {
+              view: 640,
+            },
+            verification: {
+              bodyHanSegments: 128,
+            },
+            lexicon: {
+              latinExpansion: 320,
+            },
+            caches: {
+              bodyTokensHot: 992,
+            },
+          },
+          coldOwned: {
+            total: 992,
+            bodyTokensSidecar: 992,
+          },
+          overlapDiagnostics: {
+            total: 1248,
+            bodyTokensHotVsSidecar: 992,
+            pathMirrors: 192,
+            manifestMirrors: 64,
+          },
+          combinedOwnedTotal: 4864,
+        },
+      })),
+    });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    fileSnapshotStore.getRuntimeMemoryEstimate.mockReturnValue({
+      pathBytes: 64,
+      currentTextBytes: 5120,
+      generationBytes: 8,
+      fileCount: 1,
+      slotCount: 1,
+      freeSlotCount: 0,
+      totalBytes: 5192,
+      largestEntries: [],
+    });
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+      getRuntimeMemoryEstimate: jest.fn(() => ({
+        vectorsBytes: 0,
+        graphBytes: 0,
+        totalBytes: 0,
+      })),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    (manager as any).isLexicalEngineUpToDate = true;
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    const tableSpy = jest.spyOn(console, "table").mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const groupSpy = jest
+      .spyOn(console, "groupCollapsed")
+      .mockImplementation(() => {});
+    const endSpy = jest.spyOn(console, "groupEnd").mockImplementation(() => {});
+    jest.spyOn(manager as any, "sampleJsHeapUsage").mockReturnValue(null);
+
+    await (manager as any).noticeDevStorageStats();
+
+    const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
+    expect(latestNotice).toContain("Coverage resident hot");
+    expect(latestNotice).toContain("Coverage cold owned");
+    expect(latestNotice).toContain("documents(view)");
+    expect(latestNotice).toContain("bodyTokens(sidecar)");
+    expect(latestNotice).toContain("postings.exactIncidence");
+    expect(groupSpy).toHaveBeenCalled();
+    expect(endSpy).toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalled();
+
+    const tableRows = tableSpy.mock.calls.flatMap((call) =>
+      Array.isArray(call[0]) ? call[0] : [],
+    );
+    expect(tableRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "LexicalRuntimeIndex",
+          bytes: 3872,
+        }),
+        expect.objectContaining({
+          segment: "postings.exactIncidence",
+          bytes: 1536,
+        }),
+        expect.objectContaining({
+          segment: "doc.bodyTokens(hot)",
+          bytes: 992,
+        }),
+        expect.objectContaining({
+          segment: "doc.bodyTokens(sidecar)",
+          bytes: 992,
+        }),
+        expect.objectContaining({
+          segment: "lexicon.latinExpansion",
+          bytes: 320,
+        }),
+        expect.objectContaining({
+          segment: "documents.view",
+          bytes: 640,
+        }),
+      ]),
+    );
+    expect(tableRows).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          segment: "other",
         }),
       ]),
     );
@@ -3175,3 +3377,8 @@ describe("DataManager integration", () => {
     ]);
   });
 });
+
+
+
+
+

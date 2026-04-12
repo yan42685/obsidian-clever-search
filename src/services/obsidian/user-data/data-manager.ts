@@ -1,4 +1,4 @@
-import { Notice, TFile, type TAbstractFile } from "obsidian";
+﻿import { Notice, TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
@@ -4083,7 +4083,7 @@ export class DataManager {
       jsHeapUsage,
     );
     const prominentJsHeapNoticeLines = this.buildProminentJsHeapNoticeLines(
-      runtimeTotalBytes,
+      runtimeLexicalIndexBytes,
       jsHeapUsage,
     );
 
@@ -4253,7 +4253,7 @@ export class DataManager {
   }
 
   private buildProminentJsHeapNoticeLines(
-    runtimeTotalBytes: number,
+    lexicalResidentHotBytes: number,
     jsHeapUsage: JsHeapUsageSample | null,
   ): string[] {
     if (!jsHeapUsage) {
@@ -4261,12 +4261,12 @@ export class DataManager {
     }
     const unattributedJsHeapUsed = Math.max(
       0,
-      jsHeapUsage.usedBytes - runtimeTotalBytes,
+      jsHeapUsage.usedBytes - lexicalResidentHotBytes,
     );
     return [
       'JS heap used now: ' + this.formatBytes(jsHeapUsage.usedBytes),
       'JS heap committed now: ' + this.formatBytes(jsHeapUsage.totalBytes),
-      'JS heap unattributed beyond plugin estimate: ' +
+      'JS heap unattributed beyond lexical resident-hot estimate: ' +
         this.formatBytes(unattributedJsHeapUsed) +
         ' (' +
         this.formatPercent(unattributedJsHeapUsed, jsHeapUsage.usedBytes) +
@@ -4317,213 +4317,166 @@ export class DataManager {
     stringPoolSourceRows: DevStorageBreakdownRow[];
     stringOwnershipRows: DevLexicalStringOwnershipRow[];
   } {
+    const emptyResult = {
+      noticeLines: [],
+      summaryLine: null,
+      rows: [],
+      stringPoolGroupRows: [],
+      stringPoolSourceRows: [],
+      stringOwnershipRows: [],
+    };
     if (!breakdown) {
-      return {
-        noticeLines: [],
-        summaryLine: null,
-        rows: [],
-        stringPoolGroupRows: [],
-        stringPoolSourceRows: [],
-        stringOwnershipRows: [],
-      };
+      return emptyResult;
     }
 
     const estimatedBytes = this.asRecord(breakdown.estimatedBytes);
-    if (!estimatedBytes) {
-      return {
-        noticeLines: [],
-        summaryLine: null,
-        rows: [],
-        stringPoolGroupRows: [],
-        stringPoolSourceRows: [],
-        stringOwnershipRows: [],
-      };
+    const residentHot = this.asRecord(estimatedBytes?.residentHot);
+    const coldOwned = this.asRecord(estimatedBytes?.coldOwned);
+    const overlapDiagnostics = this.asRecord(estimatedBytes?.overlapDiagnostics);
+    if (!estimatedBytes || !residentHot || !coldOwned || !overlapDiagnostics) {
+      return emptyResult;
     }
 
-    const totalBytes =
-      this.readNumber(estimatedBytes.total) ?? runtimeLexicalIndexBytes;
-    const segments: Array<{ segment: string; bytes: number }> = [];
-    const pushSegment = (segment: string, bytes: unknown) => {
-      const numericBytes = this.readNumber(bytes);
-      if (numericBytes === null || numericBytes <= 0) {
+    const residentHotPostings = this.asRecord(residentHot.postings);
+    const residentHotDocuments = this.asRecord(residentHot.documents);
+    const residentHotVerification = this.asRecord(residentHot.verification);
+    const residentHotLexicon = this.asRecord(residentHot.lexicon);
+    const residentHotCaches = this.asRecord(residentHot.caches);
+
+    const residentHotTotal =
+      this.readNumber(residentHot.total) ?? runtimeLexicalIndexBytes;
+    const coldOwnedTotal = this.readNumber(coldOwned.total) ?? 0;
+    const overlapDiagnosticsTotal =
+      this.readNumber(overlapDiagnostics.total) ?? 0;
+    const combinedOwnedTotal =
+      this.readNumber(estimatedBytes.combinedOwnedTotal) ??
+      residentHotTotal + coldOwnedTotal;
+
+    const exactIncidenceBytes =
+      this.readNumber(residentHotPostings?.exactIncidence) ?? 0;
+    const metadataHanGateBytes =
+      this.readNumber(residentHotPostings?.metadataHanGate) ?? 0;
+    const documentViewBytes =
+      this.readNumber(residentHotDocuments?.view) ?? 0;
+    const bodyHanSegmentsBytes =
+      this.readNumber(residentHotVerification?.bodyHanSegments) ?? 0;
+    const latinExpansionLexiconBytes =
+      this.readNumber(residentHotLexicon?.latinExpansion) ?? 0;
+    const bodyTokensHotBytes =
+      this.readNumber(residentHotCaches?.bodyTokensHot) ?? 0;
+    const bodyTokensSidecarBytes =
+      this.readNumber(coldOwned.bodyTokensSidecar) ?? 0;
+    const bodyTokensHotVsSidecarBytes =
+      this.readNumber(overlapDiagnostics.bodyTokensHotVsSidecar) ?? 0;
+    const pathMirrorBytes = this.readNumber(overlapDiagnostics.pathMirrors) ?? 0;
+    const manifestMirrorBytes =
+      this.readNumber(overlapDiagnostics.manifestMirrors) ?? 0;
+    const postingsTotalBytes = exactIncidenceBytes + metadataHanGateBytes;
+
+    const residentSegments: Array<{ segment: string; bytes: number }> = [];
+    const allSegments: Array<{ segment: string; bytes: number }> = [];
+    const pushResidentSegment = (segment: string, bytes: number) => {
+      if (bytes <= 0) {
         return;
       }
-      segments.push({ segment, bytes: numericBytes });
+      residentSegments.push({ segment, bytes });
+      allSegments.push({ segment, bytes });
+    };
+    const pushDiagnosticSegment = (segment: string, bytes: number) => {
+      if (bytes <= 0) {
+        return;
+      }
+      allSegments.push({ segment, bytes });
     };
 
-    const documents = this.asRecord(estimatedBytes.documents);
-    const documentIdentity = this.asRecord(estimatedBytes.documentIdentity);
-    const pathToId = this.asRecord(documentIdentity?.pathToId);
-    const idToPath = this.asRecord(documentIdentity?.idToPath);
-    const docStoreById = this.asRecord(documentIdentity?.docStoreById);
-    const bodyTokenLexicon = this.asRecord(documentIdentity?.bodyTokenLexicon);
-    const bodyTokensById = this.asRecord(documentIdentity?.bodyTokensById);
-    const bodyHanSegmentsById = this.asRecord(
-      documentIdentity?.bodyHanSegmentsById,
+    pushResidentSegment('postings.exactIncidence', exactIncidenceBytes);
+    pushResidentSegment('postings.metadataHanGate', metadataHanGateBytes);
+    pushResidentSegment('documents.view', documentViewBytes);
+    pushResidentSegment('doc.bodyHanSegments', bodyHanSegmentsBytes);
+    pushResidentSegment('lexicon.latinExpansion', latinExpansionLexiconBytes);
+    pushResidentSegment('doc.bodyTokens(hot)', bodyTokensHotBytes);
+    pushDiagnosticSegment('doc.bodyTokens(sidecar)', bodyTokensSidecarBytes);
+    pushDiagnosticSegment(
+      'overlap.bodyTokens(hot+cold)',
+      bodyTokensHotVsSidecarBytes,
     );
-    const tagValuesById = this.asRecord(documentIdentity?.tagValuesById);
-    const counter = this.asRecord(documentIdentity?.counter);
-    const documentIdentityCoreBytes =
-      (this.readNumber(pathToId?.total) ?? 0) +
-      (this.readNumber(idToPath?.total) ?? 0) +
-      (this.readNumber(docStoreById?.total) ?? 0) +
-      (this.readNumber(counter?.numberBytes) ?? 0);
+    pushDiagnosticSegment('overlap.pathMirrors', pathMirrorBytes);
+    pushDiagnosticSegment('overlap.manifestMirrors', manifestMirrorBytes);
 
-    pushSegment('stringPool', this.asRecord(estimatedBytes.stringPool)?.bytes);
-    pushSegment('documents.store', documents?.total);
-    pushSegment('documentIdentity.core', documentIdentityCoreBytes);
-    pushSegment(
-      'documentIdentity.bodyTokenLexicon',
-      bodyTokenLexicon?.total,
+    const residentAccountedBytes = residentSegments.reduce(
+      (sum, segment) => sum + segment.bytes,
+      0,
     );
-    pushSegment('doc.bodyTokens', bodyTokensById?.total);
-    pushSegment('doc.bodyHanSegments', bodyHanSegmentsById?.total);
-    pushSegment('doc.tagValues', tagValuesById?.total);
-    pushSegment('lexicon', this.asRecord(estimatedBytes.lexicon)?.total);
+    const sortedResidentSegments = [...residentSegments].sort(
+      (left, right) => right.bytes - left.bytes,
+    );
+    const rows = [...allSegments]
+      .sort((left, right) => right.bytes - left.bytes)
+      .slice(0, 10)
+      .map((segment) => ({
+        segment: segment.segment,
+        bytes: segment.bytes,
+        size: this.formatBytes(segment.bytes),
+        shareOfLexical: this.formatPercent(segment.bytes, residentHotTotal),
+        shareOfVault: this.formatPercent(segment.bytes, indexableBytes),
+      }));
 
-    const postings = this.asRecord(estimatedBytes.postings);
-    let postingsTotalBytes = 0;
-    if (postings) {
-      for (const [key, value] of Object.entries(postings)) {
-        const total = this.readNumber(this.asRecord(value)?.total);
-        if (total === null || total <= 0) {
-          continue;
-        }
-        postingsTotalBytes += total;
-        pushSegment('postings.' + key, total);
-      }
+    if (
+      rows.length === 0 &&
+      residentHotTotal <= 0 &&
+      coldOwnedTotal <= 0 &&
+      overlapDiagnosticsTotal <= 0
+    ) {
+      return emptyResult;
     }
 
-    let accountedBytes = segments.reduce((sum, segment) => sum + segment.bytes, 0);
-    const unattributedBytes = Math.max(0, totalBytes - accountedBytes);
-    if (unattributedBytes > 0) {
-      pushSegment('other', unattributedBytes);
-      accountedBytes += unattributedBytes;
-    }
-
-    const sortedSegments = segments.sort((left, right) => right.bytes - left.bytes);
-    const rows = sortedSegments.slice(0, 10).map((segment) => ({
-      segment: segment.segment,
-      bytes: segment.bytes,
-      size: this.formatBytes(segment.bytes),
-      shareOfLexical: this.formatPercent(segment.bytes, totalBytes),
-      shareOfVault: this.formatPercent(segment.bytes, indexableBytes),
-    }));
-    const stringPool = this.asRecord(estimatedBytes.stringPool);
-    const buildStringPoolRows = (
-      entries: Record<string, unknown> | null | undefined,
-    ): DevStorageBreakdownRow[] => {
-      const stringPoolBytes = this.readNumber(stringPool?.bytes) ?? 0;
-      if (!entries || totalBytes <= 0 || stringPoolBytes <= 0) {
-        return [];
-      }
-      const rows: DevStorageBreakdownRow[] = [];
-      for (const [segment, value] of Object.entries(entries)) {
-        const record = this.asRecord(value);
-        const bytes = this.readNumber(record?.bytes);
-        if (bytes === null || bytes <= 0) {
-          continue;
-        }
-        rows.push({
-          segment,
-          bytes,
-          size: this.formatBytes(bytes),
-          shareOfStringPool: this.formatPercent(bytes, stringPoolBytes),
-          shareOfLexical: this.formatPercent(bytes, totalBytes),
-          shareOfVault: this.formatPercent(bytes, indexableBytes),
-        });
-      }
-      rows.sort((left, right) => right.bytes - left.bytes);
-      const accountedBytes = rows.reduce((sum, row) => sum + row.bytes, 0);
-      const remainderBytes = Math.max(0, stringPoolBytes - accountedBytes);
-      if (remainderBytes > 0) {
-        rows.push({
-          segment: "__unattributed__",
-          bytes: remainderBytes,
-          size: this.formatBytes(remainderBytes),
-          shareOfStringPool: this.formatPercent(remainderBytes, stringPoolBytes),
-          shareOfLexical: this.formatPercent(remainderBytes, totalBytes),
-          shareOfVault: this.formatPercent(remainderBytes, indexableBytes),
-        });
-      }
-      return rows.sort((left, right) => right.bytes - left.bytes);
-    };
-    const stringPoolGroupRows = buildStringPoolRows(
-      this.asRecord(stringPool?.byGroup),
-    );
-    const stringPoolSourceRows = buildStringPoolRows(
-      this.asRecord(stringPool?.bySource),
-    ).slice(0, 12);
-    const stringOwnershipRows = this.buildLexicalStringOwnershipRows(
-      estimatedBytes,
-      totalBytes,
-      indexableBytes,
-    );
-
-    if (rows.length === 0 || totalBytes <= 0) {
-      return {
-        noticeLines: [],
-        summaryLine: null,
-        rows,
-        stringPoolGroupRows,
-        stringPoolSourceRows,
-        stringOwnershipRows,
-      };
-    }
-
-    const headline =
-      'Coverage live index (exclusive): ' +
-      this.formatBytes(totalBytes) +
-      ' (' +
-      this.formatPercent(totalBytes, indexableBytes) +
-      ' of vault)';
-    const majorGroupsLine =
+    const noticeLines = [
+      'Coverage resident hot: ' +
+        this.formatBytes(residentHotTotal) +
+        ' (' +
+        this.formatPercent(residentHotTotal, indexableBytes) +
+        ' of vault)',
+      'Coverage cold owned: ' +
+        this.formatBytes(coldOwnedTotal) +
+        ' (' +
+        this.formatPercent(coldOwnedTotal, indexableBytes) +
+        ' of vault)',
+      'Coverage combined owned: ' +
+        this.formatBytes(combinedOwnedTotal) +
+        ' (' +
+        this.formatPercent(combinedOwnedTotal, indexableBytes) +
+        ' of vault)',
+      'Coverage overlap diagnostics: ' + this.formatBytes(overlapDiagnosticsTotal),
       'Coverage major groups: ' +
-      ([
-        [
-          'stringPool',
-          this.readNumber(this.asRecord(estimatedBytes.stringPool)?.bytes) ?? 0,
-        ],
-        ['postings(total)', postingsTotalBytes],
-        [
-          'documentIdentity(total)',
-          this.readNumber(documentIdentity?.total) ?? 0,
-        ],
-        ['documents(total)', this.readNumber(documents?.total) ?? 0],
-        [
-          'lexicon',
-          this.readNumber(this.asRecord(estimatedBytes.lexicon)?.total) ?? 0,
-        ],
-      ] as Array<[string, number]>)
-        .filter(([, bytes]) => bytes > 0)
-        .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
-        .join(' | ');
-    const topLine =
-      'Coverage top segments: ' +
-      sortedSegments
-        .slice(0, 6)
-        .map((segment) => segment.segment + ' ' + this.formatBytes(segment.bytes))
-        .join(' | ');
-    const accountingLine =
-      'Coverage accounted segments: ' +
-      this.formatBytes(accountedBytes) +
-      ' / ' +
-      this.formatBytes(totalBytes);
+        ([
+          ['postings(total)', postingsTotalBytes],
+          ['documents(view)', documentViewBytes],
+          ['bodyHanSegments', bodyHanSegmentsBytes],
+          ['bodyTokens(hotCache)', bodyTokensHotBytes],
+          ['bodyTokens(sidecar)', bodyTokensSidecarBytes],
+          ['lexicon(latinExpansion)', latinExpansionLexiconBytes],
+        ] as Array<[string, number]>)
+          .filter(([, bytes]) => bytes > 0)
+          .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
+          .join(' | '),
+      'Coverage top resident segments: ' +
+        sortedResidentSegments
+          .slice(0, 6)
+          .map((segment) => segment.segment + ' ' + this.formatBytes(segment.bytes))
+          .join(' | '),
+      'Coverage accounted resident segments: ' +
+        this.formatBytes(residentAccountedBytes) +
+        ' / ' +
+        this.formatBytes(residentHotTotal),
+    ].filter((line) => !line.endsWith(': '));
 
     return {
-      noticeLines: [headline, majorGroupsLine, topLine, accountingLine],
-      summaryLine:
-        headline +
-        '; ' +
-        majorGroupsLine +
-        '; ' +
-        topLine +
-        '; ' +
-        accountingLine,
+      noticeLines,
+      summaryLine: noticeLines.join('; '),
       rows,
-      stringPoolGroupRows,
-      stringPoolSourceRows,
-      stringOwnershipRows,
+      stringPoolGroupRows: [],
+      stringPoolSourceRows: [],
+      stringOwnershipRows: [],
     };
   }
 
@@ -5004,3 +4957,6 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
+
+
+

@@ -16,6 +16,12 @@ export type CoverageLexicalV2CandidateCascadeDocumentRecord = {
 	tagsText: string;
 };
 
+export type CoverageLexicalV2CandidateCascadeHanBackstopStats = {
+	longestContiguousBigramChain: number;
+	matchedBigramCount: number;
+	bigramCoverageRatio: number;
+};
+
 export type CoverageLexicalV2CandidateCascadeStorageReader = {
 	getDocumentRecord(docId: number): CoverageLexicalV2CandidateCascadeDocumentRecord | null;
 	getBodyHanSegmentDocIds(): readonly number[];
@@ -27,7 +33,11 @@ export type CoverageLexicalV2CandidateCascadeStorageReader = {
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;
-	getBodyHanSegments(docId: number): readonly string[] | undefined;
+	getBodyHanBackstopStats(
+		docId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null;
 	collectLatinPrefixTerms(queryTerm: string, cap: number): readonly string[];
 	collectLatinFuzzyTerms(
 		queryTerm: string,

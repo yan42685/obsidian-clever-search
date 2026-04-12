@@ -37,16 +37,17 @@ import {
 } from "./coverage-lexical-v2-index-store-snapshot";
 import {
 	COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
-	type CoverageLexicalV2FieldTermLists,
 	type CoverageLexicalV2IndexStoreJournalEntry,
-	type CoverageLexicalV2MetadataBigramLists,
+	type CoverageLexicalV2PersistedJournalDocument,
 	type CoverageLexicalV2PreparedDocument,
+	type CoverageLexicalV2RuntimeMemoryBreakdown,
 } from "./coverage-lexical-v2-index-store-types";
 import {
 	planCoverageLexicalV2PersistentRecovery,
 } from "./coverage-lexical-v2-index-store-recovery";
 import {
 	CoverageLexicalV2IndexStore,
+	estimateCoverageLexicalV2BodyTokenIdSequenceBytes,
 } from "./coverage-lexical-v2-index-store";
 
 type CoverageLexicalV2PersistentStoreApi = {
@@ -69,7 +70,7 @@ export class CoverageLexicalV2FileSearchEngine
 	private readonly database = container.resolve(Database);
 	private readonly fileSnapshotStore = container.resolve(FileSnapshotStore);
 	private readonly store = new CoverageLexicalV2IndexStore();
-	private readonly bodyTokenCacheByDocId = new Map<number, readonly string[]>();
+	private readonly bodyTokenCacheByDocId = new Map<number, Uint32Array>();
 	private bodyTokenColdStore:
 		| CoverageLexicalBodyTokenColdStoreApi
 		| null
@@ -124,11 +125,16 @@ export class CoverageLexicalV2FileSearchEngine
 		);
 		const journalEntries: CoverageLexicalV2IndexStoreJournalEntry[] = [];
 		const coldWrites: CoverageLexicalBodyTokenColdDocumentWrite[] = [];
+		const hotCacheDocIds: number[] = [];
 		for (const preparedDocument of preparedDocuments) {
 			const updatedAt = Date.now();
 			const docId = this.store.replaceDocument(preparedDocument);
 			if (preparedDocument.bodyTokens.length > 0) {
-				this.bodyTokenCacheByDocId.set(docId, [...preparedDocument.bodyTokens]);
+				this.bodyTokenCacheByDocId.set(
+					docId,
+					this.store.getOrCreateBodyTokenIds(preparedDocument.bodyTokens),
+				);
+				hotCacheDocIds.push(docId);
 			} else {
 				this.bodyTokenCacheByDocId.delete(docId);
 			}
@@ -146,12 +152,14 @@ export class CoverageLexicalV2FileSearchEngine
 						`replace:${preparedDocument.path}`,
 						updatedAt,
 					),
-					document: preparedDocument,
+					document: this.requirePersistedJournalDocument(docId),
 				});
 			}
 		}
 		this.store.compactOverlayIntoSegment();
-		await this.upsertBodyTokenColdDocuments(coldWrites);
+		if (await this.upsertBodyTokenColdDocuments(coldWrites)) {
+			this.releaseHotBodyTokenCache(hotCacheDocIds);
+		}
 		if (!this.batchReindexing) {
 			await this.database.appendCoverageLexicalV2IndexStoreJournalEntries(
 				journalEntries,
@@ -203,17 +211,23 @@ export class CoverageLexicalV2FileSearchEngine
 		const updatedAt = Date.now();
 		const docId = this.store.replaceDocument(preparedDocument, oldPath);
 		if (preparedDocument.bodyTokens.length > 0) {
-			this.bodyTokenCacheByDocId.set(docId, [...preparedDocument.bodyTokens]);
+			this.bodyTokenCacheByDocId.set(
+				docId,
+				this.store.getOrCreateBodyTokenIds(preparedDocument.bodyTokens),
+			);
 		} else {
 			this.bodyTokenCacheByDocId.delete(docId);
 		}
-		await this.upsertBodyTokenColdDocuments([
+		const coldBacked = await this.upsertBodyTokenColdDocuments([
 			{
 				path: preparedDocument.path,
 				generation: preparedDocument.generation,
 				bodyTokens: preparedDocument.bodyTokens,
 			},
 		]);
+		if (coldBacked && preparedDocument.bodyTokens.length > 0) {
+			this.releaseHotBodyTokenCache([docId]);
+		}
 		if (oldPath !== preparedDocument.path) {
 			await this.deleteBodyTokenColdDocuments([oldPath]);
 		}
@@ -229,7 +243,7 @@ export class CoverageLexicalV2FileSearchEngine
 						`move:${oldPath}->${preparedDocument.path}`,
 						updatedAt,
 					),
-					document: preparedDocument,
+					document: this.requirePersistedJournalDocument(docId),
 				},
 			]);
 		}
@@ -249,7 +263,12 @@ export class CoverageLexicalV2FileSearchEngine
 			tokenizeQueryText: (queryText) =>
 				tokenizeCoverageLexicalV2QueryText(this.tokenizer, queryText),
 			storageReader: this.store.createStorageReader({
-				getBodyTokenSequence: (docId) => this.bodyTokenCacheByDocId.get(docId),
+				getBodyTokenSequence: (docId) => {
+					const tokenIds = this.bodyTokenCacheByDocId.get(docId);
+					return tokenIds
+						? this.store.decodeBodyTokenIds(tokenIds)
+						: undefined;
+				},
 				prefetchBodyTokenSequences: async (docIds) => {
 					await this.prefetchBodyTokenSequences(docIds);
 				},
@@ -303,29 +322,11 @@ export class CoverageLexicalV2FileSearchEngine
 	}
 
 	estimateIndexBytes(): number | null {
-		return this.store.estimateIndexBytes();
+		return this.buildRuntimeMemoryBreakdown().estimatedBytes.residentHot.total;
 	}
 
 	getIndexBreakdown(): Record<string, unknown> | null {
-		const breakdown = this.store.buildIndexBreakdown();
-		return {
-			documentCount: breakdown.documentCount,
-			nextDocumentId: breakdown.nextDocumentId,
-			exactTermCount: breakdown.exactTermCount,
-			metadataHanBigramCount: breakdown.metadataHanBigramCount,
-			latinExpansionTermCount: breakdown.latinExpansionTermCount,
-			estimatedBytes: {
-				total: breakdown.estimatedBytes.total,
-				postings: {
-					exactIncidence: breakdown.estimatedBytes.exactIncidence,
-					metadataHanGate: breakdown.estimatedBytes.metadataHanGate,
-				},
-				documentView: breakdown.estimatedBytes.documentView,
-				bodyHanVerificationView: breakdown.estimatedBytes.bodyHanVerificationView,
-				latinExpansionLexicon: breakdown.estimatedBytes.latinExpansionLexicon,
-				bodyTokenSidecar: breakdown.estimatedBytes.bodyTokenSidecar,
-			},
-		};
+		return this.buildRuntimeMemoryBreakdown();
 	}
 
 	supportsPersistentFileIndex(): boolean {
@@ -344,15 +345,10 @@ export class CoverageLexicalV2FileSearchEngine
 				await this.database.readCoverageLexicalV2IndexStoreJournalEntries();
 			for (const entry of journal) {
 				if (entry.kind === "replace" || entry.kind === "move") {
-					const docId = this.store.replaceDocument(
+					this.store.replacePersistedJournalDocument(
 						entry.document,
 						entry.previousPath,
 					);
-					if (entry.document.bodyTokens.length > 0) {
-						this.bodyTokenCacheByDocId.set(docId, [...entry.document.bodyTokens]);
-					} else {
-						this.bodyTokenCacheByDocId.delete(docId);
-					}
 					continue;
 				}
 				const docId = this.store.getDocumentId(entry.path);
@@ -450,8 +446,39 @@ export class CoverageLexicalV2FileSearchEngine
 			}
 			const stored = documents.get(path);
 			if (stored) {
-				this.bodyTokenCacheByDocId.set(docId, [...stored.bodyTokens]);
+				this.bodyTokenCacheByDocId.set(
+					docId,
+					this.store.getOrCreateBodyTokenIds(stored.bodyTokens),
+				);
 			}
+		}
+	}
+
+	private buildRuntimeMemoryBreakdown(): CoverageLexicalV2RuntimeMemoryBreakdown {
+		const hotCacheEstimate = this.estimateBodyTokenHotCacheBytes();
+		return this.store.buildIndexBreakdown({
+			bodyTokensHotBytes: hotCacheEstimate.bytes,
+			bodyTokensHotVsSidecarBytes: hotCacheEstimate.overlapBytes,
+		});
+	}
+
+	private estimateBodyTokenHotCacheBytes(): {
+		bytes: number;
+		overlapBytes: number;
+	} {
+		let bytes = 0;
+		for (const bodyTokenIds of this.bodyTokenCacheByDocId.values()) {
+			bytes += estimateCoverageLexicalV2BodyTokenIdSequenceBytes(bodyTokenIds);
+		}
+		return {
+			bytes,
+			overlapBytes: bytes,
+		};
+	}
+
+	private releaseHotBodyTokenCache(docIds: readonly number[]): void {
+		for (const docId of docIds) {
+			this.bodyTokenCacheByDocId.delete(docId);
 		}
 	}
 
@@ -472,12 +499,13 @@ export class CoverageLexicalV2FileSearchEngine
 
 	private async upsertBodyTokenColdDocuments(
 		documents: readonly CoverageLexicalBodyTokenColdDocumentWrite[],
-	): Promise<void> {
+	): Promise<boolean> {
 		const coldStore = this.getBodyTokenColdStore();
 		if (!coldStore || documents.length === 0) {
-			return;
+			return false;
 		}
 		await coldStore.upsertDocuments(documents);
+		return true;
 	}
 
 	private async deleteBodyTokenColdDocuments(paths: readonly string[]): Promise<void> {
@@ -493,6 +521,18 @@ export class CoverageLexicalV2FileSearchEngine
 		return {
 			transactionId: `${updatedAt}:${this.journalTransactionOrdinal}:${seed}`,
 		};
+	}
+
+	private requirePersistedJournalDocument(
+		docId: number,
+	): CoverageLexicalV2PersistedJournalDocument {
+		const document = this.store.buildPersistedJournalDocument(docId);
+		if (!document) {
+			throw new Error(
+				`Missing persisted journal document for coverage lexical V2 doc ${docId}`,
+			);
+		}
+		return document;
 	}
 }
 

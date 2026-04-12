@@ -17,6 +17,7 @@ import {
 	type PersistentFileIndexRecoveryPlan,
 	type SerializedFileSearchIndex,
 } from "./file-search-engine";
+import type { CoverageLexicalV2BodyTokenColdDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-body-token-cold-types";
 import {
 	createLightweightFuzzyIndex,
 	matchLightweightFuzzy,
@@ -228,6 +229,20 @@ export class LexicalEngine {
   async clearPersistedFileIndexArtifact(): Promise<void> {
     await this.fileSearchEngine.clearPersistedFileIndexArtifact?.();
   }
+
+	buildBodyTokenColdDocument(
+		path: string,
+		generation: number | undefined,
+		bodyText: string,
+	): CoverageLexicalV2BodyTokenColdDocumentWrite | null {
+		return (
+			this.fileSearchEngine.buildBodyTokenColdDocument?.(
+				path,
+				generation,
+				bodyText,
+			) ?? null
+		);
+	}
 
 	async getNativeFileSubItems(
 		queryText: string,

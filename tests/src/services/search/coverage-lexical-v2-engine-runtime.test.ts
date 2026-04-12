@@ -4,8 +4,26 @@ jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
+jest.mock("src/services/database/database", () => ({
+	Database: class MockDatabaseToken {},
+}));
+
+jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+	FileSnapshotStore: class MockFileSnapshotStoreToken {},
+}));
+
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 	Tokenizer: new () => unknown;
+};
+
+const { Database } = jest.requireMock("src/services/database/database") as {
+	Database: new () => unknown;
+};
+
+const { FileSnapshotStore } = jest.requireMock(
+	"src/services/search/shared/file-snapshot-store",
+) as {
+	FileSnapshotStore: new () => unknown;
 };
 
 type IndexedDocument = {
@@ -279,36 +297,200 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 	});
 
 	test("live index breakdown removes bodyChar postings while keeping bodyHanSegments resident", async () => {
-		const { CoverageLexicalFileSearchEngine } = require(
-			"src/services/search/coverage-lexical/coverage-lexical-engine",
+		const { CoverageLexicalV2IndexStore } = require(
+			"src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store",
 		) as {
-			CoverageLexicalFileSearchEngine: new () => {
-				addDocuments(documents: IndexedDocument[]): Promise<void>;
-				getIndexBreakdown(): Record<string, unknown> | null;
+			CoverageLexicalV2IndexStore: new () => {
+				replaceDocument(document: Record<string, unknown>): number;
+				buildIndexBreakdown(): Record<string, unknown>;
+				compactOverlayIntoSegment(force?: boolean): boolean;
 			};
 		};
 
-		const engine = new CoverageLexicalFileSearchEngine();
+		const store = new CoverageLexicalV2IndexStore();
+		store.replaceDocument({
+			path: "notes/win-song-body.md",
+			generation: 1,
+			indexedRef: {
+				path: "notes/win-song-body.md",
+				generation: 1,
+				size: 64,
+			},
+			record: {
+				path: "notes/win-song-body.md",
+				stableDeterministicKey: "notes/win-song-body.md",
+				basenameText: "misc",
+				aliasesText: "",
+				headingsText: "",
+				folderText: "notes",
+				tagsText: "",
+			},
+			exactTermsByField: {
+				basename: ["misc"],
+				aliases: [],
+				headings: [],
+				folder: ["notes"],
+				tag: [],
+				body: [],
+			},
+			metadataHanBigramsByField: {
+				basename: [],
+				aliases: [],
+				headings: [],
+				folder: [],
+				tag: [],
+			},
+			bodyHanSegments: ["\u8fd9\u91cc\u63d0\u5230\u4e86\u8d62\u5b8b\u8fd9\u4e24\u4e2a\u5b57"],
+			bodyTokens: [],
+		});
+		store.replaceDocument({
+			path: "notes/win-song-metadata.md",
+			generation: 2,
+			indexedRef: {
+				path: "notes/win-song-metadata.md",
+				generation: 2,
+				size: 48,
+			},
+			record: {
+				path: "notes/win-song-metadata.md",
+				stableDeterministicKey: "notes/win-song-metadata.md",
+				basenameText: "\u5173\u4e8e\u8d62\u5b8b\u7684\u7b14\u8bb0",
+				aliasesText: "",
+				headingsText: "",
+				folderText: "notes",
+				tagsText: "",
+			},
+			exactTermsByField: {
+				basename: [],
+				aliases: [],
+				headings: [],
+				folder: ["notes"],
+				tag: [],
+				body: ["latin", "filler"],
+			},
+			metadataHanBigramsByField: {
+				basename: ["\u5173\u4e8e", "\u8d62\u5b8b"],
+				aliases: [],
+				headings: [],
+				folder: [],
+				tag: [],
+			},
+			bodyHanSegments: [],
+			bodyTokens: ["latin", "filler"],
+		});
+		store.compactOverlayIntoSegment(true);
+
+		const breakdown = store.buildIndexBreakdown();
+		expect(breakdown).not.toBeNull();
+		expect("bodyCharTermCount" in (breakdown ?? {})).toBe(false);
+		expect(
+			(breakdown as any).estimatedBytes.residentHot.postings.bodyChar,
+		).toBeUndefined();
+		expect(
+			(breakdown as any).estimatedBytes.residentHot.verification.bodyHanSegments,
+		).toBeGreaterThan(0);
+	});
+
+	test("releases hot body-token cache after cold-store writes while keeping body verification working", async () => {
+		const {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
+		} = require(
+			"src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types",
+		) as {
+			COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN: string;
+		};
+		const storedDocuments = new Map<string, readonly string[]>();
+		const readDocuments = jest.fn(async (paths: readonly string[]) => {
+			const result = new Map<
+				string,
+				{ path: string; generation?: number; bodyTokens: readonly string[] }
+			>();
+			for (const path of paths) {
+				const bodyTokens = storedDocuments.get(path);
+				if (!bodyTokens) {
+					continue;
+				}
+				result.set(path, {
+					path,
+					bodyTokens,
+				});
+			}
+			return result;
+		});
+		container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
+			clearAll: jest.fn(async () => undefined),
+			deleteDocuments: jest.fn(async (paths: readonly string[]) => {
+				for (const path of paths) {
+					storedDocuments.delete(path);
+				}
+			}),
+			getMeta: jest.fn(async () => null),
+			inspectConsistency: jest.fn(async () => ({
+				needsRepair: false,
+				requiresReset: false,
+				reason: "up-to-date",
+				missingOrStalePaths: [],
+				danglingPaths: [],
+			})),
+			readDocuments,
+			updateIndexedRefsMetadata: jest.fn(async () => undefined),
+			upsertDocuments: jest.fn(async (documents: readonly any[]) => {
+				for (const document of documents) {
+					storedDocuments.set(document.path, document.bodyTokens);
+				}
+			}),
+		} as any);
+		container.registerInstance(Database, {
+			appendCoverageLexicalV2IndexStoreJournalEntries: jest.fn(
+				async () => undefined,
+			),
+		} as any);
+		container.registerInstance(FileSnapshotStore, {
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+		} as any);
+
+		const { CoverageLexicalV2FileSearchEngine } = require(
+			"src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine",
+		) as {
+			CoverageLexicalV2FileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				getIndexBreakdown(): Record<string, unknown> | null;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const engine = new CoverageLexicalV2FileSearchEngine();
 		await engine.addDocuments([
 			{
-				path: "notes/win-song-body.md",
-				basename: "misc",
+				path: "notes/offloaded-body.md",
+				basename: "offloaded-body",
 				folder: "notes",
-				content: "\u8fd9\u91cc\u63d0\u5230\u4e86\u8d62\u5b8b\u8fd9\u4e24\u4e2a\u5b57",
-			},
-			{
-				path: "notes/win-song-metadata.md",
-				basename: "\u5173\u4e8e\u8d62\u5b8b\u7684\u7b14\u8bb0",
-				folder: "notes",
-				content: "latin filler",
+				content: "alpha beta gamma cluster",
 			},
 		]);
 
 		const breakdown = engine.getIndexBreakdown();
-		expect(breakdown).not.toBeNull();
-		expect("bodyCharTermCount" in (breakdown ?? {})).toBe(false);
-		expect((breakdown as any).estimatedBytes.postings.bodyChar).toBeUndefined();
-		expect((breakdown as any).estimatedBytes.documentIdentity.bodyHanSegmentsById.total).toBeGreaterThan(0);
+		expect(
+			(breakdown as any).estimatedBytes.residentHot.caches.bodyTokensHot,
+		).toBe(0);
+		expect(
+			(breakdown as any).estimatedBytes.coldOwned.bodyTokensSidecar,
+		).toBeGreaterThan(0);
+
+		const results = await engine.searchFiles({
+			queryText: "alpha beta gamma",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+
+		expect(readDocuments).toHaveBeenCalled();
+		expect(results[0]?.path).toBe("notes/offloaded-body.md");
 	});
 
 test("searchFiles keeps using the independent v2 candidate-cascade path without configuration switches", async () => {

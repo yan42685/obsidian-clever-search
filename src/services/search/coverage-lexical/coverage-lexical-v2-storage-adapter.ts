@@ -10,6 +10,7 @@ import {
 } from "../coverage-lexical-v2/coverage-lexical-v2-engine";
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
+	CoverageLexicalV2CandidateCascadeHanBackstopStats,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../coverage-lexical-v2/candidate-cascade";
@@ -27,7 +28,11 @@ export type CoverageLexicalV2StorageAdapterBindings = {
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;
-	getBodyHanSegments(docId: number): readonly string[] | undefined;
+	getBodyHanBackstopStats(
+		docId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null;
 	collectLatinPrefixTerms(queryTerm: string, cap: number): readonly string[];
 	collectLatinFuzzyTerms(
 		queryTerm: string,
@@ -58,7 +63,11 @@ export function buildCoverageLexicalV2StorageReader(
 			field: CoverageLexicalV2CandidateCascadePostingField,
 			bigram: string,
 		) => bindings.getMetadataHanBigramPostingMatches(field, bigram),
-		getBodyHanSegments: (docId: number) => bindings.getBodyHanSegments(docId),
+		getBodyHanBackstopStats: (
+			docId: number,
+			normalizedText: string,
+			bigrams: readonly string[],
+		) => bindings.getBodyHanBackstopStats(docId, normalizedText, bigrams),
 		collectLatinPrefixTerms: (queryTerm: string, cap: number) =>
 			bindings.collectLatinPrefixTerms(queryTerm, cap),
 		collectLatinFuzzyTerms: (
