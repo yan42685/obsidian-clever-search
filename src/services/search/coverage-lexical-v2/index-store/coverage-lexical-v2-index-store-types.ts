@@ -4,13 +4,19 @@ import type {
 } from "src/globals/search-types";
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
+	CoverageLexicalV2CandidateCascadeHanBackstopStats,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../candidate-cascade";
+import type {
+	CoverageLexicalV2TokenRange,
+} from "./coverage-lexical-v2-shared-token-ids";
 
-export const COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION = 2;
+export const COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION = 6;
 export const COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID = "active";
 export const COVERAGE_LEXICAL_V2_INDEX_STORE_SNAPSHOT_CHUNK_ID = "active:0";
+export type CoverageLexicalV2CanonicalTermId = number;
+export type CoverageLexicalV2HanSymbolId = number;
 
 export type CoverageLexicalV2MetadataPostingField = Exclude<
 	CoverageLexicalV2CandidateCascadePostingField,
@@ -22,9 +28,19 @@ export type CoverageLexicalV2FieldTermLists = Record<
 	readonly string[]
 >;
 
+export type CoverageLexicalV2FieldTermIdLists = Record<
+	CoverageLexicalV2CandidateCascadePostingField,
+	readonly CoverageLexicalV2CanonicalTermId[]
+>;
+
 export type CoverageLexicalV2MetadataBigramLists = Record<
 	CoverageLexicalV2MetadataPostingField,
 	readonly string[]
+>;
+
+export type CoverageLexicalV2MetadataBigramIdLists = Record<
+	CoverageLexicalV2MetadataPostingField,
+	readonly CoverageLexicalV2CanonicalTermId[]
 >;
 
 export type CoverageLexicalV2NormalizedDocumentTexts = Pick<
@@ -44,6 +60,11 @@ export type CoverageLexicalV2BodyTokenSidecarLocator = {
 	estimatedBytes: number;
 };
 
+export type CoverageLexicalV2RuntimeBodyTokenSidecarMetadata = Omit<
+	CoverageLexicalV2BodyTokenSidecarLocator,
+	"path"
+>;
+
 export type CoverageLexicalV2PreparedDocument = {
 	path: string;
 	generation?: number;
@@ -55,14 +76,30 @@ export type CoverageLexicalV2PreparedDocument = {
 	bodyTokens: readonly string[];
 };
 
-export type CoverageLexicalV2IndexStoreDocManifest = {
-	stableDeterministicKey: string;
-	normalizedMetadataTexts: CoverageLexicalV2NormalizedDocumentTexts;
-	exactTermsByField: CoverageLexicalV2FieldTermLists;
-	metadataHanBigramsByField: CoverageLexicalV2MetadataBigramLists;
-	bodyHanSegments: readonly string[];
+export type CoverageLexicalV2CanonicalTermPoolState = {
+	arenaBytes: readonly number[];
+	termOffsets: readonly number[];
+	termByteLengths: readonly number[];
+};
+
+export type CoverageLexicalV2HanSymbolPoolState = {
+	codePointsBySymbolId: readonly number[];
+};
+
+export type CoverageLexicalV2IndexStorePersistedDocManifest = {
+	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
+	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
+	bodyHanSymbolRanges: readonly CoverageLexicalV2TokenRange[];
 	hasBodyHanSegments: boolean;
 	bodyTokenSidecar: CoverageLexicalV2BodyTokenSidecarLocator;
+};
+
+export type CoverageLexicalV2IndexStoreRuntimeDocManifest = {
+	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
+	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
+	bodyHanSymbolRanges: readonly CoverageLexicalV2TokenRange[];
+	hasBodyHanSegments: boolean;
+	bodyTokenSidecar: CoverageLexicalV2RuntimeBodyTokenSidecarMetadata;
 };
 
 export type CoverageLexicalV2IndexStoreDocumentState = {
@@ -71,13 +108,12 @@ export type CoverageLexicalV2IndexStoreDocumentState = {
 	generation?: number;
 	indexedRef: BaseIndexedFileRef;
 	record: CoverageLexicalV2CandidateCascadeDocumentRecord;
-	manifest: CoverageLexicalV2IndexStoreDocManifest;
+	manifest: CoverageLexicalV2IndexStoreRuntimeDocManifest;
 };
 
 export type CoverageLexicalV2PostingEncoding = "tiny_inline" | "delta_varint";
 
 export type CoverageLexicalV2SerializedPostingDirectoryEntry = {
-	termIndex: number;
 	encoding: CoverageLexicalV2PostingEncoding;
 	docCount: number;
 	tapeStart: number;
@@ -86,15 +122,34 @@ export type CoverageLexicalV2SerializedPostingDirectoryEntry = {
 };
 
 export type CoverageLexicalV2SerializedPostingFieldSegment = {
-	termDictionary: readonly string[];
+	termIdDictionary: readonly CoverageLexicalV2CanonicalTermId[];
 	postingDirectory: readonly CoverageLexicalV2SerializedPostingDirectoryEntry[];
 	postingTape: readonly number[];
 };
 
-export type CoverageLexicalV2SerializedExactSegmentFields = Record<
-	CoverageLexicalV2CandidateCascadePostingField,
-	CoverageLexicalV2SerializedPostingFieldSegment
->;
+export type CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment = {
+	termIdLexicon: readonly CoverageLexicalV2CanonicalTermId[];
+	singletonDocIds: readonly number[];
+	smallTermIds: readonly CoverageLexicalV2CanonicalTermId[];
+	smallDocStarts: readonly number[];
+	smallDocCounts: readonly number[];
+	smallDocIds: readonly number[];
+	deltaTermIds: readonly CoverageLexicalV2CanonicalTermId[];
+	deltaDocCounts: readonly number[];
+	deltaTapeStarts: readonly number[];
+	deltaTapeLengths: readonly number[];
+	postingTape: readonly number[];
+};
+
+export type CoverageLexicalV2SerializedExactSegmentFields = Omit<
+	Record<
+		CoverageLexicalV2CandidateCascadePostingField,
+		CoverageLexicalV2SerializedPostingFieldSegment
+	>,
+	"body"
+> & {
+	body: CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment;
+};
 
 export type CoverageLexicalV2SerializedMetadataSegmentFields = Record<
 	CoverageLexicalV2MetadataPostingField,
@@ -136,13 +191,16 @@ export type CoverageLexicalV2IndexStoreSnapshotDocument = {
 	generation?: number;
 	indexedRef: BaseIndexedFileRef;
 	record: CoverageLexicalV2CandidateCascadeDocumentRecord;
-	manifest: CoverageLexicalV2IndexStoreDocManifest;
+	manifest: CoverageLexicalV2IndexStorePersistedDocManifest;
 };
 
 export type CoverageLexicalV2IndexStoreSnapshotState = {
 	schemaVersion: number;
 	nextDocumentId: number;
 	snapshotCreatedAt: number;
+	canonicalTermPool: CoverageLexicalV2CanonicalTermPoolState;
+	hanSymbolPool: CoverageLexicalV2HanSymbolPoolState;
+	hanSymbolTape: readonly number[];
 	documents: readonly CoverageLexicalV2IndexStoreSnapshotDocument[];
 	segments: readonly CoverageLexicalV2IndexStoreResidentSegment[];
 	overlay: CoverageLexicalV2IndexStoreOverlayState;
@@ -153,13 +211,25 @@ export type CoverageLexicalV2IndexStoreJournalTransaction = {
 	commitSequence?: number;
 };
 
+export type CoverageLexicalV2PersistedJournalDocument = {
+	path: string;
+	generation?: number;
+	indexedRef: BaseIndexedFileRef;
+	record: CoverageLexicalV2CandidateCascadeDocumentRecord;
+	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
+	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
+	bodyHanCodePointTape: readonly number[];
+	bodyHanCodePointRanges: readonly CoverageLexicalV2TokenRange[];
+	bodyTokenSidecar: CoverageLexicalV2BodyTokenSidecarLocator;
+};
+
 export type CoverageLexicalV2IndexStoreReplaceJournalEntry = {
 	kind: "replace";
 	path: string;
 	previousPath?: string;
 	updatedAt: number;
 	transaction: CoverageLexicalV2IndexStoreJournalTransaction;
-	document: CoverageLexicalV2PreparedDocument;
+	document: CoverageLexicalV2PersistedJournalDocument;
 };
 
 export type CoverageLexicalV2IndexStoreMoveJournalEntry = {
@@ -168,7 +238,7 @@ export type CoverageLexicalV2IndexStoreMoveJournalEntry = {
 	previousPath: string;
 	updatedAt: number;
 	transaction: CoverageLexicalV2IndexStoreJournalTransaction;
-	document: CoverageLexicalV2PreparedDocument;
+	document: CoverageLexicalV2PersistedJournalDocument;
 };
 
 export type CoverageLexicalV2IndexStoreDeleteJournalEntry = {
@@ -229,15 +299,38 @@ export type CoverageLexicalV2IndexStoreReaderOptions = Pick<
 	"getBodyTokenSequence" | "prefetchBodyTokenSequences" | "tokenizeText"
 >;
 
-export type CoverageLexicalV2IndexStoreSizeBreakdown = {
+export type CoverageLexicalV2RuntimeMemoryBreakdown = {
 	estimatedBytes: {
-		total: number;
-		exactIncidence: number;
-		latinExpansionLexicon: number;
-		metadataHanGate: number;
-		documentView: number;
-		bodyHanVerificationView: number;
-		bodyTokenSidecar: number;
+		residentHot: {
+			total: number;
+			postings: {
+				exactIncidence: number;
+				metadataHanGate: number;
+			};
+			documents: {
+				view: number;
+			};
+			verification: {
+				bodyHanSegments: number;
+			};
+			lexicon: {
+				latinExpansion: number;
+			};
+			caches: {
+				bodyTokensHot: number;
+			};
+		};
+		coldOwned: {
+			total: number;
+			bodyTokensSidecar: number;
+		};
+		overlapDiagnostics: {
+			total: number;
+			bodyTokensHotVsSidecar: number;
+			pathMirrors: number;
+			manifestMirrors: number;
+		};
+		combinedOwnedTotal: number;
 	};
 	documentCount: number;
 	nextDocumentId: number;

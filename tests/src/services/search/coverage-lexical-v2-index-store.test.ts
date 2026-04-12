@@ -154,6 +154,17 @@ describe("CoverageLexicalV2IndexStore", () => {
 		store.compactOverlayIntoSegment(true);
 
 		const snapshot = store.buildSnapshotState();
+		expect(snapshot.documents[0]?.record.stableDeterministicKey).toBe("notes/han.md");
+		expect(snapshot.documents[0]?.record.basenameText).toBe("han");
+		expect(snapshot.documents[0]?.manifest.bodyTokenSidecar.path).toBe(
+			"notes/han.md",
+		);
+		expect(
+			snapshot.documents[0]?.manifest.bodyHanSymbolRanges.length,
+		).toBeGreaterThan(0);
+		expect(snapshot.hanSymbolPool.codePointsBySymbolId.length).toBeGreaterThan(0);
+		expect(snapshot.hanSymbolTape.length).toBeGreaterThan(0);
+		expect(snapshot.canonicalTermPool.termOffsets.length).toBeGreaterThan(0);
 		const restored = new CoverageLexicalV2IndexStore();
 		restored.restoreSnapshot(snapshot);
 		const reader = createReader(restored);
@@ -162,13 +173,68 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(reader.getPostingMatches("basename", "latin")).toEqual([1]);
 		expect(reader.getMetadataHanBigramPostingMatches("basename", "测试")).toEqual([0]);
 		expect(reader.getBodyHanSegmentDocIds()).toEqual([0]);
-		expect(reader.getBodyHanSegments(0)).toEqual(["测试正文"]);
+		expect(
+			reader.getBodyHanBackstopStats(0, "测试正文", [
+				"测试",
+				"试正",
+				"正文",
+			]),
+		).toEqual({
+			longestContiguousBigramChain: 3,
+			matchedBigramCount: 3,
+			bigramCoverageRatio: 1,
+		});
 
 		const breakdown = restored.buildIndexBreakdown();
 		expect(breakdown.segmentCount).toBeGreaterThan(0);
 		expect(breakdown.latinExpansionTermCount).toBeGreaterThan(0);
-		expect(breakdown.estimatedBytes.bodyTokenSidecar).toBeGreaterThan(0);
-		expect(breakdown.estimatedBytes.documentView).toBeGreaterThan(0);
+		expect(breakdown.estimatedBytes.residentHot.total).toBe(
+			restored.estimateIndexBytes(),
+		);
+		expect(breakdown.estimatedBytes.residentHot.postings.exactIncidence).toBeGreaterThan(0);
+		expect(breakdown.estimatedBytes.residentHot.documents.view).toBeGreaterThan(0);
+		expect(
+			breakdown.estimatedBytes.coldOwned.bodyTokensSidecar,
+		).toBeGreaterThan(0);
+		expect(
+			breakdown.estimatedBytes.combinedOwnedTotal,
+		).toBe(
+			breakdown.estimatedBytes.residentHot.total +
+				breakdown.estimatedBytes.coldOwned.total,
+		);
+
+		const runtimeDocument = (restored as any).documentById[0];
+		expect(runtimeDocument.manifest.stableDeterministicKey).toBeUndefined();
+		expect(runtimeDocument.manifest.normalizedMetadataTexts).toBeUndefined();
+		expect(runtimeDocument.manifest.bodyTokenSidecar.path).toBeUndefined();
+	});
+
+	test("shares empty runtime manifest structures across documents", () => {
+		const store = new CoverageLexicalV2IndexStore();
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/empty-a.md",
+				generation: 1,
+			}),
+		);
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/empty-b.md",
+				generation: 2,
+			}),
+		);
+
+		const firstDocument = (store as any).documentById[0];
+		const secondDocument = (store as any).documentById[1];
+		expect(firstDocument.manifest.exactTermIdsByField).toBe(
+			secondDocument.manifest.exactTermIdsByField,
+		);
+		expect(firstDocument.manifest.metadataHanBigramIdsByField).toBe(
+			secondDocument.manifest.metadataHanBigramIdsByField,
+		);
+		expect(firstDocument.manifest.bodyHanSymbolRanges).toBe(
+			secondDocument.manifest.bodyHanSymbolRanges,
+		);
 	});
 });
 

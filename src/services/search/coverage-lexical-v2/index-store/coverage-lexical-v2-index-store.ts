@@ -1,5 +1,6 @@
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type {
+	CoverageLexicalV2CandidateCascadeHanBackstopStats,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../candidate-cascade";
@@ -8,27 +9,74 @@ import {
 	isCoverageLexicalV2LatinCandidateCascadeTerm,
 } from "../candidate-cascade/coverage-lexical-candidate-match";
 import {
+	createCoverageLexicalV2CanonicalTermPool,
+	clearCoverageLexicalV2CanonicalTermPool,
+	decodeCoverageLexicalV2CanonicalTerm,
+	estimateCoverageLexicalV2CanonicalTermPoolBytes,
+	findCoverageLexicalV2CanonicalTermId,
+	getCoverageLexicalV2CanonicalTermByteLength,
+	getCoverageLexicalV2CanonicalTermCount,
+	internCoverageLexicalV2CanonicalTerm,
+	restoreCoverageLexicalV2CanonicalTermPool,
+	serializeCoverageLexicalV2CanonicalTermPool,
+	type CoverageLexicalV2CanonicalTermPool,
+} from "./coverage-lexical-v2-canonical-term-pool";
+import {
+	COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID,
+	createCoverageLexicalV2HanSymbolPool,
+	clearCoverageLexicalV2HanSymbolPool,
+	decodeCoverageLexicalV2HanSymbolCodePoint,
+	findCoverageLexicalV2HanSymbolId,
+	getOrCreateCoverageLexicalV2HanSymbolId,
+	restoreCoverageLexicalV2HanSymbolPool,
+	serializeCoverageLexicalV2HanSymbolPool,
+	type CoverageLexicalV2HanSymbolPool,
+} from "./coverage-lexical-v2-han-symbol-pool";
+import {
 	buildCoverageLexicalV2ResidentSegment,
+	decodeCoverageLexicalV2ResidentBodyPosting,
 	decodeCoverageLexicalV2ResidentSegmentPosting,
 	estimateCoverageLexicalV2ResidentSegmentBytes,
 } from "./coverage-lexical-v2-index-store-codec";
 import {
 	COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION,
+	type CoverageLexicalV2CanonicalTermId,
 	type CoverageLexicalV2FieldTermLists,
-	type CoverageLexicalV2IndexStoreDocManifest,
+	type CoverageLexicalV2FieldTermIdLists,
+	type CoverageLexicalV2HanSymbolId,
 	type CoverageLexicalV2IndexStoreDocumentState,
 	type CoverageLexicalV2IndexStoreOverlayState,
+	type CoverageLexicalV2IndexStorePersistedDocManifest,
+	type CoverageLexicalV2PersistedJournalDocument,
 	type CoverageLexicalV2IndexStoreReaderOptions,
 	type CoverageLexicalV2IndexStoreResidentSegment,
-	type CoverageLexicalV2IndexStoreSizeBreakdown,
+	type CoverageLexicalV2IndexStoreRuntimeDocManifest,
 	type CoverageLexicalV2IndexStoreSnapshotDocument,
 	type CoverageLexicalV2IndexStoreSnapshotState,
 	type CoverageLexicalV2MetadataBigramLists,
+	type CoverageLexicalV2MetadataBigramIdLists,
 	type CoverageLexicalV2MetadataPostingField,
 	type CoverageLexicalV2PreparedDocument,
+	type CoverageLexicalV2RuntimeMemoryBreakdown,
 } from "./coverage-lexical-v2-index-store-types";
+import {
+	buildCoverageLexicalV2PreparedStreamingSubsequence,
+	collectCoverageLexicalV2NumericBigramMatchIndices,
+	collectCoverageLexicalV2NumericBigramMatchIndicesStreaming,
+	containsCoverageLexicalV2NumericSubsequenceStreaming,
+	containsCoverageLexicalV2NumericSubsequence,
+	encodeCoverageLexicalV2NumericTokenTape,
+	estimateCoverageLexicalV2NumericTokenTapeBytes,
+	readCoverageLexicalV2NumericTokenRange,
+	scanCoverageLexicalV2NumericTokenRange,
+	type CoverageLexicalV2PreparedStreamingSubsequence,
+	type CoverageLexicalV2TokenRange,
+} from "./coverage-lexical-v2-shared-token-ids";
 
-type CoverageLexicalV2InternalDocumentState = CoverageLexicalV2IndexStoreDocumentState;
+type CoverageLexicalV2InternalDocumentState = CoverageLexicalV2IndexStoreDocumentState & {
+	pendingHanSymbolTape?: Uint8Array;
+	pendingHanSymbolRanges?: readonly CoverageLexicalV2TokenRange[];
+};
 
 type CoverageLexicalV2MutablePostingDelta<Field extends string> = Record<
 	Field,
@@ -50,6 +98,11 @@ type CoverageLexicalV2MutableOverlayState = {
 	>;
 };
 
+type CoverageLexicalV2RuntimeMemoryBreakdownOptions = {
+	bodyTokensHotBytes?: number;
+	bodyTokensHotVsSidecarBytes?: number;
+};
+
 const COVERAGE_LEXICAL_V2_POSTING_FIELDS = [
 	"basename",
 	"aliases",
@@ -69,6 +122,49 @@ const COVERAGE_LEXICAL_V2_METADATA_FIELDS = [
 
 const textEncoder = new TextEncoder();
 const AUTO_COMPACTION_MUTATION_CAP = 48;
+const EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST = Object.freeze(
+	[],
+) as readonly string[];
+const EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST = Object.freeze(
+	[],
+) as readonly number[];
+const EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_LISTS = Object.freeze({
+	basename: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	aliases: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	headings: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	folder: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	tag: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	body: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+}) as CoverageLexicalV2FieldTermLists;
+const EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_ID_LISTS = Object.freeze({
+	basename: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	aliases: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	headings: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	folder: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	tag: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	body: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+}) as CoverageLexicalV2FieldTermIdLists;
+const EMPTY_COVERAGE_LEXICAL_V2_METADATA_BIGRAM_LISTS = Object.freeze({
+	basename: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	aliases: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	headings: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	folder: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+	tag: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
+}) as CoverageLexicalV2MetadataBigramLists;
+const EMPTY_COVERAGE_LEXICAL_V2_METADATA_BIGRAM_ID_LISTS = Object.freeze({
+	basename: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	aliases: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	headings: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	folder: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+	tag: EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+}) as CoverageLexicalV2MetadataBigramIdLists;
+const EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST = Object.freeze(
+	[],
+) as readonly CoverageLexicalV2TokenRange[];
+const EMPTY_COVERAGE_LEXICAL_V2_NUMBER_SEGMENT_LIST = Object.freeze(
+	[],
+) as readonly (readonly number[])[];
+const MISSING_COVERAGE_LEXICAL_V2_HAN_SYMBOL_ID = -1;
 
 export class CoverageLexicalV2IndexStore {
 	private nextDocumentId = 0;
@@ -76,15 +172,29 @@ export class CoverageLexicalV2IndexStore {
 		[];
 	private readonly documentIdByPath = new Map<string, number>();
 	private readonly bodyHanSegmentDocIds: number[] = [];
-	private readonly exactTermRefCounts = new Map<string, number>();
-	private readonly metadataHanBigramRefCounts = new Map<string, number>();
+	private readonly exactTermRefCounts = new Map<number, number>();
+	private readonly metadataHanBigramRefCounts = new Map<number, number>();
 	private readonly residentSegments: CoverageLexicalV2IndexStoreResidentSegment[] = [];
 	private readonly overlay: CoverageLexicalV2MutableOverlayState =
 		createCoverageLexicalV2MutableOverlayState();
-	private latinExpansionTermsCache: string[] = [];
+	private readonly canonicalTermPool: CoverageLexicalV2CanonicalTermPool =
+		createCoverageLexicalV2CanonicalTermPool();
+	private readonly hanSymbolPool: CoverageLexicalV2HanSymbolPool =
+		createCoverageLexicalV2HanSymbolPool();
+	private hanSymbolTape = new Uint8Array(0);
+	private latinExpansionTermIdsCache: CoverageLexicalV2CanonicalTermId[] = [];
 	private latinExpansionTermsDirty = true;
 	private overlayMutationCount = 0;
 	private bodyTokenSidecarEstimatedBytes = 0;
+	private preparedHanBackstopCache:
+		| {
+				key: string;
+				symbolIds: readonly CoverageLexicalV2HanSymbolId[];
+				hasMissingSymbols: boolean;
+				bigramIndexByKey: ReadonlyMap<string, number>;
+				preparedSubsequence: CoverageLexicalV2PreparedStreamingSubsequence;
+		  }
+		| null = null;
 
 	clear(): void {
 		this.nextDocumentId = 0;
@@ -95,10 +205,14 @@ export class CoverageLexicalV2IndexStore {
 		this.metadataHanBigramRefCounts.clear();
 		this.residentSegments.length = 0;
 		clearCoverageLexicalV2MutableOverlayState(this.overlay);
-		this.latinExpansionTermsCache = [];
+		clearCoverageLexicalV2CanonicalTermPool(this.canonicalTermPool);
+		clearCoverageLexicalV2HanSymbolPool(this.hanSymbolPool);
+		this.hanSymbolTape = new Uint8Array(0);
+		this.latinExpansionTermIdsCache = [];
 		this.latinExpansionTermsDirty = true;
 		this.overlayMutationCount = 0;
 		this.bodyTokenSidecarEstimatedBytes = 0;
+		this.preparedHanBackstopCache = null;
 	}
 
 	getIndexedDocumentCount(): number {
@@ -141,9 +255,15 @@ export class CoverageLexicalV2IndexStore {
 				return "doc_registry_conflict";
 			}
 			seenPaths.add(documentState.path);
+			const manifest = documentState.manifest;
 			if (
-				!documentState.manifest ||
-				documentState.manifest.bodyTokenSidecar.path !== documentState.path
+				!manifest ||
+				manifest.hasBodyHanSegments !==
+					(manifest.bodyHanSymbolRanges.length > 0) ||
+				!Number.isFinite(manifest.bodyTokenSidecar.estimatedBytes) ||
+				manifest.bodyTokenSidecar.estimatedBytes < 0 ||
+				!Number.isFinite(manifest.bodyTokenSidecar.tokenCount) ||
+				manifest.bodyTokenSidecar.tokenCount < 0
 			) {
 				return "manifest_missing";
 			}
@@ -151,15 +271,22 @@ export class CoverageLexicalV2IndexStore {
 
 		try {
 			for (const segment of this.residentSegments) {
-				for (const fieldSegment of Object.values(segment.exactByField)) {
-					for (const term of fieldSegment.termDictionary) {
-						void decodeCoverageLexicalV2ResidentSegmentPosting(fieldSegment, term);
+				for (const fieldSegment of Object.values(segment.metadataHanByField)) {
+					for (const termId of fieldSegment.termIdDictionary) {
+						void decodeCoverageLexicalV2ResidentSegmentPosting(fieldSegment, termId);
 					}
 				}
-				for (const fieldSegment of Object.values(segment.metadataHanByField)) {
-					for (const term of fieldSegment.termDictionary) {
-						void decodeCoverageLexicalV2ResidentSegmentPosting(fieldSegment, term);
+				for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
+					const fieldSegment = segment.exactByField[field];
+					for (const termId of fieldSegment.termIdDictionary) {
+						void decodeCoverageLexicalV2ResidentSegmentPosting(fieldSegment, termId);
 					}
+				}
+				for (const termId of segment.exactByField.body.termIdLexicon) {
+					void decodeCoverageLexicalV2ResidentBodyPosting(
+						segment.exactByField.body,
+						termId,
+					);
 				}
 			}
 		} catch {
@@ -195,7 +322,7 @@ export class CoverageLexicalV2IndexStore {
 			this.nextDocumentId += 1;
 		}
 
-		const stored = buildCoverageLexicalV2InternalDocumentState(docId, document);
+		const stored = this.buildInternalDocumentState(docId, document);
 		this.documentById[docId] = stored;
 		this.documentIdByPath.set(document.path, docId);
 		if (previousPath && previousPath !== document.path) {
@@ -206,6 +333,51 @@ export class CoverageLexicalV2IndexStore {
 		this.bodyTokenSidecarEstimatedBytes +=
 			stored.manifest.bodyTokenSidecar.estimatedBytes;
 		this.latinExpansionTermsDirty = true;
+		this.rebuildHanTokenTape();
+		return docId;
+	}
+
+	replacePersistedJournalDocument(
+		document: CoverageLexicalV2PersistedJournalDocument,
+		previousPath?: string,
+	): number {
+		const recycledDocId = previousPath
+			? this.documentIdByPath.get(previousPath)
+			: undefined;
+		const existingDocId = this.documentIdByPath.get(document.path);
+		let docId = recycledDocId ?? existingDocId;
+
+		if (
+			previousPath &&
+			previousPath !== document.path &&
+			existingDocId !== undefined &&
+			existingDocId !== recycledDocId
+		) {
+			this.deleteDocumentById(existingDocId);
+		}
+
+		if (docId !== undefined) {
+			this.removeDocumentStateById(docId);
+		} else {
+			docId = this.nextDocumentId;
+			this.nextDocumentId += 1;
+		}
+
+		const stored = this.buildInternalDocumentStateFromPersistedJournal(
+			docId,
+			document,
+		);
+		this.documentById[docId] = stored;
+		this.documentIdByPath.set(document.path, docId);
+		if (previousPath && previousPath !== document.path) {
+			this.documentIdByPath.delete(previousPath);
+		}
+		this.applyDocumentAddition(stored);
+		this.syncBodyHanSegmentDocId(docId, stored.manifest.hasBodyHanSegments);
+		this.bodyTokenSidecarEstimatedBytes +=
+			stored.manifest.bodyTokenSidecar.estimatedBytes;
+		this.latinExpansionTermsDirty = true;
+		this.rebuildHanTokenTape();
 		return docId;
 	}
 
@@ -252,6 +424,7 @@ export class CoverageLexicalV2IndexStore {
 					docCount,
 					exactByField: exactPostings,
 					metadataHanByField: metadataPostings,
+					getCanonicalTermId: (term) => this.findCanonicalTermId(term),
 				}),
 			);
 		}
@@ -272,6 +445,15 @@ export class CoverageLexicalV2IndexStore {
 
 		this.clear();
 		this.nextDocumentId = snapshot.nextDocumentId;
+		restoreCoverageLexicalV2CanonicalTermPool(
+			this.canonicalTermPool,
+			snapshot.canonicalTermPool,
+		);
+		restoreCoverageLexicalV2HanSymbolPool(
+			this.hanSymbolPool,
+			snapshot.hanSymbolPool,
+		);
+		this.hanSymbolTape = Uint8Array.from(snapshot.hanSymbolTape);
 		this.residentSegments.push(
 			...snapshot.segments.map(cloneCoverageLexicalV2ResidentSegment),
 		);
@@ -290,7 +472,8 @@ export class CoverageLexicalV2IndexStore {
 			) {
 				throw new Error("Invalid coverage lexical V2 document registry");
 			}
-			const documentState = cloneCoverageLexicalV2SnapshotDocument(document);
+			const documentState =
+				this.buildInternalDocumentStateFromSnapshotDocument(document);
 			this.documentById[documentState.docId] = documentState;
 			this.documentIdByPath.set(documentState.path, documentState.docId);
 			this.syncBodyHanSegmentDocId(
@@ -299,11 +482,11 @@ export class CoverageLexicalV2IndexStore {
 			);
 			incrementCoverageLexicalV2TermRefCounts(
 				this.exactTermRefCounts,
-				documentState.manifest.exactTermsByField,
+				documentState.manifest.exactTermIdsByField,
 			);
 			incrementCoverageLexicalV2BigramRefCounts(
 				this.metadataHanBigramRefCounts,
-				documentState.manifest.metadataHanBigramsByField,
+				documentState.manifest.metadataHanBigramIdsByField,
 			);
 			this.bodyTokenSidecarEstimatedBytes +=
 				documentState.manifest.bodyTokenSidecar.estimatedBytes;
@@ -320,6 +503,11 @@ export class CoverageLexicalV2IndexStore {
 			schemaVersion: COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION,
 			nextDocumentId: this.nextDocumentId,
 			snapshotCreatedAt: Date.now(),
+			canonicalTermPool: serializeCoverageLexicalV2CanonicalTermPool(
+				this.canonicalTermPool,
+			),
+			hanSymbolPool: serializeCoverageLexicalV2HanSymbolPool(this.hanSymbolPool),
+			hanSymbolTape: [...this.hanSymbolTape],
 			documents: this.documentById.flatMap((documentState) =>
 				documentState ? [toCoverageLexicalV2SnapshotDocument(documentState)] : [],
 			),
@@ -339,8 +527,8 @@ export class CoverageLexicalV2IndexStore {
 				field === "body"
 					? undefined
 					: this.getMetadataHanBigramPostingMatches(field, bigram),
-			getBodyHanSegments: (docId) =>
-				this.documentById[docId]?.manifest.bodyHanSegments,
+			getBodyHanBackstopStats: (docId, normalizedText, bigrams) =>
+				this.getBodyHanBackstopStats(docId, normalizedText, bigrams),
 			collectLatinPrefixTerms: (queryTerm, cap) =>
 				this.collectLatinPrefixTerms(queryTerm, cap),
 			collectLatinFuzzyTerms: (queryTerm, cap, fuzzyProportion) =>
@@ -351,21 +539,36 @@ export class CoverageLexicalV2IndexStore {
 		};
 	}
 
-	estimateIndexBytes(): number {
-		return this.buildIndexBreakdown().estimatedBytes.total;
+	estimateIndexBytes(
+		options: CoverageLexicalV2RuntimeMemoryBreakdownOptions = {},
+	): number {
+		return this.buildIndexBreakdown(options).estimatedBytes.residentHot.total;
 	}
 
-	buildIndexBreakdown(): CoverageLexicalV2IndexStoreSizeBreakdown {
+	buildIndexBreakdown(
+		options: CoverageLexicalV2RuntimeMemoryBreakdownOptions = {},
+	): CoverageLexicalV2RuntimeMemoryBreakdown {
 		let exactIncidence = 0;
 		let metadataHanGate = 0;
 		let documentView = 0;
-		let bodyHanVerificationView = this.bodyHanSegmentDocIds.length * 4;
+		let bodyHanSegments = this.bodyHanSegmentDocIds.length * 4;
+		let pathMirrors = 0;
+		let manifestMirrors = 0;
+		const canonicalTermLexicon = buildCoverageLexicalV2CanonicalTermLexicon(
+			this.canonicalTermPool,
+		);
 
 		for (const segment of this.residentSegments) {
-			const estimated = estimateCoverageLexicalV2ResidentSegmentBytes(segment);
+			const estimated = estimateCoverageLexicalV2ResidentSegmentBytes(
+				segment,
+				canonicalTermLexicon,
+			);
 			exactIncidence += estimated.exactIncidence;
 			metadataHanGate += estimated.metadataHanGate;
 		}
+		exactIncidence += estimateCoverageLexicalV2CanonicalTermPoolBytes(
+			this.canonicalTermPool,
+		);
 
 		exactIncidence += estimateCoverageLexicalV2MutablePostingDeltaBytes(
 			this.overlay.exactAddsByField,
@@ -380,20 +583,46 @@ export class CoverageLexicalV2IndexStore {
 			this.overlay.metadataHanRemovalsByField,
 		);
 
+		const bodyHanRanges: Array<readonly CoverageLexicalV2TokenRange[]> = [];
 		for (const documentState of this.documentById) {
 			if (!documentState) {
 				continue;
 			}
 			documentView += estimateCoverageLexicalV2DocumentViewBytes(documentState);
-			bodyHanVerificationView += estimateCoverageLexicalV2BodyHanVerificationBytes(
-				documentState.manifest.bodyHanSegments,
+			bodyHanRanges.push(documentState.manifest.bodyHanSymbolRanges);
+			pathMirrors += estimateCoverageLexicalV2DocumentPathMirrorBytes(
+				documentState,
+			);
+			manifestMirrors += estimateCoverageLexicalV2DocumentManifestMirrorBytes(
+				documentState,
 			);
 		}
 
-		const latinExpansionTerms = this.getLatinExpansionTerms();
+		const latinExpansionTermIds = this.getLatinExpansionTermIds();
 		const latinExpansionLexicon = estimateCoverageLexicalV2LatinExpansionBytes(
-			latinExpansionTerms,
+			latinExpansionTermIds.map(
+				(termId) => canonicalTermLexicon[termId] ?? this.decodeCanonicalTerm(termId),
+			),
 		);
+		bodyHanSegments += estimateCoverageLexicalV2BodyHanVerificationBytes(
+			this.hanSymbolTape,
+			bodyHanRanges,
+		);
+		const bodyTokensHot = Math.max(0, options.bodyTokensHotBytes ?? 0);
+		const bodyTokensHotVsSidecar = Math.max(
+			0,
+			options.bodyTokensHotVsSidecarBytes ?? 0,
+		);
+		const residentHotTotal =
+			exactIncidence +
+			metadataHanGate +
+			documentView +
+			bodyHanSegments +
+			latinExpansionLexicon +
+			bodyTokensHot;
+		const coldOwnedTotal = this.bodyTokenSidecarEstimatedBytes;
+		const overlapDiagnosticsTotal =
+			bodyTokensHotVsSidecar + pathMirrors + manifestMirrors;
 
 		return {
 			documentCount: this.getIndexedDocumentCount(),
@@ -404,22 +633,39 @@ export class CoverageLexicalV2IndexStore {
 			metadataHanBigramCount: countCoverageLexicalV2PositiveRefCounts(
 				this.metadataHanBigramRefCounts,
 			),
-			latinExpansionTermCount: latinExpansionTerms.length,
+			latinExpansionTermCount: latinExpansionTermIds.length,
 			segmentCount: this.residentSegments.length,
 			estimatedBytes: {
-				exactIncidence,
-				latinExpansionLexicon,
-				metadataHanGate,
-				documentView,
-				bodyHanVerificationView,
-				bodyTokenSidecar: this.bodyTokenSidecarEstimatedBytes,
-				total:
-					exactIncidence +
-					latinExpansionLexicon +
-					metadataHanGate +
-					documentView +
-					bodyHanVerificationView +
-					this.bodyTokenSidecarEstimatedBytes,
+				residentHot: {
+					total: residentHotTotal,
+					postings: {
+						exactIncidence,
+						metadataHanGate,
+					},
+					documents: {
+						view: documentView,
+					},
+					verification: {
+						bodyHanSegments,
+					},
+					lexicon: {
+						latinExpansion: latinExpansionLexicon,
+					},
+					caches: {
+						bodyTokensHot,
+					},
+				},
+				coldOwned: {
+					total: coldOwnedTotal,
+					bodyTokensSidecar: this.bodyTokenSidecarEstimatedBytes,
+				},
+				overlapDiagnostics: {
+					total: overlapDiagnosticsTotal,
+					bodyTokensHotVsSidecar,
+					pathMirrors,
+					manifestMirrors,
+				},
+				combinedOwnedTotal: residentHotTotal + coldOwnedTotal,
 			},
 		};
 	}
@@ -428,12 +674,31 @@ export class CoverageLexicalV2IndexStore {
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		term: string,
 	): readonly number[] | undefined {
-		if ((this.exactTermRefCounts.get(term) ?? 0) <= 0) {
+		const termId = this.findCanonicalTermId(term);
+		if (termId === undefined) {
 			return undefined;
+		}
+		if ((this.exactTermRefCounts.get(termId) ?? 0) <= 0) {
+			return undefined;
+		}
+		if (field === "body") {
+			return this.collectPostingMatches(
+				this.residentSegments.map((segment) =>
+					decodeCoverageLexicalV2ResidentBodyPosting(
+						segment.exactByField.body,
+						termId,
+					),
+				),
+				this.overlay.exactAddsByField.body.get(term),
+				this.overlay.exactRemovalsByField.body.get(term),
+			);
 		}
 		return this.collectPostingMatches(
 			this.residentSegments.map((segment) =>
-				decodeCoverageLexicalV2ResidentSegmentPosting(segment.exactByField[field], term),
+				decodeCoverageLexicalV2ResidentSegmentPosting(
+					segment.exactByField[field],
+					termId,
+				),
 			),
 			this.overlay.exactAddsByField[field].get(term),
 			this.overlay.exactRemovalsByField[field].get(term),
@@ -444,19 +709,417 @@ export class CoverageLexicalV2IndexStore {
 		field: CoverageLexicalV2MetadataPostingField,
 		bigram: string,
 	): readonly number[] | undefined {
-		if ((this.metadataHanBigramRefCounts.get(bigram) ?? 0) <= 0) {
+		const termId = this.findCanonicalTermId(bigram);
+		if (termId === undefined) {
+			return undefined;
+		}
+		if ((this.metadataHanBigramRefCounts.get(termId) ?? 0) <= 0) {
 			return undefined;
 		}
 		return this.collectPostingMatches(
 			this.residentSegments.map((segment) =>
 				decodeCoverageLexicalV2ResidentSegmentPosting(
 					segment.metadataHanByField[field],
-					bigram,
+					termId,
 				),
 			),
 			this.overlay.metadataHanAddsByField[field].get(bigram),
 			this.overlay.metadataHanRemovalsByField[field].get(bigram),
 		);
+	}
+
+	private getBodyHanBackstopStats(
+		docId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null {
+		const documentState = this.documentById[docId];
+		const ranges = documentState?.manifest.bodyHanSymbolRanges;
+		if (!ranges || ranges.length === 0) {
+			return null;
+		}
+		const preparedQuery = this.prepareHanBackstopQuery(normalizedText, bigrams);
+		if (
+			preparedQuery.symbolIds.length === 0 ||
+			(preparedQuery.hasMissingSymbols &&
+				preparedQuery.bigramIndexByKey.size === 0)
+		) {
+			return null;
+		}
+		let bestStats: CoverageLexicalV2CandidateCascadeHanBackstopStats | null = null;
+		for (const range of ranges) {
+			if (
+				!preparedQuery.hasMissingSymbols &&
+				containsCoverageLexicalV2NumericSubsequenceStreaming(
+					this.hanSymbolTape,
+					range,
+					preparedQuery.preparedSubsequence,
+				)
+			) {
+				return {
+					longestContiguousBigramChain: bigrams.length,
+					matchedBigramCount: bigrams.length,
+					bigramCoverageRatio: bigrams.length > 0 ? 1 : 0,
+				};
+			}
+			if (bigrams.length === 0) {
+				continue;
+			}
+			const matchedBigramIndices =
+				collectCoverageLexicalV2NumericBigramMatchIndicesStreaming(
+					this.hanSymbolTape,
+					range,
+					preparedQuery.bigramIndexByKey,
+				);
+			if (matchedBigramIndices.size === 0) {
+				continue;
+			}
+			const stats = {
+				longestContiguousBigramChain: computeCoverageLexicalV2HanBackstopLongestChain(
+					matchedBigramIndices,
+				),
+				matchedBigramCount: matchedBigramIndices.size,
+				bigramCoverageRatio:
+					bigrams.length > 0 ? matchedBigramIndices.size / bigrams.length : 0,
+			};
+			bestStats =
+				bestStats == null ||
+				compareCoverageLexicalV2HanBackstopStats(stats, bestStats) < 0
+					? stats
+					: bestStats;
+		}
+		return bestStats;
+	}
+
+	private prepareHanBackstopQuery(
+		normalizedText: string,
+		bigrams: readonly string[],
+	): {
+		symbolIds: readonly CoverageLexicalV2HanSymbolId[];
+		hasMissingSymbols: boolean;
+		bigramIndexByKey: ReadonlyMap<string, number>;
+		preparedSubsequence: CoverageLexicalV2PreparedStreamingSubsequence;
+	} {
+		const cacheKey = normalizedText + "\u0001" + bigrams.join("\u0002");
+		if (this.preparedHanBackstopCache?.key === cacheKey) {
+			return this.preparedHanBackstopCache;
+		}
+		const symbolIds = toCoverageLexicalV2HanSymbolIds(
+			normalizedText,
+			this.hanSymbolPool,
+		);
+		const hasMissingSymbols = symbolIds.includes(
+			MISSING_COVERAGE_LEXICAL_V2_HAN_SYMBOL_ID,
+		);
+		const bigramIndexByKey = new Map<string, number>();
+		for (let index = 0; index < symbolIds.length - 1; index += 1) {
+			const left = symbolIds[index];
+			const right = symbolIds[index + 1];
+			if (
+				left <= COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID ||
+				right <= COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID
+			) {
+				continue;
+			}
+			bigramIndexByKey.set(
+				String(left) + ":" + String(right),
+				index,
+			);
+		}
+		const exactNeedle = hasMissingSymbols
+			? EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST
+			: symbolIds;
+		const prepared = {
+			key: cacheKey,
+			symbolIds,
+			hasMissingSymbols,
+			bigramIndexByKey,
+			preparedSubsequence: buildCoverageLexicalV2PreparedStreamingSubsequence(
+				exactNeedle,
+			),
+		};
+		this.preparedHanBackstopCache = prepared;
+		return prepared;
+	}
+
+	private buildInternalDocumentState(
+		docId: number,
+		document: CoverageLexicalV2PreparedDocument,
+	): CoverageLexicalV2InternalDocumentState {
+		this.ensureCanonicalTermIds(document.exactTermsByField);
+		this.ensureCanonicalBigramIds(document.metadataHanBigramsByField);
+		const encodedHan = encodeCoverageLexicalV2HanSegmentsToSymbolTape(
+			document.bodyHanSegments,
+			(codePoint) =>
+				getOrCreateCoverageLexicalV2HanSymbolId(this.hanSymbolPool, codePoint),
+		);
+		const stableDeterministicKey =
+			document.record.stableDeterministicKey ?? document.path;
+		const indexedRef: BaseIndexedFileRef = {
+			...document.indexedRef,
+			path: document.path,
+			generation: document.indexedRef.generation ?? document.generation,
+		};
+		return {
+			docId,
+			path: document.path,
+			generation: document.generation,
+			indexedRef,
+			record: {
+				...document.record,
+				path: document.path,
+				stableDeterministicKey,
+			},
+			manifest: {
+				exactTermIdsByField: mapCoverageLexicalV2FieldTermsToIds(
+					document.exactTermsByField,
+					(term) => this.getOrCreateCanonicalTermId(term),
+				),
+				metadataHanBigramIdsByField: mapCoverageLexicalV2MetadataBigramsToIds(
+					document.metadataHanBigramsByField,
+					(bigram) => this.getOrCreateCanonicalTermId(bigram),
+				),
+				bodyHanSymbolRanges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+				hasBodyHanSegments: encodedHan.ranges.length > 0,
+				bodyTokenSidecar: {
+					generation: document.generation ?? indexedRef.generation,
+					size: indexedRef.size,
+					tokenCount: document.bodyTokens.length,
+					estimatedBytes: estimateCoverageLexicalV2BodyTokenIdSequenceBytes(
+						this.getOrCreateBodyTokenIds(document.bodyTokens),
+					),
+				},
+			},
+			pendingHanSymbolTape: encodedHan.tape,
+			pendingHanSymbolRanges: encodedHan.ranges,
+		};
+	}
+
+	private buildInternalDocumentStateFromPersistedJournal(
+		docId: number,
+		document: CoverageLexicalV2PersistedJournalDocument,
+	): CoverageLexicalV2InternalDocumentState {
+		const stableDeterministicKey =
+			document.record.stableDeterministicKey ?? document.path;
+		return {
+			docId,
+			path: document.path,
+			generation: document.generation,
+			indexedRef: {
+				...document.indexedRef,
+				path: document.path,
+				generation: document.indexedRef.generation ?? document.generation,
+			},
+			record: {
+				...document.record,
+				path: document.path,
+				stableDeterministicKey,
+			},
+			manifest: {
+				exactTermIdsByField: cloneCoverageLexicalV2FieldTermIdLists(
+					document.exactTermIdsByField,
+				),
+				metadataHanBigramIdsByField:
+					cloneCoverageLexicalV2MetadataBigramIdLists(
+						document.metadataHanBigramIdsByField,
+					),
+				bodyHanSymbolRanges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+				hasBodyHanSegments: document.bodyHanCodePointRanges.length > 0,
+				bodyTokenSidecar: {
+					generation: document.bodyTokenSidecar.generation,
+					size: document.bodyTokenSidecar.size,
+					tokenCount: document.bodyTokenSidecar.tokenCount,
+					estimatedBytes: document.bodyTokenSidecar.estimatedBytes,
+				},
+			},
+			...mapCoverageLexicalV2PersistedHanDocumentToPendingTape(
+				document.bodyHanCodePointTape,
+				document.bodyHanCodePointRanges,
+				(codePoint) =>
+					getOrCreateCoverageLexicalV2HanSymbolId(this.hanSymbolPool, codePoint),
+			),
+		};
+	}
+
+	private buildInternalDocumentStateFromSnapshotDocument(
+		document: CoverageLexicalV2IndexStoreSnapshotDocument,
+	): CoverageLexicalV2InternalDocumentState {
+		return {
+			docId: document.docId,
+			path: document.path,
+			generation: document.generation,
+			indexedRef: { ...document.indexedRef },
+			record: { ...document.record },
+			manifest: normalizeCoverageLexicalV2PersistedDocManifest(document.manifest),
+		};
+	}
+
+	private ensureCanonicalTermIds(fieldTerms: CoverageLexicalV2FieldTermLists): void {
+		for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
+			for (const term of fieldTerms[field]) {
+				this.getOrCreateCanonicalTermId(term);
+			}
+		}
+	}
+
+	private ensureCanonicalBigramIds(
+		bigramsByField: CoverageLexicalV2MetadataBigramLists,
+	): void {
+		for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
+			for (const bigram of bigramsByField[field]) {
+				this.getOrCreateCanonicalTermId(bigram);
+			}
+		}
+	}
+
+	private getOrCreateCanonicalTermId(term: string): CoverageLexicalV2CanonicalTermId {
+		return internCoverageLexicalV2CanonicalTerm(this.canonicalTermPool, term);
+	}
+
+	private findCanonicalTermId(
+		term: string,
+	): CoverageLexicalV2CanonicalTermId | undefined {
+		return findCoverageLexicalV2CanonicalTermId(this.canonicalTermPool, term);
+	}
+
+	private decodeCanonicalTerm(termId: CoverageLexicalV2CanonicalTermId): string {
+		return decodeCoverageLexicalV2CanonicalTerm(this.canonicalTermPool, termId);
+	}
+
+	getOrCreateBodyTokenIds(tokens: readonly string[]): Uint32Array {
+		const ids = new Uint32Array(tokens.length);
+		for (let index = 0; index < tokens.length; index += 1) {
+			ids[index] = this.getOrCreateCanonicalTermId(tokens[index]);
+		}
+		return ids;
+	}
+
+	decodeBodyTokenIds(tokenIds: readonly number[] | Uint32Array): string[] {
+		return Array.from(tokenIds).map(
+			(tokenId) => this.decodeCanonicalTerm(tokenId),
+		);
+	}
+
+	buildPersistedJournalDocument(
+		docId: number,
+	): CoverageLexicalV2PersistedJournalDocument | null {
+		const document = this.documentById[docId];
+		if (!document) {
+			return null;
+		}
+		const localHanCodePointTape: number[] = [];
+		const localHanCodePointRanges: CoverageLexicalV2TokenRange[] = [];
+		for (const range of document.manifest.bodyHanSymbolRanges) {
+			const symbolIds =
+				readCoverageLexicalV2NumericTokenRange(this.hanSymbolTape, range) ?? [];
+			let currentSegment: number[] = [];
+			for (const symbolId of symbolIds) {
+				if (symbolId === COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID) {
+					if (currentSegment.length === 0) {
+						continue;
+					}
+					const start = localHanCodePointTape.length;
+					const encoded = encodeCoverageLexicalV2NumericTokenTape(currentSegment);
+					localHanCodePointTape.push(...encoded);
+					localHanCodePointRanges.push({
+						start,
+						end: localHanCodePointTape.length,
+					});
+					currentSegment = [];
+					continue;
+				}
+				currentSegment.push(
+					decodeCoverageLexicalV2HanSymbolCodePoint(
+						this.hanSymbolPool,
+						symbolId as CoverageLexicalV2HanSymbolId,
+					),
+				);
+			}
+			if (currentSegment.length > 0) {
+				const start = localHanCodePointTape.length;
+				const encoded = encodeCoverageLexicalV2NumericTokenTape(currentSegment);
+				localHanCodePointTape.push(...encoded);
+				localHanCodePointRanges.push({
+					start,
+					end: localHanCodePointTape.length,
+				});
+			}
+		}
+		return {
+			path: document.path,
+			generation: document.generation,
+			indexedRef: { ...document.indexedRef },
+			record: { ...document.record },
+			exactTermIdsByField: cloneCoverageLexicalV2FieldTermIdLists(
+				document.manifest.exactTermIdsByField,
+			),
+			metadataHanBigramIdsByField:
+				cloneCoverageLexicalV2MetadataBigramIdLists(
+					document.manifest.metadataHanBigramIdsByField,
+				),
+			bodyHanCodePointTape: localHanCodePointTape,
+			bodyHanCodePointRanges: localHanCodePointRanges,
+			bodyTokenSidecar: {
+				path: document.path,
+				generation: document.manifest.bodyTokenSidecar.generation,
+				size: document.manifest.bodyTokenSidecar.size,
+				tokenCount: document.manifest.bodyTokenSidecar.tokenCount,
+				estimatedBytes: document.manifest.bodyTokenSidecar.estimatedBytes,
+			},
+		};
+	}
+
+	private decodeOverlayTermIdList(
+		values: readonly CoverageLexicalV2CanonicalTermId[],
+	): readonly string[] {
+		return values.length === 0
+			? EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST
+			: values.map((termId) => this.decodeCanonicalTerm(termId));
+	}
+
+	private decodeOverlayMetadataBigramIdList(
+		values: readonly CoverageLexicalV2CanonicalTermId[],
+	): readonly string[] {
+		return values.length === 0
+			? EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST
+			: values.map((termId) => this.decodeCanonicalTerm(termId));
+	}
+
+	private rebuildHanTokenTape(): void {
+		const previousTape = this.hanSymbolTape;
+		const encoded: number[] = [];
+		for (const documentState of this.documentById) {
+			if (!documentState) {
+				continue;
+			}
+			const nextRanges: CoverageLexicalV2TokenRange[] = [];
+			const pendingTape = documentState.pendingHanSymbolTape;
+			const pendingRanges = documentState.pendingHanSymbolRanges;
+			const sourceTape = pendingTape ?? previousTape;
+			const sourceRanges =
+				pendingRanges ?? documentState.manifest.bodyHanSymbolRanges;
+			for (const range of sourceRanges) {
+				if (range.end <= range.start) {
+					continue;
+				}
+				const start = encoded.length;
+				for (let index = range.start; index < range.end; index += 1) {
+					encoded.push(sourceTape[index] ?? 0);
+				}
+				nextRanges.push({
+					start,
+					end: encoded.length,
+				});
+			}
+			documentState.manifest.bodyHanSymbolRanges =
+				nextRanges.length === 0
+					? EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST
+					: nextRanges;
+			documentState.manifest.hasBodyHanSegments = nextRanges.length > 0;
+			documentState.pendingHanSymbolTape = undefined;
+			documentState.pendingHanSymbolRanges = undefined;
+		}
+		this.hanSymbolTape = Uint8Array.from(encoded);
 	}
 
 	private collectPostingMatches(
@@ -489,11 +1152,18 @@ export class CoverageLexicalV2IndexStore {
 		if (cap <= 0 || !isCoverageLexicalV2LatinCandidateCascadeTerm(queryTerm)) {
 			return [];
 		}
-		const terms = this.getLatinExpansionTerms();
+		const terms = this.getLatinExpansionTermIds();
+		const canonicalTermLexicon = buildCoverageLexicalV2CanonicalTermLexicon(
+			this.canonicalTermPool,
+		);
 		const matches: string[] = [];
-		let index = lowerBoundCoverageLexicalV2IndexStoreString(terms, queryTerm);
+		let index = lowerBoundCoverageLexicalV2IndexStoreLatinTermIds(
+			terms,
+			canonicalTermLexicon,
+			queryTerm,
+		);
 		while (index < terms.length && matches.length < cap) {
-			const candidateTerm = terms[index];
+			const candidateTerm = canonicalTermLexicon[terms[index] ?? -1] ?? "";
 			if (!candidateTerm.startsWith(queryTerm)) {
 				break;
 			}
@@ -518,10 +1188,11 @@ export class CoverageLexicalV2IndexStore {
 			return [];
 		}
 		const matches: string[] = [];
-		for (const candidateTerm of this.getLatinExpansionTerms()) {
+		for (const termId of this.getLatinExpansionTermIds()) {
 			if (matches.length >= cap) {
 				break;
 			}
+			const candidateTerm = this.decodeCanonicalTerm(termId);
 			if (
 				getCoverageLexicalV2CandidateCascadeMatchQuality(queryTerm, candidateTerm, {
 					includeFuzzy: true,
@@ -534,25 +1205,33 @@ export class CoverageLexicalV2IndexStore {
 		return matches;
 	}
 
-	private getLatinExpansionTerms(): readonly string[] {
+	private getLatinExpansionTermIds(): readonly CoverageLexicalV2CanonicalTermId[] {
 		if (!this.latinExpansionTermsDirty) {
-			return this.latinExpansionTermsCache;
+			return this.latinExpansionTermIdsCache;
 		}
 		const nextTerms = [...this.exactTermRefCounts.entries()]
-			.filter(
-				([term, refCount]) =>
-					refCount > 0 && isCoverageLexicalV2LatinCandidateCascadeTerm(term),
+			.filter(([, refCount]) => refCount > 0)
+			.map(([termId]) => termId)
+			.filter((termId) =>
+				isCoverageLexicalV2LatinCandidateCascadeTerm(
+					this.decodeCanonicalTerm(termId),
+				),
 			)
-			.map(([term]) => term)
-			.sort(compareCoverageLexicalV2IndexStoreStrings);
-		this.latinExpansionTermsCache = nextTerms;
+			.sort((left, right) =>
+				compareCoverageLexicalV2IndexStoreStrings(
+					this.decodeCanonicalTerm(left),
+					this.decodeCanonicalTerm(right),
+				),
+			);
+		this.latinExpansionTermIdsCache = nextTerms;
 		this.latinExpansionTermsDirty = false;
-		return this.latinExpansionTermsCache;
+		return this.latinExpansionTermIdsCache;
 	}
 
 	private deleteDocumentById(docId: number): void {
 		this.removeDocumentStateById(docId);
 		this.documentById[docId] = undefined;
+		this.rebuildHanTokenTape();
 	}
 
 	private removeDocumentStateById(docId: number): void {
@@ -575,14 +1254,16 @@ export class CoverageLexicalV2IndexStore {
 	private applyDocumentAddition(documentState: CoverageLexicalV2InternalDocumentState): void {
 		incrementCoverageLexicalV2TermRefCounts(
 			this.exactTermRefCounts,
-			documentState.manifest.exactTermsByField,
+			documentState.manifest.exactTermIdsByField,
 		);
 		incrementCoverageLexicalV2BigramRefCounts(
 			this.metadataHanBigramRefCounts,
-			documentState.manifest.metadataHanBigramsByField,
+			documentState.manifest.metadataHanBigramIdsByField,
 		);
 		for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
-			for (const term of documentState.manifest.exactTermsByField[field]) {
+			for (const term of this.decodeOverlayTermIdList(
+				documentState.manifest.exactTermIdsByField[field],
+			)) {
 				applyCoverageLexicalV2OverlayPostingDelta(
 					this.overlay.exactAddsByField[field],
 					this.overlay.exactRemovalsByField[field],
@@ -593,7 +1274,9 @@ export class CoverageLexicalV2IndexStore {
 			}
 		}
 		for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
-			for (const bigram of documentState.manifest.metadataHanBigramsByField[field]) {
+			for (const bigram of this.decodeOverlayMetadataBigramIdList(
+				documentState.manifest.metadataHanBigramIdsByField[field],
+			)) {
 				applyCoverageLexicalV2OverlayPostingDelta(
 					this.overlay.metadataHanAddsByField[field],
 					this.overlay.metadataHanRemovalsByField[field],
@@ -608,14 +1291,16 @@ export class CoverageLexicalV2IndexStore {
 	private applyDocumentRemoval(documentState: CoverageLexicalV2InternalDocumentState): void {
 		decrementCoverageLexicalV2TermRefCounts(
 			this.exactTermRefCounts,
-			documentState.manifest.exactTermsByField,
+			documentState.manifest.exactTermIdsByField,
 		);
 		decrementCoverageLexicalV2BigramRefCounts(
 			this.metadataHanBigramRefCounts,
-			documentState.manifest.metadataHanBigramsByField,
+			documentState.manifest.metadataHanBigramIdsByField,
 		);
 		for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
-			for (const term of documentState.manifest.exactTermsByField[field]) {
+			for (const term of this.decodeOverlayTermIdList(
+				documentState.manifest.exactTermIdsByField[field],
+			)) {
 				applyCoverageLexicalV2OverlayPostingTombstone(
 					this.overlay.exactAddsByField[field],
 					this.overlay.exactRemovalsByField[field],
@@ -626,7 +1311,9 @@ export class CoverageLexicalV2IndexStore {
 			}
 		}
 		for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
-			for (const bigram of documentState.manifest.metadataHanBigramsByField[field]) {
+			for (const bigram of this.decodeOverlayMetadataBigramIdList(
+				documentState.manifest.metadataHanBigramIdsByField[field],
+			)) {
 				applyCoverageLexicalV2OverlayPostingTombstone(
 					this.overlay.metadataHanAddsByField[field],
 					this.overlay.metadataHanRemovalsByField[field],
@@ -655,85 +1342,23 @@ export class CoverageLexicalV2IndexStore {
 
 export function toCoverageLexicalV2PreparedDocument(
 	document: CoverageLexicalV2IndexStoreSnapshotDocument,
+	decodeTerm: (termId: CoverageLexicalV2CanonicalTermId) => string = () => "",
 ): CoverageLexicalV2PreparedDocument {
 	return {
 		path: document.path,
 		generation: document.generation,
 		indexedRef: { ...document.indexedRef },
 		record: { ...document.record },
-		exactTermsByField: cloneCoverageLexicalV2FieldTermLists(
-			document.manifest.exactTermsByField,
+		exactTermsByField: decodeCoverageLexicalV2FieldTermIdLists(
+			document.manifest.exactTermIdsByField,
+			decodeTerm,
 		),
-		metadataHanBigramsByField: cloneCoverageLexicalV2MetadataBigramLists(
-			document.manifest.metadataHanBigramsByField,
+		metadataHanBigramsByField: decodeCoverageLexicalV2MetadataBigramIdLists(
+			document.manifest.metadataHanBigramIdsByField,
+			decodeTerm,
 		),
-		bodyHanSegments: [...document.manifest.bodyHanSegments],
+		bodyHanSegments: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
 		bodyTokens: [],
-	};
-}
-
-function buildCoverageLexicalV2InternalDocumentState(
-	docId: number,
-	document: CoverageLexicalV2PreparedDocument,
-): CoverageLexicalV2InternalDocumentState {
-	const stableDeterministicKey =
-		document.record.stableDeterministicKey ?? document.path;
-	const indexedRef: BaseIndexedFileRef = {
-		...document.indexedRef,
-		path: document.path,
-		generation: document.indexedRef.generation ?? document.generation,
-	};
-	const record = {
-		...document.record,
-		path: document.path,
-		stableDeterministicKey,
-	};
-	return {
-		docId,
-		path: document.path,
-		generation: document.generation,
-		indexedRef,
-		record,
-		manifest: {
-			stableDeterministicKey,
-			normalizedMetadataTexts: {
-				basenameText: record.basenameText,
-				aliasesText: record.aliasesText,
-				headingsText: record.headingsText,
-				folderText: record.folderText,
-				tagsText: record.tagsText,
-			},
-			exactTermsByField: cloneCoverageLexicalV2FieldTermLists(
-				document.exactTermsByField,
-			),
-			metadataHanBigramsByField: cloneCoverageLexicalV2MetadataBigramLists(
-				document.metadataHanBigramsByField,
-			),
-			bodyHanSegments: [...document.bodyHanSegments],
-			hasBodyHanSegments: document.bodyHanSegments.length > 0,
-			bodyTokenSidecar: {
-				path: document.path,
-				generation: document.generation ?? indexedRef.generation,
-				size: indexedRef.size,
-				tokenCount: document.bodyTokens.length,
-				estimatedBytes: estimateCoverageLexicalV2BodyTokenSidecarBytes(
-					document.bodyTokens,
-				),
-			},
-		},
-	};
-}
-
-function cloneCoverageLexicalV2SnapshotDocument(
-	document: CoverageLexicalV2IndexStoreSnapshotDocument,
-): CoverageLexicalV2InternalDocumentState {
-	return {
-		docId: document.docId,
-		path: document.path,
-		generation: document.generation,
-		indexedRef: { ...document.indexedRef },
-		record: { ...document.record },
-		manifest: cloneCoverageLexicalV2DocManifest(document.manifest),
 	};
 }
 
@@ -746,51 +1371,312 @@ function toCoverageLexicalV2SnapshotDocument(
 		generation: document.generation,
 		indexedRef: { ...document.indexedRef },
 		record: { ...document.record },
-		manifest: cloneCoverageLexicalV2DocManifest(document.manifest),
+		manifest: buildCoverageLexicalV2PersistedDocManifest(document),
 	};
 }
 
-function cloneCoverageLexicalV2DocManifest(
-	manifest: CoverageLexicalV2IndexStoreDocManifest,
-): CoverageLexicalV2IndexStoreDocManifest {
+function buildCoverageLexicalV2RuntimeDocManifest(
+	document: CoverageLexicalV2PreparedDocument,
+	indexedRef: BaseIndexedFileRef,
+): CoverageLexicalV2IndexStoreRuntimeDocManifest {
+		return {
+			exactTermIdsByField: mapCoverageLexicalV2FieldTermsToIds(
+				document.exactTermsByField,
+			(term) => {
+				throw new Error(
+					`Cannot build runtime doc manifest without canonical term ids for "${term}"`,
+				);
+			},
+		),
+		metadataHanBigramIdsByField: mapCoverageLexicalV2MetadataBigramsToIds(
+			document.metadataHanBigramsByField,
+			(bigram) => {
+				throw new Error(
+					`Cannot build runtime doc manifest without canonical bigram ids for "${bigram}"`,
+				);
+			},
+		),
+		bodyHanSymbolRanges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+		hasBodyHanSegments: document.bodyHanSegments.length > 0,
+		bodyTokenSidecar: {
+			generation: document.generation ?? indexedRef.generation,
+			size: indexedRef.size,
+			tokenCount: document.bodyTokens.length,
+			estimatedBytes: estimateCoverageLexicalV2BodyTokenSequenceBytes(
+				document.bodyTokens,
+			),
+		},
+	};
+}
+
+function normalizeCoverageLexicalV2PersistedDocManifest(
+	manifest: CoverageLexicalV2IndexStorePersistedDocManifest,
+): CoverageLexicalV2IndexStoreRuntimeDocManifest {
 	return {
-		stableDeterministicKey: manifest.stableDeterministicKey,
-		normalizedMetadataTexts: { ...manifest.normalizedMetadataTexts },
-		exactTermsByField: cloneCoverageLexicalV2FieldTermLists(
-			manifest.exactTermsByField,
+		exactTermIdsByField: cloneCoverageLexicalV2FieldTermIdLists(
+			manifest.exactTermIdsByField,
 		),
-		metadataHanBigramsByField: cloneCoverageLexicalV2MetadataBigramLists(
-			manifest.metadataHanBigramsByField,
+		metadataHanBigramIdsByField: cloneCoverageLexicalV2MetadataBigramIdLists(
+			manifest.metadataHanBigramIdsByField,
 		),
-		bodyHanSegments: [...manifest.bodyHanSegments],
+		bodyHanSymbolRanges: cloneCoverageLexicalV2TokenRangeList(
+			manifest.bodyHanSymbolRanges,
+		),
 		hasBodyHanSegments: manifest.hasBodyHanSegments,
-		bodyTokenSidecar: { ...manifest.bodyTokenSidecar },
+		bodyTokenSidecar: {
+			generation: manifest.bodyTokenSidecar.generation,
+			size: manifest.bodyTokenSidecar.size,
+			tokenCount: manifest.bodyTokenSidecar.tokenCount,
+			estimatedBytes: manifest.bodyTokenSidecar.estimatedBytes,
+		},
+	};
+}
+
+function buildCoverageLexicalV2PersistedDocManifest(
+	document: CoverageLexicalV2InternalDocumentState,
+): CoverageLexicalV2IndexStorePersistedDocManifest {
+	return {
+		exactTermIdsByField: cloneCoverageLexicalV2FieldTermIdLists(
+			document.manifest.exactTermIdsByField,
+		),
+		metadataHanBigramIdsByField: cloneCoverageLexicalV2MetadataBigramIdLists(
+			document.manifest.metadataHanBigramIdsByField,
+		),
+		bodyHanSymbolRanges: cloneCoverageLexicalV2TokenRangeList(
+			document.manifest.bodyHanSymbolRanges,
+		),
+		hasBodyHanSegments: document.manifest.hasBodyHanSegments,
+		bodyTokenSidecar: {
+			path: document.path,
+			generation: document.manifest.bodyTokenSidecar.generation,
+			size: document.manifest.bodyTokenSidecar.size,
+			tokenCount: document.manifest.bodyTokenSidecar.tokenCount,
+			estimatedBytes: document.manifest.bodyTokenSidecar.estimatedBytes,
+		},
 	};
 }
 
 function cloneCoverageLexicalV2FieldTermLists(
 	fieldTerms: CoverageLexicalV2FieldTermLists,
 ): CoverageLexicalV2FieldTermLists {
+	if (areCoverageLexicalV2FieldTermListsEmpty(fieldTerms)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_LISTS;
+	}
 	return {
-		basename: [...fieldTerms.basename],
-		aliases: [...fieldTerms.aliases],
-		headings: [...fieldTerms.headings],
-		folder: [...fieldTerms.folder],
-		tag: [...fieldTerms.tag],
-		body: [...fieldTerms.body],
+		basename: cloneCoverageLexicalV2StringList(fieldTerms.basename),
+		aliases: cloneCoverageLexicalV2StringList(fieldTerms.aliases),
+		headings: cloneCoverageLexicalV2StringList(fieldTerms.headings),
+		folder: cloneCoverageLexicalV2StringList(fieldTerms.folder),
+		tag: cloneCoverageLexicalV2StringList(fieldTerms.tag),
+		body: cloneCoverageLexicalV2StringList(fieldTerms.body),
+	};
+}
+
+function mapCoverageLexicalV2FieldTermsToIds(
+	fieldTerms: CoverageLexicalV2FieldTermLists,
+	getOrCreateTermId: (term: string) => CoverageLexicalV2CanonicalTermId,
+): CoverageLexicalV2FieldTermIdLists {
+	if (areCoverageLexicalV2FieldTermListsEmpty(fieldTerms)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_ID_LISTS;
+	}
+	return {
+		basename: mapCoverageLexicalV2StringListToIds(
+			fieldTerms.basename,
+			getOrCreateTermId,
+		),
+		aliases: mapCoverageLexicalV2StringListToIds(
+			fieldTerms.aliases,
+			getOrCreateTermId,
+		),
+		headings: mapCoverageLexicalV2StringListToIds(
+			fieldTerms.headings,
+			getOrCreateTermId,
+		),
+		folder: mapCoverageLexicalV2StringListToIds(
+			fieldTerms.folder,
+			getOrCreateTermId,
+		),
+		tag: mapCoverageLexicalV2StringListToIds(fieldTerms.tag, getOrCreateTermId),
+		body: mapCoverageLexicalV2StringListToIds(fieldTerms.body, getOrCreateTermId),
+	};
+}
+
+function decodeCoverageLexicalV2FieldTermIdLists(
+	fieldTerms: CoverageLexicalV2FieldTermIdLists,
+	decodeTerm: (termId: CoverageLexicalV2CanonicalTermId) => string,
+): CoverageLexicalV2FieldTermLists {
+	if (areCoverageLexicalV2FieldTermIdListsEmpty(fieldTerms)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_LISTS;
+	}
+	return {
+		basename: decodeCoverageLexicalV2TermIdList(fieldTerms.basename, decodeTerm),
+		aliases: decodeCoverageLexicalV2TermIdList(fieldTerms.aliases, decodeTerm),
+		headings: decodeCoverageLexicalV2TermIdList(fieldTerms.headings, decodeTerm),
+		folder: decodeCoverageLexicalV2TermIdList(fieldTerms.folder, decodeTerm),
+		tag: decodeCoverageLexicalV2TermIdList(fieldTerms.tag, decodeTerm),
+		body: decodeCoverageLexicalV2TermIdList(fieldTerms.body, decodeTerm),
+	};
+}
+
+function cloneCoverageLexicalV2FieldTermIdLists(
+	fieldTerms: CoverageLexicalV2FieldTermIdLists,
+): CoverageLexicalV2FieldTermIdLists {
+	if (areCoverageLexicalV2FieldTermIdListsEmpty(fieldTerms)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_ID_LISTS;
+	}
+	return {
+		basename: cloneCoverageLexicalV2NumberList(fieldTerms.basename),
+		aliases: cloneCoverageLexicalV2NumberList(fieldTerms.aliases),
+		headings: cloneCoverageLexicalV2NumberList(fieldTerms.headings),
+		folder: cloneCoverageLexicalV2NumberList(fieldTerms.folder),
+		tag: cloneCoverageLexicalV2NumberList(fieldTerms.tag),
+		body: cloneCoverageLexicalV2NumberList(fieldTerms.body),
 	};
 }
 
 function cloneCoverageLexicalV2MetadataBigramLists(
 	bigramsByField: CoverageLexicalV2MetadataBigramLists,
 ): CoverageLexicalV2MetadataBigramLists {
+	if (areCoverageLexicalV2MetadataBigramListsEmpty(bigramsByField)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_METADATA_BIGRAM_LISTS;
+	}
 	return {
-		basename: [...bigramsByField.basename],
-		aliases: [...bigramsByField.aliases],
-		headings: [...bigramsByField.headings],
-		folder: [...bigramsByField.folder],
-		tag: [...bigramsByField.tag],
+		basename: cloneCoverageLexicalV2StringList(bigramsByField.basename),
+		aliases: cloneCoverageLexicalV2StringList(bigramsByField.aliases),
+		headings: cloneCoverageLexicalV2StringList(bigramsByField.headings),
+		folder: cloneCoverageLexicalV2StringList(bigramsByField.folder),
+		tag: cloneCoverageLexicalV2StringList(bigramsByField.tag),
 	};
+}
+
+function mapCoverageLexicalV2MetadataBigramsToIds(
+	bigramsByField: CoverageLexicalV2MetadataBigramLists,
+	getOrCreateTermId: (bigram: string) => CoverageLexicalV2CanonicalTermId,
+): CoverageLexicalV2MetadataBigramIdLists {
+	if (areCoverageLexicalV2MetadataBigramListsEmpty(bigramsByField)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_METADATA_BIGRAM_ID_LISTS;
+	}
+	return {
+		basename: mapCoverageLexicalV2StringListToIds(
+			bigramsByField.basename,
+			getOrCreateTermId,
+		),
+		aliases: mapCoverageLexicalV2StringListToIds(
+			bigramsByField.aliases,
+			getOrCreateTermId,
+		),
+		headings: mapCoverageLexicalV2StringListToIds(
+			bigramsByField.headings,
+			getOrCreateTermId,
+		),
+		folder: mapCoverageLexicalV2StringListToIds(
+			bigramsByField.folder,
+			getOrCreateTermId,
+		),
+		tag: mapCoverageLexicalV2StringListToIds(
+			bigramsByField.tag,
+			getOrCreateTermId,
+		),
+	};
+}
+
+function decodeCoverageLexicalV2MetadataBigramIdLists(
+	bigramsByField: CoverageLexicalV2MetadataBigramIdLists,
+	decodeTerm: (termId: CoverageLexicalV2CanonicalTermId) => string,
+): CoverageLexicalV2MetadataBigramLists {
+	if (areCoverageLexicalV2MetadataBigramIdListsEmpty(bigramsByField)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_METADATA_BIGRAM_LISTS;
+	}
+	return {
+		basename: decodeCoverageLexicalV2TermIdList(
+			bigramsByField.basename,
+			decodeTerm,
+		),
+		aliases: decodeCoverageLexicalV2TermIdList(
+			bigramsByField.aliases,
+			decodeTerm,
+		),
+		headings: decodeCoverageLexicalV2TermIdList(
+			bigramsByField.headings,
+			decodeTerm,
+		),
+		folder: decodeCoverageLexicalV2TermIdList(
+			bigramsByField.folder,
+			decodeTerm,
+		),
+		tag: decodeCoverageLexicalV2TermIdList(bigramsByField.tag, decodeTerm),
+	};
+}
+
+function cloneCoverageLexicalV2MetadataBigramIdLists(
+	bigramsByField: CoverageLexicalV2MetadataBigramIdLists,
+): CoverageLexicalV2MetadataBigramIdLists {
+	if (areCoverageLexicalV2MetadataBigramIdListsEmpty(bigramsByField)) {
+		return EMPTY_COVERAGE_LEXICAL_V2_METADATA_BIGRAM_ID_LISTS;
+	}
+	return {
+		basename: cloneCoverageLexicalV2NumberList(bigramsByField.basename),
+		aliases: cloneCoverageLexicalV2NumberList(bigramsByField.aliases),
+		headings: cloneCoverageLexicalV2NumberList(bigramsByField.headings),
+		folder: cloneCoverageLexicalV2NumberList(bigramsByField.folder),
+		tag: cloneCoverageLexicalV2NumberList(bigramsByField.tag),
+	};
+}
+
+function cloneCoverageLexicalV2StringList(
+	values: readonly string[],
+): readonly string[] {
+	return values.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST
+		: [...values];
+}
+
+function cloneCoverageLexicalV2NumberList(
+	values: readonly CoverageLexicalV2CanonicalTermId[],
+): readonly CoverageLexicalV2CanonicalTermId[] {
+	return values.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST
+		: [...values];
+}
+
+function cloneCoverageLexicalV2TokenRangeList(
+	ranges: readonly CoverageLexicalV2TokenRange[],
+): readonly CoverageLexicalV2TokenRange[] {
+	return ranges.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST
+		: ranges.map((range) => ({ ...range }));
+}
+
+function areCoverageLexicalV2FieldTermListsEmpty(
+	fieldTerms: CoverageLexicalV2FieldTermLists,
+): boolean {
+	return COVERAGE_LEXICAL_V2_POSTING_FIELDS.every(
+		(field) => fieldTerms[field].length === 0,
+	);
+}
+
+function areCoverageLexicalV2FieldTermIdListsEmpty(
+	fieldTerms: CoverageLexicalV2FieldTermIdLists,
+): boolean {
+	return COVERAGE_LEXICAL_V2_POSTING_FIELDS.every(
+		(field) => fieldTerms[field].length === 0,
+	);
+}
+
+function areCoverageLexicalV2MetadataBigramListsEmpty(
+	bigramsByField: CoverageLexicalV2MetadataBigramLists,
+): boolean {
+	return COVERAGE_LEXICAL_V2_METADATA_FIELDS.every(
+		(field) => bigramsByField[field].length === 0,
+	);
+}
+
+function areCoverageLexicalV2MetadataBigramIdListsEmpty(
+	bigramsByField: CoverageLexicalV2MetadataBigramIdLists,
+): boolean {
+	return COVERAGE_LEXICAL_V2_METADATA_FIELDS.every(
+		(field) => bigramsByField[field].length === 0,
+	);
 }
 
 function createCoverageLexicalV2MutablePostingMaps(): CoverageLexicalV2MutablePostingDelta<
@@ -957,7 +1843,7 @@ function cloneCoverageLexicalV2ResidentSegment(
 			tag: cloneCoverageLexicalV2SerializedPostingFieldSegment(
 				segment.exactByField.tag,
 			),
-			body: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			body: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.exactByField.body,
 			),
 		},
@@ -981,10 +1867,37 @@ function cloneCoverageLexicalV2ResidentSegment(
 	};
 }
 
+function cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(segment: {
+	termIdLexicon: readonly number[];
+	singletonDocIds: readonly number[];
+	smallTermIds: readonly number[];
+	smallDocStarts: readonly number[];
+	smallDocCounts: readonly number[];
+	smallDocIds: readonly number[];
+	deltaTermIds: readonly number[];
+	deltaDocCounts: readonly number[];
+	deltaTapeStarts: readonly number[];
+	deltaTapeLengths: readonly number[];
+	postingTape: readonly number[];
+}) {
+	return {
+		termIdLexicon: [...segment.termIdLexicon],
+		singletonDocIds: [...segment.singletonDocIds],
+		smallTermIds: [...segment.smallTermIds],
+		smallDocStarts: [...segment.smallDocStarts],
+		smallDocCounts: [...segment.smallDocCounts],
+		smallDocIds: [...segment.smallDocIds],
+		deltaTermIds: [...segment.deltaTermIds],
+		deltaDocCounts: [...segment.deltaDocCounts],
+		deltaTapeStarts: [...segment.deltaTapeStarts],
+		deltaTapeLengths: [...segment.deltaTapeLengths],
+		postingTape: [...segment.postingTape],
+	};
+}
+
 function cloneCoverageLexicalV2SerializedPostingFieldSegment(segment: {
-	termDictionary: readonly string[];
+	termIdDictionary: readonly number[];
 	postingDirectory: readonly {
-		termIndex: number;
 		encoding: "tiny_inline" | "delta_varint";
 		docCount: number;
 		tapeStart: number;
@@ -994,7 +1907,7 @@ function cloneCoverageLexicalV2SerializedPostingFieldSegment(segment: {
 	postingTape: readonly number[];
 }) {
 	return {
-		termDictionary: [...segment.termDictionary],
+		termIdDictionary: [...segment.termIdDictionary],
 		postingDirectory: segment.postingDirectory.map((entry) => ({
 			...entry,
 			inlineDocIds: entry.inlineDocIds ? [...entry.inlineDocIds] : undefined,
@@ -1046,8 +1959,8 @@ function applyCoverageLexicalV2OverlayPostingTombstone(
 }
 
 function incrementCoverageLexicalV2TermRefCounts(
-	refCounts: Map<string, number>,
-	fieldTerms: CoverageLexicalV2FieldTermLists,
+	refCounts: Map<CoverageLexicalV2CanonicalTermId, number>,
+	fieldTerms: CoverageLexicalV2FieldTermIdLists,
 ): void {
 	for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
 		for (const term of fieldTerms[field]) {
@@ -1057,8 +1970,8 @@ function incrementCoverageLexicalV2TermRefCounts(
 }
 
 function decrementCoverageLexicalV2TermRefCounts(
-	refCounts: Map<string, number>,
-	fieldTerms: CoverageLexicalV2FieldTermLists,
+	refCounts: Map<CoverageLexicalV2CanonicalTermId, number>,
+	fieldTerms: CoverageLexicalV2FieldTermIdLists,
 ): void {
 	for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
 		for (const term of fieldTerms[field]) {
@@ -1073,8 +1986,8 @@ function decrementCoverageLexicalV2TermRefCounts(
 }
 
 function incrementCoverageLexicalV2BigramRefCounts(
-	refCounts: Map<string, number>,
-	bigramsByField: CoverageLexicalV2MetadataBigramLists,
+	refCounts: Map<CoverageLexicalV2CanonicalTermId, number>,
+	bigramsByField: CoverageLexicalV2MetadataBigramIdLists,
 ): void {
 	for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
 		for (const bigram of bigramsByField[field]) {
@@ -1084,8 +1997,8 @@ function incrementCoverageLexicalV2BigramRefCounts(
 }
 
 function decrementCoverageLexicalV2BigramRefCounts(
-	refCounts: Map<string, number>,
-	bigramsByField: CoverageLexicalV2MetadataBigramLists,
+	refCounts: Map<CoverageLexicalV2CanonicalTermId, number>,
+	bigramsByField: CoverageLexicalV2MetadataBigramIdLists,
 ): void {
 	for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
 		for (const bigram of bigramsByField[field]) {
@@ -1169,38 +2082,70 @@ function estimateCoverageLexicalV2MutablePostingDeltaBytes<Field extends string>
 function estimateCoverageLexicalV2DocumentViewBytes(
 	documentState: CoverageLexicalV2InternalDocumentState,
 ): number {
+	const ownedStrings = new Set<string>();
+	const addOwnedStringBytes = (value: string): number => {
+		if (value.length === 0 || ownedStrings.has(value)) {
+			return 0;
+		}
+		ownedStrings.add(value);
+		return estimateCoverageLexicalV2StringBytes(value);
+	};
 	return (
-		estimateCoverageLexicalV2StringBytes(documentState.path) +
-		estimateCoverageLexicalV2StringBytes(
-			documentState.manifest.stableDeterministicKey,
+		addOwnedStringBytes(documentState.path) +
+		addOwnedStringBytes(documentState.indexedRef.path) +
+		addOwnedStringBytes(documentState.record.path) +
+		addOwnedStringBytes(
+			documentState.record.stableDeterministicKey ?? documentState.path,
 		) +
-		estimateCoverageLexicalV2StringBytes(
-			documentState.manifest.normalizedMetadataTexts.basenameText,
-		) +
-		estimateCoverageLexicalV2StringBytes(
-			documentState.manifest.normalizedMetadataTexts.aliasesText,
-		) +
-		estimateCoverageLexicalV2StringBytes(
-			documentState.manifest.normalizedMetadataTexts.headingsText,
-		) +
-		estimateCoverageLexicalV2StringBytes(
-			documentState.manifest.normalizedMetadataTexts.folderText,
-		) +
-		estimateCoverageLexicalV2StringBytes(
-			documentState.manifest.normalizedMetadataTexts.tagsText,
-		) +
-		48
+		addOwnedStringBytes(documentState.record.basenameText) +
+		addOwnedStringBytes(documentState.record.aliasesText) +
+		addOwnedStringBytes(documentState.record.headingsText) +
+		addOwnedStringBytes(documentState.record.folderText) +
+		addOwnedStringBytes(documentState.record.tagsText) +
+		64
 	);
 }
 
-function estimateCoverageLexicalV2BodyHanVerificationBytes(
-	bodyHanSegments: readonly string[],
+function estimateCoverageLexicalV2DocumentPathMirrorBytes(
+	documentState: CoverageLexicalV2InternalDocumentState,
 ): number {
 	let total = 0;
-	for (const segment of bodyHanSegments) {
-		total += estimateCoverageLexicalV2StringBytes(segment) + 8;
+	if (documentState.record.path === documentState.path) {
+		total += estimateCoverageLexicalV2StringBytes(documentState.record.path);
+	}
+	if (documentState.indexedRef.path === documentState.path) {
+		total += estimateCoverageLexicalV2StringBytes(documentState.indexedRef.path);
 	}
 	return total;
+}
+
+function estimateCoverageLexicalV2DocumentManifestMirrorBytes(
+	documentState: CoverageLexicalV2InternalDocumentState,
+): number {
+	const stableDeterministicKey =
+		documentState.record.stableDeterministicKey ?? documentState.path;
+	return stableDeterministicKey === documentState.path
+		? estimateCoverageLexicalV2StringBytes(
+				stableDeterministicKey,
+		  )
+		: 0;
+}
+
+function estimateCoverageLexicalV2BodyHanVerificationBytes(
+	hanSymbolTape: Uint8Array,
+	bodyHanRangesByDoc: readonly (readonly CoverageLexicalV2TokenRange[])[],
+): number {
+	const flattenedRanges: Array<CoverageLexicalV2TokenRange | undefined> = [];
+	for (const ranges of bodyHanRangesByDoc) {
+		for (const range of ranges) {
+			flattenedRanges.push(range);
+		}
+	}
+	const tapeBytes = estimateCoverageLexicalV2NumericTokenTapeBytes(
+		hanSymbolTape,
+		flattenedRanges,
+	);
+	return tapeBytes.total;
 }
 
 function estimateCoverageLexicalV2LatinExpansionBytes(
@@ -1213,7 +2158,7 @@ function estimateCoverageLexicalV2LatinExpansionBytes(
 	return total;
 }
 
-function estimateCoverageLexicalV2BodyTokenSidecarBytes(
+export function estimateCoverageLexicalV2BodyTokenSequenceBytes(
 	bodyTokens: readonly string[],
 ): number {
 	let total = 0;
@@ -1223,8 +2168,77 @@ function estimateCoverageLexicalV2BodyTokenSidecarBytes(
 	return total;
 }
 
+export function estimateCoverageLexicalV2BodyTokenIdSequenceBytes(
+	bodyTokenIds: readonly number[] | Uint32Array,
+): number {
+	return bodyTokenIds.length * 4;
+}
+
+function mapCoverageLexicalV2LocalTokenTapeSegmentsToGlobalIds(
+	localLexicon: readonly string[],
+	localTokenTape: readonly number[],
+	ranges: readonly CoverageLexicalV2TokenRange[],
+	getOrCreateGlobalTokenId: (token: string) => number,
+): readonly (readonly number[])[] {
+	if (ranges.length === 0) {
+		return EMPTY_COVERAGE_LEXICAL_V2_NUMBER_SEGMENT_LIST;
+	}
+	const out: number[][] = [];
+	for (const range of ranges) {
+		const segment: number[] = [];
+		for (let index = range.start; index < range.end; index += 1) {
+			const token = localLexicon[localTokenTape[index] ?? -1];
+			if (token == null) {
+				continue;
+			}
+			segment.push(getOrCreateGlobalTokenId(token));
+		}
+		if (segment.length > 0) {
+			out.push(segment);
+		}
+	}
+	return out.length === 0 ? EMPTY_COVERAGE_LEXICAL_V2_NUMBER_SEGMENT_LIST : out;
+}
+
+function compareCoverageLexicalV2HanBackstopStats(
+	left: CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	right: CoverageLexicalV2CandidateCascadeHanBackstopStats,
+): number {
+	if (left.longestContiguousBigramChain !== right.longestContiguousBigramChain) {
+		return right.longestContiguousBigramChain - left.longestContiguousBigramChain;
+	}
+	if (left.matchedBigramCount !== right.matchedBigramCount) {
+		return right.matchedBigramCount - left.matchedBigramCount;
+	}
+	if (left.bigramCoverageRatio !== right.bigramCoverageRatio) {
+		return right.bigramCoverageRatio - left.bigramCoverageRatio;
+	}
+	return 0;
+}
+
+function computeCoverageLexicalV2HanBackstopLongestChain(
+	matchedBigramIndices: ReadonlySet<number>,
+): number {
+	const sorted = [...matchedBigramIndices].sort((left, right) => left - right);
+	let longest = 0;
+	let current = 0;
+	let previous = Number.NaN;
+	for (const bigramIndex of sorted) {
+		if (!Number.isFinite(previous) || bigramIndex === previous + 1) {
+			current += 1;
+		} else {
+			current = 1;
+		}
+		if (current > longest) {
+			longest = current;
+		}
+		previous = bigramIndex;
+	}
+	return longest;
+}
+
 function countCoverageLexicalV2PositiveRefCounts(
-	refCounts: ReadonlyMap<string, number>,
+	refCounts: ReadonlyMap<CoverageLexicalV2CanonicalTermId, number>,
 ): number {
 	let total = 0;
 	for (const count of refCounts.values()) {
@@ -1284,6 +2298,53 @@ function lowerBoundCoverageLexicalV2IndexStoreString(
 	return low;
 }
 
+function lowerBoundCoverageLexicalV2IndexStoreLatinTermIds(
+	values: readonly CoverageLexicalV2CanonicalTermId[],
+	lexicon: readonly string[],
+	target: string,
+): number {
+	let low = 0;
+	let high = values.length;
+	while (low < high) {
+		const middle = (low + high) >>> 1;
+		if ((lexicon[values[middle]] ?? "") < target) {
+			low = middle + 1;
+		} else {
+			high = middle;
+		}
+	}
+	return low;
+}
+
+function mapCoverageLexicalV2StringListToIds(
+	values: readonly string[],
+	getOrCreateTermId: (term: string) => CoverageLexicalV2CanonicalTermId,
+): readonly CoverageLexicalV2CanonicalTermId[] {
+	return values.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST
+		: values.map((value) => getOrCreateTermId(value));
+}
+
+function decodeCoverageLexicalV2TermIdList(
+	values: readonly CoverageLexicalV2CanonicalTermId[],
+	decodeTerm: (termId: CoverageLexicalV2CanonicalTermId) => string,
+): readonly string[] {
+	return values.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST
+		: values.map((value) => decodeTerm(value));
+}
+
+function buildCoverageLexicalV2CanonicalTermLexicon(
+	pool: CoverageLexicalV2CanonicalTermPool,
+): string[] {
+	const lexicon: string[] = [];
+	const termCount = getCoverageLexicalV2CanonicalTermCount(pool);
+	for (let termId = 0; termId < termCount; termId += 1) {
+		lexicon.push(decodeCoverageLexicalV2CanonicalTerm(pool, termId));
+	}
+	return lexicon;
+}
+
 function compareCoverageLexicalV2IndexStoreStrings(
 	left: string,
 	right: string,
@@ -1293,4 +2354,112 @@ function compareCoverageLexicalV2IndexStoreStrings(
 
 function estimateCoverageLexicalV2StringBytes(value: string): number {
 	return textEncoder.encode(value).length;
+}
+
+function toCoverageLexicalV2HanSymbolIds(
+	text: string,
+	pool: CoverageLexicalV2HanSymbolPool,
+): CoverageLexicalV2HanSymbolId[] {
+	const symbolIds: CoverageLexicalV2HanSymbolId[] = [];
+	for (const token of Array.from(text)) {
+		const codePoint = token.codePointAt(0);
+		if (codePoint === undefined) {
+			continue;
+		}
+		symbolIds.push(
+			findCoverageLexicalV2HanSymbolId(pool, codePoint) ??
+				MISSING_COVERAGE_LEXICAL_V2_HAN_SYMBOL_ID,
+		);
+	}
+	return symbolIds;
+}
+
+function encodeCoverageLexicalV2HanSegmentsToSymbolTape(
+	segments: readonly string[],
+	getOrCreateHanSymbolId: (codePoint: number) => CoverageLexicalV2HanSymbolId,
+): {
+	tape: Uint8Array;
+	ranges: readonly CoverageLexicalV2TokenRange[];
+} {
+	if (segments.length === 0) {
+		return {
+			tape: new Uint8Array(0),
+			ranges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+		};
+	}
+	const encoded: CoverageLexicalV2HanSymbolId[] = [];
+	for (const segment of segments) {
+		const symbolIds: CoverageLexicalV2HanSymbolId[] = [];
+		for (const token of Array.from(segment)) {
+			const codePoint = token.codePointAt(0);
+			if (codePoint === undefined) {
+				continue;
+			}
+			symbolIds.push(getOrCreateHanSymbolId(codePoint));
+		}
+		if (symbolIds.length === 0) {
+			continue;
+		}
+		if (encoded.length > 0) {
+			encoded.push(COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID);
+		}
+		encoded.push(...symbolIds);
+	}
+	if (encoded.length === 0) {
+		return {
+			tape: new Uint8Array(0),
+			ranges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+		};
+	}
+	const tape = encodeCoverageLexicalV2NumericTokenTape(encoded);
+	return {
+		tape,
+		ranges: [{ start: 0, end: tape.length }],
+	};
+}
+
+function mapCoverageLexicalV2PersistedHanDocumentToPendingTape(
+	bodyHanCodePointTape: readonly number[],
+	bodyHanCodePointRanges: readonly CoverageLexicalV2TokenRange[],
+	getOrCreateHanSymbolId: (codePoint: number) => CoverageLexicalV2HanSymbolId,
+): Pick<
+	CoverageLexicalV2InternalDocumentState,
+	"pendingHanSymbolTape" | "pendingHanSymbolRanges"
+> {
+	if (bodyHanCodePointRanges.length === 0 || bodyHanCodePointTape.length === 0) {
+		return {
+			pendingHanSymbolTape: new Uint8Array(0),
+			pendingHanSymbolRanges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+		};
+	}
+	const encoded: CoverageLexicalV2HanSymbolId[] = [];
+	const persistedTape = Uint8Array.from(bodyHanCodePointTape);
+	for (const range of bodyHanCodePointRanges) {
+		if (range.end <= range.start) {
+			continue;
+		}
+		const codePoints =
+			readCoverageLexicalV2NumericTokenRange(persistedTape, range) ??
+			EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST;
+		if (codePoints.length === 0) {
+			continue;
+		}
+		if (encoded.length > 0) {
+			encoded.push(COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID);
+		}
+		for (const codePoint of codePoints) {
+			encoded.push(getOrCreateHanSymbolId(codePoint));
+		}
+	}
+	if (encoded.length === 0) {
+		return {
+			pendingHanSymbolTape: new Uint8Array(0),
+			pendingHanSymbolRanges: EMPTY_COVERAGE_LEXICAL_V2_TOKEN_RANGE_LIST,
+		};
+	}
+	const tape = encodeCoverageLexicalV2NumericTokenTape(encoded);
+	return {
+		pendingHanSymbolTape: tape,
+		pendingHanSymbolRanges: [{ start: 0, end: tape.length }],
+	};
 }
