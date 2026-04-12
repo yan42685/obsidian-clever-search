@@ -1021,6 +1021,9 @@ Preferred lexical order:
   - startup restore now has a V2-owned persistent recovery planner that compares current vault refs, persisted refs, store refs, and cold-sidecar consistency before choosing heal vs full rebuild
   - canonical term ownership now lives in a V2 UTF-8 byte arena, while body-token cold storage uses a V2-owned term-id tape block format instead of the old string-dictionary block layout
   - runtime manifests now keep only compact id/range metadata for exact/meta ownership and body Han verification; the active runtime no longer depends on per-doc exact/meta string mirrors for restore/refcount accounting
+  - exact incidence is now doc-major single-source in the active runtime: `manifest.exactTermIdsByField` is the only exact truth, resident exact segments are derived adaptive numeric shared-tape indexes, and the exact overlay is a numeric term-id memtable rather than a string-keyed posting mirror
+  - metadata exact postings now share the same adaptive numeric resident segment shape as body exact, with redundant per-term adaptive metadata removed from the hot exact path
+  - resident memory accounting now treats the canonical term arena as shared lexicon ownership instead of charging it to `postings.exactIncidence`; the automation-corpus size gate now enforces `exactIncidenceBytes <= 25,583` and currently passes at `16,227` with `residentBytes = 67,785`
   - completion proof now includes build typecheck, focused V2 index-store/runtime/cold-sidecar tests, resident-vs-cold size acceptance, and the automation benchmark sanity run with the active V2 quality gate intact
 - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
 - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
@@ -1446,8 +1449,10 @@ Fuzzy salvage:
     implementation that owns resident postings/doc view state, body-token cold
     sidecar ownership, Dexie snapshot+journal persistence, move-aware journal
     replay, and engine-owned persistent recovery planning
-  - current store layout uses tiered resident segments plus a mutable overlay,
-    with tiny-inline / delta-varint resident segment encoding and rich per-doc
+  - current store layout uses manifest-backed doc-major exact truth plus
+    derived resident segments and a mutable numeric overlay; metadata Han gate
+    postings still use tiny-inline / delta-varint resident segments, while
+    exact postings use adaptive numeric shared-tape encoding with rich per-doc
     manifests for rollback without reconstructing old raw text
   - current validation covers build typecheck, focused V2 index-store/runtime
     tests for replace/update/delete/move semantics plus snapshot roundtrip,
@@ -1686,7 +1691,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
 
 
 

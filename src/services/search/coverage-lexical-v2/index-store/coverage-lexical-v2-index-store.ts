@@ -14,7 +14,6 @@ import {
 	decodeCoverageLexicalV2CanonicalTerm,
 	estimateCoverageLexicalV2CanonicalTermPoolBytes,
 	findCoverageLexicalV2CanonicalTermId,
-	getCoverageLexicalV2CanonicalTermByteLength,
 	getCoverageLexicalV2CanonicalTermCount,
 	internCoverageLexicalV2CanonicalTerm,
 	restoreCoverageLexicalV2CanonicalTermPool,
@@ -34,6 +33,7 @@ import {
 } from "./coverage-lexical-v2-han-symbol-pool";
 import {
 	buildCoverageLexicalV2ResidentSegment,
+	decodeCoverageLexicalV2ResidentAdaptivePosting,
 	decodeCoverageLexicalV2ResidentBodyPosting,
 	decodeCoverageLexicalV2ResidentSegmentPosting,
 	estimateCoverageLexicalV2ResidentSegmentBytes,
@@ -78,22 +78,27 @@ type CoverageLexicalV2InternalDocumentState = CoverageLexicalV2IndexStoreDocumen
 	pendingHanSymbolRanges?: readonly CoverageLexicalV2TokenRange[];
 };
 
-type CoverageLexicalV2MutablePostingDelta<Field extends string> = Record<
+type CoverageLexicalV2MutableStringPostingDelta<Field extends string> = Record<
 	Field,
 	Map<string, number[]>
 >;
 
+type CoverageLexicalV2MutableNumericPostingDelta<Field extends string> = Record<
+	Field,
+	Map<CoverageLexicalV2CanonicalTermId, number[]>
+>;
+
 type CoverageLexicalV2MutableOverlayState = {
-	exactAddsByField: CoverageLexicalV2MutablePostingDelta<
+	exactAddsByField: CoverageLexicalV2MutableNumericPostingDelta<
 		CoverageLexicalV2CandidateCascadePostingField
 	>;
-	exactRemovalsByField: CoverageLexicalV2MutablePostingDelta<
+	exactRemovalsByField: CoverageLexicalV2MutableNumericPostingDelta<
 		CoverageLexicalV2CandidateCascadePostingField
 	>;
-	metadataHanAddsByField: CoverageLexicalV2MutablePostingDelta<
+	metadataHanAddsByField: CoverageLexicalV2MutableStringPostingDelta<
 		CoverageLexicalV2MetadataPostingField
 	>;
-	metadataHanRemovalsByField: CoverageLexicalV2MutablePostingDelta<
+	metadataHanRemovalsByField: CoverageLexicalV2MutableStringPostingDelta<
 		CoverageLexicalV2MetadataPostingField
 	>;
 };
@@ -278,8 +283,11 @@ export class CoverageLexicalV2IndexStore {
 				}
 				for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
 					const fieldSegment = segment.exactByField[field];
-					for (const termId of fieldSegment.termIdDictionary) {
-						void decodeCoverageLexicalV2ResidentSegmentPosting(fieldSegment, termId);
+					for (const termId of fieldSegment.termIdLexicon) {
+						void decodeCoverageLexicalV2ResidentAdaptivePosting(
+							fieldSegment,
+							termId,
+						);
 					}
 				}
 				for (const termId of segment.exactByField.body.termIdLexicon) {
@@ -390,13 +398,13 @@ export class CoverageLexicalV2IndexStore {
 	}
 
 	compactOverlayIntoSegment(force = false): boolean {
-		const exactPostings = createCoverageLexicalV2MutablePostingMaps();
+		const exactPostings = createCoverageLexicalV2MutableExactPostingMaps();
 		const metadataPostings = createCoverageLexicalV2MutableMetadataPostingMaps();
 
 		for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
-			for (const [term, docIds] of this.overlay.exactAddsByField[field]) {
+			for (const [termId, docIds] of this.overlay.exactAddsByField[field]) {
 				if (docIds.length > 0) {
-					exactPostings[field].set(term, [...docIds]);
+					exactPostings[field].set(termId, [...docIds]);
 				}
 			}
 		}
@@ -557,6 +565,9 @@ export class CoverageLexicalV2IndexStore {
 		const canonicalTermLexicon = buildCoverageLexicalV2CanonicalTermLexicon(
 			this.canonicalTermPool,
 		);
+		const canonicalTermLexiconBytes = estimateCoverageLexicalV2CanonicalTermPoolBytes(
+			this.canonicalTermPool,
+		);
 
 		for (const segment of this.residentSegments) {
 			const estimated = estimateCoverageLexicalV2ResidentSegmentBytes(
@@ -566,20 +577,16 @@ export class CoverageLexicalV2IndexStore {
 			exactIncidence += estimated.exactIncidence;
 			metadataHanGate += estimated.metadataHanGate;
 		}
-		exactIncidence += estimateCoverageLexicalV2CanonicalTermPoolBytes(
-			this.canonicalTermPool,
-		);
-
-		exactIncidence += estimateCoverageLexicalV2MutablePostingDeltaBytes(
+		exactIncidence += estimateCoverageLexicalV2MutableNumericPostingDeltaBytes(
 			this.overlay.exactAddsByField,
 		);
-		exactIncidence += estimateCoverageLexicalV2MutablePostingDeltaBytes(
+		exactIncidence += estimateCoverageLexicalV2MutableNumericPostingDeltaBytes(
 			this.overlay.exactRemovalsByField,
 		);
-		metadataHanGate += estimateCoverageLexicalV2MutablePostingDeltaBytes(
+		metadataHanGate += estimateCoverageLexicalV2MutableStringPostingDeltaBytes(
 			this.overlay.metadataHanAddsByField,
 		);
-		metadataHanGate += estimateCoverageLexicalV2MutablePostingDeltaBytes(
+		metadataHanGate += estimateCoverageLexicalV2MutableStringPostingDeltaBytes(
 			this.overlay.metadataHanRemovalsByField,
 		);
 
@@ -618,6 +625,7 @@ export class CoverageLexicalV2IndexStore {
 			metadataHanGate +
 			documentView +
 			bodyHanSegments +
+			canonicalTermLexiconBytes +
 			latinExpansionLexicon +
 			bodyTokensHot;
 		const coldOwnedTotal = this.bodyTokenSidecarEstimatedBytes;
@@ -649,6 +657,7 @@ export class CoverageLexicalV2IndexStore {
 						bodyHanSegments,
 					},
 					lexicon: {
+						canonicalTerms: canonicalTermLexiconBytes,
 						latinExpansion: latinExpansionLexicon,
 					},
 					caches: {
@@ -689,19 +698,19 @@ export class CoverageLexicalV2IndexStore {
 						termId,
 					),
 				),
-				this.overlay.exactAddsByField.body.get(term),
-				this.overlay.exactRemovalsByField.body.get(term),
+				this.overlay.exactAddsByField.body.get(termId),
+				this.overlay.exactRemovalsByField.body.get(termId),
 			);
 		}
 		return this.collectPostingMatches(
 			this.residentSegments.map((segment) =>
-				decodeCoverageLexicalV2ResidentSegmentPosting(
+				decodeCoverageLexicalV2ResidentAdaptivePosting(
 					segment.exactByField[field],
 					termId,
 				),
 			),
-			this.overlay.exactAddsByField[field].get(term),
-			this.overlay.exactRemovalsByField[field].get(term),
+			this.overlay.exactAddsByField[field].get(termId),
+			this.overlay.exactRemovalsByField[field].get(termId),
 		);
 	}
 
@@ -1069,14 +1078,6 @@ export class CoverageLexicalV2IndexStore {
 		};
 	}
 
-	private decodeOverlayTermIdList(
-		values: readonly CoverageLexicalV2CanonicalTermId[],
-	): readonly string[] {
-		return values.length === 0
-			? EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST
-			: values.map((termId) => this.decodeCanonicalTerm(termId));
-	}
-
 	private decodeOverlayMetadataBigramIdList(
 		values: readonly CoverageLexicalV2CanonicalTermId[],
 	): readonly string[] {
@@ -1261,13 +1262,11 @@ export class CoverageLexicalV2IndexStore {
 			documentState.manifest.metadataHanBigramIdsByField,
 		);
 		for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
-			for (const term of this.decodeOverlayTermIdList(
-				documentState.manifest.exactTermIdsByField[field],
-			)) {
+			for (const termId of documentState.manifest.exactTermIdsByField[field]) {
 				applyCoverageLexicalV2OverlayPostingDelta(
 					this.overlay.exactAddsByField[field],
 					this.overlay.exactRemovalsByField[field],
-					term,
+					termId,
 					documentState.docId,
 				);
 				this.overlayMutationCount += 1;
@@ -1298,13 +1297,11 @@ export class CoverageLexicalV2IndexStore {
 			documentState.manifest.metadataHanBigramIdsByField,
 		);
 		for (const field of COVERAGE_LEXICAL_V2_POSTING_FIELDS) {
-			for (const term of this.decodeOverlayTermIdList(
-				documentState.manifest.exactTermIdsByField[field],
-			)) {
+			for (const termId of documentState.manifest.exactTermIdsByField[field]) {
 				applyCoverageLexicalV2OverlayPostingTombstone(
 					this.overlay.exactAddsByField[field],
 					this.overlay.exactRemovalsByField[field],
-					term,
+					termId,
 					documentState.docId,
 				);
 				this.overlayMutationCount += 1;
@@ -1679,7 +1676,7 @@ function areCoverageLexicalV2MetadataBigramIdListsEmpty(
 	);
 }
 
-function createCoverageLexicalV2MutablePostingMaps(): CoverageLexicalV2MutablePostingDelta<
+function createCoverageLexicalV2MutableExactPostingMaps(): CoverageLexicalV2MutableNumericPostingDelta<
 	CoverageLexicalV2CandidateCascadePostingField
 > {
 	return {
@@ -1692,7 +1689,7 @@ function createCoverageLexicalV2MutablePostingMaps(): CoverageLexicalV2MutablePo
 	};
 }
 
-function createCoverageLexicalV2MutableMetadataPostingMaps(): CoverageLexicalV2MutablePostingDelta<
+function createCoverageLexicalV2MutableMetadataPostingMaps(): CoverageLexicalV2MutableStringPostingDelta<
 	CoverageLexicalV2MetadataPostingField
 > {
 	return {
@@ -1706,8 +1703,8 @@ function createCoverageLexicalV2MutableMetadataPostingMaps(): CoverageLexicalV2M
 
 function createCoverageLexicalV2MutableOverlayState(): CoverageLexicalV2MutableOverlayState {
 	return {
-		exactAddsByField: createCoverageLexicalV2MutablePostingMaps(),
-		exactRemovalsByField: createCoverageLexicalV2MutablePostingMaps(),
+		exactAddsByField: createCoverageLexicalV2MutableExactPostingMaps(),
+		exactRemovalsByField: createCoverageLexicalV2MutableExactPostingMaps(),
 		metadataHanAddsByField: createCoverageLexicalV2MutableMetadataPostingMaps(),
 		metadataHanRemovalsByField: createCoverageLexicalV2MutableMetadataPostingMaps(),
 	};
@@ -1741,19 +1738,19 @@ function serializeCoverageLexicalV2MutableOverlayState(
 	overlay: CoverageLexicalV2MutableOverlayState,
 ): CoverageLexicalV2IndexStoreOverlayState {
 	return {
-		exactAddsByField: serializeCoverageLexicalV2MutablePostingDelta(
+		exactAddsByField: serializeCoverageLexicalV2MutableNumericPostingDelta(
 			overlay.exactAddsByField,
 			COVERAGE_LEXICAL_V2_POSTING_FIELDS,
 		),
-		exactRemovalsByField: serializeCoverageLexicalV2MutablePostingDelta(
+		exactRemovalsByField: serializeCoverageLexicalV2MutableNumericPostingDelta(
 			overlay.exactRemovalsByField,
 			COVERAGE_LEXICAL_V2_POSTING_FIELDS,
 		),
-		metadataHanAddsByField: serializeCoverageLexicalV2MutablePostingDelta(
+		metadataHanAddsByField: serializeCoverageLexicalV2MutableStringPostingDelta(
 			overlay.metadataHanAddsByField,
 			COVERAGE_LEXICAL_V2_METADATA_FIELDS,
 		),
-		metadataHanRemovalsByField: serializeCoverageLexicalV2MutablePostingDelta(
+		metadataHanRemovalsByField: serializeCoverageLexicalV2MutableStringPostingDelta(
 			overlay.metadataHanRemovalsByField,
 			COVERAGE_LEXICAL_V2_METADATA_FIELDS,
 		),
@@ -1765,30 +1762,67 @@ function restoreCoverageLexicalV2MutableOverlayState(
 	overlay: CoverageLexicalV2IndexStoreOverlayState,
 ): void {
 	clearCoverageLexicalV2MutableOverlayState(target);
-	restoreCoverageLexicalV2MutablePostingDelta(
+	restoreCoverageLexicalV2MutableNumericPostingDelta(
 		target.exactAddsByField,
 		overlay.exactAddsByField,
 		COVERAGE_LEXICAL_V2_POSTING_FIELDS,
 	);
-	restoreCoverageLexicalV2MutablePostingDelta(
+	restoreCoverageLexicalV2MutableNumericPostingDelta(
 		target.exactRemovalsByField,
 		overlay.exactRemovalsByField,
 		COVERAGE_LEXICAL_V2_POSTING_FIELDS,
 	);
-	restoreCoverageLexicalV2MutablePostingDelta(
+	restoreCoverageLexicalV2MutableStringPostingDelta(
 		target.metadataHanAddsByField,
 		overlay.metadataHanAddsByField,
 		COVERAGE_LEXICAL_V2_METADATA_FIELDS,
 	);
-	restoreCoverageLexicalV2MutablePostingDelta(
+	restoreCoverageLexicalV2MutableStringPostingDelta(
 		target.metadataHanRemovalsByField,
 		overlay.metadataHanRemovalsByField,
 		COVERAGE_LEXICAL_V2_METADATA_FIELDS,
 	);
 }
 
-function serializeCoverageLexicalV2MutablePostingDelta<Field extends string>(
-	postingsByField: CoverageLexicalV2MutablePostingDelta<Field>,
+function serializeCoverageLexicalV2MutableNumericPostingDelta<Field extends string>(
+	postingsByField: CoverageLexicalV2MutableNumericPostingDelta<Field>,
+	fields: readonly Field[],
+): Record<Field, Readonly<Record<string, readonly number[]>>> {
+	const serialized = {} as Record<Field, Readonly<Record<string, readonly number[]>>>;
+	for (const field of fields) {
+		const out: Record<string, readonly number[]> = {};
+		for (const [termId, docIds] of postingsByField[field]) {
+			if (docIds.length > 0) {
+				out[String(termId)] = [...docIds];
+			}
+		}
+		serialized[field] = out;
+	}
+	return serialized;
+}
+
+function restoreCoverageLexicalV2MutableNumericPostingDelta<Field extends string>(
+	target: CoverageLexicalV2MutableNumericPostingDelta<Field>,
+	source: Record<Field, Readonly<Record<string, readonly number[]>>>,
+	fields: readonly Field[],
+): void {
+	for (const field of fields) {
+		const targetMap = target[field];
+		for (const [termIdKey, docIds] of Object.entries(source[field] ?? {})) {
+			const termId = Number(termIdKey);
+			if (!Number.isInteger(termId) || termId < 0) {
+				continue;
+			}
+			targetMap.set(
+				termId,
+				[...docIds].sort((left, right) => left - right),
+			);
+		}
+	}
+}
+
+function serializeCoverageLexicalV2MutableStringPostingDelta<Field extends string>(
+	postingsByField: CoverageLexicalV2MutableStringPostingDelta<Field>,
 	fields: readonly Field[],
 ): Record<Field, Readonly<Record<string, readonly number[]>>> {
 	const serialized = {} as Record<Field, Readonly<Record<string, readonly number[]>>>;
@@ -1804,8 +1838,8 @@ function serializeCoverageLexicalV2MutablePostingDelta<Field extends string>(
 	return serialized;
 }
 
-function restoreCoverageLexicalV2MutablePostingDelta<Field extends string>(
-	target: CoverageLexicalV2MutablePostingDelta<Field>,
+function restoreCoverageLexicalV2MutableStringPostingDelta<Field extends string>(
+	target: CoverageLexicalV2MutableStringPostingDelta<Field>,
 	source: Record<Field, Readonly<Record<string, readonly number[]>>>,
 	fields: readonly Field[],
 ): void {
@@ -1828,19 +1862,19 @@ function cloneCoverageLexicalV2ResidentSegment(
 		createdAt: segment.createdAt,
 		docCount: segment.docCount,
 		exactByField: {
-			basename: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			basename: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.exactByField.basename,
 			),
-			aliases: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			aliases: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.exactByField.aliases,
 			),
-			headings: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			headings: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.exactByField.headings,
 			),
-			folder: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			folder: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.exactByField.folder,
 			),
-			tag: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			tag: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.exactByField.tag,
 			),
 			body: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
@@ -1870,27 +1904,17 @@ function cloneCoverageLexicalV2ResidentSegment(
 function cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(segment: {
 	termIdLexicon: readonly number[];
 	singletonDocIds: readonly number[];
-	smallTermIds: readonly number[];
 	smallDocStarts: readonly number[];
-	smallDocCounts: readonly number[];
 	smallDocIds: readonly number[];
-	deltaTermIds: readonly number[];
-	deltaDocCounts: readonly number[];
 	deltaTapeStarts: readonly number[];
-	deltaTapeLengths: readonly number[];
 	postingTape: readonly number[];
 }) {
 	return {
 		termIdLexicon: [...segment.termIdLexicon],
 		singletonDocIds: [...segment.singletonDocIds],
-		smallTermIds: [...segment.smallTermIds],
 		smallDocStarts: [...segment.smallDocStarts],
-		smallDocCounts: [...segment.smallDocCounts],
 		smallDocIds: [...segment.smallDocIds],
-		deltaTermIds: [...segment.deltaTermIds],
-		deltaDocCounts: [...segment.deltaDocCounts],
 		deltaTapeStarts: [...segment.deltaTapeStarts],
-		deltaTapeLengths: [...segment.deltaTapeLengths],
 		postingTape: [...segment.postingTape],
 	};
 }
@@ -1916,10 +1940,12 @@ function cloneCoverageLexicalV2SerializedPostingFieldSegment(segment: {
 	};
 }
 
-function applyCoverageLexicalV2OverlayPostingDelta(
-	additions: Map<string, number[]>,
-	removals: Map<string, number[]>,
-	term: string,
+function applyCoverageLexicalV2OverlayPostingDelta<
+	Key extends string | CoverageLexicalV2CanonicalTermId,
+>(
+	additions: Map<Key, number[]>,
+	removals: Map<Key, number[]>,
+	term: Key,
 	docId: number,
 ): void {
 	const removalDocIds = removals.get(term);
@@ -1937,10 +1963,12 @@ function applyCoverageLexicalV2OverlayPostingDelta(
 	}
 }
 
-function applyCoverageLexicalV2OverlayPostingTombstone(
-	additions: Map<string, number[]>,
-	removals: Map<string, number[]>,
-	term: string,
+function applyCoverageLexicalV2OverlayPostingTombstone<
+	Key extends string | CoverageLexicalV2CanonicalTermId,
+>(
+	additions: Map<Key, number[]>,
+	removals: Map<Key, number[]>,
+	term: Key,
 	docId: number,
 ): void {
 	const additionDocIds = additions.get(term);
@@ -2013,10 +2041,10 @@ function decrementCoverageLexicalV2BigramRefCounts(
 }
 
 function countCoverageLexicalV2PostingMapsDocumentCount(
-	exactPostings: CoverageLexicalV2MutablePostingDelta<
+	exactPostings: CoverageLexicalV2MutableNumericPostingDelta<
 		CoverageLexicalV2CandidateCascadePostingField
 	>,
-	metadataPostings: CoverageLexicalV2MutablePostingDelta<
+	metadataPostings: CoverageLexicalV2MutableStringPostingDelta<
 		CoverageLexicalV2MetadataPostingField
 	>,
 ): number {
@@ -2053,11 +2081,13 @@ function countCoverageLexicalV2MutableOverlayMutationCount(
 	);
 }
 
-function countCoverageLexicalV2MutablePostingDeltaEntries<Field extends string>(
-	postingsByField: CoverageLexicalV2MutablePostingDelta<Field>,
+function countCoverageLexicalV2MutablePostingDeltaEntries<Field extends string, Key>(
+	postingsByField:
+		| CoverageLexicalV2MutableNumericPostingDelta<Field>
+		| CoverageLexicalV2MutableStringPostingDelta<Field>,
 ): number {
 	let total = 0;
-	for (const map of Object.values(postingsByField) as Array<Map<string, number[]>>) {
+	for (const map of Object.values(postingsByField) as Array<Map<Key, number[]>>) {
 		for (const docIds of map.values()) {
 			total += docIds.length;
 		}
@@ -2065,8 +2095,23 @@ function countCoverageLexicalV2MutablePostingDeltaEntries<Field extends string>(
 	return total;
 }
 
-function estimateCoverageLexicalV2MutablePostingDeltaBytes<Field extends string>(
-	postingsByField: CoverageLexicalV2MutablePostingDelta<Field>,
+function estimateCoverageLexicalV2MutableNumericPostingDeltaBytes<Field extends string>(
+	postingsByField: CoverageLexicalV2MutableNumericPostingDelta<Field>,
+): number {
+	let total = 0;
+	for (const map of Object.values(postingsByField) as Array<
+		Map<CoverageLexicalV2CanonicalTermId, number[]>
+	>) {
+		for (const docIds of map.values()) {
+			total += 16;
+			total += docIds.length * 4;
+		}
+	}
+	return total;
+}
+
+function estimateCoverageLexicalV2MutableStringPostingDeltaBytes<Field extends string>(
+	postingsByField: CoverageLexicalV2MutableStringPostingDelta<Field>,
 ): number {
 	let total = 0;
 	for (const map of Object.values(postingsByField) as Array<Map<string, number[]>>) {

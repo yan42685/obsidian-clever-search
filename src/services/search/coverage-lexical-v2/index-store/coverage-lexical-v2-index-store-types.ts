@@ -127,29 +127,22 @@ export type CoverageLexicalV2SerializedPostingFieldSegment = {
 	postingTape: readonly number[];
 };
 
-export type CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment = {
+export type CoverageLexicalV2SerializedAdaptivePostingFieldSegment = {
 	termIdLexicon: readonly CoverageLexicalV2CanonicalTermId[];
 	singletonDocIds: readonly number[];
-	smallTermIds: readonly CoverageLexicalV2CanonicalTermId[];
 	smallDocStarts: readonly number[];
-	smallDocCounts: readonly number[];
 	smallDocIds: readonly number[];
-	deltaTermIds: readonly CoverageLexicalV2CanonicalTermId[];
-	deltaDocCounts: readonly number[];
 	deltaTapeStarts: readonly number[];
-	deltaTapeLengths: readonly number[];
 	postingTape: readonly number[];
 };
 
-export type CoverageLexicalV2SerializedExactSegmentFields = Omit<
-	Record<
-		CoverageLexicalV2CandidateCascadePostingField,
-		CoverageLexicalV2SerializedPostingFieldSegment
-	>,
-	"body"
-> & {
-	body: CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment;
-};
+export type CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment =
+	CoverageLexicalV2SerializedAdaptivePostingFieldSegment;
+
+export type CoverageLexicalV2SerializedExactSegmentFields = Record<
+	CoverageLexicalV2CandidateCascadePostingField,
+	CoverageLexicalV2SerializedAdaptivePostingFieldSegment
+>;
 
 export type CoverageLexicalV2SerializedMetadataSegmentFields = Record<
 	CoverageLexicalV2MetadataPostingField,
@@ -168,8 +161,12 @@ export type CoverageLexicalV2SerializedPostingDeltaRecord<
 	Field extends string,
 > = Record<Field, Readonly<Record<string, readonly number[]>>>;
 
+export type CoverageLexicalV2SerializedTermIdPostingDeltaRecord<
+	Field extends string,
+> = Record<Field, Readonly<Record<string, readonly number[]>>>;
+
 export type CoverageLexicalV2SerializedExactPostingDeltaRecord =
-	CoverageLexicalV2SerializedPostingDeltaRecord<
+	CoverageLexicalV2SerializedTermIdPostingDeltaRecord<
 		CoverageLexicalV2CandidateCascadePostingField
 	>;
 
@@ -314,6 +311,7 @@ export type CoverageLexicalV2RuntimeMemoryBreakdown = {
 				bodyHanSegments: number;
 			};
 			lexicon: {
+				canonicalTerms: number;
 				latinExpansion: number;
 			};
 			caches: {

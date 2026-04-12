@@ -3973,9 +3973,6 @@ export class DataManager {
       0,
     );
     const storageUsage = await this.database.estimatePluginStorageUsage();
-    const rowsByName = new Map(
-      storageUsage.tables.map((item) => [item.name, item.rows]),
-    );
     const bytesByName = new Map(
       storageUsage.tables.map((item) => [item.name, item.bytes]),
     );
@@ -3990,252 +3987,46 @@ export class DataManager {
       runtimeLexicalIndexBytes,
       indexableBytes,
     );
-    const lexicalHeapDeltaNoticeLines = this.buildLexicalHeapDeltaNoticeLines(
-      this.latestLexicalHeapDelta,
-      runtimeLexicalIndexBytes,
-    );
-    const lexicalHeapDeltaRows = this.buildLexicalHeapDeltaRows(
-      this.latestLexicalHeapDelta,
-      runtimeLexicalIndexBytes,
-    );
-    const hybridRuntimeEstimate = this.hybridEngine.getRuntimeMemoryEstimate();
-    const fileSnapshotRuntimeEstimate =
-      this.fileSnapshotStore.getRuntimeMemoryEstimate();
-    const jsHeapUsage = this.sampleJsHeapUsage();
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
 
-    const persistedRows: DevStorageSummaryRow[] = [
-      this.createDevStorageSummaryRow(
-        "LexicalSnapshot",
-        persistedLexicalSnapshotBytes,
-        rowsByName.get("lexicalSearchSnapshots") ?? 0,
-      ),
-      this.createDevStorageSummaryRow(
-        "SharedFileSnapshot",
-        bytesByName.get("fileSnapshots") ?? 0,
-        rowsByName.get("fileSnapshots") ?? 0,
-      ),
-      this.createDevStorageSummaryRow(
-        "HybridChunk",
-        bytesByName.get("hybridChunks") ?? 0,
-        rowsByName.get("hybridChunks") ?? 0,
-      ),
-      this.createDevStorageSummaryRow(
-        "VectorShard",
-        bytesByName.get("hybridChunkVectors") ?? 0,
-        rowsByName.get("hybridChunkVectors") ?? 0,
-      ),
-      this.createDevStorageSummaryRow(
-        "HybridHNSW",
-        bytesByName.get("hybridHnswSmall") ?? 0,
-        rowsByName.get("hybridHnswSmall") ?? 0,
-      ),
-    ];
-    const runtimeRows: DevStorageSummaryRow[] = [
-      this.createDevStorageSummaryRow(
-        "LexicalRuntimeIndex",
-        runtimeLexicalIndexBytes,
-        "estimate",
-      ),
-      this.createDevStorageSummaryRow(
-        "HybridRuntimeVectors",
-        hybridRuntimeEstimate.vectorsBytes,
-        "estimate",
-      ),
-      this.createDevStorageSummaryRow(
-        "HybridRuntimeGraph",
-        hybridRuntimeEstimate.graphBytes,
-        "estimate",
-      ),
-      this.createDevStorageSummaryRow(
-        "CurrentTextRuntime",
-        fileSnapshotRuntimeEstimate.totalBytes,
-        `${fileSnapshotRuntimeEstimate.fileCount} file(s)`,
-      ),
-    ];
-    const persistedListedBytes = persistedRows.reduce(
-      (sum, row) => sum + row.bytes,
-      0,
-    );
-    const persistedUnlistedBytes = Math.max(
-      0,
-      storageUsage.totalBytes - persistedListedBytes,
-    );
-    const runtimeTotalBytes = runtimeRows.reduce(
-      (sum, row) => sum + row.bytes,
-      0,
-    );
-    const runtimePartitionBreakdown = this.buildPluginRuntimeBreakdown(
-      runtimeRows,
-      runtimeTotalBytes,
-      indexableBytes,
-      jsHeapUsage,
-    );
-    const fileSnapshotRuntimeBreakdown =
-      this.buildFileSnapshotRuntimeBreakdown(
-        fileSnapshotRuntimeEstimate,
-        runtimeTotalBytes,
-        indexableBytes,
-      );
-    const heapContextRows = this.buildPluginHeapContextRows(
-      runtimeTotalBytes,
-      jsHeapUsage,
-    );
-    const prominentJsHeapNoticeLines = this.buildProminentJsHeapNoticeLines(
-      runtimeLexicalIndexBytes,
-      jsHeapUsage,
-    );
-
     new MyNotice(
-      `${this.buildDevStorageSummaryNotice(
-        indexableBytes,
-        storageUsage.totalBytes,
-        runtimeTotalBytes,
-        this.setting.hybrid.vectorCompression,
-        persistedRows,
-        runtimeRows,
-        persistedUnlistedBytes,
-        [
-          ...prominentJsHeapNoticeLines,
-          ...runtimePartitionBreakdown.noticeLines,
-          ...fileSnapshotRuntimeBreakdown.noticeLines,
-          ...lexicalRuntimeBreakdown.noticeLines,
-          ...lexicalHeapDeltaNoticeLines,
-        ],
-      )}\n${localOnlyHint}`,
+      `${["Lexical memory report", ...lexicalRuntimeBreakdown.noticeLines, localOnlyHint].join("\n")}`,
       15000,
     );
 
-    console.groupCollapsed("[clever-search] dev storage and runtime stats");
+    console.groupCollapsed("[clever-search] lexical memory report");
     console.log(`Indexable vault size: ${this.formatBytes(indexableBytes)}`);
     console.log(
-      `Current vector quantization: ${this.setting.hybrid.vectorCompression}`,
+      `Resident lexical estimate: ${this.formatBytes(runtimeLexicalIndexBytes)}`,
     );
     console.log(
-      `Persisted total (all tables): ${this.formatBytes(storageUsage.totalBytes)}`,
+      `Persisted lexical snapshot: ${this.formatBytes(persistedLexicalSnapshotBytes)}`,
     );
-    if (persistedUnlistedBytes > 0) {
-      console.log(
-        `Persisted total includes ${this.formatBytes(persistedUnlistedBytes)} from refs/settings tables not listed below.`,
-      );
-    }
-    prominentJsHeapNoticeLines.forEach((line) => {
-      console.log(`[clever-search] ${line}`);
-    });
-    console.log(
-      `Runtime total (estimate): ${this.formatBytes(runtimeTotalBytes)}`,
-    );
-    runtimePartitionBreakdown.noticeLines.forEach((line) => {
-      console.log("[clever-search] " + line);
-    });
-    fileSnapshotRuntimeBreakdown.noticeLines.forEach((line) => {
-      console.log("[clever-search] " + line);
-    });
     if (lexicalRuntimeBreakdown.summaryLine) {
       console.log(`[clever-search] ${lexicalRuntimeBreakdown.summaryLine}`);
     }
-    lexicalHeapDeltaNoticeLines.forEach((line) => {
-      console.log(`[clever-search] ${line}`);
-    });
-    console.log("[clever-search] Persisted storage");
-    console.table(persistedRows);
-    console.log("[clever-search] Runtime memory estimate");
-    console.table(runtimeRows);
-    if (runtimePartitionBreakdown.rows.length > 0) {
-      console.log("[clever-search] Plugin runtime breakdown");
-      console.table(runtimePartitionBreakdown.rows);
+    if (lexicalRuntimeBreakdown.residentGroupRows.length > 0) {
+      console.log("[clever-search] Lexical resident groups");
+      console.table(lexicalRuntimeBreakdown.residentGroupRows);
     }
-    if (fileSnapshotRuntimeBreakdown.rows.length > 0) {
-      console.log("[clever-search] Current text runtime breakdown");
-      console.table(fileSnapshotRuntimeBreakdown.rows);
+    if (lexicalRuntimeBreakdown.coldOwnedGroupRows.length > 0) {
+      console.log("[clever-search] Lexical cold-owned groups");
+      console.table(lexicalRuntimeBreakdown.coldOwnedGroupRows);
     }
-    if (fileSnapshotRuntimeBreakdown.largestEntryRows.length > 0) {
-      console.log("[clever-search] Current text largest resident entries");
-      console.table(fileSnapshotRuntimeBreakdown.largestEntryRows);
+    if (lexicalRuntimeBreakdown.overlapRows.length > 0) {
+      console.log("[clever-search] Lexical overlap diagnostics");
+      console.table(lexicalRuntimeBreakdown.overlapRows);
     }
-    if (heapContextRows.length > 0) {
-      console.log("[clever-search] Plugin runtime vs JS heap");
-      console.table(heapContextRows);
+    if (lexicalRuntimeBreakdown.residentTopRows.length > 0) {
+      console.log("[clever-search] Lexical top resident contributors");
+      console.table(lexicalRuntimeBreakdown.residentTopRows);
     }
-    if (lexicalRuntimeBreakdown.rows.length > 0) {
-      console.log(
-        "[clever-search] Lexical runtime breakdown (exclusive segments)",
-      );
-      console.table(lexicalRuntimeBreakdown.rows);
-    }
-    if (lexicalRuntimeBreakdown.stringPoolGroupRows.length > 0) {
-      console.log("[clever-search] Lexical stringPool breakdown (groups)");
-      console.table(lexicalRuntimeBreakdown.stringPoolGroupRows);
-    }
-    if (lexicalRuntimeBreakdown.stringPoolSourceRows.length > 0) {
-      console.log("[clever-search] Lexical stringPool breakdown (sources)");
-      console.table(lexicalRuntimeBreakdown.stringPoolSourceRows);
-    }
-    if (lexicalRuntimeBreakdown.stringOwnershipRows.length > 0) {
-      console.log("[clever-search] Lexical string ownership hotspots");
-      console.table(lexicalRuntimeBreakdown.stringOwnershipRows);
-    }
-    if (lexicalHeapDeltaRows.length > 0) {
-      console.log("[clever-search] Lexical heap delta");
-      console.table(lexicalHeapDeltaRows);
+    if (lexicalRuntimeBreakdown.coldOverlapTopRows.length > 0) {
+      console.log("[clever-search] Lexical top cold/overlap contributors");
+      console.table(lexicalRuntimeBreakdown.coldOverlapTopRows);
     }
     console.log(`[clever-search] ${localOnlyHint}`);
-    if (storageUsage.hybridChunkBreakdown) {
-      console.table([
-        {
-          segment: "shared-snapshot-text",
-          bytes: storageUsage.hybridChunkBreakdown.sharedSnapshotTextBytes,
-          size: this.formatBytes(
-            storageUsage.hybridChunkBreakdown.sharedSnapshotTextBytes,
-          ),
-        },
-        {
-          segment: "shared-snapshot-path",
-          bytes: storageUsage.hybridChunkBreakdown.sharedSnapshotPathBytes,
-          size: this.formatBytes(
-            storageUsage.hybridChunkBreakdown.sharedSnapshotPathBytes,
-          ),
-        },
-        {
-          segment: "hybrid-chunk-metadata",
-          bytes: storageUsage.hybridChunkBreakdown.chunkMetadataBytes,
-          size: this.formatBytes(
-            storageUsage.hybridChunkBreakdown.chunkMetadataBytes,
-          ),
-        },
-      ]);
-    }
-    if (storageUsage.hybridVectorBreakdown) {
-      console.table([
-        {
-          segment: "vector-shard-ids",
-          bytes: storageUsage.hybridVectorBreakdown.chunkIdBytes,
-          size: this.formatBytes(
-            storageUsage.hybridVectorBreakdown.chunkIdBytes,
-          ),
-        },
-        {
-          segment: "vector-shard-data",
-          bytes: storageUsage.hybridVectorBreakdown.vectorBytes,
-          size: this.formatBytes(
-            storageUsage.hybridVectorBreakdown.vectorBytes,
-          ),
-        },
-        {
-          segment: "vector-shard-scale",
-          bytes: storageUsage.hybridVectorBreakdown.scaleBytes,
-          size: this.formatBytes(storageUsage.hybridVectorBreakdown.scaleBytes),
-        },
-        {
-          segment: "vector-shard-metadata",
-          bytes: storageUsage.hybridVectorBreakdown.metadataBytes,
-          size: this.formatBytes(
-            storageUsage.hybridVectorBreakdown.metadataBytes,
-          ),
-        },
-      ]);
-    }
     console.groupEnd();
   }
 
@@ -4312,18 +4103,20 @@ export class DataManager {
   ): {
     noticeLines: string[];
     summaryLine: string | null;
-    rows: DevStorageBreakdownRow[];
-    stringPoolGroupRows: DevStorageBreakdownRow[];
-    stringPoolSourceRows: DevStorageBreakdownRow[];
-    stringOwnershipRows: DevLexicalStringOwnershipRow[];
+    residentGroupRows: DevStorageBreakdownRow[];
+    coldOwnedGroupRows: DevStorageBreakdownRow[];
+    overlapRows: DevStorageBreakdownRow[];
+    residentTopRows: DevStorageBreakdownRow[];
+    coldOverlapTopRows: DevStorageBreakdownRow[];
   } {
     const emptyResult = {
       noticeLines: [],
       summaryLine: null,
-      rows: [],
-      stringPoolGroupRows: [],
-      stringPoolSourceRows: [],
-      stringOwnershipRows: [],
+      residentGroupRows: [],
+      coldOwnedGroupRows: [],
+      overlapRows: [],
+      residentTopRows: [],
+      coldOverlapTopRows: [],
     };
     if (!breakdown) {
       return emptyResult;
@@ -4360,6 +4153,8 @@ export class DataManager {
       this.readNumber(residentHotDocuments?.view) ?? 0;
     const bodyHanSegmentsBytes =
       this.readNumber(residentHotVerification?.bodyHanSegments) ?? 0;
+    const canonicalTermLexiconBytes =
+      this.readNumber(residentHotLexicon?.canonicalTerms) ?? 0;
     const latinExpansionLexiconBytes =
       this.readNumber(residentHotLexicon?.latinExpansion) ?? 0;
     const bodyTokensHotBytes =
@@ -4372,8 +4167,12 @@ export class DataManager {
     const manifestMirrorBytes =
       this.readNumber(overlapDiagnostics.manifestMirrors) ?? 0;
     const postingsTotalBytes = exactIncidenceBytes + metadataHanGateBytes;
+    const lexiconTotalBytes =
+      canonicalTermLexiconBytes + latinExpansionLexiconBytes;
 
     const residentSegments: Array<{ segment: string; bytes: number }> = [];
+    const coldOwnedSegments: Array<{ segment: string; bytes: number }> = [];
+    const overlapSegments: Array<{ segment: string; bytes: number }> = [];
     const allSegments: Array<{ segment: string; bytes: number }> = [];
     const pushResidentSegment = (segment: string, bytes: number) => {
       if (bytes <= 0) {
@@ -4382,10 +4181,18 @@ export class DataManager {
       residentSegments.push({ segment, bytes });
       allSegments.push({ segment, bytes });
     };
-    const pushDiagnosticSegment = (segment: string, bytes: number) => {
+    const pushColdOwnedSegment = (segment: string, bytes: number) => {
       if (bytes <= 0) {
         return;
       }
+      coldOwnedSegments.push({ segment, bytes });
+      allSegments.push({ segment, bytes });
+    };
+    const pushOverlapSegment = (segment: string, bytes: number) => {
+      if (bytes <= 0) {
+        return;
+      }
+      overlapSegments.push({ segment, bytes });
       allSegments.push({ segment, bytes });
     };
 
@@ -4393,15 +4200,16 @@ export class DataManager {
     pushResidentSegment('postings.metadataHanGate', metadataHanGateBytes);
     pushResidentSegment('documents.view', documentViewBytes);
     pushResidentSegment('doc.bodyHanSegments', bodyHanSegmentsBytes);
+    pushResidentSegment('lexicon.canonicalTerms', canonicalTermLexiconBytes);
     pushResidentSegment('lexicon.latinExpansion', latinExpansionLexiconBytes);
     pushResidentSegment('doc.bodyTokens(hot)', bodyTokensHotBytes);
-    pushDiagnosticSegment('doc.bodyTokens(sidecar)', bodyTokensSidecarBytes);
-    pushDiagnosticSegment(
+    pushColdOwnedSegment('doc.bodyTokens(sidecar)', bodyTokensSidecarBytes);
+    pushOverlapSegment(
       'overlap.bodyTokens(hot+cold)',
       bodyTokensHotVsSidecarBytes,
     );
-    pushDiagnosticSegment('overlap.pathMirrors', pathMirrorBytes);
-    pushDiagnosticSegment('overlap.manifestMirrors', manifestMirrorBytes);
+    pushOverlapSegment('overlap.pathMirrors', pathMirrorBytes);
+    pushOverlapSegment('overlap.manifestMirrors', manifestMirrorBytes);
 
     const residentAccountedBytes = residentSegments.reduce(
       (sum, segment) => sum + segment.bytes,
@@ -4410,19 +4218,56 @@ export class DataManager {
     const sortedResidentSegments = [...residentSegments].sort(
       (left, right) => right.bytes - left.bytes,
     );
-    const rows = [...allSegments]
-      .sort((left, right) => right.bytes - left.bytes)
-      .slice(0, 10)
-      .map((segment) => ({
+    const sortedColdOwnedSegments = [...coldOwnedSegments].sort(
+      (left, right) => right.bytes - left.bytes,
+    );
+    const sortedOverlapSegments = [...overlapSegments].sort(
+      (left, right) => right.bytes - left.bytes,
+    );
+    const toBreakdownRows = (
+      segments: Array<{ segment: string; bytes: number }>,
+      denominator: number,
+    ): DevStorageBreakdownRow[] =>
+      segments.map((segment) => ({
         segment: segment.segment,
         bytes: segment.bytes,
         size: this.formatBytes(segment.bytes),
-        shareOfLexical: this.formatPercent(segment.bytes, residentHotTotal),
+        shareOfLexical: this.formatPercent(segment.bytes, denominator),
         shareOfVault: this.formatPercent(segment.bytes, indexableBytes),
       }));
 
+    const residentGroupRows = toBreakdownRows(
+      ([
+        ['postings.total', postingsTotalBytes],
+        ['documents.view', documentViewBytes],
+        ['doc.bodyHanSegments', bodyHanSegmentsBytes],
+        ['lexicon.total', lexiconTotalBytes],
+        ['lexicon.canonicalTerms', canonicalTermLexiconBytes],
+        ['lexicon.latinExpansion', latinExpansionLexiconBytes],
+        ['doc.bodyTokens(hot)', bodyTokensHotBytes],
+      ] as Array<[string, number]>)
+        .filter(([, bytes]) => bytes > 0)
+        .map(([segment, bytes]) => ({ segment, bytes })),
+      residentHotTotal,
+    );
+    const coldOwnedGroupRows = toBreakdownRows(
+      coldOwnedSegments,
+      coldOwnedTotal,
+    );
+    const overlapRows = toBreakdownRows(overlapSegments, overlapDiagnosticsTotal);
+    const residentTopRows = toBreakdownRows(
+      sortedResidentSegments.slice(0, 10),
+      residentHotTotal,
+    );
+    const coldOverlapTopRows = toBreakdownRows(
+      [...sortedColdOwnedSegments, ...sortedOverlapSegments]
+        .sort((left, right) => right.bytes - left.bytes)
+        .slice(0, 10),
+      coldOwnedTotal + overlapDiagnosticsTotal,
+    );
+
     if (
-      rows.length === 0 &&
+      residentTopRows.length === 0 &&
       residentHotTotal <= 0 &&
       coldOwnedTotal <= 0 &&
       overlapDiagnosticsTotal <= 0
@@ -4447,21 +4292,33 @@ export class DataManager {
         this.formatPercent(combinedOwnedTotal, indexableBytes) +
         ' of vault)',
       'Coverage overlap diagnostics: ' + this.formatBytes(overlapDiagnosticsTotal),
-      'Coverage major groups: ' +
+      'Coverage resident major groups: ' +
         ([
           ['postings(total)', postingsTotalBytes],
           ['documents(view)', documentViewBytes],
           ['bodyHanSegments', bodyHanSegmentsBytes],
-          ['bodyTokens(hotCache)', bodyTokensHotBytes],
-          ['bodyTokens(sidecar)', bodyTokensSidecarBytes],
+          ['lexicon(total)', lexiconTotalBytes],
+          ['lexicon(canonicalTerms)', canonicalTermLexiconBytes],
           ['lexicon(latinExpansion)', latinExpansionLexiconBytes],
+          ['bodyTokens(hotCache)', bodyTokensHotBytes],
         ] as Array<[string, number]>)
           .filter(([, bytes]) => bytes > 0)
           .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
           .join(' | '),
-      'Coverage top resident segments: ' +
+      'Coverage cold owned groups: ' +
+        ([['bodyTokens(sidecar)', bodyTokensSidecarBytes]] as Array<[string, number]>)
+          .filter(([, bytes]) => bytes > 0)
+          .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
+          .join(' | '),
+      'Coverage top resident segments (top 10): ' +
         sortedResidentSegments
-          .slice(0, 6)
+          .slice(0, 10)
+          .map((segment) => segment.segment + ' ' + this.formatBytes(segment.bytes))
+          .join(' | '),
+      'Coverage top cold/overlap segments (top 10): ' +
+        [...sortedColdOwnedSegments, ...sortedOverlapSegments]
+          .sort((left, right) => right.bytes - left.bytes)
+          .slice(0, 10)
           .map((segment) => segment.segment + ' ' + this.formatBytes(segment.bytes))
           .join(' | '),
       'Coverage accounted resident segments: ' +
@@ -4473,10 +4330,11 @@ export class DataManager {
     return {
       noticeLines,
       summaryLine: noticeLines.join('; '),
-      rows,
-      stringPoolGroupRows: [],
-      stringPoolSourceRows: [],
-      stringOwnershipRows: [],
+      residentGroupRows,
+      coldOwnedGroupRows,
+      overlapRows,
+      residentTopRows,
+      coldOverlapTopRows,
     };
   }
 

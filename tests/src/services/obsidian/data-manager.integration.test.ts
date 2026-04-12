@@ -1261,20 +1261,19 @@ describe("DataManager integration", () => {
     await (manager as any).noticeDevStorageStats();
 
     const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
-    expect(latestNotice).toContain("Persisted storage");
-    expect(latestNotice).toContain("Runtime memory estimate");
-    expect(latestNotice).toContain("LexicalSnapshot");
-    expect(latestNotice).toContain("CurrentTextRuntime");
+    expect(latestNotice).toContain("Lexical memory report");
     expect(latestNotice).toContain("Coverage resident hot");
     expect(latestNotice).toContain("Coverage cold owned");
     expect(latestNotice).toContain("Coverage combined owned");
-    expect(latestNotice).toContain("Coverage top resident segments");
-    expect(latestNotice).toContain("JS heap used now:");
-    expect(latestNotice).toContain("JS heap committed now:");
-    expect(latestNotice).toContain(
-      "JS heap unattributed beyond lexical resident-hot estimate:",
-    );
-    expect(latestNotice).toContain("Current text runtime split");
+    expect(latestNotice).toContain("Coverage resident major groups");
+    expect(latestNotice).toContain("Coverage cold owned groups");
+    expect(latestNotice).toContain("Coverage top resident segments (top 10)");
+    expect(latestNotice).toContain("Coverage top cold/overlap segments (top 10)");
+    expect(latestNotice).toContain("lexicon(total)");
+    expect(latestNotice).not.toContain("Persisted storage");
+    expect(latestNotice).not.toContain("Runtime memory estimate");
+    expect(latestNotice).not.toContain("JS heap used now:");
+    expect(latestNotice).not.toContain("Current text runtime split");
     expect(groupSpy).toHaveBeenCalled();
     expect(endSpy).toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalled();
@@ -1285,30 +1284,7 @@ describe("DataManager integration", () => {
     expect(tableRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          category: "LexicalSnapshot",
-          rows: 1,
-          bytes: 3559,
-        }),
-        expect.objectContaining({
-          category: "SharedFileSnapshot",
-          bytes: 71257,
-        }),
-        expect.objectContaining({
-          category: "LexicalRuntimeIndex",
-          bytes: 80258,
-        }),
-        expect.objectContaining({
-          category: "HybridRuntimeVectors",
-          bytes: 16384,
-        }),
-        expect.objectContaining({
-          category: "HybridRuntimeGraph",
-          bytes: 8192,
-        }),
-        expect.objectContaining({
-          category: "CurrentTextRuntime",
-          bytes: 5192,
-          rows: "1 file(s)",
+          segment: "postings.total",
         }),
         expect.objectContaining({
           segment: "postings.exactIncidence",
@@ -1327,24 +1303,10 @@ describe("DataManager integration", () => {
           bytes: 11264,
         }),
         expect.objectContaining({
-          segment: "texts",
-          bytes: 5120,
+          segment: "overlap.bodyTokens(hot+cold)",
         }),
         expect.objectContaining({
-          segment: "paths",
-          bytes: 64,
-        }),
-        expect.objectContaining({
-          metric: "jsHeapUsedNow",
-          bytes: 262144,
-        }),
-        expect.objectContaining({
-          metric: "jsHeapCommittedNow",
-          bytes: 524288,
-        }),
-        expect.objectContaining({
-          metric: "unattributedJsHeapUsed",
-          bytes: 152118,
+          segment: "lexicon.total",
         }),
       ]),
     );
@@ -1465,11 +1427,16 @@ describe("DataManager integration", () => {
     await (manager as any).noticeDevStorageStats();
 
     const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
+    expect(latestNotice).toContain("Lexical memory report");
     expect(latestNotice).toContain("Coverage resident hot");
     expect(latestNotice).toContain("Coverage cold owned");
+    expect(latestNotice).toContain("Coverage resident major groups");
+    expect(latestNotice).toContain("Coverage cold owned groups");
     expect(latestNotice).toContain("documents(view)");
     expect(latestNotice).toContain("bodyTokens(sidecar)");
+    expect(latestNotice).toContain("lexicon(total)");
     expect(latestNotice).toContain("postings.exactIncidence");
+    expect(latestNotice).not.toContain("JS heap used now:");
     expect(groupSpy).toHaveBeenCalled();
     expect(endSpy).toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalled();
@@ -1480,8 +1447,7 @@ describe("DataManager integration", () => {
     expect(tableRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          category: "LexicalRuntimeIndex",
-          bytes: 3872,
+          segment: "postings.total",
         }),
         expect.objectContaining({
           segment: "postings.exactIncidence",
@@ -1502,6 +1468,10 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           segment: "documents.view",
           bytes: 640,
+        }),
+        expect.objectContaining({
+          segment: "overlap.bodyTokens(hot+cold)",
+          bytes: 992,
         }),
       ]),
     );

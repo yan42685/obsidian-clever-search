@@ -23,6 +23,8 @@ type IndexedDocument = {
 };
 
 const LEGACY_COUPLED_AUTOMATION_LIVE_BYTES_BASELINE = 101_451;
+const DOC_MAJOR_SINGLE_SOURCE_RESIDENT_BYTES_BASELINE = 86_156;
+const DOC_MAJOR_SINGLE_SOURCE_EXACT_INCIDENCE_TARGET = 25_583;
 
 const originalDescribe = global.describe;
 (global as typeof global & { describe: typeof describe }).describe = ((_: string, __: () => void) =>
@@ -114,6 +116,8 @@ describe("coverage lexical v2 size acceptance", () => {
 			coldBytes: breakdown.estimatedBytes.coldOwned.bodyTokensSidecar,
 			totalBytes: breakdown.estimatedBytes.combinedOwnedTotal,
 			documentViewBytes: breakdown.estimatedBytes.residentHot.documents.view,
+			canonicalTermLexiconBytes:
+				breakdown.estimatedBytes.residentHot.lexicon.canonicalTerms,
 			latinExpansionLexiconBytes:
 				breakdown.estimatedBytes.residentHot.lexicon.latinExpansion,
 			exactIncidenceBytes:
@@ -127,6 +131,10 @@ describe("coverage lexical v2 size acceptance", () => {
 			overlapBytes: breakdown.estimatedBytes.overlapDiagnostics.total,
 			legacyCoupledLiveBytesBaseline:
 				LEGACY_COUPLED_AUTOMATION_LIVE_BYTES_BASELINE,
+			docMajorResidentBytesBaseline:
+				DOC_MAJOR_SINGLE_SOURCE_RESIDENT_BYTES_BASELINE,
+			docMajorExactIncidenceTarget:
+				DOC_MAJOR_SINGLE_SOURCE_EXACT_INCIDENCE_TARGET,
 		};
 
 		if (process.env.COVERAGE_LEXICAL_V2_WRITE_BREAKDOWN_PATH) {
@@ -146,5 +154,9 @@ describe("coverage lexical v2 size acceptance", () => {
 		expect(breakdown.documentCount).toBeGreaterThanOrEqual(80);
 		expect(breakdown.estimatedBytes.coldOwned.bodyTokensSidecar).toBeGreaterThan(0);
 		expect(residentBytes).toBeLessThan(LEGACY_COUPLED_AUTOMATION_LIVE_BYTES_BASELINE);
+		expect(residentBytes).toBeLessThan(DOC_MAJOR_SINGLE_SOURCE_RESIDENT_BYTES_BASELINE);
+		expect(summary.exactIncidenceBytes).toBeLessThanOrEqual(
+			DOC_MAJOR_SINGLE_SOURCE_EXACT_INCIDENCE_TARGET,
+		);
 	});
 });
