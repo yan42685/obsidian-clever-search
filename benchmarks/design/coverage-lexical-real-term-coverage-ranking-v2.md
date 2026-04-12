@@ -1025,7 +1025,13 @@ Preferred lexical order:
   - exact incidence is now doc-major single-source in the active runtime: `manifest.exactTermIdsByField` is the only exact truth, resident exact segments are derived adaptive numeric shared-tape indexes, and the exact overlay is a numeric term-id memtable rather than a string-keyed posting mirror
   - metadata exact postings now share the same adaptive numeric resident segment shape as body exact, with redundant per-term adaptive metadata removed from the hot exact path
   - resident memory accounting now treats the canonical term arena as shared lexicon ownership instead of charging it to `postings.exactIncidence`; after the canonical term pool V2 compaction pass the automation-corpus size gate still passes at `exactIncidenceBytes = 16,227`, while `canonicalTermLexiconBytes` drops from `16,568` to `7,202` and `residentBytes` drops to `61,498`
-  - automation benchmark follow-up for canonical term pool V2 is now recorded in two steps rather than one blended run: Phase A (`packed offsets + derived lengths`) kept quality unchanged and shrank resident lexicon bytes materially but did not improve the relative MiniSearch timing anchor (`avg/p50/p100 ratio ~= 2.608 / 2.508 / 4.188`), and Phase B (`packed numeric hash directory`) preserved correctness but also did not produce a speed win on the same corpus (`avg/p50/p100 ratio ~= 2.859 / 2.789 / 3.384`, versus the pre-change baseline `2.486 / 2.533 / 2.702`)
+  - a focused resident-hot compaction follow-up is now also active in the runtime:
+    resident exact segments use packed numeric arrays for `termId/docId/start` ownership, Latin expansion resident accounting now charges only the sorted `termId` cache instead of duplicating canonical term bytes, and metadata Han resident segments now share the same adaptive packed sparse layout as exact postings
+  - on the automation-corpus size gate, that resident-hot follow-up now reduces `residentBytes` further from `61,498` to `41,821`, with `exactIncidenceBytes = 9,296`, `latinExpansionLexiconBytes = 1,852`, and `metadataHanGateBytes = 770`
+  - benchmark verification for the resident-hot compaction follow-up was run stepwise against MiniSearch after each sub-change rather than only at the end:
+    exact packed resident postings improved the acceptance resident footprint materially while keeping the relative MiniSearch timing anchor in the same band (`avg/p50/p100 ratio ~= 2.444 / 2.367 / 1.833`);
+    Latin-expansion ownership correction then reduced resident lexicon accounting again without changing lexical quality (`avg/p50/p100 ratio ~= 2.061 / 2.186 / 1.785`);
+    metadata Han adaptive packing produced the last large resident drop, while the final benchmark still stayed within the normal timing-noise envelope for this corpus (`avg/p50/p100 ratio ~= 2.653 / 2.442 / 2.849`)
   - completion proof now includes build typecheck, focused V2 index-store/runtime/cold-sidecar tests, resident-vs-cold size acceptance, and the automation benchmark sanity run with the active V2 quality gate intact
 - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
 - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
@@ -1694,7 +1700,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
 
 
 

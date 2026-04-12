@@ -291,20 +291,26 @@ export class CoverageLexicalV2IndexStore {
 		try {
 			for (const segment of this.residentSegments) {
 				for (const fieldSegment of Object.values(segment.metadataHanByField)) {
-					for (const termId of fieldSegment.termIdDictionary) {
+					for (const termId of iterateCoverageLexicalV2AdaptiveSegmentTermIds(
+						fieldSegment,
+					)) {
 						void decodeCoverageLexicalV2ResidentSegmentPosting(fieldSegment, termId);
 					}
 				}
 				for (const field of COVERAGE_LEXICAL_V2_METADATA_FIELDS) {
 					const fieldSegment = segment.exactByField[field];
-					for (const termId of fieldSegment.termIdLexicon) {
+					for (const termId of iterateCoverageLexicalV2AdaptiveSegmentTermIds(
+						fieldSegment,
+					)) {
 						void decodeCoverageLexicalV2ResidentAdaptivePosting(
 							fieldSegment,
 							termId,
 						);
 					}
 				}
-				for (const termId of segment.exactByField.body.termIdLexicon) {
+				for (const termId of iterateCoverageLexicalV2AdaptiveSegmentTermIds(
+					segment.exactByField.body,
+				)) {
 					void decodeCoverageLexicalV2ResidentBodyPosting(
 						segment.exactByField.body,
 						termId,
@@ -581,18 +587,12 @@ export class CoverageLexicalV2IndexStore {
 		let bodyHanSegments = this.bodyHanSegmentDocIds.length * 4;
 		let pathMirrors = 0;
 		let manifestMirrors = 0;
-		const canonicalTermLexicon = buildCoverageLexicalV2CanonicalTermLexicon(
-			this.canonicalTermPool,
-		);
 		const canonicalTermLexiconBytes = estimateCoverageLexicalV2CanonicalTermPoolBytes(
 			this.canonicalTermPool,
 		);
 
 		for (const segment of this.residentSegments) {
-			const estimated = estimateCoverageLexicalV2ResidentSegmentBytes(
-				segment,
-				canonicalTermLexicon,
-			);
+			const estimated = estimateCoverageLexicalV2ResidentSegmentBytes(segment);
 			exactIncidence += estimated.exactIncidence;
 			metadataHanGate += estimated.metadataHanGate;
 		}
@@ -626,9 +626,7 @@ export class CoverageLexicalV2IndexStore {
 
 		const latinExpansionTermIds = this.getLatinExpansionTermIds();
 		const latinExpansionLexicon = estimateCoverageLexicalV2LatinExpansionBytes(
-			latinExpansionTermIds.map(
-				(termId) => canonicalTermLexicon[termId] ?? this.decodeCanonicalTerm(termId),
-			),
+			latinExpansionTermIds,
 		);
 		const bodyTokensHot = Math.max(0, options.bodyTokensHotBytes ?? 0);
 		const bodyTokensHotVsSidecar = Math.max(
@@ -1898,19 +1896,19 @@ function cloneCoverageLexicalV2ResidentSegment(
 			),
 		},
 		metadataHanByField: {
-			basename: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			basename: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.metadataHanByField.basename,
 			),
-			aliases: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			aliases: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.metadataHanByField.aliases,
 			),
-			headings: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			headings: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.metadataHanByField.headings,
 			),
-			folder: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			folder: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.metadataHanByField.folder,
 			),
-			tag: cloneCoverageLexicalV2SerializedPostingFieldSegment(
+			tag: cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 				segment.metadataHanByField.tag,
 			),
 		},
@@ -1918,41 +1916,24 @@ function cloneCoverageLexicalV2ResidentSegment(
 }
 
 function cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(segment: {
-	termIdLexicon: readonly number[];
-	singletonDocIds: readonly number[];
-	smallDocStarts: readonly number[];
-	smallDocIds: readonly number[];
-	deltaTapeStarts: readonly number[];
-	postingTape: readonly number[];
+	singletonTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	singletonDocIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	smallTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	smallDocStarts: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	smallDocIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	deltaTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	deltaTapeStarts: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	postingTape: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
 }) {
 	return {
-		termIdLexicon: [...segment.termIdLexicon],
-		singletonDocIds: [...segment.singletonDocIds],
-		smallDocStarts: [...segment.smallDocStarts],
-		smallDocIds: [...segment.smallDocIds],
-		deltaTapeStarts: [...segment.deltaTapeStarts],
-		postingTape: [...segment.postingTape],
-	};
-}
-
-function cloneCoverageLexicalV2SerializedPostingFieldSegment(segment: {
-	termIdDictionary: readonly number[];
-	postingDirectory: readonly {
-		encoding: "tiny_inline" | "delta_varint";
-		docCount: number;
-		tapeStart: number;
-		tapeLength: number;
-		inlineDocIds?: readonly number[];
-	}[];
-	postingTape: readonly number[];
-}) {
-	return {
-		termIdDictionary: [...segment.termIdDictionary],
-		postingDirectory: segment.postingDirectory.map((entry) => ({
-			...entry,
-			inlineDocIds: entry.inlineDocIds ? [...entry.inlineDocIds] : undefined,
-		})),
-		postingTape: [...segment.postingTape],
+		singletonTermIds: Array.from(segment.singletonTermIds),
+		singletonDocIds: Array.from(segment.singletonDocIds),
+		smallTermIds: Array.from(segment.smallTermIds),
+		smallDocStarts: Array.from(segment.smallDocStarts),
+		smallDocIds: Array.from(segment.smallDocIds),
+		deltaTermIds: Array.from(segment.deltaTermIds),
+		deltaTapeStarts: Array.from(segment.deltaTapeStarts),
+		postingTape: Array.from(segment.postingTape),
 	};
 }
 
@@ -1977,6 +1958,16 @@ function applyCoverageLexicalV2OverlayPostingDelta<
 	if (additionDocIds.length > 0) {
 		additions.set(term, additionDocIds);
 	}
+}
+
+function* iterateCoverageLexicalV2AdaptiveSegmentTermIds(segment: {
+	singletonTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	smallTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	deltaTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+}): Iterable<number> {
+	yield* segment.singletonTermIds;
+	yield* segment.smallTermIds;
+	yield* segment.deltaTermIds;
 }
 
 function applyCoverageLexicalV2OverlayPostingTombstone<
@@ -2211,13 +2202,9 @@ function estimateCoverageLexicalV2EncodedHanSegmentExactBytes(
 }
 
 function estimateCoverageLexicalV2LatinExpansionBytes(
-	terms: readonly string[],
+	termIds: readonly CoverageLexicalV2CanonicalTermId[],
 ): number {
-	let total = 0;
-	for (const term of terms) {
-		total += estimateCoverageLexicalV2StringBytes(term) + 8;
-	}
-	return total;
+	return termIds.length * 4;
 }
 
 export function estimateCoverageLexicalV2BodyTokenSequenceBytes(

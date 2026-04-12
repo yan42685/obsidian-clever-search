@@ -124,6 +124,12 @@ export type CoverageLexicalV2IndexStoreDocumentState = {
 
 export type CoverageLexicalV2PostingEncoding = "tiny_inline" | "delta_varint";
 
+export type CoverageLexicalV2PackedNumberList =
+	| readonly number[]
+	| Uint8Array
+	| Uint16Array
+	| Uint32Array;
+
 export type CoverageLexicalV2SerializedPostingDirectoryEntry = {
 	encoding: CoverageLexicalV2PostingEncoding;
 	docCount: number;
@@ -139,12 +145,14 @@ export type CoverageLexicalV2SerializedPostingFieldSegment = {
 };
 
 export type CoverageLexicalV2SerializedAdaptivePostingFieldSegment = {
-	termIdLexicon: readonly CoverageLexicalV2CanonicalTermId[];
-	singletonDocIds: readonly number[];
-	smallDocStarts: readonly number[];
-	smallDocIds: readonly number[];
-	deltaTapeStarts: readonly number[];
-	postingTape: readonly number[];
+	singletonTermIds: CoverageLexicalV2PackedNumberList;
+	singletonDocIds: CoverageLexicalV2PackedNumberList;
+	smallTermIds: CoverageLexicalV2PackedNumberList;
+	smallDocStarts: CoverageLexicalV2PackedNumberList;
+	smallDocIds: CoverageLexicalV2PackedNumberList;
+	deltaTermIds: CoverageLexicalV2PackedNumberList;
+	deltaTapeStarts: CoverageLexicalV2PackedNumberList;
+	postingTape: CoverageLexicalV2PackedNumberList;
 };
 
 export type CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment =
@@ -157,7 +165,7 @@ export type CoverageLexicalV2SerializedExactSegmentFields = Record<
 
 export type CoverageLexicalV2SerializedMetadataSegmentFields = Record<
 	CoverageLexicalV2MetadataPostingField,
-	CoverageLexicalV2SerializedPostingFieldSegment
+	CoverageLexicalV2SerializedAdaptivePostingFieldSegment
 >;
 
 export type CoverageLexicalV2IndexStoreResidentSegment = {
