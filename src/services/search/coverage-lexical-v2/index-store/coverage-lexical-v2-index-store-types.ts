@@ -10,7 +10,7 @@ import type {
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../candidate-cascade";
 
-export const COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION = 10;
+export const COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION = 11;
 export const COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID = "active";
 export const COVERAGE_LEXICAL_V2_INDEX_STORE_SNAPSHOT_CHUNK_ID = "active:0";
 export type CoverageLexicalV2CanonicalTermId = number;
@@ -89,7 +89,6 @@ export type CoverageLexicalV2PreparedDocument = {
 export type CoverageLexicalV2CanonicalTermPoolState = {
 	arenaBytes: readonly number[];
 	termOffsets: readonly number[];
-	termByteLengths: readonly number[];
 };
 
 export type CoverageLexicalV2HanSymbolPoolState = {

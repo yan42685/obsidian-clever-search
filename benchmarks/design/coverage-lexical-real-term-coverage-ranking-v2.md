@@ -1020,10 +1020,12 @@ Preferred lexical order:
   - live updates now run through manifest-backed replace semantics, and lexical move events can reuse the same docId through a V2 move fast-path instead of always degrading to delete+add
   - startup restore now has a V2-owned persistent recovery planner that compares current vault refs, persisted refs, store refs, and cold-sidecar consistency before choosing heal vs full rebuild
   - canonical term ownership now lives in a V2 UTF-8 byte arena, while body-token cold storage uses a V2-owned term-id tape block format instead of the old string-dictionary block layout
+  - canonical term pool V2 is now active: persisted state no longer stores `termByteLengths`, term lengths are derived from adjacent packed offsets, the runtime offset table now uses narrow typed-array storage that widens only when the arena outgrows `Uint16`, and canonical lookup now uses a numeric packed hash directory instead of `Map<number, number[]>`
   - runtime manifests now keep only compact id/range metadata for exact/meta ownership and body Han verification; the active runtime no longer depends on per-doc exact/meta string mirrors for restore/refcount accounting
   - exact incidence is now doc-major single-source in the active runtime: `manifest.exactTermIdsByField` is the only exact truth, resident exact segments are derived adaptive numeric shared-tape indexes, and the exact overlay is a numeric term-id memtable rather than a string-keyed posting mirror
   - metadata exact postings now share the same adaptive numeric resident segment shape as body exact, with redundant per-term adaptive metadata removed from the hot exact path
-  - resident memory accounting now treats the canonical term arena as shared lexicon ownership instead of charging it to `postings.exactIncidence`; the automation-corpus size gate now enforces `exactIncidenceBytes <= 25,583` and currently passes at `16,227` with `residentBytes = 67,785`
+  - resident memory accounting now treats the canonical term arena as shared lexicon ownership instead of charging it to `postings.exactIncidence`; after the canonical term pool V2 compaction pass the automation-corpus size gate still passes at `exactIncidenceBytes = 16,227`, while `canonicalTermLexiconBytes` drops from `16,568` to `7,202` and `residentBytes` drops to `61,498`
+  - automation benchmark follow-up for canonical term pool V2 is now recorded in two steps rather than one blended run: Phase A (`packed offsets + derived lengths`) kept quality unchanged and shrank resident lexicon bytes materially but did not improve the relative MiniSearch timing anchor (`avg/p50/p100 ratio ~= 2.608 / 2.508 / 4.188`), and Phase B (`packed numeric hash directory`) preserved correctness but also did not produce a speed win on the same corpus (`avg/p50/p100 ratio ~= 2.859 / 2.789 / 3.384`, versus the pre-change baseline `2.486 / 2.533 / 2.702`)
   - completion proof now includes build typecheck, focused V2 index-store/runtime/cold-sidecar tests, resident-vs-cold size acceptance, and the automation benchmark sanity run with the active V2 quality gate intact
 - `verificationTarget` no longer drives late verification; the active candidate-cascade now verifies only the highest unresolved post-layer-4 bucket and skips proximity entirely when that bucket exceeds the configured overflow cap
 - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
@@ -1692,7 +1694,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
 
 
 
