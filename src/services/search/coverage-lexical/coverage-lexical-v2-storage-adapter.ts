@@ -11,6 +11,8 @@ import {
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
 	CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
+	CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../coverage-lexical-v2/candidate-cascade";
@@ -28,7 +30,15 @@ export type CoverageLexicalV2StorageAdapterBindings = {
 		field: CoverageLexicalV2CandidateCascadePostingField,
 		bigram: string,
 	): readonly number[] | Uint32Array | undefined;
-	getBodyHanBackstopStats(
+	getBodyHanBackstopGateStats(
+		docId: number,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null;
+	prefetchBodyHanExact(
+		docIds: readonly number[],
+		budget: CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
+	): Promise<CoverageLexicalV2CandidateCascadeHanExactPrefetchResult>;
+	getBodyHanExactBackstopStats(
 		docId: number,
 		normalizedText: string,
 		bigrams: readonly string[],
@@ -55,6 +65,7 @@ export function buildCoverageLexicalV2StorageReader(
 	bindings: CoverageLexicalV2StorageAdapterBindings,
 ): CoverageLexicalV2CandidateCascadeStorageReader {
 	return {
+		readerKind: "legacy_adapter",
 		getDocumentRecord: (docId: number) => bindings.getDocumentRecord(docId),
 		getBodyHanSegmentDocIds: () => bindings.getBodyHanSegmentDocIds(),
 		getPostingMatches: (field: CoverageLexicalV2CandidateCascadePostingField, term: string) =>
@@ -63,11 +74,17 @@ export function buildCoverageLexicalV2StorageReader(
 			field: CoverageLexicalV2CandidateCascadePostingField,
 			bigram: string,
 		) => bindings.getMetadataHanBigramPostingMatches(field, bigram),
-		getBodyHanBackstopStats: (
+		getBodyHanBackstopGateStats: (docId: number, bigrams: readonly string[]) =>
+			bindings.getBodyHanBackstopGateStats(docId, bigrams),
+		prefetchBodyHanExact: (
+			docIds: readonly number[],
+			budget: CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
+		) => bindings.prefetchBodyHanExact(docIds, budget),
+		getBodyHanExactBackstopStats: (
 			docId: number,
 			normalizedText: string,
 			bigrams: readonly string[],
-		) => bindings.getBodyHanBackstopStats(docId, normalizedText, bigrams),
+		) => bindings.getBodyHanExactBackstopStats(docId, normalizedText, bigrams),
 		collectLatinPrefixTerms: (queryTerm: string, cap: number) =>
 			bindings.collectLatinPrefixTerms(queryTerm, cap),
 		collectLatinFuzzyTerms: (
@@ -97,3 +114,5 @@ export async function searchCoverageLexicalV2WithStorageAdapter(
 		),
 	});
 }
+
+

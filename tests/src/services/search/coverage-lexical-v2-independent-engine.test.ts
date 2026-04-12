@@ -111,8 +111,28 @@ function createStorageReader(): CoverageLexicalV2CandidateCascadeStorageReader {
 		getMetadataHanBigramPostingMatches(field, bigram) {
 			return postings.get(`${field}:${bigram}`);
 		},
-		getBodyHanSegments(docId) {
-			return bodyHanSegments.get(docId);
+		getBodyHanBackstopGateStats(docId, bigrams) {
+			const segments = bodyHanSegments.get(docId) ?? [];
+			if (segments.length === 0 || bigrams.length === 0) {
+				return null;
+			}
+			return {
+				longestContiguousBigramChain: 0,
+				matchedBigramCount: 0,
+				bigramCoverageRatio: 0,
+			};
+		},
+		async prefetchBodyHanExact(docIds, _budget) {
+			return {
+				fetchedDocIds: [...docIds],
+				fetchedDocCount: docIds.length,
+				byteSum: 0,
+				skippedByBudget: 0,
+				skippedReason: "none" as const,
+			};
+		},
+		getBodyHanExactBackstopStats() {
+			return null;
 		},
 		collectLatinPrefixTerms(queryTerm, cap) {
 			return collectCanonicalLatinPrefixTerms(queryTerm, cap);
@@ -157,3 +177,4 @@ describe("coverage lexical v2 independent engine", () => {
 		expect(result.matchedFiles[0]?.matchedTerms).toEqual(["ai", "exam"]);
 	});
 });
+

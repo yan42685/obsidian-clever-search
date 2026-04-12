@@ -113,7 +113,11 @@ describe("coverage lexical v2 size acceptance", () => {
 			documentCount: breakdown.documentCount,
 			segmentCount: breakdown.segmentCount,
 			residentBytes,
-			coldBytes: breakdown.estimatedBytes.coldOwned.bodyTokensSidecar,
+			coldBytes: breakdown.estimatedBytes.coldOwned.total,
+			bodyTokenSidecarBytes:
+				breakdown.estimatedBytes.coldOwned.bodyTokensSidecar,
+			bodyHanSegmentExactSidecarBytes:
+				breakdown.estimatedBytes.coldOwned.bodyHanSegmentExactSidecar,
 			totalBytes: breakdown.estimatedBytes.combinedOwnedTotal,
 			documentViewBytes: breakdown.estimatedBytes.residentHot.documents.view,
 			canonicalTermLexiconBytes:
@@ -152,7 +156,7 @@ describe("coverage lexical v2 size acceptance", () => {
 		);
 
 		expect(breakdown.documentCount).toBeGreaterThanOrEqual(80);
-		expect(breakdown.estimatedBytes.coldOwned.bodyTokensSidecar).toBeGreaterThan(0);
+		expect(breakdown.estimatedBytes.coldOwned.total).toBeGreaterThan(0);
 		expect(residentBytes).toBeLessThan(LEGACY_COUPLED_AUTOMATION_LIVE_BYTES_BASELINE);
 		expect(residentBytes).toBeLessThan(DOC_MAJOR_SINGLE_SOURCE_RESIDENT_BYTES_BASELINE);
 		expect(summary.exactIncidenceBytes).toBeLessThanOrEqual(

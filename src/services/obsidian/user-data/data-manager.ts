@@ -44,6 +44,10 @@ import {
   type CoverageLexicalBodyTokenColdStoreApi,
   type CoverageLexicalBodyTokenColdDocumentWrite,
 } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import { CoverageLexicalV2HanSegmentExactSidecarStore } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-store";
+import {
+  COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { Tokenizer } from "src/services/search/tokenizer";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -422,6 +426,18 @@ function ensureCoverageLexicalBodyTokenColdStoreRegistered(): void {
   );
 }
 
+function ensureCoverageLexicalV2HanSegmentExactSidecarStoreRegistered(): void {
+  if (
+    container.isRegistered(COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN, false)
+  ) {
+    return;
+  }
+  container.registerSingleton(
+    COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
+    CoverageLexicalV2HanSegmentExactSidecarStore,
+  );
+}
+
 @singleton()
 export class DataManager {
   private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
@@ -447,6 +463,8 @@ export class DataManager {
   private plugin: CleverSearch = getInstance(THIS_PLUGIN);
   private readonly lexicalBodyTokenColdStoreRegistration =
     ensureCoverageLexicalBodyTokenColdStoreRegistered();
+  private readonly lexicalV2HanSegmentExactSidecarStoreRegistration =
+    ensureCoverageLexicalV2HanSegmentExactSidecarStoreRegistered();
   private database = getInstance(Database);
   private dataProvider = getInstance(DataProvider);
   private setting = getInstance(OuterSetting);
@@ -4151,7 +4169,7 @@ export class DataManager {
       this.readNumber(residentHotPostings?.metadataHanGate) ?? 0;
     const documentViewBytes =
       this.readNumber(residentHotDocuments?.view) ?? 0;
-    const bodyHanSegmentsBytes =
+    const bodyHanSegmentGateBytes =
       this.readNumber(residentHotVerification?.bodyHanSegments) ?? 0;
     const canonicalTermLexiconBytes =
       this.readNumber(residentHotLexicon?.canonicalTerms) ?? 0;
@@ -4161,6 +4179,8 @@ export class DataManager {
       this.readNumber(residentHotCaches?.bodyTokensHot) ?? 0;
     const bodyTokensSidecarBytes =
       this.readNumber(coldOwned.bodyTokensSidecar) ?? 0;
+    const bodyHanSegmentExactSidecarBytes =
+      this.readNumber(coldOwned.bodyHanSegmentExactSidecar) ?? 0;
     const bodyTokensHotVsSidecarBytes =
       this.readNumber(overlapDiagnostics.bodyTokensHotVsSidecar) ?? 0;
     const pathMirrorBytes = this.readNumber(overlapDiagnostics.pathMirrors) ?? 0;
@@ -4199,11 +4219,15 @@ export class DataManager {
     pushResidentSegment('postings.exactIncidence', exactIncidenceBytes);
     pushResidentSegment('postings.metadataHanGate', metadataHanGateBytes);
     pushResidentSegment('documents.view', documentViewBytes);
-    pushResidentSegment('doc.bodyHanSegments', bodyHanSegmentsBytes);
+    pushResidentSegment('doc.bodyHanSegmentGate', bodyHanSegmentGateBytes);
     pushResidentSegment('lexicon.canonicalTerms', canonicalTermLexiconBytes);
     pushResidentSegment('lexicon.latinExpansion', latinExpansionLexiconBytes);
     pushResidentSegment('doc.bodyTokens(hot)', bodyTokensHotBytes);
     pushColdOwnedSegment('doc.bodyTokens(sidecar)', bodyTokensSidecarBytes);
+    pushColdOwnedSegment(
+      'doc.bodyHanSegmentExact(sidecar)',
+      bodyHanSegmentExactSidecarBytes,
+    );
     pushOverlapSegment(
       'overlap.bodyTokens(hot+cold)',
       bodyTokensHotVsSidecarBytes,
@@ -4240,7 +4264,7 @@ export class DataManager {
       ([
         ['postings.total', postingsTotalBytes],
         ['documents.view', documentViewBytes],
-        ['doc.bodyHanSegments', bodyHanSegmentsBytes],
+        ['doc.bodyHanSegmentGate', bodyHanSegmentGateBytes],
         ['lexicon.total', lexiconTotalBytes],
         ['lexicon.canonicalTerms', canonicalTermLexiconBytes],
         ['lexicon.latinExpansion', latinExpansionLexiconBytes],
@@ -4296,7 +4320,7 @@ export class DataManager {
         ([
           ['postings(total)', postingsTotalBytes],
           ['documents(view)', documentViewBytes],
-          ['bodyHanSegments', bodyHanSegmentsBytes],
+          ['bodyHanSegmentGate', bodyHanSegmentGateBytes],
           ['lexicon(total)', lexiconTotalBytes],
           ['lexicon(canonicalTerms)', canonicalTermLexiconBytes],
           ['lexicon(latinExpansion)', latinExpansionLexiconBytes],
@@ -4306,7 +4330,10 @@ export class DataManager {
           .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
           .join(' | '),
       'Coverage cold owned groups: ' +
-        ([['bodyTokens(sidecar)', bodyTokensSidecarBytes]] as Array<[string, number]>)
+        ([
+          ['bodyTokens(sidecar)', bodyTokensSidecarBytes],
+          ['bodyHanSegmentExact(sidecar)', bodyHanSegmentExactSidecarBytes],
+        ] as Array<[string, number]>)
           .filter(([, bytes]) => bytes > 0)
           .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
           .join(' | '),
@@ -4815,6 +4842,3 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
-
-
-

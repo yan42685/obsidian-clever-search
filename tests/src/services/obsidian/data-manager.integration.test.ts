@@ -1173,8 +1173,9 @@ describe("DataManager integration", () => {
             },
           },
           coldOwned: {
-            total: 11264,
+            total: 18432,
             bodyTokensSidecar: 11264,
+            bodyHanSegmentExactSidecar: 7168,
           },
           overlapDiagnostics: {
             total: 13312,
@@ -1182,7 +1183,7 @@ describe("DataManager integration", () => {
             pathMirrors: 4096,
             manifestMirrors: 1024,
           },
-          combinedOwnedTotal: 91522,
+          combinedOwnedTotal: 98690,
         },
       })),
     });
@@ -1267,6 +1268,7 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("Coverage combined owned");
     expect(latestNotice).toContain("Coverage resident major groups");
     expect(latestNotice).toContain("Coverage cold owned groups");
+    expect(latestNotice).toContain("bodyHanSegmentExact(sidecar)");
     expect(latestNotice).toContain("Coverage top resident segments (top 10)");
     expect(latestNotice).toContain("Coverage top cold/overlap segments (top 10)");
     expect(latestNotice).toContain("lexicon(total)");
@@ -1301,6 +1303,10 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           segment: "doc.bodyTokens(sidecar)",
           bytes: 11264,
+        }),
+        expect.objectContaining({
+          segment: "doc.bodyHanSegmentExact(sidecar)",
+          bytes: 7168,
         }),
         expect.objectContaining({
           segment: "overlap.bodyTokens(hot+cold)",
@@ -1367,8 +1373,9 @@ describe("DataManager integration", () => {
             },
           },
           coldOwned: {
-            total: 992,
+            total: 1344,
             bodyTokensSidecar: 992,
+            bodyHanSegmentExactSidecar: 352,
           },
           overlapDiagnostics: {
             total: 1248,
@@ -1376,7 +1383,7 @@ describe("DataManager integration", () => {
             pathMirrors: 192,
             manifestMirrors: 64,
           },
-          combinedOwnedTotal: 4864,
+          combinedOwnedTotal: 5216,
         },
       })),
     });
@@ -1434,6 +1441,7 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("Coverage cold owned groups");
     expect(latestNotice).toContain("documents(view)");
     expect(latestNotice).toContain("bodyTokens(sidecar)");
+    expect(latestNotice).toContain("bodyHanSegmentExact(sidecar)");
     expect(latestNotice).toContain("lexicon(total)");
     expect(latestNotice).toContain("postings.exactIncidence");
     expect(latestNotice).not.toContain("JS heap used now:");
@@ -1460,6 +1468,10 @@ describe("DataManager integration", () => {
         expect.objectContaining({
           segment: "doc.bodyTokens(sidecar)",
           bytes: 992,
+        }),
+        expect.objectContaining({
+          segment: "doc.bodyHanSegmentExact(sidecar)",
+          bytes: 352,
         }),
         expect.objectContaining({
           segment: "lexicon.latinExpansion",
@@ -3347,8 +3359,3 @@ describe("DataManager integration", () => {
     ]);
   });
 });
-
-
-
-
-

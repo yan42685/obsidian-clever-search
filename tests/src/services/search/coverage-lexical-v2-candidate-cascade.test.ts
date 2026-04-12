@@ -50,6 +50,82 @@ function extractHanBigrams(text: string): string[] {
 	return bigrams;
 }
 
+function computeHanBackstopGateStats(
+	segments: readonly string[] | undefined,
+	bigrams: readonly string[],
+) {
+	if (!segments || segments.length === 0 || bigrams.length === 0) {
+		return null;
+	}
+	let best:
+		| {
+				longestContiguousBigramChain: number;
+				matchedBigramCount: number;
+				bigramCoverageRatio: number;
+		  }
+		| null = null;
+	for (const segment of segments) {
+		const matched = new Set<number>();
+		for (let index = 0; index < bigrams.length; index += 1) {
+			if (segment.includes(bigrams[index])) {
+				matched.add(index);
+			}
+		}
+		if (matched.size === 0) {
+			continue;
+		}
+		const sorted = [...matched].sort((left, right) => left - right);
+		let longest = 0;
+		let current = 0;
+		let previous = Number.NaN;
+		for (const bigramIndex of sorted) {
+			if (!Number.isFinite(previous) || bigramIndex === previous + 1) {
+				current += 1;
+			} else {
+				current = 1;
+			}
+			longest = Math.max(longest, current);
+			previous = bigramIndex;
+		}
+		const stats = {
+			longestContiguousBigramChain: longest,
+			matchedBigramCount: matched.size,
+			bigramCoverageRatio: matched.size / bigrams.length,
+		};
+		if (
+			!best ||
+			stats.longestContiguousBigramChain > best.longestContiguousBigramChain ||
+			(
+				stats.longestContiguousBigramChain === best.longestContiguousBigramChain &&
+				stats.matchedBigramCount > best.matchedBigramCount
+			)
+		) {
+			best = stats;
+		}
+	}
+	return best;
+}
+
+function computeHanBackstopExactStats(
+	segments: readonly string[] | undefined,
+	normalizedText: string,
+	bigrams: readonly string[],
+) {
+	if (!segments || segments.length === 0) {
+		return null;
+	}
+	for (const segment of segments) {
+		if (segment.includes(normalizedText)) {
+			return {
+				longestContiguousBigramChain: bigrams.length,
+				matchedBigramCount: bigrams.length,
+				bigramCoverageRatio: bigrams.length > 0 ? 1 : 0,
+			};
+		}
+	}
+	return null;
+}
+
 function collectCanonicalLatinPrefixTerms(
 	lexicon: readonly string[],
 	queryTerm: string,
@@ -108,6 +184,7 @@ function createStorageReader(config: {
 	reader: CoverageLexicalV2CandidateCascadeStorageReader;
 	prefetchBodyTokenSequences: jest.Mock<Promise<void>, [readonly number[]]>;
 	getBodyTokenSequence: jest.Mock<readonly string[] | undefined, [number]>;
+	prefetchBodyHanExact: jest.Mock<Promise<any>, [readonly number[]]>;
 } {
 	const documentMap = new Map(
 		config.documents.map((document) => [document.docId, document] as const),
@@ -147,6 +224,21 @@ function createStorageReader(config: {
 		}
 	}
 	const prefetchBodyTokenSequences = jest.fn(async (_docIds: readonly number[]) => {});
+	const prefetchBodyHanExact = jest.fn(async (docIds: readonly number[]) => ({
+		fetchedDocIds: [...docIds],
+		fetchedDocCount: docIds.length,
+		byteSum: docIds.reduce(
+			(sum, docId) =>
+				sum +
+				(bodyHanSegments.get(docId)?.reduce(
+					(inner, segment) => inner + Array.from(segment).length * 4,
+					0,
+				) ?? 0),
+			0,
+		),
+		skippedByBudget: 0,
+		skippedReason: "none" as const,
+	}));
 	const getBodyTokenSequence = jest.fn((docId: number) => bodyTokenSequences.get(docId));
 	return {
 		reader: {
@@ -176,8 +268,18 @@ function createStorageReader(config: {
 			getMetadataHanBigramPostingMatches(field, bigram) {
 				return hanBigramPostings.get(`${field}:${bigram}`);
 			},
-			getBodyHanSegments(docId) {
-				return bodyHanSegments.get(docId);
+			getBodyHanBackstopGateStats(docId, bigrams) {
+				return computeHanBackstopGateStats(bodyHanSegments.get(docId), bigrams);
+			},
+			prefetchBodyHanExact(docIds, _budget) {
+				return prefetchBodyHanExact(docIds);
+			},
+			getBodyHanExactBackstopStats(docId, normalizedText, bigrams) {
+				return computeHanBackstopExactStats(
+					bodyHanSegments.get(docId),
+					normalizedText,
+					bigrams,
+				);
 			},
 			collectLatinPrefixTerms(queryTerm, cap) {
 				return collectCanonicalLatinPrefixTerms(config.lexicon, queryTerm, cap);
@@ -198,6 +300,7 @@ function createStorageReader(config: {
 		},
 		prefetchBodyTokenSequences,
 		getBodyTokenSequence,
+		prefetchBodyHanExact,
 	};
 }
 
@@ -489,7 +592,7 @@ describe("coverage lexical v2 cascade", () => {
 		const queryText = "赢宋";
 		const { reader } = createStorageReader({
 			documents: [
-				{ docId: 1, path: "notes/win-song.md", basenameText: "关于赢宋的笔记" },
+				{ docId: 1, path: "notes/win-song.md", basenameText: "note 赢宋 entry" },
 				{ docId: 2, path: "notes/win-only.md", basenameText: "赢学条目" },
 			],
 			postings: {},
@@ -518,11 +621,11 @@ describe("coverage lexical v2 cascade", () => {
 	});
 
 	test("uses the Han backstop to recover a fragile-covered body hit when tokenizer exact recall is empty", async () => {
-		const queryText = "委员长";
+		const queryText = "\u59d4\u5458\u957f";
 		const { reader } = createStorageReader({
 			documents: [
-				{ docId: 1, path: "notes/chairperson.md", basenameText: "misc", bodyText: "委员长大" },
-				{ docId: 2, path: "notes/member.md", basenameText: "misc", bodyText: "委员会记录" },
+				{ docId: 1, path: "notes/chairperson.md", basenameText: "misc", bodyText: "\u59d4\u5458\u957f\u5927" },
+				{ docId: 2, path: "notes/member.md", basenameText: "misc", bodyText: "\u59d4\u5458\u4f1a\u8bb0\u5f55" },
 			],
 			postings: {},
 			lexicon: [],
@@ -551,11 +654,11 @@ describe("coverage lexical v2 cascade", () => {
 	});
 
 	test("filters bigram-only false positives unless one normalized field or Han segment contains the full query", async () => {
-		const queryText = "生命力";
+		const queryText = "\u751f\u547d\u529b";
 		const { reader } = createStorageReader({
 			documents: [
-				{ docId: 1, path: "notes/fake-life-force.md", basenameText: "生命和命力" },
-				{ docId: 2, path: "notes/real-life-force.md", basenameText: "生命力" },
+				{ docId: 1, path: "notes/fake-life-force.md", basenameText: "\u751f\u547d\u548c\u547d\u529b" },
+				{ docId: 2, path: "notes/real-life-force.md", basenameText: "\u751f\u547d\u529b" },
 			],
 			postings: {},
 			lexicon: [],
@@ -618,7 +721,10 @@ describe("coverage lexical v2 cascade", () => {
 		expect(result.trace.hanPromotedCount).toBe(1);
 		expect(result.trace.hanPromotionVerifiedCount).toBe(0);
 		expect(result.trace.bodyHanScanDocCount).toBe(2);
-		expect(result.trace.bodyHanScanMatchedDocCount).toBe(1);
+		expect(result.trace.bodyHanScanMatchedDocCount).toBe(2);
+		expect(result.trace.bodyHanColdExactRequestedDocCount).toBe(2);
+		expect(result.trace.bodyHanColdExactFetchedDocCount).toBe(2);
+		expect(result.trace.bodyHanColdExactSkippedReason).toBe("none");
 		expect(result.trace.hanPromotionSkippedReason).toBe("none");
 	});
 
@@ -687,3 +793,7 @@ describe("coverage lexical v2 cascade", () => {
 		expect(getBodyTokenSequence).not.toHaveBeenCalled();
 	});
 });
+
+
+
+

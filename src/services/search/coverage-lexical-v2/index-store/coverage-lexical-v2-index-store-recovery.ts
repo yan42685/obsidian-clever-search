@@ -1,6 +1,20 @@
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type { CoverageLexicalBodyTokenColdConsistencySummary } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import type { CoverageLexicalV2HanSegmentExactSidecarConsistencySummary } from "./coverage-lexical-v2-han-segment-exact-sidecar-types";
 import type { CoverageLexicalV2PersistentRecoveryPlan } from "./coverage-lexical-v2-index-store-types";
+
+type CoverageLexicalV2ColdConsistencyLike = {
+	needsRepair: boolean;
+	requiresReset: boolean;
+	reason:
+		| "up-to-date"
+		| "missing-meta"
+		| "schema-mismatch"
+		| "count-mismatch"
+		| "fingerprint-mismatch";
+	missingOrStalePaths: string[];
+	danglingPaths: string[];
+};
 
 export function planCoverageLexicalV2PersistentRecovery(options: {
 	currentIndexedRefs: readonly BaseIndexedFileRef[];
@@ -8,6 +22,7 @@ export function planCoverageLexicalV2PersistentRecovery(options: {
 	storeIndexedRefs: readonly BaseIndexedFileRef[];
 	structuralInvalidityReason?: CoverageLexicalV2PersistentRecoveryPlan["reason"];
 	coldConsistency?: CoverageLexicalBodyTokenColdConsistencySummary | null;
+	hanExactConsistency?: CoverageLexicalV2HanSegmentExactSidecarConsistencySummary | null;
 }): CoverageLexicalV2PersistentRecoveryPlan {
 	if (options.structuralInvalidityReason) {
 		return {
@@ -78,11 +93,19 @@ export function planCoverageLexicalV2PersistentRecovery(options: {
 		docsToMove.push(move);
 	}
 
-	if (options.coldConsistency?.needsRepair) {
-		for (const path of options.coldConsistency.danglingPaths) {
+	const consistencySummaries: CoverageLexicalV2ColdConsistencyLike[] = [
+		options.coldConsistency,
+		options.hanExactConsistency,
+	].flatMap((summary) => (summary ? [summary] : []));
+
+	for (const consistency of consistencySummaries) {
+		if (!consistency.needsRepair) {
+			continue;
+		}
+		for (const path of consistency.danglingPaths) {
 			docsToDelete.add(path);
 		}
-		for (const path of options.coldConsistency.missingOrStalePaths) {
+		for (const path of consistency.missingOrStalePaths) {
 			if (currentByPath.has(path)) {
 				docsToUpdate.add(path);
 			}
@@ -97,7 +120,7 @@ export function planCoverageLexicalV2PersistentRecovery(options: {
 			? "needs_heal"
 			: "up_to_date";
 	const reason =
-		options.coldConsistency?.needsRepair
+		consistencySummaries.some((summary) => summary.needsRepair)
 			? "cold_sidecar_drift"
 			: status === "needs_heal"
 				? "vault_drift"

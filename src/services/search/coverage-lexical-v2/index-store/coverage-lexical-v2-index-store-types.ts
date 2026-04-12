@@ -5,18 +5,18 @@ import type {
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
 	CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../candidate-cascade";
-import type {
-	CoverageLexicalV2TokenRange,
-} from "./coverage-lexical-v2-shared-token-ids";
 
-export const COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION = 6;
+export const COVERAGE_LEXICAL_V2_INDEX_STORE_SCHEMA_VERSION = 10;
 export const COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID = "active";
 export const COVERAGE_LEXICAL_V2_INDEX_STORE_SNAPSHOT_CHUNK_ID = "active:0";
 export type CoverageLexicalV2CanonicalTermId = number;
 export type CoverageLexicalV2HanSymbolId = number;
+export type CoverageLexicalV2HanBigramId = number;
+export type CoverageLexicalV2HanGateBloomWord = number;
 
 export type CoverageLexicalV2MetadataPostingField = Exclude<
 	CoverageLexicalV2CandidateCascadePostingField,
@@ -65,6 +65,16 @@ export type CoverageLexicalV2RuntimeBodyTokenSidecarMetadata = Omit<
 	"path"
 >;
 
+export type CoverageLexicalV2BodyHanSegmentExactSidecarLocator = {
+	generation?: number;
+	size?: number;
+	segmentCount: number;
+	estimatedBytes: number;
+};
+
+export type CoverageLexicalV2RuntimeBodyHanSegmentExactSidecarMetadata =
+	CoverageLexicalV2BodyHanSegmentExactSidecarLocator;
+
 export type CoverageLexicalV2PreparedDocument = {
 	path: string;
 	generation?: number;
@@ -89,16 +99,18 @@ export type CoverageLexicalV2HanSymbolPoolState = {
 export type CoverageLexicalV2IndexStorePersistedDocManifest = {
 	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
 	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
-	bodyHanSymbolRanges: readonly CoverageLexicalV2TokenRange[];
+	bodyHanGateBloomWords: readonly CoverageLexicalV2HanGateBloomWord[];
 	hasBodyHanSegments: boolean;
+	bodyHanSegmentExactSidecar: CoverageLexicalV2BodyHanSegmentExactSidecarLocator;
 	bodyTokenSidecar: CoverageLexicalV2BodyTokenSidecarLocator;
 };
 
 export type CoverageLexicalV2IndexStoreRuntimeDocManifest = {
 	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
 	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
-	bodyHanSymbolRanges: readonly CoverageLexicalV2TokenRange[];
+	bodyHanGateBloomWords: readonly CoverageLexicalV2HanGateBloomWord[];
 	hasBodyHanSegments: boolean;
+	bodyHanSegmentExactSidecar: CoverageLexicalV2RuntimeBodyHanSegmentExactSidecarMetadata;
 	bodyTokenSidecar: CoverageLexicalV2RuntimeBodyTokenSidecarMetadata;
 };
 
@@ -197,7 +209,6 @@ export type CoverageLexicalV2IndexStoreSnapshotState = {
 	snapshotCreatedAt: number;
 	canonicalTermPool: CoverageLexicalV2CanonicalTermPoolState;
 	hanSymbolPool: CoverageLexicalV2HanSymbolPoolState;
-	hanSymbolTape: readonly number[];
 	documents: readonly CoverageLexicalV2IndexStoreSnapshotDocument[];
 	segments: readonly CoverageLexicalV2IndexStoreResidentSegment[];
 	overlay: CoverageLexicalV2IndexStoreOverlayState;
@@ -215,8 +226,8 @@ export type CoverageLexicalV2PersistedJournalDocument = {
 	record: CoverageLexicalV2CandidateCascadeDocumentRecord;
 	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
 	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
-	bodyHanCodePointTape: readonly number[];
-	bodyHanCodePointRanges: readonly CoverageLexicalV2TokenRange[];
+	bodyHanGateBloomWords: readonly CoverageLexicalV2HanGateBloomWord[];
+	bodyHanSegmentExactSidecar: CoverageLexicalV2BodyHanSegmentExactSidecarLocator;
 	bodyTokenSidecar: CoverageLexicalV2BodyTokenSidecarLocator;
 };
 
@@ -293,7 +304,11 @@ export type CoverageLexicalV2IndexStorePersistenceApi = {
 
 export type CoverageLexicalV2IndexStoreReaderOptions = Pick<
 	CoverageLexicalV2CandidateCascadeStorageReader,
-	"getBodyTokenSequence" | "prefetchBodyTokenSequences" | "tokenizeText"
+	| "getBodyTokenSequence"
+	| "prefetchBodyTokenSequences"
+	| "tokenizeText"
+	| "prefetchBodyHanExact"
+	| "getBodyHanExactBackstopStats"
 >;
 
 export type CoverageLexicalV2RuntimeMemoryBreakdown = {
@@ -321,6 +336,7 @@ export type CoverageLexicalV2RuntimeMemoryBreakdown = {
 		coldOwned: {
 			total: number;
 			bodyTokensSidecar: number;
+			bodyHanSegmentExactSidecar: number;
 		};
 		overlapDiagnostics: {
 			total: number;

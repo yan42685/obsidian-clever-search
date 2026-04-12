@@ -1,4 +1,4 @@
-ï»¿import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
+import { innerSetting, OuterSetting } from "src/globals/plugin-setting";
 import type {
 	FileSubItem,
 	IndexedDocument,
@@ -126,7 +126,7 @@ const COVERAGE_LEXICAL_COARSE_HYDRATION_SUPPORT_FAMILY_UPPER_BOUND = 0.35;
 const COVERAGE_LEXICAL_COARSE_HYDRATION_CROSS_SCRIPT_UPPER_BOUND = 0.45;
 const COVERAGE_LEXICAL_SOFT_EARLY_GATE_RATIO = 0.75;
 const COVERAGE_LEXICAL_QUERY_ONLY_HAN_FUNCTION_WORD_REGEX =
-	/(?:å…³äºŽ|æœ‰å…³|å¯¹äºŽ|ä»€ä¹ˆæ˜¯|ä»€ä¹ˆå«|å¦‚ä½•|æ€Žä¹ˆ|ä¸ºä»€ä¹ˆ|ä»¥åŠ|åŠ|ä¸Ž|å’Œ|çš„|åœ°|å¾—|å¹¶ä¸”|å¹¶|ä¸­|é‡Œ|ä¸Š|ä¸‹|å°†|è¦|ä¼š|å—|å‘¢)/gu;
+	/(?:¹ØÓÚ|ÓÐ¹Ø|¶ÔÓÚ|Ê²Ã´ÊÇ|Ê²Ã´½Ð|ÈçºÎ|ÔõÃ´|ÎªÊ²Ã´|ÒÔ¼°|¼°|Óë|ºÍ|µÄ|µØ|µÃ|²¢ÇÒ|²¢|ÖÐ|Àï|ÉÏ|ÏÂ|½«|Òª|»á|Âð|ÄØ)/gu;
 
 function isCoverageLexicalExperimentalBodyTokenOffloadEnabled(): boolean {
 	const raw = process.env[COVERAGE_LEXICAL_BODY_TOKEN_OFFLOAD_ENV]?.trim();
@@ -1435,7 +1435,22 @@ export class CoverageLexicalFileSearchEngine implements FileSearchEngine {
 								return this.metadataTagCharPostings.get(bigram);
 						}
 					},
-					getBodyHanBackstopStats: (
+					getBodyHanBackstopGateStats: (
+						docId: number,
+						bigrams: readonly string[],
+					) =>
+						evaluateCoverageLexicalV2StorageAdapterHanBackstopGateStats(
+							this.documentBodyHanSegmentsById[docId],
+							bigrams,
+						),
+					prefetchBodyHanExact: async (_docIds, _budget) => ({
+						fetchedDocIds: [],
+						fetchedDocCount: 0,
+						byteSum: 0,
+						skippedByBudget: 0,
+						skippedReason: "none" as const,
+					}),
+					getBodyHanExactBackstopStats: (
 						docId: number,
 						normalizedText: string,
 						bigrams: readonly string[],
@@ -5358,6 +5373,63 @@ function evaluateCoverageLexicalV2StorageAdapterHanBackstopStats(
 	return best;
 }
 
+function evaluateCoverageLexicalV2StorageAdapterHanBackstopGateStats(
+	bodyHanSegments: readonly string[] | undefined,
+	bigrams: readonly string[],
+): {
+	longestContiguousBigramChain: number;
+	matchedBigramCount: number;
+	bigramCoverageRatio: number;
+} | null {
+	if (!bodyHanSegments || bodyHanSegments.length === 0 || bigrams.length === 0) {
+		return null;
+	}
+	let best:
+		| {
+				longestContiguousBigramChain: number;
+				matchedBigramCount: number;
+				bigramCoverageRatio: number;
+		  }
+		| null = null;
+	for (const segment of bodyHanSegments) {
+		const matchedBigramIndices = new Set<number>();
+		for (let bigramIndex = 0; bigramIndex < bigrams.length; bigramIndex += 1) {
+			if (segment.includes(bigrams[bigramIndex])) {
+				matchedBigramIndices.add(bigramIndex);
+			}
+		}
+		if (matchedBigramIndices.size === 0) {
+			continue;
+		}
+		const stats = {
+			longestContiguousBigramChain:
+				computeCoverageLexicalV2StorageAdapterHanLongestChain(
+					matchedBigramIndices,
+				),
+			matchedBigramCount: matchedBigramIndices.size,
+			bigramCoverageRatio: matchedBigramIndices.size / bigrams.length,
+		};
+		if (
+			!best ||
+			stats.longestContiguousBigramChain > best.longestContiguousBigramChain ||
+			(
+				stats.longestContiguousBigramChain ===
+					best.longestContiguousBigramChain &&
+				stats.matchedBigramCount > best.matchedBigramCount
+			) ||
+			(
+				stats.longestContiguousBigramChain ===
+					best.longestContiguousBigramChain &&
+				stats.matchedBigramCount === best.matchedBigramCount &&
+				stats.bigramCoverageRatio > best.bigramCoverageRatio
+			)
+		) {
+			best = stats;
+		}
+	}
+	return best;
+}
+
 function computeCoverageLexicalV2StorageAdapterHanLongestChain(
 	matchedBigramIndices: ReadonlySet<number>,
 ): number {
@@ -5393,3 +5465,4 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
+

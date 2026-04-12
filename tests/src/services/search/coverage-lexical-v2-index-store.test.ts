@@ -65,6 +65,15 @@ function createReader(store: CoverageLexicalV2IndexStore) {
 	return store.createStorageReader({
 		getBodyTokenSequence: () => undefined,
 		prefetchBodyTokenSequences: async () => {},
+		prefetchBodyHanExact: async (docIds, _budget) => ({
+			fetchedDocIds: [...docIds],
+			fetchedDocCount: docIds.length,
+			byteSum: 0,
+			skippedByBudget: 0,
+			skippedReason: "none" as const,
+		}),
+		getBodyHanExactBackstopStats: (docId, _normalizedText, bigrams) =>
+			store.getBodyHanBackstopGateStats(docId, bigrams),
 		tokenizeText: (text) => text.split(/\s+/u).filter(Boolean),
 	});
 }
@@ -160,10 +169,9 @@ describe("CoverageLexicalV2IndexStore", () => {
 			"notes/han.md",
 		);
 		expect(
-			snapshot.documents[0]?.manifest.bodyHanSymbolRanges.length,
+			snapshot.documents[0]?.manifest.bodyHanGateBloomWords.length,
 		).toBeGreaterThan(0);
 		expect(snapshot.hanSymbolPool.codePointsBySymbolId.length).toBeGreaterThan(0);
-		expect(snapshot.hanSymbolTape.length).toBeGreaterThan(0);
 		expect(snapshot.canonicalTermPool.termOffsets.length).toBeGreaterThan(0);
 		const restored = new CoverageLexicalV2IndexStore();
 		restored.restoreSnapshot(snapshot);
@@ -174,7 +182,7 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(reader.getMetadataHanBigramPostingMatches("basename", "测试")).toEqual([0]);
 		expect(reader.getBodyHanSegmentDocIds()).toEqual([0]);
 		expect(
-			reader.getBodyHanBackstopStats(0, "测试正文", [
+			reader.getBodyHanExactBackstopStats(0, "测试正文", [
 				"测试",
 				"试正",
 				"正文",
@@ -232,8 +240,8 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(firstDocument.manifest.metadataHanBigramIdsByField).toBe(
 			secondDocument.manifest.metadataHanBigramIdsByField,
 		);
-		expect(firstDocument.manifest.bodyHanSymbolRanges).toBe(
-			secondDocument.manifest.bodyHanSymbolRanges,
+		expect(firstDocument.manifest.bodyHanGateBloomWords).toBe(
+			secondDocument.manifest.bodyHanGateBloomWords,
 		);
 	});
 });

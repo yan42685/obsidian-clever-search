@@ -261,10 +261,19 @@ describe("coverage lexical v2 real vault size anchor", () => {
 							),
 							residentBytes,
 							residentKB: round(residentBytes / 1024),
+							coldOwnedBytes: breakdown.estimatedBytes.coldOwned.total,
+							coldOwnedKB: round(
+								breakdown.estimatedBytes.coldOwned.total / 1024,
+							),
 							bodyTokenSidecarBytes:
 								breakdown.estimatedBytes.coldOwned.bodyTokensSidecar,
 							bodyTokenSidecarKB: round(
 								breakdown.estimatedBytes.coldOwned.bodyTokensSidecar / 1024,
+							),
+							bodyHanSegmentExactSidecarBytes:
+								breakdown.estimatedBytes.coldOwned.bodyHanSegmentExactSidecar,
+							bodyHanSegmentExactSidecarKB: round(
+								breakdown.estimatedBytes.coldOwned.bodyHanSegmentExactSidecar / 1024,
 							),
 							exactIncidenceBytes:
 								breakdown.estimatedBytes.residentHot.postings.exactIncidence,
@@ -300,8 +309,8 @@ describe("coverage lexical v2 real vault size anchor", () => {
 							coldVsRaw:
 								rawMarkdownBytes > 0
 									? round(
-											breakdown.estimatedBytes.coldOwned.bodyTokensSidecar /
-												rawMarkdownBytes,
+											breakdown.estimatedBytes.coldOwned.total /
+											rawMarkdownBytes,
 									  )
 									: null,
 						},
@@ -314,4 +323,3 @@ describe("coverage lexical v2 real vault size anchor", () => {
 		1200000,
 	);
 });
-
