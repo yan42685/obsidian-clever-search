@@ -110,7 +110,11 @@ function resolveOccurrenceTermKind(
 		return null;
 	}
 	const kind = termId.slice(firstColon + 1, secondColon);
-	if (kind === "han_char" || kind === "non_han_run") {
+	if (
+		kind === "han_bigram" ||
+		kind === "han_char" ||
+		kind === "non_han_run"
+	) {
 		return kind;
 	}
 	return null;

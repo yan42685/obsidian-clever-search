@@ -675,8 +675,10 @@ function resolveFileRecallTermOccurrence(params: {
 	  }
 	| null {
 	const { term, snapshotText, normalizedSnapshot, wordOccurrences } = params;
-	const needle = term.kind === "han_char" ? term.rawText : term.normalizedText;
-	const haystack = term.kind === "han_char" ? snapshotText : normalizedSnapshot;
+	const isHanTerm =
+		term.kind === "han_bigram" || term.kind === "han_char";
+	const needle = isHanTerm ? term.rawText : term.normalizedText;
+	const haystack = isHanTerm ? snapshotText : normalizedSnapshot;
 	const start = haystack.indexOf(needle);
 	if (start >= 0) {
 		return {

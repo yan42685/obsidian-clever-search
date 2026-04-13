@@ -39,7 +39,7 @@ function collectCoveredOccurrenceKeys(
 }
 
 describe("direct subitems v2 exact-only pipeline", () => {
-	test("splits query into Han single characters and contiguous non-Han runs", () => {
+	test("splits query into Han bigrams and contiguous non-Han runs", () => {
 		const terms = splitDirectSubitemsQueryTerms(
 			"上面 foo/bar@v1.2#tag 快速 abc-123",
 		);
@@ -51,15 +51,21 @@ describe("direct subitems v2 exact-only pipeline", () => {
 				normalizedText: term.normalizedText,
 			})),
 		).toEqual([
-			{ kind: "han_char", rawText: "上", normalizedText: "上" },
-			{ kind: "han_char", rawText: "面", normalizedText: "面" },
+			{
+				kind: "han_bigram",
+				rawText: "上面",
+				normalizedText: "上面",
+			},
 			{
 				kind: "non_han_run",
 				rawText: "foo/bar@v1.2#tag",
 				normalizedText: "foo/bar@v1.2#tag",
 			},
-			{ kind: "han_char", rawText: "快", normalizedText: "快" },
-			{ kind: "han_char", rawText: "速", normalizedText: "速" },
+			{
+				kind: "han_bigram",
+				rawText: "快速",
+				normalizedText: "快速",
+			},
 			{
 				kind: "non_han_run",
 				rawText: "abc-123",
@@ -84,9 +90,9 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		}
 
 		expect([...byTerm.values()].sort((left, right) => left - right)).toEqual([
-			2, 2, 2,
+			2, 2,
 		]);
-		expect(occurrences.length).toBe(6);
+		expect(occurrences.length).toBe(4);
 	});
 
 	test("keeps nearby exact evidence inside one candidate span", () => {
@@ -96,8 +102,12 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		});
 
 		expect(result.candidateSpans).toHaveLength(1);
-		expect(result.candidateSpans[0].score.coverageCount).toBe(4);
-		expect(result.candidateSpans[0].termStats.filter((stat) => stat.bestTier === "exact")).toHaveLength(4);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		expect(
+			result.candidateSpans[0].termStats.filter(
+				(stat) => stat.bestTier === "exact",
+			),
+		).toHaveLength(2);
 	});
 
 	test("splits distant evidence clusters into multiple candidate spans", () => {
@@ -111,7 +121,7 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		});
 
 		expect(result.candidateSpans).toHaveLength(2);
-		expect(result.candidateSpans.every((span) => span.score.coverageCount === 2)).toBe(true);
+		expect(result.candidateSpans.every((span) => span.score.coverageCount === 1)).toBe(true);
 	});
 
 	test("does not dedupe distant spans that realize the same term signature", () => {
@@ -480,9 +490,9 @@ describe("direct subitems v2 exact-only pipeline", () => {
 			(left, right) => left.start - right.start,
 		);
 
-		expect(result.exactOccurrences.length).toBeGreaterThanOrEqual(12);
+		expect(result.exactOccurrences.length).toBeGreaterThanOrEqual(6);
 		expect(result.candidateSpans).toHaveLength(2);
-		expect(result.candidateSpans.every((span) => span.score.coverageCount === 4)).toBe(
+		expect(result.candidateSpans.every((span) => span.score.coverageCount === 3)).toBe(
 			true,
 		);
 		expect(spansByStart[1].start - spansByStart[0].end).toBeGreaterThan(40);
@@ -718,7 +728,7 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		});
 
 		expect(result.candidateSpans).toHaveLength(1);
-		expect(result.candidateSpans[0].score.coverageCount).toBe(3);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
 		const highlighted = result.renderPayloads[0].highlightRanges.map((range) =>
 			result.renderPayloads[0].text.slice(range.start, range.end),
 		);
@@ -738,7 +748,7 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		});
 
 		expect(result.candidateSpans).toHaveLength(1);
-		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(1);
 		const highlighted = result.renderPayloads[0].highlightRanges.map((range) =>
 			result.renderPayloads[0].text.slice(range.start, range.end),
 		);
@@ -759,7 +769,7 @@ describe("direct subitems v2 exact-only pipeline", () => {
 		});
 
 		expect(result.candidateSpans).toHaveLength(1);
-		expect(result.candidateSpans[0].score.coverageCount).toBe(2);
+		expect(result.candidateSpans[0].score.coverageCount).toBe(1);
 		const highlighted = result.renderPayloads[0].highlightRanges.map((range) =>
 			result.renderPayloads[0].text.slice(range.start, range.end),
 		);

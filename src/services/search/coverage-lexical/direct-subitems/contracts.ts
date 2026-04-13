@@ -1,4 +1,7 @@
-export type DirectSubitemsQueryTermKind = "han_char" | "non_han_run";
+export type DirectSubitemsQueryTermKind =
+	| "han_bigram"
+	| "han_char"
+	| "non_han_run";
 
 export type DirectSubitemsMatchTier =
 	| "exact"

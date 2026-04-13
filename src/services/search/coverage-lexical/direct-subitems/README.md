@@ -11,7 +11,8 @@ This folder hosts the native `coverage-lexical` direct-subitems pipeline.
 ## Current guarantees
 
 - Exact source-text occurrences are collected directly from the snapshot text.
-- Han query text is split into single-character recall terms.
+- Multi-character Han query text is split into overlapping bigram recall terms.
+- Literal one-character Han query segments remain one-character recall terms.
 - Non-Han query text is split into contiguous runs.
 - Snippet ranking follows a strict tuple comparator:
   - `coverage > exact > prefix > fuzzy > distance penalty`
@@ -43,4 +44,3 @@ This folder hosts the native `coverage-lexical` direct-subitems pipeline.
 - exact beats prefix, prefix beats fuzzy
 - distant same-signature spans are not dropped
 - dense repeated Han occurrences do not collapse unrelated clusters into one snippet
-

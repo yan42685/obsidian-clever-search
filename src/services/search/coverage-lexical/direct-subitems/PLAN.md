@@ -6,7 +6,8 @@ Replace the old snippet-selection path with a native runtime pipeline that:
 
 - recalls exact source-text evidence directly from the snapshot text
 - splits query terms as:
-  - Han single characters
+  - Han bigrams for multi-character Han segments
+  - literal single Han characters only when the query segment itself is one character
   - contiguous non-Han runs
 - ranks snippets strictly by:
   - `coverage > exact > prefix > fuzzy > distance penalty`
@@ -36,7 +37,8 @@ Shared runtime types:
 Responsibilities:
 
 - split raw query text into stable terms
-- emit Han single-character terms
+- emit Han bigrams for multi-character Han segments
+- keep literal single-character Han queries as single-char terms
 - emit contiguous non-Han runs
 - keep stable `termId`
 
@@ -114,7 +116,7 @@ Responsibilities:
 
 Covered by focused tests:
 
-- Han single-character splitting
+- Han bigram splitting
 - contiguous non-Han run splitting
 - exact occurrence recall from snapshot text
 - nearby evidence collapsing into one span
@@ -134,4 +136,3 @@ Not required for correctness, but still worth considering:
 - extract span-stat computation into a dedicated `span-stats.ts` module if we want a cleaner separation between span generation and scoring
 - add more engine-level regression cases around very dense symbol-heavy lines
 - tune runtime cost if benchmark latency becomes a priority
-
