@@ -1,6 +1,9 @@
 import type { CoverageLexicalV2QueryAnalysis } from "../query";
 import type {
 	CoverageLexicalV2BestWindowEvidence,
+	CoverageLexicalV2CheapExactPrimaryContiguity,
+	CoverageLexicalV2CheapExactWitnessSummary,
+	CoverageLexicalV2CheapSharedFieldCoverage,
 	CoverageLexicalV2MatchedPrimaryUnitEvidence,
 	CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
 	CoverageLexicalV2PrefixWitnessLite,
@@ -25,16 +28,24 @@ export function buildCoverageLexicalV2CheapComparatorCandidate(
 	queryAnalysis: CoverageLexicalV2QueryAnalysis,
 	evidence: CoverageLexicalV2ComparatorEvidence,
 ): CoverageLexicalV2ComparatorCandidate {
-	const primaryUnitKeys = new Set(
-		queryAnalysis.primaryUnits.map((unit) => createPrimaryUnitKey(unit.surfaceGroupIndex, unit.normalizedText)),
+	const primaryUnitsByKey = new Map(
+		queryAnalysis.primaryUnits.map((unit) => [
+			createPrimaryUnitKey(unit.surfaceGroupIndex, unit.normalizedText),
+			unit,
+		] as const),
 	);
 	const matchedPrimaryUnits = evidence.matchedPrimaryUnits.filter((unit) =>
-		primaryUnitKeys.has(createPrimaryUnitKey(unit.surfaceGroupIndex, unit.normalizedText)),
+		primaryUnitsByKey.has(createPrimaryUnitKey(unit.surfaceGroupIndex, unit.normalizedText)),
 	);
 	return {
 		candidateId: evidence.candidateId,
 		distinctMatchedPrimaryQueryUnitCount: countDistinctMatchedPrimaryUnits(matchedPrimaryUnits),
 		surfaceCoverageShape: buildSurfaceCoverageShape(queryAnalysis, matchedPrimaryUnits),
+		cheapExactPrimaryContiguity: buildCheapExactPrimaryContiguity(
+			primaryUnitsByKey,
+			evidence.cheapExactWitnessSummary,
+		),
+		cheapSharedFieldCoverage: buildCheapSharedFieldCoverage(matchedPrimaryUnits),
 		matchedPrimaryUnitFieldProfile: buildFieldProfile(matchedPrimaryUnits),
 		primaryUnitMatchQuality: buildPrimaryUnitMatchQuality(matchedPrimaryUnits),
 		stableDeterministicKey: evidence.stableDeterministicKey,
@@ -116,6 +127,74 @@ function buildFieldProfile(
 		}
 	}
 	return fieldProfile;
+}
+
+function buildCheapExactPrimaryContiguity(
+	primaryUnitsByKey: ReadonlyMap<string, CoverageLexicalV2QueryAnalysis["primaryUnits"][number]>,
+	cheapExactWitnessSummary: CoverageLexicalV2CheapExactWitnessSummary | undefined,
+): CoverageLexicalV2CheapExactPrimaryContiguity {
+	const intactSurfacePrimaryUnitKeys = new Set<string>();
+	for (const unitKey of cheapExactWitnessSummary?.intactSurfacePrimaryUnitKeys ?? []) {
+		const primaryUnit = primaryUnitsByKey.get(unitKey);
+		if (
+			primaryUnit?.source === "surface_han_segment" ||
+			primaryUnit?.source === "latin_segment" ||
+			primaryUnit?.source === "mixed_script_segment"
+		) {
+			intactSurfacePrimaryUnitKeys.add(unitKey);
+		}
+	}
+	return {
+		intactExactSurfaceGroupCount: new Set(
+			[...intactSurfacePrimaryUnitKeys].map(
+				(unitKey) => primaryUnitsByKey.get(unitKey)?.surfaceGroupIndex,
+			),
+		).size,
+		intactExactPrimaryUnitCount: intactSurfacePrimaryUnitKeys.size,
+		maxAdjacentExactMatchedPrimaryRunLength:
+			cheapExactWitnessSummary?.maxAdjacentExactMatchedPrimaryRunLength ?? 0,
+		adjacentExactMatchedPrimaryUnitCount:
+			cheapExactWitnessSummary?.adjacentExactMatchedPrimaryUnitCount ?? 0,
+	};
+}
+
+function buildCheapSharedFieldCoverage(
+	matchedPrimaryUnits: readonly CoverageLexicalV2MatchedPrimaryUnitEvidence[],
+): CoverageLexicalV2CheapSharedFieldCoverage {
+	const fieldsByUnitKey = new Map<string, Set<CoverageLexicalV2MatchedPrimaryUnitEvidence["strongestField"]>>();
+	for (const unit of matchedPrimaryUnits) {
+		if (unit.matchQuality !== "exact" && unit.matchQuality !== "prefix") {
+			continue;
+		}
+		const unitKey = createPrimaryUnitKey(unit.surfaceGroupIndex, unit.normalizedText);
+		const fields =
+			fieldsByUnitKey.get(unitKey) ??
+			new Set<CoverageLexicalV2MatchedPrimaryUnitEvidence["strongestField"]>();
+		fields.add(unit.strongestField);
+		for (const corroboratedField of unit.corroboratedFields ?? []) {
+			fields.add(corroboratedField);
+		}
+		fieldsByUnitKey.set(unitKey, fields);
+	}
+	if (fieldsByUnitKey.size === 0) {
+		return {
+			coversAllMatchedPrimaryUnitsInOneField: false,
+			maxDistinctPrimaryUnitsInSameField: 0,
+		};
+	}
+	const distinctUnitCountByField =
+		new Map<CoverageLexicalV2MatchedPrimaryUnitEvidence["strongestField"], number>();
+	for (const fields of fieldsByUnitKey.values()) {
+		for (const field of fields) {
+			distinctUnitCountByField.set(field, (distinctUnitCountByField.get(field) ?? 0) + 1);
+		}
+	}
+	const maxDistinctPrimaryUnitsInSameField = Math.max(...distinctUnitCountByField.values());
+	return {
+		coversAllMatchedPrimaryUnitsInOneField:
+			maxDistinctPrimaryUnitsInSameField === fieldsByUnitKey.size,
+		maxDistinctPrimaryUnitsInSameField,
+	};
 }
 
 function buildPrimaryUnitMatchQuality(

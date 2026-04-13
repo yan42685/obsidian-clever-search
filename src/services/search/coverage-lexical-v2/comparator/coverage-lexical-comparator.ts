@@ -1,4 +1,6 @@
 import type {
+	CoverageLexicalV2CheapExactPrimaryContiguity,
+	CoverageLexicalV2CheapSharedFieldCoverage,
 	CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
 	CoverageLexicalV2PrefixWitnessLite,
 	CoverageLexicalV2PrimaryUnitMatchQuality,
@@ -47,6 +49,22 @@ export function explainCoverageLexicalV2ComparatorDecision(
 				right.surfaceCoverageShape,
 			),
 			reason: "better visible surface-group coverage wins",
+		},
+		{
+			layer: "cheapExactPrimaryContiguity",
+			comparison: compareCoverageLexicalV2CheapExactPrimaryContiguity(
+				left.cheapExactPrimaryContiguity,
+				right.cheapExactPrimaryContiguity,
+			),
+			reason: "stronger exact continuity of intact surfaces and adjacent matched primary units wins",
+		},
+		{
+			layer: "cheapSharedFieldCoverage",
+			comparison: compareCoverageLexicalV2CheapSharedFieldCoverage(
+				left.cheapSharedFieldCoverage,
+				right.cheapSharedFieldCoverage,
+			),
+			reason: "stronger same-field aggregation of matched primary units wins",
 		},
 		{
 			layer: "matchedPrimaryUnitFieldProfile",
@@ -133,6 +151,14 @@ function compareWithoutProximityOrFallback(
 			left.surfaceCoverageShape,
 			right.surfaceCoverageShape,
 		),
+		compareCoverageLexicalV2CheapExactPrimaryContiguity(
+			left.cheapExactPrimaryContiguity,
+			right.cheapExactPrimaryContiguity,
+		),
+		compareCoverageLexicalV2CheapSharedFieldCoverage(
+			left.cheapSharedFieldCoverage,
+			right.cheapSharedFieldCoverage,
+		),
 		compareCoverageLexicalV2FieldProfiles(
 			left.matchedPrimaryUnitFieldProfile,
 			right.matchedPrimaryUnitFieldProfile,
@@ -153,6 +179,50 @@ export function compareCoverageLexicalV2SurfaceCoverageShapes(
 		compareBooleansDescending(left.preservesCrossScriptCoverage, right.preservesCrossScriptCoverage),
 		compareNumbersDescending(left.matchedGroupCount, right.matchedGroupCount),
 		compareNumbersAscending(left.totalGroupCount, right.totalGroupCount),
+	]);
+}
+
+export function compareCoverageLexicalV2CheapExactPrimaryContiguity(
+	left: CoverageLexicalV2CheapExactPrimaryContiguity | null | undefined,
+	right: CoverageLexicalV2CheapExactPrimaryContiguity | null | undefined,
+): number {
+	const safeLeft = left ?? EMPTY_CHEAP_EXACT_PRIMARY_CONTIGUITY;
+	const safeRight = right ?? EMPTY_CHEAP_EXACT_PRIMARY_CONTIGUITY;
+	return firstNonZero([
+		compareNumbersDescending(
+			safeLeft.intactExactSurfaceGroupCount,
+			safeRight.intactExactSurfaceGroupCount,
+		),
+		compareNumbersDescending(
+			safeLeft.intactExactPrimaryUnitCount,
+			safeRight.intactExactPrimaryUnitCount,
+		),
+		compareNumbersDescending(
+			safeLeft.maxAdjacentExactMatchedPrimaryRunLength,
+			safeRight.maxAdjacentExactMatchedPrimaryRunLength,
+		),
+		compareNumbersDescending(
+			safeLeft.adjacentExactMatchedPrimaryUnitCount,
+			safeRight.adjacentExactMatchedPrimaryUnitCount,
+		),
+	]);
+}
+
+export function compareCoverageLexicalV2CheapSharedFieldCoverage(
+	left: CoverageLexicalV2CheapSharedFieldCoverage | null | undefined,
+	right: CoverageLexicalV2CheapSharedFieldCoverage | null | undefined,
+): number {
+	const safeLeft = left ?? EMPTY_CHEAP_SHARED_FIELD_COVERAGE;
+	const safeRight = right ?? EMPTY_CHEAP_SHARED_FIELD_COVERAGE;
+	return firstNonZero([
+		compareBooleansDescending(
+			safeLeft.coversAllMatchedPrimaryUnitsInOneField,
+			safeRight.coversAllMatchedPrimaryUnitsInOneField,
+		),
+		compareNumbersDescending(
+			safeLeft.maxDistinctPrimaryUnitsInSameField,
+			safeRight.maxDistinctPrimaryUnitsInSameField,
+		),
 	]);
 }
 
@@ -304,3 +374,15 @@ function compareBooleansDescending(left: boolean, right: boolean): number {
 function compareBooleansAscending(left: boolean, right: boolean): number {
 	return compareNumbersAscending(Number(left), Number(right));
 }
+
+const EMPTY_CHEAP_EXACT_PRIMARY_CONTIGUITY: CoverageLexicalV2CheapExactPrimaryContiguity = {
+	intactExactSurfaceGroupCount: 0,
+	intactExactPrimaryUnitCount: 0,
+	maxAdjacentExactMatchedPrimaryRunLength: 0,
+	adjacentExactMatchedPrimaryUnitCount: 0,
+};
+
+const EMPTY_CHEAP_SHARED_FIELD_COVERAGE: CoverageLexicalV2CheapSharedFieldCoverage = {
+	coversAllMatchedPrimaryUnitsInOneField: false,
+	maxDistinctPrimaryUnitsInSameField: 0,
+};

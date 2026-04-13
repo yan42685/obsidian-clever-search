@@ -41,6 +41,17 @@ describe("coverage lexical v2 comparator signals", () => {
 				averageDistance: 2,
 				preservesSurfaceOrder: true,
 			},
+			cheapExactWitnessSummary: {
+				intactSurfacePrimaryUnitKeys: [
+					createPrimaryUnitKey(0, "ai"),
+					createPrimaryUnitKey(1, "exam"),
+				],
+				matchedPrimaryUnitExactWitnesses: [],
+				maxAdjacentExactMatchedPrimaryRunLength: 0,
+				adjacentExactMatchedPrimaryUnitCount: 0,
+				adjacencyField: null,
+				adjacentExactMatchedPrimaryUnitKeys: [],
+			},
 		};
 		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, evidence);
 
@@ -50,6 +61,16 @@ describe("coverage lexical v2 comparator signals", () => {
 			totalGroupCount: 2,
 			preservesVisibleGrouping: true,
 			preservesCrossScriptCoverage: true,
+		});
+		expect(candidate.cheapExactPrimaryContiguity).toEqual({
+			intactExactSurfaceGroupCount: 2,
+			intactExactPrimaryUnitCount: 2,
+			maxAdjacentExactMatchedPrimaryRunLength: 0,
+			adjacentExactMatchedPrimaryUnitCount: 0,
+		});
+		expect(candidate.cheapSharedFieldCoverage).toEqual({
+			coversAllMatchedPrimaryUnitsInOneField: true,
+			maxDistinctPrimaryUnitsInSameField: 2,
 		});
 		expect(candidate.matchedPrimaryUnitFieldProfile).toEqual({
 			basenameScore: 1,
@@ -140,6 +161,10 @@ describe("coverage lexical v2 comparator signals", () => {
 				},
 			],
 		});
+		expect(candidate.cheapSharedFieldCoverage).toEqual({
+			coversAllMatchedPrimaryUnitsInOneField: false,
+			maxDistinctPrimaryUnitsInSameField: 1,
+		});
 	});
 
 	test("does not let fallback-only evidence count as primary coverage", () => {
@@ -160,10 +185,156 @@ describe("coverage lexical v2 comparator signals", () => {
 
 		expect(candidate.distinctMatchedPrimaryQueryUnitCount).toBe(0);
 		expect(candidate.surfaceCoverageShape.matchedGroupCount).toBe(0);
+		expect(candidate.cheapExactPrimaryContiguity).toEqual({
+			intactExactSurfaceGroupCount: 0,
+			intactExactPrimaryUnitCount: 0,
+			maxAdjacentExactMatchedPrimaryRunLength: 0,
+			adjacentExactMatchedPrimaryUnitCount: 0,
+		});
+		expect(candidate.cheapSharedFieldCoverage).toEqual({
+			coversAllMatchedPrimaryUnitsInOneField: false,
+			maxDistinctPrimaryUnitsInSameField: 0,
+		});
 		expect(candidate.matchedPrimaryUnitFieldProfile.bodyScore).toBe(0);
 		expect(candidate.primaryUnitMatchQuality.hanExactCount).toBe(0);
 		expect(candidate.primaryUnitProximityScore).toBeUndefined();
 	});
+
+	test("counts Han surface-segment exact evidence in cheap exact contiguity", () => {
+		const system = "\u7cfb\u7edf";
+		const agent = "\u4ee3\u7406";
+		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis(`${system}${agent}`, [system, agent]);
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
+			candidateId: "doc-han-surface",
+			stableDeterministicKey: "a",
+			matchedPrimaryUnits: [
+				{
+					normalizedText: system,
+					surfaceGroupIndex: 0,
+					surfaceKind: "han",
+					strongestField: "body",
+					matchQuality: "exact",
+				},
+				{
+					normalizedText: agent,
+					surfaceGroupIndex: 0,
+					surfaceKind: "han",
+					strongestField: "body",
+					matchQuality: "exact",
+				},
+			],
+			cheapExactWitnessSummary: {
+				intactSurfacePrimaryUnitKeys: [createPrimaryUnitKey(0, `${system}${agent}`)],
+				matchedPrimaryUnitExactWitnesses: [],
+				maxAdjacentExactMatchedPrimaryRunLength: 0,
+				adjacentExactMatchedPrimaryUnitCount: 0,
+				adjacencyField: null,
+				adjacentExactMatchedPrimaryUnitKeys: [],
+			},
+		});
+
+		expect(candidate.cheapExactPrimaryContiguity).toEqual({
+			intactExactSurfaceGroupCount: 1,
+			intactExactPrimaryUnitCount: 1,
+			maxAdjacentExactMatchedPrimaryRunLength: 0,
+			adjacentExactMatchedPrimaryUnitCount: 0,
+		});
+		expect(candidate.cheapSharedFieldCoverage).toEqual({
+			coversAllMatchedPrimaryUnitsInOneField: true,
+			maxDistinctPrimaryUnitsInSameField: 2,
+		});
+	});
+
+	test("uses exact witness summary to count adjacency without needing intact surface exact", () => {
+		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("foo bar", ["foo", "bar"]);
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
+			candidateId: "doc-adjacent",
+			stableDeterministicKey: "a",
+			matchedPrimaryUnits: [
+				{
+					normalizedText: "foo",
+					surfaceGroupIndex: 0,
+					surfaceKind: "latin",
+					strongestField: "headings",
+					matchQuality: "exact",
+				},
+				{
+					normalizedText: "bar",
+					surfaceGroupIndex: 1,
+					surfaceKind: "latin",
+					strongestField: "headings",
+					matchQuality: "exact",
+				},
+			],
+			cheapExactWitnessSummary: {
+				intactSurfacePrimaryUnitKeys: [],
+				matchedPrimaryUnitExactWitnesses: [
+					{
+						field: "headings",
+						unitKey: createPrimaryUnitKey(0, "foo"),
+						surfaceGroupIndex: 0,
+						start: 4,
+						end: 4,
+					},
+					{
+						field: "headings",
+						unitKey: createPrimaryUnitKey(1, "bar"),
+						surfaceGroupIndex: 1,
+						start: 5,
+						end: 5,
+					},
+				],
+				maxAdjacentExactMatchedPrimaryRunLength: 2,
+				adjacentExactMatchedPrimaryUnitCount: 2,
+				adjacencyField: "headings",
+				adjacentExactMatchedPrimaryUnitKeys: [
+					createPrimaryUnitKey(0, "foo"),
+					createPrimaryUnitKey(1, "bar"),
+				],
+			},
+		});
+
+		expect(candidate.cheapExactPrimaryContiguity).toEqual({
+			intactExactSurfaceGroupCount: 0,
+			intactExactPrimaryUnitCount: 0,
+			maxAdjacentExactMatchedPrimaryRunLength: 2,
+			adjacentExactMatchedPrimaryUnitCount: 2,
+		});
+	});
+
+	test("lets exact and prefix share the same-field cheap aggregation while fuzzy stays out", () => {
+		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("pre abs misc", ["pre", "abs", "misc"]);
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
+			candidateId: "doc-shared-field",
+			stableDeterministicKey: "a",
+			matchedPrimaryUnits: [
+				{
+					normalizedText: "pre",
+					surfaceGroupIndex: 0,
+					surfaceKind: "latin",
+					strongestField: "body",
+					matchQuality: "prefix",
+				},
+				{
+					normalizedText: "abs",
+					surfaceGroupIndex: 1,
+					surfaceKind: "latin",
+					strongestField: "body",
+					matchQuality: "exact",
+				},
+				{
+					normalizedText: "misc",
+					surfaceGroupIndex: 2,
+					surfaceKind: "latin",
+					strongestField: "headings",
+					matchQuality: "fuzzy",
+				},
+			],
+		});
+
+		expect(candidate.cheapSharedFieldCoverage).toEqual({
+			coversAllMatchedPrimaryUnitsInOneField: true,
+			maxDistinctPrimaryUnitsInSameField: 2,
+		});
+	});
 });
-
-

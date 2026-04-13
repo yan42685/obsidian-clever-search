@@ -1,6 +1,8 @@
 export type CoverageLexicalV2ComparatorLayer =
 	| "distinctMatchedPrimaryQueryUnitCount"
 	| "surfaceCoverageShape"
+	| "cheapExactPrimaryContiguity"
+	| "cheapSharedFieldCoverage"
 	| "matchedPrimaryUnitFieldProfile"
 	| "primaryUnitMatchQuality"
 	| "primaryUnitProximityScore"
@@ -39,6 +41,35 @@ export type CoverageLexicalV2MatchedPrimaryUnitFieldProfile = {
 	folderScore: number;
 	tagScore: number;
 	bodyScore: number;
+};
+
+export type CoverageLexicalV2CheapExactPrimaryContiguity = {
+	intactExactSurfaceGroupCount: number;
+	intactExactPrimaryUnitCount: number;
+	maxAdjacentExactMatchedPrimaryRunLength: number;
+	adjacentExactMatchedPrimaryUnitCount: number;
+};
+
+export type CoverageLexicalV2CheapExactWitness = {
+	field: Extract<CoverageLexicalV2MatchField, "basename" | "aliases" | "headings" | "body">;
+	unitKey: string;
+	surfaceGroupIndex: number;
+	start: number;
+	end: number;
+};
+
+export type CoverageLexicalV2CheapExactWitnessSummary = {
+	intactSurfacePrimaryUnitKeys: string[];
+	matchedPrimaryUnitExactWitnesses: CoverageLexicalV2CheapExactWitness[];
+	maxAdjacentExactMatchedPrimaryRunLength: number;
+	adjacentExactMatchedPrimaryUnitCount: number;
+	adjacencyField?: CoverageLexicalV2CheapExactWitness["field"] | null;
+	adjacentExactMatchedPrimaryUnitKeys?: string[];
+};
+
+export type CoverageLexicalV2CheapSharedFieldCoverage = {
+	coversAllMatchedPrimaryUnitsInOneField: boolean;
+	maxDistinctPrimaryUnitsInSameField: number;
 };
 
 export type CoverageLexicalV2PrimaryUnitMatchQuality = {
@@ -80,6 +111,7 @@ export type CoverageLexicalV2ComparatorEvidence = {
 	candidateId: string;
 	stableDeterministicKey: string;
 	matchedPrimaryUnits: CoverageLexicalV2MatchedPrimaryUnitEvidence[];
+	cheapExactWitnessSummary?: CoverageLexicalV2CheapExactWitnessSummary;
 	bestWindow?: CoverageLexicalV2BestWindowEvidence | null;
 };
 
@@ -87,6 +119,8 @@ export type CoverageLexicalV2ComparatorCandidate = {
 	candidateId: string;
 	distinctMatchedPrimaryQueryUnitCount: number;
 	surfaceCoverageShape: CoverageLexicalV2SurfaceCoverageShape;
+	cheapExactPrimaryContiguity?: CoverageLexicalV2CheapExactPrimaryContiguity;
+	cheapSharedFieldCoverage?: CoverageLexicalV2CheapSharedFieldCoverage;
 	matchedPrimaryUnitFieldProfile: CoverageLexicalV2MatchedPrimaryUnitFieldProfile;
 	primaryUnitMatchQuality: CoverageLexicalV2PrimaryUnitMatchQuality;
 	primaryUnitProximityScore?: CoverageLexicalV2PrimaryUnitProximityScore | null;

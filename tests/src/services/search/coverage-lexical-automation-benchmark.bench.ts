@@ -8,6 +8,22 @@ jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
+jest.mock("src/services/database/database", () => ({
+	Database: class MockDatabase {
+		appendCoverageLexicalV2IndexStoreJournalEntries(): Promise<void> {
+			return Promise.resolve();
+		}
+	},
+}));
+
+jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+	FileSnapshotStore: class MockFileSnapshotStore {
+		readCurrentTexts(): Promise<Map<string, string>> {
+			return Promise.resolve(new Map());
+		}
+	},
+}));
+
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 	Tokenizer: new () => unknown;
 };
@@ -135,6 +151,27 @@ type PhaseTimingSummary = {
 	}>;
 };
 
+type IndexTimingSummary = {
+	batchCount: number;
+	documentCount: number;
+	bodyTokenCount: number;
+	exactTermCount: number;
+	metadataHanBigramCount: number;
+	bodyHanSegmentCount: number;
+	bodyHanLogicalBlockCount: number;
+	totalMeasuredMs: number;
+	phases: Array<{
+		phase: string;
+		totalMs: number;
+		maxMs: number;
+		count: number;
+		unitCount: number;
+		avgMsPerCall: number;
+		avgMsPerUnit: number;
+		shareOfMeasuredMs: number;
+	}>;
+};
+
 type CoverageLexicalBenchmarkDiagnostic =
 	| "index"
 	| "timing"
@@ -235,6 +272,8 @@ type EngineLike = {
 	serialize(): unknown;
 	estimateIndexBytes?(): number | null;
 	getIndexBreakdown?(): Record<string, unknown> | null;
+	resetBenchmarkIndexTiming?(): void;
+	getBenchmarkIndexTimingSummary?(): IndexTimingSummary | null;
 	resetBenchmarkPhaseTiming?(): void;
 	getBenchmarkPhaseTimingSummary?(): PhaseTimingSummary | null;
 	getLastBenchmarkOffloadSearchDebug?():
@@ -2668,10 +2707,13 @@ async function runBenchmark(
 ): Promise<{
 	summary: BenchmarkSummary;
 	outcomes: QueryOutcome[];
+	indexTiming: IndexTimingSummary | null;
 	phaseTiming: PhaseTimingSummary | null;
 }> {
 	registerBenchmarkFileSnapshotStore(documents);
+	engine.resetBenchmarkIndexTiming?.();
 	await engine.addDocuments(documents);
+	const indexTiming = engine.getBenchmarkIndexTimingSummary?.() ?? null;
 	engine.resetBenchmarkPhaseTiming?.();
 
 	const timings: number[] = [];
@@ -2766,6 +2808,7 @@ async function runBenchmark(
 			byGate: buildBenchmarkGateRecord(typeTotals),
 		},
 		outcomes,
+		indexTiming,
 		phaseTiming: engine.getBenchmarkPhaseTimingSummary?.() ?? null,
 	};
 }
@@ -3767,6 +3810,38 @@ function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
 	};
 }
 
+function summarizeIndexTiming(indexTiming: IndexTimingSummary | null) {
+	if (!indexTiming) {
+		return null;
+	}
+	return {
+		batchCount: indexTiming.batchCount,
+		documentCount: indexTiming.documentCount,
+		totalMeasuredMs: round(indexTiming.totalMeasuredMs),
+		perDocumentMs:
+			indexTiming.documentCount > 0
+				? round(indexTiming.totalMeasuredMs / indexTiming.documentCount)
+				: 0,
+		workload: {
+			bodyTokenCount: indexTiming.bodyTokenCount,
+			exactTermCount: indexTiming.exactTermCount,
+			metadataHanBigramCount: indexTiming.metadataHanBigramCount,
+			bodyHanSegmentCount: indexTiming.bodyHanSegmentCount,
+			bodyHanLogicalBlockCount: indexTiming.bodyHanLogicalBlockCount,
+		},
+		topHotPhases: indexTiming.phases.slice(0, 6).map((phase) => ({
+			phase: phase.phase,
+			totalMs: round(phase.totalMs),
+			avgMsPerCall: round(phase.avgMsPerCall),
+			avgMsPerUnit: round(phase.avgMsPerUnit),
+			maxMs: round(phase.maxMs),
+			count: phase.count,
+			unitCount: phase.unitCount,
+			shareOfMeasuredMs: round(phase.shareOfMeasuredMs),
+		})),
+	};
+}
+
 function round(value: number): number {
 	return Number(value.toFixed(3));
 }
@@ -3976,6 +4051,9 @@ describe("coverage lexical automation benchmark", () => {
 		const { CoverageLexicalFileSearchEngine } = require(
 			"src/services/search/coverage-lexical/coverage-lexical-engine",
 		);
+		const { CoverageLexicalV2FileSearchEngine } = require(
+			"src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine",
+		);
 		const coarseSoftGateConfig = resolveCoverageSoftEarlyGateExperimentConfig();
 		const displayPruneConfig = resolveCoverageDisplayPruneExperimentConfig();
 
@@ -4004,7 +4082,7 @@ describe("coverage lexical automation benchmark", () => {
 			true,
 			async () =>
 				createEngineHarness(
-					CoverageLexicalFileSearchEngine,
+					CoverageLexicalV2FileSearchEngine,
 					tokenizer,
 					"coverage-lexical-v2",
 				),
@@ -4455,6 +4533,7 @@ describe("coverage lexical automation benchmark", () => {
 				"[coverage-lexical-automation-benchmark] coverage-phase-timing",
 				JSON.stringify(
 					{
+						indexV2: summarizeIndexTiming(coverageV2Result.indexTiming),
 						v2: summarizePhaseTiming(coverageV2Result.phaseTiming),
 					},
 					null,

@@ -818,6 +818,208 @@ describe("coverage lexical v2 cascade", () => {
 		expect(result.trace.deferredCandidateIdsByLayer.layer4).toEqual([]);
 	});
 
+	test("prefers same-field prefix aggregation before field strength when cheap shared coverage differs", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/split-heading-body.md",
+					basenameText: "misc",
+					headingsText: "present",
+					bodyText: "absolute",
+				},
+				{
+					docId: 2,
+					path: "notes/grouped-body.md",
+					basenameText: "misc",
+					bodyText: "present absolute",
+				},
+			],
+			postings: {
+				"headings:present": [1],
+				"body:present": [2],
+				"body:absolute": [1, 2],
+			},
+			lexicon: ["absolute", "present"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "pres abso",
+			queryTerms: ["pres", "abso"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("pres abso", ["pres", "abso"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: {
+				includePrefix: true,
+			},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/grouped-body.md",
+			"notes/split-heading-body.md",
+		]);
+	});
+
+	test("prefers Han body documents with intact surface exact witness before split term-only matches", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/split-system-agent.md",
+					basenameText: "misc",
+					bodyText: "做代理并单独设置系统日期",
+				},
+				{
+					docId: 2,
+					path: "notes/contiguous-system-agent.md",
+					basenameText: "misc",
+					bodyText: "使用 clash verge rev 开启系统代理",
+				},
+			],
+			postings: {
+				"body:系统": [1, 2],
+				"body:代理": [1, 2],
+			},
+			lexicon: ["代理", "系统"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "系统代理",
+			queryTerms: ["系统", "代理"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("系统代理", ["系统", "代理"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/contiguous-system-agent.md",
+			"notes/split-system-agent.md",
+		]);
+	});
+
+	test("prefers Han body adjacency before scattered exact term hits when intact surface exact is absent", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/scattered-system-agent.md",
+					basenameText: "misc",
+					bodyText: "系统 设置 代理",
+				},
+				{
+					docId: 2,
+					path: "notes/adjacent-system-agent.md",
+					basenameText: "misc",
+					bodyText: "系统 代理",
+				},
+			],
+			postings: {
+				"body:系统": [1, 2],
+				"body:代理": [1, 2],
+			},
+			lexicon: ["代理", "系统"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "系统代理",
+			queryTerms: ["系统", "代理"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("系统代理", ["系统", "代理"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/adjacent-system-agent.md",
+			"notes/scattered-system-agent.md",
+		]);
+	});
+
+	test("prefers Han metadata intact exact before split heading hits", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/intact-heading-system-agent.md",
+					basenameText: "misc",
+					headingsText: "系统代理",
+				},
+				{
+					docId: 2,
+					path: "notes/split-heading-system-agent.md",
+					basenameText: "misc",
+					headingsText: "系统 设置 代理",
+				},
+			],
+			postings: {
+				"headings:系统": [1, 2],
+				"headings:代理": [1, 2],
+			},
+			lexicon: ["代理", "系统"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "系统代理",
+			queryTerms: ["系统", "代理"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("系统代理", ["系统", "代理"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/intact-heading-system-agent.md",
+			"notes/split-heading-system-agent.md",
+		]);
+	});
+
+	test("prefers non-Han metadata adjacency before scattered metadata exact hits", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/scattered-design-pattern.md",
+					basenameText: "misc",
+					headingsText: "design modern pattern",
+				},
+				{
+					docId: 2,
+					path: "notes/adjacent-design-pattern.md",
+					basenameText: "misc",
+					headingsText: "design pattern",
+				},
+			],
+			postings: {
+				"headings:design": [1, 2],
+				"headings:pattern": [1, 2],
+			},
+			lexicon: ["design", "modern", "pattern"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "design pattern",
+			queryTerms: ["design", "pattern"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(
+				"design pattern",
+				["design", "pattern"],
+			),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/adjacent-design-pattern.md",
+			"notes/scattered-design-pattern.md",
+		]);
+	});
+
 	test("uses the Han backstop to admit a verified metadata hit without promoting one-sided metadata noise", async () => {
 		const queryText = "\u59d4\u5458";
 		const { reader } = createStorageReader({
@@ -1150,4 +1352,3 @@ describe("coverage lexical v2 cascade", () => {
 	});
 
 });
-

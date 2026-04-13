@@ -22,6 +22,11 @@ export type CoverageLexicalV2CandidateCascadeHanBackstopStats = {
 	bigramCoverageRatio: number;
 };
 
+export type CoverageLexicalV2CandidateCascadeHanExactWitness = {
+	start: number;
+	end: number;
+};
+
 export type CoverageLexicalV2CandidateCascadeHanLogicalBlockDescriptor = {
 	blockId: number;
 	docId: number;
@@ -113,6 +118,7 @@ export type CoverageLexicalV2CandidateCascadeStorageReader = {
 	getBodyHanLogicalBlockDescriptor(
 		blockId: number,
 	): CoverageLexicalV2CandidateCascadeHanLogicalBlockDescriptor | null;
+	getBodyHanLogicalBlockIds(docId: number): readonly number[] | undefined;
 	prefetchBodyHanExactBlocks(
 		blockIds: readonly number[],
 		budget: CoverageLexicalV2CandidateCascadeHanBlockExactPrefetchBudget,
@@ -122,6 +128,16 @@ export type CoverageLexicalV2CandidateCascadeStorageReader = {
 		normalizedText: string,
 		bigrams: readonly string[],
 	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null;
+	getBodyHanExactBlockWitness?(
+		blockId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanExactWitness | null;
+	getBodyHanExactDocumentWitness(
+		docId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanExactWitness | null;
 	collectLatinPrefixTerms(queryTerm: string, cap: number): readonly string[];
 	collectLatinFuzzyTerms(
 		queryTerm: string,

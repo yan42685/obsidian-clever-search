@@ -631,6 +631,27 @@ over tokenizer output alone.
 
 Lexical final ranking should use the following ordered comparator layers.
 
+1. `distinctMatchedPrimaryQueryUnitCount`
+2. `surfaceCoverageShape`
+3. `cheapExactPrimaryContiguity`
+4. `cheapSharedFieldCoverage`
+5. `matchedPrimaryUnitFieldProfile`
+6. `primaryUnitMatchQuality`
+7. `primaryUnitProximityScore`
+8. stable deterministic fallback
+
+Layer monotonicity is mandatory in this order:
+
+- each later layer may only refine the unresolved bucket left by the previous
+  layers
+- a later layer must not overturn candidates that an earlier layer already
+  split into different buckets
+- late verification and proximity may only reorder the top bucket that remains
+  tied after all cheap layers, field placement, and lexical match quality
+  finish
+- stable fallback only resolves candidates that remain exactly tied after every
+  lexical layer above
+
 ### 1. `distinctMatchedPrimaryQueryUnitCount`
 
 Compare how many distinct **primary** query units were matched.
@@ -674,6 +695,39 @@ Locked V2 decision:
 - it is not a semantic requiredness layer
 - it should answer whether the visible query grouping is preserved, not whether
   the system inferred a deeper semantic intent
+
+### `cheapExactPrimaryContiguity`
+
+This is the first cheap structural refinement after surface coverage.
+
+It answers only exact continuity questions, using exact witnesses only.
+
+The active version now covers two exact-only sub-signals inside the same
+layer:
+
+- intact surface exact continuity for surface-derived primary units
+- adjacent exact continuity for distinct matched primary units that form a
+  natural same-field run
+
+The active runtime covers:
+
+- Han `metadata + body`
+- non-Han `metadata`
+
+Non-Han body exact continuity remains intentionally deferred to a later
+storage design.
+
+It does not compare field priority, token windows, or prefix/fuzzy strength.
+
+### `cheapSharedFieldCoverage`
+
+This is the second cheap structural refinement.
+
+It answers only whether the already matched primary units gather in one shared
+field.
+
+It may use `exact + prefix` evidence for that aggregation check, but it does
+not compare field priority, span width, token adjacency, or fuzzy evidence.
 
 ### 3. `matchedPrimaryUnitFieldProfile`
 
@@ -892,10 +946,15 @@ Final lexical ranking should use:
 
 1. `distinctMatchedPrimaryQueryUnitCount`
 2. `surfaceCoverageShape`
-3. `matchedPrimaryUnitFieldProfile`
-4. `primaryUnitMatchQuality`
-5. `primaryUnitProximityScore`
-6. stable deterministic fallback
+3. `cheapExactPrimaryContiguity`
+4. `cheapSharedFieldCoverage`
+5. `matchedPrimaryUnitFieldProfile`
+6. `primaryUnitMatchQuality`
+7. `primaryUnitProximityScore`
+8. stable deterministic fallback
+
+Each layer may only refine the bucket left unresolved by the layers above it.
+No later layer may overturn an earlier bucket split.
 
 No evidence mass.
 
@@ -945,6 +1004,8 @@ won because of:
 
 - `distinctMatchedPrimaryQueryUnitCount`
 - `surfaceCoverageShape`
+- `cheapExactPrimaryContiguity`
+- `cheapSharedFieldCoverage`
 - `matchedPrimaryUnitFieldProfile`
 - `primaryUnitMatchQuality`
 - `primaryUnitProximityScore`
@@ -1014,6 +1075,15 @@ Preferred lexical order:
     candidate sourcing -> layer-1 frontier planning -> layer-2/3/4 complete-bucket narrowing -> highest-unresolved-bucket verification -> top-bucket proximity resolution -> display
   - cheap comparator signals are now cached once per candidate and reused through layer-2/3/4 narrowing; verification only patches proximity on the resolved top bucket
   - bounded fallback remains discovery-only in normal ranking, while a narrow Han salvage path is available only when normal layer-1 coverage and fuzzy salvage are both globally absent
+    - cheap continuity layering follow-up (2026-04-13): completed
+      - the active comparator order is now
+        `distinctMatchedPrimaryQueryUnitCount -> surfaceCoverageShape -> cheapExactPrimaryContiguity -> cheapSharedFieldCoverage -> matchedPrimaryUnitFieldProfile -> primaryUnitMatchQuality -> primaryUnitProximityScore -> stable fallback`
+      - `cheapExactPrimaryContiguity` is now a unified exact-only continuity layer: it rewards both intact surface-derived exact witnesses and adjacent exact matched-primary runs, while keeping Han body on the existing Han exact witness path and adding non-Han metadata exact continuity without hydrating body tokens or changing storage schema
+      - the active cheap-exact path now consumes only unified `cheapExactWitnessSummary`; the older fallback key path has been removed, and Han body exact blocks are prefetched once per query-local logical block so cheap exact continuity can see body witnesses before verification without repeatedly cold-requesting the same block
+      - `cheapSharedFieldCoverage` now gives an `exact + prefix` same-field aggregation tie-break before field priority, so grouped body matches can beat split heading/body matches while field priority still decides ties inside the same aggregation bucket
+      - the active candidate-cascade and comparator now follow explicit layer monotonicity: each later layer only refines the previous bucket, and proximity still reorders only the final top bucket
+      - Han bigram/backstop evidence remains gate-only in this layer; only real exact witnesses may score continuity
+      - focused comparator-signal, comparator-layer, and candidate-cascade regression coverage now guards Han intact exact preference, Han exact adjacency preference, non-Han metadata exact adjacency, shared-field prefix aggregation, and the no-cross-bucket ordering contract
   - prefix refinement follow-up (2026-04-13): completed
     - Latin prefix sourcing is now field-scoped instead of always sweeping every source field: normal metadata prefix only scans metadata fields, normal body prefix only scans `body`, and short metadata assist only scans `basename / aliases / folder / tag`
     - short Latin prefix budgets are now length-sensitive in the active path: `>=5` keeps normal metadata/body prefix sourcing, `4` keeps full metadata prefix with reduced body prefix, and `3` disables normal body prefix while retaining bounded metadata prefix
@@ -1414,9 +1484,15 @@ Fuzzy salvage:
     highest layer-1 buckets downward until the configured frontier target is
     covered
   - lower buckets are deferred first, not hard-dropped immediately
-  - layers 2-4 also retain complete prefix-vector buckets only; if retained
+  - layers 2-4 also retain complete comparator buckets only; if retained
     buckets do not yet cover the return target, the next deferred bucket is
     pulled back in full before the next layer continues
+  - the active stage mapping is:
+    - layer-2: `surfaceCoverageShape -> cheapExactPrimaryContiguity`
+    - layer-3: `cheapSharedFieldCoverage -> matchedPrimaryUnitFieldProfile`
+    - layer-4: `primaryUnitMatchQuality`
+  - this mapping is strictly monotonic: each layer may only refine the buckets
+    produced by the layer above it, never reorder across already-split buckets
 
   Fallback role in the cascade:
 
@@ -1446,6 +1522,8 @@ Fuzzy salvage:
   - if the highest unresolved bucket exceeds that cap, proximity is skipped for
     the whole bucket and stable deterministic fallback resolves the remaining
     ties
+  - proximity is not allowed to reorder any candidate outside that highest
+    unresolved bucket
 
   Current implementation note:
 

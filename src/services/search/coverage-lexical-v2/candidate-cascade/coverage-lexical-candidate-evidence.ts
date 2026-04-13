@@ -78,6 +78,7 @@ type CoverageLexicalV2CandidateCascadeFieldOccurrence = {
 type CoverageLexicalV2CandidateCascadeTokenIndex = {
 	normalizedTokens: readonly string[];
 	positionsByToken: ReadonlyMap<string, readonly number[]>;
+	cumulativeTokenLengths: readonly number[];
 };
 
 type CoverageLexicalV2CandidateCascadeWindowSummary = {
@@ -333,6 +334,8 @@ function buildCoverageLexicalV2CandidateCascadeTokenIndex(
 	return {
 		normalizedTokens,
 		positionsByToken,
+		cumulativeTokenLengths:
+			buildCoverageLexicalV2CandidateCascadeCumulativeTokenLengths(normalizedTokens),
 	};
 }
 
@@ -376,7 +379,7 @@ function buildCoverageLexicalV2CandidateCascadeFieldTokenOccurrences(
 			continue;
 		}
 		for (const [start, end] of collectCoverageLexicalV2CandidateCascadeExactTokenSpans(
-			tokenIndex.normalizedTokens,
+			tokenIndex,
 			relevantUnit.normalizedText,
 		)) {
 			occurrences.push(
@@ -469,13 +472,22 @@ function buildCoverageLexicalV2CandidateCascadeFieldOccurrence(
 }
 
 function collectCoverageLexicalV2CandidateCascadeExactTokenSpans(
-	normalizedTokens: readonly string[],
+	tokenIndex: CoverageLexicalV2CandidateCascadeTokenIndex,
 	needle: string,
 ): Array<readonly [number, number]> {
 	const spans: Array<readonly [number, number]> = [];
-	for (let start = 0; start < normalizedTokens.length; start += 1) {
+	const candidateStartPositions =
+		collectCoverageLexicalV2CandidateCascadeNeedleStartPositions(tokenIndex, needle);
+	const normalizedTokens = tokenIndex.normalizedTokens;
+	const needleLength = needle.length;
+	for (const start of candidateStartPositions) {
 		let joined = "";
-		for (let end = start; end < normalizedTokens.length; end += 1) {
+		const maxEndExclusive = findCoverageLexicalV2CandidateCascadeMaxEndExclusive(
+			tokenIndex.cumulativeTokenLengths,
+			start,
+			needleLength,
+		);
+		for (let end = start; end < maxEndExclusive; end += 1) {
 			joined += normalizedTokens[end];
 			if (joined === needle) {
 				spans.push([start, end]);
@@ -510,6 +522,51 @@ function collectCoverageLexicalV2CandidateCascadeExactTextWitnesses(
 		searchStart = foundAt + 1;
 	}
 	return witnesses;
+}
+
+function collectCoverageLexicalV2CandidateCascadeNeedleStartPositions(
+	tokenIndex: CoverageLexicalV2CandidateCascadeTokenIndex,
+	needle: string,
+): number[] {
+	const candidateStartPositions: number[] = [];
+	for (const [token, positions] of tokenIndex.positionsByToken.entries()) {
+		if (!needle.startsWith(token)) {
+			continue;
+		}
+		candidateStartPositions.push(...positions);
+	}
+	return candidateStartPositions.sort((left, right) => left - right);
+}
+
+function buildCoverageLexicalV2CandidateCascadeCumulativeTokenLengths(
+	normalizedTokens: readonly string[],
+): number[] {
+	const cumulativeTokenLengths = new Array<number>(normalizedTokens.length + 1);
+	cumulativeTokenLengths[0] = 0;
+	for (let index = 0; index < normalizedTokens.length; index += 1) {
+		cumulativeTokenLengths[index + 1] =
+			cumulativeTokenLengths[index] + normalizedTokens[index].length;
+	}
+	return cumulativeTokenLengths;
+}
+
+function findCoverageLexicalV2CandidateCascadeMaxEndExclusive(
+	cumulativeTokenLengths: readonly number[],
+	start: number,
+	maxSpanLength: number,
+): number {
+	let low = start + 1;
+	let high = cumulativeTokenLengths.length;
+	while (low < high) {
+		const mid = Math.ceil((low + high) / 2);
+		const spanLength = cumulativeTokenLengths[mid] - cumulativeTokenLengths[start];
+		if (spanLength <= maxSpanLength) {
+			low = mid;
+			continue;
+		}
+		high = mid - 1;
+	}
+	return low;
 }
 
 function sortCoverageLexicalV2CandidateCascadeFieldOccurrences(
