@@ -16,6 +16,15 @@ export type CoverageLexicalV2MatchField =
 
 export type CoverageLexicalV2MatchQualityKind = "exact" | "prefix" | "fuzzy";
 
+export type CoverageLexicalV2PrefixWitnessLite = {
+	field: CoverageLexicalV2MatchField;
+	surfaceText: string;
+	cleanBoundary: boolean;
+	compoundPenalty: boolean;
+	surfaceCompletionGain: number;
+	fieldDocCount: number;
+};
+
 export type CoverageLexicalV2SurfaceCoverageShape = {
 	matchedGroupCount: number;
 	totalGroupCount: number;
@@ -37,10 +46,12 @@ export type CoverageLexicalV2PrimaryUnitMatchQuality = {
 	latinPrefixCount: number;
 	latinFuzzyCount: number;
 	hanExactCount: number;
+	metadataPrefixWitnesses?: readonly CoverageLexicalV2PrefixWitnessLite[];
 };
 
 export type CoverageLexicalV2PrimaryUnitProximityScore = {
 	matchedUnitCount: number;
+	contiguousSurfaceGroupCount?: number;
 	windowWidth: number;
 	averageDistance: number;
 	preservesSurfaceOrder: boolean;
@@ -53,11 +64,13 @@ export type CoverageLexicalV2MatchedPrimaryUnitEvidence = {
 	strongestField: CoverageLexicalV2MatchField;
 	corroboratedFields?: CoverageLexicalV2MatchField[];
 	matchQuality: CoverageLexicalV2MatchQualityKind;
+	prefixWitnessLite?: CoverageLexicalV2PrefixWitnessLite;
 };
 
 export type CoverageLexicalV2BestWindowEvidence = {
 	field?: CoverageLexicalV2MatchField;
 	matchedUnitKeys: string[];
+	contiguousSurfaceGroupCount?: number;
 	windowWidth: number;
 	averageDistance: number;
 	preservesSurfaceOrder: boolean;

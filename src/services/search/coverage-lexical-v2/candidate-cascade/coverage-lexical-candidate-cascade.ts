@@ -46,6 +46,7 @@ import {
 	buildCoverageLexicalV2CandidateCascadeMatchedPrimaryUnits,
 	type CoverageLexicalV2CandidateCascadeDocumentLexicalState,
 	type CoverageLexicalV2CandidateCascadeFieldTerms,
+	type CoverageLexicalV2CandidateCascadePrefixHint,
 	type CoverageLexicalV2CandidateCascadePrimaryUnitDefinition,
 } from "./coverage-lexical-candidate-evidence";
 import {
@@ -86,6 +87,19 @@ type CoverageLexicalV2CascadeCandidateSourceFlags = {
 	hasBodyExact: boolean;
 };
 
+type CoverageLexicalV2CascadeFieldMatchPresence = {
+	metadataMatched: boolean;
+	bodyMatched: boolean;
+};
+
+type CoverageLexicalV2CascadeAdaptivePrefixPlan = {
+	metadataTermCap: number;
+	bodyTermCap: number;
+	assistTermCap: number;
+	prefixCollectionCap: number;
+	assistDocCap: number;
+};
+
 type CoverageLexicalV2CascadeHydrationStatus =
 	| "not_requested"
 	| "prefetched";
@@ -115,6 +129,7 @@ export type CoverageLexicalV2CascadeCandidateState = {
 	matchedFieldsByPrimaryUnit: Map<number, Set<CoverageLexicalV2MatchField>>;
 	bestQualityByPrimaryUnit: Map<number, CoverageLexicalV2MatchQualityKind>;
 	fallbackMatchedSurfaceGroups: Set<number>;
+	prefixHintsByPrimaryUnit: Map<number, CoverageLexicalV2CandidateCascadePrefixHint>;
 };
 
 export type CoverageLexicalV2CandidateCascadeLayerMode =
@@ -435,6 +450,15 @@ const METADATA_FIELDS: readonly CoverageLexicalV2CandidateCascadePostingField[] 
 	"tag",
 ];
 
+const ASSIST_METADATA_FIELDS: readonly CoverageLexicalV2CandidateCascadePostingField[] = [
+	"basename",
+	"aliases",
+	"folder",
+	"tag",
+];
+
+const BODY_ONLY_FIELDS: readonly CoverageLexicalV2CandidateCascadePostingField[] = ["body"];
+
 export function resolveCoverageLexicalV2CandidateCascadePolicy(
 	maxItemResults: number,
 ): CoverageLexicalV2CandidateCascadePolicy {
@@ -492,6 +516,51 @@ function readCoverageLexicalV2CascadeOverride(
 	return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function resolveCoverageLexicalV2CascadeAdaptivePrefixPlan(
+	queryTerm: string,
+	policy: CoverageLexicalV2CandidateCascadePolicy,
+): CoverageLexicalV2CascadeAdaptivePrefixPlan {
+	const length = queryTerm.length;
+	const halfPrefixCap = Math.ceil(policy.prefixTermCapPerUnit / 2);
+	const assistTermCap = length >= 3 && length <= 4
+		? Math.min(8, Math.ceil(policy.prefixTermCapPerUnit / 4))
+		: 0;
+	if (length >= 5) {
+		return {
+			metadataTermCap: policy.prefixTermCapPerUnit,
+			bodyTermCap: policy.prefixTermCapPerUnit,
+			assistTermCap: 0,
+			prefixCollectionCap: policy.prefixTermCapPerUnit,
+			assistDocCap: policy.returnTarget,
+		};
+	}
+	if (length === 4) {
+		return {
+			metadataTermCap: policy.prefixTermCapPerUnit,
+			bodyTermCap: halfPrefixCap,
+			assistTermCap,
+			prefixCollectionCap: Math.max(halfPrefixCap, policy.prefixTermCapPerUnit + assistTermCap),
+			assistDocCap: policy.returnTarget,
+		};
+	}
+	if (length === 3) {
+		return {
+			metadataTermCap: halfPrefixCap,
+			bodyTermCap: 0,
+			assistTermCap,
+			prefixCollectionCap: halfPrefixCap + assistTermCap,
+			assistDocCap: policy.returnTarget,
+		};
+	}
+	return {
+		metadataTermCap: 0,
+		bodyTermCap: 0,
+		assistTermCap: 0,
+		prefixCollectionCap: 0,
+		assistDocCap: policy.returnTarget,
+	};
+}
+
 export async function searchCoverageLexicalV2CandidateCascade(
 	request: CoverageLexicalV2CandidateCascadeRequest,
 ): Promise<CoverageLexicalV2CandidateCascadeResult> {
@@ -515,6 +584,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	);
 	const candidateStateByDocId = new Map<number, CoverageLexicalV2CascadeCandidateState>();
 	const prefixDocIds = new Set<number>();
+	const assistDocIds = new Set<number>();
 	const fuzzyDocIds = new Set<number>();
 	const hanBackstopDocIds = new Set<number>();
 	const hanBackstopMetrics = createCoverageLexicalV2EmptyHanBackstopSourceMetrics();
@@ -530,14 +600,17 @@ export async function searchCoverageLexicalV2CandidateCascade(
 			primaryUnitIndex,
 		] as const),
 	);
+	const metadataExactByPrimaryUnit = lexicalPrimaryUnits.map(() => false);
+	const metadataPrefixByPrimaryUnit = lexicalPrimaryUnits.map(() => false);
 
 	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
-		collectCoverageLexicalV2CascadeExactMatches(
+		const exactPresence = collectCoverageLexicalV2CascadeExactMatches(
 			candidateStateByDocId,
 			primaryUnit,
 			primaryUnitIndex,
 			request.storageReader,
 		);
+		metadataExactByPrimaryUnit[primaryUnitIndex] = exactPresence.metadataMatched;
 	});
 	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
 		if (
@@ -546,11 +619,31 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		) {
 			return;
 		}
+		const prefixPlan = resolveCoverageLexicalV2CascadeAdaptivePrefixPlan(primaryUnit.normalizedText, policy);
+		if (prefixPlan.prefixCollectionCap <= 0) {
+			return;
+		}
 		const prefixTerms = request.storageReader.collectLatinPrefixTerms(
 			primaryUnit.normalizedText,
-			policy.prefixTermCapPerUnit,
+			prefixPlan.prefixCollectionCap,
 		);
-		for (const prefixTerm of prefixTerms) {
+		for (const prefixTerm of prefixTerms.slice(0, prefixPlan.metadataTermCap)) {
+			const matchPresence = collectCoverageLexicalV2CascadeExpandedMatches(
+				candidateStateByDocId,
+				prefixTerm,
+				primaryUnit,
+				primaryUnitIndex,
+				"prefix",
+				request.storageReader,
+				prefixDocIds,
+				policy.prefixDocCapPerQuery,
+				METADATA_FIELDS,
+			);
+			if (matchPresence.metadataMatched) {
+				metadataPrefixByPrimaryUnit[primaryUnitIndex] = true;
+			}
+		}
+		for (const prefixTerm of prefixTerms.slice(0, prefixPlan.bodyTermCap)) {
 			collectCoverageLexicalV2CascadeExpandedMatches(
 				candidateStateByDocId,
 				prefixTerm,
@@ -560,6 +653,26 @@ export async function searchCoverageLexicalV2CandidateCascade(
 				request.storageReader,
 				prefixDocIds,
 				policy.prefixDocCapPerQuery,
+				BODY_ONLY_FIELDS,
+			);
+		}
+		if (metadataExactByPrimaryUnit[primaryUnitIndex] || metadataPrefixByPrimaryUnit[primaryUnitIndex]) {
+			return;
+		}
+		for (const prefixTerm of prefixTerms.slice(
+			prefixPlan.metadataTermCap,
+			prefixPlan.metadataTermCap + prefixPlan.assistTermCap,
+		)) {
+			collectCoverageLexicalV2CascadeExpandedMatches(
+				candidateStateByDocId,
+				prefixTerm,
+				primaryUnit,
+				primaryUnitIndex,
+				"prefix",
+				request.storageReader,
+				assistDocIds,
+				prefixPlan.assistDocCap,
+				ASSIST_METADATA_FIELDS,
 			);
 		}
 	});
@@ -865,6 +978,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		await hydrateCoverageLexicalV2CascadeVerificationStates(
 			verificationStates,
 			request.storageReader,
+			policy,
 		);
 		await populateCoverageLexicalV2CandidateCascadeEvidence(
 			evidenceByCandidateId,
@@ -2128,6 +2242,7 @@ async function sourceCoverageLexicalV2CascadeCandidates(
 ): Promise<CoverageLexicalV2HanBackstopSourceResult> {
 	const candidateStateByDocId = new Map<number, CoverageLexicalV2CascadeCandidateState>();
 	const prefixDocIds = new Set<number>();
+	const assistDocIds = new Set<number>();
 	const fuzzyDocIds = new Set<number>();
 	const hanBackstopDocIds = new Set<number>();
 	const hanBackstopMetrics = createCoverageLexicalV2EmptyHanBackstopSourceMetrics();
@@ -2140,25 +2255,48 @@ async function sourceCoverageLexicalV2CascadeCandidates(
 			primaryUnitIndex,
 		] as const),
 	);
+	const metadataExactByPrimaryUnit = lexicalPrimaryUnits.map(() => false);
+	const metadataPrefixByPrimaryUnit = lexicalPrimaryUnits.map(() => false);
 
 	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
-		collectCoverageLexicalV2CascadeExactMatches(
+		const exactPresence = collectCoverageLexicalV2CascadeExactMatches(
 			candidateStateByDocId,
 			primaryUnit,
 			primaryUnitIndex,
 			reader,
 		);
+		metadataExactByPrimaryUnit[primaryUnitIndex] = exactPresence.metadataMatched;
 	});
 
 	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
 		if (!matchOptions.includePrefix || !isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)) {
 			return;
 		}
+		const prefixPlan = resolveCoverageLexicalV2CascadeAdaptivePrefixPlan(primaryUnit.normalizedText, policy);
+		if (prefixPlan.prefixCollectionCap <= 0) {
+			return;
+		}
 		const prefixTerms = reader.collectLatinPrefixTerms(
 			primaryUnit.normalizedText,
-			policy.prefixTermCapPerUnit,
+			prefixPlan.prefixCollectionCap,
 		);
-		for (const prefixTerm of prefixTerms) {
+		for (const prefixTerm of prefixTerms.slice(0, prefixPlan.metadataTermCap)) {
+			const matchPresence = collectCoverageLexicalV2CascadeExpandedMatches(
+				candidateStateByDocId,
+				prefixTerm,
+				primaryUnit,
+				primaryUnitIndex,
+				"prefix",
+				reader,
+				prefixDocIds,
+				policy.prefixDocCapPerQuery,
+				METADATA_FIELDS,
+			);
+			if (matchPresence.metadataMatched) {
+				metadataPrefixByPrimaryUnit[primaryUnitIndex] = true;
+			}
+		}
+		for (const prefixTerm of prefixTerms.slice(0, prefixPlan.bodyTermCap)) {
 			collectCoverageLexicalV2CascadeExpandedMatches(
 				candidateStateByDocId,
 				prefixTerm,
@@ -2168,6 +2306,26 @@ async function sourceCoverageLexicalV2CascadeCandidates(
 				reader,
 				prefixDocIds,
 				policy.prefixDocCapPerQuery,
+				BODY_ONLY_FIELDS,
+			);
+		}
+		if (metadataExactByPrimaryUnit[primaryUnitIndex] || metadataPrefixByPrimaryUnit[primaryUnitIndex]) {
+			return;
+		}
+		for (const prefixTerm of prefixTerms.slice(
+			prefixPlan.metadataTermCap,
+			prefixPlan.metadataTermCap + prefixPlan.assistTermCap,
+		)) {
+			collectCoverageLexicalV2CascadeExpandedMatches(
+				candidateStateByDocId,
+				prefixTerm,
+				primaryUnit,
+				primaryUnitIndex,
+				"prefix",
+				reader,
+				assistDocIds,
+				prefixPlan.assistDocCap,
+				ASSIST_METADATA_FIELDS,
 			);
 		}
 	});
@@ -2238,8 +2396,9 @@ async function populateCoverageLexicalV2CandidateCascadeEvidence(
 		);
 		const matchedPrimaryUnits = buildCoverageLexicalV2CandidateCascadeMatchedPrimaryUnits(
 			candidateCascadePrimaryUnits,
-			documentState.fieldTerms,
+			documentState,
 			matchOptions,
+			candidateState.prefixHintsByPrimaryUnit,
 		);
 		if (matchedPrimaryUnits.length === 0) {
 			continue;
@@ -2259,6 +2418,7 @@ async function populateCoverageLexicalV2CandidateCascadeEvidence(
 async function hydrateCoverageLexicalV2CascadeVerificationStates(
 	verificationStates: readonly CoverageLexicalV2CascadeCandidateState[],
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
+	policy: CoverageLexicalV2CandidateCascadePolicy,
 ): Promise<void> {
 	const docIds = verificationStates
 		.filter((candidateState) => candidateState.hydrationStatus !== "prefetched")
@@ -2267,6 +2427,25 @@ async function hydrateCoverageLexicalV2CascadeVerificationStates(
 		return;
 	}
 	await reader.prefetchBodyTokenSequences(docIds);
+	const requestedBodyHanLogicalBlockIds = Array.from(
+		new Set(
+			verificationStates.flatMap((candidateState) =>
+				candidateState.matchedHanGroupMask.size > 0
+					? [...(reader.getBodyHanLogicalBlockIds(candidateState.docId) ?? [])]
+					: [],
+			),
+		),
+	);
+	if (requestedBodyHanLogicalBlockIds.length > 0) {
+		await reader.prefetchBodyHanExactBlocks(requestedBodyHanLogicalBlockIds, {
+			blockBudget: Math.min(
+				requestedBodyHanLogicalBlockIds.length,
+				Math.max(policy.returnTarget, policy.hanBackstopColdExactDocBudget),
+			),
+			byteBudget: policy.hanBackstopColdExactByteBudget,
+			timeBudgetMs: policy.hanBackstopColdExactTimeBudgetMs,
+		});
+	}
 	for (const candidateState of verificationStates) {
 		candidateState.prefetchedBodyTokenSequence =
 			reader.getBodyTokenSequence(candidateState.docId);
@@ -2317,23 +2496,29 @@ function buildCoverageLexicalV2CandidateCascadeDocumentState(
 		docId: candidateState.docId,
 		path: candidateState.path,
 		stableDeterministicKey: candidateState.stableDeterministicKey,
+		record: candidateState.record,
 		fieldTerms: toCoverageLexicalV2CandidateCascadeFieldTerms(candidateState.fieldTerms),
-		basenameTokenSequence: candidateState.exactQueryTerms.basenameExactQueryTerms.size > 0
+		basenameTokenSequence: candidateState.fieldTerms.basenameTerms.size > 0
 			? tokenizeCoverageLexicalV2CandidateCascadeText(reader, candidateState.record.basenameText)
 			: undefined,
-		aliasTokenSequence: candidateState.exactQueryTerms.aliasExactQueryTerms.size > 0
+		aliasTokenSequence: candidateState.fieldTerms.aliasTerms.size > 0
 			? tokenizeCoverageLexicalV2CandidateCascadeText(reader, candidateState.record.aliasesText)
 			: undefined,
-		headingsTokenSequence: candidateState.exactQueryTerms.headingsExactQueryTerms.size > 0
+		headingsTokenSequence: candidateState.fieldTerms.headingsTerms.size > 0
 			? tokenizeCoverageLexicalV2CandidateCascadeText(reader, candidateState.record.headingsText)
 			: undefined,
 		bodyTokenSequence:
-			includeBodyTokenSequences &&
-			candidateState.exactQueryTerms.bodyExactQueryTerms.size > 0
+			includeBodyTokenSequences && candidateState.fieldTerms.bodyTerms.size > 0
 				? [...(candidateState.prefetchedBodyTokenSequence ??
 						reader.getBodyTokenSequence(candidateState.docId) ??
 						[])]
 				: undefined,
+		getBodyHanExactWitness: (normalizedText, bigrams) =>
+			reader.getBodyHanExactDocumentWitness(
+				candidateState.docId,
+				normalizedText,
+				bigrams,
+			),
 	};
 }
 
@@ -2342,10 +2527,14 @@ function collectCoverageLexicalV2CascadeExactMatches(
 	primaryUnit: CoverageLexicalV2CandidateCascadePrimaryUnitDefinition,
 	primaryUnitIndex: number,
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
-): void {
+): CoverageLexicalV2CascadeFieldMatchPresence {
+	const matchPresence: CoverageLexicalV2CascadeFieldMatchPresence = {
+		metadataMatched: false,
+		bodyMatched: false,
+	};
 	for (const field of SOURCE_FIELDS) {
 		const postings = reader.getPostingMatches(field, primaryUnit.normalizedText);
-		collectCoverageLexicalV2CascadePostingMatches(
+		const matchCount = collectCoverageLexicalV2CascadePostingMatches(
 			target,
 			postings,
 			reader,
@@ -2356,7 +2545,16 @@ function collectCoverageLexicalV2CascadeExactMatches(
 			"exact",
 			true,
 		);
+		if (matchCount <= 0) {
+			continue;
+		}
+		if (field === "body") {
+			matchPresence.bodyMatched = true;
+		} else {
+			matchPresence.metadataMatched = true;
+		}
 	}
+	return matchPresence;
 }
 
 function collectCoverageLexicalV2CascadeExpandedMatches(
@@ -2368,10 +2566,15 @@ function collectCoverageLexicalV2CascadeExpandedMatches(
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 	sourceDocIds: Set<number>,
 	docCap: number,
-): void {
-	for (const field of SOURCE_FIELDS) {
+	fields: readonly CoverageLexicalV2CandidateCascadePostingField[] = SOURCE_FIELDS,
+): CoverageLexicalV2CascadeFieldMatchPresence {
+	const matchPresence: CoverageLexicalV2CascadeFieldMatchPresence = {
+		metadataMatched: false,
+		bodyMatched: false,
+	};
+	for (const field of fields) {
 		const postings = reader.getPostingMatches(field, candidateTerm);
-		collectCoverageLexicalV2CascadePostingMatches(
+		const matchCount = collectCoverageLexicalV2CascadePostingMatches(
 			target,
 			postings,
 			reader,
@@ -2384,7 +2587,16 @@ function collectCoverageLexicalV2CascadeExpandedMatches(
 			sourceDocIds,
 			docCap,
 		);
+		if (matchCount <= 0) {
+			continue;
+		}
+		if (field === "body") {
+			matchPresence.bodyMatched = true;
+		} else {
+			matchPresence.metadataMatched = true;
+		}
 	}
+	return matchPresence;
 }
 
 function collectCoverageLexicalV2CascadeFallbackMatches(
@@ -3248,10 +3460,12 @@ function collectCoverageLexicalV2CascadePostingMatches(
 	isExactQueryMatch: boolean,
 	sourceDocIds?: Set<number>,
 	docCap?: number,
-): void {
+): number {
 	if (!postings) {
-		return;
+		return 0;
 	}
+	let matchCount = 0;
+	const fieldDocCount = postings.length;
 	for (const docIdValue of postings) {
 		const docId = Number(docIdValue);
 		const candidateState = getOrCreateCoverageLexicalV2CascadeCandidateState(
@@ -3272,8 +3486,11 @@ function collectCoverageLexicalV2CascadePostingMatches(
 			primaryUnitIndex,
 			quality,
 			isExactQueryMatch,
+			fieldDocCount,
 		);
+		matchCount += 1;
 	}
+	return matchCount;
 }
 
 function updateCoverageLexicalV2CascadePrimaryEvidence(
@@ -3284,6 +3501,7 @@ function updateCoverageLexicalV2CascadePrimaryEvidence(
 	primaryUnitIndex: number,
 	quality: CoverageLexicalV2MatchQualityKind,
 	isExactQueryMatch: boolean,
+	fieldDocCount: number,
 ): void {
 	addCoverageLexicalV2CascadeFieldTerm(candidateState.fieldTerms, field, matchedTerm);
 	if (isExactQueryMatch) {
@@ -3332,7 +3550,44 @@ function updateCoverageLexicalV2CascadePrimaryEvidence(
 		}
 	} else {
 		candidateState.sourceFlags.hasMetadata = true;
+		if (quality === "prefix") {
+			const currentPrefixHint = candidateState.prefixHintsByPrimaryUnit.get(primaryUnitIndex);
+			const nextPrefixHint: CoverageLexicalV2CandidateCascadePrefixHint = {
+				field,
+				matchedTerm,
+				fieldDocCount,
+			};
+			if (
+				currentPrefixHint == null ||
+				shouldReplaceCoverageLexicalV2CascadePrefixHint(
+					currentPrefixHint,
+					nextPrefixHint,
+					primaryUnit.normalizedText,
+				)
+			) {
+				candidateState.prefixHintsByPrimaryUnit.set(primaryUnitIndex, nextPrefixHint);
+			}
+		}
 	}
+}
+
+function shouldReplaceCoverageLexicalV2CascadePrefixHint(
+	current: CoverageLexicalV2CandidateCascadePrefixHint,
+	next: CoverageLexicalV2CandidateCascadePrefixHint,
+	queryTerm: string,
+): boolean {
+	if (FIELD_PRIORITY[next.field] !== FIELD_PRIORITY[current.field]) {
+		return FIELD_PRIORITY[next.field] < FIELD_PRIORITY[current.field];
+	}
+	const currentCompletionGain = Math.max(0, current.matchedTerm.length - queryTerm.length);
+	const nextCompletionGain = Math.max(0, next.matchedTerm.length - queryTerm.length);
+	if (nextCompletionGain !== currentCompletionGain) {
+		return nextCompletionGain < currentCompletionGain;
+	}
+	if (next.fieldDocCount !== current.fieldDocCount) {
+		return next.fieldDocCount < current.fieldDocCount;
+	}
+	return next.matchedTerm.localeCompare(current.matchedTerm) < 0;
 }
 
 function updateCoverageLexicalV2CascadeVerifiedHanBackstopEvidence(
@@ -3444,6 +3699,7 @@ function getOrCreateCoverageLexicalV2CascadeCandidateState(
 		matchedFieldsByPrimaryUnit: new Map<number, Set<CoverageLexicalV2MatchField>>(),
 		bestQualityByPrimaryUnit: new Map<number, CoverageLexicalV2MatchQualityKind>(),
 		fallbackMatchedSurfaceGroups: new Set<number>(),
+		prefixHintsByPrimaryUnit: new Map<number, CoverageLexicalV2CandidateCascadePrefixHint>(),
 	};
 	target.set(docId, created);
 	return created;

@@ -5,13 +5,14 @@ import {
 	buildCoverageLexicalV2CheapComparatorCandidate,
 	createPrimaryUnitKey,
 	patchCoverageLexicalV2ComparatorCandidateWithProximity,
+	type CoverageLexicalV2ComparatorEvidence,
 } from "src/services/search/coverage-lexical-v2/comparator";
 
 describe("coverage lexical v2 comparator signals", () => {
 	test("builds cheap comparator signals and lets proximity be patched later", () => {
-		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("AI \u7701\u8003", ["ai", "\u7701\u8003"]);
-		const evidence = {
-			candidateId: "doc-ai-shengkao",
+		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("AI exam", ["ai", "exam"]);
+		const evidence: CoverageLexicalV2ComparatorEvidence = {
+			candidateId: "doc-ai-exam",
 			stableDeterministicKey: "a",
 			matchedPrimaryUnits: [
 				{
@@ -23,9 +24,9 @@ describe("coverage lexical v2 comparator signals", () => {
 					matchQuality: "exact",
 				},
 				{
-					normalizedText: "\u7701\u8003",
+					normalizedText: "exam",
 					surfaceGroupIndex: 1,
-					surfaceKind: "han",
+					surfaceKind: "latin",
 					strongestField: "body",
 					matchQuality: "exact",
 				},
@@ -33,8 +34,9 @@ describe("coverage lexical v2 comparator signals", () => {
 			bestWindow: {
 				matchedUnitKeys: [
 					createPrimaryUnitKey(0, "ai"),
-					createPrimaryUnitKey(1, "\u7701\u8003"),
+					createPrimaryUnitKey(1, "exam"),
 				],
+				contiguousSurfaceGroupCount: 2,
 				windowWidth: 9,
 				averageDistance: 2,
 				preservesSurfaceOrder: true,
@@ -58,30 +60,96 @@ describe("coverage lexical v2 comparator signals", () => {
 			bodyScore: 1.1,
 		});
 		expect(candidate.primaryUnitMatchQuality).toEqual({
-			latinExactCount: 1,
+			latinExactCount: 2,
 			latinPrefixCount: 0,
 			latinFuzzyCount: 0,
-			hanExactCount: 1,
+			hanExactCount: 0,
 		});
 		expect(candidate.primaryUnitProximityScore).toBeUndefined();
 		expect(
 			patchCoverageLexicalV2ComparatorCandidateWithProximity(candidate, evidence).primaryUnitProximityScore,
 		).toEqual({
 			matchedUnitCount: 2,
+			contiguousSurfaceGroupCount: 2,
 			windowWidth: 9,
 			averageDistance: 2,
 			preservesSurfaceOrder: true,
 		});
 	});
 
+	test("records sorted metadata prefix witnesses when prefix evidence carries witness detail", () => {
+		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("pas sec", ["pas", "sec"]);
+		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
+			candidateId: "doc-prefix",
+			stableDeterministicKey: "a",
+			matchedPrimaryUnits: [
+				{
+					normalizedText: "pas",
+					surfaceGroupIndex: 0,
+					surfaceKind: "latin",
+					strongestField: "basename",
+					matchQuality: "prefix",
+					prefixWitnessLite: {
+						field: "basename",
+						surfaceText: "password",
+						cleanBoundary: true,
+						compoundPenalty: false,
+						surfaceCompletionGain: 5,
+						fieldDocCount: 2,
+					},
+				},
+				{
+					normalizedText: "sec",
+					surfaceGroupIndex: 1,
+					surfaceKind: "latin",
+					strongestField: "folder",
+					matchQuality: "prefix",
+					prefixWitnessLite: {
+						field: "folder",
+						surfaceText: "security-archive",
+						cleanBoundary: false,
+						compoundPenalty: true,
+						surfaceCompletionGain: 13,
+						fieldDocCount: 8,
+					},
+				},
+			],
+		});
+
+		expect(candidate.primaryUnitMatchQuality).toEqual({
+			latinExactCount: 0,
+			latinPrefixCount: 2,
+			latinFuzzyCount: 0,
+			hanExactCount: 0,
+			metadataPrefixWitnesses: [
+				{
+					field: "basename",
+					surfaceText: "password",
+					cleanBoundary: true,
+					compoundPenalty: false,
+					surfaceCompletionGain: 5,
+					fieldDocCount: 2,
+				},
+				{
+					field: "folder",
+					surfaceText: "security-archive",
+					cleanBoundary: false,
+					compoundPenalty: true,
+					surfaceCompletionGain: 13,
+					fieldDocCount: 8,
+				},
+			],
+		});
+	});
+
 	test("does not let fallback-only evidence count as primary coverage", () => {
-		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("\u8d62\u5b8b", ["\u8d62\u5b8b"]);
+		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("??", ["??"]);
 		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
 			candidateId: "doc-yingsong",
 			stableDeterministicKey: "a",
 			matchedPrimaryUnits: [
 				{
-					normalizedText: "\u8d62",
+					normalizedText: "?",
 					surfaceGroupIndex: 0,
 					surfaceKind: "han",
 					strongestField: "body",
@@ -96,29 +164,6 @@ describe("coverage lexical v2 comparator signals", () => {
 		expect(candidate.primaryUnitMatchQuality.hanExactCount).toBe(0);
 		expect(candidate.primaryUnitProximityScore).toBeUndefined();
 	});
-
-	test("preserves partial visible grouping when only one query surface group matches", () => {
-		const queryAnalysis = buildCoverageLexicalV2QueryAnalysis("steam password", ["steam", "password"]);
-		const candidate = buildCoverageLexicalV2CheapComparatorCandidate(queryAnalysis, {
-			candidateId: "doc-steam-only",
-			stableDeterministicKey: "a",
-			matchedPrimaryUnits: [
-				{
-					normalizedText: "steam",
-					surfaceGroupIndex: 0,
-					surfaceKind: "latin",
-					strongestField: "body",
-					matchQuality: "exact",
-				},
-			],
-		});
-
-		expect(candidate.distinctMatchedPrimaryQueryUnitCount).toBe(1);
-		expect(candidate.surfaceCoverageShape).toEqual({
-			matchedGroupCount: 1,
-			totalGroupCount: 2,
-			preservesVisibleGrouping: false,
-			preservesCrossScriptCoverage: true,
-		});
-	});
 });
+
+

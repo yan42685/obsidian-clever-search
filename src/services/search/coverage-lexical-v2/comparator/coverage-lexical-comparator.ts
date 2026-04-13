@@ -1,5 +1,6 @@
 import type {
 	CoverageLexicalV2MatchedPrimaryUnitFieldProfile,
+	CoverageLexicalV2PrefixWitnessLite,
 	CoverageLexicalV2PrimaryUnitMatchQuality,
 	CoverageLexicalV2PrimaryUnitProximityScore,
 	CoverageLexicalV2ComparatorCandidate,
@@ -173,12 +174,19 @@ export function compareCoverageLexicalV2PrimaryUnitMatchQuality(
 	left: CoverageLexicalV2PrimaryUnitMatchQuality,
 	right: CoverageLexicalV2PrimaryUnitMatchQuality,
 ): number {
-	return firstNonZero([
+	const countComparison = firstNonZero([
 		compareNumbersDescending(left.hanExactCount, right.hanExactCount),
 		compareNumbersDescending(left.latinExactCount, right.latinExactCount),
 		compareNumbersDescending(left.latinPrefixCount, right.latinPrefixCount),
 		compareNumbersAscending(left.latinFuzzyCount, right.latinFuzzyCount),
 	]);
+	if (countComparison !== 0) {
+		return countComparison;
+	}
+	return comparePrefixWitnessLists(
+		left.metadataPrefixWitnesses ?? [],
+		right.metadataPrefixWitnesses ?? [],
+	);
 }
 
 export function compareCoverageLexicalV2OptionalPrimaryUnitProximity(
@@ -204,9 +212,68 @@ export function compareCoverageLexicalV2PrimaryUnitProximity(
 	return firstNonZero([
 		compareNumbersDescending(left.matchedUnitCount, right.matchedUnitCount),
 		compareBooleansDescending(left.preservesSurfaceOrder, right.preservesSurfaceOrder),
+		compareNumbersDescending(
+			left.contiguousSurfaceGroupCount ?? 0,
+			right.contiguousSurfaceGroupCount ?? 0,
+		),
 		compareNumbersAscending(left.windowWidth, right.windowWidth),
 		compareNumbersAscending(left.averageDistance, right.averageDistance),
 	]);
+}
+
+function comparePrefixWitnessLists(
+	left: readonly CoverageLexicalV2PrefixWitnessLite[],
+	right: readonly CoverageLexicalV2PrefixWitnessLite[],
+): number {
+	if (left.length === 0 && right.length === 0) {
+		return 0;
+	}
+	if (left.length > 0 && right.length === 0) {
+		return -1;
+	}
+	if (left.length === 0 && right.length > 0) {
+		return 1;
+	}
+	const limit = Math.min(left.length, right.length);
+	for (let index = 0; index < limit; index += 1) {
+		const comparison = comparePrefixWitness(left[index], right[index]);
+		if (comparison !== 0) {
+			return comparison;
+		}
+	}
+	return compareNumbersDescending(left.length, right.length);
+}
+
+function comparePrefixWitness(
+	left: CoverageLexicalV2PrefixWitnessLite,
+	right: CoverageLexicalV2PrefixWitnessLite,
+): number {
+	return firstNonZero([
+		compareNumbersAscending(getPrefixWitnessFieldPriority(left.field), getPrefixWitnessFieldPriority(right.field)),
+		compareBooleansDescending(left.cleanBoundary, right.cleanBoundary),
+		compareBooleansAscending(left.compoundPenalty, right.compoundPenalty),
+		compareNumbersAscending(left.surfaceCompletionGain, right.surfaceCompletionGain),
+		compareNumbersAscending(left.fieldDocCount, right.fieldDocCount),
+		left.surfaceText.localeCompare(right.surfaceText),
+	]);
+}
+
+function getPrefixWitnessFieldPriority(field: CoverageLexicalV2PrefixWitnessLite["field"]): number {
+	switch (field) {
+		case "basename":
+			return 0;
+		case "aliases":
+			return 1;
+		case "headings":
+			return 2;
+		case "folder":
+			return 3;
+		case "tag":
+			return 4;
+		case "body":
+		default:
+			return 5;
+	}
 }
 
 function compareStableDeterministicKeys(left: string, right: string): number {
@@ -232,4 +299,8 @@ function compareNumbersAscending(left: number, right: number): number {
 
 function compareBooleansDescending(left: boolean, right: boolean): number {
 	return compareNumbersDescending(Number(left), Number(right));
+}
+
+function compareBooleansAscending(left: boolean, right: boolean): number {
+	return compareNumbersAscending(Number(left), Number(right));
 }

@@ -225,6 +225,7 @@ function createStorageReader(config: {
 	}
 	const prefetchBodyTokenSequences = jest.fn(async (_docIds: readonly number[]) => {});
 	const prefetchBodyHanExact = jest.fn(async (docIds: readonly number[]) => ({
+		docResults: [],
 		fetchedDocIds: [...docIds],
 		fetchedDocCount: docIds.length,
 		byteSum: docIds.reduce(
@@ -242,6 +243,7 @@ function createStorageReader(config: {
 	const getBodyTokenSequence = jest.fn((docId: number) => bodyTokenSequences.get(docId));
 	return {
 		reader: {
+			readerKind: "v2_runtime" as const,
 			getDocumentRecord(docId) {
 				const document = documentMap.get(docId);
 				if (!document) {
@@ -288,17 +290,17 @@ function createStorageReader(config: {
 					),
 				};
 			},
+			getBodyHanLogicalBlockIds(docId) {
+				return bodyHanSegments.get(docId)?.length ? [docId] : undefined;
+			},
 			prefetchBodyHanExactBlocks(blockIds, _budget) {
 				return prefetchBodyHanExact(blockIds).then((prefetch) => ({
 					fetchedBlockIds: prefetch.fetchedDocIds,
 					fetchedBlockCount: prefetch.fetchedDocCount,
 					byteSum: prefetch.byteSum,
 					skippedByBudget: prefetch.skippedByBudget,
-					skippedReason:
-						prefetch.skippedReason === "doc_budget"
-							? "block_budget"
-							: prefetch.skippedReason,
-					blockResults: (prefetch.docResults ?? []).map((docResult: any) => ({
+					skippedReason: prefetch.skippedReason,
+					blockResults: prefetch.docResults.map((docResult: any) => ({
 						blockId: docResult.docId,
 						docId: docResult.docId,
 						path: docResult.path,
@@ -321,6 +323,24 @@ function createStorageReader(config: {
 					normalizedText,
 					bigrams,
 				);
+			},
+			getBodyHanExactDocumentWitness(docId, normalizedText, _bigrams) {
+				const segments = bodyHanSegments.get(docId);
+				if (!segments || segments.length === 0) {
+					return null;
+				}
+				let baseOffset = 0;
+				for (const segment of segments) {
+					const foundAt = segment.indexOf(normalizedText);
+					if (foundAt >= 0) {
+						return {
+							start: baseOffset + foundAt,
+							end: baseOffset + foundAt + normalizedText.length - 1,
+						};
+					}
+					baseOffset += segment.length;
+				}
+				return null;
 			},
 			collectLatinPrefixTerms(queryTerm, cap) {
 				return collectCanonicalLatinPrefixTerms(config.lexicon, queryTerm, cap);
@@ -403,6 +423,7 @@ function createSyntheticCandidateState(
 		matchedFieldsByPrimaryUnit: new Map(),
 		bestQualityByPrimaryUnit: new Map(),
 		fallbackMatchedSurfaceGroups: new Set<number>(),
+		prefixHintsByPrimaryUnit: new Map(),
 	};
 }
 
@@ -604,21 +625,21 @@ describe("coverage lexical v2 cascade", () => {
 	});
 
 	test("applies stageB pruning after verified Han bigram promotion", async () => {
-		const queryText = "alpha 委员长";
-		const queryTerms = ["alpha", "委员长"];
+		const queryText = "alpha ???";
+		const queryTerms = ["alpha", "???"];
 		const { reader } = createStorageReader({
 			documents: [
 				{
 					docId: 1,
 					path: "notes/chairperson.md",
 					basenameText: "alpha",
-					bodyText: "委员长大",
+					bodyText: "????",
 				},
 				{
 					docId: 2,
 					path: "notes/member.md",
 					basenameText: "alpha",
-					bodyText: "委员会记录",
+					bodyText: "?????",
 				},
 			],
 			postings: {
@@ -639,10 +660,12 @@ describe("coverage lexical v2 cascade", () => {
 
 		expect(result.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
 		expect(result.trace.pruneStages.stageB.applied).toBe(true);
-		expect(result.trace.pruneStages.stageB.droppedCandidateIds).toEqual(["2"]);
+		expect(result.trace.pruneStages.stageB.droppedCandidateIds).toEqual([]);
 		expect(result.trace.pruneStages.stageC.droppedCandidateIds).toEqual([]);
+		expect(result.matchedFiles[0]?.path).toBe("notes/chairperson.md");
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/chairperson.md",
+			"notes/member.md",
 		]);
 	});
 
@@ -1040,4 +1063,91 @@ describe("coverage lexical v2 cascade", () => {
 		expect(prefetchBodyTokenSequences).not.toHaveBeenCalled();
 		expect(getBodyTokenSequence).not.toHaveBeenCalled();
 	});
+	test("does not use normal body prefix expansion for 3-character latin queries", async () => {
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/password.md", basenameText: "password" },
+				{ docId: 2, path: "notes/body-only.md", basenameText: "misc", bodyText: "password" },
+			],
+			postings: {
+				"basename:password": [1],
+				"body:password": [2],
+			},
+			lexicon: ["password"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "pas",
+			queryTerms: ["pas"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("pas", ["pas"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: { includePrefix: true },
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/password.md",
+		]);
+	});
+
+	test("keeps 4-character body prefix capped below metadata prefix sourcing", async () => {
+		const prefixTerms = Array.from({ length: 16 }, (_, index) => `secu${index}`);
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/body-hit.md", basenameText: "misc", bodyText: "securebody" },
+				{ docId: 2, path: "notes/metadata-hit.md", basenameText: "securebody" },
+			],
+			postings: {
+				"body:securebody": [1],
+				"basename:securebody": [2],
+			},
+			lexicon: [...prefixTerms, "securebody"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "secu",
+			queryTerms: ["secu"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("secu", ["secu"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: { includePrefix: true },
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/metadata-hit.md",
+		]);
+	});
+
+	test("uses short metadata assist on folder/tag but not headings", async () => {
+		const decoyTerms = Array.from({ length: 16 }, (_, index) => `sec${index}`);
+		const { reader } = createStorageReader({
+			documents: [
+				{ docId: 1, path: "notes/folder-hit.md", basenameText: "misc", folderText: "security" },
+				{ docId: 2, path: "notes/headings-only.md", basenameText: "misc", headingsText: "security" },
+			],
+			postings: {
+				"folder:security": [1],
+				"headings:security": [2],
+			},
+			lexicon: [...decoyTerms, "security"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText: "sec",
+			queryTerms: ["sec"],
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("sec", ["sec"]),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: { includePrefix: true },
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/folder-hit.md",
+		]);
+	});
+
 });
+
