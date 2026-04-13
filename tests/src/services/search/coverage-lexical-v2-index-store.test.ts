@@ -64,19 +64,63 @@ function createPreparedDocument(options: {
 }
 
 function createReader(store: CoverageLexicalV2IndexStore) {
-	return store.createStorageReader({
+	const reader = store.createStorageReader({
 		getBodyTokenSequence: () => undefined,
 		prefetchBodyTokenSequences: async () => {},
-		prefetchBodyHanExact: async (docIds, _budget) => ({
-			fetchedDocIds: [...docIds],
-			fetchedDocCount: docIds.length,
+		prefetchBodyHanExactBlocks: async (blockIds, _budget) => ({
+			fetchedBlockIds: [...blockIds],
+			fetchedBlockCount: blockIds.length,
 			byteSum: 0,
 			skippedByBudget: 0,
 			skippedReason: "none" as const,
 		}),
-		getBodyHanExactBackstopStats: (docId, _normalizedText, bigrams) =>
-			store.getBodyHanBackstopGateStats(docId, bigrams),
+		getBodyHanExactBlockBackstopStats: (blockId, _normalizedText, bigrams) =>
+			store.getBodyHanLogicalBlockDescriptor(blockId)
+				? {
+						longestContiguousBigramChain: bigrams.length,
+						matchedBigramCount: bigrams.length,
+						bigramCoverageRatio: bigrams.length > 0 ? 1 : 0,
+				  }
+				: null,
 		tokenizeText: (text) => text.split(/\s+/u).filter(Boolean),
+	});
+	return Object.assign(reader, {
+		getBodyHanSegmentDocIds() {
+			const docIds: number[] = [];
+			let blockId = 1;
+			while (true) {
+				const descriptor = store.getBodyHanLogicalBlockDescriptor(blockId);
+				if (!descriptor) {
+					break;
+				}
+				if (!docIds.includes(descriptor.docId)) {
+					docIds.push(descriptor.docId);
+				}
+				blockId += 1;
+			}
+			return docIds;
+		},
+		getBodyHanExactBackstopStats(
+			docId: number,
+			normalizedText: string,
+			bigrams: readonly string[],
+		) {
+			let blockId = 1;
+			while (true) {
+				const descriptor = store.getBodyHanLogicalBlockDescriptor(blockId);
+				if (!descriptor) {
+					return null;
+				}
+				if (descriptor.docId === docId) {
+					return reader.getBodyHanExactBlockBackstopStats(
+						blockId,
+						normalizedText,
+						bigrams,
+					);
+				}
+				blockId += 1;
+			}
+		},
 	});
 }
 
@@ -126,7 +170,7 @@ describe("CoverageLexicalV2IndexStore", () => {
 		const reader = createReader(store);
 		expect(reader.getPostingMatches("basename", "alpha")).toEqual([0]);
 		expect(reader.getPostingMatches("body", "alpha")).toEqual([0]);
-		expect(reader.getBodyHanSegmentDocIds()).toEqual([0]);
+		expect(reader.getBodyHanLogicalBlockDescriptor(1)).not.toBeNull();
 
 		const updatedDoc = createPreparedDocument({
 			path: "notes/alpha.md",
@@ -158,7 +202,7 @@ describe("CoverageLexicalV2IndexStore", () => {
 		store.deleteDocument("notes/renamed.md");
 		expect(store.getIndexedDocumentCount()).toBe(0);
 		expect(reader.getPostingMatches("basename", "beta")).toBeUndefined();
-		expect(reader.getBodyHanSegmentDocIds()).toEqual([]);
+		expect(reader.getBodyHanLogicalBlockDescriptor(1)).toBeNull();
 	});
 
 	test("force compaction rebuilds resident segments from document truth and clears tombstones", () => {
@@ -249,7 +293,7 @@ describe("CoverageLexicalV2IndexStore", () => {
 			"notes/han.md",
 		);
 		expect(
-			snapshot.documents[0]?.manifest.bodyHanGateBloomWords.length,
+			snapshot.documents[0]?.manifest.bodyHanLogicalBlocks.length,
 		).toBeGreaterThan(0);
 		expect(snapshot.hanSymbolPool.codePointsBySymbolId.length).toBeGreaterThan(0);
 		expect(snapshot.canonicalTermPool.termOffsets.length).toBeGreaterThan(0);
@@ -295,6 +339,43 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(runtimeDocument.manifest.stableDeterministicKey).toBeUndefined();
 		expect(runtimeDocument.manifest.normalizedMetadataTexts).toBeUndefined();
 		expect(runtimeDocument.manifest.bodyTokenSidecar.path).toBeUndefined();
+		expect(runtimeDocument.manifest.bodyHanLogicalBlocks[0]?.bigramIds).toBeUndefined();
+		expect(
+			(restored as any).bodyHanLogicalBlockBigramIdsByDocId.get(0)?.length,
+		).toBeGreaterThan(0);
+	});
+
+	test("splits Han resident shards to keep local block ordinals within one byte", () => {
+		const store = new CoverageLexicalV2IndexStore();
+		store.replaceDocument(
+			createPreparedDocument({
+				path: "notes/huge-han.md",
+				generation: 1,
+				bodyHanSegments: Array.from(
+					{ length: 300 },
+					() => "汉".repeat(1300),
+				),
+			}),
+		);
+
+		const reader = createReader(store);
+		const posting = reader.getBodyHanBlockPostingMatches("汉汉");
+		expect(posting).toBeDefined();
+		expect(posting?.length).toBe(300);
+
+		store.buildIndexBreakdown();
+		const residentHanShards = (store as any).residentHanShards as Array<{
+			localBlockCount: number;
+			blockDescriptors: readonly unknown[];
+		}>;
+		expect(residentHanShards.length).toBeGreaterThan(1);
+		expect(
+			residentHanShards.every(
+				(shard) =>
+					shard.localBlockCount <= 255 &&
+					shard.blockDescriptors.length === shard.localBlockCount,
+			),
+		).toBe(true);
 	});
 
 	test("shares empty runtime manifest structures across documents", () => {
@@ -320,8 +401,8 @@ describe("CoverageLexicalV2IndexStore", () => {
 		expect(firstDocument.manifest.metadataHanBigramIdsByField).toBe(
 			secondDocument.manifest.metadataHanBigramIdsByField,
 		);
-		expect(firstDocument.manifest.bodyHanGateBloomWords).toBe(
-			secondDocument.manifest.bodyHanGateBloomWords,
+		expect(firstDocument.manifest.bodyHanLogicalBlocks).toBe(
+			secondDocument.manifest.bodyHanLogicalBlocks,
 		);
 	});
 

@@ -17,7 +17,8 @@ import {
 	type PersistentFileIndexRecoveryPlan,
 	type SerializedFileSearchIndex,
 } from "./file-search-engine";
-import type { CoverageLexicalV2BodyTokenColdDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-body-token-cold-types";
+import type { CoverageLexicalBodyTokenColdDocumentWrite } from "./coverage-lexical/coverage-lexical-body-token-cold-types";
+import type { CoverageLexicalV2HanSegmentExactSidecarDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 import {
 	createLightweightFuzzyIndex,
 	matchLightweightFuzzy,
@@ -234,9 +235,23 @@ export class LexicalEngine {
 		path: string,
 		generation: number | undefined,
 		bodyText: string,
-	): CoverageLexicalV2BodyTokenColdDocumentWrite | null {
+	): CoverageLexicalBodyTokenColdDocumentWrite | null {
 		return (
 			this.fileSearchEngine.buildBodyTokenColdDocument?.(
+				path,
+				generation,
+				bodyText,
+			) ?? null
+		);
+	}
+
+	buildBodyHanExactSidecarDocument(
+		path: string,
+		generation: number | undefined,
+		bodyText: string,
+	): CoverageLexicalV2HanSegmentExactSidecarDocumentWrite | null {
+		return (
+			this.fileSearchEngine.buildBodyHanExactSidecarDocument?.(
 				path,
 				generation,
 				bodyText,

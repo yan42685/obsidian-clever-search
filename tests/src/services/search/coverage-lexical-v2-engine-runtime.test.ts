@@ -232,29 +232,29 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 		const engine = new CoverageLexicalFileSearchEngine();
 		await engine.addDocuments([
 			{
-				path: "notes/win-song-metadata.md",
-				basename: "关于赢宋的笔记",
+				path: "notes/committee-metadata.md",
+				basename: "关于委员的笔记",
 				folder: "notes",
 				content: "latin filler",
 			},
 			{
-				path: "notes/win-song-body.md",
+				path: "notes/committee-body.md",
 				basename: "misc",
 				folder: "notes",
-				content: "这里提到了赢宋这两个字",
+				content: "这里提到了委员这两个字",
 			},
 		]);
 
 		const results = await engine.searchFiles({
-			queryText: "赢宋",
+			queryText: "委员",
 			isPrefixMatch: true,
 			isFuzzy: true,
 			maxItemResults: 5,
 		});
 
 		expect(results.map((result) => result.path)).toEqual([
-			"notes/win-song-metadata.md",
-			"notes/win-song-body.md",
+			"notes/committee-metadata.md",
+			"notes/committee-body.md",
 		]);
 	});
 
@@ -309,16 +309,16 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 
 		const store = new CoverageLexicalV2IndexStore();
 		store.replaceDocument({
-			path: "notes/win-song-body.md",
+			path: "notes/committee-body.md",
 			generation: 1,
 			indexedRef: {
-				path: "notes/win-song-body.md",
+				path: "notes/committee-body.md",
 				generation: 1,
 				size: 64,
 			},
 			record: {
-				path: "notes/win-song-body.md",
-				stableDeterministicKey: "notes/win-song-body.md",
+				path: "notes/committee-body.md",
+				stableDeterministicKey: "notes/committee-body.md",
 				basenameText: "misc",
 				aliasesText: "",
 				headingsText: "",
@@ -340,21 +340,21 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 				folder: [],
 				tag: [],
 			},
-			bodyHanSegments: ["\u8fd9\u91cc\u63d0\u5230\u4e86\u8d62\u5b8b\u8fd9\u4e24\u4e2a\u5b57"],
+			bodyHanSegments: ["\u8fd9\u91cc\u63d0\u5230\u4e86\u59d4\u5458\u8fd9\u4e24\u4e2a\u5b57"],
 			bodyTokens: [],
 		});
 		store.replaceDocument({
-			path: "notes/win-song-metadata.md",
+			path: "notes/committee-metadata.md",
 			generation: 2,
 			indexedRef: {
-				path: "notes/win-song-metadata.md",
+				path: "notes/committee-metadata.md",
 				generation: 2,
 				size: 48,
 			},
 			record: {
-				path: "notes/win-song-metadata.md",
-				stableDeterministicKey: "notes/win-song-metadata.md",
-				basenameText: "\u5173\u4e8e\u8d62\u5b8b\u7684\u7b14\u8bb0",
+				path: "notes/committee-metadata.md",
+				stableDeterministicKey: "notes/committee-metadata.md",
+				basenameText: "\u5173\u4e8e\u59d4\u5458\u7684\u7b14\u8bb0",
 				aliasesText: "",
 				headingsText: "",
 				folderText: "notes",
@@ -369,7 +369,7 @@ test("searchFiles routes through the independent V2 lexical engine", async () =>
 				body: ["latin", "filler"],
 			},
 			metadataHanBigramsByField: {
-				basename: ["\u5173\u4e8e", "\u8d62\u5b8b"],
+				basename: ["\u5173\u4e8e", "\u59d4\u5458"],
 				aliases: [],
 				headings: [],
 				folder: [],
@@ -600,5 +600,167 @@ test("searchFiles keeps using the independent v2 candidate-cascade path without 
 		expect(breakdown.estimatedBytes.residentHot.postings.exactIncidence).toBeLessThan(
 			120,
 		);
+	});
+
+	test("restorePersistedFileIndex keeps opaque Han body rescue searchable after reload", async () => {
+		container.registerInstance(Tokenizer, createWholeHanCoverageTokenizer());
+		let storedSnapshot: unknown = null;
+		let storedJournalEntries: any[] = [];
+		const storedLogicalBlocks = new Map<string, any>();
+
+		const databaseMock = {
+			appendCoverageLexicalV2IndexStoreJournalEntries: jest.fn(
+				async (entries: readonly any[]) => {
+					storedJournalEntries.push(...entries);
+				},
+			),
+			readCoverageLexicalV2IndexStoreSnapshot: jest.fn(async () => storedSnapshot),
+			readCoverageLexicalV2IndexStoreJournalEntries: jest.fn(
+				async () => storedJournalEntries,
+			),
+			writeCoverageLexicalV2IndexStoreSnapshot: jest.fn(async (snapshot: unknown) => {
+				storedSnapshot = snapshot;
+				storedJournalEntries = [];
+			}),
+		};
+		container.registerInstance(Database, databaseMock as any);
+		container.registerInstance(FileSnapshotStore, {
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+		} as any);
+		const {
+			COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
+		} = require(
+			"src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types",
+		) as {
+			COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN: string;
+		};
+		container.registerInstance(
+			COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
+			{
+				clearAll: jest.fn(async () => {
+					storedLogicalBlocks.clear();
+				}),
+				deleteDocuments: jest.fn(async (paths: readonly string[]) => {
+					for (const path of paths) {
+						for (const key of [...storedLogicalBlocks.keys()]) {
+							if (key.startsWith(`${path}#`)) {
+								storedLogicalBlocks.delete(key);
+							}
+						}
+					}
+				}),
+				getMeta: jest.fn(async () => null),
+				summarizeConsistency: jest.fn(async () => ({
+					needsRepair: false,
+					requiresReset: false,
+					reason: "up-to-date",
+					missingOrStalePaths: [],
+					danglingPaths: [],
+				})),
+				moveDocument: jest.fn(async (oldPath: string, nextDocument: any) => {
+					for (const key of [...storedLogicalBlocks.keys()]) {
+						if (key.startsWith(`${oldPath}#`)) {
+							storedLogicalBlocks.delete(key);
+						}
+					}
+					for (const logicalBlock of nextDocument.logicalBlocks ?? []) {
+						storedLogicalBlocks.set(
+							`${nextDocument.path}#${logicalBlock.blockOrdinal}`,
+							{
+								path: nextDocument.path,
+								generation: nextDocument.generation,
+								blockOrdinal: logicalBlock.blockOrdinal,
+								bodyHanSymbolIds: Uint32Array.from(logicalBlock.bodyHanSymbolIds),
+								symbolCount: logicalBlock.symbolCount,
+								segmentCount: logicalBlock.segmentCount,
+								encodedByteLength: logicalBlock.encodedByteLength,
+							},
+						);
+					}
+					return true;
+				}),
+				readLogicalBlocks: jest.fn(
+					async (requests: readonly { path: string; blockOrdinal: number }[]) =>
+						new Map(
+							requests
+								.map((request) => [
+									`${request.path}#${request.blockOrdinal}`,
+									storedLogicalBlocks.get(
+										`${request.path}#${request.blockOrdinal}`,
+									),
+								] as const)
+								.filter((entry) => entry[1] != null),
+						),
+				),
+				updateIndexedRefsMetadata: jest.fn(async () => undefined),
+				upsertDocuments: jest.fn(async (documents: readonly any[]) => {
+					for (const document of documents) {
+						for (const logicalBlock of document.logicalBlocks ?? []) {
+							storedLogicalBlocks.set(
+								`${document.path}#${logicalBlock.blockOrdinal}`,
+								{
+									path: document.path,
+									generation: document.generation,
+									blockOrdinal: logicalBlock.blockOrdinal,
+									bodyHanSymbolIds: Uint32Array.from(logicalBlock.bodyHanSymbolIds),
+									symbolCount: logicalBlock.symbolCount,
+									segmentCount: logicalBlock.segmentCount,
+									encodedByteLength: logicalBlock.encodedByteLength,
+								},
+							);
+						}
+					}
+				}),
+			} as any,
+		);
+
+		const { CoverageLexicalV2FileSearchEngine } = require(
+			"src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine",
+		) as {
+			CoverageLexicalV2FileSearchEngine: new () => {
+				addDocuments(documents: IndexedDocument[]): Promise<void>;
+				persistFileIndexArtifact(): Promise<void>;
+				restorePersistedFileIndex(): Promise<boolean>;
+				searchFiles(request: {
+					queryText: string;
+					isPrefixMatch: boolean;
+					isFuzzy: boolean;
+					maxItemResults: number;
+				}): Promise<Array<{ path: string; matchedTerms: string[] }>>;
+			};
+		};
+
+		const queryText = "\u59d4\u5458";
+		const seedEngine = new CoverageLexicalV2FileSearchEngine();
+		await seedEngine.addDocuments([
+			{
+				path: "notes/committee-body.md",
+				basename: "misc",
+				folder: "notes",
+				content: "\u8fd9\u91cc\u63d0\u5230\u4e86\u59d4\u5458\u8fd9\u4e24\u4e2a\u5b57",
+			},
+			{
+				path: "notes/noise.md",
+				basename: "misc",
+				folder: "notes",
+				content: "\u8fd9\u91cc\u53ea\u6709\u8d62\u548c\u5b8b\u88ab\u62c6\u5f00",
+			},
+		]);
+		await seedEngine.persistFileIndexArtifact();
+
+		const restoredEngine = new CoverageLexicalV2FileSearchEngine();
+		await expect(restoredEngine.restorePersistedFileIndex()).resolves.toBe(true);
+
+		const results = await restoredEngine.searchFiles({
+			queryText,
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+
+		expect(results.map((result) => result.path)).toEqual([
+			"notes/committee-body.md",
+		]);
+		expect(results[0]?.matchedTerms).toEqual([queryText]);
 	});
 });

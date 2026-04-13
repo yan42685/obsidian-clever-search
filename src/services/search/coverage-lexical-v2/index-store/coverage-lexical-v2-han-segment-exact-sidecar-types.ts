@@ -8,16 +8,17 @@ export type CoverageLexicalV2HanSegmentExactSidecarMetaRow = {
 	id: typeof COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_META_ID;
 	epoch: number;
 	schemaVersion: number;
-	blockWriteMode: "multi-doc-v2";
+	blockWriteMode: "logical-block-v3";
 	documentCount: number;
+	logicalBlockCount: number;
 	indexedRefsFingerprint: string;
 	updatedAt: number;
 };
 
-export type CoverageLexicalV2HanSegmentExactSidecarBlockRow = {
+export type CoverageLexicalV2HanSegmentExactSidecarStorageBlockRow = {
 	id: string;
 	epoch: number;
-	documentCount: number;
+	logicalBlockCount: number;
 	symbolCount: number;
 	segmentCount: number;
 	symbolIdTape: Uint8Array;
@@ -25,24 +26,54 @@ export type CoverageLexicalV2HanSegmentExactSidecarBlockRow = {
 	updatedAt: number;
 };
 
-export type CoverageLexicalV2HanSegmentExactSidecarDocRow = {
+export type CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRow = {
+	id: string;
 	path: string;
 	epoch: number;
 	generation?: number;
-	blockId: string;
-	blockDocIndex: number;
+	storageBlockId: string;
+	blockOrdinal: number;
 	symbolStart: number;
 	symbolLength: number;
+	symbolCount: number;
+	segmentCount: number;
+	encodedByteLength: number;
+	updatedAt: number;
+};
+
+export type CoverageLexicalV2HanSegmentExactSidecarDocSummaryRow = {
+	path: string;
+	epoch: number;
+	generation?: number;
+	blockCount: number;
 	symbolCount: number;
 	segmentCount: number;
 	updatedAt: number;
 };
 
+export type CoverageLexicalV2HanSegmentExactSidecarLogicalBlockWrite = {
+	blockOrdinal: number;
+	bodyHanSymbolIds: readonly number[] | Uint32Array;
+	bigramIds: readonly number[];
+	encodedByteLength: number;
+	symbolCount: number;
+	segmentCount: number;
+};
+
 export type CoverageLexicalV2HanSegmentExactSidecarDocumentWrite = {
 	path: string;
 	generation?: number;
-	bodyHanSymbolIds: readonly number[] | Uint32Array;
+	logicalBlocks: readonly CoverageLexicalV2HanSegmentExactSidecarLogicalBlockWrite[];
+};
+
+export type CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRead = {
+	path: string;
+	generation?: number;
+	blockOrdinal: number;
+	bodyHanSymbolIds: Uint32Array;
+	symbolCount: number;
 	segmentCount: number;
+	encodedByteLength: number;
 };
 
 export interface CoverageLexicalV2HanSegmentExactSidecarStoreApi {
@@ -56,9 +87,12 @@ export interface CoverageLexicalV2HanSegmentExactSidecarStoreApi {
 		oldPath: string,
 		nextDocument: CoverageLexicalV2HanSegmentExactSidecarDocumentWrite,
 	): Promise<boolean>;
-	readDocuments(
-		paths: readonly string[],
-	): Promise<Map<string, CoverageLexicalV2HanSegmentExactSidecarDocumentWrite>>;
+	readLogicalBlocks(
+		requests: readonly {
+			path: string;
+			blockOrdinal: number;
+		}[],
+	): Promise<Map<string, CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRead>>;
 	updateIndexedRefsMetadata(
 		indexedFileRefs: readonly BaseIndexedFileRef[],
 	): Promise<void>;

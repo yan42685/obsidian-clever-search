@@ -81,6 +81,14 @@ export async function registerDevCommands(
 	});
 
 	context.addCommand({
+		id: "cs-dev-han-storage-runtime-experiments",
+		name: "Show Han storage and runtime diagnostics [dev]",
+		callback: async () => {
+			await getInstance(DataManager).showDevHanDiagnostics();
+		},
+	});
+
+	context.addCommand({
 		id: "cs-dev-search-bootstrap-summary",
 		name: "Show search bootstrap summary [dev]",
 		callback: () => {

@@ -257,26 +257,67 @@ function createStorageReader(config: {
 					tagsText: document.tagsText ?? "",
 				};
 			},
-			getBodyHanSegmentDocIds() {
-				return [...bodyHanSegments.entries()]
-					.filter(([, segments]) => segments.length > 0)
-					.map(([docId]) => docId);
-			},
 			getPostingMatches(field, term) {
 				return config.postings[`${field}:${term}`];
 			},
 			getMetadataHanBigramPostingMatches(field, bigram) {
 				return hanBigramPostings.get(`${field}:${bigram}`);
 			},
-			getBodyHanBackstopGateStats(docId, bigrams) {
-				return computeHanBackstopGateStats(bodyHanSegments.get(docId), bigrams);
+			getBodyHanBlockPostingMatches(bigram) {
+				return hanBigramPostings.get(`body:${bigram}`);
 			},
-			prefetchBodyHanExact(docIds, _budget) {
-				return prefetchBodyHanExact(docIds);
+			getBodyHanLogicalBlockDescriptor(blockId) {
+				const document = documentMap.get(blockId);
+				const segments = bodyHanSegments.get(blockId) ?? [];
+				if (!document || segments.length === 0) {
+					return null;
+				}
+				return {
+					blockId,
+					docId: blockId,
+					path: document.path,
+					blockOrdinal: 0,
+					segmentCount: segments.length,
+					symbolCount: segments.reduce(
+						(sum, segment) => sum + Array.from(segment).length,
+						0,
+					),
+					encodedByteLength: segments.reduce(
+						(sum, segment) => sum + Array.from(segment).length * 4,
+						0,
+					),
+				};
 			},
-			getBodyHanExactBackstopStats(docId, normalizedText, bigrams) {
+			prefetchBodyHanExactBlocks(blockIds, _budget) {
+				return prefetchBodyHanExact(blockIds).then((prefetch) => ({
+					fetchedBlockIds: prefetch.fetchedDocIds,
+					fetchedBlockCount: prefetch.fetchedDocCount,
+					byteSum: prefetch.byteSum,
+					skippedByBudget: prefetch.skippedByBudget,
+					skippedReason:
+						prefetch.skippedReason === "doc_budget"
+							? "block_budget"
+							: prefetch.skippedReason,
+					blockResults: (prefetch.docResults ?? []).map((docResult: any) => ({
+						blockId: docResult.docId,
+						docId: docResult.docId,
+						path: docResult.path,
+						blockOrdinal: 0,
+						status:
+							docResult.status === "doc_budget"
+								? "block_budget"
+								: docResult.status === "zero_segment_count"
+									? "zero_symbol_count"
+									: docResult.status,
+						estimatedBytes: docResult.estimatedBytes,
+						segmentCount: docResult.segmentCount,
+						symbolCount: null,
+					})),
+				}));
+			},
+			getBodyHanExactBlockBackstopStats(blockId, normalizedText, bigrams) {
 				return computeHanBackstopExactStats(
-					bodyHanSegments.get(docId),
+					bodyHanSegments.get(blockId),
 					normalizedText,
 					bigrams,
 				);
@@ -589,11 +630,11 @@ describe("coverage lexical v2 cascade", () => {
 	});
 
 	test("uses the Han backstop to admit a verified metadata hit without promoting one-sided metadata noise", async () => {
-		const queryText = "赢宋";
+		const queryText = "\u59d4\u5458";
 		const { reader } = createStorageReader({
 			documents: [
-				{ docId: 1, path: "notes/win-song.md", basenameText: "note 赢宋 entry" },
-				{ docId: 2, path: "notes/win-only.md", basenameText: "赢学条目" },
+				{ docId: 1, path: "notes/committee-note.md", basenameText: "note \u59d4\u5458 entry" },
+				{ docId: 2, path: "notes/committee-noise.md", basenameText: "\u59d4\u4f1a\u62c6\u5f00\u8bb0\u5f55" },
 			],
 			postings: {},
 			lexicon: [],
@@ -613,10 +654,10 @@ describe("coverage lexical v2 cascade", () => {
 			hasHanBackstop: candidateState.sourceFlags.hasHanBackstop,
 			potential: candidateState.potentialPrimaryCoverageCount,
 		}))).toEqual([
-			{ path: "notes/win-song.md", hasHanBackstop: true, potential: 1 },
+			{ path: "notes/committee-note.md", hasHanBackstop: true, potential: 1 },
 		]);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
-			"notes/win-song.md",
+			"notes/committee-note.md",
 		]);
 	});
 
@@ -718,12 +759,12 @@ describe("coverage lexical v2 cascade", () => {
 			{ path: "notes/chairperson.md", potential: 1 },
 		]);
 		expect(result.trace.pendingHanFrontierCount).toBe(1);
-		expect(result.trace.hanPromotedCount).toBe(1);
-		expect(result.trace.hanPromotionVerifiedCount).toBe(0);
-		expect(result.trace.bodyHanScanDocCount).toBe(2);
-		expect(result.trace.bodyHanScanMatchedDocCount).toBe(2);
-		expect(result.trace.bodyHanColdExactRequestedDocCount).toBe(2);
-		expect(result.trace.bodyHanColdExactFetchedDocCount).toBe(2);
+		expect(result.trace.hanPromotionDocCount).toBe(1);
+		expect(result.trace.hanPromotionVerifiedDocCount).toBe(0);
+		expect(result.trace.bodyHanCandidateBlockCount).toBe(1);
+		expect(result.trace.bodyHanIntersectedBlockCount).toBe(1);
+		expect(result.trace.bodyHanColdExactRequestedBlockCount).toBe(1);
+		expect(result.trace.bodyHanColdExactFetchedBlockCount).toBe(1);
 		expect(result.trace.bodyHanColdExactSkippedReason).toBe("none");
 		expect(result.trace.hanPromotionSkippedReason).toBe("none");
 	});
@@ -793,7 +834,3 @@ describe("coverage lexical v2 cascade", () => {
 		expect(getBodyTokenSequence).not.toHaveBeenCalled();
 	});
 });
-
-
-
-

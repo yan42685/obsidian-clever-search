@@ -4,36 +4,41 @@ import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import {
 	COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_META_ID,
-	type CoverageLexicalV2HanSegmentExactSidecarBlockRow,
 	type CoverageLexicalV2HanSegmentExactSidecarConsistencySummary,
-	type CoverageLexicalV2HanSegmentExactSidecarDocRow,
+	type CoverageLexicalV2HanSegmentExactSidecarDocSummaryRow,
 	type CoverageLexicalV2HanSegmentExactSidecarDocumentWrite,
+	type CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRead,
+	type CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRow,
 	type CoverageLexicalV2HanSegmentExactSidecarMetaRow,
+	type CoverageLexicalV2HanSegmentExactSidecarStorageBlockRow,
 	type CoverageLexicalV2HanSegmentExactSidecarStoreApi,
 } from "./coverage-lexical-v2-han-segment-exact-sidecar-types";
 import {
-	decodeCoverageLexicalV2HanSegmentExactSidecarDocument,
+	decodeCoverageLexicalV2HanSegmentExactSidecarLogicalBlock,
 	packCoverageLexicalV2HanSegmentExactSidecarDocuments,
 } from "./coverage-lexical-v2-han-segment-exact-sidecar-packing";
 
-const COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_SCHEMA_VERSION = 2;
+const COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_SCHEMA_VERSION = 3;
 
 @singleton()
 export class CoverageLexicalV2HanSegmentExactSidecarStore
 	implements CoverageLexicalV2HanSegmentExactSidecarStoreApi
 {
 	private readonly database = getInstance(Database);
-	private nextBlockCounter = 0;
+	private nextStorageBlockCounter = 0;
+	private nextLogicalBlockCounter = 0;
 
 	async clearAll(): Promise<void> {
 		await this.database.db.transaction(
 			"rw",
 			this.database.db.lexicalV2HanSegmentExactSidecarMeta,
 			this.database.db.lexicalV2HanSegmentExactSidecarBlocks,
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks,
 			this.database.db.lexicalV2HanSegmentExactSidecarDocs,
 			async () => {
 				await this.database.db.lexicalV2HanSegmentExactSidecarMeta.clear();
 				await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.clear();
+				await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks.clear();
 				await this.database.db.lexicalV2HanSegmentExactSidecarDocs.clear();
 			},
 		);
@@ -52,18 +57,22 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 		if (uniquePaths.length === 0) {
 			return;
 		}
-		const existingRows =
-			await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkGet(
+		const existingLogicalRows =
+			await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+				.where("path")
+				.anyOf(uniquePaths)
+				.toArray();
+		const staleStorageBlockIds = Array.from(
+			new Set(existingLogicalRows.map((row) => row.storageBlockId)),
+		);
+		if (staleStorageBlockIds.length === 0) {
+			await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkDelete(
 				uniquePaths,
 			);
-		const staleBlockIds = Array.from(
-			new Set(existingRows.flatMap((row) => (row ? [row.blockId] : []))),
-		);
-		if (staleBlockIds.length === 0) {
 			return;
 		}
-		const replacement = await this.buildReplacementBlocksForAffectedBlockIds(
-			staleBlockIds,
+		const replacement = await this.buildReplacementData(
+			staleStorageBlockIds,
 			new Set(uniquePaths),
 			[],
 		);
@@ -71,28 +80,46 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 			"rw",
 			this.database.db.lexicalV2HanSegmentExactSidecarMeta,
 			this.database.db.lexicalV2HanSegmentExactSidecarBlocks,
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks,
 			this.database.db.lexicalV2HanSegmentExactSidecarDocs,
 			async () => {
 				const meta = await this.ensureMeta();
 				await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkDelete(
-					staleBlockIds,
+					staleStorageBlockIds,
 				);
-				await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkDelete(
-					replacement.removedDocPaths,
-				);
-				if (replacement.blockRows.length > 0) {
-					await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkPut(
-						replacement.blockRows,
+				if (replacement.removedLogicalBlockIds.length > 0) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks.bulkDelete(
+						replacement.removedLogicalBlockIds,
 					);
 				}
-				if (replacement.docRows.length > 0) {
+				if (replacement.removedDocPaths.length > 0) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkDelete(
+						replacement.removedDocPaths,
+					);
+				}
+				if (replacement.storageBlockRows.length > 0) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkPut(
+						replacement.storageBlockRows,
+					);
+				}
+				if (replacement.logicalBlockRows.length > 0) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks.bulkPut(
+						replacement.logicalBlockRows,
+					);
+				}
+				if (replacement.docSummaryRows.length > 0) {
 					await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkPut(
-						replacement.docRows,
+						replacement.docSummaryRows,
 					);
 				}
 				await this.database.db.lexicalV2HanSegmentExactSidecarMeta.put({
 					...meta,
+					blockWriteMode: "logical-block-v3",
 					documentCount: Math.max(0, meta.documentCount - uniquePaths.length),
+					logicalBlockCount: Math.max(
+						0,
+						meta.logicalBlockCount - existingLogicalRows.length,
+					),
 					updatedAt: Date.now(),
 				});
 			},
@@ -173,58 +200,88 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 		oldPath: string,
 		nextDocument: CoverageLexicalV2HanSegmentExactSidecarDocumentWrite,
 	): Promise<boolean> {
-		const [meta, existingRow] = await Promise.all([
+		const [meta, existingDocRow, existingLogicalRows] = await Promise.all([
 			this.getMeta(),
 			this.database.db.lexicalV2HanSegmentExactSidecarDocs.get(oldPath),
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+				.where("path")
+				.equals(oldPath)
+				.sortBy("blockOrdinal"),
 		]);
-		if (!meta || !existingRow || existingRow.path === nextDocument.path) {
+		if (!meta || !existingDocRow || oldPath === nextDocument.path) {
 			return false;
 		}
-		if (existingRow.epoch !== meta.epoch) {
+		if (existingDocRow.epoch !== meta.epoch) {
 			return false;
 		}
-		const blockRow = await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.get(
-			existingRow.blockId,
+		const currentLogicalBlocks = await this.readLogicalBlocks(
+			existingLogicalRows.map((row) => ({
+				path: row.path,
+				blockOrdinal: row.blockOrdinal,
+			})),
 		);
-		if (!blockRow) {
+		if (currentLogicalBlocks.size !== nextDocument.logicalBlocks.length) {
 			return false;
 		}
-		const decoded = decodeCoverageLexicalV2HanSegmentExactSidecarDocument(
-			blockRow,
-			existingRow,
-		);
-		if (
-			decoded.segmentCount !== nextDocument.segmentCount ||
-			decoded.bodyHanSymbolIds.length !== nextDocument.bodyHanSymbolIds.length
-		) {
-			return false;
-		}
-		for (let index = 0; index < decoded.bodyHanSymbolIds.length; index += 1) {
-			if (decoded.bodyHanSymbolIds[index] !== nextDocument.bodyHanSymbolIds[index]) {
+		for (const nextLogicalBlock of nextDocument.logicalBlocks) {
+			const current = currentLogicalBlocks.get(
+				this.createLogicalBlockLookupKey(oldPath, nextLogicalBlock.blockOrdinal),
+			);
+			if (
+				!current ||
+				current.segmentCount !== nextLogicalBlock.segmentCount ||
+				current.symbolCount !== nextLogicalBlock.symbolCount ||
+				current.encodedByteLength !== nextLogicalBlock.encodedByteLength ||
+				current.bodyHanSymbolIds.length !== nextLogicalBlock.bodyHanSymbolIds.length
+			) {
 				return false;
+			}
+			for (let index = 0; index < current.bodyHanSymbolIds.length; index += 1) {
+				if (current.bodyHanSymbolIds[index] !== nextLogicalBlock.bodyHanSymbolIds[index]) {
+					return false;
+				}
 			}
 		}
 		await this.database.db.transaction(
 			"rw",
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks,
 			this.database.db.lexicalV2HanSegmentExactSidecarDocs,
 			async () => {
 				await this.database.db.lexicalV2HanSegmentExactSidecarDocs.delete(oldPath);
 				await this.database.db.lexicalV2HanSegmentExactSidecarDocs.put({
-					...existingRow,
+					...existingDocRow,
 					path: nextDocument.path,
 					generation: nextDocument.generation,
 					updatedAt: Date.now(),
 				});
+				for (const existingLogicalRow of existingLogicalRows) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks.put({
+						...existingLogicalRow,
+						path: nextDocument.path,
+						generation: nextDocument.generation,
+						updatedAt: Date.now(),
+					});
+				}
 			},
 		);
 		return true;
 	}
 
-	async readDocuments(
-		paths: readonly string[],
-	): Promise<Map<string, CoverageLexicalV2HanSegmentExactSidecarDocumentWrite>> {
-		const uniquePaths = Array.from(new Set(paths));
-		if (uniquePaths.length === 0) {
+	async readLogicalBlocks(
+		requests: readonly {
+			path: string;
+			blockOrdinal: number;
+		}[],
+	): Promise<Map<string, CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRead>> {
+		const uniqueRequests = Array.from(
+			new Map(
+				requests.map((request) => [
+					this.createLogicalBlockLookupKey(request.path, request.blockOrdinal),
+					request,
+				]),
+			).values(),
+		);
+		if (uniqueRequests.length === 0) {
 			return new Map();
 		}
 		const meta = await this.getMeta();
@@ -235,49 +292,60 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 		) {
 			return new Map();
 		}
-		const [docRowsByPath, indexedRefsByPath] = await Promise.all([
-			this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkGet(uniquePaths),
-			this.database.db.lexicalIndexedFileRefs.bulkGet(uniquePaths),
-		]);
-		const docRows: CoverageLexicalV2HanSegmentExactSidecarDocRow[] = [];
-		for (let index = 0; index < uniquePaths.length; index += 1) {
-			const docRow = docRowsByPath[index];
-			const indexedRef = indexedRefsByPath[index];
-			if (
-				docRow &&
-				indexedRef &&
-				docRow.epoch === meta.epoch &&
-				docRow.generation === indexedRef.generation
-			) {
-				docRows.push(docRow);
-			}
-		}
-		if (docRows.length === 0) {
+		const logicalRows =
+			await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+				.where("[path+blockOrdinal]")
+				.anyOf(uniqueRequests.map((request) => [request.path, request.blockOrdinal]))
+				.toArray();
+		if (logicalRows.length === 0) {
 			return new Map();
 		}
-		const blockIds = Array.from(new Set(docRows.map((row) => row.blockId)));
-		const blockRows = await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkGet(
-			blockIds,
+		const indexedRefsByPath = new Map(
+			(
+				await this.database.db.lexicalIndexedFileRefs.bulkGet(
+					Array.from(new Set(logicalRows.map((row) => row.path))),
+				)
+			).flatMap((row) => (row ? [[row.path, row] as const] : [])),
 		);
-		const blockRowById = new Map(
-			blockRows.flatMap((row) => (row ? [[row.id, row] as const] : [])),
+		const validLogicalRows = logicalRows.filter((logicalRow) => {
+			const indexedRef = indexedRefsByPath.get(logicalRow.path);
+			return (
+				!!indexedRef &&
+				logicalRow.epoch === meta.epoch &&
+				logicalRow.generation === indexedRef.generation
+			);
+		});
+		if (validLogicalRows.length === 0) {
+			return new Map();
+		}
+		const storageBlockIds = Array.from(
+			new Set(validLogicalRows.map((row) => row.storageBlockId)),
 		);
-		const documents = new Map<
+		const storageBlockRows =
+			await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkGet(
+				storageBlockIds,
+			);
+		const storageBlockRowById = new Map(
+			storageBlockRows.flatMap((row) => (row ? [[row.id, row] as const] : [])),
+		);
+		const blocks = new Map<
 			string,
-			CoverageLexicalV2HanSegmentExactSidecarDocumentWrite
+			CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRead
 		>();
-		for (const docRow of docRows) {
-			const blockRow = blockRowById.get(docRow.blockId);
-			if (!blockRow) {
+		for (const logicalRow of validLogicalRows) {
+			const storageBlockRow = storageBlockRowById.get(logicalRow.storageBlockId);
+			if (!storageBlockRow) {
 				continue;
 			}
-			const decoded = decodeCoverageLexicalV2HanSegmentExactSidecarDocument(
-				blockRow,
-				docRow,
+			blocks.set(
+				this.createLogicalBlockLookupKey(logicalRow.path, logicalRow.blockOrdinal),
+				decodeCoverageLexicalV2HanSegmentExactSidecarLogicalBlock(
+					storageBlockRow,
+					logicalRow,
+				),
 			);
-			documents.set(decoded.path, decoded);
 		}
-		return documents;
+		return blocks;
 	}
 
 	async updateIndexedRefsMetadata(
@@ -306,15 +374,16 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 		}
 		const meta = await this.ensureMeta();
 		const now = Date.now();
-		const existingRows =
-			await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkGet(
-				normalizedDocuments.map((document) => document.path),
-			);
-		const staleBlockIds = Array.from(
-			new Set(existingRows.flatMap((row) => (row ? [row.blockId] : []))),
+		const existingLogicalRows =
+			await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+				.where("path")
+				.anyOf(normalizedDocuments.map((document) => document.path))
+				.toArray();
+		const staleStorageBlockIds = Array.from(
+			new Set(existingLogicalRows.map((row) => row.storageBlockId)),
 		);
-		const replacement = await this.buildReplacementBlocksForAffectedBlockIds(
-			staleBlockIds,
+		const replacement = await this.buildReplacementData(
+			staleStorageBlockIds,
 			new Set(normalizedDocuments.map((document) => document.path)),
 			normalizedDocuments,
 			meta.epoch,
@@ -324,15 +393,20 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 			"rw",
 			this.database.db.lexicalV2HanSegmentExactSidecarMeta,
 			this.database.db.lexicalV2HanSegmentExactSidecarBlocks,
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks,
 			this.database.db.lexicalV2HanSegmentExactSidecarDocs,
 			async () => {
 				await this.database.db.lexicalV2HanSegmentExactSidecarMeta.put({
 					...meta,
-					blockWriteMode: "multi-doc-v2",
+					blockWriteMode: "logical-block-v3",
 					documentCount:
 						meta.documentCount -
 						replacement.removedDocPaths.length +
-						replacement.docRows.length,
+						replacement.docSummaryRows.length,
+					logicalBlockCount:
+						meta.logicalBlockCount -
+						replacement.removedLogicalBlockIds.length +
+						replacement.logicalBlockRows.length,
 					updatedAt: now,
 				});
 				if (replacement.removedDocPaths.length > 0) {
@@ -340,19 +414,29 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 						replacement.removedDocPaths,
 					);
 				}
-				if (staleBlockIds.length > 0) {
+				if (replacement.removedLogicalBlockIds.length > 0) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks.bulkDelete(
+						replacement.removedLogicalBlockIds,
+					);
+				}
+				if (staleStorageBlockIds.length > 0) {
 					await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkDelete(
-						staleBlockIds,
+						staleStorageBlockIds,
 					);
 				}
-				if (replacement.blockRows.length > 0) {
+				if (replacement.storageBlockRows.length > 0) {
 					await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkPut(
-						replacement.blockRows,
+						replacement.storageBlockRows,
 					);
 				}
-				if (replacement.docRows.length > 0) {
+				if (replacement.logicalBlockRows.length > 0) {
+					await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks.bulkPut(
+						replacement.logicalBlockRows,
+					);
+				}
+				if (replacement.docSummaryRows.length > 0) {
 					await this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkPut(
-						replacement.docRows,
+						replacement.docSummaryRows,
 					);
 				}
 			},
@@ -370,8 +454,9 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 			id: COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_META_ID,
 			epoch: 1,
 			schemaVersion: COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_SCHEMA_VERSION,
-			blockWriteMode: "multi-doc-v2",
+			blockWriteMode: "logical-block-v3",
 			documentCount: 0,
+			logicalBlockCount: 0,
 			indexedRefsFingerprint: "",
 			updatedAt: Date.now(),
 		};
@@ -379,66 +464,104 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 		return created;
 	}
 
-	private async buildReplacementBlocksForAffectedBlockIds(
-		staleBlockIds: readonly string[],
+	private async buildReplacementData(
+		staleStorageBlockIds: readonly string[],
 		replacedPaths: ReadonlySet<string>,
 		nextDocuments: readonly CoverageLexicalV2HanSegmentExactSidecarDocumentWrite[],
 		epoch = 1,
 		now = Date.now(),
 	): Promise<{
-		blockRows: CoverageLexicalV2HanSegmentExactSidecarBlockRow[];
-		docRows: CoverageLexicalV2HanSegmentExactSidecarDocRow[];
+		storageBlockRows: CoverageLexicalV2HanSegmentExactSidecarStorageBlockRow[];
+		logicalBlockRows: CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRow[];
+		docSummaryRows: CoverageLexicalV2HanSegmentExactSidecarDocSummaryRow[];
+		removedLogicalBlockIds: string[];
 		removedDocPaths: string[];
 	}> {
 		const survivorDocuments =
-			staleBlockIds.length === 0
+			staleStorageBlockIds.length === 0
 				? []
-				: await this.readBlockSurvivors(staleBlockIds, replacedPaths);
+				: await this.readSurvivorDocuments(staleStorageBlockIds, replacedPaths);
 		const packed = packCoverageLexicalV2HanSegmentExactSidecarDocuments(
 			epoch,
 			[...survivorDocuments, ...nextDocuments],
 			now,
-			() => this.nextBlockId(epoch, now),
+			() => this.nextStorageBlockId(epoch, now),
+			() => this.nextLogicalBlockId(epoch, now),
 		);
+		const removedLogicalBlockIds =
+			staleStorageBlockIds.length === 0
+				? []
+				: (
+						await this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+							.where("storageBlockId")
+							.anyOf(Array.from(staleStorageBlockIds))
+							.primaryKeys()
+				  ).map(String);
 		return {
-			blockRows: packed.blockRows,
-			docRows: packed.docRows,
+			storageBlockRows: packed.storageBlockRows,
+			logicalBlockRows: packed.logicalBlockRows,
+			docSummaryRows: packed.docSummaryRows,
+			removedLogicalBlockIds,
 			removedDocPaths: [...replacedPaths],
 		};
 	}
 
-	private async readBlockSurvivors(
-		blockIds: readonly string[],
+	private async readSurvivorDocuments(
+		storageBlockIds: readonly string[],
 		replacedPaths: ReadonlySet<string>,
 	): Promise<CoverageLexicalV2HanSegmentExactSidecarDocumentWrite[]> {
-		const [blockRows, docRows] = await Promise.all([
+		const [storageBlockRows, logicalBlockRows] = await Promise.all([
 			this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkGet(
-				Array.from(blockIds),
+				Array.from(storageBlockIds),
 			),
-			this.database.db.lexicalV2HanSegmentExactSidecarDocs
-				.where("blockId")
-				.anyOf(Array.from(blockIds))
-				.toArray(),
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+				.where("storageBlockId")
+				.anyOf(Array.from(storageBlockIds))
+				.sortBy("blockOrdinal"),
 		]);
-		const blockRowById = new Map(
-			blockRows.flatMap((row) => (row ? [[row.id, row] as const] : [])),
+		const storageBlockRowById = new Map(
+			storageBlockRows.flatMap((row) => (row ? [[row.id, row] as const] : [])),
 		);
-		const survivors: CoverageLexicalV2HanSegmentExactSidecarDocumentWrite[] = [];
-		for (const docRow of docRows) {
-			if (replacedPaths.has(docRow.path)) {
+		const survivorsByPath = new Map<string, CoverageLexicalV2HanSegmentExactSidecarDocumentWrite>();
+		for (const logicalBlockRow of logicalBlockRows) {
+			if (replacedPaths.has(logicalBlockRow.path)) {
 				continue;
 			}
-			const blockRow = blockRowById.get(docRow.blockId);
-			if (!blockRow) {
+			const storageBlockRow = storageBlockRowById.get(logicalBlockRow.storageBlockId);
+			if (!storageBlockRow) {
 				continue;
 			}
-			const decoded = decodeCoverageLexicalV2HanSegmentExactSidecarDocument(
-				blockRow,
-				docRow,
+			const decoded = decodeCoverageLexicalV2HanSegmentExactSidecarLogicalBlock(
+				storageBlockRow,
+				logicalBlockRow,
 			);
-			survivors.push(decoded);
+			const existing =
+				survivorsByPath.get(logicalBlockRow.path) ?? {
+					path: logicalBlockRow.path,
+					generation: logicalBlockRow.generation,
+					logicalBlocks: [],
+				};
+			survivorsByPath.set(logicalBlockRow.path, {
+				...existing,
+				logicalBlocks: [
+					...existing.logicalBlocks,
+					{
+						blockOrdinal: decoded.blockOrdinal,
+						bodyHanSymbolIds: decoded.bodyHanSymbolIds,
+						bigramIds: [],
+						encodedByteLength: decoded.encodedByteLength,
+						symbolCount: decoded.symbolCount,
+						segmentCount: decoded.segmentCount,
+					},
+				],
+			});
 		}
-		return survivors;
+		return [...survivorsByPath.values()].map((document) => ({
+			...document,
+			logicalBlocks: [...document.logicalBlocks].sort(
+				(left, right) => left.blockOrdinal - right.blockOrdinal,
+			),
+		}));
 	}
 
 	private async listStoredPaths(): Promise<string[]> {
@@ -447,9 +570,18 @@ export class CoverageLexicalV2HanSegmentExactSidecarStore
 		);
 	}
 
-	private nextBlockId(epoch: number, now: number): string {
-		this.nextBlockCounter += 1;
-		return `v2:han:${epoch}:${now}:${this.nextBlockCounter}`;
+	private createLogicalBlockLookupKey(path: string, blockOrdinal: number): string {
+		return `${path}#${blockOrdinal}`;
+	}
+
+	private nextStorageBlockId(epoch: number, now: number): string {
+		this.nextStorageBlockCounter += 1;
+		return `v3:han:storage:${epoch}:${now}:${this.nextStorageBlockCounter}`;
+	}
+
+	private nextLogicalBlockId(epoch: number, now: number): string {
+		this.nextLogicalBlockCounter += 1;
+		return `v3:han:logical:${epoch}:${now}:${this.nextLogicalBlockCounter}`;
 	}
 }
 
@@ -461,4 +593,3 @@ function buildCoverageLexicalV2HanSegmentExactSidecarIndexedRefsFingerprint(
 		.sort()
 		.join("|");
 }
-

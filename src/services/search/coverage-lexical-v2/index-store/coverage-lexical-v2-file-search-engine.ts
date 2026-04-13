@@ -76,6 +76,8 @@ export class CoverageLexicalV2FileSearchEngine
 	implements FileSearchEngine, CoverageLexicalV2PersistentStoreApi {
 	readonly backend = "coverage-lexical" as const;
 	readonly supportsSerialization = true;
+	private static readonly BODY_HAN_EXACT_CACHE_MAX_BLOCKS = 2048;
+	private static readonly BODY_HAN_EXACT_CACHE_MAX_BYTES = 12 * 1024 * 1024;
 
 	private readonly tokenizer = container.resolve(Tokenizer);
 	private readonly database = container.resolve(Database);
@@ -83,6 +85,7 @@ export class CoverageLexicalV2FileSearchEngine
 	private readonly store = new CoverageLexicalV2IndexStore();
 	private readonly bodyTokenCacheByDocId = new Map<number, Uint32Array>();
 	private readonly bodyHanExactCacheByDocKey = new Map<string, Uint32Array>();
+	private bodyHanExactCacheBytes = 0;
 	private bodyTokenColdStore:
 		| CoverageLexicalBodyTokenColdStoreApi
 		| null
@@ -121,6 +124,7 @@ export class CoverageLexicalV2FileSearchEngine
 		this.store.clear();
 		this.bodyTokenCacheByDocId.clear();
 		this.bodyHanExactCacheByDocKey.clear();
+		this.bodyHanExactCacheBytes = 0;
 	}
 
 	beginBatchReindex(): void {
@@ -326,16 +330,16 @@ export class CoverageLexicalV2FileSearchEngine
 				prefetchBodyTokenSequences: async (docIds) => {
 					await this.prefetchBodyTokenSequences(docIds);
 				},
-				prefetchBodyHanExact: async (docIds, budget) =>
-					await this.prefetchBodyHanExact(
-						docIds,
+				prefetchBodyHanExactBlocks: async (blockIds, budget) =>
+					await this.prefetchBodyHanExactBlocks(
+						blockIds,
 						queryLocalBodyHanExactCache,
 						budget,
 					),
-				getBodyHanExactBackstopStats: (docId, normalizedText, bigrams) => {
+				getBodyHanExactBlockBackstopStats: (blockId, normalizedText, bigrams) => {
 					const symbolIds =
-						queryLocalBodyHanExactCache.get(docId) ??
-						this.getCachedBodyHanExact(docId);
+						queryLocalBodyHanExactCache.get(blockId) ??
+						this.getCachedBodyHanExact(blockId);
 					return symbolIds
 						? this.store.buildBodyHanExactBackstopStatsFromSymbolIds(
 								symbolIds,
@@ -498,6 +502,37 @@ export class CoverageLexicalV2FileSearchEngine
 		await this.database.clearCoverageLexicalV2IndexStorePersistence();
 	}
 
+	buildBodyTokenColdDocument(
+		path: string,
+		generation: number | undefined,
+		bodyText: string,
+	): CoverageLexicalBodyTokenColdDocumentWrite {
+		return {
+			path,
+			generation,
+			bodyTokens: tokenizeCoverageLexicalV2DocumentText(this.tokenizer, bodyText),
+		};
+	}
+
+	buildBodyHanExactSidecarDocument(
+		path: string,
+		generation: number | undefined,
+		bodyText: string,
+	): CoverageLexicalV2HanSegmentExactSidecarDocumentWrite | null {
+		return this.buildBodyHanExactSidecarWrite(
+			buildCoverageLexicalV2PreparedDocument(this.tokenizer, {
+				path,
+				generation,
+				content: bodyText,
+				basename: "",
+				folder: "",
+				aliases: "",
+				tags: "",
+				headings: "",
+			}),
+		);
+	}
+
 	private async prefetchBodyTokenSequences(docIds: readonly number[]): Promise<void> {
 		const coldStore = this.getBodyTokenColdStore();
 		if (!coldStore) {
@@ -532,219 +567,284 @@ export class CoverageLexicalV2FileSearchEngine
 		}
 	}
 
-	private async prefetchBodyHanExact(
-		docIds: readonly number[],
+	private async prefetchBodyHanExactBlocks(
+		blockIds: readonly number[],
 		queryLocalCache: Map<number, Uint32Array>,
 		budget: CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
 	): Promise<{
-		fetchedDocIds: readonly number[];
-		fetchedDocCount: number;
+		fetchedBlockIds: readonly number[];
+		fetchedBlockCount: number;
 		byteSum: number;
 		skippedByBudget: number;
-		skippedReason: "none" | "doc_budget" | "byte_budget" | "time_budget";
-		docResults: readonly CoverageLexicalV2CandidateCascadeHanExactPrefetchDocResult[];
+		skippedReason: "none" | "block_budget" | "byte_budget" | "time_budget";
+		blockResults: readonly CoverageLexicalV2CandidateCascadeHanExactPrefetchDocResult[];
 	}> {
 		const coldStore = this.getBodyHanExactSidecarStore();
-		if (!coldStore || docIds.length === 0) {
+		if (!coldStore || blockIds.length === 0) {
 			return {
-				fetchedDocIds: [],
-				fetchedDocCount: 0,
+				fetchedBlockIds: [],
+				fetchedBlockCount: 0,
 				byteSum: 0,
 				skippedByBudget: 0,
 				skippedReason: "none",
-				docResults: docIds.map((docId) => ({
-					docId,
-					path: this.store.getDocumentPath(docId) ?? null,
+				blockResults: blockIds.map((blockId) => {
+					const descriptor = this.store.getBodyHanLogicalBlockDescriptor(blockId);
+					return {
+					blockId,
+					docId: descriptor?.docId ?? null,
+					path: descriptor?.path ?? null,
+					blockOrdinal: descriptor?.blockOrdinal ?? null,
 					status: "cold_store_unavailable",
-					estimatedBytes:
-						this.store.getBodyHanSegmentExactSidecarMetadata(docId)?.estimatedBytes ??
-						null,
-					segmentCount:
-						this.store.getBodyHanSegmentExactSidecarMetadata(docId)?.segmentCount ??
-						null,
-				})),
+					estimatedBytes: descriptor?.encodedByteLength ?? null,
+					segmentCount: descriptor?.segmentCount ?? null,
+					symbolCount: descriptor?.symbolCount ?? null,
+				};
+				}),
 			};
 		}
 		const deadline = Date.now() + Math.max(0, budget.timeBudgetMs);
-		const fetchedDocIds: number[] = [];
-		const docIdsToFetch: number[] = [];
-		const pathsToFetch: string[] = [];
-		const docResultsById = new Map<
+		const fetchedBlockIds: number[] = [];
+		const requestsToFetch: Array<{ blockId: number; path: string; blockOrdinal: number }> = [];
+		const blockResultsById = new Map<
 			number,
 			CoverageLexicalV2CandidateCascadeHanExactPrefetchDocResult
 		>();
 		let budgetedByteSum = 0;
 		let byteSum = 0;
-		let skippedReason: "none" | "doc_budget" | "byte_budget" | "time_budget" = "none";
+		let skippedReason: "none" | "block_budget" | "byte_budget" | "time_budget" = "none";
 		let skippedByBudget = 0;
-		const setDocResult = (
-			docId: number,
+		const setBlockResult = (
+			blockId: number,
+			docId: number | null,
 			path: string | null,
 			status: CoverageLexicalV2CandidateCascadeHanExactPrefetchDocStatus,
+			blockOrdinal: number | null,
 			estimatedBytes: number | null,
 			segmentCount: number | null,
+			symbolCount: number | null,
 		): void => {
-			docResultsById.set(docId, {
+			blockResultsById.set(blockId, {
+				blockId,
 				docId,
 				path,
+				blockOrdinal,
 				status,
 				estimatedBytes,
 				segmentCount,
+				symbolCount,
 			});
 		};
-		for (const docId of docIds) {
-			const cached = this.getCachedBodyHanExact(docId);
-			if (cached) {
-				queryLocalCache.set(docId, cached);
-				fetchedDocIds.push(docId);
-				byteSum += cached.length * 4;
-				setDocResult(
-					docId,
-					this.store.getDocumentPath(docId) ?? null,
-					"cache_hit",
+		for (const blockId of blockIds) {
+			const descriptor = this.store.getBodyHanLogicalBlockDescriptor(blockId);
+			if (!descriptor) {
+				setBlockResult(
+					blockId,
+					null,
+					null,
+					"missing_block_descriptor",
+					null,
+					null,
 					null,
 					null,
 				);
 				continue;
 			}
-			const metadata = this.store.getBodyHanSegmentExactSidecarMetadata(docId);
-			const path = this.store.getDocumentPath(docId);
-			if (!metadata) {
-				setDocResult(docId, path ?? null, "missing_metadata", null, null);
+			const cached = this.getCachedBodyHanExact(blockId);
+			if (cached) {
+				queryLocalCache.set(blockId, cached);
+				fetchedBlockIds.push(blockId);
+				byteSum += cached.length * 4;
+				setBlockResult(
+					blockId,
+					descriptor.docId,
+					descriptor.path,
+					"cache_hit",
+					descriptor.blockOrdinal,
+					null,
+					null,
+					null,
+				);
 				continue;
 			}
-			if (!path) {
-				setDocResult(
-					docId,
+			if (!descriptor.path) {
+				setBlockResult(
+					blockId,
+					descriptor.docId,
 					null,
 					"missing_path",
-					metadata.estimatedBytes,
-					metadata.segmentCount,
+					descriptor.blockOrdinal,
+					descriptor.encodedByteLength,
+					descriptor.segmentCount,
+					descriptor.symbolCount,
 				);
 				continue;
 			}
-			if (metadata.segmentCount <= 0) {
-				setDocResult(
-					docId,
-					path,
-					"zero_segment_count",
-					metadata.estimatedBytes,
-					metadata.segmentCount,
+			if (descriptor.symbolCount <= 0) {
+				setBlockResult(
+					blockId,
+					descriptor.docId,
+					descriptor.path,
+					"zero_symbol_count",
+					descriptor.blockOrdinal,
+					descriptor.encodedByteLength,
+					descriptor.segmentCount,
+					descriptor.symbolCount,
 				);
 				continue;
 			}
-			if (docIdsToFetch.length >= Math.max(0, budget.docBudget)) {
-				skippedReason = "doc_budget";
+			if (requestsToFetch.length >= Math.max(0, budget.blockBudget)) {
+				skippedReason = "block_budget";
 				skippedByBudget += 1;
-				setDocResult(
-					docId,
-					path,
-					"doc_budget",
-					metadata.estimatedBytes,
-					metadata.segmentCount,
+				setBlockResult(
+					blockId,
+					descriptor.docId,
+					descriptor.path,
+					"block_budget",
+					descriptor.blockOrdinal,
+					descriptor.encodedByteLength,
+					descriptor.segmentCount,
+					descriptor.symbolCount,
 				);
 				continue;
 			}
-			if (budgetedByteSum + metadata.estimatedBytes > Math.max(0, budget.byteBudget)) {
+			if (
+				budgetedByteSum + descriptor.encodedByteLength >
+				Math.max(0, budget.byteBudget)
+			) {
 				skippedReason = "byte_budget";
 				skippedByBudget += 1;
-				setDocResult(
-					docId,
-					path,
+				setBlockResult(
+					blockId,
+					descriptor.docId,
+					descriptor.path,
 					"byte_budget",
-					metadata.estimatedBytes,
-					metadata.segmentCount,
+					descriptor.blockOrdinal,
+					descriptor.encodedByteLength,
+					descriptor.segmentCount,
+					descriptor.symbolCount,
 				);
 				continue;
 			}
 			if (Date.now() > deadline) {
 				skippedReason = "time_budget";
 				skippedByBudget += 1;
-				setDocResult(
-					docId,
-					path,
+				setBlockResult(
+					blockId,
+					descriptor.docId,
+					descriptor.path,
 					"time_budget",
-					metadata.estimatedBytes,
-					metadata.segmentCount,
+					descriptor.blockOrdinal,
+					descriptor.encodedByteLength,
+					descriptor.segmentCount,
+					descriptor.symbolCount,
 				);
 				continue;
 			}
-			docIdsToFetch.push(docId);
-			pathsToFetch.push(path);
-			budgetedByteSum += metadata.estimatedBytes;
+			requestsToFetch.push({
+				blockId,
+				path: descriptor.path,
+				blockOrdinal: descriptor.blockOrdinal,
+			});
+			budgetedByteSum += descriptor.encodedByteLength;
 		}
-		if (pathsToFetch.length > 0) {
-			const documents = await coldStore.readDocuments(pathsToFetch);
-			const missingPaths = pathsToFetch.filter((path) => !documents.has(path));
+		if (requestsToFetch.length > 0) {
+			const logicalBlocks = await coldStore.readLogicalBlocks(
+				requestsToFetch.map((request) => ({
+					path: request.path,
+					blockOrdinal: request.blockOrdinal,
+				})),
+			);
+			const missingRequests = requestsToFetch.filter(
+				(request) =>
+					!logicalBlocks.has(
+						this.getBodyHanExactLogicalBlockLookupKey(
+							request.path,
+							request.blockOrdinal,
+						),
+					),
+			);
 			const missingDiagnostics =
-				missingPaths.length > 0
-					? await this.diagnoseMissingBodyHanExactPaths(missingPaths)
+				missingRequests.length > 0
+					? await this.diagnoseMissingBodyHanExactLogicalBlocks(missingRequests)
 					: new Map<
 							string,
 							{
 								status: CoverageLexicalV2CandidateCascadeHanExactPrefetchDocStatus;
 								estimatedBytes: number | null;
 								segmentCount: number | null;
+								symbolCount: number | null;
 							}
 					  >();
-			for (const docId of docIdsToFetch) {
-				const path = this.store.getDocumentPath(docId);
-				if (!path) {
-					setDocResult(docId, null, "missing_path", null, null);
-					continue;
-				}
-				const stored = documents.get(path);
-				if (!stored) {
-					const metadata = this.store.getBodyHanSegmentExactSidecarMetadata(docId);
-					const diagnosis = missingDiagnostics.get(path);
-					setDocResult(
-						docId,
-						path,
+			for (const request of requestsToFetch) {
+				const descriptor = this.store.getBodyHanLogicalBlockDescriptor(request.blockId);
+				const lookupKey = this.getBodyHanExactLogicalBlockLookupKey(
+					request.path,
+					request.blockOrdinal,
+				);
+				const stored = logicalBlocks.get(lookupKey);
+				if (!stored || !descriptor) {
+					const diagnosis = missingDiagnostics.get(lookupKey);
+					setBlockResult(
+						request.blockId,
+						descriptor?.docId ?? null,
+						request.path,
 						diagnosis?.status ?? "read_miss",
-						diagnosis?.estimatedBytes ?? metadata?.estimatedBytes ?? null,
-						diagnosis?.segmentCount ?? metadata?.segmentCount ?? null,
+						request.blockOrdinal,
+						diagnosis?.estimatedBytes ?? descriptor?.encodedByteLength ?? null,
+						diagnosis?.segmentCount ?? descriptor?.segmentCount ?? null,
+						diagnosis?.symbolCount ?? descriptor?.symbolCount ?? null,
 					);
 					continue;
 				}
 				const symbolIds = Uint32Array.from(stored.bodyHanSymbolIds);
-				queryLocalCache.set(docId, symbolIds);
-				this.setCachedBodyHanExact(docId, symbolIds);
-				fetchedDocIds.push(docId);
+				queryLocalCache.set(request.blockId, symbolIds);
+				this.setCachedBodyHanExact(request.blockId, symbolIds);
+				fetchedBlockIds.push(request.blockId);
 				byteSum += symbolIds.length * 4;
-				setDocResult(
-					docId,
-					path,
+				setBlockResult(
+					request.blockId,
+					descriptor.docId,
+					request.path,
 					"fetched",
+					request.blockOrdinal,
 					symbolIds.length * 4,
 					stored.segmentCount,
+					stored.symbolCount,
 				);
 			}
 		}
 		return {
-			fetchedDocIds,
-			fetchedDocCount: fetchedDocIds.length,
+			fetchedBlockIds,
+			fetchedBlockCount: fetchedBlockIds.length,
 			byteSum,
 			skippedByBudget,
 			skippedReason,
-			docResults: docIds.map(
-				(docId) =>
-					docResultsById.get(docId) ?? {
-						docId,
-						path: this.store.getDocumentPath(docId) ?? null,
+			blockResults: blockIds.map(
+				(blockId) => {
+					const descriptor = this.store.getBodyHanLogicalBlockDescriptor(blockId);
+					return (
+					blockResultsById.get(blockId) ?? {
+						blockId,
+						docId: descriptor?.docId ?? null,
+						path: descriptor?.path ?? null,
+						blockOrdinal: descriptor?.blockOrdinal ?? null,
 						status: "read_miss",
-						estimatedBytes:
-							this.store.getBodyHanSegmentExactSidecarMetadata(docId)?.estimatedBytes ??
-							null,
-						segmentCount:
-							this.store.getBodyHanSegmentExactSidecarMetadata(docId)?.segmentCount ??
-							null,
-					},
+						estimatedBytes: descriptor?.encodedByteLength ?? null,
+						segmentCount: descriptor?.segmentCount ?? null,
+						symbolCount: descriptor?.symbolCount ?? null,
+					}
+					);
+				},
 			),
 		};
 	}
 
-	private async diagnoseMissingBodyHanExactPaths(
-		paths: readonly string[],
+	private async diagnoseMissingBodyHanExactLogicalBlocks(
+		requests: readonly {
+			blockId: number;
+			path: string;
+			blockOrdinal: number;
+		}[],
 	): Promise<
 		Map<
 			string,
@@ -752,110 +852,212 @@ export class CoverageLexicalV2FileSearchEngine
 				status: CoverageLexicalV2CandidateCascadeHanExactPrefetchDocStatus;
 				estimatedBytes: number | null;
 				segmentCount: number | null;
+				symbolCount: number | null;
 			}
 		>
 	> {
-		const uniquePaths = Array.from(new Set(paths));
+		const uniqueRequests = Array.from(
+			new Map(
+				requests.map((request) => [
+					this.getBodyHanExactLogicalBlockLookupKey(
+						request.path,
+						request.blockOrdinal,
+					),
+					request,
+				]),
+			).values(),
+		);
 		const diagnoses = new Map<
 			string,
 			{
 				status: CoverageLexicalV2CandidateCascadeHanExactPrefetchDocStatus;
 				estimatedBytes: number | null;
 				segmentCount: number | null;
+				symbolCount: number | null;
 			}
 		>();
-		if (uniquePaths.length === 0) {
+		if (uniqueRequests.length === 0) {
 			return diagnoses;
 		}
 		const meta = await this.database.db.lexicalV2HanSegmentExactSidecarMeta.get(
 			COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_META_ID,
 		);
 		if (!meta) {
-			for (const path of uniquePaths) {
-				diagnoses.set(path, {
+			for (const request of uniqueRequests) {
+				diagnoses.set(
+					this.getBodyHanExactLogicalBlockLookupKey(
+						request.path,
+						request.blockOrdinal,
+					),
+					{
 					status: "sidecar_meta_missing",
 					estimatedBytes: null,
 					segmentCount: null,
-				});
+					symbolCount: null,
+				},
+				);
 			}
 			return diagnoses;
 		}
-		if (meta.schemaVersion !== 2) {
-			for (const path of uniquePaths) {
-				diagnoses.set(path, {
+		if (meta.schemaVersion !== 3) {
+			for (const request of uniqueRequests) {
+				diagnoses.set(
+					this.getBodyHanExactLogicalBlockLookupKey(
+						request.path,
+						request.blockOrdinal,
+					),
+					{
 					status: "sidecar_schema_mismatch",
 					estimatedBytes: null,
 					segmentCount: null,
-				});
+					symbolCount: null,
+				},
+				);
 			}
 			return diagnoses;
 		}
-		const [docRowsByPath, indexedRefsByPath] = await Promise.all([
-			this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkGet(uniquePaths),
-			this.database.db.lexicalIndexedFileRefs.bulkGet(uniquePaths),
+		const [logicalBlockRows, docSummariesByPath, indexedRefsByPath] = await Promise.all([
+			this.database.db.lexicalV2HanSegmentExactSidecarLogicalBlocks
+				.where("[path+blockOrdinal]")
+				.anyOf(
+					uniqueRequests.map((request) => [request.path, request.blockOrdinal]),
+				)
+				.toArray(),
+			this.database.db.lexicalV2HanSegmentExactSidecarDocs.bulkGet(
+				Array.from(new Set(uniqueRequests.map((request) => request.path))),
+			),
+			this.database.db.lexicalIndexedFileRefs.bulkGet(
+				Array.from(new Set(uniqueRequests.map((request) => request.path))),
+			),
 		]);
-		const candidateBlockIds = Array.from(
+		const logicalBlockRowByLookupKey = new Map(
+			logicalBlockRows.map((logicalBlockRow) => [
+				this.getBodyHanExactLogicalBlockLookupKey(
+					logicalBlockRow.path,
+					logicalBlockRow.blockOrdinal,
+				),
+				logicalBlockRow,
+			] as const),
+		);
+		const docSummaryByPath = new Map(
+			Array.from(new Set(uniqueRequests.map((request) => request.path))).flatMap(
+				(path, index) =>
+					docSummariesByPath[index]
+						? [[path, docSummariesByPath[index]] as const]
+						: [],
+			),
+		);
+		const indexedRefByPath = new Map(
+			Array.from(new Set(uniqueRequests.map((request) => request.path))).flatMap(
+				(path, index) =>
+					indexedRefsByPath[index] ? [[path, indexedRefsByPath[index]] as const] : [],
+			),
+		);
+		const candidateStorageBlockIds = Array.from(
 			new Set(
-				docRowsByPath.flatMap((docRow) =>
-					docRow && docRow.epoch === meta.epoch ? [docRow.blockId] : [],
+				logicalBlockRows.flatMap((logicalBlockRow) =>
+					logicalBlockRow && logicalBlockRow.epoch === meta.epoch
+						? [logicalBlockRow.storageBlockId]
+						: [],
 				),
 			),
 		);
-		const blockRows =
-			candidateBlockIds.length > 0
+		const storageBlockRows =
+			candidateStorageBlockIds.length > 0
 				? await this.database.db.lexicalV2HanSegmentExactSidecarBlocks.bulkGet(
-						candidateBlockIds,
+						candidateStorageBlockIds,
 				  )
 				: [];
-		const blockIds = new Set(blockRows.flatMap((blockRow) => (blockRow ? [blockRow.id] : [])));
-		for (let index = 0; index < uniquePaths.length; index += 1) {
-			const path = uniquePaths[index];
-			const docRow = docRowsByPath[index];
-			const indexedRef = indexedRefsByPath[index];
-			if (!docRow) {
-				diagnoses.set(path, {
-					status: "sidecar_doc_row_missing",
+		const storageBlockIds = new Set(
+			storageBlockRows.flatMap((storageBlockRow) =>
+				storageBlockRow ? [storageBlockRow.id] : [],
+			),
+		);
+		for (const request of uniqueRequests) {
+			const lookupKey = this.getBodyHanExactLogicalBlockLookupKey(
+				request.path,
+				request.blockOrdinal,
+			);
+			const logicalBlockRow = logicalBlockRowByLookupKey.get(lookupKey);
+			const docSummary = docSummaryByPath.get(request.path);
+			const indexedRef = indexedRefByPath.get(request.path);
+			if (!docSummary) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_doc_summary_missing",
 					estimatedBytes: null,
 					segmentCount: null,
+					symbolCount: null,
 				});
 				continue;
 			}
 			if (!indexedRef) {
-				diagnoses.set(path, {
-					status: "sidecar_indexed_ref_missing",
-					estimatedBytes: null,
-					segmentCount: docRow.segmentCount,
-				});
-				continue;
-			}
-			if (docRow.epoch !== meta.epoch) {
-				diagnoses.set(path, {
-					status: "sidecar_epoch_mismatch",
-					estimatedBytes: docRow.symbolCount * 4,
-					segmentCount: docRow.segmentCount,
-				});
-				continue;
-			}
-			if (docRow.generation !== indexedRef.generation) {
-				diagnoses.set(path, {
+				diagnoses.set(lookupKey, {
 					status: "sidecar_generation_mismatch",
-					estimatedBytes: docRow.symbolCount * 4,
-					segmentCount: docRow.segmentCount,
+					estimatedBytes: null,
+					segmentCount: docSummary.segmentCount,
+					symbolCount: docSummary.symbolCount,
 				});
 				continue;
 			}
-			if (!blockIds.has(docRow.blockId)) {
-				diagnoses.set(path, {
-					status: "sidecar_block_missing",
-					estimatedBytes: docRow.symbolCount * 4,
-					segmentCount: docRow.segmentCount,
+			if (docSummary.epoch !== meta.epoch) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_epoch_mismatch",
+					estimatedBytes: docSummary.symbolCount * 4,
+					segmentCount: docSummary.segmentCount,
+					symbolCount: docSummary.symbolCount,
 				});
 				continue;
 			}
-			diagnoses.set(path, {
+			if (docSummary.generation !== indexedRef.generation) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_generation_mismatch",
+					estimatedBytes: docSummary.symbolCount * 4,
+					segmentCount: docSummary.segmentCount,
+					symbolCount: docSummary.symbolCount,
+				});
+				continue;
+			}
+			if (!logicalBlockRow) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_logical_block_missing",
+					estimatedBytes: null,
+					segmentCount: null,
+					symbolCount: null,
+				});
+				continue;
+			}
+			if (logicalBlockRow.epoch !== meta.epoch) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_epoch_mismatch",
+					estimatedBytes: logicalBlockRow.symbolCount * 4,
+					segmentCount: logicalBlockRow.segmentCount,
+					symbolCount: logicalBlockRow.symbolCount,
+				});
+				continue;
+			}
+			if (logicalBlockRow.generation !== indexedRef.generation) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_generation_mismatch",
+					estimatedBytes: logicalBlockRow.symbolCount * 4,
+					segmentCount: logicalBlockRow.segmentCount,
+					symbolCount: logicalBlockRow.symbolCount,
+				});
+				continue;
+			}
+			if (!storageBlockIds.has(logicalBlockRow.storageBlockId)) {
+				diagnoses.set(lookupKey, {
+					status: "sidecar_storage_block_missing",
+					estimatedBytes: logicalBlockRow.symbolCount * 4,
+					segmentCount: logicalBlockRow.segmentCount,
+					symbolCount: logicalBlockRow.symbolCount,
+				});
+				continue;
+			}
+			diagnoses.set(lookupKey, {
 				status: "read_miss",
-				estimatedBytes: docRow.symbolCount * 4,
-				segmentCount: docRow.segmentCount,
+				estimatedBytes: logicalBlockRow.symbolCount * 4,
+				segmentCount: logicalBlockRow.segmentCount,
+				symbolCount: logicalBlockRow.symbolCount,
 			});
 		}
 		return diagnoses;
@@ -889,8 +1091,8 @@ export class CoverageLexicalV2FileSearchEngine
 		}
 	}
 
-	private getCachedBodyHanExact(docId: number): Uint32Array | undefined {
-		const cacheKey = this.getBodyHanExactCacheKey(docId);
+	private getCachedBodyHanExact(blockId: number): Uint32Array | undefined {
+		const cacheKey = this.getBodyHanExactCacheKey(blockId);
 		if (!cacheKey) {
 			return undefined;
 		}
@@ -903,36 +1105,75 @@ export class CoverageLexicalV2FileSearchEngine
 		return cached;
 	}
 
-	private setCachedBodyHanExact(docId: number, symbolIds: Uint32Array): void {
-		const cacheKey = this.getBodyHanExactCacheKey(docId);
+	private setCachedBodyHanExact(blockId: number, symbolIds: Uint32Array): void {
+		const cacheKey = this.getBodyHanExactCacheKey(blockId);
 		if (!cacheKey) {
 			return;
 		}
-		this.bodyHanExactCacheByDocKey.delete(cacheKey);
+		const cacheBytes = symbolIds.byteLength;
+		const existing = this.bodyHanExactCacheByDocKey.get(cacheKey);
+		if (existing) {
+			this.bodyHanExactCacheByDocKey.delete(cacheKey);
+			this.bodyHanExactCacheBytes = Math.max(
+				0,
+				this.bodyHanExactCacheBytes - existing.byteLength,
+			);
+		}
+		if (
+			cacheBytes >
+			CoverageLexicalV2FileSearchEngine.BODY_HAN_EXACT_CACHE_MAX_BYTES
+		) {
+			return;
+		}
 		this.bodyHanExactCacheByDocKey.set(cacheKey, symbolIds);
-		while (this.bodyHanExactCacheByDocKey.size > 24) {
+		this.bodyHanExactCacheBytes += cacheBytes;
+		while (
+			this.bodyHanExactCacheByDocKey.size >
+				CoverageLexicalV2FileSearchEngine.BODY_HAN_EXACT_CACHE_MAX_BLOCKS ||
+			this.bodyHanExactCacheBytes >
+				CoverageLexicalV2FileSearchEngine.BODY_HAN_EXACT_CACHE_MAX_BYTES
+		) {
 			const oldestKey = this.bodyHanExactCacheByDocKey.keys().next().value;
 			if (!oldestKey) {
 				break;
 			}
+			const oldest = this.bodyHanExactCacheByDocKey.get(oldestKey);
 			this.bodyHanExactCacheByDocKey.delete(oldestKey);
+			this.bodyHanExactCacheBytes = Math.max(
+				0,
+				this.bodyHanExactCacheBytes - (oldest?.byteLength ?? 0),
+			);
 		}
 	}
 
 	private deleteCachedBodyHanExact(docIds: readonly number[]): void {
-		for (const docId of docIds) {
-			const prefix = `${docId}:`;
-			for (const cacheKey of this.bodyHanExactCacheByDocKey.keys()) {
-				if (cacheKey.startsWith(prefix)) {
-					this.bodyHanExactCacheByDocKey.delete(cacheKey);
-				}
+		const targetDocIds = new Set(docIds);
+		for (const [cacheKey] of this.bodyHanExactCacheByDocKey) {
+			const docId = Number(cacheKey.split(":", 1)[0]);
+			if (targetDocIds.has(docId)) {
+				const cached = this.bodyHanExactCacheByDocKey.get(cacheKey);
+				this.bodyHanExactCacheByDocKey.delete(cacheKey);
+				this.bodyHanExactCacheBytes = Math.max(
+					0,
+					this.bodyHanExactCacheBytes - (cached?.byteLength ?? 0),
+				);
 			}
 		}
 	}
 
-	private getBodyHanExactCacheKey(docId: number): string | null {
-		const generation = this.store.getDocumentGeneration(docId);
-		return generation === undefined ? null : `${docId}:${generation}`;
+	private getBodyHanExactCacheKey(blockId: number): string | null {
+		const descriptor = this.store.getBodyHanLogicalBlockDescriptor(blockId);
+		if (!descriptor) {
+			return null;
+		}
+		return `${descriptor.docId}:${descriptor.generation ?? -1}:${descriptor.blockOrdinal}`;
+	}
+
+	private getBodyHanExactLogicalBlockLookupKey(
+		path: string,
+		blockOrdinal: number,
+	): string {
+		return `${path}#${blockOrdinal}`;
 	}
 
 	private getBodyTokenColdStore(): CoverageLexicalBodyTokenColdStoreApi | null {
@@ -1014,17 +1255,16 @@ export class CoverageLexicalV2FileSearchEngine
 	private buildBodyHanExactSidecarWrite(
 		document: CoverageLexicalV2PreparedDocument,
 	): CoverageLexicalV2HanSegmentExactSidecarDocumentWrite | null {
-		const encoded = this.store.getOrCreateBodyHanSegmentExactSymbolIds(
+		const logicalBlocks = this.store.getOrCreateBodyHanLogicalBlockWrites(
 			document.bodyHanSegments,
 		);
-		if (encoded.segmentCount <= 0 || encoded.symbolIds.length === 0) {
+		if (logicalBlocks.length === 0) {
 			return null;
 		}
 		return {
 			path: document.path,
 			generation: document.generation,
-			bodyHanSymbolIds: encoded.symbolIds,
-			segmentCount: encoded.segmentCount,
+			logicalBlocks,
 		};
 	}
 

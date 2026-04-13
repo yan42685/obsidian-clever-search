@@ -1,6 +1,7 @@
 import type {
 	MatchedFile,
 } from "src/globals/search-types";
+import { devOption } from "src/globals/dev-option";
 import {
 	applyCoverageLexicalV2DisplayPolicy,
 } from "../display";
@@ -179,13 +180,13 @@ export type CoverageLexicalV2CandidateCascadeTrace = {
 	};
 	verificationSkippedReason: CoverageLexicalV2CandidateCascadeVerificationSkippedReason;
 	pendingHanFrontierCount: number;
-	hanPromotedCount: number;
-	hanPromotionVerifiedCount: number;
-	bodyHanScanDocCount: number;
-	bodyHanScanSegmentCount: number;
-	bodyHanScanMatchedDocCount: number;
-	bodyHanColdExactRequestedDocCount: number;
-	bodyHanColdExactFetchedDocCount: number;
+	hanPromotionDocCount: number;
+	hanPromotionVerifiedDocCount: number;
+	bodyHanCandidateBlockCount: number;
+	bodyHanCandidateSegmentCount: number;
+	bodyHanIntersectedBlockCount: number;
+	bodyHanColdExactRequestedBlockCount: number;
+	bodyHanColdExactFetchedBlockCount: number;
 	bodyHanColdExactByteSum: number;
 	bodyHanColdExactSkippedByBudget: number;
 	bodyHanColdExactSkippedReason:
@@ -245,6 +246,7 @@ type CoverageLexicalV2PendingHanCandidateVerificationState =
 
 export type CoverageLexicalV2PendingHanCandidate = {
 	docId: number;
+	bodyLogicalBlockId?: number;
 	primaryUnitIndex: number;
 	surfaceGroupIndex: number;
 	normalizedText: string;
@@ -270,13 +272,13 @@ export type CoverageLexicalV2HanPromotionResult = {
 
 type CoverageLexicalV2HanBackstopSourceMetrics = {
 	pendingHanFrontierCount: number;
-	hanPromotedCount: number;
-	hanPromotionVerifiedCount: number;
-	bodyHanScanDocCount: number;
-	bodyHanScanSegmentCount: number;
-	bodyHanScanMatchedDocCount: number;
-	bodyHanColdExactRequestedDocCount: number;
-	bodyHanColdExactFetchedDocCount: number;
+	hanPromotionDocCount: number;
+	hanPromotionVerifiedDocCount: number;
+	bodyHanCandidateBlockCount: number;
+	bodyHanCandidateSegmentCount: number;
+	bodyHanIntersectedBlockCount: number;
+	bodyHanColdExactRequestedBlockCount: number;
+	bodyHanColdExactFetchedBlockCount: number;
 	bodyHanColdExactByteSum: number;
 	bodyHanColdExactSkippedByBudget: number;
 	bodyHanColdExactSkippedReason:
@@ -327,14 +329,14 @@ type CoverageLexicalV2TargetedHanDebugTrace = {
 		stats: CoverageLexicalV2CandidateCascadeHanBackstopStats;
 	}>;
 	prefetch: null | {
-		requestedDocIds: number[];
-		fetchedDocIds: number[];
-		fetchedDocCount: number;
+		requestedBlockIds: number[];
+		fetchedBlockIds: number[];
+		fetchedBlockCount: number;
 		byteSum: number;
 		skippedByBudget: number;
 		skippedReason: string;
-		docStatusCounts: Record<string, number>;
-		docResults: CoverageLexicalV2CandidateCascadeHanExactPrefetchDocResult[];
+		blockStatusCounts: Record<string, number>;
+		blockResults: CoverageLexicalV2CandidateCascadeHanExactPrefetchDocResult[];
 	};
 	exactEvaluations: Array<{
 		docId: number;
@@ -841,13 +843,13 @@ function createCoverageLexicalV2CandidateCascadeTrace(
 		},
 		verificationSkippedReason: "none",
 		pendingHanFrontierCount: 0,
-		hanPromotedCount: 0,
-		hanPromotionVerifiedCount: 0,
-		bodyHanScanDocCount: 0,
-		bodyHanScanSegmentCount: 0,
-		bodyHanScanMatchedDocCount: 0,
-		bodyHanColdExactRequestedDocCount: 0,
-		bodyHanColdExactFetchedDocCount: 0,
+		hanPromotionDocCount: 0,
+		hanPromotionVerifiedDocCount: 0,
+		bodyHanCandidateBlockCount: 0,
+		bodyHanCandidateSegmentCount: 0,
+		bodyHanIntersectedBlockCount: 0,
+		bodyHanColdExactRequestedBlockCount: 0,
+		bodyHanColdExactFetchedBlockCount: 0,
 		bodyHanColdExactByteSum: 0,
 		bodyHanColdExactSkippedByBudget: 0,
 		bodyHanColdExactSkippedReason: "not_requested",
@@ -861,13 +863,13 @@ function createCoverageLexicalV2EmptyHanBackstopSourceMetrics():
 CoverageLexicalV2HanBackstopSourceMetrics {
 	return {
 		pendingHanFrontierCount: 0,
-		hanPromotedCount: 0,
-		hanPromotionVerifiedCount: 0,
-		bodyHanScanDocCount: 0,
-		bodyHanScanSegmentCount: 0,
-		bodyHanScanMatchedDocCount: 0,
-		bodyHanColdExactRequestedDocCount: 0,
-		bodyHanColdExactFetchedDocCount: 0,
+		hanPromotionDocCount: 0,
+		hanPromotionVerifiedDocCount: 0,
+		bodyHanCandidateBlockCount: 0,
+		bodyHanCandidateSegmentCount: 0,
+		bodyHanIntersectedBlockCount: 0,
+		bodyHanColdExactRequestedBlockCount: 0,
+		bodyHanColdExactFetchedBlockCount: 0,
 		bodyHanColdExactByteSum: 0,
 		bodyHanColdExactSkippedByBudget: 0,
 		bodyHanColdExactSkippedReason: "not_requested",
@@ -880,15 +882,15 @@ function applyCoverageLexicalV2HanBackstopMetricsToTrace(
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
 ): void {
 	trace.pendingHanFrontierCount = metrics.pendingHanFrontierCount;
-	trace.hanPromotedCount = metrics.hanPromotedCount;
-	trace.hanPromotionVerifiedCount = metrics.hanPromotionVerifiedCount;
-	trace.bodyHanScanDocCount = metrics.bodyHanScanDocCount;
-	trace.bodyHanScanSegmentCount = metrics.bodyHanScanSegmentCount;
-	trace.bodyHanScanMatchedDocCount = metrics.bodyHanScanMatchedDocCount;
-	trace.bodyHanColdExactRequestedDocCount =
-		metrics.bodyHanColdExactRequestedDocCount;
-	trace.bodyHanColdExactFetchedDocCount =
-		metrics.bodyHanColdExactFetchedDocCount;
+	trace.hanPromotionDocCount = metrics.hanPromotionDocCount;
+	trace.hanPromotionVerifiedDocCount = metrics.hanPromotionVerifiedDocCount;
+	trace.bodyHanCandidateBlockCount = metrics.bodyHanCandidateBlockCount;
+	trace.bodyHanCandidateSegmentCount = metrics.bodyHanCandidateSegmentCount;
+	trace.bodyHanIntersectedBlockCount = metrics.bodyHanIntersectedBlockCount;
+	trace.bodyHanColdExactRequestedBlockCount =
+		metrics.bodyHanColdExactRequestedBlockCount;
+	trace.bodyHanColdExactFetchedBlockCount =
+		metrics.bodyHanColdExactFetchedBlockCount;
 	trace.bodyHanColdExactByteSum = metrics.bodyHanColdExactByteSum;
 	trace.bodyHanColdExactSkippedByBudget =
 		metrics.bodyHanColdExactSkippedByBudget;
@@ -1268,8 +1270,13 @@ function createCoverageLexicalV2TargetedHanDebugTrace(
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 ): CoverageLexicalV2TargetedHanDebugTrace {
 	const normalizedQueryText = normalizeCoverageLexicalV2Text(queryText).trim();
+	const normalizedDebugQuery = devOption.targetedHanDebugQuery
+		? normalizeCoverageLexicalV2Text(devOption.targetedHanDebugQuery).trim()
+		: "";
 	return {
-		enabled: normalizedQueryText === "赢宋",
+		enabled:
+			normalizedDebugQuery.length > 0 &&
+			normalizedQueryText === normalizedDebugQuery,
 		normalizedQueryText,
 		queryText,
 		queryTerms,
@@ -1375,20 +1382,25 @@ function recordCoverageLexicalV2TargetedHanDebugPrefetch(
 	if (!targetedHanDebug.enabled) {
 		return;
 	}
-	const docResults = (prefetch.docResults ?? []).map((docResult) => ({ ...docResult }));
-	const docStatusCounts = docResults.reduce<Record<string, number>>((counts, docResult) => {
-		counts[docResult.status] = (counts[docResult.status] ?? 0) + 1;
+	const blockResults = (prefetch.blockResults ?? prefetch.docResults ?? []).map(
+		(blockResult) => ({ ...blockResult }),
+	);
+	const blockStatusCounts = blockResults.reduce<Record<string, number>>((counts, blockResult) => {
+		counts[blockResult.status] = (counts[blockResult.status] ?? 0) + 1;
 		return counts;
 	}, {});
 	targetedHanDebug.prefetch = {
-		requestedDocIds: candidates.map((candidate) => candidate.docId),
-		fetchedDocIds: [...prefetch.fetchedDocIds],
-		fetchedDocCount: prefetch.fetchedDocCount,
+		requestedBlockIds: candidates.flatMap((candidate) =>
+			candidate.bodyLogicalBlockId == null ? [] : [candidate.bodyLogicalBlockId],
+		),
+		fetchedBlockIds: [...(prefetch.fetchedBlockIds ?? prefetch.fetchedDocIds ?? [])],
+		fetchedBlockCount:
+			prefetch.fetchedBlockCount ?? prefetch.fetchedDocCount ?? 0,
 		byteSum: prefetch.byteSum,
 		skippedByBudget: prefetch.skippedByBudget,
 		skippedReason: prefetch.skippedReason,
-		docStatusCounts,
-		docResults,
+		blockStatusCounts,
+		blockResults,
 	};
 }
 
@@ -1402,7 +1414,14 @@ function recordCoverageLexicalV2TargetedHanDebugExactEvaluation(
 	if (!targetedHanDebug.enabled) {
 		return;
 	}
-	const path = reader.getDocumentRecord(candidate.docId)?.path ?? String(candidate.docId);
+	const descriptor =
+		candidate.bodyLogicalBlockId == null
+			? null
+			: reader.getBodyHanLogicalBlockDescriptor(candidate.bodyLogicalBlockId);
+	const path =
+		descriptor?.path ??
+		reader.getDocumentRecord(candidate.docId)?.path ??
+		String(candidate.docId);
 	targetedHanDebug.trackedDocs.set(candidate.docId, path);
 	targetedHanDebug.exactEvaluations.push({
 		docId: candidate.docId,
@@ -1470,6 +1489,22 @@ function finalizeCoverageLexicalV2TargetedHanDebugTrace(
 			path,
 			outcome,
 			sourceFlags: candidateState?.sourceFlags ?? null,
+			potentialPrimaryCoverageCount:
+				candidateState?.potentialPrimaryCoverageCount ?? null,
+			fuzzySalvageCoverageCount:
+				candidateState?.fuzzySalvageCoverageCount ?? null,
+			hanFallbackSalvageGroupCount:
+				candidateState?.hanFallbackSalvageGroupCount ?? null,
+			exactPrimaryUnitIndices: candidateState
+				? [...candidateState.exactPrimaryMask].sort((left, right) => left - right)
+				: null,
+			prefixPrimaryUnitIndices: candidateState
+				? [...candidateState.prefixPrimaryMask].sort((left, right) => left - right)
+				: null,
+			bodyExactQueryTerms: candidateState
+				? [...candidateState.exactQueryTerms.bodyExactQueryTerms]
+				: null,
+			bodyMatchedTerms: candidateState ? [...candidateState.fieldTerms.bodyTerms] : null,
 			needsVerification: candidateState?.needsVerification ?? null,
 			inLayer1: layer1Ids.has(candidateId),
 			inLayer2: layer2Ids.has(candidateId),
@@ -1990,7 +2025,7 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 			continue;
 		}
 		rankedBodyCandidates.push(
-			...collectCoverageLexicalV2BodyHanBackstopGateMatches(
+			...collectCoverageLexicalV2BodyHanBackstopBlockMatches(
 			hanBackstopGroup,
 			primaryUnitIndex,
 			reader,
@@ -2009,12 +2044,14 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 		cappedBodyCandidates,
 		reader,
 	);
-	metrics.bodyHanColdExactRequestedDocCount = cappedBodyCandidates.length;
+	metrics.bodyHanColdExactRequestedBlockCount = cappedBodyCandidates.length;
 	if (cappedBodyCandidates.length > 0) {
-		const prefetch = await reader.prefetchBodyHanExact(
-			cappedBodyCandidates.map((candidate) => candidate.docId),
+		const prefetch = await reader.prefetchBodyHanExactBlocks(
+			cappedBodyCandidates.flatMap((candidate) =>
+				candidate.bodyLogicalBlockId == null ? [] : [candidate.bodyLogicalBlockId],
+			),
 			{
-				docBudget: policy.hanBackstopColdExactDocBudget,
+				blockBudget: policy.hanBackstopColdExactDocBudget,
 				byteBudget: policy.hanBackstopColdExactByteBudget,
 				timeBudgetMs: policy.hanBackstopColdExactTimeBudgetMs,
 			},
@@ -2025,10 +2062,15 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 			cappedBodyCandidates,
 			prefetch,
 		);
-		const prefetchedDocIds = new Set(prefetch.fetchedDocIds);
+		const prefetchedBlockIds = new Set(
+			prefetch.fetchedBlockIds ?? prefetch.fetchedDocIds ?? [],
+		);
 		for (const candidate of cappedBodyCandidates) {
-			const exactStats = reader.getBodyHanExactBackstopStats(
-				candidate.docId,
+			if (candidate.bodyLogicalBlockId == null) {
+				continue;
+			}
+			const exactStats = reader.getBodyHanExactBlockBackstopStats(
+				candidate.bodyLogicalBlockId,
 				candidate.normalizedText,
 				extractCoverageLexicalV2PendingHanCandidateBigrams(
 					queryAnalysis,
@@ -2040,7 +2082,7 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 				targetedHanDebug,
 				candidate,
 				reader,
-				prefetchedDocIds.has(candidate.docId),
+				prefetchedBlockIds.has(candidate.bodyLogicalBlockId),
 				exactStats,
 			);
 			if (!exactStats) {
@@ -2207,8 +2249,8 @@ function mergeCoverageLexicalV2HanPromotionMetrics(
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
 	result: CoverageLexicalV2HanPromotionResult,
 ): void {
-	metrics.hanPromotedCount += result.promotedCount;
-	metrics.hanPromotionVerifiedCount += result.verifiedCount;
+	metrics.hanPromotionDocCount += result.promotedCount;
+	metrics.hanPromotionVerifiedDocCount += result.verifiedCount;
 	if (
 		result.skippedReason === "none" ||
 		result.promotedCount > 0 ||
@@ -2222,7 +2264,7 @@ function mergeCoverageLexicalV2HanPromotionMetrics(
 	}
 }
 
-function collectCoverageLexicalV2BodyHanBackstopGateMatches(
+function collectCoverageLexicalV2BodyHanBackstopBlockMatches(
 	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
 	primaryUnitIndex: number,
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
@@ -2230,30 +2272,69 @@ function collectCoverageLexicalV2BodyHanBackstopGateMatches(
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
 	targetedHanDebug: CoverageLexicalV2TargetedHanDebugTrace,
 ): CoverageLexicalV2PendingHanCandidate[] {
-	const matchedCandidates: CoverageLexicalV2PendingHanCandidate[] = [];
-	for (const docId of reader.getBodyHanSegmentDocIds()) {
-		metrics.bodyHanScanDocCount += 1;
-		const stats = evaluateCoverageLexicalV2BodyHanBackstopMatch(
-			docId,
-			hanBackstopGroup,
-			reader,
-			metrics,
-			targetedHanDebug,
+	if (hanBackstopGroup.bigrams.length === 0) {
+		return [];
+	}
+	const postingEntries = hanBackstopGroup.bigrams
+		.map((bigram, bigramIndex) => ({
+			bigram,
+			bigramIndex,
+			blockIds: reader.getBodyHanBlockPostingMatches(bigram),
+		}))
+		.filter(
+			(entry): entry is {
+				bigram: string;
+				bigramIndex: number;
+				blockIds: readonly number[] | Uint32Array;
+			} => !!entry.blockIds && entry.blockIds.length > 0,
+		)
+		.sort((left, right) => left.blockIds.length - right.blockIds.length);
+	if (postingEntries.length === 0) {
+		return [];
+	}
+	let candidateBlockIds = new Set<number>(Array.from(postingEntries[0].blockIds, Number));
+	for (let index = 1; index < postingEntries.length; index += 1) {
+		const postingSet = new Set<number>(Array.from(postingEntries[index].blockIds, Number));
+		candidateBlockIds = new Set(
+			[...candidateBlockIds].filter((blockId) => postingSet.has(blockId)),
 		);
-		if (!stats) {
+		if (candidateBlockIds.size === 0) {
+			break;
+		}
+	}
+	const matchedCandidates: CoverageLexicalV2PendingHanCandidate[] = [];
+	for (const blockId of candidateBlockIds) {
+		const descriptor = reader.getBodyHanLogicalBlockDescriptor(blockId);
+		if (!descriptor) {
 			continue;
 		}
-		const record = reader.getDocumentRecord(docId);
+		metrics.bodyHanCandidateBlockCount += 1;
+		metrics.bodyHanCandidateSegmentCount += descriptor.segmentCount;
+		const record = reader.getDocumentRecord(descriptor.docId);
 		if (!record) {
 			continue;
 		}
-		metrics.bodyHanScanMatchedDocCount += 1;
+		const stats = {
+			longestContiguousBigramChain: hanBackstopGroup.bigrams.length,
+			matchedBigramCount: hanBackstopGroup.bigrams.length,
+			bigramCoverageRatio: hanBackstopGroup.bigrams.length > 0 ? 1 : 0,
+		};
+		recordCoverageLexicalV2TargetedHanDebugBodyGateEvaluation(
+			targetedHanDebug,
+			hanBackstopGroup,
+			descriptor.docId,
+			reader,
+			stats,
+		);
+		metrics.bodyHanIntersectedBlockCount += 1;
 		matchedCandidates.push({
-			docId,
+			docId: descriptor.docId,
+			bodyLogicalBlockId: blockId,
 			primaryUnitIndex,
 			surfaceGroupIndex: hanBackstopGroup.surfaceGroupIndex,
 			normalizedText: hanBackstopGroup.normalizedText,
-			stableDeterministicKey: record.stableDeterministicKey ?? record.path,
+			stableDeterministicKey:
+				(record.stableDeterministicKey ?? record.path) + `#${descriptor.blockOrdinal}`,
 			stats,
 			verificationState: "pending",
 			verifiedFields: new Set<CoverageLexicalV2MatchField>(),
@@ -2262,24 +2343,6 @@ function collectCoverageLexicalV2BodyHanBackstopGateMatches(
 	return matchedCandidates
 		.sort(compareCoverageLexicalV2PendingHanCandidates)
 		.slice(0, docCapPerGroup);
-}
-
-function evaluateCoverageLexicalV2BodyHanBackstopMatch(
-	docId: number,
-	hanBackstopGroup: CoverageLexicalV2HanBackstopGroup,
-	reader: CoverageLexicalV2CandidateCascadeStorageReader,
-	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
-	targetedHanDebug: CoverageLexicalV2TargetedHanDebugTrace,
-): CoverageLexicalV2CandidateCascadeHanBackstopStats | null {
-	const stats = reader.getBodyHanBackstopGateStats(docId, hanBackstopGroup.bigrams);
-	recordCoverageLexicalV2TargetedHanDebugBodyGateEvaluation(
-		targetedHanDebug,
-		hanBackstopGroup,
-		docId,
-		reader,
-		stats,
-	);
-	return stats;
 }
 
 function extractCoverageLexicalV2PendingHanCandidateBigrams(
@@ -2302,7 +2365,8 @@ function applyCoverageLexicalV2BodyHanExactPrefetchMetrics(
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
 	prefetch: CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
 ): void {
-	metrics.bodyHanColdExactFetchedDocCount += prefetch.fetchedDocCount;
+	const fetchedBlockCount = prefetch.fetchedBlockCount ?? prefetch.fetchedDocCount ?? 0;
+	metrics.bodyHanColdExactFetchedBlockCount += fetchedBlockCount;
 	metrics.bodyHanColdExactByteSum += prefetch.byteSum;
 	metrics.bodyHanColdExactSkippedByBudget += prefetch.skippedByBudget;
 	if (
@@ -2313,7 +2377,7 @@ function applyCoverageLexicalV2BodyHanExactPrefetchMetrics(
 		return;
 	}
 	if (
-		prefetch.fetchedDocCount > 0 ||
+		fetchedBlockCount > 0 ||
 		prefetch.byteSum > 0 ||
 		prefetch.skippedReason === "none"
 	) {
@@ -2689,6 +2753,11 @@ function updateCoverageLexicalV2CascadeVerifiedHanBackstopEvidence(
 	primaryUnitIndex: number,
 ): void {
 	addCoverageLexicalV2CascadeFieldTerm(candidateState.fieldTerms, field, matchedTerm);
+	addCoverageLexicalV2CascadeExactQueryTerm(
+		candidateState.exactQueryTerms,
+		field,
+		primaryUnit.normalizedText,
+	);
 	candidateState.exactPrimaryMask.add(primaryUnitIndex);
 	candidateState.sourceFlags.hasExact = true;
 	candidateState.sourceFlags.hasHanBackstop = true;
@@ -2708,6 +2777,7 @@ function updateCoverageLexicalV2CascadeVerifiedHanBackstopEvidence(
 	}
 	if (field === "body") {
 		candidateState.sourceFlags.hasBody = true;
+		candidateState.sourceFlags.hasBodyExact = true;
 		return;
 	}
 	candidateState.sourceFlags.hasMetadata = true;

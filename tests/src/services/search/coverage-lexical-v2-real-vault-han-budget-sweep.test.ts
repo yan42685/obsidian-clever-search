@@ -436,15 +436,15 @@ describe("coverage lexical v2 real-vault Han budget sweep", () => {
 				summaries.push({
 					name: sweepCase.name,
 					latencyMs: summarizeTimings(timings),
-					prefetch: {
-						requested:
-							lastDebug?.hanBackstopMetrics?.bodyHanColdExactRequestedDocCount ??
-							lastDebug?.prefetch?.requestedDocIds?.length ??
-							0,
-						fetched:
-							lastDebug?.hanBackstopMetrics?.bodyHanColdExactFetchedDocCount ??
-							lastDebug?.prefetch?.fetchedDocCount ??
-							0,
+						prefetch: {
+							requested:
+								lastDebug?.hanBackstopMetrics?.bodyHanColdExactRequestedBlockCount ??
+								lastDebug?.prefetch?.requestedDocIds?.length ??
+								0,
+							fetched:
+								lastDebug?.hanBackstopMetrics?.bodyHanColdExactFetchedBlockCount ??
+								lastDebug?.prefetch?.fetchedDocCount ??
+								0,
 						skippedByBudget:
 							lastDebug?.hanBackstopMetrics?.bodyHanColdExactSkippedByBudget ??
 							lastDebug?.prefetch?.skippedByBudget ??

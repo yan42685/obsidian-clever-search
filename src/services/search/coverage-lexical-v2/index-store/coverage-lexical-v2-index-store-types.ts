@@ -5,7 +5,7 @@ import type {
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
 	CoverageLexicalV2CandidateCascadeHanBackstopStats,
-	CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
+	CoverageLexicalV2CandidateCascadeHanBlockExactPrefetchResult,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../candidate-cascade";
@@ -69,11 +69,24 @@ export type CoverageLexicalV2BodyHanSegmentExactSidecarLocator = {
 	generation?: number;
 	size?: number;
 	segmentCount: number;
+	logicalBlockCount: number;
 	estimatedBytes: number;
 };
 
 export type CoverageLexicalV2RuntimeBodyHanSegmentExactSidecarMetadata =
 	CoverageLexicalV2BodyHanSegmentExactSidecarLocator;
+
+export type CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest = {
+	blockOrdinal: number;
+	segmentCount: number;
+	symbolCount: number;
+	encodedByteLength: number;
+};
+
+export type CoverageLexicalV2PersistedBodyHanLogicalBlockManifest =
+	CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest & {
+	bigramIds: readonly CoverageLexicalV2HanBigramId[];
+	};
 
 export type CoverageLexicalV2PreparedDocument = {
 	path: string;
@@ -98,7 +111,7 @@ export type CoverageLexicalV2HanSymbolPoolState = {
 export type CoverageLexicalV2IndexStorePersistedDocManifest = {
 	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
 	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
-	bodyHanGateBloomWords: readonly CoverageLexicalV2HanGateBloomWord[];
+	bodyHanLogicalBlocks: readonly CoverageLexicalV2PersistedBodyHanLogicalBlockManifest[];
 	hasBodyHanSegments: boolean;
 	bodyHanSegmentExactSidecar: CoverageLexicalV2BodyHanSegmentExactSidecarLocator;
 	bodyTokenSidecar: CoverageLexicalV2BodyTokenSidecarLocator;
@@ -107,7 +120,7 @@ export type CoverageLexicalV2IndexStorePersistedDocManifest = {
 export type CoverageLexicalV2IndexStoreRuntimeDocManifest = {
 	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
 	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
-	bodyHanGateBloomWords: readonly CoverageLexicalV2HanGateBloomWord[];
+	bodyHanLogicalBlocks: readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[];
 	hasBodyHanSegments: boolean;
 	bodyHanSegmentExactSidecar: CoverageLexicalV2RuntimeBodyHanSegmentExactSidecarMetadata;
 	bodyTokenSidecar: CoverageLexicalV2RuntimeBodyTokenSidecarMetadata;
@@ -146,10 +159,13 @@ export type CoverageLexicalV2SerializedPostingFieldSegment = {
 
 export type CoverageLexicalV2SerializedAdaptivePostingFieldSegment = {
 	singletonTermIds: CoverageLexicalV2PackedNumberList;
-	singletonDocIds: CoverageLexicalV2PackedNumberList;
+	singletonValueIds: CoverageLexicalV2PackedNumberList;
+	pairTermIds: CoverageLexicalV2PackedNumberList;
+	pairFirstValueIds: CoverageLexicalV2PackedNumberList;
+	pairSecondValueIds: CoverageLexicalV2PackedNumberList;
 	smallTermIds: CoverageLexicalV2PackedNumberList;
-	smallDocStarts: CoverageLexicalV2PackedNumberList;
-	smallDocIds: CoverageLexicalV2PackedNumberList;
+	smallValueStarts: CoverageLexicalV2PackedNumberList;
+	smallValueIds: CoverageLexicalV2PackedNumberList;
 	deltaTermIds: CoverageLexicalV2PackedNumberList;
 	deltaTapeStarts: CoverageLexicalV2PackedNumberList;
 	postingTape: CoverageLexicalV2PackedNumberList;
@@ -174,6 +190,22 @@ export type CoverageLexicalV2IndexStoreResidentSegment = {
 	docCount: number;
 	exactByField: CoverageLexicalV2SerializedExactSegmentFields;
 	metadataHanByField: CoverageLexicalV2SerializedMetadataSegmentFields;
+};
+
+export type CoverageLexicalV2ResidentHanShardBlockDescriptor = {
+	blockId: number;
+	docId: number;
+	generation?: number;
+	blockOrdinal: number;
+	encodedByteLength: number;
+};
+
+export type CoverageLexicalV2ResidentHanShard = {
+	id: string;
+	createdAt: number;
+	localBlockCount: number;
+	postingsByBigram: CoverageLexicalV2SerializedAdaptivePostingFieldSegment;
+	blockDescriptors: readonly CoverageLexicalV2ResidentHanShardBlockDescriptor[];
 };
 
 export type CoverageLexicalV2SerializedPostingDeltaRecord<
@@ -233,7 +265,7 @@ export type CoverageLexicalV2PersistedJournalDocument = {
 	record: CoverageLexicalV2CandidateCascadeDocumentRecord;
 	exactTermIdsByField: CoverageLexicalV2FieldTermIdLists;
 	metadataHanBigramIdsByField: CoverageLexicalV2MetadataBigramIdLists;
-	bodyHanGateBloomWords: readonly CoverageLexicalV2HanGateBloomWord[];
+	bodyHanLogicalBlocks: readonly CoverageLexicalV2PersistedBodyHanLogicalBlockManifest[];
 	bodyHanSegmentExactSidecar: CoverageLexicalV2BodyHanSegmentExactSidecarLocator;
 	bodyTokenSidecar: CoverageLexicalV2BodyTokenSidecarLocator;
 };
@@ -314,8 +346,8 @@ export type CoverageLexicalV2IndexStoreReaderOptions = Pick<
 	| "getBodyTokenSequence"
 	| "prefetchBodyTokenSequences"
 	| "tokenizeText"
-	| "prefetchBodyHanExact"
-	| "getBodyHanExactBackstopStats"
+	| "prefetchBodyHanExactBlocks"
+	| "getBodyHanExactBlockBackstopStats"
 >;
 
 export type CoverageLexicalV2RuntimeMemoryBreakdown = {
@@ -325,12 +357,14 @@ export type CoverageLexicalV2RuntimeMemoryBreakdown = {
 			postings: {
 				exactIncidence: number;
 				metadataHanGate: number;
+				bodyHanShards: number;
 			};
 			documents: {
 				view: number;
 			};
 			verification: {
 				bodyHanSegments: number;
+				bodyHanShardDescriptors: number;
 			};
 			lexicon: {
 				canonicalTerms: number;

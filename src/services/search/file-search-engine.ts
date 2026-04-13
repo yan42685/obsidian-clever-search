@@ -8,7 +8,8 @@ import type { FileSearchBackend } from "src/globals/plugin-setting";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { CoverageLexicalV2FileSearchEngine } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine";
-import type { CoverageLexicalV2BodyTokenColdDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-body-token-cold-types";
+import type { CoverageLexicalBodyTokenColdDocumentWrite } from "./coverage-lexical/coverage-lexical-body-token-cold-types";
+import type { CoverageLexicalV2HanSegmentExactSidecarDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 
 export type FileSearchRequest = {
 	queryText: string;
@@ -88,7 +89,12 @@ export interface FileSearchEngine {
     path: string,
     generation: number | undefined,
     bodyText: string,
-  ): CoverageLexicalV2BodyTokenColdDocumentWrite | null;
+  ): CoverageLexicalBodyTokenColdDocumentWrite | null;
+  buildBodyHanExactSidecarDocument?(
+    path: string,
+    generation: number | undefined,
+    bodyText: string,
+  ): CoverageLexicalV2HanSegmentExactSidecarDocumentWrite | null;
   beginBatchReindex?(): void;
   finishBatchReindex?(): void | Promise<void>;
   abortBatchReindex?(): void | Promise<void>;

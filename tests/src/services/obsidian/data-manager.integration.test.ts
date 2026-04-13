@@ -145,6 +145,7 @@ import { FileWatcher } from "src/services/obsidian/user-data/file-watcher";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
+import { COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { Tokenizer } from "src/services/search/tokenizer";
 
@@ -809,6 +810,32 @@ function createMockLexicalEngine(overrides: Record<string, unknown> = {}) {
     clearPersistedFileIndexArtifact: jest.fn(async () => {}),
     estimateFileIndexBytes: jest.fn(() => 0),
     getFileIndexBreakdown: jest.fn(() => null),
+    buildBodyTokenColdDocument: jest.fn(
+      (path: string, generation: number | undefined, bodyText: string) => ({
+        path,
+        generation,
+        bodyTokens: bodyText.length === 0 ? [] : [bodyText],
+      }),
+    ),
+    buildBodyHanExactSidecarDocument: jest.fn(
+      (path: string, generation: number | undefined, bodyText: string) =>
+        bodyText.length === 0
+          ? null
+          : {
+              path,
+              generation,
+              logicalBlocks: [
+                {
+                  blockOrdinal: 0,
+                  bodyHanSymbolIds: Uint32Array.from([1, 2]),
+                  bigramIds: [1],
+                  encodedByteLength: bodyText.length,
+                  symbolCount: 2,
+                  segmentCount: 1,
+                },
+              ],
+            },
+    ),
     clearIndex: jest.fn(() => {}),
   };
   const moveDocument = jest.fn(async (oldPath: string, document: any) => {
@@ -936,6 +963,22 @@ function registerDataManagerDeps(params: {
       danglingPaths: [],
     })),
     readDocuments: jest.fn(async () => new Map()),
+    updateIndexedRefsMetadata: jest.fn(async () => undefined),
+    upsertDocuments: jest.fn(async () => undefined),
+  } as any);
+  container.registerInstance(COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN, {
+    clearAll: jest.fn(async () => undefined),
+    deleteDocuments: jest.fn(async () => undefined),
+    getMeta: jest.fn(async () => null),
+    summarizeConsistency: jest.fn(async () => ({
+      needsRepair: false,
+      requiresReset: false,
+      reason: "up-to-date",
+      missingOrStalePaths: [],
+      danglingPaths: [],
+    })),
+    moveDocument: jest.fn(async () => false),
+    readLogicalBlocks: jest.fn(async () => new Map()),
     updateIndexedRefsMetadata: jest.fn(async () => undefined),
     upsertDocuments: jest.fn(async () => undefined),
   } as any);
@@ -3337,6 +3380,118 @@ describe("DataManager integration", () => {
     );
   });
 
+  test("startup lexical bootstrap heals body-token and Han exact offloads from the same indexed text source", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const file = createFile("docs/han.md", "\u59d4\u5458\u6d4b\u8bd5", 420);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "\u59d4\u5458\u6d4b\u8bd5"]]);
+
+    const database = createMockDatabase();
+    await database.setLexicalIndexedFileRefs([
+      {
+        path: file.path,
+        generation: file.stat.mtime,
+        size: file.stat.size,
+      },
+    ]);
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine({
+      supportsPersistentFileIndex: jest.fn(() => true),
+      restorePersistedFileIndex: jest.fn(async () => true),
+      planPersistentRecovery: jest.fn(async () => ({
+        status: "up_to_date",
+        reason: "up_to_date",
+        docsToDelete: [],
+        docsToAdd: [],
+        docsToUpdate: [],
+        docsToMove: [],
+      })),
+    });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    fileSnapshotStore.persisted.set(file.path, {
+      text: "\u59d4\u5458\u6d4b\u8bd5",
+      generation: file.stat.mtime,
+    });
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const bodyTokenStore = {
+      clearAll: jest.fn(async () => undefined),
+      deleteDocuments: jest.fn(async () => undefined),
+      getMeta: jest.fn(async () => null),
+      inspectConsistency: jest.fn(async () => ({
+        needsRepair: true,
+        requiresReset: true,
+        reason: "schema-mismatch",
+        missingOrStalePaths: [file.path],
+        danglingPaths: [file.path],
+      })),
+      readDocuments: jest.fn(async () => new Map()),
+      updateIndexedRefsMetadata: jest.fn(async () => undefined),
+      upsertDocuments: jest.fn(async () => undefined),
+    };
+    const hanStore = {
+      clearAll: jest.fn(async () => undefined),
+      deleteDocuments: jest.fn(async () => undefined),
+      getMeta: jest.fn(async () => null),
+      summarizeConsistency: jest.fn(async () => ({
+        needsRepair: true,
+        requiresReset: true,
+        reason: "schema-mismatch",
+        missingOrStalePaths: [file.path],
+        danglingPaths: [file.path],
+      })),
+      moveDocument: jest.fn(async () => false),
+      readLogicalBlocks: jest.fn(async () => new Map()),
+      updateIndexedRefsMetadata: jest.fn(async () => undefined),
+      upsertDocuments: jest.fn(async () => undefined),
+    };
+    container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, bodyTokenStore as any);
+    container.registerInstance(
+      COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
+      hanStore as any,
+    );
+
+    const manager = resolveDataManager();
+    await manager.initAsync();
+
+    expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledWith([
+      {
+        path: file.path,
+        generation: file.stat.mtime,
+      },
+    ]);
+    expect(lexicalEngine.buildBodyTokenColdDocument).toHaveBeenCalledWith(
+      file.path,
+      file.stat.mtime,
+      "\u59d4\u5458\u6d4b\u8bd5",
+    );
+    expect(lexicalEngine.buildBodyHanExactSidecarDocument).toHaveBeenCalledWith(
+      file.path,
+      file.stat.mtime,
+      "\u59d4\u5458\u6d4b\u8bd5",
+    );
+    expect(bodyTokenStore.clearAll).toHaveBeenCalledTimes(1);
+    expect(hanStore.clearAll).toHaveBeenCalledTimes(1);
+    expect(bodyTokenStore.upsertDocuments).toHaveBeenCalledTimes(1);
+    expect(hanStore.upsertDocuments).toHaveBeenCalledTimes(1);
+    expect(bodyTokenStore.updateIndexedRefsMetadata).toHaveBeenCalled();
+    expect(hanStore.updateIndexedRefsMetadata).toHaveBeenCalled();
+  });
+
   test("lexical cold repair batches honor file and byte limits while keeping oversized files alone", () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = false;
@@ -3391,7 +3546,7 @@ describe("DataManager integration", () => {
     });
 
     const manager = resolveDataManager() as any;
-    const batches = manager.buildLexicalBodyTokenColdRepairBatches([
+    const batches = manager.buildLexicalOffloadRepairBatches([
       smallA,
       smallB,
       smallC,

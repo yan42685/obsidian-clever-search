@@ -1,8 +1,12 @@
 ﻿import fs from "fs/promises";
 import path from "path";
+import type { IndexedDocument } from "src/globals/search-types";
 import {
 	CoverageLexicalV2IndexStore,
 } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store";
+import {
+	estimateCoverageLexicalV2AdaptiveHanBigramDocPostingBytes,
+} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-bigram-doc-posting-estimate";
 import {
 	extractHanBigrams,
 	extractHanSegments,
@@ -12,18 +16,6 @@ import {
 jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
-
-type IndexedDocument = {
-	path: string;
-	basename: string;
-	folder: string;
-	content?: string;
-	aliases?: string;
-	tags?: string;
-	headings?: string;
-	generation?: number;
-	size?: number;
-};
 
 const realVaultAnchorTest =
 	process.env.COVERAGE_LEXICAL_REAL_VAULT_ANCHOR === "1" ? test : test.skip;
@@ -242,6 +234,8 @@ describe("coverage lexical v2 real vault size anchor", () => {
 
 			const breakdown = store.buildIndexBreakdown();
 			const residentBytes = breakdown.estimatedBytes.residentHot.total;
+			const adaptiveHanBigramDocPostingEstimate =
+				estimateCoverageLexicalV2AdaptiveHanBigramDocPostingBytes(documents);
 
 			console.log(
 				"[coverage-lexical-v2-real-vault-size-anchor] anchor",
@@ -293,6 +287,9 @@ describe("coverage lexical v2 real vault size anchor", () => {
 							metadataHanBigramCount: breakdown.metadataHanBigramCount,
 							latinExpansionTermCount:
 								breakdown.latinExpansionTermCount,
+						},
+						experimental: {
+							adaptiveHanBigramDocPostingEstimate,
 						},
 						ratios: {
 							totalVsRaw:

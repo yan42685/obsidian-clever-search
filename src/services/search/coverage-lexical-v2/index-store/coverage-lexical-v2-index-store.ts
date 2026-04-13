@@ -31,6 +31,7 @@ import {
 	type CoverageLexicalV2HanSymbolPool,
 } from "./coverage-lexical-v2-han-symbol-pool";
 import {
+	buildCoverageLexicalV2BodyHanAdaptivePostingFieldSegment,
 	buildCoverageLexicalV2ResidentSegment,
 	decodeCoverageLexicalV2ResidentAdaptivePosting,
 	decodeCoverageLexicalV2ResidentBodyPosting,
@@ -43,13 +44,14 @@ import {
 	type CoverageLexicalV2FieldTermLists,
 	type CoverageLexicalV2FieldTermIdLists,
 	type CoverageLexicalV2HanBigramId,
-	type CoverageLexicalV2HanGateBloomWord,
 	type CoverageLexicalV2HanSymbolId,
 	type CoverageLexicalV2IndexStoreDocumentState,
 	type CoverageLexicalV2IndexStoreOverlayState,
 	type CoverageLexicalV2IndexStorePersistedDocManifest,
 	type CoverageLexicalV2PersistedJournalDocument,
 	type CoverageLexicalV2IndexStoreReaderOptions,
+	type CoverageLexicalV2ResidentHanShard,
+	type CoverageLexicalV2ResidentHanShardBlockDescriptor,
 	type CoverageLexicalV2IndexStoreResidentSegment,
 	type CoverageLexicalV2IndexStoreRuntimeDocManifest,
 	type CoverageLexicalV2IndexStoreSnapshotDocument,
@@ -57,7 +59,10 @@ import {
 	type CoverageLexicalV2MetadataBigramLists,
 	type CoverageLexicalV2MetadataBigramIdLists,
 	type CoverageLexicalV2MetadataPostingField,
+	type CoverageLexicalV2PackedNumberList,
+	type CoverageLexicalV2PersistedBodyHanLogicalBlockManifest,
 	type CoverageLexicalV2PreparedDocument,
+	type CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest,
 	type CoverageLexicalV2RuntimeMemoryBreakdown,
 } from "./coverage-lexical-v2-index-store-types";
 import {
@@ -106,6 +111,44 @@ type CoverageLexicalV2SharedStringPoolEntry = {
 	estimatedBytes: number;
 };
 
+type CoverageLexicalV2RuntimeHanLogicalBlockDescriptor = {
+	blockId: number;
+	docId: number;
+	path: string;
+	generation?: number;
+	blockOrdinal: number;
+	segmentCount: number;
+	symbolCount: number;
+	encodedByteLength: number;
+};
+
+type CoverageLexicalV2PreparedHanLogicalBlock = {
+	blockOrdinal: number;
+	symbolIds: Uint32Array;
+	segmentCount: number;
+	symbolCount: number;
+	encodedByteLength: number;
+	bigramIds: readonly CoverageLexicalV2HanBigramId[];
+};
+
+type CoverageLexicalV2PreparedResidentHanShardBlock = {
+	blockId: number;
+	docId: number;
+	generation?: number;
+	blockOrdinal: number;
+	encodedByteLength: number;
+	bigramIds: readonly CoverageLexicalV2HanBigramId[];
+};
+
+type CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists = readonly (
+	readonly CoverageLexicalV2HanBigramId[]
+)[];
+
+type CoverageLexicalV2HanLogicalBlockConfig = {
+	targetSymbols: number;
+	targetEncodedBytes: number;
+};
+
 const COVERAGE_LEXICAL_V2_POSTING_FIELDS = [
 	"basename",
 	"aliases",
@@ -125,12 +168,22 @@ const COVERAGE_LEXICAL_V2_METADATA_FIELDS = [
 
 const textEncoder = new TextEncoder();
 const AUTO_COMPACTION_MUTATION_CAP = 48;
+const MAX_COVERAGE_LEXICAL_V2_RESIDENT_HAN_SHARD_BLOCKS = 255;
 const EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST = Object.freeze(
 	[],
 ) as readonly string[];
 const EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST = Object.freeze(
 	[],
 ) as readonly number[];
+const EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_MANIFESTS = Object.freeze(
+	[],
+) as readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[];
+const EMPTY_COVERAGE_LEXICAL_V2_PERSISTED_BODY_HAN_LOGICAL_BLOCK_MANIFESTS = Object.freeze(
+	[],
+) as readonly CoverageLexicalV2PersistedBodyHanLogicalBlockManifest[];
+const EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_BIGRAM_LISTS = Object.freeze(
+	[],
+) as CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists;
 const EMPTY_COVERAGE_LEXICAL_V2_FIELD_TERM_LISTS = Object.freeze({
 	basename: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
 	aliases: EMPTY_COVERAGE_LEXICAL_V2_STRING_LIST,
@@ -167,22 +220,35 @@ const EMPTY_COVERAGE_LEXICAL_V2_NUMBER_SEGMENT_LIST = Object.freeze(
 const MISSING_COVERAGE_LEXICAL_V2_HAN_SYMBOL_ID = -1;
 const COVERAGE_LEXICAL_V2_HAN_BIGRAM_HASH_OFFSET_BASIS = 2166136261;
 const COVERAGE_LEXICAL_V2_HAN_BIGRAM_HASH_PRIME = 16777619;
-const COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT = 16;
-const COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_HASH_COUNT = 3;
-const EMPTY_COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORDS = Object.freeze(
-	new Array<number>(COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT).fill(0),
-) as readonly CoverageLexicalV2HanGateBloomWord[];
 const COVERAGE_LEXICAL_V2_DOCUMENT_VIEW_BASE_BYTES = 64;
+const TARGET_COVERAGE_LEXICAL_V2_HAN_LOGICAL_BLOCK_SYMBOLS = 1152;
+const TARGET_COVERAGE_LEXICAL_V2_HAN_LOGICAL_BLOCK_ENCODED_BYTES = 4608;
 
 export class CoverageLexicalV2IndexStore {
+	private readonly hanLogicalBlockConfig: CoverageLexicalV2HanLogicalBlockConfig;
 	private nextDocumentId = 0;
+	private nextBodyHanLogicalBlockId = 1;
 	private readonly documentById: Array<CoverageLexicalV2InternalDocumentState | undefined> =
 		[];
 	private readonly documentIdByPath = new Map<string, number>();
-	private readonly bodyHanSegmentDocIds: number[] = [];
+	private readonly bodyHanLogicalBlockById = new Map<
+		number,
+		CoverageLexicalV2RuntimeHanLogicalBlockDescriptor
+	>();
+	private readonly bodyHanLogicalBlockIdsByDocId = new Map<number, readonly number[]>();
+	private readonly pendingBodyHanLogicalBlockBigramIdsByDocId = new Map<
+		number,
+		CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists
+	>();
+	private readonly bodyHanLogicalBlockBigramIdsByDocId = new Map<
+		number,
+		CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists
+	>();
 	private readonly exactTermRefCounts = new Map<number, number>();
 	private readonly metadataHanBigramRefCounts = new Map<number, number>();
 	private readonly residentSegments: CoverageLexicalV2IndexStoreResidentSegment[] = [];
+	private residentHanShards: CoverageLexicalV2ResidentHanShard[] = [];
+	private residentHanShardsDirty = true;
 	private readonly overlay: CoverageLexicalV2MutableOverlayState =
 		createCoverageLexicalV2MutableOverlayState();
 	private readonly canonicalTermPool: CoverageLexicalV2CanonicalTermPool =
@@ -209,14 +275,34 @@ export class CoverageLexicalV2IndexStore {
 		  }
 		| null = null;
 
+	constructor(options?: {
+		hanLogicalBlockSymbols?: number;
+		hanLogicalBlockEncodedBytes?: number;
+	}) {
+		this.hanLogicalBlockConfig = {
+			targetSymbols:
+				options?.hanLogicalBlockSymbols ??
+				TARGET_COVERAGE_LEXICAL_V2_HAN_LOGICAL_BLOCK_SYMBOLS,
+			targetEncodedBytes:
+				options?.hanLogicalBlockEncodedBytes ??
+				TARGET_COVERAGE_LEXICAL_V2_HAN_LOGICAL_BLOCK_ENCODED_BYTES,
+		};
+	}
+
 	clear(): void {
 		this.nextDocumentId = 0;
+		this.nextBodyHanLogicalBlockId = 1;
 		this.documentById.length = 0;
 		this.documentIdByPath.clear();
-		this.bodyHanSegmentDocIds.length = 0;
+		this.bodyHanLogicalBlockById.clear();
+		this.bodyHanLogicalBlockIdsByDocId.clear();
+		this.pendingBodyHanLogicalBlockBigramIdsByDocId.clear();
+		this.bodyHanLogicalBlockBigramIdsByDocId.clear();
 		this.exactTermRefCounts.clear();
 		this.metadataHanBigramRefCounts.clear();
 		this.residentSegments.length = 0;
+		this.residentHanShards = [];
+		this.residentHanShardsDirty = false;
 		clearCoverageLexicalV2MutableOverlayState(this.overlay);
 		clearCoverageLexicalV2CanonicalTermPool(this.canonicalTermPool);
 		clearCoverageLexicalV2HanSymbolPool(this.hanSymbolPool);
@@ -256,6 +342,12 @@ export class CoverageLexicalV2IndexStore {
 		return this.documentById[docId]?.manifest.bodyHanSegmentExactSidecar ?? null;
 	}
 
+	getBodyHanLogicalBlockDescriptor(
+		blockId: number,
+	): CoverageLexicalV2RuntimeHanLogicalBlockDescriptor | null {
+		return this.bodyHanLogicalBlockById.get(blockId) ?? null;
+	}
+
 	getIndexedRefs(): BaseIndexedFileRef[] {
 		return this.documentById.flatMap((documentState) =>
 			documentState ? [{ ...documentState.indexedRef }] : [],
@@ -285,9 +377,9 @@ export class CoverageLexicalV2IndexStore {
 				!manifest ||
 				manifest.hasBodyHanSegments !==
 					(manifest.bodyHanSegmentExactSidecar.segmentCount > 0) ||
-				!Array.isArray(manifest.bodyHanGateBloomWords) ||
-				manifest.bodyHanGateBloomWords.length !==
-					COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT ||
+				!Array.isArray(manifest.bodyHanLogicalBlocks) ||
+				manifest.bodyHanSegmentExactSidecar.logicalBlockCount !==
+					manifest.bodyHanLogicalBlocks.length ||
 				!Number.isFinite(manifest.bodyHanSegmentExactSidecar.estimatedBytes) ||
 				manifest.bodyHanSegmentExactSidecar.estimatedBytes < 0 ||
 				!Number.isFinite(manifest.bodyHanSegmentExactSidecar.segmentCount) ||
@@ -370,7 +462,7 @@ export class CoverageLexicalV2IndexStore {
 			this.documentIdByPath.delete(previousPath);
 		}
 		this.applyDocumentAddition(stored);
-		this.syncBodyHanSegmentDocId(docId, stored.manifest.hasBodyHanSegments);
+		this.registerBodyHanLogicalBlocks(stored);
 		this.bodyTokenSidecarEstimatedBytes +=
 			stored.manifest.bodyTokenSidecar.estimatedBytes;
 		this.bodyHanSegmentExactSidecarEstimatedBytes +=
@@ -415,7 +507,7 @@ export class CoverageLexicalV2IndexStore {
 			this.documentIdByPath.delete(previousPath);
 		}
 		this.applyDocumentAddition(stored);
-		this.syncBodyHanSegmentDocId(docId, stored.manifest.hasBodyHanSegments);
+		this.registerBodyHanLogicalBlocks(stored);
 		this.bodyTokenSidecarEstimatedBytes +=
 			stored.manifest.bodyTokenSidecar.estimatedBytes;
 		this.bodyHanSegmentExactSidecarEstimatedBytes +=
@@ -570,10 +662,7 @@ export class CoverageLexicalV2IndexStore {
 				this.buildInternalDocumentStateFromSnapshotDocument(document);
 			this.documentById[documentState.docId] = documentState;
 			this.documentIdByPath.set(documentState.path, documentState.docId);
-			this.syncBodyHanSegmentDocId(
-				documentState.docId,
-				documentState.manifest.hasBodyHanSegments,
-			);
+			this.registerBodyHanLogicalBlocks(documentState);
 			incrementCoverageLexicalV2TermRefCounts(
 				this.exactTermRefCounts,
 				documentState.manifest.exactTermIdsByField,
@@ -591,6 +680,7 @@ export class CoverageLexicalV2IndexStore {
 		const minimumNextDocumentId =
 			documents.length === 0 ? 0 : documents[documents.length - 1].docId + 1;
 		this.nextDocumentId = Math.max(this.nextDocumentId, minimumNextDocumentId);
+		this.residentHanShardsDirty = true;
 		this.latinExpansionTermsDirty = true;
 	}
 
@@ -604,7 +694,16 @@ export class CoverageLexicalV2IndexStore {
 			),
 			hanSymbolPool: serializeCoverageLexicalV2HanSymbolPool(this.hanSymbolPool),
 			documents: this.documentById.flatMap((documentState) =>
-				documentState ? [toCoverageLexicalV2SnapshotDocument(documentState)] : [],
+				documentState
+					? [
+							toCoverageLexicalV2SnapshotDocument(
+								documentState,
+								this.bodyHanLogicalBlockBigramIdsByDocId.get(
+									documentState.docId,
+								) ?? EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_BIGRAM_LISTS,
+							),
+						]
+					: [],
 			),
 			segments: this.residentSegments.map(cloneCoverageLexicalV2ResidentSegment),
 			overlay: serializeCoverageLexicalV2MutableOverlayState(this.overlay),
@@ -617,16 +716,17 @@ export class CoverageLexicalV2IndexStore {
 		return {
 			readerKind: "v2_runtime",
 			getDocumentRecord: (docId) => this.documentById[docId]?.record ?? null,
-			getBodyHanSegmentDocIds: () => this.bodyHanSegmentDocIds,
 			getPostingMatches: (field, term) => this.getExactPostingMatches(field, term),
 			getMetadataHanBigramPostingMatches: (field, bigram) =>
 				field === "body"
 					? undefined
 					: this.getMetadataHanBigramPostingMatches(field, bigram),
-			getBodyHanBackstopGateStats: (docId, bigrams) =>
-				this.getBodyHanBackstopGateStats(docId, bigrams),
-			prefetchBodyHanExact: options.prefetchBodyHanExact,
-			getBodyHanExactBackstopStats: options.getBodyHanExactBackstopStats,
+			getBodyHanBlockPostingMatches: (bigram) =>
+				this.getBodyHanBlockPostingMatches(bigram),
+			getBodyHanLogicalBlockDescriptor: (blockId) =>
+				this.bodyHanLogicalBlockById.get(blockId) ?? null,
+			prefetchBodyHanExactBlocks: options.prefetchBodyHanExactBlocks,
+			getBodyHanExactBlockBackstopStats: options.getBodyHanExactBlockBackstopStats,
 			collectLatinPrefixTerms: (queryTerm, cap) =>
 				this.collectLatinPrefixTerms(queryTerm, cap),
 			collectLatinFuzzyTerms: (queryTerm, cap, fuzzyProportion) =>
@@ -646,12 +746,15 @@ export class CoverageLexicalV2IndexStore {
 	buildIndexBreakdown(
 		options: CoverageLexicalV2RuntimeMemoryBreakdownOptions = {},
 	): CoverageLexicalV2RuntimeMemoryBreakdown {
+		this.ensureResidentHanShardsCurrent();
 		let exactIncidence = 0;
 		let metadataHanGate = 0;
 		const documentView =
 			this.getIndexedDocumentCount() * COVERAGE_LEXICAL_V2_DOCUMENT_VIEW_BASE_BYTES +
 			this.documentViewSharedStringBytes;
-		let bodyHanSegments = this.bodyHanSegmentDocIds.length * 4;
+		let bodyHanSegments = 0;
+		let bodyHanShardPostings = 0;
+		let bodyHanShardDescriptors = 0;
 		let pathMirrors = 0;
 		let manifestMirrors = 0;
 		const canonicalTermLexiconBytes = estimateCoverageLexicalV2CanonicalTermPoolBytes(
@@ -680,13 +783,22 @@ export class CoverageLexicalV2IndexStore {
 			if (!documentState) {
 				continue;
 			}
-			bodyHanSegments +=
-				documentState.manifest.bodyHanGateBloomWords.length * 4;
+			bodyHanSegments += estimateCoverageLexicalV2BodyHanLogicalBlocksBytes(
+				documentState.manifest.bodyHanLogicalBlocks,
+			);
 			pathMirrors += estimateCoverageLexicalV2DocumentPathMirrorBytes(
 				documentState,
 			);
 			manifestMirrors += estimateCoverageLexicalV2DocumentManifestMirrorBytes(
 				documentState,
+			);
+		}
+		for (const shard of this.residentHanShards) {
+			bodyHanShardPostings += estimateCoverageLexicalV2ResidentHanShardPostingBytes(
+				shard,
+			);
+			bodyHanShardDescriptors += estimateCoverageLexicalV2ResidentHanShardDescriptorBytes(
+				shard,
 			);
 		}
 
@@ -702,8 +814,10 @@ export class CoverageLexicalV2IndexStore {
 		const residentHotTotal =
 			exactIncidence +
 			metadataHanGate +
+			bodyHanShardPostings +
 			documentView +
 			bodyHanSegments +
+			bodyHanShardDescriptors +
 			canonicalTermLexiconBytes +
 			latinExpansionLexicon +
 			bodyTokensHot;
@@ -730,12 +844,14 @@ export class CoverageLexicalV2IndexStore {
 					postings: {
 						exactIncidence,
 						metadataHanGate,
+						bodyHanShards: bodyHanShardPostings,
 					},
 					documents: {
 						view: documentView,
 					},
 					verification: {
 						bodyHanSegments,
+						bodyHanShardDescriptors,
 					},
 					lexicon: {
 						canonicalTerms: canonicalTermLexiconBytes,
@@ -820,42 +936,31 @@ export class CoverageLexicalV2IndexStore {
 		);
 	}
 
-	getBodyHanBackstopGateStats(
-		docId: number,
-		bigrams: readonly string[],
-	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null {
-		const bodyHanGateBloomWords =
-			this.documentById[docId]?.manifest.bodyHanGateBloomWords;
-		if (
-			!bodyHanGateBloomWords ||
-			bodyHanGateBloomWords.length !== COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT
-		) {
-			return null;
+	private getBodyHanBlockPostingMatches(
+		bigram: string,
+	): readonly number[] | undefined {
+		const bigramId = encodeCoverageLexicalV2HanBigramId(bigram);
+		if (bigramId === undefined) {
+			return undefined;
 		}
-		const matchedBigramIndices = new Set<number>();
-		for (let index = 0; index < bigrams.length; index += 1) {
-			const bigramId = encodeCoverageLexicalV2HanBigramId(bigrams[index]);
-			if (
-				bigramId !== undefined &&
-				mightContainCoverageLexicalV2HanBigramId(
-					bodyHanGateBloomWords,
-					bigramId,
-				)
-			) {
-				matchedBigramIndices.add(index);
+		this.ensureResidentHanShardsCurrent();
+		const blockIds = new Set<number>();
+		for (const shard of this.residentHanShards) {
+			const localOrdinals = decodeCoverageLexicalV2ResidentAdaptivePosting(
+				shard.postingsByBigram,
+				bigramId,
+			);
+			for (const localOrdinal of localOrdinals ?? []) {
+				const descriptor = shard.blockDescriptors[localOrdinal];
+				if (descriptor) {
+					blockIds.add(descriptor.blockId);
+				}
 			}
 		}
-		if (matchedBigramIndices.size === 0) {
-			return null;
+		if (blockIds.size === 0) {
+			return undefined;
 		}
-		return {
-			longestContiguousBigramChain: computeCoverageLexicalV2HanBackstopLongestChain(
-				matchedBigramIndices,
-			),
-			matchedBigramCount: matchedBigramIndices.size,
-			bigramCoverageRatio:
-				bigrams.length > 0 ? matchedBigramIndices.size / bigrams.length : 0,
-		};
+		return [...blockIds].sort((left, right) => left - right);
 	}
 
 	buildBodyHanExactBackstopStatsFromSymbolIds(
@@ -965,11 +1070,26 @@ export class CoverageLexicalV2IndexStore {
 	): CoverageLexicalV2InternalDocumentState {
 		this.ensureCanonicalTermIds(document.exactTermsByField);
 		this.ensureCanonicalBigramIds(document.metadataHanBigramsByField);
-		const encodedHan = encodeCoverageLexicalV2HanSegmentsToSymbolIds(
+		const logicalHanBlocks = buildCoverageLexicalV2HanLogicalBlocks(
 			document.bodyHanSegments,
 			(codePoint) =>
 				getOrCreateCoverageLexicalV2HanSymbolId(this.hanSymbolPool, codePoint),
+			this.hanLogicalBlockConfig,
 		);
+		const totalHanSegmentCount = logicalHanBlocks.reduce(
+			(sum, logicalBlock) => sum + logicalBlock.segmentCount,
+			0,
+		);
+		const totalHanEstimatedBytes = logicalHanBlocks.reduce(
+			(sum, logicalBlock) => sum + logicalBlock.encodedByteLength,
+			0,
+		);
+		const runtimeBodyHanLogicalBlocks =
+			buildCoverageLexicalV2RuntimeBodyHanLogicalBlockManifests(logicalHanBlocks);
+		const bodyHanLogicalBlockBigramIds =
+			extractCoverageLexicalV2PreparedBodyHanLogicalBlockBigramLists(
+				logicalHanBlocks,
+			);
 		const stableDeterministicKey =
 			document.record.stableDeterministicKey ?? document.path;
 		const indexedRef: BaseIndexedFileRef = {
@@ -996,17 +1116,14 @@ export class CoverageLexicalV2IndexStore {
 					document.metadataHanBigramsByField,
 					(bigram) => this.getOrCreateCanonicalTermId(bigram),
 				),
-				bodyHanGateBloomWords: buildCoverageLexicalV2HanGateBloomWords(
-					document.bodyHanSegments,
-				),
-				hasBodyHanSegments: encodedHan.segmentCount > 0,
+				bodyHanLogicalBlocks: runtimeBodyHanLogicalBlocks,
+				hasBodyHanSegments: totalHanSegmentCount > 0,
 				bodyHanSegmentExactSidecar: {
 					generation: document.generation ?? indexedRef.generation,
 					size: indexedRef.size,
-					segmentCount: encodedHan.segmentCount,
-					estimatedBytes: estimateCoverageLexicalV2EncodedHanSegmentExactBytes(
-						encodedHan.symbolIds,
-					),
+					segmentCount: totalHanSegmentCount,
+					logicalBlockCount: logicalHanBlocks.length,
+					estimatedBytes: totalHanEstimatedBytes,
 				},
 				bodyTokenSidecar: {
 					generation: document.generation ?? indexedRef.generation,
@@ -1018,6 +1135,10 @@ export class CoverageLexicalV2IndexStore {
 				},
 			},
 		};
+		this.pendingBodyHanLogicalBlockBigramIdsByDocId.set(
+			docId,
+			bodyHanLogicalBlockBigramIds,
+		);
 		this.internDocumentViewStrings(documentState);
 		return documentState;
 	}
@@ -1026,6 +1147,12 @@ export class CoverageLexicalV2IndexStore {
 		docId: number,
 		document: CoverageLexicalV2PersistedJournalDocument,
 	): CoverageLexicalV2InternalDocumentState {
+		this.pendingBodyHanLogicalBlockBigramIdsByDocId.set(
+			docId,
+			extractCoverageLexicalV2PersistedBodyHanLogicalBlockBigramLists(
+				document.bodyHanLogicalBlocks,
+			),
+		);
 		const stableDeterministicKey =
 			document.record.stableDeterministicKey ?? document.path;
 		const documentState: CoverageLexicalV2InternalDocumentState = {
@@ -1050,15 +1177,20 @@ export class CoverageLexicalV2IndexStore {
 					cloneCoverageLexicalV2MetadataBigramIdLists(
 						document.metadataHanBigramIdsByField,
 					),
-				bodyHanGateBloomWords: cloneCoverageLexicalV2NumberList(
-					document.bodyHanGateBloomWords,
-				),
+				bodyHanLogicalBlocks:
+					cloneCoverageLexicalV2RuntimeBodyHanLogicalBlockManifests(
+						stripCoverageLexicalV2PersistedBodyHanLogicalBlockBigramIds(
+							document.bodyHanLogicalBlocks,
+						),
+					),
 				hasBodyHanSegments:
 					document.bodyHanSegmentExactSidecar.segmentCount > 0,
 				bodyHanSegmentExactSidecar: {
 					generation: document.bodyHanSegmentExactSidecar.generation,
 					size: document.bodyHanSegmentExactSidecar.size,
 					segmentCount: document.bodyHanSegmentExactSidecar.segmentCount,
+					logicalBlockCount:
+						document.bodyHanSegmentExactSidecar.logicalBlockCount,
 					estimatedBytes: document.bodyHanSegmentExactSidecar.estimatedBytes,
 				},
 				bodyTokenSidecar: {
@@ -1076,6 +1208,12 @@ export class CoverageLexicalV2IndexStore {
 	private buildInternalDocumentStateFromSnapshotDocument(
 		document: CoverageLexicalV2IndexStoreSnapshotDocument,
 	): CoverageLexicalV2InternalDocumentState {
+		this.pendingBodyHanLogicalBlockBigramIdsByDocId.set(
+			document.docId,
+			extractCoverageLexicalV2PersistedBodyHanLogicalBlockBigramLists(
+				document.manifest.bodyHanLogicalBlocks,
+			),
+		);
 		const documentState: CoverageLexicalV2InternalDocumentState = {
 			docId: document.docId,
 			path: document.path,
@@ -1139,6 +1277,29 @@ export class CoverageLexicalV2IndexStore {
 		);
 	}
 
+	getOrCreateBodyHanLogicalBlockWrites(segments: readonly string[]): readonly {
+		blockOrdinal: number;
+		bodyHanSymbolIds: Uint32Array;
+		bigramIds: readonly number[];
+		encodedByteLength: number;
+		symbolCount: number;
+		segmentCount: number;
+	}[] {
+		return buildCoverageLexicalV2HanLogicalBlocks(
+			segments,
+			(codePoint) =>
+				getOrCreateCoverageLexicalV2HanSymbolId(this.hanSymbolPool, codePoint),
+			this.hanLogicalBlockConfig,
+		).map((logicalBlock) => ({
+			blockOrdinal: logicalBlock.blockOrdinal,
+			bodyHanSymbolIds: logicalBlock.symbolIds,
+			bigramIds: logicalBlock.bigramIds,
+			encodedByteLength: logicalBlock.encodedByteLength,
+			symbolCount: logicalBlock.symbolCount,
+			segmentCount: logicalBlock.segmentCount,
+		}));
+	}
+
 	decodeBodyTokenIds(tokenIds: readonly number[] | Uint32Array): string[] {
 		return Array.from(tokenIds).map(
 			(tokenId) => this.decodeCanonicalTerm(tokenId),
@@ -1152,6 +1313,12 @@ export class CoverageLexicalV2IndexStore {
 		if (!document) {
 			return null;
 		}
+		const persistedBodyHanLogicalBlocks =
+			buildCoverageLexicalV2PersistedBodyHanLogicalBlockProjection(
+				document.manifest.bodyHanLogicalBlocks,
+				this.bodyHanLogicalBlockBigramIdsByDocId.get(docId) ??
+					EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_BIGRAM_LISTS,
+			);
 		return {
 			path: document.path,
 			generation: document.generation,
@@ -1164,13 +1331,13 @@ export class CoverageLexicalV2IndexStore {
 				cloneCoverageLexicalV2MetadataBigramIdLists(
 					document.manifest.metadataHanBigramIdsByField,
 				),
-			bodyHanGateBloomWords: cloneCoverageLexicalV2NumberList(
-				document.manifest.bodyHanGateBloomWords,
-			),
+			bodyHanLogicalBlocks: persistedBodyHanLogicalBlocks,
 			bodyHanSegmentExactSidecar: {
 				generation: document.manifest.bodyHanSegmentExactSidecar.generation,
 				size: document.manifest.bodyHanSegmentExactSidecar.size,
 				segmentCount: document.manifest.bodyHanSegmentExactSidecar.segmentCount,
+				logicalBlockCount:
+					document.manifest.bodyHanSegmentExactSidecar.logicalBlockCount,
 				estimatedBytes: document.manifest.bodyHanSegmentExactSidecar.estimatedBytes,
 			},
 			bodyTokenSidecar: {
@@ -1309,7 +1476,7 @@ export class CoverageLexicalV2IndexStore {
 		}
 		this.releaseDocumentViewStrings(existing);
 		this.applyDocumentRemoval(existing);
-		this.syncBodyHanSegmentDocId(docId, false);
+		this.unregisterBodyHanLogicalBlocks(docId);
 		this.bodyTokenSidecarEstimatedBytes = Math.max(
 			0,
 			this.bodyTokenSidecarEstimatedBytes -
@@ -1437,18 +1604,153 @@ export class CoverageLexicalV2IndexStore {
 		}
 	}
 
-	private syncBodyHanSegmentDocId(docId: number, shouldExist: boolean): void {
-		const currentIndex = this.bodyHanSegmentDocIds.indexOf(docId);
-		if (shouldExist) {
-			if (currentIndex >= 0) {
-				return;
-			}
-			insertCoverageLexicalV2SortedNumber(this.bodyHanSegmentDocIds, docId);
+	private ensureResidentHanShardsCurrent(): void {
+		if (!this.residentHanShardsDirty) {
 			return;
 		}
-		if (currentIndex >= 0) {
-			this.bodyHanSegmentDocIds.splice(currentIndex, 1);
+		this.residentHanShards = this.buildResidentHanShardsFromDocumentTruth();
+		this.residentHanShardsDirty = false;
+	}
+
+	private setBodyHanLogicalBlockBigramIds(
+		docId: number,
+		bigramIdsByBlock: CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists,
+	): void {
+		if (bigramIdsByBlock.length === 0) {
+			this.bodyHanLogicalBlockBigramIdsByDocId.delete(docId);
+			return;
 		}
+		this.bodyHanLogicalBlockBigramIdsByDocId.set(docId, bigramIdsByBlock);
+	}
+
+	private buildResidentHanShardsFromDocumentTruth(): CoverageLexicalV2ResidentHanShard[] {
+		const preparedBlocks: CoverageLexicalV2PreparedResidentHanShardBlock[] = [];
+		for (const documentState of this.documentById) {
+			if (!documentState) {
+				continue;
+			}
+			const blockIds = this.bodyHanLogicalBlockIdsByDocId.get(documentState.docId);
+			const blockBigramIds = this.bodyHanLogicalBlockBigramIdsByDocId.get(
+				documentState.docId,
+			);
+			if (
+				!blockIds ||
+				blockIds.length === 0 ||
+				!blockBigramIds ||
+				blockBigramIds.length === 0
+			) {
+				continue;
+			}
+			for (
+				let index = 0;
+				index < documentState.manifest.bodyHanLogicalBlocks.length &&
+				index < blockIds.length &&
+				index < blockBigramIds.length;
+				index += 1
+			) {
+				const logicalBlock = documentState.manifest.bodyHanLogicalBlocks[index];
+				preparedBlocks.push({
+					blockId: blockIds[index],
+					docId: documentState.docId,
+					generation: documentState.generation,
+					blockOrdinal: logicalBlock.blockOrdinal,
+					encodedByteLength: logicalBlock.encodedByteLength,
+					bigramIds: blockBigramIds[index],
+				});
+			}
+		}
+		if (preparedBlocks.length === 0) {
+			return [];
+		}
+
+		const shards: CoverageLexicalV2ResidentHanShard[] = [];
+		for (
+			let start = 0;
+			start < preparedBlocks.length;
+			start += MAX_COVERAGE_LEXICAL_V2_RESIDENT_HAN_SHARD_BLOCKS
+		) {
+			const blocks = preparedBlocks.slice(
+				start,
+				start + MAX_COVERAGE_LEXICAL_V2_RESIDENT_HAN_SHARD_BLOCKS,
+			);
+			const postingsByBigram = new Map<number, number[]>();
+			const blockDescriptors: CoverageLexicalV2ResidentHanShardBlockDescriptor[] = [];
+			for (let localBlockOrdinal = 0; localBlockOrdinal < blocks.length; localBlockOrdinal += 1) {
+				const block = blocks[localBlockOrdinal];
+				blockDescriptors.push({
+					blockId: block.blockId,
+					docId: block.docId,
+					generation: block.generation,
+					blockOrdinal: block.blockOrdinal,
+					encodedByteLength: block.encodedByteLength,
+				});
+				for (const bigramId of block.bigramIds) {
+					const localOrdinals = postingsByBigram.get(bigramId) ?? [];
+					localOrdinals.push(localBlockOrdinal);
+					postingsByBigram.set(bigramId, localOrdinals);
+				}
+			}
+			shards.push({
+				id: `han-shard:${Date.now()}:${shards.length}`,
+				createdAt: Date.now(),
+				localBlockCount: blockDescriptors.length,
+				postingsByBigram:
+					buildCoverageLexicalV2BodyHanAdaptivePostingFieldSegment(postingsByBigram),
+				blockDescriptors,
+			});
+		}
+		return shards;
+	}
+
+	private registerBodyHanLogicalBlocks(documentState: CoverageLexicalV2InternalDocumentState): void {
+		const pendingBigramIds =
+			this.pendingBodyHanLogicalBlockBigramIdsByDocId.get(documentState.docId) ??
+			EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_BIGRAM_LISTS;
+		this.unregisterBodyHanLogicalBlocks(documentState.docId, true);
+		if (documentState.manifest.bodyHanLogicalBlocks.length === 0) {
+			this.pendingBodyHanLogicalBlockBigramIdsByDocId.delete(documentState.docId);
+			this.residentHanShardsDirty = true;
+			return;
+		}
+		const blockIds: number[] = [];
+		for (const logicalBlock of documentState.manifest.bodyHanLogicalBlocks) {
+			const blockId = this.nextBodyHanLogicalBlockId;
+			this.nextBodyHanLogicalBlockId += 1;
+			blockIds.push(blockId);
+			this.bodyHanLogicalBlockById.set(blockId, {
+				blockId,
+				docId: documentState.docId,
+				path: documentState.path,
+				generation: documentState.generation,
+				blockOrdinal: logicalBlock.blockOrdinal,
+				segmentCount: logicalBlock.segmentCount,
+				symbolCount: logicalBlock.symbolCount,
+				encodedByteLength: logicalBlock.encodedByteLength,
+			});
+		}
+		this.bodyHanLogicalBlockIdsByDocId.set(documentState.docId, blockIds);
+		this.setBodyHanLogicalBlockBigramIds(documentState.docId, pendingBigramIds);
+		this.pendingBodyHanLogicalBlockBigramIdsByDocId.delete(documentState.docId);
+		this.residentHanShardsDirty = true;
+	}
+
+	private unregisterBodyHanLogicalBlocks(
+		docId: number,
+		preservePendingBigramIds = false,
+	): void {
+		const blockIds = this.bodyHanLogicalBlockIdsByDocId.get(docId);
+		this.bodyHanLogicalBlockBigramIdsByDocId.delete(docId);
+		if (!preservePendingBigramIds) {
+			this.pendingBodyHanLogicalBlockBigramIdsByDocId.delete(docId);
+		}
+		if (!blockIds || blockIds.length === 0) {
+			return;
+		}
+		for (const blockId of blockIds) {
+			this.bodyHanLogicalBlockById.delete(blockId);
+		}
+		this.bodyHanLogicalBlockIdsByDocId.delete(docId);
+		this.residentHanShardsDirty = true;
 	}
 }
 
@@ -1476,6 +1778,7 @@ export function toCoverageLexicalV2PreparedDocument(
 
 function toCoverageLexicalV2SnapshotDocument(
 	document: CoverageLexicalV2InternalDocumentState,
+	bodyHanLogicalBlockBigramIds: CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists,
 ): CoverageLexicalV2IndexStoreSnapshotDocument {
 	return {
 		docId: document.docId,
@@ -1483,7 +1786,10 @@ function toCoverageLexicalV2SnapshotDocument(
 		generation: document.generation,
 		indexedRef: { ...document.indexedRef },
 		record: { ...document.record },
-		manifest: buildCoverageLexicalV2PersistedDocManifest(document),
+		manifest: buildCoverageLexicalV2PersistedDocManifest(
+			document,
+			bodyHanLogicalBlockBigramIds,
+		),
 	};
 }
 
@@ -1491,9 +1797,28 @@ function buildCoverageLexicalV2RuntimeDocManifest(
 	document: CoverageLexicalV2PreparedDocument,
 	indexedRef: BaseIndexedFileRef,
 ): CoverageLexicalV2IndexStoreRuntimeDocManifest {
-		return {
-			exactTermIdsByField: mapCoverageLexicalV2FieldTermsToIds(
-				document.exactTermsByField,
+	const logicalHanBlocks = buildCoverageLexicalV2HanLogicalBlocks(
+		document.bodyHanSegments,
+		() => {
+			throw new Error("Cannot build runtime doc manifest without Han symbol ids");
+		},
+		{
+			targetSymbols: TARGET_COVERAGE_LEXICAL_V2_HAN_LOGICAL_BLOCK_SYMBOLS,
+			targetEncodedBytes:
+				TARGET_COVERAGE_LEXICAL_V2_HAN_LOGICAL_BLOCK_ENCODED_BYTES,
+		},
+	);
+	const totalSegmentCount = logicalHanBlocks.reduce(
+		(sum, logicalBlock) => sum + logicalBlock.segmentCount,
+		0,
+	);
+	const totalEstimatedBytes = logicalHanBlocks.reduce(
+		(sum, logicalBlock) => sum + logicalBlock.encodedByteLength,
+		0,
+	);
+	return {
+		exactTermIdsByField: mapCoverageLexicalV2FieldTermsToIds(
+			document.exactTermsByField,
 			(term) => {
 				throw new Error(
 					`Cannot build runtime doc manifest without canonical term ids for "${term}"`,
@@ -1508,17 +1833,17 @@ function buildCoverageLexicalV2RuntimeDocManifest(
 				);
 			},
 		),
-		bodyHanGateBloomWords: buildCoverageLexicalV2HanGateBloomWords(
-			document.bodyHanSegments,
-		),
-		hasBodyHanSegments: document.bodyHanSegments.length > 0,
+		bodyHanLogicalBlocks:
+			buildCoverageLexicalV2RuntimeBodyHanLogicalBlockManifests(
+				logicalHanBlocks,
+			),
+		hasBodyHanSegments: totalSegmentCount > 0,
 		bodyHanSegmentExactSidecar: {
 			generation: document.generation ?? indexedRef.generation,
 			size: indexedRef.size,
-			segmentCount: document.bodyHanSegments.length,
-			estimatedBytes: estimateCoverageLexicalV2BodyHanSegmentExactBytes(
-				document.bodyHanSegments,
-			),
+			segmentCount: totalSegmentCount,
+			logicalBlockCount: logicalHanBlocks.length,
+			estimatedBytes: totalEstimatedBytes,
 		},
 		bodyTokenSidecar: {
 			generation: document.generation ?? indexedRef.generation,
@@ -1541,14 +1866,18 @@ function normalizeCoverageLexicalV2PersistedDocManifest(
 		metadataHanBigramIdsByField: cloneCoverageLexicalV2MetadataBigramIdLists(
 			manifest.metadataHanBigramIdsByField,
 		),
-		bodyHanGateBloomWords: cloneCoverageLexicalV2NumberList(
-			manifest.bodyHanGateBloomWords,
-		),
+		bodyHanLogicalBlocks:
+			cloneCoverageLexicalV2RuntimeBodyHanLogicalBlockManifests(
+				stripCoverageLexicalV2PersistedBodyHanLogicalBlockBigramIds(
+					manifest.bodyHanLogicalBlocks,
+				),
+			),
 		hasBodyHanSegments: manifest.hasBodyHanSegments,
 		bodyHanSegmentExactSidecar: {
 			generation: manifest.bodyHanSegmentExactSidecar.generation,
 			size: manifest.bodyHanSegmentExactSidecar.size,
 			segmentCount: manifest.bodyHanSegmentExactSidecar.segmentCount,
+			logicalBlockCount: manifest.bodyHanSegmentExactSidecar.logicalBlockCount,
 			estimatedBytes: manifest.bodyHanSegmentExactSidecar.estimatedBytes,
 		},
 		bodyTokenSidecar: {
@@ -1562,6 +1891,7 @@ function normalizeCoverageLexicalV2PersistedDocManifest(
 
 function buildCoverageLexicalV2PersistedDocManifest(
 	document: CoverageLexicalV2InternalDocumentState,
+	bodyHanLogicalBlockBigramIds: CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists,
 ): CoverageLexicalV2IndexStorePersistedDocManifest {
 	return {
 		exactTermIdsByField: cloneCoverageLexicalV2FieldTermIdLists(
@@ -1570,14 +1900,18 @@ function buildCoverageLexicalV2PersistedDocManifest(
 		metadataHanBigramIdsByField: cloneCoverageLexicalV2MetadataBigramIdLists(
 			document.manifest.metadataHanBigramIdsByField,
 		),
-		bodyHanGateBloomWords: cloneCoverageLexicalV2NumberList(
-			document.manifest.bodyHanGateBloomWords,
-		),
+		bodyHanLogicalBlocks:
+			buildCoverageLexicalV2PersistedBodyHanLogicalBlockProjection(
+				document.manifest.bodyHanLogicalBlocks,
+				bodyHanLogicalBlockBigramIds,
+			),
 		hasBodyHanSegments: document.manifest.hasBodyHanSegments,
 		bodyHanSegmentExactSidecar: {
 			generation: document.manifest.bodyHanSegmentExactSidecar.generation,
 			size: document.manifest.bodyHanSegmentExactSidecar.size,
 			segmentCount: document.manifest.bodyHanSegmentExactSidecar.segmentCount,
+			logicalBlockCount:
+				document.manifest.bodyHanSegmentExactSidecar.logicalBlockCount,
 			estimatedBytes: document.manifest.bodyHanSegmentExactSidecar.estimatedBytes,
 		},
 		bodyTokenSidecar: {
@@ -2032,20 +2366,26 @@ function cloneCoverageLexicalV2ResidentSegment(
 
 function cloneCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(segment: {
 	singletonTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
-	singletonDocIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	singletonValueIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	pairTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	pairFirstValueIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	pairSecondValueIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
 	smallTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
-	smallDocStarts: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
-	smallDocIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	smallValueStarts: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
+	smallValueIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
 	deltaTermIds: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
 	deltaTapeStarts: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
 	postingTape: readonly number[] | Uint8Array | Uint16Array | Uint32Array;
 }) {
 	return {
 		singletonTermIds: Array.from(segment.singletonTermIds),
-		singletonDocIds: Array.from(segment.singletonDocIds),
+		singletonValueIds: Array.from(segment.singletonValueIds),
+		pairTermIds: Array.from(segment.pairTermIds),
+		pairFirstValueIds: Array.from(segment.pairFirstValueIds),
+		pairSecondValueIds: Array.from(segment.pairSecondValueIds),
 		smallTermIds: Array.from(segment.smallTermIds),
-		smallDocStarts: Array.from(segment.smallDocStarts),
-		smallDocIds: Array.from(segment.smallDocIds),
+		smallValueStarts: Array.from(segment.smallValueStarts),
+		smallValueIds: Array.from(segment.smallValueIds),
 		deltaTermIds: Array.from(segment.deltaTermIds),
 		deltaTapeStarts: Array.from(segment.deltaTapeStarts),
 		postingTape: Array.from(segment.postingTape),
@@ -2599,66 +2939,252 @@ function encodeCoverageLexicalV2HanBigramId(
 	return hash >>> 0;
 }
 
-function buildCoverageLexicalV2HanGateBloomWords(
+function buildCoverageLexicalV2HanLogicalBlocks(
 	segments: readonly string[],
-): readonly CoverageLexicalV2HanGateBloomWord[] {
-	if (segments.length === 0) {
-		return EMPTY_COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORDS;
-	}
-	const words = new Array<number>(COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT).fill(0);
+	getOrCreateHanSymbolId: (codePoint: number) => CoverageLexicalV2HanSymbolId,
+	config: CoverageLexicalV2HanLogicalBlockConfig,
+): readonly CoverageLexicalV2PreparedHanLogicalBlock[] {
+	const preparedSegments: Array<{
+		text: string;
+		symbolIds: readonly CoverageLexicalV2HanSymbolId[];
+		encodedByteLength: number;
+		bigramIds: readonly CoverageLexicalV2HanBigramId[];
+	}> = [];
 	for (const segment of segments) {
-		const chars = Array.from(segment);
-		for (let index = 0; index < chars.length - 1; index += 1) {
-			const bigramId = encodeCoverageLexicalV2HanBigramId(
-				chars[index] + chars[index + 1],
-			);
-			if (bigramId === undefined) {
+		const symbolIds: CoverageLexicalV2HanSymbolId[] = [];
+		for (const token of Array.from(segment)) {
+			const codePoint = token.codePointAt(0);
+			if (codePoint === undefined) {
 				continue;
 			}
-			addCoverageLexicalV2HanBigramIdToBloom(words, bigramId);
+			symbolIds.push(getOrCreateHanSymbolId(codePoint));
 		}
-	}
-	return words.every((word) => word === 0)
-		? EMPTY_COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORDS
-		: words;
-}
-
-function addCoverageLexicalV2HanBigramIdToBloom(
-	words: number[],
-	bigramId: CoverageLexicalV2HanBigramId,
-): void {
-	for (let seed = 0; seed < COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_HASH_COUNT; seed += 1) {
-		const mixed = mixCoverageLexicalV2HanBigramIdForBloom(bigramId, seed);
-		const wordIndex = mixed & (COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT - 1);
-		const bitIndex = (mixed >>> 4) & 31;
-		words[wordIndex] = (words[wordIndex] ?? 0) | (1 << bitIndex);
-	}
-}
-
-function mightContainCoverageLexicalV2HanBigramId(
-	words: readonly CoverageLexicalV2HanGateBloomWord[],
-	bigramId: CoverageLexicalV2HanBigramId,
-): boolean {
-	for (let seed = 0; seed < COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_HASH_COUNT; seed += 1) {
-		const mixed = mixCoverageLexicalV2HanBigramIdForBloom(bigramId, seed);
-		const wordIndex = mixed & (COVERAGE_LEXICAL_V2_HAN_GATE_BLOOM_WORD_COUNT - 1);
-		const bitIndex = (mixed >>> 4) & 31;
-		if ((((words[wordIndex] ?? 0) >>> bitIndex) & 1) === 0) {
-			return false;
+		if (symbolIds.length === 0) {
+			continue;
 		}
+		preparedSegments.push({
+			text: segment,
+			symbolIds,
+			encodedByteLength: estimateCoverageLexicalV2EncodedHanSegmentExactBytes(
+				Uint32Array.from(symbolIds),
+			),
+			bigramIds: collectCoverageLexicalV2HanSegmentBigramIds(segment),
+		});
 	}
-	return true;
+	if (preparedSegments.length === 0) {
+		return [];
+	}
+	const logicalBlocks: CoverageLexicalV2PreparedHanLogicalBlock[] = [];
+	let pendingSegments: typeof preparedSegments = [];
+	let pendingSymbolCount = 0;
+	let pendingEncodedByteLength = 0;
+	let blockOrdinal = 0;
+
+	const flushPending = () => {
+		if (pendingSegments.length === 0) {
+			return;
+		}
+		const encoded: CoverageLexicalV2HanSymbolId[] = [];
+		for (const [index, pendingSegment] of pendingSegments.entries()) {
+			if (index > 0) {
+				encoded.push(COVERAGE_LEXICAL_V2_HAN_SEGMENT_SEPARATOR_ID);
+			}
+			encoded.push(...pendingSegment.symbolIds);
+		}
+		const bigramIds = Array.from(
+			new Set(pendingSegments.flatMap((pendingSegment) => pendingSegment.bigramIds)),
+		).sort((left, right) => left - right);
+		logicalBlocks.push({
+			blockOrdinal,
+			symbolIds: Uint32Array.from(encoded),
+			segmentCount: pendingSegments.length,
+			symbolCount: pendingSymbolCount,
+			encodedByteLength: pendingEncodedByteLength,
+			bigramIds,
+		});
+		blockOrdinal += 1;
+		pendingSegments = [];
+		pendingSymbolCount = 0;
+		pendingEncodedByteLength = 0;
+	};
+
+	for (const preparedSegment of preparedSegments) {
+		const shouldOwnBlock =
+			preparedSegment.symbolIds.length >= config.targetSymbols ||
+			preparedSegment.encodedByteLength >= config.targetEncodedBytes;
+		const wouldOverflow =
+			pendingSegments.length > 0 &&
+			(
+				pendingSymbolCount + preparedSegment.symbolIds.length >
+					config.targetSymbols ||
+				pendingEncodedByteLength + preparedSegment.encodedByteLength >
+					config.targetEncodedBytes
+			);
+		if (shouldOwnBlock) {
+			flushPending();
+			pendingSegments = [preparedSegment];
+			pendingSymbolCount = preparedSegment.symbolIds.length;
+			pendingEncodedByteLength = preparedSegment.encodedByteLength;
+			flushPending();
+			continue;
+		}
+		if (wouldOverflow) {
+			flushPending();
+		}
+		pendingSegments.push(preparedSegment);
+		pendingSymbolCount += preparedSegment.symbolIds.length;
+		pendingEncodedByteLength += preparedSegment.encodedByteLength;
+	}
+	flushPending();
+
+	return logicalBlocks;
 }
 
-function mixCoverageLexicalV2HanBigramIdForBloom(
-	bigramId: CoverageLexicalV2HanBigramId,
-	seed: number,
+function collectCoverageLexicalV2HanSegmentBigramIds(
+	segment: string,
+): readonly CoverageLexicalV2HanBigramId[] {
+	const bigramIds: CoverageLexicalV2HanBigramId[] = [];
+	const seen = new Set<number>();
+	const chars = Array.from(segment);
+	for (let index = 0; index < chars.length - 1; index += 1) {
+		const bigramId = encodeCoverageLexicalV2HanBigramId(chars[index] + chars[index + 1]);
+		if (bigramId === undefined || seen.has(bigramId)) {
+			continue;
+		}
+		seen.add(bigramId);
+		bigramIds.push(bigramId);
+	}
+	return bigramIds.sort((left, right) => left - right);
+}
+
+function buildCoverageLexicalV2RuntimeBodyHanLogicalBlockManifests(
+	logicalBlocks: readonly Pick<
+		CoverageLexicalV2PreparedHanLogicalBlock,
+		"blockOrdinal" | "segmentCount" | "symbolCount" | "encodedByteLength"
+	>[],
+): readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[] {
+	return logicalBlocks.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_MANIFESTS
+		: logicalBlocks.map((logicalBlock) => ({
+				blockOrdinal: logicalBlock.blockOrdinal,
+				segmentCount: logicalBlock.segmentCount,
+				symbolCount: logicalBlock.symbolCount,
+				encodedByteLength: logicalBlock.encodedByteLength,
+			}));
+}
+
+function extractCoverageLexicalV2PreparedBodyHanLogicalBlockBigramLists(
+	logicalBlocks: readonly Pick<CoverageLexicalV2PreparedHanLogicalBlock, "bigramIds">[],
+): CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists {
+	return logicalBlocks.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_BIGRAM_LISTS
+		: logicalBlocks.map((logicalBlock) =>
+				cloneCoverageLexicalV2NumberList(logicalBlock.bigramIds),
+			);
+}
+
+function extractCoverageLexicalV2PersistedBodyHanLogicalBlockBigramLists(
+	logicalBlocks: readonly CoverageLexicalV2PersistedBodyHanLogicalBlockManifest[],
+): CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists {
+	return logicalBlocks.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_BIGRAM_LISTS
+		: logicalBlocks.map((logicalBlock) =>
+				cloneCoverageLexicalV2NumberList(logicalBlock.bigramIds),
+			);
+}
+
+function stripCoverageLexicalV2PersistedBodyHanLogicalBlockBigramIds(
+	logicalBlocks: readonly CoverageLexicalV2PersistedBodyHanLogicalBlockManifest[],
+): readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[] {
+	return logicalBlocks.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_MANIFESTS
+		: logicalBlocks.map((logicalBlock) => ({
+				blockOrdinal: logicalBlock.blockOrdinal,
+				segmentCount: logicalBlock.segmentCount,
+				symbolCount: logicalBlock.symbolCount,
+				encodedByteLength: logicalBlock.encodedByteLength,
+			}));
+}
+
+function buildCoverageLexicalV2PersistedBodyHanLogicalBlockProjection(
+	logicalBlocks: readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[],
+	bigramIdsByBlock: CoverageLexicalV2RuntimeBodyHanLogicalBlockBigramLists,
+): readonly CoverageLexicalV2PersistedBodyHanLogicalBlockManifest[] {
+	return logicalBlocks.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_PERSISTED_BODY_HAN_LOGICAL_BLOCK_MANIFESTS
+		: logicalBlocks.map((logicalBlock, index) => ({
+				blockOrdinal: logicalBlock.blockOrdinal,
+				segmentCount: logicalBlock.segmentCount,
+				symbolCount: logicalBlock.symbolCount,
+				encodedByteLength: logicalBlock.encodedByteLength,
+				bigramIds:
+					bigramIdsByBlock[index] ?? EMPTY_COVERAGE_LEXICAL_V2_NUMBER_LIST,
+			}));
+}
+
+function cloneCoverageLexicalV2RuntimeBodyHanLogicalBlockManifests(
+	logicalBlocks: readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[],
+): readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[] {
+	return logicalBlocks.length === 0
+		? EMPTY_COVERAGE_LEXICAL_V2_BODY_HAN_LOGICAL_BLOCK_MANIFESTS
+		: logicalBlocks.map((logicalBlock) => ({
+				blockOrdinal: logicalBlock.blockOrdinal,
+				segmentCount: logicalBlock.segmentCount,
+				symbolCount: logicalBlock.symbolCount,
+				encodedByteLength: logicalBlock.encodedByteLength,
+			}));
+}
+
+function estimateCoverageLexicalV2BodyHanLogicalBlocksBytes(
+	logicalBlocks: readonly CoverageLexicalV2RuntimeBodyHanLogicalBlockManifest[],
 ): number {
-	let mixed = bigramId ^ Math.imul(seed + 1, 0x9e3779b1);
-	mixed ^= mixed >>> 16;
-	mixed = Math.imul(mixed, 0x7feb352d);
-	mixed ^= mixed >>> 15;
-	mixed = Math.imul(mixed, 0x846ca68b);
-	mixed ^= mixed >>> 16;
-	return mixed >>> 0;
+	return logicalBlocks.length * 20;
+}
+
+function estimateCoverageLexicalV2ResidentHanShardPostingBytes(
+	shard: CoverageLexicalV2ResidentHanShard,
+): number {
+	return estimateCoverageLexicalV2SerializedAdaptiveFieldSegmentBytesForRuntime(
+		shard.postingsByBigram,
+	);
+}
+
+function estimateCoverageLexicalV2ResidentHanShardDescriptorBytes(
+	shard: CoverageLexicalV2ResidentHanShard,
+): number {
+	return shard.blockDescriptors.length * 20;
+}
+
+function estimateCoverageLexicalV2SerializedAdaptiveFieldSegmentBytesForRuntime(segment: {
+	singletonTermIds: CoverageLexicalV2PackedNumberList;
+	singletonValueIds: CoverageLexicalV2PackedNumberList;
+	pairTermIds: CoverageLexicalV2PackedNumberList;
+	pairFirstValueIds: CoverageLexicalV2PackedNumberList;
+	pairSecondValueIds: CoverageLexicalV2PackedNumberList;
+	smallTermIds: CoverageLexicalV2PackedNumberList;
+	smallValueStarts: CoverageLexicalV2PackedNumberList;
+	smallValueIds: CoverageLexicalV2PackedNumberList;
+	deltaTermIds: CoverageLexicalV2PackedNumberList;
+	deltaTapeStarts: CoverageLexicalV2PackedNumberList;
+	postingTape: CoverageLexicalV2PackedNumberList;
+}): number {
+	return (
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.singletonTermIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.singletonValueIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.pairTermIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.pairFirstValueIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.pairSecondValueIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.smallTermIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.smallValueStarts) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.smallValueIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.deltaTermIds) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.deltaTapeStarts) +
+		estimateCoverageLexicalV2PackedListBytesForRuntime(segment.postingTape)
+	);
+}
+
+function estimateCoverageLexicalV2PackedListBytesForRuntime(
+	values: CoverageLexicalV2PackedNumberList,
+): number {
+	return "byteLength" in values ? values.byteLength : values.length * 4;
 }

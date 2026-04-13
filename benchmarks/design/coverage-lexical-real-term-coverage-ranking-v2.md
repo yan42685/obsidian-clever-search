@@ -1016,7 +1016,7 @@ Preferred lexical order:
   - bounded fallback remains discovery-only in normal ranking, while a narrow Han salvage path is available only when normal layer-1 coverage and fuzzy salvage are both globally absent
 - Independent V2 index-store / persistence completion pass: completed
   - active runtime now uses the standalone `coverage-lexical-v2/index-store/` path for resident store, journal/snapshot persistence, and body-token cold sidecar ownership
-  - the resident store now exposes a V2-only reader boundary over `document_view`, exact postings, metadata Han gate postings, resident `bodyHanSegments`, and cold body-token fetch/prefetch
+  - the resident store now exposes a V2-only reader boundary over `document_view`, exact postings, metadata Han gate postings, resident body-Han block postings, and cold body-token/body-Han exact fetch-pipelines
   - live updates now run through manifest-backed replace semantics, and lexical move events can reuse the same docId through a V2 move fast-path instead of always degrading to delete+add
   - startup restore now has a V2-owned persistent recovery planner that compares current vault refs, persisted refs, store refs, and cold-sidecar consistency before choosing heal vs full rebuild
   - canonical term ownership now lives in a V2 UTF-8 byte arena, while body-token cold storage uses a V2-owned term-id tape block format instead of the old string-dictionary block layout
@@ -1037,10 +1037,15 @@ Preferred lexical order:
 - the abandoned `witness / phrase_signature` direction is no longer part of the active V2 worldview; Han recall now uses a symmetric Han backstop path:
   real-token lanes first, then residual/fragile Han bigram gating, then bounded cold HanSegment exact verification before synthetic Han exact evidence is admitted
 - `metadata` and `body` now share the same Han backstop trigger and verification semantics; field priority differences remain only in the final comparator
-- body Han resident ownership is now recall-first gate metadata only: hot runtime keeps doc-level Han bigram gate stats in a V2-owned lightweight Bloom-style Han-bigram sketch rather than the shared canonical term arena, while exact HanSegment payload is owned by a cold sidecar plus tiny exact cache
+- body Han hot resident ownership is now block-first rather than doc-gate-first:
+  hot runtime keeps adaptive `bigram -> logical-block` postings in resident Han shards, while exact Han logical-block payload remains owned by the cold sidecar plus exact cache
 - Memory-First Phase 2 is now implemented in the active path:
   - metadata Han recovery now enters a `pending Han frontier` and must pass a pre-layer-1 promotion batch before it can contribute synthetic exact Han evidence
-  - body Han recovery no longer uses hot `bodyChar` postings or resident exact `bodyHanSegments` narrow scan ownership; it now runs hot Han bigram gate -> bounded cold HanSegment exact prefetch -> exact-only promotion
+  - body Han recovery no longer uses hot `bodyChar` postings, doc-level Han Bloom gating, or resident exact `bodyHanSegments` narrow scan ownership; it now runs hot resident Han-shard bigram postings -> bounded cold logical-block exact prefetch -> exact-only promotion
+  - runtime doc manifests no longer keep per-block Han `bigramIds`; resident Han shards are now the sole hot query view for body Han, while persisted snapshot/journal manifests still retain the minimum data needed to rebuild shards on restore
+  - body Han logical blocks now default to the `3x` sizing tier (`1152 symbols / 4608 bytes`), and resident Han shards keep `localBlockCount <= 255` so hot postings stay on 1-byte local ordinals without requiring a global `<=255` block cap
+  - metadata Han doc postings, body exact postings, and body Han block postings now share the same adaptive resident codec core (`singleton / pair / small / delta_tape`), with per-lane profiles instead of separate hot structures
+  - active body-Han exact caching now uses a `12MB + 2048 entries` cap rather than the earlier tiny block cache, which materially reduces warmed long-tail latency without allowing entry-count metadata to grow unbounded
   - unpromoted Han pending candidates do not enter layer 1, matched-field accounting, or display ranking
   - active live-index accounting no longer includes `postings.bodyChar`; on the automation corpus the active V2 benchmark now reports `estimatedIndexKB ~= 99.1` with the same `objective 0.885 / top1 0.818 / top3 0.939 / zeroRate 0` quality gate
   - active trace/debug now records pending-frontier volume, Han promotions, metadata verification promotions, body Han gate workload, and cold exact budget/fetch/degrade outcomes
@@ -1711,8 +1716,6 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
-
-
 
 
 

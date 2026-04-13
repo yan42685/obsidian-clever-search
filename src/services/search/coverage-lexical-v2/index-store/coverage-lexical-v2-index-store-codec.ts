@@ -12,7 +12,20 @@ import type {
 	CoverageLexicalV2SerializedMetadataSegmentFields,
 } from "./coverage-lexical-v2-index-store-types";
 
-const TINY_INLINE_DOC_CAP = 4;
+type CoverageLexicalV2AdaptivePostingCodecProfile = {
+	smallInlineCap: number;
+	enablePairLane: boolean;
+};
+
+const DEFAULT_ADAPTIVE_POSTING_CODEC_PROFILE: CoverageLexicalV2AdaptivePostingCodecProfile = {
+	smallInlineCap: 4,
+	enablePairLane: true,
+};
+
+const BODY_HAN_ADAPTIVE_POSTING_CODEC_PROFILE: CoverageLexicalV2AdaptivePostingCodecProfile = {
+	smallInlineCap: 8,
+	enablePairLane: true,
+};
 
 export function buildCoverageLexicalV2ResidentSegment(options: {
 	id: string;
@@ -63,7 +76,18 @@ export function decodeCoverageLexicalV2ResidentAdaptivePosting(
 		termId,
 	);
 	if (fieldSegment.singletonTermIds[singletonIndex] === termId) {
-		return [fieldSegment.singletonDocIds[singletonIndex] ?? 0];
+		return [fieldSegment.singletonValueIds[singletonIndex] ?? 0];
+	}
+
+	const pairIndex = lowerBoundCoverageLexicalV2Number(
+		fieldSegment.pairTermIds,
+		termId,
+	);
+	if (fieldSegment.pairTermIds[pairIndex] === termId) {
+		return [
+			fieldSegment.pairFirstValueIds[pairIndex] ?? 0,
+			fieldSegment.pairSecondValueIds[pairIndex] ?? 0,
+		];
 	}
 
 	const smallIndex = lowerBoundCoverageLexicalV2Number(
@@ -72,12 +96,12 @@ export function decodeCoverageLexicalV2ResidentAdaptivePosting(
 	);
 	if (fieldSegment.smallTermIds[smallIndex] === termId) {
 		const localIndex = smallIndex;
-		const start = fieldSegment.smallDocStarts[localIndex] ?? 0;
+		const start = fieldSegment.smallValueStarts[localIndex] ?? 0;
 		const nextStart =
-			fieldSegment.smallDocStarts[localIndex + 1] ?? fieldSegment.smallDocIds.length;
+			fieldSegment.smallValueStarts[localIndex + 1] ?? fieldSegment.smallValueIds.length;
 		const count = Math.max(0, nextStart - start);
 		return sliceCoverageLexicalV2PackedNumberList(
-			fieldSegment.smallDocIds,
+			fieldSegment.smallValueIds,
 			start,
 			start + count,
 		);
@@ -133,20 +157,20 @@ export function estimateCoverageLexicalV2ResidentSegmentBytes(
 }
 
 export function encodeCoverageLexicalV2DeltaVarintPosting(
-	docIds: readonly number[],
+	valueIds: readonly number[],
 ): number[] {
 	const bytes: number[] = [];
 	let previous = 0;
-	for (let index = 0; index < docIds.length; index += 1) {
-		const docId = docIds[index];
-		const delta = index === 0 ? docId : docId - previous;
+	for (let index = 0; index < valueIds.length; index += 1) {
+		const valueId = valueIds[index];
+		const delta = index === 0 ? valueId : valueId - previous;
 		let value = delta >>> 0;
 		while (value >= 0x80) {
 			bytes.push((value & 0x7f) | 0x80);
 			value >>>= 7;
 		}
 		bytes.push(value);
-		previous = docId;
+		previous = valueId;
 	}
 	return bytes;
 }
@@ -241,46 +265,57 @@ function buildCoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment(
 ): CoverageLexicalV2SerializedAdaptiveBodyPostingFieldSegment {
 	return buildCoverageLexicalV2SerializedAdaptivePostingFieldSegment(
 		postingsByTermId,
+		DEFAULT_ADAPTIVE_POSTING_CODEC_PROFILE,
 	);
 }
 
-function buildCoverageLexicalV2SerializedAdaptivePostingFieldSegment(
-	postingsByTermId: ReadonlyMap<CoverageLexicalV2CanonicalTermId, readonly number[]>,
+export function buildCoverageLexicalV2SerializedAdaptivePostingFieldSegment(
+	postingsByTermId: ReadonlyMap<number, readonly number[]>,
+	profile: CoverageLexicalV2AdaptivePostingCodecProfile = DEFAULT_ADAPTIVE_POSTING_CODEC_PROFILE,
 ): CoverageLexicalV2SerializedAdaptivePostingFieldSegment {
 	const singletonTermIds: CoverageLexicalV2CanonicalTermId[] = [];
-	const singletonDocIds: number[] = [];
+	const singletonValueIds: number[] = [];
+	const pairTermIds: CoverageLexicalV2CanonicalTermId[] = [];
+	const pairFirstValueIds: number[] = [];
+	const pairSecondValueIds: number[] = [];
 	const smallTermIds: CoverageLexicalV2CanonicalTermId[] = [];
-	const smallDocStarts: number[] = [];
-	const smallDocIds: number[] = [];
+	const smallValueStarts: number[] = [];
+	const smallValueIds: number[] = [];
 	const deltaTermIds: CoverageLexicalV2CanonicalTermId[] = [];
 	const deltaTapeStarts: number[] = [];
 	const postingTape: number[] = [];
 
 	const tokenPostings: Array<{
 		termId: CoverageLexicalV2CanonicalTermId;
-		docIds: number[];
+		valueIds: number[];
 	}> = [];
-	for (const [termId, rawDocIds] of postingsByTermId.entries()) {
+	for (const [termId, rawValueIds] of postingsByTermId.entries()) {
 		tokenPostings.push({
 			termId,
-			docIds: [...rawDocIds].sort((left, right) => left - right),
+			valueIds: [...rawValueIds].sort((left, right) => left - right),
 		});
 	}
 	tokenPostings.sort((left, right) => left.termId - right.termId);
 
 	for (const posting of tokenPostings) {
-		if (posting.docIds.length === 1) {
+		if (posting.valueIds.length === 1) {
 			singletonTermIds.push(posting.termId);
-			singletonDocIds.push(posting.docIds[0]);
+			singletonValueIds.push(posting.valueIds[0]);
 			continue;
 		}
-		if (posting.docIds.length <= TINY_INLINE_DOC_CAP) {
+		if (profile.enablePairLane && posting.valueIds.length === 2) {
+			pairTermIds.push(posting.termId);
+			pairFirstValueIds.push(posting.valueIds[0]);
+			pairSecondValueIds.push(posting.valueIds[1]);
+			continue;
+		}
+		if (posting.valueIds.length <= profile.smallInlineCap) {
 			smallTermIds.push(posting.termId);
-			smallDocStarts.push(smallDocIds.length);
-			smallDocIds.push(...posting.docIds);
+			smallValueStarts.push(smallValueIds.length);
+			smallValueIds.push(...posting.valueIds);
 			continue;
 		}
-		const encoded = encodeCoverageLexicalV2DeltaVarintPosting(posting.docIds);
+		const encoded = encodeCoverageLexicalV2DeltaVarintPosting(posting.valueIds);
 		deltaTermIds.push(posting.termId);
 		deltaTapeStarts.push(postingTape.length);
 		postingTape.push(...encoded);
@@ -288,10 +323,13 @@ function buildCoverageLexicalV2SerializedAdaptivePostingFieldSegment(
 
 	return {
 		singletonTermIds: packCoverageLexicalV2UnsignedList(singletonTermIds),
-		singletonDocIds: packCoverageLexicalV2UnsignedList(singletonDocIds),
+		singletonValueIds: packCoverageLexicalV2UnsignedList(singletonValueIds),
+		pairTermIds: packCoverageLexicalV2UnsignedList(pairTermIds),
+		pairFirstValueIds: packCoverageLexicalV2UnsignedList(pairFirstValueIds),
+		pairSecondValueIds: packCoverageLexicalV2UnsignedList(pairSecondValueIds),
 		smallTermIds: packCoverageLexicalV2UnsignedList(smallTermIds),
-		smallDocStarts: packCoverageLexicalV2UnsignedList(smallDocStarts),
-		smallDocIds: packCoverageLexicalV2UnsignedList(smallDocIds),
+		smallValueStarts: packCoverageLexicalV2UnsignedList(smallValueStarts),
+		smallValueIds: packCoverageLexicalV2UnsignedList(smallValueIds),
 		deltaTermIds: packCoverageLexicalV2UnsignedList(deltaTermIds),
 		deltaTapeStarts: packCoverageLexicalV2UnsignedList(deltaTapeStarts),
 		postingTape: Uint8Array.from(postingTape),
@@ -301,6 +339,7 @@ function buildCoverageLexicalV2SerializedAdaptivePostingFieldSegment(
 function buildCoverageLexicalV2SerializedAdaptivePostingFieldSegmentFromTerms(
 	postingsByTerm: ReadonlyMap<string, readonly number[]>,
 	getCanonicalTermId: (term: string) => CoverageLexicalV2CanonicalTermId | undefined,
+	profile: CoverageLexicalV2AdaptivePostingCodecProfile = DEFAULT_ADAPTIVE_POSTING_CODEC_PROFILE,
 ): CoverageLexicalV2SerializedAdaptivePostingFieldSegment {
 	const dictionaryEntries = [...postingsByTerm.entries()]
 		.map(([term, docIds]) => ({
@@ -321,6 +360,7 @@ function buildCoverageLexicalV2SerializedAdaptivePostingFieldSegmentFromTerms(
 				[...entry.docIds].sort((left, right) => left - right),
 			]),
 		),
+		profile,
 	);
 }
 
@@ -332,19 +372,35 @@ function estimateCoverageLexicalV2SerializedAdaptiveFieldSegmentBytes(
 		fieldSegment.singletonTermIds,
 	);
 	total += estimateCoverageLexicalV2PackedNumberListBytes(
-		fieldSegment.singletonDocIds,
+		fieldSegment.singletonValueIds,
+	);
+	total += estimateCoverageLexicalV2PackedNumberListBytes(fieldSegment.pairTermIds);
+	total += estimateCoverageLexicalV2PackedNumberListBytes(
+		fieldSegment.pairFirstValueIds,
+	);
+	total += estimateCoverageLexicalV2PackedNumberListBytes(
+		fieldSegment.pairSecondValueIds,
 	);
 	total += estimateCoverageLexicalV2PackedNumberListBytes(fieldSegment.smallTermIds);
 	total += estimateCoverageLexicalV2PackedNumberListBytes(
-		fieldSegment.smallDocStarts,
+		fieldSegment.smallValueStarts,
 	);
-	total += estimateCoverageLexicalV2PackedNumberListBytes(fieldSegment.smallDocIds);
+	total += estimateCoverageLexicalV2PackedNumberListBytes(fieldSegment.smallValueIds);
 	total += estimateCoverageLexicalV2PackedNumberListBytes(fieldSegment.deltaTermIds);
 	total += estimateCoverageLexicalV2PackedNumberListBytes(
 		fieldSegment.deltaTapeStarts,
 	);
 	total += estimateCoverageLexicalV2PackedNumberListBytes(fieldSegment.postingTape);
 	return total;
+}
+
+export function buildCoverageLexicalV2BodyHanAdaptivePostingFieldSegment(
+	postingsByBigramId: ReadonlyMap<number, readonly number[]>,
+): CoverageLexicalV2SerializedAdaptivePostingFieldSegment {
+	return buildCoverageLexicalV2SerializedAdaptivePostingFieldSegment(
+		postingsByBigramId,
+		BODY_HAN_ADAPTIVE_POSTING_CODEC_PROFILE,
+	);
 }
 
 function lowerBoundCoverageLexicalV2String(

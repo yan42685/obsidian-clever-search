@@ -67,24 +67,110 @@ export function buildCoverageLexicalV2StorageReader(
 	return {
 		readerKind: "legacy_adapter",
 		getDocumentRecord: (docId: number) => bindings.getDocumentRecord(docId),
-		getBodyHanSegmentDocIds: () => bindings.getBodyHanSegmentDocIds(),
 		getPostingMatches: (field: CoverageLexicalV2CandidateCascadePostingField, term: string) =>
 			bindings.getPostingMatches(field, term),
 		getMetadataHanBigramPostingMatches: (
 			field: CoverageLexicalV2CandidateCascadePostingField,
 			bigram: string,
 		) => bindings.getMetadataHanBigramPostingMatches(field, bigram),
-		getBodyHanBackstopGateStats: (docId: number, bigrams: readonly string[]) =>
-			bindings.getBodyHanBackstopGateStats(docId, bigrams),
-		prefetchBodyHanExact: (
-			docIds: readonly number[],
+		getBodyHanBlockPostingMatches: (bigram: string) =>
+			bindings
+				.getBodyHanSegmentDocIds()
+				.filter((docId) => bindings.getBodyHanBackstopGateStats(docId, [bigram]) != null),
+		getBodyHanLogicalBlockDescriptor: (blockId: number) => {
+			const record = bindings.getDocumentRecord(blockId);
+			if (!record) {
+				return null;
+			}
+			return {
+				blockId,
+				docId: blockId,
+				path: record.path,
+				blockOrdinal: 0,
+				segmentCount: 1,
+				symbolCount: 0,
+				encodedByteLength: 0,
+			};
+		},
+		prefetchBodyHanExactBlocks: (
+			blockIds: readonly number[],
 			budget: CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
-		) => bindings.prefetchBodyHanExact(docIds, budget),
-		getBodyHanExactBackstopStats: (
-			docId: number,
+		) =>
+			bindings
+				.prefetchBodyHanExact(blockIds, {
+					blockBudget: budget.blockBudget,
+					byteBudget: budget.byteBudget,
+					timeBudgetMs: budget.timeBudgetMs,
+				})
+				.then((prefetch) => {
+					const legacyPrefetch = prefetch as {
+						fetchedDocIds?: readonly number[];
+						fetchedDocCount?: number;
+						docResults?: Array<{
+							docId: number;
+							path: string | null;
+							status: string;
+							estimatedBytes: number | null;
+							segmentCount: number | null;
+						}>;
+					};
+					const sourceBlockResults = (prefetch.blockResults ??
+						legacyPrefetch.docResults ??
+						[]) as Array<
+						| {
+								blockId: number;
+								docId: number | null;
+								path: string | null;
+								blockOrdinal: number | null;
+								status: string;
+								estimatedBytes: number | null;
+								segmentCount: number | null;
+								symbolCount: number | null;
+						  }
+						| {
+								docId: number;
+								path: string | null;
+								status: string;
+								estimatedBytes: number | null;
+								segmentCount: number | null;
+						  }
+					>;
+					return ({
+					fetchedBlockIds:
+						prefetch.fetchedBlockIds ?? legacyPrefetch.fetchedDocIds ?? [],
+					fetchedBlockCount:
+						prefetch.fetchedBlockCount ?? legacyPrefetch.fetchedDocCount ?? 0,
+					byteSum: prefetch.byteSum,
+					skippedByBudget: prefetch.skippedByBudget,
+					skippedReason: prefetch.skippedReason,
+					blockResults: sourceBlockResults.map((docResult) => ({
+						blockId: "blockId" in docResult ? docResult.blockId : docResult.docId,
+						docId: docResult.docId,
+						path: docResult.path,
+						blockOrdinal:
+							"blockOrdinal" in docResult ? (docResult.blockOrdinal ?? 0) : 0,
+						status:
+							docResult.status === "doc_budget"
+								? "block_budget"
+								: docResult.status === "zero_segment_count"
+									? "zero_symbol_count"
+									: docResult.status === "sidecar_doc_row_missing"
+										? "sidecar_doc_summary_missing"
+										: docResult.status === "sidecar_block_missing"
+											? "sidecar_storage_block_missing"
+											: (docResult.status as any),
+						estimatedBytes: docResult.estimatedBytes,
+						segmentCount: docResult.segmentCount,
+						symbolCount:
+							"symbolCount" in docResult ? docResult.symbolCount : null,
+					})),
+				});
+				}),
+		getBodyHanExactBlockBackstopStats: (
+			blockId: number,
 			normalizedText: string,
 			bigrams: readonly string[],
-		) => bindings.getBodyHanExactBackstopStats(docId, normalizedText, bigrams),
+		) => bindings.getBodyHanExactBackstopStats(blockId, normalizedText, bigrams),
 		collectLatinPrefixTerms: (queryTerm: string, cap: number) =>
 			bindings.collectLatinPrefixTerms(queryTerm, cap),
 		collectLatinFuzzyTerms: (
@@ -114,5 +200,3 @@ export async function searchCoverageLexicalV2WithStorageAdapter(
 		),
 	});
 }
-
-

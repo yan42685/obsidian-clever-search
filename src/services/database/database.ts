@@ -23,9 +23,10 @@ import type {
   CoverageLexicalV2BodyTokenColdMetaRow,
 } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-body-token-cold-types";
 import type {
-  CoverageLexicalV2HanSegmentExactSidecarBlockRow,
-  CoverageLexicalV2HanSegmentExactSidecarDocRow,
+  CoverageLexicalV2HanSegmentExactSidecarDocSummaryRow,
+  CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRow,
   CoverageLexicalV2HanSegmentExactSidecarMetaRow,
+  CoverageLexicalV2HanSegmentExactSidecarStorageBlockRow,
 } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 import {
   decodeCoverageLexicalV2IndexStoreJournalEntry,
@@ -101,6 +102,10 @@ export class Database {
       {
         name: "lexicalV2HanSegmentExactSidecarBlocks",
         table: this.db.lexicalV2HanSegmentExactSidecarBlocks,
+      },
+      {
+        name: "lexicalV2HanSegmentExactSidecarLogicalBlocks",
+        table: this.db.lexicalV2HanSegmentExactSidecarLogicalBlocks,
       },
       {
         name: "lexicalV2HanSegmentExactSidecarDocs",
@@ -554,7 +559,7 @@ export class Database {
 class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 27.1;
+  private static readonly _dbVersion = 27.2;
   private static readonly dbNamePrefix = "clever-search/";
   private privateApi: PrivateApi;
   private schemaUpgradeDetected = false;
@@ -594,11 +599,15 @@ class DexieWrapper extends Dexie {
     string
   >;
   lexicalV2HanSegmentExactSidecarBlocks!: Dexie.Table<
-    CoverageLexicalV2HanSegmentExactSidecarBlockRow,
+    CoverageLexicalV2HanSegmentExactSidecarStorageBlockRow,
+    string
+  >;
+  lexicalV2HanSegmentExactSidecarLogicalBlocks!: Dexie.Table<
+    CoverageLexicalV2HanSegmentExactSidecarLogicalBlockRow,
     string
   >;
   lexicalV2HanSegmentExactSidecarDocs!: Dexie.Table<
-    CoverageLexicalV2HanSegmentExactSidecarDocRow,
+    CoverageLexicalV2HanSegmentExactSidecarDocSummaryRow,
     string
   >;
   lexicalV2IndexStoreMeta!: Dexie.Table<CoverageLexicalV2IndexStoreMetaRow, string>;
@@ -672,7 +681,9 @@ class DexieWrapper extends Dexie {
       lexicalV2BodyTokenColdDocs: "path, epoch, blockId, updatedAt",
       lexicalV2HanSegmentExactSidecarMeta: "id",
       lexicalV2HanSegmentExactSidecarBlocks: "id, epoch, updatedAt",
-      lexicalV2HanSegmentExactSidecarDocs: "path, epoch, blockId, updatedAt",
+      lexicalV2HanSegmentExactSidecarLogicalBlocks:
+        "id, path, [path+blockOrdinal], epoch, storageBlockId, updatedAt",
+      lexicalV2HanSegmentExactSidecarDocs: "path, epoch, generation, updatedAt",
       lexicalV2IndexStoreMeta: "id",
       lexicalV2IndexStoreSnapshotChunks: "id, snapshotId, order, updatedAt",
       lexicalV2IndexStoreJournal: "id, sequence, path, updatedAt",
