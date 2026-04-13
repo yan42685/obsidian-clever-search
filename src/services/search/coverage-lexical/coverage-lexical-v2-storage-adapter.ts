@@ -108,6 +108,7 @@ export function buildCoverageLexicalV2StorageReader(
 				.prefetchBodyHanExact(blockIds, {
 					blockBudget: budget.blockBudget,
 					byteBudget: budget.byteBudget,
+					perDocByteBudget: budget.perDocByteBudget,
 					timeBudgetMs: budget.timeBudgetMs,
 				})
 				.then((prefetch) => {

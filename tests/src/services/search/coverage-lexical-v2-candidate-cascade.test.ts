@@ -1199,6 +1199,86 @@ describe("coverage lexical v2 cascade", () => {
 		]);
 	});
 
+	test("strict cheap Han exact prefetch only covers exact-primary leaders", async () => {
+		const queryText = "\u7cfb\u7edf\u4ee3\u7406";
+		const queryTerms = ["\u7cfb\u7edf", "\u4ee3\u7406"];
+		const { reader, prefetchBodyHanExact } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/leader.md",
+					basenameText: "misc",
+					bodyText: "\u7cfb\u7edf\u4ee3\u7406",
+				},
+				{
+					docId: 2,
+					path: "notes/near-leader.md",
+					basenameText: "misc",
+					bodyText: "\u7cfb\u7edf\u8bbe\u7f6e\u4ee3\u7406",
+				},
+			],
+			postings: {
+				"body:\u7cfb\u7edf": [1, 2],
+				"body:\u4ee3\u7406": [1, 2],
+				"body:\u7cfb\u7edf\u4ee3\u7406": [1],
+			},
+			lexicon: [],
+		});
+
+		await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "strict",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(prefetchBodyHanExact).toHaveBeenCalledTimes(1);
+		expect(prefetchBodyHanExact).toHaveBeenCalledWith([1]);
+	});
+
+	test("non-strict cheap Han exact prefetch also covers candidates within one exact primary of the leader", async () => {
+		const queryText = "\u7cfb\u7edf\u4ee3\u7406";
+		const queryTerms = ["\u7cfb\u7edf", "\u4ee3\u7406"];
+		const { reader, prefetchBodyHanExact } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/leader.md",
+					basenameText: "misc",
+					bodyText: "\u7cfb\u7edf\u4ee3\u7406",
+				},
+				{
+					docId: 2,
+					path: "notes/near-leader.md",
+					basenameText: "misc",
+					bodyText: "\u7cfb\u7edf\u8bbe\u7f6e\u4ee3\u7406",
+				},
+			],
+			postings: {
+				"body:\u7cfb\u7edf": [1, 2],
+				"body:\u4ee3\u7406": [1, 2],
+				"body:\u7cfb\u7edf\u4ee3\u7406": [1],
+			},
+			lexicon: [],
+		});
+
+		await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "normal",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(prefetchBodyHanExact).toHaveBeenCalledTimes(1);
+		expect(prefetchBodyHanExact).toHaveBeenCalledWith([1, 2]);
+	});
+
 	test("hydrates body tokens only for the late verification frontier", async () => {
 		const documents = Array.from({ length: 8 }, (_, index) => ({
 			docId: index + 1,

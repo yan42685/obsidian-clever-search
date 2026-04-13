@@ -751,6 +751,7 @@ export class CoverageLexicalV2FileSearchEngine
 			CoverageLexicalV2CandidateCascadeHanExactPrefetchDocResult
 		>();
 		let budgetedByteSum = 0;
+		const budgetedByteSumByDocId = new Map<number, number>();
 		let byteSum = 0;
 		let skippedReason: "none" | "block_budget" | "byte_budget" | "time_budget" = "none";
 		let skippedByBudget = 0;
@@ -866,6 +867,26 @@ export class CoverageLexicalV2FileSearchEngine
 				);
 				continue;
 			}
+			const budgetedDocByteSum =
+				budgetedByteSumByDocId.get(descriptor.docId) ?? 0;
+			if (
+				budgetedDocByteSum + descriptor.encodedByteLength >
+				Math.max(0, budget.perDocByteBudget)
+			) {
+				skippedReason = "byte_budget";
+				skippedByBudget += 1;
+				setBlockResult(
+					blockId,
+					descriptor.docId,
+					descriptor.path,
+					"byte_budget",
+					descriptor.blockOrdinal,
+					descriptor.encodedByteLength,
+					descriptor.segmentCount,
+					descriptor.symbolCount,
+				);
+				continue;
+			}
 			if (Date.now() > deadline) {
 				skippedReason = "time_budget";
 				skippedByBudget += 1;
@@ -887,6 +908,10 @@ export class CoverageLexicalV2FileSearchEngine
 				blockOrdinal: descriptor.blockOrdinal,
 			});
 			budgetedByteSum += descriptor.encodedByteLength;
+			budgetedByteSumByDocId.set(
+				descriptor.docId,
+				budgetedDocByteSum + descriptor.encodedByteLength,
+			);
 		}
 		if (requestsToFetch.length > 0) {
 			const logicalBlocks = await coldStore.readLogicalBlocks(

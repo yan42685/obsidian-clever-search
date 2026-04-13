@@ -166,6 +166,7 @@ export type CoverageLexicalV2CandidateCascadePolicy = {
 	hanBackstopDocCapPerQuery: number;
 	hanBackstopColdExactDocBudget: number;
 	hanBackstopColdExactByteBudget: number;
+	hanBackstopColdExactPerDocByteBudget: number;
 	hanBackstopColdExactTimeBudgetMs: number;
 };
 
@@ -558,8 +559,9 @@ export function resolveCoverageLexicalV2CandidateCascadePolicy(
 		hanBackstopDocCapPerGroup: Math.min(frontierTarget, Math.max(returnTarget, 8)),
 		hanBackstopDocCapPerQuery: frontierTarget,
 		hanBackstopColdExactDocBudget: Math.min(frontierTarget, Math.max(returnTarget, 12)),
-		hanBackstopColdExactByteBudget: 128 * 1024,
-		hanBackstopColdExactTimeBudgetMs: 12,
+		hanBackstopColdExactByteBudget: 512 * 1024,
+		hanBackstopColdExactPerDocByteBudget: 256 * 1024,
+		hanBackstopColdExactTimeBudgetMs: 15,
 	};
 	return {
 		...defaults,
@@ -578,6 +580,10 @@ export function resolveCoverageLexicalV2CandidateCascadePolicy(
 		hanBackstopColdExactByteBudget: readCoverageLexicalV2CascadeOverride(
 			"COVERAGE_LEXICAL_V2_HAN_BACKSTOP_COLD_BYTE_BUDGET",
 			defaults.hanBackstopColdExactByteBudget,
+		),
+		hanBackstopColdExactPerDocByteBudget: readCoverageLexicalV2CascadeOverride(
+			"COVERAGE_LEXICAL_V2_HAN_BACKSTOP_COLD_PER_DOC_BYTE_BUDGET",
+			defaults.hanBackstopColdExactPerDocByteBudget,
 		),
 		hanBackstopColdExactTimeBudgetMs: readCoverageLexicalV2CascadeOverride(
 			"COVERAGE_LEXICAL_V2_HAN_BACKSTOP_COLD_TIME_BUDGET_MS",
@@ -806,6 +812,8 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		},
 		prefetchedBodyHanExactBlockIds,
 		policy,
+		layerMode: "normal",
+		weakFilePruneMode,
 	});
 	const preFuzzyLayerMode = summarizeCoverageLexicalV2CandidateCascadeLayerMode(
 		candidateStates,
@@ -867,6 +875,8 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		matchOptions: request.matchOptions,
 		prefetchedBodyHanExactBlockIds,
 		policy,
+		layerMode: preFrontierSummary.layerMode,
+		weakFilePruneMode,
 	});
 	pruneStageTrace.stageC = applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage({
 		mode: weakFilePruneMode,
@@ -1031,6 +1041,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		inputCandidates: frontierPlan.activeFrontier,
 		deferredBuckets: frontierPlan.deferredBuckets,
 		layerMode: frontierPlan.layerMode,
+		weakFilePruneMode,
 		queryAnalysis: comparatorQueryAnalysis,
 		candidateCascadePrimaryUnits,
 		reader: request.storageReader,
@@ -1052,6 +1063,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		inputCandidates: layer2Outcome.retained,
 		deferredBuckets: layer2Outcome.deferredBuckets,
 		layerMode: frontierPlan.layerMode,
+		weakFilePruneMode,
 		queryAnalysis: comparatorQueryAnalysis,
 		candidateCascadePrimaryUnits,
 		reader: request.storageReader,
@@ -1073,6 +1085,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		inputCandidates: layer3Outcome.retained,
 		deferredBuckets: layer3Outcome.deferredBuckets,
 		layerMode: frontierPlan.layerMode,
+		weakFilePruneMode,
 		queryAnalysis: comparatorQueryAnalysis,
 		candidateCascadePrimaryUnits,
 		reader: request.storageReader,
@@ -1123,6 +1136,8 @@ export async function searchCoverageLexicalV2CandidateCascade(
 			request.matchOptions,
 			prefetchedBodyHanExactBlockIds,
 			policy,
+			frontierPlan.layerMode,
+			weakFilePruneMode,
 			true,
 		);
 		for (const candidateState of verificationStates) {
@@ -1473,6 +1488,7 @@ async function resolveCoverageLexicalV2CandidateCascadeLayerOutcome(config: {
 	inputCandidates: readonly CoverageLexicalV2CascadeCandidateState[];
 	deferredBuckets: readonly CoverageLexicalV2CascadeCandidateState[][];
 	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
+	weakFilePruneMode: WeakFilePruneMode;
 	queryAnalysis: CoverageLexicalV2QueryAnalysis;
 	candidateCascadePrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[];
 	reader: CoverageLexicalV2CandidateCascadeStorageReader;
@@ -1493,6 +1509,8 @@ async function resolveCoverageLexicalV2CandidateCascadeLayerOutcome(config: {
 		config.matchOptions,
 		config.prefetchedBodyHanExactBlockIds,
 		config.policy,
+		config.layerMode,
+		config.weakFilePruneMode,
 		false,
 	);
 	let outcome = narrowCoverageLexicalV2CandidateCascadeLayer({
@@ -1519,6 +1537,8 @@ async function resolveCoverageLexicalV2CandidateCascadeLayerOutcome(config: {
 			config.matchOptions,
 			config.prefetchedBodyHanExactBlockIds,
 			config.policy,
+			config.layerMode,
+			config.weakFilePruneMode,
 			false,
 		);
 		outcome = narrowCoverageLexicalV2CandidateCascadeLayer({
@@ -2995,6 +3015,12 @@ function resolveCoverageLexicalV2WeakFilePruneGap(
 	return mode === "strict" ? 0 : 1;
 }
 
+function resolveCoverageLexicalV2CheapExactHanPrefetchGap(
+	mode: WeakFilePruneMode,
+): number | null {
+	return mode === "strict" ? 0 : 1;
+}
+
 function finalizeCoverageLexicalV2WeakFilePruneStageTrace(
 	trace: CoverageLexicalV2WeakFilePruneStageTrace,
 	retainedCandidateIds: readonly string[],
@@ -3080,6 +3106,8 @@ async function buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot(config: {
 	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions;
 	prefetchedBodyHanExactBlockIds: Set<number>;
 	policy: CoverageLexicalV2CandidateCascadePolicy;
+	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
+	weakFilePruneMode: WeakFilePruneMode;
 }): Promise<CoverageLexicalV2ConfirmedPrimaryCoverageSnapshot> {
 	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>();
 	const comparatorCandidateById = new Map<string, CoverageLexicalV2ComparatorCandidate>();
@@ -3100,6 +3128,8 @@ async function buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot(config: {
 		config.matchOptions,
 		config.prefetchedBodyHanExactBlockIds,
 		config.policy,
+		config.layerMode,
+		config.weakFilePruneMode,
 		false,
 	);
 	for (const candidateState of config.candidateStates) {
@@ -3356,6 +3386,8 @@ async function populateCoverageLexicalV2CandidateCascadeEvidence(
 	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions,
 	prefetchedBodyHanExactBlockIds: Set<number>,
 	policy: CoverageLexicalV2CandidateCascadePolicy,
+	layerMode: CoverageLexicalV2CandidateCascadeLayerMode,
+	weakFilePruneMode: WeakFilePruneMode,
 	includeBodyTokenSequences: boolean,
 ): Promise<void> {
 	await prefetchCoverageLexicalV2CheapExactHanBodyWitnesses(
@@ -3364,6 +3396,8 @@ async function populateCoverageLexicalV2CandidateCascadeEvidence(
 		reader,
 		prefetchedBodyHanExactBlockIds,
 		policy,
+		layerMode,
+		weakFilePruneMode,
 		includeBodyTokenSequences,
 	);
 	for (const candidateState of candidateStates) {
@@ -3410,11 +3444,26 @@ async function prefetchCoverageLexicalV2CheapExactHanBodyWitnesses(
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 	prefetchedBodyHanExactBlockIds: Set<number>,
 	policy: CoverageLexicalV2CandidateCascadePolicy,
+	layerMode: CoverageLexicalV2CandidateCascadeLayerMode,
+	weakFilePruneMode: WeakFilePruneMode,
 	includeBodyTokenSequences: boolean,
 ): Promise<void> {
-	if (includeBodyTokenSequences) {
+	if (includeBodyTokenSequences || layerMode !== "normal") {
 		return;
 	}
+	const maxExactPrimaryCoverageCount = candidateStates.reduce(
+		(maxCount, candidateState) =>
+			Math.max(maxCount, candidateState.exactPrimaryMask.size),
+		0,
+	);
+	const minAllowedExactPrimaryCoverageCount =
+		maxExactPrimaryCoverageCount > 0
+			? Math.max(
+					0,
+					maxExactPrimaryCoverageCount -
+						(resolveCoverageLexicalV2CheapExactHanPrefetchGap(weakFilePruneMode) ?? 1),
+				)
+			: 0;
 	const requestedBodyHanLogicalBlockIds = Array.from(
 		new Set(
 			candidateStates.flatMap((candidateState) => {
@@ -3425,6 +3474,12 @@ async function prefetchCoverageLexicalV2CheapExactHanBodyWitnesses(
 				if (
 					candidateState.matchedHanGroupMask.size === 0 ||
 					candidateState.fieldTerms.bodyTerms.size === 0
+				) {
+					return [];
+				}
+				if (
+					candidateState.exactPrimaryMask.size <
+					minAllowedExactPrimaryCoverageCount
 				) {
 					return [];
 				}
@@ -3440,6 +3495,7 @@ async function prefetchCoverageLexicalV2CheapExactHanBodyWitnesses(
 	const prefetch = await reader.prefetchBodyHanExactBlocks(requestedBodyHanLogicalBlockIds, {
 		blockBudget: requestedBodyHanLogicalBlockIds.length,
 		byteBudget: policy.hanBackstopColdExactByteBudget,
+		perDocByteBudget: policy.hanBackstopColdExactPerDocByteBudget,
 		timeBudgetMs: policy.hanBackstopColdExactTimeBudgetMs,
 	});
 	for (const blockId of prefetch.fetchedBlockIds ?? prefetch.fetchedDocIds ?? []) {
@@ -3962,6 +4018,7 @@ async function hydrateCoverageLexicalV2CascadeVerificationStates(
 				Math.max(policy.returnTarget, policy.hanBackstopColdExactDocBudget),
 			),
 			byteBudget: policy.hanBackstopColdExactByteBudget,
+			perDocByteBudget: policy.hanBackstopColdExactPerDocByteBudget,
 			timeBudgetMs: policy.hanBackstopColdExactTimeBudgetMs,
 		});
 		for (const blockId of prefetch.fetchedBlockIds ?? prefetch.fetchedDocIds ?? []) {
@@ -4333,6 +4390,7 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 			{
 				blockBudget: policy.hanBackstopColdExactDocBudget,
 				byteBudget: policy.hanBackstopColdExactByteBudget,
+				perDocByteBudget: policy.hanBackstopColdExactPerDocByteBudget,
 				timeBudgetMs: policy.hanBackstopColdExactTimeBudgetMs,
 			},
 		);

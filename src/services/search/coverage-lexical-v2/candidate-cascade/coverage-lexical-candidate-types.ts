@@ -47,6 +47,7 @@ export type CoverageLexicalV2CandidateCascadeHanExactPrefetchSkippedReason =
 export type CoverageLexicalV2CandidateCascadeHanBlockExactPrefetchBudget = {
 	blockBudget: number;
 	byteBudget: number;
+	perDocByteBudget: number;
 	timeBudgetMs: number;
 };
 export type CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget =

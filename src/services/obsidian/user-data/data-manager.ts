@@ -5157,6 +5157,7 @@ export class DataManager {
     budget: {
       blockBudget: number;
       byteBudget: number;
+      perDocByteBudget: number;
       timeBudgetMs: number;
     };
     getGlobalExactCacheBytes: () => number;
@@ -5207,6 +5208,7 @@ export class DataManager {
     >();
     let fetchedByteSum = 0;
     let budgetedByteSum = 0;
+    const budgetedByteSumByDocId = new Map<number, number>();
     let skippedByBudget = 0;
     let skippedReason: "none" | "block_budget" | "byte_budget" | "time_budget" =
       "none";
@@ -5282,6 +5284,25 @@ export class DataManager {
         });
         continue;
       }
+      const budgetedDocByteSum = budgetedByteSumByDocId.get(descriptor.docId) ?? 0;
+      if (
+        budgetedDocByteSum + descriptor.encodedByteLength >
+        Math.max(0, options.budget.perDocByteBudget)
+      ) {
+        skippedReason = "byte_budget";
+        skippedByBudget += 1;
+        blockResults.set(blockId, {
+          blockId,
+          docId: descriptor.docId,
+          path: descriptor.path,
+          blockOrdinal: descriptor.blockOrdinal,
+          status: "byte_budget",
+          estimatedBytes: descriptor.encodedByteLength,
+          segmentCount: descriptor.segmentCount,
+          symbolCount: descriptor.symbolCount,
+        });
+        continue;
+      }
       if (Date.now() > deadline) {
         skippedReason = "time_budget";
         skippedByBudget += 1;
@@ -5313,6 +5334,10 @@ export class DataManager {
       }
       fetchedRequestCount += 1;
       budgetedByteSum += descriptor.encodedByteLength;
+      budgetedByteSumByDocId.set(
+        descriptor.docId,
+        budgetedDocByteSum + descriptor.encodedByteLength,
+      );
       options.queryLocalBodyHanExactCache.set(blockId, symbolIds);
       this.setVariantCachedBodyHanExact(
         options.globalExactCache,
