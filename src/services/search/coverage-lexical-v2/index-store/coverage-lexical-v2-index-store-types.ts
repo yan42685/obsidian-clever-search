@@ -5,6 +5,7 @@ import type {
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
 	CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	CoverageLexicalV2CandidateCascadeHanExactWitness,
 	CoverageLexicalV2CandidateCascadeHanBlockExactPrefetchResult,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
@@ -348,7 +349,15 @@ export type CoverageLexicalV2IndexStoreReaderOptions = Pick<
 	| "tokenizeText"
 	| "prefetchBodyHanExactBlocks"
 	| "getBodyHanExactBlockBackstopStats"
->;
+> & {
+	getBodyHanExactBlockWitness: CoverageLexicalV2IndexStoreBodyHanExactBlockWitnessReader;
+};
+
+export type CoverageLexicalV2IndexStoreBodyHanExactBlockWitnessReader = (
+	blockId: number,
+	normalizedText: string,
+	bigrams: readonly string[],
+) => CoverageLexicalV2CandidateCascadeHanExactWitness | null;
 
 export type CoverageLexicalV2RuntimeMemoryBreakdown = {
 	estimatedBytes: {

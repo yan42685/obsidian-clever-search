@@ -11,6 +11,7 @@ import {
 import type {
 	CoverageLexicalV2CandidateCascadeDocumentRecord,
 	CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	CoverageLexicalV2CandidateCascadeHanExactWitness,
 	CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
 	CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
 	CoverageLexicalV2CandidateCascadePostingField,
@@ -43,6 +44,11 @@ export type CoverageLexicalV2StorageAdapterBindings = {
 		normalizedText: string,
 		bigrams: readonly string[],
 	): CoverageLexicalV2CandidateCascadeHanBackstopStats | null;
+	getBodyHanExactWitness?(
+		docId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanExactWitness | null;
 	collectLatinPrefixTerms(queryTerm: string, cap: number): readonly string[];
 	collectLatinFuzzyTerms(
 		queryTerm: string,
@@ -92,6 +98,8 @@ export function buildCoverageLexicalV2StorageReader(
 				encodedByteLength: 0,
 			};
 		},
+		getBodyHanLogicalBlockIds: (docId: number) =>
+			bindings.getDocumentRecord(docId) ? [docId] : undefined,
 		prefetchBodyHanExactBlocks: (
 			blockIds: readonly number[],
 			budget: CoverageLexicalV2CandidateCascadeHanExactPrefetchBudget,
@@ -171,6 +179,16 @@ export function buildCoverageLexicalV2StorageReader(
 			normalizedText: string,
 			bigrams: readonly string[],
 		) => bindings.getBodyHanExactBackstopStats(blockId, normalizedText, bigrams),
+		getBodyHanExactDocumentWitness: (
+			docId: number,
+			normalizedText: string,
+			bigrams: readonly string[],
+		) =>
+			bindings.getBodyHanExactWitness?.(docId, normalizedText, bigrams) ??
+			(buildApproximateHanExactWitness(
+				bindings.getBodyHanExactBackstopStats(docId, normalizedText, bigrams),
+				normalizedText,
+			)),
 		collectLatinPrefixTerms: (queryTerm: string, cap: number) =>
 			bindings.collectLatinPrefixTerms(queryTerm, cap),
 		collectLatinFuzzyTerms: (
@@ -182,6 +200,20 @@ export function buildCoverageLexicalV2StorageReader(
 		prefetchBodyTokenSequences: (docIds: readonly number[]) =>
 			bindings.prefetchBodyTokenSequences(docIds),
 		tokenizeText: (text: string) => bindings.tokenizeText(text),
+	};
+}
+
+function buildApproximateHanExactWitness(
+	stats: CoverageLexicalV2CandidateCascadeHanBackstopStats | null,
+	normalizedText: string,
+): CoverageLexicalV2CandidateCascadeHanExactWitness | null {
+	if (stats == null) {
+		return null;
+	}
+	const charLength = Array.from(normalizedText).length;
+	return {
+		start: 0,
+		end: Math.max(0, charLength - 1),
 	};
 }
 

@@ -82,6 +82,13 @@ function createReader(store: CoverageLexicalV2IndexStore) {
 						bigramCoverageRatio: bigrams.length > 0 ? 1 : 0,
 				  }
 				: null,
+		getBodyHanExactBlockWitness: (blockId, normalizedText, _bigrams) =>
+			store.getBodyHanLogicalBlockDescriptor(blockId)
+				? {
+						start: 0,
+						end: Math.max(0, normalizedText.length - 1),
+				  }
+				: null,
 		tokenizeText: (text) => text.split(/\s+/u).filter(Boolean),
 	});
 	return Object.assign(reader, {
@@ -315,6 +322,17 @@ describe("CoverageLexicalV2IndexStore", () => {
 			longestContiguousBigramChain: 3,
 			matchedBigramCount: 3,
 			bigramCoverageRatio: 1,
+		});
+
+		expect(
+			reader.getBodyHanExactDocumentWitness(0, "娴嬭瘯姝ｆ枃", [
+				"娴嬭瘯",
+				"璇曟",
+				"姝ｆ枃",
+			]),
+		).toEqual({
+			start: 0,
+			end: "娴嬭瘯姝ｆ枃".length - 1,
 		});
 
 		const breakdown = restored.buildIndexBreakdown();

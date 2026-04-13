@@ -4,6 +4,7 @@ import type {
 	IndexedDocument,
 	MatchedFile,
 } from "src/globals/search-types";
+import { performance } from "perf_hooks";
 import { container, singleton } from "tsyringe";
 import { Database } from "src/services/database/database";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
@@ -34,6 +35,7 @@ import {
 } from "src/services/search/coverage-lexical/coverage-lexical-cjk";
 import type {
 	FileSearchEngine,
+	FileSearchIndexTimingSummary,
 	FileSearchRequest,
 	PersistentFileIndexRecoveryPlan,
 	SerializedCoverageLexicalBinarySnapshot,
@@ -71,6 +73,35 @@ type CoverageLexicalV2PersistentStoreApi = {
 	abortBatchReindex?(): void | Promise<void>;
 };
 
+type CoverageLexicalV2BenchmarkIndexPhaseName =
+	| "prepareDocuments"
+	| "replaceDocuments"
+	| "compactOverlay"
+	| "bodyTokenColdSidecar"
+	| "bodyHanExactSidecar"
+	| "journal";
+
+type CoverageLexicalV2BenchmarkIndexPhaseTimingEntry = {
+	totalMs: number;
+	maxMs: number;
+	count: number;
+	unitCount: number;
+};
+
+type CoverageLexicalV2BenchmarkIndexTimingState = {
+	batchCount: number;
+	documentCount: number;
+	bodyTokenCount: number;
+	exactTermCount: number;
+	metadataHanBigramCount: number;
+	bodyHanSegmentCount: number;
+	bodyHanLogicalBlockCount: number;
+	phases: Map<
+		CoverageLexicalV2BenchmarkIndexPhaseName,
+		CoverageLexicalV2BenchmarkIndexPhaseTimingEntry
+	>;
+};
+
 @singleton()
 export class CoverageLexicalV2FileSearchEngine
 	implements FileSearchEngine, CoverageLexicalV2PersistentStoreApi {
@@ -96,6 +127,8 @@ export class CoverageLexicalV2FileSearchEngine
 		| undefined;
 	private batchReindexing = false;
 	private journalTransactionOrdinal = 0;
+	private benchmarkIndexTiming: CoverageLexicalV2BenchmarkIndexTimingState | null =
+		null;
 
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
@@ -127,13 +160,64 @@ export class CoverageLexicalV2FileSearchEngine
 		this.bodyHanExactCacheBytes = 0;
 	}
 
+	resetBenchmarkIndexTiming(): void {
+		this.benchmarkIndexTiming = createCoverageLexicalV2BenchmarkIndexTimingState();
+	}
+
+	getBenchmarkIndexTimingSummary(): FileSearchIndexTimingSummary | null {
+		if (!this.benchmarkIndexTiming) {
+			return null;
+		}
+		const totalMeasuredMs = Array.from(
+			this.benchmarkIndexTiming.phases.values(),
+		).reduce((sum, phase) => sum + phase.totalMs, 0);
+		return {
+			batchCount: this.benchmarkIndexTiming.batchCount,
+			documentCount: this.benchmarkIndexTiming.documentCount,
+			bodyTokenCount: this.benchmarkIndexTiming.bodyTokenCount,
+			exactTermCount: this.benchmarkIndexTiming.exactTermCount,
+			metadataHanBigramCount:
+				this.benchmarkIndexTiming.metadataHanBigramCount,
+			bodyHanSegmentCount: this.benchmarkIndexTiming.bodyHanSegmentCount,
+			bodyHanLogicalBlockCount:
+				this.benchmarkIndexTiming.bodyHanLogicalBlockCount,
+			totalMeasuredMs,
+			phases: Array.from(this.benchmarkIndexTiming.phases.entries())
+				.map(([phase, stats]) => ({
+					phase,
+					totalMs: stats.totalMs,
+					maxMs: stats.maxMs,
+					count: stats.count,
+					unitCount: stats.unitCount,
+					avgMsPerCall:
+						stats.count > 0 ? stats.totalMs / stats.count : 0,
+					avgMsPerUnit:
+						stats.unitCount > 0 ? stats.totalMs / stats.unitCount : 0,
+					shareOfMeasuredMs:
+						totalMeasuredMs > 0 ? stats.totalMs / totalMeasuredMs : 0,
+				}))
+				.sort(
+					(left, right) =>
+						right.totalMs - left.totalMs ||
+						right.unitCount - left.unitCount ||
+						left.phase.localeCompare(right.phase),
+				),
+		};
+	}
+
 	beginBatchReindex(): void {
 		this.batchReindexing = true;
 	}
 
 	finishBatchReindex(): void {
 		this.batchReindexing = false;
-		this.store.compactOverlayIntoSegment(true);
+		this.recordBenchmarkIndexPhase(
+			"compactOverlay",
+			this.store.getIndexedDocumentCount(),
+			() => {
+				this.store.compactOverlayIntoSegment(true);
+			},
+		);
 	}
 
 	abortBatchReindex(): void {
@@ -141,9 +225,15 @@ export class CoverageLexicalV2FileSearchEngine
 	}
 
 	async addDocuments(documents: IndexedDocument[]): Promise<void> {
-		const preparedDocuments = documents.map((document) =>
-			buildCoverageLexicalV2PreparedDocument(this.tokenizer, document),
+		const preparedDocuments = this.recordBenchmarkIndexPhase(
+			"prepareDocuments",
+			documents.length,
+			() =>
+				documents.map((document) =>
+					buildCoverageLexicalV2PreparedDocument(this.tokenizer, document),
+				),
 		);
+		this.recordBenchmarkIndexBatchPreparedDocuments(preparedDocuments);
 		const journalEntries: CoverageLexicalV2IndexStoreJournalEntry[] = [];
 		const coldWrites: CoverageLexicalBodyTokenColdDocumentWrite[] = [];
 		const bodyHanExactWrites: CoverageLexicalV2HanSegmentExactSidecarDocumentWrite[] = [];
@@ -151,7 +241,11 @@ export class CoverageLexicalV2FileSearchEngine
 		const hotCacheDocIds: number[] = [];
 		for (const preparedDocument of preparedDocuments) {
 			const updatedAt = Date.now();
-			const docId = this.store.replaceDocument(preparedDocument);
+			const docId = this.recordBenchmarkIndexPhase(
+				"replaceDocuments",
+				1,
+				() => this.store.replaceDocument(preparedDocument),
+			);
 			if (preparedDocument.bodyTokens.length > 0) {
 				this.bodyTokenCacheByDocId.set(
 					docId,
@@ -166,9 +260,17 @@ export class CoverageLexicalV2FileSearchEngine
 				generation: preparedDocument.generation,
 				bodyTokens: preparedDocument.bodyTokens,
 			});
-			const bodyHanExactWrite = this.buildBodyHanExactSidecarWrite(preparedDocument);
+			const bodyHanExactWrite = this.recordBenchmarkIndexPhase(
+				"bodyHanExactSidecar",
+				1,
+				() => this.buildBodyHanExactSidecarWrite(preparedDocument),
+			);
 			if (bodyHanExactWrite) {
 				bodyHanExactWrites.push(bodyHanExactWrite);
+				if (this.benchmarkIndexTiming) {
+					this.benchmarkIndexTiming.bodyHanLogicalBlockCount +=
+						bodyHanExactWrite.logicalBlocks.length;
+				}
 			} else {
 				bodyHanExactDeletes.push(preparedDocument.path);
 			}
@@ -186,17 +288,43 @@ export class CoverageLexicalV2FileSearchEngine
 				});
 			}
 		}
-		this.store.compactOverlayIntoSegment();
-		if (await this.upsertBodyTokenColdDocuments(coldWrites)) {
+		this.recordBenchmarkIndexPhase(
+			"compactOverlay",
+			preparedDocuments.length,
+			() => {
+				this.store.compactOverlayIntoSegment();
+			},
+		);
+		const coldBacked = await this.recordBenchmarkIndexPhaseAsync(
+			"bodyTokenColdSidecar",
+			coldWrites.length,
+			async () => await this.upsertBodyTokenColdDocuments(coldWrites),
+		);
+		if (coldBacked) {
 			this.releaseHotBodyTokenCache(hotCacheDocIds);
 		}
 		if (bodyHanExactDeletes.length > 0) {
-			await this.deleteBodyHanExactSidecarDocuments(bodyHanExactDeletes);
+			await this.recordBenchmarkIndexPhaseAsync(
+				"bodyHanExactSidecar",
+				bodyHanExactDeletes.length,
+				async () =>
+					await this.deleteBodyHanExactSidecarDocuments(bodyHanExactDeletes),
+			);
 		}
-		await this.upsertBodyHanExactSidecarDocuments(bodyHanExactWrites);
+		await this.recordBenchmarkIndexPhaseAsync(
+			"bodyHanExactSidecar",
+			bodyHanExactWrites.length,
+			async () =>
+				await this.upsertBodyHanExactSidecarDocuments(bodyHanExactWrites),
+		);
 		if (!this.batchReindexing) {
-			await this.database.appendCoverageLexicalV2IndexStoreJournalEntries(
-				journalEntries,
+			await this.recordBenchmarkIndexPhaseAsync(
+				"journal",
+				journalEntries.length,
+				async () =>
+					await this.database.appendCoverageLexicalV2IndexStoreJournalEntries(
+						journalEntries,
+					),
 			);
 		}
 	}
@@ -343,6 +471,18 @@ export class CoverageLexicalV2FileSearchEngine
 						this.getCachedBodyHanExact(blockId);
 					return symbolIds
 						? this.store.buildBodyHanExactBackstopStatsFromSymbolIds(
+								symbolIds,
+								normalizedText,
+								bigrams,
+						  )
+						: null;
+				},
+				getBodyHanExactBlockWitness: (blockId, normalizedText, bigrams) => {
+					const symbolIds =
+						queryLocalBodyHanExactCache.get(blockId) ??
+						this.getCachedBodyHanExact(blockId);
+					return symbolIds
+						? this.store.buildBodyHanExactWitnessFromSymbolIds(
 								symbolIds,
 								normalizedText,
 								bigrams,
@@ -1287,6 +1427,69 @@ export class CoverageLexicalV2FileSearchEngine
 		}
 		return document;
 	}
+
+	private recordBenchmarkIndexBatchPreparedDocuments(
+		documents: readonly CoverageLexicalV2PreparedDocument[],
+	): void {
+		if (!this.benchmarkIndexTiming) {
+			return;
+		}
+		this.benchmarkIndexTiming.batchCount += 1;
+		this.benchmarkIndexTiming.documentCount += documents.length;
+		for (const document of documents) {
+			this.benchmarkIndexTiming.bodyTokenCount += document.bodyTokens.length;
+			this.benchmarkIndexTiming.bodyHanSegmentCount +=
+				document.bodyHanSegments.length;
+			for (const fieldTerms of Object.values(document.exactTermsByField)) {
+				this.benchmarkIndexTiming.exactTermCount += fieldTerms.length;
+			}
+			for (const bigrams of Object.values(document.metadataHanBigramsByField)) {
+				this.benchmarkIndexTiming.metadataHanBigramCount += bigrams.length;
+			}
+		}
+	}
+
+	private recordBenchmarkIndexPhase<Result>(
+		phase: CoverageLexicalV2BenchmarkIndexPhaseName,
+		unitCount: number,
+		work: () => Result,
+	): Result {
+		if (!this.benchmarkIndexTiming) {
+			return work();
+		}
+		const startedAt = performance.now();
+		try {
+			return work();
+		} finally {
+			recordCoverageLexicalV2BenchmarkIndexPhase(
+				this.benchmarkIndexTiming,
+				phase,
+				performance.now() - startedAt,
+				unitCount,
+			);
+		}
+	}
+
+	private async recordBenchmarkIndexPhaseAsync<Result>(
+		phase: CoverageLexicalV2BenchmarkIndexPhaseName,
+		unitCount: number,
+		work: () => Promise<Result>,
+	): Promise<Result> {
+		if (!this.benchmarkIndexTiming) {
+			return await work();
+		}
+		const startedAt = performance.now();
+		try {
+			return await work();
+		} finally {
+			recordCoverageLexicalV2BenchmarkIndexPhase(
+				this.benchmarkIndexTiming,
+				phase,
+				performance.now() - startedAt,
+				unitCount,
+			);
+		}
+	}
 }
 
 export function buildCoverageLexicalV2PreparedDocument(
@@ -1400,3 +1603,35 @@ export const COVERAGE_LEXICAL_V2_PERSISTENT_ENGINE_METHODS = {
 	supportsPersistentFileIndex: true,
 	metaId: COVERAGE_LEXICAL_V2_INDEX_STORE_META_ID,
 } as const;
+
+function createCoverageLexicalV2BenchmarkIndexTimingState(): CoverageLexicalV2BenchmarkIndexTimingState {
+	return {
+		batchCount: 0,
+		documentCount: 0,
+		bodyTokenCount: 0,
+		exactTermCount: 0,
+		metadataHanBigramCount: 0,
+		bodyHanSegmentCount: 0,
+		bodyHanLogicalBlockCount: 0,
+		phases: new Map(),
+	};
+}
+
+function recordCoverageLexicalV2BenchmarkIndexPhase(
+	state: CoverageLexicalV2BenchmarkIndexTimingState,
+	phase: CoverageLexicalV2BenchmarkIndexPhaseName,
+	durationMs: number,
+	unitCount: number,
+): void {
+	const current = state.phases.get(phase) ?? {
+		totalMs: 0,
+		maxMs: 0,
+		count: 0,
+		unitCount: 0,
+	};
+	current.totalMs += durationMs;
+	current.maxMs = Math.max(current.maxMs, durationMs);
+	current.count += 1;
+	current.unitCount += Math.max(0, unitCount);
+	state.phases.set(phase, current);
+}

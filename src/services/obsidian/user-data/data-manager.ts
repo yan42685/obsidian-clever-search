@@ -5007,6 +5007,18 @@ export class DataManager {
                 )
               : null;
           },
+          getBodyHanExactBlockWitness: (blockId, normalizedText, bigrams) => {
+            const symbolIds =
+              queryLocalBodyHanExactCache.get(blockId) ??
+              this.getVariantCachedBodyHanExact(store, globalExactCache, blockId);
+            return symbolIds
+              ? store.buildBodyHanExactWitnessFromSymbolIds(
+                  symbolIds,
+                  normalizedText,
+                  bigrams,
+                )
+              : null;
+          },
           tokenizeText: (text) =>
             this.tokenizer
               .tokenizeSequence(text, "index")

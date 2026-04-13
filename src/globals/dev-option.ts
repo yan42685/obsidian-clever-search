@@ -7,4 +7,5 @@ export const devOption = {
     traceLog: isDev ? false : false,
     loadIndexFromDatabase: isDev ? true : true,
     targetedHanDebugQuery: null as string | null,
+    targetedComparatorDebugQuery: "系统代理" as string | null,
 }

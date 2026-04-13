@@ -61,6 +61,29 @@ export type PersistentFileIndexRecoveryPlan = {
 	docsToMove: PersistentFileIndexRecoveryMove[];
 };
 
+export type FileSearchIndexTimingPhaseSummary = {
+	phase: string;
+	totalMs: number;
+	maxMs: number;
+	count: number;
+	unitCount: number;
+	avgMsPerCall: number;
+	avgMsPerUnit: number;
+	shareOfMeasuredMs: number;
+};
+
+export type FileSearchIndexTimingSummary = {
+	batchCount: number;
+	documentCount: number;
+	bodyTokenCount: number;
+	exactTermCount: number;
+	metadataHanBigramCount: number;
+	bodyHanSegmentCount: number;
+	bodyHanLogicalBlockCount: number;
+	totalMeasuredMs: number;
+	phases: FileSearchIndexTimingPhaseSummary[];
+};
+
 export interface FileSearchEngine {
 	readonly backend: FileSearchBackend;
 	readonly supportsSerialization: boolean;
@@ -99,6 +122,8 @@ export interface FileSearchEngine {
     generation: number | undefined,
     bodyText: string,
   ): CoverageLexicalV2HanSegmentExactSidecarDocumentWrite | null;
+  resetBenchmarkIndexTiming?(): void;
+  getBenchmarkIndexTimingSummary?(): FileSearchIndexTimingSummary | null;
   beginBatchReindex?(): void;
   finishBatchReindex?(): void | Promise<void>;
   abortBatchReindex?(): void | Promise<void>;

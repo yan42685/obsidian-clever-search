@@ -1,6 +1,7 @@
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 import type {
 	CoverageLexicalV2CandidateCascadeHanBackstopStats,
+	CoverageLexicalV2CandidateCascadeHanExactWitness,
 	CoverageLexicalV2CandidateCascadePostingField,
 	CoverageLexicalV2CandidateCascadeStorageReader,
 } from "../candidate-cascade";
@@ -46,6 +47,7 @@ import {
 	type CoverageLexicalV2HanBigramId,
 	type CoverageLexicalV2HanSymbolId,
 	type CoverageLexicalV2IndexStoreDocumentState,
+	type CoverageLexicalV2IndexStoreBodyHanExactBlockWitnessReader,
 	type CoverageLexicalV2IndexStoreOverlayState,
 	type CoverageLexicalV2IndexStorePersistedDocManifest,
 	type CoverageLexicalV2PersistedJournalDocument,
@@ -346,6 +348,10 @@ export class CoverageLexicalV2IndexStore {
 		blockId: number,
 	): CoverageLexicalV2RuntimeHanLogicalBlockDescriptor | null {
 		return this.bodyHanLogicalBlockById.get(blockId) ?? null;
+	}
+
+	getBodyHanLogicalBlockIds(docId: number): readonly number[] | undefined {
+		return this.bodyHanLogicalBlockIdsByDocId.get(docId);
 	}
 
 	getIndexedRefs(): BaseIndexedFileRef[] {
@@ -725,8 +731,18 @@ export class CoverageLexicalV2IndexStore {
 				this.getBodyHanBlockPostingMatches(bigram),
 			getBodyHanLogicalBlockDescriptor: (blockId) =>
 				this.bodyHanLogicalBlockById.get(blockId) ?? null,
+			getBodyHanLogicalBlockIds: (docId) =>
+				this.bodyHanLogicalBlockIdsByDocId.get(docId),
 			prefetchBodyHanExactBlocks: options.prefetchBodyHanExactBlocks,
 			getBodyHanExactBlockBackstopStats: options.getBodyHanExactBlockBackstopStats,
+			getBodyHanExactBlockWitness: options.getBodyHanExactBlockWitness,
+			getBodyHanExactDocumentWitness: (docId, normalizedText, bigrams) =>
+				this.buildBodyHanExactDocumentWitness(
+					docId,
+					normalizedText,
+					bigrams,
+					options.getBodyHanExactBlockWitness,
+				),
 			collectLatinPrefixTerms: (queryTerm, cap) =>
 				this.collectLatinPrefixTerms(queryTerm, cap),
 			collectLatinFuzzyTerms: (queryTerm, cap, fuzzyProportion) =>
@@ -735,6 +751,43 @@ export class CoverageLexicalV2IndexStore {
 			prefetchBodyTokenSequences: options.prefetchBodyTokenSequences,
 			tokenizeText: options.tokenizeText,
 		};
+	}
+
+	private buildBodyHanExactDocumentWitness(
+		docId: number,
+		normalizedText: string,
+		bigrams: readonly string[],
+		getBlockWitness: CoverageLexicalV2IndexStoreBodyHanExactBlockWitnessReader,
+	): CoverageLexicalV2CandidateCascadeHanExactWitness | null {
+		const blockIds = this.bodyHanLogicalBlockIdsByDocId.get(docId);
+		if (!blockIds || blockIds.length === 0) {
+			return null;
+		}
+		let baseOffset = 0;
+		let bestWitness: CoverageLexicalV2CandidateCascadeHanExactWitness | null = null;
+		for (const blockId of blockIds) {
+			const descriptor = this.bodyHanLogicalBlockById.get(blockId);
+			if (!descriptor) {
+				continue;
+			}
+			const blockWitness = getBlockWitness(blockId, normalizedText, bigrams);
+			if (blockWitness) {
+				const globalWitness = {
+					start: baseOffset + blockWitness.start,
+					end: baseOffset + blockWitness.end,
+				};
+				if (
+					bestWitness == null ||
+					globalWitness.start < bestWitness.start ||
+					(globalWitness.start === bestWitness.start &&
+						globalWitness.end < bestWitness.end)
+				) {
+					bestWitness = globalWitness;
+				}
+			}
+			baseOffset += descriptor.symbolCount;
+		}
+		return bestWitness;
 	}
 
 	estimateIndexBytes(
@@ -1010,6 +1063,32 @@ export class CoverageLexicalV2IndexStore {
 			matchedBigramCount: matchedBigramIndices.size,
 			bigramCoverageRatio:
 				bigrams.length > 0 ? matchedBigramIndices.size / bigrams.length : 0,
+		};
+	}
+
+	buildBodyHanExactWitnessFromSymbolIds(
+		bodyHanSymbolIds: readonly number[] | Uint32Array,
+		normalizedText: string,
+		bigrams: readonly string[],
+	): CoverageLexicalV2CandidateCascadeHanExactWitness | null {
+		const symbolIds = Array.from(bodyHanSymbolIds);
+		if (symbolIds.length === 0) {
+			return null;
+		}
+		const preparedQuery = this.prepareHanBackstopQuery(normalizedText, bigrams);
+		if (preparedQuery.symbolIds.length === 0 || preparedQuery.hasMissingSymbols) {
+			return null;
+		}
+		const start = findCoverageLexicalV2NumericSubsequenceStart(
+			symbolIds,
+			preparedQuery.symbolIds,
+		);
+		if (start < 0) {
+			return null;
+		}
+		return {
+			start,
+			end: start + preparedQuery.symbolIds.length - 1,
 		};
 	}
 
@@ -2734,6 +2813,29 @@ function computeCoverageLexicalV2HanBackstopLongestChain(
 		previous = bigramIndex;
 	}
 	return longest;
+}
+
+function findCoverageLexicalV2NumericSubsequenceStart(
+	haystack: readonly number[],
+	needle: readonly number[],
+): number {
+	if (needle.length === 0 || haystack.length < needle.length) {
+		return -1;
+	}
+	const lastStart = haystack.length - needle.length;
+	for (let start = 0; start <= lastStart; start += 1) {
+		let matched = true;
+		for (let offset = 0; offset < needle.length; offset += 1) {
+			if (haystack[start + offset] !== needle[offset]) {
+				matched = false;
+				break;
+			}
+		}
+		if (matched) {
+			return start;
+		}
+	}
+	return -1;
 }
 
 function countCoverageLexicalV2PositiveRefCounts(
