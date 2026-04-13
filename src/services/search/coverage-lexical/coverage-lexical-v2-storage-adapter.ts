@@ -192,6 +192,7 @@ export async function searchCoverageLexicalV2WithStorageAdapter(
 		queryText: options.request.queryText,
 		isPrefixMatch: options.request.isPrefixMatch,
 		isFuzzy: options.request.isFuzzy,
+		weakFilePruneMode: options.request.weakFilePruneMode,
 		maxItemResults: options.request.maxItemResults,
 		fuzzyProportion: options.fuzzyProportion,
 		tokenizeQueryText: options.tokenizeQueryText,

@@ -4,7 +4,10 @@ import type {
 	IndexedDocument,
 	MatchedFile,
 } from "src/globals/search-types";
-import type { FileSearchBackend } from "src/globals/plugin-setting";
+import type {
+	FileSearchBackend,
+	WeakFilePruneMode,
+} from "src/globals/plugin-setting";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { CoverageLexicalV2FileSearchEngine } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine";
@@ -15,6 +18,7 @@ export type FileSearchRequest = {
 	queryText: string;
 	isPrefixMatch: boolean;
 	isFuzzy: boolean;
+	weakFilePruneMode?: WeakFilePruneMode;
 	maxItemResults: number;
 	maxDirectSubItemResults?: number;
 	maxSubItemResults?: number;

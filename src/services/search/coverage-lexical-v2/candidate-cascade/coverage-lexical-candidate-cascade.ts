@@ -1,6 +1,7 @@
 import type {
 	MatchedFile,
 } from "src/globals/search-types";
+import type { WeakFilePruneMode } from "src/globals/plugin-setting";
 import { devOption } from "src/globals/dev-option";
 import {
 	applyCoverageLexicalV2DisplayPolicy,
@@ -64,6 +65,8 @@ type CoverageLexicalV2CascadeCandidateFieldTermSets = {
 	tagTerms: Set<string>;
 	bodyTerms: Set<string>;
 };
+
+const DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE: WeakFilePruneMode = "strict";
 
 type CoverageLexicalV2CascadeCandidateExactQueryTerms = {
 	basenameExactQueryTerms: Set<string>;
@@ -149,12 +152,45 @@ export type CoverageLexicalV2CandidateCascadeRequest = {
 	queryTerms: readonly string[];
 	queryAnalysis: CoverageLexicalV2QueryAnalysis;
 	maxItemResults: number;
+	weakFilePruneMode?: WeakFilePruneMode;
 	storageReader: CoverageLexicalV2CandidateCascadeStorageReader;
 	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions;
 };
 
+type CoverageLexicalV2WeakFilePruneStageName = "stageA" | "stageB" | "stageC";
+
+type CoverageLexicalV2WeakFilePruneMetric =
+	| "potential_primary"
+	| "confirmed_primary";
+
+type CoverageLexicalV2WeakFilePruneSkipReason =
+	| "none"
+	| "mode_off"
+	| "no_candidates"
+	| "non_normal_layer_mode"
+	| "han_fallback_salvage"
+	| "no_positive_leader";
+
+export type CoverageLexicalV2WeakFilePruneStageTrace = {
+	applied: boolean;
+	mode: WeakFilePruneMode;
+	metric: CoverageLexicalV2WeakFilePruneMetric;
+	allowedGap: number | null;
+	leaderCount: number;
+	retainedCandidateIds: string[];
+	droppedCandidateIds: string[];
+	retainedCandidateCount: number;
+	droppedCandidateCount: number;
+	skippedReason: CoverageLexicalV2WeakFilePruneSkipReason;
+};
+
 export type CoverageLexicalV2CandidateCascadeTrace = {
 	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
+	pruneStages: {
+		stageA: CoverageLexicalV2WeakFilePruneStageTrace;
+		stageB: CoverageLexicalV2WeakFilePruneStageTrace;
+		stageC: CoverageLexicalV2WeakFilePruneStageTrace;
+	};
 	retainedCandidateIdsByLayer: {
 		layer1: string[];
 		layer2: string[];
@@ -264,6 +300,11 @@ export type CoverageLexicalV2HanPromotionBatchPolicy = {
 	docCap: number;
 };
 
+type CoverageLexicalV2HanExactStatsCache = Map<
+	string,
+	CoverageLexicalV2CandidateCascadeHanBackstopStats | null
+>;
+
 export type CoverageLexicalV2HanPromotionResult = {
 	promotedCount: number;
 	verifiedCount: number;
@@ -290,6 +331,21 @@ type CoverageLexicalV2HanBackstopSourceMetrics = {
 type CoverageLexicalV2HanBackstopSourceResult = {
 	candidateStates: CoverageLexicalV2CascadeCandidateState[];
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics;
+};
+
+type CoverageLexicalV2CandidateCascadeLayerModeSummary = {
+	maxPotentialPrimaryCoverageCount: number;
+	maxFuzzySalvageCoverageCount: number;
+	maxHanFallbackSalvageGroupCount: number;
+	usedFuzzySalvage: boolean;
+	usedHanFallbackSalvage: boolean;
+	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
+};
+
+type CoverageLexicalV2ConfirmedPrimaryCoverageSnapshot = {
+	evidenceByCandidateId: Map<string, CoverageLexicalV2ComparatorEvidence>;
+	comparatorCandidateById: Map<string, CoverageLexicalV2ComparatorCandidate>;
+	confirmedCoverageCountByCandidateId: Map<string, number>;
 };
 
 type CoverageLexicalV2TargetedHanDebugTrace = {
@@ -440,6 +496,8 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	request: CoverageLexicalV2CandidateCascadeRequest,
 ): Promise<CoverageLexicalV2CandidateCascadeResult> {
 	const policy = resolveCoverageLexicalV2CandidateCascadePolicy(request.maxItemResults);
+	const weakFilePruneMode =
+		request.weakFilePruneMode ?? DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE;
 	const targetedHanDebug = createCoverageLexicalV2TargetedHanDebugTrace(
 		request.queryText,
 		request.queryTerms,
@@ -455,19 +513,171 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		request.queryAnalysis,
 		lexicalPrimaryUnits,
 	);
-	const sourcing = await sourceCoverageLexicalV2CascadeCandidates(
+	const candidateStateByDocId = new Map<number, CoverageLexicalV2CascadeCandidateState>();
+	const prefixDocIds = new Set<number>();
+	const fuzzyDocIds = new Set<number>();
+	const hanBackstopDocIds = new Set<number>();
+	const hanBackstopMetrics = createCoverageLexicalV2EmptyHanBackstopSourceMetrics();
+	const pruneStageTrace = createCoverageLexicalV2CandidateCascadePruneStageTraceSet(
+		weakFilePruneMode,
+	);
+	const primaryUnitIndexByKey = new Map<string, number>(
+		candidateCascadePrimaryUnits.map((primaryUnit, primaryUnitIndex) => [
+			createCoverageLexicalV2CascadePrimaryUnitKey(
+				primaryUnit.surfaceGroupIndex,
+				primaryUnit.normalizedText,
+			),
+			primaryUnitIndex,
+		] as const),
+	);
+
+	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
+		collectCoverageLexicalV2CascadeExactMatches(
+			candidateStateByDocId,
+			primaryUnit,
+			primaryUnitIndex,
+			request.storageReader,
+		);
+	});
+	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
+		if (
+			!request.matchOptions.includePrefix ||
+			!isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)
+		) {
+			return;
+		}
+		const prefixTerms = request.storageReader.collectLatinPrefixTerms(
+			primaryUnit.normalizedText,
+			policy.prefixTermCapPerUnit,
+		);
+		for (const prefixTerm of prefixTerms) {
+			collectCoverageLexicalV2CascadeExpandedMatches(
+				candidateStateByDocId,
+				prefixTerm,
+				primaryUnit,
+				primaryUnitIndex,
+				"prefix",
+				request.storageReader,
+				prefixDocIds,
+				policy.prefixDocCapPerQuery,
+			);
+		}
+	});
+
+	let candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
+		candidateStateByDocId,
+	);
+	pruneStageTrace.stageA = applyCoverageLexicalV2WeakFilePruneByPotential({
+		mode: weakFilePruneMode,
+		candidateStateByDocId,
+		candidateStates,
+		layerMode: "normal",
+		stageName: "stageA",
+	});
+	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
+		candidateStateByDocId,
+	);
+
+	await collectCoverageLexicalV2CascadeHanBackstopMatches(
+		candidateStateByDocId,
 		request.queryAnalysis,
-		lexicalPrimaryUnits,
 		candidateCascadePrimaryUnits,
+		primaryUnitIndexByKey,
 		request.storageReader,
-		request.matchOptions,
+		hanBackstopDocIds,
 		policy,
+		hanBackstopMetrics,
 		targetedHanDebug,
 	);
-	const candidateStates = sourcing.candidateStates;
+
+	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
+		candidateStateByDocId,
+	);
+	const preFuzzyConfirmed = await buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot({
+		candidateStates,
+		queryAnalysis: comparatorQueryAnalysis,
+		candidateCascadePrimaryUnits,
+		reader: request.storageReader,
+		matchOptions: {
+			...request.matchOptions,
+			includeFuzzy: false,
+		},
+	});
+	const preFuzzyLayerMode = summarizeCoverageLexicalV2CandidateCascadeLayerMode(
+		candidateStates,
+		request.queryAnalysis.hasHanGroups,
+		false,
+	).layerMode;
+	pruneStageTrace.stageB = applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage({
+		mode: weakFilePruneMode,
+		candidateStateByDocId,
+		candidateStates,
+		layerMode: preFuzzyLayerMode,
+		stageName: "stageB",
+		confirmedCoverageCountByCandidateId:
+			preFuzzyConfirmed.confirmedCoverageCountByCandidateId,
+	});
+	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
+		candidateStateByDocId,
+	);
+
+	lexicalPrimaryUnits.forEach((primaryUnit, primaryUnitIndex) => {
+		if (
+			!request.matchOptions.includeFuzzy ||
+			!isCoverageLexicalV2LatinCandidateCascadeTerm(primaryUnit.normalizedText)
+		) {
+			return;
+		}
+		const fuzzyTerms = request.storageReader.collectLatinFuzzyTerms(
+			primaryUnit.normalizedText,
+			policy.fuzzyTermCapPerUnit,
+			request.matchOptions.fuzzyProportion ?? 0,
+		);
+		for (const fuzzyTerm of fuzzyTerms) {
+			collectCoverageLexicalV2CascadeExpandedMatches(
+				candidateStateByDocId,
+				fuzzyTerm,
+				primaryUnit,
+				primaryUnitIndex,
+				"fuzzy",
+				request.storageReader,
+				fuzzyDocIds,
+				policy.fuzzyDocCapPerQuery,
+			);
+		}
+	});
+
+	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
+		candidateStateByDocId,
+	);
+	const preFrontierSummary = summarizeCoverageLexicalV2CandidateCascadeLayerMode(
+		candidateStates,
+		request.queryAnalysis.hasHanGroups,
+		request.matchOptions.includeFuzzy === true,
+	);
+	const fullConfirmed = await buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot({
+		candidateStates,
+		queryAnalysis: comparatorQueryAnalysis,
+		candidateCascadePrimaryUnits,
+		reader: request.storageReader,
+		matchOptions: request.matchOptions,
+	});
+	pruneStageTrace.stageC = applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage({
+		mode: weakFilePruneMode,
+		candidateStateByDocId,
+		candidateStates,
+		layerMode: preFrontierSummary.layerMode,
+		stageName: "stageC",
+		confirmedCoverageCountByCandidateId:
+			fullConfirmed.confirmedCoverageCountByCandidateId,
+	});
+	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
+		candidateStateByDocId,
+	);
 	if (candidateStates.length === 0) {
 		const emptyTrace = createCoverageLexicalV2CandidateCascadeTrace("normal");
-		applyCoverageLexicalV2HanBackstopMetricsToTrace(emptyTrace, sourcing.metrics);
+		emptyTrace.pruneStages = pruneStageTrace;
+		applyCoverageLexicalV2HanBackstopMetricsToTrace(emptyTrace, hanBackstopMetrics);
 		finalizeCoverageLexicalV2TargetedHanDebugTrace(
 			targetedHanDebug,
 			candidateStates,
@@ -496,7 +706,8 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		policy,
 	);
 	const trace = createCoverageLexicalV2CandidateCascadeTrace(frontierPlan.layerMode);
-	applyCoverageLexicalV2HanBackstopMetricsToTrace(trace, sourcing.metrics);
+	trace.pruneStages = pruneStageTrace;
+	applyCoverageLexicalV2HanBackstopMetricsToTrace(trace, hanBackstopMetrics);
 	trace.retainedCandidateIdsByLayer.layer1 = frontierPlan.activeFrontier.map((candidateState) =>
 		String(candidateState.docId),
 	);
@@ -565,8 +776,13 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		};
 	}
 
-	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>();
-	const cheapComparatorCandidateById = new Map<string, CoverageLexicalV2ComparatorCandidate>();
+	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>(
+		fullConfirmed.evidenceByCandidateId,
+	);
+	const cheapComparatorCandidateById = new Map<
+		string,
+		CoverageLexicalV2ComparatorCandidate
+	>(fullConfirmed.comparatorCandidateById);
 	const layer2Outcome = await resolveCoverageLexicalV2CandidateCascadeLayerOutcome({
 		layerName: "layer2",
 		inputCandidates: frontierPlan.activeFrontier,
@@ -735,36 +951,12 @@ export function planCoverageLexicalV2CandidateCascadeLayer1Frontier(
 	includeFuzzy: boolean,
 	policy: CoverageLexicalV2CandidateCascadePolicy,
 ): CoverageLexicalV2CandidateCascadeFrontierPlan {
-	const maxPotentialPrimaryCoverageCount = candidateStates.reduce(
-		(maxCoverage, candidateState) =>
-			Math.max(maxCoverage, candidateState.potentialPrimaryCoverageCount),
-		0,
+	const summary = summarizeCoverageLexicalV2CandidateCascadeLayerMode(
+		candidateStates,
+		hasHanGroups,
+		includeFuzzy,
 	);
-	const maxFuzzySalvageCoverageCount = candidateStates.reduce(
-		(maxCoverage, candidateState) =>
-			Math.max(maxCoverage, candidateState.fuzzySalvageCoverageCount),
-		0,
-	);
-	const maxHanFallbackSalvageGroupCount = candidateStates.reduce(
-		(maxCoverage, candidateState) =>
-			Math.max(maxCoverage, candidateState.hanFallbackSalvageGroupCount),
-		0,
-	);
-	const usedFuzzySalvage =
-		includeFuzzy &&
-		maxPotentialPrimaryCoverageCount === 0 &&
-		maxFuzzySalvageCoverageCount > 0;
-	const usedHanFallbackSalvage =
-		!usedFuzzySalvage &&
-		hasHanGroups &&
-		maxPotentialPrimaryCoverageCount === 0 &&
-		maxFuzzySalvageCoverageCount === 0 &&
-		maxHanFallbackSalvageGroupCount > 0;
-	const layerMode: CoverageLexicalV2CandidateCascadeLayerMode = usedHanFallbackSalvage
-		? "han_fallback_salvage"
-		: usedFuzzySalvage
-			? "fuzzy_salvage"
-			: "normal";
+	const layerMode = summary.layerMode;
 	const eligibleCandidates = candidateStates
 		.filter((candidateState) =>
 			getCoverageLexicalV2CascadeLayer1Score(candidateState, layerMode) > 0,
@@ -807,8 +999,8 @@ export function planCoverageLexicalV2CandidateCascadeLayer1Frontier(
 	return {
 		activeFrontier,
 		deferredBuckets,
-		usedFuzzySalvage,
-		usedHanFallbackSalvage,
+		usedFuzzySalvage: summary.usedFuzzySalvage,
+		usedHanFallbackSalvage: summary.usedHanFallbackSalvage,
 		layerMode,
 	};
 }
@@ -818,6 +1010,9 @@ function createCoverageLexicalV2CandidateCascadeTrace(
 ): CoverageLexicalV2CandidateCascadeTrace {
 	return {
 		layerMode,
+		pruneStages: createCoverageLexicalV2CandidateCascadePruneStageTraceSet(
+			DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE,
+		),
 		retainedCandidateIdsByLayer: {
 			layer1: [],
 			layer2: [],
@@ -856,6 +1051,87 @@ function createCoverageLexicalV2CandidateCascadeTrace(
 		hanPromotionSkippedReason: "no_pending_candidates",
 		usedFuzzySalvage: false,
 		usedHanFallbackSalvage: false,
+	};
+}
+
+function summarizeCoverageLexicalV2CandidateCascadeLayerMode(
+	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[],
+	hasHanGroups: boolean,
+	includeFuzzy: boolean,
+): CoverageLexicalV2CandidateCascadeLayerModeSummary {
+	const maxPotentialPrimaryCoverageCount = candidateStates.reduce(
+		(maxCoverage, candidateState) =>
+			Math.max(maxCoverage, candidateState.potentialPrimaryCoverageCount),
+		0,
+	);
+	const maxFuzzySalvageCoverageCount = candidateStates.reduce(
+		(maxCoverage, candidateState) =>
+			Math.max(maxCoverage, candidateState.fuzzySalvageCoverageCount),
+		0,
+	);
+	const maxHanFallbackSalvageGroupCount = candidateStates.reduce(
+		(maxCoverage, candidateState) =>
+			Math.max(maxCoverage, candidateState.hanFallbackSalvageGroupCount),
+		0,
+	);
+	const usedFuzzySalvage =
+		includeFuzzy &&
+		maxPotentialPrimaryCoverageCount === 0 &&
+		maxFuzzySalvageCoverageCount > 0;
+	const usedHanFallbackSalvage =
+		!usedFuzzySalvage &&
+		hasHanGroups &&
+		maxPotentialPrimaryCoverageCount === 0 &&
+		maxFuzzySalvageCoverageCount === 0 &&
+		maxHanFallbackSalvageGroupCount > 0;
+	return {
+		maxPotentialPrimaryCoverageCount,
+		maxFuzzySalvageCoverageCount,
+		maxHanFallbackSalvageGroupCount,
+		usedFuzzySalvage,
+		usedHanFallbackSalvage,
+		layerMode: usedHanFallbackSalvage
+			? "han_fallback_salvage"
+			: usedFuzzySalvage
+				? "fuzzy_salvage"
+				: "normal",
+	};
+}
+
+function createCoverageLexicalV2CandidateCascadePruneStageTrace(
+	mode: WeakFilePruneMode,
+	metric: CoverageLexicalV2WeakFilePruneMetric,
+): CoverageLexicalV2WeakFilePruneStageTrace {
+	return {
+		applied: false,
+		mode,
+		metric,
+		allowedGap: null,
+		leaderCount: 0,
+		retainedCandidateIds: [],
+		droppedCandidateIds: [],
+		retainedCandidateCount: 0,
+		droppedCandidateCount: 0,
+		skippedReason: "none",
+	};
+}
+
+function createCoverageLexicalV2CandidateCascadePruneStageTraceSet(
+	mode: WeakFilePruneMode,
+): CoverageLexicalV2CandidateCascadeTrace["pruneStages"] {
+	return {
+		stageA: createCoverageLexicalV2CandidateCascadePruneStageTrace(
+			mode,
+			"potential_primary",
+		),
+		stageB: createCoverageLexicalV2CandidateCascadePruneStageTrace(
+			mode,
+			"confirmed_primary",
+		),
+		stageC: createCoverageLexicalV2CandidateCascadePruneStageTrace(
+			mode,
+			"confirmed_primary",
+		),
 	};
 }
 
@@ -1376,7 +1652,7 @@ function recordCoverageLexicalV2TargetedHanDebugBodyGateCappedCandidates(
 
 function recordCoverageLexicalV2TargetedHanDebugPrefetch(
 	targetedHanDebug: CoverageLexicalV2TargetedHanDebugTrace,
-	candidates: readonly CoverageLexicalV2PendingHanCandidate[],
+	requestedBlockIds: readonly number[],
 	prefetch: CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
 ): void {
 	if (!targetedHanDebug.enabled) {
@@ -1390,9 +1666,7 @@ function recordCoverageLexicalV2TargetedHanDebugPrefetch(
 		return counts;
 	}, {});
 	targetedHanDebug.prefetch = {
-		requestedBlockIds: candidates.flatMap((candidate) =>
-			candidate.bodyLogicalBlockId == null ? [] : [candidate.bodyLogicalBlockId],
-		),
+		requestedBlockIds: [...requestedBlockIds],
 		fetchedBlockIds: [...(prefetch.fetchedBlockIds ?? prefetch.fetchedDocIds ?? [])],
 		fetchedBlockCount:
 			prefetch.fetchedBlockCount ?? prefetch.fetchedDocCount ?? 0,
@@ -1463,6 +1737,9 @@ function finalizeCoverageLexicalV2TargetedHanDebugTrace(
 	const verificationIds = new Set(trace.verificationBucketCandidateIds);
 	const resolvedIds = new Set(trace.resolvedTopBucketCandidateIds);
 	const visibleIds = new Set(visibleCandidateIds);
+	const stageADroppedIds = new Set(trace.pruneStages.stageA.droppedCandidateIds);
+	const stageBDroppedIds = new Set(trace.pruneStages.stageB.droppedCandidateIds);
+	const stageCDroppedIds = new Set(trace.pruneStages.stageC.droppedCandidateIds);
 	const trackedDocs = [...targetedHanDebug.trackedDocs.entries()].map(([docId, path]) => {
 		const candidateId = String(docId);
 		const candidateState = stateById.get(candidateId);
@@ -1475,10 +1752,16 @@ function finalizeCoverageLexicalV2TargetedHanDebugTrace(
 			outcome = "verification_bucket_but_not_resolved";
 		} else if (candidateState && layer4Ids.has(candidateId)) {
 			outcome = "not_in_top_verification_bucket";
+		} else if (stageCDroppedIds.has(candidateId)) {
+			outcome = "dropped_at_stageC";
 		} else if (candidateState && layer3Ids.has(candidateId)) {
 			outcome = "dropped_at_layer4";
+		} else if (stageBDroppedIds.has(candidateId)) {
+			outcome = "dropped_at_stageB";
 		} else if (candidateState && layer2Ids.has(candidateId)) {
 			outcome = "dropped_at_layer3";
+		} else if (stageADroppedIds.has(candidateId)) {
+			outcome = "dropped_at_stageA";
 		} else if (candidateState && layer1Ids.has(candidateId)) {
 			outcome = "dropped_at_layer2";
 		} else if (candidateState) {
@@ -1607,6 +1890,231 @@ function buildCoverageLexicalV2ComparatorQueryAnalysis(
 		...queryAnalysis,
 		primaryUnits: [...queryAnalysis.primaryUnits, ...syntheticPrimaryUnits],
 	};
+}
+
+function finalizeCoverageLexicalV2CascadeCandidateStates(
+	candidateStateByDocId: ReadonlyMap<number, CoverageLexicalV2CascadeCandidateState>,
+): CoverageLexicalV2CascadeCandidateState[] {
+	return [...candidateStateByDocId.values()]
+		.map((candidateState) => finalizeCoverageLexicalV2CascadeCandidateState(candidateState))
+		.sort((left, right) =>
+			left.stableDeterministicKey.localeCompare(right.stableDeterministicKey),
+		);
+}
+
+function resolveCoverageLexicalV2WeakFilePruneGap(
+	mode: WeakFilePruneMode,
+	stageName: CoverageLexicalV2WeakFilePruneStageName,
+): number | null {
+	if (mode === "off") {
+		return null;
+	}
+	if (stageName === "stageA") {
+		return mode === "strict" ? 1 : 2;
+	}
+	return mode === "strict" ? 0 : 1;
+}
+
+function finalizeCoverageLexicalV2WeakFilePruneStageTrace(
+	trace: CoverageLexicalV2WeakFilePruneStageTrace,
+	retainedCandidateIds: readonly string[],
+	droppedCandidateIds: readonly string[],
+): CoverageLexicalV2WeakFilePruneStageTrace {
+	trace.retainedCandidateIds = [...retainedCandidateIds];
+	trace.droppedCandidateIds = [...droppedCandidateIds];
+	trace.retainedCandidateCount = retainedCandidateIds.length;
+	trace.droppedCandidateCount = droppedCandidateIds.length;
+	return trace;
+}
+
+function applyCoverageLexicalV2WeakFilePruneByPotential(config: {
+	mode: WeakFilePruneMode;
+	candidateStateByDocId: Map<number, CoverageLexicalV2CascadeCandidateState>;
+	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[];
+	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
+	stageName: CoverageLexicalV2WeakFilePruneStageName;
+}): CoverageLexicalV2WeakFilePruneStageTrace {
+	const trace = createCoverageLexicalV2CandidateCascadePruneStageTrace(
+		config.mode,
+		"potential_primary",
+	);
+	const allCandidateIds = config.candidateStates.map((candidateState) =>
+		String(candidateState.docId),
+	);
+	if (config.mode === "off") {
+		trace.skippedReason = "mode_off";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	if (config.candidateStates.length === 0) {
+		trace.skippedReason = "no_candidates";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, [], []);
+	}
+	if (config.layerMode !== "normal") {
+		trace.skippedReason = "non_normal_layer_mode";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	const leaderCount = config.candidateStates.reduce(
+		(maxCount, candidateState) =>
+			Math.max(maxCount, candidateState.potentialPrimaryCoverageCount),
+		0,
+	);
+	trace.leaderCount = leaderCount;
+	if (leaderCount <= 0) {
+		trace.skippedReason = "no_positive_leader";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	const allowedGap = resolveCoverageLexicalV2WeakFilePruneGap(
+		config.mode,
+		config.stageName,
+	);
+	trace.allowedGap = allowedGap;
+	if (allowedGap == null) {
+		trace.skippedReason = "mode_off";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	trace.applied = true;
+	const minAllowedCount = Math.max(0, leaderCount - allowedGap);
+	const retainedCandidateIds: string[] = [];
+	const droppedCandidateIds: string[] = [];
+	for (const candidateState of config.candidateStates) {
+		const candidateId = String(candidateState.docId);
+		if (candidateState.potentialPrimaryCoverageCount >= minAllowedCount) {
+			retainedCandidateIds.push(candidateId);
+			continue;
+		}
+		config.candidateStateByDocId.delete(candidateState.docId);
+		droppedCandidateIds.push(candidateId);
+	}
+	return finalizeCoverageLexicalV2WeakFilePruneStageTrace(
+		trace,
+		retainedCandidateIds,
+		droppedCandidateIds,
+	);
+}
+
+async function buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot(config: {
+	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[];
+	queryAnalysis: CoverageLexicalV2QueryAnalysis;
+	candidateCascadePrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[];
+	reader: CoverageLexicalV2CandidateCascadeStorageReader;
+	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions;
+}): Promise<CoverageLexicalV2ConfirmedPrimaryCoverageSnapshot> {
+	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>();
+	const comparatorCandidateById = new Map<string, CoverageLexicalV2ComparatorCandidate>();
+	const confirmedCoverageCountByCandidateId = new Map<string, number>();
+	if (config.candidateStates.length === 0) {
+		return {
+			evidenceByCandidateId,
+			comparatorCandidateById,
+			confirmedCoverageCountByCandidateId,
+		};
+	}
+	await populateCoverageLexicalV2CandidateCascadeEvidence(
+		evidenceByCandidateId,
+		config.candidateStates,
+		config.queryAnalysis,
+		config.candidateCascadePrimaryUnits,
+		config.reader,
+		config.matchOptions,
+		false,
+	);
+	for (const candidateState of config.candidateStates) {
+		const candidateId = String(candidateState.docId);
+		const evidence = evidenceByCandidateId.get(candidateId);
+		if (!evidence) {
+			confirmedCoverageCountByCandidateId.set(candidateId, 0);
+			continue;
+		}
+		const comparatorCandidate = buildCoverageLexicalV2CheapComparatorCandidate(
+			config.queryAnalysis,
+			evidence,
+		);
+		comparatorCandidateById.set(candidateId, comparatorCandidate);
+		confirmedCoverageCountByCandidateId.set(
+			candidateId,
+			comparatorCandidate.distinctMatchedPrimaryQueryUnitCount,
+		);
+	}
+	return {
+		evidenceByCandidateId,
+		comparatorCandidateById,
+		confirmedCoverageCountByCandidateId,
+	};
+}
+
+function applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage(config: {
+	mode: WeakFilePruneMode;
+	candidateStateByDocId: Map<number, CoverageLexicalV2CascadeCandidateState>;
+	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[];
+	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
+	stageName: CoverageLexicalV2WeakFilePruneStageName;
+	confirmedCoverageCountByCandidateId: ReadonlyMap<string, number>;
+}): CoverageLexicalV2WeakFilePruneStageTrace {
+	const trace = createCoverageLexicalV2CandidateCascadePruneStageTrace(
+		config.mode,
+		"confirmed_primary",
+	);
+	const allCandidateIds = config.candidateStates.map((candidateState) =>
+		String(candidateState.docId),
+	);
+	if (config.mode === "off") {
+		trace.skippedReason = "mode_off";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	if (config.candidateStates.length === 0) {
+		trace.skippedReason = "no_candidates";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, [], []);
+	}
+	if (config.stageName === "stageC" && config.layerMode === "han_fallback_salvage") {
+		trace.skippedReason = "han_fallback_salvage";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	if (config.stageName !== "stageC" && config.layerMode !== "normal") {
+		trace.skippedReason = "non_normal_layer_mode";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	const leaderCount = config.candidateStates.reduce(
+		(maxCount, candidateState) =>
+			Math.max(
+				maxCount,
+				config.confirmedCoverageCountByCandidateId.get(String(candidateState.docId)) ?? 0,
+			),
+		0,
+	);
+	trace.leaderCount = leaderCount;
+	if (leaderCount <= 0) {
+		trace.skippedReason = "no_positive_leader";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	const allowedGap = resolveCoverageLexicalV2WeakFilePruneGap(
+		config.mode,
+		config.stageName,
+	);
+	trace.allowedGap = allowedGap;
+	if (allowedGap == null) {
+		trace.skippedReason = "mode_off";
+		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	}
+	trace.applied = true;
+	const minAllowedCount = Math.max(0, leaderCount - allowedGap);
+	const retainedCandidateIds: string[] = [];
+	const droppedCandidateIds: string[] = [];
+	for (const candidateState of config.candidateStates) {
+		const candidateId = String(candidateState.docId);
+		const confirmedCoverageCount =
+			config.confirmedCoverageCountByCandidateId.get(candidateId) ?? 0;
+		if (confirmedCoverageCount >= minAllowedCount) {
+			retainedCandidateIds.push(candidateId);
+			continue;
+		}
+		config.candidateStateByDocId.delete(candidateState.docId);
+		droppedCandidateIds.push(candidateId);
+	}
+	return finalizeCoverageLexicalV2WeakFilePruneStageTrace(
+		trace,
+		retainedCandidateIds,
+		droppedCandidateIds,
+	);
 }
 
 async function sourceCoverageLexicalV2CascadeCandidates(
@@ -1945,6 +2453,7 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 ): Promise<void> {
 	targetedHanDebug.enteredHanBackstop = queryAnalysis.hanBackstopGroups.length > 0;
 	const metadataFrontier = createCoverageLexicalV2PendingHanFrontier();
+	const bodyHanExactStatsCache: CoverageLexicalV2HanExactStatsCache = new Map();
 	for (const hanBackstopGroup of queryAnalysis.hanBackstopGroups) {
 		const activated = shouldActivateCoverageLexicalV2HanBackstopGroup(
 			hanBackstopGroup,
@@ -1981,6 +2490,27 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 			reader,
 		);
 		for (const rankedCandidate of rankedCandidates) {
+			if (
+				hasCoverageLexicalV2CascadeResolvedPrimaryUnitMatch(
+					target,
+					rankedCandidate.docId,
+					primaryUnitIndex,
+				)
+			) {
+				continue;
+			}
+			const record = reader.getDocumentRecord(rankedCandidate.docId);
+			if (!record) {
+				continue;
+			}
+			const verifiedFields = verifyCoverageLexicalV2HanBackstopMetadataRecord(
+				record,
+				hanBackstopGroup.normalizedText,
+			);
+			if (verifiedFields.length === 0) {
+				continue;
+			}
+			metrics.hanPromotionVerifiedDocCount += 1;
 			enqueueCoverageLexicalV2PendingHanCandidate(
 				metadataFrontier,
 				{
@@ -1990,8 +2520,8 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 					normalizedText: hanBackstopGroup.normalizedText,
 					stableDeterministicKey: rankedCandidate.stableDeterministicKey,
 					stats: rankedCandidate.stats,
-					verificationState: "pending",
-					verifiedFields: new Set<CoverageLexicalV2MatchField>(),
+					verificationState: "verified",
+					verifiedFields: new Set<CoverageLexicalV2MatchField>(verifiedFields),
 				},
 				metrics,
 			);
@@ -2026,12 +2556,19 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 		}
 		rankedBodyCandidates.push(
 			...collectCoverageLexicalV2BodyHanBackstopBlockMatches(
-			hanBackstopGroup,
-			primaryUnitIndex,
-			reader,
-			policy.hanBackstopDocCapPerGroup,
-			metrics,
-			targetedHanDebug,
+				hanBackstopGroup,
+				primaryUnitIndex,
+				reader,
+				policy.hanBackstopDocCapPerGroup,
+				metrics,
+				targetedHanDebug,
+			).filter(
+				(candidate) =>
+					!hasCoverageLexicalV2CascadeResolvedPrimaryUnitMatch(
+						target,
+						candidate.docId,
+						candidate.primaryUnitIndex,
+					),
 			),
 		);
 	}
@@ -2039,17 +2576,22 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 	const cappedBodyCandidates = rankedBodyCandidates
 		.sort(compareCoverageLexicalV2PendingHanCandidates)
 		.slice(0, policy.hanBackstopDocCapPerQuery);
+	const requestedBodyLogicalBlockIds = Array.from(
+		new Set(
+			cappedBodyCandidates.flatMap((candidate) =>
+				candidate.bodyLogicalBlockId == null ? [] : [candidate.bodyLogicalBlockId],
+			),
+		),
+	);
 	recordCoverageLexicalV2TargetedHanDebugBodyGateCappedCandidates(
 		targetedHanDebug,
 		cappedBodyCandidates,
 		reader,
 	);
-	metrics.bodyHanColdExactRequestedBlockCount = cappedBodyCandidates.length;
-	if (cappedBodyCandidates.length > 0) {
+	metrics.bodyHanColdExactRequestedBlockCount = requestedBodyLogicalBlockIds.length;
+	if (requestedBodyLogicalBlockIds.length > 0) {
 		const prefetch = await reader.prefetchBodyHanExactBlocks(
-			cappedBodyCandidates.flatMap((candidate) =>
-				candidate.bodyLogicalBlockId == null ? [] : [candidate.bodyLogicalBlockId],
-			),
+			requestedBodyLogicalBlockIds,
 			{
 				blockBudget: policy.hanBackstopColdExactDocBudget,
 				byteBudget: policy.hanBackstopColdExactByteBudget,
@@ -2059,7 +2601,7 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 		applyCoverageLexicalV2BodyHanExactPrefetchMetrics(metrics, prefetch);
 		recordCoverageLexicalV2TargetedHanDebugPrefetch(
 			targetedHanDebug,
-			cappedBodyCandidates,
+			requestedBodyLogicalBlockIds,
 			prefetch,
 		);
 		const prefetchedBlockIds = new Set(
@@ -2069,14 +2611,11 @@ async function collectCoverageLexicalV2CascadeHanBackstopMatches(
 			if (candidate.bodyLogicalBlockId == null) {
 				continue;
 			}
-			const exactStats = reader.getBodyHanExactBlockBackstopStats(
-				candidate.bodyLogicalBlockId,
-				candidate.normalizedText,
-				extractCoverageLexicalV2PendingHanCandidateBigrams(
-					queryAnalysis,
-					candidate.surfaceGroupIndex,
-					candidate.normalizedText,
-				),
+			const exactStats = getOrComputeCoverageLexicalV2BodyHanExactStats(
+				bodyHanExactStatsCache,
+				reader,
+				queryAnalysis,
+				candidate,
 			);
 			recordCoverageLexicalV2TargetedHanDebugExactEvaluation(
 				targetedHanDebug,
@@ -2136,6 +2675,21 @@ function shouldActivateCoverageLexicalV2HanBackstopGroup(
 		}
 	}
 	return true;
+}
+
+function hasCoverageLexicalV2CascadeResolvedPrimaryUnitMatch(
+	target: ReadonlyMap<number, CoverageLexicalV2CascadeCandidateState>,
+	docId: number,
+	primaryUnitIndex: number,
+): boolean {
+	const candidateState = target.get(docId);
+	if (!candidateState) {
+		return false;
+	}
+	return (
+		candidateState.exactPrimaryMask.has(primaryUnitIndex) ||
+		candidateState.prefixPrimaryMask.has(primaryUnitIndex)
+	);
 }
 
 function createCoverageLexicalV2PendingHanFrontier():
@@ -2361,6 +2915,32 @@ function extractCoverageLexicalV2PendingHanCandidateBigrams(
 	return [];
 }
 
+function getOrComputeCoverageLexicalV2BodyHanExactStats(
+	cache: CoverageLexicalV2HanExactStatsCache,
+	reader: CoverageLexicalV2CandidateCascadeStorageReader,
+	queryAnalysis: CoverageLexicalV2QueryAnalysis,
+	candidate: CoverageLexicalV2PendingHanCandidate,
+): CoverageLexicalV2CandidateCascadeHanBackstopStats | null {
+	if (candidate.bodyLogicalBlockId == null) {
+		return null;
+	}
+	const cacheKey = `${candidate.bodyLogicalBlockId}:${candidate.normalizedText}`;
+	if (cache.has(cacheKey)) {
+		return cache.get(cacheKey) ?? null;
+	}
+	const exactStats = reader.getBodyHanExactBlockBackstopStats(
+		candidate.bodyLogicalBlockId,
+		candidate.normalizedText,
+		extractCoverageLexicalV2PendingHanCandidateBigrams(
+			queryAnalysis,
+			candidate.surfaceGroupIndex,
+			candidate.normalizedText,
+		),
+	);
+	cache.set(cacheKey, exactStats);
+	return exactStats;
+}
+
 function applyCoverageLexicalV2BodyHanExactPrefetchMetrics(
 	metrics: CoverageLexicalV2HanBackstopSourceMetrics,
 	prefetch: CoverageLexicalV2CandidateCascadeHanExactPrefetchResult,
@@ -2523,15 +3103,25 @@ function verifyCoverageLexicalV2HanBackstopMetadataCandidate(
 	normalizedText: string,
 	reader: CoverageLexicalV2CandidateCascadeStorageReader,
 ): CoverageLexicalV2MatchField[] {
-	const verifiedFields: CoverageLexicalV2MatchField[] = [];
 	const metadataTexts = reader.getDocumentRecord(docId);
-	if (metadataTexts) {
-		appendCoverageLexicalV2VerifiedMetadataFields(
-			verifiedFields,
+	return metadataTexts
+		? verifyCoverageLexicalV2HanBackstopMetadataRecord(
 			metadataTexts,
 			normalizedText,
-		);
-	}
+		)
+		: [];
+}
+
+function verifyCoverageLexicalV2HanBackstopMetadataRecord(
+	metadataTexts: CoverageLexicalV2CandidateCascadeDocumentRecord,
+	normalizedText: string,
+): CoverageLexicalV2MatchField[] {
+	const verifiedFields: CoverageLexicalV2MatchField[] = [];
+	appendCoverageLexicalV2VerifiedMetadataFields(
+		verifiedFields,
+		metadataTexts,
+		normalizedText,
+	);
 	return dedupeCoverageLexicalV2VerifiedFields(verifiedFields);
 }
 

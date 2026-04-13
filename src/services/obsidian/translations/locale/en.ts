@@ -130,9 +130,16 @@ export default {
 	Clear: "Clear",
 
 	"Case sensitive": "Case sensitive",
-	"Hide weakly relevant files": "Hide weakly relevant files",
+	"Weak file pruning": "Weak file pruning",
+	"Weak file pruning.off": "Do not hide",
+	"Weak file pruning.standard": "Loose",
+	"Weak file pruning.strict": "Strict",
 	"Prefix match":"Prefix match",
+	"Prefix match desc":
+		"Expand contiguous Latin letter and digit sequences in metadata and body under a capped budget. Metadata fields are visited before body within the same budget, so this is not a 100% prefix-recall mode and is mainly an input UX optimization.",
 	"Character fuzzy allowed": "Character fuzzy allowed",
+	"Character fuzzy allowed desc":
+		"Expand under a capped fuzzy budget. Fuzzy candidates are introduced only after exact and prefix stages, mainly for typo tolerance and limited rescue, and do not guarantee 100% fuzzy recall.",
 
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,

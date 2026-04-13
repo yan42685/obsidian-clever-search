@@ -200,6 +200,7 @@ export class LexicalEngine {
 			queryText: query.text,
 			isPrefixMatch: query.userOption.isPrefixMatch,
 			isFuzzy: query.userOption.isFuzzy,
+			weakFilePruneMode: this.outerSetting.weakFilePruneMode,
 			maxItemResults,
 			maxDirectSubItemResults,
 			maxSubItemResults,

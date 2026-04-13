@@ -14,6 +14,7 @@ import {
 	OuterSetting,
 	type LogLevelOptions,
 	type SearchHistoryMaxItems,
+	normalizeWeakFilePruneMode,
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
@@ -137,6 +138,10 @@ export class SettingManager {
 			await this.plugin.loadData(),
 		);
 		this.setting.fileSearchBackend = DEFAULT_FILE_SEARCH_BACKEND;
+		this.setting.weakFilePruneMode = normalizeWeakFilePruneMode(
+			((this.setting as unknown) as Record<string, unknown>).weakFilePruneMode,
+		);
+		delete ((this.setting as unknown) as Record<string, unknown>).hideWeaklyRelevantFiles;
 		delete (this.setting.hybrid as Record<string, unknown>).searchStrategy;
 		delete (this.setting.hybrid as Record<string, unknown>).enableHighPerformanceMode;
 		delete (this.setting.hybrid as Record<string, unknown>).highPerformanceMaxMb;
@@ -283,11 +288,18 @@ class GeneralTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName(t("Hide weakly relevant files"))
-			.addToggle((t) =>
-				t.setValue(this.setting.hideWeaklyRelevantFiles).onChange((v) => {
-					this.setting.hideWeaklyRelevantFiles = v;
-				}),
+			.setName(t("Weak file pruning"))
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						off: t("Weak file pruning.off"),
+						standard: t("Weak file pruning.standard"),
+						strict: t("Weak file pruning.strict"),
+					})
+					.setValue(this.setting.weakFilePruneMode)
+					.onChange((value) => {
+						this.setting.weakFilePruneMode = normalizeWeakFilePruneMode(value);
+					}),
 			);
 
 		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>
@@ -298,6 +310,7 @@ class GeneralTab extends PluginSettingTab {
 		);
 		new Setting(containerEl)
 			.setName(t("Prefix match"))
+			.setDesc(t("Prefix match desc"))
 			.addToggle((t) =>
 				t
 					.setValue(this.setting.isPrefixMatch)
@@ -306,6 +319,7 @@ class GeneralTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName(t("Character fuzzy allowed"))
+			.setDesc(t("Character fuzzy allowed desc"))
 			.addToggle((t) =>
 				t
 					.setValue(this.setting.isFuzzy)

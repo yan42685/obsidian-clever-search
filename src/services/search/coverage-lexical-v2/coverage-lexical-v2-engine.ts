@@ -1,6 +1,7 @@
 import type {
 	MatchedFile,
 } from "src/globals/search-types";
+import type { WeakFilePruneMode } from "src/globals/plugin-setting";
 import {
 	buildCoverageLexicalV2QueryAnalysis,
 } from "./query";
@@ -11,10 +12,13 @@ import {
 	type CoverageLexicalV2CandidateCascadeStorageReader,
 } from "./candidate-cascade";
 
+const DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE: WeakFilePruneMode = "strict";
+
 export type CoverageLexicalV2EngineSearchRequest = {
 	queryText: string;
 	isPrefixMatch: boolean;
 	isFuzzy: boolean;
+	weakFilePruneMode?: WeakFilePruneMode;
 	maxItemResults: number;
 	fuzzyProportion: number;
 	tokenizeQueryText(queryText: string): readonly string[];
@@ -30,6 +34,44 @@ export type CoverageLexicalV2EngineSearchResult = {
 function createCoverageLexicalV2EmptyTrace(): CoverageLexicalV2CandidateCascadeTrace {
 	return {
 		layerMode: "normal",
+		pruneStages: {
+			stageA: {
+				applied: false,
+				mode: DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE,
+				metric: "potential_primary",
+				allowedGap: null,
+				leaderCount: 0,
+				retainedCandidateIds: [],
+				droppedCandidateIds: [],
+				retainedCandidateCount: 0,
+				droppedCandidateCount: 0,
+				skippedReason: "none",
+			},
+			stageB: {
+				applied: false,
+				mode: DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE,
+				metric: "confirmed_primary",
+				allowedGap: null,
+				leaderCount: 0,
+				retainedCandidateIds: [],
+				droppedCandidateIds: [],
+				retainedCandidateCount: 0,
+				droppedCandidateCount: 0,
+				skippedReason: "none",
+			},
+			stageC: {
+				applied: false,
+				mode: DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE,
+				metric: "confirmed_primary",
+				allowedGap: null,
+				leaderCount: 0,
+				retainedCandidateIds: [],
+				droppedCandidateIds: [],
+				retainedCandidateCount: 0,
+				droppedCandidateCount: 0,
+				skippedReason: "none",
+			},
+		},
 		retainedCandidateIdsByLayer: {
 			layer1: [],
 			layer2: [],
@@ -110,6 +152,7 @@ export async function searchCoverageLexicalV2Engine(
 		queryTerms,
 		queryAnalysis,
 		maxItemResults: request.maxItemResults,
+		weakFilePruneMode: request.weakFilePruneMode,
 		storageReader: request.storageReader,
 		matchOptions: cascadeMatchOptions,
 	});

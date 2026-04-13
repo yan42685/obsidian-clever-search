@@ -10,7 +10,7 @@ export class OuterSetting {
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
 	fileSearchBackend: FileSearchBackend;
-	hideWeaklyRelevantFiles: boolean;
+	weakFilePruneMode: WeakFilePruneMode;
 	isCaseSensitive: boolean;
 	isPrefixMatch: boolean;
 	isFuzzy: boolean;
@@ -26,6 +26,7 @@ export class OuterSetting {
 const isChineseUser = window.localStorage.getItem("language") === "zh";
 
 export const DEFAULT_FILE_SEARCH_BACKEND = "coverage-lexical" as const;
+export const DEFAULT_WEAK_FILE_PRUNE_MODE = "strict" as const;
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	customExtensions: { plaintext: ["md"] },
@@ -33,7 +34,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
 	fileSearchBackend: DEFAULT_FILE_SEARCH_BACKEND,
-	hideWeaklyRelevantFiles: true,
+	weakFilePruneMode: DEFAULT_WEAK_FILE_PRUNE_MODE,
 	isCaseSensitive: false,
 	isPrefixMatch: true,
 	isFuzzy: true,
@@ -94,6 +95,11 @@ export type FileSearchBackend =
 	| "minisearch"
 	| "coverage-lexical";
 
+export type WeakFilePruneMode =
+	| "off"
+	| "standard"
+	| "strict";
+
 export function isFileSearchBackend(value: unknown): value is FileSearchBackend {
 	return value === "minisearch" || value === "coverage-lexical";
 }
@@ -102,6 +108,16 @@ export function normalizeFileSearchBackend(
 	value: unknown,
 ): FileSearchBackend {
 	return isFileSearchBackend(value) ? value : DEFAULT_FILE_SEARCH_BACKEND;
+}
+
+export function isWeakFilePruneMode(value: unknown): value is WeakFilePruneMode {
+	return value === "off" || value === "standard" || value === "strict";
+}
+
+export function normalizeWeakFilePruneMode(
+	value: unknown,
+): WeakFilePruneMode {
+	return isWeakFilePruneMode(value) ? value : DEFAULT_WEAK_FILE_PRUNE_MODE;
 }
 export type HybridSetting = {
 	enabled: boolean;

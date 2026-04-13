@@ -4276,7 +4276,7 @@ function resolveCoverageLexicalSoftEarlyGateRatio(): number {
 }
 
 function resolveCoverageLexicalDisplayPruneConfig(): CoverageLexicalDisplayPruneConfig {
-	const fallbackEnabled = getInstance(OuterSetting).hideWeaklyRelevantFiles;
+	const fallbackEnabled = getInstance(OuterSetting).weakFilePruneMode !== "off";
 	return {
 		enabled: readCoverageLexicalBooleanEnv(
 			"COVERAGE_LEXICAL_DISPLAY_PRUNE_ENABLED",
@@ -5465,4 +5465,5 @@ function isSerializedCoverageLexicalBinarySnapshot(
 		(data as Record<string, unknown>).data instanceof ArrayBuffer
 	);
 }
+
 

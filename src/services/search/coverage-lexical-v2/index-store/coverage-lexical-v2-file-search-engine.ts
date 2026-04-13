@@ -316,6 +316,7 @@ export class CoverageLexicalV2FileSearchEngine
 			queryText: request.queryText,
 			isPrefixMatch: request.isPrefixMatch,
 			isFuzzy: request.isFuzzy,
+			weakFilePruneMode: request.weakFilePruneMode,
 			maxItemResults: request.maxItemResults,
 			fuzzyProportion: 0.2,
 			tokenizeQueryText: (queryText) =>

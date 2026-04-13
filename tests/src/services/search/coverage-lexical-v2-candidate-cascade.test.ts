@@ -431,6 +431,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
 			maxItemResults: 2,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -469,6 +470,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
 			maxItemResults: 5,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {
 				includePrefix: true,
@@ -513,6 +515,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
 			maxItemResults: 5,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {
 				includePrefix: true,
@@ -524,6 +527,167 @@ describe("coverage lexical v2 cascade", () => {
 		expect(result.usedFuzzySalvage).toBe(true);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/cache.md",
+		]);
+	});
+
+	test("applies stageA pruning by potential primary coverage according to mode", async () => {
+		const queryText = "alpha beta gamma";
+		const queryTerms = ["alpha", "beta", "gamma"];
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/leader.md",
+					basenameText: "alpha beta gamma",
+				},
+				{
+					docId: 2,
+					path: "notes/mid.md",
+					basenameText: "alpha beta",
+				},
+				{
+					docId: 3,
+					path: "notes/tail.md",
+					basenameText: "alpha",
+				},
+			],
+			postings: {
+				"basename:alpha": [1, 2, 3],
+				"basename:beta": [1, 2],
+				"basename:gamma": [1],
+			},
+			lexicon: ["alpha", "beta", "gamma"],
+		});
+
+		const standardResult = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "standard",
+			storageReader: reader,
+			matchOptions: {},
+		});
+		const strictResult = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "strict",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(standardResult.trace.pruneStages.stageA.applied).toBe(true);
+		expect(standardResult.trace.pruneStages.stageA.allowedGap).toBe(2);
+		expect(standardResult.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
+		expect(standardResult.trace.pruneStages.stageA.retainedCandidateIds).toEqual([
+			"1",
+			"2",
+			"3",
+		]);
+		expect(standardResult.candidateStates.map((candidateState) => candidateState.path)).toEqual([
+			"notes/leader.md",
+			"notes/mid.md",
+		]);
+
+		expect(strictResult.trace.pruneStages.stageA.applied).toBe(true);
+		expect(strictResult.trace.pruneStages.stageA.allowedGap).toBe(1);
+		expect(strictResult.trace.pruneStages.stageA.droppedCandidateIds).toEqual(["3"]);
+		expect(strictResult.trace.pruneStages.stageA.retainedCandidateIds).toEqual([
+			"1",
+			"2",
+		]);
+		expect(strictResult.candidateStates.map((candidateState) => candidateState.path)).toEqual([
+			"notes/leader.md",
+		]);
+	});
+
+	test("applies stageB pruning after verified Han bigram promotion", async () => {
+		const queryText = "alpha 委员长";
+		const queryTerms = ["alpha", "委员长"];
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/chairperson.md",
+					basenameText: "alpha",
+					bodyText: "委员长大",
+				},
+				{
+					docId: 2,
+					path: "notes/member.md",
+					basenameText: "alpha",
+					bodyText: "委员会记录",
+				},
+			],
+			postings: {
+				"basename:alpha": [1, 2],
+			},
+			lexicon: ["alpha"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "strict",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
+		expect(result.trace.pruneStages.stageB.applied).toBe(true);
+		expect(result.trace.pruneStages.stageB.droppedCandidateIds).toEqual(["2"]);
+		expect(result.trace.pruneStages.stageC.droppedCandidateIds).toEqual([]);
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/chairperson.md",
+		]);
+	});
+
+	test("applies stageC pruning after fuzzy evidence is materialized", async () => {
+		const queryText = "cahce alpha";
+		const queryTerms = ["cahce", "alpha"];
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/cache-alpha.md",
+					basenameText: "cache alpha",
+				},
+				{
+					docId: 2,
+					path: "notes/alpha.md",
+					basenameText: "alpha",
+				},
+			],
+			postings: {
+				"basename:cache": [1],
+				"basename:alpha": [1, 2],
+			},
+			lexicon: ["alpha", "cache"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "strict",
+			storageReader: reader,
+			matchOptions: {
+				includeFuzzy: true,
+				fuzzyProportion: 0.4,
+			},
+		});
+
+		expect(result.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
+		expect(result.trace.pruneStages.stageB.droppedCandidateIds).toEqual([]);
+		expect(result.trace.pruneStages.stageC.applied).toBe(true);
+		expect(result.trace.pruneStages.stageC.droppedCandidateIds).toEqual(["2"]);
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/cache-alpha.md",
 		]);
 	});
 
@@ -574,6 +738,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: ["cache"],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("cache", ["cache"]),
 			maxItemResults: 2,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -612,6 +777,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: ["cache"],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("cache", ["cache"]),
 			maxItemResults: 1,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {
 				includePrefix: true,
@@ -645,6 +811,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: [],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, []),
 			maxItemResults: 5,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -656,6 +823,7 @@ describe("coverage lexical v2 cascade", () => {
 		}))).toEqual([
 			{ path: "notes/committee-note.md", hasHanBackstop: true, potential: 1 },
 		]);
+		expect(result.trace.hanPromotionVerifiedDocCount).toBe(1);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/committee-note.md",
 		]);
@@ -677,6 +845,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: [queryText],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
 			maxItemResults: 5,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -710,6 +879,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: [queryText],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
 			maxItemResults: 5,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -748,6 +918,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: [queryText],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, [queryText]),
 			maxItemResults: 5,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -767,6 +938,40 @@ describe("coverage lexical v2 cascade", () => {
 		expect(result.trace.bodyHanColdExactFetchedBlockCount).toBe(1);
 		expect(result.trace.bodyHanColdExactSkippedReason).toBe("none");
 		expect(result.trace.hanPromotionSkippedReason).toBe("none");
+	});
+
+	test("deduplicates body Han cold exact requests by logical block id", async () => {
+		const queryText = "\u59d4\u5458\u957f \u4e3b\u5e2d";
+		const queryTerms = ["\u59d4\u5458\u957f", "\u4e3b\u5e2d"];
+		const { reader, prefetchBodyHanExact } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/meeting.md",
+					basenameText: "misc",
+					bodyText: "\u59d4\u5458\u957f \u4e3b\u5e2d\u8bb2\u8bdd",
+				},
+			],
+			postings: {},
+			lexicon: [],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "off",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(prefetchBodyHanExact).toHaveBeenCalledTimes(1);
+		expect(prefetchBodyHanExact).toHaveBeenCalledWith([1]);
+		expect(result.trace.bodyHanColdExactRequestedBlockCount).toBe(1);
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/meeting.md",
+		]);
 	});
 
 	test("hydrates body tokens only for the late verification frontier", async () => {
@@ -792,6 +997,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
 			maxItemResults: 1,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -824,6 +1030,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms: ["alpha", "beta"],
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis("alpha beta", ["alpha", "beta"]),
 			maxItemResults: 1,
+			weakFilePruneMode: "off",
 			storageReader: reader,
 			matchOptions: {},
 		});
