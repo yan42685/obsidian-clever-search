@@ -168,7 +168,7 @@ export default {
 	"Case sensitive": "区分大小写",
 	"Weak file pruning": "弱相关文件隐藏",
 	"Weak file pruning.off": "不隐藏",
-	"Weak file pruning.standard": "宽松",
+	"Weak file pruning.lenient": "宽松",
 	"Weak file pruning.strict": "严格",
 	"Prefix match": "前缀匹配",
 	"Prefix match desc":

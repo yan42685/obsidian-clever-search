@@ -8,6 +8,7 @@ import {
 } from "obsidian";
 import { ICON_COLLAPSE, ICON_EXPAND, THIS_PLUGIN } from "src/globals/constants";
 import { EventEnum } from "src/globals/enums";
+import { migrateOuterSetting } from "src/globals/plugin-setting-migration";
 import {
 	DEFAULT_FILE_SEARCH_BACKEND,
 	DEFAULT_OUTER_SETTING,
@@ -133,19 +134,19 @@ export class SettingManager {
 		// 	DEFAULT_OUTER_SETTING,
 		// 	await this.plugin.loadData(),
 		// );
+		const migrationResult = migrateOuterSetting(await this.plugin.loadData());
 		this.setting = MyLib.mergeDeep(
 			DEFAULT_OUTER_SETTING,
-			await this.plugin.loadData(),
-		);
+			migrationResult.data as Partial<OuterSetting>,
+		) as OuterSetting;
 		this.setting.fileSearchBackend = DEFAULT_FILE_SEARCH_BACKEND;
 		this.setting.weakFilePruneMode = normalizeWeakFilePruneMode(
 			((this.setting as unknown) as Record<string, unknown>).weakFilePruneMode,
 		);
-		delete ((this.setting as unknown) as Record<string, unknown>).hideWeaklyRelevantFiles;
-		delete (this.setting.hybrid as Record<string, unknown>).searchStrategy;
-		delete (this.setting.hybrid as Record<string, unknown>).enableHighPerformanceMode;
-		delete (this.setting.hybrid as Record<string, unknown>).highPerformanceMaxMb;
 		logger.setLevel(this.setting.logLevel);
+		if (migrationResult.didMigrate) {
+			await this.plugin.saveData(this.setting);
+		}
 	}
 
 	private hasPendingRefresh(state: PendingRefreshState): boolean {
@@ -293,7 +294,7 @@ class GeneralTab extends PluginSettingTab {
 				dropdown
 					.addOptions({
 						off: t("Weak file pruning.off"),
-						standard: t("Weak file pruning.standard"),
+						lenient: t("Weak file pruning.lenient"),
 						strict: t("Weak file pruning.strict"),
 					})
 					.setValue(this.setting.weakFilePruneMode)

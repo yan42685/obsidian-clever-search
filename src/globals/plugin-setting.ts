@@ -3,6 +3,7 @@ import { isDevEnvironment } from "src/utils/my-lib";
 
 // exposed to users
 export class OuterSetting {
+	settingsSchemaVersion: number;
 	customExtensions: {
 		plaintext: string[];
 	};
@@ -23,12 +24,16 @@ export class OuterSetting {
 	ui: UISetting;
 }
 
-const isChineseUser = window.localStorage.getItem("language") === "zh";
+const isChineseUser =
+	typeof window !== "undefined" &&
+	window.localStorage.getItem("language") === "zh";
 
 export const DEFAULT_FILE_SEARCH_BACKEND = "coverage-lexical" as const;
-export const DEFAULT_WEAK_FILE_PRUNE_MODE = "strict" as const;
+export const DEFAULT_WEAK_FILE_PRUNE_MODE = "lenient" as const;
+export const CURRENT_OUTER_SETTING_SCHEMA_VERSION = 1 as const;
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
+	settingsSchemaVersion: CURRENT_OUTER_SETTING_SCHEMA_VERSION,
 	customExtensions: { plaintext: ["md"] },
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
@@ -97,7 +102,7 @@ export type FileSearchBackend =
 
 export type WeakFilePruneMode =
 	| "off"
-	| "standard"
+	| "lenient"
 	| "strict";
 
 export function isFileSearchBackend(value: unknown): value is FileSearchBackend {
@@ -111,7 +116,7 @@ export function normalizeFileSearchBackend(
 }
 
 export function isWeakFilePruneMode(value: unknown): value is WeakFilePruneMode {
-	return value === "off" || value === "standard" || value === "strict";
+	return value === "off" || value === "lenient" || value === "strict";
 }
 
 export function normalizeWeakFilePruneMode(

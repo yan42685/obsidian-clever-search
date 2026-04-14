@@ -580,12 +580,12 @@ describe("coverage lexical v2 cascade", () => {
 			lexicon: ["alpha", "beta", "gamma"],
 		});
 
-		const standardResult = await searchCoverageLexicalV2CandidateCascade({
+		const lenientResult = await searchCoverageLexicalV2CandidateCascade({
 			queryText,
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
 			maxItemResults: 5,
-			weakFilePruneMode: "standard",
+			weakFilePruneMode: "lenient",
 			storageReader: reader,
 			matchOptions: {},
 		});
@@ -600,11 +600,11 @@ describe("coverage lexical v2 cascade", () => {
 		});
 
 		expect(
-			standardResult.candidateStates
+			lenientResult.candidateStates
 				.map((candidateState) => candidateState.path)
 				.sort(),
 		).toEqual(["notes/leader.md", "notes/mid.md", "notes/tail.md"]);
-		expect(standardResult.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+		expect(lenientResult.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/leader.md",
 			"notes/mid.md",
 			"notes/tail.md",
@@ -621,7 +621,7 @@ describe("coverage lexical v2 cascade", () => {
 		]);
 	});
 
-	test("late result prune keeps candidates with confirmedTotalPrimaryCount within standard gap", async () => {
+	test("late result prune keeps candidates with confirmedTotalPrimaryCount within lenient gap", async () => {
 		const queryText = "alpha beta gamma";
 		const queryTerms = ["alpha", "beta", "gamma"];
 		const { reader } = createStorageReader({
@@ -655,7 +655,7 @@ describe("coverage lexical v2 cascade", () => {
 			queryTerms,
 			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
 			maxItemResults: 5,
-			weakFilePruneMode: "standard",
+			weakFilePruneMode: "lenient",
 			storageReader: reader,
 			matchOptions: {},
 		});

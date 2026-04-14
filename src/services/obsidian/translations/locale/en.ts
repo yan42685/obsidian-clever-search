@@ -132,7 +132,7 @@ export default {
 	"Case sensitive": "Case sensitive",
 	"Weak file pruning": "Weak file pruning",
 	"Weak file pruning.off": "Do not hide",
-	"Weak file pruning.standard": "Loose",
+	"Weak file pruning.lenient": "Lenient",
 	"Weak file pruning.strict": "Strict",
 	"Prefix match":"Prefix match",
 	"Prefix match desc":

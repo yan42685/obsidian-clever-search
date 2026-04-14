@@ -1,7 +1,10 @@
 import type {
 	MatchedFile,
 } from "src/globals/search-types";
-import type { WeakFilePruneMode } from "src/globals/plugin-setting";
+import {
+	DEFAULT_WEAK_FILE_PRUNE_MODE,
+	type WeakFilePruneMode,
+} from "src/globals/plugin-setting";
 import { devOption } from "src/globals/dev-option";
 import {
 	applyCoverageLexicalV2DisplayPolicy,
@@ -74,7 +77,7 @@ type CoverageLexicalV2CascadeCandidateFieldTermSets = {
 	bodyTerms: Set<string>;
 };
 
-const DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE: WeakFilePruneMode = "strict";
+const DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE: WeakFilePruneMode = DEFAULT_WEAK_FILE_PRUNE_MODE;
 
 type CoverageLexicalV2CascadeCandidateExactQueryTerms = {
 	basenameExactQueryTerms: Set<string>;
@@ -1539,7 +1542,11 @@ function compareCoverageLexicalV2CascadeEntriesByLayer(
 		left.comparatorCandidate.cheapExactPrimaryContiguity,
 		right.comparatorCandidate.cheapExactPrimaryContiguity,
 	);
-	if (surfaceComparison !== 0 || cheapExactComparison !== 0 || layerName === "layer2") {
+	if (
+		surfaceComparison !== 0 ||
+		cheapExactComparison !== 0 ||
+		layerName === "layer2"
+	) {
 		return firstNonZeroCoverageLexicalV2CascadeComparison([
 			surfaceComparison,
 			cheapExactComparison,
