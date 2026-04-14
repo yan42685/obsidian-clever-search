@@ -28,7 +28,8 @@ export type RouteContainer = EvidenceContainer &
 export type BodyWindowContainer = EvidenceContainer &
 	Readonly<{
 		tier: "bodyWindow";
-		blockId: number;
+		blockIds: readonly number[];
+		boundaryCrossingCount: number;
 		windowWidth: number;
 		gapCount: number;
 		density: number;

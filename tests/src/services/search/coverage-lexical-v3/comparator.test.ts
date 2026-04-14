@@ -43,7 +43,8 @@ function createBodyWindowContainer(
 ): BodyWindowContainer {
 	return {
 		tier: "bodyWindow",
-		blockId: options.blockId ?? 0,
+		blockIds: options.blockIds ?? [0],
+		boundaryCrossingCount: options.boundaryCrossingCount ?? 0,
 		coveredUnitIndices,
 		coveredDistinctUnitCount: coveredUnitIndices.length,
 		containerCompactness:

@@ -1,5 +1,6 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildBodyBlockArena } from "../layout/body-blocks";
+import { buildBodySummaryArena } from "../layout/body-summary-postings";
 import { buildDocTable } from "../layout/doc-table";
 import {
 	buildExactTapeArena,
@@ -51,7 +52,6 @@ type PreparedDocument = Readonly<{
 type PreparedBodyBlock = Readonly<{
 	docId: number;
 	ordinal: number;
-	spanLength: number;
 	summaryFamilyTexts: readonly string[];
 	exactFamilyTexts: readonly string[];
 	hanWitnessTexts: readonly string[];
@@ -107,7 +107,6 @@ export function buildResidentBase(
 	const blockInputs: Array<{
 		docId: number;
 		ordinal: number;
-		spanLength: number;
 		summaryFamilyIds: readonly number[];
 		exactDraft: ExactTapeDraft;
 	}> = [];
@@ -122,7 +121,6 @@ export function buildResidentBase(
 			blockInputs.push({
 				docId: block.docId,
 				ordinal: block.ordinal,
-				spanLength: block.spanLength,
 				summaryFamilyIds: mapFamilyTextsToIds(
 					block.summaryFamilyTexts,
 					familyIdByText,
@@ -138,13 +136,14 @@ export function buildResidentBase(
 	const exactTapes = buildExactTapeArena(
 		blockInputs.map((block) => block.exactDraft),
 	);
+	const bodySummary = buildBodySummaryArena({
+		familyCount: familyLexicon.familyCount,
+		summaryFamilyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
+	});
 	const bodyBlocks = buildBodyBlockArena(
 		blockInputs.map((block, blockId) => ({
 			docId: block.docId,
 			ordinal: block.ordinal,
-			tokenCount: block.exactDraft.familyIds.length,
-			spanLength: block.spanLength,
-			summaryFamilyIds: block.summaryFamilyIds,
 			exactTapeStart: exactTapes.startsByDraftIndex[blockId] ?? 0,
 			exactTapeCount: exactTapes.countsByDraftIndex[blockId] ?? 0,
 		})),
@@ -181,6 +180,7 @@ export function buildResidentBase(
 		docTable,
 		familyLexicon,
 		metadataContainers: metadataContainers.arena,
+		bodySummary,
 		bodyBlocks,
 		exactTapes: exactTapes.arena,
 		hanRoute,
@@ -195,6 +195,7 @@ export function buildResidentBase(
 		docTable,
 		familyLexicon,
 		metadataContainers: metadataContainers.arena,
+		bodySummary,
 		bodyBlocks,
 		exactTapes: exactTapes.arena,
 		hanRoute,
@@ -258,7 +259,6 @@ function prepareDocument(
 	).map<PreparedBodyBlock>((block) => ({
 		docId,
 		ordinal: block.ordinal,
-		spanLength: block.spanLength,
 		summaryFamilyTexts: dedupeSorted(block.familyTexts),
 		exactFamilyTexts: block.exactFamilyTexts,
 		hanWitnessTexts: dedupeSorted(block.hanWitnessTexts),
@@ -364,7 +364,6 @@ function buildResidentHanRoute(
 	documents: readonly PreparedDocument[],
 	bodyBlocks: Readonly<{
 		blockCount: number;
-		exactTapeStartByBlockId: Uint32Array;
 	}>,
 	familyIdByText: ReadonlyMap<string, number>,
 ) {
@@ -397,10 +396,6 @@ function buildResidentHanRoute(
 			metadataRouteDocIdsByBigram: [],
 			metadataHeadingDocIdsByBigram: [],
 			bodyBlockIdsByBigram: [],
-			bodyHanExactTapeOffsetsByBlockId: Array.from(
-				{ length: bodyBlocks.blockCount },
-				(_, blockId) => bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0,
-			),
 			identityWitnessFamilyIdsByDoc,
 			routeWitnessFamilyIdsByDoc,
 			headingWitnessFamilyIdsByDoc,
@@ -441,10 +436,6 @@ function buildResidentHanRoute(
 		metadataRouteDocIdsByBigram: routeDocIdsByBigram,
 		metadataHeadingDocIdsByBigram: headingDocIdsByBigram,
 		bodyBlockIdsByBigram,
-		bodyHanExactTapeOffsetsByBlockId: Array.from(
-			{ length: bodyBlocks.blockCount },
-			(_, blockId) => bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0,
-		),
 		identityWitnessFamilyIdsByDoc,
 		routeWitnessFamilyIdsByDoc,
 		headingWitnessFamilyIdsByDoc,

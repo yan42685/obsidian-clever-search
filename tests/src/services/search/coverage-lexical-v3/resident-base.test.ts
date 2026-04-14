@@ -1,8 +1,6 @@
 import type { IndexedDocument } from "src/globals/search-types";
-import {
-	buildResidentBase,
-	describeResidentBase,
-} from "src/services/search/coverage-lexical-v3";
+import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
+import { describeResidentBase } from "src/services/search/coverage-lexical-v3/metrics";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
@@ -27,6 +25,7 @@ function sumMetricBuckets(metrics: ReturnType<typeof buildResidentBase>["metrics
 		metrics.familyLexiconBytes +
 		metrics.metadataContainerBytes +
 		metrics.headingBytes +
+		metrics.bodySummaryBytes +
 		metrics.bodyBlockBytes +
 		metrics.exactTapeBytes +
 		metrics.hanRouteBytes +
@@ -45,7 +44,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 		expect(residentBase.metrics["residentBytes / indexedSurfaceUtf8Bytes"]).toBe(0);
 		expect(residentBase.metrics["residentBytes / rawMarkdownUtf8Bytes"]).toBe(0);
-		expect(summary.buckets).toHaveLength(9);
+		expect(summary.buckets).toHaveLength(10);
 	});
 
 	test("builds a single latin document", () => {
@@ -64,6 +63,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.docTable.docCount).toBe(1);
 		expect(residentBase.familyLexicon.familyCount).toBeGreaterThan(0);
 		expect(residentBase.metadataContainers.identityPostings.docIds.length).toBeGreaterThan(0);
+		expect(residentBase.bodySummary.postings.blockIds.length).toBeGreaterThan(0);
 		expect(residentBase.bodyBlocks.blockCount).toBe(1);
 		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
@@ -116,6 +116,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.stringArenaBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.metadataContainerBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.headingBytes).toBeGreaterThan(0);
+		expect(residentBase.metrics.bodySummaryBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.bodyBlockBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.exactTapeBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));

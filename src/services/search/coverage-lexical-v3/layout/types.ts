@@ -41,6 +41,12 @@ export type ResidentPostingList = Readonly<{
 	docIds: Uint32Array;
 }>;
 
+export type ResidentBlockPostingList = Readonly<{
+	postingStarts: Uint32Array;
+	postingCounts: Uint32Array;
+	blockIds: Uint32Array;
+}>;
+
 export type ResidentMetadataContainerArena = Readonly<{
 	identityFamiliesByDoc: Uint32Array;
 	routeFamiliesByDoc: Uint32Array;
@@ -50,17 +56,16 @@ export type ResidentMetadataContainerArena = Readonly<{
 	headingPostings: ResidentPostingList;
 }>;
 
+export type ResidentBodySummaryArena = Readonly<{
+	postings: ResidentBlockPostingList;
+}>;
+
 export type ResidentBodyBlockArena = Readonly<{
 	blockCount: number;
 	docIdByBlockId: Uint32Array;
 	blockOrdinalByBlockId: Uint32Array;
-	tokenCountByBlockId: Uint32Array;
-	spanLengthByBlockId: Uint32Array;
-	summaryStartByBlockId: Uint32Array;
-	summaryCountByBlockId: Uint32Array;
 	exactTapeStartByBlockId: Uint32Array;
 	exactTapeCountByBlockId: Uint32Array;
-	summaryFamilyIds: Uint32Array;
 }>;
 
 export type ResidentExactTapeArena = Readonly<{
@@ -82,7 +87,6 @@ export type ResidentHanRouteArena = Readonly<{
 	bodyBlockPostingStarts: Uint32Array;
 	bodyBlockPostingCounts: Uint32Array;
 	bodyBlockIds: Uint32Array;
-	bodyHanExactTapeOffsets: Uint32Array;
 	identityWitnessStartByDocId: Uint32Array;
 	identityWitnessCountByDocId: Uint32Array;
 	identityWitnessFamilyIds: Uint32Array;
@@ -103,6 +107,7 @@ export type ResidentBaseMetrics = Readonly<{
 	familyLexiconBytes: number;
 	metadataContainerBytes: number;
 	headingBytes: number;
+	bodySummaryBytes: number;
 	bodyBlockBytes: number;
 	exactTapeBytes: number;
 	hanRouteBytes: number;
@@ -138,6 +143,7 @@ export type ResidentBase = Readonly<{
 	docTable: ResidentDocTable;
 	familyLexicon: ResidentFamilyLexicon;
 	metadataContainers: ResidentMetadataContainerArena;
+	bodySummary: ResidentBodySummaryArena;
 	bodyBlocks: ResidentBodyBlockArena;
 	exactTapes: ResidentExactTapeArena;
 	hanRoute: ResidentHanRouteArena;

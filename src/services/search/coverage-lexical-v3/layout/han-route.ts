@@ -6,7 +6,6 @@ type HanRouteBuildInput = Readonly<{
 	metadataRouteDocIdsByBigram: readonly (readonly number[])[];
 	metadataHeadingDocIdsByBigram: readonly (readonly number[])[];
 	bodyBlockIdsByBigram: readonly (readonly number[])[];
-	bodyHanExactTapeOffsetsByBlockId: readonly number[];
 	identityWitnessFamilyIdsByDoc: readonly (readonly number[])[];
 	routeWitnessFamilyIdsByDoc: readonly (readonly number[])[];
 	headingWitnessFamilyIdsByDoc: readonly (readonly number[])[];
@@ -20,7 +19,6 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 		metadataRouteDocIdsByBigram: [],
 		metadataHeadingDocIdsByBigram: [],
 		bodyBlockIdsByBigram: [],
-		bodyHanExactTapeOffsetsByBlockId: [],
 		identityWitnessFamilyIdsByDoc: [],
 		routeWitnessFamilyIdsByDoc: [],
 		headingWitnessFamilyIdsByDoc: [],
@@ -53,7 +51,6 @@ export function buildHanRouteArena(
 		bodyBlockPostingStarts: bodyBuckets.starts,
 		bodyBlockPostingCounts: bodyBuckets.counts,
 		bodyBlockIds: bodyBuckets.ids,
-		bodyHanExactTapeOffsets: Uint32Array.from(input.bodyHanExactTapeOffsetsByBlockId),
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
 		identityWitnessCountByDocId: identityWitnessBuckets.counts,
 		identityWitnessFamilyIds: identityWitnessBuckets.ids,
@@ -105,7 +102,6 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 		arena.bodyBlockPostingStarts.byteLength +
 		arena.bodyBlockPostingCounts.byteLength +
 		arena.bodyBlockIds.byteLength +
-		arena.bodyHanExactTapeOffsets.byteLength +
 		arena.identityWitnessStartByDocId.byteLength +
 		arena.identityWitnessCountByDocId.byteLength +
 		arena.identityWitnessFamilyIds.byteLength +

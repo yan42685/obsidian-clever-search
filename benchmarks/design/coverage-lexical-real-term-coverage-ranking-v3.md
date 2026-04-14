@@ -772,3 +772,26 @@ real-term worldview:
   witness path for opaque confirmation without restoring Han surface ranking
 - the V3 regression baseline now verifies
   `metadata dual hit > body dual hit > split hit`
+
+### Phase 6
+
+Status: Completed on 2026-04-14
+
+The current implementation now moves V3 body recall and body-window ranking
+closer to the intended local-window worldview:
+
+- ordinary body shortlist no longer scans every document block; it now uses
+  `summary family -> blockIds` postings as a recall-first gate
+- Han body route postings still join the shortlist through the same block-level
+  candidate set
+- the old per-block pseudo-window calculation has been replaced by a
+  chain-aware local window resolver over shortlisted blocks
+- body windows are now admitted only when they satisfy explicit locality
+  constraints on covered units, width, and adjacent-gap spread
+- adjacent paragraph blocks can form a weaker body window, while dispersed body
+  hits no longer inflate into a false `bodyWindow(2)`
+- unused resident fields from the previous body shortlist/body-window path have
+  been removed, and resident metrics now account for the new body summary
+  posting arena
+- the V3 regression baseline now verifies:
+  `metadata 2 > same-block bodyWindow 2 > adjacent-block bodyWindow 2 > metadata 1 + body 1 > dispersed body`

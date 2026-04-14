@@ -1,4 +1,5 @@
 import { estimateBodyBlockBytes } from "../layout/body-blocks";
+import { estimateBodySummaryBytes } from "../layout/body-summary-postings";
 import { estimateDocTableBytes } from "../layout/doc-table";
 import { estimateExactTapeBytes } from "../layout/exact-tapes";
 import { estimateFamilyLexiconBytes } from "../layout/family-lexicon";
@@ -26,6 +27,7 @@ type MetricsBuildInput = Readonly<{
 	familyLexicon: ResidentFamilyLexicon;
 	metadataContainers: ResidentMetadataContainerArena;
 	bodyBlocks: ResidentBodyBlockArena;
+	bodySummary: ResidentBase["bodySummary"];
 	exactTapes: ResidentExactTapeArena;
 	hanRoute: ResidentHanRouteArena;
 	auxiliaryBytes: number;
@@ -45,6 +47,7 @@ export function buildResidentBaseMetrics(
 		input.metadataContainers,
 	);
 	const headingBytes = estimateHeadingBytes(input.metadataContainers);
+	const bodySummaryBytes = estimateBodySummaryBytes(input.bodySummary);
 	const bodyBlockBytes = estimateBodyBlockBytes(input.bodyBlocks);
 	const exactTapeBytes = estimateExactTapeBytes(input.exactTapes);
 	const hanRouteBytes = estimateHanRouteBytes(input.hanRoute);
@@ -55,6 +58,7 @@ export function buildResidentBaseMetrics(
 		familyLexiconBytes +
 		metadataContainerBytes +
 		headingBytes +
+		bodySummaryBytes +
 		bodyBlockBytes +
 		exactTapeBytes +
 		hanRouteBytes +
@@ -65,6 +69,7 @@ export function buildResidentBaseMetrics(
 		familyLexiconBytes,
 		metadataContainerBytes,
 		headingBytes,
+		bodySummaryBytes,
 		bodyBlockBytes,
 		exactTapeBytes,
 		hanRouteBytes,
@@ -108,6 +113,11 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 				metrics.residentBytes,
 			),
 			buildBucketShare("headingBytes", metrics.headingBytes, metrics.residentBytes),
+			buildBucketShare(
+				"bodySummaryBytes",
+				metrics.bodySummaryBytes,
+				metrics.residentBytes,
+			),
 			buildBucketShare("bodyBlockBytes", metrics.bodyBlockBytes, metrics.residentBytes),
 			buildBucketShare("exactTapeBytes", metrics.exactTapeBytes, metrics.residentBytes),
 			buildBucketShare("hanRouteBytes", metrics.hanRouteBytes, metrics.residentBytes),

@@ -2,13 +2,12 @@ import type { ResidentBase } from "../layout/types";
 import { encodeHanBigramId } from "../query";
 import type { V3QueryAnalysis } from "../query/analysis";
 import {
+	collectBodySummaryBlockIds,
 	collectHanBodyBlockIds,
 	collectHanMetadataHeadingDocIds,
 	collectHanMetadataIdentityDocIds,
 	collectHanMetadataRouteDocIds,
 	collectPostingDocIds,
-	getBodyBlockSummaryFamilyIds,
-	getDocBodyBlockIds,
 } from "./access";
 import type {
 	V3CandidateDocRecall,
@@ -58,20 +57,15 @@ export function recallCandidateDocs(
 		}
 	}
 
-	for (let docId = 0; docId < base.docTable.docCount; docId += 1) {
-		const bodyBlockIds = getDocBodyBlockIds(base, docId);
-		for (const blockId of bodyBlockIds) {
-			const summaryFamilyIds = getBodyBlockSummaryFamilyIds(base, blockId);
-			if (
-				!summaryFamilyIds.some((familyId) =>
-					unitFamilyMatches.some((unitMatches) =>
-						unitMatches.matches.some((match) => match.familyId === familyId),
-					),
-				)
-			) {
-				continue;
+	for (const unitMatches of unitFamilyMatches) {
+		for (const match of unitMatches.matches) {
+			for (const blockId of collectBodySummaryBlockIds(base, match.familyId)) {
+				const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
+				if (docId < 0) {
+					continue;
+				}
+				getOrCreateRecallBucket(recallByDocId, docId).bodyBlocks.add(blockId);
 			}
-			getOrCreateRecallBucket(recallByDocId, docId).bodyBlocks.add(blockId);
 		}
 	}
 

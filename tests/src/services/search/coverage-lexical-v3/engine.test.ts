@@ -217,7 +217,7 @@ describe("coverage lexical v3 engine", () => {
 		expect(result.rankedCandidates[0].identityContainer?.coveredDistinctUnitCount).toBe(2);
 		expect(result.rankedCandidates[1].bodyWindowContainer?.coveredDistinctUnitCount).toBe(2);
 		expect(result.rankedCandidates[2].identityContainer?.coveredDistinctUnitCount).toBe(1);
-		expect(result.rankedCandidates[2].bodyWindowContainer?.coveredDistinctUnitCount).toBe(1);
+		expect(result.rankedCandidates[2].bodyWindowContainer).toBeNull();
 	});
 
 	test("heading han real terms corroborate body but do not form standalone realized coverage", () => {
@@ -262,5 +262,64 @@ describe("coverage lexical v3 engine", () => {
 		expect(
 			result.rankedCandidates[0].bodyWindowContainer?.headingCorroboration.unitCount,
 		).toBeGreaterThan(0);
+	});
+
+	test("metadata split hit outranks dispersed same-block body hits that fail bodyWindow admission", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/split.md",
+				basename: "cache",
+				folder: "latin",
+				content: "restore",
+			}),
+			createDocument({
+				path: "latin/dispersed-body.md",
+				basename: "notes",
+				folder: "latin",
+				content: "cache one two three four five six restore",
+			}),
+		]);
+
+		const result = engine.search("cache restore");
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"latin/split.md",
+			"latin/dispersed-body.md",
+		]);
+		expect(result.rankedCandidates[0].identityContainer?.coveredDistinctUnitCount).toBe(1);
+		expect(result.rankedCandidates[0].bodyWindowContainer).toBeNull();
+		expect(result.rankedCandidates[1].bodyWindowContainer).toBeNull();
+	});
+
+	test("adjacent blocks can form a weaker chain bodyWindow", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/same-block.md",
+				basename: "notes",
+				folder: "latin",
+				content: "cache restore",
+			}),
+			createDocument({
+				path: "latin/adjacent-blocks.md",
+				basename: "notes",
+				folder: "latin",
+				content: "cache\n\nrestore",
+			}),
+		]);
+
+		const result = engine.search("cache restore");
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"latin/same-block.md",
+			"latin/adjacent-blocks.md",
+		]);
+		expect(result.rankedCandidates[0].bodyWindowContainer?.blockIds).toEqual([2]);
+		expect(result.rankedCandidates[1].bodyWindowContainer?.blockIds).toEqual([0, 1]);
+		expect(
+			(result.rankedCandidates[0].bodyWindowContainer?.containerCompactness ?? 0) >
+				(result.rankedCandidates[1].bodyWindowContainer?.containerCompactness ?? 0),
+		).toBe(true);
 	});
 });

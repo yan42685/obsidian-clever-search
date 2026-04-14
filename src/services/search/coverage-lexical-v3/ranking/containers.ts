@@ -19,9 +19,7 @@ import type {
 	V3QueryFamilyMatch,
 	V3QueryUnitFamilyMatches,
 } from "../recall";
-import {
-	compareContainerStrength,
-} from "./comparator";
+import { compareContainerStrength } from "./comparator";
 import type {
 	BodyWindowContainer,
 	EvidenceContainer,
@@ -32,6 +30,33 @@ import type {
 	RealizedQueryUnitFamily,
 	RouteContainer,
 } from "./types";
+
+const CHAIN_BOUNDARY_PENALTY = 2;
+
+type BodyOccurrence = Readonly<{
+	blockId: number;
+	unitIndex: number;
+	match: V3QueryFamilyMatch;
+	localPosition: number;
+	virtualPosition: number;
+}>;
+
+type BodyWindowCandidate = Readonly<{
+	tier: "bodyWindow";
+	blockIds: readonly number[];
+	boundaryCrossingCount: number;
+	coveredUnitIndices: readonly number[];
+	coveredDistinctUnitCount: number;
+	containerCompactness: number;
+	exactUnitCount: number;
+	windowWidth: number;
+	gapCount: number;
+	density: number;
+	maxAdjacentGap: number;
+	preservesQueryOrder: boolean;
+	windowStart: number;
+	headingCorroboration: HeadingCorroboration;
+}>;
 
 export function buildPackingProfile(
 	base: ResidentBase,
@@ -60,16 +85,17 @@ export function buildPackingProfile(
 		routeFamilyIds,
 		headingFamilyIds,
 	);
-	const bodyMatchesByBlockId = new Map<number, Map<number, V3QueryFamilyMatch>>();
-	const bodyPositionsByBlockId = new Map<number, Map<number, number>>();
+	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
+	const bodyBlockIdsByUnitFamily = new Map<number, Map<number, Set<number>>>();
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
 		const exactFamilyIds = getBodyBlockExactFamilyIds(base, blockId);
 		const witnessFamilyIds = getBodyBlockHanWitnessFamilyIds(base, blockId);
 		const tokenPositions = getBodyBlockExactTokenPositions(base, blockId);
-		const blockMatches = new Map<number, V3QueryFamilyMatch>();
-		const blockPositions = new Map<number, number>();
+		const blockOccurrences: BodyOccurrence[] = [];
 		for (const unitMatches of mergedUnitFamilyMatches) {
-			const blockMatch = findBestBlockMatch(
+			const occurrences = collectBlockOccurrences(
+				blockId,
+				unitMatches.queryUnitIndex,
 				unitMatches.matches,
 				unitMatches.queryUnitSource === "opaque_han_confirmed"
 					? witnessFamilyIds
@@ -78,24 +104,40 @@ export function buildPackingProfile(
 					? witnessFamilyIds.map((_, index) => index)
 					: tokenPositions,
 			);
-			if (blockMatch == null) {
+			if (occurrences.length === 0) {
 				continue;
 			}
-			blockMatches.set(unitMatches.queryUnitIndex, blockMatch.match);
-			blockPositions.set(unitMatches.queryUnitIndex, blockMatch.position);
+			blockOccurrences.push(...occurrences);
+			for (const occurrence of occurrences) {
+				let familyMap = bodyBlockIdsByUnitFamily.get(occurrence.unitIndex);
+				if (familyMap == null) {
+					familyMap = new Map<number, Set<number>>();
+					bodyBlockIdsByUnitFamily.set(occurrence.unitIndex, familyMap);
+				}
+				let blockIds = familyMap.get(occurrence.match.familyId);
+				if (blockIds == null) {
+					blockIds = new Set<number>();
+					familyMap.set(occurrence.match.familyId, blockIds);
+				}
+				blockIds.add(blockId);
+			}
 		}
-		if (blockMatches.size > 0) {
-			bodyMatchesByBlockId.set(blockId, blockMatches);
-			bodyPositionsByBlockId.set(blockId, blockPositions);
+		if (blockOccurrences.length > 0) {
+			bodyOccurrencesByBlockId.set(
+				blockId,
+				blockOccurrences.sort(compareBodyOccurrenceOrder),
+			);
 		}
 	}
 
 	const bestBodyWindowContainer = chooseBestBodyWindow(
-		bodyMatchesByBlockId,
-		bodyPositionsByBlockId,
+		base,
+		bodyOccurrencesByBlockId,
 		headingFamilyIds,
 	);
-	const bestBodyBlockId = bestBodyWindowContainer?.blockId ?? null;
+	const bestBodyWindowBlockIds = new Set<number>(
+		bestBodyWindowContainer?.blockIds ?? [],
+	);
 	const realizedFamilies = mergedUnitFamilyMatches
 		.map((unitMatches) =>
 			selectRealizedFamilyForUnit({
@@ -103,8 +145,8 @@ export function buildPackingProfile(
 				identityFamilyIds,
 				routeFamilyIds,
 				headingFamilyIds,
-				bodyMatchesByBlockId,
-				bestBodyBlockId,
+				bodyBlockIdsByUnitFamily,
+				bestBodyWindowBlockIds,
 			}),
 		)
 		.filter((realized): realized is RealizedQueryUnitFamily => realized != null);
@@ -196,38 +238,29 @@ function mergeCandidateSpecificHanConfirmedMatches(
 	});
 }
 
-function findBestBlockMatch(
+function collectBlockOccurrences(
+	blockId: number,
+	unitIndex: number,
 	matches: readonly V3QueryFamilyMatch[],
-	exactFamilyIds: readonly number[],
+	familyIds: readonly number[],
 	positions: readonly number[],
-): Readonly<{
-	match: V3QueryFamilyMatch;
-	position: number;
-}> | null {
-	let best:
-		| Readonly<{
-				match: V3QueryFamilyMatch;
-				position: number;
-		  }>
-		| null = null;
-	for (let index = 0; index < exactFamilyIds.length; index += 1) {
-		const familyId = exactFamilyIds[index];
+): BodyOccurrence[] {
+	const occurrences: BodyOccurrence[] = [];
+	for (let index = 0; index < familyIds.length; index += 1) {
+		const familyId = familyIds[index];
 		const match = matches.find((candidate) => candidate.familyId === familyId);
 		if (match == null) {
 			continue;
 		}
-		if (
-			best == null ||
-			compareMatchPreference(match, best.match) < 0 ||
-			(compareMatchPreference(match, best.match) === 0 && index < best.position)
-		) {
-			best = {
-				match,
-				position: positions[index] ?? index,
-			};
-		}
+		occurrences.push({
+			blockId,
+			unitIndex,
+			match,
+			localPosition: positions[index] ?? index,
+			virtualPosition: positions[index] ?? index,
+		});
 	}
-	return best;
+	return occurrences;
 }
 
 function compareMatchPreference(
@@ -261,69 +294,270 @@ function matchKindPreference(kind: V3QueryFamilyMatch["matchKind"]): number {
 	}
 }
 
+function compareBodyOccurrenceOrder(left: BodyOccurrence, right: BodyOccurrence): number {
+	if (left.localPosition !== right.localPosition) {
+		return left.localPosition - right.localPosition;
+	}
+	const preference = compareMatchPreference(left.match, right.match);
+	if (preference !== 0) {
+		return preference;
+	}
+	if (left.unitIndex !== right.unitIndex) {
+		return left.unitIndex - right.unitIndex;
+	}
+	return left.match.familyId - right.match.familyId;
+}
+
 function chooseBestBodyWindow(
-	bodyMatchesByBlockId: ReadonlyMap<number, Map<number, V3QueryFamilyMatch>>,
-	bodyPositionsByBlockId: ReadonlyMap<number, Map<number, number>>,
+	base: ResidentBase,
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
 	headingFamilyIds: ReadonlySet<number>,
 ): BodyWindowContainer | null {
-	const candidates = [...bodyMatchesByBlockId.entries()].map<BodyWindowContainer | null>(
-		([blockId, blockMatches]) => {
-			const coveredUnitIndices = [...blockMatches.keys()].sort((left, right) => left - right);
-			if (coveredUnitIndices.length === 0) {
-				return null;
+	const shortlistedBlockIds = [...bodyOccurrencesByBlockId.keys()].sort((left, right) => {
+		const leftOrdinal = base.bodyBlocks.blockOrdinalByBlockId[left] ?? left;
+		const rightOrdinal = base.bodyBlocks.blockOrdinalByBlockId[right] ?? right;
+		return leftOrdinal - rightOrdinal || left - right;
+	});
+	const candidates: BodyWindowCandidate[] = [];
+	for (const blockId of shortlistedBlockIds) {
+		const singleCandidate = buildBodyWindowCandidate(
+			base,
+			[blockId],
+			bodyOccurrencesByBlockId,
+			headingFamilyIds,
+		);
+		if (singleCandidate != null) {
+			candidates.push(singleCandidate);
+		}
+	}
+	for (let index = 0; index < shortlistedBlockIds.length - 1; index += 1) {
+		const leftBlockId = shortlistedBlockIds[index];
+		const rightBlockId = shortlistedBlockIds[index + 1];
+		const leftOrdinal = base.bodyBlocks.blockOrdinalByBlockId[leftBlockId] ?? leftBlockId;
+		const rightOrdinal = base.bodyBlocks.blockOrdinalByBlockId[rightBlockId] ?? rightBlockId;
+		if (rightOrdinal !== leftOrdinal + 1) {
+			continue;
+		}
+		const pairCandidate = buildBodyWindowCandidate(
+			base,
+			[leftBlockId, rightBlockId],
+			bodyOccurrencesByBlockId,
+			headingFamilyIds,
+		);
+		if (pairCandidate != null) {
+			candidates.push(pairCandidate);
+		}
+	}
+	return candidates.sort(compareBodyWindowCandidate)[0] ?? null;
+}
+
+function buildBodyWindowCandidate(
+	base: ResidentBase,
+	blockIds: readonly number[],
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+	headingFamilyIds: ReadonlySet<number>,
+): BodyWindowCandidate | null {
+	const virtualOccurrences = buildChainVirtualOccurrences(base, blockIds, bodyOccurrencesByBlockId);
+	if (virtualOccurrences.length === 0) {
+		return null;
+	}
+	let bestWindow: BodyWindowCandidate | null = null;
+	for (let start = 0; start < virtualOccurrences.length; start += 1) {
+		for (let end = start; end < virtualOccurrences.length; end += 1) {
+			const candidate = summarizeWindowCandidate(
+				virtualOccurrences.slice(start, end + 1),
+				headingFamilyIds,
+			);
+			if (candidate == null || !passesBodyWindowAdmission(candidate)) {
+				continue;
 			}
-			const positions = coveredUnitIndices
-				.map((unitIndex) => bodyPositionsByBlockId.get(blockId)?.get(unitIndex))
-				.filter((position): position is number => typeof position === "number")
-				.sort((left, right) => left - right);
-			const minPosition = positions[0] ?? 0;
-			const maxPosition = positions[positions.length - 1] ?? minPosition;
-			const windowWidth = maxPosition - minPosition + 1;
-			const gapCount = positions.reduce((gapTotal, position, index) => {
-				if (index === 0) {
-					return gapTotal;
-				}
-				return gapTotal + Math.max(0, position - positions[index - 1] - 1);
-			}, 0);
-			const density = coveredUnitIndices.length / Math.max(windowWidth, 1);
-			const headingCorroborationUnitIndices = coveredUnitIndices.filter((unitIndex) => {
-				const familyId = blockMatches.get(unitIndex)?.familyId;
-				return familyId !== undefined && headingFamilyIds.has(familyId);
+			if (bestWindow == null || compareBodyWindowCandidate(candidate, bestWindow) < 0) {
+				bestWindow = candidate;
+			}
+		}
+	}
+	return bestWindow;
+}
+
+function buildChainVirtualOccurrences(
+	base: ResidentBase,
+	blockIds: readonly number[],
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+): BodyOccurrence[] {
+	const out: BodyOccurrence[] = [];
+	let baseOffset = 0;
+	for (let index = 0; index < blockIds.length; index += 1) {
+		const blockId = blockIds[index];
+		const blockOccurrences = bodyOccurrencesByBlockId.get(blockId) ?? [];
+		for (const occurrence of blockOccurrences) {
+			out.push({
+				...occurrence,
+				virtualPosition: baseOffset + occurrence.localPosition,
 			});
-			return {
-				tier: "bodyWindow",
-				blockId,
-				coveredUnitIndices,
-				coveredDistinctUnitCount: coveredUnitIndices.length,
-				containerCompactness:
-					Math.round(density * 1000) - gapCount * 40 - Math.max(windowWidth - coveredUnitIndices.length, 0) * 20,
-				exactUnitCount: coveredUnitIndices.filter(
-					(unitIndex) => blockMatches.get(unitIndex)?.matchKind === "exact",
-				).length,
-				windowWidth,
-				gapCount,
-				density,
-				headingCorroboration: {
-					coveredUnitIndices: headingCorroborationUnitIndices,
-					unitCount: headingCorroborationUnitIndices.length,
-				},
-			};
-		},
+		}
+		baseOffset +=
+			(base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0) + CHAIN_BOUNDARY_PENALTY;
+	}
+	return out.sort((left, right) => {
+		if (left.virtualPosition !== right.virtualPosition) {
+			return left.virtualPosition - right.virtualPosition;
+		}
+		return compareBodyOccurrenceOrder(left, right);
+	});
+}
+
+function summarizeWindowCandidate(
+	windowOccurrences: readonly BodyOccurrence[],
+	headingFamilyIds: ReadonlySet<number>,
+): BodyWindowCandidate | null {
+	if (windowOccurrences.length === 0) {
+		return null;
+	}
+	const representativeByUnit = new Map<number, BodyOccurrence>();
+	for (const occurrence of windowOccurrences) {
+		const existing = representativeByUnit.get(occurrence.unitIndex);
+		if (existing == null || compareOccurrenceRepresentative(occurrence, existing) < 0) {
+			representativeByUnit.set(occurrence.unitIndex, occurrence);
+		}
+	}
+	const representatives = [...representativeByUnit.values()].sort((left, right) => {
+		if (left.virtualPosition !== right.virtualPosition) {
+			return left.virtualPosition - right.virtualPosition;
+		}
+		return left.unitIndex - right.unitIndex;
+	});
+	const coveredUnitIndices = [...representativeByUnit.keys()].sort((left, right) => left - right);
+	if (coveredUnitIndices.length === 0) {
+		return null;
+	}
+	const minPosition = representatives[0]?.virtualPosition ?? 0;
+	const maxPosition =
+		representatives[representatives.length - 1]?.virtualPosition ?? minPosition;
+	const windowWidth = maxPosition - minPosition + 1;
+	let totalGap = 0;
+	let maxAdjacentGap = 0;
+	for (let index = 1; index < representatives.length; index += 1) {
+		const gap = Math.max(
+			0,
+			representatives[index].virtualPosition -
+				representatives[index - 1].virtualPosition -
+				1,
+		);
+		totalGap += gap;
+		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
+	}
+	const blockIds = [...new Set(representatives.map((occurrence) => occurrence.blockId))].sort(
+		(left, right) => left - right,
 	);
-	return candidates
-		.filter((candidate): candidate is BodyWindowContainer => candidate != null)
-		.sort((left, right) => {
-			if (left.coveredDistinctUnitCount !== right.coveredDistinctUnitCount) {
-				return right.coveredDistinctUnitCount - left.coveredDistinctUnitCount;
-			}
-			if (left.containerCompactness !== right.containerCompactness) {
-				return right.containerCompactness - left.containerCompactness;
-			}
-			if (left.exactUnitCount !== right.exactUnitCount) {
-				return right.exactUnitCount - left.exactUnitCount;
-			}
-			return left.blockId - right.blockId;
-		})[0] ?? null;
+	const exactUnitCount = coveredUnitIndices.filter((unitIndex) => {
+		const representative = representativeByUnit.get(unitIndex);
+		return representative?.match.matchKind === "exact";
+	}).length;
+	const preservesQueryOrder = coveredUnitIndices.every((unitIndex, index) => {
+		if (index === 0) {
+			return true;
+		}
+		const previous = representativeByUnit.get(coveredUnitIndices[index - 1]);
+		const current = representativeByUnit.get(unitIndex);
+		return (previous?.virtualPosition ?? 0) <= (current?.virtualPosition ?? 0);
+	});
+	const boundaryCrossingCount = Math.max(0, blockIds.length - 1);
+	const density = coveredUnitIndices.length / Math.max(windowWidth, 1);
+	const headingCorroborationUnitIndices = coveredUnitIndices.filter((unitIndex) => {
+		const representative = representativeByUnit.get(unitIndex);
+		return (
+			representative != null &&
+			headingFamilyIds.has(representative.match.familyId)
+		);
+	});
+	return {
+		tier: "bodyWindow",
+		blockIds,
+		boundaryCrossingCount,
+		coveredUnitIndices,
+		coveredDistinctUnitCount: coveredUnitIndices.length,
+		containerCompactness:
+			coveredUnitIndices.length * 1000 -
+			windowWidth * 40 -
+			totalGap * 20 -
+			boundaryCrossingCount * 80,
+		exactUnitCount,
+		windowWidth,
+		gapCount: totalGap,
+		density,
+		maxAdjacentGap,
+		preservesQueryOrder,
+		windowStart: minPosition,
+		headingCorroboration: {
+			coveredUnitIndices: headingCorroborationUnitIndices,
+			unitCount: headingCorroborationUnitIndices.length,
+		},
+	};
+}
+
+function compareOccurrenceRepresentative(left: BodyOccurrence, right: BodyOccurrence): number {
+	const preference = compareMatchPreference(left.match, right.match);
+	if (preference !== 0) {
+		return preference;
+	}
+	if (left.virtualPosition !== right.virtualPosition) {
+		return left.virtualPosition - right.virtualPosition;
+	}
+	if (left.blockId !== right.blockId) {
+		return left.blockId - right.blockId;
+	}
+	return left.match.familyId - right.match.familyId;
+}
+
+function passesBodyWindowAdmission(candidate: BodyWindowCandidate): boolean {
+	return (
+		candidate.coveredDistinctUnitCount >= 2 &&
+		candidate.boundaryCrossingCount <= 1 &&
+		candidate.windowWidth <=
+			candidate.coveredDistinctUnitCount * 4 + candidate.boundaryCrossingCount * 3 &&
+		candidate.maxAdjacentGap <= 4 + candidate.boundaryCrossingCount * 2
+	);
+}
+
+function compareBodyWindowCandidate(
+	left: BodyWindowCandidate,
+	right: BodyWindowCandidate,
+): number {
+	if (left.coveredDistinctUnitCount !== right.coveredDistinctUnitCount) {
+		return right.coveredDistinctUnitCount - left.coveredDistinctUnitCount;
+	}
+	if (left.exactUnitCount !== right.exactUnitCount) {
+		return right.exactUnitCount - left.exactUnitCount;
+	}
+	if (left.preservesQueryOrder !== right.preservesQueryOrder) {
+		return left.preservesQueryOrder ? -1 : 1;
+	}
+	if (left.windowWidth !== right.windowWidth) {
+		return left.windowWidth - right.windowWidth;
+	}
+	if (left.maxAdjacentGap !== right.maxAdjacentGap) {
+		return left.maxAdjacentGap - right.maxAdjacentGap;
+	}
+	if (left.gapCount !== right.gapCount) {
+		return left.gapCount - right.gapCount;
+	}
+	if (left.windowStart !== right.windowStart) {
+		return left.windowStart - right.windowStart;
+	}
+	if (left.boundaryCrossingCount !== right.boundaryCrossingCount) {
+		return left.boundaryCrossingCount - right.boundaryCrossingCount;
+	}
+	return compareBlockIdLists(left.blockIds, right.blockIds);
+}
+
+function compareBlockIdLists(left: readonly number[], right: readonly number[]): number {
+	const length = Math.min(left.length, right.length);
+	for (let index = 0; index < length; index += 1) {
+		if (left[index] !== right[index]) {
+			return left[index] - right[index];
+		}
+	}
+	return left.length - right.length;
 }
 
 function selectRealizedFamilyForUnit(params: Readonly<{
@@ -331,17 +565,19 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 	identityFamilyIds: ReadonlySet<number>;
 	routeFamilyIds: ReadonlySet<number>;
 	headingFamilyIds: ReadonlySet<number>;
-	bodyMatchesByBlockId: ReadonlyMap<number, Map<number, V3QueryFamilyMatch>>;
-	bestBodyBlockId: number | null;
+	bodyBlockIdsByUnitFamily: ReadonlyMap<number, ReadonlyMap<number, ReadonlySet<number>>>;
+	bestBodyWindowBlockIds: ReadonlySet<number>;
 }>): RealizedQueryUnitFamily | null {
+	const unitBodySupport = params.bodyBlockIdsByUnitFamily.get(params.unitMatches.queryUnitIndex);
 	const candidates = params.unitMatches.matches
 		.map((match) => {
-			const bodyBlockIds = [...params.bodyMatchesByBlockId.entries()]
-				.filter(([, blockMatches]) => blockMatches.get(params.unitMatches.queryUnitIndex)?.familyId === match.familyId)
-				.map(([blockId]) => blockId);
-			const inBestBodyWindow =
-				params.bestBodyBlockId != null && bodyBlockIds.includes(params.bestBodyBlockId);
-			const inBodyResidue = bodyBlockIds.some((blockId) => blockId !== params.bestBodyBlockId);
+			const bodyBlockIds = [...(unitBodySupport?.get(match.familyId) ?? [])];
+			const inBestBodyWindow = bodyBlockIds.some((blockId) =>
+				params.bestBodyWindowBlockIds.has(blockId),
+			);
+			const inBodyResidue = bodyBlockIds.some(
+				(blockId) => !params.bestBodyWindowBlockIds.has(blockId),
+			);
 			const inIdentity = params.identityFamilyIds.has(match.familyId);
 			const inRoute = params.routeFamilyIds.has(match.familyId);
 			const inHeading = params.headingFamilyIds.has(match.familyId);
@@ -442,6 +678,7 @@ function bindBodyWindowToRealizedFamilies(
 	bodyWindow: BodyWindowContainer,
 	realizedFamilies: readonly RealizedQueryUnitFamily[],
 ): BodyWindowContainer {
+	const bodyWindowBlockIds = new Set<number>(bodyWindow.blockIds);
 	const coveredUnitIndices = realizedFamilies
 		.filter((family) => family.inBestBodyWindow)
 		.map((family) => family.queryUnitIndex)
@@ -450,8 +687,10 @@ function bindBodyWindowToRealizedFamilies(
 		.filter((family) => family.inBestBodyWindow && family.inHeading)
 		.map((family) => family.queryUnitIndex)
 		.sort((left, right) => left - right);
+	const blockIds = bodyWindow.blockIds.filter((blockId) => bodyWindowBlockIds.has(blockId));
 	return {
 		...bodyWindow,
+		blockIds,
 		coveredUnitIndices,
 		coveredDistinctUnitCount: coveredUnitIndices.length,
 		exactUnitCount: realizedFamilies.filter(

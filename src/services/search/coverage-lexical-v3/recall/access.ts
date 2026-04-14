@@ -65,14 +65,14 @@ export function getDocBodyBlockIds(
 	return Array.from({ length: count }, (_, index) => start + index);
 }
 
-export function getBodyBlockSummaryFamilyIds(
+export function collectBodySummaryBlockIds(
 	base: ResidentBase,
-	blockId: number,
+	familyId: number,
 ): number[] {
 	return sliceUint32Array(
-		base.bodyBlocks.summaryFamilyIds,
-		base.bodyBlocks.summaryStartByBlockId[blockId] ?? 0,
-		base.bodyBlocks.summaryCountByBlockId[blockId] ?? 0,
+		base.bodySummary.postings.blockIds,
+		base.bodySummary.postings.postingStarts[familyId] ?? 0,
+		base.bodySummary.postings.postingCounts[familyId] ?? 0,
 	);
 }
 
@@ -207,13 +207,6 @@ export function collectHanBodyBlockIds(
 		base.hanRoute.bodyBlockPostingStarts[bigramIndex] ?? 0,
 		base.hanRoute.bodyBlockPostingCounts[bigramIndex] ?? 0,
 	);
-}
-
-export function getHanBodyExactTapeOffset(
-	base: ResidentBase,
-	blockId: number,
-): number {
-	return base.hanRoute.bodyHanExactTapeOffsets[blockId] ?? 0;
 }
 
 function sliceUint32Array(values: Uint32Array, start: number, count: number): number[] {
