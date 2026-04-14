@@ -1,15 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { IndexedDocument } from "src/globals/search-types";
-import {
-	buildResidentBase,
-	describeResidentBase,
-} from "src/services/search/coverage-lexical-v3";
+import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
+import { describeResidentBase } from "src/services/search/coverage-lexical-v3/metrics";
 
 const originalDescribe = global.describe;
 (global as typeof global & { describe: typeof describe }).describe = ((_: string, __: () => void) =>
 	undefined) as typeof describe;
-const fixtureModule = require("../coverage-lexical-automation-benchmark.bench") as {
+const fixtureModule = require("../coverage-lexical-legacy-automation-benchmark.bench") as {
 	createAutomationCorpus(): {
 		documents: IndexedDocument[];
 		queryCases: Array<{ query: string; relevantPath: string }>;
@@ -49,6 +47,6 @@ describe("coverage lexical v3 size anchor", () => {
 		expect(residentBase.metrics.residentBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
 		expect(residentBase.metrics["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
-		expect(summary.buckets).toHaveLength(9);
+		expect(summary.buckets).toHaveLength(10);
 	});
 });

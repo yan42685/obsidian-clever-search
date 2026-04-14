@@ -23,7 +23,7 @@ process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT = "1";
 const {
 	createAutomationCorpus,
 	createMockTokenizer,
-} = require("./coverage-lexical-automation-benchmark.bench") as {
+} = require("./coverage-lexical-legacy-automation-benchmark.bench") as {
 	createAutomationCorpus(): {
 		documents: Array<{
 			path: string;

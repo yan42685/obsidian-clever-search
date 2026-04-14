@@ -1,4 +1,4 @@
-﻿import path from "path";
+import path from "path";
 
 export const OBJECTIVE_WEIGHTS = {
 	hits1: 0.55,
@@ -47,7 +47,7 @@ export const DEFAULT_LATEST_REPORT = path.join(
 export const DEFAULT_BENCHMARK_ARGS = [
 	"node_modules/jest/bin/jest.js",
 	"--config",
-	"jest.coverage-lexical-benchmark.config.js",
+	"jest.coverage-lexical-legacy-benchmark.config.js",
 	"--runInBand",
 ];
 

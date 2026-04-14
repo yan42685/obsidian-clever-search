@@ -1,4 +1,4 @@
-﻿import fs from "fs/promises";
+import fs from "fs/promises";
 import path from "path";
 import type { IndexedDocument } from "src/globals/search-types";
 import {
@@ -215,7 +215,7 @@ describe("coverage lexical v2 real vault size anchor", () => {
 		async () => {
 			process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT = "1";
 			const { createMockTokenizer } = require(
-				"./coverage-lexical-automation-benchmark.bench",
+				"./coverage-lexical-legacy-automation-benchmark.bench",
 			) as {
 				createMockTokenizer: () => unknown;
 			};

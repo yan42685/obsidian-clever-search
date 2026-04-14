@@ -43,7 +43,7 @@ type QueryCase = {
 const originalDescribe = global.describe;
 (global as typeof global & { describe: typeof describe }).describe = ((_: string, __: () => void) =>
 	undefined) as typeof describe;
-const fixtureModule = require("./coverage-lexical-automation-benchmark.bench") as {
+const fixtureModule = require("./coverage-lexical-legacy-automation-benchmark.bench") as {
 	createAutomationCorpus(): {
 		documents: IndexedDocument[];
 		queryCases: QueryCase[];
@@ -128,7 +128,7 @@ describe("coverage lexical automation corpus export", () => {
 				"Materialized synthetic corpus used by coverage-lexical-automation-benchmark.",
 			generatedAt: new Date().toISOString(),
 			sourceModule:
-				"tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts#createAutomationCorpus",
+				"tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts#createAutomationCorpus",
 			outputRoot: path.relative(repoRoot, outputRoot).replaceAll("\\", "/"),
 			layout: {
 				vaultRoot: "vault",

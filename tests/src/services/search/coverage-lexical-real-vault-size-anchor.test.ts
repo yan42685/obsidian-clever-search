@@ -244,7 +244,7 @@ describe("coverage lexical real vault size anchor", () => {
 	realVaultAnchorTest("measures live index bytes on the current Test-Vault", async () => {
 		process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT = "1";
 		const { createMockTokenizer } = require(
-			"./coverage-lexical-automation-benchmark.bench",
+			"./coverage-lexical-legacy-automation-benchmark.bench",
 		) as {
 			createMockTokenizer: () => unknown;
 		};

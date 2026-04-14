@@ -60,7 +60,7 @@ describe("coverage lexical startup snapshot benchmark", () => {
 	test("measures rebuild versus binary snapshot hydrate on the automation corpus", async () => {
 		process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT = "1";
 		const benchmarkFixtures = require(
-			"./coverage-lexical-automation-benchmark.bench",
+			"./coverage-lexical-legacy-automation-benchmark.bench",
 		) as {
 			createMockTokenizer: () => unknown;
 			createAutomationCorpus: () => {

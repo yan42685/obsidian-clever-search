@@ -830,3 +830,20 @@ into a full family scan:
   preferring smaller completion gain and then non-compound tokens
 - the V3 regression baseline now verifies that `prefe` keeps the exact family
   and caps prefix realizations to a loose bounded set
+
+### Phase 9
+
+Status: Completed on 2026-04-14
+
+The current implementation now has a dedicated V3 automation benchmark while
+preserving the older continuity harness as legacy:
+
+- the former `coverage-lexical` automation benchmark file is now explicitly
+  marked legacy
+- the current `npm run benchmark:coverage-lexical` entry now targets a V3-only
+  benchmark harness
+- the V3 harness reuses the legacy automation corpus, query cases, and core
+  summary metrics
+- the V3 report now compares only `CoverageLexical(V3)` against `MiniSearch`
+- the legacy continuity harness remains available through
+  `npm run benchmark:coverage-lexical:legacy`

@@ -485,7 +485,7 @@ function loadAutomationCorpus(): {
 		globalScope[hookName] = noop;
 	}
 	try {
-		const modulePath = require.resolve("./coverage-lexical-automation-benchmark.bench");
+		const modulePath = require.resolve("./coverage-lexical-legacy-automation-benchmark.bench");
 		delete require.cache[modulePath];
 		const fixtureModule = require(modulePath) as {
 			createAutomationCorpus: () => {

@@ -2296,7 +2296,7 @@ function buildRecallContractCases(): RecallContractCase[] {
 	];
 }
 
-function createEngineHarness(
+export function createEngineHarness(
 	EngineCtor: new () => EngineLike,
 	tokenizer: MockTokenizer,
 	backend: "minisearch" | "coverage-lexical",
@@ -2630,7 +2630,10 @@ function estimateIndexBytes(engine: EngineLike): number {
 	}
 }
 
-function computeRelativeRatio(numerator: number, denominator: number): number | null {
+export function computeRelativeRatio(
+	numerator: number,
+	denominator: number,
+): number | null {
 	if (
 		!Number.isFinite(numerator) ||
 		!Number.isFinite(denominator) ||
@@ -2653,7 +2656,7 @@ function documentText(document: IndexedDocument): string {
 	].join("\n");
 }
 
-function computeLanguageMix(documents: IndexedDocument[]): {
+export function computeLanguageMix(documents: IndexedDocument[]): {
 	docsWithHan: number;
 	docsWithLatinAndHan: number;
 	hanRatio: number;
@@ -2681,7 +2684,9 @@ function computeLanguageMix(documents: IndexedDocument[]): {
 	};
 }
 
-function computeQueryLanguageMix(queryCases: QueryCase[]): Record<QueryLanguageBucket, number> {
+export function computeQueryLanguageMix(
+	queryCases: QueryCase[],
+): Record<QueryLanguageBucket, number> {
 	return queryCases.reduce<Record<QueryLanguageBucket, number>>(
 		(acc, queryCase) => {
 			acc[detectQueryLanguageBucket(queryCase.query)] += 1;
@@ -2695,7 +2700,7 @@ function computeQueryLanguageMix(queryCases: QueryCase[]): Record<QueryLanguageB
 	);
 }
 
-async function runBenchmark(
+export async function runBenchmark(
 	name: string,
 	engine: EngineLike,
 	documents: IndexedDocument[],
@@ -3842,7 +3847,7 @@ function summarizeIndexTiming(indexTiming: IndexTimingSummary | null) {
 	};
 }
 
-function round(value: number): number {
+export function round(value: number): number {
 	return Number(value.toFixed(3));
 }
 
@@ -4007,7 +4012,7 @@ function shouldPrintCoverageLexicalBenchmarkDiagnostic(
 }
 
 if (process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT !== "1") {
-describe("coverage lexical automation benchmark", () => {
+describe("coverage lexical legacy automation benchmark", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
 			(container as any).reset();
@@ -4032,7 +4037,7 @@ describe("coverage lexical automation benchmark", () => {
 		}
 	});
 
-	test("compare coverage lexical against minisearch on automation corpus", async () => {
+	test("compare coverage lexical legacy against minisearch on automation corpus", async () => {
 		const benchmarkStartedAt = performance.now();
 		const diagnostics = resolveCoverageLexicalBenchmarkDiagnostics();
 		const includeOffloadDiagnostics =
@@ -4331,7 +4336,7 @@ describe("coverage lexical automation benchmark", () => {
 		const benchmarkElapsedMs = performance.now() - benchmarkStartedAt;
 
 		console.log(
-			"[coverage-lexical-automation-benchmark] corpus",
+			"[coverage-lexical-legacy-automation-benchmark] corpus",
 			JSON.stringify(
 				{
 					noteCount: documents.length,
@@ -4380,7 +4385,7 @@ describe("coverage lexical automation benchmark", () => {
 
 		if (includePruneDiagnostics) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] display-prune-config",
+				"[coverage-lexical-legacy-automation-benchmark] display-prune-config",
 				JSON.stringify(
 					displayPruneConfig,
 					null,
@@ -4389,7 +4394,7 @@ describe("coverage lexical automation benchmark", () => {
 			);
 		}
 		console.log(
-			"[coverage-lexical-automation-benchmark] summary",
+			"[coverage-lexical-legacy-automation-benchmark] summary",
 			JSON.stringify(
 				[
 					miniResult.summary,
@@ -4450,7 +4455,7 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 		console.log(
-			"[coverage-lexical-automation-benchmark] intent-gates",
+			"[coverage-lexical-legacy-automation-benchmark] intent-gates",
 			JSON.stringify(
 				[
 					miniResult.summary,
@@ -4476,7 +4481,7 @@ describe("coverage lexical automation benchmark", () => {
 			),
 		);
 		console.log(
-			"[coverage-lexical-automation-benchmark] relative-anchor",
+			"[coverage-lexical-legacy-automation-benchmark] relative-anchor",
 			JSON.stringify(
 				{
 					primaryNote:
@@ -4514,7 +4519,7 @@ describe("coverage lexical automation benchmark", () => {
 		);
 		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "index")) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] index-breakdown",
+				"[coverage-lexical-legacy-automation-benchmark] index-breakdown",
 				JSON.stringify(
 					{
 						MiniSearch: mini.getIndexBreakdown?.() ?? null,
@@ -4530,7 +4535,7 @@ describe("coverage lexical automation benchmark", () => {
 		}
 		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "timing")) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-phase-timing",
+				"[coverage-lexical-legacy-automation-benchmark] coverage-phase-timing",
 				JSON.stringify(
 					{
 						indexV2: summarizeIndexTiming(coverageV2Result.indexTiming),
@@ -4543,7 +4548,7 @@ describe("coverage lexical automation benchmark", () => {
 		}
 		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "wins")) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-v2-vs-mini",
+				"[coverage-lexical-legacy-automation-benchmark] coverage-v2-vs-mini",
 				JSON.stringify(coverageV2VsMini, null, 2),
 			);
 		}
@@ -4554,23 +4559,23 @@ describe("coverage lexical automation benchmark", () => {
 			)
 		) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] disagreement-digest-v2-vs-mini",
+				"[coverage-lexical-legacy-automation-benchmark] disagreement-digest-v2-vs-mini",
 				JSON.stringify(v2VsMiniDisagreementDigest, null, 2),
 			);
 		}
 		if (shouldPrintCoverageLexicalBenchmarkDiagnostic(diagnostics, "misses")) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] coverage-v2-misses",
+				"[coverage-lexical-legacy-automation-benchmark] coverage-v2-misses",
 				JSON.stringify(coverageV2Misses, null, 2),
 			);
 			console.log(
-				"[coverage-lexical-automation-benchmark] mini-misses",
+				"[coverage-lexical-legacy-automation-benchmark] mini-misses",
 				JSON.stringify(miniMisses, null, 2),
 			);
 		}
 		if (includeOffloadDiagnostics) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] offload-diagnostics-v2",
+				"[coverage-lexical-legacy-automation-benchmark] offload-diagnostics-v2",
 				JSON.stringify(
 					summarizeOffloadDiagnostics(coverageV2Result.outcomes),
 					null,
@@ -4580,7 +4585,7 @@ describe("coverage lexical automation benchmark", () => {
 		}
 		if (includeCandidateCascadeDiagnostics) {
 			console.log(
-				"[coverage-lexical-automation-benchmark] candidate-cascade-diagnostics-v2",
+				"[coverage-lexical-legacy-automation-benchmark] candidate-cascade-diagnostics-v2",
 				JSON.stringify(
 					summarizeCoverageLexicalCandidateCascadeDiagnostics(
 						coverageV2Result.outcomes,
