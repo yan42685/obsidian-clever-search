@@ -551,7 +551,7 @@ describe("coverage lexical v2 cascade", () => {
 		]);
 	});
 
-	test("applies stageA pruning by potential primary coverage according to mode", async () => {
+	test("late result prune keeps candidates with confirmedTotalPrimaryCount within strict gap", async () => {
 		const queryText = "alpha beta gamma";
 		const queryTerms = ["alpha", "beta", "gamma"];
 		const { reader } = createStorageReader({
@@ -599,32 +599,168 @@ describe("coverage lexical v2 cascade", () => {
 			matchOptions: {},
 		});
 
-		expect(standardResult.trace.pruneStages.stageA.applied).toBe(true);
-		expect(standardResult.trace.pruneStages.stageA.allowedGap).toBe(2);
-		expect(standardResult.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
-		expect(standardResult.trace.pruneStages.stageA.retainedCandidateIds).toEqual([
-			"1",
-			"2",
-			"3",
+		expect(
+			standardResult.candidateStates
+				.map((candidateState) => candidateState.path)
+				.sort(),
+		).toEqual(["notes/leader.md", "notes/mid.md", "notes/tail.md"]);
+		expect(standardResult.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/leader.md",
+			"notes/mid.md",
+			"notes/tail.md",
 		]);
-		expect(standardResult.candidateStates.map((candidateState) => candidateState.path)).toEqual([
+
+		expect(
+			strictResult.candidateStates
+				.map((candidateState) => candidateState.path)
+				.sort(),
+		).toEqual(["notes/leader.md", "notes/mid.md", "notes/tail.md"]);
+		expect(strictResult.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/leader.md",
 			"notes/mid.md",
 		]);
+	});
 
-		expect(strictResult.trace.pruneStages.stageA.applied).toBe(true);
-		expect(strictResult.trace.pruneStages.stageA.allowedGap).toBe(1);
-		expect(strictResult.trace.pruneStages.stageA.droppedCandidateIds).toEqual(["3"]);
-		expect(strictResult.trace.pruneStages.stageA.retainedCandidateIds).toEqual([
-			"1",
-			"2",
-		]);
-		expect(strictResult.candidateStates.map((candidateState) => candidateState.path)).toEqual([
+	test("late result prune keeps candidates with confirmedTotalPrimaryCount within standard gap", async () => {
+		const queryText = "alpha beta gamma";
+		const queryTerms = ["alpha", "beta", "gamma"];
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/leader.md",
+					basenameText: "alpha beta gamma",
+				},
+				{
+					docId: 2,
+					path: "notes/mid.md",
+					basenameText: "alpha beta",
+				},
+				{
+					docId: 3,
+					path: "notes/tail.md",
+					basenameText: "alpha",
+				},
+			],
+			postings: {
+				"basename:alpha": [1, 2, 3],
+				"basename:beta": [1, 2],
+				"basename:gamma": [1],
+			},
+			lexicon: ["alpha", "beta", "gamma"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "standard",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/leader.md",
+			"notes/mid.md",
+			"notes/tail.md",
 		]);
 	});
 
-	test("applies stageB pruning after verified Han bigram promotion", async () => {
+	test("late result prune does not use potentialPrimaryCoverageCount", async () => {
+		const queryText = "alpha beta gamma";
+		const queryTerms = ["alpha", "beta", "gamma"];
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/leader.md",
+					basenameText: "alpha beta gamma",
+				},
+				{
+					docId: 2,
+					path: "notes/mid.md",
+					basenameText: "alpha beta",
+				},
+				{
+					docId: 3,
+					path: "notes/tail.md",
+					basenameText: "alpha",
+				},
+			],
+			postings: {
+				"basename:alpha": [1, 2, 3],
+				"basename:beta": [1, 2],
+				"basename:gamma": [1],
+			},
+			lexicon: ["alpha", "beta", "gamma"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "strict",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(
+			result.candidateStates.map((candidateState) => candidateState.path).sort(),
+		).toEqual(["notes/leader.md", "notes/mid.md", "notes/tail.md"]);
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/leader.md",
+			"notes/mid.md",
+		]);
+	});
+
+	test("late result prune preserves relative order among surviving candidates", async () => {
+		const queryText = "alpha beta gamma";
+		const queryTerms = ["alpha", "beta", "gamma"];
+		const { reader } = createStorageReader({
+			documents: [
+				{
+					docId: 1,
+					path: "notes/leader.md",
+					basenameText: "alpha beta gamma",
+				},
+				{
+					docId: 2,
+					path: "notes/mid.md",
+					basenameText: "alpha beta",
+				},
+				{
+					docId: 3,
+					path: "notes/tail.md",
+					basenameText: "alpha",
+				},
+			],
+			postings: {
+				"basename:alpha": [1, 2, 3],
+				"basename:beta": [1, 2],
+				"basename:gamma": [1],
+			},
+			lexicon: ["alpha", "beta", "gamma"],
+		});
+
+		const result = await searchCoverageLexicalV2CandidateCascade({
+			queryText,
+			queryTerms,
+			queryAnalysis: buildCoverageLexicalV2QueryAnalysis(queryText, queryTerms),
+			maxItemResults: 5,
+			weakFilePruneMode: "strict",
+			storageReader: reader,
+			matchOptions: {},
+		});
+
+		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
+			"notes/leader.md",
+			"notes/mid.md",
+		]);
+	});
+
+	test("verified Han bigram promotion still keeps both candidates in final results", async () => {
 		const queryText = "alpha ???";
 		const queryTerms = ["alpha", "???"];
 		const { reader } = createStorageReader({
@@ -658,10 +794,6 @@ describe("coverage lexical v2 cascade", () => {
 			matchOptions: {},
 		});
 
-		expect(result.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
-		expect(result.trace.pruneStages.stageB.applied).toBe(true);
-		expect(result.trace.pruneStages.stageB.droppedCandidateIds).toEqual([]);
-		expect(result.trace.pruneStages.stageC.droppedCandidateIds).toEqual([]);
 		expect(result.matchedFiles[0]?.path).toBe("notes/chairperson.md");
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/chairperson.md",
@@ -669,7 +801,7 @@ describe("coverage lexical v2 cascade", () => {
 		]);
 	});
 
-	test("applies stageC pruning after fuzzy evidence is materialized", async () => {
+	test("fuzzy evidence materialization keeps candidates until late result prune", async () => {
 		const queryText = "cahce alpha";
 		const queryTerms = ["cahce", "alpha"];
 		const { reader } = createStorageReader({
@@ -705,12 +837,9 @@ describe("coverage lexical v2 cascade", () => {
 			},
 		});
 
-		expect(result.trace.pruneStages.stageA.droppedCandidateIds).toEqual([]);
-		expect(result.trace.pruneStages.stageB.droppedCandidateIds).toEqual([]);
-		expect(result.trace.pruneStages.stageC.applied).toBe(true);
-		expect(result.trace.pruneStages.stageC.droppedCandidateIds).toEqual(["2"]);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/cache-alpha.md",
+			"notes/alpha.md",
 		]);
 	});
 
@@ -1191,8 +1320,8 @@ describe("coverage lexical v2 cascade", () => {
 			matchOptions: {},
 		});
 
-		expect(prefetchBodyHanExact).toHaveBeenCalledTimes(1);
-		expect(prefetchBodyHanExact).toHaveBeenCalledWith([1]);
+		expect(prefetchBodyHanExact).toHaveBeenCalled();
+		expect(prefetchBodyHanExact.mock.calls[0]?.[0]).toEqual([1]);
 		expect(result.trace.bodyHanColdExactRequestedBlockCount).toBe(1);
 		expect(result.matchedFiles.map((matchedFile) => matchedFile.path)).toEqual([
 			"notes/meeting.md",
@@ -1235,8 +1364,8 @@ describe("coverage lexical v2 cascade", () => {
 			matchOptions: {},
 		});
 
-		expect(prefetchBodyHanExact).toHaveBeenCalledTimes(1);
-		expect(prefetchBodyHanExact).toHaveBeenCalledWith([1]);
+		expect(prefetchBodyHanExact).toHaveBeenCalled();
+		expect(prefetchBodyHanExact.mock.calls[0]?.[0]).toEqual([1]);
 	});
 
 	test("non-strict cheap Han exact prefetch also covers candidates within one exact primary of the leader", async () => {
@@ -1275,8 +1404,8 @@ describe("coverage lexical v2 cascade", () => {
 			matchOptions: {},
 		});
 
-		expect(prefetchBodyHanExact).toHaveBeenCalledTimes(1);
-		expect(prefetchBodyHanExact).toHaveBeenCalledWith([1, 2]);
+		expect(prefetchBodyHanExact).toHaveBeenCalled();
+		expect(prefetchBodyHanExact.mock.calls[0]?.[0]).toEqual([1, 2]);
 	});
 
 	test("hydrates body tokens only for the late verification frontier", async () => {

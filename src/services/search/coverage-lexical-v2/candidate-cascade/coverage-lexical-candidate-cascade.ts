@@ -180,40 +180,8 @@ export type CoverageLexicalV2CandidateCascadeRequest = {
 	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions;
 };
 
-type CoverageLexicalV2WeakFilePruneStageName = "stageA" | "stageB" | "stageC";
-
-type CoverageLexicalV2WeakFilePruneMetric =
-	| "potential_primary"
-	| "confirmed_primary";
-
-type CoverageLexicalV2WeakFilePruneSkipReason =
-	| "none"
-	| "mode_off"
-	| "no_candidates"
-	| "non_normal_layer_mode"
-	| "han_fallback_salvage"
-	| "no_positive_leader";
-
-export type CoverageLexicalV2WeakFilePruneStageTrace = {
-	applied: boolean;
-	mode: WeakFilePruneMode;
-	metric: CoverageLexicalV2WeakFilePruneMetric;
-	allowedGap: number | null;
-	leaderCount: number;
-	retainedCandidateIds: string[];
-	droppedCandidateIds: string[];
-	retainedCandidateCount: number;
-	droppedCandidateCount: number;
-	skippedReason: CoverageLexicalV2WeakFilePruneSkipReason;
-};
-
 export type CoverageLexicalV2CandidateCascadeTrace = {
 	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
-	pruneStages: {
-		stageA: CoverageLexicalV2WeakFilePruneStageTrace;
-		stageB: CoverageLexicalV2WeakFilePruneStageTrace;
-		stageC: CoverageLexicalV2WeakFilePruneStageTrace;
-	};
 	retainedCandidateIdsByLayer: {
 		layer1: string[];
 		layer2: string[];
@@ -682,9 +650,6 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	const hanBackstopDocIds = new Set<number>();
 	const prefetchedBodyHanExactBlockIds = new Set<number>();
 	const hanBackstopMetrics = createCoverageLexicalV2EmptyHanBackstopSourceMetrics();
-	const pruneStageTrace = createCoverageLexicalV2CandidateCascadePruneStageTraceSet(
-		weakFilePruneMode,
-	);
 	const primaryUnitIndexByKey = new Map<string, number>(
 		candidateCascadePrimaryUnits.map((primaryUnit, primaryUnitIndex) => [
 			createCoverageLexicalV2CascadePrimaryUnitKey(
@@ -774,16 +739,6 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	let candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
 		candidateStateByDocId,
 	);
-	pruneStageTrace.stageA = applyCoverageLexicalV2WeakFilePruneByPotential({
-		mode: weakFilePruneMode,
-		candidateStateByDocId,
-		candidateStates,
-		layerMode: "normal",
-		stageName: "stageA",
-	});
-	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
-		candidateStateByDocId,
-	);
 
 	await collectCoverageLexicalV2CascadeHanBackstopMatches(
 		candidateStateByDocId,
@@ -798,37 +753,6 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		targetedHanDebug,
 	);
 
-	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
-		candidateStateByDocId,
-	);
-	const preFuzzyConfirmed = await buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot({
-		candidateStates,
-		queryAnalysis: comparatorQueryAnalysis,
-		candidateCascadePrimaryUnits,
-		reader: request.storageReader,
-		matchOptions: {
-			...request.matchOptions,
-			includeFuzzy: false,
-		},
-		prefetchedBodyHanExactBlockIds,
-		policy,
-		layerMode: "normal",
-		weakFilePruneMode,
-	});
-	const preFuzzyLayerMode = summarizeCoverageLexicalV2CandidateCascadeLayerMode(
-		candidateStates,
-		request.queryAnalysis.hasHanGroups,
-		false,
-	).layerMode;
-	pruneStageTrace.stageB = applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage({
-		mode: weakFilePruneMode,
-		candidateStateByDocId,
-		candidateStates,
-		layerMode: preFuzzyLayerMode,
-		stageName: "stageB",
-		confirmedCoverageCountByCandidateId:
-			preFuzzyConfirmed.confirmedCoverageCountByCandidateId,
-	});
 	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
 		candidateStateByDocId,
 	);
@@ -862,37 +786,8 @@ export async function searchCoverageLexicalV2CandidateCascade(
 	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
 		candidateStateByDocId,
 	);
-	const preFrontierSummary = summarizeCoverageLexicalV2CandidateCascadeLayerMode(
-		candidateStates,
-		request.queryAnalysis.hasHanGroups,
-		request.matchOptions.includeFuzzy === true,
-	);
-	const fullConfirmed = await buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot({
-		candidateStates,
-		queryAnalysis: comparatorQueryAnalysis,
-		candidateCascadePrimaryUnits,
-		reader: request.storageReader,
-		matchOptions: request.matchOptions,
-		prefetchedBodyHanExactBlockIds,
-		policy,
-		layerMode: preFrontierSummary.layerMode,
-		weakFilePruneMode,
-	});
-	pruneStageTrace.stageC = applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage({
-		mode: weakFilePruneMode,
-		candidateStateByDocId,
-		candidateStates,
-		layerMode: preFrontierSummary.layerMode,
-		stageName: "stageC",
-		confirmedCoverageCountByCandidateId:
-			fullConfirmed.confirmedCoverageCountByCandidateId,
-	});
-	candidateStates = finalizeCoverageLexicalV2CascadeCandidateStates(
-		candidateStateByDocId,
-	);
 	if (candidateStates.length === 0) {
 		const emptyTrace = createCoverageLexicalV2CandidateCascadeTrace("normal");
-		emptyTrace.pruneStages = pruneStageTrace;
 		applyCoverageLexicalV2HanBackstopMetricsToTrace(emptyTrace, hanBackstopMetrics);
 		finalizeCoverageLexicalV2TargetedHanDebugTrace(
 			targetedHanDebug,
@@ -933,7 +828,6 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		policy,
 	);
 	const trace = createCoverageLexicalV2CandidateCascadeTrace(frontierPlan.layerMode);
-	trace.pruneStages = pruneStageTrace;
 	applyCoverageLexicalV2HanBackstopMetricsToTrace(trace, hanBackstopMetrics);
 	trace.retainedCandidateIdsByLayer.layer1 = frontierPlan.activeFrontier.map((candidateState) =>
 		String(candidateState.docId),
@@ -1029,13 +923,11 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		};
 	}
 
-	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>(
-		fullConfirmed.evidenceByCandidateId,
-	);
+	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>();
 	const cheapComparatorCandidateById = new Map<
 		string,
 		CoverageLexicalV2ComparatorCandidate
-	>(fullConfirmed.comparatorCandidateById);
+	>();
 	const layer2Outcome = await resolveCoverageLexicalV2CandidateCascadeLayerOutcome({
 		layerName: "layer2",
 		inputCandidates: frontierPlan.activeFrontier,
@@ -1176,14 +1068,38 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		verificationSkippedReason === "none",
 	);
 	trace.resolvedTopBucketCandidateIds = resolvedTopBucket.map((candidate) => candidate.evidence.candidateId);
-	const orderedCandidates = assembleCoverageLexicalV2CandidateCascadeOrderedCandidates(
+	let orderedCandidates = assembleCoverageLexicalV2CandidateCascadeOrderedCandidates(
 		resolvedTopBucket,
 		layer4Outcome.orderedBuckets.slice(1),
 		evidenceByCandidateId,
 		cheapComparatorCandidateById,
 	);
+	orderedCandidates = await applyCoverageLexicalV2LateResultPrune({
+		mode: request.weakFilePruneMode ?? DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE,
+		orderedCandidates,
+		queryAnalysis: request.queryAnalysis,
+		candidateStateById,
+		candidateCascadePrimaryUnits,
+		reader: request.storageReader,
+		matchOptions: request.matchOptions,
+		evidenceByCandidateId,
+		cheapComparatorCandidateById,
+		prefetchedBodyHanExactBlockIds,
+		policy,
+		layerMode: frontierPlan.layerMode,
+	});
+	const survivingCandidateIds = new Set(
+		orderedCandidates.map((candidate) => candidate.evidence.candidateId),
+	);
+	const resolvedTopBucketForDisplay = refreshCoverageLexicalV2ComparatorRunCandidates(
+		resolvedTopBucket.filter((candidate) =>
+			survivingCandidateIds.has(candidate.evidence.candidateId),
+		),
+		evidenceByCandidateId,
+		cheapComparatorCandidateById,
+	);
 	const topTieBand = selectCoverageLexicalV2ComparatorTopTieBand(
-		resolvedTopBucket.map((candidate) => candidate.comparatorCandidate),
+		resolvedTopBucketForDisplay.map((candidate) => candidate.comparatorCandidate),
 	);
 	const display = applyCoverageLexicalV2DisplayPolicy(orderedCandidates, {
 		maxDisplayCandidates: request.maxItemResults,
@@ -1201,7 +1117,7 @@ export async function searchCoverageLexicalV2CandidateCascade(
 		candidateStates,
 		trace,
 		orderedCandidates,
-		resolvedTopBucket,
+		resolvedTopBucket: resolvedTopBucketForDisplay,
 		topTieBand,
 		visibleCandidateIds: display.visibleCandidates.map(
 			(candidate) => candidate.evidence.candidateId,
@@ -1303,9 +1219,6 @@ function createCoverageLexicalV2CandidateCascadeTrace(
 ): CoverageLexicalV2CandidateCascadeTrace {
 	return {
 		layerMode,
-		pruneStages: createCoverageLexicalV2CandidateCascadePruneStageTraceSet(
-			DEFAULT_COVERAGE_LEXICAL_V2_WEAK_FILE_PRUNE_MODE,
-		),
 		retainedCandidateIdsByLayer: {
 			layer1: [],
 			layer2: [],
@@ -1388,43 +1301,6 @@ function summarizeCoverageLexicalV2CandidateCascadeLayerMode(
 			: usedFuzzySalvage
 				? "fuzzy_salvage"
 				: "normal",
-	};
-}
-
-function createCoverageLexicalV2CandidateCascadePruneStageTrace(
-	mode: WeakFilePruneMode,
-	metric: CoverageLexicalV2WeakFilePruneMetric,
-): CoverageLexicalV2WeakFilePruneStageTrace {
-	return {
-		applied: false,
-		mode,
-		metric,
-		allowedGap: null,
-		leaderCount: 0,
-		retainedCandidateIds: [],
-		droppedCandidateIds: [],
-		retainedCandidateCount: 0,
-		droppedCandidateCount: 0,
-		skippedReason: "none",
-	};
-}
-
-function createCoverageLexicalV2CandidateCascadePruneStageTraceSet(
-	mode: WeakFilePruneMode,
-): CoverageLexicalV2CandidateCascadeTrace["pruneStages"] {
-	return {
-		stageA: createCoverageLexicalV2CandidateCascadePruneStageTrace(
-			mode,
-			"potential_primary",
-		),
-		stageB: createCoverageLexicalV2CandidateCascadePruneStageTrace(
-			mode,
-			"confirmed_primary",
-		),
-		stageC: createCoverageLexicalV2CandidateCascadePruneStageTrace(
-			mode,
-			"confirmed_primary",
-		),
 	};
 }
 
@@ -1805,6 +1681,33 @@ function assembleCoverageLexicalV2CandidateCascadeOrderedCandidates(
 		}
 	}
 	return orderedCandidates;
+}
+
+function refreshCoverageLexicalV2ComparatorRunCandidates(
+	runCandidates: readonly CoverageLexicalV2ComparatorRunCandidate[],
+	evidenceByCandidateId: ReadonlyMap<string, CoverageLexicalV2ComparatorEvidence>,
+	cheapComparatorCandidateById: ReadonlyMap<string, CoverageLexicalV2ComparatorCandidate>,
+): CoverageLexicalV2ComparatorRunCandidate[] {
+	return runCandidates
+		.map<CoverageLexicalV2ComparatorRunCandidate | null>((runCandidate) => {
+			const candidateId = runCandidate.evidence.candidateId;
+			const evidence = evidenceByCandidateId.get(candidateId);
+			const cheapComparatorCandidate = cheapComparatorCandidateById.get(candidateId);
+			if (!evidence || !cheapComparatorCandidate) {
+				return null;
+			}
+			return {
+				evidence,
+				comparatorCandidate:
+					runCandidate.comparatorCandidate.primaryUnitProximityScore != null
+						? patchCoverageLexicalV2ComparatorCandidateWithProximity(
+							cheapComparatorCandidate,
+							evidence,
+						)
+						: cheapComparatorCandidate,
+			};
+		})
+		.filter((candidate): candidate is CoverageLexicalV2ComparatorRunCandidate => candidate != null);
 }
 
 function serializeCoverageLexicalV2SurfaceCoverageShape(
@@ -2416,9 +2319,6 @@ function resolveCoverageLexicalV2TargetedComparatorCandidateOutcome(
 	verificationIds: ReadonlySet<string>,
 	resolvedIds: ReadonlySet<string>,
 	visibleIds: ReadonlySet<string>,
-	stageADroppedIds: ReadonlySet<string>,
-	stageBDroppedIds: ReadonlySet<string>,
-	stageCDroppedIds: ReadonlySet<string>,
 ): string {
 	if (visibleIds.has(candidateId)) {
 		return "visible";
@@ -2432,20 +2332,11 @@ function resolveCoverageLexicalV2TargetedComparatorCandidateOutcome(
 	if (candidateState && layer4Ids.has(candidateId)) {
 		return "not_in_top_verification_bucket";
 	}
-	if (stageCDroppedIds.has(candidateId)) {
-		return "dropped_at_stageC";
-	}
 	if (candidateState && layer3Ids.has(candidateId)) {
 		return "dropped_at_layer4";
 	}
-	if (stageBDroppedIds.has(candidateId)) {
-		return "dropped_at_stageB";
-	}
 	if (candidateState && layer2Ids.has(candidateId)) {
 		return "dropped_at_layer3";
-	}
-	if (stageADroppedIds.has(candidateId)) {
-		return "dropped_at_stageA";
 	}
 	if (candidateState && layer1Ids.has(candidateId)) {
 		return "dropped_at_layer2";
@@ -2490,9 +2381,6 @@ function finalizeCoverageLexicalV2TargetedComparatorDebugTrace(config: {
 	const verificationIds = new Set(config.trace.verificationBucketCandidateIds);
 	const resolvedIds = new Set(config.trace.resolvedTopBucketCandidateIds);
 	const visibleIds = new Set(config.visibleCandidateIds);
-	const stageADroppedIds = new Set(config.trace.pruneStages.stageA.droppedCandidateIds);
-	const stageBDroppedIds = new Set(config.trace.pruneStages.stageB.droppedCandidateIds);
-	const stageCDroppedIds = new Set(config.trace.pruneStages.stageC.droppedCandidateIds);
 	const topTieBandIds = config.topTieBand.map((candidate) => candidate.candidateId);
 
 	const summarizeCandidate = (
@@ -2516,9 +2404,6 @@ function finalizeCoverageLexicalV2TargetedComparatorDebugTrace(config: {
 				verificationIds,
 				resolvedIds,
 				visibleIds,
-				stageADroppedIds,
-				stageBDroppedIds,
-				stageCDroppedIds,
 			),
 			sourceFlags: candidateState?.sourceFlags ?? null,
 			potentialPrimaryCoverageCount:
@@ -2837,9 +2722,6 @@ function finalizeCoverageLexicalV2TargetedHanDebugTrace(
 	const verificationIds = new Set(trace.verificationBucketCandidateIds);
 	const resolvedIds = new Set(trace.resolvedTopBucketCandidateIds);
 	const visibleIds = new Set(visibleCandidateIds);
-	const stageADroppedIds = new Set(trace.pruneStages.stageA.droppedCandidateIds);
-	const stageBDroppedIds = new Set(trace.pruneStages.stageB.droppedCandidateIds);
-	const stageCDroppedIds = new Set(trace.pruneStages.stageC.droppedCandidateIds);
 	const trackedDocs = [...targetedHanDebug.trackedDocs.entries()].map(([docId, path]) => {
 		const candidateId = String(docId);
 		const candidateState = stateById.get(candidateId);
@@ -2852,16 +2734,10 @@ function finalizeCoverageLexicalV2TargetedHanDebugTrace(
 			outcome = "verification_bucket_but_not_resolved";
 		} else if (candidateState && layer4Ids.has(candidateId)) {
 			outcome = "not_in_top_verification_bucket";
-		} else if (stageCDroppedIds.has(candidateId)) {
-			outcome = "dropped_at_stageC";
 		} else if (candidateState && layer3Ids.has(candidateId)) {
 			outcome = "dropped_at_layer4";
-		} else if (stageBDroppedIds.has(candidateId)) {
-			outcome = "dropped_at_stageB";
 		} else if (candidateState && layer2Ids.has(candidateId)) {
 			outcome = "dropped_at_layer3";
-		} else if (stageADroppedIds.has(candidateId)) {
-			outcome = "dropped_at_stageA";
 		} else if (candidateState && layer1Ids.has(candidateId)) {
 			outcome = "dropped_at_layer2";
 		} else if (candidateState) {
@@ -3002,126 +2878,71 @@ function finalizeCoverageLexicalV2CascadeCandidateStates(
 		);
 }
 
-function resolveCoverageLexicalV2WeakFilePruneGap(
-	mode: WeakFilePruneMode,
-	stageName: CoverageLexicalV2WeakFilePruneStageName,
-): number | null {
-	if (mode === "off") {
-		return null;
-	}
-	if (stageName === "stageA") {
-		return mode === "strict" ? 1 : 2;
-	}
-	return mode === "strict" ? 0 : 1;
-}
-
 function resolveCoverageLexicalV2CheapExactHanPrefetchGap(
 	mode: WeakFilePruneMode,
 ): number | null {
 	return mode === "strict" ? 0 : 1;
 }
 
-function finalizeCoverageLexicalV2WeakFilePruneStageTrace(
-	trace: CoverageLexicalV2WeakFilePruneStageTrace,
-	retainedCandidateIds: readonly string[],
-	droppedCandidateIds: readonly string[],
-): CoverageLexicalV2WeakFilePruneStageTrace {
-	trace.retainedCandidateIds = [...retainedCandidateIds];
-	trace.droppedCandidateIds = [...droppedCandidateIds];
-	trace.retainedCandidateCount = retainedCandidateIds.length;
-	trace.droppedCandidateCount = droppedCandidateIds.length;
-	return trace;
+function resolveCoverageLexicalV2LateResultPruneGap(
+	mode: WeakFilePruneMode,
+): number | null {
+	if (mode === "off") {
+		return null;
+	}
+	return mode === "strict" ? 1 : 2;
 }
 
-function applyCoverageLexicalV2WeakFilePruneByPotential(config: {
+function shouldKeepByLateResultPrune(
+	mode: WeakFilePruneMode,
+	candidateConfirmedTotalPrimaryCount: number,
+	leaderConfirmedTotalPrimaryCount: number,
+): boolean {
+	const allowedGap = resolveCoverageLexicalV2LateResultPruneGap(mode);
+	if (allowedGap == null || leaderConfirmedTotalPrimaryCount <= 0) {
+		return true;
+	}
+	return (
+		candidateConfirmedTotalPrimaryCount >=
+		Math.max(0, leaderConfirmedTotalPrimaryCount - allowedGap)
+	);
+}
+
+async function applyCoverageLexicalV2LateResultPrune(config: {
 	mode: WeakFilePruneMode;
-	candidateStateByDocId: Map<number, CoverageLexicalV2CascadeCandidateState>;
-	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[];
-	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
-	stageName: CoverageLexicalV2WeakFilePruneStageName;
-}): CoverageLexicalV2WeakFilePruneStageTrace {
-	const trace = createCoverageLexicalV2CandidateCascadePruneStageTrace(
-		config.mode,
-		"potential_primary",
-	);
-	const allCandidateIds = config.candidateStates.map((candidateState) =>
-		String(candidateState.docId),
-	);
-	if (config.mode === "off") {
-		trace.skippedReason = "mode_off";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	if (config.candidateStates.length === 0) {
-		trace.skippedReason = "no_candidates";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, [], []);
-	}
-	if (config.layerMode !== "normal") {
-		trace.skippedReason = "non_normal_layer_mode";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	const leaderCount = config.candidateStates.reduce(
-		(maxCount, candidateState) =>
-			Math.max(maxCount, candidateState.potentialPrimaryCoverageCount),
-		0,
-	);
-	trace.leaderCount = leaderCount;
-	if (leaderCount <= 0) {
-		trace.skippedReason = "no_positive_leader";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	const allowedGap = resolveCoverageLexicalV2WeakFilePruneGap(
-		config.mode,
-		config.stageName,
-	);
-	trace.allowedGap = allowedGap;
-	if (allowedGap == null) {
-		trace.skippedReason = "mode_off";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	trace.applied = true;
-	const minAllowedCount = Math.max(0, leaderCount - allowedGap);
-	const retainedCandidateIds: string[] = [];
-	const droppedCandidateIds: string[] = [];
-	for (const candidateState of config.candidateStates) {
-		const candidateId = String(candidateState.docId);
-		if (candidateState.potentialPrimaryCoverageCount >= minAllowedCount) {
-			retainedCandidateIds.push(candidateId);
-			continue;
-		}
-		config.candidateStateByDocId.delete(candidateState.docId);
-		droppedCandidateIds.push(candidateId);
-	}
-	return finalizeCoverageLexicalV2WeakFilePruneStageTrace(
-		trace,
-		retainedCandidateIds,
-		droppedCandidateIds,
-	);
-}
-
-async function buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot(config: {
-	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[];
+	orderedCandidates: readonly CoverageLexicalV2ComparatorRunCandidate[];
 	queryAnalysis: CoverageLexicalV2QueryAnalysis;
+	candidateStateById: ReadonlyMap<string, CoverageLexicalV2CascadeCandidateState>;
 	candidateCascadePrimaryUnits: readonly CoverageLexicalV2CandidateCascadePrimaryUnitDefinition[];
 	reader: CoverageLexicalV2CandidateCascadeStorageReader;
 	matchOptions: CoverageLexicalV2CandidateCascadeMatchOptions;
+	evidenceByCandidateId: Map<string, CoverageLexicalV2ComparatorEvidence>;
+	cheapComparatorCandidateById: Map<string, CoverageLexicalV2ComparatorCandidate>;
 	prefetchedBodyHanExactBlockIds: Set<number>;
 	policy: CoverageLexicalV2CandidateCascadePolicy;
 	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
-	weakFilePruneMode: WeakFilePruneMode;
-}): Promise<CoverageLexicalV2ConfirmedPrimaryCoverageSnapshot> {
-	const evidenceByCandidateId = new Map<string, CoverageLexicalV2ComparatorEvidence>();
-	const comparatorCandidateById = new Map<string, CoverageLexicalV2ComparatorCandidate>();
-	const confirmedCoverageCountByCandidateId = new Map<string, number>();
-	if (config.candidateStates.length === 0) {
-		return {
-			evidenceByCandidateId,
-			comparatorCandidateById,
-			confirmedCoverageCountByCandidateId,
-		};
+}): Promise<CoverageLexicalV2ComparatorRunCandidate[]> {
+	if (config.mode === "off" || config.orderedCandidates.length === 0) {
+		return [...config.orderedCandidates];
 	}
+	const orderedCandidateStates = config.orderedCandidates
+		.map((candidate) => config.candidateStateById.get(candidate.evidence.candidateId))
+		.filter(
+			(candidateState): candidateState is CoverageLexicalV2CascadeCandidateState =>
+				candidateState != null,
+		);
+	if (orderedCandidateStates.length === 0) {
+		return [...config.orderedCandidates];
+	}
+	await hydrateCoverageLexicalV2CascadeVerificationStates(
+		orderedCandidateStates,
+		config.reader,
+		config.prefetchedBodyHanExactBlockIds,
+		config.policy,
+	);
 	await populateCoverageLexicalV2CandidateCascadeEvidence(
-		evidenceByCandidateId,
-		config.candidateStates,
+		config.evidenceByCandidateId,
+		orderedCandidateStates,
 		config.queryAnalysis,
 		config.candidateCascadePrimaryUnits,
 		config.reader,
@@ -3129,105 +2950,51 @@ async function buildCoverageLexicalV2ConfirmedPrimaryCoverageSnapshot(config: {
 		config.prefetchedBodyHanExactBlockIds,
 		config.policy,
 		config.layerMode,
-		config.weakFilePruneMode,
-		false,
+		"off",
+		true,
 	);
-	for (const candidateState of config.candidateStates) {
+	const confirmedTotalPrimaryCountByCandidateId = new Map<string, number>();
+	let leaderConfirmedTotalPrimaryCount = 0;
+	for (const candidateState of orderedCandidateStates) {
 		const candidateId = String(candidateState.docId);
-		const evidence = evidenceByCandidateId.get(candidateId);
+		const evidence = config.evidenceByCandidateId.get(candidateId);
 		if (!evidence) {
-			confirmedCoverageCountByCandidateId.set(candidateId, 0);
+			confirmedTotalPrimaryCountByCandidateId.set(candidateId, 0);
 			continue;
 		}
 		const comparatorCandidate = buildCoverageLexicalV2CheapComparatorCandidate(
 			config.queryAnalysis,
 			evidence,
 		);
-		comparatorCandidateById.set(candidateId, comparatorCandidate);
-		confirmedCoverageCountByCandidateId.set(
+		config.cheapComparatorCandidateById.set(candidateId, comparatorCandidate);
+		const confirmedTotalPrimaryCount =
+			comparatorCandidate.distinctMatchedPrimaryQueryUnitCount;
+		confirmedTotalPrimaryCountByCandidateId.set(
 			candidateId,
-			comparatorCandidate.distinctMatchedPrimaryQueryUnitCount,
+			confirmedTotalPrimaryCount,
+		);
+		leaderConfirmedTotalPrimaryCount = Math.max(
+			leaderConfirmedTotalPrimaryCount,
+			confirmedTotalPrimaryCount,
 		);
 	}
-	return {
-		evidenceByCandidateId,
-		comparatorCandidateById,
-		confirmedCoverageCountByCandidateId,
-	};
-}
-
-function applyCoverageLexicalV2WeakFilePruneByConfirmedCoverage(config: {
-	mode: WeakFilePruneMode;
-	candidateStateByDocId: Map<number, CoverageLexicalV2CascadeCandidateState>;
-	candidateStates: readonly CoverageLexicalV2CascadeCandidateState[];
-	layerMode: CoverageLexicalV2CandidateCascadeLayerMode;
-	stageName: CoverageLexicalV2WeakFilePruneStageName;
-	confirmedCoverageCountByCandidateId: ReadonlyMap<string, number>;
-}): CoverageLexicalV2WeakFilePruneStageTrace {
-	const trace = createCoverageLexicalV2CandidateCascadePruneStageTrace(
-		config.mode,
-		"confirmed_primary",
-	);
-	const allCandidateIds = config.candidateStates.map((candidateState) =>
-		String(candidateState.docId),
-	);
-	if (config.mode === "off") {
-		trace.skippedReason = "mode_off";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
+	if (leaderConfirmedTotalPrimaryCount <= 0) {
+		return refreshCoverageLexicalV2ComparatorRunCandidates(
+			config.orderedCandidates,
+			config.evidenceByCandidateId,
+			config.cheapComparatorCandidateById,
+		);
 	}
-	if (config.candidateStates.length === 0) {
-		trace.skippedReason = "no_candidates";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, [], []);
-	}
-	if (config.stageName === "stageC" && config.layerMode === "han_fallback_salvage") {
-		trace.skippedReason = "han_fallback_salvage";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	if (config.stageName !== "stageC" && config.layerMode !== "normal") {
-		trace.skippedReason = "non_normal_layer_mode";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	const leaderCount = config.candidateStates.reduce(
-		(maxCount, candidateState) =>
-			Math.max(
-				maxCount,
-				config.confirmedCoverageCountByCandidateId.get(String(candidateState.docId)) ?? 0,
+	return refreshCoverageLexicalV2ComparatorRunCandidates(
+		config.orderedCandidates.filter((candidate) =>
+			shouldKeepByLateResultPrune(
+				config.mode,
+				confirmedTotalPrimaryCountByCandidateId.get(candidate.evidence.candidateId) ?? 0,
+				leaderConfirmedTotalPrimaryCount,
 			),
-		0,
-	);
-	trace.leaderCount = leaderCount;
-	if (leaderCount <= 0) {
-		trace.skippedReason = "no_positive_leader";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	const allowedGap = resolveCoverageLexicalV2WeakFilePruneGap(
-		config.mode,
-		config.stageName,
-	);
-	trace.allowedGap = allowedGap;
-	if (allowedGap == null) {
-		trace.skippedReason = "mode_off";
-		return finalizeCoverageLexicalV2WeakFilePruneStageTrace(trace, allCandidateIds, []);
-	}
-	trace.applied = true;
-	const minAllowedCount = Math.max(0, leaderCount - allowedGap);
-	const retainedCandidateIds: string[] = [];
-	const droppedCandidateIds: string[] = [];
-	for (const candidateState of config.candidateStates) {
-		const candidateId = String(candidateState.docId);
-		const confirmedCoverageCount =
-			config.confirmedCoverageCountByCandidateId.get(candidateId) ?? 0;
-		if (confirmedCoverageCount >= minAllowedCount) {
-			retainedCandidateIds.push(candidateId);
-			continue;
-		}
-		config.candidateStateByDocId.delete(candidateState.docId);
-		droppedCandidateIds.push(candidateId);
-	}
-	return finalizeCoverageLexicalV2WeakFilePruneStageTrace(
-		trace,
-		retainedCandidateIds,
-		droppedCandidateIds,
+		),
+		config.evidenceByCandidateId,
+		config.cheapComparatorCandidateById,
 	);
 }
 
