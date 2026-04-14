@@ -10,7 +10,7 @@ import type {
 } from "src/globals/plugin-setting";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { CoverageLexicalV2FileSearchEngine } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine";
+import { CoverageLexicalV3FileSearchEngine } from "./coverage-lexical-v3";
 import type { CoverageLexicalBodyTokenColdDocumentWrite } from "./coverage-lexical/coverage-lexical-body-token-cold-types";
 import type { CoverageLexicalV2HanSegmentExactSidecarDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 
@@ -131,7 +131,7 @@ export interface FileSearchEngine {
 
 @singleton()
 export class FileSearchEngineFactory {
-	private readonly coverageLexical = getInstance(CoverageLexicalV2FileSearchEngine);
+	private readonly coverageLexical = getInstance(CoverageLexicalV3FileSearchEngine);
 
 	getActiveEngine(): FileSearchEngine {
 		return this.coverageLexical;

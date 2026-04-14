@@ -1,4 +1,4 @@
-﻿import { Notice, TFile, type TAbstractFile } from "obsidian";
+import { Notice, TFile, type TAbstractFile } from "obsidian";
 import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
@@ -37,6 +37,7 @@ import type {
   PersistentFileIndexRecoveryPlan,
   SerializedFileSearchIndex,
 } from "src/services/search/file-search-engine";
+import type { CoverageLexicalV3RuntimeMemoryBreakdown } from "src/services/search/coverage-lexical-v3";
 import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
 import {
   COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
@@ -4194,7 +4195,9 @@ export class DataManager {
       ? (bytesByName.get("lexicalV2IndexStoreMeta") ?? 0) +
         (bytesByName.get("lexicalV2IndexStoreSnapshotChunks") ?? 0) +
         (bytesByName.get("lexicalV2IndexStoreJournal") ?? 0)
-      : (bytesByName.get("lexicalSearchSnapshots") ?? 0);
+      : this.lexicalEngine.supportsSerializedFileIndex()
+        ? (bytesByName.get("lexicalSearchSnapshots") ?? 0)
+        : 0;
     const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
       persistedLexicalSnapshotBytes,
     );
@@ -5560,6 +5563,14 @@ export class DataManager {
       return emptyResult;
     }
 
+    if (breakdown.__backend === "coverage-lexical-v3") {
+      return this.buildCoverageLexicalV3RuntimeBreakdown(
+        breakdown as CoverageLexicalV3RuntimeMemoryBreakdown,
+        runtimeLexicalIndexBytes,
+        indexableBytes,
+      );
+    }
+
     const estimatedBytes = this.asRecord(breakdown.estimatedBytes);
     const residentHot = this.asRecord(estimatedBytes?.residentHot);
     const coldOwned = this.asRecord(estimatedBytes?.coldOwned);
@@ -5795,6 +5806,84 @@ export class DataManager {
     };
   }
 
+  private buildCoverageLexicalV3RuntimeBreakdown(
+    breakdown: CoverageLexicalV3RuntimeMemoryBreakdown,
+    runtimeLexicalIndexBytes: number,
+    indexableBytes: number,
+  ): {
+    noticeLines: string[];
+    summaryLine: string | null;
+    residentGroupRows: DevStorageBreakdownRow[];
+    coldOwnedGroupRows: DevStorageBreakdownRow[];
+    overlapRows: DevStorageBreakdownRow[];
+    residentTopRows: DevStorageBreakdownRow[];
+    coldOverlapTopRows: DevStorageBreakdownRow[];
+  } {
+    const metrics = breakdown.metrics;
+    const summary = breakdown.summary;
+    const residentTotal = metrics.residentBytes || runtimeLexicalIndexBytes;
+    const segments: Array<{ segment: string; bytes: number }> = [
+      { segment: "docArena", bytes: metrics.docArenaBytes },
+      { segment: "stringArena", bytes: metrics.stringArenaBytes },
+      { segment: "familyLexicon", bytes: metrics.familyLexiconBytes },
+      { segment: "metadataContainers", bytes: metrics.metadataContainerBytes },
+      { segment: "heading", bytes: metrics.headingBytes },
+      { segment: "bodyBlocks", bytes: metrics.bodyBlockBytes },
+      { segment: "exactTapes", bytes: metrics.exactTapeBytes },
+      { segment: "hanRoute", bytes: metrics.hanRouteBytes },
+      { segment: "auxiliary", bytes: metrics.auxiliaryBytes },
+    ].filter((segment) => segment.bytes > 0);
+    const toBreakdownRows = (
+      entries: Array<{ segment: string; bytes: number }>,
+      denominator: number,
+    ): DevStorageBreakdownRow[] =>
+      entries.map((entry) => ({
+        segment: entry.segment,
+        bytes: entry.bytes,
+        size: this.formatBytes(entry.bytes),
+        shareOfLexical: this.formatPercent(entry.bytes, denominator),
+        shareOfVault: this.formatPercent(entry.bytes, indexableBytes),
+      }));
+    const residentGroupRows = toBreakdownRows(segments, residentTotal);
+    const residentTopRows = toBreakdownRows(
+      [...segments].sort((left, right) => right.bytes - left.bytes).slice(0, 10),
+      residentTotal,
+    );
+    const noticeLines = [
+      "Coverage V3 resident base: " +
+        this.formatBytes(residentTotal) +
+        " (" +
+        this.formatPercent(residentTotal, indexableBytes) +
+        " of vault)",
+      "Coverage V3 resident ratios: indexedSurface " +
+        summary["residentBytes / indexedSurfaceUtf8Bytes"].toFixed(3) +
+        "x | rawMarkdown " +
+        summary["residentBytes / rawMarkdownUtf8Bytes"].toFixed(3) +
+        "x",
+      "Coverage V3 structure: docs " +
+        summary.documentCount +
+        " | families " +
+        summary.familyCount +
+        " | bodyBlocks " +
+        summary.blockCount +
+        " | exactTapeValues " +
+        summary.exactTapeValueCount,
+      "Coverage V3 resident groups: " +
+        residentTopRows
+          .map((row) => row.segment + " " + row.size)
+          .join(" | "),
+    ].filter((line) => !line.endsWith(": "));
+
+    return {
+      noticeLines,
+      summaryLine: noticeLines.join("; "),
+      residentGroupRows,
+      coldOwnedGroupRows: [],
+      overlapRows: [],
+      residentTopRows,
+      coldOverlapTopRows: [],
+    };
+  }
   private buildFileSnapshotRuntimeBreakdown(
     estimate: FileSnapshotRuntimeMemoryEstimate,
     runtimeTotalBytes: number,
