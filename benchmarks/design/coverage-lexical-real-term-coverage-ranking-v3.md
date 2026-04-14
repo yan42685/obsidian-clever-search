@@ -847,3 +847,22 @@ preserving the older continuity harness as legacy:
 - the V3 report now compares only `CoverageLexical(V3)` against `MiniSearch`
 - the legacy continuity harness remains available through
   `npm run benchmark:coverage-lexical:legacy`
+
+### Phase 10
+
+Status: Completed on 2026-04-14
+
+The current implementation now adds a late Han surface-completion witness tie-break
+without giving Han bigrams any direct ranking credit or adding a second Han resident
+index:
+
+- Han bigrams remain recall-only and never contribute to realized coverage
+- Han groups that already have tokenizer-real primary terms can now receive a very
+  late completion preference when the candidate also exact-witnesses the full Han
+  surface
+- completion witness is resolved only from existing per-tier and per-block Han
+  witness families, so this stage does not add a new resident arena
+- completion witness only acts as a late tie-break after coverage, containers,
+  fragmentation, and exact count
+- the V3 regression baseline now verifies `生命力 > 生命` while keeping `委员`
+  bridge recall from gaining completion credit

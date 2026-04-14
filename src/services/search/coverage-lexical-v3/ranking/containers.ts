@@ -29,6 +29,7 @@ import type {
 	IdentityContainer,
 	RealizedQueryUnitFamily,
 	RouteContainer,
+	HanSurfaceCompletionTier,
 } from "./types";
 
 const CHAIN_BOUNDARY_PENALTY = 2;
@@ -58,23 +59,37 @@ type BodyWindowCandidate = Readonly<{
 	headingCorroboration: HeadingCorroboration;
 }>;
 
+type HanSurfaceCompletionGroup = Readonly<{
+	surfaceGroupIndex: number;
+	surfaceText: string;
+}>;
+
+type HanSurfaceCompletionSummary = Readonly<{
+	completedGroupCount: number;
+	tierScoreTotal: number;
+	strongestTier: HanSurfaceCompletionTier;
+}>;
+
 export function buildPackingProfile(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 	candidateRecall: V3CandidateDocRecall,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 ): EvidencePackingProfile {
+	const identityWitnessFamilyIds = getDocIdentityHanWitnessFamilyIds(base, candidateRecall.docId);
+	const routeWitnessFamilyIds = getDocRouteHanWitnessFamilyIds(base, candidateRecall.docId);
+	const headingWitnessFamilyIds = getDocHeadingHanWitnessFamilyIds(base, candidateRecall.docId);
 	const identityFamilyIds = new Set<number>([
 		...getDocIdentityFamilyIds(base, candidateRecall.docId),
-		...getDocIdentityHanWitnessFamilyIds(base, candidateRecall.docId),
+		...identityWitnessFamilyIds,
 	]);
 	const routeFamilyIds = new Set<number>([
 		...getDocRouteFamilyIds(base, candidateRecall.docId),
-		...getDocRouteHanWitnessFamilyIds(base, candidateRecall.docId),
+		...routeWitnessFamilyIds,
 	]);
 	const headingFamilyIds = new Set<number>([
 		...getDocHeadingFamilyIds(base, candidateRecall.docId),
-		...getDocHeadingHanWitnessFamilyIds(base, candidateRecall.docId),
+		...headingWitnessFamilyIds,
 	]);
 	const mergedUnitFamilyMatches = mergeCandidateSpecificHanConfirmedMatches(
 		base,
@@ -87,9 +102,11 @@ export function buildPackingProfile(
 	);
 	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
 	const bodyBlockIdsByUnitFamily = new Map<number, Map<number, Set<number>>>();
+	const bodyWitnessFamilyIdsByBlockId = new Map<number, readonly number[]>();
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
 		const exactFamilyIds = getBodyBlockExactFamilyIds(base, blockId);
 		const witnessFamilyIds = getBodyBlockHanWitnessFamilyIds(base, blockId);
+		bodyWitnessFamilyIdsByBlockId.set(blockId, witnessFamilyIds);
 		const tokenPositions = getBodyBlockExactTokenPositions(base, blockId);
 		const blockOccurrences: BodyOccurrence[] = [];
 		for (const unitMatches of mergedUnitFamilyMatches) {
@@ -169,6 +186,14 @@ export function buildPackingProfile(
 		strongestContainer,
 		secondStrongestContainer,
 	);
+	const hanSurfaceCompletionSummary = summarizeHanSurfaceCompletion(
+		base,
+		queryAnalysis,
+		identityWitnessFamilyIds,
+		routeWitnessFamilyIds,
+		bodyWitnessFamilyIdsByBlockId,
+		bestBodyWindowBlockIds,
+	);
 	return {
 		docId: candidateRecall.docId,
 		path: getDocPath(base, candidateRecall.docId),
@@ -176,6 +201,9 @@ export function buildPackingProfile(
 		surfaceCoverageShapeKey: queryAnalysis.surfaceCoverageShapeKey,
 		realizedCoverageCount: realizedFamilies.length,
 		exactUnitCount: realizedFamilies.filter((family) => family.matchKind === "exact").length,
+		completedHanSurfaceGroupCount: hanSurfaceCompletionSummary.completedGroupCount,
+		hanSurfaceCompletionTierScoreTotal: hanSurfaceCompletionSummary.tierScoreTotal,
+		strongestHanSurfaceCompletionTier: hanSurfaceCompletionSummary.strongestTier,
 		prefixCompletionGainTotal: realizedFamilies.reduce((total, family) => {
 			if (family.matchKind !== "prefix") {
 				return total;
@@ -739,4 +767,123 @@ function buildFragmentationPenalty(
 			realizedFamilies.some((family) => family.inBestBodyWindow),
 		].filter(Boolean).length,
 	};
+}
+
+function summarizeHanSurfaceCompletion(
+	base: ResidentBase,
+	queryAnalysis: V3QueryAnalysis,
+	identityWitnessFamilyIds: readonly number[],
+	routeWitnessFamilyIds: readonly number[],
+	bodyWitnessFamilyIdsByBlockId: ReadonlyMap<number, readonly number[]>,
+	bestBodyWindowBlockIds: ReadonlySet<number>,
+): HanSurfaceCompletionSummary {
+	const groups = collectHanSurfaceCompletionGroups(queryAnalysis);
+	let completedGroupCount = 0;
+	let tierScoreTotal = 0;
+	let strongestTier: HanSurfaceCompletionTier = "none";
+	for (const group of groups) {
+		const tier = resolveHanSurfaceCompletionTier(
+			base,
+			group.surfaceText,
+			identityWitnessFamilyIds,
+			routeWitnessFamilyIds,
+			bodyWitnessFamilyIdsByBlockId,
+			bestBodyWindowBlockIds,
+		);
+		if (tier === "none") {
+			continue;
+		}
+		completedGroupCount += 1;
+		tierScoreTotal += getHanSurfaceCompletionTierScore(tier);
+		if (
+			getHanSurfaceCompletionTierScore(tier) >
+			getHanSurfaceCompletionTierScore(strongestTier)
+		) {
+			strongestTier = tier;
+		}
+	}
+	return {
+		completedGroupCount,
+		tierScoreTotal,
+		strongestTier,
+	};
+}
+
+function collectHanSurfaceCompletionGroups(
+	queryAnalysis: V3QueryAnalysis,
+): HanSurfaceCompletionGroup[] {
+	return queryAnalysis.surfaceGroups
+		.filter(
+			(group) =>
+				group.kind === "han" &&
+				Array.from(group.text).length >= 2 &&
+				queryAnalysis.primaryUnits.some(
+					(unit) =>
+						unit.surfaceGroupIndex === group.index &&
+						unit.source === "han_tokenizer_real",
+				),
+		)
+		.map((group) => ({
+			surfaceGroupIndex: group.index,
+			surfaceText: group.text,
+		}));
+}
+
+function resolveHanSurfaceCompletionTier(
+	base: ResidentBase,
+	surfaceText: string,
+	identityWitnessFamilyIds: readonly number[],
+	routeWitnessFamilyIds: readonly number[],
+	bodyWitnessFamilyIdsByBlockId: ReadonlyMap<number, readonly number[]>,
+	bestBodyWindowBlockIds: ReadonlySet<number>,
+): HanSurfaceCompletionTier {
+	if (witnessFamiliesContainSurface(base, identityWitnessFamilyIds, surfaceText)) {
+		return "identity";
+	}
+	if (witnessFamiliesContainSurface(base, routeWitnessFamilyIds, surfaceText)) {
+		return "route";
+	}
+	for (const blockId of bestBodyWindowBlockIds) {
+		if (
+			witnessFamiliesContainSurface(
+				base,
+				bodyWitnessFamilyIdsByBlockId.get(blockId) ?? [],
+				surfaceText,
+			)
+		) {
+			return "body_window";
+		}
+	}
+	for (const [blockId, familyIds] of bodyWitnessFamilyIdsByBlockId.entries()) {
+		if (bestBodyWindowBlockIds.has(blockId)) {
+			continue;
+		}
+		if (witnessFamiliesContainSurface(base, familyIds, surfaceText)) {
+			return "body_residue";
+		}
+	}
+	return "none";
+}
+
+function witnessFamiliesContainSurface(
+	base: ResidentBase,
+	familyIds: readonly number[],
+	surfaceText: string,
+): boolean {
+	return familyIds.some((familyId) => getFamilyText(base, familyId).includes(surfaceText));
+}
+
+function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): number {
+	switch (tier) {
+		case "identity":
+			return 4;
+		case "route":
+			return 3;
+		case "body_window":
+			return 2;
+		case "body_residue":
+			return 1;
+		default:
+			return 0;
+	}
 }

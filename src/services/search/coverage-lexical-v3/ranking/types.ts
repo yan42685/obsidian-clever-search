@@ -55,6 +55,13 @@ export type FragmentationPenalty = Readonly<{
 	activeContainerCount: number;
 }>;
 
+export type HanSurfaceCompletionTier =
+	| "none"
+	| "body_residue"
+	| "body_window"
+	| "route"
+	| "identity";
+
 export type EvidencePackingProfile = Readonly<{
 	docId: number;
 	path: string;
@@ -62,6 +69,9 @@ export type EvidencePackingProfile = Readonly<{
 	surfaceCoverageShapeKey: string;
 	realizedCoverageCount: number;
 	exactUnitCount: number;
+	completedHanSurfaceGroupCount: number;
+	hanSurfaceCompletionTierScoreTotal: number;
+	strongestHanSurfaceCompletionTier: HanSurfaceCompletionTier;
 	prefixCompletionGainTotal: number;
 	compoundPrefixCount: number;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];

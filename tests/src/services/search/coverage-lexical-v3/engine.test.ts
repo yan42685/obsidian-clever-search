@@ -161,9 +161,48 @@ describe("coverage lexical v3 engine", () => {
 		expect(result.rankedCandidates).toHaveLength(1);
 		expect(result.rankedCandidates[0].path).toBe("zh/committee.md");
 		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(1);
+		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(0);
 		expect(
 			result.rankedCandidates[0].realizedFamilies.map((family) => family.familyText),
 		).toEqual(["\u59d4\u5458"]);
+	});
+
+	test("completed Han surface witness in body outranks a partial real-term hit", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u751f\u547d\u529b": ["\u751f\u547d"],
+			"\u8fd9\u91cc\u8bb0\u5f55\u751f\u547d\u529b\u8bad\u7ec3": ["\u8fd9\u91cc", "\u8bb0\u5f55", "\u751f\u547d", "\u8bad\u7ec3"],
+			"\u8fd9\u91cc\u8bb0\u5f55\u751f\u547d": ["\u8fd9\u91cc", "\u8bb0\u5f55", "\u751f\u547d"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/life-force.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u8fd9\u91cc\u8bb0\u5f55\u751f\u547d\u529b\u8bad\u7ec3",
+				}),
+				createDocument({
+					path: "zh/life-only.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u8fd9\u91cc\u8bb0\u5f55\u751f\u547d",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u751f\u547d\u529b", ["\u751f\u547d"]);
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/life-force.md",
+			"zh/life-only.md",
+		]);
+		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(1);
+		expect(result.rankedCandidates[0].strongestHanSurfaceCompletionTier).toBe(
+			"body_residue",
+		);
+		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(0);
 	});
 
 	test("metadata dual real-term coverage outranks body dual coverage which outranks split coverage", () => {

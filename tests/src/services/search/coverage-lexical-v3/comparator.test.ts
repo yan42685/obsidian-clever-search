@@ -72,6 +72,10 @@ function createPackingProfile(
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "lll",
 		realizedCoverageCount: overrides.realizedCoverageCount ?? 0,
 		exactUnitCount: overrides.exactUnitCount ?? 0,
+		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
+		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
+		strongestHanSurfaceCompletionTier:
+			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		realizedFamilies: overrides.realizedFamilies ?? [],
@@ -271,6 +275,30 @@ describe("coverage lexical v3 comparator", () => {
 		});
 
 		expect(comparePackingProfiles(plainPrefix, compoundPrefix)).toBeLessThan(0);
+	});
+
+	test("completed Han surface witness wins as a very late tie-break", () => {
+		const completed = createPackingProfile({
+			path: "z-completed.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 1,
+			completedHanSurfaceGroupCount: 1,
+			hanSurfaceCompletionTierScoreTotal: 2,
+			strongestHanSurfaceCompletionTier: "body_window",
+			strongestContainer: createBodyWindowContainer([0], {
+				containerCompactness: 260,
+			}),
+		});
+		const partial = createPackingProfile({
+			path: "a-partial.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 1,
+			strongestContainer: createBodyWindowContainer([0], {
+				containerCompactness: 260,
+			}),
+		});
+
+		expect(comparePackingProfiles(completed, partial)).toBeLessThan(0);
 	});
 
 	test("surfaceCoverageShape does not participate in same-band packing comparison", () => {

@@ -1,12 +1,21 @@
 import type {
 	EvidenceContainer,
 	EvidencePackingProfile,
+	HanSurfaceCompletionTier,
 } from "./types";
 
 const CONTAINER_TIER_SCORE: Record<EvidenceContainer["tier"], number> = {
 	identity: 3,
 	route: 2,
 	bodyWindow: 1,
+};
+
+const HAN_SURFACE_COMPLETION_TIER_SCORE: Record<HanSurfaceCompletionTier, number> = {
+	none: 0,
+	body_residue: 1,
+	body_window: 2,
+	route: 3,
+	identity: 4,
 };
 
 const COMPACTNESS_TIE_BAND = 180;
@@ -38,6 +47,10 @@ export function comparePackingProfiles(
 	}
 	if (left.exactUnitCount !== right.exactUnitCount) {
 		return right.exactUnitCount - left.exactUnitCount;
+	}
+	const hanSurfaceCompletionComparison = compareHanSurfaceCompletion(left, right);
+	if (hanSurfaceCompletionComparison !== 0) {
+		return hanSurfaceCompletionComparison;
 	}
 	if (left.prefixCompletionGainTotal !== right.prefixCompletionGainTotal) {
 		return left.prefixCompletionGainTotal - right.prefixCompletionGainTotal;
@@ -116,6 +129,34 @@ function compareFragmentation(
 			left.fragmentationPenalty.activeContainerCount -
 			right.fragmentationPenalty.activeContainerCount
 		);
+	}
+	return 0;
+}
+
+function compareHanSurfaceCompletion(
+	left: EvidencePackingProfile,
+	right: EvidencePackingProfile,
+): number {
+	if (
+		left.completedHanSurfaceGroupCount !== right.completedHanSurfaceGroupCount
+	) {
+		return right.completedHanSurfaceGroupCount - left.completedHanSurfaceGroupCount;
+	}
+	if (
+		left.hanSurfaceCompletionTierScoreTotal !==
+		right.hanSurfaceCompletionTierScoreTotal
+	) {
+		return (
+			right.hanSurfaceCompletionTierScoreTotal -
+			left.hanSurfaceCompletionTierScoreTotal
+		);
+	}
+	const leftStrongestTierScore =
+		HAN_SURFACE_COMPLETION_TIER_SCORE[left.strongestHanSurfaceCompletionTier];
+	const rightStrongestTierScore =
+		HAN_SURFACE_COMPLETION_TIER_SCORE[right.strongestHanSurfaceCompletionTier];
+	if (leftStrongestTierScore !== rightStrongestTierScore) {
+		return rightStrongestTierScore - leftStrongestTierScore;
 	}
 	return 0;
 }
