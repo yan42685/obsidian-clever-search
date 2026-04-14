@@ -1,4 +1,4 @@
-# Coverage Lexical Char Fallback Report
+﻿# Coverage Lexical Char Fallback Report
 
 This report records the current working-tree benchmark anchor before and after
 adding the Han bigram fallback channel, the simplified tag fallback, and the
@@ -7,7 +7,7 @@ char-aware direct-subitem highlighting path.
 ## Benchmark
 
 - command:
-  `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - corpus:
   `73` docs, `176` queries
 - anchor date:
@@ -54,3 +54,4 @@ char-aware direct-subitem highlighting path.
   verifies Han body fallback and simplified tag fallback.
 - `tests/src/services/search/coverage-lexical-direct-subitems.test.ts`
   verifies char-level snippet highlighting fallback.
+

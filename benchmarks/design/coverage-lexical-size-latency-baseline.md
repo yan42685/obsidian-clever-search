@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline
+﻿# Coverage Lexical Size And Latency Baseline
 
 Date: 2026-03-31
 
@@ -6,11 +6,11 @@ Date: 2026-03-31
 
 - purpose: anchor `coverage-lexical` before query-time and index-layout compression work
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - `59050ae` (`Fix coverage lexical index size accounting`)
 - worktree note:
-  - baseline metrics below were refreshed after adding relative-anchor benchmark logging in `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - baseline metrics below were refreshed after adding relative-anchor benchmark logging in `tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
   - that logging change does not change search behavior; it only records ratio-oriented timing anchors
 - timing anchor rule:
   - use `CoverageLexical / MiniSearch` latency ratios as the primary timing anchor
@@ -104,3 +104,4 @@ Date: 2026-03-31
   - quality delta vs this anchor
   - latency ratio delta vs this anchor
   - estimated index size ratio delta vs this anchor
+

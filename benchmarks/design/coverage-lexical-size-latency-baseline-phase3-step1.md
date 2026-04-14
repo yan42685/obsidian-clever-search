@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Phase 3 Step 1 DocId Ownership
+﻿# Coverage Lexical Size And Latency Baseline After Phase 3 Step 1 DocId Ownership
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after introducing stable `docId` ownership and before migrating postings away from `Set<string path>`
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `872fc5f` (`Freeze coverage lexical phase 2 baseline`)
 - included Phase 3 step:
@@ -93,4 +93,5 @@ Date: 2026-03-31
   - estimated bytes moved from `290,276` to `293,796`
   - estimated index size ratio moved from `4.886` to `4.945`
   - this is the expected temporary tax for introducing explicit document identity before numeric postings compression lands
+
 

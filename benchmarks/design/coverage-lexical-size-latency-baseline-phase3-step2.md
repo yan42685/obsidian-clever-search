@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Phase 3 Step 2 Hot Posting Migration
+﻿# Coverage Lexical Size And Latency Baseline After Phase 3 Step 2 Hot Posting Migration
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after migrating the hottest posting buckets from `Set<string path>` to `docId`-oriented storage
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `2fdda12` (`Introduce coverage lexical doc id ownership`)
 - included Phase 3 step:
@@ -99,4 +99,5 @@ Date: 2026-03-31
   - estimated bytes moved from `293,796` to `292,628`
   - estimated index size ratio moved from `4.945` to `4.926`
   - the byte win is modest, which is expected before field-specific postings and document-side strings are also migrated
+
 

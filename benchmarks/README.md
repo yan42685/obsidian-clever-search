@@ -95,7 +95,7 @@ node scripts/benchmark-big-vault-read.mjs
 
 ### `coverage-lexical-automation-v1`
 
-This is the exact synthetic corpus used by `npm run benchmark:coverage-lexical`.
+This is the shared synthetic corpus used by `npm run benchmark:coverage-lexical` (V3) and `npm run benchmark:coverage-lexical:legacy`.
 
 Materialize the benchmark corpus locally with:
 
@@ -122,22 +122,28 @@ If you want a different output directory, run:
 node scripts/materialize-coverage-lexical-corpus.mjs --output=.codex-bench/corpora/my-coverage-corpus
 ```
 
-Run the benchmark itself with:
+Run the current V3 benchmark with:
 
 ```bash
 npm run benchmark:coverage-lexical
 ```
 
-The benchmark currently keeps `coverage-lexical-automation-v1` as the
-continuity anchor, but the report now also splits results into intent gates:
+Run the preserved legacy continuity benchmark with:
+
+```bash
+npm run benchmark:coverage-lexical:legacy
+```
+
+The current V3 benchmark reuses the legacy automation corpus, query cases, and
+core summary metrics, but narrows the comparison set to
+`CoverageLexical(V3)` versus `MiniSearch`.
+
+The preserved legacy benchmark keeps `coverage-lexical-automation-v1` as the
+continuity anchor and still reports the original intent gates:
 
 - `product_guardrail_gate`
 - `exception_aware_gate`
 - `legacy_continuity_gate`
-
-That reporting split does not change the synthetic corpus version. It only
-makes it easier to tell whether a change hurt product-facing intent, exception
-handling, or broad legacy continuity.
 
 For coverage-lexical Chinese regression work, do not rely on this synthetic
 benchmark alone. There are also dedicated regression suites for:
@@ -177,7 +183,7 @@ and mixed-script query shapes such as:
 
 The materialized corpus and the benchmark both come from the same generator:
 
-- `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts#createAutomationCorpus`
+- `tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts#createAutomationCorpus`
 
 ## Design intent
 
@@ -203,4 +209,3 @@ Practical rule:
 - store source repo + commit sha + original path in a manifest file when possible
 - prefer public markdown sources with clear provenance
 - keep large local corpora in `.codex-bench/` unless there is a strong reason to commit them
-

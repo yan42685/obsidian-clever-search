@@ -1,4 +1,4 @@
-# Coverage Lexical Ranking Intent Realignment Plan
+﻿# Coverage Lexical Ranking Intent Realignment Plan
 
 Date: 2026-04-09
 Status: Draft
@@ -622,7 +622,7 @@ Primary files:
 
 - `tests/src/services/search/coverage-lexical-ranking.test.ts`
 - `tests/src/services/search/coverage-lexical-recall-suite.test.ts`
-- `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+- `tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 
 Exit criteria:
 
@@ -770,7 +770,7 @@ Actions:
 
 Primary files:
 
-- `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+- `tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - `benchmarks/README.md`
 - `benchmarks/design/` follow-up assessments
 
@@ -905,7 +905,7 @@ Validated in this branch:
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-regression.test.ts`
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-engine-regression.test.ts`
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-tokenizer-gate.test.ts`
-- `npm run benchmark:coverage-lexical`
+- `npm run benchmark:coverage-lexical:legacy`
 
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-ranking.test.ts`
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-recall-suite.test.ts`
@@ -1112,3 +1112,5 @@ Do not start with another standalone count-threshold tweak.
 Start by cleaning up the design target, then migrate the ranking stack toward a
 completeness-aware unified evidence model that preserves file lookup,
 exact-witness, mixed-script, and partial-memory behavior simultaneously.
+
+

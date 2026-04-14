@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Phase 2 Compression
+﻿# Coverage Lexical Size And Latency Baseline After Phase 2 Compression
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after the first successful phrase-storage compression wave and before Phase 3 live-layout redesign
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - `fc1b7d9` (`Canonicalize coverage lexical phrase storage`)
 - included compression steps:
@@ -120,4 +120,5 @@ Date: 2026-03-31
   - quality delta vs this Phase 2 anchor
   - latency ratio delta vs this Phase 2 anchor
   - estimated index size ratio delta vs this Phase 2 anchor
+
 

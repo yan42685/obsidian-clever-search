@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Query-Time Hot-Path Flattening
+﻿# Coverage Lexical Size And Latency Baseline After Query-Time Hot-Path Flattening
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after the current query-time hot-path flattening wave so future work compares against the latest measured latency win rather than the older mixed-layout structural anchor
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `d4b9764` (`Flatten coverage lexical window scoring hot path`) plus numeric `seenWindows` dedupe in local window scoring
 - included hot-path changes in this anchor:
@@ -101,4 +101,5 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - continue latency work by removing the remaining query-time string and container churn in local window evaluation before expecting more benefit from additional posting migration
+
 

@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Engine Query-Local Result Reuse
+﻿# Coverage Lexical Size And Latency Baseline After Engine Query-Local Result Reuse
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after the engine-side query-local reuse step so future latency work compares against the first retained post-recall-cache win from the ranking pipeline itself
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `7dd9475` (`Reuse coverage lexical recall lane signals`) plus engine-side query-local base-result reuse and base-signal flattening in `coverage-lexical-engine.ts`
 - included hot-path changes in this anchor:
@@ -108,4 +108,5 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - next latency work should keep targeting duplicated query-time document work or per-candidate full-family scans, not additional numeric migration by itself
+
 

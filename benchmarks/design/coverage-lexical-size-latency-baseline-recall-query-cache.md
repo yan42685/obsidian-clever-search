@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Recall Query-Local Caching
+﻿# Coverage Lexical Size And Latency Baseline After Recall Query-Local Caching
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after the first high-ROI recall-side caching step so later recall and ranking work compares against the latest measured latency win rather than against the earlier query-hotpath-flattening anchor
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `27b1f23` (`Share coverage lexical body evidence tracing`) plus recall-side query-local caching in `coverage-lexical-recall.ts`
 - included hot-path changes in this anchor:
@@ -100,4 +100,5 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - next latency work should focus on recall-side signal construction churn, especially repeated group-signal assembly and bridge/body merge work inside lane prefiltering and evaluation
+
 

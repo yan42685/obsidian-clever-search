@@ -1,4 +1,4 @@
-# Coverage Lexical Unified Evidence Ranking Design
+﻿# Coverage Lexical Unified Evidence Ranking Design
 
 Date: 2026-04-08
 Status: Draft
@@ -602,7 +602,7 @@ If the quality fix exceeds the target but remains clearly beneficial, retain the
 - `tests/src/services/search/coverage-lexical-planner.test.ts`
 - `tests/src/services/search/coverage-lexical-real-tokenizer.test.ts`
 - `tests/src/services/search/coverage-lexical-recall-suite.test.ts`
-- `tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+- `tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 
 ## Acceptance Checklist
 
@@ -614,3 +614,4 @@ If the quality fix exceeds the target but remains clearly beneficial, retain the
 - coarse ranking and fine ranking share one objective and do not drift semantically
 - the coverage benchmark includes targeted Chinese short-query hard cases
 - quality is improved or preserved without an obvious latency cliff
+

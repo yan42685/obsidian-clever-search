@@ -1,4 +1,4 @@
-# Coverage Lexical Metadata Priority Baseline
+﻿# Coverage Lexical Metadata Priority Baseline
 
 Date: 2026-03-30
 
@@ -7,7 +7,7 @@ Date: 2026-03-30
 - purpose: anchor benchmark and regression behavior before introducing metadata-priority count-first ranking
 - command:
   - `node node_modules/jest/bin/jest.js --runInBand tests/src/services/search/coverage-lexical-ranking.test.ts tests/src/services/search/coverage-lexical-recall-suite.test.ts tests/src/services/search/coverage-lexical-planner.test.ts tests/src/services/obsidian/search-service-bootstrap.test.ts`
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - worktree note:
   - existing unrelated local modifications are present in `src/services/search/coverage-lexical/coverage-lexical-planner.ts`
   - existing unrelated local modifications are present in `tests/src/services/search/coverage-lexical-planner.test.ts`
@@ -109,3 +109,4 @@ Date: 2026-03-30
   - mixed-script anchor disambiguation
   - a small tail of partial-memory ranking misses
 - any post-change benchmark movement should be judged against these existing weak spots rather than against a perfect baseline
+

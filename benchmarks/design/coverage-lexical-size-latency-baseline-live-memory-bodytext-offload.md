@@ -1,4 +1,4 @@
-## Coverage Lexical Live-Memory BodyText Offload Anchor
+﻿## Coverage Lexical Live-Memory BodyText Offload Anchor
 
 Date: 2026-04-01
 
@@ -6,7 +6,7 @@ Date: 2026-04-01
 
 - purpose: freeze the first retained live-memory reduction after removing resident `bodyText` from `CoverageLexicalDocument` and shifting direct-subitems body reads to `FileSnapshotStore`
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture state:
   - working tree after:
     - live documents stop storing `bodyText`
@@ -113,4 +113,5 @@ Date: 2026-04-01
 - execution takeaway:
   - promote this file as the new active query anchor for the live-memory slimming track
   - next work should keep targeting resident document weight and binary-friendly ownership layout, not speculative persisted-byte compression
+
 

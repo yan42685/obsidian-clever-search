@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Phase 3 Step 3 Canonical Recall Candidate Migration
+﻿# Coverage Lexical Size And Latency Baseline After Phase 3 Step 3 Canonical Recall Candidate Migration
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after making recall candidate collection internally canonical-keyed so numeric postings stay `docId`-native until final path projection
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `1da764a` (`Migrate coverage lexical hot postings to doc ids`) plus the Phase 3 Step 3 canonical recall migration
 - included Phase 3 step:
@@ -104,4 +104,5 @@ Date: 2026-03-31
   - estimated index size ratio stayed at `4.926`
 - execution takeaway:
   - Phase 3 should continue by migrating the remaining field-specific metadata, tag, and char postings off path sets before evaluating whether canonical-key recall can deliver its intended latency win
+
 

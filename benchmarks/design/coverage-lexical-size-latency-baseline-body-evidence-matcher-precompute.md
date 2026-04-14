@@ -1,4 +1,4 @@
-# Coverage Lexical Size And Latency Baseline After Body Evidence Family Matcher Precompute
+﻿# Coverage Lexical Size And Latency Baseline After Body Evidence Family Matcher Precompute
 
 Date: 2026-03-31
 
@@ -6,7 +6,7 @@ Date: 2026-03-31
 
 - purpose: freeze `coverage-lexical` after flattening the shared body-evidence matcher path so future latency work compares against the first retained post-engine-cache win in the document scan itself
 - benchmark command:
-  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-automation-benchmark.bench.ts`
+  - `node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts`
 - benchmark capture commit:
   - working tree after `f66fa47` (`Cache coverage lexical engine rank signals`) plus the retained body-evidence matcher precompute in `coverage-lexical-body-evidence.ts`
 - included hot-path changes in this anchor:
@@ -125,4 +125,5 @@ Date: 2026-03-31
 - execution takeaway:
   - promote this file as the new active anchor
   - next latency work should keep targeting shared downstream consumers of body-evidence and other repeated per-family scans, not broad token-bucket caching unless a benchmark clearly proves it
+
 

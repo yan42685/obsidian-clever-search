@@ -1,4 +1,4 @@
-
+﻿
 # Coverage Lexical Query-Unit Ranking V2
 
 Date: 2026-04-10
@@ -1090,7 +1090,7 @@ Preferred lexical order:
     - short Latin prefix budgets are now length-sensitive in the active path: `>=5` keeps normal metadata/body prefix sourcing, `4` keeps full metadata prefix with reduced body prefix, and `3` disables normal body prefix while retaining bounded metadata prefix
     - each primary unit now collects a runtime-only metadata `prefixHint` and, when the winning unit evidence is metadata prefix, a runtime-only `PrefixWitnessLite` derived from existing document-record raw text without changing index-store schema or hydration boundaries
     - `primaryUnitMatchQuality` still respects `exact > prefix > fuzzy`; metadata prefix witness comparison now runs only as an in-layer tie-break after the existing exact/prefix/fuzzy counts fully tie, while best-window and proximity remain exact-only
-    - focused candidate-cascade, evidence, comparator, and independent-engine regression coverage now exercises metadata-only assist, body-prefix gating, metadata prefix witness extraction, and prefix tie-break behavior; `npm run benchmark:coverage-lexical` plus `npm run benchmark:coverage-lexical:stress` completed without a new schema/storage migration
+    - focused candidate-cascade, evidence, comparator, and independent-engine regression coverage now exercises metadata-only assist, body-prefix gating, metadata prefix witness extraction, and prefix tie-break behavior; `npm run benchmark:coverage-lexical:legacy` plus `npm run benchmark:coverage-lexical:legacy:stress` completed without a new schema/storage migration
   - proximity witness follow-up (2026-04-13): completed
     - verification-bucket best-window evidence now accepts `exact + prefix` witnesses instead of only exact token equality, while `fuzzy` remains excluded from proximity
     - `primaryUnitProximityScore` now includes `contiguousSurfaceGroupCount` between `preservesSurfaceOrder` and span-width distance tie-breaks so contiguous local witnesses beat equally covered scattered ones without moving proximity ahead of coverage/field/match-quality
@@ -1807,6 +1807,8 @@ Default benchmark comparison policy:
   regressions or validating continuity during rollout
 - benchmark continuity is important, but it must not be used as a reason to
   preserve old worldview logic
+
+
 
 
 
