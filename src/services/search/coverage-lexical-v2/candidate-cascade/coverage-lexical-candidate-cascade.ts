@@ -1710,6 +1710,40 @@ function refreshCoverageLexicalV2ComparatorRunCandidates(
 		.filter((candidate): candidate is CoverageLexicalV2ComparatorRunCandidate => candidate != null);
 }
 
+function refreshCoverageLexicalV2ComparatorRunCandidatesSelective(
+	runCandidates: readonly CoverageLexicalV2ComparatorRunCandidate[],
+	evidenceByCandidateId: ReadonlyMap<string, CoverageLexicalV2ComparatorEvidence>,
+	cheapComparatorCandidateById: ReadonlyMap<string, CoverageLexicalV2ComparatorCandidate>,
+	candidateIdsNeedingRefresh: ReadonlySet<string>,
+): CoverageLexicalV2ComparatorRunCandidate[] {
+	if (candidateIdsNeedingRefresh.size === 0) {
+		return [...runCandidates];
+	}
+	return runCandidates
+		.map<CoverageLexicalV2ComparatorRunCandidate | null>((runCandidate) => {
+			const candidateId = runCandidate.evidence.candidateId;
+			if (!candidateIdsNeedingRefresh.has(candidateId)) {
+				return runCandidate;
+			}
+			const evidence = evidenceByCandidateId.get(candidateId);
+			const cheapComparatorCandidate = cheapComparatorCandidateById.get(candidateId);
+			if (!evidence || !cheapComparatorCandidate) {
+				return null;
+			}
+			return {
+				evidence,
+				comparatorCandidate:
+					runCandidate.comparatorCandidate.primaryUnitProximityScore != null
+						? patchCoverageLexicalV2ComparatorCandidateWithProximity(
+							cheapComparatorCandidate,
+							evidence,
+						)
+						: cheapComparatorCandidate,
+			};
+		})
+		.filter((candidate): candidate is CoverageLexicalV2ComparatorRunCandidate => candidate != null);
+}
+
 function serializeCoverageLexicalV2SurfaceCoverageShape(
 	shape: CoverageLexicalV2SurfaceCoverageShape,
 ): string {
@@ -2934,39 +2968,57 @@ async function applyCoverageLexicalV2LateResultPrune(config: {
 	if (orderedCandidateStates.length === 0) {
 		return [...config.orderedCandidates];
 	}
-	await hydrateCoverageLexicalV2CascadeVerificationStates(
-		orderedCandidateStates,
-		config.reader,
-		config.prefetchedBodyHanExactBlockIds,
-		config.policy,
+	const candidateStatesNeedingLateFreeze = orderedCandidateStates.filter(
+		(candidateState) =>
+			candidateState.needsVerification &&
+			candidateState.hydrationStatus !== "prefetched",
 	);
-	await populateCoverageLexicalV2CandidateCascadeEvidence(
-		config.evidenceByCandidateId,
-		orderedCandidateStates,
-		config.queryAnalysis,
-		config.candidateCascadePrimaryUnits,
-		config.reader,
-		config.matchOptions,
-		config.prefetchedBodyHanExactBlockIds,
-		config.policy,
-		config.layerMode,
-		"off",
-		true,
+	const candidateIdsNeedingLateFreeze = new Set(
+		candidateStatesNeedingLateFreeze.map((candidateState) => String(candidateState.docId)),
 	);
+	const candidateIdsNeedingRunCandidateRefresh = new Set<string>();
+	if (candidateStatesNeedingLateFreeze.length > 0) {
+		await hydrateCoverageLexicalV2CascadeVerificationStates(
+			candidateStatesNeedingLateFreeze,
+			config.reader,
+			config.prefetchedBodyHanExactBlockIds,
+			config.policy,
+		);
+		await populateCoverageLexicalV2CandidateCascadeEvidence(
+			config.evidenceByCandidateId,
+			candidateStatesNeedingLateFreeze,
+			config.queryAnalysis,
+			config.candidateCascadePrimaryUnits,
+			config.reader,
+			config.matchOptions,
+			config.prefetchedBodyHanExactBlockIds,
+			config.policy,
+			config.layerMode,
+			"off",
+			true,
+		);
+	}
 	const confirmedTotalPrimaryCountByCandidateId = new Map<string, number>();
 	let leaderConfirmedTotalPrimaryCount = 0;
 	for (const candidateState of orderedCandidateStates) {
 		const candidateId = String(candidateState.docId);
-		const evidence = config.evidenceByCandidateId.get(candidateId);
-		if (!evidence) {
-			confirmedTotalPrimaryCountByCandidateId.set(candidateId, 0);
-			continue;
+		let comparatorCandidate = config.cheapComparatorCandidateById.get(candidateId);
+		if (
+			comparatorCandidate == null ||
+			candidateIdsNeedingLateFreeze.has(candidateId)
+		) {
+			const evidence = config.evidenceByCandidateId.get(candidateId);
+			if (!evidence) {
+				confirmedTotalPrimaryCountByCandidateId.set(candidateId, 0);
+				continue;
+			}
+			comparatorCandidate = buildCoverageLexicalV2CheapComparatorCandidate(
+				config.queryAnalysis,
+				evidence,
+			);
+			config.cheapComparatorCandidateById.set(candidateId, comparatorCandidate);
+			candidateIdsNeedingRunCandidateRefresh.add(candidateId);
 		}
-		const comparatorCandidate = buildCoverageLexicalV2CheapComparatorCandidate(
-			config.queryAnalysis,
-			evidence,
-		);
-		config.cheapComparatorCandidateById.set(candidateId, comparatorCandidate);
 		const confirmedTotalPrimaryCount =
 			comparatorCandidate.distinctMatchedPrimaryQueryUnitCount;
 		confirmedTotalPrimaryCountByCandidateId.set(
@@ -2979,22 +3031,25 @@ async function applyCoverageLexicalV2LateResultPrune(config: {
 		);
 	}
 	if (leaderConfirmedTotalPrimaryCount <= 0) {
-		return refreshCoverageLexicalV2ComparatorRunCandidates(
+		return refreshCoverageLexicalV2ComparatorRunCandidatesSelective(
 			config.orderedCandidates,
 			config.evidenceByCandidateId,
 			config.cheapComparatorCandidateById,
+			candidateIdsNeedingRunCandidateRefresh,
 		);
 	}
-	return refreshCoverageLexicalV2ComparatorRunCandidates(
-		config.orderedCandidates.filter((candidate) =>
-			shouldKeepByLateResultPrune(
-				config.mode,
-				confirmedTotalPrimaryCountByCandidateId.get(candidate.evidence.candidateId) ?? 0,
-				leaderConfirmedTotalPrimaryCount,
-			),
+	const survivingOrderedCandidates = config.orderedCandidates.filter((candidate) =>
+		shouldKeepByLateResultPrune(
+			config.mode,
+			confirmedTotalPrimaryCountByCandidateId.get(candidate.evidence.candidateId) ?? 0,
+			leaderConfirmedTotalPrimaryCount,
 		),
+	);
+	return refreshCoverageLexicalV2ComparatorRunCandidatesSelective(
+		survivingOrderedCandidates,
 		config.evidenceByCandidateId,
 		config.cheapComparatorCandidateById,
+		candidateIdsNeedingRunCandidateRefresh,
 	);
 }
 
