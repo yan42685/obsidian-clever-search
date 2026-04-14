@@ -72,6 +72,8 @@ function createPackingProfile(
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "lll",
 		realizedCoverageCount: overrides.realizedCoverageCount ?? 0,
 		exactUnitCount: overrides.exactUnitCount ?? 0,
+		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
+		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		realizedFamilies: overrides.realizedFamilies ?? [],
 		identityContainer: overrides.identityContainer ?? null,
 		routeContainer: overrides.routeContainer ?? null,
@@ -221,6 +223,54 @@ describe("coverage lexical v3 comparator", () => {
 		});
 
 		expect(comparePackingProfiles(exactHeavy, prefixHeavy)).toBeLessThan(0);
+	});
+
+	test("smaller prefix completion gain wins before path fallback", () => {
+		const tighterPrefix = createPackingProfile({
+			path: "z-preference.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 0,
+			prefixCompletionGainTotal: 1,
+			strongestContainer: createBodyWindowContainer([0], {
+				containerCompactness: 260,
+			}),
+		});
+		const looserPrefix = createPackingProfile({
+			path: "a-prefer.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 0,
+			prefixCompletionGainTotal: 5,
+			strongestContainer: createBodyWindowContainer([0], {
+				containerCompactness: 260,
+			}),
+		});
+
+		expect(comparePackingProfiles(tighterPrefix, looserPrefix)).toBeLessThan(0);
+	});
+
+	test("non-compound prefix wins when completion gain ties", () => {
+		const plainPrefix = createPackingProfile({
+			path: "z-plain.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 0,
+			prefixCompletionGainTotal: 2,
+			compoundPrefixCount: 0,
+			strongestContainer: createBodyWindowContainer([0], {
+				containerCompactness: 260,
+			}),
+		});
+		const compoundPrefix = createPackingProfile({
+			path: "a-compound.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 0,
+			prefixCompletionGainTotal: 2,
+			compoundPrefixCount: 1,
+			strongestContainer: createBodyWindowContainer([0], {
+				containerCompactness: 260,
+			}),
+		});
+
+		expect(comparePackingProfiles(plainPrefix, compoundPrefix)).toBeLessThan(0);
 	});
 
 	test("surfaceCoverageShape does not participate in same-band packing comparison", () => {

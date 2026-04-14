@@ -176,6 +176,16 @@ export function buildPackingProfile(
 		surfaceCoverageShapeKey: queryAnalysis.surfaceCoverageShapeKey,
 		realizedCoverageCount: realizedFamilies.length,
 		exactUnitCount: realizedFamilies.filter((family) => family.matchKind === "exact").length,
+		prefixCompletionGainTotal: realizedFamilies.reduce((total, family) => {
+			if (family.matchKind !== "prefix") {
+				return total;
+			}
+			return total + Math.max(0, family.familyText.length - family.queryUnitText.length);
+		}, 0),
+		compoundPrefixCount: realizedFamilies.filter(
+			(family) =>
+				family.matchKind === "prefix" && /[_./-]/u.test(family.familyText),
+		).length,
 		realizedFamilies,
 		identityContainer,
 		routeContainer,

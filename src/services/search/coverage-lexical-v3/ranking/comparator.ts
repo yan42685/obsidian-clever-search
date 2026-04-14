@@ -39,6 +39,12 @@ export function comparePackingProfiles(
 	if (left.exactUnitCount !== right.exactUnitCount) {
 		return right.exactUnitCount - left.exactUnitCount;
 	}
+	if (left.prefixCompletionGainTotal !== right.prefixCompletionGainTotal) {
+		return left.prefixCompletionGainTotal - right.prefixCompletionGainTotal;
+	}
+	if (left.compoundPrefixCount !== right.compoundPrefixCount) {
+		return left.compoundPrefixCount - right.compoundPrefixCount;
+	}
 	return left.path.localeCompare(right.path);
 }
 

@@ -795,3 +795,38 @@ closer to the intended local-window worldview:
   posting arena
 - the V3 regression baseline now verifies:
   `metadata 2 > same-block bodyWindow 2 > adjacent-block bodyWindow 2 > metadata 1 + body 1 > dispersed body`
+
+### Phase 7
+
+Status: Completed on 2026-04-14
+
+The current implementation now adds a late prefix-quality tie-break for V3
+without changing coverage credit or resident storage:
+
+- prefix quality is still never promoted into realized coverage counts
+- candidates that are otherwise tied now prefer smaller total prefix completion
+  gain before falling back to deterministic path ordering
+- when completion gain ties, non-compound prefix realizations are preferred
+  over compound tokens
+- the V3 regression baseline now verifies
+  `prefe -> prefer > preference > prefer-cache`
+
+### Phase 8
+
+Status: Completed on 2026-04-14
+
+The current implementation now bounds V3 prefix expansion at query time so
+prefix-heavy inputs stay loose in normal cases without turning worst-case lookup
+into a full family scan:
+
+- V3 family lookup no longer materializes and scans every family text for every
+  query unit
+- family lookup now uses lexicographic lower-bound lookup over the already
+  sorted family lexicon to jump directly to the relevant exact/prefix range
+- exact family realization is always preserved before any prefix budget applies
+- prefix expansion is now a controlled query-time collection step with dynamic
+  per-unit match limits and scan budgets that grow with query length
+- prefix candidate ordering now stays aligned with the late comparator by
+  preferring smaller completion gain and then non-compound tokens
+- the V3 regression baseline now verifies that `prefe` keeps the exact family
+  and caps prefix realizations to a loose bounded set

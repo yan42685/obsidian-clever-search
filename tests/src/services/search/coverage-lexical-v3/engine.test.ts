@@ -322,4 +322,39 @@ describe("coverage lexical v3 engine", () => {
 				(result.rankedCandidates[1].bodyWindowContainer?.containerCompactness ?? 0),
 		).toBe(true);
 	});
+
+	test("prefix-only body hits prefer smaller completion gain and then non-compound tokens", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/preference.md",
+				basename: "notes",
+				folder: "latin",
+				content: "preference",
+			}),
+			createDocument({
+				path: "latin/prefer.md",
+				basename: "notes",
+				folder: "latin",
+				content: "prefer",
+			}),
+			createDocument({
+				path: "latin/prefer-compound.md",
+				basename: "notes",
+				folder: "latin",
+				content: "prefer-cache",
+			}),
+		]);
+
+		const result = engine.search("prefe");
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"latin/prefer.md",
+			"latin/preference.md",
+			"latin/prefer-compound.md",
+		]);
+		expect(result.rankedCandidates[0].prefixCompletionGainTotal).toBe(1);
+		expect(result.rankedCandidates[1].prefixCompletionGainTotal).toBe(5);
+		expect(result.rankedCandidates[2].compoundPrefixCount).toBe(1);
+	});
 });

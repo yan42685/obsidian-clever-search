@@ -62,6 +62,8 @@ export type EvidencePackingProfile = Readonly<{
 	surfaceCoverageShapeKey: string;
 	realizedCoverageCount: number;
 	exactUnitCount: number;
+	prefixCompletionGainTotal: number;
+	compoundPrefixCount: number;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];
 	identityContainer: IdentityContainer | null;
 	routeContainer: RouteContainer | null;
