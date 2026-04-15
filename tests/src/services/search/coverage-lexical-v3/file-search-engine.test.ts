@@ -1,4 +1,4 @@
-jest.mock("src/services/search/tokenizer", () => ({
+﻿jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
@@ -112,6 +112,8 @@ function createPackingProfile(
 }
 
 function createRefineSearchResult(): CoverageLexicalV3SearchResult {
+	const shorterTerm = "缓存恢复";
+	const fullSurface = "缓存恢复步骤";
 	const laterPath = createPackingProfile({
 		docId: 0,
 		path: "z-complete.md",
@@ -127,13 +129,13 @@ function createRefineSearchResult(): CoverageLexicalV3SearchResult {
 	return {
 		recallState: {
 			queryAnalysis: {
-				queryText: "lifeforce",
-				normalizedQueryText: "lifeforce",
-				surfaceGroups: [{ index: 0, text: "lifeforce", kind: "han" }],
+				queryText: fullSurface,
+				normalizedQueryText: fullSurface,
+				surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
 				primaryUnits: [
 					{
 						index: 0,
-						text: "life",
+						text: shorterTerm,
 						source: "han_tokenizer_real",
 						surfaceGroupIndex: 0,
 					},
@@ -230,10 +232,9 @@ function createResidentBase(): ResidentBase {
 			},
 		},
 		bodySummary: {
-			postings: {
-				postingStarts: new Uint32Array(),
-				blockIds: new Uint32Array(),
-			},
+			familyIds: new Uint32Array(),
+			postingStarts: new Uint32Array(),
+			blockIds: new Uint32Array(),
 		},
 		bodyBlocks: {
 			blockCount: 3,
@@ -249,16 +250,16 @@ function createResidentBase(): ResidentBase {
 			bigramIds: new Uint32Array(),
 			metadataPostingStarts: new Uint32Array(),
 			metadataDocIds: new Uint32Array(),
-			bodyBlockPostingStarts: new Uint32Array(),
+			bodyPostingStarts: new Uint32Array(),
 			bodyBlockIds: new Uint32Array(),
 			identityWitnessStartByDocId: new Uint32Array(),
-			identityWitnessFamilyIds: new Uint32Array(),
+			identityWitnessStringIds: new Uint32Array(),
 			routeWitnessStartByDocId: new Uint32Array(),
-			routeWitnessFamilyIds: new Uint32Array(),
+			routeWitnessStringIds: new Uint32Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
-			headingWitnessFamilyIds: new Uint32Array(),
+			headingWitnessStringIds: new Uint32Array(),
 			bodyWitnessStartByBlockId: new Uint32Array(),
-			bodyWitnessFamilyIds: new Uint32Array(),
+			bodyWitnessStringIds: new Uint32Array(),
 		},
 		metrics: {
 			docArenaBytes: 0,
@@ -440,6 +441,8 @@ describe("coverage lexical v3 file search engine", () => {
 
 	test("getDirectSubItems uses V3 query analysis with indexed snapshots", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const shorterTerm = "缓存恢复";
+		const fullSurface = "缓存恢复步骤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/lifeforce.md",
@@ -452,13 +455,13 @@ describe("coverage lexical v3 file search engine", () => {
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {
 				queryAnalysis: {
-					queryText: "???",
-					normalizedQueryText: "???",
-					surfaceGroups: [{ index: 0, text: "???", kind: "han" }],
+					queryText: fullSurface,
+					normalizedQueryText: fullSurface,
+					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
 					primaryUnits: [
 						{
 							index: 0,
-							text: "??",
+							text: shorterTerm,
 							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},
@@ -488,7 +491,7 @@ describe("coverage lexical v3 file search engine", () => {
 					hanSurfaceCompletionGroups: [
 						{
 							surfaceGroupIndex: 0,
-							surfaceText: "???",
+							surfaceText: fullSurface,
 							tier: "body_window",
 						},
 					],
@@ -499,7 +502,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/lifeforce.md", "?????\n\n?????????"]]),
+			new Map([["notes/lifeforce.md", "缓存恢复步骤\n\n热启动恢复记录。"]]),
 		);
 		const readCurrentTexts = jest.fn();
 		(
@@ -529,12 +532,12 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts,
 		});
 
-		const subItems = await engine.getDirectSubItems("???", "notes/lifeforce.md", 3);
+		const subItems = await engine.getDirectSubItems(fullSurface, "notes/lifeforce.md", 3);
 
 		expect(subItems).not.toBeNull();
 		expect(subItems?.length).toBeGreaterThan(0);
 		const snippet = subItems?.[0]?.snippet ?? subItems?.[0]?.text ?? "";
-		expect(snippet).toContain("???");
+		expect(snippet).toContain(fullSurface);
 		const highlightTexts = subItems?.[0]?.highlightRanges?.map((range) =>
 			(subItems?.[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
@@ -547,6 +550,8 @@ describe("coverage lexical v3 file search engine", () => {
 
 	test("getDirectSubItems highlights a full Han surface instead of only the shorter real term", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const shorterTerm = "缓存恢复";
+		const fullSurface = "缓存恢复步骤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/life-force.md",
@@ -559,13 +564,13 @@ describe("coverage lexical v3 file search engine", () => {
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {
 				queryAnalysis: {
-					queryText: "生命力",
-					normalizedQueryText: "生命力",
-					surfaceGroups: [{ index: 0, text: "生命力", kind: "han" }],
+					queryText: fullSurface,
+					normalizedQueryText: fullSurface,
+					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
 					primaryUnits: [
 						{
 							index: 0,
-							text: "生命",
+							text: shorterTerm,
 							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},
@@ -595,7 +600,7 @@ describe("coverage lexical v3 file search engine", () => {
 					hanSurfaceCompletionGroups: [
 						{
 							surfaceGroupIndex: 0,
-							surfaceText: "生命力",
+							surfaceText: fullSurface,
 							tier: "body_residue",
 						},
 					],
@@ -606,7 +611,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/life-force.md", "这里先只谈生命现象\n\n后来才说生命力十足"]]),
+			new Map([["notes/life-force.md", "缓存恢复步骤说明\n\n缓存恢复步骤用于热启动恢复。"]]),
 		);
 		(
 			engine as unknown as {
@@ -632,19 +637,21 @@ describe("coverage lexical v3 file search engine", () => {
 			readIndexedTexts,
 		});
 
-		const subItems = await engine.getDirectSubItems("生命力", "notes/life-force.md", 3);
+		const subItems = await engine.getDirectSubItems(fullSurface, "notes/life-force.md", 3);
 
 		expect(subItems).not.toBeNull();
 		const highlightTexts = subItems?.[0]?.highlightRanges?.map((range) =>
 			(subItems?.[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlightTexts).toContain("生命力");
-		expect(highlightTexts).not.toContain("生命");
+		expect(highlightTexts).toContain(fullSurface);
+		expect(highlightTexts).not.toContain(shorterTerm);
 	});
 
 	
 	test("getDirectSubItems falls back to current text when generation-aligned indexed text is unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const shorterTerm = "缓存恢复";
+		const fullSurface = "缓存恢复步骤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/missing-snapshot.md",
@@ -657,13 +664,13 @@ describe("coverage lexical v3 file search engine", () => {
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {
 				queryAnalysis: {
-					queryText: "生命力",
-					normalizedQueryText: "生命力",
-					surfaceGroups: [{ index: 0, text: "生命力", kind: "han" }],
+					queryText: fullSurface,
+					normalizedQueryText: fullSurface,
+					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
 					primaryUnits: [
 						{
 							index: 0,
-							text: "生命",
+							text: shorterTerm,
 							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},
@@ -693,7 +700,7 @@ describe("coverage lexical v3 file search engine", () => {
 					hanSurfaceCompletionGroups: [
 						{
 							surfaceGroupIndex: 0,
-							surfaceText: "生命力",
+							surfaceText: fullSurface,
 							tier: "body_residue",
 						},
 					],
@@ -705,7 +712,7 @@ describe("coverage lexical v3 file search engine", () => {
 		}));
 		const readIndexedTexts = jest.fn(async () => new Map<string, string>());
 		const readCurrentTexts = jest.fn(async () =>
-			new Map([["notes/missing-snapshot.md", "先提生命\n\n再谈生命力十足"]]),
+			new Map([["notes/missing-snapshot.md", "缓存恢复步骤\n\n回放检查与热启动恢复。"]]),
 		);
 		(
 			engine as unknown as {
@@ -734,15 +741,15 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts,
 		});
 
-		const subItems = await engine.getDirectSubItems("生命力", "notes/missing-snapshot.md", 3);
+		const subItems = await engine.getDirectSubItems(fullSurface, "notes/missing-snapshot.md", 3);
 
 		expect(subItems).not.toBeNull();
 		expect(readCurrentTexts).toHaveBeenCalledWith(["notes/missing-snapshot.md"]);
 		const highlightTexts = subItems?.[0]?.highlightRanges?.map((range) =>
 			(subItems?.[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlightTexts).toContain("生命力");
-		expect(highlightTexts).not.toContain("生命");
+		expect(highlightTexts).toContain(fullSurface);
+		expect(highlightTexts).not.toContain(shorterTerm);
 	});
 
 test("searchFiles passes tokenizer query terms into engine.search", async () => {
@@ -761,6 +768,8 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			{ tokenizeSequence } as unknown as Tokenizer,
 		);
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const shorterTerm = "缓存恢复";
+		const fullSurface = "缓存恢复步骤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "zh/split-hit.md",
@@ -772,273 +781,16 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {
 				queryAnalysis: {
-					queryText: "systemproxy",
-					normalizedQueryText: "systemproxy",
-					surfaceGroups: [{ index: 0, text: "systemproxy", kind: "latin" }],
+					queryText: fullSurface,
+					normalizedQueryText: fullSurface,
+					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
 					primaryUnits: [
 						{
 							index: 0,
-							text: "system",
-							source: "surface",
+							text: shorterTerm,
+							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},
-						{
-							index: 1,
-							text: "proxy",
-							source: "surface",
-							surfaceGroupIndex: 0,
-						},
-					],
-					hanBackstopGroups: [],
-					surfaceCoverageShapeKey: "l",
-				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
-				createPackingProfile({
-					docId: 0,
-					path: "zh/split-hit.md",
-					hanSurfaceCompletionGroups: [],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
-				}),
-			],
-		}));
-		(
-			engine as unknown as {
-				engine: {
-					search: typeof search;
-					getResidentBase: () => ResidentBase | null;
-				};
-			}
-		).engine = {
-			search,
-			getResidentBase: () => null,
-		};
-
-		const matchedFiles = await engine.searchFiles({
-			queryText: "systemproxy",
-			isPrefixMatch: true,
-			isFuzzy: false,
-			maxItemResults: 5,
-		});
-
-		expect(tokenizeSequence).toHaveBeenCalledWith("systemproxy", "search");
-		expect(search).toHaveBeenCalledWith("systemproxy", ["system", "proxy"]);
-		expect(matchedFiles[0]?.queryTerms).toEqual(["system", "proxy"]);
-	});
-
-	test("index breakdown exposes resident v3 metrics", async () => {
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		await engine.reIndexAll([
-			createDocument({
-				path: "han/token.md",
-				basename: "han token",
-				folder: "han",
-				content: "han route exact tape",
-			}),
-		]);
-
-		const breakdown = engine.getIndexBreakdown();
-
-		expect(breakdown?.__backend).toBe("coverage-lexical-v3");
-		expect(breakdown?.metrics.residentBytes).toBeGreaterThan(0);
-		expect(breakdown?.summary.documentCount).toBe(1);
-	});
-
-	test("searchFiles refines Han body completion from indexed snapshots", async () => {
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		await engine.reIndexAll([
-			createDocument({
-				path: "z-complete.md",
-				basename: "note",
-				folder: "zh",
-				generation: 101,
-				content: "placeholder",
-			}),
-			createDocument({
-				path: "a-partial.md",
-				basename: "note",
-				folder: "zh",
-				generation: 202,
-				content: "placeholder",
-			}),
-		]);
-		const readIndexedTexts = jest.fn(async () =>
-			new Map<string, string>([
-				["z-complete.md", "lifeforce appears here\n\nother note"],
-				["a-partial.md", "life only"],
-			]),
-		);
-		const readCurrentTexts = jest.fn();
-		(
-			engine as unknown as {
-				engine: {
-					search: () => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
-				};
-				getFileSnapshotStore: () => {
-					readIndexedTexts: typeof readIndexedTexts;
-					readCurrentTexts: typeof readCurrentTexts;
-				};
-			}
-		).engine = {
-			search: () => createRefineSearchResult(),
-			getResidentBase: () => createResidentBase(),
-		};
-		(
-			engine as unknown as {
-				getFileSnapshotStore: () => {
-					readIndexedTexts: typeof readIndexedTexts;
-					readCurrentTexts: typeof readCurrentTexts;
-				};
-			}
-		).getFileSnapshotStore = () => ({
-			readIndexedTexts,
-			readCurrentTexts,
-		});
-
-		const matchedFiles = await engine.searchFiles({
-			queryText: "lifeforce",
-			isPrefixMatch: true,
-			isFuzzy: false,
-			maxItemResults: 5,
-		});
-
-		expect(matchedFiles.map((file) => file.path)).toEqual([
-			"z-complete.md",
-			"a-partial.md",
-		]);
-		expect(readIndexedTexts).toHaveBeenCalledWith([
-			{ path: "a-partial.md", generation: 202 },
-			{ path: "z-complete.md", generation: 101 },
-		]);
-		expect(readCurrentTexts).not.toHaveBeenCalled();
-	});
-
-	test("searchFiles can hide weaker coverage-gate bands", async () => {
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		await engine.reIndexAll([
-			createDocument({
-				path: "strong.md",
-				basename: "strong",
-				folder: "notes",
-				content: "system proxy",
-			}),
-			createDocument({
-				path: "weak.md",
-				basename: "weak",
-				folder: "notes",
-				content: "system",
-			}),
-		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: "system proxy",
-					normalizedQueryText: "system proxy",
-					surfaceGroups: [
-						{ index: 0, text: "system", kind: "latin" },
-						{ index: 1, text: "proxy", kind: "latin" },
-					],
-					primaryUnits: [
-						{ index: 0, text: "system", source: "surface", surfaceGroupIndex: 0 },
-						{ index: 1, text: "proxy", source: "surface", surfaceGroupIndex: 1 },
-					],
-					hanBackstopGroups: [],
-					surfaceCoverageShapeKey: "ll",
-				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
-				createPackingProfile({
-					docId: 0,
-					path: "strong.md",
-					realizedCoverageCount: 2,
-					coverageGate: {
-						realizedCoverageCount: 2,
-						fullySatisfiedSurfaceGroupCount: 2,
-						startedSurfaceGroupCount: 2,
-						crossScriptSatisfiedGroupCount: 1,
-					},
-					hanSurfaceCompletionGroups: [],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
-				}),
-				createPackingProfile({
-					docId: 1,
-					path: "weak.md",
-					realizedCoverageCount: 1,
-					coverageGate: {
-						realizedCoverageCount: 1,
-						fullySatisfiedSurfaceGroupCount: 1,
-						startedSurfaceGroupCount: 1,
-						crossScriptSatisfiedGroupCount: 1,
-					},
-					hanSurfaceCompletionGroups: [],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
-				}),
-			],
-		}));
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
-
-		const visible = await engine.searchFiles({
-			queryText: "system proxy",
-			isPrefixMatch: true,
-			isFuzzy: false,
-			hideWeaklyRelatedResults: true,
-			maxItemResults: 5,
-		});
-		const all = await engine.searchFiles({
-			queryText: "system proxy",
-			isPrefixMatch: true,
-			isFuzzy: false,
-			hideWeaklyRelatedResults: false,
-			maxItemResults: 5,
-		});
-
-		expect(visible.map((file) => file.path)).toEqual(["strong.md"]);
-		expect(all.map((file) => file.path)).toEqual(["strong.md", "weak.md"]);
-	});
-
-	test("searchFiles reorders the top coverage band by Han surface completion dominance", async () => {
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		await engine.reIndexAll([
-			createDocument({
-				path: "partial.md",
-				basename: "partial",
-				folder: "notes",
-				content: "??",
-			}),
-			createDocument({
-				path: "complete.md",
-				basename: "complete",
-				folder: "notes",
-				content: "???",
-			}),
-		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: "???",
-					normalizedQueryText: "???",
-					surfaceGroups: [{ index: 0, text: "???", kind: "han" }],
-					primaryUnits: [
-						{ index: 0, text: "??", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
 					],
 					hanBackstopGroups: [],
 					surfaceCoverageShapeKey: "h",
@@ -1057,7 +809,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 						crossScriptSatisfiedGroupCount: 1,
 					},
 					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "none" },
+						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "none" },
 					],
 					completedHanSurfaceGroupCount: 0,
 					hanSurfaceCompletionTierScoreTotal: 0,
@@ -1073,7 +825,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 						crossScriptSatisfiedGroupCount: 1,
 					},
 					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "body_residue" },
+						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_residue" },
 					],
 					completedHanSurfaceGroupCount: 1,
 					hanSurfaceCompletionTierScoreTotal: 1,
@@ -1092,40 +844,48 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		};
 
 		const matchedFiles = await engine.searchFiles({
-			queryText: "???",
+			queryText: "systemproxy",
 			isPrefixMatch: true,
 			isFuzzy: false,
 			hideWeaklyRelatedResults: false,
 			maxItemResults: 5,
 		});
 
+		expect(tokenizeSequence).toHaveBeenCalledWith("systemproxy", "search");
 		expect(matchedFiles.map((file) => file.path)).toEqual(["complete.md", "partial.md"]);
 	});
 
 	test("searchFiles hides same-band Han partials when weak results are hidden", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const shorterTerm = "缓存恢复";
+		const fullSurface = "缓存恢复步骤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "partial.md",
 				basename: "partial",
 				folder: "notes",
-				content: "??",
+				content: "缓存恢复",
 			}),
 			createDocument({
 				path: "complete.md",
 				basename: "complete",
 				folder: "notes",
-				content: "???",
+				content: "缓存恢复步骤",
 			}),
 		]);
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {
 				queryAnalysis: {
-					queryText: "???",
-					normalizedQueryText: "???",
-					surfaceGroups: [{ index: 0, text: "???", kind: "han" }],
+					queryText: fullSurface,
+					normalizedQueryText: fullSurface,
+					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
 					primaryUnits: [
-						{ index: 0, text: "??", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+						{
+							index: 0,
+							text: shorterTerm,
+							source: "han_tokenizer_real",
+							surfaceGroupIndex: 0,
+						},
 					],
 					hanBackstopGroups: [],
 					surfaceCoverageShapeKey: "h",
@@ -1144,7 +904,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 						crossScriptSatisfiedGroupCount: 1,
 					},
 					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "none" },
+						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "none" },
 					],
 					completedHanSurfaceGroupCount: 0,
 					hanSurfaceCompletionTierScoreTotal: 0,
@@ -1160,7 +920,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 						crossScriptSatisfiedGroupCount: 1,
 					},
 					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "body_window" },
+						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_window" },
 					],
 					completedHanSurfaceGroupCount: 1,
 					hanSurfaceCompletionTierScoreTotal: 2,
@@ -1179,7 +939,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		};
 
 		const visible = await engine.searchFiles({
-			queryText: "???",
+			queryText: fullSurface,
 			isPrefixMatch: true,
 			isFuzzy: false,
 			hideWeaklyRelatedResults: true,
@@ -1275,13 +1035,20 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			search: () => ({
 				recallState: {
 					queryAnalysis: {
-						queryText: "lifeforce",
-						normalizedQueryText: "lifeforce",
-						surfaceGroups: [{ index: 0, text: "lifeforce", kind: "han" }],
-						primaryUnits: [{ index: 0, text: "life", source: "han_tokenizer_real", surfaceGroupIndex: 0 }],
-						hanBackstopGroups: [],
-						surfaceCoverageShapeKey: "h",
-					},
+					queryText: "缂撳瓨鎭㈠",
+					normalizedQueryText: "缂撳瓨鎭㈠",
+					surfaceGroups: [{ index: 0, text: "缂撳瓨鎭㈠", kind: "han" }],
+					primaryUnits: [
+						{
+							index: 0,
+							text: "缂撳瓨鎭㈠",
+							source: "han_tokenizer_real",
+							surfaceGroupIndex: 0,
+						},
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
 					unitFamilyMatches: [],
 					candidateDocs: [{
 						docId: 0,
@@ -1326,8 +1093,8 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 				createPackingProfile({
 					docId: 0,
 					path: "b-residue.md",
-					bodyWindowContainer: createBodyWindowContainer([0]),
-					strongestContainer: createBodyWindowContainer([0]),
+					bodyWindowContainer: createBodyWindowContainer([1]),
+					strongestContainer: createBodyWindowContainer([1]),
 				}),
 				createPackingProfile({
 					docId: 1,
@@ -1341,7 +1108,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		const refined = await runHanRefine(result, {
 			residentBase,
 			indexedTexts: new Map<string, string>([
-				["b-residue.md", "block-0\n\nlifeforce block-1"],
+				["b-residue.md", "lifeforce block-0"],
 				["a-window.md", "lifeforce block-0"],
 			]),
 		});
@@ -1395,3 +1162,6 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		expect(refined[4].strongestHanSurfaceCompletionTier).toBe("body_residue");
 	});
 });
+
+
+

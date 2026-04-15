@@ -216,7 +216,11 @@ function expandDisplayLineWindow(params: {
 	let downAdded = 0;
 	while (true) {
 		let expanded = false;
-		for (const direction of ["up", "down"] as const) {
+		for (const direction of buildExpansionOrder({
+			seedWindow: params.seedWindow,
+			startLine,
+			endLine,
+		})) {
 			if (direction === "up") {
 				if (upAdded >= MAX_DISPLAY_LINES_PER_SIDE || startLine <= 0) {
 					continue;
@@ -255,6 +259,16 @@ function expandDisplayLineWindow(params: {
 		}
 	}
 	return { startLine, endLine };
+}
+
+function buildExpansionOrder(params: {
+	seedWindow: LineWindow;
+	startLine: number;
+	endLine: number;
+}): Array<"up" | "down"> {
+	const upDistance = params.seedWindow.startLine - params.startLine;
+	const downDistance = params.endLine - params.seedWindow.endLine;
+	return upDistance <= downDistance ? ["up", "down"] : ["down", "up"];
 }
 
 function trimBlankLineEdges(

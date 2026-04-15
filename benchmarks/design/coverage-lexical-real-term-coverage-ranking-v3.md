@@ -334,46 +334,43 @@ The required tiers are:
 
 - `identity = basename + alias`
 - `route = tag + folder`
-- `heading`
 
 The purpose is cheap doc routing only.
 
 V3 should not keep separate Han bigram routing lanes for all five original
-metadata fields if the routing worldview only needs the three higher-level
+metadata fields if the routing worldview only needs the two higher-level
 tiers above.
 
 #### 2. `bodyHanBlockPostings`
 
-Body Han bigrams should route to **logical blocks**, not directly to whole
+Body Han bigrams should route directly to **V3 body blocks**, not to whole
 documents.
 
 The required resident structure is:
 
-- `bigramId -> blockId list`
+- `bigramId -> bodyBlockId list`
 
-This is the correct minimum because Han body exact confirmation is block-local.
+This is the correct minimum now that Han body confirmation is block-native and
+witness-backed.
 
-V3 should not keep a separate body Han doc-level bigram posting graph in
-addition to block postings.
+V3 should not keep a separate body Han doc-level bigram posting graph or an
+intermediate logical-block route layer if block-native witness confirmation is
+the only live exactness path.
 
 #### 3. `bodyHanExactTapeArena`
 
-Han bigram routing must end in Han exact confirmation.
+A separate non-resident body Han exact sidecar is no longer required for the V3
+body-Han backstop path.
 
-V3 therefore requires a resident exact tape arena for Han body blocks so that
-candidate blocks can be confirmed without a second persistent sidecar system.
-
-This exact tape arena is the final Han evidence source.
-
-Han bigrams only decide what to inspect next; the exact tape decides what is
-actually realized.
+Han bigrams only decide what to inspect next; block-native Han witness text and
+later indexed-text refinement decide what is actually realized.
 
 ### Build-Time Rule
 
 During build:
 
-- each Han logical block may temporarily collect its unique Han bigram ids
-- those bigram ids are used to build the global `bigramId -> blockId list`
+- each body block may temporarily collect its unique Han bigram ids
+- those bigram ids are used to build the global `bigramId -> bodyBlockId list`
 - after the postings are built, per-block duplicate bigram lists should not be
   kept as an additional resident mirror unless another live query path
   absolutely requires them
@@ -401,11 +398,10 @@ Han bigram flow in V3 should be fixed as:
 
 1. build `hanBackstopGroups`
 2. use metadata bigram postings to collect cheap doc candidates
-3. use body block bigram postings to collect cheap block candidates
-4. intersect and cap those candidates under Han backstop budgets
-5. run Han exact confirmation on the remaining blocks
-6. convert only exact-confirmed Han evidence into realized evidence consumed by
-   the final packing comparator
+3. use body-block bigram postings to collect cheap body candidates
+4. run block-native Han witness confirmation on the admitted body blocks
+5. convert only confirmed Han evidence into realized evidence consumed by the
+   final packing comparator
 
 This flow preserves the V3 rule that final ranking should compare confirmed
 evidence packing rather than route-time approximations.
@@ -751,7 +747,7 @@ for V3 query analysis and realization:
 - whole-group Han backstop now activates only for zero-real-term Han groups
 - zero-real-term Han groups can realize coverage only through opaque exact
   confirmation, never through bigram counts themselves
-- the V3 regression baseline now includes `系统代理`, `委员长`, and zero-real-term
+- the V3 regression baseline now includes `绯荤粺浠ｇ悊`, `濮斿憳闀縛, and zero-real-term
   Han exact-confirm cases
 
 ### Phase 5
@@ -864,7 +860,7 @@ index:
   witness families, so this stage does not add a new resident arena
 - completion witness only acts as a late tie-break after coverage, containers,
   fragmentation, and exact count
-- the V3 regression baseline now verifies `生命力 > 生命` while keeping `委员`
+- the V3 regression baseline now verifies `鐢熷懡鍔?> 鐢熷懡` while keeping `濮斿憳`
   bridge recall from gaining completion credit
 
 ### Phase 11
@@ -912,13 +908,56 @@ late ranking:
   display-only text source is unavailable they now fall back to
   `FileSnapshotStore.readCurrentTexts(...)` and resolve snippets against a
   whole-document range instead of dropping to legacy line highlighting
+- local direct-subitem candidate growth is now bounded by a weighted inter-term
+  gap budget (`Han = 0.65`, other characters = `0.25`, stop after `15`), so
+  dispersed terms no longer inflate into one oversized snippet cluster
+- display-window line growth now alternates up/down by current expansion balance,
+  matching the legacy renderer behavior when there is still room to grow on
+  both sides
+- V3 direct-subitems now apply a stricter V1-style post-rank dedupe using
+  realized-term signatures plus strong overlap, which collapses display-equivalent
+  duplicates while preserving genuinely distant same-signature snippets
 - `coveredRealPrimaryCount` remains the first snippet-ranking signal; full Han
   surface completion only lifts snippet spans within the same real-coverage band
   and does not add new coverage credit
 - producer-side `snippetText + highlightRanges` invariants remain explicit, and
   the UI-side range clamp stays only as a defensive boundary check rather than a
   Han-specific semantic repair path
-- the V3 regression baseline now verifies that `生命力` snippets highlight the
-  full surface instead of only `生命`, while preserving `委员长` bridge fallback
+- the V3 regression baseline now verifies that `鐢熷懡鍔沗 snippets highlight the
+  full surface instead of only `鐢熷懡`, while preserving `濮斿憳闀縛 bridge fallback
   behavior and keeping higher real-coverage mixed-query snippets ahead of
   lower-coverage full-surface spans
+
+### Phase 13
+
+Status: Completed on 2026-04-15
+
+The current implementation now aligns V3 body chunking, `bestWindow` locality,
+and direct-subitem tail dedupe around one consistent local-evidence worldview:
+
+- body blocks no longer rely on blank-line paragraphs alone; V3 now chunks body
+  text with a hybrid-style, non-overlapping approximate token budget
+  (`target = 300`, `max overflow = 15%`) and prefers newline / sentence-ending
+  boundaries before hard cutting
+- direct-subitem raw block resolution now uses the same body chunking policy for
+  snapshot-side ordinal alignment, so resident-locality candidate ranges do not
+  drift away from file-level body block ordering
+- `bestWindow` still enumerates only single-block and adjacent-block candidates,
+  but body locality is now measured with resident-side approximate original-text
+  start/end positions derived from family / witness string lengths rather than
+  pure ordinal token positions
+- block boundaries remain lightweight (`boundary penalty = 2`) because the new
+  body chunks are treated as flat retrieval units rather than strong semantic
+  segments
+- `bestWindow` admission now keeps the old ordinal compactness screen as its
+  first layer, then applies a second approximate-locality gate requiring
+  `single gap <= 15` and `head-tail <= 160`
+- windows that fail the new approximate locality gate simply fall back to
+  `bodyResidue`, allowing `identity` / `route` evidence to outrank them through
+  the existing packing comparator without any special compensation rule
+- direct-subitems still do post-rank structural dedupe first, but now also apply
+  a render-time weak dedupe that only suppresses tail snippets whose display
+  windows overlap by at least `0.9` and whose rebased highlight signatures are
+  identical; top1 is always retained and genuinely distant repeats are preserved
+- the regression baseline now includes hybrid-style body chunk splitting and
+  render-time weak-dedupe coverage for display-equivalent tail snippets

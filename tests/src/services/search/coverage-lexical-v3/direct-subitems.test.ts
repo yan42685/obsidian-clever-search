@@ -1,4 +1,4 @@
-﻿import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
+import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import type { V3QueryAnalysis } from "src/services/search/coverage-lexical-v3/query/analysis";
 import type { V3CandidateDocRecall } from "src/services/search/coverage-lexical-v3/recall";
 import type { EvidencePackingProfile } from "src/services/search/coverage-lexical-v3/ranking";
@@ -65,10 +65,9 @@ function createResidentBaseForBlockCounts(
 			},
 		},
 		bodySummary: {
-			postings: {
-				postingStarts: new Uint32Array(),
-				blockIds: new Uint32Array(),
-			},
+			familyIds: new Uint32Array(),
+			postingStarts: new Uint32Array(),
+			blockIds: new Uint32Array(),
 		},
 		bodyBlocks: {
 			blockCount: blockStart,
@@ -84,16 +83,16 @@ function createResidentBaseForBlockCounts(
 			bigramIds: new Uint32Array(),
 			metadataPostingStarts: new Uint32Array(),
 			metadataDocIds: new Uint32Array(),
-			bodyBlockPostingStarts: new Uint32Array(),
+			bodyPostingStarts: new Uint32Array(),
 			bodyBlockIds: new Uint32Array(),
 			identityWitnessStartByDocId: new Uint32Array(),
-			identityWitnessFamilyIds: new Uint32Array(),
+			identityWitnessStringIds: new Uint32Array(),
 			routeWitnessStartByDocId: new Uint32Array(),
-			routeWitnessFamilyIds: new Uint32Array(),
+			routeWitnessStringIds: new Uint32Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
-			headingWitnessFamilyIds: new Uint32Array(),
+			headingWitnessStringIds: new Uint32Array(),
 			bodyWitnessStartByBlockId: new Uint32Array(),
-			bodyWitnessFamilyIds: new Uint32Array(),
+			bodyWitnessStringIds: new Uint32Array(),
 		},
 		metrics: {
 			docArenaBytes: 0,
@@ -374,5 +373,173 @@ describe("coverage lexical v3 direct subitems", () => {
 		);
 		expect(topHighlight).toContain("abc");
 		expect(topHighlight).toContain("生命力");
+	});
+
+	test("splits distant latin evidence when the weighted gap exceeds the local budget", () => {
+		const queryAnalysis: V3QueryAnalysis = {
+			queryText: "alpha beta",
+			normalizedQueryText: "alpha beta",
+			surfaceGroups: [
+				{ index: 0, text: "alpha", kind: "latin" },
+				{ index: 1, text: "beta", kind: "latin" },
+			],
+			primaryUnits: [
+				{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
+				{ index: 1, text: "beta", source: "surface", surfaceGroupIndex: 1 },
+			],
+			hanBackstopGroups: [],
+			surfaceCoverageShapeKey: "ll",
+		};
+		const result = buildV3DirectSubitems({
+			snapshotText: `alpha${"x".repeat(70)}beta`,
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "far-gap.md",
+				bodyWindowContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+				strongestContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(result.candidates).toHaveLength(2);
+		expect(result.candidates.every((candidate) => candidate.coveredRealPrimaryCount === 1)).toBe(
+			true,
+		);
+		expect(result.subItems[0]?.snippetText).toContain("alpha");
+		expect(result.subItems[1]?.snippetText).toContain("beta");
+	});
+
+	test("keeps nearby latin evidence in one snippet when the weighted gap stays within budget", () => {
+		const queryAnalysis: V3QueryAnalysis = {
+			queryText: "alpha beta",
+			normalizedQueryText: "alpha beta",
+			surfaceGroups: [
+				{ index: 0, text: "alpha", kind: "latin" },
+				{ index: 1, text: "beta", kind: "latin" },
+			],
+			primaryUnits: [
+				{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
+				{ index: 1, text: "beta", source: "surface", surfaceGroupIndex: 1 },
+			],
+			hanBackstopGroups: [],
+			surfaceCoverageShapeKey: "ll",
+		};
+		const result = buildV3DirectSubitems({
+			snapshotText: `alpha${"x".repeat(40)}beta`,
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "near-gap.md",
+				bodyWindowContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+				strongestContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(result.candidates[0]?.coveredRealPrimaryCount).toBe(2);
+		const highlighted = result.subItems[0]?.highlightRanges?.map((range) =>
+			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(highlighted).toEqual(expect.arrayContaining(["alpha", "beta"]));
+	});
+
+	test("dedupes equivalent candidates emitted from merged and single-block ranges", () => {
+		const queryAnalysis: V3QueryAnalysis = {
+			queryText: "alpha",
+			normalizedQueryText: "alpha",
+			surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
+			primaryUnits: [
+				{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
+			],
+			hanBackstopGroups: [],
+			surfaceCoverageShapeKey: "l",
+		};
+		const result = buildV3DirectSubitems({
+			snapshotText: "alpha block\n\ncontext block",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "dedupe.md",
+				bodyWindowContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0],
+					coveredDistinctUnitCount: 1,
+					containerCompactness: 100,
+					exactUnitCount: 1,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+				strongestContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0],
+					coveredDistinctUnitCount: 1,
+					containerCompactness: 100,
+					exactUnitCount: 1,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0, 1] }),
+			residentBase: createResidentBaseForBlockCounts([2]),
+		});
+
+		expect(result.candidates).toHaveLength(1);
+		expect(result.subItems[0]?.snippetText).toContain("alpha");
 	});
 });

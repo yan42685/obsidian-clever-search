@@ -1,5 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
-import { buildResidentBase } from "./build";
+import { buildResidentBaseArtifacts } from "./build";
 import type {
 	ResidentBase,
 	ResidentBaseMetrics,
@@ -31,9 +31,9 @@ export class CoverageLexicalV3Engine {
 		documents: readonly IndexedDocument[],
 		tokenizeDocumentText?: V3DocumentTokenizer,
 	): ResidentBase {
-		const residentBase = buildResidentBase(documents, tokenizeDocumentText);
-		this.residentBase = residentBase;
-		return residentBase;
+		const artifacts = buildResidentBaseArtifacts(documents, tokenizeDocumentText);
+		this.residentBase = artifacts.base;
+		return artifacts.base;
 	}
 
 	loadResidentBase(residentBase: ResidentBase): void {

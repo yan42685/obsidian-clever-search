@@ -88,7 +88,7 @@ export function buildResidentBaseMetrics(
 		input.bodyBlocks.exactTapeStartByBlockId.byteLength +
 		input.bodyBlocks.exactTapeCountByBlockId.byteLength +
 		input.hanRoute.metadataPostingStarts.byteLength +
-		input.hanRoute.bodyBlockPostingStarts.byteLength +
+		input.hanRoute.bodyPostingStarts.byteLength +
 		input.hanRoute.identityWitnessStartByDocId.byteLength +
 		input.hanRoute.routeWitnessStartByDocId.byteLength +
 		input.hanRoute.headingWitnessStartByDocId.byteLength +
@@ -137,6 +137,10 @@ export function buildResidentBaseMetrics(
 		hanRouteMetadataHanPostingsBytes:
 			hanRouteBreakdown.metadataHanPostingsBytes,
 		hanRouteBodyHanPostingsBytes: hanRouteBreakdown.bodyHanPostingsBytes,
+		hanRouteBodyHanPostingStartsBytes:
+			hanRouteBreakdown.bodyHanPostingStartsBytes,
+		hanRouteBodyHanBodyBlockIdsBytes:
+			hanRouteBreakdown.bodyHanBodyBlockIdsBytes,
 		hanRouteMetadataWitnessBytes: hanRouteBreakdown.metadataWitnessBytes,
 		hanRouteBodyWitnessBytes: hanRouteBreakdown.bodyWitnessBytes,
 		scaffoldBytes,
@@ -231,11 +235,11 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 			),
 			describeIntegerSection(
 				"hanRoute.body.starts",
-				base.hanRoute.bodyBlockPostingStarts,
+				base.hanRoute.bodyPostingStarts,
 				sentinelStartsEncodingFlag(),
 			),
 			describeIntegerSection(
-				"hanRoute.body.blockIds",
+				"hanRoute.body.bodyBlockIds",
 				base.hanRoute.bodyBlockIds,
 			),
 		],

@@ -213,8 +213,18 @@ export function collectHanBodyBlockIds(
 	}
 	return sliceResidentIntegerArray(
 		base.hanRoute.bodyBlockIds,
-		getSentinelSliceStart(base.hanRoute.bodyBlockPostingStarts, bigramIndex),
-		getSentinelSliceEnd(base.hanRoute.bodyBlockPostingStarts, bigramIndex),
+		getSentinelSliceStart(base.hanRoute.bodyPostingStarts, bigramIndex),
+		getSentinelSliceEnd(base.hanRoute.bodyPostingStarts, bigramIndex),
+	);
+}
+
+export function confirmHanBodyBlockSurface(
+	base: ResidentBase,
+	blockId: number,
+	surfaceText: string,
+): boolean {
+	return getBodyBlockHanWitnessTexts(base, blockId).some((text) =>
+		text.includes(surfaceText),
 	);
 }
 

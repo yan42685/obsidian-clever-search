@@ -158,6 +158,11 @@ describe("coverage lexical v3 resident base", () => {
 				(section) => section.sectionKind === "bodySummary.familyIds",
 			),
 		).toBe(true);
+		expect(
+			summary.sectionEncodings.some(
+				(section) => section.sectionKind === "hanRoute.body.bodyBlockIds",
+			),
+		).toBe(true);
 		expect(residentBase.metrics.stringPayloadBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
 	});

@@ -4,7 +4,6 @@ import {
 	getBodyBlockExactFamilyIds,
 	getBodyBlockHanWitnessStringIds,
 	getBodyBlockHanWitnessTexts,
-	getBodyBlockExactTokenPositions,
 	getDocHeadingFamilyIds,
 	getDocHeadingHanWitnessStringIds,
 	getDocHeadingHanWitnessTexts,
@@ -44,8 +43,12 @@ type BodyOccurrence = Readonly<{
 	blockId: number;
 	unitIndex: number;
 	match: V3QueryFamilyMatch;
+	ordinalPosition: number;
 	localPosition: number;
+	localEndPosition: number;
+	ordinalVirtualPosition: number;
 	virtualPosition: number;
+	virtualEndPosition: number;
 }>;
 
 type BodyWindowCandidate = Readonly<{
@@ -62,7 +65,18 @@ type BodyWindowCandidate = Readonly<{
 	maxAdjacentGap: number;
 	preservesQueryOrder: boolean;
 	windowStart: number;
+	approxWindowStart: number;
+	approxWindowEnd: number;
+	approxHeadTailSpan: number;
+	approxMaxAdjacentGap: number;
 	headingCorroboration: HeadingCorroboration;
+}>;
+
+type PositionedFamilyOccurrence = Readonly<{
+	familyId: number;
+	ordinalPosition: number;
+	localPosition: number;
+	localEndPosition: number;
 }>;
 
 type HanSurfaceCompletionGroup = Readonly<{
@@ -110,13 +124,28 @@ export function buildPackingProfile(
 		headingFamilyIds,
 	);
 	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
+	const bodyApproxSpanByBlockId = new Map<number, number>();
+	const bodyOrdinalSpanByBlockId = new Map<number, number>();
 	const bodyBlockIdsByUnitFamily = new Map<number, Map<number, Set<number>>>();
 	const bodyWitnessTextsByBlockId = new Map<number, readonly string[]>();
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
 		const exactFamilyIds = getBodyBlockExactFamilyIds(base, blockId);
 		const witnessStringIds = getBodyBlockHanWitnessStringIds(base, blockId);
 		bodyWitnessTextsByBlockId.set(blockId, getBodyBlockHanWitnessTexts(base, blockId));
-		const tokenPositions = getBodyBlockExactTokenPositions(base, blockId);
+		const exactOccurrences = buildExactPositionedOccurrences(base, exactFamilyIds);
+		const witnessOccurrences = buildWitnessPositionedOccurrences(base, witnessStringIds);
+		bodyApproxSpanByBlockId.set(
+			blockId,
+			Math.max(
+				1,
+				getPositionedOccurrenceSpan(exactOccurrences),
+				getPositionedOccurrenceSpan(witnessOccurrences),
+			),
+		);
+		bodyOrdinalSpanByBlockId.set(
+			blockId,
+			Math.max(1, exactOccurrences.length, witnessOccurrences.length),
+		);
 		const blockOccurrences: BodyOccurrence[] = [];
 		for (const unitMatches of mergedUnitFamilyMatches) {
 			const occurrences = collectBlockOccurrences(
@@ -124,11 +153,8 @@ export function buildPackingProfile(
 				unitMatches.queryUnitIndex,
 				unitMatches.matches,
 				unitMatches.queryUnitSource === "opaque_han_confirmed"
-					? witnessStringIds.map(encodeWitnessMatchFamilyId)
-					: exactFamilyIds,
-				unitMatches.queryUnitSource === "opaque_han_confirmed"
-					? witnessStringIds.map((_, index) => index)
-					: tokenPositions,
+					? witnessOccurrences
+					: exactOccurrences,
 			);
 			if (occurrences.length === 0) {
 				continue;
@@ -159,6 +185,8 @@ export function buildPackingProfile(
 	const bestBodyWindowContainer = chooseBestBodyWindow(
 		base,
 		bodyOccurrencesByBlockId,
+		bodyApproxSpanByBlockId,
+		bodyOrdinalSpanByBlockId,
 		headingFamilyIds,
 	);
 	const bestBodyWindowBlockIds = new Set<number>(
@@ -291,12 +319,11 @@ function collectBlockOccurrences(
 	blockId: number,
 	unitIndex: number,
 	matches: readonly V3QueryFamilyMatch[],
-	familyIds: readonly number[],
-	positions: readonly number[],
+	positionedOccurrences: readonly PositionedFamilyOccurrence[],
 ): BodyOccurrence[] {
 	const occurrences: BodyOccurrence[] = [];
-	for (let index = 0; index < familyIds.length; index += 1) {
-		const familyId = familyIds[index];
+	for (const positionedOccurrence of positionedOccurrences) {
+		const familyId = positionedOccurrence.familyId;
 		const match = matches.find((candidate) => candidate.familyId === familyId);
 		if (match == null) {
 			continue;
@@ -305,11 +332,62 @@ function collectBlockOccurrences(
 			blockId,
 			unitIndex,
 			match,
-			localPosition: positions[index] ?? index,
-			virtualPosition: positions[index] ?? index,
+			ordinalPosition: positionedOccurrence.ordinalPosition,
+			localPosition: positionedOccurrence.localPosition,
+			localEndPosition: positionedOccurrence.localEndPosition,
+			ordinalVirtualPosition: positionedOccurrence.ordinalPosition,
+			virtualPosition: positionedOccurrence.localPosition,
+			virtualEndPosition: positionedOccurrence.localEndPosition,
 		});
 	}
 	return occurrences;
+}
+
+function buildExactPositionedOccurrences(
+	base: ResidentBase,
+	familyIds: readonly number[],
+): PositionedFamilyOccurrence[] {
+	let cursor = 0;
+	return familyIds.map((familyId, index) => {
+		const approxLength = Math.max(1, readFamilyApproxLength(base, familyId));
+		const occurrence = {
+			familyId,
+			ordinalPosition: index,
+			localPosition: cursor,
+			localEndPosition: cursor + approxLength,
+		};
+		cursor += approxLength + 1;
+		return occurrence;
+	});
+}
+
+function buildWitnessPositionedOccurrences(
+	base: ResidentBase,
+	stringIds: readonly number[],
+): PositionedFamilyOccurrence[] {
+	let cursor = 0;
+	return stringIds.map((stringId, index) => {
+		const approxLength = Math.max(1, base.stringArena.lengths[stringId] ?? 0);
+		const occurrence = {
+			familyId: encodeWitnessMatchFamilyId(stringId),
+			ordinalPosition: index,
+			localPosition: cursor,
+			localEndPosition: cursor + approxLength,
+		};
+		cursor += approxLength + 1;
+		return occurrence;
+	});
+}
+
+function getPositionedOccurrenceSpan(
+	occurrences: readonly PositionedFamilyOccurrence[],
+): number {
+	return occurrences[occurrences.length - 1]?.localEndPosition ?? 0;
+}
+
+function readFamilyApproxLength(base: ResidentBase, familyId: number): number {
+	const stringId = base.familyLexicon.familyStringIds[familyId] ?? 0;
+	return base.stringArena.lengths[stringId] ?? 0;
 }
 
 function compareMatchPreference(
@@ -347,6 +425,9 @@ function compareBodyOccurrenceOrder(left: BodyOccurrence, right: BodyOccurrence)
 	if (left.localPosition !== right.localPosition) {
 		return left.localPosition - right.localPosition;
 	}
+	if (left.localEndPosition !== right.localEndPosition) {
+		return left.localEndPosition - right.localEndPosition;
+	}
 	const preference = compareMatchPreference(left.match, right.match);
 	if (preference !== 0) {
 		return preference;
@@ -360,6 +441,8 @@ function compareBodyOccurrenceOrder(left: BodyOccurrence, right: BodyOccurrence)
 function chooseBestBodyWindow(
 	base: ResidentBase,
 	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
+	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
 	headingFamilyIds: ReadonlySet<number>,
 ): BodyWindowContainer | null {
 	const shortlistedBlockIds = [...bodyOccurrencesByBlockId.keys()].sort((left, right) => {
@@ -373,6 +456,8 @@ function chooseBestBodyWindow(
 			base,
 			[blockId],
 			bodyOccurrencesByBlockId,
+			bodyApproxSpanByBlockId,
+			bodyOrdinalSpanByBlockId,
 			headingFamilyIds,
 		);
 		if (singleCandidate != null) {
@@ -391,6 +476,8 @@ function chooseBestBodyWindow(
 			base,
 			[leftBlockId, rightBlockId],
 			bodyOccurrencesByBlockId,
+			bodyApproxSpanByBlockId,
+			bodyOrdinalSpanByBlockId,
 			headingFamilyIds,
 		);
 		if (pairCandidate != null) {
@@ -404,9 +491,17 @@ function buildBodyWindowCandidate(
 	base: ResidentBase,
 	blockIds: readonly number[],
 	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
+	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
 	headingFamilyIds: ReadonlySet<number>,
 ): BodyWindowCandidate | null {
-	const virtualOccurrences = buildChainVirtualOccurrences(base, blockIds, bodyOccurrencesByBlockId);
+	const virtualOccurrences = buildChainVirtualOccurrences(
+		base,
+		blockIds,
+		bodyOccurrencesByBlockId,
+		bodyApproxSpanByBlockId,
+		bodyOrdinalSpanByBlockId,
+	);
 	if (virtualOccurrences.length === 0) {
 		return null;
 	}
@@ -432,20 +527,31 @@ function buildChainVirtualOccurrences(
 	base: ResidentBase,
 	blockIds: readonly number[],
 	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
+	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
 ): BodyOccurrence[] {
 	const out: BodyOccurrence[] = [];
 	let baseOffset = 0;
+	let ordinalBaseOffset = 0;
 	for (let index = 0; index < blockIds.length; index += 1) {
 		const blockId = blockIds[index];
 		const blockOccurrences = bodyOccurrencesByBlockId.get(blockId) ?? [];
 		for (const occurrence of blockOccurrences) {
 			out.push({
 				...occurrence,
+				ordinalVirtualPosition: ordinalBaseOffset + occurrence.ordinalPosition,
 				virtualPosition: baseOffset + occurrence.localPosition,
+				virtualEndPosition: baseOffset + occurrence.localEndPosition,
 			});
 		}
 		baseOffset +=
-			(base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0) + CHAIN_BOUNDARY_PENALTY;
+			(bodyApproxSpanByBlockId.get(blockId) ??
+				base.bodyBlocks.exactTapeCountByBlockId[blockId] ??
+				0) + CHAIN_BOUNDARY_PENALTY;
+		ordinalBaseOffset +=
+			(bodyOrdinalSpanByBlockId.get(blockId) ??
+				base.bodyBlocks.exactTapeCountByBlockId[blockId] ??
+				0) + CHAIN_BOUNDARY_PENALTY;
 	}
 	return out.sort((left, right) => {
 		if (left.virtualPosition !== right.virtualPosition) {
@@ -479,21 +585,34 @@ function summarizeWindowCandidate(
 	if (coveredUnitIndices.length === 0) {
 		return null;
 	}
-	const minPosition = representatives[0]?.virtualPosition ?? 0;
+	const minPosition = representatives[0]?.ordinalVirtualPosition ?? 0;
 	const maxPosition =
-		representatives[representatives.length - 1]?.virtualPosition ?? minPosition;
+		representatives[representatives.length - 1]?.ordinalVirtualPosition ?? minPosition;
 	const windowWidth = maxPosition - minPosition + 1;
 	let totalGap = 0;
 	let maxAdjacentGap = 0;
+	const approxWindowStart = representatives[0]?.virtualPosition ?? 0;
+	const approxWindowEnd =
+		representatives[representatives.length - 1]?.virtualEndPosition ??
+		approxWindowStart;
+	let approxMaxAdjacentGap = 0;
 	for (let index = 1; index < representatives.length; index += 1) {
 		const gap = Math.max(
 			0,
-			representatives[index].virtualPosition -
-				representatives[index - 1].virtualPosition -
+			representatives[index].ordinalVirtualPosition -
+				representatives[index - 1].ordinalVirtualPosition -
 				1,
 		);
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
+		approxMaxAdjacentGap = Math.max(
+			approxMaxAdjacentGap,
+			Math.max(
+				0,
+				representatives[index].virtualPosition -
+					representatives[index - 1].virtualEndPosition,
+			),
+		);
 	}
 	const blockIds = [...new Set(representatives.map((occurrence) => occurrence.blockId))].sort(
 		(left, right) => left - right,
@@ -537,6 +656,10 @@ function summarizeWindowCandidate(
 		maxAdjacentGap,
 		preservesQueryOrder,
 		windowStart: minPosition,
+		approxWindowStart,
+		approxWindowEnd,
+		approxHeadTailSpan: Math.max(1, approxWindowEnd - approxWindowStart),
+		approxMaxAdjacentGap,
 		headingCorroboration: {
 			coveredUnitIndices: headingCorroborationUnitIndices,
 			unitCount: headingCorroborationUnitIndices.length,
@@ -552,6 +675,9 @@ function compareOccurrenceRepresentative(left: BodyOccurrence, right: BodyOccurr
 	if (left.virtualPosition !== right.virtualPosition) {
 		return left.virtualPosition - right.virtualPosition;
 	}
+	if (left.virtualEndPosition !== right.virtualEndPosition) {
+		return left.virtualEndPosition - right.virtualEndPosition;
+	}
 	if (left.blockId !== right.blockId) {
 		return left.blockId - right.blockId;
 	}
@@ -564,7 +690,9 @@ function passesBodyWindowAdmission(candidate: BodyWindowCandidate): boolean {
 		candidate.boundaryCrossingCount <= 1 &&
 		candidate.windowWidth <=
 			candidate.coveredDistinctUnitCount * 4 + candidate.boundaryCrossingCount * 3 &&
-		candidate.maxAdjacentGap <= 4 + candidate.boundaryCrossingCount * 2
+		candidate.maxAdjacentGap <= 4 + candidate.boundaryCrossingCount * 2 &&
+		candidate.approxMaxAdjacentGap <= 15 &&
+		candidate.approxHeadTailSpan <= 160
 	);
 }
 

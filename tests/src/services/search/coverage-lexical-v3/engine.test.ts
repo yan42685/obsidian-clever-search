@@ -1,6 +1,9 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
-import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
+import {
+	splitBodyBlocks,
+	type V3DocumentTokenizer,
+} from "src/services/search/coverage-lexical-v3/query";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
@@ -22,6 +25,29 @@ function createDocumentTokenizer(
 	termMap: Readonly<Record<string, readonly string[]>>,
 ): V3DocumentTokenizer {
 	return (text) => termMap[text] ?? [];
+}
+
+function buildLongSentenceText(sentenceCount: number): string {
+	return Array.from({ length: sentenceCount }, (_, index) =>
+		`Sentence ${String(index + 1).padStart(4, "0")} ends here.`,
+	).join(" ");
+}
+
+function buildAdjacentChunkBoundaryContent(): string {
+	for (let charCount = 900; charCount <= 1400; charCount += 1) {
+		const content = `${"x".repeat(charCount)} cache\nrestore`;
+		const blocks = splitBodyBlocks(content);
+		const previous = blocks[0]?.normalizedText ?? "";
+		const last = blocks[1]?.normalizedText ?? "";
+		if (
+			blocks.length === 2 &&
+			previous.endsWith("cache") &&
+			last.startsWith("restore")
+		) {
+			return content;
+		}
+	}
+	throw new Error("failed to construct adjacent chunk boundary content");
 }
 
 describe("coverage lexical v3 engine", () => {
@@ -303,7 +329,7 @@ describe("coverage lexical v3 engine", () => {
 		).toBeGreaterThan(0);
 	});
 
-	test("metadata split hit outranks dispersed same-block body hits that fail bodyWindow admission", () => {
+	test("metadata split hit outranks same-block body hits that fail the approximate gap gate", () => {
 		const engine = new CoverageLexicalV3Engine();
 		engine.buildResidentBase([
 			createDocument({
@@ -313,10 +339,10 @@ describe("coverage lexical v3 engine", () => {
 				content: "restore",
 			}),
 			createDocument({
-				path: "latin/dispersed-body.md",
+				path: "latin/long-gap-body.md",
 				basename: "notes",
 				folder: "latin",
-				content: "cache one two three four five six restore",
+				content: `cache ${"a".repeat(170)} restore`,
 			}),
 		]);
 
@@ -324,15 +350,16 @@ describe("coverage lexical v3 engine", () => {
 
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
 			"latin/split.md",
-			"latin/dispersed-body.md",
+			"latin/long-gap-body.md",
 		]);
 		expect(result.rankedCandidates[0].identityContainer?.coveredDistinctUnitCount).toBe(1);
 		expect(result.rankedCandidates[0].bodyWindowContainer).toBeNull();
 		expect(result.rankedCandidates[1].bodyWindowContainer).toBeNull();
 	});
 
-	test("adjacent blocks can form a weaker chain bodyWindow", () => {
+	test("adjacent chunk evidence can still form a bodyWindow under the lightweight boundary penalty", () => {
 		const engine = new CoverageLexicalV3Engine();
+		const adjacentChunkContent = buildAdjacentChunkBoundaryContent();
 		engine.buildResidentBase([
 			createDocument({
 				path: "latin/same-block.md",
@@ -341,25 +368,44 @@ describe("coverage lexical v3 engine", () => {
 				content: "cache restore",
 			}),
 			createDocument({
-				path: "latin/adjacent-blocks.md",
+				path: "latin/adjacent-chunks.md",
 				basename: "notes",
 				folder: "latin",
-				content: "cache\n\nrestore",
+				content: adjacentChunkContent,
 			}),
 		]);
 
 		const result = engine.search("cache restore");
 
-		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
-			"latin/same-block.md",
-			"latin/adjacent-blocks.md",
+		const sameBlockCandidate = result.rankedCandidates.find(
+			(candidate) => candidate.path === "latin/same-block.md",
+		);
+		const adjacentChunkCandidate = result.rankedCandidates.find(
+			(candidate) => candidate.path === "latin/adjacent-chunks.md",
+		);
+
+		expect(sameBlockCandidate?.bodyWindowContainer?.boundaryCrossingCount).toBe(0);
+		expect(adjacentChunkCandidate?.bodyWindowContainer?.boundaryCrossingCount).toBe(1);
+		expect(adjacentChunkCandidate?.bodyWindowContainer?.blockIds).toHaveLength(2);
+	});
+
+	test("same-block chain drift fails bodyWindow when head-tail span exceeds the approximate budget", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const leftTerm = `left${"a".repeat(80)}`;
+		const rightTerm = `right${"b".repeat(80)}`;
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/head-tail-span.md",
+				basename: "notes",
+				folder: "latin",
+				content: `${leftTerm} ${rightTerm}`,
+			}),
 		]);
-		expect(result.rankedCandidates[0].bodyWindowContainer?.blockIds).toEqual([2]);
-		expect(result.rankedCandidates[1].bodyWindowContainer?.blockIds).toEqual([0, 1]);
-		expect(
-			(result.rankedCandidates[0].bodyWindowContainer?.containerCompactness ?? 0) >
-				(result.rankedCandidates[1].bodyWindowContainer?.containerCompactness ?? 0),
-		).toBe(true);
+
+		const result = engine.search(`${leftTerm} ${rightTerm}`);
+
+		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates[0].bodyWindowContainer).toBeNull();
 	});
 
 	test("prefix-only body hits prefer smaller completion gain and then non-compound tokens", () => {

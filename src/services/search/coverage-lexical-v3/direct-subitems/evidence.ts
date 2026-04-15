@@ -1,12 +1,21 @@
 ﻿import type { ResidentBase } from "../layout/types";
 import type { V3QueryAnalysis, V3QueryUnit } from "../query/analysis";
-import { normalizeText } from "../query/text";
+import {
+	createV3BodyBlockChunkRanges,
+	V3_BODY_BLOCK_MAX_TOKENS,
+	V3_BODY_BLOCK_TARGET_TOKENS,
+} from "../query/text";
 import type { V3CandidateDocRecall } from "../recall";
 import type { EvidencePackingProfile } from "../ranking";
 import type {
 	V3DirectSubitemCandidate,
 	V3DirectSubitemOccurrence,
 } from "./contracts";
+
+const DIRECT_SUBITEM_WEIGHTED_GAP_LIMIT = 15;
+const DIRECT_SUBITEM_HAN_GAP_WEIGHT = 0.65;
+const DIRECT_SUBITEM_OTHER_GAP_WEIGHT = 0.25;
+const HAN_CHAR_PATTERN = /\p{Script=Han}/u;
 
 export type ResolvedSnippetRange = Readonly<{
 	start: number;
@@ -37,16 +46,13 @@ export function buildV3DirectSubitemCandidates(params: {
 		snapshotText: params.snapshotText,
 		candidateRangeMode: params.candidateRangeMode,
 	});
-	const candidates = candidateRanges
-		.map((range) =>
-			buildCandidateForRange(
-				params.snapshotText,
-				range,
-				params.queryAnalysis,
-			),
-		)
-		.filter((candidate): candidate is V3DirectSubitemCandidate => candidate != null);
-	return dedupeCandidateRanges(candidates);
+	return candidateRanges.flatMap((range) =>
+		buildCandidatesForRange(
+			params.snapshotText,
+			range,
+			params.queryAnalysis,
+		),
+	);
 }
 
 function resolveCandidateRanges(params: {
@@ -98,16 +104,69 @@ function resolveCandidateRanges(params: {
 	return [];
 }
 
-function buildCandidateForRange(
+function buildCandidatesForRange(
 	snapshotText: string,
 	range: ResolvedSnippetRange,
 	queryAnalysis: V3QueryAnalysis,
-): V3DirectSubitemCandidate | null {
+): V3DirectSubitemCandidate[] {
 	const occurrences = collectOccurrences(snapshotText, range, queryAnalysis);
 	const displayOccurrences = resolveDominantDisplayOccurrences(
 		occurrences,
 		queryAnalysis,
 	);
+	const occurrenceWindows = buildOccurrenceWindows(
+		snapshotText,
+		displayOccurrences.length > 0 ? displayOccurrences : occurrences,
+	);
+	if (occurrenceWindows.length === 0) {
+		const candidate = buildCandidateFromOccurrences(
+			snapshotText,
+			occurrences,
+			displayOccurrences,
+		);
+		return candidate == null ? [] : [candidate];
+	}
+	return occurrenceWindows
+		.map((window) =>
+			buildCandidateFromOccurrenceWindow(
+				snapshotText,
+				occurrences,
+				displayOccurrences,
+				window,
+			),
+		)
+		.filter((candidate): candidate is V3DirectSubitemCandidate => candidate != null);
+}
+
+function buildCandidateFromOccurrenceWindow(
+	snapshotText: string,
+	occurrences: readonly V3DirectSubitemOccurrence[],
+	displayOccurrences: readonly V3DirectSubitemOccurrence[],
+	window: ResolvedSnippetRange,
+): V3DirectSubitemCandidate | null {
+	const localOccurrences = occurrences.filter(
+		(occurrence) =>
+			occurrence.start >= window.start && occurrence.end <= window.end,
+	);
+	const localDisplayOccurrences = displayOccurrences.filter(
+		(occurrence) =>
+			occurrence.start >= window.start && occurrence.end <= window.end,
+	);
+	return buildCandidateFromOccurrences(
+		snapshotText,
+		localOccurrences,
+		localDisplayOccurrences,
+	);
+}
+
+function buildCandidateFromOccurrences(
+	snapshotText: string,
+	occurrences: readonly V3DirectSubitemOccurrence[],
+	displayOccurrences: readonly V3DirectSubitemOccurrence[],
+): V3DirectSubitemCandidate | null {
+	if (occurrences.length === 0) {
+		return null;
+	}
 	const realOccurrences = occurrences.filter(
 		(occurrence) => occurrence.kind === "real_exact",
 	);
@@ -130,7 +189,11 @@ function buildCandidateForRange(
 	) {
 		return null;
 	}
-	const representativeOccurrences = selectRepresentativeOccurrences(displayOccurrences);
+	const effectiveDisplayOccurrences =
+		displayOccurrences.length > 0 ? displayOccurrences : occurrences;
+	const representativeOccurrences = selectRepresentativeOccurrences(
+		effectiveDisplayOccurrences,
+	);
 	if (representativeOccurrences.length === 0) {
 		return null;
 	}
@@ -140,10 +203,10 @@ function buildCandidateForRange(
 	let totalGap = 0;
 	let maxAdjacentGap = 0;
 	for (let index = 1; index < representativeOccurrences.length; index += 1) {
-		const gap = Math.max(
-			0,
-			representativeOccurrences[index].start -
-				representativeOccurrences[index - 1].end,
+		const gap = computeWeightedGap(
+			snapshotText,
+			representativeOccurrences[index - 1].end,
+			representativeOccurrences[index].start,
 		);
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
@@ -164,6 +227,59 @@ function buildCandidateForRange(
 		maxAdjacentGap,
 		totalGap,
 	};
+}
+
+function buildOccurrenceWindows(
+	snapshotText: string,
+	occurrences: readonly V3DirectSubitemOccurrence[],
+): ResolvedSnippetRange[] {
+	if (occurrences.length === 0) {
+		return [];
+	}
+	const sortedOccurrences = [...occurrences].sort(
+		(left, right) => left.start - right.start || left.end - right.end,
+	);
+	const windows: ResolvedSnippetRange[] = [];
+	for (let startIndex = 0; startIndex < sortedOccurrences.length; startIndex += 1) {
+		let endIndex = startIndex;
+		let weightedGapTotal = 0;
+		while (endIndex + 1 < sortedOccurrences.length) {
+			const nextGap = computeWeightedGap(
+				snapshotText,
+				sortedOccurrences[endIndex].end,
+				sortedOccurrences[endIndex + 1].start,
+			);
+			if (
+				weightedGapTotal + nextGap >
+				DIRECT_SUBITEM_WEIGHTED_GAP_LIMIT
+			) {
+				break;
+			}
+			weightedGapTotal += nextGap;
+			endIndex += 1;
+		}
+		windows.push({
+			start: sortedOccurrences[startIndex].start,
+			end: sortedOccurrences[endIndex].end,
+		});
+	}
+	return dedupeOccurrenceWindows(windows);
+}
+
+function dedupeOccurrenceWindows(
+	windows: readonly ResolvedSnippetRange[],
+): ResolvedSnippetRange[] {
+	const deduped: ResolvedSnippetRange[] = [];
+	const seen = new Set<string>();
+	for (const window of windows) {
+		const key = `${window.start}:${window.end}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		deduped.push(window);
+	}
+	return deduped;
 }
 
 function collectOccurrences(
@@ -251,6 +367,23 @@ function selectRepresentativeOccurrences(
 	);
 }
 
+function computeWeightedGap(
+	snapshotText: string,
+	start: number,
+	end: number,
+): number {
+	if (end <= start) {
+		return 0;
+	}
+	let total = 0;
+	for (const char of snapshotText.slice(start, end)) {
+		total += HAN_CHAR_PATTERN.test(char)
+			? DIRECT_SUBITEM_HAN_GAP_WEIGHT
+			: DIRECT_SUBITEM_OTHER_GAP_WEIGHT;
+	}
+	return total;
+}
+
 function preservesQueryOrder(
 	occurrences: readonly V3DirectSubitemOccurrence[],
 ): boolean {
@@ -304,17 +437,15 @@ function resolveDominantDisplayOccurrences(
 
 function splitRawBodyBlocks(snapshotText: string): RawBlock[] {
 	const blocks: RawBlock[] = [];
-	const separator = /\r?\n\s*\r?\n+/gu;
-	let start = 0;
-	let ordinal = 0;
-	for (const match of snapshotText.matchAll(separator)) {
-		pushBlock(snapshotText, start, match.index ?? start, ordinal, blocks);
-		if (blocks.length > ordinal) {
-			ordinal += 1;
-		}
-		start = (match.index ?? start) + match[0].length;
+	const ranges = createV3BodyBlockChunkRanges(
+		snapshotText,
+		V3_BODY_BLOCK_TARGET_TOKENS,
+		V3_BODY_BLOCK_MAX_TOKENS,
+	);
+	for (let ordinal = 0; ordinal < ranges.length; ordinal += 1) {
+		const range = ranges[ordinal];
+		pushBlock(snapshotText, range.startOffset, range.endOffset, ordinal, blocks);
 	}
-	pushBlock(snapshotText, start, snapshotText.length, ordinal, blocks);
 	return blocks;
 }
 
@@ -409,20 +540,4 @@ function compareBlockOrder(
 
 function uniqueSortedNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
-}
-
-function dedupeCandidateRanges(
-	candidates: readonly V3DirectSubitemCandidate[],
-): V3DirectSubitemCandidate[] {
-	const seen = new Set<string>();
-	const deduped: V3DirectSubitemCandidate[] = [];
-	for (const candidate of candidates) {
-		const key = `${candidate.start}:${candidate.end}:${candidate.coveredRealPrimaryCount}:${candidate.completedHanSurfaceGroupCount}`;
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		deduped.push(candidate);
-	}
-	return deduped;
 }

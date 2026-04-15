@@ -41,7 +41,7 @@ export function buildHanRouteArena(
 		bigramIds: Uint32Array.from(input.bigramIds),
 		metadataPostingStarts: metadataBuckets.starts,
 		metadataDocIds: metadataBuckets.ids,
-		bodyBlockPostingStarts: bodyBuckets.starts,
+		bodyPostingStarts: bodyBuckets.starts,
 		bodyBlockIds: bodyBuckets.ids,
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
 		identityWitnessStringIds: identityWitnessBuckets.ids,
@@ -83,7 +83,7 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 			arena.metadataDocIds,
 		) +
 		estimateSentinelPostingBytes(
-			arena.bodyBlockPostingStarts,
+			arena.bodyPostingStarts,
 			arena.bodyBlockIds,
 		) +
 		estimateSentinelPostingBytes(
@@ -110,6 +110,8 @@ export function describeHanRouteByteBreakdown(
 ): Readonly<{
 	metadataHanPostingsBytes: number;
 	bodyHanPostingsBytes: number;
+	bodyHanPostingStartsBytes: number;
+	bodyHanBodyBlockIdsBytes: number;
 	metadataWitnessBytes: number;
 	bodyWitnessBytes: number;
 }> {
@@ -121,9 +123,11 @@ export function describeHanRouteByteBreakdown(
 				arena.metadataDocIds,
 			),
 		bodyHanPostingsBytes: estimateSentinelPostingBytes(
-			arena.bodyBlockPostingStarts,
+			arena.bodyPostingStarts,
 			arena.bodyBlockIds,
 		),
+		bodyHanPostingStartsBytes: arena.bodyPostingStarts.byteLength,
+		bodyHanBodyBlockIdsBytes: arena.bodyBlockIds.byteLength,
 		metadataWitnessBytes:
 			estimateSentinelPostingBytes(
 				arena.identityWitnessStartByDocId,

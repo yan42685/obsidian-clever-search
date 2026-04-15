@@ -6,6 +6,7 @@ import {
 	collectHanBodyBlockIds,
 	collectHanMetadataDocIds,
 	collectPostingDocIds,
+	confirmHanBodyBlockSurface,
 } from "./access";
 import type {
 	V3CandidateDocRecall,
@@ -89,9 +90,12 @@ export function recallCandidateDocs(
 			if (docId < 0) {
 				continue;
 			}
+			const stats = buildHanGateStats(bigramIds.length, matchedPositions);
+			if (!confirmHanBodyBlockSurface(base, blockId, hanBackstopGroup.normalizedText)) {
+				continue;
+			}
 			const bucket = getOrCreateRecallBucket(recallByDocId, docId);
 			bucket.bodyBlocks.add(blockId);
-			const stats = buildHanGateStats(bigramIds.length, matchedPositions);
 			const existing = bucket.hanBodyBlockGateStatsByBlockId.get(blockId) ?? null;
 			bucket.hanBodyBlockGateStatsByBlockId.set(
 				blockId,

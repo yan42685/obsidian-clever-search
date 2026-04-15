@@ -5852,6 +5852,16 @@ export class DataManager {
         bytes: metrics.hanRouteBodyWitnessBytes,
       },
     ].filter((segment) => segment.bytes > 0);
+        const hanRouteBodyDetailSegments: Array<{ segment: string; bytes: number }> = [
+      {
+        segment: "postingStarts",
+        bytes: metrics.hanRouteBodyHanPostingStartsBytes,
+      },
+      {
+        segment: "bodyBlockIds",
+        bytes: metrics.hanRouteBodyHanBodyBlockIdsBytes,
+      },
+    ].filter((segment) => segment.bytes > 0);
     const toBreakdownRows = (
       entries: Array<{ segment: string; bytes: number }>,
       denominator: number,
@@ -5879,7 +5889,7 @@ export class DataManager {
         "x | rawMarkdown " +
         summary["residentBytes / rawMarkdownUtf8Bytes"].toFixed(3) +
         "x",
-      "Coverage V3 structure: docs " +
+            "Coverage V3 structure: docs " +
         summary.documentCount +
         " | families " +
         summary.familyCount +
@@ -5893,6 +5903,10 @@ export class DataManager {
           .join(" | "),
       "Coverage V3 hanRoute groups: " +
         hanRouteSegments
+          .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+          .join(" | "),
+      "Coverage V3 bodyHan detail: " +
+        hanRouteBodyDetailSegments
           .map((row) => row.segment + " " + this.formatBytes(row.bytes))
           .join(" | "),
       "Coverage V3 resident payload split: scaffold " +

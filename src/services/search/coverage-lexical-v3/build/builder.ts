@@ -44,7 +44,6 @@ type PreparedDocument = Readonly<{
 	headingHanWitnessTexts: readonly string[];
 	identityHanBigramIds: readonly number[];
 	routeHanBigramIds: readonly number[];
-	headingHanBigramIds: readonly number[];
 	bodyBlocks: readonly PreparedBodyBlock[];
 }>;
 
@@ -57,10 +56,21 @@ type PreparedBodyBlock = Readonly<{
 	hanBigramIds: readonly number[];
 }>;
 
+export type ResidentBuildArtifacts = Readonly<{
+	base: ResidentBase;
+}>;
+
 export function buildResidentBase(
 	documents: readonly IndexedDocument[],
 	tokenizeDocumentText?: V3DocumentTokenizer,
 ): ResidentBase {
+	return buildResidentBaseArtifacts(documents, tokenizeDocumentText).base;
+}
+
+export function buildResidentBaseArtifacts(
+	documents: readonly IndexedDocument[],
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): ResidentBuildArtifacts {
 	const stringArenaBuilder = new StringArenaBuilder();
 	const preparedDocuments = [...documents]
 		.sort((left, right) => left.path.localeCompare(right.path))
@@ -157,10 +167,7 @@ export function buildResidentBase(
 		})),
 	);
 
-	const hanRoute = buildResidentHanRoute(
-		preparedDocuments,
-		stringArenaBuilder,
-	);
+	const hanRoute = buildResidentHanRoute(preparedDocuments, stringArenaBuilder);
 	const stringArena = stringArenaBuilder.build();
 	const metrics = buildResidentBaseMetrics({
 		stringArena,
@@ -177,16 +184,18 @@ export function buildResidentBase(
 	});
 
 	return {
-		version: 1,
-		stringArena,
-		docTable,
-		familyLexicon,
-		metadataContainers: metadataContainers.arena,
-		bodySummary,
-		bodyBlocks,
-		exactTapes: exactTapes.arena,
-		hanRoute,
-		metrics,
+		base: {
+			version: 1,
+			stringArena,
+			docTable,
+			familyLexicon,
+			metadataContainers: metadataContainers.arena,
+			bodySummary,
+			bodyBlocks,
+			exactTapes: exactTapes.arena,
+			hanRoute,
+			metrics,
+		},
 	};
 }
 
@@ -289,9 +298,6 @@ function prepareDocument(
 			...extractHanBigrams(document.folder ?? ""),
 			...splitTagValues(tagsText).flatMap((tag) => extractHanBigrams(tag)),
 		]).map(encodeHanBigramId),
-		headingHanBigramIds: dedupeSorted(extractHanBigrams(headingsText)).map(
-			encodeHanBigramId,
-		),
 		bodyBlocks,
 	};
 }
@@ -345,13 +351,11 @@ function buildResidentHanRoute(
 			mapStringsToStringIds(block.hanWitnessTexts, stringArenaBuilder),
 		),
 	);
+	const allBodyBlocks = documents.flatMap((document) => document.bodyBlocks);
 	const allBigramIds = dedupeSortedNumbers([
 		...documents.flatMap((document) => document.identityHanBigramIds),
 		...documents.flatMap((document) => document.routeHanBigramIds),
-		...documents.flatMap((document) => document.headingHanBigramIds),
-		...documents.flatMap((document) =>
-			document.bodyBlocks.flatMap((block) => block.hanBigramIds),
-		),
+		...allBodyBlocks.flatMap((block) => block.hanBigramIds),
 	]);
 	if (allBigramIds.length === 0) {
 		return buildHanRouteArena({
@@ -373,7 +377,6 @@ function buildResidentHanRoute(
 		{ length: allBigramIds.length },
 		() => [] as number[],
 	);
-	let globalBlockId = 0;
 	for (let docId = 0; docId < documents.length; docId += 1) {
 		const document = documents[docId];
 		pushBigramPostings(
@@ -381,15 +384,18 @@ function buildResidentHanRoute(
 			dedupeSortedNumbers([
 				...document.identityHanBigramIds,
 				...document.routeHanBigramIds,
-				...document.headingHanBigramIds,
 			]),
 			docId,
 			bigramIndexById,
 		);
-		for (const block of document.bodyBlocks) {
-			pushBigramPostings(bodyBlockIdsByBigram, block.hanBigramIds, globalBlockId, bigramIndexById);
-			globalBlockId += 1;
-		}
+	}
+	for (let blockId = 0; blockId < allBodyBlocks.length; blockId += 1) {
+		pushBigramPostings(
+			bodyBlockIdsByBigram,
+			allBodyBlocks[blockId]?.hanBigramIds ?? [],
+			blockId,
+			bigramIndexById,
+		);
 	}
 	return buildHanRouteArena({
 		bigramIds: allBigramIds,
@@ -401,7 +407,6 @@ function buildResidentHanRoute(
 		bodyWitnessStringIdsByBlock,
 	});
 }
-
 function mergeSourceMask(
 	target: Map<string, number>,
 	familyTexts: readonly string[],

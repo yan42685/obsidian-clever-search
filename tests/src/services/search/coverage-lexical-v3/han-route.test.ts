@@ -25,6 +25,12 @@ function createDocumentTokenizer(
 	return (text) => termMap[text] ?? [];
 }
 
+function createHanSequence(length: number, startCodePoint = 0x4e00): string {
+	return Array.from({ length }, (_, index) => String.fromCodePoint(startCodePoint + index)).join(
+		"",
+	);
+}
+
 describe("coverage lexical v3 han route", () => {
 	test("metadata han route can recall a candidate before han exact confirmation", () => {
 		const engine = new CoverageLexicalV3Engine();
@@ -208,7 +214,7 @@ describe("coverage lexical v3 han route", () => {
 		);
 	});
 
-	test("metadata han route stores union doc postings across metadata tiers", () => {
+	test("metadata han route stores union doc postings across identity and route only", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
 				path: "zh/union.md",
@@ -229,5 +235,95 @@ describe("coverage lexical v3 han route", () => {
 			const docIds = Array.from(residentBase.hanRoute.metadataDocIds.slice(start, end));
 			expect(new Set(docIds).size).toBe(docIds.length);
 		}
+	});
+
+	test("heading-only Han route no longer admits docs through metadata gate", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "zh/heading-only.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				headings: "\u7f13\u5b58\u6062\u590d",
+				content: "\u666e\u901a\u8bb0\u5f55",
+			}),
+		]);
+
+		const result = engine.search("\u7f13\u5b58\u6062\u590d");
+
+		expect(result.recallState.candidateDocs).toHaveLength(0);
+		expect(result.rankedCandidates).toHaveLength(0);
+	});
+
+	test("heading Han can still be admitted through body route when the content contains the heading text", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "zh/heading-in-body.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				headings: "\u7f13\u5b58\u6062\u590d",
+				content: "# \u7f13\u5b58\u6062\u590d\n\n\u666e\u901a\u8bb0\u5f55",
+			}),
+		]);
+
+		const result = engine.search("\u7f13\u5b58\u6062\u590d");
+
+		expect(result.recallState.candidateDocs).toHaveLength(1);
+		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates[0].path).toBe("zh/heading-in-body.md");
+	});
+
+	test("logical block route does not shortlist blocks when the exact Han surface is split across separate segments", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "zh/split-segments.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				content: "\u7f13\u5b58\u6062\u590d abc \u6269\u5bb9\u8bb0\u5f55",
+			}),
+		]);
+
+		const result = engine.search("\u6062\u590d\u6269\u5bb9");
+
+		expect(result.recallState.candidateDocs).toHaveLength(0);
+		expect(result.rankedCandidates).toHaveLength(0);
+	});
+
+	test("body Han route stores direct body block postings", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "zh/logical-span.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				content: "\u7f13\u5b58\u6062\u590d\n\n\u6269\u5bb9\u8bb0\u5f55",
+			}),
+		]);
+
+		expect(residentBase.hanRoute.bodyBlockIds.length).toBeGreaterThan(0);
+	});
+
+	test("oversized Han segments still admit cross-chunk surfaces through chunk route and full-segment confirm", () => {
+		const longHan = createHanSequence(1100);
+		const querySurface = Array.from(longHan).slice(1021, 1027).join("");
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "zh/oversized-segment.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				content: longHan,
+			}),
+		]);
+
+		const result = engine.search(querySurface);
+
+		expect(result.recallState.candidateDocs).toHaveLength(1);
+		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates[0].path).toBe("zh/oversized-segment.md");
+		expect(
+			result.recallState.candidateDocs[0]?.shortlistedBodyBlockIds.length,
+		).toBeGreaterThan(0);
 	});
 });

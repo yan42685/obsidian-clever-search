@@ -800,3 +800,62 @@ Validation completed for this phase:
 - witness-split and sparse-body-summary regression tests pass
 - existing resident-base, family-lookup, Han-route, engine, and size-anchor
   suites continue to pass
+
+### Phase 7
+
+Status: Implemented on 2026-04-15
+
+The following Han-route structural shrink is now implemented:
+
+- metadata Han resident gate is now restricted to `identity + route`
+  only:
+  - `basename`
+  - `aliases`
+  - `folder`
+  - `tags`
+- `heading` Han bigrams no longer participate in resident metadata Han
+  postings
+- heading corroboration semantics remain unchanged:
+  - heading families are still materialized
+  - heading witness strings are still materialized
+  - `BodyWindowContainer.headingCorroboration` still reads heading-backed
+    evidence during ranking
+- body Han resident postings now route directly to V3 body blocks instead of
+  routing through document-local Han logical blocks
+- query-time body Han admission now works in two steps:
+  - route cheap Han backstop bigram hits to body blocks
+  - confirm the requested Han surface against block-native Han witness text
+    before admitting the block into the shortlist
+- oversized Han segments no longer need a separate logical-block chunk layer:
+  route uses body-block bigrams, while witness confirmation still checks the
+  full block-native Han surface text
+
+Implementation note:
+
+- this phase keeps the existing `u32` Han bigram hash
+- metadata Han is still treated as a cheap admission gate, not as exact
+  evidence
+- resident body witness strings remain block-native because ranking and Han
+  completion still consume block-level witness text
+- the earlier logical-block/cold-sidecar version was removed after witness-only
+  confirmation proved sufficient; the active body-Han path is now direct
+  `bigram -> bodyBlockId -> witness confirm`
+
+Validation completed for this phase:
+
+- Han-route regression coverage now asserts:
+  - heading-only Han no longer admits docs through metadata Han gate
+  - heading text can still be admitted through body Han when it appears in body
+  - body Han route stores direct body-block postings
+  - split Han segments do not get falsely confirmed into body shortlist
+  - oversized Han segments still admit long-surface queries without false
+    negatives
+- resident-base, engine, size-anchor, file-search-engine, family-lookup,
+  ranking-stability, and reindex-width-transition suites pass
+
+Remaining validation note:
+
+- repo-wide `npm run typecheck:build` is currently blocked by unrelated
+  `direct-subitems/resolver.ts` typing errors outside this Han-route workstream,
+  so this phase is code-complete for V3 Han route but still awaits a clean
+  cross-repo typecheck baseline before it can be marked fully validated
