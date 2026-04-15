@@ -20,7 +20,7 @@ export function getDocPath(base: ResidentBase, docId: number): string {
 }
 
 export function getDocStableKey(base: ResidentBase, docId: number): string {
-	return readResidentString(base, base.docTable.stableKeyStringIds[docId] ?? 0);
+	return getDocPath(base, docId);
 }
 
 export function getDocIdentityFamilyIds(
@@ -91,11 +91,8 @@ export function getBodyBlockExactTokenPositions(
 	base: ResidentBase,
 	blockId: number,
 ): number[] {
-	return sliceUint32Array(
-		base.exactTapes.tokenPositions,
-		base.bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0,
-		base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0,
-	);
+	const count = base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0;
+	return Array.from({ length: count }, (_, index) => index);
 }
 
 export function getDocIdentityHanWitnessFamilyIds(

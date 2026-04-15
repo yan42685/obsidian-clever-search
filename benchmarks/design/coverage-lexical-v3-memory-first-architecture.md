@@ -115,7 +115,6 @@ Each doc row should contain only:
 
 - `docId`
 - `pathStringId`
-- `stableKeyStringId`
 - `generation`
 - `contentFingerprint`
 - `identitySummaryOffset`
@@ -123,7 +122,6 @@ Each doc row should contain only:
 - `headingSummaryOffset`
 - `bodyBlockStart`
 - `bodyBlockCount`
-- minimal flags
 
 It should not keep:
 

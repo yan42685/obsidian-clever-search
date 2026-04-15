@@ -8,11 +8,9 @@ export type ResidentStringArena = Readonly<{
 export type ResidentDocTable = Readonly<{
 	docCount: number;
 	pathStringIds: Uint32Array;
-	stableKeyStringIds: Uint32Array;
 	basenameStringIds: Uint32Array;
 	folderStringIds: Uint32Array;
 	generationByDocId: Uint32Array;
-	sizeByDocId: Uint32Array;
 	identityStartByDocId: Uint32Array;
 	identityCountByDocId: Uint32Array;
 	routeStartByDocId: Uint32Array;
@@ -21,7 +19,6 @@ export type ResidentDocTable = Readonly<{
 	headingCountByDocId: Uint32Array;
 	bodyBlockStartByDocId: Uint32Array;
 	bodyBlockCountByDocId: Uint32Array;
-	flagsByDocId: Uint8Array;
 }>;
 
 export type ResidentFamilyKind = "latin" | "han" | "mixed" | "other";
@@ -29,8 +26,6 @@ export type ResidentFamilyKind = "latin" | "han" | "mixed" | "other";
 export type ResidentFamilyLexicon = Readonly<{
 	familyCount: number;
 	familyStringIds: Uint32Array;
-	firstCodePointByFamilyId: Uint32Array;
-	kindCodeByFamilyId: Uint8Array;
 	prefixExpandableByFamilyId: Uint8Array;
 	sourceMaskByFamilyId: Uint8Array;
 }>;
@@ -70,7 +65,6 @@ export type ResidentBodyBlockArena = Readonly<{
 
 export type ResidentExactTapeArena = Readonly<{
 	familyIds: Uint32Array;
-	tokenPositions: Uint32Array;
 }>;
 
 export type ResidentHanRouteArena = Readonly<{

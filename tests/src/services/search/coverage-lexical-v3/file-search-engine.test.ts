@@ -197,11 +197,9 @@ function createResidentBase(): ResidentBase {
 		docTable: {
 			docCount: 2,
 			pathStringIds: new Uint32Array([0, 0]),
-			stableKeyStringIds: new Uint32Array([0, 0]),
 			basenameStringIds: new Uint32Array([0, 0]),
 			folderStringIds: new Uint32Array([0, 0]),
 			generationByDocId: new Uint32Array([101, 202]),
-			sizeByDocId: new Uint32Array([0, 0]),
 			identityStartByDocId: new Uint32Array([0, 0]),
 			identityCountByDocId: new Uint32Array([0, 0]),
 			routeStartByDocId: new Uint32Array([0, 0]),
@@ -210,13 +208,10 @@ function createResidentBase(): ResidentBase {
 			headingCountByDocId: new Uint32Array([0, 0]),
 			bodyBlockStartByDocId: new Uint32Array([0, 2]),
 			bodyBlockCountByDocId: new Uint32Array([2, 1]),
-			flagsByDocId: new Uint8Array([0, 0]),
 		},
 		familyLexicon: {
 			familyCount: 0,
 			familyStringIds: new Uint32Array(),
-			firstCodePointByFamilyId: new Uint32Array(),
-			kindCodeByFamilyId: new Uint8Array(),
 			prefixExpandableByFamilyId: new Uint8Array(),
 			sourceMaskByFamilyId: new Uint8Array(),
 		},
@@ -256,7 +251,6 @@ function createResidentBase(): ResidentBase {
 		},
 		exactTapes: {
 			familyIds: new Uint32Array(),
-			tokenPositions: new Uint32Array(),
 		},
 		hanRoute: {
 			bigramIds: new Uint32Array(),
@@ -329,11 +323,9 @@ function createResidentBaseForBlockCounts(
 			...base.docTable,
 			docCount: blockCountsByDoc.length,
 			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			stableKeyStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			basenameStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			folderStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			generationByDocId: new Uint32Array(blockCountsByDoc.map((_, index) => 100 + index)),
-			sizeByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			identityStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			identityCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			routeStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
@@ -342,7 +334,6 @@ function createResidentBaseForBlockCounts(
 			headingCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			bodyBlockStartByDocId: new Uint32Array(bodyBlockStartByDocId),
 			bodyBlockCountByDocId: new Uint32Array(bodyBlockCountByDocId),
-			flagsByDocId: new Uint8Array(blockCountsByDoc.map(() => 0)),
 		},
 		bodyBlocks: {
 			...base.bodyBlocks,

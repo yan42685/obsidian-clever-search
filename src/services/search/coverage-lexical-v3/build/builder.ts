@@ -32,9 +32,7 @@ const SOURCE_MASK_BODY = 1 << 3;
 
 type PreparedDocument = Readonly<{
 	path: string;
-	stableKey: string;
 	generation: number;
-	size: number;
 	basename: string;
 	folder: string;
 	identityFamilyTexts: readonly string[];
@@ -127,7 +125,6 @@ export function buildResidentBase(
 				),
 				exactDraft: {
 					familyIds: exactFamilyIds,
-					tokenPositions: exactFamilyIds.map((_, index) => index),
 				},
 			});
 		}
@@ -152,11 +149,9 @@ export function buildResidentBase(
 	const docTable = buildDocTable(
 		preparedDocuments.map((document, docId) => ({
 			pathStringId: stringArenaBuilder.intern(document.path),
-			stableKeyStringId: stringArenaBuilder.intern(document.stableKey),
 			basenameStringId: stringArenaBuilder.intern(document.basename),
 			folderStringId: stringArenaBuilder.intern(document.folder),
 			generation: document.generation,
-			size: document.size,
 			identityStart: metadataContainers.identityStartByDocId[docId] ?? 0,
 			identityCount: metadataContainers.identityCountByDocId[docId] ?? 0,
 			routeStart: metadataContainers.routeStartByDocId[docId] ?? 0,
@@ -165,7 +160,6 @@ export function buildResidentBase(
 			headingCount: metadataContainers.headingCountByDocId[docId] ?? 0,
 			bodyBlockStart: bodyBlockStartByDocId[docId] ?? 0,
 			bodyBlockCount: bodyBlockCountByDocId[docId] ?? 0,
-			flags: document.bodyBlocks.length > 0 ? 1 : 0,
 		})),
 	);
 
@@ -275,14 +269,7 @@ function prepareDocument(
 	const headingHanWitnessTexts = dedupeSorted(extractHanSegments(headingsText));
 	return {
 		path: document.path,
-		stableKey: document.path,
 		generation: document.generation ?? 1,
-		size:
-			document.size ??
-			estimateUtf8Bytes(contentText) +
-				estimateUtf8Bytes(aliasesText) +
-				estimateUtf8Bytes(tagsText) +
-				estimateUtf8Bytes(headingsText),
 		basename: document.basename ?? "",
 		folder: document.folder ?? "",
 		identityFamilyTexts: dedupeSorted([
