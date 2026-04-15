@@ -6,12 +6,21 @@ import type {
 	V3QueryUnitFamilyMatches,
 } from "./types";
 
+const PREFIX_LOOKUP_BUDGET_MS = 50;
+const PREFIX_LOOKUP_TIME_CHECK_INTERVAL = 256;
+
+type PrefixLookupBudgetState = {
+	startedAtMs: number;
+	exhausted: boolean;
+};
+
 export function lookupQueryUnitFamilies(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 ): V3QueryUnitFamilyMatches[] {
 	const prefixExpandableByFamilyId = base.familyLexicon.prefixExpandableByFamilyId;
 	const sourceMaskByFamilyId = base.familyLexicon.sourceMaskByFamilyId;
+	const prefixBudgetState = createPrefixLookupBudgetState();
 	return queryAnalysis.primaryUnits.map((queryUnit) => ({
 		queryUnitIndex: queryUnit.index,
 		queryUnitText: queryUnit.text,
@@ -25,7 +34,8 @@ export function lookupQueryUnitFamilies(
 						queryUnit.text,
 						prefixExpandableByFamilyId,
 						sourceMaskByFamilyId,
-					),
+					prefixBudgetState,
+				),
 	}));
 }
 
@@ -34,6 +44,7 @@ function lookupSortedQueryUnitFamilyMatches(
 	queryUnitText: string,
 	prefixExpandableByFamilyId: Uint8Array,
 	sourceMaskByFamilyId: Uint8Array,
+	prefixBudgetState: PrefixLookupBudgetState,
 ): V3QueryFamilyMatch[] {
 	const rangeStartFamilyId = findFirstFamilyIdAtOrAfter(base, queryUnitText);
 	const exactMatch = collectExactMatch(
@@ -48,6 +59,7 @@ function lookupSortedQueryUnitFamilyMatches(
 		queryUnitText,
 		prefixExpandableByFamilyId,
 		sourceMaskByFamilyId,
+		prefixBudgetState,
 	);
 	return exactMatch == null ? prefixMatches : [exactMatch, ...prefixMatches];
 }
@@ -81,6 +93,7 @@ function collectBoundedPrefixMatches(
 	queryUnitText: string,
 	prefixExpandableByFamilyId: Uint8Array,
 	sourceMaskByFamilyId: Uint8Array,
+	prefixBudgetState: PrefixLookupBudgetState,
 ): V3QueryFamilyMatch[] {
 	const matchLimit = computePrefixMatchLimit(queryUnitText);
 	if (matchLimit <= 0) {
@@ -100,6 +113,9 @@ function collectBoundedPrefixMatches(
 		}
 		scannedPrefixFamilyCount += 1;
 		if (scannedPrefixFamilyCount > scanBudget) {
+			break;
+		}
+		if (shouldAbortPrefixLookup(prefixBudgetState, scannedPrefixFamilyCount)) {
 			break;
 		}
 		if (
@@ -214,6 +230,34 @@ function resolvePrefixLengthBand(queryUnitLength: number): 0 | 3 | 4 | 5 | 6 | 7
 		return queryUnitLength as 3 | 4 | 5 | 6 | 7 | 8;
 	}
 	return 9;
+}
+
+function createPrefixLookupBudgetState(): PrefixLookupBudgetState {
+	return {
+		startedAtMs: nowMs(),
+		exhausted: false,
+	};
+}
+
+function shouldAbortPrefixLookup(
+	state: PrefixLookupBudgetState,
+	scannedPrefixFamilyCount: number,
+): boolean {
+	if (state.exhausted) {
+		return true;
+	}
+	if (scannedPrefixFamilyCount % PREFIX_LOOKUP_TIME_CHECK_INTERVAL !== 0) {
+		return false;
+	}
+	if (nowMs() - state.startedAtMs <= PREFIX_LOOKUP_BUDGET_MS) {
+		return false;
+	}
+	state.exhausted = true;
+	return true;
+}
+
+function nowMs(): number {
+	return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
 function compareQueryFamilyMatch(

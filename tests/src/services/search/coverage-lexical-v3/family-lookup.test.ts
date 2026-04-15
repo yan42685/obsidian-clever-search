@@ -59,6 +59,33 @@ describe("coverage lexical v3 family lookup", () => {
 		expect(prefixMatches.at(-1)?.familyText).toBe("prefe0063");
 	});
 
+	test("prefix collection respects a query-wide soft time budget", () => {
+		const base = buildResidentBase([
+			...buildPrefixDocuments("prefe", 600),
+			...buildPrefixDocuments("alpha", 600),
+		]);
+		const nowSpy = jest.spyOn(performance, "now");
+		nowSpy
+			.mockReturnValueOnce(0)
+			.mockReturnValueOnce(60)
+			.mockReturnValue(60);
+
+		const unitMatches = lookupQueryUnitFamilies(base, analyzeQuery("prefe alpha"));
+		const prefeMatches = unitMatches[0].matches.filter((match) => match.matchKind === "prefix");
+		const alphaMatches = unitMatches[1].matches.filter((match) => match.matchKind === "prefix");
+
+		expect(prefeMatches).toHaveLength(64);
+		expect(unitMatches[1].matches[0]).toEqual(
+			expect.objectContaining({
+				familyText: "alpha",
+				matchKind: "exact",
+			}),
+		);
+		expect(alphaMatches).toHaveLength(0);
+
+		nowSpy.mockRestore();
+	});
+
 	test("prefix collection grows match limit with longer query units", () => {
 		const eightCharBase = buildResidentBase(buildPrefixDocuments("prefix08", 400));
 		const [eightCharMatches] = lookupQueryUnitFamilies(
