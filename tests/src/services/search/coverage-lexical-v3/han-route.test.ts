@@ -1,4 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
+import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
 
@@ -205,5 +206,28 @@ describe("coverage lexical v3 han route", () => {
 				matchKind: "opaque_exact",
 			}),
 		);
+	});
+
+	test("metadata han route stores union doc postings across metadata tiers", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "zh/union.md",
+				basename: "\u7f13\u5b58\u6062\u590d",
+				folder: "zh",
+				headings: "\u5173\u4e8e\u7f13\u5b58\u6062\u590d\u7684\u8865\u5145",
+				content: "\u666e\u901a\u8bb0\u5f55",
+			}),
+		]);
+
+		expect(residentBase.hanRoute.bigramIds.length).toBeGreaterThan(0);
+		expect(residentBase.hanRoute.metadataPostingStarts.length).toBe(
+			residentBase.hanRoute.bigramIds.length + 1,
+		);
+		for (let index = 0; index < residentBase.hanRoute.bigramIds.length; index += 1) {
+			const start = residentBase.hanRoute.metadataPostingStarts[index] ?? 0;
+			const end = residentBase.hanRoute.metadataPostingStarts[index + 1] ?? start;
+			const docIds = Array.from(residentBase.hanRoute.metadataDocIds.slice(start, end));
+			expect(new Set(docIds).size).toBe(docIds.length);
+		}
 	});
 });

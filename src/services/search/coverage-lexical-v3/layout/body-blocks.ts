@@ -1,3 +1,4 @@
+import { buildIntegerArray } from "./integer-arrays";
 import type { ResidentBodyBlockArena } from "./types";
 
 type BodyBlockBuildInput = Readonly<{
@@ -12,12 +13,12 @@ export function buildBodyBlockArena(
 ): ResidentBodyBlockArena {
 	return {
 		blockCount: blocks.length,
-		docIdByBlockId: Uint32Array.from(blocks.map((block) => block.docId)),
-		blockOrdinalByBlockId: Uint32Array.from(blocks.map((block) => block.ordinal)),
-		exactTapeStartByBlockId: Uint32Array.from(
+		docIdByBlockId: buildIntegerArray(blocks.map((block) => block.docId)),
+		blockOrdinalByBlockId: buildIntegerArray(blocks.map((block) => block.ordinal)),
+		exactTapeStartByBlockId: buildIntegerArray(
 			blocks.map((block) => block.exactTapeStart),
 		),
-		exactTapeCountByBlockId: Uint32Array.from(
+		exactTapeCountByBlockId: buildIntegerArray(
 			blocks.map((block) => block.exactTapeCount),
 		),
 	};

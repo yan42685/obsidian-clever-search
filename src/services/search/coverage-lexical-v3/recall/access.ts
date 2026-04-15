@@ -1,3 +1,10 @@
+import type { ResidentIntegerArray } from "../layout/integer-arrays";
+import {
+	getSentinelSliceEnd,
+	getSentinelSliceStart,
+	sliceResidentIntegerArray,
+	sliceSentinelBucket,
+} from "../layout/integer-arrays";
 import type { ResidentBase } from "../layout/types";
 import { lookupHanBigramIndex } from "../layout/han-route";
 
@@ -27,10 +34,11 @@ export function getDocIdentityFamilyIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceResidentIntegerArray(
 		base.metadataContainers.identityFamiliesByDoc,
 		base.docTable.identityStartByDocId[docId] ?? 0,
-		base.docTable.identityCountByDocId[docId] ?? 0,
+		(base.docTable.identityStartByDocId[docId] ?? 0) +
+			(base.docTable.identityCountByDocId[docId] ?? 0),
 	);
 }
 
@@ -38,10 +46,11 @@ export function getDocRouteFamilyIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceResidentIntegerArray(
 		base.metadataContainers.routeFamiliesByDoc,
 		base.docTable.routeStartByDocId[docId] ?? 0,
-		base.docTable.routeCountByDocId[docId] ?? 0,
+		(base.docTable.routeStartByDocId[docId] ?? 0) +
+			(base.docTable.routeCountByDocId[docId] ?? 0),
 	);
 }
 
@@ -49,10 +58,11 @@ export function getDocHeadingFamilyIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceResidentIntegerArray(
 		base.metadataContainers.headingFamiliesByDoc,
 		base.docTable.headingStartByDocId[docId] ?? 0,
-		base.docTable.headingCountByDocId[docId] ?? 0,
+		(base.docTable.headingStartByDocId[docId] ?? 0) +
+			(base.docTable.headingCountByDocId[docId] ?? 0),
 	);
 }
 
@@ -69,10 +79,10 @@ export function collectBodySummaryBlockIds(
 	base: ResidentBase,
 	familyId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceSentinelBucket(
+		base.bodySummary.postings.postingStarts,
 		base.bodySummary.postings.blockIds,
-		base.bodySummary.postings.postingStarts[familyId] ?? 0,
-		base.bodySummary.postings.postingCounts[familyId] ?? 0,
+		familyId,
 	);
 }
 
@@ -80,10 +90,11 @@ export function getBodyBlockExactFamilyIds(
 	base: ResidentBase,
 	blockId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceResidentIntegerArray(
 		base.exactTapes.familyIds,
 		base.bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0,
-		base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0,
+		(base.bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0) +
+			(base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0),
 	);
 }
 
@@ -99,10 +110,10 @@ export function getDocIdentityHanWitnessFamilyIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceSentinelBucket(
+		base.hanRoute.identityWitnessStartByDocId,
 		base.hanRoute.identityWitnessFamilyIds,
-		base.hanRoute.identityWitnessStartByDocId[docId] ?? 0,
-		base.hanRoute.identityWitnessCountByDocId[docId] ?? 0,
+		docId,
 	);
 }
 
@@ -110,10 +121,10 @@ export function getDocRouteHanWitnessFamilyIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceSentinelBucket(
+		base.hanRoute.routeWitnessStartByDocId,
 		base.hanRoute.routeWitnessFamilyIds,
-		base.hanRoute.routeWitnessStartByDocId[docId] ?? 0,
-		base.hanRoute.routeWitnessCountByDocId[docId] ?? 0,
+		docId,
 	);
 }
 
@@ -121,10 +132,10 @@ export function getDocHeadingHanWitnessFamilyIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceSentinelBucket(
+		base.hanRoute.headingWitnessStartByDocId,
 		base.hanRoute.headingWitnessFamilyIds,
-		base.hanRoute.headingWitnessStartByDocId[docId] ?? 0,
-		base.hanRoute.headingWitnessCountByDocId[docId] ?? 0,
+		docId,
 	);
 }
 
@@ -132,60 +143,28 @@ export function getBodyBlockHanWitnessFamilyIds(
 	base: ResidentBase,
 	blockId: number,
 ): number[] {
-	return sliceUint32Array(
+	return sliceSentinelBucket(
+		base.hanRoute.bodyWitnessStartByBlockId,
 		base.hanRoute.bodyWitnessFamilyIds,
-		base.hanRoute.bodyWitnessStartByBlockId[blockId] ?? 0,
-		base.hanRoute.bodyWitnessCountByBlockId[blockId] ?? 0,
+		blockId,
 	);
 }
 
 export function collectPostingDocIds(
-	postingStarts: Uint32Array,
-	postingCounts: Uint32Array,
-	docIds: Uint32Array,
+	postingStarts: ResidentIntegerArray,
+	docIds: ResidentIntegerArray,
 	familyId: number,
 ): number[] {
-	return sliceUint32Array(
-		docIds,
-		postingStarts[familyId] ?? 0,
-		postingCounts[familyId] ?? 0,
-	);
+	return sliceSentinelBucket(postingStarts, docIds, familyId);
 }
 
-export function collectHanMetadataIdentityDocIds(
+export function collectHanMetadataDocIds(
 	base: ResidentBase,
 	bigramId: number,
 ): number[] {
 	return collectHanPostingDocIds(
-		base.hanRoute.metadataIdentityPostingStarts,
-		base.hanRoute.metadataIdentityPostingCounts,
-		base.hanRoute.metadataIdentityDocIds,
-		base,
-		bigramId,
-	);
-}
-
-export function collectHanMetadataRouteDocIds(
-	base: ResidentBase,
-	bigramId: number,
-): number[] {
-	return collectHanPostingDocIds(
-		base.hanRoute.metadataRoutePostingStarts,
-		base.hanRoute.metadataRoutePostingCounts,
-		base.hanRoute.metadataRouteDocIds,
-		base,
-		bigramId,
-	);
-}
-
-export function collectHanMetadataHeadingDocIds(
-	base: ResidentBase,
-	bigramId: number,
-): number[] {
-	return collectHanPostingDocIds(
-		base.hanRoute.metadataHeadingPostingStarts,
-		base.hanRoute.metadataHeadingPostingCounts,
-		base.hanRoute.metadataHeadingDocIds,
+		base.hanRoute.metadataPostingStarts,
+		base.hanRoute.metadataDocIds,
 		base,
 		bigramId,
 	);
@@ -199,24 +178,16 @@ export function collectHanBodyBlockIds(
 	if (bigramIndex === -1) {
 		return [];
 	}
-	return sliceUint32Array(
+	return sliceResidentIntegerArray(
 		base.hanRoute.bodyBlockIds,
-		base.hanRoute.bodyBlockPostingStarts[bigramIndex] ?? 0,
-		base.hanRoute.bodyBlockPostingCounts[bigramIndex] ?? 0,
+		getSentinelSliceStart(base.hanRoute.bodyBlockPostingStarts, bigramIndex),
+		getSentinelSliceEnd(base.hanRoute.bodyBlockPostingStarts, bigramIndex),
 	);
 }
 
-function sliceUint32Array(values: Uint32Array, start: number, count: number): number[] {
-	if (count <= 0) {
-		return [];
-	}
-	return Array.from(values.slice(start, start + count));
-}
-
 function collectHanPostingDocIds(
-	postingStarts: Uint32Array,
-	postingCounts: Uint32Array,
-	docIds: Uint32Array,
+	postingStarts: ResidentIntegerArray,
+	docIds: ResidentIntegerArray,
 	base: ResidentBase,
 	bigramId: number,
 ): number[] {
@@ -224,9 +195,9 @@ function collectHanPostingDocIds(
 	if (bigramIndex === -1) {
 		return [];
 	}
-	return sliceUint32Array(
+	return sliceResidentIntegerArray(
 		docIds,
-		postingStarts[bigramIndex] ?? 0,
-		postingCounts[bigramIndex] ?? 0,
+		getSentinelSliceStart(postingStarts, bigramIndex),
+		getSentinelSliceEnd(postingStarts, bigramIndex),
 	);
 }

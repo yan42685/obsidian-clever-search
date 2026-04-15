@@ -1,10 +1,14 @@
+import {
+	buildIntegerArray,
+	buildSentinelStarts,
+	estimateSentinelPostingBytes,
+	flattenBuckets,
+} from "./integer-arrays";
 import type { ResidentHanRouteArena } from "./types";
 
 type HanRouteBuildInput = Readonly<{
 	bigramIds: readonly number[];
-	metadataIdentityDocIdsByBigram: readonly (readonly number[])[];
-	metadataRouteDocIdsByBigram: readonly (readonly number[])[];
-	metadataHeadingDocIdsByBigram: readonly (readonly number[])[];
+	metadataDocIdsByBigram: readonly (readonly number[])[];
 	bodyBlockIdsByBigram: readonly (readonly number[])[];
 	identityWitnessFamilyIdsByDoc: readonly (readonly number[])[];
 	routeWitnessFamilyIdsByDoc: readonly (readonly number[])[];
@@ -15,9 +19,7 @@ type HanRouteBuildInput = Readonly<{
 export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 	return buildHanRouteArena({
 		bigramIds: [],
-		metadataIdentityDocIdsByBigram: [],
-		metadataRouteDocIdsByBigram: [],
-		metadataHeadingDocIdsByBigram: [],
+		metadataDocIdsByBigram: [],
 		bodyBlockIdsByBigram: [],
 		identityWitnessFamilyIdsByDoc: [],
 		routeWitnessFamilyIdsByDoc: [],
@@ -29,9 +31,7 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 export function buildHanRouteArena(
 	input: HanRouteBuildInput,
 ): ResidentHanRouteArena {
-	const identityBuckets = buildPostingBuckets(input.metadataIdentityDocIdsByBigram);
-	const routeBuckets = buildPostingBuckets(input.metadataRouteDocIdsByBigram);
-	const headingBuckets = buildPostingBuckets(input.metadataHeadingDocIdsByBigram);
+	const metadataBuckets = buildPostingBuckets(input.metadataDocIdsByBigram);
 	const bodyBuckets = buildPostingBuckets(input.bodyBlockIdsByBigram);
 	const identityWitnessBuckets = buildPostingBuckets(input.identityWitnessFamilyIdsByDoc);
 	const routeWitnessBuckets = buildPostingBuckets(input.routeWitnessFamilyIdsByDoc);
@@ -39,29 +39,17 @@ export function buildHanRouteArena(
 	const bodyWitnessBuckets = buildPostingBuckets(input.bodyWitnessFamilyIdsByBlock);
 	return {
 		bigramIds: Uint32Array.from(input.bigramIds),
-		metadataIdentityPostingStarts: identityBuckets.starts,
-		metadataIdentityPostingCounts: identityBuckets.counts,
-		metadataIdentityDocIds: identityBuckets.ids,
-		metadataRoutePostingStarts: routeBuckets.starts,
-		metadataRoutePostingCounts: routeBuckets.counts,
-		metadataRouteDocIds: routeBuckets.ids,
-		metadataHeadingPostingStarts: headingBuckets.starts,
-		metadataHeadingPostingCounts: headingBuckets.counts,
-		metadataHeadingDocIds: headingBuckets.ids,
+		metadataPostingStarts: metadataBuckets.starts,
+		metadataDocIds: metadataBuckets.ids,
 		bodyBlockPostingStarts: bodyBuckets.starts,
-		bodyBlockPostingCounts: bodyBuckets.counts,
 		bodyBlockIds: bodyBuckets.ids,
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
-		identityWitnessCountByDocId: identityWitnessBuckets.counts,
 		identityWitnessFamilyIds: identityWitnessBuckets.ids,
 		routeWitnessStartByDocId: routeWitnessBuckets.starts,
-		routeWitnessCountByDocId: routeWitnessBuckets.counts,
 		routeWitnessFamilyIds: routeWitnessBuckets.ids,
 		headingWitnessStartByDocId: headingWitnessBuckets.starts,
-		headingWitnessCountByDocId: headingWitnessBuckets.counts,
 		headingWitnessFamilyIds: headingWitnessBuckets.ids,
 		bodyWitnessStartByBlockId: bodyWitnessBuckets.starts,
-		bodyWitnessCountByBlockId: bodyWitnessBuckets.counts,
 		bodyWitnessFamilyIds: bodyWitnessBuckets.ids,
 	};
 }
@@ -90,53 +78,80 @@ export function lookupHanBigramIndex(
 export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 	return (
 		arena.bigramIds.byteLength +
-		arena.metadataIdentityPostingStarts.byteLength +
-		arena.metadataIdentityPostingCounts.byteLength +
-		arena.metadataIdentityDocIds.byteLength +
-		arena.metadataRoutePostingStarts.byteLength +
-		arena.metadataRoutePostingCounts.byteLength +
-		arena.metadataRouteDocIds.byteLength +
-		arena.metadataHeadingPostingStarts.byteLength +
-		arena.metadataHeadingPostingCounts.byteLength +
-		arena.metadataHeadingDocIds.byteLength +
-		arena.bodyBlockPostingStarts.byteLength +
-		arena.bodyBlockPostingCounts.byteLength +
-		arena.bodyBlockIds.byteLength +
-		arena.identityWitnessStartByDocId.byteLength +
-		arena.identityWitnessCountByDocId.byteLength +
-		arena.identityWitnessFamilyIds.byteLength +
-		arena.routeWitnessStartByDocId.byteLength +
-		arena.routeWitnessCountByDocId.byteLength +
-		arena.routeWitnessFamilyIds.byteLength +
-		arena.headingWitnessStartByDocId.byteLength +
-		arena.headingWitnessCountByDocId.byteLength +
-		arena.headingWitnessFamilyIds.byteLength +
-		arena.bodyWitnessStartByBlockId.byteLength +
-		arena.bodyWitnessCountByBlockId.byteLength +
-		arena.bodyWitnessFamilyIds.byteLength
+		estimateSentinelPostingBytes(
+			arena.metadataPostingStarts,
+			arena.metadataDocIds,
+		) +
+		estimateSentinelPostingBytes(
+			arena.bodyBlockPostingStarts,
+			arena.bodyBlockIds,
+		) +
+		estimateSentinelPostingBytes(
+			arena.identityWitnessStartByDocId,
+			arena.identityWitnessFamilyIds,
+		) +
+		estimateSentinelPostingBytes(
+			arena.routeWitnessStartByDocId,
+			arena.routeWitnessFamilyIds,
+		) +
+		estimateSentinelPostingBytes(
+			arena.headingWitnessStartByDocId,
+			arena.headingWitnessFamilyIds,
+		) +
+		estimateSentinelPostingBytes(
+			arena.bodyWitnessStartByBlockId,
+			arena.bodyWitnessFamilyIds,
+		)
 	);
+}
+
+export function describeHanRouteByteBreakdown(
+	arena: ResidentHanRouteArena,
+): Readonly<{
+	metadataHanPostingsBytes: number;
+	bodyHanPostingsBytes: number;
+	metadataWitnessBytes: number;
+	bodyWitnessBytes: number;
+}> {
+	return {
+		metadataHanPostingsBytes:
+			arena.bigramIds.byteLength +
+			estimateSentinelPostingBytes(
+				arena.metadataPostingStarts,
+				arena.metadataDocIds,
+			),
+		bodyHanPostingsBytes: estimateSentinelPostingBytes(
+			arena.bodyBlockPostingStarts,
+			arena.bodyBlockIds,
+		),
+		metadataWitnessBytes:
+			estimateSentinelPostingBytes(
+				arena.identityWitnessStartByDocId,
+				arena.identityWitnessFamilyIds,
+			) +
+			estimateSentinelPostingBytes(
+				arena.routeWitnessStartByDocId,
+				arena.routeWitnessFamilyIds,
+			) +
+			estimateSentinelPostingBytes(
+				arena.headingWitnessStartByDocId,
+				arena.headingWitnessFamilyIds,
+			),
+		bodyWitnessBytes: estimateSentinelPostingBytes(
+			arena.bodyWitnessStartByBlockId,
+			arena.bodyWitnessFamilyIds,
+		),
+	};
 }
 
 function buildPostingBuckets(
 	postingsByBigram: readonly (readonly number[])[],
 ): Readonly<{
-	starts: Uint32Array;
-	counts: Uint32Array;
-	ids: Uint32Array;
+	starts: ReturnType<typeof buildIntegerArray>;
+	ids: ReturnType<typeof buildIntegerArray>;
 }> {
-	const starts: number[] = [];
-	const counts: number[] = [];
-	const ids: number[] = [];
-	for (const bucket of postingsByBigram) {
-		starts.push(ids.length);
-		counts.push(bucket.length);
-		for (const value of bucket) {
-			ids.push(value);
-		}
-	}
 	return {
-		starts: Uint32Array.from(starts),
-		counts: Uint32Array.from(counts),
-		ids: Uint32Array.from(ids),
+		starts: buildSentinelStarts(postingsByBigram),
+		ids: flattenBuckets(postingsByBigram),
 	};
 }

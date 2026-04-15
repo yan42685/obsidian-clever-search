@@ -1,3 +1,4 @@
+import { buildIntegerArray } from "./integer-arrays";
 import type { ResidentExactTapeArena } from "./types";
 
 export type ExactTapeDraft = Readonly<{
@@ -6,8 +7,8 @@ export type ExactTapeDraft = Readonly<{
 
 export type ExactTapeBuildOutput = Readonly<{
 	arena: ResidentExactTapeArena;
-	startsByDraftIndex: Uint32Array;
-	countsByDraftIndex: Uint32Array;
+	startsByDraftIndex: ReturnType<typeof buildIntegerArray>;
+	countsByDraftIndex: ReturnType<typeof buildIntegerArray>;
 }>;
 
 export function buildExactTapeArena(
@@ -23,10 +24,10 @@ export function buildExactTapeArena(
 	}
 	return {
 		arena: {
-			familyIds: Uint32Array.from(familyIds),
+			familyIds: buildIntegerArray(familyIds),
 		},
-		startsByDraftIndex: Uint32Array.from(starts),
-		countsByDraftIndex: Uint32Array.from(counts),
+		startsByDraftIndex: buildIntegerArray(starts),
+		countsByDraftIndex: buildIntegerArray(counts),
 	};
 }
 

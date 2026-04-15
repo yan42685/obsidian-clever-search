@@ -1,3 +1,8 @@
+import {
+	buildSentinelStarts,
+	estimateSentinelPostingBytes,
+	flattenBuckets,
+} from "./integer-arrays";
 import type {
 	ResidentBlockPostingList,
 	ResidentBodySummaryArena,
@@ -35,27 +40,12 @@ function buildBlockPostingList(
 			buckets[familyId]?.push(blockId);
 		}
 	}
-	const postingStarts: number[] = [];
-	const postingCounts: number[] = [];
-	const blockIds: number[] = [];
-	for (const bucket of buckets) {
-		postingStarts.push(blockIds.length);
-		postingCounts.push(bucket.length);
-		for (const blockId of bucket) {
-			blockIds.push(blockId);
-		}
-	}
 	return {
-		postingStarts: Uint32Array.from(postingStarts),
-		postingCounts: Uint32Array.from(postingCounts),
-		blockIds: Uint32Array.from(blockIds),
+		postingStarts: buildSentinelStarts(buckets),
+		blockIds: flattenBuckets(buckets),
 	};
 }
 
 function estimateBlockPostingListBytes(postings: ResidentBlockPostingList): number {
-	return (
-		postings.postingStarts.byteLength +
-		postings.postingCounts.byteLength +
-		postings.blockIds.byteLength
-	);
+	return estimateSentinelPostingBytes(postings.postingStarts, postings.blockIds);
 }

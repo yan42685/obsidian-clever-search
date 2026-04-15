@@ -236,15 +236,17 @@ It must remain separate from:
 
 The minimum resident Han route structures are:
 
-- `metadataBigramPostingsByTier`
-  - `bigramId -> identity doc postings`
-  - `bigramId -> route doc postings`
-  - `bigramId -> heading doc postings`
+- `metadataBigramDocPostings`
+  - `bigramId -> doc postings`
 - `bodyHanBlockPostings`
   - `bigramId -> blockId postings`
 - hooks from block ids into Han exact tapes
 
 Han bigrams should never become final primary ranking evidence.
+
+Tier semantics such as `identity > route > heading` should remain in metadata
+families, Han witness families, and final packing/completion. They do not need
+to survive as separate resident Han metadata bigram posting tiers.
 
 ### 7. Metrics Arena
 
@@ -257,9 +259,18 @@ At minimum, V3 should report:
 - `familyLexiconBytes`
 - `metadataContainerBytes`
 - `headingBytes`
+- `bodySummaryBytes`
 - `bodyBlockBytes`
 - `exactTapeBytes`
 - `hanRouteBytes`
+- `hanRouteMetadataHanPostingsBytes`
+- `hanRouteBodyHanPostingsBytes`
+- `hanRouteMetadataWitnessBytes`
+- `hanRouteBodyWitnessBytes`
+- `scaffoldBytes`
+- `countBytes`
+- `idPayloadBytes`
+- `stringPayloadBytes`
 - `overlayBytes`
 - `auxiliaryBytes`
 - `residentBytes`
@@ -439,6 +450,8 @@ To keep resident memory minimal:
 
 - use numeric 32-bit bigram ids
 - store `bigramId -> docId` or `bigramId -> blockId` postings only
+- allow the resident base to union metadata-tier Han doc postings when the gate
+  only needs candidate admission semantics
 - do not keep resident bigram strings in the hot path
 - do not keep both body doc-level and body block-level Han bigram postings
 - do not keep a resident per-block bigram mirror after global block postings are
@@ -658,3 +671,32 @@ Validation completed for this phase:
 - Han route tests pass
 - `hanRouteBytes` is now visible in the resident bytes contract
 - Han route stats remain outside the final packing comparator world
+
+### Phase 4
+
+Status: Completed on 2026-04-15
+
+The following Phase 4 resident-memory baseline is now implemented:
+
+- resident postings now use width-adaptive integer arrays instead of assuming a
+  fixed `Uint32Array` contract
+- metadata postings, body-summary postings, and Han route postings now use
+  sentinel-start layouts instead of `starts + counts + ids`
+- metadata Han route postings are now stored as union doc postings:
+  - `bigramId -> doc postings`
+  - no tier-split resident metadata Han posting sets remain
+- family-lexicon metadata flags are now packed into a single byte per family
+- resident doc table no longer stores unused basename/folder string id arrays
+- resident metrics and runtime breakdown now expose:
+  - `bodySummaryBytes`
+  - Han route sub-buckets
+  - scaffold/count/id/string payload splits
+- resident summary now exposes section-level width/encoding descriptors to keep
+  the live layout compatible with future width-aware snapshot sections
+
+Validation completed for this phase:
+
+- build typecheck passes
+- Coverage V3 resident-base, family-lookup, Han-route, engine, size-anchor,
+  direct-subitems, and file-search-engine tests pass
+- V3 search semantics remain unchanged across the targeted regression suite

@@ -8,6 +8,7 @@ import {
 } from "../layout/exact-tapes";
 import { buildFamilyLexicon } from "../layout/family-lexicon";
 import { buildHanRouteArena } from "../layout/han-route";
+import { buildIntegerArray } from "../layout/integer-arrays";
 import { buildMetadataContainerArena } from "../layout/metadata-containers";
 import type { ResidentBase } from "../layout/types";
 import { buildResidentBaseMetrics } from "../metrics";
@@ -149,8 +150,6 @@ export function buildResidentBase(
 	const docTable = buildDocTable(
 		preparedDocuments.map((document, docId) => ({
 			pathStringId: stringArenaBuilder.intern(document.path),
-			basenameStringId: stringArenaBuilder.intern(document.basename),
-			folderStringId: stringArenaBuilder.intern(document.folder),
 			generation: document.generation,
 			identityStart: metadataContainers.identityStartByDocId[docId] ?? 0,
 			identityCount: metadataContainers.identityCountByDocId[docId] ?? 0,
@@ -379,9 +378,7 @@ function buildResidentHanRoute(
 	if (allBigramIds.length === 0) {
 		return buildHanRouteArena({
 			bigramIds: [],
-			metadataIdentityDocIdsByBigram: [],
-			metadataRouteDocIdsByBigram: [],
-			metadataHeadingDocIdsByBigram: [],
+			metadataDocIdsByBigram: [],
 			bodyBlockIdsByBigram: [],
 			identityWitnessFamilyIdsByDoc,
 			routeWitnessFamilyIdsByDoc,
@@ -390,15 +387,7 @@ function buildResidentHanRoute(
 		});
 	}
 	const bigramIndexById = new Map(allBigramIds.map((bigramId, index) => [bigramId, index]));
-	const identityDocIdsByBigram = Array.from(
-		{ length: allBigramIds.length },
-		() => [] as number[],
-	);
-	const routeDocIdsByBigram = Array.from(
-		{ length: allBigramIds.length },
-		() => [] as number[],
-	);
-	const headingDocIdsByBigram = Array.from(
+	const metadataDocIdsByBigram = Array.from(
 		{ length: allBigramIds.length },
 		() => [] as number[],
 	);
@@ -409,9 +398,16 @@ function buildResidentHanRoute(
 	let globalBlockId = 0;
 	for (let docId = 0; docId < documents.length; docId += 1) {
 		const document = documents[docId];
-		pushBigramPostings(identityDocIdsByBigram, document.identityHanBigramIds, docId, bigramIndexById);
-		pushBigramPostings(routeDocIdsByBigram, document.routeHanBigramIds, docId, bigramIndexById);
-		pushBigramPostings(headingDocIdsByBigram, document.headingHanBigramIds, docId, bigramIndexById);
+		pushBigramPostings(
+			metadataDocIdsByBigram,
+			dedupeSortedNumbers([
+				...document.identityHanBigramIds,
+				...document.routeHanBigramIds,
+				...document.headingHanBigramIds,
+			]),
+			docId,
+			bigramIndexById,
+		);
 		for (const block of document.bodyBlocks) {
 			pushBigramPostings(bodyBlockIdsByBigram, block.hanBigramIds, globalBlockId, bigramIndexById);
 			globalBlockId += 1;
@@ -419,9 +415,7 @@ function buildResidentHanRoute(
 	}
 	return buildHanRouteArena({
 		bigramIds: allBigramIds,
-		metadataIdentityDocIdsByBigram: identityDocIdsByBigram,
-		metadataRouteDocIdsByBigram: routeDocIdsByBigram,
-		metadataHeadingDocIdsByBigram: headingDocIdsByBigram,
+		metadataDocIdsByBigram,
 		bodyBlockIdsByBigram,
 		identityWitnessFamilyIdsByDoc,
 		routeWitnessFamilyIdsByDoc,
@@ -540,8 +534,8 @@ class StringArenaBuilder {
 		}
 		return {
 			text,
-			offsets: Uint32Array.from(offsets),
-			lengths: Uint32Array.from(lengths),
+			offsets: buildIntegerArray(offsets),
+			lengths: buildIntegerArray(lengths),
 			count: this.values.length,
 		} as const;
 	}

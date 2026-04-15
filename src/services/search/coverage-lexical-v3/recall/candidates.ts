@@ -4,9 +4,7 @@ import type { V3QueryAnalysis } from "../query/analysis";
 import {
 	collectBodySummaryBlockIds,
 	collectHanBodyBlockIds,
-	collectHanMetadataHeadingDocIds,
-	collectHanMetadataIdentityDocIds,
-	collectHanMetadataRouteDocIds,
+	collectHanMetadataDocIds,
 	collectPostingDocIds,
 } from "./access";
 import type {
@@ -26,7 +24,6 @@ export function recallCandidateDocs(
 		for (const match of unitMatches.matches) {
 			for (const docId of collectPostingDocIds(
 				base.metadataContainers.identityPostings.postingStarts,
-				base.metadataContainers.identityPostings.postingCounts,
 				base.metadataContainers.identityPostings.docIds,
 				match.familyId,
 			)) {
@@ -36,7 +33,6 @@ export function recallCandidateDocs(
 			}
 			for (const docId of collectPostingDocIds(
 				base.metadataContainers.routePostings.postingStarts,
-				base.metadataContainers.routePostings.postingCounts,
 				base.metadataContainers.routePostings.docIds,
 				match.familyId,
 			)) {
@@ -46,7 +42,6 @@ export function recallCandidateDocs(
 			}
 			for (const docId of collectPostingDocIds(
 				base.metadataContainers.headingPostings.postingStarts,
-				base.metadataContainers.headingPostings.postingCounts,
 				base.metadataContainers.headingPostings.docIds,
 				match.familyId,
 			)) {
@@ -75,13 +70,7 @@ export function recallCandidateDocs(
 		const matchedBigramPositionsByBlock = new Map<number, Set<number>>();
 		for (let position = 0; position < bigramIds.length; position += 1) {
 			const bigramId = bigramIds[position];
-			for (const docId of collectHanMetadataIdentityDocIds(base, bigramId)) {
-				addMatchedBigramPosition(matchedBigramPositionsByDoc, docId, position);
-			}
-			for (const docId of collectHanMetadataRouteDocIds(base, bigramId)) {
-				addMatchedBigramPosition(matchedBigramPositionsByDoc, docId, position);
-			}
-			for (const docId of collectHanMetadataHeadingDocIds(base, bigramId)) {
+			for (const docId of collectHanMetadataDocIds(base, bigramId)) {
 				addMatchedBigramPosition(matchedBigramPositionsByDoc, docId, position);
 			}
 			for (const blockId of collectHanBodyBlockIds(base, bigramId)) {

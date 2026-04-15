@@ -1,3 +1,9 @@
+import {
+	buildIntegerArray,
+	buildSentinelStarts,
+	estimateSentinelPostingBytes,
+	flattenBuckets,
+} from "./integer-arrays";
 import type {
 	ResidentMetadataContainerArena,
 	ResidentPostingList,
@@ -12,12 +18,12 @@ type MetadataContainersBuildInput = Readonly<{
 
 export type MetadataContainersBuildOutput = Readonly<{
 	arena: ResidentMetadataContainerArena;
-	identityStartByDocId: Uint32Array;
-	identityCountByDocId: Uint32Array;
-	routeStartByDocId: Uint32Array;
-	routeCountByDocId: Uint32Array;
-	headingStartByDocId: Uint32Array;
-	headingCountByDocId: Uint32Array;
+	identityStartByDocId: ReturnType<typeof buildIntegerArray>;
+	identityCountByDocId: ReturnType<typeof buildIntegerArray>;
+	routeStartByDocId: ReturnType<typeof buildIntegerArray>;
+	routeCountByDocId: ReturnType<typeof buildIntegerArray>;
+	headingStartByDocId: ReturnType<typeof buildIntegerArray>;
+	headingCountByDocId: ReturnType<typeof buildIntegerArray>;
 }>;
 
 export function buildMetadataContainerArena(
@@ -76,9 +82,9 @@ export function estimateHeadingBytes(
 function flattenDocFamilyIds(
 	docFamilyIds: readonly (readonly number[])[],
 ): Readonly<{
-	values: Uint32Array;
-	starts: Uint32Array;
-	counts: Uint32Array;
+	values: ReturnType<typeof buildIntegerArray>;
+	starts: ReturnType<typeof buildIntegerArray>;
+	counts: ReturnType<typeof buildIntegerArray>;
 }> {
 	const values: number[] = [];
 	const starts: number[] = [];
@@ -91,9 +97,9 @@ function flattenDocFamilyIds(
 		}
 	}
 	return {
-		values: Uint32Array.from(values),
-		starts: Uint32Array.from(starts),
-		counts: Uint32Array.from(counts),
+		values: buildIntegerArray(values),
+		starts: buildIntegerArray(starts),
+		counts: buildIntegerArray(counts),
 	};
 }
 
@@ -107,27 +113,12 @@ function buildPostingList(
 			buckets[familyId]?.push(docId);
 		}
 	}
-	const postingStarts: number[] = [];
-	const postingCounts: number[] = [];
-	const docIds: number[] = [];
-	for (const bucket of buckets) {
-		postingStarts.push(docIds.length);
-		postingCounts.push(bucket.length);
-		for (const docId of bucket) {
-			docIds.push(docId);
-		}
-	}
 	return {
-		postingStarts: Uint32Array.from(postingStarts),
-		postingCounts: Uint32Array.from(postingCounts),
-		docIds: Uint32Array.from(docIds),
+		postingStarts: buildSentinelStarts(buckets),
+		docIds: flattenBuckets(buckets),
 	};
 }
 
 function estimatePostingListBytes(postings: ResidentPostingList): number {
-	return (
-		postings.postingStarts.byteLength +
-		postings.postingCounts.byteLength +
-		postings.docIds.byteLength
-	);
+	return estimateSentinelPostingBytes(postings.postingStarts, postings.docIds);
 }

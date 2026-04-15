@@ -5828,10 +5828,29 @@ export class DataManager {
       { segment: "familyLexicon", bytes: metrics.familyLexiconBytes },
       { segment: "metadataContainers", bytes: metrics.metadataContainerBytes },
       { segment: "heading", bytes: metrics.headingBytes },
+      { segment: "bodySummary", bytes: metrics.bodySummaryBytes },
       { segment: "bodyBlocks", bytes: metrics.bodyBlockBytes },
       { segment: "exactTapes", bytes: metrics.exactTapeBytes },
       { segment: "hanRoute", bytes: metrics.hanRouteBytes },
       { segment: "auxiliary", bytes: metrics.auxiliaryBytes },
+    ].filter((segment) => segment.bytes > 0);
+    const hanRouteSegments: Array<{ segment: string; bytes: number }> = [
+      {
+        segment: "metadataHanPostings",
+        bytes: metrics.hanRouteMetadataHanPostingsBytes,
+      },
+      {
+        segment: "bodyHanPostings",
+        bytes: metrics.hanRouteBodyHanPostingsBytes,
+      },
+      {
+        segment: "metadataWitness",
+        bytes: metrics.hanRouteMetadataWitnessBytes,
+      },
+      {
+        segment: "bodyWitness",
+        bytes: metrics.hanRouteBodyWitnessBytes,
+      },
     ].filter((segment) => segment.bytes > 0);
     const toBreakdownRows = (
       entries: Array<{ segment: string; bytes: number }>,
@@ -5872,6 +5891,18 @@ export class DataManager {
         residentTopRows
           .map((row) => row.segment + " " + row.size)
           .join(" | "),
+      "Coverage V3 hanRoute groups: " +
+        hanRouteSegments
+          .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+          .join(" | "),
+      "Coverage V3 resident payload split: scaffold " +
+        this.formatBytes(metrics.scaffoldBytes) +
+        " | counts " +
+        this.formatBytes(metrics.countBytes) +
+        " | ids " +
+        this.formatBytes(metrics.idPayloadBytes) +
+        " | strings " +
+        this.formatBytes(metrics.stringPayloadBytes),
     ].filter((line) => !line.endsWith(": "));
 
     return {

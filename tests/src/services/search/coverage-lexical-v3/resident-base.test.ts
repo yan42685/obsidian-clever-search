@@ -124,4 +124,36 @@ describe("coverage lexical v3 resident base", () => {
 		expect(summary.familyCount).toBe(residentBase.familyLexicon.familyCount);
 		expect(summary["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
 	});
+
+	test("uses adaptive integer widths and exposes section encoding descriptors", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "notes/one.md",
+				basename: "one",
+				folder: "notes",
+				content: "alpha beta",
+			}),
+			createDocument({
+				path: "notes/two.md",
+				basename: "two",
+				folder: "notes",
+				content: "alpha gamma",
+			}),
+		]);
+		const summary = describeResidentBase(residentBase);
+
+		expect(residentBase.docTable.pathStringIds).toBeInstanceOf(Uint8Array);
+		expect(residentBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint8Array);
+		expect(residentBase.exactTapes.familyIds).toBeInstanceOf(Uint8Array);
+		expect(summary.sectionEncodings.length).toBeGreaterThan(0);
+		expect(
+			summary.sectionEncodings.some(
+				(section) =>
+					section.sectionKind === "bodySummary.postings.starts" &&
+					section.encodingFlags > 0,
+			),
+		).toBe(true);
+		expect(residentBase.metrics.stringPayloadBytes).toBeGreaterThan(0);
+		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
+	});
 });

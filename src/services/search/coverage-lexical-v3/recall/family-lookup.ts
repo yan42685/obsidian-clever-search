@@ -1,3 +1,7 @@
+import {
+	getFamilySourceMask,
+	isFamilyPrefixExpandable,
+} from "../layout/family-lexicon";
 import type { ResidentBase } from "../layout/types";
 import type { V3QueryAnalysis } from "../query/analysis";
 import { getFamilyText } from "./access";
@@ -18,8 +22,7 @@ export function lookupQueryUnitFamilies(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 ): V3QueryUnitFamilyMatches[] {
-	const prefixExpandableByFamilyId = base.familyLexicon.prefixExpandableByFamilyId;
-	const sourceMaskByFamilyId = base.familyLexicon.sourceMaskByFamilyId;
+	const familyFlagsByFamilyId = base.familyLexicon.familyFlagsByFamilyId;
 	const prefixBudgetState = createPrefixLookupBudgetState();
 	return queryAnalysis.primaryUnits.map((queryUnit) => ({
 		queryUnitIndex: queryUnit.index,
@@ -32,8 +35,7 @@ export function lookupQueryUnitFamilies(
 				: lookupSortedQueryUnitFamilyMatches(
 						base,
 						queryUnit.text,
-						prefixExpandableByFamilyId,
-						sourceMaskByFamilyId,
+						familyFlagsByFamilyId,
 					prefixBudgetState,
 				),
 	}));
@@ -42,8 +44,7 @@ export function lookupQueryUnitFamilies(
 function lookupSortedQueryUnitFamilyMatches(
 	base: ResidentBase,
 	queryUnitText: string,
-	prefixExpandableByFamilyId: Uint8Array,
-	sourceMaskByFamilyId: Uint8Array,
+	familyFlagsByFamilyId: Uint8Array,
 	prefixBudgetState: PrefixLookupBudgetState,
 ): V3QueryFamilyMatch[] {
 	const rangeStartFamilyId = findFirstFamilyIdAtOrAfter(base, queryUnitText);
@@ -51,14 +52,13 @@ function lookupSortedQueryUnitFamilyMatches(
 		base,
 		rangeStartFamilyId,
 		queryUnitText,
-		sourceMaskByFamilyId,
+		familyFlagsByFamilyId,
 	);
 	const prefixMatches = collectBoundedPrefixMatches(
 		base,
 		rangeStartFamilyId,
 		queryUnitText,
-		prefixExpandableByFamilyId,
-		sourceMaskByFamilyId,
+		familyFlagsByFamilyId,
 		prefixBudgetState,
 	);
 	return exactMatch == null ? prefixMatches : [exactMatch, ...prefixMatches];
@@ -68,12 +68,12 @@ function collectExactMatch(
 	base: ResidentBase,
 	familyId: number,
 	queryUnitText: string,
-	sourceMaskByFamilyId: Uint8Array,
+	familyFlagsByFamilyId: Uint8Array,
 ): V3QueryFamilyMatch | null {
 	if (familyId >= base.familyLexicon.familyCount) {
 		return null;
 	}
-	if ((sourceMaskByFamilyId[familyId] ?? 0) === 0) {
+	if (getFamilySourceMask(familyFlagsByFamilyId[familyId] ?? 0) === 0) {
 		return null;
 	}
 	const familyText = getFamilyText(base, familyId);
@@ -91,8 +91,7 @@ function collectBoundedPrefixMatches(
 	base: ResidentBase,
 	rangeStartFamilyId: number,
 	queryUnitText: string,
-	prefixExpandableByFamilyId: Uint8Array,
-	sourceMaskByFamilyId: Uint8Array,
+	familyFlagsByFamilyId: Uint8Array,
 	prefixBudgetState: PrefixLookupBudgetState,
 ): V3QueryFamilyMatch[] {
 	const matchLimit = computePrefixMatchLimit(queryUnitText);
@@ -120,8 +119,8 @@ function collectBoundedPrefixMatches(
 		}
 		if (
 			familyText === queryUnitText ||
-			(sourceMaskByFamilyId[familyId] ?? 0) === 0 ||
-			prefixExpandableByFamilyId[familyId] !== 1 ||
+			getFamilySourceMask(familyFlagsByFamilyId[familyId] ?? 0) === 0 ||
+			!isFamilyPrefixExpandable(familyFlagsByFamilyId[familyId] ?? 0) ||
 			familyText.length <= queryUnitText.length
 		) {
 			continue;

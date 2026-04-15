@@ -1,51 +1,51 @@
+import type {
+	ResidentIntegerArray,
+	ResidentSectionEncodingDescriptor,
+} from "./integer-arrays";
+
 export type ResidentStringArena = Readonly<{
 	text: string;
-	offsets: Uint32Array;
-	lengths: Uint32Array;
+	offsets: ResidentIntegerArray;
+	lengths: ResidentIntegerArray;
 	count: number;
 }>;
 
 export type ResidentDocTable = Readonly<{
 	docCount: number;
-	pathStringIds: Uint32Array;
-	basenameStringIds: Uint32Array;
-	folderStringIds: Uint32Array;
-	generationByDocId: Uint32Array;
-	identityStartByDocId: Uint32Array;
-	identityCountByDocId: Uint32Array;
-	routeStartByDocId: Uint32Array;
-	routeCountByDocId: Uint32Array;
-	headingStartByDocId: Uint32Array;
-	headingCountByDocId: Uint32Array;
-	bodyBlockStartByDocId: Uint32Array;
-	bodyBlockCountByDocId: Uint32Array;
+	pathStringIds: ResidentIntegerArray;
+	generationByDocId: ResidentIntegerArray;
+	identityStartByDocId: ResidentIntegerArray;
+	identityCountByDocId: ResidentIntegerArray;
+	routeStartByDocId: ResidentIntegerArray;
+	routeCountByDocId: ResidentIntegerArray;
+	headingStartByDocId: ResidentIntegerArray;
+	headingCountByDocId: ResidentIntegerArray;
+	bodyBlockStartByDocId: ResidentIntegerArray;
+	bodyBlockCountByDocId: ResidentIntegerArray;
 }>;
 
 export type ResidentFamilyKind = "latin" | "han" | "mixed" | "other";
 
 export type ResidentFamilyLexicon = Readonly<{
 	familyCount: number;
-	familyStringIds: Uint32Array;
-	prefixExpandableByFamilyId: Uint8Array;
-	sourceMaskByFamilyId: Uint8Array;
+	familyStringIds: ResidentIntegerArray;
+	familyFlagsByFamilyId: Uint8Array;
 }>;
 
 export type ResidentPostingList = Readonly<{
-	postingStarts: Uint32Array;
-	postingCounts: Uint32Array;
-	docIds: Uint32Array;
+	postingStarts: ResidentIntegerArray;
+	docIds: ResidentIntegerArray;
 }>;
 
 export type ResidentBlockPostingList = Readonly<{
-	postingStarts: Uint32Array;
-	postingCounts: Uint32Array;
-	blockIds: Uint32Array;
+	postingStarts: ResidentIntegerArray;
+	blockIds: ResidentIntegerArray;
 }>;
 
 export type ResidentMetadataContainerArena = Readonly<{
-	identityFamiliesByDoc: Uint32Array;
-	routeFamiliesByDoc: Uint32Array;
-	headingFamiliesByDoc: Uint32Array;
+	identityFamiliesByDoc: ResidentIntegerArray;
+	routeFamiliesByDoc: ResidentIntegerArray;
+	headingFamiliesByDoc: ResidentIntegerArray;
 	identityPostings: ResidentPostingList;
 	routePostings: ResidentPostingList;
 	headingPostings: ResidentPostingList;
@@ -57,42 +57,30 @@ export type ResidentBodySummaryArena = Readonly<{
 
 export type ResidentBodyBlockArena = Readonly<{
 	blockCount: number;
-	docIdByBlockId: Uint32Array;
-	blockOrdinalByBlockId: Uint32Array;
-	exactTapeStartByBlockId: Uint32Array;
-	exactTapeCountByBlockId: Uint32Array;
+	docIdByBlockId: ResidentIntegerArray;
+	blockOrdinalByBlockId: ResidentIntegerArray;
+	exactTapeStartByBlockId: ResidentIntegerArray;
+	exactTapeCountByBlockId: ResidentIntegerArray;
 }>;
 
 export type ResidentExactTapeArena = Readonly<{
-	familyIds: Uint32Array;
+	familyIds: ResidentIntegerArray;
 }>;
 
 export type ResidentHanRouteArena = Readonly<{
 	bigramIds: Uint32Array;
-	metadataIdentityPostingStarts: Uint32Array;
-	metadataIdentityPostingCounts: Uint32Array;
-	metadataIdentityDocIds: Uint32Array;
-	metadataRoutePostingStarts: Uint32Array;
-	metadataRoutePostingCounts: Uint32Array;
-	metadataRouteDocIds: Uint32Array;
-	metadataHeadingPostingStarts: Uint32Array;
-	metadataHeadingPostingCounts: Uint32Array;
-	metadataHeadingDocIds: Uint32Array;
-	bodyBlockPostingStarts: Uint32Array;
-	bodyBlockPostingCounts: Uint32Array;
-	bodyBlockIds: Uint32Array;
-	identityWitnessStartByDocId: Uint32Array;
-	identityWitnessCountByDocId: Uint32Array;
-	identityWitnessFamilyIds: Uint32Array;
-	routeWitnessStartByDocId: Uint32Array;
-	routeWitnessCountByDocId: Uint32Array;
-	routeWitnessFamilyIds: Uint32Array;
-	headingWitnessStartByDocId: Uint32Array;
-	headingWitnessCountByDocId: Uint32Array;
-	headingWitnessFamilyIds: Uint32Array;
-	bodyWitnessStartByBlockId: Uint32Array;
-	bodyWitnessCountByBlockId: Uint32Array;
-	bodyWitnessFamilyIds: Uint32Array;
+	metadataPostingStarts: ResidentIntegerArray;
+	metadataDocIds: ResidentIntegerArray;
+	bodyBlockPostingStarts: ResidentIntegerArray;
+	bodyBlockIds: ResidentIntegerArray;
+	identityWitnessStartByDocId: ResidentIntegerArray;
+	identityWitnessFamilyIds: ResidentIntegerArray;
+	routeWitnessStartByDocId: ResidentIntegerArray;
+	routeWitnessFamilyIds: ResidentIntegerArray;
+	headingWitnessStartByDocId: ResidentIntegerArray;
+	headingWitnessFamilyIds: ResidentIntegerArray;
+	bodyWitnessStartByBlockId: ResidentIntegerArray;
+	bodyWitnessFamilyIds: ResidentIntegerArray;
 }>;
 
 export type ResidentBaseMetrics = Readonly<{
@@ -105,6 +93,14 @@ export type ResidentBaseMetrics = Readonly<{
 	bodyBlockBytes: number;
 	exactTapeBytes: number;
 	hanRouteBytes: number;
+	hanRouteMetadataHanPostingsBytes: number;
+	hanRouteBodyHanPostingsBytes: number;
+	hanRouteMetadataWitnessBytes: number;
+	hanRouteBodyWitnessBytes: number;
+	scaffoldBytes: number;
+	countBytes: number;
+	idPayloadBytes: number;
+	stringPayloadBytes: number;
 	auxiliaryBytes: number;
 	residentBytes: number;
 	indexedSurfaceUtf8Bytes: number;
@@ -125,6 +121,7 @@ export type ResidentBaseSummary = Readonly<{
 	blockCount: number;
 	exactTapeValueCount: number;
 	buckets: readonly ResidentByteBreakdownEntry[];
+	sectionEncodings: readonly ResidentSectionEncodingDescriptor[];
 	indexedSurfaceUtf8Bytes: number;
 	rawMarkdownUtf8Bytes: number;
 	"residentBytes / indexedSurfaceUtf8Bytes": number;
