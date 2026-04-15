@@ -197,8 +197,6 @@ function createResidentBase(): ResidentBase {
 		docTable: {
 			docCount: 2,
 			pathStringIds: new Uint32Array([0, 0]),
-			basenameStringIds: new Uint32Array([0, 0]),
-			folderStringIds: new Uint32Array([0, 0]),
 			generationByDocId: new Uint32Array([101, 202]),
 			identityStartByDocId: new Uint32Array([0, 0]),
 			identityCountByDocId: new Uint32Array([0, 0]),
@@ -212,8 +210,7 @@ function createResidentBase(): ResidentBase {
 		familyLexicon: {
 			familyCount: 0,
 			familyStringIds: new Uint32Array(),
-			prefixExpandableByFamilyId: new Uint8Array(),
-			sourceMaskByFamilyId: new Uint8Array(),
+			familyFlagsByFamilyId: new Uint8Array(),
 		},
 		metadataContainers: {
 			identityFamiliesByDoc: new Uint32Array(),
@@ -221,24 +218,20 @@ function createResidentBase(): ResidentBase {
 			headingFamiliesByDoc: new Uint32Array(),
 			identityPostings: {
 				postingStarts: new Uint32Array(),
-				postingCounts: new Uint32Array(),
 				docIds: new Uint32Array(),
 			},
 			routePostings: {
 				postingStarts: new Uint32Array(),
-				postingCounts: new Uint32Array(),
 				docIds: new Uint32Array(),
 			},
 			headingPostings: {
 				postingStarts: new Uint32Array(),
-				postingCounts: new Uint32Array(),
 				docIds: new Uint32Array(),
 			},
 		},
 		bodySummary: {
 			postings: {
 				postingStarts: new Uint32Array(),
-				postingCounts: new Uint32Array(),
 				blockIds: new Uint32Array(),
 			},
 		},
@@ -254,29 +247,17 @@ function createResidentBase(): ResidentBase {
 		},
 		hanRoute: {
 			bigramIds: new Uint32Array(),
-			metadataIdentityPostingStarts: new Uint32Array(),
-			metadataIdentityPostingCounts: new Uint32Array(),
-			metadataIdentityDocIds: new Uint32Array(),
-			metadataRoutePostingStarts: new Uint32Array(),
-			metadataRoutePostingCounts: new Uint32Array(),
-			metadataRouteDocIds: new Uint32Array(),
-			metadataHeadingPostingStarts: new Uint32Array(),
-			metadataHeadingPostingCounts: new Uint32Array(),
-			metadataHeadingDocIds: new Uint32Array(),
+			metadataPostingStarts: new Uint32Array(),
+			metadataDocIds: new Uint32Array(),
 			bodyBlockPostingStarts: new Uint32Array(),
-			bodyBlockPostingCounts: new Uint32Array(),
 			bodyBlockIds: new Uint32Array(),
 			identityWitnessStartByDocId: new Uint32Array(),
-			identityWitnessCountByDocId: new Uint32Array(),
 			identityWitnessFamilyIds: new Uint32Array(),
 			routeWitnessStartByDocId: new Uint32Array(),
-			routeWitnessCountByDocId: new Uint32Array(),
 			routeWitnessFamilyIds: new Uint32Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
-			headingWitnessCountByDocId: new Uint32Array(),
 			headingWitnessFamilyIds: new Uint32Array(),
 			bodyWitnessStartByBlockId: new Uint32Array(),
-			bodyWitnessCountByBlockId: new Uint32Array(),
 			bodyWitnessFamilyIds: new Uint32Array(),
 		},
 		metrics: {
@@ -289,6 +270,14 @@ function createResidentBase(): ResidentBase {
 			bodyBlockBytes: 0,
 			exactTapeBytes: 0,
 			hanRouteBytes: 0,
+			hanRouteMetadataHanPostingsBytes: 0,
+			hanRouteBodyHanPostingsBytes: 0,
+			hanRouteMetadataWitnessBytes: 0,
+			hanRouteBodyWitnessBytes: 0,
+			scaffoldBytes: 0,
+			countBytes: 0,
+			idPayloadBytes: 0,
+			stringPayloadBytes: 0,
 			auxiliaryBytes: 0,
 			residentBytes: 0,
 			indexedSurfaceUtf8Bytes: 0,
@@ -323,8 +312,6 @@ function createResidentBaseForBlockCounts(
 			...base.docTable,
 			docCount: blockCountsByDoc.length,
 			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			basenameStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			folderStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			generationByDocId: new Uint32Array(blockCountsByDoc.map((_, index) => 100 + index)),
 			identityStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			identityCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
@@ -451,44 +438,314 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.matchedTerms).toContain("projected");
 	});
 
-	test("getDirectSubItems reuses legacy direct-subitems builder by path", async () => {
+	test("getDirectSubItems uses V3 query analysis with indexed snapshots", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		(
-			engine as unknown as {
-				getFileSnapshotStore: () => {
-					readCurrentTexts: (paths: string[]) => Promise<Map<string, string>>;
-				};
-			}
-		).getFileSnapshotStore = () => ({
-			readCurrentTexts: async (paths: string[]) =>
-				new Map([
-					[
-						paths[0],
-						"The system proxy fallback is documented here.\n\nThis note explains the proxy setup.",
-					],
-				]),
-		});
 		await engine.reIndexAll([
 			createDocument({
-				path: "notes/system-proxy.md",
-				basename: "system note",
+				path: "notes/lifeforce.md",
+				basename: "life note",
 				folder: "notes",
+				generation: 101,
 				content: "placeholder",
 			}),
 		]);
-
-		const subItems = await engine.getDirectSubItems(
-			"system proxy",
-			"notes/system-proxy.md",
-			3,
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "???",
+					normalizedQueryText: "???",
+					surfaceGroups: [{ index: 0, text: "???", kind: "han" }],
+					primaryUnits: [
+						{
+							index: 0,
+							text: "??",
+							source: "han_tokenizer_real",
+							surfaceGroupIndex: 0,
+						},
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [
+					{
+						docId: 0,
+						matchedIdentityUnitIndices: [],
+						matchedRouteUnitIndices: [],
+						matchedHeadingUnitIndices: [],
+						shortlistedBodyBlockIds: [0, 1],
+						hanMetadataGateStats: null,
+						hanBodyBlockGateStats: [],
+					},
+				],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "notes/lifeforce.md",
+					bodyWindowContainer: createBodyWindowContainer([0]),
+					strongestContainer: createBodyWindowContainer([0]),
+					hanSurfaceCompletionGroups: [
+						{
+							surfaceGroupIndex: 0,
+							surfaceText: "???",
+							tier: "body_window",
+						},
+					],
+					completedHanSurfaceGroupCount: 1,
+					hanSurfaceCompletionTierScoreTotal: 2,
+					strongestHanSurfaceCompletionTier: "body_window",
+				}),
+			],
+		}));
+		const readIndexedTexts = jest.fn(async () =>
+			new Map([["notes/lifeforce.md", "?????\n\n?????????"]]),
 		);
+		const readCurrentTexts = jest.fn();
+		(
+			engine as unknown as {
+				engine: {
+					search: typeof search;
+					getResidentBase: () => ResidentBase;
+				};
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: typeof readCurrentTexts;
+				};
+			}
+		).engine = {
+			search,
+			getResidentBase: () => createResidentBaseForBlockCounts([2]),
+		};
+		(
+			engine as unknown as {
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: typeof readCurrentTexts;
+				};
+			}
+		).getFileSnapshotStore = () => ({
+			readIndexedTexts,
+			readCurrentTexts,
+		});
+
+		const subItems = await engine.getDirectSubItems("???", "notes/lifeforce.md", 3);
 
 		expect(subItems).not.toBeNull();
 		expect(subItems?.length).toBeGreaterThan(0);
-		expect(subItems?.[0]?.snippet ?? subItems?.[0]?.text).toContain("proxy");
+		const snippet = subItems?.[0]?.snippet ?? subItems?.[0]?.text ?? "";
+		expect(snippet).toContain("???");
+		const highlightTexts = subItems?.[0]?.highlightRanges?.map((range) =>
+			(subItems?.[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(highlightTexts?.length ?? 0).toBeGreaterThan(0);
+		expect(readIndexedTexts).toHaveBeenCalledWith([
+			{ path: "notes/lifeforce.md", generation: 100 },
+		]);
+		expect(readCurrentTexts).not.toHaveBeenCalled();
 	});
 
-	test("searchFiles passes tokenizer query terms into engine.search", async () => {
+	test("getDirectSubItems highlights a full Han surface instead of only the shorter real term", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "notes/life-force.md",
+				basename: "life force",
+				folder: "notes",
+				generation: 101,
+				content: "placeholder",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "生命力",
+					normalizedQueryText: "生命力",
+					surfaceGroups: [{ index: 0, text: "生命力", kind: "han" }],
+					primaryUnits: [
+						{
+							index: 0,
+							text: "生命",
+							source: "han_tokenizer_real",
+							surfaceGroupIndex: 0,
+						},
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [
+					{
+						docId: 0,
+						matchedIdentityUnitIndices: [],
+						matchedRouteUnitIndices: [],
+						matchedHeadingUnitIndices: [],
+						shortlistedBodyBlockIds: [0, 1],
+						hanMetadataGateStats: null,
+						hanBodyBlockGateStats: [],
+					},
+				],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "notes/life-force.md",
+					bodyWindowContainer: createBodyWindowContainer([0]),
+					strongestContainer: createBodyWindowContainer([0]),
+					hanSurfaceCompletionGroups: [
+						{
+							surfaceGroupIndex: 0,
+							surfaceText: "生命力",
+							tier: "body_residue",
+						},
+					],
+					completedHanSurfaceGroupCount: 1,
+					hanSurfaceCompletionTierScoreTotal: 1,
+					strongestHanSurfaceCompletionTier: "body_residue",
+				}),
+			],
+		}));
+		const readIndexedTexts = jest.fn(async () =>
+			new Map([["notes/life-force.md", "这里先只谈生命现象\n\n后来才说生命力十足"]]),
+		);
+		(
+			engine as unknown as {
+				engine: {
+					search: typeof search;
+					getResidentBase: () => ResidentBase;
+				};
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+				};
+			}
+		).engine = {
+			search,
+			getResidentBase: () => createResidentBaseForBlockCounts([2]),
+		};
+		(
+			engine as unknown as {
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+				};
+			}
+		).getFileSnapshotStore = () => ({
+			readIndexedTexts,
+		});
+
+		const subItems = await engine.getDirectSubItems("生命力", "notes/life-force.md", 3);
+
+		expect(subItems).not.toBeNull();
+		const highlightTexts = subItems?.[0]?.highlightRanges?.map((range) =>
+			(subItems?.[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(highlightTexts).toContain("生命力");
+		expect(highlightTexts).not.toContain("生命");
+	});
+
+	
+	test("getDirectSubItems falls back to current text when generation-aligned indexed text is unavailable", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "notes/missing-snapshot.md",
+				basename: "note",
+				folder: "notes",
+				generation: 101,
+				content: "placeholder",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "生命力",
+					normalizedQueryText: "生命力",
+					surfaceGroups: [{ index: 0, text: "生命力", kind: "han" }],
+					primaryUnits: [
+						{
+							index: 0,
+							text: "生命",
+							source: "han_tokenizer_real",
+							surfaceGroupIndex: 0,
+						},
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [
+					{
+						docId: 0,
+						matchedIdentityUnitIndices: [],
+						matchedRouteUnitIndices: [],
+						matchedHeadingUnitIndices: [],
+						shortlistedBodyBlockIds: [0],
+						hanMetadataGateStats: null,
+						hanBodyBlockGateStats: [],
+					},
+				],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "notes/missing-snapshot.md",
+					bodyWindowContainer: createBodyWindowContainer([0]),
+					strongestContainer: createBodyWindowContainer([0]),
+					hanSurfaceCompletionGroups: [
+						{
+							surfaceGroupIndex: 0,
+							surfaceText: "生命力",
+							tier: "body_residue",
+						},
+					],
+					completedHanSurfaceGroupCount: 1,
+					hanSurfaceCompletionTierScoreTotal: 1,
+					strongestHanSurfaceCompletionTier: "body_residue",
+				}),
+			],
+		}));
+		const readIndexedTexts = jest.fn(async () => new Map<string, string>());
+		const readCurrentTexts = jest.fn(async () =>
+			new Map([["notes/missing-snapshot.md", "先提生命\n\n再谈生命力十足"]]),
+		);
+		(
+			engine as unknown as {
+				engine: {
+					search: typeof search;
+					getResidentBase: () => ResidentBase;
+				};
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: typeof readCurrentTexts;
+				};
+			}
+		).engine = {
+			search,
+			getResidentBase: () => createResidentBaseForBlockCounts([1]),
+		};
+		(
+			engine as unknown as {
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: typeof readCurrentTexts;
+				};
+			}
+		).getFileSnapshotStore = () => ({
+			readIndexedTexts,
+			readCurrentTexts,
+		});
+
+		const subItems = await engine.getDirectSubItems("生命力", "notes/missing-snapshot.md", 3);
+
+		expect(subItems).not.toBeNull();
+		expect(readCurrentTexts).toHaveBeenCalledWith(["notes/missing-snapshot.md"]);
+		const highlightTexts = subItems?.[0]?.highlightRanges?.map((range) =>
+			(subItems?.[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(highlightTexts).toContain("生命力");
+		expect(highlightTexts).not.toContain("生命");
+	});
+
+test("searchFiles passes tokenizer query terms into engine.search", async () => {
 		const tokenizeSequence = jest.fn((text: string, mode?: "index" | "search") => {
 			if (text === "systemproxy" && mode === "search") {
 				return ["system", "proxy"];

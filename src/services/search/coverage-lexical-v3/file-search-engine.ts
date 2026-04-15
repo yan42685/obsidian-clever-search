@@ -3,7 +3,7 @@ import type {
 	IndexedDocument,
 	MatchedFile,
 } from "src/globals/search-types";
-import { buildDirectSubitemsExactFileSubItems } from "src/services/search/coverage-lexical/direct-subitems";
+import { buildV3DirectSubitems } from "./direct-subitems";
 import { Tokenizer } from "src/services/search/tokenizer";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { getInstance } from "src/utils/my-lib";
@@ -158,23 +158,54 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (!this.documentsByPath.has(path)) {
 			return null;
 		}
-		const snapshotText = (
-			await this.getFileSnapshotStore().readCurrentTexts([path])
-		).get(path);
-		if (!snapshotText) {
+		const residentBase = this.engine.getResidentBase();
+		if (residentBase == null) {
 			return null;
 		}
-		return buildDirectSubitemsExactFileSubItems({
-			queryText,
+		const trimmedQuery = queryText.trim();
+		if (trimmedQuery.length === 0) {
+			return null;
+		}
+		const searchTerms = this.getQueryTerms(trimmedQuery);
+		const result = this.engine.search(trimmedQuery, searchTerms);
+		const refinedCandidates = await this.refineHanSurfaceCompletion(result);
+		const candidate = refinedCandidates.find((item) => item.path === path);
+		if (candidate == null) {
+			return null;
+		}
+		const candidateRecall = result.recallState.candidateDocs.find(
+			(item) => item.docId === candidate.docId,
+		);
+		if (candidateRecall == null) {
+			return null;
+		}
+		const snapshotStore = this.getFileSnapshotStore();
+		let snapshotText = (
+			await this.getFileSnapshotStore().readIndexedTexts([
+				{
+					path,
+					generation: residentBase.docTable.generationByDocId[candidate.docId],
+				},
+			])
+		).get(path);
+		let candidateRangeMode: "resident_locality" | "whole_document" =
+			"resident_locality";
+		if (snapshotText == null) {
+			snapshotText = (await snapshotStore.readCurrentTexts([path])).get(path);
+			candidateRangeMode = "whole_document";
+		}
+		if (snapshotText == null) {
+			return null;
+		}
+		return buildV3DirectSubitems({
 			snapshotText,
-			options: {
-				maxChars: 220,
-				mergeGap: 32,
-				contextLeft: 24,
-				contextRight: 40,
-				boundaryLookaround: 24,
-			},
-		}).slice(0, maxSubItemResults);
+			queryAnalysis: result.recallState.queryAnalysis,
+			candidate,
+			candidateRecall,
+			residentBase,
+			maxSubItemResults,
+			candidateRangeMode,
+		}).subItems.slice(0, maxSubItemResults);
 	}
 
 	serialize(): SerializedFileSearchIndex | null {

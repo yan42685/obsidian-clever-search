@@ -6,3 +6,4 @@ export * from "./recall";
 export * from "./ranking";
 export * from "./engine";
 export * from "./file-search-engine";
+export * from "./direct-subitems";

@@ -887,9 +887,38 @@ coverage gating and generation-aligned Han raw-span refinement:
 - raw-span refinement remains wrapper-local, inspects only shortlisted blocks under the
   widened `maxBlocksPerDoc = 96` and `maxBlocksPerQuery = 384` budgets, and never
   changes recall, realized coverage, or main evidence containers
-- when generation-aligned indexed text is unavailable, V3 now cleanly falls back to the
-  weak witness result without touching `readCurrentTexts` or requiring a new resident
-  text arena
+- when generation-aligned indexed text is unavailable, the main V3 ranking/refine path
+  now cleanly falls back to the weak witness result without touching
+  `readCurrentTexts` or requiring a new resident text arena
 - the V3 regression baseline now verifies coverage-gate ordering and wrapper-level Han
   raw-span refinement / fallback behavior
 
+### Phase 12
+
+Status: Completed on 2026-04-15
+
+The current implementation now aligns V3 direct-subitem snippet selection and
+highlight rendering with the Han surface-completion worldview already used by
+late ranking:
+
+- V3 direct-subitems now resolve Han display dominance at the snippet producer
+  layer instead of allowing shorter tokenizer-real Han terms to co-dominate the
+  final highlight set when a full Han surface occurrence is present in the same
+  candidate range
+- snippet representative occurrences and window geometry are now derived from
+  dominance-resolved display occurrences, so the selected snippet span and its
+  final highlight payload follow the same local surface-completion explanation
+- direct-subitems still prefer generation-aligned indexed snapshots, but when that
+  display-only text source is unavailable they now fall back to
+  `FileSnapshotStore.readCurrentTexts(...)` and resolve snippets against a
+  whole-document range instead of dropping to legacy line highlighting
+- `coveredRealPrimaryCount` remains the first snippet-ranking signal; full Han
+  surface completion only lifts snippet spans within the same real-coverage band
+  and does not add new coverage credit
+- producer-side `snippetText + highlightRanges` invariants remain explicit, and
+  the UI-side range clamp stays only as a defensive boundary check rather than a
+  Han-specific semantic repair path
+- the V3 regression baseline now verifies that `生命力` snippets highlight the
+  full surface instead of only `生命`, while preserving `委员长` bridge fallback
+  behavior and keeping higher real-coverage mixed-query snippets ahead of
+  lower-coverage full-surface spans

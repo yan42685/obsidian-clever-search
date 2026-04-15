@@ -187,19 +187,21 @@ export class ViewHelper {
     const segments: Array<{ text: string; highlight: boolean }> = [];
     let cursor = 0;
     for (const range of mergedRanges) {
-      if (range.start > cursor) {
+      const start = Math.max(0, Math.min(snippetText.length, range.start));
+      const end = Math.max(start, Math.min(snippetText.length, range.end));
+      if (start > cursor) {
         segments.push({
-          text: snippetText.slice(cursor, range.start),
+          text: snippetText.slice(cursor, start),
           highlight: false,
         });
       }
-      if (range.end > range.start) {
+      if (end > start) {
         segments.push({
-          text: snippetText.slice(range.start, range.end),
+          text: snippetText.slice(start, end),
           highlight: true,
         });
       }
-      cursor = range.end;
+      cursor = end;
     }
     if (cursor < snippetText.length) {
       segments.push({
