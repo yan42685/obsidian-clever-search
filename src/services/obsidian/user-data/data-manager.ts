@@ -5836,6 +5836,10 @@ export class DataManager {
     ].filter((segment) => segment.bytes > 0);
     const hanRouteSegments: Array<{ segment: string; bytes: number }> = [
       {
+        segment: "sharedBigramIds",
+        bytes: metrics.hanRouteSharedBigramIdsBytes,
+      },
+      {
         segment: "metadataHanPostings",
         bytes: metrics.hanRouteMetadataHanPostingsBytes,
       },
@@ -5852,7 +5856,21 @@ export class DataManager {
         bytes: metrics.hanRouteBodyWitnessBytes,
       },
     ].filter((segment) => segment.bytes > 0);
-        const hanRouteBodyDetailSegments: Array<{ segment: string; bytes: number }> = [
+    const hanRouteMetadataDetailSegments: Array<{ segment: string; bytes: number }> = [
+      {
+        segment: "postingStarts",
+        bytes: metrics.hanRouteMetadataHanPostingStartsBytes,
+      },
+      {
+        segment: "docIds",
+        bytes: metrics.hanRouteMetadataHanDocIdsBytes,
+      },
+    ].filter((segment) => segment.bytes > 0);
+    const hanRouteBodyDetailSegments: Array<{ segment: string; bytes: number }> = [
+      {
+        segment: "bigramIds",
+        bytes: metrics.hanRouteBodyBigramIdsBytes,
+      },
       {
         segment: "postingStarts",
         bytes: metrics.hanRouteBodyHanPostingStartsBytes,
@@ -5860,6 +5878,40 @@ export class DataManager {
       {
         segment: "bodyBlockIds",
         bytes: metrics.hanRouteBodyHanBodyBlockIdsBytes,
+      },
+    ].filter((segment) => segment.bytes > 0);
+    const stringArenaDetailSegments: Array<{ segment: string; bytes: number }> = [
+      {
+        segment: "paths",
+        bytes: metrics.stringArenaPathBytes,
+      },
+      {
+        segment: "family",
+        bytes: metrics.stringArenaFamilyBytes,
+      },
+      {
+        segment: "identityWitness",
+        bytes: metrics.stringArenaIdentityWitnessBytes,
+      },
+      {
+        segment: "routeWitness",
+        bytes: metrics.stringArenaRouteWitnessBytes,
+      },
+      {
+        segment: "headingWitness",
+        bytes: metrics.stringArenaHeadingWitnessBytes,
+      },
+      {
+        segment: "bodyWitness",
+        bytes: metrics.stringArenaBodyWitnessBytes,
+      },
+      {
+        segment: "multiSource",
+        bytes: metrics.stringArenaMultiSourceBytes,
+      },
+      {
+        segment: "unattributed",
+        bytes: metrics.stringArenaUnattributedBytes,
       },
     ].filter((segment) => segment.bytes > 0);
     const toBreakdownRows = (
@@ -5905,8 +5957,16 @@ export class DataManager {
         hanRouteSegments
           .map((row) => row.segment + " " + this.formatBytes(row.bytes))
           .join(" | "),
+      "Coverage V3 metadataHan detail: " +
+        hanRouteMetadataDetailSegments
+          .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+          .join(" | "),
       "Coverage V3 bodyHan detail: " +
         hanRouteBodyDetailSegments
+          .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+          .join(" | "),
+      "Coverage V3 stringArena text detail: " +
+        stringArenaDetailSegments
           .map((row) => row.segment + " " + this.formatBytes(row.bytes))
           .join(" | "),
       "Coverage V3 resident payload split: scaffold " +
@@ -6406,3 +6466,5 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
+
+

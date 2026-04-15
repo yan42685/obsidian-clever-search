@@ -71,6 +71,7 @@ export type ResidentExactTapeArena = Readonly<{
 
 export type ResidentHanRouteArena = Readonly<{
 	bigramIds: Uint32Array;
+	bodyBigramIds: Uint32Array;
 	metadataPostingStarts: ResidentIntegerArray;
 	metadataDocIds: ResidentIntegerArray;
 	bodyPostingStarts: ResidentIntegerArray;
@@ -88,6 +89,14 @@ export type ResidentHanRouteArena = Readonly<{
 export type ResidentBaseMetrics = Readonly<{
 	docArenaBytes: number;
 	stringArenaBytes: number;
+	stringArenaPathBytes: number;
+	stringArenaFamilyBytes: number;
+	stringArenaIdentityWitnessBytes: number;
+	stringArenaRouteWitnessBytes: number;
+	stringArenaHeadingWitnessBytes: number;
+	stringArenaBodyWitnessBytes: number;
+	stringArenaMultiSourceBytes: number;
+	stringArenaUnattributedBytes: number;
 	familyLexiconBytes: number;
 	metadataContainerBytes: number;
 	headingBytes: number;
@@ -95,8 +104,12 @@ export type ResidentBaseMetrics = Readonly<{
 	bodyBlockBytes: number;
 	exactTapeBytes: number;
 	hanRouteBytes: number;
+	hanRouteSharedBigramIdsBytes: number;
 	hanRouteMetadataHanPostingsBytes: number;
+	hanRouteMetadataHanPostingStartsBytes: number;
+	hanRouteMetadataHanDocIdsBytes: number;
 	hanRouteBodyHanPostingsBytes: number;
+	hanRouteBodyBigramIdsBytes: number;
 	hanRouteBodyHanPostingStartsBytes: number;
 	hanRouteBodyHanBodyBlockIdsBytes: number;
 	hanRouteMetadataWitnessBytes: number;
@@ -144,3 +157,5 @@ export type ResidentBase = Readonly<{
 	hanRoute: ResidentHanRouteArena;
 	metrics: ResidentBaseMetrics;
 }>;
+
+

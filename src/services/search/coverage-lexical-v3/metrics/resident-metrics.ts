@@ -30,6 +30,16 @@ import type {
 
 type MetricsBuildInput = Readonly<{
 	stringArena: ResidentStringArena;
+	stringArenaSourceBreakdown: Readonly<{
+		pathBytes: number;
+		familyBytes: number;
+		identityWitnessBytes: number;
+		routeWitnessBytes: number;
+		headingWitnessBytes: number;
+		bodyWitnessBytes: number;
+		multiSourceBytes: number;
+		unattributedBytes: number;
+	}>;
 	docTable: ResidentDocTable;
 	familyLexicon: ResidentFamilyLexicon;
 	metadataContainers: ResidentMetadataContainerArena;
@@ -59,6 +69,7 @@ export function buildResidentBaseMetrics(
 	const exactTapeBytes = estimateExactTapeBytes(input.exactTapes);
 	const hanRouteBytes = estimateHanRouteBytes(input.hanRoute);
 	const hanRouteBreakdown = describeHanRouteByteBreakdown(input.hanRoute);
+	const stringArenaSourceBreakdown = input.stringArenaSourceBreakdown;
 	const auxiliaryBytes = Math.max(0, input.auxiliaryBytes);
 	const stringPayloadBytes = textEncoder.encode(input.stringArena.text).byteLength;
 	const countBytes =
@@ -107,6 +118,7 @@ export function buildResidentBaseMetrics(
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
 		input.exactTapes.familyIds.byteLength +
 		input.hanRoute.bigramIds.byteLength +
+		input.hanRoute.bodyBigramIds.byteLength +
 		input.hanRoute.metadataDocIds.byteLength +
 		input.hanRoute.bodyBlockIds.byteLength +
 		input.hanRoute.identityWitnessStringIds.byteLength +
@@ -127,6 +139,17 @@ export function buildResidentBaseMetrics(
 	return {
 		docArenaBytes,
 		stringArenaBytes,
+		stringArenaPathBytes: stringArenaSourceBreakdown.pathBytes,
+		stringArenaFamilyBytes: stringArenaSourceBreakdown.familyBytes,
+		stringArenaIdentityWitnessBytes:
+			stringArenaSourceBreakdown.identityWitnessBytes,
+		stringArenaRouteWitnessBytes: stringArenaSourceBreakdown.routeWitnessBytes,
+		stringArenaHeadingWitnessBytes:
+			stringArenaSourceBreakdown.headingWitnessBytes,
+		stringArenaBodyWitnessBytes: stringArenaSourceBreakdown.bodyWitnessBytes,
+		stringArenaMultiSourceBytes: stringArenaSourceBreakdown.multiSourceBytes,
+		stringArenaUnattributedBytes:
+			stringArenaSourceBreakdown.unattributedBytes,
 		familyLexiconBytes,
 		metadataContainerBytes,
 		headingBytes,
@@ -134,9 +157,15 @@ export function buildResidentBaseMetrics(
 		bodyBlockBytes,
 		exactTapeBytes,
 		hanRouteBytes,
+		hanRouteSharedBigramIdsBytes: hanRouteBreakdown.sharedBigramIdsBytes,
 		hanRouteMetadataHanPostingsBytes:
 			hanRouteBreakdown.metadataHanPostingsBytes,
+		hanRouteMetadataHanPostingStartsBytes:
+			hanRouteBreakdown.metadataHanPostingStartsBytes,
+		hanRouteMetadataHanDocIdsBytes:
+			hanRouteBreakdown.metadataHanDocIdsBytes,
 		hanRouteBodyHanPostingsBytes: hanRouteBreakdown.bodyHanPostingsBytes,
+		hanRouteBodyBigramIdsBytes: hanRouteBreakdown.bodyBigramIdsBytes,
 		hanRouteBodyHanPostingStartsBytes:
 			hanRouteBreakdown.bodyHanPostingStartsBytes,
 		hanRouteBodyHanBodyBlockIdsBytes:
@@ -234,6 +263,10 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 				base.hanRoute.metadataDocIds,
 			),
 			describeIntegerSection(
+				"hanRoute.body.bigramIds",
+				base.hanRoute.bodyBigramIds,
+			),
+			describeIntegerSection(
 				"hanRoute.body.starts",
 				base.hanRoute.bodyPostingStarts,
 				sentinelStartsEncodingFlag(),
@@ -282,3 +315,6 @@ function buildBucketShare(
 		share: safeDivide(bytes, total),
 	};
 }
+
+
+

@@ -31,6 +31,13 @@ const SOURCE_MASK_ROUTE = 1 << 1;
 const SOURCE_MASK_HEADING = 1 << 2;
 const SOURCE_MASK_BODY = 1 << 3;
 
+const STRING_SOURCE_PATH = 1 << 0;
+const STRING_SOURCE_FAMILY = 1 << 1;
+const STRING_SOURCE_IDENTITY_WITNESS = 1 << 2;
+const STRING_SOURCE_ROUTE_WITNESS = 1 << 3;
+const STRING_SOURCE_HEADING_WITNESS = 1 << 4;
+const STRING_SOURCE_BODY_WITNESS = 1 << 5;
+
 type PreparedDocument = Readonly<{
 	path: string;
 	generation: number;
@@ -87,7 +94,7 @@ export function buildResidentBaseArtifacts(
 			familyIdByText.set(text, familyId);
 			return {
 				text,
-				stringId: stringArenaBuilder.intern(text),
+				stringId: stringArenaBuilder.intern(text, STRING_SOURCE_FAMILY),
 				sourceMask: familySourceMaskByText.get(text) ?? 0,
 			};
 		}),
@@ -154,7 +161,7 @@ export function buildResidentBaseArtifacts(
 
 	const docTable = buildDocTable(
 		preparedDocuments.map((document, docId) => ({
-			pathStringId: stringArenaBuilder.intern(document.path),
+			pathStringId: stringArenaBuilder.intern(document.path, STRING_SOURCE_PATH),
 			generation: document.generation,
 			identityStart: metadataContainers.identityStartByDocId[docId] ?? 0,
 			identityCount: metadataContainers.identityCountByDocId[docId] ?? 0,
@@ -168,9 +175,11 @@ export function buildResidentBaseArtifacts(
 	);
 
 	const hanRoute = buildResidentHanRoute(preparedDocuments, stringArenaBuilder);
+	const stringArenaSourceBreakdown = stringArenaBuilder.describeSourceUtf8Bytes();
 	const stringArena = stringArenaBuilder.build();
 	const metrics = buildResidentBaseMetrics({
 		stringArena,
+		stringArenaSourceBreakdown,
 		docTable,
 		familyLexicon,
 		metadataContainers: metadataContainers.arena,
@@ -338,29 +347,48 @@ function buildResidentHanRoute(
 	stringArenaBuilder: StringArenaBuilder,
 ) {
 	const identityWitnessStringIdsByDoc = documents.map((document) =>
-		mapStringsToStringIds(document.identityHanWitnessTexts, stringArenaBuilder),
+		mapStringsToStringIds(
+			document.identityHanWitnessTexts,
+			stringArenaBuilder,
+			STRING_SOURCE_IDENTITY_WITNESS,
+		),
 	);
 	const routeWitnessStringIdsByDoc = documents.map((document) =>
-		mapStringsToStringIds(document.routeHanWitnessTexts, stringArenaBuilder),
+		mapStringsToStringIds(
+			document.routeHanWitnessTexts,
+			stringArenaBuilder,
+			STRING_SOURCE_ROUTE_WITNESS,
+		),
 	);
 	const headingWitnessStringIdsByDoc = documents.map((document) =>
-		mapStringsToStringIds(document.headingHanWitnessTexts, stringArenaBuilder),
+		mapStringsToStringIds(
+			document.headingHanWitnessTexts,
+			stringArenaBuilder,
+			STRING_SOURCE_HEADING_WITNESS,
+		),
 	);
 	const bodyWitnessStringIdsByBlock = documents.flatMap((document) =>
 		document.bodyBlocks.map((block) =>
-			mapStringsToStringIds(block.hanWitnessTexts, stringArenaBuilder),
+			mapStringsToStringIds(
+				block.hanWitnessTexts,
+				stringArenaBuilder,
+				STRING_SOURCE_BODY_WITNESS,
+			),
 		),
 	);
 	const allBodyBlocks = documents.flatMap((document) => document.bodyBlocks);
-	const allBigramIds = dedupeSortedNumbers([
+	const metadataBigramIds = dedupeSortedNumbers([
 		...documents.flatMap((document) => document.identityHanBigramIds),
 		...documents.flatMap((document) => document.routeHanBigramIds),
-		...allBodyBlocks.flatMap((block) => block.hanBigramIds),
 	]);
-	if (allBigramIds.length === 0) {
+	const bodyBigramIds = dedupeSortedNumbers(
+		allBodyBlocks.flatMap((block) => block.hanBigramIds),
+	);
+	if (metadataBigramIds.length === 0 && bodyBigramIds.length === 0) {
 		return buildHanRouteArena({
 			bigramIds: [],
 			metadataDocIdsByBigram: [],
+			bodyBigramIds: [],
 			bodyBlockIdsByBigram: [],
 			identityWitnessStringIdsByDoc,
 			routeWitnessStringIdsByDoc,
@@ -368,13 +396,18 @@ function buildResidentHanRoute(
 			bodyWitnessStringIdsByBlock,
 		});
 	}
-	const bigramIndexById = new Map(allBigramIds.map((bigramId, index) => [bigramId, index]));
+	const metadataBigramIndexById = new Map(
+		metadataBigramIds.map((bigramId, index) => [bigramId, index]),
+	);
+	const bodyBigramIndexById = new Map(
+		bodyBigramIds.map((bigramId, index) => [bigramId, index]),
+	);
 	const metadataDocIdsByBigram = Array.from(
-		{ length: allBigramIds.length },
+		{ length: metadataBigramIds.length },
 		() => [] as number[],
 	);
 	const bodyBlockIdsByBigram = Array.from(
-		{ length: allBigramIds.length },
+		{ length: bodyBigramIds.length },
 		() => [] as number[],
 	);
 	for (let docId = 0; docId < documents.length; docId += 1) {
@@ -386,7 +419,7 @@ function buildResidentHanRoute(
 				...document.routeHanBigramIds,
 			]),
 			docId,
-			bigramIndexById,
+			metadataBigramIndexById,
 		);
 	}
 	for (let blockId = 0; blockId < allBodyBlocks.length; blockId += 1) {
@@ -394,12 +427,13 @@ function buildResidentHanRoute(
 			bodyBlockIdsByBigram,
 			allBodyBlocks[blockId]?.hanBigramIds ?? [],
 			blockId,
-			bigramIndexById,
+			bodyBigramIndexById,
 		);
 	}
 	return buildHanRouteArena({
-		bigramIds: allBigramIds,
+		bigramIds: metadataBigramIds,
 		metadataDocIdsByBigram,
+		bodyBigramIds,
 		bodyBlockIdsByBigram,
 		identityWitnessStringIdsByDoc,
 		routeWitnessStringIdsByDoc,
@@ -429,8 +463,9 @@ function mapFamilyTextsToIds(
 function mapStringsToStringIds(
 	values: readonly string[],
 	stringArenaBuilder: StringArenaBuilder,
+	sourceMask: number,
 ): number[] {
-	return values.map((value) => stringArenaBuilder.intern(value));
+	return values.map((value) => stringArenaBuilder.intern(value, sourceMask));
 }
 
 function computeIndexedSurfaceUtf8Bytes(
@@ -502,15 +537,77 @@ class StringArenaBuilder {
 
 	private readonly values: string[] = [];
 
-	intern(value: string): number {
+	private readonly sourceMasksByStringId: number[] = [];
+
+	intern(value: string, sourceMask = 0): number {
 		const existingId = this.stringIdByValue.get(value);
 		if (existingId !== undefined) {
+			this.sourceMasksByStringId[existingId] =
+				(this.sourceMasksByStringId[existingId] ?? 0) | sourceMask;
 			return existingId;
 		}
 		const stringId = this.values.length;
 		this.values.push(value);
+		this.sourceMasksByStringId.push(sourceMask);
 		this.stringIdByValue.set(value, stringId);
 		return stringId;
+	}
+
+	describeSourceUtf8Bytes() {
+		let pathBytes = 0;
+		let familyBytes = 0;
+		let identityWitnessBytes = 0;
+		let routeWitnessBytes = 0;
+		let headingWitnessBytes = 0;
+		let bodyWitnessBytes = 0;
+		let multiSourceBytes = 0;
+		let unattributedBytes = 0;
+		for (let stringId = 0; stringId < this.values.length; stringId += 1) {
+			const value = this.values[stringId] ?? "";
+			const mask = this.sourceMasksByStringId[stringId] ?? 0;
+			const bytes = estimateUtf8Bytes(value);
+			if (mask === 0) {
+				unattributedBytes += bytes;
+				continue;
+			}
+			if ((mask & (mask - 1)) !== 0) {
+				multiSourceBytes += bytes;
+				continue;
+			}
+			switch (mask) {
+				case STRING_SOURCE_PATH:
+					pathBytes += bytes;
+					break;
+				case STRING_SOURCE_FAMILY:
+					familyBytes += bytes;
+					break;
+				case STRING_SOURCE_IDENTITY_WITNESS:
+					identityWitnessBytes += bytes;
+					break;
+				case STRING_SOURCE_ROUTE_WITNESS:
+					routeWitnessBytes += bytes;
+					break;
+				case STRING_SOURCE_HEADING_WITNESS:
+					headingWitnessBytes += bytes;
+					break;
+				case STRING_SOURCE_BODY_WITNESS:
+					bodyWitnessBytes += bytes;
+					break;
+				default:
+					multiSourceBytes += bytes;
+					break;
+			}
+		}
+		return {
+			pathBytes,
+			familyBytes,
+			identityWitnessBytes,
+			routeWitnessBytes,
+			headingWitnessBytes,
+			bodyWitnessBytes,
+			multiSourceBytes,
+			unattributedBytes,
+		} as const;
 	}
 
 	build() {
@@ -530,3 +627,7 @@ class StringArenaBuilder {
 		} as const;
 	}
 }
+
+
+
+

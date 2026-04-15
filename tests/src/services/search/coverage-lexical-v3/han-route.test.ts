@@ -301,7 +301,32 @@ describe("coverage lexical v3 han route", () => {
 			}),
 		]);
 
+		expect(residentBase.hanRoute.bodyBigramIds.length).toBeGreaterThan(0);
+		expect(residentBase.hanRoute.bodyPostingStarts.length).toBe(
+			residentBase.hanRoute.bodyBigramIds.length + 1,
+		);
 		expect(residentBase.hanRoute.bodyBlockIds.length).toBeGreaterThan(0);
+	});
+
+	test("body Han route keeps a sparse body-only bigram vocabulary", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "zh/sparse-body-route.md",
+				basename: "\u8def\u7531\u89c4\u5212",
+				folder: "zh",
+				content: "\u7f13\u5b58\u6062\u590d",
+			}),
+		]);
+
+		expect(Array.from(residentBase.hanRoute.bigramIds)).not.toEqual(
+			Array.from(residentBase.hanRoute.bodyBigramIds),
+		);
+		expect(residentBase.hanRoute.metadataPostingStarts.length).toBe(
+			residentBase.hanRoute.bigramIds.length + 1,
+		);
+		expect(residentBase.hanRoute.bodyPostingStarts.length).toBe(
+			residentBase.hanRoute.bodyBigramIds.length + 1,
+		);
 	});
 
 	test("oversized Han segments still admit cross-chunk surfaces through chunk route and full-segment confirm", () => {
@@ -327,3 +352,4 @@ describe("coverage lexical v3 han route", () => {
 		).toBeGreaterThan(0);
 	});
 });
+

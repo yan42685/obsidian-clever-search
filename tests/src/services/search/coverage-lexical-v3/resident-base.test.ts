@@ -73,11 +73,11 @@ describe("coverage lexical v3 resident base", () => {
 	test("builds a single han document", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
-				path: "技术/缓存恢复.md",
-				basename: "缓存恢复",
-				folder: "技术",
-				headings: "故障回放",
-				content: "缓存恢复步骤\n\n回放检查与热启动恢复。",
+				path: "\u6280\u672f/\u7f13\u5b58\u6062\u590d.md",
+				basename: "\u7f13\u5b58\u6062\u590d",
+				folder: "\u6280\u672f",
+				headings: "\u6545\u969c\u56de\u653e",
+				content: "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\n\n\u56de\u653e\u68c0\u67e5\u4e0e\u70ed\u542f\u52a8\u6062\u590d\u3002",
 			}),
 		]);
 
@@ -88,8 +88,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.hanRouteBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 	});
-
-	test("builds mixed metadata and body structures with stable byte buckets", () => {
+test("builds mixed metadata and body structures with stable byte buckets", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
 				path: "infra/projected-secret-note.md",
@@ -119,6 +118,23 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.bodySummaryBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.bodyBlockBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.exactTapeBytes).toBeGreaterThan(0);
+		expect(
+			residentBase.metrics.hanRouteSharedBigramIdsBytes +
+				residentBase.metrics.hanRouteMetadataHanPostingsBytes +
+				residentBase.metrics.hanRouteBodyHanPostingsBytes +
+				residentBase.metrics.hanRouteMetadataWitnessBytes +
+				residentBase.metrics.hanRouteBodyWitnessBytes,
+		).toBe(residentBase.metrics.hanRouteBytes);
+		expect(
+			residentBase.metrics.stringArenaPathBytes +
+				residentBase.metrics.stringArenaFamilyBytes +
+				residentBase.metrics.stringArenaIdentityWitnessBytes +
+				residentBase.metrics.stringArenaRouteWitnessBytes +
+				residentBase.metrics.stringArenaHeadingWitnessBytes +
+				residentBase.metrics.stringArenaBodyWitnessBytes +
+				residentBase.metrics.stringArenaMultiSourceBytes +
+				residentBase.metrics.stringArenaUnattributedBytes,
+		).toBe(residentBase.metrics.stringPayloadBytes);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 		expect(summary.documentCount).toBe(2);
 		expect(summary.familyCount).toBe(residentBase.familyLexicon.familyCount);
@@ -160,6 +176,11 @@ describe("coverage lexical v3 resident base", () => {
 		).toBe(true);
 		expect(
 			summary.sectionEncodings.some(
+				(section) => section.sectionKind === "hanRoute.body.bigramIds",
+			),
+		).toBe(true);
+		expect(
+			summary.sectionEncodings.some(
 				(section) => section.sectionKind === "hanRoute.body.bodyBlockIds",
 			),
 		).toBe(true);
@@ -167,3 +188,8 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
 	});
 });
+
+
+
+
+

@@ -9,6 +9,7 @@ import type { ResidentHanRouteArena } from "./types";
 type HanRouteBuildInput = Readonly<{
 	bigramIds: readonly number[];
 	metadataDocIdsByBigram: readonly (readonly number[])[];
+	bodyBigramIds: readonly number[];
 	bodyBlockIdsByBigram: readonly (readonly number[])[];
 	identityWitnessStringIdsByDoc: readonly (readonly number[])[];
 	routeWitnessStringIdsByDoc: readonly (readonly number[])[];
@@ -20,6 +21,7 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 	return buildHanRouteArena({
 		bigramIds: [],
 		metadataDocIdsByBigram: [],
+		bodyBigramIds: [],
 		bodyBlockIdsByBigram: [],
 		identityWitnessStringIdsByDoc: [],
 		routeWitnessStringIdsByDoc: [],
@@ -39,6 +41,7 @@ export function buildHanRouteArena(
 	const bodyWitnessBuckets = buildPostingBuckets(input.bodyWitnessStringIdsByBlock);
 	return {
 		bigramIds: Uint32Array.from(input.bigramIds),
+		bodyBigramIds: Uint32Array.from(input.bodyBigramIds),
 		metadataPostingStarts: metadataBuckets.starts,
 		metadataDocIds: metadataBuckets.ids,
 		bodyPostingStarts: bodyBuckets.starts,
@@ -58,26 +61,20 @@ export function lookupHanBigramIndex(
 	arena: ResidentHanRouteArena,
 	bigramId: number,
 ): number {
-	let low = 0;
-	let high = arena.bigramIds.length - 1;
-	while (low <= high) {
-		const mid = (low + high) >>> 1;
-		const value = arena.bigramIds[mid];
-		if (value === bigramId) {
-			return mid;
-		}
-		if (value < bigramId) {
-			low = mid + 1;
-			continue;
-		}
-		high = mid - 1;
-	}
-	return -1;
+	return lookupBigramIndex(arena.bigramIds, bigramId);
+}
+
+export function lookupBodyHanBigramIndex(
+	arena: ResidentHanRouteArena,
+	bigramId: number,
+): number {
+	return lookupBigramIndex(arena.bodyBigramIds, bigramId);
 }
 
 export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 	return (
 		arena.bigramIds.byteLength +
+		arena.bodyBigramIds.byteLength +
 		estimateSentinelPostingBytes(
 			arena.metadataPostingStarts,
 			arena.metadataDocIds,
@@ -108,24 +105,31 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 export function describeHanRouteByteBreakdown(
 	arena: ResidentHanRouteArena,
 ): Readonly<{
+	sharedBigramIdsBytes: number;
 	metadataHanPostingsBytes: number;
+	metadataHanPostingStartsBytes: number;
+	metadataHanDocIdsBytes: number;
 	bodyHanPostingsBytes: number;
+	bodyBigramIdsBytes: number;
 	bodyHanPostingStartsBytes: number;
 	bodyHanBodyBlockIdsBytes: number;
 	metadataWitnessBytes: number;
 	bodyWitnessBytes: number;
 }> {
 	return {
+		sharedBigramIdsBytes: arena.bigramIds.byteLength,
 		metadataHanPostingsBytes:
-			arena.bigramIds.byteLength +
+			arena.metadataPostingStarts.byteLength +
+			arena.metadataDocIds.byteLength,
+		metadataHanPostingStartsBytes: arena.metadataPostingStarts.byteLength,
+		metadataHanDocIdsBytes: arena.metadataDocIds.byteLength,
+		bodyHanPostingsBytes:
+			arena.bodyBigramIds.byteLength +
 			estimateSentinelPostingBytes(
-				arena.metadataPostingStarts,
-				arena.metadataDocIds,
+				arena.bodyPostingStarts,
+				arena.bodyBlockIds,
 			),
-		bodyHanPostingsBytes: estimateSentinelPostingBytes(
-			arena.bodyPostingStarts,
-			arena.bodyBlockIds,
-		),
+		bodyBigramIdsBytes: arena.bodyBigramIds.byteLength,
 		bodyHanPostingStartsBytes: arena.bodyPostingStarts.byteLength,
 		bodyHanBodyBlockIdsBytes: arena.bodyBlockIds.byteLength,
 		metadataWitnessBytes:
@@ -158,4 +162,22 @@ function buildPostingBuckets(
 		starts: buildSentinelStarts(postingsByBigram),
 		ids: flattenBuckets(postingsByBigram),
 	};
+}
+
+function lookupBigramIndex(bigramIds: Uint32Array, bigramId: number): number {
+	let low = 0;
+	let high = bigramIds.length - 1;
+	while (low <= high) {
+		const mid = (low + high) >>> 1;
+		const value = bigramIds[mid];
+		if (value === bigramId) {
+			return mid;
+		}
+		if (value < bigramId) {
+			low = mid + 1;
+			continue;
+		}
+		high = mid - 1;
+	}
+	return -1;
 }

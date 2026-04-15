@@ -7,7 +7,7 @@ import {
 } from "../layout/integer-arrays";
 import { collectBodySummaryBlockIdsForFamily } from "../layout/body-summary-postings";
 import type { ResidentBase } from "../layout/types";
-import { lookupHanBigramIndex } from "../layout/han-route";
+import { lookupBodyHanBigramIndex, lookupHanBigramIndex } from "../layout/han-route";
 
 export function readResidentString(
 	base: ResidentBase,
@@ -207,7 +207,7 @@ export function collectHanBodyBlockIds(
 	base: ResidentBase,
 	bigramId: number,
 ): number[] {
-	const bigramIndex = lookupHanBigramIndex(base.hanRoute, bigramId);
+	const bigramIndex = lookupBodyHanBigramIndex(base.hanRoute, bigramId);
 	if (bigramIndex === -1) {
 		return [];
 	}
@@ -244,3 +244,4 @@ function collectHanPostingDocIds(
 		getSentinelSliceEnd(postingStarts, bigramIndex),
 	);
 }
+

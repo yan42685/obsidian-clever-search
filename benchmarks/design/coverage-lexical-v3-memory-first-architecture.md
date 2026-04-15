@@ -803,7 +803,7 @@ Validation completed for this phase:
 
 ### Phase 7
 
-Status: Implemented on 2026-04-15
+Status: Completed on 2026-04-16
 
 The following Han-route structural shrink is now implemented:
 
@@ -829,6 +829,10 @@ The following Han-route structural shrink is now implemented:
 - oversized Han segments no longer need a separate logical-block chunk layer:
   route uses body-block bigrams, while witness confirmation still checks the
   full block-native Han surface text
+- body Han no longer reuses the shared metadata Han bigram vocabulary:
+  - metadata Han keeps a small shared `identity + route` key space
+  - body Han now owns a dedicated sparse `bodyBigramIds -> bodyPostingStarts -> bodyBlockIds`
+    route
 
 Implementation note:
 
@@ -847,15 +851,12 @@ Validation completed for this phase:
   - heading-only Han no longer admits docs through metadata Han gate
   - heading text can still be admitted through body Han when it appears in body
   - body Han route stores direct body-block postings
+  - body Han route keeps a body-only sparse bigram vocabulary distinct from the
+    metadata/shared Han key space
   - split Han segments do not get falsely confirmed into body shortlist
   - oversized Han segments still admit long-surface queries without false
     negatives
 - resident-base, engine, size-anchor, file-search-engine, family-lookup,
   ranking-stability, and reindex-width-transition suites pass
-
-Remaining validation note:
-
-- repo-wide `npm run typecheck:build` is currently blocked by unrelated
-  `direct-subitems/resolver.ts` typing errors outside this Han-route workstream,
-  so this phase is code-complete for V3 Han route but still awaits a clean
-  cross-repo typecheck baseline before it can be marked fully validated
+- repo-wide `npm run typecheck:build` passes again as of 2026-04-16, so this
+  phase is now fully validated at the code level
