@@ -71,11 +71,18 @@ function createPackingProfile(
 		stableKey: overrides.stableKey ?? overrides.path,
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "lll",
 		realizedCoverageCount: overrides.realizedCoverageCount ?? 0,
+		coverageGate: overrides.coverageGate ?? {
+			realizedCoverageCount: overrides.realizedCoverageCount ?? 0,
+			fullySatisfiedSurfaceGroupCount: 0,
+			startedSurfaceGroupCount: 0,
+			crossScriptSatisfiedGroupCount: 0,
+		},
 		exactUnitCount: overrides.exactUnitCount ?? 0,
 		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
 		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
 		strongestHanSurfaceCompletionTier:
 			overrides.strongestHanSurfaceCompletionTier ?? "none",
+		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		realizedFamilies: overrides.realizedFamilies ?? [],
@@ -196,6 +203,81 @@ describe("coverage lexical v3 comparator", () => {
 		expect(comparePackingProfiles(withHeading, withoutHeading)).toBeLessThan(0);
 		expect(withHeading.routeContainer).toBeNull();
 		expect(withHeading.identityContainer).toBeNull();
+	});
+
+	test("coverage gate prefers fuller surface-group satisfaction before packing", () => {
+		const fuller = createPackingProfile({
+			path: "z-fuller.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 2,
+				startedSurfaceGroupCount: 2,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+			strongestContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 800,
+			}),
+		});
+		const partial = createPackingProfile({
+			path: "a-partial.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 2,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+			strongestContainer: createIdentityContainer([0], 1, 620),
+		});
+
+		expect(comparePackingProfiles(fuller, partial)).toBeLessThan(0);
+	});
+
+	test("coverage gate uses started groups and cross-script satisfaction before packing", () => {
+		const broaderStart = createPackingProfile({
+			path: "z-broader-start.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 2,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+		});
+		const narrowerStart = createPackingProfile({
+			path: "a-narrower-start.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+		});
+		const crossScript = createPackingProfile({
+			path: "z-cross-script.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 2,
+			},
+		});
+		const singleScript = createPackingProfile({
+			path: "a-single-script.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+		});
+
+		expect(comparePackingProfiles(broaderStart, narrowerStart)).toBeLessThan(0);
+		expect(comparePackingProfiles(crossScript, singleScript)).toBeLessThan(0);
 	});
 
 	test("exact count is a late tie-break", () => {

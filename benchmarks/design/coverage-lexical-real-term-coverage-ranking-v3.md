@@ -866,3 +866,30 @@ index:
   fragmentation, and exact count
 - the V3 regression baseline now verifies `生命力 > 生命` while keeping `委员`
   bridge recall from gaining completion credit
+
+### Phase 11
+
+Status: Completed on 2026-04-14
+
+The current implementation now tightens the V3 late-ranking boundary around explicit
+coverage gating and generation-aligned Han raw-span refinement:
+
+- V3 packing profiles now carry an explicit `CoverageGateProfile` using
+  `realizedCoverageCount`, `fullySatisfiedSurfaceGroupCount`,
+  `startedSurfaceGroupCount`, and `crossScriptSatisfiedGroupCount`
+- the comparator now resolves that coverage gate before it enters container packing,
+  so same-coverage candidates are banded by surface-group satisfaction before late
+  packing tie-breaks
+- Han surface completion keeps the existing low-cost weak witness path, but body-tier
+  completion can now be synchronously refined from generation-aligned indexed text via
+  `FileSnapshotStore.readIndexedTexts(path + generation)`, but only for candidates that
+  remain tied through the pre-Han completion comparator layers
+- raw-span refinement remains wrapper-local, inspects only shortlisted blocks under the
+  widened `maxBlocksPerDoc = 96` and `maxBlocksPerQuery = 384` budgets, and never
+  changes recall, realized coverage, or main evidence containers
+- when generation-aligned indexed text is unavailable, V3 now cleanly falls back to the
+  weak witness result without touching `readCurrentTexts` or requiring a new resident
+  text arena
+- the V3 regression baseline now verifies coverage-gate ordering and wrapper-level Han
+  raw-span refinement / fallback behavior
+

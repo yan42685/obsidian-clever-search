@@ -15,7 +15,8 @@ import {
 	OuterSetting,
 	type LogLevelOptions,
 	type SearchHistoryMaxItems,
-	normalizeWeakFilePruneMode,
+	normalizeHideWeaklyRelatedResults,
+	toLegacyWeakFilePruneMode,
 } from "src/globals/plugin-setting";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
@@ -140,8 +141,12 @@ export class SettingManager {
 			migrationResult.data as Partial<OuterSetting>,
 		) as OuterSetting;
 		this.setting.fileSearchBackend = DEFAULT_FILE_SEARCH_BACKEND;
-		this.setting.weakFilePruneMode = normalizeWeakFilePruneMode(
-			((this.setting as unknown) as Record<string, unknown>).weakFilePruneMode,
+		this.setting.hideWeaklyRelatedResults = normalizeHideWeaklyRelatedResults(
+			((this.setting as unknown) as Record<string, unknown>)
+				.hideWeaklyRelatedResults,
+		);
+		this.setting.weakFilePruneMode = toLegacyWeakFilePruneMode(
+			this.setting.hideWeaklyRelatedResults,
 		);
 		logger.setLevel(this.setting.logLevel);
 		if (migrationResult.didMigrate) {
@@ -290,16 +295,13 @@ class GeneralTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName(t("Weak file pruning"))
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						off: t("Weak file pruning.off"),
-						lenient: t("Weak file pruning.lenient"),
-						strict: t("Weak file pruning.strict"),
-					})
-					.setValue(this.setting.weakFilePruneMode)
+			.setDesc(t("Weak file pruning desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.hideWeaklyRelatedResults)
 					.onChange((value) => {
-						this.setting.weakFilePruneMode = normalizeWeakFilePruneMode(value);
+						this.setting.hideWeaklyRelatedResults = value;
+						this.setting.weakFilePruneMode = toLegacyWeakFilePruneMode(value);
 					}),
 			);
 

@@ -11,7 +11,10 @@ import { PriorityQueue } from "src/utils/data-structure";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
-import { OuterSetting } from "../../globals/plugin-setting";
+import {
+	OuterSetting,
+	toLegacyWeakFilePruneMode,
+} from "../../globals/plugin-setting";
 import {
 	FileSearchEngineFactory,
 	type PersistentFileIndexRecoveryPlan,
@@ -200,7 +203,10 @@ export class LexicalEngine {
 			queryText: query.text,
 			isPrefixMatch: query.userOption.isPrefixMatch,
 			isFuzzy: query.userOption.isFuzzy,
-			weakFilePruneMode: this.outerSetting.weakFilePruneMode,
+			hideWeaklyRelatedResults: this.outerSetting.hideWeaklyRelatedResults,
+			weakFilePruneMode: toLegacyWeakFilePruneMode(
+				this.outerSetting.hideWeaklyRelatedResults,
+			),
 			maxItemResults,
 			maxDirectSubItemResults,
 			maxSubItemResults,

@@ -10,3 +10,8 @@
 - Do not rely on memory alone for stage tracking; write the completed-state
   update back into the relevant design doc once the milestone is actually
   reached.
+
+## Plan Completion Check Rule
+
+- When executing a plan-mode task or a user-provided implementation plan, do a final end-of-task check that every planned item is 100% complete before closing the task.
+- If any plan item is intentionally deferred, blocked, or only partially complete, call that out explicitly in the final status instead of implying the whole plan is done.

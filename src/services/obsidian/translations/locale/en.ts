@@ -130,10 +130,8 @@ export default {
 	Clear: "Clear",
 
 	"Case sensitive": "Case sensitive",
-	"Weak file pruning": "Weak file pruning",
-	"Weak file pruning.off": "Do not hide",
-	"Weak file pruning.lenient": "Lenient",
-	"Weak file pruning.strict": "Strict",
+	"Weak file pruning": "Hide weakly related results",
+	"Weak file pruning desc": "When enabled, only the top coverage-gate band remains visible and lower-band results are hidden.",
 	"Prefix match":"Prefix match",
 	"Prefix match desc":
 		"Expand contiguous Latin letter and digit sequences in metadata and body under a capped budget. Metadata fields are visited before body within the same budget, so this is not a 100% prefix-recall mode and is mainly an input UX optimization.",

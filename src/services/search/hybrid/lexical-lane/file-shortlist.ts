@@ -29,6 +29,7 @@ export async function buildHybridLexicalLaneFileShortlist(params: {
 		queryText,
 		isPrefixMatch: setting.isPrefixMatch,
 		isFuzzy: setting.isFuzzy,
+		hideWeaklyRelatedResults: setting.hideWeaklyRelatedResults,
 		weakFilePruneMode: setting.weakFilePruneMode,
 		maxItemResults: Math.max(params.limit, params.limit * 3),
 	});

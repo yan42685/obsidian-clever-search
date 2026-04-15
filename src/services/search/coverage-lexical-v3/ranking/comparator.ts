@@ -24,8 +24,36 @@ export function comparePackingProfiles(
 	left: EvidencePackingProfile,
 	right: EvidencePackingProfile,
 ): number {
-	if (left.realizedCoverageCount !== right.realizedCoverageCount) {
-		return right.realizedCoverageCount - left.realizedCoverageCount;
+	const preHanCompletionComparison = comparePackingProfilesBeforeHanSurfaceCompletion(
+		left,
+		right,
+	);
+	if (preHanCompletionComparison !== 0) {
+		return preHanCompletionComparison;
+	}
+	const hanSurfaceCompletionComparison = compareHanSurfaceCompletion(left, right);
+	if (hanSurfaceCompletionComparison !== 0) {
+		return hanSurfaceCompletionComparison;
+	}
+	if (left.prefixCompletionGainTotal !== right.prefixCompletionGainTotal) {
+		return left.prefixCompletionGainTotal - right.prefixCompletionGainTotal;
+	}
+	if (left.compoundPrefixCount !== right.compoundPrefixCount) {
+		return left.compoundPrefixCount - right.compoundPrefixCount;
+	}
+	return left.path.localeCompare(right.path);
+}
+
+export function comparePackingProfilesBeforeHanSurfaceCompletion(
+	left: EvidencePackingProfile,
+	right: EvidencePackingProfile,
+): number {
+	const coverageGateComparison = compareCoverageGate(
+		left.coverageGate,
+		right.coverageGate,
+	);
+	if (coverageGateComparison !== 0) {
+		return coverageGateComparison;
 	}
 	const strongestComparison = compareContainerStrength(
 		left.strongestContainer,
@@ -48,17 +76,26 @@ export function comparePackingProfiles(
 	if (left.exactUnitCount !== right.exactUnitCount) {
 		return right.exactUnitCount - left.exactUnitCount;
 	}
-	const hanSurfaceCompletionComparison = compareHanSurfaceCompletion(left, right);
-	if (hanSurfaceCompletionComparison !== 0) {
-		return hanSurfaceCompletionComparison;
+	return 0;
+}
+
+function compareCoverageGate(
+	left: EvidencePackingProfile["coverageGate"],
+	right: EvidencePackingProfile["coverageGate"],
+): number {
+	if (left.realizedCoverageCount !== right.realizedCoverageCount) {
+		return right.realizedCoverageCount - left.realizedCoverageCount;
 	}
-	if (left.prefixCompletionGainTotal !== right.prefixCompletionGainTotal) {
-		return left.prefixCompletionGainTotal - right.prefixCompletionGainTotal;
+	if (left.fullySatisfiedSurfaceGroupCount !== right.fullySatisfiedSurfaceGroupCount) {
+		return right.fullySatisfiedSurfaceGroupCount - left.fullySatisfiedSurfaceGroupCount;
 	}
-	if (left.compoundPrefixCount !== right.compoundPrefixCount) {
-		return left.compoundPrefixCount - right.compoundPrefixCount;
+	if (left.startedSurfaceGroupCount !== right.startedSurfaceGroupCount) {
+		return right.startedSurfaceGroupCount - left.startedSurfaceGroupCount;
 	}
-	return left.path.localeCompare(right.path);
+	if (left.crossScriptSatisfiedGroupCount !== right.crossScriptSatisfiedGroupCount) {
+		return right.crossScriptSatisfiedGroupCount - left.crossScriptSatisfiedGroupCount;
+	}
+	return 0;
 }
 
 export function compareContainerStrength(

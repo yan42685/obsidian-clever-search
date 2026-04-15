@@ -166,10 +166,8 @@ export default {
 	"Floating window for in-file search desc":
 		"再次执行“文件内搜索”命令会关闭已存在的浮动窗口。关闭此选项可改为使用经典模态框。",
 	"Case sensitive": "区分大小写",
-	"Weak file pruning": "弱相关文件隐藏",
-	"Weak file pruning.off": "不隐藏",
-	"Weak file pruning.lenient": "宽松",
-	"Weak file pruning.strict": "严格",
+	"Weak file pruning": "\u662f\u5426\u9690\u85cf\u5f31\u76f8\u5173\u7ed3\u679c",
+	"Weak file pruning desc": "\u5f00\u542f\u540e\uff0c\u53ea\u663e\u793a\u6700\u9ad8 coverage gate band \u7684\u7ed3\u679c\uff1b\u8f83\u4f4e band \u7ed3\u679c\u76f4\u63a5\u9690\u85cf\u3002",
 	"Prefix match": "前缀匹配",
 	"Prefix match desc":
 		"对 metadata 和正文里的连续字母数字序列做有限预算的前缀扩展。当前流程会在同一预算下优先经过 metadata 字段，再在剩余预算内扩展正文，因此不保证 100% 召回所有 prefix 命中，主要用于优化输入体验。",

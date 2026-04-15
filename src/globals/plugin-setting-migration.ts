@@ -19,6 +19,11 @@ export function migrateOuterSetting(raw: unknown): OuterSettingMigrationResult {
 				version = 1;
 				didMigrate = true;
 				break;
+			case 1:
+				migrateOuterSettingV1ToV2(data);
+				version = 2;
+				didMigrate = true;
+				break;
 			default:
 				version = CURRENT_OUTER_SETTING_SCHEMA_VERSION;
 				didMigrate = true;
@@ -48,6 +53,14 @@ function migrateOuterSettingV0ToV1(data: RawSettingRecord): void {
 		delete hybrid.highPerformanceMaxMb;
 		data.hybrid = hybrid;
 	}
+}
+
+function migrateOuterSettingV1ToV2(data: RawSettingRecord): void {
+	if (typeof data.hideWeaklyRelatedResults !== "boolean") {
+		data.hideWeaklyRelatedResults = data.weakFilePruneMode !== "off";
+	}
+	delete data.weakFilePruneMode;
+	delete data.hideWeaklyRelevantFiles;
 }
 
 function readOuterSettingSchemaVersion(data: RawSettingRecord): number {

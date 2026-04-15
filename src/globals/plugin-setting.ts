@@ -11,6 +11,7 @@ export class OuterSetting {
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
 	fileSearchBackend: FileSearchBackend;
+	hideWeaklyRelatedResults: boolean;
 	weakFilePruneMode: WeakFilePruneMode;
 	isCaseSensitive: boolean;
 	isPrefixMatch: boolean;
@@ -30,7 +31,8 @@ const isChineseUser =
 
 export const DEFAULT_FILE_SEARCH_BACKEND = "coverage-lexical" as const;
 export const DEFAULT_WEAK_FILE_PRUNE_MODE = "lenient" as const;
-export const CURRENT_OUTER_SETTING_SCHEMA_VERSION = 1 as const;
+export const DEFAULT_HIDE_WEAKLY_RELATED_RESULTS = true as const;
+export const CURRENT_OUTER_SETTING_SCHEMA_VERSION = 2 as const;
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	settingsSchemaVersion: CURRENT_OUTER_SETTING_SCHEMA_VERSION,
@@ -39,6 +41,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
 	fileSearchBackend: DEFAULT_FILE_SEARCH_BACKEND,
+	hideWeaklyRelatedResults: DEFAULT_HIDE_WEAKLY_RELATED_RESULTS,
 	weakFilePruneMode: DEFAULT_WEAK_FILE_PRUNE_MODE,
 	isCaseSensitive: false,
 	isPrefixMatch: true,
@@ -123,6 +126,18 @@ export function normalizeWeakFilePruneMode(
 	value: unknown,
 ): WeakFilePruneMode {
 	return isWeakFilePruneMode(value) ? value : DEFAULT_WEAK_FILE_PRUNE_MODE;
+}
+
+export function normalizeHideWeaklyRelatedResults(value: unknown): boolean {
+	return typeof value === "boolean"
+		? value
+		: DEFAULT_HIDE_WEAKLY_RELATED_RESULTS;
+}
+
+export function toLegacyWeakFilePruneMode(
+	hideWeaklyRelatedResults: boolean,
+): WeakFilePruneMode {
+	return hideWeaklyRelatedResults ? DEFAULT_WEAK_FILE_PRUNE_MODE : "off";
 }
 export type HybridSetting = {
 	enabled: boolean;

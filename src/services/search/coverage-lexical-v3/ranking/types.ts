@@ -62,16 +62,31 @@ export type HanSurfaceCompletionTier =
 	| "route"
 	| "identity";
 
+export type CoverageGateProfile = Readonly<{
+	realizedCoverageCount: number;
+	fullySatisfiedSurfaceGroupCount: number;
+	startedSurfaceGroupCount: number;
+	crossScriptSatisfiedGroupCount: number;
+}>;
+
+export type HanSurfaceCompletionGroupResult = Readonly<{
+	surfaceGroupIndex: number;
+	surfaceText: string;
+	tier: HanSurfaceCompletionTier;
+}>;
+
 export type EvidencePackingProfile = Readonly<{
 	docId: number;
 	path: string;
 	stableKey: string;
 	surfaceCoverageShapeKey: string;
 	realizedCoverageCount: number;
+	coverageGate: CoverageGateProfile;
 	exactUnitCount: number;
 	completedHanSurfaceGroupCount: number;
 	hanSurfaceCompletionTierScoreTotal: number;
 	strongestHanSurfaceCompletionTier: HanSurfaceCompletionTier;
+	hanSurfaceCompletionGroups: readonly HanSurfaceCompletionGroupResult[];
 	prefixCompletionGainTotal: number;
 	compoundPrefixCount: number;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];

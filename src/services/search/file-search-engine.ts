@@ -18,6 +18,7 @@ export type FileSearchRequest = {
 	queryText: string;
 	isPrefixMatch: boolean;
 	isFuzzy: boolean;
+	hideWeaklyRelatedResults?: boolean;
 	weakFilePruneMode?: WeakFilePruneMode;
 	maxItemResults: number;
 	maxDirectSubItemResults?: number;
