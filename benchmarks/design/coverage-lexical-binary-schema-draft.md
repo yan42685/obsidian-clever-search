@@ -79,6 +79,9 @@ Each section entry should include:
 - byte offset
 - byte length
 - element count
+- integer width metadata
+  - id width
+  - offset width when applicable
 - encoding flags
 
 Minimum section kinds:
@@ -90,6 +93,19 @@ Minimum section kinds:
 - `postings_payload`
 - `doc_tokens`
 - `doc_tags`
+
+Encoding guidance for resident-compatible sections:
+
+- sentinel-start posting sections are first-class snapshot shapes
+- section metadata should describe integer width per section instead of assuming
+  a global `Uint32Array` contract
+- future overlays may use different integer widths than the base snapshot as
+  long as the shared access layer understands the section descriptor
+- section-level encoding flags should be the mechanism for describing shapes
+  such as:
+  - sentinel starts
+  - delta-coded ids
+  - packed flags bytes
 
 ## String Pool
 
@@ -258,6 +274,13 @@ The right sequence is:
 1. add a `CoverageLexicalSnapshotV1` writer and reader behind a feature flag
 2. persist only the minimum sections listed above
 3. validate round-trip integrity on a small corpus
+
+Implementation note after resident slimming:
+
+- the live V3 resident base now already uses width-adaptive integer sections and
+  sentinel-start posting layouts
+- snapshot work should mirror those section descriptors directly instead of
+  re-inflating them back into fixed-width arrays during persistence
 4. benchmark:
    - snapshot write
    - snapshot hydrate

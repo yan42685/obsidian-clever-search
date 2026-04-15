@@ -52,7 +52,9 @@ export type ResidentMetadataContainerArena = Readonly<{
 }>;
 
 export type ResidentBodySummaryArena = Readonly<{
-	postings: ResidentBlockPostingList;
+	familyIds: ResidentIntegerArray;
+	postingStarts: ResidentIntegerArray;
+	blockIds: ResidentIntegerArray;
 }>;
 
 export type ResidentBodyBlockArena = Readonly<{
@@ -74,13 +76,13 @@ export type ResidentHanRouteArena = Readonly<{
 	bodyBlockPostingStarts: ResidentIntegerArray;
 	bodyBlockIds: ResidentIntegerArray;
 	identityWitnessStartByDocId: ResidentIntegerArray;
-	identityWitnessFamilyIds: ResidentIntegerArray;
+	identityWitnessStringIds: ResidentIntegerArray;
 	routeWitnessStartByDocId: ResidentIntegerArray;
-	routeWitnessFamilyIds: ResidentIntegerArray;
+	routeWitnessStringIds: ResidentIntegerArray;
 	headingWitnessStartByDocId: ResidentIntegerArray;
-	headingWitnessFamilyIds: ResidentIntegerArray;
+	headingWitnessStringIds: ResidentIntegerArray;
 	bodyWitnessStartByBlockId: ResidentIntegerArray;
-	bodyWitnessFamilyIds: ResidentIntegerArray;
+	bodyWitnessStringIds: ResidentIntegerArray;
 }>;
 
 export type ResidentBaseMetrics = Readonly<{

@@ -63,7 +63,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.docTable.docCount).toBe(1);
 		expect(residentBase.familyLexicon.familyCount).toBeGreaterThan(0);
 		expect(residentBase.metadataContainers.identityPostings.docIds.length).toBeGreaterThan(0);
-		expect(residentBase.bodySummary.postings.blockIds.length).toBeGreaterThan(0);
+		expect(residentBase.bodySummary.blockIds.length).toBeGreaterThan(0);
 		expect(residentBase.bodyBlocks.blockCount).toBe(1);
 		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
@@ -151,6 +151,11 @@ describe("coverage lexical v3 resident base", () => {
 				(section) =>
 					section.sectionKind === "bodySummary.postings.starts" &&
 					section.encodingFlags > 0,
+			),
+		).toBe(true);
+		expect(
+			summary.sectionEncodings.some(
+				(section) => section.sectionKind === "bodySummary.familyIds",
 			),
 		).toBe(true);
 		expect(residentBase.metrics.stringPayloadBytes).toBeGreaterThan(0);

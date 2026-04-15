@@ -2,16 +2,19 @@ import type { ResidentBase } from "../layout/types";
 import type { V3QueryAnalysis } from "../query";
 import {
 	getBodyBlockExactFamilyIds,
-	getBodyBlockHanWitnessFamilyIds,
+	getBodyBlockHanWitnessStringIds,
+	getBodyBlockHanWitnessTexts,
 	getBodyBlockExactTokenPositions,
-	getFamilyText,
 	getDocHeadingFamilyIds,
-	getDocHeadingHanWitnessFamilyIds,
+	getDocHeadingHanWitnessStringIds,
+	getDocHeadingHanWitnessTexts,
 	getDocIdentityFamilyIds,
-	getDocIdentityHanWitnessFamilyIds,
+	getDocIdentityHanWitnessStringIds,
+	getDocIdentityHanWitnessTexts,
 	getDocPath,
 	getDocRouteFamilyIds,
-	getDocRouteHanWitnessFamilyIds,
+	getDocRouteHanWitnessStringIds,
+	getDocRouteHanWitnessTexts,
 	getDocStableKey,
 } from "../recall";
 import type {
@@ -35,6 +38,7 @@ import type {
 } from "./types";
 
 const CHAIN_BOUNDARY_PENALTY = 2;
+const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
 
 type BodyOccurrence = Readonly<{
 	blockId: number;
@@ -79,20 +83,22 @@ export function buildPackingProfile(
 	candidateRecall: V3CandidateDocRecall,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 ): EvidencePackingProfile {
-	const identityWitnessFamilyIds = getDocIdentityHanWitnessFamilyIds(base, candidateRecall.docId);
-	const routeWitnessFamilyIds = getDocRouteHanWitnessFamilyIds(base, candidateRecall.docId);
-	const headingWitnessFamilyIds = getDocHeadingHanWitnessFamilyIds(base, candidateRecall.docId);
+	const identityWitnessStringIds = getDocIdentityHanWitnessStringIds(base, candidateRecall.docId);
+	const routeWitnessStringIds = getDocRouteHanWitnessStringIds(base, candidateRecall.docId);
+	const headingWitnessStringIds = getDocHeadingHanWitnessStringIds(base, candidateRecall.docId);
+	const identityWitnessTexts = getDocIdentityHanWitnessTexts(base, candidateRecall.docId);
+	const routeWitnessTexts = getDocRouteHanWitnessTexts(base, candidateRecall.docId);
 	const identityFamilyIds = new Set<number>([
 		...getDocIdentityFamilyIds(base, candidateRecall.docId),
-		...identityWitnessFamilyIds,
+		...identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
 	]);
 	const routeFamilyIds = new Set<number>([
 		...getDocRouteFamilyIds(base, candidateRecall.docId),
-		...routeWitnessFamilyIds,
+		...routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
 	]);
 	const headingFamilyIds = new Set<number>([
 		...getDocHeadingFamilyIds(base, candidateRecall.docId),
-		...headingWitnessFamilyIds,
+		...headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
 	]);
 	const mergedUnitFamilyMatches = mergeCandidateSpecificHanConfirmedMatches(
 		base,
@@ -105,11 +111,11 @@ export function buildPackingProfile(
 	);
 	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
 	const bodyBlockIdsByUnitFamily = new Map<number, Map<number, Set<number>>>();
-	const bodyWitnessFamilyIdsByBlockId = new Map<number, readonly number[]>();
+	const bodyWitnessTextsByBlockId = new Map<number, readonly string[]>();
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
 		const exactFamilyIds = getBodyBlockExactFamilyIds(base, blockId);
-		const witnessFamilyIds = getBodyBlockHanWitnessFamilyIds(base, blockId);
-		bodyWitnessFamilyIdsByBlockId.set(blockId, witnessFamilyIds);
+		const witnessStringIds = getBodyBlockHanWitnessStringIds(base, blockId);
+		bodyWitnessTextsByBlockId.set(blockId, getBodyBlockHanWitnessTexts(base, blockId));
 		const tokenPositions = getBodyBlockExactTokenPositions(base, blockId);
 		const blockOccurrences: BodyOccurrence[] = [];
 		for (const unitMatches of mergedUnitFamilyMatches) {
@@ -118,10 +124,10 @@ export function buildPackingProfile(
 				unitMatches.queryUnitIndex,
 				unitMatches.matches,
 				unitMatches.queryUnitSource === "opaque_han_confirmed"
-					? witnessFamilyIds
+					? witnessStringIds.map(encodeWitnessMatchFamilyId)
 					: exactFamilyIds,
 				unitMatches.queryUnitSource === "opaque_han_confirmed"
-					? witnessFamilyIds.map((_, index) => index)
+					? witnessStringIds.map((_, index) => index)
 					: tokenPositions,
 			);
 			if (occurrences.length === 0) {
@@ -190,11 +196,10 @@ export function buildPackingProfile(
 		secondStrongestContainer,
 	);
 	const hanSurfaceCompletionSummary = summarizeHanSurfaceCompletion(
-		base,
 		queryAnalysis,
-		identityWitnessFamilyIds,
-		routeWitnessFamilyIds,
-		bodyWitnessFamilyIdsByBlockId,
+		identityWitnessTexts,
+		routeWitnessTexts,
+		bodyWitnessTextsByBlockId,
 		bestBodyWindowBlockIds,
 	);
 	const coverageGate = buildCoverageGateProfile(queryAnalysis, realizedFamilies);
@@ -239,16 +244,16 @@ function mergeCandidateSpecificHanConfirmedMatches(
 	routeFamilyIds: ReadonlySet<number>,
 	headingFamilyIds: ReadonlySet<number>,
 ): V3QueryUnitFamilyMatches[] {
-	const candidateBodyWitnessFamilyIds = new Set<number>();
+	const candidateBodyWitnessStringIds = new Set<number>();
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
-		for (const familyId of getBodyBlockHanWitnessFamilyIds(base, blockId)) {
-			candidateBodyWitnessFamilyIds.add(familyId);
+		for (const stringId of getBodyBlockHanWitnessStringIds(base, blockId)) {
+			candidateBodyWitnessStringIds.add(stringId);
 		}
 	}
-	const candidateMetadataWitnessFamilyIds = new Set<number>([
-		...getDocIdentityHanWitnessFamilyIds(base, candidateRecall.docId),
-		...getDocRouteHanWitnessFamilyIds(base, candidateRecall.docId),
-		...getDocHeadingHanWitnessFamilyIds(base, candidateRecall.docId),
+	const candidateMetadataWitnessStringIds = new Set<number>([
+		...getDocIdentityHanWitnessStringIds(base, candidateRecall.docId),
+		...getDocRouteHanWitnessStringIds(base, candidateRecall.docId),
+		...getDocHeadingHanWitnessStringIds(base, candidateRecall.docId),
 	]);
 	return unitFamilyMatches.map<V3QueryUnitFamilyMatches>((unitMatches) => {
 		if (unitMatches.queryUnitSource !== "opaque_han_confirmed") {
@@ -258,20 +263,20 @@ function mergeCandidateSpecificHanConfirmedMatches(
 		for (const match of unitMatches.matches) {
 			mergedMatches.set(`${match.familyId}:${match.matchKind}`, match);
 		}
-		for (const familyId of [
-			...candidateMetadataWitnessFamilyIds,
-			...candidateBodyWitnessFamilyIds,
+		for (const stringId of [
+			...candidateMetadataWitnessStringIds,
+			...candidateBodyWitnessStringIds,
 		]) {
-			const familyText = getFamilyText(base, familyId);
+			const familyText = readWitnessText(base, stringId);
 			if (!familyText.includes(unitMatches.queryUnitText)) {
 				continue;
 			}
 			const confirmedMatch: V3QueryFamilyMatch = {
-				familyId,
+				familyId: encodeWitnessMatchFamilyId(stringId),
 				familyText,
 				matchKind: "opaque_exact",
 			};
-			mergedMatches.set(`${familyId}:opaque_exact`, confirmedMatch);
+			mergedMatches.set(`${confirmedMatch.familyId}:opaque_exact`, confirmedMatch);
 		}
 		return {
 			...unitMatches,
@@ -832,11 +837,10 @@ function buildCoverageGateProfile(
 }
 
 function summarizeHanSurfaceCompletion(
-	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
-	identityWitnessFamilyIds: readonly number[],
-	routeWitnessFamilyIds: readonly number[],
-	bodyWitnessFamilyIdsByBlockId: ReadonlyMap<number, readonly number[]>,
+	identityWitnessTexts: readonly string[],
+	routeWitnessTexts: readonly string[],
+	bodyWitnessTextsByBlockId: ReadonlyMap<number, readonly string[]>,
 	bestBodyWindowBlockIds: ReadonlySet<number>,
 ): HanSurfaceCompletionSummary {
 	const groups = collectHanSurfaceCompletionGroups(queryAnalysis);
@@ -844,11 +848,10 @@ function summarizeHanSurfaceCompletion(
 		surfaceGroupIndex: group.surfaceGroupIndex,
 		surfaceText: group.surfaceText,
 		tier: resolveHanSurfaceCompletionTier(
-			base,
 			group.surfaceText,
-			identityWitnessFamilyIds,
-			routeWitnessFamilyIds,
-			bodyWitnessFamilyIdsByBlockId,
+			identityWitnessTexts,
+			routeWitnessTexts,
+			bodyWitnessTextsByBlockId,
 			bestBodyWindowBlockIds,
 		),
 	}));
@@ -897,47 +900,49 @@ function collectHanSurfaceCompletionGroups(
 }
 
 function resolveHanSurfaceCompletionTier(
-	base: ResidentBase,
 	surfaceText: string,
-	identityWitnessFamilyIds: readonly number[],
-	routeWitnessFamilyIds: readonly number[],
-	bodyWitnessFamilyIdsByBlockId: ReadonlyMap<number, readonly number[]>,
+	identityWitnessTexts: readonly string[],
+	routeWitnessTexts: readonly string[],
+	bodyWitnessTextsByBlockId: ReadonlyMap<number, readonly string[]>,
 	bestBodyWindowBlockIds: ReadonlySet<number>,
 ): HanSurfaceCompletionTier {
-	if (witnessFamiliesContainSurface(base, identityWitnessFamilyIds, surfaceText)) {
+	if (witnessTextsContainSurface(identityWitnessTexts, surfaceText)) {
 		return "identity";
 	}
-	if (witnessFamiliesContainSurface(base, routeWitnessFamilyIds, surfaceText)) {
+	if (witnessTextsContainSurface(routeWitnessTexts, surfaceText)) {
 		return "route";
 	}
 	for (const blockId of bestBodyWindowBlockIds) {
-		if (
-			witnessFamiliesContainSurface(
-				base,
-				bodyWitnessFamilyIdsByBlockId.get(blockId) ?? [],
-				surfaceText,
-			)
-		) {
+		if (witnessTextsContainSurface(bodyWitnessTextsByBlockId.get(blockId) ?? [], surfaceText)) {
 			return "body_window";
 		}
 	}
-	for (const [blockId, familyIds] of bodyWitnessFamilyIdsByBlockId.entries()) {
+	for (const [blockId, texts] of bodyWitnessTextsByBlockId.entries()) {
 		if (bestBodyWindowBlockIds.has(blockId)) {
 			continue;
 		}
-		if (witnessFamiliesContainSurface(base, familyIds, surfaceText)) {
+		if (witnessTextsContainSurface(texts, surfaceText)) {
 			return "body_residue";
 		}
 	}
 	return "none";
 }
 
-function witnessFamiliesContainSurface(
-	base: ResidentBase,
-	familyIds: readonly number[],
+function witnessTextsContainSurface(
+	witnessTexts: readonly string[],
 	surfaceText: string,
 ): boolean {
-	return familyIds.some((familyId) => getFamilyText(base, familyId).includes(surfaceText));
+	return witnessTexts.some((text) => text.includes(surfaceText));
+}
+
+function encodeWitnessMatchFamilyId(stringId: number): number {
+	return -1 * (stringId + WITNESS_MATCH_FAMILY_ID_OFFSET);
+}
+
+function readWitnessText(base: ResidentBase, stringId: number): string {
+	const offset = base.stringArena.offsets[stringId] ?? 0;
+	const length = base.stringArena.lengths[stringId] ?? 0;
+	return base.stringArena.text.slice(offset, offset + length);
 }
 
 function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): number {

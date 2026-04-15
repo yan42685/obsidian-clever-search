@@ -83,7 +83,8 @@ export function buildResidentBaseMetrics(
 		input.metadataContainers.identityPostings.postingStarts.byteLength +
 		input.metadataContainers.routePostings.postingStarts.byteLength +
 		input.metadataContainers.headingPostings.postingStarts.byteLength +
-		input.bodySummary.postings.postingStarts.byteLength +
+		input.bodySummary.familyIds.byteLength +
+		input.bodySummary.postingStarts.byteLength +
 		input.bodyBlocks.exactTapeStartByBlockId.byteLength +
 		input.bodyBlocks.exactTapeCountByBlockId.byteLength +
 		input.hanRoute.metadataPostingStarts.byteLength +
@@ -101,17 +102,17 @@ export function buildResidentBaseMetrics(
 		input.metadataContainers.identityPostings.docIds.byteLength +
 		input.metadataContainers.routePostings.docIds.byteLength +
 		input.metadataContainers.headingPostings.docIds.byteLength +
-		input.bodySummary.postings.blockIds.byteLength +
+		input.bodySummary.blockIds.byteLength +
 		input.bodyBlocks.docIdByBlockId.byteLength +
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
 		input.exactTapes.familyIds.byteLength +
 		input.hanRoute.bigramIds.byteLength +
 		input.hanRoute.metadataDocIds.byteLength +
 		input.hanRoute.bodyBlockIds.byteLength +
-		input.hanRoute.identityWitnessFamilyIds.byteLength +
-		input.hanRoute.routeWitnessFamilyIds.byteLength +
-		input.hanRoute.headingWitnessFamilyIds.byteLength +
-		input.hanRoute.bodyWitnessFamilyIds.byteLength;
+		input.hanRoute.identityWitnessStringIds.byteLength +
+		input.hanRoute.routeWitnessStringIds.byteLength +
+		input.hanRoute.headingWitnessStringIds.byteLength +
+		input.hanRoute.bodyWitnessStringIds.byteLength;
 	const residentBytes =
 		docArenaBytes +
 		stringArenaBytes +
@@ -206,13 +207,17 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 				base.metadataContainers.identityPostings.docIds,
 			),
 			describeIntegerSection(
+				"bodySummary.familyIds",
+				base.bodySummary.familyIds,
+			),
+			describeIntegerSection(
 				"bodySummary.postings.starts",
-				base.bodySummary.postings.postingStarts,
+				base.bodySummary.postingStarts,
 				sentinelStartsEncodingFlag(),
 			),
 			describeIntegerSection(
 				"bodySummary.postings.blockIds",
-				base.bodySummary.postings.blockIds,
+				base.bodySummary.blockIds,
 			),
 			describeIntegerSection("exactTapes.familyIds", base.exactTapes.familyIds),
 			describeIntegerSection(

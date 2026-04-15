@@ -700,3 +700,103 @@ Validation completed for this phase:
 - Coverage V3 resident-base, family-lookup, Han-route, engine, size-anchor,
   direct-subitems, and file-search-engine tests pass
 - V3 search semantics remain unchanged across the targeted regression suite
+
+### Phase 5
+
+Status: Completed on 2026-04-15
+
+The following Phase 5 validation-and-schema tail is now implemented:
+
+- V3 now has dedicated lifecycle regression coverage for rebuild-safe resident
+  width changes across:
+  - `reIndexAll`
+  - `addDocuments`
+  - `deleteDocuments`
+  - `moveDocument`
+  - `beginBatchReindex` / `finishBatchReindex`
+- V3 now has dedicated ranking-stability regression coverage that compares the
+  same query corpus across compact and width-stressed resident layouts
+- the binary schema draft now explicitly records:
+  - width-aware section metadata
+  - sentinel-start section encoding
+  - per-section encoding flags
+  - future overlay sections being allowed to use different integer widths than
+    the base snapshot
+
+Real-vault baseline captured for the post-Phase-4 resident layout:
+
+- resident total: `2.65 MB`
+- docs: `185`
+- families: `45055`
+- bodyBlocks: `3937`
+- exactTapeValues: `108675`
+- resident groups:
+  - `stringArena 872 KB`
+  - `hanRoute 847 KB`
+  - `bodySummary 344 KB`
+  - `exactTapes 212 KB`
+  - `metadataContainers 179 KB`
+  - `familyLexicon 132 KB`
+  - `heading 94.7 KB`
+  - `bodyBlocks 34.6 KB`
+  - `docArena 3.61 KB`
+- Han route groups:
+  - `metadataHanPostings 316 KB`
+  - `bodyHanPostings 463 KB`
+  - `metadataWitness 2.85 KB`
+  - `bodyWitness 65.6 KB`
+- payload split:
+  - `scaffold 1009 KB`
+  - `counts 8.77 KB`
+  - `ids 1.03 MB`
+  - `strings 651 KB`
+
+This baseline confirms that the Phase 4 resident slimming was effective, but
+also makes the remaining structural pressure clear:
+
+- witness-only Han text was still inflating `familyCount`
+- `bodySummary` was still paying a family-driven scaffold cost
+- `stringArena` and body Han postings remained the next major targets, but were
+  intentionally left for later work
+
+Validation completed for this phase:
+
+- build typecheck passes
+- resident-base, family-lookup, Han-route, engine, size-anchor, lifecycle, and
+  ranking-stability tests pass
+
+### Phase 6
+
+Status: Completed on 2026-04-15
+
+The following Phase 6 structural resident shrink is now implemented:
+
+- witness-only Han surfaces no longer participate in the main `familyLexicon`
+  id space
+- resident Han witness slices now store witness `stringId` values instead of
+  main `familyId` values
+- ranking completion reads witness text directly from the shared `stringArena`
+  rather than routing witness completion through `getFamilyText(...)`
+- `opaque_han_confirmed` match realization now uses witness-backed synthetic
+  match ids only inside ranking scratch state, so final ranking semantics stay
+  unchanged while the resident base stops paying lexicon-wide family costs for
+  witness-only text
+- `bodySummary` is now sparse:
+  - only families that actually appear in block summaries materialize a row
+  - the arena now stores `familyIds + postingStarts + blockIds`
+  - absent families return empty shortlists by binary lookup instead of forcing
+    dense `familyCount`-sized scaffolds
+
+Implementation note:
+
+- after this phase, `familyCount` now means lexical families that participate
+  in exact, prefix, metadata, and body-summary evidence
+- witness-only Han surface text still lives in the shared `stringArena`, but it
+  no longer inflates the main lexical-family universe
+
+Validation completed for this phase:
+
+- build typecheck passes
+- witness-split and sparse-body-summary regression tests pass
+- existing resident-base, family-lookup, Han-route, engine, and size-anchor
+  suites continue to pass

@@ -10,10 +10,10 @@ type HanRouteBuildInput = Readonly<{
 	bigramIds: readonly number[];
 	metadataDocIdsByBigram: readonly (readonly number[])[];
 	bodyBlockIdsByBigram: readonly (readonly number[])[];
-	identityWitnessFamilyIdsByDoc: readonly (readonly number[])[];
-	routeWitnessFamilyIdsByDoc: readonly (readonly number[])[];
-	headingWitnessFamilyIdsByDoc: readonly (readonly number[])[];
-	bodyWitnessFamilyIdsByBlock: readonly (readonly number[])[];
+	identityWitnessStringIdsByDoc: readonly (readonly number[])[];
+	routeWitnessStringIdsByDoc: readonly (readonly number[])[];
+	headingWitnessStringIdsByDoc: readonly (readonly number[])[];
+	bodyWitnessStringIdsByBlock: readonly (readonly number[])[];
 }>;
 
 export function createEmptyHanRouteArena(): ResidentHanRouteArena {
@@ -21,10 +21,10 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 		bigramIds: [],
 		metadataDocIdsByBigram: [],
 		bodyBlockIdsByBigram: [],
-		identityWitnessFamilyIdsByDoc: [],
-		routeWitnessFamilyIdsByDoc: [],
-		headingWitnessFamilyIdsByDoc: [],
-		bodyWitnessFamilyIdsByBlock: [],
+		identityWitnessStringIdsByDoc: [],
+		routeWitnessStringIdsByDoc: [],
+		headingWitnessStringIdsByDoc: [],
+		bodyWitnessStringIdsByBlock: [],
 	});
 }
 
@@ -33,10 +33,10 @@ export function buildHanRouteArena(
 ): ResidentHanRouteArena {
 	const metadataBuckets = buildPostingBuckets(input.metadataDocIdsByBigram);
 	const bodyBuckets = buildPostingBuckets(input.bodyBlockIdsByBigram);
-	const identityWitnessBuckets = buildPostingBuckets(input.identityWitnessFamilyIdsByDoc);
-	const routeWitnessBuckets = buildPostingBuckets(input.routeWitnessFamilyIdsByDoc);
-	const headingWitnessBuckets = buildPostingBuckets(input.headingWitnessFamilyIdsByDoc);
-	const bodyWitnessBuckets = buildPostingBuckets(input.bodyWitnessFamilyIdsByBlock);
+	const identityWitnessBuckets = buildPostingBuckets(input.identityWitnessStringIdsByDoc);
+	const routeWitnessBuckets = buildPostingBuckets(input.routeWitnessStringIdsByDoc);
+	const headingWitnessBuckets = buildPostingBuckets(input.headingWitnessStringIdsByDoc);
+	const bodyWitnessBuckets = buildPostingBuckets(input.bodyWitnessStringIdsByBlock);
 	return {
 		bigramIds: Uint32Array.from(input.bigramIds),
 		metadataPostingStarts: metadataBuckets.starts,
@@ -44,13 +44,13 @@ export function buildHanRouteArena(
 		bodyBlockPostingStarts: bodyBuckets.starts,
 		bodyBlockIds: bodyBuckets.ids,
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
-		identityWitnessFamilyIds: identityWitnessBuckets.ids,
+		identityWitnessStringIds: identityWitnessBuckets.ids,
 		routeWitnessStartByDocId: routeWitnessBuckets.starts,
-		routeWitnessFamilyIds: routeWitnessBuckets.ids,
+		routeWitnessStringIds: routeWitnessBuckets.ids,
 		headingWitnessStartByDocId: headingWitnessBuckets.starts,
-		headingWitnessFamilyIds: headingWitnessBuckets.ids,
+		headingWitnessStringIds: headingWitnessBuckets.ids,
 		bodyWitnessStartByBlockId: bodyWitnessBuckets.starts,
-		bodyWitnessFamilyIds: bodyWitnessBuckets.ids,
+		bodyWitnessStringIds: bodyWitnessBuckets.ids,
 	};
 }
 
@@ -88,19 +88,19 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 		) +
 		estimateSentinelPostingBytes(
 			arena.identityWitnessStartByDocId,
-			arena.identityWitnessFamilyIds,
+			arena.identityWitnessStringIds,
 		) +
 		estimateSentinelPostingBytes(
 			arena.routeWitnessStartByDocId,
-			arena.routeWitnessFamilyIds,
+			arena.routeWitnessStringIds,
 		) +
 		estimateSentinelPostingBytes(
 			arena.headingWitnessStartByDocId,
-			arena.headingWitnessFamilyIds,
+			arena.headingWitnessStringIds,
 		) +
 		estimateSentinelPostingBytes(
 			arena.bodyWitnessStartByBlockId,
-			arena.bodyWitnessFamilyIds,
+			arena.bodyWitnessStringIds,
 		)
 	);
 }
@@ -127,19 +127,19 @@ export function describeHanRouteByteBreakdown(
 		metadataWitnessBytes:
 			estimateSentinelPostingBytes(
 				arena.identityWitnessStartByDocId,
-				arena.identityWitnessFamilyIds,
+				arena.identityWitnessStringIds,
 			) +
 			estimateSentinelPostingBytes(
 				arena.routeWitnessStartByDocId,
-				arena.routeWitnessFamilyIds,
+				arena.routeWitnessStringIds,
 			) +
 			estimateSentinelPostingBytes(
 				arena.headingWitnessStartByDocId,
-				arena.headingWitnessFamilyIds,
+				arena.headingWitnessStringIds,
 			),
 		bodyWitnessBytes: estimateSentinelPostingBytes(
 			arena.bodyWitnessStartByBlockId,
-			arena.bodyWitnessFamilyIds,
+			arena.bodyWitnessStringIds,
 		),
 	};
 }

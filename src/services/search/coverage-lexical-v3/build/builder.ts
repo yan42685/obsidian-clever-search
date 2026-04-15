@@ -68,11 +68,7 @@ export function buildResidentBase(
 			prepareDocument(document, docId, tokenizeDocumentText),
 		);
 	const familySourceMaskByText = collectFamilySourceMasks(preparedDocuments);
-	const witnessTexts = collectWitnessTexts(preparedDocuments);
-	const familyTexts = dedupeSorted([
-		...familySourceMaskByText.keys(),
-		...witnessTexts,
-	]).sort((left, right) =>
+	const familyTexts = [...familySourceMaskByText.keys()].sort((left, right) =>
 		left.localeCompare(right),
 	);
 	const familyIdByText = new Map<string, number>();
@@ -135,7 +131,6 @@ export function buildResidentBase(
 		blockInputs.map((block) => block.exactDraft),
 	);
 	const bodySummary = buildBodySummaryArena({
-		familyCount: familyLexicon.familyCount,
 		summaryFamilyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
 	});
 	const bodyBlocks = buildBodyBlockArena(
@@ -162,12 +157,11 @@ export function buildResidentBase(
 		})),
 	);
 
-	const stringArena = stringArenaBuilder.build();
 	const hanRoute = buildResidentHanRoute(
 		preparedDocuments,
-		bodyBlocks,
-		familyIdByText,
+		stringArenaBuilder,
 	);
+	const stringArena = stringArenaBuilder.build();
 	const metrics = buildResidentBaseMetrics({
 		stringArena,
 		docTable,
@@ -333,38 +327,22 @@ function collectFamilySourceMasks(
 	return familySourceMaskByText;
 }
 
-function collectWitnessTexts(documents: readonly PreparedDocument[]): string[] {
-	const out: string[] = [];
-	for (const document of documents) {
-		out.push(...document.identityHanWitnessTexts);
-		out.push(...document.routeHanWitnessTexts);
-		out.push(...document.headingHanWitnessTexts);
-		for (const block of document.bodyBlocks) {
-			out.push(...block.hanWitnessTexts);
-		}
-	}
-	return out;
-}
-
 function buildResidentHanRoute(
 	documents: readonly PreparedDocument[],
-	bodyBlocks: Readonly<{
-		blockCount: number;
-	}>,
-	familyIdByText: ReadonlyMap<string, number>,
+	stringArenaBuilder: StringArenaBuilder,
 ) {
-	const identityWitnessFamilyIdsByDoc = documents.map((document) =>
-		mapFamilyTextsToIds(document.identityHanWitnessTexts, familyIdByText),
+	const identityWitnessStringIdsByDoc = documents.map((document) =>
+		mapStringsToStringIds(document.identityHanWitnessTexts, stringArenaBuilder),
 	);
-	const routeWitnessFamilyIdsByDoc = documents.map((document) =>
-		mapFamilyTextsToIds(document.routeHanWitnessTexts, familyIdByText),
+	const routeWitnessStringIdsByDoc = documents.map((document) =>
+		mapStringsToStringIds(document.routeHanWitnessTexts, stringArenaBuilder),
 	);
-	const headingWitnessFamilyIdsByDoc = documents.map((document) =>
-		mapFamilyTextsToIds(document.headingHanWitnessTexts, familyIdByText),
+	const headingWitnessStringIdsByDoc = documents.map((document) =>
+		mapStringsToStringIds(document.headingHanWitnessTexts, stringArenaBuilder),
 	);
-	const bodyWitnessFamilyIdsByBlock = documents.flatMap((document) =>
+	const bodyWitnessStringIdsByBlock = documents.flatMap((document) =>
 		document.bodyBlocks.map((block) =>
-			mapFamilyTextsToIds(block.hanWitnessTexts, familyIdByText),
+			mapStringsToStringIds(block.hanWitnessTexts, stringArenaBuilder),
 		),
 	);
 	const allBigramIds = dedupeSortedNumbers([
@@ -380,10 +358,10 @@ function buildResidentHanRoute(
 			bigramIds: [],
 			metadataDocIdsByBigram: [],
 			bodyBlockIdsByBigram: [],
-			identityWitnessFamilyIdsByDoc,
-			routeWitnessFamilyIdsByDoc,
-			headingWitnessFamilyIdsByDoc,
-			bodyWitnessFamilyIdsByBlock,
+			identityWitnessStringIdsByDoc,
+			routeWitnessStringIdsByDoc,
+			headingWitnessStringIdsByDoc,
+			bodyWitnessStringIdsByBlock,
 		});
 	}
 	const bigramIndexById = new Map(allBigramIds.map((bigramId, index) => [bigramId, index]));
@@ -417,10 +395,10 @@ function buildResidentHanRoute(
 		bigramIds: allBigramIds,
 		metadataDocIdsByBigram,
 		bodyBlockIdsByBigram,
-		identityWitnessFamilyIdsByDoc,
-		routeWitnessFamilyIdsByDoc,
-		headingWitnessFamilyIdsByDoc,
-		bodyWitnessFamilyIdsByBlock,
+		identityWitnessStringIdsByDoc,
+		routeWitnessStringIdsByDoc,
+		headingWitnessStringIdsByDoc,
+		bodyWitnessStringIdsByBlock,
 	});
 }
 
@@ -441,6 +419,13 @@ function mapFamilyTextsToIds(
 	return familyTexts
 		.map((familyText) => familyIdByText.get(familyText))
 		.filter((familyId): familyId is number => familyId !== undefined);
+}
+
+function mapStringsToStringIds(
+	values: readonly string[],
+	stringArenaBuilder: StringArenaBuilder,
+): number[] {
+	return values.map((value) => stringArenaBuilder.intern(value));
 }
 
 function computeIndexedSurfaceUtf8Bytes(

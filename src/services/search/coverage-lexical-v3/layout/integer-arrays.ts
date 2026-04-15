@@ -87,6 +87,27 @@ export function estimateSentinelPostingBytes(
 	return starts.byteLength + values.byteLength;
 }
 
+export function findResidentIntegerIndex(
+	values: ResidentIntegerArray,
+	target: number,
+): number {
+	let low = 0;
+	let high = values.length - 1;
+	while (low <= high) {
+		const mid = (low + high) >>> 1;
+		const value = values[mid] ?? 0;
+		if (value === target) {
+			return mid;
+		}
+		if (value < target) {
+			low = mid + 1;
+			continue;
+		}
+		high = mid - 1;
+	}
+	return -1;
+}
+
 export function describeIntegerSection(
 	sectionKind: string,
 	values: ResidentIntegerArray,

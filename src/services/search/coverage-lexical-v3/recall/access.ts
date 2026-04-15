@@ -5,6 +5,7 @@ import {
 	sliceResidentIntegerArray,
 	sliceSentinelBucket,
 } from "../layout/integer-arrays";
+import { collectBodySummaryBlockIdsForFamily } from "../layout/body-summary-postings";
 import type { ResidentBase } from "../layout/types";
 import { lookupHanBigramIndex } from "../layout/han-route";
 
@@ -79,11 +80,7 @@ export function collectBodySummaryBlockIds(
 	base: ResidentBase,
 	familyId: number,
 ): number[] {
-	return sliceSentinelBucket(
-		base.bodySummary.postings.postingStarts,
-		base.bodySummary.postings.blockIds,
-		familyId,
-	);
+	return collectBodySummaryBlockIdsForFamily(base.bodySummary, familyId);
 }
 
 export function getBodyBlockExactFamilyIds(
@@ -106,47 +103,83 @@ export function getBodyBlockExactTokenPositions(
 	return Array.from({ length: count }, (_, index) => index);
 }
 
-export function getDocIdentityHanWitnessFamilyIds(
+export function getDocIdentityHanWitnessStringIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.identityWitnessStartByDocId,
-		base.hanRoute.identityWitnessFamilyIds,
+		base.hanRoute.identityWitnessStringIds,
 		docId,
 	);
 }
 
-export function getDocRouteHanWitnessFamilyIds(
+export function getDocIdentityHanWitnessTexts(
+	base: ResidentBase,
+	docId: number,
+): string[] {
+	return getDocIdentityHanWitnessStringIds(base, docId).map((stringId) =>
+		readResidentString(base, stringId),
+	);
+}
+
+export function getDocRouteHanWitnessStringIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.routeWitnessStartByDocId,
-		base.hanRoute.routeWitnessFamilyIds,
+		base.hanRoute.routeWitnessStringIds,
 		docId,
 	);
 }
 
-export function getDocHeadingHanWitnessFamilyIds(
+export function getDocRouteHanWitnessTexts(
+	base: ResidentBase,
+	docId: number,
+): string[] {
+	return getDocRouteHanWitnessStringIds(base, docId).map((stringId) =>
+		readResidentString(base, stringId),
+	);
+}
+
+export function getDocHeadingHanWitnessStringIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.headingWitnessStartByDocId,
-		base.hanRoute.headingWitnessFamilyIds,
+		base.hanRoute.headingWitnessStringIds,
 		docId,
 	);
 }
 
-export function getBodyBlockHanWitnessFamilyIds(
+export function getDocHeadingHanWitnessTexts(
+	base: ResidentBase,
+	docId: number,
+): string[] {
+	return getDocHeadingHanWitnessStringIds(base, docId).map((stringId) =>
+		readResidentString(base, stringId),
+	);
+}
+
+export function getBodyBlockHanWitnessStringIds(
 	base: ResidentBase,
 	blockId: number,
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.bodyWitnessStartByBlockId,
-		base.hanRoute.bodyWitnessFamilyIds,
+		base.hanRoute.bodyWitnessStringIds,
 		blockId,
+	);
+}
+
+export function getBodyBlockHanWitnessTexts(
+	base: ResidentBase,
+	blockId: number,
+): string[] {
+	return getBodyBlockHanWitnessStringIds(base, blockId).map((stringId) =>
+		readResidentString(base, stringId),
 	);
 }
 
