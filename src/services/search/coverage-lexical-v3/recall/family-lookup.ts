@@ -165,29 +165,55 @@ function findFirstFamilyIdAtOrAfter(
 }
 
 function computePrefixMatchLimit(queryUnitText: string): number {
-	if (queryUnitText.length <= 2) {
-		return 16;
+	switch (resolvePrefixLengthBand(queryUnitText.length)) {
+		case 0:
+			return 16;
+		case 3:
+			return 32;
+		case 4:
+			return 48;
+		case 5:
+			return 64;
+		case 6:
+			return 80;
+		case 7:
+			return 96;
+		case 8:
+			return 112;
+		default:
+			return 128;
 	}
-	if (queryUnitText.length <= 4) {
-		return 32;
-	}
-	if (queryUnitText.length <= 7) {
-		return 64;
-	}
-	return 96;
 }
 
 function computePrefixScanBudget(queryUnitText: string, matchLimit: number): number {
-	if (queryUnitText.length <= 2) {
-		return Math.max(32, matchLimit * 3);
+	switch (resolvePrefixLengthBand(queryUnitText.length)) {
+		case 0:
+			return Math.max(96, matchLimit * 6);
+		case 3:
+			return Math.max(256, matchLimit * 8);
+		case 4:
+			return Math.max(512, matchLimit * 10);
+		case 5:
+			return Math.max(1024, matchLimit * 16);
+		case 6:
+			return Math.max(2048, matchLimit * 26);
+		case 7:
+			return Math.max(4096, matchLimit * 42);
+		case 8:
+			return Math.max(6144, matchLimit * 55);
+		default:
+			return Math.max(8192, matchLimit * 64);
 	}
-	if (queryUnitText.length <= 4) {
-		return Math.max(96, matchLimit * 3);
+}
+
+function resolvePrefixLengthBand(queryUnitLength: number): 0 | 3 | 4 | 5 | 6 | 7 | 8 | 9 {
+	if (queryUnitLength <= 2) {
+		return 0;
 	}
-	if (queryUnitText.length <= 7) {
-		return Math.max(192, matchLimit * 4);
+	if (queryUnitLength <= 8) {
+		return queryUnitLength as 3 | 4 | 5 | 6 | 7 | 8;
 	}
-	return Math.max(256, matchLimit * 4);
+	return 9;
 }
 
 function compareQueryFamilyMatch(
