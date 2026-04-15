@@ -46,6 +46,11 @@ type HanCompletionSummary = Readonly<{
 	strongestTier: HanSurfaceCompletionTier;
 }>;
 
+type HanSurfaceDominanceProfile = Readonly<{
+	completedGroupCount: number;
+	tierScoreTotal: number;
+}>;
+
 const MAX_HAN_RAW_REFINE_BLOCKS_PER_DOC = 96;
 const MAX_HAN_RAW_REFINE_BLOCKS_PER_QUERY = 384;
 
@@ -122,9 +127,14 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const searchTerms = this.getQueryTerms(queryText);
 		const result = this.engine.search(queryText, searchTerms);
 		const refinedCandidates = await this.refineHanSurfaceCompletion(result);
-		const visibleCandidates = request.hideWeaklyRelatedResults
+		const weaklyPrunedCandidates = request.hideWeaklyRelatedResults
 			? filterToTopCoverageGateBand(refinedCandidates)
 			: refinedCandidates;
+		const visibleCandidates = applyHanSurfaceCompletionDominance(
+			result,
+			weaklyPrunedCandidates,
+			request.hideWeaklyRelatedResults === true,
+		);
 		const queryTerms = result.recallState.queryAnalysis.primaryUnits.map((unit) => unit.text);
 		return visibleCandidates.slice(0, request.maxItemResults).map((candidate) => ({
 			path: candidate.path,
@@ -564,4 +574,129 @@ function hasSameCoverageGate(
 		left.crossScriptSatisfiedGroupCount ===
 			right.crossScriptSatisfiedGroupCount
 	);
+}
+
+function applyHanSurfaceCompletionDominance(
+	result: CoverageLexicalV3SearchResult,
+	candidates: readonly EvidencePackingProfile[],
+	hideWeaklyRelatedResults: boolean,
+): readonly EvidencePackingProfile[] {
+	const topBand = collectLeadingCoverageGateBand(candidates);
+	if (topBand.length <= 1) {
+		return candidates;
+	}
+	const eligibleSurfaceGroupIndices = collectEligibleHanSurfaceDominanceGroupIndices(
+		result,
+	);
+	if (eligibleSurfaceGroupIndices.length === 0) {
+		return candidates;
+	}
+	const dominanceProfiles = new Map<number, HanSurfaceDominanceProfile>(
+		topBand.map((candidate) => [
+			candidate.docId,
+			buildHanSurfaceDominanceProfile(candidate, eligibleSurfaceGroupIndices),
+		]),
+	);
+	const sortedTopBand = [...topBand].sort((left, right) => {
+		const dominanceComparison = compareHanSurfaceDominanceProfiles(
+			dominanceProfiles.get(left.docId) ?? EMPTY_HAN_SURFACE_DOMINANCE_PROFILE,
+			dominanceProfiles.get(right.docId) ?? EMPTY_HAN_SURFACE_DOMINANCE_PROFILE,
+		);
+		if (dominanceComparison !== 0) {
+			return dominanceComparison;
+		}
+		return comparePackingProfiles(left, right);
+	});
+	const strongestProfile = dominanceProfiles.get(sortedTopBand[0].docId) ?? EMPTY_HAN_SURFACE_DOMINANCE_PROFILE;
+	const filteredTopBand =
+		hideWeaklyRelatedResults && strongestProfile.completedGroupCount > 0
+			? sortedTopBand.filter((candidate) =>
+				(dominanceProfiles.get(candidate.docId) ?? EMPTY_HAN_SURFACE_DOMINANCE_PROFILE)
+					.completedGroupCount > 0,
+			)
+			: sortedTopBand;
+	if (filteredTopBand.length === topBand.length && filteredTopBand.every((candidate, index) => candidate === candidates[index])) {
+		return candidates;
+	}
+	return [...filteredTopBand, ...candidates.slice(topBand.length)];
+}
+
+const EMPTY_HAN_SURFACE_DOMINANCE_PROFILE: HanSurfaceDominanceProfile = {
+	completedGroupCount: 0,
+	tierScoreTotal: 0,
+};
+
+function collectLeadingCoverageGateBand(
+	candidates: readonly EvidencePackingProfile[],
+): readonly EvidencePackingProfile[] {
+	const strongestCoverageGate = candidates[0]?.coverageGate;
+	if (strongestCoverageGate == null) {
+		return [];
+	}
+	const topBand: EvidencePackingProfile[] = [];
+	for (const candidate of candidates) {
+		if (!hasSameCoverageGate(candidate.coverageGate, strongestCoverageGate)) {
+			break;
+		}
+		topBand.push(candidate);
+	}
+	return topBand;
+}
+
+function collectEligibleHanSurfaceDominanceGroupIndices(
+	result: CoverageLexicalV3SearchResult,
+): number[] {
+	const primaryUnitsBySurfaceGroupIndex = new Map<number, string[]>();
+	for (const unit of result.recallState.queryAnalysis.primaryUnits) {
+		if (unit.source !== "han_tokenizer_real" || unit.surfaceGroupIndex == null) {
+			continue;
+		}
+		const existing = primaryUnitsBySurfaceGroupIndex.get(unit.surfaceGroupIndex) ?? [];
+		existing.push(unit.text);
+		primaryUnitsBySurfaceGroupIndex.set(unit.surfaceGroupIndex, existing);
+	}
+	return result.recallState.queryAnalysis.surfaceGroups
+		.filter((group) => group.kind === "han")
+		.filter((group) => {
+			const realHanTerms = primaryUnitsBySurfaceGroupIndex.get(group.index) ?? [];
+			return realHanTerms.length === 1 && Array.from(group.text).length > Array.from(realHanTerms[0]).length;
+		})
+		.map((group) => group.index);
+}
+
+function buildHanSurfaceDominanceProfile(
+	candidate: EvidencePackingProfile,
+	eligibleSurfaceGroupIndices: readonly number[],
+): HanSurfaceDominanceProfile {
+	const tierBySurfaceGroupIndex = new Map<number, HanSurfaceCompletionTier>(
+		candidate.hanSurfaceCompletionGroups.map((group) => [group.surfaceGroupIndex, group.tier]),
+	);
+	let completedGroupCount = 0;
+	let tierScoreTotal = 0;
+	for (const surfaceGroupIndex of eligibleSurfaceGroupIndices) {
+		const tier = tierBySurfaceGroupIndex.get(surfaceGroupIndex) ?? "none";
+		const tierScore = getHanSurfaceCompletionTierScore(tier);
+		if (tierScore <= 0) {
+			continue;
+		}
+		completedGroupCount += 1;
+		tierScoreTotal += tierScore;
+	}
+	return {
+		completedGroupCount,
+		tierScoreTotal,
+	};
+}
+
+function compareHanSurfaceDominanceProfiles(
+	left: HanSurfaceDominanceProfile,
+	right: HanSurfaceDominanceProfile,
+): number {
+	if (left.completedGroupCount !== right.completedGroupCount) {
+		return right.completedGroupCount - left.completedGroupCount;
+	}
+	if (left.tierScoreTotal !== right.tierScoreTotal) {
+		return right.tierScoreTotal - left.tierScoreTotal;
+	}
+	return 0;
 }

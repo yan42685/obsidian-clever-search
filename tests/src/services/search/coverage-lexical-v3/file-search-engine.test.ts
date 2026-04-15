@@ -767,6 +767,180 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(all.map((file) => file.path)).toEqual(["strong.md", "weak.md"]);
 	});
 
+	test("searchFiles reorders the top coverage band by Han surface completion dominance", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "partial.md",
+				basename: "partial",
+				folder: "notes",
+				content: "??",
+			}),
+			createDocument({
+				path: "complete.md",
+				basename: "complete",
+				folder: "notes",
+				content: "???",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "???",
+					normalizedQueryText: "???",
+					surfaceGroups: [{ index: 0, text: "???", kind: "han" }],
+					primaryUnits: [
+						{ index: 0, text: "??", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "partial.md",
+					coverageGate: {
+						realizedCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hanSurfaceCompletionGroups: [
+						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "none" },
+					],
+					completedHanSurfaceGroupCount: 0,
+					hanSurfaceCompletionTierScoreTotal: 0,
+					strongestHanSurfaceCompletionTier: "none",
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "complete.md",
+					coverageGate: {
+						realizedCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hanSurfaceCompletionGroups: [
+						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "body_residue" },
+					],
+					completedHanSurfaceGroupCount: 1,
+					hanSurfaceCompletionTierScoreTotal: 1,
+					strongestHanSurfaceCompletionTier: "body_residue",
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: typeof search;
+				getResidentBase: () => ResidentBase | null;
+			};
+		}).engine = {
+			search,
+			getResidentBase: () => null,
+		};
+
+		const matchedFiles = await engine.searchFiles({
+			queryText: "???",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: false,
+			maxItemResults: 5,
+		});
+
+		expect(matchedFiles.map((file) => file.path)).toEqual(["complete.md", "partial.md"]);
+	});
+
+	test("searchFiles hides same-band Han partials when weak results are hidden", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "partial.md",
+				basename: "partial",
+				folder: "notes",
+				content: "??",
+			}),
+			createDocument({
+				path: "complete.md",
+				basename: "complete",
+				folder: "notes",
+				content: "???",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "???",
+					normalizedQueryText: "???",
+					surfaceGroups: [{ index: 0, text: "???", kind: "han" }],
+					primaryUnits: [
+						{ index: 0, text: "??", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "partial.md",
+					coverageGate: {
+						realizedCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hanSurfaceCompletionGroups: [
+						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "none" },
+					],
+					completedHanSurfaceGroupCount: 0,
+					hanSurfaceCompletionTierScoreTotal: 0,
+					strongestHanSurfaceCompletionTier: "none",
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "complete.md",
+					coverageGate: {
+						realizedCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hanSurfaceCompletionGroups: [
+						{ surfaceGroupIndex: 0, surfaceText: "???", tier: "body_window" },
+					],
+					completedHanSurfaceGroupCount: 1,
+					hanSurfaceCompletionTierScoreTotal: 2,
+					strongestHanSurfaceCompletionTier: "body_window",
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: typeof search;
+				getResidentBase: () => ResidentBase | null;
+			};
+		}).engine = {
+			search,
+			getResidentBase: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: "???",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual(["complete.md"]);
+	});
+
 	test("searchFiles keeps weak witness order when indexed snapshots are unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		await engine.reIndexAll([
