@@ -381,15 +381,22 @@ function buildResidentHanRoute(
 		...documents.flatMap((document) => document.identityHanBigramIds),
 		...documents.flatMap((document) => document.routeHanBigramIds),
 	]);
-	const bodyBigramIds = dedupeSortedNumbers(
-		allBodyBlocks.flatMap((block) => block.hanBigramIds),
-	);
-	if (metadataBigramIds.length === 0 && bodyBigramIds.length === 0) {
+	const bodyPostingsByBigramId = new Map<number, number[]>();
+	for (let blockId = 0; blockId < allBodyBlocks.length; blockId += 1) {
+		for (const bigramId of allBodyBlocks[blockId]?.hanBigramIds ?? []) {
+			let blockIds = bodyPostingsByBigramId.get(bigramId);
+			if (!blockIds) {
+				blockIds = [];
+				bodyPostingsByBigramId.set(bigramId, blockIds);
+			}
+			blockIds.push(blockId);
+		}
+	}
+	if (metadataBigramIds.length === 0 && bodyPostingsByBigramId.size === 0) {
 		return buildHanRouteArena({
 			bigramIds: [],
 			metadataDocIdsByBigram: [],
-			bodyBigramIds: [],
-			bodyBlockIdsByBigram: [],
+			bodyPostingsByBigramId: new Map(),
 			identityWitnessStringIdsByDoc,
 			routeWitnessStringIdsByDoc,
 			headingWitnessStringIdsByDoc,
@@ -399,15 +406,8 @@ function buildResidentHanRoute(
 	const metadataBigramIndexById = new Map(
 		metadataBigramIds.map((bigramId, index) => [bigramId, index]),
 	);
-	const bodyBigramIndexById = new Map(
-		bodyBigramIds.map((bigramId, index) => [bigramId, index]),
-	);
 	const metadataDocIdsByBigram = Array.from(
 		{ length: metadataBigramIds.length },
-		() => [] as number[],
-	);
-	const bodyBlockIdsByBigram = Array.from(
-		{ length: bodyBigramIds.length },
 		() => [] as number[],
 	);
 	for (let docId = 0; docId < documents.length; docId += 1) {
@@ -422,19 +422,10 @@ function buildResidentHanRoute(
 			metadataBigramIndexById,
 		);
 	}
-	for (let blockId = 0; blockId < allBodyBlocks.length; blockId += 1) {
-		pushBigramPostings(
-			bodyBlockIdsByBigram,
-			allBodyBlocks[blockId]?.hanBigramIds ?? [],
-			blockId,
-			bodyBigramIndexById,
-		);
-	}
 	return buildHanRouteArena({
 		bigramIds: metadataBigramIds,
 		metadataDocIdsByBigram,
-		bodyBigramIds,
-		bodyBlockIdsByBigram,
+		bodyPostingsByBigramId,
 		identityWitnessStringIdsByDoc,
 		routeWitnessStringIdsByDoc,
 		headingWitnessStringIdsByDoc,
@@ -627,7 +618,6 @@ class StringArenaBuilder {
 		} as const;
 	}
 }
-
 
 
 

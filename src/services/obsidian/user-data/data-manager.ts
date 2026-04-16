@@ -5868,16 +5868,48 @@ export class DataManager {
     ].filter((segment) => segment.bytes > 0);
     const hanRouteBodyDetailSegments: Array<{ segment: string; bytes: number }> = [
       {
-        segment: "bigramIds",
-        bytes: metrics.hanRouteBodyBigramIdsBytes,
+        segment: "singletonTermIds",
+        bytes: metrics.hanRouteBodyHanSingletonTermIdsBytes,
       },
       {
-        segment: "postingStarts",
-        bytes: metrics.hanRouteBodyHanPostingStartsBytes,
+        segment: "singletonBodyBlockIds",
+        bytes: metrics.hanRouteBodyHanSingletonBodyBlockIdsBytes,
       },
       {
-        segment: "bodyBlockIds",
-        bytes: metrics.hanRouteBodyHanBodyBlockIdsBytes,
+        segment: "pairTermIds",
+        bytes: metrics.hanRouteBodyHanPairTermIdsBytes,
+      },
+      {
+        segment: "pairFirstBodyBlockIds",
+        bytes: metrics.hanRouteBodyHanPairFirstBodyBlockIdsBytes,
+      },
+      {
+        segment: "pairSecondBodyBlockIds",
+        bytes: metrics.hanRouteBodyHanPairSecondBodyBlockIdsBytes,
+      },
+      {
+        segment: "smallTermIds",
+        bytes: metrics.hanRouteBodyHanSmallTermIdsBytes,
+      },
+      {
+        segment: "smallPostingStarts",
+        bytes: metrics.hanRouteBodyHanSmallPostingStartsBytes,
+      },
+      {
+        segment: "smallBodyBlockIds",
+        bytes: metrics.hanRouteBodyHanSmallBodyBlockIdsBytes,
+      },
+      {
+        segment: "deltaTermIds",
+        bytes: metrics.hanRouteBodyHanDeltaTermIdsBytes,
+      },
+      {
+        segment: "deltaTapeStarts",
+        bytes: metrics.hanRouteBodyHanDeltaTapeStartsBytes,
+      },
+      {
+        segment: "deltaPostingTape",
+        bytes: metrics.hanRouteBodyHanDeltaPostingTapeBytes,
       },
     ].filter((segment) => segment.bytes > 0);
     const stringArenaDetailSegments: Array<{ segment: string; bytes: number }> = [
@@ -6466,5 +6498,4 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
-
 

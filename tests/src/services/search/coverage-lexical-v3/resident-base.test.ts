@@ -176,19 +176,18 @@ test("builds mixed metadata and body structures with stable byte buckets", () =>
 		).toBe(true);
 		expect(
 			summary.sectionEncodings.some(
-				(section) => section.sectionKind === "hanRoute.body.bigramIds",
+				(section) => section.sectionKind === "hanRoute.body.singletonTermIds",
 			),
 		).toBe(true);
 		expect(
 			summary.sectionEncodings.some(
-				(section) => section.sectionKind === "hanRoute.body.bodyBlockIds",
+				(section) => section.sectionKind === "hanRoute.body.postingTape",
 			),
 		).toBe(true);
 		expect(residentBase.metrics.stringPayloadBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
 	});
 });
-
 
 
 

@@ -99,7 +99,8 @@ export function buildResidentBaseMetrics(
 		input.bodyBlocks.exactTapeStartByBlockId.byteLength +
 		input.bodyBlocks.exactTapeCountByBlockId.byteLength +
 		input.hanRoute.metadataPostingStarts.byteLength +
-		input.hanRoute.bodyPostingStarts.byteLength +
+		input.hanRoute.bodyAdaptivePostings.smallValueStarts.byteLength +
+		input.hanRoute.bodyAdaptivePostings.deltaTapeStarts.byteLength +
 		input.hanRoute.identityWitnessStartByDocId.byteLength +
 		input.hanRoute.routeWitnessStartByDocId.byteLength +
 		input.hanRoute.headingWitnessStartByDocId.byteLength +
@@ -118,9 +119,16 @@ export function buildResidentBaseMetrics(
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
 		input.exactTapes.familyIds.byteLength +
 		input.hanRoute.bigramIds.byteLength +
-		input.hanRoute.bodyBigramIds.byteLength +
 		input.hanRoute.metadataDocIds.byteLength +
-		input.hanRoute.bodyBlockIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.singletonTermIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.singletonValueIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.pairTermIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.pairFirstValueIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.pairSecondValueIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.smallTermIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.smallValueIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.deltaTermIds.byteLength +
+		input.hanRoute.bodyAdaptivePostings.postingTape.byteLength +
 		input.hanRoute.identityWitnessStringIds.byteLength +
 		input.hanRoute.routeWitnessStringIds.byteLength +
 		input.hanRoute.headingWitnessStringIds.byteLength +
@@ -170,6 +178,28 @@ export function buildResidentBaseMetrics(
 			hanRouteBreakdown.bodyHanPostingStartsBytes,
 		hanRouteBodyHanBodyBlockIdsBytes:
 			hanRouteBreakdown.bodyHanBodyBlockIdsBytes,
+		hanRouteBodyHanSingletonTermIdsBytes:
+			hanRouteBreakdown.bodyHanSingletonTermIdsBytes,
+		hanRouteBodyHanSingletonBodyBlockIdsBytes:
+			hanRouteBreakdown.bodyHanSingletonBodyBlockIdsBytes,
+		hanRouteBodyHanPairTermIdsBytes:
+			hanRouteBreakdown.bodyHanPairTermIdsBytes,
+		hanRouteBodyHanPairFirstBodyBlockIdsBytes:
+			hanRouteBreakdown.bodyHanPairFirstBodyBlockIdsBytes,
+		hanRouteBodyHanPairSecondBodyBlockIdsBytes:
+			hanRouteBreakdown.bodyHanPairSecondBodyBlockIdsBytes,
+		hanRouteBodyHanSmallTermIdsBytes:
+			hanRouteBreakdown.bodyHanSmallTermIdsBytes,
+		hanRouteBodyHanSmallPostingStartsBytes:
+			hanRouteBreakdown.bodyHanSmallPostingStartsBytes,
+		hanRouteBodyHanSmallBodyBlockIdsBytes:
+			hanRouteBreakdown.bodyHanSmallBodyBlockIdsBytes,
+		hanRouteBodyHanDeltaTermIdsBytes:
+			hanRouteBreakdown.bodyHanDeltaTermIdsBytes,
+		hanRouteBodyHanDeltaTapeStartsBytes:
+			hanRouteBreakdown.bodyHanDeltaTapeStartsBytes,
+		hanRouteBodyHanDeltaPostingTapeBytes:
+			hanRouteBreakdown.bodyHanDeltaPostingTapeBytes,
 		hanRouteMetadataWitnessBytes: hanRouteBreakdown.metadataWitnessBytes,
 		hanRouteBodyWitnessBytes: hanRouteBreakdown.bodyWitnessBytes,
 		scaffoldBytes,
@@ -263,17 +293,50 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 				base.hanRoute.metadataDocIds,
 			),
 			describeIntegerSection(
-				"hanRoute.body.bigramIds",
-				base.hanRoute.bodyBigramIds,
+				"hanRoute.body.singletonTermIds",
+				base.hanRoute.bodyAdaptivePostings.singletonTermIds,
 			),
 			describeIntegerSection(
-				"hanRoute.body.starts",
-				base.hanRoute.bodyPostingStarts,
+				"hanRoute.body.singletonValueIds",
+				base.hanRoute.bodyAdaptivePostings.singletonValueIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.pairTermIds",
+				base.hanRoute.bodyAdaptivePostings.pairTermIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.pairFirstValueIds",
+				base.hanRoute.bodyAdaptivePostings.pairFirstValueIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.pairSecondValueIds",
+				base.hanRoute.bodyAdaptivePostings.pairSecondValueIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.smallTermIds",
+				base.hanRoute.bodyAdaptivePostings.smallTermIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.smallValueStarts",
+				base.hanRoute.bodyAdaptivePostings.smallValueStarts,
 				sentinelStartsEncodingFlag(),
 			),
 			describeIntegerSection(
-				"hanRoute.body.bodyBlockIds",
-				base.hanRoute.bodyBlockIds,
+				"hanRoute.body.smallValueIds",
+				base.hanRoute.bodyAdaptivePostings.smallValueIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.deltaTermIds",
+				base.hanRoute.bodyAdaptivePostings.deltaTermIds,
+			),
+			describeIntegerSection(
+				"hanRoute.body.deltaTapeStarts",
+				base.hanRoute.bodyAdaptivePostings.deltaTapeStarts,
+				sentinelStartsEncodingFlag(),
+			),
+			describeIntegerSection(
+				"hanRoute.body.postingTape",
+				base.hanRoute.bodyAdaptivePostings.postingTape,
 			),
 		],
 		indexedSurfaceUtf8Bytes: metrics.indexedSurfaceUtf8Bytes,
@@ -315,6 +378,5 @@ function buildBucketShare(
 		share: safeDivide(bytes, total),
 	};
 }
-
 
 

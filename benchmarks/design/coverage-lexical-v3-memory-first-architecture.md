@@ -841,6 +841,12 @@ Implementation note:
   evidence
 - resident body witness strings remain block-native because ranking and Han
   completion still consume block-level witness text
+- resident body Han postings now use a V3-local adaptive codec copied from the
+  proven V2 shape, with separate `singleton`, `pair`, `small`, and `delta`
+  lanes instead of a single `bodyPostingStarts + bodyBlockIds` scaffold
+- query-time body Han recall decodes those adaptive lanes back into the same
+  block-id candidate sets, so admission semantics stay unchanged while resident
+  scaffold pressure shifts toward per-lane compact encodings
 - the earlier logical-block/cold-sidecar version was removed after witness-only
   confirmation proved sufficient; the active body-Han path is now direct
   `bigram -> bodyBlockId -> witness confirm`

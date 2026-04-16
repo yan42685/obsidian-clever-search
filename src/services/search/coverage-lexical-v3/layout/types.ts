@@ -69,13 +69,25 @@ export type ResidentExactTapeArena = Readonly<{
 	familyIds: ResidentIntegerArray;
 }>;
 
+export type ResidentAdaptivePostingField = Readonly<{
+	singletonTermIds: ResidentIntegerArray;
+	singletonValueIds: ResidentIntegerArray;
+	pairTermIds: ResidentIntegerArray;
+	pairFirstValueIds: ResidentIntegerArray;
+	pairSecondValueIds: ResidentIntegerArray;
+	smallTermIds: ResidentIntegerArray;
+	smallValueStarts: ResidentIntegerArray;
+	smallValueIds: ResidentIntegerArray;
+	deltaTermIds: ResidentIntegerArray;
+	deltaTapeStarts: ResidentIntegerArray;
+	postingTape: Uint8Array;
+}>;
+
 export type ResidentHanRouteArena = Readonly<{
 	bigramIds: Uint32Array;
-	bodyBigramIds: Uint32Array;
 	metadataPostingStarts: ResidentIntegerArray;
 	metadataDocIds: ResidentIntegerArray;
-	bodyPostingStarts: ResidentIntegerArray;
-	bodyBlockIds: ResidentIntegerArray;
+	bodyAdaptivePostings: ResidentAdaptivePostingField;
 	identityWitnessStartByDocId: ResidentIntegerArray;
 	identityWitnessStringIds: ResidentIntegerArray;
 	routeWitnessStartByDocId: ResidentIntegerArray;
@@ -112,6 +124,17 @@ export type ResidentBaseMetrics = Readonly<{
 	hanRouteBodyBigramIdsBytes: number;
 	hanRouteBodyHanPostingStartsBytes: number;
 	hanRouteBodyHanBodyBlockIdsBytes: number;
+	hanRouteBodyHanSingletonTermIdsBytes: number;
+	hanRouteBodyHanSingletonBodyBlockIdsBytes: number;
+	hanRouteBodyHanPairTermIdsBytes: number;
+	hanRouteBodyHanPairFirstBodyBlockIdsBytes: number;
+	hanRouteBodyHanPairSecondBodyBlockIdsBytes: number;
+	hanRouteBodyHanSmallTermIdsBytes: number;
+	hanRouteBodyHanSmallPostingStartsBytes: number;
+	hanRouteBodyHanSmallBodyBlockIdsBytes: number;
+	hanRouteBodyHanDeltaTermIdsBytes: number;
+	hanRouteBodyHanDeltaTapeStartsBytes: number;
+	hanRouteBodyHanDeltaPostingTapeBytes: number;
 	hanRouteMetadataWitnessBytes: number;
 	hanRouteBodyWitnessBytes: number;
 	scaffoldBytes: number;
@@ -157,5 +180,3 @@ export type ResidentBase = Readonly<{
 	hanRoute: ResidentHanRouteArena;
 	metrics: ResidentBaseMetrics;
 }>;
-
-

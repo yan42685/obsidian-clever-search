@@ -1,7 +1,15 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
-import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
+import {
+	buildHanRouteArena,
+	decodeBodyHanPosting,
+} from "src/services/search/coverage-lexical-v3/layout/han-route";
+import {
+	encodeHanBigramId,
+	type V3DocumentTokenizer,
+} from "src/services/search/coverage-lexical-v3/query";
+import { collectHanBodyBlockIds } from "src/services/search/coverage-lexical-v3/recall/access";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
@@ -301,11 +309,20 @@ describe("coverage lexical v3 han route", () => {
 			}),
 		]);
 
-		expect(residentBase.hanRoute.bodyBigramIds.length).toBeGreaterThan(0);
-		expect(residentBase.hanRoute.bodyPostingStarts.length).toBe(
-			residentBase.hanRoute.bodyBigramIds.length + 1,
-		);
-		expect(residentBase.hanRoute.bodyBlockIds.length).toBeGreaterThan(0);
+		const postings = residentBase.hanRoute.bodyAdaptivePostings;
+
+		expect(
+			postings.singletonTermIds.length +
+				postings.pairTermIds.length +
+				postings.smallTermIds.length +
+				postings.deltaTermIds.length,
+		).toBeGreaterThan(0);
+		expect(
+			collectHanBodyBlockIds(residentBase, encodeHanBigramId("\u7f13\u5b58")),
+		).toEqual([0]);
+		expect(
+			collectHanBodyBlockIds(residentBase, encodeHanBigramId("\u6269\u5bb9")),
+		).toHaveLength(1);
 	});
 
 	test("body Han route keeps a sparse body-only bigram vocabulary", () => {
@@ -318,15 +335,40 @@ describe("coverage lexical v3 han route", () => {
 			}),
 		]);
 
-		expect(Array.from(residentBase.hanRoute.bigramIds)).not.toEqual(
-			Array.from(residentBase.hanRoute.bodyBigramIds),
-		);
+		const postings = residentBase.hanRoute.bodyAdaptivePostings;
+
 		expect(residentBase.hanRoute.metadataPostingStarts.length).toBe(
 			residentBase.hanRoute.bigramIds.length + 1,
 		);
-		expect(residentBase.hanRoute.bodyPostingStarts.length).toBe(
-			residentBase.hanRoute.bodyBigramIds.length + 1,
-		);
+		expect(postings.smallValueStarts.length).toBe(postings.smallTermIds.length);
+		expect(postings.deltaTapeStarts.length).toBe(postings.deltaTermIds.length);
+		expect(residentBase.metrics.hanRouteBodyBigramIdsBytes).toBeGreaterThan(0);
+	});
+
+	test("body Han adaptive codec splits singleton pair small and delta lanes", () => {
+		const arena = buildHanRouteArena({
+			bigramIds: [],
+			metadataDocIdsByBigram: [],
+			bodyPostingsByBigramId: new Map([
+				[11, [3]],
+				[12, [1, 4]],
+				[13, [0, 2, 5]],
+				[14, [0, 1, 2, 3, 4, 5, 6, 7, 8]],
+			]),
+			identityWitnessStringIdsByDoc: [],
+			routeWitnessStringIdsByDoc: [],
+			headingWitnessStringIdsByDoc: [],
+			bodyWitnessStringIdsByBlock: [],
+		});
+
+		expect(Array.from(arena.bodyAdaptivePostings.singletonTermIds)).toEqual([11]);
+		expect(Array.from(arena.bodyAdaptivePostings.pairTermIds)).toEqual([12]);
+		expect(Array.from(arena.bodyAdaptivePostings.smallTermIds)).toEqual([13]);
+		expect(Array.from(arena.bodyAdaptivePostings.deltaTermIds)).toEqual([14]);
+		expect(decodeBodyHanPosting(arena, 11)).toEqual([3]);
+		expect(decodeBodyHanPosting(arena, 12)).toEqual([1, 4]);
+		expect(decodeBodyHanPosting(arena, 13)).toEqual([0, 2, 5]);
+		expect(decodeBodyHanPosting(arena, 14)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
 	});
 
 	test("oversized Han segments still admit cross-chunk surfaces through chunk route and full-segment confirm", () => {
