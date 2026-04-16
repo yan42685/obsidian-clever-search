@@ -411,12 +411,10 @@ class LexicalSearchModal extends Modal {
 	private readonly setting = getInstance(OuterSetting);
 
 	onOpen() {
-		this.modalEl.style.width = "42vw";
+		this.modalEl.style.width = "52vw";
+		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const { contentEl } = this;
 		contentEl.empty();
-
-		contentEl.createEl("h3", { text: t("Manage lexical search") });
-		contentEl.createEl("p", { text: t("lexicalModal.manageIntro") });
 
 		contentEl.createEl("h4", { text: t("lexicalModal.section.display") });
 
@@ -448,7 +446,6 @@ class LexicalSearchModal extends Modal {
 
 		new Setting(contentEl)
 			.setName(t("Weak file pruning"))
-			.setDesc(t("Weak file pruning desc"))
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.setting.hideWeaklyRelatedResults)

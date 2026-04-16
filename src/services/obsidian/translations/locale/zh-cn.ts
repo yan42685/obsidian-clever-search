@@ -1,3 +1,5 @@
+import { stopWordsEnTargetUrl } from "./en";
+
 export default {
 	"searchNotice.lexicalIndexingProgressPrefix": "\u5df2\u7d22\u5f15 ",
 	"searchNotice.lexicalIndexingProgressSuffix": "",
@@ -136,8 +138,6 @@ export default {
 	"Lexical search desc":
 		"集中管理词法搜索的结果显示、文件内 UI 与匹配或索引选项。",
 	"Manage lexical search": "管理词法搜索",
-	"lexicalModal.manageIntro":
-		"在这里集中配置词法搜索的结果展示、匹配策略与索引相关选项。",
 	"lexicalModal.section.display": "结果与界面",
 	"lexicalModal.section.matching": "匹配与索引",
 	"hybridModal.manageIntro":
@@ -179,13 +179,13 @@ export default {
 	"Weak file pruning desc": "\u5f00\u542f\u540e\uff0c\u53ea\u663e\u793a\u6700\u9ad8 coverage gate band \u7684\u7ed3\u679c\uff1b\u8f83\u4f4e band \u7ed3\u679c\u76f4\u63a5\u9690\u85cf\u3002",
 	"Prefix match": "前缀匹配",
 	"Prefix match desc":
-		"对 metadata 和正文里的连续字母数字序列做有限预算的前缀扩展。当前流程会在同一预算下优先经过 metadata 字段，再在剩余预算内扩展正文，因此不保证 100% 召回所有 prefix 命中，主要用于优化输入体验。",
+		"对 metadata（路径、别名、标签）和正文里的连续字母数字序列做有限预算的前缀扩展。当前流程会在同一预算下优先经过 metadata 字段，再在剩余预算内扩展正文，因此不保证 100% 召回所有 prefix 命中，主要用于优化输入体验。",
 	"Character fuzzy allowed": "允许字符级模糊匹配",
 	"Character fuzzy allowed desc":
 		"fuzzy 只对文件路径、别名和标签生效；仅在拉丁序列字符数 >= 6 且 exact / prefix miss 之后，才会在有限预算内尝试最多 1 typo 的补救，因此不保证 100% recall。",
 	"English word blacklist": "英文停用词",
 	"English word blacklist desc":
-		"将 do、and、them 等意义较弱的英文词排除出索引，可提升搜索与建索引速度。可按需修改 stop-words-en.txt。",
+		`将 do、and、them 等意义较弱的英文词排除出索引，可提升搜索与建索引速度。可按需修改 ${stopWordsEnTargetUrl}。`,
 	"Chinese patch": "中文补丁",
 	"Chinese patch desc": "为中文提供更好的搜索结果",
 	"Chinese word blacklist": "中文停用词",

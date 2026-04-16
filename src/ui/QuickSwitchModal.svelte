@@ -533,7 +533,10 @@
 
 	.quickswitch-match {
 		font-weight: 800;
-		color: var(--text-accent, var(--text-normal));
+		color: var(
+			--cs-highlight-char-color,
+			var(--text-accent, var(--text-normal))
+		);
 		text-decoration: none;
 	}
 

@@ -584,16 +584,32 @@
 
 	:global(.search-container .cs-search-match) {
 		font-weight: 700;
-		color: inherit;
+		color: var(
+			--cs-highlight-char-color,
+			var(--text-accent, var(--text-normal))
+		);
 	}
 
 	:global(.search-container .cs-search-match-weak) {
 		font-weight: 600;
-		color: inherit;
+		color: var(
+			--cs-highlight-char-color,
+			var(--text-accent, var(--text-normal))
+		);
 		text-decoration-line: underline;
 		text-decoration-style: dashed;
 		text-decoration-thickness: 1px;
 		text-underline-offset: 0.12em;
+	}
+
+	:global(.search-container mark) {
+		background: transparent;
+		color: var(
+			--cs-highlight-char-color,
+			var(--text-accent, var(--text-normal))
+		);
+		font-weight: 700;
+		padding: 0;
 	}
 
 	.left-pane {

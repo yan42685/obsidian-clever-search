@@ -171,7 +171,6 @@ export default {
 	"Lexical search": "Lexical search",
 	"Lexical search desc": "Manage lexical result display, in-file UI, and matching or indexing behavior in one place.",
 	"Manage lexical search": "Manage lexical search",
-	"lexicalModal.manageIntro": "Configure lexical search display, matching strategy, and indexing-related options here.",
 	"lexicalModal.section.display": "Result display",
 	"lexicalModal.section.matching": "Matching and indexing",
 
