@@ -137,6 +137,10 @@ type BodyScopePrefilter = Readonly<{
 	virtualOccurrences: readonly BodyOccurrence[];
 }>;
 
+type BodyWindowSearchState = Readonly<{
+	representativeByUnit: Map<number, BodyOccurrence>;
+}>;
+
 type PositionedFamilyOccurrence = Readonly<{
 	familyId: number;
 	ordinalPosition: number;
@@ -653,9 +657,19 @@ function buildBodyWindowCandidateFromVirtualOccurrences(
 	}
 	let bestWindow: BodyWindowCandidate | null = null;
 	for (let start = 0; start < virtualOccurrences.length; start += 1) {
+		const state = createBodyWindowSearchState();
 		for (let end = start; end < virtualOccurrences.length; end += 1) {
-			const candidate = summarizeWindowCandidate(
-				virtualOccurrences.slice(start, end + 1),
+			const representativeChanged = pushBodyWindowOccurrence(
+				state,
+				virtualOccurrences[end],
+			);
+			// If the best representative set is unchanged, this window would
+			// summarize to the same shortlist item as the previous `end`.
+			if (!representativeChanged || state.representativeByUnit.size < 2) {
+				continue;
+			}
+			const candidate = summarizeWindowCandidateFromRepresentatives(
+				state.representativeByUnit,
 				headingFamilyIds,
 			);
 			if (candidate == null || !passesBodyWindowAdmission(candidate)) {
@@ -667,6 +681,24 @@ function buildBodyWindowCandidateFromVirtualOccurrences(
 		}
 	}
 	return bestWindow;
+}
+
+function createBodyWindowSearchState(): BodyWindowSearchState {
+	return {
+		representativeByUnit: new Map<number, BodyOccurrence>(),
+	};
+}
+
+function pushBodyWindowOccurrence(
+	state: BodyWindowSearchState,
+	occurrence: BodyOccurrence,
+): boolean {
+	const current = state.representativeByUnit.get(occurrence.unitIndex);
+	if (current != null && compareOccurrenceRepresentative(current, occurrence) <= 0) {
+		return false;
+	}
+	state.representativeByUnit.set(occurrence.unitIndex, occurrence);
+	return true;
 }
 
 function buildChainVirtualOccurrences(

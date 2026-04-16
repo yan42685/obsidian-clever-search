@@ -1169,3 +1169,42 @@ Validation completed for this phase:
   - `top5 = 1`
   - `zeroRate = 0`
   - `objective = 0.878`
+
+### Phase 21
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes a strict-equivalent body-window
+enumeration hot-path optimization for V3 packing-profile construction without
+changing recall structure, admission rules, or final ranking semantics:
+
+- `buildBodyWindowCandidateFromVirtualOccurrences(...)` no longer rebuilds each
+  candidate window via `slice(...) + summarizeWindowCandidate(...)`
+- body-window enumeration now keeps a per-start incremental
+  `representativeByUnit` state and updates it only when the newly appended
+  occurrence actually becomes the best representative for its query unit
+- windows whose appended occurrence does not change any unit representative are
+  skipped entirely because they would produce the same admitted shortlist state
+  as the previous end boundary
+- admitted-window comparison still uses the same exact signals and order:
+  - `coveredDistinctUnitCount`
+  - `preservesQueryOrder`
+  - `approxHeadTailSpan`
+  - `approxMaxAdjacentGap`
+  - `approxTotalGapMass`
+  - stable block/start/representative fallback
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/body-window-selection.test.ts`
+  now compares the incremental selector against a duplicated exhaustive
+  selector on repeated exact single-block windows, mixed exact/prefix
+  single-block windows, and adjacent two-block windows
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes after
+  the optimization, confirming existing packing/regression behavior remains
+  stable
+- `tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts`
+  passes after the optimization
+- `npm run typecheck:build` passes on 2026-04-16
+- `npm run benchmark:coverage-lexical` passes on 2026-04-16 with
+  `CoverageLexical(V3)` still at `top1 = 0.808`, `zeroRate = 0`, `top5 = 1`,
