@@ -276,7 +276,7 @@ function createResidentBase(): ResidentBase {
 			familyLexiconBytes: 0,
 			metadataContainerBytes: 0,
 			headingBytes: 0,
-			bodySummaryBytes: 0,
+			familyPostingBytes: 0,
 			bodyBlockBytes: 0,
 			exactTapeBytes: 0,
 			hanRouteBytes: 0,
