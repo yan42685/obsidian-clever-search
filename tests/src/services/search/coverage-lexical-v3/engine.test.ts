@@ -188,6 +188,182 @@ describe("coverage lexical v3 engine", () => {
 		).toEqual(["\u4e0a\u9762"]);
 	});
 
+	test("stable Han query cover lets split real terms match a longer basename surface", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u8d62\u5b8b\u7a84\u4f53\u5b8b": ["\u8d62\u5b8b", "\u7a84\u4f53"],
+			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/winsong-narrow.md",
+					basename: "\u8d62\u5b8b\u7a84\u4f53\u5b8b",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+				createDocument({
+					path: "zh/winsong-only.md",
+					basename: "\u8d62\u5b8b",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search(
+			"\u8d62\u5b8b\u7a84\u4f53",
+			["\u8d62\u5b8b\u7a84\u4f53", "\u8d62\u5b8b", "\u7a84\u4f53"],
+		);
+
+		expect(
+			result.recallState.queryAnalysis.primaryUnits.map((unit) => ({
+				text: unit.text,
+				source: unit.source,
+			})),
+		).toEqual([
+			{ text: "\u8d62\u5b8b", source: "han_tokenizer_real" },
+			{ text: "\u7a84\u4f53", source: "han_tokenizer_real" },
+		]);
+		expect(result.rankedCandidates[0].path).toBe("zh/winsong-narrow.md");
+		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(2);
+		expect(
+			result.rankedCandidates[0].realizedFamilies.map((family) => family.familyText),
+		).toEqual(["\u8d62\u5b8b", "\u7a84\u4f53"]);
+	});
+
+	test("missed Han real terms can recover through bigram route plus opaque exact confirmation", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
+			"\u666e\u901a": ["\u666e\u901a"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/fallback-hit.md",
+					basename: "\u8d62\u5b8b\u4f53",
+					folder: "zh",
+					content: "\u666e\u901a",
+				}),
+				createDocument({
+					path: "zh/distractor.md",
+					basename: "\u666e\u901a",
+					folder: "zh",
+					content: "\u666e\u901a",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u8d62\u5b8b", ["\u8d62\u5b8b"]);
+
+		expect(
+			result.recallState.queryAnalysis.primaryUnits.map((unit) => ({
+				text: unit.text,
+				source: unit.source,
+			})),
+		).toEqual([
+			{ text: "\u8d62\u5b8b", source: "han_tokenizer_real" },
+		]);
+		expect(result.recallState.unitFamilyMatches[0]?.matches).toEqual([]);
+		expect(result.recallState.candidateDocs.map((candidate) => candidate.docId)).toEqual([1]);
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/fallback-hit.md",
+		]);
+		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(1);
+		expect(result.rankedCandidates[0].exactUnitCount).toBe(0);
+		expect(result.rankedCandidates[0].realizedFamilies).toEqual([
+			expect.objectContaining({
+				queryUnitText: "\u8d62\u5b8b",
+				matchKind: "opaque_exact",
+				inIdentity: true,
+			}),
+		]);
+	});
+
+	test("body-only Han fallback uses witness confirmation without inflating exact count", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/body-fallback.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u8d62\u5b8b\u4f53",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u8d62\u5b8b", ["\u8d62\u5b8b"]);
+
+		expect(result.recallState.unitFamilyMatches[0]?.matches).toEqual([]);
+		expect(result.recallState.candidateDocs[0]?.shortlistedBodyBlockIds.length).toBeGreaterThan(0);
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/body-fallback.md",
+		]);
+		expect(result.rankedCandidates[0].exactUnitCount).toBe(0);
+		expect(result.rankedCandidates[0].realizedFamilies[0]).toEqual(
+			expect.objectContaining({
+				queryUnitText: "\u8d62\u5b8b",
+				matchKind: "opaque_exact",
+				inIdentity: false,
+				inBodyResidue: true,
+			}),
+		);
+	});
+
+	test("exact Han real-term matches still outrank opaque fallback confirmations", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
+			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/exact.md",
+					basename: "\u8d62\u5b8b",
+					folder: "zh",
+					content: "\u666e\u901a",
+				}),
+				createDocument({
+					path: "zh/fallback.md",
+					basename: "\u8d62\u5b8b\u4f53",
+					folder: "zh",
+					content: "\u666e\u901a",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u8d62\u5b8b", ["\u8d62\u5b8b"]);
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/exact.md",
+			"zh/fallback.md",
+		]);
+		expect(result.rankedCandidates[0].realizedFamilies[0]).toEqual(
+			expect.objectContaining({
+				queryUnitText: "\u8d62\u5b8b",
+				matchKind: "exact",
+				inIdentity: true,
+			}),
+		);
+		expect(result.rankedCandidates[1].realizedFamilies[0]).toEqual(
+			expect.objectContaining({
+				queryUnitText: "\u8d62\u5b8b",
+				matchKind: "opaque_exact",
+				inIdentity: true,
+			}),
+		);
+	});
+
 	test("bridge bigrams can recall han candidates without inflating realized coverage", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({

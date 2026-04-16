@@ -3,7 +3,13 @@ import type {
 	IndexedDocument,
 	MatchedFile,
 } from "src/globals/search-types";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { buildV3DirectSubitems } from "./direct-subitems";
+import {
+	logCoverageLexicalV3Debug,
+	nowDebugMs,
+	shouldLogCoverageLexicalV3Debug,
+} from "./debug";
 import { Tokenizer } from "src/services/search/tokenizer";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { getInstance } from "src/utils/my-lib";
@@ -61,6 +67,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	readonly supportsSerialization = false;
 
 	private engine = new CoverageLexicalV3Engine();
+	private readonly outerSetting = getInstance(OuterSetting);
 	private readonly documentsByPath = new Map<string, IndexedDocument>();
 	private batchReindexing = false;
 
@@ -125,19 +132,32 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (queryText.length === 0) {
 			return [];
 		}
+		const shouldLogDebug = shouldLogCoverageLexicalV3Debug(queryText);
+		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const tokenizeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const searchTerms = this.getQueryTerms(queryText);
+		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
+		const engineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const result = this.engine.search(queryText, searchTerms);
+		const engineMs = shouldLogDebug ? nowDebugMs() - engineStartedAtMs : 0;
+		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const refinedCandidates = await this.refineHanSurfaceCompletion(result);
+		const refineMs = shouldLogDebug ? nowDebugMs() - refineStartedAtMs : 0;
+		const pruneStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const weaklyPrunedCandidates = request.hideWeaklyRelatedResults
 			? filterToTopCoverageGateBand(refinedCandidates)
 			: refinedCandidates;
+		const pruneMs = shouldLogDebug ? nowDebugMs() - pruneStartedAtMs : 0;
+		const visibleStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const visibleCandidates = applyHanSurfaceCompletionDominance(
 			result,
 			weaklyPrunedCandidates,
 			request.hideWeaklyRelatedResults === true,
 		);
+		const visibleMs = shouldLogDebug ? nowDebugMs() - visibleStartedAtMs : 0;
+		const materializeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const queryTerms = result.recallState.queryAnalysis.primaryUnits.map((unit) => unit.text);
-		return visibleCandidates.slice(0, request.maxItemResults).map((candidate) => {
+		const matchedFiles = visibleCandidates.slice(0, request.maxItemResults).map((candidate) => {
 			const document = this.documentsByPath.get(candidate.path);
 			const basenameText = document?.basename ?? "";
 			const folderText = document?.folder ?? "";
@@ -161,6 +181,30 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				folderWeakHighlightRanges: metadataHighlights.folderWeakHighlightRanges,
 			};
 		});
+		const materializeMs = shouldLogDebug ? nowDebugMs() - materializeStartedAtMs : 0;
+		if (shouldLogDebug) {
+			logCoverageLexicalV3Debug("file-search-engine.searchFiles", {
+				queryText,
+				searchTermCount: searchTerms.length,
+				hideWeaklyRelatedResults: request.hideWeaklyRelatedResults === true,
+				maxItemResults: request.maxItemResults,
+				candidateDocCount: result.recallState.candidateDocs.length,
+				refinedCandidateCount: refinedCandidates.length,
+				weaklyPrunedCandidateCount: weaklyPrunedCandidates.length,
+				visibleCandidateCount: visibleCandidates.length,
+				returnedCandidateCount: matchedFiles.length,
+				phaseMs: {
+					tokenize: roundDebugMs(tokenizeMs),
+					engine: roundDebugMs(engineMs),
+					hanRefine: roundDebugMs(refineMs),
+					prune: roundDebugMs(pruneMs),
+					visible: roundDebugMs(visibleMs),
+					materialize: roundDebugMs(materializeMs),
+					total: roundDebugMs(nowDebugMs() - startedAtMs),
+				},
+			});
+		}
+		return matchedFiles;
 	}
 
 	getIndexedDocumentCount(): number {
@@ -222,6 +266,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			residentBase,
 			maxSubItemResults,
 			candidateRangeMode,
+			hideWeaklyRelatedResults: this.outerSetting.hideWeaklyRelatedResults,
 		}).subItems.slice(0, maxSubItemResults);
 	}
 
@@ -596,6 +641,10 @@ function dedupePreservingOrder(values: readonly string[]): string[] {
 		output.push(value);
 	}
 	return output;
+}
+
+function roundDebugMs(value: number): number {
+	return Math.round(value * 1000) / 1000;
 }
 
 function filterToTopCoverageGateBand(

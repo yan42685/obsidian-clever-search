@@ -246,6 +246,7 @@ export function buildPackingProfile(
 		const blockEvidence = getCachedBodyBlockEvidence(base, blockId);
 		const exactOccurrences = blockEvidence.exactOccurrences;
 		const witnessOccurrences = blockEvidence.witnessOccurrences;
+		const allOccurrences = [...exactOccurrences, ...witnessOccurrences];
 		bodyWitnessTextsByBlockId.set(blockId, blockEvidence.witnessTexts);
 		bodyApproxSpanByBlockId.set(blockId, blockEvidence.approxSpan);
 		bodyOrdinalSpanByBlockId.set(blockId, blockEvidence.ordinalSpan);
@@ -255,9 +256,7 @@ export function buildPackingProfile(
 				blockId,
 				unitMatches.queryUnitIndex,
 				unitMatches.matches,
-				unitMatches.queryUnitSource === "opaque_han_confirmed"
-					? witnessOccurrences
-					: exactOccurrences,
+				allOccurrences,
 			);
 			if (occurrences.length === 0) {
 				continue;
@@ -513,7 +512,7 @@ function mergeCandidateSpecificHanConfirmedMatches(
 		...getDocHeadingHanWitnessStringIds(base, candidateRecall.docId),
 	]);
 	return unitFamilyMatches.map<V3QueryUnitFamilyMatches>((unitMatches) => {
-		if (unitMatches.queryUnitSource !== "opaque_han_confirmed") {
+		if (!shouldAttemptCandidateSpecificOpaqueConfirm(queryAnalysis, unitMatches)) {
 			return unitMatches;
 		}
 		const mergedMatches = new Map<string, V3QueryFamilyMatch>();
@@ -543,6 +542,27 @@ function mergeCandidateSpecificHanConfirmedMatches(
 			),
 		};
 	});
+}
+
+function shouldAttemptCandidateSpecificOpaqueConfirm(
+	queryAnalysis: V3QueryAnalysis,
+	unitMatches: V3QueryUnitFamilyMatches,
+): boolean {
+	if (unitMatches.queryUnitSource === "opaque_han_confirmed") {
+		return true;
+	}
+	if (unitMatches.queryUnitSource !== "han_tokenizer_real") {
+		return false;
+	}
+	const surfaceGroupIndex = unitMatches.querySurfaceGroupIndex;
+	const surfaceText =
+		surfaceGroupIndex == null
+			? null
+			: queryAnalysis.surfaceGroups[surfaceGroupIndex]?.text ?? null;
+	return (
+		Array.from(unitMatches.queryUnitText).length >= 2 &&
+		surfaceText === unitMatches.queryUnitText
+	);
 }
 
 function collectBlockOccurrences(

@@ -1334,3 +1334,126 @@ Validation completed for this phase:
   - `avgMsPerQuery = 5.688`
   - `p50Ms = 4.586`
   - `p100Ms = 30.975`
+
+### Phase 23
+
+Status: Completed on 2026-04-16
+
+The current implementation now adds a bounded Han real-term fallback that can
+reuse the existing bigram posting route without turning V3 into bigram-first
+ranking:
+
+- whole-surface `han_tokenizer_real` query units may now use the existing Han
+  bigram route as a candidate-admission backstop even when the normal family
+  lexicon does not provide the best candidate-specific explanation
+- that route still does not grant any direct bigram coverage credit; it only
+  widens candidate recall and then requires witness-backed `opaque_exact`
+  confirmation before the unit can realize coverage
+- candidate-specific confirmation remains bounded to whole-surface Han real
+  units, so multi-unit Han queries such as split real-term surfaces do not
+  inherit broad opaque coverage from one larger witness string
+- when a normal exact family exists for the same unit, it continues to outrank
+  the fallback because the fallback path contributes `opaque_exact` coverage
+  without adding `exactUnitCount`
+- body-side fallback now reuses witness occurrences alongside exact occurrences
+  so body-only whole-surface recoveries can realize coverage without changing
+  the existing exact-first comparator order
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts` now covers:
+  - whole-surface Han real-term recovery through metadata bigram route plus
+    `opaque_exact` confirmation
+  - body-only whole-surface Han fallback confirmation
+  - exact Han family matches continuing to outrank the fallback path
+- `tests/src/services/search/coverage-lexical-v3/han-route.test.ts` passes
+  after the fallback integration
+- `npm run typecheck:build` passes on 2026-04-16
+
+### Phase 24
+
+Status: Completed on 2026-04-16
+
+The current implementation now makes Han query-side real-term selection follow a
+stable non-overlapping cover instead of blindly admitting every overlapping
+tokenizer term:
+
+- V3 Han query analysis now derives `primaryUnits` from the best non-overlapping
+  real-term cover inside each Han surface group, rather than accepting every
+  tokenizer-produced Han term that happens to be contained in the surface
+- the cover prefers higher total realized Han character coverage first, then
+  prefers the richer split cover when multiple non-overlapping explanations
+  fully cover the same surface
+- this keeps tokenizer-produced split real terms such as `赢宋 + 窄体`
+  available as the main lexical explanation even when search-mode tokenization
+  also emits a larger overlapping whole-surface candidate
+- residual-span and bridge-bigram generation now operate against that stable
+  cover, so fallback remains bounded to the truly uncovered parts of the Han
+  surface instead of fighting an over-expanded primary-unit set
+- V3 therefore stays in the real-term worldview while removing a query-side
+  implementation mismatch that could block matches against document-side split
+  Han families
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts`
+  now verifies:
+  - overlapping Han tokenizer terms collapse to a stable split cover for
+    `赢宋窄体`
+  - whole-surface Han real terms remain primary when no better split cover
+    exists
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts` now verifies
+  that the stable Han query cover lets `赢宋窄体` match a longer basename surface
+  through split real terms on the normal V3 path
+- `tests/src/services/search/coverage-lexical-v3/han-route.test.ts` still
+  passes after the query-cover change
+- `npm run typecheck:build` passes on 2026-04-16
+
+### Phase 24
+
+Status: Completed on 2026-04-16
+
+The current implementation now aligns V3 direct-subitem Han snippet
+materialization with the candidate-level ranking worldview while keeping weak
+tail hiding behind the existing `hideWeaklyRelatedResults` boolean:
+
+- direct-subitems now admit snippets only when a local anchor exists:
+  - `real_exact` / fuzzy-backed lexical anchors
+  - witness-confirmed `opaque_han_confirmed` whole-group anchors
+  - candidate-confirmed Han `surface_completion` anchors
+- `opaque_han_confirmed` and `whole_group_backstop` candidates no longer go
+  silent at snippet time when the selected file contains the corresponding Han
+  surface span; the snippet builder now materializes that local anchor instead
+  of requiring an unrelated local `han_tokenizer_real` hit first
+- direct-subitem Han surface completion now inherits candidate-confirmed
+  `hanSurfaceCompletionGroups` before falling back to local corroboration, so
+  snippet rendering no longer uses a weaker "local literal only" worldview than
+  the file-level comparator
+- residual Han support remains display-only and anchor-attached:
+  - bridge or residual Han support can now attach to confirmed opaque/surface
+    anchors in addition to local real-term anchors
+  - single-character residual support still renders only as weak highlight and
+    cannot create a snippet, expand a window on its own, or raise coverage
+- direct-subitem weak-tail hiding now uses only
+  `hideWeaklyRelatedResults`:
+  - `false` keeps all anchored snippets after structural dedupe
+  - `true` keeps only non-overlapping snippets from the top anchor gate band
+  - no new `weakFilePruneMode` split was introduced for direct subitems
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts`
+  passes, including opaque whole-group Han anchor materialization and mixed
+  Latin/Han highlight coverage
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts`
+  passes, including anchor-only admission and `hideWeaklyRelatedResults`
+  top-gate pruning
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems-residual-support.test.ts`
+  passes, covering bridge residual support, same-scope full-surface dominance,
+  and metadata completion not globally suppressing body residual support
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems-shortlist.test.ts`
+  passes after the Han anchor/support alignment
+- `tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts`
+  passes, confirming the file-level `hideWeaklyRelatedResults` path still
+  drives the native direct-subitem behavior correctly
+- `npm run typecheck:build` passes on 2026-04-16

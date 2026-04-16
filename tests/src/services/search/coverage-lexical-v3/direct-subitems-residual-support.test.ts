@@ -32,7 +32,9 @@ function createResidentBaseForBlockCounts(
 		docTable: {
 			docCount: blockCountsByDoc.length,
 			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			generationByDocId: new Uint32Array(blockCountsByDoc.map((_, index) => 100 + index)),
+			generationByDocId: new Uint32Array(
+				blockCountsByDoc.map((_, index) => 100 + index),
+			),
 			identityStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			identityCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			routeStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
@@ -75,8 +77,12 @@ function createResidentBaseForBlockCounts(
 			blockCount: blockStart,
 			docIdByBlockId: new Uint32Array(docIdByBlockId),
 			blockOrdinalByBlockId: new Uint32Array(blockOrdinalByBlockId),
-			exactTapeStartByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
-			exactTapeCountByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
+			exactTapeStartByBlockId: new Uint32Array(
+				Array.from({ length: blockStart }, () => 0),
+			),
+			exactTapeCountByBlockId: new Uint32Array(
+				Array.from({ length: blockStart }, () => 0),
+			),
 		},
 		exactTapes: {
 			familyIds: new Uint32Array(),
@@ -153,7 +159,13 @@ function createResidentBaseForBlockCounts(
 	};
 }
 
-function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePackingProfile {
+function createCandidate(
+	overrides: Partial<EvidencePackingProfile>,
+): EvidencePackingProfile {
+	const coveredUnitIndices =
+		overrides.bodyWindowContainer?.coveredUnitIndices ??
+		overrides.strongestContainer?.coveredUnitIndices ??
+		[0];
 	return {
 		docId: overrides.docId ?? 0,
 		path: overrides.path ?? "doc.md",
@@ -167,13 +179,33 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 			crossScriptSatisfiedGroupCount: 1,
 		},
 		exactUnitCount: overrides.exactUnitCount ?? 1,
-		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
-		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
-		strongestHanSurfaceCompletionTier: overrides.strongestHanSurfaceCompletionTier ?? "none",
+		completedHanSurfaceGroupCount:
+			overrides.completedHanSurfaceGroupCount ?? 0,
+		hanSurfaceCompletionTierScoreTotal:
+			overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
+		strongestHanSurfaceCompletionTier:
+			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
-		realizedFamilies: overrides.realizedFamilies ?? [],
+		realizedFamilies:
+			overrides.realizedFamilies ??
+			coveredUnitIndices.map((queryUnitIndex) => ({
+				queryUnitIndex,
+				queryUnitText: `unit-${queryUnitIndex}`,
+				familyId: queryUnitIndex,
+				familyText: `unit-${queryUnitIndex}`,
+				matchKind: "exact",
+				editDistance: 0,
+				identityMetadataSource: "none",
+				routeMetadataSource: "none",
+				metadataPackingSource: "route",
+				inIdentity: false,
+				inRoute: false,
+				inHeading: false,
+				inBestBodyWindow: true,
+				inBodyResidue: false,
+			})),
 		identityContainer: overrides.identityContainer ?? null,
 		routeContainer: overrides.routeContainer ?? null,
 		bodyWindowContainer: overrides.bodyWindowContainer ?? {
@@ -189,19 +221,20 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 			density: 1,
 			headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 		},
-		strongestContainer: overrides.strongestContainer ?? overrides.bodyWindowContainer ?? {
-			tier: "bodyWindow",
-			blockIds: [0],
-			boundaryCrossingCount: 0,
-			coveredUnitIndices: [0],
-			coveredDistinctUnitCount: 1,
-			containerCompactness: 100,
-			exactUnitCount: 1,
-			windowWidth: 1,
-			gapCount: 0,
-			density: 1,
-			headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
-		},
+		strongestContainer: overrides.strongestContainer ??
+			overrides.bodyWindowContainer ?? {
+				tier: "bodyWindow",
+				blockIds: [0],
+				boundaryCrossingCount: 0,
+				coveredUnitIndices: [0],
+				coveredDistinctUnitCount: 1,
+				containerCompactness: 100,
+				exactUnitCount: 1,
+				windowWidth: 1,
+				gapCount: 0,
+				density: 1,
+				headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+			},
 		secondStrongestContainer: overrides.secondStrongestContainer ?? null,
 		fragmentationPenalty: overrides.fragmentationPenalty ?? {
 			bodyResidueUnitCount: 0,
@@ -211,7 +244,9 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 	};
 }
 
-function createCandidateRecall(overrides: Partial<V3CandidateDocRecall>): V3CandidateDocRecall {
+function createCandidateRecall(
+	overrides: Partial<V3CandidateDocRecall>,
+): V3CandidateDocRecall {
 	return {
 		docId: overrides.docId ?? 0,
 		matchedIdentityUnitIndices: overrides.matchedIdentityUnitIndices ?? [],
@@ -225,33 +260,37 @@ function createCandidateRecall(overrides: Partial<V3CandidateDocRecall>): V3Cand
 
 describe("coverage lexical v3 direct subitems residual support", () => {
 	test("adds bridge residual support highlights within the local body scope", () => {
-		const queryAnalysis = analyzeQuery("涓婇潰杩欑瑪璁?, ["涓婇潰", "绗旇"]);
+		const queryText = "\u751f\u547d\u529b";
+		const queryAnalysis = analyzeQuery(queryText, ["\u751f\u547d"]);
 		const result = buildV3DirectSubitems({
-			snapshotText: "涔熸槸涓婇潰杩欎綅寮€鍙戠殑锛屾煡鐪嬬瑪璁板叧绯汇€?,
+			snapshotText: "\u524d\u7f00\u751f\u547d\u529b\u540e\u7f00",
 			queryAnalysis,
 			candidate: createCandidate({ path: "bridge.md" }),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
 			residentBase: createResidentBaseForBlockCounts([1]),
 		});
 
-		const highlights = result.subItems[0]?.highlightRanges?.map((range) =>
+		const strongHighlights = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlights).toContain("涓婇潰杩?);
-		expect(highlights).toContain("绗旇");
-		expect(highlights).not.toContain("涓婇潰杩欑瑪璁?);
+		const weakHighlights = result.subItems[0]?.weakHighlightRanges?.map((range) =>
+			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(strongHighlights).toContain("\u751f\u547d");
+		expect(weakHighlights).toContain("\u529b");
 		expect(result.candidates[0]?.completedHanSurfaceGroupCount).toBe(0);
 	});
 
 	test("same-scope full surface suppresses residual support highlights", () => {
-		const queryAnalysis = analyzeQuery("涓婇潰杩欑瑪璁?, ["涓婇潰", "绗旇"]);
+		const queryText = "\u751f\u547d\u529b";
+		const queryAnalysis = analyzeQuery(queryText, ["\u751f\u547d"]);
 		const result = buildV3DirectSubitems({
-			snapshotText: "涓婇潰杩欑瑪璁板氨鍦ㄨ繖閲屻€?,
+			snapshotText: "\u524d\u7f00\u751f\u547d\u529b\u540e\u7f00",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "full-body.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "涓婇潰杩欑瑪璁?, tier: "body_window" },
+					{ surfaceGroupIndex: 0, surfaceText: queryText, tier: "body_window" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 2,
@@ -261,22 +300,24 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 			residentBase: createResidentBaseForBlockCounts([1]),
 		});
 
-		const highlights = result.subItems[0]?.highlightRanges?.map((range) =>
+		const strongHighlights = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlights).toContain("涓婇潰杩欑瑪璁?);
-		expect(highlights).not.toContain("涓婇潰杩?);
+		expect(strongHighlights).toContain(queryText);
+		expect(result.subItems[0]?.weakHighlightRanges ?? []).toHaveLength(0);
 	});
 
 	test("metadata completion does not globally suppress body residual support", () => {
-		const queryAnalysis = analyzeQuery("涓婇潰杩欑瑪璁?, ["涓婇潰", "绗旇"]);
+		const queryText = "\u751f\u547d\u4e4b\u529b";
+		const queryAnalysis = analyzeQuery(queryText, ["\u751f\u547d"]);
 		const result = buildV3DirectSubitems({
-			snapshotText: "涔熸槸涓婇潰杩欎綅寮€鍙戠殑锛屾煡鐪嬬瑪璁板叧绯汇€?,
+			snapshotText:
+				"\u524d\u7f00\u751f\u547d\uff0c\u7136\u540e\u662f\u4e4b\u529b\uff0c\u540e\u7f00",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "identity-body.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "涓婇潰杩欑瑪璁?, tier: "identity" },
+					{ surfaceGroupIndex: 0, surfaceText: queryText, tier: "identity" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 4,
@@ -286,11 +327,14 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 			residentBase: createResidentBaseForBlockCounts([1]),
 		});
 
-		const highlights = result.subItems[0]?.highlightRanges?.map((range) =>
+		const strongHighlights = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlights).toContain("涓婇潰杩?);
-		expect(highlights).toContain("绗旇");
-		expect(highlights).not.toContain("涓婇潰杩欑瑪璁?);
+		const weakHighlights = result.subItems[0]?.weakHighlightRanges?.map((range) =>
+			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(strongHighlights).toContain("\u751f\u547d");
+		expect(weakHighlights).toContain("\u4e4b\u529b");
+		expect(strongHighlights).not.toContain(queryText);
 	});
 });

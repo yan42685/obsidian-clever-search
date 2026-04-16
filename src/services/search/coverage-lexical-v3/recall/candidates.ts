@@ -1,5 +1,5 @@
 import type { ResidentBase } from "../layout/types";
-import { encodeHanBigramId } from "../query";
+import { encodeHanBigramId, extractHanBigrams } from "../query";
 import type { V3QueryAnalysis } from "../query/analysis";
 import {
 	collectBodyFamilyPostingBlockIds,
@@ -65,43 +65,25 @@ export function recallCandidateDocs(
 		}
 	}
 
+	for (const unitMatches of unitFamilyMatches) {
+		if (!shouldAttemptHanRealTermOpaqueFallback(queryAnalysis, unitMatches)) {
+			continue;
+		}
+		routeHanBigramsToRecallBuckets(
+			base,
+			extractHanBigrams(unitMatches.queryUnitText).map(encodeHanBigramId),
+			unitMatches.queryUnitText,
+			recallByDocId,
+		);
+	}
+
 	for (const hanBackstopGroup of queryAnalysis.hanBackstopGroups) {
-		const bigramIds = hanBackstopGroup.bigrams.map(encodeHanBigramId);
-		const matchedBigramPositionsByDoc = new Map<number, Set<number>>();
-		const matchedBigramPositionsByBlock = new Map<number, Set<number>>();
-		for (let position = 0; position < bigramIds.length; position += 1) {
-			const bigramId = bigramIds[position];
-			for (const docId of collectHanMetadataDocIds(base, bigramId)) {
-				addMatchedBigramPosition(matchedBigramPositionsByDoc, docId, position);
-			}
-			for (const blockId of collectHanBodyBlockIds(base, bigramId)) {
-				addMatchedBigramPosition(matchedBigramPositionsByBlock, blockId, position);
-			}
-		}
-		for (const [docId, matchedPositions] of matchedBigramPositionsByDoc.entries()) {
-			const bucket = getOrCreateRecallBucket(recallByDocId, docId);
-			bucket.hanMetadataGateStats = chooseBetterHanGateStats(
-				bucket.hanMetadataGateStats,
-				buildHanGateStats(bigramIds.length, matchedPositions),
-			);
-		}
-		for (const [blockId, matchedPositions] of matchedBigramPositionsByBlock.entries()) {
-			const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
-			if (docId < 0) {
-				continue;
-			}
-			const stats = buildHanGateStats(bigramIds.length, matchedPositions);
-			if (!confirmHanBodyBlockSurface(base, blockId, hanBackstopGroup.normalizedText)) {
-				continue;
-			}
-			const bucket = getOrCreateRecallBucket(recallByDocId, docId);
-			bucket.bodyBlocks.add(blockId);
-			const existing = bucket.hanBodyBlockGateStatsByBlockId.get(blockId) ?? null;
-			bucket.hanBodyBlockGateStatsByBlockId.set(
-				blockId,
-				chooseBetterHanGateStats(existing, stats) ?? stats,
-			);
-		}
+		routeHanBigramsToRecallBuckets(
+			base,
+			hanBackstopGroup.bigrams.map(encodeHanBigramId),
+			hanBackstopGroup.normalizedText,
+			recallByDocId,
+		);
 	}
 
 	return [...recallByDocId.entries()]
@@ -162,6 +144,68 @@ function addMatchedBigramPosition(
 		return;
 	}
 	target.set(key, new Set<number>([position]));
+}
+
+function shouldAttemptHanRealTermOpaqueFallback(
+	queryAnalysis: V3QueryAnalysis,
+	unitMatches: V3QueryUnitFamilyMatches,
+): boolean {
+	const surfaceGroupIndex = unitMatches.querySurfaceGroupIndex;
+	const surfaceText =
+		surfaceGroupIndex == null
+			? null
+			: queryAnalysis.surfaceGroups[surfaceGroupIndex]?.text ?? null;
+	return (
+		unitMatches.queryUnitSource === "han_tokenizer_real" &&
+		Array.from(unitMatches.queryUnitText).length >= 2 &&
+		surfaceText === unitMatches.queryUnitText
+	);
+}
+
+function routeHanBigramsToRecallBuckets(
+	base: ResidentBase,
+	bigramIds: readonly number[],
+	surfaceText: string,
+	recallByDocId: Map<number, RecallBucket>,
+): void {
+	if (bigramIds.length === 0) {
+		return;
+	}
+	const matchedBigramPositionsByDoc = new Map<number, Set<number>>();
+	const matchedBigramPositionsByBlock = new Map<number, Set<number>>();
+	for (let position = 0; position < bigramIds.length; position += 1) {
+		const bigramId = bigramIds[position];
+		for (const docId of collectHanMetadataDocIds(base, bigramId)) {
+			addMatchedBigramPosition(matchedBigramPositionsByDoc, docId, position);
+		}
+		for (const blockId of collectHanBodyBlockIds(base, bigramId)) {
+			addMatchedBigramPosition(matchedBigramPositionsByBlock, blockId, position);
+		}
+	}
+	for (const [docId, matchedPositions] of matchedBigramPositionsByDoc.entries()) {
+		const bucket = getOrCreateRecallBucket(recallByDocId, docId);
+		bucket.hanMetadataGateStats = chooseBetterHanGateStats(
+			bucket.hanMetadataGateStats,
+			buildHanGateStats(bigramIds.length, matchedPositions),
+		);
+	}
+	for (const [blockId, matchedPositions] of matchedBigramPositionsByBlock.entries()) {
+		const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
+		if (docId < 0) {
+			continue;
+		}
+		const stats = buildHanGateStats(bigramIds.length, matchedPositions);
+		if (!confirmHanBodyBlockSurface(base, blockId, surfaceText)) {
+			continue;
+		}
+		const bucket = getOrCreateRecallBucket(recallByDocId, docId);
+		bucket.bodyBlocks.add(blockId);
+		const existing = bucket.hanBodyBlockGateStatsByBlockId.get(blockId) ?? null;
+		bucket.hanBodyBlockGateStatsByBlockId.set(
+			blockId,
+			chooseBetterHanGateStats(existing, stats) ?? stats,
+		);
+	}
 }
 
 function buildHanGateStats(

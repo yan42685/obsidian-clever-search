@@ -130,23 +130,148 @@ function collectHanPrimaryTerms(
 	surfaceText: string,
 	queryTerms: readonly string[],
 ): string[] {
+	const candidateTerms = dedupePreservingOrder(
+		queryTerms.filter(
+			(term) =>
+				classifySurfaceKind(term) === "han" &&
+				Array.from(term).length >= 2 &&
+				surfaceText.includes(term),
+		),
+	);
+	if (candidateTerms.length === 0) {
+		return [];
+	}
+	const chars = Array.from(surfaceText);
+	const occurrencesByStart = new Map<number, HanTermOccurrence[]>();
+	for (const term of candidateTerms) {
+		const termChars = Array.from(term);
+		if (termChars.length === 0 || termChars.length > chars.length) {
+			continue;
+		}
+		for (let start = 0; start <= chars.length - termChars.length; start += 1) {
+			if (!matchesCharsAt(chars, termChars, start)) {
+				continue;
+			}
+			const occurrence: HanTermOccurrence = {
+				text: term,
+				start,
+				end: start + termChars.length,
+				length: termChars.length,
+			};
+			const existing = occurrencesByStart.get(start);
+			if (existing != null) {
+				existing.push(occurrence);
+				continue;
+			}
+			occurrencesByStart.set(start, [occurrence]);
+		}
+	}
+	const bestCoverByStart = new Map<number, HanCoverChoice>();
+	for (let start = chars.length; start >= 0; start -= 1) {
+		let bestChoice =
+			start < chars.length
+				? bestCoverByStart.get(start + 1) ?? createEmptyHanCoverChoice()
+				: createEmptyHanCoverChoice();
+		for (const occurrence of occurrencesByStart.get(start) ?? []) {
+			const suffix = bestCoverByStart.get(occurrence.end) ?? createEmptyHanCoverChoice();
+			const candidate = prependHanCoverChoice(occurrence, suffix);
+			if (compareHanCoverChoice(candidate, bestChoice) > 0) {
+				bestChoice = candidate;
+			}
+		}
+		bestCoverByStart.set(start, bestChoice);
+	}
+	return (bestCoverByStart.get(0) ?? createEmptyHanCoverChoice()).terms.map(
+		(occurrence) => occurrence.text,
+	);
+}
+
+type HanTermOccurrence = Readonly<{
+	text: string;
+	start: number;
+	end: number;
+	length: number;
+}>;
+
+type HanCoverChoice = Readonly<{
+	coveredChars: number;
+	termCount: number;
+	longestTermLength: number;
+	terms: readonly HanTermOccurrence[];
+}>;
+
+function matchesCharsAt(
+	chars: readonly string[],
+	termChars: readonly string[],
+	start: number,
+): boolean {
+	for (let index = 0; index < termChars.length; index += 1) {
+		if (chars[start + index] !== termChars[index]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function createEmptyHanCoverChoice(): HanCoverChoice {
+	return {
+		coveredChars: 0,
+		termCount: 0,
+		longestTermLength: 0,
+		terms: [],
+	};
+}
+
+function prependHanCoverChoice(
+	occurrence: HanTermOccurrence,
+	choice: HanCoverChoice,
+): HanCoverChoice {
+	return {
+		coveredChars: occurrence.length + choice.coveredChars,
+		termCount: 1 + choice.termCount,
+		longestTermLength: Math.max(occurrence.length, choice.longestTermLength),
+		terms: [occurrence, ...choice.terms],
+	};
+}
+
+function compareHanCoverChoice(left: HanCoverChoice, right: HanCoverChoice): number {
+	if (left.coveredChars !== right.coveredChars) {
+		return left.coveredChars - right.coveredChars;
+	}
+	if (left.termCount !== right.termCount) {
+		return left.termCount - right.termCount;
+	}
+	if (left.longestTermLength !== right.longestTermLength) {
+		return right.longestTermLength - left.longestTermLength;
+	}
+	const leftTerms = left.terms;
+	const rightTerms = right.terms;
+	for (let index = 0; index < Math.min(leftTerms.length, rightTerms.length); index += 1) {
+		const startDifference = rightTerms[index].start - leftTerms[index].start;
+		if (startDifference !== 0) {
+			return startDifference;
+		}
+		const lengthDifference = rightTerms[index].length - leftTerms[index].length;
+		if (lengthDifference !== 0) {
+			return lengthDifference;
+		}
+		const textDifference = leftTerms[index].text.localeCompare(rightTerms[index].text);
+		if (textDifference !== 0) {
+			return -textDifference;
+		}
+	}
+	return rightTerms.length - leftTerms.length;
+}
+
+function dedupePreservingOrder(values: readonly string[]): string[] {
 	const out: string[] = [];
 	const seen = new Set<string>();
-	for (const term of queryTerms) {
-		if (seen.has(term)) {
+	for (const value of values) {
+		if (seen.has(value)) {
 			continue;
 		}
-		if (classifySurfaceKind(term) !== "han") {
-			continue;
-		}
-		if (Array.from(term).length < 2) {
-			continue;
-		}
-		if (!surfaceText.includes(term)) {
-			continue;
-		}
-		seen.add(term);
-		out.push(term);
+		seen.add(value);
+		out.push(value);
 	}
 	return out;
 }

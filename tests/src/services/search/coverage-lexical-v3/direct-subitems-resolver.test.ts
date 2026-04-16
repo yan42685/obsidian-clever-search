@@ -35,6 +35,10 @@ function createCandidate(
 			},
 		],
 		displayOccurrences: overrides.displayOccurrences ?? [],
+		hasAnchor: overrides.hasAnchor ?? true,
+		anchorTier: overrides.anchorTier ?? "real_lexical",
+		confirmedHanAnchorGroupCount:
+			overrides.confirmedHanAnchorGroupCount ?? 0,
 		coveredRealPrimaryCount: overrides.coveredRealPrimaryCount ?? 1,
 		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
 		preservesQueryOrder: overrides.preservesQueryOrder ?? true,
@@ -146,6 +150,7 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			candidateRecall: {} as never,
 			residentBase: {} as never,
 			maxSubItemResults: 5,
+			hideWeaklyRelatedResults: false,
 		});
 
 		expect(result.candidates).toEqual([topCandidate, distantTail]);
@@ -193,6 +198,7 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			candidateRecall: {} as never,
 			residentBase: {} as never,
 			maxSubItemResults: 5,
+			hideWeaklyRelatedResults: false,
 		});
 
 		expect(result.candidates).toEqual([topCandidate, distantTail]);
@@ -200,5 +206,118 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			"top",
 			"distant",
 		]);
+	});
+
+	test("lenient pruning keeps only non-overlapping candidates from the top anchor gate", () => {
+		const topCandidate = createCandidate({
+			start: 10,
+			end: 20,
+			anchorOffset: 10,
+			anchorTier: "confirmed_surface",
+			confirmedHanAnchorGroupCount: 1,
+		});
+		const sameGateOverlap = createCandidate({
+			start: 15,
+			end: 25,
+			anchorOffset: 15,
+			anchorTier: "confirmed_surface",
+			confirmedHanAnchorGroupCount: 1,
+		});
+		const sameGateFar = createCandidate({
+			start: 40,
+			end: 55,
+			anchorOffset: 40,
+			anchorTier: "confirmed_surface",
+			confirmedHanAnchorGroupCount: 1,
+		});
+		const weakerTail = createCandidate({
+			start: 80,
+			end: 95,
+			anchorOffset: 80,
+			anchorTier: "real_lexical",
+			confirmedHanAnchorGroupCount: 0,
+		});
+		mockedBuildCandidates.mockReturnValue([
+			topCandidate,
+			sameGateOverlap,
+			sameGateFar,
+			weakerTail,
+		]);
+		mockedRenderCandidate.mockImplementation(({ candidate }) =>
+			createRenderPayload({
+				text: `${candidate.start}`,
+				snippetText: `${candidate.start}`,
+				displayStart: candidate.start,
+				displayEnd: candidate.end + 20,
+				highlightRanges: [{ start: 0, end: 3 }],
+			}),
+		);
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "alpha",
+			queryAnalysis: {
+				queryText: "alpha",
+				normalizedQueryText: "alpha",
+				surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
+				primaryUnits: [
+					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
+				],
+				hanBackstopGroups: [],
+				surfaceCoverageShapeKey: "l",
+			},
+			candidate: {} as never,
+			candidateRecall: {} as never,
+			residentBase: {} as never,
+			maxSubItemResults: 5,
+			hideWeaklyRelatedResults: true,
+		});
+
+		expect(result.candidates).toEqual([topCandidate, sameGateFar]);
+	});
+
+	test("anchorless candidates are dropped even when weak pruning is off", () => {
+		const anchorlessCandidate = createCandidate({
+			start: 10,
+			end: 20,
+			hasAnchor: false,
+			anchorTier: "none",
+			coveredRealPrimaryCount: 0,
+		});
+		const anchoredCandidate = createCandidate({
+			start: 40,
+			end: 50,
+			anchorOffset: 40,
+		});
+		mockedBuildCandidates.mockReturnValue([anchorlessCandidate, anchoredCandidate]);
+		mockedRenderCandidate.mockImplementation(({ candidate }) =>
+			createRenderPayload({
+				text: `${candidate.start}`,
+				snippetText: `${candidate.start}`,
+				displayStart: candidate.start,
+				displayEnd: candidate.end + 20,
+				highlightRanges: [{ start: 0, end: 3 }],
+			}),
+		);
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "alpha",
+			queryAnalysis: {
+				queryText: "alpha",
+				normalizedQueryText: "alpha",
+				surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
+				primaryUnits: [
+					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
+				],
+				hanBackstopGroups: [],
+				surfaceCoverageShapeKey: "l",
+			},
+			candidate: {} as never,
+			candidateRecall: {} as never,
+			residentBase: {} as never,
+			maxSubItemResults: 5,
+			hideWeaklyRelatedResults: false,
+		});
+
+		expect(result.candidates).toEqual([anchoredCandidate]);
 	});
 });

@@ -103,12 +103,15 @@ function collapseSurfaceDisplayOccurrences(
 	occurrences: readonly V3DirectSubitemOccurrence[],
 ): V3DirectSubitemOccurrence[] {
 	const realOccurrences = occurrences.filter(
-		(occurrence) => occurrence.kind !== "surface_completion",
+		(occurrence) =>
+			occurrence.kind !== "surface_completion" &&
+			occurrence.kind !== "opaque_anchor",
 	);
 	const bestSurfaceByGroup = new Map<number, V3DirectSubitemOccurrence>();
 	for (const occurrence of occurrences) {
 		if (
-			occurrence.kind !== "surface_completion" ||
+			(occurrence.kind !== "surface_completion" &&
+				occurrence.kind !== "opaque_anchor") ||
 			occurrence.surfaceGroupIndex == null
 		) {
 			continue;
@@ -136,7 +139,7 @@ function resolveStyledDisplayRanges(
 }> {
 	const strongHighlightRanges = mergeRanges(
 		occurrences
-			.filter((occurrence) => occurrence.kind !== "fuzzy")
+			.filter((occurrence) => occurrence.highlightTier !== "weak")
 			.map((occurrence) => ({
 				start: Math.max(occurrence.start, displayWindow.start),
 				end: Math.min(occurrence.end, displayWindow.end),
@@ -149,7 +152,7 @@ function resolveStyledDisplayRanges(
 	);
 	const weakHighlightRanges = mergeRanges(
 		occurrences
-			.filter((occurrence) => occurrence.kind === "fuzzy")
+			.filter((occurrence) => occurrence.highlightTier === "weak")
 			.map((occurrence) => ({
 				start: Math.max(occurrence.start, displayWindow.start),
 				end: Math.min(occurrence.end, displayWindow.end),
@@ -217,6 +220,8 @@ function pickRepresentativeOccurrences(
 		const key =
 			occurrence.kind === "surface_completion"
 				? `surface:${occurrence.surfaceGroupIndex ?? -1}`
+				: occurrence.kind === "opaque_anchor"
+					? `opaque:${occurrence.surfaceGroupIndex ?? occurrence.queryUnitIndex ?? -1}`
 				: occurrence.kind === "residual_support"
 					? `residual:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.residualSupportKind ?? "none"}:${occurrence.start}:${occurrence.end}`
 					: `unit:${occurrence.queryUnitIndex ?? -1}`;

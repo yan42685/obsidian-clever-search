@@ -12,7 +12,8 @@ import { renderV3DirectSubitemCandidate } from "./renderer";
 export function buildV3DirectSubitems(
 	params: V3DirectSubitemsBuildParams,
 ): V3DirectSubitemsBuildResult {
-	const candidates = dedupeV3DirectSubitemCandidates(
+	const candidates = applyWeakFilePruneMode(
+		dedupeV3DirectSubitemCandidates(
 		buildV3DirectSubitemCandidates({
 			snapshotText: params.snapshotText,
 			queryAnalysis: params.queryAnalysis,
@@ -21,6 +22,8 @@ export function buildV3DirectSubitems(
 			residentBase: params.residentBase,
 			candidateRangeMode: params.candidateRangeMode,
 		}).sort(compareV3DirectSubitemCandidates),
+		),
+		params,
 	);
 	const weakDeduped = weakDedupeRenderedCandidates(
 		candidates.map((candidate) => ({
@@ -66,6 +69,52 @@ export function buildV3DirectSubitems(
 	};
 }
 
+function applyWeakFilePruneMode(
+	candidates: readonly V3DirectSubitemCandidate[],
+	params: Pick<V3DirectSubitemsBuildParams, "hideWeaklyRelatedResults">,
+): V3DirectSubitemCandidate[] {
+	if (candidates.length <= 1) {
+		return [...candidates];
+	}
+	if (params.hideWeaklyRelatedResults !== true) {
+		return [...candidates];
+	}
+	const topCandidate = candidates[0];
+	if (topCandidate == null) {
+		return [...candidates];
+	}
+	const kept: V3DirectSubitemCandidate[] = [];
+	for (const candidate of candidates) {
+		if (!hasSameAnchorGate(candidate, topCandidate)) {
+			continue;
+		}
+		if (kept.some((existing) => doCandidateRangesOverlap(existing, candidate))) {
+			continue;
+		}
+		kept.push(candidate);
+	}
+	return kept.length > 0 ? kept : [topCandidate];
+}
+
+function hasSameAnchorGate(
+	left: V3DirectSubitemCandidate,
+	right: V3DirectSubitemCandidate,
+): boolean {
+	return (
+		left.anchorTier === right.anchorTier &&
+		left.confirmedHanAnchorGroupCount ===
+			right.confirmedHanAnchorGroupCount &&
+		left.coveredRealPrimaryCount === right.coveredRealPrimaryCount
+	);
+}
+
+function doCandidateRangesOverlap(
+	left: Pick<V3DirectSubitemCandidate, "start" | "end">,
+	right: Pick<V3DirectSubitemCandidate, "start" | "end">,
+): boolean {
+	return Math.min(left.end, right.end) > Math.max(left.start, right.start);
+}
+
 function weakDedupeRenderedCandidates(
 	entries: ReadonlyArray<{
 		candidate: V3DirectSubitemCandidate;
@@ -105,6 +154,9 @@ function dedupeV3DirectSubitemCandidates(
 ): V3DirectSubitemCandidate[] {
 	const selected: V3DirectSubitemCandidate[] = [];
 	for (const candidate of candidates) {
+		if (!candidate.hasAnchor) {
+			continue;
+		}
 		if (
 			selected.some((existing) =>
 				areEquivalentV3DirectSubitemCandidates(existing, candidate),
@@ -144,7 +196,11 @@ function buildCandidateTermSignature(
 	)].sort((left, right) => left - right);
 	const surfaceGroupIndices = [...new Set(
 		candidate.occurrences
-			.filter((occurrence) => occurrence.kind === "surface_completion")
+			.filter(
+				(occurrence) =>
+					occurrence.kind === "surface_completion" ||
+					occurrence.kind === "opaque_anchor",
+			)
 			.map((occurrence) => occurrence.surfaceGroupIndex)
 			.filter((value): value is number => value != null),
 	)].sort((left, right) => left - right);

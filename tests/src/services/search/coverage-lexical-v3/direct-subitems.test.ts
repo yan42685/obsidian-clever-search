@@ -154,6 +154,10 @@ function createResidentBaseForBlockCounts(
 }
 
 function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePackingProfile {
+	const coveredUnitIndices =
+		overrides.bodyWindowContainer?.coveredUnitIndices ??
+		overrides.strongestContainer?.coveredUnitIndices ??
+		[0];
 	return {
 		docId: overrides.docId ?? 0,
 		path: overrides.path ?? "doc.md",
@@ -173,7 +177,24 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
-		realizedFamilies: overrides.realizedFamilies ?? [],
+		realizedFamilies:
+			overrides.realizedFamilies ??
+			coveredUnitIndices.map((queryUnitIndex) => ({
+				queryUnitIndex,
+				queryUnitText: `unit-${queryUnitIndex}`,
+				familyId: queryUnitIndex,
+				familyText: `unit-${queryUnitIndex}`,
+				matchKind: "exact",
+				editDistance: 0,
+				identityMetadataSource: "none",
+				routeMetadataSource: "none",
+				metadataPackingSource: "route",
+				inIdentity: false,
+				inRoute: false,
+				inHeading: false,
+				inBestBodyWindow: true,
+				inBodyResidue: false,
+			})),
 		identityContainer: overrides.identityContainer ?? null,
 		routeContainer: overrides.routeContainer ?? null,
 		bodyWindowContainer: overrides.bodyWindowContainer ?? {
@@ -246,7 +267,7 @@ describe("coverage lexical v3 direct subitems", () => {
 			candidate: createCandidate({
 				path: "life.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "生命力", tier: "body_window" },
+					{ surfaceGroupIndex: 0, surfaceText: queryAnalysis.surfaceGroups[1]?.text ?? "", tier: "body_window" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 2,
@@ -286,7 +307,7 @@ describe("coverage lexical v3 direct subitems", () => {
 			candidate: createCandidate({
 				path: "life-neighbor.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "生命力", tier: "body_residue" },
+					{ surfaceGroupIndex: 0, surfaceText: queryAnalysis.surfaceGroups[1]?.text ?? "", tier: "body_residue" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 1,
@@ -355,8 +376,34 @@ describe("coverage lexical v3 direct subitems", () => {
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "mixed-coverage.md",
+				bodyWindowContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+				strongestContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 1, surfaceText: "生命力", tier: "body_residue" },
+					{ surfaceGroupIndex: 1, surfaceText: queryAnalysis.surfaceGroups[1]?.text ?? "", tier: "body_residue" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 1,
@@ -394,7 +441,41 @@ describe("coverage lexical v3 direct subitems", () => {
 		const result = buildV3DirectSubitems({
 			snapshotText: "abc 生命力在这里",
 			queryAnalysis,
-			candidate: createCandidate({ path: "mixed.md" }),
+			candidate: createCandidate({
+				path: "mixed.md",
+				bodyWindowContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+				strongestContainer: {
+					tier: "bodyWindow",
+					blockIds: [0],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [0, 1],
+					coveredDistinctUnitCount: 2,
+					containerCompactness: 100,
+					exactUnitCount: 2,
+					windowWidth: 1,
+					gapCount: 0,
+					density: 1,
+					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+				},
+				hanSurfaceCompletionGroups: [
+					{ surfaceGroupIndex: 1, surfaceText: queryAnalysis.surfaceGroups[1]?.text ?? "", tier: "body_window" },
+				],
+				completedHanSurfaceGroupCount: 1,
+				hanSurfaceCompletionTierScoreTotal: 2,
+				strongestHanSurfaceCompletionTier: "body_window",
+			}),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
 			residentBase: createResidentBaseForBlockCounts([1]),
 		});
@@ -404,6 +485,65 @@ describe("coverage lexical v3 direct subitems", () => {
 		);
 		expect(topHighlight).toContain("abc");
 		expect(topHighlight).toContain("生命力");
+	});
+
+	test("materializes an opaque whole-group Han anchor when the local snippet contains the full surface", () => {
+		const queryAnalysis: V3QueryAnalysis = {
+			queryText: "这是啥",
+			normalizedQueryText: "这是啥",
+			surfaceGroups: [{ index: 0, text: "这是啥", kind: "han" }],
+			primaryUnits: [
+				{
+					index: 0,
+					text: "这是啥",
+					source: "opaque_han_confirmed",
+					surfaceGroupIndex: 0,
+				},
+			],
+			hanBackstopGroups: [
+				{
+					surfaceGroupIndex: 0,
+					normalizedText: "这是啥",
+					bigrams: ["这是", "是啥"],
+					charLength: 3,
+					triggerKind: "whole_group_backstop",
+				},
+			],
+			surfaceCoverageShapeKey: "h",
+		};
+		const result = buildV3DirectSubitems({
+			snapshotText: "前文\n这是啥在这里",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "opaque.md",
+				realizedFamilies: [
+					{
+						queryUnitIndex: 0,
+						queryUnitText: "这是啥",
+						familyId: -1,
+						familyText: "这是啥",
+						matchKind: "opaque_exact",
+						editDistance: 0,
+						identityMetadataSource: "none",
+						routeMetadataSource: "none",
+						metadataPackingSource: "route",
+						inIdentity: false,
+						inRoute: false,
+						inHeading: false,
+						inBestBodyWindow: true,
+						inBodyResidue: false,
+					},
+				],
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(result.candidates[0]?.anchorTier).toBe("opaque_whole_group");
+		const topHighlight = result.subItems[0]?.highlightRanges?.map((range) =>
+			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
+		);
+		expect(topHighlight).toContain("这是啥");
 	});
 
 	test("splits distant latin evidence when the weighted gap exceeds the local budget", () => {
