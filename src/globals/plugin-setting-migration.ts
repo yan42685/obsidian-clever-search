@@ -24,6 +24,11 @@ export function migrateOuterSetting(raw: unknown): OuterSettingMigrationResult {
 				version = 2;
 				didMigrate = true;
 				break;
+			case 2:
+				migrateOuterSettingV2ToV3(data);
+				version = 3;
+				didMigrate = true;
+				break;
 			default:
 				version = CURRENT_OUTER_SETTING_SCHEMA_VERSION;
 				didMigrate = true;
@@ -61,6 +66,21 @@ function migrateOuterSettingV1ToV2(data: RawSettingRecord): void {
 	}
 	delete data.weakFilePruneMode;
 	delete data.hideWeaklyRelevantFiles;
+}
+
+function migrateOuterSettingV2ToV3(data: RawSettingRecord): void {
+	const releaseAnnouncements = cloneOptionalRawSettingRecord(
+		data.releaseAnnouncements,
+	);
+	const seenVersions = Array.isArray(releaseAnnouncements?.seenVersions)
+		? releaseAnnouncements?.seenVersions.filter(
+			(value): value is string => typeof value === "string" && value.length > 0,
+		)
+		: [];
+
+	data.releaseAnnouncements = {
+		seenVersions,
+	};
 }
 
 function readOuterSettingSchemaVersion(data: RawSettingRecord): number {

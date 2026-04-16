@@ -1,6 +1,11 @@
+import { THIS_PLUGIN } from "src/globals/constants";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { FloatingWindowManager } from "src/ui/floating-window";
+import {
+	RELEASE_ANNOUNCEMENT_VERSION_030,
+	showReleaseAnnouncementNotice,
+} from "src/ui/release-announcement-notice";
 import { logger } from "src/utils/logger";
 import { AssetsProvider } from "src/utils/web/assets-provider";
 import { SearchClient } from "src/web-workers/client";
@@ -12,6 +17,7 @@ import { SettingManager } from "./setting-manager";
 import { DataManager } from "./user-data/data-manager";
 import { RecentFileManager } from "./user-data/recent-file-manager";
 import { ViewRegistry } from "./view-registry";
+import type CleverSearch from "src/main";
 
 @singleton()
 export class PluginManager {
@@ -40,6 +46,7 @@ export class PluginManager {
 		await commandRegistry.addDevCommands();
 		await getInstance(DataManager).initAsync();
 		await getInstance(OmnisearchIntegration).initAsync();
+		await this.maybeShowReleaseAnnouncement();
 	}
 
 	// should be called in CleverSearch.onunload()
@@ -51,5 +58,34 @@ export class PluginManager {
 
 	onAppQuit() {
 		// getInstance(SettingManager).saveSettings();
+	}
+
+	private async maybeShowReleaseAnnouncement(): Promise<void> {
+		const version = this.resolveReleaseAnnouncementVersion();
+		if (!version) {
+			return;
+		}
+
+		const settingManager = getInstance(SettingManager);
+		if (!isDevEnvironment && settingManager.hasSeenReleaseAnnouncement(version)) {
+			return;
+		}
+
+		showReleaseAnnouncementNotice();
+		if (!isDevEnvironment) {
+			await settingManager.markReleaseAnnouncementSeen(version);
+		}
+	}
+
+	private resolveReleaseAnnouncementVersion(): string | null {
+		if (isDevEnvironment) {
+			return RELEASE_ANNOUNCEMENT_VERSION_030;
+		}
+		const plugin = getInstance(THIS_PLUGIN) as CleverSearch;
+		const pluginVersion = plugin.manifest.version ?? "";
+		return pluginVersion.startsWith(`${RELEASE_ANNOUNCEMENT_VERSION_030}.`) ||
+			pluginVersion === RELEASE_ANNOUNCEMENT_VERSION_030
+			? RELEASE_ANNOUNCEMENT_VERSION_030
+			: null;
 	}
 }

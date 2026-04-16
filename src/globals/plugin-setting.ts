@@ -7,6 +7,7 @@ export class OuterSetting {
 	customExtensions: {
 		plaintext: string[];
 	};
+	releaseAnnouncements: ReleaseAnnouncementSetting;
 	followObsidianExcludedFiles: boolean;
 	excludedPaths: string[]; // NOTE: can't use Set() or it will be a non-iterable object after deserialization
 	logLevel: LogLevel;
@@ -32,11 +33,14 @@ const isChineseUser =
 export const DEFAULT_FILE_SEARCH_BACKEND = "coverage-lexical" as const;
 export const DEFAULT_WEAK_FILE_PRUNE_MODE = "lenient" as const;
 export const DEFAULT_HIDE_WEAKLY_RELATED_RESULTS = true as const;
-export const CURRENT_OUTER_SETTING_SCHEMA_VERSION = 2 as const;
+export const CURRENT_OUTER_SETTING_SCHEMA_VERSION = 3 as const;
 
 export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	settingsSchemaVersion: CURRENT_OUTER_SETTING_SCHEMA_VERSION,
 	customExtensions: { plaintext: ["md"] },
+	releaseAnnouncements: {
+		seenVersions: [],
+	},
 	followObsidianExcludedFiles: true,
 	excludedPaths: [],
 	logLevel: isDevEnvironment ? "trace" : "info",
@@ -151,6 +155,10 @@ export type HybridSetting = {
 	failedEmbeddingRetryIntervalMin: number;
 	vectorCompression: HybridVectorCompression;
 	excludedPaths: string[];
+};
+
+export type ReleaseAnnouncementSetting = {
+	seenVersions: string[];
 };
 
 export type HybridVectorCompression = "int8" | "float16";

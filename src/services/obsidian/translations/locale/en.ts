@@ -332,4 +332,16 @@ export default {
 	"hybridModal.healthSummary.metric.failed": "failed",
 	"hybridModal.healthSummary.metric.deferred": "deferred",
 	"hybridModal.healthSummary.metric.samples": "Shadow mismatch samples",
+	"releaseAnnouncement.0_3.title": "Clever Search 0.3 major upgrade",
+	"releaseAnnouncement.0_3.intro":
+		"Version 0.3 brings a major search stack refresh. This notice is shown only once.",
+	"releaseAnnouncement.0_3.item.lexical":
+		"Coverage Lexical now replaces MiniSearch as the lexical engine, making results feel more intuitive and aligned with user intent.",
+	"releaseAnnouncement.0_3.item.hybrid":
+		"Hybrid lexical-vector search now replaces Semantic Search as the main complement for cross-language, synonym, and near-synonym queries.",
+	"releaseAnnouncement.0_3.item.quickSwitch":
+		"QuickSwitch and QuickCommand are now available, with persistent search history and learned preferences for items you confirm often.",
+	"releaseAnnouncement.0_3.footer":
+		"You can start using the new behavior right away from the normal search flow and the new quick actions.",
+	"releaseAnnouncement.dismiss": "Got it",
 };

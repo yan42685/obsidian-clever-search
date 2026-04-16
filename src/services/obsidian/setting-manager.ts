@@ -94,6 +94,18 @@ export class SettingManager {
 		await this.plugin.saveData(this.setting);
 	}
 
+	hasSeenReleaseAnnouncement(version: string): boolean {
+		return this.setting.releaseAnnouncements.seenVersions.includes(version);
+	}
+
+	async markReleaseAnnouncementSeen(version: string): Promise<void> {
+		if (this.hasSeenReleaseAnnouncement(version)) {
+			return;
+		}
+		this.setting.releaseAnnouncements.seenVersions.push(version);
+		await this.saveSettings();
+	}
+
 	async postSettingUpdated() {
 		await this.saveSettings();
 		const pendingRefresh = this.consumePendingRefresh();
