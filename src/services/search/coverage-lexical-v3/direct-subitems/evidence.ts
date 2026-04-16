@@ -1,5 +1,4 @@
 import type { ResidentBase } from "../layout/types";
-import { getAttachedBlockShortlistSketch } from "../body-locality/shortlist";
 import type {
 	V3HanBackstopGroup,
 	V3QueryAnalysis,
@@ -66,8 +65,17 @@ export function buildV3DirectSubitemCandidates(params: {
 		),
 	);
 	const rawBlocks = splitRawBodyBlocks(params.snapshotText);
+	const candidateLocalBlockOrdinals = new Set(
+		params.candidateRecall.shortlistedBodyBlockIds.map(
+			(blockId) => params.residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
+		),
+	);
+	const candidateLocalRawBlocks = rawBlocks.filter((block) =>
+		candidateLocalBlockOrdinals.has(block.ordinal),
+	);
 	const candidateRanges = resolveCandidateRanges({
 		rawBlocks,
+		candidateLocalRawBlocks,
 		candidate: params.candidate,
 		snapshotText: params.snapshotText,
 		queryAnalysis: params.queryAnalysis,
@@ -91,6 +99,7 @@ export function buildV3DirectSubitemCandidates(params: {
 
 function resolveCandidateRanges(params: {
 	rawBlocks: readonly RawBlock[];
+	candidateLocalRawBlocks: readonly RawBlock[];
 	candidate: EvidencePackingProfile;
 	snapshotText: string;
 	queryAnalysis: V3QueryAnalysis;
@@ -104,20 +113,9 @@ function resolveCandidateRanges(params: {
 			? [{ start: 0, end: params.snapshotText.length, scopeTier: "whole_document" }]
 			: [];
 	}
-	const shortlist = getAttachedBlockShortlistSketch(params.candidate);
-	if (shortlist != null && shortlist.length > 0) {
-		const shortlistRanges = buildRangesFromShortlist(
-			params.rawBlocks,
-			shortlist,
-			params.bestBodyWindowBlockIds,
-		);
-		if (shortlistRanges.length > 0) {
-			return shortlistRanges;
-		}
-	}
-	const fallbackRanges = buildRangesFromLocalFallbackShortlist(
+	const fallbackRanges = buildRangesFromCandidateLocalBodyRanges(
 		params.snapshotText,
-		params.rawBlocks,
+		params.candidateLocalRawBlocks,
 		params.queryAnalysis,
 		params.candidate,
 		new Set(params.candidate.hanSurfaceCompletionGroups.map((group) => group.surfaceGroupIndex)),
@@ -136,36 +134,7 @@ function resolveCandidateRanges(params: {
 	return [];
 }
 
-function buildRangesFromShortlist(
-	rawBlocks: readonly RawBlock[],
-	shortlist: NonNullable<ReturnType<typeof getAttachedBlockShortlistSketch>>,
-	bestBodyWindowBlockIds: ReadonlySet<number>,
-): ResolvedSnippetRange[] {
-	const ranges: ResolvedSnippetRange[] = [];
-	const seen = new Set<string>();
-	for (const item of shortlist.slice(0, DIRECT_SUBITEM_SHORTLIST_SCAN_LIMIT)) {
-		const startBlock = rawBlocks[item.blockStart];
-		const endBlock = rawBlocks[item.blockEnd];
-		if (startBlock == null || endBlock == null) {
-			continue;
-		}
-		const key = `${startBlock.start}:${endBlock.end}`;
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		ranges.push({
-			start: startBlock.start,
-			end: endBlock.end,
-			scopeTier: isBodyWindowShortlistItem(item.blockIds, bestBodyWindowBlockIds)
-				? "body_window"
-				: "body_residue",
-		});
-	}
-	return ranges;
-}
-
-function buildRangesFromLocalFallbackShortlist(
+function buildRangesFromCandidateLocalBodyRanges(
 	snapshotText: string,
 	rawBlocks: readonly RawBlock[],
 	queryAnalysis: V3QueryAnalysis,
@@ -174,13 +143,12 @@ function buildRangesFromLocalFallbackShortlist(
 	bestBodyWindowBlockOrdinals: ReadonlySet<number>,
 	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
 ): ResolvedSnippetRange[] {
-	const localBlocks = subdivideRawBlocksForFallback(snapshotText, rawBlocks);
 	const shortlisted: Array<{
 		range: ResolvedSnippetRange;
 		bestCandidate: V3DirectSubitemCandidate;
 	}> = [];
-	for (let index = 0; index < localBlocks.length; index += 1) {
-		const block = localBlocks[index];
+	for (let index = 0; index < rawBlocks.length; index += 1) {
+		const block = rawBlocks[index];
 		pushFallbackRangeCandidate(
 			shortlisted,
 			snapshotText,
@@ -194,8 +162,11 @@ function buildRangesFromLocalFallbackShortlist(
 			supportedHanSurfaceGroupIndices,
 			completedHanSurfaceTierByGroup,
 		);
-		const nextBlock = localBlocks[index + 1];
+		const nextBlock = rawBlocks[index + 1];
 		if (nextBlock == null) {
+			continue;
+		}
+		if (nextBlock.ordinal !== block.ordinal + 1) {
 			continue;
 		}
 		pushFallbackRangeCandidate(
@@ -921,17 +892,6 @@ function uniqueSortedNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
 }
 
-function isBodyWindowShortlistItem(
-	blockIds: readonly number[],
-	bestBodyWindowBlockIds: ReadonlySet<number>,
-): boolean {
-	return (
-		blockIds.length > 0 &&
-		bestBodyWindowBlockIds.size > 0 &&
-		blockIds.every((blockId) => bestBodyWindowBlockIds.has(blockId))
-	);
-}
-
 function resolveRangeScopeTier(
 	blockOrdinals: readonly number[],
 	bestBodyWindowBlockOrdinals: ReadonlySet<number>,
@@ -966,49 +926,4 @@ function rangesOverlap(
 	rightEnd: number,
 ): boolean {
 	return Math.min(leftEnd, rightEnd) > Math.max(leftStart, rightStart);
-}
-
-function subdivideRawBlocksForFallback(
-	snapshotText: string,
-	rawBlocks: readonly RawBlock[],
-): RawBlock[] {
-	const paragraphs: RawBlock[] = [];
-	for (const block of rawBlocks) {
-		const localParagraphs = splitBlockIntoParagraphs(snapshotText, block);
-		if (localParagraphs.length <= 1) {
-			paragraphs.push(block);
-			continue;
-		}
-		paragraphs.push(...localParagraphs);
-	}
-	return paragraphs;
-}
-
-function splitBlockIntoParagraphs(
-	snapshotText: string,
-	block: RawBlock,
-): RawBlock[] {
-	const paragraphs: RawBlock[] = [];
-	const paragraphBreakPattern = /\n\s*\n+/gu;
-	let cursor = block.start;
-	for (const match of block.text.matchAll(paragraphBreakPattern)) {
-		const matchStart = block.start + (match.index ?? 0);
-		pushParagraphBlock(snapshotText, cursor, matchStart, block.ordinal, paragraphs);
-		cursor = block.start + (match.index ?? 0) + match[0].length;
-	}
-	pushParagraphBlock(snapshotText, cursor, block.end, block.ordinal, paragraphs);
-	return paragraphs;
-}
-
-function pushParagraphBlock(
-	snapshotText: string,
-	start: number,
-	end: number,
-	ordinal: number,
-	blocks: RawBlock[],
-): void {
-	if (end <= start) {
-		return;
-	}
-	pushBlock(snapshotText, start, end, ordinal, blocks);
 }

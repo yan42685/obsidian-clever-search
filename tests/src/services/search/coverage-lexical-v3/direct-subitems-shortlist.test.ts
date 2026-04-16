@@ -1,5 +1,4 @@
 import { buildV3DirectSubitems } from "src/services/search/coverage-lexical-v3/direct-subitems";
-import { attachBlockShortlistSketch, type BlockShortlistItem } from "src/services/search/coverage-lexical-v3/body-locality/shortlist";
 import { splitBodyBlocks } from "src/services/search/coverage-lexical-v3/query";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import type { V3QueryAnalysis } from "src/services/search/coverage-lexical-v3/query/analysis";
@@ -220,36 +219,19 @@ function buildTripleBlockSnapshot(): string {
 	throw new Error("failed to construct a triple-block snapshot");
 }
 
-function createShortlistItem(blockOrdinal: number): BlockShortlistItem {
-	return {
-		blockStart: blockOrdinal,
-		blockEnd: blockOrdinal,
-		blockIds: [blockOrdinal],
-		boundaryCrossingCount: 0,
-		coveredUnitIndices: [0],
-		coveredDistinctUnitCount: 1,
-		representatives: [],
-		approxWindowStart: 0,
-		approxWindowEnd: 10,
-		approxMaxAdjacentGap: 0,
-		approxHeadTailSpan: 10,
-		approxTotalGapMass: 0,
-		preservesQueryOrder: true,
-		priorityScore: 1,
-	};
-}
-
 describe("coverage lexical v3 direct subitems shortlist", () => {
-	test("uses the attached shortlist to limit body scanning to selected blocks", () => {
+	test("uses candidate-local shortlisted body blocks to limit body scanning to selected blocks", () => {
 		const snapshotText = buildTripleBlockSnapshot();
 		const candidate = createCandidate();
-		attachBlockShortlistSketch(candidate, [createShortlistItem(1)]);
 
 		const result = buildV3DirectSubitems({
 			snapshotText,
 			queryAnalysis: createQueryAnalysis(),
 			candidate,
-			candidateRecall: createCandidateRecall(3),
+			candidateRecall: {
+				...createCandidateRecall(3),
+				shortlistedBodyBlockIds: [1],
+			},
 			residentBase: createResidentBaseForBlockCount(3),
 		});
 
