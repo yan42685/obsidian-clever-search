@@ -46,13 +46,16 @@ describe("coverage lexical v3 sparse body summary", () => {
 		);
 		const metadataFamilyId = findFamilyIdByText(familyTexts, "metadataonly");
 		const bodyFamilyId = findFamilyIdByText(familyTexts, "bodyonly");
+		const summarizedFamilyCount =
+			residentBase.bodySummary.singletonTermIds.length +
+			residentBase.bodySummary.pairTermIds.length +
+			residentBase.bodySummary.smallTermIds.length +
+			residentBase.bodySummary.deltaTermIds.length;
 
-		expect(residentBase.bodySummary.familyIds.length).toBeLessThan(
+		expect(summarizedFamilyCount).toBeLessThan(
 			residentBase.familyLexicon.familyCount,
 		);
-		expect(residentBase.bodySummary.postingStarts.length).toBe(
-			residentBase.bodySummary.familyIds.length + 1,
-		);
+		expect(summarizedFamilyCount).toBe(1);
 		expect(collectBodySummaryBlockIds(residentBase, metadataFamilyId)).toEqual([]);
 		expect(collectBodySummaryBlockIds(residentBase, bodyFamilyId)).toEqual([0]);
 	});

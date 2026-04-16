@@ -25,11 +25,30 @@ function sumMetricBuckets(metrics: ReturnType<typeof buildResidentBase>["metrics
 		metrics.familyLexiconBytes +
 		metrics.metadataContainerBytes +
 		metrics.headingBytes +
-		metrics.bodySummaryBytes +
+		metrics.familyPostingBytes +
 		metrics.bodyBlockBytes +
 		metrics.exactTapeBytes +
 		metrics.hanRouteBytes +
 		metrics.auxiliaryBytes
+	);
+}
+
+function countAdaptiveTerms(field: ReturnType<typeof buildResidentBase>["bodySummary"]): number {
+	return (
+		field.singletonTermIds.length +
+		field.pairTermIds.length +
+		field.smallTermIds.length +
+		field.deltaTermIds.length
+	);
+}
+
+function countAdaptiveValues(field: ReturnType<typeof buildResidentBase>["bodySummary"]): number {
+	return (
+		field.singletonValueIds.length +
+		field.pairFirstValueIds.length +
+		field.pairSecondValueIds.length +
+		field.smallValueIds.length +
+		field.postingTape.length
 	);
 }
 
@@ -63,7 +82,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.docTable.docCount).toBe(1);
 		expect(residentBase.familyLexicon.familyCount).toBeGreaterThan(0);
 		expect(residentBase.metadataContainers.identityPostings.docIds.length).toBeGreaterThan(0);
-		expect(residentBase.bodySummary.blockIds.length).toBeGreaterThan(0);
+		expect(countAdaptiveValues(residentBase.bodySummary)).toBeGreaterThan(0);
 		expect(residentBase.bodyBlocks.blockCount).toBe(1);
 		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
@@ -115,13 +134,13 @@ test("builds mixed metadata and body structures with stable byte buckets", () =>
 		expect(residentBase.metrics.stringArenaBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.metadataContainerBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.headingBytes).toBeGreaterThan(0);
-		expect(residentBase.metrics.bodySummaryBytes).toBeGreaterThan(0);
+		expect(residentBase.metrics.familyPostingBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.bodyBlockBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.exactTapeBytes).toBeGreaterThan(0);
 		expect(
 			residentBase.metrics.hanRouteSharedBigramIdsBytes +
 				residentBase.metrics.hanRouteMetadataHanPostingsBytes +
-				residentBase.metrics.hanRouteBodyHanPostingsBytes +
+				residentBase.metrics.hanRouteHanBigramPostingBytes +
 				residentBase.metrics.hanRouteMetadataWitnessBytes +
 				residentBase.metrics.hanRouteBodyWitnessBytes,
 		).toBe(residentBase.metrics.hanRouteBytes);
@@ -165,30 +184,29 @@ test("builds mixed metadata and body structures with stable byte buckets", () =>
 		expect(
 			summary.sectionEncodings.some(
 				(section) =>
-					section.sectionKind === "bodySummary.postings.starts" &&
+					section.sectionKind === "familyPosting.smallValueStarts" &&
 					section.encodingFlags > 0,
 			),
 		).toBe(true);
 		expect(
 			summary.sectionEncodings.some(
-				(section) => section.sectionKind === "bodySummary.familyIds",
+				(section) => section.sectionKind === "familyPosting.singletonTermIds",
 			),
 		).toBe(true);
 		expect(
 			summary.sectionEncodings.some(
-				(section) => section.sectionKind === "hanRoute.body.singletonTermIds",
+				(section) => section.sectionKind === "hanRoute.hanBigramPosting.singletonTermIds",
 			),
 		).toBe(true);
 		expect(
 			summary.sectionEncodings.some(
-				(section) => section.sectionKind === "hanRoute.body.postingTape",
+				(section) => section.sectionKind === "hanRoute.hanBigramPosting.postingTape",
 			),
 		).toBe(true);
+		expect(countAdaptiveTerms(residentBase.bodySummary)).toBeGreaterThan(0);
 		expect(residentBase.metrics.stringPayloadBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
 	});
 });
-
-
 
 

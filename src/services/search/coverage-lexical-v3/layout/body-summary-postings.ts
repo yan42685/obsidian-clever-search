@@ -1,14 +1,20 @@
 import {
-	buildSentinelStarts,
-	buildIntegerArray,
-	estimateSentinelPostingBytes,
-	findResidentIntegerIndex,
-} from "./integer-arrays";
+	buildAdaptivePostingField,
+	createEmptyAdaptivePostingField,
+	decodeAdaptivePosting,
+	estimateAdaptivePostingBytes,
+	type AdaptivePostingCodecProfile,
+} from "./adaptive-postings";
 import type { ResidentBodySummaryArena } from "./types";
 
 type BodySummaryBuildInput = Readonly<{
 	summaryFamilyIdsByBlock: readonly (readonly number[])[];
 }>;
+
+const BODY_SUMMARY_ADAPTIVE_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
+	smallInlineCap: 8,
+	enablePairLane: true,
+};
 
 export function buildBodySummaryArena(
 	input: BodySummaryBuildInput,
@@ -24,42 +30,71 @@ export function buildBodySummaryArena(
 			blockIds.push(blockId);
 		}
 	}
-	const familyIds = [...blocksByFamilyId.keys()].sort((left, right) => left - right);
-	const buckets = familyIds.map((familyId) => blocksByFamilyId.get(familyId) ?? []);
-	return {
-		familyIds: buildIntegerArray(familyIds),
-		postingStarts: buildSentinelStarts(buckets),
-		blockIds: buildIntegerArray(buckets.flat()),
-	};
+	if (blocksByFamilyId.size === 0) {
+		return createEmptyAdaptivePostingField();
+	}
+	return buildAdaptivePostingField(
+		blocksByFamilyId,
+		BODY_SUMMARY_ADAPTIVE_POSTING_CODEC_PROFILE,
+	);
 }
 
 export function estimateBodySummaryBytes(
 	arena: ResidentBodySummaryArena,
 ): number {
-	return (
-		arena.familyIds.byteLength +
-		estimateSentinelPostingBytes(arena.postingStarts, arena.blockIds)
-	);
+	return estimateAdaptivePostingBytes(arena);
 }
 
-export function findBodySummaryFamilyIndex(
+export function describeBodySummaryByteBreakdown(
 	arena: ResidentBodySummaryArena,
-	familyId: number,
-): number {
-	return findResidentIntegerIndex(arena.familyIds, familyId);
+): Readonly<{
+	termIdsBytes: number;
+	postingStartsBytes: number;
+	blockIdsBytes: number;
+	singletonTermIdsBytes: number;
+	singletonBlockIdsBytes: number;
+	pairTermIdsBytes: number;
+	pairFirstBlockIdsBytes: number;
+	pairSecondBlockIdsBytes: number;
+	smallTermIdsBytes: number;
+	smallPostingStartsBytes: number;
+	smallBlockIdsBytes: number;
+	deltaTermIdsBytes: number;
+	deltaTapeStartsBytes: number;
+	deltaPostingTapeBytes: number;
+}> {
+	return {
+		termIdsBytes:
+			arena.singletonTermIds.byteLength +
+			arena.pairTermIds.byteLength +
+			arena.smallTermIds.byteLength +
+			arena.deltaTermIds.byteLength,
+		postingStartsBytes:
+			arena.smallValueStarts.byteLength +
+			arena.deltaTapeStarts.byteLength,
+		blockIdsBytes:
+			arena.singletonValueIds.byteLength +
+			arena.pairFirstValueIds.byteLength +
+			arena.pairSecondValueIds.byteLength +
+			arena.smallValueIds.byteLength +
+			arena.postingTape.byteLength,
+		singletonTermIdsBytes: arena.singletonTermIds.byteLength,
+		singletonBlockIdsBytes: arena.singletonValueIds.byteLength,
+		pairTermIdsBytes: arena.pairTermIds.byteLength,
+		pairFirstBlockIdsBytes: arena.pairFirstValueIds.byteLength,
+		pairSecondBlockIdsBytes: arena.pairSecondValueIds.byteLength,
+		smallTermIdsBytes: arena.smallTermIds.byteLength,
+		smallPostingStartsBytes: arena.smallValueStarts.byteLength,
+		smallBlockIdsBytes: arena.smallValueIds.byteLength,
+		deltaTermIdsBytes: arena.deltaTermIds.byteLength,
+		deltaTapeStartsBytes: arena.deltaTapeStarts.byteLength,
+		deltaPostingTapeBytes: arena.postingTape.byteLength,
+	};
 }
 
 export function collectBodySummaryBlockIdsForFamily(
 	arena: ResidentBodySummaryArena,
 	familyId: number,
 ): number[] {
-	const familyIndex = findBodySummaryFamilyIndex(arena, familyId);
-	if (familyIndex === -1) {
-		return [];
-	}
-	const start = arena.postingStarts[familyIndex] ?? 0;
-	const end = arena.postingStarts[familyIndex + 1] ?? start;
-	return Array.from(
-		arena.blockIds.slice(start, end),
-	);
+	return decodeAdaptivePosting(arena, familyId);
 }

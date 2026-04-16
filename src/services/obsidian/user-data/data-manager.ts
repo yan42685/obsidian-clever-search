@@ -5828,7 +5828,7 @@ export class DataManager {
       { segment: "familyLexicon", bytes: metrics.familyLexiconBytes },
       { segment: "metadataContainers", bytes: metrics.metadataContainerBytes },
       { segment: "heading", bytes: metrics.headingBytes },
-      { segment: "bodySummary", bytes: metrics.bodySummaryBytes },
+      { segment: "familyPosting", bytes: metrics.familyPostingBytes },
       { segment: "bodyBlocks", bytes: metrics.bodyBlockBytes },
       { segment: "exactTapes", bytes: metrics.exactTapeBytes },
       { segment: "hanRoute", bytes: metrics.hanRouteBytes },
@@ -5844,8 +5844,8 @@ export class DataManager {
         bytes: metrics.hanRouteMetadataHanPostingsBytes,
       },
       {
-        segment: "bodyHanPostings",
-        bytes: metrics.hanRouteBodyHanPostingsBytes,
+        segment: "hanBigramPosting",
+        bytes: metrics.hanRouteHanBigramPostingBytes,
       },
       {
         segment: "metadataWitness",
@@ -5869,47 +5869,93 @@ export class DataManager {
     const hanRouteBodyDetailSegments: Array<{ segment: string; bytes: number }> = [
       {
         segment: "singletonTermIds",
-        bytes: metrics.hanRouteBodyHanSingletonTermIdsBytes,
+        bytes: metrics.hanRouteHanBigramSingletonTermIdsBytes,
       },
       {
         segment: "singletonBodyBlockIds",
-        bytes: metrics.hanRouteBodyHanSingletonBodyBlockIdsBytes,
+        bytes: metrics.hanRouteHanBigramSingletonBlockIdsBytes,
       },
       {
         segment: "pairTermIds",
-        bytes: metrics.hanRouteBodyHanPairTermIdsBytes,
+        bytes: metrics.hanRouteHanBigramPairTermIdsBytes,
       },
       {
         segment: "pairFirstBodyBlockIds",
-        bytes: metrics.hanRouteBodyHanPairFirstBodyBlockIdsBytes,
+        bytes: metrics.hanRouteHanBigramPairFirstBlockIdsBytes,
       },
       {
         segment: "pairSecondBodyBlockIds",
-        bytes: metrics.hanRouteBodyHanPairSecondBodyBlockIdsBytes,
+        bytes: metrics.hanRouteHanBigramPairSecondBlockIdsBytes,
       },
       {
         segment: "smallTermIds",
-        bytes: metrics.hanRouteBodyHanSmallTermIdsBytes,
+        bytes: metrics.hanRouteHanBigramSmallTermIdsBytes,
       },
       {
         segment: "smallPostingStarts",
-        bytes: metrics.hanRouteBodyHanSmallPostingStartsBytes,
+        bytes: metrics.hanRouteHanBigramSmallPostingStartsBytes,
       },
       {
         segment: "smallBodyBlockIds",
-        bytes: metrics.hanRouteBodyHanSmallBodyBlockIdsBytes,
+        bytes: metrics.hanRouteHanBigramSmallBlockIdsBytes,
       },
       {
         segment: "deltaTermIds",
-        bytes: metrics.hanRouteBodyHanDeltaTermIdsBytes,
+        bytes: metrics.hanRouteHanBigramDeltaTermIdsBytes,
       },
       {
         segment: "deltaTapeStarts",
-        bytes: metrics.hanRouteBodyHanDeltaTapeStartsBytes,
+        bytes: metrics.hanRouteHanBigramDeltaTapeStartsBytes,
       },
       {
         segment: "deltaPostingTape",
-        bytes: metrics.hanRouteBodyHanDeltaPostingTapeBytes,
+        bytes: metrics.hanRouteHanBigramDeltaPostingTapeBytes,
+      },
+    ].filter((segment) => segment.bytes > 0);
+    const familyPostingDetailSegments: Array<{ segment: string; bytes: number }> = [
+      {
+        segment: "singletonTermIds",
+        bytes: metrics.familyPostingSingletonTermIdsBytes,
+      },
+      {
+        segment: "singletonBlockIds",
+        bytes: metrics.familyPostingSingletonBlockIdsBytes,
+      },
+      {
+        segment: "pairTermIds",
+        bytes: metrics.familyPostingPairTermIdsBytes,
+      },
+      {
+        segment: "pairFirstBlockIds",
+        bytes: metrics.familyPostingPairFirstBlockIdsBytes,
+      },
+      {
+        segment: "pairSecondBlockIds",
+        bytes: metrics.familyPostingPairSecondBlockIdsBytes,
+      },
+      {
+        segment: "smallTermIds",
+        bytes: metrics.familyPostingSmallTermIdsBytes,
+      },
+      {
+        segment: "smallPostingStarts",
+        bytes: metrics.familyPostingSmallPostingStartsBytes,
+      },
+      {
+        segment: "smallBlockIds",
+        bytes: metrics.familyPostingSmallBlockIdsBytes,
+      },
+      {
+        segment: "deltaTermIds",
+        bytes: metrics.familyPostingDeltaTermIdsBytes,
+      },
+      {
+        segment: "deltaTapeStarts",
+        bytes: metrics.familyPostingDeltaTapeStartsBytes,
+      },
+      {
+        segment: "deltaPostingTape",
+        bytes: metrics.familyPostingDeltaPostingTapeBytes,
       },
     ].filter((segment) => segment.bytes > 0);
     const stringArenaDetailSegments: Array<{ segment: string; bytes: number }> = [
@@ -5986,14 +6032,18 @@ export class DataManager {
           .map((row) => row.segment + " " + row.size)
           .join(" | "),
       "Coverage V3 hanRoute groups: " +
-        hanRouteSegments
-          .map((row) => row.segment + " " + this.formatBytes(row.bytes))
-          .join(" | "),
+          hanRouteSegments
+            .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+            .join(" | "),
+      "Coverage V3 familyPosting detail: " +
+          familyPostingDetailSegments
+            .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+            .join(" | "),
       "Coverage V3 metadataHan detail: " +
-        hanRouteMetadataDetailSegments
-          .map((row) => row.segment + " " + this.formatBytes(row.bytes))
-          .join(" | "),
-      "Coverage V3 bodyHan detail: " +
+          hanRouteMetadataDetailSegments
+            .map((row) => row.segment + " " + this.formatBytes(row.bytes))
+            .join(" | "),
+      "Coverage V3 hanBigramPosting detail: " +
         hanRouteBodyDetailSegments
           .map((row) => row.segment + " " + this.formatBytes(row.bytes))
           .join(" | "),
@@ -6498,4 +6548,3 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
-

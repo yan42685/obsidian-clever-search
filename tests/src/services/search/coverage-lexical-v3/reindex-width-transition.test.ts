@@ -122,14 +122,12 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		const baselineBase = getResidentBase(engine);
 
 		expect(baselineBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint8Array);
-		expect(baselineBase.bodySummary.blockIds).toBeInstanceOf(Uint8Array);
 		expect(baselineBase.exactTapes.familyIds).toBeInstanceOf(Uint8Array);
 
 		await engine.addDocuments([stressDocument]);
 		const widenedBase = getResidentBase(engine);
 
 		expect(widenedBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint16Array);
-		expect(widenedBase.bodySummary.blockIds).toBeInstanceOf(Uint16Array);
 		expect(widenedBase.exactTapes.familyIds).toBeInstanceOf(Uint16Array);
 		expect(await searchAlphaPaths(engine)).toEqual(baselinePaths);
 
@@ -137,7 +135,6 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		const shrunkBase = getResidentBase(engine);
 
 		expect(shrunkBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint8Array);
-		expect(shrunkBase.bodySummary.blockIds).toBeInstanceOf(Uint8Array);
 		expect(shrunkBase.exactTapes.familyIds).toBeInstanceOf(Uint8Array);
 		expect(await searchAlphaPaths(engine)).toEqual(baselinePaths);
 	});
@@ -172,7 +169,6 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		const postFinishPaths = await searchAlphaPaths(engine, 64);
 		expect(postFinishPaths).not.toContain("notes/doc-000-renamed.md");
 		expect(postFinishPaths).not.toContain("notes/doc-000.md");
-		expect(getResidentBase(engine).bodySummary.blockIds).toBeInstanceOf(Uint16Array);
 
 		await engine.reIndexAll(createBaselineDocuments(8));
 		expect(getResidentBase(engine).bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint8Array);

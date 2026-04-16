@@ -51,11 +51,7 @@ export type ResidentMetadataContainerArena = Readonly<{
 	headingPostings: ResidentPostingList;
 }>;
 
-export type ResidentBodySummaryArena = Readonly<{
-	familyIds: ResidentIntegerArray;
-	postingStarts: ResidentIntegerArray;
-	blockIds: ResidentIntegerArray;
-}>;
+export type ResidentBodySummaryArena = ResidentAdaptivePostingField;
 
 export type ResidentBodyBlockArena = Readonly<{
 	blockCount: number;
@@ -112,7 +108,21 @@ export type ResidentBaseMetrics = Readonly<{
 	familyLexiconBytes: number;
 	metadataContainerBytes: number;
 	headingBytes: number;
-	bodySummaryBytes: number;
+	familyPostingBytes: number;
+	familyPostingTermIdsBytes: number;
+	familyPostingPostingStartsBytes: number;
+	familyPostingBlockIdsBytes: number;
+	familyPostingSingletonTermIdsBytes: number;
+	familyPostingSingletonBlockIdsBytes: number;
+	familyPostingPairTermIdsBytes: number;
+	familyPostingPairFirstBlockIdsBytes: number;
+	familyPostingPairSecondBlockIdsBytes: number;
+	familyPostingSmallTermIdsBytes: number;
+	familyPostingSmallPostingStartsBytes: number;
+	familyPostingSmallBlockIdsBytes: number;
+	familyPostingDeltaTermIdsBytes: number;
+	familyPostingDeltaTapeStartsBytes: number;
+	familyPostingDeltaPostingTapeBytes: number;
 	bodyBlockBytes: number;
 	exactTapeBytes: number;
 	hanRouteBytes: number;
@@ -120,21 +130,21 @@ export type ResidentBaseMetrics = Readonly<{
 	hanRouteMetadataHanPostingsBytes: number;
 	hanRouteMetadataHanPostingStartsBytes: number;
 	hanRouteMetadataHanDocIdsBytes: number;
-	hanRouteBodyHanPostingsBytes: number;
+	hanRouteHanBigramPostingBytes: number;
 	hanRouteBodyBigramIdsBytes: number;
-	hanRouteBodyHanPostingStartsBytes: number;
-	hanRouteBodyHanBodyBlockIdsBytes: number;
-	hanRouteBodyHanSingletonTermIdsBytes: number;
-	hanRouteBodyHanSingletonBodyBlockIdsBytes: number;
-	hanRouteBodyHanPairTermIdsBytes: number;
-	hanRouteBodyHanPairFirstBodyBlockIdsBytes: number;
-	hanRouteBodyHanPairSecondBodyBlockIdsBytes: number;
-	hanRouteBodyHanSmallTermIdsBytes: number;
-	hanRouteBodyHanSmallPostingStartsBytes: number;
-	hanRouteBodyHanSmallBodyBlockIdsBytes: number;
-	hanRouteBodyHanDeltaTermIdsBytes: number;
-	hanRouteBodyHanDeltaTapeStartsBytes: number;
-	hanRouteBodyHanDeltaPostingTapeBytes: number;
+	hanRouteHanBigramPostingStartsBytes: number;
+	hanRouteHanBigramBlockIdsBytes: number;
+	hanRouteHanBigramSingletonTermIdsBytes: number;
+	hanRouteHanBigramSingletonBlockIdsBytes: number;
+	hanRouteHanBigramPairTermIdsBytes: number;
+	hanRouteHanBigramPairFirstBlockIdsBytes: number;
+	hanRouteHanBigramPairSecondBlockIdsBytes: number;
+	hanRouteHanBigramSmallTermIdsBytes: number;
+	hanRouteHanBigramSmallPostingStartsBytes: number;
+	hanRouteHanBigramSmallBlockIdsBytes: number;
+	hanRouteHanBigramDeltaTermIdsBytes: number;
+	hanRouteHanBigramDeltaTapeStartsBytes: number;
+	hanRouteHanBigramDeltaPostingTapeBytes: number;
 	hanRouteMetadataWitnessBytes: number;
 	hanRouteBodyWitnessBytes: number;
 	scaffoldBytes: number;
