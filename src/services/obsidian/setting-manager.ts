@@ -208,6 +208,10 @@ export function openHybridSearchModal(app: App) {
 	new HybridSearchModal(app).open();
 }
 
+export function openLexicalSearchModal(app: App) {
+	new LexicalSearchModal(app).open();
+}
+
 export function openHybridHealthSummaryModal(app: App) {
 	new HybridHealthSummaryModal(app).open();
 }
@@ -255,27 +259,12 @@ class GeneralTab extends PluginSettingTab {
 		// 	);
 
 		new Setting(containerEl)
-			.setName(t("Max items count"))
-			.setDesc(t("Max items count desc"))
-			.addSlider((text) =>
-				text
-					.setLimits(1, 300, 1)
-					.setValue(this.setting.ui.maxItemResults)
-					.setDynamicTooltip()
-					.onChange((value) => {
-						this.setting.ui.maxItemResults = value;
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Floating window for in-file search"))
-			.setDesc(t("Floating window for in-file search desc"))
-			.addToggle((t) =>
-				t
-					.setValue(this.setting.ui.floatingWindowForInFile)
-					.onChange(
-						(v) => (this.setting.ui.floatingWindowForInFile = v),
-					),
+			.setName(t("Lexical search"))
+			.setDesc(t("Lexical search desc"))
+			.addButton((button) =>
+				button.setButtonText(t("Manage")).onClick(() => {
+					openLexicalSearchModal(getInstance(App));
+				}),
 			);
 
 		new Setting(containerEl)
@@ -305,86 +294,6 @@ class GeneralTab extends PluginSettingTab {
 				}),
 			);
 
-		new Setting(containerEl)
-			.setName(t("Weak file pruning"))
-			.setDesc(t("Weak file pruning desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.hideWeaklyRelatedResults)
-					.onChange((value) => {
-						this.setting.hideWeaklyRelatedResults = value;
-						this.setting.weakFilePruneMode = toLegacyWeakFilePruneMode(value);
-					}),
-			);
-
-		new Setting(containerEl).setName(t("Case sensitive")).addToggle((t) =>
-			t.setValue(this.setting.isCaseSensitive).onChange((v) => {
-				this.setting.isCaseSensitive = v;
-				this.settingManager.requestLexicalReindex();
-			}),
-		);
-		new Setting(containerEl)
-			.setName(t("Prefix match"))
-			.setDesc(t("Prefix match desc"))
-			.addToggle((t) =>
-				t
-					.setValue(this.setting.isPrefixMatch)
-					.onChange((v) => (this.setting.isPrefixMatch = v)),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Character fuzzy allowed"))
-			.setDesc(t("Character fuzzy allowed desc"))
-			.addToggle((t) =>
-				t
-					.setValue(this.setting.isFuzzy)
-					.onChange((v) => (this.setting.isFuzzy = v)),
-			);
-
-		new Setting(containerEl)
-			.setName(t("English word blacklist"))
-			.setDesc(t("English word blacklist desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.enableStopWordsEn)
-					.onChange((value) => {
-						this.setting.enableStopWordsEn = value;
-						this.settingManager.requestLexicalReindex();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Chinese patch"))
-			.setDesc(t("Chinese patch desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.enableChinesePatch)
-					.onChange(async (value) => {
-						this.setting.enableChinesePatch = value;
-						logger.info(
-							`enable chinese: ${
-								getInstance(OuterSetting).enableChinesePatch
-							}`,
-						);
-						this.settingManager.requestLexicalReindex({
-							reloadAssets: true,
-						});
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(t("Chinese word blacklist"))
-			.setDesc(t("Chinese word blacklist desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.setting.enableStopWordsZh)
-					.onChange(async (value) => {
-						this.setting.enableStopWordsZh = value;
-						this.settingManager.requestLexicalReindex({
-							reloadAssets: true,
-						});
-					}),
-			);
 		new Setting(containerEl).setName(t("Excluded files")).addButton((b) =>
 			b.setButtonText(t("Manage")).onClick(() => {
 				new ExcludePathModal(getInstance(App)).open();
@@ -494,6 +403,145 @@ class GeneralTab extends PluginSettingTab {
 					);
 				});
 			});
+	}
+}
+
+class LexicalSearchModal extends Modal {
+	private readonly settingManager = getInstance(SettingManager);
+	private readonly setting = getInstance(OuterSetting);
+
+	onOpen() {
+		this.modalEl.style.width = "42vw";
+		const { contentEl } = this;
+		contentEl.empty();
+
+		contentEl.createEl("h3", { text: t("Manage lexical search") });
+		contentEl.createEl("p", { text: t("lexicalModal.manageIntro") });
+
+		contentEl.createEl("h4", { text: t("lexicalModal.section.display") });
+
+		new Setting(contentEl)
+			.setName(t("Max items count"))
+			.setDesc(t("Max items count desc"))
+			.addSlider((slider) =>
+				slider
+					.setLimits(1, 300, 1)
+					.setValue(this.setting.ui.maxItemResults)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.setting.ui.maxItemResults = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Floating window for in-file search"))
+			.setDesc(t("Floating window for in-file search desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.ui.floatingWindowForInFile)
+					.onChange(async (value) => {
+						this.setting.ui.floatingWindowForInFile = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Weak file pruning"))
+			.setDesc(t("Weak file pruning desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.hideWeaklyRelatedResults)
+					.onChange(async (value) => {
+						this.setting.hideWeaklyRelatedResults = value;
+						this.setting.weakFilePruneMode = toLegacyWeakFilePruneMode(value);
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		contentEl.createEl("h4", { text: t("lexicalModal.section.matching") });
+
+		new Setting(contentEl).setName(t("Case sensitive")).addToggle((toggle) =>
+			toggle.setValue(this.setting.isCaseSensitive).onChange(async (value) => {
+				this.setting.isCaseSensitive = value;
+				this.settingManager.requestLexicalReindex();
+				await this.settingManager.saveSettings();
+			}),
+		);
+
+		new Setting(contentEl)
+			.setName(t("Prefix match"))
+			.setDesc(t("Prefix match desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.isPrefixMatch)
+					.onChange(async (value) => {
+						this.setting.isPrefixMatch = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Character fuzzy allowed"))
+			.setDesc(t("Character fuzzy allowed desc"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.setting.isFuzzy).onChange(async (value) => {
+					this.setting.isFuzzy = value;
+					await this.settingManager.saveSettings();
+				}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("English word blacklist"))
+			.setDesc(t("English word blacklist desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.enableStopWordsEn)
+					.onChange(async (value) => {
+						this.setting.enableStopWordsEn = value;
+						this.settingManager.requestLexicalReindex();
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Chinese patch"))
+			.setDesc(t("Chinese patch desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.enableChinesePatch)
+					.onChange(async (value) => {
+						this.setting.enableChinesePatch = value;
+						logger.info(
+							`enable chinese: ${
+								getInstance(OuterSetting).enableChinesePatch
+							}`,
+						);
+						this.settingManager.requestLexicalReindex({
+							reloadAssets: true,
+						});
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(t("Chinese word blacklist"))
+			.setDesc(t("Chinese word blacklist desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.enableStopWordsZh)
+					.onChange(async (value) => {
+						this.setting.enableStopWordsZh = value;
+						this.settingManager.requestLexicalReindex({
+							reloadAssets: true,
+						});
+						await this.settingManager.saveSettings();
+					}),
+			);
+	}
+
+	onClose() {
+		void this.settingManager.postSettingUpdated();
 	}
 }
 

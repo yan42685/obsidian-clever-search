@@ -54,6 +54,7 @@ export default {
 	"autocompleteSource.heading": "\u6807\u9898",
 	"autocompleteSource.path": "\u8def\u5f84",
 	"autocompleteSource.recent": "\u6700\u8fd1",
+	"autocompleteSource.quickCommand": "QuickCommand",
 	"hybridModal.desc":
 		"混合搜索结合了词法搜索与千问语义检索。索引阶段使用 text-embedding-v4，搜索阶段使用 qwen3-rerank，接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",
@@ -131,6 +132,14 @@ export default {
 		"Coverage Lexical 是当前综合更好的词法搜索引擎，也是主要优化方向；MiniSearch 则作为旧版但稳定的备选方案保留。",
 	"fileSearchBackend.minisearch": "MiniSearch（旧版稳定）",
 	"Manage hybrid search": "管理混合搜索",
+	"Lexical search": "词法搜索",
+	"Lexical search desc":
+		"集中管理词法搜索的结果显示、文件内 UI 与匹配或索引选项。",
+	"Manage lexical search": "管理词法搜索",
+	"lexicalModal.manageIntro":
+		"在这里集中配置词法搜索的结果展示、匹配策略与索引相关选项。",
+	"lexicalModal.section.display": "结果与界面",
+	"lexicalModal.section.matching": "匹配与索引",
 	"hybridModal.manageIntro":
 		"在这里可以集中管理 hybrid 搜索的接口配置、token 预算、排序策略和索引范围。",
 	"hybridModal.todayUsed": "本日",
@@ -287,9 +296,13 @@ export default {
 	"QuickSwitch desc": "\u7ba1\u7406 QuickSwitch \u4f7f\u7528\u7684\u5bfc\u822a\u5019\u9009\u6765\u6e90\u3002",
     "quickSwitch.emptyState.search": "\u6ca1\u6709\u5339\u914d\u7684\u5bfc\u822a\u7ed3\u679c\u3002",
     "quickSwitch.emptyState.idle": "\u8fd8\u6ca1\u6709\u6700\u8fd1\u6587\u4ef6\u6216 QuickSwitch \u5df2\u786e\u8ba4\u76ee\u6807\u3002",
+    "quickSwitch.quickCommand.emptyState.search": "\u6ca1\u6709\u5339\u914d\u7684 QuickCommand \u7ed3\u679c\u3002",
+    "quickSwitch.quickCommand.emptyState.idle": "\u8fd8\u6ca1\u6709\u6700\u8fd1\u7684 QuickCommand \u8bb0\u5f55\u3002",
     "quickSwitch.section.recentTargets": "\u6700\u8fd1\u786e\u8ba4\u76ee\u6807",
     "quickSwitch.section.recentFiles": "\u6700\u8fd1\u6587\u4ef6",
+    "quickSwitch.placeholder.quickCommand": "QuickCommand...",
     "quickSwitch.footer.navigation": "QuickSwitch \u5bfc\u822a\u5019\u9009",
+    "quickSwitch.footer.quickCommand": "QuickCommand \u5019\u9009",
     "quickSwitch.footer.keys": "Ctrl+J / Ctrl+K \u5207\u6362\u5019\u9009",
 	"Search history completion": "\u641c\u7d22\u5386\u53f2\u8865\u5168",
 	"Search history completion desc": "\u57fa\u4e8e\u5df2\u786e\u8ba4\u7684\u641c\u7d22\u8bb0\u5f55\u542f\u7528\u5386\u53f2\u8865\u5168\uff0c\u5305\u62ec\u5019\u9009\u6846\u548c\u5f71\u5b50\u8865\u5168\u3002",

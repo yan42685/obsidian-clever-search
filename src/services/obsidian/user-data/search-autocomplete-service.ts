@@ -28,9 +28,9 @@ export type SearchAutocompleteSource =
 	| "heading"
 	| "path"
 	| "recent"
-	| "command";
+	| "quickCommand";
 
-export type SearchAutocompleteMode = "navigation" | "command";
+export type SearchAutocompleteMode = "navigation" | "quickCommand";
 
 export type SearchAutocompleteSection =
 	| "matches"
@@ -69,7 +69,7 @@ type ParsedNavigationQuery = {
 
 type IndexedAutocompleteEntry = {
 	id: string;
-	kind: Exclude<SearchAutocompleteSource, "recent" | "command">;
+	kind: Exclude<SearchAutocompleteSource, "recent" | "quickCommand">;
 	insertText: string;
 	primaryText: string;
 	secondaryText?: string;
@@ -81,9 +81,9 @@ type IndexedAutocompleteEntry = {
 	pathLength: number;
 };
 
-type IndexedCommandEntry = {
+type IndexedQuickCommandEntry = {
 	id: string;
-	kind: "command";
+	kind: "quickCommand";
 	insertText: string;
 	primaryText: string;
 	secondaryText: string;
@@ -98,7 +98,7 @@ export class SearchAutocompleteService {
 	private static readonly MAX_CANDIDATE_COUNT = 12;
 	private static readonly RECENT_FILE_LIMIT = 10;
 	private static readonly RECENT_TARGET_LIMIT = 6;
-	private static readonly RECENT_COMMAND_LIMIT = 8;
+	private static readonly RECENT_QUICK_COMMAND_LIMIT = 8;
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 	private readonly app = getInstance(App);
 	private readonly vault = getInstance(Vault);
@@ -109,7 +109,7 @@ export class SearchAutocompleteService {
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly searchHistoryService = getInstance(SearchHistoryService);
 	private indexedEntriesCache: IndexedAutocompleteEntry[] | null = null;
-	private indexedCommandEntriesCache: IndexedCommandEntry[] | null = null;
+	private indexedQuickCommandEntriesCache: IndexedQuickCommandEntry[] | null = null;
 
 	constructor() {
 		this.registerInvalidationEvents();
@@ -176,7 +176,7 @@ export class SearchAutocompleteService {
 		return this.sortAndTrimCandidates(candidates, limit);
 	}
 
-	getCommandSuggestions(
+	getQuickCommandSuggestions(
 		queryText: string,
 		limit = SearchAutocompleteService.MAX_CANDIDATE_COUNT,
 	): SearchAutocompleteCandidate[] {
@@ -184,11 +184,11 @@ export class SearchAutocompleteService {
 		const preparedQuery = prepareLightweightFuzzyQuery(queryText, "history");
 		const normalizedQuery = preparedQuery.normalizedQuery;
 		const navigationHabitSignals =
-			this.searchHistoryService.getCommandHabitSignals(queryText);
+			this.searchHistoryService.getQuickCommandHabitSignals(queryText);
 		if (normalizedQuery.length === 0) {
 			return this.sortAndTrimCandidates(
-				this.buildRecentCommandCandidates(
-					SearchAutocompleteService.RECENT_COMMAND_LIMIT,
+				this.buildRecentQuickCommandCandidates(
+					SearchAutocompleteService.RECENT_QUICK_COMMAND_LIMIT,
 					navigationHabitSignals,
 				),
 				limit,
@@ -196,8 +196,8 @@ export class SearchAutocompleteService {
 		}
 
 		const candidates: SearchAutocompleteCandidate[] = [];
-		for (const entry of this.getIndexedCommandEntries()) {
-			const candidate = this.buildMatchedCommandCandidate(
+		for (const entry of this.getIndexedQuickCommandEntries()) {
+			const candidate = this.buildMatchedQuickCommandCandidate(
 				entry,
 				preparedQuery,
 				normalizedQuery,
@@ -316,8 +316,8 @@ export class SearchAutocompleteService {
 		};
 	}
 
-	private buildMatchedCommandCandidate(
-		entry: IndexedCommandEntry,
+	private buildMatchedQuickCommandCandidate(
+		entry: IndexedQuickCommandEntry,
 		preparedQuery: ReturnType<typeof prepareLightweightFuzzyQuery>,
 		normalizedQuery: string,
 		habitSignal?: NavigationHabitSignal,
@@ -330,7 +330,7 @@ export class SearchAutocompleteService {
 		if (!primaryMatch && !secondaryMatch) {
 			return null;
 		}
-		const projectedPositions = this.projectCommandMatchPositions(
+		const projectedPositions = this.projectQuickCommandMatchPositions(
 			entry.insertText,
 			entry.primaryText,
 			entry.secondaryText,
@@ -341,13 +341,13 @@ export class SearchAutocompleteService {
 			(primaryMatch
 				? primaryMatch.score
 				: Math.max(0, (secondaryMatch?.score ?? 0) - 140)) +
-			this.getSourceBoost("command", false) +
-			this.getCommandExactnessBoost(entry, normalizedQuery) +
+			this.getSourceBoost("quickCommand", false) +
+			this.getQuickCommandExactnessBoost(entry, normalizedQuery) +
 			this.getNavigationHabitBoost(habitSignal, normalizedQuery.length > 0);
 
 		return {
 			id: entry.id,
-			kind: "command",
+			kind: "quickCommand",
 			section: "matches",
 			insertText: entry.insertText,
 			primaryText: entry.primaryText,
@@ -452,24 +452,24 @@ export class SearchAutocompleteService {
 		};
 	}
 
-	private buildRecentCommandCandidates(
+	private buildRecentQuickCommandCandidates(
 		limit: number,
 		navigationHabitSignals: Map<string, NavigationHabitSignal>,
 	): SearchAutocompleteCandidate[] {
-		const indexedCommands = new Map(
-			this.getIndexedCommandEntries().map((entry) => [entry.openLinkText, entry]),
+		const indexedQuickCommands = new Map(
+			this.getIndexedQuickCommandEntries().map((entry) => [entry.openLinkText, entry]),
 		);
-		const selections = this.searchHistoryService.getRecentCommandSelections(limit);
+		const selections = this.searchHistoryService.getRecentQuickCommandSelections(limit);
 
 		return selections.map((selection) => {
 			const habitSignal = navigationHabitSignals.get(selection.openLinkText);
-			const indexedEntry = indexedCommands.get(selection.openLinkText);
+			const indexedEntry = indexedQuickCommands.get(selection.openLinkText);
 			const primaryText = indexedEntry?.primaryText ?? selection.primaryText;
 			const secondaryText = indexedEntry?.secondaryText ?? selection.secondaryText;
 			const insertText = indexedEntry?.insertText ?? selection.primaryText;
 			return {
-				id: `recent-command:${selection.openLinkText}`,
-				kind: "command",
+				id: `recent-quick-command:${selection.openLinkText}`,
+				kind: "quickCommand",
 				section: "recent-targets",
 				insertText,
 				primaryText,
@@ -480,7 +480,7 @@ export class SearchAutocompleteService {
 				pathPositions: [],
 				secondaryPositions: [],
 				score:
-					this.getSourceBoost("command", false) +
+					this.getSourceBoost("quickCommand", false) +
 					this.getNavigationHabitBoost(habitSignal, false) +
 					this.getTimestampRecencyBoost(
 						selection.timestamp,
@@ -625,9 +625,9 @@ export class SearchAutocompleteService {
 		return entries;
 	}
 
-	private getIndexedCommandEntries(): IndexedCommandEntry[] {
-		if (this.indexedCommandEntriesCache) {
-			return this.indexedCommandEntriesCache;
+	private getIndexedQuickCommandEntries(): IndexedQuickCommandEntry[] {
+		if (this.indexedQuickCommandEntriesCache) {
+			return this.indexedQuickCommandEntriesCache;
 		}
 
 		const registry = (this.app as App & {
@@ -635,7 +635,7 @@ export class SearchAutocompleteService {
 				commands?: Record<string, { id?: string; name?: string }>;
 			};
 		}).commands?.commands;
-		const entries: IndexedCommandEntry[] = [];
+		const entries: IndexedQuickCommandEntry[] = [];
 		for (const [registryKey, command] of Object.entries(registry ?? {})) {
 			const commandId = command?.id?.trim() || registryKey.trim();
 			const commandName = command?.name?.trim() || "";
@@ -643,13 +643,13 @@ export class SearchAutocompleteService {
 				continue;
 			}
 
-			entries.push(this.createIndexedCommandEntry(commandId, commandName));
+			entries.push(this.createIndexedQuickCommandEntry(commandId, commandName));
 		}
 
-		this.indexedCommandEntriesCache = entries.sort((left, right) =>
+		this.indexedQuickCommandEntriesCache = entries.sort((left, right) =>
 			left.primaryText.localeCompare(right.primaryText),
 		);
-		return this.indexedCommandEntriesCache;
+		return this.indexedQuickCommandEntriesCache;
 	}
 
 	private buildEntriesForFile(file: TFile): IndexedAutocompleteEntry[] {
@@ -706,15 +706,15 @@ export class SearchAutocompleteService {
 		return entries;
 	}
 
-	private createIndexedCommandEntry(
+	private createIndexedQuickCommandEntry(
 		commandId: string,
 		commandName: string,
-	): IndexedCommandEntry {
-		const secondaryText = this.getCommandOwnerText(commandId);
-		const displayName = this.getCommandDisplayName(commandName, secondaryText);
+	): IndexedQuickCommandEntry {
+		const secondaryText = this.getQuickCommandOwnerText(commandId);
+		const displayName = this.getQuickCommandDisplayName(commandName, secondaryText);
 		return {
-			id: `command:${normalizeKey(commandId)}`,
-			kind: "command",
+			id: `quick-command:${normalizeKey(commandId)}`,
+			kind: "quickCommand",
 			insertText: commandName,
 			primaryText: displayName,
 			secondaryText,
@@ -770,7 +770,7 @@ export class SearchAutocompleteService {
 
 	private isSelectionSourceEnabled(kind: SearchAutocompleteSource): boolean {
 		switch (kind) {
-			case "command":
+			case "quickCommand":
 				return false;
 			case "recent":
 				return this.setting.searchHistory.sources.recentFile;
@@ -800,7 +800,7 @@ export class SearchAutocompleteService {
 		queryLooksPathLike: boolean,
 	): number {
 		switch (kind) {
-			case "command":
+			case "quickCommand":
 				return 320;
 			case "recent":
 				return 220;
@@ -824,7 +824,7 @@ export class SearchAutocompleteService {
 				return 0;
 			case "heading":
 				switch (kind) {
-					case "command":
+					case "quickCommand":
 						return 0;
 					case "heading":
 						return 220;
@@ -839,7 +839,7 @@ export class SearchAutocompleteService {
 				}
 			case "block":
 				switch (kind) {
-					case "command":
+					case "quickCommand":
 						return 0;
 					case "heading":
 						return 190;
@@ -854,7 +854,7 @@ export class SearchAutocompleteService {
 				}
 			case "path":
 				switch (kind) {
-					case "command":
+					case "quickCommand":
 						return 0;
 					case "path":
 						return 260;
@@ -869,7 +869,7 @@ export class SearchAutocompleteService {
 				}
 			case "breadcrumb":
 				switch (kind) {
-					case "command":
+					case "quickCommand":
 						return 0;
 					case "heading":
 						return 210;
@@ -939,8 +939,8 @@ export class SearchAutocompleteService {
 		return 0;
 	}
 
-	private getCommandExactnessBoost(
-		entry: IndexedCommandEntry,
+	private getQuickCommandExactnessBoost(
+		entry: IndexedQuickCommandEntry,
 		normalizedQuery: string,
 	): number {
 		if (normalizedQuery.length === 0) {
@@ -950,10 +950,10 @@ export class SearchAutocompleteService {
 		const normalizedInsert = normalizeKey(entry.insertText);
 		const normalizedSecondary = normalizeKey(entry.secondaryText);
 		if (normalizedInsert === normalizedQuery) {
-			return this.getExactMatchBoost("command");
+			return this.getExactMatchBoost("quickCommand");
 		}
 		if (normalizedInsert.startsWith(normalizedQuery)) {
-			return this.getPrefixMatchBoost("command");
+			return this.getPrefixMatchBoost("quickCommand");
 		}
 		if (normalizedSecondary === normalizedQuery) {
 			return 220;
@@ -1008,7 +1008,7 @@ export class SearchAutocompleteService {
 
 	private getExactMatchBoost(kind: Exclude<SearchAutocompleteSource, "recent">): number {
 		switch (kind) {
-			case "command":
+			case "quickCommand":
 				return 640;
 			case "file":
 				return 620;
@@ -1023,7 +1023,7 @@ export class SearchAutocompleteService {
 
 	private getPrefixMatchBoost(kind: Exclude<SearchAutocompleteSource, "recent">): number {
 		switch (kind) {
-			case "command":
+			case "quickCommand":
 				return 280;
 			case "file":
 				return 260;
@@ -1038,7 +1038,7 @@ export class SearchAutocompleteService {
 
 	private getKindPriority(kind: SearchAutocompleteSource): number {
 		switch (kind) {
-			case "command":
+			case "quickCommand":
 				return 6;
 			case "file":
 				return 5;
@@ -1066,8 +1066,8 @@ export class SearchAutocompleteService {
 
 	private getDedupKey(candidate: SearchAutocompleteCandidate): string {
 		switch (candidate.kind) {
-			case "command":
-				return `command:${normalizeKey(candidate.openLinkText)}`;
+			case "quickCommand":
+				return `quick-command:${normalizeKey(candidate.openLinkText)}`;
 			case "recent":
 			case "file":
 				return `file:${candidate.path}`;
@@ -1180,7 +1180,7 @@ export class SearchAutocompleteService {
 		};
 	}
 
-	private getCommandOwnerText(commandId: string): string {
+	private getQuickCommandOwnerText(commandId: string): string {
 		const pluginId = commandId.split(":")[0]?.trim();
 		if (!pluginId) {
 			return "Obsidian";
@@ -1194,11 +1194,11 @@ export class SearchAutocompleteService {
 		return pluginManifest?.name?.trim() || "Obsidian";
 	}
 
-	private getCommandDisplayName(commandName: string, ownerText: string): string {
-		return this.getCommandDisplayProjection(commandName, ownerText).displayName;
+	private getQuickCommandDisplayName(commandName: string, ownerText: string): string {
+		return this.getQuickCommandDisplayProjection(commandName, ownerText).displayName;
 	}
 
-	private getCommandDisplayProjection(
+	private getQuickCommandDisplayProjection(
 		commandName: string,
 		ownerText: string,
 	): {
@@ -1240,7 +1240,7 @@ export class SearchAutocompleteService {
 		};
 	}
 
-	private projectCommandMatchPositions(
+	private projectQuickCommandMatchPositions(
 		commandName: string,
 		displayName: string,
 		ownerText: string,
@@ -1253,7 +1253,7 @@ export class SearchAutocompleteService {
 			return { primaryPositions: [], secondaryPositions: [] };
 		}
 
-		const projection = this.getCommandDisplayProjection(commandName, ownerText);
+		const projection = this.getQuickCommandDisplayProjection(commandName, ownerText);
 		if (projection.displayOffset === 0) {
 			return {
 				primaryPositions: positions.filter(
@@ -1308,7 +1308,7 @@ export class SearchAutocompleteService {
 
 	private invalidateCache(): void {
 		this.indexedEntriesCache = null;
-		this.indexedCommandEntriesCache = null;
+		this.indexedQuickCommandEntriesCache = null;
 	}
 }
 

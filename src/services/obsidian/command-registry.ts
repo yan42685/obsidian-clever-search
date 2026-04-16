@@ -79,9 +79,9 @@ export class CommandRegistry {
 		});
 
 		this.addCommand({
-			id: "cs-search-commands",
-			name: "Search commands",
-			callback: () => new QuickSwitchModal(this.app, "command").open(),
+			id: "cs-quick-command",
+			name: "QuickCommand",
+			callback: () => new QuickSwitchModal(this.app, "quickCommand").open(),
 		});
 
 

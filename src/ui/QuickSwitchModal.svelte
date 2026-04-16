@@ -49,12 +49,12 @@
 		void scrollSelectedIntoView();
 	}
 
-	function getRecentCommandFallbackResults(
+	function getRecentQuickCommandFallbackResults(
 		limit: number,
 	): SearchAutocompleteCandidate[] {
-		return searchHistoryService.getRecentCommandSelections(limit).map((entry) => ({
-			id: "recent-command-fallback:" + entry.openLinkText,
-			kind: "command",
+		return searchHistoryService.getRecentQuickCommandSelections(limit).map((entry) => ({
+			id: "recent-quick-command-fallback:" + entry.openLinkText,
+			kind: "quickCommand",
 			section: "recent-targets",
 			insertText: entry.primaryText,
 			primaryText: entry.primaryText,
@@ -70,11 +70,11 @@
 	}
 
 	function refreshResults(resetIndex = false): void {
-		if (mode === "command") {
+		if (mode === "quickCommand") {
 			results =
 				queryText.trim().length === 0
-					? getRecentCommandFallbackResults(24)
-					: autocompleteService.getCommandSuggestions(queryText, 24);
+					? getRecentQuickCommandFallbackResults(24)
+					: autocompleteService.getQuickCommandSuggestions(queryText, 24);
 		} else {
 			results = autocompleteService.getNavigationSuggestions(queryText, 24);
 		}
@@ -124,7 +124,7 @@
 		if (!candidate?.openLinkText) {
 			return;
 		}
-		if (mode === "command") {
+		if (mode === "quickCommand") {
 			await searchHistoryService.recordNavigationSelection(queryText, {
 				path: candidate.path,
 				primaryText: candidate.primaryText,
@@ -226,8 +226,8 @@
 				return "autocompleteSource.path";
 			case "recent":
 				return "autocompleteSource.recent";
-			case "command":
-				return "autocompleteSource.command";
+			case "quickCommand":
+				return "autocompleteSource.quickCommand";
 		}
 	}
 
@@ -251,17 +251,17 @@
 
 	function shouldShowPath(entry: SearchAutocompleteCandidate): boolean {
 		return (
-			entry.kind !== "command" &&
+			entry.kind !== "quickCommand" &&
 			entry.path.length > 0 &&
 			entry.primaryText !== entry.path
 		);
 	}
 
 	function getEmptyStateText(): string {
-		if (mode === "command") {
+		if (mode === "quickCommand") {
 			return queryText.trim().length === 0
-				? t("quickSwitch.command.emptyState.idle")
-				: t("quickSwitch.command.emptyState.search");
+				? t("quickSwitch.quickCommand.emptyState.idle")
+				: t("quickSwitch.quickCommand.emptyState.search");
 		}
 		return queryText.trim().length === 0
 			? t("quickSwitch.emptyState.idle")
@@ -269,19 +269,19 @@
 	}
 
 	function getPlaceholderText(): string {
-		return mode === "command"
-			? t("quickSwitch.placeholder.command")
+		return mode === "quickCommand"
+			? t("quickSwitch.placeholder.quickCommand")
 			: t("quickSwitch.placeholder.navigation");
 	}
 
 	function getFooterText(): string {
-		return mode === "command"
-			? t("quickSwitch.footer.command")
+		return mode === "quickCommand"
+			? t("quickSwitch.footer.quickCommand")
 			: t("quickSwitch.footer.navigation");
 	}
 
 	function shouldShowKind(entry: SearchAutocompleteCandidate): boolean {
-		return !(mode === "command" && entry.kind === "command");
+		return !(mode === "quickCommand" && entry.kind === "quickCommand");
 	}
 
 	function getHighlightParts(
@@ -425,7 +425,7 @@
 		overflow: visible;
 	}
 
-	:global(.cs-modal.cs-quickswitch-modal.cs-command-switch-modal) {
+	:global(.cs-modal.cs-quickswitch-modal.cs-quick-command-modal) {
 		width: min(50rem, 66vw);
 		max-width: 66vw;
 	}

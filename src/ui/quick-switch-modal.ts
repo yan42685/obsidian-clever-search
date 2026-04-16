@@ -13,8 +13,8 @@ export class QuickSwitchModal extends Modal {
 		this.mode = mode;
 		this.modalEl.replaceChildren();
 		this.modalEl.addClass("cs-modal", "cs-quickswitch-modal");
-		if (this.mode === "command") {
-			this.modalEl.addClass("cs-command-switch-modal");
+		if (this.mode === "quickCommand") {
+			this.modalEl.addClass("cs-quick-command-modal");
 		}
 		this.mountedElement = new QuickSwitchModalView({
 			target: this.modalEl,
@@ -30,7 +30,7 @@ export class QuickSwitchModal extends Modal {
 	}
 
 	onClose() {
-		this.modalEl.removeClass("cs-command-switch-modal");
+		this.modalEl.removeClass("cs-quick-command-modal");
 		this.mountedElement.$destroy();
 	}
 }
