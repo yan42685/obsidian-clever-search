@@ -7,7 +7,17 @@ import type { EvidencePackingProfile } from "../ranking";
 export type V3DirectSubitemEvidenceKind =
 	| "real_exact"
 	| "surface_completion"
+	| "residual_support"
 	| "route_only";
+
+export type V3DirectSubitemResidualSupportKind =
+	| "residual_span"
+	| "bridge_bigram";
+
+export type V3DirectSubitemResidualScopeTier =
+	| "body_window"
+	| "body_residue"
+	| "whole_document";
 
 export type V3DirectSubitemOccurrence = Readonly<{
 	kind: V3DirectSubitemEvidenceKind;
@@ -16,6 +26,8 @@ export type V3DirectSubitemOccurrence = Readonly<{
 	queryUnitIndex: number | null;
 	surfaceGroupIndex: number | null;
 	text: string;
+	residualSupportKind?: V3DirectSubitemResidualSupportKind | null;
+	scopeTier?: V3DirectSubitemResidualScopeTier | null;
 }>;
 
 export type V3DirectSubitemCandidate = Readonly<{

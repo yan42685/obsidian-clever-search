@@ -174,7 +174,9 @@ function pickRepresentativeOccurrences(
 		const key =
 			occurrence.kind === "surface_completion"
 				? `surface:${occurrence.surfaceGroupIndex ?? -1}`
-				: `unit:${occurrence.queryUnitIndex ?? -1}`;
+				: occurrence.kind === "residual_support"
+					? `residual:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.residualSupportKind ?? "none"}:${occurrence.start}:${occurrence.end}`
+					: `unit:${occurrence.queryUnitIndex ?? -1}`;
 		const existing = bestByKey.get(key);
 		if (
 			existing == null ||

@@ -13,6 +13,7 @@ import type {
 	FileSearchRequest,
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
+import { buildV3MetadataFieldHighlightRanges } from "./metadata-highlights";
 import {
 	CoverageLexicalV3Engine,
 	type CoverageLexicalV3SearchResult,
@@ -136,14 +137,27 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			request.hideWeaklyRelatedResults === true,
 		);
 		const queryTerms = result.recallState.queryAnalysis.primaryUnits.map((unit) => unit.text);
-		return visibleCandidates.slice(0, request.maxItemResults).map((candidate) => ({
-			path: candidate.path,
-			queryTerms,
-			matchedTerms: buildMatchedTerms(candidate, result),
-			score: candidate.realizedCoverageCount,
-			directSubItems: [],
-			nativeSubItemsReady: false,
-		}));
+		return visibleCandidates.slice(0, request.maxItemResults).map((candidate) => {
+			const document = this.documentsByPath.get(candidate.path);
+			const basenameText = document?.basename ?? "";
+			const folderText = document?.folder ?? "";
+			const metadataHighlights = buildV3MetadataFieldHighlightRanges({
+				queryAnalysis: result.recallState.queryAnalysis,
+				candidate,
+				basenameText,
+				folderText,
+			});
+			return {
+				path: candidate.path,
+				queryTerms,
+				matchedTerms: buildMatchedTerms(candidate, result),
+				score: candidate.realizedCoverageCount,
+				directSubItems: [],
+				nativeSubItemsReady: false,
+				basenameHighlightRanges: metadataHighlights.basenameHighlightRanges,
+				folderHighlightRanges: metadataHighlights.folderHighlightRanges,
+			};
+		});
 	}
 
 	getIndexedDocumentCount(): number {

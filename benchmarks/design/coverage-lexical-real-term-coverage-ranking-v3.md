@@ -747,7 +747,7 @@ for V3 query analysis and realization:
 - whole-group Han backstop now activates only for zero-real-term Han groups
 - zero-real-term Han groups can realize coverage only through opaque exact
   confirmation, never through bigram counts themselves
-- the V3 regression baseline now includes `绯荤粺浠ｇ悊`, `濮斿憳闀縛, and zero-real-term
+- the V3 regression baseline now includes `缁崵绮烘禒锝囨倞`, `婵柨鎲抽梹绺? and zero-real-term
   Han exact-confirm cases
 
 ### Phase 5
@@ -860,7 +860,7 @@ index:
   witness families, so this stage does not add a new resident arena
 - completion witness only acts as a late tie-break after coverage, containers,
   fragmentation, and exact count
-- the V3 regression baseline now verifies `鐢熷懡鍔?> 鐢熷懡` while keeping `濮斿憳`
+- the V3 regression baseline now verifies `閻㈢喎鎳￠崝?> 閻㈢喎鎳 while keeping `婵柨鎲砢
   bridge recall from gaining completion credit
 
 ### Phase 11
@@ -923,8 +923,8 @@ late ranking:
 - producer-side `snippetText + highlightRanges` invariants remain explicit, and
   the UI-side range clamp stays only as a defensive boundary check rather than a
   Han-specific semantic repair path
-- the V3 regression baseline now verifies that `鐢熷懡鍔沗 snippets highlight the
-  full surface instead of only `鐢熷懡`, while preserving `濮斿憳闀縛 bridge fallback
+- the V3 regression baseline now verifies that `閻㈢喎鎳￠崝娌?snippets highlight the
+  full surface instead of only `閻㈢喎鎳, while preserving `婵柨鎲抽梹绺?bridge fallback
   behavior and keeping higher real-coverage mixed-query snippets ahead of
   lower-coverage full-surface spans
 
@@ -1024,3 +1024,56 @@ direct-subitem alignment work from this phase:
 - the regression baseline now verifies attached-shortlist consumption,
   adjacent-block body-window formation under zero cross-block penalty, and the
   repaired no-shortlist Han snippet-selection behavior
+### Phase 16
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes the display-only Han residual-support
+follow-up for direct subitems without changing the file-level completion model:
+
+- `surface completeness` remains the only full Han completion truth; residual
+  spans and bridge bigrams do not contribute to
+  `completedHanSurfaceGroupCount`, `realizedCoverageCount`, or the main
+  ranking comparators
+- direct-subitems now recognize a weaker `residual_support` evidence kind when
+  a Han surface group already has local real-term skeleton evidence inside the
+  current snippet scope, allowing display-only highlight completion for
+  residual spans and bridge characters
+- the residual-support path is container-local on the snippet side: it is only
+  constructed from the current body-window or body-residue shortlist scope and
+  never stitched across unrelated file regions
+- same-group full Han surface completion short-circuits residual-support
+  display within the same local body scope, so a real full-surface confirmation
+  continues to dominate snippet rendering
+- metadata or route-level Han completion no longer globally suppresses body
+  residual highlights in direct-subitems; only same-scope body completion
+  blocks the weaker residual display path
+- the regression baseline now covers both the new `上面这...笔记` style
+  residual highlight behavior and the existing conservative Han completion
+  protections against fabricated full-surface display
+
+### Phase 17
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes V3 FileItem metadata highlighting for
+the filename and folder path fields without changing file-level ranking:
+
+- `searchFiles(...)` now populates `basenameHighlightRanges` and
+  `folderHighlightRanges` for V3 results, so the FileItem title column uses the
+  same display contract that already existed in the UI
+- basename highlighting now supports `real_exact`, full Han
+  `surface_completion`, and display-only Han `residual_support`, while still
+  keeping full-surface dominance over same-group shorter Han real terms
+- folder highlighting now supports `real_exact`, full Han
+  `surface_completion`, and a more conservative residual-support path that is
+  restricted to a single folder-path segment and never stitched across `/`
+- basename and folder are treated as separate display fields, so Han bridge or
+  residual evidence cannot be shared across the two fields
+- the metadata highlight path remains display-only: it does not change
+  `realizedCoverageCount`, `completedHanSurfaceGroupCount`, or the main packing
+  comparator
+- the regression baseline now covers exact basename/folder highlights, Han
+  full-surface dominance in basename and folder segments, basename residual
+  support, single-segment folder residual support, and basename/folder field
+  isolation
