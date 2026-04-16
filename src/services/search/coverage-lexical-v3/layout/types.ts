@@ -53,7 +53,7 @@ export type ResidentMetadataContainerArena = Readonly<{
 	headingPostings: ResidentPostingList;
 }>;
 
-export type ResidentBodySummaryArena = ResidentAdaptivePostingField;
+export type ResidentBodyFamilyPostingField = ResidentAdaptivePostingField;
 
 export type ResidentBodyBlockArena = Readonly<{
 	blockCount: number;
@@ -79,6 +79,13 @@ export type ResidentAdaptivePostingField = Readonly<{
 	deltaTermIds: ResidentIntegerArray;
 	deltaTapeStarts: ResidentIntegerArray;
 	postingTape: Uint8Array;
+}>;
+
+export type ResidentFuzzyRescueSidecar = Readonly<{
+	candidateMetadataFamilyIdsByDeletionKey: ReadonlyMap<string, Uint32Array>;
+	indexedMetadataFamilyCount: number;
+	deletionKeyCount: number;
+	bytes: number;
 }>;
 
 export type ResidentHanRouteArena = Readonly<{
@@ -186,9 +193,10 @@ export type ResidentBase = Readonly<{
 	docTable: ResidentDocTable;
 	familyLexicon: ResidentFamilyLexicon;
 	metadataContainers: ResidentMetadataContainerArena;
-	bodySummary: ResidentBodySummaryArena;
+	bodyFamilyPosting: ResidentBodyFamilyPostingField;
 	bodyBlocks: ResidentBodyBlockArena;
 	exactTapes: ResidentExactTapeArena;
 	hanRoute: ResidentHanRouteArena;
+	fuzzyRescue: ResidentFuzzyRescueSidecar;
 	metrics: ResidentBaseMetrics;
 }>;

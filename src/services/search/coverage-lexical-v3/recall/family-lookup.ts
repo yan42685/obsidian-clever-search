@@ -2,8 +2,12 @@ import {
 	getFamilySourceMask,
 	isFamilyPrefixExpandable,
 } from "../layout/family-lexicon";
+import {
+	buildFuzzyLookupKeys,
+	FUZZY_RESCUE_MIN_QUERY_LENGTH,
+} from "../layout/fuzzy-rescue";
 import type { ResidentBase } from "../layout/types";
-import type { V3QueryAnalysis } from "../query/analysis";
+import type { V3QueryAnalysis, V3QueryUnit } from "../query/analysis";
 import { getFamilyText } from "./access";
 import type {
 	V3QueryFamilyMatch,
@@ -12,8 +16,17 @@ import type {
 
 const PREFIX_LOOKUP_BUDGET_MS = 50;
 const PREFIX_LOOKUP_TIME_CHECK_INTERVAL = 256;
+const FUZZY_LOOKUP_BUDGET_MS = 8;
+const FUZZY_LOOKUP_TIME_CHECK_INTERVAL = 16;
+const FUZZY_LOOKUP_MAX_VERIFIED_CANDIDATES = 64;
+const FUZZY_LOOKUP_MATCH_LIMIT = 8;
 
 type PrefixLookupBudgetState = {
+	startedAtMs: number;
+	exhausted: boolean;
+};
+
+type FuzzyLookupBudgetState = {
 	startedAtMs: number;
 	exhausted: boolean;
 };
@@ -24,6 +37,7 @@ export function lookupQueryUnitFamilies(
 ): V3QueryUnitFamilyMatches[] {
 	const familyFlagsByFamilyId = base.familyLexicon.familyFlagsByFamilyId;
 	const prefixBudgetState = createPrefixLookupBudgetState();
+	const fuzzyBudgetState = createFuzzyLookupBudgetState();
 	return queryAnalysis.primaryUnits.map((queryUnit) => ({
 		queryUnitIndex: queryUnit.index,
 		queryUnitText: queryUnit.text,
@@ -34,19 +48,24 @@ export function lookupQueryUnitFamilies(
 				? []
 				: lookupSortedQueryUnitFamilyMatches(
 						base,
-						queryUnit.text,
+						queryUnit,
+						queryAnalysis,
 						familyFlagsByFamilyId,
-					prefixBudgetState,
+						prefixBudgetState,
+						fuzzyBudgetState,
 				),
 	}));
 }
 
 function lookupSortedQueryUnitFamilyMatches(
 	base: ResidentBase,
-	queryUnitText: string,
+	queryUnit: V3QueryUnit,
+	queryAnalysis: V3QueryAnalysis,
 	familyFlagsByFamilyId: Uint8Array,
 	prefixBudgetState: PrefixLookupBudgetState,
+	fuzzyBudgetState: FuzzyLookupBudgetState,
 ): V3QueryFamilyMatch[] {
+	const queryUnitText = queryUnit.text;
 	const rangeStartFamilyId = findFirstFamilyIdAtOrAfter(base, queryUnitText);
 	const exactMatch = collectExactMatch(
 		base,
@@ -61,7 +80,16 @@ function lookupSortedQueryUnitFamilyMatches(
 		familyFlagsByFamilyId,
 		prefixBudgetState,
 	);
-	return exactMatch == null ? prefixMatches : [exactMatch, ...prefixMatches];
+	if (exactMatch != null) {
+		return [exactMatch, ...prefixMatches];
+	}
+	if (prefixMatches.length > 0) {
+		return prefixMatches;
+	}
+	if (!shouldAttemptFuzzyRescue(queryUnit, queryAnalysis)) {
+		return [];
+	}
+	return collectBoundedFuzzyMatches(base, queryUnitText, fuzzyBudgetState);
 }
 
 function collectExactMatch(
@@ -84,6 +112,7 @@ function collectExactMatch(
 		familyId,
 		familyText,
 		matchKind: "exact",
+		editDistance: 0,
 	};
 }
 
@@ -131,10 +160,72 @@ function collectBoundedPrefixMatches(
 				familyId,
 				familyText,
 				matchKind: "prefix",
+				editDistance: 0,
 			},
 			queryUnitText,
 			matchLimit,
 		);
+	}
+	return matches;
+}
+
+function collectBoundedFuzzyMatches(
+	base: ResidentBase,
+	queryUnitText: string,
+	fuzzyBudgetState: FuzzyLookupBudgetState,
+): V3QueryFamilyMatch[] {
+	if (fuzzyBudgetState.exhausted) {
+		return [];
+	}
+	const candidateMetadataFamilyIdsByDeletionKey =
+		base.fuzzyRescue.candidateMetadataFamilyIdsByDeletionKey;
+	if (candidateMetadataFamilyIdsByDeletionKey.size === 0) {
+		return [];
+	}
+	const matches: V3QueryFamilyMatch[] = [];
+	const seenFamilyIds = new Set<number>();
+	let verifiedCandidateCount = 0;
+	for (const lookupKey of buildFuzzyLookupKeys(queryUnitText)) {
+		const candidateMetadataFamilyIds =
+			candidateMetadataFamilyIdsByDeletionKey.get(lookupKey);
+		if (candidateMetadataFamilyIds == null) {
+			continue;
+		}
+		for (const familyId of candidateMetadataFamilyIds) {
+			if (seenFamilyIds.has(familyId)) {
+				continue;
+			}
+			seenFamilyIds.add(familyId);
+			verifiedCandidateCount += 1;
+			if (verifiedCandidateCount > FUZZY_LOOKUP_MAX_VERIFIED_CANDIDATES) {
+				return matches;
+			}
+			if (shouldAbortFuzzyLookup(fuzzyBudgetState, verifiedCandidateCount)) {
+				return matches;
+			}
+			const familyText = getFamilyText(base, familyId);
+			const editDistance = resolveEditDistanceAtMostOne(
+				queryUnitText,
+				familyText,
+			);
+			if (editDistance == null || editDistance === 0) {
+				continue;
+			}
+			insertBoundedPrefixMatch(
+				matches,
+				{
+					familyId,
+					familyText,
+					matchKind: "fuzzy",
+					editDistance,
+				},
+				queryUnitText,
+				FUZZY_LOOKUP_MATCH_LIMIT,
+			);
+		}
+	}
+	if (nowMs() - fuzzyBudgetState.startedAtMs > FUZZY_LOOKUP_BUDGET_MS) {
+		fuzzyBudgetState.exhausted = true;
 	}
 	return matches;
 }
@@ -255,8 +346,50 @@ function shouldAbortPrefixLookup(
 	return true;
 }
 
+function createFuzzyLookupBudgetState(): FuzzyLookupBudgetState {
+	return {
+		startedAtMs: nowMs(),
+		exhausted: false,
+	};
+}
+
+function shouldAbortFuzzyLookup(
+	state: FuzzyLookupBudgetState,
+	verifiedCandidateCount: number,
+): boolean {
+	if (state.exhausted) {
+		return true;
+	}
+	if (verifiedCandidateCount % FUZZY_LOOKUP_TIME_CHECK_INTERVAL !== 0) {
+		return false;
+	}
+	if (nowMs() - state.startedAtMs <= FUZZY_LOOKUP_BUDGET_MS) {
+		return false;
+	}
+	state.exhausted = true;
+	return true;
+}
+
 function nowMs(): number {
 	return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function shouldAttemptFuzzyRescue(
+	queryUnit: V3QueryUnit,
+	queryAnalysis: V3QueryAnalysis,
+): boolean {
+	if (
+		queryUnit.source !== "surface" ||
+		queryUnit.text.length < FUZZY_RESCUE_MIN_QUERY_LENGTH
+	) {
+		return false;
+	}
+	if (queryUnit.surfaceGroupIndex == null) {
+		return false;
+	}
+	return (
+		queryAnalysis.surfaceGroups[queryUnit.surfaceGroupIndex]?.kind !== "han"
+	);
 }
 
 function compareQueryFamilyMatch(
@@ -265,7 +398,10 @@ function compareQueryFamilyMatch(
 	queryUnitText: string,
 ): number {
 	if (left.matchKind !== right.matchKind) {
-		return left.matchKind === "exact" ? -1 : 1;
+		return getQueryFamilyMatchRank(left.matchKind) - getQueryFamilyMatchRank(right.matchKind);
+	}
+	if (left.editDistance !== right.editDistance) {
+		return left.editDistance - right.editDistance;
 	}
 	const leftExpansion = left.familyText.length - queryUnitText.length;
 	const rightExpansion = right.familyText.length - queryUnitText.length;
@@ -280,6 +416,64 @@ function compareQueryFamilyMatch(
 	return left.familyText.localeCompare(right.familyText);
 }
 
+function getQueryFamilyMatchRank(kind: V3QueryFamilyMatch["matchKind"]): number {
+	switch (kind) {
+		case "exact":
+			return 0;
+		case "opaque_exact":
+			return 1;
+		case "prefix":
+			return 2;
+		case "fuzzy":
+			return 3;
+	}
+}
+
 function getCompoundPrefixPenalty(match: V3QueryFamilyMatch): number {
 	return match.matchKind === "prefix" && /[_./-]/u.test(match.familyText) ? 1 : 0;
+}
+
+function resolveEditDistanceAtMostOne(
+	queryUnitText: string,
+	familyText: string,
+): 0 | 1 | null {
+	if (queryUnitText === familyText) {
+		return 0;
+	}
+	if (Math.abs(queryUnitText.length - familyText.length) > 1) {
+		return null;
+	}
+	if (queryUnitText.length === familyText.length) {
+		let mismatchCount = 0;
+		for (let index = 0; index < queryUnitText.length; index += 1) {
+			if (queryUnitText[index] === familyText[index]) {
+				continue;
+			}
+			mismatchCount += 1;
+			if (mismatchCount > 1) {
+				return null;
+			}
+		}
+		return mismatchCount === 1 ? 1 : 0;
+	}
+	const shorterText =
+		queryUnitText.length < familyText.length ? queryUnitText : familyText;
+	const longerText =
+		queryUnitText.length < familyText.length ? familyText : queryUnitText;
+	let shorterIndex = 0;
+	let longerIndex = 0;
+	let usedSkip = false;
+	while (shorterIndex < shorterText.length && longerIndex < longerText.length) {
+		if (shorterText[shorterIndex] === longerText[longerIndex]) {
+			shorterIndex += 1;
+			longerIndex += 1;
+			continue;
+		}
+		if (usedSkip) {
+			return null;
+		}
+		usedSkip = true;
+		longerIndex += 1;
+	}
+	return 1;
 }

@@ -1,8 +1,8 @@
 import { estimateBodyBlockBytes } from "../layout/body-blocks";
 import {
-	describeBodySummaryByteBreakdown,
-	estimateBodySummaryBytes,
-} from "../layout/body-summary-postings";
+	describeBodyFamilyPostingByteBreakdown,
+	estimateBodyFamilyPostingBytes,
+} from "../layout/body-family-posting";
 import { estimateDocTableBytes } from "../layout/doc-table";
 import { estimateExactTapeBytes } from "../layout/exact-tapes";
 import { estimateFamilyLexiconBytes } from "../layout/family-lexicon";
@@ -47,7 +47,7 @@ type MetricsBuildInput = Readonly<{
 	familyLexicon: ResidentFamilyLexicon;
 	metadataContainers: ResidentMetadataContainerArena;
 	bodyBlocks: ResidentBodyBlockArena;
-	bodySummary: ResidentBase["bodySummary"];
+	bodyFamilyPosting: ResidentBase["bodyFamilyPosting"];
 	exactTapes: ResidentExactTapeArena;
 	hanRoute: ResidentHanRouteArena;
 	auxiliaryBytes: number;
@@ -67,9 +67,11 @@ export function buildResidentBaseMetrics(
 		input.metadataContainers,
 	);
 	const headingBytes = estimateHeadingBytes(input.metadataContainers);
-	const familyPostingBytes = estimateBodySummaryBytes(input.bodySummary);
-	const familyPostingBreakdown = describeBodySummaryByteBreakdown(
-		input.bodySummary,
+	const familyPostingBytes = estimateBodyFamilyPostingBytes(
+		input.bodyFamilyPosting,
+	);
+	const familyPostingBreakdown = describeBodyFamilyPostingByteBreakdown(
+		input.bodyFamilyPosting,
 	);
 	const bodyBlockBytes = estimateBodyBlockBytes(input.bodyBlocks);
 	const exactTapeBytes = estimateExactTapeBytes(input.exactTapes);
@@ -100,8 +102,8 @@ export function buildResidentBaseMetrics(
 		input.metadataContainers.identityPostings.postingStarts.byteLength +
 		input.metadataContainers.routePostings.postingStarts.byteLength +
 		input.metadataContainers.headingPostings.postingStarts.byteLength +
-		input.bodySummary.smallValueStarts.byteLength +
-		input.bodySummary.deltaTapeStarts.byteLength +
+		input.bodyFamilyPosting.smallValueStarts.byteLength +
+		input.bodyFamilyPosting.deltaTapeStarts.byteLength +
 		input.bodyBlocks.exactTapeStartByBlockId.byteLength +
 		input.bodyBlocks.exactTapeCountByBlockId.byteLength +
 		input.hanRoute.metadataPostingStarts.byteLength +
@@ -122,15 +124,15 @@ export function buildResidentBaseMetrics(
 		input.metadataContainers.identityPostings.docIds.byteLength +
 		input.metadataContainers.routePostings.docIds.byteLength +
 		input.metadataContainers.headingPostings.docIds.byteLength +
-		input.bodySummary.singletonTermIds.byteLength +
-		input.bodySummary.singletonValueIds.byteLength +
-		input.bodySummary.pairTermIds.byteLength +
-		input.bodySummary.pairFirstValueIds.byteLength +
-		input.bodySummary.pairSecondValueIds.byteLength +
-		input.bodySummary.smallTermIds.byteLength +
-		input.bodySummary.smallValueIds.byteLength +
-		input.bodySummary.deltaTermIds.byteLength +
-		input.bodySummary.postingTape.byteLength +
+		input.bodyFamilyPosting.singletonTermIds.byteLength +
+		input.bodyFamilyPosting.singletonValueIds.byteLength +
+		input.bodyFamilyPosting.pairTermIds.byteLength +
+		input.bodyFamilyPosting.pairFirstValueIds.byteLength +
+		input.bodyFamilyPosting.pairSecondValueIds.byteLength +
+		input.bodyFamilyPosting.smallTermIds.byteLength +
+		input.bodyFamilyPosting.smallValueIds.byteLength +
+		input.bodyFamilyPosting.deltaTermIds.byteLength +
+		input.bodyFamilyPosting.postingTape.byteLength +
 		input.bodyBlocks.docIdByBlockId.byteLength +
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
 		input.exactTapes.familyIds.byteLength +
@@ -314,49 +316,49 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 			),
 			describeIntegerSection(
 				"familyPosting.singletonTermIds",
-				base.bodySummary.singletonTermIds,
+				base.bodyFamilyPosting.singletonTermIds,
 			),
 			describeIntegerSection(
 				"familyPosting.singletonValueIds",
-				base.bodySummary.singletonValueIds,
+				base.bodyFamilyPosting.singletonValueIds,
 			),
 			describeIntegerSection(
 				"familyPosting.pairTermIds",
-				base.bodySummary.pairTermIds,
+				base.bodyFamilyPosting.pairTermIds,
 			),
 			describeIntegerSection(
 				"familyPosting.pairFirstValueIds",
-				base.bodySummary.pairFirstValueIds,
+				base.bodyFamilyPosting.pairFirstValueIds,
 			),
 			describeIntegerSection(
 				"familyPosting.pairSecondValueIds",
-				base.bodySummary.pairSecondValueIds,
+				base.bodyFamilyPosting.pairSecondValueIds,
 			),
 			describeIntegerSection(
 				"familyPosting.smallTermIds",
-				base.bodySummary.smallTermIds,
+				base.bodyFamilyPosting.smallTermIds,
 			),
 			describeIntegerSection(
 				"familyPosting.smallValueStarts",
-				base.bodySummary.smallValueStarts,
+				base.bodyFamilyPosting.smallValueStarts,
 				sentinelStartsEncodingFlag(),
 			),
 			describeIntegerSection(
 				"familyPosting.smallValueIds",
-				base.bodySummary.smallValueIds,
+				base.bodyFamilyPosting.smallValueIds,
 			),
 			describeIntegerSection(
 				"familyPosting.deltaTermIds",
-				base.bodySummary.deltaTermIds,
+				base.bodyFamilyPosting.deltaTermIds,
 			),
 			describeIntegerSection(
 				"familyPosting.deltaTapeStarts",
-				base.bodySummary.deltaTapeStarts,
+				base.bodyFamilyPosting.deltaTapeStarts,
 				sentinelStartsEncodingFlag(),
 			),
 			describeIntegerSection(
 				"familyPosting.postingTape",
-				base.bodySummary.postingTape,
+				base.bodyFamilyPosting.postingTape,
 			),
 			describeIntegerSection("exactTapes.familyIds", base.exactTapes.familyIds),
 			describeIntegerSection(

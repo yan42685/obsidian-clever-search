@@ -41,7 +41,7 @@ function createResidentBaseForBlockCount(blockCount: number): ResidentBase {
 			routePostings: { postingStarts: new Uint32Array(), docIds: new Uint32Array() },
 			headingPostings: { postingStarts: new Uint32Array(), docIds: new Uint32Array() },
 		},
-		bodySummary: {
+		bodyFamilyPosting: {
 			familyIds: new Uint32Array(),
 			postingStarts: new Uint32Array(),
 			docIds: new Uint32Array(),

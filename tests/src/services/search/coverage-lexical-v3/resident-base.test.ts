@@ -13,7 +13,8 @@ import {
 } from "src/services/search/coverage-lexical-v3/recall";
 
 function createDocument(
-	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
+	overrides: Partial<IndexedDocument> &
+		Pick<IndexedDocument, "path" | "basename" | "folder">,
 ): IndexedDocument {
 	return {
 		path: overrides.path,
@@ -43,7 +44,9 @@ function sumMetricBuckets(metrics: ReturnType<typeof buildResidentBase>["metrics
 	);
 }
 
-function countAdaptiveTerms(field: ReturnType<typeof buildResidentBase>["bodySummary"]): number {
+function countAdaptiveTerms(
+	field: ReturnType<typeof buildResidentBase>["bodyFamilyPosting"],
+): number {
 	return (
 		field.singletonTermIds.length +
 		field.pairTermIds.length +
@@ -52,7 +55,9 @@ function countAdaptiveTerms(field: ReturnType<typeof buildResidentBase>["bodySum
 	);
 }
 
-function countAdaptiveValues(field: ReturnType<typeof buildResidentBase>["bodySummary"]): number {
+function countAdaptiveValues(
+	field: ReturnType<typeof buildResidentBase>["bodyFamilyPosting"],
+): number {
 	return (
 		field.singletonValueIds.length +
 		field.pairFirstValueIds.length +
@@ -92,7 +97,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.docTable.docCount).toBe(1);
 		expect(residentBase.familyLexicon.familyCount).toBeGreaterThan(0);
 		expect(residentBase.metadataContainers.identityPostings.docIds.length).toBeGreaterThan(0);
-		expect(countAdaptiveValues(residentBase.bodySummary)).toBeGreaterThan(0);
+		expect(countAdaptiveValues(residentBase.bodyFamilyPosting)).toBeGreaterThan(0);
 		expect(residentBase.bodyBlocks.blockCount).toBe(1);
 		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
@@ -102,11 +107,11 @@ describe("coverage lexical v3 resident base", () => {
 	test("builds a single han document", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
-				path: "\u6280\u672f/\u7f13\u5b58\u6062\u590d.md",
-				basename: "\u7f13\u5b58\u6062\u590d",
-				folder: "\u6280\u672f",
-				headings: "\u6545\u969c\u56de\u653e",
-				content: "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\n\n\u56de\u653e\u68c0\u67e5\u4e0e\u70ed\u542f\u52a8\u6062\u590d\u3002",
+				path: "技术/缓存恢复.md",
+				basename: "缓存恢复",
+				folder: "技术",
+				headings: "故障回放",
+				content: "缓存恢复步骤\n\n回放检查与热启动恢复。",
 			}),
 		]);
 
@@ -117,6 +122,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.hanRouteBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 	});
+
 	test("builds mixed metadata and body structures with stable byte buckets", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
@@ -257,8 +263,74 @@ describe("coverage lexical v3 resident base", () => {
 				(section) => section.sectionKind === "hanRoute.hanBigramPosting.postingTape",
 			),
 		).toBe(true);
-		expect(countAdaptiveTerms(residentBase.bodySummary)).toBeGreaterThan(0);
+		expect(countAdaptiveTerms(residentBase.bodyFamilyPosting)).toBeGreaterThan(0);
 		expect(residentBase.metrics.stringPayloadBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
+	});
+
+	test("indexes eligible metadata families in fuzzy rescue sidecar and skips heading/body only families", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "latin/obsidian.md",
+				basename: "obsidian",
+				folder: "latin",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/runtime.md",
+				basename: "notes",
+				folder: "latin",
+				aliases: "runtime",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/short.md",
+				basename: "cache",
+				folder: "latin",
+				content: "cache",
+			}),
+			createDocument({
+				path: "zh/han.md",
+				basename: "缓存恢复",
+				folder: "zh",
+				content: "缓存恢复",
+			}),
+			createDocument({
+				path: "latin/heading-only.md",
+				basename: "notes",
+				folder: "latin",
+				headings: "incident",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/body-only.md",
+				basename: "notes",
+				folder: "latin",
+				content: "runbooks",
+			}),
+		]);
+
+		const obsidanPosting =
+			residentBase.fuzzyRescue.candidateMetadataFamilyIdsByDeletionKey.get(
+				"obsidan",
+			);
+		const incdentPosting =
+			residentBase.fuzzyRescue.candidateMetadataFamilyIdsByDeletionKey.get(
+				"incdent",
+			);
+		const runboksPosting =
+			residentBase.fuzzyRescue.candidateMetadataFamilyIdsByDeletionKey.get(
+				"runboks",
+			);
+		const postedFamilyTexts = Array.from(obsidanPosting ?? []).map((familyId) =>
+			getFamilyText(residentBase, familyId),
+		);
+
+		expect(residentBase.fuzzyRescue.indexedMetadataFamilyCount).toBe(2);
+		expect(postedFamilyTexts).toContain("obsidian");
+		expect(postedFamilyTexts).not.toContain("cache");
+		expect(incdentPosting).toBeUndefined();
+		expect(runboksPosting).toBeUndefined();
+		expect(residentBase.metrics.auxiliaryBytes).toBeGreaterThan(0);
 	});
 });

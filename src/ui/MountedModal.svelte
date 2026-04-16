@@ -369,6 +369,7 @@
 			viewHelper.renderHighlightedText(
 				item.basename,
 				item.basenameHighlightRanges ?? [],
+				item.basenameWeakHighlightRanges ?? [],
 			) +
 				HTML_4_SPACES +
 				escapeHtml(getFileExtensionText(item)),
@@ -380,6 +381,7 @@
 			viewHelper.renderHighlightedText(
 				item.folderPath,
 				item.folderHighlightRanges ?? [],
+				item.folderWeakHighlightRanges ?? [],
 			),
 		);
 	}
@@ -540,8 +542,10 @@
 									<span class="subitem-snippet">
 										{#if structuredSegments}
 											{#each structuredSegments as segment}
-												{#if segment.highlight}
-													<mark>{segment.text}</mark>
+												{#if segment.style === "strong"}
+													<strong class="cs-search-match">{segment.text}</strong>
+												{:else if segment.style === "weak"}
+													<span class="cs-search-match-weak">{segment.text}</span>
 												{:else}
 													{segment.text}
 												{/if}
@@ -578,9 +582,18 @@
 		overflow-wrap: break-word;
 	}
 
-	:global(.search-container mark) {
-		background-color: var(--cs-highlight-bgc, rgba(219, 204, 149, 0.9));
-		color: var(--cs-highlight-char-color, #111);
+	:global(.search-container .cs-search-match) {
+		font-weight: 700;
+		color: inherit;
+	}
+
+	:global(.search-container .cs-search-match-weak) {
+		font-weight: 600;
+		color: inherit;
+		text-decoration-line: underline;
+		text-decoration-style: dashed;
+		text-decoration-thickness: 1px;
+		text-underline-offset: 0.12em;
 	}
 
 	.left-pane {
@@ -763,12 +776,4 @@
 		background-color: var(--cs-item-selected-color, rgba(85, 85, 85, 0.35));
 	}
 
-	.right-pane .preview-container :global(span.matched-line) {
-		display: inline-block;
-		width: 100%;
-	}
-
-	.right-pane .preview-container :global(span.matched-line.highlight-bg) {
-		background-color: var(--cs-hint-char-color, #468eeb33);
-	}
 </style>

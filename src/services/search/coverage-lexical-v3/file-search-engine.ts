@@ -155,7 +155,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				directSubItems: [],
 				nativeSubItemsReady: false,
 				basenameHighlightRanges: metadataHighlights.basenameHighlightRanges,
+				basenameWeakHighlightRanges:
+					metadataHighlights.basenameWeakHighlightRanges,
 				folderHighlightRanges: metadataHighlights.folderHighlightRanges,
+				folderWeakHighlightRanges: metadataHighlights.folderWeakHighlightRanges,
 			};
 		});
 	}

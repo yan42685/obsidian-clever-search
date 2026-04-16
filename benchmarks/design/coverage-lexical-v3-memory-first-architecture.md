@@ -864,5 +864,33 @@ Validation completed for this phase:
     negatives
 - resident-base, engine, size-anchor, file-search-engine, family-lookup,
   ranking-stability, and reindex-width-transition suites pass
+
+### Runtime Auxiliary Note
+
+Status: Updated on 2026-04-16
+
+The current runtime implementation now includes a resident-only
+`fuzzyRescue` auxiliary sidecar for metadata fuzzy fallback:
+
+- it is built alongside the resident base and rebuilt on reindex
+- it is not yet part of the snapshot / restore schema
+- its current role is strictly query-time fuzzy candidate admission after
+  `exact` and `prefix` miss
+- its current resident scope is intentionally metadata-only:
+  `basename` / `alias` / `folder` / `tag`
+- `heading`-only and `body`-only families are excluded from the global fuzzy
+  sidecar in the current pass to cut auxiliary resident fanout without changing
+  the agreed metadata fuzzy recall boundary
+
+Implementation note:
+
+- the runtime sidecar exists and is accounted under `auxiliaryBytes`, but its
+  current footprint is still above the intended first-pass resident-memory
+  budget even after the metadata-only pruning pass
+- the automation size anchor improved from `auxiliaryBytes = 214,619` to
+  `43,007`, which is directionally much better but still around
+  `0.49x rawMarkdownUtf8Bytes` and therefore not yet memory-settled
+- further compression / packing work is therefore still required before this
+  auxiliary structure should be treated as architecturally settled
 - repo-wide `npm run typecheck:build` passes again as of 2026-04-16, so this
   phase is now fully validated at the code level

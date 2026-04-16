@@ -1,6 +1,9 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
-import { collectBodySummaryBlockIds, getFamilyText } from "src/services/search/coverage-lexical-v3/recall";
+import {
+	collectBodyFamilyPostingBlockIds,
+	getFamilyText,
+} from "src/services/search/coverage-lexical-v3/recall";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> &
@@ -30,8 +33,8 @@ function findFamilyIdByText(
 	return familyId;
 }
 
-describe("coverage lexical v3 sparse body summary", () => {
-	test("body summary stores only families that actually appear in block summaries", () => {
+describe("coverage lexical v3 sparse body family posting", () => {
+	test("body family posting stores only families that actually appear in block summaries", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
 				path: "notes/sparse.md",
@@ -47,16 +50,20 @@ describe("coverage lexical v3 sparse body summary", () => {
 		const metadataFamilyId = findFamilyIdByText(familyTexts, "metadataonly");
 		const bodyFamilyId = findFamilyIdByText(familyTexts, "bodyonly");
 		const summarizedFamilyCount =
-			residentBase.bodySummary.singletonTermIds.length +
-			residentBase.bodySummary.pairTermIds.length +
-			residentBase.bodySummary.smallTermIds.length +
-			residentBase.bodySummary.deltaTermIds.length;
+			residentBase.bodyFamilyPosting.singletonTermIds.length +
+			residentBase.bodyFamilyPosting.pairTermIds.length +
+			residentBase.bodyFamilyPosting.smallTermIds.length +
+			residentBase.bodyFamilyPosting.deltaTermIds.length;
 
 		expect(summarizedFamilyCount).toBeLessThan(
 			residentBase.familyLexicon.familyCount,
 		);
 		expect(summarizedFamilyCount).toBe(1);
-		expect(collectBodySummaryBlockIds(residentBase, metadataFamilyId)).toEqual([]);
-		expect(collectBodySummaryBlockIds(residentBase, bodyFamilyId)).toEqual([0]);
+		expect(collectBodyFamilyPostingBlockIds(residentBase, metadataFamilyId)).toEqual(
+			[],
+		);
+		expect(collectBodyFamilyPostingBlockIds(residentBase, bodyFamilyId)).toEqual(
+			[0],
+		);
 	});
 });

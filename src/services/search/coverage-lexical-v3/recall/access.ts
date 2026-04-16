@@ -5,7 +5,7 @@ import {
 	sliceResidentIntegerArray,
 	sliceSentinelBucket,
 } from "../layout/integer-arrays";
-import { collectBodySummaryBlockIdsForFamily } from "../layout/body-summary-postings";
+import { collectBodyFamilyPostingBlockIdsForFamily } from "../layout/body-family-posting";
 import type { ResidentBase } from "../layout/types";
 import { decodeBodyHanPosting, lookupHanBigramIndex } from "../layout/han-route";
 
@@ -102,11 +102,14 @@ export function getDocBodyBlockIds(
 	return Array.from({ length: count }, (_, index) => start + index);
 }
 
-export function collectBodySummaryBlockIds(
+export function collectBodyFamilyPostingBlockIds(
 	base: ResidentBase,
 	familyId: number,
 ): number[] {
-	return collectBodySummaryBlockIdsForFamily(base.bodySummary, familyId);
+	return collectBodyFamilyPostingBlockIdsForFamily(
+		base.bodyFamilyPosting,
+		familyId,
+	);
 }
 
 export function getBodyBlockExactFamilyIds(

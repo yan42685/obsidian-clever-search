@@ -320,6 +320,14 @@ export function buildPackingProfile(
 			(family) =>
 				family.matchKind === "prefix" && /[_./-]/u.test(family.familyText),
 		).length,
+		fuzzyUnitCount: realizedFamilies.filter(
+			(family) => family.matchKind === "fuzzy",
+		).length,
+		fuzzyEditDistanceTotal: realizedFamilies.reduce(
+			(total, family) =>
+				family.matchKind === "fuzzy" ? total + family.editDistance : total,
+			0,
+		),
 		metadataPackingSignature,
 		realizedFamilies,
 		identityContainer,
@@ -475,6 +483,7 @@ function mergeCandidateSpecificHanConfirmedMatches(
 				familyId: encodeWitnessMatchFamilyId(stringId),
 				familyText,
 				matchKind: "opaque_exact",
+				editDistance: 0,
 			};
 			mergedMatches.set(`${confirmedMatch.familyId}:opaque_exact`, confirmedMatch);
 		}
@@ -569,6 +578,9 @@ function compareMatchPreference(
 	if (left.matchKind !== right.matchKind) {
 		return compareMatchKindPreference(left.matchKind, right.matchKind);
 	}
+	if (left.editDistance !== right.editDistance) {
+		return left.editDistance - right.editDistance;
+	}
 	if (left.familyText.length !== right.familyText.length) {
 		return left.familyText.length - right.familyText.length;
 	}
@@ -590,6 +602,8 @@ function matchKindPreference(kind: V3QueryFamilyMatch["matchKind"]): number {
 			return 1;
 		case "prefix":
 			return 2;
+		case "fuzzy":
+			return 3;
 	}
 }
 
@@ -884,6 +898,16 @@ function summarizeWindowCandidate(
 			representativeByUnit.set(occurrence.unitIndex, occurrence);
 		}
 	}
+	return summarizeWindowCandidateFromRepresentatives(
+		representativeByUnit,
+		headingFamilyIds,
+	);
+}
+
+function summarizeWindowCandidateFromRepresentatives(
+	representativeByUnit: ReadonlyMap<number, BodyOccurrence>,
+	headingFamilyIds: ReadonlySet<number>,
+): BodyWindowCandidate | null {
 	const representatives = [...representativeByUnit.values()].sort((left, right) => {
 		if (left.virtualPosition !== right.virtualPosition) {
 			return left.virtualPosition - right.virtualPosition;
@@ -1155,6 +1179,7 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 		familyId: best.match.familyId,
 		familyText: best.match.familyText,
 		matchKind: best.match.matchKind,
+		editDistance: best.match.editDistance,
 		identityMetadataSource: best.identityMetadataSource,
 		routeMetadataSource: best.routeMetadataSource,
 		metadataPackingSource: best.metadataPackingSource,

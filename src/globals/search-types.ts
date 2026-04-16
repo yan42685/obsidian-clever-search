@@ -63,7 +63,9 @@ export type MatchedFile = {
   matchedTerms: string[];
   score?: number;
   basenameHighlightRanges?: HighlightRange[];
+  basenameWeakHighlightRanges?: HighlightRange[];
   folderHighlightRanges?: HighlightRange[];
+  folderWeakHighlightRanges?: HighlightRange[];
   directSubItems?: FileSubItem[];
   nativeSubItemsReady?: boolean;
 };
@@ -182,7 +184,9 @@ export class FileItem extends Item {
   queryTerms: string[];
   matchedTerms: string[];
   basenameHighlightRanges?: HighlightRange[];
+  basenameWeakHighlightRanges?: HighlightRange[];
   folderHighlightRanges?: HighlightRange[];
+  folderWeakHighlightRanges?: HighlightRange[];
   subItems: FileSubItem[]; // for markdown viewType
   nativeSubItemsReady: boolean;
   // TODO: impl this
@@ -211,6 +215,8 @@ export class FileItem extends Item {
     nativeSubItemsReady = false,
     basenameHighlightRanges?: HighlightRange[],
     folderHighlightRanges?: HighlightRange[],
+    basenameWeakHighlightRanges?: HighlightRange[],
+    folderWeakHighlightRanges?: HighlightRange[],
   ) {
     super();
     this.engineType = engineType;
@@ -222,6 +228,8 @@ export class FileItem extends Item {
     this.nativeSubItemsReady = nativeSubItemsReady;
     this.basenameHighlightRanges = basenameHighlightRanges;
     this.folderHighlightRanges = folderHighlightRanges;
+    this.basenameWeakHighlightRanges = basenameWeakHighlightRanges;
+    this.folderWeakHighlightRanges = folderWeakHighlightRanges;
   }
 }
 
@@ -232,6 +240,7 @@ export class FileSubItem extends Item {
   score?: number;
   snippetText?: string;
   highlightRanges?: HighlightRange[];
+  weakHighlightRanges?: HighlightRange[];
   private cachedSnippet?: string;
   private snippetBuilder?: () => string;
 

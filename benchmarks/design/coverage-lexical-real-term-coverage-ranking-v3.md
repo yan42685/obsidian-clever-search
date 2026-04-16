@@ -1170,6 +1170,62 @@ Validation completed for this phase:
   - `zeroRate = 0`
   - `objective = 0.878`
 
+### Phase 20
+
+Status: In Progress on 2026-04-16
+
+The current implementation now lands the core V3 non-Han fuzzy-rescue path as
+a runtime-resident lexical fallback without promoting fuzzy into the normal
+hot-path worldview:
+
+- V3 resident build now materializes a runtime-only `fuzzyRescue` auxiliary
+  sidecar for eligible metadata families with
+  `length >= 6`
+  - the current boundary is intentionally metadata-only:
+    `basename` / `alias` / `folder` / `tag`
+  - `heading`-only and `body`-only families are no longer indexed into the
+    global fuzzy sidecar
+- query-unit family lookup now runs fuzzy only as a rescue lane:
+  - only for `surface` non-Han units
+  - only after both `exact` and `prefix` miss
+  - only at `editDistance <= 1`
+  - with bounded per-unit candidate verification and a query-wide soft time
+    budget
+  - without adding new recall-changing gates such as longest-unit-only rescue,
+    hot-key stoplists, or anchor-character filters in this pass
+- realized-family selection and final ranking now admit `matchKind = fuzzy`,
+  but keep fuzzy strictly late and de-noised:
+  - `exact > prefix > fuzzy` family preference
+  - fuzzy does not contribute to `exactUnitCount`
+  - fuzzy is only penalized in very-late tie-breaks via
+    `fuzzyUnitCount` / `fuzzyEditDistanceTotal`
+- basename/folder/snippet display now distinguishes strong and weak lexical
+  evidence:
+  - exact/prefix/Han surface-completion render as strong character-only
+    emphasis
+  - fuzzy render as weak emphasis with a lighter dotted-underline treatment
+  - the main search UI no longer relies on `<mark>` background highlighting
+
+Validation completed for the implemented portion of this phase:
+
+- targeted V3 family-lookup, engine, comparator, ranking-stability,
+  metadata-highlight, direct-subitems, and UI highlight regression suites pass
+- `npm run typecheck:build` passes as of 2026-04-16
+- the automation size anchor now shows the metadata-only sidecar materially
+  reduces resident auxiliary size:
+  - `auxiliaryBytes: 214,619 -> 43,007`
+  - still above the intended first target
+    (`43,007 / 88,066 ~= 0.49x rawMarkdownUtf8Bytes`)
+
+Open follow-up still remaining in this phase:
+
+- the current runtime sidecar footprint is still above the intended first
+  resident-memory target even after the metadata-only pruning pass
+  (`auxiliaryBytes = 43,007` vs `rawMarkdownUtf8Bytes = 88,066` on the
+  automation size anchor)
+- fuzzy sidecar persistence / snapshot schema work is intentionally deferred;
+  the current implementation is runtime-resident only
+
 ### Phase 21
 
 Status: Completed on 2026-04-16
@@ -1193,13 +1249,18 @@ changing recall structure, admission rules, or final ranking semantics:
   - `approxMaxAdjacentGap`
   - `approxTotalGapMass`
   - stable block/start/representative fallback
+- multi-block adjacent scopes still route through the same scope prefilter and
+  the same shortlist comparator; only the internal per-scope enumeration
+  strategy changed
 
 Validation completed for this phase:
 
 - `tests/src/services/search/coverage-lexical-v3/body-window-selection.test.ts`
   now compares the incremental selector against a duplicated exhaustive
-  selector on repeated exact single-block windows, mixed exact/prefix
-  single-block windows, and adjacent two-block windows
+  selector on:
+  - repeated exact single-block windows
+  - mixed exact/prefix single-block windows
+  - adjacent two-block windows
 - `tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes after
   the optimization, confirming existing packing/regression behavior remains
   stable
@@ -1207,4 +1268,12 @@ Validation completed for this phase:
   passes after the optimization
 - `npm run typecheck:build` passes on 2026-04-16
 - `npm run benchmark:coverage-lexical` passes on 2026-04-16 with
-  `CoverageLexical(V3)` still at `top1 = 0.808`, `zeroRate = 0`, `top5 = 1`,
+  `CoverageLexical(V3)` still at:
+  - `top1 = 0.808`
+  - `zeroRate = 0`
+  - `top5 = 1`
+  - `objective = 0.879`
+  while the same benchmark rerun dropped the latency anchor to approximately:
+  - `avgMsPerQuery = 6.239`
+  - `p50Ms = 4.355`
+  - `p100Ms = 46.619`

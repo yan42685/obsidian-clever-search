@@ -64,7 +64,7 @@ function createResidentBaseForBlockCounts(
 				docIds: new Uint32Array(),
 			},
 		},
-		bodySummary: {
+		bodyFamilyPosting: {
 			familyIds: new Uint32Array(),
 			postingStarts: new Uint32Array(),
 			docIds: new Uint32Array(),
@@ -216,9 +216,9 @@ function createCandidateRecall(overrides: Partial<V3CandidateDocRecall>): V3Cand
 
 describe("coverage lexical v3 direct subitems residual support", () => {
 	test("adds bridge residual support highlights within the local body scope", () => {
-		const queryAnalysis = analyzeQuery("上面这笔记", ["上面", "笔记"]);
+		const queryAnalysis = analyzeQuery("涓婇潰杩欑瑪璁?, ["涓婇潰", "绗旇"]);
 		const result = buildV3DirectSubitems({
-			snapshotText: "也是上面这位开发的，查看笔记关系。",
+			snapshotText: "涔熸槸涓婇潰杩欎綅寮€鍙戠殑锛屾煡鐪嬬瑪璁板叧绯汇€?,
 			queryAnalysis,
 			candidate: createCandidate({ path: "bridge.md" }),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
@@ -228,21 +228,21 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 		const highlights = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlights).toContain("上面这");
-		expect(highlights).toContain("笔记");
-		expect(highlights).not.toContain("上面这笔记");
+		expect(highlights).toContain("涓婇潰杩?);
+		expect(highlights).toContain("绗旇");
+		expect(highlights).not.toContain("涓婇潰杩欑瑪璁?);
 		expect(result.candidates[0]?.completedHanSurfaceGroupCount).toBe(0);
 	});
 
 	test("same-scope full surface suppresses residual support highlights", () => {
-		const queryAnalysis = analyzeQuery("上面这笔记", ["上面", "笔记"]);
+		const queryAnalysis = analyzeQuery("涓婇潰杩欑瑪璁?, ["涓婇潰", "绗旇"]);
 		const result = buildV3DirectSubitems({
-			snapshotText: "上面这笔记就在这里。",
+			snapshotText: "涓婇潰杩欑瑪璁板氨鍦ㄨ繖閲屻€?,
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "full-body.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "上面这笔记", tier: "body_window" },
+					{ surfaceGroupIndex: 0, surfaceText: "涓婇潰杩欑瑪璁?, tier: "body_window" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 2,
@@ -255,19 +255,19 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 		const highlights = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlights).toContain("上面这笔记");
-		expect(highlights).not.toContain("上面这");
+		expect(highlights).toContain("涓婇潰杩欑瑪璁?);
+		expect(highlights).not.toContain("涓婇潰杩?);
 	});
 
 	test("metadata completion does not globally suppress body residual support", () => {
-		const queryAnalysis = analyzeQuery("上面这笔记", ["上面", "笔记"]);
+		const queryAnalysis = analyzeQuery("涓婇潰杩欑瑪璁?, ["涓婇潰", "绗旇"]);
 		const result = buildV3DirectSubitems({
-			snapshotText: "也是上面这位开发的，查看笔记关系。",
+			snapshotText: "涔熸槸涓婇潰杩欎綅寮€鍙戠殑锛屾煡鐪嬬瑪璁板叧绯汇€?,
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "identity-body.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "上面这笔记", tier: "identity" },
+					{ surfaceGroupIndex: 0, surfaceText: "涓婇潰杩欑瑪璁?, tier: "identity" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 4,
@@ -280,8 +280,8 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 		const highlights = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(highlights).toContain("上面这");
-		expect(highlights).toContain("笔记");
-		expect(highlights).not.toContain("上面这笔记");
+		expect(highlights).toContain("涓婇潰杩?);
+		expect(highlights).toContain("绗旇");
+		expect(highlights).not.toContain("涓婇潰杩欑瑪璁?);
 	});
 });

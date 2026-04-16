@@ -46,6 +46,7 @@ describe("coverage lexical v3 size anchor", () => {
 		expect(residentBase.docTable.docCount).toBeGreaterThanOrEqual(80);
 		expect(residentBase.metrics.residentBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
+		expect(residentBase.metrics.auxiliaryBytes).toBeGreaterThanOrEqual(0);
 		expect(residentBase.metrics["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
 		expect(summary.buckets).toHaveLength(10);
 	});

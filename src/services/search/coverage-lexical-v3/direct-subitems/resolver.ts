@@ -51,6 +51,12 @@ export function buildV3DirectSubitems(
 			start: range.start,
 			end: range.end,
 		}));
+		subItem.weakHighlightRanges = (payload.weakHighlightRanges ?? []).map(
+			(range) => ({
+				start: range.start,
+				end: range.end,
+			}),
+		);
 		return subItem;
 	});
 	return {
@@ -129,7 +135,10 @@ function buildCandidateTermSignature(
 ): string {
 	const realUnitIndices = [...new Set(
 		candidate.occurrences
-			.filter((occurrence) => occurrence.kind === "real_exact")
+			.filter(
+				(occurrence) =>
+					occurrence.kind === "real_exact" || occurrence.kind === "fuzzy",
+			)
 			.map((occurrence) => occurrence.queryUnitIndex)
 			.filter((value): value is number => value != null),
 	)].sort((left, right) => left - right);
@@ -195,9 +204,13 @@ function computeDisplayOverlapRatio(
 }
 
 function buildHighlightRangeSignature(
-	payload: Pick<V3DirectSubitemRenderPayload, "highlightRanges">,
+	payload: Pick<V3DirectSubitemRenderPayload, "highlightRanges" | "weakHighlightRanges">,
 ): string {
-	return payload.highlightRanges
-		.map((range) => `${range.start}:${range.end}`)
+	return [
+		...payload.highlightRanges.map((range) => `s:${range.start}:${range.end}`),
+		...(payload.weakHighlightRanges ?? []).map(
+			(range) => `w:${range.start}:${range.end}`,
+		),
+	]
 		.join("|");
 }

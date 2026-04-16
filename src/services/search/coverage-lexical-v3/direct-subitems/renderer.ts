@@ -49,10 +49,17 @@ export function renderV3DirectSubitemCandidate(params: {
 	const snippetText = snapshotText.slice(displayWindow.start, displayWindow.end);
 	const row = offsetToLine(lineOffsets, candidate.anchorOffset);
 	const lineStartOffset = lineOffsets[row] ?? 0;
-	const highlightRanges = resolveHighlightRanges(candidate, displayWindow);
+	const { strongHighlightRanges, weakHighlightRanges } = resolveHighlightRanges(
+		candidate,
+		displayWindow,
+	);
 	return {
 		text: snippetText,
-		html: renderHighlightedSnippet(snippetText, highlightRanges),
+		html: renderHighlightedSnippet(
+			snippetText,
+			strongHighlightRanges,
+			weakHighlightRanges,
+		),
 		snippetText,
 		row,
 		col: Math.max(0, candidate.anchorOffset - lineStartOffset),
@@ -61,29 +68,34 @@ export function renderV3DirectSubitemCandidate(params: {
 		displayStart: displayWindow.start,
 		displayEnd: displayWindow.end,
 		anchorOffset: candidate.anchorOffset,
-		highlightRanges,
+		highlightRanges: strongHighlightRanges,
+		weakHighlightRanges,
 	};
 }
 
 function resolveHighlightRanges(
 	candidate: V3DirectSubitemCandidate,
 	displayWindow: DisplayWindow,
-): Array<{ start: number; end: number }> {
+): Readonly<{
+	strongHighlightRanges: Array<{ start: number; end: number }>;
+	weakHighlightRanges: Array<{ start: number; end: number }>;
+}> {
 	const displayOccurrences = collapseSurfaceDisplayOccurrences(
 		candidate.displayOccurrences,
 	);
-	const displayRanges = mapOccurrencesToDisplayRanges(
+	const displayRanges = resolveStyledDisplayRanges(
 		displayOccurrences,
 		displayWindow,
 	);
-	if (displayRanges.length > 0) {
-		return mergeRanges(displayRanges);
+	if (
+		displayRanges.strongHighlightRanges.length > 0 ||
+		displayRanges.weakHighlightRanges.length > 0
+	) {
+		return displayRanges;
 	}
-	return mergeRanges(
-		mapOccurrencesToDisplayRanges(
-			collapseSurfaceDisplayOccurrences(candidate.occurrences),
-			displayWindow,
-		),
+	return resolveStyledDisplayRanges(
+		collapseSurfaceDisplayOccurrences(candidate.occurrences),
+		displayWindow,
 	);
 }
 
@@ -115,20 +127,51 @@ function collapseSurfaceDisplayOccurrences(
 	);
 }
 
-function mapOccurrencesToDisplayRanges(
+function resolveStyledDisplayRanges(
 	occurrences: readonly V3DirectSubitemOccurrence[],
 	displayWindow: DisplayWindow,
-): Array<{ start: number; end: number }> {
-	return occurrences
-		.map((occurrence) => ({
-			start: Math.max(occurrence.start, displayWindow.start),
-			end: Math.min(occurrence.end, displayWindow.end),
-		}))
-		.filter((range) => range.end > range.start)
-		.map((range) => ({
-			start: range.start - displayWindow.start,
-			end: range.end - displayWindow.start,
-		}));
+): Readonly<{
+	strongHighlightRanges: Array<{ start: number; end: number }>;
+	weakHighlightRanges: Array<{ start: number; end: number }>;
+}> {
+	const strongHighlightRanges = mergeRanges(
+		occurrences
+			.filter((occurrence) => occurrence.kind !== "fuzzy")
+			.map((occurrence) => ({
+				start: Math.max(occurrence.start, displayWindow.start),
+				end: Math.min(occurrence.end, displayWindow.end),
+			}))
+			.filter((range) => range.end > range.start)
+			.map((range) => ({
+				start: range.start - displayWindow.start,
+				end: range.end - displayWindow.start,
+			})),
+	);
+	const weakHighlightRanges = mergeRanges(
+		occurrences
+			.filter((occurrence) => occurrence.kind === "fuzzy")
+			.map((occurrence) => ({
+				start: Math.max(occurrence.start, displayWindow.start),
+				end: Math.min(occurrence.end, displayWindow.end),
+			}))
+			.filter((range) => range.end > range.start)
+			.map((range) => ({
+				start: range.start - displayWindow.start,
+				end: range.end - displayWindow.start,
+			}))
+			.filter(
+				(range) =>
+					!strongHighlightRanges.some(
+						(strongRange) =>
+							Math.min(strongRange.end, range.end) >
+							Math.max(strongRange.start, range.start),
+					),
+			),
+	);
+	return {
+		strongHighlightRanges,
+		weakHighlightRanges,
+	};
 }
 
 function buildDisplayWindow(params: {
@@ -382,22 +425,41 @@ function mergeRanges(
 
 function renderHighlightedSnippet(
 	text: string,
-	ranges: ReadonlyArray<{ start: number; end: number }>,
+	strongHighlightRanges: ReadonlyArray<{ start: number; end: number }>,
+	weakHighlightRanges: ReadonlyArray<{ start: number; end: number }>,
 ): string {
-	if (ranges.length === 0) {
+	if (strongHighlightRanges.length === 0 && weakHighlightRanges.length === 0) {
 		return text;
 	}
-	let html = "";
-	let cursor = 0;
-	for (const range of ranges) {
-		if (cursor < range.start) {
-			html += escapeHtml(text.slice(cursor, range.start));
-		}
-		html += `<span class="matched-line highlight-bg">${escapeHtml(text.slice(range.start, range.end))}</span>`;
-		cursor = range.end;
+	const boundaries = new Set<number>([0, text.length]);
+	for (const range of [...strongHighlightRanges, ...weakHighlightRanges]) {
+		boundaries.add(range.start);
+		boundaries.add(range.end);
 	}
-	if (cursor < text.length) {
-		html += escapeHtml(text.slice(cursor));
+	const orderedBoundaries = [...boundaries].sort((left, right) => left - right);
+	let html = "";
+	for (let index = 1; index < orderedBoundaries.length; index += 1) {
+		const start = orderedBoundaries[index - 1];
+		const end = orderedBoundaries[index];
+		if (end <= start) {
+			continue;
+		}
+		const segmentText = escapeHtml(text.slice(start, end));
+		const inStrong = strongHighlightRanges.some(
+			(range) => range.start <= start && range.end >= end,
+		);
+		if (inStrong) {
+			html += `<strong class="cs-search-match">${segmentText}</strong>`;
+			continue;
+		}
+		const inWeak = weakHighlightRanges.some(
+			(range) => range.start <= start && range.end >= end,
+		);
+		if (inWeak) {
+			html += `<span class="cs-search-match-weak">${segmentText}</span>`;
+			continue;
+		}
+		html += segmentText;
 	}
 	return html;
 }

@@ -81,6 +81,7 @@ export function buildV3DirectSubitemCandidates(params: {
 			params.snapshotText,
 			range,
 			params.queryAnalysis,
+			params.candidate,
 			supportedHanSurfaceGroupIndices,
 			completedHanSurfaceTierByGroup,
 		),
@@ -118,6 +119,7 @@ function resolveCandidateRanges(params: {
 		params.snapshotText,
 		params.rawBlocks,
 		params.queryAnalysis,
+		params.candidate,
 		new Set(params.candidate.hanSurfaceCompletionGroups.map((group) => group.surfaceGroupIndex)),
 		params.bestBodyWindowBlockOrdinals,
 		params.completedHanSurfaceTierByGroup,
@@ -167,6 +169,7 @@ function buildRangesFromLocalFallbackShortlist(
 	snapshotText: string,
 	rawBlocks: readonly RawBlock[],
 	queryAnalysis: V3QueryAnalysis,
+	candidate: EvidencePackingProfile,
 	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 	bestBodyWindowBlockOrdinals: ReadonlySet<number>,
 	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
@@ -187,6 +190,7 @@ function buildRangesFromLocalFallbackShortlist(
 				scopeTier: resolveRangeScopeTier([block.ordinal], bestBodyWindowBlockOrdinals),
 			},
 			queryAnalysis,
+			candidate,
 			supportedHanSurfaceGroupIndices,
 			completedHanSurfaceTierByGroup,
 		);
@@ -206,6 +210,7 @@ function buildRangesFromLocalFallbackShortlist(
 				),
 			},
 			queryAnalysis,
+			candidate,
 			supportedHanSurfaceGroupIndices,
 			completedHanSurfaceTierByGroup,
 		);
@@ -233,10 +238,16 @@ function buildCandidatesForRange(
 	snapshotText: string,
 	range: ResolvedSnippetRange,
 	queryAnalysis: V3QueryAnalysis,
+	candidate: EvidencePackingProfile,
 	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
 ): V3DirectSubitemCandidate[] {
-	const baseOccurrences = collectOccurrences(snapshotText, range, queryAnalysis);
+	const baseOccurrences = collectOccurrences(
+		snapshotText,
+		range,
+		queryAnalysis,
+		candidate,
+	);
 	const occurrences = [
 		...baseOccurrences,
 		...collectResidualSupportOccurrences(
@@ -256,6 +267,7 @@ function buildCandidatesForRange(
 	const occurrenceWindows = buildOccurrenceWindows(
 		snapshotText,
 		displayOccurrences.length > 0 ? displayOccurrences : occurrences,
+		range.scopeTier,
 	);
 	if (occurrenceWindows.length === 0) {
 		const candidate = buildCandidateFromOccurrences(
@@ -289,6 +301,7 @@ function pushFallbackRangeCandidate(
 	snapshotText: string,
 	range: ResolvedSnippetRange,
 	queryAnalysis: V3QueryAnalysis,
+	candidate: EvidencePackingProfile,
 	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
 ): void {
@@ -296,6 +309,7 @@ function pushFallbackRangeCandidate(
 		snapshotText,
 		range,
 		queryAnalysis,
+		candidate,
 		supportedHanSurfaceGroupIndices,
 		completedHanSurfaceTierByGroup,
 	);
@@ -344,8 +358,8 @@ function buildCandidateFromOccurrences(
 	if (occurrences.length === 0) {
 		return null;
 	}
-	const realOccurrences = occurrences.filter(
-		(occurrence) => occurrence.kind === "real_exact",
+	const realOccurrences = occurrences.filter((occurrence) =>
+		isRealLikeOccurrenceKind(occurrence.kind),
 	);
 	const validatedSurfaceOccurrences = resolveValidatedSurfaceCompletions(
 		occurrences,
@@ -376,8 +390,8 @@ function buildCandidateFromOccurrences(
 	if (representativeOccurrences.length === 0) {
 		return null;
 	}
-	const orderedRealOccurrences = representativeOccurrences.filter(
-		(occurrence) => occurrence.kind === "real_exact",
+	const orderedRealOccurrences = representativeOccurrences.filter((occurrence) =>
+		isRealLikeOccurrenceKind(occurrence.kind),
 	);
 	let totalGap = 0;
 	let maxAdjacentGap = 0;
@@ -411,6 +425,7 @@ function buildCandidateFromOccurrences(
 function buildOccurrenceWindows(
 	snapshotText: string,
 	occurrences: readonly V3DirectSubitemOccurrence[],
+	scopeTier: V3DirectSubitemResidualScopeTier,
 ): ResolvedSnippetRange[] {
 	if (occurrences.length === 0) {
 		return [];
@@ -440,6 +455,7 @@ function buildOccurrenceWindows(
 		windows.push({
 			start: sortedOccurrences[startIndex].start,
 			end: sortedOccurrences[endIndex].end,
+			scopeTier,
 		});
 	}
 	return dedupeOccurrenceWindows(windows);
@@ -465,21 +481,36 @@ function collectOccurrences(
 	snapshotText: string,
 	range: ResolvedSnippetRange,
 	queryAnalysis: V3QueryAnalysis,
+	candidate: EvidencePackingProfile,
 ): V3DirectSubitemOccurrence[] {
 	const segmentText = snapshotText.slice(range.start, range.end);
 	const occurrences: V3DirectSubitemOccurrence[] = [];
+	const realizedFamilyByUnitIndex = new Map(
+		candidate.realizedFamilies.map((family) => [family.queryUnitIndex, family]),
+	);
 	for (const unit of queryAnalysis.primaryUnits) {
 		if (unit.source === "opaque_han_confirmed") {
 			continue;
 		}
-		for (const occurrence of findTextOccurrences(segmentText, unit.text, unit)) {
+		const realizedFamily = realizedFamilyByUnitIndex.get(unit.index);
+		const occurrenceKind =
+			realizedFamily?.matchKind === "fuzzy" ? "fuzzy" : "real_exact";
+		const occurrenceText =
+			realizedFamily?.matchKind === "fuzzy"
+				? realizedFamily.familyText
+				: unit.text;
+		for (const occurrence of findTextOccurrences(
+			segmentText,
+			occurrenceText,
+			unit,
+		)) {
 			occurrences.push({
-				kind: "real_exact",
+				kind: occurrenceKind,
 				start: range.start + occurrence.start,
 				end: range.start + occurrence.end,
 				queryUnitIndex: unit.index,
 				surfaceGroupIndex: unit.surfaceGroupIndex,
-				text: unit.text,
+				text: occurrenceText,
 			});
 		}
 	}
@@ -695,7 +726,7 @@ function selectRepresentativeOccurrences(
 	const bestByKey = new Map<string, V3DirectSubitemOccurrence>();
 	for (const occurrence of occurrences) {
 		const key =
-			occurrence.kind === "real_exact"
+			isRealLikeOccurrenceKind(occurrence.kind)
 				? `unit:${occurrence.queryUnitIndex ?? -1}`
 				: occurrence.kind === "surface_completion"
 					? `surface:${occurrence.surfaceGroupIndex ?? -1}`
@@ -779,7 +810,7 @@ function resolveDominantDisplayOccurrences(
 			return surfaceOccurrences.length === 0;
 		}
 		if (
-			occurrence.kind !== "real_exact" ||
+			!isRealLikeOccurrenceKind(occurrence.kind) ||
 			occurrence.surfaceGroupIndex == null
 		) {
 			return occurrence.kind !== "route_only";
@@ -802,7 +833,7 @@ function resolveValidatedSurfaceCompletions(
 	const realOccurrencesBySurfaceGroup = new Map<number, V3DirectSubitemOccurrence[]>();
 	for (const occurrence of occurrences) {
 		if (
-			occurrence.kind !== "real_exact" ||
+			!isRealLikeOccurrenceKind(occurrence.kind) ||
 			occurrence.surfaceGroupIndex == null
 		) {
 			continue;
@@ -834,6 +865,12 @@ function resolveValidatedSurfaceCompletions(
 			realOccurrence.end <= occurrence.end,
 		) && hasCorroboration;
 	});
+}
+
+function isRealLikeOccurrenceKind(
+	kind: V3DirectSubitemOccurrence["kind"],
+): boolean {
+	return kind === "real_exact" || kind === "fuzzy";
 }
 
 function buildOccurrenceKey(

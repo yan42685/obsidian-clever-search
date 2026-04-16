@@ -1,12 +1,19 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildBodyBlockArena } from "../layout/body-blocks";
-import { buildBodySummaryArena } from "../layout/body-summary-postings";
+import { buildBodyFamilyPostingField } from "../layout/body-family-posting";
 import { buildDocTable } from "../layout/doc-table";
 import {
 	buildExactTapeArena,
 	type ExactTapeDraft,
 } from "../layout/exact-tapes";
-import { buildFamilyLexicon } from "../layout/family-lexicon";
+import {
+	buildFamilyLexicon,
+	FAMILY_SOURCE_MASK_BODY,
+	FAMILY_SOURCE_MASK_HEADING,
+	FAMILY_SOURCE_MASK_IDENTITY,
+	FAMILY_SOURCE_MASK_ROUTE,
+} from "../layout/family-lexicon";
+import { buildResidentFuzzyRescueSidecar } from "../layout/fuzzy-rescue";
 import { buildHanRouteArena } from "../layout/han-route";
 import { buildIntegerArray } from "../layout/integer-arrays";
 import { buildMetadataContainerArena } from "../layout/metadata-containers";
@@ -31,11 +38,6 @@ import {
 } from "../query";
 
 const textEncoder = new TextEncoder();
-
-const SOURCE_MASK_IDENTITY = 1 << 0;
-const SOURCE_MASK_ROUTE = 1 << 1;
-const SOURCE_MASK_HEADING = 1 << 2;
-const SOURCE_MASK_BODY = 1 << 3;
 
 const STRING_SOURCE_PATH = 1 << 0;
 const STRING_SOURCE_FAMILY = 1 << 1;
@@ -111,6 +113,10 @@ export function buildResidentBaseArtifacts(
 			};
 		}),
 	);
+	const fuzzyRescue = buildResidentFuzzyRescueSidecar({
+		familyTexts,
+		familyFlagsByFamilyId: familyLexicon.familyFlagsByFamilyId,
+	});
 
 	const identityFamilyIdsByDoc = preparedDocuments.map((document) =>
 		mapFamilyTextsToIds(document.identityFamilyTexts, familyIdByText),
@@ -167,8 +173,8 @@ export function buildResidentBaseArtifacts(
 	const exactTapes = buildExactTapeArena(
 		blockInputs.map((block) => block.exactDraft),
 	);
-	const bodySummary = buildBodySummaryArena({
-		summaryFamilyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
+	const bodyFamilyPosting = buildBodyFamilyPostingField({
+		familyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
 	});
 	const bodyBlocks = buildBodyBlockArena(
 		blockInputs.map((block, blockId) => ({
@@ -203,11 +209,11 @@ export function buildResidentBaseArtifacts(
 		docTable,
 		familyLexicon,
 		metadataContainers: metadataContainers.arena,
-		bodySummary,
+		bodyFamilyPosting,
 		bodyBlocks,
 		exactTapes: exactTapes.arena,
 		hanRoute,
-		auxiliaryBytes: 0,
+		auxiliaryBytes: fuzzyRescue.bytes,
 		indexedSurfaceUtf8Bytes: computeIndexedSurfaceUtf8Bytes(documents),
 		rawMarkdownUtf8Bytes: computeRawMarkdownUtf8Bytes(documents),
 	});
@@ -219,10 +225,11 @@ export function buildResidentBaseArtifacts(
 			docTable,
 			familyLexicon,
 			metadataContainers: metadataContainers.arena,
-			bodySummary,
+			bodyFamilyPosting,
 			bodyBlocks,
 			exactTapes: exactTapes.arena,
 			hanRoute,
+			fuzzyRescue,
 			metrics,
 		},
 	};
@@ -375,23 +382,23 @@ function collectFamilySourceMasks(
 		mergeSourceMask(
 			familySourceMaskByText,
 			document.identityFamilyTexts,
-			SOURCE_MASK_IDENTITY,
+			FAMILY_SOURCE_MASK_IDENTITY,
 		);
 		mergeSourceMask(
 			familySourceMaskByText,
 			document.routeFamilyTexts,
-			SOURCE_MASK_ROUTE,
+			FAMILY_SOURCE_MASK_ROUTE,
 		);
 		mergeSourceMask(
 			familySourceMaskByText,
 			document.headingFamilyTexts,
-			SOURCE_MASK_HEADING,
+			FAMILY_SOURCE_MASK_HEADING,
 		);
 		for (const block of document.bodyBlocks) {
 			mergeSourceMask(
 				familySourceMaskByText,
 				block.summaryFamilyTexts,
-				SOURCE_MASK_BODY,
+				FAMILY_SOURCE_MASK_BODY,
 			);
 		}
 	}
@@ -688,5 +695,3 @@ class StringArenaBuilder {
 		} as const;
 	}
 }
-
-

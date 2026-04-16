@@ -2,7 +2,7 @@ import type { ResidentBase } from "../layout/types";
 import { encodeHanBigramId } from "../query";
 import type { V3QueryAnalysis } from "../query/analysis";
 import {
-	collectBodySummaryBlockIds,
+	collectBodyFamilyPostingBlockIds,
 	collectHanBodyBlockIds,
 	collectHanMetadataDocIds,
 	collectPostingDocIds,
@@ -55,7 +55,7 @@ export function recallCandidateDocs(
 
 	for (const unitMatches of unitFamilyMatches) {
 		for (const match of unitMatches.matches) {
-			for (const blockId of collectBodySummaryBlockIds(base, match.familyId)) {
+			for (const blockId of collectBodyFamilyPostingBlockIds(base, match.familyId)) {
 				const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
 				if (docId < 0) {
 					continue;

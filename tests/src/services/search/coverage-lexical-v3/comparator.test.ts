@@ -87,6 +87,8 @@ function createPackingProfile(
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
+		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
+		fuzzyEditDistanceTotal: overrides.fuzzyEditDistanceTotal ?? 0,
 		metadataPackingSignature:
 			overrides.metadataPackingSignature ?? createMetadataPackingSignature(),
 		realizedFamilies: overrides.realizedFamilies ?? [],
@@ -546,6 +548,29 @@ describe("coverage lexical v3 comparator", () => {
 		});
 
 		expect(comparePackingProfiles(plainPrefix, compoundPrefix)).toBeLessThan(0);
+	});
+
+	test("fewer fuzzy realized units wins after prefix tie-breaks", () => {
+		const cleaner = createPackingProfile({
+			path: "z-cleaner.md",
+			realizedCoverageCount: 2,
+			fuzzyUnitCount: 0,
+			fuzzyEditDistanceTotal: 0,
+			strongestContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 320,
+			}),
+		});
+		const fuzzier = createPackingProfile({
+			path: "a-fuzzier.md",
+			realizedCoverageCount: 2,
+			fuzzyUnitCount: 1,
+			fuzzyEditDistanceTotal: 1,
+			strongestContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 320,
+			}),
+		});
+
+		expect(comparePackingProfiles(cleaner, fuzzier)).toBeLessThan(0);
 	});
 
 	test("completed Han surface witness wins as a very late tie-break", () => {

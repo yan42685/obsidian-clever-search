@@ -5,23 +5,23 @@ import {
 	estimateAdaptivePostingBytes,
 	type AdaptivePostingCodecProfile,
 } from "./adaptive-postings";
-import type { ResidentBodySummaryArena } from "./types";
+import type { ResidentBodyFamilyPostingField } from "./types";
 
-type BodySummaryBuildInput = Readonly<{
-	summaryFamilyIdsByBlock: readonly (readonly number[])[];
+type BodyFamilyPostingBuildInput = Readonly<{
+	familyIdsByBlock: readonly (readonly number[])[];
 }>;
 
-const BODY_SUMMARY_ADAPTIVE_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
+const BODY_FAMILY_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
 	smallInlineCap: 8,
 	enablePairLane: true,
 };
 
-export function buildBodySummaryArena(
-	input: BodySummaryBuildInput,
-): ResidentBodySummaryArena {
+export function buildBodyFamilyPostingField(
+	input: BodyFamilyPostingBuildInput,
+): ResidentBodyFamilyPostingField {
 	const blocksByFamilyId = new Map<number, number[]>();
-	for (let blockId = 0; blockId < input.summaryFamilyIdsByBlock.length; blockId += 1) {
-		for (const familyId of input.summaryFamilyIdsByBlock[blockId] ?? []) {
+	for (let blockId = 0; blockId < input.familyIdsByBlock.length; blockId += 1) {
+		for (const familyId of input.familyIdsByBlock[blockId] ?? []) {
 			let blockIds = blocksByFamilyId.get(familyId);
 			if (blockIds == null) {
 				blockIds = [];
@@ -35,18 +35,18 @@ export function buildBodySummaryArena(
 	}
 	return buildAdaptivePostingField(
 		blocksByFamilyId,
-		BODY_SUMMARY_ADAPTIVE_POSTING_CODEC_PROFILE,
+		BODY_FAMILY_POSTING_CODEC_PROFILE,
 	);
 }
 
-export function estimateBodySummaryBytes(
-	arena: ResidentBodySummaryArena,
+export function estimateBodyFamilyPostingBytes(
+	arena: ResidentBodyFamilyPostingField,
 ): number {
 	return estimateAdaptivePostingBytes(arena);
 }
 
-export function describeBodySummaryByteBreakdown(
-	arena: ResidentBodySummaryArena,
+export function describeBodyFamilyPostingByteBreakdown(
+	arena: ResidentBodyFamilyPostingField,
 ): Readonly<{
 	termIdsBytes: number;
 	postingStartsBytes: number;
@@ -92,8 +92,8 @@ export function describeBodySummaryByteBreakdown(
 	};
 }
 
-export function collectBodySummaryBlockIdsForFamily(
-	arena: ResidentBodySummaryArena,
+export function collectBodyFamilyPostingBlockIdsForFamily(
+	arena: ResidentBodyFamilyPostingField,
 	familyId: number,
 ): number[] {
 	return decodeAdaptivePosting(arena, familyId);

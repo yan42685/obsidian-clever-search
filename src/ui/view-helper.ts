@@ -33,31 +33,26 @@ export class ViewHelper {
   renderHighlightedText(
     text: string,
     ranges: ReadonlyArray<HighlightRange> = [],
+    weakRanges: ReadonlyArray<HighlightRange> = [],
   ): string {
     if (!text) {
       return "";
     }
-    if (ranges.length === 0) {
+    if (ranges.length === 0 && weakRanges.length === 0) {
       return escapeHtml(text);
     }
-    const mergedRanges = mergeRanges(ranges);
-    let cursor = 0;
-    let rendered = "";
-    for (const range of mergedRanges) {
-      const start = Math.max(0, Math.min(text.length, range.start));
-      const end = Math.max(start, Math.min(text.length, range.end));
-      if (start > cursor) {
-        rendered += escapeHtml(text.slice(cursor, start));
-      }
-      if (end > start) {
-        rendered += `<mark>${escapeHtml(text.slice(start, end))}</mark>`;
-      }
-      cursor = end;
-    }
-    if (cursor < text.length) {
-      rendered += escapeHtml(text.slice(cursor));
-    }
-    return rendered;
+    return buildHighlightSegments(text, ranges, weakRanges)
+      .map((segment) => {
+        const escaped = escapeHtml(segment.text);
+        if (segment.style === "strong") {
+          return `<strong class="cs-search-match">${escaped}</strong>`;
+        }
+        if (segment.style === "weak") {
+          return `<span class="cs-search-match-weak">${escaped}</span>`;
+        }
+        return escaped;
+      })
+      .join("");
   }
 
   updateSubItemIndex(
@@ -173,43 +168,29 @@ export class ViewHelper {
 
   getStructuredSnippetSegments(
     subItem: FileSubItem,
-  ): Array<{ text: string; highlight: boolean }> | null {
+  ): Array<{
+    text: string;
+    style: "none" | "strong" | "weak";
+    highlight: boolean;
+  }> | null {
     const snippetText = subItem.snippetText;
     const highlightRanges = subItem.highlightRanges;
+    const weakHighlightRanges = subItem.weakHighlightRanges;
     if (
       snippetText === undefined ||
-      !highlightRanges ||
-      highlightRanges.length === 0
+      ((!highlightRanges || highlightRanges.length === 0) &&
+        (!weakHighlightRanges || weakHighlightRanges.length === 0))
     ) {
       return null;
     }
-    const mergedRanges = mergeRanges(highlightRanges);
-    const segments: Array<{ text: string; highlight: boolean }> = [];
-    let cursor = 0;
-    for (const range of mergedRanges) {
-      const start = Math.max(0, Math.min(snippetText.length, range.start));
-      const end = Math.max(start, Math.min(snippetText.length, range.end));
-      if (start > cursor) {
-        segments.push({
-          text: snippetText.slice(cursor, start),
-          highlight: false,
-        });
-      }
-      if (end > start) {
-        segments.push({
-          text: snippetText.slice(start, end),
-          highlight: true,
-        });
-      }
-      cursor = end;
-    }
-    if (cursor < snippetText.length) {
-      segments.push({
-        text: snippetText.slice(cursor),
-        highlight: false,
-      });
-    }
-    return segments.length > 0 ? segments : [{ text: snippetText, highlight: false }];
+    const segments = buildHighlightSegments(
+      snippetText,
+      highlightRanges ?? [],
+      weakHighlightRanges ?? [],
+    ).map((segment) => createStructuredHighlightSegment(segment.text, segment.style));
+    return segments.length > 0
+      ? segments
+      : [createStructuredHighlightSegment(snippetText, "none")];
   }
 
   insertFileLinkToActiveMarkdown(path: string | undefined) {
@@ -377,6 +358,79 @@ function mergeRanges(
     merged.push({ start: current.start, end: current.end });
   }
   return merged;
+}
+
+function buildHighlightSegments(
+  text: string,
+  strongRanges: ReadonlyArray<HighlightRange>,
+  weakRanges: ReadonlyArray<HighlightRange>,
+): Array<{ text: string; style: "none" | "strong" | "weak" }> {
+  const normalizedStrongRanges = mergeRanges(strongRanges);
+  const normalizedWeakRanges = mergeRanges(weakRanges).filter(
+    (weakRange) =>
+      !normalizedStrongRanges.some(
+        (strongRange) =>
+          Math.min(strongRange.end, weakRange.end) >
+          Math.max(strongRange.start, weakRange.start),
+      ),
+  );
+  const boundaries = new Set<number>([0, text.length]);
+  for (const range of [...normalizedStrongRanges, ...normalizedWeakRanges]) {
+    boundaries.add(Math.max(0, Math.min(text.length, range.start)));
+    boundaries.add(Math.max(0, Math.min(text.length, range.end)));
+  }
+  const orderedBoundaries = [...boundaries].sort((left, right) => left - right);
+  const segments: Array<{ text: string; style: "none" | "strong" | "weak" }> = [];
+  for (let index = 1; index < orderedBoundaries.length; index += 1) {
+    const start = orderedBoundaries[index - 1];
+    const end = orderedBoundaries[index];
+    if (end <= start) {
+      continue;
+    }
+    const segmentText = text.slice(start, end);
+    if (segmentText.length === 0) {
+      continue;
+    }
+    const style = normalizedStrongRanges.some(
+      (range) => range.start <= start && range.end >= end,
+    )
+      ? "strong"
+      : normalizedWeakRanges.some(
+            (range) => range.start <= start && range.end >= end,
+          )
+        ? "weak"
+        : "none";
+    segments.push({
+      text: segmentText,
+      style,
+    });
+  }
+  return segments;
+}
+
+function createStructuredHighlightSegment(
+  text: string,
+  style: "none" | "strong" | "weak",
+): {
+  text: string;
+  style: "none" | "strong" | "weak";
+  highlight: boolean;
+} {
+  const segment = {
+    text,
+    highlight: style !== "none",
+  } as {
+    text: string;
+    style: "none" | "strong" | "weak";
+    highlight: boolean;
+  };
+  Object.defineProperty(segment, "style", {
+    value: style,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return segment;
 }
 
 function escapeHtml(text: string): string {

@@ -47,6 +47,7 @@ export type RealizedQueryUnitFamily = Readonly<{
 	familyId: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;
+	editDistance: 0 | 1;
 	identityMetadataSource: IdentityMetadataSource;
 	routeMetadataSource: RouteMetadataSource;
 	metadataPackingSource: MetadataPackingSource;
@@ -109,6 +110,8 @@ export type EvidencePackingProfile = Readonly<{
 	hanSurfaceCompletionGroups: readonly HanSurfaceCompletionGroupResult[];
 	prefixCompletionGainTotal: number;
 	compoundPrefixCount: number;
+	fuzzyUnitCount: number;
+	fuzzyEditDistanceTotal: number;
 	metadataPackingSignature: MetadataPackingSignature;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];
 	identityContainer: IdentityContainer | null;

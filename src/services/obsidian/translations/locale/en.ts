@@ -137,7 +137,7 @@ export default {
 		"Expand contiguous Latin letter and digit sequences in metadata and body under a capped budget. Metadata fields are visited before body within the same budget, so this is not a 100% prefix-recall mode and is mainly an input UX optimization.",
 	"Character fuzzy allowed": "Character fuzzy allowed",
 	"Character fuzzy allowed desc":
-		"Expand under a capped fuzzy budget. Fuzzy candidates are introduced only after exact and prefix stages, mainly for typo tolerance and limited rescue, and do not guarantee 100% fuzzy recall.",
+		"Apply bounded typo rescue only to file paths, aliases, and tags. For Latin sequences with length >= 6, at most one typo may be rescued after exact and prefix miss, under a limited budget, so 100% recall is not guaranteed.",
 
 	"English word blacklist": "English word blacklist",
 	"English word blacklist desc": `Exclude some meaningless English words like "do", "and", "them" from indexing, enhancing search and indexing speed. Modify the file at ${stopWordsEnTargetUrl} to tailor the list to your needs.`,

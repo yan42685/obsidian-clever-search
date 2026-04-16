@@ -6,6 +6,7 @@ import type { EvidencePackingProfile } from "../ranking";
 
 export type V3DirectSubitemEvidenceKind =
 	| "real_exact"
+	| "fuzzy"
 	| "surface_completion"
 	| "residual_support"
 	| "route_only";
@@ -56,6 +57,7 @@ export type V3DirectSubitemRenderPayload = Readonly<{
 	displayEnd: number;
 	anchorOffset: number;
 	highlightRanges: Array<{ start: number; end: number }>;
+	weakHighlightRanges?: Array<{ start: number; end: number }>;
 }>;
 
 export type V3DirectSubitemsBuildResult = Readonly<{

@@ -8,6 +8,7 @@ import type {
 
 type MetadataHighlightOccurrenceKind =
 	| "real_exact"
+	| "fuzzy"
 	| "surface_completion"
 	| "residual_support";
 
@@ -32,42 +33,58 @@ export function buildV3MetadataFieldHighlightRanges(params: {
 	folderText: string;
 }): Readonly<{
 	basenameHighlightRanges: HighlightRange[];
+	basenameWeakHighlightRanges: HighlightRange[];
 	folderHighlightRanges: HighlightRange[];
+	folderWeakHighlightRanges: HighlightRange[];
 }> {
 	const eligibleSurfaceGroupIndices = new Set(
 		params.candidate.hanSurfaceCompletionGroups.map((group) => group.surfaceGroupIndex),
 	);
+	const basenameHighlights = buildFieldHighlightRanges({
+		text: params.basenameText,
+		queryAnalysis: params.queryAnalysis,
+		candidate: params.candidate,
+		eligibleSurfaceGroupIndices,
+		residualSegments:
+			params.basenameText.length > 0
+				? [{ start: 0, end: params.basenameText.length }]
+				: [],
+	});
+	const folderHighlights = buildFieldHighlightRanges({
+		text: params.folderText,
+		queryAnalysis: params.queryAnalysis,
+		candidate: params.candidate,
+		eligibleSurfaceGroupIndices,
+		residualSegments: splitPathSegments(params.folderText),
+	});
 	return {
-		basenameHighlightRanges: buildFieldHighlightRanges({
-			text: params.basenameText,
-			queryAnalysis: params.queryAnalysis,
-			eligibleSurfaceGroupIndices,
-			residualSegments:
-				params.basenameText.length > 0
-					? [{ start: 0, end: params.basenameText.length }]
-					: [],
-		}),
-		folderHighlightRanges: buildFieldHighlightRanges({
-			text: params.folderText,
-			queryAnalysis: params.queryAnalysis,
-			eligibleSurfaceGroupIndices,
-			residualSegments: splitPathSegments(params.folderText),
-		}),
+		basenameHighlightRanges: basenameHighlights.strongHighlightRanges,
+		basenameWeakHighlightRanges: basenameHighlights.weakHighlightRanges,
+		folderHighlightRanges: folderHighlights.strongHighlightRanges,
+		folderWeakHighlightRanges: folderHighlights.weakHighlightRanges,
 	};
 }
 
 function buildFieldHighlightRanges(params: {
 	text: string;
 	queryAnalysis: V3QueryAnalysis;
+	candidate: EvidencePackingProfile;
 	eligibleSurfaceGroupIndices: ReadonlySet<number>;
 	residualSegments: readonly TextSegment[];
-}): HighlightRange[] {
+}): Readonly<{
+	strongHighlightRanges: HighlightRange[];
+	weakHighlightRanges: HighlightRange[];
+}> {
 	if (params.text.length === 0) {
-		return [];
+		return {
+			strongHighlightRanges: [],
+			weakHighlightRanges: [],
+		};
 	}
 	const baseOccurrences = collectBaseOccurrences(
 		params.text,
 		params.queryAnalysis,
+		params.candidate,
 		params.eligibleSurfaceGroupIndices,
 	);
 	const residualOccurrences = collectResidualSupportOccurrences(
@@ -81,24 +98,60 @@ function buildFieldHighlightRanges(params: {
 		[...baseOccurrences, ...residualOccurrences],
 		params.queryAnalysis,
 	);
-	return mergeHighlightRanges(
-		keptOccurrences.map((occurrence) => ({
-			start: occurrence.start,
-			end: occurrence.end,
-		})),
+	const strongHighlightRanges = mergeHighlightRanges(
+		keptOccurrences
+			.filter((occurrence) => occurrence.kind !== "fuzzy")
+			.map((occurrence) => ({
+				start: occurrence.start,
+				end: occurrence.end,
+			})),
 	);
+	const weakHighlightRanges = mergeHighlightRanges(
+		keptOccurrences
+			.filter((occurrence) => occurrence.kind === "fuzzy")
+			.filter(
+				(occurrence) =>
+					!strongHighlightRanges.some((range) =>
+						rangesOverlap(
+							range.start,
+							range.end,
+							occurrence.start,
+							occurrence.end,
+						),
+					),
+			)
+			.map((occurrence) => ({
+				start: occurrence.start,
+				end: occurrence.end,
+			})),
+	);
+	return {
+		strongHighlightRanges,
+		weakHighlightRanges,
+	};
 }
 
 function collectBaseOccurrences(
 	text: string,
 	queryAnalysis: V3QueryAnalysis,
+	candidate: EvidencePackingProfile,
 	eligibleSurfaceGroupIndices: ReadonlySet<number>,
 ): MetadataHighlightOccurrence[] {
 	const occurrences: MetadataHighlightOccurrence[] = [];
+	const realizedFamilyByUnitIndex = new Map(
+		candidate.realizedFamilies.map((family) => [family.queryUnitIndex, family]),
+	);
 	for (const unit of queryAnalysis.primaryUnits) {
-		for (const occurrence of findTextOccurrences(text, unit.text, unit)) {
+		const realizedFamily = realizedFamilyByUnitIndex.get(unit.index);
+		const occurrenceKind =
+			realizedFamily?.matchKind === "fuzzy" ? "fuzzy" : "real_exact";
+		const occurrenceText =
+			realizedFamily?.matchKind === "fuzzy"
+				? realizedFamily.familyText
+				: unit.text;
+		for (const occurrence of findTextOccurrences(text, occurrenceText, unit)) {
 			occurrences.push({
-				kind: "real_exact",
+				kind: occurrenceKind,
 				start: occurrence.start,
 				end: occurrence.end,
 				queryUnitIndex: unit.index,

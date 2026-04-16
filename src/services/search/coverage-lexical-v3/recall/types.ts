@@ -1,11 +1,16 @@
 import type { V3QueryAnalysis, V3QueryUnitSource } from "../query/analysis";
 
-export type V3QueryFamilyMatchKind = "exact" | "opaque_exact" | "prefix";
+export type V3QueryFamilyMatchKind =
+	| "exact"
+	| "opaque_exact"
+	| "prefix"
+	| "fuzzy";
 
 export type V3QueryFamilyMatch = Readonly<{
 	familyId: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;
+	editDistance: 0 | 1;
 }>;
 
 export type V3QueryUnitFamilyMatches = Readonly<{

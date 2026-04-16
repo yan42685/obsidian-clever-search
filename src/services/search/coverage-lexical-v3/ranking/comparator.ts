@@ -41,6 +41,12 @@ export function comparePackingProfiles(
 	if (left.compoundPrefixCount !== right.compoundPrefixCount) {
 		return left.compoundPrefixCount - right.compoundPrefixCount;
 	}
+	if (left.fuzzyUnitCount !== right.fuzzyUnitCount) {
+		return left.fuzzyUnitCount - right.fuzzyUnitCount;
+	}
+	if (left.fuzzyEditDistanceTotal !== right.fuzzyEditDistanceTotal) {
+		return left.fuzzyEditDistanceTotal - right.fuzzyEditDistanceTotal;
+	}
 	return left.path.localeCompare(right.path);
 }
 

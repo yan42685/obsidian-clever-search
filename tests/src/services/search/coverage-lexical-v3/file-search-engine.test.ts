@@ -112,8 +112,8 @@ function createPackingProfile(
 }
 
 function createRefineSearchResult(): CoverageLexicalV3SearchResult {
-	const shorterTerm = "»º´æ»Ö¸´";
-	const fullSurface = "»º´æ»Ö¸´²½Öè";
+	const shorterTerm = "ç¼“å­˜æ¢å¤";
+	const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
 	const laterPath = createPackingProfile({
 		docId: 0,
 		path: "z-complete.md",
@@ -231,7 +231,7 @@ function createResidentBase(): ResidentBase {
 				docIds: new Uint32Array(),
 			},
 		},
-		bodySummary: {
+		bodyFamilyPosting: {
 			familyIds: new Uint32Array(),
 			postingStarts: new Uint32Array(),
 			blockIds: new Uint32Array(),
@@ -456,8 +456,8 @@ describe("coverage lexical v3 file search engine", () => {
 
 	test("getDirectSubItems uses V3 query analysis with indexed snapshots", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "»º´æ»Ö¸´";
-		const fullSurface = "»º´æ»Ö¸´²½Öè";
+		const shorterTerm = "ç¼“å­˜æ¢å¤";
+		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/lifeforce.md",
@@ -517,7 +517,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/lifeforce.md", "»º´æ»Ö¸´²½Öè\n\nÈÈÆô¶¯»Ö¸´¼ÇÂ¼¡£"]]),
+			new Map([["notes/lifeforce.md", "ç¼“å­˜æ¢å¤æ­¥éª¤\n\nçƒ­å¯åŠ¨æ¢å¤è®°å½•ã€‚"]]),
 		);
 		const readCurrentTexts = jest.fn();
 		(
@@ -565,8 +565,8 @@ describe("coverage lexical v3 file search engine", () => {
 
 	test("getDirectSubItems highlights a full Han surface instead of only the shorter real term", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "»º´æ»Ö¸´";
-		const fullSurface = "»º´æ»Ö¸´²½Öè";
+		const shorterTerm = "ç¼“å­˜æ¢å¤";
+		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/life-force.md",
@@ -626,7 +626,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/life-force.md", "»º´æ»Ö¸´²½ÖèËµÃ÷\n\n»º´æ»Ö¸´²½ÖèÓÃÓÚÈÈÆô¶¯»Ö¸´¡£"]]),
+			new Map([["notes/life-force.md", "ç¼“å­˜æ¢å¤æ­¥éª¤è¯´æ˜\n\nç¼“å­˜æ¢å¤æ­¥éª¤ç”¨äºçƒ­å¯åŠ¨æ¢å¤ã€‚"]]),
 		);
 		(
 			engine as unknown as {
@@ -665,8 +665,8 @@ describe("coverage lexical v3 file search engine", () => {
 	
 	test("getDirectSubItems falls back to current text when generation-aligned indexed text is unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "»º´æ»Ö¸´";
-		const fullSurface = "»º´æ»Ö¸´²½Öè";
+		const shorterTerm = "ç¼“å­˜æ¢å¤";
+		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/missing-snapshot.md",
@@ -727,7 +727,7 @@ describe("coverage lexical v3 file search engine", () => {
 		}));
 		const readIndexedTexts = jest.fn(async () => new Map<string, string>());
 		const readCurrentTexts = jest.fn(async () =>
-			new Map([["notes/missing-snapshot.md", "»º´æ»Ö¸´²½Öè\n\n»Ø·Å¼ì²éÓëÈÈÆô¶¯»Ö¸´¡£"]]),
+			new Map([["notes/missing-snapshot.md", "ç¼“å­˜æ¢å¤æ­¥éª¤\n\nå›æ”¾æ£€æŸ¥ä¸çƒ­å¯åŠ¨æ¢å¤ã€‚"]]),
 		);
 		(
 			engine as unknown as {
@@ -783,8 +783,8 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			{ tokenizeSequence } as unknown as Tokenizer,
 		);
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "»º´æ»Ö¸´";
-		const fullSurface = "»º´æ»Ö¸´²½Öè";
+		const shorterTerm = "ç¼“å­˜æ¢å¤";
+		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "zh/split-hit.md",
@@ -872,20 +872,20 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 
 	test("searchFiles hides same-band Han partials when weak results are hidden", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "»º´æ»Ö¸´";
-		const fullSurface = "»º´æ»Ö¸´²½Öè";
+		const shorterTerm = "ç¼“å­˜æ¢å¤";
+		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
 		await engine.reIndexAll([
 			createDocument({
 				path: "partial.md",
 				basename: "partial",
 				folder: "notes",
-				content: "»º´æ»Ö¸´",
+				content: "ç¼“å­˜æ¢å¤",
 			}),
 			createDocument({
 				path: "complete.md",
 				basename: "complete",
 				folder: "notes",
-				content: "»º´æ»Ö¸´²½Öè",
+				content: "ç¼“å­˜æ¢å¤æ­¥éª¤",
 			}),
 		]);
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
@@ -1050,13 +1050,13 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			search: () => ({
 				recallState: {
 					queryAnalysis: {
-					queryText: "ç¼“å­˜æ¢å¤",
-					normalizedQueryText: "ç¼“å­˜æ¢å¤",
-					surfaceGroups: [{ index: 0, text: "ç¼“å­˜æ¢å¤", kind: "han" }],
+					queryText: "ç¼‚æ’³ç“¨é­ãˆ î˜²",
+					normalizedQueryText: "ç¼‚æ’³ç“¨é­ãˆ î˜²",
+					surfaceGroups: [{ index: 0, text: "ç¼‚æ’³ç“¨é­ãˆ î˜²", kind: "han" }],
 					primaryUnits: [
 						{
 							index: 0,
-							text: "ç¼“å­˜æ¢å¤",
+							text: "ç¼‚æ’³ç“¨é­ãˆ î˜²",
 							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},

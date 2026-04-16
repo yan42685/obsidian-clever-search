@@ -173,7 +173,7 @@ export default {
 		"对 metadata 和正文里的连续字母数字序列做有限预算的前缀扩展。当前流程会在同一预算下优先经过 metadata 字段，再在剩余预算内扩展正文，因此不保证 100% 召回所有 prefix 命中，主要用于优化输入体验。",
 	"Character fuzzy allowed": "允许字符级模糊匹配",
 	"Character fuzzy allowed desc":
-		"fuzzy 是有限预算扩展，而且是在 exact / prefix 之后才引入 fuzzy 候选，主要用于 typo 容错和有限补救，不保证 100% fuzzy recall。",
+		"fuzzy 只对文件路径、别名和标签生效；仅在拉丁序列字符数 >= 6 且 exact / prefix miss 之后，才会在有限预算内尝试最多 1 typo 的补救，因此不保证 100% recall。",
 	"English word blacklist": "英文停用词",
 	"English word blacklist desc":
 		"将 do、and、them 等意义较弱的英文词排除出索引，可提升搜索与建索引速度。可按需修改 stop-words-en.txt。",

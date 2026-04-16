@@ -110,4 +110,164 @@ describe("coverage lexical v3 family lookup", () => {
 		expect(longPrefixMatches[0]?.familyText).toBe("prefixlong0000");
 		expect(longPrefixMatches.at(-1)?.familyText).toBe("prefixlong0127");
 	});
+
+	test("fuzzy rescue only triggers after exact and prefix both miss", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/obsidian.md",
+				basename: "obsidian",
+				folder: "latin",
+				content: "obsidian",
+			}),
+			createDocument({
+				path: "latin/runtime.md",
+				basename: "runtime",
+				folder: "latin",
+				content: "runtime",
+			}),
+		]);
+
+		const [fuzzyOnly] = lookupQueryUnitFamilies(base, analyzeQuery("obsidan"));
+		expect(fuzzyOnly.matches).toEqual([
+			expect.objectContaining({
+				familyText: "obsidian",
+				matchKind: "fuzzy",
+				editDistance: 1,
+			}),
+		]);
+
+		const [exactPresent] = lookupQueryUnitFamilies(base, analyzeQuery("runtime"));
+		expect(exactPresent.matches.some((match) => match.matchKind === "fuzzy")).toBe(false);
+
+		const [prefixPresent] = lookupQueryUnitFamilies(base, analyzeQuery("runtim"));
+		expect(prefixPresent.matches.some((match) => match.matchKind === "fuzzy")).toBe(false);
+	});
+
+	test("fuzzy rescue respects minimum length and edit-distance-one verification", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/cache.md",
+				basename: "cachex",
+				folder: "latin",
+				content: "cachex",
+			}),
+			createDocument({
+				path: "latin/obsidian.md",
+				basename: "obsidian",
+				folder: "latin",
+				content: "obsidian",
+			}),
+		]);
+
+		const [tooShort] = lookupQueryUnitFamilies(base, analyzeQuery("cachx"));
+		expect(tooShort.matches).toEqual([]);
+
+		const [oneEdit] = lookupQueryUnitFamilies(base, analyzeQuery("obsidan"));
+		expect(oneEdit.matches.some((match) => match.familyText === "obsidian")).toBe(true);
+
+		const [twoEdits] = lookupQueryUnitFamilies(base, analyzeQuery("obsadn"));
+		expect(twoEdits.matches).toEqual([]);
+	});
+
+	test("fuzzy rescue stays on metadata anchors and skips heading or body only families", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/basename.md",
+				basename: "obsidian",
+				folder: "latin",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/alias.md",
+				basename: "notes",
+				folder: "latin",
+				aliases: "workspace",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/route.md",
+				basename: "notes",
+				folder: "playbooks",
+				tags: "restoration",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/heading-only.md",
+				basename: "notes",
+				folder: "latin",
+				headings: "incident",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/body-only.md",
+				basename: "notes",
+				folder: "latin",
+				content: "runbooks",
+			}),
+		]);
+
+		const [basenameMatch] = lookupQueryUnitFamilies(base, analyzeQuery("obsidan"));
+		expect(basenameMatch.matches).toEqual([
+			expect.objectContaining({
+				familyText: "obsidian",
+				matchKind: "fuzzy",
+			}),
+		]);
+
+		const [aliasMatch] = lookupQueryUnitFamilies(base, analyzeQuery("workspce"));
+		expect(aliasMatch.matches).toEqual([
+			expect.objectContaining({
+				familyText: "workspace",
+				matchKind: "fuzzy",
+			}),
+		]);
+
+		const [routeMatch] = lookupQueryUnitFamilies(base, analyzeQuery("restoraton"));
+		expect(routeMatch.matches).toEqual([
+			expect.objectContaining({
+				familyText: "restoration",
+				matchKind: "fuzzy",
+			}),
+		]);
+
+		const [headingOnlyMiss] = lookupQueryUnitFamilies(base, analyzeQuery("incdent"));
+		expect(headingOnlyMiss.matches).toEqual([]);
+
+		const [bodyOnlyMiss] = lookupQueryUnitFamilies(base, analyzeQuery("runboks"));
+		expect(bodyOnlyMiss.matches).toEqual([]);
+	});
+
+	test("fuzzy rescue respects query-wide time budget", () => {
+		const fuzzyChars = "abcdefghijklmnopqrstuvwxy0123456789".split("");
+		const families = fuzzyChars.map((char) =>
+			createDocument({
+				path: `latin/obsidian-${char}.md`,
+				basename: `obsidian${char}`,
+				folder: "latin",
+				content: `obsidian${char}`,
+			}),
+		);
+		const base = buildResidentBase([
+			...families,
+			createDocument({
+				path: "latin/incident.md",
+				basename: "incident",
+				folder: "latin",
+				content: "incident",
+			}),
+		]);
+		const nowSpy = jest.spyOn(performance, "now");
+		nowSpy
+			.mockReturnValueOnce(0)
+			.mockReturnValueOnce(0)
+			.mockReturnValueOnce(9)
+			.mockReturnValue(9);
+
+		const unitMatches = lookupQueryUnitFamilies(base, analyzeQuery("obsidianz incdent"));
+
+		expect(unitMatches[0].matches.some((match) => match.matchKind === "fuzzy")).toBe(true);
+		expect(unitMatches[1].matches.some((match) => match.matchKind === "fuzzy")).toBe(false);
+
+		nowSpy.mockRestore();
+	});
 });

@@ -630,4 +630,37 @@ describe("coverage lexical v3 engine", () => {
 		expect(result.rankedCandidates[1].prefixCompletionGainTotal).toBe(5);
 		expect(result.rankedCandidates[2].compoundPrefixCount).toBe(1);
 	});
+
+	test("fuzzy rescue can recover realized coverage without outranking exact peers", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/exact-obsidian.md",
+				basename: "obsidian",
+				folder: "latin",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/fuzzy-obsidian.md",
+				basename: "notes",
+				folder: "latin",
+				aliases: "obsidian",
+				content: "plain note",
+			}),
+		]);
+
+		const typoResult = engine.search("obsidan");
+		expect(
+			typoResult.rankedCandidates.some((candidate) => candidate.fuzzyUnitCount === 1),
+		).toBe(true);
+		expect(
+			typoResult.rankedCandidates.some((candidate) =>
+				candidate.realizedFamilies.some((family) => family.matchKind === "fuzzy"),
+			),
+		).toBe(true);
+
+		const exactResult = engine.search("obsidian");
+		expect(exactResult.rankedCandidates[0].path).toBe("latin/exact-obsidian.md");
+		expect(exactResult.rankedCandidates[0].strongestContainer?.tier).toBe("identity");
+	});
 });

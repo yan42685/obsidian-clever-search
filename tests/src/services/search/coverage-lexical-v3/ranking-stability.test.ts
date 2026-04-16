@@ -1,112 +1,74 @@
-import type { IndexedDocument } from "src/globals/search-types";
-import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
-import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
+import { comparePackingProfiles } from "src/services/search/coverage-lexical-v3/ranking";
+import type { EvidencePackingProfile } from "src/services/search/coverage-lexical-v3/ranking/types";
 
-function createDocument(
-	overrides: Partial<IndexedDocument> &
-		Pick<IndexedDocument, "path" | "basename" | "folder">,
-): IndexedDocument {
+function createPackingProfile(
+	overrides: Partial<EvidencePackingProfile> & Pick<EvidencePackingProfile, "path">,
+): EvidencePackingProfile {
 	return {
+		docId: overrides.docId ?? 0,
 		path: overrides.path,
-		basename: overrides.basename,
-		folder: overrides.folder,
-		content: overrides.content,
-		aliases: overrides.aliases,
-		tags: overrides.tags,
-		headings: overrides.headings,
-		generation: overrides.generation,
-		size: overrides.size,
+		stableKey: overrides.stableKey ?? overrides.path,
+		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "l",
+		realizedCoverageCount: overrides.realizedCoverageCount ?? 1,
+		coverageGate: overrides.coverageGate ?? {
+			realizedCoverageCount: overrides.realizedCoverageCount ?? 1,
+			fullySatisfiedSurfaceGroupCount: 1,
+			startedSurfaceGroupCount: 1,
+			crossScriptSatisfiedGroupCount: 1,
+		},
+		exactUnitCount: overrides.exactUnitCount ?? 0,
+		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
+		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
+		strongestHanSurfaceCompletionTier:
+			overrides.strongestHanSurfaceCompletionTier ?? "none",
+		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
+		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
+		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
+		fuzzyEditDistanceTotal: overrides.fuzzyEditDistanceTotal ?? 0,
+		metadataPackingSignature: overrides.metadataPackingSignature ?? {
+			basenameUnitCount: 0,
+			aliasUnitCount: 0,
+			routeUnitCount: 0,
+			sortedBuckets: [],
+		},
+		realizedFamilies: overrides.realizedFamilies ?? [],
+		identityContainer: overrides.identityContainer ?? null,
+		routeContainer: overrides.routeContainer ?? null,
+		bodyWindowContainer: overrides.bodyWindowContainer ?? null,
+		strongestContainer: overrides.strongestContainer ?? null,
+		secondStrongestContainer: overrides.secondStrongestContainer ?? null,
+		fragmentationPenalty:
+			overrides.fragmentationPenalty ?? {
+				bodyResidueUnitCount: 0,
+				uncoveredByTopTwoCount: 0,
+				explanatoryContainerCount: 0,
+			},
 	};
 }
 
-function createDocumentTokenizer(
-	termMap: Readonly<Record<string, readonly string[]>>,
-): V3DocumentTokenizer {
-	return (text) => termMap[text] ?? [];
-}
-
-function createWidthStressDocuments(): IndexedDocument[] {
-	return Array.from({ length: 260 }, (_, index) =>
-		createDocument({
-			path: `stress/irrelevant-${index.toString().padStart(3, "0")}.md`,
-			basename: "stress",
-			folder: "stress",
-			content: Array.from({ length: 4 }, (_, blockIndex) => `noise${index}_${blockIndex}`).join(
-				"\n\n",
-			),
-		}),
-	);
-}
-
-function summarizeCandidates(engine: CoverageLexicalV3Engine, queryText: string, queryTerms: readonly string[] = []) {
-	return engine.search(queryText, queryTerms).rankedCandidates.map((candidate) => ({
-		path: candidate.path,
-		realizedCoverageCount: candidate.realizedCoverageCount,
-		strongestContainer: candidate.strongestContainer?.tier ?? null,
-		strongestHanSurfaceCompletionTier: candidate.strongestHanSurfaceCompletionTier,
-	}));
-}
-
 describe("coverage lexical v3 ranking stability", () => {
-	test("layout widening leaves latin, han gate, and metadata-vs-body rankings unchanged", () => {
-		const tokenizer = createDocumentTokenizer({
-			"缓存恢复说明": ["缓存", "恢复", "说明"],
-			"缓存扩容说明": ["缓存", "扩容", "说明"],
-			"system proxy access": ["system", "proxy", "access"],
-		});
-		const corpus = [
-			createDocument({
-				path: "latin/exact.md",
-				basename: "cache restore",
-				folder: "latin",
-				content: "plain note",
+	test("mixed exact, prefix, and fuzzy ties sort repeatably", () => {
+		const profiles = [
+			createPackingProfile({
+				path: "b-fuzzy.md",
+				fuzzyUnitCount: 1,
+				fuzzyEditDistanceTotal: 1,
 			}),
-			createDocument({
-				path: "latin/prefix.md",
-				basename: "cache restoration",
-				folder: "latin",
-				content: "plain note",
+			createPackingProfile({
+				path: "a-exact.md",
+				exactUnitCount: 1,
 			}),
-			createDocument({
-				path: "zh/metadata-hit.md",
-				basename: "缓存恢复说明",
-				folder: "zh",
-				content: "普通记录",
-			}),
-			createDocument({
-				path: "zh/metadata-distractor.md",
-				basename: "缓存扩容说明",
-				folder: "zh",
-				content: "普通记录",
-			}),
-			createDocument({
-				path: "infra/metadata-strong.md",
-				basename: "system proxy access",
-				folder: "infra",
-				content: "plain note",
-			}),
-			createDocument({
-				path: "infra/body-strong.md",
-				basename: "plain note",
-				folder: "infra",
-				content: "system proxy access",
+			createPackingProfile({
+				path: "c-prefix.md",
+				prefixCompletionGainTotal: 1,
 			}),
 		];
-		const widenedCorpus = [...corpus, ...createWidthStressDocuments()];
-		const baseEngine = new CoverageLexicalV3Engine();
-		const widenedEngine = new CoverageLexicalV3Engine();
 
-		baseEngine.buildResidentBase(corpus, tokenizer);
-		widenedEngine.buildResidentBase(widenedCorpus, tokenizer);
+		const firstOrder = [...profiles].sort(comparePackingProfiles).map((profile) => profile.path);
+		const secondOrder = [...profiles].sort(comparePackingProfiles).map((profile) => profile.path);
 
-		expect(summarizeCandidates(baseEngine, "cache restore")).toEqual(
-			summarizeCandidates(widenedEngine, "cache restore"),
-		);
-		expect(summarizeCandidates(baseEngine, "缓存恢复", ["缓存", "恢复"])).toEqual(
-			summarizeCandidates(widenedEngine, "缓存恢复", ["缓存", "恢复"]),
-		);
-		expect(summarizeCandidates(baseEngine, "system proxy access")).toEqual(
-			summarizeCandidates(widenedEngine, "system proxy access"),
-		);
+		expect(firstOrder).toEqual(secondOrder);
+		expect(firstOrder).toEqual(["a-exact.md", "b-fuzzy.md", "c-prefix.md"]);
 	});
 });

@@ -4,6 +4,13 @@ import type { ResidentFamilyLexicon } from "./types";
 const PREFIX_EXPANDABLE_FLAG = 1 << 0;
 const SOURCE_MASK_SHIFT = 1;
 
+export const FAMILY_SOURCE_MASK_IDENTITY = 1 << 0;
+export const FAMILY_SOURCE_MASK_ROUTE = 1 << 1;
+export const FAMILY_SOURCE_MASK_HEADING = 1 << 2;
+export const FAMILY_SOURCE_MASK_BODY = 1 << 3;
+export const FAMILY_SOURCE_MASK_FUZZY_RESCUE_METADATA =
+	FAMILY_SOURCE_MASK_IDENTITY | FAMILY_SOURCE_MASK_ROUTE;
+
 type FamilyBuildInput = Readonly<{
 	text: string;
 	stringId: number;
