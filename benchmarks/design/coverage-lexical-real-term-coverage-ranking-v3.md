@@ -1077,3 +1077,95 @@ the filename and folder path fields without changing file-level ranking:
   full-surface dominance in basename and folder segments, basename residual
   support, single-segment folder residual support, and basename/folder field
   isolation
+
+### Phase 18
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes a V3 hot-path static-evidence caching
+pass for whole-corpus fanout queries without changing the file-level ranking
+worldview:
+
+- packing-profile construction now memoizes doc-local resident slices per
+  `ResidentBase + docId`, including metadata family ids and Han witness ids/text
+- packing-profile construction now memoizes body-block resident slices per
+  `ResidentBase + blockId`, including exact positioned occurrences, witness
+  positioned occurrences, witness text, and the cached approximate/ordinal span
+  used by body-window scope formation
+- the cached data is strictly resident-derived and query-invariant; V3 still
+  computes query-local realization, body-window choice, coverage gating, and
+  final comparator inputs from the same exact evidence shape as before
+- tail-latency diagnosis for the V3 automation benchmark now points at
+  `engine.search(...)` fanout rather than raw Han refine:
+  - the slowest `partial_memory` / mixed-anchor queries were repeatedly
+    ranking `89 / 89` candidate docs
+  - `refineHanSurfaceCompletion(...)` stayed sub-millisecond on those cases and
+    was not the dominant tail source
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts`
+  passes, including the raw-Han-refine regression coverage
+- the V3 automation benchmark rerun on 2026-04-16 improved the latency anchor
+  from approximately:
+  - `avgMsPerQuery 25.923 -> 18.982`
+  - `p50Ms 20.553 -> 13.108`
+  - `p100Ms 159.878 -> 135.524`
+- the benchmark still shows whole-corpus candidate fanout on some
+  `partial_memory` and mixed-anchor queries, so candidate-count reduction
+  remains a follow-up tail-latency target
+
+### Phase 19
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes a V3 metadata-source packing tie-break
+for late same-band ordering without changing recall structure or the main
+container worldview:
+
+- resident metadata containers now retain doc-local source masks for metadata
+  family entries:
+  - identity entries preserve `basename` / `alias` provenance
+  - route entries preserve `tag` / `folder` provenance
+- V3 still keeps the existing aggregate metadata tables and postings:
+  - no source-specific recall tables were added
+  - recall still routes through the same `identity` / `route` lanes as before
+- packing-profile realization now carries per-unit metadata source information
+  and derives a best-source-only packing signature:
+  - `basename > alias > route`
+  - route-internal source is retained for provenance but `tag = folder` for
+    tiering
+  - a realized unit never counts toward multiple primary packing buckets
+- the final comparator now inserts metadata packing immediately after
+  `exactUnitCount` and before Han-surface completion, so canonical metadata
+  identity can break exact-count ties before the ranking falls through to later
+  lexical or path fallback
+- this tie-break is strictly late-stage:
+  - it does not alter coverage gating
+  - it does not change strongest/second container formation
+  - it does not change the new route-corroboration rule where route only enters
+    the main explanation when it adds novel coverage
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/comparator.test.ts` passes,
+  including the new basename-vs-alias, alias-vs-route, route-equality, and
+  best-source-only packing regressions
+- `tests/src/services/search/coverage-lexical-v3/resident-base.test.ts` passes,
+  including the new doc-local metadata-source mask regression
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes,
+  including:
+  - the existing route-corroboration regression
+  - the `vector cache` canonical-playbook top-5 regression
+  - a new basename-exact vs alias-exact tie regression
+  - a new mixed-source best-source-only regression
+- `tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts`
+  and
+  `tests/src/services/search/coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts`
+  still pass, confirming old packing-profile fixtures remain compatible with the
+  new late tie-break
+- `npm run benchmark:coverage-lexical` passes on 2026-04-16 with
+  `CoverageLexical(V3)` still at:
+  - `top5 = 1`
+  - `zeroRate = 0`
+  - `objective = 0.878`

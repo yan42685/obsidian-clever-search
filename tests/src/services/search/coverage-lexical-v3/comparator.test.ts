@@ -1,11 +1,13 @@
 import {
 	compareContainerStrength,
 	comparePackingProfiles,
+	comparePackingProfilesBeforeHanSurfaceCompletion,
 } from "src/services/search/coverage-lexical-v3/ranking/comparator";
 import type {
 	BodyWindowContainer,
 	EvidencePackingProfile,
 	IdentityContainer,
+	MetadataPackingSignature,
 	RouteContainer,
 } from "src/services/search/coverage-lexical-v3/ranking/types";
 
@@ -85,6 +87,8 @@ function createPackingProfile(
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
+		metadataPackingSignature:
+			overrides.metadataPackingSignature ?? createMetadataPackingSignature(),
 		realizedFamilies: overrides.realizedFamilies ?? [],
 		identityContainer: overrides.identityContainer ?? null,
 		routeContainer: overrides.routeContainer ?? null,
@@ -95,8 +99,19 @@ function createPackingProfile(
 			overrides.fragmentationPenalty ?? {
 				bodyResidueUnitCount: 0,
 				uncoveredByTopTwoCount: 0,
-				activeContainerCount: 0,
+				explanatoryContainerCount: 0,
 			},
+	};
+}
+
+function createMetadataPackingSignature(
+	overrides: Partial<MetadataPackingSignature> = {},
+): MetadataPackingSignature {
+	return {
+		basenameUnitCount: overrides.basenameUnitCount ?? 0,
+		aliasUnitCount: overrides.aliasUnitCount ?? 0,
+		routeUnitCount: overrides.routeUnitCount ?? 0,
+		sortedBuckets: overrides.sortedBuckets ?? [],
 	};
 }
 
@@ -117,7 +132,7 @@ describe("coverage lexical v3 comparator", () => {
 			fragmentationPenalty: {
 				bodyResidueUnitCount: 0,
 				uncoveredByTopTwoCount: 0,
-				activeContainerCount: 2,
+				explanatoryContainerCount: 2,
 			},
 		});
 		const fragmented = createPackingProfile({
@@ -131,7 +146,7 @@ describe("coverage lexical v3 comparator", () => {
 			fragmentationPenalty: {
 				bodyResidueUnitCount: 2,
 				uncoveredByTopTwoCount: 2,
-				activeContainerCount: 3,
+				explanatoryContainerCount: 3,
 			},
 		});
 
@@ -291,7 +306,7 @@ describe("coverage lexical v3 comparator", () => {
 			fragmentationPenalty: {
 				bodyResidueUnitCount: 0,
 				uncoveredByTopTwoCount: 0,
-				activeContainerCount: 1,
+				explanatoryContainerCount: 1,
 			},
 		});
 		const exactHeavy = createPackingProfile({
@@ -304,11 +319,185 @@ describe("coverage lexical v3 comparator", () => {
 			fragmentationPenalty: {
 				bodyResidueUnitCount: 0,
 				uncoveredByTopTwoCount: 0,
-				activeContainerCount: 1,
+				explanatoryContainerCount: 1,
 			},
 		});
 
 		expect(comparePackingProfiles(exactHeavy, prefixHeavy)).toBeLessThan(0);
+	});
+
+	test("metadata packing prefers basename over alias after exact ties", () => {
+		const basenameHeavy = createPackingProfile({
+			path: "z-basename.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createIdentityContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				basenameUnitCount: 2,
+				sortedBuckets: [{ source: "basename", unitCount: 2 }],
+			}),
+		});
+		const aliasHeavy = createPackingProfile({
+			path: "a-alias.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createIdentityContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				aliasUnitCount: 2,
+				sortedBuckets: [{ source: "alias", unitCount: 2 }],
+			}),
+		});
+
+		expect(comparePackingProfiles(basenameHeavy, aliasHeavy)).toBeLessThan(0);
+	});
+
+	test("metadata packing prefers alias over route after exact ties", () => {
+		const aliasHeavy = createPackingProfile({
+			path: "z-alias.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createIdentityContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				aliasUnitCount: 2,
+				sortedBuckets: [{ source: "alias", unitCount: 2 }],
+			}),
+		});
+		const routeHeavy = createPackingProfile({
+			path: "a-route.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createIdentityContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				routeUnitCount: 2,
+				sortedBuckets: [{ source: "route", unitCount: 2 }],
+			}),
+		});
+
+		expect(comparePackingProfiles(aliasHeavy, routeHeavy)).toBeLessThan(0);
+	});
+
+	test("route packing does not distinguish tag from folder when counts tie", () => {
+		const tagLikeRoute = createPackingProfile({
+			path: "z-tag.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createRouteContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				routeUnitCount: 2,
+				sortedBuckets: [{ source: "route", unitCount: 2 }],
+			}),
+		});
+		const folderLikeRoute = createPackingProfile({
+			path: "a-folder.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createRouteContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				routeUnitCount: 2,
+				sortedBuckets: [{ source: "route", unitCount: 2 }],
+			}),
+		});
+
+		expect(
+			comparePackingProfilesBeforeHanSurfaceCompletion(tagLikeRoute, folderLikeRoute),
+		).toBe(0);
+	});
+
+	test("metadata packing does not override exact count", () => {
+		const strongerPacking = createPackingProfile({
+			path: "z-packing.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 1,
+			strongestContainer: createIdentityContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				basenameUnitCount: 2,
+				sortedBuckets: [{ source: "basename", unitCount: 2 }],
+			}),
+		});
+		const strongerExact = createPackingProfile({
+			path: "a-exact.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			strongestContainer: createIdentityContainer([0, 1]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				routeUnitCount: 2,
+				sortedBuckets: [{ source: "route", unitCount: 2 }],
+			}),
+		});
+
+		expect(comparePackingProfiles(strongerExact, strongerPacking)).toBeLessThan(0);
+	});
+
+	test("mixed-source units do not outrank pure basename when best-source packing is equal", () => {
+		const pureBasename = createPackingProfile({
+			path: "a-basename.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 1,
+			strongestContainer: createIdentityContainer([0]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				basenameUnitCount: 1,
+				sortedBuckets: [{ source: "basename", unitCount: 1 }],
+			}),
+		});
+		const basenameWithAliasCorroboration = createPackingProfile({
+			path: "z-mixed.md",
+			realizedCoverageCount: 1,
+			exactUnitCount: 1,
+			strongestContainer: createIdentityContainer([0]),
+			metadataPackingSignature: createMetadataPackingSignature({
+				basenameUnitCount: 1,
+				sortedBuckets: [{ source: "basename", unitCount: 1 }],
+			}),
+		});
+
+		expect(
+			comparePackingProfilesBeforeHanSurfaceCompletion(
+				pureBasename,
+				basenameWithAliasCorroboration,
+			),
+		).toBe(0);
+	});
+
+	test("redundant route corroboration does not outrank a cleaner explanation before exact tie-breaks", () => {
+		const packed = createPackingProfile({
+			path: "a-packed.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 2,
+			identityContainer: createIdentityContainer([0, 1]),
+			bodyWindowContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 840,
+			}),
+			strongestContainer: createIdentityContainer([0, 1]),
+			secondStrongestContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 840,
+			}),
+			fragmentationPenalty: {
+				bodyResidueUnitCount: 0,
+				uncoveredByTopTwoCount: 0,
+				explanatoryContainerCount: 2,
+			},
+		});
+		const corroborated = createPackingProfile({
+			path: "z-corroborated.md",
+			realizedCoverageCount: 2,
+			exactUnitCount: 3,
+			identityContainer: createIdentityContainer([0, 1]),
+			routeContainer: createRouteContainer([1]),
+			bodyWindowContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 840,
+			}),
+			strongestContainer: createIdentityContainer([0, 1]),
+			secondStrongestContainer: createBodyWindowContainer([0, 1], {
+				containerCompactness: 840,
+			}),
+			fragmentationPenalty: {
+				bodyResidueUnitCount: 0,
+				uncoveredByTopTwoCount: 0,
+				explanatoryContainerCount: 2,
+			},
+		});
+
+		expect(comparePackingProfiles(corroborated, packed)).toBeLessThan(0);
 	});
 
 	test("smaller prefix completion gain wins before path fallback", () => {

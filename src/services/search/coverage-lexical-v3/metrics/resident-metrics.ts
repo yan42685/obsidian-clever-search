@@ -115,7 +115,9 @@ export function buildResidentBaseMetrics(
 		input.familyLexicon.familyStringIds.byteLength +
 		input.familyLexicon.familyFlagsByFamilyId.byteLength +
 		input.metadataContainers.identityFamiliesByDoc.byteLength +
+		input.metadataContainers.identitySourceMaskByDocEntry.byteLength +
 		input.metadataContainers.routeFamiliesByDoc.byteLength +
+		input.metadataContainers.routeSourceMaskByDocEntry.byteLength +
 		input.metadataContainers.headingFamiliesByDoc.byteLength +
 		input.metadataContainers.identityPostings.docIds.byteLength +
 		input.metadataContainers.routePostings.docIds.byteLength +

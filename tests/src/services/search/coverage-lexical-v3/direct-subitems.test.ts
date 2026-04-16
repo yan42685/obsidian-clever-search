@@ -67,6 +67,8 @@ function createResidentBaseForBlockCounts(
 		bodySummary: {
 			familyIds: new Uint32Array(),
 			postingStarts: new Uint32Array(),
+			docIds: new Uint32Array(),
+			docPostingStarts: new Uint32Array(),
 			blockIds: new Uint32Array(),
 		},
 		bodyBlocks: {
@@ -81,6 +83,7 @@ function createResidentBaseForBlockCounts(
 		},
 		hanRoute: {
 			bigramIds: new Uint32Array(),
+			bodyBigramIds: new Uint32Array(),
 			metadataPostingStarts: new Uint32Array(),
 			metadataDocIds: new Uint32Array(),
 			bodyPostingStarts: new Uint32Array(),
@@ -94,18 +97,37 @@ function createResidentBaseForBlockCounts(
 			bodyWitnessStartByBlockId: new Uint32Array(),
 			bodyWitnessStringIds: new Uint32Array(),
 		},
-		metrics: {
+				metrics: {
 			docArenaBytes: 0,
 			stringArenaBytes: 0,
+			stringArenaPathBytes: 0,
+			stringArenaFamilyBytes: 0,
+			stringArenaIdentityWitnessBytes: 0,
+			stringArenaRouteWitnessBytes: 0,
+			stringArenaHeadingWitnessBytes: 0,
+			stringArenaBodyWitnessBytes: 0,
+			stringArenaMultiSourceBytes: 0,
+			stringArenaUnattributedBytes: 0,
 			familyLexiconBytes: 0,
 			metadataContainerBytes: 0,
 			headingBytes: 0,
 			bodySummaryBytes: 0,
+			bodySummaryFamilyIdsBytes: 0,
+			bodySummaryFamilyPostingStartsBytes: 0,
+			bodySummaryDocIdsBytes: 0,
+			bodySummaryDocPostingStartsBytes: 0,
+			bodySummaryBlockOrdinalsBytes: 0,
 			bodyBlockBytes: 0,
 			exactTapeBytes: 0,
 			hanRouteBytes: 0,
+			hanRouteSharedBigramIdsBytes: 0,
 			hanRouteMetadataHanPostingsBytes: 0,
+			hanRouteMetadataHanPostingStartsBytes: 0,
+			hanRouteMetadataHanDocIdsBytes: 0,
 			hanRouteBodyHanPostingsBytes: 0,
+			hanRouteBodyBigramIdsBytes: 0,
+			hanRouteBodyHanPostingStartsBytes: 0,
+			hanRouteBodyHanBodyBlockIdsBytes: 0,
 			hanRouteMetadataWitnessBytes: 0,
 			hanRouteBodyWitnessBytes: 0,
 			scaffoldBytes: 0,
@@ -195,13 +217,13 @@ function createCandidateRecall(overrides: Partial<V3CandidateDocRecall>): V3Cand
 describe("coverage lexical v3 direct subitems", () => {
 	test("prefers a full Han surface snippet over a shorter real term", () => {
 		const queryAnalysis: V3QueryAnalysis = {
-			queryText: "ç”Ÿå‘½åŠ›",
-			normalizedQueryText: "ç”Ÿå‘½åŠ›",
-			surfaceGroups: [{ index: 0, text: "ç”Ÿå‘½åŠ›", kind: "han" }],
+			queryText: "ÉúÃüÁ¦",
+			normalizedQueryText: "ÉúÃüÁ¦",
+			surfaceGroups: [{ index: 0, text: "ÉúÃüÁ¦", kind: "han" }],
 			primaryUnits: [
 				{
 					index: 0,
-					text: "ç”Ÿå‘½",
+					text: "ÉúÃü",
 					source: "han_tokenizer_real",
 					surfaceGroupIndex: 0,
 				},
@@ -210,12 +232,12 @@ describe("coverage lexical v3 direct subitems", () => {
 			surfaceCoverageShapeKey: "h",
 		};
 		const result = buildV3DirectSubitems({
-			snapshotText: "ç”Ÿå‘½åŠ›åè¶³\n\nè¿™é‡Œå…ˆåªè°ˆç”Ÿå‘½çŽ°è±¡",
+			snapshotText: "ÉúÃüÁ¦Ê®×ã\n\nÕâÀïÏÈÖ»Ì¸ÉúÃüÏÖÏó¡£",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "life.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "ç”Ÿå‘½åŠ›", tier: "body_window" },
+					{ surfaceGroupIndex: 0, surfaceText: "ÉúÃüÁ¦", tier: "body_window" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 2,
@@ -230,18 +252,18 @@ describe("coverage lexical v3 direct subitems", () => {
 		const topHighlight = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(topHighlight).toContain("ç”Ÿå‘½åŠ›");
+		expect(topHighlight).toContain("ÉúÃüÁ¦");
 	});
 
 	test("prefers an adjacent full Han surface span over an earlier partial span at the same coverage", () => {
 		const queryAnalysis: V3QueryAnalysis = {
-			queryText: "ç”Ÿå‘½åŠ›",
-			normalizedQueryText: "ç”Ÿå‘½åŠ›",
-			surfaceGroups: [{ index: 0, text: "ç”Ÿå‘½åŠ›", kind: "han" }],
+			queryText: "ÉúÃüÁ¦",
+			normalizedQueryText: "ÉúÃüÁ¦",
+			surfaceGroups: [{ index: 0, text: "ÉúÃüÁ¦", kind: "han" }],
 			primaryUnits: [
 				{
 					index: 0,
-					text: "ç”Ÿå‘½",
+					text: "ÉúÃü",
 					source: "han_tokenizer_real",
 					surfaceGroupIndex: 0,
 				},
@@ -250,12 +272,12 @@ describe("coverage lexical v3 direct subitems", () => {
 			surfaceCoverageShapeKey: "h",
 		};
 		const result = buildV3DirectSubitems({
-			snapshotText: "è¿™é‡Œå…ˆåªè°ˆç”Ÿå‘½çŽ°è±¡\n\nåŽæ¥æ‰è¯´ç”Ÿå‘½åŠ›åè¶³",
+			snapshotText: "ÕâÀïÏÈÖ»Ì¸ÉúÃüÏÖÏó\n\nºóÀ´ËµÉúÃüÁ¦Ê®×ã",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "life-neighbor.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 0, surfaceText: "ç”Ÿå‘½åŠ›", tier: "body_residue" },
+					{ surfaceGroupIndex: 0, surfaceText: "ÉúÃüÁ¦", tier: "body_residue" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 1,
@@ -268,19 +290,19 @@ describe("coverage lexical v3 direct subitems", () => {
 		const topHighlight = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(topHighlight).toContain("ç”Ÿå‘½åŠ›");
-		expect(topHighlight).not.toContain("ç”Ÿå‘½");
+		expect(topHighlight).toContain("ÉúÃüÁ¦");
+		expect(topHighlight).not.toContain("ÉúÃü");
 	});
 
 	test("does not fabricate Han surface completion from dispersed bridge evidence", () => {
 		const queryAnalysis: V3QueryAnalysis = {
-			queryText: "å§”å‘˜é•¿",
-			normalizedQueryText: "å§”å‘˜é•¿",
-			surfaceGroups: [{ index: 0, text: "å§”å‘˜é•¿", kind: "han" }],
+			queryText: "Î¯Ô±³¤",
+			normalizedQueryText: "Î¯Ô±³¤",
+			surfaceGroups: [{ index: 0, text: "Î¯Ô±³¤", kind: "han" }],
 			primaryUnits: [
 				{
 					index: 0,
-					text: "å§”å‘˜",
+					text: "Î¯Ô±",
 					source: "han_tokenizer_real",
 					surfaceGroupIndex: 0,
 				},
@@ -289,7 +311,7 @@ describe("coverage lexical v3 direct subitems", () => {
 			surfaceCoverageShapeKey: "h",
 		};
 		const result = buildV3DirectSubitems({
-			snapshotText: "å§”å‘˜æ­£åœ¨è®¨è®º\n\nåŽæ¥é•¿å¤§æˆäºº",
+			snapshotText: "Î¯Ô±ÕýÔÚÌÖÂÛ\n\nºóÀ´³¤´ó³ÉÈË",
 			queryAnalysis,
 			candidate: createCandidate({ path: "chair.md" }),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0, 1] }),
@@ -300,32 +322,32 @@ describe("coverage lexical v3 direct subitems", () => {
 		const topHighlight = result.subItems[0]?.highlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(topHighlight).toContain("å§”å‘˜");
-		expect(topHighlight).not.toContain("å§”å‘˜é•¿");
+		expect(topHighlight).toContain("Î¯Ô±");
+		expect(topHighlight).not.toContain("Î¯Ô±³¤");
 	});
 
 	test("keeps higher real coverage ahead of a full Han surface snippet", () => {
 		const queryAnalysis: V3QueryAnalysis = {
-			queryText: "abc ç”Ÿå‘½åŠ›",
-			normalizedQueryText: "abc ç”Ÿå‘½åŠ›",
+			queryText: "abc ÉúÃüÁ¦",
+			normalizedQueryText: "abc ÉúÃüÁ¦",
 			surfaceGroups: [
 				{ index: 0, text: "abc", kind: "latin" },
-				{ index: 1, text: "ç”Ÿå‘½åŠ›", kind: "han" },
+				{ index: 1, text: "ÉúÃüÁ¦", kind: "han" },
 			],
 			primaryUnits: [
 				{ index: 0, text: "abc", source: "surface", surfaceGroupIndex: 0 },
-				{ index: 1, text: "ç”Ÿå‘½", source: "han_tokenizer_real", surfaceGroupIndex: 1 },
+				{ index: 1, text: "ÉúÃü", source: "han_tokenizer_real", surfaceGroupIndex: 1 },
 			],
 			hanBackstopGroups: [],
 			surfaceCoverageShapeKey: "lh",
 		};
 		const result = buildV3DirectSubitems({
-			snapshotText: "ç”Ÿå‘½åŠ›åè¶³\n\nabc ä¸Žç”Ÿå‘½åˆ†å¼€å‡ºçŽ°",
+			snapshotText: "ÉúÃüÁ¦Ê®×ã\n\nabc ÓëÉúÃü·Ö¿ª³öÏÖ",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "mixed-coverage.md",
 				hanSurfaceCompletionGroups: [
-					{ surfaceGroupIndex: 1, surfaceText: "ç”Ÿå‘½åŠ›", tier: "body_residue" },
+					{ surfaceGroupIndex: 1, surfaceText: "ÉúÃüÁ¦", tier: "body_residue" },
 				],
 				completedHanSurfaceGroupCount: 1,
 				hanSurfaceCompletionTierScoreTotal: 1,
@@ -341,27 +363,27 @@ describe("coverage lexical v3 direct subitems", () => {
 		);
 		expect(topHighlight).toContain("abc");
 		expect(topHighlight).toEqual(
-			expect.arrayContaining(["abc", expect.stringMatching(/^ç”Ÿå‘½/)]),
+			expect.arrayContaining(["abc", expect.stringMatching(/^ÉúÃü/)]),
 		);
 	});
 
 	test("keeps non-Han exact highlights alongside Han surface dominance", () => {
 		const queryAnalysis: V3QueryAnalysis = {
-			queryText: "abc ç”Ÿå‘½åŠ›",
-			normalizedQueryText: "abc ç”Ÿå‘½åŠ›",
+			queryText: "abc ÉúÃüÁ¦",
+			normalizedQueryText: "abc ÉúÃüÁ¦",
 			surfaceGroups: [
 				{ index: 0, text: "abc", kind: "latin" },
-				{ index: 1, text: "ç”Ÿå‘½åŠ›", kind: "han" },
+				{ index: 1, text: "ÉúÃüÁ¦", kind: "han" },
 			],
 			primaryUnits: [
 				{ index: 0, text: "abc", source: "surface", surfaceGroupIndex: 0 },
-				{ index: 1, text: "ç”Ÿå‘½", source: "han_tokenizer_real", surfaceGroupIndex: 1 },
+				{ index: 1, text: "ÉúÃü", source: "han_tokenizer_real", surfaceGroupIndex: 1 },
 			],
 			hanBackstopGroups: [],
 			surfaceCoverageShapeKey: "lh",
 		};
 		const result = buildV3DirectSubitems({
-			snapshotText: "abc ç”Ÿå‘½åŠ›åœ¨è¿™é‡Œ",
+			snapshotText: "abc ÉúÃüÁ¦ÔÚÕâÀï",
 			queryAnalysis,
 			candidate: createCandidate({ path: "mixed.md" }),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
@@ -372,7 +394,7 @@ describe("coverage lexical v3 direct subitems", () => {
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
 		expect(topHighlight).toContain("abc");
-		expect(topHighlight).toContain("ç”Ÿå‘½åŠ›");
+		expect(topHighlight).toContain("ÉúÃüÁ¦");
 	});
 
 	test("splits distant latin evidence when the weighted gap exceeds the local budget", () => {
@@ -543,3 +565,12 @@ describe("coverage lexical v3 direct subitems", () => {
 		expect(result.subItems[0]?.snippetText).toContain("alpha");
 	});
 });
+
+
+
+
+
+
+
+
+

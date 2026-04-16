@@ -11,6 +11,12 @@ import { buildHanRouteArena } from "../layout/han-route";
 import { buildIntegerArray } from "../layout/integer-arrays";
 import { buildMetadataContainerArena } from "../layout/metadata-containers";
 import type { ResidentBase } from "../layout/types";
+import {
+	IDENTITY_METADATA_SOURCE_ALIAS,
+	IDENTITY_METADATA_SOURCE_BASENAME,
+	ROUTE_METADATA_SOURCE_FOLDER,
+	ROUTE_METADATA_SOURCE_TAG,
+} from "../metadata-source";
 import { buildResidentBaseMetrics } from "../metrics";
 import {
 	encodeHanBigramId,
@@ -43,8 +49,14 @@ type PreparedDocument = Readonly<{
 	generation: number;
 	basename: string;
 	folder: string;
+	basenameFamilyTexts: readonly string[];
+	aliasFamilyTexts: readonly string[];
 	identityFamilyTexts: readonly string[];
+	identitySourceMasks: readonly number[];
+	folderFamilyTexts: readonly string[];
+	tagFamilyTexts: readonly string[];
 	routeFamilyTexts: readonly string[];
+	routeSourceMasks: readonly number[];
 	headingFamilyTexts: readonly string[];
 	identityHanWitnessTexts: readonly string[];
 	routeHanWitnessTexts: readonly string[];
@@ -103,8 +115,14 @@ export function buildResidentBaseArtifacts(
 	const identityFamilyIdsByDoc = preparedDocuments.map((document) =>
 		mapFamilyTextsToIds(document.identityFamilyTexts, familyIdByText),
 	);
+	const identitySourceMasksByDoc = preparedDocuments.map(
+		(document) => document.identitySourceMasks,
+	);
 	const routeFamilyIdsByDoc = preparedDocuments.map((document) =>
 		mapFamilyTextsToIds(document.routeFamilyTexts, familyIdByText),
+	);
+	const routeSourceMasksByDoc = preparedDocuments.map(
+		(document) => document.routeSourceMasks,
 	);
 	const headingFamilyIdsByDoc = preparedDocuments.map((document) =>
 		mapFamilyTextsToIds(document.headingFamilyTexts, familyIdByText),
@@ -112,7 +130,9 @@ export function buildResidentBaseArtifacts(
 	const metadataContainers = buildMetadataContainerArena({
 		familyCount: familyLexicon.familyCount,
 		identityFamilyIdsByDoc,
+		identitySourceMasksByDoc,
 		routeFamilyIdsByDoc,
+		routeSourceMasksByDoc,
 		headingFamilyIdsByDoc,
 	});
 
@@ -258,6 +278,20 @@ function prepareDocument(
 	const tagsText = document.tags ?? "";
 	const headingsText = document.headings ?? "";
 	const contentText = document.content ?? "";
+	const basenameFamilyTexts = dedupeSorted(
+		extractDocumentFamilyTexts(document.basename ?? "", tokenizeDocumentText),
+	);
+	const aliasFamilyTexts = dedupeSorted(
+		extractDocumentFamilyTexts(aliasesText, tokenizeDocumentText),
+	);
+	const folderFamilyTexts = dedupeSorted(
+		extractDocumentFamilyTexts(document.folder ?? "", tokenizeDocumentText),
+	);
+	const tagFamilyTexts = dedupeSorted(
+		splitTagValues(tagsText).flatMap((tag) =>
+			extractDocumentFamilyTexts(tag, tokenizeDocumentText),
+		),
+	);
 	const bodyBlocks = splitBodyBlocksWithDocumentTokenizer(
 		contentText,
 		tokenizeDocumentText,
@@ -283,16 +317,38 @@ function prepareDocument(
 		generation: document.generation ?? 1,
 		basename: document.basename ?? "",
 		folder: document.folder ?? "",
-		identityFamilyTexts: dedupeSorted([
-			...extractDocumentFamilyTexts(document.basename ?? "", tokenizeDocumentText),
-			...extractDocumentFamilyTexts(aliasesText, tokenizeDocumentText),
-		]),
-		routeFamilyTexts: dedupeSorted([
-			...extractDocumentFamilyTexts(document.folder ?? "", tokenizeDocumentText),
-			...splitTagValues(tagsText).flatMap((tag) =>
-				extractDocumentFamilyTexts(tag, tokenizeDocumentText),
-			),
-		]),
+		basenameFamilyTexts,
+		aliasFamilyTexts,
+		identityFamilyTexts: dedupeSorted([...basenameFamilyTexts, ...aliasFamilyTexts]),
+		identitySourceMasks: buildDocMetadataSourceMasks(
+			dedupeSorted([...basenameFamilyTexts, ...aliasFamilyTexts]),
+			[
+				{
+					familyTexts: basenameFamilyTexts,
+					mask: IDENTITY_METADATA_SOURCE_BASENAME,
+				},
+				{
+					familyTexts: aliasFamilyTexts,
+					mask: IDENTITY_METADATA_SOURCE_ALIAS,
+				},
+			],
+		),
+		folderFamilyTexts,
+		tagFamilyTexts,
+		routeFamilyTexts: dedupeSorted([...folderFamilyTexts, ...tagFamilyTexts]),
+		routeSourceMasks: buildDocMetadataSourceMasks(
+			dedupeSorted([...folderFamilyTexts, ...tagFamilyTexts]),
+			[
+				{
+					familyTexts: tagFamilyTexts,
+					mask: ROUTE_METADATA_SOURCE_TAG,
+				},
+				{
+					familyTexts: folderFamilyTexts,
+					mask: ROUTE_METADATA_SOURCE_FOLDER,
+				},
+			],
+		),
 		headingFamilyTexts: dedupeSorted(
 			extractDocumentFamilyTexts(headingsText, tokenizeDocumentText),
 		),
@@ -449,6 +505,20 @@ function mapFamilyTextsToIds(
 	return familyTexts
 		.map((familyText) => familyIdByText.get(familyText))
 		.filter((familyId): familyId is number => familyId !== undefined);
+}
+
+function buildDocMetadataSourceMasks(
+	familyTexts: readonly string[],
+	sourceEntries: readonly Readonly<{
+		familyTexts: readonly string[];
+		mask: number;
+	}>[],
+): number[] {
+	const sourceMaskByFamilyText = new Map<string, number>();
+	for (const entry of sourceEntries) {
+		mergeSourceMask(sourceMaskByFamilyText, entry.familyTexts, entry.mask);
+	}
+	return familyTexts.map((familyText) => sourceMaskByFamilyText.get(familyText) ?? 0);
 }
 
 function mapStringsToStringIds(
@@ -618,6 +688,5 @@ class StringArenaBuilder {
 		} as const;
 	}
 }
-
 
 

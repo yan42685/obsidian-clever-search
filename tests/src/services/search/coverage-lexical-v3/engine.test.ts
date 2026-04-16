@@ -426,6 +426,176 @@ describe("coverage lexical v3 engine", () => {
 		expect(result.rankedCandidates[0].bodyWindowContainer?.coveredDistinctUnitCount).toBe(2);
 	});
 
+	test("route stays corroborative when identity and body already explain the query, but becomes main evidence when it adds a missing unit", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/redundant-route.md",
+				basename: "vector cache",
+				folder: "latin",
+				tags: "sdk cache",
+				content: "vector cache restore note",
+			}),
+			createDocument({
+				path: "latin/novel-route.md",
+				basename: "cache note",
+				folder: "latin",
+				tags: "vector",
+				content: "cache note",
+			}),
+		]);
+
+		const result = engine.search("vector cache");
+		const redundantRoute = result.rankedCandidates.find(
+			(candidate) => candidate.path === "latin/redundant-route.md",
+		);
+		const novelRoute = result.rankedCandidates.find(
+			(candidate) => candidate.path === "latin/novel-route.md",
+		);
+
+		expect(redundantRoute?.routeContainer).not.toBeNull();
+		expect(redundantRoute?.strongestContainer?.tier).toBe("identity");
+		expect(redundantRoute?.secondStrongestContainer?.tier).toBe("bodyWindow");
+		expect(redundantRoute?.fragmentationPenalty.explanatoryContainerCount).toBe(2);
+		expect(novelRoute?.routeContainer).not.toBeNull();
+		expect(novelRoute?.strongestContainer?.tier).toBe("identity");
+		expect(novelRoute?.secondStrongestContainer?.tier).toBe("route");
+		expect(novelRoute?.fragmentationPenalty.explanatoryContainerCount).toBe(2);
+	});
+
+	test("vector cache canonical playbook stays in the top five when route support is only corroborative", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "pkm-en/projects/sdk/vector-cache.md",
+				basename: "Vector cache playbook",
+				folder: "pkm-en/projects/sdk",
+				headings: "Eviction restore",
+				aliases: "sdk cache restore;vector cache restore note",
+				tags: "sdk cache",
+				content:
+					"vector cache eviction keeps sdk search warm after shard checkpoint restore",
+			}),
+			createDocument({
+				path: "pkm-en/archive/vector-cache.md",
+				basename: "Vector cache playbook",
+				folder: "pkm-en/archive",
+				headings: "Eviction restore",
+				aliases: "archive cache restore",
+				tags: "archive cache",
+				content:
+					"vector cache eviction keeps archive search warm after shard checkpoint restore",
+			}),
+			createDocument({
+				path: "pkm-en/inbox/restart-cache-after-outage.md",
+				basename: "Restart cache after outage",
+				folder: "pkm-en/inbox",
+				headings: "Restart checklist",
+				aliases: "vector cache crash note",
+				tags: "inbox outage",
+				content:
+					"remember to restart cache after outage, restore vector cache shards, and verify checkpoint replay",
+			}),
+			createDocument({
+				path: "pkm-en/scratch/vector-cache-migration.md",
+				basename: "Vector cache migration",
+				folder: "pkm-en/scratch",
+				headings: "Migration scratch",
+				content:
+					"scratch thoughts about vector cache migration, hotfixes, and unstable warm restart ideas",
+			}),
+			createDocument({
+				path: "pkm-en/ops/vector-cache-hotfix.md",
+				basename: "Vector cache hotfix",
+				folder: "pkm-en/ops",
+				headings: "Hotfix steps",
+				content:
+					"ops hotfix for vector cache crash handling after outage with follow up verification steps",
+			}),
+			createDocument({
+				path: "pkm-en/incidents/vector-cache-postmortem.md",
+				basename: "Vector cache postmortem",
+				folder: "pkm-en/incidents",
+				headings: "Postmortem notes",
+				aliases: "vector cache outage follow up",
+				tags: "incident postmortem",
+				content:
+					"vector cache outage postmortem covers warm restart, replay gaps, mitigation, and follow up actions",
+			}),
+		]);
+
+		const result = engine.search("vector cache");
+		const targetIndex = result.rankedCandidates.findIndex(
+			(candidate) => candidate.path === "pkm-en/projects/sdk/vector-cache.md",
+		);
+		const aliasBackedIndex = result.rankedCandidates.findIndex(
+			(candidate) => candidate.path === "pkm-en/inbox/restart-cache-after-outage.md",
+		);
+		const target = result.rankedCandidates[targetIndex];
+
+		expect(targetIndex).toBeGreaterThanOrEqual(0);
+		expect(targetIndex).toBeLessThan(5);
+		expect(aliasBackedIndex).toBeGreaterThan(targetIndex);
+		expect(target?.routeContainer).not.toBeNull();
+		expect(target?.strongestContainer?.tier).toBe("identity");
+		expect(target?.secondStrongestContainer?.tier).toBe("bodyWindow");
+		expect(target?.fragmentationPenalty.explanatoryContainerCount).toBe(2);
+		expect(target?.metadataPackingSignature.basenameUnitCount).toBeGreaterThan(0);
+	});
+
+	test("basename exact beats alias exact when exact counts tie", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/canonical-vector-cache.md",
+				basename: "vector cache",
+				folder: "latin",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/alias-vector-cache.md",
+				basename: "restart note",
+				folder: "latin",
+				aliases: "vector cache",
+				content: "plain note",
+			}),
+		]);
+
+		const result = engine.search("vector cache");
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"latin/canonical-vector-cache.md",
+			"latin/alias-vector-cache.md",
+		]);
+		expect(result.rankedCandidates[0].exactUnitCount).toBe(
+			result.rankedCandidates[1].exactUnitCount,
+		);
+		expect(result.rankedCandidates[0].metadataPackingSignature.basenameUnitCount).toBe(2);
+		expect(result.rankedCandidates[1].metadataPackingSignature.aliasUnitCount).toBe(2);
+	});
+
+	test("mixed basename and alias hits use best-source-only metadata packing", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/mixed-source.md",
+				basename: "vector cache",
+				folder: "latin",
+				aliases: "vector cache crash note",
+				content: "plain note",
+			}),
+		]);
+
+		const result = engine.search("vector cache");
+		const candidate = result.rankedCandidates[0];
+
+		expect(candidate.metadataPackingSignature.basenameUnitCount).toBe(2);
+		expect(candidate.metadataPackingSignature.aliasUnitCount).toBe(0);
+		expect(candidate.realizedFamilies.every((family) => family.metadataPackingSource === "basename")).toBe(
+			true,
+		);
+	});
+
 	test("prefix-only body hits prefer smaller completion gain and then non-compound tokens", () => {
 		const engine = new CoverageLexicalV3Engine();
 		engine.buildResidentBase([

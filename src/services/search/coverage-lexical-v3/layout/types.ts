@@ -44,7 +44,9 @@ export type ResidentBlockPostingList = Readonly<{
 
 export type ResidentMetadataContainerArena = Readonly<{
 	identityFamiliesByDoc: ResidentIntegerArray;
+	identitySourceMaskByDocEntry: Uint8Array;
 	routeFamiliesByDoc: ResidentIntegerArray;
+	routeSourceMaskByDocEntry: Uint8Array;
 	headingFamiliesByDoc: ResidentIntegerArray;
 	identityPostings: ResidentPostingList;
 	routePostings: ResidentPostingList;

@@ -43,6 +43,19 @@ export function getDocIdentityFamilyIds(
 	);
 }
 
+export function getDocIdentitySourceMasks(
+	base: ResidentBase,
+	docId: number,
+): number[] {
+	return Array.from(
+		base.metadataContainers.identitySourceMaskByDocEntry.slice(
+			base.docTable.identityStartByDocId[docId] ?? 0,
+			(base.docTable.identityStartByDocId[docId] ?? 0) +
+				(base.docTable.identityCountByDocId[docId] ?? 0),
+		),
+	);
+}
+
 export function getDocRouteFamilyIds(
 	base: ResidentBase,
 	docId: number,
@@ -52,6 +65,19 @@ export function getDocRouteFamilyIds(
 		base.docTable.routeStartByDocId[docId] ?? 0,
 		(base.docTable.routeStartByDocId[docId] ?? 0) +
 			(base.docTable.routeCountByDocId[docId] ?? 0),
+	);
+}
+
+export function getDocRouteSourceMasks(
+	base: ResidentBase,
+	docId: number,
+): number[] {
+	return Array.from(
+		base.metadataContainers.routeSourceMaskByDocEntry.slice(
+			base.docTable.routeStartByDocId[docId] ?? 0,
+			(base.docTable.routeStartByDocId[docId] ?? 0) +
+				(base.docTable.routeCountByDocId[docId] ?? 0),
+		),
 	);
 }
 

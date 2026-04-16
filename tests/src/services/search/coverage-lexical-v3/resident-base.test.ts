@@ -1,6 +1,16 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { describeResidentBase } from "src/services/search/coverage-lexical-v3/metrics";
+import {
+	IDENTITY_METADATA_SOURCE_ALIAS,
+	IDENTITY_METADATA_SOURCE_BASENAME,
+} from "src/services/search/coverage-lexical-v3/metadata-source";
+import {
+	getDocPath,
+	getDocIdentityFamilyIds,
+	getDocIdentitySourceMasks,
+	getFamilyText,
+} from "src/services/search/coverage-lexical-v3/recall";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
@@ -107,7 +117,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.hanRouteBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 	});
-test("builds mixed metadata and body structures with stable byte buckets", () => {
+	test("builds mixed metadata and body structures with stable byte buckets", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
 				path: "infra/projected-secret-note.md",
@@ -160,6 +170,50 @@ test("builds mixed metadata and body structures with stable byte buckets", () =>
 		expect(summary["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
 	});
 
+	test("stores doc-local metadata source masks without collapsing them into a global family mask", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "notes/basename-cache.md",
+				basename: "cache",
+				folder: "notes",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "notes/alias-cache.md",
+				basename: "plain note",
+				folder: "notes",
+				aliases: "cache",
+				content: "plain note",
+			}),
+		]);
+
+		const basenameDocId = Array.from(
+			{ length: residentBase.docTable.docCount },
+			(_, docId) => docId,
+		).findIndex((docId) => getDocPath(residentBase, docId) === "notes/basename-cache.md");
+		const aliasDocId = Array.from(
+			{ length: residentBase.docTable.docCount },
+			(_, docId) => docId,
+		).findIndex((docId) => getDocPath(residentBase, docId) === "notes/alias-cache.md");
+		const basenameIdentityFamilies = getDocIdentityFamilyIds(residentBase, basenameDocId);
+		const aliasIdentityFamilies = getDocIdentityFamilyIds(residentBase, aliasDocId);
+		const basenameSourceMasks = getDocIdentitySourceMasks(residentBase, basenameDocId);
+		const aliasSourceMasks = getDocIdentitySourceMasks(residentBase, aliasDocId);
+		const basenameCacheIndex = basenameIdentityFamilies.findIndex(
+			(familyId) => getFamilyText(residentBase, familyId) === "cache",
+		);
+		const aliasCacheIndex = aliasIdentityFamilies.findIndex(
+			(familyId) => getFamilyText(residentBase, familyId) === "cache",
+		);
+
+		expect(basenameCacheIndex).toBeGreaterThanOrEqual(0);
+		expect(aliasCacheIndex).toBeGreaterThanOrEqual(0);
+		expect(basenameSourceMasks[basenameCacheIndex]).toBe(
+			IDENTITY_METADATA_SOURCE_BASENAME,
+		);
+		expect(aliasSourceMasks[aliasCacheIndex]).toBe(IDENTITY_METADATA_SOURCE_ALIAS);
+	});
+
 	test("uses adaptive integer widths and exposes section encoding descriptors", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
@@ -208,5 +262,3 @@ test("builds mixed metadata and body structures with stable byte buckets", () =>
 		expect(residentBase.metrics.idPayloadBytes).toBeGreaterThan(0);
 	});
 });
-
-

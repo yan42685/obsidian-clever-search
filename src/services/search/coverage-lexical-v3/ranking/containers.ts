@@ -19,12 +19,20 @@ import {
 	getDocIdentityFamilyIds,
 	getDocIdentityHanWitnessStringIds,
 	getDocIdentityHanWitnessTexts,
+	getDocIdentitySourceMasks,
 	getDocPath,
 	getDocRouteFamilyIds,
 	getDocRouteHanWitnessStringIds,
 	getDocRouteHanWitnessTexts,
+	getDocRouteSourceMasks,
 	getDocStableKey,
 } from "../recall";
+import {
+	chooseMetadataPackingSource,
+	decodeIdentityMetadataSource,
+	decodeRouteMetadataSource,
+	type MetadataPackingSource,
+} from "../metadata-source";
 import type {
 	V3CandidateDocRecall,
 	V3QueryFamilyMatch,
@@ -41,6 +49,7 @@ import type {
 	HanSurfaceCompletionTier,
 	HeadingCorroboration,
 	IdentityContainer,
+	MetadataPackingSignature,
 	RealizedQueryUnitFamily,
 	RouteContainer,
 } from "./types";
@@ -49,6 +58,33 @@ const CHAIN_BOUNDARY_PENALTY = 0;
 const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
 const BLOCK_SHORTLIST_LIMIT = 6;
 const BODY_WINDOW_PREFILTER_PER_BUCKET = 4;
+
+type CachedDocEvidence = Readonly<{
+	identityFamilyIds: readonly number[];
+	routeFamilyIds: readonly number[];
+	headingFamilyIds: readonly number[];
+	identitySourceMaskByFamilyId: ReadonlyMap<number, number>;
+	routeSourceMaskByFamilyId: ReadonlyMap<number, number>;
+	identityWitnessStringIds: readonly number[];
+	routeWitnessStringIds: readonly number[];
+	headingWitnessStringIds: readonly number[];
+	identityWitnessTexts: readonly string[];
+	routeWitnessTexts: readonly string[];
+}>;
+
+type CachedBodyBlockEvidence = Readonly<{
+	exactOccurrences: readonly PositionedFamilyOccurrence[];
+	witnessOccurrences: readonly PositionedFamilyOccurrence[];
+	witnessTexts: readonly string[];
+	approxSpan: number;
+	ordinalSpan: number;
+}>;
+
+const DOC_EVIDENCE_CACHE = new WeakMap<ResidentBase, Map<number, CachedDocEvidence>>();
+const BODY_BLOCK_EVIDENCE_CACHE = new WeakMap<
+	ResidentBase,
+	Map<number, CachedBodyBlockEvidence>
+>();
 
 type BodyOccurrence = Readonly<{
 	blockId: number;
@@ -126,22 +162,18 @@ export function buildPackingProfile(
 	candidateRecall: V3CandidateDocRecall,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 ): EvidencePackingProfile {
-	const identityWitnessStringIds = getDocIdentityHanWitnessStringIds(base, candidateRecall.docId);
-	const routeWitnessStringIds = getDocRouteHanWitnessStringIds(base, candidateRecall.docId);
-	const headingWitnessStringIds = getDocHeadingHanWitnessStringIds(base, candidateRecall.docId);
-	const identityWitnessTexts = getDocIdentityHanWitnessTexts(base, candidateRecall.docId);
-	const routeWitnessTexts = getDocRouteHanWitnessTexts(base, candidateRecall.docId);
+	const docEvidence = getCachedDocEvidence(base, candidateRecall.docId);
 	const identityFamilyIds = new Set<number>([
-		...getDocIdentityFamilyIds(base, candidateRecall.docId),
-		...identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		...docEvidence.identityFamilyIds,
+		...docEvidence.identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
 	]);
 	const routeFamilyIds = new Set<number>([
-		...getDocRouteFamilyIds(base, candidateRecall.docId),
-		...routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		...docEvidence.routeFamilyIds,
+		...docEvidence.routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
 	]);
 	const headingFamilyIds = new Set<number>([
-		...getDocHeadingFamilyIds(base, candidateRecall.docId),
-		...headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		...docEvidence.headingFamilyIds,
+		...docEvidence.headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
 	]);
 	const mergedUnitFamilyMatches = mergeCandidateSpecificHanConfirmedMatches(
 		base,
@@ -158,23 +190,12 @@ export function buildPackingProfile(
 	const bodyBlockIdsByUnitFamily = new Map<number, Map<number, Set<number>>>();
 	const bodyWitnessTextsByBlockId = new Map<number, readonly string[]>();
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
-		const exactFamilyIds = getBodyBlockExactFamilyIds(base, blockId);
-		const witnessStringIds = getBodyBlockHanWitnessStringIds(base, blockId);
-		bodyWitnessTextsByBlockId.set(blockId, getBodyBlockHanWitnessTexts(base, blockId));
-		const exactOccurrences = buildExactPositionedOccurrences(base, exactFamilyIds);
-		const witnessOccurrences = buildWitnessPositionedOccurrences(base, witnessStringIds);
-		bodyApproxSpanByBlockId.set(
-			blockId,
-			Math.max(
-				1,
-				getPositionedOccurrenceSpan(exactOccurrences),
-				getPositionedOccurrenceSpan(witnessOccurrences),
-			),
-		);
-		bodyOrdinalSpanByBlockId.set(
-			blockId,
-			Math.max(1, exactOccurrences.length, witnessOccurrences.length),
-		);
+		const blockEvidence = getCachedBodyBlockEvidence(base, blockId);
+		const exactOccurrences = blockEvidence.exactOccurrences;
+		const witnessOccurrences = blockEvidence.witnessOccurrences;
+		bodyWitnessTextsByBlockId.set(blockId, blockEvidence.witnessTexts);
+		bodyApproxSpanByBlockId.set(blockId, blockEvidence.approxSpan);
+		bodyOrdinalSpanByBlockId.set(blockId, blockEvidence.ordinalSpan);
 		const blockOccurrences: BodyOccurrence[] = [];
 		for (const unitMatches of mergedUnitFamilyMatches) {
 			const occurrences = collectBlockOccurrences(
@@ -229,6 +250,8 @@ export function buildPackingProfile(
 				identityFamilyIds,
 				routeFamilyIds,
 				headingFamilyIds,
+				identitySourceMaskByFamilyId: docEvidence.identitySourceMaskByFamilyId,
+				routeSourceMaskByFamilyId: docEvidence.routeSourceMaskByFamilyId,
 				bodyBlockIdsByUnitFamily,
 				bestBodyWindowBlockIds,
 			}),
@@ -240,7 +263,16 @@ export function buildPackingProfile(
 	const bodyWindowContainer = bestBodyWindowContainer
 		? bindBodyWindowToRealizedFamilies(bestBodyWindowContainer, realizedFamilies)
 		: null;
-	const mainContainers = [identityContainer, routeContainer, bodyWindowContainer]
+	const routeProvidesNovelCoverage = routeContainerProvidesNovelCoverage(
+		routeContainer,
+		identityContainer,
+		bodyWindowContainer,
+	);
+	const mainContainers = [
+		identityContainer,
+		routeProvidesNovelCoverage ? routeContainer : null,
+		bodyWindowContainer,
+	]
 		.filter(
 			(container): container is IdentityContainer | RouteContainer | BodyWindowContainer =>
 				container != null,
@@ -255,12 +287,13 @@ export function buildPackingProfile(
 	);
 	const hanSurfaceCompletionSummary = summarizeHanSurfaceCompletion(
 		queryAnalysis,
-		identityWitnessTexts,
-		routeWitnessTexts,
+		docEvidence.identityWitnessTexts,
+		docEvidence.routeWitnessTexts,
 		bodyWitnessTextsByBlockId,
 		bestBodyWindowBlockIds,
 	);
 	const coverageGate = buildCoverageGateProfile(queryAnalysis, realizedFamilies);
+	const metadataPackingSignature = buildMetadataPackingSignature(realizedFamilies);
 	const profile: EvidencePackingProfile = {
 		docId: candidateRecall.docId,
 		path: getDocPath(base, candidateRecall.docId),
@@ -283,6 +316,7 @@ export function buildPackingProfile(
 			(family) =>
 				family.matchKind === "prefix" && /[_./-]/u.test(family.familyText),
 		).length,
+		metadataPackingSignature,
 		realizedFamilies,
 		identityContainer,
 		routeContainer,
@@ -293,6 +327,108 @@ export function buildPackingProfile(
 	};
 	attachBlockShortlistSketch(profile, bodyWindowSelection.shortlist);
 	return profile;
+}
+
+function getCachedDocEvidence(
+	base: ResidentBase,
+	docId: number,
+): CachedDocEvidence {
+	let cache = DOC_EVIDENCE_CACHE.get(base);
+	if (cache == null) {
+		cache = new Map<number, CachedDocEvidence>();
+		DOC_EVIDENCE_CACHE.set(base, cache);
+	}
+	const existing = cache.get(docId);
+	if (existing != null) {
+		return existing;
+	}
+	const created: CachedDocEvidence = {
+		identityFamilyIds: getDocIdentityFamilyIds(base, docId),
+		routeFamilyIds: getDocRouteFamilyIds(base, docId),
+		headingFamilyIds: getDocHeadingFamilyIds(base, docId),
+		identitySourceMaskByFamilyId: buildMetadataSourceMaskByFamilyId(
+			getDocIdentityFamilyIds(base, docId),
+			getDocIdentitySourceMasks(base, docId),
+		),
+		routeSourceMaskByFamilyId: buildMetadataSourceMaskByFamilyId(
+			getDocRouteFamilyIds(base, docId),
+			getDocRouteSourceMasks(base, docId),
+		),
+		identityWitnessStringIds: getDocIdentityHanWitnessStringIds(base, docId),
+		routeWitnessStringIds: getDocRouteHanWitnessStringIds(base, docId),
+		headingWitnessStringIds: getDocHeadingHanWitnessStringIds(base, docId),
+		identityWitnessTexts: getDocIdentityHanWitnessTexts(base, docId),
+		routeWitnessTexts: getDocRouteHanWitnessTexts(base, docId),
+	};
+	cache.set(docId, created);
+	return created;
+}
+
+function buildMetadataSourceMaskByFamilyId(
+	familyIds: readonly number[],
+	sourceMasks: readonly number[],
+): ReadonlyMap<number, number> {
+	const sourceMaskByFamilyId = new Map<number, number>();
+	for (let index = 0; index < familyIds.length; index += 1) {
+		sourceMaskByFamilyId.set(
+			familyIds[index],
+			(sourceMaskByFamilyId.get(familyIds[index]) ?? 0) | (sourceMasks[index] ?? 0),
+		);
+	}
+	return sourceMaskByFamilyId;
+}
+
+function getCachedBodyBlockEvidence(
+	base: ResidentBase,
+	blockId: number,
+): CachedBodyBlockEvidence {
+	let cache = BODY_BLOCK_EVIDENCE_CACHE.get(base);
+	if (cache == null) {
+		cache = new Map<number, CachedBodyBlockEvidence>();
+		BODY_BLOCK_EVIDENCE_CACHE.set(base, cache);
+	}
+	const existing = cache.get(blockId);
+	if (existing != null) {
+		return existing;
+	}
+	const exactOccurrences = buildExactPositionedOccurrences(
+		base,
+		getBodyBlockExactFamilyIds(base, blockId),
+	);
+	const witnessOccurrences = buildWitnessPositionedOccurrences(
+		base,
+		getBodyBlockHanWitnessStringIds(base, blockId),
+	);
+	const created: CachedBodyBlockEvidence = {
+		exactOccurrences,
+		witnessOccurrences,
+		witnessTexts: getBodyBlockHanWitnessTexts(base, blockId),
+		approxSpan: Math.max(
+			1,
+			getPositionedOccurrenceSpan(exactOccurrences),
+			getPositionedOccurrenceSpan(witnessOccurrences),
+		),
+		ordinalSpan: Math.max(1, exactOccurrences.length, witnessOccurrences.length),
+	};
+	cache.set(blockId, created);
+	return created;
+}
+
+function routeContainerProvidesNovelCoverage(
+	routeContainer: RouteContainer | null,
+	identityContainer: IdentityContainer | null,
+	bodyWindowContainer: BodyWindowContainer | null,
+): boolean {
+	if (routeContainer == null) {
+		return false;
+	}
+	const coveredByIdentityOrBody = new Set<number>([
+		...(identityContainer?.coveredUnitIndices ?? []),
+		...(bodyWindowContainer?.coveredUnitIndices ?? []),
+	]);
+	return routeContainer.coveredUnitIndices.some(
+		(unitIndex) => !coveredByIdentityOrBody.has(unitIndex),
+	);
 }
 
 function mergeCandidateSpecificHanConfirmedMatches(
@@ -914,6 +1050,8 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 	identityFamilyIds: ReadonlySet<number>;
 	routeFamilyIds: ReadonlySet<number>;
 	headingFamilyIds: ReadonlySet<number>;
+	identitySourceMaskByFamilyId: ReadonlyMap<number, number>;
+	routeSourceMaskByFamilyId: ReadonlyMap<number, number>;
 	bodyBlockIdsByUnitFamily: ReadonlyMap<number, ReadonlyMap<number, ReadonlySet<number>>>;
 	bestBodyWindowBlockIds: ReadonlySet<number>;
 }>): RealizedQueryUnitFamily | null {
@@ -930,6 +1068,12 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 			const inIdentity = params.identityFamilyIds.has(match.familyId);
 			const inRoute = params.routeFamilyIds.has(match.familyId);
 			const inHeading = params.headingFamilyIds.has(match.familyId);
+			const identityMetadataSource = decodeIdentityMetadataSource(
+				params.identitySourceMaskByFamilyId.get(match.familyId) ?? 0,
+			);
+			const routeMetadataSource = decodeRouteMetadataSource(
+				params.routeSourceMaskByFamilyId.get(match.familyId) ?? 0,
+			);
 			const baseSupportScore =
 				(inIdentity ? 8 : 0) +
 				(inRoute ? 5 : 0) +
@@ -947,6 +1091,12 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 				inIdentity,
 				inRoute,
 				inHeading,
+				identityMetadataSource,
+				routeMetadataSource,
+				metadataPackingSource: chooseMetadataPackingSource(
+					identityMetadataSource,
+					routeMetadataSource,
+				),
 				inBestBodyWindow,
 				inBodyResidue,
 				supportScore,
@@ -973,6 +1123,9 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 		familyId: best.match.familyId,
 		familyText: best.match.familyText,
 		matchKind: best.match.matchKind,
+		identityMetadataSource: best.identityMetadataSource,
+		routeMetadataSource: best.routeMetadataSource,
+		metadataPackingSource: best.metadataPackingSource,
 		inIdentity: best.inIdentity,
 		inRoute: best.inRoute,
 		inHeading: best.inHeading,
@@ -1058,11 +1211,71 @@ function buildHeadingCorroboration(
 	};
 }
 
+function buildMetadataPackingSignature(
+	realizedFamilies: readonly RealizedQueryUnitFamily[],
+): MetadataPackingSignature {
+	const basenameUnitCount = countMetadataPackingSource(realizedFamilies, "basename");
+	const aliasUnitCount = countMetadataPackingSource(realizedFamilies, "alias");
+	const routeUnitCount = countMetadataPackingSource(realizedFamilies, "route");
+	const sortedBuckets = ([
+		{ source: "basename", unitCount: basenameUnitCount },
+		{ source: "alias", unitCount: aliasUnitCount },
+		{ source: "route", unitCount: routeUnitCount },
+	] as const)
+		.filter((bucket) => bucket.unitCount > 0)
+		.sort(compareMetadataPackingBucketOrder);
+	return {
+		basenameUnitCount,
+		aliasUnitCount,
+		routeUnitCount,
+		sortedBuckets,
+	};
+}
+
+function countMetadataPackingSource(
+	realizedFamilies: readonly RealizedQueryUnitFamily[],
+	source: MetadataPackingSource,
+): number {
+	return realizedFamilies.filter(
+		(family) => family.metadataPackingSource === source,
+	).length;
+}
+
+function compareMetadataPackingBucketOrder(
+	left: Readonly<{
+		source: Exclude<MetadataPackingSource, "none">;
+		unitCount: number;
+	}>,
+	right: Readonly<{
+		source: Exclude<MetadataPackingSource, "none">;
+		unitCount: number;
+	}>,
+): number {
+	if (left.unitCount !== right.unitCount) {
+		return right.unitCount - left.unitCount;
+	}
+	return getMetadataPackingSourceScore(right.source) - getMetadataPackingSourceScore(left.source);
+}
+
+function getMetadataPackingSourceScore(source: Exclude<MetadataPackingSource, "none">): number {
+	switch (source) {
+		case "basename":
+			return 3;
+		case "alias":
+			return 2;
+		case "route":
+			return 1;
+	}
+}
+
 function buildFragmentationPenalty(
 	realizedFamilies: readonly RealizedQueryUnitFamily[],
 	strongestContainer: EvidenceContainer | null,
 	secondStrongestContainer: EvidenceContainer | null,
 ): FragmentationPenalty {
+	const explanatoryContainers = [strongestContainer, secondStrongestContainer].filter(
+		(container): container is EvidenceContainer => container != null,
+	);
 	const coveredByTopTwo = new Set<number>([
 		...(strongestContainer?.coveredUnitIndices ?? []),
 		...(secondStrongestContainer?.coveredUnitIndices ?? []),
@@ -1072,12 +1285,53 @@ function buildFragmentationPenalty(
 		uncoveredByTopTwoCount: realizedFamilies.filter(
 			(family) => !coveredByTopTwo.has(family.queryUnitIndex),
 		).length,
-		activeContainerCount: [
-			realizedFamilies.some((family) => family.inIdentity),
-			realizedFamilies.some((family) => family.inRoute),
-			realizedFamilies.some((family) => family.inBestBodyWindow),
-		].filter(Boolean).length,
+		explanatoryContainerCount: countExplanatoryContainers(
+			realizedFamilies,
+			explanatoryContainers,
+			coveredByTopTwo,
+		),
 	};
+}
+
+function countExplanatoryContainers(
+	realizedFamilies: readonly RealizedQueryUnitFamily[],
+	topContainers: readonly EvidenceContainer[],
+	coveredByTopTwo: ReadonlySet<number>,
+): number {
+	let explanatoryContainerCount = topContainers.length;
+	const corroborationContainers = [
+		realizedFamilies
+			.filter((family) => family.inIdentity)
+			.map((family) => family.queryUnitIndex),
+		realizedFamilies
+			.filter((family) => family.inRoute)
+			.map((family) => family.queryUnitIndex),
+		realizedFamilies
+			.filter((family) => family.inBestBodyWindow)
+			.map((family) => family.queryUnitIndex),
+	];
+	const topContainerKeys = new Set(
+		topContainers.map((container) => buildContainerCoverageKey(container.coveredUnitIndices)),
+	);
+	for (const coveredUnitIndices of corroborationContainers) {
+		const dedupedIndices = Array.from(new Set(coveredUnitIndices)).sort(
+			(left, right) => left - right,
+		);
+		if (dedupedIndices.length === 0) {
+			continue;
+		}
+		if (topContainerKeys.has(buildContainerCoverageKey(dedupedIndices))) {
+			continue;
+		}
+		if (dedupedIndices.some((unitIndex) => !coveredByTopTwo.has(unitIndex))) {
+			explanatoryContainerCount += 1;
+		}
+	}
+	return explanatoryContainerCount;
+}
+
+function buildContainerCoverageKey(coveredUnitIndices: readonly number[]): string {
+	return coveredUnitIndices.join(",");
 }
 
 function buildCoverageGateProfile(

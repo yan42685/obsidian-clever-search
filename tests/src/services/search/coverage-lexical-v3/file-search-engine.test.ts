@@ -1,4 +1,4 @@
-ï»¿jest.mock("src/services/search/tokenizer", () => ({
+jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
@@ -106,14 +106,14 @@ function createPackingProfile(
 			overrides.fragmentationPenalty ?? {
 				bodyResidueUnitCount: 0,
 				uncoveredByTopTwoCount: 0,
-				activeContainerCount: 1,
+				explanatoryContainerCount: 1,
 			},
 	};
 }
 
 function createRefineSearchResult(): CoverageLexicalV3SearchResult {
-	const shorterTerm = "ç¼“å­˜æ¢å¤";
-	const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
+	const shorterTerm = "»º´æ»Ö¸´";
+	const fullSurface = "»º´æ»Ö¸´²½Öè";
 	const laterPath = createPackingProfile({
 		docId: 0,
 		path: "z-complete.md",
@@ -248,6 +248,7 @@ function createResidentBase(): ResidentBase {
 		},
 		hanRoute: {
 			bigramIds: new Uint32Array(),
+			bodyBigramIds: new Uint32Array(),
 			metadataPostingStarts: new Uint32Array(),
 			metadataDocIds: new Uint32Array(),
 			bodyPostingStarts: new Uint32Array(),
@@ -264,6 +265,14 @@ function createResidentBase(): ResidentBase {
 		metrics: {
 			docArenaBytes: 0,
 			stringArenaBytes: 0,
+			stringArenaPathBytes: 0,
+			stringArenaFamilyBytes: 0,
+			stringArenaIdentityWitnessBytes: 0,
+			stringArenaRouteWitnessBytes: 0,
+			stringArenaHeadingWitnessBytes: 0,
+			stringArenaBodyWitnessBytes: 0,
+			stringArenaMultiSourceBytes: 0,
+			stringArenaUnattributedBytes: 0,
 			familyLexiconBytes: 0,
 			metadataContainerBytes: 0,
 			headingBytes: 0,
@@ -271,8 +280,14 @@ function createResidentBase(): ResidentBase {
 			bodyBlockBytes: 0,
 			exactTapeBytes: 0,
 			hanRouteBytes: 0,
+			hanRouteSharedBigramIdsBytes: 0,
 			hanRouteMetadataHanPostingsBytes: 0,
+			hanRouteMetadataHanPostingStartsBytes: 0,
+			hanRouteMetadataHanDocIdsBytes: 0,
 			hanRouteBodyHanPostingsBytes: 0,
+			hanRouteBodyBigramIdsBytes: 0,
+			hanRouteBodyHanPostingStartsBytes: 0,
+			hanRouteBodyHanBodyBlockIdsBytes: 0,
 			hanRouteMetadataWitnessBytes: 0,
 			hanRouteBodyWitnessBytes: 0,
 			scaffoldBytes: 0,
@@ -441,8 +456,8 @@ describe("coverage lexical v3 file search engine", () => {
 
 	test("getDirectSubItems uses V3 query analysis with indexed snapshots", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "ç¼“å­˜æ¢å¤";
-		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
+		const shorterTerm = "»º´æ»Ö¸´";
+		const fullSurface = "»º´æ»Ö¸´²½Öè";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/lifeforce.md",
@@ -502,7 +517,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/lifeforce.md", "ç¼“å­˜æ¢å¤æ­¥éª¤\n\nçƒ­å¯åŠ¨æ¢å¤è®°å½•ã€‚"]]),
+			new Map([["notes/lifeforce.md", "»º´æ»Ö¸´²½Öè\n\nÈÈÆô¶¯»Ö¸´¼ÇÂ¼¡£"]]),
 		);
 		const readCurrentTexts = jest.fn();
 		(
@@ -550,8 +565,8 @@ describe("coverage lexical v3 file search engine", () => {
 
 	test("getDirectSubItems highlights a full Han surface instead of only the shorter real term", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "ç¼“å­˜æ¢å¤";
-		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
+		const shorterTerm = "»º´æ»Ö¸´";
+		const fullSurface = "»º´æ»Ö¸´²½Öè";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/life-force.md",
@@ -611,7 +626,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/life-force.md", "ç¼“å­˜æ¢å¤æ­¥éª¤è¯´æ˜Ž\n\nç¼“å­˜æ¢å¤æ­¥éª¤ç”¨äºŽçƒ­å¯åŠ¨æ¢å¤ã€‚"]]),
+			new Map([["notes/life-force.md", "»º´æ»Ö¸´²½ÖèËµÃ÷\n\n»º´æ»Ö¸´²½ÖèÓÃÓÚÈÈÆô¶¯»Ö¸´¡£"]]),
 		);
 		(
 			engine as unknown as {
@@ -650,8 +665,8 @@ describe("coverage lexical v3 file search engine", () => {
 	
 	test("getDirectSubItems falls back to current text when generation-aligned indexed text is unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "ç¼“å­˜æ¢å¤";
-		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
+		const shorterTerm = "»º´æ»Ö¸´";
+		const fullSurface = "»º´æ»Ö¸´²½Öè";
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/missing-snapshot.md",
@@ -712,7 +727,7 @@ describe("coverage lexical v3 file search engine", () => {
 		}));
 		const readIndexedTexts = jest.fn(async () => new Map<string, string>());
 		const readCurrentTexts = jest.fn(async () =>
-			new Map([["notes/missing-snapshot.md", "ç¼“å­˜æ¢å¤æ­¥éª¤\n\nå›žæ”¾æ£€æŸ¥ä¸Žçƒ­å¯åŠ¨æ¢å¤ã€‚"]]),
+			new Map([["notes/missing-snapshot.md", "»º´æ»Ö¸´²½Öè\n\n»Ø·Å¼ì²éÓëÈÈÆô¶¯»Ö¸´¡£"]]),
 		);
 		(
 			engine as unknown as {
@@ -768,8 +783,8 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			{ tokenizeSequence } as unknown as Tokenizer,
 		);
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "ç¼“å­˜æ¢å¤";
-		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
+		const shorterTerm = "»º´æ»Ö¸´";
+		const fullSurface = "»º´æ»Ö¸´²½Öè";
 		await engine.reIndexAll([
 			createDocument({
 				path: "zh/split-hit.md",
@@ -857,20 +872,20 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 
 	test("searchFiles hides same-band Han partials when weak results are hidden", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "ç¼“å­˜æ¢å¤";
-		const fullSurface = "ç¼“å­˜æ¢å¤æ­¥éª¤";
+		const shorterTerm = "»º´æ»Ö¸´";
+		const fullSurface = "»º´æ»Ö¸´²½Öè";
 		await engine.reIndexAll([
 			createDocument({
 				path: "partial.md",
 				basename: "partial",
 				folder: "notes",
-				content: "ç¼“å­˜æ¢å¤",
+				content: "»º´æ»Ö¸´",
 			}),
 			createDocument({
 				path: "complete.md",
 				basename: "complete",
 				folder: "notes",
-				content: "ç¼“å­˜æ¢å¤æ­¥éª¤",
+				content: "»º´æ»Ö¸´²½Öè",
 			}),
 		]);
 		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
@@ -1035,13 +1050,13 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			search: () => ({
 				recallState: {
 					queryAnalysis: {
-					queryText: "ç¼‚æ’³ç“¨éŽ­ãˆ î˜²",
-					normalizedQueryText: "ç¼‚æ’³ç“¨éŽ­ãˆ î˜²",
-					surfaceGroups: [{ index: 0, text: "ç¼‚æ’³ç“¨éŽ­ãˆ î˜²", kind: "han" }],
+					queryText: "ç¼“å­˜æ¢å¤",
+					normalizedQueryText: "ç¼“å­˜æ¢å¤",
+					surfaceGroups: [{ index: 0, text: "ç¼“å­˜æ¢å¤", kind: "han" }],
 					primaryUnits: [
 						{
 							index: 0,
-							text: "ç¼‚æ’³ç“¨éŽ­ãˆ î˜²",
+							text: "ç¼“å­˜æ¢å¤",
 							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},
@@ -1162,6 +1177,14 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		expect(refined[4].strongestHanSurfaceCompletionTier).toBe("body_residue");
 	});
 });
+
+
+
+
+
+
+
+
 
 
 

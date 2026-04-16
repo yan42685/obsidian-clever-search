@@ -1,4 +1,9 @@
 import type { V3QueryFamilyMatchKind } from "../recall";
+import type {
+	IdentityMetadataSource,
+	MetadataPackingSource,
+	RouteMetadataSource,
+} from "../metadata-source";
 
 export type HeadingCorroboration = Readonly<{
 	coveredUnitIndices: readonly number[];
@@ -42,6 +47,9 @@ export type RealizedQueryUnitFamily = Readonly<{
 	familyId: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;
+	identityMetadataSource: IdentityMetadataSource;
+	routeMetadataSource: RouteMetadataSource;
+	metadataPackingSource: MetadataPackingSource;
 	inIdentity: boolean;
 	inRoute: boolean;
 	inHeading: boolean;
@@ -49,10 +57,22 @@ export type RealizedQueryUnitFamily = Readonly<{
 	inBodyResidue: boolean;
 }>;
 
+export type MetadataPackingBucket = Readonly<{
+	source: Exclude<MetadataPackingSource, "none">;
+	unitCount: number;
+}>;
+
+export type MetadataPackingSignature = Readonly<{
+	basenameUnitCount: number;
+	aliasUnitCount: number;
+	routeUnitCount: number;
+	sortedBuckets: readonly MetadataPackingBucket[];
+}>;
+
 export type FragmentationPenalty = Readonly<{
 	bodyResidueUnitCount: number;
 	uncoveredByTopTwoCount: number;
-	activeContainerCount: number;
+	explanatoryContainerCount: number;
 }>;
 
 export type HanSurfaceCompletionTier =
@@ -89,6 +109,7 @@ export type EvidencePackingProfile = Readonly<{
 	hanSurfaceCompletionGroups: readonly HanSurfaceCompletionGroupResult[];
 	prefixCompletionGainTotal: number;
 	compoundPrefixCount: number;
+	metadataPackingSignature: MetadataPackingSignature;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];
 	identityContainer: IdentityContainer | null;
 	routeContainer: RouteContainer | null;

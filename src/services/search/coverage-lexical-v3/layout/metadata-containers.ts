@@ -12,7 +12,9 @@ import type {
 type MetadataContainersBuildInput = Readonly<{
 	familyCount: number;
 	identityFamilyIdsByDoc: readonly (readonly number[])[];
+	identitySourceMasksByDoc: readonly (readonly number[])[];
 	routeFamilyIdsByDoc: readonly (readonly number[])[];
+	routeSourceMasksByDoc: readonly (readonly number[])[];
 	headingFamilyIdsByDoc: readonly (readonly number[])[];
 }>;
 
@@ -29,13 +31,21 @@ export type MetadataContainersBuildOutput = Readonly<{
 export function buildMetadataContainerArena(
 	input: MetadataContainersBuildInput,
 ): MetadataContainersBuildOutput {
-	const identitySummary = flattenDocFamilyIds(input.identityFamilyIdsByDoc);
-	const routeSummary = flattenDocFamilyIds(input.routeFamilyIdsByDoc);
+	const identitySummary = flattenDocFamilyEntries(
+		input.identityFamilyIdsByDoc,
+		input.identitySourceMasksByDoc,
+	);
+	const routeSummary = flattenDocFamilyEntries(
+		input.routeFamilyIdsByDoc,
+		input.routeSourceMasksByDoc,
+	);
 	const headingSummary = flattenDocFamilyIds(input.headingFamilyIdsByDoc);
 	return {
 		arena: {
 			identityFamiliesByDoc: identitySummary.values,
+			identitySourceMaskByDocEntry: identitySummary.sourceMasks,
 			routeFamiliesByDoc: routeSummary.values,
+			routeSourceMaskByDocEntry: routeSummary.sourceMasks,
 			headingFamiliesByDoc: headingSummary.values,
 			identityPostings: buildPostingList(
 				input.familyCount,
@@ -64,7 +74,9 @@ export function estimateMetadataContainerBytes(
 ): number {
 	return (
 		arena.identityFamiliesByDoc.byteLength +
+		arena.identitySourceMaskByDocEntry.byteLength +
 		arena.routeFamiliesByDoc.byteLength +
+		arena.routeSourceMaskByDocEntry.byteLength +
 		estimatePostingListBytes(arena.identityPostings) +
 		estimatePostingListBytes(arena.routePostings)
 	);
@@ -98,6 +110,42 @@ function flattenDocFamilyIds(
 	}
 	return {
 		values: buildIntegerArray(values),
+		starts: buildIntegerArray(starts),
+		counts: buildIntegerArray(counts),
+	};
+}
+
+function flattenDocFamilyEntries(
+	docFamilyIds: readonly (readonly number[])[],
+	docSourceMasks: readonly (readonly number[])[],
+): Readonly<{
+	values: ReturnType<typeof buildIntegerArray>;
+	sourceMasks: Uint8Array;
+	starts: ReturnType<typeof buildIntegerArray>;
+	counts: ReturnType<typeof buildIntegerArray>;
+}> {
+	const values: number[] = [];
+	const sourceMasks: number[] = [];
+	const starts: number[] = [];
+	const counts: number[] = [];
+	for (let docId = 0; docId < docFamilyIds.length; docId += 1) {
+		const familyIds = docFamilyIds[docId] ?? [];
+		const masks = docSourceMasks[docId] ?? [];
+		if (familyIds.length !== masks.length) {
+			throw new Error(
+				`metadata source mask length mismatch for doc ${docId}: ${familyIds.length} families vs ${masks.length} masks`,
+			);
+		}
+		starts.push(values.length);
+		counts.push(familyIds.length);
+		for (let index = 0; index < familyIds.length; index += 1) {
+			values.push(familyIds[index]);
+			sourceMasks.push(masks[index] ?? 0);
+		}
+	}
+	return {
+		values: buildIntegerArray(values),
+		sourceMasks: Uint8Array.from(sourceMasks),
 		starts: buildIntegerArray(starts),
 		counts: buildIntegerArray(counts),
 	};

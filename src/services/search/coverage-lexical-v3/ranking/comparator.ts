@@ -76,6 +76,13 @@ export function comparePackingProfilesBeforeHanSurfaceCompletion(
 	if (left.exactUnitCount !== right.exactUnitCount) {
 		return right.exactUnitCount - left.exactUnitCount;
 	}
+	const metadataPackingComparison = compareMetadataPackingSignature(
+		left.metadataPackingSignature,
+		right.metadataPackingSignature,
+	);
+	if (metadataPackingComparison !== 0) {
+		return metadataPackingComparison;
+	}
 	return 0;
 }
 
@@ -159,15 +166,66 @@ function compareFragmentation(
 		);
 	}
 	if (
-		left.fragmentationPenalty.activeContainerCount !==
-		right.fragmentationPenalty.activeContainerCount
+		left.fragmentationPenalty.explanatoryContainerCount !==
+		right.fragmentationPenalty.explanatoryContainerCount
 	) {
 		return (
-			left.fragmentationPenalty.activeContainerCount -
-			right.fragmentationPenalty.activeContainerCount
+			left.fragmentationPenalty.explanatoryContainerCount -
+			right.fragmentationPenalty.explanatoryContainerCount
 		);
 	}
 	return 0;
+}
+
+function compareMetadataPackingSignature(
+	left: EvidencePackingProfile["metadataPackingSignature"] | undefined,
+	right: EvidencePackingProfile["metadataPackingSignature"] | undefined,
+): number {
+	const normalizedLeft = left ?? EMPTY_METADATA_PACKING_SIGNATURE;
+	const normalizedRight = right ?? EMPTY_METADATA_PACKING_SIGNATURE;
+	const maxBucketCount = Math.max(
+		normalizedLeft.sortedBuckets.length,
+		normalizedRight.sortedBuckets.length,
+		3,
+	);
+	for (let index = 0; index < maxBucketCount; index += 1) {
+		const leftBucket = normalizedLeft.sortedBuckets[index];
+		const rightBucket = normalizedRight.sortedBuckets[index];
+		const leftUnitCount = leftBucket?.unitCount ?? 0;
+		const rightUnitCount = rightBucket?.unitCount ?? 0;
+		if (leftUnitCount !== rightUnitCount) {
+			return rightUnitCount - leftUnitCount;
+		}
+		if (leftUnitCount <= 0) {
+			continue;
+		}
+		const leftSourceScore = getMetadataPackingSourceScore(leftBucket?.source);
+		const rightSourceScore = getMetadataPackingSourceScore(rightBucket?.source);
+		if (leftSourceScore !== rightSourceScore) {
+			return rightSourceScore - leftSourceScore;
+		}
+	}
+	return 0;
+}
+
+const EMPTY_METADATA_PACKING_SIGNATURE = {
+	basenameUnitCount: 0,
+	aliasUnitCount: 0,
+	routeUnitCount: 0,
+	sortedBuckets: [],
+} as const;
+
+function getMetadataPackingSourceScore(source: "basename" | "alias" | "route" | undefined): number {
+	switch (source) {
+		case "basename":
+			return 3;
+		case "alias":
+			return 2;
+		case "route":
+			return 1;
+		default:
+			return 0;
+	}
 }
 
 function compareHanSurfaceCompletion(
