@@ -324,6 +324,10 @@
 		await handleConfirm(null, true);
 	}
 
+	export function consumeEscape(): boolean {
+		return historyInputRef?.consumeEscape?.() ?? false;
+	}
+
 	function handleToggleHistorySuggestions() {
 		historyInputRef?.toggleSuggestionsByHotkey?.();
 	}

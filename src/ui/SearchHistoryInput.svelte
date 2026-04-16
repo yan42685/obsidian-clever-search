@@ -5,6 +5,10 @@
 		type SearchHistorySuggestion,
 	} from "src/services/obsidian/user-data/search-history-service";
 	import { t } from "src/services/obsidian/translations/locale-helper";
+	import {
+		shouldSuppressAutoGhostCompletionForQuery,
+		shouldSuppressAutoSuggestionsForQuery,
+	} from "src/ui/search-history-auto-suppression";
 	import { shouldHideSingleRedundantSuggestion } from "src/ui/search-history-suggestion-visibility";
 	import { getInstance } from "src/utils/my-lib";
 	import { createEventDispatcher, tick } from "svelte";
@@ -41,6 +45,7 @@
 	let suppressAutoSuggestions = false;
 	let suppressAutoGhostCompletion = false;
 	let lastAcceptedQuery = "";
+	let lastDismissedSuggestionQuery = "";
 	let searchInputEl: HTMLInputElement;
 	let suggestionsEl: HTMLUListElement;
 	let editableQueryText = "";
@@ -141,6 +146,20 @@
 		manualSuggestionsOpen = false;
 	}
 
+	function dismissSuggestionsForCurrentQuery() {
+		lastDismissedSuggestionQuery = normalizedQueryText;
+		suppressAutoSuggestions = true;
+		closeHistorySuggestions();
+	}
+
+	export function consumeEscape(): boolean {
+		if (!isHistoryDropdownOpen) {
+			return false;
+		}
+		dismissSuggestionsForCurrentQuery();
+		return true;
+	}
+
 	function moveHistorySelection(direction: "next" | "prev") {
 		if (!isHistoryDropdownOpen || historySuggestions.length === 0) {
 			return;
@@ -232,10 +251,9 @@
 			return;
 		}
 
-		if (event.key === "Escape" && isHistoryDropdownOpen) {
+		if (event.key === "Escape" && consumeEscape()) {
 			event.preventDefault();
 			event.stopPropagation();
-			closeHistorySuggestions();
 			return;
 		}
 
@@ -307,11 +325,18 @@
 	}
 
 	function clearAutoSuppressionsIfNeeded() {
-		if (normalizedQueryText === lastAcceptedQuery) {
-			return;
+		suppressAutoSuggestions = shouldSuppressAutoSuggestionsForQuery(
+			normalizedQueryText,
+			lastAcceptedQuery,
+			lastDismissedSuggestionQuery,
+		);
+		suppressAutoGhostCompletion = shouldSuppressAutoGhostCompletionForQuery(
+			normalizedQueryText,
+			lastAcceptedQuery,
+		);
+		if (normalizedQueryText !== lastDismissedSuggestionQuery) {
+			lastDismissedSuggestionQuery = "";
 		}
-		suppressAutoSuggestions = false;
-		suppressAutoGhostCompletion = false;
 	}
 
 	function updateCaretState() {
@@ -432,7 +457,7 @@
 		}
 
 		if (isHistoryDropdownOpen) {
-			closeHistorySuggestions();
+			dismissSuggestionsForCurrentQuery();
 			return true;
 		}
 
