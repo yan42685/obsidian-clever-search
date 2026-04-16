@@ -894,3 +894,39 @@ Implementation note:
   auxiliary structure should be treated as architecturally settled
 - repo-wide `npm run typecheck:build` passes again as of 2026-04-16, so this
   phase is now fully validated at the code level
+
+### Runtime Decoupling Milestone
+
+Status: Completed on 2026-04-16
+
+The following runtime-decoupling milestone is now implemented:
+
+- the formal runtime paths under `src/services/` now converge on
+  `coverage-lexical-v3` for active lexical runtime integration
+- hybrid lexical-lane local block recall no longer imports legacy
+  `coverage-lexical/` or `coverage-lexical-v2/` direct-subitems runtime helpers
+- `coverage-lexical-v3` now exposes a dedicated hybrid lexical-subitems bridge
+  for lexical-lane integration
+- the first version of that bridge is intentionally a placeholder that throws a
+  stable `V3 hybrid lexical subitems not implemented` error so runtime imports
+  are detached before feature parity is completed
+- active `DataManager`, `LexicalEngine`, `FileSearchEngine`, and live database
+  schema paths no longer register or depend on legacy cold-store / Han sidecar /
+  V2 index-store runtime persistence
+- the live Dexie schema now upgrades directly by clearing search data and
+  letting the current runtime rebuild, instead of preserving a compatibility
+  path for legacy lexical persistence
+- `coverage-lexical/` and `coverage-lexical-v2/` source directories are still
+  retained in-tree as reference assets only; they are no longer intended to be
+  part of the formal runtime dependency graph
+
+Implementation note:
+
+- `runtime detached` does not mean `hybrid lexical subitems implemented`
+- hybrid lexical-lane prepare is now wired through the V3 bridge, but the bridge
+  currently throws by design, so lexical-lane local block recall remains
+  intentionally incomplete until a later milestone fills in the V3-backed
+  subitems implementation
+- database upgrade compatibility was intentionally not preserved in this pass;
+  upgrading clears existing search state and relies on rebuild under the active
+  V3-centered runtime

@@ -11,8 +11,6 @@ import type {
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { CoverageLexicalV3FileSearchEngine } from "./coverage-lexical-v3";
-import type { CoverageLexicalBodyTokenColdDocumentWrite } from "./coverage-lexical/coverage-lexical-body-token-cold-types";
-import type { CoverageLexicalV2HanSegmentExactSidecarDocumentWrite } from "./coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 
 export type FileSearchRequest = {
 	queryText: string;
@@ -111,23 +109,13 @@ export interface FileSearchEngine {
 	planPersistentRecovery?(
 		currentIndexedRefs: readonly BaseIndexedFileRef[],
 	): Promise<PersistentFileIndexRecoveryPlan>;
-  persistFileIndexArtifact?(): Promise<void>;
-  clearPersistedFileIndexArtifact?(): Promise<void>;
-  buildBodyTokenColdDocument?(
-    path: string,
-    generation: number | undefined,
-    bodyText: string,
-  ): CoverageLexicalBodyTokenColdDocumentWrite | null;
-  buildBodyHanExactSidecarDocument?(
-    path: string,
-    generation: number | undefined,
-    bodyText: string,
-  ): CoverageLexicalV2HanSegmentExactSidecarDocumentWrite | null;
-  resetBenchmarkIndexTiming?(): void;
-  getBenchmarkIndexTimingSummary?(): FileSearchIndexTimingSummary | null;
-  beginBatchReindex?(): void;
-  finishBatchReindex?(): void | Promise<void>;
-  abortBatchReindex?(): void | Promise<void>;
+	persistFileIndexArtifact?(): Promise<void>;
+	clearPersistedFileIndexArtifact?(): Promise<void>;
+	resetBenchmarkIndexTiming?(): void;
+	getBenchmarkIndexTimingSummary?(): FileSearchIndexTimingSummary | null;
+	beginBatchReindex?(): void;
+	finishBatchReindex?(): void | Promise<void>;
+	abortBatchReindex?(): void | Promise<void>;
 }
 
 @singleton()

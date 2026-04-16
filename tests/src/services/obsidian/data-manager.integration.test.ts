@@ -1,4 +1,4 @@
-锘縤mport { container } from "tsyringe";
+import { container } from "tsyringe";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 
 jest.mock("obsidian", () => {
@@ -144,8 +144,6 @@ import {
 import { FileWatcher } from "src/services/obsidian/user-data/file-watcher";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 import { LexicalEngine } from "src/services/search/lexical-engine";
-import { COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
-import { COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { Tokenizer } from "src/services/search/tokenizer";
 
@@ -951,37 +949,7 @@ function registerDataManagerDeps(params: {
     params.fileSnapshotStore as any,
   );
   container.registerInstance(Tokenizer, createMockTokenizer() as any);
-  container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, {
-    clearAll: jest.fn(async () => undefined),
-    deleteDocuments: jest.fn(async () => undefined),
-    getMeta: jest.fn(async () => null),
-    inspectConsistency: jest.fn(async () => ({
-      needsRepair: false,
-      requiresReset: false,
-      reason: "up-to-date",
-      missingOrStalePaths: [],
-      danglingPaths: [],
-    })),
-    readDocuments: jest.fn(async () => new Map()),
-    updateIndexedRefsMetadata: jest.fn(async () => undefined),
-    upsertDocuments: jest.fn(async () => undefined),
-  } as any);
-  container.registerInstance(COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN, {
-    clearAll: jest.fn(async () => undefined),
-    deleteDocuments: jest.fn(async () => undefined),
-    getMeta: jest.fn(async () => null),
-    summarizeConsistency: jest.fn(async () => ({
-      needsRepair: false,
-      requiresReset: false,
-      reason: "up-to-date",
-      missingOrStalePaths: [],
-      danglingPaths: [],
-    })),
-    moveDocument: jest.fn(async () => false),
-    readLogicalBlocks: jest.fn(async () => new Map()),
-    updateIndexedRefsMetadata: jest.fn(async () => undefined),
-    upsertDocuments: jest.fn(async () => undefined),
-  } as any);
+
   container.registerInstance(SearchService, {
     hybridEngine: params.hybridEngine,
   } as any);
@@ -3380,13 +3348,13 @@ describe("DataManager integration", () => {
     );
   });
 
-  test("startup lexical bootstrap heals body-token and Han exact offloads from the same indexed text source", async () => {
+  test("startup lexical bootstrap no longer builds legacy offload documents", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = false;
 
-    const file = createFile("docs/han.md", "\u59d4\u5458\u6d4b\u8bd5", 420);
+    const file = createFile("docs/han.md", "委员测试", 420);
     const files = new Map<string, TFile>([[file.path, file]]);
-    const texts = new Map<string, string>([[file.path, "\u59d4\u5458\u6d4b\u8bd5"]]);
+    const texts = new Map<string, string>([[file.path, "委员测试"]]);
 
     const database = createMockDatabase();
     await database.setLexicalIndexedFileRefs([
@@ -3411,7 +3379,7 @@ describe("DataManager integration", () => {
     });
     const fileSnapshotStore = createMockFileSnapshotStore();
     fileSnapshotStore.persisted.set(file.path, {
-      text: "\u59d4\u5458\u6d4b\u8bd5",
+      text: "委员测试",
       generation: file.stat.mtime,
     });
     const hybridEngine = createMockHybridEngine({
@@ -3428,136 +3396,11 @@ describe("DataManager integration", () => {
       hybridEngine,
     });
 
-    const bodyTokenStore = {
-      clearAll: jest.fn(async () => undefined),
-      deleteDocuments: jest.fn(async () => undefined),
-      getMeta: jest.fn(async () => null),
-      inspectConsistency: jest.fn(async () => ({
-        needsRepair: true,
-        requiresReset: true,
-        reason: "schema-mismatch",
-        missingOrStalePaths: [file.path],
-        danglingPaths: [file.path],
-      })),
-      readDocuments: jest.fn(async () => new Map()),
-      updateIndexedRefsMetadata: jest.fn(async () => undefined),
-      upsertDocuments: jest.fn(async () => undefined),
-    };
-    const hanStore = {
-      clearAll: jest.fn(async () => undefined),
-      deleteDocuments: jest.fn(async () => undefined),
-      getMeta: jest.fn(async () => null),
-      summarizeConsistency: jest.fn(async () => ({
-        needsRepair: true,
-        requiresReset: true,
-        reason: "schema-mismatch",
-        missingOrStalePaths: [file.path],
-        danglingPaths: [file.path],
-      })),
-      moveDocument: jest.fn(async () => false),
-      readLogicalBlocks: jest.fn(async () => new Map()),
-      updateIndexedRefsMetadata: jest.fn(async () => undefined),
-      upsertDocuments: jest.fn(async () => undefined),
-    };
-    container.registerInstance(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, bodyTokenStore as any);
-    container.registerInstance(
-      COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
-      hanStore as any,
-    );
-
     const manager = resolveDataManager();
     await manager.initAsync();
 
-    expect(fileSnapshotStore.readIndexedTexts).toHaveBeenCalledWith([
-      {
-        path: file.path,
-        generation: file.stat.mtime,
-      },
-    ]);
-    expect(lexicalEngine.buildBodyTokenColdDocument).toHaveBeenCalledWith(
-      file.path,
-      file.stat.mtime,
-      "\u59d4\u5458\u6d4b\u8bd5",
-    );
-    expect(lexicalEngine.buildBodyHanExactSidecarDocument).toHaveBeenCalledWith(
-      file.path,
-      file.stat.mtime,
-      "\u59d4\u5458\u6d4b\u8bd5",
-    );
-    expect(bodyTokenStore.clearAll).toHaveBeenCalledTimes(1);
-    expect(hanStore.clearAll).toHaveBeenCalledTimes(1);
-    expect(bodyTokenStore.upsertDocuments).toHaveBeenCalledTimes(1);
-    expect(hanStore.upsertDocuments).toHaveBeenCalledTimes(1);
-    expect(bodyTokenStore.updateIndexedRefsMetadata).toHaveBeenCalled();
-    expect(hanStore.updateIndexedRefsMetadata).toHaveBeenCalled();
-  });
-
-  test("lexical cold repair batches honor file and byte limits while keeping oversized files alone", () => {
-    const setting = cloneSetting();
-    setting.hybrid.enabled = false;
-
-    const smallA = createFile(
-      "docs/small-a.md",
-      "a".repeat(1024 * 1024),
-      100,
-    );
-    const smallB = createFile(
-      "docs/small-b.md",
-      "b".repeat(1024 * 1024),
-      101,
-    );
-    const smallC = createFile(
-      "docs/small-c.md",
-      "c".repeat(1024 * 1024),
-      102,
-    );
-    const large = createFile(
-      "docs/large.md",
-      "d".repeat(5 * 1024 * 1024),
-      103,
-    );
-    const trailing = createFile(
-      "docs/trailing.md",
-      "e".repeat(1024),
-      104,
-    );
-
-    const files = new Map<string, TFile>([
-      [smallA.path, smallA],
-      [smallB.path, smallB],
-      [smallC.path, smallC],
-      [large.path, large],
-      [trailing.path, trailing],
-    ]);
-    const texts = new Map<string, string>(
-      Array.from(files.values()).map((file) => [file.path, ""]),
-    );
-
-    registerDataManagerDeps({
-      setting,
-      pluginFiles: [],
-      database: createMockDatabase(),
-      dataProvider: createMockDataProvider({ files, texts }),
-      lexicalEngine: createMockLexicalEngine(),
-      fileSnapshotStore: createMockFileSnapshotStore(),
-      hybridEngine: createMockHybridEngine({
-        isEnabled: jest.fn(() => false),
-      }),
-    });
-
-    const manager = resolveDataManager() as any;
-    const batches = manager.buildLexicalOffloadRepairBatches([
-      smallA,
-      smallB,
-      smallC,
-      large,
-      trailing,
-    ]) as TFile[][];
-
-    expect(batches.map((batch) => batch.map((file) => file.path))).toEqual([
-      [smallA.path, smallB.path, smallC.path],
-      [large.path],
-      [trailing.path],
-    ]);
+    expect(lexicalEngine.buildBodyTokenColdDocument).not.toHaveBeenCalled();
+    expect(lexicalEngine.buildBodyHanExactSidecarDocument).not.toHaveBeenCalled();
   });
 });
+

@@ -38,33 +38,6 @@ import type {
   SerializedFileSearchIndex,
 } from "src/services/search/file-search-engine";
 import type { CoverageLexicalV3RuntimeMemoryBreakdown } from "src/services/search/coverage-lexical-v3";
-import { CoverageLexicalBodyTokenColdStore } from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-store";
-import {
-  COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
-  type CoverageLexicalBodyTokenColdConsistencySummary,
-  type CoverageLexicalBodyTokenColdStoreApi,
-  type CoverageLexicalBodyTokenColdDocumentWrite,
-} from "src/services/search/coverage-lexical/coverage-lexical-body-token-cold-types";
-import { CoverageLexicalV2HanSegmentExactSidecarStore } from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-store";
-import {
-  estimateCoverageLexicalV2AdaptiveHanBigramDocPostingBytes,
-} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-bigram-doc-posting-estimate";
-import {
-  CoverageLexicalV2IndexStore,
-} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-index-store";
-import {
-  buildCoverageLexicalV2PreparedDocument,
-} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-file-search-engine";
-import {
-  searchCoverageLexicalV2Engine,
-} from "src/services/search/coverage-lexical-v2/coverage-lexical-v2-engine";
-import { extractHanSegments } from "src/services/search/coverage-lexical/coverage-lexical-cjk";
-import {
-  COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
-  type CoverageLexicalV2HanSegmentExactSidecarConsistencySummary,
-  type CoverageLexicalV2HanSegmentExactSidecarDocumentWrite,
-  type CoverageLexicalV2HanSegmentExactSidecarStoreApi,
-} from "src/services/search/coverage-lexical-v2/index-store/coverage-lexical-v2-han-segment-exact-sidecar-types";
 import { type FileSnapshotRuntimeMemoryEstimate, FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { Tokenizer } from "src/services/search/tokenizer";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
@@ -76,7 +49,7 @@ import {
   monitorDecorator,
   MyLib,
 } from "src/utils/my-lib";
-import { container, singleton } from "tsyringe";
+import { singleton } from "tsyringe";
 import { MyNotice } from "../transformed-api";
 import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
@@ -132,10 +105,6 @@ type HybridPreflightReport = {
   projectedUsageRatio: number | null;
 };
 
-type LexicalOffloadDocumentBundle = {
-  bodyTokenDocuments: CoverageLexicalBodyTokenColdDocumentWrite[];
-  bodyHanExactDocuments: CoverageLexicalV2HanSegmentExactSidecarDocumentWrite[];
-};
 
 type HybridStorageRepairReport = {
   repairedPaths: string[];
@@ -520,28 +489,6 @@ function formatBytesLabel(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
-function ensureCoverageLexicalBodyTokenColdStoreRegistered(): void {
-  if (container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
-    return;
-  }
-  container.registerSingleton(
-    COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
-    CoverageLexicalBodyTokenColdStore,
-  );
-}
-
-function ensureCoverageLexicalV2HanSegmentExactSidecarStoreRegistered(): void {
-  if (
-    container.isRegistered(COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN, false)
-  ) {
-    return;
-  }
-  container.registerSingleton(
-    COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
-    CoverageLexicalV2HanSegmentExactSidecarStore,
-  );
-}
-
 @singleton()
 export class DataManager {
   private static readonly HYBRID_INDEX_MAX_RETRIES = 3;
@@ -549,10 +496,6 @@ export class DataManager {
   private static readonly HYBRID_TABLE_SCAN_BATCH_SIZE = 512;
   private static readonly LEXICAL_REINDEX_BATCH_SIZE = 64;
   private static readonly LEXICAL_REINDEX_MAX_BYTES = 8 * 1024 * 1024;
-  private static readonly LEXICAL_COLD_REPAIR_BATCH_SIZE = 32;
-  private static readonly LEXICAL_COLD_REPAIR_MAX_BYTES = 4 * 1024 * 1024;
-  private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS = 128;
-  private static readonly LEXICAL_COLD_REPAIR_SYNC_MAX_BYTES = 8 * 1024 * 1024;
   private static readonly HYBRID_LARGE_FILE_BYTES = 1024 * 1024;
   private static readonly HYBRID_PRECHECK_NOTICE_BYTES = 64 * 1024 * 1024;
   private static readonly HYBRID_QUOTA_WARN_RATIO = 0.7;
@@ -565,10 +508,6 @@ export class DataManager {
   private static readonly LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD = 24;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_BYTES_THRESHOLD = 768 * 1024;
   private plugin: CleverSearch = getInstance(THIS_PLUGIN);
-  private readonly lexicalBodyTokenColdStoreRegistration =
-    ensureCoverageLexicalBodyTokenColdStoreRegistered();
-  private readonly lexicalV2HanSegmentExactSidecarStoreRegistration =
-    ensureCoverageLexicalV2HanSegmentExactSidecarStoreRegistered();
   private database = getInstance(Database);
   private dataProvider = getInstance(DataProvider);
   private setting = getInstance(OuterSetting);
@@ -579,7 +518,6 @@ export class DataManager {
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
   private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
-  private lexicalOffloadRepairTask: Promise<void> | null = null;
   private readonly lexicalSnapshotCoordinator = new DirtyArtifactCoordinator({
     engine: "lexical",
     artifact: "snapshot",
@@ -1158,7 +1096,6 @@ export class DataManager {
     this.clearHybridFailedEmbeddingState();
     this.hideLexicalIndexFailureNotice();
     this.lexicalIndexFailuresByPath.clear();
-    this.lexicalOffloadRepairTask = null;
     this.searchBootstrapCommitTask = null;
     this.setLexicalBootstrapState("blocked");
     this.setHybridBootstrapState("blocked");
@@ -2142,7 +2079,6 @@ export class DataManager {
   ): Promise<void> {
     if (plan.needsFullReindex) {
       await this.reindexLexicalEngineWithCurrFiles();
-      await this.syncLexicalOffloadStoreMetadata();
       return;
     }
     if (
@@ -2155,7 +2091,6 @@ export class DataManager {
     } else {
       await this.ensureLexicalIndexedFileRefsLoaded();
     }
-    await this.healLexicalOffloadRows();
   }
 
   private async commitLexicalBootstrapPlan(): Promise<void> {
@@ -2244,6 +2179,56 @@ export class DataManager {
     this.isLexicalEngineUpToDate = failures.length === 0;
   }
 
+
+  private buildLexicalReindexBatches(files: readonly TFile[]): TFile[][] {
+    return this.buildFileBatches(
+      files,
+      DataManager.LEXICAL_REINDEX_BATCH_SIZE,
+      DataManager.LEXICAL_REINDEX_MAX_BYTES,
+    );
+  }
+
+  private buildFileBatches(
+    files: readonly TFile[],
+    maxFilesPerBatch: number,
+    maxBytesPerBatch: number,
+  ): TFile[][] {
+    const batches: TFile[][] = [];
+    let currentBatch: TFile[] = [];
+    let currentBatchBytes = 0;
+
+    for (const file of files) {
+      const fileBytes = Math.max(0, file.stat.size ?? 0);
+      const wouldExceedFileLimit = currentBatch.length >= maxFilesPerBatch;
+      const wouldExceedByteLimit =
+        currentBatch.length > 0 &&
+        currentBatchBytes + fileBytes > maxBytesPerBatch;
+
+      if (wouldExceedFileLimit || wouldExceedByteLimit) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+
+      currentBatch.push(file);
+      currentBatchBytes += fileBytes;
+
+      if (
+        currentBatch.length >= maxFilesPerBatch ||
+        (fileBytes > maxBytesPerBatch && currentBatch.length === 1)
+      ) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+    }
+
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    return batches;
+  }
   private buildCurrentLexicalIndexedFileRefs(): BaseIndexedFileRef[] {
     return this.dataProvider.allFilesToBeIndexed().map((file) => ({
       path: file.path,
@@ -2398,7 +2383,6 @@ export class DataManager {
     }));
     await this.database.setLexicalIndexedFileRefs(updatedIndexedFileRefs);
     await this.reloadLexicalIndexedFileRefs();
-    await this.syncLexicalOffloadStoreMetadata();
     logger.trace(
       `${updatedIndexedFileRefs.length} lexical indexed file refs updated`,
     );
@@ -2431,7 +2415,6 @@ export class DataManager {
     };
     await this.database.putLexicalIndexedFileRef(nextRef);
     this.lexicalIndexedFileRefsByPath.set(file.path, nextRef);
-    await this.syncLexicalOffloadStoreMetadata();
   }
 
   private async deleteLexicalIndexedFileRefs(
@@ -2445,331 +2428,6 @@ export class DataManager {
     for (const path of paths) {
       this.lexicalIndexedFileRefsByPath.delete(path);
     }
-    await this.syncLexicalOffloadStoreMetadata();
-  }
-
-  private getLexicalBodyTokenColdStore(): CoverageLexicalBodyTokenColdStoreApi | null {
-    if (!container.isRegistered(COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN, false)) {
-      return null;
-    }
-    try {
-      return container.resolve<CoverageLexicalBodyTokenColdStoreApi>(
-        COVERAGE_LEXICAL_BODY_TOKEN_COLD_STORE_TOKEN,
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  private getLexicalHanExactSidecarStore():
-    | CoverageLexicalV2HanSegmentExactSidecarStoreApi
-    | null {
-    if (
-      !container.isRegistered(
-        COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
-        false,
-      )
-    ) {
-      return null;
-    }
-    try {
-      return container.resolve<CoverageLexicalV2HanSegmentExactSidecarStoreApi>(
-        COVERAGE_LEXICAL_V2_HAN_SEGMENT_EXACT_SIDECAR_STORE_TOKEN,
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  private async syncLexicalOffloadStoreMetadata(): Promise<void> {
-    await this.ensureLexicalIndexedFileRefsLoaded();
-    const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
-    await this.getLexicalBodyTokenColdStore()?.updateIndexedRefsMetadata(
-      indexedFileRefs,
-    );
-    await this.getLexicalHanExactSidecarStore()?.updateIndexedRefsMetadata(
-      indexedFileRefs,
-    );
-  }
-
-  private async healLexicalOffloadRows(): Promise<void> {
-    await this.ensureLexicalIndexedFileRefsLoaded();
-    const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
-    const coldStore = this.getLexicalBodyTokenColdStore();
-    const hanStore = this.getLexicalHanExactSidecarStore();
-    if (!coldStore && !hanStore) {
-      return;
-    }
-    const coldConsistency = coldStore
-      ? await coldStore.inspectConsistency(indexedFileRefs)
-      : null;
-    const hanConsistency = hanStore
-      ? await hanStore.summarizeConsistency(indexedFileRefs)
-      : null;
-    if (!coldConsistency?.needsRepair && !hanConsistency?.needsRepair) {
-      await this.syncLexicalOffloadStoreMetadata();
-      return;
-    }
-
-    const missingOrStalePaths = Array.from(
-      new Set([
-        ...(coldConsistency?.missingOrStalePaths ?? []),
-        ...(hanConsistency?.missingOrStalePaths ?? []),
-      ]),
-    );
-    const missingOrStaleFiles = missingOrStalePaths
-      .map((path) => this.dataProvider.getFileByPath(path))
-      .filter((file): file is TFile => file !== null);
-    const estimatedRepairBytes = missingOrStaleFiles.reduce(
-      (sum, file) => sum + Math.max(0, file.stat.size ?? 0),
-      0,
-    );
-    const shouldRepairSynchronously =
-      missingOrStalePaths.length <= DataManager.LEXICAL_COLD_REPAIR_SYNC_MAX_PATHS &&
-      estimatedRepairBytes <= DataManager.LEXICAL_COLD_REPAIR_SYNC_MAX_BYTES;
-
-    logger.trace("repairing lexical offload rows", {
-      bodyTokenReason: coldConsistency?.reason ?? "not-registered",
-      bodyTokenRequiresReset: coldConsistency?.requiresReset ?? false,
-      bodyTokenMissingOrStaleCount: coldConsistency?.missingOrStalePaths.length ?? 0,
-      bodyTokenDanglingCount: coldConsistency?.danglingPaths.length ?? 0,
-      hanExactReason: hanConsistency?.reason ?? "not-registered",
-      hanExactRequiresReset: hanConsistency?.requiresReset ?? false,
-      hanExactMissingOrStaleCount: hanConsistency?.missingOrStalePaths.length ?? 0,
-      hanExactDanglingCount: hanConsistency?.danglingPaths.length ?? 0,
-      estimatedRepairBytes,
-      shouldRepairSynchronously,
-    });
-
-    if (shouldRepairSynchronously) {
-      await this.executeLexicalOffloadRepair(
-        indexedFileRefs,
-        coldStore,
-        coldConsistency,
-        hanStore,
-        hanConsistency,
-        missingOrStaleFiles,
-      );
-      return;
-    }
-
-    this.queueLexicalOffloadRepair();
-  }
-
-  private async buildLexicalOffloadDocuments(
-    files: readonly TFile[],
-    indexedFileRefsByPath: ReadonlyMap<string, BaseIndexedFileRef>,
-  ): Promise<LexicalOffloadDocumentBundle> {
-    const requests = files.flatMap((file) => {
-      const indexedRef = indexedFileRefsByPath.get(file.path);
-      return indexedRef
-        ? [{ path: file.path, generation: indexedRef.generation }]
-        : [];
-    });
-    const textsByPath = await this.fileSnapshotStore.readIndexedTexts(requests);
-    const bodyTokenDocuments: CoverageLexicalBodyTokenColdDocumentWrite[] = [];
-    const bodyHanExactDocuments: CoverageLexicalV2HanSegmentExactSidecarDocumentWrite[] = [];
-    for (const file of files) {
-      const indexedRef = indexedFileRefsByPath.get(file.path);
-      const plainText = textsByPath.get(file.path);
-      if (!indexedRef || plainText === undefined) {
-        continue;
-      }
-      const bodyTokenDocument = this.lexicalEngine.buildBodyTokenColdDocument(
-        file.path,
-        indexedRef.generation,
-        plainText,
-      );
-      if (bodyTokenDocument) {
-        bodyTokenDocuments.push(bodyTokenDocument);
-      }
-      const bodyHanExactDocument =
-        this.lexicalEngine.buildBodyHanExactSidecarDocument(
-          file.path,
-          indexedRef.generation,
-          plainText,
-        );
-      if (bodyHanExactDocument) {
-        bodyHanExactDocuments.push(bodyHanExactDocument);
-      }
-    }
-    return {
-      bodyTokenDocuments,
-      bodyHanExactDocuments,
-    };
-  }
-
-  private buildLexicalOffloadRepairBatches(
-    files: readonly TFile[],
-  ): TFile[][] {
-    return this.buildFileBatches(
-      files,
-      DataManager.LEXICAL_COLD_REPAIR_BATCH_SIZE,
-      DataManager.LEXICAL_COLD_REPAIR_MAX_BYTES,
-    );
-  }
-
-  private buildLexicalReindexBatches(files: readonly TFile[]): TFile[][] {
-    return this.buildFileBatches(
-      files,
-      DataManager.LEXICAL_REINDEX_BATCH_SIZE,
-      DataManager.LEXICAL_REINDEX_MAX_BYTES,
-    );
-  }
-
-  private buildFileBatches(
-    files: readonly TFile[],
-    maxFilesPerBatch: number,
-    maxBytesPerBatch: number,
-  ): TFile[][] {
-    const batches: TFile[][] = [];
-    let currentBatch: TFile[] = [];
-    let currentBatchBytes = 0;
-
-    for (const file of files) {
-      const fileBytes = Math.max(0, file.stat.size ?? 0);
-      const wouldExceedFileLimit = currentBatch.length >= maxFilesPerBatch;
-      const wouldExceedByteLimit =
-        currentBatch.length > 0 &&
-        currentBatchBytes + fileBytes > maxBytesPerBatch;
-
-      if (wouldExceedFileLimit || wouldExceedByteLimit) {
-        batches.push(currentBatch);
-        currentBatch = [];
-        currentBatchBytes = 0;
-      }
-
-      currentBatch.push(file);
-      currentBatchBytes += fileBytes;
-
-      if (
-        currentBatch.length >= maxFilesPerBatch ||
-        (fileBytes > maxBytesPerBatch && currentBatch.length === 1)
-      ) {
-        batches.push(currentBatch);
-        currentBatch = [];
-        currentBatchBytes = 0;
-      }
-    }
-
-    if (currentBatch.length > 0) {
-      batches.push(currentBatch);
-    }
-
-    return batches;
-  }
-
-  private queueLexicalOffloadRepair(): void {
-    if (this.lexicalOffloadRepairTask) {
-      return;
-    }
-    this.lexicalOffloadRepairTask = (async () => {
-      try {
-        if (this.isUnloaded) {
-          return;
-        }
-        await this.ensureLexicalIndexedFileRefsLoaded();
-        const indexedFileRefs = Array.from(this.lexicalIndexedFileRefsByPath.values());
-        const coldStore = this.getLexicalBodyTokenColdStore();
-        const hanStore = this.getLexicalHanExactSidecarStore();
-        if (!coldStore && !hanStore) {
-          return;
-        }
-        const coldConsistency = coldStore
-          ? await coldStore.inspectConsistency(indexedFileRefs)
-          : null;
-        const hanConsistency = hanStore
-          ? await hanStore.summarizeConsistency(indexedFileRefs)
-          : null;
-        if (!coldConsistency?.needsRepair && !hanConsistency?.needsRepair) {
-          await this.syncLexicalOffloadStoreMetadata();
-          return;
-        }
-        const missingOrStaleFiles = Array.from(
-          new Set([
-            ...(coldConsistency?.missingOrStalePaths ?? []),
-            ...(hanConsistency?.missingOrStalePaths ?? []),
-          ]),
-        )
-          .map((path) => this.dataProvider.getFileByPath(path))
-          .filter((file): file is TFile => file !== null);
-        await this.executeLexicalOffloadRepair(
-          indexedFileRefs,
-          coldStore,
-          coldConsistency,
-          hanStore,
-          hanConsistency,
-          missingOrStaleFiles,
-        );
-      } catch (error) {
-        logger.warn("lexical offload repair failed:", error);
-      } finally {
-        this.lexicalOffloadRepairTask = null;
-      }
-    })();
-  }
-
-  private async executeLexicalOffloadRepair(
-    indexedFileRefs: readonly BaseIndexedFileRef[],
-    coldStore: CoverageLexicalBodyTokenColdStoreApi | null,
-    coldConsistency: CoverageLexicalBodyTokenColdConsistencySummary | null,
-    hanStore: CoverageLexicalV2HanSegmentExactSidecarStoreApi | null,
-    hanConsistency: CoverageLexicalV2HanSegmentExactSidecarConsistencySummary | null,
-    missingOrStaleFiles: readonly TFile[],
-  ): Promise<void> {
-    const indexedFileRefsByPath = new Map(
-      indexedFileRefs.map((ref) => [ref.path, ref] as const),
-    );
-    if (coldStore && coldConsistency) {
-      if (coldConsistency.requiresReset) {
-        await coldStore.clearAll();
-      } else if (coldConsistency.danglingPaths.length > 0) {
-        await coldStore.deleteDocuments(coldConsistency.danglingPaths);
-      }
-    }
-    if (hanStore && hanConsistency) {
-      if (hanConsistency.requiresReset) {
-        await hanStore.clearAll();
-      } else if (hanConsistency.danglingPaths.length > 0) {
-        await hanStore.deleteDocuments(hanConsistency.danglingPaths);
-      }
-    }
-
-    if (missingOrStaleFiles.length > 0) {
-      const repairBatches = this.buildLexicalOffloadRepairBatches(missingOrStaleFiles);
-      const coldRepairPathSet = new Set(coldConsistency?.missingOrStalePaths ?? []);
-      const hanRepairPathSet = new Set(hanConsistency?.missingOrStalePaths ?? []);
-      for (let index = 0; index < repairBatches.length; index += 1) {
-        if (this.isUnloaded) {
-          return;
-        }
-        const batchFiles = repairBatches[index];
-        const batchDocuments = await this.buildLexicalOffloadDocuments(
-          batchFiles,
-          indexedFileRefsByPath,
-        );
-        if (coldStore) {
-          await coldStore.upsertDocuments(
-            batchDocuments.bodyTokenDocuments.filter((document) =>
-              coldRepairPathSet.has(document.path),
-            ),
-          );
-        }
-        if (hanStore) {
-          await hanStore.upsertDocuments(
-            batchDocuments.bodyHanExactDocuments.filter((document) =>
-              hanRepairPathSet.has(document.path),
-            ),
-          );
-        }
-        if (index + 1 < repairBatches.length) {
-          await MyLib.sleep(0);
-        }
-      }
-    }
-
-    await coldStore?.updateIndexedRefsMetadata(indexedFileRefs);
-    await hanStore?.updateIndexedRefsMetadata(indexedFileRefs);
   }
 
   private hasIndexedFileRefChanged(
@@ -3210,7 +2868,7 @@ export class DataManager {
     if (!isDevEnvironment) {
       return;
     }
-    await this.noticeDevStorageStats(true);
+    await this.noticeDevStorageStats();
   }
 
   getLexicalAvailabilityState(): LexicalAvailabilityState {
@@ -4181,7 +3839,7 @@ export class DataManager {
         : "";
     return `Hybrid indexing preflight: ${report.filesToAdd} file(s) to add/update, ${report.filesToDelete} to delete, vault ${this.formatBytes(report.totalBytes)}${largeFileText}, shared snapshots ${this.formatBytes(report.sharedSnapshotBytes)}, current hybrid index ${this.formatBytes(report.currentHybridBytes)}, estimated hybrid index ${this.formatBytes(report.estimatedHybridBytes)}. ${quotaText}. Large files will be indexed serially.`;
   }
-  private async noticeDevStorageStats(includeHanExperiments = false) {
+  private async noticeDevStorageStats() {
     const indexableFiles = this.dataProvider.allFilesToBeIndexed();
     const indexableBytes = indexableFiles.reduce(
       (sum, file) => sum + file.stat.size,
@@ -4191,13 +3849,9 @@ export class DataManager {
     const bytesByName = new Map(
       storageUsage.tables.map((item) => [item.name, item.bytes]),
     );
-    const persistedLexicalSnapshotBytes = this.lexicalEngine.supportsPersistentFileIndex()
-      ? (bytesByName.get("lexicalV2IndexStoreMeta") ?? 0) +
-        (bytesByName.get("lexicalV2IndexStoreSnapshotChunks") ?? 0) +
-        (bytesByName.get("lexicalV2IndexStoreJournal") ?? 0)
-      : this.lexicalEngine.supportsSerializedFileIndex()
-        ? (bytesByName.get("lexicalSearchSnapshots") ?? 0)
-        : 0;
+    const persistedLexicalSnapshotBytes = this.lexicalEngine.supportsSerializedFileIndex()
+      ? (bytesByName.get("lexicalSearchSnapshots") ?? 0)
+      : 0;
     const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
       persistedLexicalSnapshotBytes,
     );
@@ -4207,14 +3861,6 @@ export class DataManager {
       runtimeLexicalIndexBytes,
       indexableBytes,
     );
-    const adaptiveHanBigramExperiment = includeHanExperiments
-      ? await this.buildAdaptiveHanBigramExperiment(indexableFiles)
-      : null;
-    const adaptiveHanBigramPostingEstimate =
-      adaptiveHanBigramExperiment?.estimate ?? null;
-    const hanRuntimeTiming = adaptiveHanBigramExperiment?.runtimeTiming ?? null;
-    const hanVariantComparison =
-      adaptiveHanBigramExperiment?.variantComparison ?? null;
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
 
@@ -4251,1202 +3897,9 @@ export class DataManager {
       console.log("[clever-search] Lexical overlap diagnostics");
       console.table(lexicalRuntimeBreakdown.overlapRows);
     }
-    if (lexicalRuntimeBreakdown.residentTopRows.length > 0) {
-      console.log("[clever-search] Lexical top resident contributors");
-      console.table(lexicalRuntimeBreakdown.residentTopRows);
-    }
-    if (lexicalRuntimeBreakdown.coldOverlapTopRows.length > 0) {
-      console.log("[clever-search] Lexical top cold/overlap contributors");
-      console.table(lexicalRuntimeBreakdown.coldOverlapTopRows);
-    }
-    if (adaptiveHanBigramPostingEstimate) {
-      console.log(
-        "[clever-search] Han diagnostics: adaptive bigram posting estimate",
-      );
-      console.table([
-        {
-          metric: "indexedDocumentCount",
-          count: adaptiveHanBigramPostingEstimate.indexedDocumentCount,
-        },
-        {
-          metric: "failedDocumentCount",
-          count: adaptiveHanBigramPostingEstimate.failedDocumentCount,
-        },
-        {
-          metric: "hanDocumentCount",
-          count: adaptiveHanBigramPostingEstimate.hanDocumentCount,
-        },
-        {
-          metric: "hanLogicalBlockCount",
-          count: adaptiveHanBigramPostingEstimate.hanLogicalBlockCount,
-        },
-        {
-          metric: "hanOnlyUtf8Bytes",
-          bytes: adaptiveHanBigramPostingEstimate.hanOnlyUtf8Bytes,
-          size: this.formatBytes(adaptiveHanBigramPostingEstimate.hanOnlyUtf8Bytes),
-        },
-        {
-          metric: "optimisticPackedBytes",
-          bytes: adaptiveHanBigramPostingEstimate.optimisticPackedBytes,
-          size: this.formatBytes(adaptiveHanBigramPostingEstimate.optimisticPackedBytes),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.optimisticPackedVsHanRaw ?? "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.optimisticPackedVsRawMarkdown ?? "n/a",
-        },
-        {
-          metric: "ultraOptimisticPackedBytes",
-          bytes: adaptiveHanBigramPostingEstimate.ultraOptimisticPackedBytes,
-          size: this.formatBytes(adaptiveHanBigramPostingEstimate.ultraOptimisticPackedBytes),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.ultraOptimisticPackedVsHanRaw ?? "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.ultraOptimisticPackedVsRawMarkdown ?? "n/a",
-        },
-        {
-          metric: "denseBigramOptimisticPackedBytes",
-          bytes: adaptiveHanBigramPostingEstimate.denseBigramOptimisticPackedBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.denseBigramOptimisticPackedBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.denseBigramOptimisticPackedVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.denseBigramOptimisticPackedVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "denseBigramHanDocOrdinalPackedBytes",
-          bytes: adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalPackedBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalPackedBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalPackedVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalPackedVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "denseBigramDictionaryLowerBoundBytes",
-          bytes: adaptiveHanBigramPostingEstimate.denseBigramDictionaryLowerBoundBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.denseBigramDictionaryLowerBoundBytes,
-          ),
-        },
-        {
-          metric: "denseBigramHanDocOrdinalWithDictionaryLowerBoundBytes",
-          bytes:
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalWithDictionaryLowerBoundBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalWithDictionaryLowerBoundBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalWithDictionaryLowerBoundVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.denseBigramHanDocOrdinalWithDictionaryLowerBoundVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "docAdaptiveCodec.totalBytes",
-          bytes: adaptiveHanBigramPostingEstimate.docAdaptiveCodec.totalBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.docAdaptiveCodec.totalBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.hanOnlyUtf8Bytes > 0
-              ? (
-                  adaptiveHanBigramPostingEstimate.docAdaptiveCodec.totalBytes /
-                  adaptiveHanBigramPostingEstimate.hanOnlyUtf8Bytes
-                ).toFixed(3)
-              : "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.rawMarkdownBytes > 0
-              ? (
-                  adaptiveHanBigramPostingEstimate.docAdaptiveCodec.totalBytes /
-                  adaptiveHanBigramPostingEstimate.rawMarkdownBytes
-                ).toFixed(3)
-              : "n/a",
-        },
-        {
-          metric: "docAdaptiveCodec.withDictionaryLowerBoundBytes",
-          bytes:
-            adaptiveHanBigramPostingEstimate.docAdaptiveCodecWithDictionaryLowerBoundBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.docAdaptiveCodecWithDictionaryLowerBoundBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.docAdaptiveCodecWithDictionaryLowerBoundVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.docAdaptiveCodecWithDictionaryLowerBoundVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "uniqueBigramCount",
-          count: adaptiveHanBigramPostingEstimate.uniqueBigramCount,
-        },
-        {
-          metric: "docBigramIncidenceCount",
-          count: adaptiveHanBigramPostingEstimate.docBigramIncidenceCount,
-        },
-        {
-          metric: "blockBigramIncidenceCount",
-          count: adaptiveHanBigramPostingEstimate.blockBigramIncidenceCount,
-        },
-        {
-          metric: "denseBigramIdBytes",
-          count: adaptiveHanBigramPostingEstimate.denseBigramIdBytes,
-        },
-        {
-          metric: "hanDocOrdinalBytes",
-          count: adaptiveHanBigramPostingEstimate.hanDocOrdinalBytes,
-        },
-        {
-          metric: "blockIdBytes",
-          count: adaptiveHanBigramPostingEstimate.blockIdBytes,
-        },
-        {
-          metric: "blockOrdinalBytes",
-          count: adaptiveHanBigramPostingEstimate.blockOrdinalBytes,
-        },
-        {
-          metric: "maxBlocksPerHanDocument",
-          count: adaptiveHanBigramPostingEstimate.maxBlocksPerHanDocument,
-        },
-        {
-          metric: "denseBigramBlockPostingBytes",
-          bytes: adaptiveHanBigramPostingEstimate.denseBigramBlockPostingBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "denseBigramBlockPostingWithDictionaryLowerBoundBytes",
-          bytes:
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingWithDictionaryLowerBoundBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingWithDictionaryLowerBoundBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingWithDictionaryLowerBoundVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.denseBigramBlockPostingWithDictionaryLowerBoundVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "blockDescriptorSearchCoreBytes",
-          bytes: adaptiveHanBigramPostingEstimate.blockDescriptorSearchCoreBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.blockDescriptorSearchCoreBytes,
-          ),
-        },
-        {
-          metric: "blockDescriptorOperationalBytes",
-          bytes:
-            adaptiveHanBigramPostingEstimate.blockDescriptorOperationalBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.blockDescriptorOperationalBytes,
-          ),
-        },
-        {
-          metric: "blockQueryViewWithSearchCoreBytes",
-          bytes: adaptiveHanBigramPostingEstimate.blockQueryViewWithSearchCoreBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithSearchCoreBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithSearchCoreVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithSearchCoreVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "blockQueryViewWithOperationalDescriptorBytes",
-          bytes:
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithOperationalDescriptorBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithOperationalDescriptorBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithOperationalDescriptorVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.blockQueryViewWithOperationalDescriptorVsRawMarkdown ??
-            "n/a",
-        },
-        {
-          metric: "blockAdaptiveCodec.totalBytes",
-          bytes: adaptiveHanBigramPostingEstimate.blockAdaptiveCodec.totalBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.blockAdaptiveCodec.totalBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.hanOnlyUtf8Bytes > 0
-              ? (
-                  adaptiveHanBigramPostingEstimate.blockAdaptiveCodec.totalBytes /
-                  adaptiveHanBigramPostingEstimate.hanOnlyUtf8Bytes
-                ).toFixed(3)
-              : "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.rawMarkdownBytes > 0
-              ? (
-                  adaptiveHanBigramPostingEstimate.blockAdaptiveCodec.totalBytes /
-                  adaptiveHanBigramPostingEstimate.rawMarkdownBytes
-                ).toFixed(3)
-              : "n/a",
-        },
-        {
-          metric: "blockAdaptiveCodec.withDictionaryLowerBoundBytes",
-          bytes:
-            adaptiveHanBigramPostingEstimate.blockAdaptiveCodecWithDictionaryLowerBoundBytes,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.blockAdaptiveCodecWithDictionaryLowerBoundBytes,
-          ),
-          ratioVsHanRaw:
-            adaptiveHanBigramPostingEstimate.blockAdaptiveCodecWithDictionaryLowerBoundVsHanRaw ??
-            "n/a",
-          ratioVsRawMarkdown:
-            adaptiveHanBigramPostingEstimate.blockAdaptiveCodecWithDictionaryLowerBoundVsRawMarkdown ??
-            "n/a",
-        },
-      ]);
-      console.log(
-        "[clever-search] Han diagnostics: bigram doc-frequency histogram",
-        adaptiveHanBigramPostingEstimate.docFrequencyHistogram,
-      );
-      console.log(
-        "[clever-search] Han diagnostics: adaptive posting codec lanes",
-        {
-          docAdaptiveCodec: adaptiveHanBigramPostingEstimate.docAdaptiveCodec,
-          blockAdaptiveCodec: adaptiveHanBigramPostingEstimate.blockAdaptiveCodec,
-        },
-      );
-      console.log("[clever-search] Han diagnostics: logical block size sweep");
-      console.table(
-        adaptiveHanBigramPostingEstimate.blockSizeSweep.map((row) => ({
-          label: row.label,
-          targetSymbols: row.targetSymbols,
-          targetEncodedBytes: row.targetEncodedBytes,
-          hanLogicalBlockCount: row.hanLogicalBlockCount,
-          maxBlocksPerHanDocument: row.maxBlocksPerHanDocument,
-          blockAdaptiveCodecTotalBytes: row.blockAdaptiveCodecTotalBytes,
-          blockAdaptiveCodecWithDictionaryLowerBoundBytes:
-            row.blockAdaptiveCodecWithDictionaryLowerBoundBytes,
-          blockQueryViewWithSearchCoreBytes: row.blockQueryViewWithSearchCoreBytes,
-          directBlockCandidateCountAvg: row.directBlockCandidateCountAvg,
-          directBlockCandidateCountP90: row.directBlockCandidateCountP90,
-          directBlockByteCountAvg: row.directBlockByteCountAvg,
-          directBlockByteCountP90: row.directBlockByteCountP90,
-          docRouteVsBlockRouteByteRatioAvg: row.docRouteVsBlockRouteByteRatioAvg,
-          docRouteVsBlockRouteByteRatioP90: row.docRouteVsBlockRouteByteRatioP90,
-          queryViewBytesVsCurrent: row.queryViewBytesVsCurrent ?? "n/a",
-          directExactBytesVsCurrent: row.directExactBytesVsCurrent ?? "n/a",
-          heuristicBalanceScoreVsCurrent:
-            row.heuristicBalanceScoreVsCurrent ?? "n/a",
-        })),
-      );
-      console.log(
-        "[clever-search] Han diagnostics: exact fanout summary (doc postings -> exact blocks)",
-      );
-      console.table([
-        {
-          metric: "queryCount",
-          count: adaptiveHanBigramPostingEstimate.exactFanout.queryCount,
-        },
-        {
-          metric: "oneBigramQueryCount",
-          count: adaptiveHanBigramPostingEstimate.exactFanout.oneBigramQueryCount,
-        },
-        {
-          metric: "twoBigramQueryCount",
-          count: adaptiveHanBigramPostingEstimate.exactFanout.twoBigramQueryCount,
-        },
-        {
-          metric: "threePlusBigramQueryCount",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.threePlusBigramQueryCount,
-        },
-        {
-          metric: "docCandidateCount.avg",
-          count: adaptiveHanBigramPostingEstimate.exactFanout.docCandidateCount.avg,
-        },
-        {
-          metric: "docCandidateCount.p90",
-          count: adaptiveHanBigramPostingEstimate.exactFanout.docCandidateCount.p90,
-        },
-        {
-          metric: "docRouteFanoutBlockCount.avg",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteFanoutBlockCount.avg,
-        },
-        {
-          metric: "docRouteFanoutBlockCount.p90",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteFanoutBlockCount.p90,
-        },
-        {
-          metric: "directBlockCandidateCount.avg",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.directBlockCandidateCount.avg,
-        },
-        {
-          metric: "directBlockCandidateCount.p90",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.directBlockCandidateCount.p90,
-        },
-        {
-          metric: "docRouteVsBlockRouteBlockRatio.avg",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteVsBlockRouteBlockRatio.avg,
-        },
-        {
-          metric: "docRouteVsBlockRouteBlockRatio.p90",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteVsBlockRouteBlockRatio.p90,
-        },
-        {
-          metric: "docRouteFanoutByteCount.avg",
-          bytes:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteFanoutByteCount.avg,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteFanoutByteCount.avg,
-          ),
-        },
-        {
-          metric: "docRouteFanoutByteCount.p90",
-          bytes:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteFanoutByteCount.p90,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteFanoutByteCount.p90,
-          ),
-        },
-        {
-          metric: "directBlockByteCount.avg",
-          bytes: adaptiveHanBigramPostingEstimate.exactFanout.directBlockByteCount.avg,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.exactFanout.directBlockByteCount.avg,
-          ),
-        },
-        {
-          metric: "directBlockByteCount.p90",
-          bytes: adaptiveHanBigramPostingEstimate.exactFanout.directBlockByteCount.p90,
-          size: this.formatBytes(
-            adaptiveHanBigramPostingEstimate.exactFanout.directBlockByteCount.p90,
-          ),
-        },
-        {
-          metric: "docRouteVsBlockRouteByteRatio.avg",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteVsBlockRouteByteRatio.avg,
-        },
-        {
-          metric: "docRouteVsBlockRouteByteRatio.p90",
-          count:
-            adaptiveHanBigramPostingEstimate.exactFanout.docRouteVsBlockRouteByteRatio.p90,
-        },
-      ]);
-      console.log(
-        "[clever-search] Han diagnostics: exact fanout buckets",
-        adaptiveHanBigramPostingEstimate.exactFanout.byBucket,
-      );
-      if (hanRuntimeTiming) {
-        console.log(
-          "[clever-search] Han diagnostics: runtime query latency (wall-clock)",
-        );
-        console.table([
-          {
-            metric: "queryCount",
-            count: hanRuntimeTiming.queryCount,
-          },
-          {
-            metric: "sampleLimitPerBucket",
-            count: hanRuntimeTiming.sampleLimitPerBucket,
-          },
-          {
-            metric: "oneBigramQueryCount",
-            count: hanRuntimeTiming.oneBigramQueryCount,
-          },
-          {
-            metric: "twoBigramQueryCount",
-            count: hanRuntimeTiming.twoBigramQueryCount,
-          },
-          {
-            metric: "threePlusBigramQueryCount",
-            count: hanRuntimeTiming.threePlusBigramQueryCount,
-          },
-          {
-            metric: "durationMs.avg",
-            count: hanRuntimeTiming.durationMs.avg,
-          },
-          {
-            metric: "durationMs.p90",
-            count: hanRuntimeTiming.durationMs.p90,
-          },
-          {
-            metric: "durationMs.p95",
-            count: hanRuntimeTiming.durationMs.p95,
-          },
-          {
-            metric: "durationMs.p100",
-            count: hanRuntimeTiming.durationMs.p100,
-          },
-          {
-            metric: "warmDurationMs.avg",
-            count: hanRuntimeTiming.warmDurationMs.avg,
-          },
-          {
-            metric: "warmDurationMs.p95",
-            count: hanRuntimeTiming.warmDurationMs.p95,
-          },
-          {
-            metric: "warmDurationMs.p100",
-            count: hanRuntimeTiming.warmDurationMs.p100,
-          },
-          {
-            metric: "matchedFileCount.avg",
-            count: hanRuntimeTiming.matchedFileCount.avg,
-          },
-          {
-            metric: "matchedFileCount.p95",
-            count: hanRuntimeTiming.matchedFileCount.p95,
-          },
-          {
-            metric: "matchedFileCount.p100",
-            count: hanRuntimeTiming.matchedFileCount.p100,
-          },
-        ]);
-        console.log(
-          "[clever-search] Han diagnostics: runtime query latency buckets",
-          hanRuntimeTiming.byBucket,
-        );
-      }
-      if (hanVariantComparison && hanVariantComparison.length > 0) {
-        console.log(
-          "[clever-search] Han diagnostics: block variant runtime comparison",
-        );
-        console.table(
-          hanVariantComparison.map((row) => ({
-            label: row.label,
-            targetSymbols: row.targetSymbols,
-            targetEncodedBytes: row.targetEncodedBytes,
-            durationMsAvg: row.durationMs.avg,
-            durationMsP95: row.durationMs.p95,
-            durationMsP100: row.durationMs.p100,
-            warmDurationMsAvg: row.warmDurationMs.avg,
-            warmDurationMsP95: row.warmDurationMs.p95,
-            warmDurationMsP100: row.warmDurationMs.p100,
-            matchedFileCountAvg: row.matchedFileCount.avg,
-            matchedFileCountP95: row.matchedFileCount.p95,
-          })),
-        );
-      }
-      console.log(
-        "[clever-search] Han diagnostics payload",
-        adaptiveHanBigramPostingEstimate,
-      );
-    }
     console.log(`[clever-search] ${localOnlyHint}`);
     console.groupEnd();
   }
-
-  private async buildAdaptiveHanBigramExperiment(
-    indexableFiles: readonly TFile[],
-  ): Promise<
-    | {
-        estimate: ReturnType<typeof estimateCoverageLexicalV2AdaptiveHanBigramDocPostingBytes> & {
-          indexedDocumentCount: number;
-          failedDocumentCount: number;
-        };
-        runtimeTiming: HanRuntimeTimingReport | null;
-        variantComparison:
-          | readonly HanBlockVariantRuntimeComparisonRow[]
-          | null;
-      }
-    | null
-  > {
-    const generated = await this.dataProvider.generateAllIndexedDocuments([
-      ...indexableFiles,
-    ]);
-    if (generated.documents.length === 0) {
-      return null;
-    }
-    const estimate = estimateCoverageLexicalV2AdaptiveHanBigramDocPostingBytes(
-      generated.documents,
-    );
-    if (generated.failures.length > 0) {
-      console.warn(
-        "[clever-search] Han diagnostics skipped some files",
-        generated.failures.map((failure) => failure.file.path),
-      );
-    }
-    return {
-      estimate: {
-        ...estimate,
-        indexedDocumentCount: generated.documents.length,
-        failedDocumentCount: generated.failures.length,
-      },
-      runtimeTiming: await this.measureHanRuntimeQueryTiming(generated.documents),
-      variantComparison:
-        await this.measureHanBlockVariantRuntimeComparison(generated.documents),
-    };
-  }
-
-  private async measureHanRuntimeQueryTiming(
-    documents: readonly IndexedDocument[],
-  ): Promise<HanRuntimeTimingReport | null> {
-    const querySamples = this.buildHanRuntimeTimingQuerySamples(documents);
-    if (querySamples.length === 0) {
-      return null;
-    }
-    const allDurations: number[] = [];
-    const allWarmDurations: number[] = [];
-    const allMatchedFileCounts: number[] = [];
-    const buckets: Record<
-      HanRuntimeTimingBucketKey,
-      { durations: number[]; warmDurations: number[]; matchedFileCounts: number[] }
-    > = {
-      oneBigram: { durations: [], warmDurations: [], matchedFileCounts: [] },
-      twoBigram: { durations: [], warmDurations: [], matchedFileCounts: [] },
-      threePlusBigram: { durations: [], warmDurations: [], matchedFileCounts: [] },
-    };
-
-    for (const querySample of querySamples) {
-      const startedAt = performance.now();
-      const matches = await this.lexicalEngine.searchFiles(
-        querySample.queryText,
-        20,
-        20,
-        20,
-      );
-      const durationMs = performance.now() - startedAt;
-      allDurations.push(durationMs);
-      allMatchedFileCounts.push(matches.length);
-      buckets[querySample.bucket].durations.push(durationMs);
-      buckets[querySample.bucket].matchedFileCounts.push(matches.length);
-    }
-
-    for (const querySample of querySamples) {
-      const startedAt = performance.now();
-      await this.lexicalEngine.searchFiles(querySample.queryText, 20, 20, 20);
-      const durationMs = performance.now() - startedAt;
-      allWarmDurations.push(durationMs);
-      buckets[querySample.bucket].warmDurations.push(durationMs);
-    }
-
-    return {
-      queryCount: querySamples.length,
-      sampleLimitPerBucket: HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET,
-      oneBigramQueryCount: buckets.oneBigram.durations.length,
-      twoBigramQueryCount: buckets.twoBigram.durations.length,
-      threePlusBigramQueryCount: buckets.threePlusBigram.durations.length,
-      durationMs: summarizeHanRuntimeTimingDistribution(allDurations),
-      warmDurationMs: summarizeHanRuntimeTimingDistribution(allWarmDurations),
-      matchedFileCount: summarizeHanRuntimeTimingDistribution(allMatchedFileCounts),
-      byBucket: {
-        oneBigram: {
-          queryCount: buckets.oneBigram.durations.length,
-          durationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.oneBigram.durations,
-          ),
-          warmDurationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.oneBigram.warmDurations,
-          ),
-          matchedFileCount: summarizeHanRuntimeTimingDistribution(
-            buckets.oneBigram.matchedFileCounts,
-          ),
-        },
-        twoBigram: {
-          queryCount: buckets.twoBigram.durations.length,
-          durationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.twoBigram.durations,
-          ),
-          warmDurationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.twoBigram.warmDurations,
-          ),
-          matchedFileCount: summarizeHanRuntimeTimingDistribution(
-            buckets.twoBigram.matchedFileCounts,
-          ),
-        },
-        threePlusBigram: {
-          queryCount: buckets.threePlusBigram.durations.length,
-          durationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.threePlusBigram.durations,
-          ),
-          warmDurationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.threePlusBigram.warmDurations,
-          ),
-          matchedFileCount: summarizeHanRuntimeTimingDistribution(
-            buckets.threePlusBigram.matchedFileCounts,
-          ),
-        },
-      },
-    };
-  }
-
-  private async measureHanBlockVariantRuntimeComparison(
-    documents: readonly IndexedDocument[],
-  ): Promise<readonly HanBlockVariantRuntimeComparisonRow[] | null> {
-    const querySamples = this.buildHanRuntimeTimingQuerySamples(documents);
-    if (querySamples.length === 0) {
-      return null;
-    }
-    const variants = [
-      { label: "1x", targetSymbols: 384, targetEncodedBytes: 1536 },
-      { label: "3x", targetSymbols: 1152, targetEncodedBytes: 4608 },
-    ] as const;
-    const rows: HanBlockVariantRuntimeComparisonRow[] = [];
-    for (const variant of variants) {
-      const timing = await this.measureHanRuntimeQueryTimingAgainstVariant(
-        documents,
-        querySamples,
-        variant.targetSymbols,
-        variant.targetEncodedBytes,
-      );
-      rows.push({
-        label: variant.label,
-        targetSymbols: variant.targetSymbols,
-        targetEncodedBytes: variant.targetEncodedBytes,
-        durationMs: timing.durationMs,
-        warmDurationMs: timing.warmDurationMs,
-        matchedFileCount: timing.matchedFileCount,
-      });
-    }
-    return rows;
-  }
-
-  private async measureHanRuntimeQueryTimingAgainstVariant(
-    documents: readonly IndexedDocument[],
-    querySamples: readonly HanRuntimeTimingQuerySample[],
-    targetSymbols: number,
-    targetEncodedBytes: number,
-  ): Promise<HanRuntimeTimingReport> {
-    const store = new CoverageLexicalV2IndexStore({
-      hanLogicalBlockSymbols: targetSymbols,
-      hanLogicalBlockEncodedBytes: targetEncodedBytes,
-    });
-    const bodyTokenSequenceByDocId = new Map<number, readonly string[]>();
-    const exactBlocksByLookupKey = new Map<string, Uint32Array>();
-    for (const document of documents) {
-      const prepared = buildCoverageLexicalV2PreparedDocument(this.tokenizer, document);
-      const logicalBlockWrites = store.getOrCreateBodyHanLogicalBlockWrites(
-        prepared.bodyHanSegments,
-      );
-      const docId = store.replaceDocument(prepared);
-      bodyTokenSequenceByDocId.set(docId, prepared.bodyTokens);
-      for (const logicalBlock of logicalBlockWrites) {
-        exactBlocksByLookupKey.set(
-          `${prepared.path}:${logicalBlock.blockOrdinal}`,
-          logicalBlock.bodyHanSymbolIds,
-        );
-      }
-    }
-    store.compactOverlayIntoSegment(true);
-
-    const globalExactCache = new Map<string, Uint32Array>();
-    let globalExactCacheBytes = 0;
-    const allDurations: number[] = [];
-    const allWarmDurations: number[] = [];
-    const allMatchedFileCounts: number[] = [];
-    const buckets: Record<
-      HanRuntimeTimingBucketKey,
-      { durations: number[]; warmDurations: number[]; matchedFileCounts: number[] }
-    > = {
-      oneBigram: { durations: [], warmDurations: [], matchedFileCounts: [] },
-      twoBigram: { durations: [], warmDurations: [], matchedFileCounts: [] },
-      threePlusBigram: { durations: [], warmDurations: [], matchedFileCounts: [] },
-    };
-
-    const searchOnce = async (
-      queryText: string,
-      queryLocalBodyHanExactCache: Map<number, Uint32Array>,
-    ) =>
-      await searchCoverageLexicalV2Engine({
-        queryText,
-        isPrefixMatch: false,
-        isFuzzy: false,
-        maxItemResults: 20,
-        fuzzyProportion: 0.2,
-        tokenizeQueryText: (text) =>
-          this.tokenizer
-            .tokenizeSequence(text, "search")
-            .map((term) => term.toLowerCase()),
-        storageReader: store.createStorageReader({
-          getBodyTokenSequence: (docId) => bodyTokenSequenceByDocId.get(docId),
-          prefetchBodyTokenSequences: async () => {},
-          prefetchBodyHanExactBlocks: async (blockIds, budget) =>
-            this.prefetchHanVariantExactBlocks({
-              store,
-              exactBlocksByLookupKey,
-              globalExactCache,
-              queryLocalBodyHanExactCache,
-              blockIds,
-              budget,
-              getGlobalExactCacheBytes: () => globalExactCacheBytes,
-              setGlobalExactCacheBytes: (nextValue) => {
-                globalExactCacheBytes = nextValue;
-              },
-            }),
-          getBodyHanExactBlockBackstopStats: (blockId, normalizedText, bigrams) => {
-            const symbolIds =
-              queryLocalBodyHanExactCache.get(blockId) ??
-              this.getVariantCachedBodyHanExact(store, globalExactCache, blockId);
-            return symbolIds
-              ? store.buildBodyHanExactBackstopStatsFromSymbolIds(
-                  symbolIds,
-                  normalizedText,
-                  bigrams,
-                )
-              : null;
-          },
-          getBodyHanExactBlockWitness: (blockId, normalizedText, bigrams) => {
-            const symbolIds =
-              queryLocalBodyHanExactCache.get(blockId) ??
-              this.getVariantCachedBodyHanExact(store, globalExactCache, blockId);
-            return symbolIds
-              ? store.buildBodyHanExactWitnessFromSymbolIds(
-                  symbolIds,
-                  normalizedText,
-                  bigrams,
-                )
-              : null;
-          },
-          tokenizeText: (text) =>
-            this.tokenizer
-              .tokenizeSequence(text, "index")
-              .map((term) => term.toLowerCase()),
-        }),
-      });
-
-    for (const querySample of querySamples) {
-      const queryLocalBodyHanExactCache = new Map<number, Uint32Array>();
-      const startedAt = performance.now();
-      const result = await searchOnce(
-        querySample.queryText,
-        queryLocalBodyHanExactCache,
-      );
-      const durationMs = performance.now() - startedAt;
-      allDurations.push(durationMs);
-      allMatchedFileCounts.push(result.matchedFiles.length);
-      buckets[querySample.bucket].durations.push(durationMs);
-      buckets[querySample.bucket].matchedFileCounts.push(result.matchedFiles.length);
-    }
-
-    for (const querySample of querySamples) {
-      const queryLocalBodyHanExactCache = new Map<number, Uint32Array>();
-      const startedAt = performance.now();
-      await searchOnce(querySample.queryText, queryLocalBodyHanExactCache);
-      const durationMs = performance.now() - startedAt;
-      allWarmDurations.push(durationMs);
-      buckets[querySample.bucket].warmDurations.push(durationMs);
-    }
-
-    return {
-      queryCount: querySamples.length,
-      sampleLimitPerBucket: HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET,
-      oneBigramQueryCount: buckets.oneBigram.durations.length,
-      twoBigramQueryCount: buckets.twoBigram.durations.length,
-      threePlusBigramQueryCount: buckets.threePlusBigram.durations.length,
-      durationMs: summarizeHanRuntimeTimingDistribution(allDurations),
-      warmDurationMs: summarizeHanRuntimeTimingDistribution(allWarmDurations),
-      matchedFileCount: summarizeHanRuntimeTimingDistribution(allMatchedFileCounts),
-      byBucket: {
-        oneBigram: {
-          queryCount: buckets.oneBigram.durations.length,
-          durationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.oneBigram.durations,
-          ),
-          warmDurationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.oneBigram.warmDurations,
-          ),
-          matchedFileCount: summarizeHanRuntimeTimingDistribution(
-            buckets.oneBigram.matchedFileCounts,
-          ),
-        },
-        twoBigram: {
-          queryCount: buckets.twoBigram.durations.length,
-          durationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.twoBigram.durations,
-          ),
-          warmDurationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.twoBigram.warmDurations,
-          ),
-          matchedFileCount: summarizeHanRuntimeTimingDistribution(
-            buckets.twoBigram.matchedFileCounts,
-          ),
-        },
-        threePlusBigram: {
-          queryCount: buckets.threePlusBigram.durations.length,
-          durationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.threePlusBigram.durations,
-          ),
-          warmDurationMs: summarizeHanRuntimeTimingDistribution(
-            buckets.threePlusBigram.warmDurations,
-          ),
-          matchedFileCount: summarizeHanRuntimeTimingDistribution(
-            buckets.threePlusBigram.matchedFileCounts,
-          ),
-        },
-      },
-    };
-  }
-
-  private buildHanRuntimeTimingQuerySamples(
-    documents: readonly IndexedDocument[],
-  ): readonly HanRuntimeTimingQuerySample[] {
-    const bucketSets: Record<HanRuntimeTimingBucketKey, Set<string>> = {
-      oneBigram: new Set<string>(),
-      twoBigram: new Set<string>(),
-      threePlusBigram: new Set<string>(),
-    };
-
-    for (const document of documents) {
-      const content = document.content ?? "";
-      for (const segment of extractHanSegments(content)) {
-        const symbols = Array.from(segment);
-        this.collectHanRuntimeTimingWindows(bucketSets.oneBigram, symbols, 2);
-        this.collectHanRuntimeTimingWindows(bucketSets.twoBigram, symbols, 3);
-        this.collectHanRuntimeTimingWindows(bucketSets.threePlusBigram, symbols, 4);
-        if (
-          bucketSets.oneBigram.size >= HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET &&
-          bucketSets.twoBigram.size >= HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET &&
-          bucketSets.threePlusBigram.size >= HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET
-        ) {
-          break;
-        }
-      }
-      if (
-        bucketSets.oneBigram.size >= HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET &&
-        bucketSets.twoBigram.size >= HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET &&
-        bucketSets.threePlusBigram.size >= HAN_RUNTIME_TIMING_SAMPLE_LIMIT_PER_BUCKET
-      ) {
-        break;
-      }
-    }
-
-    return [
-      ...Array.from(bucketSets.oneBigram, (queryText) => ({
-        queryText,
-        bucket: "oneBigram" as const,
-      })),
-      ...Array.from(bucketSets.twoBigram, (queryText) => ({
-        queryText,
-        bucket: "twoBigram" as const,
-      })),
-      ...Array.from(bucketSets.threePlusBigram, (queryText) => ({
-        queryText,
-        bucket: "threePlusBigram" as const,
-      })),
-    ];
-  }
-
-  private async prefetchHanVariantExactBlocks(options: {
-    store: CoverageLexicalV2IndexStore;
-    exactBlocksByLookupKey: ReadonlyMap<string, Uint32Array>;
-    globalExactCache: Map<string, Uint32Array>;
-    queryLocalBodyHanExactCache: Map<number, Uint32Array>;
-    blockIds: readonly number[];
-    budget: {
-      blockBudget: number;
-      byteBudget: number;
-      perDocByteBudget: number;
-      timeBudgetMs: number;
-    };
-    getGlobalExactCacheBytes: () => number;
-    setGlobalExactCacheBytes: (nextValue: number) => void;
-  }): Promise<{
-    fetchedBlockIds: readonly number[];
-    fetchedBlockCount: number;
-    byteSum: number;
-    skippedByBudget: number;
-    skippedReason: "none" | "block_budget" | "byte_budget" | "time_budget";
-    blockResults: readonly {
-      blockId: number;
-      docId: number | null;
-      path: string | null;
-      blockOrdinal: number | null;
-      status:
-        | "cache_hit"
-        | "fetched"
-        | "block_budget"
-        | "byte_budget"
-        | "time_budget"
-        | "read_miss";
-      estimatedBytes: number | null;
-      segmentCount: number | null;
-      symbolCount: number | null;
-    }[];
-  }> {
-    const deadline = Date.now() + Math.max(0, options.budget.timeBudgetMs);
-    const fetchedBlockIds: number[] = [];
-    const blockResults = new Map<
-      number,
-      {
-        blockId: number;
-        docId: number | null;
-        path: string | null;
-        blockOrdinal: number | null;
-        status:
-          | "cache_hit"
-          | "fetched"
-          | "block_budget"
-          | "byte_budget"
-          | "time_budget"
-          | "read_miss";
-        estimatedBytes: number | null;
-        segmentCount: number | null;
-        symbolCount: number | null;
-      }
-    >();
-    let fetchedByteSum = 0;
-    let budgetedByteSum = 0;
-    const budgetedByteSumByDocId = new Map<number, number>();
-    let skippedByBudget = 0;
-    let skippedReason: "none" | "block_budget" | "byte_budget" | "time_budget" =
-      "none";
-    let fetchedRequestCount = 0;
-
-    for (const blockId of options.blockIds) {
-      const descriptor = options.store.getBodyHanLogicalBlockDescriptor(blockId);
-      const cacheKey = this.getVariantBodyHanExactCacheKey(options.store, blockId);
-      if (!descriptor || !cacheKey) {
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor?.docId ?? null,
-          path: descriptor?.path ?? null,
-          blockOrdinal: descriptor?.blockOrdinal ?? null,
-          status: "read_miss",
-          estimatedBytes: descriptor?.encodedByteLength ?? null,
-          segmentCount: descriptor?.segmentCount ?? null,
-          symbolCount: descriptor?.symbolCount ?? null,
-        });
-        continue;
-      }
-      const cached = this.getVariantCachedBodyHanExact(
-        options.store,
-        options.globalExactCache,
-        blockId,
-      );
-      if (cached) {
-        options.queryLocalBodyHanExactCache.set(blockId, cached);
-        fetchedBlockIds.push(blockId);
-        fetchedByteSum += cached.byteLength;
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor.docId,
-          path: descriptor.path,
-          blockOrdinal: descriptor.blockOrdinal,
-          status: "cache_hit",
-          estimatedBytes: cached.byteLength,
-          segmentCount: descriptor.segmentCount,
-          symbolCount: descriptor.symbolCount,
-        });
-        continue;
-      }
-      if (fetchedRequestCount >= Math.max(0, options.budget.blockBudget)) {
-        skippedReason = "block_budget";
-        skippedByBudget += 1;
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor.docId,
-          path: descriptor.path,
-          blockOrdinal: descriptor.blockOrdinal,
-          status: "block_budget",
-          estimatedBytes: descriptor.encodedByteLength,
-          segmentCount: descriptor.segmentCount,
-          symbolCount: descriptor.symbolCount,
-        });
-        continue;
-      }
-      if (
-        budgetedByteSum + descriptor.encodedByteLength >
-        Math.max(0, options.budget.byteBudget)
-      ) {
-        skippedReason = "byte_budget";
-        skippedByBudget += 1;
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor.docId,
-          path: descriptor.path,
-          blockOrdinal: descriptor.blockOrdinal,
-          status: "byte_budget",
-          estimatedBytes: descriptor.encodedByteLength,
-          segmentCount: descriptor.segmentCount,
-          symbolCount: descriptor.symbolCount,
-        });
-        continue;
-      }
-      const budgetedDocByteSum = budgetedByteSumByDocId.get(descriptor.docId) ?? 0;
-      if (
-        budgetedDocByteSum + descriptor.encodedByteLength >
-        Math.max(0, options.budget.perDocByteBudget)
-      ) {
-        skippedReason = "byte_budget";
-        skippedByBudget += 1;
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor.docId,
-          path: descriptor.path,
-          blockOrdinal: descriptor.blockOrdinal,
-          status: "byte_budget",
-          estimatedBytes: descriptor.encodedByteLength,
-          segmentCount: descriptor.segmentCount,
-          symbolCount: descriptor.symbolCount,
-        });
-        continue;
-      }
-      if (Date.now() > deadline) {
-        skippedReason = "time_budget";
-        skippedByBudget += 1;
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor.docId,
-          path: descriptor.path,
-          blockOrdinal: descriptor.blockOrdinal,
-          status: "time_budget",
-          estimatedBytes: descriptor.encodedByteLength,
-          segmentCount: descriptor.segmentCount,
-          symbolCount: descriptor.symbolCount,
-        });
-        continue;
-      }
-      const symbolIds = options.exactBlocksByLookupKey.get(cacheKey);
-      if (!symbolIds) {
-        blockResults.set(blockId, {
-          blockId,
-          docId: descriptor.docId,
-          path: descriptor.path,
-          blockOrdinal: descriptor.blockOrdinal,
-          status: "read_miss",
-          estimatedBytes: descriptor.encodedByteLength,
-          segmentCount: descriptor.segmentCount,
-          symbolCount: descriptor.symbolCount,
-        });
-        continue;
-      }
-      fetchedRequestCount += 1;
-      budgetedByteSum += descriptor.encodedByteLength;
-      budgetedByteSumByDocId.set(
-        descriptor.docId,
-        budgetedDocByteSum + descriptor.encodedByteLength,
-      );
-      options.queryLocalBodyHanExactCache.set(blockId, symbolIds);
-      this.setVariantCachedBodyHanExact(
-        options.globalExactCache,
-        cacheKey,
-        symbolIds,
-        options.getGlobalExactCacheBytes,
-        options.setGlobalExactCacheBytes,
-      );
-      fetchedBlockIds.push(blockId);
-      fetchedByteSum += symbolIds.byteLength;
-      blockResults.set(blockId, {
-        blockId,
-        docId: descriptor.docId,
-        path: descriptor.path,
-        blockOrdinal: descriptor.blockOrdinal,
-        status: "fetched",
-        estimatedBytes: symbolIds.byteLength,
-        segmentCount: descriptor.segmentCount,
-        symbolCount: descriptor.symbolCount,
-      });
-    }
-
-    return {
-      fetchedBlockIds,
-      fetchedBlockCount: fetchedBlockIds.length,
-      byteSum: fetchedByteSum,
-      skippedByBudget,
-      skippedReason,
-      blockResults: options.blockIds.map((blockId) => {
-        const descriptor = options.store.getBodyHanLogicalBlockDescriptor(blockId);
-        return (
-          blockResults.get(blockId) ?? {
-            blockId,
-            docId: descriptor?.docId ?? null,
-            path: descriptor?.path ?? null,
-            blockOrdinal: descriptor?.blockOrdinal ?? null,
-            status: "read_miss" as const,
-            estimatedBytes: descriptor?.encodedByteLength ?? null,
-            segmentCount: descriptor?.segmentCount ?? null,
-            symbolCount: descriptor?.symbolCount ?? null,
-          }
-        );
-      }),
-    };
-  }
-
-  private getVariantCachedBodyHanExact(
-    store: CoverageLexicalV2IndexStore,
-    globalExactCache: Map<string, Uint32Array>,
-    blockId: number,
-  ): Uint32Array | undefined {
-    const cacheKey = this.getVariantBodyHanExactCacheKey(store, blockId);
-    if (!cacheKey) {
-      return undefined;
-    }
-    const cached = globalExactCache.get(cacheKey);
-    if (!cached) {
-      return undefined;
-    }
-    globalExactCache.delete(cacheKey);
-    globalExactCache.set(cacheKey, cached);
-    return cached;
-  }
-
-  private setVariantCachedBodyHanExact(
-    globalExactCache: Map<string, Uint32Array>,
-    cacheKey: string,
-    symbolIds: Uint32Array,
-    getGlobalExactCacheBytes: () => number,
-    setGlobalExactCacheBytes: (nextValue: number) => void,
-  ): void {
-    const existing = globalExactCache.get(cacheKey);
-    let cacheBytes = getGlobalExactCacheBytes();
-    if (existing) {
-      globalExactCache.delete(cacheKey);
-      cacheBytes = Math.max(0, cacheBytes - existing.byteLength);
-    }
-    if (symbolIds.byteLength > 12 * 1024 * 1024) {
-      setGlobalExactCacheBytes(cacheBytes);
-      return;
-    }
-    globalExactCache.set(cacheKey, symbolIds);
-    cacheBytes += symbolIds.byteLength;
-    while (globalExactCache.size > 2048 || cacheBytes > 12 * 1024 * 1024) {
-      const oldestKey = globalExactCache.keys().next().value;
-      if (!oldestKey) {
-        break;
-      }
-      const oldest = globalExactCache.get(oldestKey);
-      globalExactCache.delete(oldestKey);
-      cacheBytes = Math.max(0, cacheBytes - (oldest?.byteLength ?? 0));
-    }
-    setGlobalExactCacheBytes(cacheBytes);
-  }
-
-  private getVariantBodyHanExactCacheKey(
-    store: CoverageLexicalV2IndexStore,
-    blockId: number,
-  ): string | null {
-    const descriptor = store.getBodyHanLogicalBlockDescriptor(blockId);
-    if (!descriptor?.path) {
-      return null;
-    }
-    return `${descriptor.path}:${descriptor.blockOrdinal}`;
-  }
-
   private collectHanRuntimeTimingWindows(
     bucket: Set<string>,
     symbols: readonly string[],
@@ -6548,3 +5001,4 @@ export class DataManager {
     return formatBytesLabel(bytes);
   }
 }
+

@@ -7,3 +7,5 @@ export * from "./ranking";
 export * from "./engine";
 export * from "./file-search-engine";
 export * from "./direct-subitems";
+export * from "./hybrid-lexical-subitems";
+
