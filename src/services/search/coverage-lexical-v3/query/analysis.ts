@@ -142,9 +142,6 @@ function collectHanPrimaryTerms(
 		if (Array.from(term).length < 2) {
 			continue;
 		}
-		if (term === surfaceText) {
-			continue;
-		}
 		if (!surfaceText.includes(term)) {
 			continue;
 		}

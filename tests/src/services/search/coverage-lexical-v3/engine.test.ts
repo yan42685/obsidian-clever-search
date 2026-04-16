@@ -146,6 +146,48 @@ describe("coverage lexical v3 engine", () => {
 		).toEqual(["\u7cfb\u7edf", "\u4ee3\u7406"]);
 	});
 
+	test("whole-surface Han tokenizer terms still participate as real primary units", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u4e0a\u9762": ["\u4e0a\u9762"],
+			"\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684": [
+				"\u4e5f\u662f",
+				"\u4e0a\u9762",
+				"\u8fd9\u4f4d",
+				"\u5f00\u53d1",
+			],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/above-note.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u4e5f\u662f\u4e0a\u9762\u8fd9\u4f4d\u5f00\u53d1\u7684",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u4e0a\u9762", ["\u4e0a\u9762"]);
+
+		expect(
+			result.recallState.queryAnalysis.primaryUnits.map((unit) => ({
+				text: unit.text,
+				source: unit.source,
+			})),
+		).toEqual([
+			{ text: "\u4e0a\u9762", source: "han_tokenizer_real" },
+		]);
+		expect(result.recallState.queryAnalysis.hanBackstopGroups).toHaveLength(0);
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/above-note.md",
+		]);
+		expect(
+			result.rankedCandidates[0].realizedFamilies.map((family) => family.familyText),
+		).toEqual(["\u4e0a\u9762"]);
+	});
+
 	test("bridge bigrams can recall han candidates without inflating realized coverage", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({

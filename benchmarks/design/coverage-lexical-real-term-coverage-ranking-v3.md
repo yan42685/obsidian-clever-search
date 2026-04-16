@@ -1277,3 +1277,60 @@ Validation completed for this phase:
   - `avgMsPerQuery = 6.239`
   - `p50Ms = 4.355`
   - `p100Ms = 46.619`
+
+### Phase 22
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes a second strict-equivalent body-window
+hot-path refinement for V3 packing-profile construction without changing
+enumeration scope, admission rules, comparator order, or final ranking
+semantics:
+
+- `buildBodyWindowCandidateFromVirtualOccurrences(...)` now maintains a richer
+  per-start incremental shortlist state instead of rebuilding full
+  `BodyWindowCandidate` objects for every admitted representative change
+- the hot path now tracks the shortlist comparator inputs directly:
+  - representatives in virtual order
+  - covered unit order
+  - approximate head-tail span
+  - approximate gap mass and max gap
+  - query-order preservation
+  - block boundary state
+- body-window admission now runs directly on that lightweight shortlist state,
+  preserving the same `coveredDistinctUnitCount`, boundary, and approximate-gap
+  semantics as before
+- scope-best comparison also runs on the same strict-equivalent shortlist
+  signals and deterministic representative fallback, so the winning window is
+  unchanged even though the inner loop no longer materializes a full candidate
+  on every admitted state change
+- a full `BodyWindowCandidate` is now materialized only when the current
+  shortlist state actually becomes the new scope best, keeping exact-count,
+  density, ordinal-gap, and heading-corroboration derivation on the cold path
+- the query-analysis Han primary-term fix remains compatible with this body
+  window refinement: whole-surface tokenizer-real Han terms can still realize
+  normal primary coverage instead of being dropped into the backstop-only lane
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/body-window-selection.test.ts`
+  now compares the live selector against an exhaustive shortlist baseline on:
+  - repeated exact single-block windows
+  - exact-versus-prefix replacement for the same unit
+  - order-flip and later-order-recovery windows
+  - adjacent-block gap and boundary tie-break behavior
+- `tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts`
+  passes after the shortlist-state refactor
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes,
+  including the whole-surface tokenizer-real Han primary-term regression
+- `npm run typecheck:build` passes on 2026-04-16
+- `npm run benchmark:coverage-lexical` passes on 2026-04-16 with
+  `CoverageLexical(V3)` still at:
+  - `top1 = 0.808`
+  - `zeroRate = 0`
+  - `top5 = 1`
+  - `objective = 0.879`
+  while the same rerun improved the latency anchor to approximately:
+  - `avgMsPerQuery = 5.688`
+  - `p50Ms = 4.586`
+  - `p100Ms = 30.975`

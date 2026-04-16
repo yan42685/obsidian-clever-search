@@ -455,16 +455,33 @@ function toBlockShortlistItem(
 	};
 }
 
-function buildExhaustiveBestBodyWindowSketch(
+function pushExhaustiveShortlistCandidate(
+	shortlist: BlockShortlistItem[],
+	item: BlockShortlistItem,
+): void {
+	shortlist.push(item);
+	shortlist.sort(compareBlockShortlistItems);
+	if (shortlist.length > 6) {
+		shortlist.length = 6;
+	}
+}
+
+function buildExhaustiveBodyWindowSelection(
 	base: ResidentBase,
 	queryText: string,
 	documents: readonly IndexedDocument[],
-): BlockShortlistItem | null {
+): Readonly<{
+	bestItem: BlockShortlistItem | null;
+	shortlist: readonly BlockShortlistItem[];
+}> {
 	const queryAnalysis = analyzeQuery(queryText);
 	const unitFamilyMatches = lookupQueryUnitFamilies(base, queryAnalysis);
 	const candidateRecall = recallCandidateDocs(base, queryAnalysis, unitFamilyMatches)[0];
 	if (candidateRecall == null) {
-		return null;
+		return {
+			bestItem: null,
+			shortlist: [],
+		};
 	}
 	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
 	const bodyApproxSpanByBlockId = new Map<number, number>();
@@ -502,7 +519,9 @@ function buildExhaustiveBestBodyWindowSketch(
 		bodyOrdinalSpanByBlockId,
 	);
 	let bestItem: BlockShortlistItem | null = null;
+	const shortlist: BlockShortlistItem[] = [];
 	for (const scope of scopes) {
+		let scopeBestItem: BlockShortlistItem | null = null;
 		for (let start = 0; start < scope.virtualOccurrences.length; start += 1) {
 			for (let end = start; end < scope.virtualOccurrences.length; end += 1) {
 				const candidate = summarizeWindowCandidate(scope.virtualOccurrences.slice(start, end + 1));
@@ -510,15 +529,24 @@ function buildExhaustiveBestBodyWindowSketch(
 					continue;
 				}
 				const item = toBlockShortlistItem(base, candidate);
+				if (scopeBestItem == null || compareBlockShortlistItems(item, scopeBestItem) < 0) {
+					scopeBestItem = item;
+				}
 				if (bestItem == null || compareBlockShortlistItems(item, bestItem) < 0) {
 					bestItem = item;
 				}
 			}
 		}
+		if (scopeBestItem != null) {
+			pushExhaustiveShortlistCandidate(shortlist, scopeBestItem);
+		}
 	}
 	expect(documents).toHaveLength(1);
 	expect(getDocHeadingFamilyIds(base, 0)).toEqual([]);
-	return bestItem;
+	return {
+		bestItem,
+		shortlist,
+	};
 }
 
 describe("coverage lexical v3 body window selection", () => {
@@ -545,6 +573,17 @@ describe("coverage lexical v3 body window selection", () => {
 			}),
 		},
 		{
+			name: "later exact replaces earlier prefix for same unit",
+			query: "project access",
+			document: createDocument({
+				path: "notes/replacement.md",
+				basename: "replacement",
+				folder: "notes",
+				content:
+					"projected access drift projected context project access final witness",
+			}),
+		},
+		{
 			name: "adjacent blocks still match exhaustive window choice",
 			query: "alpha gamma",
 			document: createDocument({
@@ -552,6 +591,28 @@ describe("coverage lexical v3 body window selection", () => {
 				basename: "adjacent",
 				folder: "notes",
 				content: "alpha alpha context here\n\nnoise gamma gamma context here",
+			}),
+		},
+		{
+			name: "single block order flips and recovers with later exact window",
+			query: "alpha beta gamma",
+			document: createDocument({
+				path: "notes/order-recovery.md",
+				basename: "order recovery",
+				folder: "notes",
+				content:
+					"beta gamma drift alpha drift gamma alpha beta gamma steady witness",
+			}),
+		},
+		{
+			name: "adjacent blocks preserve gap and boundary shortlist semantics",
+			query: "alpha beta gamma",
+			document: createDocument({
+				path: "notes/gap-boundary.md",
+				basename: "gap boundary",
+				folder: "notes",
+				content:
+					"alpha filler filler beta\n\ngamma filler filler alpha beta gamma",
 			}),
 		},
 	])("$name", ({ query, document }) => {
@@ -564,11 +625,12 @@ describe("coverage lexical v3 body window selection", () => {
 		const profile = buildPackingProfile(base, queryAnalysis, candidateRecall!, unitFamilyMatches);
 		const shortlist = getAttachedBlockShortlistSketch(profile);
 		const actualBest = shortlist?.[0] ?? null;
-		const expectedBest = buildExhaustiveBestBodyWindowSketch(base, query, [document]);
+		const expectedSelection = buildExhaustiveBodyWindowSelection(base, query, [document]);
 
-		expect(actualBest).toEqual(expectedBest);
+		expect(shortlist ?? []).toEqual(expectedSelection.shortlist);
+		expect(actualBest).toEqual(expectedSelection.bestItem);
 		expect(profile.bodyWindowContainer?.coveredUnitIndices ?? []).toEqual(
-			expectedBest?.coveredUnitIndices ?? [],
+			expectedSelection.bestItem?.coveredUnitIndices ?? [],
 		);
 	});
 });

@@ -137,8 +137,57 @@ type BodyScopePrefilter = Readonly<{
 	virtualOccurrences: readonly BodyOccurrence[];
 }>;
 
-type BodyWindowSearchState = Readonly<{
+type BodyWindowSearchState = {
 	representativeByUnit: Map<number, BodyOccurrence>;
+	representativesByVirtualOrder: BodyOccurrence[];
+	coveredUnitIndicesSorted: number[];
+	coveredDistinctUnitCount: number;
+	exactUnitCount: number;
+	blockCountById: Map<number, number>;
+	blockIdsSorted: number[];
+	blockStart: number;
+	boundaryCrossingCount: number;
+	approxWindowStart: number;
+	approxWindowEnd: number;
+	approxHeadTailSpan: number;
+	approxMaxAdjacentGap: number;
+	approxTotalGapMass: number;
+	orderViolationCount: number;
+	preservesQueryOrder: boolean;
+};
+
+type BodyWindowShortlistSnapshot = Readonly<{
+	blockStart: number;
+	boundaryCrossingCount: number;
+	coveredUnitIndices: readonly number[];
+	coveredDistinctUnitCount: number;
+	representatives: readonly BodyOccurrence[];
+	approxWindowStart: number;
+	approxWindowEnd: number;
+	approxHeadTailSpan: number;
+	approxMaxAdjacentGap: number;
+	approxTotalGapMass: number;
+	preservesQueryOrder: boolean;
+}>;
+
+type BodyWindowPushResult =
+	| Readonly<{ kind: "no_change" }>
+	| Readonly<{
+			kind: "insert_new_unit";
+			previousRepresentative: null;
+			nextRepresentative: BodyOccurrence;
+	  }>
+	| Readonly<{
+			kind: "replace_existing_unit";
+			previousRepresentative: BodyOccurrence;
+			nextRepresentative: BodyOccurrence;
+	  }>;
+
+type OrdinalWindowSummary = Readonly<{
+	windowStart: number;
+	windowWidth: number;
+	gapCount: number;
+	maxAdjacentGap: number;
 }>;
 
 type PositionedFamilyOccurrence = Readonly<{
@@ -670,27 +719,34 @@ function buildBodyWindowCandidateFromVirtualOccurrences(
 		return null;
 	}
 	let bestWindow: BodyWindowCandidate | null = null;
+	let bestSnapshot: BodyWindowShortlistSnapshot | null = null;
 	for (let start = 0; start < virtualOccurrences.length; start += 1) {
 		const state = createBodyWindowSearchState();
 		for (let end = start; end < virtualOccurrences.length; end += 1) {
-			const representativeChanged = pushBodyWindowOccurrence(
+			const pushResult = pushBodyWindowOccurrence(
 				state,
 				virtualOccurrences[end],
 			);
 			// If the best representative set is unchanged, this window would
 			// summarize to the same shortlist item as the previous `end`.
-			if (!representativeChanged || state.representativeByUnit.size < 2) {
+			if (
+				pushResult.kind === "no_change" ||
+				state.coveredDistinctUnitCount < 2
+			) {
 				continue;
 			}
-			const candidate = summarizeWindowCandidateFromRepresentatives(
-				state.representativeByUnit,
-				headingFamilyIds,
-			);
-			if (candidate == null || !passesBodyWindowAdmission(candidate)) {
+			if (!passesBodyWindowShortlistAdmission(state)) {
 				continue;
 			}
-			if (bestWindow == null || compareBodyWindowCandidate(candidate, bestWindow) < 0) {
-				bestWindow = candidate;
+			if (
+				bestSnapshot == null ||
+				compareBodyWindowShortlistState(state, bestSnapshot) < 0
+			) {
+				bestSnapshot = snapshotBodyWindowShortlistState(state);
+				bestWindow = materializeBodyWindowCandidateFromShortlistState(
+					state,
+					headingFamilyIds,
+				);
 			}
 		}
 	}
@@ -700,19 +756,131 @@ function buildBodyWindowCandidateFromVirtualOccurrences(
 function createBodyWindowSearchState(): BodyWindowSearchState {
 	return {
 		representativeByUnit: new Map<number, BodyOccurrence>(),
+		representativesByVirtualOrder: [],
+		coveredUnitIndicesSorted: [],
+		coveredDistinctUnitCount: 0,
+		exactUnitCount: 0,
+		blockCountById: new Map<number, number>(),
+		blockIdsSorted: [],
+		blockStart: 0,
+		boundaryCrossingCount: 0,
+		approxWindowStart: 0,
+		approxWindowEnd: 0,
+		approxHeadTailSpan: 1,
+		approxMaxAdjacentGap: 0,
+		approxTotalGapMass: 0,
+		orderViolationCount: 0,
+		preservesQueryOrder: true,
 	};
 }
 
 function pushBodyWindowOccurrence(
 	state: BodyWindowSearchState,
 	occurrence: BodyOccurrence,
-): boolean {
+): BodyWindowPushResult {
 	const current = state.representativeByUnit.get(occurrence.unitIndex);
 	if (current != null && compareOccurrenceRepresentative(current, occurrence) <= 0) {
-		return false;
+		return { kind: "no_change" };
 	}
+	if (current == null) {
+		insertBodyWindowRepresentative(state, occurrence);
+		return {
+			kind: "insert_new_unit",
+			previousRepresentative: null,
+			nextRepresentative: occurrence,
+		};
+	}
+	replaceBodyWindowRepresentative(state, current, occurrence);
+	return {
+		kind: "replace_existing_unit",
+		previousRepresentative: current,
+		nextRepresentative: occurrence,
+	};
+}
+
+function insertBodyWindowRepresentative(
+	state: BodyWindowSearchState,
+	occurrence: BodyOccurrence,
+): void {
+	const unitInsertIndex = findSortedNumberInsertIndex(
+		state.coveredUnitIndicesSorted,
+		occurrence.unitIndex,
+	);
+	const previousUnitIndex = state.coveredUnitIndicesSorted[unitInsertIndex - 1];
+	const nextUnitIndex = state.coveredUnitIndicesSorted[unitInsertIndex];
+	state.orderViolationCount -= readOrderViolationCount(
+		state.representativeByUnit,
+		previousUnitIndex,
+		nextUnitIndex,
+	);
 	state.representativeByUnit.set(occurrence.unitIndex, occurrence);
-	return true;
+	state.coveredUnitIndicesSorted.splice(unitInsertIndex, 0, occurrence.unitIndex);
+	state.coveredDistinctUnitCount += 1;
+	if (occurrence.match.matchKind === "exact") {
+		state.exactUnitCount += 1;
+	}
+	state.orderViolationCount += readOrderViolationCount(
+		state.representativeByUnit,
+		previousUnitIndex,
+		occurrence.unitIndex,
+	);
+	state.orderViolationCount += readOrderViolationCount(
+		state.representativeByUnit,
+		occurrence.unitIndex,
+		nextUnitIndex,
+	);
+	insertRepresentativeByVirtualOrder(state.representativesByVirtualOrder, occurrence);
+	incrementBlockIdCount(state, occurrence.blockId);
+	refreshBodyWindowShortlistStateDerived(state);
+}
+
+function replaceBodyWindowRepresentative(
+	state: BodyWindowSearchState,
+	previousRepresentative: BodyOccurrence,
+	nextRepresentative: BodyOccurrence,
+): void {
+	const unitIndex = previousRepresentative.unitIndex;
+	const unitSortedIndex = state.coveredUnitIndicesSorted.indexOf(unitIndex);
+	const previousUnitIndex = state.coveredUnitIndicesSorted[unitSortedIndex - 1];
+	const nextUnitIndex = state.coveredUnitIndicesSorted[unitSortedIndex + 1];
+	state.orderViolationCount -= readOrderViolationCount(
+		state.representativeByUnit,
+		previousUnitIndex,
+		unitIndex,
+	);
+	state.orderViolationCount -= readOrderViolationCount(
+		state.representativeByUnit,
+		unitIndex,
+		nextUnitIndex,
+	);
+	removeRepresentativeByVirtualOrder(
+		state.representativesByVirtualOrder,
+		previousRepresentative,
+	);
+	decrementBlockIdCount(state, previousRepresentative.blockId);
+	if (previousRepresentative.match.matchKind === "exact") {
+		state.exactUnitCount -= 1;
+	}
+	state.representativeByUnit.set(unitIndex, nextRepresentative);
+	if (nextRepresentative.match.matchKind === "exact") {
+		state.exactUnitCount += 1;
+	}
+	insertRepresentativeByVirtualOrder(
+		state.representativesByVirtualOrder,
+		nextRepresentative,
+	);
+	incrementBlockIdCount(state, nextRepresentative.blockId);
+	state.orderViolationCount += readOrderViolationCount(
+		state.representativeByUnit,
+		previousUnitIndex,
+		unitIndex,
+	);
+	state.orderViolationCount += readOrderViolationCount(
+		state.representativeByUnit,
+		unitIndex,
+		nextUnitIndex,
+	);
+	refreshBodyWindowShortlistStateDerived(state);
 }
 
 function buildChainVirtualOccurrences(
@@ -807,6 +975,139 @@ function buildPrefilteredBodyScopes(
 	return selected;
 }
 
+function findSortedNumberInsertIndex(values: readonly number[], target: number): number {
+	let index = 0;
+	while (index < values.length && values[index] < target) {
+		index += 1;
+	}
+	return index;
+}
+
+function compareRepresentativeVirtualOrder(
+	left: BodyOccurrence,
+	right: BodyOccurrence,
+): number {
+	if (left.virtualPosition !== right.virtualPosition) {
+		return left.virtualPosition - right.virtualPosition;
+	}
+	return left.unitIndex - right.unitIndex;
+}
+
+function insertRepresentativeByVirtualOrder(
+	representativesByVirtualOrder: BodyOccurrence[],
+	occurrence: BodyOccurrence,
+): void {
+	let insertIndex = 0;
+	while (
+		insertIndex < representativesByVirtualOrder.length &&
+		compareRepresentativeVirtualOrder(
+			representativesByVirtualOrder[insertIndex],
+			occurrence,
+		) <= 0
+	) {
+		insertIndex += 1;
+	}
+	representativesByVirtualOrder.splice(insertIndex, 0, occurrence);
+}
+
+function removeRepresentativeByVirtualOrder(
+	representativesByVirtualOrder: BodyOccurrence[],
+	occurrence: BodyOccurrence,
+): void {
+	const index = representativesByVirtualOrder.findIndex(
+		(candidate) => candidate === occurrence,
+	);
+	if (index >= 0) {
+		representativesByVirtualOrder.splice(index, 1);
+		return;
+	}
+	const fallbackIndex = representativesByVirtualOrder.findIndex(
+		(candidate) =>
+			candidate.unitIndex === occurrence.unitIndex &&
+			candidate.virtualPosition === occurrence.virtualPosition &&
+			candidate.virtualEndPosition === occurrence.virtualEndPosition &&
+			candidate.blockId === occurrence.blockId &&
+			candidate.match.familyId === occurrence.match.familyId,
+	);
+	if (fallbackIndex >= 0) {
+		representativesByVirtualOrder.splice(fallbackIndex, 1);
+	}
+}
+
+function incrementBlockIdCount(
+	state: BodyWindowSearchState,
+	blockId: number,
+): void {
+	const nextCount = (state.blockCountById.get(blockId) ?? 0) + 1;
+	state.blockCountById.set(blockId, nextCount);
+	if (nextCount === 1) {
+		const insertIndex = findSortedNumberInsertIndex(state.blockIdsSorted, blockId);
+		state.blockIdsSorted.splice(insertIndex, 0, blockId);
+	}
+}
+
+function decrementBlockIdCount(
+	state: BodyWindowSearchState,
+	blockId: number,
+): void {
+	const currentCount = state.blockCountById.get(blockId) ?? 0;
+	if (currentCount <= 1) {
+		state.blockCountById.delete(blockId);
+		const blockIndex = state.blockIdsSorted.indexOf(blockId);
+		if (blockIndex >= 0) {
+			state.blockIdsSorted.splice(blockIndex, 1);
+		}
+		return;
+	}
+	state.blockCountById.set(blockId, currentCount - 1);
+}
+
+function readOrderViolationCount(
+	representativeByUnit: ReadonlyMap<number, BodyOccurrence>,
+	leftUnitIndex: number | undefined,
+	rightUnitIndex: number | undefined,
+): number {
+	if (leftUnitIndex == null || rightUnitIndex == null) {
+		return 0;
+	}
+	const leftRepresentative = representativeByUnit.get(leftUnitIndex);
+	const rightRepresentative = representativeByUnit.get(rightUnitIndex);
+	if (leftRepresentative == null || rightRepresentative == null) {
+		return 0;
+	}
+	return leftRepresentative.virtualPosition <= rightRepresentative.virtualPosition ? 0 : 1;
+}
+
+function refreshBodyWindowShortlistStateDerived(
+	state: BodyWindowSearchState,
+): void {
+	state.blockStart = state.blockIdsSorted[0] ?? 0;
+	state.boundaryCrossingCount = Math.max(0, state.blockIdsSorted.length - 1);
+	const firstRepresentative = state.representativesByVirtualOrder[0];
+	const lastRepresentative =
+		state.representativesByVirtualOrder[state.representativesByVirtualOrder.length - 1];
+	state.approxWindowStart = firstRepresentative?.virtualPosition ?? 0;
+	state.approxWindowEnd = lastRepresentative?.virtualEndPosition ?? state.approxWindowStart;
+	state.approxHeadTailSpan = Math.max(
+		1,
+		state.approxWindowEnd - state.approxWindowStart,
+	);
+	let approxMaxAdjacentGap = 0;
+	let approxTotalGapMass = 0;
+	for (let index = 1; index < state.representativesByVirtualOrder.length; index += 1) {
+		const approxGap = Math.max(
+			0,
+			state.representativesByVirtualOrder[index].virtualPosition -
+				state.representativesByVirtualOrder[index - 1].virtualEndPosition,
+		);
+		approxMaxAdjacentGap = Math.max(approxMaxAdjacentGap, approxGap);
+		approxTotalGapMass += approxGap;
+	}
+	state.approxMaxAdjacentGap = approxMaxAdjacentGap;
+	state.approxTotalGapMass = approxTotalGapMass;
+	state.preservesQueryOrder = state.orderViolationCount === 0;
+}
+
 function buildBodyScopePrefilter(
 	base: ResidentBase,
 	blockIds: readonly number[],
@@ -898,73 +1199,25 @@ function summarizeWindowCandidate(
 			representativeByUnit.set(occurrence.unitIndex, occurrence);
 		}
 	}
-	return summarizeWindowCandidateFromRepresentatives(
-		representativeByUnit,
-		headingFamilyIds,
-	);
+	const state = createBodyWindowSearchState();
+	for (const representative of representativeByUnit.values()) {
+		insertBodyWindowRepresentative(state, representative);
+	}
+	return materializeBodyWindowCandidateFromShortlistState(state, headingFamilyIds);
 }
 
-function summarizeWindowCandidateFromRepresentatives(
-	representativeByUnit: ReadonlyMap<number, BodyOccurrence>,
+function materializeBodyWindowCandidateFromShortlistState(
+	state: BodyWindowSearchState,
 	headingFamilyIds: ReadonlySet<number>,
 ): BodyWindowCandidate | null {
-	const representatives = [...representativeByUnit.values()].sort((left, right) => {
-		if (left.virtualPosition !== right.virtualPosition) {
-			return left.virtualPosition - right.virtualPosition;
-		}
-		return left.unitIndex - right.unitIndex;
-	});
-	const coveredUnitIndices = [...representativeByUnit.keys()].sort((left, right) => left - right);
+	const representatives = [...state.representativesByVirtualOrder];
+	const coveredUnitIndices = [...state.coveredUnitIndicesSorted];
 	if (coveredUnitIndices.length === 0) {
 		return null;
 	}
-	const minPosition = representatives[0]?.ordinalVirtualPosition ?? 0;
-	const maxPosition =
-		representatives[representatives.length - 1]?.ordinalVirtualPosition ?? minPosition;
-	const windowWidth = maxPosition - minPosition + 1;
-	let totalGap = 0;
-	let maxAdjacentGap = 0;
-	const approxWindowStart = representatives[0]?.virtualPosition ?? 0;
-	const approxWindowEnd =
-		representatives[representatives.length - 1]?.virtualEndPosition ??
-		approxWindowStart;
-	let approxMaxAdjacentGap = 0;
-	let approxTotalGapMass = 0;
-	for (let index = 1; index < representatives.length; index += 1) {
-		const gap = Math.max(
-			0,
-			representatives[index].ordinalVirtualPosition -
-				representatives[index - 1].ordinalVirtualPosition -
-				1,
-		);
-		totalGap += gap;
-		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
-		const approxGap = Math.max(
-			0,
-			representatives[index].virtualPosition -
-				representatives[index - 1].virtualEndPosition,
-		);
-		approxMaxAdjacentGap = Math.max(approxMaxAdjacentGap, approxGap);
-		approxTotalGapMass += approxGap;
-	}
-	const blockIds = [...new Set(representatives.map((occurrence) => occurrence.blockId))].sort(
-		(left, right) => left - right,
-	);
-	const exactUnitCount = coveredUnitIndices.filter((unitIndex) => {
-		const representative = representativeByUnit.get(unitIndex);
-		return representative?.match.matchKind === "exact";
-	}).length;
-	const preservesQueryOrder = coveredUnitIndices.every((unitIndex, index) => {
-		if (index === 0) {
-			return true;
-		}
-		const previous = representativeByUnit.get(coveredUnitIndices[index - 1]);
-		const current = representativeByUnit.get(unitIndex);
-		return (previous?.virtualPosition ?? 0) <= (current?.virtualPosition ?? 0);
-	});
-	const boundaryCrossingCount = Math.max(0, blockIds.length - 1);
+	const ordinalSummary = buildOrdinalWindowSummary(representatives);
 	const headingCorroborationUnitIndices = coveredUnitIndices.filter((unitIndex) => {
-		const representative = representativeByUnit.get(unitIndex);
+		const representative = state.representativeByUnit.get(unitIndex);
 		return (
 			representative != null &&
 			headingFamilyIds.has(representative.match.familyId)
@@ -972,33 +1225,59 @@ function summarizeWindowCandidateFromRepresentatives(
 	});
 	return {
 		tier: "bodyWindow",
-		blockIds,
-		boundaryCrossingCount,
+		blockIds: [...state.blockIdsSorted],
+		boundaryCrossingCount: state.boundaryCrossingCount,
 		coveredUnitIndices,
 		coveredDistinctUnitCount: coveredUnitIndices.length,
 		containerCompactness:
 			coveredUnitIndices.length * 1000 -
-			Math.max(1, approxWindowEnd - approxWindowStart) * 16 -
-			approxTotalGapMass * 10 -
-			approxMaxAdjacentGap * 12 -
-			boundaryCrossingCount * 80,
-		exactUnitCount,
-		windowWidth,
-		gapCount: totalGap,
-		density: coveredUnitIndices.length / Math.max(approxWindowEnd - approxWindowStart, 1),
-		maxAdjacentGap,
-		preservesQueryOrder,
-		windowStart: minPosition,
-		approxWindowStart,
-		approxWindowEnd,
-		approxHeadTailSpan: Math.max(1, approxWindowEnd - approxWindowStart),
-		approxMaxAdjacentGap,
-		approxTotalGapMass,
+			state.approxHeadTailSpan * 16 -
+			state.approxTotalGapMass * 10 -
+			state.approxMaxAdjacentGap * 12 -
+			state.boundaryCrossingCount * 80,
+		exactUnitCount: state.exactUnitCount,
+		windowWidth: ordinalSummary.windowWidth,
+		gapCount: ordinalSummary.gapCount,
+		density: coveredUnitIndices.length / Math.max(state.approxHeadTailSpan, 1),
+		maxAdjacentGap: ordinalSummary.maxAdjacentGap,
+		preservesQueryOrder: state.preservesQueryOrder,
+		windowStart: ordinalSummary.windowStart,
+		approxWindowStart: state.approxWindowStart,
+		approxWindowEnd: state.approxWindowEnd,
+		approxHeadTailSpan: state.approxHeadTailSpan,
+		approxMaxAdjacentGap: state.approxMaxAdjacentGap,
+		approxTotalGapMass: state.approxTotalGapMass,
 		representatives,
 		headingCorroboration: {
 			coveredUnitIndices: headingCorroborationUnitIndices,
 			unitCount: headingCorroborationUnitIndices.length,
 		},
+	};
+}
+
+function buildOrdinalWindowSummary(
+	representatives: readonly BodyOccurrence[],
+): OrdinalWindowSummary {
+	const minPosition = representatives[0]?.ordinalVirtualPosition ?? 0;
+	const maxPosition =
+		representatives[representatives.length - 1]?.ordinalVirtualPosition ?? minPosition;
+	let gapCount = 0;
+	let maxAdjacentGap = 0;
+	for (let index = 1; index < representatives.length; index += 1) {
+		const gap = Math.max(
+			0,
+			representatives[index].ordinalVirtualPosition -
+				representatives[index - 1].ordinalVirtualPosition -
+				1,
+		);
+		gapCount += gap;
+		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
+	}
+	return {
+		windowStart: minPosition,
+		windowWidth: maxPosition - minPosition + 1,
+		gapCount,
+		maxAdjacentGap,
 	};
 }
 
@@ -1019,8 +1298,90 @@ function compareOccurrenceRepresentative(left: BodyOccurrence, right: BodyOccurr
 	return left.match.familyId - right.match.familyId;
 }
 
-function passesBodyWindowAdmission(candidate: BodyWindowCandidate): boolean {
-	return passesBlockShortlistAdmission(candidate);
+function passesBodyWindowShortlistAdmission(state: BodyWindowSearchState): boolean {
+	return passesBlockShortlistAdmission({
+		coveredDistinctUnitCount: state.coveredDistinctUnitCount,
+		boundaryCrossingCount: state.boundaryCrossingCount,
+		approxMaxAdjacentGap: state.approxMaxAdjacentGap,
+		approxHeadTailSpan: state.approxHeadTailSpan,
+	});
+}
+
+function snapshotBodyWindowShortlistState(
+	state: BodyWindowSearchState,
+): BodyWindowShortlistSnapshot {
+	return {
+		blockStart: state.blockStart,
+		boundaryCrossingCount: state.boundaryCrossingCount,
+		coveredUnitIndices: [...state.coveredUnitIndicesSorted],
+		coveredDistinctUnitCount: state.coveredDistinctUnitCount,
+		representatives: [...state.representativesByVirtualOrder],
+		approxWindowStart: state.approxWindowStart,
+		approxWindowEnd: state.approxWindowEnd,
+		approxHeadTailSpan: state.approxHeadTailSpan,
+		approxMaxAdjacentGap: state.approxMaxAdjacentGap,
+		approxTotalGapMass: state.approxTotalGapMass,
+		preservesQueryOrder: state.preservesQueryOrder,
+	};
+}
+
+function compareBodyWindowShortlistState(
+	left: BodyWindowSearchState,
+	right: BodyWindowShortlistSnapshot,
+): number {
+	if (left.coveredDistinctUnitCount !== right.coveredDistinctUnitCount) {
+		return right.coveredDistinctUnitCount - left.coveredDistinctUnitCount;
+	}
+	if (left.preservesQueryOrder !== right.preservesQueryOrder) {
+		return left.preservesQueryOrder ? -1 : 1;
+	}
+	if (left.approxHeadTailSpan !== right.approxHeadTailSpan) {
+		return left.approxHeadTailSpan - right.approxHeadTailSpan;
+	}
+	if (left.approxMaxAdjacentGap !== right.approxMaxAdjacentGap) {
+		return left.approxMaxAdjacentGap - right.approxMaxAdjacentGap;
+	}
+	if (left.approxTotalGapMass !== right.approxTotalGapMass) {
+		return left.approxTotalGapMass - right.approxTotalGapMass;
+	}
+	if (left.boundaryCrossingCount !== right.boundaryCrossingCount) {
+		return left.boundaryCrossingCount - right.boundaryCrossingCount;
+	}
+	if (left.blockStart !== right.blockStart) {
+		return left.blockStart - right.blockStart;
+	}
+	if (left.approxWindowStart !== right.approxWindowStart) {
+		return left.approxWindowStart - right.approxWindowStart;
+	}
+	return compareBodyWindowRepresentativeOrder(
+		left.representativesByVirtualOrder,
+		right.representatives,
+	);
+}
+
+function compareBodyWindowRepresentativeOrder(
+	left: readonly BodyOccurrence[],
+	right: readonly BodyOccurrence[],
+): number {
+	const length = Math.min(left.length, right.length);
+	for (let index = 0; index < length; index += 1) {
+		if (left[index].unitIndex !== right[index].unitIndex) {
+			return left[index].unitIndex - right[index].unitIndex;
+		}
+		if (left[index].virtualPosition !== right[index].virtualPosition) {
+			return left[index].virtualPosition - right[index].virtualPosition;
+		}
+		if (left[index].virtualEndPosition !== right[index].virtualEndPosition) {
+			return left[index].virtualEndPosition - right[index].virtualEndPosition;
+		}
+		if (left[index].blockId !== right[index].blockId) {
+			return left[index].blockId - right[index].blockId;
+		}
+		if (left[index].match.familyId !== right[index].match.familyId) {
+			return left[index].match.familyId - right[index].match.familyId;
+		}
+	}
+	return left.length - right.length;
 }
 
 function compareBodyWindowCandidate(
