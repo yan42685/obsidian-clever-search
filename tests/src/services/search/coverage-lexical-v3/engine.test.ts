@@ -357,7 +357,7 @@ describe("coverage lexical v3 engine", () => {
 		expect(result.rankedCandidates[1].bodyWindowContainer).toBeNull();
 	});
 
-	test("adjacent chunk evidence can still form a bodyWindow under the lightweight boundary penalty", () => {
+	test("adjacent chunk evidence can still form a bodyWindow with zero cross-block penalty", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const adjacentChunkContent = buildAdjacentChunkBoundaryContent();
 		engine.buildResidentBase([
@@ -406,6 +406,24 @@ describe("coverage lexical v3 engine", () => {
 
 		expect(result.rankedCandidates).toHaveLength(1);
 		expect(result.rankedCandidates[0].bodyWindowContainer).toBeNull();
+	});
+
+	test("compact body evidence survives many short intervening tokens under approximate locality", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/compact-many-tokens.md",
+				basename: "notes",
+				folder: "latin",
+				content: "alpha a a a a a omega",
+			}),
+		]);
+
+		const result = engine.search("alpha omega");
+
+		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates[0].bodyWindowContainer).not.toBeNull();
+		expect(result.rankedCandidates[0].bodyWindowContainer?.coveredDistinctUnitCount).toBe(2);
 	});
 
 	test("prefix-only body hits prefer smaller completion gain and then non-compound tokens", () => {

@@ -1,4 +1,13 @@
 import type { ResidentBase } from "../layout/types";
+import {
+	attachBlockShortlistSketch,
+	buildBlockShortlistPriorityScore,
+	compareBlockShortlistItems,
+	passesBlockShortlistAdmission,
+	type BlockShortlistItem,
+	type BlockShortlistRepresentative,
+	type BlockShortlistSketch,
+} from "../body-locality/shortlist";
 import type { V3QueryAnalysis } from "../query";
 import {
 	getBodyBlockExactFamilyIds,
@@ -36,8 +45,10 @@ import type {
 	RouteContainer,
 } from "./types";
 
-const CHAIN_BOUNDARY_PENALTY = 2;
+const CHAIN_BOUNDARY_PENALTY = 0;
 const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
+const BLOCK_SHORTLIST_LIMIT = 6;
+const BODY_WINDOW_PREFILTER_PER_BUCKET = 4;
 
 type BodyOccurrence = Readonly<{
 	blockId: number;
@@ -69,7 +80,25 @@ type BodyWindowCandidate = Readonly<{
 	approxWindowEnd: number;
 	approxHeadTailSpan: number;
 	approxMaxAdjacentGap: number;
+	approxTotalGapMass: number;
+	representatives: readonly BodyOccurrence[];
 	headingCorroboration: HeadingCorroboration;
+}>;
+
+type BodyWindowSelection = Readonly<{
+	bestCandidate: BodyWindowCandidate | null;
+	shortlist: BlockShortlistSketch;
+}>;
+
+type BodyScopePrefilter = Readonly<{
+	blockIds: readonly number[];
+	coveredDistinctUnitCount: number;
+	preservesQueryOrder: boolean;
+	approxWindowStart: number;
+	approxWindowEnd: number;
+	approxHeadTailSpan: number;
+	priorityScore: number;
+	virtualOccurrences: readonly BodyOccurrence[];
 }>;
 
 type PositionedFamilyOccurrence = Readonly<{
@@ -182,13 +211,14 @@ export function buildPackingProfile(
 		}
 	}
 
-	const bestBodyWindowContainer = chooseBestBodyWindow(
+	const bodyWindowSelection = chooseBestBodyWindow(
 		base,
 		bodyOccurrencesByBlockId,
 		bodyApproxSpanByBlockId,
 		bodyOrdinalSpanByBlockId,
 		headingFamilyIds,
 	);
+	const bestBodyWindowContainer = bodyWindowSelection.bestCandidate;
 	const bestBodyWindowBlockIds = new Set<number>(
 		bestBodyWindowContainer?.blockIds ?? [],
 	);
@@ -231,7 +261,7 @@ export function buildPackingProfile(
 		bestBodyWindowBlockIds,
 	);
 	const coverageGate = buildCoverageGateProfile(queryAnalysis, realizedFamilies);
-	return {
+	const profile: EvidencePackingProfile = {
 		docId: candidateRecall.docId,
 		path: getDocPath(base, candidateRecall.docId),
 		stableKey: getDocStableKey(base, candidateRecall.docId),
@@ -261,6 +291,8 @@ export function buildPackingProfile(
 		secondStrongestContainer,
 		fragmentationPenalty,
 	};
+	attachBlockShortlistSketch(profile, bodyWindowSelection.shortlist);
+	return profile;
 }
 
 function mergeCandidateSpecificHanConfirmedMatches(
@@ -444,64 +476,42 @@ function chooseBestBodyWindow(
 	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
 	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
 	headingFamilyIds: ReadonlySet<number>,
-): BodyWindowContainer | null {
+): BodyWindowSelection {
 	const shortlistedBlockIds = [...bodyOccurrencesByBlockId.keys()].sort((left, right) => {
 		const leftOrdinal = base.bodyBlocks.blockOrdinalByBlockId[left] ?? left;
 		const rightOrdinal = base.bodyBlocks.blockOrdinalByBlockId[right] ?? right;
 		return leftOrdinal - rightOrdinal || left - right;
 	});
-	const candidates: BodyWindowCandidate[] = [];
-	for (const blockId of shortlistedBlockIds) {
-		const singleCandidate = buildBodyWindowCandidate(
-			base,
-			[blockId],
-			bodyOccurrencesByBlockId,
-			bodyApproxSpanByBlockId,
-			bodyOrdinalSpanByBlockId,
-			headingFamilyIds,
-		);
-		if (singleCandidate != null) {
-			candidates.push(singleCandidate);
-		}
-	}
-	for (let index = 0; index < shortlistedBlockIds.length - 1; index += 1) {
-		const leftBlockId = shortlistedBlockIds[index];
-		const rightBlockId = shortlistedBlockIds[index + 1];
-		const leftOrdinal = base.bodyBlocks.blockOrdinalByBlockId[leftBlockId] ?? leftBlockId;
-		const rightOrdinal = base.bodyBlocks.blockOrdinalByBlockId[rightBlockId] ?? rightBlockId;
-		if (rightOrdinal !== leftOrdinal + 1) {
-			continue;
-		}
-		const pairCandidate = buildBodyWindowCandidate(
-			base,
-			[leftBlockId, rightBlockId],
-			bodyOccurrencesByBlockId,
-			bodyApproxSpanByBlockId,
-			bodyOrdinalSpanByBlockId,
-			headingFamilyIds,
-		);
-		if (pairCandidate != null) {
-			candidates.push(pairCandidate);
-		}
-	}
-	return candidates.sort(compareBodyWindowCandidate)[0] ?? null;
-}
-
-function buildBodyWindowCandidate(
-	base: ResidentBase,
-	blockIds: readonly number[],
-	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
-	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
-	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
-	headingFamilyIds: ReadonlySet<number>,
-): BodyWindowCandidate | null {
-	const virtualOccurrences = buildChainVirtualOccurrences(
+	let bestCandidate: BodyWindowCandidate | null = null;
+	const shortlist: BlockShortlistItem[] = [];
+	const prefilteredScopes = buildPrefilteredBodyScopes(
 		base,
-		blockIds,
+		shortlistedBlockIds,
 		bodyOccurrencesByBlockId,
 		bodyApproxSpanByBlockId,
 		bodyOrdinalSpanByBlockId,
 	);
+	for (const scope of prefilteredScopes) {
+		const candidate = buildBodyWindowCandidateFromVirtualOccurrences(
+			scope.virtualOccurrences,
+			headingFamilyIds,
+		);
+		if (candidate == null) {
+			continue;
+		}
+		bestCandidate = pickStrongerBodyWindowCandidate(bestCandidate, candidate);
+		pushShortlistCandidate(shortlist, toBlockShortlistItem(base, candidate));
+	}
+	return {
+		bestCandidate,
+		shortlist,
+	};
+}
+
+function buildBodyWindowCandidateFromVirtualOccurrences(
+	virtualOccurrences: readonly BodyOccurrence[],
+	headingFamilyIds: ReadonlySet<number>,
+): BodyWindowCandidate | null {
 	if (virtualOccurrences.length === 0) {
 		return null;
 	}
@@ -561,6 +571,137 @@ function buildChainVirtualOccurrences(
 	});
 }
 
+function buildPrefilteredBodyScopes(
+	base: ResidentBase,
+	shortlistedBlockIds: readonly number[],
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
+	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
+): BodyScopePrefilter[] {
+	const scopes: BodyScopePrefilter[] = [];
+	for (const blockId of shortlistedBlockIds) {
+		const scope = buildBodyScopePrefilter(
+			base,
+			[blockId],
+			bodyOccurrencesByBlockId,
+			bodyApproxSpanByBlockId,
+			bodyOrdinalSpanByBlockId,
+		);
+		if (scope != null) {
+			scopes.push(scope);
+		}
+	}
+	for (let index = 0; index < shortlistedBlockIds.length - 1; index += 1) {
+		const leftBlockId = shortlistedBlockIds[index];
+		const rightBlockId = shortlistedBlockIds[index + 1];
+		const leftOrdinal = base.bodyBlocks.blockOrdinalByBlockId[leftBlockId] ?? leftBlockId;
+		const rightOrdinal = base.bodyBlocks.blockOrdinalByBlockId[rightBlockId] ?? rightBlockId;
+		if (rightOrdinal !== leftOrdinal + 1) {
+			continue;
+		}
+		const scope = buildBodyScopePrefilter(
+			base,
+			[leftBlockId, rightBlockId],
+			bodyOccurrencesByBlockId,
+			bodyApproxSpanByBlockId,
+			bodyOrdinalSpanByBlockId,
+		);
+		if (scope != null) {
+			scopes.push(scope);
+		}
+	}
+	const buckets = new Map<number, BodyScopePrefilter[]>();
+	for (const scope of scopes) {
+		const bucket = buckets.get(scope.coveredDistinctUnitCount) ?? [];
+		bucket.push(scope);
+		buckets.set(scope.coveredDistinctUnitCount, bucket);
+	}
+	const selected: BodyScopePrefilter[] = [];
+	for (const unitCount of [...buckets.keys()].sort((left, right) => right - left)) {
+		const bucket = buckets.get(unitCount) ?? [];
+		bucket.sort(compareBodyScopePrefilter);
+		selected.push(...bucket.slice(0, BODY_WINDOW_PREFILTER_PER_BUCKET));
+	}
+	return selected;
+}
+
+function buildBodyScopePrefilter(
+	base: ResidentBase,
+	blockIds: readonly number[],
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
+	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
+): BodyScopePrefilter | null {
+	const virtualOccurrences = buildChainVirtualOccurrences(
+		base,
+		blockIds,
+		bodyOccurrencesByBlockId,
+		bodyApproxSpanByBlockId,
+		bodyOrdinalSpanByBlockId,
+	);
+	if (virtualOccurrences.length === 0) {
+		return null;
+	}
+	const representativeByUnit = new Map<number, BodyOccurrence>();
+	for (const occurrence of virtualOccurrences) {
+		const existing = representativeByUnit.get(occurrence.unitIndex);
+		if (existing == null || compareOccurrenceRepresentative(occurrence, existing) < 0) {
+			representativeByUnit.set(occurrence.unitIndex, occurrence);
+		}
+	}
+	if (representativeByUnit.size < 2) {
+		return null;
+	}
+	const representatives = [...representativeByUnit.values()].sort((left, right) => {
+		if (left.virtualPosition !== right.virtualPosition) {
+			return left.virtualPosition - right.virtualPosition;
+		}
+		return left.unitIndex - right.unitIndex;
+	});
+	const approxWindowStart = representatives[0]?.virtualPosition ?? 0;
+	const approxWindowEnd =
+		representatives[representatives.length - 1]?.virtualEndPosition ?? approxWindowStart;
+	const coveredUnitIndices = [...representativeByUnit.keys()].sort((left, right) => left - right);
+	const preservesQueryOrder = coveredUnitIndices.every((unitIndex, index) => {
+		if (index === 0) {
+			return true;
+		}
+		const previous = representativeByUnit.get(coveredUnitIndices[index - 1]);
+		const current = representativeByUnit.get(unitIndex);
+		return (previous?.virtualPosition ?? 0) <= (current?.virtualPosition ?? 0);
+	});
+	return {
+		blockIds,
+		coveredDistinctUnitCount: representativeByUnit.size,
+		preservesQueryOrder,
+		approxWindowStart,
+		approxWindowEnd,
+		approxHeadTailSpan: Math.max(1, approxWindowEnd - approxWindowStart),
+		priorityScore:
+			representativeByUnit.size * 10000 +
+			(preservesQueryOrder ? 500 : 0) -
+			Math.max(1, approxWindowEnd - approxWindowStart) * 12 -
+			(blockIds.length - 1) * 40,
+		virtualOccurrences,
+	};
+}
+
+function compareBodyScopePrefilter(left: BodyScopePrefilter, right: BodyScopePrefilter): number {
+	if (left.coveredDistinctUnitCount !== right.coveredDistinctUnitCount) {
+		return right.coveredDistinctUnitCount - left.coveredDistinctUnitCount;
+	}
+	if (left.preservesQueryOrder !== right.preservesQueryOrder) {
+		return left.preservesQueryOrder ? -1 : 1;
+	}
+	if (left.approxHeadTailSpan !== right.approxHeadTailSpan) {
+		return left.approxHeadTailSpan - right.approxHeadTailSpan;
+	}
+	if (left.priorityScore !== right.priorityScore) {
+		return right.priorityScore - left.priorityScore;
+	}
+	return compareBlockIdLists(left.blockIds, right.blockIds);
+}
+
 function summarizeWindowCandidate(
 	windowOccurrences: readonly BodyOccurrence[],
 	headingFamilyIds: ReadonlySet<number>,
@@ -596,6 +737,7 @@ function summarizeWindowCandidate(
 		representatives[representatives.length - 1]?.virtualEndPosition ??
 		approxWindowStart;
 	let approxMaxAdjacentGap = 0;
+	let approxTotalGapMass = 0;
 	for (let index = 1; index < representatives.length; index += 1) {
 		const gap = Math.max(
 			0,
@@ -605,14 +747,13 @@ function summarizeWindowCandidate(
 		);
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
-		approxMaxAdjacentGap = Math.max(
-			approxMaxAdjacentGap,
-			Math.max(
-				0,
-				representatives[index].virtualPosition -
-					representatives[index - 1].virtualEndPosition,
-			),
+		const approxGap = Math.max(
+			0,
+			representatives[index].virtualPosition -
+				representatives[index - 1].virtualEndPosition,
 		);
+		approxMaxAdjacentGap = Math.max(approxMaxAdjacentGap, approxGap);
+		approxTotalGapMass += approxGap;
 	}
 	const blockIds = [...new Set(representatives.map((occurrence) => occurrence.blockId))].sort(
 		(left, right) => left - right,
@@ -630,7 +771,6 @@ function summarizeWindowCandidate(
 		return (previous?.virtualPosition ?? 0) <= (current?.virtualPosition ?? 0);
 	});
 	const boundaryCrossingCount = Math.max(0, blockIds.length - 1);
-	const density = coveredUnitIndices.length / Math.max(windowWidth, 1);
 	const headingCorroborationUnitIndices = coveredUnitIndices.filter((unitIndex) => {
 		const representative = representativeByUnit.get(unitIndex);
 		return (
@@ -646,13 +786,14 @@ function summarizeWindowCandidate(
 		coveredDistinctUnitCount: coveredUnitIndices.length,
 		containerCompactness:
 			coveredUnitIndices.length * 1000 -
-			windowWidth * 40 -
-			totalGap * 20 -
+			Math.max(1, approxWindowEnd - approxWindowStart) * 16 -
+			approxTotalGapMass * 10 -
+			approxMaxAdjacentGap * 12 -
 			boundaryCrossingCount * 80,
 		exactUnitCount,
 		windowWidth,
 		gapCount: totalGap,
-		density,
+		density: coveredUnitIndices.length / Math.max(approxWindowEnd - approxWindowStart, 1),
 		maxAdjacentGap,
 		preservesQueryOrder,
 		windowStart: minPosition,
@@ -660,6 +801,8 @@ function summarizeWindowCandidate(
 		approxWindowEnd,
 		approxHeadTailSpan: Math.max(1, approxWindowEnd - approxWindowStart),
 		approxMaxAdjacentGap,
+		approxTotalGapMass,
+		representatives,
 		headingCorroboration: {
 			coveredUnitIndices: headingCorroborationUnitIndices,
 			unitCount: headingCorroborationUnitIndices.length,
@@ -685,46 +828,75 @@ function compareOccurrenceRepresentative(left: BodyOccurrence, right: BodyOccurr
 }
 
 function passesBodyWindowAdmission(candidate: BodyWindowCandidate): boolean {
-	return (
-		candidate.coveredDistinctUnitCount >= 2 &&
-		candidate.boundaryCrossingCount <= 1 &&
-		candidate.windowWidth <=
-			candidate.coveredDistinctUnitCount * 4 + candidate.boundaryCrossingCount * 3 &&
-		candidate.maxAdjacentGap <= 4 + candidate.boundaryCrossingCount * 2 &&
-		candidate.approxMaxAdjacentGap <= 15 &&
-		candidate.approxHeadTailSpan <= 160
-	);
+	return passesBlockShortlistAdmission(candidate);
 }
 
 function compareBodyWindowCandidate(
 	left: BodyWindowCandidate,
 	right: BodyWindowCandidate,
 ): number {
-	if (left.coveredDistinctUnitCount !== right.coveredDistinctUnitCount) {
-		return right.coveredDistinctUnitCount - left.coveredDistinctUnitCount;
+	return compareBlockShortlistItems(
+		toBlockShortlistItem(null, left),
+		toBlockShortlistItem(null, right),
+	);
+}
+
+function pickStrongerBodyWindowCandidate(
+	current: BodyWindowCandidate | null,
+	next: BodyWindowCandidate,
+): BodyWindowCandidate {
+	if (current == null || compareBodyWindowCandidate(next, current) < 0) {
+		return next;
 	}
-	if (left.exactUnitCount !== right.exactUnitCount) {
-		return right.exactUnitCount - left.exactUnitCount;
+	return current;
+}
+
+function pushShortlistCandidate(
+	shortlist: BlockShortlistItem[],
+	item: BlockShortlistItem,
+): void {
+	shortlist.push(item);
+	shortlist.sort(compareBlockShortlistItems);
+	if (shortlist.length > BLOCK_SHORTLIST_LIMIT) {
+		shortlist.length = BLOCK_SHORTLIST_LIMIT;
 	}
-	if (left.preservesQueryOrder !== right.preservesQueryOrder) {
-		return left.preservesQueryOrder ? -1 : 1;
-	}
-	if (left.windowWidth !== right.windowWidth) {
-		return left.windowWidth - right.windowWidth;
-	}
-	if (left.maxAdjacentGap !== right.maxAdjacentGap) {
-		return left.maxAdjacentGap - right.maxAdjacentGap;
-	}
-	if (left.gapCount !== right.gapCount) {
-		return left.gapCount - right.gapCount;
-	}
-	if (left.windowStart !== right.windowStart) {
-		return left.windowStart - right.windowStart;
-	}
-	if (left.boundaryCrossingCount !== right.boundaryCrossingCount) {
-		return left.boundaryCrossingCount - right.boundaryCrossingCount;
-	}
-	return compareBlockIdLists(left.blockIds, right.blockIds);
+}
+
+function toBlockShortlistItem(
+	base: ResidentBase | null,
+	candidate: BodyWindowCandidate,
+): BlockShortlistItem {
+	const representatives: BlockShortlistRepresentative[] = candidate.representatives.map(
+		(representative) => ({
+			queryUnitIndex: representative.unitIndex,
+			familyId: representative.match.familyId,
+			familyText: representative.match.familyText,
+			matchKind: representative.match.matchKind,
+			blockId: representative.blockId,
+			approxStart: representative.virtualPosition,
+			approxEnd: representative.virtualEndPosition,
+		}),
+	);
+	const blockStartId = candidate.blockIds[0] ?? 0;
+	const blockEndId = candidate.blockIds[candidate.blockIds.length - 1] ?? 0;
+	return {
+		blockStart:
+			base?.bodyBlocks.blockOrdinalByBlockId[blockStartId] ?? blockStartId,
+		blockEnd:
+			base?.bodyBlocks.blockOrdinalByBlockId[blockEndId] ?? blockEndId,
+		blockIds: candidate.blockIds,
+		boundaryCrossingCount: candidate.boundaryCrossingCount,
+		coveredUnitIndices: candidate.coveredUnitIndices,
+		coveredDistinctUnitCount: candidate.coveredDistinctUnitCount,
+		representatives,
+		approxWindowStart: candidate.approxWindowStart,
+		approxWindowEnd: candidate.approxWindowEnd,
+		approxMaxAdjacentGap: candidate.approxMaxAdjacentGap,
+		approxHeadTailSpan: candidate.approxHeadTailSpan,
+		approxTotalGapMass: candidate.approxTotalGapMass,
+		preservesQueryOrder: candidate.preservesQueryOrder,
+		priorityScore: buildBlockShortlistPriorityScore(candidate),
+	};
 }
 
 function compareBlockIdLists(left: readonly number[], right: readonly number[]): number {

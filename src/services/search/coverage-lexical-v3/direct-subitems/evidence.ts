@@ -1,4 +1,5 @@
 ﻿import type { ResidentBase } from "../layout/types";
+import { getAttachedBlockShortlistSketch } from "../body-locality/shortlist";
 import type { V3QueryAnalysis, V3QueryUnit } from "../query/analysis";
 import {
 	createV3BodyBlockChunkRanges,
@@ -11,10 +12,12 @@ import type {
 	V3DirectSubitemCandidate,
 	V3DirectSubitemOccurrence,
 } from "./contracts";
+import { compareV3DirectSubitemCandidates } from "./ranker";
 
 const DIRECT_SUBITEM_WEIGHTED_GAP_LIMIT = 15;
 const DIRECT_SUBITEM_HAN_GAP_WEIGHT = 0.65;
 const DIRECT_SUBITEM_OTHER_GAP_WEIGHT = 0.25;
+const DIRECT_SUBITEM_SHORTLIST_SCAN_LIMIT = 3;
 const HAN_CHAR_PATTERN = /\p{Script=Han}/u;
 
 export type ResolvedSnippetRange = Readonly<{
@@ -37,30 +40,35 @@ export function buildV3DirectSubitemCandidates(params: {
 	residentBase: ResidentBase;
 	candidateRangeMode?: "resident_locality" | "whole_document";
 }): V3DirectSubitemCandidate[] {
+	const supportedHanSurfaceGroupIndices = new Set(
+		params.candidate.hanSurfaceCompletionGroups.map(
+			(group) => group.surfaceGroupIndex,
+		),
+	);
 	const rawBlocks = splitRawBodyBlocks(params.snapshotText);
 	const candidateRanges = resolveCandidateRanges({
 		rawBlocks,
 		candidate: params.candidate,
-		candidateRecall: params.candidateRecall,
-		residentBase: params.residentBase,
 		snapshotText: params.snapshotText,
+		queryAnalysis: params.queryAnalysis,
 		candidateRangeMode: params.candidateRangeMode,
 	});
-	return candidateRanges.flatMap((range) =>
+	const candidates = candidateRanges.flatMap((range) =>
 		buildCandidatesForRange(
 			params.snapshotText,
 			range,
 			params.queryAnalysis,
+			supportedHanSurfaceGroupIndices,
 		),
 	);
+	return candidates;
 }
 
 function resolveCandidateRanges(params: {
 	rawBlocks: readonly RawBlock[];
 	candidate: EvidencePackingProfile;
-	candidateRecall: V3CandidateDocRecall;
-	residentBase: ResidentBase;
 	snapshotText: string;
+	queryAnalysis: V3QueryAnalysis;
 	candidateRangeMode?: "resident_locality" | "whole_document";
 }): ResolvedSnippetRange[] {
 	if (params.candidateRangeMode === "whole_document") {
@@ -68,32 +76,21 @@ function resolveCandidateRanges(params: {
 			? [{ start: 0, end: params.snapshotText.length }]
 			: [];
 	}
-	const prioritizedBlockIds = prioritizeShortlistedBlockIds(
-		params.residentBase,
-		params.candidate,
-		params.candidateRecall,
-	);
-	const selectedBlocks = prioritizedBlockIds
-		.map((blockId) => {
-			const ordinal =
-				params.residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId;
-			return params.rawBlocks[ordinal];
-		})
-		.filter((block): block is RawBlock => block != null);
-	const ranges: ResolvedSnippetRange[] = selectedBlocks.map((block) => ({
-		start: block.start,
-		end: block.end,
-	}));
-	for (let index = 0; index < selectedBlocks.length - 1; index += 1) {
-		const left = selectedBlocks[index];
-		const right = selectedBlocks[index + 1];
-		if (right.ordinal !== left.ordinal + 1) {
-			continue;
+	const shortlist = getAttachedBlockShortlistSketch(params.candidate);
+	if (shortlist != null && shortlist.length > 0) {
+		const shortlistRanges = buildRangesFromShortlist(params.rawBlocks, shortlist);
+		if (shortlistRanges.length > 0) {
+			return shortlistRanges;
 		}
-		ranges.push({ start: left.start, end: right.end });
 	}
-	if (ranges.length > 0) {
-		return ranges;
+	const fallbackRanges = buildRangesFromLocalFallbackShortlist(
+		params.snapshotText,
+		params.rawBlocks,
+		params.queryAnalysis,
+		new Set(params.candidate.hanSurfaceCompletionGroups.map((group) => group.surfaceGroupIndex)),
+	);
+	if (fallbackRanges.length > 0) {
+		return fallbackRanges;
 	}
 	if (
 		params.snapshotText.trim().length > 0 &&
@@ -104,15 +101,93 @@ function resolveCandidateRanges(params: {
 	return [];
 }
 
+function buildRangesFromShortlist(
+	rawBlocks: readonly RawBlock[],
+	shortlist: NonNullable<ReturnType<typeof getAttachedBlockShortlistSketch>>,
+): ResolvedSnippetRange[] {
+	const ranges: ResolvedSnippetRange[] = [];
+	const seen = new Set<string>();
+	for (const item of shortlist.slice(0, DIRECT_SUBITEM_SHORTLIST_SCAN_LIMIT)) {
+		const startBlock = rawBlocks[item.blockStart];
+		const endBlock = rawBlocks[item.blockEnd];
+		if (startBlock == null || endBlock == null) {
+			continue;
+		}
+		const key = `${startBlock.start}:${endBlock.end}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		ranges.push({
+			start: startBlock.start,
+			end: endBlock.end,
+		});
+	}
+	return ranges;
+}
+
+function buildRangesFromLocalFallbackShortlist(
+	snapshotText: string,
+	rawBlocks: readonly RawBlock[],
+	queryAnalysis: V3QueryAnalysis,
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
+): ResolvedSnippetRange[] {
+	const localBlocks = subdivideRawBlocksForFallback(snapshotText, rawBlocks);
+	const shortlisted: Array<{
+		range: ResolvedSnippetRange;
+		bestCandidate: V3DirectSubitemCandidate;
+	}> = [];
+	for (let index = 0; index < localBlocks.length; index += 1) {
+		const block = localBlocks[index];
+		pushFallbackRangeCandidate(
+			shortlisted,
+			snapshotText,
+			{ start: block.start, end: block.end },
+			queryAnalysis,
+			supportedHanSurfaceGroupIndices,
+		);
+		const nextBlock = localBlocks[index + 1];
+		if (nextBlock == null) {
+			continue;
+		}
+		pushFallbackRangeCandidate(
+			shortlisted,
+			snapshotText,
+			{ start: block.start, end: nextBlock.end },
+			queryAnalysis,
+			supportedHanSurfaceGroupIndices,
+		);
+	}
+	shortlisted.sort((left, right) =>
+		compareV3DirectSubitemCandidates(left.bestCandidate, right.bestCandidate),
+	);
+	const selected: ResolvedSnippetRange[] = [];
+	const seen = new Set<string>();
+	for (const item of shortlisted) {
+		const key = `${item.range.start}:${item.range.end}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		selected.push(item.range);
+		if (selected.length >= DIRECT_SUBITEM_SHORTLIST_SCAN_LIMIT) {
+			break;
+		}
+	}
+	return selected;
+}
+
 function buildCandidatesForRange(
 	snapshotText: string,
 	range: ResolvedSnippetRange,
 	queryAnalysis: V3QueryAnalysis,
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 ): V3DirectSubitemCandidate[] {
 	const occurrences = collectOccurrences(snapshotText, range, queryAnalysis);
 	const displayOccurrences = resolveDominantDisplayOccurrences(
 		occurrences,
 		queryAnalysis,
+		supportedHanSurfaceGroupIndices,
 	);
 	const occurrenceWindows = buildOccurrenceWindows(
 		snapshotText,
@@ -123,6 +198,7 @@ function buildCandidatesForRange(
 			snapshotText,
 			occurrences,
 			displayOccurrences,
+			supportedHanSurfaceGroupIndices,
 		);
 		return candidate == null ? [] : [candidate];
 	}
@@ -133,9 +209,36 @@ function buildCandidatesForRange(
 				occurrences,
 				displayOccurrences,
 				window,
+				supportedHanSurfaceGroupIndices,
 			),
 		)
 		.filter((candidate): candidate is V3DirectSubitemCandidate => candidate != null);
+}
+
+function pushFallbackRangeCandidate(
+	shortlisted: Array<{
+		range: ResolvedSnippetRange;
+		bestCandidate: V3DirectSubitemCandidate;
+	}>,
+	snapshotText: string,
+	range: ResolvedSnippetRange,
+	queryAnalysis: V3QueryAnalysis,
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
+): void {
+	const candidates = buildCandidatesForRange(
+		snapshotText,
+		range,
+		queryAnalysis,
+		supportedHanSurfaceGroupIndices,
+	);
+	if (candidates.length === 0) {
+		return;
+	}
+	const bestCandidate = [...candidates].sort(compareV3DirectSubitemCandidates)[0];
+	if (bestCandidate == null) {
+		return;
+	}
+	shortlisted.push({ range, bestCandidate });
 }
 
 function buildCandidateFromOccurrenceWindow(
@@ -143,6 +246,7 @@ function buildCandidateFromOccurrenceWindow(
 	occurrences: readonly V3DirectSubitemOccurrence[],
 	displayOccurrences: readonly V3DirectSubitemOccurrence[],
 	window: ResolvedSnippetRange,
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 ): V3DirectSubitemCandidate | null {
 	const localOccurrences = occurrences.filter(
 		(occurrence) =>
@@ -156,6 +260,7 @@ function buildCandidateFromOccurrenceWindow(
 		snapshotText,
 		localOccurrences,
 		localDisplayOccurrences,
+		supportedHanSurfaceGroupIndices,
 	);
 }
 
@@ -163,6 +268,7 @@ function buildCandidateFromOccurrences(
 	snapshotText: string,
 	occurrences: readonly V3DirectSubitemOccurrence[],
 	displayOccurrences: readonly V3DirectSubitemOccurrence[],
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 ): V3DirectSubitemCandidate | null {
 	if (occurrences.length === 0) {
 		return null;
@@ -170,8 +276,9 @@ function buildCandidateFromOccurrences(
 	const realOccurrences = occurrences.filter(
 		(occurrence) => occurrence.kind === "real_exact",
 	);
-	const surfaceOccurrences = occurrences.filter(
-		(occurrence) => occurrence.kind === "surface_completion",
+	const validatedSurfaceOccurrences = resolveValidatedSurfaceCompletions(
+		occurrences,
+		supportedHanSurfaceGroupIndices,
 	);
 	const coveredUnitIndices = uniqueSortedNumbers(
 		realOccurrences
@@ -179,7 +286,7 @@ function buildCandidateFromOccurrences(
 			.filter((value): value is number => value != null),
 	);
 	const completedSurfaceGroupIndices = uniqueSortedNumbers(
-		surfaceOccurrences
+		validatedSurfaceOccurrences
 			.map((occurrence) => occurrence.surfaceGroupIndex)
 			.filter((value): value is number => value != null),
 	);
@@ -401,24 +508,31 @@ function preservesQueryOrder(
 function resolveDominantDisplayOccurrences(
 	occurrences: readonly V3DirectSubitemOccurrence[],
 	queryAnalysis: V3QueryAnalysis,
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
 ): V3DirectSubitemOccurrence[] {
 	const unitByIndex = new Map(
 		queryAnalysis.primaryUnits.map((unit) => [unit.index, unit]),
 	);
+	const validatedSurfaceOccurrences = resolveValidatedSurfaceCompletions(
+		occurrences,
+		supportedHanSurfaceGroupIndices,
+	);
+	const validatedSurfaceKeys = new Set(
+		validatedSurfaceOccurrences.map((occurrence) =>
+			buildOccurrenceKey(occurrence),
+		),
+	);
 	const surfaceOccurrencesByGroup = new Map<number, V3DirectSubitemOccurrence[]>();
-	for (const occurrence of occurrences) {
-		if (
-			occurrence.kind !== "surface_completion" ||
-			occurrence.surfaceGroupIndex == null
-		) {
-			continue;
-		}
+	for (const occurrence of validatedSurfaceOccurrences) {
 		const existing =
-			surfaceOccurrencesByGroup.get(occurrence.surfaceGroupIndex) ?? [];
+			surfaceOccurrencesByGroup.get(occurrence.surfaceGroupIndex ?? -1) ?? [];
 		existing.push(occurrence);
-		surfaceOccurrencesByGroup.set(occurrence.surfaceGroupIndex, existing);
+		surfaceOccurrencesByGroup.set(occurrence.surfaceGroupIndex ?? -1, existing);
 	}
 	return occurrences.filter((occurrence) => {
+		if (occurrence.kind === "surface_completion") {
+			return validatedSurfaceKeys.has(buildOccurrenceKey(occurrence));
+		}
 		if (
 			occurrence.kind !== "real_exact" ||
 			occurrence.surfaceGroupIndex == null
@@ -433,6 +547,49 @@ function resolveDominantDisplayOccurrences(
 			surfaceOccurrencesByGroup.get(occurrence.surfaceGroupIndex) ?? [];
 		return surfaceOccurrences.length === 0;
 	});
+}
+
+function resolveValidatedSurfaceCompletions(
+	occurrences: readonly V3DirectSubitemOccurrence[],
+	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
+): V3DirectSubitemOccurrence[] {
+	const realOccurrencesBySurfaceGroup = new Map<number, V3DirectSubitemOccurrence[]>();
+	for (const occurrence of occurrences) {
+		if (
+			occurrence.kind !== "real_exact" ||
+			occurrence.surfaceGroupIndex == null
+		) {
+			continue;
+		}
+		const existing =
+			realOccurrencesBySurfaceGroup.get(occurrence.surfaceGroupIndex) ?? [];
+		existing.push(occurrence);
+		realOccurrencesBySurfaceGroup.set(occurrence.surfaceGroupIndex, existing);
+	}
+	return occurrences.filter((occurrence) => {
+		if (
+			occurrence.kind !== "surface_completion" ||
+			occurrence.surfaceGroupIndex == null
+		) {
+			return false;
+		}
+		const groupRealOccurrences =
+			realOccurrencesBySurfaceGroup.get(occurrence.surfaceGroupIndex) ?? [];
+		const distinctRealSurfaceGroupCount = realOccurrencesBySurfaceGroup.size;
+		const hasCorroboration =
+			supportedHanSurfaceGroupIndices.has(occurrence.surfaceGroupIndex) ||
+			distinctRealSurfaceGroupCount > 1;
+		return groupRealOccurrences.some((realOccurrence) =>
+			realOccurrence.start >= occurrence.start &&
+			realOccurrence.end <= occurrence.end,
+		) && hasCorroboration;
+	});
+}
+
+function buildOccurrenceKey(
+	occurrence: V3DirectSubitemOccurrence,
+): string {
+	return `${occurrence.kind}:${occurrence.queryUnitIndex ?? -1}:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.start}:${occurrence.end}`;
 }
 
 function splitRawBodyBlocks(snapshotText: string): RawBlock[] {
@@ -473,71 +630,51 @@ function pushBlock(
 	});
 }
 
-function prioritizeShortlistedBlockIds(
-	residentBase: ResidentBase,
-	candidate: EvidencePackingProfile,
-	candidateRecall: V3CandidateDocRecall,
-): number[] {
-	const shortlistedBlockIds = [...candidateRecall.shortlistedBodyBlockIds].sort(
-		(left, right) => compareBlockOrder(residentBase, left, right),
-	);
-	const bestBodyWindowBlockIds = new Set(candidate.bodyWindowContainer?.blockIds ?? []);
-	const bestBodyWindowOrdinals = new Set<number>(
-		[...bestBodyWindowBlockIds].map(
-			(blockId) => residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
-		),
-	);
-	const adjacentChainBlockIds = new Set<number>(
-		shortlistedBlockIds.filter((blockId) => {
-			if (bestBodyWindowBlockIds.has(blockId)) {
-				return false;
-			}
-			const blockOrdinal =
-				residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId;
-			return (
-				bestBodyWindowOrdinals.has(blockOrdinal - 1) ||
-				bestBodyWindowOrdinals.has(blockOrdinal + 1)
-			);
-		}),
-	);
-	const hanRouteBlockIds = new Set<number>(
-		candidateRecall.hanBodyBlockGateStats.map((gate) => gate.blockId),
-	);
-	const prioritized: number[] = [];
-	const seen = new Set<number>();
-	for (const bucket of [
-		bestBodyWindowBlockIds,
-		adjacentChainBlockIds,
-		hanRouteBlockIds,
-	]) {
-		for (const blockId of shortlistedBlockIds) {
-			if (!bucket.has(blockId) || seen.has(blockId)) {
-				continue;
-			}
-			seen.add(blockId);
-			prioritized.push(blockId);
-		}
-	}
-	for (const blockId of shortlistedBlockIds) {
-		if (seen.has(blockId)) {
-			continue;
-		}
-		seen.add(blockId);
-		prioritized.push(blockId);
-	}
-	return prioritized;
-}
-
-function compareBlockOrder(
-	residentBase: ResidentBase,
-	left: number,
-	right: number,
-): number {
-	const leftOrdinal = residentBase.bodyBlocks.blockOrdinalByBlockId[left] ?? left;
-	const rightOrdinal = residentBase.bodyBlocks.blockOrdinalByBlockId[right] ?? right;
-	return leftOrdinal - rightOrdinal || left - right;
-}
-
 function uniqueSortedNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function subdivideRawBlocksForFallback(
+	snapshotText: string,
+	rawBlocks: readonly RawBlock[],
+): RawBlock[] {
+	const paragraphs: RawBlock[] = [];
+	for (const block of rawBlocks) {
+		const localParagraphs = splitBlockIntoParagraphs(snapshotText, block);
+		if (localParagraphs.length <= 1) {
+			paragraphs.push(block);
+			continue;
+		}
+		paragraphs.push(...localParagraphs);
+	}
+	return paragraphs;
+}
+
+function splitBlockIntoParagraphs(
+	snapshotText: string,
+	block: RawBlock,
+): RawBlock[] {
+	const paragraphs: RawBlock[] = [];
+	const paragraphBreakPattern = /\n\s*\n+/gu;
+	let cursor = block.start;
+	for (const match of block.text.matchAll(paragraphBreakPattern)) {
+		const matchStart = block.start + (match.index ?? 0);
+		pushParagraphBlock(snapshotText, cursor, matchStart, block.ordinal, paragraphs);
+		cursor = block.start + (match.index ?? 0) + match[0].length;
+	}
+	pushParagraphBlock(snapshotText, cursor, block.end, block.ordinal, paragraphs);
+	return paragraphs;
+}
+
+function pushParagraphBlock(
+	snapshotText: string,
+	start: number,
+	end: number,
+	ordinal: number,
+	blocks: RawBlock[],
+): void {
+	if (end <= start) {
+		return;
+	}
+	pushBlock(snapshotText, start, end, ordinal, blocks);
 }

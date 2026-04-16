@@ -961,3 +961,66 @@ and direct-subitem tail dedupe around one consistent local-evidence worldview:
   identical; top1 is always retained and genuinely distant repeats are preserved
 - the regression baseline now includes hybrid-style body chunk splitting and
   render-time weak-dedupe coverage for display-equivalent tail snippets
+
+### Phase 14
+
+Status: Completed on 2026-04-16
+
+The current implementation now refines V3 local-body ranking and snippet reuse
+around a lightweight `block shortlist sketch` hot-path worldview instead of
+sharing a heavier full-cluster object:
+
+- `bestWindow` no longer relies on ordinal width / adjacent-gap admission; body
+  locality is now admitted entirely in approximate original-text space using
+  `coveredDistinctUnitCount >= 2`, `boundaryCrossingCount <= 1`,
+  `approxMaxAdjacentGap <= 15`, and `approxHeadTailSpan <= 160`
+- `bestWindow` comparison is now approximate-first as well, preferring more
+  covered units, preserved query order, smaller approximate span, smaller
+  approximate max gap, and lower approximate gap mass before deterministic
+  tie-breaks
+- query-time body-window selection keeps its single-block / adjacent-block
+  search scope, but now streams toward Top1 instead of collecting and sorting a
+  larger candidate list; at the same time it retains only a tiny top-ranked
+  `block shortlist sketch` for downstream snippet work
+- the shortlist sketch records only the most promising block or adjacent-block
+  scopes, including their representative matches and approximate locality
+  geometry, and is attached internally to the file-level ranking result without
+  changing the public V3 search result shape
+- V3 direct-subitems now consume that shortlist sketch when available and only
+  scan the highest-priority shortlisted block scopes instead of re-walking the
+  full recalled body-block set for the file
+- when no shortlist sketch is present, direct-subitems keep a conservative
+  block-prioritization fallback rather than regressing to an exhaustive
+  whole-body local search
+- the regression baseline now verifies that compact evidence separated by many
+  short tokens still survives under approximate locality, and that
+  direct-subitems obey an attached shortlist by rendering only from the
+  shortlisted block range
+
+### Phase 15
+
+Status: Completed on 2026-04-16
+
+The current implementation now completes the hot-path body-window and
+direct-subitem alignment work from this phase:
+
+- cross-block chaining now treats body blocks as fully flat retrieval units;
+  the old virtual boundary tax has been removed (`boundary penalty = 0`)
+- `bestWindow` now uses a two-layer hot path: it first builds a very cheap
+  block/pair prefilter keyed by covered unit count, approximate span, and query
+  order, then only runs the full window summarizer on a tiny number of scopes
+  retained per distinct-unit bucket
+- the body-window search scope remains limited to single blocks and adjacent
+  block pairs, but the expensive nested window evaluation is now avoided for
+  obviously weaker scopes
+- V3 direct-subitems consume an attached shortlist sketch when available, and
+  the no-shortlist path now builds a lightweight current-file fallback from the
+  local raw block ranges instead of falling back to the older
+  resident-locality ordering heuristic
+- the no-shortlist fallback now keeps Han surface completion conservative: a
+  raw-text Han surface can dominate display only when the file-level candidate
+  already corroborates that surface group or when the local snippet window also
+  carries real evidence from another surface group
+- the regression baseline now verifies attached-shortlist consumption,
+  adjacent-block body-window formation under zero cross-block penalty, and the
+  repaired no-shortlist Han snippet-selection behavior

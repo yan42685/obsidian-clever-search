@@ -69,15 +69,49 @@ function resolveHighlightRanges(
 	candidate: V3DirectSubitemCandidate,
 	displayWindow: DisplayWindow,
 ): Array<{ start: number; end: number }> {
-	const displayRanges = mapOccurrencesToDisplayRanges(
+	const displayOccurrences = collapseSurfaceDisplayOccurrences(
 		candidate.displayOccurrences,
+	);
+	const displayRanges = mapOccurrencesToDisplayRanges(
+		displayOccurrences,
 		displayWindow,
 	);
 	if (displayRanges.length > 0) {
 		return mergeRanges(displayRanges);
 	}
 	return mergeRanges(
-		mapOccurrencesToDisplayRanges(candidate.occurrences, displayWindow),
+		mapOccurrencesToDisplayRanges(
+			collapseSurfaceDisplayOccurrences(candidate.occurrences),
+			displayWindow,
+		),
+	);
+}
+
+function collapseSurfaceDisplayOccurrences(
+	occurrences: readonly V3DirectSubitemOccurrence[],
+): V3DirectSubitemOccurrence[] {
+	const realOccurrences = occurrences.filter(
+		(occurrence) => occurrence.kind !== "surface_completion",
+	);
+	const bestSurfaceByGroup = new Map<number, V3DirectSubitemOccurrence>();
+	for (const occurrence of occurrences) {
+		if (
+			occurrence.kind !== "surface_completion" ||
+			occurrence.surfaceGroupIndex == null
+		) {
+			continue;
+		}
+		const existing = bestSurfaceByGroup.get(occurrence.surfaceGroupIndex);
+		if (
+			existing == null ||
+			occurrence.start < existing.start ||
+			(occurrence.start === existing.start && occurrence.end > existing.end)
+		) {
+			bestSurfaceByGroup.set(occurrence.surfaceGroupIndex, occurrence);
+		}
+	}
+	return [...realOccurrences, ...bestSurfaceByGroup.values()].sort(
+		(left, right) => left.start - right.start || left.end - right.end,
 	);
 }
 
