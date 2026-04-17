@@ -28,7 +28,7 @@ function createDocument(
 		aliases: overrides.aliases,
 		tags: overrides.tags,
 		headings: overrides.headings,
-		generation: overrides.generation,
+			generation: overrides.generation ?? 1,
 		size: overrides.size,
 	};
 }
@@ -199,7 +199,7 @@ function createResidentBase(): ResidentBase {
 		docTable: {
 			docCount: 2,
 			pathStringIds: new Uint32Array([0, 0]),
-			generationByDocId: new Uint32Array([101, 202]),
+				generationByDocId: new Float64Array([101, 202]),
 			identityStartByDocId: new Uint32Array([0, 0]),
 			identityCountByDocId: new Uint32Array([0, 0]),
 			routeStartByDocId: new Uint32Array([0, 0]),
@@ -328,7 +328,7 @@ function createResidentBaseForBlockCounts(
 			...base.docTable,
 			docCount: blockCountsByDoc.length,
 			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			generationByDocId: new Uint32Array(blockCountsByDoc.map((_, index) => 100 + index)),
+				generationByDocId: new Float64Array(blockCountsByDoc.map((_, index) => 100 + index)),
 			identityStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			identityCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			routeStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),

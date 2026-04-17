@@ -13,7 +13,7 @@ export type ResidentStringArena = Readonly<{
 export type ResidentDocTable = Readonly<{
 	docCount: number;
 	pathStringIds: ResidentIntegerArray;
-	generationByDocId: ResidentIntegerArray;
+	generationByDocId: Float64Array;
 	identityStartByDocId: ResidentIntegerArray;
 	identityCountByDocId: ResidentIntegerArray;
 	routeStartByDocId: ResidentIntegerArray;

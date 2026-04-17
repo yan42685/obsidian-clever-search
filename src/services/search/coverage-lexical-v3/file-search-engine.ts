@@ -227,38 +227,101 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (trimmedQuery.length === 0) {
 			return null;
 		}
+		const shouldLogDebug = shouldLogCoverageLexicalV3Debug(trimmedQuery);
+		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const tokenizeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const searchTerms = this.getQueryTerms(trimmedQuery);
+		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
+		const engineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const result = this.engine.search(trimmedQuery, searchTerms);
+		const engineMs = shouldLogDebug ? nowDebugMs() - engineStartedAtMs : 0;
+		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const refinedCandidates = await this.refineHanSurfaceCompletion(result);
+		const refineMs = shouldLogDebug ? nowDebugMs() - refineStartedAtMs : 0;
 		const candidate = refinedCandidates.find((item) => item.path === path);
 		if (candidate == null) {
+			if (shouldLogDebug) {
+				logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
+					queryText: trimmedQuery,
+					path,
+					maxSubItemResults,
+					foundCandidate: false,
+					phaseMs: {
+						tokenize: roundDebugMs(tokenizeMs),
+						engine: roundDebugMs(engineMs),
+						hanRefine: roundDebugMs(refineMs),
+						total: roundDebugMs(nowDebugMs() - startedAtMs),
+					},
+				});
+			}
 			return null;
 		}
 		const candidateRecall = result.recallState.candidateDocs.find(
 			(item) => item.docId === candidate.docId,
 		);
 		if (candidateRecall == null) {
+			if (shouldLogDebug) {
+				logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
+					queryText: trimmedQuery,
+					path,
+					maxSubItemResults,
+					foundCandidate: true,
+					foundCandidateRecall: false,
+					phaseMs: {
+						tokenize: roundDebugMs(tokenizeMs),
+						engine: roundDebugMs(engineMs),
+						hanRefine: roundDebugMs(refineMs),
+						total: roundDebugMs(nowDebugMs() - startedAtMs),
+					},
+				});
+			}
 			return null;
 		}
 		const snapshotStore = this.getFileSnapshotStore();
+		const snapshotReadStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const expectedGeneration =
+			residentBase.docTable.generationByDocId[candidate.docId];
 		let snapshotText = (
 			await this.getFileSnapshotStore().readIndexedTexts([
 				{
 					path,
-					generation: residentBase.docTable.generationByDocId[candidate.docId],
+					generation: expectedGeneration,
 				},
 			])
 		).get(path);
+		const snapshotAvailability = shouldLogDebug
+			? await snapshotStore.inspectIndexedTextAvailability(path, expectedGeneration)
+			: null;
 		let candidateRangeMode: "resident_locality" | "whole_document" =
 			"resident_locality";
 		if (snapshotText == null) {
 			snapshotText = (await snapshotStore.readCurrentTexts([path])).get(path);
 			candidateRangeMode = "whole_document";
 		}
+		const snapshotReadMs = shouldLogDebug ? nowDebugMs() - snapshotReadStartedAtMs : 0;
 		if (snapshotText == null) {
+			if (shouldLogDebug) {
+				logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
+					queryText: trimmedQuery,
+					path,
+					maxSubItemResults,
+					foundCandidate: true,
+					foundCandidateRecall: true,
+					snapshotReady: false,
+					snapshotAvailability,
+					phaseMs: {
+						tokenize: roundDebugMs(tokenizeMs),
+						engine: roundDebugMs(engineMs),
+						hanRefine: roundDebugMs(refineMs),
+						snapshotRead: roundDebugMs(snapshotReadMs),
+						total: roundDebugMs(nowDebugMs() - startedAtMs),
+					},
+				});
+			}
 			return null;
 		}
-		return buildV3DirectSubitems({
+		const buildStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const subItems = buildV3DirectSubitems({
 			snapshotText,
 			queryAnalysis: result.recallState.queryAnalysis,
 			candidate,
@@ -268,6 +331,29 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			candidateRangeMode,
 			hideWeaklyRelatedResults: this.outerSetting.hideWeaklyRelatedResults,
 		}).subItems.slice(0, maxSubItemResults);
+		const buildMs = shouldLogDebug ? nowDebugMs() - buildStartedAtMs : 0;
+		if (shouldLogDebug) {
+			logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
+				queryText: trimmedQuery,
+				path,
+				maxSubItemResults,
+				foundCandidate: true,
+				foundCandidateRecall: true,
+				snapshotReady: true,
+				candidateRangeMode,
+				snapshotAvailability,
+				subItemCount: subItems.length,
+				phaseMs: {
+					tokenize: roundDebugMs(tokenizeMs),
+					engine: roundDebugMs(engineMs),
+					hanRefine: roundDebugMs(refineMs),
+					snapshotRead: roundDebugMs(snapshotReadMs),
+					build: roundDebugMs(buildMs),
+					total: roundDebugMs(nowDebugMs() - startedAtMs),
+				},
+			});
+		}
+		return subItems;
 	}
 
 	serialize(): SerializedFileSearchIndex | null {

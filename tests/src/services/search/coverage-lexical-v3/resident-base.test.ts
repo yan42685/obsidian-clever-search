@@ -24,7 +24,7 @@ function createDocument(
 		aliases: overrides.aliases,
 		tags: overrides.tags,
 		headings: overrides.headings,
-		generation: overrides.generation,
+			generation: overrides.generation ?? 1,
 		size: overrides.size,
 	};
 }
@@ -85,6 +85,7 @@ describe("coverage lexical v3 resident base", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
 				path: "notes/cache-restore.md",
+				generation: 1775395495598,
 				basename: "cache restore",
 				folder: "notes",
 				aliases: "restore cache replay",
@@ -102,6 +103,39 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
+		expect(residentBase.docTable.generationByDocId).toBeInstanceOf(Float64Array);
+		expect(residentBase.docTable.generationByDocId[0]).toBe(1775395495598);
+	});
+
+	test("preserves millisecond document generations without uint32 truncation", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "notes/high-mtime.md",
+				generation: 1775395495598,
+				basename: "high mtime",
+				folder: "notes",
+				content: "alpha beta gamma",
+			}),
+		]);
+
+		expect(residentBase.docTable.generationByDocId).toBeInstanceOf(Float64Array);
+		expect(residentBase.docTable.generationByDocId[0]).toBe(1775395495598);
+		expect(residentBase.docTable.generationByDocId[0]).not.toBe(1574002350);
+	});
+
+	test("throws when a document is missing generation", () => {
+		expect(() =>
+			buildResidentBase([
+				{
+					path: "notes/missing-generation.md",
+					basename: "missing generation",
+					folder: "notes",
+					content: "alpha beta gamma",
+				},
+			]),
+		).toThrow(
+			"coverage-lexical-v3 requires IndexedDocument.generation for notes/missing-generation.md",
+		);
 	});
 
 	test("builds a single han document", () => {

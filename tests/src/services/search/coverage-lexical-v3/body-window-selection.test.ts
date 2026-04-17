@@ -77,7 +77,7 @@ function createDocument(
 		aliases: overrides.aliases,
 		tags: overrides.tags,
 		headings: overrides.headings,
-		generation: overrides.generation,
+			generation: overrides.generation ?? 1,
 		size: overrides.size,
 	};
 }

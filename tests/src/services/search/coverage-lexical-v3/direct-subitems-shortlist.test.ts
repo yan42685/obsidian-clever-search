@@ -17,7 +17,7 @@ function createResidentBaseForBlockCount(blockCount: number): ResidentBase {
 		docTable: {
 			docCount: 1,
 			pathStringIds: new Uint32Array([0]),
-			generationByDocId: new Uint32Array([1]),
+				generationByDocId: new Float64Array([1]),
 			identityStartByDocId: new Uint32Array([0]),
 			identityCountByDocId: new Uint32Array([0]),
 			routeStartByDocId: new Uint32Array([0]),

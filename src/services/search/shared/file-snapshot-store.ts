@@ -52,6 +52,19 @@ export type FileSnapshotRuntimeMemoryEstimate = {
 	}>;
 };
 
+export type FileSnapshotAvailabilityDebugInfo = Readonly<{
+	path: string;
+	expectedGeneration?: number;
+	fileExists: boolean;
+	fileMtime?: number;
+	currentGeneration?: number;
+	persistedGeneration?: number;
+	shadowGeneration?: number;
+	currentGenerationMatch: boolean;
+	persistedGenerationMatch: boolean;
+	shadowGenerationMatch: boolean;
+}>;
+
 @singleton()
 export class FileSnapshotStore {
 	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
@@ -93,6 +106,39 @@ export class FileSnapshotStore {
 			requests.map((request) => request.path),
 			expectedGenerations,
 		);
+	}
+
+	async inspectIndexedTextAvailability(
+		path: string,
+		expectedGeneration?: number,
+	): Promise<FileSnapshotAvailabilityDebugInfo> {
+		const file = this.resolveFile(path);
+		const current = this.getCurrentFile(path, false);
+		const [persistedRow, shadowRow] = await Promise.all([
+			this.database.db.fileSnapshots.get(path),
+			this.database.db.hybridDirtyShadows.get(path),
+		]);
+		return {
+			path,
+			expectedGeneration,
+			fileExists: file instanceof TFile,
+			fileMtime: file instanceof TFile ? file.stat.mtime : undefined,
+			currentGeneration: current?.generation,
+			persistedGeneration: persistedRow?.generation,
+			shadowGeneration: shadowRow?.generation,
+			currentGenerationMatch: this.isGenerationMatch(
+				current?.generation,
+				expectedGeneration,
+			),
+			persistedGenerationMatch: this.isGenerationMatch(
+				persistedRow?.generation,
+				expectedGeneration,
+			),
+			shadowGenerationMatch: this.isGenerationMatch(
+				shadowRow?.generation,
+				expectedGeneration,
+			),
+		};
 	}
 
 	async publishIndexedTexts(

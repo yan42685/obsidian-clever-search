@@ -281,6 +281,12 @@ function prepareDocument(
 	docId: number,
 	tokenizeDocumentText?: V3DocumentTokenizer,
 ): PreparedDocument {
+	const generation = document.generation;
+	if (generation == null) {
+		throw new Error(
+			`coverage-lexical-v3 requires IndexedDocument.generation for ${document.path}`,
+		);
+	}
 	const aliasesText = document.aliases ?? "";
 	const tagsText = document.tags ?? "";
 	const headingsText = document.headings ?? "";
@@ -321,7 +327,7 @@ function prepareDocument(
 	const headingHanWitnessTexts = dedupeSorted(extractHanSegments(headingsText));
 	return {
 		path: document.path,
-		generation: document.generation ?? 1,
+		generation,
 		basename: document.basename ?? "",
 		folder: document.folder ?? "",
 		basenameFamilyTexts,

@@ -20,6 +20,11 @@
 	import { onDestroy, tick } from "svelte";
 	import { debounce } from "throttle-debounce";
 	import {
+		logCoverageLexicalV3Debug,
+		nowDebugMs,
+		shouldLogCoverageLexicalV3Debug,
+	} from "src/services/search/coverage-lexical-v3/debug";
+	import {
 		AutoHybridFallbackController,
 		createHiddenHybridFreshnessNoticeState,
 		getMountedModalFileItemScore,
@@ -53,6 +58,12 @@
 	let currFilePreviewContent: any = undefined; // for non-markdown viewType
 	let currSubItemIndex = NULL_NUMBER;
 	let latestSearchRequestId = 0;
+	let latestSearchTrigger:
+		| "initial_mount"
+		| "input"
+		| "cache_hit"
+		| "hybrid_result_apply"
+		| "auto_hybrid_result_apply" = "initial_mount";
 	let historyInputRef: any;
 	let hybridFreshnessNotice: HybridFreshnessNoticeState =
 		createHiddenHybridFreshnessNoticeState();
@@ -69,6 +80,7 @@
 		getLatestRequestId: () => latestSearchRequestId,
 		getCurrentQueryText: () => queryText,
 		onResultApplied: async (query, result) => {
+			latestSearchTrigger = "auto_hybrid_result_apply";
 			searchResult = result;
 			if (shouldCacheAutoHybridFallbackResult(result)) {
 				cachedResult.set(query, result);
@@ -98,6 +110,7 @@
 			cachedResult.set(query, result);
 		},
 		onResultApplied: async (_query, result) => {
+			latestSearchTrigger = "hybrid_result_apply";
 			searchResult = result;
 			hybridFreshnessNoticeController.syncFromResult(result);
 			await updateItemAsync(0);
@@ -128,8 +141,14 @@
 
 	// updates focused content and selected file index
 	async function updateItemAsync(index: number): Promise<void> {
+		const shouldLogDebug =
+			searchType === SearchType.IN_VAULT &&
+			shouldLogCoverageLexicalV3Debug(queryText);
+		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const initialTickStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		// wait until all dynamic elements are mounted and rendered
 		await tick();
+		const initialTickMs = shouldLogDebug ? nowDebugMs() - initialTickStartedAtMs : 0;
 		const items = searchResult.items;
 		if (index >= 0 && index < items.length) {
 			currItemIndex = index;
@@ -140,26 +159,76 @@
 				currFileItem = items[index] as FileItem;
 
 				// hybrid search returns subItems directly; lexical fetches on demand
+				const subItemFetchStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 				if (!usesDirectFileSubItems(currFileItem)) {
 					currFileItem.subItems = await searchService.getFileSubItems(
 						queryText,
 						currFileItem,
 					);
 				}
+				const subItemFetchMs = shouldLogDebug
+					? nowDebugMs() - subItemFetchStartedAtMs
+					: 0;
 				currFileSubItems = currFileItem.subItems;
 				currSubItemIndex =
 					currFileSubItems.length > 0 ? 0 : NULL_NUMBER;
+				const subItemsRenderStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 				await tick(); // wait until subItems are rendered by svelte
+				const subItemsRenderMs = shouldLogDebug
+					? nowDebugMs() - subItemsRenderStartedAtMs
+					: 0;
+				const previewScrollStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 				viewHelper.scrollTo(
 					"start",
 					currFileSubItems[currSubItemIndex],
 					"instant",
 				);
+				const previewScrollMs = shouldLogDebug
+					? nowDebugMs() - previewScrollStartedAtMs
+					: 0;
+				if (shouldLogDebug) {
+					logCoverageLexicalV3Debug("mounted-modal.updateItemAsync", {
+						queryText,
+						index,
+						trigger: latestSearchTrigger,
+						itemCount: items.length,
+						path: currFileItem.path,
+						usesDirectSubItems: usesDirectFileSubItems(currFileItem),
+						nativeSubItemsReady: currFileItem.nativeSubItemsReady,
+						subItemCount: currFileSubItems.length,
+						phaseMs: {
+							initialTick: roundDebugMs(initialTickMs),
+							subItemFetch: roundDebugMs(subItemFetchMs),
+							subItemsRender: roundDebugMs(subItemsRenderMs),
+							previewScroll: roundDebugMs(previewScrollMs),
+							total: roundDebugMs(nowDebugMs() - startedAtMs),
+						},
+					});
+				}
 			} else {
 				throw Error(`unsupported search type: ${searchType}`);
 			}
+			const itemScrollRenderStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 			await tick();
+			const itemScrollRenderMs = shouldLogDebug
+				? nowDebugMs() - itemScrollRenderStartedAtMs
+				: 0;
+			const itemScrollStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 			viewHelper.scrollTo("center", items[index], "smooth");
+			const itemScrollMs = shouldLogDebug
+				? nowDebugMs() - itemScrollStartedAtMs
+				: 0;
+			if (shouldLogDebug) {
+				logCoverageLexicalV3Debug("mounted-modal.itemScroll", {
+					queryText,
+					index,
+					trigger: latestSearchTrigger,
+					phaseMs: {
+						preScrollTick: roundDebugMs(itemScrollRenderMs),
+						itemScroll: roundDebugMs(itemScrollMs),
+					},
+				});
+			}
 		} else {
 			currContext = "";
 			currFileItem = null;
@@ -175,8 +244,13 @@
 	async function handleInputAsync() {
 		const requestId = ++latestSearchRequestId;
 		const currentQueryText = queryText;
+		const shouldLogDebug =
+			searchType === SearchType.IN_VAULT &&
+			shouldLogCoverageLexicalV3Debug(currentQueryText);
+		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 
 		if (cachedResult.has(currentQueryText)) {
+			latestSearchTrigger = "cache_hit";
 			if (
 				requestId !== latestSearchRequestId ||
 				currentQueryText !== queryText
@@ -187,6 +261,18 @@
 			searchService.notifyHybridFallback(searchResult);
 			hybridFreshnessNoticeController.syncFromResult(searchResult);
 			await updateItemAsync(0);
+			if (shouldLogDebug) {
+				logCoverageLexicalV3Debug("mounted-modal.handleInputAsync", {
+					queryText: currentQueryText,
+					requestId,
+					trigger: latestSearchTrigger,
+					cacheHit: true,
+					itemCount: searchResult.items.length,
+					phaseMs: {
+						total: roundDebugMs(nowDebugMs() - startedAtMs),
+					},
+				});
+			}
 			if (
 				searchType === SearchType.IN_VAULT &&
 				!isHybrid &&
@@ -204,6 +290,7 @@
 		if (searchType === SearchType.IN_FILE) {
 			nextResult = await searchService.searchInFile(currentQueryText);
 		} else if (searchType === SearchType.IN_VAULT) {
+			const searchStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 			if (isHybrid) {
 				nextResult =
 					hybridMode === "lexical-lane"
@@ -213,6 +300,19 @@
 						: await searchService.searchInVaultHybrid(currentQueryText);
 			} else {
 				nextResult = await searchService.searchInVault(currentQueryText);
+			}
+			if (shouldLogDebug) {
+				logCoverageLexicalV3Debug("mounted-modal.searchDispatch", {
+					queryText: currentQueryText,
+					requestId,
+					trigger: latestSearchTrigger,
+					isHybrid,
+					hybridMode,
+					itemCount: nextResult.items.length,
+					phaseMs: {
+						searchDispatch: roundDebugMs(nowDebugMs() - searchStartedAtMs),
+					},
+				});
 			}
 		} else {
 			throw Error(TO_BE_IMPL);
@@ -229,6 +329,18 @@
 		hybridFreshnessNoticeController.syncFromResult(nextResult);
 		cachedResult.set(currentQueryText, searchResult);
 		await updateItemAsync(0);
+		if (shouldLogDebug) {
+			logCoverageLexicalV3Debug("mounted-modal.handleInputAsync", {
+				queryText: currentQueryText,
+				requestId,
+				trigger: latestSearchTrigger,
+				cacheHit: false,
+				itemCount: searchResult.items.length,
+				phaseMs: {
+					total: roundDebugMs(nowDebugMs() - startedAtMs),
+				},
+			});
+		}
 
 		if (
 			searchType === SearchType.IN_VAULT &&
@@ -243,6 +355,16 @@
 	}
 
 	function handleInput() {
+		latestSearchTrigger = "input";
+		if (
+			searchType === SearchType.IN_VAULT &&
+			shouldLogCoverageLexicalV3Debug(queryText)
+		) {
+			logCoverageLexicalV3Debug("mounted-modal.handleInput", {
+				queryText,
+				nextRequestId: latestSearchRequestId + 1,
+			});
+		}
 		if (searchType === SearchType.IN_VAULT && isHybrid) {
 			hybridQuerySessionController.handleInput(queryText);
 			return;
@@ -359,6 +481,10 @@
 		return item.extension === "md" ? "" : item.extension;
 	}
 
+	function roundDebugMs(value: number): number {
+		return Math.round(value * 1000) / 1000;
+	}
+
 	function escapeHtml(text: string): string {
 		return text
 			.replace(/&/g, "&amp;")
@@ -425,6 +551,7 @@
 		listenEvent(EventEnum.INSERT_FILE_LINK, handleInsertFileLink);
 	}
 	viewHelper.focusInput();
+	latestSearchTrigger = "initial_mount";
 	handleInputAsync();
 </script>
 

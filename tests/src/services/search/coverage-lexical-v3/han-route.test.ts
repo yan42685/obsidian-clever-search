@@ -22,7 +22,7 @@ function createDocument(
 		aliases: overrides.aliases,
 		tags: overrides.tags,
 		headings: overrides.headings,
-		generation: overrides.generation,
+			generation: overrides.generation ?? 1,
 		size: overrides.size,
 	};
 }
@@ -394,4 +394,3 @@ describe("coverage lexical v3 han route", () => {
 		).toBeGreaterThan(0);
 	});
 });
-

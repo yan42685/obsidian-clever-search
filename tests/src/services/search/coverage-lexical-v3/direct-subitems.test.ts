@@ -32,7 +32,7 @@ function createResidentBaseForBlockCounts(
 		docTable: {
 			docCount: blockCountsByDoc.length,
 			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			generationByDocId: new Uint32Array(blockCountsByDoc.map((_, index) => 100 + index)),
+				generationByDocId: new Float64Array(blockCountsByDoc.map((_, index) => 100 + index)),
 			identityStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			identityCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
 			routeStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),

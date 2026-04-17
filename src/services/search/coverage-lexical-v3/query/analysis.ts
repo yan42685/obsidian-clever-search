@@ -20,6 +20,7 @@ export type V3QuerySurfaceGroup = Readonly<{
 	index: number;
 	text: string;
 	kind: ReturnType<typeof classifySurfaceKind>;
+	hanBigramTexts: readonly string[];
 }>;
 
 export type V3HanBackstopGroup = Readonly<{
@@ -57,6 +58,8 @@ export function analyzeQuery(
 			index,
 			text,
 			kind: classifySurfaceKind(text),
+			hanBigramTexts:
+				classifySurfaceKind(text) === "han" ? extractHanBigrams(text) : [],
 		}));
 	const primaryUnits: V3QueryUnit[] = [];
 	const hanBackstopGroups: V3HanBackstopGroup[] = [];

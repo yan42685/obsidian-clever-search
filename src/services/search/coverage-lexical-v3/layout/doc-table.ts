@@ -18,7 +18,7 @@ export function buildDocTable(rows: readonly DocRowBuildInput[]): ResidentDocTab
 	return {
 		docCount: rows.length,
 		pathStringIds: buildIntegerArray(rows.map((row) => row.pathStringId)),
-		generationByDocId: buildIntegerArray(rows.map((row) => row.generation)),
+		generationByDocId: Float64Array.from(rows.map((row) => row.generation)),
 		identityStartByDocId: buildIntegerArray(rows.map((row) => row.identityStart)),
 		identityCountByDocId: buildIntegerArray(rows.map((row) => row.identityCount)),
 		routeStartByDocId: buildIntegerArray(rows.map((row) => row.routeStart)),

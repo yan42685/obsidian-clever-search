@@ -1,11 +1,11 @@
 const LOCAL_STORAGE_DEBUG_QUERY_KEY = "coverage-lexical-v3-debug-query";
 const LOCAL_STORAGE_DEBUG_MODE_KEY = "coverage-lexical-v3-debug-mode";
-const DEFAULT_DEBUG_QUERY = "st";
+const DEFAULT_DEBUG_QUERIES = ["s", "st"] as const;
 
 type DebugQueryMode = "exact" | "contains";
 
 type DebugQueryConfig = Readonly<{
-	query: string;
+	queries: readonly string[];
 	mode: DebugQueryMode;
 }>;
 
@@ -19,10 +19,13 @@ export function shouldLogCoverageLexicalV3Debug(queryText: string): boolean {
 		return false;
 	}
 	const config = resolveDebugQueryConfig();
-	if (config.mode === "contains") {
-		return normalizedQuery.includes(config.query);
+	if (config.queries.length === 0) {
+		return false;
 	}
-	return normalizedQuery === config.query;
+	if (config.mode === "contains") {
+		return config.queries.some((query) => normalizedQuery.includes(query));
+	}
+	return config.queries.some((query) => normalizedQuery === query);
 }
 
 export function logCoverageLexicalV3Debug(
@@ -38,8 +41,15 @@ function resolveDebugQueryConfig(): DebugQueryConfig {
 		localStorage?.getItem(LOCAL_STORAGE_DEBUG_QUERY_KEY)?.trim() ?? "";
 	const configuredMode =
 		localStorage?.getItem(LOCAL_STORAGE_DEBUG_MODE_KEY)?.trim() ?? "";
+	const configuredQueries = configuredQuery
+		.split(",")
+		.map((query) => query.trim())
+		.filter((query) => query.length > 0);
 	return {
-		query: configuredQuery.length > 0 ? configuredQuery : DEFAULT_DEBUG_QUERY,
+		queries:
+			configuredQueries.length > 0
+				? configuredQueries
+				: [...DEFAULT_DEBUG_QUERIES],
 		mode: configuredMode === "contains" ? "contains" : "exact",
 	};
 }

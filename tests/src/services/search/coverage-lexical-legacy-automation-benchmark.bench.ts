@@ -37,6 +37,7 @@ type IndexedDocument = {
 	path: string;
 	basename: string;
 	folder: string;
+	generation: number;
 	content?: string;
 	aliases?: string;
 	tags?: string;
@@ -409,6 +410,7 @@ export function createAutomationCorpus(): {
 } {
 	const documents: IndexedDocument[] = [];
 	const queryCases: QueryCase[] = [];
+	const benchmarkGenerationBase = 1_700_000_000_000;
 	const zhElectronicsIntroPath = "pkm-zh/books/电子技术入门.md";
 	const zhAliasMigrationNotePath = "pkm-zh/notes/别名迁移说明.md";
 	const addDocument = (
@@ -422,6 +424,7 @@ export function createAutomationCorpus(): {
 			path,
 			basename,
 			folder: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "",
+			generation: benchmarkGenerationBase + documents.length,
 			headings,
 			content,
 			...extra,
