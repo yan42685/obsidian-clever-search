@@ -1,42 +1,63 @@
 import type { ResidentBase } from "../layout/types";
-import type {
-	V3HanBackstopGroup,
-	V3QueryAnalysis,
-	V3QueryUnit,
-} from "../query/analysis";
+import type { V3QueryAnalysis, V3QuerySurfaceGroup, V3QueryUnit } from "../query/analysis";
 import {
 	createV3BodyBlockChunkRanges,
 	V3_BODY_BLOCK_MAX_TOKENS,
 	V3_BODY_BLOCK_TARGET_TOKENS,
 } from "../query/text";
-import type { V3CandidateDocRecall } from "../recall";
+import type { V3CandidateDocRecall, V3ResolvedHanSurfaceGroup } from "../recall";
+import { resolveCandidateHanSurfaceGroups } from "../recall/han-surface-groups";
 import type { EvidencePackingProfile } from "../ranking";
+import {
+	collectOpaqueBigramOccurrencesInText,
+	collectRealizedFamilyOccurrencesInText,
+	resolveConfirmedSurfaceSpans,
+	type PrimitiveTextOccurrence,
+} from "../primitive-evidence";
+import { compareV3DirectSubitemCandidates } from "./ranker";
 import type {
 	V3DirectSubitemAnchorTier,
+	V3DirectSubitemAtom,
 	V3DirectSubitemCandidate,
-	V3DirectSubitemOccurrence,
+	V3DirectSubitemComponent,
+	V3DirectSubitemHighlightTier,
 	V3DirectSubitemResidualScopeTier,
 } from "./contracts";
-import { compareV3DirectSubitemCandidates } from "./ranker";
 
-const DIRECT_SUBITEM_WEIGHTED_GAP_LIMIT = 15;
 const DIRECT_SUBITEM_HAN_GAP_WEIGHT = 0.65;
 const DIRECT_SUBITEM_OTHER_GAP_WEIGHT = 0.25;
-const DIRECT_SUBITEM_SHORTLIST_SCAN_LIMIT = 3;
+const DIRECT_SUBITEM_MAX_ADJACENT_GAP = 15;
 const HAN_CHAR_PATTERN = /\p{Script=Han}/u;
 
-export type ResolvedSnippetRange = Readonly<{
-	start: number;
-	end: number;
-	scopeTier: V3DirectSubitemResidualScopeTier;
-}>;
-
 type RawBlock = Readonly<{
+	blockId: number;
 	ordinal: number;
 	start: number;
 	end: number;
 	text: string;
 }>;
+
+type LocalScope = Readonly<{
+	scopeStart: number;
+	scopeEnd: number;
+	scopeTier: V3DirectSubitemResidualScopeTier;
+	blocks: readonly RawBlock[];
+}>;
+
+type BuildScopeContext = Readonly<{
+	snapshotText: string;
+	queryAnalysis: V3QueryAnalysis;
+	candidate: EvidencePackingProfile;
+	candidateRecall: V3CandidateDocRecall;
+	scope: LocalScope;
+	unitByIndex: ReadonlyMap<number, V3QueryUnit>;
+	surfaceGroupByIndex: ReadonlyMap<number, V3QuerySurfaceGroup>;
+	resolvedHanSurfaceGroupByIndex: ReadonlyMap<number, V3ResolvedHanSurfaceGroup>;
+}>;
+
+type ExplanationSearchState = {
+	representativeByKey: Map<string, V3DirectSubitemAtom>;
+};
 
 export function buildV3DirectSubitemCandidates(params: {
 	snapshotText: string;
@@ -46,782 +67,737 @@ export function buildV3DirectSubitemCandidates(params: {
 	residentBase: ResidentBase;
 	candidateRangeMode?: "resident_locality" | "whole_document";
 }): V3DirectSubitemCandidate[] {
-	const confirmedHanSurfaceGroupIndices = new Set(
-		params.candidate.hanSurfaceCompletionGroups
-			.filter((group) => group.tier !== "none")
-			.map((group) => group.surfaceGroupIndex),
+	if (params.snapshotText.trim().length === 0) {
+		return [];
+	}
+	const rawBlocks = splitRawBodyBlocks(
+		params.snapshotText,
+		params.candidate,
+		params.candidateRecall,
+		params.residentBase,
 	);
-	const completedHanSurfaceTierByGroup = new Map(
-		params.candidate.hanSurfaceCompletionGroups.map((group) => [
-			group.surfaceGroupIndex,
-			group.tier,
-		]),
+	if (rawBlocks.length === 0) {
+		return [];
+	}
+	const scopes = buildLocalScopes(rawBlocks, params.candidate);
+	if (scopes.length === 0) {
+		return [];
+	}
+	const unitByIndex = new Map<number, V3QueryUnit>(
+		params.queryAnalysis.primaryUnits.map((unit) => [unit.index, unit]),
 	);
-	const bestBodyWindowBlockIds = new Set(
-		params.candidate.bodyWindowContainer?.blockIds ?? [],
+	const surfaceGroupByIndex = new Map<number, V3QuerySurfaceGroup>(
+		params.queryAnalysis.surfaceGroups.map((group) => [group.index, group]),
 	);
-	const bestBodyWindowBlockOrdinals = new Set(
-		(params.candidate.bodyWindowContainer?.blockIds ?? []).map(
-			(blockId) => params.residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
-		),
-	);
-	const rawBlocks = splitRawBodyBlocks(params.snapshotText);
-	const candidateLocalBlockOrdinals = new Set(
-		params.candidateRecall.shortlistedBodyBlockIds.map(
-			(blockId) => params.residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
-		),
-	);
-	const candidateLocalRawBlocks = rawBlocks.filter((block) =>
-		candidateLocalBlockOrdinals.has(block.ordinal),
-	);
-	const candidateRanges = resolveCandidateRanges({
-		rawBlocks,
-		candidateLocalRawBlocks,
-		candidate: params.candidate,
-		snapshotText: params.snapshotText,
-		queryAnalysis: params.queryAnalysis,
-		candidateRangeMode: params.candidateRangeMode,
-		bestBodyWindowBlockIds,
-		bestBodyWindowBlockOrdinals,
-		completedHanSurfaceTierByGroup,
-	});
-	const candidates = candidateRanges.flatMap((range) =>
-		buildCandidatesForRange(
-			params.snapshotText,
-			range,
+	const resolvedHanSurfaceGroupByIndex = new Map<number, V3ResolvedHanSurfaceGroup>(
+		resolveCandidateHanSurfaceGroups(
 			params.queryAnalysis,
-			params.candidate,
-			confirmedHanSurfaceGroupIndices,
-			completedHanSurfaceTierByGroup,
-		),
+			params.candidate.realizedFamilies,
+		).map((group) => [group.surfaceGroupIndex, group]),
+	);
+	const candidates = scopes.flatMap((scope) =>
+		buildCandidatesForScope({
+			snapshotText: params.snapshotText,
+			queryAnalysis: params.queryAnalysis,
+			candidate: params.candidate,
+			candidateRecall: params.candidateRecall,
+			scope,
+			unitByIndex,
+			surfaceGroupByIndex,
+			resolvedHanSurfaceGroupByIndex,
+		}),
+	);
+	return candidates.sort(compareV3DirectSubitemCandidates);
+}
+
+function buildCandidatesForScope(
+	context: BuildScopeContext,
+): V3DirectSubitemCandidate[] {
+	const baseOccurrences = collectBaseOccurrencesForScope(context);
+	if (baseOccurrences.length === 0) {
+		return [];
+	}
+	const candidatesByKey = new Map<string, V3DirectSubitemCandidate>();
+	for (let startIndex = 0; startIndex < baseOccurrences.length; startIndex += 1) {
+		const state: ExplanationSearchState = {
+			representativeByKey: new Map<string, V3DirectSubitemAtom>(),
+		};
+		for (let endIndex = startIndex; endIndex < baseOccurrences.length; endIndex += 1) {
+			const occurrence = baseOccurrences[endIndex];
+			if (!applyOccurrenceToState(state, occurrence)) {
+				continue;
+			}
+			const candidate = buildCandidateFromState(context, state);
+			if (candidate == null) {
+				continue;
+			}
+			const key = buildCanonicalSnapshotKey(candidate, context.scope.blocks);
+			const existing = candidatesByKey.get(key);
+			if (
+				existing == null ||
+				compareV3DirectSubitemCandidates(candidate, existing) < 0
+			) {
+				candidatesByKey.set(key, candidate);
+			}
+		}
+	}
+	const candidates = filterDominatedCandidates(
+		[...candidatesByKey.values()].sort(compareV3DirectSubitemCandidates),
 	);
 	if (
 		candidates.length === 0 &&
-		params.candidateRangeMode !== "whole_document" &&
-		shouldRetryDirectSubitemsAcrossWholeDocument(
-			params.snapshotText,
-			params.queryAnalysis,
-			params.candidate,
-			completedHanSurfaceTierByGroup,
-		)
+		context.candidate.strongestContainer?.tier === "bodyWindow"
 	) {
-		return buildCandidatesForRange(
-			params.snapshotText,
+		const fallbackCandidate = buildCandidateFromState(
+			context,
 			{
-				start: 0,
-				end: params.snapshotText.length,
-				scopeTier: "whole_document",
-			},
-			params.queryAnalysis,
-			params.candidate,
-			confirmedHanSurfaceGroupIndices,
-			completedHanSurfaceTierByGroup,
-		);
-	}
-	return candidates;
-}
-
-function resolveCandidateRanges(params: {
-	rawBlocks: readonly RawBlock[];
-	candidateLocalRawBlocks: readonly RawBlock[];
-	candidate: EvidencePackingProfile;
-	snapshotText: string;
-	queryAnalysis: V3QueryAnalysis;
-	candidateRangeMode?: "resident_locality" | "whole_document";
-	bestBodyWindowBlockIds: ReadonlySet<number>;
-	bestBodyWindowBlockOrdinals: ReadonlySet<number>;
-	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>;
-}): ResolvedSnippetRange[] {
-	if (params.candidateRangeMode === "whole_document") {
-		return params.snapshotText.trim().length > 0
-			? [{ start: 0, end: params.snapshotText.length, scopeTier: "whole_document" }]
-			: [];
-	}
-	const fallbackRanges = buildRangesFromCandidateLocalBodyRanges(
-		params.snapshotText,
-		params.candidateLocalRawBlocks,
-		params.queryAnalysis,
-		params.candidate,
-		new Set(params.candidate.hanSurfaceCompletionGroups.map((group) => group.surfaceGroupIndex)),
-		params.bestBodyWindowBlockOrdinals,
-		params.completedHanSurfaceTierByGroup,
-	);
-	if (fallbackRanges.length > 0) {
-		return fallbackRanges;
-	}
-	if (
-		params.snapshotText.trim().length > 0 &&
-		(params.candidate.identityContainer != null || params.candidate.routeContainer != null)
-	) {
-		return [{ start: 0, end: params.snapshotText.length, scopeTier: "whole_document" }];
-	}
-	return [];
-}
-
-function buildRangesFromCandidateLocalBodyRanges(
-	snapshotText: string,
-	rawBlocks: readonly RawBlock[],
-	queryAnalysis: V3QueryAnalysis,
-	candidate: EvidencePackingProfile,
-	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
-	bestBodyWindowBlockOrdinals: ReadonlySet<number>,
-	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
-): ResolvedSnippetRange[] {
-	const shortlisted: Array<{
-		range: ResolvedSnippetRange;
-		bestCandidate: V3DirectSubitemCandidate;
-	}> = [];
-	for (let index = 0; index < rawBlocks.length; index += 1) {
-		const block = rawBlocks[index];
-		pushFallbackRangeCandidate(
-			shortlisted,
-			snapshotText,
-			{
-				start: block.start,
-				end: block.end,
-				scopeTier: resolveRangeScopeTier([block.ordinal], bestBodyWindowBlockOrdinals),
-			},
-			queryAnalysis,
-			candidate,
-			supportedHanSurfaceGroupIndices,
-			completedHanSurfaceTierByGroup,
-		);
-		const nextBlock = rawBlocks[index + 1];
-		if (nextBlock == null) {
-			continue;
-		}
-		if (nextBlock.ordinal !== block.ordinal + 1) {
-			continue;
-		}
-		pushFallbackRangeCandidate(
-			shortlisted,
-			snapshotText,
-			{
-				start: block.start,
-				end: nextBlock.end,
-				scopeTier: resolveRangeScopeTier(
-					[block.ordinal, nextBlock.ordinal],
-					bestBodyWindowBlockOrdinals,
+				representativeByKey: new Map(
+					baseOccurrences.map((occurrence) => [buildOccurrenceKey(occurrence), occurrence]),
 				),
 			},
-			queryAnalysis,
-			candidate,
-			supportedHanSurfaceGroupIndices,
-			completedHanSurfaceTierByGroup,
 		);
-	}
-	shortlisted.sort((left, right) =>
-		compareV3DirectSubitemCandidates(left.bestCandidate, right.bestCandidate),
-	);
-	const selected: ResolvedSnippetRange[] = [];
-	const seen = new Set<string>();
-	for (const item of shortlisted) {
-		const key = `${item.range.start}:${item.range.end}`;
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		selected.push(item.range);
-		if (selected.length >= DIRECT_SUBITEM_SHORTLIST_SCAN_LIMIT) {
-			break;
+		if (fallbackCandidate != null) {
+			candidates.push(fallbackCandidate);
 		}
 	}
-	return selected;
+	return candidates.sort(compareV3DirectSubitemCandidates);
 }
 
-function buildCandidatesForRange(
-	snapshotText: string,
-	range: ResolvedSnippetRange,
-	queryAnalysis: V3QueryAnalysis,
-	candidate: EvidencePackingProfile,
-	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
-	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
-): V3DirectSubitemCandidate[] {
-	const baseOccurrences = collectOccurrences(
-		snapshotText,
-		range,
-		queryAnalysis,
-		candidate,
-	);
-	const occurrences = [
-		...baseOccurrences,
-		...collectResidualSupportOccurrences(
-			snapshotText,
-			range,
-			queryAnalysis,
-			baseOccurrences,
-			completedHanSurfaceTierByGroup,
+function collectBaseOccurrencesForScope(
+	context: BuildScopeContext,
+): V3DirectSubitemAtom[] {
+	const realOccurrences = collectRealizedFamilyOccurrencesInText({
+		text: context.snapshotText.slice(context.scope.scopeStart, context.scope.scopeEnd),
+		queryAnalysis: context.queryAnalysis,
+		realizedFamilies: context.candidate.realizedFamilies.filter(
+			(family) =>
+				family.inBestBodyWindow ||
+				family.inBodyResidue ||
+				context.candidate.strongestContainer?.tier === "bodyWindow",
 		),
-	].sort((left, right) => left.start - right.start || left.end - right.end);
-	const displayOccurrences = resolveDominantDisplayOccurrences(
-		occurrences,
-		queryAnalysis,
-		supportedHanSurfaceGroupIndices,
-		range.scopeTier,
+	}).flatMap((occurrence) => {
+		const start = context.scope.scopeStart + occurrence.start;
+		const end = context.scope.scopeStart + occurrence.end;
+		const block = findBlockForRange(context.scope.blocks, start, end);
+		if (block == null) {
+			return [];
+		}
+		const highlightTier: V3DirectSubitemHighlightTier =
+			occurrence.matchKind === "fuzzy" ? "weak" : "strong";
+		return [
+			{
+				kind: "realized_family_atom",
+				evidenceKind:
+					occurrence.matchKind === "fuzzy" ? "fuzzy" : "real_exact",
+				queryUnitIndex: occurrence.queryUnitIndex,
+				surfaceGroupIndex: occurrence.surfaceGroupIndex,
+				blockId: block.blockId,
+				start,
+				end,
+				matchedText: occurrence.matchedText,
+				anchorTier: "real_lexical",
+				highlightTier,
+				bigramText: null,
+			} satisfies V3DirectSubitemAtom,
+		];
+	});
+
+	const scopeBlockIds = new Set(context.scope.blocks.map((block) => block.blockId));
+	const opaqueOccurrences = context.candidateRecall.hanSurfaceGroupRecalls.flatMap(
+		(groupRecall) => {
+			const surfaceGroup = context.surfaceGroupByIndex.get(groupRecall.surfaceGroupIndex);
+			const resolvedHanSurfaceGroup = context.resolvedHanSurfaceGroupByIndex.get(
+				groupRecall.surfaceGroupIndex,
+			);
+			if (
+				surfaceGroup == null ||
+				resolvedHanSurfaceGroup == null ||
+				resolvedHanSurfaceGroup.rescueBigrams.length === 0
+			) {
+				return [];
+			}
+			const allowedBlockIds = new Set<number>();
+			for (const seedBlockId of groupRecall.bodySeedBlockIds) {
+				for (const blockId of collectSameDocSeedNeighborhoodBlockIds(
+					context.candidateRecall.docId,
+					seedBlockId,
+					context.scope.blocks,
+				)) {
+					if (scopeBlockIds.has(blockId)) {
+						allowedBlockIds.add(blockId);
+					}
+				}
+			}
+			if (allowedBlockIds.size === 0) {
+				return [];
+			}
+			return context.scope.blocks.flatMap((block) => {
+				if (!allowedBlockIds.has(block.blockId)) {
+					return [];
+				}
+				return collectOpaqueBigramOccurrencesInText({
+					text: block.text,
+					surfaceGroupIndex: surfaceGroup.index,
+					rescueBigrams: resolvedHanSurfaceGroup.rescueBigrams,
+				}).map<V3DirectSubitemAtom>((occurrence) => ({
+					kind: "opaque_bigram_atom",
+					evidenceKind: "opaque_bigram",
+					queryUnitIndex: null,
+					surfaceGroupIndex: occurrence.surfaceGroupIndex,
+					blockId: block.blockId,
+					start: block.start + occurrence.start,
+					end: block.start + occurrence.end,
+					matchedText: occurrence.matchedText,
+					anchorTier: "opaque_bigram",
+					highlightTier: "strong",
+					bigramText: occurrence.bigramText,
+				}));
+			});
+		},
 	);
-	const occurrenceWindows = buildOccurrenceWindows(
-		snapshotText,
-		displayOccurrences.length > 0 ? displayOccurrences : occurrences,
-		range.scopeTier,
-	);
-	if (occurrenceWindows.length === 0) {
-		const candidate = buildCandidateFromOccurrences(
-			snapshotText,
-			occurrences,
-			displayOccurrences,
-			supportedHanSurfaceGroupIndices,
-			range.scopeTier,
-		);
-		return candidate == null ? [] : [candidate];
-	}
-	return occurrenceWindows
-		.map((window) =>
-			buildCandidateFromOccurrenceWindow(
-				snapshotText,
-				occurrences,
-				displayOccurrences,
-				window,
-				supportedHanSurfaceGroupIndices,
-				range.scopeTier,
-			),
-		)
-		.filter((candidate): candidate is V3DirectSubitemCandidate => candidate != null);
+	return dedupeAtoms([...realOccurrences, ...opaqueOccurrences]).sort(compareAtoms);
 }
 
-function pushFallbackRangeCandidate(
-	shortlisted: Array<{
-		range: ResolvedSnippetRange;
-		bestCandidate: V3DirectSubitemCandidate;
-	}>,
-	snapshotText: string,
-	range: ResolvedSnippetRange,
-	queryAnalysis: V3QueryAnalysis,
-	candidate: EvidencePackingProfile,
-	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
-	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
-): void {
-	const candidates = buildCandidatesForRange(
-		snapshotText,
-		range,
-		queryAnalysis,
-		candidate,
-		supportedHanSurfaceGroupIndices,
-		completedHanSurfaceTierByGroup,
-	);
-	if (candidates.length === 0) {
-		return;
+function applyOccurrenceToState(
+	state: ExplanationSearchState,
+	occurrence: V3DirectSubitemAtom,
+): boolean {
+	const key = buildOccurrenceKey(occurrence);
+	if (state.representativeByKey.has(key)) {
+		return false;
 	}
-	const bestCandidate = [...candidates].sort(compareV3DirectSubitemCandidates)[0];
-	if (bestCandidate == null) {
-		return;
-	}
-	shortlisted.push({ range, bestCandidate });
+	state.representativeByKey.set(key, occurrence);
+	return true;
 }
 
-function buildCandidateFromOccurrenceWindow(
-	snapshotText: string,
-	occurrences: readonly V3DirectSubitemOccurrence[],
-	displayOccurrences: readonly V3DirectSubitemOccurrence[],
-	window: ResolvedSnippetRange,
-	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
-	scopeTier: V3DirectSubitemResidualScopeTier,
+function buildOccurrenceKey(
+	occurrence: V3DirectSubitemAtom,
+): string {
+	if (occurrence.kind === "realized_family_atom") {
+		return `real:${occurrence.queryUnitIndex ?? -1}`;
+	}
+	if (occurrence.kind === "opaque_bigram_atom") {
+		return `opaque:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.bigramText ?? occurrence.matchedText}`;
+	}
+	return `surface:${occurrence.surfaceGroupIndex ?? -1}`;
+}
+
+function buildCandidateFromState(
+	context: BuildScopeContext,
+	state: ExplanationSearchState,
 ): V3DirectSubitemCandidate | null {
-	const localOccurrences = occurrences.filter(
-		(occurrence) =>
-			occurrence.start >= window.start && occurrence.end <= window.end,
-	);
-	const localDisplayOccurrences = displayOccurrences.filter(
-		(occurrence) =>
-			occurrence.start >= window.start && occurrence.end <= window.end,
-	);
-	return buildCandidateFromOccurrences(
-		snapshotText,
-		localOccurrences,
-		localDisplayOccurrences,
-		supportedHanSurfaceGroupIndices,
-		scopeTier,
-	);
-}
-
-function buildCandidateFromOccurrences(
-	snapshotText: string,
-	occurrences: readonly V3DirectSubitemOccurrence[],
-	displayOccurrences: readonly V3DirectSubitemOccurrence[],
-	confirmedHanSurfaceGroupIndices: ReadonlySet<number>,
-	scopeTier: V3DirectSubitemResidualScopeTier,
-): V3DirectSubitemCandidate | null {
-	if (occurrences.length === 0) {
+	const baseAtoms = [...state.representativeByKey.values()].sort(compareAtoms);
+	if (baseAtoms.length === 0) {
 		return null;
 	}
-	const realOccurrences = occurrences.filter((occurrence) =>
-		isRealLikeOccurrenceKind(occurrence.kind),
-	);
-	const validatedSurfaceOccurrences = resolveValidatedSurfaceCompletions(
-		occurrences,
-		confirmedHanSurfaceGroupIndices,
-		scopeTier,
-	);
-	const validatedSurfaceOccurrenceKeys = new Set(
-		validatedSurfaceOccurrences.map((occurrence) => buildOccurrenceKey(occurrence)),
-	);
-	const anchorOccurrences = occurrences.filter(
-		(occurrence) =>
-			occurrence.kind === "opaque_anchor" ||
-			isRealLikeOccurrenceKind(occurrence.kind) ||
-			validatedSurfaceOccurrenceKeys.has(buildOccurrenceKey(occurrence)),
-	);
-	const confirmedHanAnchorGroupIndices = uniqueSortedNumbers(
-		anchorOccurrences
-			.filter((occurrence) =>
-				occurrence.kind === "opaque_anchor" ||
-				validatedSurfaceOccurrenceKeys.has(buildOccurrenceKey(occurrence)),
-			)
-			.map((occurrence) => occurrence.surfaceGroupIndex)
-			.filter((value): value is number => value != null),
-	);
-	const coveredUnitIndices = uniqueSortedNumbers(
-		realOccurrences
-			.map((occurrence) => occurrence.queryUnitIndex)
-			.filter((value): value is number => value != null),
-	);
-	if (anchorOccurrences.length === 0) {
-		return null;
-	}
-	const effectiveDisplayOccurrences =
-		displayOccurrences.length > 0 ? displayOccurrences : occurrences;
-	const representativeOccurrences = selectRepresentativeOccurrences(
-		effectiveDisplayOccurrences,
-	);
-	if (representativeOccurrences.length === 0) {
-		return null;
-	}
-	const representativeAnchorOccurrences = selectRepresentativeOccurrences(
-		anchorOccurrences,
-	);
-	if (representativeAnchorOccurrences.length === 0) {
-		return null;
-	}
-	const orderedRealOccurrences = representativeOccurrences.filter((occurrence) =>
-		isRealLikeOccurrenceKind(occurrence.kind),
-	);
 	let totalGap = 0;
 	let maxAdjacentGap = 0;
-	for (let index = 1; index < representativeOccurrences.length; index += 1) {
+	for (let index = 1; index < baseAtoms.length; index += 1) {
 		const gap = computeWeightedGap(
-			snapshotText,
-			representativeOccurrences[index - 1].end,
-			representativeOccurrences[index].start,
+			context.snapshotText,
+			baseAtoms[index - 1].end,
+			baseAtoms[index].start,
 		);
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
 	}
-	return {
-		start: representativeOccurrences[0].start,
-		end: representativeOccurrences[representativeOccurrences.length - 1].end,
-		anchorOffset: resolveCandidateAnchorOffset(representativeAnchorOccurrences),
-		occurrences,
-		displayOccurrences,
-		hasAnchor: true,
-		anchorTier: resolveCandidateAnchorTier(
-			representativeAnchorOccurrences,
-			validatedSurfaceOccurrenceKeys,
+	if (maxAdjacentGap > DIRECT_SUBITEM_MAX_ADJACENT_GAP) {
+		return null;
+	}
+	const confirmedSurfaceAtoms = buildConfirmedSurfaceAtoms(
+		context.snapshotText,
+		context.scope,
+		baseAtoms,
+		context.surfaceGroupByIndex,
+	);
+	const atoms = dedupeAtoms([...baseAtoms, ...confirmedSurfaceAtoms]).sort(compareAtoms);
+	if (atoms.length === 0) {
+		return null;
+	}
+	const displayAtoms = resolveDisplayAtoms(atoms);
+	const realAtoms = baseAtoms.filter((atom) => atom.kind === "realized_family_atom");
+	const confirmedSurfaceGroupIndices = uniqueSortedNumbers(
+		atoms
+			.filter((atom) => atom.kind === "confirmed_surface_atom")
+			.map((atom) => atom.surfaceGroupIndex)
+			.filter((value): value is number => value != null),
+	);
+	const opaqueBigramKeys = [
+		...new Set(
+			baseAtoms
+				.filter((atom) => atom.kind === "opaque_bigram_atom")
+				.map((atom) => `${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`),
 		),
-		confirmedHanAnchorGroupCount: confirmedHanAnchorGroupIndices.length,
-		coveredRealPrimaryCount: coveredUnitIndices.length,
-		completedHanSurfaceGroupCount: confirmedHanAnchorGroupIndices.length,
-		preservesQueryOrder: preservesQueryOrder(orderedRealOccurrences),
-		windowWidth:
-			representativeOccurrences[representativeOccurrences.length - 1].end -
-			representativeOccurrences[0].start,
+	];
+	const touchedOpaqueSurfaceGroupIndices = uniqueSortedNumbers(
+		baseAtoms
+			.filter((atom) => atom.kind === "opaque_bigram_atom")
+			.map((atom) => atom.surfaceGroupIndex)
+			.filter((value): value is number => value != null),
+	);
+	const totalOpaqueBigramCount = touchedOpaqueSurfaceGroupIndices.reduce(
+		(total, groupIndex) =>
+			total +
+			(context.resolvedHanSurfaceGroupByIndex.get(groupIndex)?.rescueBigrams.length ?? 0),
+		0,
+	);
+	return {
+		start: atoms[0].start,
+		end: atoms[atoms.length - 1].end,
+		anchorOffset: resolveCandidateAnchorOffset(atoms),
+		component: {
+			scopeStart: context.scope.scopeStart,
+			scopeEnd: context.scope.scopeEnd,
+			scopeTier: context.scope.scopeTier,
+			blockIds: context.scope.blocks.map((block) => block.blockId),
+			atoms,
+		},
+		atoms,
+		displayAtoms,
+		hasAnchor: true,
+		anchorTier: resolveCandidateAnchorTier(atoms),
+		coveredRealPrimaryCount: uniqueSortedNumbers(
+			realAtoms
+				.map((atom) => atom.queryUnitIndex)
+				.filter((value): value is number => value != null),
+		).length,
+		confirmedSurfaceGroupCount: confirmedSurfaceGroupIndices.length,
+		matchedOpaqueBigramCount: opaqueBigramKeys.length,
+		opaqueCoverageRatio:
+			totalOpaqueBigramCount > 0
+				? opaqueBigramKeys.length / totalOpaqueBigramCount
+				: 0,
+		preservesQueryOrder: preservesQueryOrder(realAtoms),
+		windowWidth: Math.max(1, atoms[atoms.length - 1].end - atoms[0].start),
 		maxAdjacentGap,
 		totalGap,
 	};
 }
 
-function buildOccurrenceWindows(
+function buildConfirmedSurfaceAtoms(
 	snapshotText: string,
-	occurrences: readonly V3DirectSubitemOccurrence[],
-	scopeTier: V3DirectSubitemResidualScopeTier,
-): ResolvedSnippetRange[] {
-	if (occurrences.length === 0) {
+	scope: LocalScope,
+	baseAtoms: readonly V3DirectSubitemAtom[],
+	surfaceGroupByIndex: ReadonlyMap<number, V3QuerySurfaceGroup>,
+): V3DirectSubitemAtom[] {
+	const touchedSurfaceGroupIndices = uniqueSortedNumbers(
+		baseAtoms
+			.filter(
+				(atom) =>
+					(atom.kind === "realized_family_atom" ||
+						atom.kind === "opaque_bigram_atom") &&
+					atom.surfaceGroupIndex != null,
+			)
+			.map((atom) => atom.surfaceGroupIndex)
+			.filter((value): value is number => value != null),
+	);
+	if (touchedSurfaceGroupIndices.length === 0) {
 		return [];
 	}
-	const sortedOccurrences = [...occurrences].sort(
-		(left, right) => left.start - right.start || left.end - right.end,
-	);
-	const windows: ResolvedSnippetRange[] = [];
-	for (let startIndex = 0; startIndex < sortedOccurrences.length; startIndex += 1) {
-		if (sortedOccurrences[startIndex].isSupportOnly) {
+	const scopeText = snapshotText.slice(scope.scopeStart, scope.scopeEnd);
+	const confirmedAtoms: V3DirectSubitemAtom[] = [];
+	for (const surfaceGroupIndex of touchedSurfaceGroupIndices) {
+		const surfaceGroup = surfaceGroupByIndex.get(surfaceGroupIndex);
+		if (surfaceGroup == null) {
 			continue;
 		}
-		let endIndex = startIndex;
-		let weightedGapTotal = 0;
-		while (endIndex + 1 < sortedOccurrences.length) {
-			const nextGap = computeWeightedGap(
-				snapshotText,
-				sortedOccurrences[endIndex].end,
-				sortedOccurrences[endIndex + 1].start,
-			);
-			if (
-				weightedGapTotal + nextGap >
-				DIRECT_SUBITEM_WEIGHTED_GAP_LIMIT
-			) {
-				break;
-			}
-			weightedGapTotal += nextGap;
-			endIndex += 1;
+		const supportingRanges: PrimitiveTextOccurrence[] = baseAtoms
+			.filter((atom) => atom.surfaceGroupIndex === surfaceGroupIndex)
+			.map((atom) => ({
+				start: atom.start - scope.scopeStart,
+				end: atom.end - scope.scopeStart,
+				matchedText: atom.matchedText,
+			}));
+		const confirmedSpan = resolveConfirmedSurfaceSpans({
+			text: scopeText,
+			surfaceGroup,
+			supportingRanges,
+		})[0];
+		if (confirmedSpan == null) {
+			continue;
 		}
-		windows.push({
-			start: sortedOccurrences[startIndex].start,
-			end: sortedOccurrences[endIndex].end,
-			scopeTier,
+		const start = scope.scopeStart + confirmedSpan.start;
+		const end = scope.scopeStart + confirmedSpan.end;
+		const block = findBlockForRange(scope.blocks, start, end);
+		if (block == null) {
+			continue;
+		}
+		confirmedAtoms.push({
+			kind: "confirmed_surface_atom",
+			evidenceKind: "confirmed_surface",
+			queryUnitIndex: null,
+			surfaceGroupIndex,
+			blockId: block.blockId,
+			start,
+			end,
+			matchedText: confirmedSpan.surfaceText,
+			anchorTier: "confirmed_surface",
+			highlightTier: "strong",
+			bigramText: null,
 		});
 	}
-	return dedupeOccurrenceWindows(windows);
+	return confirmedAtoms;
 }
 
-function dedupeOccurrenceWindows(
-	windows: readonly ResolvedSnippetRange[],
-): ResolvedSnippetRange[] {
-	const deduped: ResolvedSnippetRange[] = [];
-	const seen = new Set<string>();
-	for (const window of windows) {
-		const key = `${window.start}:${window.end}`;
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		deduped.push(window);
+function buildCanonicalSnapshotKey(
+	candidate: V3DirectSubitemCandidate,
+	scopeBlocks: readonly RawBlock[],
+): string {
+	const realUnitIndices = uniqueSortedNumbers(
+		candidate.atoms
+			.filter((atom) => atom.kind === "realized_family_atom")
+			.map((atom) => atom.queryUnitIndex)
+			.filter((value): value is number => value != null),
+	).join(",");
+	const opaqueBigramKeys = [
+		...new Set(
+			candidate.atoms
+				.filter((atom) => atom.kind === "opaque_bigram_atom")
+				.map((atom) => `${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`),
+		),
+	]
+		.sort()
+		.join(",");
+	const confirmedSurfaceGroups = uniqueSortedNumbers(
+		candidate.atoms
+			.filter((atom) => atom.kind === "confirmed_surface_atom")
+			.map((atom) => atom.surfaceGroupIndex)
+			.filter((value): value is number => value != null),
+	).join(",");
+	return [
+		realUnitIndices,
+		opaqueBigramKeys,
+		confirmedSurfaceGroups,
+		candidate.anchorTier,
+		candidate.preservesQueryOrder ? "ordered" : "unordered",
+		scopeBlocks.map((block) => block.blockId).join(","),
+	].join("|");
+}
+
+function filterDominatedCandidates(
+	candidates: readonly V3DirectSubitemCandidate[],
+): V3DirectSubitemCandidate[] {
+	return candidates.filter(
+		(candidate, candidateIndex) =>
+			!candidates.some(
+				(contender, contenderIndex) =>
+					candidateIndex !== contenderIndex &&
+					isDominatedCandidate(candidate, contender),
+			),
+	);
+}
+
+function isDominatedCandidate(
+	candidate: V3DirectSubitemCandidate,
+	contender: V3DirectSubitemCandidate,
+): boolean {
+	if (
+		candidate.component.scopeStart !== contender.component.scopeStart ||
+		candidate.component.scopeEnd !== contender.component.scopeEnd
+	) {
+		return false;
 	}
-	return deduped;
+	if (compareV3DirectSubitemCandidates(contender, candidate) >= 0) {
+		return false;
+	}
+	const contenderAtomKeys = new Set(
+		contender.atoms.map((atom) =>
+			[
+				atom.kind,
+				atom.queryUnitIndex ?? -1,
+				atom.surfaceGroupIndex ?? -1,
+				atom.bigramText ?? atom.matchedText,
+			].join(":"),
+		),
+	);
+	return candidate.atoms.every((atom) =>
+		contenderAtomKeys.has(
+			[
+				atom.kind,
+				atom.queryUnitIndex ?? -1,
+				atom.surfaceGroupIndex ?? -1,
+				atom.bigramText ?? atom.matchedText,
+			].join(":"),
+		),
+	);
 }
 
-function collectOccurrences(
-	snapshotText: string,
-	range: ResolvedSnippetRange,
-	queryAnalysis: V3QueryAnalysis,
+function resolveDisplayAtoms(
+	atoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemAtom[] {
+	const confirmedSurfaceGroups = new Set<number>(
+		atoms
+			.filter((atom) => atom.kind === "confirmed_surface_atom")
+			.map((atom) => atom.surfaceGroupIndex)
+			.filter((value): value is number => value != null),
+	);
+	return atoms.filter((atom) => {
+		if (atom.kind !== "realized_family_atom" || atom.surfaceGroupIndex == null) {
+			return true;
+		}
+		return !confirmedSurfaceGroups.has(atom.surfaceGroupIndex);
+	});
+}
+
+function buildLocalScopes(
+	rawBlocks: readonly RawBlock[],
 	candidate: EvidencePackingProfile,
-): V3DirectSubitemOccurrence[] {
-	const segmentText = snapshotText.slice(range.start, range.end);
-	const occurrences: V3DirectSubitemOccurrence[] = [];
-	const realizedFamilyByUnitIndex = new Map(
-		candidate.realizedFamilies.map((family) => [family.queryUnitIndex, family]),
-	);
-	for (const unit of queryAnalysis.primaryUnits) {
-		const realizedFamily = realizedFamilyByUnitIndex.get(unit.index);
-		if (unit.source === "opaque_han_confirmed") {
-			if (realizedFamily?.matchKind !== "opaque_exact") {
-				continue;
-			}
-			for (const occurrence of findTextOccurrences(
-				segmentText,
-				unit.text,
-				unit,
-			)) {
-				occurrences.push({
-					kind: "opaque_anchor",
-					start: range.start + occurrence.start,
-					end: range.start + occurrence.end,
-					queryUnitIndex: unit.index,
-					surfaceGroupIndex: unit.surfaceGroupIndex,
-					text: unit.text,
-					anchorTier: "opaque_whole_group",
-					highlightTier: "strong",
-				});
-			}
-			continue;
-		}
-		if (realizedFamily == null) {
-			continue;
-		}
-		const occurrenceKind =
-			realizedFamily?.matchKind === "fuzzy" ? "fuzzy" : "real_exact";
-		const occurrenceText =
-			realizedFamily?.matchKind === "fuzzy"
-				? realizedFamily.familyText
-				: unit.text;
-		for (const occurrence of findTextOccurrences(
-			segmentText,
-			occurrenceText,
-			unit,
-		)) {
-			occurrences.push({
-				kind: occurrenceKind,
-				start: range.start + occurrence.start,
-				end: range.start + occurrence.end,
-				queryUnitIndex: unit.index,
-				surfaceGroupIndex: unit.surfaceGroupIndex,
-				text: occurrenceText,
-				anchorTier: "real_lexical",
-				highlightTier:
-					occurrenceKind === "fuzzy" ? "weak" : "strong",
-			});
-		}
-	}
-	const confirmedHanSurfaceGroupIndices = new Set(
-		candidate.hanSurfaceCompletionGroups
-			.filter((group) => group.tier !== "none")
-			.map((group) => group.surfaceGroupIndex),
-	);
-	for (const group of queryAnalysis.surfaceGroups) {
-		if (group.kind !== "han" || Array.from(group.text).length < 2) {
-			continue;
-		}
-		for (const occurrence of findTextOccurrences(segmentText, group.text)) {
-			occurrences.push({
-				kind: "surface_completion",
-				start: range.start + occurrence.start,
-				end: range.start + occurrence.end,
-				queryUnitIndex: null,
-				surfaceGroupIndex: group.index,
-				text: group.text,
-				anchorTier: confirmedHanSurfaceGroupIndices.has(group.index)
-					? "confirmed_surface"
-					: null,
-				highlightTier: "strong",
-				isConfirmedSurfaceCompletion:
-					confirmedHanSurfaceGroupIndices.has(group.index),
-			});
-		}
-	}
-	return occurrences.sort(
-		(left, right) => left.start - right.start || left.end - right.end,
-	);
-}
-
-function collectResidualSupportOccurrences(
-	snapshotText: string,
-	range: ResolvedSnippetRange,
-	queryAnalysis: V3QueryAnalysis,
-	baseOccurrences: readonly V3DirectSubitemOccurrence[],
-	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
-): V3DirectSubitemOccurrence[] {
-	if (range.scopeTier === "whole_document") {
+): LocalScope[] {
+	if (rawBlocks.length === 0) {
 		return [];
 	}
-	const unitByIndex = new Map(
-		queryAnalysis.primaryUnits.map((unit) => [unit.index, unit]),
-	);
-	const localCompletionTier = scopeTierToCompletionTier(range.scopeTier);
-	const supportingAnchorOccurrencesByGroup = new Map<number, V3DirectSubitemOccurrence[]>();
-	for (const occurrence of baseOccurrences) {
-		if (occurrence.surfaceGroupIndex == null) {
+	const bestBodyWindowBlockIds = new Set(candidate.bodyWindowContainer?.blockIds ?? []);
+	const scopes: LocalScope[] = [];
+	let scopeStartIndex = 0;
+	for (let index = 1; index < rawBlocks.length; index += 1) {
+		if (rawBlocks[index].ordinal === rawBlocks[index - 1].ordinal + 1) {
 			continue;
 		}
-		if (
-			occurrence.kind === "opaque_anchor" ||
-			(occurrence.kind === "surface_completion" &&
-				occurrence.isConfirmedSurfaceCompletion === true)
-		) {
-			const existing =
-				supportingAnchorOccurrencesByGroup.get(occurrence.surfaceGroupIndex) ?? [];
-			existing.push(occurrence);
-			supportingAnchorOccurrencesByGroup.set(
-				occurrence.surfaceGroupIndex,
-				existing,
-			);
-			continue;
-		}
-		if (!isRealLikeOccurrenceKind(occurrence.kind)) {
-			continue;
-		}
-		const unit = unitByIndex.get(occurrence.queryUnitIndex ?? -1);
-		if (unit?.source !== "han_tokenizer_real") {
-			continue;
-		}
-		const existing =
-			supportingAnchorOccurrencesByGroup.get(occurrence.surfaceGroupIndex) ?? [];
-		existing.push(occurrence);
-		supportingAnchorOccurrencesByGroup.set(
-			occurrence.surfaceGroupIndex,
-			existing,
+		scopes.push(
+			createScope(rawBlocks.slice(scopeStartIndex, index), bestBodyWindowBlockIds),
 		);
+		scopeStartIndex = index;
 	}
-	const segmentText = snapshotText.slice(range.start, range.end);
-	const residualSupportOccurrences: V3DirectSubitemOccurrence[] = [];
-	const seen = new Set<string>();
-	for (const backstopGroup of queryAnalysis.hanBackstopGroups) {
-		if (
-			completedHanSurfaceTierByGroup.get(backstopGroup.surfaceGroupIndex) ===
-			localCompletionTier
-		) {
-			continue;
-		}
-		const supportingAnchorOccurrences =
-			supportingAnchorOccurrencesByGroup.get(backstopGroup.surfaceGroupIndex) ?? [];
-		if (supportingAnchorOccurrences.length === 0) {
-			continue;
-		}
-		if (backstopGroup.triggerKind === "residual_span") {
-			pushResidualSpanSupportOccurrences(
-				residualSupportOccurrences,
-				seen,
-				segmentText,
-				range,
-				backstopGroup,
-			);
-			continue;
-		}
-		if (backstopGroup.triggerKind === "bridge_bigram") {
-			pushBridgeResidualSupportOccurrences(
-				residualSupportOccurrences,
-				seen,
-				segmentText,
-				range,
-				backstopGroup,
-				supportingAnchorOccurrences,
-			);
-		}
-	}
-	return residualSupportOccurrences.sort(
-		(left, right) => left.start - right.start || left.end - right.end,
-	);
+	scopes.push(createScope(rawBlocks.slice(scopeStartIndex), bestBodyWindowBlockIds));
+	return scopes;
 }
 
-function pushResidualSpanSupportOccurrences(
-	target: V3DirectSubitemOccurrence[],
-	seen: Set<string>,
-	segmentText: string,
-	range: ResolvedSnippetRange,
-	backstopGroup: V3HanBackstopGroup,
-): void {
-	for (const occurrence of findTextOccurrences(segmentText, backstopGroup.normalizedText)) {
-		const residualOccurrence = buildResidualSupportOccurrence(
-			range,
-			backstopGroup.surfaceGroupIndex,
-			backstopGroup.normalizedText,
-			backstopGroup.triggerKind,
-			occurrence.start,
-			occurrence.end,
-		);
-		pushUniqueOccurrence(target, seen, residualOccurrence);
-	}
-}
-
-function pushBridgeResidualSupportOccurrences(
-	target: V3DirectSubitemOccurrence[],
-	seen: Set<string>,
-	segmentText: string,
-	range: ResolvedSnippetRange,
-	backstopGroup: V3HanBackstopGroup,
-	supportingAnchorOccurrences: readonly V3DirectSubitemOccurrence[],
-): void {
-	for (const bigram of backstopGroup.bigrams) {
-		const residualOffset = bigram.indexOf(backstopGroup.normalizedText);
-		if (residualOffset < 0) {
-			continue;
-		}
-		for (const occurrence of findTextOccurrences(segmentText, bigram)) {
-			const bigramStart = range.start + occurrence.start;
-			const bigramEnd = range.start + occurrence.end;
-			if (
-				!supportingAnchorOccurrences.some((anchorOccurrence) =>
-					rangesOverlap(
-						anchorOccurrence.start,
-						anchorOccurrence.end,
-						bigramStart,
-						bigramEnd,
-					),
-				)
-			) {
-				continue;
-			}
-			const residualOccurrence = buildResidualSupportOccurrence(
-				range,
-				backstopGroup.surfaceGroupIndex,
-				backstopGroup.normalizedText,
-				backstopGroup.triggerKind,
-				occurrence.start + residualOffset,
-				occurrence.start + residualOffset + backstopGroup.normalizedText.length,
-			);
-			pushUniqueOccurrence(target, seen, residualOccurrence);
-		}
-	}
-}
-
-function buildResidualSupportOccurrence(
-	range: ResolvedSnippetRange,
-	surfaceGroupIndex: number,
-	text: string,
-	triggerKind: V3HanBackstopGroup["triggerKind"],
-	localStart: number,
-	localEnd: number,
-): V3DirectSubitemOccurrence {
+function createScope(
+	blocks: readonly RawBlock[],
+	bestBodyWindowBlockIds: ReadonlySet<number>,
+): LocalScope {
 	return {
-		kind: "residual_support",
-		start: range.start + localStart,
-		end: range.start + localEnd,
-		queryUnitIndex: null,
-		surfaceGroupIndex,
-		text,
-		residualSupportKind:
-			triggerKind === "residual_span" ? "residual_span" : "bridge_bigram",
-		scopeTier: range.scopeTier,
-		highlightTier: "weak",
-		isSupportOnly: true,
+		scopeStart: blocks[0].start,
+		scopeEnd: blocks[blocks.length - 1].end,
+		scopeTier: blocks.every((block) => bestBodyWindowBlockIds.has(block.blockId))
+			? "body_window"
+			: "body_residue",
+		blocks,
 	};
 }
 
-function pushUniqueOccurrence(
-	target: V3DirectSubitemOccurrence[],
-	seen: Set<string>,
-	occurrence: V3DirectSubitemOccurrence,
-): void {
-	const key = buildOccurrenceKey(occurrence);
-	if (seen.has(key)) {
-		return;
+function splitRawBodyBlocks(
+	snapshotText: string,
+	candidate: EvidencePackingProfile,
+	candidateRecall: V3CandidateDocRecall,
+	residentBase: ResidentBase,
+): RawBlock[] {
+	const localBlockIds = collectLocalBlockIds(candidate, candidateRecall, residentBase);
+	if (localBlockIds.size === 0) {
+		return [];
 	}
-	seen.add(key);
-	target.push(occurrence);
+	const blockIdByOrdinal = new Map<number, number>();
+	for (const blockId of localBlockIds) {
+		const ordinal = residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId;
+		if (!blockIdByOrdinal.has(ordinal)) {
+			blockIdByOrdinal.set(ordinal, blockId);
+		}
+	}
+	const ranges = createV3BodyBlockChunkRanges(
+		snapshotText,
+		V3_BODY_BLOCK_TARGET_TOKENS,
+		V3_BODY_BLOCK_MAX_TOKENS,
+	);
+	const blocks: RawBlock[] = [];
+	for (const [ordinal, blockId] of [...blockIdByOrdinal.entries()].sort(
+		(left, right) => left[0] - right[0],
+	)) {
+		const range = ranges[ordinal];
+		if (range == null) {
+			continue;
+		}
+		pushBlock(snapshotText, range.startOffset, range.endOffset, ordinal, blockId, blocks);
+	}
+	return blocks;
 }
 
-function findTextOccurrences(
-	haystack: string,
-	needle: string,
-	unit?: V3QueryUnit,
-): Array<{ start: number; end: number }> {
-	const out: Array<{ start: number; end: number }> = [];
-	if (needle.length === 0 || haystack.length === 0) {
-		return out;
-	}
-	const useCaseInsensitive = unit == null || unit.source === "surface";
-	const haystackText = useCaseInsensitive ? haystack.toLowerCase() : haystack;
-	const needleText = useCaseInsensitive ? needle.toLowerCase() : needle;
-	let searchStart = 0;
-	while (searchStart < haystackText.length) {
-		const index = haystackText.indexOf(needleText, searchStart);
-		if (index < 0) {
-			break;
+function collectLocalBlockIds(
+	candidate: EvidencePackingProfile,
+	candidateRecall: V3CandidateDocRecall,
+	residentBase: ResidentBase,
+): Set<number> {
+	const blockIds = new Set<number>([
+		...(candidate.bodyWindowContainer?.blockIds ?? []),
+		...candidateRecall.shortlistedBodyBlockIds,
+	]);
+	for (const groupRecall of candidateRecall.hanSurfaceGroupRecalls) {
+		for (const seedBlockId of groupRecall.bodySeedBlockIds) {
+			blockIds.add(seedBlockId);
+			for (const blockId of collectSameDocSeedNeighborhoodBlockIds(
+				candidateRecall.docId,
+				seedBlockId,
+				getBodyBlocksForDoc(candidateRecall.docId, residentBase),
+			)) {
+				blockIds.add(blockId);
+			}
 		}
-		out.push({ start: index, end: index + needleText.length });
-		searchStart = index + 1;
+	}
+	return blockIds;
+}
+
+function getBodyBlocksForDoc(
+	docId: number,
+	residentBase: ResidentBase,
+): RawBlock[] {
+	const start = residentBase.docTable.bodyBlockStartByDocId[docId] ?? 0;
+	const count = residentBase.docTable.bodyBlockCountByDocId[docId] ?? 0;
+	const blocks: RawBlock[] = [];
+	for (let offset = 0; offset < count; offset += 1) {
+		const blockId = start + offset;
+		blocks.push({
+			blockId,
+			ordinal: residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
+			start: 0,
+			end: 0,
+			text: "",
+		});
+	}
+	return blocks;
+}
+
+function collectSameDocSeedNeighborhoodBlockIds(
+	_docId: number,
+	seedBlockId: number,
+	availableBlocks: readonly Pick<RawBlock, "blockId">[],
+): number[] {
+	const availableBlockIds = new Set(availableBlocks.map((block) => block.blockId));
+	const out: number[] = [];
+	for (const candidateBlockId of [seedBlockId - 1, seedBlockId, seedBlockId + 1]) {
+		if (candidateBlockId < 0 || !availableBlockIds.has(candidateBlockId)) {
+			continue;
+		}
+		out.push(candidateBlockId);
 	}
 	return out;
 }
 
-function selectRepresentativeOccurrences(
-	occurrences: readonly V3DirectSubitemOccurrence[],
-): V3DirectSubitemOccurrence[] {
-	const bestByKey = new Map<string, V3DirectSubitemOccurrence>();
-	for (const occurrence of occurrences) {
-		const key =
-			isRealLikeOccurrenceKind(occurrence.kind)
-				? `unit:${occurrence.queryUnitIndex ?? -1}`
-				: occurrence.kind === "opaque_anchor"
-					? `opaque:${occurrence.surfaceGroupIndex ?? occurrence.queryUnitIndex ?? -1}`
-				: occurrence.kind === "surface_completion"
-					? `surface:${occurrence.surfaceGroupIndex ?? -1}`
-					: occurrence.kind === "residual_support"
-						? `residual:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.residualSupportKind ?? "none"}:${occurrence.start}:${occurrence.end}`
-						: `route:${occurrence.start}:${occurrence.end}`;
-		const existing = bestByKey.get(key);
-		if (existing == null || occurrence.start < existing.start) {
-			bestByKey.set(key, occurrence);
+function pushBlock(
+	snapshotText: string,
+	rangeStart: number,
+	rangeEnd: number,
+	ordinal: number,
+	blockId: number,
+	blocks: RawBlock[],
+): void {
+	const rawText = snapshotText.slice(rangeStart, rangeEnd);
+	const leadingTrim = rawText.search(/\S/u);
+	if (leadingTrim < 0) {
+		return;
+	}
+	const trailingTrim = rawText.length - rawText.trimEnd().length;
+	const start = rangeStart + leadingTrim;
+	const end = rangeEnd - trailingTrim;
+	blocks.push({
+		blockId,
+		ordinal,
+		start,
+		end,
+		text: snapshotText.slice(start, end),
+	});
+}
+
+function findBlockForRange(
+	blocks: readonly RawBlock[],
+	start: number,
+	end: number,
+): RawBlock | null {
+	return blocks.find((block) => start >= block.start && end <= block.end) ?? null;
+}
+
+function dedupeAtoms(
+	atoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemAtom[] {
+	const deduped = new Map<string, V3DirectSubitemAtom>();
+	for (const atom of atoms) {
+		const key = [
+			atom.kind,
+			atom.queryUnitIndex ?? -1,
+			atom.surfaceGroupIndex ?? -1,
+			atom.blockId,
+			atom.start,
+			atom.end,
+			atom.matchedText,
+		].join(":");
+		const existing = deduped.get(key);
+		if (
+			existing == null ||
+			getAnchorTierScore(atom.anchorTier) > getAnchorTierScore(existing.anchorTier)
+		) {
+			deduped.set(key, atom);
 		}
 	}
-	return [...bestByKey.values()].sort(
-		(left, right) => left.start - right.start || left.end - right.end,
-	);
+	return [...deduped.values()].sort(compareAtoms);
+}
+
+function compareAtoms(
+	left: V3DirectSubitemAtom,
+	right: V3DirectSubitemAtom,
+): number {
+	if (left.start !== right.start) {
+		return left.start - right.start;
+	}
+	if (left.end !== right.end) {
+		return left.end - right.end;
+	}
+	if (left.kind !== right.kind) {
+		return left.kind.localeCompare(right.kind);
+	}
+	if ((left.queryUnitIndex ?? -1) !== (right.queryUnitIndex ?? -1)) {
+		return (left.queryUnitIndex ?? -1) - (right.queryUnitIndex ?? -1);
+	}
+	if ((left.surfaceGroupIndex ?? -1) !== (right.surfaceGroupIndex ?? -1)) {
+		return (left.surfaceGroupIndex ?? -1) - (right.surfaceGroupIndex ?? -1);
+	}
+	return left.matchedText.localeCompare(right.matchedText);
+}
+
+function resolveCandidateAnchorOffset(
+	atoms: readonly V3DirectSubitemAtom[],
+): number {
+	return [...atoms].sort(
+		(left, right) =>
+			getAnchorTierScore(right.anchorTier) - getAnchorTierScore(left.anchorTier) ||
+			left.start - right.start ||
+			left.end - right.end,
+	)[0]?.start ?? atoms[0]?.start ?? 0;
+}
+
+function resolveCandidateAnchorTier(
+	atoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemAnchorTier {
+	let strongestTier: V3DirectSubitemAnchorTier = "none";
+	for (const atom of atoms) {
+		if (getAnchorTierScore(atom.anchorTier) > getAnchorTierScore(strongestTier)) {
+			strongestTier = atom.anchorTier;
+		}
+	}
+	return strongestTier;
+}
+
+function getAnchorTierScore(
+	tier: V3DirectSubitemAnchorTier,
+): number {
+	switch (tier) {
+		case "confirmed_surface":
+			return 3;
+		case "opaque_bigram":
+			return 2;
+		case "real_lexical":
+			return 1;
+		default:
+			return 0;
+	}
+}
+
+function preservesQueryOrder(
+	atoms: readonly V3DirectSubitemAtom[],
+): boolean {
+	for (let index = 1; index < atoms.length; index += 1) {
+		if ((atoms[index - 1].queryUnitIndex ?? -1) > (atoms[index].queryUnitIndex ?? -1)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 function computeWeightedGap(
@@ -841,305 +817,8 @@ function computeWeightedGap(
 	return total;
 }
 
-function preservesQueryOrder(
-	occurrences: readonly V3DirectSubitemOccurrence[],
-): boolean {
-	for (let index = 1; index < occurrences.length; index += 1) {
-		if (
-			(occurrences[index - 1].queryUnitIndex ?? -1) >
-			(occurrences[index].queryUnitIndex ?? -1)
-		) {
-			return false;
-		}
-	}
-	return true;
-}
-
-function resolveDominantDisplayOccurrences(
-	occurrences: readonly V3DirectSubitemOccurrence[],
-	queryAnalysis: V3QueryAnalysis,
-	confirmedHanSurfaceGroupIndices: ReadonlySet<number>,
-	scopeTier: V3DirectSubitemResidualScopeTier,
-): V3DirectSubitemOccurrence[] {
-	const unitByIndex = new Map(
-		queryAnalysis.primaryUnits.map((unit) => [unit.index, unit]),
-	);
-	const validatedSurfaceOccurrences = resolveValidatedSurfaceCompletions(
-		occurrences,
-		confirmedHanSurfaceGroupIndices,
-		scopeTier,
-	);
-	const validatedSurfaceKeys = new Set(
-		validatedSurfaceOccurrences.map((occurrence) =>
-			buildOccurrenceKey(occurrence),
-		),
-	);
-	const surfaceOccurrencesByGroup = new Map<number, V3DirectSubitemOccurrence[]>();
-	for (const occurrence of validatedSurfaceOccurrences) {
-		const existing =
-			surfaceOccurrencesByGroup.get(occurrence.surfaceGroupIndex ?? -1) ?? [];
-		existing.push(occurrence);
-		surfaceOccurrencesByGroup.set(occurrence.surfaceGroupIndex ?? -1, existing);
-	}
-	return occurrences.filter((occurrence) => {
-		if (occurrence.kind === "surface_completion") {
-			return validatedSurfaceKeys.has(buildOccurrenceKey(occurrence));
-		}
-		if (occurrence.kind === "opaque_anchor") {
-			return true;
-		}
-		if (occurrence.kind === "residual_support") {
-			const surfaceOccurrences =
-				surfaceOccurrencesByGroup.get(occurrence.surfaceGroupIndex ?? -1) ?? [];
-			return surfaceOccurrences.length === 0;
-		}
-		if (
-			!isRealLikeOccurrenceKind(occurrence.kind) ||
-			occurrence.surfaceGroupIndex == null
-		) {
-			return occurrence.kind !== "route_only";
-		}
-		const unit = unitByIndex.get(occurrence.queryUnitIndex ?? -1);
-		if (unit?.source !== "han_tokenizer_real") {
-			return true;
-		}
-		const surfaceOccurrences =
-			surfaceOccurrencesByGroup.get(occurrence.surfaceGroupIndex) ?? [];
-		return surfaceOccurrences.length === 0;
-	});
-}
-
-function resolveValidatedSurfaceCompletions(
-	occurrences: readonly V3DirectSubitemOccurrence[],
-	confirmedHanSurfaceGroupIndices: ReadonlySet<number>,
-	scopeTier: V3DirectSubitemResidualScopeTier,
-): V3DirectSubitemOccurrence[] {
-	const realOccurrencesBySurfaceGroup = new Map<number, V3DirectSubitemOccurrence[]>();
-	for (const occurrence of occurrences) {
-		if (
-			!isRealLikeOccurrenceKind(occurrence.kind) ||
-			occurrence.surfaceGroupIndex == null
-		) {
-			continue;
-		}
-		const existing =
-			realOccurrencesBySurfaceGroup.get(occurrence.surfaceGroupIndex) ?? [];
-		existing.push(occurrence);
-		realOccurrencesBySurfaceGroup.set(occurrence.surfaceGroupIndex, existing);
-	}
-	return occurrences.filter((occurrence) => {
-		if (
-			occurrence.kind !== "surface_completion" ||
-			occurrence.surfaceGroupIndex == null
-		) {
-			return false;
-		}
-		if (confirmedHanSurfaceGroupIndices.has(occurrence.surfaceGroupIndex)) {
-			return true;
-		}
-		const groupRealOccurrences =
-			realOccurrencesBySurfaceGroup.get(occurrence.surfaceGroupIndex) ?? [];
-		const distinctRealSurfaceGroupCount = realOccurrencesBySurfaceGroup.size;
-		const hasCorroboration =
-			hasLocalSurfaceCompletionSupport(
-				occurrence.surfaceGroupIndex,
-				confirmedHanSurfaceGroupIndices,
-				scopeTier,
-			) ||
-			distinctRealSurfaceGroupCount > 1;
-		return groupRealOccurrences.some((realOccurrence) =>
-			realOccurrence.start >= occurrence.start &&
-			realOccurrence.end <= occurrence.end,
-		) && hasCorroboration;
-	});
-}
-
-function isRealLikeOccurrenceKind(
-	kind: V3DirectSubitemOccurrence["kind"],
-): boolean {
-	return kind === "real_exact" || kind === "fuzzy";
-}
-
-function buildOccurrenceKey(
-	occurrence: V3DirectSubitemOccurrence,
-): string {
-	return `${occurrence.kind}:${occurrence.queryUnitIndex ?? -1}:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.start}:${occurrence.end}:${occurrence.residualSupportKind ?? "none"}:${occurrence.scopeTier ?? "none"}`;
-}
-
-function splitRawBodyBlocks(snapshotText: string): RawBlock[] {
-	const blocks: RawBlock[] = [];
-	const ranges = createV3BodyBlockChunkRanges(
-		snapshotText,
-		V3_BODY_BLOCK_TARGET_TOKENS,
-		V3_BODY_BLOCK_MAX_TOKENS,
-	);
-	for (let ordinal = 0; ordinal < ranges.length; ordinal += 1) {
-		const range = ranges[ordinal];
-		pushBlock(snapshotText, range.startOffset, range.endOffset, ordinal, blocks);
-	}
-	return blocks;
-}
-
-function pushBlock(
-	snapshotText: string,
-	rangeStart: number,
-	rangeEnd: number,
-	ordinal: number,
-	blocks: RawBlock[],
-): void {
-	const rawText = snapshotText.slice(rangeStart, rangeEnd);
-	const leadingTrim = rawText.search(/\S/u);
-	if (leadingTrim < 0) {
-		return;
-	}
-	const trailingTrim = rawText.length - rawText.trimEnd().length;
-	const start = rangeStart + leadingTrim;
-	const end = rangeEnd - trailingTrim;
-	const text = snapshotText.slice(start, end);
-	blocks.push({
-		ordinal,
-		start,
-		end,
-		text,
-	});
-}
-
-function uniqueSortedNumbers(values: readonly number[]): number[] {
+function uniqueSortedNumbers(
+	values: readonly number[],
+): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
-}
-
-function resolveRangeScopeTier(
-	blockOrdinals: readonly number[],
-	bestBodyWindowBlockOrdinals: ReadonlySet<number>,
-): V3DirectSubitemResidualScopeTier {
-	return (
-		blockOrdinals.length > 0 &&
-		bestBodyWindowBlockOrdinals.size > 0 &&
-		blockOrdinals.every((ordinal) => bestBodyWindowBlockOrdinals.has(ordinal))
-	)
-		? "body_window"
-		: "body_residue";
-}
-
-function scopeTierToCompletionTier(
-	scopeTier: V3DirectSubitemResidualScopeTier,
-): string {
-	return scopeTier === "body_window" ? "body_window" : "body_residue";
-}
-
-function hasLocalSurfaceCompletionSupport(
-	surfaceGroupIndex: number,
-	supportedHanSurfaceGroupIndices: ReadonlySet<number>,
-	scopeTier: V3DirectSubitemResidualScopeTier,
-): boolean {
-	return supportedHanSurfaceGroupIndices.has(surfaceGroupIndex);
-}
-
-function rangesOverlap(
-	leftStart: number,
-	leftEnd: number,
-	rightStart: number,
-	rightEnd: number,
-): boolean {
-	return Math.min(leftEnd, rightEnd) > Math.max(leftStart, rightStart);
-}
-
-function shouldRetryDirectSubitemsAcrossWholeDocument(
-	snapshotText: string,
-	queryAnalysis: V3QueryAnalysis,
-	candidate: EvidencePackingProfile,
-	completedHanSurfaceTierByGroup: ReadonlyMap<number, string>,
-): boolean {
-	if (snapshotText.trim().length === 0) {
-		return false;
-	}
-	for (const realizedFamily of candidate.realizedFamilies) {
-		if (
-			realizedFamily.matchKind === "opaque_exact" &&
-			snapshotText.includes(realizedFamily.queryUnitText)
-		) {
-			return true;
-		}
-	}
-	for (const group of queryAnalysis.surfaceGroups) {
-		if (
-			group.kind === "han" &&
-			completedHanSurfaceTierByGroup.get(group.index) != null &&
-			completedHanSurfaceTierByGroup.get(group.index) !== "none" &&
-			snapshotText.includes(group.text)
-		) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function resolveCandidateAnchorOffset(
-	representativeAnchorOccurrences: readonly V3DirectSubitemOccurrence[],
-): number {
-	const strongestAnchor = [...representativeAnchorOccurrences].sort(
-		(left, right) =>
-			getOccurrenceAnchorTierScore(right) - getOccurrenceAnchorTierScore(left) ||
-			left.start - right.start ||
-			left.end - right.end,
-	)[0];
-	return strongestAnchor?.start ?? representativeAnchorOccurrences[0]?.start ?? 0;
-}
-
-function resolveCandidateAnchorTier(
-	representativeAnchorOccurrences: readonly V3DirectSubitemOccurrence[],
-	validatedSurfaceOccurrenceKeys: ReadonlySet<string>,
-): V3DirectSubitemAnchorTier {
-	let strongestAnchorTier: V3DirectSubitemAnchorTier = "none";
-	for (const occurrence of representativeAnchorOccurrences) {
-		const occurrenceAnchorTier = resolveOccurrenceAnchorTier(
-			occurrence,
-			validatedSurfaceOccurrenceKeys,
-		);
-		if (
-			getAnchorTierScore(occurrenceAnchorTier) >
-			getAnchorTierScore(strongestAnchorTier)
-		) {
-			strongestAnchorTier = occurrenceAnchorTier;
-		}
-	}
-	return strongestAnchorTier;
-}
-
-function getOccurrenceAnchorTierScore(
-	occurrence: V3DirectSubitemOccurrence,
-): number {
-	return getAnchorTierScore(occurrence.anchorTier ?? "none");
-}
-
-function resolveOccurrenceAnchorTier(
-	occurrence: V3DirectSubitemOccurrence,
-	validatedSurfaceOccurrenceKeys: ReadonlySet<string>,
-): V3DirectSubitemAnchorTier {
-	if (occurrence.kind === "opaque_anchor") {
-		return "opaque_whole_group";
-	}
-	if (validatedSurfaceOccurrenceKeys.has(buildOccurrenceKey(occurrence))) {
-		return "confirmed_surface";
-	}
-	if (occurrence.anchorTier != null) {
-		return occurrence.anchorTier;
-	}
-	if (isRealLikeOccurrenceKind(occurrence.kind)) {
-		return "real_lexical";
-	}
-	return "none";
-}
-
-function getAnchorTierScore(anchorTier: V3DirectSubitemAnchorTier): number {
-	switch (anchorTier) {
-		case "opaque_whole_group":
-			return 3;
-		case "confirmed_surface":
-			return 2;
-		case "real_lexical":
-			return 1;
-		default:
-			return 0;
-	}
 }

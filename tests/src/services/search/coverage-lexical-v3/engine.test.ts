@@ -50,6 +50,22 @@ function buildAdjacentChunkBoundaryContent(): string {
 	throw new Error("failed to construct adjacent chunk boundary content");
 }
 
+function buildAdjacentHanChunkBoundaryContent(): string {
+	for (let charCount = 900; charCount <= 4000; charCount += 1) {
+		const content = `${"x".repeat(charCount)}\u8d62\u5b8b\u7a84\u4f53`;
+		const blocks = splitBodyBlocks(content);
+		const previous = blocks[0]?.normalizedText ?? "";
+		const last = blocks[1]?.normalizedText ?? "";
+		if (
+			blocks.length === 2 &&
+			previous.endsWith("\u8d62\u5b8b") &&
+			last.startsWith("\u7a84\u4f53")
+		) {
+			return content;
+		}
+	}
+	throw new Error("failed to construct adjacent Han chunk boundary content");
+}
 describe("coverage lexical v3 engine", () => {
 	test("search read path builds candidates and ranks the stronger packed document first", () => {
 		const engine = new CoverageLexicalV3Engine();
@@ -233,7 +249,7 @@ describe("coverage lexical v3 engine", () => {
 		).toEqual(["\u8d62\u5b8b", "\u7a84\u4f53"]);
 	});
 
-	test("missed Han real terms can recover through bigram route plus opaque exact confirmation", () => {
+	test("fully covered Han real terms can still rescue through metadata when family lookup misses", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
@@ -268,22 +284,24 @@ describe("coverage lexical v3 engine", () => {
 			{ text: "\u8d62\u5b8b", source: "han_tokenizer_real" },
 		]);
 		expect(result.recallState.unitFamilyMatches[0]?.matches).toEqual([]);
-		expect(result.recallState.candidateDocs.map((candidate) => candidate.docId)).toEqual([1]);
+		expect(result.recallState.queryAnalysis.surfaceGroups[0]?.queryResidualUniqueBigrams).toEqual([]);
+		expect(result.recallState.candidateDocs).toHaveLength(1);
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
 			"zh/fallback-hit.md",
 		]);
-		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(1);
-		expect(result.rankedCandidates[0].exactUnitCount).toBe(0);
-		expect(result.rankedCandidates[0].realizedFamilies).toEqual([
-			expect.objectContaining({
-				queryUnitText: "\u8d62\u5b8b",
-				matchKind: "opaque_exact",
-				inIdentity: true,
-			}),
-		]);
+		expect(result.rankedCandidates[0]?.realizedFamilies).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					queryUnitText: "\u8d62\u5b8b",
+					familyText: "\u8d62\u5b8b",
+					matchKind: "opaque_exact",
+				}),
+			]),
+		);
+		expect(result.rankedCandidates[0]?.exactUnitCount).toBe(0);
 	});
 
-	test("body-only Han fallback uses witness confirmation without inflating exact count", () => {
+	test("body-only Han rescue activates when a fully covered real-term group has no family matches", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
@@ -303,22 +321,24 @@ describe("coverage lexical v3 engine", () => {
 		const result = engine.search("\u8d62\u5b8b", ["\u8d62\u5b8b"]);
 
 		expect(result.recallState.unitFamilyMatches[0]?.matches).toEqual([]);
-		expect(result.recallState.candidateDocs[0]?.shortlistedBodyBlockIds.length).toBeGreaterThan(0);
+		expect(result.recallState.queryAnalysis.surfaceGroups[0]?.queryResidualUniqueBigrams).toEqual([]);
+		expect(result.recallState.candidateDocs).toHaveLength(1);
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
 			"zh/body-fallback.md",
 		]);
-		expect(result.rankedCandidates[0].exactUnitCount).toBe(0);
-		expect(result.rankedCandidates[0].realizedFamilies[0]).toEqual(
-			expect.objectContaining({
-				queryUnitText: "\u8d62\u5b8b",
-				matchKind: "opaque_exact",
-				inIdentity: false,
-				inBodyResidue: true,
-			}),
+		expect(result.rankedCandidates[0]?.realizedFamilies).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					queryUnitText: "\u8d62\u5b8b",
+					familyText: "\u8d62\u5b8b",
+					matchKind: "opaque_exact",
+					inBestBodyWindow: true,
+				}),
+			]),
 		);
 	});
 
-	test("exact Han real-term matches still outrank opaque fallback confirmations", () => {
+	test("exact Han real-term matches still outrank rescue-only docs from the same fully covered group", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
@@ -359,8 +379,59 @@ describe("coverage lexical v3 engine", () => {
 			expect.objectContaining({
 				queryUnitText: "\u8d62\u5b8b",
 				matchKind: "opaque_exact",
-				inIdentity: true,
 			}),
+		);
+	});
+
+	test("multiple Han surface groups resolve rescue independently even when they share a bigram", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u65e7\u8d62\u5b8b\u4f53": ["\u65e7\u8d62\u5b8b\u4f53"],
+			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/shared-bigram.md",
+					basename: "\u65e7\u8d62\u5b8b\u4f53",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+				createDocument({
+					path: "zh/second-group-only.md",
+					basename: "\u8d62\u5b8b\u4f53",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search(
+			"\u65e7\u8d62 abc \u8d62\u5b8b\u4f53",
+			["\u65e7\u8d62", "\u8d62\u5b8b", "\u5b8b\u4f53"],
+		);
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/shared-bigram.md",
+			"zh/second-group-only.md",
+		]);
+		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(2);
+		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(1);
+		expect(result.rankedCandidates[0].realizedFamilies).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					querySurfaceGroupIndex: 0,
+					familyText: "\u65e7\u8d62",
+					matchKind: "opaque_exact",
+				}),
+				expect.objectContaining({
+					querySurfaceGroupIndex: 2,
+					familyText: "\u8d62\u5b8b",
+					matchKind: "opaque_exact",
+				}),
+				]
+			),
 		);
 	});
 
@@ -402,13 +473,139 @@ describe("coverage lexical v3 engine", () => {
 			}),
 		]);
 		expect(result.recallState.candidateDocs).toHaveLength(2);
-		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates).toHaveLength(2);
 		expect(result.rankedCandidates[0].path).toBe("zh/committee.md");
+		expect(result.rankedCandidates[1].path).toBe("zh/bridge-only.md");
 		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(1);
 		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(0);
 		expect(
 			result.rankedCandidates[0].realizedFamilies.map((family) => family.familyText),
 		).toEqual(["\u59d4\u5458"]);
+	});
+
+	test("mixed latin plus Han ordering stays abc plus life over life-force over life", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u751f\u547d\u529b": ["\u751f\u547d"],
+			"abc \u4e0e\u751f\u547d\u5728\u8fd9\u91cc": ["abc", "\u751f\u547d", "\u8fd9\u91cc"],
+			"\u751f\u547d\u529b\u5728\u8fd9\u91cc": ["\u751f\u547d", "\u8fd9\u91cc"],
+			"\u53ea\u8c08\u751f\u547d": ["\u751f\u547d"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/abc-life.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "abc \u4e0e\u751f\u547d\u5728\u8fd9\u91cc",
+				}),
+				createDocument({
+					path: "zh/life-force.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u751f\u547d\u529b\u5728\u8fd9\u91cc",
+				}),
+				createDocument({
+					path: "zh/life-only.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u53ea\u8c08\u751f\u547d",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("abc \u751f\u547d\u529b", ["abc", "\u751f\u547d"]);
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/abc-life.md",
+			"zh/life-force.md",
+			"zh/life-only.md",
+		]);
+		expect(result.rankedCandidates[0].path).toBe("zh/abc-life.md");
+		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(1);
+		expect(result.rankedCandidates[2].completedHanSurfaceGroupCount).toBe(0);
+	});
+
+	test("metadata opaque rescue uses the best single witness without cross-witness aggregation", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u661f\u7a79\u63a5\u53e3": [],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/single-witness.md",
+					basename: "\u661f\u7a79\u63a5\u53e3",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+				createDocument({
+					path: "zh/split-witness.md",
+					basename: "\u661f\u7a79",
+					folder: "zh",
+					aliases: "\u63a5\u53e3",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u661f\u7a79\u63a5\u53e3");
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/single-witness.md",
+			"zh/split-witness.md",
+		]);
+		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(3);
+		expect(result.rankedCandidates[1].realizedCoverageCount).toBe(1);
+		expect(
+			result.rankedCandidates[1].realizedFamilies.map((family) => family.familyText),
+		).toEqual(["\u661f\u7a79"]);
+	});
+
+	test("adjacent Han chunk boundary evidence can rescue unresolved bigrams through continuous body locality", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const adjacentHanChunkContent = buildAdjacentHanChunkBoundaryContent();
+		const tokenizer = createDocumentTokenizer({
+			"\u8d62\u5b8b\u7a84\u4f53": ["\u8d62\u5b8b"],
+			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
+			"\u7a84\u4f53": ["\u7a84\u4f53"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/adjacent-han-chunks.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: adjacentHanChunkContent,
+				}),
+				createDocument({
+					path: "zh/only-prefix.md",
+					basename: "\u8d62\u5b8b",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u8d62\u5b8b\u7a84\u4f53", ["\u8d62\u5b8b"]);
+
+		expect(result.rankedCandidates[0]?.path).toBe("zh/adjacent-han-chunks.md");
+		expect(result.rankedCandidates[0]?.realizedFamilies).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					queryUnitText: "\u8d62\u5b8b",
+					matchKind: "exact",
+				}),
+				expect.objectContaining({
+					queryUnitText: "\u8d62\u5b8b\u7a84\u4f53",
+					matchKind: "opaque_exact",
+					inBestBodyWindow: true,
+				}),
+			]),
+		);
 	});
 
 	test("completed Han surface witness in body outranks a partial real-term hit", () => {

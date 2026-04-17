@@ -87,6 +87,7 @@ function createPackingProfile(
 			{
 				queryUnitIndex: 0,
 				queryUnitText: "life",
+				querySurfaceGroupIndex: 0,
 				familyId: 0,
 				familyText: "life",
 				matchKind: "exact",
@@ -111,6 +112,21 @@ function createPackingProfile(
 	};
 }
 
+function createHanSurfaceGroup(index: number, text: string) {
+	const chars = Array.from(text);
+	const hanBigramTexts = chars.slice(0, -1).map((_, charIndex) => {
+		return chars[charIndex] + chars[charIndex + 1];
+	});
+	return {
+		index,
+		text,
+		kind: "han" as const,
+		hanBigramTexts,
+		coveredCharMask: Array.from({ length: chars.length }, () => false),
+		queryResidualUniqueBigrams: hanBigramTexts,
+	};
+}
+
 function createRefineSearchResult(): CoverageLexicalV3SearchResult {
 	const shorterTerm = "缓存恢复";
 	const fullSurface = "缓存恢复步骤";
@@ -131,7 +147,7 @@ function createRefineSearchResult(): CoverageLexicalV3SearchResult {
 			queryAnalysis: {
 				queryText: fullSurface,
 				normalizedQueryText: fullSurface,
-				surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+				surfaceGroups: [createHanSurfaceGroup(0, fullSurface)],
 				primaryUnits: [
 					{
 						index: 0,
@@ -349,29 +365,61 @@ function createResidentBaseForBlockCounts(
 	};
 }
 
-function createBlockText(
-	blockCount: number,
-	surfaceText: string,
-	surfaceBlockOrdinals: readonly number[] = [],
-): string {
-	const surfaceBlocks = new Set(surfaceBlockOrdinals);
-	return Array.from({ length: blockCount }, (_, ordinal) =>
-		surfaceBlocks.has(ordinal)
-			? surfaceText + " block-" + ordinal
-			: "block-" + ordinal,
-	).join("\n\n");
+function withBodyWitnessTexts(
+	base: ResidentBase,
+	bodyWitnessTextsByBlock: ReadonlyArray<readonly string[]>,
+): ResidentBase {
+	const uniqueStrings = new Map<string, number>([["", 0]]);
+	const orderedStrings = [""];
+	const bodyWitnessStartByBlockId: number[] = [];
+	const bodyWitnessStringIds: number[] = [];
+	for (let blockId = 0; blockId < base.bodyBlocks.blockCount; blockId += 1) {
+		bodyWitnessStartByBlockId.push(bodyWitnessStringIds.length);
+		for (const text of bodyWitnessTextsByBlock[blockId] ?? []) {
+			let stringId = uniqueStrings.get(text);
+			if (stringId == null) {
+				stringId = orderedStrings.length;
+				uniqueStrings.set(text, stringId);
+				orderedStrings.push(text);
+			}
+			bodyWitnessStringIds.push(stringId);
+		}
+	}
+	bodyWitnessStartByBlockId.push(bodyWitnessStringIds.length);
+	const offsets: number[] = [];
+	const lengths: number[] = [];
+	let stringArenaText = "";
+	for (const text of orderedStrings) {
+		offsets.push(stringArenaText.length);
+		lengths.push(text.length);
+		stringArenaText += text;
+	}
+	return {
+		...base,
+		stringArena: {
+			text: stringArenaText,
+			offsets: new Uint32Array(offsets),
+			lengths: new Uint32Array(lengths),
+			count: orderedStrings.length,
+		},
+		hanRoute: {
+			...base.hanRoute,
+			bodyWitnessStartByBlockId: new Uint32Array(bodyWitnessStartByBlockId),
+			bodyWitnessStringIds: new Uint32Array(bodyWitnessStringIds),
+		},
+	};
 }
 
 async function runHanRefine(
 	result: CoverageLexicalV3SearchResult,
 	options: {
-		indexedTexts: Map<string, string>;
+		indexedTexts?: Map<string, string>;
 		residentBase?: ResidentBase;
 	},
 ): Promise<readonly EvidencePackingProfile[]> {
 	const engine = new CoverageLexicalV3FileSearchEngine();
 	const residentBase = options.residentBase ?? createResidentBase();
-	const readIndexedTexts = jest.fn(async () => options.indexedTexts);
+	const readIndexedTexts = jest.fn(async () => options.indexedTexts ?? new Map<string, string>());
 	(
 		engine as unknown as {
 			engine: {
@@ -472,7 +520,7 @@ describe("coverage lexical v3 file search engine", () => {
 				queryAnalysis: {
 					queryText: fullSurface,
 					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+					surfaceGroups: [createHanSurfaceGroup(0, fullSurface)],
 					primaryUnits: [
 						{
 							index: 0,
@@ -494,6 +542,7 @@ describe("coverage lexical v3 file search engine", () => {
 						shortlistedBodyBlockIds: [0, 1],
 						hanMetadataGateStats: null,
 						hanBodyBlockGateStats: [],
+						hanSurfaceGroupRecalls: [],
 					},
 				],
 			},
@@ -501,6 +550,25 @@ describe("coverage lexical v3 file search engine", () => {
 				createPackingProfile({
 					docId: 0,
 					path: "notes/lifeforce.md",
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: shorterTerm,
+							querySurfaceGroupIndex: 0,
+							familyId: 0,
+							familyText: shorterTerm,
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "none",
+							routeMetadataSource: "none",
+							metadataPackingSource: "route",
+							inIdentity: false,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: true,
+							inBodyResidue: false,
+						},
+					],
 					bodyWindowContainer: createBodyWindowContainer([0]),
 					strongestContainer: createBodyWindowContainer([0]),
 					hanSurfaceCompletionGroups: [
@@ -581,7 +649,7 @@ describe("coverage lexical v3 file search engine", () => {
 				queryAnalysis: {
 					queryText: fullSurface,
 					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+					surfaceGroups: [createHanSurfaceGroup(0, fullSurface)],
 					primaryUnits: [
 						{
 							index: 0,
@@ -603,6 +671,7 @@ describe("coverage lexical v3 file search engine", () => {
 						shortlistedBodyBlockIds: [0, 1],
 						hanMetadataGateStats: null,
 						hanBodyBlockGateStats: [],
+						hanSurfaceGroupRecalls: [],
 					},
 				],
 			},
@@ -610,6 +679,25 @@ describe("coverage lexical v3 file search engine", () => {
 				createPackingProfile({
 					docId: 0,
 					path: "notes/life-force.md",
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: shorterTerm,
+							querySurfaceGroupIndex: 0,
+							familyId: 0,
+							familyText: shorterTerm,
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "none",
+							routeMetadataSource: "none",
+							metadataPackingSource: "route",
+							inIdentity: false,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: true,
+							inBodyResidue: false,
+						},
+					],
 					bodyWindowContainer: createBodyWindowContainer([0]),
 					strongestContainer: createBodyWindowContainer([0]),
 					hanSurfaceCompletionGroups: [
@@ -662,6 +750,175 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(highlightTexts).not.toContain(shorterTerm);
 	});
 
+	test("getDirectSubItems guarantees a body witness when bodyWindow is the dominant evidence", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "notes/body-dominant.md",
+				basename: "body dominant",
+				folder: "notes",
+				generation: 101,
+				content: "placeholder",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "runtime access",
+					normalizedQueryText: "runtime access",
+					surfaceGroups: [
+						{
+							index: 0,
+							text: "runtime",
+							kind: "latin",
+							hanBigramTexts: [],
+							coveredCharMask: [],
+							queryResidualUniqueBigrams: [],
+							hasQueryResidualHanCoverage: false,
+						},
+						{
+							index: 1,
+							text: "access",
+							kind: "latin",
+							hanBigramTexts: [],
+							coveredCharMask: [],
+							queryResidualUniqueBigrams: [],
+							hasQueryResidualHanCoverage: false,
+						},
+					],
+					primaryUnits: [
+						{ index: 0, text: "runtime", source: "surface", surfaceGroupIndex: 0 },
+						{ index: 1, text: "access", source: "surface", surfaceGroupIndex: 1 },
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "ll",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [
+					{
+						docId: 0,
+						matchedIdentityUnitIndices: [],
+						matchedRouteUnitIndices: [],
+						matchedHeadingUnitIndices: [],
+						shortlistedBodyBlockIds: [0],
+						hanMetadataGateStats: null,
+						hanBodyBlockGateStats: [],
+						hanSurfaceGroupRecalls: [],
+					},
+				],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "notes/body-dominant.md",
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: "runtime",
+							querySurfaceGroupIndex: 0,
+							familyId: 0,
+							familyText: "runtime",
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "none",
+							routeMetadataSource: "none",
+							metadataPackingSource: "none",
+							inIdentity: false,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: true,
+							inBodyResidue: false,
+						},
+						{
+							queryUnitIndex: 1,
+							queryUnitText: "access",
+							querySurfaceGroupIndex: 1,
+							familyId: 1,
+							familyText: "access",
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "none",
+							routeMetadataSource: "none",
+							metadataPackingSource: "none",
+							inIdentity: false,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: true,
+							inBodyResidue: false,
+						},
+					],
+					bodyWindowContainer: {
+						tier: "bodyWindow",
+						blockIds: [0],
+						boundaryCrossingCount: 0,
+						coveredUnitIndices: [0, 1],
+						coveredDistinctUnitCount: 2,
+						containerCompactness: 200,
+						exactUnitCount: 2,
+						windowWidth: 2,
+						gapCount: 1,
+						density: 1,
+						headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+					},
+					strongestContainer: {
+						tier: "bodyWindow",
+						blockIds: [0],
+						boundaryCrossingCount: 0,
+						coveredUnitIndices: [0, 1],
+						coveredDistinctUnitCount: 2,
+						containerCompactness: 200,
+						exactUnitCount: 2,
+						windowWidth: 2,
+						gapCount: 1,
+						density: 1,
+						headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
+					},
+				}),
+			],
+		}));
+		const readIndexedTexts = jest.fn(async () =>
+			new Map([
+				["notes/body-dominant.md", "runtime access restores the session quickly"],
+			]),
+		);
+		(
+			engine as unknown as {
+				engine: {
+					search: typeof search;
+					getResidentBase: () => ResidentBase;
+				};
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: jest.Mock;
+				};
+			}
+		).engine = {
+			search,
+			getResidentBase: () => createResidentBaseForBlockCounts([1]),
+		};
+		(
+			engine as unknown as {
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: jest.Mock;
+				};
+			}
+		).getFileSnapshotStore = () => ({
+			readIndexedTexts,
+			readCurrentTexts: jest.fn(),
+		});
+
+		const subItems = await engine.getDirectSubItems(
+			"runtime access",
+			"notes/body-dominant.md",
+			3,
+		);
+
+		expect(subItems).not.toBeNull();
+		expect(subItems?.length ?? 0).toBeGreaterThan(0);
+		expect(subItems?.[0]?.snippetText ?? "").toContain("runtime access");
+	});
+
 	
 	test("getDirectSubItems falls back to current text when generation-aligned indexed text is unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
@@ -681,7 +938,7 @@ describe("coverage lexical v3 file search engine", () => {
 				queryAnalysis: {
 					queryText: fullSurface,
 					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+					surfaceGroups: [createHanSurfaceGroup(0, fullSurface)],
 					primaryUnits: [
 						{
 							index: 0,
@@ -703,6 +960,7 @@ describe("coverage lexical v3 file search engine", () => {
 						shortlistedBodyBlockIds: [0],
 						hanMetadataGateStats: null,
 						hanBodyBlockGateStats: [],
+						hanSurfaceGroupRecalls: [],
 					},
 				],
 			},
@@ -710,6 +968,25 @@ describe("coverage lexical v3 file search engine", () => {
 				createPackingProfile({
 					docId: 0,
 					path: "notes/missing-snapshot.md",
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: shorterTerm,
+							querySurfaceGroupIndex: 0,
+							familyId: 0,
+							familyText: shorterTerm,
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "none",
+							routeMetadataSource: "none",
+							metadataPackingSource: "route",
+							inIdentity: false,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: true,
+							inBodyResidue: false,
+						},
+					],
 					bodyWindowContainer: createBodyWindowContainer([0]),
 					strongestContainer: createBodyWindowContainer([0]),
 					hanSurfaceCompletionGroups: [
@@ -798,7 +1075,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 				queryAnalysis: {
 					queryText: fullSurface,
 					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+					surfaceGroups: [createHanSurfaceGroup(0, fullSurface)],
 					primaryUnits: [
 						{
 							index: 0,
@@ -893,7 +1170,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 				queryAnalysis: {
 					queryText: fullSurface,
 					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+					surfaceGroups: [createHanSurfaceGroup(0, fullSurface)],
 					primaryUnits: [
 						{
 							index: 0,
@@ -1022,9 +1299,10 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			"a-partial.md",
 			"z-complete.md",
 		]);
+		expect(readIndexedTexts).not.toHaveBeenCalled();
 		expect(readCurrentTexts).not.toHaveBeenCalled();
 	});
-	test("searchFiles skips raw Han refine when no near-tie risk exists", async () => {
+	test("searchFiles skips Han surface refine when no near-tie risk exists", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		await engine.reIndexAll([
 			createDocument({
@@ -1101,7 +1379,7 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		expect(readIndexedTexts).not.toHaveBeenCalled();
 	});
 
-	test("raw Han refine promotes best-window surface confirms above residue confirms", async () => {
+	test("resident Han witness refine promotes best-window surface confirms above residue confirms", async () => {
 		const result: CoverageLexicalV3SearchResult = {
 			recallState: createRefineSearchResult().recallState,
 			rankedCandidates: [
@@ -1119,13 +1397,13 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 				}),
 			],
 		};
-		const residentBase = createResidentBase();
+		const residentBase = withBodyWitnessTexts(createResidentBase(), [
+			["lifeforce"],
+			[],
+			["lifeforce"],
+		]);
 		const refined = await runHanRefine(result, {
 			residentBase,
-			indexedTexts: new Map<string, string>([
-				["b-residue.md", "lifeforce block-0"],
-				["a-window.md", "lifeforce block-0"],
-			]),
 		});
 
 		expect(refined.map((candidate) => candidate.path)).toEqual([
@@ -1136,16 +1414,16 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		expect(refined[1].strongestHanSurfaceCompletionTier).toBe("body_residue");
 	});
 
-	test("raw Han refine respects query-wide block budget", async () => {
+	test("resident Han witness refine checks all shortlisted blocks without raw query budget caps", async () => {
 		const blockCounts = [100, 100, 100, 100, 100] as const;
-		const residentBase = createResidentBaseForBlockCounts(blockCounts);
+		const residentBaseWithoutWitness = createResidentBaseForBlockCounts(blockCounts);
 		const candidateDocs = blockCounts.map((blockCount, docId) => ({
 			docId,
 			matchedIdentityUnitIndices: [],
 			matchedRouteUnitIndices: [],
 			matchedHeadingUnitIndices: [],
 			shortlistedBodyBlockIds: Array.from({ length: blockCount }, (_, ordinal) =>
-				residentBase.docTable.bodyBlockStartByDocId[docId] + ordinal,
+				residentBaseWithoutWitness.docTable.bodyBlockStartByDocId[docId] + ordinal,
 			),
 			hanMetadataGateStats: null,
 			hanBodyBlockGateStats: [],
@@ -1154,8 +1432,12 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			createPackingProfile({
 				docId,
 				path: String.fromCharCode(97 + docId) + ".md",
-				bodyWindowContainer: createBodyWindowContainer([residentBase.docTable.bodyBlockStartByDocId[docId]]),
-				strongestContainer: createBodyWindowContainer([residentBase.docTable.bodyBlockStartByDocId[docId]]),
+				bodyWindowContainer: createBodyWindowContainer([
+					residentBaseWithoutWitness.docTable.bodyBlockStartByDocId[docId],
+				]),
+				strongestContainer: createBodyWindowContainer([
+					residentBaseWithoutWitness.docTable.bodyBlockStartByDocId[docId],
+				]),
 			}),
 		);
 		const result: CoverageLexicalV3SearchResult = {
@@ -1165,16 +1447,24 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 			},
 			rankedCandidates,
 		};
-		const indexedTexts = new Map<string, string>(
-			rankedCandidates.map((candidate) => [
-				candidate.path,
-				createBlockText(100, "lifeforce", [0]),
-			]),
+		const residentBase = withBodyWitnessTexts(
+			residentBaseWithoutWitness,
+			Array.from(
+				{ length: residentBaseWithoutWitness.bodyBlocks.blockCount },
+				(_, blockId) => {
+					const blockOrdinal =
+						residentBaseWithoutWitness.bodyBlocks.blockOrdinalByBlockId[blockId] ?? 0;
+					return blockOrdinal === 0 ? ["lifeforce"] : [];
+				},
+			),
 		);
-		const refined = await runHanRefine(result, { residentBase, indexedTexts });
+		const refined = await runHanRefine(result, { residentBase });
 
-		expect(refined.slice(0, 4).every((candidate) => candidate.strongestHanSurfaceCompletionTier === "body_window")).toBe(true);
-		expect(refined[4].strongestHanSurfaceCompletionTier).toBe("body_residue");
+		expect(
+			refined.every(
+				(candidate) => candidate.strongestHanSurfaceCompletionTier === "body_window",
+			),
+		).toBe(true);
 	});
 });
 

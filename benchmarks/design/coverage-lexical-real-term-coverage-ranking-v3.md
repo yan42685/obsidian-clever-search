@@ -1457,3 +1457,160 @@ Validation completed for this phase:
   passes, confirming the file-level `hideWeaklyRelatedResults` path still
   drives the native direct-subitem behavior correctly
 - `npm run typecheck:build` passes on 2026-04-16
+
+### Phase 25
+
+Status: Completed on 2026-04-17
+
+The current implementation now replaces the earlier whole-surface Han fallback
+with the uncovered-bigram rescue model, so V3 only widens Han recall from the
+parts of a surface that remain unresolved after the real-term query cover:
+
+- query analysis now records per-Han-group covered character state,
+  `queryResidualUniqueBigrams`, and `hasQueryResidualHanCoverage`, making unresolved
+  Han bigrams the single source of truth for the fallback path
+- candidate recall now routes Han rescue only from those unresolved unique
+  bigrams, keeps per-group same-doc body seeds and metadata/body gate stats,
+  and no longer lets heading-only Han bigrams admit a candidate through the
+  metadata gate
+- ranking now removes the older candidate-specific Han `opaque_exact`
+  confirmation path and realizes Han rescue through exactly two bounded forms:
+  - metadata-side per-bigram opaque exact-like units from the best single
+    witness only, without cross-witness aggregation
+  - body-side same-doc neighborhood rescue that reuses the existing body-window
+    comparator and realizes at most one group-level `opaque_exact` per Han
+    surface group
+- body Han rescue now respects continuous text locality more closely by:
+  - treating separate witness segments inside the same block as materially
+    separated instead of nearly adjacent
+  - synthesizing adjacent-block boundary bigram occurrences when a Han bigram is
+    split across neighboring blocks in the same document
+  - requiring at least two matched unresolved bigrams when a group has two or
+    more unresolved bigrams before body rescue can realize a group-level
+    `opaque_exact`
+- the body-rescue gate now compares candidates after excluding the current Han
+  surface group's own contribution, so mixed-query ordering such as
+  `abc + ���� > ������ > ����` remains locked to the existing coverage-gate and
+  real-term preference semantics instead of being distorted by same-group rescue
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts`
+  now verifies:
+  - stable split Han query cover behavior on `Ӯ��խ��`
+  - uncovered unique bigram derivation for `������`
+- `tests/src/services/search/coverage-lexical-v3/han-route.test.ts` now
+  verifies:
+  - metadata opaque rescue materializes per unresolved bigram instead of the old
+    whole-surface witness confirmation
+  - heading-only Han metadata no longer admits candidates
+  - split-segment body candidates can still be recalled without being realized
+    when rescue corroboration is too weak
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts` now verifies:
+  - fully covered Han real terms no longer widen recall through the removed
+    whole-surface fallback route
+  - metadata rescue does not aggregate across multiple witnesses
+  - adjacent Han chunk boundaries can rescue unresolved bigrams through
+    continuous body locality
+  - mixed-query ordering remains `abc + ���� > ������ > ����`
+- `npm run typecheck:build` passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+  passes on 2026-04-17
+
+### Phase 26
+
+Status: Completed on 2026-04-17
+
+The current implementation now shifts Han rescue from query-time coverage alone to
+candidate-aware, family-verified group coverage while preserving the existing
+weak-semantic treatment of opaque rescue evidence:
+
+- recall now plans Han rescue per surface group instead of relying on a global
+  post-family miss state, so fully covered real-term groups such as `赢宋` can
+  still admit rescue-only candidates through whole-group Han bigrams
+- ranking now resolves Han group rescue obligations from each candidate's own
+  realized real-term evidence, which means:
+  - groups with no realized real Han unit enter `whole_group_when_real_miss`
+  - groups with some realized real Han units only rescue the residual uncovered
+    bigrams left after those candidate-specific real matches
+  - multiple Han groups stay independent even when they share a bigram string
+- body opaque rescue keeps the bounded same-doc / adjacent-block locality rules,
+  but only promotes a rescue window into the main body-window comparison band
+  for whole-group opaque backstops or stronger multi-bigram residual confirms;
+  single-bigram residual rescue remains residue-only so it does not distort the
+  existing mixed-query ordering semantics
+- coverage gating now uses opaque rescue to satisfy Han group obligations
+  without counting `opaque_exact` units as raw realized coverage, preserving the
+  intended weak ordering of rescue-only evidence relative to true exact matches
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts`
+  passes on 2026-04-17
+- `tests/src/services/search/coverage-lexical-v3/han-route.test.ts`
+  passes on 2026-04-17
+- `tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+  now verifies:
+  - fully covered Han real terms can still rescue through metadata when family
+    lookup misses
+  - body-only Han rescue activates for fully covered real-term groups whose
+    family lookup misses
+  - exact Han real-term hits still outrank rescue-only hits from the same group
+  - multiple Han surface groups resolve rescue independently even when they
+    share a bigram
+  - mixed Latin plus Han ordering still keeps `abc + 生命` ahead of `生命力`
+    rescue-only completion
+- `npm run typecheck:build` passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+  passes on 2026-04-17
+
+### Phase 27
+
+Status: Completed on 2026-04-17
+
+The current implementation now aligns direct-subitem Han evidence with the
+candidate-aware rescue semantics introduced for main ranking:
+
+- shared Han group resolution now derives per-candidate rescue bigrams from the
+  candidate's realized real-term evidence instead of relying on query-time
+  `queryResidualUniqueBigrams` alone
+- direct subitems now materialize opaque Han body atoms from those resolved
+  rescue bigrams, so fully covered real-term groups like `赢宋` still produce
+  body snippets when the candidate only survives through whole-group Han rescue
+- direct-subitem opaque coverage ratios now use the resolved rescue bigram set,
+  keeping snippet ranking consistent with the main Han rescue obligation model
+
+Validation completed for this phase:
+
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts`
+  passes on 2026-04-17, including the new whole-group Han rescue snippet case
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts`
+  passes on 2026-04-17
+- `tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts`
+  passes on 2026-04-17
+- `npm run typecheck:build` passes on 2026-04-17
+
+### Phase 28
+
+Status: Completed on 2026-04-17
+
+The current implementation now closes the Han-rescue API boundary so query-time
+residual state is explicitly weaker than candidate-final rescue resolution:
+
+- `V3QuerySurfaceGroup.uncoveredUniqueBigrams` and
+  `hasUnresolvedHanCoverage` have been renamed to
+  `queryResidualUniqueBigrams` and `hasQueryResidualHanCoverage` to make their
+  query-analysis-only role explicit
+- shared Han rescue APIs are now split cleanly into:
+  - `planHanSurfaceGroupRecalls(...)` for query-side recall admission planning
+  - `resolveCandidateHanSurfaceGroups(...)` for candidate-final rescue
+    obligations used by ranking and display semantics
+- ranking and direct-subitem body evidence now consume resolved Han rescue
+  payloads instead of directly reading query residual fields, including the
+  no-real Han fallback branch inside coverage gating
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts`
+  passes on 2026-04-17

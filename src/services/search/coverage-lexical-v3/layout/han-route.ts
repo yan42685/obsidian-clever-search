@@ -17,7 +17,9 @@ type HanRouteBuildInput = Readonly<{
 	metadataDocIdsByBigram: readonly (readonly number[])[];
 	bodyPostingsByBigramId: ReadonlyMap<number, readonly number[]>;
 	identityWitnessStringIdsByDoc: readonly (readonly number[])[];
+	identityWitnessSourceMasksByDoc: readonly (readonly number[])[];
 	routeWitnessStringIdsByDoc: readonly (readonly number[])[];
+	routeWitnessSourceMasksByDoc: readonly (readonly number[])[];
 	headingWitnessStringIdsByDoc: readonly (readonly number[])[];
 	bodyWitnessStringIdsByBlock: readonly (readonly number[])[];
 }>;
@@ -33,7 +35,9 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 		metadataDocIdsByBigram: [],
 		bodyPostingsByBigramId: new Map(),
 		identityWitnessStringIdsByDoc: [],
+		identityWitnessSourceMasksByDoc: [],
 		routeWitnessStringIdsByDoc: [],
+		routeWitnessSourceMasksByDoc: [],
 		headingWitnessStringIdsByDoc: [],
 		bodyWitnessStringIdsByBlock: [],
 	});
@@ -51,6 +55,12 @@ export function buildHanRouteArena(
 	const routeWitnessBuckets = buildPostingBuckets(input.routeWitnessStringIdsByDoc);
 	const headingWitnessBuckets = buildPostingBuckets(input.headingWitnessStringIdsByDoc);
 	const bodyWitnessBuckets = buildPostingBuckets(input.bodyWitnessStringIdsByBlock);
+	const identityWitnessSourceMasksByDoc =
+		input.identityWitnessSourceMasksByDoc ??
+		input.identityWitnessStringIdsByDoc.map(() => []);
+	const routeWitnessSourceMasksByDoc =
+		input.routeWitnessSourceMasksByDoc ??
+		input.routeWitnessStringIdsByDoc.map(() => []);
 	return {
 		bigramIds: Uint32Array.from(input.bigramIds),
 		metadataPostingStarts: metadataBuckets.starts,
@@ -58,8 +68,14 @@ export function buildHanRouteArena(
 		bodyAdaptivePostings,
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
 		identityWitnessStringIds: identityWitnessBuckets.ids,
+		identityWitnessSourceMaskByDocEntry: Uint8Array.from(
+			flattenBuckets(identityWitnessSourceMasksByDoc),
+		),
 		routeWitnessStartByDocId: routeWitnessBuckets.starts,
 		routeWitnessStringIds: routeWitnessBuckets.ids,
+		routeWitnessSourceMaskByDocEntry: Uint8Array.from(
+			flattenBuckets(routeWitnessSourceMasksByDoc),
+		),
 		headingWitnessStartByDocId: headingWitnessBuckets.starts,
 		headingWitnessStringIds: headingWitnessBuckets.ids,
 		bodyWitnessStartByBlockId: bodyWitnessBuckets.starts,
@@ -93,10 +109,12 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 			arena.identityWitnessStartByDocId,
 			arena.identityWitnessStringIds,
 		) +
+		arena.identityWitnessSourceMaskByDocEntry.byteLength +
 		estimateSentinelPostingBytes(
 			arena.routeWitnessStartByDocId,
 			arena.routeWitnessStringIds,
 		) +
+		arena.routeWitnessSourceMaskByDocEntry.byteLength +
 		estimateSentinelPostingBytes(
 			arena.headingWitnessStartByDocId,
 			arena.headingWitnessStringIds,
@@ -179,10 +197,12 @@ export function describeHanRouteByteBreakdown(
 				arena.identityWitnessStartByDocId,
 				arena.identityWitnessStringIds,
 			) +
+			arena.identityWitnessSourceMaskByDocEntry.byteLength +
 			estimateSentinelPostingBytes(
 				arena.routeWitnessStartByDocId,
 				arena.routeWitnessStringIds,
 			) +
+			arena.routeWitnessSourceMaskByDocEntry.byteLength +
 			estimateSentinelPostingBytes(
 				arena.headingWitnessStartByDocId,
 				arena.headingWitnessStringIds,

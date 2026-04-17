@@ -3,8 +3,8 @@ import type { V3DirectSubitemCandidate } from "./contracts";
 const DIRECT_SUBITEM_ANCHOR_TIER_SCORE = {
 	none: 0,
 	real_lexical: 1,
-	confirmed_surface: 2,
-	opaque_whole_group: 3,
+	opaque_bigram: 2,
+	confirmed_surface: 3,
 } as const;
 
 export function compareV3DirectSubitemCandidates(
@@ -14,33 +14,24 @@ export function compareV3DirectSubitemCandidates(
 	if (left.hasAnchor !== right.hasAnchor) {
 		return left.hasAnchor ? -1 : 1;
 	}
+	if (left.coveredRealPrimaryCount != right.coveredRealPrimaryCount) {
+		return right.coveredRealPrimaryCount - left.coveredRealPrimaryCount;
+	}
+	if (left.confirmedSurfaceGroupCount != right.confirmedSurfaceGroupCount) {
+		return right.confirmedSurfaceGroupCount - left.confirmedSurfaceGroupCount;
+	}
+	if (left.opaqueCoverageRatio !== right.opaqueCoverageRatio) {
+		return right.opaqueCoverageRatio - left.opaqueCoverageRatio;
+	}
+	if (left.matchedOpaqueBigramCount !== right.matchedOpaqueBigramCount) {
+		return right.matchedOpaqueBigramCount - left.matchedOpaqueBigramCount;
+	}
 	const leftAnchorTierScore =
 		DIRECT_SUBITEM_ANCHOR_TIER_SCORE[left.anchorTier];
 	const rightAnchorTierScore =
 		DIRECT_SUBITEM_ANCHOR_TIER_SCORE[right.anchorTier];
 	if (leftAnchorTierScore !== rightAnchorTierScore) {
 		return rightAnchorTierScore - leftAnchorTierScore;
-	}
-	if (
-		left.confirmedHanAnchorGroupCount !==
-		right.confirmedHanAnchorGroupCount
-	) {
-		return (
-			right.confirmedHanAnchorGroupCount -
-			left.confirmedHanAnchorGroupCount
-		);
-	}
-	if (left.coveredRealPrimaryCount != right.coveredRealPrimaryCount) {
-		return right.coveredRealPrimaryCount - left.coveredRealPrimaryCount;
-	}
-	if (
-		left.completedHanSurfaceGroupCount !=
-		right.completedHanSurfaceGroupCount
-	) {
-		return (
-			right.completedHanSurfaceGroupCount -
-			left.completedHanSurfaceGroupCount
-		);
 	}
 	if (left.preservesQueryOrder !== right.preservesQueryOrder) {
 		return left.preservesQueryOrder ? -1 : 1;

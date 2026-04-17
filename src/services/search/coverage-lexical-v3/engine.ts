@@ -22,6 +22,7 @@ import {
 import {
 	buildPackingProfile,
 	comparePackingProfiles,
+	comparePackingProfilesBeforeHanSurfaceCompletion,
 	type EvidencePackingProfile,
 } from "./ranking";
 
@@ -84,15 +85,48 @@ export class CoverageLexicalV3Engine {
 		);
 		const recallMs = shouldLogDebug ? nowDebugMs() - recallStartedAtMs : 0;
 		const packingStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const rankedCandidatesBeforeSort = candidateDocs
+		const provisionalCandidates = candidateDocs
 			.map((candidateRecall) =>
 				buildPackingProfile(
 					this.residentBase!,
 					queryAnalysis,
 					candidateRecall,
 					unitFamilyMatches,
+					{
+						allowBodyOpaqueRescueSurfaceGroupIndices: null,
+					},
 				),
 			)
+			.filter(
+				(candidate, index) =>
+					candidate.realizedCoverageCount > 0 ||
+					hasBodyOpaqueRescueSeeds(candidateDocs[index]),
+			);
+		const allowedBodyOpaqueRescueByDocId = buildAllowedBodyOpaqueRescueSurfaceGroups(
+			this.residentBase!,
+			queryAnalysis,
+			candidateDocs,
+			unitFamilyMatches,
+		);
+		const rankedCandidatesBeforeSort = provisionalCandidates
+			.map((provisionalCandidate) => {
+				const candidateRecall = candidateDocs.find(
+					(item) => item.docId === provisionalCandidate.docId,
+				);
+				if (candidateRecall == null) {
+					return provisionalCandidate;
+				}
+				return buildPackingProfile(
+					this.residentBase!,
+					queryAnalysis,
+					candidateRecall,
+					unitFamilyMatches,
+					{
+						allowBodyOpaqueRescueSurfaceGroupIndices:
+							allowedBodyOpaqueRescueByDocId.get(candidateRecall.docId) ?? null,
+					},
+				);
+			})
 			.filter((candidate) => candidate.realizedCoverageCount > 0);
 		const packingMs = shouldLogDebug ? nowDebugMs() - packingStartedAtMs : 0;
 		const sortStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
@@ -101,6 +135,7 @@ export class CoverageLexicalV3Engine {
 		if (shouldLogDebug) {
 			logCoverageLexicalV3Debug("engine.search", {
 				queryText,
+				queryTerms,
 				queryTermCount: queryTerms.length,
 				primaryUnitCount: queryAnalysis.primaryUnits.length,
 				hanBackstopGroupCount: queryAnalysis.hanBackstopGroups.length,
@@ -117,6 +152,10 @@ export class CoverageLexicalV3Engine {
 					0,
 				),
 				unitFamilyMatchTotals: summarizeUnitFamilyMatches(unitFamilyMatches),
+				queryAnalysisDetails: summarizeQueryAnalysisDetails(queryAnalysis),
+				unitFamilyMatchDetails: summarizeUnitFamilyMatchDetails(unitFamilyMatches),
+				candidateDocDetails: summarizeCandidateDocs(candidateDocs),
+				topRankedCandidateDetails: summarizeTopRankedCandidates(rankedCandidates),
 				phaseMs: {
 					analyze: roundDebugMs(analyzeMs),
 					familyLookup: roundDebugMs(familyLookupMs),
@@ -185,6 +224,235 @@ function summarizeUnitFamilyMatches(
 		fuzzyMatchCount: unitSummaries.reduce((sum, unitSummary) => sum + unitSummary.fuzzy, 0),
 		topUnitsByMatchCount,
 	};
+}
+
+function summarizeQueryAnalysisDetails(
+	queryAnalysis: V3RecallState["queryAnalysis"],
+): Readonly<{
+	surfaceGroups: ReadonlyArray<{
+		index: number;
+		text: string;
+		kind: string;
+		hanBigramTexts: readonly string[];
+		queryResidualUniqueBigrams: readonly string[];
+	}>;
+	primaryUnits: ReadonlyArray<{
+		index: number;
+		text: string;
+		source: string;
+		surfaceGroupIndex: number | null;
+	}>;
+	hanBackstopGroups: ReadonlyArray<{
+		surfaceGroupIndex: number;
+		normalizedText: string;
+		bigrams: readonly string[];
+		triggerKind: string;
+	}>;
+}> {
+	return {
+		surfaceGroups: queryAnalysis.surfaceGroups.map((group) => ({
+			index: group.index,
+			text: group.text,
+			kind: group.kind,
+			hanBigramTexts: group.hanBigramTexts,
+			queryResidualUniqueBigrams: group.queryResidualUniqueBigrams,
+		})),
+		primaryUnits: queryAnalysis.primaryUnits.map((unit) => ({
+			index: unit.index,
+			text: unit.text,
+			source: unit.source,
+			surfaceGroupIndex: unit.surfaceGroupIndex,
+		})),
+		hanBackstopGroups: queryAnalysis.hanBackstopGroups.map((group) => ({
+			surfaceGroupIndex: group.surfaceGroupIndex,
+			normalizedText: group.normalizedText,
+			bigrams: group.bigrams,
+			triggerKind: group.triggerKind,
+		})),
+	};
+}
+
+function summarizeUnitFamilyMatchDetails(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+): ReadonlyArray<{
+	queryUnitIndex: number;
+	queryUnitText: string;
+	queryUnitSource: string;
+	querySurfaceGroupIndex: number | null;
+	matches: ReadonlyArray<{
+		familyId: number;
+		familyText: string;
+		matchKind: string;
+		editDistance: 0 | 1;
+	}>;
+}> {
+	return unitFamilyMatches.map((unitMatches) => ({
+		queryUnitIndex: unitMatches.queryUnitIndex,
+		queryUnitText: unitMatches.queryUnitText,
+		queryUnitSource: unitMatches.queryUnitSource,
+		querySurfaceGroupIndex: unitMatches.querySurfaceGroupIndex,
+		matches: unitMatches.matches.map((match) => ({
+			familyId: match.familyId,
+			familyText: match.familyText,
+			matchKind: match.matchKind,
+			editDistance: match.editDistance,
+		})),
+	}));
+}
+
+function summarizeCandidateDocs(
+	candidateDocs: V3RecallState["candidateDocs"],
+): ReadonlyArray<{
+	docId: number;
+	matchedIdentityUnitIndices: readonly number[];
+	matchedRouteUnitIndices: readonly number[];
+	matchedHeadingUnitIndices: readonly number[];
+	shortlistedBodyBlockIds: readonly number[];
+	hanMetadataGateStats: V3RecallState["candidateDocs"][number]["hanMetadataGateStats"];
+	hanSurfaceGroupRecalls: ReadonlyArray<{
+		surfaceGroupIndex: number;
+		metadataGateStats: V3RecallState["candidateDocs"][number]["hanSurfaceGroupRecalls"][number]["metadataGateStats"];
+		bodySeedBlockIds: readonly number[];
+		bodySeedBlockGateBlockIds: readonly number[];
+	}>;
+}> {
+	return candidateDocs.map((candidateDoc) => ({
+		docId: candidateDoc.docId,
+		matchedIdentityUnitIndices: candidateDoc.matchedIdentityUnitIndices,
+		matchedRouteUnitIndices: candidateDoc.matchedRouteUnitIndices,
+		matchedHeadingUnitIndices: candidateDoc.matchedHeadingUnitIndices,
+		shortlistedBodyBlockIds: candidateDoc.shortlistedBodyBlockIds,
+		hanMetadataGateStats: candidateDoc.hanMetadataGateStats,
+		hanSurfaceGroupRecalls: candidateDoc.hanSurfaceGroupRecalls.map((groupRecall) => ({
+			surfaceGroupIndex: groupRecall.surfaceGroupIndex,
+			metadataGateStats: groupRecall.metadataGateStats,
+			bodySeedBlockIds: groupRecall.bodySeedBlockIds,
+			bodySeedBlockGateBlockIds: groupRecall.bodySeedBlockGates.map((gate) => gate.blockId),
+		})),
+	}));
+}
+
+function summarizeTopRankedCandidates(
+	rankedCandidates: readonly EvidencePackingProfile[],
+): ReadonlyArray<{
+	docId: number;
+	path: string;
+	realizedCoverageCount: number;
+	realizedFamilyTexts: readonly string[];
+	matchedSurfaceGroupIndices: readonly number[];
+}> {
+	return rankedCandidates.slice(0, 8).map((candidate) => ({
+		docId: candidate.docId,
+		path: candidate.path,
+		realizedCoverageCount: candidate.realizedCoverageCount,
+		realizedFamilyTexts: candidate.realizedFamilies.map((family) => family.familyText),
+		matchedSurfaceGroupIndices: candidate.hanSurfaceCompletionGroups.map(
+			(group) => group.surfaceGroupIndex,
+		),
+	}));
+}
+
+function hasBodyOpaqueRescueSeeds(candidateRecall: V3RecallState["candidateDocs"][number]): boolean {
+	return candidateRecall.hanSurfaceGroupRecalls.some(
+		(groupRecall) => groupRecall.bodySeedBlockIds.length > 0,
+	);
+}
+
+function buildAllowedBodyOpaqueRescueSurfaceGroups(
+	base: ResidentBase,
+	queryAnalysis: V3RecallState["queryAnalysis"],
+	candidateDocs: V3RecallState["candidateDocs"],
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+): ReadonlyMap<number, ReadonlySet<number>> {
+	const comparisonProfileByDocAndSurfaceGroup = new Map<string, EvidencePackingProfile>();
+	const bestBySurfaceGroupIndex = new Map<number, EvidencePackingProfile>();
+	const hasOtherFamilyEvidenceBySurfaceGroup = new Map<number, boolean>();
+	for (const candidateRecall of candidateDocs) {
+		for (const groupRecall of candidateRecall.hanSurfaceGroupRecalls) {
+			if (groupRecall.bodySeedBlockIds.length === 0) {
+				continue;
+			}
+			const comparisonProfile = buildPackingProfile(
+				base,
+				queryAnalysis,
+				candidateRecall,
+				unitFamilyMatches,
+				{
+					allowBodyOpaqueRescueSurfaceGroupIndices: null,
+					excludeSurfaceGroupIndices: new Set<number>([groupRecall.surfaceGroupIndex]),
+				},
+			);
+			comparisonProfileByDocAndSurfaceGroup.set(
+				buildBodyOpaqueRescueGateKey(candidateRecall.docId, groupRecall.surfaceGroupIndex),
+				comparisonProfile,
+			);
+			if (comparisonProfile.realizedCoverageCount > 0) {
+				hasOtherFamilyEvidenceBySurfaceGroup.set(groupRecall.surfaceGroupIndex, true);
+			}
+			const currentBest = bestBySurfaceGroupIndex.get(groupRecall.surfaceGroupIndex);
+			if (
+				currentBest == null ||
+				comparePackingProfilesBeforeHanSurfaceCompletion(
+					comparisonProfile,
+					currentBest,
+				) < 0
+			) {
+				bestBySurfaceGroupIndex.set(groupRecall.surfaceGroupIndex, comparisonProfile);
+			}
+		}
+	}
+	const allowedByDocId = new Map<number, Set<number>>();
+	for (const candidateRecall of candidateDocs) {
+		for (const groupRecall of candidateRecall.hanSurfaceGroupRecalls) {
+			if (groupRecall.bodySeedBlockIds.length === 0) {
+				continue;
+			}
+			if (!hasOtherFamilyEvidenceBySurfaceGroup.get(groupRecall.surfaceGroupIndex)) {
+				pushAllowedBodyOpaqueRescueSurfaceGroup(
+					allowedByDocId,
+					candidateRecall.docId,
+					groupRecall.surfaceGroupIndex,
+				);
+				continue;
+			}
+			const comparisonProfile = comparisonProfileByDocAndSurfaceGroup.get(
+				buildBodyOpaqueRescueGateKey(candidateRecall.docId, groupRecall.surfaceGroupIndex),
+			);
+			if (comparisonProfile == null || comparisonProfile.realizedCoverageCount === 0) {
+				continue;
+			}
+			const best = bestBySurfaceGroupIndex.get(groupRecall.surfaceGroupIndex);
+			if (
+				best == null ||
+				comparePackingProfilesBeforeHanSurfaceCompletion(comparisonProfile, best) !== 0
+			) {
+				continue;
+			}
+			pushAllowedBodyOpaqueRescueSurfaceGroup(
+				allowedByDocId,
+				candidateRecall.docId,
+				groupRecall.surfaceGroupIndex,
+			);
+		}
+	}
+	return allowedByDocId;
+}
+
+function buildBodyOpaqueRescueGateKey(docId: number, surfaceGroupIndex: number): string {
+	return `${docId}:${surfaceGroupIndex}`;
+}
+
+function pushAllowedBodyOpaqueRescueSurfaceGroup(
+	target: Map<number, Set<number>>,
+	docId: number,
+	surfaceGroupIndex: number,
+): void {
+	const existing = target.get(docId);
+	if (existing != null) {
+		existing.add(surfaceGroupIndex);
+		return;
+	}
+	target.set(docId, new Set<number>([surfaceGroupIndex]));
 }
 
 function roundDebugMs(value: number): number {

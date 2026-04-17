@@ -7,8 +7,13 @@ import type { EvidencePackingProfile } from "../ranking";
 export type V3DirectSubitemAnchorTier =
 	| "none"
 	| "real_lexical"
-	| "confirmed_surface"
-	| "opaque_whole_group";
+	| "opaque_bigram"
+	| "confirmed_surface";
+
+export type V3DirectSubitemAtomKind =
+	| "realized_family_atom"
+	| "opaque_bigram_atom"
+	| "confirmed_surface_atom";
 
 export type V3DirectSubitemHighlightTier =
 	| "strong"
@@ -17,46 +22,48 @@ export type V3DirectSubitemHighlightTier =
 export type V3DirectSubitemEvidenceKind =
 	| "real_exact"
 	| "fuzzy"
-	| "opaque_anchor"
-	| "surface_completion"
-	| "residual_support"
-	| "route_only";
-
-export type V3DirectSubitemResidualSupportKind =
-	| "residual_span"
-	| "bridge_bigram";
+	| "opaque_bigram"
+	| "confirmed_surface";
 
 export type V3DirectSubitemResidualScopeTier =
 	| "body_window"
-	| "body_residue"
-	| "whole_document";
+	| "body_residue";
 
-export type V3DirectSubitemOccurrence = Readonly<{
-	kind: V3DirectSubitemEvidenceKind;
-	start: number;
-	end: number;
+export type V3DirectSubitemAtom = Readonly<{
+	kind: V3DirectSubitemAtomKind;
+	evidenceKind: V3DirectSubitemEvidenceKind;
 	queryUnitIndex: number | null;
 	surfaceGroupIndex: number | null;
-	text: string;
-	residualSupportKind?: V3DirectSubitemResidualSupportKind | null;
-	scopeTier?: V3DirectSubitemResidualScopeTier | null;
-	anchorTier?: V3DirectSubitemAnchorTier | null;
-	highlightTier?: V3DirectSubitemHighlightTier | null;
-	isConfirmedSurfaceCompletion?: boolean | null;
-	isSupportOnly?: boolean | null;
+	blockId: number;
+	start: number;
+	end: number;
+	matchedText: string;
+	anchorTier: V3DirectSubitemAnchorTier;
+	highlightTier: V3DirectSubitemHighlightTier;
+	bigramText?: string | null;
+}>;
+
+export type V3DirectSubitemComponent = Readonly<{
+	scopeStart: number;
+	scopeEnd: number;
+	scopeTier: V3DirectSubitemResidualScopeTier;
+	blockIds: readonly number[];
+	atoms: readonly V3DirectSubitemAtom[];
 }>;
 
 export type V3DirectSubitemCandidate = Readonly<{
 	start: number;
 	end: number;
 	anchorOffset: number;
-	occurrences: readonly V3DirectSubitemOccurrence[];
-	displayOccurrences: readonly V3DirectSubitemOccurrence[];
+	component: V3DirectSubitemComponent;
+	atoms: readonly V3DirectSubitemAtom[];
+	displayAtoms: readonly V3DirectSubitemAtom[];
 	hasAnchor: boolean;
 	anchorTier: V3DirectSubitemAnchorTier;
-	confirmedHanAnchorGroupCount: number;
 	coveredRealPrimaryCount: number;
-	completedHanSurfaceGroupCount: number;
+	confirmedSurfaceGroupCount: number;
+	matchedOpaqueBigramCount: number;
+	opaqueCoverageRatio: number;
 	preservesQueryOrder: boolean;
 	windowWidth: number;
 	maxAdjacentGap: number;

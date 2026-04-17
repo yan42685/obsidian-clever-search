@@ -44,6 +44,7 @@ export type BodyWindowContainer = EvidenceContainer &
 export type RealizedQueryUnitFamily = Readonly<{
 	queryUnitIndex: number;
 	queryUnitText: string;
+	querySurfaceGroupIndex: number | null;
 	familyId: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;

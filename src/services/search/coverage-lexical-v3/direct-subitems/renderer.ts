@@ -1,7 +1,7 @@
 import { buildLineOffsets, offsetToLine } from "../../hybrid/chunker";
 import type {
+	V3DirectSubitemAtom,
 	V3DirectSubitemCandidate,
-	V3DirectSubitemOccurrence,
 	V3DirectSubitemRenderPayload,
 } from "./contracts";
 
@@ -80,11 +80,11 @@ function resolveHighlightRanges(
 	strongHighlightRanges: Array<{ start: number; end: number }>;
 	weakHighlightRanges: Array<{ start: number; end: number }>;
 }> {
-	const displayOccurrences = collapseSurfaceDisplayOccurrences(
-		candidate.displayOccurrences,
+	const displayAtoms = collapseSurfaceDisplayAtoms(
+		candidate.displayAtoms,
 	);
 	const displayRanges = resolveStyledDisplayRanges(
-		displayOccurrences,
+		displayAtoms,
 		displayWindow,
 	);
 	if (
@@ -94,55 +94,55 @@ function resolveHighlightRanges(
 		return displayRanges;
 	}
 	return resolveStyledDisplayRanges(
-		collapseSurfaceDisplayOccurrences(candidate.occurrences),
+		collapseSurfaceDisplayAtoms(candidate.atoms),
 		displayWindow,
 	);
 }
 
-function collapseSurfaceDisplayOccurrences(
-	occurrences: readonly V3DirectSubitemOccurrence[],
-): V3DirectSubitemOccurrence[] {
-	const realOccurrences = occurrences.filter(
-		(occurrence) =>
-			occurrence.kind !== "surface_completion" &&
-			occurrence.kind !== "opaque_anchor",
+function collapseSurfaceDisplayAtoms(
+	atoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemAtom[] {
+	const realAtoms = atoms.filter(
+		(atom) =>
+			atom.evidenceKind !== "confirmed_surface" &&
+			atom.evidenceKind !== "opaque_bigram",
 	);
-	const bestSurfaceByGroup = new Map<number, V3DirectSubitemOccurrence>();
-	for (const occurrence of occurrences) {
+	const bestSurfaceByGroup = new Map<number, V3DirectSubitemAtom>();
+	for (const atom of atoms) {
 		if (
-			(occurrence.kind !== "surface_completion" &&
-				occurrence.kind !== "opaque_anchor") ||
-			occurrence.surfaceGroupIndex == null
+			(atom.evidenceKind !== "confirmed_surface" &&
+				atom.evidenceKind !== "opaque_bigram") ||
+			atom.surfaceGroupIndex == null
 		) {
 			continue;
 		}
-		const existing = bestSurfaceByGroup.get(occurrence.surfaceGroupIndex);
+		const existing = bestSurfaceByGroup.get(atom.surfaceGroupIndex);
 		if (
 			existing == null ||
-			occurrence.start < existing.start ||
-			(occurrence.start === existing.start && occurrence.end > existing.end)
+			atom.start < existing.start ||
+			(atom.start === existing.start && atom.end > existing.end)
 		) {
-			bestSurfaceByGroup.set(occurrence.surfaceGroupIndex, occurrence);
+			bestSurfaceByGroup.set(atom.surfaceGroupIndex, atom);
 		}
 	}
-	return [...realOccurrences, ...bestSurfaceByGroup.values()].sort(
+	return [...realAtoms, ...bestSurfaceByGroup.values()].sort(
 		(left, right) => left.start - right.start || left.end - right.end,
 	);
 }
 
 function resolveStyledDisplayRanges(
-	occurrences: readonly V3DirectSubitemOccurrence[],
+	atoms: readonly V3DirectSubitemAtom[],
 	displayWindow: DisplayWindow,
 ): Readonly<{
 	strongHighlightRanges: Array<{ start: number; end: number }>;
 	weakHighlightRanges: Array<{ start: number; end: number }>;
 }> {
 	const strongHighlightRanges = mergeRanges(
-		occurrences
-			.filter((occurrence) => occurrence.highlightTier !== "weak")
-			.map((occurrence) => ({
-				start: Math.max(occurrence.start, displayWindow.start),
-				end: Math.min(occurrence.end, displayWindow.end),
+		atoms
+			.filter((atom) => atom.highlightTier !== "weak")
+			.map((atom) => ({
+				start: Math.max(atom.start, displayWindow.start),
+				end: Math.min(atom.end, displayWindow.end),
 			}))
 			.filter((range) => range.end > range.start)
 			.map((range) => ({
@@ -151,11 +151,11 @@ function resolveStyledDisplayRanges(
 			})),
 	);
 	const weakHighlightRanges = mergeRanges(
-		occurrences
-			.filter((occurrence) => occurrence.highlightTier === "weak")
-			.map((occurrence) => ({
-				start: Math.max(occurrence.start, displayWindow.start),
-				end: Math.min(occurrence.end, displayWindow.end),
+		atoms
+			.filter((atom) => atom.highlightTier === "weak")
+			.map((atom) => ({
+				start: Math.max(atom.start, displayWindow.start),
+				end: Math.min(atom.end, displayWindow.end),
 			}))
 			.filter((range) => range.end > range.start)
 			.map((range) => ({
@@ -183,11 +183,11 @@ function buildDisplayWindow(params: {
 	candidate: V3DirectSubitemCandidate;
 	maxChars: number;
 }): DisplayWindow {
-	const representativeOccurrences = pickRepresentativeOccurrences(
-		params.candidate.displayOccurrences,
+	const representativeAtoms = pickRepresentativeAtoms(
+		params.candidate.displayAtoms,
 	);
 	const lineOffsets = params.lineInfos.map((line) => line.start);
-	const seedWindow = buildSeedLineWindow(lineOffsets, representativeOccurrences);
+	const seedWindow = buildSeedLineWindow(lineOffsets, representativeAtoms);
 	if (seedWindow != null) {
 		const seedLength = computeLineWindowLength(params.lineInfos, seedWindow);
 		if (seedLength <= params.maxChars) {
@@ -204,34 +204,32 @@ function buildDisplayWindow(params: {
 	}
 	return buildInlineDisplayWindow({
 		snapshotText: params.snapshotText,
-		coverStart: representativeOccurrences[0]?.start ?? params.candidate.start,
+		coverStart: representativeAtoms[0]?.start ?? params.candidate.start,
 		coverEnd:
-			representativeOccurrences[representativeOccurrences.length - 1]?.end ??
+			representativeAtoms[representativeAtoms.length - 1]?.end ??
 			params.candidate.end,
 		maxChars: params.maxChars,
 	});
 }
 
-function pickRepresentativeOccurrences(
-	occurrences: readonly V3DirectSubitemOccurrence[],
-): V3DirectSubitemOccurrence[] {
-	const bestByKey = new Map<string, V3DirectSubitemOccurrence>();
-	for (const occurrence of occurrences) {
+function pickRepresentativeAtoms(
+	atoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemAtom[] {
+	const bestByKey = new Map<string, V3DirectSubitemAtom>();
+	for (const atom of atoms) {
 		const key =
-			occurrence.kind === "surface_completion"
-				? `surface:${occurrence.surfaceGroupIndex ?? -1}`
-				: occurrence.kind === "opaque_anchor"
-					? `opaque:${occurrence.surfaceGroupIndex ?? occurrence.queryUnitIndex ?? -1}`
-				: occurrence.kind === "residual_support"
-					? `residual:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.residualSupportKind ?? "none"}:${occurrence.start}:${occurrence.end}`
-					: `unit:${occurrence.queryUnitIndex ?? -1}`;
+			atom.kind === "confirmed_surface_atom"
+				? `surface:${atom.surfaceGroupIndex ?? -1}`
+				: atom.kind === "opaque_bigram_atom"
+					? `opaque:${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`
+					: `unit:${atom.queryUnitIndex ?? -1}`;
 		const existing = bestByKey.get(key);
 		if (
 			existing == null ||
-			occurrence.start < existing.start ||
-			(occurrence.start === existing.start && occurrence.end > existing.end)
+			atom.start < existing.start ||
+			(atom.start === existing.start && atom.end > existing.end)
 		) {
-			bestByKey.set(key, occurrence);
+			bestByKey.set(key, atom);
 		}
 	}
 	return [...bestByKey.values()].sort(
@@ -259,21 +257,21 @@ function buildLineInfos(
 
 function buildSeedLineWindow(
 	lineOffsets: readonly number[],
-	occurrences: readonly V3DirectSubitemOccurrence[],
+	atoms: readonly V3DirectSubitemAtom[],
 ): LineWindow | null {
-	if (lineOffsets.length === 0 || occurrences.length === 0) {
+	if (lineOffsets.length === 0 || atoms.length === 0) {
 		return null;
 	}
 	const startLine = Math.min(
-		...occurrences.map((occurrence) =>
-			offsetToLine(lineOffsets as number[], occurrence.start),
+		...atoms.map((atom) =>
+			offsetToLine(lineOffsets as number[], atom.start),
 		),
 	);
 	const endLine = Math.max(
-		...occurrences.map((occurrence) =>
+		...atoms.map((atom) =>
 			offsetToLine(
 				lineOffsets as number[],
-				Math.max(occurrence.start, occurrence.end - 1),
+				Math.max(atom.start, atom.end - 1),
 			),
 		),
 	);

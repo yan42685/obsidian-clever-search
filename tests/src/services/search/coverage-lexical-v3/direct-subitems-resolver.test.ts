@@ -8,7 +8,9 @@ jest.mock("src/services/search/coverage-lexical-v3/direct-subitems/renderer", ()
 
 import { buildV3DirectSubitems } from "src/services/search/coverage-lexical-v3/direct-subitems";
 import type {
+	V3DirectSubitemAtom,
 	V3DirectSubitemCandidate,
+	V3DirectSubitemComponent,
 	V3DirectSubitemRenderPayload,
 } from "src/services/search/coverage-lexical-v3/direct-subitems/contracts";
 import { buildV3DirectSubitemCandidates } from "src/services/search/coverage-lexical-v3/direct-subitems/evidence";
@@ -17,30 +19,56 @@ import { renderV3DirectSubitemCandidate } from "src/services/search/coverage-lex
 const mockedBuildCandidates = jest.mocked(buildV3DirectSubitemCandidates);
 const mockedRenderCandidate = jest.mocked(renderV3DirectSubitemCandidate);
 
+function createAtom(
+	overrides: Partial<V3DirectSubitemAtom> = {},
+): V3DirectSubitemAtom {
+	return {
+		kind: overrides.kind ?? "realized_family_atom",
+		evidenceKind: overrides.evidenceKind ?? "real_exact",
+		queryUnitIndex: overrides.queryUnitIndex ?? 0,
+		surfaceGroupIndex: overrides.surfaceGroupIndex ?? 0,
+		blockId: overrides.blockId ?? 0,
+		start: overrides.start ?? 0,
+		end: overrides.end ?? 5,
+		matchedText: overrides.matchedText ?? "alpha",
+		anchorTier: overrides.anchorTier ?? "real_lexical",
+		highlightTier: overrides.highlightTier ?? "strong",
+		bigramText: overrides.bigramText ?? null,
+	};
+}
+
+function createComponent(atoms: readonly V3DirectSubitemAtom[]): V3DirectSubitemComponent {
+	return {
+		scopeStart: atoms[0]?.start ?? 0,
+		scopeEnd: atoms[atoms.length - 1]?.end ?? 10,
+		scopeTier: "body_window",
+		blockIds: [...new Set(atoms.map((atom) => atom.blockId))],
+		atoms,
+	};
+}
+
 function createCandidate(
 	overrides: Partial<V3DirectSubitemCandidate>,
 ): V3DirectSubitemCandidate {
+	const atoms = overrides.atoms ?? [
+		createAtom({
+			start: overrides.start ?? 0,
+			end: (overrides.start ?? 0) + 5,
+		}),
+	];
 	return {
-		start: overrides.start ?? 0,
-		end: overrides.end ?? 10,
+		start: overrides.start ?? atoms[0]?.start ?? 0,
+		end: overrides.end ?? atoms[atoms.length - 1]?.end ?? 10,
 		anchorOffset: overrides.anchorOffset ?? overrides.start ?? 0,
-		occurrences: overrides.occurrences ?? [
-			{
-				kind: "real_exact",
-				start: overrides.start ?? 0,
-				end: (overrides.start ?? 0) + 5,
-				queryUnitIndex: 0,
-				surfaceGroupIndex: null,
-				text: "alpha",
-			},
-		],
-		displayOccurrences: overrides.displayOccurrences ?? [],
+		component: overrides.component ?? createComponent(atoms),
+		atoms,
+		displayAtoms: overrides.displayAtoms ?? atoms,
 		hasAnchor: overrides.hasAnchor ?? true,
 		anchorTier: overrides.anchorTier ?? "real_lexical",
-		confirmedHanAnchorGroupCount:
-			overrides.confirmedHanAnchorGroupCount ?? 0,
 		coveredRealPrimaryCount: overrides.coveredRealPrimaryCount ?? 1,
-		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
+		confirmedSurfaceGroupCount: overrides.confirmedSurfaceGroupCount ?? 0,
+		matchedOpaqueBigramCount: overrides.matchedOpaqueBigramCount ?? 0,
+		opaqueCoverageRatio: overrides.opaqueCoverageRatio ?? 0,
 		preservesQueryOrder: overrides.preservesQueryOrder ?? true,
 		windowWidth: overrides.windowWidth ?? 10,
 		maxAdjacentGap: overrides.maxAdjacentGap ?? 0,
@@ -72,184 +100,16 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 		mockedRenderCandidate.mockReset();
 	});
 
-	test("weakly dedupes tail snippets that render almost the same display window", () => {
-		const topCandidate = createCandidate({
-			start: 10,
-			end: 20,
-			anchorOffset: 10,
-			windowWidth: 10,
-		});
-		const nearDuplicateTail = createCandidate({
-			start: 12,
-			end: 24,
-			anchorOffset: 12,
-			windowWidth: 12,
-			occurrences: [
-				{
-					kind: "real_exact",
-					start: 13,
-					end: 18,
-					queryUnitIndex: 0,
-					surfaceGroupIndex: null,
-					text: "alpha",
-				},
-			],
-		});
-		const distantTail = createCandidate({
-			start: 120,
-			end: 130,
-			anchorOffset: 120,
-			windowWidth: 10,
-		});
-		mockedBuildCandidates.mockReturnValue([
-			topCandidate,
-			nearDuplicateTail,
-			distantTail,
-		]);
-		mockedRenderCandidate.mockImplementation(({ candidate }) => {
-			if (candidate === topCandidate) {
-				return createRenderPayload({
-					text: "top",
-					snippetText: "top",
-					displayStart: 0,
-					displayEnd: 40,
-					highlightRanges: [{ start: 0, end: 5 }],
-				});
-			}
-			if (candidate === nearDuplicateTail) {
-				return createRenderPayload({
-					text: "tail-dup",
-					snippetText: "tail-dup",
-					displayStart: 2,
-					displayEnd: 41,
-					highlightRanges: [{ start: 0, end: 5 }],
-				});
-			}
-			return createRenderPayload({
-				text: "tail-distant",
-				snippetText: "tail-distant",
-				displayStart: 100,
-				displayEnd: 140,
-				highlightRanges: [{ start: 0, end: 5 }],
-			});
-		});
-
-		const result = buildV3DirectSubitems({
-			snapshotText: "alpha",
-			queryAnalysis: {
-				queryText: "alpha",
-				normalizedQueryText: "alpha",
-				surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
-				primaryUnits: [
-					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
-				],
-				hanBackstopGroups: [],
-				surfaceCoverageShapeKey: "l",
-			},
-			candidate: {} as never,
-			candidateRecall: {} as never,
-			residentBase: {} as never,
-			maxSubItemResults: 5,
-			hideWeaklyRelatedResults: false,
-		});
-
-		expect(result.candidates).toEqual([topCandidate, distantTail]);
-		expect(result.renderPayloads.map((payload) => payload.text)).toEqual([
-			"top",
-			"tail-distant",
-		]);
-	});
-
-	test("keeps genuinely distant tails even when highlight signatures match", () => {
-		const topCandidate = createCandidate({ start: 10, end: 20, anchorOffset: 10 });
-		const distantTail = createCandidate({ start: 200, end: 210, anchorOffset: 200 });
-		mockedBuildCandidates.mockReturnValue([topCandidate, distantTail]);
-		mockedRenderCandidate.mockImplementation(({ candidate }) =>
-			candidate === topCandidate
-				? createRenderPayload({
-					text: "top",
-					snippetText: "top",
-					displayStart: 0,
-					displayEnd: 40,
-					highlightRanges: [{ start: 0, end: 5 }],
-				})
-				: createRenderPayload({
-					text: "distant",
-					snippetText: "distant",
-					displayStart: 120,
-					displayEnd: 160,
-					highlightRanges: [{ start: 0, end: 5 }],
-				}),
-		);
-
-		const result = buildV3DirectSubitems({
-			snapshotText: "alpha",
-			queryAnalysis: {
-				queryText: "alpha",
-				normalizedQueryText: "alpha",
-				surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
-				primaryUnits: [
-					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
-				],
-				hanBackstopGroups: [],
-				surfaceCoverageShapeKey: "l",
-			},
-			candidate: {} as never,
-			candidateRecall: {} as never,
-			residentBase: {} as never,
-			maxSubItemResults: 5,
-			hideWeaklyRelatedResults: false,
-		});
-
-		expect(result.candidates).toEqual([topCandidate, distantTail]);
-		expect(result.renderPayloads.map((payload) => payload.text)).toEqual([
-			"top",
-			"distant",
-		]);
-	});
-
-	test("lenient pruning keeps only non-overlapping candidates from the top anchor gate", () => {
-		const topCandidate = createCandidate({
-			start: 10,
-			end: 20,
-			anchorOffset: 10,
-			anchorTier: "confirmed_surface",
-			confirmedHanAnchorGroupCount: 1,
-		});
-		const sameGateOverlap = createCandidate({
-			start: 15,
-			end: 25,
-			anchorOffset: 15,
-			anchorTier: "confirmed_surface",
-			confirmedHanAnchorGroupCount: 1,
-		});
-		const sameGateFar = createCandidate({
-			start: 40,
-			end: 55,
-			anchorOffset: 40,
-			anchorTier: "confirmed_surface",
-			confirmedHanAnchorGroupCount: 1,
-		});
-		const weakerTail = createCandidate({
-			start: 80,
-			end: 95,
-			anchorOffset: 80,
-			anchorTier: "real_lexical",
-			confirmedHanAnchorGroupCount: 0,
-		});
-		mockedBuildCandidates.mockReturnValue([
-			topCandidate,
-			sameGateOverlap,
-			sameGateFar,
-			weakerTail,
-		]);
+	test("keeps all canonical candidates when weak pruning is off", () => {
+		const first = createCandidate({ start: 10, end: 20, anchorOffset: 10 });
+		const second = createCandidate({ start: 120, end: 130, anchorOffset: 120 });
+		mockedBuildCandidates.mockReturnValue([first, second]);
 		mockedRenderCandidate.mockImplementation(({ candidate }) =>
 			createRenderPayload({
 				text: `${candidate.start}`,
 				snippetText: `${candidate.start}`,
 				displayStart: candidate.start,
 				displayEnd: candidate.end + 20,
-				highlightRanges: [{ start: 0, end: 3 }],
 			}),
 		);
 
@@ -258,7 +118,81 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			queryAnalysis: {
 				queryText: "alpha",
 				normalizedQueryText: "alpha",
-				surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
+				surfaceGroups: [
+					{
+						index: 0,
+						text: "alpha",
+						kind: "latin",
+						hanBigramTexts: [],
+						coveredCharMask: [],
+						queryResidualUniqueBigrams: [],
+						hasQueryResidualHanCoverage: false,
+					},
+				],
+				primaryUnits: [
+					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
+				],
+				hanBackstopGroups: [],
+				surfaceCoverageShapeKey: "l",
+			},
+			candidate: {} as never,
+			candidateRecall: {} as never,
+			residentBase: {} as never,
+			maxSubItemResults: 5,
+			hideWeaklyRelatedResults: false,
+		});
+
+		expect(result.candidates).toEqual([first, second]);
+	});
+
+	test("weak pruning keeps only candidates in the top anchor gate", () => {
+		const topCandidate = createCandidate({
+			start: 10,
+			end: 20,
+			anchorOffset: 10,
+			anchorTier: "confirmed_surface",
+			confirmedSurfaceGroupCount: 1,
+		});
+		const sameGate = createCandidate({
+			start: 40,
+			end: 55,
+			anchorOffset: 40,
+			anchorTier: "confirmed_surface",
+			confirmedSurfaceGroupCount: 1,
+		});
+		const weakerTail = createCandidate({
+			start: 80,
+			end: 95,
+			anchorOffset: 80,
+			anchorTier: "real_lexical",
+			confirmedSurfaceGroupCount: 0,
+		});
+		mockedBuildCandidates.mockReturnValue([topCandidate, sameGate, weakerTail]);
+		mockedRenderCandidate.mockImplementation(({ candidate }) =>
+			createRenderPayload({
+				text: `${candidate.start}`,
+				snippetText: `${candidate.start}`,
+				displayStart: candidate.start,
+				displayEnd: candidate.end + 20,
+			}),
+		);
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "alpha",
+			queryAnalysis: {
+				queryText: "alpha",
+				normalizedQueryText: "alpha",
+				surfaceGroups: [
+					{
+						index: 0,
+						text: "alpha",
+						kind: "latin",
+						hanBigramTexts: [],
+						coveredCharMask: [],
+						queryResidualUniqueBigrams: [],
+						hasQueryResidualHanCoverage: false,
+					},
+				],
 				primaryUnits: [
 					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
 				],
@@ -272,30 +206,27 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			hideWeaklyRelatedResults: true,
 		});
 
-		expect(result.candidates).toEqual([topCandidate, sameGateFar]);
+		expect(result.candidates).toEqual([topCandidate, sameGate]);
 	});
 
-	test("anchorless candidates are dropped even when weak pruning is off", () => {
-		const anchorlessCandidate = createCandidate({
+	test("anchorless candidates are dropped defensively", () => {
+		const anchorless = createCandidate({
 			start: 10,
 			end: 20,
+			anchorOffset: 10,
 			hasAnchor: false,
 			anchorTier: "none",
-			coveredRealPrimaryCount: 0,
 		});
-		const anchoredCandidate = createCandidate({
+		const anchored = createCandidate({
 			start: 40,
 			end: 50,
 			anchorOffset: 40,
 		});
-		mockedBuildCandidates.mockReturnValue([anchorlessCandidate, anchoredCandidate]);
+		mockedBuildCandidates.mockReturnValue([anchorless, anchored]);
 		mockedRenderCandidate.mockImplementation(({ candidate }) =>
 			createRenderPayload({
 				text: `${candidate.start}`,
 				snippetText: `${candidate.start}`,
-				displayStart: candidate.start,
-				displayEnd: candidate.end + 20,
-				highlightRanges: [{ start: 0, end: 3 }],
 			}),
 		);
 
@@ -304,7 +235,17 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			queryAnalysis: {
 				queryText: "alpha",
 				normalizedQueryText: "alpha",
-				surfaceGroups: [{ index: 0, text: "alpha", kind: "latin" }],
+				surfaceGroups: [
+					{
+						index: 0,
+						text: "alpha",
+						kind: "latin",
+						hanBigramTexts: [],
+						coveredCharMask: [],
+						queryResidualUniqueBigrams: [],
+						hasQueryResidualHanCoverage: false,
+					},
+				],
 				primaryUnits: [
 					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
 				],
@@ -318,6 +259,6 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 			hideWeaklyRelatedResults: false,
 		});
 
-		expect(result.candidates).toEqual([anchoredCandidate]);
+		expect(result.candidates).toEqual([anchored]);
 	});
 });

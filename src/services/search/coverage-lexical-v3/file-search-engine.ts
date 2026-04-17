@@ -29,8 +29,10 @@ import type {
 	ResidentBaseMetrics,
 	ResidentBaseSummary,
 } from "./layout/types";
-import { splitBodyBlocksWithDocumentTokenizer } from "./query";
-import type { V3CandidateDocRecall } from "./recall";
+import {
+	confirmHanBodyBlockSurface,
+	type V3CandidateDocRecall,
+} from "./recall";
 import {
 	comparePackingProfiles,
 	comparePackingProfilesBeforeHanSurfaceCompletion,
@@ -57,9 +59,6 @@ type HanSurfaceDominanceProfile = Readonly<{
 	completedGroupCount: number;
 	tierScoreTotal: number;
 }>;
-
-const MAX_HAN_RAW_REFINE_BLOCKS_PER_DOC = 96;
-const MAX_HAN_RAW_REFINE_BLOCKS_PER_QUERY = 384;
 
 @singleton()
 export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
@@ -185,6 +184,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (shouldLogDebug) {
 			logCoverageLexicalV3Debug("file-search-engine.searchFiles", {
 				queryText,
+				searchTerms,
 				searchTermCount: searchTerms.length,
 				hideWeaklyRelatedResults: request.hideWeaklyRelatedResults === true,
 				maxItemResults: request.maxItemResults,
@@ -244,6 +244,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
 					queryText: trimmedQuery,
 					path,
+					searchTerms,
 					maxSubItemResults,
 					foundCandidate: false,
 					phaseMs: {
@@ -264,6 +265,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
 					queryText: trimmedQuery,
 					path,
+					searchTerms,
 					maxSubItemResults,
 					foundCandidate: true,
 					foundCandidateRecall: false,
@@ -304,6 +306,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
 					queryText: trimmedQuery,
 					path,
+					searchTerms,
 					maxSubItemResults,
 					foundCandidate: true,
 					foundCandidateRecall: true,
@@ -336,6 +339,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			logCoverageLexicalV3Debug("file-search-engine.getDirectSubItems", {
 				queryText: trimmedQuery,
 				path,
+				searchTerms,
 				maxSubItemResults,
 				foundCandidate: true,
 				foundCandidateRecall: true,
@@ -424,78 +428,27 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const candidateRecallByDocId = new Map<number, V3CandidateDocRecall>(
 			result.recallState.candidateDocs.map((candidate) => [candidate.docId, candidate]),
 		);
-		const scheduledCandidates: EvidencePackingProfile[] = [];
-		let projectedQueryBlockBudget = 0;
+		const refinedCandidates = new Map<number, EvidencePackingProfile>();
 		for (let candidateIndex = 0; candidateIndex < result.rankedCandidates.length; candidateIndex += 1) {
 			const candidate = result.rankedCandidates[candidateIndex];
 			const candidateRecall = candidateRecallByDocId.get(candidate.docId);
 			if (candidateRecall == null || !hasBodyTierHanCompletion(candidate)) {
 				continue;
 			}
-			if (!hasHanRawRefineNearTieRisk(result.rankedCandidates, candidateIndex)) {
+			if (!hasHanSurfaceRefineNearTieRisk(result.rankedCandidates, candidateIndex)) {
 				continue;
 			}
-			const projectedDocBlocks = Math.min(
-				MAX_HAN_RAW_REFINE_BLOCKS_PER_DOC,
-				candidateRecall.shortlistedBodyBlockIds.length,
-			);
-			if (projectedDocBlocks <= 0) {
-				continue;
-			}
-			if (projectedQueryBlockBudget >= MAX_HAN_RAW_REFINE_BLOCKS_PER_QUERY) {
-				break;
-			}
-			scheduledCandidates.push(candidate);
-			projectedQueryBlockBudget += Math.min(
-				projectedDocBlocks,
-				MAX_HAN_RAW_REFINE_BLOCKS_PER_QUERY - projectedQueryBlockBudget,
-			);
-		}
-		if (scheduledCandidates.length === 0) {
-			return result.rankedCandidates;
-		}
-		const indexedTexts = await this.getFileSnapshotStore().readIndexedTexts(
-			scheduledCandidates.map((candidate) => ({
-				path: candidate.path,
-				generation: residentBase.docTable.generationByDocId[candidate.docId],
-			})),
-		);
-		const refinedCandidates = new Map<number, EvidencePackingProfile>();
-		let remainingQueryBlockBudget = MAX_HAN_RAW_REFINE_BLOCKS_PER_QUERY;
-		for (const candidate of scheduledCandidates) {
-			if (remainingQueryBlockBudget <= 0) {
-				break;
-			}
-			const indexedText = indexedTexts.get(candidate.path);
-			const candidateRecall = candidateRecallByDocId.get(candidate.docId);
-			if (indexedText == null || candidateRecall == null) {
-				continue;
-			}
-			const prioritizedBlockIds = prioritizeShortlistedBlockIds(
+			const inspectBlockIds = prioritizeShortlistedBlockIds(
 				residentBase,
 				candidate,
 				candidateRecall,
 			);
-			const inspectBlockIds = prioritizedBlockIds.slice(
-				0,
-				Math.min(MAX_HAN_RAW_REFINE_BLOCKS_PER_DOC, remainingQueryBlockBudget),
-			);
-			remainingQueryBlockBudget -= inspectBlockIds.length;
 			if (inspectBlockIds.length === 0) {
 				continue;
 			}
-			const runtimeBlocks = splitBodyBlocksWithDocumentTokenizer(
-				indexedText,
-				(text) => this.getDocumentTerms(text),
-			);
 			const confirmedTierByGroupIndex = new Map<number, BodyHanCompletionTier>();
 			const bestBodyWindowBlockIds = new Set(candidate.bodyWindowContainer?.blockIds ?? []);
 			for (const blockId of inspectBlockIds) {
-				const blockOrdinal = residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId;
-				const runtimeBlock = runtimeBlocks[blockOrdinal];
-				if (runtimeBlock == null) {
-					continue;
-				}
 				const completionTier: BodyHanCompletionTier = bestBodyWindowBlockIds.has(blockId)
 					? "body_window"
 					: "body_residue";
@@ -506,7 +459,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 					if (confirmedTierByGroupIndex.get(group.surfaceGroupIndex) === "body_window") {
 						continue;
 					}
-					if (!runtimeBlock.normalizedText.includes(group.surfaceText)) {
+					if (!confirmHanBodyBlockSurface(residentBase, blockId, group.surfaceText)) {
 						continue;
 					}
 					confirmedTierByGroupIndex.set(group.surfaceGroupIndex, completionTier);
@@ -570,7 +523,7 @@ function buildMatchedTerms(
 	);
 }
 
-function hasHanRawRefineNearTieRisk(
+function hasHanSurfaceRefineNearTieRisk(
 	rankedCandidates: readonly EvidencePackingProfile[],
 	candidateIndex: number,
 ): boolean {

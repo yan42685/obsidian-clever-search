@@ -1,27 +1,57 @@
 import { renderV3DirectSubitemCandidate } from "src/services/search/coverage-lexical-v3/direct-subitems/renderer";
-import type { V3DirectSubitemCandidate } from "src/services/search/coverage-lexical-v3/direct-subitems/contracts";
+import type {
+	V3DirectSubitemAtom,
+	V3DirectSubitemCandidate,
+	V3DirectSubitemComponent,
+} from "src/services/search/coverage-lexical-v3/direct-subitems/contracts";
+
+function createAtom(
+	overrides: Partial<V3DirectSubitemAtom> = {},
+): V3DirectSubitemAtom {
+	return {
+		kind: overrides.kind ?? "realized_family_atom",
+		evidenceKind: overrides.evidenceKind ?? "real_exact",
+		queryUnitIndex: overrides.queryUnitIndex ?? 0,
+		surfaceGroupIndex: overrides.surfaceGroupIndex ?? 0,
+		blockId: overrides.blockId ?? 0,
+		start: overrides.start ?? 0,
+		end: overrides.end ?? 3,
+		matchedText: overrides.matchedText ?? "abc",
+		anchorTier: overrides.anchorTier ?? "real_lexical",
+		highlightTier: overrides.highlightTier ?? "strong",
+		bigramText: overrides.bigramText ?? null,
+	};
+}
+
+function createComponent(
+	atoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemComponent {
+	return {
+		scopeStart: 0,
+		scopeEnd: 40,
+		scopeTier: "body_window",
+		blockIds: [...new Set(atoms.map((atom) => atom.blockId))],
+		atoms,
+	};
+}
 
 function createCandidate(
 	overrides: Partial<V3DirectSubitemCandidate> = {},
 ): V3DirectSubitemCandidate {
+	const atoms = overrides.atoms ?? [createAtom()];
 	return {
-		start: overrides.start ?? 0,
-		end: overrides.end ?? 3,
-		anchorOffset: overrides.anchorOffset ?? 0,
-		occurrences:
-			overrides.occurrences ?? [
-				{
-					kind: "surface_completion",
-					start: 0,
-					end: 3,
-					queryUnitIndex: null,
-					surfaceGroupIndex: 0,
-					text: "???",
-				},
-			],
-		displayOccurrences: overrides.displayOccurrences ?? [],
+		start: overrides.start ?? atoms[0]?.start ?? 0,
+		end: overrides.end ?? atoms[atoms.length - 1]?.end ?? 3,
+		anchorOffset: overrides.anchorOffset ?? atoms[0]?.start ?? 0,
+		component: overrides.component ?? createComponent(atoms),
+		atoms,
+		displayAtoms: overrides.displayAtoms ?? atoms,
+		hasAnchor: overrides.hasAnchor ?? true,
+		anchorTier: overrides.anchorTier ?? "real_lexical",
 		coveredRealPrimaryCount: overrides.coveredRealPrimaryCount ?? 1,
-		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 1,
+		confirmedSurfaceGroupCount: overrides.confirmedSurfaceGroupCount ?? 0,
+		matchedOpaqueBigramCount: overrides.matchedOpaqueBigramCount ?? 0,
+		opaqueCoverageRatio: overrides.opaqueCoverageRatio ?? 0,
 		preservesQueryOrder: overrides.preservesQueryOrder ?? true,
 		windowWidth: overrides.windowWidth ?? 3,
 		maxAdjacentGap: overrides.maxAdjacentGap ?? 0,
@@ -30,14 +60,23 @@ function createCandidate(
 }
 
 describe("coverage lexical v3 direct subitems renderer", () => {
-	test("falls back to raw occurrences when display occurrences are empty", () => {
+	test("falls back to atoms when display atoms are empty", () => {
 		const payload = renderV3DirectSubitemCandidate({
-			snapshotText: "??? rest of snippet",
-			candidate: createCandidate(),
+			snapshotText: "abc rest of snippet",
+			candidate: createCandidate({
+				atoms: [
+					createAtom({
+						start: 0,
+						end: 3,
+						matchedText: "abc",
+					}),
+				],
+				displayAtoms: [],
+			}),
 		});
 
 		expect(payload.highlightRanges).toEqual([{ start: 0, end: 3 }]);
-		expect(payload.snippetText.slice(0, 3)).toBe("???");
+		expect(payload.snippetText.slice(0, 3)).toBe("abc");
 	});
 
 	test("expands display context above and below the seed lines within budget", () => {
@@ -49,47 +88,29 @@ describe("coverage lexical v3 direct subitems renderer", () => {
 			"second line below",
 			"third line below should stay out",
 		].join("\n");
+		const alphaStart = snapshotText.indexOf("alpha");
+		const betaStart = snapshotText.indexOf("beta");
 		const payload = renderV3DirectSubitemCandidate({
 			snapshotText,
 			candidate: createCandidate({
-				start: snapshotText.indexOf("alpha"),
-				end: snapshotText.indexOf("beta") + "beta".length,
-				anchorOffset: snapshotText.indexOf("alpha"),
-				occurrences: [
-					{
-						kind: "real_exact",
-						start: snapshotText.indexOf("alpha"),
-						end: snapshotText.indexOf("alpha") + "alpha".length,
+				start: alphaStart,
+				end: betaStart + "beta".length,
+				anchorOffset: alphaStart,
+				atoms: [
+					createAtom({
+						start: alphaStart,
+						end: alphaStart + "alpha".length,
 						queryUnitIndex: 0,
 						surfaceGroupIndex: 0,
-						text: "alpha",
-					},
-					{
-						kind: "real_exact",
-						start: snapshotText.indexOf("beta"),
-						end: snapshotText.indexOf("beta") + "beta".length,
+						matchedText: "alpha",
+					}),
+					createAtom({
+						start: betaStart,
+						end: betaStart + "beta".length,
 						queryUnitIndex: 1,
 						surfaceGroupIndex: 1,
-						text: "beta",
-					},
-				],
-				displayOccurrences: [
-					{
-						kind: "real_exact",
-						start: snapshotText.indexOf("alpha"),
-						end: snapshotText.indexOf("alpha") + "alpha".length,
-						queryUnitIndex: 0,
-						surfaceGroupIndex: 0,
-						text: "alpha",
-					},
-					{
-						kind: "real_exact",
-						start: snapshotText.indexOf("beta"),
-						end: snapshotText.indexOf("beta") + "beta".length,
-						queryUnitIndex: 1,
-						surfaceGroupIndex: 1,
-						text: "beta",
-					},
+						matchedText: "beta",
+					}),
 				],
 			}),
 			maxChars: 120,

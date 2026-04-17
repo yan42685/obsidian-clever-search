@@ -38,3 +38,5 @@ benchmarks/*
 !benchmarks/design/
 !benchmarks/design/*.md
 benchmarks/corpora/
+
+tmp/

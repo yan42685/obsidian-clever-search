@@ -61,10 +61,13 @@ type PreparedDocument = Readonly<{
 	routeSourceMasks: readonly number[];
 	headingFamilyTexts: readonly string[];
 	identityHanWitnessTexts: readonly string[];
+	identityHanWitnessSourceMasks: readonly number[];
 	routeHanWitnessTexts: readonly string[];
+	routeHanWitnessSourceMasks: readonly number[];
 	headingHanWitnessTexts: readonly string[];
 	identityHanBigramIds: readonly number[];
 	routeHanBigramIds: readonly number[];
+	headingHanBigramIds: readonly number[];
 	bodyBlocks: readonly PreparedBodyBlock[];
 }>;
 
@@ -316,14 +319,42 @@ function prepareDocument(
 		hanWitnessTexts: dedupeSorted(block.hanWitnessTexts),
 		hanBigramIds: dedupeSorted(block.hanBigramTexts).map(encodeHanBigramId),
 	}));
-	const identityHanWitnessTexts = dedupeSorted([
-		...extractHanSegments(document.basename ?? ""),
-		...extractHanSegments(aliasesText),
-	]);
-	const routeHanWitnessTexts = dedupeSorted([
-		...extractHanSegments(document.folder ?? ""),
-		...splitTagValues(tagsText).flatMap((tag) => extractHanSegments(tag)),
-	]);
+	const identityHanWitnessEntries = [
+		...extractHanSegments(document.basename ?? "").map((text) => ({
+			text,
+			mask: IDENTITY_METADATA_SOURCE_BASENAME,
+		})),
+		...extractHanSegments(aliasesText).map((text) => ({
+			text,
+			mask: IDENTITY_METADATA_SOURCE_ALIAS,
+		})),
+	];
+	const identityHanWitnessTexts = dedupeSorted(
+		identityHanWitnessEntries.map((entry) => entry.text),
+	);
+	const identityHanWitnessSourceMasks = mapWitnessTextsToSourceMasks(
+		identityHanWitnessTexts,
+		identityHanWitnessEntries,
+	);
+	const routeHanWitnessEntries = [
+		...extractHanSegments(document.folder ?? "").map((text) => ({
+			text,
+			mask: ROUTE_METADATA_SOURCE_FOLDER,
+		})),
+		...splitTagValues(tagsText).flatMap((tag) =>
+			extractHanSegments(tag).map((text) => ({
+				text,
+				mask: ROUTE_METADATA_SOURCE_TAG,
+			})),
+		),
+	];
+	const routeHanWitnessTexts = dedupeSorted(
+		routeHanWitnessEntries.map((entry) => entry.text),
+	);
+	const routeHanWitnessSourceMasks = mapWitnessTextsToSourceMasks(
+		routeHanWitnessTexts,
+		routeHanWitnessEntries,
+	);
 	const headingHanWitnessTexts = dedupeSorted(extractHanSegments(headingsText));
 	return {
 		path: document.path,
@@ -366,7 +397,9 @@ function prepareDocument(
 			extractDocumentFamilyTexts(headingsText, tokenizeDocumentText),
 		),
 		identityHanWitnessTexts,
+		identityHanWitnessSourceMasks,
 		routeHanWitnessTexts,
+		routeHanWitnessSourceMasks,
 		headingHanWitnessTexts,
 		identityHanBigramIds: dedupeSorted([
 			...extractHanBigrams(document.basename ?? ""),
@@ -376,6 +409,9 @@ function prepareDocument(
 			...extractHanBigrams(document.folder ?? ""),
 			...splitTagValues(tagsText).flatMap((tag) => extractHanBigrams(tag)),
 		]).map(encodeHanBigramId),
+		headingHanBigramIds: dedupeSorted(
+			extractHanBigrams(headingsText),
+		).map(encodeHanBigramId),
 		bodyBlocks,
 	};
 }
@@ -422,12 +458,18 @@ function buildResidentHanRoute(
 			STRING_SOURCE_IDENTITY_WITNESS,
 		),
 	);
+	const identityWitnessSourceMasksByDoc = documents.map(
+		(document) => document.identityHanWitnessSourceMasks,
+	);
 	const routeWitnessStringIdsByDoc = documents.map((document) =>
 		mapStringsToStringIds(
 			document.routeHanWitnessTexts,
 			stringArenaBuilder,
 			STRING_SOURCE_ROUTE_WITNESS,
 		),
+	);
+	const routeWitnessSourceMasksByDoc = documents.map(
+		(document) => document.routeHanWitnessSourceMasks,
 	);
 	const headingWitnessStringIdsByDoc = documents.map((document) =>
 		mapStringsToStringIds(
@@ -467,7 +509,9 @@ function buildResidentHanRoute(
 			metadataDocIdsByBigram: [],
 			bodyPostingsByBigramId: new Map(),
 			identityWitnessStringIdsByDoc,
+			identityWitnessSourceMasksByDoc,
 			routeWitnessStringIdsByDoc,
+			routeWitnessSourceMasksByDoc,
 			headingWitnessStringIdsByDoc,
 			bodyWitnessStringIdsByBlock,
 		});
@@ -493,13 +537,15 @@ function buildResidentHanRoute(
 	}
 	return buildHanRouteArena({
 		bigramIds: metadataBigramIds,
-		metadataDocIdsByBigram,
-		bodyPostingsByBigramId,
-		identityWitnessStringIdsByDoc,
-		routeWitnessStringIdsByDoc,
-		headingWitnessStringIdsByDoc,
-		bodyWitnessStringIdsByBlock,
-	});
+			metadataDocIdsByBigram,
+			bodyPostingsByBigramId,
+			identityWitnessStringIdsByDoc,
+			identityWitnessSourceMasksByDoc,
+			routeWitnessStringIdsByDoc,
+			routeWitnessSourceMasksByDoc,
+			headingWitnessStringIdsByDoc,
+			bodyWitnessStringIdsByBlock,
+		});
 }
 function mergeSourceMask(
 	target: Map<string, number>,
@@ -585,6 +631,17 @@ function dedupeSorted(values: readonly string[]): string[] {
 
 function dedupeSortedNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function mapWitnessTextsToSourceMasks(
+	witnessTexts: readonly string[],
+	entries: readonly Readonly<{ text: string; mask: number }>[],
+): number[] {
+	const maskByText = new Map<string, number>();
+	for (const entry of entries) {
+		maskByText.set(entry.text, (maskByText.get(entry.text) ?? 0) | entry.mask);
+	}
+	return witnessTexts.map((text) => maskByText.get(text) ?? 0);
 }
 
 function pushBigramPostings(

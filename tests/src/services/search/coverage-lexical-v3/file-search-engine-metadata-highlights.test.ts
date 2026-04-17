@@ -6,10 +6,7 @@ import type { IndexedDocument } from "src/globals/search-types";
 import type { CoverageLexicalV3SearchResult } from "src/services/search/coverage-lexical-v3/engine";
 import { CoverageLexicalV3FileSearchEngine } from "src/services/search/coverage-lexical-v3/file-search-engine";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
-import type {
-	BodyWindowContainer,
-	EvidencePackingProfile,
-} from "src/services/search/coverage-lexical-v3/ranking/types";
+import type { EvidencePackingProfile } from "src/services/search/coverage-lexical-v3/ranking/types";
 import { container } from "tsyringe";
 
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
@@ -28,33 +25,13 @@ function createDocument(
 		aliases: overrides.aliases,
 		tags: overrides.tags,
 		headings: overrides.headings,
-			generation: overrides.generation ?? 1,
+		generation: overrides.generation ?? 1,
 		size: overrides.size,
 	};
 }
 
-function createBodyWindowContainer(blockIds: readonly number[]): BodyWindowContainer {
-	return {
-		tier: "bodyWindow",
-		blockIds,
-		boundaryCrossingCount: Math.max(0, blockIds.length - 1),
-		coveredUnitIndices: [0],
-		coveredDistinctUnitCount: 1,
-		containerCompactness: 260,
-		exactUnitCount: 1,
-		windowWidth: 1,
-		gapCount: 0,
-		density: 1,
-		headingCorroboration: {
-			coveredUnitIndices: [],
-			unitCount: 0,
-		},
-	};
-}
-
 function createPackingProfile(
-	overrides: Partial<EvidencePackingProfile> &
-		Pick<EvidencePackingProfile, "docId" | "path">,
+	overrides: Partial<EvidencePackingProfile> & Pick<EvidencePackingProfile, "docId" | "path">,
 ): EvidencePackingProfile {
 	return {
 		docId: overrides.docId,
@@ -69,53 +46,35 @@ function createPackingProfile(
 			crossScriptSatisfiedGroupCount: 1,
 		},
 		exactUnitCount: overrides.exactUnitCount ?? 1,
-		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 1,
+		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
 		hanSurfaceCompletionTierScoreTotal:
-			overrides.hanSurfaceCompletionTierScoreTotal ?? 1,
+			overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
 		strongestHanSurfaceCompletionTier:
-			overrides.strongestHanSurfaceCompletionTier ?? "body_residue",
-		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [
-			{
-				surfaceGroupIndex: 0,
-				surfaceText: "lifeforce",
-				tier: "body_residue",
-			},
-		],
+			overrides.strongestHanSurfaceCompletionTier ?? "none",
+		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
-		realizedFamilies: overrides.realizedFamilies ?? [
-			{
-				queryUnitIndex: 0,
-				queryUnitText: "life",
-				familyId: 0,
-				familyText: "life",
-				matchKind: "exact",
-				inIdentity: false,
-				inRoute: false,
-				inHeading: false,
-				inBestBodyWindow: true,
-				inBodyResidue: false,
-			},
-		],
+		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
+		fuzzyEditDistanceTotal: overrides.fuzzyEditDistanceTotal ?? 0,
+		metadataPackingSignature: overrides.metadataPackingSignature ?? {
+			basenameUnitCount: 0,
+			aliasUnitCount: 0,
+			routeUnitCount: 0,
+			sortedBuckets: [],
+		},
+		realizedFamilies: overrides.realizedFamilies ?? [],
 		identityContainer: overrides.identityContainer ?? null,
 		routeContainer: overrides.routeContainer ?? null,
-		bodyWindowContainer: overrides.bodyWindowContainer ?? createBodyWindowContainer([0]),
-		strongestContainer: overrides.strongestContainer ?? createBodyWindowContainer([0]),
+		bodyWindowContainer: overrides.bodyWindowContainer ?? null,
+		strongestContainer: overrides.strongestContainer ?? null,
 		secondStrongestContainer: overrides.secondStrongestContainer ?? null,
 		fragmentationPenalty:
 			overrides.fragmentationPenalty ?? {
 				bodyResidueUnitCount: 0,
 				uncoveredByTopTwoCount: 0,
-				activeContainerCount: 1,
+				explanatoryContainerCount: 0,
 			},
 	};
-}
-
-function sliceHighlights(
-	text: string,
-	ranges: readonly { start: number; end: number }[] | undefined,
-): string[] {
-	return (ranges ?? []).map((range) => text.slice(range.start, range.end));
 }
 
 function installTokenizer(): void {
@@ -128,9 +87,33 @@ function installTokenizer(): void {
 	} as unknown as Tokenizer);
 }
 
+function sliceHighlights(
+	text: string,
+	ranges: readonly { start: number; end: number }[] | undefined,
+): string[] {
+	return (ranges ?? []).map((range) => text.slice(range.start, range.end));
+}
+
+function createMockEngineResult(
+	queryAnalysis: CoverageLexicalV3SearchResult["recallState"]["queryAnalysis"],
+	candidate: EvidencePackingProfile,
+): CoverageLexicalV3SearchResult {
+	return {
+		recallState: {
+			queryAnalysis,
+			unitFamilyMatches: [],
+			candidateDocs: [],
+		},
+		rankedCandidates: [candidate],
+	};
+}
+
 describe("coverage lexical v3 file search engine metadata highlights", () => {
-	test("searchFiles highlights basename and folder exact matches for metadata fields", async () => {
+	beforeEach(() => {
 		installTokenizer();
+	});
+
+	test("searchFiles highlights basename exact matches and folder prefix matches by realized family text", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		await engine.reIndexAll([
 			createDocument({
@@ -140,12 +123,22 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
+		const search = jest.fn(() =>
+			createMockEngineResult(
+				{
 					queryText: "runtime",
 					normalizedQueryText: "runtime",
-					surfaceGroups: [{ index: 0, text: "runtime", kind: "latin" }],
+					surfaceGroups: [
+						{
+							index: 0,
+							text: "runtime",
+							kind: "latin",
+							hanBigramTexts: [],
+							coveredCharMask: [],
+							queryResidualUniqueBigrams: [],
+							hasQueryResidualHanCoverage: false,
+						},
+					],
 					primaryUnits: [
 						{
 							index: 0,
@@ -157,20 +150,31 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 					hanBackstopGroups: [],
 					surfaceCoverageShapeKey: "l",
 				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
 				createPackingProfile({
 					docId: 0,
 					path: "infra/runtime/runtime-note.md",
-					hanSurfaceCompletionGroups: [],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: "runtime",
+							querySurfaceGroupIndex: 0,
+							familyId: 1,
+							familyText: "runtime",
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "basename",
+							routeMetadataSource: "folder",
+							metadataPackingSource: "basename",
+							inIdentity: true,
+							inRoute: true,
+							inHeading: false,
+							inBestBodyWindow: false,
+							inBodyResidue: false,
+						},
+					],
 				}),
-			],
-		}));
+			),
+		);
 		(engine as unknown as {
 			engine: {
 				search: typeof search;
@@ -191,34 +195,156 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 		expect(sliceHighlights("runtime note", matchedFiles[0]?.basenameHighlightRanges)).toEqual([
 			"runtime",
 		]);
-		expect(
-			sliceHighlights("infra/runtime/", matchedFiles[0]?.folderHighlightRanges),
-		).toEqual(["runtime"]);
+		expect(sliceHighlights("infra/runtime/", matchedFiles[0]?.folderHighlightRanges)).toEqual([
+			"runtime",
+		]);
 	});
 
-	test("searchFiles highlights a full Han basename surface instead of the shorter real term", async () => {
-		installTokenizer();
+	test("searchFiles highlights fuzzy metadata matches as weak ranges", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "缓存恢复";
-		const fullSurface = "缓存恢复步骤";
+		await engine.reIndexAll([
+			createDocument({
+				path: "notes/runtime-obsidian.md",
+				basename: "obsidian runtime guide",
+				folder: "notes/runtime/",
+				content: "placeholder",
+			}),
+		]);
+		const search = jest.fn(() =>
+			createMockEngineResult(
+				{
+					queryText: "obsidan runtime",
+					normalizedQueryText: "obsidan runtime",
+					surfaceGroups: [
+						{
+							index: 0,
+							text: "obsidan",
+							kind: "latin",
+							hanBigramTexts: [],
+							coveredCharMask: [],
+							queryResidualUniqueBigrams: [],
+							hasQueryResidualHanCoverage: false,
+						},
+						{
+							index: 1,
+							text: "runtime",
+							kind: "latin",
+							hanBigramTexts: [],
+							coveredCharMask: [],
+							queryResidualUniqueBigrams: [],
+							hasQueryResidualHanCoverage: false,
+						},
+					],
+					primaryUnits: [
+						{ index: 0, text: "obsidan", source: "surface", surfaceGroupIndex: 0 },
+						{ index: 1, text: "runtime", source: "surface", surfaceGroupIndex: 1 },
+					],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "ll",
+				},
+				createPackingProfile({
+					docId: 0,
+					path: "notes/runtime-obsidian.md",
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: "obsidan",
+							querySurfaceGroupIndex: 0,
+							familyId: 1,
+							familyText: "obsidian",
+							matchKind: "fuzzy",
+							editDistance: 1,
+							identityMetadataSource: "basename",
+							routeMetadataSource: "none",
+							metadataPackingSource: "basename",
+							inIdentity: true,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: false,
+							inBodyResidue: false,
+						},
+						{
+							queryUnitIndex: 1,
+							queryUnitText: "runtime",
+							querySurfaceGroupIndex: 1,
+							familyId: 2,
+							familyText: "runtime",
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "basename",
+							routeMetadataSource: "folder",
+							metadataPackingSource: "basename",
+							inIdentity: true,
+							inRoute: true,
+							inHeading: false,
+							inBestBodyWindow: false,
+							inBodyResidue: false,
+						},
+					],
+				}),
+			),
+		);
+		(engine as unknown as {
+			engine: {
+				search: typeof search;
+				getResidentBase: () => ResidentBase | null;
+			};
+		}).engine = {
+			search,
+			getResidentBase: () => null,
+		};
+
+		const matchedFiles = await engine.searchFiles({
+			queryText: "obsidan runtime",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+
+		expect(
+			sliceHighlights(
+				"obsidian runtime guide",
+				matchedFiles[0]?.basenameWeakHighlightRanges,
+			),
+		).toContain("obsidian");
+		expect(
+			sliceHighlights(
+				"obsidian runtime guide",
+				matchedFiles[0]?.basenameHighlightRanges,
+			),
+		).toContain("runtime");
+	});
+
+	test("searchFiles prefers a full Han surface over the shorter covered real term in basename", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
 		await engine.reIndexAll([
 			createDocument({
 				path: "zh/cache-guide.md",
-				basename: "缓存恢复步骤说明",
+				basename: "生命力档案",
 				folder: "zh/",
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: fullSurface,
-					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
+		const search = jest.fn(() =>
+			createMockEngineResult(
+				{
+					queryText: "生命力",
+					normalizedQueryText: "生命力",
+					surfaceGroups: [
+						{
+							index: 0,
+							text: "生命力",
+							kind: "han",
+							hanBigramTexts: ["生命", "命力"],
+							coveredCharMask: [true, true, false],
+							queryResidualUniqueBigrams: ["命力"],
+							hasQueryResidualHanCoverage: true,
+						},
+					],
 					primaryUnits: [
 						{
 							index: 0,
-							text: shorterTerm,
+							text: "生命",
 							source: "han_tokenizer_real",
 							surfaceGroupIndex: 0,
 						},
@@ -226,22 +352,31 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 					hanBackstopGroups: [],
 					surfaceCoverageShapeKey: "h",
 				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
 				createPackingProfile({
 					docId: 0,
 					path: "zh/cache-guide.md",
-					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "identity" },
+					realizedFamilies: [
+						{
+							queryUnitIndex: 0,
+							queryUnitText: "生命",
+							querySurfaceGroupIndex: 0,
+							familyId: 1,
+							familyText: "生命",
+							matchKind: "exact",
+							editDistance: 0,
+							identityMetadataSource: "basename",
+							routeMetadataSource: "none",
+							metadataPackingSource: "basename",
+							inIdentity: true,
+							inRoute: false,
+							inHeading: false,
+							inBestBodyWindow: false,
+							inBodyResidue: false,
+						},
 					],
-					completedHanSurfaceGroupCount: 1,
-					hanSurfaceCompletionTierScoreTotal: 4,
-					strongestHanSurfaceCompletionTier: "identity",
 				}),
-			],
-		}));
+			),
+		);
 		(engine as unknown as {
 			engine: {
 				search: typeof search;
@@ -253,321 +388,53 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 		};
 
 		const matchedFiles = await engine.searchFiles({
-			queryText: fullSurface,
+			queryText: "生命力",
 			isPrefixMatch: true,
 			isFuzzy: false,
 			maxItemResults: 5,
 		});
 
-		const highlights = sliceHighlights(
-			"缓存恢复步骤说明",
-			matchedFiles[0]?.basenameHighlightRanges,
-		);
-		expect(highlights).toContain(fullSurface);
-		expect(highlights).not.toContain(shorterTerm);
+		const highlights = sliceHighlights("生命力档案", matchedFiles[0]?.basenameHighlightRanges);
+		expect(highlights).toContain("生命力");
+		expect(highlights).not.toContain("生命");
 	});
 
-	test("searchFiles adds display-only residual support for basename Han highlights", async () => {
-		installTokenizer();
+	test("searchFiles keeps Han opaque bigram highlights inside the best single witness", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		const fullSurface = "上面这笔记";
 		await engine.reIndexAll([
 			createDocument({
-				path: "zh/bridge.md",
-				basename: "上面这位笔记",
-				folder: "zh/",
+				path: "资料/命力/生命.md",
+				basename: "生命",
+				folder: "资料/命力/",
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: fullSurface,
-					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
-					primaryUnits: [
+		const search = jest.fn(() =>
+			createMockEngineResult(
+				{
+					queryText: "生命力",
+					normalizedQueryText: "生命力",
+					surfaceGroups: [
 						{
 							index: 0,
-							text: "上面",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-						{
-							index: 1,
-							text: "笔记",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
+							text: "生命力",
+							kind: "han",
+							hanBigramTexts: ["生命", "命力"],
+							coveredCharMask: [false, false, false],
+							queryResidualUniqueBigrams: ["生命", "命力"],
+							hasQueryResidualHanCoverage: true,
 						},
 					],
-					hanBackstopGroups: [
-						{
-							surfaceGroupIndex: 0,
-							normalizedText: "这",
-							bigrams: ["面这", "这笔"],
-							charLength: 1,
-							triggerKind: "bridge_bigram",
-						},
-					],
-					surfaceCoverageShapeKey: "h",
-				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
-				createPackingProfile({
-					docId: 0,
-					path: "zh/bridge.md",
-					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "none" },
-					],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
-				}),
-			],
-		}));
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
-
-		const matchedFiles = await engine.searchFiles({
-			queryText: fullSurface,
-			isPrefixMatch: true,
-			isFuzzy: false,
-			maxItemResults: 5,
-		});
-
-		const highlights = sliceHighlights(
-			"上面这位笔记",
-			matchedFiles[0]?.basenameHighlightRanges,
-		);
-		expect(highlights).toContain("上面这");
-		expect(highlights).toContain("笔记");
-		expect(highlights).not.toContain(fullSurface);
-	});
-
-	test("searchFiles keeps folder residual support inside a single path segment", async () => {
-		installTokenizer();
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		const fullSurface = "上面这笔记";
-		await engine.reIndexAll([
-			createDocument({
-				path: "项目/上面/笔记/bridge.md",
-				basename: "bridge",
-				folder: "项目/上面/笔记/",
-				content: "placeholder",
-			}),
-		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: fullSurface,
-					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
-					primaryUnits: [
-						{
-							index: 0,
-							text: "上面",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-						{
-							index: 1,
-							text: "笔记",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-					],
-					hanBackstopGroups: [
-						{
-							surfaceGroupIndex: 0,
-							normalizedText: "这",
-							bigrams: ["面这", "这笔"],
-							charLength: 1,
-							triggerKind: "bridge_bigram",
-						},
-					],
-					surfaceCoverageShapeKey: "h",
-				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
-				createPackingProfile({
-					docId: 0,
-					path: "项目/上面/笔记/bridge.md",
-					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "none" },
-					],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
-				}),
-			],
-		}));
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
-
-		const matchedFiles = await engine.searchFiles({
-			queryText: fullSurface,
-			isPrefixMatch: true,
-			isFuzzy: false,
-			maxItemResults: 5,
-		});
-
-		const highlights = sliceHighlights(
-			"项目/上面/笔记/",
-			matchedFiles[0]?.folderHighlightRanges,
-		);
-		expect(highlights).toContain("上面");
-		expect(highlights).toContain("笔记");
-		expect(highlights).not.toContain("上面这");
-		expect(highlights).not.toContain(fullSurface);
-	});
-
-	test("searchFiles highlights a full Han surface inside a single folder segment", async () => {
-		installTokenizer();
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		const shorterTerm = "缓存恢复";
-		const fullSurface = "缓存恢复步骤";
-		await engine.reIndexAll([
-			createDocument({
-				path: "资料/缓存恢复步骤/guide.md",
-				basename: "guide",
-				folder: "资料/缓存恢复步骤/",
-				content: "placeholder",
-			}),
-		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: fullSurface,
-					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
-					primaryUnits: [
-						{
-							index: 0,
-							text: shorterTerm,
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-					],
+					primaryUnits: [],
 					hanBackstopGroups: [],
 					surfaceCoverageShapeKey: "h",
 				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
 				createPackingProfile({
 					docId: 0,
-					path: "资料/缓存恢复步骤/guide.md",
-					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "route" },
-					],
-					completedHanSurfaceGroupCount: 1,
-					hanSurfaceCompletionTierScoreTotal: 3,
-					strongestHanSurfaceCompletionTier: "route",
+					path: "资料/命力/生命.md",
 				}),
-			],
-		}));
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
-
-		const matchedFiles = await engine.searchFiles({
-			queryText: fullSurface,
-			isPrefixMatch: true,
-			isFuzzy: false,
-			maxItemResults: 5,
-		});
-
-		const highlights = sliceHighlights(
-			"资料/缓存恢复步骤/",
-			matchedFiles[0]?.folderHighlightRanges,
+			),
 		);
-		expect(highlights).toContain(fullSurface);
-		expect(highlights).not.toContain(shorterTerm);
-	});
-
-	test("searchFiles does not share Han residual evidence across basename and folder", async () => {
-		installTokenizer();
-		const engine = new CoverageLexicalV3FileSearchEngine();
-		const fullSurface = "上面这笔记";
-		await engine.reIndexAll([
-			createDocument({
-				path: "资料/笔记/上面.md",
-				basename: "上面",
-				folder: "资料/笔记/",
-				content: "placeholder",
-			}),
-		]);
-		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
-			recallState: {
-				queryAnalysis: {
-					queryText: fullSurface,
-					normalizedQueryText: fullSurface,
-					surfaceGroups: [{ index: 0, text: fullSurface, kind: "han" }],
-					primaryUnits: [
-						{
-							index: 0,
-							text: "上面",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-						{
-							index: 1,
-							text: "笔记",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-					],
-					hanBackstopGroups: [
-						{
-							surfaceGroupIndex: 0,
-							normalizedText: "这",
-							bigrams: ["面这", "这笔"],
-							charLength: 1,
-							triggerKind: "bridge_bigram",
-						},
-					],
-					surfaceCoverageShapeKey: "h",
-				},
-				unitFamilyMatches: [],
-				candidateDocs: [],
-			},
-			rankedCandidates: [
-				createPackingProfile({
-					docId: 0,
-					path: "资料/笔记/上面.md",
-					hanSurfaceCompletionGroups: [
-						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "none" },
-					],
-					completedHanSurfaceGroupCount: 0,
-					hanSurfaceCompletionTierScoreTotal: 0,
-					strongestHanSurfaceCompletionTier: "none",
-				}),
-			],
-		}));
 		(engine as unknown as {
 			engine: {
 				search: typeof search;
@@ -579,17 +446,13 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 		};
 
 		const matchedFiles = await engine.searchFiles({
-			queryText: fullSurface,
+			queryText: "生命力",
 			isPrefixMatch: true,
 			isFuzzy: false,
 			maxItemResults: 5,
 		});
 
-		expect(sliceHighlights("上面", matchedFiles[0]?.basenameHighlightRanges)).toEqual([
-			"上面",
-		]);
-		expect(sliceHighlights("资料/笔记/", matchedFiles[0]?.folderHighlightRanges)).toEqual([
-			"笔记",
-		]);
+		expect(sliceHighlights("生命", matchedFiles[0]?.basenameHighlightRanges)).toEqual(["生命"]);
+		expect(sliceHighlights("资料/命力/", matchedFiles[0]?.folderHighlightRanges)).toEqual([]);
 	});
 });

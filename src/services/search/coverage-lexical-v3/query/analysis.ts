@@ -21,6 +21,12 @@ export type V3QuerySurfaceGroup = Readonly<{
 	text: string;
 	kind: ReturnType<typeof classifySurfaceKind>;
 	hanBigramTexts: readonly string[];
+	coveredCharMask: readonly boolean[];
+	// Query-analysis-only residual bigrams from the tokenizer/stable-cover view.
+	// Do not use these as candidate-final rescue obligations for ranking/display.
+	queryResidualUniqueBigrams: readonly string[];
+	// Query-analysis-only summary of whether the static query cover leaves residual Han.
+	hasQueryResidualHanCoverage: boolean;
 }>;
 
 export type V3HanBackstopGroup = Readonly<{
@@ -51,10 +57,10 @@ export function analyzeQuery(
 	const normalizedQueryTerms = queryTerms
 		.map((term) => normalizeText(term).trim())
 		.filter((term) => term.length > 0);
-	const surfaceGroups = (normalizedQueryText.match(RAW_SURFACE_REGEX) ?? [])
+	const initialSurfaceGroups = (normalizedQueryText.match(RAW_SURFACE_REGEX) ?? [])
 		.map((text) => text.trim())
 		.filter((text) => text.length > 0)
-		.map<V3QuerySurfaceGroup>((text, index) => ({
+		.map((text, index) => ({
 			index,
 			text,
 			kind: classifySurfaceKind(text),
@@ -63,9 +69,16 @@ export function analyzeQuery(
 		}));
 	const primaryUnits: V3QueryUnit[] = [];
 	const hanBackstopGroups: V3HanBackstopGroup[] = [];
+	const surfaceGroups: V3QuerySurfaceGroup[] = [];
 	const seenPrimaryTexts = new Set<string>();
-	for (const group of surfaceGroups) {
+	for (const group of initialSurfaceGroups) {
 		if (group.kind !== "han") {
+			surfaceGroups.push({
+				...group,
+				coveredCharMask: [],
+				queryResidualUniqueBigrams: [],
+				hasQueryResidualHanCoverage: false,
+			});
 			pushPrimaryUnit(primaryUnits, seenPrimaryTexts, {
 				text: group.text,
 				source: "surface",
@@ -81,28 +94,52 @@ export function analyzeQuery(
 				surfaceGroupIndex: group.index,
 			});
 		}
-		const charLength = Array.from(group.text).length;
+		const coveredCharMask = markCoveredHanChars(
+			group.text,
+			Array.from(group.text).length,
+			realHanTerms,
+		);
+		const queryResidualUniqueBigrams = collectUncoveredUniqueBigrams(
+			group.text,
+			coveredCharMask,
+			group.hanBigramTexts,
+		);
+		surfaceGroups.push({
+			...group,
+			coveredCharMask,
+			queryResidualUniqueBigrams,
+			hasQueryResidualHanCoverage: queryResidualUniqueBigrams.length > 0,
+		});
 		if (realHanTerms.length === 0) {
-			if (charLength >= 2) {
+			if (Array.from(group.text).length >= 2) {
 				pushPrimaryUnit(primaryUnits, seenPrimaryTexts, {
 					text: group.text,
 					source: "opaque_han_confirmed",
 					surfaceGroupIndex: group.index,
 				});
-				const bigrams = extractHanBigrams(group.text);
-				if (bigrams.length > 0) {
+				if (queryResidualUniqueBigrams.length > 0) {
 					hanBackstopGroups.push({
 						surfaceGroupIndex: group.index,
 						normalizedText: group.text,
-						bigrams,
-						charLength,
+						bigrams: queryResidualUniqueBigrams,
+						charLength: Array.from(group.text).length,
 						triggerKind: "whole_group_backstop",
 					});
 				}
 			}
 			continue;
 		}
-		hanBackstopGroups.push(...buildHanBackstopGroups(group, realHanTerms));
+		hanBackstopGroups.push(
+			...buildHanBackstopGroups(
+				{
+					...group,
+					coveredCharMask,
+					queryResidualUniqueBigrams,
+					hasQueryResidualHanCoverage: queryResidualUniqueBigrams.length > 0,
+				},
+				coveredCharMask,
+			),
+		);
 	}
 	return {
 		queryText,
@@ -281,10 +318,9 @@ function dedupePreservingOrder(values: readonly string[]): string[] {
 
 function buildHanBackstopGroups(
 	group: V3QuerySurfaceGroup,
-	realHanTerms: readonly string[],
+	covered: readonly boolean[],
 ): V3HanBackstopGroup[] {
 	const chars = Array.from(group.text);
-	const covered = markCoveredHanChars(group.text, chars.length, realHanTerms);
 	const residualSpans = collectResidualSpans(chars, covered);
 	const out: V3HanBackstopGroup[] = [];
 	for (const span of residualSpans) {
@@ -313,6 +349,25 @@ function buildHanBackstopGroups(
 		}
 	}
 	return out;
+}
+
+function collectUncoveredUniqueBigrams(
+	surfaceText: string,
+	covered: readonly boolean[],
+	hanBigramTexts: readonly string[],
+): string[] {
+	if (hanBigramTexts.length === 0) {
+		return [];
+	}
+	const chars = Array.from(surfaceText);
+	const unresolved = new Set<string>();
+	for (let index = 0; index < chars.length - 1; index += 1) {
+		if (covered[index] && covered[index + 1]) {
+			continue;
+		}
+		unresolved.add(chars[index] + chars[index + 1]);
+	}
+	return hanBigramTexts.filter((bigram) => unresolved.has(bigram));
 }
 
 function markCoveredHanChars(

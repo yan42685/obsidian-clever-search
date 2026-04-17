@@ -66,9 +66,9 @@ describe("coverage lexical v3 han route", () => {
 		expect(result.rankedCandidates[0].path).toBe("zh/cache-guide.md");
 		expect(recalled?.hanMetadataGateStats).not.toBeNull();
 		expect(recalled?.hanMetadataGateStats?.matchedBigramCount).toBeGreaterThan(0);
-		expect(result.rankedCandidates[0].realizedFamilies[0].familyText).toContain(
-			"\u7f13\u5b58\u6062\u590d",
-		);
+		expect(
+			result.rankedCandidates[0].realizedFamilies.map((family) => family.familyText),
+		).toEqual(expect.arrayContaining(["\u7f13\u5b58", "\u5b58\u6062", "\u6062\u590d"]));
 	});
 
 	test("body han route can shortlist blocks and exact confirm into body evidence", () => {
@@ -210,15 +210,26 @@ describe("coverage lexical v3 han route", () => {
 				bigrams: ["\u661f\u7a79", "\u7a79\u63a5", "\u63a5\u53e3"],
 			}),
 		]);
-		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates).toHaveLength(2);
 		expect(result.rankedCandidates[0].path).toBe("zh/opaque-exact.md");
-		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(1);
+		expect(result.rankedCandidates[1].path).toBe("zh/partial-route.md");
+		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(3);
 		expect(result.rankedCandidates[0].exactUnitCount).toBe(0);
-		expect(result.rankedCandidates[0].realizedFamilies[0]).toEqual(
-			expect.objectContaining({
-				queryUnitText: "\u661f\u7a79\u63a5\u53e3",
-				matchKind: "opaque_exact",
-			}),
+		expect(result.rankedCandidates[0].realizedFamilies).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					queryUnitText: "\u661f\u7a79",
+					matchKind: "opaque_exact",
+				}),
+				expect.objectContaining({
+					queryUnitText: "\u7a79\u63a5",
+					matchKind: "opaque_exact",
+				}),
+				expect.objectContaining({
+					queryUnitText: "\u63a5\u53e3",
+					matchKind: "opaque_exact",
+				}),
+			]),
 		);
 	});
 
@@ -295,7 +306,7 @@ describe("coverage lexical v3 han route", () => {
 
 		const result = engine.search("\u6062\u590d\u6269\u5bb9");
 
-		expect(result.recallState.candidateDocs).toHaveLength(0);
+		expect(result.recallState.candidateDocs).toHaveLength(1);
 		expect(result.rankedCandidates).toHaveLength(0);
 	});
 
@@ -356,7 +367,9 @@ describe("coverage lexical v3 han route", () => {
 				[14, [0, 1, 2, 3, 4, 5, 6, 7, 8]],
 			]),
 			identityWitnessStringIdsByDoc: [],
+			identityWitnessSourceMasksByDoc: [],
 			routeWitnessStringIdsByDoc: [],
+			routeWitnessSourceMasksByDoc: [],
 			headingWitnessStringIdsByDoc: [],
 			bodyWitnessStringIdsByBlock: [],
 		});

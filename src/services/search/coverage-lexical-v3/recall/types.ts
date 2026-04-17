@@ -21,6 +21,21 @@ export type V3QueryUnitFamilyMatches = Readonly<{
 	matches: readonly V3QueryFamilyMatch[];
 }>;
 
+export type V3ResolvedHanSurfaceGroupRescueMode =
+	| "none"
+	| "residual_only"
+	| "whole_group_when_real_miss";
+
+export type V3ResolvedHanSurfaceGroup = Readonly<{
+	surfaceGroupIndex: number;
+	surfaceText: string;
+	realUnitIndices: readonly number[];
+	matchedRealUnitIndices: readonly number[];
+	matchedCharMask: readonly boolean[];
+	rescueMode: V3ResolvedHanSurfaceGroupRescueMode;
+	rescueBigrams: readonly string[];
+}>;
+
 export type V3HanRouteGateStats = Readonly<{
 	matchedBigramCount: number;
 	longestContiguousBigramChain: number;

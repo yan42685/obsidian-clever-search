@@ -95,8 +95,10 @@ export type ResidentHanRouteArena = Readonly<{
 	bodyAdaptivePostings: ResidentAdaptivePostingField;
 	identityWitnessStartByDocId: ResidentIntegerArray;
 	identityWitnessStringIds: ResidentIntegerArray;
+	identityWitnessSourceMaskByDocEntry: Uint8Array;
 	routeWitnessStartByDocId: ResidentIntegerArray;
 	routeWitnessStringIds: ResidentIntegerArray;
+	routeWitnessSourceMaskByDocEntry: Uint8Array;
 	headingWitnessStartByDocId: ResidentIntegerArray;
 	headingWitnessStringIds: ResidentIntegerArray;
 	bodyWitnessStartByBlockId: ResidentIntegerArray;

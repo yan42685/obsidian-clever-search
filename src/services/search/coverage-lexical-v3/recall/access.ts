@@ -143,6 +143,15 @@ export function getDocIdentityHanWitnessStringIds(
 	);
 }
 
+export function getDocIdentityHanWitnessSourceMasks(
+	base: ResidentBase,
+	docId: number,
+): number[] {
+	const start = base.hanRoute.identityWitnessStartByDocId[docId] ?? 0;
+	const end = base.hanRoute.identityWitnessStartByDocId[docId + 1] ?? start;
+	return Array.from(base.hanRoute.identityWitnessSourceMaskByDocEntry.slice(start, end));
+}
+
 export function getDocIdentityHanWitnessTexts(
 	base: ResidentBase,
 	docId: number,
@@ -161,6 +170,15 @@ export function getDocRouteHanWitnessStringIds(
 		base.hanRoute.routeWitnessStringIds,
 		docId,
 	);
+}
+
+export function getDocRouteHanWitnessSourceMasks(
+	base: ResidentBase,
+	docId: number,
+): number[] {
+	const start = base.hanRoute.routeWitnessStartByDocId[docId] ?? 0;
+	const end = base.hanRoute.routeWitnessStartByDocId[docId + 1] ?? start;
+	return Array.from(base.hanRoute.routeWitnessSourceMaskByDocEntry.slice(start, end));
 }
 
 export function getDocRouteHanWitnessTexts(
