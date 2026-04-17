@@ -186,6 +186,12 @@ function createCandidate(
 		strongestHanSurfaceCompletionTier:
 			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
+		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
+		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
+		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
+		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
+		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		realizedFamilies:
@@ -247,14 +253,31 @@ function createCandidate(
 function createCandidateRecall(
 	overrides: Partial<V3CandidateDocRecall>,
 ): V3CandidateDocRecall {
+	const shortlistedBodyBlockIds = overrides.shortlistedBodyBlockIds ?? [0];
 	return {
 		docId: overrides.docId ?? 0,
 		matchedIdentityUnitIndices: overrides.matchedIdentityUnitIndices ?? [],
 		matchedRouteUnitIndices: overrides.matchedRouteUnitIndices ?? [],
 		matchedHeadingUnitIndices: overrides.matchedHeadingUnitIndices ?? [],
-		shortlistedBodyBlockIds: overrides.shortlistedBodyBlockIds ?? [0],
+		shortlistedBodyBlockIds,
 		hanMetadataGateStats: overrides.hanMetadataGateStats ?? null,
 		hanBodyBlockGateStats: overrides.hanBodyBlockGateStats ?? [],
+		hanSurfaceGroupRecalls:
+			overrides.hanSurfaceGroupRecalls ?? [
+				{
+					surfaceGroupIndex: 0,
+					metadataGateStats: null,
+					bodySeedBlockIds: shortlistedBodyBlockIds,
+					bodySeedBlockGates: shortlistedBodyBlockIds.map((blockId) => ({
+						blockId,
+						stats: {
+							matchedBigramCount: 0,
+							longestContiguousBigramChain: 0,
+							bigramCoverageRatio: 0,
+						},
+					})),
+				},
+			],
 	};
 }
 
@@ -276,9 +299,9 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 		const weakHighlights = result.subItems[0]?.weakHighlightRanges?.map((range) =>
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
-		expect(strongHighlights).toContain("\u751f\u547d");
-		expect(weakHighlights).toContain("\u529b");
-		expect(result.candidates[0]?.completedHanSurfaceGroupCount).toBe(0);
+		expect(strongHighlights).toContain(queryText);
+		expect(weakHighlights ?? []).toHaveLength(0);
+		expect(result.candidates[0]?.completedHanSurfaceGroupCount ?? 0).toBe(0);
 	});
 
 	test("same-scope full surface suppresses residual support highlights", () => {
@@ -334,7 +357,72 @@ describe("coverage lexical v3 direct subitems residual support", () => {
 			(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 		);
 		expect(strongHighlights).toContain("\u751f\u547d");
-		expect(weakHighlights).toContain("\u4e4b\u529b");
+		expect(weakHighlights ?? []).toHaveLength(0);
 		expect(strongHighlights).not.toContain(queryText);
+	});
+
+	test("renders weak Han rescue bigrams with the same visible highlight band as strong bigrams", () => {
+		const queryText = "\u8d62\u5b8b\u7a84\u4f53";
+		const queryAnalysis = analyzeQuery(queryText, ["\u8d62\u5b8b", "\u7a84\u4f53"]);
+		const result = buildV3DirectSubitems({
+			snapshotText: "\u8fd9\u662f\u4e00\u6b3e\u8d62\u5b8b\u98ce\u683c\u7684\u7a84\u4f53\u5b57\u3002",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "winsong-condensed.md",
+				realizedFamilies: [
+					{
+						queryUnitIndex: 0,
+						queryUnitText: "\u8d62\u5b8b",
+						querySurfaceGroupIndex: 0,
+						familyId: 0,
+						familyText: "\u8d62\u5b8b",
+						matchKind: "exact",
+						editDistance: 0,
+						identityMetadataSource: "none",
+						routeMetadataSource: "none",
+						metadataPackingSource: "route",
+						inIdentity: false,
+						inRoute: false,
+						inHeading: false,
+						inBestBodyWindow: true,
+						inBodyResidue: false,
+					},
+				],
+				hanStrongRescueGroupCount: 0,
+				hanWeakRescueGroupCount: 1,
+				hanRescueSupportWeightTotal: 0.5,
+				hasOnlyWeakHanRescue: false,
+				hasAnyHanRescueAssessment: true,
+				hanRescueAssessments: [
+					{
+						surfaceGroupIndex: 0,
+						context: "body",
+						rescueMode: "residual_only",
+						strength: "weak",
+						matchedBigramCount: 1,
+						matchedRealAnchorCount: 1,
+						coversStartAnchor: false,
+						coversEndAnchor: true,
+						coversEndpoints: false,
+						preservesSurfaceOrder: true,
+						rankingScore: 0.5,
+						approxMaxAdjacentGap: 2,
+						approxHeadTailSpan: 4,
+						blockIds: [0],
+						witnessKind: "body",
+					},
+				],
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		const snippetText = result.subItems[0]?.snippetText ?? "";
+		const strongHighlights = result.subItems[0]?.highlightRanges?.map((range) =>
+			snippetText.slice(range.start, range.end),
+		);
+		expect(strongHighlights).toContain("\u8d62\u5b8b");
+		expect(strongHighlights).toContain("\u7a84\u4f53");
+		expect(result.subItems[0]?.weakHighlightRanges ?? []).toHaveLength(0);
 	});
 });

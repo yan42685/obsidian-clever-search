@@ -47,7 +47,7 @@ describe("coverage lexical v3 witness split", () => {
 		const engine = new CoverageLexicalV3Engine();
 
 		expect(familyTexts).not.toContain("生命力");
-		expect(residentBase.hanRoute.bodyWitnessStringIds.length).toBeGreaterThan(0);
+		expect(residentBase.hanRoute.bodyWitnessOccurrenceStringIds.length).toBeGreaterThan(0);
 
 		engine.buildResidentBase([document], tokenizer);
 		const result = engine.search("生命力", ["生命"]);
@@ -56,7 +56,7 @@ describe("coverage lexical v3 witness split", () => {
 		expect(result.rankedCandidates[0].path).toBe("zh/life-force.md");
 		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(1);
 		expect(result.rankedCandidates[0].strongestHanSurfaceCompletionTier).toBe(
-			"body_residue",
+			"body_window",
 		);
 	});
 });

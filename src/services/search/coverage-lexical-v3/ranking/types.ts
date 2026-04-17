@@ -1,4 +1,5 @@
 import type { V3QueryFamilyMatchKind } from "../recall";
+import type { HanRescueAssessment } from "../han-rescue";
 import type {
 	IdentityMetadataSource,
 	MetadataPackingSource,
@@ -41,6 +42,8 @@ export type BodyWindowContainer = EvidenceContainer &
 		headingCorroboration: HeadingCorroboration;
 	}>;
 
+export type BodyPrefixSupportKind = "none" | "standalone" | "compound_only" | "mixed";
+
 export type RealizedQueryUnitFamily = Readonly<{
 	queryUnitIndex: number;
 	queryUnitText: string;
@@ -52,6 +55,7 @@ export type RealizedQueryUnitFamily = Readonly<{
 	identityMetadataSource: IdentityMetadataSource;
 	routeMetadataSource: RouteMetadataSource;
 	metadataPackingSource: MetadataPackingSource;
+	bodyPrefixSupportKind: BodyPrefixSupportKind;
 	inIdentity: boolean;
 	inRoute: boolean;
 	inHeading: boolean;
@@ -109,7 +113,14 @@ export type EvidencePackingProfile = Readonly<{
 	hanSurfaceCompletionTierScoreTotal: number;
 	strongestHanSurfaceCompletionTier: HanSurfaceCompletionTier;
 	hanSurfaceCompletionGroups: readonly HanSurfaceCompletionGroupResult[];
+	hanStrongRescueGroupCount: number;
+	hanWeakRescueGroupCount: number;
+	hanRescueSupportWeightTotal: number;
+	hasOnlyWeakHanRescue: boolean;
+	hasAnyHanRescueAssessment: boolean;
+	hanRescueAssessments: readonly HanRescueAssessment[];
 	prefixCompletionGainTotal: number;
+	compoundBackedPrefixCount: number;
 	compoundPrefixCount: number;
 	fuzzyUnitCount: number;
 	fuzzyEditDistanceTotal: number;

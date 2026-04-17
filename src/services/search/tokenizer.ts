@@ -76,7 +76,7 @@ export class Tokenizer {
 
 				const words = segment.split(SEPERATOR_REGEX);
 				for (const word of words) {
-					const normalizedWord = word.toLowerCase();
+					const normalizedWord = normalizeNonChineseToken(word);
 					if (
 						word.length < 2 || // don't index single char for small charset
 						(this.setting.enableStopWordsEn &&
@@ -84,15 +84,16 @@ export class Tokenizer {
 					) {
 						continue;
 					}
-					tokens.push(word);
+					tokens.push(normalizedWord);
 
 					if (word.length > 3) {
 						const subwords = word
 							.replace(HYPHEN_AND_CAMEL_CASE_REGEX, "$1 ")
 							.split(" ");
 						for (const subword of subwords) {
-							if (subword.length > 1) {
-								tokens.push(subword);
+							const normalizedSubword = normalizeNonChineseToken(subword);
+							if (normalizedSubword.length > 1) {
+								tokens.push(normalizedSubword);
 							}
 						}
 					}
@@ -230,7 +231,7 @@ export class Tokenizer {
 		mode: "index" | "search",
 		output: Array<{ token: string; start: number; end: number }>,
 	): void {
-		const normalizedWord = word.toLowerCase();
+		const normalizedWord = normalizeNonChineseToken(word);
 		if (
 			word.length < 2 ||
 			(this.setting.enableStopWordsEn && this.stopWordsEn?.has(normalizedWord))
@@ -238,7 +239,7 @@ export class Tokenizer {
 			return;
 		}
 		output.push({
-			token: word,
+			token: normalizedWord,
 			start: wordStart,
 			end: wordStart + word.length,
 		});
@@ -246,8 +247,12 @@ export class Tokenizer {
 			return;
 		}
 		for (const subword of splitWordWithOffsets(word, wordStart)) {
-			if (subword.token.length > 1) {
-				output.push(subword);
+			const normalizedSubword = normalizeNonChineseToken(subword.token);
+			if (normalizedSubword.length > 1) {
+				output.push({
+					...subword,
+					token: normalizedSubword,
+				});
 			}
 		}
 	}
@@ -261,6 +266,10 @@ function sanitizeSegmentedToken(token: string): string | null {
 	return SEGMENTED_TOKEN_HAS_LEXICAL_CHAR_REGEX.test(normalized)
 		? normalized
 		: null;
+}
+
+function normalizeNonChineseToken(token: string): string {
+	return token.toLowerCase().normalize("NFKC");
 }
 
 function splitWordWithOffsets(

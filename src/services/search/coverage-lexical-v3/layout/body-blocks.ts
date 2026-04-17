@@ -6,11 +6,21 @@ type BodyBlockBuildInput = Readonly<{
 	ordinal: number;
 	exactTapeStart: number;
 	exactTapeCount: number;
+	familySupportFamilyIds: readonly number[];
+	familySupportMasks: readonly number[];
 }>;
 
 export function buildBodyBlockArena(
 	blocks: readonly BodyBlockBuildInput[],
 ): ResidentBodyBlockArena {
+	const familySupportStarts: number[] = [0];
+	const familySupportFamilyIds: number[] = [];
+	const familySupportMasks: number[] = [];
+	for (const block of blocks) {
+		familySupportFamilyIds.push(...block.familySupportFamilyIds);
+		familySupportMasks.push(...block.familySupportMasks);
+		familySupportStarts.push(familySupportFamilyIds.length);
+	}
 	return {
 		blockCount: blocks.length,
 		docIdByBlockId: buildIntegerArray(blocks.map((block) => block.docId)),
@@ -21,6 +31,9 @@ export function buildBodyBlockArena(
 		exactTapeCountByBlockId: buildIntegerArray(
 			blocks.map((block) => block.exactTapeCount),
 		),
+		familySupportStartByBlockId: buildIntegerArray(familySupportStarts),
+		familySupportFamilyIds: buildIntegerArray(familySupportFamilyIds),
+		familySupportMaskByEntry: Uint8Array.from(familySupportMasks),
 	};
 }
 
@@ -31,6 +44,9 @@ export function estimateBodyBlockBytes(
 		arena.docIdByBlockId.byteLength +
 		arena.blockOrdinalByBlockId.byteLength +
 		arena.exactTapeStartByBlockId.byteLength +
-		arena.exactTapeCountByBlockId.byteLength
+		arena.exactTapeCountByBlockId.byteLength +
+		arena.familySupportStartByBlockId.byteLength +
+		arena.familySupportFamilyIds.byteLength +
+		arena.familySupportMaskByEntry.byteLength
 	);
 }

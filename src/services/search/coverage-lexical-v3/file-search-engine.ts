@@ -137,15 +137,22 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const searchTerms = this.getQueryTerms(queryText);
 		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
 		const engineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const result = this.engine.search(queryText, searchTerms);
+		const result = this.engine.search(queryText, searchTerms, {
+			allowPrefixMatch: request.isPrefixMatch,
+			allowFuzzyMatch: request.isFuzzy,
+		});
 		const engineMs = shouldLogDebug ? nowDebugMs() - engineStartedAtMs : 0;
 		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const refinedCandidates = await this.refineHanSurfaceCompletion(result);
 		const refineMs = shouldLogDebug ? nowDebugMs() - refineStartedAtMs : 0;
+		const visibilityFilteredCandidates =
+			request.hideWeaklyRelatedResults === true
+				? refinedCandidates.filter((candidate) => !candidate.hasOnlyWeakHanRescue)
+				: refinedCandidates;
 		const pruneStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const weaklyPrunedCandidates = request.hideWeaklyRelatedResults
-			? filterToTopCoverageGateBand(refinedCandidates)
-			: refinedCandidates;
+			? filterToTopCoverageGateBand(visibilityFilteredCandidates)
+			: visibilityFilteredCandidates;
 		const pruneMs = shouldLogDebug ? nowDebugMs() - pruneStartedAtMs : 0;
 		const visibleStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const visibleCandidates = applyHanSurfaceCompletionDominance(
@@ -190,6 +197,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				maxItemResults: request.maxItemResults,
 				candidateDocCount: result.recallState.candidateDocs.length,
 				refinedCandidateCount: refinedCandidates.length,
+				visibilityFilteredCandidateCount: visibilityFilteredCandidates.length,
 				weaklyPrunedCandidateCount: weaklyPrunedCandidates.length,
 				visibleCandidateCount: visibleCandidates.length,
 				returnedCandidateCount: matchedFiles.length,

@@ -2,15 +2,24 @@ import type { RealizedQueryUnitFamily } from "../ranking/types";
 import type { V3QueryAnalysis } from "../query/analysis";
 import type {
 	V3ResolvedHanSurfaceGroup,
+	V3QueryUnitFamilyMatches,
 } from "./types";
 
 /**
- * Query-side Han rescue planning. Suitable for recall admission only.
- * Do not treat this as candidate-final rescue coverage.
+ * Family-aware Han rescue planning for recall admission. This is the query-side
+ * bridge between tokenizer proposals and the resident family lexicon: once a
+ * Han real unit has no family match at all, recall falls back to whole-group
+ * bigrams instead of trusting the query-time cover.
  */
-export function planHanSurfaceGroupRecalls(
+export function planHanSurfaceGroupRecallsAfterFamilyLookup(
 	queryAnalysis: V3QueryAnalysis,
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 ): V3ResolvedHanSurfaceGroup[] {
+	const matchedQueryUnitIndexSet = new Set<number>(
+		unitFamilyMatches
+			.filter((unitMatches) => unitMatches.matches.length > 0)
+			.map((unitMatches) => unitMatches.queryUnitIndex),
+	);
 	const out: V3ResolvedHanSurfaceGroup[] = [];
 	for (const group of queryAnalysis.surfaceGroups) {
 		if (group.kind !== "han") {
@@ -28,32 +37,48 @@ export function planHanSurfaceGroupRecalls(
 				surfaceText: group.text,
 				realUnitIndices,
 				matchedRealUnitIndices: [],
-				matchedCharMask: group.coveredCharMask,
+				matchedCharMask: Array.from({ length: Array.from(group.text).length }, () => false),
 				rescueMode: "none",
-				rescueBigrams: group.queryResidualUniqueBigrams,
+				rescueBigrams: group.hanBigramTexts,
 			});
 			continue;
 		}
-		if (group.queryResidualUniqueBigrams.length > 0) {
+		const matchedRealUnitIndices = realPrimaryUnits
+			.filter((unit) => matchedQueryUnitIndexSet.has(unit.index))
+			.map((unit) => unit.index);
+		if (matchedRealUnitIndices.length === 0) {
 			out.push({
 				surfaceGroupIndex: group.index,
 				surfaceText: group.text,
 				realUnitIndices,
-				matchedRealUnitIndices: realUnitIndices,
-				matchedCharMask: group.coveredCharMask,
-				rescueMode: "residual_only",
-				rescueBigrams: group.queryResidualUniqueBigrams,
+				matchedRealUnitIndices,
+				matchedCharMask: Array.from({ length: Array.from(group.text).length }, () => false),
+				rescueMode: group.hanBigramTexts.length > 0 ? "whole_group_when_real_miss" : "none",
+				rescueBigrams: group.hanBigramTexts,
 			});
 			continue;
 		}
+		const matchedRealUnitTexts = realPrimaryUnits
+			.filter((unit) => matchedQueryUnitIndexSet.has(unit.index))
+			.map((unit) => unit.text);
+		const matchedCharMask = markCoveredHanChars(
+			group.text,
+			Array.from(group.text).length,
+			matchedRealUnitTexts,
+		);
+		const rescueBigrams = collectUncoveredUniqueBigrams(
+			group.text,
+			matchedCharMask,
+			group.hanBigramTexts,
+		);
 		out.push({
 			surfaceGroupIndex: group.index,
 			surfaceText: group.text,
 			realUnitIndices,
-			matchedRealUnitIndices: [],
-			matchedCharMask: Array.from({ length: Array.from(group.text).length }, () => false),
-			rescueMode: group.hanBigramTexts.length > 0 ? "whole_group_when_real_miss" : "none",
-			rescueBigrams: group.hanBigramTexts,
+			matchedRealUnitIndices,
+			matchedCharMask,
+			rescueMode: rescueBigrams.length > 0 ? "residual_only" : "none",
+			rescueBigrams,
 		});
 	}
 	return out;

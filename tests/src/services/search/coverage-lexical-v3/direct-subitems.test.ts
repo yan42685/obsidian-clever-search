@@ -80,6 +80,11 @@ function createResidentBaseForBlockCounts(
 		},
 		exactTapes: {
 			familyIds: new Uint32Array(),
+			positionEncodingByBlockId: new Uint8Array(),
+			positionStartByBlockId: new Uint32Array(),
+			positionDeltaU8Tape: new Uint8Array(),
+			positionDeltaU16Tape: new Uint16Array(),
+			positionDeltaU32Tape: new Uint32Array(),
 		},
 		hanRoute: {
 			bigramIds: new Uint32Array(),
@@ -94,8 +99,13 @@ function createResidentBaseForBlockCounts(
 			routeWitnessStringIds: new Uint32Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
 			headingWitnessStringIds: new Uint32Array(),
-			bodyWitnessStartByBlockId: new Uint32Array(),
-			bodyWitnessStringIds: new Uint32Array(),
+			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(),
+			bodyWitnessOccurrenceStringIds: new Uint32Array(),
+			bodyWitnessPositionEncodingByBlockId: new Uint8Array(),
+			bodyWitnessPositionStartByBlockId: new Uint32Array(),
+			bodyWitnessPositionDeltaU8Tape: new Uint8Array(),
+			bodyWitnessPositionDeltaU16Tape: new Uint16Array(),
+			bodyWitnessPositionDeltaU32Tape: new Uint32Array(),
 		},
 		metrics: {
 			docArenaBytes: 0,
@@ -187,6 +197,12 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
 		strongestHanSurfaceCompletionTier: overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
+		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
+		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
+		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
+		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
+		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
@@ -289,11 +305,11 @@ function extractHighlightTexts(result: ReturnType<typeof buildV3DirectSubitems>)
 describe("coverage lexical v3 direct subitems", () => {
 	test("prefers a full Han surface snippet over a shorter real term", () => {
 		const queryAnalysis = createQueryAnalysis({
-			queryText: "生命力",
+			queryText: "\u751f\u547d\u529b",
 			surfaceGroups: [
 				{
 					index: 0,
-					text: "生命力",
+					text: "\u751f\u547d\u529b",
 					kind: "han",
 					hanBigramTexts: ["生命", "命力"],
 					coveredCharMask: [true, true, false],
@@ -318,7 +334,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		expect(result.candidates[0]?.confirmedSurfaceGroupCount).toBe(1);
-		expect(extractHighlightTexts(result)).toContain("生命力");
+		expect(extractHighlightTexts(result)).toContain("\u751f\u547d\u529b");
 	});
 
 	test("whole-group Han rescue still yields a direct subitem when query-time residual bigrams are empty", () => {
@@ -370,7 +386,7 @@ describe("coverage lexical v3 direct subitems", () => {
 
 	test("keeps higher real coverage ahead of a full Han surface snippet", () => {
 		const queryAnalysis = createQueryAnalysis({
-			queryText: "abc 生命力",
+			queryText: "abc \u751f\u547d\u529b",
 			surfaceGroups: [
 				{
 					index: 0,
@@ -383,7 +399,7 @@ describe("coverage lexical v3 direct subitems", () => {
 				},
 				{
 					index: 1,
-					text: "生命力",
+					text: "\u751f\u547d\u529b",
 					kind: "han",
 					hanBigramTexts: ["生命", "命力"],
 					coveredCharMask: [true, true, false],
@@ -446,11 +462,11 @@ describe("coverage lexical v3 direct subitems", () => {
 
 	test("materializes a body snippet from unresolved bigrams even without a full surface span", () => {
 		const queryAnalysis = createQueryAnalysis({
-			queryText: "生命力",
+			queryText: "\u751f\u547d\u529b",
 			surfaceGroups: [
 				{
 					index: 0,
-					text: "生命力",
+					text: "\u751f\u547d\u529b",
 					kind: "han",
 					hanBigramTexts: ["生命", "命力"],
 					coveredCharMask: [true, false, false],
@@ -493,11 +509,11 @@ describe("coverage lexical v3 direct subitems", () => {
 
 	test("does not fabricate a full Han surface when only partial Han evidence exists", () => {
 		const queryAnalysis = createQueryAnalysis({
-			queryText: "生命力",
+			queryText: "\u751f\u547d\u529b",
 			surfaceGroups: [
 				{
 					index: 0,
-					text: "生命力",
+					text: "\u751f\u547d\u529b",
 					kind: "han",
 					hanBigramTexts: ["生命", "命力"],
 					coveredCharMask: [true, true, false],
@@ -525,7 +541,7 @@ describe("coverage lexical v3 direct subitems", () => {
 
 		expect(result.candidates[0]?.confirmedSurfaceGroupCount).toBe(0);
 		expect(extractHighlightTexts(result)).toContain("生命");
-		expect(extractHighlightTexts(result)).not.toContain("生命力");
+		expect(extractHighlightTexts(result)).not.toContain("\u751f\u547d\u529b");
 	});
 
 	test("splits distant latin evidence when the weighted gap exceeds the local budget", () => {
@@ -676,11 +692,11 @@ describe("coverage lexical v3 direct subitems", () => {
 
 	test("hideWeaklyRelatedResults drops same-query weaker snippets once a confirmed full surface wins", () => {
 		const queryAnalysis = createQueryAnalysis({
-			queryText: "生命力",
+			queryText: "\u751f\u547d\u529b",
 			surfaceGroups: [
 				{
 					index: 0,
-					text: "生命力",
+					text: "\u751f\u547d\u529b",
 					kind: "han",
 					hanBigramTexts: ["生命", "命力"],
 					coveredCharMask: [true, true, false],
@@ -706,7 +722,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		expect(result.subItems).toHaveLength(1);
-		expect(extractHighlightTexts(result)).toContain("生命力");
+		expect(extractHighlightTexts(result)).toContain("\u751f\u547d\u529b");
 	});
 
 	test("returns no body snippet when there is no legal local body evidence", () => {

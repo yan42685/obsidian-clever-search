@@ -102,16 +102,32 @@ function resolveHighlightRanges(
 function collapseSurfaceDisplayAtoms(
 	atoms: readonly V3DirectSubitemAtom[],
 ): V3DirectSubitemAtom[] {
-	const realAtoms = atoms.filter(
-		(atom) =>
-			atom.evidenceKind !== "confirmed_surface" &&
-			atom.evidenceKind !== "opaque_bigram",
-	);
+	const confirmedSurfaceGroups = new Set<number>();
+	for (const atom of atoms) {
+		if (
+			atom.evidenceKind === "confirmed_surface" &&
+			atom.surfaceGroupIndex != null
+		) {
+			confirmedSurfaceGroups.add(atom.surfaceGroupIndex);
+		}
+	}
+	const displayAtoms = atoms.filter((atom) => {
+		if (atom.evidenceKind === "confirmed_surface") {
+			return false;
+		}
+		if (
+			atom.evidenceKind === "opaque_bigram" &&
+			atom.surfaceGroupIndex != null &&
+			confirmedSurfaceGroups.has(atom.surfaceGroupIndex)
+		) {
+			return false;
+		}
+		return true;
+	});
 	const bestSurfaceByGroup = new Map<number, V3DirectSubitemAtom>();
 	for (const atom of atoms) {
 		if (
-			(atom.evidenceKind !== "confirmed_surface" &&
-				atom.evidenceKind !== "opaque_bigram") ||
+			atom.evidenceKind !== "confirmed_surface" ||
 			atom.surfaceGroupIndex == null
 		) {
 			continue;
@@ -125,7 +141,7 @@ function collapseSurfaceDisplayAtoms(
 			bestSurfaceByGroup.set(atom.surfaceGroupIndex, atom);
 		}
 	}
-	return [...realAtoms, ...bestSurfaceByGroup.values()].sort(
+	return [...displayAtoms, ...bestSurfaceByGroup.values()].sort(
 		(left, right) => left.start - right.start || left.end - right.end,
 	);
 }

@@ -6,6 +6,7 @@ import type { IndexedDocument } from "src/globals/search-types";
 import { CoverageLexicalV3FileSearchEngine } from "src/services/search/coverage-lexical-v3/file-search-engine";
 import type { CoverageLexicalV3SearchResult } from "src/services/search/coverage-lexical-v3/engine";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
+import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
 import type {
 	BodyWindowContainer,
 	EvidencePackingProfile,
@@ -81,6 +82,12 @@ function createPackingProfile(
 				tier: "body_residue",
 			},
 		],
+		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
+		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
+		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
+		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
+		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
+		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		realizedFamilies: overrides.realizedFamilies ?? [
@@ -261,6 +268,11 @@ function createResidentBase(): ResidentBase {
 		},
 		exactTapes: {
 			familyIds: new Uint32Array(),
+			positionEncodingByBlockId: new Uint8Array(),
+			positionStartByBlockId: new Uint32Array(),
+			positionDeltaU8Tape: new Uint8Array(),
+			positionDeltaU16Tape: new Uint16Array(),
+			positionDeltaU32Tape: new Uint32Array(),
 		},
 		hanRoute: {
 			bigramIds: new Uint32Array(),
@@ -275,8 +287,13 @@ function createResidentBase(): ResidentBase {
 			routeWitnessStringIds: new Uint32Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
 			headingWitnessStringIds: new Uint32Array(),
-			bodyWitnessStartByBlockId: new Uint32Array(),
-			bodyWitnessStringIds: new Uint32Array(),
+			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(),
+			bodyWitnessOccurrenceStringIds: new Uint32Array(),
+			bodyWitnessPositionEncodingByBlockId: new Uint8Array(),
+			bodyWitnessPositionStartByBlockId: new Uint32Array(),
+			bodyWitnessPositionDeltaU8Tape: new Uint8Array(),
+			bodyWitnessPositionDeltaU16Tape: new Uint16Array(),
+			bodyWitnessPositionDeltaU32Tape: new Uint32Array(),
 		},
 		metrics: {
 			docArenaBytes: 0,
@@ -371,10 +388,13 @@ function withBodyWitnessTexts(
 ): ResidentBase {
 	const uniqueStrings = new Map<string, number>([["", 0]]);
 	const orderedStrings = [""];
-	const bodyWitnessStartByBlockId: number[] = [];
-	const bodyWitnessStringIds: number[] = [];
+	const bodyWitnessOccurrenceStartByBlockId: number[] = [];
+	const bodyWitnessOccurrenceStringIds: number[] = [];
+	const bodyWitnessStartOffsetsByBlock = bodyWitnessTextsByBlock.map((texts) =>
+		texts.map((_, index) => index),
+	);
 	for (let blockId = 0; blockId < base.bodyBlocks.blockCount; blockId += 1) {
-		bodyWitnessStartByBlockId.push(bodyWitnessStringIds.length);
+		bodyWitnessOccurrenceStartByBlockId.push(bodyWitnessOccurrenceStringIds.length);
 		for (const text of bodyWitnessTextsByBlock[blockId] ?? []) {
 			let stringId = uniqueStrings.get(text);
 			if (stringId == null) {
@@ -382,10 +402,15 @@ function withBodyWitnessTexts(
 				uniqueStrings.set(text, stringId);
 				orderedStrings.push(text);
 			}
-			bodyWitnessStringIds.push(stringId);
+			bodyWitnessOccurrenceStringIds.push(stringId);
 		}
 	}
-	bodyWitnessStartByBlockId.push(bodyWitnessStringIds.length);
+	bodyWitnessOccurrenceStartByBlockId.push(bodyWitnessOccurrenceStringIds.length);
+	const positionLane = buildBlockPositionLane(
+		Array.from({ length: base.bodyBlocks.blockCount }, (_, blockId) =>
+			bodyWitnessStartOffsetsByBlock[blockId] ?? [],
+		),
+	);
 	const offsets: number[] = [];
 	const lengths: number[] = [];
 	let stringArenaText = "";
@@ -404,8 +429,13 @@ function withBodyWitnessTexts(
 		},
 		hanRoute: {
 			...base.hanRoute,
-			bodyWitnessStartByBlockId: new Uint32Array(bodyWitnessStartByBlockId),
-			bodyWitnessStringIds: new Uint32Array(bodyWitnessStringIds),
+			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(bodyWitnessOccurrenceStartByBlockId),
+			bodyWitnessOccurrenceStringIds: new Uint32Array(bodyWitnessOccurrenceStringIds),
+			bodyWitnessPositionEncodingByBlockId: positionLane.positionEncodingByBlockId,
+			bodyWitnessPositionStartByBlockId: positionLane.positionStartByBlockId,
+			bodyWitnessPositionDeltaU8Tape: positionLane.positionDeltaU8Tape,
+			bodyWitnessPositionDeltaU16Tape: positionLane.positionDeltaU16Tape,
+			bodyWitnessPositionDeltaU32Tape: positionLane.positionDeltaU32Tape,
 		},
 	};
 }
@@ -585,7 +615,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/lifeforce.md", "缓存恢复步骤\n\n热启动恢复记录。"]]),
+			new Map([["notes/lifeforce.md", "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\n\n\u70ed\u542f\u52a8\u6062\u590d\u8bb0\u5f55\u3002"]]),
 		);
 		const readCurrentTexts = jest.fn();
 		(
@@ -714,7 +744,7 @@ describe("coverage lexical v3 file search engine", () => {
 			],
 		}));
 		const readIndexedTexts = jest.fn(async () =>
-			new Map([["notes/life-force.md", "缓存恢复步骤说明\n\n缓存恢复步骤用于热启动恢复。"]]),
+			new Map([["notes/life-force.md", "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\u8bf4\u660e\n\n\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\u7528\u4e8e\u70ed\u542f\u52a8\u6062\u590d\u3002"]]),
 		);
 		(
 			engine as unknown as {
@@ -1004,7 +1034,7 @@ describe("coverage lexical v3 file search engine", () => {
 		}));
 		const readIndexedTexts = jest.fn(async () => new Map<string, string>());
 		const readCurrentTexts = jest.fn(async () =>
-			new Map([["notes/missing-snapshot.md", "缓存恢复步骤\n\n回放检查与热启动恢复。"]]),
+			new Map([["notes/missing-snapshot.md", "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\n\n\u56de\u653e\u68c0\u67e5\u4e0e\u70ed\u542f\u52a8\u6062\u590d\u3002"]]),
 		);
 		(
 			engine as unknown as {

@@ -106,13 +106,18 @@ export function buildResidentBaseMetrics(
 		input.bodyFamilyPosting.deltaTapeStarts.byteLength +
 		input.bodyBlocks.exactTapeStartByBlockId.byteLength +
 		input.bodyBlocks.exactTapeCountByBlockId.byteLength +
+		input.bodyBlocks.familySupportStartByBlockId.byteLength +
+		input.exactTapes.positionEncodingByBlockId.byteLength +
+		input.exactTapes.positionStartByBlockId.byteLength +
 		input.hanRoute.metadataPostingStarts.byteLength +
 		input.hanRoute.bodyAdaptivePostings.smallValueStarts.byteLength +
 		input.hanRoute.bodyAdaptivePostings.deltaTapeStarts.byteLength +
 		input.hanRoute.identityWitnessStartByDocId.byteLength +
 		input.hanRoute.routeWitnessStartByDocId.byteLength +
 		input.hanRoute.headingWitnessStartByDocId.byteLength +
-		input.hanRoute.bodyWitnessStartByBlockId.byteLength;
+		input.hanRoute.bodyWitnessOccurrenceStartByBlockId.byteLength +
+		input.hanRoute.bodyWitnessPositionEncodingByBlockId.byteLength +
+		input.hanRoute.bodyWitnessPositionStartByBlockId.byteLength;
 	const idPayloadBytes =
 		input.familyLexicon.familyStringIds.byteLength +
 		input.familyLexicon.familyFlagsByFamilyId.byteLength +
@@ -135,7 +140,12 @@ export function buildResidentBaseMetrics(
 		input.bodyFamilyPosting.postingTape.byteLength +
 		input.bodyBlocks.docIdByBlockId.byteLength +
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
+		input.bodyBlocks.familySupportFamilyIds.byteLength +
+		input.bodyBlocks.familySupportMaskByEntry.byteLength +
 		input.exactTapes.familyIds.byteLength +
+		input.exactTapes.positionDeltaU8Tape.byteLength +
+		input.exactTapes.positionDeltaU16Tape.byteLength +
+		input.exactTapes.positionDeltaU32Tape.byteLength +
 		input.hanRoute.bigramIds.byteLength +
 		input.hanRoute.metadataDocIds.byteLength +
 		input.hanRoute.bodyAdaptivePostings.singletonTermIds.byteLength +
@@ -150,7 +160,10 @@ export function buildResidentBaseMetrics(
 		input.hanRoute.identityWitnessStringIds.byteLength +
 		input.hanRoute.routeWitnessStringIds.byteLength +
 		input.hanRoute.headingWitnessStringIds.byteLength +
-		input.hanRoute.bodyWitnessStringIds.byteLength;
+		input.hanRoute.bodyWitnessOccurrenceStringIds.byteLength +
+		input.hanRoute.bodyWitnessPositionDeltaU8Tape.byteLength +
+		input.hanRoute.bodyWitnessPositionDeltaU16Tape.byteLength +
+		input.hanRoute.bodyWitnessPositionDeltaU32Tape.byteLength;
 	const residentBytes =
 		docArenaBytes +
 		stringArenaBytes +
@@ -208,6 +221,12 @@ export function buildResidentBaseMetrics(
 			familyPostingBreakdown.deltaPostingTapeBytes,
 		bodyBlockBytes,
 		exactTapeBytes,
+		exactTapePositionBytes:
+			input.exactTapes.positionEncodingByBlockId.byteLength +
+			input.exactTapes.positionStartByBlockId.byteLength +
+			input.exactTapes.positionDeltaU8Tape.byteLength +
+			input.exactTapes.positionDeltaU16Tape.byteLength +
+			input.exactTapes.positionDeltaU32Tape.byteLength,
 		hanRouteBytes,
 		hanRouteSharedBigramIdsBytes: hanRouteBreakdown.sharedBigramIdsBytes,
 		hanRouteMetadataHanPostingsBytes:
@@ -247,6 +266,7 @@ export function buildResidentBaseMetrics(
 			hanRouteBreakdown.bodyHanDeltaPostingTapeBytes,
 		hanRouteMetadataWitnessBytes: hanRouteBreakdown.metadataWitnessBytes,
 		hanRouteBodyWitnessBytes: hanRouteBreakdown.bodyWitnessBytes,
+		hanRouteBodyWitnessPositionBytes: hanRouteBreakdown.bodyWitnessPositionBytes,
 		scaffoldBytes,
 		countBytes,
 		idPayloadBytes,
@@ -362,6 +382,22 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 			),
 			describeIntegerSection("exactTapes.familyIds", base.exactTapes.familyIds),
 			describeIntegerSection(
+				"exactTapes.positionStartByBlockId",
+				base.exactTapes.positionStartByBlockId,
+			),
+			describeIntegerSection(
+				"exactTapes.positionDeltaU8Tape",
+				base.exactTapes.positionDeltaU8Tape,
+			),
+			describeIntegerSection(
+				"exactTapes.positionDeltaU16Tape",
+				base.exactTapes.positionDeltaU16Tape,
+			),
+			describeIntegerSection(
+				"exactTapes.positionDeltaU32Tape",
+				base.exactTapes.positionDeltaU32Tape,
+			),
+			describeIntegerSection(
 				"hanRoute.metadata.starts",
 				base.hanRoute.metadataPostingStarts,
 				sentinelStartsEncodingFlag(),
@@ -415,6 +451,31 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 			describeIntegerSection(
 				"hanRoute.hanBigramPosting.postingTape",
 				base.hanRoute.bodyAdaptivePostings.postingTape,
+			),
+			describeIntegerSection(
+				"hanRoute.bodyWitnessOccurrenceStartByBlockId",
+				base.hanRoute.bodyWitnessOccurrenceStartByBlockId,
+				sentinelStartsEncodingFlag(),
+			),
+			describeIntegerSection(
+				"hanRoute.bodyWitnessOccurrenceStringIds",
+				base.hanRoute.bodyWitnessOccurrenceStringIds,
+			),
+			describeIntegerSection(
+				"hanRoute.bodyWitnessPositionStartByBlockId",
+				base.hanRoute.bodyWitnessPositionStartByBlockId,
+			),
+			describeIntegerSection(
+				"hanRoute.bodyWitnessPositionDeltaU8Tape",
+				base.hanRoute.bodyWitnessPositionDeltaU8Tape,
+			),
+			describeIntegerSection(
+				"hanRoute.bodyWitnessPositionDeltaU16Tape",
+				base.hanRoute.bodyWitnessPositionDeltaU16Tape,
+			),
+			describeIntegerSection(
+				"hanRoute.bodyWitnessPositionDeltaU32Tape",
+				base.hanRoute.bodyWitnessPositionDeltaU32Tape,
 			),
 		],
 		indexedSurfaceUtf8Bytes: metrics.indexedSurfaceUtf8Bytes,

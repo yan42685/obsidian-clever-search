@@ -1,12 +1,19 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
+import { buildIntegerArray } from "src/services/search/coverage-lexical-v3/layout/integer-arrays";
+import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
+import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { describeResidentBase } from "src/services/search/coverage-lexical-v3/metrics";
 import {
 	IDENTITY_METADATA_SOURCE_ALIAS,
 	IDENTITY_METADATA_SOURCE_BASENAME,
 } from "src/services/search/coverage-lexical-v3/metadata-source";
 import {
+	getBodyBlockFamilySupportEntries,
+	getBodyBlockFamilySupportMask,
 	getDocPath,
+	getBodyBlockExactTokenPositions,
+	getBodyBlockHanWitnessOccurrences,
 	getDocIdentityFamilyIds,
 	getDocIdentitySourceMasks,
 	getFamilyText,
@@ -141,11 +148,11 @@ describe("coverage lexical v3 resident base", () => {
 	test("builds a single han document", () => {
 		const residentBase = buildResidentBase([
 			createDocument({
-				path: "技术/缓存恢复.md",
-				basename: "缓存恢复",
-				folder: "技术",
-				headings: "故障回放",
-				content: "缓存恢复步骤\n\n回放检查与热启动恢复。",
+				path: "\u6280\u672f/\u7f13\u5b58\u6062\u590d.md",
+				basename: "\u7f13\u5b58\u6062\u590d",
+				folder: "\u6280\u672f",
+				headings: "\u6545\u969c\u56de\u653e",
+				content: "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\n\n\u56de\u653e\u68c0\u67e5\u4e0e\u70ed\u542f\u52a8\u6062\u590d\u3002",
 			}),
 		]);
 
@@ -192,7 +199,8 @@ describe("coverage lexical v3 resident base", () => {
 				residentBase.metrics.hanRouteMetadataHanPostingsBytes +
 				residentBase.metrics.hanRouteHanBigramPostingBytes +
 				residentBase.metrics.hanRouteMetadataWitnessBytes +
-				residentBase.metrics.hanRouteBodyWitnessBytes,
+				residentBase.metrics.hanRouteBodyWitnessBytes +
+				residentBase.metrics.hanRouteBodyWitnessPositionBytes,
 		).toBe(residentBase.metrics.hanRouteBytes);
 		expect(
 			residentBase.metrics.stringArenaPathBytes +
@@ -210,6 +218,240 @@ describe("coverage lexical v3 resident base", () => {
 		expect(summary["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
 	});
 
+	test("stores real exact and witness positions in resident block lanes", () => {
+		const tokenizer = (text: string) =>
+			text === "\u751f\u547d\u529b\u6838\u5fc3" ? ["\u751f\u547d", "\u529b\u6838", "\u6838\u5fc3"] : [];
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "zh/positions.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				content: "\u524d\u7f00 \u751f\u547d\u529b\u6838\u5fc3 \u751f\u547d",
+			}),
+		], tokenizer);
+
+		expect(getBodyBlockExactTokenPositions(residentBase, 0)).toEqual([3, 5, 6]);
+		expect(getBodyBlockHanWitnessOccurrences(residentBase, 0)).toEqual([
+			expect.objectContaining({ start: 0 }),
+			expect.objectContaining({ start: 3 }),
+			expect.objectContaining({ start: 9 }),
+		]);
+		expect(residentBase.metrics.exactTapePositionBytes).toBeGreaterThan(0);
+		expect(residentBase.metrics.hanRouteBodyWitnessPositionBytes).toBeGreaterThan(0);
+	});
+
+	test("aggregates standalone and compound latin support separately per block family", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "latin/mixed-support.md",
+				basename: "notes",
+				folder: "latin",
+				content: "prefer prefer-cache",
+			}),
+		]);
+		const familyIdsByText = new Map(
+			getBodyBlockFamilySupportEntries(residentBase, 0).map((entry) => [
+				getFamilyText(residentBase, entry.familyId),
+				entry.familyId,
+			]),
+		);
+		const preferFamilyId = familyIdsByText.get("prefer");
+		const compoundFamilyId = familyIdsByText.get("prefer-cache");
+
+		expect(preferFamilyId).toBeDefined();
+		expect(compoundFamilyId).toBeDefined();
+		expect(getBodyBlockFamilySupportMask(residentBase, 0, preferFamilyId ?? -1)).toBe(3);
+		expect(getBodyBlockFamilySupportMask(residentBase, 0, compoundFamilyId ?? -1)).toBe(1);
+	});
+
+	test("reads exact and witness positions for block ids above uint16 range", () => {
+		const highBlockId = 70000;
+		const blockCount = highBlockId + 1;
+		const exactOffsetsByBlock = Array.from({ length: blockCount }, () => [] as number[]);
+		exactOffsetsByBlock[highBlockId] = [9, 320];
+		const witnessOffsetsByBlock = Array.from({ length: blockCount }, () => [] as number[]);
+		witnessOffsetsByBlock[highBlockId] = [4, 70004];
+		const exactPositionLane = buildBlockPositionLane(exactOffsetsByBlock);
+		const witnessPositionLane = buildBlockPositionLane(witnessOffsetsByBlock);
+		const witnessStarts = new Array(blockCount + 1).fill(0);
+		witnessStarts[blockCount] = 2;
+		const residentBase = {
+			version: 1,
+			stringArena: {
+				text: "ab",
+				offsets: buildIntegerArray([0, 0]),
+				lengths: buildIntegerArray([1, 1]),
+				count: 2,
+			},
+			docTable: {
+				docCount: 1,
+				pathStringIds: buildIntegerArray([0]),
+				generationByDocId: new Float64Array([1]),
+				identityStartByDocId: buildIntegerArray([0]),
+				identityCountByDocId: buildIntegerArray([0]),
+				routeStartByDocId: buildIntegerArray([0]),
+				routeCountByDocId: buildIntegerArray([0]),
+				headingStartByDocId: buildIntegerArray([0]),
+				headingCountByDocId: buildIntegerArray([0]),
+				bodyBlockStartByDocId: buildIntegerArray([0]),
+				bodyBlockCountByDocId: buildIntegerArray([blockCount]),
+			},
+			familyLexicon: {
+				familyCount: 2,
+				familyStringIds: buildIntegerArray([0, 1]),
+				familyFlagsByFamilyId: new Uint8Array([0, 0]),
+			},
+			metadataContainers: {
+				identityFamiliesByDoc: buildIntegerArray([]),
+				identitySourceMaskByDocEntry: new Uint8Array(),
+				routeFamiliesByDoc: buildIntegerArray([]),
+				routeSourceMaskByDocEntry: new Uint8Array(),
+				headingFamiliesByDoc: buildIntegerArray([]),
+				identityPostings: { postingStarts: buildIntegerArray([]), docIds: buildIntegerArray([]) },
+				routePostings: { postingStarts: buildIntegerArray([]), docIds: buildIntegerArray([]) },
+				headingPostings: { postingStarts: buildIntegerArray([]), docIds: buildIntegerArray([]) },
+			},
+			bodyFamilyPosting: {
+				singletonTermIds: buildIntegerArray([]),
+				singletonValueIds: buildIntegerArray([]),
+				pairTermIds: buildIntegerArray([]),
+				pairFirstValueIds: buildIntegerArray([]),
+				pairSecondValueIds: buildIntegerArray([]),
+				smallTermIds: buildIntegerArray([]),
+				smallValueStarts: buildIntegerArray([]),
+				smallValueIds: buildIntegerArray([]),
+				deltaTermIds: buildIntegerArray([]),
+				deltaTapeStarts: buildIntegerArray([]),
+				postingTape: new Uint8Array(),
+			},
+			bodyBlocks: {
+				blockCount,
+				docIdByBlockId: buildIntegerArray(new Array(blockCount).fill(0)),
+				blockOrdinalByBlockId: buildIntegerArray(Array.from({ length: blockCount }, (_, index) => index)),
+				exactTapeStartByBlockId: buildIntegerArray(new Array(blockCount).fill(0)),
+				exactTapeCountByBlockId: buildIntegerArray(new Array(blockCount).fill(0).map((value, index) => index === highBlockId ? 2 : value)),
+			},
+			exactTapes: {
+				familyIds: buildIntegerArray([0, 1]),
+				positionEncodingByBlockId: exactPositionLane.positionEncodingByBlockId,
+				positionStartByBlockId: exactPositionLane.positionStartByBlockId,
+				positionDeltaU8Tape: exactPositionLane.positionDeltaU8Tape,
+				positionDeltaU16Tape: exactPositionLane.positionDeltaU16Tape,
+				positionDeltaU32Tape: exactPositionLane.positionDeltaU32Tape,
+			},
+			hanRoute: {
+				bigramIds: new Uint32Array(),
+				metadataPostingStarts: buildIntegerArray([]),
+				metadataDocIds: buildIntegerArray([]),
+				bodyAdaptivePostings: {
+					singletonTermIds: buildIntegerArray([]),
+					singletonValueIds: buildIntegerArray([]),
+					pairTermIds: buildIntegerArray([]),
+					pairFirstValueIds: buildIntegerArray([]),
+					pairSecondValueIds: buildIntegerArray([]),
+					smallTermIds: buildIntegerArray([]),
+					smallValueStarts: buildIntegerArray([]),
+					smallValueIds: buildIntegerArray([]),
+					deltaTermIds: buildIntegerArray([]),
+					deltaTapeStarts: buildIntegerArray([]),
+					postingTape: new Uint8Array(),
+				},
+				identityWitnessStartByDocId: buildIntegerArray([0, 0]),
+				identityWitnessStringIds: buildIntegerArray([]),
+				identityWitnessSourceMaskByDocEntry: new Uint8Array(),
+				routeWitnessStartByDocId: buildIntegerArray([0, 0]),
+				routeWitnessStringIds: buildIntegerArray([]),
+				routeWitnessSourceMaskByDocEntry: new Uint8Array(),
+				headingWitnessStartByDocId: buildIntegerArray([0, 0]),
+				headingWitnessStringIds: buildIntegerArray([]),
+				bodyWitnessOccurrenceStartByBlockId: buildIntegerArray(witnessStarts),
+				bodyWitnessOccurrenceStringIds: buildIntegerArray([0, 1]),
+				bodyWitnessPositionEncodingByBlockId: witnessPositionLane.positionEncodingByBlockId,
+				bodyWitnessPositionStartByBlockId: witnessPositionLane.positionStartByBlockId,
+				bodyWitnessPositionDeltaU8Tape: witnessPositionLane.positionDeltaU8Tape,
+				bodyWitnessPositionDeltaU16Tape: witnessPositionLane.positionDeltaU16Tape,
+				bodyWitnessPositionDeltaU32Tape: witnessPositionLane.positionDeltaU32Tape,
+			},
+			fuzzyRescue: {
+				candidateMetadataFamilyIdsByDeletionKey: new Map(),
+				indexedMetadataFamilyCount: 0,
+				deletionKeyCount: 0,
+				bytes: 0,
+			},
+			metrics: {
+				docArenaBytes: 0,
+				stringArenaBytes: 0,
+				stringArenaPathBytes: 0,
+				stringArenaFamilyBytes: 0,
+				stringArenaIdentityWitnessBytes: 0,
+				stringArenaRouteWitnessBytes: 0,
+				stringArenaHeadingWitnessBytes: 0,
+				stringArenaBodyWitnessBytes: 0,
+				stringArenaMultiSourceBytes: 0,
+				stringArenaUnattributedBytes: 0,
+				familyLexiconBytes: 0,
+				metadataContainerBytes: 0,
+				headingBytes: 0,
+				familyPostingBytes: 0,
+				familyPostingTermIdsBytes: 0,
+				familyPostingPostingStartsBytes: 0,
+				familyPostingBlockIdsBytes: 0,
+				familyPostingSingletonTermIdsBytes: 0,
+				familyPostingSingletonBlockIdsBytes: 0,
+				familyPostingPairTermIdsBytes: 0,
+				familyPostingPairFirstBlockIdsBytes: 0,
+				familyPostingPairSecondBlockIdsBytes: 0,
+				familyPostingSmallTermIdsBytes: 0,
+				familyPostingSmallPostingStartsBytes: 0,
+				familyPostingSmallBlockIdsBytes: 0,
+				familyPostingDeltaTermIdsBytes: 0,
+				familyPostingDeltaTapeStartsBytes: 0,
+				familyPostingDeltaPostingTapeBytes: 0,
+				bodyBlockBytes: 0,
+				exactTapeBytes: 0,
+				exactTapePositionBytes: 0,
+				hanRouteBytes: 0,
+				hanRouteSharedBigramIdsBytes: 0,
+				hanRouteMetadataHanPostingsBytes: 0,
+				hanRouteMetadataHanPostingStartsBytes: 0,
+				hanRouteMetadataHanDocIdsBytes: 0,
+				hanRouteHanBigramPostingBytes: 0,
+				hanRouteBodyBigramIdsBytes: 0,
+				hanRouteHanBigramPostingStartsBytes: 0,
+				hanRouteHanBigramBlockIdsBytes: 0,
+				hanRouteHanBigramSingletonTermIdsBytes: 0,
+				hanRouteHanBigramSingletonBlockIdsBytes: 0,
+				hanRouteHanBigramPairTermIdsBytes: 0,
+				hanRouteHanBigramPairFirstBlockIdsBytes: 0,
+				hanRouteHanBigramPairSecondBlockIdsBytes: 0,
+				hanRouteHanBigramSmallTermIdsBytes: 0,
+				hanRouteHanBigramSmallPostingStartsBytes: 0,
+				hanRouteHanBigramSmallBlockIdsBytes: 0,
+				hanRouteHanBigramDeltaTermIdsBytes: 0,
+				hanRouteHanBigramDeltaTapeStartsBytes: 0,
+				hanRouteHanBigramDeltaPostingTapeBytes: 0,
+				hanRouteMetadataWitnessBytes: 0,
+				hanRouteBodyWitnessBytes: 0,
+				hanRouteBodyWitnessPositionBytes: 0,
+				scaffoldBytes: 0,
+				countBytes: 0,
+				idPayloadBytes: 0,
+				stringPayloadBytes: 0,
+				auxiliaryBytes: 0,
+				residentBytes: 0,
+				indexedSurfaceUtf8Bytes: 0,
+				rawMarkdownUtf8Bytes: 0,
+				"residentBytes / indexedSurfaceUtf8Bytes": 0,
+				"residentBytes / rawMarkdownUtf8Bytes": 0,
+			},
+		} satisfies ResidentBase;
+
+		expect(getBodyBlockExactTokenPositions(residentBase, highBlockId)).toEqual([9, 320]);
+		expect(getBodyBlockHanWitnessOccurrences(residentBase, highBlockId)).toEqual([
+			{ stringId: 0, start: 4 },
+			{ stringId: 1, start: 70004 },
+		]);
+	});
 	test("stores doc-local metadata source masks without collapsing them into a global family mask", () => {
 		const residentBase = buildResidentBase([
 			createDocument({

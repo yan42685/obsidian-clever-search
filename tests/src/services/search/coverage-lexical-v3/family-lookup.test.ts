@@ -111,6 +111,20 @@ describe("coverage lexical v3 family lookup", () => {
 		expect(longPrefixMatches.at(-1)?.familyText).toBe("prefixlong0127");
 	});
 
+	test("prefix collection can be disabled per request", () => {
+		const base = buildResidentBase(buildPrefixDocuments("freefont", 12));
+		const [unitMatches] = lookupQueryUnitFamilies(base, analyzeQuery("freefont"), {
+			allowPrefixMatch: false,
+		});
+
+		expect(unitMatches.matches).toEqual([
+			expect.objectContaining({
+				familyText: "freefont",
+				matchKind: "exact",
+			}),
+		]);
+	});
+
 	test("fuzzy rescue only triggers after exact and prefix both miss", () => {
 		const base = buildResidentBase([
 			createDocument({
@@ -167,6 +181,23 @@ describe("coverage lexical v3 family lookup", () => {
 
 		const [twoEdits] = lookupQueryUnitFamilies(base, analyzeQuery("obsadn"));
 		expect(twoEdits.matches).toEqual([]);
+	});
+
+	test("fuzzy rescue can be disabled per request", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/obsidian.md",
+				basename: "obsidian",
+				folder: "latin",
+				content: "obsidian",
+			}),
+		]);
+
+		const [unitMatches] = lookupQueryUnitFamilies(base, analyzeQuery("obsidan"), {
+			allowFuzzyMatch: false,
+		});
+
+		expect(unitMatches.matches).toEqual([]);
 	});
 
 	test("fuzzy rescue stays on metadata anchors and skips heading or body only families", () => {

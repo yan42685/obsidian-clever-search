@@ -7,7 +7,7 @@ import {
 	collectHanMetadataDocIds,
 	collectPostingDocIds,
 } from "./access";
-import { planHanSurfaceGroupRecalls } from "./han-surface-groups";
+import { planHanSurfaceGroupRecallsAfterFamilyLookup } from "./han-surface-groups";
 import type {
 	V3CandidateDocRecall,
 	V3HanBodyBlockGate,
@@ -67,7 +67,10 @@ export function recallCandidateDocs(
 		}
 	}
 
-	const resolvedHanSurfaceGroups = planHanSurfaceGroupRecalls(queryAnalysis);
+	const resolvedHanSurfaceGroups = planHanSurfaceGroupRecallsAfterFamilyLookup(
+		queryAnalysis,
+		unitFamilyMatches,
+	);
 	routeHanRescueGroupsToRecallBuckets(base, resolvedHanSurfaceGroups, recallByDocId);
 
 	return [...recallByDocId.entries()]

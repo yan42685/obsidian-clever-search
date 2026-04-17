@@ -38,13 +38,26 @@ const BODY_BLOCK_CLOSING_BOUNDARY_CHARS = new Set([
 
 export type V3SurfaceKind = "latin" | "han" | "mixed" | "other";
 export type V3DocumentTokenizer = (text: string) => readonly string[];
+export const BODY_FAMILY_SUPPORT_STANDALONE = 1 << 0;
+export const BODY_FAMILY_SUPPORT_COMPOUND_SUBWORD = 1 << 1;
+export type V3TextOccurrence = Readonly<{
+	text: string;
+	startOffset: number;
+}>;
+export type V3FamilyOccurrence = V3TextOccurrence &
+	Readonly<{
+		bodySupportMask: number;
+	}>;
 
 export type V3BodyBlockDraft = Readonly<{
 	ordinal: number;
 	normalizedText: string;
 	familyTexts: readonly string[];
 	exactFamilyTexts: readonly string[];
+	exactFamilyStartOffsets: readonly number[];
+	exactFamilySupportMasks: readonly number[];
 	hanWitnessTexts: readonly string[];
+	hanWitnessStartOffsets: readonly number[];
 	hanBigramTexts: readonly string[];
 	spanLength: number;
 }>;
@@ -109,9 +122,10 @@ export function extractDocumentFamilyTexts(
 	text: string,
 	tokenizeDocumentText?: V3DocumentTokenizer,
 ): string[] {
-	const normalized = normalizeText(text);
 	return dedupePreservingOrder(
-		extractDocumentFamilySequence(normalized, tokenizeDocumentText),
+		extractDocumentFamilyOccurrences(text, tokenizeDocumentText).map(
+			(occurrence) => occurrence.text,
+		),
 	);
 }
 
@@ -119,23 +133,73 @@ export function extractDocumentFamilySequence(
 	text: string,
 	tokenizeDocumentText?: V3DocumentTokenizer,
 ): string[] {
-	const normalized = normalizeText(text);
-	const out: string[] = [];
-	for (const match of normalized.matchAll(RAW_SEGMENT_REGEX)) {
-		const token = match[0].trim();
+	return extractDocumentFamilyOccurrences(text, tokenizeDocumentText).map(
+		(occurrence) => occurrence.text,
+	);
+}
+
+export function extractDocumentFamilyOccurrences(
+	text: string,
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): V3TextOccurrence[] {
+	return extractDocumentFamilySupportOccurrences(text, tokenizeDocumentText).map(
+		({ text: occurrenceText, startOffset: occurrenceStartOffset }) => ({
+			text: occurrenceText,
+			startOffset: occurrenceStartOffset,
+		}),
+	);
+}
+
+export function extractDocumentFamilySupportOccurrences(
+	text: string,
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): V3FamilyOccurrence[] {
+	const out: V3FamilyOccurrence[] = [];
+	for (const match of text.matchAll(RAW_SEGMENT_REGEX)) {
+		const rawToken = match[0] ?? "";
+		const token = normalizeText(rawToken).trim();
+		const startOffset = match.index ?? 0;
 		if (token.length === 0) {
 			continue;
 		}
-		if (classifySurfaceKind(token) !== "han" || tokenizeDocumentText == null) {
-			out.push(token);
+		if (classifySurfaceKind(token) !== "han") {
+			out.push(...collectLatinFamilyOccurrences(rawToken, startOffset));
+			continue;
+		}
+		if (tokenizeDocumentText == null) {
+			out.push({
+				text: token,
+				startOffset,
+				bodySupportMask: BODY_FAMILY_SUPPORT_STANDALONE,
+			});
 			continue;
 		}
 		const hanTerms = collectHanTokenizerTerms(token, tokenizeDocumentText);
-		if (hanTerms.length > 0) {
-			out.push(...hanTerms);
+		for (const occurrence of collectHanTokenizerOccurrences(token, hanTerms)) {
+			out.push({
+				text: occurrence.text,
+				startOffset: startOffset + occurrence.startOffset,
+				bodySupportMask: BODY_FAMILY_SUPPORT_STANDALONE,
+			});
 		}
 	}
-	return out;
+	return out
+		.map((occurrence, index) => ({
+			...occurrence,
+			sequenceOrdinal: index,
+		}))
+		.sort((left, right) =>
+			left.startOffset - right.startOffset ||
+			left.sequenceOrdinal - right.sequenceOrdinal ||
+			left.text.localeCompare(right.text),
+		)
+		.map(
+			({ text: occurrenceText, startOffset: occurrenceStartOffset, bodySupportMask }) => ({
+				text: occurrenceText,
+				startOffset: occurrenceStartOffset,
+				bodySupportMask,
+			}),
+		);
 }
 
 export function extractHanSegments(text: string): string[] {
@@ -153,9 +217,20 @@ export function extractHanSegments(text: string): string[] {
 }
 
 export function extractOrderedHanSegments(text: string): string[] {
+	return extractOrderedHanSegmentOccurrences(text).map(
+		(occurrence) => occurrence.text,
+	);
+}
+
+export function extractOrderedHanSegmentOccurrences(
+	text: string,
+): V3TextOccurrence[] {
 	return [...normalizeText(text).matchAll(HAN_SEQUENCE_REGEX)]
-		.map((match) => match[0]?.trim() ?? "")
-		.filter((segment) => segment.length > 0);
+		.map((match) => ({
+			text: match[0]?.trim() ?? "",
+			startOffset: match.index ?? 0,
+		}))
+		.filter((occurrence) => occurrence.text.length > 0);
 }
 
 export function extractHanBigrams(text: string): string[] {
@@ -190,15 +265,28 @@ export function encodeHanBigramId(bigram: string): number {
 export function splitBodyBlocks(text: string): V3BodyBlockDraft[] {
 	const normalized = normalizeText(text).replace(/\r\n?/gu, "\n");
 	return splitNormalizedBodyBlockTexts(normalized)
-		.map<V3BodyBlockDraft>((block, index) => ({
-			ordinal: index,
-			normalizedText: block,
-			familyTexts: extractOrderedFamilySequence(block),
-			exactFamilyTexts: extractOrderedFamilySequence(block),
-			hanWitnessTexts: dedupePreservingOrder(extractHanSegments(block)),
-			hanBigramTexts: extractHanBigrams(block),
-			spanLength: block.length,
-		}))
+		.map<V3BodyBlockDraft>((block, index) => {
+			const exactFamilyOccurrences = extractOrderedFamilySupportOccurrences(block);
+			const hanWitnessOccurrences = extractOrderedHanSegmentOccurrences(block);
+			return {
+				ordinal: index,
+				normalizedText: block,
+				familyTexts: exactFamilyOccurrences.map((occurrence) => occurrence.text),
+				exactFamilyTexts: exactFamilyOccurrences.map((occurrence) => occurrence.text),
+				exactFamilyStartOffsets: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.startOffset,
+				),
+				exactFamilySupportMasks: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.bodySupportMask,
+				),
+				hanWitnessTexts: hanWitnessOccurrences.map((occurrence) => occurrence.text),
+				hanWitnessStartOffsets: hanWitnessOccurrences.map(
+					(occurrence) => occurrence.startOffset,
+				),
+				hanBigramTexts: extractHanBigrams(block),
+				spanLength: block.length,
+			};
+		})
 		.filter((block) => block.familyTexts.length > 0);
 }
 
@@ -209,16 +297,28 @@ export function splitBodyBlocksWithDocumentTokenizer(
 	const normalized = normalizeText(text).replace(/\r\n?/gu, "\n");
 	return splitNormalizedBodyBlockTexts(normalized)
 		.map<V3BodyBlockDraft>((block, index) => {
-			const exactFamilyTexts = extractDocumentFamilySequence(
+			const exactFamilyOccurrences = extractDocumentFamilySupportOccurrences(
 				block,
 				tokenizeDocumentText,
 			);
+			const hanWitnessOccurrences = extractOrderedHanSegmentOccurrences(block);
 			return {
 				ordinal: index,
 				normalizedText: block,
-				familyTexts: dedupePreservingOrder(exactFamilyTexts),
-				exactFamilyTexts,
-				hanWitnessTexts: dedupePreservingOrder(extractHanSegments(block)),
+				familyTexts: dedupePreservingOrder(
+					exactFamilyOccurrences.map((occurrence) => occurrence.text),
+				),
+				exactFamilyTexts: exactFamilyOccurrences.map((occurrence) => occurrence.text),
+				exactFamilyStartOffsets: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.startOffset,
+				),
+				exactFamilySupportMasks: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.bodySupportMask,
+				),
+				hanWitnessTexts: hanWitnessOccurrences.map((occurrence) => occurrence.text),
+				hanWitnessStartOffsets: hanWitnessOccurrences.map(
+					(occurrence) => occurrence.startOffset,
+				),
 				hanBigramTexts: extractHanBigrams(block),
 				spanLength: block.length,
 			};
@@ -231,17 +331,35 @@ export function splitBodyBlocksWithDocumentTokenizer(
 		);
 }
 
-export function extractOrderedFamilySequence(text: string): string[] {
-	const normalized = normalizeText(text);
-	const out: string[] = [];
-	for (const match of normalized.matchAll(RAW_SEGMENT_REGEX)) {
-		const token = match[0].trim();
+export function extractOrderedFamilyOccurrences(text: string): V3TextOccurrence[] {
+	return extractOrderedFamilySupportOccurrences(text).map(
+		({ text: occurrenceText, startOffset: occurrenceStartOffset }) => ({
+			text: occurrenceText,
+			startOffset: occurrenceStartOffset,
+		}),
+	);
+}
+
+export function extractOrderedFamilySupportOccurrences(
+	text: string,
+): V3FamilyOccurrence[] {
+	const out: V3FamilyOccurrence[] = [];
+	for (const match of text.matchAll(RAW_SEGMENT_REGEX)) {
+		const token = normalizeText(match[0] ?? "").trim();
 		if (token.length === 0) {
 			continue;
 		}
-		out.push(token);
+		out.push({
+			text: token,
+			startOffset: match.index ?? 0,
+			bodySupportMask: BODY_FAMILY_SUPPORT_STANDALONE,
+		});
 	}
 	return out;
+}
+
+export function extractOrderedFamilySequence(text: string): string[] {
+	return extractOrderedFamilyOccurrences(text).map((occurrence) => occurrence.text);
 }
 
 function collectHanTokenizerTerms(
@@ -266,6 +384,172 @@ function collectHanTokenizerTerms(
 		out.push(normalized);
 	}
 	return out;
+}
+
+function collectLatinFamilyOccurrences(
+	rawToken: string,
+	startOffset: number,
+): V3FamilyOccurrence[] {
+	const occurrences: V3FamilyOccurrence[] = [];
+	const seen = new Set<string>();
+	const hasCompoundDelimiter = /[-_]/u.test(rawToken);
+	pushLatinOccurrence(
+		occurrences,
+		seen,
+		normalizeText(rawToken).trim(),
+		startOffset,
+		BODY_FAMILY_SUPPORT_STANDALONE,
+	);
+	for (const segment of collectLatinWordSegments(rawToken, startOffset)) {
+		const normalizedSegment = normalizeText(segment.text).trim();
+		pushLatinOccurrence(
+		occurrences,
+		seen,
+		normalizedSegment,
+		segment.startOffset,
+		hasCompoundDelimiter
+			? BODY_FAMILY_SUPPORT_COMPOUND_SUBWORD
+			: BODY_FAMILY_SUPPORT_STANDALONE,
+		);
+		for (const part of splitCamelCaseSegments(segment.text, segment.startOffset)) {
+			pushLatinOccurrence(
+				occurrences,
+				seen,
+				normalizeText(part.text).trim(),
+				part.startOffset,
+				BODY_FAMILY_SUPPORT_STANDALONE,
+			);
+		}
+	}
+	return occurrences;
+}
+
+function pushLatinOccurrence(
+	target: V3FamilyOccurrence[],
+	seen: Set<string>,
+	text: string,
+	startOffset: number,
+	bodySupportMask: number,
+): void {
+	if (text.length === 0) {
+		return;
+	}
+	const key = `${startOffset}:${text}`;
+	if (seen.has(key)) {
+		return;
+	}
+	seen.add(key);
+	target.push({ text, startOffset, bodySupportMask });
+}
+
+function collectLatinWordSegments(
+	rawToken: string,
+	tokenStartOffset: number,
+): V3TextOccurrence[] {
+	const segments: V3TextOccurrence[] = [];
+	for (const match of rawToken.matchAll(/[a-z0-9]+/giu)) {
+		const text = match[0] ?? "";
+		if (text.length === 0) {
+			continue;
+		}
+		segments.push({
+			text,
+			startOffset: tokenStartOffset + (match.index ?? 0),
+		});
+	}
+	return segments;
+}
+
+function splitCamelCaseSegments(
+	rawSegment: string,
+	segmentStartOffset: number,
+): V3TextOccurrence[] {
+	const parts: V3TextOccurrence[] = [];
+	let start = 0;
+	for (let index = 0; index < rawSegment.length; index += 1) {
+		const current = rawSegment[index];
+		const previous = index > 0 ? rawSegment[index - 1] : "";
+		const next = index + 1 < rawSegment.length ? rawSegment[index + 1] : "";
+		const shouldSplit =
+			(previous >= "a" &&
+				previous <= "z" &&
+				current >= "A" &&
+				current <= "Z") ||
+			(previous >= "A" &&
+				previous <= "Z" &&
+				current >= "A" &&
+				current <= "Z" &&
+				next >= "a" &&
+				next <= "z");
+		if (!shouldSplit) {
+			continue;
+		}
+		if (index > start) {
+			parts.push({
+				text: rawSegment.slice(start, index),
+				startOffset: segmentStartOffset + start,
+			});
+		}
+		start = index;
+	}
+	if (start < rawSegment.length) {
+		parts.push({
+			text: rawSegment.slice(start),
+			startOffset: segmentStartOffset + start,
+		});
+	}
+	return parts.filter((part) => part.text.length > 1);
+}
+
+function collectHanTokenizerOccurrences(
+	surfaceText: string,
+	hanTerms: readonly string[],
+): V3TextOccurrence[] {
+	const orderedOccurrences: V3TextOccurrence[] = [];
+	const offsetsByTerm = new Map<string, number[]>();
+	const consumedCountByTerm = new Map<string, number>();
+	for (const term of hanTerms) {
+		let offsets = offsetsByTerm.get(term);
+		if (offsets == null) {
+			offsets = findOverlappingMatchOffsets(surfaceText, term);
+			offsetsByTerm.set(term, offsets);
+		}
+		if (offsets.length === 0) {
+			continue;
+		}
+		const consumedCount = consumedCountByTerm.get(term) ?? 0;
+		const startOffset = offsets[Math.min(consumedCount, offsets.length - 1)] ?? -1;
+		if (startOffset < 0) {
+			continue;
+		}
+		consumedCountByTerm.set(term, consumedCount + 1);
+		orderedOccurrences.push({ text: term, startOffset });
+	}
+	return orderedOccurrences
+		.map((occurrence, index) => ({
+			...occurrence,
+			sequenceOrdinal: index,
+		}))
+		.sort((left, right) =>
+			left.startOffset - right.startOffset ||
+			left.sequenceOrdinal - right.sequenceOrdinal ||
+			left.text.localeCompare(right.text),
+		)
+		.map(({ text, startOffset }) => ({ text, startOffset }));
+}
+
+function findOverlappingMatchOffsets(text: string, term: string): number[] {
+	const offsets: number[] = [];
+	let searchStart = 0;
+	while (searchStart <= text.length - term.length) {
+		const matchIndex = text.indexOf(term, searchStart);
+		if (matchIndex < 0) {
+			break;
+		}
+		offsets.push(matchIndex);
+		searchStart = matchIndex + 1;
+	}
+	return offsets;
 }
 
 function splitNormalizedBodyBlockTexts(normalizedText: string): string[] {

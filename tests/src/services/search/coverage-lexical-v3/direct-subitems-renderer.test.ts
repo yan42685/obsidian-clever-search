@@ -120,4 +120,50 @@ describe("coverage lexical v3 direct subitems renderer", () => {
 		expect(payload.text).toContain("context line below");
 		expect(payload.text).not.toContain("third line below should stay out");
 	});
+
+	test("keeps multiple opaque bigrams from the same Han surface group visible", () => {
+		const snapshotText = "这是赢宋风格的窄体字。";
+		const winSongStart = snapshotText.indexOf("赢宋");
+		const condensedStart = snapshotText.indexOf("窄体");
+		const payload = renderV3DirectSubitemCandidate({
+			snapshotText,
+			candidate: createCandidate({
+				start: winSongStart,
+				end: condensedStart + "窄体".length,
+				anchorOffset: winSongStart,
+				atoms: [
+					createAtom({
+						kind: "opaque_bigram_atom",
+						evidenceKind: "opaque_bigram",
+						queryUnitIndex: null,
+						surfaceGroupIndex: 0,
+						start: winSongStart,
+						end: winSongStart + "赢宋".length,
+						matchedText: "赢宋",
+						bigramText: "赢宋",
+						anchorTier: "weak_opaque_bigram",
+						highlightTier: "strong",
+					}),
+					createAtom({
+						kind: "opaque_bigram_atom",
+						evidenceKind: "opaque_bigram",
+						queryUnitIndex: null,
+						surfaceGroupIndex: 0,
+						start: condensedStart,
+						end: condensedStart + "窄体".length,
+						matchedText: "窄体",
+						bigramText: "窄体",
+						anchorTier: "weak_opaque_bigram",
+						highlightTier: "strong",
+					}),
+				],
+			}),
+		});
+
+		const highlighted = payload.highlightRanges.map((range) =>
+			payload.snippetText.slice(range.start, range.end),
+		);
+		expect(highlighted).toContain("赢宋");
+		expect(highlighted).toContain("窄体");
+	});
 });

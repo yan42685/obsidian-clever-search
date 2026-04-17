@@ -5,9 +5,20 @@ import {
 	sliceResidentIntegerArray,
 	sliceSentinelBucket,
 } from "../layout/integer-arrays";
+import { decodeBlockPositionLane } from "../layout/position-lanes";
 import { collectBodyFamilyPostingBlockIdsForFamily } from "../layout/body-family-posting";
 import type { ResidentBase } from "../layout/types";
 import { decodeBodyHanPosting, lookupHanBigramIndex } from "../layout/han-route";
+
+export type BodyHanWitnessOccurrence = Readonly<{
+	stringId: number;
+	start: number;
+}>;
+
+export type BodyBlockFamilySupportEntry = Readonly<{
+	familyId: number;
+	supportMask: number;
+}>;
 
 export function readResidentString(
 	base: ResidentBase,
@@ -129,7 +140,37 @@ export function getBodyBlockExactTokenPositions(
 	blockId: number,
 ): number[] {
 	const count = base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0;
-	return Array.from({ length: count }, (_, index) => index);
+	return decodeBlockPositionLane(base.exactTapes, blockId, count);
+}
+
+export function getBodyBlockFamilySupportEntries(
+	base: ResidentBase,
+	blockId: number,
+): BodyBlockFamilySupportEntry[] {
+	const start = base.bodyBlocks.familySupportStartByBlockId[blockId] ?? 0;
+	const end = base.bodyBlocks.familySupportStartByBlockId[blockId + 1] ?? start;
+	const familyIds = sliceResidentIntegerArray(
+		base.bodyBlocks.familySupportFamilyIds,
+		start,
+		end,
+	);
+	return familyIds.map((familyId, index) => ({
+		familyId,
+		supportMask: base.bodyBlocks.familySupportMaskByEntry[start + index] ?? 0,
+	}));
+}
+
+export function getBodyBlockFamilySupportMask(
+	base: ResidentBase,
+	blockId: number,
+	familyId: number,
+): number {
+	for (const entry of getBodyBlockFamilySupportEntries(base, blockId)) {
+		if (entry.familyId === familyId) {
+			return entry.supportMask;
+		}
+	}
+	return 0;
 }
 
 export function getDocIdentityHanWitnessStringIds(
@@ -215,10 +256,44 @@ export function getBodyBlockHanWitnessStringIds(
 	blockId: number,
 ): number[] {
 	return sliceSentinelBucket(
-		base.hanRoute.bodyWitnessStartByBlockId,
-		base.hanRoute.bodyWitnessStringIds,
+		base.hanRoute.bodyWitnessOccurrenceStartByBlockId,
+		base.hanRoute.bodyWitnessOccurrenceStringIds,
 		blockId,
 	);
+}
+
+export function getBodyBlockHanWitnessStartOffsets(
+	base: ResidentBase,
+	blockId: number,
+): number[] {
+	const count =
+		(base.hanRoute.bodyWitnessOccurrenceStartByBlockId[blockId + 1] ?? 0) -
+		(base.hanRoute.bodyWitnessOccurrenceStartByBlockId[blockId] ?? 0);
+	return decodeBlockPositionLane(
+		{
+			positionEncodingByBlockId:
+				base.hanRoute.bodyWitnessPositionEncodingByBlockId,
+			positionStartByBlockId:
+				base.hanRoute.bodyWitnessPositionStartByBlockId,
+			positionDeltaU8Tape: base.hanRoute.bodyWitnessPositionDeltaU8Tape,
+			positionDeltaU16Tape: base.hanRoute.bodyWitnessPositionDeltaU16Tape,
+			positionDeltaU32Tape: base.hanRoute.bodyWitnessPositionDeltaU32Tape,
+		},
+		blockId,
+		count,
+	);
+}
+
+export function getBodyBlockHanWitnessOccurrences(
+	base: ResidentBase,
+	blockId: number,
+): BodyHanWitnessOccurrence[] {
+	const stringIds = getBodyBlockHanWitnessStringIds(base, blockId);
+	const starts = getBodyBlockHanWitnessStartOffsets(base, blockId);
+	return stringIds.map((stringId, index) => ({
+		stringId,
+		start: starts[index] ?? 0,
+	}));
 }
 
 export function getBodyBlockHanWitnessTexts(

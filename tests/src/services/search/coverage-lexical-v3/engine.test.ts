@@ -249,6 +249,56 @@ describe("coverage lexical v3 engine", () => {
 		).toEqual(["\u8d62\u5b8b", "\u7a84\u4f53"]);
 	});
 
+	test("family-verified Han recall planning falls back to whole-group bigrams when query segmentation drifts", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer = createDocumentTokenizer({
+			"\u8d62\u5b8b\u7a84\u4f53\u5b8b": ["\u8d62\u5b8b", "\u7a84\u4f53"],
+			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/winsong-narrow-body.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u8d62\u5b8b\u7a84\u4f53\u5b8b",
+				}),
+				createDocument({
+					path: "zh/winsong-only.md",
+					basename: "\u8d62\u5b8b",
+					folder: "zh",
+					content: "\u666e\u901a\u8bb0\u5f55",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search(
+			"\u8d62\u5b8b\u7a84\u4f53",
+			["\u8d62", "\u5b8b\u7a84\u4f53"],
+		);
+
+		expect(result.recallState.queryAnalysis.surfaceGroups[0]?.queryResidualUniqueBigrams).toEqual([
+			"\u8d62\u5b8b",
+		]);
+		expect(
+			result.recallState.queryAnalysis.primaryUnits.map((unit) => ({
+				text: unit.text,
+				source: unit.source,
+			})),
+		).toEqual([
+			{ text: "\u5b8b\u7a84\u4f53", source: "han_tokenizer_real" },
+		]);
+		expect(result.recallState.unitFamilyMatches[0]?.matches).toEqual([]);
+		expect(result.recallState.candidateDocs).toHaveLength(2);
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/winsong-narrow-body.md",
+			"zh/winsong-only.md",
+		]);
+		expect(result.rankedCandidates[0]?.completedHanSurfaceGroupCount).toBe(1);
+		expect(result.rankedCandidates[1]?.completedHanSurfaceGroupCount).toBe(0);
+	});
+
 	test("fully covered Han real terms can still rescue through metadata when family lookup misses", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
@@ -338,7 +388,7 @@ describe("coverage lexical v3 engine", () => {
 		);
 	});
 
-	test("exact Han real-term matches still outrank rescue-only docs from the same fully covered group", () => {
+	test("global Han family matches no longer widen recall to rescue-only docs from the same group", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
@@ -366,19 +416,12 @@ describe("coverage lexical v3 engine", () => {
 
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
 			"zh/exact.md",
-			"zh/fallback.md",
 		]);
 		expect(result.rankedCandidates[0].realizedFamilies[0]).toEqual(
 			expect.objectContaining({
 				queryUnitText: "\u8d62\u5b8b",
 				matchKind: "exact",
 				inIdentity: true,
-			}),
-		);
-		expect(result.rankedCandidates[1].realizedFamilies[0]).toEqual(
-			expect.objectContaining({
-				queryUnitText: "\u8d62\u5b8b",
-				matchKind: "opaque_exact",
 			}),
 		);
 	});
@@ -518,12 +561,12 @@ describe("coverage lexical v3 engine", () => {
 		const result = engine.search("abc \u751f\u547d\u529b", ["abc", "\u751f\u547d"]);
 
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
-			"zh/abc-life.md",
 			"zh/life-force.md",
+			"zh/abc-life.md",
 			"zh/life-only.md",
 		]);
-		expect(result.rankedCandidates[0].path).toBe("zh/abc-life.md");
-		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(1);
+		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(1);
+		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(0);
 		expect(result.rankedCandidates[2].completedHanSurfaceGroupCount).toBe(0);
 	});
 
@@ -558,10 +601,10 @@ describe("coverage lexical v3 engine", () => {
 			"zh/split-witness.md",
 		]);
 		expect(result.rankedCandidates[0].realizedCoverageCount).toBe(3);
-		expect(result.rankedCandidates[1].realizedCoverageCount).toBe(1);
-		expect(
-			result.rankedCandidates[1].realizedFamilies.map((family) => family.familyText),
-		).toEqual(["\u661f\u7a79"]);
+		expect(result.rankedCandidates[1].realizedCoverageCount).toBe(0);
+		expect(result.rankedCandidates[1].hanStrongRescueGroupCount).toBe(0);
+		expect(result.rankedCandidates[1].hanWeakRescueGroupCount).toBe(1);
+		expect(result.rankedCandidates[1].hasOnlyWeakHanRescue).toBe(true);
 	});
 
 	test("adjacent Han chunk boundary evidence can rescue unresolved bigrams through continuous body locality", () => {
@@ -641,7 +684,7 @@ describe("coverage lexical v3 engine", () => {
 		]);
 		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(1);
 		expect(result.rankedCandidates[0].strongestHanSurfaceCompletionTier).toBe(
-			"body_residue",
+			"body_window",
 		);
 		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(0);
 	});
@@ -1035,7 +1078,6 @@ describe("coverage lexical v3 engine", () => {
 		]);
 
 		const result = engine.search("prefe");
-
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
 			"latin/prefer.md",
 			"latin/preference.md",
@@ -1044,6 +1086,40 @@ describe("coverage lexical v3 engine", () => {
 		expect(result.rankedCandidates[0].prefixCompletionGainTotal).toBe(1);
 		expect(result.rankedCandidates[1].prefixCompletionGainTotal).toBe(5);
 		expect(result.rankedCandidates[2].compoundPrefixCount).toBe(1);
+	});
+
+	test("mixed standalone and compound support does not count as compound-only backing", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentBase([
+			createDocument({
+				path: "latin/preference.md",
+				basename: "notes",
+				folder: "latin",
+				content: "preference",
+			}),
+			createDocument({
+				path: "latin/prefer-mixed.md",
+				basename: "notes",
+				folder: "latin",
+				content: "prefer prefer-cache",
+			}),
+			createDocument({
+				path: "latin/prefer-compound.md",
+				basename: "notes",
+				folder: "latin",
+				content: "prefer-cache",
+			}),
+		]);
+
+		const result = engine.search("prefe");
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"latin/prefer-mixed.md",
+			"latin/preference.md",
+			"latin/prefer-compound.md",
+		]);
+		expect(result.rankedCandidates[0].compoundBackedPrefixCount).toBe(0);
+		expect(result.rankedCandidates[0].compoundPrefixCount).toBe(0);
+		expect(result.rankedCandidates[2].compoundBackedPrefixCount).toBe(1);
 	});
 
 	test("fuzzy rescue can recover realized coverage without outranking exact peers", () => {

@@ -10,6 +10,10 @@ import {
 	estimateSentinelPostingBytes,
 	flattenBuckets,
 } from "./integer-arrays";
+import {
+	buildBlockPositionLane,
+	estimateBlockPositionLaneBytes,
+} from "./position-lanes";
 import type { ResidentHanRouteArena } from "./types";
 
 type HanRouteBuildInput = Readonly<{
@@ -21,7 +25,8 @@ type HanRouteBuildInput = Readonly<{
 	routeWitnessStringIdsByDoc: readonly (readonly number[])[];
 	routeWitnessSourceMasksByDoc: readonly (readonly number[])[];
 	headingWitnessStringIdsByDoc: readonly (readonly number[])[];
-	bodyWitnessStringIdsByBlock: readonly (readonly number[])[];
+	bodyWitnessOccurrenceStringIdsByBlock: readonly (readonly number[])[];
+	bodyWitnessOccurrenceStartOffsetsByBlock: readonly (readonly number[])[];
 }>;
 
 const BODY_HAN_ADAPTIVE_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
@@ -39,7 +44,8 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 		routeWitnessStringIdsByDoc: [],
 		routeWitnessSourceMasksByDoc: [],
 		headingWitnessStringIdsByDoc: [],
-		bodyWitnessStringIdsByBlock: [],
+		bodyWitnessOccurrenceStringIdsByBlock: [],
+		bodyWitnessOccurrenceStartOffsetsByBlock: [],
 	});
 }
 
@@ -54,13 +60,18 @@ export function buildHanRouteArena(
 	const identityWitnessBuckets = buildPostingBuckets(input.identityWitnessStringIdsByDoc);
 	const routeWitnessBuckets = buildPostingBuckets(input.routeWitnessStringIdsByDoc);
 	const headingWitnessBuckets = buildPostingBuckets(input.headingWitnessStringIdsByDoc);
-	const bodyWitnessBuckets = buildPostingBuckets(input.bodyWitnessStringIdsByBlock);
+	const bodyWitnessBuckets = buildPostingBuckets(
+		input.bodyWitnessOccurrenceStringIdsByBlock,
+	);
 	const identityWitnessSourceMasksByDoc =
 		input.identityWitnessSourceMasksByDoc ??
 		input.identityWitnessStringIdsByDoc.map(() => []);
 	const routeWitnessSourceMasksByDoc =
 		input.routeWitnessSourceMasksByDoc ??
 		input.routeWitnessStringIdsByDoc.map(() => []);
+	const bodyWitnessPositionLane = buildBlockPositionLane(
+		input.bodyWitnessOccurrenceStartOffsetsByBlock,
+	);
 	return {
 		bigramIds: Uint32Array.from(input.bigramIds),
 		metadataPostingStarts: metadataBuckets.starts,
@@ -78,8 +89,18 @@ export function buildHanRouteArena(
 		),
 		headingWitnessStartByDocId: headingWitnessBuckets.starts,
 		headingWitnessStringIds: headingWitnessBuckets.ids,
-		bodyWitnessStartByBlockId: bodyWitnessBuckets.starts,
-		bodyWitnessStringIds: bodyWitnessBuckets.ids,
+		bodyWitnessOccurrenceStartByBlockId: bodyWitnessBuckets.starts,
+		bodyWitnessOccurrenceStringIds: bodyWitnessBuckets.ids,
+		bodyWitnessPositionEncodingByBlockId:
+			bodyWitnessPositionLane.positionEncodingByBlockId,
+		bodyWitnessPositionStartByBlockId:
+			bodyWitnessPositionLane.positionStartByBlockId,
+		bodyWitnessPositionDeltaU8Tape:
+			bodyWitnessPositionLane.positionDeltaU8Tape,
+		bodyWitnessPositionDeltaU16Tape:
+			bodyWitnessPositionLane.positionDeltaU16Tape,
+		bodyWitnessPositionDeltaU32Tape:
+			bodyWitnessPositionLane.positionDeltaU32Tape,
 	};
 }
 
@@ -120,9 +141,16 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 			arena.headingWitnessStringIds,
 		) +
 		estimateSentinelPostingBytes(
-			arena.bodyWitnessStartByBlockId,
-			arena.bodyWitnessStringIds,
-		)
+			arena.bodyWitnessOccurrenceStartByBlockId,
+			arena.bodyWitnessOccurrenceStringIds,
+		) +
+		estimateBlockPositionLaneBytes({
+			positionEncodingByBlockId: arena.bodyWitnessPositionEncodingByBlockId,
+			positionStartByBlockId: arena.bodyWitnessPositionStartByBlockId,
+			positionDeltaU8Tape: arena.bodyWitnessPositionDeltaU8Tape,
+			positionDeltaU16Tape: arena.bodyWitnessPositionDeltaU16Tape,
+			positionDeltaU32Tape: arena.bodyWitnessPositionDeltaU32Tape,
+		})
 	);
 }
 
@@ -150,6 +178,7 @@ export function describeHanRouteByteBreakdown(
 	bodyHanDeltaPostingTapeBytes: number;
 	metadataWitnessBytes: number;
 	bodyWitnessBytes: number;
+	bodyWitnessPositionBytes: number;
 }> {
 	const bodyAdaptivePostings = arena.bodyAdaptivePostings;
 	return {
@@ -208,9 +237,16 @@ export function describeHanRouteByteBreakdown(
 				arena.headingWitnessStringIds,
 			),
 		bodyWitnessBytes: estimateSentinelPostingBytes(
-			arena.bodyWitnessStartByBlockId,
-			arena.bodyWitnessStringIds,
+			arena.bodyWitnessOccurrenceStartByBlockId,
+			arena.bodyWitnessOccurrenceStringIds,
 		),
+		bodyWitnessPositionBytes: estimateBlockPositionLaneBytes({
+			positionEncodingByBlockId: arena.bodyWitnessPositionEncodingByBlockId,
+			positionStartByBlockId: arena.bodyWitnessPositionStartByBlockId,
+			positionDeltaU8Tape: arena.bodyWitnessPositionDeltaU8Tape,
+			positionDeltaU16Tape: arena.bodyWitnessPositionDeltaU16Tape,
+			positionDeltaU32Tape: arena.bodyWitnessPositionDeltaU32Tape,
+		}),
 	};
 }
 

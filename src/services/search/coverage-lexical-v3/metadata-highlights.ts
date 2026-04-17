@@ -1,4 +1,4 @@
-import type { HighlightRange } from "src/globals/search-types";
+﻿import type { HighlightRange } from "src/globals/search-types";
 import type { EvidencePackingProfile } from "./ranking";
 import type {
 	V3QueryAnalysis,
@@ -316,6 +316,7 @@ function collectRealHanSurfaceOccurrencesInWitness(
 					identityMetadataSource: "basename",
 					routeMetadataSource: "folder",
 					metadataPackingSource: "none",
+                    bodyPrefixSupportKind: 'none',
 					inIdentity: false,
 					inRoute: false,
 					inHeading: false,

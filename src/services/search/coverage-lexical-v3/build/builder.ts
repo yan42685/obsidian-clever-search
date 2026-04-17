@@ -76,7 +76,10 @@ type PreparedBodyBlock = Readonly<{
 	ordinal: number;
 	summaryFamilyTexts: readonly string[];
 	exactFamilyTexts: readonly string[];
+	exactFamilyStartOffsets: readonly number[];
+	exactFamilySupportMasks: readonly number[];
 	hanWitnessTexts: readonly string[];
+	hanWitnessStartOffsets: readonly number[];
 	hanBigramIds: readonly number[];
 }>;
 
@@ -150,15 +153,24 @@ export function buildResidentBaseArtifacts(
 		ordinal: number;
 		summaryFamilyIds: readonly number[];
 		exactDraft: ExactTapeDraft;
+		familySupportFamilyIds: readonly number[];
+		familySupportMasks: readonly number[];
 	}> = [];
 	const bodyBlockStartByDocId: number[] = [];
 	const bodyBlockCountByDocId: number[] = [];
 	for (const document of preparedDocuments) {
 		bodyBlockStartByDocId.push(blockInputs.length);
 		for (const block of document.bodyBlocks) {
-			const exactFamilyIds = block.exactFamilyTexts
-				.map((familyText) => familyIdByText.get(familyText))
-				.filter((familyId): familyId is number => familyId !== undefined);
+			const exactDraft = buildExactTapeDraft(
+				block.exactFamilyTexts,
+				block.exactFamilyStartOffsets,
+				familyIdByText,
+			);
+			const familySupportDraft = buildBlockFamilySupportDraft(
+				block.exactFamilyTexts,
+				block.exactFamilySupportMasks,
+				familyIdByText,
+			);
 			blockInputs.push({
 				docId: block.docId,
 				ordinal: block.ordinal,
@@ -166,9 +178,9 @@ export function buildResidentBaseArtifacts(
 					block.summaryFamilyTexts,
 					familyIdByText,
 				),
-				exactDraft: {
-					familyIds: exactFamilyIds,
-				},
+				exactDraft,
+				familySupportFamilyIds: familySupportDraft.familyIds,
+				familySupportMasks: familySupportDraft.supportMasks,
 			});
 		}
 		bodyBlockCountByDocId.push(blockInputs.length - bodyBlockStartByDocId.at(-1)!);
@@ -185,6 +197,8 @@ export function buildResidentBaseArtifacts(
 			ordinal: block.ordinal,
 			exactTapeStart: exactTapes.startsByDraftIndex[blockId] ?? 0,
 			exactTapeCount: exactTapes.countsByDraftIndex[blockId] ?? 0,
+			familySupportFamilyIds: block.familySupportFamilyIds,
+			familySupportMasks: block.familySupportMasks,
 		})),
 	);
 
@@ -316,7 +330,10 @@ function prepareDocument(
 		ordinal: block.ordinal,
 		summaryFamilyTexts: dedupeSorted(block.familyTexts),
 		exactFamilyTexts: block.exactFamilyTexts,
-		hanWitnessTexts: dedupeSorted(block.hanWitnessTexts),
+		exactFamilyStartOffsets: block.exactFamilyStartOffsets,
+		exactFamilySupportMasks: block.exactFamilySupportMasks,
+		hanWitnessTexts: block.hanWitnessTexts,
+		hanWitnessStartOffsets: block.hanWitnessStartOffsets,
 		hanBigramIds: dedupeSorted(block.hanBigramTexts).map(encodeHanBigramId),
 	}));
 	const identityHanWitnessEntries = [
@@ -487,6 +504,9 @@ function buildResidentHanRoute(
 			),
 		),
 	);
+	const bodyWitnessStartOffsetsByBlock = documents.flatMap((document) =>
+		document.bodyBlocks.map((block) => [...block.hanWitnessStartOffsets]),
+	);
 	const allBodyBlocks = documents.flatMap((document) => document.bodyBlocks);
 	const metadataBigramIds = dedupeSortedNumbers([
 		...documents.flatMap((document) => document.identityHanBigramIds),
@@ -513,7 +533,8 @@ function buildResidentHanRoute(
 			routeWitnessStringIdsByDoc,
 			routeWitnessSourceMasksByDoc,
 			headingWitnessStringIdsByDoc,
-			bodyWitnessStringIdsByBlock,
+			bodyWitnessOccurrenceStringIdsByBlock: bodyWitnessStringIdsByBlock,
+			bodyWitnessOccurrenceStartOffsetsByBlock: bodyWitnessStartOffsetsByBlock,
 		});
 	}
 	const metadataBigramIndexById = new Map(
@@ -544,7 +565,8 @@ function buildResidentHanRoute(
 			routeWitnessStringIdsByDoc,
 			routeWitnessSourceMasksByDoc,
 			headingWitnessStringIdsByDoc,
-			bodyWitnessStringIdsByBlock,
+			bodyWitnessOccurrenceStringIdsByBlock: bodyWitnessStringIdsByBlock,
+			bodyWitnessOccurrenceStartOffsetsByBlock: bodyWitnessStartOffsetsByBlock,
 		});
 }
 function mergeSourceMask(
@@ -564,6 +586,53 @@ function mapFamilyTextsToIds(
 	return familyTexts
 		.map((familyText) => familyIdByText.get(familyText))
 		.filter((familyId): familyId is number => familyId !== undefined);
+}
+
+function buildExactTapeDraft(
+	familyTexts: readonly string[],
+	startOffsets: readonly number[],
+	familyIdByText: ReadonlyMap<string, number>,
+): ExactTapeDraft {
+	const familyIds: number[] = [];
+	const draftStartOffsets: number[] = [];
+	for (let index = 0; index < familyTexts.length; index += 1) {
+		const familyId = familyIdByText.get(familyTexts[index] ?? "");
+		if (familyId === undefined) {
+			continue;
+		}
+		familyIds.push(familyId);
+		draftStartOffsets.push(startOffsets[index] ?? 0);
+	}
+	return {
+		familyIds,
+		startOffsets: draftStartOffsets,
+	};
+}
+
+function buildBlockFamilySupportDraft(
+	familyTexts: readonly string[],
+	supportMasks: readonly number[],
+	familyIdByText: ReadonlyMap<string, number>,
+): Readonly<{
+	familyIds: readonly number[];
+	supportMasks: readonly number[];
+}> {
+	const supportMaskByFamilyId = new Map<number, number>();
+	for (let index = 0; index < familyTexts.length; index += 1) {
+		const familyId = familyIdByText.get(familyTexts[index] ?? "");
+		if (familyId === undefined) {
+			continue;
+		}
+		supportMaskByFamilyId.set(
+			familyId,
+			(supportMaskByFamilyId.get(familyId) ?? 0) | (supportMasks[index] ?? 0),
+		);
+	}
+	const familyIds = [...supportMaskByFamilyId.keys()].sort((left, right) => left - right);
+	return {
+		familyIds,
+		supportMasks: familyIds.map((familyId) => supportMaskByFamilyId.get(familyId) ?? 0),
+	};
 }
 
 function buildDocMetadataSourceMasks(

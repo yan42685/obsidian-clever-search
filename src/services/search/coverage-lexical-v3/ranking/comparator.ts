@@ -3,6 +3,7 @@ import type {
 	EvidencePackingProfile,
 	HanSurfaceCompletionTier,
 } from "./types";
+import { compareHanRescueAssessments } from "../han-rescue-collector";
 
 const CONTAINER_TIER_SCORE: Record<EvidenceContainer["tier"], number> = {
 	identity: 3,
@@ -35,6 +36,9 @@ export function comparePackingProfiles(
 	if (hanSurfaceCompletionComparison !== 0) {
 		return hanSurfaceCompletionComparison;
 	}
+	if (left.compoundBackedPrefixCount !== right.compoundBackedPrefixCount) {
+		return left.compoundBackedPrefixCount - right.compoundBackedPrefixCount;
+	}
 	if (left.prefixCompletionGainTotal !== right.prefixCompletionGainTotal) {
 		return left.prefixCompletionGainTotal - right.prefixCompletionGainTotal;
 	}
@@ -47,7 +51,12 @@ export function comparePackingProfiles(
 	if (left.fuzzyEditDistanceTotal !== right.fuzzyEditDistanceTotal) {
 		return left.fuzzyEditDistanceTotal - right.fuzzyEditDistanceTotal;
 	}
+	const hanRescueComparison = compareHanRescueSummary(left, right);
+	if (hanRescueComparison !== 0) {
+		return hanRescueComparison;
+	}
 	return left.path.localeCompare(right.path);
+	return 0;
 }
 
 export function comparePackingProfilesBeforeHanSurfaceCompletion(
@@ -209,6 +218,52 @@ function compareMetadataPackingSignature(
 		const rightSourceScore = getMetadataPackingSourceScore(rightBucket?.source);
 		if (leftSourceScore !== rightSourceScore) {
 			return rightSourceScore - leftSourceScore;
+		}
+	}
+	return 0;
+}
+
+function compareHanRescueSummary(
+	left: EvidencePackingProfile,
+	right: EvidencePackingProfile,
+): number {
+	if (!left.hasAnyHanRescueAssessment && !right.hasAnyHanRescueAssessment) {
+		return 0;
+	}
+	if (left.hasOnlyWeakHanRescue !== right.hasOnlyWeakHanRescue) {
+		return left.hasOnlyWeakHanRescue ? 1 : -1;
+	}
+	if (left.hanStrongRescueGroupCount !== right.hanStrongRescueGroupCount) {
+		return right.hanStrongRescueGroupCount - left.hanStrongRescueGroupCount;
+	}
+	if (left.hanWeakRescueGroupCount !== right.hanWeakRescueGroupCount) {
+		return right.hanWeakRescueGroupCount - left.hanWeakRescueGroupCount;
+	}
+	if (left.hanRescueSupportWeightTotal !== right.hanRescueSupportWeightTotal) {
+		return right.hanRescueSupportWeightTotal - left.hanRescueSupportWeightTotal;
+	}
+	const maxAssessmentCount = Math.max(
+		left.hanRescueAssessments.length,
+		right.hanRescueAssessments.length,
+	);
+	for (let index = 0; index < maxAssessmentCount; index += 1) {
+		const leftAssessment = left.hanRescueAssessments[index] ?? null;
+		const rightAssessment = right.hanRescueAssessments[index] ?? null;
+		if (leftAssessment == null && rightAssessment == null) {
+			continue;
+		}
+		if (leftAssessment == null) {
+			return 1;
+		}
+		if (rightAssessment == null) {
+			return -1;
+		}
+		const assessmentComparison = compareHanRescueAssessments(
+			leftAssessment,
+			rightAssessment,
+		);
+		if (assessmentComparison !== 0) {
+			return assessmentComparison;
 		}
 	}
 	return 0;

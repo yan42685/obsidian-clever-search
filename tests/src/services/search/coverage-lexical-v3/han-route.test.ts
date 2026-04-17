@@ -307,7 +307,8 @@ describe("coverage lexical v3 han route", () => {
 		const result = engine.search("\u6062\u590d\u6269\u5bb9");
 
 		expect(result.recallState.candidateDocs).toHaveLength(1);
-		expect(result.rankedCandidates).toHaveLength(0);
+		expect(result.rankedCandidates).toHaveLength(1);
+		expect(result.rankedCandidates[0]?.path).toBe("zh/split-segments.md");
 	});
 
 	test("body Han route stores direct body block postings", () => {
@@ -371,7 +372,8 @@ describe("coverage lexical v3 han route", () => {
 			routeWitnessStringIdsByDoc: [],
 			routeWitnessSourceMasksByDoc: [],
 			headingWitnessStringIdsByDoc: [],
-			bodyWitnessStringIdsByBlock: [],
+			bodyWitnessOccurrenceStringIdsByBlock: [],
+			bodyWitnessOccurrenceStartOffsetsByBlock: [],
 		});
 
 		expect(Array.from(arena.bodyAdaptivePostings.singletonTermIds)).toEqual([11]);

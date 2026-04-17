@@ -160,6 +160,12 @@ function createCandidate(): EvidencePackingProfile {
 		hanSurfaceCompletionTierScoreTotal: 0,
 		strongestHanSurfaceCompletionTier: "none",
 		hanSurfaceCompletionGroups: [],
+		hanStrongRescueGroupCount: 0,
+		hanWeakRescueGroupCount: 0,
+		hanRescueSupportWeightTotal: 0,
+		hasOnlyWeakHanRescue: false,
+		hasAnyHanRescueAssessment: false,
+		hanRescueAssessments: [],
 		prefixCompletionGainTotal: 0,
 		compoundPrefixCount: 0,
 		realizedFamilies: [
@@ -202,6 +208,7 @@ function createCandidateRecall(blockCount: number): V3CandidateDocRecall {
 		shortlistedBodyBlockIds: Array.from({ length: blockCount }, (_, blockId) => blockId),
 		hanMetadataGateStats: null,
 		hanBodyBlockGateStats: [],
+		hanSurfaceGroupRecalls: [],
 	};
 }
 

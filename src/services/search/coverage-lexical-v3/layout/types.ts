@@ -2,6 +2,7 @@ import type {
 	ResidentIntegerArray,
 	ResidentSectionEncodingDescriptor,
 } from "./integer-arrays";
+import type { ResidentBlockPositionLane } from "./position-lanes";
 
 export type ResidentStringArena = Readonly<{
 	text: string;
@@ -61,11 +62,15 @@ export type ResidentBodyBlockArena = Readonly<{
 	blockOrdinalByBlockId: ResidentIntegerArray;
 	exactTapeStartByBlockId: ResidentIntegerArray;
 	exactTapeCountByBlockId: ResidentIntegerArray;
+	familySupportStartByBlockId: ResidentIntegerArray;
+	familySupportFamilyIds: ResidentIntegerArray;
+	familySupportMaskByEntry: Uint8Array;
 }>;
 
 export type ResidentExactTapeArena = Readonly<{
 	familyIds: ResidentIntegerArray;
-}>;
+}> &
+	ResidentBlockPositionLane;
 
 export type ResidentAdaptivePostingField = Readonly<{
 	singletonTermIds: ResidentIntegerArray;
@@ -101,9 +106,16 @@ export type ResidentHanRouteArena = Readonly<{
 	routeWitnessSourceMaskByDocEntry: Uint8Array;
 	headingWitnessStartByDocId: ResidentIntegerArray;
 	headingWitnessStringIds: ResidentIntegerArray;
-	bodyWitnessStartByBlockId: ResidentIntegerArray;
-	bodyWitnessStringIds: ResidentIntegerArray;
-}>;
+	bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
+	bodyWitnessOccurrenceStringIds: ResidentIntegerArray;
+}> &
+	{
+		bodyWitnessPositionEncodingByBlockId: Uint8Array;
+		bodyWitnessPositionStartByBlockId: ResidentIntegerArray;
+		bodyWitnessPositionDeltaU8Tape: Uint8Array;
+		bodyWitnessPositionDeltaU16Tape: Uint16Array;
+		bodyWitnessPositionDeltaU32Tape: Uint32Array;
+	};
 
 export type ResidentBaseMetrics = Readonly<{
 	docArenaBytes: number;
@@ -136,6 +148,7 @@ export type ResidentBaseMetrics = Readonly<{
 	familyPostingDeltaPostingTapeBytes: number;
 	bodyBlockBytes: number;
 	exactTapeBytes: number;
+	exactTapePositionBytes: number;
 	hanRouteBytes: number;
 	hanRouteSharedBigramIdsBytes: number;
 	hanRouteMetadataHanPostingsBytes: number;
@@ -158,6 +171,7 @@ export type ResidentBaseMetrics = Readonly<{
 	hanRouteHanBigramDeltaPostingTapeBytes: number;
 	hanRouteMetadataWitnessBytes: number;
 	hanRouteBodyWitnessBytes: number;
+	hanRouteBodyWitnessPositionBytes: number;
 	scaffoldBytes: number;
 	countBytes: number;
 	idPayloadBytes: number;

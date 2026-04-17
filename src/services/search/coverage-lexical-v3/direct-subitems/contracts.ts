@@ -7,6 +7,7 @@ import type { EvidencePackingProfile } from "../ranking";
 export type V3DirectSubitemAnchorTier =
 	| "none"
 	| "real_lexical"
+	| "weak_opaque_bigram"
 	| "opaque_bigram"
 	| "confirmed_surface";
 

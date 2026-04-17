@@ -14,6 +14,11 @@ import type {
 	V3QueryUnitFamilyMatches,
 } from "./types";
 
+export type V3FamilyLookupOptions = Readonly<{
+	allowPrefixMatch?: boolean;
+	allowFuzzyMatch?: boolean;
+}>;
+
 const PREFIX_LOOKUP_BUDGET_MS = 50;
 const PREFIX_LOOKUP_TIME_CHECK_INTERVAL = 256;
 const FUZZY_LOOKUP_BUDGET_MS = 8;
@@ -34,10 +39,13 @@ type FuzzyLookupBudgetState = {
 export function lookupQueryUnitFamilies(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
+	options: V3FamilyLookupOptions = {},
 ): V3QueryUnitFamilyMatches[] {
 	const familyFlagsByFamilyId = base.familyLexicon.familyFlagsByFamilyId;
 	const prefixBudgetState = createPrefixLookupBudgetState();
 	const fuzzyBudgetState = createFuzzyLookupBudgetState();
+	const allowPrefixMatch = options.allowPrefixMatch !== false;
+	const allowFuzzyMatch = options.allowFuzzyMatch !== false;
 	return queryAnalysis.primaryUnits.map((queryUnit) => ({
 		queryUnitIndex: queryUnit.index,
 		queryUnitText: queryUnit.text,
@@ -53,6 +61,8 @@ export function lookupQueryUnitFamilies(
 						familyFlagsByFamilyId,
 						prefixBudgetState,
 						fuzzyBudgetState,
+						allowPrefixMatch,
+						allowFuzzyMatch,
 				),
 	}));
 }
@@ -64,6 +74,8 @@ function lookupSortedQueryUnitFamilyMatches(
 	familyFlagsByFamilyId: Uint8Array,
 	prefixBudgetState: PrefixLookupBudgetState,
 	fuzzyBudgetState: FuzzyLookupBudgetState,
+	allowPrefixMatch: boolean,
+	allowFuzzyMatch: boolean,
 ): V3QueryFamilyMatch[] {
 	const queryUnitText = queryUnit.text;
 	const rangeStartFamilyId = findFirstFamilyIdAtOrAfter(base, queryUnitText);
@@ -73,20 +85,22 @@ function lookupSortedQueryUnitFamilyMatches(
 		queryUnitText,
 		familyFlagsByFamilyId,
 	);
-	const prefixMatches = collectBoundedPrefixMatches(
-		base,
-		rangeStartFamilyId,
-		queryUnitText,
-		familyFlagsByFamilyId,
-		prefixBudgetState,
-	);
+	const prefixMatches = allowPrefixMatch
+		? collectBoundedPrefixMatches(
+				base,
+				rangeStartFamilyId,
+				queryUnitText,
+				familyFlagsByFamilyId,
+				prefixBudgetState,
+		  )
+		: [];
 	if (exactMatch != null) {
 		return [exactMatch, ...prefixMatches];
 	}
 	if (prefixMatches.length > 0) {
 		return prefixMatches;
 	}
-	if (!shouldAttemptFuzzyRescue(queryUnit, queryAnalysis)) {
+	if (!allowFuzzyMatch || !shouldAttemptFuzzyRescue(queryUnit, queryAnalysis)) {
 		return [];
 	}
 	return collectBoundedFuzzyMatches(base, queryUnitText, fuzzyBudgetState);

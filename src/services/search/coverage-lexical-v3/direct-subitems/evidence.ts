@@ -1,4 +1,8 @@
 import type { ResidentBase } from "../layout/types";
+import {
+	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
+	type HanRescueAssessment,
+} from "../han-rescue";
 import type { V3QueryAnalysis, V3QuerySurfaceGroup, V3QueryUnit } from "../query/analysis";
 import {
 	createV3BodyBlockChunkRanges,
@@ -26,7 +30,6 @@ import type {
 
 const DIRECT_SUBITEM_HAN_GAP_WEIGHT = 0.65;
 const DIRECT_SUBITEM_OTHER_GAP_WEIGHT = 0.25;
-const DIRECT_SUBITEM_MAX_ADJACENT_GAP = 15;
 const HAN_CHAR_PATTERN = /\p{Script=Han}/u;
 
 type RawBlock = Readonly<{
@@ -53,6 +56,7 @@ type BuildScopeContext = Readonly<{
 	unitByIndex: ReadonlyMap<number, V3QueryUnit>;
 	surfaceGroupByIndex: ReadonlyMap<number, V3QuerySurfaceGroup>;
 	resolvedHanSurfaceGroupByIndex: ReadonlyMap<number, V3ResolvedHanSurfaceGroup>;
+	hanRescueAssessmentByGroupIndex: ReadonlyMap<number, HanRescueAssessment>;
 }>;
 
 type ExplanationSearchState = {
@@ -95,6 +99,42 @@ export function buildV3DirectSubitemCandidates(params: {
 			params.candidate.realizedFamilies,
 		).map((group) => [group.surfaceGroupIndex, group]),
 	);
+	const providedAssessments = params.candidate.hanRescueAssessments;
+	const fallbackOpaqueAssessments = providedAssessments.length > 0
+		? []
+		: params.candidate.realizedFamilies
+				.filter(
+					(family) =>
+						family.matchKind === "opaque_exact" &&
+						family.querySurfaceGroupIndex != null,
+				)
+				.map<HanRescueAssessment>((family) => ({
+					surfaceGroupIndex: family.querySurfaceGroupIndex ?? -1,
+					context: family.inBestBodyWindow || family.inBodyResidue ? "body" : "metadata",
+					rescueMode:
+						resolvedHanSurfaceGroupByIndex.get(family.querySurfaceGroupIndex ?? -1)
+							?.rescueMode === "residual_only"
+							? "residual_only"
+							: "whole_group_when_real_miss",
+					strength: "strong",
+					matchedBigramCount: 1,
+					matchedRealAnchorCount: 0,
+					coversStartAnchor: false,
+					coversEndAnchor: false,
+					coversEndpoints: false,
+					preservesSurfaceOrder: true,
+					rankingScore: 1,
+					approxMaxAdjacentGap: null,
+					approxHeadTailSpan: null,
+					blockIds: [],
+					witnessKind: family.inBestBodyWindow || family.inBodyResidue ? "body" : null,
+				}));
+	const hanRescueAssessmentByGroupIndex = new Map<number, HanRescueAssessment>(
+		[...providedAssessments, ...fallbackOpaqueAssessments].map((assessment) => [
+			assessment.surfaceGroupIndex,
+			assessment,
+		]),
+	);
 	const candidates = scopes.flatMap((scope) =>
 		buildCandidatesForScope({
 			snapshotText: params.snapshotText,
@@ -105,6 +145,7 @@ export function buildV3DirectSubitemCandidates(params: {
 			unitByIndex,
 			surfaceGroupByIndex,
 			resolvedHanSurfaceGroupByIndex,
+			hanRescueAssessmentByGroupIndex,
 		}),
 	);
 	return candidates.sort(compareV3DirectSubitemCandidates);
@@ -209,10 +250,36 @@ function collectBaseOccurrencesForScope(
 			const resolvedHanSurfaceGroup = context.resolvedHanSurfaceGroupByIndex.get(
 				groupRecall.surfaceGroupIndex,
 			);
+			const assessment =
+				context.hanRescueAssessmentByGroupIndex.get(groupRecall.surfaceGroupIndex) ??
+				(resolvedHanSurfaceGroup == null
+					? null
+					: ({
+							surfaceGroupIndex: groupRecall.surfaceGroupIndex,
+							context: "body",
+							rescueMode:
+								resolvedHanSurfaceGroup.rescueMode === "residual_only"
+									? "residual_only"
+									: "whole_group_when_real_miss",
+							strength: "strong",
+							matchedBigramCount: resolvedHanSurfaceGroup.rescueBigrams.length,
+							matchedRealAnchorCount: 0,
+							coversStartAnchor: false,
+							coversEndAnchor: false,
+							coversEndpoints: false,
+							preservesSurfaceOrder: true,
+							rankingScore: 1,
+							approxMaxAdjacentGap: null,
+							approxHeadTailSpan: null,
+							blockIds: [],
+							witnessKind: "body",
+						} satisfies HanRescueAssessment));
 			if (
 				surfaceGroup == null ||
 				resolvedHanSurfaceGroup == null ||
-				resolvedHanSurfaceGroup.rescueBigrams.length === 0
+				resolvedHanSurfaceGroup.rescueBigrams.length === 0 ||
+				assessment == null ||
+				assessment.strength === "none"
 			) {
 				return [];
 			}
@@ -248,7 +315,12 @@ function collectBaseOccurrencesForScope(
 					start: block.start + occurrence.start,
 					end: block.start + occurrence.end,
 					matchedText: occurrence.matchedText,
-					anchorTier: "opaque_bigram",
+					anchorTier:
+						assessment.strength === "strong"
+							? "opaque_bigram"
+							: "weak_opaque_bigram",
+					// Keep weak rescue weaker for anchor/ranking semantics, but render the
+					// actual matched bigram with the same visual emphasis as strong bigram rescue.
 					highlightTier: "strong",
 					bigramText: occurrence.bigramText,
 				}));
@@ -301,7 +373,7 @@ function buildCandidateFromState(
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
 	}
-	if (maxAdjacentGap > DIRECT_SUBITEM_MAX_ADJACENT_GAP) {
+	if (maxAdjacentGap > HAN_BODY_LOCALITY_MAX_ADJACENT_GAP) {
 		return null;
 	}
 	const confirmedSurfaceAtoms = buildConfirmedSurfaceAtoms(
@@ -779,8 +851,10 @@ function getAnchorTierScore(
 ): number {
 	switch (tier) {
 		case "confirmed_surface":
-			return 3;
+			return 4;
 		case "opaque_bigram":
+			return 3;
+		case "weak_opaque_bigram":
 			return 2;
 		case "real_lexical":
 			return 1;

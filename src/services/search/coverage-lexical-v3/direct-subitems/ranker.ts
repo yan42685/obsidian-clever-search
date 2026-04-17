@@ -3,8 +3,9 @@ import type { V3DirectSubitemCandidate } from "./contracts";
 const DIRECT_SUBITEM_ANCHOR_TIER_SCORE = {
 	none: 0,
 	real_lexical: 1,
-	opaque_bigram: 2,
-	confirmed_surface: 3,
+	weak_opaque_bigram: 2,
+	opaque_bigram: 3,
+	confirmed_surface: 4,
 } as const;
 
 export function compareV3DirectSubitemCandidates(

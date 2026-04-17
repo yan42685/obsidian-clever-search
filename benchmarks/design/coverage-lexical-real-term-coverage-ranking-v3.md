@@ -1614,3 +1614,158 @@ Validation completed for this phase:
 - `npm run typecheck:build` passes on 2026-04-17
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts`
   passes on 2026-04-17
+
+### Phase 29
+
+Status: Completed on 2026-04-17
+
+The current implementation now removes the old query-time Han recall-planning
+authority and makes Han recall admission family-aware before it falls back to
+bigram rescue:
+
+- query-time residual Han state no longer directly decides which Han bigrams are
+  used for recall admission when a Han group already has tokenizer real units
+- recall planning now runs through
+  `planHanSurfaceGroupRecallsAfterFamilyLookup(queryAnalysis, unitFamilyMatches)`
+  so Han group admission follows these rules:
+  - if a Han group has no real tokenizer units, recall still uses the whole
+    surface Han bigrams as the opaque backstop
+  - if a Han group has real tokenizer units and at least one of those units has
+    a global family match, recall only routes the family-verified residual
+    bigrams for the still-uncovered part of that surface
+  - if a Han group has real tokenizer units but all of them miss in global
+    family lookup, recall falls back to the whole surface Han bigrams rather
+    than trusting the tokenizer cover
+- this removes the old recall behavior where query-time
+  `queryResidualUniqueBigrams` could suppress whole-group Han rescue even when
+  the tokenizer segmentation drifted away from the index lexicon
+- exact global Han family hits now also prevent recall from widening to
+  rescue-only siblings in the same group, preserving the tighter V3 semantics
+  once the lexicon already knows that query unit
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+  passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts`
+  passes on 2026-04-17
+
+### Phase 30
+
+Status: Completed on 2026-04-17
+
+The current implementation now materializes real block-local body positions for
+both exact family occurrences and body Han witness occurrences instead of
+reconstructing them from query-time pseudo spacing:
+
+- `ResidentExactTapeArena` now carries per-block adaptive start-offset lanes in
+  parallel with `familyIds`
+- body Han witness storage now uses ordered occurrence buckets plus adaptive
+  start-offset lanes instead of a dedup-only bucket model
+- body ranking consumes resident start offsets for exact and Han witness
+  occurrences, so `bestWindow`, compactness, and opaque bigram rescue positions
+  all operate on real block-local coordinates
+- body Han opaque rescue still uses block-local `indexOf`, but its resulting
+  occurrences now anchor at true witness starts
+- global block scaffolding still uses adaptive integer arrays, so block id
+  growth remains independent from block-local position width
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-17
+- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
+  passes on 2026-04-17
+
+### Phase 31
+
+Status: Completed on 2026-04-17
+
+The current implementation now evaluates Han rescue through position-aware
+assessments instead of a single matched-bigram gate, and keeps weak rescue
+evidence available for visibility/snippet flows without inflating realized
+coverage:
+
+- body Han rescue now classifies each surface group as `none`, `weak`, or
+  `strong` using block-local windows, shared locality constants, endpoint
+  coverage, and residual-only vs whole-group rules
+- metadata Han rescue now scores a single witness at a time and no longer
+  depends on the body `15 / 160` thresholds; cross-witness metadata rescue is
+  still disallowed
+- strong Han rescue continues to materialize `opaque_exact` families, while
+  weak Han rescue is tracked separately through `hanRescueAssessments`,
+  `hanWeakRescueGroupCount`, and `hasOnlyWeakHanRescue`
+- engine ranking now retains weak-only Han candidates until visibility
+  filtering, allowing `hideWeaklyRelatedResults` to suppress them explicitly
+  instead of relying on realized coverage alone
+- direct subitems now consume the shared Han rescue assessments and reuse the
+  shared body locality constant, so weak Han rescue produces weak opaque
+  anchors/highlights while strong rescue continues to anchor normally
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts`
+  passes on 2026-04-17
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts`
+  passes on 2026-04-17
+
+### Phase 32
+
+Status: Completed on 2026-04-18
+
+The current implementation now routes Han rescue through a shared collector and
+lets the main comparator consume the resulting summary as a bounded late
+tie-breaker:
+
+- Han rescue assessment generation is no longer authored directly inside
+  `ranking/containers.ts`; a shared collector now owns metadata witness
+  evaluation, body rescue evaluation, per-group strongest assessment selection,
+  and summary aggregation
+- multi-group Han rescue now performs doc-level union collection for metadata
+  witness bigrams and body neighborhood bigram occurrences, then projects that
+  shared evidence back into group-specific obligations so same-occurrence reuse
+  no longer requires per-group rescans
+- body rescue materialization in ranking now consumes collector outputs instead
+  of re-deriving assessments inline, keeping strong/weak classification and
+  synthetic opaque realization aligned with the shared assessment layer
+- the main comparator now formally reads `hanStrongRescueGroupCount`,
+  `hanWeakRescueGroupCount`, `hanRescueSupportWeightTotal`, and the strongest
+  `hanRescueAssessments`, but only as a late same-band tie-breaker so existing
+  non-Han ordering semantics remain ahead of Han rescue-specific preferences
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-18
+- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts --testNamePattern "Han|metadata opaque rescue|adjacent Han chunk boundary|completed Han surface witness|mixed latin plus Han|bridge bigrams|multiple Han surface groups|global Han family matches|body-only Han rescue|fully covered Han real terms|family-verified Han recall planning|whole-surface Han tokenizer terms|stable Han query cover|han rescue summary"`
+  passes on 2026-04-18
+
+### Phase 33
+
+Status: Completed on 2026-04-18
+
+The current implementation now preserves compound-backed Latin prefix provenance
+without narrowing recall, so hyphen/underscore subwords can still recall a
+document while same-band ranking continues to prefer true standalone prefixes:
+
+- query/build now tags Latin body exact-family occurrences as either
+  `standalone` or `compound_subword`, while still indexing the original raw
+  token and its recall-helpful subwords
+- body resident storage now carries a compact per-block/per-family support mask
+  sidecar instead of a heavier occurrence-level provenance lane, allowing
+  ranking to distinguish `standalone only`, `compound only`, and `mixed`
+  support without changing the main posting structure
+- realized V3 families now retain `bodyPrefixSupportKind`, and the packing
+  profile exposes `compoundBackedPrefixCount` so compound-backed prefixes are
+  penalized before prefix completion gain in same-band ordering
+- `mixed` support no longer counts as compound-only, so a block that contains a
+  true standalone `prefer` alongside `prefer-cache` is not over-penalized
+- the late prefix tie-break now restores the intended order for
+  `prefer`, `preference`, and `prefer-cache` style candidates while preserving
+  the broader Latin recall behavior added by the tokenizer changes
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-18
+- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/family-lookup.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-shortlist.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-residual-support.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/position-lanes.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
+  passes on 2026-04-18

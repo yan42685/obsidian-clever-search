@@ -31,6 +31,11 @@ export type CoverageLexicalV3SearchResult = Readonly<{
 	rankedCandidates: readonly EvidencePackingProfile[];
 }>;
 
+export type CoverageLexicalV3SearchOptions = Readonly<{
+	allowPrefixMatch?: boolean;
+	allowFuzzyMatch?: boolean;
+}>;
+
 export class CoverageLexicalV3Engine {
 	private residentBase: ResidentBase | null = null;
 
@@ -65,6 +70,7 @@ export class CoverageLexicalV3Engine {
 	search(
 		queryText: string,
 		queryTerms: readonly string[] = [],
+		options: CoverageLexicalV3SearchOptions = {},
 	): CoverageLexicalV3SearchResult {
 		if (this.residentBase == null) {
 			throw new Error("CoverageLexicalV3Engine.search requires a resident base");
@@ -75,7 +81,11 @@ export class CoverageLexicalV3Engine {
 		const queryAnalysis = analyzeQuery(queryText, queryTerms);
 		const analyzeMs = shouldLogDebug ? nowDebugMs() - analyzeStartedAtMs : 0;
 		const familyLookupStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const unitFamilyMatches = lookupQueryUnitFamilies(this.residentBase, queryAnalysis);
+		const unitFamilyMatches = lookupQueryUnitFamilies(
+			this.residentBase,
+			queryAnalysis,
+			options,
+		);
 		const familyLookupMs = shouldLogDebug ? nowDebugMs() - familyLookupStartedAtMs : 0;
 		const recallStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const candidateDocs = recallCandidateDocs(
@@ -85,21 +95,22 @@ export class CoverageLexicalV3Engine {
 		);
 		const recallMs = shouldLogDebug ? nowDebugMs() - recallStartedAtMs : 0;
 		const packingStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const provisionalCandidates = candidateDocs
-			.map((candidateRecall) =>
-				buildPackingProfile(
-					this.residentBase!,
-					queryAnalysis,
-					candidateRecall,
-					unitFamilyMatches,
-					{
-						allowBodyOpaqueRescueSurfaceGroupIndices: null,
-					},
-				),
-			)
+		const provisionalCandidateProfiles = candidateDocs.map((candidateRecall) =>
+			buildPackingProfile(
+				this.residentBase!,
+				queryAnalysis,
+				candidateRecall,
+				unitFamilyMatches,
+				{
+					allowBodyOpaqueRescueSurfaceGroupIndices: null,
+				},
+			),
+		);
+		const provisionalCandidates = provisionalCandidateProfiles
 			.filter(
 				(candidate, index) =>
 					candidate.realizedCoverageCount > 0 ||
+					candidate.hasAnyHanRescueAssessment ||
 					hasBodyOpaqueRescueSeeds(candidateDocs[index]),
 			);
 		const allowedBodyOpaqueRescueByDocId = buildAllowedBodyOpaqueRescueSurfaceGroups(
@@ -108,8 +119,7 @@ export class CoverageLexicalV3Engine {
 			candidateDocs,
 			unitFamilyMatches,
 		);
-		const rankedCandidatesBeforeSort = provisionalCandidates
-			.map((provisionalCandidate) => {
+		const secondPassCandidateProfiles = provisionalCandidates.map((provisionalCandidate) => {
 				const candidateRecall = candidateDocs.find(
 					(item) => item.docId === provisionalCandidate.docId,
 				);
@@ -126,8 +136,12 @@ export class CoverageLexicalV3Engine {
 							allowedBodyOpaqueRescueByDocId.get(candidateRecall.docId) ?? null,
 					},
 				);
-			})
-			.filter((candidate) => candidate.realizedCoverageCount > 0);
+			});
+		const rankedCandidatesBeforeSort = secondPassCandidateProfiles
+			.filter(
+				(candidate) =>
+					candidate.realizedCoverageCount > 0 || candidate.hasOnlyWeakHanRescue,
+			);
 		const packingMs = shouldLogDebug ? nowDebugMs() - packingStartedAtMs : 0;
 		const sortStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const rankedCandidates = rankedCandidatesBeforeSort.sort(comparePackingProfiles);
@@ -155,6 +169,10 @@ export class CoverageLexicalV3Engine {
 				queryAnalysisDetails: summarizeQueryAnalysisDetails(queryAnalysis),
 				unitFamilyMatchDetails: summarizeUnitFamilyMatchDetails(unitFamilyMatches),
 				candidateDocDetails: summarizeCandidateDocs(candidateDocs),
+				provisionalCandidateDetails: summarizePackingProfiles(provisionalCandidateProfiles),
+				bodyOpaqueRescueAllowanceDetails:
+					summarizeAllowedBodyOpaqueRescueByDocId(allowedBodyOpaqueRescueByDocId),
+				secondPassCandidateDetails: summarizePackingProfiles(secondPassCandidateProfiles),
 				topRankedCandidateDetails: summarizeTopRankedCandidates(rankedCandidates),
 				phaseMs: {
 					analyze: roundDebugMs(analyzeMs),
@@ -350,6 +368,70 @@ function summarizeTopRankedCandidates(
 			(group) => group.surfaceGroupIndex,
 		),
 	}));
+}
+
+function summarizePackingProfiles(
+	profiles: readonly EvidencePackingProfile[],
+): ReadonlyArray<{
+	docId: number;
+	path: string;
+	realizedCoverageCount: number;
+	coverageGate: EvidencePackingProfile["coverageGate"];
+	exactUnitCount: number;
+	completedHanSurfaceGroupCount: number;
+	strongestHanSurfaceCompletionTier: EvidencePackingProfile["strongestHanSurfaceCompletionTier"];
+	realizedFamilies: ReadonlyArray<{
+		queryUnitIndex: number;
+		queryUnitText: string;
+		querySurfaceGroupIndex: number | null;
+		familyText: string;
+		matchKind: string;
+		inIdentity: boolean;
+		inRoute: boolean;
+		inHeading: boolean;
+		inBestBodyWindow: boolean;
+		inBodyResidue: boolean;
+	}>;
+	bodyWindowBlockIds: readonly number[];
+}> {
+	return profiles.map((profile) => ({
+		docId: profile.docId,
+		path: profile.path,
+		realizedCoverageCount: profile.realizedCoverageCount,
+		coverageGate: profile.coverageGate,
+		exactUnitCount: profile.exactUnitCount,
+		completedHanSurfaceGroupCount: profile.completedHanSurfaceGroupCount,
+		strongestHanSurfaceCompletionTier: profile.strongestHanSurfaceCompletionTier,
+		realizedFamilies: profile.realizedFamilies.map((family) => ({
+			queryUnitIndex: family.queryUnitIndex,
+			queryUnitText: family.queryUnitText,
+			querySurfaceGroupIndex: family.querySurfaceGroupIndex,
+			familyText: family.familyText,
+			matchKind: family.matchKind,
+			inIdentity: family.inIdentity,
+			inRoute: family.inRoute,
+			inHeading: family.inHeading,
+			inBestBodyWindow: family.inBestBodyWindow,
+			inBodyResidue: family.inBodyResidue,
+		})),
+		bodyWindowBlockIds: profile.bodyWindowContainer?.blockIds ?? [],
+	}));
+}
+
+function summarizeAllowedBodyOpaqueRescueByDocId(
+	allowedBodyOpaqueRescueByDocId: ReadonlyMap<number, ReadonlySet<number>>,
+): ReadonlyArray<{
+	docId: number;
+	allowedSurfaceGroupIndices: readonly number[];
+}> {
+	return [...allowedBodyOpaqueRescueByDocId.entries()]
+		.map(([docId, surfaceGroupIndices]) => ({
+			docId,
+			allowedSurfaceGroupIndices: [...surfaceGroupIndices].sort(
+				(left, right) => left - right,
+			),
+		}))
+		.sort((left, right) => left.docId - right.docId);
 }
 
 function hasBodyOpaqueRescueSeeds(candidateRecall: V3RecallState["candidateDocs"][number]): boolean {

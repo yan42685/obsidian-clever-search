@@ -3,6 +3,7 @@ import {
 	comparePackingProfiles,
 	comparePackingProfilesBeforeHanSurfaceCompletion,
 } from "src/services/search/coverage-lexical-v3/ranking/comparator";
+import type { HanRescueAssessment } from "src/services/search/coverage-lexical-v3/han-rescue";
 import type {
 	BodyWindowContainer,
 	EvidencePackingProfile,
@@ -85,6 +86,13 @@ function createPackingProfile(
 		strongestHanSurfaceCompletionTier:
 			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
+		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
+		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
+		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
+		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
+		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
+		compoundBackedPrefixCount: overrides.compoundBackedPrefixCount ?? 0,
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
@@ -114,6 +122,28 @@ function createMetadataPackingSignature(
 		aliasUnitCount: overrides.aliasUnitCount ?? 0,
 		routeUnitCount: overrides.routeUnitCount ?? 0,
 		sortedBuckets: overrides.sortedBuckets ?? [],
+	};
+}
+
+function createHanRescueAssessment(
+	overrides: Partial<HanRescueAssessment> & Pick<HanRescueAssessment, "surfaceGroupIndex">,
+): HanRescueAssessment {
+	return {
+		surfaceGroupIndex: overrides.surfaceGroupIndex,
+		context: overrides.context ?? "body",
+		rescueMode: overrides.rescueMode ?? "whole_group_when_real_miss",
+		strength: overrides.strength ?? "strong",
+		matchedBigramCount: overrides.matchedBigramCount ?? 2,
+		matchedRealAnchorCount: overrides.matchedRealAnchorCount ?? 0,
+		coversStartAnchor: overrides.coversStartAnchor ?? true,
+		coversEndAnchor: overrides.coversEndAnchor ?? true,
+		coversEndpoints: overrides.coversEndpoints ?? true,
+		preservesSurfaceOrder: overrides.preservesSurfaceOrder ?? true,
+		rankingScore: overrides.rankingScore ?? 1.6,
+		approxMaxAdjacentGap: overrides.approxMaxAdjacentGap ?? 4,
+		approxHeadTailSpan: overrides.approxHeadTailSpan ?? 24,
+		blockIds: overrides.blockIds ?? [0],
+		witnessKind: overrides.witnessKind ?? "body",
 	};
 }
 
@@ -615,5 +645,83 @@ describe("coverage lexical v3 comparator", () => {
 
 		expect(comparePackingProfiles(left, right)).toBeLessThan(0);
 		expect(comparePackingProfiles(right, left)).toBeGreaterThan(0);
+	});
+
+	test("han rescue summary prefers strong rescue over weak-only rescue within the same packing tier", () => {
+		const strong = createPackingProfile({
+			path: "strong.md",
+			hanStrongRescueGroupCount: 1,
+			hanRescueSupportWeightTotal: 1.6,
+			hasAnyHanRescueAssessment: true,
+			hanRescueAssessments: [createHanRescueAssessment({ surfaceGroupIndex: 0 })],
+		});
+		const weakOnly = createPackingProfile({
+			path: "weak.md",
+			hanWeakRescueGroupCount: 1,
+			hanRescueSupportWeightTotal: 0.7,
+			hasOnlyWeakHanRescue: true,
+			hasAnyHanRescueAssessment: true,
+			hanRescueAssessments: [
+				createHanRescueAssessment({
+					surfaceGroupIndex: 0,
+					strength: "weak",
+					matchedBigramCount: 1,
+					coversStartAnchor: true,
+					coversEndAnchor: false,
+					coversEndpoints: false,
+					rankingScore: 0.7,
+				}),
+			],
+		});
+
+		expect(comparePackingProfiles(strong, weakOnly)).toBeLessThan(0);
+	});
+
+	test("han rescue summary uses assessment strength and support as bounded tie-breakers", () => {
+		const stronger = createPackingProfile({
+			path: "stronger.md",
+			hanStrongRescueGroupCount: 1,
+			hanRescueSupportWeightTotal: 1.8,
+			hasAnyHanRescueAssessment: true,
+			hanRescueAssessments: [
+				createHanRescueAssessment({
+					surfaceGroupIndex: 0,
+					matchedRealAnchorCount: 1,
+					rankingScore: 1.8,
+				}),
+			],
+		});
+		const weaker = createPackingProfile({
+			path: "weaker.md",
+			hanStrongRescueGroupCount: 1,
+			hanRescueSupportWeightTotal: 1.4,
+			hasAnyHanRescueAssessment: true,
+			hanRescueAssessments: [
+				createHanRescueAssessment({
+					surfaceGroupIndex: 0,
+					matchedRealAnchorCount: 0,
+					rankingScore: 1.4,
+				}),
+			],
+		});
+
+		expect(comparePackingProfiles(stronger, weaker)).toBeLessThan(0);
+	});
+
+	test("compound-backed prefixes lose before larger completion-gain plain prefixes", () => {
+		const plain = createPackingProfile({
+			path: "plain.md",
+			realizedCoverageCount: 1,
+			prefixCompletionGainTotal: 5,
+			compoundBackedPrefixCount: 0,
+		});
+		const compoundBacked = createPackingProfile({
+			path: "compound.md",
+			realizedCoverageCount: 1,
+			prefixCompletionGainTotal: 1,
+			compoundBackedPrefixCount: 1,
+		});
+
+		expect(comparePackingProfiles(plain, compoundBacked)).toBeLessThan(0);
 	});
 });
