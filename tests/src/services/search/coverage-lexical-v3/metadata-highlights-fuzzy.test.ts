@@ -23,7 +23,26 @@ function createPackingProfile(
 		strongestHanSurfaceCompletionTier:
 			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		singletonHanCompletion: overrides.singletonHanCompletion ?? {
+			singletonHanChar: null,
+			singletonHanCharIndex: null,
+			singletonHanSurfaceGroupIndex: null,
+			matched: false,
+			matchSource: "none",
+			bestAnchorKind: "none",
+			bestAnchorDistance: null,
+			sameBlockAsAnchor: false,
+			sameBlockAsBestBodyWindow: false,
+			tier: "none",
+		},
+		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
+		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
+		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
+		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
+		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
+		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
+		compoundBackedPrefixCount: overrides.compoundBackedPrefixCount ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 1,
 		fuzzyEditDistanceTotal: overrides.fuzzyEditDistanceTotal ?? 1,
@@ -117,4 +136,36 @@ describe("coverage lexical v3 fuzzy metadata highlights", () => {
 			sliceHighlights("notes/runtime/", highlights.folderWeakHighlightRanges),
 		).toEqual([]);
 	});
+
+	test("singleton Han metadata matches render as strong ranges", () => {
+		const queryAnalysis = analyzeQuery("\u9910");
+		const highlights = buildV3MetadataFieldHighlightRanges({
+			queryAnalysis,
+			candidate: createPackingProfile({
+				path: "notes/menu.md",
+				realizedCoverageCount: 0,
+				realizedFamilies: [],
+				singletonHanCompletion: {
+					singletonHanChar: "\u9910",
+					singletonHanCharIndex: null,
+					singletonHanSurfaceGroupIndex: 0,
+					matched: true,
+					matchSource: "identity",
+					bestAnchorKind: "none",
+					bestAnchorDistance: null,
+					sameBlockAsAnchor: false,
+					sameBlockAsBestBodyWindow: false,
+					tier: "tight",
+				},
+			}),
+			basenameText: "\u5957\u9910\u8bf4\u660e",
+			folderText: "notes/\u9910\u996e/",
+		});
+
+		expect(
+			sliceHighlights("\u5957\u9910\u8bf4\u660e", highlights.basenameHighlightRanges),
+		).toContain("\u9910");
+		expect(highlights.basenameWeakHighlightRanges).toEqual([]);
+	});
 });
+

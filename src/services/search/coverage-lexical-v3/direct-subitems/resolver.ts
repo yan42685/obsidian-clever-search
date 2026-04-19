@@ -82,6 +82,7 @@ function hasSameAnchorGate(
 	return (
 		left.coveredRealPrimaryCount === right.coveredRealPrimaryCount &&
 		left.confirmedSurfaceGroupCount === right.confirmedSurfaceGroupCount &&
+		left.singletonHanCompletionTier === right.singletonHanCompletionTier &&
 		left.anchorTier === right.anchorTier
 	);
 }

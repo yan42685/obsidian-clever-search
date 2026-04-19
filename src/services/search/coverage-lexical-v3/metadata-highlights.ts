@@ -12,6 +12,7 @@ import {
 } from "./primitive-evidence";
 
 type MetadataHighlightOccurrenceKind =
+	| "singleton_han"
 	| "real_exact"
 	| "fuzzy"
 	| "opaque_bigram"
@@ -70,13 +71,24 @@ export function buildV3MetadataFieldHighlightRanges(params: {
 		queryAnalysis: params.queryAnalysis,
 		witnesses,
 	});
+	const singletonHighlightsByField = collectSingletonHanHighlightsByField({
+		queryAnalysis: params.queryAnalysis,
+		candidate: params.candidate,
+		witnesses,
+	});
 	const basenameBundle = buildWitnessHighlightBundle(
 		realOccurrencesByField.basename,
-		hanHighlightsByField.basename,
+		[
+			...hanHighlightsByField.basename,
+			...singletonHighlightsByField.basename,
+		],
 	);
 	const folderBundle = buildWitnessHighlightBundle(
 		realOccurrencesByField.folder,
-		hanHighlightsByField.folder,
+		[
+			...hanHighlightsByField.folder,
+			...singletonHighlightsByField.folder,
+		],
 	);
 	return {
 		basenameHighlightRanges: mergeHighlightRanges(
@@ -206,6 +218,57 @@ function collectOpaqueHanHighlightsByField(params: Readonly<{
 	};
 }
 
+function collectSingletonHanHighlightsByField(params: Readonly<{
+	queryAnalysis: V3QueryAnalysis;
+	candidate: EvidencePackingProfile;
+	witnesses: readonly MetadataWitness[];
+}>): Readonly<{
+	basename: readonly MetadataHighlightOccurrence[];
+	folder: readonly MetadataHighlightOccurrence[];
+}> {
+	const outByField = {
+		basename: [] as MetadataHighlightOccurrence[],
+		folder: [] as MetadataHighlightOccurrence[],
+	};
+	const singletonHanCompletion = params.candidate.singletonHanCompletion;
+	const singletonHanChar =
+		singletonHanCompletion?.matched && singletonHanCompletion.singletonHanChar != null
+			? singletonHanCompletion.singletonHanChar
+			: params.queryAnalysis.querySingletonHanRecallEligible
+				? params.queryAnalysis.querySingletonHanChar
+				: null;
+	const singletonHanSurfaceGroupIndex =
+		singletonHanCompletion?.matched
+			? singletonHanCompletion.singletonHanSurfaceGroupIndex
+			: null;
+	if (
+		singletonHanChar == null
+	) {
+		return outByField;
+	}
+	for (const witness of params.witnesses) {
+		for (const charOffset of collectTextOffsets(
+			witness.text,
+			singletonHanChar,
+		)) {
+			outByField[witness.field].push({
+				kind: "singleton_han",
+				start: witness.start + charOffset,
+				end:
+					witness.start +
+					charOffset +
+					singletonHanChar.length,
+				queryUnitIndex: null,
+				surfaceGroupIndex: singletonHanSurfaceGroupIndex,
+			});
+		}
+	}
+	return {
+		basename: dedupeMetadataOccurrences(outByField.basename),
+		folder: dedupeMetadataOccurrences(outByField.folder),
+	};
+}
+
 function chooseBestMetadataWitnessForSurfaceGroup(
 	surfaceGroup: V3QuerySurfaceGroup,
 	witnesses: readonly MetadataWitness[],
@@ -292,6 +355,9 @@ function collectRealHanSurfaceOccurrencesInWitness(
 			queryAnalysis: {
 				queryText: surfaceGroup.text,
 				normalizedQueryText: surfaceGroup.text,
+				querySingletonHanChar: null,
+				querySingletonHanCodePoint: null,
+				querySingletonHanRecallEligible: false,
 				surfaceGroups: [surfaceGroup],
 				primaryUnits: [
 					{
@@ -316,7 +382,7 @@ function collectRealHanSurfaceOccurrencesInWitness(
 					identityMetadataSource: "basename",
 					routeMetadataSource: "folder",
 					metadataPackingSource: "none",
-                    bodyPrefixSupportKind: 'none',
+					bodyPrefixSupportKind: "none",
 					inIdentity: false,
 					inRoute: false,
 					inHeading: false,
@@ -530,4 +596,18 @@ function toHighlightRange(
 		start: occurrence.start,
 		end: occurrence.end,
 	};
+}
+
+function collectTextOffsets(text: string, target: string): number[] {
+	const offsets: number[] = [];
+	let searchStart = 0;
+	while (searchStart <= text.length - target.length) {
+		const matchIndex = text.indexOf(target, searchStart);
+		if (matchIndex < 0) {
+			break;
+		}
+		offsets.push(matchIndex);
+		searchStart = matchIndex + 1;
+	}
+	return offsets;
 }

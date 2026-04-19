@@ -11,6 +11,14 @@ import {
 } from "../query/text";
 import type { V3CandidateDocRecall, V3ResolvedHanSurfaceGroup } from "../recall";
 import { resolveCandidateHanSurfaceGroups } from "../recall/han-surface-groups";
+import type { SingletonHanTarget } from "../singleton-han";
+import {
+	buildWeightedGapIndex,
+	computeWeightedAdjacentBoundaryGap,
+	computeWeightedBoundaryGap,
+	computeWeightedGap,
+	type WeightedGapIndex,
+} from "../weighted-gap";
 import type { EvidencePackingProfile } from "../ranking";
 import {
 	collectOpaqueBigramOccurrencesInText,
@@ -28,9 +36,10 @@ import type {
 	V3DirectSubitemResidualScopeTier,
 } from "./contracts";
 
-const DIRECT_SUBITEM_HAN_GAP_WEIGHT = 0.65;
-const DIRECT_SUBITEM_OTHER_GAP_WEIGHT = 0.25;
-const HAN_CHAR_PATTERN = /\p{Script=Han}/u;
+const DIRECT_SUBITEM_SINGLETON_HAN_TIER_SCORE = {
+	none: 0,
+	tight: 1,
+} as const;
 
 type RawBlock = Readonly<{
 	blockId: number;
@@ -49,6 +58,7 @@ type LocalScope = Readonly<{
 
 type BuildScopeContext = Readonly<{
 	snapshotText: string;
+	snapshotGapIndex: WeightedGapIndex;
 	queryAnalysis: V3QueryAnalysis;
 	candidate: EvidencePackingProfile;
 	candidateRecall: V3CandidateDocRecall;
@@ -57,6 +67,9 @@ type BuildScopeContext = Readonly<{
 	surfaceGroupByIndex: ReadonlyMap<number, V3QuerySurfaceGroup>;
 	resolvedHanSurfaceGroupByIndex: ReadonlyMap<number, V3ResolvedHanSurfaceGroup>;
 	hanRescueAssessmentByGroupIndex: ReadonlyMap<number, HanRescueAssessment>;
+	singletonHanTargets: readonly SingletonHanTarget[];
+	blockById: ReadonlyMap<number, RawBlock>;
+	blockGapIndexById: ReadonlyMap<number, WeightedGapIndex>;
 }>;
 
 type ExplanationSearchState = {
@@ -135,9 +148,21 @@ export function buildV3DirectSubitemCandidates(params: {
 			assessment,
 		]),
 	);
-	const candidates = scopes.flatMap((scope) =>
-		buildCandidatesForScope({
+	const singletonHanTargets = deriveSingletonHanTargetsFromCandidate(
+		params.queryAnalysis,
+		params.candidate,
+	);
+	const snapshotGapIndex = buildWeightedGapIndex(params.snapshotText);
+	const candidates = scopes.flatMap((scope) => {
+		const blockById = new Map<number, RawBlock>(
+			scope.blocks.map((block) => [block.blockId, block]),
+		);
+		const blockGapIndexById = new Map<number, WeightedGapIndex>(
+			scope.blocks.map((block) => [block.blockId, buildWeightedGapIndex(block.text)]),
+		);
+		return buildCandidatesForScope({
 			snapshotText: params.snapshotText,
+			snapshotGapIndex,
 			queryAnalysis: params.queryAnalysis,
 			candidate: params.candidate,
 			candidateRecall: params.candidateRecall,
@@ -146,8 +171,11 @@ export function buildV3DirectSubitemCandidates(params: {
 			surfaceGroupByIndex,
 			resolvedHanSurfaceGroupByIndex,
 			hanRescueAssessmentByGroupIndex,
-		}),
-	);
+			singletonHanTargets,
+			blockById,
+			blockGapIndexById,
+		});
+	});
 	return candidates.sort(compareV3DirectSubitemCandidates);
 }
 
@@ -156,7 +184,7 @@ function buildCandidatesForScope(
 ): V3DirectSubitemCandidate[] {
 	const baseOccurrences = collectBaseOccurrencesForScope(context);
 	if (baseOccurrences.length === 0) {
-		return [];
+		return buildSingletonOnlyCandidates(context);
 	}
 	const candidatesByKey = new Map<string, V3DirectSubitemCandidate>();
 	for (let startIndex = 0; startIndex < baseOccurrences.length; startIndex += 1) {
@@ -327,7 +355,114 @@ function collectBaseOccurrencesForScope(
 			});
 		},
 	);
-	return dedupeAtoms([...realOccurrences, ...opaqueOccurrences]).sort(compareAtoms);
+	const matchedBigramOccurrences = collectMatchedBigramOccurrencesForScope(context);
+	return dedupeAtoms([
+		...realOccurrences,
+		...opaqueOccurrences,
+		...matchedBigramOccurrences,
+	]).sort(compareAtoms);
+}
+
+function deriveSingletonHanTargetsFromCandidate(
+	queryAnalysis: V3QueryAnalysis,
+	candidate: EvidencePackingProfile,
+): readonly SingletonHanTarget[] {
+	const singletonHanCompletion = candidate.singletonHanCompletion;
+	if (
+		singletonHanCompletion != null &&
+		singletonHanCompletion.matched &&
+		singletonHanCompletion.singletonHanChar != null
+	) {
+		return [
+			{
+				char: singletonHanCompletion.singletonHanChar,
+				singletonHanCharIndex: singletonHanCompletion.singletonHanCharIndex,
+				surfaceGroupIndex: singletonHanCompletion.singletonHanSurfaceGroupIndex,
+				kind:
+					singletonHanCompletion.singletonHanCharIndex == null
+						? "query_singleton"
+						: "residual_singleton",
+			},
+		];
+	}
+	if (
+		queryAnalysis.querySingletonHanRecallEligible &&
+		queryAnalysis.querySingletonHanChar != null
+	) {
+		return [
+			{
+				char: queryAnalysis.querySingletonHanChar,
+				singletonHanCharIndex: null,
+				surfaceGroupIndex: null,
+				kind: "query_singleton",
+			},
+		];
+	}
+	return [];
+}
+
+function collectMatchedBigramOccurrencesForScope(
+	context: BuildScopeContext,
+): V3DirectSubitemAtom[] {
+	if (
+		!context.candidate.singletonHanCompletion.matched ||
+		context.candidate.singletonHanCompletion.bestAnchorKind !== "bigram" ||
+		context.singletonHanTargets.length === 0
+	) {
+		return [];
+	}
+	const queryBigramTexts = [
+		...new Set(
+			context.queryAnalysis.surfaceGroups.flatMap((group) =>
+				group.kind === "han" ? group.hanBigramTexts : [],
+			),
+		),
+	];
+	if (queryBigramTexts.length === 0) {
+		return [];
+	}
+	const singletonChars = context.singletonHanTargets.map((target) => target.char);
+	return context.scope.blocks.flatMap((block) => {
+		const hasNearbySingleton = singletonChars.some((char) => {
+			if (collectTextOffsets(block.text, char).length > 0) {
+				return true;
+			}
+			return context.scope.blocks.some(
+				(candidateBlock) =>
+					Math.abs(candidateBlock.ordinal - block.ordinal) === 1 &&
+					collectTextOffsets(candidateBlock.text, char).length > 0,
+			);
+		});
+		if (!hasNearbySingleton) {
+			return [];
+		}
+		const out: V3DirectSubitemAtom[] = [];
+		for (const surfaceGroup of context.queryAnalysis.surfaceGroups) {
+			if (surfaceGroup.kind !== "han") {
+				continue;
+			}
+			for (const occurrence of collectOpaqueBigramOccurrencesInText({
+				text: block.text,
+				surfaceGroupIndex: surfaceGroup.index,
+				rescueBigrams: queryBigramTexts,
+			})) {
+				out.push({
+					kind: "matched_bigram_atom",
+					evidenceKind: "matched_bigram",
+					queryUnitIndex: null,
+					surfaceGroupIndex: occurrence.surfaceGroupIndex,
+					blockId: block.blockId,
+					start: block.start + occurrence.start,
+					end: block.start + occurrence.end,
+					matchedText: occurrence.matchedText,
+					anchorTier: "matched_bigram",
+					highlightTier: "strong",
+					bigramText: occurrence.bigramText,
+				});
+			}
+		}
+		return out;
+	});
 }
 
 function applyOccurrenceToState(
@@ -348,6 +483,12 @@ function buildOccurrenceKey(
 	if (occurrence.kind === "realized_family_atom") {
 		return `real:${occurrence.queryUnitIndex ?? -1}`;
 	}
+	if (occurrence.kind === "singleton_han_atom") {
+		return `singleton:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.blockId}:${occurrence.matchedText}`;
+	}
+	if (occurrence.kind === "matched_bigram_atom") {
+		return `matched:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.bigramText ?? occurrence.matchedText}:${occurrence.blockId}`;
+	}
 	if (occurrence.kind === "opaque_bigram_atom") {
 		return `opaque:${occurrence.surfaceGroupIndex ?? -1}:${occurrence.bigramText ?? occurrence.matchedText}`;
 	}
@@ -366,7 +507,7 @@ function buildCandidateFromState(
 	let maxAdjacentGap = 0;
 	for (let index = 1; index < baseAtoms.length; index += 1) {
 		const gap = computeWeightedGap(
-			context.snapshotText,
+			context.snapshotGapIndex,
 			baseAtoms[index - 1].end,
 			baseAtoms[index].start,
 		);
@@ -382,7 +523,12 @@ function buildCandidateFromState(
 		baseAtoms,
 		context.surfaceGroupByIndex,
 	);
-	const atoms = dedupeAtoms([...baseAtoms, ...confirmedSurfaceAtoms]).sort(compareAtoms);
+	const singletonHanAtoms = collectSingletonHanAtomsForScope(context, baseAtoms);
+	const atoms = dedupeAtoms([
+		...baseAtoms,
+		...confirmedSurfaceAtoms,
+		...singletonHanAtoms,
+	]).sort(compareAtoms);
 	if (atoms.length === 0) {
 		return null;
 	}
@@ -397,13 +543,19 @@ function buildCandidateFromState(
 	const opaqueBigramKeys = [
 		...new Set(
 			baseAtoms
-				.filter((atom) => atom.kind === "opaque_bigram_atom")
+				.filter(
+					(atom) =>
+						atom.kind === "opaque_bigram_atom" || atom.kind === "matched_bigram_atom",
+				)
 				.map((atom) => `${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`),
 		),
 	];
 	const touchedOpaqueSurfaceGroupIndices = uniqueSortedNumbers(
 		baseAtoms
-			.filter((atom) => atom.kind === "opaque_bigram_atom")
+			.filter(
+				(atom) =>
+					atom.kind === "opaque_bigram_atom" || atom.kind === "matched_bigram_atom",
+			)
 			.map((atom) => atom.surfaceGroupIndex)
 			.filter((value): value is number => value != null),
 	);
@@ -434,6 +586,11 @@ function buildCandidateFromState(
 				.filter((value): value is number => value != null),
 		).length,
 		confirmedSurfaceGroupCount: confirmedSurfaceGroupIndices.length,
+		singletonHanCompletionTier: resolveSingletonHanCompletionTierForScope(
+			context,
+			baseAtoms,
+			singletonHanAtoms,
+		),
 		matchedOpaqueBigramCount: opaqueBigramKeys.length,
 		opaqueCoverageRatio:
 			totalOpaqueBigramCount > 0
@@ -454,13 +611,14 @@ function buildConfirmedSurfaceAtoms(
 ): V3DirectSubitemAtom[] {
 	const touchedSurfaceGroupIndices = uniqueSortedNumbers(
 		baseAtoms
-			.filter(
-				(atom) =>
-					(atom.kind === "realized_family_atom" ||
-						atom.kind === "opaque_bigram_atom") &&
-					atom.surfaceGroupIndex != null,
-			)
-			.map((atom) => atom.surfaceGroupIndex)
+				.filter(
+					(atom) =>
+						(atom.kind === "realized_family_atom" ||
+							atom.kind === "opaque_bigram_atom" ||
+							atom.kind === "matched_bigram_atom") &&
+						atom.surfaceGroupIndex != null,
+				)
+				.map((atom) => atom.surfaceGroupIndex)
 			.filter((value): value is number => value != null),
 	);
 	if (touchedSurfaceGroupIndices.length === 0) {
@@ -511,6 +669,229 @@ function buildConfirmedSurfaceAtoms(
 	return confirmedAtoms;
 }
 
+function buildSingletonOnlyCandidates(
+	context: BuildScopeContext,
+): V3DirectSubitemCandidate[] {
+	const singletonHanAtoms = collectSingletonHanAtomsForScope(context, []);
+	if (singletonHanAtoms.length === 0) {
+		return [];
+	}
+	const candidates: V3DirectSubitemCandidate[] = [];
+	for (const block of context.scope.blocks) {
+		const blockAtoms = singletonHanAtoms.filter((atom) => atom.blockId === block.blockId);
+		if (blockAtoms.length === 0) {
+			continue;
+		}
+		const atoms = dedupeAtoms(blockAtoms).sort(compareAtoms);
+		const start = atoms[0]?.start ?? block.start;
+		const end = atoms[atoms.length - 1]?.end ?? block.end;
+		candidates.push({
+			start,
+			end,
+			anchorOffset: start,
+			component: {
+				scopeStart: block.start,
+				scopeEnd: block.end,
+				scopeTier: context.scope.scopeTier,
+				blockIds: [block.blockId],
+				atoms,
+			},
+			atoms,
+			displayAtoms: atoms,
+			hasAnchor: true,
+			anchorTier: resolveCandidateAnchorTier(atoms),
+			coveredRealPrimaryCount: 0,
+			confirmedSurfaceGroupCount: 0,
+			singletonHanCompletionTier: resolveSingletonHanCompletionTierForScope(
+				context,
+				[],
+				atoms,
+			),
+			matchedOpaqueBigramCount: 0,
+			opaqueCoverageRatio: 0,
+			preservesQueryOrder: true,
+			windowWidth: Math.max(1, end - start),
+			maxAdjacentGap: 0,
+			totalGap: 0,
+		});
+	}
+	return candidates.sort(compareV3DirectSubitemCandidates);
+}
+
+function collectSingletonHanAtomsForScope(
+	context: BuildScopeContext,
+	baseAtoms: readonly V3DirectSubitemAtom[],
+): V3DirectSubitemAtom[] {
+	if (context.singletonHanTargets.length === 0) {
+		return [];
+	}
+	const shortlistedBodyBlockIds = new Set(context.candidateRecall.shortlistedBodyBlockIds);
+	const atoms: V3DirectSubitemAtom[] = [];
+	for (const target of context.singletonHanTargets) {
+		for (const block of context.scope.blocks) {
+			const charOffsets = collectTextOffsets(block.text, target.char);
+			if (charOffsets.length === 0) {
+				continue;
+			}
+			if (baseAtoms.length === 0) {
+				if (target.kind !== "query_singleton") {
+					continue;
+				}
+				if (!shortlistedBodyBlockIds.has(block.blockId)) {
+					continue;
+				}
+				const earliestOffset = charOffsets[0];
+				if (earliestOffset == null) {
+					continue;
+				}
+				atoms.push({
+					kind: "singleton_han_atom",
+					evidenceKind: "singleton_han",
+					queryUnitIndex: null,
+					surfaceGroupIndex: target.surfaceGroupIndex,
+					blockId: block.blockId,
+					start: block.start + earliestOffset,
+					end: block.start + earliestOffset + target.char.length,
+					matchedText: target.char,
+					anchorTier: "singleton_han",
+					highlightTier: "strong",
+					bigramText: null,
+				});
+				continue;
+			}
+			let bestOffset: number | null = null;
+			let bestGap = Number.POSITIVE_INFINITY;
+		for (const charOffset of charOffsets) {
+			const start = block.start + charOffset;
+			const end = start + target.char.length;
+			if (
+				baseAtoms.some(
+					(anchor) =>
+						anchor.blockId === block.blockId &&
+						Math.min(anchor.end, end) > Math.max(anchor.start, start),
+				)
+			) {
+				continue;
+			}
+			for (const anchor of baseAtoms) {
+				const gap = computeScopeAtomBoundaryGap(
+					context,
+						{ blockId: block.blockId, start, end },
+						anchor,
+					);
+					if (gap == null) {
+						continue;
+					}
+					if (gap < bestGap || (gap === bestGap && (bestOffset == null || charOffset < bestOffset))) {
+						bestGap = gap;
+						bestOffset = charOffset;
+					}
+				}
+			}
+			if (
+				bestOffset == null ||
+				bestGap > HAN_BODY_LOCALITY_MAX_ADJACENT_GAP
+			) {
+				continue;
+			}
+			atoms.push({
+				kind: "singleton_han_atom",
+				evidenceKind: "singleton_han",
+				queryUnitIndex: null,
+				surfaceGroupIndex: target.surfaceGroupIndex,
+				blockId: block.blockId,
+				start: block.start + bestOffset,
+				end: block.start + bestOffset + target.char.length,
+				matchedText: target.char,
+				anchorTier: "singleton_han",
+				highlightTier: "strong",
+				bigramText: null,
+			});
+		}
+	}
+	return dedupeAtoms(atoms).sort(compareAtoms);
+}
+
+function resolveSingletonHanCompletionTierForScope(
+	context: BuildScopeContext,
+	baseAtoms: readonly V3DirectSubitemAtom[],
+	singletonHanAtoms: readonly V3DirectSubitemAtom[],
+): "none" | "tight" {
+	if (singletonHanAtoms.length === 0) {
+		return "none";
+	}
+	if (baseAtoms.length === 0) {
+		return "tight";
+	}
+	let bestGap = Number.POSITIVE_INFINITY;
+	for (const singletonAtom of singletonHanAtoms) {
+		for (const anchor of baseAtoms) {
+			const gap = computeScopeAtomBoundaryGap(context, singletonAtom, anchor);
+			if (gap == null) {
+				continue;
+			}
+			bestGap = Math.min(bestGap, gap);
+		}
+	}
+	if (!Number.isFinite(bestGap)) {
+		return "none";
+	}
+	return bestGap <= HAN_BODY_LOCALITY_MAX_ADJACENT_GAP ? "tight" : "none";
+}
+
+function computeScopeAtomBoundaryGap(
+	context: BuildScopeContext,
+	left: Pick<V3DirectSubitemAtom, "blockId" | "start" | "end">,
+	right: Pick<V3DirectSubitemAtom, "blockId" | "start" | "end">,
+): number | null {
+	const leftBlock = context.blockById.get(left.blockId);
+	const rightBlock = context.blockById.get(right.blockId);
+	const leftGapIndex = context.blockGapIndexById.get(left.blockId);
+	const rightGapIndex = context.blockGapIndexById.get(right.blockId);
+	if (
+		leftBlock == null ||
+		rightBlock == null ||
+		leftGapIndex == null ||
+		rightGapIndex == null
+	) {
+		return null;
+	}
+	const leftStart = left.start - leftBlock.start;
+	const leftEnd = left.end - leftBlock.start;
+	const rightStart = right.start - rightBlock.start;
+	const rightEnd = right.end - rightBlock.start;
+	if (left.blockId === right.blockId) {
+		return computeWeightedBoundaryGap(
+			leftGapIndex,
+			leftStart,
+			leftEnd,
+			rightStart,
+			rightEnd,
+		);
+	}
+	if (Math.abs(leftBlock.ordinal - rightBlock.ordinal) !== 1) {
+		return null;
+	}
+	if (leftBlock.ordinal < rightBlock.ordinal) {
+		return computeWeightedAdjacentBoundaryGap(
+			leftGapIndex,
+			leftStart,
+			leftEnd,
+			rightGapIndex,
+			rightStart,
+			rightEnd,
+		);
+	}
+	return computeWeightedAdjacentBoundaryGap(
+		rightGapIndex,
+		rightStart,
+		rightEnd,
+		leftGapIndex,
+		leftStart,
+		leftEnd,
+	);
+}
+
 function buildCanonicalSnapshotKey(
 	candidate: V3DirectSubitemCandidate,
 	scopeBlocks: readonly RawBlock[],
@@ -524,7 +905,10 @@ function buildCanonicalSnapshotKey(
 	const opaqueBigramKeys = [
 		...new Set(
 			candidate.atoms
-				.filter((atom) => atom.kind === "opaque_bigram_atom")
+				.filter(
+					(atom) =>
+						atom.kind === "opaque_bigram_atom" || atom.kind === "matched_bigram_atom",
+				)
 				.map((atom) => `${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`),
 		),
 	]
@@ -851,12 +1235,16 @@ function getAnchorTierScore(
 ): number {
 	switch (tier) {
 		case "confirmed_surface":
-			return 4;
+			return 5;
 		case "opaque_bigram":
+			return 4;
+		case "matched_bigram":
 			return 3;
 		case "weak_opaque_bigram":
-			return 2;
+			return 3;
 		case "real_lexical":
+			return 2;
+		case "singleton_han":
 			return 1;
 		default:
 			return 0;
@@ -874,25 +1262,22 @@ function preservesQueryOrder(
 	return true;
 }
 
-function computeWeightedGap(
-	snapshotText: string,
-	start: number,
-	end: number,
-): number {
-	if (end <= start) {
-		return 0;
-	}
-	let total = 0;
-	for (const char of snapshotText.slice(start, end)) {
-		total += HAN_CHAR_PATTERN.test(char)
-			? DIRECT_SUBITEM_HAN_GAP_WEIGHT
-			: DIRECT_SUBITEM_OTHER_GAP_WEIGHT;
-	}
-	return total;
-}
-
 function uniqueSortedNumbers(
 	values: readonly number[],
 ): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function collectTextOffsets(text: string, target: string): number[] {
+	const offsets: number[] = [];
+	let searchStart = 0;
+	while (searchStart <= text.length - target.length) {
+		const matchIndex = text.indexOf(target, searchStart);
+		if (matchIndex < 0) {
+			break;
+		}
+		offsets.push(matchIndex);
+		searchStart = matchIndex + 1;
+	}
+	return offsets;
 }

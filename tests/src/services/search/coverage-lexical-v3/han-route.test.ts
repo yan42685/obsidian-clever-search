@@ -3,13 +3,19 @@ import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import {
 	buildHanRouteArena,
+	decodeBodyHanCharPosting,
 	decodeBodyHanPosting,
 } from "src/services/search/coverage-lexical-v3/layout/han-route";
 import {
 	encodeHanBigramId,
+	encodeHanCharId,
 	type V3DocumentTokenizer,
 } from "src/services/search/coverage-lexical-v3/query";
-import { collectHanBodyBlockIds } from "src/services/search/coverage-lexical-v3/recall/access";
+import {
+	collectHanBodyBlockIds,
+	collectHanBodyBlockIdsByChar,
+	collectHanMetadataDocIdsByChar,
+} from "src/services/search/coverage-lexical-v3/recall/access";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
@@ -256,6 +262,35 @@ describe("coverage lexical v3 han route", () => {
 		}
 	});
 
+	test("singleton Han route stores metadata doc postings and body block postings without heading-only fanout", () => {
+		const residentBase = buildResidentBase([
+			createDocument({
+				path: "zh/singleton-route.md",
+				basename: "\u4e91\u7f13\u5b58",
+				folder: "\u4e91ops",
+				headings: "\u4e91\u6807\u9898",
+				content: "\u4e91\u6062\u590d\u6b65\u9aa4",
+			}),
+			createDocument({
+				path: "zh/heading-only.md",
+				basename: "\u666e\u901a\u7b14\u8bb0",
+				folder: "zh",
+				headings: "\u4e91\u6807\u9898",
+				content: "\u666e\u901a\u8bb0\u5f55",
+			}),
+		]);
+
+		expect(residentBase.hanRoute.metadataCharIds.length).toBeGreaterThan(0);
+		expect(residentBase.hanRoute.metadataCharPostingStarts.length).toBe(
+			residentBase.hanRoute.metadataCharIds.length + 1,
+		);
+		expect(collectHanMetadataDocIdsByChar(residentBase, encodeHanCharId("\u4e91"))).toEqual([1]);
+		expect(collectHanBodyBlockIdsByChar(residentBase, encodeHanCharId("\u4e91"))).toEqual([1]);
+		expect(
+			decodeBodyHanCharPosting(residentBase.hanRoute, encodeHanCharId("\u4e91")),
+		).toEqual([1]);
+	});
+
 	test("heading-only Han route no longer admits docs through metadata gate", () => {
 		const engine = new CoverageLexicalV3Engine();
 		engine.buildResidentBase([
@@ -367,6 +402,9 @@ describe("coverage lexical v3 han route", () => {
 				[13, [0, 2, 5]],
 				[14, [0, 1, 2, 3, 4, 5, 6, 7, 8]],
 			]),
+			metadataCharIds: [],
+			metadataDocIdsByChar: [],
+			bodyPostingsByCharId: new Map(),
 			identityWitnessStringIdsByDoc: [],
 			identityWitnessSourceMasksByDoc: [],
 			routeWitnessStringIdsByDoc: [],
@@ -409,3 +447,6 @@ describe("coverage lexical v3 han route", () => {
 		).toBeGreaterThan(0);
 	});
 });
+
+
+

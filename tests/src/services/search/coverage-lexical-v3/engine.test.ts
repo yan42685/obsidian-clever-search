@@ -66,6 +66,26 @@ function buildAdjacentHanChunkBoundaryContent(): string {
 	}
 	throw new Error("failed to construct adjacent Han chunk boundary content");
 }
+function buildAdjacentSingletonHanChunkBoundaryContent(
+	anchorText: string,
+	singletonChar: string,
+): string {
+	for (let charCount = 900; charCount <= 4000; charCount += 1) {
+		const content = `${"x".repeat(charCount)}${anchorText}${singletonChar}`;
+		const blocks = splitBodyBlocks(content);
+		const previous = blocks[0]?.normalizedText ?? "";
+		const last = blocks[1]?.normalizedText ?? "";
+		if (
+			blocks.length === 2 &&
+			previous.endsWith(anchorText) &&
+			last.startsWith(singletonChar)
+		) {
+			return content;
+		}
+	}
+	throw new Error("failed to construct adjacent singleton Han chunk boundary content");
+}
+
 describe("coverage lexical v3 engine", () => {
 	test("search read path builds candidates and ranks the stronger packed document first", () => {
 		const engine = new CoverageLexicalV3Engine();
@@ -648,6 +668,222 @@ describe("coverage lexical v3 engine", () => {
 					inBestBodyWindow: true,
 				}),
 			]),
+		);
+	});
+
+	test("adjacent singleton Han completion can stay tight across a chunk boundary", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const adjacentContent = buildAdjacentSingletonHanChunkBoundaryContent(
+			"\u751f\u547d",
+			"\u529b",
+		);
+		const tokenizer = createDocumentTokenizer({
+			"\u751f\u547d\u529b": ["\u751f\u547d"],
+			[adjacentContent]: ["\u751f\u547d"],
+			"\u751f\u547d": ["\u751f\u547d"],
+		});
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/life-force-adjacent.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: adjacentContent,
+				}),
+				createDocument({
+					path: "zh/life-only.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u751f\u547d",
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u751f\u547d\u529b", ["\u751f\u547d"]);
+
+		expect(result.rankedCandidates[0]?.path).toBe("zh/life-force-adjacent.md");
+		expect(result.rankedCandidates[0]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: true,
+				matchSource: "body_adjacent_block",
+				tier: "tight",
+				bestAnchorKind: "exact",
+				bestAnchorDistance: 0,
+			}),
+		);
+		expect(result.rankedCandidates[1]?.singletonHanCompletion.matched).toBe(false);
+	});
+
+	test("rescue bigram does not satisfy singleton completion with its own overlapping char", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const filler = "\u9694\u5f00\u5f88\u8fdc\u7684\u8bf4\u660e\u6587\u5b57".repeat(12);
+		const rescueOnlyContent = `\u524d\u9762\u5148\u5199\u751f\u547d${filler}\u6700\u540e\u53ea\u7528\u547d\u529b\u6765\u6536\u5c3e\u3002`;
+		const tokenizer: V3DocumentTokenizer = (text) =>
+			text.includes("\u751f\u547d") ? ["\u751f\u547d"] : [];
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/rescue-only-overlap.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: rescueOnlyContent,
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u751f\u547d\u529b", ["\u751f\u547d"]);
+
+		expect(result.rankedCandidates[0]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: false,
+				matchSource: "none",
+				tier: "none",
+			}),
+		);
+	});
+
+	test("matched bigram coverage removes singleton rescue when the query Han mask is fully covered", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const filler = "\u9694\u5f00\u5f88\u8fdc\u7684\u8bf4\u660e\u6587\u5b57".repeat(12);
+		const rescueBigramContent = `\u524d\u9762\u5148\u5199\u751f\u547d${filler}\u6700\u540e\u7528\u547d\u529b\u529b\u6765\u6536\u5c3e\u3002`;
+		const exactOnlyContent = `\u524d\u9762\u5148\u5199\u751f\u547d${filler}\u6700\u540e\u53ea\u653e\u4e00\u4e2a\u529b\u5b57\u3002`;
+		const tokenizer: V3DocumentTokenizer = (text) =>
+			text.includes("\u751f\u547d") ? ["\u751f\u547d"] : [];
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/rescue-bigram-singleton.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: rescueBigramContent,
+				}),
+				createDocument({
+					path: "zh/exact-only-singleton.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: exactOnlyContent,
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u751f\u547d\u529b", ["\u751f\u547d"]);
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/rescue-bigram-singleton.md",
+			"zh/exact-only-singleton.md",
+		]);
+		expect(result.rankedCandidates[0]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: false,
+				matchSource: "none",
+				tier: "none",
+			}),
+		);
+		expect(result.rankedCandidates[1]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: false,
+				matchSource: "none",
+				tier: "none",
+				bestAnchorKind: "none",
+			}),
+		);
+	});
+
+	test("any matched query bigram can seed residual singleton completion", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const bigramAndSingletonContent = "\u524d\u9762\u5148\u5199\u8d62\u5b8ba\u529f\uff0c\u540e\u9762\u518d\u8865\u4e00\u4e9b\u8bf4\u660e\u3002";
+		const bigramOnlyContent = "\u524d\u9762\u53ea\u5199\u8d62\u5b8ba\u5b57\uff0c\u540e\u9762\u4e0d\u518d\u51fa\u73b0\u5176\u4ed6\u76f8\u5173\u6c49\u5b57\u3002";
+		const tokenizer: V3DocumentTokenizer = () => [];
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/win-song-gong.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: bigramAndSingletonContent,
+				}),
+				createDocument({
+					path: "zh/win-song-only.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: bigramOnlyContent,
+				}),
+			],
+			tokenizer,
+		);
+
+		const result = engine.search("\u8d62\u5b8b\u529f");
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/win-song-gong.md",
+			"zh/win-song-only.md",
+		]);
+		expect(result.rankedCandidates[0]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: true,
+				matchSource: "body_same_block",
+				tier: "tight",
+				bestAnchorKind: "bigram",
+				singletonHanChar: "\u529f",
+			}),
+		);
+		expect(result.rankedCandidates[1]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: false,
+				matchSource: "none",
+				tier: "none",
+			}),
+		);
+	});
+
+	test("global residual singleton recall rescue admits both prefix-side and suffix-side singleton Han around a matched bigram", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const tokenizer: V3DocumentTokenizer = () => [];
+		engine.buildResidentBase(
+			[
+				createDocument({
+					path: "zh/function-origin-winsong.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u529f\u80fd\u8bcd\u6e90\u8d62\u5b8b",
+				}),
+				createDocument({
+					path: "zh/winsong-only.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: "\u53ea\u5199\u8d62\u5b8b",
+				}),
+			],
+			tokenizer,
+		);
+
+		const prefixSingletonResult = engine.search("\u529f\u8d62\u5b8b");
+		expect(prefixSingletonResult.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/function-origin-winsong.md",
+			"zh/winsong-only.md",
+		]);
+		expect(prefixSingletonResult.rankedCandidates[0]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: true,
+				bestAnchorKind: "bigram",
+				singletonHanChar: "\u529f",
+			}),
+		);
+
+		const suffixSingletonResult = engine.search("\u8d62\u5b8b\u529f");
+		expect(suffixSingletonResult.rankedCandidates.map((candidate) => candidate.path)).toEqual([
+			"zh/function-origin-winsong.md",
+			"zh/winsong-only.md",
+		]);
+		expect(suffixSingletonResult.rankedCandidates[0]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: true,
+				bestAnchorKind: "bigram",
+				singletonHanChar: "\u529f",
+			}),
 		);
 	});
 

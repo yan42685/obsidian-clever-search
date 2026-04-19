@@ -8,7 +8,12 @@ import {
 import { decodeBlockPositionLane } from "../layout/position-lanes";
 import { collectBodyFamilyPostingBlockIdsForFamily } from "../layout/body-family-posting";
 import type { ResidentBase } from "../layout/types";
-import { decodeBodyHanPosting, lookupHanBigramIndex } from "../layout/han-route";
+import {
+	decodeBodyHanCharPosting,
+	decodeBodyHanPosting,
+	lookupHanBigramIndex,
+	lookupHanCharIndex,
+} from "../layout/han-route";
 
 export type BodyHanWitnessOccurrence = Readonly<{
 	stringId: number;
@@ -330,6 +335,28 @@ export function collectHanBodyBlockIds(
 	bigramId: number,
 ): number[] {
 	return decodeBodyHanPosting(base.hanRoute, bigramId);
+}
+
+export function collectHanMetadataDocIdsByChar(
+	base: ResidentBase,
+	charId: number,
+): number[] {
+	const charIndex = lookupHanCharIndex(base.hanRoute, charId);
+	if (charIndex === -1) {
+		return [];
+	}
+	return sliceResidentIntegerArray(
+		base.hanRoute.metadataCharDocIds,
+		getSentinelSliceStart(base.hanRoute.metadataCharPostingStarts, charIndex),
+		getSentinelSliceEnd(base.hanRoute.metadataCharPostingStarts, charIndex),
+	);
+}
+
+export function collectHanBodyBlockIdsByChar(
+	base: ResidentBase,
+	charId: number,
+): number[] {
+	return decodeBodyHanCharPosting(base.hanRoute, charId);
 }
 
 export function confirmHanBodyBlockSurface(

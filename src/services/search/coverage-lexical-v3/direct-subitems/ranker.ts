@@ -2,10 +2,12 @@ import type { V3DirectSubitemCandidate } from "./contracts";
 
 const DIRECT_SUBITEM_ANCHOR_TIER_SCORE = {
 	none: 0,
-	real_lexical: 1,
-	weak_opaque_bigram: 2,
-	opaque_bigram: 3,
-	confirmed_surface: 4,
+	singleton_han: 1,
+	real_lexical: 2,
+	matched_bigram: 3,
+	weak_opaque_bigram: 3,
+	opaque_bigram: 4,
+	confirmed_surface: 5,
 } as const;
 
 export function compareV3DirectSubitemCandidates(
@@ -20,6 +22,12 @@ export function compareV3DirectSubitemCandidates(
 	}
 	if (left.confirmedSurfaceGroupCount != right.confirmedSurfaceGroupCount) {
 		return right.confirmedSurfaceGroupCount - left.confirmedSurfaceGroupCount;
+	}
+	if (left.singletonHanCompletionTier !== right.singletonHanCompletionTier) {
+		return (
+			DIRECT_SUBITEM_SINGLETON_HAN_TIER_SCORE[right.singletonHanCompletionTier] -
+			DIRECT_SUBITEM_SINGLETON_HAN_TIER_SCORE[left.singletonHanCompletionTier]
+		);
 	}
 	if (left.opaqueCoverageRatio !== right.opaqueCoverageRatio) {
 		return right.opaqueCoverageRatio - left.opaqueCoverageRatio;
@@ -54,3 +62,9 @@ export function compareV3DirectSubitemCandidates(
 	}
 	return left.end - right.end;
 }
+
+const DIRECT_SUBITEM_SINGLETON_HAN_TIER_SCORE = {
+	none: 0,
+	loose: 1,
+	tight: 2,
+} as const;

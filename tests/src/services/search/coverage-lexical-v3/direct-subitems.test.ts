@@ -168,10 +168,17 @@ function createQueryAnalysis(params: {
 	surfaceGroups: V3QueryAnalysis["surfaceGroups"];
 	primaryUnits: V3QueryAnalysis["primaryUnits"];
 	surfaceCoverageShapeKey?: string;
+	querySingletonHanChar?: string | null;
+	querySingletonHanCodePoint?: number | null;
+	querySingletonHanRecallEligible?: boolean;
 }): V3QueryAnalysis {
 	return {
 		queryText: params.queryText,
 		normalizedQueryText: params.queryText,
+		querySingletonHanChar: params.querySingletonHanChar ?? null,
+		querySingletonHanCodePoint: params.querySingletonHanCodePoint ?? null,
+		querySingletonHanRecallEligible:
+			params.querySingletonHanRecallEligible ?? false,
 		surfaceGroups: params.surfaceGroups,
 		primaryUnits: params.primaryUnits,
 		hanBackstopGroups: [],
@@ -197,6 +204,18 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
 		strongestHanSurfaceCompletionTier: overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		singletonHanCompletion: overrides.singletonHanCompletion ?? {
+			singletonHanChar: null,
+			singletonHanCharIndex: null,
+			singletonHanSurfaceGroupIndex: null,
+			matched: false,
+			matchSource: "none",
+			bestAnchorKind: "none",
+			bestAnchorDistance: null,
+			sameBlockAsAnchor: false,
+			sameBlockAsBestBodyWindow: false,
+			tier: "none",
+		},
 		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
 		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
 		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
@@ -723,6 +742,51 @@ describe("coverage lexical v3 direct subitems", () => {
 
 		expect(result.subItems).toHaveLength(1);
 		expect(extractHighlightTexts(result)).toContain("\u751f\u547d\u529b");
+	});
+
+	test("singleton Han body snippets render the matched char as a strong highlight", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "?",
+			querySingletonHanChar: "?",
+			querySingletonHanCodePoint: "?".codePointAt(0) ?? null,
+			querySingletonHanRecallEligible: true,
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "?",
+					kind: "han",
+					hanBigramTexts: [],
+					coveredCharMask: [false],
+					queryResidualUniqueBigrams: [],
+					hasQueryResidualHanCoverage: false,
+				},
+			],
+			primaryUnits: [],
+		});
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "??????????",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "menu.md",
+				realizedCoverageCount: 0,
+				coverageGate: {
+					realizedCoverageCount: 0,
+					fullySatisfiedSurfaceGroupCount: 0,
+					startedSurfaceGroupCount: 0,
+					crossScriptSatisfiedGroupCount: 0,
+				},
+				exactUnitCount: 0,
+				realizedFamilies: [],
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(result.subItems).toHaveLength(1);
+		expect(result.candidates[0]?.anchorTier).toBe("singleton_han");
+		expect(extractHighlightTexts(result)).toContain("?");
+		expect(result.subItems[0]?.weakHighlightRanges ?? []).toEqual([]);
 	});
 
 	test("returns no body snippet when there is no legal local body evidence", () => {

@@ -423,7 +423,7 @@ class LexicalSearchModal extends Modal {
 			.setDesc(t("Max items count desc"))
 			.addSlider((slider) =>
 				slider
-					.setLimits(1, 300, 1)
+					.setLimits(1, 200, 1)
 					.setValue(this.setting.ui.maxItemResults)
 					.setDynamicTooltip()
 					.onChange(async (value) => {

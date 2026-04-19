@@ -23,14 +23,14 @@ describe("coverage lexical v3 query analysis", () => {
 	});
 
 	test("keeps whole-surface Han term when no better real-term cover exists", () => {
-		const analysis = analyzeQuery("涓婇潰", ["涓婇潰"]);
+		const analysis = analyzeQuery("系统代理", ["系统代理"]);
 
 		expect(
 			analysis.primaryUnits.map((unit) => ({
 				text: unit.text,
 				source: unit.source,
 			})),
-		).toEqual([{ text: "涓婇潰", source: "han_tokenizer_real" }]);
+		).toEqual([{ text: "系统代理", source: "han_tokenizer_real" }]);
 		expect(analysis.hanBackstopGroups).toHaveLength(0);
 	});
 
@@ -57,5 +57,24 @@ describe("coverage lexical v3 query analysis", () => {
 				triggerKind: "bridge_bigram",
 			}),
 		]);
+	});
+
+	test("enables singleton Han recall only when the normalized query has exactly one Han codepoint", () => {
+		const singleton = analyzeQuery("abc云123", []);
+		const multiHan = analyzeQuery("abc云火123", []);
+
+		expect(singleton.querySingletonHanChar).toBe("云");
+		expect(singleton.querySingletonHanCodePoint).toBe("云".codePointAt(0));
+		expect(singleton.querySingletonHanRecallEligible).toBe(true);
+		expect(multiHan.querySingletonHanChar).toBeNull();
+		expect(multiHan.querySingletonHanCodePoint).toBeNull();
+		expect(multiHan.querySingletonHanRecallEligible).toBe(false);
+	});
+
+	test("singleton Han stop characters do not enable singleton recall", () => {
+		const analysis = analyzeQuery("abc的123", []);
+
+		expect(analysis.querySingletonHanChar).toBe("的");
+		expect(analysis.querySingletonHanRecallEligible).toBe(false);
 	});
 });

@@ -1,6 +1,6 @@
 const LOCAL_STORAGE_DEBUG_QUERY_KEY = "coverage-lexical-v3-debug-query";
 const LOCAL_STORAGE_DEBUG_MODE_KEY = "coverage-lexical-v3-debug-mode";
-const DEFAULT_DEBUG_QUERIES = ["s", "st"] as const;
+const DEFAULT_DEBUG_QUERIES = ["s", "st", "赢宋功", "功赢宋"] as const;
 
 type DebugQueryMode = "exact" | "contains";
 

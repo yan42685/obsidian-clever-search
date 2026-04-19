@@ -1769,3 +1769,356 @@ Validation completed for this phase:
 - `npm run typecheck:build` passes on 2026-04-18
 - `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/family-lookup.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-shortlist.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-residual-support.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/position-lanes.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
   passes on 2026-04-18
+### Phase 34
+
+Status: Completed on 2026-04-18
+
+The current implementation now adds an engine-side extreme-pressure guard for
+prefix-driven candidate fanout before packing/profile construction, while
+keeping normal recall and ranking behavior unchanged below the configured
+budget. The current tuning resolves that budget dynamically as
+`clamp(maxItemResults * 4, 160, 256)` and keeps the anchored soft budget at
+`70%` of the resolved total:
+
+- recall candidate docs now retain minimal per-body-block provenance through
+  `hasExactSupport`, `hasPrefixSupport`, and `hasStrongHanSupport`
+- strong Han block protection is derived only from recall-side Han gate stats,
+  using the agreed `coverage / contiguous-chain / matched-bigram` threshold
+  rule instead of the later packing-time Han completion path
+- engine search now applies a bounded body-block guard only when recalled body
+  blocks exceed the resolved dynamic budget:
+  - `maxItemResults = 30 -> 160` total body blocks, `112` anchored soft budget
+  - `maxItemResults = 50 -> 200` total body blocks, `140` anchored soft budget
+  - `maxItemResults >= 64 -> 256` total body blocks, `179` anchored soft budget
+- admitted body blocks now use a two-pass guard within each anchored/unanchored
+  budget lane:
+  - all non-prefix blocks consume the lane budget first
+  - weak `prefix-only` blocks may fill only the leftover capacity after the
+    non-prefix pass
+  - this prevents early high-fanout prefix-only docs from evicting later exact
+    or other non-prefix body evidence from the same lane
+- metadata-anchored docs are never deleted by the guard; only their retained
+  body blocks may shrink, while unanchored docs can be removed if no kept body
+  blocks remain
+- the guard trims body-side Han seed/gate payloads alongside
+  `shortlistedBodyBlockIds`, so packing and opaque-rescue logic only see the
+  kept body evidence after guarding
+- debug output now records pre/post candidate counts, pre/post total body block
+  counts, anchored/unanchored doc counts, kept block totals, removed
+  unanchored-doc counts, and whether the guard activated at all
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-18
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts`
+  passes on 2026-04-18
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+  passes on 2026-04-18
+- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --roots tests/src --roots tmp --runTestsByPath tmp/coverage-lexical-v3-prefix-fanout-stress.test.ts`
+  passes on 2026-04-18, confirming:
+  - the light synthetic fanout case stays below the guard and remains unchanged
+  - heavy mixed / high-block fanout cases are trimmed back to the active body
+    block budget, capped at `<= 256`
+  - anchored candidates present before the guard remain present after the guard
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts`
+  passes on 2026-04-19 after the dynamic budget retuning, confirming:
+  - `maxItemResults = 30` resolves to a `160` block guard
+  - `maxItemResults = 50` resolves to a `200` block guard
+  - `maxItemResults = 200` still clamps to the `256` global cap
+  - a later anchored exact block still survives when an earlier anchored doc has
+    enough prefix-only blocks to saturate the entire anchored soft budget
+
+
+### Phase 35
+
+Status: Completed on 2026-04-19
+
+The current implementation now closes the singleton-Han display loop without
+promoting singleton chars into normal lexical-family coverage, so singleton Han
+remains route-only for recall/admission and completion-only for late same-band
+ordering while results can still show concrete snippet/highlight evidence:
+
+- query analysis now exposes `querySingletonHanChar`,
+  `querySingletonHanCodePoint`, and `querySingletonHanRecallEligible`, with the
+  agreed stop-char guard and no DF-based gating
+- resident Han route now includes route-only singleton char posting lanes for
+  metadata (`identity + route` only) and body blocks, while `heading` remains
+  corroboration-only and does not get a singleton recall lane
+- query-time singleton recall now routes through those metadata/body char lanes
+  with the agreed `100 docs + 100 blocks` hard budgets and keeps scoped-first
+  reuse ahead of global char-route expansion
+- candidate-final singleton completion still only inspects admitted metadata
+  witnesses plus the current body block and its ordinal-adjacent neighbors, and
+  it still feeds only a late same-band comparator preference instead of main
+  realized coverage
+- metadata singleton matches now render as strong highlight ranges, and body
+  singleton matches can now materialize singleton-only direct-subitems with
+  strong highlights so single-char Han results are visible instead of silent
+- `hideWeaklyRelatedResults` / direct-subitems visibility now distinguish
+  singleton-completed vs singleton-incomplete evidence using the new
+  completion-tier signal, but stronger coverage/container bands still stay
+  ahead of singleton preference
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+  passes on 2026-04-19
+
+### Phase 36
+
+Status: Completed on 2026-04-19
+
+This follow-up phase tightens singleton-Han completion semantics without
+promoting singleton chars into main lexical coverage and without adding any new
+resident-side char mirrors or DF gating:
+
+- `residual_singleton` targets now preserve `singletonHanCharIndex` all the way
+  through target collection, while `query_singleton` keeps a `null` index so we
+  stop dropping uncovered-char position metadata at the target boundary
+- body singleton completion no longer re-reads Han witness strings/occurrences
+  outside the existing block-evidence cache; singleton char offsets are now
+  computed lazily from cached witness texts and memoized per block/char
+- singleton completion distance is now a shared weighted boundary-gap instead of
+  a start-to-start absolute offset:
+  - same-text / same-block gaps use `Han=0.65` and `other=0.25`
+  - adjacent body blocks stay block-neutral with zero boundary penalty and use
+    the left-suffix + right-prefix weighted gap form
+  - metadata and direct-subitems now share that same locality formula
+- `body_adjacent_block` no longer forces `loose`; `tight / loose` is now driven
+  by the shared locality threshold (`HAN_BODY_LOCALITY_MAX_ADJACENT_GAP`) and
+  actual weighted gap, while comparator preference still remains same-band only
+- direct-subitems keep strong singleton highlights, but singleton atom choice is
+  now based on the shared weighted boundary-gap helper instead of a same-block
+  absolute offset plus an adjacent-block penalty bucket
+- this phase still does not add direction gating, does not add adjacent-block
+  pruning, and does not let singleton completion cross the main coverage gate
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/singleton-han.test.ts tests/src/services/search/coverage-lexical-v3/weighted-gap.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts` passes on 2026-04-19
+
+### Phase 37
+
+Status: Completed on 2026-04-19
+
+This phase lets body rescue bigrams participate as singleton-Han weak anchors
+without promoting them into normal lexical-family coverage and without changing
+same-band-only comparator semantics:
+
+- body rescue evaluation now retains the matched synthetic bigram occurrences by
+  block so singleton completion can reuse real rescue-bigram spans instead of
+  falling back to block-level seed presence only
+- singleton body completion now consults those rescue-bigram spans in both the
+  current block and ordinal-adjacent blocks and scores them with the same
+  weighted boundary-gap helper used by exact/prefix/fuzzy anchors
+- the old `bodySeedBlockIds` fallback is still kept as a last resort, but only
+  after span-aware rescue-bigram anchors fail to produce a better completion
+- singleton completion is now summarized against pre-opaque real-term families,
+  so a strong body rescue can still expose the residual-singleton late signal
+  instead of erasing it as soon as the opaque whole-group family is materialized
+- rescue bigrams still remain completion-only weak anchors here: they do not
+  become primary lexical families, do not change DF behavior, and still cannot
+  overturn the main coverage gate across bands
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/singleton-han.test.ts tests/src/services/search/coverage-lexical-v3/weighted-gap.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts` passes on 2026-04-19
+
+### Phase 38
+
+Status: Completed on 2026-04-19
+
+This phase widens singleton-Han weak-anchor eligibility from rescue-only
+synthetic bigrams to any query bigram that is actually matched in the
+candidate's singleton-completion body scope, while still keeping singleton
+completion out of main lexical coverage:
+
+- singleton body completion now scans the query surface group's actual
+  `hanBigramTexts` in the current body block and ordinal-adjacent body blocks,
+  merges those span-aware matches with any rescue synthetic bigram occurrences,
+  and uses the merged set as `bigram` weak anchors
+- the singleton char itself must still be outside the matched bigram span; a
+  bigram match cannot satisfy singleton completion by reusing its own overlapping
+  character occurrence
+- target eligibility now has two independent views:
+  - the original residual-singleton view based on the candidate's realized
+    family coverage
+  - a matched-bigram-only residual view, so a candidate like `赢宋 … 功` can
+    still produce a singleton target even when no real-term family was realized
+- those two target views are merged with deterministic deduping, so matched
+  query bigrams can introduce new singleton weak-anchor opportunities without
+  erasing an existing residual singleton that came from base realized families
+- this remains completion-only and same-band only: matched query bigrams still
+  do not become realized families, do not raise main coverage, and do not cross
+  the main coverage gate
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes on 2026-04-19, including:
+  - overlapping rescue bigrams do not self-satisfy singleton completion
+  - rescue bigrams can still anchor a separate singleton outside their own span
+  - any matched query bigram can seed residual singleton completion
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts` still fails on 2026-04-19 because the existing fixture constructs `CoverageLexicalV3FileSearchEngine` without `outerSetting.ui.maxItemResults`; this appears unrelated to the Phase 38 singleton-Han changes and was not modified here
+
+### Phase 39
+
+Status: Completed on 2026-04-19
+
+This phase replaces the earlier dual-view singleton-Han residual merge with the
+agreed global query-Han coverage model while keeping singleton rescue as a late
+same-band-only signal:
+
+- candidate-final singleton eligibility now builds one global query-Han
+  coverage mask across the full normalized Han query rather than computing
+  per-group residuals and matched-bigram-only residuals separately
+- that global mask marks coverage from:
+  - realized families
+  - any matched Han bigram rescue anchor
+- singleton rescue is emitted only when the global uncovered Han set has
+  exactly one remaining codepoint; `singletonHanCharIndex` now refers to the
+  global query-Han order, while `surfaceGroupIndex` becomes explain/display-only
+- singleton weak anchors no longer require same-group membership:
+  any actually matched Han bigram in the metadata/body completion scope can
+  anchor the remaining singleton char, and realized-family anchors plus matched
+  bigram anchors now share the same anchor pool
+- singleton char positions are filtered against the unified anchor spans, so a
+  matched bigram can anchor singleton rescue but cannot reuse one of its own
+  overlapping characters as the singleton itself
+- direct-subitems and metadata highlights now read singleton display state from
+  the candidate's summarized singleton completion, while query-singleton recall
+  still keeps its original independent fallback path for singleton-only
+  rendering/highlighting
+- the Phase 38 dual-track residual-target merge and any same-group gating on
+  bigram singleton weak anchors have been removed; no new recall lane or main
+  lexical-coverage path was added here
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/singleton-han.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts` passes on 2026-04-19
+
+### Phase 40
+
+Status: Completed on 2026-04-19
+
+This phase adds the missing recall-side admission counterpart for the unified
+global singleton-Han model, so singleton rescue is no longer limited to
+candidate-final ranking/display when the live document was never admitted:
+
+- recall now runs a scoped global residual singleton rescue after the existing
+  family, Han-rescue, and query-singleton lanes
+- this recall rescue first merges the doc-local Han coverage sources from:
+  - matched family-backed query units in `identity + route + body`
+  - any matched query Han bigram in `identity + route + body`
+- only when that merged doc-local view leaves exactly one uncovered Han
+  codepoint in the full query-Han sequence does recall generate a singleton
+  rescue obligation for that doc
+- metadata singleton admission stays restricted to `identity + route` and does
+  not inspect `heading`
+- body singleton admission stays scoped to the matched family/bigram anchor
+  blocks and their ordinal-adjacent neighbors (`±1`), rather than opening a
+  doc-wide singleton-char search
+- when that scoped singleton body check succeeds, recall protects the relevant
+  anchor blocks as singleton-support blocks; it does not force the singleton
+  char block itself into shortlist if doing so would weaken the later
+  adjacent-block completion semantics
+- this closes the live gap for cases like `功赢宋` / `赢宋功` against
+  `功能词源赢宋`: the document can now be admitted via the matched `赢宋`
+  bigram plus scoped singleton `功`, after which the existing same-band
+  singleton ranking/display logic applies as designed
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/singleton-han.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts` passes on 2026-04-19
+
+### Phase 41
+
+Status: Completed on 2026-04-19
+
+This follow-up phase keeps the new scoped singleton-recall rescue available for
+admission while preventing it from consuming the existing anchored/protected
+guard budget that was originally intended for stronger recall evidence:
+
+- scoped global singleton recall rescue now uses its own recall markers instead
+  of reusing the original query-singleton guard-weight fields
+- query-singleton recall still sets:
+  - `hasQuerySingletonHanMetadataSupport`
+  - `hasSingletonHanSupport`
+  so true single-char queries keep their established behavior
+- scoped global singleton recall rescue now sets separate admit-only markers for
+  metadata/body support, allowing the document and anchor blocks to enter the
+  candidate pipeline without automatically becoming:
+  - anchored metadata docs in the prefix fanout guard
+  - protected singleton-support blocks in the guard block-priority order
+- this preserves the intended late same-band singleton behavior while avoiding a
+  regression where a `1 anchor + 1 singleton` structure could borrow the hard
+  guard budget reserved for stronger exact/metadata/strong-Han evidence
+- the live `功赢宋` / `赢宋功` admission path remains covered; the recall rescue
+  still admits the document through matched `赢宋` plus scoped singleton `功`
+  even though that rescue no longer receives guard-anchor priority by itself
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts` passes on 2026-04-19
+
+### Phase 42
+
+Status: Completed on 2026-04-19
+
+This follow-up phase closes the file-search-engine/UI visibility gap for the new
+singleton-Han rescue behavior:
+
+- `searchFiles(...)` no longer hides singleton-completed candidates just because
+  they still carry `hasOnlyWeakHanRescue`
+- when `hideWeaklyRelatedResults` is enabled, weak Han rescue is still filtered
+  aggressively, but a candidate with a matched singleton completion is now kept
+  in the visible set so the late same-band singleton signal can actually reach
+  the UI
+- this aligns the top-level file list with the already-updated engine/ranking
+  semantics; without this step, engine-level `赢宋功` / `功赢宋` success could
+  still disappear from the UI because the file-search-engine weak-result filter
+  ran before singleton visibility logic had any chance to help
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts` passes on 2026-04-19
+
+### Phase 43
+
+Status: Completed on 2026-04-19
+
+This follow-up phase tightens singleton-Han completion locality so far-away
+single-character rescue no longer survives as a weak late signal just because
+it happened to fall somewhere inside the broader local scope:
+
+- singleton completion no longer has a `loose` tier; it is now a locality-gated
+  `tight-or-none` signal
+- anchored singleton completion in ranking must satisfy
+  `bestAnchorDistance <= HAN_BODY_LOCALITY_MAX_ADJACENT_GAP`; otherwise the
+  completion is discarded instead of surviving as a far-distance `loose`
+  preference
+- residual singleton completion can no longer self-materialize without any
+  anchor; only true `query_singleton` fallback may still form an unanchored
+  singleton completion/display path
+- direct-subitems now applies the same hard singleton locality gate when
+  selecting singleton atoms, so far-away singleton chars are no longer pulled
+  into snippets/highlights merely because they exist somewhere inside a
+  connected local scope
+- comparator/direct-subitem tiering have been simplified to the new
+  `tight-or-none` singleton model, keeping the existing same-band late-ordering
+  role while removing the visually confusing long-range singleton expansion
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-19
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts` passes on 2026-04-19

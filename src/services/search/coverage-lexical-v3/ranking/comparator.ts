@@ -2,6 +2,8 @@ import type {
 	EvidenceContainer,
 	EvidencePackingProfile,
 	HanSurfaceCompletionTier,
+	SingletonHanCompletionAnchorKind,
+	SingletonHanCompletionMatchSource,
 } from "./types";
 import { compareHanRescueAssessments } from "../han-rescue-collector";
 
@@ -15,6 +17,30 @@ const HAN_SURFACE_COMPLETION_TIER_SCORE: Record<HanSurfaceCompletionTier, number
 	none: 0,
 	body_residue: 1,
 	body_window: 2,
+	route: 3,
+	identity: 4,
+};
+const SINGLETON_HAN_COMPLETION_TIER_SCORE = {
+	none: 0,
+	tight: 1,
+} as const;
+const SINGLETON_HAN_ANCHOR_KIND_SCORE: Record<
+	SingletonHanCompletionAnchorKind,
+	number
+> = {
+	none: 0,
+	bigram: 1,
+	fuzzy: 2,
+	prefix: 3,
+	exact: 4,
+};
+const SINGLETON_HAN_MATCH_SOURCE_SCORE: Record<
+	SingletonHanCompletionMatchSource,
+	number
+> = {
+	none: 0,
+	body_adjacent_block: 1,
+	body_same_block: 2,
 	route: 3,
 	identity: 4,
 };
@@ -87,6 +113,10 @@ export function comparePackingProfilesBeforeHanSurfaceCompletion(
 	const fragmentationComparison = compareFragmentation(left, right);
 	if (fragmentationComparison !== 0) {
 		return fragmentationComparison;
+	}
+	const singletonHanCompletionComparison = compareSingletonHanCompletion(left, right);
+	if (singletonHanCompletionComparison !== 0) {
+		return singletonHanCompletionComparison;
 	}
 	if (left.exactUnitCount !== right.exactUnitCount) {
 		return right.exactUnitCount - left.exactUnitCount;
@@ -313,6 +343,46 @@ function compareHanSurfaceCompletion(
 		HAN_SURFACE_COMPLETION_TIER_SCORE[right.strongestHanSurfaceCompletionTier];
 	if (leftStrongestTierScore !== rightStrongestTierScore) {
 		return rightStrongestTierScore - leftStrongestTierScore;
+	}
+	return 0;
+}
+
+function compareSingletonHanCompletion(
+	left: EvidencePackingProfile,
+	right: EvidencePackingProfile,
+): number {
+	const leftTierScore =
+		SINGLETON_HAN_COMPLETION_TIER_SCORE[left.singletonHanCompletion.tier];
+	const rightTierScore =
+		SINGLETON_HAN_COMPLETION_TIER_SCORE[right.singletonHanCompletion.tier];
+	if (leftTierScore !== rightTierScore) {
+		return rightTierScore - leftTierScore;
+	}
+	const leftAnchorKindScore =
+		SINGLETON_HAN_ANCHOR_KIND_SCORE[left.singletonHanCompletion.bestAnchorKind];
+	const rightAnchorKindScore =
+		SINGLETON_HAN_ANCHOR_KIND_SCORE[right.singletonHanCompletion.bestAnchorKind];
+	if (leftAnchorKindScore !== rightAnchorKindScore) {
+		return rightAnchorKindScore - leftAnchorKindScore;
+	}
+	const leftDistance = left.singletonHanCompletion.bestAnchorDistance ?? Number.MAX_SAFE_INTEGER;
+	const rightDistance =
+		right.singletonHanCompletion.bestAnchorDistance ?? Number.MAX_SAFE_INTEGER;
+	if (leftDistance !== rightDistance) {
+		return leftDistance - rightDistance;
+	}
+	if (
+		left.singletonHanCompletion.sameBlockAsBestBodyWindow !==
+		right.singletonHanCompletion.sameBlockAsBestBodyWindow
+	) {
+		return left.singletonHanCompletion.sameBlockAsBestBodyWindow ? -1 : 1;
+	}
+	const leftSourceScore =
+		SINGLETON_HAN_MATCH_SOURCE_SCORE[left.singletonHanCompletion.matchSource];
+	const rightSourceScore =
+		SINGLETON_HAN_MATCH_SOURCE_SCORE[right.singletonHanCompletion.matchSource];
+	if (leftSourceScore !== rightSourceScore) {
+		return rightSourceScore - leftSourceScore;
 	}
 	return 0;
 }

@@ -101,6 +101,35 @@ export type HanSurfaceCompletionGroupResult = Readonly<{
 	tier: HanSurfaceCompletionTier;
 }>;
 
+export type SingletonHanCompletionMatchSource =
+	| "none"
+	| "identity"
+	| "route"
+	| "body_same_block"
+	| "body_adjacent_block";
+
+export type SingletonHanCompletionAnchorKind =
+	| "none"
+	| "exact"
+	| "prefix"
+	| "fuzzy"
+	| "bigram";
+
+export type SingletonHanCompletionTier = "none" | "tight";
+
+export type SingletonHanCompletion = Readonly<{
+	singletonHanChar: string | null;
+	singletonHanCharIndex: number | null;
+	singletonHanSurfaceGroupIndex: number | null;
+	matched: boolean;
+	matchSource: SingletonHanCompletionMatchSource;
+	bestAnchorKind: SingletonHanCompletionAnchorKind;
+	bestAnchorDistance: number | null;
+	sameBlockAsAnchor: boolean;
+	sameBlockAsBestBodyWindow: boolean;
+	tier: SingletonHanCompletionTier;
+}>;
+
 export type EvidencePackingProfile = Readonly<{
 	docId: number;
 	path: string;
@@ -113,6 +142,7 @@ export type EvidencePackingProfile = Readonly<{
 	hanSurfaceCompletionTierScoreTotal: number;
 	strongestHanSurfaceCompletionTier: HanSurfaceCompletionTier;
 	hanSurfaceCompletionGroups: readonly HanSurfaceCompletionGroupResult[];
+	singletonHanCompletion: SingletonHanCompletion;
 	hanStrongRescueGroupCount: number;
 	hanWeakRescueGroupCount: number;
 	hanRescueSupportWeightTotal: number;

@@ -13,6 +13,7 @@ import type {
 import { describeResidentBase } from "./metrics";
 import { analyzeQuery } from "./query";
 import type { V3DocumentTokenizer } from "./query";
+import { applyPrefixFanoutGuard } from "./prefix-fanout-guard";
 import {
 	recallCandidateDocs,
 	lookupQueryUnitFamilies,
@@ -34,6 +35,7 @@ export type CoverageLexicalV3SearchResult = Readonly<{
 export type CoverageLexicalV3SearchOptions = Readonly<{
 	allowPrefixMatch?: boolean;
 	allowFuzzyMatch?: boolean;
+	maxItemResults?: number;
 }>;
 
 export class CoverageLexicalV3Engine {
@@ -94,8 +96,12 @@ export class CoverageLexicalV3Engine {
 			unitFamilyMatches,
 		);
 		const recallMs = shouldLogDebug ? nowDebugMs() - recallStartedAtMs : 0;
+		const guardStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const guardResult = applyPrefixFanoutGuard(candidateDocs, options.maxItemResults);
+		const guardedCandidateDocs = guardResult.candidateDocs;
+		const guardMs = shouldLogDebug ? nowDebugMs() - guardStartedAtMs : 0;
 		const packingStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const provisionalCandidateProfiles = candidateDocs.map((candidateRecall) =>
+		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
 			buildPackingProfile(
 				this.residentBase!,
 				queryAnalysis,
@@ -110,17 +116,18 @@ export class CoverageLexicalV3Engine {
 			.filter(
 				(candidate, index) =>
 					candidate.realizedCoverageCount > 0 ||
+					candidate.singletonHanCompletion.matched ||
 					candidate.hasAnyHanRescueAssessment ||
-					hasBodyOpaqueRescueSeeds(candidateDocs[index]),
+					hasBodyOpaqueRescueSeeds(guardedCandidateDocs[index]),
 			);
 		const allowedBodyOpaqueRescueByDocId = buildAllowedBodyOpaqueRescueSurfaceGroups(
 			this.residentBase!,
 			queryAnalysis,
-			candidateDocs,
+			guardedCandidateDocs,
 			unitFamilyMatches,
 		);
 		const secondPassCandidateProfiles = provisionalCandidates.map((provisionalCandidate) => {
-				const candidateRecall = candidateDocs.find(
+				const candidateRecall = guardedCandidateDocs.find(
 					(item) => item.docId === provisionalCandidate.docId,
 				);
 				if (candidateRecall == null) {
@@ -140,7 +147,9 @@ export class CoverageLexicalV3Engine {
 		const rankedCandidatesBeforeSort = secondPassCandidateProfiles
 			.filter(
 				(candidate) =>
-					candidate.realizedCoverageCount > 0 || candidate.hasOnlyWeakHanRescue,
+					candidate.realizedCoverageCount > 0 ||
+					candidate.singletonHanCompletion.matched ||
+					candidate.hasOnlyWeakHanRescue,
 			);
 		const packingMs = shouldLogDebug ? nowDebugMs() - packingStartedAtMs : 0;
 		const sortStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
@@ -153,22 +162,34 @@ export class CoverageLexicalV3Engine {
 				queryTermCount: queryTerms.length,
 				primaryUnitCount: queryAnalysis.primaryUnits.length,
 				hanBackstopGroupCount: queryAnalysis.hanBackstopGroups.length,
-				candidateDocCount: candidateDocs.length,
+				guardApplied: guardResult.stats.guardApplied,
+				candidateDocCount: guardedCandidateDocs.length,
+				preGuardCandidateDocCount: guardResult.stats.preCandidateDocCount,
+				postGuardCandidateDocCount: guardResult.stats.postCandidateDocCount,
 				rankedCandidateCount: rankedCandidates.length,
-				totalShortlistedBodyBlockCount: candidateDocs.reduce(
+				totalShortlistedBodyBlockCount: guardedCandidateDocs.reduce(
 					(sum, candidateRecall) =>
 						sum + candidateRecall.shortlistedBodyBlockIds.length,
 					0,
 				),
-				maxShortlistedBodyBlockCount: candidateDocs.reduce(
+				preGuardTotalShortlistedBodyBlockCount:
+					guardResult.stats.preTotalShortlistedBodyBlockCount,
+				postGuardTotalShortlistedBodyBlockCount:
+					guardResult.stats.postTotalShortlistedBodyBlockCount,
+				maxShortlistedBodyBlockCount: guardedCandidateDocs.reduce(
 					(max, candidateRecall) =>
 						Math.max(max, candidateRecall.shortlistedBodyBlockIds.length),
 					0,
 				),
+				anchoredDocCount: guardResult.stats.anchoredDocCount,
+				unanchoredDocCount: guardResult.stats.unanchoredDocCount,
+				anchoredKeptBlockCount: guardResult.stats.anchoredKeptBlockCount,
+				unanchoredKeptBlockCount: guardResult.stats.unanchoredKeptBlockCount,
+				removedUnanchoredDocCount: guardResult.stats.removedUnanchoredDocCount,
 				unitFamilyMatchTotals: summarizeUnitFamilyMatches(unitFamilyMatches),
 				queryAnalysisDetails: summarizeQueryAnalysisDetails(queryAnalysis),
 				unitFamilyMatchDetails: summarizeUnitFamilyMatchDetails(unitFamilyMatches),
-				candidateDocDetails: summarizeCandidateDocs(candidateDocs),
+				candidateDocDetails: summarizeCandidateDocs(guardedCandidateDocs),
 				provisionalCandidateDetails: summarizePackingProfiles(provisionalCandidateProfiles),
 				bodyOpaqueRescueAllowanceDetails:
 					summarizeAllowedBodyOpaqueRescueByDocId(allowedBodyOpaqueRescueByDocId),
@@ -178,6 +199,7 @@ export class CoverageLexicalV3Engine {
 					analyze: roundDebugMs(analyzeMs),
 					familyLookup: roundDebugMs(familyLookupMs),
 					recall: roundDebugMs(recallMs),
+					guard: roundDebugMs(guardMs),
 					packing: roundDebugMs(packingMs),
 					sort: roundDebugMs(sortMs),
 					total: roundDebugMs(nowDebugMs() - startedAtMs),
@@ -188,7 +210,7 @@ export class CoverageLexicalV3Engine {
 			recallState: {
 				queryAnalysis,
 				unitFamilyMatches,
-				candidateDocs,
+				candidateDocs: guardedCandidateDocs,
 			},
 			rankedCandidates,
 		};
@@ -325,7 +347,16 @@ function summarizeCandidateDocs(
 	matchedIdentityUnitIndices: readonly number[];
 	matchedRouteUnitIndices: readonly number[];
 	matchedHeadingUnitIndices: readonly number[];
-	shortlistedBodyBlockIds: readonly number[];
+	hasQuerySingletonHanMetadataSupport: boolean;
+	hasScopedSingletonHanMetadataSupport: boolean;
+	shortlistedBodyBlocks: ReadonlyArray<{
+		blockId: number;
+		hasExactSupport: boolean;
+		hasPrefixSupport: boolean;
+		hasStrongHanSupport: boolean;
+		hasSingletonHanSupport: boolean;
+		hasScopedSingletonHanSupport: boolean;
+	}>;
 	hanMetadataGateStats: V3RecallState["candidateDocs"][number]["hanMetadataGateStats"];
 	hanSurfaceGroupRecalls: ReadonlyArray<{
 		surfaceGroupIndex: number;
@@ -339,7 +370,18 @@ function summarizeCandidateDocs(
 		matchedIdentityUnitIndices: candidateDoc.matchedIdentityUnitIndices,
 		matchedRouteUnitIndices: candidateDoc.matchedRouteUnitIndices,
 		matchedHeadingUnitIndices: candidateDoc.matchedHeadingUnitIndices,
-		shortlistedBodyBlockIds: candidateDoc.shortlistedBodyBlockIds,
+		hasQuerySingletonHanMetadataSupport:
+			candidateDoc.hasQuerySingletonHanMetadataSupport,
+		hasScopedSingletonHanMetadataSupport:
+			candidateDoc.hasScopedSingletonHanMetadataSupport,
+		shortlistedBodyBlocks: candidateDoc.shortlistedBodyBlocks.map((block) => ({
+			blockId: block.blockId,
+			hasExactSupport: block.hasExactSupport,
+			hasPrefixSupport: block.hasPrefixSupport,
+			hasStrongHanSupport: block.hasStrongHanSupport,
+			hasSingletonHanSupport: block.hasSingletonHanSupport,
+			hasScopedSingletonHanSupport: block.hasScopedSingletonHanSupport,
+		})),
 		hanMetadataGateStats: candidateDoc.hanMetadataGateStats,
 		hanSurfaceGroupRecalls: candidateDoc.hanSurfaceGroupRecalls.map((groupRecall) => ({
 			surfaceGroupIndex: groupRecall.surfaceGroupIndex,
@@ -393,6 +435,17 @@ function summarizePackingProfiles(
 		inBodyResidue: boolean;
 	}>;
 	bodyWindowBlockIds: readonly number[];
+	hasOnlyWeakHanRescue: boolean;
+	singletonHanCompletion: {
+		matched: boolean;
+		char: string | null;
+		charIndex: number | null;
+		surfaceGroupIndex: number | null;
+		matchSource: EvidencePackingProfile["singletonHanCompletion"]["matchSource"];
+		bestAnchorKind: EvidencePackingProfile["singletonHanCompletion"]["bestAnchorKind"];
+		bestAnchorDistance: number | null;
+		tier: EvidencePackingProfile["singletonHanCompletion"]["tier"];
+	};
 }> {
 	return profiles.map((profile) => ({
 		docId: profile.docId,
@@ -412,9 +465,21 @@ function summarizePackingProfiles(
 			inRoute: family.inRoute,
 			inHeading: family.inHeading,
 			inBestBodyWindow: family.inBestBodyWindow,
-			inBodyResidue: family.inBodyResidue,
-		})),
+				inBodyResidue: family.inBodyResidue,
+			})),
 		bodyWindowBlockIds: profile.bodyWindowContainer?.blockIds ?? [],
+		hasOnlyWeakHanRescue: profile.hasOnlyWeakHanRescue,
+		singletonHanCompletion: {
+			matched: profile.singletonHanCompletion.matched,
+			char: profile.singletonHanCompletion.singletonHanChar,
+			charIndex: profile.singletonHanCompletion.singletonHanCharIndex,
+			surfaceGroupIndex:
+				profile.singletonHanCompletion.singletonHanSurfaceGroupIndex,
+			matchSource: profile.singletonHanCompletion.matchSource,
+			bestAnchorKind: profile.singletonHanCompletion.bestAnchorKind,
+			bestAnchorDistance: profile.singletonHanCompletion.bestAnchorDistance,
+			tier: profile.singletonHanCompletion.tier,
+		},
 	}));
 }
 

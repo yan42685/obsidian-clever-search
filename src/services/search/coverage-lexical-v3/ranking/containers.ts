@@ -1,12 +1,16 @@
-﻿import type { ResidentBase } from "../layout/types";
+import type { ResidentBase } from "../layout/types";
 import {
 	logCoverageLexicalV3Debug,
 	shouldLogCoverageLexicalV3Debug,
 } from "../debug";
-import type { HanRescueAssessment } from "../han-rescue";
+import {
+	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
+	type HanRescueAssessment,
+} from "../han-rescue";
 import {
 	collectHanRescueArtifacts,
 	type HanBodyRescueEvaluation,
+	type HanSyntheticBodyOccurrence,
 	type HanMetadataWitnessAssessmentCandidate as SharedHanMetadataWitnessAssessmentCandidate,
 } from "../han-rescue-collector";
 import {
@@ -23,6 +27,18 @@ import {
 	BODY_FAMILY_SUPPORT_STANDALONE,
 	type V3QueryAnalysis,
 } from "../query";
+import {
+	collectCandidateSingletonHanTargets,
+	type MatchedHanBigramLike,
+	type SingletonHanTarget,
+} from "../singleton-han";
+import {
+	buildWeightedGapIndex,
+	buildWeightedGapIndexFromSegments,
+	computeWeightedAdjacentBoundaryGap,
+	computeWeightedBoundaryGap,
+	type WeightedGapIndex,
+} from "../weighted-gap";
 import {
 	getBodyBlockExactFamilyIds,
 	getBodyBlockExactTokenPositions,
@@ -73,6 +89,10 @@ import type {
 	MetadataPackingSignature,
 	RealizedQueryUnitFamily,
 	RouteContainer,
+	SingletonHanCompletion,
+	SingletonHanCompletionAnchorKind,
+	SingletonHanCompletionMatchSource,
+	SingletonHanCompletionTier,
 } from "./types";
 
 const CHAIN_BOUNDARY_PENALTY = 0;
@@ -103,6 +123,8 @@ type CachedBodyBlockEvidence = Readonly<{
 	familySupportMaskByFamilyId: ReadonlyMap<number, number>;
 	approxSpan: number;
 	ordinalSpan: number;
+	weightedGapIndex: WeightedGapIndex;
+	singletonCharPositionsByChar: Map<string, readonly number[]>;
 }>;
 
 const DOC_EVIDENCE_CACHE = new WeakMap<ResidentBase, Map<number, CachedDocEvidence>>();
@@ -110,6 +132,12 @@ const BODY_BLOCK_EVIDENCE_CACHE = new WeakMap<
 	ResidentBase,
 	Map<number, CachedBodyBlockEvidence>
 >();
+
+type BodyBigramAnchorOccurrence = Readonly<{
+	bigramText: string;
+	localPosition: number;
+	localEndPosition: number;
+}>;
 
 type BodyOccurrence = Readonly<{
 	blockId: number;
@@ -233,6 +261,11 @@ type HanSurfaceCompletionSummary = Readonly<{
 	strongestTier: HanSurfaceCompletionTier;
 	groups: readonly HanSurfaceCompletionGroupResult[];
 }>;
+
+type SingletonHanCompletionCandidate = SingletonHanCompletion &
+	Readonly<{
+		priorityScore: number;
+	}>;
 
 type OpaqueMetadataRescueUnit = Readonly<{
 	surfaceGroupIndex: number;
@@ -584,6 +617,17 @@ export function buildPackingProfile(
 	);
 	const coverageGate = buildCoverageGateProfile(queryAnalysis, realizedFamilies, resolvedHanSurfaceGroupByIndex);
 	const metadataPackingSignature = buildMetadataPackingSignature(realizedFamilies);
+	const singletonHanCompletion = summarizeSingletonHanCompletion({
+		base,
+		queryAnalysis,
+		candidateRecall,
+		docEvidence,
+		bodyOccurrencesByBlockId,
+		bodyRescueEvaluationBySurfaceGroupIndex:
+			hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
+		bestBodyWindowBlockIds,
+		realizedFamilies: baseRealizedFamilies,
+	});
 	const profile: EvidencePackingProfile = {
 		docId: candidateRecall.docId,
 		path: getDocPath(base, candidateRecall.docId),
@@ -596,6 +640,7 @@ export function buildPackingProfile(
 		hanSurfaceCompletionTierScoreTotal: hanSurfaceCompletionSummary.tierScoreTotal,
 		strongestHanSurfaceCompletionTier: hanSurfaceCompletionSummary.strongestTier,
 		hanSurfaceCompletionGroups: hanSurfaceCompletionSummary.groups,
+		singletonHanCompletion,
 		hanStrongRescueGroupCount: hanRescueSummary.strongGroupCount,
 		hanWeakRescueGroupCount: hanRescueSummary.weakGroupCount,
 		hanRescueSupportWeightTotal: hanRescueSummary.supportWeightTotal,
@@ -705,27 +750,37 @@ function getCachedBodyBlockEvidence(
 		getBodyBlockExactFamilyIds(base, blockId),
 		getBodyBlockExactTokenPositions(base, blockId),
 	);
-	const witnessOccurrences = buildWitnessPositionedOccurrences(
-		base,
-		getBodyBlockHanWitnessOccurrences(base, blockId),
+	const rawWitnessOccurrences = getBodyBlockHanWitnessOccurrences(base, blockId);
+	const witnessOccurrences = buildWitnessPositionedOccurrences(base, rawWitnessOccurrences);
+	const witnessTexts = getBodyBlockHanWitnessTexts(base, blockId);
+	const approxSpan = Math.max(
+		1,
+		getPositionedOccurrenceSpan(exactOccurrences),
+		getPositionedOccurrenceSpan(witnessOccurrences),
 	);
 	const created: CachedBodyBlockEvidence = {
 		exactOccurrences,
 		witnessOccurrences,
-		witnessTexts: getBodyBlockHanWitnessTexts(base, blockId),
+		witnessTexts,
 		familySupportMaskByFamilyId: new Map(
 			getBodyBlockFamilySupportEntries(base, blockId).map((entry) => [entry.familyId, entry.supportMask]),
 		),
-		approxSpan: Math.max(
-			1,
-			getPositionedOccurrenceSpan(exactOccurrences),
-			getPositionedOccurrenceSpan(witnessOccurrences),
-		),
+		approxSpan,
 		ordinalSpan: Math.max(1, exactOccurrences.length, witnessOccurrences.length),
+		weightedGapIndex: buildWeightedGapIndexFromSegments(
+			approxSpan,
+			rawWitnessOccurrences
+				.map((occurrence, index) => ({
+					start: occurrence.start,
+					text: witnessTexts[index] ?? "",
+				}))
+				.filter((segment) => segment.text.length > 0),
+		),
+		singletonCharPositionsByChar: new Map<string, readonly number[]>(),
 	};
 	cache.set(blockId, created);
 	return created;
-}
+	}
 
 function buildSyntheticMetadataQueryUnitIndex(
 	baseQueryUnitCount: number,
@@ -2227,6 +2282,858 @@ function buildCoverageGateProfile(
 	};
 }
 
+function summarizeSingletonHanCompletion(params: Readonly<{
+	base: ResidentBase;
+	queryAnalysis: V3QueryAnalysis;
+	candidateRecall: V3CandidateDocRecall;
+	docEvidence: CachedDocEvidence;
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
+	bodyRescueEvaluationBySurfaceGroupIndex: ReadonlyMap<
+		number,
+		HanBodyRescueEvaluation<BodyWindowCandidate>
+	>;
+	bestBodyWindowBlockIds: ReadonlySet<number>;
+	realizedFamilies: readonly RealizedQueryUnitFamily[];
+}>): SingletonHanCompletion {
+	const candidateBlockIds = collectCandidateSingletonHanBlockIds(
+		params.base,
+		params.candidateRecall.docId,
+		params.candidateRecall.shortlistedBodyBlockIds,
+	);
+	const queryBigramTexts = collectAllQueryHanBigramTexts(params.queryAnalysis);
+	const bodyRescueBigramOccurrencesByBlockId = collectAllBodyRescueBigramOccurrencesByBlockId(
+		params.bodyRescueEvaluationBySurfaceGroupIndex,
+	);
+	const matchedHanBigrams = collectMatchedHanBigramAnchorsForSingletonScope({
+		base: params.base,
+		docEvidence: params.docEvidence,
+		candidateBlockIds,
+		queryBigramTexts,
+		bodyRescueBigramOccurrencesByBlockId,
+	});
+	const targets = collectCandidateSingletonHanTargets(
+		params.queryAnalysis,
+		params.realizedFamilies,
+		matchedHanBigrams,
+	);
+	let best: SingletonHanCompletionCandidate | null = null;
+	for (const target of targets) {
+		const metadataCandidate = buildMetadataSingletonHanCompletionCandidate({
+			target,
+			docEvidence: params.docEvidence,
+			realizedFamilies: params.realizedFamilies,
+			queryBigramTexts,
+		});
+		best = chooseBetterSingletonHanCompletion(best, metadataCandidate);
+		const bodyCandidate = buildBodySingletonHanCompletionCandidate({
+			target,
+			base: params.base,
+			docId: params.candidateRecall.docId,
+			queryBigramTexts,
+			shortlistedBodyBlockIds: params.candidateRecall.shortlistedBodyBlockIds,
+			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
+			bodyRescueBigramOccurrencesByBlockId,
+			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
+		});
+		best = chooseBetterSingletonHanCompletion(best, bodyCandidate);
+	}
+	if (best == null) {
+		return createEmptySingletonHanCompletion();
+	}
+	const { priorityScore: _priorityScore, ...completion } = best;
+	return completion;
+}
+
+function collectAllQueryHanBigramTexts(
+	queryAnalysis: V3QueryAnalysis,
+): readonly string[] {
+	return [
+		...new Set(
+			queryAnalysis.surfaceGroups.flatMap((group) =>
+				group.kind === "han" ? group.hanBigramTexts : [],
+			),
+		),
+	].sort((left, right) => left.localeCompare(right));
+}
+
+function collectAllBodyRescueBigramOccurrencesByBlockId(
+	bodyRescueEvaluationBySurfaceGroupIndex: ReadonlyMap<
+		number,
+		HanBodyRescueEvaluation<BodyWindowCandidate>
+	>,
+): ReadonlyMap<number, readonly HanSyntheticBodyOccurrence[]> {
+	const out = new Map<number, HanSyntheticBodyOccurrence[]>();
+	for (const evaluation of bodyRescueEvaluationBySurfaceGroupIndex.values()) {
+		for (const [blockId, occurrences] of evaluation.matchedOccurrencesByBlockId.entries()) {
+			const existing = out.get(blockId);
+			if (existing != null) {
+				existing.push(...occurrences);
+				continue;
+			}
+			out.set(blockId, [...occurrences]);
+		}
+	}
+	return out;
+}
+
+function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
+	base: ResidentBase;
+	docEvidence: CachedDocEvidence;
+	candidateBlockIds: readonly number[];
+	queryBigramTexts: readonly string[];
+	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
+		number,
+		readonly HanSyntheticBodyOccurrence[]
+	>;
+}>): readonly MatchedHanBigramLike[] {
+	const matched = new Set<string>();
+	for (const witnessText of [
+		...params.docEvidence.identityWitnessTexts,
+		...params.docEvidence.routeWitnessTexts,
+	]) {
+		for (const bigramText of params.queryBigramTexts) {
+			if (collectTextOffsets(witnessText, bigramText).length > 0) {
+				matched.add(bigramText);
+			}
+		}
+	}
+	for (const blockId of params.candidateBlockIds) {
+		const blockEvidence = getCachedBodyBlockEvidence(params.base, blockId);
+		for (const occurrence of collectBodyBigramAnchorOccurrences({
+			blockEvidence,
+			queryBigramTexts: params.queryBigramTexts,
+			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
+		})) {
+			matched.add(occurrence.bigramText);
+		}
+	}
+	return [...matched]
+		.sort((left, right) => left.localeCompare(right))
+		.map<MatchedHanBigramLike>((bigramText) => ({
+			bigramText,
+			surfaceGroupIndex: null,
+		}));
+}
+
+function buildMetadataSingletonHanCompletionCandidate(params: Readonly<{
+	target: SingletonHanTarget;
+	docEvidence: CachedDocEvidence;
+	realizedFamilies: readonly RealizedQueryUnitFamily[];
+	queryBigramTexts: readonly string[];
+}>): SingletonHanCompletionCandidate | null {
+	const identityCandidate = buildWitnessSingletonHanCompletionCandidate({
+		target: params.target,
+		witnessTexts: params.docEvidence.identityWitnessTexts,
+		matchSource: "identity",
+		anchorFamilies: params.realizedFamilies.filter((family) => family.inIdentity),
+		queryBigramTexts: params.queryBigramTexts,
+	});
+	const routeCandidate = buildWitnessSingletonHanCompletionCandidate({
+		target: params.target,
+		witnessTexts: params.docEvidence.routeWitnessTexts,
+		matchSource: "route",
+		anchorFamilies: params.realizedFamilies.filter((family) => family.inRoute),
+		queryBigramTexts: params.queryBigramTexts,
+	});
+	return chooseBetterSingletonHanCompletion(identityCandidate, routeCandidate);
+}
+
+function buildWitnessSingletonHanCompletionCandidate(params: Readonly<{
+	target: SingletonHanTarget;
+	witnessTexts: readonly string[];
+	matchSource: Exclude<SingletonHanCompletionMatchSource, "none" | "body_same_block" | "body_adjacent_block">;
+	anchorFamilies: readonly RealizedQueryUnitFamily[];
+	queryBigramTexts: readonly string[];
+}>): SingletonHanCompletionCandidate | null {
+	let best: SingletonHanCompletionCandidate | null = null;
+	for (const witnessText of params.witnessTexts) {
+		const familyAnchorSpans = collectWitnessFamilyAnchorSpans(
+			witnessText,
+			params.anchorFamilies,
+		);
+		const bigramAnchorSpans = collectWitnessBigramAnchorSpans(
+			witnessText,
+			params.queryBigramTexts,
+		);
+		const charOffsets = filterOverlappingTextOffsets(
+			collectTextOffsets(witnessText, params.target.char),
+			params.target.char.length,
+			[
+				...familyAnchorSpans.map((span) => ({
+					start: span.start,
+					end: span.end,
+				})),
+				...bigramAnchorSpans.map((span) => ({
+					start: span.start,
+					end: span.end,
+				})),
+			],
+		);
+		if (charOffsets.length === 0) {
+			continue;
+		}
+		const gapIndex = buildWeightedGapIndex(witnessText);
+		for (const charOffset of charOffsets) {
+			for (const anchorSpan of familyAnchorSpans) {
+				const completion = createSingletonHanCompletion({
+					target: params.target,
+					matchSource: params.matchSource,
+					bestAnchorKind: anchorSpan.anchorKind,
+					bestAnchorDistance: computeWeightedBoundaryGap(
+						gapIndex,
+						charOffset,
+						charOffset + params.target.char.length,
+						anchorSpan.start,
+						anchorSpan.end,
+					),
+					sameBlockAsAnchor: false,
+					sameBlockAsBestBodyWindow: false,
+				});
+				if (completion == null) {
+					continue;
+				}
+				best = chooseBetterSingletonHanCompletion(best, {
+					...completion,
+					priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+				});
+			}
+			for (const anchorSpan of bigramAnchorSpans) {
+				const completion = createSingletonHanCompletion({
+					target: params.target,
+					matchSource: params.matchSource,
+					bestAnchorKind: "bigram",
+					bestAnchorDistance: computeWeightedBoundaryGap(
+						gapIndex,
+						charOffset,
+						charOffset + params.target.char.length,
+						anchorSpan.start,
+						anchorSpan.end,
+					),
+					sameBlockAsAnchor: false,
+					sameBlockAsBestBodyWindow: false,
+				});
+				if (completion == null) {
+					continue;
+				}
+				best = chooseBetterSingletonHanCompletion(best, {
+					...completion,
+					priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+				});
+			}
+		}
+		if (best == null) {
+			const completion = createSingletonHanCompletion({
+				target: params.target,
+				matchSource: params.matchSource,
+				bestAnchorKind: "none",
+				bestAnchorDistance: null,
+				sameBlockAsAnchor: false,
+				sameBlockAsBestBodyWindow: false,
+			});
+			if (completion != null) {
+				best = chooseBetterSingletonHanCompletion(best, {
+					...completion,
+					priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+				});
+			}
+		}
+	}
+	return best;
+}
+
+function collectWitnessFamilyAnchorSpans(
+	witnessText: string,
+	anchorFamilies: readonly RealizedQueryUnitFamily[],
+): ReadonlyArray<
+	Readonly<{
+		start: number;
+		end: number;
+		anchorKind: SingletonHanCompletionAnchorKind;
+	}>
+> {
+	const out: Array<{
+		start: number;
+		end: number;
+		anchorKind: SingletonHanCompletionAnchorKind;
+	}> = [];
+	for (const family of anchorFamilies) {
+		for (const anchorOffset of collectTextOffsets(witnessText, family.familyText)) {
+			out.push({
+				start: anchorOffset,
+				end: anchorOffset + family.familyText.length,
+				anchorKind: toSingletonHanAnchorKind(family.matchKind),
+			});
+		}
+	}
+	return out;
+}
+
+function collectWitnessBigramAnchorSpans(
+	witnessText: string,
+	queryBigramTexts: readonly string[],
+): ReadonlyArray<Readonly<{ start: number; end: number; bigramText: string }>> {
+	const out = new Map<string, { start: number; end: number; bigramText: string }>();
+	for (const bigramText of queryBigramTexts) {
+		for (const offset of collectTextOffsets(witnessText, bigramText)) {
+			const key = `${bigramText}:${offset}:${offset + bigramText.length}`;
+			if (!out.has(key)) {
+				out.set(key, {
+					start: offset,
+					end: offset + bigramText.length,
+					bigramText,
+				});
+			}
+		}
+	}
+	return [...out.values()];
+}
+
+function filterOverlappingTextOffsets(
+	offsets: readonly number[],
+	textLength: number,
+	anchorSpans: readonly Readonly<{ start: number; end: number }>[],
+): readonly number[] {
+	if (anchorSpans.length === 0) {
+		return offsets;
+	}
+	return offsets.filter((offset) => {
+		const end = offset + textLength;
+		return !anchorSpans.some((anchorSpan) =>
+			spansOverlap(offset, end, anchorSpan.start, anchorSpan.end),
+		);
+	});
+}
+
+function buildBodySingletonHanCompletionCandidate(params: Readonly<{
+	target: SingletonHanTarget;
+	base: ResidentBase;
+	docId: number;
+	queryBigramTexts: readonly string[];
+	shortlistedBodyBlockIds: readonly number[];
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
+	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
+		number,
+		readonly HanSyntheticBodyOccurrence[]
+	>;
+	bestBodyWindowBlockIds: ReadonlySet<number>;
+}>): SingletonHanCompletionCandidate | null {
+	const candidateBlockIds = collectCandidateSingletonHanBlockIds(
+		params.base,
+		params.docId,
+		params.shortlistedBodyBlockIds,
+	);
+	let best: SingletonHanCompletionCandidate | null = null;
+	for (const blockId of candidateBlockIds) {
+		const blockEvidence = getCachedBodyBlockEvidence(params.base, blockId);
+		const blockBigramAnchorOccurrences = collectBodyBigramAnchorOccurrences({
+			blockEvidence,
+			queryBigramTexts: params.queryBigramTexts,
+			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
+		});
+		const charPositions = filterOverlappingSingletonCharPositions(
+			collectBodySingletonCharPositions(blockEvidence, params.target.char),
+			params.target.char,
+			[
+				...(params.bodyOccurrencesByBlockId.get(blockId) ?? []).map((occurrence) => ({
+					start: occurrence.localPosition,
+					end: occurrence.localEndPosition,
+				})),
+				...blockBigramAnchorOccurrences.map((occurrence) => ({
+					start: occurrence.localPosition,
+					end: occurrence.localEndPosition,
+				})),
+			],
+		);
+		if (charPositions.length === 0) {
+			continue;
+		}
+		const sameBlockAnchor = buildBodySingletonHanSameBlockAnchorCandidate({
+			target: params.target,
+			blockId,
+			charPositions,
+			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
+			bodyBigramAnchorOccurrences: blockBigramAnchorOccurrences,
+			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
+			weightedGapIndex: blockEvidence.weightedGapIndex,
+		});
+		best = chooseBetterSingletonHanCompletion(best, sameBlockAnchor);
+		if (params.shortlistedBodyBlockIds.includes(blockId)) {
+			continue;
+		}
+		const adjacentAnchor = buildBodySingletonHanAdjacentAnchorCandidate({
+			base: params.base,
+			blockId,
+			docId: params.docId,
+			target: params.target,
+			charPositions,
+			weightedGapIndex: blockEvidence.weightedGapIndex,
+			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
+			bodyRescueBigramOccurrencesByBlockId: params.bodyRescueBigramOccurrencesByBlockId,
+			queryBigramTexts: params.queryBigramTexts,
+			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
+		});
+		best = chooseBetterSingletonHanCompletion(best, adjacentAnchor);
+	}
+	return best;
+}
+
+function collectCandidateSingletonHanBlockIds(
+	base: ResidentBase,
+	docId: number,
+	shortlistedBodyBlockIds: readonly number[],
+): number[] {
+	const out = new Set<number>(shortlistedBodyBlockIds);
+	for (const blockId of shortlistedBodyBlockIds) {
+		for (const candidateBlockId of [blockId - 1, blockId + 1]) {
+			if ((base.bodyBlocks.docIdByBlockId[candidateBlockId] ?? -1) !== docId) {
+				continue;
+			}
+			out.add(candidateBlockId);
+		}
+	}
+	return [...out].sort((left, right) => left - right);
+}
+
+function collectBodySingletonCharPositions(
+	blockEvidence: CachedBodyBlockEvidence,
+	singletonHanChar: string,
+): readonly number[] {
+	const cached = blockEvidence.singletonCharPositionsByChar.get(singletonHanChar);
+	if (cached != null) {
+		return cached;
+	}
+	const out: number[] = [];
+	for (let index = 0; index < blockEvidence.witnessOccurrences.length; index += 1) {
+		const occurrence = blockEvidence.witnessOccurrences[index];
+		const witnessText = blockEvidence.witnessTexts[index] ?? "";
+		for (const charOffset of collectTextOffsets(witnessText, singletonHanChar)) {
+			out.push(occurrence.localPosition + charOffset);
+		}
+	}
+	const sorted = out.sort((left, right) => left - right);
+	blockEvidence.singletonCharPositionsByChar.set(singletonHanChar, sorted);
+	return sorted;
+}
+
+function collectBodyBigramAnchorOccurrences(params: Readonly<{
+	blockEvidence: CachedBodyBlockEvidence;
+	queryBigramTexts: readonly string[];
+	rescueOccurrences: readonly HanSyntheticBodyOccurrence[] | null;
+}>): readonly BodyBigramAnchorOccurrence[] {
+	const out = new Map<string, BodyBigramAnchorOccurrence>();
+	const uniqueBigrams = [...new Set(params.queryBigramTexts.filter((bigram) => bigram.length > 0))];
+	for (let index = 0; index < params.blockEvidence.witnessOccurrences.length; index += 1) {
+		const witnessOccurrence = params.blockEvidence.witnessOccurrences[index];
+		const witnessText = params.blockEvidence.witnessTexts[index] ?? "";
+		for (const bigramText of uniqueBigrams) {
+			for (const charOffset of collectTextOffsets(witnessText, bigramText)) {
+				const localPosition = witnessOccurrence.localPosition + charOffset;
+				const localEndPosition = localPosition + bigramText.length;
+				const key = `${bigramText}:${localPosition}:${localEndPosition}`;
+				if (!out.has(key)) {
+					out.set(key, {
+						bigramText,
+						localPosition,
+						localEndPosition,
+					});
+				}
+			}
+		}
+	}
+	for (const occurrence of params.rescueOccurrences ?? []) {
+		const key = `${occurrence.match.familyText}:${occurrence.localPosition}:${occurrence.localEndPosition}`;
+		if (!out.has(key)) {
+			out.set(key, {
+				bigramText: occurrence.match.familyText,
+				localPosition: occurrence.localPosition,
+				localEndPosition: occurrence.localEndPosition,
+			});
+		}
+	}
+	return [...out.values()].sort((left, right) => {
+		if (left.localPosition !== right.localPosition) {
+			return left.localPosition - right.localPosition;
+		}
+		if (left.localEndPosition !== right.localEndPosition) {
+			return left.localEndPosition - right.localEndPosition;
+		}
+		return left.bigramText.localeCompare(right.bigramText);
+	});
+}
+
+function filterOverlappingSingletonCharPositions(
+	charPositions: readonly number[],
+	singletonHanChar: string,
+	anchorSpans: readonly Readonly<{ start: number; end: number }>[],
+): readonly number[] {
+	if (anchorSpans.length === 0) {
+		return charPositions;
+	}
+	return charPositions.filter((charPosition) => {
+		const charEnd = charPosition + singletonHanChar.length;
+		return !anchorSpans.some((occurrence) =>
+			spansOverlap(charPosition, charEnd, occurrence.start, occurrence.end),
+		);
+	});
+}
+
+function buildBodySingletonHanSameBlockAnchorCandidate(params: Readonly<{
+	target: SingletonHanTarget;
+	blockId: number;
+	charPositions: readonly number[];
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
+	bodyBigramAnchorOccurrences: readonly BodyBigramAnchorOccurrence[];
+	bestBodyWindowBlockIds: ReadonlySet<number>;
+	weightedGapIndex: WeightedGapIndex;
+}>): SingletonHanCompletionCandidate | null {
+	let best: SingletonHanCompletionCandidate | null = null;
+	for (const charPosition of params.charPositions) {
+		for (const occurrence of params.bodyOccurrencesByBlockId.get(params.blockId) ?? []) {
+			const completion = createSingletonHanCompletion({
+				target: params.target,
+				matchSource: "body_same_block",
+				bestAnchorKind: toSingletonHanAnchorKind(occurrence.match.matchKind),
+				bestAnchorDistance: computeWeightedBoundaryGap(
+					params.weightedGapIndex,
+					charPosition,
+					charPosition + params.target.char.length,
+					occurrence.localPosition,
+					occurrence.localEndPosition,
+				),
+				sameBlockAsAnchor: true,
+				sameBlockAsBestBodyWindow: params.bestBodyWindowBlockIds.has(params.blockId),
+			});
+			if (completion == null) {
+				continue;
+			}
+			best = chooseBetterSingletonHanCompletion(best, {
+				...completion,
+				priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+			});
+		}
+	}
+	for (const charPosition of params.charPositions) {
+		for (const occurrence of params.bodyBigramAnchorOccurrences) {
+			const charEnd = charPosition + params.target.char.length;
+			if (spansOverlap(charPosition, charEnd, occurrence.localPosition, occurrence.localEndPosition)) {
+				continue;
+			}
+			const completion = createSingletonHanCompletion({
+				target: params.target,
+				matchSource: "body_same_block",
+				bestAnchorKind: "bigram",
+				bestAnchorDistance: computeWeightedBoundaryGap(
+					params.weightedGapIndex,
+					charPosition,
+					charEnd,
+					occurrence.localPosition,
+					occurrence.localEndPosition,
+				),
+				sameBlockAsAnchor: true,
+				sameBlockAsBestBodyWindow: params.bestBodyWindowBlockIds.has(params.blockId),
+			});
+			if (completion == null) {
+				continue;
+			}
+			best = chooseBetterSingletonHanCompletion(best, {
+				...completion,
+				priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+			});
+		}
+	}
+	if (best != null) {
+		return best;
+	}
+	if (params.charPositions.length > 0) {
+		const completion = createSingletonHanCompletion({
+			target: params.target,
+			matchSource: "body_same_block",
+			bestAnchorKind: "none",
+			bestAnchorDistance: null,
+			sameBlockAsAnchor: true,
+			sameBlockAsBestBodyWindow: params.bestBodyWindowBlockIds.has(params.blockId),
+		});
+		if (completion != null) {
+			return {
+				...completion,
+				priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+			};
+		}
+	}
+	return null;
+}
+
+function buildBodySingletonHanAdjacentAnchorCandidate(params: Readonly<{
+	base: ResidentBase;
+	blockId: number;
+	docId: number;
+	target: SingletonHanTarget;
+	charPositions: readonly number[];
+	weightedGapIndex: WeightedGapIndex;
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
+	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
+		number,
+		readonly HanSyntheticBodyOccurrence[]
+	> | null;
+	queryBigramTexts: readonly string[];
+	bestBodyWindowBlockIds: ReadonlySet<number>;
+}>): SingletonHanCompletionCandidate | null {
+	let best: SingletonHanCompletionCandidate | null = null;
+	const currentOrdinal =
+		params.base.bodyBlocks.blockOrdinalByBlockId[params.blockId] ?? params.blockId;
+	for (const adjacentBlockId of [params.blockId - 1, params.blockId + 1]) {
+		if ((params.base.bodyBlocks.docIdByBlockId[adjacentBlockId] ?? -1) !== params.docId) {
+			continue;
+		}
+		const adjacentEvidence = getCachedBodyBlockEvidence(params.base, adjacentBlockId);
+		const adjacentBigramAnchorOccurrences = collectBodyBigramAnchorOccurrences({
+			blockEvidence: adjacentEvidence,
+			queryBigramTexts: params.queryBigramTexts,
+			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId?.get(adjacentBlockId) ?? null,
+		});
+		const adjacentOrdinal =
+			params.base.bodyBlocks.blockOrdinalByBlockId[adjacentBlockId] ?? adjacentBlockId;
+		for (const occurrence of params.bodyOccurrencesByBlockId.get(adjacentBlockId) ?? []) {
+			for (const charPosition of params.charPositions) {
+				const distance =
+					adjacentOrdinal < currentOrdinal
+						? computeWeightedAdjacentBoundaryGap(
+							adjacentEvidence.weightedGapIndex,
+							occurrence.localPosition,
+							occurrence.localEndPosition,
+							params.weightedGapIndex,
+							charPosition,
+							charPosition + params.target.char.length,
+						)
+						: computeWeightedAdjacentBoundaryGap(
+							params.weightedGapIndex,
+							charPosition,
+							charPosition + params.target.char.length,
+							adjacentEvidence.weightedGapIndex,
+							occurrence.localPosition,
+							occurrence.localEndPosition,
+						);
+				const completion = createSingletonHanCompletion({
+					target: params.target,
+					matchSource: "body_adjacent_block",
+					bestAnchorKind: toSingletonHanAnchorKind(occurrence.match.matchKind),
+					bestAnchorDistance: distance,
+					sameBlockAsAnchor: false,
+					sameBlockAsBestBodyWindow: params.bestBodyWindowBlockIds.has(params.blockId),
+				});
+				if (completion == null) {
+					continue;
+				}
+				best = chooseBetterSingletonHanCompletion(best, {
+					...completion,
+					priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+				});
+			}
+		}
+		for (const occurrence of adjacentBigramAnchorOccurrences) {
+			for (const charPosition of params.charPositions) {
+				const charEnd = charPosition + params.target.char.length;
+				if (spansOverlap(charPosition, charEnd, occurrence.localPosition, occurrence.localEndPosition)) {
+					continue;
+				}
+				const distance =
+					adjacentOrdinal < currentOrdinal
+						? computeWeightedAdjacentBoundaryGap(
+							adjacentEvidence.weightedGapIndex,
+							occurrence.localPosition,
+							occurrence.localEndPosition,
+							params.weightedGapIndex,
+							charPosition,
+							charEnd,
+						)
+						: computeWeightedAdjacentBoundaryGap(
+							params.weightedGapIndex,
+							charPosition,
+							charEnd,
+							adjacentEvidence.weightedGapIndex,
+							occurrence.localPosition,
+							occurrence.localEndPosition,
+						);
+				const completion = createSingletonHanCompletion({
+					target: params.target,
+					matchSource: "body_adjacent_block",
+					bestAnchorKind: "bigram",
+					bestAnchorDistance: distance,
+					sameBlockAsAnchor: false,
+					sameBlockAsBestBodyWindow: params.bestBodyWindowBlockIds.has(params.blockId),
+				});
+				if (completion == null) {
+					continue;
+				}
+				best = chooseBetterSingletonHanCompletion(best, {
+					...completion,
+					priorityScore: buildSingletonHanCompletionPriorityScore(completion),
+				});
+			}
+		}
+	}
+	if (best != null) {
+		return best;
+	}
+	return null;
+}
+function createSingletonHanCompletion(params: Readonly<{
+	target: SingletonHanTarget;
+	matchSource: SingletonHanCompletionMatchSource;
+	bestAnchorKind: SingletonHanCompletionAnchorKind;
+	bestAnchorDistance: number | null;
+	sameBlockAsAnchor: boolean;
+	sameBlockAsBestBodyWindow: boolean;
+}>): SingletonHanCompletion | null {
+	if (
+		!isSingletonHanCompletionLocalityQualified(
+			params.target,
+			params.bestAnchorKind,
+			params.bestAnchorDistance,
+		)
+	) {
+		return null;
+	}
+	return {
+		singletonHanChar: params.target.char,
+		singletonHanCharIndex: params.target.singletonHanCharIndex,
+		singletonHanSurfaceGroupIndex: params.target.surfaceGroupIndex,
+		matched: true,
+		matchSource: params.matchSource,
+		bestAnchorKind: params.bestAnchorKind,
+		bestAnchorDistance: params.bestAnchorDistance,
+		sameBlockAsAnchor: params.sameBlockAsAnchor,
+		sameBlockAsBestBodyWindow: params.sameBlockAsBestBodyWindow,
+		tier: resolveSingletonHanCompletionTier(),
+	};
+}
+
+function isSingletonHanCompletionLocalityQualified(
+	target: SingletonHanTarget,
+	bestAnchorKind: SingletonHanCompletionAnchorKind,
+	bestAnchorDistance: number | null,
+): boolean {
+	if (bestAnchorKind === "none") {
+		return target.kind === "query_singleton";
+	}
+	return (
+		(bestAnchorDistance ?? Number.MAX_SAFE_INTEGER) <=
+		HAN_BODY_LOCALITY_MAX_ADJACENT_GAP
+	);
+}
+
+function resolveSingletonHanCompletionTier(): SingletonHanCompletionTier {
+	return "tight";
+}
+
+function createEmptySingletonHanCompletion(): SingletonHanCompletion {
+	return {
+		singletonHanChar: null,
+		singletonHanCharIndex: null,
+		singletonHanSurfaceGroupIndex: null,
+		matched: false,
+		matchSource: "none",
+		bestAnchorKind: "none",
+		bestAnchorDistance: null,
+		sameBlockAsAnchor: false,
+		sameBlockAsBestBodyWindow: false,
+		tier: "none",
+	};
+}
+
+const SINGLETON_HAN_MATCH_SOURCE_SCORE: Record<
+	SingletonHanCompletionMatchSource,
+	number
+> = {
+	none: 0,
+	body_adjacent_block: 2,
+	body_same_block: 2,
+	route: 3,
+	identity: 4,
+};
+
+const SINGLETON_HAN_ANCHOR_KIND_SCORE: Record<
+	SingletonHanCompletionAnchorKind,
+	number
+> = {
+	none: 0,
+	bigram: 1,
+	fuzzy: 2,
+	prefix: 3,
+	exact: 4,
+};
+
+const SINGLETON_HAN_COMPLETION_TIER_SCORE: Record<SingletonHanCompletionTier, number> = {
+	none: 0,
+	tight: 1,
+};
+
+function chooseBetterSingletonHanCompletion(
+	left: SingletonHanCompletionCandidate | null,
+	right: SingletonHanCompletionCandidate | null,
+): SingletonHanCompletionCandidate | null {
+	if (left == null) {
+		return right;
+	}
+	if (right == null) {
+		return left;
+	}
+	if (left.priorityScore !== right.priorityScore) {
+		return left.priorityScore > right.priorityScore ? left : right;
+	}
+	return left;
+}
+
+function buildSingletonHanCompletionPriorityScore(
+	completion: SingletonHanCompletion,
+): number {
+	return (
+		SINGLETON_HAN_COMPLETION_TIER_SCORE[completion.tier] * 1_000_000 +
+		SINGLETON_HAN_ANCHOR_KIND_SCORE[completion.bestAnchorKind] * 100_000 +
+		SINGLETON_HAN_MATCH_SOURCE_SCORE[completion.matchSource] * 10_000 +
+		(completion.sameBlockAsBestBodyWindow ? 1_000 : 0) -
+		Math.min(completion.bestAnchorDistance ?? 999, 999)
+	);
+}
+
+function toSingletonHanAnchorKind(
+	matchKind: RealizedQueryUnitFamily["matchKind"],
+): SingletonHanCompletionAnchorKind {
+	switch (matchKind) {
+		case "exact":
+			return "exact";
+		case "prefix":
+			return "prefix";
+		case "fuzzy":
+			return "fuzzy";
+		default:
+			return "bigram";
+	}
+}
+
+function spansOverlap(
+	leftStart: number,
+	leftEnd: number,
+	rightStart: number,
+	rightEnd: number,
+): boolean {
+	return leftStart < rightEnd && rightStart < leftEnd;
+}
+
+function collectTextOffsets(text: string, target: string): number[] {
+	const offsets: number[] = [];
+	let searchStart = 0;
+	while (searchStart <= text.length - target.length) {
+		const matchIndex = text.indexOf(target, searchStart);
+		if (matchIndex < 0) {
+			break;
+		}
+		offsets.push(matchIndex);
+		searchStart = matchIndex + 1;
+	}
+	return offsets;
+}
+
 function summarizeHanSurfaceCompletion(
 	queryAnalysis: V3QueryAnalysis,
 	identityWitnessTexts: readonly string[],
@@ -2344,13 +3251,5 @@ function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): numbe
 			return 0;
 	}
 }
-
-
-
-
-
-
-
-
 
 

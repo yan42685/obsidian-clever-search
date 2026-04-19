@@ -35,6 +35,28 @@ const BODY_BLOCK_CLOSING_BOUNDARY_CHARS = new Set([
 	"\u300d",
 	"\u300f",
 ]);
+const SINGLETON_HAN_STOP_CHARS = new Set([
+	"的",
+	"了",
+	"是",
+	"在",
+	"和",
+	"与",
+	"及",
+	"就",
+	"都",
+	"也",
+	"很",
+	"把",
+	"被",
+	"为",
+	"于",
+	"或",
+	"而",
+	"又",
+	"并",
+	"之",
+]);
 
 export type V3SurfaceKind = "latin" | "han" | "mixed" | "other";
 export type V3DocumentTokenizer = (text: string) => readonly string[];
@@ -250,6 +272,29 @@ export function extractHanBigrams(text: string): string[] {
 	return out;
 }
 
+export function extractHanChars(text: string): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const match of normalizeText(text).matchAll(HAN_SEQUENCE_REGEX)) {
+		for (const char of Array.from(match[0])) {
+			if (seen.has(char)) {
+				continue;
+			}
+			seen.add(char);
+			out.push(char);
+		}
+	}
+	return out;
+}
+
+export function countHanCodepoints(text: string): number {
+	let count = 0;
+	for (const match of normalizeText(text).matchAll(HAN_SEQUENCE_REGEX)) {
+		count += Array.from(match[0]).length;
+	}
+	return count;
+}
+
 export function encodeHanBigramId(bigram: string): number {
 	const chars = Array.from(bigram);
 	const left = chars[0]?.codePointAt(0) ?? 0;
@@ -260,6 +305,15 @@ export function encodeHanBigramId(bigram: string): number {
 	hash ^= right;
 	hash = Math.imul(hash, 0x01000193);
 	return hash >>> 0;
+}
+
+export function encodeHanCharId(char: string): number {
+	return (Array.from(char)[0]?.codePointAt(0) ?? 0) >>> 0;
+}
+
+export function isSingletonHanStopChar(char: string): boolean {
+	const normalizedChar = normalizeText(char).trim();
+	return normalizedChar.length > 0 && SINGLETON_HAN_STOP_CHARS.has(normalizedChar);
 }
 
 export function splitBodyBlocks(text: string): V3BodyBlockDraft[] {

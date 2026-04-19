@@ -116,7 +116,8 @@ function collapseSurfaceDisplayAtoms(
 			return false;
 		}
 		if (
-			atom.evidenceKind === "opaque_bigram" &&
+			(atom.evidenceKind === "opaque_bigram" ||
+				atom.evidenceKind === "matched_bigram") &&
 			atom.surfaceGroupIndex != null &&
 			confirmedSurfaceGroups.has(atom.surfaceGroupIndex)
 		) {
@@ -236,9 +237,13 @@ function pickRepresentativeAtoms(
 		const key =
 			atom.kind === "confirmed_surface_atom"
 				? `surface:${atom.surfaceGroupIndex ?? -1}`
-				: atom.kind === "opaque_bigram_atom"
-					? `opaque:${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`
-					: `unit:${atom.queryUnitIndex ?? -1}`;
+				: atom.kind === "singleton_han_atom"
+					? `singleton:${atom.surfaceGroupIndex ?? -1}:${atom.blockId}:${atom.matchedText}`
+					: atom.kind === "matched_bigram_atom"
+						? `matched:${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}:${atom.blockId}`
+					: atom.kind === "opaque_bigram_atom"
+						? `opaque:${atom.surfaceGroupIndex ?? -1}:${atom.bigramText ?? atom.matchedText}`
+						: `unit:${atom.queryUnitIndex ?? -1}`;
 		const existing = bestByKey.get(key);
 		if (
 			existing == null ||

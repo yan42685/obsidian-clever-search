@@ -86,6 +86,16 @@ function createPackingProfile(
 		strongestHanSurfaceCompletionTier:
 			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		singletonHanCompletion: overrides.singletonHanCompletion ?? {
+			singletonHanChar: null,
+			matched: false,
+			matchSource: "none",
+			bestAnchorKind: "none",
+			bestAnchorDistance: null,
+			sameBlockAsAnchor: false,
+			sameBlockAsBestBodyWindow: false,
+			tier: "none",
+		},
 		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
 		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
 		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
@@ -279,6 +289,107 @@ describe("coverage lexical v3 comparator", () => {
 		});
 
 		expect(comparePackingProfiles(fuller, partial)).toBeLessThan(0);
+	});
+
+	test("tight singleton completion outranks missing singleton completion inside the same band", () => {
+		const tightSingleton = createPackingProfile({
+			path: "tight-singleton.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+			singletonHanCompletion: {
+				singletonHanChar: "云",
+				matched: true,
+				matchSource: "body_same_block",
+				bestAnchorKind: "exact",
+				bestAnchorDistance: 6,
+				sameBlockAsAnchor: true,
+				sameBlockAsBestBodyWindow: true,
+				tier: "tight",
+			},
+		});
+		const missingSingleton = createPackingProfile({
+			path: "missing-singleton.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+			singletonHanCompletion: {
+				singletonHanChar: "云",
+				matched: false,
+				matchSource: "none",
+				bestAnchorKind: "none",
+				bestAnchorDistance: null,
+				sameBlockAsAnchor: false,
+				sameBlockAsBestBodyWindow: false,
+				tier: "none",
+			},
+		});
+		const noSingleton = createPackingProfile({
+			path: "no-singleton.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+		});
+
+		expect(comparePackingProfiles(tightSingleton, missingSingleton)).toBeLessThan(0);
+		expect(comparePackingProfiles(tightSingleton, noSingleton)).toBeLessThan(0);
+	});
+
+	test("smaller singleton gaps can outrank same-band body completions across adjacent blocks", () => {
+		const adjacentTight = createPackingProfile({
+			path: "adjacent-tight.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+			singletonHanCompletion: {
+				singletonHanChar: "\u529b",
+				matched: true,
+				matchSource: "body_adjacent_block",
+				bestAnchorKind: "exact",
+				bestAnchorDistance: 0,
+				sameBlockAsAnchor: false,
+				sameBlockAsBestBodyWindow: true,
+				tier: "tight",
+			},
+		});
+		const sameBlockButLooser = createPackingProfile({
+			path: "same-block-looser.md",
+			realizedCoverageCount: 2,
+			coverageGate: {
+				realizedCoverageCount: 2,
+				fullySatisfiedSurfaceGroupCount: 1,
+				startedSurfaceGroupCount: 1,
+				crossScriptSatisfiedGroupCount: 1,
+			},
+			singletonHanCompletion: {
+				singletonHanChar: "\u529b",
+				matched: true,
+				matchSource: "body_same_block",
+				bestAnchorKind: "exact",
+				bestAnchorDistance: 8,
+				sameBlockAsAnchor: true,
+				sameBlockAsBestBodyWindow: true,
+				tier: "tight",
+			},
+		});
+
+		expect(comparePackingProfiles(adjacentTight, sameBlockButLooser)).toBeLessThan(0);
 	});
 
 	test("coverage gate uses started groups and cross-script satisfaction before packing", () => {

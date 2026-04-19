@@ -6,13 +6,17 @@ import type { EvidencePackingProfile } from "../ranking";
 
 export type V3DirectSubitemAnchorTier =
 	| "none"
+	| "singleton_han"
 	| "real_lexical"
+	| "matched_bigram"
 	| "weak_opaque_bigram"
 	| "opaque_bigram"
 	| "confirmed_surface";
 
 export type V3DirectSubitemAtomKind =
+	| "singleton_han_atom"
 	| "realized_family_atom"
+	| "matched_bigram_atom"
 	| "opaque_bigram_atom"
 	| "confirmed_surface_atom";
 
@@ -21,8 +25,10 @@ export type V3DirectSubitemHighlightTier =
 	| "weak";
 
 export type V3DirectSubitemEvidenceKind =
+	| "singleton_han"
 	| "real_exact"
 	| "fuzzy"
+	| "matched_bigram"
 	| "opaque_bigram"
 	| "confirmed_surface";
 
@@ -63,6 +69,7 @@ export type V3DirectSubitemCandidate = Readonly<{
 	anchorTier: V3DirectSubitemAnchorTier;
 	coveredRealPrimaryCount: number;
 	confirmedSurfaceGroupCount: number;
+	singletonHanCompletionTier: "none" | "tight";
 	matchedOpaqueBigramCount: number;
 	opaqueCoverageRatio: number;
 	preservesQueryOrder: boolean;

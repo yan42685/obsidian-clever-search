@@ -67,12 +67,39 @@ function createCandidate(
 		anchorTier: overrides.anchorTier ?? "real_lexical",
 		coveredRealPrimaryCount: overrides.coveredRealPrimaryCount ?? 1,
 		confirmedSurfaceGroupCount: overrides.confirmedSurfaceGroupCount ?? 0,
+		singletonHanCompletionTier: overrides.singletonHanCompletionTier ?? "none",
 		matchedOpaqueBigramCount: overrides.matchedOpaqueBigramCount ?? 0,
 		opaqueCoverageRatio: overrides.opaqueCoverageRatio ?? 0,
 		preservesQueryOrder: overrides.preservesQueryOrder ?? true,
 		windowWidth: overrides.windowWidth ?? 10,
 		maxAdjacentGap: overrides.maxAdjacentGap ?? 0,
 		totalGap: overrides.totalGap ?? 0,
+	};
+}
+
+function createQueryAnalysis() {
+	return {
+		queryText: "alpha",
+		normalizedQueryText: "alpha",
+		querySingletonHanChar: null,
+		querySingletonHanCodePoint: null,
+		querySingletonHanRecallEligible: false,
+		surfaceGroups: [
+			{
+				index: 0,
+				text: "alpha",
+				kind: "latin" as const,
+				hanBigramTexts: [],
+				coveredCharMask: [],
+				queryResidualUniqueBigrams: [],
+				hasQueryResidualHanCoverage: false,
+			},
+		],
+		primaryUnits: [
+			{ index: 0, text: "alpha", source: "surface" as const, surfaceGroupIndex: 0 },
+		],
+		hanBackstopGroups: [],
+		surfaceCoverageShapeKey: "l",
 	};
 }
 
@@ -115,26 +142,7 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 
 		const result = buildV3DirectSubitems({
 			snapshotText: "alpha",
-			queryAnalysis: {
-				queryText: "alpha",
-				normalizedQueryText: "alpha",
-				surfaceGroups: [
-					{
-						index: 0,
-						text: "alpha",
-						kind: "latin",
-						hanBigramTexts: [],
-						coveredCharMask: [],
-						queryResidualUniqueBigrams: [],
-						hasQueryResidualHanCoverage: false,
-					},
-				],
-				primaryUnits: [
-					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
-				],
-				hanBackstopGroups: [],
-				surfaceCoverageShapeKey: "l",
-			},
+			queryAnalysis: createQueryAnalysis(),
 			candidate: {} as never,
 			candidateRecall: {} as never,
 			residentBase: {} as never,
@@ -179,26 +187,7 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 
 		const result = buildV3DirectSubitems({
 			snapshotText: "alpha",
-			queryAnalysis: {
-				queryText: "alpha",
-				normalizedQueryText: "alpha",
-				surfaceGroups: [
-					{
-						index: 0,
-						text: "alpha",
-						kind: "latin",
-						hanBigramTexts: [],
-						coveredCharMask: [],
-						queryResidualUniqueBigrams: [],
-						hasQueryResidualHanCoverage: false,
-					},
-				],
-				primaryUnits: [
-					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
-				],
-				hanBackstopGroups: [],
-				surfaceCoverageShapeKey: "l",
-			},
+			queryAnalysis: createQueryAnalysis(),
 			candidate: {} as never,
 			candidateRecall: {} as never,
 			residentBase: {} as never,
@@ -207,6 +196,50 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 		});
 
 		expect(result.candidates).toEqual([topCandidate, sameGate]);
+	});
+
+	test("weak pruning keeps singleton-completed candidates ahead of singleton-incomplete peers", () => {
+		const tightSingleton = createCandidate({
+			start: 10,
+			end: 20,
+			anchorOffset: 10,
+			singletonHanCompletionTier: "tight",
+		});
+		const sameTightSingleton = createCandidate({
+			start: 40,
+			end: 50,
+			anchorOffset: 40,
+			singletonHanCompletionTier: "tight",
+		});
+		const missingSingleton = createCandidate({
+			start: 80,
+			end: 90,
+			anchorOffset: 80,
+			singletonHanCompletionTier: "none",
+		});
+		mockedBuildCandidates.mockReturnValue([
+			tightSingleton,
+			sameTightSingleton,
+			missingSingleton,
+		]);
+		mockedRenderCandidate.mockImplementation(({ candidate }) =>
+			createRenderPayload({
+				text: `${candidate.start}`,
+				snippetText: `${candidate.start}`,
+			}),
+		);
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "alpha",
+			queryAnalysis: createQueryAnalysis(),
+			candidate: {} as never,
+			candidateRecall: {} as never,
+			residentBase: {} as never,
+			maxSubItemResults: 5,
+			hideWeaklyRelatedResults: true,
+		});
+
+		expect(result.candidates).toEqual([tightSingleton, sameTightSingleton]);
 	});
 
 	test("anchorless candidates are dropped defensively", () => {
@@ -232,26 +265,7 @@ describe("coverage lexical v3 direct subitems resolver", () => {
 
 		const result = buildV3DirectSubitems({
 			snapshotText: "alpha",
-			queryAnalysis: {
-				queryText: "alpha",
-				normalizedQueryText: "alpha",
-				surfaceGroups: [
-					{
-						index: 0,
-						text: "alpha",
-						kind: "latin",
-						hanBigramTexts: [],
-						coveredCharMask: [],
-						queryResidualUniqueBigrams: [],
-						hasQueryResidualHanCoverage: false,
-					},
-				],
-				primaryUnits: [
-					{ index: 0, text: "alpha", source: "surface", surfaceGroupIndex: 0 },
-				],
-				hanBackstopGroups: [],
-				surfaceCoverageShapeKey: "l",
-			},
+			queryAnalysis: createQueryAnalysis(),
 			candidate: {} as never,
 			candidateRecall: {} as never,
 			residentBase: {} as never,

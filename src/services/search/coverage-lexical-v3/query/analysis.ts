@@ -1,6 +1,9 @@
 import {
 	classifySurfaceKind,
+	countHanCodepoints,
 	extractHanBigrams,
+	extractHanChars,
+	isSingletonHanStopChar,
 	normalizeText,
 } from "./text";
 
@@ -40,6 +43,9 @@ export type V3HanBackstopGroup = Readonly<{
 export type V3QueryAnalysis = Readonly<{
 	queryText: string;
 	normalizedQueryText: string;
+	querySingletonHanChar: string | null;
+	querySingletonHanCodePoint: number | null;
+	querySingletonHanRecallEligible: boolean;
 	surfaceGroups: readonly V3QuerySurfaceGroup[];
 	primaryUnits: readonly V3QueryUnit[];
 	hanBackstopGroups: readonly V3HanBackstopGroup[];
@@ -54,6 +60,9 @@ export function analyzeQuery(
 	queryTerms: readonly string[] = [],
 ): V3QueryAnalysis {
 	const normalizedQueryText = normalizeText(queryText);
+	const queryHanChars = extractHanChars(normalizedQueryText);
+	const querySingletonHanChar =
+		countHanCodepoints(normalizedQueryText) === 1 ? (queryHanChars[0] ?? null) : null;
 	const normalizedQueryTerms = queryTerms
 		.map((term) => normalizeText(term).trim())
 		.filter((term) => term.length > 0);
@@ -144,6 +153,13 @@ export function analyzeQuery(
 	return {
 		queryText,
 		normalizedQueryText,
+		querySingletonHanChar,
+		querySingletonHanCodePoint:
+			querySingletonHanChar == null
+				? null
+				: (querySingletonHanChar.codePointAt(0) ?? null),
+		querySingletonHanRecallEligible:
+			querySingletonHanChar != null && !isSingletonHanStopChar(querySingletonHanChar),
 		surfaceGroups,
 		primaryUnits,
 		hanBackstopGroups,

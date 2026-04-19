@@ -98,6 +98,10 @@ export type ResidentHanRouteArena = Readonly<{
 	metadataPostingStarts: ResidentIntegerArray;
 	metadataDocIds: ResidentIntegerArray;
 	bodyAdaptivePostings: ResidentAdaptivePostingField;
+	metadataCharIds: Uint32Array;
+	metadataCharPostingStarts: ResidentIntegerArray;
+	metadataCharDocIds: ResidentIntegerArray;
+	bodyCharAdaptivePostings: ResidentAdaptivePostingField;
 	identityWitnessStartByDocId: ResidentIntegerArray;
 	identityWitnessStringIds: ResidentIntegerArray;
 	identityWitnessSourceMaskByDocEntry: Uint8Array;
@@ -169,6 +173,13 @@ export type ResidentBaseMetrics = Readonly<{
 	hanRouteHanBigramDeltaTermIdsBytes: number;
 	hanRouteHanBigramDeltaTapeStartsBytes: number;
 	hanRouteHanBigramDeltaPostingTapeBytes: number;
+	hanRouteMetadataHanCharPostingsBytes: number;
+	hanRouteMetadataHanCharPostingStartsBytes: number;
+	hanRouteMetadataHanCharDocIdsBytes: number;
+	hanRouteHanCharPostingBytes: number;
+	hanRouteBodyCharIdsBytes: number;
+	hanRouteHanCharPostingStartsBytes: number;
+	hanRouteHanCharBlockIdsBytes: number;
 	hanRouteMetadataWitnessBytes: number;
 	hanRouteBodyWitnessBytes: number;
 	hanRouteBodyWitnessPositionBytes: number;

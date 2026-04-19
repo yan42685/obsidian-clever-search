@@ -47,6 +47,15 @@ export type V3HanBodyBlockGate = Readonly<{
 	stats: V3HanRouteGateStats;
 }>;
 
+export type V3CandidateBodyBlockRecall = Readonly<{
+	blockId: number;
+	hasExactSupport: boolean;
+	hasPrefixSupport: boolean;
+	hasStrongHanSupport: boolean;
+	hasSingletonHanSupport: boolean;
+	hasScopedSingletonHanSupport: boolean;
+}>;
+
 export type V3CandidateHanSurfaceGroupRecall = Readonly<{
 	surfaceGroupIndex: number;
 	metadataGateStats: V3HanRouteGateStats | null;
@@ -59,6 +68,9 @@ export type V3CandidateDocRecall = Readonly<{
 	matchedIdentityUnitIndices: readonly number[];
 	matchedRouteUnitIndices: readonly number[];
 	matchedHeadingUnitIndices: readonly number[];
+	hasQuerySingletonHanMetadataSupport: boolean;
+	hasScopedSingletonHanMetadataSupport: boolean;
+	shortlistedBodyBlocks: readonly V3CandidateBodyBlockRecall[];
 	shortlistedBodyBlockIds: readonly number[];
 	hanMetadataGateStats: V3HanRouteGateStats | null;
 	hanBodyBlockGateStats: readonly V3HanBodyBlockGate[];

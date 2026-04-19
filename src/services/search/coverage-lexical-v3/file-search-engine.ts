@@ -140,6 +140,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const result = this.engine.search(queryText, searchTerms, {
 			allowPrefixMatch: request.isPrefixMatch,
 			allowFuzzyMatch: request.isFuzzy,
+			maxItemResults: request.maxItemResults,
 		});
 		const engineMs = shouldLogDebug ? nowDebugMs() - engineStartedAtMs : 0;
 		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
@@ -147,7 +148,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const refineMs = shouldLogDebug ? nowDebugMs() - refineStartedAtMs : 0;
 		const visibilityFilteredCandidates =
 			request.hideWeaklyRelatedResults === true
-				? refinedCandidates.filter((candidate) => !candidate.hasOnlyWeakHanRescue)
+				? refinedCandidates.filter(
+						(candidate) =>
+							!candidate.hasOnlyWeakHanRescue ||
+							candidate.singletonHanCompletion.matched,
+					)
 				: refinedCandidates;
 		const pruneStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const weaklyPrunedCandidates = request.hideWeaklyRelatedResults
@@ -193,6 +198,19 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				queryText,
 				searchTerms,
 				searchTermCount: searchTerms.length,
+				queryPrimaryUnits: result.recallState.queryAnalysis.primaryUnits.map((unit) => ({
+					index: unit.index,
+					text: unit.text,
+					source: unit.source,
+					surfaceGroupIndex: unit.surfaceGroupIndex,
+				})),
+				querySurfaceGroups: result.recallState.queryAnalysis.surfaceGroups.map((group) => ({
+					index: group.index,
+					text: group.text,
+					kind: group.kind,
+					hanBigramTexts: group.hanBigramTexts,
+					queryResidualUniqueBigrams: group.queryResidualUniqueBigrams,
+				})),
 				hideWeaklyRelatedResults: request.hideWeaklyRelatedResults === true,
 				maxItemResults: request.maxItemResults,
 				candidateDocCount: result.recallState.candidateDocs.length,
@@ -201,6 +219,17 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				weaklyPrunedCandidateCount: weaklyPrunedCandidates.length,
 				visibleCandidateCount: visibleCandidates.length,
 				returnedCandidateCount: matchedFiles.length,
+				refinedCandidateDetails: summarizeFileSearchDebugCandidates(refinedCandidates),
+				visibilityFilteredOutPaths: collectFilteredCandidatePaths(
+					refinedCandidates,
+					visibilityFilteredCandidates,
+				),
+				weaklyPrunedOutPaths: collectFilteredCandidatePaths(
+					visibilityFilteredCandidates,
+					weaklyPrunedCandidates,
+				),
+				visibleCandidateDetails: summarizeFileSearchDebugCandidates(visibleCandidates),
+				returnedPaths: matchedFiles.map((file) => file.path),
 				phaseMs: {
 					tokenize: roundDebugMs(tokenizeMs),
 					engine: roundDebugMs(engineMs),
@@ -241,7 +270,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const searchTerms = this.getQueryTerms(trimmedQuery);
 		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
 		const engineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const result = this.engine.search(trimmedQuery, searchTerms);
+		const result = this.engine.search(trimmedQuery, searchTerms, {
+			maxItemResults: this.outerSetting.ui.maxItemResults,
+		});
 		const engineMs = shouldLogDebug ? nowDebugMs() - engineStartedAtMs : 0;
 		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const refinedCandidates = await this.refineHanSurfaceCompletion(result);
@@ -692,6 +723,55 @@ function dedupePreservingOrder(values: readonly string[]): string[] {
 
 function roundDebugMs(value: number): number {
 	return Math.round(value * 1000) / 1000;
+}
+
+function summarizeFileSearchDebugCandidates(
+	candidates: readonly EvidencePackingProfile[],
+): ReadonlyArray<{
+	docId: number;
+	path: string;
+	realizedCoverageCount: number;
+	coverageGate: EvidencePackingProfile["coverageGate"];
+	hasOnlyWeakHanRescue: boolean;
+	singletonHanCompletion: {
+		matched: boolean;
+		char: string | null;
+		charIndex: number | null;
+		surfaceGroupIndex: number | null;
+		matchSource: EvidencePackingProfile["singletonHanCompletion"]["matchSource"];
+		bestAnchorKind: EvidencePackingProfile["singletonHanCompletion"]["bestAnchorKind"];
+		bestAnchorDistance: number | null;
+		tier: EvidencePackingProfile["singletonHanCompletion"]["tier"];
+	};
+}> {
+	return candidates.slice(0, 12).map((candidate) => ({
+		docId: candidate.docId,
+		path: candidate.path,
+		realizedCoverageCount: candidate.realizedCoverageCount,
+		coverageGate: candidate.coverageGate,
+		hasOnlyWeakHanRescue: candidate.hasOnlyWeakHanRescue,
+		singletonHanCompletion: {
+			matched: candidate.singletonHanCompletion.matched,
+			char: candidate.singletonHanCompletion.singletonHanChar,
+			charIndex: candidate.singletonHanCompletion.singletonHanCharIndex,
+			surfaceGroupIndex:
+				candidate.singletonHanCompletion.singletonHanSurfaceGroupIndex,
+			matchSource: candidate.singletonHanCompletion.matchSource,
+			bestAnchorKind: candidate.singletonHanCompletion.bestAnchorKind,
+			bestAnchorDistance: candidate.singletonHanCompletion.bestAnchorDistance,
+			tier: candidate.singletonHanCompletion.tier,
+		},
+	}));
+}
+
+function collectFilteredCandidatePaths(
+	before: readonly EvidencePackingProfile[],
+	after: readonly EvidencePackingProfile[],
+): string[] {
+	const retainedDocIds = new Set(after.map((candidate) => candidate.docId));
+	return before
+		.filter((candidate) => !retainedDocIds.has(candidate.docId))
+		.map((candidate) => candidate.path);
 }
 
 function filterToTopCoverageGateBand(

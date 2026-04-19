@@ -112,6 +112,9 @@ export function buildResidentBaseMetrics(
 		input.hanRoute.metadataPostingStarts.byteLength +
 		input.hanRoute.bodyAdaptivePostings.smallValueStarts.byteLength +
 		input.hanRoute.bodyAdaptivePostings.deltaTapeStarts.byteLength +
+		input.hanRoute.metadataCharPostingStarts.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.smallValueStarts.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.deltaTapeStarts.byteLength +
 		input.hanRoute.identityWitnessStartByDocId.byteLength +
 		input.hanRoute.routeWitnessStartByDocId.byteLength +
 		input.hanRoute.headingWitnessStartByDocId.byteLength +
@@ -157,6 +160,17 @@ export function buildResidentBaseMetrics(
 		input.hanRoute.bodyAdaptivePostings.smallValueIds.byteLength +
 		input.hanRoute.bodyAdaptivePostings.deltaTermIds.byteLength +
 		input.hanRoute.bodyAdaptivePostings.postingTape.byteLength +
+		input.hanRoute.metadataCharIds.byteLength +
+		input.hanRoute.metadataCharDocIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.singletonTermIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.singletonValueIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.pairTermIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.pairFirstValueIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.pairSecondValueIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.smallTermIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.smallValueIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.deltaTermIds.byteLength +
+		input.hanRoute.bodyCharAdaptivePostings.postingTape.byteLength +
 		input.hanRoute.identityWitnessStringIds.byteLength +
 		input.hanRoute.routeWitnessStringIds.byteLength +
 		input.hanRoute.headingWitnessStringIds.byteLength +
@@ -264,6 +278,19 @@ export function buildResidentBaseMetrics(
 			hanRouteBreakdown.bodyHanDeltaTapeStartsBytes,
 		hanRouteHanBigramDeltaPostingTapeBytes:
 			hanRouteBreakdown.bodyHanDeltaPostingTapeBytes,
+		hanRouteMetadataHanCharPostingsBytes:
+			hanRouteBreakdown.metadataHanCharPostingsBytes,
+		hanRouteMetadataHanCharPostingStartsBytes:
+			hanRouteBreakdown.metadataHanCharPostingStartsBytes,
+		hanRouteMetadataHanCharDocIdsBytes:
+			hanRouteBreakdown.metadataHanCharDocIdsBytes,
+		hanRouteHanCharPostingBytes:
+			hanRouteBreakdown.bodyHanCharPostingsBytes,
+		hanRouteBodyCharIdsBytes: hanRouteBreakdown.bodyHanCharIdsBytes,
+		hanRouteHanCharPostingStartsBytes:
+			hanRouteBreakdown.bodyHanCharPostingStartsBytes,
+		hanRouteHanCharBlockIdsBytes:
+			hanRouteBreakdown.bodyHanCharBodyBlockIdsBytes,
 		hanRouteMetadataWitnessBytes: hanRouteBreakdown.metadataWitnessBytes,
 		hanRouteBodyWitnessBytes: hanRouteBreakdown.bodyWitnessBytes,
 		hanRouteBodyWitnessPositionBytes: hanRouteBreakdown.bodyWitnessPositionBytes,

@@ -27,9 +27,11 @@ import {
 import { buildResidentBaseMetrics } from "../metrics";
 import {
 	encodeHanBigramId,
+	encodeHanCharId,
 	extractDocumentFamilySequence,
 	extractDocumentFamilyTexts,
 	extractHanBigrams,
+	extractHanChars,
 	extractHanSegments,
 	splitBodyBlocks,
 	splitBodyBlocksWithDocumentTokenizer,
@@ -68,6 +70,8 @@ type PreparedDocument = Readonly<{
 	identityHanBigramIds: readonly number[];
 	routeHanBigramIds: readonly number[];
 	headingHanBigramIds: readonly number[];
+	identityHanCharIds: readonly number[];
+	routeHanCharIds: readonly number[];
 	bodyBlocks: readonly PreparedBodyBlock[];
 }>;
 
@@ -81,6 +85,7 @@ type PreparedBodyBlock = Readonly<{
 	hanWitnessTexts: readonly string[];
 	hanWitnessStartOffsets: readonly number[];
 	hanBigramIds: readonly number[];
+	hanCharIds: readonly number[];
 }>;
 
 export type ResidentBuildArtifacts = Readonly<{
@@ -335,6 +340,9 @@ function prepareDocument(
 		hanWitnessTexts: block.hanWitnessTexts,
 		hanWitnessStartOffsets: block.hanWitnessStartOffsets,
 		hanBigramIds: dedupeSorted(block.hanBigramTexts).map(encodeHanBigramId),
+		hanCharIds: dedupeSorted(
+			block.hanWitnessTexts.flatMap((text) => extractHanChars(text)),
+		).map(encodeHanCharId),
 	}));
 	const identityHanWitnessEntries = [
 		...extractHanSegments(document.basename ?? "").map((text) => ({
@@ -429,6 +437,14 @@ function prepareDocument(
 		headingHanBigramIds: dedupeSorted(
 			extractHanBigrams(headingsText),
 		).map(encodeHanBigramId),
+		identityHanCharIds: dedupeSorted([
+			...extractHanChars(document.basename ?? ""),
+			...extractHanChars(aliasesText),
+		]).map(encodeHanCharId),
+		routeHanCharIds: dedupeSorted([
+			...extractHanChars(document.folder ?? ""),
+			...splitTagValues(tagsText).flatMap((tag) => extractHanChars(tag)),
+		]).map(encodeHanCharId),
 		bodyBlocks,
 	};
 }
@@ -512,7 +528,12 @@ function buildResidentHanRoute(
 		...documents.flatMap((document) => document.identityHanBigramIds),
 		...documents.flatMap((document) => document.routeHanBigramIds),
 	]);
+	const metadataCharIds = dedupeSortedNumbers([
+		...documents.flatMap((document) => document.identityHanCharIds),
+		...documents.flatMap((document) => document.routeHanCharIds),
+	]);
 	const bodyPostingsByBigramId = new Map<number, number[]>();
+	const bodyPostingsByCharId = new Map<number, number[]>();
 	for (let blockId = 0; blockId < allBodyBlocks.length; blockId += 1) {
 		for (const bigramId of allBodyBlocks[blockId]?.hanBigramIds ?? []) {
 			let blockIds = bodyPostingsByBigramId.get(bigramId);
@@ -522,12 +543,28 @@ function buildResidentHanRoute(
 			}
 			blockIds.push(blockId);
 		}
+		for (const charId of allBodyBlocks[blockId]?.hanCharIds ?? []) {
+			let blockIds = bodyPostingsByCharId.get(charId);
+			if (!blockIds) {
+				blockIds = [];
+				bodyPostingsByCharId.set(charId, blockIds);
+			}
+			blockIds.push(blockId);
+		}
 	}
-	if (metadataBigramIds.length === 0 && bodyPostingsByBigramId.size === 0) {
+	if (
+		metadataBigramIds.length === 0 &&
+		bodyPostingsByBigramId.size === 0 &&
+		metadataCharIds.length === 0 &&
+		bodyPostingsByCharId.size === 0
+	) {
 		return buildHanRouteArena({
 			bigramIds: [],
 			metadataDocIdsByBigram: [],
 			bodyPostingsByBigramId: new Map(),
+			metadataCharIds: [],
+			metadataDocIdsByChar: [],
+			bodyPostingsByCharId: new Map(),
 			identityWitnessStringIdsByDoc,
 			identityWitnessSourceMasksByDoc,
 			routeWitnessStringIdsByDoc,
@@ -544,6 +581,13 @@ function buildResidentHanRoute(
 		{ length: metadataBigramIds.length },
 		() => [] as number[],
 	);
+	const metadataCharIndexById = new Map(
+		metadataCharIds.map((charId, index) => [charId, index]),
+	);
+	const metadataDocIdsByChar = Array.from(
+		{ length: metadataCharIds.length },
+		() => [] as number[],
+	);
 	for (let docId = 0; docId < documents.length; docId += 1) {
 		const document = documents[docId];
 		pushBigramPostings(
@@ -555,11 +599,23 @@ function buildResidentHanRoute(
 			docId,
 			metadataBigramIndexById,
 		);
+		pushBigramPostings(
+			metadataDocIdsByChar,
+			dedupeSortedNumbers([
+				...document.identityHanCharIds,
+				...document.routeHanCharIds,
+			]),
+			docId,
+			metadataCharIndexById,
+		);
 	}
 	return buildHanRouteArena({
 		bigramIds: metadataBigramIds,
 			metadataDocIdsByBigram,
 			bodyPostingsByBigramId,
+			metadataCharIds,
+			metadataDocIdsByChar,
+			bodyPostingsByCharId,
 			identityWitnessStringIdsByDoc,
 			identityWitnessSourceMasksByDoc,
 			routeWitnessStringIdsByDoc,

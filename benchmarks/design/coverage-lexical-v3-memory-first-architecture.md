@@ -930,3 +930,27 @@ Implementation note:
 - database upgrade compatibility was intentionally not preserved in this pass;
   upgrading clears existing search state and relies on rebuild under the active
   V3-centered runtime
+
+
+### Runtime Singleton Han Route Note
+
+Status: Updated on 2026-04-19
+
+The resident Han-route layout now also carries route-only singleton-char lanes
+for the singleton-Han recall path:
+
+- metadata singleton route stores deduped `charId -> docId` postings derived
+  only from `basename`, `alias`, `folder`, and `tag`
+- body singleton route stores deduped `charId -> blockId` postings derived only
+  from block-native Han witness text
+- `charId` is the Han Unicode code point stored as `u32`, reusing the Han route
+  resident-posting style instead of entering the main family lexicon or exact
+  tape world-view
+- no extra resident per-doc or per-block singleton-char mirror is retained once
+  the postings are built
+- `heading` singleton recall remains intentionally unsupported in resident
+  layout; heading witness strings still exist only for corroboration / display
+  reading paths
+- resident metrics now account for the extra singleton-char route lanes, and
+  access helpers expose `collectHanMetadataDocIdsByChar(...)` plus
+  `collectHanBodyBlockIdsByChar(...)`

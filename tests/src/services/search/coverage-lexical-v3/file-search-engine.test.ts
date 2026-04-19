@@ -3,6 +3,7 @@ jest.mock("src/services/search/tokenizer", () => ({
 }));
 
 import type { IndexedDocument } from "src/globals/search-types";
+import { OuterSetting } from "src/globals/plugin-setting";
 import { CoverageLexicalV3FileSearchEngine } from "src/services/search/coverage-lexical-v3/file-search-engine";
 import type { CoverageLexicalV3SearchResult } from "src/services/search/coverage-lexical-v3/engine";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
@@ -88,7 +89,18 @@ function createPackingProfile(
 		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
 		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
 		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
+		singletonHanCompletion: overrides.singletonHanCompletion ?? {
+			singletonHanChar: null,
+			matched: false,
+			matchSource: 'none',
+			bestAnchorKind: 'none',
+			bestAnchorDistance: null,
+			sameBlockAsAnchor: false,
+			sameBlockAsBestBodyWindow: false,
+			tier: 'none',
+		},
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
+		compoundBackedPrefixCount: overrides.compoundBackedPrefixCount ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		realizedFamilies: overrides.realizedFamilies ?? [
 			{
@@ -131,6 +143,7 @@ function createHanSurfaceGroup(index: number, text: string) {
 		hanBigramTexts,
 		coveredCharMask: Array.from({ length: chars.length }, () => false),
 		queryResidualUniqueBigrams: hanBigramTexts,
+		hasQueryResidualHanCoverage: hanBigramTexts.length > 0,
 	};
 }
 
@@ -485,6 +498,13 @@ async function runHanRefine(
 
 describe("coverage lexical v3 file search engine", () => {
 	beforeEach(() => {
+		container.registerInstance(
+			OuterSetting,
+			{
+				ui: { maxItemResults: 30 },
+				hideWeaklyRelatedResults: false,
+			} as unknown as OuterSetting,
+		);
 		container.registerInstance(
 			Tokenizer,
 			{
@@ -1271,6 +1291,89 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		expect(visible.map((file) => file.path)).toEqual(["complete.md"]);
 	});
 
+	test("searchFiles keeps singleton-completed weak Han rescue candidates when weak results are hidden", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "winsong-gong.md",
+				basename: "note",
+				folder: "zh",
+				content: "功能词源赢宋",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "赢宋功",
+					normalizedQueryText: "赢宋功",
+					querySingletonHanChar: null,
+					querySingletonHanCodePoint: null,
+					querySingletonHanRecallEligible: false,
+					surfaceGroups: [createHanSurfaceGroup(0, "赢宋功")],
+					primaryUnits: [],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "winsong-gong.md",
+					realizedCoverageCount: 0,
+					coverageGate: {
+						realizedCoverageCount: 0,
+						fullySatisfiedSurfaceGroupCount: 0,
+						startedSurfaceGroupCount: 0,
+						crossScriptSatisfiedGroupCount: 0,
+					},
+					exactUnitCount: 0,
+					realizedFamilies: [],
+					hasOnlyWeakHanRescue: true,
+					hasAnyHanRescueAssessment: true,
+					singletonHanCompletion: {
+						singletonHanChar: "功",
+						singletonHanCharIndex: 2,
+						singletonHanSurfaceGroupIndex: 0,
+						matched: true,
+						matchSource: "body_same_block",
+						bestAnchorKind: "bigram",
+						bestAnchorDistance: 0,
+						sameBlockAsAnchor: true,
+						sameBlockAsBestBodyWindow: true,
+						tier: "tight",
+					},
+					bodyWindowContainer: null,
+					strongestContainer: null,
+					hanSurfaceCompletionGroups: [],
+					completedHanSurfaceGroupCount: 0,
+					hanSurfaceCompletionTierScoreTotal: 0,
+					strongestHanSurfaceCompletionTier: "none",
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: typeof search;
+				getResidentBase: () => ResidentBase | null;
+			};
+		}).engine = {
+			search,
+			getResidentBase: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: "赢宋功",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual(["winsong-gong.md"]);
+	});
+
 	test("searchFiles keeps weak witness order when indexed snapshots are unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		await engine.reIndexAll([
@@ -1497,6 +1600,9 @@ test("searchFiles passes tokenizer query terms into engine.search", async () => 
 		).toBe(true);
 	});
 });
+
+
+
 
 
 

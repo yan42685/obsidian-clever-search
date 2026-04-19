@@ -97,6 +97,7 @@ export type HanBodyRescueEvaluation<TBodyWindow extends HanBodyWindowLike> = Rea
 	assessment: HanRescueAssessment;
 	unresolvedBigrams: readonly string[];
 	matchedBigrams: readonly string[];
+	matchedOccurrencesByBlockId: ReadonlyMap<number, readonly HanSyntheticBodyOccurrence[]>;
 }>;
 
 export type HanRescueAssessmentSummary = Readonly<{
@@ -595,9 +596,31 @@ function collectBodyRescueEvaluations<TBodyWindow extends HanBodyWindowLike>(par
 			},
 			unresolvedBigrams: group.unresolvedBigrams,
 			matchedBigrams,
+			matchedOccurrencesByBlockId: collectMatchedSyntheticBodyOccurrencesByBlock({
+				matchedBigrams,
+				syntheticOccurrencesByBlockId,
+			}),
 		});
 	}
 	return bestByGroup;
+}
+
+function collectMatchedSyntheticBodyOccurrencesByBlock(params: Readonly<{
+	matchedBigrams: readonly string[];
+	syntheticOccurrencesByBlockId: ReadonlyMap<number, readonly HanSyntheticBodyOccurrence[]>;
+}>): ReadonlyMap<number, readonly HanSyntheticBodyOccurrence[]> {
+	const matchedBigramSet = new Set(params.matchedBigrams);
+	const out = new Map<number, readonly HanSyntheticBodyOccurrence[]>();
+	for (const [blockId, occurrences] of params.syntheticOccurrencesByBlockId) {
+		const matchedOccurrences = occurrences.filter((occurrence) =>
+			matchedBigramSet.has(occurrence.match.familyText),
+		);
+		if (matchedOccurrences.length === 0) {
+			continue;
+		}
+		out.set(blockId, matchedOccurrences);
+	}
+	return out;
 }
 
 function projectGroupBodyBigramOccurrences(params: Readonly<{
